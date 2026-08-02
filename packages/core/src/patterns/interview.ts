@@ -1,4 +1,4 @@
-import type { ContextMemory } from '@noetic-tools/memory';
+import type { ContextData } from '@noetic-tools/context';
 import type { Context, Step } from '@noetic-tools/types';
 import { frameworkCast } from '@noetic-tools/types';
 import type { ZodType } from 'zod';
@@ -142,21 +142,21 @@ function buildEnvelopeSchema<Q, C>(
  */
 export function interview<Q, C>(
   opts: InterviewOpts<Q, C>,
-): Step<ContextMemory, string, InterviewResult<Q, C>> {
+): Step<ContextData, string, InterviewResult<Q, C>> {
   const maxQuestions = opts.maxQuestions ?? DEFAULT_MAX_QUESTIONS;
   const formatAnswer = opts.formatAnswer ?? defaultFormatAnswer;
   const envelopeSchema = buildEnvelopeSchema(opts.questionSchema, opts.completeSchema);
 
-  const llmStep = step.llm<ContextMemory, string, Envelope<Q, C>>({
+  const llmStep = step.llm<ContextData, string, Envelope<Q, C>>({
     id: 'interview-llm',
     model: opts.model,
     instructions: opts.systemPrompt,
     output: envelopeSchema,
   });
 
-  const turnStep = step.run<ContextMemory, string, IterState<Q, C>>({
+  const turnStep = step.run<ContextData, string, IterState<Q, C>>({
     id: 'interview-turn',
-    execute: async (input: string, ctx: Context<ContextMemory>) => {
+    execute: async (input: string, ctx: Context<ContextData>) => {
       const envelope = await ctx.harness.run(llmStep, input, ctx);
       if (envelope.type === 'complete') {
         await opts.onComplete(envelope.data);
@@ -175,7 +175,7 @@ export function interview<Q, C>(
     },
   });
 
-  const loopStep = loop<ContextMemory, string, IterState<Q, C>>({
+  const loopStep = loop<ContextData, string, IterState<Q, C>>({
     id: 'interview-loop',
     steps: [
       turnStep,
@@ -189,9 +189,9 @@ export function interview<Q, C>(
     prepareNext: (output) => output.nextInput,
   });
 
-  return step.run<ContextMemory, string, InterviewResult<Q, C>>({
+  return step.run<ContextData, string, InterviewResult<Q, C>>({
     id: 'interview',
-    execute: async (input: string, ctx: Context<ContextMemory>) => {
+    execute: async (input: string, ctx: Context<ContextData>) => {
       const final = await ctx.harness.run(loopStep, input, ctx);
       if (final.status === 'complete') {
         return {

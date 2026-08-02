@@ -1,0 +1,136 @@
+---
+title: Plan Memory
+description: PRD authoring and plan execution lifecycle with tool restrictions during planning.
+---
+
+## Overview
+
+Plan Memory manages a structured planning workflow: the agent enters a restricted "plan mode" where only read-only tools are allowed, writes a PRD document, optionally structures the plan as a JSON `WorkflowDocument`, then exits to execute the plan with full tool access.
+
+A plan's tree IS a workflow document ([JSON Workflow Runtime](/docs/framework/json-runtime)). Plans additionally store **named workflows** referenced from the tree via `subflow` nodes — the reviewed tree stays small while detailed mechanics live in separately-authored, separately-reviewable workflows.
+
+- **Slot**: `240` (`Slot.PROCEDURAL - 10`)
+- **Scope**: `thread` (default)
+- **Default budget**: `{ min: 100, max: 3000 }`
+
+## Usage
+
+```ts
+import { planMemory } from '@noetic-tools/core';
+
+const layer = planMemory();
+```
+
+The layer is included by default in the Noetic CLI. Users type `/plan` to enter plan mode.
+
+## Configuration
+
+```ts validate=none
+interface PlanMemoryConfig {
+  scope?: MemoryScope;
+  additionalAllowedTools?: string[];
+  maxPrdLength?: number;
+  maxDepth?: number;
+  maxWorkflows?: number;
+  maxWorkflowChars?: number;
+  allowedNodeKinds?: WorkflowNode['kind'][];
+  additionalPlanInstructions?: string;
+  onEnterSession?: () => Promise<{ slug: string }>;
+  onExit?: (state: PlanState) => Promise<{ approved: boolean }>;
+}
+```
+
+| Field | Type | Default | Purpose |
+|---|---|---|---|
+| `scope` | `MemoryScope` | `'thread'` | Persistence scope |
+| `additionalAllowedTools` | `string[]` | -- | Extra tools allowed during plan mode |
+| `maxPrdLength` | `number` | `50000` | Maximum PRD content length |
+| `maxDepth` | `number` | `5` | Maximum structural depth (`workflowDepth`) of the plan tree and each named workflow |
+| `maxWorkflows` | `number` | `20` | Maximum number of named workflows |
+| `maxWorkflowChars` | `number` | `20000` | Maximum serialized size of each workflow document |
+| `allowedNodeKinds` | `WorkflowNode['kind'][]` | all kinds | Optional profile restricting which node kinds a plan may use. Hosts that set this must include `'subflow'` |
+| `additionalPlanInstructions` | `string` | -- | Extra free-form instructions appended to the planning-phase recall payload |
+| `onEnterSession` | `() => Promise<{ slug: string }>` | -- | Host callback invoked once on the Idle → Planning transition. Returns a session identifier the host owns (e.g. an on-disk plan directory slug), stored on the state as `planSlug` |
+| `onExit` | `(state: PlanState) => Promise<{ approved: boolean }>` | -- | Host callback invoked when the model requests `plan/exitPlanMode` with `action: 'execute'`. Return `{ approved: false }` to keep the layer in Planning — the model is told the user rejected the plan and should revise it before requesting approval again |
+
+## Phase Lifecycle
+
+The layer manages a state machine with five phases:
+
+1. **idle** — No active plan. `recall` returns nothing.
+2. **planning** — Read-only tools only. LLM writes PRD, plan tree, and named workflows.
+3. **executing** — Full tool access. Plan context injected into each LLM call.
+4. **completed** — Execution succeeded. Outcome recorded.
+5. **failed** — Execution failed or was aborted. Outcome recorded.
+
+When `onExit` is configured, the Planning → Executing transition requires approval: if `onExit` returns `{ approved: false }` (e.g. the user rejected the plan in the UI), the layer stays in **planning** and the model is prompted to address the feedback and call `plan/exitPlanMode` again.
+
+Before `onExit` is ever invoked, the layer validates the plan structurally: every `subflow` ref (in the tree and inside stored workflows) must name a stored workflow, and named workflows must not reference each other in a cycle. The user is never asked to approve a plan that cannot hydrate.
+
+## LLM Tools
+
+The layer exposes seven LLM tools and one data projection via its `provides` map:
+
+| Tool | Description |
+|---|---|
+| `plan/enterPlanMode` | Enter plan mode. Accepts optional `goal` string. Resets workflows from any prior plan. |
+| `plan/updatePrd` | Replace PRD content with new markdown. |
+| `plan/setPlanTree` | Set the plan as `{ document: WorkflowDocument }`. Validates schema, depth, node kinds, and subflow-ref name syntax. Refs to not-yet-defined workflows are allowed — the result message enumerates them. |
+| `plan/setWorkflow` | Create or replace a named workflow (`{ name, document }`, upsert). Names are lowercase slugs, max 64 chars. |
+| `plan/removeWorkflow` | Delete a named workflow. Warns when the tree or another workflow still references it. |
+| `plan/getWorkflow` | Read back a stored workflow's JSON (recall shows summaries, not bodies). |
+| `plan/exitPlanMode` | Exit plan mode (`execute` or `cancel`). `execute` validates refs and cycles before requesting approval. |
+| `status` (data) | Read-only: `{ phase, hasPrd, hasPlanTree, workflowNames, version }` |
+
+Documents may be passed as objects or JSON strings (a common LLM tool-call shape); validation happens inside the tool with readable error messages, against the published schema at `https://noetic.tools/schema/noetic-workflow.schema.json`.
+
+## Tool Restrictions
+
+During the `planning` phase, `beforeToolCall` restricts tool usage:
+
+- **Allowed**: `Read`, `Grep`, `Find`, `Ls`, `AskUserQuestion`, `activateSkill`, the sub-agent coordination tools (`agent`, `checkAgent`, `sendMessage`), `requestPlanApproval`, and all `plan/*` tools
+- **Denied**: All other tools (`Write`, `Edit`, `Bash`, etc.)
+
+Additional tools can be allowed via `additionalAllowedTools` in the config.
+
+## The Plan is a WorkflowDocument
+
+`plan/setPlanTree` stores a `WorkflowDocument` — the same portable JSON format the [JSON Workflow Runtime](/docs/framework/json-runtime) executes, with node kinds like `llm`, `tool`, `sequence`, `fork`, `branch`, `loop`, `spawn`, `subflow`, and the coding-agent kinds (`claude-code`, `codex`, `opencode`, `pi`).
+
+The planning-phase instructions steer the model to keep the tree small (~7 top-level nodes a reviewer can scan) and factor mechanics into named workflows:
+
+```json
+{
+  "version": 1,
+  "root": {
+    "kind": "sequence",
+    "id": "plan",
+    "steps": [
+      { "kind": "llm", "id": "implement", "instructions": "Apply the PRD changes." },
+      { "kind": "subflow", "id": "verify", "ref": "verify-loop" }
+    ]
+  }
+}
+```
+
+with `verify-loop` defined separately via `plan/setWorkflow`. Named workflows may reference other named workflows, but cycles are rejected at exit.
+
+## Executing an Approved Plan
+
+`PlanState.planTree` and `PlanState.workflows` map directly onto the workflow runtime:
+
+```ts validate=none
+const onExit: PlanExitCallback = async (state) => {
+  const approved = await ui.requestApproval(state.prd, state.planTree, state.workflows);
+  if (approved) {
+    void parseAndRunWorkflow({
+      json: state.planTree,
+      workflows: new Map(Object.entries(state.workflows)),
+      harness, ctx, tools, layers,
+    });
+  }
+  return { approved };
+};
+```
+
+The default CLI flow uses context injection instead — the plan is recalled into the LLM's view as an `<active_plan>` block and the model executes by making tool calls directly; `parseAndRunWorkflow` is the programmatic path.

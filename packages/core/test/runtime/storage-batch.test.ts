@@ -3,8 +3,8 @@
 // parallel-sweep `get` when it does not. See issue #58.
 
 import { describe, expect, it } from 'bun:test';
-import type { StorageAdapter } from '@noetic-tools/memory';
-import { storageGetMany } from '@noetic-tools/memory';
+import type { StorageAdapter } from '@noetic-tools/context';
+import { storageGetMany } from '@noetic-tools/context';
 import { frameworkCast } from '@noetic-tools/types';
 import { createInMemoryStorage } from '../../src/runtime/in-memory-storage';
 

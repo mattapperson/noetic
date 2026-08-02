@@ -10,7 +10,7 @@
  *       → results collected → LLM synthesizes final answer
  */
 
-import type { ContextMemory } from '@noetic-tools/memory';
+import type { ContextData } from '@noetic-tools/context';
 import type { Channel, DetachedHandle, StepLoop } from '@noetic-tools/types';
 import { z } from 'zod';
 import { channel } from '../src/builders/channel-builder';
@@ -35,7 +35,7 @@ export const delegateInbox = channel('delegate-inbox', {
 export function buildDynamicDelegateAgent(opts: {
   inbox: Channel<string>;
   parkTimeout?: number;
-}): StepLoop<ContextMemory, string, string> {
+}): StepLoop<ContextData, string, string> {
   const handles = new Map<string, DetachedHandle<string>>();
 
   const syncTool = createSyncDelegateTool();

@@ -6,8 +6,8 @@ import { frameworkCast, isServerToolSpec } from '@noetic-tools/types';
  * declared on LLM steps. Used to build the unified tool set
  * that gets sent with every LLM call for prompt cache efficiency.
  */
-export function collectAllTools<TMemory = unknown, I = unknown, O = unknown>(
-  step: Step<TMemory, I, O>,
+export function collectAllTools<TContext = unknown, I = unknown, O = unknown>(
+  step: Step<TContext, I, O>,
 ): Tool[] {
   const tools: Tool[] = [];
   // walkStep uses Step with defaults (unknown generics); the cast is safe because

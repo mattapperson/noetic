@@ -1,11 +1,11 @@
-import type { ContextMemory } from '@noetic-tools/memory';
+import type { ContextData } from '@noetic-tools/context';
 import type { StepLoop } from '@noetic-tools/types';
 import { NoeticConfigError } from '@noetic-tools/types';
 import { getDefaultRegistrar } from '../types/step-registrar';
 
 /** @public Configuration options accepted by the `loop()` builder, excluding the `kind` discriminant. */
-export type LoopConfig<TMemory = ContextMemory, I = unknown, O = unknown> = Omit<
-  StepLoop<TMemory, I, O>,
+export type LoopConfig<TContext = ContextData, I = unknown, O = unknown> = Omit<
+  StepLoop<TContext, I, O>,
   'kind'
 >;
 
@@ -27,9 +27,9 @@ export type LoopConfig<TMemory = ContextMemory, I = unknown, O = unknown> = Omit
  * @throws `NoeticConfigError` with code `MISSING_LOOP_BODY` if `steps` is empty.
  * @throws `NoeticConfigError` with code `MISSING_UNTIL_PREDICATE` if `until` is not provided.
  */
-export function loop<TMemory = ContextMemory, I = unknown, O = unknown>(
-  opts: LoopConfig<TMemory, I, O>,
-): StepLoop<TMemory, I, O> {
+export function loop<TContext = ContextData, I = unknown, O = unknown>(
+  opts: LoopConfig<TContext, I, O>,
+): StepLoop<TContext, I, O> {
   if (!opts.id || opts.id.trim() === '') {
     throw new NoeticConfigError({
       code: 'EMPTY_STEP_ID',
@@ -51,7 +51,7 @@ export function loop<TMemory = ContextMemory, I = unknown, O = unknown>(
       hint: 'Provide an until predicate, e.g. until.maxSteps(10).',
     });
   }
-  const built: StepLoop<TMemory, I, O> = {
+  const built: StepLoop<TContext, I, O> = {
     kind: 'loop',
     ...opts,
   };

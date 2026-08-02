@@ -1,6 +1,6 @@
 # Spawn: Child Execution with Context Boundary
 
-> **Depends On:** `01-step-type` (Step<I,O>), `07-context-and-event-log` (Context, Item, ItemLog), `11-memory-layer-system` (MemoryLayer.onSpawn/onReturn)
+> **Depends On:** `01-step-type` (Step<I,O>), `07-context-and-event-log` (Context, Item, ItemLog), `11-context-layer-system` (ContextLayer.onSpawn/onReturn)
 > **Exports:** `spawn()`, `SpawnOpts`
 
 ---
@@ -13,7 +13,7 @@
 interface SpawnOpts<I, O> {
   id: string;
   child: Step<I, O>;
-  memory?: MemoryLayer[];
+  context?: ContextLayer[];
   timeout?: number;
   /**
    * Per-step subprocess adapter override. Takes precedence over the harness
@@ -28,14 +28,14 @@ interface SpawnOpts<I, O> {
 
 ## Design
 
-The child starts with an **empty ItemLog** by default. All context flow across the spawn boundary is controlled by memory layers:
+The child starts with an **empty ItemLog** by default. All context flow across the spawn boundary is controlled by context layers:
 
 - **`onSpawn` hooks** provide items to the child's initial ItemLog and set up child-side layer state.
 - **`onReturn` hooks** transform the child's result before it reaches the parent. Each layer's `onReturn` receives the previous result, forming a transformation pipeline.
 
-The optional `memory` field on `StepSpawn` provides **spawn-local memory layers** that replace parent layer propagation. When `memory` is set, only the specified layers are active in the child — parent layers do not propagate. This gives full isolation control.
+The optional `context` field on `StepSpawn` provides **spawn-local context layers** that replace parent layer propagation. When `context` is set, only the specified layers are active in the child — parent layers do not propagate. This gives full isolation control.
 
-When `memory` is not set, parent memory layers propagate to the child normally, and each layer's `onSpawn` hook determines what state crosses the boundary:
+When `context` is not set, parent context layers propagate to the child normally, and each layer's `onSpawn` hook determines what state crosses the boundary:
 
 - A layer can return `{ childState }` to provide initial state in the child.
 - A layer can return `null` to disable itself in the child.
@@ -43,25 +43,25 @@ When `memory` is not set, parent memory layers propagate to the child normally, 
 
 ---
 
-## Spawn Lifecycle with Memory Layers
+## Spawn Lifecycle with Context Layers
 
 ```
 Parent calls spawn(opts)
 │
 ├─ Determine active layers:
-│   ├─ If opts.memory is set → use spawn-local layers (parent layers do not propagate)
-│   └─ If opts.memory is not set → propagate parent layers
+│   ├─ If opts.context is set → use spawn-local layers (parent layers do not propagate)
+│   └─ If opts.context is not set → propagate parent layers
 │
 ├─ Child starts with empty ItemLog
 │
-├─ For each active memory layer (sequential, array order):
+├─ For each active context layer (sequential, array order):
 │   └─ onSpawn() → returns child state + optional items for ItemLog (or null to disable)
 │
-├─ Child execution runs with its ItemLog + memory layer states
+├─ Child execution runs with its ItemLog + context layer states
 │
 ├─ Child completes with result
 │
-└─ For each active memory layer (sequential, array order):
+└─ For each active context layer (sequential, array order):
     └─ onReturn(result) → transforms result, output feeds into next layer's onReturn
 ```
 
@@ -69,13 +69,13 @@ The result transformation pipeline means layers compose naturally. A logging lay
 
 ---
 
-## Memory Layer Interaction
+## Context Layer Interaction
 
-Memory layers are the single system for all context flow across spawn boundaries. There is no separate ItemLog strategy — layers handle everything:
+Context layers are the single system for all context flow across spawn boundaries. There is no separate ItemLog strategy — layers handle everything:
 
 - **Providing context to the child**: A layer's `onSpawn` hook can inject items into the child's initially-empty ItemLog. A layer that injects the parent's full conversation history achieves the equivalent of the old `inherit` pattern. A layer that injects a filtered subset achieves `subset`.
 - **Transforming results for the parent**: A layer's `onReturn` hook receives the child's result (or the previous layer's transformed result) and returns the value the parent sees.
-- **Isolation via spawn-local layers**: Setting `memory` on the spawn step replaces all parent layers with the specified set, giving complete control over what crosses the boundary in both directions.
+- **Isolation via spawn-local layers**: Setting `context` on the spawn step replaces all parent layers with the specified set, giving complete control over what crosses the boundary in both directions.
 
 This unified approach means there is one system to learn, one set of hooks to implement, and full composability between layers.
 
@@ -136,7 +136,7 @@ Parent calls harness.detachedSpawn(step, input, ctx)
 
 ### Context in Tools
 
-Tools receive a `ToolExecutionContext` as their second argument, which provides `{ ctx, harness?, memory, assembledView, lastStepMeta, turnContext? }`. Note: `harness` is `undefined` when the step is executed via bare `run()` without an AgentHarness wrapper; tools that need the harness (for spawn, channels) should check for its presence. Tools that spawn sub-agents **must use `toolCtx.ctx`** (the parent context) rather than creating a new root context via `harness.createContext()`. Creating a root context breaks depth tracking, `threadId`/`resourceId` inheritance, memory layer propagation, and observability tracing. Both `harness.run()` and `harness.detachedSpawn()` create their own child contexts internally, so the tool should simply forward the parent context it receives via `toolCtx.ctx`.
+Tools receive a `ToolExecutionContext` as their second argument, which provides `{ ctx, harness?, context, assembledView, lastStepMeta, turnContext? }`. Note: `harness` is `undefined` when the step is executed via bare `run()` without an AgentHarness wrapper; tools that need the harness (for spawn, channels) should check for its presence. Tools that spawn sub-agents **must use `toolCtx.ctx`** (the parent context) rather than creating a new root context via `harness.createContext()`. Creating a root context breaks depth tracking, `threadId`/`resourceId` inheritance, context layer propagation, and observability tracing. Both `harness.run()` and `harness.detachedSpawn()` create their own child contexts internally, so the tool should simply forward the parent context it receives via `toolCtx.ctx`.
 
 ---
 
@@ -146,7 +146,7 @@ Tools receive a `ToolExecutionContext` as their second argument, which provides 
 
 A spawned child does not run in complete isolation from its parent. While the child has its own ItemLog and context convergence, the parent's layers may continue to produce state changes during the child's execution. The child can receive these updates and decide how to respond.
 
-This is opt-in per memory layer via the `onParentUpdate` hook (see `11-memory-layer-system`). The agent harness fires `onParentUpdate` on the child's layer whenever the corresponding parent layer's state changes (after `store()` on the parent side) and the child is still running. The child layer receives both the current parent state and its own current state, and decides what — if anything — to do with the update.
+This is opt-in per context layer via the `onParentUpdate` hook (see `11-context-layer-system`). The agent harness fires `onParentUpdate` on the child's layer whenever the corresponding parent layer's state changes (after `store()` on the parent side) and the child is still running. The child layer receives both the current parent state and its own current state, and decides what — if anything — to do with the update.
 
 **The child is never forced to accept parent updates.** Returning `void` means the child ignores the update entirely. This preserves the child's autonomy while enabling reactive parent-child relationships where needed.
 

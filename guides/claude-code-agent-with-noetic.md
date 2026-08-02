@@ -1,6 +1,6 @@
 # Building a Claude Code-Like Agent with Noetic
 
-This guide walks through how to recreate the core architecture of Claude Code — its 5 specialized agent types, plan/act mode, coordinator pattern, and sub-agent delegation — using Noetic's step primitives, memory layers, and patterns.
+This guide walks through how to recreate the core architecture of Claude Code — its 5 specialized agent types, plan/act mode, coordinator pattern, and sub-agent delegation — using Noetic's step primitives, context layers, and patterns.
 
 ## Table of Contents
 
@@ -37,10 +37,10 @@ Noetic maps these to composable primitives:
 | Tool System (per-agent tool sets) | `tools` param on `step.llm()` | What the model **can call** — different per agent type |
 | Agent type switching | `branch()` inside the loop | Which `step.llm()` (with which tools) runs each iteration |
 | Plan/Act Mode | `branch()` over mode state | Which agent types are available |
-| Memory layers | `memory` on `AgentHarness` | What memory layers are available to steps |
-| Compaction | `observationalMemory()` layer | What the model **sees in context** |
+| Context layers | `context` on `AgentHarness` | What context layers are available to steps |
+| Compaction | `observationalContext()` layer | What the model **sees in context** |
 
-**Key principle**: Each agent type is a different `step.llm()` with its own `tools` array. The `tools` param is the hard capability boundary — it defines what function calls the LLM can make. Memory layers are a separate concern that controls prompt context (what the model sees), not capabilities (what the model can do).
+**Key principle**: Each agent type is a different `step.llm()` with its own `tools` array. The `tools` param is the hard capability boundary — it defines what function calls the LLM can make. Context layers are a separate concern that controls prompt context (what the model sees), not capabilities (what the model can do).
 
 Everything runs through a single `AgentHarness` instance.
 
@@ -56,7 +56,7 @@ import { AgentHarness } from '@noetic-tools/core';
 const harness = new AgentHarness({
   name: 'claude-code-agent',
   initialStep: mainLoop,       // a loop() — see below
-  memory: memoryLayers,        // memory layers for context management
+  context: contextLayers,        // context layers for context management
   params: {},
   llm: { provider: 'openrouter' },
 });
@@ -64,7 +64,7 @@ const harness = new AgentHarness({
 const result = await harness.execute(userInput);
 ```
 
-The `AgentHarness` **is** the agent. The `initialStep` is the loop that defines what the agent does. `memory` provides memory layers (compaction, steering, working memory) to every execution. Calling `execute()` creates a fresh context with those layers and runs the step.
+The `AgentHarness` **is** the agent. The `initialStep` is the loop that defines what the agent does. `memory` provides context layers (compaction, steering, working memory) to every execution. Calling `execute()` creates a fresh context with those layers and runs the step.
 
 Events (tool calls, model responses) flow through the harness in real-time — there's no isolation boundary between the main loop and the UI. Reserve `spawn` for sub-agents that need isolated contexts.
 
@@ -228,7 +228,7 @@ The loop body has two steps per iteration:
 ```typescript
 import {
   AgentHarness, loop, step, branch,
-  workingMemory, observationalMemory,
+  workingMemoryContext, observationalContext,
 } from '@noetic-tools/core';
 import { any, until } from '@noetic-tools/core';
 
@@ -319,9 +319,9 @@ const harness = new AgentHarness({
       until.maxCost(10),
     ),
   }),
-  memory: [
-    workingMemory({ scope: 'thread' }),
-    observationalMemory({ bufferThreshold: 3_000 }),
+  context: [
+    workingMemoryContext({ scope: 'thread' }),
+    observationalContext({ bufferThreshold: 3_000 }),
   ],
   params: {},
   llm: { provider: 'openrouter' },
@@ -462,14 +462,14 @@ handle.send('Actually, also add error handling.'); // injects into the running l
 
 A 4-stage pipeline (snip → microcompact → context collapse → autocompact) triggers when context grows too large.
 
-### The Noetic Equivalent: Observational Memory
+### The Noetic Equivalent: Observational Context
 
-`observationalMemory()` buffers raw conversation items. When the buffer crosses a token threshold, it calls an `observer` function to distill them into compact observations. This is a **memory layer** — it controls what the model sees in its prompt, not what tools are available:
+`observationalContext()` buffers raw conversation items. When the buffer crosses a token threshold, it calls an `observer` function to distill them into compact observations. This is a **context layer** — it controls what the model sees in its prompt, not what tools are available:
 
 ```typescript
-import { observationalMemory } from '@noetic-tools/core';
+import { observationalContext } from '@noetic-tools/core';
 
-const compactor = observationalMemory({
+const compactor = observationalContext({
   bufferThreshold: 50_000, // tokens before distilling
   maxObservations: 50,
   observer: async (buffer) => {
@@ -478,7 +478,7 @@ const compactor = observationalMemory({
 });
 ```
 
-Memory layers are provided at the harness level via the `memory` option (see [The Single Harness](#the-single-harness)). Every `execute()` call creates a context with those layers attached — no `spawn` wrapper needed. If a sub-agent needs different layers, use `provide()` to override within that subtree, or `spawn()` to create a fully isolated context.
+Context layers are provided at the harness level via the `context` option (see [The Single Harness](#the-single-harness)). Every `execute()` call creates a context with those layers attached — no `spawn` wrapper needed. If a sub-agent needs different layers, use `provide()` to override within that subtree, or `spawn()` to create a fully isolated context.
 
 Short-lived agent types (explore, guide) don't need compaction — they run for a few iterations and terminate. Longer-running types (general, plan) benefit from it.
 
@@ -492,7 +492,7 @@ A lifecycle hook inspects conversation history for repetitive patterns and injec
 
 ### The Noetic Equivalent: Steering Layer
 
-`steering()` is a memory layer that can intercept tool calls (`beforeToolCall`) and model responses (`afterModelCall`). For doom loop detection, we use `afterModelCall` to check for repetitive patterns and inject guidance:
+`steering()` is a context layer that can intercept tool calls (`beforeToolCall`) and model responses (`afterModelCall`). For doom loop detection, we use `afterModelCall` to check for repetitive patterns and inject guidance:
 
 ```typescript
 import { steering, SteeringAction } from '@noetic-tools/core';
@@ -532,7 +532,7 @@ When `Guide` is returned, the guidance is injected as a developer message and th
 ```typescript
 import {
   AgentHarness, step, branch, loop, spawn, tool, channel,
-  workingMemory, observationalMemory, steering, SteeringAction,
+  workingMemoryContext, observationalContext, steering, SteeringAction,
 } from '@noetic-tools/core';
 import { any, until } from '@noetic-tools/core';
 import { z } from 'zod';
@@ -661,10 +661,10 @@ const harness = new AgentHarness({
       until.maxCost(10),
     ),
   }),
-  memory: [
+  context: [
     doomLoopDetector,                                // steering: intercepts repetitive patterns
-    workingMemory({ scope: 'thread' }),              // prompt: scratchpad for task state
-    observationalMemory({ bufferThreshold: 3_000 }), // prompt: compressed history
+    workingMemoryContext({ scope: 'thread' }),              // prompt: scratchpad for task state
+    observationalContext({ bufferThreshold: 3_000 }), // prompt: compressed history
   ],
   params: {},
   llm: { provider: 'openrouter' },
@@ -708,9 +708,9 @@ Iteration 5:
 |---|---|---|
 | **Streaming tokens to UI** | `callModel()` returns completed responses, no SSE surface | Wrap the OpenRouter SDK's streaming directly, outside of Noetic's step model |
 | **Agent continuation** (`SendMessage` to existing agent) | `detachedSpawn` is fire-and-forget; can't add messages to a running agent's conversation | Use `inbox` channel on the sub-agent's loop — messages arrive as developer items via `parkTimeout` |
-| **Request transformer pipeline** (SortTools, ImageHandling, etc.) | No user-facing request transform hook | Implement in a memory layer's `recall` hook (for prompt-side transforms) |
+| **Request transformer pipeline** (SortTools, ImageHandling, etc.) | No user-facing request transform hook | Implement in a context layer's `recall` hook (for prompt-side transforms) |
 | **Interactive permission prompts** (`needsApproval` → user confirms in UI) | The flag exists on `tool()` but has no built-in UI | Pause on `ctx.recv(approvalChannel)`, external UI calls `handle.send('approved')` |
 | **Dynamic model downgrade** (200k+ context → cheaper model in plan mode) | `step.llm` model is fixed at build time | Use `branch()` to route to different `step.llm` configs based on `ctx.tokens.total` |
 | **Prompt cache key preservation** | Provider-specific optimization not exposed | Would require a custom adapter layer |
 | **tmux pane routing for teams** | No process/terminal management | External concern — Noetic handles agent logic, not UI |
-| **`criticalSystemReminder`** (re-injected every turn for verification) | No per-turn system injection outside memory layers | Use `staticContent({ load: async () => reminder })` — it injects at `recall`, which fires before every LLM call |
+| **`criticalSystemReminder`** (re-injected every turn for verification) | No per-turn system injection outside context layers | Use `staticContent({ load: async () => reminder })` — it injects at `recall`, which fires before every LLM call |

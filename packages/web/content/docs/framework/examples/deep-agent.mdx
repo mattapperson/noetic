@@ -1,25 +1,25 @@
 ---
 title: Deep Agent (DeepAgentsJS Recreation)
-description: A full-featured coding agent with filesystem access, task planning, sub-agent delegation, skills, and memory — built entirely from Noetic primitives.
+description: A full-featured coding agent with filesystem access, task planning, sub-agent delegation, skills, and context — built entirely from Noetic primitives.
 ---
 
 ## Overview
 
 This example recreates the core capabilities of [DeepAgentsJS](https://github.com/langchain-ai/deepagentsjs) — a LangGraph-based framework for building AI coding agents — using only Noetic's seven step primitives.
 
-The key insight: **middleware = tools + memory layers**. Every piece of DeepAgentsJS middleware decomposes into either a tool (for mutations/actions) or a memory layer (for context projection), composed together with `react()` + `memory` for isolation.
+The key insight: **middleware = tools + context layers**. Every piece of DeepAgentsJS middleware decomposes into either a tool (for mutations/actions) or a context layer (for context projection), composed together with `react()` + `context` for isolation.
 
 ## Architecture Mapping
 
 | DeepAgentsJS Concept | Noetic Equivalent |
 |---|---|
-| `createDeepAgent()` | `react()` with `memory` param (wraps in `spawn` automatically) |
-| todoListMiddleware | `tool()` definitions with `ToolMemoryDeclaration` + `toolMemoryLayer()` |
+| `createDeepAgent()` | `react()` with `context` param (wraps in `spawn` automatically) |
+| todoListMiddleware | `tool()` definitions with `ToolContextDeclaration` + `toolContextLayer()` |
 | filesystemMiddleware | `tool()` definitions using Node.js `fs` |
 | subAgentMiddleware | `createConfigurableDelegateTool()` using `toolCtx.harness` |
-| summarizationMiddleware | `observationalMemory()` with custom observer |
-| skillsMiddleware | Custom `MemoryLayer` with progressive disclosure |
-| memoryMiddleware | `staticContent()` built-in layer |
+| summarizationMiddleware | `observationalContext()` with custom observer |
+| skillsMiddleware | Custom `ContextLayer` with progressive disclosure |
+| memoryMiddleware (upstream) | `staticContent()` built-in layer |
 | promptCachingMiddleware | N/A — adapter-level concern |
 | patchToolCallsMiddleware | N/A — Noetic interpreter handles natively |
 | humanInTheLoopMiddleware | `tool({ needsApproval: true })` |
@@ -28,11 +28,11 @@ The key insight: **middleware = tools + memory layers**. Every piece of DeepAgen
 
 Three tools mirror the todoListMiddleware pattern:
 
-- **`write_todos`** — Creates todo items, writes state via `toolCtx.memory.set()`
+- **`write_todos`** — Creates todo items, writes state via `toolCtx.context.set()`
 - **`update_todo`** — Updates an item's status (pending, in_progress, completed, blocked)
-- **`list_todos`** — Reads current state from `toolCtx.memory.get()`
+- **`list_todos`** — Reads current state from `toolCtx.context.get()`
 
-Tools declare a shared `ToolMemoryDeclaration` with `id: 'todos'` — `toolMemoryLayer()` materializes this into a single `MemoryLayer` that projects the todo state into the LLM context:
+Tools declare a shared `ToolContextDeclaration` with `id: 'todos'` — `toolContextLayer()` materializes this into a single `ContextLayer` that projects the todo state into the LLM context:
 
 ```ts
 interface TodoState {
@@ -41,7 +41,7 @@ interface TodoState {
 
 declare const STATUS_ICONS: Record<string, string>;
 
-const todoMemory: ToolMemoryDeclaration<TodoState> = {
+const todoContext: ToolContextDeclaration<TodoState> = {
   id: 'todos',
   init: () => ({ items: [] }),
   recall: (state) => {
@@ -53,7 +53,7 @@ const todoMemory: ToolMemoryDeclaration<TodoState> = {
   },
 };
 
-// Each tool gets `memory: todoMemory` — shared id means shared state
+// Each tool gets `context: todoContext` — shared id means shared state
 ```
 
 ## Filesystem Tools
@@ -86,7 +86,7 @@ export function createConfigurableDelegateTool(resolver: SubAgentResolver): Tool
 }
 ```
 
-## Memory Layers
+## Context Layers
 
 ### Instructions (via `staticContent`)
 
@@ -105,14 +105,14 @@ staticContent({
 - **Slot**: `WORKING_MEMORY + 5` (105)
 - **Scope**: `resource`
 
-### Todo Memory (via `toolMemoryLayer`)
+### Todo State (via `toolContextLayer`)
 
-Generated automatically from `ToolMemoryDeclaration` on the tools:
+Generated automatically from `ToolContextDeclaration` on the tools:
 
 ```ts
 declare const allTools: Tool[];
 
-toolMemoryLayer(allTools); // produces one layer per unique memory.id
+toolContextLayer(allTools); // produces one layer per unique context.id
 ```
 
 - **Slot**: `WORKING_MEMORY + 10` (110)
@@ -128,10 +128,10 @@ Lists all skill names in `recall` (string shorthand). When the LLM calls `activa
 
 ### Summarization
 
-Reuses the built-in `observationalMemory` with a custom `observer` function:
+Reuses the built-in `observationalContext` with a custom `observer` function:
 
 ```ts
-observationalMemory({
+observationalContext({
   bufferThreshold: 4_000,
   observer: async (buffer) => [
     `Summary: processed ${buffer.length} exchanges...`,
@@ -141,11 +141,11 @@ observationalMemory({
 
 ## Main Composition
 
-The `buildDeepAgent` function composes everything using `react()` with `memory`:
+The `buildDeepAgent` function composes everything using `react()` with `context`:
 
 ```ts
-import { observationalMemory, react, staticContent, toolMemoryLayer } from '@noetic-tools/core';
-import type { ContextMemory, MemoryLayer, StepLoop, StepSpawn, Tool } from '@noetic-tools/core';
+import { observationalContext, react, staticContent, toolContextLayer } from '@noetic-tools/core';
+import type { ContextData, ContextLayer, StepLoop, StepSpawn, Tool } from '@noetic-tools/core';
 
 interface DeepAgentConfig {
   model: string;
@@ -155,31 +155,31 @@ interface DeepAgentConfig {
 declare const fsTools: Tool[];
 declare const todoTools: Tool[];
 declare const delegateTool: Tool;
-declare function skillsLayer(opts: unknown): MemoryLayer;
+declare function skillsLayer(opts: unknown): ContextLayer;
 declare function loadInstructions(): Promise<string>;
 declare const observer: (buffer: ReadonlyArray<unknown>) => Promise<string[]>;
 
 export function buildDeepAgent(
   config: DeepAgentConfig,
-): StepLoop<ContextMemory, string, string> | StepSpawn<ContextMemory, string, string> {
+): StepLoop<ContextData, string, string> | StepSpawn<ContextData, string, string> {
   const allTools = [...fsTools, ...todoTools, delegateTool];
-  const layers: MemoryLayer[] = [
+  const layers: ContextLayer[] = [
     staticContent({ load: loadInstructions, tag: 'instructions' }),
-    ...toolMemoryLayer(allTools),
+    ...toolContextLayer(allTools),
     skillsLayer({}),
-    observationalMemory({ bufferThreshold: 4_000, observer }),
+    observationalContext({ bufferThreshold: 4_000, observer }),
   ];
 
   return react({
     model: config.model,
     instructions: config.instructions,
     tools: allTools,
-    memory: layers,
+    context: layers,
   });
 }
 ```
 
-When `memory` is provided, `react()` automatically wraps the loop in a `spawn` that creates a context boundary with those memory layers.
+When `context` is provided, `react()` automatically wraps the loop in a `spawn` that creates a context boundary with those context layers.
 
 ## What's Different from DeepAgentsJS
 
@@ -192,5 +192,5 @@ When `memory` is provided, `react()` automatically wraps the loop in a `spawn` t
 - Human-in-the-loop — supported via `tool({ needsApproval: true })`
 
 **Extension points:**
-- `StorageAdapter` interface for persistent memory across sessions
+- `StorageAdapter` interface for persistent state across sessions
 - Custom `SubAgentResolver` for dynamic sub-agent configuration

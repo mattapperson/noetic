@@ -6,9 +6,9 @@
 
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
+import type { Tool } from '@noetic-tools/types';
 import { z } from 'zod';
 import { tool } from '../../../src/builders/tool-builder';
-import type { Tool } from '../../../src/types/common';
 
 //#region Helper Functions
 

@@ -25,15 +25,15 @@ const greet = step.run({ id: 'greet', execute: async (input: string, ctx) => {
 }});
 ```
 
-Every step in Noetic receives a `Context` object as its second argument. The context carries execution metadata, token budgets, the conversation item log, memory layer handles, channel methods, and lifecycle controls. It is the single source of truth for everything that has happened during a run.
+Every step in Noetic receives a `Context` object as its second argument. The context carries execution metadata, token budgets, the conversation item log, context layer handles, channel methods, and lifecycle controls. It is the single source of truth for everything that has happened during a run.
 
 ## Context Interface
 
 ```ts
-type ContextShape<TMemory = ContextMemory, TState = unknown> = Context<TMemory, TState>;
+type ContextShape<TContext = ContextData, TState = unknown> = Context<TContext, TState>;
 ```
 
-The `TMemory` generic defaults to `ContextMemory` (an untyped record). Use `InferMemory<typeof config>` to supply a fully typed shape.
+The `TContext` generic defaults to `ContextData` (an untyped record). Use `InferContext<typeof config>` to supply a fully typed shape.
 
 | Property | Type | Description |
 |---|---|---|
@@ -43,7 +43,7 @@ The `TMemory` generic defaults to `ContextMemory` (an untyped record). Use `Infe
 | `elapsed` | `number` | Wall-clock milliseconds since context creation. |
 | `cost` | `number` | Cumulative cost estimate for LLM calls. |
 | `state` | `TState` | Mutable, generic state object. You can read and write to this freely. |
-| `memory` | `TMemory` | Layer provides keyed by layer ID. See [Memory](#memory) below. |
+| `context` | `TContext` | Layer provides keyed by layer ID. See [Context](#context) below. |
 | `parent` | `Context \| null` | Parent context when running inside a spawn. |
 | `depth` | `number` | Nesting depth (0 for root). |
 | `span` | [`Span`](/docs/framework/observability) | The active tracing span for this execution. |
@@ -52,29 +52,29 @@ The `TMemory` generic defaults to `ContextMemory` (an untyped record). Use `Infe
 | `itemLog` | [`ItemLog`](#itemlog) | The conversation event log. |
 | `lastStepMeta` | `StepMeta \| null` | Metadata from the most recently completed step (tool calls, usage, cost). |
 
-### Memory
+### Context
 
-The `ctx.memory` property is a readonly object keyed by layer ID. Each key maps to a handle containing the data projections and callable functions that the layer declared in its `provides` field.
+The `ctx.context` property is a readonly object keyed by layer ID. Each key maps to a handle containing the data projections and callable functions that the layer declared in its `provides` field.
 
 ```ts
 declare const ctx: Context<Record<string, { snapshot: unknown; update: (next: unknown) => Promise<void> }>>;
 
-const snap = ctx.memory['working-memory'].snapshot;
+const snap = ctx.context['working-context'].snapshot;
 
-await ctx.memory['working-memory'].update({ key: 'value' });
+await ctx.context['working-context'].update({ key: 'value' });
 ```
 
 At runtime, data entries use getters (reading live state on each access), while function entries are async closures that validate input via Zod and may update the layer's internal state.
 
-When layers are wrapped with the `memory()` builder, use `InferMemory<typeof config>` to get compile-time types:
+When layers are wrapped with the `context()` builder, use `InferContext<typeof config>` to get compile-time types:
 
 ```ts
-import { memory, workingMemory, type InferMemory } from '@noetic-tools/core';
+import { context, workingMemoryContext, type InferContext } from '@noetic-tools/core';
 
-const mem = memory([workingMemory()]);
-type Mem = InferMemory<typeof mem>;
+const mem = context([workingMemoryContext()]);
+type Mem = InferContext<typeof mem>;
 
-// ctx: Context<Mem> gives fully typed ctx.memory
+// ctx: Context<Mem> gives fully typed ctx.context
 ```
 
 ### TokenUsage
@@ -182,7 +182,7 @@ ctx.abort('user pressed stop');
 
 It never travels up: aborting a fork path or spawn child leaves the parent (and its siblings) running, which is what lets `fork` treat one failed path as a recoverable outcome. A child context created *after* its parent was aborted is aborted at construction, so a spawn already in flight cannot escape the cancellation.
 
-`ctx.abort()` does not run memory-layer teardown. Use [`harness.cancel(ctx, reason)`](/docs/framework/runtime#durability-methods) when the layers' `onComplete` / `dispose` hooks should also run.
+`ctx.abort()` does not run context-layer teardown. Use [`harness.cancel(ctx, reason)`](/docs/framework/runtime#durability-methods) when the layers' `onComplete` / `dispose` hooks should also run.
 
 ## Item Types
 

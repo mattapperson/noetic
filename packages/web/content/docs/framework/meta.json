@@ -1,6 +1,6 @@
 {
   "title": "Framework",
-  "description": "The Noetic framework for building agents — steps, operators, memory, patterns.",
+  "description": "The Noetic framework for building agents — steps, operators, context, patterns.",
   "root": true,
   "pages": [
     "index",
@@ -19,8 +19,8 @@
     "durability",
     "errors",
     "observability",
-    "---Memory---",
-    "memory",
+    "---Context---",
+    "context-layers",
     "---Patterns---",
     "patterns",
     "---Examples---",

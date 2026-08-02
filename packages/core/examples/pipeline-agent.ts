@@ -12,7 +12,7 @@
  * and prepareNext feeding each stage's output as the next stage's input.
  */
 
-import type { ContextMemory } from '@noetic-tools/memory';
+import type { ContextData } from '@noetic-tools/context';
 import type { StepLoop } from '@noetic-tools/types';
 import { branch } from '../src/builders/control-flow-builders';
 import { loop } from '../src/builders/loop-builder';
@@ -21,7 +21,7 @@ import { until } from '../src/until/predicates';
 
 //#region Stage Handlers
 
-const normalizeStage = step.run<ContextMemory, string, string>({
+const normalizeStage = step.run<ContextData, string, string>({
   id: 'normalize-text',
   execute: async (input) => {
     return input
@@ -31,7 +31,7 @@ const normalizeStage = step.run<ContextMemory, string, string>({
   },
 });
 
-const analyzeStage = step.llm<ContextMemory, string, string>({
+const analyzeStage = step.llm<ContextData, string, string>({
   id: 'analyze-text',
   model: 'openai/gpt-4o',
   instructions: [
@@ -43,7 +43,7 @@ const analyzeStage = step.llm<ContextMemory, string, string>({
   ].join(' '),
 });
 
-const formatStage = step.run<ContextMemory, string, string>({
+const formatStage = step.run<ContextData, string, string>({
   id: 'format-report',
   execute: async (input) => {
     return [
@@ -61,7 +61,7 @@ const formatStage = step.run<ContextMemory, string, string>({
 //#region Agent Builder
 
 /** Builds a 3-stage text processing pipeline using branch + loop + prepareNext. */
-export function buildPipelineAgent(): StepLoop<ContextMemory, string, string> {
+export function buildPipelineAgent(): StepLoop<ContextData, string, string> {
   const stages = [
     normalizeStage,
     analyzeStage,
@@ -69,7 +69,7 @@ export function buildPipelineAgent(): StepLoop<ContextMemory, string, string> {
   ] as const;
   let phase = 0;
 
-  const router = branch<ContextMemory, string, string>({
+  const router = branch<ContextData, string, string>({
     id: 'phase-router',
     route: () => stages[phase] ?? null,
   });

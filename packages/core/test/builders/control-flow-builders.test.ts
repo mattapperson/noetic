@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'bun:test';
-import type { ContextMemory } from '@noetic-tools/memory';
+import type { ContextData } from '@noetic-tools/context';
 import type { SettleResult } from '@noetic-tools/types';
 import { branch, fork } from '../../src/builders/control-flow-builders';
 import { makeMockContext } from '../_helpers';
 
 describe('fork builder', () => {
   it('creates race mode fork', () => {
-    const f = fork<ContextMemory, string, string>({
+    const f = fork<ContextData, string, string>({
       id: 'race-test',
       mode: 'race',
       paths: () => [
@@ -28,7 +28,7 @@ describe('fork builder', () => {
   });
 
   it('creates all mode fork with merge', () => {
-    const f = fork<ContextMemory, string, string>({
+    const f = fork<ContextData, string, string>({
       id: 'all-test',
       mode: 'all',
       paths: () => [
@@ -55,7 +55,7 @@ describe('fork builder', () => {
   });
 
   it('creates settle mode fork with merge', () => {
-    const f = fork<ContextMemory, string, string>({
+    const f = fork<ContextData, string, string>({
       id: 'settle-test',
       mode: 'settle',
       paths: () => [
@@ -76,7 +76,7 @@ describe('fork builder', () => {
   });
 
   it('supports concurrency option', () => {
-    const f = fork<ContextMemory, string, string>({
+    const f = fork<ContextData, string, string>({
       id: 'conc-test',
       mode: 'all',
       paths: () => [],
@@ -88,7 +88,7 @@ describe('fork builder', () => {
 
   it('throws on empty id', () => {
     expect(() =>
-      fork<ContextMemory, string, string>({
+      fork<ContextData, string, string>({
         id: '',
         mode: 'race',
         paths: () => [],
@@ -98,7 +98,7 @@ describe('fork builder', () => {
 
   it('throws when all mode lacks merge', () => {
     expect(() =>
-      fork<ContextMemory, string, string>({
+      fork<ContextData, string, string>({
         id: 'test',
         // @ts-expect-error — a merge-less fork falls through to the `settle`
         // overload, so the mismatch surfaces here; runtime validation is what
@@ -112,7 +112,7 @@ describe('fork builder', () => {
   it('throws when settle mode lacks merge', () => {
     expect(() =>
       // @ts-expect-error — intentionally passing invalid opts to test runtime validation
-      fork<ContextMemory, string, string>({
+      fork<ContextData, string, string>({
         id: 'test',
         mode: 'settle',
         paths: () => [],
@@ -121,7 +121,7 @@ describe('fork builder', () => {
   });
 
   it('paths is a function', () => {
-    const f = fork<ContextMemory, number, number>({
+    const f = fork<ContextData, number, number>({
       id: 'fn-test',
       mode: 'race',
       paths: (input) => [
@@ -143,7 +143,7 @@ describe('fork builder', () => {
 describe('branch builder', () => {
   it('throws on empty id', () => {
     expect(() =>
-      branch<ContextMemory, string, string>({
+      branch<ContextData, string, string>({
         id: '',
         route: () => null,
       }),
@@ -152,7 +152,7 @@ describe('branch builder', () => {
 
   it('throws on missing route', () => {
     expect(() =>
-      branch<ContextMemory, string, string>({
+      branch<ContextData, string, string>({
         id: 'test',
         // @ts-expect-error — intentionally passing invalid opts to test runtime validation
         route: undefined,

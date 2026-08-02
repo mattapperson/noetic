@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
 // The client renders with noetic's REAL OpenUI Lang parser. It's pure (imports
-// only ./document, no node/memory deps), so we alias it straight to source and
+// only ./document, no node/context deps), so we alias it straight to source and
 // let esbuild compile the TS — no build step, no bundling the whole package.
 const OPENUI_SRC = resolve(__dirname, '../../../packages/openui/src/lang');
 

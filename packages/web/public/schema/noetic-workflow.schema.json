@@ -460,6 +460,34 @@
           "properties": {
             "kind": {
               "type": "string",
+              "const": "subflow"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "document": {
+              "$ref": "#"
+            },
+            "ref": {
+              "type": "string",
+              "minLength": 1
+            },
+            "input": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
               "const": "claude-code"
             },
             "id": {

@@ -1,4 +1,4 @@
-import type { StorageAdapter } from '@noetic-tools/memory';
+import type { StorageAdapter } from '@noetic-tools/context';
 import { NoeticConfigError } from '@noetic-tools/types';
 import type { CheckpointSnapshot } from '../../types/checkpoint';
 import { CheckpointSnapshotSchema } from '../../types/checkpoint';

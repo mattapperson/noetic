@@ -10,7 +10,7 @@ import { Nav } from '@/components/landing/nav';
 
 const CODE_TITLE = 'Noetic Code';
 const CODE_DESCRIPTION =
-  'An AI coding agent built on Noetic — in your terminal, on your Mac and iPhone, and in the cloud. Durable sessions, background agents, multi-model routing, and ten memory layers. Coming soon.';
+  'An AI coding agent built on Noetic — in your terminal, on your Mac and iPhone, and in the cloud. Durable sessions, background agents, multi-model routing, and ten context layers. Coming soon.';
 
 export const metadata = {
   title: CODE_TITLE,

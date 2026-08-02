@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import type { ContextMemory } from '@noetic-tools/memory';
+import type { ContextData } from '@noetic-tools/context';
 import { z } from 'zod';
 import { AgentHarness, loop, step, tool, until } from '../src/index';
 import { assertOpenResponsesCompliance } from './_helpers';
@@ -15,7 +15,7 @@ const RUN_LIVE = !!process.env.OPENROUTER_API_KEY && !!process.env.NOETIC_LIVE_T
 
 describe.skipIf(!RUN_LIVE)('live OpenRouter integration', () => {
   test('simple LLM step returns valid OpenResponses items', async () => {
-    const llmStep = step.llm<ContextMemory, string, string>({
+    const llmStep = step.llm<ContextData, string, string>({
       id: 'live-simple',
       model: 'openai/gpt-4o-mini',
       instructions: 'You are a helpful assistant. Reply in exactly one sentence.',
@@ -51,7 +51,7 @@ describe.skipIf(!RUN_LIVE)('live OpenRouter integration', () => {
     });
 
     const llmStep = step.llm<
-      ContextMemory,
+      ContextData,
       string,
       {
         answer: number;
@@ -103,7 +103,7 @@ describe.skipIf(!RUN_LIVE)('live OpenRouter integration', () => {
       },
     });
 
-    const llmStep = step.llm<ContextMemory, string, string>({
+    const llmStep = step.llm<ContextData, string, string>({
       id: 'live-tool',
       model: 'openai/gpt-4o-mini',
       instructions:
@@ -161,10 +161,10 @@ describe.skipIf(!RUN_LIVE)('live OpenRouter integration', () => {
       },
     });
 
-    const agentLoop = loop<ContextMemory, string, string>({
+    const agentLoop = loop<ContextData, string, string>({
       id: 'live-loop',
       steps: [
-        step.llm<ContextMemory, string, string>({
+        step.llm<ContextData, string, string>({
           id: 'live-loop-llm',
           model: 'openai/gpt-4o-mini',
           instructions:
@@ -203,7 +203,7 @@ describe.skipIf(!RUN_LIVE)('live OpenRouter integration', () => {
 
   test('multi-step pipeline with code and LLM steps', async () => {
     const classifyStep = step.run<
-      ContextMemory,
+      ContextData,
       string,
       {
         topic: string;
@@ -217,13 +217,13 @@ describe.skipIf(!RUN_LIVE)('live OpenRouter integration', () => {
       }),
     });
 
-    const llmStep = step.llm<ContextMemory, string, string>({
+    const llmStep = step.llm<ContextData, string, string>({
       id: 'respond',
       model: 'openai/gpt-4o-mini',
       instructions: 'You are a concise assistant. Reply in one sentence.',
     });
 
-    const pipeline = step.run<ContextMemory, string, string>({
+    const pipeline = step.run<ContextData, string, string>({
       id: 'pipeline',
       execute: async (input, ctx) => {
         const classification = await ctx.harness.run(classifyStep, input, ctx);

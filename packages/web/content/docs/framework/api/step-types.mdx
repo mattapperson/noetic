@@ -20,17 +20,17 @@ import type {
   StepTool,
 } from '@noetic-tools/core';
 
-type _AssertShape<TMemory, I, O> =
-  | StepRun<TMemory, I, O>
-  | StepLLM<TMemory, I, O>
-  | StepTool<TMemory, I, O>
-  | StepBranch<TMemory, I, O>
-  | StepFork<TMemory, I, O>
-  | StepSpawn<TMemory, I, O>
-  | StepProvide<TMemory, I, O>
-  | StepLoop<TMemory, I, O>;
+type _AssertShape<TContext, I, O> =
+  | StepRun<TContext, I, O>
+  | StepLLM<TContext, I, O>
+  | StepTool<TContext, I, O>
+  | StepBranch<TContext, I, O>
+  | StepFork<TContext, I, O>
+  | StepSpawn<TContext, I, O>
+  | StepProvide<TContext, I, O>
+  | StepLoop<TContext, I, O>;
 
-type _AssertSubset<TMemory, I, O> = _AssertShape<TMemory, I, O> extends Step<TMemory, I, O>
+type _AssertSubset<TContext, I, O> = _AssertShape<TContext, I, O> extends Step<TContext, I, O>
   ? true
   : false;
 ```
@@ -39,18 +39,18 @@ The exported `Step` union additionally includes [`StepEvery`](#stepevery) for fi
 
 ## StepRun
 
-`StepRun<TMemory, I, O>`
+`StepRun<TContext, I, O>`
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `kind` | `'run'` | yes | Discriminant |
 | `id` | `string` | yes | Step identifier |
-| `execute` | `(input: I, ctx: Context<TMemory>) => Promise<O>` | yes | Async function to execute |
+| `execute` | `(input: I, ctx: Context<TContext>) => Promise<O>` | yes | Async function to execute |
 | `retry` | `RetryPolicy` | no | Retry configuration |
 
 ## StepLLM
 
-`StepLLM<TMemory, I, O>`
+`StepLLM<TContext, I, O>`
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -65,7 +65,7 @@ The exported `Step` union additionally includes [`StepEvery`](#stepevery) for fi
 
 ## StepTool
 
-`StepTool<TMemory, I, O>`
+`StepTool<TContext, I, O>`
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -76,13 +76,13 @@ The exported `Step` union additionally includes [`StepEvery`](#stepevery) for fi
 
 ## StepBranch
 
-`StepBranch<TMemory, I, O>`
+`StepBranch<TContext, I, O>`
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `kind` | `'branch'` | yes | Discriminant |
 | `id` | `string` | yes | Step identifier |
-| `route` | `(input: I, ctx: Context<TMemory>) => Step<TMemory, I, O> \| null` | yes | Routing function (null skips) |
+| `route` | `(input: I, ctx: Context<TContext>) => Step<TContext, I, O> \| null` | yes | Routing function (null skips) |
 
 ## StepFork
 
@@ -90,85 +90,85 @@ Fork has three mode variants, each a separate interface.
 
 ### StepForkRace
 
-`StepForkRace<TMemory, I, O>`
+`StepForkRace<TContext, I, O>`
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `kind` | `'fork'` | yes | Discriminant |
 | `id` | `string` | yes | Step identifier |
 | `mode` | `'race'` | yes | First completion wins |
-| `paths` | `(input: I, ctx: Context<TMemory>) => Step<TMemory, I, O>[]` | yes | Path factory |
+| `paths` | `(input: I, ctx: Context<TContext>) => Step<TContext, I, O>[]` | yes | Path factory |
 | `concurrency` | `number` | no | Max parallel paths |
 
 ### StepForkAll
 
-`StepForkAll<TMemory, I, O>`
+`StepForkAll<TContext, I, O>`
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `kind` | `'fork'` | yes | Discriminant |
 | `id` | `string` | yes | Step identifier |
 | `mode` | `'all'` | yes | Wait for all paths |
-| `paths` | `(input: I, ctx: Context<TMemory>) => Step<TMemory, I, O>[]` | yes | Path factory |
-| `merge` | `(results: O[], ctx: Context<TMemory>) => O` | yes | Merge function |
+| `paths` | `(input: I, ctx: Context<TContext>) => Step<TContext, I, O>[]` | yes | Path factory |
+| `merge` | `(results: O[], ctx: Context<TContext>) => O` | yes | Merge function |
 | `concurrency` | `number` | no | Max parallel paths |
 
 ### StepForkSettle
 
-`StepForkSettle<TMemory, I, O>`
+`StepForkSettle<TContext, I, O>`
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `kind` | `'fork'` | yes | Discriminant |
 | `id` | `string` | yes | Step identifier |
 | `mode` | `'settle'` | yes | Wait for all, include errors |
-| `paths` | `(input: I, ctx: Context<TMemory>) => Step<TMemory, I, O>[]` | yes | Path factory |
-| `merge` | `(results: SettleResult<O>[], ctx: Context<TMemory>) => O` | yes | Merge function |
+| `paths` | `(input: I, ctx: Context<TContext>) => Step<TContext, I, O>[]` | yes | Path factory |
+| `merge` | `(results: SettleResult<O>[], ctx: Context<TContext>) => O` | yes | Merge function |
 | `concurrency` | `number` | no | Max parallel paths |
 
 ## StepProvide
 
-`StepProvide<TMemory, I, O>`
+`StepProvide<TContext, I, O>`
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `kind` | `'provide'` | yes | Discriminant |
 | `id` | `string` | yes | Step identifier |
-| `child` | `Step<TMemory, I, O>` | yes | Child step to execute with the provided layers |
-| `memory` | `MemoryConfig \| MemoryLayer[]` | yes | Memory layers available to all descendant steps |
+| `child` | `Step<TContext, I, O>` | yes | Child step to execute with the provided layers |
+| `context` | `ContextConfig \| ContextLayer[]` | yes | Context layers available to all descendant steps |
 
 ## StepSpawn
 
-`StepSpawn<TMemory, I, O>`
+`StepSpawn<TContext, I, O>`
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `kind` | `'spawn'` | yes | Discriminant |
 | `id` | `string` | yes | Step identifier |
-| `child` | `Step<TMemory, I, O>` | yes | Child step to execute |
-| `memory` | `MemoryConfig \| MemoryLayer[]` | no | Spawn-local memory layers |
+| `child` | `Step<TContext, I, O>` | yes | Child step to execute |
+| `context` | `ContextConfig \| ContextLayer[]` | no | Spawn-local context layers |
 | `timeout` | `number` | no | Timeout in milliseconds |
 
 ## StepLoop
 
-`StepLoop<TMemory, I, O>`
+`StepLoop<TContext, I, O>`
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `kind` | `'loop'` | yes | Discriminant |
 | `id` | `string` | yes | Step identifier |
-| `steps` | `ReadonlyArray<Step<TMemory, I, O>>` | yes | Loop body steps |
+| `steps` | `ReadonlyArray<Step<TContext, I, O>>` | yes | Loop body steps |
 | `until` | `Until` | yes | Termination predicate |
 | `maxIterations` | `number` | no | Safety limit on iterations |
 | `maxHistorySize` | `number` | no | Max history items to retain |
 | `inbox` | `Channel<string>` | no | Channel for external messages that prevent loop from stopping |
 | `parkTimeout` | `number` | no | Milliseconds to wait on inbox before stopping (0 = non-blocking) |
-| `prepareNext` | `(output: O, verdict: Verdict, ctx: Context<TMemory>) => I` | no | Transform output to next input |
-| `onError` | `(error: NoeticError, ctx: Context<TMemory>) => 'retry' \| 'skip' \| 'abort'` | no | Error handler |
+| `prepareNext` | `(output: O, verdict: Verdict, ctx: Context<TContext>) => I` | no | Transform output to next input |
+| `onError` | `(error: NoeticError, ctx: Context<TContext>) => 'retry' \| 'skip' \| 'abort'` | no | Error handler |
 
 ## StepEvery
 
-`StepEvery<TMemory, I, O>`
+`StepEvery<TContext, I, O>`
 
 A step that runs a body step on a fixed-interval schedule, optionally woken sooner by a wake channel. Runs forever until the executing context is cancelled. The operator output is `void` — `every` does not accumulate iteration outputs.
 
@@ -176,7 +176,7 @@ A step that runs a body step on a fixed-interval schedule, optionally woken soon
 |---|---|---|---|
 | `kind` | `'every'` | yes | Discriminant |
 | `id` | `string` | yes | Step identifier |
-| `step` | `Step<TMemory, I, O>` | yes | Body step executed on each iteration |
+| `step` | `Step<TContext, I, O>` | yes | Body step executed on each iteration |
 | `ms` | `number` | yes | Park duration between iterations in milliseconds. Must be `>= 0`. |
 | `wakeOn` | `Channel<unknown>` | no | Channel that wakes the parking interval when any value arrives |
 | `onError` | `'continue' \| 'fail'` | no | Behavior when `step` throws. Defaults to `'continue'` (record the error and keep parking). |
@@ -224,14 +224,14 @@ A step that runs a body step on a fixed-interval schedule, optionally woken soon
 | `decorateResultItem` | `(params) => Item` | Decorate the harness-created tool-result item before it is appended/emitted. The decorated item must satisfy this tool's own `itemSchemas.toolResults` (when declared) — including for error outputs such as malformed-arguments results — or the round fails with `NoeticError` kind `item_schema_mismatch`. |
 | `execute` | `(args: z.infer<I>, toolCtx: ToolExecutionContext) => Promise<z.infer<O>> \| AsyncGenerator<unknown, z.infer<O>>` | Async function (or generator) that performs the tool's work. |
 | `needsApproval` | `boolean` | Optional. When `true`, execution pauses for human approval before running. |
-| `memory` | `ToolMemoryDeclaration` | Optional. Declares tool-owned memory the runtime materializes into a `MemoryLayer`. |
+| `context` | `ToolContextDeclaration` | Optional. Declares tool-owned state the runtime materializes into a `ContextLayer`. |
 
 ### ExecuteStepFn
 
 ```ts
-declare const executeStepShape: <TMemory, I, O>(
-  step: Step<TMemory, I, O>,
+declare const executeStepShape: <TContext, I, O>(
+  step: Step<TContext, I, O>,
   input: I,
-  ctx: Context<TMemory>,
+  ctx: Context<TContext>,
 ) => Promise<O>;
 ```

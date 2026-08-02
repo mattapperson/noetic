@@ -7,7 +7,7 @@
  * Flow: User input → LLM loop → delegate tool call → sub-agent executes → result returned
  */
 
-import type { ContextMemory } from '@noetic-tools/memory';
+import type { ContextData } from '@noetic-tools/context';
 import type { StepLoop, StepSpawn } from '@noetic-tools/types';
 import { react } from '../src/patterns/react';
 import { createSyncDelegateTool } from './delegate-tools';
@@ -16,8 +16,8 @@ import { createSyncDelegateTool } from './delegate-tools';
 
 /** Builds the main agent loop with sync delegation capability. */
 export function buildSyncDelegateAgent():
-  | StepLoop<ContextMemory, string, string>
-  | StepSpawn<ContextMemory, string, string> {
+  | StepLoop<ContextData, string, string>
+  | StepSpawn<ContextData, string, string> {
   const delegateTool = createSyncDelegateTool();
 
   return react({

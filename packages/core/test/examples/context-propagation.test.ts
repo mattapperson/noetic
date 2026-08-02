@@ -14,15 +14,18 @@ function makeToolCtxWithHarness(harness: AgentHarnessContract): ToolExecutionCon
     threadId: 'thread-abc',
     resourceId: 'resource-xyz',
   });
+  const toolContext = {
+    get: () => undefined,
+    set: () => {},
+  };
   return {
     ctx,
     harness,
     fs: harness.fs,
     shell: harness.shell,
-    memory: {
-      get: () => undefined,
-      set: () => {},
-    },
+    context: toolContext,
+    // Deprecated alias — same accessor object.
+    memory: toolContext,
     assembledView: ctx.itemLog.items,
     lastStepMeta: null,
   };

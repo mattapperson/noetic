@@ -1,6 +1,6 @@
 name: Release packages
 
-# Single workflow releasing @noetic-tools/types -> memory -> core as
+# Single workflow releasing @noetic-tools/types -> context -> core as
 # SEQUENTIAL jobs in dependency order. They used to be three independent
 # workflows, which raced: each semantic-release pushes a `chore: release`
 # commit to main, and every concurrently-running sibling then saw "local
@@ -14,6 +14,7 @@ on:
     branches: [main]
     paths:
       - 'packages/types/**'
+      - 'packages/context/**'
       - 'packages/memory/**'
       - 'packages/core/**'
       - 'packages/openui/**'
@@ -85,11 +86,65 @@ jobs:
           NPM_CONFIG_PROVENANCE: 'true'
         run: npx --yes -p semantic-release@24 -p semantic-release-monorepo@8 -p @semantic-release/changelog@6 -p @semantic-release/git@10 -p conventional-changelog-conventionalcommits@7 semantic-release --extends semantic-release-monorepo
 
-  memory:
-    name: Release @noetic-tools/memory
+  context:
+    name: Release @noetic-tools/context
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: types
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Lint
+        run: bunx biome check packages/context
+
+      - name: Typecheck
+        run: bun --cwd=packages/context run typecheck
+
+      # @noetic-tools/context depends on @noetic-tools/types. Build the dependency's
+      # dist first so context's own build (run by `prepublishOnly`) and the Node
+      # ESM smoke test can resolve `@noetic-tools/types` via node_modules.
+      - name: Build dependency (@noetic-tools/types)
+        run: bun --cwd=packages/types run build
+
+      - name: Build
+        run: bun --cwd=packages/context run build
+
+      # See the types job. context's own `workspace:*` deps are pinned to concrete
+      # versions at publish time by `prepublishOnly` (scripts/pin-workspace-deps.ts).
+      - name: Detach package from workspace for npm
+        run: node -e "const fs=require('fs');const p=require('./package.json');delete p.workspaces;fs.writeFileSync('./package.json',JSON.stringify(p,null,2)+'\n')"
+
+      - name: Release
+        working-directory: packages/context
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: 'true'
+        run: npx --yes -p semantic-release@24 -p semantic-release-monorepo@8 -p @semantic-release/changelog@6 -p @semantic-release/git@10 -p conventional-changelog-conventionalcommits@7 semantic-release --extends semantic-release-monorepo
+
+
+  memory:
+    name: Release @noetic-tools/memory (deprecated shim)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: context
     permissions:
       contents: write
       issues: write
@@ -116,16 +171,18 @@ jobs:
       - name: Typecheck
         run: bun --cwd=packages/memory run typecheck
 
-      # @noetic-tools/memory depends on @noetic-tools/types. Build the dependency's
-      # dist first so memory's own build (run by `prepublishOnly`) and the Node
-      # ESM smoke test can resolve `@noetic-tools/types` via node_modules.
-      - name: Build dependency (@noetic-tools/types)
-        run: bun --cwd=packages/types run build
+      # The shim re-exports @noetic-tools/context, which itself needs
+      # @noetic-tools/types. Build both dists so the shim's own build (run by
+      # `prepublishOnly`) and the Node ESM smoke test can resolve them.
+      - name: Build dependencies (@noetic-tools/types, @noetic-tools/context)
+        run: |
+          bun --cwd=packages/types run build
+          bun --cwd=packages/context run build
 
       - name: Build
         run: bun --cwd=packages/memory run build
 
-      # See the types job. memory's own `workspace:*` deps are pinned to concrete
+      # See the types job. The shim's own `workspace:*` deps are pinned to concrete
       # versions at publish time by `prepublishOnly` (scripts/pin-workspace-deps.ts).
       - name: Detach package from workspace for npm
         run: node -e "const fs=require('fs');const p=require('./package.json');delete p.workspaces;fs.writeFileSync('./package.json',JSON.stringify(p,null,2)+'\n')"
@@ -452,19 +509,19 @@ jobs:
       - name: Typecheck
         run: bun --cwd=packages/core run typecheck
 
-      # @noetic-tools/core depends on @noetic-tools/types and @noetic-tools/memory.
+      # @noetic-tools/core depends on @noetic-tools/types and @noetic-tools/context.
       # Build those dists first so core's own build (run by `prepublishOnly`) and
       # the Node ESM smoke test can resolve them via node_modules.
-      - name: Build dependencies (@noetic-tools/types, @noetic-tools/memory)
+      - name: Build dependencies (@noetic-tools/types, @noetic-tools/context)
         run: |
           bun --cwd=packages/types run build
-          bun --cwd=packages/memory run build
+          bun --cwd=packages/context run build
 
       - name: Build
         run: bun --cwd=packages/core run build
 
       # See the types job. core's own `workspace:*` deps (@noetic-tools/types,
-      # @noetic-tools/memory) are pinned to concrete versions at publish time by
+      # @noetic-tools/context) are pinned to concrete versions at publish time by
       # `prepublishOnly` (scripts/pin-workspace-deps.ts).
       - name: Detach package from workspace for npm
         run: node -e "const fs=require('fs');const p=require('./package.json');delete p.workspaces;fs.writeFileSync('./package.json',JSON.stringify(p,null,2)+'\n')"
@@ -477,7 +534,7 @@ jobs:
           NPM_CONFIG_PROVENANCE: 'true'
         run: npx --yes -p semantic-release@24 -p semantic-release-monorepo@8 -p @semantic-release/changelog@6 -p @semantic-release/git@10 -p conventional-changelog-conventionalcommits@7 semantic-release --extends semantic-release-monorepo
 
-  # openui depends on memory + types (never on core), so it can release after the
+  # openui depends on context + types (never on core), so it can release after the
   # rest of the chain — its pinned deps are already on npm by then. core never
   # imports openui, so the reverse edge doesn't exist.
   openui:
@@ -511,13 +568,13 @@ jobs:
       - name: Typecheck
         run: bun --cwd=packages/openui run typecheck
 
-      # @noetic-tools/openui depends on @noetic-tools/types and @noetic-tools/memory.
+      # @noetic-tools/openui depends on @noetic-tools/types and @noetic-tools/context.
       # Build those dists first so openui's own build (run by `prepublishOnly`) and
       # the Node ESM smoke test can resolve them via node_modules.
-      - name: Build dependencies (@noetic-tools/types, @noetic-tools/memory)
+      - name: Build dependencies (@noetic-tools/types, @noetic-tools/context)
         run: |
           bun --cwd=packages/types run build
-          bun --cwd=packages/memory run build
+          bun --cwd=packages/context run build
 
       - name: Build
         run: bun --cwd=packages/openui run build
@@ -535,7 +592,7 @@ jobs:
           NPM_CONFIG_PROVENANCE: 'true'
         run: npx --yes -p semantic-release@24 -p semantic-release-monorepo@8 -p @semantic-release/changelog@6 -p @semantic-release/git@10 -p conventional-changelog-conventionalcommits@7 semantic-release --extends semantic-release-monorepo
 
-  # eval depends on core (which depends on memory + types), so it releases last:
+  # eval depends on core (which depends on context + types), so it releases last:
   # by then core's new version is on npm and pin-workspace-deps can point at it.
   # Nothing in the chain imports eval, so the reverse edge doesn't exist.
   #
@@ -577,10 +634,10 @@ jobs:
       # first so eval's own build (run by `prepublishOnly`) and the Node ESM smoke
       # test can resolve them via node_modules — tsconfig.build.json drops the
       # `bun` condition, so src/*.ts is not resolvable at build time.
-      - name: Build dependencies (@noetic-tools/types, @noetic-tools/memory, @noetic-tools/core)
+      - name: Build dependencies (@noetic-tools/types, @noetic-tools/context, @noetic-tools/core)
         run: |
           bun --cwd=packages/types run build
-          bun --cwd=packages/memory run build
+          bun --cwd=packages/context run build
           bun --cwd=packages/core run build
 
       - name: Build

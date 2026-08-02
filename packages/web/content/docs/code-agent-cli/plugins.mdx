@@ -1,6 +1,6 @@
 ---
 title: Plugins
-description: Extend the noetic CLI with custom tools, memory layers, skills, slash commands, footer UI, sub-agent presets, reminder triggers, and language servers.
+description: Extend the noetic CLI with custom tools, context layers, skills, slash commands, footer UI, sub-agent presets, reminder triggers, and language servers.
 ---
 
 A **plugin** is an npm-publishable extension that contributes to the CLI's runtime. Plugins are first-class — every extension point the built-in CLI uses is available to a plugin. You can publish a plugin, install it, register it in `noetic.config.ts`, and your sessions inherit its behavior.
@@ -16,7 +16,7 @@ interface NoeticPlugin {
 
   // Extension points (all optional)
   tools?: (ctx: PluginContext) => ReadonlyArray<Tool> | Promise<ReadonlyArray<Tool>>;
-  memoryLayers?: (ctx: PluginContext) => ReadonlyArray<MemoryLayer> | Promise<ReadonlyArray<MemoryLayer>>;
+  contextLayers?: (ctx: PluginContext) => ReadonlyArray<ContextLayer> | Promise<ReadonlyArray<ContextLayer>>;
   skills?: (ctx: PluginContext) => ReadonlyArray<SkillDefinition> | Promise<ReadonlyArray<SkillDefinition>>;
   commands?: (ctx: PluginContext) => ReadonlyArray<Command> | Promise<ReadonlyArray<Command>>;
   subagentPresets?: () => Record<string, SubagentPreset> | Promise<Record<string, SubagentPreset>>;
@@ -72,9 +72,9 @@ const weatherTool: Tool<typeof weatherInput> = {
 };
 ```
 
-### `memoryLayers`
+### `contextLayers`
 
-Contribute custom [memory layers](/docs/framework/memory/custom-layers). Layers participate in budget allocation and recall just like the built-ins.
+Contribute custom [context layers](/docs/framework/context-layers/custom-layers). Layers participate in budget allocation and recall just like the built-ins.
 
 ### `skills`
 

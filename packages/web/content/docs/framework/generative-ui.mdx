@@ -1,6 +1,6 @@
 ---
 title: Generative UI
-description: Agents that respond with your UI — via OpenUI — through a streaming output codec, a server-authoritative memory layer, tool-authored fragments, and a transport.
+description: Agents that respond with your UI — via OpenUI — through a streaming output codec, a server-authoritative context layer, tool-authored fragments, and a transport.
 ---
 
 ## Quick Example
@@ -8,7 +8,7 @@ description: Agents that respond with your UI — via OpenUI — through a strea
 Register a component library, hand it to `step.llm` as a streaming output codec, and the model renders your UI instead of returning plain text:
 
 ```ts
-import { AgentHarness, type ContextMemory, step } from '@noetic-tools/core';
+import { AgentHarness, type ContextData, step } from '@noetic-tools/core';
 import { createLibrary, defineComponent, openUi } from '@noetic-tools/openui';
 import { z } from 'zod';
 
@@ -18,7 +18,7 @@ const library = createLibrary([
   defineComponent({ name: 'Stack', props: z.object({ children: z.array(z.unknown()) }) }),
 ]);
 
-const dashboard = step.llm<ContextMemory, string, unknown>({
+const dashboard = step.llm<ContextData, string, unknown>({
   id: 'dashboard',
   model: 'claude-sonnet-5',
   output: openUi(library), // ← the model emits OpenUI Lang; the step returns a UiDocument
@@ -35,17 +35,17 @@ const doc = await harness.run(dashboard, 'Show a welcome card', ctx);
 
 ## What is generative UI?
 
-Generative UI lets an agent answer with a *user interface* built from components you registered, rather than a text blob. Noetic implements the [OpenUI](https://www.openui.com) standard through the `@noetic-tools/openui` package, which depends only on [`@noetic-tools/memory`](/docs/framework/memory) and `@noetic-tools/types` — never on core. Core sees two dialect-agnostic contracts (`OutputCodec` and `UiFragment`) and resolves everything else from the package, exactly the way [sub-harnesses](/docs/framework/sub-harnesses) are decoupled.
+Generative UI lets an agent answer with a *user interface* built from components you registered, rather than a text blob. Noetic implements the [OpenUI](https://www.openui.com) standard through the `@noetic-tools/openui` package, which depends only on [`@noetic-tools/context`](/docs/framework/context-layers) and `@noetic-tools/types` — never on core. Core sees two dialect-agnostic contracts (`OutputCodec` and `UiFragment`) and resolves everything else from the package, exactly the way [sub-harnesses](/docs/framework/sub-harnesses) are decoupled.
 
 There are three surfaces, adopted independently:
 
 1. **A model-authored codec** — `openUi(library)` on `step.llm.output`.
-2. **A server-authoritative memory layer** — `openUiSurface()` owns the UI state so it is durable, resumable, visible to the model, and conditionable by the step graph.
+2. **A server-authoritative context layer** — `openUiSurface()` owns the UI state so it is durable, resumable, visible to the model, and conditionable by the step graph.
 3. **Tool-authored fragments** — a tool declares `ui` render functions and its calls carry their own UI.
 
 A **transport** (`@noetic-tools/openui/server`) wires OpenUI's own React client to a Noetic harness.
 
-The design center is **server-authoritative UI state**: the memory layer is the single owner of the mounted document, the reactive variables, and the interaction record. The client renderer is a projection of that state — never the other way around.
+The design center is **server-authoritative UI state**: the context layer is the single owner of the mounted document, the reactive variables, and the interaction record. The client renderer is a projection of that state — never the other way around.
 
 ## OpenUI Lang
 
@@ -67,7 +67,7 @@ The parser is tolerant: prose, code fences, and unparseable lines become diagnos
 
 ## The surface layer
 
-Install `openUiSurface()` as a memory layer to make the server the owner of UI state. It is modeled on [`durableTaskState`](/docs/framework/memory) (thread-scoped, durable, rendered into the view) and the [steering layer](/docs/framework/memory) (enforcement hooks).
+Install `openUiSurface()` as a context layer to make the server the owner of UI state. It is modeled on [`durableTaskState`](/docs/framework/context-layers) (thread-scoped, durable, rendered into the view) and the [steering layer](/docs/framework/context-layers) (enforcement hooks).
 
 ```ts
 import { AgentHarness } from '@noetic-tools/core';
@@ -80,7 +80,7 @@ const surface = openUiSurface({ library });
 const harness = new AgentHarness({
   name: 'ui-agent',
   params: {},
-  memory: [surface], // AgentHarness takes a MemoryLayer[]
+  context: [surface], // AgentHarness takes a ContextLayer[]
 });
 ```
 
@@ -216,7 +216,7 @@ A node referencing an unregistered library fails hydration with `UNKNOWN_UI_LIBR
 ## Package layout
 
 ```
-openui ──→ memory ──→ types
+openui ─→ context ─→ types
 core ──→ types            (core never imports openui)
 ```
 

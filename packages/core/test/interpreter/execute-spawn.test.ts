@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import type { ContextMemory, MemoryLayer } from '@noetic-tools/memory';
-import { createLayerStateStore, Slot } from '@noetic-tools/memory';
+import type { ContextData } from '@noetic-tools/context';
+import { createLayerStateStore, Slot } from '@noetic-tools/context';
 import type { Context, Item, StepSpawn } from '@noetic-tools/types';
 import { isNoeticError } from '@noetic-tools/types';
 import { z } from 'zod';
@@ -9,15 +9,15 @@ import { channel } from '../../src/builders/channel-builder';
 import { executeSpawn } from '../../src/interpreter/execute-action';
 import { ChannelStore } from '../../src/runtime/channel-store';
 import { ContextImpl } from '../../src/runtime/context-impl';
-import { getItemId, makeMessage, makeMockHarness, simpleExecute } from '../_helpers';
+import { getItemId, makeLayer, makeMessage, makeMockHarness, simpleExecute } from '../_helpers';
 
 //#region Helper Functions
 
-function makeSpawnStep<TMemory = ContextMemory, I = unknown, O = unknown>(
+function makeSpawnStep<TContext = ContextData, I = unknown, O = unknown>(
   id: string,
-  execute: (input: I, ctx: Context<TMemory>) => Promise<O>,
-  overrides?: Partial<Pick<StepSpawn<TMemory, I, O>, 'memory' | 'timeout'>>,
-): StepSpawn<TMemory, I, O> {
+  execute: (input: I, ctx: Context<TContext>) => Promise<O>,
+  overrides?: Partial<Pick<StepSpawn<TContext, I, O>, 'context' | 'timeout'>>,
+): StepSpawn<TContext, I, O> {
   return {
     kind: 'spawn',
     id,
@@ -27,16 +27,6 @@ function makeSpawnStep<TMemory = ContextMemory, I = unknown, O = unknown>(
       execute,
     },
     ...overrides,
-  };
-}
-
-function makeLayer(id: string, slot: number, hooks: MemoryLayer['hooks']): MemoryLayer {
-  return {
-    id,
-    name: id,
-    slot,
-    scope: 'execution',
-    hooks,
   };
 }
 
@@ -53,7 +43,7 @@ describe('executeSpawn', () => {
       parentCtx.itemLog.append(makeMessage('user', 'hello', 'p1'));
 
       let childItemCount = -1;
-      const step = makeSpawnStep<ContextMemory, string, string>(
+      const step = makeSpawnStep<ContextData, string, string>(
         'empty-spawn',
         async (_input, ctx) => {
           childItemCount = ctx.itemLog.items.length;
@@ -98,15 +88,12 @@ describe('executeSpawn', () => {
         state: initialState,
       });
 
-      const step = makeSpawnStep<ContextMemory, string, string>(
-        'state-test',
-        async (_input, ctx) => {
-          assertsIsTestState(ctx.state);
-          ctx.state.count = 99;
-          ctx.state.nested.val = 'modified';
-          return 'done';
-        },
-      );
+      const step = makeSpawnStep<ContextData, string, string>('state-test', async (_input, ctx) => {
+        assertsIsTestState(ctx.state);
+        ctx.state.count = 99;
+        ctx.state.nested.val = 'modified';
+        return 'done';
+      });
 
       await executeSpawn(step, '', parentCtx, simpleExecute);
 
@@ -123,13 +110,10 @@ describe('executeSpawn', () => {
       });
       let childDepth = -1;
 
-      const step = makeSpawnStep<ContextMemory, string, string>(
-        'depth-test',
-        async (_input, ctx) => {
-          childDepth = ctx.depth;
-          return 'done';
-        },
-      );
+      const step = makeSpawnStep<ContextData, string, string>('depth-test', async (_input, ctx) => {
+        childDepth = ctx.depth;
+        return 'done';
+      });
 
       await executeSpawn(step, '', parentCtx, simpleExecute);
       expect(parentCtx.depth).toBe(0);
@@ -142,7 +126,7 @@ describe('executeSpawn', () => {
       const parentCtx = new ContextImpl({
         harness: makeMockHarness(),
       });
-      const step = makeSpawnStep<ContextMemory, string, string>('error-test', async () => {
+      const step = makeSpawnStep<ContextData, string, string>('error-test', async () => {
         throw new Error('child boom');
       });
 
@@ -150,7 +134,7 @@ describe('executeSpawn', () => {
     });
   });
 
-  describe('memory layers with onSpawn', () => {
+  describe('context layers with onSpawn', () => {
     it('provides items to child via onSpawn hook', async () => {
       const parentCtx = new ContextImpl({
         harness: makeMockHarness(),
@@ -164,24 +148,27 @@ describe('executeSpawn', () => {
       });
 
       const spawnItem = makeMessage('user', 'from layer', 'spawn-1');
-      const layer = makeLayer('recall-layer', Slot.WORKING_MEMORY, {
-        onSpawn: async ({ parentState }) => ({
-          childState: parentState,
-          items: [
-            spawnItem,
-          ],
-        }),
+      const layer = makeLayer('recall-layer', {
+        slot: Slot.WORKING_MEMORY,
+        hooks: {
+          onSpawn: async ({ parentState }) => ({
+            childState: parentState,
+            items: [
+              spawnItem,
+            ],
+          }),
+        },
       });
 
       let childItems: readonly Item[] = [];
-      const step = makeSpawnStep<ContextMemory, string, string>(
+      const step = makeSpawnStep<ContextData, string, string>(
         'layer-spawn',
         async (_input, ctx) => {
           childItems = ctx.itemLog.items;
           return 'done';
         },
         {
-          memory: [
+          context: [
             layer,
           ],
         },
@@ -213,21 +200,24 @@ describe('executeSpawn', () => {
         active: true,
       });
 
-      const layer = makeLayer('transform-layer', Slot.WORKING_MEMORY, {
-        onSpawn: async ({ parentState }) => ({
-          childState: parentState,
-        }),
-        onReturn: async ({ parentState, result }) => ({
-          parentState,
-          result: `transformed:${result}`,
-        }),
+      const layer = makeLayer('transform-layer', {
+        slot: Slot.WORKING_MEMORY,
+        hooks: {
+          onSpawn: async ({ parentState }) => ({
+            childState: parentState,
+          }),
+          onReturn: async ({ parentState, result }) => ({
+            parentState,
+            result: `transformed:${result}`,
+          }),
+        },
       });
 
-      const step = makeSpawnStep<ContextMemory, string, string>(
+      const step = makeSpawnStep<ContextData, string, string>(
         'pipeline-test',
         async () => 'raw-output',
         {
-          memory: [
+          context: [
             layer,
           ],
         },
@@ -245,29 +235,35 @@ describe('executeSpawn', () => {
   });
 
   describe('spawn-local memory replaces parent layers', () => {
-    it('uses step.memory instead of parentLayers', async () => {
+    it('uses step.context instead of parentLayers', async () => {
       const parentCtx = new ContextImpl({
         harness: makeMockHarness(),
       });
       const layerStore = createLayerStateStore();
       const parentExecId = parentCtx.id;
 
-      const parentLayer = makeLayer('parent-layer', Slot.WORKING_MEMORY, {
-        onSpawn: async ({ parentState }) => ({
-          childState: parentState,
-          items: [
-            makeMessage('user', 'from parent', 'parent-item'),
-          ],
-        }),
+      const parentLayer = makeLayer('parent-layer', {
+        slot: Slot.WORKING_MEMORY,
+        hooks: {
+          onSpawn: async ({ parentState }) => ({
+            childState: parentState,
+            items: [
+              makeMessage('user', 'from parent', 'parent-item'),
+            ],
+          }),
+        },
       });
 
-      const spawnLayer = makeLayer('spawn-layer', Slot.OBSERVATIONS, {
-        onSpawn: async ({ parentState }) => ({
-          childState: parentState,
-          items: [
-            makeMessage('user', 'from spawn', 'spawn-item'),
-          ],
-        }),
+      const spawnLayer = makeLayer('spawn-layer', {
+        slot: Slot.OBSERVATIONS,
+        hooks: {
+          onSpawn: async ({ parentState }) => ({
+            childState: parentState,
+            items: [
+              makeMessage('user', 'from spawn', 'spawn-item'),
+            ],
+          }),
+        },
       });
 
       // Seed state for both layers
@@ -279,14 +275,14 @@ describe('executeSpawn', () => {
       });
 
       let childItems: readonly Item[] = [];
-      const step = makeSpawnStep<ContextMemory, string, string>(
+      const step = makeSpawnStep<ContextData, string, string>(
         'replace-test',
         async (_input, ctx) => {
           childItems = ctx.itemLog.items;
           return 'done';
         },
         {
-          memory: [
+          context: [
             spawnLayer,
           ],
         },
@@ -315,22 +311,28 @@ describe('executeSpawn', () => {
       const layerStore = createLayerStateStore();
       const parentExecId = parentCtx.id;
 
-      const highSlotLayer = makeLayer('high-slot', Slot.EPISODIC, {
-        onSpawn: async ({ parentState }) => ({
-          childState: parentState,
-          items: [
-            makeMessage('user', 'episodic', 'high-item'),
-          ],
-        }),
+      const highSlotLayer = makeLayer('high-slot', {
+        slot: Slot.EPISODIC,
+        hooks: {
+          onSpawn: async ({ parentState }) => ({
+            childState: parentState,
+            items: [
+              makeMessage('user', 'episodic', 'high-item'),
+            ],
+          }),
+        },
       });
 
-      const lowSlotLayer = makeLayer('low-slot', Slot.WORKING_MEMORY, {
-        onSpawn: async ({ parentState }) => ({
-          childState: parentState,
-          items: [
-            makeMessage('user', 'working', 'low-item'),
-          ],
-        }),
+      const lowSlotLayer = makeLayer('low-slot', {
+        slot: Slot.WORKING_MEMORY,
+        hooks: {
+          onSpawn: async ({ parentState }) => ({
+            childState: parentState,
+            items: [
+              makeMessage('user', 'working', 'low-item'),
+            ],
+          }),
+        },
       });
 
       // Seed state
@@ -343,14 +345,14 @@ describe('executeSpawn', () => {
 
       let childItems: readonly Item[] = [];
       // Pass layers in reverse slot order to verify sorting
-      const step = makeSpawnStep<ContextMemory, string, string>(
+      const step = makeSpawnStep<ContextData, string, string>(
         'merge-test',
         async (_input, ctx) => {
           childItems = ctx.itemLog.items;
           return 'done';
         },
         {
-          memory: [
+          context: [
             highSlotLayer,
             lowSlotLayer,
           ],
@@ -383,7 +385,7 @@ describe('executeSpawn', () => {
       let sendError: unknown = null;
       let received: number | undefined;
 
-      const step: StepSpawn<ContextMemory, void, void> = {
+      const step: StepSpawn<ContextData, void, void> = {
         kind: 'spawn',
         id: 'channel-spawn',
         child: {
@@ -419,8 +421,8 @@ describe('executeSpawn', () => {
         mode: 'queue',
       });
       const channelStore = new ChannelStore();
-      let childCtx: Context<ContextMemory> | undefined;
-      const step = makeSpawnStep<ContextMemory, void, string>('cancel-spawn', async (_input, c) => {
+      let childCtx: Context<ContextData> | undefined;
+      const step = makeSpawnStep<ContextData, void, string>('cancel-spawn', async (_input, c) => {
         childCtx = c;
         // Never delivered — only the parent's abort unblocks this.
         return await c.recv(ch, {
@@ -454,7 +456,7 @@ describe('executeSpawn', () => {
     });
 
     it('detaches the child once the spawn settles, so it is not retained', async () => {
-      const step = makeSpawnStep<ContextMemory, void, string>('detach-spawn', async () => 'done');
+      const step = makeSpawnStep<ContextData, void, string>('detach-spawn', async () => 'done');
       const parentCtx = new ContextImpl({
         harness: makeMockHarness(),
       });

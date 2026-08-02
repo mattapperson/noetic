@@ -1,4 +1,4 @@
-import type { ContextMemory } from '@noetic-tools/memory';
+import type { ContextData } from '@noetic-tools/context';
 import type {
   Context,
   Lazy,
@@ -23,9 +23,9 @@ import { getDefaultRegistrar } from '../types/step-registrar';
 
 //#region Types
 
-interface StepRunOpts<TMemory, I, O> {
+export interface StepRunOpts<TContext, I, O> {
   id: string;
-  execute: (input: I, ctx: Context<TMemory>) => Promise<O>;
+  execute: (input: I, ctx: Context<TContext>) => Promise<O>;
   retry?: RetryPolicy;
   /**
    * Optional subprocess adapter override. When set, `execute()` is routed
@@ -35,40 +35,40 @@ interface StepRunOpts<TMemory, I, O> {
   subprocess?: SubprocessAdapter;
 }
 
-interface StepLLMOpts<TMemory, O> {
+export interface StepLLMOpts<TContext, O> {
   id: string;
   /** Model id. Eager string or `(ctx) => string` getter (resolved at step execution). */
-  model: Lazy<string, TMemory>;
+  model: Lazy<string, TContext>;
   /** Optional instructions; eager string or `(ctx) => string | undefined` getter. */
-  instructions?: Lazy<string | undefined, TMemory>;
+  instructions?: Lazy<string | undefined, TContext>;
   /**
    * Optional tools; eager array or `(ctx) => (...)[] | undefined` getter. Each
    * entry is either a client `Tool` or an inline `ServerToolSpec` (an OpenRouter
    * server tool the provider executes, e.g. web search/fetch).
    */
-  tools?: Lazy<(Tool | ServerToolSpec)[] | undefined, TMemory>;
+  tools?: Lazy<(Tool | ServerToolSpec)[] | undefined, TContext>;
   /** Structured output: a Zod schema or a streaming `OutputCodec` (e.g. OpenUI Lang). */
   output?: ZodType<O> | OutputCodec<O>;
   params?: ModelParams;
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }
 
-interface StepToolOpts<I, O> {
+export interface StepToolOpts<I, O> {
   id: string;
   tool: Tool<ZodType<I>, ZodType<O>>;
   args?: Partial<I>;
 }
 
-interface StepSubHarnessOpts<TMemory, O> {
+export interface StepSubHarnessOpts<TContext, O> {
   id: string;
   /** The harness adapter created by a `@noetic-tools/sub-harness-*` factory. Eager or `(ctx) => SubHarness`. */
-  harness: Lazy<SubHarness, TMemory>;
+  harness: Lazy<SubHarness, TContext>;
   /** Turn prompt. Eager string or `(ctx) => string` getter. */
-  prompt: Lazy<string, TMemory>;
+  prompt: Lazy<string, TContext>;
   /** Shared harness settings (model, permission mode, …). */
   settings?: SubHarnessSettings;
   /** System instructions applied on the first message of a fresh session. */
-  instructions?: Lazy<string | undefined, TMemory>;
+  instructions?: Lazy<string | undefined, TContext>;
   /** Optional Zod schema; when set the assistant text is JSON-parsed and validated. */
   output?: ZodType<O>;
   /** Session reuse + teardown policy across steps. */
@@ -85,11 +85,11 @@ interface StepSubHarnessOpts<TMemory, O> {
  * thin wrapper so the kinds stay individually typed while the validation and
  * registration live in one place.
  */
-function buildSubHarnessStep<TMemory, I, O>(
+function buildSubHarnessStep<TContext, I, O>(
   kind: SubHarnessKind,
   builderName: string,
-  opts: StepSubHarnessOpts<TMemory, O>,
-): StepSubHarness<TMemory, I, O> {
+  opts: StepSubHarnessOpts<TContext, O>,
+): StepSubHarness<TContext, I, O> {
   if (!opts.id || opts.id.trim() === '') {
     throw new NoeticConfigError({
       code: 'EMPTY_STEP_ID',
@@ -114,7 +114,7 @@ function buildSubHarnessStep<TMemory, I, O>(
       hint: `Use the matching builder, e.g. step.${opts.harness.harnessId}({ ... }).`,
     });
   }
-  const built: StepSubHarness<TMemory, I, O> = {
+  const built: StepSubHarness<TContext, I, O> = {
     kind,
     ...opts,
   };
@@ -142,9 +142,9 @@ export const step = {
    * @throws `NoeticConfigError` with code `MISSING_EXECUTE_FUNCTION` if `execute` is not provided.
    * @throws `NoeticConfigError` with code `DUPLICATE_STEP_ID` if another step with the same id is already registered with a different body.
    */
-  run<TMemory = ContextMemory, I = unknown, O = unknown>(
-    opts: StepRunOpts<TMemory, I, O>,
-  ): StepRun<TMemory, I, O> {
+  run<TContext = ContextData, I = unknown, O = unknown>(
+    opts: StepRunOpts<TContext, I, O>,
+  ): StepRun<TContext, I, O> {
     if (!opts.id || opts.id.trim() === '') {
       throw new NoeticConfigError({
         code: 'EMPTY_STEP_ID',
@@ -159,7 +159,7 @@ export const step = {
         hint: 'Provide an async execute function, e.g. execute: async (input, ctx) => result.',
       });
     }
-    const built: StepRun<TMemory, I, O> = {
+    const built: StepRun<TContext, I, O> = {
       kind: 'run',
       ...opts,
     };
@@ -182,9 +182,9 @@ export const step = {
    * @throws `NoeticConfigError` with code `EMPTY_STEP_ID` if `id` is empty.
    * @throws `NoeticConfigError` with code `MISSING_MODEL` if an eager `model` string is empty. Function-form models are validated at step execution.
    */
-  llm<TMemory = ContextMemory, I = unknown, O = unknown>(
-    opts: StepLLMOpts<TMemory, O>,
-  ): StepLLM<TMemory, I, O> {
+  llm<TContext = ContextData, I = unknown, O = unknown>(
+    opts: StepLLMOpts<TContext, O>,
+  ): StepLLM<TContext, I, O> {
     if (!opts.id || opts.id.trim() === '') {
       throw new NoeticConfigError({
         code: 'EMPTY_STEP_ID',
@@ -202,7 +202,7 @@ export const step = {
         hint: "Pass a model identifier, e.g. model: 'anthropic/claude-sonnet-4-20250514'.",
       });
     }
-    const built: StepLLM<TMemory, I, O> = {
+    const built: StepLLM<TContext, I, O> = {
       kind: 'llm',
       ...opts,
     };
@@ -222,9 +222,9 @@ export const step = {
    * @throws `NoeticConfigError` with code `EMPTY_STEP_ID` if `id` is empty.
    * @throws `NoeticConfigError` with code `MISSING_TOOL` if `tool` is not provided.
    */
-  tool<TMemory = ContextMemory, I = unknown, O = unknown>(
+  tool<TContext = ContextData, I = unknown, O = unknown>(
     opts: StepToolOpts<I, O>,
-  ): StepTool<TMemory, I, O> {
+  ): StepTool<TContext, I, O> {
     if (!opts.id || opts.id.trim() === '') {
       throw new NoeticConfigError({
         code: 'EMPTY_STEP_ID',
@@ -239,7 +239,7 @@ export const step = {
         hint: 'Provide a tool definition created with the tool() builder.',
       });
     }
-    const built: StepTool<TMemory, I, O> = {
+    const built: StepTool<TContext, I, O> = {
       kind: 'tool',
       ...opts,
     };
@@ -259,9 +259,9 @@ export const step = {
    * @returns A `StepSubHarness` of kind `claude-code`, auto-registered in the step registry.
    * @throws `NoeticConfigError` `EMPTY_STEP_ID` / `MISSING_SUB_HARNESS` / `SUB_HARNESS_KIND_MISMATCH`.
    */
-  claudeCode<TMemory = ContextMemory, I = unknown, O = unknown>(
-    opts: StepSubHarnessOpts<TMemory, O>,
-  ): StepSubHarness<TMemory, I, O> {
+  claudeCode<TContext = ContextData, I = unknown, O = unknown>(
+    opts: StepSubHarnessOpts<TContext, O>,
+  ): StepSubHarness<TContext, I, O> {
     return buildSubHarnessStep('claude-code', 'step.claudeCode', opts);
   },
 
@@ -271,9 +271,9 @@ export const step = {
    * @param opts - See {@link step.claudeCode}; `opts.harness` is a `codex(...)` adapter.
    * @returns A `StepSubHarness` of kind `codex`.
    */
-  codex<TMemory = ContextMemory, I = unknown, O = unknown>(
-    opts: StepSubHarnessOpts<TMemory, O>,
-  ): StepSubHarness<TMemory, I, O> {
+  codex<TContext = ContextData, I = unknown, O = unknown>(
+    opts: StepSubHarnessOpts<TContext, O>,
+  ): StepSubHarness<TContext, I, O> {
     return buildSubHarnessStep('codex', 'step.codex', opts);
   },
 
@@ -283,9 +283,9 @@ export const step = {
    * @param opts - See {@link step.claudeCode}; `opts.harness` is an `opencode(...)` adapter.
    * @returns A `StepSubHarness` of kind `opencode`.
    */
-  opencode<TMemory = ContextMemory, I = unknown, O = unknown>(
-    opts: StepSubHarnessOpts<TMemory, O>,
-  ): StepSubHarness<TMemory, I, O> {
+  opencode<TContext = ContextData, I = unknown, O = unknown>(
+    opts: StepSubHarnessOpts<TContext, O>,
+  ): StepSubHarness<TContext, I, O> {
     return buildSubHarnessStep('opencode', 'step.opencode', opts);
   },
 
@@ -295,9 +295,9 @@ export const step = {
    * @param opts - See {@link step.claudeCode}; `opts.harness` is a `pi(...)` adapter.
    * @returns A `StepSubHarness` of kind `pi`.
    */
-  pi<TMemory = ContextMemory, I = unknown, O = unknown>(
-    opts: StepSubHarnessOpts<TMemory, O>,
-  ): StepSubHarness<TMemory, I, O> {
+  pi<TContext = ContextData, I = unknown, O = unknown>(
+    opts: StepSubHarnessOpts<TContext, O>,
+  ): StepSubHarness<TContext, I, O> {
     return buildSubHarnessStep('pi', 'step.pi', opts);
   },
 };

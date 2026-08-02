@@ -15,7 +15,7 @@
 
 import type {
   Context,
-  ContextMemory,
+  ContextData,
   StepSubHarness,
   SubHarnessStreamPart,
   SubHarnessTurnResult,
@@ -38,7 +38,7 @@ export class SubHarnessEventBridge {
   private sawText = false;
   private sawToolCall = false;
 
-  constructor(step: Pick<StepSubHarness, 'id' | 'kind' | 'emit'>, ctx: Context<ContextMemory>) {
+  constructor(step: Pick<StepSubHarness, 'id' | 'kind' | 'emit'>, ctx: Context<ContextData>) {
     this.broadcaster = getBroadcaster(ctx);
     this.agentName = ctx.harness.config.name;
     this.stepId = step.id;

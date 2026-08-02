@@ -1,4 +1,4 @@
-import type { ContextMemory, LayerStateStore, MemoryLayer } from '@noetic-tools/memory';
+import type { ContextData, ContextLayer, LayerStateStore } from '@noetic-tools/context';
 import type {
   Context,
   Step,
@@ -43,9 +43,9 @@ function asContextImpl(ctx: Context): ContextImpl | null {
 }
 
 /**
- * Extract the parent's memory layers and layer-state store so `executeSpawn`
+ * Extract the parent's context layers and layer-state store so `executeSpawn`
  * can propagate them to the child context per `specs/04-spawn.md`: when a
- * spawn step has no explicit `memory` config, parent layers inherit and their
+ * spawn step has no explicit `context` config, parent layers inherit and their
  * `onSpawn`/`onReturn` hooks run across the boundary.
  *
  * `ctx.harness.layerStateStore` is not on the public `AgentHarnessContract`
@@ -56,13 +56,13 @@ interface HarnessWithLayerStore {
   layerStateStore: LayerStateStore;
 }
 
-function harnessWithLayerStore<TMemory>(ctx: Context<TMemory>): HarnessWithLayerStore {
+function harnessWithLayerStore<TContext>(ctx: Context<TContext>): HarnessWithLayerStore {
   return frameworkCast<HarnessWithLayerStore>(ctx.harness);
 }
 
-function buildSpawnOpts<TMemory>(ctx: Context<TMemory>): {
+function buildSpawnOpts<TContext>(ctx: Context<TContext>): {
   itemSchemas: Context['itemSchemas'];
-  parentLayers: MemoryLayer[] | undefined;
+  parentLayers: ContextLayer[] | undefined;
   layerStore: LayerStateStore;
 } {
   const baseCtx = frameworkCast<Context>(ctx);
@@ -77,8 +77,8 @@ function buildSpawnOpts<TMemory>(ctx: Context<TMemory>): {
  * Resolve the per-step framework-event emit option. Both `llm` and the harness
  * step kinds carry an `emit` field; every other kind defaults to enabled.
  */
-function resolveStepEmit<TMemory, I, O>(
-  step: Step<TMemory, I, O>,
+function resolveStepEmit<TContext, I, O>(
+  step: Step<TContext, I, O>,
 ): boolean | ((eventType: string, data: Record<string, unknown>) => boolean) | undefined {
   if (
     step.kind === 'llm' ||
@@ -97,9 +97,9 @@ function resolveStepEmit<TMemory, I, O>(
  * Precedence is `step.subprocess ?? ctx.harness.subprocess`. Per-call
  * `detachedSpawn` overrides layer above this in the harness itself.
  */
-function resolveStepAdapter<TMemory, I, O>(
-  step: Step<TMemory, I, O>,
-  ctx: Context<TMemory>,
+function resolveStepAdapter<TContext, I, O>(
+  step: Step<TContext, I, O>,
+  ctx: Context<TContext>,
 ): SubprocessAdapter {
   if ((step.kind === 'run' || step.kind === 'spawn') && step.subprocess) {
     return step.subprocess;
@@ -116,10 +116,10 @@ function resolveStepAdapter<TMemory, I, O>(
  * and synchronous error propagation. Out-of-process adapters ignore
  * `_localExecutor` and run the step in a child runtime.
  */
-async function dispatchViaAdapter<TMemory, I, O>(
-  step: StepRun<TMemory, I, O> | StepSpawn<TMemory, I, O>,
+async function dispatchViaAdapter<TContext, I, O>(
+  step: StepRun<TContext, I, O> | StepSpawn<TContext, I, O>,
   input: I,
-  ctx: Context<TMemory>,
+  ctx: Context<TContext>,
   executor: () => Promise<O>,
 ): Promise<O> {
   const adapter = resolveStepAdapter(step, ctx);
@@ -156,10 +156,10 @@ async function dispatchViaAdapter<TMemory, I, O>(
  * through the adapter as normal, so per-step overrides on descendants
  * continue to work.
  */
-export async function executeNoAdapter<TMemory, I, O>(
-  step: Step<TMemory, I, O>,
+export async function executeNoAdapter<TContext, I, O>(
+  step: Step<TContext, I, O>,
   input: I,
-  ctx: Context<TMemory>,
+  ctx: Context<TContext>,
 ): Promise<O> {
   switch (step.kind) {
     case 'run':
@@ -183,11 +183,11 @@ export async function executeNoAdapter<TMemory, I, O>(
  * `step_replayed`. Returns `{ hit: false }` when there is nothing to replay so
  * the caller dispatches the step normally.
  */
-function replayFromLedger<TMemory, I, O>(opts: {
+function replayFromLedger<TContext, I, O>(opts: {
   ledger: StepLedger | undefined;
   ledgerPath: string | undefined;
   impl: ContextImpl | null;
-  step: Step<TMemory, I, O>;
+  step: Step<TContext, I, O>;
   broadcaster: EventBroadcaster | undefined;
   agentName: string;
 }):
@@ -236,10 +236,10 @@ function replayFromLedger<TMemory, I, O>(opts: {
  * re-executing. A no-op without a ledger or ledger path. Only successes reach
  * here — a step that threw skips this call in `execute` and runs again on resume.
  */
-async function recordToLedger<TMemory, I, O>(opts: {
+async function recordToLedger<TContext, I, O>(opts: {
   ledger: StepLedger | undefined;
   ledgerPath: string | undefined;
-  step: Step<TMemory, I, O>;
+  step: Step<TContext, I, O>;
   output: O;
 }): Promise<void> {
   const { ledger, ledgerPath, step, output } = opts;
@@ -267,10 +267,10 @@ async function recordToLedger<TMemory, I, O>(opts: {
  * @throws `NoeticError` with kind `step_failed` if max depth is exceeded or an unknown step kind is encountered.
  * @throws `NoeticError` with kind `cancelled` if the context is aborted.
  */
-export async function execute<TMemory = ContextMemory, I = unknown, O = unknown>(
-  step: Step<TMemory, I, O>,
+export async function execute<TContext = ContextData, I = unknown, O = unknown>(
+  step: Step<TContext, I, O>,
   input: I,
-  ctx: Context<TMemory>,
+  ctx: Context<TContext>,
 ): Promise<O> {
   const baseCtx = frameworkCast<Context>(ctx);
   // Depth guard — classified as step_failed (not budget_exceeded) because depth

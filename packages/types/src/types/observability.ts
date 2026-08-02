@@ -13,8 +13,8 @@ export interface TraceExporter {
   export(spans: Span[]): Promise<void>;
 }
 
-/** @public Diagnostic span recording a single memory layer hook invocation and its outcome. */
-export interface MemoryTraceSpan {
+/** @public Diagnostic span recording a single context layer hook invocation and its outcome. */
+export interface LayerTraceSpan {
   layerId: string;
   hook: 'init' | 'recall' | 'store' | 'onSpawn' | 'onReturn' | 'onComplete' | 'dispose';
   durationMs: number;

@@ -88,7 +88,7 @@ A skill goes from "discovered" to "activated" in three ways:
 2. **Model**: calls the `activate_skill` tool (only when `model-invocable: true`).
 3. **Spawn**: parent calls the `agent` tool with `subagent_type: <agent-type>` — the skill body becomes the child's system prompt and `allowed-tools` becomes the child's tool pool.
 
-Activation is per-thread. The `skills` memory layer tracks which skills are active and renders their processed instructions on every recall.
+Activation is per-thread. The `skills` context layer tracks which skills are active and renders their processed instructions on every recall.
 
 ## Built-in skills
 

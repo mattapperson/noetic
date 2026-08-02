@@ -8,10 +8,10 @@ description: Run a coding agent — Claude Code, Codex, opencode, pi — as a No
 A sub-harness step delegates a turn to an external coding-agent runtime, exactly the way [`step.llm`](/docs/framework/steps) delegates a turn to a language model. You pick the agent with a builder (`step.claudeCode`, `step.codex`, `step.opencode`, `step.pi`) and hand it an adapter from the matching package:
 
 ```ts
-import { AgentHarness, type ContextMemory, step } from '@noetic-tools/core';
+import { AgentHarness, type ContextData, step } from '@noetic-tools/core';
 import { claudeCode } from '@noetic-tools/sub-harness-claude-code';
 
-const review = step.claudeCode<ContextMemory, string, string>({
+const review = step.claudeCode<ContextData, string, string>({
   id: 'review',
   harness: claudeCode({ model: 'claude-opus-4-8' }),
   prompt: 'Review the staged diff and summarize the riskiest change.',
@@ -27,7 +27,7 @@ The step runs Claude Code for one turn against the current workspace: it seeds t
 
 ## What is a sub-harness?
 
-A *sub-harness* is a pluggable backend that drives an agentic coding tool as a step. It is the direct analogue of a [memory layer](/docs/framework/memory): a contract defined in the dependency-free `@noetic-tools/types` foundation, implemented once per tool in its own package, and consumed by `@noetic-tools/core` without ever forming an import cycle.
+A *sub-harness* is a pluggable backend that drives an agentic coding tool as a step. It is the direct analogue of a [context layer](/docs/framework/context-layers): a contract defined in the dependency-free `@noetic-tools/types` foundation, implemented once per tool in its own package, and consumed by `@noetic-tools/core` without ever forming an import cycle.
 
 Four agents ship today, each a distinct `Step.kind`:
 
@@ -45,16 +45,16 @@ Each builder is its own individually-typed step variant, but all share the `Step
 Every `step.<agent>(...)` builder takes the same options:
 
 ```ts validate=none
-step.claudeCode<TMemory = ContextMemory, I = unknown, O = unknown>({
+step.claudeCode<TContext = ContextData, I = unknown, O = unknown>({
   id: string;
-  harness: SubHarness | ((ctx: Context<TMemory>) => SubHarness); // the adapter
-  prompt: string | ((ctx: Context<TMemory>) => string);         // the turn prompt
+  harness: SubHarness | ((ctx: Context<TContext>) => SubHarness); // the adapter
+  prompt: string | ((ctx: Context<TContext>) => string);         // the turn prompt
   settings?: SubHarnessSettings;
-  instructions?: string | ((ctx: Context<TMemory>) => string | undefined);
+  instructions?: string | ((ctx: Context<TContext>) => string | undefined);
   output?: ZodType<O>;
   session?: SubHarnessSessionPolicy;
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
-}): StepSubHarness<TMemory, I, O>
+}): StepSubHarness<TContext, I, O>
 ```
 
 | Field | Type | Description |
@@ -235,5 +235,5 @@ The base package also exports the building blocks the lifecycle uses internally:
 
 - [Steps](/docs/framework/steps) — the step primitives sub-harness steps sit alongside.
 - [JSON Workflow Runtime](/docs/framework/json-runtime) — how the JSON node kinds hydrate and execute.
-- [Memory](/docs/framework/memory) — the contract this design mirrors.
+- [Context Layers](/docs/framework/context-layers) — the contract this design mirrors.
 - [Runtime](/docs/framework/runtime) — the AgentHarness that executes sub-harness steps.

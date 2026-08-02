@@ -121,7 +121,7 @@ function schemaMismatch(category: ItemSchemaCategory): NoeticErrorImpl {
 }
 
 /**
- * @public Runtime item validator with optional tool, memory-layer, and harness extension schemas.
+ * @public Runtime item validator with optional tool, context-layer, and harness extension schemas.
  *
  * Extension schemas are pure shape validators (gate, not normalizer): on
  * match the original value is returned unchanged, including fields the schema

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import type { ContextMemory } from '@noetic-tools/memory';
+import type { ContextData } from '@noetic-tools/context';
 import type { StepTool, ToolExecutionContext } from '@noetic-tools/types';
 import { frameworkCast, isNoeticError } from '@noetic-tools/types';
 import { z } from 'zod';
@@ -27,7 +27,7 @@ describe('executeTool', () => {
       }),
     };
     const s: StepTool<
-      ContextMemory,
+      ContextData,
       {
         a: number;
         b: number;
@@ -73,7 +73,7 @@ describe('executeTool', () => {
       name: string;
     };
     const s: StepTool<
-      ContextMemory,
+      ContextData,
       GreetInput,
       {
         greeting: string;
@@ -121,7 +121,7 @@ describe('executeTool', () => {
       },
     };
     const s: StepTool<
-      ContextMemory,
+      ContextData,
       {
         query: string;
         limit: number;
@@ -162,7 +162,7 @@ describe('executeTool', () => {
         return 'ok';
       },
     };
-    const s: StepTool<ContextMemory, Record<string, never>, string> = {
+    const s: StepTool<ContextData, Record<string, never>, string> = {
       kind: 'tool',
       id: 'ctx-test',
       tool,
@@ -170,7 +170,7 @@ describe('executeTool', () => {
     await executeTool(s, {}, mockCtx, mockHarness);
     assert(receivedToolCtx !== undefined);
     expect(receivedToolCtx.ctx).toBe(mockCtx);
-    expect(receivedToolCtx.memory).toBeDefined();
+    expect(receivedToolCtx.context).toBeDefined();
     expect(receivedToolCtx.assembledView).toBeDefined();
   });
 
@@ -184,7 +184,7 @@ describe('executeTool', () => {
         throw new Error('tool broke');
       },
     };
-    const s: StepTool<ContextMemory, Record<string, never>, string> = {
+    const s: StepTool<ContextData, Record<string, never>, string> = {
       kind: 'tool',
       id: 'fail-test',
       tool,

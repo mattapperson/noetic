@@ -112,7 +112,7 @@ export function CodeEverywhere(): ReactNode {
           }}
         >
           Sessions live in the cloud, not in a terminal process. The same conversation — the same
-          diffs, the same queue, the same memory — is open in your terminal, on your Mac, on your
+          diffs, the same queue, the same context — is open in your terminal, on your Mac, on your
           phone, and on the web, synced live over one WebSocket stream.
         </p>
       </div>

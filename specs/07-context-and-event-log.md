@@ -7,7 +7,7 @@
 
 ## The `Context` Interface
 
-Every step runs inside a `Context`. It's the runtime's handle into the execution. The `Context` is NOT the content sent to the LLM — that is the **View**, assembled by the Projector from memory layers and conversation history (see `11-memory-layer-system`). The `Context` is execution metadata and infrastructure.
+Every step runs inside a `Context`. It's the runtime's handle into the execution. The `Context` is NOT the content sent to the LLM — that is the **View**, assembled by the Projector from context layers and conversation history (see `11-context-layer-system`). The `Context` is execution metadata and infrastructure.
 
 ```typescript
 interface Context<TState = unknown> {
@@ -22,7 +22,7 @@ interface Context<TState = unknown> {
   readonly span: Span;           // OpenTelemetry trace span (see 10-observability)
   readonly harness: AgentHarness;   // reference to the owning agent harness (see 08-runtime)
 
-  // Identifiers for memory layer scope resolution (see 11-memory-layer-system)
+  // Identifiers for context layer scope resolution (see 11-context-layer-system)
   readonly threadId: string;     // stable across calls in the same conversation
   readonly resourceId?: string;  // user, entity, or resource identifier
 
@@ -38,7 +38,7 @@ interface Context<TState = unknown> {
   // for the Context's lifetime; mutate via `setToolCwd`.
   readonly cwdState: CwdState;
 
-  // Per-memory-layer breakdown of the context window as of the most recent
+  // Per-context-layer breakdown of the context window as of the most recent
   // callModel in this execution. See "Per-Layer Usage Breakdown" below.
   readonly lastLayerUsage?: LastLayerUsage;
 
@@ -81,7 +81,7 @@ interface CwdState {
 
 ## `ItemLog`
 
-The append-only record of all conversation items in an execution. It is NOT directly sent to the LLM. The Projector (see `11-memory-layer-system`) renders it into the View alongside memory layer outputs, applying overflow policies when the log exceeds the token budget.
+The append-only record of all conversation items in an execution. It is NOT directly sent to the LLM. The Projector (see `11-context-layer-system`) renders it into the View alongside context layer outputs, applying overflow policies when the log exceeds the token budget.
 
 ```typescript
 interface ItemLog {
@@ -90,7 +90,7 @@ interface ItemLog {
 }
 ```
 
-`ItemLog` is unbounded — storage grows monotonically across turns and never shrinks. Capping the items projected to the LLM is a separate, read-side concern owned by memory layers via the `projectHistory` hook (see `11-memory-layer-system`); the canonical built-in is `historyWindow` (spec 12). Because the cap is a projection, it leaves session save/restore, `getAgentResponse`, and any UI that reads `itemLog` unaffected.
+`ItemLog` is unbounded — storage grows monotonically across turns and never shrinks. Capping the items projected to the LLM is a separate, read-side concern owned by context layers via the `projectHistory` hook (see `11-context-layer-system`); the canonical built-in is `historyWindow` (spec 12). Because the cap is a projection, it leaves session save/restore, `getAgentResponse`, and any UI that reads `itemLog` unaffected.
 
 ---
 
@@ -263,9 +263,9 @@ interface LLMResponse {
 - **`harness`** gives every step direct access to the `AgentHarness` that owns this context. Steps and tools read harness params via `ctx.harness.config.params` and can call harness methods (e.g., `ctx.harness.run(...)` for sub-agent delegation).
 - **`parent`** enables spawn-tree traversal. The `depth` field enables recursive patterns with depth limits.
 - **`span`** means every step is automatically traced without user instrumentation (see `10-observability`).
-- **`threadId` / `resourceId`** are used by the runtime to resolve memory layer scope keys. A `scope: 'thread'` memory layer isolates state per `threadId`; a `scope: 'resource'` layer shares state across threads for the same `resourceId` (see `11-memory-layer-system`).
-- **`itemLog`** is the raw record. The View (what the LLM sees) is a projection of it plus memory layer outputs.
-- **The `Context` interface is not the context the LLM sees.** The `Context` object is execution infrastructure — metadata, state, and runtime handles. What the LLM actually receives is the View: the result of all memory layers converging in slot order. Context is never a layer itself; it is the output of layer convergence, assembled fresh before each LLM call. See `11-memory-layer-system`.
+- **`threadId` / `resourceId`** are used by the runtime to resolve context layer scope keys. A `scope: 'thread'` context layer isolates state per `threadId`; a `scope: 'resource'` layer shares state across threads for the same `resourceId` (see `11-context-layer-system`).
+- **`itemLog`** is the raw record. The View (what the LLM sees) is a projection of it plus context layer outputs.
+- **The `Context` interface is not the context the LLM sees.** The `Context` object is execution infrastructure — metadata, state, and runtime handles. What the LLM actually receives is the View: the result of all context layers converging in slot order. Context is never a layer itself; it is the output of layer convergence, assembled fresh before each LLM call. See `11-context-layer-system`.
 
 ## Per-Layer Usage Breakdown
 
@@ -273,7 +273,7 @@ After every successful `callModel`, the runtime records a snapshot of how the co
 
 ```typescript
 interface LayerUsageEntry {
-  readonly layerId: string;       // matches MemoryLayer.id
+  readonly layerId: string;       // matches ContextLayer.id
   readonly tokenCount: number;    // self-reported by the layer's recall() output
   readonly items: ReadonlyArray<Item>; // items this layer contributed to the last render
 }
@@ -291,7 +291,7 @@ interface LastLayerUsage {
 
 ### How the buckets are computed
 
-Layer tokens come from each layer's `recall()` self-reported `tokenCount` (see `11-memory-layer-system`). System-prompt and tools tokens are estimated against a 4-chars-per-token heuristic. History tokens are estimated from `ctx.itemLog.items` — recall output items live in the assembled view but never in the item log, so there is no overlap to deduplicate.
+Layer tokens come from each layer's `recall()` self-reported `tokenCount` (see `11-context-layer-system`). System-prompt and tools tokens are estimated against a 4-chars-per-token heuristic. History tokens are estimated from `ctx.itemLog.items` — recall output items live in the assembled view but never in the item log, so there is no overlap to deduplicate.
 
 ### When the snapshot is taken
 

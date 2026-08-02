@@ -1,26 +1,34 @@
-import type { ContextMemory, MemoryConfig, MemoryLayer } from '@noetic-tools/memory';
+import type { ContextConfig, ContextData, ContextLayer } from '@noetic-tools/context';
 import type { Step, StepProvide } from '@noetic-tools/types';
 import { NoeticConfigError } from '@noetic-tools/types';
 import { getDefaultRegistrar } from '../types/step-registrar';
+import { resolveContextOption } from './context-option';
 
 /**
- * Creates a provide step that attaches memory layers to its child without creating an isolated context.
+ * Creates a provide step that attaches context layers to its child without creating an isolated context.
  * Like React's Context.Provider — layers are available to all descendant steps.
  * Spawn and detachedSpawn break the inheritance chain.
  *
  * @public
  * @param opts.id - Unique step identifier used in traces and error messages.
  * @param opts.child - Step to execute with the provided layers.
- * @param opts.memory - Memory layers to provide to descendant steps.
+ * @param opts.context - Context layers to provide to descendant steps.
  * @returns A `StepProvide` step.
  * @throws `NoeticConfigError` with code `EMPTY_STEP_ID` if `id` is empty.
  * @throws `NoeticConfigError` with code `MISSING_CHILD_STEP` if `child` is not provided.
  */
-export function provide<TMemory = ContextMemory, I = unknown, O = unknown>(opts: {
+export function provide<TContext = ContextData, I = unknown, O = unknown>(opts: {
   id: string;
-  child: Step<TMemory, I, O>;
-  memory: MemoryConfig | MemoryLayer[];
-}): StepProvide<TMemory, I, O> {
+  child: Step<TContext, I, O>;
+  /**
+   * Optional in the type only so the deprecated `memory` spelling remains a
+   * valid way to supply the layers. Exactly one of the two is required — the
+   * runtime enforces it, the same way `id` and `child` are enforced.
+   */
+  context?: ContextConfig | ContextLayer[];
+  /** @deprecated Renamed to `context`. */
+  memory?: ContextConfig | ContextLayer[];
+}): StepProvide<TContext, I, O> {
   if (!opts.id?.trim()) {
     throw new NoeticConfigError({
       code: 'EMPTY_STEP_ID',
@@ -32,12 +40,22 @@ export function provide<TMemory = ContextMemory, I = unknown, O = unknown>(opts:
     throw new NoeticConfigError({
       code: 'MISSING_CHILD_STEP',
       message: 'provide() requires a child step.',
-      hint: 'Provide a child step to execute with the provided memory layers.',
+      hint: 'Provide a child step to execute with the provided context layers.',
     });
   }
-  const built: StepProvide<TMemory, I, O> = {
+  const layers = resolveContextOption(opts);
+  if (!layers) {
+    throw new NoeticConfigError({
+      code: 'MISSING_CONTEXT_LAYERS',
+      message: 'provide() requires context layers.',
+      hint: 'Pass context: [workingMemoryContext()]. The `memory` key is the deprecated spelling of `context`.',
+    });
+  }
+  const built: StepProvide<TContext, I, O> = {
     kind: 'provide',
-    ...opts,
+    id: opts.id,
+    child: opts.child,
+    context: layers,
   };
   getDefaultRegistrar().register(built);
   return built;

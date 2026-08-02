@@ -4,7 +4,7 @@
  * Used by the sync-delegate, async-delegate, and dynamic-delegate examples.
  */
 
-import type { ContextMemory, MemoryLayer } from '@noetic-tools/memory';
+import type { ContextData, ContextLayer } from '@noetic-tools/context';
 import type {
   AgentHarnessContract,
   Channel,
@@ -26,7 +26,7 @@ interface SubAgentConfig {
   model: string;
   instructions: string;
   tools?: Tool[];
-  memory?: MemoryLayer[];
+  context?: ContextLayer[];
 }
 
 export type SubAgentResolver = (task: string) => SubAgentConfig;
@@ -44,8 +44,8 @@ type CheckToolResult = {
 
 //#region Shared Helpers
 
-function buildSubAgentStep(id: string): ReturnType<typeof step.llm<ContextMemory, string, string>> {
-  return step.llm<ContextMemory, string, string>({
+function buildSubAgentStep(id: string): ReturnType<typeof step.llm<ContextData, string, string>> {
+  return step.llm<ContextData, string, string>({
     id,
     model: 'openai/gpt-4o',
     instructions: 'You are a research assistant. Answer concisely.',
@@ -54,8 +54,8 @@ function buildSubAgentStep(id: string): ReturnType<typeof step.llm<ContextMemory
 
 function buildConfiguredSubAgentStep(
   config: SubAgentConfig,
-): ReturnType<typeof spawn<ContextMemory, string, string>> {
-  const llmStep = step.llm<ContextMemory, string, string>({
+): ReturnType<typeof spawn<ContextData, string, string>> {
+  const llmStep = step.llm<ContextData, string, string>({
     id: `${config.id}-llm`,
     model: config.model,
     instructions: config.instructions,
@@ -74,7 +74,7 @@ function buildConfiguredSubAgentStep(
   return spawn({
     id: config.id,
     child: body,
-    memory: config.memory,
+    context: config.context,
   });
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import type { ContextMemory } from '@noetic-tools/memory';
+import type { ContextData } from '@noetic-tools/context';
 import type { CallModelRequest, OutputCodec, StepLLM } from '@noetic-tools/types';
 import { executeLLM } from '../../src/interpreter/execute-action';
 import { makeLLMResponse, makeMockContext, makeMockHarness } from '../_helpers';
@@ -80,7 +80,7 @@ function makeLineCodec(): OutputCodec<string> & {
 describe('executeLLM with an OutputCodec', () => {
   it('emits the trailing statement even when the final line is unterminated', async () => {
     const codec = makeLineCodec();
-    const step: StepLLM<ContextMemory, string, string> = {
+    const step: StepLLM<ContextData, string, string> = {
       kind: 'llm',
       id: 'ui',
       model: 'gpt-4',
@@ -102,7 +102,7 @@ describe('executeLLM with an OutputCodec', () => {
 
   it('folds codec.instructions into the system prompt and keeps the codec off outputSchema', async () => {
     const codec = makeRecordingCodec();
-    const step: StepLLM<ContextMemory, string, string> = {
+    const step: StepLLM<ContextData, string, string> = {
       kind: 'llm',
       id: 'ui',
       model: 'gpt-4',
@@ -133,7 +133,7 @@ describe('executeLLM with an OutputCodec', () => {
 
   it('uses only the codec instructions when the step has none', async () => {
     const codec = makeRecordingCodec();
-    const step: StepLLM<ContextMemory, string, string> = {
+    const step: StepLLM<ContextData, string, string> = {
       kind: 'llm',
       id: 'ui',
       model: 'gpt-4',
@@ -156,7 +156,7 @@ describe('executeLLM with an OutputCodec', () => {
 
   it('records usage/meta like any llm step (side-effect invariant)', async () => {
     const codec = makeRecordingCodec();
-    const step: StepLLM<ContextMemory, string, string> = {
+    const step: StepLLM<ContextData, string, string> = {
       kind: 'llm',
       id: 'ui',
       model: 'gpt-4',

@@ -1,6 +1,6 @@
 # Step Variants: `run`, `llm`, `tool`, `provide`
 
-> **Depends On:** `01-step-type` (Step<I,O>, execute), `11-memory-layer-system` (MemoryLayer, MemoryConfig)
+> **Depends On:** `01-step-type` (Step<I,O>, execute), `11-context-layer-system` (ContextLayer, ContextConfig)
 > **Exports:** `step.run()`, `step.llm()`, `step.tool()`, `step.provide()`, `StepRunOpts`, `StepLLMOpts`, `StepToolOpts`, `StepProvideOpts`, `Tool`, `RetryPolicy`, `ModelParams`
 
 ---
@@ -53,15 +53,15 @@ const fetchData = step.run({
 Costs tokens, needs model routing (OpenRouter, gateway, etc.), generates trace metadata with GenAI semantic conventions. Output may contain tool calls that drive the next iteration.
 
 ```typescript
-type Lazy<T, TMemory = ContextMemory> =
+type Lazy<T, TContext = ContextData> =
   | T
-  | ((ctx: Context<TMemory>) => T | Promise<T>);
+  | ((ctx: Context<TContext>) => T | Promise<T>);
 
-interface StepLLMOpts<TMemory, O> {
+interface StepLLMOpts<TContext, O> {
   id: string;
-  model: Lazy<string, TMemory>;                    // e.g. 'anthropic/claude-sonnet-4-20250514' — or a (ctx) => string getter
-  instructions?: Lazy<string | undefined, TMemory>;
-  tools?: Lazy<Tool[] | undefined, TMemory>;       // allowed tool subset (undefined = all, [] = none)
+  model: Lazy<string, TContext>;                    // e.g. 'anthropic/claude-sonnet-4-20250514' — or a (ctx) => string getter
+  instructions?: Lazy<string | undefined, TContext>;
+  tools?: Lazy<Tool[] | undefined, TContext>;       // allowed tool subset (undefined = all, [] = none)
   output?: ZodType<O>;                             // structured output schema
   params?: ModelParams;                            // temperature, topP, etc.
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
@@ -77,7 +77,7 @@ interface ModelParams {
 
 ### Lazy Params
 
-`model`, `instructions`, and `tools` each accept either an eager value or a `(ctx) => value` getter resolved at step execution. Getters see the live `Context`, so a step can read `ctx.harness.config.params`, `ctx.unifiedTools`, or memory layer state to produce per-run values without baking them in at build time.
+`model`, `instructions`, and `tools` each accept either an eager value or a `(ctx) => value` getter resolved at step execution. Getters see the live `Context`, so a step can read `ctx.harness.config.params`, `ctx.unifiedTools`, or context layer state to produce per-run values without baking them in at build time.
 
 - **Eager vs lazy — semantics are identical** after resolution. An eager `model: 'gpt-4'` behaves the same as `model: () => 'gpt-4'`.
 - **Model validation moves to runtime for getters.** `step.llm()` validates eager `model` strings at build time; function-form models are validated after resolution inside `executeLLM` with the same `MISSING_MODEL` `NoeticConfigError`.
@@ -131,7 +131,7 @@ const harness = new AgentHarness({
 
 ### Unified Tool Set
 
-Before execution begins, the agent harness walks the entire step tree and collects all `Tool` instances declared on LLM steps, plus tools provided by memory layers. These are deduplicated by name (first-wins) into a **unified tool set** stored on the execution context.
+Before execution begins, the agent harness walks the entire step tree and collects all `Tool` instances declared on LLM steps, plus tools provided by context layers. These are deduplicated by name (first-wins) into a **unified tool set** stored on the execution context.
 
 Every LLM call receives the full unified tool set, preserving prompt cache across calls with different tool restrictions. Individual steps restrict which tools the model may invoke via the `tools` field on `StepLLMOpts`:
 
@@ -175,14 +175,14 @@ const result = await execute(analyze, codeSnippet, ctx);
 
 ### What the LLM Actually Sees: The View
 
-An `llm` step does NOT simply send the `system` prompt and the raw input. The agent harness assembles a **View** — the complete `Item[]` array sent to the model — via the Memory Layer system (see `11-memory-layer-system`). Before each LLM call, the agent harness:
+An `llm` step does NOT simply send the `system` prompt and the raw input. The agent harness assembles a **View** — the complete `Item[]` array sent to the model — via the context layer system (see `11-context-layer-system`). Before each LLM call, the agent harness:
 
-1. Runs `recall()` on each memory layer to gather contextual content.
-2. Assembles system prompt item (`role: system`) + memory layer output items (`role: developer`) + conversation history items into the View as `Item[]`.
+1. Runs `recall()` on each context layer to gather contextual content.
+2. Assembles system prompt item (`role: system`) + context layer output items (`role: developer`) + conversation history items into the View as `Item[]`.
 3. Sends the View to the model. The View is `Item[]` — directly passable to the LLM provider as input.
-4. After the response, runs `store()` on each memory layer to persist learnings.
+4. After the response, runs `store()` on each context layer to persist learnings.
 
-The `instructions` field on `StepLLMOpts` becomes the agent's base instructions within the View (rendered as a `MessageItem` with `role: system`). Memory layers inject additional context as `MessageItem` entries with `role: developer`.
+The `instructions` field on `StepLLMOpts` becomes the agent's base instructions within the View (rendered as a `MessageItem` with `role: system`). Context layers inject additional context as `MessageItem` entries with `role: developer`.
 
 ### `StepMeta`
 
@@ -214,7 +214,7 @@ interface StepToolOpts<I, O> {
 ## The `Tool` Type
 
 ```typescript
-interface ToolMemoryDeclaration<TState = unknown> {
+interface ToolContextDeclaration<TState = unknown> {
   id?: string;            // shared id = shared state; defaults to tool.name
   init: () => TState;
   recall: (state: TState) => string | null;
@@ -227,31 +227,31 @@ interface Tool<I extends ZodTypeAny = ZodTypeAny, O extends ZodTypeAny = ZodType
   output: O;
   execute: (args: z.infer<I>, ctx: Context) => Promise<z.infer<O>>;
   needsApproval?: boolean;  // preventive gating, not reactive throwing
-  memory?: ToolMemoryDeclaration;
+  context?: ToolContextDeclaration;
 }
 ```
 
-`toolMemoryLayer(tools)` generates one `MemoryLayer` per unique `memory.id` among the tools. Tools sharing the same id share state.
+`toolContextLayer(tools)` generates one `ContextLayer` per unique `context.id` among the tools. Tools sharing the same id share state.
 
 ---
 
-## Variant: `provide` — Scoped Memory Layer Injection
+## Variant: `provide` — Scoped Context Layer Injection
 
-Attaches memory layers to a descendant step subtree without creating an isolated context. Analogous to React's `Context.Provider` — the layers are available to all descendant `llm` steps without the context boundary that `spawn` introduces.
+Attaches context layers to a descendant step subtree without creating an isolated context. Analogous to React's `Context.Provider` — the layers are available to all descendant `llm` steps without the context boundary that `spawn` introduces.
 
 ```typescript
-interface StepProvideOpts<TMemory, I, O> {
+interface StepProvideOpts<TContext, I, O> {
   id: string;
-  child: Step<TMemory, I, O>;
-  memory: MemoryConfig | MemoryLayer[];
+  child: Step<TContext, I, O>;
+  context: ContextConfig | ContextLayer[];
 }
 ```
 
 ```typescript
-const withMemory = step.provide({
-  id: 'inject-working-memory',
+const withContextLayers = step.provide({
+  id: 'inject-working-context',
   child: analyzeAndRespond,
-  memory: memory([workingMemory(), semanticRecall({ embedder })]),
+  context: context([workingMemoryContext(), semanticRecall({ embedder })]),
 });
 ```
 
@@ -260,15 +260,44 @@ const withMemory = step.provide({
 1. **No context boundary.** Unlike `spawn`, the child step shares the parent's `Context` and `ItemLog`. There is no `onSpawn`/`onReturn` lifecycle.
 2. **Layer merging.** The provided layers are appended to whatever layers the parent already has. Descendant `llm` steps see the merged set.
 3. **Scoped lifetime.** Provided layers are initialized when `provide` begins and disposed when the child completes. They do not outlive the `provide` boundary.
-4. **Composable.** `provide` steps can nest. Inner `provide` layers merge with outer ones. Duplicate layer IDs follow the same resolution rules as top-level layer deduplication (see `11-memory-layer-system`).
+4. **Composable.** `provide` steps can nest. Inner `provide` layers merge with outer ones. Duplicate layer IDs follow the same resolution rules as top-level layer deduplication (see `11-context-layer-system`).
 
 ### When to Use `provide` vs `spawn`
 
 | Concern | `provide` | `spawn` |
 |---------|-----------|---------|
 | Context isolation | Shared — same ItemLog | Isolated — fresh ItemLog |
-| Memory layers | Merged with parent | Replaced or propagated via `onSpawn` |
+| Context layers | Merged with parent | Replaced or propagated via `onSpawn` |
 | Use case | "Add capabilities to this subtree" | "Run this work with a different context window" |
+
+---
+
+## Builder: `step.workflow` — JSON Workflow as a Step
+
+Runs a `WorkflowDocument` (spec 26) as a single composable step. Not a new `Step` kind — the builder returns a `StepRun` whose `execute` hydrates the document via the harness on the execution context and runs it.
+
+```typescript
+step.workflow(opts: {
+  id: string;
+  document?: WorkflowDocument;   // inline — XOR with ref
+  ref?: string;                  // named, resolved from workflows
+  tools?: Tool[];
+  layers?: ReadonlyMap<string, MemoryLayer>;
+  workflows?: ReadonlyMap<string, WorkflowDocument>;
+  subHarnesses?: ReadonlyMap<SubHarnessKind, SubHarness>;
+  uiLibraries?: ReadonlyMap<string, OutputCodec>;
+  resolveSubprocess?: (ref: string) => SubprocessAdapter | undefined;
+  isolation?: 'inherit' | 'spawn';
+}): StepRun<ContextMemory, string, string>
+```
+
+Semantics:
+
+- **Lazy resolution, memoized.** The document resolves on first execution (a `ref` may target a workflow registered after the step is built); the hydrated tree is reused across executions.
+- **Isolation.** `'inherit'` (default) runs the hydrated tree in the caller's session; `'spawn'` wraps it in `spawn({ id: `${id}-spawn` })` for a fresh context boundary.
+- **Cycle safety.** When built from a `ref`, that name seeds the subflow ancestry chain, so a self-referencing named workflow fails with `WORKFLOW_CYCLE` instead of recursing.
+- **Errors.** `EMPTY_STEP_ID`; `INVALID_WORKFLOW_SOURCE` unless exactly one of `document`/`ref` is set; at execution time `MISSING_HARNESS_CONTEXT` without `ctx.harness` and `UNKNOWN_WORKFLOW_REFERENCE` for an unregistered `ref`.
+- **Portability.** `step.workflow` lives on the main entry's `step` namespace only; the `/portable` surface exports the base namespace without it, keeping the hydrator out of restricted runtimes.
 
 ---
 
@@ -279,6 +308,6 @@ The agent harness needs to treat them differently:
 - **LLM steps** have cost implications, need model routing, produce telemetry with GenAI semantic conventions, and their output may contain tool calls that drive the next iteration.
 - **Tool steps** may have side effects, may need human approval before execution, and may need sandboxing.
 - **Run steps** are pure computation — the agent harness can retry freely, cache results, and doesn't need to track token usage.
-- **Provide steps** are structural — they configure the memory layer environment for a subtree without altering execution semantics or creating context boundaries.
+- **Provide steps** are structural — they configure the context layer environment for a subtree without altering execution semantics or creating context boundaries.
 
 A single `step()` that inspects its arguments loses type safety and forces runtime introspection. Explicit variants mean the TypeScript compiler knows exactly what you're doing.

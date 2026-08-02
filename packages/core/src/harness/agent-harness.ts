@@ -7,14 +7,7 @@ import {
   createInMemorySubprocessAdapter,
   OpenRouter,
 } from './deps/adapters';
-import type { DetachedSpawnOverrides } from './deps/interpreter';
-import {
-  collectAllTools,
-  deduplicateTools,
-  dispatchStepThroughAdapter,
-  execute,
-} from './deps/interpreter';
-import type { LayerStateStore, RecallCache } from './deps/memory';
+import type { LayerStateStore, RecallCache } from './deps/context';
 import {
   afterModelCallLayers,
   allocateBudgets,
@@ -35,7 +28,14 @@ import {
   resolveLayerTools,
   runAppendPipeline,
   storeLayers,
-} from './deps/memory';
+} from './deps/context';
+import type { DetachedSpawnOverrides } from './deps/interpreter';
+import {
+  collectAllTools,
+  deduplicateTools,
+  dispatchStepThroughAdapter,
+  execute,
+} from './deps/interpreter';
 import type {
   CheckpointStore,
   EventBroadcaster,
@@ -69,7 +69,8 @@ import type {
   Channel,
   ChannelHandle,
   Context,
-  ContextMemory,
+  ContextData,
+  ContextLayer,
   CwdState,
   DeliveryMode,
   DetachedHandle,
@@ -84,7 +85,6 @@ import type {
   ItemSchemaExtensions,
   LLMResponse,
   LlmProviderConfig,
-  MemoryLayer,
   ProjectionPolicy,
   RecallLayerOutput,
   SessionScope,
@@ -107,15 +107,18 @@ import { AgentHarnessModelCaller } from './model-call';
 
 export { createStreamIdleWatchdog } from './model-call';
 
+import { resolveContextOption } from '../builders/context-option';
 import { buildItemSchemaRegistry } from './model-schema';
 
 //#region Types
 
 interface AgentHarnessOpts<TParams extends Record<string, unknown> = Record<string, unknown>> {
   name: string;
-  initialStep?: Step<ContextMemory, string, string>;
-  /** Default memory layers applied to every context created via `createContext()` / `execute()`. */
-  memory?: MemoryLayer[];
+  initialStep?: Step<ContextData, string, string>;
+  /** Default context layers applied to every context created via `createContext()` / `execute()`. */
+  context?: ContextLayer[];
+  /** @deprecated Renamed to `context`. */
+  memory?: ContextLayer[];
   storage?: StorageAdapter;
   hooks?: AgentHooks;
   /**
@@ -316,8 +319,8 @@ function createClient(config?: LlmProviderConfig): OpenRouter | undefined {
 //#region AgentHarness
 
 /**
- * Default agent harness for executing agent steps with built-in channel, memory, and trace support.
- * Provides channel store, memory layer lifecycle, and trace export with no external dependencies.
+ * Default agent harness for executing agent steps with built-in channel, context, and trace support.
+ * Provides channel store, context layer lifecycle, and trace export with no external dependencies.
  *
  * Messages submitted via `execute()` are enqueued on a per-thread session and
  * processed by a `SessionRunner`. Consumers observe responses via the session-
@@ -350,13 +353,13 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
    * @internal
    */
   readonly stepLedgerRetention: Required<StepLedgerRetention>;
-  private readonly initialStep?: Step<ContextMemory, string, string>;
+  private readonly initialStep?: Step<ContextData, string, string>;
   /** Harness-wide tool pool merged into every context's `unifiedTools`. */
   private readonly harnessTools: ReadonlyArray<Tool>;
-  /** @internal Memory layers configured for this harness. Exposed non-private
+  /** @internal Context layers configured for this harness. Exposed non-private
    *  so free functions in `runtime/durable/` (checkpoint/restore) can read it
    *  without friend-class gymnastics. Do not access from outside core. */
-  readonly _memory?: MemoryLayer[];
+  readonly _contextLayers?: ContextLayer[];
   private readonly client?: OpenRouter;
   private readonly channelStore: ChannelStore;
   /** Re-entrant `run()` depth per root context id — see `executeClosingChannels`. */
@@ -419,7 +422,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     this.stepLedgerRetention = resolveStepLedgerRetention(opts.stepLedgerRetention);
     this.initialStep = opts.initialStep;
     this.harnessTools = opts.tools ?? [];
-    this._memory = opts.memory;
+    this._contextLayers = resolveContextOption(opts);
     this.callModelOverride = opts._testCallModel;
     this.client = opts._testCallModel ? undefined : createClient(opts.llm);
     this.channelStore = new ChannelStore();
@@ -427,7 +430,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     this.layerStateStore =
       opts.layerStateStore ??
       createLayerStateStore((layerId, hook, error) => {
-        console.warn(`[noetic] memory layer '${layerId}' ${hook} error:`, error);
+        console.warn(`[noetic] context layer '${layerId}' ${hook} error:`, error);
       });
     this.recallCache = createRecallCache();
     this.defaultDeliveryMode = opts.defaultDeliveryMode ?? 'next-turn';
@@ -563,7 +566,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
         threadId,
         agentName: this.config.name,
         // The first queued message in a batch establishes `resourceId` /
-        // `state` / `memory` for the turn. If multiple messages are drained
+        // `state` / `context` for the turn. If multiple messages are drained
         // together (queue flush), later messages' values for these fields
         // are ignored. `deliveryMode` is resolved per-message at enqueue
         // time and doesn't apply here.
@@ -578,7 +581,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
             threadId,
             resourceId: perTurnOptions.resourceId,
             state: perTurnOptions.state,
-            memory: perTurnOptions.memory,
+            context: resolveContextOption(perTurnOptions),
             _broadcaster: session.runner.broadcaster,
           });
           const ext = frameworkCast<Context & SessionCtxExtension>(ctx);
@@ -659,7 +662,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
 
   //#endregion
 
-  async run<I, O>(s: Step<ContextMemory, I, O>, input: I, ctx: Context): Promise<O> {
+  async run<I, O>(s: Step<ContextData, I, O>, input: I, ctx: Context): Promise<O> {
     // Populate the unified tool pool when an embedder drives a step directly on
     // a bare `createContext()` context (the turn pipeline does this per turn).
     // Without it, steps that resolve tools dynamically from `ctx.unifiedTools`
@@ -670,8 +673,8 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
         ...this.harnessTools,
       ]);
     }
-    // Hydrate/recall/persist memory on the bare `run()` path too (issue #48):
-    // configuring `memory` + `storage` must "just work" without going through
+    // Hydrate/recall/persist context on the bare `run()` path too (issue #48):
+    // configuring `context` + `storage` must "just work" without going through
     // `execute()`/`seedSessionHistory`. Idempotent — see `ensureLayersInit`.
     await this.ensureLayersInit(ctx);
     return this.executeClosingChannels(s, input, ctx);
@@ -679,7 +682,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
 
   /** Run all layer `init` hooks before the first step executes. Per spec 11,
    *  init MUST complete before any recall fires so layer state is populated. */
-  private async initAndRun<I, O>(s: Step<ContextMemory, I, O>, input: I, ctx: Context): Promise<O> {
+  private async initAndRun<I, O>(s: Step<ContextData, I, O>, input: I, ctx: Context): Promise<O> {
     await this.ensureLayersInit(ctx);
     return this.executeClosingChannels(s, input, ctx);
   }
@@ -693,7 +696,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
    * close anything.
    */
   private async executeClosingChannels<I, O>(
-    s: Step<ContextMemory, I, O>,
+    s: Step<ContextData, I, O>,
     input: I,
     ctx: Context,
   ): Promise<O> {
@@ -741,7 +744,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   }
 
   detachedSpawn<I, O>(
-    s: Step<ContextMemory, I, O>,
+    s: Step<ContextData, I, O>,
     input: I,
     parentCtx: Context,
     overrides?: DetachedSpawnOverrides,
@@ -759,7 +762,9 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     state?: unknown;
     threadId?: string;
     resourceId?: string;
-    memory?: MemoryLayer[];
+    context?: ContextLayer[];
+    /** @deprecated Renamed to `context`. */
+    memory?: ContextLayer[];
     /**
      * Initial cwd for the new context. When set, takes precedence over both
      * the parent snapshot and the harness root cwd — used by worktree
@@ -768,11 +773,14 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     cwdInit?: string;
     _broadcaster?: EventBroadcaster;
   }): Context {
-    const { memory: memoryLayers, cwdInit, ...rest } = opts ?? {};
-    const effectiveMemory = memoryLayers ?? this._memory;
+    const resolved = opts ?? {};
+    // `ContextImpl` takes the layers as `layers`, so both option spellings are
+    // dropped from `rest` rather than spread through under the wrong name.
+    const { context: _context, memory: _memory, cwdInit, ...rest } = resolved;
+    const effectiveLayers = resolveContextOption(resolved) ?? this._contextLayers;
     const itemSchemas = buildItemSchemaRegistry({
       base: this.itemSchemas,
-      layers: effectiveMemory,
+      layers: effectiveLayers,
     });
     /* The execution id is chosen here rather than inside ContextImpl so the ledger
      * can be keyed to it — the ledger's storage keys and `ctx.id` must agree for a
@@ -783,7 +791,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       id: executionId,
       harness: this,
       channelStore: this.channelStore,
-      layers: effectiveMemory,
+      layers: effectiveLayers,
       itemSchemas,
       cwdState: resolveContextCwdState(this.rootCwdState, opts?.parent, cwdInit),
       // Without this `ctx.checkpoint()` is inert, and the boundaries below never
@@ -855,7 +863,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     });
   }
 
-  async initLayers(layers: MemoryLayer[], ctx: Context, storage: StorageAdapter): Promise<void> {
+  async initLayers(layers: ContextLayer[], ctx: Context, storage: StorageAdapter): Promise<void> {
     await initLayers({
       layers,
       ctx: this.toExecCtx(ctx),
@@ -865,7 +873,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   }
 
   async recallLayers(
-    layers: MemoryLayer[],
+    layers: ContextLayer[],
     input: string,
     ctx: Context,
   ): Promise<RecallLayerOutput[]> {
@@ -881,7 +889,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   }
 
   /** Allocate per-layer recall budgets from the harness projection policy. */
-  private layerBudgets(layers: MemoryLayer[]): Map<string, number> {
+  private layerBudgets(layers: ContextLayer[]): Map<string, number> {
     const policy = this.config.projection ?? DEFAULT_PROJECTION;
     const { allocations } = allocateBudgets({
       layers,
@@ -898,7 +906,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   }
 
   async recallLayersAtomic(
-    layers: MemoryLayer[],
+    layers: ContextLayer[],
     input: string,
     ctx: Context,
     budgets: Map<string, number>,
@@ -916,7 +924,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   }
 
   async recallLayersEventual(
-    layers: MemoryLayer[],
+    layers: ContextLayer[],
     input: string,
     ctx: Context,
     budgets: Map<string, number>,
@@ -936,7 +944,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
 
   /**
    * Compute the items array that would be sent to the model on the next turn —
-   * the same arrangement `executeLLM` builds: harness-level memory layers'
+   * the same arrangement `executeLLM` builds: harness-level context layers'
    * recall outputs concatenated with the session's accumulated history.
    *
    * Read-mostly: `recallLayers` writes layer-state snapshots to
@@ -956,7 +964,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     const ctx = this.createContext({
       items: historyItems,
       threadId,
-      memory: this._memory,
+      context: this._contextLayers,
     });
     const layers = ctx.layers ?? [];
     if (layers.length === 0) {
@@ -974,7 +982,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     });
   }
 
-  async storeLayers(layers: MemoryLayer[], response: LLMResponse, ctx: Context): Promise<void> {
+  async storeLayers(layers: ContextLayer[], response: LLMResponse, ctx: Context): Promise<void> {
     const storage = this.config.storage;
     if (!storage) {
       return;
@@ -990,7 +998,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     });
   }
 
-  async disposeLayers(layers: MemoryLayer[], ctx: Context): Promise<void> {
+  async disposeLayers(layers: ContextLayer[], ctx: Context): Promise<void> {
     // Drop the init guard so a deliberate dispose→run cycle re-hydrates from
     // storage (disposeLayers also clears the layer-state store for this id).
     this.initializedExecutions.delete(ctx.id);
@@ -1034,7 +1042,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
    * checkpoint via `CheckpointStore.clear()` and start a fresh execution.
    *
    * `opts` is the `createContext`-shaped wiring the host attached to the
-   * original context (broadcaster, parent, state, memory overrides). A
+   * original context (broadcaster, parent, state, context overrides). A
    * snapshot recovers data, not live objects — pass the same wiring here or
    * the resumed run gets an undecorated context and whatever depended on that
    * wiring (event streaming, mid-turn injection) stops working without
@@ -1070,7 +1078,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
 
   /**
    * Cancel an execution: abort `ctx` and every live descendant context, then
-   * run the memory-layer teardown for each (spec 09, Cancellation).
+   * run the context-layer teardown for each (spec 09, Cancellation).
    *
    * The abort itself fans out top-down and synchronously — `ctx.abort()`
    * cascades into every live fork path and spawn child, so no corner of the
@@ -1145,7 +1153,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   }
 
   async beforeToolCall(
-    layers: MemoryLayer[],
+    layers: ContextLayer[],
     toolName: string,
     toolArgs: unknown,
     ctx: Context,
@@ -1166,7 +1174,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   }
 
   async afterModelCall(
-    layers: MemoryLayer[],
+    layers: ContextLayer[],
     response: LLMResponse,
     ctx: Context,
   ): Promise<SteeringDecision> {
@@ -1185,7 +1193,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   }
 
   async projectHistory(
-    layers: MemoryLayer[],
+    layers: ContextLayer[],
     items: ReadonlyArray<Item>,
     ctx: Context,
   ): Promise<ReadonlyArray<Item>> {
@@ -1202,7 +1210,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   }
 
   async runAppendPipeline(
-    layers: MemoryLayer[],
+    layers: ContextLayer[],
     items: Item[],
     ctx: Context,
   ): Promise<{
@@ -1240,7 +1248,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       timing: 'immediate' | 'batched';
       scope: 'self' | 'slot-after' | 'all';
     }[],
-    layers: MemoryLayer[],
+    layers: ContextLayer[],
     ctx: Context,
     budgets: Map<string, number>,
     query?: string,

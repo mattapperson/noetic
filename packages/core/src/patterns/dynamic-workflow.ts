@@ -3,7 +3,7 @@
  * then hydrates and runs it within the same harness session.
  */
 
-import type { ContextMemory, MemoryLayer } from '@noetic-tools/memory';
+import type { ContextData, ContextLayer } from '@noetic-tools/context';
 import type {
   AgentHarnessContract,
   Context,
@@ -55,6 +55,7 @@ A WorkflowNode is one of:
 - { "kind": "loop", "id": "<unique>", "body": <WorkflowNode>, "until": { "kind": "maxSteps", "n": <number> } }
 - { "kind": "branch", "id": "<unique>", "routes": [{ "match": "<substring>", "target": <WorkflowNode> }], "default": <WorkflowNode> }
 - { "kind": "spawn", "id": "<unique>", "child": <WorkflowNode> }
+- { "kind": "subflow", "id": "<unique>", "document": { "version": 1, "root": <WorkflowNode> } } (an inline sub-workflow run as one step; only emit the inline form — named refs require a registry this planner does not provide)
 - { "kind": "claude-code"|"codex"|"opencode"|"pi", "id": "<unique>", "prompt": "<turn prompt>", "settings": { "model": "<optional>", "permissionMode": "<optional>" } }
 
 SubHarness nodes (claude-code, codex, opencode, pi) delegate a turn to an external coding agent; only emit one if a matching harness adapter is registered for the workflow.
@@ -80,7 +81,7 @@ Respond with ONLY the JSON document, no markdown fences or explanation.`;
  * @param opts.maxRevisions - Retries with error feedback on validation failure. Default: 3.
  * @returns A `Step` that dynamically plans and executes.
  */
-export function dynamicWorkflow(opts: DynamicWorkflowOpts): Step<ContextMemory, string, string> {
+export function dynamicWorkflow(opts: DynamicWorkflowOpts): Step<ContextData, string, string> {
   const model = opts.model ?? DEFAULT_MODEL;
   const maxDepth = opts.maxDepth ?? DEFAULT_MAX_DEPTH;
   const maxRevisions = opts.maxRevisions ?? DEFAULT_MAX_REVISIONS;
@@ -165,11 +166,13 @@ export interface ParseAndRunWorkflowOpts {
   input?: string;
   maxDepth?: number;
   /**
-   * Memory layers the document's `provide` / `spawn` nodes may reference by name.
+   * Context layers the document's `provide` / `spawn` nodes may reference by name.
    * Without a registry those nodes resolve to NO layers rather than failing, so a
    * host that runs layer-bearing workflows must pass its layers here.
    */
-  layers?: ReadonlyMap<string, MemoryLayer>;
+  layers?: ReadonlyMap<string, ContextLayer>;
+  /** Named sub-workflows the document's `subflow` nodes may reference via `ref`. */
+  workflows?: ReadonlyMap<string, WorkflowDocument>;
 }
 
 /**
@@ -201,6 +204,7 @@ export async function parseAndRunWorkflow(opts: ParseAndRunWorkflowOpts): Promis
     tools: buildToolMap(opts.tools),
     executeStep,
     layers: opts.layers,
+    workflows: opts.workflows,
   };
 
   const hydrated = hydrateWorkflow(parseResult.doc, hydrationCtx);

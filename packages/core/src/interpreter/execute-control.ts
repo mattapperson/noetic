@@ -2,7 +2,7 @@
  * Control-flow step handlers: branch, fork, loop, every.
  */
 
-import type { ContextMemory } from '@noetic-tools/memory';
+import type { ContextData } from '@noetic-tools/context';
 import type {
   Channel,
   Context,
@@ -31,10 +31,10 @@ import { getContextChannelStore, isContextImpl, isMutableContext } from './typeg
 
 //#region branch
 
-export async function executeBranch<TMemory, I, O>(
-  step: StepBranch<TMemory, I, O>,
+export async function executeBranch<TContext, I, O>(
+  step: StepBranch<TContext, I, O>,
   input: I,
-  ctx: Context<TMemory>,
+  ctx: Context<TContext>,
   executeStep: ExecuteStepFn,
 ): Promise<O> {
   const selected = await step.route(input, ctx);
@@ -43,7 +43,7 @@ export async function executeBranch<TMemory, I, O>(
     // the input passes through. Callers must ensure I is compatible with O.
     return frameworkCast<O>(input);
   }
-  return executeStep<TMemory, I, O>(selected, input, ctx);
+  return executeStep<TContext, I, O>(selected, input, ctx);
 }
 
 //#endregion
@@ -79,7 +79,7 @@ function createChildContexts(ctx: Context, count: number, stepId: string): Conte
         channelStore,
         cwdState: snapshotCwdState(ctx),
         // Layers and the harness tool pool cross the fork boundary: without
-        // them an `llm` step inside a path would run with no memory
+        // them an `llm` step inside a path would run with no context
         // projection and no layer tools, and a nested `spawn` would have no
         // parent layers to inherit. Per-path layer STATE is still isolated —
         // see `createForkLayerBridge`.
@@ -90,7 +90,7 @@ function createChildContexts(ctx: Context, count: number, stepId: string): Conte
 }
 
 /**
- * Runs the memory-layer child-boundary lifecycle around each forked path.
+ * Runs the context-layer child-boundary lifecycle around each forked path.
  *
  * A fork path is a child execution exactly like a spawn child: `onSpawn`
  * seeds its layer state from the parent's, and `onReturn` merges the path's
@@ -121,7 +121,7 @@ function createForkLayerBridge({
   childContexts,
   opts,
 }: {
-  ctx: Context<ContextMemory>;
+  ctx: Context<ContextData>;
   childContexts: ContextImpl[];
   opts?: ExecuteForkOpts;
 }): ForkLayerBridge | null {
@@ -192,18 +192,18 @@ function withForkLayers(
     ]),
   );
 
-  return async <TMemory, I, O>(
-    step: Step<TMemory, I, O>,
+  return async <TContext, I, O>(
+    step: Step<TContext, I, O>,
     input: I,
-    childCtx: Context<TMemory>,
+    childCtx: Context<TContext>,
   ): Promise<O> => {
     const index = indexByContext.get(frameworkCast<Context>(childCtx));
     if (index === undefined) {
-      return executeStep<TMemory, I, O>(step, input, childCtx);
+      return executeStep<TContext, I, O>(step, input, childCtx);
     }
     await bridge.seed(index);
     try {
-      const output = await executeStep<TMemory, I, O>(step, input, childCtx);
+      const output = await executeStep<TContext, I, O>(step, input, childCtx);
       return await bridge.settle(index, output);
     } finally {
       bridge.cleanup(index);
@@ -217,14 +217,14 @@ export interface ExecuteForkOpts {
   itemSchemas?: ItemSchemaRegistry;
 }
 
-export async function executeFork<TMemory, I, O>(
-  step: StepFork<TMemory, I, O>,
+export async function executeFork<TContext, I, O>(
+  step: StepFork<TContext, I, O>,
   input: I,
-  ctx: Context<TMemory>,
+  ctx: Context<TContext>,
   rawExecuteStep: ExecuteStepFn,
   opts?: ExecuteForkOpts,
 ): Promise<O> {
-  const baseCtx = frameworkCast<Context<ContextMemory>>(ctx);
+  const baseCtx = frameworkCast<Context<ContextData>>(ctx);
   const paths = step.paths(input, ctx);
 
   if (paths.length === 0) {
@@ -377,11 +377,11 @@ function classifyResults<T>(
   };
 }
 
-async function executeAll<TMemory, I, O>(
-  step: StepForkAll<TMemory, I, O>,
-  paths: Step<TMemory, I, O>[],
+async function executeAll<TContext, I, O>(
+  step: StepForkAll<TContext, I, O>,
+  paths: Step<TContext, I, O>[],
   _input: I,
-  ctx: Context<TMemory>,
+  ctx: Context<TContext>,
   childContexts: ContextImpl[],
   executeStep: ExecuteStepFn,
   concurrency: number,
@@ -402,10 +402,10 @@ async function executeAll<TMemory, I, O>(
       });
     }
     try {
-      return await executeStep<TMemory, I, O>(
+      return await executeStep<TContext, I, O>(
         path,
         _input,
-        frameworkCast<Context<TMemory>>(childContexts[i]),
+        frameworkCast<Context<TContext>>(childContexts[i]),
       );
     } catch (e) {
       const isCancellation = isNoeticError(e) && e.noeticError.kind === 'cancelled';
@@ -445,16 +445,16 @@ async function executeAll<TMemory, I, O>(
   return step.merge(results, ctx);
 }
 
-async function executeRace<TMemory, I, O>(
-  step: StepForkRace<TMemory, I, O>,
-  paths: Step<TMemory, I, O>[],
+async function executeRace<TContext, I, O>(
+  step: StepForkRace<TContext, I, O>,
+  paths: Step<TContext, I, O>[],
   input: I,
-  ctx: Context<TMemory>,
+  ctx: Context<TContext>,
   childContexts: ContextImpl[],
   executeStep: ExecuteStepFn,
   concurrency: number,
 ): Promise<O> {
-  const raceBaseCtx = frameworkCast<Context<ContextMemory>>(ctx);
+  const raceBaseCtx = frameworkCast<Context<ContextData>>(ctx);
   return new Promise<O>((resolve, reject) => {
     let settled = false;
     let failedCount = 0;
@@ -468,7 +468,11 @@ async function executeRace<TMemory, I, O>(
       }
       const i = nextIndex++;
 
-      executeStep<TMemory, I, O>(paths[i], input, frameworkCast<Context<TMemory>>(childContexts[i]))
+      executeStep<TContext, I, O>(
+        paths[i],
+        input,
+        frameworkCast<Context<TContext>>(childContexts[i]),
+      )
         .then((result) => {
           if (settled) {
             return;
@@ -520,18 +524,18 @@ async function executeRace<TMemory, I, O>(
   });
 }
 
-async function executeSettle<TMemory, I, O>(
-  step: StepForkSettle<TMemory, I, O>,
-  paths: Step<TMemory, I, O>[],
+async function executeSettle<TContext, I, O>(
+  step: StepForkSettle<TContext, I, O>,
+  paths: Step<TContext, I, O>[],
   input: I,
-  ctx: Context<TMemory>,
+  ctx: Context<TContext>,
   childContexts: ContextImpl[],
   executeStep: ExecuteStepFn,
   concurrency: number,
 ): Promise<O> {
   const tasks = paths.map(
     (path, i) => () =>
-      executeStep<TMemory, I, O>(path, input, frameworkCast<Context<TMemory>>(childContexts[i])),
+      executeStep<TContext, I, O>(path, input, frameworkCast<Context<TContext>>(childContexts[i])),
   );
   const settled = await runWithConcurrency(tasks, concurrency);
 
@@ -595,11 +599,11 @@ async function recvInboxWithTimeout(ctx: Context, step: InboxFields): Promise<st
   }
 }
 
-function prepareNextInput<TMemory, I, O>(
-  step: StepLoop<TMemory, I, O>,
+function prepareNextInput<TContext, I, O>(
+  step: StepLoop<TContext, I, O>,
   lastOutput: O,
   verdict: Verdict,
-  ctx: Context<TMemory>,
+  ctx: Context<TContext>,
 ): I {
   if (step.prepareNext) {
     return step.prepareNext(lastOutput, verdict, ctx);
@@ -609,13 +613,13 @@ function prepareNextInput<TMemory, I, O>(
   return frameworkCast<I>(lastOutput);
 }
 
-export async function executeLoop<TMemory, I, O>(
-  step: StepLoop<TMemory, I, O>,
+export async function executeLoop<TContext, I, O>(
+  step: StepLoop<TContext, I, O>,
   input: I,
-  ctx: Context<TMemory>,
+  ctx: Context<TContext>,
   executeStep: ExecuteStepFn,
 ): Promise<O> {
-  const baseCtx = frameworkCast<Context<ContextMemory>>(ctx);
+  const baseCtx = frameworkCast<Context<ContextData>>(ctx);
   let currentInput: I = input;
   let lastOutput: O | undefined;
   let lastText = '';
@@ -768,11 +772,11 @@ export async function executeLoop<TMemory, I, O>(
 
 //#region every
 
-interface ParkContext<TMemory> {
+interface ParkContext<TContext> {
   ms: number;
   jitter: number;
   wakeOn?: Channel<unknown>;
-  ctx: Context<TMemory>;
+  ctx: Context<TContext>;
   channelStore?: ChannelStore;
 }
 
@@ -795,7 +799,7 @@ function nextParkMs(ms: number, jitter: number): number {
  * context is aborted. Always resolves; never throws (cancellation surfaces on
  * the next iteration's abort check).
  */
-function park<TMemory>(parkCtx: ParkContext<TMemory>): Promise<void> {
+function park<TContext>(parkCtx: ParkContext<TContext>): Promise<void> {
   const duration = nextParkMs(parkCtx.ms, parkCtx.jitter);
 
   return new Promise<void>((resolve) => {
@@ -857,7 +861,7 @@ function park<TMemory>(parkCtx: ParkContext<TMemory>): Promise<void> {
   });
 }
 
-function recordIterationError<TMemory>(ctx: Context<TMemory>, error: unknown): void {
+function recordIterationError<TContext>(ctx: Context<TContext>, error: unknown): void {
   const message = error instanceof Error ? error.message : String(error);
   const stack = error instanceof Error && error.stack ? error.stack : '';
   ctx.span.addEvent('every.iteration.error', {
@@ -885,10 +889,10 @@ function throwCancelled(reason: string | undefined): never {
  * The body's output is discarded — `every` runs forever and does not accumulate
  * iteration outputs. Only ever returns by throwing on cancellation or `fail`.
  */
-export async function executeEvery<TMemory, I, O>(
-  step: StepEvery<TMemory, I, O>,
+export async function executeEvery<TContext, I, O>(
+  step: StepEvery<TContext, I, O>,
   input: I,
-  ctx: Context<TMemory>,
+  ctx: Context<TContext>,
   executeStep: ExecuteStepFn,
 ): Promise<O> {
   const onError = step.onError ?? 'continue';

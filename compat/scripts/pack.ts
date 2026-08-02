@@ -1,6 +1,6 @@
 /**
  * Build `@noetic-tools/core` (with its `@noetic-tools/types` and
- * `@noetic-tools/memory` dependencies) and pack them into publishable tarballs
+ * `@noetic-tools/context` dependencies) and pack them into publishable tarballs
  * under `compat/vendor/`.
  *
  * `npm pack` applies each package's `publishConfig` (notably the `exports` →
@@ -27,7 +27,7 @@ interface PackTarget {
 }
 
 // Order matters: @noetic-tools/core is built with tsc (its workspace deps are
-// NOT bundled), so it imports @noetic-tools/types and @noetic-tools/memory at
+// NOT bundled), so it imports @noetic-tools/types and @noetic-tools/context at
 // runtime. Build/pack those first so core's build resolves them and the
 // external consumer can install them as real tarballs.
 const TARGETS: ReadonlyArray<PackTarget> = [
@@ -36,8 +36,8 @@ const TARGETS: ReadonlyArray<PackTarget> = [
     out: 'noetic-types.tgz',
   },
   {
-    dir: 'packages/memory',
-    out: 'noetic-memory.tgz',
+    dir: 'packages/context',
+    out: 'noetic-context.tgz',
   },
   {
     dir: 'packages/core',

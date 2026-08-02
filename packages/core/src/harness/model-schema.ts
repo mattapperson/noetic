@@ -1,4 +1,4 @@
-import type { MemoryLayer } from '@noetic-tools/memory';
+import type { ContextLayer } from '@noetic-tools/context';
 import type { Item, ItemSchemaExtensions, ItemSchemaRegistry, Tool } from '@noetic-tools/types';
 import { mergeExtensions } from '@noetic-tools/types';
 
@@ -19,7 +19,7 @@ function mergeItemSchemaExtensions(
   return result;
 }
 
-function collectLayerItemSchemaExtensions(layers: ReadonlyArray<MemoryLayer> | undefined) {
+function collectLayerItemSchemaExtensions(layers: ReadonlyArray<ContextLayer> | undefined) {
   return mergeItemSchemaExtensions(layers?.map((layer) => layer.itemSchemas) ?? []);
 }
 
@@ -33,7 +33,7 @@ export function buildItemSchemaRegistry({
   tools,
 }: {
   base: ItemSchemaRegistry;
-  layers?: ReadonlyArray<MemoryLayer>;
+  layers?: ReadonlyArray<ContextLayer>;
   tools?: ReadonlyArray<Tool>;
 }): ItemSchemaRegistry {
   return base

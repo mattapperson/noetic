@@ -223,7 +223,7 @@ interface InputMessageItem {
 | Field | Type | Description |
 |---|---|---|
 | `type` | `'message'` | Discriminant |
-| `role` | `'user' \| 'system' \| 'developer'` | Message author. `developer` is used for framework-injected context (e.g., from memory layers), distinct from `system` (agent instructions). |
+| `role` | `'user' \| 'system' \| 'developer'` | Message author. `developer` is used for framework-injected context (e.g., from context layers), distinct from `system` (agent instructions). |
 | `content` | `InputTextPart[]` | Input text content segments |
 | `status` | `string` | Lifecycle status. Includes `failed` as a Noetic extension beyond the Open Responses spec. |
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import type { ContextMemory } from '@noetic-tools/memory';
+import type { ContextData } from '@noetic-tools/context';
 import type { SettleResult, Step } from '@noetic-tools/types';
 import { isNoeticError, NoeticErrorImpl } from '@noetic-tools/types';
 import { loop } from '../../src/builders/loop-builder';
@@ -12,7 +12,7 @@ import { makeMockHarness } from '../_helpers';
 describe('Error propagation', () => {
   describe('loop error handling', () => {
     it('default propagates error', async () => {
-      const loopStep = loop<ContextMemory, string, string>({
+      const loopStep = loop<ContextData, string, string>({
         id: 'test-loop',
         steps: [
           {
@@ -33,7 +33,7 @@ describe('Error propagation', () => {
 
     it('onError retry re-runs', async () => {
       let attempts = 0;
-      const loopStep = loop<ContextMemory, string, string>({
+      const loopStep = loop<ContextData, string, string>({
         id: 'retry-loop',
         steps: [
           {
@@ -66,7 +66,7 @@ describe('Error propagation', () => {
 
     it('until predicate throw treated as stop', async () => {
       let bodyCount = 0;
-      const loopStep = loop<ContextMemory, string, string>({
+      const loopStep = loop<ContextData, string, string>({
         id: 'pred-throw',
         steps: [
           {
@@ -93,7 +93,7 @@ describe('Error propagation', () => {
 
   describe('fork error handling', () => {
     it('all mode throws fork_partial on failure', async () => {
-      const step: Step<ContextMemory, string, string> = {
+      const step: Step<ContextData, string, string> = {
         kind: 'fork',
         id: 'fail-fork',
         mode: 'all',
@@ -126,7 +126,7 @@ describe('Error propagation', () => {
     });
 
     it('settle mode never throws', async () => {
-      const step: Step<ContextMemory, string, string> = {
+      const step: Step<ContextData, string, string> = {
         kind: 'fork',
         id: 'settle-fork',
         mode: 'settle',
@@ -155,7 +155,7 @@ describe('Error propagation', () => {
     });
 
     it('race mode all-fail throws fork_partial', async () => {
-      const step: Step<ContextMemory, string, string> = {
+      const step: Step<ContextData, string, string> = {
         kind: 'fork',
         id: 'race-fail',
         mode: 'race',

@@ -22,6 +22,7 @@ const NODE_KINDS = [
   'loop',
   'sequence',
   'every',
+  'subflow',
   'claude-code',
   'codex',
   'opencode',

@@ -54,7 +54,7 @@ export function isTextPart(part: { type: string }): part is {
   return 'text' in part && typeof part.text === 'string';
 }
 
-/** Extracts assistant/output text from items for memory buffering (one string per message). */
+/** Extracts assistant/output text from items for context buffering (one string per message). */
 export function collectOutputText(items: ReadonlyArray<Item>): string[] {
   return items
     .filter(isAssistantMessage)
@@ -68,7 +68,7 @@ export function collectOutputText(items: ReadonlyArray<Item>): string[] {
 }
 
 /**
- * Extracts text from INPUT items for memory buffering: concatenates the text
+ * Extracts text from INPUT items for context buffering: concatenates the text
  * content parts of message items (user `input_text` and any text parts) and
  * appends the `output` of `function_call_output` (tool result) items. Empty
  * strings are dropped.

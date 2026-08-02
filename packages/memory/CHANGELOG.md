@@ -1,3 +1,26 @@
+## @noetic-tools/memory-v3.1.0 (2026-08-02)
+
+* feat: rename the memory layer system to context layers ([123810f](https://github.com/mattapperson/noetic/commit/123810f))
+
+## @noetic-tools/memory-v3.0.0 (2026-08-02)
+
+* fix: harden step.workflow caching and plan-layer state loading ([3b10168](https://github.com/mattapperson/noetic/commit/3b10168))
+* feat(memory)!: rebuild plan layer on WorkflowDocument with named workflows ([caf5c91](https://github.com/mattapperson/noetic/commit/caf5c91))
+
+### BREAKING CHANGE
+
+* FlowSchema/FlowNode and validateFlow/walkFlow/flowDepth
+are removed from @noetic-tools/memory and @noetic-tools/core
+(packages/memory/src/memory/flow-schema.ts and
+packages/core/src/patterns/flow.ts deleted). PlanState.planTree is now a
+WorkflowDocument and PlanState gains workflows.
+PlanMemoryConfig.maxTreeDepth is renamed maxDepth; plan/setPlanTree
+takes { document } instead of { tree }. Persisted legacy plan trees are
+reset to null on load.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01YaQitK6c9QsjU518ry8uX4
+
 ## @noetic-tools/memory-v2.0.0 (2026-07-26)
 
 * feat(core): batch read on StorageAdapter, so ledger restore is not an N+1 ([6bb7b87](https://github.com/mattapperson/noetic/commit/6bb7b87)), closes [#58](https://github.com/mattapperson/noetic/issues/58)

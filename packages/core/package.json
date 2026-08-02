@@ -1,8 +1,8 @@
 {
   "name": "@noetic-tools/core",
-  "version": "3.2.0",
+  "version": "4.0.0",
   "type": "module",
-  "description": "Step primitives, interpreter, runtime, and memory layer contract for Noetic agents.",
+  "description": "Step primitives, interpreter, runtime, and context layer contract for Noetic agents.",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -70,7 +70,7 @@
     }
   },
   "dependencies": {
-    "@noetic-tools/memory": "workspace:*",
+    "@noetic-tools/context": "workspace:*",
     "@noetic-tools/types": "workspace:*",
     "@openrouter/agent": "^0.6.0",
     "zod": "^4.0.0"

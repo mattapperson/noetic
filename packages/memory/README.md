@@ -1,24 +1,32 @@
 # @noetic-tools/memory
 
-The memory layer system for Noetic agents.
+> **Deprecated — renamed to [`@noetic-tools/context`](https://www.npmjs.com/package/@noetic-tools/context).**
 
-A *memory layer* is a composable unit that shapes what an agent sees in its
-context window — capping history, summarising old turns, tracking a plan,
-exposing tool results, redacting items, and steering tool calls. This package
-provides:
+The memory layer system was renamed to the **context layer** system. These
+layers assemble the model's context window — recall, budget allocation, history
+projection, the item-append pipeline, steering — which is what they are for;
+"memory" only ever described what a few of them happened to store.
 
-- The **`MemoryLayer` contract** — the interface every layer implements.
-- The **lifecycle, budget, and projection machinery** that converges layer
-  outputs into the assembled LLM context (`assembleView`, `allocateBudgets`,
-  layer state stores, scoping).
-- The **built-in layers**: working memory, history window, observational
-  memory, plan, temporal, steering, file reference, static content, durable
-  task state, and the tool memory layer.
+This package is now a thin re-export of `@noetic-tools/context` and receives no
+further changes. Everything resolves identically through either package, so
+nothing breaks by staying here — but new code should not.
 
-It depends only on [`@noetic-tools/types`](https://www.npmjs.com/package/@noetic-tools/types).
-[`@noetic-tools/core`](https://www.npmjs.com/package/@noetic-tools/core) builds
-on it and re-exports its public surface, so application code typically imports
-memory layers from `@noetic-tools/core`.
+## Migrating
+
+Change the import specifier:
+
+```diff
+- import { workingMemory, type MemoryLayer } from '@noetic-tools/memory';
++ import { workingMemoryContext, type ContextLayer } from '@noetic-tools/context';
+```
+
+The old names (`MemoryLayer`, `workingMemory`, `planMemory`, …) survive as
+deprecated aliases in `@noetic-tools/context` too, so the specifier change alone
+is a valid first step.
+
+Most applications never import this package directly —
+[`@noetic-tools/core`](https://www.npmjs.com/package/@noetic-tools/core)
+re-exports the whole surface.
 
 ## License
 

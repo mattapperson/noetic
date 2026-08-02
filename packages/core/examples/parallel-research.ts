@@ -8,7 +8,7 @@
  * function that combines results into a multi-section summary.
  */
 
-import type { ContextMemory } from '@noetic-tools/memory';
+import type { ContextData } from '@noetic-tools/context';
 import type { StepForkAll } from '@noetic-tools/types';
 import { fork } from '../src/builders/control-flow-builders';
 import { spawn } from '../src/builders/spawn-builder';
@@ -54,15 +54,15 @@ const PERSPECTIVES = [
 //#region Agent Builder
 
 /** Builds a parallel research agent that forks into perspective-specific sub-agents. */
-export function buildParallelResearchAgent(): StepForkAll<ContextMemory, string, string> {
-  return fork<ContextMemory, string, string>({
+export function buildParallelResearchAgent(): StepForkAll<ContextData, string, string> {
+  return fork<ContextData, string, string>({
     id: 'parallel-research',
     mode: 'all',
     paths: () =>
       PERSPECTIVES.map((perspective) =>
-        spawn<ContextMemory, string, string>({
+        spawn<ContextData, string, string>({
           id: `research-${perspective.id}`,
-          child: step.llm<ContextMemory, string, string>({
+          child: step.llm<ContextData, string, string>({
             id: `llm-${perspective.id}`,
             model: 'openai/gpt-4o',
             instructions: perspective.instructions,

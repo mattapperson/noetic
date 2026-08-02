@@ -44,7 +44,7 @@ export interface HarnessResponse {
   };
   readonly cost?: number;
   readonly text: string;
-  /** Per-memory-layer context window breakdown captured at the last callModel of this execution. */
+  /** Per-context-layer context window breakdown captured at the last callModel of this execution. */
   readonly lastLayerUsage?: LastLayerUsage;
 }
 

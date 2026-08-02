@@ -6,7 +6,7 @@ const SITE_URL = 'https://noetic.tools';
 const SITE_NAME = 'Noetic';
 const SITE_TAGLINE = 'Build AI agents you’d actually trust in production.';
 const SITE_DESCRIPTION =
-  'Build AI agents you’d actually trust in production. Composable TypeScript primitives, memory that keeps token costs flat, and evals that catch regressions before users do.';
+  'Build AI agents you’d actually trust in production. Composable TypeScript primitives, context that keeps token costs flat, and evals that catch regressions before users do.';
 
 export const metadata = {
   metadataBase: new URL(SITE_URL),
@@ -24,7 +24,7 @@ export const metadata = {
     'AI orchestration',
     'multi-agent systems',
     'ReAct',
-    'memory layers',
+    'context layers',
     'durable execution',
     'agent evals',
   ],

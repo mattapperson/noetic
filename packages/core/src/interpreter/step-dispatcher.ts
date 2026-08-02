@@ -1,4 +1,4 @@
-import type { ContextMemory } from '@noetic-tools/memory';
+import type { ContextData } from '@noetic-tools/context';
 import type {
   Context,
   DetachedHandle,
@@ -21,8 +21,8 @@ import { executeNoAdapter } from './execute';
  *
  * @internal
  */
-export function resolveStepAdapter<TMemory, I, O>(
-  step: Step<TMemory, I, O>,
+export function resolveStepAdapter<TContext, I, O>(
+  step: Step<TContext, I, O>,
   callOverride: SubprocessAdapter | undefined,
   fallback: SubprocessAdapter,
 ): SubprocessAdapter {
@@ -91,7 +91,7 @@ export interface DetachedSpawnOverrides {
  */
 export function dispatchStepThroughAdapter<I, O>(
   h: StepDispatchHandle,
-  s: Step<ContextMemory, I, O>,
+  s: Step<ContextData, I, O>,
   input: I,
   parentCtx: Context,
   overrides?: DetachedSpawnOverrides,

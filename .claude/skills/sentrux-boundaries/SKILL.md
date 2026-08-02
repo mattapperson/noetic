@@ -15,7 +15,7 @@ Validates architectural rules defined in `.sentrux/rules.toml` via the `plugin:s
    - Classify as **`[[boundaries]]` violation** (has a `reason` string from the TOML) or **layer_direction drift** (implicit, from the layer ordering).
    - For a handful of representative violations (no more than 5, highest-signal first), read the offending file and 20 lines of context around the import statement.
    - Suggest a fix:
-     - **Memory → core interpreter/runtime** (acyclicity + tree-shakability): offer to move the referenced helper inline into `packages/memory/src/` or duplicate a narrow utility to avoid pulling the larger module.
+     - **Context → core interpreter/runtime** (acyclicity + tree-shakability): offer to move the referenced helper inline into `packages/context/src/` or duplicate a narrow utility to avoid pulling the larger module.
      - **Sibling-package imports** (e.g. eval → code-agent): offer to move the shared code into `@noetic-tools/core` or refactor the caller to not need it.
      - **Layer_direction drift within cli/**: offer to invert the dependency (e.g. extract the shared type into `cli-foundations`) or accept the drift and adjust `specs/22-cli-architecture.md` if the intent has changed.
 4. Group the report by `reason` field so the user sees the architectural theme, not just file pairs.
@@ -25,4 +25,4 @@ Validates architectural rules defined in `.sentrux/rules.toml` via the `plugin:s
 - Do not auto-fix without asking. List the suggestions and let the user pick.
 - If `check_rules` returns zero violations, say so in one line. Don't invent issues.
 - Cross-reference `specs/00-overview.md` and `specs/22-cli-architecture.md` when explaining why a rule exists — the spec is the primary source of intent, `rules.toml` just enforces it.
-- Boundaries with `memory layers must be tree-shakable` in their reason are the highest-priority; flag those at the top of the report.
+- Boundaries with `context layers must be tree-shakable` in their reason are the highest-priority; flag those at the top of the report.

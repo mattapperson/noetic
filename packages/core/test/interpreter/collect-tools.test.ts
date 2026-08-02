@@ -154,7 +154,7 @@ describe('collectAllTools', () => {
       child: llmStep('s1', [
         t,
       ]),
-      memory: [],
+      context: [],
     };
     const result = collectAllTools(provide);
     expect(result).toHaveLength(1);
@@ -273,7 +273,7 @@ describe('collectAllTools', () => {
               ]),
             ],
           },
-          memory: [],
+          context: [],
         },
       ],
       until: () => ({

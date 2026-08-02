@@ -1,9 +1,9 @@
 export type {
-  ContextMemory,
+  ContextConfig,
+  ContextData,
+  ContextLayer,
   ExecutionContext,
-  MemoryConfig,
-  MemoryLayer,
-} from '@noetic-tools/memory';
+} from '@noetic-tools/context';
 export type {
   AgentHarnessContract,
   Context,

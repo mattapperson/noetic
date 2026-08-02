@@ -1,4 +1,4 @@
-import type { StorageAdapter } from '@noetic-tools/memory';
+import type { StorageAdapter } from '@noetic-tools/context';
 import { frameworkCast } from '@noetic-tools/types';
 
 //#region Public API

@@ -11,17 +11,17 @@ Adaptive Plans combine LLM-powered plan generation with automatic error-driven r
 
 ```ts validate=none
 function adaptivePlan<O, A = unknown>(opts: {
-  planner: Step<ContextMemory, string, PlanNode>;
-  agents: Record<string, (prompt: string) => Step<ContextMemory, string, A>>;
+  planner: Step<ContextData, string, PlanNode>;
+  agents: Record<string, (prompt: string) => Step<ContextData, string, A>>;
   constraints?: PlanConstraints;
   maxRevisions: number;
   executeStep?: ExecuteStepFn;
-}): Step<ContextMemory, string, O>
+}): Step<ContextData, string, O>
 ```
 
 | Parameter | Type | Purpose |
 |---|---|---|
-| `planner` | `Step<TMemory, string, PlanNode>` | A step that takes a task description and returns a `PlanNode` tree |
+| `planner` | `Step<TContext, string, PlanNode>` | A step that takes a task description and returns a `PlanNode` tree |
 | `agents` | `Record<string, (prompt: string) => Step>` | Agent factories keyed by role name |
 | `constraints` | `PlanConstraints` | Optional constraints on execution |
 | `maxRevisions` | `number` | Maximum number of plan revisions before giving up |

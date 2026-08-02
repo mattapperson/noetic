@@ -9,7 +9,7 @@ import { CODE_PRE_STYLE } from '@/lib/tui-theme';
 
 const TABS = [
   'ReAct reasoning loop',
-  '5-layer memory in 10 lines',
+  '5-layer context in 10 lines',
   'Sandboxed harness',
   'Extend any primitive',
 ] as const;
@@ -18,7 +18,7 @@ type Tab = (typeof TABS)[number];
 
 const TAB_FILES: Record<Tab, string> = {
   'ReAct reasoning loop': 'react-loop.ts',
-  '5-layer memory in 10 lines': 'memory-setup.ts',
+  '5-layer context in 10 lines': 'context-setup.ts',
   'Sandboxed harness': 'harness-adapters.ts',
   'Extend any primitive': 'custom-step.ts',
 };
@@ -39,25 +39,25 @@ const reasonAndAct = loop({
 });
 // Observe → Think → Act — just primitives composed`,
 
-  '5-layer memory in 10 lines': `import {
+  '5-layer context in 10 lines': `import {
   AgentHarness,
   durableTaskState,
-  observationalMemory,
-  planMemory,
-  temporalMemory,
-  workingMemory,
+  observationalContext,
+  planContext,
+  temporalContext,
+  workingMemoryContext,
 } from '@noetic-tools/core';
 
 const harness = new AgentHarness({
   name: 'agent',
   initialStep: agent,
   params: {},
-  memory: [
-    workingMemory({ scope: 'thread' }),
-    observationalMemory({ bufferThreshold: 4_000, observer }),
-    planMemory({ maxTreeDepth: 3 }),
+  context: [
+    workingMemoryContext({ scope: 'thread' }),
+    observationalContext({ bufferThreshold: 4_000, observer }),
+    planContext({ maxTreeDepth: 3 }),
     durableTaskState(),
-    temporalMemory(),
+    temporalContext(),
   ],
 });`,
 
@@ -74,7 +74,7 @@ const harness = new AgentHarness({
   name: 'sandboxed-agent',
   initialStep: agent,
   params: {},
-  fs,           // tools, skill discovery, memory layers all route here
+  fs,           // tools, skill discovery, context layers all route here
   shell,        // every sub-process the agent spawns goes through this
   initialCwd: '/work',
   llm: { provider: 'openrouter', apiKey: process.env.OPENROUTER_API_KEY },
@@ -83,15 +83,15 @@ const harness = new AgentHarness({
   'Extend any primitive': `import { step } from '@noetic-tools/core';
 import type { Context } from '@noetic-tools/core';
 
-interface SessionMemory {
+interface SessionContext {
   userId: string;
   sessionId: string;
 }
 
-const logStep = step.run<SessionMemory, string, void>({
+const logStep = step.run<SessionContext, string, void>({
   id: 'audit-log',
-  execute: async (input, ctx: Context<SessionMemory>) => {
-    console.log(\`[\${ctx.memory.sessionId}] user=\${ctx.memory.userId} msg=\${input}\`);
+  execute: async (input, ctx: Context<SessionContext>) => {
+    console.log(\`[\${ctx.context.sessionId}] user=\${ctx.context.userId} msg=\${input}\`);
   },
 });`,
 };
@@ -124,7 +124,7 @@ export function CodePeek(): ReactNode {
           letterSpacing: '-0.01em',
         }}
       >
-        Reasoning loop in 15 lines, full memory stack in 10. No boilerplate.
+        Reasoning loop in 15 lines, full context stack in 10. No boilerplate.
       </h2>
       <p
         style={{

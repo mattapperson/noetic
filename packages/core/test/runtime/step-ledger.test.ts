@@ -2,8 +2,8 @@
 // recorded instead of re-running those steps. See specs/23a-step-level-resume.
 
 import { describe, expect, it } from 'bun:test';
-import type { StorageAdapter } from '@noetic-tools/memory';
-import type { Context, ContextMemory } from '@noetic-tools/types';
+import type { StorageAdapter } from '@noetic-tools/context';
+import type { Context, ContextData } from '@noetic-tools/types';
 import { isNoeticConfigError } from '@noetic-tools/types';
 import { fork } from '../../src/builders/control-flow-builders';
 import { loop } from '../../src/builders/loop-builder';
@@ -22,7 +22,7 @@ import { createInMemoryStorage } from '../../src/runtime/in-memory-storage';
 import { until } from '../../src/until/predicates';
 
 type Storage = ReturnType<typeof createInMemoryStorage>;
-type RunStep = ReturnType<typeof step.run<ContextMemory, string, string>>;
+type RunStep = ReturnType<typeof step.run<ContextData, string, string>>;
 
 function durableHarness(storage: Storage, retention?: StepLedgerRetention): AgentHarness {
   return new AgentHarness({
@@ -38,7 +38,7 @@ function durableHarness(storage: Storage, retention?: StepLedgerRetention): Agen
 
 /** A step that records every dispatch, so a re-run is observable. */
 function countingStep(id: string, calls: string[], out: (input: string) => string): RunStep {
-  return step.run<ContextMemory, string, string>({
+  return step.run<ContextData, string, string>({
     id,
     execute: async (input: string) => {
       calls.push(id);
@@ -50,7 +50,7 @@ function countingStep(id: string, calls: string[], out: (input: string) => strin
 /** Compose children the way the workflow hydrator does — a `run` step that dispatches
  *  each child through the harness. There is no standalone `sequence` builder. */
 function sequenceOf(harness: AgentHarness, id: string, children: RunStep[]): RunStep {
-  return step.run<ContextMemory, string, string>({
+  return step.run<ContextData, string, string>({
     id,
     execute: async (input: string, execCtx) => {
       let current = input;
@@ -128,7 +128,7 @@ describe('step ledger', () => {
     const storage = createInMemoryStorage();
     const harness = durableHarness(storage);
     let nth = 0;
-    const tree = step.run<ContextMemory, string, string>({
+    const tree = step.run<ContextData, string, string>({
       id: 'nondet',
       execute: async () => {
         nth += 1;
@@ -148,10 +148,10 @@ describe('step ledger', () => {
     const storage = createInMemoryStorage();
     const harness = durableHarness(storage);
     const seen: string[] = [];
-    const tree = loop<ContextMemory, string, string>({
+    const tree = loop<ContextData, string, string>({
       id: 'spin',
       steps: [
-        step.run<ContextMemory, string, string>({
+        step.run<ContextData, string, string>({
           id: 'body',
           execute: async (input: string) => {
             seen.push(input);
@@ -179,15 +179,15 @@ describe('step ledger', () => {
   it('gives sibling fork paths distinct keys', async () => {
     const storage = createInMemoryStorage();
     const harness = durableHarness(storage);
-    const tree = fork<ContextMemory, string, string>({
+    const tree = fork<ContextData, string, string>({
       id: 'fan',
       mode: 'all',
       paths: () => [
-        step.run<ContextMemory, string, string>({
+        step.run<ContextData, string, string>({
           id: 'leg-a',
           execute: async () => 'x',
         }),
-        step.run<ContextMemory, string, string>({
+        step.run<ContextData, string, string>({
           id: 'leg-b',
           execute: async () => 'y',
         }),
@@ -278,7 +278,7 @@ describe('step ledger', () => {
     const storage = createInMemoryStorage();
     const harness = durableHarness(storage);
     let attempts = 0;
-    const tree = step.run<ContextMemory, string, string>({
+    const tree = step.run<ContextData, string, string>({
       id: 'flaky',
       execute: async () => {
         attempts += 1;

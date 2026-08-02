@@ -9,7 +9,7 @@
  * and an expressive component vocabulary; the model composes the screen.
  */
 
-import type { ContextMemory } from '@noetic-tools/core';
+import type { ContextData } from '@noetic-tools/core';
 import { AgentHarness, step, tool } from '@noetic-tools/core';
 import { createLibrary, defineComponent, openUi, openUiSurface } from '@noetic-tools/openui';
 import { z } from 'zod';
@@ -498,7 +498,7 @@ const INSTRUCTIONS = [
   '`PriceBreakdown`, and a `Button("Back to stays", Action([@ToAssistant("Show me Annapolis stays")]))`.',
 ].join('\n');
 
-export const stays = step.llm<ContextMemory, string, unknown>({
+export const stays = step.llm<ContextData, string, unknown>({
   id: 'stays-ui',
   model: 'anthropic/claude-sonnet-4.5',
   instructions: INSTRUCTIONS,
@@ -520,7 +520,7 @@ export function createStaysHarness(): {
     name: 'stays',
     initialStep: stays,
     params: {},
-    memory: [
+    context: [
       surface,
     ],
     llm: {

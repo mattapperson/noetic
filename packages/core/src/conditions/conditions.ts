@@ -1,5 +1,5 @@
-import type { ContextMemory, StorageAdapter } from '@noetic-tools/memory';
-import { storageGetMany } from '@noetic-tools/memory';
+import type { ContextData, StorageAdapter } from '@noetic-tools/context';
+import { storageGetMany } from '@noetic-tools/context';
 import type { Context, Step } from '@noetic-tools/types';
 import { createMessage, extractAssistantText, trackUsage } from '@noetic-tools/types';
 import { z } from 'zod';
@@ -10,18 +10,18 @@ import { cosineSimilarity } from './cosine-similarity';
 
 export type Condition<I> = (input: I, ctx: Context) => Promise<boolean>;
 
-export interface WhenClause<TMemory = ContextMemory, I = unknown, O = unknown> {
+export interface WhenClause<TContext = ContextData, I = unknown, O = unknown> {
   readonly kind: 'when';
   readonly condition: Condition<I>;
-  readonly step: Step<TMemory, I, O>;
+  readonly step: Step<TContext, I, O>;
 }
 
-export interface OtherwiseClause<TMemory = ContextMemory, I = unknown, O = unknown> {
+export interface OtherwiseClause<TContext = ContextData, I = unknown, O = unknown> {
   readonly kind: 'otherwise';
-  readonly step: Step<TMemory, I, O>;
+  readonly step: Step<TContext, I, O>;
 }
 
-type Clause<TMemory, I, O> = WhenClause<TMemory, I, O> | OtherwiseClause<TMemory, I, O>;
+type Clause<TContext, I, O> = WhenClause<TContext, I, O> | OtherwiseClause<TContext, I, O>;
 
 interface VectorCache {
   memory: readonly number[][] | null;
@@ -96,10 +96,10 @@ async function getLabelVectors(
  * @param step - Step to execute when the condition matches.
  * @returns A `WhenClause` for use in `semanticRoute`.
  */
-export function when<TMemory = ContextMemory, I = unknown, O = unknown>(
+export function when<TContext = ContextData, I = unknown, O = unknown>(
   condition: Condition<I>,
-  step: Step<TMemory, I, O>,
-): WhenClause<TMemory, I, O> {
+  step: Step<TContext, I, O>,
+): WhenClause<TContext, I, O> {
   return {
     kind: 'when',
     condition,
@@ -114,9 +114,9 @@ export function when<TMemory = ContextMemory, I = unknown, O = unknown>(
  * @param step - Step to execute when no prior `when` clause matches.
  * @returns An `OtherwiseClause` for use in `semanticRoute`.
  */
-export function otherwise<TMemory = ContextMemory, I = unknown, O = unknown>(
-  step: Step<TMemory, I, O>,
-): OtherwiseClause<TMemory, I, O> {
+export function otherwise<TContext = ContextData, I = unknown, O = unknown>(
+  step: Step<TContext, I, O>,
+): OtherwiseClause<TContext, I, O> {
   return {
     kind: 'otherwise',
     step,
@@ -127,9 +127,9 @@ export function otherwise<TMemory = ContextMemory, I = unknown, O = unknown>(
 
 //#region Route Builders
 
-function isOtherwise<TMemory, I, O>(
-  clause: Clause<TMemory, I, O>,
-): clause is OtherwiseClause<TMemory, I, O> {
+function isOtherwise<TContext, I, O>(
+  clause: Clause<TContext, I, O>,
+): clause is OtherwiseClause<TContext, I, O> {
   return clause.kind === 'otherwise';
 }
 
@@ -141,10 +141,10 @@ function isOtherwise<TMemory, I, O>(
  * @param clauses - Ordered `WhenClause` and optional trailing `OtherwiseClause`.
  * @returns A route function suitable for `branch({ route })`.
  */
-export function semanticRoute<TMemory = ContextMemory, I = unknown, O = unknown>(
-  ...clauses: Clause<TMemory, I, O>[]
-): (input: I, ctx: Context) => Promise<Step<TMemory, I, O> | null> {
-  return async (input: I, ctx: Context): Promise<Step<TMemory, I, O> | null> => {
+export function semanticRoute<TContext = ContextData, I = unknown, O = unknown>(
+  ...clauses: Clause<TContext, I, O>[]
+): (input: I, ctx: Context) => Promise<Step<TContext, I, O> | null> {
+  return async (input: I, ctx: Context): Promise<Step<TContext, I, O> | null> => {
     for (const clause of clauses) {
       if (isOtherwise(clause)) {
         return clause.step;
@@ -162,21 +162,21 @@ export function semanticRoute<TMemory = ContextMemory, I = unknown, O = unknown>
 
 //#region semanticSwitch
 
-interface SemanticSwitchSimple<TMemory, I, O> {
+interface SemanticSwitchSimple<TContext, I, O> {
   embed: EmbedFn;
-  cases: Record<string, Step<TMemory, I, O>>;
-  default?: Step<TMemory, I, O>;
+  cases: Record<string, Step<TContext, I, O>>;
+  default?: Step<TContext, I, O>;
   threshold?: number;
   cache?: StorageAdapter;
 }
 
-interface SemanticSwitchAdvanced<TMemory, I, O> {
+interface SemanticSwitchAdvanced<TContext, I, O> {
   embed: EmbedFn;
   cases: {
     labels: string | string[];
-    step: Step<TMemory, I, O>;
+    step: Step<TContext, I, O>;
   }[];
-  default?: Step<TMemory, I, O>;
+  default?: Step<TContext, I, O>;
   threshold?: number;
   cache?: StorageAdapter;
 }
@@ -188,24 +188,24 @@ interface SemanticSwitchAdvanced<TMemory, I, O> {
  * @param opts - Simple form with `Record<string, Step>` cases, or advanced form with multi-label cases.
  * @returns A route function suitable for `branch({ route })`.
  */
-export function semanticSwitch<TMemory = ContextMemory, I = unknown, O = unknown>(
-  opts: SemanticSwitchSimple<TMemory, I, O>,
-): (input: I, ctx: Context) => Promise<Step<TMemory, I, O> | null>;
+export function semanticSwitch<TContext = ContextData, I = unknown, O = unknown>(
+  opts: SemanticSwitchSimple<TContext, I, O>,
+): (input: I, ctx: Context) => Promise<Step<TContext, I, O> | null>;
 
 /** @public */
-export function semanticSwitch<TMemory = ContextMemory, I = unknown, O = unknown>(
-  opts: SemanticSwitchAdvanced<TMemory, I, O>,
-): (input: I, ctx: Context) => Promise<Step<TMemory, I, O> | null>;
+export function semanticSwitch<TContext = ContextData, I = unknown, O = unknown>(
+  opts: SemanticSwitchAdvanced<TContext, I, O>,
+): (input: I, ctx: Context) => Promise<Step<TContext, I, O> | null>;
 
-export function semanticSwitch<TMemory = ContextMemory, I = unknown, O = unknown>(
-  opts: SemanticSwitchSimple<TMemory, I, O> | SemanticSwitchAdvanced<TMemory, I, O>,
-): (input: I, ctx: Context) => Promise<Step<TMemory, I, O> | null> {
+export function semanticSwitch<TContext = ContextData, I = unknown, O = unknown>(
+  opts: SemanticSwitchSimple<TContext, I, O> | SemanticSwitchAdvanced<TContext, I, O>,
+): (input: I, ctx: Context) => Promise<Step<TContext, I, O> | null> {
   const threshold = opts.threshold ?? 0.7;
 
   // Normalize to advanced form
   const cases: {
     labels: string[];
-    step: Step<TMemory, I, O>;
+    step: Step<TContext, I, O>;
   }[] = Array.isArray(opts.cases)
     ? opts.cases.map((c) => ({
         labels: Array.isArray(c.labels)
@@ -230,7 +230,7 @@ export function semanticSwitch<TMemory = ContextMemory, I = unknown, O = unknown
     storage: opts.cache,
   };
 
-  return async (input: I, _ctx: Context): Promise<Step<TMemory, I, O> | null> => {
+  return async (input: I, _ctx: Context): Promise<Step<TContext, I, O> | null> => {
     const text = serializeInput(input);
     const [inputVector] = await opts.embed([
       text,

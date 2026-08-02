@@ -1,3 +1,7 @@
+## @noetic-tools/openui-v2.1.0 (2026-08-02)
+
+* feat: rename the memory layer system to context layers ([123810f](https://github.com/mattapperson/noetic/commit/123810f))
+
 ## @noetic-tools/openui-v2.0.0 (2026-07-26)
 
 * feat(core): batch read on StorageAdapter, so ledger restore is not an N+1 ([6bb7b87](https://github.com/mattapperson/noetic/commit/6bb7b87)), closes [#58](https://github.com/mattapperson/noetic/issues/58)

@@ -16,8 +16,8 @@ type Step<I, O> =
   | { kind: 'tool';    id: string; tool: Tool; args?: unknown }
   | { kind: 'branch';  id: string; route: (input: I, ctx: Context) => Step<I, O> | null }
   | { kind: 'fork';    id: string; mode: 'all' | 'race' | 'settle'; paths: (input: I, ctx: Context) => Step<I, O>[]; merge?: MergeFn<O>; concurrency?: number }
-  | { kind: 'spawn';   id: string; child: Step<I, O>; memory?: MemoryLayer[]; timeout?: number; subprocess?: SubprocessAdapter }
-  | { kind: 'provide'; id: string; child: Step<I, O>; memory: MemoryConfig | MemoryLayer[] }
+  | { kind: 'spawn';   id: string; child: Step<I, O>; context?: ContextLayer[]; timeout?: number; subprocess?: SubprocessAdapter }
+  | { kind: 'provide'; id: string; child: Step<I, O>; context: ContextConfig | ContextLayer[] }
   | { kind: 'loop';    id: string; body: Step<I, O>; until: Until; maxIterations?: number; maxHistorySize?: number; prepareNext?: (output: O, verdict: Verdict, ctx: Context) => I; onError?: (error: NoeticError, ctx: Context) => 'retry' | 'skip' | 'abort' }
 ```
 
@@ -33,7 +33,7 @@ Each variant is specified in its own feature spec:
 | `branch` | `03-control-flow` | Conditional routing |
 | `fork` | `03-control-flow` | Parallel execution |
 | `spawn` | `04-spawn` | Child execution with context boundary |
-| `provide` | `02-step-variants` | Scoped memory layer injection |
+| `provide` | `02-step-variants` | Scoped context layer injection |
 | `loop` | `05-loop-and-until` | Repeating execution with termination |
 
 ## The `execute()` Interpreter
@@ -76,7 +76,7 @@ This means `Step<I, O>` is an honest contract: input `I`, output `O`, always. Th
 - `Context` type referenced here is defined in `07-context-and-event-log`
 - `RetryPolicy`, `ModelParams`, `Tool` are defined in `02-step-variants`
 - `MergeFn`, `SettleResult` are defined in `03-control-flow`
-- `MemoryLayer` is defined in `11-memory-layer-system`
+- `ContextLayer` is defined in `11-context-layer-system`
 - `Until`, `Verdict` are defined in `05-loop-and-until`
 - `NoeticError` is defined in `09-error-model`
 - `SubprocessAdapter` is defined in `08-runtime`; per-step override semantics and the shared step registry live in `04-spawn`, and durable execution in `23-durable-execution`.

@@ -1,13 +1,13 @@
 # AgentHarness Interface
 
-> **Depends On:** `01-step-type` (Step), `07-context-and-event-log` (Context, Item, LLMResponse), `06-channels` (Channel, ExternalChannel), `11-memory-layer-system` (MemoryLayer, StorageAdapter), `10-observability` (Span)
+> **Depends On:** `01-step-type` (Step), `07-context-and-event-log` (Context, Item, LLMResponse), `06-channels` (Channel, ExternalChannel), `11-context-layer-system` (ContextLayer, StorageAdapter), `10-observability` (Span)
 > **Exports:** `AgentHarness`, `AgentConfig`, `FsAdapter`, `FsStats`, `createLocalFsAdapter`, `ShellAdapter`, `ShellExecOptions`, `ShellExecResult`, `createLocalShellAdapter`, `SubprocessAdapter`, `SubprocessSpec`, `SubprocessHandle`, `SubprocessExitInfo`, `SubprocessCapabilities`, `SubprocessIpcChannel`, `SubprocessServer`, `SubprocessKillSignal`, `createLocalSubprocessAdapter`, `setHarness()`, `setTraceExporter()`
 
 ---
 
 ## Filesystem Abstraction
 
-The `FsAdapter` interface abstracts all filesystem operations used by the agent harness, tools, memory layers, and skill discovery. This enables sandboxed, virtualized, or remote filesystem backends without changing agent code.
+The `FsAdapter` interface abstracts all filesystem operations used by the agent harness, tools, context layers, and skill discovery. This enables sandboxed, virtualized, or remote filesystem backends without changing agent code.
 
 ```typescript
 interface FsStats {
@@ -42,7 +42,7 @@ interface FsAdapter {
 
 ## Shell Abstraction
 
-The `ShellAdapter` interface abstracts all shell command execution used by the agent harness, tools, memory layers, and skill processing. This enables sandboxed or emulated shell backends (e.g., `just-bash`) without changing agent code.
+The `ShellAdapter` interface abstracts all shell command execution used by the agent harness, tools, context layers, and skill processing. This enables sandboxed or emulated shell backends (e.g., `just-bash`) without changing agent code.
 
 ```typescript
 interface ShellExecOptions {
@@ -102,7 +102,7 @@ Other embedders of `@noetic-tools/core` keep the raw shell semantics unless they
 
 ## Subprocess Abstraction
 
-The `SubprocessAdapter` interface abstracts long-lived child-process lifecycle and inter-process RPC. Tools, memory layers, and CLI features that need to spawn helper processes (agent-ci runs, daemons, sub-agents, RPC services) call through this adapter rather than `node:child_process` or `node:net` directly. This enables the harness to run inside non-POSIX runtimes (Cloudflare Worker isolates, Durable Objects, remote workers) where a "subprocess" maps to a service binding or a separately-deployed worker.
+The `SubprocessAdapter` interface abstracts long-lived child-process lifecycle and inter-process RPC. Tools, context layers, and CLI features that need to spawn helper processes (agent-ci runs, daemons, sub-agents, RPC services) call through this adapter rather than `node:child_process` or `node:net` directly. This enables the harness to run inside non-POSIX runtimes (Cloudflare Worker isolates, Durable Objects, remote workers) where a "subprocess" maps to a service binding or a separately-deployed worker.
 
 The interface speaks in opaque ids and capability flags rather than POSIX-specific concepts (pid, signals) so non-POSIX backends are first-class.
 
@@ -235,7 +235,7 @@ Callers may attach arbitrary additional keys via `request.metadata`; the adapter
 
 ## The `AgentHarness` Interface
 
-The agent harness is the engine. It's behind an interface with methods covering execution, session-scoped stream accessors, context management, channels, durability, memory layer lifecycle, cancellation, and tracing.
+The agent harness is the engine. It's behind an interface with methods covering execution, session-scoped stream accessors, context management, channels, durability, context layer lifecycle, cancellation, and tracing.
 
 ```typescript
 interface AgentHarness<TParams extends Record<string, unknown> = Record<string, unknown>> {
@@ -316,7 +316,7 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
     state?: unknown;
     threadId?: string;
     resourceId?: string;
-    memory?: MemoryLayer[];
+    context?: ContextLayer[];
     cwdInit?: string;             // override cwdState.cwd for this context
   }): Context;
 
@@ -333,14 +333,14 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
   getChannelHandle<T>(channel: ExternalChannel<T>, executionId: string): ChannelHandle<T>;
   getChannelStream<T>(channel: ExternalChannel<T>, executionId: string): AsyncIterable<T>;
 
-  // Memory layer lifecycle (see 11-memory-layer-system for hook semantics)
-  initLayers(layers: MemoryLayer[], ctx: Context, storage: StorageAdapter): Promise<void>;
-  recallLayers(layers: MemoryLayer[], input: string, ctx: Context): Promise<RecallLayerOutput[]>;
+  // Context layer lifecycle (see 11-context-layer-system for hook semantics)
+  initLayers(layers: ContextLayer[], ctx: Context, storage: StorageAdapter): Promise<void>;
+  recallLayers(layers: ContextLayer[], input: string, ctx: Context): Promise<RecallLayerOutput[]>;
   previewRequestItems(scope?: SessionScope): Promise<ReadonlyArray<Item>>;
-  storeLayers(layers: MemoryLayer[], response: LLMResponse, ctx: Context): Promise<void>;
-  beforeToolCall(layers: MemoryLayer[], toolName: string, toolArgs: unknown, ctx: Context): Promise<SteeringDecision>;
-  afterModelCall(layers: MemoryLayer[], response: LLMResponse, ctx: Context): Promise<SteeringDecision>;
-  disposeLayers(layers: MemoryLayer[], ctx: Context): Promise<void>;
+  storeLayers(layers: ContextLayer[], response: LLMResponse, ctx: Context): Promise<void>;
+  beforeToolCall(layers: ContextLayer[], toolName: string, toolArgs: unknown, ctx: Context): Promise<SteeringDecision>;
+  afterModelCall(layers: ContextLayer[], response: LLMResponse, ctx: Context): Promise<SteeringDecision>;
+  disposeLayers(layers: ContextLayer[], ctx: Context): Promise<void>;
 
   // Durability
   /**
@@ -374,7 +374,7 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
   // Observability (see 10-observability)
   createSpan(name: string, parent: Span | null): Span;
 
-  // Layer state access (used by ToolExecutionContext.memory)
+  // Layer state access (used by ToolExecutionContext.context)
   getLayerState<T>(executionId: string, layerId: string): T | undefined;
   setLayerState<T>(executionId: string, layerId: string, state: T): void;
 }
@@ -417,7 +417,7 @@ interface DetachedHandle<O> {
 - a long-lived `EventBroadcaster` that relays SDK and framework events across all turns,
 - an `itemLog` snapshot that carries conversation history from turn to turn.
 
-Before the first turn runs, the harness walks the step tree to collect all tools from LLM steps, merges them with layer-provided tools, and deduplicates by name. This **unified tool set** is stored on the turn's execution context and sent with every LLM call for prompt cache efficiency. Individual steps restrict the model to a subset via the Open Responses `tool_choice: { type: "allowed_tools" }` parameter. `run(step, input, ctx)` does the same lazily: when an embedder drives a step directly on a bare `createContext()` context, `run` populates that context's unified tool set (the step's tools plus the harness tools) if it is not already set, so directly-driven steps — and any sub-agents they spawn — see the harness toolset. `run` also runs the configured memory layers' `init()` hooks once per context (keyed by `ctx.id`) before executing, so a harness built with `memory` + `storage` rehydrates prior layer state, recalls it, and persists updates on the bare `run()` path — the same guarantee the session/`execute()` path gives. The init is idempotent: nested or repeated `run()` calls and the session turn path never re-init (which would clobber accumulated in-memory state by re-hydrating from storage); a deliberate `disposeLayers(ctx)` clears the guard so a later `run()` re-hydrates.
+Before the first turn runs, the harness walks the step tree to collect all tools from LLM steps, merges them with layer-provided tools, and deduplicates by name. This **unified tool set** is stored on the turn's execution context and sent with every LLM call for prompt cache efficiency. Individual steps restrict the model to a subset via the Open Responses `tool_choice: { type: "allowed_tools" }` parameter. `run(step, input, ctx)` does the same lazily: when an embedder drives a step directly on a bare `createContext()` context, `run` populates that context's unified tool set (the step's tools plus the harness tools) if it is not already set, so directly-driven steps — and any sub-agents they spawn — see the harness toolset. `run` also runs the configured context layers' `init()` hooks once per context (keyed by `ctx.id`) before executing, so a harness built with `context` + `storage` rehydrates prior layer state, recalls it, and persists updates on the bare `run()` path — the same guarantee the session/`execute()` path gives. The init is idempotent: nested or repeated `run()` calls and the session turn path never re-init (which would clobber accumulated in-layer state by re-hydrating from storage); a deliberate `disposeLayers(ctx)` clears the guard so a later `run()` re-hydrates.
 
 A session's runner starts turns lazily whenever the queue goes non-empty while the runner is idle. Each turn:
 
@@ -545,7 +545,7 @@ interface ExecuteOptions {
   threadId?: string;
   resourceId?: string;
   state?: unknown;
-  memory?: MemoryLayer[];
+  context?: ContextLayer[];
   /** Per-call override of the harness default. */
   deliveryMode?: DeliveryMode;
 }
@@ -569,16 +569,16 @@ type DeliveryMode = 'next-turn' | 'between-rounds' | 'interrupt';
 - **`send`/`recv`/`tryRecv` on the agent harness** means the agent harness controls channel storage. `AgentHarness` uses a `Map`. `DurableAgentHarness` uses a message broker. The `Context` methods are thin wrappers: `ctx.send(ch, v)` calls `harness.send(ch, v, ctx)`. `ctx.tryRecv(ch)` calls `harness.tryRecv(ch, ctx)`.
 - **`getChannelHandle`** returns a `ChannelHandle<T>` for external code to write into a running execution. The handle is typed, lifecycle-aware, and scoped to the root execution. External handles route to the correct execution via `executionId`. `AgentHarness` uses in-process handles; `DurableAgentHarness` translates to durable signals (e.g., Temporal signals, Inngest events).
 - **`getChannelStream`** is the read-side counterpart: an `AsyncIterable<T>` over values the agent sends on an external channel. Delivery is channel-scoped; `executionId` bounds only the subscription's lifetime (it ends when that root execution completes, and a never-run id yields a harness-lifetime stream). Per-mode delivery and lifecycle semantics are specified in `06-channels` (External Subscriptions).
-- **Memory layer methods** manage the full lifecycle defined in `11-memory-layer-system`. `initLayers` runs `init()` sequentially. `recallLayers` runs `recall()` in slot order and returns `Item[]`. `storeLayers` runs `store()` concurrently via `Promise.allSettled` and receives `LLMResponse` (with items + usage). `disposeLayers` runs `dispose()` in reverse order. Error handling follows the per-hook policy.
-- **`previewRequestItems(scope?)`** returns the `Item[]` that would be sent to the model on the next turn for `scope.threadId` (or the default thread): the session's accumulated history with harness-level memory-layer recall outputs prepended via `assembleView`. Read-mostly: `recallLayers` writes layer-state snapshots to `layerStateStore` exactly as a real turn would, so successive previews remain consistent with what the next real turn produces. Does not allocate a session for unknown thread ids — returns an empty history in that case.
+- **Context layer methods** manage the full lifecycle defined in `11-context-layer-system`. `initLayers` runs `init()` sequentially. `recallLayers` runs `recall()` in slot order and returns `Item[]`. `storeLayers` runs `store()` concurrently via `Promise.allSettled` and receives `LLMResponse` (with items + usage). `disposeLayers` runs `dispose()` in reverse order. Error handling follows the per-hook policy.
+- **`previewRequestItems(scope?)`** returns the `Item[]` that would be sent to the model on the next turn for `scope.threadId` (or the default thread): the session's accumulated history with harness-level context-layer recall outputs prepended via `assembleView`. Read-mostly: `recallLayers` writes layer-state snapshots to `layerStateStore` exactly as a real turn would, so successive previews remain consistent with what the next real turn produces. Does not allocate a session for unknown thread ids — returns an empty history in that case.
 - **`beforeToolCall(layers, toolName, toolArgs, ctx)`** runs each layer's `beforeToolCall` hook sequentially in slot order before a tool is executed. Returns a `SteeringDecision` — `Allow` proceeds normally, `Deny` short-circuits and blocks the tool call, `Guide` returns guidance text to the model. Short-circuits on the first `Deny`. When multiple layers return `Guide`, their guidance is concatenated.
 - **`afterModelCall(layers, response, ctx)`** runs each layer's `afterModelCall` hook sequentially in slot order immediately after the LLM responds. Returns a `SteeringDecision` — `Allow` proceeds normally, `Deny` throws `steering_denied`, `Guide` injects guidance as a developer message and retries the model call (up to 3 times). Short-circuits on the first `Deny`.
-- **`fs`** exposes the `FsAdapter` that the harness was constructed with (or the default `createLocalFsAdapter()`). All filesystem operations — CLI tools (read, write, edit, ls, grep, find), skill discovery, and memory layers — use `ctx.harness.fs` rather than importing `fs/promises` directly. This enables sandboxed or virtualized filesystems (e.g., in-memory FS for testing, remote FS for cloud execution). `Context` exposes a `readonly fs: FsAdapter` getter that delegates to the harness. `ToolExecutionContext` and memory `ExecutionContext` also expose `readonly fs: FsAdapter`.
+- **`fs`** exposes the `FsAdapter` that the harness was constructed with (or the default `createLocalFsAdapter()`). All filesystem operations — CLI tools (read, write, edit, ls, grep, find), skill discovery, and context layers — use `ctx.harness.fs` rather than importing `fs/promises` directly. This enables sandboxed or virtualized filesystems (e.g., in-memory FS for testing, remote FS for cloud execution). `Context` exposes a `readonly fs: FsAdapter` getter that delegates to the harness. `ToolExecutionContext` and memory `ExecutionContext` also expose `readonly fs: FsAdapter`.
 - **`config`** exposes the `AgentConfig<TParams>` that the harness was constructed with. Steps and tools access harness params via `ctx.harness.config.params`.
-- **`memory` on AgentConfig** are default memory layers applied to every context created via `createContext()`. When `createContext` is called with its own `memory` option, the per-call layers take precedence (full override, not merge). When neither is specified, the context has no default layers. This provides a convenient way to set up memory for the entire agent without passing layers to every call.
+- **`context` on AgentConfig** are default context layers applied to every context created via `createContext()`. When `createContext` is called with its own `context` option, the per-call layers take precedence (full override, not merge). When neither is specified, the context has no default layers. This provides a convenient way to set up context for the entire agent without passing layers to every call.
 - **`detachedSpawn`** launches a child step concurrently without blocking the caller. Creates a child `Context` with `parent: parentCtx`, starts execution, and returns a `DetachedHandle` immediately. The handle tracks status (`running` / `completed` / `failed`), exposes the result, and supports `await(timeout?)` for blocking on completion. Pairs with the loop inbox channel (see `05-loop-and-until`) for async sub-agent notification patterns. Optional `overrides.threadId` / `overrides.resourceId` decouple the child's session-scoped item log from the parent's — useful for background sub-agents whose accumulated items should NOT replay in the parent's next turn.
 - **`checkpoint`/`restore`** are the first-class durable-execution surface. `AgentHarness` implements them against an injected `CheckpointStore` (which wraps the harness's `StorageAdapter`). When no store is configured both calls are no-ops, preserving zero-config ergonomics. `DurableAgentHarness` uses the same contract with a distributed backend. The full lifecycle (snapshot boundaries, schema versioning, idempotency expectations, restart flow) is specified in `23-durable-execution`.
-- **`cancel`** with propagation. The agent harness knows the execution tree (via parent/child context references) and walks it to cancel children. Cancelled executions still run `onComplete` and `dispose` on their memory layers.
+- **`cancel`** with propagation. The agent harness knows the execution tree (via parent/child context references) and walks it to cancel children. Cancelled executions still run `onComplete` and `dispose` on their context layers.
 - **`createSpan`** lets the agent harness control the tracing backend.
 
 ### Shared cwd
@@ -599,16 +599,16 @@ Ordering at resolve time: an eager `step.tools` array still wins for its own cal
 
 ### Item schema registry (extension-item validation)
 
-The harness validates items at trust boundaries (model output parsing, session restore, tool-result decoration) through an `ItemSchemaRegistry` seeded from harness-level `itemSchemas`. Harness-level schemas are global by design. Tool and memory-layer extension schemas are **additive and owner-scoped**:
+The harness validates items at trust boundaries (model output parsing, session restore, tool-result decoration) through an `ItemSchemaRegistry` seeded from harness-level `itemSchemas`. Harness-level schemas are global by design. Tool and context-layer extension schemas are **additive and owner-scoped**:
 
-- **Model output parsing** uses the harness registry extended with the round's memory-layer and tool schemas. Items matching a known base type always pass even when extension schemas are registered.
+- **Model output parsing** uses the harness registry extended with the round's context-layer and tool schemas. Items matching a known base type always pass even when extension schemas are registered.
 - **Tool result items** are validated against the harness registry extended with **only the called tool's** `itemSchemas.toolResults` — one tool's schemas never reject a sibling tool's result items, and tools without schemas fall back to the base structural parse.
 - Extension schemas are **gates, not normalizers**: on match the original item is returned unchanged, including fields the schema does not declare. Zod transforms and defaults in extension schemas are unsupported.
 - Validation failures raise `NoeticError` kind `item_schema_mismatch` (see `09-error-model`).
 
 ### What's NOT on the AgentHarness
 
-- **`assembleView`** — view assembly (the Projector) is a standalone function in `memory/projector.ts`. It calls `recallLayers`, allocates token budgets, and assembles system prompt item + layer output items + conversation history items into the View as `Item[]`. This is what `executeLLM` calls internally before sending items to the model.
+- **`assembleView`** — view assembly (the Projector) is a standalone function in `context/projector.ts`. It calls `recallLayers`, allocates token budgets, and assembles system prompt item + layer output items + conversation history items into the View as `Item[]`. This is what `executeLLM` calls internally before sending items to the model.
 - **`executeFork`** — fork execution is handled by the core `run` switch. The `fork` variant calls `run` on each path internally.
 - **`summarize`** — summarization is just an LLM call. The `spawn` executor calls `run(step.llm({ id: 'summarize', ... }), ...)` internally.
 
@@ -644,7 +644,7 @@ Snapshot content (Zod-validated by `CheckpointSnapshotSchema`):
 
 `harness.restore(executionId)` reads the snapshot and rebuilds a `Context`:
 
-1. Replays layer state into `layerStateStore` under the same executionId so memory projectors observe continuity.
+1. Replays layer state into `layerStateStore` under the same executionId so context projectors observe continuity.
 2. Re-parses `itemLog.items` via the harness's `ItemSchemaRegistry` (the same gate production traffic passes through).
 3. Seeds a new context with `threadId`, `resourceId`, and `cwdInit` from the snapshot.
 4. Returns a `Context` whose `.id` is overridden to the original `executionId` so downstream readers correlate across the restart.
@@ -675,12 +675,12 @@ See `23-durable-execution` for the full durable-execution model, including `Subp
 
 ```typescript
 import { setHarness, AgentHarness } from '@noetic-tools/core';
-import { workingMemory, semanticRecall } from '@noetic-tools/core';
+import { workingMemoryContext, semanticRecall } from '@noetic-tools/core';
 
 setHarness(new AgentHarness({
   name: 'my-agent',
   params: { model: 'anthropic/claude-sonnet-4-20250514' },
-  memory: [workingMemory(), semanticRecall({ embedder })],
+  context: [workingMemoryContext(), semanticRecall({ embedder })],
 }));
 ```
 
@@ -756,7 +756,7 @@ In-memory channel storage and non-durable agent harnesses do not persist across 
 
 ## `AgentConfig`
 
-The top-level configuration for an agent harness. `AgentConfig` is generic over `TParams`, an arbitrary key-value record that steps and tools access via `ctx.harness.config.params`. Domain-specific settings (model, instructions, tools, memory layers) live in `params` rather than as top-level fields, keeping the harness config minimal and the params bag extensible without schema changes.
+The top-level configuration for an agent harness. `AgentConfig` is generic over `TParams`, an arbitrary key-value record that steps and tools access via `ctx.harness.config.params`. Domain-specific settings (model, instructions, tools, context layers) live in `params` rather than as top-level fields, keeping the harness config minimal and the params bag extensible without schema changes.
 
 ```typescript
 interface AgentConfig<TParams extends Record<string, unknown> = Record<string, unknown>> {
@@ -771,14 +771,14 @@ interface AgentConfig<TParams extends Record<string, unknown> = Record<string, u
   /** Subprocess adapter. Defaults to createLocalSubprocessAdapter(). */
   subprocess?: SubprocessAdapter;
 
-  /** Storage backend for memory persistence. See 11-memory-layer-system. */
+  /** Storage backend for context persistence. See 11-context-layer-system. */
   storage?: StorageAdapter;
 
-  /** Agent-level lifecycle hooks (separate from memory hooks). */
+  /** Agent-level lifecycle hooks (separate from layer hooks). */
   hooks?: AgentHooks;
 
-  /** Default memory layers applied to every context created via createContext() / execute(). */
-  memory?: MemoryLayer[];
+  /** Default context layers applied to every context created via createContext() / execute(). */
+  context?: ContextLayer[];
 
   /** Arbitrary key-value parameters accessible via ctx.harness.config.params. */
   params: TParams;

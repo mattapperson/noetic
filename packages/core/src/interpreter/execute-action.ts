@@ -39,14 +39,14 @@ import {
 import type {
   AgentHarnessContract,
   Context,
-  ContextMemory,
+  ContextConfig,
+  ContextData,
+  ContextLayer,
   ContextRerenderRequest,
   ExecuteStepFn,
   ExecutionContext,
   FunctionCallItem,
   Item,
-  MemoryConfig,
-  MemoryLayer,
   ProjectionPolicy,
   RecallLayerOutput,
   RetryPolicy,
@@ -72,10 +72,10 @@ import {
 
 //#region run
 
-export async function executeRun<TMemory, I, O>(
-  step: StepRun<TMemory, I, O>,
+export async function executeRun<TContext, I, O>(
+  step: StepRun<TContext, I, O>,
   input: I,
-  ctx: Context<TMemory>,
+  ctx: Context<TContext>,
 ): Promise<O> {
   const retry = step.retry;
   const maxAttempts = retry?.maxAttempts ?? 1;
@@ -178,12 +178,12 @@ interface ResolvedTools {
  * both sync and async getters.
  *
  * Lazy fields let a step inspect `ctx.harness.config.params`, `ctx.unifiedTools`,
- * or memory layer state to produce per-execution values (model, instructions,
+ * or context layer state to produce per-execution values (model, instructions,
  * tools) without baking them in at build time.
  */
-export async function resolveLazy<T, TMemory>(
-  value: T | ((ctx: Context<TMemory>) => T | Promise<T>),
-  ctx: Context<TMemory>,
+export async function resolveLazy<T, TContext>(
+  value: T | ((ctx: Context<TContext>) => T | Promise<T>),
+  ctx: Context<TContext>,
 ): Promise<T> {
   if (typeof value !== 'function') {
     return value;
@@ -191,7 +191,7 @@ export async function resolveLazy<T, TMemory>(
   // The `function` narrowing collapses to `T & Function` when `T` itself can
   // be a function, so we defer to `frameworkCast` — the single sanctioned
   // unsafe coercion helper. Runtime check above guarantees safety.
-  const getter = frameworkCast<(ctx: Context<TMemory>) => T | Promise<T>>(value);
+  const getter = frameworkCast<(ctx: Context<TContext>) => T | Promise<T>>(value);
   return await getter(ctx);
 }
 
@@ -211,7 +211,7 @@ export async function resolveLazy<T, TMemory>(
  */
 function resolveToolsAndRestrictions(
   stepTools: Tool[] | undefined,
-  layers: MemoryLayer[] | undefined,
+  layers: ContextLayer[] | undefined,
   ctx: Context,
 ): ResolvedTools {
   // stepTools = [] → explicit opt-out
@@ -252,8 +252,8 @@ function resolveToolsAndRestrictions(
 }
 
 interface RunInputPipelineParams {
-  ctx: Context<ContextMemory>;
-  layers: MemoryLayer[];
+  ctx: Context<ContextData>;
+  layers: ContextLayer[];
   input: string;
 }
 
@@ -324,7 +324,7 @@ function resolveOutputMode<O>(
 function finalizeCodecOutput<O>(
   codec: OutputCodec<O>,
   lastText: string,
-  ctx: Context<ContextMemory>,
+  ctx: Context<ContextData>,
   emit: EmitOption | undefined,
 ): O {
   const session = codec.start();
@@ -385,7 +385,7 @@ function finalizeStepOutput<O>(params: {
   outputCodec: OutputCodec<O> | undefined;
   outputSchema: ZodType<O> | undefined;
   lastText: string;
-  ctx: Context<ContextMemory>;
+  ctx: Context<ContextData>;
 }): O {
   if (params.outputCodec) {
     return finalizeCodecOutput(params.outputCodec, params.lastText, params.ctx, params.emit);
@@ -396,18 +396,18 @@ function finalizeStepOutput<O>(params: {
   return frameworkCast<O>(params.lastText);
 }
 
-export async function executeLLM<TMemory, I, O>(
-  step: StepLLM<TMemory, I, O>,
+export async function executeLLM<TContext, I, O>(
+  step: StepLLM<TContext, I, O>,
   input: I,
-  ctx: Context<TMemory>,
-  layers?: MemoryLayer[],
+  ctx: Context<TContext>,
+  layers?: ContextLayer[],
 ): Promise<O> {
-  const baseCtx = frameworkCast<Context<ContextMemory>>(ctx);
+  const baseCtx = frameworkCast<Context<ContextData>>(ctx);
   const hasLayers = layers !== undefined && layers.length > 0;
 
   // Resolve lazy step fields up-front. Function-form getters run once per
   // step execution with the live context, so `ctx.harness.config.params`,
-  // `ctx.unifiedTools`, and memory layer state are all visible at resolution.
+  // `ctx.unifiedTools`, and context layer state are all visible at resolution.
   const resolvedModel = await resolveLazy(step.model, ctx);
   if (!resolvedModel || resolvedModel.trim() === '') {
     throw new NoeticConfigError({
@@ -713,35 +713,35 @@ export async function executeLLM<TMemory, I, O>(
 
 export interface ExecuteSpawnOpts {
   layerStore?: LayerStateStore;
-  parentLayers?: MemoryLayer[];
+  parentLayers?: ContextLayer[];
   itemSchemas?: ItemSchemaRegistry;
 }
 
 interface CollectSpawnItemsParams {
-  layers: MemoryLayer[];
+  layers: ContextLayer[];
   parentExecutionCtx: ExecutionContext;
   childExecutionCtx: ExecutionContext;
   layerStore: LayerStateStore;
   itemSchemas?: ItemSchemaRegistry;
 }
 
-function isMemoryConfig(value: unknown): value is MemoryConfig {
+function isContextConfig(value: unknown): value is ContextConfig {
   return typeof value === 'object' && value !== null && 'layers' in value;
 }
 
-function resolveLayersForSpawn<TMemory, I, O>(
-  step: StepSpawn<TMemory, I, O>,
-  parentLayers?: MemoryLayer[],
-): MemoryLayer[] {
-  if (!step.memory) {
+function resolveLayersForSpawn<TContext, I, O>(
+  step: StepSpawn<TContext, I, O>,
+  parentLayers?: ContextLayer[],
+): ContextLayer[] {
+  if (!step.context) {
     return parentLayers ?? [];
   }
-  if (isMemoryConfig(step.memory)) {
+  if (isContextConfig(step.context)) {
     return [
-      ...step.memory.layers,
+      ...step.context.layers,
     ];
   }
-  return step.memory;
+  return step.context;
 }
 
 async function collectSpawnItems({
@@ -763,7 +763,7 @@ async function collectSpawnItems({
 }
 
 /** Adds a spawned child's accumulated token/cost usage to its parent. */
-function rollUpSpawnUsage(parent: Context<ContextMemory>, child: Context<ContextMemory>): void {
+function rollUpSpawnUsage(parent: Context<ContextData>, child: Context<ContextData>): void {
   if (!isMutableContext(parent)) {
     return;
   }
@@ -776,14 +776,14 @@ function rollUpSpawnUsage(parent: Context<ContextMemory>, child: Context<Context
   parent.cost += child.cost;
 }
 
-export async function executeSpawn<TMemory, I, O>(
-  step: StepSpawn<TMemory, I, O>,
+export async function executeSpawn<TContext, I, O>(
+  step: StepSpawn<TContext, I, O>,
   input: I,
-  ctx: Context<TMemory>,
+  ctx: Context<TContext>,
   executeStep: ExecuteStepFn,
   opts?: ExecuteSpawnOpts,
 ): Promise<O> {
-  const baseCtx = frameworkCast<Context<ContextMemory>>(ctx);
+  const baseCtx = frameworkCast<Context<ContextData>>(ctx);
   const layers = resolveLayersForSpawn(step, opts?.parentLayers);
   const childId = crypto.randomUUID();
   const childExecutionCtx = contextToExecCtx(baseCtx, {
@@ -800,7 +800,7 @@ export async function executeSpawn<TMemory, I, O>(
   const layerStore = opts?.layerStore;
   const hasLayers = layers.length > 0 && layerStore !== undefined;
 
-  // Collect items from memory layers via onSpawn hooks
+  // Collect items from context layers via onSpawn hooks
   let childItems: Item[] = [];
   let parentExecutionCtx: ExecutionContext | undefined;
   if (hasLayers) {
@@ -834,7 +834,7 @@ export async function executeSpawn<TMemory, I, O>(
   // Create child context — empty by default, layers provide items via onSpawn.
   // `id: childId` keeps the ContextImpl's id in sync with the executionId
   // used by spawnLayers/returnLayers in the layer-state store, so writes via
-  // `ctx.memory[layerId]` and spawn-boundary hooks read from the same key.
+  // `ctx.context[layerId]` and spawn-boundary hooks read from the same key.
   const childCtx = new ContextImpl({
     harness: baseCtx.harness,
     parent: baseCtx,
@@ -855,10 +855,10 @@ export async function executeSpawn<TMemory, I, O>(
 
   try {
     // Execute the child step
-    const childOutput = await executeStep<TMemory, I, O>(
+    const childOutput = await executeStep<TContext, I, O>(
       step.child,
       input,
-      frameworkCast<Context<TMemory>>(childCtx),
+      frameworkCast<Context<TContext>>(childCtx),
     );
 
     // Roll the child's token/cost usage up into the parent. A sub-agent's
@@ -897,16 +897,19 @@ export async function executeSpawn<TMemory, I, O>(
 
 //#region provide
 
-function resolveLayers<TMemory, I, O>(step: StepProvide<TMemory, I, O>): MemoryLayer[] {
-  if (isMemoryConfig(step.memory)) {
+function resolveLayers<TContext, I, O>(step: StepProvide<TContext, I, O>): ContextLayer[] {
+  if (isContextConfig(step.context)) {
     return [
-      ...step.memory.layers,
+      ...step.context.layers,
     ];
   }
-  return step.memory;
+  return step.context;
 }
 
-function mergeLayers(existing: MemoryLayer[] | undefined, provided: MemoryLayer[]): MemoryLayer[] {
+function mergeLayers(
+  existing: ContextLayer[] | undefined,
+  provided: ContextLayer[],
+): ContextLayer[] {
   if (!existing || existing.length === 0) {
     return provided;
   }
@@ -921,21 +924,21 @@ function mergeLayers(existing: MemoryLayer[] | undefined, provided: MemoryLayer[
 }
 
 /**
- * Executes a provide step by attaching memory layers to the current context
+ * Executes a provide step by attaching context layers to the current context
  * without creating an isolated child context.
  *
  * Unlike spawn, provide does not create a new itemLog or clone state.
  * Events flow through to the parent in real-time.
  */
-export async function executeProvide<TMemory, I, O>(
-  step: StepProvide<TMemory, I, O>,
+export async function executeProvide<TContext, I, O>(
+  step: StepProvide<TContext, I, O>,
   input: I,
-  ctx: Context<TMemory>,
+  ctx: Context<TContext>,
   executeStep: ExecuteStepFn,
 ): Promise<O> {
   const baseCtx = frameworkCast<
-    Context<ContextMemory> & {
-      layers?: MemoryLayer[];
+    Context<ContextData> & {
+      layers?: ContextLayer[];
       unifiedTools?: ReadonlyArray<Tool>;
     }
   >(ctx);
@@ -959,7 +962,7 @@ export async function executeProvide<TMemory, I, O>(
   }
 
   try {
-    return await executeStep<TMemory, I, O>(step.child, input, ctx);
+    return await executeStep<TContext, I, O>(step.child, input, ctx);
   } finally {
     // Restore previous layers and unified tools so siblings are not affected
     baseCtx.layers = previousLayers;
@@ -982,7 +985,7 @@ async function consumeToolGenerator(params: {
   generator: AsyncGenerator<unknown, unknown>;
   stepId: string;
   tool: Tool;
-  ctx: Context<ContextMemory>;
+  ctx: Context<ContextData>;
   args: unknown;
 }): Promise<unknown> {
   const broadcaster = getBroadcaster(params.ctx);
@@ -1018,14 +1021,14 @@ async function consumeToolGenerator(params: {
   }
 }
 
-export async function executeTool<TMemory, I, O>(
-  step: StepTool<TMemory, I, O>,
+export async function executeTool<TContext, I, O>(
+  step: StepTool<TContext, I, O>,
   input: I,
-  ctx: Context<TMemory>,
+  ctx: Context<TContext>,
   harness: AgentHarnessContract,
-  layers?: MemoryLayer[],
+  layers?: ContextLayer[],
 ): Promise<O> {
-  const baseCtx = frameworkCast<Context<ContextMemory>>(ctx);
+  const baseCtx = frameworkCast<Context<ContextData>>(ctx);
   const args = step.args ? Object.assign({}, input, step.args) : input;
 
   const parseResult = step.tool.input.safeParse(args);

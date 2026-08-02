@@ -1,6 +1,6 @@
 # Pattern Derivations
 
-> **Depends On:** `01-step-type` (Step, execute), `02-step-variants` (step.run, step.llm, Tool), `03-control-flow` (fork), `04-spawn` (spawn, contextIn, contextOut), `05-loop-and-until` (loop, until, any), `06-channels` (channel, ExternalChannel, ChannelHandle, tryRecv), `07-context-and-event-log` (Context, Item, ItemLog), `11-memory-layer-system` (memory layer lifecycle)
+> **Depends On:** `01-step-type` (Step, execute), `02-step-variants` (step.run, step.llm, Tool), `03-control-flow` (fork), `04-spawn` (spawn, contextIn, contextOut), `05-loop-and-until` (loop, until, any), `06-channels` (channel, ExternalChannel, ChannelHandle, tryRecv), `07-context-and-event-log` (Context, Item, ItemLog), `11-context-layer-system` (context layer lifecycle)
 > **Exports:** `react()`, `ralphWiggum()`, `taskTree()`, `enforced()`, `recursiveLLM()`, `threadWeave()`, `remote()`, `compilePlan()`, `adaptivePlan()`, `dualAgent()`, `TaskNode`, `PlanNode`, `PlanNodeSchema`, `PlanConstraints`, `WorkerDispatch`
 
 ---
@@ -31,7 +31,7 @@ function react(opts: {
   tools: Tool[];
   maxSteps?: number;
   maxCost?: number;
-  memory?: MemoryLayer[];
+  context?: ContextLayer[];
 }) {
   const llmStep = step.llm({
     id: 'react-step',
@@ -50,20 +50,20 @@ function react(opts: {
     ),
   });
 
-  if (!opts.memory) return loopStep;
-  return spawn({ id: 'react-agent', child: loopStep, memory: opts.memory });
+  if (!opts.context) return loopStep;
+  return spawn({ id: 'react-agent', child: loopStep, context: opts.context });
 }
 ```
 
 **Primitives used:** `loop` + `step.llm` + `until.noToolCalls` + `until.maxSteps`.
 
-**ItemLog strategy:** Accumulate. No spawn boundary — tool call results append to the ItemLog. Memory layers `recall()`/`store()` run each iteration.
+**ItemLog strategy:** Accumulate. No spawn boundary — tool call results append to the ItemLog. Context layers `recall()`/`store()` run each iteration.
 
 ---
 
 ## Ralph Wiggum Loop
 
-Wraps an inner pattern in an outer loop where each iteration gets a fresh ItemLog. All state that survives across iterations is managed by memory layers.
+Wraps an inner pattern in an outer loop where each iteration gets a fresh ItemLog. All state that survives across iterations is managed by context layers.
 
 ```typescript
 function ralphWiggum(opts: {
@@ -105,7 +105,7 @@ function ralphWiggum(opts: {
 
 **Primitives used:** `loop` + `spawn(contextIn: fresh)` + `react` (inner) + `until.verified`.
 
-**Memory layer interaction:** `durableTaskState()` handles task artifacts across fresh boundaries. `workingMemory({ scope: 'resource' })` carries structured progress. `observationalMemory()` compresses learnings from past iterations into the next View.
+**Context layer interaction:** `durableTaskState()` handles task artifacts across fresh boundaries. `workingMemoryContext({ scope: 'resource' })` carries structured progress. `observationalContext()` compresses learnings from past iterations into the next View.
 
 **Usage:**
 
@@ -174,7 +174,7 @@ function recursiveLLM<I, O>(opts: {
 
 **Primitives used:** `step.run` (outer) + `fork` (parallel children) + `spawn(contextIn: custom, contextOut: summary)` + self-reference for recursion. Depth control via `ctx.depth`.
 
-**Memory layer interaction:** `scope: 'global'` layers (shared knowledge) available to all children. Each child's `onReturn` merges discoveries back into parent state.
+**Context layer interaction:** `scope: 'global'` layers (shared knowledge) available to all children. Each child's `onReturn` merges discoveries back into parent state.
 
 ---
 
@@ -200,7 +200,7 @@ interface WorkerDispatch {
 
 **Primitives used:** `loop` (orchestrator rounds) + `fork` (parallel workers) + `spawn(contextIn: fresh, contextOut: summary)` + `react` (inner worker loop).
 
-**Memory layer interaction:** Orchestrator's `observationalMemory()` accumulates worker summaries. `sharedSwarmMemory()` enables real-time finding sharing between concurrent workers.
+**Context layer interaction:** Orchestrator's `observationalContext()` accumulates worker summaries. `sharedSwarmContext()` enables real-time finding sharing between concurrent workers.
 
 ---
 
@@ -281,7 +281,7 @@ function dualAgent(opts: {
   const { userChannel } = opts;
 
   // Shared working memory for plan coordination
-  const sharedMemory = workingMemory({ scope: 'resource' });
+  const sharedMemory = workingMemoryContext({ scope: 'resource' });
 
   // Conversational agent: responds to user, updates shared plan
   const conversationalLoop = loop({
@@ -356,4 +356,4 @@ app.post('/api/message', (req, res) => {
 });
 ```
 
-**Memory layer interaction:** `workingMemory({ scope: 'resource' })` shared between conversational and worker agents enables plan coordination. The worker uses `tryRecv` to check for plan updates without blocking. External channels survive `contextIn: 'fresh'` boundaries because they're scoped to the root execution.
+**Context layer interaction:** `workingMemoryContext({ scope: 'resource' })` shared between conversational and worker agents enables plan coordination. The worker uses `tryRecv` to check for plan updates without blocking. External channels survive `contextIn: 'fresh'` boundaries because they're scoped to the root execution.

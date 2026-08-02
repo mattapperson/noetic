@@ -20,7 +20,7 @@ core ─→ types        (core never imports sub-harness or any adapter)
   contract, the `SubHarnessStreamPart` event union (with its Zod schema), the
   `SubHarnessSettings` / `SubHarnessSessionPolicy` shapes, and the
   `SubHarnessKind` discriminant (`'claude-code' | 'codex' | 'opencode' | 'pi'`).
-  The contract lives here — next to `MemoryLayer` — so both `core` and the
+  The contract lives here — next to `ContextLayer` — so both `core` and the
   adapter packages depend on it without forming a cycle.
 - **`@noetic-tools/sub-harness`** — the base package. Re-exports the contract
   and adds `defineSubHarness`, the `SubHarnessTurnAccumulator`, the

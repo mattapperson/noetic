@@ -12,10 +12,10 @@ type ToolExecutionResult<O extends ZodTypeAny> =
   | AsyncGenerator<unknown, z.infer<O>>;
 
 /**
- * Declares tool-owned memory that the runtime materializes into a MemoryLayer.
+ * Declares tool-owned state that the runtime materializes into a ContextLayer.
  * @public
  */
-export interface ToolMemoryDeclaration<TState = unknown> {
+export interface ToolContextDeclaration<TState = unknown> {
   /** Shared id — tools with the same id share state. Defaults to `tool.name`. */
   id?: string;
   /** Factory for the initial state. */
@@ -23,8 +23,8 @@ export interface ToolMemoryDeclaration<TState = unknown> {
   /**
    * Project state into the LLM context. Return null to omit.
    * Declared as a method (bivariant params) so a concrete
-   * `ToolMemoryDeclaration<MyState>` assigns to the erased
-   * `ToolMemoryDeclaration` the `tool()` builder and runtime consume.
+   * `ToolContextDeclaration<MyState>` assigns to the erased
+   * `ToolContextDeclaration` the `tool()` builder and runtime consume.
    */
   recall(state: TState): string | null;
 }
@@ -33,7 +33,7 @@ export interface ToolMemoryDeclaration<TState = unknown> {
  * A renderable UI fragment in a named dialect (e.g. `'openui-lang/0.5'`).
  * The framework never interprets `source` — it forwards fragments as
  * `openui.fragment` framework events and attaches them to items; a UI
- * surface (memory layer + transport) composes and renders them.
+ * surface (context layer + transport) composes and renders them.
  * @public
  */
 export interface UiFragment {
@@ -46,7 +46,7 @@ export interface UiFragment {
 /**
  * Declares tool-owned UI: programmatic render functions invoked at tool
  * lifecycle points. All methods are optional — an omitted point renders
- * nothing (mirrors `ToolMemoryDeclaration`). Declared as methods (bivariant
+ * nothing (mirrors `ToolContextDeclaration`). Declared as methods (bivariant
  * params) so a concretely-typed declaration assigns to the erased form the
  * `tool()` builder and runtime consume.
  * @public
@@ -106,8 +106,8 @@ export interface Tool<I extends ZodTypeAny = ZodTypeAny, O extends ZodTypeAny = 
   execute(args: z.infer<I>, toolCtx: unknown): ToolExecutionResult<O>;
   /** When true, execution pauses for human approval before running. */
   needsApproval?: boolean;
-  /** Optional memory declaration — the runtime generates a MemoryLayer from this. */
-  memory?: ToolMemoryDeclaration;
+  /** Optional context declaration — the runtime generates a ContextLayer from this. */
+  context?: ToolContextDeclaration;
   /** Optional UI declaration — the runtime emits the rendered fragments at call/progress/result points. */
   ui?: ToolUiDeclaration<I, O>;
 }

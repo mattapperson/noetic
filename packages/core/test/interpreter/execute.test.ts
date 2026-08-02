@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import type { ContextMemory } from '@noetic-tools/memory';
+import type { ContextData } from '@noetic-tools/context';
 import type { Context, Step } from '@noetic-tools/types';
 import { isNoeticError } from '@noetic-tools/types';
 import { z } from 'zod';
@@ -11,7 +11,7 @@ import { createScriptedCallModel, makeLLMResponse, makeMockHarness } from '../_h
 
 describe('execute() switch', () => {
   it('dispatches run step', async () => {
-    const step: Step<ContextMemory, string, number> = {
+    const step: Step<ContextData, string, number> = {
       kind: 'run',
       id: 'test',
       execute: async (input: string) => input.length,
@@ -34,7 +34,7 @@ describe('execute() switch', () => {
       execute: async (args: { msg: string }) => args.msg,
     };
     const step: Step<
-      ContextMemory,
+      ContextData,
       {
         msg: string;
       },
@@ -60,7 +60,7 @@ describe('execute() switch', () => {
   });
 
   it('dispatches llm step via mock callModel', async () => {
-    const step: Step<ContextMemory, string, string> = {
+    const step: Step<ContextData, string, string> = {
       kind: 'llm',
       id: 'llm-test',
       model: 'test-model',
@@ -77,7 +77,7 @@ describe('execute() switch', () => {
   });
 
   it('throws when harness has no client configured', async () => {
-    const step: Step<ContextMemory, string, string> = {
+    const step: Step<ContextData, string, string> = {
       kind: 'llm',
       id: 'test',
       model: 'x',
@@ -89,7 +89,7 @@ describe('execute() switch', () => {
   });
 
   it('increments stepCount', async () => {
-    const step: Step<ContextMemory, string, string> = {
+    const step: Step<ContextData, string, string> = {
       kind: 'run',
       id: 'test',
       execute: async (input: string) => input,
@@ -116,7 +116,7 @@ describe('execute() switch', () => {
       });
     }
     expect(ctx.depth).toBe(64);
-    const step: Step<ContextMemory, string, string> = {
+    const step: Step<ContextData, string, string> = {
       kind: 'run',
       id: 'deep',
       execute: async (input: string) => input,
@@ -137,7 +137,7 @@ describe('execute() switch', () => {
       harness: makeMockHarness(),
     });
     ctx.abort('test abort');
-    const step: Step<ContextMemory, string, string> = {
+    const step: Step<ContextData, string, string> = {
       kind: 'run',
       id: 'test',
       execute: async (input: string) => input,
@@ -156,7 +156,7 @@ describe('execute() switch', () => {
     const ctx = new ContextImpl({
       harness: makeMockHarness(),
     });
-    const branchStep: Step<ContextMemory, string, string> = {
+    const branchStep: Step<ContextData, string, string> = {
       kind: 'branch',
       id: 'b',
       route: () => null,
@@ -202,7 +202,7 @@ describe('AgentHarness', () => {
       params: {},
     });
     const ctx = harness.createContext();
-    const step: Step<ContextMemory, string, number> = {
+    const step: Step<ContextData, string, number> = {
       kind: 'run',
       id: 'len',
       execute: async (s: string) => s.length,
@@ -220,7 +220,7 @@ describe('AgentHarness', () => {
       ]),
     });
     const ctx = harness.createContext();
-    const step: Step<ContextMemory, string, string> = {
+    const step: Step<ContextData, string, string> = {
       kind: 'llm',
       id: 'test',
       model: 'gpt-4',

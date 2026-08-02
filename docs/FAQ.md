@@ -15,7 +15,7 @@ Have a question that isn't answered here? Open a
 Noetic is a TypeScript agent framework that decomposes AI agent patterns into a
 small set of composable **step primitives** (`run`, `llm`, `claude-code`/`tool`,
 `branch`, `fork`, `spawn`, `loop`). It treats context-boundary management as a
-first-class concern and ships a pluggable memory system with well-defined
+first-class concern and ships a pluggable context system with well-defined
 lifecycle hooks. Patterns like ReAct, Ralph Wiggum, and task trees are short
 compositions of these primitives. See the [README](../README.md).
 
@@ -27,11 +27,11 @@ Noetic is a Bun workspace monorepo under `packages/*`. The dependency direction
 ```
 plugins → cli → code-agent → core ← eval
                               │
-                              └→ memory → types ← sub-harness ← sub-harness-{claude-code,codex,opencode,pi}
+                              └→ context → types ← sub-harness ← sub-harness-{claude-code,codex,opencode,pi}
 ```
 
 - `@noetic-tools/types` — dependency-free foundation (data model, contracts).
-- `@noetic-tools/memory` — the memory-layer system.
+- `@noetic-tools/context` — the context-layer system.
 - `@noetic-tools/core` — step primitives, interpreter, runtime.
 - `@noetic-tools/eval` — evaluation and optimization.
 - `@noetic-tools/cli` / `code-agent` — the TUI harness and tool implementations.
@@ -81,7 +81,7 @@ a DCO sign-off. See [`NOTICE`](../NOTICE) for attribution.
 Publishing is automated via semantic-release, driven by Conventional Commit
 messages: a `feat` is a minor bump, a breaking change (with a `BREAKING CHANGE:`
 footer) is a major, and everything else is a patch. `@noetic-tools/types`,
-`memory`, and `core` release in dependency order on push to `main`. See
+`context`, and `core` release in dependency order on push to `main`. See
 [`.claude/rules/commit-conventions.md`](../.claude/rules/commit-conventions.md).
 
 ## How do I report a bug?

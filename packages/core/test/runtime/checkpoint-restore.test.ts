@@ -9,8 +9,8 @@
 
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import type { MemoryLayer } from '@noetic-tools/memory';
-import { Slot } from '@noetic-tools/memory';
+import type { ContextLayer } from '@noetic-tools/context';
+import { Slot } from '@noetic-tools/context';
 import type { Item } from '@noetic-tools/types';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { getBroadcaster } from '../../src/runtime/broadcaster-utils';
@@ -19,7 +19,7 @@ import type { RestoreCheckpointOptions } from '../../src/runtime/durable/harness
 import { EventBroadcaster } from '../../src/runtime/event-broadcaster';
 import { createInMemoryStorage } from '../../src/runtime/in-memory-storage';
 import type { CheckpointSnapshot } from '../../src/types/checkpoint';
-import { makeMessage } from '../_helpers';
+import { makeLayer, makeMessage } from '../_helpers';
 
 describe('CheckpointStore', () => {
   it('save → load round-trips a snapshot through the StorageAdapter', async () => {
@@ -188,21 +188,11 @@ describe('AgentHarness.checkpoint + restore', () => {
 
 //#region restore(executionId, opts) — caller-supplied context wiring
 
-function makeLayer(id: string, slot: number): MemoryLayer {
-  return {
-    id,
-    name: id,
-    slot,
-    scope: 'execution',
-    hooks: {},
-  };
-}
-
 /**
  * A harness pair over one shared store: `origin` creates + checkpoints the
  * pre-crash context, `resumed` stands in for the process that came back up.
  */
-function makeHarnessPair(memory?: MemoryLayer[]): {
+function makeHarnessPair(context?: ContextLayer[]): {
   origin: AgentHarness;
   resumed: AgentHarness;
 } {
@@ -215,7 +205,7 @@ function makeHarnessPair(memory?: MemoryLayer[]): {
     params: {},
     storage,
     checkpointStore,
-    memory,
+    context,
   };
   return {
     origin: new AgentHarness(config),
@@ -237,6 +227,67 @@ describe('AgentHarness.restore context wiring', () => {
     });
     assert(restored);
     expect(getBroadcaster(restored)).toBe(broadcaster);
+  });
+
+  it('lets the caller swap the context layers on restore, under either key', async () => {
+    // `restore` forwards its opts straight to `createContext`, which owns the
+    // context/memory resolution and the harness-default fallback. These three
+    // cases pin that delegation: without them the compat path is untested.
+    const harnessLayer = makeLayer('from-harness', {
+      slot: 100,
+    });
+    const overrideLayer = makeLayer('from-caller', {
+      slot: 100,
+    });
+
+    // Written as two explicit literals rather than a loop over a key union:
+    // a computed key widens to an index signature, so a typo would still
+    // compile and the check would silently become runtime-only.
+    {
+      const { origin, resumed } = makeHarnessPair([
+        harnessLayer,
+      ]);
+      const ctx = origin.createContext({});
+      await origin.checkpoint(ctx);
+      const restored = await resumed.restore(ctx.id, {
+        context: [
+          overrideLayer,
+        ],
+      });
+      assert(restored);
+      expect(restored.layers).toEqual([
+        overrideLayer,
+      ]);
+    }
+
+    {
+      const { origin, resumed } = makeHarnessPair([
+        harnessLayer,
+      ]);
+      const ctx = origin.createContext({});
+      await origin.checkpoint(ctx);
+      const restored = await resumed.restore(ctx.id, {
+        memory: [
+          overrideLayer,
+        ],
+      });
+      assert(restored);
+      expect(restored.layers).toEqual([
+        overrideLayer,
+      ]);
+    }
+
+    // No override falls back to the harness default.
+    const { origin, resumed } = makeHarnessPair([
+      harnessLayer,
+    ]);
+    const ctx = origin.createContext({});
+    await origin.checkpoint(ctx);
+    const restored = await resumed.restore(ctx.id);
+    assert(restored);
+    expect(restored.layers).toEqual([
+      harnessLayer,
+    ]);
   });
 
   it('restores a bare context when the caller supplies no wiring', async () => {
@@ -274,8 +325,10 @@ describe('AgentHarness.restore context wiring', () => {
     });
   });
 
-  it('caller memory layers override the harness defaults on restore', async () => {
-    const harnessLayer = makeLayer('harness-layer', Slot.STEERING);
+  it('caller context layers override the harness defaults on restore', async () => {
+    const harnessLayer = makeLayer('harness-layer', {
+      slot: Slot.STEERING,
+    });
     const { origin, resumed } = makeHarnessPair([
       harnessLayer,
     ]);
@@ -283,8 +336,10 @@ describe('AgentHarness.restore context wiring', () => {
     await origin.checkpoint(ctx);
 
     const restored = await resumed.restore(ctx.id, {
-      memory: [
-        makeLayer('call-layer', Slot.WORKING_MEMORY),
+      context: [
+        makeLayer('call-layer', {
+          slot: Slot.WORKING_MEMORY,
+        }),
       ],
     });
     assert(restored);
@@ -294,9 +349,11 @@ describe('AgentHarness.restore context wiring', () => {
     ]);
   });
 
-  it('falls back to the harness memory layers when the caller omits them', async () => {
+  it('falls back to the harness context layers when the caller omits them', async () => {
     const { origin, resumed } = makeHarnessPair([
-      makeLayer('harness-layer', Slot.STEERING),
+      makeLayer('harness-layer', {
+        slot: Slot.STEERING,
+      }),
     ]);
     const ctx = origin.createContext({});
     await origin.checkpoint(ctx);

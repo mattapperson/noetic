@@ -3,16 +3,16 @@
  * Unstable exports for framework extenders.
  *
  * Symbols exported from this module may change in any minor release.
- * They are intended for authors of custom memory layers, runtime backends,
+ * They are intended for authors of custom context layers, runtime backends,
  * and other framework extensions. Do not depend on them in application code.
  */
 
-/** @unstable Budget allocation algorithm for memory layer token budgets. */
+/** @unstable Budget allocation algorithm for context layer token budgets. */
 /** @unstable Layer state store type for managing per-layer state during execution. */
-export type { BudgetAllocation, BudgetLimits, LayerStateStore } from '@noetic-tools/memory';
+export type { BudgetAllocation, BudgetLimits, LayerStateStore } from '@noetic-tools/context';
 /** @unstable Budget allocation and checking utilities. */
 /** @unstable Factory for creating layer state stores. */
-/** @unstable View assembly algorithm that converges memory layer outputs into the LLM context. */
+/** @unstable View assembly algorithm that converges context layer outputs into the LLM context. */
 /** @unstable Factory for creating scoped storage wrappers around a StorageAdapter. */
 export {
   allocateBudgets,
@@ -20,7 +20,7 @@ export {
   checkBudget,
   createLayerStateStore,
   createScopedStorage,
-} from '@noetic-tools/memory';
+} from '@noetic-tools/context';
 /** @unstable Unsafe cast utility for bridging internal type boundaries. */
 export { frameworkCast } from '@noetic-tools/types';
 /**

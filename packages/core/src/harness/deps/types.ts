@@ -1,10 +1,10 @@
 export type {
-  ContextMemory,
+  ContextData,
+  ContextLayer,
   ExecutionContext,
-  MemoryLayer,
   ProjectionPolicy,
   StorageAdapter,
-} from '@noetic-tools/memory';
+} from '@noetic-tools/context';
 export type {
   AgentConfig,
   AgentHarnessContract,

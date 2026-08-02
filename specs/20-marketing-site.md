@@ -5,7 +5,7 @@
 - A clear, broad-audience value proposition is front and center within the hero — a static hook above the install line, plus a static 4-up pillar row below the CTA. No motion competes for attention in the first viewport.
 - The page is organized around the **agent lifecycle** as four pillars — **Compose · Remember · Endure · Prove** — so the value prop and the feature sections tell one story.
 - Copy is accessible to developers new to AI agents without condescending to experienced engineers.
-- Every claim matches the shipped surface (e.g. the nine exported memory layers; the eval framework as a shipped capability, not "coming soon").
+- Every claim matches the shipped surface (e.g. the nine exported context layers; the eval framework as a shipped capability, not "coming soon").
 - Feature sections use the animated isometric SVG graphics (45° tube-map style, glowing sphere data flow) where a graphic adds clarity.
 - A "Code Peek" tabbed section lets developers see the primitives in action.
 
@@ -18,7 +18,7 @@ The hero leads with a single broad-audience hook: a punchy subhead ("Build AI ag
 | # | Pillar | Headline | Support line |
 |---|--------|----------|--------------|
 | 01 | COMPOSE | It's just TypeScript. | Seven primitives you read, fork, and own. |
-| 02 | REMEMBER | Context that doesn't blow up. | Nine memory layers keep token costs flat. |
+| 02 | REMEMBER | Context that doesn't blow up. | Nine context layers keep token costs flat. |
 | 03 | ENDURE | Survives production. | Checkpoint and resume — Node, browser, or sandbox. |
 | 04 | PROVE | Prove it works. | Score and optimize like Jest tests. |
 
@@ -48,7 +48,7 @@ All SVG graphics follow this style:
 | 3 | Primitives | 01 · Compose |
 | 4 | Patterns | 01 · Compose |
 | 5 | Code Peek | 01 · Compose |
-| 6 | Memory | 02 · Remember |
+| 6 | Context | 02 · Remember |
 | 7 | Endurance | 03 · Endure |
 | 8 | Eval | 04 · Prove |
 | 9 | Differentiation | — |
@@ -69,7 +69,7 @@ Each pillar's cluster is preceded by a `PillarHeader` marker (`01 · COMPOSE`, e
 | Tag | `// constrain the agent, not the intelligence` |
 | H1 | `NOETIC` |
 | Subhead (hook) | "Build AI agents you'd actually trust in production." (clamp ~18–22px, weight 600) |
-| Body | "Noetic gives you composable TypeScript primitives, memory that keeps token costs flat, and evals that catch regressions before users do." |
+| Body | "Noetic gives you composable TypeScript primitives, context that keeps token costs flat, and evals that catch regressions before users do." |
 | Install | Static: `$ bun add @noetic-tools/core` with a muted `(npm · pnpm)` hint to the right — no cycling |
 | CTA primary | "Build your first agent →" → `/docs` |
 | CTA secondary | "GitHub ★" → GitHub URL |
@@ -131,7 +131,7 @@ Patterns: ReAct (~15 lines), Ralph Wiggum (~10), Task Trees (~40), Adaptive Plan
 | Element | Content |
 |---------|---------|
 | Tag | `// read the source` |
-| H2 | "Reasoning loop in 15 lines, full memory stack in 10. No boilerplate." |
+| H2 | "Reasoning loop in 15 lines, full context stack in 10. No boilerplate." |
 | Body | "It's the same seven primitives from before. Once you know those, you can read — and change — anything." |
 
 Tabs (TUI-style tab bar), each rendering a `<TuiWindow>` snippet:
@@ -139,44 +139,44 @@ Tabs (TUI-style tab bar), each rendering a `<TuiWindow>` snippet:
 | Tab label | Shows |
 |-----------|-------|
 | `ReAct reasoning loop` | ~15-line ReAct via `loop` / `llm` / `tool` + `until` |
-| `5-layer memory in 10 lines` | `AgentHarness` configured with a stack of memory layers |
-| `Sandboxed harness` | Swappable `FsAdapter` / `ShellAdapter` routing tools, skills, and memory |
+| `5-layer context in 10 lines` | `AgentHarness` configured with a stack of context layers |
+| `Sandboxed harness` | Swappable `FsAdapter` / `ShellAdapter` routing tools, skills, and context |
 | `Extend any primitive` | Custom `step.run` with typed context |
 
 ---
 
-### 6. Memory — *Remember*
+### 6. Context — *Remember*
 
-**Component:** `packages/web/components/landing/memory-system.tsx`
+**Component:** `packages/web/components/landing/context-system.tsx`
 
 **Layout:** left (copy + layer grid) / right (isometric SVG).
 
 | Element | Content |
 |---------|---------|
 | Tag | `// context management` |
-| H2 | "Unparalleled memory management" |
+| H2 | "Unparalleled context management" |
 | Subhead | "Long multi-turn conversations without blowing up the context window." |
 | Body | "Working memory, observation extraction, plan tracking, durable checkpoints, and more — assemble the layers you need or build your own. Token costs stay predictable as conversations grow." |
 | Below | Legend (working / retrieval / persistence) + grid of the nine layers and a custom-layer tile |
 
-The grid shows the **nine exported memory layers** plus a "build your own" tile:
+The grid shows the **nine exported context layers** plus a "build your own" tile:
 
 | Layer (label) | Export | Group |
 |---------------|--------|-------|
-| Working Memory | `workingMemory` | working |
-| Observational Memory | `observationalMemory` | working |
+| Working Memory | `workingMemoryContext` | working |
+| Observational Context | `observationalContext` | working |
 | Steering | `steering` | working |
 | Static Content | `staticContent` | working |
 | History Window | `historyWindow` | retrieval |
 | File Reference | `fileReference` | retrieval |
-| Tool Memory | `toolMemoryLayer` | retrieval |
-| Plan Memory | `planMemory` | persistence |
+| Tool Context | `toolContextLayer` | retrieval |
+| Plan Context | `planContext` | persistence |
 | Durable Task State | `durableTaskState` | persistence |
 | Custom Layers | (build your own — e.g. semantic recall, episodic summaries) | — |
 
-Group assignment + color follow the legend; final labels/grouping are confirmed against `docs/framework/memory/*`. "Semantic recall" and "episodic memory" are documented build-it-yourself recipes, not exported layers, so they appear only via the custom-layer tile/link (`docs/framework/memory/custom-layers`).
+Group assignment + color follow the legend; final labels/grouping are confirmed against `docs/framework/context-layers/*`. "Semantic recall" and "episodic context" are documented build-it-yourself recipes, not exported layers, so they appear only via the custom-layer tile/link (`docs/framework/context-layers/custom-layers`).
 
-**SVG:** `MemoryIsometricSvg` — stacked isometric layer panels. Left wire: green sphere propagates **down** (writes & propagates). Right wire: cyan sphere travels **up** (`assembleView()` reads). Connector lines link each layer to both wires. LLM box at top-right receives assembled context. Callout: "raw history ≈ 6,000 tok → assembled context ≈ 680 tok".
+**SVG:** `ContextIsometricSvg` — stacked isometric layer panels. Left wire: green sphere propagates **down** (writes & propagates). Right wire: cyan sphere travels **up** (`assembleView()` reads). Connector lines link each layer to both wires. LLM box at top-right receives assembled context. Callout: "raw history ≈ 6,000 tok → assembled context ≈ 680 tok".
 
 ---
 
@@ -248,7 +248,7 @@ Comparison strip (bordered rows), Noetic row highlighted (green accent):
 | `CodePeek` | `components/landing/code-peek.tsx` | Tabbed code examples |
 | `PrimitivesIsometricSvg` | `components/landing/svgs/primitives-isometric.tsx` | Animated SVG for Primitives section |
 | `PatternsIsometricSvg` | `components/landing/svgs/patterns-isometric.tsx` | Animated SVG for Patterns section |
-| `MemoryIsometricSvg` | `components/landing/svgs/memory-isometric.tsx` | Animated SVG for Memory section |
+| `ContextIsometricSvg` | `components/landing/svgs/context-isometric.tsx` | Animated SVG for Context section |
 
 ---
 
@@ -266,7 +266,7 @@ Comparison strip (bordered rows), Noetic row highlighted (green accent):
     <CodePeek />
 
     <PillarHeader id="remember" index="02" name="Remember" />
-    <MemorySystem />
+    <ContextSystem />
 
     <PillarHeader id="endure" index="03" name="Endure" />
     <Endurance />
@@ -284,7 +284,7 @@ Comparison strip (bordered rows), Noetic row highlighted (green accent):
 
 ### CSS (`global.css`)
 - Pillar anchor sections set `scroll-margin-top` (≈110px) to clear the fixed nav + announcement banner.
-- `.section-split` — two-column layout within Memory (copy left, SVG right).
+- `.section-split` — two-column layout within Context (copy left, SVG right).
 - Carousel uses `motion`/`AnimatePresence` crossfade; reduced-motion handled in component via `useReducedMotion`.
 - SVG animation keyframes where needed (most animations use SVG SMIL `animateMotion`).
 
@@ -314,10 +314,10 @@ const NODE_D = 10;   // Isometric depth (extends beyond front face)
 |----------|-----|-------|
 | `GREEN` | `#39ff14` | LLM nodes, primary flow, success states |
 | `CYAN` | `#38bdf8` | Tool nodes, read operations, actions |
-| `AMBER` | `#ffb000` | Memory/observation, loops, feedback |
+| `AMBER` | `#ffb000` | Context/observation, loops, feedback |
 | `MUTED` | `#475569` | External inputs, boundaries |
 | `SURFACE` | `#080808` | Node fill color |
-| `BORDER_COLOR` | `#1a1a1a` | Memory layer borders |
+| `BORDER_COLOR` | `#1a1a1a` | Context layer borders |
 
 ### Typography
 

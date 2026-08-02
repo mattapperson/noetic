@@ -4,7 +4,7 @@
 // layer-bearing documents silently loses every layer it declared.
 
 import { describe, expect, it } from 'bun:test';
-import type { MemoryLayer } from '@noetic-tools/memory';
+import type { ContextLayer } from '@noetic-tools/context';
 import { frameworkCast, NoeticConfigError } from '@noetic-tools/types';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { parseAndRunWorkflow } from '../../src/patterns/dynamic-workflow';
@@ -27,7 +27,7 @@ const DOC = {
   },
 };
 
-function recordingLayer(recalls: string[]): MemoryLayer {
+function recordingLayer(recalls: string[]): ContextLayer {
   return frameworkCast({
     id: 'task-state',
     slot: 0,

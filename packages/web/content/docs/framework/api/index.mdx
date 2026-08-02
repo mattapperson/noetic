@@ -43,27 +43,27 @@ description: Complete type reference for all @noetic-tools/core exports, organiz
 | `executeSpawn()` | function | Spawn step executor |
 | `executeLoop()` | function | Loop step executor |
 
-## Memory
+## Context
 
 | Export | Kind | Description |
 |---|---|---|
-| `workingMemory()` | function | Working memory layer factory |
-| `observationalMemory()` | function | Observational memory layer factory |
+| `workingMemoryContext()` | function | Working context layer factory |
+| `observationalContext()` | function | Observational context layer factory |
 | `durableTaskState()` | function | Durable task state layer factory |
 | `assembleView()` | function | Merge layer outputs into prompt |
 | `allocateBudgets()` | function | Distribute token budgets across layers |
 | `checkBudget()` | function | Verify budget constraints |
-| `initLayers()` | function | Initialize all memory layers |
+| `initLayers()` | function | Initialize all context layers |
 | `recallLayers()` | function | Run recall on all layers |
 | `storeLayers()` | function | Run store on all layers |
-| `disposeLayers()` | function | Dispose all memory layers |
+| `disposeLayers()` | function | Dispose all context layers |
 | `completeLayers()` | function | Run onComplete on all layers |
 | `spawnLayers()` | function | Run onSpawn on all layers |
 | `returnLayers()` | function | Run onReturn on all layers |
 | `createLayerStateStore()` | function | Create layer state storage |
 | `createScopedStorage()` | function | Create scoped storage adapter |
 | `resolveScopeKey()` | function | Resolve scope key for a layer |
-| `Slot` | const | Memory slot constants |
+| `Slot` | const | Layer slot constants |
 
 ## Until
 
@@ -104,5 +104,5 @@ description: Complete type reference for all @noetic-tools/core exports, organiz
 - [Context Types](/docs/framework/api/context-types) -- Context, ItemLog, Item, ContentPart
 - [Items & Events](/docs/framework/api/items-and-events) -- Standard items, extension items, streaming events, OpenResponses compatibility
 - [AgentHarness Types](/docs/framework/api/runtime-types) -- AgentHarness, AgentConfig, AgentHooks
-- [Memory Types](/docs/framework/api/memory-types) -- MemoryLayer, MemoryHooks, ProjectionPolicy, StorageAdapter
+- [Context Layer Types](/docs/framework/api/context-layer-types) -- ContextLayer, ContextLayerHooks, ProjectionPolicy, StorageAdapter
 - [Until Types](/docs/framework/api/until-types) -- Until, Verdict, Snapshot, VerifyFn

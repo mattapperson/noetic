@@ -1,5 +1,5 @@
 /**
- * The `openUiSurface()` memory layer — the server-authoritative owner of UI
+ * The `openUiSurface()` context layer — the server-authoritative owner of UI
  * state. The client renderer is a projection of this layer's state, never the
  * other way around: agent renders fold in via `afterModelCall`, client events
  * reduce in via `onItemAppend`, the model sees a budget-trimmed `<ui_surface>`
@@ -10,10 +10,10 @@
 import type {
   AfterModelCallParams,
   AfterModelCallResult,
+  ContextLayer,
+  ContextLayerHooks,
   InputMessageItem,
   Item,
-  MemoryHooks,
-  MemoryLayer,
   OnItemAppendParams,
   OnItemAppendResult,
 } from '@noetic-tools/types';
@@ -298,7 +298,7 @@ export const OPENUI_SURFACE_LAYER_ID = 'openui-surface';
  * best effort; create one surface per harness when executions run in parallel.
  * @public
  */
-export interface OpenUiSurfaceLayer extends MemoryLayer<OpenUiSurfaceState> {
+export interface OpenUiSurfaceLayer extends ContextLayer<OpenUiSurfaceState> {
   /** Latest state observed by any hook of this layer instance. */
   readState(): OpenUiSurfaceState | undefined;
 }
@@ -425,7 +425,7 @@ export function openUiSurface(config: OpenUiSurfaceConfig): OpenUiSurfaceLayer {
     return state;
   };
 
-  const hooks: MemoryHooks<OpenUiSurfaceState> = {
+  const hooks: ContextLayerHooks<OpenUiSurfaceState> = {
     async init({ storage }) {
       const saved = await storage.get<OpenUiSurfaceState>('state');
       return {

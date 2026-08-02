@@ -17,6 +17,8 @@ export { createOpenRouterEmbed } from './adapters/openrouter';
 /** @public */
 export { channel } from './builders/channel-builder';
 /** @public */
+export { context } from './builders/context-builder';
+/** @public */
 export { branch, fork } from './builders/control-flow-builders';
 /** @public */
 export type { EveryOptions } from './builders/every';
@@ -29,19 +31,19 @@ export type { LoopConfig } from './builders/loop-builder';
 /** @public */
 export { loop } from './builders/loop-builder';
 /** @public */
-export { memory } from './builders/memory-builder';
-/** @public */
 export { provide } from './builders/provide-builder';
 /** @public */
 export { spawn } from './builders/spawn-builder';
-/** @public */
-export { step } from './builders/step-builders';
 /** @public */
 export { tool, toolWithGenerator } from './builders/tool-builder';
 /** @public */
 export type { HydrationContext } from './builders/workflow-hydrator';
 /** @public */
 export { hydrateNode, hydrateWorkflow } from './builders/workflow-hydrator';
+/** @public */
+export type { StepWorkflowOpts } from './builders/workflow-step';
+/** @public */
+export { step } from './builders/workflow-step';
 
 //#endregion
 
@@ -106,7 +108,7 @@ export { execute } from './interpreter/execute';
 
 //#endregion
 
-//#region Memory Layers
+//#region Context Layers
 
 /** @public */
 /** @public */
@@ -119,19 +121,19 @@ export type {
   FactExtractor,
   FactSearcher,
   HistoryWindowConfig,
-  ObservationalMemoryConfig,
+  ObservationalContextConfig,
   ObservationalState,
+  PlanContextConfig,
   PlanEnterSessionCallback,
   PlanExecutionEntry,
   PlanExitCallback,
-  PlanMemoryConfig,
   PlanState,
+  TemporalContextConfig,
   TemporalFact,
-  TemporalMemoryConfig,
   TemporalSearchResult,
-  WorkingMemoryConfig,
-  WorkingMemoryState,
-} from '@noetic-tools/memory';
+  WorkingMemoryContextConfig,
+  WorkingMemoryContextState,
+} from '@noetic-tools/context';
 /** @public */
 /** @public */
 /** @public */
@@ -149,17 +151,17 @@ export {
   fileReference,
   findFunctionCall,
   historyWindow,
-  observationalMemory,
+  observationalContext,
   PlanPhase,
-  planMemory,
+  planContext,
   staticContent,
   steering,
   storageGetMany,
   stripUnresolvedToolCalls,
-  temporalMemory,
-  toolMemoryLayer,
-  workingMemory,
-} from '@noetic-tools/memory';
+  temporalContext,
+  toolContextLayer,
+  workingMemoryContext,
+} from '@noetic-tools/context';
 
 //#endregion
 
@@ -187,17 +189,6 @@ export { createInMemoryStorage } from './runtime/in-memory-storage';
 export type { DynamicWorkflowOpts, ParseAndRunWorkflowOpts } from './patterns/dynamic-workflow';
 /** @public */
 export { dynamicWorkflow, parseAndRunWorkflow } from './patterns/dynamic-workflow';
-/** @public */
-export type {
-  FlowNode,
-  ForkFlowNode,
-  LlmFlowNode,
-  SequenceFlowNode,
-  SpawnFlowNode,
-  SubagentFlowNode,
-} from './patterns/flow';
-/** @public */
-export { FlowSchema, flowDepth, validateFlow, walkFlow } from './patterns/flow';
 /** @public */
 export type { InterviewOpts, InterviewQuestionAnswer, InterviewResult } from './patterns/interview';
 /** @public */
@@ -264,6 +255,7 @@ export type {
   ProvideWorkflowNode,
   SequenceWorkflowNode,
   SpawnWorkflowNode,
+  SubflowWorkflowNode,
   SubHarnessWorkflowNode,
   ToolWorkflowNode,
   UntilPredicate,
@@ -303,7 +295,7 @@ export type {
   StepMeta,
   TokenUsage,
   Tool,
-  ToolMemoryDeclaration,
+  ToolContextDeclaration,
 } from '@noetic-tools/types';
 /** @public */
 export { isServerToolSpec } from '@noetic-tools/types';
@@ -409,25 +401,25 @@ export type {
 
 //#endregion
 
-//#region Types — Memory
+//#region Types — Context Layers
 
 /** @public */
 export type {
   BudgetConfig,
   CompleteParams,
-  ContextMemory,
+  ContextConfig,
+  ContextData,
+  ContextLayer,
+  ContextLayerHooks,
   DisposeParams,
-  InferMemory,
-  InferMemoryShape,
+  InferContext,
+  InferContextShape,
   InitParams,
   InitResult,
   LayerDataDecl,
   LayerFunctionDecl,
   LayerProvides,
   LayerTimeouts,
-  MemoryConfig,
-  MemoryHooks,
-  MemoryLayer,
   ProjectionPolicy,
   RecallParams,
   RecallResult,
@@ -439,15 +431,15 @@ export type {
   StorageAdapter,
   StoreParams,
   StoreResult,
-} from '@noetic-tools/memory';
+} from '@noetic-tools/context';
 /** @public */
-export { Slot } from '@noetic-tools/memory';
+export { Slot } from '@noetic-tools/context';
 /** @public */
 export type {
+  ContextScope,
   ExecutionContext,
   ExecutionOutcome,
-  MemoryCallModelRequest,
-  MemoryScope,
+  LayerCallModelRequest,
 } from '@noetic-tools/types';
 
 //#endregion
@@ -455,7 +447,7 @@ export type {
 //#region Types — Observability
 
 /** @public */
-export type { MemoryTraceSpan, Span, TraceExporter } from '@noetic-tools/types';
+export type { LayerTraceSpan, Span, TraceExporter } from '@noetic-tools/types';
 
 //#endregion
 
@@ -595,7 +587,7 @@ export { serializeError } from './adapters/in-memory-subprocess/metadata';
 //#region Types — Tool Context
 
 /** @public */
-export type { ToolExecutionContext, ToolMemory } from '@noetic-tools/types';
+export type { ToolContext, ToolExecutionContext } from '@noetic-tools/types';
 
 //#endregion
 
@@ -607,5 +599,16 @@ export { all, any } from './until/combinators';
 export type { ConvergeConfig, VerifyFn } from './until/predicates';
 /** @public */
 export { until } from './until/predicates';
+
+//#endregion
+
+//#region Deprecated aliases
+
+/**
+ * Pre-rename names for the context layer system — `MemoryLayer`, `memory()`,
+ * `workingMemory`, and friends. Each carries its own `@deprecated` pointer to
+ * its replacement in `./deprecated`. Removed in the next major.
+ */
+export * from './deprecated';
 
 //#endregion

@@ -112,7 +112,7 @@ when(condition, step);
 | Parameter | Type | Description |
 | --- | --- | --- |
 | `condition` | `Condition<I>` | Async predicate |
-| `step` | `Step<TMemory, I, O>` | Step to execute when condition is true |
+| `step` | `Step<TContext, I, O>` | Step to execute when condition is true |
 
 ### `otherwise`
 
@@ -224,10 +224,10 @@ Any function matching `Condition<I>` works with `when`, `anyCondition`, and `all
 
 ```ts
 import { branch, semanticRoute, when, otherwise } from '@noetic-tools/core';
-import type { Condition, ContextMemory, Step } from '@noetic-tools/core';
+import type { Condition, ContextData, Step } from '@noetic-tools/core';
 
-declare const helpStep: Step<ContextMemory, string>;
-declare const defaultStep: Step<ContextMemory, string>;
+declare const helpStep: Step<ContextData, string>;
+declare const defaultStep: Step<ContextData, string>;
 
 const containsKeyword: Condition<string> = async (input) => {
   return input.toLowerCase().includes('help');

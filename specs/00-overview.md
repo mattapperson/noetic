@@ -7,19 +7,19 @@
 
 ## Why Another API
 
-Every existing TypeScript agent framework either provides too-high-level abstractions that can't express all patterns (Mastra, Vercel AI SDK), or provides a flexible-but-complex graph model that still misses key patterns (LangGraph). None of them treat context boundary management as a first-class concern, which means they can't naturally express Ralph Wiggum's fresh-context meta-loops or Slate's episodic thread weaving. And none of them provide a composable memory system where independently-authored memory layers (working memory, semantic recall, observations, episodic memory) participate in a well-defined lifecycle around each LLM call.
+Every existing TypeScript agent framework either provides too-high-level abstractions that can't express all patterns (Mastra, Vercel AI SDK), or provides a flexible-but-complex graph model that still misses key patterns (LangGraph). None of them treat context boundary management as a first-class concern, which means they can't naturally express Ralph Wiggum's fresh-context meta-loops or Slate's episodic thread weaving. And none of them provide a composable memory system where independently-authored context layers (working memory, semantic recall, observations, episodic context) participate in a well-defined lifecycle around each LLM call.
 
 The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs, Slate Thread Weaving) look different on the surface but decompose into combinations of the same small set of operations. These operations are derived from the intersection of:
 
 - **Process calculi** — CSP channels, actor message passing
 - **Durable execution** — Temporal's step/signal/child-workflow, Inngest's step.run/waitForEvent
 - **LangGraph's Pregel engine** — supersteps, channels, message passing
-- **Slate's architecture** — episodic memory, orchestrator/worker separation, thread-as-actor model
+- **Slate's architecture** — episodic context, orchestrator/worker separation, thread-as-actor model
 
 ## Packages
 
 ```
-@noetic-tools/memory  →  @noetic-tools/types  ←  @noetic-tools/sub-harness
+@noetic-tools/context  →  @noetic-tools/types  ←  @noetic-tools/sub-harness
         ↑                        ↑                          ↑
 @noetic-tools/core  ←  @noetic-tools/eval        @noetic-tools/sub-harness-{claude-code,codex,opencode,pi}
       ↑
@@ -29,11 +29,11 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 
 `@noetic-tools/core` depends only on the `SubHarness` *type* in `@noetic-tools/types`; it never imports a sub-harness adapter package (the dependency edge above runs adapters → contract, never core → adapter).
 
-- **`@noetic-tools/types`** — The dependency-free foundation. Owns the conversation `Item` data model, LLM config (`LlmProviderConfig`, `ModelParams`, `LLMResponse`, `TokenUsage`), execution context + steering contracts, the platform adapter interfaces (`FsAdapter`, `ShellAdapter`, `SubprocessAdapter`), the error model (`NoeticErrorImpl`), the `Item` schema, and the `MemoryLayer` contract (`types/memory.ts`, also exposed at the `@noetic-tools/types/contract` subpath). Depends on nothing in the workspace.
+- **`@noetic-tools/types`** — The dependency-free foundation. Owns the conversation `Item` data model, LLM config (`LlmProviderConfig`, `ModelParams`, `LLMResponse`, `TokenUsage`), execution context + steering contracts, the platform adapter interfaces (`FsAdapter`, `ShellAdapter`, `SubprocessAdapter`), the error model (`NoeticErrorImpl`), the `Item` schema, and the `ContextLayer` contract (`types/context-layer.ts`, also exposed at the `@noetic-tools/types/contract` subpath). Depends on nothing in the workspace.
 
-- **`@noetic-tools/memory`** — The memory layer system: lifecycle, budget allocation, projector/view assembly (`assembleView`, `allocateBudgets`), scope/storage helpers, and the built-in layer factories. Depends only on `@noetic-tools/types`; re-exports the `MemoryLayer` contract so it is the one-stop import for memory-layer authoring.
+- **`@noetic-tools/context`** — The context layer system: lifecycle, budget allocation, projector/view assembly (`assembleView`, `allocateBudgets`), scope/storage helpers, and the built-in layer factories. Depends only on `@noetic-tools/types`; re-exports the `ContextLayer` contract so it is the one-stop import for context-layer authoring.
 
-- **`@noetic-tools/core`** — Step primitives and execution infrastructure. Runtime-agnostic: no `node:*` imports, no browser-only APIs. Depends on `@noetic-tools/types` and `@noetic-tools/memory` and re-exports their public surface, so every symbol importable from `@noetic-tools/core` (including the `MemoryLayer` contract and built-in layers) stays importable from it. The memory subsystem remains tree-shakable because it has no transitive dependency on the interpreter or runtime modules.
+- **`@noetic-tools/core`** — Step primitives and execution infrastructure. Runtime-agnostic: no `node:*` imports, no browser-only APIs. Depends on `@noetic-tools/types` and `@noetic-tools/context` and re-exports their public surface, so every symbol importable from `@noetic-tools/core` (including the `ContextLayer` contract and built-in layers) stays importable from it. The context subsystem remains tree-shakable because it has no transitive dependency on the interpreter or runtime modules.
 
 - **`@noetic-tools/platform-node`** — Node.js ≥ 20 concrete adapter implementations: local filesystem, local shell, local subprocess, durable IPC, agent-ipc server/client, step bootstrap. Consumed by `@noetic-tools/cli`, `@noetic-tools/code-agent`, and any Node-target user code. See `25-platform-packages`.
 
@@ -43,7 +43,7 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 
 - **`@noetic-tools/sub-harness-{claude-code,codex,opencode,pi}`** — Per-tool sub-harness adapters. Each implements the `SubHarness` contract via `defineSubHarness` (vendor SDK behind an injectable runner) and exports a factory (`claudeCode()`, `codex()`, …). Depends on `@noetic-tools/sub-harness` + `@noetic-tools/types` — never on `@noetic-tools/core`.
 
-- **`@noetic-tools/openui`** — Generative UI via the OpenUI standard: the `openUi()` output codec (streaming OpenUI Lang parser), the `openUiSurface()` memory layer (server-authoritative UI state), the typed `fragment()` builder for tool-authored UI, and the `./server` transport for OpenUI's client stack. Depends on `@noetic-tools/memory` + `@noetic-tools/types` — never on `@noetic-tools/core` (core sees only the dialect-agnostic `OutputCodec` / `UiFragment` contracts in `types`). See `28-generative-ui`.
+- **`@noetic-tools/openui`** — Generative UI via the OpenUI standard: the `openUi()` output codec (streaming OpenUI Lang parser), the `openUiSurface()` context layer (server-authoritative UI state), the typed `fragment()` builder for tool-authored UI, and the `./server` transport for OpenUI's client stack. Depends on `@noetic-tools/context` + `@noetic-tools/types` — never on `@noetic-tools/core` (core sees only the dialect-agnostic `OutputCodec` / `UiFragment` contracts in `types`). See `28-generative-ui`.
 
 - **`@noetic-tools/eval`** — Eval framework, CLI, scorers, and optimization loop. Depends on `@noetic-tools/core`.
 
@@ -55,7 +55,7 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 
 2. **Execution infrastructure** (`07-context-and-event-log`, `08-agent-harness`, `09-error-model`, `10-observability`) — The engine that runs steps: context management, pluggable agent harness backends, error taxonomy, and tracing. Items-native (OpenResponses) — the framework uses `Item` types aligned with the OpenResponses format throughout, eliminating impedance mismatch with the LLM provider.
 
-3. **Memory system** (`11-memory-layer-system`, `12-builtin-memory-layers`) — The `MemoryLayer` contract (owned by `@noetic-tools/types`), lifecycle hook types, scope system, storage adapter contract, and built-in layer factories, all living in `@noetic-tools/memory`. The View (what the LLM actually sees) is assembled by the Projector from the layer outputs + conversation history. **Boundary rule:** `@noetic-tools/memory` depends only on `@noetic-tools/types` and MUST NOT import from `@noetic-tools/core`. This keeps memory tree-shakable and free of any transitive dependency on the interpreter or runtime.
+3. **Memory system** (`11-context-layer-system`, `12-builtin-memory-layers`) — The `ContextLayer` contract (owned by `@noetic-tools/types`), lifecycle hook types, scope system, storage adapter contract, and built-in layer factories, all living in `@noetic-tools/context`. The View (what the LLM actually sees) is assembled by the Projector from the layer outputs + conversation history. **Boundary rule:** `@noetic-tools/context` depends only on `@noetic-tools/types` and MUST NOT import from `@noetic-tools/core`. This keeps memory tree-shakable and free of any transitive dependency on the interpreter or runtime.
 
 **Patterns** (`13-patterns`) are 15-30 line compositions of primitives. They prove the primitives are sufficient; they are not framework magic.
 
@@ -73,7 +73,7 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 | `08-agent-harness` | `AgentHarness` interface | Pluggable engine |
 | `09-error-model` | `NoeticError` | Error taxonomy + propagation |
 | `10-observability` | `Span`, tracing | OpenTelemetry integration |
-| `11-memory-layer-system` | `MemoryLayer`, lifecycle, budget, scope, View assembly | Memory contract |
+| `11-context-layer-system` | `ContextLayer`, lifecycle, budget, scope, View assembly | Context contract |
 | `12-builtin-memory-layers` | 5 built-in factories + custom examples | Reference implementations |
 | `13-patterns` | ReAct, Ralph Wiggum, Task Trees, Dual-Agent, etc. | Composition proofs |
 | `14-design-decisions` | Architectural rationale | Tradeoff documentation |
@@ -99,17 +99,17 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
                   13-patterns (uses all primitives)
                        |
                        ↓ re-exports
-── @noetic-tools/memory ──────────────────────────────────────────────
-                   memory (11, 12)
+── @noetic-tools/context ──────────────────────────────────────────────
+                   context (11, 12)
                        |
                        ↓ depends on
 ── @noetic-tools/types ───────────────────────────────────────────────
             Item, LlmProviderConfig, ExecutionContext,
             FsAdapter/ShellAdapter/SubprocessAdapter,
-            NoeticErrorImpl, MemoryLayer contract
+            NoeticErrorImpl, ContextLayer contract
 
 ── @noetic-tools/eval ────────────────────────────────────────────────
                 17-eval-and-optimization
 ```
 
-`@noetic-tools/memory` depends only on `@noetic-tools/types` and has no edge into `@noetic-tools/core` — see the boundary rule in the Architecture section above. `@noetic-tools/core` re-exports the public surface of both so its entry points are unchanged for consumers.
+`@noetic-tools/context` depends only on `@noetic-tools/types` and has no edge into `@noetic-tools/core` — see the boundary rule in the Architecture section above. `@noetic-tools/core` re-exports the public surface of both so its entry points are unchanged for consumers.

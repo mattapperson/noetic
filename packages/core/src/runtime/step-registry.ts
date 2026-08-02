@@ -1,4 +1,4 @@
-import type { ContextMemory } from '@noetic-tools/memory';
+import type { ContextData } from '@noetic-tools/context';
 import type { Step } from '@noetic-tools/types';
 import { frameworkCast, NoeticConfigError } from '@noetic-tools/types';
 import { setDefaultRegistrar } from '../types/step-registrar';
@@ -9,7 +9,7 @@ import { setDefaultRegistrar } from '../types/step-registrar';
  *  callers can register steps with narrower input/output types without
  *  fighting variance. The public `Step` default already uses `unknown` for
  *  the input and output parameters, matching this shape. */
-type RegisteredStep = Step<ContextMemory, unknown, unknown>;
+type RegisteredStep = Step<ContextData, unknown, unknown>;
 
 //#endregion
 
@@ -34,7 +34,7 @@ const registry = new Map<string, RegisteredStep>();
  * `clearRegistry` wiring is deferred — see the tracked follow-up task on
  * the team's board (strict-registry-plus-test-clear).
  */
-export function registerStep<TMemory, I, O>(step: Step<TMemory, I, O>): void {
+export function registerStep<TContext, I, O>(step: Step<TContext, I, O>): void {
   if (!step.id || step.id.trim() === '') {
     throw new NoeticConfigError({
       code: 'EMPTY_STEP_ID',

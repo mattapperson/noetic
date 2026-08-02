@@ -1,7 +1,7 @@
 {
   "name": "Noetic — Build AI agents you’d actually trust in production.",
   "short_name": "Noetic",
-  "description": "Build AI agents you’d actually trust in production. Composable TypeScript primitives, memory that keeps token costs flat, and evals that catch regressions before users do.",
+  "description": "Build AI agents you’d actually trust in production. Composable TypeScript primitives, context that keeps token costs flat, and evals that catch regressions before users do.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#050505",

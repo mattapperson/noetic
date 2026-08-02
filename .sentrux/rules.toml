@@ -17,7 +17,7 @@
 
 [constraints]
 # sentrux 0.5.7 reports 1 "cycle": a single strongly-connected component of
-# 121 files spanning examples/openui-airbnb, packages/core, packages/memory,
+# 121 files spanning examples/openui-airbnb, packages/core, packages/context,
 # packages/openui, and packages/types. That is the whole barrel-exporting
 # graph collapsed into one component, not a real cycle — an independent
 # file-level SCC pass over the same import graph finds none, and the DSM
@@ -94,7 +94,6 @@ paths = [
   "packages/cli/src/ai/**",
   "packages/cli/src/lsp/**",
   "packages/cli/src/config/**",
-  "packages/cli/src/memory/**",
   "packages/cli/src/setup/**",
 ]
 order = 14
@@ -136,7 +135,7 @@ order = 50
 # Tier D — core-internal layers (packages/core/src/**)
 # Ordered per the dependency graph in specs/00-overview.md: harness →
 # patterns → adapters → interpreter → runtime → primitives →
-# memory/observability → foundations.
+# context/observability → foundations.
 # ─────────────────────────────────────────────────────────────────────────────
 
 [[layers]]
@@ -189,16 +188,22 @@ paths = [
 order = 86
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Tier E — foundational shared packages. The memory layer system and the
+# Tier E — foundational shared packages. The context layer system and the
 # type/contract vocabulary it builds on were extracted from core so they can
-# ship as standalone npm packages (@noetic-tools/memory, @noetic-tools/types).
+# ship as standalone npm packages (@noetic-tools/context, @noetic-tools/types).
 # They sit BELOW every core layer: core imports them, never the reverse.
-# @noetic-tools/types is the dependency-free bottom; @noetic-tools/memory
-# builds on types and is consumed by core.
+# @noetic-tools/types is the dependency-free bottom; @noetic-tools/context
+# builds on types and is consumed by core. packages/memory is the deprecated
+# re-export shim for the pre-rename package name and holds no logic.
 # ─────────────────────────────────────────────────────────────────────────────
 
 [[layers]]
-name = "noetic-memory"
+name = "noetic-context"
+paths = ["packages/context/src/**"]
+order = 88
+
+[[layers]]
+name = "noetic-memory-shim"
 paths = ["packages/memory/src/**"]
 order = 88
 
@@ -208,23 +213,33 @@ paths = ["packages/types/src/**"]
 order = 90
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Foundation acyclicity + memory tree-shakability. @noetic-tools/memory and
+# Foundation acyclicity + context tree-shakability. @noetic-tools/context and
 # @noetic-tools/types are extracted foundational packages: core depends on
-# them, never the reverse. A memory layer importing back into core would
+# them, never the reverse. A context layer importing back into core would
 # both create a package cycle and defeat tree-shakability (importing one
 # layer must not pull in the interpreter/runtime). @noetic-tools/types is
 # the dependency-free bottom of the stack.
 # ─────────────────────────────────────────────────────────────────────────────
 
 [[boundaries]]
+from = "packages/context/src/**"
+to = "packages/core/src/**"
+reason = "core depends on @noetic-tools/context; context must never import back into core (acyclic) and must stay tree-shakable from the interpreter/runtime"
+
+[[boundaries]]
 from = "packages/memory/src/**"
 to = "packages/core/src/**"
-reason = "core depends on @noetic-tools/memory; memory must never import back into core (acyclic) and must stay tree-shakable from the interpreter/runtime"
+reason = "@noetic-tools/memory is the frozen deprecation shim for @noetic-tools/context; it re-exports that package and nothing else, so it inherits the same no-import-back-into-core rule"
+
+[[boundaries]]
+from = "packages/context/src/**"
+to = "packages/memory/src/**"
+reason = "the deprecation shim depends on @noetic-tools/context, so the reverse edge would be a package cycle. They are same-order siblings, which sentrux leaves unconstrained unless stated explicitly"
 
 [[boundaries]]
 from = "packages/types/src/**"
-to = "packages/memory/src/**"
-reason = "@noetic-tools/types is the dependency-free foundation; @noetic-tools/memory builds on it, not the reverse"
+to = "packages/context/src/**"
+reason = "@noetic-tools/types is the dependency-free foundation; @noetic-tools/context builds on it, not the reverse"
 
 [[boundaries]]
 from = "packages/types/src/**"
@@ -282,14 +297,14 @@ to = "packages/platform-browser/src/**"
 reason = "core is runtime-agnostic; it cannot depend on a specific platform"
 
 [[boundaries]]
-from = "packages/memory/src/**"
+from = "packages/context/src/**"
 to = "packages/platform-node/src/**"
-reason = "memory layers are platform-independent; platform packages are platform-specific"
+reason = "context layers are platform-independent; platform packages are platform-specific"
 
 [[boundaries]]
-from = "packages/memory/src/**"
+from = "packages/context/src/**"
 to = "packages/platform-browser/src/**"
-reason = "memory layers are platform-independent; platform packages are platform-specific"
+reason = "context layers are platform-independent; platform packages are platform-specific"
 
 [[boundaries]]
 from = "packages/platform-node/src/**"
@@ -385,9 +400,9 @@ name = "sub-harness"
 paths = ["packages/sub-harness/src/**"]
 order = 87
 
-# @noetic-tools/openui builds on @noetic-tools/memory + @noetic-tools/types (the
-# openUiSurface memory layer + the OutputCodec/UiFragment contracts) and is a
-# consumer package like the sub-harness base — it sits above memory/types and
+# @noetic-tools/openui builds on @noetic-tools/context + @noetic-tools/types (the
+# openUiSurface context layer + the OutputCodec/UiFragment contracts) and is a
+# consumer package like the sub-harness base — it sits above context/types and
 # below every core layer. core sees only the dialect-agnostic contracts in
 # types; it must never import openui or pull the OpenUI parser/transport into
 # its dependency graph (see specs/28-generative-ui.md).
@@ -402,9 +417,9 @@ to = "packages/openui/src/**"
 reason = "core resolves generative-UI output via the @noetic-tools/types OutputCodec/UiFragment contracts; it must never import @noetic-tools/openui or pull the OpenUI Lang parser/surface/transport into its dependency graph"
 
 [[boundaries]]
-from = "packages/memory/src/**"
+from = "packages/context/src/**"
 to = "packages/openui/src/**"
-reason = "@noetic-tools/openui depends on @noetic-tools/memory (the openUiSurface layer builds on it); memory must never import back into openui (acyclic + tree-shakable)"
+reason = "@noetic-tools/openui depends on @noetic-tools/context (the openUiSurface layer builds on it); context must never import back into openui (acyclic + tree-shakable)"
 
 [[boundaries]]
 from = "packages/core/src/**"
@@ -608,8 +623,8 @@ reason = "@noetic-tools/sub-harness is a foundational package on @noetic-tools/t
 
 [[boundaries]]
 from = "packages/sub-harness/src/**"
-to = "packages/memory/src/**"
-reason = "@noetic-tools/sub-harness depends only on @noetic-tools/types; it must not reach into the memory package"
+to = "packages/context/src/**"
+reason = "@noetic-tools/sub-harness depends only on @noetic-tools/types; it must not reach into the context package"
 
 [[boundaries]]
 from = "packages/sub-harness/src/**"
@@ -623,5 +638,5 @@ reason = "a sub-harness adapter is a pure adapter on the SubHarness contract; it
 
 [[boundaries]]
 from = "packages/sub-harness-*/src/**"
-to = "packages/memory/src/**"
-reason = "a sub-harness adapter depends only on @noetic-tools/sub-harness + @noetic-tools/types; it must not reach into the memory package"
+to = "packages/context/src/**"
+reason = "a sub-harness adapter depends only on @noetic-tools/sub-harness + @noetic-tools/types; it must not reach into the context package"

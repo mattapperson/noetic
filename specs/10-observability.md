@@ -1,7 +1,7 @@
 # Observability
 
 > **Depends On:** (none — defines its own primitives)
-> **Exports:** `Span`, `TraceExporter`, `MemoryTraceSpan`
+> **Exports:** `Span`, `TraceExporter`, `LayerTraceSpan`
 
 ---
 
@@ -102,12 +102,12 @@ The harness emits one `llm.call` span per model call (one per tool round) and on
 
 ---
 
-## Memory Layer Trace Spans
+## Context Layer Trace Spans
 
-Every memory layer hook invocation produces a trace span (see also `11-memory-layer-system`).
+Every context layer hook invocation produces a trace span (see also `11-context-layer-system`).
 
 ```typescript
-interface MemoryTraceSpan {
+interface LayerTraceSpan {
   /** Layer that produced this span. */
   layerId: string;
   /** Which hook was invoked. */

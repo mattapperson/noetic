@@ -11,7 +11,7 @@
  * Wrapped in loop({ until: until.maxSteps(1) }) to show branch inside a loop body.
  */
 
-import type { ContextMemory } from '@noetic-tools/memory';
+import type { ContextData } from '@noetic-tools/context';
 import type { StepLoop } from '@noetic-tools/types';
 import { branch } from '../src/builders/control-flow-builders';
 import { loop } from '../src/builders/loop-builder';
@@ -47,7 +47,7 @@ function containsKeyword(input: string, keywords: readonly string[]): boolean {
   return keywords.some((keyword) => lower.includes(keyword));
 }
 
-const billingHandler = step.run<ContextMemory, string, string>({
+const billingHandler = step.run<ContextData, string, string>({
   id: 'billing-handler',
   execute: async (input) => {
     return [
@@ -61,7 +61,7 @@ const billingHandler = step.run<ContextMemory, string, string>({
   },
 });
 
-const technicalHandler = step.llm<ContextMemory, string, string>({
+const technicalHandler = step.llm<ContextData, string, string>({
   id: 'technical-handler',
   model: 'openai/gpt-4o',
   instructions: [
@@ -71,7 +71,7 @@ const technicalHandler = step.llm<ContextMemory, string, string>({
   ].join(' '),
 });
 
-const fallbackHandler = step.run<ContextMemory, string, string>({
+const fallbackHandler = step.run<ContextData, string, string>({
   id: 'fallback-handler',
   execute: async (input) => {
     return [
@@ -89,8 +89,8 @@ const fallbackHandler = step.run<ContextMemory, string, string>({
 //#region Agent Builder
 
 /** Builds a support ticket router using branch + loop. */
-export function buildBranchingAgent(): StepLoop<ContextMemory, string, string> {
-  const router = branch<ContextMemory, string, string>({
+export function buildBranchingAgent(): StepLoop<ContextData, string, string> {
+  const router = branch<ContextData, string, string>({
     id: 'ticket-router',
     route: (input) => {
       if (containsKeyword(input, BILLING_KEYWORDS)) {

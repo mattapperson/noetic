@@ -26,7 +26,7 @@ to bottom of stack (foundations):
 | `cli-presentation`  | Ink/React TUI components, screens, and input handling. |
 | `cli-orchestration` | Composes the domain layer into running sessions: harness wiring, session persistence, planning flow, daemon runtime. |
 | `cli-domain`        | Business capabilities: tool implementations, teammate agents, skills, plugin contract, built-in commands. |
-| `cli-infra`         | External-system adapters: LSP client, AI provider, config loader, CLI-local memory layers. |
+| `cli-infra`         | External-system adapters: LSP client, AI provider, config loader, CLI-local context layers. |
 | `cli-foundations`   | Pure types, errors, shared utilities. No side effects, no I/O. |
 
 ## Subdirectory map
@@ -51,7 +51,7 @@ Every directory under `packages/cli/src/` belongs to exactly one layer.
 | `ai/`              | `cli-infra`         |
 | `lsp/`             | `cli-infra`         |
 | `config/`          | `cli-infra`         |
-| `memory/`          | `cli-infra`         |
+| `context/`         | `cli-infra`         |
 | `types/`           | `cli-foundations`   |
 | `errors/`          | `cli-foundations`   |
 | `util/`            | `cli-foundations`   |

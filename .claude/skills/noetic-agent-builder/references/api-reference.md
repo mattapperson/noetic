@@ -618,7 +618,7 @@ Recall emits a tool preference hierarchy (e.g. "Use Read tool, NOT cat/head/tail
 
 ### planningModeLayer
 
-Specialized guidance for plan-mode operations with FlowSchema integration and phase tracking. Part of the CLI's enhanced prompt engineering system (`@noetic-tools/cli`).
+Specialized guidance for plan-mode operations with workflow-document authoring and phase tracking. Part of the CLI's enhanced prompt engineering system (`@noetic-tools/cli`).
 
 ```typescript
 interface PlanningModeConfig {
@@ -637,7 +637,7 @@ function planningModeLayer(config: PlanningModeConfig): MemoryLayer<PlanningMode
 | **budget** | `{ min: 400, max: 1500 }` |
 | **hooks** | `init`, `recall`, `store`, `onSpawn` |
 
-Recall returns null when not active. When active, injects FlowSchema node type guidelines (llm, subagent, fork, spawn, sequence), PRD authoring best practices with a plan.md template, plan-mode tool restrictions, phase-specific objectives (exploration/authoring/review), and exploration progress. Store counts Read calls to auto-transition phases. Spawn clones state, resets progress.
+Recall returns null when not active. When active, injects workflow-document node guidelines, PRD authoring best practices with a plan.md template, plan-mode tool restrictions, phase-specific objectives (exploration/authoring/review), and exploration progress. Store counts Read calls to auto-transition phases. Spawn clones state, resets progress.
 
 ### skillsLayer
 
@@ -799,27 +799,38 @@ interface SteeringRule {
 
 ### planMemory
 
-Manages PRD authoring and plan execution lifecycle. Enters a restricted "plan mode" where only read-only tools are allowed, the LLM writes a PRD and structures a PlanNode tree, then exits to execution.
+Manages PRD authoring and plan execution lifecycle. Enters a restricted "plan mode" where only read-only tools are allowed, the LLM writes a PRD and structures the plan as a JSON `WorkflowDocument` (spec 26) plus named sub-workflows, then exits to execution.
 
 ```typescript
 planMemory({
   scope?: MemoryScope;                    // default 'thread'
   additionalAllowedTools?: string[];      // extra tools allowed in plan mode
   maxPrdLength?: number;                  // default 50_000
-  maxTreeDepth?: number;                  // default 5
+  maxDepth?: number;                      // workflowDepth cap for tree + workflows; default 5
+  maxWorkflows?: number;                  // named workflow count cap; default 20
+  maxWorkflowChars?: number;              // per-workflow serialized size cap; default 20_000
+  allowedNodeKinds?: WorkflowNode['kind'][]; // optional profile; must include 'subflow' if set
+  additionalPlanInstructions?: string;
+  onEnterSession?: () => Promise<{ slug: string }>;
+  onExit?: (state: PlanState) => Promise<{ approved: boolean }>;
 }): MemoryLayer<PlanState>
 ```
 
-**State:** `{ phase, prd, planTree, executionLog, version }`. Phase transitions: `idle → planning → executing → completed/failed`.
+**State:** `{ phase, prd, planTree: WorkflowDocument | null, workflows: Record<string, WorkflowDocument>, executionLog, version, planSlug? }`. Phase transitions: `idle → planning → executing → completed/failed`.
 
 **Provides (auto-exposed as LLM tools):**
-- `plan/enterPlanMode({ goal? })` — transitions idle → planning, optionally seeds PRD
+- `plan/enterPlanMode({ goal? })` — transitions idle → planning, optionally seeds PRD; resets workflows
 - `plan/updatePrd({ content })` — replaces PRD content (planning phase only)
-- `plan/setPlanTree(PlanNode)` — sets execution tree (validated against PlanNodeSchema)
-- `plan/exitPlanMode({ action: 'execute' | 'cancel' })` — exits plan mode
-- `status` (layerData) — `{ phase, hasPrd, hasPlanTree, version }`
+- `plan/setPlanTree({ document })` — sets the plan as a `WorkflowDocument` (schema/depth/kind/ref-slug validated in-execute; JSON strings accepted); refs to not-yet-defined workflows are listed in the result
+- `plan/setWorkflow({ name, document })` — upserts a named workflow (slug names, count/size/depth caps)
+- `plan/removeWorkflow({ name })` — deletes; warns when still referenced
+- `plan/getWorkflow({ name })` — returns the stored JSON (recall shows summaries, not bodies)
+- `plan/exitPlanMode({ action: 'execute' | 'cancel' })` — `execute` rejects dangling subflow refs and workflow cycles before invoking `onExit`
+- `status` (layerData) — `{ phase, hasPrd, hasPlanTree, workflowNames, version }`
 
-**Lifecycle hooks:** `init` (load from storage), `recall` (phase-dependent context injection), `beforeToolCall` (restrict to read-only in planning), `onSpawn` (clone state), `onComplete` (record outcome).
+**Executing an approved plan:** feed `state.planTree` + `new Map(Object.entries(state.workflows))` to `parseAndRunWorkflow({ json, workflows, ... })` — the plan format IS the JSON workflow runtime format.
+
+**Lifecycle hooks:** `init` (load from storage; legacy trees reset to null), `recall` (phase-dependent context injection), `beforeToolCall` (restrict to read-only in planning), `onSpawn` (clone state), `onComplete` (record outcome).
 
 ## Layer Provides API
 
@@ -1814,7 +1825,9 @@ const doc = validateWorkflow({
 });
 ```
 
-9 node kinds: `llm`, `tool`, `branch`, `fork`, `spawn`, `provide`, `loop`, `sequence`, `every`.
+Node kinds: `llm`, `tool`, `run`, `branch`, `fork`, `spawn`, `provide`, `loop`, `sequence`, `every`, `subflow`, plus the sub-harness kinds (`claude-code`, `codex`, `opencode`, `pi`).
+
+A `subflow` node runs another workflow document as one step — inline (`document`) or by name (`ref`, resolved lazily from `HydrationContext.workflows` / `parseAndRunWorkflow`'s `workflows` option). Exactly one of `document`/`ref` is required. Unknown refs raise `UNKNOWN_WORKFLOW_REFERENCE` at execution; ref cycles raise `WORKFLOW_CYCLE`. There is also a `step.workflow({ id, document | ref, tools?, layers?, workflows?, isolation?: 'inherit' | 'spawn' })` builder that runs a document as a composable `StepRun` (main entry only, not `/portable`).
 
 ### hydrateWorkflow / hydrateNode
 

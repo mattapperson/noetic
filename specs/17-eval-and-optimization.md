@@ -59,7 +59,7 @@ interface EvalSuiteOptions {
 }
 ```
 
-The eval context has **zero knowledge of LLM provider configuration** — the `AgentHarness` auto-resolves from `OPENROUTER_API_KEY` or its `llm` config. Memory layers, if needed, should be baked into the step tree (e.g., via `spawn({ child: step, memory })`), not passed through eval config.
+The eval context has **zero knowledge of LLM provider configuration** — the `AgentHarness` auto-resolves from `OPENROUTER_API_KEY` or its `llm` config. Context layers, if needed, should be baked into the step tree (e.g., via `spawn({ child: step, context })`), not passed through eval config.
 
 ### Execution Model
 
@@ -334,7 +334,7 @@ Fields discovered per step kind:
 |-----------|-----------|-----------|-----------|
 | `llm` | `instructions`, `params` | `model`, `tools` | (topology) |
 | `loop` | (from body) | `maxIterations` | `until` predicates |
-| `spawn` | (from child) | `timeout` | `memory` layers |
+| `spawn` | (from child) | `timeout` | `context` layers |
 | `fork` | (from children) | `mode`, `concurrency` | path topology |
 
 ### Phase 2: Mutator (Immutable Clone + Replacement)
@@ -702,5 +702,5 @@ Runs the optimization pipeline after evaluation. The `--scope` flag controls the
 - `Context`, `Item`, `TokenUsage` are defined in `07-context-and-event-log`
 - `AgentHarness`, `run` are defined in `08-agent-harness`
 - `Span` is defined in `10-observability`
-- `MemoryLayer` is defined in `11-memory-layer-system`
+- `ContextLayer` is defined in `11-context-layer-system`
 - `react`, `ralphWiggum` patterns are defined in `13-patterns`

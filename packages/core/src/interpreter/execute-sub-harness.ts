@@ -7,7 +7,7 @@
 
 import type {
   Context,
-  ContextMemory,
+  ContextData,
   FunctionCallItem,
   Item,
   LLMResponse,
@@ -50,13 +50,13 @@ type TeardownMode = NonNullable<SubHarnessSessionPolicy['onComplete']>;
 
 //#region Helpers
 
-function sessionStore(ctx: Context<ContextMemory>): Map<string, SubHarnessSession> {
+function sessionStore(ctx: Context<ContextData>): Map<string, SubHarnessSession> {
   return frameworkCast<SubHarnessSessionStore>(ctx.harness).subHarnessSessions;
 }
 
-async function resolveSubHarness<TMemory, I, O>(
-  step: StepSubHarness<TMemory, I, O>,
-  ctx: Context<TMemory>,
+async function resolveSubHarness<TContext, I, O>(
+  step: StepSubHarness<TContext, I, O>,
+  ctx: Context<TContext>,
 ): Promise<SubHarness> {
   const resolved = await resolveLazy(step.harness, ctx);
   if (!resolved) {
@@ -88,11 +88,11 @@ function resolveTurnText<I>(resolvedPrompt: string | undefined, input: I): strin
  * to the adapter so `ctx.abort()` / `harness.cancel()` stops the coding agent's
  * in-flight turn instead of leaving a sub-process running until it finishes.
  */
-function abortSignalOf(ctx: Context<ContextMemory>): AbortSignal | undefined {
+function abortSignalOf(ctx: Context<ContextData>): AbortSignal | undefined {
   return isContextImpl(ctx) ? ctx.abortSignal : undefined;
 }
 
-function buildRunContext(ctx: Context<ContextMemory>): SubHarnessRunContext {
+function buildRunContext(ctx: Context<ContextData>): SubHarnessRunContext {
   return {
     cwd: ctx.cwdState.cwd,
     fs: ctx.fs,
@@ -116,7 +116,7 @@ function toLlmResponse(result: SubHarnessTurnResult): LLMResponse {
   };
 }
 
-function applyTurnResult(ctx: Context<ContextMemory>, result: SubHarnessTurnResult): void {
+function applyTurnResult(ctx: Context<ContextData>, result: SubHarnessTurnResult): void {
   const toolCalls: FunctionCallItem[] = [];
   for (const item of result.items) {
     ctx.itemLog.append(item);
@@ -156,11 +156,11 @@ interface SessionResolution {
   reuseKey?: string;
 }
 
-async function startOrReuseSession<TMemory, I, O>(
-  step: StepSubHarness<TMemory, I, O>,
+async function startOrReuseSession<TContext, I, O>(
+  step: StepSubHarness<TContext, I, O>,
   harness: SubHarness,
-  ctx: Context<TMemory>,
-  baseCtx: Context<ContextMemory>,
+  ctx: Context<TContext>,
+  baseCtx: Context<ContextData>,
   history: ReadonlyArray<Item>,
 ): Promise<SessionResolution> {
   const reuseKey = step.session?.reuse;
@@ -198,7 +198,7 @@ async function startOrReuseSession<TMemory, I, O>(
 async function finalizeSession(
   resolution: SessionResolution,
   policy: SubHarnessSessionPolicy | undefined,
-  baseCtx: Context<ContextMemory>,
+  baseCtx: Context<ContextData>,
 ): Promise<void> {
   const { session, reuseKey } = resolution;
   if (!reuseKey) {
@@ -221,12 +221,12 @@ async function finalizeSession(
 
 //#region Public API
 
-export async function executeSubHarness<TMemory, I, O>(
-  step: StepSubHarness<TMemory, I, O>,
+export async function executeSubHarness<TContext, I, O>(
+  step: StepSubHarness<TContext, I, O>,
   input: I,
-  ctx: Context<TMemory>,
+  ctx: Context<TContext>,
 ): Promise<O> {
-  const baseCtx = frameworkCast<Context<ContextMemory>>(ctx);
+  const baseCtx = frameworkCast<Context<ContextData>>(ctx);
 
   const harness = await resolveSubHarness(step, ctx);
   const resolvedPrompt = await resolveLazy(step.prompt, ctx);

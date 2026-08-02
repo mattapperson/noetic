@@ -113,7 +113,7 @@ Before execution, the harness collects all tools from every LLM step in the step
 
 ### Auto-Injected Layer Tools
 
-Functions declared in a memory layer's `provides` field are automatically included in the unified tool set. These tools are namespaced as `layerId/fnName` (e.g., `working-memory/update`). You do not need to pass them in the `tools` array -- the runtime resolves them from the active memory layers.
+Functions declared in a context layer's `provides` field are automatically included in the unified tool set. These tools are namespaced as `layerId/fnName` (e.g., `working-context/update`). You do not need to pass them in the `tools` array -- the runtime resolves them from the active context layers.
 
 ## Tuning Generation
 

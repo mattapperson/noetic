@@ -15,7 +15,7 @@ It exercises the real generative-UI pipeline end to end against a live model:
 
 - **`createLibrary` / `defineComponent`** — the component vocabulary the model may render.
 - **`step.llm({ output: openUi(library) })`** — the streaming output codec; the model authors UI instead of prose.
-- **`openUiSurface()`** — the server-authoritative memory layer that owns the mounted document across turns.
+- **`openUiSurface()`** — the server-authoritative context layer that owns the mounted document across turns.
 - **real tools** (`search_listings` with `near`/`sort` + haversine distance, `quote_price`) — the model infers the search intent, calls them, then bakes the results into components.
 
 ### Intent drives the layout

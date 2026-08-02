@@ -4,7 +4,7 @@
  * snippet harness, so we expose just the public types referenced by documentation.
  */
 
-import type { LastLayerUsage, MemoryLayer, StorageAdapter, Tool } from '@noetic-tools/core';
+import type { ContextLayer, LastLayerUsage, StorageAdapter, Tool } from '@noetic-tools/core';
 
 export interface AgentOverride {
   model?: string;
@@ -27,7 +27,7 @@ export interface AgentConfig {
     exclude?: string[];
     tasks?: boolean;
   };
-  memory?: string[];
+  context?: string[];
   worktree?: {
     'worktree-path'?: string;
     branch?: string;
@@ -145,9 +145,9 @@ export interface NoeticPlugin {
   name: string;
   version: string;
   tools?: (ctx: PluginContext) => ReadonlyArray<Tool> | Promise<ReadonlyArray<Tool>>;
-  memoryLayers?: (
+  contextLayers?: (
     ctx: PluginContext,
-  ) => ReadonlyArray<MemoryLayer> | Promise<ReadonlyArray<MemoryLayer>>;
+  ) => ReadonlyArray<ContextLayer> | Promise<ReadonlyArray<ContextLayer>>;
   skills?: (ctx: PluginContext) => ReadonlyArray<unknown> | Promise<ReadonlyArray<unknown>>;
   commands?: (ctx: PluginContext) => ReadonlyArray<Command> | Promise<ReadonlyArray<Command>>;
   subagentPresets?: () => Record<string, unknown> | Promise<Record<string, unknown>>;

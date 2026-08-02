@@ -7,7 +7,7 @@ import type { AgentHarnessContract } from './runtime';
 import type { ShellAdapter } from './shell-adapter';
 
 /** @public Accessor for reading and writing per-layer state from within a tool execution. */
-export interface ToolMemory {
+export interface ToolContext {
   get<T>(layerId: string): T | undefined;
   set<T>(layerId: string, state: T): void;
 }
@@ -25,8 +25,15 @@ export interface ToolExecutionContext {
   readonly fs: FsAdapter;
   /** Shell adapter for virtual or real shell command execution. */
   readonly shell: ShellAdapter;
-  /** Per-layer memory accessor for reading/writing tool-specific state. */
-  readonly memory: ToolMemory;
+  /** Per-layer state accessor for reading/writing tool-specific state. */
+  readonly context: ToolContext;
+  /**
+   * @deprecated Renamed to `context`. Returns the same accessor.
+   *
+   * Required for the same reason as `Context.memory` — pre-rename code calls
+   * `toolCtx.memory.get(...)` directly.
+   */
+  readonly memory: ToolContext;
   /** The fully assembled conversation view at the point of tool invocation. */
   readonly assembledView: ReadonlyArray<Item>;
   /** Metadata from the most recent step execution (token usage, tool calls, etc.). */

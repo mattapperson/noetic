@@ -118,11 +118,11 @@ Each forked path receives a **deep clone** of the parent's `Context.state`. Muta
 
 This mirrors `spawn`'s deep-clone guarantee (see `04-spawn`) and prevents race conditions between concurrent paths.
 
-### Memory Layers
+### Context Layers
 
-A forked path is a child execution. Each path inherits the parent's memory layers and unified tool set, so `llm` steps inside a path keep their memory projection and layer tools, and a nested `spawn` has parent layers to inherit.
+A forked path is a child execution. Each path inherits the parent's context layers and unified tool set, so `llm` steps inside a path keep their context projection and layer tools, and a nested `spawn` has parent layers to inherit.
 
-Layer **state** is per-path, bracketed by the same hooks `spawn` uses (see `11-memory-layer-system`):
+Layer **state** is per-path, bracketed by the same hooks `spawn` uses (see `11-context-layer-system`):
 
 - `onSpawn` seeds each path's layer state from the parent's before the path runs. Unlike `spawn`, items returned by `onSpawn` are NOT appended — a fork child already inherits the parent's full item log, which is what those items exist to seed for an otherwise-empty spawn child.
 - `onReturn` merges a path's contribution back into the parent when the path **succeeds**. Failed paths are not merged (matching `spawn`, whose `onReturn` is skipped when the child throws) and their layer state is discarded.

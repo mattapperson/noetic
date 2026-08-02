@@ -5,7 +5,7 @@
  * render functions at the call / progress / result / error lifecycle points and
  * forwards each returned `UiFragment` as an `openui.fragment` framework event
  * (namespaced `${agentName}:openui.fragment`). The framework never interprets
- * the fragment source — a UI surface (memory layer + transport) composes it.
+ * the fragment source — a UI surface (context layer + transport) composes it.
  *
  * The `ui` methods are declared bivariantly on `ToolUiDeclaration`, so the
  * erased `Tool` handle the runtime holds can call them with runtime values.

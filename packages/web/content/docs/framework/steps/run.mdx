@@ -23,25 +23,25 @@ const transform = step.run({
 The `execute` function receives two arguments:
 
 1. **input** -- the typed input from the previous step (or the initial pipeline input).
-2. **ctx** -- the Noetic `Context`, giving access to memory, tokens, abort signals, and more.
+2. **ctx** -- the Noetic `Context`, giving access to context, tokens, abort signals, and more.
 
 The return value becomes the output of the step, passed to whatever comes next.
 
 ## Type Signature
 
 ```ts
-type RunStepOptions<TMemory, I, O> = {
+type RunStepOptions<TContext, I, O> = {
   id: string;
-  execute: (input: I, ctx: Context<TMemory>) => Promise<O>;
+  execute: (input: I, ctx: Context<TContext>) => Promise<O>;
   retry?: RetryPolicy;
 };
 
-declare const stepRun: <TMemory, I, O>(
-  opts: RunStepOptions<TMemory, I, O>,
-) => StepRun<TMemory, I, O>;
+declare const stepRun: <TContext, I, O>(
+  opts: RunStepOptions<TContext, I, O>,
+) => StepRun<TContext, I, O>;
 ```
 
-`TMemory` is the typed memory shape (from `InferMemory`), `I` is the input type, and `O` is the output type.
+`TContext` is the typed context shape (from `InferContext`), `I` is the input type, and `O` is the output type.
 
 ## API Reference
 
@@ -50,7 +50,7 @@ declare const stepRun: <TMemory, I, O>(
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
 | `id` | `string` | Yes | Unique step identifier |
-| `execute` | `(input: I, ctx: Context<TMemory>) => Promise<O>` | Yes | The async function to run |
+| `execute` | `(input: I, ctx: Context<TContext>) => Promise<O>` | Yes | The async function to run |
 | `retry` | `RetryPolicy` | No | Retry configuration on failure |
 | `subprocess` | `SubprocessAdapter` | No | Per-step subprocess adapter override. When set, the interpreter dispatches this step through the given adapter instead of the harness default (resolution order: `detachedSpawn` overrides → `step.subprocess` → `harness.subprocess`) |
 
@@ -104,15 +104,15 @@ const contextAware = step.run({
     // Access token usage
     console.log('Tokens used so far:', ctx.tokens.total);
 
-    // Access memory layer data
-    const snapshot = ctx.memory['working-memory'].snapshot;
+    // Access context layer data
+    const snapshot = ctx.context['working-context'].snapshot;
 
     return `Processed: ${input}`;
   },
 });
 ```
 
-The `ctx.memory` property provides typed access to data and functions exposed by memory layers via their `provides` field. See [Context](/docs/framework/context) for the full property reference.
+The `ctx.context` property provides typed access to data and functions exposed by context layers via their `provides` field. See [Context](/docs/framework/context) for the full property reference.
 
 ## Related
 

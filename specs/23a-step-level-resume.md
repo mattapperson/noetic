@@ -98,7 +98,7 @@ This is the same bet the Noetic platform's turn fence already makes, and the rea
 
 **Recommendation: core's ledger covers control flow and `llm` steps; effects stay fenced at the tool/host boundary.** Core should not claim exactly-once for tool execution — it has no durable pre-dispatch record and no way to know whether a given tool is idempotent. Stating this explicitly matters, because "durable execution" invites the assumption that side effects are covered.
 
-## Interaction with memory layers
+## Interaction with context layers
 
 Layer state is already snapshotted (`layers`, keyed by `layerId`) and replayed into `layerStateStore` on restore. A replayed `llm` step must therefore **bypass the layer lifecycle entirely** — no recall, no store, no append pipeline. Re-running `store` hooks against restored state would double-fold every observation the pre-crash run already folded.
 

@@ -94,9 +94,9 @@ A failing `store.save` is logged via `console.warn` and swallowed. **A failing c
 
 1. Reads the snapshot via `checkpointStore.load(executionId)`. Returns `null` if no snapshot is recorded.
 2. Validates `schemaVersion` (throws `CHECKPOINT_SCHEMA_MISMATCH` on mismatch).
-3. Replays `layers` into `harness.layerStateStore` keyed by the original `executionId`, so memory projectors and `ctx.memory[layerId]` accessors observe continuity across the restart.
+3. Replays `layers` into `harness.layerStateStore` keyed by the original `executionId`, so context projectors and `ctx.context[layerId]` accessors observe continuity across the restart.
 4. Re-parses `itemLog.items` through `harness.itemSchemas` to recover typed `Item[]`.
-5. Calls `harness.createContext({...opts, items, threadId, resourceId, cwdInit: snapshot.cwd?.current, memory: opts?.memory ?? harness._memory})` to produce a fresh context seeded with the snapshot's item log, identity, and cwd.
+5. Calls `harness.createContext({...opts, items, threadId, resourceId, cwdInit: snapshot.cwd?.current, context: opts?.context ?? harness._contextLayers})` to produce a fresh context seeded with the snapshot's item log, identity, and cwd.
 6. Overrides the returned context's `.id` to the original `executionId` so downstream adapter-correlation keeps working.
 7. Attaches the recovered step ledger (`23a-step-level-resume`) keyed to that same id.
 
@@ -112,7 +112,7 @@ A snapshot recovers **data**. It cannot recover the **live objects** a host atta
 interface RestoreContextOptions {
   parent?: Context;
   state?: unknown;
-  memory?: MemoryLayer[];
+  context?: ContextLayer[];
 }
 ```
 

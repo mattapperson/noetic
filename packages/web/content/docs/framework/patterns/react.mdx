@@ -16,8 +16,8 @@ declare function react(opts: {
   tools: Tool[];
   maxSteps?: number;
   maxCost?: number;
-  memory?: MemoryConfig | MemoryLayer[];
-}): StepLoop<ContextMemory, string, string> | StepSpawn<ContextMemory, string, string>;
+  context?: ContextConfig | ContextLayer[];
+}): StepLoop<ContextData, string, string> | StepSpawn<ContextData, string, string>;
 ```
 
 | Parameter | Type | Default | Purpose |
@@ -27,9 +27,9 @@ declare function react(opts: {
 | `tools` | `Tool[]` | -- | Available tools for the agent |
 | `maxSteps` | `number` | `10` | Maximum loop iterations |
 | `maxCost` | `number` | -- | Optional USD cost cap |
-| `memory` | `MemoryConfig \| MemoryLayer[]` | -- | When provided, the loop is wrapped in a `spawn` with these layers; the return type becomes `StepSpawn`. |
+| `context` | `ContextConfig \| ContextLayer[]` | -- | When provided, the loop is wrapped in a `spawn` with these layers; the return type becomes `StepSpawn`. |
 
-**Returns**: a `StepLoop<ContextMemory, string, string>` when no `memory` is supplied, or a `StepSpawn<ContextMemory, string, string>` (loop wrapped in spawn) when memory layers are passed.
+**Returns**: a `StepLoop<ContextData, string, string>` when no `context` is supplied, or a `StepSpawn<ContextData, string, string>` (loop wrapped in spawn) when context layers are passed.
 
 ## Example
 
@@ -105,15 +105,15 @@ function reactImpl(opts: {
 
 ## Customizing
 
-When called without `memory`, `react()` returns a plain `StepLoop`, so you can mutate the returned step's loop hooks before handing it to the harness:
+When called without `context`, `react()` returns a plain `StepLoop`, so you can mutate the returned step's loop hooks before handing it to the harness:
 
 ```ts
 import { react } from '@noetic-tools/core';
-import type { ContextMemory, StepLoop, Tool } from '@noetic-tools/core';
+import type { ContextData, StepLoop, Tool } from '@noetic-tools/core';
 
 declare const tools: Tool[];
 
-const myReact = react({ model: 'openai/gpt-4o', tools }) as StepLoop<ContextMemory, string, string>;
+const myReact = react({ model: 'openai/gpt-4o', tools }) as StepLoop<ContextData, string, string>;
 
 myReact.onError = (error) => {
   if (error.kind === 'llm_rate_limit') return 'retry';

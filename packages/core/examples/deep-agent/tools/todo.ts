@@ -1,19 +1,19 @@
 /**
  * Task planning tools — mirrors DeepAgentsJS todoListMiddleware.
  *
- * Tools declare memory via ToolMemoryDeclaration; toolMemoryLayer() materializes it.
- * Tools read/write state via toolCtx.memory.
+ * Tools declare state via ToolContextDeclaration; toolContextLayer() materializes it.
+ * Tools read/write state via toolCtx.context.
  */
 
+import type { Tool, ToolContextDeclaration } from '@noetic-tools/types';
 import { z } from 'zod';
 import { tool } from '../../../src/builders/tool-builder';
-import type { Tool, ToolMemoryDeclaration } from '../../../src/types/common';
 import type { TodoItem, TodoState } from '../types';
 import { TodoStatus } from '../types';
 
-const TODO_MEMORY_ID = 'todos';
+const TODO_CONTEXT_ID = 'todos';
 
-//#region Memory Declaration
+//#region Context Declaration
 
 const STATUS_ICONS: Record<string, string> = {
   [TodoStatus.Pending]: '[ ]',
@@ -22,8 +22,8 @@ const STATUS_ICONS: Record<string, string> = {
   [TodoStatus.Blocked]: '[!]',
 };
 
-export const todoMemory: ToolMemoryDeclaration<TodoState> = {
-  id: TODO_MEMORY_ID,
+export const todoContext: ToolContextDeclaration<TodoState> = {
+  id: TODO_CONTEXT_ID,
   init: () => ({
     items: [],
   }),
@@ -47,12 +47,12 @@ function generateId(): string {
 }
 
 function getTodoState(toolCtx: {
-  memory: {
+  context: {
     get<T>(id: string): T | undefined;
   };
 }): TodoState {
   return (
-    toolCtx.memory.get<TodoState>(TODO_MEMORY_ID) ?? {
+    toolCtx.context.get<TodoState>(TODO_CONTEXT_ID) ?? {
       items: [],
     }
   );
@@ -60,13 +60,13 @@ function getTodoState(toolCtx: {
 
 function setTodoState(
   toolCtx: {
-    memory: {
+    context: {
       set<T>(id: string, state: T): void;
     };
   },
   state: TodoState,
 ): void {
-  toolCtx.memory.set(TODO_MEMORY_ID, state);
+  toolCtx.context.set(TODO_CONTEXT_ID, state);
 }
 
 //#endregion
@@ -108,7 +108,7 @@ function createWriteTodosTool(): Tool {
       setTodoState(toolCtx, updatedState);
       return newItems;
     },
-    memory: todoMemory,
+    context: todoContext,
   });
 }
 
@@ -138,7 +138,7 @@ function createUpdateTodoTool(): Tool {
       setTodoState(toolCtx, state);
       return item;
     },
-    memory: todoMemory,
+    context: todoContext,
   });
 }
 
@@ -152,7 +152,7 @@ function createListTodosTool(): Tool {
       const state = getTodoState(toolCtx);
       return state.items;
     },
-    memory: todoMemory,
+    context: todoContext,
   });
 }
 

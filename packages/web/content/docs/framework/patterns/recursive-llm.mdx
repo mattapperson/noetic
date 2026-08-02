@@ -5,7 +5,7 @@ description: Use spawn to delegate recursive sub-tasks to child agents that run 
 
 ## Overview
 
-The Recursive LLM pattern uses `spawn()` to create child agents that start with an empty `ItemLog`. Since spawn provides full isolation by default, the child runs independently without inheriting the parent's conversation history. Memory layers can be attached to control what the child sees and how results flow back.
+The Recursive LLM pattern uses `spawn()` to create child agents that start with an empty `ItemLog`. Since spawn provides full isolation by default, the child runs independently without inheriting the parent's conversation history. Context layers can be attached to control what the child sees and how results flow back.
 
 ## Pattern
 
@@ -25,9 +25,9 @@ const recursiveStep = spawn({
 });
 ```
 
-## Controlling Child Context with Memory Layers
+## Controlling Child Context with Context Layers
 
-Memory layers give you fine-grained control over what the child sees and how results return to the parent.
+Context layers give you fine-grained control over what the child sees and how results return to the parent.
 
 **`onSpawn` hooks** inject items into the child's initial context. Use these to provide instructions, background knowledge, or a curated subset of the parent's history.
 
@@ -37,7 +37,7 @@ Memory layers give you fine-grained control over what the child sees and how res
 const recursiveStep = spawn({
   id: 'recursive-subtask',
   child: subTaskAgent,
-  memory: [
+  context: [
     {
       id: 'task-briefing',
       name: 'Task Briefing',
@@ -116,6 +116,6 @@ const subtaskStep = spawn({
 
 ## Tips
 
-- Attach a memory layer with an `onReturn` hook to compress child results before they flow back to the parent. This keeps the parent's context from growing unboundedly.
+- Attach a context layer with an `onReturn` hook to compress child results before they flow back to the parent. This keeps the parent's context from growing unboundedly.
 - Set a `timeout` on the spawn to prevent runaway sub-tasks.
 - Combine with `fork({ mode: 'all' })` to run multiple recursive sub-tasks in parallel.

@@ -23,7 +23,7 @@ The discriminated union `Step` type and the `execute` interpreter. Get the core 
 
 **Specs:** `04-spawn`
 
-`spawn` with `fresh` + `full`. Write **Ralph Wiggum**. This forces context isolation and the `prepareNext` feedback loop. State persistence across fresh boundaries is deferred to Stage 7 (memory layers).
+`spawn` with `fresh` + `full`. Write **Ralph Wiggum**. This forces context isolation and the `prepareNext` feedback loop. State persistence across fresh boundaries is deferred to Stage 7 (context layers).
 
 ## Stage 4: Channels and External Channels
 
@@ -45,26 +45,26 @@ Add external channel declaration (`external: true`), `getChannelHandle`, `Channe
 
 `branch` and `compilePlan`. Write the **dynamic plan** pattern and **adaptive plan** loop. This forces agent resolution and the adaptive revision cycle.
 
-## Stage 7: Memory Layer System
+## Stage 7: Context Layer System
 
-**Specs:** `11-memory-layer-system`, `12-builtin-memory-layers` (workingMemory)
+**Specs:** `11-context-layer-system`, `12-builtin-memory-layers` (workingMemoryContext)
 
-Implement the `MemoryLayer` interface, the Projector (View assembly), and the `workingMemory()` built-in. The Projector assembles system prompt item (`role: system`) + layer output items (`role: developer`) + conversation history items into `Item[]`. `recallLayers` returns `Item[]`. `storeLayers` receives `LLMResponse` (with items + usage). Write a ReAct agent with working memory and verify the recall/store lifecycle runs correctly on each iteration. This forces the budget allocation algorithm and the slot-ordering system.
+Implement the `ContextLayer` interface, the Projector (View assembly), and the `workingMemoryContext()` built-in. The Projector assembles system prompt item (`role: system`) + layer output items (`role: developer`) + conversation history items into `Item[]`. `recallLayers` returns `Item[]`. `storeLayers` receives `LLMResponse` (with items + usage). Write a ReAct agent with working memory and verify the recall/store lifecycle runs correctly on each iteration. This forces the budget allocation algorithm and the slot-ordering system.
 
-## Stage 8: Memory Layers Across Spawn Boundaries
+## Stage 8: Context Layers Across Spawn Boundaries
 
-**Specs:** `11-memory-layer-system` (onSpawn/onReturn), `12-builtin-memory-layers` (durableTaskState, observationalMemory)
+**Specs:** `11-context-layer-system` (onSpawn/onReturn), `12-builtin-memory-layers` (durableTaskState, observationalContext)
 
-Implement `onSpawn`/`onReturn` hooks. Write Ralph Wiggum with `workingMemory({ scope: 'resource' })` and `durableTaskState()`. Verify that both structured state and task artifacts persist across fresh-context iterations while the ItemLog resets. Add `observationalMemory()` and verify that observations compress across iterations.
+Implement `onSpawn`/`onReturn` hooks. Write Ralph Wiggum with `workingMemoryContext({ scope: 'resource' })` and `durableTaskState()`. Verify that both structured state and task artifacts persist across fresh-context iterations while the ItemLog resets. Add `observationalContext()` and verify that observations compress across iterations.
 
 ## Stage 9: Error Model
 
 **Specs:** `09-error-model`
 
-Deliberately inject failures at every level and verify propagation matches the defined rules. Test `onError` on loops, `fork_partial` recovery, `spawn_summary_failed` fallback. Test memory layer error policies: init failure disables the layer, recall failure skips iteration, store failure is logged but doesn't block. Test `channel_closed` error on external channel handles.
+Deliberately inject failures at every level and verify propagation matches the defined rules. Test `onError` on loops, `fork_partial` recovery, `spawn_summary_failed` fallback. Test context layer error policies: init failure disables the layer, recall failure skips iteration, store failure is logged but doesn't block. Test `channel_closed` error on external channel handles.
 
 ## Stage 10: Observability
 
 **Specs:** `10-observability`
 
-Add span creation to the `execute` interpreter. Verify the trace tree matches the execution tree for all patterns. Verify memory layer trace spans include budget allocation, token usage, and hook duration.
+Add span creation to the `execute` interpreter. Verify the trace tree matches the execution tree for all patterns. Verify context layer trace spans include budget allocation, token usage, and hook duration.

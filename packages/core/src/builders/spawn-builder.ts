@@ -1,14 +1,17 @@
-import type { ContextMemory, MemoryConfig, MemoryLayer } from '@noetic-tools/memory';
+import type { ContextConfig, ContextData, ContextLayer } from '@noetic-tools/context';
 import type { Step, StepSpawn, SubprocessAdapter } from '@noetic-tools/types';
 import { NoeticConfigError } from '@noetic-tools/types';
 import { getDefaultRegistrar } from '../types/step-registrar';
+import { resolveContextOption } from './context-option';
 
 //#region Types
 
-interface SpawnOpts<TMemory, I, O> {
+interface SpawnOpts<TContext, I, O> {
   id: string;
-  child: Step<TMemory, I, O>;
-  memory?: MemoryConfig | MemoryLayer[];
+  child: Step<TContext, I, O>;
+  context?: ContextConfig | ContextLayer[];
+  /** @deprecated Renamed to `context`. */
+  memory?: ContextConfig | ContextLayer[];
   timeout?: number;
   /**
    * Optional per-step subprocess adapter override. The interpreter routes
@@ -28,7 +31,7 @@ interface SpawnOpts<TMemory, I, O> {
  * @public
  * @param opts.id - Unique step identifier used in traces and error messages.
  * @param opts.child - Step to execute in the isolated child context.
- * @param opts.memory - Optional memory config or layers for the child context (replaces parent layers entirely).
+ * @param opts.context - Optional context config or layers for the child context (replaces parent layers entirely).
  * @param opts.timeout - Optional execution timeout in ms; the child is aborted if it exceeds this.
  * @param opts.subprocess - Optional per-step subprocess adapter override.
  * @returns A `StepSpawn` step. The spawn step and its `child` step are both
@@ -38,9 +41,9 @@ interface SpawnOpts<TMemory, I, O> {
  * @throws `NoeticConfigError` with code `MISSING_CHILD_STEP` if `child` is not provided.
  * @throws `NoeticConfigError` with code `DUPLICATE_STEP_ID` if another step with the same id is already registered.
  */
-export function spawn<TMemory = ContextMemory, I = unknown, O = unknown>(
-  opts: SpawnOpts<TMemory, I, O>,
-): StepSpawn<TMemory, I, O> {
+export function spawn<TContext = ContextData, I = unknown, O = unknown>(
+  opts: SpawnOpts<TContext, I, O>,
+): StepSpawn<TContext, I, O> {
   if (!opts.id?.trim()) {
     throw new NoeticConfigError({
       code: 'EMPTY_STEP_ID',
@@ -55,9 +58,13 @@ export function spawn<TMemory = ContextMemory, I = unknown, O = unknown>(
       hint: 'Provide a child step to execute in the isolated child context.',
     });
   }
-  const built: StepSpawn<TMemory, I, O> = {
+  const built: StepSpawn<TContext, I, O> = {
     kind: 'spawn',
-    ...opts,
+    id: opts.id,
+    child: opts.child,
+    context: resolveContextOption(opts),
+    timeout: opts.timeout,
+    subprocess: opts.subprocess,
   };
   getDefaultRegistrar().register(built);
   // Ensure the child is addressable by id — builders for `run`/`llm`/`tool`

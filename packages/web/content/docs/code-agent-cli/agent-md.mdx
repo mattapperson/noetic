@@ -5,7 +5,7 @@ description: Persistent project and user instructions surfaced into every agent 
 
 `AGENT.md` is a markdown file that the CLI loads into context on every execution. It is the canonical place to put **persistent, repo-wide guidance** for the agent: how to run tests, what the architecture looks like, conventions you want enforced, packages to avoid, and so on.
 
-The file is loaded by the `agent-md` memory layer, which sits just above observations in the [memory budget](/docs/framework/memory). Total budget is **15 KB recall**; per-file content cap is 25 KB; aggregate cap across all sources is 60 KB. When the aggregate cap is exceeded, lower-precedence sources are dropped and a note is appended.
+The file is loaded by the `agent-md` context layer, which sits just above observations in the [context budget](/docs/framework/context-layers). Total budget is **15 KB recall**; per-file content cap is 25 KB; aggregate cap across all sources is 60 KB. When the aggregate cap is exceeded, lower-precedence sources are dropped and a note is appended.
 
 ## Discovery order
 

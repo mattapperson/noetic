@@ -440,7 +440,7 @@ const agent = react({
 });
 ```
 
-When the model calls `plan/enterPlanMode`, tool calls are restricted to read-only. The model authors a PRD via `plan/updatePrd`, structures a `PlanNode` tree via `plan/setPlanTree`, then calls `plan/exitPlanMode({ action: 'execute' })` to begin execution.
+When the model calls `plan/enterPlanMode`, tool calls are restricted to read-only. The model authors a PRD via `plan/updatePrd`, structures the plan as a JSON `WorkflowDocument` via `plan/setPlanTree({ document })`, factors detailed mechanics into named workflows via `plan/setWorkflow({ name, document })` (referenced from the tree with `{ kind: 'subflow', ref: '<name>' }` nodes), then calls `plan/exitPlanMode({ action: 'execute' })`. Exit rejects dangling subflow refs and workflow cycles before any approval callback runs.
 
 ### With Custom Allowed Tools
 
@@ -448,13 +448,32 @@ When the model calls `plan/enterPlanMode`, tool calls are restricted to read-onl
 planMemory({
   additionalAllowedTools: ['SearchDocs', 'ListIssues'],
   maxPrdLength: 1e5,
-  maxTreeDepth: 3,
+  maxDepth: 3,
+  allowedNodeKinds: ['sequence', 'llm', 'tool', 'subflow'],
 })
+```
+
+### Executing an Approved Plan
+
+The plan format IS the JSON workflow runtime format, so the host runs it directly:
+
+```typescript
+const onExit = async (state) => {
+  const approved = await ui.requestApproval(state.prd, state.planTree, state.workflows);
+  if (approved) {
+    void parseAndRunWorkflow({
+      json: state.planTree,
+      workflows: new Map(Object.entries(state.workflows)),
+      harness, ctx, tools,
+    });
+  }
+  return { approved };
+};
 ```
 
 ### CLI Integration
 
-The CLI includes `planMemory()` by default. Users type `/plan` to enter plan mode. The agent explores with read-only tools, writes a PRD, structures a plan tree, then exits to execute.
+The CLI includes `planMemory()` by default. Users type `/plan` to enter plan mode. The agent explores with read-only tools, writes a PRD, structures the plan document plus named workflows, then exits to execute.
 
 ---
 

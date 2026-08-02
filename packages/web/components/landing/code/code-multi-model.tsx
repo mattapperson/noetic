@@ -41,7 +41,7 @@ const PHASES: PhaseRow[] = [
   },
   {
     phase: 'Embedder',
-    why: 'Memory recall. Purpose-built beats general-purpose.',
+    why: 'Context recall. Purpose-built beats general-purpose.',
     exampleModel: 'text-embedding-3-large',
     exampleProvider: 'openai',
   },

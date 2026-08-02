@@ -2,8 +2,8 @@ import type { ZodType } from 'zod';
 import type { Channel } from './channel';
 import type { ModelParams, RetryPolicy, ServerToolSpec, StepMeta } from './common';
 import type { Context } from './context';
+import type { ContextConfig, ContextData, ContextLayer, ProjectionPolicy } from './context-layer';
 import type { NoeticError } from './error';
-import type { ContextMemory, MemoryConfig, MemoryLayer, ProjectionPolicy } from './memory';
 import type { OutputCodec } from './output-codec';
 import type {
   SubHarness,
@@ -65,7 +65,7 @@ export type Until = (snapshot: Snapshot) => Verdict | Promise<Verdict>;
  * tool list). The getter runs at step execution time with the live context.
  * @public
  */
-export type Lazy<T, TMemory = ContextMemory> = T | ((ctx: Context<TMemory>) => T | Promise<T>);
+export type Lazy<T, TContext = ContextData> = T | ((ctx: Context<TContext>) => T | Promise<T>);
 
 /**
  * Outcome of a single path in a `settle`-mode fork (mirrors `Promise.allSettled`).
@@ -83,23 +83,23 @@ export interface SettleResult<O> {
 }
 
 /** @public Discriminated union of all step kinds that can be composed into an execution tree. */
-export type Step<TMemory = ContextMemory, I = unknown, O = unknown> =
-  | StepRun<TMemory, I, O>
-  | StepLLM<TMemory, I, O>
-  | StepSubHarness<TMemory, I, O>
-  | StepTool<TMemory, I, O>
-  | StepBranch<TMemory, I, O>
-  | StepFork<TMemory, I, O>
-  | StepSpawn<TMemory, I, O>
-  | StepProvide<TMemory, I, O>
-  | StepLoop<TMemory, I, O>
-  | StepEvery<TMemory, I, O>;
+export type Step<TContext = ContextData, I = unknown, O = unknown> =
+  | StepRun<TContext, I, O>
+  | StepLLM<TContext, I, O>
+  | StepSubHarness<TContext, I, O>
+  | StepTool<TContext, I, O>
+  | StepBranch<TContext, I, O>
+  | StepFork<TContext, I, O>
+  | StepSpawn<TContext, I, O>
+  | StepProvide<TContext, I, O>
+  | StepLoop<TContext, I, O>
+  | StepEvery<TContext, I, O>;
 
 /** @public A step that executes arbitrary async logic via a user-supplied function. */
-export interface StepRun<TMemory = ContextMemory, I = unknown, O = unknown> {
+export interface StepRun<TContext = ContextData, I = unknown, O = unknown> {
   kind: 'run';
   id: string;
-  execute: (input: I, ctx: Context<TMemory>) => Promise<O>;
+  execute: (input: I, ctx: Context<TContext>) => Promise<O>;
   retry?: RetryPolicy;
   /**
    * Per-step subprocess adapter override. When set, the interpreter
@@ -111,13 +111,13 @@ export interface StepRun<TMemory = ContextMemory, I = unknown, O = unknown> {
 }
 
 /** @public A step that sends a prompt to a language model and returns its response. */
-export interface StepLLM<TMemory = ContextMemory, _I = unknown, O = unknown> {
+export interface StepLLM<TContext = ContextData, _I = unknown, O = unknown> {
   kind: 'llm';
   id: string;
   /** Model id. Accepts either an eager string or a `(ctx) => string` getter. */
-  model: Lazy<string, TMemory>;
+  model: Lazy<string, TContext>;
   /** System instructions. Eager string or `(ctx) => string | undefined` getter. */
-  instructions?: Lazy<string | undefined, TMemory>;
+  instructions?: Lazy<string | undefined, TContext>;
   /**
    * Tools exposed to the LLM. Eager array or `(ctx) => (...)[] | undefined` getter.
    * Entries are either a client `Tool` or an inline `ServerToolSpec` (an
@@ -125,7 +125,7 @@ export interface StepLLM<TMemory = ContextMemory, _I = unknown, O = unknown> {
    * Function-form tools do not contribute to the pre-computed `ctx.unifiedTools`;
    * they are resolved per execution.
    */
-  tools?: Lazy<(Tool | ServerToolSpec)[] | undefined, TMemory>;
+  tools?: Lazy<(Tool | ServerToolSpec)[] | undefined, TContext>;
   /**
    * Structured output: a Zod schema (assistant text is JSON-parsed and
    * validated) or a streaming `OutputCodec` (fed each text delta, produces
@@ -146,7 +146,7 @@ export interface StepLLM<TMemory = ContextMemory, _I = unknown, O = unknown> {
  * interpreter handler.
  * @public
  */
-export interface StepSubHarness<TMemory = ContextMemory, _I = unknown, O = unknown> {
+export interface StepSubHarness<TContext = ContextData, _I = unknown, O = unknown> {
   /** The harness kind, equal to the backing adapter's `harnessId`. */
   kind: SubHarnessKind;
   id: string;
@@ -155,13 +155,13 @@ export interface StepSubHarness<TMemory = ContextMemory, _I = unknown, O = unkno
    * Programmatic builders take it inline; the JSON hydrator resolves it from
    * the workflow's harness registry and inlines it here.
    */
-  harness: Lazy<SubHarness, TMemory>;
+  harness: Lazy<SubHarness, TContext>;
   /** Turn prompt. Eager string or `(ctx) => string` getter. */
-  prompt: Lazy<string, TMemory>;
+  prompt: Lazy<string, TContext>;
   /** Shared harness settings (model, permission mode, …). */
   settings?: SubHarnessSettings;
   /** System instructions applied on the first message of a fresh session. */
-  instructions?: Lazy<string | undefined, TMemory>;
+  instructions?: Lazy<string | undefined, TContext>;
   /** When set, the assistant text is JSON-parsed and validated against this schema. */
   output?: ZodType<O>;
   /** Session reuse + teardown policy across steps. */
@@ -171,7 +171,7 @@ export interface StepSubHarness<TMemory = ContextMemory, _I = unknown, O = unkno
 }
 
 /** @public A step that invokes a single tool directly, bypassing the LLM. */
-export interface StepTool<_TMemory = ContextMemory, I = unknown, O = unknown> {
+export interface StepTool<_TContext = ContextData, I = unknown, O = unknown> {
   kind: 'tool';
   id: string;
   tool: Tool<ZodType<I>, ZodType<O>>;
@@ -179,73 +179,73 @@ export interface StepTool<_TMemory = ContextMemory, I = unknown, O = unknown> {
 }
 
 /** @public A step that dynamically selects and executes one of several possible sub-steps. */
-export interface StepBranch<TMemory = ContextMemory, I = unknown, O = unknown> {
+export interface StepBranch<TContext = ContextData, I = unknown, O = unknown> {
   kind: 'branch';
   id: string;
   route: (
     input: I,
-    ctx: Context<TMemory>,
-  ) => Step<TMemory, I, O> | null | Promise<Step<TMemory, I, O> | null>;
-  _optimizable?: Step<TMemory>[];
+    ctx: Context<TContext>,
+  ) => Step<TContext, I, O> | null | Promise<Step<TContext, I, O> | null>;
+  _optimizable?: Step<TContext>[];
 }
 
 /** @public Union of fork step variants (`race`, `all`, `settle`) for concurrent path execution. */
-export type StepFork<TMemory = ContextMemory, I = unknown, O = unknown> =
-  | StepForkRace<TMemory, I, O>
-  | StepForkAll<TMemory, I, O>
-  | StepForkSettle<TMemory, I, O>;
+export type StepFork<TContext = ContextData, I = unknown, O = unknown> =
+  | StepForkRace<TContext, I, O>
+  | StepForkAll<TContext, I, O>
+  | StepForkSettle<TContext, I, O>;
 
 /** @public A fork step that returns the result of the first path to complete. */
-export interface StepForkRace<TMemory = ContextMemory, I = unknown, O = unknown> {
+export interface StepForkRace<TContext = ContextData, I = unknown, O = unknown> {
   kind: 'fork';
   id: string;
   mode: 'race';
-  paths: (input: I, ctx: Context<TMemory>) => Step<TMemory, I, O>[];
+  paths: (input: I, ctx: Context<TContext>) => Step<TContext, I, O>[];
   concurrency?: number;
-  _optimizable?: Step<TMemory>[];
+  _optimizable?: Step<TContext>[];
 }
 
 /** @public A fork step that runs all paths and merges their results. */
-export interface StepForkAll<TMemory = ContextMemory, I = unknown, O = unknown> {
+export interface StepForkAll<TContext = ContextData, I = unknown, O = unknown> {
   kind: 'fork';
   id: string;
   mode: 'all';
-  paths: (input: I, ctx: Context<TMemory>) => Step<TMemory, I, O>[];
-  merge: (results: O[], ctx: Context<TMemory>) => O;
+  paths: (input: I, ctx: Context<TContext>) => Step<TContext, I, O>[];
+  merge: (results: O[], ctx: Context<TContext>) => O;
   concurrency?: number;
-  _optimizable?: Step<TMemory>[];
+  _optimizable?: Step<TContext>[];
 }
 
 /** @public A fork step that runs all paths and collects fulfilled/rejected outcomes. */
-export interface StepForkSettle<TMemory = ContextMemory, I = unknown, O = unknown> {
+export interface StepForkSettle<TContext = ContextData, I = unknown, O = unknown> {
   kind: 'fork';
   id: string;
   mode: 'settle';
-  paths: (input: I, ctx: Context<TMemory>) => Step<TMemory, I, O>[];
-  merge: (results: SettleResult<O>[], ctx: Context<TMemory>) => O;
+  paths: (input: I, ctx: Context<TContext>) => Step<TContext, I, O>[];
+  merge: (results: SettleResult<O>[], ctx: Context<TContext>) => O;
   concurrency?: number;
-  _optimizable?: Step<TMemory>[];
+  _optimizable?: Step<TContext>[];
 }
 
 /**
- * A step that provides memory layers to its child without creating an isolated context.
+ * A step that provides context layers to its child without creating an isolated context.
  * Like React's Context.Provider — layers are available to all descendant steps.
  * Spawn and detachedSpawn break the inheritance chain.
  * @public
  */
-export interface StepProvide<TMemory = ContextMemory, I = unknown, O = unknown> {
+export interface StepProvide<TContext = ContextData, I = unknown, O = unknown> {
   kind: 'provide';
   id: string;
-  child: Step<TMemory, I, O>;
-  memory: MemoryConfig | MemoryLayer[];
+  child: Step<TContext, I, O>;
+  context: ContextConfig | ContextLayer[];
 }
 
-/** @public A step that launches a child execution with its own memory scope. */
-export interface StepSpawn<TMemory = ContextMemory, I = unknown, O = unknown> {
+/** @public A step that launches a child execution with its own context scope. */
+export interface StepSpawn<TContext = ContextData, I = unknown, O = unknown> {
   kind: 'spawn';
   id: string;
-  child: Step<TMemory, I, O>;
-  memory?: MemoryConfig | MemoryLayer[];
+  child: Step<TContext, I, O>;
+  context?: ContextConfig | ContextLayer[];
   timeout?: number;
   /**
    * Per-step subprocess adapter override applied when the interpreter
@@ -259,12 +259,12 @@ export interface StepSpawn<TMemory = ContextMemory, I = unknown, O = unknown> {
  * A loop step that iterates a body step until a termination predicate is satisfied.
  * @public
  */
-export interface StepLoop<TMemory = ContextMemory, I = unknown, O = unknown> {
+export interface StepLoop<TContext = ContextData, I = unknown, O = unknown> {
   kind: 'loop';
   /** Unique step identifier used in traces and error messages. */
   id: string;
   /** Steps to execute sequentially on each iteration. */
-  steps: ReadonlyArray<Step<TMemory, I, O>>;
+  steps: ReadonlyArray<Step<TContext, I, O>>;
   /** Termination predicate evaluated after each iteration with a cumulative snapshot. */
   until: Until;
   /** Hard safety cap on iterations (default: 1000). */
@@ -276,9 +276,9 @@ export interface StepLoop<TMemory = ContextMemory, I = unknown, O = unknown> {
   /** Ms to wait on inbox before the loop parks itself (default: 0 = no parking). */
   parkTimeout?: number;
   /** Transforms the previous iteration's output into the next iteration's input. */
-  prepareNext?: (output: O, verdict: Verdict, ctx: Context<TMemory>) => I;
+  prepareNext?: (output: O, verdict: Verdict, ctx: Context<TContext>) => I;
   /** Per-iteration error handler: retry the iteration, skip it, or abort the loop. */
-  onError?: (error: NoeticError, ctx: Context<TMemory>) => 'retry' | 'skip' | 'abort';
+  onError?: (error: NoeticError, ctx: Context<TContext>) => 'retry' | 'skip' | 'abort';
 }
 
 /**
@@ -298,12 +298,12 @@ export type EveryErrorPolicy = 'continue' | 'fail';
  *
  * @public
  */
-export interface StepEvery<TMemory = ContextMemory, I = unknown, O = unknown> {
+export interface StepEvery<TContext = ContextData, I = unknown, O = unknown> {
   kind: 'every';
   /** Unique step identifier used in traces and error messages. */
   id: string;
   /** Body step executed on each iteration. */
-  step: Step<TMemory, I, O>;
+  step: Step<TContext, I, O>;
   /** Park duration between iterations in milliseconds. Must be >= 0. */
   ms: number;
   /** Optional channel that wakes the parking interval when any value arrives. */
@@ -315,8 +315,8 @@ export interface StepEvery<TMemory = ContextMemory, I = unknown, O = unknown> {
 }
 
 /** @public Function signature used by the interpreter to recursively execute a step. */
-export type ExecuteStepFn = <TMemory, I, O>(
-  step: Step<TMemory, I, O>,
+export type ExecuteStepFn = <TContext, I, O>(
+  step: Step<TContext, I, O>,
   input: I,
-  ctx: Context<TMemory>,
+  ctx: Context<TContext>,
 ) => Promise<O>;

@@ -1,4 +1,4 @@
-import type { StorageAdapter } from '@noetic-tools/memory';
+import type { StorageAdapter } from '@noetic-tools/context';
 import type {
   ProcessSubprocessRequest,
   StepSubprocessRequest,

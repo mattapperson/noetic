@@ -1,3 +1,12 @@
+## @noetic-tools/types-v2.3.0 (2026-08-02)
+
+* feat: rename the memory layer system to context layers ([123810f](https://github.com/mattapperson/noetic/commit/123810f))
+
+## @noetic-tools/types-v2.2.0 (2026-08-02)
+
+* feat(core): add subflow workflow node with named sub-workflow registry ([82c2529](https://github.com/mattapperson/noetic/commit/82c2529))
+* feat(types): host the JSON workflow schema (moved from @noetic-tools/core) ([7f37ad6](https://github.com/mattapperson/noetic/commit/7f37ad6))
+
 ## @noetic-tools/types-v2.1.1 (2026-07-26)
 
 * fix(core): cascade abort to child contexts and implement harness.cancel ([6d36c97](https://github.com/mattapperson/noetic/commit/6d36c97))

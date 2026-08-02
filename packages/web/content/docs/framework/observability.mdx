@@ -79,12 +79,12 @@ const myStep = step.run({ id: 'annotated', execute: async (input: string, ctx) =
 | `events` | `Array<{ name, timestamp, attributes? }>` | All events recorded via `addEvent`. |
 | `duration` | `number` (getter) | `endTime - startTime`, or time since creation if still open. |
 
-## MemoryTraceSpan
+## LayerTraceSpan
 
-Memory layer operations produce their own trace records:
+Context layer operations produce their own trace records:
 
 ```ts validate=none
-interface MemoryTraceSpan {
+interface LayerTraceSpan {
   layerId: string;
   hook: 'init' | 'recall' | 'store' | 'onSpawn' | 'onReturn' | 'onComplete' | 'dispose';
   durationMs: number;
@@ -97,7 +97,7 @@ interface MemoryTraceSpan {
 
 | Field | Description |
 |---|---|
-| `layerId` | Which memory layer produced this trace. |
+| `layerId` | Which context layer produced this trace. |
 | `hook` | The lifecycle hook that executed. |
 | `durationMs` | How long the hook took. |
 | `status` | Outcome: `ok`, `error`, `timeout`, or `skipped`. |
@@ -230,4 +230,4 @@ const doc = JSON.parse(String(runSpan.attributes.get(NoeticAttr.WORKFLOW_DOCUMEN
 
 - [Context & Event Log](/docs/framework/context) -- every context carries a `span`.
 - [AgentHarness](/docs/framework/runtime) -- `createSpan` and trace exporter configuration.
-- [Memory](/docs/framework/memory) -- memory layer operations produce `MemoryTraceSpan` records.
+- [Context Layers](/docs/framework/context-layers) -- context layer operations produce `LayerTraceSpan` records.

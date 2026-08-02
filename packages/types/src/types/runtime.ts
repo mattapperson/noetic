@@ -2,11 +2,11 @@ import type { ZodType } from 'zod';
 import type { Channel, ChannelHandle, ExternalChannel } from './channel';
 import type { LLMResponse, ModelParams, ServerToolSpec } from './common';
 import type { Context, CwdState, RestoreContextOptions } from './context';
+import type { ContextData, ContextLayer, ProjectionPolicy, StorageAdapter } from './context-layer';
 import type { DetachedHandle } from './detached';
 import type { FsAdapter } from './fs-adapter';
 import type { HarnessResponse, StreamEvent, StreamingItem } from './harness-result';
 import type { ExecuteInput, Item, ItemSchemaExtensions } from './items';
-import type { ContextMemory, MemoryLayer, ProjectionPolicy, StorageAdapter } from './memory';
 import type { Span, TraceExporter } from './observability';
 import type { ShellAdapter } from './shell-adapter';
 import type { SteeringDecision } from './steering';
@@ -20,7 +20,7 @@ export interface AgentHooks {
   afterStep?: (step: Step, result: unknown, ctx: Context) => Promise<void>;
 }
 
-/** @public Top-level configuration object that defines an agent's model, tools, memory, and behavior. */
+/** @public Top-level configuration object that defines an agent's model, tools, context, and behavior. */
 export interface AgentConfig<TParams extends Record<string, unknown> = Record<string, unknown>> {
   name: string;
   storage?: StorageAdapter;
@@ -95,7 +95,7 @@ interface CallModelRequestBase {
 interface CallModelRequestWithTools extends CallModelRequestBase {
   tools: Tool[];
   ctx: Context;
-  layers?: MemoryLayer[];
+  layers?: ContextLayer[];
   /** When set, restricts which tools the model may invoke for this call. */
   allowedToolNames?: string[];
 }
@@ -120,8 +120,10 @@ export interface ExecuteOptions {
   threadId?: string;
   resourceId?: string;
   state?: unknown;
-  /** Memory layers to apply to the execution context. Overrides harness-level memory if provided. */
-  memory?: MemoryLayer[];
+  /** Context layers to apply to the execution context. Overrides harness-level layers if provided. */
+  context?: ContextLayer[];
+  /** @deprecated Renamed to `context`. */
+  memory?: ContextLayer[];
   /** Override the harness's default delivery mode for this message only. */
   deliveryMode?: DeliveryMode;
   /**
@@ -166,7 +168,7 @@ export interface SessionScope {
 
 //#region Agent Harness Contract
 
-/** @public Type-level contract for the agent runtime. Used for type annotations throughout the interpreter, memory layers, and context. Implemented by `AgentHarness`. */
+/** @public Type-level contract for the agent runtime. Used for type annotations throughout the interpreter, context layers, and context. Implemented by `AgentHarness`. */
 export interface AgentHarnessContract<
   TParams extends Record<string, unknown> = Record<string, unknown>,
 > {
@@ -229,7 +231,7 @@ export interface AgentHarnessContract<
    */
   seedSessionHistory(threadId: string, items: ReadonlyArray<Item>): void;
 
-  run<I, O>(step: Step<ContextMemory, I, O>, input: I, ctx: Context): Promise<O>;
+  run<I, O>(step: Step<ContextData, I, O>, input: I, ctx: Context): Promise<O>;
   /**
    * Launch `step` as a fire-and-forget background execution.
    *
@@ -241,12 +243,12 @@ export interface AgentHarnessContract<
    *
    * @param step Step to execute in a fresh child context.
    * @param input Initial input passed to `step`.
-   * @param parentCtx Parent context (the child inherits memory layers and,
+   * @param parentCtx Parent context (the child inherits context layers and,
    * by default, threadId/resourceId).
    * @param overrides Optional: override threadId or resourceId on the child.
    */
   detachedSpawn<I, O>(
-    step: Step<ContextMemory, I, O>,
+    step: Step<ContextData, I, O>,
     input: I,
     parentCtx: Context,
     overrides?: {
@@ -262,7 +264,9 @@ export interface AgentHarnessContract<
     state?: unknown;
     threadId?: string;
     resourceId?: string;
-    memory?: MemoryLayer[];
+    context?: ContextLayer[];
+    /** @deprecated Renamed to `context`. */
+    memory?: ContextLayer[];
     /** Override the new context's initial cwd. */
     cwdInit?: string;
   }): Context;
@@ -297,30 +301,30 @@ export interface AgentHarnessContract<
    * iterable owns a single iterator; subscribe again for a second consumer.
    */
   getChannelStream<T>(channel: ExternalChannel<T>, executionId: string): AsyncIterable<T>;
-  initLayers(layers: MemoryLayer[], ctx: Context, storage: StorageAdapter): Promise<void>;
-  recallLayers(layers: MemoryLayer[], input: string, ctx: Context): Promise<RecallLayerOutput[]>;
+  initLayers(layers: ContextLayer[], ctx: Context, storage: StorageAdapter): Promise<void>;
+  recallLayers(layers: ContextLayer[], input: string, ctx: Context): Promise<RecallLayerOutput[]>;
   /** Recall only atomic layers (or all layers when the harness forces atomic recall). Blocks until complete. */
   recallLayersAtomic(
-    layers: MemoryLayer[],
+    layers: ContextLayer[],
     input: string,
     ctx: Context,
     budgets: Map<string, number>,
   ): Promise<RecallLayerOutput[]>;
   /** Recall eventual layers from cache (non-blocking); returns nothing when the harness forces atomic recall. */
   recallLayersEventual(
-    layers: MemoryLayer[],
+    layers: ContextLayer[],
     input: string,
     ctx: Context,
     budgets: Map<string, number>,
   ): Promise<RecallLayerOutput[]>;
   /**
    * Compute the items that would be sent to the model on the next turn for a
-   * session — its accumulated history plus the harness's memory-layer recall
+   * session — its accumulated history plus the harness's context-layer recall
    * outputs assembled in the same order `executeLLM` produces.
    */
   previewRequestItems(scope?: SessionScope): Promise<ReadonlyArray<Item>>;
-  storeLayers(layers: MemoryLayer[], response: LLMResponse, ctx: Context): Promise<void>;
-  disposeLayers(layers: MemoryLayer[], ctx: Context): Promise<void>;
+  storeLayers(layers: ContextLayer[], response: LLMResponse, ctx: Context): Promise<void>;
+  disposeLayers(layers: ContextLayer[], ctx: Context): Promise<void>;
   checkpoint(ctx: Context): Promise<void>;
   /**
    * Rebuild a `Context` from a persisted snapshot. `opts` carries the wiring
@@ -330,7 +334,7 @@ export interface AgentHarnessContract<
   restore(executionId: string, opts?: RestoreContextOptions): Promise<Context | null>;
   /**
    * Cancel an execution. Aborts `ctx` and — cascading down the execution tree —
-   * every live fork path and spawn child, then runs memory-layer teardown
+   * every live fork path and spawn child, then runs context-layer teardown
    * (`onComplete` with `outcome: 'aborted'`, then `dispose`) bottom-up.
    *
    * Blocked channel operations reject with `cancelled`, the in-flight model
@@ -345,13 +349,13 @@ export interface AgentHarnessContract<
   getLayerState<T>(executionId: string, layerId: string): T | undefined;
   setLayerState<T>(executionId: string, layerId: string, state: T): void;
   beforeToolCall(
-    layers: MemoryLayer[],
+    layers: ContextLayer[],
     toolName: string,
     toolArgs: unknown,
     ctx: Context,
   ): Promise<SteeringDecision>;
   afterModelCall(
-    layers: MemoryLayer[],
+    layers: ContextLayer[],
     response: LLMResponse,
     ctx: Context,
   ): Promise<SteeringDecision>;
@@ -361,7 +365,7 @@ export interface AgentHarnessContract<
    * Returns the input unchanged if no layer registers the hook.
    */
   projectHistory(
-    layers: MemoryLayer[],
+    layers: ContextLayer[],
     items: ReadonlyArray<Item>,
     ctx: Context,
   ): Promise<ReadonlyArray<Item>>;
@@ -371,7 +375,7 @@ export interface AgentHarnessContract<
    * Returns final items to append and any re-render requests.
    */
   runAppendPipeline(
-    layers: MemoryLayer[],
+    layers: ContextLayer[],
     items: Item[],
     ctx: Context,
   ): Promise<AppendPipelineResult>;
@@ -381,7 +385,7 @@ export interface AgentHarnessContract<
    */
   executeRerender(
     requests: RerenderRequest[],
-    layers: MemoryLayer[],
+    layers: ContextLayer[],
     ctx: Context,
     budgets: Map<string, number>,
     query?: string,
@@ -390,7 +394,7 @@ export interface AgentHarnessContract<
 
 //#endregion
 
-/** @public Output from a single memory layer's recall phase, including items and token budget used. */
+/** @public Output from a single context layer's recall phase, including items and token budget used. */
 export interface RecallLayerOutput {
   layerId: string;
   items: Item[];

@@ -1,4 +1,4 @@
-export type { ContextMemory, MemoryLayer } from '@noetic-tools/memory';
+export type { ContextData, ContextLayer } from '@noetic-tools/context';
 export type {
   AgentHarnessContract,
   Channel,

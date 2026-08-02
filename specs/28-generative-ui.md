@@ -9,12 +9,12 @@ surfaces that compose but adopt independently:
 1. **Transport** — an OpenUI-speaking server boundary around `AgentHarness`, so
    OpenUI's own client stack (`@openuidev/react-ui`) talks to a Noetic agent.
 2. **Model-authored UI** — an output codec on `step.llm` that parses streamed
-   OpenUI Lang, paired with a memory layer that owns the resulting UI state.
+   OpenUI Lang, paired with a context layer that owns the resulting UI state.
 3. **Tool-authored UI** — a per-tool declaration of programmatic render
    functions, so tool calls and results carry their own UI fragments.
 
 The design center is **server-authoritative UI state**: the `openUiSurface()`
-memory layer is the single owner of the mounted document, reactive variables,
+context layer is the single owner of the mounted document, reactive variables,
 and interaction record. The client renderer is a projection of layer state —
 never the other way around. This is what makes generative UI durable,
 resumable, visible to the model, and conditionable by the step graph.
@@ -22,7 +22,7 @@ resumable, visible to the model, and conditionable by the step graph.
 ## Packages
 
 ```
-openui ──→ memory ──→ types
+openui ─→ context ─→ types
 core ──→ types            (core never imports openui)
 ```
 
@@ -31,9 +31,9 @@ core ──→ types            (core never imports openui)
   `ToolUiDeclaration` (on `Tool`). Neither mentions OpenUI; both are string- and
   schema-shaped so `types` stays a dependency leaf.
 - **`@noetic-tools/openui`** — everything OpenUI-specific: the `openUi()` output
-  codec (streaming OpenUI Lang parser), the `openUiSurface()` memory layer, the
+  codec (streaming OpenUI Lang parser), the `openUiSurface()` context layer, the
   typed `fragment()` builder, `ui.*` until-predicates, the ask-user renderer,
-  and library/prompt generation. Depends on `@noetic-tools/memory` and
+  and library/prompt generation. Depends on `@noetic-tools/context` and
   `@noetic-tools/types` only.
 - **`@noetic-tools/openui/server`** — the transport: `serveOpenUi()` plus the
   client-side `noeticStreamAdapter()` / `noeticMessageFormat` pair consumed by
@@ -43,7 +43,7 @@ core ──→ types            (core never imports openui)
 resolves codec/library instances from the step or the hydration registry. No
 OpenUI code enters core's dependency graph — the same decoupling invariant as
 sub-harnesses (`27-sub-harness-steps`), enforced by `.sentrux/rules.toml`
-(`core → openui` forbidden, `memory → openui` forbidden).
+(`core → openui` forbidden, `context → openui` forbidden).
 
 ## Contracts in `types`
 
@@ -52,7 +52,7 @@ sub-harnesses (`27-sub-harness-steps`), enforced by `.sentrux/rules.toml`
 `StepLLM.output` accepts a Zod schema or a codec:
 
 ```ts
-interface StepLLM<TMemory, _I, O> {
+interface StepLLM<TContext, _I, O> {
   // ...
   output?: ZodType<O> | OutputCodec<O>;
 }
@@ -101,7 +101,7 @@ interface ToolUiDeclaration<I extends ZodTypeAny, O extends ZodTypeAny, E = unkn
 }
 
 interface Tool<I, O> {
-  // ...existing fields (mirrors `memory?: ToolMemoryDeclaration`)
+  // ...existing fields (mirrors `context?: ToolContextDeclaration`)
   ui?: ToolUiDeclaration<I, O>;
 }
 ```
@@ -148,7 +148,7 @@ one registry, so data fetches execute as ordinary tool executions with full
 `ctx.tokens` / `ctx.cost` / observability coverage and pass through
 `beforeToolCall` policy (steering) like any agent-initiated call.
 
-## The `openUiSurface()` memory layer
+## The `openUiSurface()` context layer
 
 The layer is the server-side owner of UI state, modeled on `durableTaskState`
 (thread-scoped durable state rendered into the View) and `steering`
@@ -175,7 +175,7 @@ interface OpenUiSurfaceState {
   appliedEventSeq: number;
 }
 
-function openUiSurface(config: { library: UiLibrary }): MemoryLayer<OpenUiSurfaceState>
+function openUiSurface(config: { library: UiLibrary }): ContextLayer<OpenUiSurfaceState>
 ```
 
 | Property | Value |

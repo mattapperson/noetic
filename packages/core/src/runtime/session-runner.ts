@@ -29,7 +29,7 @@ export interface TurnContext {
  *  (so the runner is the single point of ExecuteInput → Item[] conversion),
  *  plus the messages being delivered this turn so the harness can honour
  *  per-turn `ExecuteOptions` (the first message's options establish
- *  resourceId/state/memory for the turn). */
+ *  resourceId/state/context for the turn). */
 export type CreateContextFn = (
   items: ReadonlyArray<Item>,
   turnId: string,

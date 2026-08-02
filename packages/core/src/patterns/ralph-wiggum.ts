@@ -1,4 +1,4 @@
-import type { ContextMemory } from '@noetic-tools/memory';
+import type { ContextData } from '@noetic-tools/context';
 import type { StepLoop, Tool } from '@noetic-tools/types';
 import { loop } from '../builders/loop-builder';
 import { spawn } from '../builders/spawn-builder';
@@ -22,7 +22,7 @@ export function ralphWiggum(opts: {
   verify: VerifyFn;
   maxIterations?: number;
   innerMaxSteps?: number;
-}): StepLoop<ContextMemory, string, string> {
+}): StepLoop<ContextData, string, string> {
   const inner = react({
     model: opts.model,
     instructions: opts.instructions,
@@ -30,10 +30,10 @@ export function ralphWiggum(opts: {
     maxSteps: opts.innerMaxSteps ?? 20,
   });
 
-  return loop<ContextMemory, string, string>({
+  return loop<ContextData, string, string>({
     id: 'ralph-wiggum-loop',
     steps: [
-      spawn<ContextMemory, string, string>({
+      spawn<ContextData, string, string>({
         id: 'ralph-iteration',
         child: inner,
       }),

@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import type { ContextMemory } from '@noetic-tools/memory';
+import type { ContextData } from '@noetic-tools/context';
 import type { Step } from '@noetic-tools/types';
 import { isNoeticConfigError } from '@noetic-tools/types';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { createScriptedCallModel, makeMessage, textOnlyResponse } from '../_helpers';
 
-const echoStep: Step<ContextMemory, string, string> = {
+const echoStep: Step<ContextData, string, string> = {
   kind: 'llm',
   id: 'echo',
   model: 'test/echo',

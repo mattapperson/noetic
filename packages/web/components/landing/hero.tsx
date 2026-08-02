@@ -202,8 +202,8 @@ export function Hero(): ReactNode {
             lineHeight: 1.6,
           }}
         >
-          Noetic gives you composable TypeScript primitives, memory that keeps token costs flat, and
-          evals that catch regressions before users do.
+          Noetic gives you composable TypeScript primitives, context that keeps token costs flat,
+          and evals that catch regressions before users do.
         </motion.p>
 
         <motion.div

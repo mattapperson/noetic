@@ -1,8 +1,8 @@
 {
   "name": "@noetic-tools/openui",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "type": "module",
-  "description": "Generative UI for Noetic agents via the OpenUI standard: the openUi() output codec (streaming OpenUI Lang parser), the openUiSurface() memory layer (server-authoritative UI state), the typed fragment() builder for tool-authored UI, and an OpenUI-speaking transport.",
+  "description": "Generative UI for Noetic agents via the OpenUI standard: the openUi() output codec (streaming OpenUI Lang parser), the openUiSurface() context layer (server-authoritative UI state), the typed fragment() builder for tool-authored UI, and an OpenUI-speaking transport.",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -50,7 +50,7 @@
     "zod": "^4.0.0"
   },
   "dependencies": {
-    "@noetic-tools/memory": "workspace:*",
+    "@noetic-tools/context": "workspace:*",
     "@noetic-tools/types": "workspace:*",
     "zod": "^4.0.0"
   },

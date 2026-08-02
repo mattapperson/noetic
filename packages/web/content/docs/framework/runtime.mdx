@@ -1,6 +1,6 @@
 ---
 title: AgentHarness
-description: The AgentHarness executes agent steps, manages context, and coordinates memory and channels.
+description: The AgentHarness executes agent steps, manages context, and coordinates context layers and channels.
 ---
 
 ## Quick Example
@@ -36,7 +36,7 @@ const response = await harness.getAgentResponse();
 console.log(response.text);
 ```
 
-The AgentHarness is the execution engine at the heart of Noetic. It creates contexts, manages per-thread **sessions** with a message queue, dispatches steps, coordinates channels and memory layers, and provides tracing infrastructure.
+The AgentHarness is the execution engine at the heart of Noetic. It creates contexts, manages per-thread **sessions** with a message queue, dispatches steps, coordinates channels and context layers, and provides tracing infrastructure.
 
 Calls to `execute()` enqueue the input on the session identified by `options.threadId` (a single default thread is used when omitted). Stream accessors are session-scoped — subscribe once and events flow across every turn in that session.
 
@@ -55,19 +55,19 @@ const harness = new AgentHarness({
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `name` | `string` | required | Agent name (populates `config.name`). |
-| `initialStep` | `Step<TMemory, string, string>` | `undefined` | The agent step to execute when calling `execute()`. `TMemory` defaults to `ContextMemory`. |
+| `initialStep` | `Step<TContext, string, string>` | `undefined` | The agent step to execute when calling `execute()`. `TContext` defaults to `ContextData`. |
 | `params` | `TParams` | required | Arbitrary key-value parameters (populates `config.params`). |
-| `memory` | `MemoryLayer[]` | `undefined` | Default memory layers applied to every context created via `createContext()` / `execute()`. |
-| `storage` | `StorageAdapter` | in-memory | Storage backend for memory persistence. |
+| `context` | `ContextLayer[]` | `undefined` | Default context layers applied to every context created via `createContext()` / `execute()`. |
+| `storage` | `StorageAdapter` | in-memory | Storage backend for context persistence. |
 | `hooks` | `AgentHooks` | `undefined` | Before/after step hooks. |
 | `paramsSchema` | `ZodType` | `undefined` | Optional Zod schema to validate `params` at construction time. |
-| `fs` | `FsAdapter` | `createLocalFsAdapter()` | Filesystem adapter exposed as `harness.fs`. Memory layers, tools, and skill discovery all route through this adapter. |
+| `fs` | `FsAdapter` | `createLocalFsAdapter()` | Filesystem adapter exposed as `harness.fs`. Context layers, tools, and skill discovery all route through this adapter. |
 | `shell` | `ShellAdapter` | `createLocalShellAdapter()` | Shell adapter exposed as `harness.shell`. Tools that execute commands route through this adapter. Defaults to raw `sh -c` execution; pass `createLocalShellAdapter({ useRtk: true })` to wrap each command through [`rtk rewrite`](https://github.com/rtk-ai/rtk) for token-efficient output. The `@noetic-tools/cli` package enables this by default (controlled by `shell.useRtk` in `noetic.config.ts`). |
 | `llm` | `LlmProviderConfig` | `undefined` | LLM provider configuration. Currently supports `{ provider: 'openrouter', apiKey?: string }`. The `apiKey` defaults to `process.env.OPENROUTER_API_KEY`. |
 | `itemSchemas` | `ItemSchemaExtensions` | `undefined` | Harness-wide item-schema extensions used to validate emitted/returned items. Global by design; tool-contributed `toolResults` schemas are owner-scoped to each tool's own result items. Mismatches raise `NoeticError` kind `item_schema_mismatch`. |
 | `strictItemSchemas` | `boolean` | `true` | Whether unknown extension item types must match a registered schema. |
 | `traceExporter` | `TraceExporter` | `NoopExporter` | Where to send completed spans. |
-| `layerStateStore` | `LayerStateStore` | In-memory store | Backing store for memory layer state. |
+| `layerStateStore` | `LayerStateStore` | In-memory store | Backing store for context layer state. |
 | `defaultDeliveryMode` | `DeliveryMode` | `'next-turn'` | Default delivery mode for messages that don't specify one. |
 | `streamIdleTimeoutMs` | `number` | `120_000` | Abort the in-flight model call if the provider stream emits no events for this many milliseconds. Pass `0` or a negative number to disable. |
 | `initialCwd` | `string` | `process.cwd()` | Initial working directory seeded into every root context this harness creates. |
@@ -105,7 +105,7 @@ await harness.execute('follow-up', { threadId: 'thread-1' });
 | Parameter | Type | Description |
 |---|---|---|
 | `input` | `string \| Item \| Item[]` | The input to the agent. |
-| `options` | `ExecuteOptions` | Optional `threadId`, `resourceId`, `state`, `memory`, `deliveryMode`. |
+| `options` | `ExecuteOptions` | Optional `threadId`, `resourceId`, `state`, `context`, `deliveryMode`. |
 
 Rejects with `NoeticConfigError` code `NO_STEP_CONFIGURED` if no `initialStep` was provided in the constructor.
 
@@ -190,7 +190,7 @@ const result = await harness.run(myStep, input, ctx);
 
 | Parameter | Type | Description |
 |---|---|---|
-| `step` | `Step<TMemory, I, O>` | The step to execute. |
+| `step` | `Step<TContext, I, O>` | The step to execute. |
 | `input` | `I` | Input value for the step. |
 | `ctx` | `Context` | Execution context. |
 
@@ -205,7 +205,7 @@ When the harness is built with `memory` + `storage`, `run()` runs the layers' `i
 | `state` | `unknown` | Initial mutable state. |
 | `threadId` | `string` | Conversation thread identifier. |
 | `resourceId` | `string` | Optional resource/tenant identifier. |
-| `memory` | `MemoryLayer[]` | Memory layers for this context. Overrides harness-level `memory` if provided. |
+| `context` | `ContextLayer[]` | Context layers for this context. Overrides harness-level `context` if provided. |
 
 ## Channel Methods
 
@@ -217,9 +217,9 @@ When the harness is built with `memory` + `storage`, `run()` runs the layers' `i
 | `getChannelHandle(channel, executionId)` | Get a [`ChannelHandle`](/docs/framework/operators/channels#channelhandle) for an external channel, enabling outside processes to push values in. |
 | `getChannelStream(channel, executionId)` | Subscribe to an external channel from outside the execution as an [`AsyncIterable`](/docs/framework/operators/channels#reading-from-outside-getchannelstream); ends when the root execution completes. |
 
-## Memory Methods
+## Context Methods
 
-The agent harness coordinates [memory layer](/docs/framework/memory) lifecycle hooks:
+The agent harness coordinates [context layer](/docs/framework/context-layers) lifecycle hooks:
 
 | Method | Description |
 |---|---|
@@ -246,12 +246,12 @@ When the harness is constructed with a `checkpointStore` (and, typically, a dura
 | Method | Description |
 |---|---|
 | `checkpoint(ctx)` | Snapshot execution state (frontier, layer states, cwd, ask-user queue, item log) through the configured `checkpointStore`. Fires automatically after every `execute()`, `detachedSpawn()` settle, ask-user enqueue, and `runAppendPipeline`. Keyed by `ctx.id`; idempotent. |
-| `restore(executionId, opts?)` | Rebuild a `Context` from a previously saved snapshot. Returns `null` when no snapshot exists. Throws `NoeticConfigError` with `code: 'CHECKPOINT_SCHEMA_MISMATCH'` when the persisted `schemaVersion` is unrecognised. `opts` is a `RestoreContextOptions` (`parent` / `state` / `memory`) carrying back the host wiring a snapshot cannot serialise — see [Restoring a decorated context](/docs/framework/durability#restoring-a-decorated-context). |
-| `cancel(ctx, reason?)` | Cancel a running execution: abort `ctx` and every live descendant context (fork paths, spawn children), then run memory-layer teardown — `onComplete` with `outcome: 'aborted'`, then `dispose` — bottom-up. A no-op on an already-cancelled context. |
+| `restore(executionId, opts?)` | Rebuild a `Context` from a previously saved snapshot. Returns `null` when no snapshot exists. Throws `NoeticConfigError` with `code: 'CHECKPOINT_SCHEMA_MISMATCH'` when the persisted `schemaVersion` is unrecognised. `opts` is a `RestoreContextOptions` (`parent` / `state` / `context`) carrying back the host wiring a snapshot cannot serialise — see [Restoring a decorated context](/docs/framework/durability#restoring-a-decorated-context). |
+| `cancel(ctx, reason?)` | Cancel a running execution: abort `ctx` and every live descendant context (fork paths, spawn children), then run context-layer teardown — `onComplete` with `outcome: 'aborted'`, then `dispose` — bottom-up. A no-op on an already-cancelled context. |
 
 Cancellation reaches inside the work in flight: blocked channel `recv`/`send` calls reject with `cancelled`, the current provider stream and sub-harness turn are cut short, and the next step boundary throws `cancelled`. Tokens and cost already spent stay charged to the context. Beyond those points it is cooperative — a `step.run` body that ignores `ctx.aborted` between `await`s runs to its next step boundary.
 
-Use [`ctx.abort(reason)`](/docs/framework/context#abort) for the same signal without layer teardown (it is synchronous and returns `void`); use `cancel` when the harness owns the memory lifecycle. Note that `harness.abort(scope?)` is a different operation: it cancels the current *session turn* by thread, not a specific context tree.
+Use [`ctx.abort(reason)`](/docs/framework/context#abort) for the same signal without layer teardown (it is synchronous and returns `void`); use `cancel` when the harness owns the layer lifecycle. Note that `harness.abort(scope?)` is a different operation: it cancels the current *session turn* by thread, not a specific context tree.
 
 The `subprocess` adapter is the companion surface: it persists handle manifests for every long-lived child so a restarted host can call `harness.subprocess.listLive()` + `harness.restore(executionId)` per live child to rejoin the execution. Full durable-execution model, storage layout, and IPC protocol live on the [Durability](/docs/framework/durability) page.
 
@@ -277,7 +277,7 @@ interface AgentConfig<TParams extends Record<string, unknown> = Record<string, u
 | Field | Description |
 |---|---|
 | `name` | Human-readable agent name. |
-| `storage` | Storage adapter for memory persistence. |
+| `storage` | Storage adapter for context persistence. |
 | `hooks` | Lifecycle hooks (see below). |
 | `params` | Arbitrary key-value parameters accessible via `ctx.harness.config.params`. |
 
@@ -352,6 +352,6 @@ Per-step and per-call overrides let you mix execution backends. A step with `sub
 
 - [Context & Event Log](/docs/framework/context) -- the context object the agent harness creates.
 - [Channels](/docs/framework/operators/channels) -- channel send/recv methods on the agent harness.
-- [Memory](/docs/framework/memory) -- memory layers managed by the agent harness.
+- [Context Layers](/docs/framework/context-layers) -- context layers managed by the agent harness.
 - [Observability](/docs/framework/observability) -- tracing spans created by `createSpan`.
 - [Durability](/docs/framework/durability) -- checkpoint/restore, adapter durability, and the host-restart flow.

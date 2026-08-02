@@ -18,8 +18,8 @@
  * correctness.
  */
 
-import type { StorageAdapter } from '@noetic-tools/memory';
-import { storageGetMany } from '@noetic-tools/memory';
+import type { StorageAdapter } from '@noetic-tools/context';
+import { storageGetMany } from '@noetic-tools/context';
 import { NoeticConfigError } from '@noetic-tools/types';
 import { z } from 'zod';
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import type { ContextMemory, ExecutionContext, MemoryLayer } from '@noetic-tools/memory';
-import { historyWindow, projectHistoryLayers } from '@noetic-tools/memory';
+import type { ContextData, ContextLayer, ExecutionContext } from '@noetic-tools/context';
+import { historyWindow, projectHistoryLayers } from '@noetic-tools/context';
 import type { CallModelRequest, StepLLM } from '@noetic-tools/types';
 import { frameworkCast, isNoeticError, SteeringAction } from '@noetic-tools/types';
 import { z } from 'zod';
@@ -16,7 +16,7 @@ import {
 
 describe('executeLLM', () => {
   it('calls the client and returns text output', async () => {
-    const step: StepLLM<ContextMemory, string, string> = {
+    const step: StepLLM<ContextData, string, string> = {
       kind: 'llm',
       id: 'test',
       model: 'gpt-4',
@@ -30,7 +30,7 @@ describe('executeLLM', () => {
   });
 
   it('appends input as user message to ItemLog', async () => {
-    const step: StepLLM<ContextMemory, string, string> = {
+    const step: StepLLM<ContextData, string, string> = {
       kind: 'llm',
       id: 'test',
       model: 'gpt-4',
@@ -45,7 +45,7 @@ describe('executeLLM', () => {
   });
 
   it('appends response items to ItemLog', async () => {
-    const step: StepLLM<ContextMemory, string, string> = {
+    const step: StepLLM<ContextData, string, string> = {
       kind: 'llm',
       id: 'test',
       model: 'gpt-4',
@@ -62,7 +62,7 @@ describe('executeLLM', () => {
   });
 
   it('does not append user message for empty string input', async () => {
-    const step: StepLLM<ContextMemory, string, string> = {
+    const step: StepLLM<ContextData, string, string> = {
       kind: 'llm',
       id: 'test',
       model: 'gpt-4',
@@ -77,7 +77,7 @@ describe('executeLLM', () => {
   });
 
   it('sets ctx.lastStepMeta with usage', async () => {
-    const step: StepLLM<ContextMemory, string, string> = {
+    const step: StepLLM<ContextData, string, string> = {
       kind: 'llm',
       id: 'test',
       model: 'gpt-4',
@@ -99,7 +99,7 @@ describe('executeLLM', () => {
   });
 
   it('accumulates token usage on context', async () => {
-    const step: StepLLM<ContextMemory, string, string> = {
+    const step: StepLLM<ContextData, string, string> = {
       kind: 'llm',
       id: 'test',
       model: 'gpt-4',
@@ -124,7 +124,7 @@ describe('executeLLM', () => {
       answer: z.string(),
       confidence: z.number(),
     });
-    const step: StepLLM<ContextMemory, string, z.infer<typeof schema>> = {
+    const step: StepLLM<ContextData, string, z.infer<typeof schema>> = {
       kind: 'llm',
       id: 'test',
       model: 'gpt-4',
@@ -145,7 +145,7 @@ describe('executeLLM', () => {
     const schema = z.object({
       answer: z.string(),
     });
-    const step: StepLLM<ContextMemory, string, z.infer<typeof schema>> = {
+    const step: StepLLM<ContextData, string, z.infer<typeof schema>> = {
       kind: 'llm',
       id: 'parse-fail',
       model: 'gpt-4',
@@ -168,7 +168,7 @@ describe('executeLLM', () => {
     const schema = z.object({
       answer: z.string(),
     });
-    const step: StepLLM<ContextMemory, string, z.infer<typeof schema>> = {
+    const step: StepLLM<ContextData, string, z.infer<typeof schema>> = {
       kind: 'llm',
       id: 'parse-fail',
       model: 'gpt-4',
@@ -188,7 +188,7 @@ describe('executeLLM', () => {
   });
 
   it('identifies tool calls in response', async () => {
-    const step: StepLLM<ContextMemory, string, string> = {
+    const step: StepLLM<ContextData, string, string> = {
       kind: 'llm',
       id: 'test',
       model: 'gpt-4',
@@ -237,7 +237,7 @@ describe('executeLLM', () => {
   });
 
   it('stores responseItems in lastStepMeta', async () => {
-    const step: StepLLM<ContextMemory, string, string> = {
+    const step: StepLLM<ContextData, string, string> = {
       kind: 'llm',
       id: 'test',
       model: 'gpt-4',
@@ -251,7 +251,7 @@ describe('executeLLM', () => {
   });
 
   it('accumulates cost on context', async () => {
-    const step: StepLLM<ContextMemory, string, string> = {
+    const step: StepLLM<ContextData, string, string> = {
       kind: 'llm',
       id: 'test',
       model: 'gpt-4',
@@ -272,7 +272,7 @@ describe('executeLLM', () => {
 
   it('does not create user message for non-string input', async () => {
     const step: StepLLM<
-      ContextMemory,
+      ContextData,
       {
         data: number;
       },
@@ -296,7 +296,7 @@ describe('executeLLM', () => {
   });
 
   it('handles empty tools array', async () => {
-    const step: StepLLM<ContextMemory, string, string> = {
+    const step: StepLLM<ContextData, string, string> = {
       kind: 'llm',
       id: 'test',
       model: 'gpt-4',
@@ -311,7 +311,7 @@ describe('executeLLM', () => {
   });
 
   it('passes step.instructions through in the callModel request', async () => {
-    const step: StepLLM<ContextMemory, string, string> = {
+    const step: StepLLM<ContextData, string, string> = {
       kind: 'llm',
       id: 'test',
       model: 'gpt-4',
@@ -334,7 +334,7 @@ describe('executeLLM', () => {
   });
 
   it('passes undefined instructions when step has no instructions', async () => {
-    const step: StepLLM<ContextMemory, string, string> = {
+    const step: StepLLM<ContextData, string, string> = {
       kind: 'llm',
       id: 'test',
       model: 'gpt-4',
@@ -356,7 +356,7 @@ describe('executeLLM', () => {
   });
 
   it('populates ctx.lastLayerUsage with per-layer recall token counts', async () => {
-    const step: StepLLM<ContextMemory, string, string> = {
+    const step: StepLLM<ContextData, string, string> = {
       kind: 'llm',
       id: 'test',
       model: 'gpt-4',
@@ -370,7 +370,7 @@ describe('executeLLM', () => {
     };
     harness.recallLayers = async () => [
       {
-        layerId: 'planMemory',
+        layerId: 'planContext',
         items: [
           {
             id: 'plan-1',
@@ -388,7 +388,7 @@ describe('executeLLM', () => {
         tokenCount: 42,
       },
       {
-        layerId: 'workingMemory',
+        layerId: 'workingMemoryContext',
         items: [
           {
             id: 'wm-1',
@@ -409,15 +409,15 @@ describe('executeLLM', () => {
     const ctx = new ContextImpl({
       harness,
     });
-    const layers: MemoryLayer[] = [
+    const layers: ContextLayer[] = [
       {
-        id: 'planMemory',
+        id: 'planContext',
         slot: 100,
         scope: 'execution',
         hooks: {},
       },
       {
-        id: 'workingMemory',
+        id: 'workingMemoryContext',
         slot: 110,
         scope: 'execution',
         hooks: {},
@@ -430,9 +430,9 @@ describe('executeLLM', () => {
     expect(ctx.lastLayerUsage.modelId).toBe('gpt-4');
     expect(ctx.lastLayerUsage.executionId).toBe(ctx.id);
     expect(ctx.lastLayerUsage.layers).toHaveLength(2);
-    expect(ctx.lastLayerUsage.layers[0]?.layerId).toBe('planMemory');
+    expect(ctx.lastLayerUsage.layers[0]?.layerId).toBe('planContext');
     expect(ctx.lastLayerUsage.layers[0]?.tokenCount).toBe(42);
-    expect(ctx.lastLayerUsage.layers[1]?.layerId).toBe('workingMemory');
+    expect(ctx.lastLayerUsage.layers[1]?.layerId).toBe('workingMemoryContext');
     expect(ctx.lastLayerUsage.layers[1]?.tokenCount).toBe(17);
 
     // Recall items must reach the model via assembleView, prepended before history.
@@ -449,7 +449,7 @@ describe('executeLLM', () => {
   });
 
   it('caps history items via projectHistory before sending to the model', async () => {
-    const step: StepLLM<ContextMemory, string, string> = {
+    const step: StepLLM<ContextData, string, string> = {
       kind: 'llm',
       id: 'test',
       model: 'gpt-4',
@@ -492,7 +492,7 @@ describe('executeLLM', () => {
         ],
       });
     }
-    const layers: MemoryLayer[] = [
+    const layers: ContextLayer[] = [
       {
         id: 'history-window',
         slot: 275,
@@ -513,7 +513,7 @@ describe('executeLLM', () => {
   });
 
   it('integrates the real historyWindow layer end-to-end via projectHistoryLayers', async () => {
-    const step: StepLLM<ContextMemory, string, string> = {
+    const step: StepLLM<ContextData, string, string> = {
       kind: 'llm',
       id: 'test',
       model: 'gpt-4',
@@ -586,7 +586,7 @@ describe('executeLLM', () => {
   });
 
   describe('steering usage accounting', () => {
-    const STEERING_LAYER: MemoryLayer = {
+    const STEERING_LAYER: ContextLayer = {
       id: 'steering-dummy',
       slot: 1e2,
       scope: 'execution',
@@ -631,7 +631,7 @@ describe('executeLLM', () => {
       });
     }
 
-    const llmStep: StepLLM<ContextMemory, string, string> = {
+    const llmStep: StepLLM<ContextData, string, string> = {
       kind: 'llm',
       id: 'steered-usage',
       model: 'test/model',
@@ -711,7 +711,7 @@ describe('executeLLM', () => {
 });
 
 describe('executeLLM cancellation', () => {
-  const step: StepLLM<ContextMemory, string, string> = {
+  const step: StepLLM<ContextData, string, string> = {
     kind: 'llm',
     id: 'cancel-me',
     model: 'gpt-4',

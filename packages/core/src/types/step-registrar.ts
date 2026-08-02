@@ -25,7 +25,7 @@ import type { Step } from '@noetic-tools/types';
  * typically call the runtime's underlying `registerStep` function.
  */
 export interface StepRegistrar {
-  register<TMemory, I, O>(step: Step<TMemory, I, O>): void;
+  register<TContext, I, O>(step: Step<TContext, I, O>): void;
 }
 
 //#endregion

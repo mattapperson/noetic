@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { ContextMemory } from '@noetic-tools/memory';
+import type { ContextData } from '@noetic-tools/context';
 import type { Step } from '@noetic-tools/types';
 import { execute } from '../../src/interpreter/execute';
 import type { PlanNode } from '../../src/patterns/plans';
@@ -336,7 +336,7 @@ describe('adaptivePlan', () => {
   });
 
   it('non-run planner without executeStep throws', async () => {
-    const planner: Step<ContextMemory, string, PlanNode> = {
+    const planner: Step<ContextData, string, PlanNode> = {
       kind: 'loop' as const,
       id: 'planner',
       steps: [

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { ContextMemory } from '@noetic-tools/memory';
+import type { ContextData } from '@noetic-tools/context';
 import type { Context, StepSpawn } from '@noetic-tools/types';
 import { executeSpawn } from '../../src/interpreter/execute-action';
 import { ContextImpl } from '../../src/runtime/context-impl';
@@ -8,8 +8,8 @@ import { makeMockHarness, simpleExecute } from '../_helpers';
 
 function makeSpawnStep<I, O>(
   id: string,
-  execute: (input: I, ctx: Context<ContextMemory>) => Promise<O>,
-): StepSpawn<ContextMemory, I, O> {
+  execute: (input: I, ctx: Context<ContextData>) => Promise<O>,
+): StepSpawn<ContextData, I, O> {
   return {
     kind: 'spawn',
     id,

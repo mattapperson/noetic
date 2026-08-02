@@ -48,7 +48,7 @@ export { createInMemoryFsAdapter } from './adapters/in-memory-fs-adapter';
 export { createInMemoryShellAdapter } from './adapters/in-memory-shell-adapter';
 export { createInMemorySubprocessAdapter } from './adapters/in-memory-subprocess-adapter';
 
-// Harness, interpreter, memory, builders — unchanged
+// Harness, interpreter, context, builders — unchanged
 export { AgentHarness, /* … */ } from './harness/agent-harness';
 ```
 
@@ -165,18 +165,18 @@ to = "packages/platform-browser/**"
 reason = "core is runtime-agnostic; it cannot depend on a specific platform"
 ```
 
-Memory layer boundaries extend to forbid importing platform packages directly:
+Context layer boundaries extend to forbid importing platform packages directly:
 
 ```toml
 [[boundaries]]
-from = "packages/memory/src/**"
+from = "packages/context/src/**"
 to = "packages/platform-node/**"
-reason = "memory layers are platform-independent; platform packages are platform-specific"
+reason = "context layers are platform-independent; platform packages are platform-specific"
 
 [[boundaries]]
-from = "packages/memory/src/**"
+from = "packages/context/src/**"
 to = "packages/platform-browser/**"
-reason = "memory layers are platform-independent; platform packages are platform-specific"
+reason = "context layers are platform-independent; platform packages are platform-specific"
 ```
 
 ## Migration Path

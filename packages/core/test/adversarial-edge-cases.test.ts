@@ -4,7 +4,7 @@
 
 import { describe, expect, test } from 'bun:test';
 import assert from 'node:assert';
-import type { ContextMemory, MemoryLayer } from '@noetic-tools/memory';
+import type { ContextData, ContextLayer } from '@noetic-tools/context';
 import type { NoeticError, Step } from '@noetic-tools/types';
 import { isNoeticError, SteeringAction } from '@noetic-tools/types';
 import { z } from 'zod';
@@ -52,11 +52,11 @@ async function expectNoeticError(
 }
 
 async function expectInvalidMaxIterations(maxIterations: number): Promise<void> {
-  const bodyStep = step.run<ContextMemory, string, string>({
+  const bodyStep = step.run<ContextData, string, string>({
     id: 'noop',
     execute: async (input) => input,
   });
-  const loopStep = loop<ContextMemory, string, string>({
+  const loopStep = loop<ContextData, string, string>({
     id: `invalid-max-${maxIterations}`,
     steps: [
       bodyStep,
@@ -127,7 +127,7 @@ describe('empty fork paths', () => {
 
 describe('loop edge cases', () => {
   test('all iterations failing with onError returning skip hits maxIterations', async () => {
-    const failingStep = step.run<ContextMemory, string, string>({
+    const failingStep = step.run<ContextData, string, string>({
       id: 'always-fail',
       execute: async () => {
         throw new NoeticErrorImpl({
@@ -139,7 +139,7 @@ describe('loop edge cases', () => {
       },
     });
 
-    const loopStep = loop<ContextMemory, string, string>({
+    const loopStep = loop<ContextData, string, string>({
       id: 'fail-loop',
       steps: [
         failingStep,
@@ -160,7 +160,7 @@ describe('loop edge cases', () => {
 
   test('predicate throws is treated as stop: true', async () => {
     let callCount = 0;
-    const bodyStep = step.run<ContextMemory, string, string>({
+    const bodyStep = step.run<ContextData, string, string>({
       id: 'counter',
       execute: async (input) => {
         callCount++;
@@ -168,7 +168,7 @@ describe('loop edge cases', () => {
       },
     });
 
-    const loopStep = loop<ContextMemory, string, string>({
+    const loopStep = loop<ContextData, string, string>({
       id: 'pred-throw-loop',
       steps: [
         bodyStep,
@@ -242,7 +242,7 @@ describe('structured output parse failures', () => {
       answer: z.string(),
     });
     const llmStep = step.llm<
-      ContextMemory,
+      ContextData,
       string,
       {
         answer: string;
@@ -278,7 +278,7 @@ describe('structured output parse failures', () => {
       answer: z.string(),
     });
     const llmStep = step.llm<
-      ContextMemory,
+      ContextData,
       string,
       {
         answer: string;
@@ -314,7 +314,7 @@ describe('structured output parse failures', () => {
 
 describe('steering retry exhaustion', () => {
   test('falls through after MAX_STEERING_RETRIES', async () => {
-    const llmStep = step.llm<ContextMemory, string, string>({
+    const llmStep = step.llm<ContextData, string, string>({
       id: 'steered',
       model: 'test/model',
     });
@@ -331,7 +331,7 @@ describe('steering retry exhaustion', () => {
     });
 
     // executeLLM only enters steering when layers array is non-empty
-    const dummyLayer: MemoryLayer = {
+    const dummyLayer: ContextLayer = {
       id: 'dummy',
       slot: 1e2,
       scope: 'execution',
@@ -363,12 +363,12 @@ describe('steering retry exhaustion', () => {
 
 describe('race fork aborts losers', () => {
   test('winner resolves, loser context is aborted', async () => {
-    const fastStep = step.run<ContextMemory, string, string>({
+    const fastStep = step.run<ContextData, string, string>({
       id: 'fast',
       execute: async () => 'fast-wins',
     });
 
-    const slowStep = step.run<ContextMemory, string, string>({
+    const slowStep = step.run<ContextData, string, string>({
       id: 'slow',
       execute: async () => {
         await new Promise((resolve) => setTimeout(resolve, 2e2));
@@ -376,7 +376,7 @@ describe('race fork aborts losers', () => {
       },
     });
 
-    const forkStep = fork<ContextMemory, string, string>({
+    const forkStep = fork<ContextData, string, string>({
       id: 'race-abort',
       mode: 'race',
       paths: () => [
@@ -402,8 +402,8 @@ describe('fork with concurrency=1 executes sequentially', () => {
   test('paths run one at a time', async () => {
     const timestamps: number[][] = [];
 
-    function makeTimedStep(index: number): Step<ContextMemory, string, string> {
-      return step.run<ContextMemory, string, string>({
+    function makeTimedStep(index: number): Step<ContextData, string, string> {
+      return step.run<ContextData, string, string>({
         id: `timed-${index}`,
         execute: async () => {
           const start = Date.now();
@@ -418,7 +418,7 @@ describe('fork with concurrency=1 executes sequentially', () => {
       });
     }
 
-    const forkStep = fork<ContextMemory, string, string>({
+    const forkStep = fork<ContextData, string, string>({
       id: 'sequential-fork',
       mode: 'all',
       paths: () => [
@@ -449,7 +449,7 @@ describe('fork with concurrency=1 executes sequentially', () => {
 
 describe('branch null route passes input through', () => {
   test('output === input when route returns null', async () => {
-    const branchStep = branch<ContextMemory, string, string>({
+    const branchStep = branch<ContextData, string, string>({
       id: 'skip',
       route: () => null,
     });

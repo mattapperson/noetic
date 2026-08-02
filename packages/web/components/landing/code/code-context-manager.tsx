@@ -36,7 +36,7 @@ const LAYERS: LayerCard[] = [
   },
   {
     index: '02',
-    name: 'Observational Memory',
+    name: 'Observational Context',
     description: 'Auto-extracted facts from what just happened.',
     tone: 'working',
   },
@@ -48,7 +48,7 @@ const LAYERS: LayerCard[] = [
   },
   {
     index: '04',
-    name: 'Tool Memory',
+    name: 'Tool Context',
     description: 'Per-tool state — bash history, LSP diagnostics, open files.',
     tone: 'working',
   },
@@ -61,18 +61,18 @@ const LAYERS: LayerCard[] = [
   {
     index: '06',
     name: 'Semantic Recall',
-    description: 'Vector-indexed long-term memory. Pulls only what is relevant.',
+    description: 'Vector-indexed long-term recall. Pulls only what is relevant.',
     tone: 'retrieval',
   },
   {
     index: '07',
-    name: 'Episodic Memory',
+    name: 'Episodic Context',
     description: 'Summaries of past conversations, indexed by task and outcome.',
     tone: 'retrieval',
   },
   {
     index: '08',
-    name: 'Plan Memory',
+    name: 'Plan Context',
     description: 'PRDs, task breakdowns, and checkpointed progress across runs.',
     tone: 'retrieval',
   },
@@ -122,7 +122,7 @@ export function CodeContextManager(): ReactNode {
             maxWidth: '780px',
           }}
         >
-          Most coding agents have one trick for memory: cram it all in, pray the model finds it.
+          Most coding agents have one trick for context: cram it all in, pray the model finds it.
         </p>
         <p
           style={{

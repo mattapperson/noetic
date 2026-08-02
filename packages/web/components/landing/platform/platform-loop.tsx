@@ -19,7 +19,7 @@ const STAGES: LoopStage[] = [
     name: 'build',
     lede: 'TypeScript primitives or plain language.',
     detail:
-      'The same portable workflow document runs in the open-source framework and on the platform. Compose it in code, or describe the agent in a sentence and let the builder draft it — memory layers, tools, and all.',
+      'The same portable workflow document runs in the open-source framework and on the platform. Compose it in code, or describe the agent in a sentence and let the builder draft it — context layers, tools, and all.',
     signal: '@noetic-tools/core',
     color: 'var(--color-tui-green)',
   },

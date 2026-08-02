@@ -15,7 +15,7 @@ interface LoopConfig<I, O> {
   steps: ReadonlyArray<Step<I, O>>;
   until: Until;
   maxIterations?: number;    // hard safety cap on iterations (default 1000)
-  maxHistorySize?: number;   // limits history array size for memory management
+  maxHistorySize?: number;   // limits history array size for context management
   prepareNext?: (output: O, verdict: Verdict, ctx: Context) => I;
   onError?: (error: NoeticError, ctx: Context) => 'retry' | 'skip' | 'abort';
 }
@@ -40,9 +40,9 @@ prepareNext: (output, verdict, ctx) => {
 
 `onError` is never consulted for a `cancelled` error — cancellation is not a retriable error and always terminates the loop immediately (see `09-error-model`, Cancellation Propagation Semantics).
 
-### Memory Layer Interaction
+### Context Layer Interaction
 
-On each loop iteration, the full memory layer lifecycle runs: `recall()` before the LLM call, `store()` after. This means memory layers (working memory, observations, etc.) can evolve across iterations even though the ItemLog grows linearly.
+On each loop iteration, the full context layer lifecycle runs: `recall()` before the LLM call, `store()` after. This means context layers (working memory, observations, etc.) can evolve across iterations even though the ItemLog grows linearly.
 
 ---
 

@@ -1,20 +1,17 @@
 /**
  * Deep Agent — DeepAgentsJS recreation using Noetic primitives.
  *
- * Proves that middleware stacks decompose into tools + memory layers + spawn.
+ * Proves that middleware stacks decompose into tools + context layers + spawn.
  * Run: OPENROUTER_API_KEY=xxx bun run examples/deep-agent/index.ts
  */
 
-import { observationalMemory } from '../../src/memory/layers/observational-memory';
-import { staticContent } from '../../src/memory/layers/static-content';
-import { toolMemoryLayer } from '../../src/memory/layers/tool-memory-layer';
+import { observationalContext, staticContent, toolContextLayer } from '@noetic-tools/context';
+import type { ContextData, ContextLayer, StepLoop, StepSpawn } from '@noetic-tools/types';
 import { react } from '../../src/patterns/react';
-import type { ContextMemory, MemoryLayer } from '../../src/types/memory';
-import type { StepLoop, StepSpawn } from '../../src/types/step';
 import { createExampleHarness } from '../create-example-harness';
 import type { SubAgentResolver } from '../delegate-tools';
 import { createConfigurableDelegateTool } from '../delegate-tools';
-import { skillsLayer } from './memory/skills-layer';
+import { skillsLayer } from './context/skills-layer';
 import { createFilesystemTools } from './tools/filesystem';
 import { createTodoTools } from './tools/todo';
 import type { DeepAgentConfig } from './types';
@@ -35,7 +32,7 @@ function defaultResolver(model: string): SubAgentResolver {
 
 export function buildDeepAgent(
   config: DeepAgentConfig,
-): StepLoop<ContextMemory, string, string> | StepSpawn<ContextMemory, string, string> {
+): StepLoop<ContextData, string, string> | StepSpawn<ContextData, string, string> {
   const fsTools = createFilesystemTools(config.rootDir);
   const todoTools = createTodoTools();
   const delegateTool = createConfigurableDelegateTool(
@@ -47,7 +44,7 @@ export function buildDeepAgent(
     delegateTool,
   ];
 
-  const layers: MemoryLayer[] = [
+  const layers: ContextLayer[] = [
     ...(config.instructionFiles?.length
       ? [
           staticContent({
@@ -64,13 +61,13 @@ export function buildDeepAgent(
           }),
         ]
       : []),
-    ...toolMemoryLayer(allTools),
+    ...toolContextLayer(allTools),
     ...(config.skills?.length
       ? [
           skillsLayer(config.skills),
         ]
       : []),
-    observationalMemory({
+    observationalContext({
       bufferThreshold: 4_000,
       observer: async (buffer) => [
         `Summary: processed ${buffer.length} exchanges covering: ${buffer.map((b) => b.slice(0, 50)).join('; ')}`,
@@ -84,7 +81,7 @@ export function buildDeepAgent(
     tools: allTools,
     maxSteps: config.maxSteps ?? 25,
     maxCost: config.maxCost,
-    memory: layers,
+    context: layers,
   });
 }
 

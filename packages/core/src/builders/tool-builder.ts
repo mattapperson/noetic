@@ -4,13 +4,14 @@ import type {
   Item,
   ItemSchemaExtensions,
   Tool,
+  ToolContextDeclaration,
   ToolExecutionContext,
-  ToolMemoryDeclaration,
   ToolResultExtensionItem,
   ToolUiDeclaration,
 } from '@noetic-tools/types';
 import { NoeticConfigError } from '@noetic-tools/types';
 import type { ZodTypeAny, z } from 'zod';
+import { resolveContextOption } from './context-option';
 
 //#region Types
 
@@ -30,8 +31,10 @@ interface ToolConfig<I extends ZodTypeAny, O extends ZodTypeAny> {
   }) => Item | ToolResultExtensionItem;
   execute: (args: z.infer<I>, toolCtx: ToolExecutionContext) => Promise<z.infer<O>>;
   needsApproval?: boolean;
-  /** Optional memory declaration — the runtime generates a MemoryLayer from this via toolMemoryLayer(). */
-  memory?: ToolMemoryDeclaration;
+  /** Optional context declaration — the runtime generates a ContextLayer from this via toolContextLayer(). */
+  context?: ToolContextDeclaration;
+  /** @deprecated Renamed to `context`. */
+  memory?: ToolContextDeclaration;
   /** Optional UI declaration — the runtime emits the rendered fragments at call/progress/result points. */
   ui?: ToolUiDeclaration<I, O>;
 }
@@ -56,8 +59,10 @@ interface GeneratorToolConfig<I extends ZodTypeAny, E extends ZodTypeAny, O exte
     toolCtx: ToolExecutionContext,
   ) => AsyncGenerator<z.infer<E>, z.infer<O>>;
   needsApproval?: boolean;
-  /** Optional memory declaration — the runtime generates a MemoryLayer from this via toolMemoryLayer(). */
-  memory?: ToolMemoryDeclaration;
+  /** Optional context declaration — the runtime generates a ContextLayer from this via toolContextLayer(). */
+  context?: ToolContextDeclaration;
+  /** @deprecated Renamed to `context`. */
+  memory?: ToolContextDeclaration;
   /** Optional UI declaration — the runtime emits the rendered fragments at call/progress/result points. */
   ui?: ToolUiDeclaration<I, O, z.infer<E>>;
 }
@@ -107,7 +112,7 @@ export function tool<I extends ZodTypeAny, O extends ZodTypeAny>(
     decorateResultItem: config.decorateResultItem,
     execute: config.execute,
     needsApproval: config.needsApproval,
-    memory: config.memory,
+    context: resolveContextOption(config),
     ui: config.ui,
   } satisfies Tool<I, O>;
 }
@@ -132,7 +137,7 @@ export function toolWithGenerator<I extends ZodTypeAny, E extends ZodTypeAny, O 
     decorateResultItem: config.decorateResultItem,
     execute: config.execute,
     needsApproval: config.needsApproval,
-    memory: config.memory,
+    context: resolveContextOption(config),
     ui: config.ui,
   } satisfies Tool<I, O>;
 }

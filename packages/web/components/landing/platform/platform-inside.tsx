@@ -31,7 +31,7 @@ const FEATURES: FeatureTile[] = [
       'Agents render live interactive UI — not walls of text. One OpenUI document renders natively on web, in the terminal, and in the iOS and macOS apps.',
   },
   {
-    name: 'Memory layers',
+    name: 'Context layers',
     chip: 'editable · server-side',
     detail:
       'History windows, working memory, plans, steering rules, temporal facts. Live token usage per layer, and you can edit what the agent remembers mid-session.',

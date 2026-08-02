@@ -62,19 +62,22 @@ Authoring documents by hand or reviewing LLM-generated ones, reference the schem
 
 ## WorkflowNode Union
 
-`WorkflowNode` is a discriminated union on `kind` with nine variants. Each maps to an existing `Step` builder. All nodes share a common `id` field.
+`WorkflowNode` is a discriminated union on `kind`. Each variant maps to an existing `Step` builder. All nodes share a common `id` field. Sub-harness node kinds (`claude-code`, `codex`, `opencode`, `pi`) are specified in `27-sub-harness-steps`.
 
 ```typescript
 type WorkflowNode =
   | LlmWorkflowNode
   | ToolWorkflowNode
+  | RunWorkflowNode
   | BranchWorkflowNode
   | ForkWorkflowNode
   | SpawnWorkflowNode
   | ProvideWorkflowNode
   | LoopWorkflowNode
   | SequenceWorkflowNode
-  | EveryWorkflowNode;
+  | EveryWorkflowNode
+  | SubflowWorkflowNode
+  | SubHarnessWorkflowNode;
 ```
 
 ### `llm`
@@ -258,6 +261,30 @@ interface EveryWorkflowNode {
 | `ms`      | Yes      | Interval in milliseconds between executions.                          |
 | `onError` | No       | Error handling: `continue` (default) swallows; `fail` propagates.    |
 
+### `subflow`
+
+Runs another workflow document as a single step — either inline or by name.
+
+```typescript
+interface SubflowWorkflowNode {
+  kind: 'subflow';
+  id: string;
+  document?: WorkflowDocument;
+  ref?: string;
+  input?: string;
+}
+```
+
+| Field      | Required | Description                                                              |
+|------------|----------|--------------------------------------------------------------------------|
+| `document` | XOR      | Inline sub-workflow. Supply exactly one of `document` / `ref`.           |
+| `ref`      | XOR      | Named sub-workflow resolved from `HydrationContext.workflows`.           |
+| `input`    | No       | Literal input passed to the sub-workflow; defaults to the node's input.  |
+
+Resolution is lazy: the target document resolves and hydrates on the node's first execution, memoized afterwards. A live `workflows` map may therefore gain entries after hydration and still satisfy refs. The hydrated sub-document's node ids are suffixed with `-<node id>` so two subflow nodes referencing the same named workflow trace with distinct step ids.
+
+Ref chains are cycle-checked per execution path: a named workflow may not reference itself, directly or transitively (`WORKFLOW_CYCLE`), while sibling nodes referencing the same workflow (diamond reuse) are legal. Inline documents are finite JSON trees and cannot cycle. `walkWorkflow`/`workflowGraph`/`workflowDepth` treat a `ref` as a leaf — static analysis does not see through named refs.
+
 ---
 
 ## Until Predicates
@@ -339,19 +366,27 @@ Hydration converts a `WorkflowDocument` into a live `Step` tree that the interpr
 
 ```typescript
 interface HydrationContext {
-  tools: Map<string, Tool>;
-  executeStep: <I, O>(step: Step<I, O>, input: I, ctx: Context) => Promise<O>;
-  defaultModel?: string;
-  maxDepth?: number;
+  tools: ReadonlyMap<string, Tool>;
+  executeStep: ExecuteStepFn;
+  layers?: ReadonlyMap<string, MemoryLayer>;
+  subHarnesses?: ReadonlyMap<SubHarnessKind, SubHarness>;
+  uiLibraries?: ReadonlyMap<string, OutputCodec>;
+  resolveSubprocess?: (ref: string) => SubprocessAdapter | undefined;
+  workflows?: ReadonlyMap<string, WorkflowDocument>;
+  subflowAncestry?: ReadonlySet<string>;
 }
 ```
 
-| Field          | Required | Description                                                          |
-|----------------|----------|----------------------------------------------------------------------|
-| `tools`        | Yes      | Registry mapping tool names to live `Tool` objects.                  |
-| `executeStep`  | Yes      | The interpreter's `execute` function, threaded for recursive calls.  |
-| `defaultModel` | No       | Fallback model for `llm` nodes that omit `model`.                    |
-| `maxDepth`     | No       | Maximum tree depth enforced during hydration. Default: `32`.         |
+| Field                | Required | Description                                                              |
+|----------------------|----------|--------------------------------------------------------------------------|
+| `tools`              | Yes      | Registry mapping tool names to live `Tool` objects.                      |
+| `executeStep`        | Yes      | The interpreter's `execute` function, threaded for recursive calls.      |
+| `layers`             | No       | Named memory layers for `provide` nodes and `spawn.layers`.              |
+| `subHarnesses`       | No       | SubHarness adapters keyed by harness id (`claude-code`, `codex`, …).     |
+| `uiLibraries`        | No       | Output codecs for `llm` nodes' `output` codec references.                |
+| `resolveSubprocess`  | No       | Resolves a named subprocess adapter ref on a `run` node.                 |
+| `workflows`          | No       | Named sub-workflow documents that `subflow` nodes resolve via `ref`.     |
+| `subflowAncestry`    | No       | Internal: ancestor ref chain for subflow cycle detection. Never set by callers. |
 
 ### `hydrateWorkflow`
 
@@ -364,7 +399,7 @@ function hydrateWorkflow(
 ): Step<string, string>
 ```
 
-Throws `INVALID_WORKFLOW` if the document fails schema validation. Throws `WORKFLOW_TOO_DEEP` if the tree exceeds `maxDepth`.
+Hydration expects an already-validated document; schema validation and depth limits are enforced at parse time by `parseAndRunWorkflow`/`dynamicWorkflow` (`WORKFLOW_VALIDATION_FAILED`).
 
 ### `hydrateNode`
 
@@ -374,7 +409,6 @@ Recursive hydrator for a single node. Called by `hydrateWorkflow` and available 
 function hydrateNode(
   node: WorkflowNode,
   ctx: HydrationContext,
-  depth?: number,
 ): Step<string, string>
 ```
 
@@ -393,6 +427,7 @@ Each node kind maps to a single existing builder:
 | `loop`      | `loop({...})`             | Until predicate hydrated to runtime `Until` function.  |
 | `sequence`  | `step.run` + chaining     | Steps piped sequentially via composed `execute` calls. |
 | `every`     | `every({...})`            | Maps directly to the `every()` builder.                |
+| `subflow`   | `step.run` wrapper        | Target document resolved lazily at first execution; sub-tree hydrated with suffixed ids. |
 
 ### Tool Resolution
 
@@ -445,7 +480,7 @@ function hydrateUntil(pred: UntilPredicate): Until {
 
 ### Depth Enforcement
 
-The `depth` counter increments at each structural node (`fork`, `spawn`, `loop`, `sequence`, `branch`, `provide`). Leaf nodes (`llm`, `tool`, `every`) do not increment depth. If `depth` exceeds `ctx.maxDepth`, hydration throws `WORKFLOW_TOO_DEEP`.
+Depth is measured by `workflowDepth` (structural nodes add +1 over their deepest child; leaves are 0) and enforced at parse time: `parseAndRunWorkflow` and `dynamicWorkflow` reject documents deeper than their `maxDepth` option (default `5`) with `WORKFLOW_VALIDATION_FAILED`. Depth does not see through `subflow` refs — a named sub-workflow's own depth is checked wherever that document is itself parsed. Cycle detection prevents infinite recursion through refs, but it does not bound total fan-out: an acyclic chain of workflows that each reference the next several times multiplies execution combinatorially. Hosts that accept untrusted registries should cap the registry size and per-document breadth accordingly.
 
 ---
 
@@ -497,33 +532,36 @@ A standalone utility for executing a workflow document that already exists (load
 
 ```typescript
 function parseAndRunWorkflow(opts: {
-  document: unknown;
-  tools: Map<string, Tool>;
-  executeStep: <I, O>(step: Step<I, O>, input: I, ctx: Context) => Promise<O>;
-  defaultModel?: string;
+  json: unknown;
+  harness: AgentHarnessContract;
+  ctx: Context;
+  tools: Tool[];
+  input?: string;
   maxDepth?: number;
-}): Step<string, string>
+  layers?: ReadonlyMap<string, MemoryLayer>;
+  workflows?: ReadonlyMap<string, WorkflowDocument>;
+}): Promise<string>
 ```
 
-This validates the document, hydrates it, and returns the resulting `Step`. The caller executes it with the interpreter like any other step:
+This validates the document (schema + depth, throwing `WORKFLOW_VALIDATION_FAILED`), hydrates it, executes it via the harness inside a `workflow.run` trace span, and returns the final output:
 
 ```typescript
-const workflow = parseAndRunWorkflow({
-  document: JSON.parse(workflowJson),
-  tools: toolRegistry,
-  executeStep: execute,
+const result = await parseAndRunWorkflow({
+  json: JSON.parse(workflowJson),
+  harness,
+  ctx,
+  tools,
+  input: userPrompt,
 });
-
-const result = await execute(workflow, userPrompt, ctx);
 ```
 
 ---
 
 ## Constraints
 
-### No `step.run`
+### No In-Process Closures
 
-`step.run` accepts an `execute` closure, which is not JSON-serialisable. WorkflowNode does not include a `run` variant. Arbitrary computation must be expressed through tool calls or LLM steps.
+Programmatic `step.run` accepts an `execute` closure, which is not JSON-serialisable. The `run` node instead carries its body as a code STRING dispatched through a subprocess adapter — never eval'd in-process. Arbitrary in-process computation must be expressed through tool calls or LLM steps.
 
 ### Static Lazy Fields Only
 
@@ -535,41 +573,45 @@ Tool references are strings, not `Tool` objects. Resolution happens once during 
 
 ### Maximum Tree Depth
 
-Tree depth is enforced during hydration to prevent unbounded recursion in LLM-generated workflows. The default limit is `32` levels of structural nesting. This is configurable via `HydrationContext.maxDepth`.
+Tree depth is enforced at parse time to prevent unbounded recursion in LLM-generated workflows. The default limit is `5` levels of structural nesting, configurable via the `maxDepth` option on `parseAndRunWorkflow` and `dynamicWorkflow`. Depth does not see through `subflow` refs; cycle detection prevents infinite recursion through them, but acyclic ref fan-out is not bounded by the runtime — hosts cap registry size and breadth.
 
 ---
 
-## Relationship to FlowSchema
+## Plan-Memory Integration
 
-`FlowSchema` (defined in `memory/flow-schema.ts`, used by the plan-memory layer) is a JSON-serialisable workflow format that predates `WorkflowNode`. The two formats serve different audiences and scopes:
+The plan memory layer (spec 12, `planMemory()`) authors plans directly in this format: `PlanState.planTree` is a `WorkflowDocument`, and `PlanState.workflows` is a `Record<string, WorkflowDocument>` of named workflows the tree references via `subflow` nodes. The layer validates documents at authoring time (schema, depth, optional node-kind profile, ref slug syntax) and rejects dangling refs and reference cycles before requesting approval.
 
-| Dimension        | FlowSchema                            | WorkflowNode                                    |
-|------------------|---------------------------------------|--------------------------------------------------|
-| **Scope**        | Plan-mode flows (plan memory layer)   | General-purpose runtime workflow format          |
-| **Node kinds**   | 5: llm, subagent, fork, spawn, sequence | 9: llm, tool, branch, fork, spawn, provide, loop, sequence, every |
-| **Until support**| None                                  | Full predicate union with combinators            |
-| **Model params** | None                                  | temperature, topP, maxTokens, stopSequences      |
-| **Tool args**    | None (tools on llm only)              | Explicit tool node with static args              |
-| **Memory layers**| None                                  | `provide` node, plus per-child layers on `spawn` |
-| **Periodics**    | None                                  | `every` node with interval + error handling      |
-| **Branching**    | None                                  | `branch` with substring match routes             |
+On approval, the host feeds both pieces straight into this runtime:
 
-`FlowSchema` is intentionally minimal -- it describes what the planner wants to happen. `WorkflowNode` is comprehensive -- it describes exactly how the runtime should execute it, including termination conditions, parallelism strategies, and memory scoping.
+```typescript
+await parseAndRunWorkflow({
+  json: state.planTree,
+  workflows: new Map(Object.entries(state.workflows)),
+  harness, ctx, tools, layers,
+});
+```
 
-The two schemas are independent. `FlowSchema` documents are not valid `WorkflowDocument`s and vice versa. A migration utility is not provided; the plan-memory layer continues to use `FlowSchema` for its narrower purpose.
+The split keeps the human-reviewed tree small — mechanics factor into named workflows the model authors and revises independently — while the whole plan stays one inspectable, portable JSON structure with stable node ids.
 
 ---
 
 ## Error Kinds
 
-The JSON Workflow Runtime introduces the following `NoeticError` kinds:
+The JSON Workflow Runtime introduces the following `NoeticConfigError` codes:
 
-| Kind                         | When                                                          |
-|------------------------------|---------------------------------------------------------------|
-| `INVALID_WORKFLOW`           | Document fails `WorkflowDocumentSchema` validation.           |
-| `WORKFLOW_TOO_DEEP`          | Tree depth exceeds `maxDepth` during hydration.               |
-| `UNKNOWN_TOOL_REFERENCE`     | A tool name in the document is not in the hydration registry. |
-| `WORKFLOW_GENERATION_FAILED` | `dynamicWorkflow` exhausts all revision attempts.             |
+| Code                           | When                                                                     |
+|--------------------------------|--------------------------------------------------------------------------|
+| `WORKFLOW_VALIDATION_FAILED`   | Document fails schema validation or exceeds `maxDepth` at parse time.    |
+| `UNKNOWN_NODE_KIND`            | A node kind has no registered hydrator.                                  |
+| `UNKNOWN_TOOL_REFERENCE`       | A tool name in the document is not in the hydration registry.            |
+| `UNKNOWN_LAYER_REFERENCE`      | A layer name on a `provide`/`spawn` node is not in the layer registry.   |
+| `UNKNOWN_SUB_HARNESS_REFERENCE`| A sub-harness node's adapter is not registered.                          |
+| `UNKNOWN_UI_LIBRARY_REFERENCE` | An `llm` node's `output.library` is not in the codec registry.           |
+| `UNKNOWN_SUBPROCESS_REFERENCE` | A `run` node's `subprocess` ref cannot be resolved.                      |
+| `UNKNOWN_UNTIL_PREDICATE`      | An until predicate kind is unrecognised.                                 |
+| `UNKNOWN_WORKFLOW_REFERENCE`   | A `subflow` ref names no registered workflow (raised at execution time). |
+| `WORKFLOW_CYCLE`               | Named sub-workflow refs form a cycle (raised at execution time).         |
+| `INVALID_FORK_INPUT`           | A dynamic fork's input does not resolve to an array.                     |
 
 ---
 
@@ -648,6 +690,15 @@ const WorkflowNodeSchema: z.ZodType<WorkflowNode> = z.lazy(() =>
       ms: z.number().int().positive(),
       onError: z.enum(['continue', 'fail']).optional(),
     }),
+    z.object({
+      kind: z.literal('subflow'),
+      id: z.string().min(1),
+      document: WorkflowDocumentSchema.optional(),
+      ref: z.string().min(1).optional(),
+      input: z.string().optional(),
+    }).refine((node) => (node.document === undefined) !== (node.ref === undefined), {
+      message: "subflow node requires exactly one of 'document' (inline) or 'ref' (named).",
+    }),
   ])
 );
 
@@ -670,7 +721,7 @@ const WorkflowDocumentSchema = z.object({
 - `AgentHarness`, `Tool`: `08-runtime`
 - `NoeticError` kinds: `09-error-model`
 - `MemoryLayer`: `11-memory-layer-system`
-- `FlowSchema`, `FlowNode`: `memory/flow-schema.ts` (plan-memory internal)
+- `planMemory`, `PlanState`: `12-builtin-memory-layers`
 - `compilePlan`, `adaptivePlan`, `PlanNodeSchema`: `13-patterns`
 
 ---
@@ -678,7 +729,7 @@ const WorkflowDocumentSchema = z.object({
 ## Future Considerations
 
 - **Custom until predicates via registered names.** A plugin could register a named predicate (e.g., `until.custom('myCheck')`) that the hydrator resolves from a predicate registry, similar to tool name resolution. This would allow domain-specific termination logic without extending the schema.
-- **Workflow composition and sub-workflow references.** A `ref` node kind that points to another `WorkflowDocument` by URI, enabling modular workflow libraries. The hydrator would fetch and inline the referenced document, with cycle detection.
+- **URI workflow references.** The `subflow` node resolves named refs from an in-memory registry; a URI form could fetch documents from remote workflow libraries, reusing the same cycle detection.
 - **Streaming hydration.** For very large workflows, hydrate nodes lazily as execution reaches them rather than building the entire `Step` tree upfront. This reduces memory pressure and startup latency.
 - **Named memory layer resolution for `provide` nodes.** The current design uses string layer names, but the resolution mechanism is left to the `HydrationContext`. A standardised layer registry (analogous to the tool registry) would make `provide` nodes portable across different harness configurations.
 - **Workflow versioning and migration.** When `version` increments to `2`, a `migrateV1toV2` function would transform old documents automatically. The version field exists to enable this without breaking existing consumers.

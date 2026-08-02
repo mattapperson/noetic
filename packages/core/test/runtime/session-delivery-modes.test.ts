@@ -1,13 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import assert from 'node:assert';
-import type { ContextMemory } from '@noetic-tools/memory';
+import type { ContextData } from '@noetic-tools/context';
 import type { CallModelRequest, LLMResponse, Step, StreamEvent, Tool } from '@noetic-tools/types';
 import { z } from 'zod';
 import { AgentHarness } from '../../src/harness/agent-harness';
 
 //#region Test scaffolding
 
-const echoStep: Step<ContextMemory, string, string> = {
+const echoStep: Step<ContextData, string, string> = {
   kind: 'llm',
   id: 'echo',
   model: 'test/echo',
@@ -399,7 +399,7 @@ describe('AgentHarness delivery modes', () => {
       output: z.string(),
       execute: async () => 'never called',
     };
-    const stepWithTools: Step<ContextMemory, string, string> = {
+    const stepWithTools: Step<ContextData, string, string> = {
       kind: 'llm',
       id: 'tooled',
       model: 'test/echo',

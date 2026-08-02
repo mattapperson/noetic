@@ -4,7 +4,13 @@
 
 import { expect } from 'bun:test';
 import * as fsp from 'node:fs/promises';
-import type { FsAdapter, FsStats, ShellAdapter } from '@noetic-tools/types';
+import type {
+  ContextData,
+  FsAdapter,
+  FsStats,
+  ShellAdapter,
+  ToolContext,
+} from '@noetic-tools/types';
 import { z } from 'zod';
 import { createInMemorySubprocessAdapter } from '../src/adapters/in-memory-subprocess-adapter';
 
@@ -12,7 +18,7 @@ import { createInMemorySubprocessAdapter } from '../src/adapters/in-memory-subpr
 //
 // Core is runtime-agnostic and ships no `node:*` adapters; those live in
 // `@noetic-tools/platform-node`. Core tests that exercise filesystem-dependent
-// memory layers need real disk access, so we inline a minimal
+// context layers need real disk access, so we inline a minimal
 // Node-backed `FsAdapter` and a no-op `ShellAdapter` here. Keeping these
 // helpers local to `test/` prevents the production bundle from pulling
 // `node:fs/promises`.
@@ -64,7 +70,14 @@ function createNoopShellAdapter(): ShellAdapter {
   };
 }
 
-import type { ExecutionContext, ScopedStorage, StorageAdapter } from '@noetic-tools/memory';
+import type {
+  BudgetConfig,
+  ContextLayer,
+  ContextScope,
+  ExecutionContext,
+  ScopedStorage,
+  StorageAdapter,
+} from '@noetic-tools/context';
 //#endregion
 import type {
   AgentHarnessContract,
@@ -252,6 +265,9 @@ function getSharedMockHarness(): AgentHarnessContract {
 
 export function makeMockContext(overrides?: Partial<Context>): Context {
   const harness = overrides?.harness ?? getSharedMockHarness();
+  // One object behind both accessors, exactly as ContextImpl does — a mock that
+  // let them diverge would hide compat bugs instead of catching them.
+  const contextData: ContextData = {};
   return {
     id: 'test-ctx',
     stepCount: 0,
@@ -285,7 +301,6 @@ export function makeMockContext(overrides?: Partial<Context>): Context {
       cwd: process.cwd(),
     },
     layers: undefined,
-    memory: {},
     recv: async () => {
       throw new Error('not impl');
     },
@@ -302,6 +317,11 @@ export function makeMockContext(overrides?: Partial<Context>): Context {
     aborted: false,
     abort: () => {},
     ...overrides,
+    // Re-derived AFTER the spread: an override that sets only `context` would
+    // otherwise leave `memory` pointing at the orphaned original, a divergence
+    // ContextImpl cannot produce (its `memory` is a getter over `context`).
+    context: overrides?.context ?? contextData,
+    memory: overrides?.memory ?? overrides?.context ?? contextData,
   };
 }
 
@@ -395,15 +415,18 @@ export function mockEmbed(vectors: Record<string, number[]>): EmbedFn {
 export function makeMockToolContext(ctx?: Context): ToolExecutionContext {
   const resolvedCtx = ctx ?? makeMockContext();
   const harness = makeMockHarness();
+  const toolContext: ToolContext = {
+    get: () => undefined,
+    set: () => {},
+  };
   return {
     ctx: resolvedCtx,
     harness,
     fs: harness.fs,
     shell: harness.shell,
-    memory: {
-      get: () => undefined,
-      set: () => {},
-    },
+    context: toolContext,
+    // Deprecated alias — same accessor object, as buildToolExecutionContext does.
+    memory: toolContext,
     assembledView: resolvedCtx.itemLog.items,
     lastStepMeta: null,
   };
@@ -584,10 +607,10 @@ export function createDynamicCallModel(
 
 // ── Simple execute dispatcher (for loop/fork/spawn tests) ────────────
 
-export const simpleExecute: ExecuteStepFn = async <TMemory, I, O>(
-  step: Step<TMemory, I, O>,
+export const simpleExecute: ExecuteStepFn = async <TContext, I, O>(
+  step: Step<TContext, I, O>,
   input: I,
-  ctx: Context<TMemory>,
+  ctx: Context<TContext>,
 ): Promise<O> => {
   if (step.kind === 'run') {
     return step.execute(input, ctx);
@@ -728,4 +751,34 @@ export function assertOpenResponsesCompliance(items: readonly Item[]): void {
 
 export function isRecord(val: unknown): val is Record<string, unknown> {
   return typeof val === 'object' && val !== null && !Array.isArray(val);
+}
+
+/**
+ * Structural ContextLayer with no behaviour — for tests that only care that a
+ * layer with a given id/slot reached the runtime, not what it does.
+ *
+ * Pass `hooks` when the test needs the layer to actually participate in the
+ * lifecycle; the default is an inert layer.
+ */
+export function makeLayer(
+  id: string,
+  opts?: {
+    slot?: number;
+    scope?: ContextScope;
+    budget?: BudgetConfig;
+    hooks?: ContextLayer['hooks'];
+  },
+): ContextLayer {
+  return {
+    id,
+    name: id,
+    slot: opts?.slot ?? 100,
+    scope: opts?.scope ?? 'execution',
+    ...(opts?.budget === undefined
+      ? {}
+      : {
+          budget: opts.budget,
+        }),
+    hooks: opts?.hooks ?? {},
+  };
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import type { MemoryLayer } from '@noetic-tools/memory';
+import type { ContextLayer } from '@noetic-tools/context';
 import { spawn } from '../../src/builders/spawn-builder';
 
 describe('spawn builder', () => {
@@ -73,7 +73,7 @@ describe('spawn builder', () => {
       slot: 100,
       scope: 'thread',
       hooks: {},
-    } satisfies MemoryLayer;
+    } satisfies ContextLayer;
 
     const s = spawn({
       id: 'memory-spawn',
@@ -82,14 +82,14 @@ describe('spawn builder', () => {
         id: 'child',
         execute: async (i: string) => i,
       },
-      memory: [
+      context: [
         layer,
       ],
     });
 
-    assert(s.memory !== undefined);
-    assert(Array.isArray(s.memory));
-    expect(s.memory).toHaveLength(1);
-    expect(s.memory[0].id).toBe('test-layer');
+    assert(s.context !== undefined);
+    assert(Array.isArray(s.context));
+    expect(s.context).toHaveLength(1);
+    expect(s.context[0].id).toBe('test-layer');
   });
 });

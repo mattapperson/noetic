@@ -3,7 +3,7 @@
  *
  * A "harness" here is a pluggable backend that drives an external agentic
  * coding tool — Claude Code, Codex, opencode, pi — as a Noetic step. It is the
- * direct analogue of the `MemoryLayer` contract: defined in the dependency-free
+ * direct analogue of the `ContextLayer` contract: defined in the dependency-free
  * `@noetic-tools/types` foundation so both `@noetic-tools/core` (which executes
  * harness steps) and the per-tool `@noetic-tools/sub-harness-*` packages (which
  * implement them) can depend on it without forming a cycle.

@@ -1,6 +1,6 @@
 # Tasks
 
-> **Depends On:** `08-runtime` (`AgentHarness`, `FsAdapter`), `11-memory-layer-system` (steering layer slot conventions)
+> **Depends On:** `08-runtime` (`AgentHarness`, `FsAdapter`), `11-context-layer-system` (steering layer slot conventions)
 > **Exports:** `Task`, `LogEntry`, `Event`, `State`, `KanbanColumn`, `Milestone`, `Slice`, `Feature`, `Assertion`, `ValidatorRun`, `FixLineage`, `InterviewSession`, `runTasksCli`, `taskTools`, `createSteeringFileLayer`
 > **Source of truth:** `packages/cli/src/commands/builtins/tasks/`
 > **Docs:** `packages/web/content/docs/cli/tasks.mdx`
@@ -308,7 +308,7 @@ The launcher passes these to the runner child:
 
 | Var | Required | Meaning |
 |---|---|---|
-| `NOETIC_TASK_DIR` | yes | Absolute path to `<projectRoot>/.noetic/tasks/<taskId>`. Used by the runner to derive `taskId` and `projectRoot`, and by the steering memory layer to locate `steering.md`. |
+| `NOETIC_TASK_DIR` | yes | Absolute path to `<projectRoot>/.noetic/tasks/<taskId>`. Used by the runner to derive `taskId` and `projectRoot`, and by the steering context layer to locate `steering.md`. |
 | `NOETIC_TASK_WORKFLOW` | yes | Workflow file passed to `agent-ci run --workflow`. |
 | `NOETIC_TASK_CWD` | no | Working dir for the agent-ci child. Defaults to `process.cwd()`. |
 
@@ -454,9 +454,9 @@ The fork's `merge` reconciles both partials into a single `ValidatorRunOutcome`:
 
 The validator returns `error` immediately when the leaf task has no `worktreePath` (i.e. the implementer hasn't run yet) so the daemon never observes a hung validation. Projects that don't want adversarial review can pass `runValidator` directly to `buildHierarchyDaemonHarness` to short-circuit the default wiring.
 
-## Steering memory layer
+## Steering context layer
 
-`createSteeringFileLayer()` (`packages/cli/src/memory/steering-file-layer.ts`) surfaces `<NOETIC_TASK_DIR>/steering.md` to a task's agent run.
+`createSteeringFileLayer()` (`packages/cli/src/context/steering-file-layer.ts`) surfaces `<NOETIC_TASK_DIR>/steering.md` to a task's agent run.
 
 Contract:
 
@@ -557,7 +557,7 @@ When `viewMode === 'taskBoard'`, `app.tsx` renders the kanban board instead of t
 ## Cross-references
 
 - `08-runtime` — `FsAdapter`, `AgentHarness` lifecycle.
-- `11-memory-layer-system` / `12-builtin-memory-layers` — slot conventions for the steering layer.
+- `11-context-layer-system` / `12-builtin-memory-layers` — slot conventions for the steering layer.
 - `09-error-model` — handlers throw plain `Error` (not `NoeticError`); see `handlers/_shared.ts#formatError`.
 
 ## Future Considerations

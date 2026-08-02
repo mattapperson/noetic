@@ -1,0 +1,168 @@
+'use client';
+
+import type { ReactNode } from 'react';
+import { LayerTile } from '@/components/landing/layer-tile';
+import { LegendRow } from '@/components/landing/legend-row';
+import { ContextIsometricSvg } from '@/components/landing/svgs/context-isometric';
+
+const LAYERS = [
+  {
+    name: 'Working Memory',
+    description: 'Scratchpad for the current turn',
+    color: 'var(--color-tui-cyan)',
+  },
+  {
+    name: 'Observational Context',
+    description: 'Auto-extracted facts from the conversation',
+    color: 'var(--color-tui-cyan)',
+  },
+  {
+    name: 'Steering',
+    description: 'Always-on instructions and guardrails',
+    color: 'var(--color-tui-cyan)',
+  },
+  {
+    name: 'Static Content',
+    description: 'Pinned reference material',
+    color: 'var(--color-tui-cyan)',
+  },
+  {
+    name: 'History Window',
+    description: 'Recent turns, trimmed to a budget',
+    color: 'var(--color-tui-green)',
+  },
+  {
+    name: 'File Reference',
+    description: 'On-demand file contents',
+    color: 'var(--color-tui-green)',
+  },
+  {
+    name: 'Tool Context',
+    description: 'Recall of prior tool calls and results',
+    color: 'var(--color-tui-green)',
+  },
+  {
+    name: 'Temporal Context',
+    description: 'Time-stamped fact extraction and recall',
+    color: 'var(--color-tui-green)',
+  },
+  {
+    name: 'Plan Context',
+    description: 'Task tree and execution state',
+    color: 'var(--color-tui-amber)',
+  },
+  {
+    name: 'Durable Task State',
+    description: 'Persistent agent checkpoints',
+    color: 'var(--color-tui-amber)',
+  },
+  {
+    name: 'Custom Layers',
+    description: 'Build your own — semantic recall, episodic summaries',
+    color: 'var(--color-tui-muted)',
+  },
+] as const;
+
+const LEGEND = [
+  {
+    color: 'var(--color-tui-cyan)',
+    label: 'working layers',
+  },
+  {
+    color: 'var(--color-tui-green)',
+    label: 'retrieval layers',
+  },
+  {
+    color: 'var(--color-tui-amber)',
+    label: 'persistence',
+  },
+] as const;
+
+export function ContextSystem(): ReactNode {
+  return (
+    <section
+      style={{
+        padding: '80px 24px',
+        margin: '0 auto',
+      }}
+    >
+      <div
+        className="section-split"
+        style={{
+          marginBottom: '48px',
+        }}
+      >
+        {/* Copy - appears first in DOM for mobile, reordered on desktop */}
+        <div className="context-content">
+          <span
+            style={{
+              fontSize: '13px',
+              color: 'var(--color-tui-muted)',
+              letterSpacing: '0.1em',
+            }}
+          >
+            {'// context management'}
+          </span>
+          <h2
+            style={{
+              fontSize: '38px',
+              fontWeight: 700,
+              margin: '8px 0 12px',
+              textTransform: 'uppercase',
+              letterSpacing: '-0.01em',
+            }}
+          >
+            Unparalleled context management
+          </h2>
+          <p
+            style={{
+              fontSize: '17px',
+              color: 'var(--color-tui-secondary)',
+              margin: '0 0 8px',
+              lineHeight: 1.5,
+            }}
+          >
+            Long multi-turn conversations without blowing up the context window.
+          </p>
+          <p
+            style={{
+              fontSize: '14px',
+              color: 'var(--color-tui-muted)',
+              margin: '0',
+              lineHeight: 1.7,
+            }}
+          >
+            Working memory, observation extraction, plan tracking, durable checkpoints, and more —
+            assemble the layers you need or build your own. Token costs stay predictable as
+            conversations grow.
+          </p>
+        </div>
+
+        {/* SVG - appears second in DOM for mobile, reordered on desktop */}
+        <div className="context-visual">
+          <ContextIsometricSvg />
+        </div>
+      </div>
+
+      <LegendRow items={LEGEND} />
+
+      <div
+        className="context-layers-grid"
+        style={{
+          display: 'grid',
+          gap: '4px',
+        }}
+      >
+        {LAYERS.map((layer, i) => (
+          <LayerTile
+            key={layer.name}
+            name={layer.name}
+            description={layer.description}
+            color={layer.color}
+            delay={i * 0.08}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}

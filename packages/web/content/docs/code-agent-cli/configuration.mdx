@@ -32,7 +32,7 @@ export default {
   trustProjectEmbeddedCommands: false,
   plugins: [],
   tools: { include: [], exclude: [], tasks: true },
-  memory: [],
+  context: [],
   ui: { doublePressWindowMs: 800 },
   history: { maxItems: 200 },
   shell: { useRtk: true },
@@ -67,7 +67,7 @@ export default {
 | `tools.include` | `string[]` | — | Whitelist of tool names. When set, only these register. |
 | `tools.exclude` | `string[]` | — | Blacklist of tool names. Applied after `include`. |
 | `tools.tasks` | `boolean` | `true` | Register the built-in `task_*` tools. Set `false` to opt out entirely. |
-| `memory` | `string[]` | — | Identifiers for additional memory layers to install (advanced). |
+| `context` | `string[]` | — | Identifiers for additional context layers to install (advanced). |
 | `worktree` | `WorktreeConfig` | — | Sub-agent isolation config — see [Hooks](/docs/code-agent-cli/hooks). |
 | `ui.doublePressWindowMs` | `int` 100–5000 | `800` | Window in ms within which a second `Ctrl+C` / `Ctrl+D` press triggers a graceful exit. |
 | `history.maxItems` | `int` 2–10000 | — | Cap on trailing items projected to the LLM each turn. Storage is untouched — this is a read-side projection only. When unset, history is uncapped. |
@@ -109,7 +109,7 @@ All built-in commands are available to every session. Plugin commands appear aft
 |---|---|
 | `/clear` | Clear history and start a fresh session |
 | `/config` | View and edit agent configuration |
-| `/context` | Show context window breakdown by memory layer (from last run) |
+| `/context` | Show context window breakdown by context layer (from last run) |
 | `/diff-review` | Open a diff review window with branch / per-commit / all-files scopes |
 | `/init` | Initialize CLAUDE.md (and optional skills/hooks) with codebase documentation |
 | `/mode` | Toggle agent mode between `act` and `planning` |

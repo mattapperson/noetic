@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import type { ContextMemory } from '@noetic-tools/memory';
+import type { ContextData } from '@noetic-tools/context';
 import type { Step, StepSubprocessRequest } from '@noetic-tools/types';
 import { DetachedStatus, isNoeticError } from '@noetic-tools/types';
 import { createInMemorySubprocessAdapter } from '../../src/adapters/in-memory-subprocess-adapter';
@@ -156,7 +156,7 @@ describe('AgentHarness.detachedSpawn', () => {
     });
     const ctx = harness.createContext();
 
-    const step: Step<ContextMemory, number, number> = {
+    const step: Step<ContextData, number, number> = {
       kind: 'run',
       id: 'delayed',
       execute: async (input: number) => {
@@ -189,7 +189,7 @@ describe('AgentHarness.detachedSpawn', () => {
     });
     const ctx = harness.createContext();
 
-    const step: Step<ContextMemory, string, string> = {
+    const step: Step<ContextData, string, string> = {
       kind: 'run',
       id: 'echo',
       execute: async (input: string) => input,

@@ -19,7 +19,7 @@ A research agent that investigates a topic from three perspectives simultaneousl
 ## Code
 
 ```ts
-import type { ContextMemory } from '@noetic-tools/core';
+import type { ContextData } from '@noetic-tools/core';
 import { fork } from '@noetic-tools/core';
 import { spawn } from '@noetic-tools/core';
 import { step } from '@noetic-tools/core';
@@ -43,14 +43,14 @@ const PERSPECTIVES = [
 ] as const;
 
 export function buildParallelResearchAgent() {
-  return fork<ContextMemory, string, string>({
+  return fork<ContextData, string, string>({
     id: 'parallel-research',
     mode: 'all',
     paths: () =>
       PERSPECTIVES.map((perspective) =>
-        spawn<ContextMemory, string, string>({
+        spawn<ContextData, string, string>({
           id: `research-${perspective.id}`,
-          child: step.llm<ContextMemory, string, string>({
+          child: step.llm<ContextData, string, string>({
             id: `llm-${perspective.id}`,
             model: 'openai/gpt-4o',
             instructions: perspective.instructions,
@@ -75,7 +75,7 @@ export function buildParallelResearchAgent() {
 
 ### Spawn for Isolation
 
-Each LLM call is wrapped in `spawn`, giving it its own context boundary. This means each perspective agent has independent token tracking, memory, and item logs. If one perspective fails, it doesn't corrupt the others.
+Each LLM call is wrapped in `spawn`, giving it its own context boundary. This means each perspective agent has independent token tracking, context, and item logs. If one perspective fails, it doesn't corrupt the others.
 
 ### Data-Driven Paths
 

@@ -69,7 +69,7 @@ describe('Type definitions', () => {
   // the `Step` narrowing below.
   describe('Public step-type re-exports', () => {
     it('exposes StepSpawn from @noetic-tools/core', () => {
-      function isSpawn<TMemory, I, O>(s: Step<TMemory, I, O>): s is StepSpawn<TMemory, I, O> {
+      function isSpawn<TContext, I, O>(s: Step<TContext, I, O>): s is StepSpawn<TContext, I, O> {
         return s.kind === 'spawn';
       }
       // Use the predicate so the import is not elided as type-only.

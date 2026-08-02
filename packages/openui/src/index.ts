@@ -1,6 +1,6 @@
 /**
  * @noetic-tools/openui — generative UI for Noetic agents via the OpenUI
- * standard: the `openUi()` output codec, the `openUiSurface()` memory layer,
+ * standard: the `openUi()` output codec, the `openUiSurface()` context layer,
  * the typed `fragment()` builder for tool-authored UI, and `ui.*` predicates.
  * The transport lives at the `./server` subpath.
  */

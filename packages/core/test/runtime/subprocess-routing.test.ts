@@ -17,7 +17,7 @@
 
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import type { ContextMemory } from '@noetic-tools/memory';
+import type { ContextData } from '@noetic-tools/context';
 import type {
   Step,
   StepSubprocessRequest,
@@ -88,7 +88,7 @@ describe('Phase A adapter routing', () => {
       params: {},
     });
     const ctx = harness.createContext();
-    const step: Step<ContextMemory, string, string> = {
+    const step: Step<ContextData, string, string> = {
       kind: 'run',
       id: 'throws-sync',
       execute: () => {
@@ -122,7 +122,7 @@ describe('Phase A adapter routing', () => {
       subprocess: adapterA,
     });
     const ctx = harness.createContext();
-    const step: Step<ContextMemory, string, string> = {
+    const step: Step<ContextData, string, string> = {
       kind: 'run',
       id: 'per-step-step',
       execute: async (input) => `echo:${input}`,
@@ -153,7 +153,7 @@ describe('Phase A adapter routing', () => {
       subprocess: adapterA,
     });
     const ctx = harness.createContext();
-    const step: Step<ContextMemory, string, string> = {
+    const step: Step<ContextData, string, string> = {
       kind: 'run',
       id: 'per-call-step',
       execute: async (input) => `echo:${input}`,
@@ -239,7 +239,7 @@ describe('Phase A adapter routing', () => {
       subprocess: neverSettling,
     });
     const ctx = harness.createContext();
-    const step: Step<ContextMemory, string, string> = {
+    const step: Step<ContextData, string, string> = {
       kind: 'run',
       id: 'timeout-step',
       execute: async (input) => input,

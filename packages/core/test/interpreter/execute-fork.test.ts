@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import type { ContextMemory, LayerStateStore, MemoryLayer } from '@noetic-tools/memory';
-import { createLayerStateStore, Slot } from '@noetic-tools/memory';
+import type { ContextData, ContextLayer, LayerStateStore } from '@noetic-tools/context';
+import { createLayerStateStore, Slot } from '@noetic-tools/context';
 import type {
   Context,
   SettleResult,
@@ -25,7 +25,7 @@ const _StateSchema = z.record(z.string(), z.unknown());
 describe('executeFork', () => {
   describe('all mode', () => {
     it('executes all paths and merges results', async () => {
-      const step: StepForkAll<ContextMemory, number, number> = {
+      const step: StepForkAll<ContextData, number, number> = {
         kind: 'fork',
         id: 'all-test',
         mode: 'all',
@@ -51,7 +51,7 @@ describe('executeFork', () => {
     });
 
     it('throws fork_partial when any path fails', async () => {
-      const step: StepForkAll<ContextMemory, string, string> = {
+      const step: StepForkAll<ContextData, string, string> = {
         kind: 'fork',
         id: 'fail-test',
         mode: 'all',
@@ -88,7 +88,7 @@ describe('executeFork', () => {
     });
 
     it('state is isolated between paths', async () => {
-      const step: StepForkAll<ContextMemory, string, string> = {
+      const step: StepForkAll<ContextData, string, string> = {
         kind: 'fork',
         id: 'iso-test',
         mode: 'all',
@@ -135,7 +135,7 @@ describe('executeFork', () => {
     it('respects concurrency limit', async () => {
       let maxConcurrent = 0;
       let current = 0;
-      const step: StepForkAll<ContextMemory, string, string> = {
+      const step: StepForkAll<ContextData, string, string> = {
         kind: 'fork',
         id: 'conc-test',
         mode: 'all',
@@ -198,7 +198,7 @@ describe('executeFork', () => {
           return id;
         },
       });
-      const step: StepForkAll<ContextMemory, string, string> = {
+      const step: StepForkAll<ContextData, string, string> = {
         kind: 'fork',
         id: 'serial-test',
         mode: 'all',
@@ -221,7 +221,7 @@ describe('executeFork', () => {
     it('paths() receives input and context', async () => {
       let capturedInput: string | undefined;
       let capturedCtx: Context | undefined;
-      const step: StepForkAll<ContextMemory, string, string> = {
+      const step: StepForkAll<ContextData, string, string> = {
         kind: 'fork',
         id: 'args-test',
         mode: 'all',
@@ -248,7 +248,7 @@ describe('executeFork', () => {
 
     it('merge() receives context as second arg', async () => {
       let capturedCtx: Context | undefined;
-      const step: StepForkAll<ContextMemory, string, string> = {
+      const step: StepForkAll<ContextData, string, string> = {
         kind: 'fork',
         id: 'merge-ctx-test',
         mode: 'all',
@@ -272,7 +272,7 @@ describe('executeFork', () => {
     });
 
     it('handles empty paths', async () => {
-      const step: StepForkAll<ContextMemory, string, string> = {
+      const step: StepForkAll<ContextData, string, string> = {
         kind: 'fork',
         id: 'empty-all',
         mode: 'all',
@@ -289,7 +289,7 @@ describe('executeFork', () => {
 
   describe('race mode', () => {
     it('returns first completed result', async () => {
-      const step: StepForkRace<ContextMemory, string, string> = {
+      const step: StepForkRace<ContextData, string, string> = {
         kind: 'fork',
         id: 'race-test',
         mode: 'race',
@@ -320,7 +320,7 @@ describe('executeFork', () => {
     });
 
     it('winner state replaces parent state', async () => {
-      const step: StepForkRace<ContextMemory, string, string> = {
+      const step: StepForkRace<ContextData, string, string> = {
         kind: 'fork',
         id: 'state-test',
         mode: 'race',
@@ -359,7 +359,7 @@ describe('executeFork', () => {
 
     it('aborts loser contexts after winner resolves', async () => {
       const childContexts: Context[] = [];
-      const step: StepForkRace<ContextMemory, string, string> = {
+      const step: StepForkRace<ContextData, string, string> = {
         kind: 'fork',
         id: 'abort-test',
         mode: 'race',
@@ -399,7 +399,7 @@ describe('executeFork', () => {
     it('respects concurrency limit in race mode', async () => {
       let maxConcurrent = 0;
       let current = 0;
-      const step: StepForkRace<ContextMemory, string, string> = {
+      const step: StepForkRace<ContextData, string, string> = {
         kind: 'fork',
         id: 'race-conc-test',
         mode: 'race',
@@ -448,7 +448,7 @@ describe('executeFork', () => {
     });
 
     it('all fail throws fork_partial', async () => {
-      const step: StepForkRace<ContextMemory, string, string> = {
+      const step: StepForkRace<ContextData, string, string> = {
         kind: 'fork',
         id: 'all-fail',
         mode: 'race',
@@ -485,7 +485,7 @@ describe('executeFork', () => {
     });
 
     it('throws fork_partial on empty paths', async () => {
-      const step: StepForkRace<ContextMemory, string, string> = {
+      const step: StepForkRace<ContextData, string, string> = {
         kind: 'fork',
         id: 'empty-race',
         mode: 'race',
@@ -506,7 +506,7 @@ describe('executeFork', () => {
 
   describe('settle mode', () => {
     it('waits for all and never throws', async () => {
-      const step: StepForkSettle<ContextMemory, string, string> = {
+      const step: StepForkSettle<ContextData, string, string> = {
         kind: 'fork',
         id: 'settle-test',
         mode: 'settle',
@@ -539,7 +539,7 @@ describe('executeFork', () => {
 
     it('settle result has correct shape', async () => {
       let capturedResults: SettleResult<string>[] = [];
-      const step: StepForkSettle<ContextMemory, string, string> = {
+      const step: StepForkSettle<ContextData, string, string> = {
         kind: 'fork',
         id: 'shape-test',
         mode: 'settle',
@@ -578,7 +578,7 @@ describe('executeFork', () => {
     });
 
     it('handles empty paths', async () => {
-      const step: StepForkSettle<ContextMemory, string, string> = {
+      const step: StepForkSettle<ContextData, string, string> = {
         kind: 'fork',
         id: 'empty-settle',
         mode: 'settle',
@@ -604,7 +604,7 @@ describe('executeFork', () => {
       let senderError: unknown = null;
       let received: number | null | undefined;
 
-      const step: StepForkAll<ContextMemory, void, void> = {
+      const step: StepForkAll<ContextData, void, void> = {
         kind: 'fork',
         id: 'channel-share',
         mode: 'all',
@@ -643,12 +643,12 @@ describe('executeFork', () => {
     });
   });
 
-  describe('memory-layer child boundary', () => {
+  describe('context-layer child boundary', () => {
     interface ArtifactState {
       files: string[];
     }
 
-    function makeArtifactLayer(overrides?: Partial<MemoryLayer['hooks']>): MemoryLayer {
+    function makeArtifactLayer(overrides?: Partial<ContextLayer['hooks']>): ContextLayer {
       return {
         id: 'artifacts',
         name: 'artifacts',
@@ -682,7 +682,7 @@ describe('executeFork', () => {
       return {
         kind: 'run' as const,
         id,
-        execute: async (_input: string, c: Context<ContextMemory>): Promise<string> => {
+        execute: async (_input: string, c: Context<ContextData>): Promise<string> => {
           const seeded = frameworkCast<ArtifactState | undefined>(store.get(c.id, 'artifacts'));
           store.set(c.id, 'artifacts', {
             files: [
@@ -710,7 +710,7 @@ describe('executeFork', () => {
         ],
       });
 
-      const step: StepForkAll<ContextMemory, string, string> = {
+      const step: StepForkAll<ContextData, string, string> = {
         kind: 'fork',
         id: 'fan-out',
         mode: 'all',
@@ -753,7 +753,7 @@ describe('executeFork', () => {
         files: [],
       });
 
-      const step: StepForkSettle<ContextMemory, string, string> = {
+      const step: StepForkSettle<ContextData, string, string> = {
         kind: 'fork',
         id: 'partial-fan-out',
         mode: 'settle',
@@ -762,7 +762,7 @@ describe('executeFork', () => {
           {
             kind: 'run',
             id: 'boom',
-            execute: async (_input: string, c: Context<ContextMemory>): Promise<string> => {
+            execute: async (_input: string, c: Context<ContextData>): Promise<string> => {
               store.set(c.id, 'artifacts', {
                 files: [
                   'never.ts',
@@ -800,7 +800,7 @@ describe('executeFork', () => {
       });
 
       const childIds: string[] = [];
-      const step: StepForkAll<ContextMemory, string, string> = {
+      const step: StepForkAll<ContextData, string, string> = {
         kind: 'fork',
         id: 'cleanup',
         mode: 'all',
@@ -808,7 +808,7 @@ describe('executeFork', () => {
           {
             kind: 'run',
             id: 'p',
-            execute: async (_input: string, c: Context<ContextMemory>): Promise<string> => {
+            execute: async (_input: string, c: Context<ContextData>): Promise<string> => {
               childIds.push(c.id);
               store.set(c.id, 'artifacts', {
                 files: [
@@ -850,7 +850,7 @@ describe('executeFork', () => {
 
       let childLayerIds: string[] = [];
       let childToolNames: string[] = [];
-      const step: StepForkAll<ContextMemory, string, string> = {
+      const step: StepForkAll<ContextData, string, string> = {
         kind: 'fork',
         id: 'inherit',
         mode: 'all',
@@ -858,7 +858,7 @@ describe('executeFork', () => {
           {
             kind: 'run',
             id: 'p',
-            execute: async (_input: string, c: Context<ContextMemory>): Promise<string> => {
+            execute: async (_input: string, c: Context<ContextData>): Promise<string> => {
               childLayerIds = (c.layers ?? []).map((l) => l.id);
               childToolNames = (c.unifiedTools ?? []).map((t) => t.name);
               return 'p';
@@ -901,7 +901,7 @@ describe('executeFork', () => {
       });
 
       let childItemCount = -1;
-      const step: StepForkAll<ContextMemory, string, string> = {
+      const step: StepForkAll<ContextData, string, string> = {
         kind: 'fork',
         id: 'no-double-seed',
         mode: 'all',
@@ -909,7 +909,7 @@ describe('executeFork', () => {
           {
             kind: 'run',
             id: 'p',
-            execute: async (_input: string, c: Context<ContextMemory>): Promise<string> => {
+            execute: async (_input: string, c: Context<ContextData>): Promise<string> => {
               childItemCount = c.itemLog.items.length;
               return 'p';
             },
@@ -929,7 +929,7 @@ describe('executeFork', () => {
       const ctx = new ContextImpl({
         harness: makeMockHarness(),
       });
-      const step: StepForkAll<ContextMemory, number, number> = {
+      const step: StepForkAll<ContextData, number, number> = {
         kind: 'fork',
         id: 'no-layers',
         mode: 'all',
@@ -957,7 +957,7 @@ describe('executeFork', () => {
 
     it("first failure aborts in-flight siblings: the sibling's second step never runs", async () => {
       let siblingSecondStepRan = 0;
-      const slowSibling = loop<ContextMemory, number, number>({
+      const slowSibling = loop<ContextData, number, number>({
         id: 'slow-sibling',
         steps: [
           {
@@ -979,7 +979,7 @@ describe('executeFork', () => {
         ],
         until: until.maxSteps(1),
       });
-      const step: StepForkAll<ContextMemory, number, number> = {
+      const step: StepForkAll<ContextData, number, number> = {
         kind: 'fork',
         id: 'fail-fast-fork',
         mode: 'all',
@@ -1024,7 +1024,7 @@ describe('executeFork', () => {
 
     it('concurrency 1: paths queued behind a failure are skipped without executing', async () => {
       const executed: string[] = [];
-      const step: StepForkAll<ContextMemory, number, number> = {
+      const step: StepForkAll<ContextData, number, number> = {
         kind: 'fork',
         id: 'queued-skip-fork',
         mode: 'all',
@@ -1085,7 +1085,7 @@ describe('executeFork', () => {
     });
 
     it('a path that completed before the failure lands in succeeded', async () => {
-      const step: StepForkAll<ContextMemory, number, number> = {
+      const step: StepForkAll<ContextData, number, number> = {
         kind: 'fork',
         id: 'partial-success-fork',
         mode: 'all',
@@ -1132,7 +1132,7 @@ describe('executeFork', () => {
     });
 
     it('parent abort mid-fork surfaces cancelled, not fork_partial', async () => {
-      const step: StepForkAll<ContextMemory, number, number> = {
+      const step: StepForkAll<ContextData, number, number> = {
         kind: 'fork',
         id: 'parent-abort-fork',
         mode: 'all',
@@ -1166,7 +1166,7 @@ describe('executeFork', () => {
     });
 
     it('all-success regression: fail-fast machinery does not disturb a clean fork', async () => {
-      const step: StepForkAll<ContextMemory, number, number> = {
+      const step: StepForkAll<ContextData, number, number> = {
         kind: 'fork',
         id: 'clean-fork',
         mode: 'all',
@@ -1197,8 +1197,8 @@ describe('executeFork', () => {
     });
 
     it('parent abort cascades into the in-flight path contexts', async () => {
-      const seen: Context<ContextMemory>[] = [];
-      const step: StepForkAll<ContextMemory, number, number> = {
+      const seen: Context<ContextData>[] = [];
+      const step: StepForkAll<ContextData, number, number> = {
         kind: 'fork',
         id: 'cascade-fork',
         mode: 'all',
@@ -1243,7 +1243,7 @@ describe('executeFork', () => {
     });
 
     it('detaches path contexts once the fork settles', async () => {
-      const step: StepForkAll<ContextMemory, number, number> = {
+      const step: StepForkAll<ContextData, number, number> = {
         kind: 'fork',
         id: 'detach-fork',
         mode: 'all',

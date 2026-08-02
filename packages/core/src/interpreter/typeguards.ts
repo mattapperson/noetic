@@ -1,4 +1,4 @@
-import type { ContextMemory } from '@noetic-tools/memory';
+import type { ContextData } from '@noetic-tools/context';
 import type { Context, FunctionCallItem, Item } from '@noetic-tools/types';
 import type { ChannelStore } from '../runtime/channel-store';
 import { ContextImpl } from '../runtime/context-impl';
@@ -7,7 +7,7 @@ import type { MutableContext } from '../types/mutable-context';
 // Re-exports for backward compatibility; the pure variants live in util/.
 export { isAssistantMessage, isOutputText, isUserMessage } from '@noetic-tools/types';
 
-export function isMutableContext(ctx: Context<ContextMemory>): ctx is MutableContext {
+export function isMutableContext(ctx: Context<ContextData>): ctx is MutableContext {
   // Check if the context has writable mutable fields (ContextImpl or compatible mock)
   if (ctx instanceof ContextImpl) {
     return true;
@@ -17,7 +17,7 @@ export function isMutableContext(ctx: Context<ContextMemory>): ctx is MutableCon
   return desc !== undefined && desc.writable !== false;
 }
 
-export function isContextImpl(ctx: Context<ContextMemory>): ctx is ContextImpl {
+export function isContextImpl(ctx: Context<ContextData>): ctx is ContextImpl {
   return ctx instanceof ContextImpl;
 }
 
@@ -26,7 +26,7 @@ export function isContextImpl(ctx: Context<ContextMemory>): ctx is ContextImpl {
  * the same module other interpreters pull it from, sidestepping a circular
  * TDZ when this helper is used by `executeEvery` in `execute-control.ts`.
  */
-export function getContextChannelStore<TMemory>(ctx: Context<TMemory>): ChannelStore | undefined {
+export function getContextChannelStore<TContext>(ctx: Context<TContext>): ChannelStore | undefined {
   if (ctx instanceof ContextImpl) {
     return ctx.channelStore;
   }

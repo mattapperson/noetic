@@ -1,4 +1,4 @@
-export { buildContextMemory } from '@noetic-tools/memory';
+export { buildContextData } from '@noetic-tools/context';
 export type { ItemSchemaRegistry } from '@noetic-tools/types';
 export { defaultItemSchemaRegistry } from '@noetic-tools/types';
 export type {
@@ -6,7 +6,8 @@ export type {
   Channel,
   ChannelStore,
   Context,
-  ContextMemory,
+  ContextData,
+  ContextLayer,
   CwdState,
   EventBroadcaster,
   FrontierFrame,
@@ -14,7 +15,6 @@ export type {
   Item,
   ItemLog,
   LastLayerUsage,
-  MemoryLayer,
   Span,
   StepMeta,
   TokenUsage,

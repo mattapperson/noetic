@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import assert from 'node:assert';
-import type { MemoryLayer } from '@noetic-tools/memory';
+import type { ContextLayer } from '@noetic-tools/context';
 import type {
   OutputCodec,
   ProcessSubprocessRequest,
@@ -64,7 +64,10 @@ function makeMockSubprocess(opts?: { fail?: boolean }): {
   };
 }
 
-function makeHydrationContext(tools: Tool[] = []): HydrationContext {
+function makeHydrationContext(
+  tools: Tool[] = [],
+  extra?: Partial<HydrationContext>,
+): HydrationContext {
   const toolMap = new Map(
     tools.map((t) => [
       t.name,
@@ -74,6 +77,7 @@ function makeHydrationContext(tools: Tool[] = []): HydrationContext {
   return {
     tools: toolMap,
     executeStep: async (_step, input) => frameworkCast(input),
+    ...extra,
   };
 }
 
@@ -388,11 +392,11 @@ describe('hydrateNode — spawn', () => {
     };
     const result = hydrateNode(node, makeHydrationContext());
     assert(result.kind === 'spawn');
-    expect(result.memory).toBeUndefined();
+    expect(result.context).toBeUndefined();
   });
 
   test('resolves named layers onto the spawned child', () => {
-    const mockLayer: MemoryLayer = frameworkCast({
+    const mockLayer: ContextLayer = frameworkCast({
       id: 'durable-task-state',
       slot: 110,
     });
@@ -417,7 +421,7 @@ describe('hydrateNode — spawn', () => {
     ]);
     const result = hydrateNode(node, ctx);
     assert(result.kind === 'spawn');
-    expect(result.memory).toEqual([
+    expect(result.context).toEqual([
       mockLayer,
     ]);
   });
@@ -600,6 +604,280 @@ describe('hydrateNode — sequence', () => {
   });
 });
 
+describe('hydrateNode — subflow', () => {
+  /**
+   * An executeStep that records every (step, input) pair and actually runs
+   * `run` steps, so nested subflow wrappers resolve — the echo default would
+   * never execute the inner wrapper, hiding transitive cycles.
+   */
+  function makeExecutingContext(workflows?: ReadonlyMap<string, WorkflowDocument>): {
+    ctx: HydrationContext;
+    executed: Array<{
+      id: string;
+      input: string;
+      step: unknown;
+    }>;
+  } {
+    const executed: Array<{
+      id: string;
+      input: string;
+      step: unknown;
+    }> = [];
+    const ctx: HydrationContext = {
+      tools: new Map(),
+      workflows,
+      executeStep: async (step, input, execCtx) => {
+        executed.push({
+          id: step.id ?? '',
+          input: String(input),
+          step,
+        });
+        if (step.kind === 'run') {
+          return frameworkCast(await step.execute(frameworkCast(input), execCtx));
+        }
+        return frameworkCast(input);
+      },
+    };
+    return {
+      ctx,
+      executed,
+    };
+  }
+
+  const innerLlm = (id = 'inner'): WorkflowNode => ({
+    kind: 'llm',
+    id,
+    instructions: 'do it',
+  });
+
+  test('inline document hydrates lazily and executes with suffixed ids', async () => {
+    const node: WorkflowNode = {
+      kind: 'subflow',
+      id: 'sub',
+      document: {
+        version: 1,
+        root: innerLlm(),
+      },
+    };
+    const { ctx, executed } = makeExecutingContext();
+    const wrapper = hydrateNode(node, ctx);
+    expect(wrapper.kind).toBe('run');
+    assert(wrapper.kind === 'run');
+    const result = await wrapper.execute('hello', makeMockContext());
+    expect(result).toBe('hello');
+    expect(executed).toHaveLength(1);
+    expect(executed[0]?.id).toBe('inner-sub');
+    expect(executed[0]?.input).toBe('hello');
+  });
+
+  test('ref resolves from the workflows registry', async () => {
+    const workflows = new Map<string, WorkflowDocument>([
+      [
+        'named',
+        {
+          version: 1,
+          root: innerLlm(),
+        },
+      ],
+    ]);
+    const node: WorkflowNode = {
+      kind: 'subflow',
+      id: 'sub',
+      ref: 'named',
+    };
+    const { ctx, executed } = makeExecutingContext(workflows);
+    const wrapper = hydrateNode(node, ctx);
+    assert(wrapper.kind === 'run');
+    await wrapper.execute('in', makeMockContext());
+    expect(executed[0]?.id).toBe('inner-sub');
+  });
+
+  test('input field overrides the runtime input', async () => {
+    const node: WorkflowNode = {
+      kind: 'subflow',
+      id: 'sub',
+      input: 'literal',
+      document: {
+        version: 1,
+        root: innerLlm(),
+      },
+    };
+    const { ctx, executed } = makeExecutingContext();
+    const wrapper = hydrateNode(node, ctx);
+    assert(wrapper.kind === 'run');
+    await wrapper.execute('runtime', makeMockContext());
+    expect(executed[0]?.input).toBe('literal');
+  });
+
+  test('unknown ref throws UNKNOWN_WORKFLOW_REFERENCE at execution time', async () => {
+    const node: WorkflowNode = {
+      kind: 'subflow',
+      id: 'sub',
+      ref: 'missing',
+    };
+    const { ctx } = makeExecutingContext(new Map());
+    const wrapper = hydrateNode(node, ctx);
+    assert(wrapper.kind === 'run');
+    try {
+      await wrapper.execute('in', makeMockContext());
+      expect.unreachable('expected UNKNOWN_WORKFLOW_REFERENCE');
+    } catch (e) {
+      assert(isNoeticConfigError(e));
+      expect(e.code).toBe('UNKNOWN_WORKFLOW_REFERENCE');
+      expect(e.hint).toContain('(none)');
+    }
+  });
+
+  test('direct self-reference throws WORKFLOW_CYCLE', async () => {
+    const workflows = new Map<string, WorkflowDocument>([
+      [
+        'a',
+        {
+          version: 1,
+          root: {
+            kind: 'subflow',
+            id: 'again',
+            ref: 'a',
+          },
+        },
+      ],
+    ]);
+    const node: WorkflowNode = {
+      kind: 'subflow',
+      id: 'root',
+      ref: 'a',
+    };
+    const { ctx } = makeExecutingContext(workflows);
+    const wrapper = hydrateNode(node, ctx);
+    assert(wrapper.kind === 'run');
+    try {
+      await wrapper.execute('in', makeMockContext());
+      expect.unreachable('expected WORKFLOW_CYCLE');
+    } catch (e) {
+      assert(isNoeticConfigError(e));
+      expect(e.code).toBe('WORKFLOW_CYCLE');
+    }
+  });
+
+  test('transitive cycle a -> b -> a throws WORKFLOW_CYCLE', async () => {
+    const workflows = new Map<string, WorkflowDocument>([
+      [
+        'a',
+        {
+          version: 1,
+          root: {
+            kind: 'subflow',
+            id: 'to-b',
+            ref: 'b',
+          },
+        },
+      ],
+      [
+        'b',
+        {
+          version: 1,
+          root: {
+            kind: 'subflow',
+            id: 'back-to-a',
+            ref: 'a',
+          },
+        },
+      ],
+    ]);
+    const node: WorkflowNode = {
+      kind: 'subflow',
+      id: 'root',
+      ref: 'a',
+    };
+    const { ctx } = makeExecutingContext(workflows);
+    const wrapper = hydrateNode(node, ctx);
+    assert(wrapper.kind === 'run');
+    try {
+      await wrapper.execute('in', makeMockContext());
+      expect.unreachable('expected WORKFLOW_CYCLE');
+    } catch (e) {
+      assert(isNoeticConfigError(e));
+      expect(e.code).toBe('WORKFLOW_CYCLE');
+      expect(e.message).toContain('a -> b -> a');
+    }
+  });
+
+  test('diamond reuse of the same workflow from sibling nodes is legal', async () => {
+    const workflows = new Map<string, WorkflowDocument>([
+      [
+        'shared',
+        {
+          version: 1,
+          root: innerLlm(),
+        },
+      ],
+    ]);
+    const { ctx, executed } = makeExecutingContext(workflows);
+    const first = hydrateNode(
+      {
+        kind: 'subflow',
+        id: 'left',
+        ref: 'shared',
+      },
+      ctx,
+    );
+    const second = hydrateNode(
+      {
+        kind: 'subflow',
+        id: 'right',
+        ref: 'shared',
+      },
+      ctx,
+    );
+    assert(first.kind === 'run');
+    assert(second.kind === 'run');
+    await first.execute('x', makeMockContext());
+    await second.execute('y', makeMockContext());
+    expect(executed.map((e) => e.id)).toEqual([
+      'inner-left',
+      'inner-right',
+    ]);
+  });
+
+  test('a workflow registered after hydration still resolves', async () => {
+    const workflows = new Map<string, WorkflowDocument>();
+    const { ctx, executed } = makeExecutingContext(workflows);
+    const wrapper = hydrateNode(
+      {
+        kind: 'subflow',
+        id: 'sub',
+        ref: 'late',
+      },
+      ctx,
+    );
+    workflows.set('late', {
+      version: 1,
+      root: innerLlm(),
+    });
+    assert(wrapper.kind === 'run');
+    await wrapper.execute('in', makeMockContext());
+    expect(executed[0]?.id).toBe('inner-sub');
+  });
+
+  test('repeated executions reuse the memoized hydrated child', async () => {
+    const node: WorkflowNode = {
+      kind: 'subflow',
+      id: 'sub',
+      document: {
+        version: 1,
+        root: innerLlm(),
+      },
+    };
+    const { ctx, executed } = makeExecutingContext();
+    const wrapper = hydrateNode(node, ctx);
+    assert(wrapper.kind === 'run');
+    await wrapper.execute('one', makeMockContext());
+    await wrapper.execute('two', makeMockContext());
+    expect(executed).toHaveLength(2);
+    expect(Object.is(executed[0]?.step, executed[1]?.step)).toBe(true);
+  });
+});
+
 describe('hydrateNode — every', () => {
   test('produces StepEvery', () => {
     const node: WorkflowNode = {
@@ -652,7 +930,7 @@ describe('hydrateWorkflow', () => {
 
 describe('hydrateNode — provide', () => {
   test('produces StepProvide with resolved layers', () => {
-    const mockLayer: MemoryLayer = frameworkCast({
+    const mockLayer: ContextLayer = frameworkCast({
       id: 'test-layer',
       slot: 0,
     });

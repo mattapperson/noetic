@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import type { ContextMemory } from '@noetic-tools/memory';
+import type { ContextData } from '@noetic-tools/context';
 import type { CallModelRequest, Item, LLMResponse, Step } from '@noetic-tools/types';
 import { ItemSchema, ItemSchemaRegistry, isNoeticError } from '@noetic-tools/types';
 import { z } from 'zod';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { makeMessage, textOnlyResponse } from '../_helpers';
 
-const echoStep: Step<ContextMemory, string, string> = {
+const echoStep: Step<ContextData, string, string> = {
   kind: 'llm',
   id: 'echo',
   model: 'test/echo',

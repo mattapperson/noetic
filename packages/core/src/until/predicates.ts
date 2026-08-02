@@ -1,4 +1,4 @@
-import type { StorageAdapter } from '@noetic-tools/memory';
+import type { StorageAdapter } from '@noetic-tools/context';
 import type { Snapshot, Until, Verdict } from '@noetic-tools/types';
 import { cosineSimilarity } from '../conditions/cosine-similarity';
 import type { EmbedFn } from '../types/embed';

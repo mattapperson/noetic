@@ -1,19 +1,19 @@
 # Noetic
 
-A TypeScript agent framework that decomposes AI agent patterns into eight composable step primitives. Noetic treats context boundary management as a first-class concern and provides a pluggable memory system with well-defined lifecycle hooks.
+A TypeScript agent framework that decomposes AI agent patterns into eight composable step primitives. Noetic treats context boundary management as a first-class concern and provides a pluggable context system with well-defined lifecycle hooks.
 
 ## Philosophy
 
 - **Everything is a `Step<I, O>`** — a typed, serializable unit of work
 - **No hidden control flow** — no magic base classes, no runtime surprises
 - **Primitives compose freely** — a loop can contain a branch, which can contain forked spawned agents
-- **Memory is pluggable** — agents pay only for the features they use
+- **Context is pluggable** — agents pay only for the features they use
 
 ## Packages
 
 | Package | Description |
 |---------|-------------|
-| [`@noetic-tools/core`](packages/core) | Core framework — step primitives, agent harness, memory layers, patterns |
+| [`@noetic-tools/core`](packages/core) | Core framework — step primitives, agent harness, context layers, patterns |
 | [`@noetic-tools/eval`](packages/eval) | Scored evaluation, GEPA-based prompt optimization, regression testing |
 | [`@noetic/web`](packages/web) | Documentation site (Next.js + Fumadocs) |
 
@@ -22,7 +22,7 @@ A TypeScript agent framework that decomposes AI agent patterns into eight compos
 | Primitive | Kind | Purpose |
 |-----------|------|---------|
 | `step.run` | `run` | Pure async computation with retry support |
-| `step.llm` | `llm` | LLM call with tools, structured output, and memory context |
+| `step.llm` | `llm` | LLM call with tools, structured output, and layered context |
 | `step.claudeCode` | `claude-code`, `codex`, `opencode`, `pi` | Delegate a turn to a coding agent (sub-harness) |
 | `step.tool` | `tool` | Direct tool execution with Zod-validated I/O |
 | `branch` | `branch` | Conditional routing — returns a step or null |
@@ -94,17 +94,17 @@ const harness = new AgentHarness();
 const result = await harness.run(agent, { query: 'What is 12! ?' });
 ```
 
-## Memory Layers
+## Context Layers
 
-Memory layers participate in execution via lifecycle hooks (`init`, `recall`, `store`, `onSpawn`, `onReturn`, `onComplete`, `dispose`). Built-in layers cover common patterns:
+Context layers participate in execution via lifecycle hooks (`init`, `recall`, `store`, `onSpawn`, `onReturn`, `onComplete`, `dispose`). Built-in layers cover common patterns:
 
 | Layer | Slot | Purpose |
 |-------|------|---------|
-| `workingMemory` | 100 | Short-term facts and observations |
-| `observationalMemory` | 200 | Timestamped event log |
+| `workingMemoryContext` | 100 | Short-term facts and observations |
+| `observationalContext` | 200 | Timestamped event log |
 | `durableTaskState` | 250 | Persisted task artifacts |
 | `staticContent` | 350 | Unchanging background facts |
-| `toolMemoryLayer` | auto | Per-tool state from `Tool.memory` declarations |
+| `toolContextLayer` | auto | Per-tool state from `Tool.context` declarations |
 
 ## Evaluation
 
@@ -137,7 +137,7 @@ noetic-eval -u       # Run GEPA optimization
 
 ## Specs
 
-Detailed specifications live in [`specs/`](specs/), covering every primitive, the memory system, error model, observability, and patterns.
+Detailed specifications live in [`specs/`](specs/), covering every primitive, the context system, error model, observability, and patterns.
 
 The specs are consumed by [SpecBuilt](https://github.com/mattapperson/spec-built), which automatically implements new features and modifies existing code to keep the implementation aligned with the specs.
 

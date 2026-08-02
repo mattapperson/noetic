@@ -1,4 +1,4 @@
-import type { ContextMemory } from '@noetic-tools/memory';
+import type { ContextData } from '@noetic-tools/context';
 import type { Channel, EveryErrorPolicy, Step, StepEvery } from '@noetic-tools/types';
 import { NoeticConfigError } from '@noetic-tools/types';
 import { getDefaultRegistrar } from '../types/step-registrar';
@@ -10,11 +10,11 @@ import { getDefaultRegistrar } from '../types/step-registrar';
  *
  * @public
  */
-export interface EveryOptions<TMemory = ContextMemory, I = unknown, O = unknown> {
+export interface EveryOptions<TContext = ContextData, I = unknown, O = unknown> {
   /** Unique step identifier used in traces and error messages. */
   id: string;
   /** Body step executed on each iteration. */
-  step: Step<TMemory, I, O>;
+  step: Step<TContext, I, O>;
   /** Park duration between iterations in milliseconds. Must be >= 0. */
   ms: number;
   /** Optional channel that wakes the parking interval when any value arrives. */
@@ -45,9 +45,9 @@ export interface EveryOptions<TMemory = ContextMemory, I = unknown, O = unknown>
  * @throws `NoeticConfigError` with code `INVALID_INTERVAL_MS` if `ms` is negative or not finite.
  * @throws `NoeticConfigError` with code `INVALID_JITTER` if `jitter` is negative or not finite.
  */
-export function every<TMemory = ContextMemory, I = unknown, O = unknown>(
-  opts: EveryOptions<TMemory, I, O>,
-): StepEvery<TMemory, I, O> {
+export function every<TContext = ContextData, I = unknown, O = unknown>(
+  opts: EveryOptions<TContext, I, O>,
+): StepEvery<TContext, I, O> {
   if (!opts.id || opts.id.trim() === '') {
     throw new NoeticConfigError({
       code: 'EMPTY_STEP_ID',
@@ -76,7 +76,7 @@ export function every<TMemory = ContextMemory, I = unknown, O = unknown>(
       hint: 'Pass a non-negative number of milliseconds for jitter, or omit it.',
     });
   }
-  const built: StepEvery<TMemory, I, O> = {
+  const built: StepEvery<TContext, I, O> = {
     kind: 'every',
     id: opts.id,
     step: opts.step,

@@ -257,7 +257,7 @@ describe('WorkflowNodeSchema — provide', () => {
         instructions: 'work',
       },
       layers: [
-        'working-memory',
+        'working-context',
       ],
     };
     const result = WorkflowNodeSchema.safeParse(node);
@@ -393,6 +393,89 @@ describe('WorkflowNodeSchema — every', () => {
         instructions: 'check',
       },
       ms: -1,
+    };
+    const result = WorkflowNodeSchema.safeParse(node);
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('WorkflowNodeSchema — subflow', () => {
+  test('parses subflow with inline document', () => {
+    const node = {
+      kind: 'subflow',
+      id: 'sub-1',
+      document: {
+        version: 1,
+        root: {
+          kind: 'llm',
+          id: 'inner',
+          instructions: 'do it',
+        },
+      },
+    };
+    const result = WorkflowNodeSchema.safeParse(node);
+    expect(result.success).toBe(true);
+  });
+
+  test('parses subflow with ref and input', () => {
+    const node = {
+      kind: 'subflow',
+      id: 'sub-2',
+      ref: 'verify-loop',
+      input: 'literal input',
+    };
+    const result = WorkflowNodeSchema.safeParse(node);
+    expect(result.success).toBe(true);
+  });
+
+  test('rejects subflow with both document and ref', () => {
+    const node = {
+      kind: 'subflow',
+      id: 'sub-both',
+      ref: 'verify-loop',
+      document: {
+        version: 1,
+        root: {
+          kind: 'llm',
+          id: 'inner',
+          instructions: 'do it',
+        },
+      },
+    };
+    const result = WorkflowNodeSchema.safeParse(node);
+    expect(result.success).toBe(false);
+  });
+
+  test('rejects subflow with neither document nor ref', () => {
+    const node = {
+      kind: 'subflow',
+      id: 'sub-neither',
+    };
+    const result = WorkflowNodeSchema.safeParse(node);
+    expect(result.success).toBe(false);
+  });
+
+  test('rejects subflow with empty ref', () => {
+    const node = {
+      kind: 'subflow',
+      id: 'sub-empty',
+      ref: '',
+    };
+    const result = WorkflowNodeSchema.safeParse(node);
+    expect(result.success).toBe(false);
+  });
+
+  test('rejects subflow whose inline document has an invalid root', () => {
+    const node = {
+      kind: 'subflow',
+      id: 'sub-bad-doc',
+      document: {
+        version: 1,
+        root: {
+          kind: 'llm',
+          id: 'inner',
+        },
+      },
     };
     const result = WorkflowNodeSchema.safeParse(node);
     expect(result.success).toBe(false);
@@ -644,6 +727,61 @@ describe('walkWorkflow', () => {
       'lp',
       'inner',
     ]);
+  });
+});
+
+describe('walkWorkflow — subflow', () => {
+  test('inline document root is walked as a child', () => {
+    const tree: WorkflowNode = {
+      kind: 'subflow',
+      id: 'sub',
+      document: {
+        version: 1,
+        root: {
+          kind: 'llm',
+          id: 'inner',
+          instructions: 'deep',
+        },
+      },
+    };
+    const ids = [
+      ...walkWorkflow(tree),
+    ].map((n) => n.id);
+    expect(ids).toEqual([
+      'sub',
+      'inner',
+    ]);
+  });
+
+  test('a ref subflow is a leaf', () => {
+    const tree: WorkflowNode = {
+      kind: 'subflow',
+      id: 'sub',
+      ref: 'named',
+    };
+    const ids = [
+      ...walkWorkflow(tree),
+    ].map((n) => n.id);
+    expect(ids).toEqual([
+      'sub',
+    ]);
+    expect(workflowDepth(tree)).toBe(0);
+  });
+
+  test('inline document adds 1 to depth', () => {
+    const tree: WorkflowNode = {
+      kind: 'subflow',
+      id: 'sub',
+      document: {
+        version: 1,
+        root: {
+          kind: 'llm',
+          id: 'inner',
+          instructions: 'deep',
+        },
+      },
+    };
+    expect(workflowDepth(tree)).toBe(1);
   });
 });
 

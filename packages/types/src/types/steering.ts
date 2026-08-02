@@ -1,5 +1,5 @@
 import type { LLMResponse } from './common';
-import type { ExecutionContext, MemoryScope } from './memory-context';
+import type { ContextScope, ExecutionContext } from './context-scope';
 
 //#region Enums
 
@@ -95,7 +95,7 @@ export interface SteeringConfig {
   rules: SteeringRule[];
   maxLedgerEntries?: number;
   maxRetries?: number;
-  scope?: MemoryScope;
+  scope?: ContextScope;
 }
 
 /** @public Mutable runtime state maintained by the steering layer across an execution. */

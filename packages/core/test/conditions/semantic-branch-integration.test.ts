@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { ContextMemory } from '@noetic-tools/memory';
+import type { ContextData } from '@noetic-tools/context';
 import { branch } from '../../src/builders/control-flow-builders';
 import { otherwise, semanticRoute, when } from '../../src/conditions/conditions';
 import { executeBranch } from '../../src/interpreter/execute-control';
@@ -32,7 +32,7 @@ describe('semantic branch integration', () => {
       execute: async () => 'handled fallback',
     };
 
-    const step = branch<ContextMemory, string, string>({
+    const step = branch<ContextData, string, string>({
       id: 'semantic-branch',
       route: semanticRoute(
         when(async (input: string) => {
@@ -61,7 +61,7 @@ describe('semantic branch integration', () => {
   });
 
   it('async route in branch() works end-to-end', async () => {
-    const step = branch<ContextMemory, string, string>({
+    const step = branch<ContextData, string, string>({
       id: 'async-branch',
       route: async (input) => {
         // Simulate async operation

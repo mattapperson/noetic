@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import * as types from '../src/index';
-import * as contract from '../src/types/memory';
+import * as contract from '../src/types/context-layer';
 
 describe('@noetic-tools/types public surface', () => {
   it('exports the Slot runtime constant from the contract', () => {

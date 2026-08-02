@@ -1,17 +1,17 @@
 import { describe, expect, it } from 'bun:test';
-import type { MemoryLayer } from '@noetic-tools/memory';
-import { Slot } from '@noetic-tools/memory';
+import type { ContextLayer } from '@noetic-tools/context';
+import { Slot } from '@noetic-tools/context';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import { createScriptedCallModel, textOnlyResponse } from '../_helpers';
 
 //#region Helper Functions
 
-function makeHarness(memory?: MemoryLayer[]): AgentHarness {
+function makeHarness(context?: ContextLayer[]): AgentHarness {
   return new AgentHarness({
     name: 'test',
     params: {},
-    memory,
+    context,
     _testCallModel: createScriptedCallModel([
       textOnlyResponse('ok'),
     ]),
@@ -19,7 +19,7 @@ function makeHarness(memory?: MemoryLayer[]): AgentHarness {
 }
 
 /** Layer that records its teardown hooks (and the outcome) into `trace`. */
-function makeTracingLayer(id: string, trace: string[]): MemoryLayer {
+function makeTracingLayer(id: string, trace: string[]): ContextLayer {
   return {
     id,
     name: id,

@@ -2,13 +2,13 @@ import type { ZodType } from 'zod';
 import type { ItemSchemaRegistry } from '../schemas/item';
 import type { Channel, ChannelHandle, ExternalChannel } from './channel';
 import type { LLMResponse, ModelParams, StepMeta, TokenUsage } from './common';
+import type { ContextData, ContextLayer, ProjectionPolicy, StorageAdapter } from './context-layer';
 import type { ItemLog } from './context-parts/item-log';
 import type { LastLayerUsage } from './context-parts/layer-usage';
 import type { DetachedHandle } from './detached';
 import type { FsAdapter } from './fs-adapter';
 import type { HarnessResponse, StreamEvent, StreamingItem } from './harness-result';
 import type { ExecuteInput } from './items';
-import type { ContextMemory, MemoryLayer, ProjectionPolicy, StorageAdapter } from './memory';
 import type { Span, TraceExporter } from './observability';
 import type { ShellAdapter } from './shell-adapter';
 import type { SteeringDecision } from './steering';
@@ -54,7 +54,7 @@ interface ContextCallModelRequestBase {
 interface ContextCallModelRequestWithTools extends ContextCallModelRequestBase {
   tools: Tool[];
   ctx: Context;
-  layers?: MemoryLayer[];
+  layers?: ContextLayer[];
   allowedToolNames?: string[];
 }
 
@@ -97,8 +97,10 @@ export interface RestoreContextOptions {
   parent?: Context;
   /** Opaque per-execution state, same as `createContext({ state })`. */
   state?: unknown;
-  /** Memory layers for the restored context. Defaults to the harness's configured layers. */
-  memory?: MemoryLayer[];
+  /** Context layers for the restored context. Defaults to the harness's configured layers. */
+  context?: ContextLayer[];
+  /** @deprecated Renamed to `context`. */
+  memory?: ContextLayer[];
 }
 
 export interface ContextRerenderRequest {
@@ -119,11 +121,11 @@ export interface ContextRecallLayerOutput {
   tokenCount: number;
 }
 
-export type ContextStep<TMemory = ContextMemory, I = unknown, O = unknown> =
+export type ContextStep<TContext = ContextData, I = unknown, O = unknown> =
   | {
       readonly kind: 'run';
       readonly id: string;
-      readonly execute: (input: I, ctx: Context<TMemory>) => Promise<O>;
+      readonly execute: (input: I, ctx: Context<TContext>) => Promise<O>;
     }
   | {
       readonly kind: 'llm';
@@ -133,8 +135,8 @@ export type ContextStep<TMemory = ContextMemory, I = unknown, O = unknown> =
   | {
       readonly kind: 'loop';
       readonly id: string;
-      readonly steps: ReadonlyArray<ContextStep<TMemory, I, O>>;
-      readonly prepareNext?: (output: O, verdict: unknown, ctx: Context<TMemory>) => I;
+      readonly steps: ReadonlyArray<ContextStep<TContext, I, O>>;
+      readonly prepareNext?: (output: O, verdict: unknown, ctx: Context<TContext>) => I;
     }
   | {
       readonly kind: string;
@@ -160,7 +162,7 @@ export interface ContextHarness {
   getTextStream(scope?: unknown): AsyncIterable<string>;
   getReasoningStream(scope?: unknown): AsyncIterable<string>;
   getFullStream(scope?: unknown): AsyncIterable<StreamEvent>;
-  run<I, O>(step: ContextStep<ContextMemory, I, O>, input: I, ctx: Context): Promise<O>;
+  run<I, O>(step: ContextStep<ContextData, I, O>, input: I, ctx: Context): Promise<O>;
   detachedSpawn<I, O>(
     step: unknown,
     input: I,
@@ -173,51 +175,53 @@ export interface ContextHarness {
     state?: unknown;
     threadId?: string;
     resourceId?: string;
-    memory?: MemoryLayer[];
+    context?: ContextLayer[];
+    /** @deprecated Renamed to `context`. */
+    memory?: ContextLayer[];
     cwdInit?: string;
   }): Context;
   setRootCwd(nextCwd: string): void;
   getLayerState<T>(executionId: string, layerId: string): T | undefined;
   setLayerState<T>(executionId: string, layerId: string, state: T): void;
   beforeToolCall(
-    layers: MemoryLayer[],
+    layers: ContextLayer[],
     toolName: string,
     toolArgs: unknown,
     ctx: Context,
   ): Promise<SteeringDecision>;
   afterModelCall(
-    layers: MemoryLayer[],
+    layers: ContextLayer[],
     response: LLMResponse,
     ctx: Context,
   ): Promise<SteeringDecision>;
   runAppendPipeline(
-    layers: MemoryLayer[],
+    layers: ContextLayer[],
     items: import('./items').Item[],
     ctx: Context,
   ): Promise<ContextAppendPipelineResult>;
   recallLayers(
-    layers: MemoryLayer[],
+    layers: ContextLayer[],
     input: string,
     ctx: Context,
   ): Promise<ContextRecallLayerOutput[]>;
   recallLayersAtomic(
-    layers: MemoryLayer[],
+    layers: ContextLayer[],
     input: string,
     ctx: Context,
     budgets: Map<string, number>,
   ): Promise<ContextRecallLayerOutput[]>;
   recallLayersEventual(
-    layers: MemoryLayer[],
+    layers: ContextLayer[],
     input: string,
     ctx: Context,
     budgets: Map<string, number>,
   ): Promise<ContextRecallLayerOutput[]>;
   projectHistory(
-    layers: MemoryLayer[],
+    layers: ContextLayer[],
     items: ReadonlyArray<import('./items').Item>,
     ctx: Context,
   ): Promise<ReadonlyArray<import('./items').Item>>;
-  storeLayers(layers: MemoryLayer[], response: LLMResponse, ctx: Context): Promise<void>;
+  storeLayers(layers: ContextLayer[], response: LLMResponse, ctx: Context): Promise<void>;
   previewRequestItems(scope?: unknown): Promise<ReadonlyArray<import('./items').Item>>;
   /**
    * Internal-sender channel write. Resolves immediately unless the target
@@ -237,13 +241,13 @@ export interface ContextHarness {
   getChannelHandle<T>(channel: ExternalChannel<T>, executionId: string): ChannelHandle<T>;
   /** Read-side counterpart to `getChannelHandle` — see `AgentHarnessContract.getChannelStream`. */
   getChannelStream<T>(channel: ExternalChannel<T>, executionId: string): AsyncIterable<T>;
-  initLayers(layers: MemoryLayer[], ctx: Context, storage: StorageAdapter): Promise<void>;
-  disposeLayers(layers: MemoryLayer[], ctx: Context): Promise<void>;
+  initLayers(layers: ContextLayer[], ctx: Context, storage: StorageAdapter): Promise<void>;
+  disposeLayers(layers: ContextLayer[], ctx: Context): Promise<void>;
   checkpoint(ctx: Context): Promise<void>;
   restore(executionId: string, opts?: RestoreContextOptions): Promise<Context | null>;
   /**
    * Cancel an execution: abort `ctx` and every live descendant context, then
-   * run memory-layer teardown (`onComplete` with `outcome: 'aborted'`, then
+   * run context-layer teardown (`onComplete` with `outcome: 'aborted'`, then
    * `dispose`) bottom-up. A no-op on an already-cancelled context.
    */
   cancel(ctx: Context, reason?: string): Promise<void>;
@@ -256,7 +260,7 @@ export interface ContextHarness {
   seedSessionHistory(threadId: string, items: ReadonlyArray<import('./items').Item>): void;
   executeRerender(
     requests: ContextRerenderRequest[],
-    layers: MemoryLayer[],
+    layers: ContextLayer[],
     ctx: Context,
     budgets: Map<string, number>,
     query?: string,
@@ -264,14 +268,14 @@ export interface ContextHarness {
 }
 
 /** @public Execution context threaded through every step, carrying state, metrics, and channels. */
-export interface Context<TMemory = ContextMemory, TState = unknown> {
+export interface Context<TContext = ContextData, TState = unknown> {
   readonly id: string;
   readonly stepCount: number;
   readonly tokens: TokenUsage;
   readonly elapsed: number;
   readonly cost: number;
   state: TState;
-  readonly parent: Context<ContextMemory> | null;
+  readonly parent: Context<ContextData> | null;
   readonly depth: number;
   readonly span: Span;
   readonly threadId: string;
@@ -293,9 +297,17 @@ export interface Context<TMemory = ContextMemory, TState = unknown> {
    * agent `cd` propagates to subsequent tool calls.
    */
   readonly cwdState: CwdState;
-  readonly layers?: MemoryLayer[];
-  /** Layer provides keyed by layer ID. Access data/functions via `ctx.memory['layerId'].prop`. */
-  readonly memory: TMemory;
+  readonly layers?: ContextLayer[];
+  /** Layer provides keyed by layer ID. Access data/functions via `ctx.context['layerId'].prop`. */
+  readonly context: TContext;
+  /**
+   * @deprecated Renamed to `context`. Reads through to the same object.
+   *
+   * Required, not optional: pre-rename code does `ctx.memory['layerId']`, and an
+   * optional field would make that a `possibly undefined` compile error — which
+   * is exactly the break this alias exists to prevent.
+   */
+  readonly memory: TContext;
   /** Unified tool set collected from all LLM steps in the step tree before execution. */
   readonly unifiedTools?: ReadonlyArray<Tool>;
   /** Runtime item schema registry active for this context. */
@@ -330,7 +342,7 @@ export interface Context<TMemory = ContextMemory, TState = unknown> {
    * Aborting rejects operations blocked on the context (channel `recv` waiters,
    * parked back-pressure senders) with `cancelled`, cuts short the in-flight
    * model call or sub-harness turn, and makes the next step boundary throw
-   * `cancelled`. Memory-layer teardown is NOT run — use
+   * `cancelled`. Context-layer teardown is NOT run — use
    * `harness.cancel(ctx, reason)` for that.
    */
   abort(reason?: string): void;

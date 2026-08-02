@@ -1,4 +1,4 @@
-import type { MemoryLayer } from '@noetic-tools/memory';
+import type { ContextLayer } from '@noetic-tools/context';
 import type {
   AgentHarnessContract,
   Context,
@@ -20,7 +20,7 @@ import {
 } from '@noetic-tools/types';
 import type * as OpenRouterAgent from '@openrouter/agent';
 import { z } from 'zod';
-import { buildToolExecutionContext } from '../runtime/tool-memory';
+import { buildToolExecutionContext } from '../runtime/tool-context';
 import { emitToolUi } from '../runtime/tool-ui';
 import type { EmbedFn } from '../types/embed';
 
@@ -307,7 +307,7 @@ export interface ExecuteToolCallParams {
   tools: ReadonlyArray<Tool>;
   context: Context;
   harness: AgentHarnessContract;
-  layers?: MemoryLayer[];
+  layers?: ContextLayer[];
   /** The model's `function_call` id — keys this call's tool-UI region. */
   callId?: string;
 }
@@ -328,7 +328,7 @@ export async function executeToolCall(params: ExecuteToolCallParams): Promise<{
   // Model sees sanitised tool names (see `sanitizeToolNameForWire`). Match
   // against both the original and sanitised name so internal identity (e.g.
   // `plan/updatePrd` used by steering whitelists, skill docs, and the
-  // `planMemory.beforeToolCall` hook) stays intact while the wire name is
+  // `planContext.beforeToolCall` hook) stays intact while the wire name is
   // provider-compliant.
   const matchedTool = params.tools.find(
     (t) => t.name === params.toolName || sanitizeToolNameForWire(t.name) === params.toolName,

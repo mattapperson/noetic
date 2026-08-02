@@ -1,4 +1,4 @@
-import type { LayerStateStore, MemoryLayer } from '@noetic-tools/memory';
+import type { LayerStateStore } from '@noetic-tools/context';
 import type { Context, Item, ItemSchemaRegistry, RestoreContextOptions } from '@noetic-tools/types';
 import type { CheckpointSnapshot, FrontierFrame } from '../../types/checkpoint';
 import { CheckpointSchemaVersion } from '../../types/checkpoint';
@@ -37,7 +37,6 @@ export interface CheckpointHarnessHandle {
   readonly stepLedgerRetention?: StepLedgerRetention;
   readonly layerStateStore: LayerStateStore;
   readonly itemSchemas: ItemSchemaRegistry;
-  readonly _memory?: MemoryLayer[];
   createContext(
     opts?: RestoreCheckpointOptions & {
       items?: Item[];
@@ -117,7 +116,7 @@ export async function captureCheckpoint(h: CheckpointHarnessHandle, ctx: Context
  * `null` if no snapshot is recorded for `executionId`. Layer state is
  * replayed into `layerStateStore` keyed by the original executionId so
  * the restored context observes the pre-crash state through
- * `readLayerState` and the memory projectors.
+ * `readLayerState` and the context projectors.
  *
  * `opts` carries the host's own context wiring (broadcaster, parent, state,
  * layer overrides) into the rebuilt context. A snapshot cannot round-trip live
@@ -151,7 +150,7 @@ export async function restoreFromCheckpoint(
   }
   const items: Item[] = h.itemSchemas.parseMany(snapshot.itemLog.items);
   const cwdInit = snapshot.cwd?.current ?? undefined;
-  /* Caller wiring first, snapshot second: a host may legitimately swap the memory
+  /* Caller wiring first, snapshot second: a host may legitimately swap the context
    * layers or hang the restored execution under a new parent, but it must never be
    * able to override the identity/history the snapshot is the record of. */
   const ctx = h.createContext({
@@ -160,7 +159,6 @@ export async function restoreFromCheckpoint(
     threadId: snapshot.threadId,
     resourceId: snapshot.resourceId,
     cwdInit,
-    memory: opts?.memory ?? h._memory,
   });
   if (ctx instanceof ContextImpl) {
     Object.defineProperty(ctx, 'id', {

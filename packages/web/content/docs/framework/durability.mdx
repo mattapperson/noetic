@@ -34,7 +34,7 @@ Any `detachedSpawn` through this harness lands a manifest entry. Any `execute()`
 
 Durable execution composes three primitives:
 
-1. **`CheckpointStore`** — saves and loads per-execution snapshots covering the step frontier, memory-layer state, cwd, pending ask-user queue, and item log.
+1. **`CheckpointStore`** — saves and loads per-execution snapshots covering the step frontier, context-layer state, cwd, pending ask-user queue, and item log.
 2. **`SubprocessAdapter.reattach` / `listLive`** — persists handle manifests for every long-lived child and rebinds them on parent restart.
 3. **Durable IPC (`DurableOutboundQueue` + protocol v2)** — numbers every outbound IPC frame with a monotonic sequence, persists it, and resumes from the client's last ack on reconnect.
 
@@ -175,7 +175,7 @@ const restored = await harness.restore(executionId, {
 interface RestoreContextOptions {
   parent?: Context;
   state?: unknown;
-  memory?: MemoryLayer[];
+  context?: ContextLayer[];
 }
 ```
 

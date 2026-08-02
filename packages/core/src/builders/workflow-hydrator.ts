@@ -6,7 +6,7 @@
  * ones — they register in the step registry, carry retry policies, etc.
  */
 
-import type { ContextMemory, MemoryLayer } from '@noetic-tools/memory';
+import type { ContextData, ContextLayer } from '@noetic-tools/context';
 import type {
   Context,
   ExecuteStepFn,
@@ -20,6 +20,8 @@ import type {
   SubHarnessSettings,
   SubprocessAdapter,
   Tool,
+  ToolContext,
+  ToolExecutionContext,
   Until,
 } from '@noetic-tools/types';
 import { frameworkCast, isServerToolSpec, NoeticConfigError } from '@noetic-tools/types';
@@ -27,6 +29,7 @@ import { DetachedHandleImpl } from '../runtime/detached-handle';
 import type {
   LlmWorkflowNode,
   OutputCodecRef,
+  SubflowWorkflowNode,
   UntilPredicate,
   WorkflowDocument,
   WorkflowNode,
@@ -47,7 +50,7 @@ import { step } from './step-builders';
 export interface HydrationContext {
   tools: ReadonlyMap<string, Tool>;
   executeStep: ExecuteStepFn;
-  layers?: ReadonlyMap<string, MemoryLayer>;
+  layers?: ReadonlyMap<string, ContextLayer>;
   /** SubHarness adapters keyed by harness id, resolving `claude-code`/`codex`/… nodes. */
   subHarnesses?: ReadonlyMap<SubHarnessKind, SubHarness>;
   /**
@@ -63,6 +66,17 @@ export interface HydrationContext {
    * `ctx.subprocess` at execution time.
    */
   resolveSubprocess?: (ref: string) => SubprocessAdapter | undefined;
+  /**
+   * Named sub-workflow documents that `subflow` nodes resolve via `ref`.
+   * Resolution is lazy (first execution), so a live map view may gain
+   * entries after hydration.
+   */
+  workflows?: ReadonlyMap<string, WorkflowDocument>;
+  /**
+   * Ancestor ref chain for cycle detection on named sub-workflow references.
+   * Threaded internally by the subflow hydrator — callers never set it.
+   */
+  subflowAncestry?: ReadonlySet<string>;
 }
 
 interface SubHarnessBuilderOpts {
@@ -74,12 +88,12 @@ interface SubHarnessBuilderOpts {
   session?: SubHarnessSessionPolicy;
 }
 
-type SubHarnessStepBuilder = (opts: SubHarnessBuilderOpts) => Step<ContextMemory, string, string>;
+type SubHarnessStepBuilder = (opts: SubHarnessBuilderOpts) => Step<ContextData, string, string>;
 
 type NodeHydrator = (
   node: WorkflowNode,
   ctx: HydrationContext,
-) => Step<ContextMemory, string, string>;
+) => Step<ContextData, string, string>;
 
 //#endregion
 
@@ -151,7 +165,7 @@ function resolveLlmTools(
 function hydrateLlmNode(
   node: WorkflowNode,
   ctx: HydrationContext,
-): Step<ContextMemory, string, string> {
+): Step<ContextData, string, string> {
   if (node.kind !== 'llm') {
     return frameworkCast(undefined);
   }
@@ -207,7 +221,7 @@ function resolveOutputCodec(
 function hydrateToolNode(
   node: WorkflowNode,
   ctx: HydrationContext,
-): Step<ContextMemory, string, string> {
+): Step<ContextData, string, string> {
   if (node.kind !== 'tool') {
     return frameworkCast(undefined);
   }
@@ -240,15 +254,22 @@ function hydrateToolNode(
           arguments: JSON.stringify(args),
         };
         execCtx.itemLog.append(callItem);
-        const toolCtx = {
+        const layerState: ToolContext = {
+          get: <T>(_layerId: string): T | undefined => undefined,
+          set: <T>(_layerId: string, _state: T): void => {},
+        };
+        const toolCtx: ToolExecutionContext = {
           ctx: execCtx,
           harness: execCtx.harness,
           fs: execCtx.fs,
           shell: execCtx.shell,
-          memory: {
-            get: <T>(_layerId: string): T | undefined => undefined,
-            set: <T>(_layerId: string, _state: T): void => {},
-          },
+          context: layerState,
+          // Deprecated alias — the same accessor object, as
+          // `buildToolExecutionContext` does. `Tool.execute` takes its second
+          // argument as `unknown`, so nothing here is structurally checked
+          // against `ToolExecutionContext`; the annotation above is what makes
+          // a missing field a compile error instead of a runtime `undefined`.
+          memory: layerState,
           assembledView: execCtx.itemLog.items,
           lastStepMeta: execCtx.lastStepMeta,
         };
@@ -262,7 +283,7 @@ function hydrateToolNode(
 function hydrateRunNode(
   node: WorkflowNode,
   ctx: HydrationContext,
-): Step<ContextMemory, string, string> {
+): Step<ContextData, string, string> {
   if (node.kind !== 'run') {
     return frameworkCast(undefined);
   }
@@ -293,7 +314,7 @@ function hydrateRunNode(
 function hydrateBranchNode(
   node: WorkflowNode,
   ctx: HydrationContext,
-): Step<ContextMemory, string, string> {
+): Step<ContextData, string, string> {
   if (node.kind !== 'branch') {
     return frameworkCast(undefined);
   }
@@ -327,7 +348,7 @@ function hydrateBranchNode(
 function hydrateForkNode(
   node: WorkflowNode,
   ctx: HydrationContext,
-): Step<ContextMemory, string, string> {
+): Step<ContextData, string, string> {
   if (node.kind !== 'fork') {
     return frameworkCast(undefined);
   }
@@ -339,7 +360,7 @@ function hydrateForkNode(
   const eachTemplate = node.each;
   const staticPaths = dynamic ? [] : (node.paths ?? []).map((p) => hydrateNode(p, ctx));
 
-  const pathsFactory = (input: string): Step<ContextMemory, string, string>[] => {
+  const pathsFactory = (input: string): Step<ContextData, string, string>[] => {
     if (!dynamic || !eachTemplate) {
       return staticPaths;
     }
@@ -354,7 +375,7 @@ function hydrateForkNode(
       }),
     );
   };
-  const optimizable = dynamic ? undefined : frameworkCast<Step<ContextMemory>[]>(staticPaths);
+  const optimizable = dynamic ? undefined : frameworkCast<Step<ContextData>[]>(staticPaths);
 
   if (node.mode === 'race') {
     return fork({
@@ -407,7 +428,7 @@ function resolveNamedLayers({
   nodeKind: string;
   nodeId: string;
   ctx: HydrationContext;
-}): MemoryLayer[] {
+}): ContextLayer[] {
   if (!ctx.layers) {
     return [];
   }
@@ -416,7 +437,7 @@ function resolveNamedLayers({
     if (!layer) {
       throw new NoeticConfigError({
         code: 'UNKNOWN_LAYER_REFERENCE',
-        message: `Memory layer '${name}' referenced in ${nodeKind} node '${nodeId}' is not registered.`,
+        message: `Context layer '${name}' referenced in ${nodeKind} node '${nodeId}' is not registered.`,
         hint: `Available layers: ${
           [
             ...(ctx.layers?.keys() ?? []),
@@ -431,11 +452,11 @@ function resolveNamedLayers({
 function hydrateSpawnNode(
   node: WorkflowNode,
   ctx: HydrationContext,
-): Step<ContextMemory, string, string> {
+): Step<ContextData, string, string> {
   if (node.kind !== 'spawn') {
     return frameworkCast(undefined);
   }
-  // `memory` is left undefined when the node names no layers so the child
+  // `context` is left undefined when the node names no layers so the child
   // inherits the parent's layers (spec 04). An explicit list replaces them.
   const resolvedLayers = node.layers
     ? resolveNamedLayers({
@@ -449,21 +470,21 @@ function hydrateSpawnNode(
     id: node.id,
     child: hydrateNode(node.child, ctx),
     timeout: node.timeout,
-    memory: resolvedLayers,
+    context: resolvedLayers,
   });
 }
 
 function hydrateProvideNode(
   node: WorkflowNode,
   ctx: HydrationContext,
-): Step<ContextMemory, string, string> {
+): Step<ContextData, string, string> {
   if (node.kind !== 'provide') {
     return frameworkCast(undefined);
   }
   return provide({
     id: node.id,
     child: hydrateNode(node.child, ctx),
-    memory: resolveNamedLayers({
+    context: resolveNamedLayers({
       names: node.layers,
       nodeKind: 'provide',
       nodeId: node.id,
@@ -475,7 +496,7 @@ function hydrateProvideNode(
 function hydrateLoopNode(
   node: WorkflowNode,
   ctx: HydrationContext,
-): Step<ContextMemory, string, string> {
+): Step<ContextData, string, string> {
   if (node.kind !== 'loop') {
     return frameworkCast(undefined);
   }
@@ -492,7 +513,7 @@ function hydrateLoopNode(
 function hydrateSequenceNode(
   node: WorkflowNode,
   ctx: HydrationContext,
-): Step<ContextMemory, string, string> {
+): Step<ContextData, string, string> {
   if (node.kind !== 'sequence') {
     return frameworkCast(undefined);
   }
@@ -517,7 +538,7 @@ function hydrateSequenceNode(
 function hydrateEveryNode(
   node: WorkflowNode,
   ctx: HydrationContext,
-): Step<ContextMemory, string, string> {
+): Step<ContextData, string, string> {
   if (node.kind !== 'every') {
     return frameworkCast(undefined);
   }
@@ -539,7 +560,7 @@ const SUB_HARNESS_BUILDERS: Record<SubHarnessKind, SubHarnessStepBuilder> = {
 function hydrateSubHarnessNode(
   node: WorkflowNode,
   ctx: HydrationContext,
-): Step<ContextMemory, string, string> {
+): Step<ContextData, string, string> {
   if (
     node.kind !== 'claude-code' &&
     node.kind !== 'codex' &&
@@ -566,6 +587,90 @@ function hydrateSubHarnessNode(
   });
 }
 
+/**
+ * Hydrates a `subflow` node lazily: the target document resolves and hydrates
+ * on first execution, memoized. Lazy because `HydrationContext.workflows` may
+ * be a live view that gains entries after hydration, and because it keeps
+ * cycle detection path-scoped — each ref chain threads its own ancestry set,
+ * so diamond reuse of a named workflow is legal while A→B→A throws.
+ */
+function hydrateSubflowNode(
+  node: WorkflowNode,
+  ctx: HydrationContext,
+): Step<ContextData, string, string> {
+  if (node.kind !== 'subflow') {
+    return frameworkCast(undefined);
+  }
+  let cached: Step<ContextData, string, string> | undefined;
+  const resolve = (): Step<ContextData, string, string> => {
+    if (!cached) {
+      const { doc, childCtx } = resolveSubflowDocument(node, ctx);
+      cached = hydrateNode(suffixNodeIds(doc.root, `-${node.id}`), childCtx);
+    }
+    return cached;
+  };
+  return frameworkCast(
+    step.run({
+      id: node.id,
+      execute: async (input: string, execCtx: Context) => {
+        const child = resolve();
+        return stringifyResult(await ctx.executeStep(child, node.input ?? input, execCtx));
+      },
+    }),
+  );
+}
+
+function resolveSubflowDocument(
+  node: SubflowWorkflowNode,
+  ctx: HydrationContext,
+): {
+  doc: WorkflowDocument;
+  childCtx: HydrationContext;
+} {
+  if (node.document) {
+    // Inline documents are finite JSON trees — they cannot cycle, so they
+    // add nothing to the ancestry chain.
+    return {
+      doc: node.document,
+      childCtx: ctx,
+    };
+  }
+  const ref = node.ref ?? '';
+  const ancestry = ctx.subflowAncestry ?? new Set<string>();
+  if (ancestry.has(ref)) {
+    throw new NoeticConfigError({
+      code: 'WORKFLOW_CYCLE',
+      message: `Sub-workflow '${ref}' referenced in subflow node '${node.id}' forms a reference cycle (${[
+        ...ancestry,
+        ref,
+      ].join(' -> ')}).`,
+      hint: 'A named sub-workflow may not reference itself, directly or transitively. Break the cycle or inline the document.',
+    });
+  }
+  const doc = ctx.workflows?.get(ref);
+  if (!doc) {
+    throw new NoeticConfigError({
+      code: 'UNKNOWN_WORKFLOW_REFERENCE',
+      message: `Sub-workflow '${ref}' referenced in subflow node '${node.id}' is not registered.`,
+      hint: `Pass named workflows via HydrationContext.workflows. Available: ${
+        [
+          ...(ctx.workflows?.keys() ?? []),
+        ].join(', ') || '(none)'
+      }.`,
+    });
+  }
+  return {
+    doc,
+    childCtx: {
+      ...ctx,
+      subflowAncestry: new Set([
+        ...ancestry,
+        ref,
+      ]),
+    },
+  };
+}
+
 //#endregion
 
 //#region Handler Registry
@@ -581,6 +686,7 @@ const NODE_HYDRATORS: Record<string, NodeHydrator> = {
   loop: hydrateLoopNode,
   sequence: hydrateSequenceNode,
   every: hydrateEveryNode,
+  subflow: hydrateSubflowNode,
   'claude-code': hydrateSubHarnessNode,
   codex: hydrateSubHarnessNode,
   opencode: hydrateSubHarnessNode,
@@ -683,7 +789,7 @@ function buildPerItemStep(opts: {
   item: unknown;
   index: number;
   ctx: HydrationContext;
-}): Step<ContextMemory, string, string> {
+}): Step<ContextData, string, string> {
   const { forkId, eachTemplate, item, index, ctx } = opts;
   const hydratedEach = hydrateNode(suffixNodeIds(eachTemplate, `-${index}`), ctx);
   return frameworkCast(
@@ -821,11 +927,13 @@ async function runCodeViaSubprocess(opts: {
  * @throws `NoeticConfigError` with code `UNKNOWN_NODE_KIND` if the node kind is unrecognised.
  * @throws `NoeticConfigError` with code `UNKNOWN_TOOL_REFERENCE` if a tool name cannot be resolved.
  * @throws `NoeticConfigError` with code `UNKNOWN_UNTIL_PREDICATE` if an until predicate kind is unrecognised.
+ * @throws `NoeticConfigError` with code `UNKNOWN_WORKFLOW_REFERENCE` (at execution time) if a subflow ref names no registered workflow.
+ * @throws `NoeticConfigError` with code `WORKFLOW_CYCLE` (at execution time) if named sub-workflow refs form a cycle.
  */
 export function hydrateNode(
   node: WorkflowNode,
   ctx: HydrationContext,
-): Step<ContextMemory, string, string> {
+): Step<ContextData, string, string> {
   const hydrator = NODE_HYDRATORS[node.kind];
   if (!hydrator) {
     throw new NoeticConfigError({
@@ -848,7 +956,7 @@ export function hydrateNode(
 export function hydrateWorkflow(
   doc: WorkflowDocument,
   ctx: HydrationContext,
-): Step<ContextMemory, string, string> {
+): Step<ContextData, string, string> {
   return hydrateNode(doc.root, ctx);
 }
 

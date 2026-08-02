@@ -1,21 +1,21 @@
 import { describe, expect, it } from 'bun:test';
-import * as memory from '../src/index';
+import * as context from '@noetic-tools/context';
+import * as shim from '../src/index';
 
-describe('@noetic-tools/memory public surface', () => {
-  it('exports built-in layer factories', () => {
-    expect(typeof memory.workingMemory).toBe('function');
-    expect(typeof memory.historyWindow).toBe('function');
-    expect(typeof memory.planMemory).toBe('function');
-    expect(typeof memory.toolMemoryLayer).toBe('function');
+describe('@noetic-tools/memory deprecation shim', () => {
+  it('re-exports every name from @noetic-tools/context', () => {
+    const missing = Object.keys(context).filter((name) => !(name in shim));
+    expect(missing).toEqual([]);
   });
 
-  it('re-exports the MemoryLayer contract (Slot) from @noetic-tools/types', () => {
-    expect(memory.Slot).toBeDefined();
-    expect(memory.Slot.WORKING_MEMORY).toBe(100);
+  it('adds nothing of its own', () => {
+    const extra = Object.keys(shim).filter((name) => !(name in context));
+    expect(extra).toEqual([]);
   });
 
-  it('exports the budget allocation utilities', () => {
-    expect(typeof memory.allocateBudgets).toBe('function');
-    expect(typeof memory.checkBudget).toBe('function');
+  it('resolves to the same bindings, not copies', () => {
+    expect(shim.workingMemoryContext).toBe(context.workingMemoryContext);
+    expect(shim.workingMemory).toBe(context.workingMemoryContext);
+    expect(shim.Slot).toBe(context.Slot);
   });
 });

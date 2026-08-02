@@ -28,9 +28,9 @@ declare interface HarnessApi<TParams extends Record<string, unknown> = Record<st
   seedSessionHistory(threadId: string, items: ReadonlyArray<Item>): void;
   setRootCwd(nextCwd: string): void;
 
-  run<I, O>(step: Step<ContextMemory, I, O>, input: I, ctx: Context): Promise<O>;
+  run<I, O>(step: Step<ContextData, I, O>, input: I, ctx: Context): Promise<O>;
   detachedSpawn<I, O>(
-    step: Step<ContextMemory, I, O>,
+    step: Step<ContextData, I, O>,
     input: I,
     parentCtx: Context,
     overrides?: { threadId?: string; resourceId?: string; cwdInit?: string },
@@ -41,7 +41,7 @@ declare interface HarnessApi<TParams extends Record<string, unknown> = Record<st
     state?: unknown;
     threadId?: string;
     resourceId?: string;
-    memory?: MemoryLayer[];
+    context?: ContextLayer[];
     cwdInit?: string;
   }): Context;
 
@@ -51,50 +51,50 @@ declare interface HarnessApi<TParams extends Record<string, unknown> = Record<st
   getChannelHandle<T>(channel: ExternalChannel<T>, executionId: string): ChannelHandle<T>;
   getChannelStream<T>(channel: ExternalChannel<T>, executionId: string): AsyncIterable<T>;
 
-  initLayers(layers: MemoryLayer[], ctx: Context, storage: StorageAdapter): Promise<void>;
-  recallLayers(layers: MemoryLayer[], input: string, ctx: Context): Promise<RecallLayerOutput[]>;
+  initLayers(layers: ContextLayer[], ctx: Context, storage: StorageAdapter): Promise<void>;
+  recallLayers(layers: ContextLayer[], input: string, ctx: Context): Promise<RecallLayerOutput[]>;
   recallLayersAtomic(
-    layers: MemoryLayer[],
+    layers: ContextLayer[],
     input: string,
     ctx: Context,
     budgets: Map<string, number>,
   ): Promise<RecallLayerOutput[]>;
   recallLayersEventual(
-    layers: MemoryLayer[],
+    layers: ContextLayer[],
     input: string,
     ctx: Context,
     budgets: Map<string, number>,
   ): Promise<RecallLayerOutput[]>;
   projectHistory(
-    layers: MemoryLayer[],
+    layers: ContextLayer[],
     items: ReadonlyArray<Item>,
     ctx: Context,
   ): Promise<ReadonlyArray<Item>>;
   runAppendPipeline(
-    layers: MemoryLayer[],
+    layers: ContextLayer[],
     items: Item[],
     ctx: Context,
   ): Promise<{ items: Item[]; rerenderRequests: RerenderRequest[] }>;
   executeRerender(
     requests: RerenderRequest[],
-    layers: MemoryLayer[],
+    layers: ContextLayer[],
     ctx: Context,
     budgets: Map<string, number>,
     query?: string,
   ): Promise<RecallLayerOutput[]>;
   previewRequestItems(scope?: SessionScope): Promise<ReadonlyArray<Item>>;
-  storeLayers(layers: MemoryLayer[], response: LLMResponse, ctx: Context): Promise<void>;
-  disposeLayers(layers: MemoryLayer[], ctx: Context): Promise<void>;
+  storeLayers(layers: ContextLayer[], response: LLMResponse, ctx: Context): Promise<void>;
+  disposeLayers(layers: ContextLayer[], ctx: Context): Promise<void>;
   getLayerState<T>(executionId: string, layerId: string): T | undefined;
   setLayerState<T>(executionId: string, layerId: string, state: T): void;
 
   beforeToolCall(
-    layers: MemoryLayer[],
+    layers: ContextLayer[],
     toolName: string,
     toolArgs: unknown,
     ctx: Context,
   ): Promise<unknown>;
-  afterModelCall(layers: MemoryLayer[], response: LLMResponse, ctx: Context): Promise<unknown>;
+  afterModelCall(layers: ContextLayer[], response: LLMResponse, ctx: Context): Promise<unknown>;
 
   checkpoint(ctx: Context): Promise<void>;
   restore(executionId: string): Promise<Context | null>;
@@ -115,7 +115,7 @@ declare interface RerenderRequest {
 | Method | Description |
 |---|---|
 | `config` | The `AgentConfig<TParams>` the harness was constructed with. |
-| `fs` | The `FsAdapter` the harness was constructed with (defaults to `createLocalFsAdapter()`). All filesystem operations — CLI tools, skill discovery, and memory layers — route through this adapter. |
+| `fs` | The `FsAdapter` the harness was constructed with (defaults to `createLocalFsAdapter()`). All filesystem operations — CLI tools, skill discovery, and context layers — route through this adapter. |
 | `shell` | The `ShellAdapter` (defaults to `createLocalShellAdapter()`). Tools that need a real shell go through this. |
 | `subprocess` | The `SubprocessAdapter` used by `step.run.subprocess` requests and detached spawns. Defaults to an in-memory adapter. |
 | `rootCwdState` | Long-lived shared cwd state, seeded into every root context the harness creates so successive runs and the TUI observe each other's `cd`s. |
@@ -133,13 +133,13 @@ declare interface RerenderRequest {
 | `setRootCwd(nextCwd)` | Update the harness root cwd (e.g., from a TUI `! cd`). |
 | `run(step, input, ctx)` | Run a step with the given input and context. |
 | `detachedSpawn(step, input, parentCtx, overrides?)` | Launch a step concurrently, returning a `DetachedHandle`. Optional `overrides.threadId` / `overrides.resourceId` / `overrides.cwdInit` decouple the child's session-scoped state from the parent's. |
-| `createContext(opts?)` | Create a new execution context. Accepts optional `memory` to override harness-level defaults. |
+| `createContext(opts?)` | Create a new execution context. Accepts optional `context` to override harness-level defaults. |
 | `send(channel, value, ctx)` | Send a value to a channel. Returns a `Promise<void>` that resolves immediately unless the target queue channel is at capacity, in which case the send parks until a consumer frees a slot (back-pressure; default 30s timeout → `channel_timeout`, abort → `cancelled`). |
 | `recv(channel, ctx, opts?)` | Receive from a channel (blocking). Rejects with kind `'cancelled'` when the context is aborted while waiting. |
 | `tryRecv(channel, ctx)` | Non-blocking receive. |
 | `getChannelHandle(channel, executionId)` | Get external channel handle. |
 | `getChannelStream(channel, executionId)` | Subscribe to an external channel from outside the execution; ends when the root execution completes. |
-| `initLayers(layers, ctx, storage)` | Initialize memory layers. |
+| `initLayers(layers, ctx, storage)` | Initialize context layers. |
 | `recallLayers(layers, input, ctx)` | Run recall on all layers. |
 | `recallLayersAtomic(layers, input, ctx, budgets)` | Run recall on the atomic-mode layers only, blocking until each completes within its budget. |
 | `recallLayersEventual(layers, input, ctx, budgets)` | Serve recall for eventual-mode layers from cache without blocking; the cache refreshes after `store()`. |
@@ -177,7 +177,7 @@ interface ExecuteOptions {
   threadId?: string;
   resourceId?: string;
   state?: unknown;
-  memory?: MemoryLayer[];
+  context?: ContextLayer[];
   deliveryMode?: DeliveryMode;
 }
 
@@ -253,7 +253,7 @@ declare interface AgentConfigShape<
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `name` | `string` | yes | Agent name. |
-| `storage` | `StorageAdapter` | no | Storage backend for memory persistence. Defaults to an in-memory adapter. |
+| `storage` | `StorageAdapter` | no | Storage backend for context persistence. Defaults to an in-memory adapter. |
 | `hooks` | `AgentHooks` | no | Before/after step hooks. |
 | `params` | `TParams` | yes | Arbitrary key-value parameters available to every step and tool via `ctx.harness.config.params`. |
 | `itemSchemas` | `ItemSchemaExtensions` | no | Harness-wide item-schema extensions used to validate emitted and returned items. Global by design; tool-contributed `toolResults` schemas are owner-scoped to each tool's own result items. Extension schemas are gates, not normalizers — the original item is returned on match. Mismatches raise `NoeticError` kind `item_schema_mismatch`. |
@@ -314,7 +314,7 @@ type DetachedStatus = (typeof DetachedStatus)[keyof typeof DetachedStatus];
 
 ## RecallLayerOutput
 
-The output from a single memory layer's recall hook.
+The output from a single context layer's recall hook.
 
 ```ts validate=none
 interface RecallLayerOutput {

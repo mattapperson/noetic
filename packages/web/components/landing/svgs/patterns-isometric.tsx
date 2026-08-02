@@ -76,7 +76,7 @@ function PrimitiveNode({ x, y, color, label, muted }: NodeProps): ReactNode {
   );
 }
 
-function MemoryLayer({
+function ContextLayerNode({
   x,
   y,
   w,
@@ -291,13 +291,13 @@ export function PatternsIsometricSvg(): ReactNode {
   // llm → tool: 28px horizontal
   const wireLlmTool = `M${llmRight.x},${llmRight.y} L${toolLeft.x},${toolLeft.y}`;
 
-  // tool → memory: 45° down-left to right side of observe node
+  // tool → context: 45° down-left to right side of observe node
   const toolToMemDelta = 36; // 45° diagonal > 28px minimum
   const toolToMemTurnX = toolBottom.x - toolToMemDelta;
   const toolToMemTurnY = toolBottom.y + toolToMemDelta;
   const wireToolMem = `M${toolBottom.x},${toolBottom.y} L${toolToMemTurnX},${toolToMemTurnY} L${memRight.x},${memRight.y}`;
 
-  // memory → llm: straight vertical up, ending at llm bottom edge (not top)
+  // context → llm: straight vertical up, ending at llm bottom edge (not top)
   // This prevents orbs from going "into" the node
   const wireMemLlm = `M${memTop.x},${memTop.y} L${llmBottom.x},${llmBottom.y}`;
 
@@ -474,9 +474,9 @@ export function PatternsIsometricSvg(): ReactNode {
       <PrimitiveNode x={inputPos.x} y={inputPos.y} color={MUTED} label="input" muted />
       <PrimitiveNode x={llmPos.x} y={llmPos.y} color={GREEN} label="thought" />
       <PrimitiveNode x={toolPos.x} y={toolPos.y} color={CYAN} label="action" />
-      <MemoryLayer x={memX} y={memY} w={memW} h={memH} d={memD} label="observe" />
+      <ContextLayerNode x={memX} y={memY} w={memW} h={memH} d={memD} label="observe" />
 
-      {/* Action → Observe wire rendered AFTER memory node so arrow is visible on top */}
+      {/* Action → Observe wire rendered AFTER context node so arrow is visible on top */}
       <path
         d={wireToolMem}
         fill="none"

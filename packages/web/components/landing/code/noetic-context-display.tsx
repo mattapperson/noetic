@@ -54,7 +54,7 @@ const LAYER_DETAILS: Record<string, Omit<LayerInfo, 'id'>> = {
     preview:
       '[developer] # Project & User Instructions (AGENT.md) Contents of ~/my-project/AGENT.md…',
   },
-  'skills-memory': {
+  'skills-context': {
     state: 'active',
     tokens: '532',
     itemCount: 3,
@@ -324,7 +324,7 @@ function LayerTabContent({ layer }: { layer: LayerInfo }): ReactNode {
             color: VAPOR.muted,
           }}
         >
-          Some layers (e.g. planMemory) only activate once a corresponding flow has started.
+          Some layers (e.g. planContext) only activate once a corresponding flow has started.
         </span>
       </div>
     );

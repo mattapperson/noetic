@@ -32,10 +32,10 @@ interface PlanNode {
 ```ts validate=none
 function compilePlan<O, A = unknown>(
   plan: PlanNode,
-  agents: Record<string, (prompt: string) => Step<ContextMemory, string, A>>,
+  agents: Record<string, (prompt: string) => Step<ContextData, string, A>>,
   constraints?: PlanConstraints,
   executeStep?: ExecuteStepFn,
-): Step<ContextMemory, string, O>
+): Step<ContextData, string, O>
 ```
 
 | Parameter | Type | Purpose |

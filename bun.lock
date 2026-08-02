@@ -39,11 +39,25 @@
         "chat",
       ],
     },
+    "packages/context": {
+      "name": "@noetic-tools/context",
+      "version": "1.0.0",
+      "dependencies": {
+        "@noetic-tools/types": "workspace:*",
+        "zod": "^4.0.0",
+      },
+      "devDependencies": {
+        "bun-types": "latest",
+      },
+      "peerDependencies": {
+        "zod": "^4.0.0",
+      },
+    },
     "packages/core": {
       "name": "@noetic-tools/core",
-      "version": "3.2.0",
+      "version": "4.0.0",
       "dependencies": {
-        "@noetic-tools/memory": "workspace:*",
+        "@noetic-tools/context": "workspace:*",
         "@noetic-tools/types": "workspace:*",
         "@openrouter/agent": "^0.6.0",
         "zod": "^4.0.0",
@@ -86,10 +100,9 @@
     },
     "packages/memory": {
       "name": "@noetic-tools/memory",
-      "version": "2.0.0",
+      "version": "3.1.0",
       "dependencies": {
-        "@noetic-tools/types": "workspace:*",
-        "zod": "^4.0.0",
+        "@noetic-tools/context": "workspace:*",
       },
       "devDependencies": {
         "bun-types": "latest",
@@ -100,9 +113,9 @@
     },
     "packages/openui": {
       "name": "@noetic-tools/openui",
-      "version": "2.0.0",
+      "version": "2.1.0",
       "dependencies": {
-        "@noetic-tools/memory": "workspace:*",
+        "@noetic-tools/context": "workspace:*",
         "@noetic-tools/types": "workspace:*",
         "zod": "^4.0.0",
       },
@@ -223,7 +236,7 @@
     },
     "packages/types": {
       "name": "@noetic-tools/types",
-      "version": "2.1.1",
+      "version": "2.3.0",
       "dependencies": {
         "@openrouter/agent": "^0.6.0",
         "zod": "^4.0.0",
@@ -447,6 +460,8 @@
     "@next/swc-win32-x64-msvc": ["@next/swc-win32-x64-msvc@16.1.6", "", { "os": "win32", "cpu": "x64" }, "sha512-NRfO39AIrzBnixKbjuo2YiYhB6o9d8v/ymU9m/Xk8cyVk+k7XylniXkHwjs4s70wedVffc6bQNbufk5v0xEm0A=="],
 
     "@noetic-tools/chat-sdk": ["@noetic-tools/chat-sdk@workspace:packages/chat-sdk"],
+
+    "@noetic-tools/context": ["@noetic-tools/context@workspace:packages/context"],
 
     "@noetic-tools/core": ["@noetic-tools/core@workspace:packages/core"],
 

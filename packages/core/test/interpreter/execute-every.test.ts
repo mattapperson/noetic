@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import type { ContextMemory } from '@noetic-tools/memory';
+import type { ContextData } from '@noetic-tools/context';
 import { isNoeticError, NoeticErrorImpl } from '@noetic-tools/types';
 import { z } from 'zod';
 import { channel } from '../../src/builders/channel-builder';
@@ -31,7 +31,7 @@ function makeCapturingSpan(): {
 describe('executeEvery', () => {
   it('paces 3 iterations at ms=50 in >= 100ms total', async () => {
     let count = 0;
-    const everyStep = every<ContextMemory, number, number>({
+    const everyStep = every<ContextData, number, number>({
       id: 'pacing-every',
       step: {
         kind: 'run',
@@ -80,7 +80,7 @@ describe('executeEvery', () => {
       channelStore,
     });
 
-    const everyStep = every<ContextMemory, void, void>({
+    const everyStep = every<ContextData, void, void>({
       id: 'wake-every',
       step: {
         kind: 'run',
@@ -131,7 +131,7 @@ describe('executeEvery', () => {
       span,
     });
 
-    const everyStep = every<ContextMemory, void, void>({
+    const everyStep = every<ContextData, void, void>({
       id: 'continue-every',
       step: {
         kind: 'run',
@@ -168,7 +168,7 @@ describe('executeEvery', () => {
 
   it("onError 'fail' propagates and operator terminates with that error", async () => {
     const failure = new Error('fatal boom');
-    const everyStep = every<ContextMemory, void, void>({
+    const everyStep = every<ContextData, void, void>({
       id: 'fail-every',
       step: {
         kind: 'run',
@@ -197,7 +197,7 @@ describe('executeEvery', () => {
 
   it('abort during long park returns control within ~50ms', async () => {
     let started = false;
-    const everyStep = every<ContextMemory, void, void>({
+    const everyStep = every<ContextData, void, void>({
       id: 'abort-park-every',
       step: {
         kind: 'run',
@@ -246,7 +246,7 @@ describe('executeEvery', () => {
       harness: makeMockHarness(),
     });
 
-    const everyStep = every<ContextMemory, void, void>({
+    const everyStep = every<ContextData, void, void>({
       id: 'jitter-every',
       step: {
         kind: 'run',
@@ -289,7 +289,7 @@ describe('executeEvery', () => {
     const ctx = new ContextImpl({
       harness: makeMockHarness(),
     });
-    const everyStep = every<ContextMemory, void, void>({
+    const everyStep = every<ContextData, void, void>({
       id: 'dispatch-every',
       step: {
         kind: 'run',
@@ -320,7 +320,7 @@ describe('executeEvery', () => {
       harness: makeMockHarness(),
     });
 
-    const everyStep = every<ContextMemory, void, void>({
+    const everyStep = every<ContextData, void, void>({
       id: 'cancel-not-swallowed',
       step: {
         kind: 'run',
@@ -356,7 +356,7 @@ describe('executeEvery', () => {
     ctx.abort('preempted');
 
     let count = 0;
-    const everyStep = every<ContextMemory, void, void>({
+    const everyStep = every<ContextData, void, void>({
       id: 'pre-aborted-every',
       step: {
         kind: 'run',
@@ -383,7 +383,7 @@ describe('executeEvery', () => {
     const ctx = new ContextImpl({
       harness: makeMockHarness(),
     });
-    const everyStep = every<ContextMemory, void, void>({
+    const everyStep = every<ContextData, void, void>({
       id: 'plain-park-every',
       step: {
         kind: 'run',
@@ -415,7 +415,7 @@ describe('executeEvery', () => {
     const ctx = new ContextImpl({
       harness: makeMockHarness(),
     });
-    const everyStep = every<ContextMemory, void, void>({
+    const everyStep = every<ContextData, void, void>({
       id: 'no-second-iter-every',
       step: {
         kind: 'run',
@@ -451,7 +451,7 @@ describe('executeEvery', () => {
       channelStore,
     });
 
-    const everyStep = every<ContextMemory, void, void>({
+    const everyStep = every<ContextData, void, void>({
       id: 'queue-wake',
       step: {
         kind: 'run',

@@ -22,9 +22,9 @@ const OUTPUT = path.join(WEB_DIR, 'scripts/doc-preamble.ts');
 const STANDINS = `
 declare const searchTool: Tool;
 declare const calcTool: Tool;
-declare const agent: Step<ContextMemory, string, string>;
+declare const agent: Step<ContextData, string, string>;
 declare const observer: (buffer: ReadonlyArray<unknown>) => Promise<string[]>;
-declare const semanticRecall: MemoryLayer;
+declare const semanticRecall: ContextLayer;
 `;
 
 /** Parse `export { ... }` / `export type { ... }` blocks into value and type name sets. */

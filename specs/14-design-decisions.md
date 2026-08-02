@@ -25,7 +25,7 @@ We chose mandatory `merge` for `all` and `settle` modes (see `03-control-flow`) 
 
 ## Two-axis context strategy vs. single enum (superseded)
 
-We originally chose `contextIn` x `contextOut` as two independent axes. The original design before that used a single string enum (`'accumulate' | 'fresh' | 'episodic' | 'windowed'`) that hid enormous complexity behind four words. Both approaches were **superseded by memory layers** — see "Memory layers replace contextIn/contextOut on spawn" below.
+We originally chose `contextIn` x `contextOut` as two independent axes. The original design before that used a single string enum (`'accumulate' | 'fresh' | 'episodic' | 'windowed'`) that hid enormous complexity behind four words. Both approaches were **superseded by context layers** — see "Context layers replace contextIn/contextOut on spawn" below.
 
 ## Error taxonomy vs. generic `Error` propagation
 
@@ -39,17 +39,17 @@ We chose standalone `Channel<T>` objects (see `06-channels`) over LangGraph-styl
 
 We chose `Verdict` (see `05-loop-and-until`) with `stop`, `reason`, and `feedback` fields. Booleans provide no observability and no feedback injection. The tradeoff: predicate implementations are slightly more verbose, but every loop termination is traceable and debuggable.
 
-## Memory layers as a separate plugin system vs. built into Context
+## Context layers as a separate plugin system vs. built into Context
 
-We chose to make memory layers a plugin system (see `11-memory-layer-system`) with lifecycle hooks rather than building memory management into the `Context` object. The alternative would make every agent pay for memory features it doesn't use. The tradeoff: more indirection (the View is assembled by the Projector), but memory layers are independently authorable, composable, and replaceable. A simple script uses zero layers; a production agent uses five — same agent harness, same Step types.
+We chose to make context layers a plugin system (see `11-context-layer-system`) with lifecycle hooks rather than building context management into the `Context` object. The alternative would make every agent pay for context features it doesn't use. The tradeoff: more indirection (the View is assembled by the Projector), but context layers are independently authorable, composable, and replaceable. A simple script uses zero layers; a production agent uses five — same agent harness, same Step types.
 
-## ItemLog + Memory Layers vs. a single "context" concept
+## ItemLog + Context Layers vs. a single "context" concept
 
-We chose to separate the ItemLog from memory layers (see `07-context-and-event-log`, `11-memory-layer-system`) because they have fundamentally different lifecycles. The ItemLog is the raw record of what happened; memory layers are interpretations of that record. Conversation history gets the remainder of the token budget — not a share of a common pool. This asymmetry is intentional.
+We chose to separate the ItemLog from context layers (see `07-context-and-event-log`, `11-context-layer-system`) because they have fundamentally different lifecycles. The ItemLog is the raw record of what happened; context layers are interpretations of that record. Conversation history gets the remainder of the token budget — not a share of a common pool. This asymmetry is intentional.
 
-## All persistence through memory layers vs. `Persistence` on spawn
+## All persistence through context layers vs. `Persistence` on spawn
 
-We chose to handle all persistence — including task-level artifacts like files and git commits — through the memory layer system (see `12-builtin-memory-layers`, `durableTaskState()`). The alternative was a separate `Persistence` interface on `spawn`. The tradeoff: task state persistence is slightly more verbose to configure (it's a memory layer in the agent's `memory` array rather than a field on `spawn`), but persistence is handled uniformly through one system with one lifecycle, one storage backend, and one set of scope rules. There is no second persistence mechanism to learn.
+We chose to handle all persistence — including task-level artifacts like files and git commits — through the context layer system (see `12-builtin-memory-layers`, `durableTaskState()`). The alternative was a separate `Persistence` interface on `spawn`. The tradeoff: task state persistence is slightly more verbose to configure (it's a context layer in the agent's `memory` array rather than a field on `spawn`), but persistence is handled uniformly through one system with one lifecycle, one storage backend, and one set of scope rules. There is no second persistence mechanism to learn.
 
 ## Items-native vs. Message/Event duality
 
@@ -65,20 +65,20 @@ We chose `ChannelHandle<T>` as a typed, lifecycle-aware write surface for extern
 
 ## External channels survive fresh boundaries
 
-External channels are scoped to the **root execution**, not individual spawn boundaries (see `06-channels`). A spawn starts with an empty ItemLog and clears internal channels, but external channels remain accessible. This is analogous to `scope: 'resource'` memory layers — they represent user-level communication that should persist regardless of how the agent structures its internal execution. The alternative — resetting external channels on spawn — would break human-in-the-loop patterns where a user sends messages to a running agent that uses fresh-context iterations internally.
+External channels are scoped to the **root execution**, not individual spawn boundaries (see `06-channels`). A spawn starts with an empty ItemLog and clears internal channels, but external channels remain accessible. This is analogous to `scope: 'resource'` context layers — they represent user-level communication that should persist regardless of how the agent structures its internal execution. The alternative — resetting external channels on spawn — would break human-in-the-loop patterns where a user sends messages to a running agent that uses fresh-context iterations internally.
 
-## `developer` role for memory layer output vs. `system` for agent instructions
+## `developer` role for context layer output vs. `system` for agent instructions
 
-OpenResponses distinguishes `system` (user-authored instructions) from `developer` (framework-injected context). Memory layers use `role: developer` because they're framework machinery, not the agent's core instructions. The `system` field on `StepLLMOpts` renders as a `MessageItem` with `role: system`. This separation lets models treat them differently and makes the View's provenance clear: system items are the agent's identity; developer items are runtime-injected context that may change between calls.
+OpenResponses distinguishes `system` (user-authored instructions) from `developer` (framework-injected context). Context layers use `role: developer` because they're framework machinery, not the agent's core instructions. The `system` field on `StepLLMOpts` renders as a `MessageItem` with `role: system`. This separation lets models treat them differently and makes the View's provenance clear: system items are the agent's identity; developer items are runtime-injected context that may change between calls.
 
 ## Options object for `channel()` factory
 
 We moved from positional `channel(name, schema, mode)` to `channel(name, { schema, mode, ... })` (see `06-channels`). The positional form would grow unwieldy as we add `external`, `capacity`, and future options. The options object is more extensible, consistent with other builders (`step.llm({...})`, `spawn({...})`), and avoids a growing positional parameter list. The tradeoff: slightly more verbose for the simplest case, but the API is self-documenting and won't need breaking changes when new options are added.
 
-## Memory layers replace contextIn/contextOut on spawn
+## Context layers replace contextIn/contextOut on spawn
 
-We chose to remove `contextIn` and `contextOut` from `StepSpawn` and unify context flow under the memory layer system (see `04-spawn`, `11-memory-layer-system`). Previously, spawn had two independent strategy axes controlling ItemLog flow, while memory layers had `onSpawn`/`onReturn` hooks that were never called from `executeSpawn`. The two systems were disconnected.
+We chose to remove `contextIn` and `contextOut` from `StepSpawn` and unify context flow under the context layer system (see `04-spawn`, `11-context-layer-system`). Previously, spawn had two independent strategy axes controlling ItemLog flow, while context layers had `onSpawn`/`onReturn` hooks that were never called from `executeSpawn`. The two systems were disconnected.
 
-The new design: child starts with an empty ItemLog by default. Memory layers provide items via `onSpawn` and transform results via `onReturn`. An optional `memory` field on `StepSpawn` provides spawn-local layers that replace parent layer propagation for full isolation.
+The new design: child starts with an empty ItemLog by default. Context layers provide items via `onSpawn` and transform results via `onReturn`. An optional `context` field on `StepSpawn` provides spawn-local layers that replace parent layer propagation for full isolation.
 
-The tradeoff: users who previously relied on `contextIn: 'inherit'` or `contextIn: 'subset'` must now write a memory layer to achieve the same effect. But the benefit is a single, composable system for all context flow — no more two-axis configuration, no more implicit interaction between ItemLog strategies and layer hooks.
+The tradeoff: users who previously relied on `contextIn: 'inherit'` or `contextIn: 'subset'` must now write a context layer to achieve the same effect. But the benefit is a single, composable system for all context flow — no more two-axis configuration, no more implicit interaction between ItemLog strategies and layer hooks.

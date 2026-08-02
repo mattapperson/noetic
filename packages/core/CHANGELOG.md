@@ -1,3 +1,30 @@
+## @noetic-tools/core-v4.0.0 (2026-08-02)
+
+* fix: apply the rename to work that landed on main during the rebase ([aee8f21](https://github.com/mattapperson/noetic/commit/aee8f21))
+* fix: harden step.workflow caching and plan-layer state loading ([3b10168](https://github.com/mattapperson/noetic/commit/3b10168))
+* fix(core): export the step builder option types so the dist build emits ([1a16e74](https://github.com/mattapperson/noetic/commit/1a16e74))
+* fix(core): restore the ctx.memory alias on the JSON-workflow tool path ([293019e](https://github.com/mattapperson/noetic/commit/293019e))
+* feat: rename the memory layer system to context layers ([123810f](https://github.com/mattapperson/noetic/commit/123810f))
+* feat(core): add step.workflow builder ([6d1e548](https://github.com/mattapperson/noetic/commit/6d1e548))
+* feat(core): add subflow workflow node with named sub-workflow registry ([82c2529](https://github.com/mattapperson/noetic/commit/82c2529))
+* feat(types): host the JSON workflow schema (moved from @noetic-tools/core) ([7f37ad6](https://github.com/mattapperson/noetic/commit/7f37ad6))
+* feat(memory)!: rebuild plan layer on WorkflowDocument with named workflows ([caf5c91](https://github.com/mattapperson/noetic/commit/caf5c91))
+* refactor(core): cut execute() complexity to fix structural-gate drift (#65) ([f0a0148](https://github.com/mattapperson/noetic/commit/f0a0148)), closes [#65](https://github.com/mattapperson/noetic/issues/65) [#64](https://github.com/mattapperson/noetic/issues/64) [#64](https://github.com/mattapperson/noetic/issues/64)
+
+### BREAKING CHANGE
+
+* FlowSchema/FlowNode and validateFlow/walkFlow/flowDepth
+are removed from @noetic-tools/memory and @noetic-tools/core
+(packages/memory/src/memory/flow-schema.ts and
+packages/core/src/patterns/flow.ts deleted). PlanState.planTree is now a
+WorkflowDocument and PlanState gains workflows.
+PlanMemoryConfig.maxTreeDepth is renamed maxDepth; plan/setPlanTree
+takes { document } instead of { tree }. Persisted legacy plan trees are
+reset to null on load.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01YaQitK6c9QsjU518ry8uX4
+
 ## @noetic-tools/core-v3.2.0 (2026-07-26)
 
 * fix(core): cascade abort to child contexts and implement harness.cancel ([6d36c97](https://github.com/mattapperson/noetic/commit/6d36c97))

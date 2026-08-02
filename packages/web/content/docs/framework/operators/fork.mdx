@@ -133,15 +133,15 @@ const settleExample = fork({
 | --- | --- | --- | --- |
 | `id` | `string` | Yes | Unique step identifier |
 | `mode` | `'race' \| 'all' \| 'settle'` | Yes | Execution mode |
-| `paths` | `(input: I, ctx: Context<TMemory>) => Step<TMemory, I, O>[]` | Yes | Function returning the steps to run |
+| `paths` | `(input: I, ctx: Context<TContext>) => Step<TContext, I, O>[]` | Yes | Function returning the steps to run |
 | `concurrency` | `number` | No | Max parallel executions |
 
 ### Mode-Specific Options
 
 | Property | Modes | Type | Description |
 | --- | --- | --- | --- |
-| `merge` | `all` | `(results: O[], ctx: Context<TMemory>) => O` | Combine all outputs into one |
-| `merge` | `settle` | `(results: SettleResult<O>[], ctx: Context<TMemory>) => O` | Combine settled results into one |
+| `merge` | `all` | `(results: O[], ctx: Context<TContext>) => O` | Combine all outputs into one |
+| `merge` | `settle` | `(results: SettleResult<O>[], ctx: Context<TContext>) => O` | Combine settled results into one |
 
 ## Concurrency Control
 
@@ -159,9 +159,9 @@ const throttled = fork({
 });
 ```
 
-## Memory Layers
+## Context Layers
 
-Each path is a child execution. It inherits the parent's memory layers and tool pool, so `llm` steps inside a path keep their memory projection and layer tools, and a nested `spawn` has layers to inherit.
+Each path is a child execution. It inherits the parent's context layers and tool pool, so `llm` steps inside a path keep their context projection and layer tools, and a nested `spawn` has layers to inherit.
 
 Layer *state* is per path:
 
@@ -169,7 +169,7 @@ Layer *state* is per path:
 - `onReturn` merges a successful path's contribution back into the parent. A failed path is not merged, and its state is discarded.
 - Merges run one at a time even though paths run concurrently, so no path's contribution is lost to a concurrent read-modify-write.
 
-For layers that collect artifacts from many workers, choose a merge strategy that namespaces per child -- see [`durableTaskState({ mergeData: 'namespace' })`](/docs/framework/memory/durable-task-state).
+For layers that collect artifacts from many workers, choose a merge strategy that namespaces per child -- see [`durableTaskState({ mergeData: 'namespace' })`](/docs/framework/context-layers/durable-task-state).
 
 ## Related
 

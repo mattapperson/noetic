@@ -3,7 +3,8 @@ import type {
   Channel,
   ChannelStore,
   Context,
-  ContextMemory,
+  ContextData,
+  ContextLayer,
   CwdState,
   EventBroadcaster,
   FrontierFrame,
@@ -12,17 +13,16 @@ import type {
   ItemLog,
   ItemSchemaRegistry,
   LastLayerUsage,
-  MemoryLayer,
   Span,
   StepMeta,
   TokenUsage,
   Tool,
 } from './context-deps';
-import { buildContextMemory, defaultItemSchemaRegistry } from './context-deps';
+import { buildContextData, defaultItemSchemaRegistry } from './context-deps';
 import type { StepLedger } from './durable/step-ledger';
 import { ItemLogImpl } from './item-log-impl';
 
-const EMPTY_MEMORY: ContextMemory = Object.freeze({});
+const EMPTY_CONTEXT: ContextData = Object.freeze({});
 
 class NoopSpan implements Span {
   readonly traceId = crypto.randomUUID();
@@ -52,7 +52,7 @@ export function collectContextTree(ctx: Context): Context[] {
   return tree;
 }
 
-export class ContextImpl implements Context<ContextMemory> {
+export class ContextImpl implements Context<ContextData> {
   readonly id: string;
   stepCount = 0;
   tokens: TokenUsage = {
@@ -62,7 +62,7 @@ export class ContextImpl implements Context<ContextMemory> {
   };
   cost = 0;
   state: unknown;
-  readonly parent: Context<ContextMemory> | null;
+  readonly parent: Context<ContextData> | null;
   readonly depth: number;
   readonly span: Span;
   readonly threadId: string;
@@ -71,7 +71,7 @@ export class ContextImpl implements Context<ContextMemory> {
   lastStepMeta: StepMeta | null = null;
   lastLayerUsage: LastLayerUsage | undefined = undefined;
   readonly harness: AgentHarnessContract;
-  readonly layers?: MemoryLayer[];
+  readonly layers?: ContextLayer[];
   unifiedTools?: ReadonlyArray<Tool>;
   readonly itemSchemas?: ItemSchemaRegistry;
   readonly cwdState: CwdState;
@@ -111,7 +111,7 @@ export class ContextImpl implements Context<ContextMemory> {
    * @internal
    */
   private readonly _children = new Set<ContextImpl>();
-  private _memory?: ContextMemory;
+  private _contextData?: ContextData;
   /**
    * Stack of steps currently in flight on this context, most-recent last.
    * Pushed by `enterStep` at the top of `execute()` and popped by
@@ -165,7 +165,7 @@ export class ContextImpl implements Context<ContextMemory> {
     pathPrefix?: string;
     /** The execution's completion ledger, shared with children by reference. */
     ledger?: StepLedger;
-    layers?: MemoryLayer[];
+    layers?: ContextLayer[];
     unifiedTools?: ReadonlyArray<Tool>;
     itemSchemas?: ItemSchemaRegistry;
     cwdState?: CwdState;
@@ -174,7 +174,7 @@ export class ContextImpl implements Context<ContextMemory> {
      * Pre-chosen context id. When set, the ContextImpl adopts this id instead
      * of generating a fresh UUID. Used by `executeSpawn` so the child's
      * `ctx.id` matches the `executionId` keyed into the layer-state store —
-     * otherwise writes via `ctx.memory[layerId].state` land on one id while
+     * otherwise writes via `ctx.context[layerId].state` land on one id while
      * spawn's `onReturn` reads from another, silently losing the update.
      */
     id?: string;
@@ -273,11 +273,16 @@ export class ContextImpl implements Context<ContextMemory> {
     return this.harness.subprocess;
   }
 
-  get memory(): ContextMemory {
-    if (!this._memory) {
-      this._memory = this.layers ? buildContextMemory(this.layers, this) : EMPTY_MEMORY;
+  get context(): ContextData {
+    if (!this._contextData) {
+      this._contextData = this.layers ? buildContextData(this.layers, this) : EMPTY_CONTEXT;
     }
-    return this._memory;
+    return this._contextData;
+  }
+
+  /** @deprecated Renamed to `context`. Returns the same object. */
+  get memory(): ContextData {
+    return this.context;
   }
 
   recv<T>(

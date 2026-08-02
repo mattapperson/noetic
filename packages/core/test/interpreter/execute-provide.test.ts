@@ -1,19 +1,19 @@
 import { describe, expect, it } from 'bun:test';
-import type { ContextMemory, MemoryLayer } from '@noetic-tools/memory';
-import { Slot } from '@noetic-tools/memory';
+import type { ContextData, ContextLayer } from '@noetic-tools/context';
+import { Slot } from '@noetic-tools/context';
 import type { Context, ExecuteStepFn, StepProvide } from '@noetic-tools/types';
 import { frameworkCast } from '@noetic-tools/types';
 import { executeProvide } from '../../src/interpreter/execute-action';
 import { ContextImpl } from '../../src/runtime/context-impl';
-import { getItemId, makeMessage, makeMockHarness, simpleExecute } from '../_helpers';
+import { getItemId, makeLayer, makeMessage, makeMockHarness, simpleExecute } from '../_helpers';
 
 //#region Helper Functions
 
-function makeProvideStep<TMemory = ContextMemory, I = unknown, O = unknown>(
+function makeProvideStep<TContext = ContextData, I = unknown, O = unknown>(
   id: string,
-  execute: (input: I, ctx: Context<TMemory>) => Promise<O>,
-  memory: MemoryLayer[],
-): StepProvide<TMemory, I, O> {
+  execute: (input: I, ctx: Context<TContext>) => Promise<O>,
+  context: ContextLayer[],
+): StepProvide<TContext, I, O> {
   return {
     kind: 'provide',
     id,
@@ -22,38 +22,28 @@ function makeProvideStep<TMemory = ContextMemory, I = unknown, O = unknown>(
       id: `${id}-child`,
       execute,
     },
-    memory,
+    context,
   };
 }
 
-function makeLayer(id: string, slot: number): MemoryLayer {
-  return {
-    id,
-    name: id,
-    slot,
-    scope: 'execution',
-    hooks: {},
-  };
-}
-
-function getLayers(ctx: Context): MemoryLayer[] | undefined {
+function getLayers(ctx: Context): ContextLayer[] | undefined {
   return frameworkCast<{
-    layers?: MemoryLayer[];
+    layers?: ContextLayer[];
   }>(ctx).layers;
 }
 
 function provideExecute(): ExecuteStepFn {
-  const fn: ExecuteStepFn = async <TMemory, I, O>(
+  const fn: ExecuteStepFn = async <TContext, I, O>(
     s: {
       kind: string;
       id: string;
-      execute?: (input: I, ctx: Context<TMemory>) => Promise<O>;
+      execute?: (input: I, ctx: Context<TContext>) => Promise<O>;
     },
     input: I,
-    c: Context<TMemory>,
+    c: Context<TContext>,
   ): Promise<O> => {
     if (s.kind === 'provide') {
-      return executeProvide(frameworkCast<StepProvide<TMemory, I, O>>(s), input, c, fn);
+      return executeProvide(frameworkCast<StepProvide<TContext, I, O>>(s), input, c, fn);
     }
     if (s.kind === 'run' && s.execute) {
       return s.execute(input, c);
@@ -73,8 +63,10 @@ describe('executeProvide', () => {
       const ctx = new ContextImpl({
         harness: makeMockHarness(),
       });
-      const layer = makeLayer('test-layer', Slot.STEERING);
-      let receivedLayers: MemoryLayer[] | undefined;
+      const layer = makeLayer('test-layer', {
+        slot: Slot.STEERING,
+      });
+      let receivedLayers: ContextLayer[] | undefined;
 
       const step = makeProvideStep(
         'provide-layers',
@@ -97,7 +89,9 @@ describe('executeProvide', () => {
       const ctx = new ContextImpl({
         harness: makeMockHarness(),
       });
-      const layer = makeLayer('temp-layer', Slot.STEERING);
+      const layer = makeLayer('temp-layer', {
+        slot: Slot.STEERING,
+      });
 
       const step = makeProvideStep('provide-restore', async () => 'done', [
         layer,
@@ -112,7 +106,9 @@ describe('executeProvide', () => {
       const ctx = new ContextImpl({
         harness: makeMockHarness(),
       });
-      const layer = makeLayer('temp-layer', Slot.STEERING);
+      const layer = makeLayer('temp-layer', {
+        slot: Slot.STEERING,
+      });
 
       const step = makeProvideStep('provide-error', async () => {
         throw new Error('child error');
@@ -142,7 +138,9 @@ describe('executeProvide', () => {
           return 'done';
         },
         [
-          makeLayer('l1', Slot.STEERING),
+          makeLayer('l1', {
+            slot: Slot.STEERING,
+          }),
         ],
       );
 
@@ -169,7 +167,9 @@ describe('executeProvide', () => {
           return 'done';
         },
         [
-          makeLayer('l1', Slot.STEERING),
+          makeLayer('l1', {
+            slot: Slot.STEERING,
+          }),
         ],
       );
 
@@ -187,11 +187,15 @@ describe('executeProvide', () => {
       const ctx = new ContextImpl({
         harness: makeMockHarness(),
       });
-      const outerLayer = makeLayer('outer', Slot.STEERING);
-      const innerLayer = makeLayer('inner', Slot.WORKING_MEMORY);
-      let receivedLayers: MemoryLayer[] | undefined;
+      const outerLayer = makeLayer('outer', {
+        slot: Slot.STEERING,
+      });
+      const innerLayer = makeLayer('inner', {
+        slot: Slot.WORKING_MEMORY,
+      });
+      let receivedLayers: ContextLayer[] | undefined;
 
-      const innerStep: StepProvide<ContextMemory, string, string> = {
+      const innerStep: StepProvide<ContextData, string, string> = {
         kind: 'provide',
         id: 'inner-provide',
         child: {
@@ -202,16 +206,16 @@ describe('executeProvide', () => {
             return 'done';
           },
         },
-        memory: [
+        context: [
           innerLayer,
         ],
       };
 
-      const outerStep: StepProvide<ContextMemory, string, string> = {
+      const outerStep: StepProvide<ContextData, string, string> = {
         kind: 'provide',
         id: 'outer-provide',
         child: innerStep,
-        memory: [
+        context: [
           outerLayer,
         ],
       };
@@ -229,11 +233,15 @@ describe('executeProvide', () => {
       const ctx = new ContextImpl({
         harness: makeMockHarness(),
       });
-      const outerLayer = makeLayer('shared-id', Slot.STEERING);
-      const innerLayer = makeLayer('shared-id', Slot.WORKING_MEMORY);
-      let receivedLayers: MemoryLayer[] | undefined;
+      const outerLayer = makeLayer('shared-id', {
+        slot: Slot.STEERING,
+      });
+      const innerLayer = makeLayer('shared-id', {
+        slot: Slot.WORKING_MEMORY,
+      });
+      let receivedLayers: ContextLayer[] | undefined;
 
-      const innerStep: StepProvide<ContextMemory, string, string> = {
+      const innerStep: StepProvide<ContextData, string, string> = {
         kind: 'provide',
         id: 'inner-provide',
         child: {
@@ -244,16 +252,16 @@ describe('executeProvide', () => {
             return 'done';
           },
         },
-        memory: [
+        context: [
           innerLayer,
         ],
       };
 
-      const outerStep: StepProvide<ContextMemory, string, string> = {
+      const outerStep: StepProvide<ContextData, string, string> = {
         kind: 'provide',
         id: 'outer-provide',
         child: innerStep,
-        memory: [
+        context: [
           outerLayer,
         ],
       };
@@ -266,15 +274,17 @@ describe('executeProvide', () => {
     });
   });
 
-  describe('MemoryConfig support', () => {
-    it('resolves layers from MemoryConfig object', async () => {
+  describe('ContextConfig support', () => {
+    it('resolves layers from ContextConfig object', async () => {
       const ctx = new ContextImpl({
         harness: makeMockHarness(),
       });
-      const layer = makeLayer('config-layer', Slot.STEERING);
-      let receivedLayers: MemoryLayer[] | undefined;
+      const layer = makeLayer('config-layer', {
+        slot: Slot.STEERING,
+      });
+      let receivedLayers: ContextLayer[] | undefined;
 
-      const step: StepProvide<ContextMemory, string, string> = {
+      const step: StepProvide<ContextData, string, string> = {
         kind: 'provide',
         id: 'provide-config',
         child: {
@@ -285,7 +295,7 @@ describe('executeProvide', () => {
             return 'done';
           },
         },
-        memory: [
+        context: [
           layer,
         ],
       };
@@ -303,7 +313,9 @@ describe('executeProvide', () => {
       });
 
       const step = makeProvideStep('provide-passthrough', async () => 'result-value', [
-        makeLayer('l1', Slot.STEERING),
+        makeLayer('l1', {
+          slot: Slot.STEERING,
+        }),
       ]);
 
       const result = await executeProvide(step, 'input', ctx, simpleExecute);

@@ -31,7 +31,7 @@ const INSTALL_COMMANDS = [
 const STATUS_PILLS = [
   {
     state: 'running',
-    label: '10 memory layers',
+    label: '10 context layers',
   },
   {
     state: 'running',
@@ -239,7 +239,7 @@ export function CodeHero(): ReactNode {
                 lineHeight: 1.7,
               }}
             >
-              Ten memory layers in concert. Detached agents in isolated worktrees. Per-phase model
+              ten context layers in concert. Detached agents in isolated worktrees. Per-phase model
               routing — not married to any provider. Durable cloud sessions you can pick up from any
               device.
             </motion.p>

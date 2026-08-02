@@ -1,11 +1,11 @@
 import type { ReactNode } from 'react';
 import { CodePeek } from '@/components/landing/code-peek';
+import { ContextSystem } from '@/components/landing/context-system';
 import { Differentiation } from '@/components/landing/differentiation';
 import { Endurance } from '@/components/landing/endurance';
 import { EvalFramework } from '@/components/landing/eval-framework';
 import { Footer } from '@/components/landing/footer';
 import { Hero } from '@/components/landing/hero';
-import { MemorySystem } from '@/components/landing/memory-system';
 import { Nav } from '@/components/landing/nav';
 import { PatternsGrid } from '@/components/landing/patterns-grid';
 import { PillarHeader } from '@/components/landing/pillar-header';
@@ -30,7 +30,7 @@ export default function LandingPage(): ReactNode {
           <CodePeek />
 
           <PillarHeader id="remember" index="02" name="Remember" />
-          <MemorySystem />
+          <ContextSystem />
 
           <PillarHeader id="endure" index="03" name="Endure" />
           <Endurance />

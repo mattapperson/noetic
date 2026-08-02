@@ -1,6 +1,6 @@
 ---
 title: spawn
-description: Run a child step in an isolated context with optional spawn-local memory layers.
+description: Run a child step in an isolated context with optional spawn-local context layers.
 ---
 
 ## Quick Example
@@ -22,7 +22,7 @@ const isolated = spawn({
 
 `spawn` runs a child step in an isolated context. The child starts with an empty `ItemLog` by default, giving it a fresh conversation history and preventing it from polluting the parent context.
 
-You can attach spawn-local memory layers via the optional `memory` field. These layers use `onSpawn` hooks to provide items to the child and `onReturn` hooks to transform results back to the parent. Spawn-local memory fully replaces parent layer propagation, ensuring complete isolation.
+You can attach spawn-local context layers via the optional `context` field. These layers use `onSpawn` hooks to provide items to the child and `onReturn` hooks to transform results back to the parent. Spawn-local context fully replaces parent layer propagation, ensuring complete isolation.
 
 This is the primitive for sub-agents, delegation, and sandboxed execution.
 
@@ -31,29 +31,29 @@ This is the primitive for sub-agents, delegation, and sandboxed execution.
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
 | `id` | `string` | Yes | Unique step identifier |
-| `child` | `Step<TMemory, I, O>` | Yes | The step to execute in isolation |
-| `memory` | `MemoryConfig \| MemoryLayer[]` | No | Spawn-local memory layers (use the `memory()` builder for typed access) |
+| `child` | `Step<TContext, I, O>` | Yes | The step to execute in isolation |
+| `context` | `ContextConfig \| ContextLayer[]` | No | Spawn-local context layers (use the `context()` builder for typed access) |
 | `timeout` | `number` | No | Timeout in milliseconds |
 | `subprocess` | `SubprocessAdapter` | No | Per-step adapter override; see [SubprocessAdapter Routing](#subprocessadapter-routing) below. |
 
-## Memory Layers
+## Context Layers
 
-The `memory` field accepts either a raw `MemoryLayer[]` array or a `MemoryConfig` object produced by the `memory()` builder. The builder provides typed access to layer state and is the recommended approach.
+The `context` field accepts either a raw `ContextLayer[]` array or a `ContextConfig` object produced by the `context()` builder. The builder provides typed access to layer state and is the recommended approach.
 
-Spawn-local memory layers control what the child sees and how results are transformed when the child completes.
+Spawn-local context layers control what the child sees and how results are transformed when the child completes.
 
 - **`onSpawn` hooks** provide items to the child's initial context. Each layer can inject items (e.g., relevant conversation history, cached knowledge, instructions) into the child's empty `ItemLog`.
 - **`onReturn` hooks** transform the child's results before they flow back to the parent. Layers can summarize, filter, or restructure the output.
 
 ```ts
 import { createMessage, spawn, step } from '@noetic-tools/core';
-import type { MemoryLayer } from '@noetic-tools/core';
+import type { ContextLayer } from '@noetic-tools/core';
 
 interface ResearchState {
   lastResearch?: string;
 }
 
-const contextLayer: MemoryLayer<ResearchState> = {
+const contextLayer: ContextLayer<ResearchState> = {
   id: 'context-layer',
   name: 'Context Provider',
   slot: 100,
@@ -70,14 +70,14 @@ const contextLayer: MemoryLayer<ResearchState> = {
   },
 };
 
-const withMemory = spawn({
+const withContextLayers = spawn({
   id: 'research-agent',
   child: step.llm({
     id: 'researcher',
     model: 'openai/gpt-4o',
     instructions: 'Research the topic thoroughly.',
   }),
-  memory: [contextLayer],
+  context: [contextLayer],
 });
 ```
 
@@ -93,18 +93,18 @@ const spawned = spawn({
 });
 ```
 
-## Real-World Example: Research Delegation with Memory
+## Real-World Example: Research Delegation with Context Layers
 
 ```ts validate=none
 import { createMessage, loop, spawn, step, until } from '@noetic-tools/core';
-import type { MemoryLayer } from '@noetic-tools/core';
+import type { ContextLayer } from '@noetic-tools/core';
 
 interface BriefingState {
   topic: string;
   findings?: unknown;
 }
 
-const briefingLayer: MemoryLayer<BriefingState> = {
+const briefingLayer: ContextLayer<BriefingState> = {
   id: 'research-briefing',
   name: 'Research Briefing',
   slot: 100,
@@ -134,7 +134,7 @@ const researchAgent = spawn({
     until: until.noToolCalls(),
     maxIterations: 10,
   }),
-  memory: [briefingLayer],
+  context: [briefingLayer],
   timeout: 6e4, // 60 seconds
 });
 ```
@@ -220,7 +220,7 @@ Give the LLM both a sync and async delegation tool. The LLM decides at runtime w
 
 ```ts
 import { channel, spawn, step, tool, until } from '@noetic-tools/core';
-import type { ContextMemory } from '@noetic-tools/core';
+import type { ContextData } from '@noetic-tools/core';
 import { z } from 'zod';
 
 const inbox = channel('agent-inbox', { schema: z.string(), mode: 'queue' });
@@ -234,7 +234,7 @@ const delegateTool = tool({
   input: z.object({ task: z.string() }),
   output: z.string(),
   execute: async (args: { task: string }, toolCtx) => {
-    const child = step.llm<ContextMemory, string, string>({
+    const child = step.llm<ContextData, string, string>({
       id: 'sync-sub', model: 'openai/gpt-4o', instructions: 'Answer concisely.',
     });
     return toolCtx.harness.run(spawn({ id: 'sync-spawn', child }), args.task, toolCtx.ctx);
@@ -248,7 +248,7 @@ const launchTool = tool({
   input: z.object({ task: z.string() }),
   output: z.object({ agentId: z.string() }),
   execute: async (args: { task: string }, toolCtx) => {
-    const child = step.llm<ContextMemory, string, string>({
+    const child = step.llm<ContextData, string, string>({
       id: 'async-sub', model: 'openai/gpt-4o', instructions: 'Answer concisely.',
     });
     const handle = toolCtx.harness.detachedSpawn(child, args.task, toolCtx.ctx);
@@ -327,19 +327,19 @@ Adapters configured with a durable `StorageAdapter` persist a manifest per handl
 
 ## provide vs spawn
 
-Use [`provide`](/docs/framework/operators/provide) when you want to attach memory layers to a subtree without isolating the child context. The child shares the parent's `ItemLog` and conversation history -- layers simply become available to all descendant steps.
+Use [`provide`](/docs/framework/operators/provide) when you want to attach context layers to a subtree without isolating the child context. The child shares the parent's `ItemLog` and conversation history -- layers simply become available to all descendant steps.
 
 Use `spawn` when you need full context isolation. The child starts with an empty `ItemLog`, and `onSpawn` / `onReturn` hooks control data flow across the boundary.
 
 | | `provide` | `spawn` |
 |---|---|---|
 | Child context | Shared with parent | Isolated (empty `ItemLog`) |
-| Memory layers | Inherited by descendants | Spawn-local only |
+| Context layers | Inherited by descendants | Spawn-local only |
 | Use case | Attach layers to a subtree | Sub-agents, delegation, sandboxing |
 
 ## Related
 
-- [provide](/docs/framework/operators/provide) -- attach memory layers without context isolation.
+- [provide](/docs/framework/operators/provide) -- attach context layers without context isolation.
 - [fork](/docs/framework/operators/fork) -- parallel execution without context isolation.
 - [Loop & Until](/docs/framework/operators/loop-and-until) -- use a loop as a spawn child for iterative sub-agents.
 - [Overview](/docs/framework/overview) -- how spawn fits into the eight primitives.

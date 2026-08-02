@@ -1,4 +1,9 @@
 {
   "title": "Noetic",
-  "pages": ["index", "framework", "code-agent-cli"]
+  "pages": [
+    "index",
+    "framework",
+    "code-agent-cli",
+    "migration"
+  ]
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { ContextMemory } from '@noetic-tools/memory';
+import type { ContextData } from '@noetic-tools/context';
 import type { Context, StepTool, StreamEvent, Tool } from '@noetic-tools/types';
 import { frameworkCast } from '@noetic-tools/types';
 import { z } from 'zod';
@@ -189,7 +189,7 @@ describe('executeTool tool-UI integration', () => {
         }),
       },
     });
-    const step: StepTool<ContextMemory, unknown, unknown> = {
+    const step: StepTool<ContextData, unknown, unknown> = {
       kind: 'tool',
       id: 'quote-step',
       tool,
@@ -235,7 +235,7 @@ describe('executeTool tool-UI integration', () => {
         }),
       },
     });
-    const step: StepTool<ContextMemory, unknown, unknown> = {
+    const step: StepTool<ContextData, unknown, unknown> = {
       kind: 'tool',
       id: 'boom-step',
       tool,

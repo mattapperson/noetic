@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import type { ContextMemory } from '@noetic-tools/memory';
+import type { ContextData } from '@noetic-tools/context';
 import type { LLMResponse, Step, StreamEvent } from '@noetic-tools/types';
 import {
   frameworkCast,
@@ -21,7 +21,7 @@ import { createScriptedCallModel, makeMessage, textOnlyResponse } from '../_help
 
 //#region Helpers
 
-const echoStep: Step<ContextMemory, string, string> = {
+const echoStep: Step<ContextData, string, string> = {
   kind: 'llm',
   id: 'echo',
   model: 'test/echo',
@@ -942,7 +942,7 @@ describe('AgentHarness — item schema extensions', () => {
           CustomMemoryItemSchema,
         ],
       },
-      memory: [
+      context: [
         {
           id: 'custom-memory',
           slot: 100,
@@ -1211,7 +1211,7 @@ describe('AgentHarness — item schema extensions', () => {
 
 describe('AgentHarness — emit option', () => {
   it('emit: false suppresses framework events inside callModel', async () => {
-    const silentStep: Step<ContextMemory, string, string> = {
+    const silentStep: Step<ContextData, string, string> = {
       kind: 'llm',
       id: 'silent',
       model: 'test/echo',

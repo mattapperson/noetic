@@ -1,6 +1,6 @@
 {
   "name": "@noetic-tools/types",
-  "version": "2.1.1",
+  "version": "2.3.0",
   "type": "module",
   "description": "Foundational type contracts and primitives shared across the Noetic framework (items, LLM config, adapters, steering, errors).",
   "license": "Apache-2.0",
@@ -28,9 +28,9 @@
       "default": "./dist/index.js"
     },
     "./contract": {
-      "bun": "./src/types/memory.ts",
-      "types": "./dist/types/memory.d.ts",
-      "default": "./dist/types/memory.js"
+      "bun": "./src/types/context-layer.ts",
+      "types": "./dist/types/context-layer.d.ts",
+      "default": "./dist/types/context-layer.js"
     },
     "./package.json": "./package.json"
   },

@@ -1,8 +1,8 @@
 {
   "name": "@noetic-tools/memory",
-  "version": "2.0.0",
+  "version": "3.1.0",
   "type": "module",
-  "description": "Memory layer system for Noetic agents: the MemoryLayer contract, lifecycle, budget/projection machinery, and built-in layer implementations.",
+  "description": "DEPRECATED — renamed to @noetic-tools/context. Thin re-export kept for compatibility.",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -16,9 +16,10 @@
   "keywords": [
     "noetic",
     "agents",
-    "memory",
+    "context",
     "llm",
-    "context"
+    "memory",
+    "deprecated"
   ],
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -45,8 +46,7 @@
     "zod": "^4.0.0"
   },
   "dependencies": {
-    "@noetic-tools/types": "workspace:*",
-    "zod": "^4.0.0"
+    "@noetic-tools/context": "workspace:*"
   },
   "scripts": {
     "build": "bunx tsc -p tsconfig.build.json && bun scripts/add-js-extensions.ts",

@@ -149,10 +149,10 @@ export interface FunctionCallOutputItem {
   readonly output: string;
 }
 
-/** @public Item produced by an extension schema registered by a tool, memory layer, or harness. */
+/** @public Item produced by an extension schema registered by a tool, context layer, or harness. */
 export type ExtensionItem = ItemBase & Record<string, unknown>;
 
-/** @public Developer-role message item refined by a memory-layer extension schema. */
+/** @public Developer-role message item refined by a context-layer extension schema. */
 export type DeveloperMessageExtensionItem = InputMessageItem & {
   readonly role: 'developer';
 } & Record<string, unknown>;
@@ -167,7 +167,7 @@ export type ToolResultExtensionItem = FunctionCallOutputItem & Record<string, un
 export interface ItemSchemaExtensions {
   /** Harness-wide schemas. Any item matching one of these schemas is accepted. */
   readonly items?: ReadonlyArray<ZodTypeAny>;
-  /** Schemas for memory-layer developer message items. */
+  /** Schemas for context-layer developer message items. */
   readonly developerMessages?: ReadonlyArray<ZodTypeAny>;
   /** Schemas for tool call items emitted by the model or a harness adapter. */
   readonly toolCalls?: ReadonlyArray<ZodTypeAny>;

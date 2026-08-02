@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import type { ContextMemory } from '@noetic-tools/memory';
+import type { ContextData } from '@noetic-tools/context';
 import type { Step } from '@noetic-tools/types';
 import { isNoeticError } from '@noetic-tools/types';
 import { z } from 'zod';
@@ -13,7 +13,7 @@ const approvals = channel('approvals', {
   external: true,
 });
 
-function sendingStep(values: string[]): Step<ContextMemory, string, string> {
+function sendingStep(values: string[]): Step<ContextData, string, string> {
   return {
     kind: 'run',
     id: 'sender',
@@ -86,7 +86,7 @@ describe('AgentHarness.getChannelStream', () => {
     const inner = sendingStep([
       'inner',
     ]);
-    const outer: Step<ContextMemory, string, string> = {
+    const outer: Step<ContextData, string, string> = {
       kind: 'run',
       id: 'outer',
       execute: async (input: string, innerCtx) => {
@@ -124,7 +124,7 @@ describe('AgentHarness.getChannelStream', () => {
     await harness.run(sendingStep([]), 'first', ctx);
     expect(handle.closed).toBe(true);
 
-    const observer: Step<ContextMemory, string, string> = {
+    const observer: Step<ContextData, string, string> = {
       kind: 'run',
       id: 'observer',
       execute: async (input: string) => {

@@ -73,10 +73,10 @@ The two entry points differ only in cleanup:
 | | `ctx.abort(reason)` | `runtime.cancel(ctx, reason)` |
 |---|---|---|
 | Aborts the context and its descendants | yes | yes |
-| Runs memory-layer teardown (`onComplete` + `dispose`) | no | yes |
+| Runs context-layer teardown (`onComplete` + `dispose`) | no | yes |
 | Return type | `void` (synchronous) | `Promise<void>` (awaits teardown) |
 
-Hosts that own the memory lifecycle themselves can use `ctx.abort()`; anything
+Hosts that own the context lifecycle themselves can use `ctx.abort()`; anything
 else should call `runtime.cancel()`.
 
 #### Propagation Semantics
@@ -98,7 +98,7 @@ Cancellation covers the whole execution tree rooted at the cancelled context:
    loop mid-flight rather than waiting for a long generation to finish. Tokens
    and cost already spent are charged to the context; the truncated response is
    not returned as the step's output — the step throws `cancelled`.
-6. **Memory layer cleanup.** `onComplete` runs with `outcome: 'aborted'`, then `dispose` runs. Both always execute, even under cancellation. If a memory layer hook is in-progress when cancellation arrives, the hook is allowed to complete (up to its timeout) before `onComplete`/`dispose` run. Cleanup runs bottom-up: a child context's teardown completes before its parent's.
+6. **Context layer cleanup.** `onComplete` runs with `outcome: 'aborted'`, then `dispose` runs. Both always execute, even under cancellation. If a context layer hook is in-progress when cancellation arrives, the hook is allowed to complete (up to its timeout) before `onComplete`/`dispose` run. Cleanup runs bottom-up: a child context's teardown completes before its parent's.
 7. **In-progress `store()` calls.** Concurrent `store()` calls are allowed to settle (they use `Promise.allSettled`). The runtime does not abort them — they may write partial results, which is acceptable because `store` is idempotent by convention.
 
 Cancellation is cooperative beyond those points: step code that ignores
@@ -117,7 +117,7 @@ first `abort()` owns `ctx.abortReason` — a later abort does not overwrite it.
 `NoeticConfigError` is a separate class from `NoeticError`. The two are never interchangeable:
 
 - **`NoeticError`** — thrown during execution (LLM failures, fork failures, spawn errors, budget exceeded, cancellation). Always has a `kind` discriminant. Caught by callers of `execute()`.
-- **`NoeticConfigError`** — thrown during construction and setup (invalid step config, missing env vars, invalid memory layer config, runtime misconfiguration). Always has `code`, `hint`, and optional `docsUrl`. Caught before execution begins.
+- **`NoeticConfigError`** — thrown during construction and setup (invalid step config, missing env vars, invalid context layer config, runtime misconfiguration). Always has `code`, `hint`, and optional `docsUrl`. Caught before execution begins.
 
 ```typescript
 class NoeticConfigError extends Error {
@@ -136,7 +136,7 @@ function isNoeticConfigError(e: unknown): e is NoeticConfigError;
 3. `docsUrl` SHOULD be provided for any error a new user is likely to hit during setup.
 4. Error messages MUST NOT expose internal stack details, file paths, or implementation class names.
 5. Every `code` value MUST appear in `docs/errors.mdx` with an explanation and resolution steps.
-6. Construction-time functions (builders, factories, memory layer factories) that can throw `NoeticConfigError` MUST document the applicable `code` values in a `@throws` TSDoc tag.
+6. Construction-time functions (builders, factories, context layer factories) that can throw `NoeticConfigError` MUST document the applicable `code` values in a `@throws` TSDoc tag.
 
 ### Example
 

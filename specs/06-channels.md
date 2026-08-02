@@ -151,7 +151,7 @@ const handle = harness.getChannelHandle(userMessages, executionId);
 
 ### Scope Rule
 
-External channels survive `contextIn: 'fresh'` spawn boundaries. They are scoped to the **root execution**, not individual spawn boundaries. This is analogous to `scope: 'resource'` memory layers — they represent user-level communication, not execution-level state.
+External channels survive `contextIn: 'fresh'` spawn boundaries. They are scoped to the **root execution**, not individual spawn boundaries. This is analogous to `scope: 'resource'` context layers — they represent user-level communication, not execution-level state.
 
 ### Lifecycle
 
