@@ -49,6 +49,7 @@ declare interface HarnessApi<TParams extends Record<string, unknown> = Record<st
   recv<T>(channel: Channel<T>, ctx: Context, opts?: { timeout?: number }): Promise<T>;
   tryRecv<T>(channel: Channel<T>, ctx: Context): T | null;
   getChannelHandle<T>(channel: ExternalChannel<T>, executionId: string): ChannelHandle<T>;
+  getChannelStream<T>(channel: ExternalChannel<T>, executionId: string): AsyncIterable<T>;
 
   initLayers(layers: MemoryLayer[], ctx: Context, storage: StorageAdapter): Promise<void>;
   recallLayers(layers: MemoryLayer[], input: string, ctx: Context): Promise<RecallLayerOutput[]>;
@@ -137,6 +138,7 @@ declare interface RerenderRequest {
 | `recv(channel, ctx, opts?)` | Receive from a channel (blocking). Rejects with kind `'cancelled'` when the context is aborted while waiting. |
 | `tryRecv(channel, ctx)` | Non-blocking receive. |
 | `getChannelHandle(channel, executionId)` | Get external channel handle. |
+| `getChannelStream(channel, executionId)` | Subscribe to an external channel from outside the execution; ends when the root execution completes. |
 | `initLayers(layers, ctx, storage)` | Initialize memory layers. |
 | `recallLayers(layers, input, ctx)` | Run recall on all layers. |
 | `recallLayersAtomic(layers, input, ctx, budgets)` | Run recall on the atomic-mode layers only, blocking until each completes within its budget. |

@@ -54,9 +54,14 @@ handle.send({
   priority: 1,
 });
 
-// Check if the channel is still open
-if (!handle.closed) {
+// The channel closes when the target execution completes — a send after
+// that throws `channel_closed`. `handle.closed` is a point-in-time read
+// (the execution can finish between the check and the send), so guard the
+// send itself:
+try {
   handle.send(anotherMessage);
+} catch (e) {
+  // channel_closed: the run ended; drop or reroute the message.
 }
 ```
 
@@ -96,8 +101,14 @@ const orchestrator = step.run({
 // Worker process gets a handle to the orchestrator's channel
 const handle = runtime.getChannelHandle(resultChannel, orchestratorExecutionId);
 
-// After completing work, send result back
-handle.send({ result: 'Processed batch 1' });
+// After completing work, send result back. If the orchestrator's recv timed
+// out and its run already ended, the channel is closed — treat that as
+// "nobody is waiting anymore", not as a crash.
+try {
+  handle.send({ result: 'Processed batch 1' });
+} catch (e) {
+  // channel_closed — the orchestrator moved on.
+}
 ```
 
 ## ExternalChannel vs Channel

@@ -495,6 +495,9 @@ export function makeMockHarness(): AgentHarnessContract {
     getChannelHandle: () => {
       throw new Error('not impl');
     },
+    getChannelStream: () => {
+      throw new Error('not impl');
+    },
     initLayers: async () => {},
     recallLayers: async () => [],
     // Default to delegating atomic recall to recallLayers so tests that mock

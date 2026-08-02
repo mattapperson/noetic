@@ -220,6 +220,38 @@ const handle = harness.getChannelHandle(approval, ctx.id);
 handle.send('approve'); // Unblocks the step
 ```
 
+### Reading from Outside (`getChannelStream`)
+
+The read-side counterpart to `getChannelHandle`: subscribe to values the agent sends on an external channel as an `AsyncIterable`. The full approval loop — agent asks, integration posts a card, click flows back in:
+
+```ts validate=none
+const requests = channel('approval-requests', {
+  schema: z.object({ requestId: z.string(), plan: z.string() }),
+  mode: 'queue',
+  external: true,
+});
+
+// Integration side: observe requests, post them to your UI or chat platform.
+// `executionId` is the root context id from `harness.createContext()`;
+// subscribe BEFORE calling `run()` so no early send is missed.
+for await (const request of harness.getChannelStream(requests, executionId)) {
+  await postApprovalCard(request);
+}
+// The loop ends when that execution completes (buffered values drain first).
+```
+
+**Delivery is channel-scoped, not execution-scoped**: every subscriber to a channel name sees that channel's traffic regardless of which execution sent it — `executionId` only bounds the subscription's lifetime. An id that no execution ever runs under never closes, giving a harness-lifetime stream you end yourself with `break` — the right shape for observers that span a session harness's turns.
+
+Delivery depends on the channel mode:
+
+| Mode | External subscriber behavior |
+|---|---|
+| `queue` | Competing consumer — waits in the same FIFO as internal `recv`; consuming frees parked senders. Subscribe once per harness, on channels only the agent writes. |
+| `topic` | Non-lossy tap — each subscriber buffers up to 1000 values between `next()` calls (no replay of pre-subscribe sends). |
+| `value` | Current value, then conflated updates — a slow consumer sees only the newest. Non-consuming. |
+
+The iterable ends normally (never throws) when the root execution finishes — success, failure, or cancellation. Queue values present at close drain first; values sent afterwards stay in the channel for its next consumer. External waiters never hit `channel_timeout`; a `break` from `for await` unsubscribes. The returned iterable owns a single iterator — subscribe again for a second consumer.
+
 ## Schema Validation
 
 Every value sent through a channel is validated against its Zod schema at runtime. This catches type mismatches, malformed data, and contract violations early:

@@ -235,6 +235,8 @@ export interface ContextHarness {
   ): Promise<T>;
   tryRecv<T>(channel: Channel<T>, ctx: Context): T | null;
   getChannelHandle<T>(channel: ExternalChannel<T>, executionId: string): ChannelHandle<T>;
+  /** Read-side counterpart to `getChannelHandle` — see `AgentHarnessContract.getChannelStream`. */
+  getChannelStream<T>(channel: ExternalChannel<T>, executionId: string): AsyncIterable<T>;
   initLayers(layers: MemoryLayer[], ctx: Context, storage: StorageAdapter): Promise<void>;
   disposeLayers(layers: MemoryLayer[], ctx: Context): Promise<void>;
   checkpoint(ctx: Context): Promise<void>;

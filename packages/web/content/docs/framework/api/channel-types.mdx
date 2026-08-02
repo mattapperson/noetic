@@ -67,6 +67,24 @@ interface ChannelHandle<T> {
 | `closed` | `boolean` | Whether the handle is closed (execution completed) |
 | `channel` | `Channel<T>` | Reference to the underlying channel |
 
+## getChannelStream
+
+The read-side counterpart to `getChannelHandle`: subscribe from outside the execution to values the agent sends on an external channel.
+
+```ts validate=none
+harness.getChannelStream<T>(channel: ExternalChannel<T>, executionId: string): AsyncIterable<T>
+```
+
+Delivery is channel-scoped (state is keyed by channel name per harness); `executionId` bounds only the subscription's lifetime. An id no execution runs under never closes — a harness-lifetime stream ended with `iterator.return()`.
+
+| Mode | External subscriber behavior |
+|---|---|
+| `queue` | Competing consumer — FIFO-fair with internal `recv` waiters; consuming frees parked senders. Subscribe once per harness |
+| `topic` | Non-lossy tap — per-subscriber buffer (1000, drop-oldest), no pre-subscribe replay |
+| `value` | Current value, then conflated updates; non-consuming |
+
+The iterable ends normally when the root execution completes (queue values present at close drain first; later sends stay in the channel) — it never rejects with `channel_timeout` or `cancelled`. A re-run or restored root context reopens its id. `iterator.return()` unsubscribes; the iterable owns a single iterator, so subscribe again for a second consumer.
+
 ## Context Channel Methods
 
 The `Context` object provides three methods for channel interaction:

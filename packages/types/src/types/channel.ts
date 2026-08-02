@@ -16,11 +16,13 @@ export interface Channel<T> {
 }
 
 /**
- * A channel that is writable from outside the execution tree (e.g. user input).
+ * A channel reachable from outside the execution tree: writable via
+ * `getChannelHandle` (e.g. user input) and readable via `getChannelStream`
+ * (e.g. approval requests posted to a chat platform).
  * @public
  */
 export interface ExternalChannel<T> extends Channel<T> {
-  /** Marker indicating the channel accepts writes from external callers. */
+  /** Marker indicating the channel accepts external readers and writers. */
   readonly external: true;
 }
 

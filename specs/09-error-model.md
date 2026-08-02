@@ -61,7 +61,7 @@ Thrown by `ItemSchemaRegistry` when an item fails extension-schema validation at
 
 ### Channel Closed
 
-Thrown when `ChannelHandle.send()` is called after the execution has completed. The execution's external channels are closed when the root execution finishes (success, failure, or cancellation). External callers can check `handle.closed` before sending to avoid this error.
+Thrown when `ChannelHandle.send()` is called after the execution has completed. The execution's external channels are closed when the root execution finishes (success, failure, or cancellation). External callers can check `handle.closed` before sending to avoid this error. Closure is an error only for `send` — an external channel stream (`getChannelStream`) reports it as normal end-of-iteration after draining buffered values.
 
 ### Cancellation
 

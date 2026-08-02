@@ -215,6 +215,7 @@ When the harness is built with `memory` + `storage`, `run()` runs the layers' `i
 | `recv(channel, ctx, opts?)` | Wait for a value from a channel. Supports `timeout`. |
 | `tryRecv(channel, ctx)` | Non-blocking read. Returns `null` if nothing is available. |
 | `getChannelHandle(channel, executionId)` | Get a [`ChannelHandle`](/docs/framework/operators/channels#channelhandle) for an external channel, enabling outside processes to push values in. |
+| `getChannelStream(channel, executionId)` | Subscribe to an external channel from outside the execution as an [`AsyncIterable`](/docs/framework/operators/channels#reading-from-outside-getchannelstream); ends when the root execution completes. |
 
 ## Memory Methods
 

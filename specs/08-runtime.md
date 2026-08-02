@@ -331,6 +331,7 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
 
   // External channel handles
   getChannelHandle<T>(channel: ExternalChannel<T>, executionId: string): ChannelHandle<T>;
+  getChannelStream<T>(channel: ExternalChannel<T>, executionId: string): AsyncIterable<T>;
 
   // Memory layer lifecycle (see 11-memory-layer-system for hook semantics)
   initLayers(layers: MemoryLayer[], ctx: Context, storage: StorageAdapter): Promise<void>;
@@ -567,6 +568,7 @@ type DeliveryMode = 'next-turn' | 'between-rounds' | 'interrupt';
 
 - **`send`/`recv`/`tryRecv` on the agent harness** means the agent harness controls channel storage. `AgentHarness` uses a `Map`. `DurableAgentHarness` uses a message broker. The `Context` methods are thin wrappers: `ctx.send(ch, v)` calls `harness.send(ch, v, ctx)`. `ctx.tryRecv(ch)` calls `harness.tryRecv(ch, ctx)`.
 - **`getChannelHandle`** returns a `ChannelHandle<T>` for external code to write into a running execution. The handle is typed, lifecycle-aware, and scoped to the root execution. External handles route to the correct execution via `executionId`. `AgentHarness` uses in-process handles; `DurableAgentHarness` translates to durable signals (e.g., Temporal signals, Inngest events).
+- **`getChannelStream`** is the read-side counterpart: an `AsyncIterable<T>` over values the agent sends on an external channel. Delivery is channel-scoped; `executionId` bounds only the subscription's lifetime (it ends when that root execution completes, and a never-run id yields a harness-lifetime stream). Per-mode delivery and lifecycle semantics are specified in `06-channels` (External Subscriptions).
 - **Memory layer methods** manage the full lifecycle defined in `11-memory-layer-system`. `initLayers` runs `init()` sequentially. `recallLayers` runs `recall()` in slot order and returns `Item[]`. `storeLayers` runs `store()` concurrently via `Promise.allSettled` and receives `LLMResponse` (with items + usage). `disposeLayers` runs `dispose()` in reverse order. Error handling follows the per-hook policy.
 - **`previewRequestItems(scope?)`** returns the `Item[]` that would be sent to the model on the next turn for `scope.threadId` (or the default thread): the session's accumulated history with harness-level memory-layer recall outputs prepended via `assembleView`. Read-mostly: `recallLayers` writes layer-state snapshots to `layerStateStore` exactly as a real turn would, so successive previews remain consistent with what the next real turn produces. Does not allocate a session for unknown thread ids — returns an empty history in that case.
 - **`beforeToolCall(layers, toolName, toolArgs, ctx)`** runs each layer's `beforeToolCall` hook sequentially in slot order before a tool is executed. Returns a `SteeringDecision` — `Allow` proceeds normally, `Deny` short-circuits and blocks the tool call, `Guide` returns guidance text to the model. Short-circuits on the first `Deny`. When multiple layers return `Guide`, their guidance is concatenated.

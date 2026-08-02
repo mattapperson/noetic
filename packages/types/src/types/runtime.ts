@@ -286,6 +286,17 @@ export interface AgentHarnessContract<
   ): Promise<T>;
   tryRecv<T>(channel: Channel<T>, ctx: Context): T | null;
   getChannelHandle<T>(channel: ExternalChannel<T>, executionId: string): ChannelHandle<T>;
+  /**
+   * Read-side counterpart to `getChannelHandle`: subscribe to values the agent
+   * sends on an external channel. Delivery is CHANNEL-scoped (state is keyed
+   * by channel name per harness) — `executionId` bounds only the
+   * subscription's lifetime: the iterable ends when that root execution
+   * completes (success, failure, or cancellation), draining buffered values
+   * first. An id no execution runs under never closes, giving a
+   * harness-lifetime stream ended via `iterator.return()`. The returned
+   * iterable owns a single iterator; subscribe again for a second consumer.
+   */
+  getChannelStream<T>(channel: ExternalChannel<T>, executionId: string): AsyncIterable<T>;
   initLayers(layers: MemoryLayer[], ctx: Context, storage: StorageAdapter): Promise<void>;
   recallLayers(layers: MemoryLayer[], input: string, ctx: Context): Promise<RecallLayerOutput[]>;
   /** Recall only atomic layers (or all layers when the harness forces atomic recall). Blocks until complete. */

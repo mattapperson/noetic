@@ -62,11 +62,27 @@ interface ChannelState<T> {
    * still sees pending queue / value entries on the next iteration.
    */
   wakeSubscribers: Set<() => void>;
+  /**
+   * External readers (`getChannelStream`) on topic/value channels. Unlike
+   * `topicSubscribers` these are persistent and buffered — external consumers
+   * must not lose values between `next()` calls. Queue-mode readers compete
+   * through `queueWaiters` instead and never appear here.
+   */
+  externalSubscribers: Set<ExternalSubscriber<T>>;
 }
 
 export class ChannelStore {
   private channels = new Map<string, ChannelState<unknown>>();
   private closedExecutions = new Set<string>();
+  /**
+   * Ids a `ChannelHandle` was issued for. Handles have no dispose lifecycle,
+   * so these are the only ids whose closure must be durably recorded (for
+   * `handle.closed` / `channel_closed`). Streams are closed directly through
+   * `subscribersByExecution`, so stream-only ids never accumulate here — a
+   * session harness closing one root id per turn stays bounded.
+   */
+  private handleObserved = new Set<string>();
+  private subscribersByExecution = new Map<string, Set<ExternalSubscriber<unknown>>>();
 
   private getOrCreate<T>(channel: Channel<T>): ChannelState<T> {
     let state = frameworkCast<ChannelState<T> | undefined>(this.channels.get(channel.name));
@@ -81,6 +97,7 @@ export class ChannelStore {
         pendingSenders: [],
         topicSubscribers: new Set(),
         wakeSubscribers: new Set(),
+        externalSubscribers: new Set(),
       };
       this.channels.set(channel.name, frameworkCast<ChannelState<unknown>>(state));
     }
@@ -138,6 +155,9 @@ export class ChannelStore {
             waiter.resolve(value);
           }
         }
+        for (const sub of state.externalSubscribers) {
+          sub.push(value);
+        }
         break;
       case 'queue':
         if (state.queueWaiters.length > 0) {
@@ -152,6 +172,9 @@ export class ChannelStore {
       case 'topic':
         for (const sub of state.topicSubscribers) {
           sub(value);
+        }
+        for (const sub of state.externalSubscribers) {
+          sub.push(value);
         }
         break;
     }
@@ -282,10 +305,9 @@ export class ChannelStore {
         return this.waitWithTimeout(state.valueWaiters, channel.name, timeout, signal);
 
       case 'queue': {
-        if (state.queue.length > 0) {
-          const head = state.queue.shift()!;
-          this.promotePendingSender(state);
-          return head;
+        const head = this.dequeueHead(state);
+        if (head) {
+          return head.value;
         }
         // capacity-0 edge: senders can be parked while the queue is empty —
         // hand the oldest parked value straight to this receiver.
@@ -354,12 +376,10 @@ export class ChannelStore {
       case 'value':
         return state.hasValue ? state.currentValue! : null;
       case 'queue': {
-        if (state.queue.length > 0) {
-          const head = state.queue.shift()!;
-          this.promotePendingSender(state);
-          return head;
-        }
-        return null;
+        // Explicit head check (not `?? null`): a stored `undefined` must come
+        // back as `undefined`, distinguishable from the empty-queue sentinel.
+        const head = this.dequeueHead(state);
+        return head ? head.value : null;
       }
       case 'topic':
         return null;
@@ -465,7 +485,102 @@ export class ChannelStore {
     void this.send(channel, value);
   }
 
+  /**
+   * External-reader subscription (spec 06, External Subscriptions). Delivery
+   * by mode: `topic` is a persistent non-lossy tap (per-subscriber bounded
+   * buffer, no replay of pre-subscribe values), `queue` competes with internal
+   * `recv` waiters FIFO (external consumption frees parked senders), `value`
+   * yields the current value then conflated updates.
+   *
+   * Channel state is keyed by NAME — `executionId` bounds only the
+   * subscription's lifetime (it ends when `closeExecution(executionId)`
+   * runs; queued values present at close drain first), never which values
+   * are delivered. An id that is never closed yields an unbounded stream
+   * the caller ends with `iterator.return()`. External waiters never time
+   * out — they end via close instead. The returned iterable owns a single
+   * iterator (generator semantics): subscribe again for a second consumer.
+   */
+  subscribe<T>(channel: ExternalChannel<T>, executionId: string): AsyncIterable<T> {
+    if (this.closedExecutions.has(executionId)) {
+      return CLOSED_ITERABLE;
+    }
+    const state = this.getOrCreate(channel);
+    const subscriber: ExternalSubscriber<T> = new ExternalSubscriber<T>({
+      channelName: channel.name,
+      conflate: state.mode === 'value',
+      takeShared:
+        state.mode === 'queue'
+          ? () => {
+              const head = this.dequeueHead(state);
+              if (head) {
+                return head;
+              }
+              // capacity-0 edge: hand a parked sender's value straight over.
+              const sender = state.pendingSenders.shift();
+              if (!sender) {
+                return null;
+              }
+              sender.resolve();
+              return {
+                value: sender.value,
+              };
+            }
+          : undefined,
+      parkShared:
+        state.mode === 'queue'
+          ? (waiter) => {
+              state.queueWaiters.push(waiter);
+              return () => {
+                const idx = state.queueWaiters.indexOf(waiter);
+                if (idx >= 0) {
+                  state.queueWaiters.splice(idx, 1);
+                }
+              };
+            }
+          : undefined,
+      onFinish: () => {
+        state.externalSubscribers.delete(subscriber);
+        const byExecution = this.subscribersByExecution.get(executionId);
+        if (byExecution) {
+          byExecution.delete(erased);
+          if (byExecution.size === 0) {
+            this.subscribersByExecution.delete(executionId);
+          }
+        }
+      },
+    });
+    const erased = frameworkCast<ExternalSubscriber<unknown>>(subscriber);
+    if (state.mode !== 'queue') {
+      state.externalSubscribers.add(subscriber);
+    }
+    if (state.mode === 'value' && state.hasValue) {
+      subscriber.push(state.currentValue!);
+    }
+    let byExecution = this.subscribersByExecution.get(executionId);
+    if (!byExecution) {
+      byExecution = new Set();
+      this.subscribersByExecution.set(executionId, byExecution);
+    }
+    byExecution.add(erased);
+    return subscriber;
+  }
+
+  /** Shift the queue head and promote the oldest parked sender into the freed slot. */
+  private dequeueHead<T>(state: ChannelState<T>): {
+    value: T;
+  } | null {
+    if (state.queue.length === 0) {
+      return null;
+    }
+    const head = state.queue.shift()!;
+    this.promotePendingSender(state);
+    return {
+      value: head,
+    };
+  }
+
   getHandle<T>(channel: ExternalChannel<T>, executionId: string): ChannelHandle<T> {
+    this.handleObserved.add(executionId);
     const store = this;
     return {
       get closed() {
@@ -485,6 +600,220 @@ export class ChannelStore {
   }
 
   closeExecution(executionId: string): void {
-    this.closedExecutions.add(executionId);
+    // Closure is durably recorded only for ids with issued handles — see
+    // `handleObserved`. Consequence: a handle taken AFTER an execution
+    // completed reads `closed === false`, and a stream subscribed after a
+    // stream-only execution completed waits instead of ending; take handles
+    // and subscribe before running.
+    if (this.handleObserved.has(executionId)) {
+      this.closedExecutions.add(executionId);
+    }
+    const subscribers = this.subscribersByExecution.get(executionId);
+    if (!subscribers) {
+      return;
+    }
+    this.subscribersByExecution.delete(executionId);
+    for (const subscriber of subscribers) {
+      subscriber.close();
+    }
+  }
+
+  /**
+   * A root run is (re)starting on this execution id: clear any previous
+   * closure so checkpoint-restored and sequentially re-run root contexts get
+   * working channels again instead of a permanently poisoned id.
+   */
+  openExecution(executionId: string): void {
+    this.closedExecutions.delete(executionId);
+  }
+}
+
+const MAX_EXTERNAL_BUFFER = 1_000;
+
+const CLOSED_ITERABLE: AsyncIterable<never> & AsyncIterator<never> = {
+  [Symbol.asyncIterator]() {
+    return this;
+  },
+  next(): Promise<IteratorResult<never>> {
+    return Promise.resolve({
+      value: undefined,
+      done: true,
+    });
+  },
+};
+
+interface ExternalSubscriberOpts<T> {
+  channelName: string;
+  /** Value mode: keep only the newest undelivered value. */
+  conflate: boolean;
+  /** Queue mode: take an available item from the shared queue state. */
+  takeShared?: () => {
+    value: T;
+  } | null;
+  /** Queue mode: park a waiter in the shared FIFO; returns an un-park. */
+  parkShared?: (waiter: { resolve: (v: T) => void; reject: (e: Error) => void }) => () => void;
+  /** Unregister this subscriber from the store. */
+  onFinish: () => void;
+}
+
+/**
+ * The iterator behind `ChannelStore.subscribe`. Topic/value subscribers are
+ * push-fed via `push()`; queue subscribers pull from the shared queue state so
+ * they compete fairly with internal `recv` waiters. `close()` (execution
+ * completed) lets already-buffered values drain before ending; `return()`
+ * (consumer walked away) drops them.
+ */
+class ExternalSubscriber<T> implements AsyncIterableIterator<T> {
+  private buffer: T[] = [];
+  private waiters: Array<(result: IteratorResult<T>) => void> = [];
+  private parked: Array<{
+    unpark: () => void;
+    settleDone: () => void;
+  }> = [];
+  private done = false;
+  /** Consumer called return(): stop pulling from the shared queue. */
+  private detached = false;
+
+  constructor(private opts: ExternalSubscriberOpts<T>) {}
+
+  [Symbol.asyncIterator](): AsyncIterableIterator<T> {
+    return this;
+  }
+
+  /** Deliver a value to this subscriber (topic/value modes). */
+  push(value: T): void {
+    if (this.done) {
+      return;
+    }
+    const waiter = this.waiters.shift();
+    if (waiter) {
+      waiter({
+        value,
+        done: false,
+      });
+      return;
+    }
+    if (this.opts.conflate) {
+      this.buffer = [
+        value,
+      ];
+      return;
+    }
+    if (this.buffer.length >= MAX_EXTERNAL_BUFFER) {
+      console.warn(
+        `[noetic] Channel '${this.opts.channelName}': external subscriber buffer at capacity (${MAX_EXTERNAL_BUFFER}), dropping oldest value.`,
+      );
+      this.buffer.shift();
+    }
+    this.buffer.push(value);
+  }
+
+  next(): Promise<IteratorResult<T>> {
+    if (this.buffer.length > 0) {
+      return Promise.resolve({
+        value: this.buffer.shift()!,
+        done: false,
+      });
+    }
+    // Live shared-queue reads stop at close — close() snapshots the queue
+    // into this.buffer, so a closed iterator can never steal values sent to
+    // a later execution on the same channel name.
+    const taken = this.done ? null : this.opts.takeShared?.();
+    if (taken) {
+      return Promise.resolve({
+        value: taken.value,
+        done: false,
+      });
+    }
+    if (this.done) {
+      return Promise.resolve({
+        value: undefined,
+        done: true,
+      });
+    }
+    if (this.opts.parkShared) {
+      return this.parkInSharedQueue(this.opts.parkShared);
+    }
+    return new Promise((resolve) => {
+      this.waiters.push(resolve);
+    });
+  }
+
+  return(): Promise<IteratorResult<T>> {
+    this.detached = true;
+    this.buffer = [];
+    this.close();
+    return Promise.resolve({
+      value: undefined,
+      done: true,
+    });
+  }
+
+  /** End the iterator: settle every pending `next()` and unregister. Buffered values still drain. */
+  close(): void {
+    if (this.done) {
+      return;
+    }
+    // Snapshot the shared queue's current contents into the private buffer
+    // ("buffered values drain first") — after this the iterator never touches
+    // live channel state again. A detached iterator (return()) walked away
+    // and drains nothing.
+    if (!this.detached && this.opts.takeShared) {
+      for (let taken = this.opts.takeShared(); taken; taken = this.opts.takeShared()) {
+        this.buffer.push(taken.value);
+      }
+    }
+    this.done = true;
+    this.opts.onFinish();
+    for (const entry of this.parked.splice(0)) {
+      entry.unpark();
+      entry.settleDone();
+    }
+    for (const waiter of this.waiters.splice(0)) {
+      waiter({
+        value: undefined,
+        done: true,
+      });
+    }
+  }
+
+  /**
+   * Queue mode: wait in the channel's shared waiter FIFO. No timer attaches,
+   * so external waiters never reject with `channel_timeout` — `close()` ends
+   * them instead.
+   */
+  private parkInSharedQueue(
+    parkShared: NonNullable<ExternalSubscriberOpts<T>['parkShared']>,
+  ): Promise<IteratorResult<T>> {
+    return new Promise((resolve) => {
+      const entry = {
+        unpark: () => {},
+        settleDone: () =>
+          resolve({
+            value: undefined,
+            done: true,
+          }),
+      };
+      const removeParked = (): void => {
+        const idx = this.parked.indexOf(entry);
+        if (idx >= 0) {
+          this.parked.splice(idx, 1);
+        }
+      };
+      entry.unpark = parkShared({
+        resolve: (value: T) => {
+          removeParked();
+          resolve({
+            value,
+            done: false,
+          });
+        },
+        reject: () => {
+          removeParked();
+          entry.settleDone();
+        },
+      });
+      this.parked.push(entry);
+    });
   }
 }

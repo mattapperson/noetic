@@ -359,6 +359,8 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   readonly _memory?: MemoryLayer[];
   private readonly client?: OpenRouter;
   private readonly channelStore: ChannelStore;
+  /** Re-entrant `run()` depth per root context id — see `executeClosingChannels`. */
+  private readonly rootRunDepth = new Map<string, number>();
   private readonly callModelOverride?: (request: CallModelRequest) => Promise<LLMResponse>;
   private readonly defaultDeliveryMode: DeliveryMode;
   private readonly streamIdleTimeoutMs: number;
@@ -672,14 +674,50 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     // configuring `memory` + `storage` must "just work" without going through
     // `execute()`/`seedSessionHistory`. Idempotent — see `ensureLayersInit`.
     await this.ensureLayersInit(ctx);
-    return execute(s, input, ctx);
+    return this.executeClosingChannels(s, input, ctx);
   }
 
   /** Run all layer `init` hooks before the first step executes. Per spec 11,
    *  init MUST complete before any recall fires so layer state is populated. */
   private async initAndRun<I, O>(s: Step<ContextMemory, I, O>, input: I, ctx: Context): Promise<O> {
     await this.ensureLayersInit(ctx);
-    return execute(s, input, ctx);
+    return this.executeClosingChannels(s, input, ctx);
+  }
+
+  /**
+   * Run `execute`, closing the execution's external channels when the
+   * OUTERMOST run on a root context finishes (spec 06 Lifecycle: handles flip
+   * `closed`, channel streams end). Patterns re-enter `run()` with the same
+   * root context (`ctx.harness.run(step, input, ctx)`), so a depth count —
+   * not the return itself — marks root completion. Child-context runs never
+   * close anything.
+   */
+  private async executeClosingChannels<I, O>(
+    s: Step<ContextMemory, I, O>,
+    input: I,
+    ctx: Context,
+  ): Promise<O> {
+    if (ctx.parent !== null) {
+      return execute(s, input, ctx);
+    }
+    const depth = this.rootRunDepth.get(ctx.id) ?? 0;
+    if (depth === 0) {
+      // A restored or sequentially re-run root context reuses its id — clear
+      // any closure from a previous completion so its channels work again.
+      this.channelStore.openExecution(ctx.id);
+    }
+    this.rootRunDepth.set(ctx.id, depth + 1);
+    try {
+      return await execute(s, input, ctx);
+    } finally {
+      const remaining = (this.rootRunDepth.get(ctx.id) ?? 1) - 1;
+      if (remaining > 0) {
+        this.rootRunDepth.set(ctx.id, remaining);
+      } else {
+        this.rootRunDepth.delete(ctx.id);
+        this.channelStore.closeExecution(ctx.id);
+      }
+    }
   }
 
   /**
@@ -789,6 +827,10 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
 
   getChannelHandle<T>(channel: ExternalChannel<T>, executionId: string): ChannelHandle<T> {
     return this.channelStore.getHandle(channel, executionId);
+  }
+
+  getChannelStream<T>(channel: ExternalChannel<T>, executionId: string): AsyncIterable<T> {
+    return this.channelStore.subscribe(channel, executionId);
   }
 
   /** Resolves layer-provided tools and merges with step tools into ctx.unifiedTools. */
@@ -1055,6 +1097,11 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     ctx.abort(reason);
     for (const node of tree.reverse()) {
       await this.teardownCancelledContext(node);
+    }
+    // Cancellation completes the root execution (spec 06 Lifecycle): close
+    // its external channels so handles flip `closed` and streams end.
+    if (ctx.parent === null) {
+      this.channelStore.closeExecution(ctx.id);
     }
   }
 

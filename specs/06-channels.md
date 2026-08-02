@@ -1,7 +1,7 @@
 # Channels: Typed Data Flow
 
 > **Depends On:** `07-context-and-event-log` (Context — for `ctx.send`/`ctx.recv`/`ctx.tryRecv`)
-> **Exports:** `channel()`, `Channel<T>`, `ExternalChannel<T>`, `ChannelHandle<T>`, `tryRecv` semantics
+> **Exports:** `channel()`, `Channel<T>`, `ExternalChannel<T>`, `ChannelHandle<T>`, `tryRecv` semantics, `getChannelStream` external subscriptions
 
 ---
 
@@ -159,6 +159,37 @@ External channels survive `contextIn: 'fresh'` spawn boundaries. They are scoped
 - **Closed**: When the root execution completes (success, failure, or cancellation), all external channel handles are closed.
 - **After close**: `handle.send()` throws `channel_closed` (see `09-error-model`). Callers can check `handle.closed` before sending.
 
+### External Subscriptions (`getChannelStream`)
+
+The read-side counterpart to `getChannelHandle`: code outside the execution tree subscribes to values the agent sends on an external channel.
+
+```typescript
+harness.getChannelStream(channel: ExternalChannel<T>, executionId: string): AsyncIterable<T>
+```
+
+**Delivery is channel-scoped, not execution-scoped.** Channel state is keyed by channel name within a harness; every subscriber to a name sees that channel's traffic regardless of which execution sent it. The `executionId` bounds only the subscription's *lifetime* — it ends when that root execution completes. Two consequences:
+
+- To receive values from exactly one execution, use a channel that only that execution writes.
+- An id that no execution ever runs under is never closed, so it names a **harness-lifetime scope**: subscribe with it for a stream that spans turns and end it yourself with `iterator.return()`. This is how long-lived observers (e.g. an approval-card poster) attach to a session harness, whose per-turn root ids each close at turn end.
+
+The canonical consumer is an approval gate: a tool sends an approval request on an external channel, one integration subscriber (per harness) posts a card to a chat platform, and the button click routes back in through `handle.send()` on a reply channel.
+
+Delivery by mode:
+
+| Mode | External subscriber behavior |
+|---|---|
+| `topic` | **Non-lossy tap.** Each subscriber has a private bounded buffer (1000, oldest dropped with a warning). Every send after subscribe is retained until consumed; no replay of pre-subscribe values. Subscribers are persistent and do not count as internal receivers. |
+| `queue` | **Competing consumer.** External `next()` waits in the same FIFO as internal `recv` waiters; consuming an item frees parked internal senders exactly as `recv` does. Multiple subscribers — or a step `recv`ing the same channel — split deliveries first-waiter-wins: subscribe ONCE per harness and point subscriptions at channels only the agent writes. |
+| `value` | **Current value, then updates, conflated.** The first `next()` yields the current value if one exists; a slow consumer sees only the newest update. Non-consuming. |
+
+Lifecycle:
+
+- The iterable ends (`done`, not an error) when the root execution identified by `executionId` completes — success, failure, or cancellation. Queue values present at close are snapshotted and drain first; after the snapshot the iterator never touches live channel state, so values sent later are never delivered to (or consumed by) a closed subscriber. External iterators carry no context, so the `cancelled` rejection rule (see `09-error-model`) does not apply to them.
+- External waiters never reject with `channel_timeout`; close is their only exit.
+- A root run (re)starting on an id — a sequential `run()` on the same context, or a checkpoint-restored execution — clears its previous closure: handles work again and the next completion closes again. Completion is durably recorded only for ids a handle was issued for; subscribe and take handles *before* running, since a stream-only id's completion is observable only by subscribers attached at the time.
+- `iterator.return()` (a `break` from `for await`) unregisters the subscriber and drops its buffer.
+- The returned iterable owns a single iterator (generator semantics): iterating it twice splits values. Subscribe again for a second consumer, subject to the queue-mode caveat above.
+
 ### External Sender Back-Pressure
 
 External senders are NOT back-pressured. If a queue channel's buffer is full when an external sender calls `handle.send()`:
@@ -287,4 +318,4 @@ Within a `fork` (see `03-control-flow`), the agent harness runs paths as concurr
 
 ### Topic Mode is Lossy
 
-Items are not buffered if no receiver is waiting. This is intentional — topic channels are for real-time coordination, not reliable delivery. Use `queue` mode for reliable delivery.
+Items are not buffered if no receiver is waiting. This is intentional — topic channels are for real-time coordination, not reliable delivery. Use `queue` mode for reliable delivery. Lossiness applies to *internal* receivers (`recv`); external subscriptions (`getChannelStream`) buffer per subscriber.
