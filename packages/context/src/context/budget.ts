@@ -18,11 +18,15 @@ export const DEFAULT_PROJECTION: ProjectionPolicy = {
 };
 
 /**
- * Share of the post-reserve budget offered to context layers each turn. Layer
- * recall competes with the conversation for the window, and the conversation
- * has to win by default: a layer set that can claim most of the budget starves
- * history and pushes the assembler into trimming turns. `historyPressure`
- * handles the history side.
+ * Share of the post-reserve budget offered to context layers as *discretionary*
+ * headroom each turn. Layer recall competes with the conversation for the
+ * window, and the conversation has to win by default: a layer set that can
+ * claim most of the budget starves history and pushes the assembler into
+ * trimming turns. `historyPressure` handles the history side.
+ *
+ * This share bounds the remainder pool only. Declared `min` values are a floor
+ * satisfied out of the full available window before this share applies — see
+ * `allocateBudgets`.
  */
 const LAYER_POOL_SHARE = 0.25;
 
@@ -87,20 +91,27 @@ interface AllocateBudgetsOpts {
 }
 
 /**
- * Split the layer pool across layers, deterministically:
+ * Split the layer budget across layers, deterministically:
  *
- * 1. Every layer is guaranteed its declared `min` (scaled down proportionally
- *    if the mins alone overcommit the pool).
+ * 1. **Minimums are satisfied first**, out of the *full* available window
+ *    (`totalBudget − responseReserve − systemPromptTokens`) — not out of the
+ *    discretionary pool. A layer that declares `{ min: 10_000, max: 12_000 }`
+ *    because 10k is what it takes to render a coherent block gets its 10k on a
+ *    32k model. Mins are scaled down proportionally only when the mins alone
+ *    overcommit the available window, and in that case nothing else is
+ *    distributed.
  * 2. The remainder is distributed proportionally to remaining headroom
  *    (`cap − min`), clamped to each cap. `'auto'`/omitted budgets use a fixed
  *    default cap — no infinite-headroom special cases, so the same layer set
  *    gets the same allocation on a 32k model and a 1M one.
  *
- * The layer pool is `LAYER_POOL_SHARE` of what remains after the response
- * reserve and system prompt. History does not get a per-turn budget line here:
- * it is append-only between explicit compactions, and what the assembler can
- * actually fit is decided in `assembleView` against the same policy (see
- * `historyPressure` for the compaction signal).
+ * Only that *discretionary remainder* is rationed by `LAYER_POOL_SHARE`: the
+ * remainder pool is `min(available × LAYER_POOL_SHARE, available − totalMin)`,
+ * so opportunistic recall cannot claim most of the window, while a declared
+ * floor is never silently cut to a fraction of itself. History does not get a
+ * per-turn budget line here: it is append-only between explicit compactions,
+ * and what the assembler can actually fit is decided in `assembleView` against
+ * the same policy (see `historyPressure` for the compaction signal).
  *
  * Input contract: `totalBudget` / `systemPromptTokens` / `responseReserve`
  * MUST NOT be NaN (throws `NoeticConfigError` code `INVALID_BUDGET_INPUT`).
@@ -130,12 +141,12 @@ export function allocateBudgets({
     };
   }
 
-  const pool = available * LAYER_POOL_SHARE;
-
-  // Phase 1: guarantee minimums (scaled down if they overcommit the pool).
+  // Phase 1: guarantee minimums out of the FULL available window — a declared
+  // floor is a floor, not a share of the discretionary pool. Scale down only
+  // when the mins alone overcommit what is actually available.
   const mins = layers.map((l) => extractMin(l.budget));
   const totalMin = mins.reduce((sum, m) => sum + m, 0);
-  const minScale = totalMin > pool ? pool / totalMin : 1;
+  const minScale = totalMin > available ? available / totalMin : 1;
   const allocations: BudgetAllocation[] = layers.map((l, i) => ({
     layerId: l.id,
     allocated: Math.floor(mins[i] * minScale),
@@ -146,8 +157,10 @@ export function allocateBudgets({
     };
   }
 
-  // Phase 2: distribute the remainder proportionally to headroom, clamped to caps.
-  const remainder = pool - totalMin;
+  // Phase 2: distribute the discretionary remainder proportionally to headroom,
+  // clamped to caps. Only this pool is rationed by LAYER_POOL_SHARE, and it can
+  // never exceed what the mins left behind.
+  const remainder = Math.min(available * LAYER_POOL_SHARE, available - totalMin);
   const headrooms = layers.map((layer, i) => Math.max(0, extractCap(layer.budget) - mins[i]));
   const finiteTotal = headrooms.reduce((sum, h) => (Number.isFinite(h) ? sum + h : sum), 0);
   const infiniteCount = headrooms.filter((h) => !Number.isFinite(h)).length;

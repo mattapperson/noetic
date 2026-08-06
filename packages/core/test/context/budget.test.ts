@@ -17,7 +17,9 @@ function makeLayer(id: string, budget?: BudgetConfig): ContextLayer {
   };
 }
 
-// The layer pool is 25% of (totalBudget - responseReserve - systemPromptTokens).
+// Declared mins are satisfied out of the full available window
+// (totalBudget - responseReserve - systemPromptTokens); only the discretionary
+// remainder on top of them is 25% of that window.
 // History no longer takes a per-turn budget line from the allocator: what the
 // assembler can fit is decided in assembleView, and compaction is how history
 // shrinks (see historyPressure).
@@ -165,7 +167,7 @@ describe('allocateBudgets', () => {
     expect(allocations[1].allocated).toBe(AUTO_CAP);
   });
 
-  it('scales minimums down proportionally when they overcommit the pool', () => {
+  it('mins that exceed the pool but fit the window are still satisfied in full', () => {
     const layers = [
       makeLayer('a', {
         min: 2_000,
@@ -182,11 +184,94 @@ describe('allocateBudgets', () => {
       systemPromptTokens: 0,
       responseReserve: 0,
     });
-    // pool = 2500, mins total 8000 → scale = 2500/8000
+    // mins total 8000 — over the 2500 pool, but well inside the 10000 window.
+    // The pool bounds the discretionary remainder only, never the floors.
+    expect(allocations[0].allocated).toBeGreaterThanOrEqual(2_000);
+    expect(allocations[1].allocated).toBeGreaterThanOrEqual(6_000);
+  });
+
+  it('scales minimums down proportionally only when they overcommit the window', () => {
+    const layers = [
+      makeLayer('a', {
+        min: 2_000,
+        max: 3_000,
+      }),
+      makeLayer('b', {
+        min: 6_000,
+        max: 8_000,
+      }),
+    ];
+    const { allocations } = allocateBudgets({
+      layers,
+      totalBudget: 4_000,
+      systemPromptTokens: 0,
+      responseReserve: 0,
+    });
+    // available = 4000, mins total 8000 → scale = 4000/8000, nothing else split.
     const sum = allocations.reduce((s, a) => s + a.allocated, 0);
-    expect(sum).toBeLessThanOrEqual(2_500);
-    // Proportionality preserved (b declared 3x a's min).
-    expect(allocations[1].allocated).toBeGreaterThan(allocations[0].allocated * 2.5);
+    expect(sum).toBeLessThanOrEqual(4_000);
+    expect(allocations[0].allocated).toBe(1_000);
+    expect(allocations[1].allocated).toBe(3_000);
+  });
+
+  it('a min larger than the pool survives a small window (32k/4k regression)', () => {
+    const layers = [
+      makeLayer('a', {
+        min: 10_000,
+        max: 12_000,
+      }),
+    ];
+    const { allocations } = allocateBudgets({
+      layers,
+      totalBudget: 32_000,
+      systemPromptTokens: 0,
+      responseReserve: 4_000,
+    });
+    // available = 28000; the 25% pool is 7000, below the declared 10000 min.
+    // The floor comes out of the window first, then the remainder tops it up to
+    // the cap — squeezing the min into the pool would silently render a
+    // truncated block.
+    expect(allocations[0].allocated).toBe(12_000);
+  });
+
+  it('two min-declaring layers both keep their floors on a small window', () => {
+    const layers = [
+      makeLayer('a', {
+        min: 3_000,
+        max: 4_000,
+      }),
+      makeLayer('b', {
+        min: 5_000,
+        max: 6_000,
+      }),
+    ];
+    const { allocations } = allocateBudgets({
+      layers,
+      totalBudget: 32_000,
+      systemPromptTokens: 0,
+      responseReserve: 4_000,
+    });
+    // mins total 8000 > the 7000 pool, but available is 28000.
+    expect(allocations[0].allocated).toBe(4_000);
+    expect(allocations[1].allocated).toBe(6_000);
+  });
+
+  it('the discretionary remainder never exceeds what the mins left behind', () => {
+    const layers = [
+      makeLayer('a', {
+        min: 9_000,
+        max: Number.POSITIVE_INFINITY,
+      }),
+    ];
+    const { allocations } = allocateBudgets({
+      layers,
+      totalBudget: 10_000,
+      systemPromptTokens: 0,
+      responseReserve: 0,
+    });
+    // available = 10000, min = 9000 → remainder is capped at 1000, not the
+    // 2500 pool share, so the total stays inside the window.
+    expect(allocations[0].allocated).toBe(10_000);
   });
 
   it('explicit Infinity caps split the remainder after finite caps', () => {

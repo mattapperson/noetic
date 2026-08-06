@@ -1055,9 +1055,10 @@ describe('Budget allocation: edge cases', () => {
       responseReserve: 1e3,
     });
 
-    // available = 8000, pool = 25% = 2000. The min (100) is guaranteed, then the
-    // sole layer's headroom absorbs the rest of the pool.
-    expect(result.allocations[0].allocated).toBe(2e3);
+    // available = 8000. The min (100) is guaranteed out of the full window, then
+    // the sole layer's headroom absorbs the whole discretionary pool
+    // (25% of 8000 = 2000) on top of that floor.
+    expect(result.allocations[0].allocated).toBe(2.1e3);
   });
 
   it('zero total budget yields zero for all', () => {
