@@ -1027,13 +1027,14 @@ describe('Budget allocation: edge cases', () => {
     const allocB = result.allocations.find((a) => a.layerId === 'b');
     const allocC = result.allocations.find((a) => a.layerId === 'c');
 
-    expect(allocA!.allocated).toBe(1.6e3);
-    expect(allocB!.allocated).toBe(1.6e3);
-    expect(allocC!.allocated).toBe(1.6e3);
-    expect(result.historyBudget).toBe(3.2e3);
+    // available = 8000, pool = 25% = 2000; three auto caps of 2000 each split
+    // the pool proportionally (666 each after flooring).
+    expect(allocA!.allocated).toBe(666);
+    expect(allocB!.allocated).toBe(666);
+    expect(allocC!.allocated).toBe(666);
   });
 
-  it('single layer with budget gets 60% of available', () => {
+  it('single layer with headroom absorbs the whole pool', () => {
     const layers: ContextLayer[] = [
       {
         id: 'only',
@@ -1054,7 +1055,9 @@ describe('Budget allocation: edge cases', () => {
       responseReserve: 1e3,
     });
 
-    expect(result.allocations[0].allocated).toBe(4840);
+    // available = 8000, pool = 25% = 2000. The min (100) is guaranteed, then the
+    // sole layer's headroom absorbs the rest of the pool.
+    expect(result.allocations[0].allocated).toBe(2e3);
   });
 
   it('zero total budget yields zero for all', () => {
@@ -1079,7 +1082,6 @@ describe('Budget allocation: edge cases', () => {
     });
 
     expect(result.allocations[0].allocated).toBe(0);
-    expect(result.historyBudget).toBe(0);
   });
 
   it('mixed finite and infinite layers do not over-allocate', () => {
@@ -1116,9 +1118,9 @@ describe('Budget allocation: edge cases', () => {
     expect(finiteAlloc!.allocated).toBeLessThanOrEqual(1e3);
     expect(infiniteAlloc!.allocated).toBeGreaterThan(0);
 
-    // Total allocated to layers should not exceed layerPool (4800)
+    // Total allocated to layers must not exceed the pool (25% of 8000 = 2000)
     const totalAllocated = result.allocations.reduce((sum, a) => sum + a.allocated, 0);
-    expect(totalAllocated).toBeLessThanOrEqual(4.8e3);
+    expect(totalAllocated).toBeLessThanOrEqual(2e3);
   });
 });
 
