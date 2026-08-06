@@ -645,3 +645,38 @@ reason = "a sub-harness adapter is a pure adapter on the SubHarness contract; it
 from = "packages/sub-harness-*/src/**"
 to = "packages/context/src/**"
 reason = "a sub-harness adapter depends only on @noetic-tools/sub-harness + @noetic-tools/types; it must not reach into the context package"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# @noetic-tools/agent-plugins — the Agent Plugins v1 client (agent-plugins.org).
+# It ships the agentPlugins() context layer and, like the sub-harness base and
+# openui, is a consumer package sitting above types and below every core layer.
+# It is the only package allowed to depend on the MCP SDK; core must never
+# import it, for exactly the reason core must never import a sub-harness
+# adapter — a vendor SDK (and here a subprocess launcher) must not enter core's
+# dependency graph. See specs/30-agent-plugins.md.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[layers]]
+name = "agent-plugins"
+paths = ["packages/agent-plugins/src/**"]
+order = 87
+
+[[boundaries]]
+from = "packages/core/src/**"
+to = "packages/agent-plugins/src/**"
+reason = "core must never import @noetic-tools/agent-plugins or pull the MCP SDK and its stdio subprocess launcher into its dependency graph; hosts compose the agentPlugins() layer in, the same way they compose a sub-harness adapter"
+
+[[boundaries]]
+from = "packages/agent-plugins/src/**"
+to = "packages/core/src/**"
+reason = "@noetic-tools/agent-plugins builds on the @noetic-tools/types ContextLayer contract; it must never import back into core (acyclic)"
+
+[[boundaries]]
+from = "packages/agent-plugins/src/**"
+to = "packages/context/src/**"
+reason = "@noetic-tools/agent-plugins depends only on @noetic-tools/types; keeping it off @noetic-tools/context means composing the layer never drags the other built-in layers in"
+
+[[boundaries]]
+from = "packages/context/src/**"
+to = "packages/agent-plugins/src/**"
+reason = "@noetic-tools/context is the foundational layer package; it must not reach up into a consumer package that carries the MCP SDK"

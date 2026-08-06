@@ -1,0 +1,204 @@
+---
+title: Agent Plugins
+description: A conformant Agent Plugins v1 client — discovers plugin packages from agent-plugins.org and exposes their Agent Skills and MCP servers to the model using progressive disclosure.
+---
+
+## Overview
+
+[Agent Plugins](https://agent-plugins.org) is an open, vendor-neutral standard for packaging reusable agent components. A plugin is a directory with a `plugin.json` manifest and two portable component types:
+
+- **Skills** — `skills/<name>/SKILL.md`, conforming to the [Agent Skills specification](https://agentskills.io/specification)
+- **MCP servers** — `mcp.json`, over stdio, Streamable HTTP, or the legacy HTTP+SSE transport
+
+`agentPlugins()` discovers those packages and puts them in front of the model, following the progressive disclosure model the Agent Skills spec prescribes: skill descriptions are always in context, skill instructions load on demand, and bundled files load one at a time.
+
+- **Default slot**: `250` (`Slot.PROCEDURAL`) — skills are procedural knowledge
+- **Default scope**: `thread` — the plugin set is fixed, but which skills are active is conversation state
+- **Budget**: `{ min: 200, max: 4000 }`
+- **[Placement](/docs/framework/context-layers#prompt-cache-anchoring)**: `'anchor'` — the skill index is identical every turn, so it belongs in the cache-stable prefix
+
+<Callout type="info">
+This layer ships in its own package, `@noetic-tools/agent-plugins`, not in `@noetic-tools/core`. It depends on the MCP SDK and spawns subprocesses, and neither belongs in core's dependency graph.
+</Callout>
+
+## Installation
+
+```bash
+bun add @noetic-tools/agent-plugins
+```
+
+## Usage
+
+```ts
+import { agentPlugins } from '@noetic-tools/agent-plugins';
+import { context } from '@noetic-tools/core';
+
+const config = context([
+  agentPlugins({
+    roots: ['/home/alex/.agents/plugins'],
+    dataDir: '/home/alex/.agents/plugins-data',
+  }),
+]);
+```
+
+Each immediate child of a `roots` directory that contains a `plugin.json` is loaded. Children without one are ignored, so a plugins directory can hold other things.
+
+## Configuration
+
+```ts
+import type { McpTransport } from '@noetic-tools/agent-plugins';
+import type { BudgetConfig, ContextScope } from '@noetic-tools/types';
+
+interface AgentPluginsConfig {
+  /** Directories to scan for plugin directories. */
+  roots: readonly string[];
+  /**
+   * Base directory for per-plugin PLUGIN_DATA. Each plugin gets
+   * `<dataDir>/<plugin-name>`, created before its first subprocess launches
+   * and preserved across plugin updates.
+   */
+  dataDir: string;
+  /** MCP transports to connect. Default: ['stdio', 'streamable-http']. */
+  transports?: readonly McpTransport[];
+  /** Connect MCP servers at all. Default: true. */
+  connectMcp?: boolean;
+  /** Ambient environment for the inherited allowlist. Default: process.env. */
+  baseEnv?: Record<string, string | undefined>;
+  slot?: number;
+  scope?: ContextScope;
+  budget?: BudgetConfig;
+}
+```
+
+## Progressive disclosure
+
+The layer implements the three tiers the Agent Skills spec describes.
+
+**Tier 1 — metadata.** Every skill's name and description appear in `recall` output on every turn, at roughly 100 tokens per skill. This is what lets the model know a skill exists:
+
+```xml
+<agent_plugins>
+<plugins>
+- reports v1.2.0 — Reporting helpers
+</plugins>
+<skills>
+Call loadSkill with a skill id to read its full instructions.
+- reports/summarize: Summarizes reports. Use when the user asks for a summary.
+- reports/chart: Charts data. Use when the user asks for a chart.
+</skills>
+<mcp_servers>
+Call callMcpTool to invoke a tool on a connected server.
+- reports/api: fetch_report, list_reports
+</mcp_servers>
+</agent_plugins>
+```
+
+**Tier 2 — instructions.** Calling `loadSkill` returns the `SKILL.md` body and pins it into context for the rest of the thread, inside an `<active_skills>` block.
+
+**Tier 3 — resources.** `readSkillResource` reads one bundled file at a time from `scripts/`, `references/`, or `assets/`.
+
+Because only activation changes the block, the layer implements `renderDelta`: a newly activated skill is published as a delta rather than rewriting the whole cached prefix.
+
+### Budget behavior
+
+Under pressure the layer sheds the **oldest** activated skill body first, then the next, and only trims the index as a last resort — the index is what makes the model aware a skill exists at all. A zero budget fails open rather than deleting the block.
+
+## Exposed functions
+
+These become LLM tools automatically, and are callable from code steps via `ctx.context['agent-plugins']`.
+
+| Function | Purpose |
+|---|---|
+| `loadSkill({ skill })` | Returns a skill's instructions and its bundled-resource list, and activates it |
+| `readSkillResource({ skill, path })` | Reads one bundled file, contained to the skill directory |
+| `callMcpTool({ server, tool, arguments })` | Invokes a tool on a connected MCP server |
+
+`loadSkill` accepts either the qualified `<plugin>/<skill>` id or a bare skill name. A bare name resolves when exactly one plugin provides it; when two do, the call reports the candidates instead of guessing.
+
+`callMcpTool` is only registered when `connectMcp` is enabled, so a skills-only host does not carry a dead tool.
+
+## Exposed data
+
+| Key | Contents |
+|---|---|
+| `plugins` | Every loaded plugin, with its manifest, root, and data directory |
+| `skills` | Every discovered skill, with frontmatter and body |
+| `mcpServers` | Resolved, launch-ready server configurations |
+| `mcpTools` | Tools exposed by connected servers |
+| `diagnostics` | Everything that was skipped or rejected, and why |
+| `activeSkills` | Qualified ids activated in this thread |
+
+## Diagnostics
+
+The spec requires that failures be isolated, not silent. A broken skill never stops its siblings loading; a server that will not start never stops the plugin's skills working. Every skip produces a diagnostic naming the specification section it enforces:
+
+```ts
+import { agentPlugins } from '@noetic-tools/agent-plugins';
+
+const layer = agentPlugins({
+  roots: ['/home/alex/.agents/plugins'],
+  dataDir: '/home/alex/.agents/plugins-data',
+});
+
+// after the harness has run init
+for (const d of layer.readDiagnostics()) {
+  console.warn(`[${d.code}] ${d.pluginName ?? d.pluginDir}: ${d.detail}`);
+}
+```
+
+Diagnostics are also emitted onto the execution trace as `agent-plugins.diagnostic` events, so they show up in observability without anyone having to remember to read them.
+
+| Code | Meaning |
+|---|---|
+| `plugin-rejected` | The plugin is unusable; none of its components load |
+| `unknown-manifest-field` | An unknown `plugin.json` field was reported and ignored |
+| `invalid-extensions` | `extensions` was not an object; the field was ignored |
+| `component-type-invalid` | A fixed location was present but the wrong kind |
+| `skill-skipped` | A skill does not conform to the Agent Skills spec |
+| `mcp-disabled` | `mcp.json` is unusable; MCP is off for this plugin only |
+| `mcp-server-invalid` | One server entry is invalid; siblings still load |
+| `mcp-transport-unsupported` | The host has not enabled that entry's transport |
+| `mcp-connect-failed` | The server was valid but would not start or connect |
+
+## Security
+
+The layer enforces the specification's containment rules, which matter because a plugin is third-party code on disk:
+
+- Every package path is resolved through `realpath` before use. A symlink may point outside the plugin directory, so a lexical check would let `skills/x` look contained while resolving to `/etc`. Paths that cannot be resolved are treated as escapes — the check fails closed.
+- `readSkillResource` is contained to the *skill* directory, which is stricter than the spec requires and stops one skill reading another's files.
+- MCP `command` values must be a single executable token, never a shell command string, so no user-authored string is ever parsed or escaped as shell syntax.
+- Plugin subprocesses receive a narrow environment allowlist, not the agent's environment. Ambient secrets — API keys and the like — are not passed through. `PLUGIN_ROOT` and `PLUGIN_DATA` are applied last, so a plugin cannot spoof them.
+- Configured `env` values and MCP headers are visible package data. The specification is explicit that they are not a secret mechanism; do not put credentials in either.
+
+## Client extensions
+
+Agent Plugins reserves reverse-domain namespaces for client-specific data. Noetic claims `tools.noetic`, and surfaces it verbatim:
+
+```ts
+import { agentPlugins } from '@noetic-tools/agent-plugins';
+
+const layer = agentPlugins({
+  roots: ['/home/alex/.agents/plugins'],
+  dataDir: '/home/alex/.agents/plugins-data',
+});
+
+const [plugin] = layer.readPlugins();
+plugin?.noeticExtension; // extensions['tools.noetic'] from plugin.json
+plugin?.noeticExtensionDir; // the tools.noetic/ directory, if present
+```
+
+Semantics are deliberately open — the data is passed through rather than interpreted, so nothing is locked in before a consumer exists. Namespaces belonging to other clients are ignored without being validated.
+
+## Skills-only hosts
+
+A client may support skills without supporting MCP and still conform. Set `connectMcp: false` to skip connecting servers entirely; they are still discovered and validated, and reported through `mcpServers`.
+
+```ts
+import { agentPlugins } from '@noetic-tools/agent-plugins';
+
+agentPlugins({
+  roots: ['/home/alex/.agents/plugins'],
+  dataDir: '/home/alex/.agents/plugins-data',
+  connectMcp: false,
+});
+```

@@ -20,10 +20,10 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 
 ```
 @noetic-tools/context  →  @noetic-tools/types  ←  @noetic-tools/sub-harness
-        ↑                        ↑                          ↑
-@noetic-tools/core  ←  @noetic-tools/eval        @noetic-tools/sub-harness-{claude-code,codex,opencode,pi}
-      ↑
-      ├── @noetic-tools/platform-node
+        ↑                     ↑     ↑                     ↑
+@noetic-tools/core  ←  @noetic-tools/eval  │   @noetic-tools/sub-harness-{claude-code,codex,opencode,pi}
+      ↑                                    │
+      ├── @noetic-tools/platform-node      └── @noetic-tools/agent-plugins
       └── @noetic/platform-browser
 ```
 
@@ -42,6 +42,8 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 - **`@noetic-tools/sub-harness`** — The base contract and helpers for coding-agent sub-harnesses (Claude Code, Codex, opencode, pi run as Noetic steps). Re-exports the `SubHarness` contract from `@noetic-tools/types` and adds `defineSubHarness`, the turn accumulator, item builders, the registry, the common-tool vocabulary, and shared error types. Depends only on `@noetic-tools/types`. See `27-sub-harness-steps`.
 
 - **`@noetic-tools/sub-harness-{claude-code,codex,opencode,pi}`** — Per-tool sub-harness adapters. Each implements the `SubHarness` contract via `defineSubHarness` (vendor SDK behind an injectable runner) and exports a factory (`claudeCode()`, `codex()`, …). Depends on `@noetic-tools/sub-harness` + `@noetic-tools/types` — never on `@noetic-tools/core`.
+
+- **`@noetic-tools/agent-plugins`** — An [Agent Plugins](https://agent-plugins.org) v1 client: discovers plugin packages (a closed `plugin.json` manifest plus the two portable component types, Agent Skills and MCP servers) and exposes them through the `agentPlugins()` context layer using the spec's progressive disclosure model. The only package permitted to depend on the MCP SDK. Depends on `@noetic-tools/types` — never on `@noetic-tools/core` or `@noetic-tools/context`. See `30-agent-plugins`.
 
 - **`@noetic-tools/openui`** — Generative UI via the OpenUI standard: the `openUi()` output codec (streaming OpenUI Lang parser), the `openUiSurface()` context layer (server-authoritative UI state), the typed `fragment()` builder for tool-authored UI, and the `./server` transport for OpenUI's client stack. Depends on `@noetic-tools/context` + `@noetic-tools/types` — never on `@noetic-tools/core` (core sees only the dialect-agnostic `OutputCodec` / `UiFragment` contracts in `types`). See `28-generative-ui`.
 
@@ -81,6 +83,7 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 | `22-cli-architecture` | `@noetic-tools/cli` layer hierarchy, subprocess adapter wiring | CLI internals |
 | `23-durable-execution` | `CheckpointSnapshot`, `reattach`/`listLive`, durable IPC, host-restart flow | Crash-recovery model |
 | `28-generative-ui` | `OutputCodec`, `ToolUiDeclaration`, `openUiSurface()` layer, OpenUI transport | Generative UI (OpenUI) |
+| `30-agent-plugins` | `plugin.json` / `mcp.json` validation, skill discovery, `agentPlugins()` layer | Agent Plugins v1 client |
 
 ## Dependency Graph
 

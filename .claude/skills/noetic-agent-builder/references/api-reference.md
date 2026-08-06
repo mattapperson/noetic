@@ -604,6 +604,46 @@ staticContent({ load: () => Promise<string>, tag?, id?, slot?, scope? })
 // outright rather than waiting for churn telemetry to reach the same verdict.
 ```
 
+### agentPlugins
+
+From `@noetic-tools/agent-plugins` (its own package -- it carries the MCP SDK and
+spawns subprocesses, so it must stay out of core's dependency graph). A
+conformant [Agent Plugins](https://agent-plugins.org) v1 client: discovers
+plugin directories and exposes their Agent Skills + MCP servers to the model.
+
+```typescript
+agentPlugins({
+  roots: readonly string[],       // dirs to scan; each child with a plugin.json is a plugin
+  dataDir: string,                // base for per-plugin PLUGIN_DATA (spec §9.1)
+  transports?: McpTransport[],    // default ['stdio', 'streamable-http']; add 'sse' to opt in
+  connectMcp?: boolean,           // false => skills-only client, callMcpTool not exposed
+  baseEnv?: Record<string, string | undefined>,
+  slot?, scope?, budget?,
+})
+// slot: Slot.PROCEDURAL (250) — skills are procedural knowledge
+// scope: 'thread' — activation is conversation state
+// placement: 'anchor' + renderDelta — the skill index is identical every turn,
+// so activating a skill publishes a delta instead of rewriting the cached prefix.
+```
+
+Progressive disclosure, as the Agent Skills spec prescribes:
+
+1. **tier 1** -- every skill's `name` + `description` in `recall`, every turn
+2. **tier 2** -- `loadSkill({ skill })` returns the `SKILL.md` body and pins it for the thread
+3. **tier 3** -- `readSkillResource({ skill, path })` reads one bundled file at a time
+
+Also exposes `callMcpTool({ server, tool, arguments })` when MCP is enabled.
+Data: `plugins`, `skills`, `mcpServers`, `mcpTools`, `diagnostics`, `activeSkills`.
+
+Under budget pressure it sheds the OLDEST activated body first and trims the
+index last -- the index is what makes the model aware a skill exists. Zero
+budget is fail-open.
+
+Failures are isolated per the spec: a non-conforming `SKILL.md` never stops its
+siblings, an unconnectable MCP server never stops the plugin's skills. Every
+skip is reported via `layer.readDiagnostics()` and as an
+`agent-plugins.diagnostic` trace event.
+
 ### historyWindow
 
 Caps the trailing items projected to the LLM each turn. Storage (`itemLog`, session JSON) is untouched — the cap is a read-side projection via the `projectHistory` hook. Defaults to `maxItems: 40`. Includes a minimum-exchange guarantee (always preserves at least one user + one assistant message), but that expansion is bounded to `maxItems × 4` so a tool-only burst can't grow the window unbounded. Re-attaches a head `system`/anchor message that fell outside the window, and strips orphan `function_call` / `function_call_output` at the slice boundary.

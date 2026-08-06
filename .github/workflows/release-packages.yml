@@ -18,6 +18,7 @@ on:
       - 'packages/memory/**'
       - 'packages/core/**'
       - 'packages/openui/**'
+      - 'packages/agent-plugins/**'
       - 'packages/sub-harness/**'
       - 'packages/sub-harness-claude-code/**'
       - 'packages/sub-harness-codex/**'
@@ -592,6 +593,65 @@ jobs:
           NPM_CONFIG_PROVENANCE: 'true'
         run: npx --yes -p semantic-release@24 -p semantic-release-monorepo@8 -p @semantic-release/changelog@6 -p @semantic-release/git@10 -p conventional-changelog-conventionalcommits@7 semantic-release --extends semantic-release-monorepo
 
+  # @noetic-tools/agent-plugins depends only on @noetic-tools/types, so it could
+  # release right after types. It is sequenced here instead because every job in
+  # this workflow pushes a `chore: release` commit to main, and running them in
+  # one chain is what keeps a sibling from being stranded behind a moved ref.
+  agent-plugins:
+    name: Release @noetic-tools/agent-plugins
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: openui
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Lint
+        run: bunx biome check packages/agent-plugins
+
+      - name: Typecheck
+        run: bun --cwd=packages/agent-plugins run typecheck
+
+      - name: Test
+        run: bun --cwd=packages/agent-plugins run test
+
+      # Only @noetic-tools/types is needed: the package builds on the
+      # ContextLayer contract and nothing else in the workspace.
+      - name: Build dependency (@noetic-tools/types)
+        run: bun --cwd=packages/types run build
+
+      - name: Build
+        run: bun --cwd=packages/agent-plugins run build
+
+      # See the types job. `workspace:*` deps are pinned to concrete versions at
+      # publish time by `prepublishOnly` (scripts/pin-workspace-deps.ts).
+      - name: Detach package from workspace for npm
+        run: node -e "const fs=require('fs');const p=require('./package.json');delete p.workspaces;fs.writeFileSync('./package.json',JSON.stringify(p,null,2)+'\n')"
+
+      - name: Release
+        working-directory: packages/agent-plugins
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: 'true'
+        run: npx --yes -p semantic-release@24 -p semantic-release-monorepo@8 -p @semantic-release/changelog@6 -p @semantic-release/git@10 -p conventional-changelog-conventionalcommits@7 semantic-release --extends semantic-release-monorepo
+
   # eval depends on core (which depends on context + types), so it releases last:
   # by then core's new version is on npm and pin-workspace-deps can point at it.
   # Nothing in the chain imports eval, so the reverse edge doesn't exist.
@@ -603,7 +663,7 @@ jobs:
     name: Release @noetic-tools/eval
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: openui
+    needs: agent-plugins
     permissions:
       contents: write
       issues: write

@@ -20,6 +20,7 @@
       "@noetic-tools/memory": ["../memory/src/index.ts"],
       "@noetic-tools/context/*": ["../context/src/*"],
       "@noetic-tools/memory/*": ["../memory/src/*"],
+      "@noetic-tools/agent-plugins": ["../agent-plugins/src/index.ts"],
       "@noetic-tools/openui": ["../openui/src/index.ts"],
       "@noetic-tools/openui/server": ["../openui/src/server/index.ts"],
       "@noetic-tools/openui/*": ["../openui/src/*"],

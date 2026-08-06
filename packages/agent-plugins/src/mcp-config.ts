@@ -1,0 +1,577 @@
+/**
+ * Agent Plugins §7.2 — the `mcp.json` configuration format — and §9.2, the
+ * placeholder expansion that turns it into launch-ready values.
+ *
+ * Two failure boundaries live here and must not be confused (§7.2.2):
+ *
+ *   - a problem with the *document* (bad JSON, wrong `$schema`, extra
+ *     top-level field, version mismatch with `plugin.json`) disables MCP for
+ *     the whole plugin, and the plugin's skills still load;
+ *   - a problem with one *server entry* skips that entry only, and its
+ *     siblings still load and connect.
+ *
+ * Resolution is deliberately separate from parsing: parsing is pure and
+ * synchronous, while resolution touches the filesystem to enforce §4.1
+ * containment on `command` and `cwd`.
+ */
+
+import { resolve } from 'node:path';
+import { z } from 'zod';
+import { SPEC_VERSION } from './manifest';
+import { containedPath, isPluginRelativePath, resolvePluginRelative } from './paths';
+
+//#region Constants
+
+/** @public Canonical `$schema` identifier for `mcp.json` at the supported spec version (§7.2.1). */
+export const MCP_SCHEMA_ID = `https://agent-plugins.org/schemas/${SPEC_VERSION}/mcp.schema.json`;
+
+/**
+ * The two placeholder tokens of §9.2. Composed from the variable names rather
+ * than written out literally, so nothing in this file contains a bare `${…}`
+ * that a reader — or a linter — could mistake for an interpolation.
+ */
+const PLUGIN_ROOT_VAR = `\${${'PLUGIN_ROOT'}}`;
+const PLUGIN_DATA_VAR = `\${${'PLUGIN_DATA'}}`;
+
+/** @public The three MCP transports §7.2.1 defines. */
+export const McpTransport = {
+  Stdio: 'stdio',
+  StreamableHttp: 'streamable-http',
+  Sse: 'sse',
+} as const;
+
+/** @public */
+export type McpTransport = (typeof McpTransport)[keyof typeof McpTransport];
+
+/**
+ * @public Transports this client connects by default.
+ *
+ * §7.2.1 requires at least one of `stdio` or `streamable-http` and makes `sse`
+ * OPTIONAL. All three are implemented; `sse` is off by default because it is
+ * the deprecated 2024-11-05 transport, and opting into a deprecated transport
+ * should be a deliberate act by the host.
+ */
+export const DEFAULT_TRANSPORTS: readonly McpTransport[] = [
+  McpTransport.Stdio,
+  McpTransport.StreamableHttp,
+];
+
+/** §9.1 — the two reserved variables the client supplies and a plugin must not set. */
+const RESERVED_ENV = new Set([
+  'PLUGIN_ROOT',
+  'PLUGIN_DATA',
+]);
+
+/**
+ * §9.2 — the only placeholders that expand, matched in one left-to-right pass.
+ * A single `String.replace` with this global regex is what makes expansion
+ * non-recursive: replacement text is never rescanned.
+ */
+const PLACEHOLDER_PATTERN = /\$\{PLUGIN_(?:ROOT|DATA)\}/g;
+
+/** RFC 7230 `token` — the legal character set for an HTTP field name. */
+const HEADER_NAME_PATTERN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+
+//#endregion
+
+//#region Document schema
+
+const StdioServerSchema = z.strictObject({
+  type: z.literal(McpTransport.Stdio),
+  command: z.string().min(1),
+  args: z.array(z.string()).optional(),
+  env: z.record(z.string(), z.string()).optional(),
+  cwd: z.string().optional(),
+});
+
+const StreamableHttpServerSchema = z.strictObject({
+  type: z.literal(McpTransport.StreamableHttp),
+  url: z.string().min(1),
+  headers: z.record(z.string(), z.string()).optional(),
+});
+
+const SseServerSchema = z.strictObject({
+  type: z.literal(McpTransport.Sse),
+  url: z.string().min(1),
+  headers: z.record(z.string(), z.string()).optional(),
+});
+
+/**
+ * @public The closed server union of §7.2.1.
+ *
+ * A discriminated union rather than `z.union`: it makes an unknown `type`
+ * report as an unknown discriminator instead of collapsing into three
+ * unrelated variant errors, and it keeps cross-variant fields (a `url` on a
+ * stdio entry) reporting as the unknown-key violations they are.
+ */
+export const McpServerSchema = z.discriminatedUnion('type', [
+  StdioServerSchema,
+  StreamableHttpServerSchema,
+  SseServerSchema,
+]);
+
+/** @public One entry of `mcpServers`, as written in the file. */
+export type McpServerConfig = z.infer<typeof McpServerSchema>;
+
+/** @public The `mcp.json` document (§7.2.1) — closed, with exactly two top-level fields. */
+export const McpDocumentSchema = z.strictObject({
+  $schema: z.string(),
+  mcpServers: z.record(z.string(), z.unknown()),
+});
+
+/** @public */
+export type McpDocument = z.infer<typeof McpDocumentSchema>;
+
+//#endregion
+
+//#region Document parsing
+
+/** @public Outcome of parsing an `mcp.json` document (not its individual entries). */
+export type McpDocumentResult =
+  | {
+      ok: true;
+      document: McpDocument;
+    }
+  | {
+      ok: false;
+      /** Why MCP is disabled for this plugin (§7.2.2 rule 2). */
+      detail: string;
+    };
+
+/**
+ * Extract the spec version from a canonical schema identifier, or `null` when
+ * the value is not an agent-plugins.org MCP schema URL at all.
+ */
+function schemaVersion(id: string): string | null {
+  const match = /^https:\/\/agent-plugins\.org\/schemas\/([^/]+)\/mcp\.schema\.json$/.exec(id);
+  return match?.[1] ?? null;
+}
+
+/**
+ * Validate an `mcp.json` document's top-level shape and `$schema` (§7.2.1,
+ * §10.1). Individual server entries are validated separately so one bad entry
+ * cannot disable the rest.
+ *
+ * @public
+ * @param raw - The parsed JSON value.
+ * @param pluginSpecVersion - The version declared by `plugin.json`; §10.1 requires a match.
+ */
+export function parseMcpDocument(raw: unknown, pluginSpecVersion: string): McpDocumentResult {
+  const parsed = McpDocumentSchema.safeParse(raw);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    return {
+      ok: false,
+      detail: `§7.2.1: invalid mcp.json document (${issue?.path.join('.') || '<root>'}: ${issue?.message ?? 'schema violation'})`,
+    };
+  }
+
+  const version = schemaVersion(parsed.data.$schema);
+  if (version === null) {
+    return {
+      ok: false,
+      detail: `§7.2.1: $schema must be a canonical Agent Plugins MCP schema identifier, got '${parsed.data.$schema}'`,
+    };
+  }
+  // §10.1: the MCP schema version must match the one plugin.json declares.
+  // Checked before local support so a mixed-version package reports the real
+  // cause rather than "unsupported version".
+  if (version !== pluginSpecVersion) {
+    return {
+      ok: false,
+      detail: `§10.1: mcp.json targets Agent Plugins ${version} but plugin.json targets ${pluginSpecVersion}`,
+    };
+  }
+  if (parsed.data.$schema !== MCP_SCHEMA_ID) {
+    return {
+      ok: false,
+      detail: `§7.2.1: unsupported Agent Plugins version '${version}'; this client implements ${SPEC_VERSION}`,
+    };
+  }
+
+  return {
+    ok: true,
+    document: parsed.data,
+  };
+}
+
+//#endregion
+
+//#region Entry validation
+
+/** @public Outcome of validating one `mcpServers` entry against the closed union. */
+export type McpEntryResult =
+  | {
+      ok: true;
+      config: McpServerConfig;
+    }
+  | {
+      ok: false;
+      detail: string;
+    };
+
+function invalidEntry(detail: string): McpEntryResult {
+  return {
+    ok: false,
+    detail,
+  };
+}
+
+/**
+ * §7.2.1: `command` is a single executable token, not a shell command string.
+ * It is either a bare executable name or a plugin-relative `./` path — a bare
+ * name containing a separator is neither, and a value carrying shell syntax or
+ * whitespace is a command string the client must not parse or escape.
+ */
+function validateCommand(command: string): string | null {
+  if (isPluginRelativePath(command)) {
+    return null;
+  }
+  if (/[\s'"`$&|;<>(){}[\]*?!\\]/.test(command)) {
+    return `§7.2.1: 'command' must be a single executable token, not a shell command string (got '${command}')`;
+  }
+  if (command.includes('/')) {
+    return `§7.2.1: 'command' must be a bare executable name or a './'-prefixed plugin-relative path (got '${command}')`;
+  }
+  return null;
+}
+
+/** §7.2.1: `cwd` accepts exactly three forms. */
+function validateCwdForm(cwd: string): string | null {
+  const legal =
+    isPluginRelativePath(cwd) ||
+    cwd === PLUGIN_ROOT_VAR ||
+    cwd.startsWith(`${PLUGIN_ROOT_VAR}/`) ||
+    cwd === PLUGIN_DATA_VAR ||
+    cwd.startsWith(`${PLUGIN_DATA_VAR}/`);
+  if (!legal) {
+    return `§7.2.1: 'cwd' must be './…', '${PLUGIN_ROOT_VAR}[/…]', or '${PLUGIN_DATA_VAR}[/…]' (got '${cwd}')`;
+  }
+  return null;
+}
+
+/** §9.2: the client supplies the reserved variables; a plugin must not set them. */
+function validateEnv(env: Record<string, string>): string | null {
+  for (const key of Object.keys(env)) {
+    if (RESERVED_ENV.has(key)) {
+      return `§9.2: 'env' must not contain the reserved variable '${key}'`;
+    }
+  }
+  return null;
+}
+
+/** §7.2.1: absolute http(s), no user information, no fragment, HTTPS off-loopback. */
+function validateUrl(raw: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return `§7.2.1: 'url' must be an absolute URL (got '${raw}')`;
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    return `§7.2.1: 'url' must use http or https (got '${url.protocol}')`;
+  }
+  if (url.username !== '' || url.password !== '') {
+    return "§7.2.1: 'url' must not contain user information";
+  }
+  if (url.hash !== '') {
+    return "§7.2.1: 'url' must not contain a fragment";
+  }
+  if (url.protocol === 'http:' && !isLoopback(url.hostname)) {
+    return `§7.2.1: plain HTTP is only permitted for loopback hosts (got '${url.hostname}')`;
+  }
+  return null;
+}
+
+/** §7.2.1 permits plain HTTP only for `localhost` or an IP literal in a loopback range. */
+function isLoopback(hostname: string): boolean {
+  if (hostname === 'localhost') {
+    return true;
+  }
+  // URL normalizes IPv6 literals to bracketed form.
+  if (hostname === '[::1]') {
+    return true;
+  }
+  return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname);
+}
+
+/**
+ * True when the string carries a character an HTTP field value may not.
+ *
+ * Field values admit visible ASCII plus SP and HTAB; C0 controls (other than
+ * HTAB) and DEL are forbidden — a bare CR or LF would let a header value
+ * inject a second header. Checked by code point rather than by regex so no
+ * control character has to be written literally into this source file.
+ */
+function hasControlCharacter(value: string): boolean {
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code === 0x09) {
+      continue; // HTAB is allowed.
+    }
+    if (code < 0x20 || code === 0x7f) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * §7.2.1: header names are case-insensitive, so the same name under two
+ * casings is an ambiguity the client cannot resolve — the entry is invalid.
+ */
+function validateHeaders(headers: Record<string, string>): string | null {
+  const seen = new Set<string>();
+  for (const [name, value] of Object.entries(headers)) {
+    if (!HEADER_NAME_PATTERN.test(name)) {
+      return `§7.2.1: '${name}' is not a valid HTTP header field name`;
+    }
+    if (hasControlCharacter(value)) {
+      return `§7.2.1: the value of header '${name}' contains a control character`;
+    }
+    const lower = name.toLowerCase();
+    if (seen.has(lower)) {
+      return `§7.2.1: header '${name}' is declared more than once under different casing`;
+    }
+    seen.add(lower);
+  }
+  return null;
+}
+
+/**
+ * Validate one `mcpServers` entry against the closed union and the semantic
+ * rules JSON Schema cannot express.
+ *
+ * @public
+ */
+export function validateMcpEntry(raw: unknown): McpEntryResult {
+  const parsed = McpServerSchema.safeParse(raw);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    const where = issue?.path.join('.');
+    return invalidEntry(
+      `§7.2.1: ${where ? `field '${where}': ` : ''}${issue?.message ?? 'does not match any server variant'}`,
+    );
+  }
+
+  const config = parsed.data;
+
+  if (config.type === McpTransport.Stdio) {
+    const commandError = validateCommand(config.command);
+    if (commandError !== null) {
+      return invalidEntry(commandError);
+    }
+    if (config.cwd !== undefined) {
+      const cwdError = validateCwdForm(config.cwd);
+      if (cwdError !== null) {
+        return invalidEntry(cwdError);
+      }
+    }
+    if (config.env !== undefined) {
+      const envError = validateEnv(config.env);
+      if (envError !== null) {
+        return invalidEntry(envError);
+      }
+    }
+    return {
+      ok: true,
+      config,
+    };
+  }
+
+  const urlError = validateUrl(config.url);
+  if (urlError !== null) {
+    return invalidEntry(urlError);
+  }
+  if (config.headers !== undefined) {
+    const headerError = validateHeaders(config.headers);
+    if (headerError !== null) {
+      return invalidEntry(headerError);
+    }
+  }
+  return {
+    ok: true,
+    config,
+  };
+}
+
+//#endregion
+
+//#region Placeholder expansion
+
+/** @public The two absolute paths §9.1 defines for a plugin. */
+export interface PluginVariables {
+  pluginRoot: string;
+  pluginData: string;
+}
+
+/**
+ * §9.2 — replace every exact occurrence of the two plugin placeholders in a
+ * single non-recursive pass. Unrecognized placeholder-like text stays literal.
+ *
+ * @public
+ */
+export function expandPlaceholders(value: string, vars: PluginVariables): string {
+  return value.replace(PLACEHOLDER_PATTERN, (match) =>
+    match === PLUGIN_ROOT_VAR ? vars.pluginRoot : vars.pluginData,
+  );
+}
+
+//#endregion
+
+//#region Resolution
+
+/** @public A stdio entry resolved to launch-ready values. */
+export interface ResolvedStdioServer {
+  key: string;
+  type: typeof McpTransport.Stdio;
+  /** Absolute path for a `./`-relative command, or the bare name to search for on PATH. */
+  command: string;
+  /** Expanded arguments (§9.2). */
+  args: string[];
+  /**
+   * The plugin's *configured* environment overlay, already expanded. The
+   * reserved `PLUGIN_ROOT` / `PLUGIN_DATA` entries are deliberately absent:
+   * §9.1 requires the client to apply them **after** this overlay, which
+   * happens at launch time.
+   */
+  env: Record<string, string>;
+  /** Absolute working directory. Defaults to the plugin root when `cwd` is omitted. */
+  cwd: string;
+}
+
+/** @public A remote entry resolved to launch-ready values. */
+export interface ResolvedHttpServer {
+  key: string;
+  type: typeof McpTransport.StreamableHttp | typeof McpTransport.Sse;
+  url: string;
+  headers: Record<string, string>;
+}
+
+/** @public One MCP server entry, validated and resolved. */
+export type ResolvedMcpServer = ResolvedStdioServer | ResolvedHttpServer;
+
+/** @public Outcome of resolving a validated entry against the filesystem. */
+export type McpResolveResult =
+  | {
+      ok: true;
+      server: ResolvedMcpServer;
+    }
+  | {
+      ok: false;
+      detail: string;
+    };
+
+function expandRecord(
+  record: Record<string, string>,
+  vars: PluginVariables,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(record)) {
+    // §9.2: expansion applies to values only, never to `env` keys.
+    out[key] = expandPlaceholders(value, vars);
+  }
+  return out;
+}
+
+type CwdResult =
+  | {
+      ok: true;
+      path: string;
+    }
+  | {
+      ok: false;
+      detail: string;
+    };
+
+/**
+ * Resolve `cwd` to an absolute, containment-checked directory (§7.2.1, §4.1).
+ * A `${PLUGIN_DATA}`-rooted value is contained against the data directory, not
+ * the plugin root — the one place a legal package path points outside the root.
+ */
+async function resolveCwd(cwd: string | undefined, vars: PluginVariables): Promise<CwdResult> {
+  if (cwd === undefined) {
+    // §7.2.1: omitted `cwd` means the plugin root.
+    return {
+      ok: true,
+      path: vars.pluginRoot,
+    };
+  }
+
+  const root = cwd.startsWith(PLUGIN_DATA_VAR) ? vars.pluginData : vars.pluginRoot;
+  const expanded = expandPlaceholders(cwd, vars);
+  const contained = await containedPath(root, resolve(root, expanded));
+  if (!contained.ok) {
+    return {
+      ok: false,
+      detail: `§7.2.1/§4.1: 'cwd' resolves outside its root (${contained.reason}: ${contained.attempted})`,
+    };
+  }
+  return {
+    ok: true,
+    path: contained.path,
+  };
+}
+
+/**
+ * Turn a validated entry into launch-ready values: expand §9.2 placeholders
+ * and enforce §4.1 containment on `command` and `cwd`.
+ *
+ * @public
+ */
+export async function resolveMcpServer(params: {
+  key: string;
+  config: McpServerConfig;
+  vars: PluginVariables;
+}): Promise<McpResolveResult> {
+  const { key, config, vars } = params;
+
+  if (config.type !== McpTransport.Stdio) {
+    return {
+      ok: true,
+      server: {
+        key,
+        type: config.type,
+        url: config.url,
+        // §7.2.1: no expansion in `url`, header names, or header values.
+        headers: config.headers ?? {},
+      },
+    };
+  }
+
+  // §9.2: `command` is never expanded. A `./` path resolves against the plugin
+  // root and must stay inside it; a bare name goes to the platform search.
+  let command = config.command;
+  if (isPluginRelativePath(command)) {
+    const contained = await resolvePluginRelative(vars.pluginRoot, command);
+    if (!contained.ok) {
+      return {
+        ok: false,
+        detail: `§4.1: 'command' resolves outside the plugin root (${contained.reason}: ${contained.attempted})`,
+      };
+    }
+    command = contained.path;
+  }
+
+  const cwd = await resolveCwd(config.cwd, vars);
+  if (!cwd.ok) {
+    return {
+      ok: false,
+      detail: cwd.detail,
+    };
+  }
+
+  return {
+    ok: true,
+    server: {
+      key,
+      type: McpTransport.Stdio,
+      command,
+      args: (config.args ?? []).map((arg) => expandPlaceholders(arg, vars)),
+      env: expandRecord(config.env ?? {}, vars),
+      cwd: cwd.path,
+    },
+  };
+}
+
+//#endregion

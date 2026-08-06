@@ -1,6 +1,6 @@
 ---
 name: noetic-agent-builder
-description: This skill provides guidance for building AI agents with the Noetic framework. It should be used when creating, modifying, or composing agent patterns using Noetic's step primitives, context layers, tools, sub-harness (coding-agent) steps, generative UI (OpenUI), chat platform integration (chat-sdk.dev), and agent harness. Triggers include mentions of "agent", "react pattern", "context layer", "spawn", "tool", "loop", "sub-harness", "step.claudeCode", "Claude Code / Codex / opencode / pi as a step", "generative UI", "OpenUI", "openUi codec", "openUiSurface", "tool ui / render fragment", "chat-sdk", "noeticAgent", "Slack bot / Discord bot / Teams bot with Noetic", "getChannelStream", or any Noetic-specific API usage in the packages/core directory.
+description: This skill provides guidance for building AI agents with the Noetic framework. It should be used when creating, modifying, or composing agent patterns using Noetic's step primitives, context layers, tools, sub-harness (coding-agent) steps, generative UI (OpenUI), chat platform integration (chat-sdk.dev), and agent harness. Triggers include mentions of "agent", "react pattern", "context layer", "spawn", "tool", "loop", "sub-harness", "step.claudeCode", "Claude Code / Codex / opencode / pi as a step", "generative UI", "OpenUI", "openUi codec", "openUiSurface", "tool ui / render fragment", "chat-sdk", "noeticAgent", "Slack bot / Discord bot / Teams bot with Noetic", "getChannelStream", "agent plugins", "agent-plugins.org", "SKILL.md", "Agent Skills", "mcp.json", "MCP server", "agentPlugins", "loadSkill", or any Noetic-specific API usage in the packages/core directory.
 ---
 
 # Building Agents with Noetic
@@ -81,6 +81,7 @@ Context layers inject context into the LLM view (via `recall`) and persist state
 - **`staticContent()`** -- immutable instruction injection from loaded content
 - **`toolContextLayer()`** -- auto-generated layers from tool `context` declarations
 - **`openUiSurface()`** (from `@noetic-tools/openui`) -- server-authoritative generative-UI state; see [Generative UI](#generative-ui-openui)
+- **`agentPlugins()`** (from `@noetic-tools/agent-plugins`) -- an [Agent Plugins](https://agent-plugins.org) v1 client: discovers plugin packages and exposes their Agent Skills (`SKILL.md`) and MCP servers (`mcp.json`) with progressive disclosure; see `references/api-reference.md`
 
 The `@noetic-tools/cli` package provides additional enhanced prompt layers (`promptEngineeringLayer`, `communicationStyleLayer`, `environmentContextLayer`, `toolGuidanceLayer`, `planningModeLayer`) that implement behavioral guidelines, adaptive communication, environment detection, tool preferences, and plan-mode guidance. Progressive skill disclosure is provided separately by `skillsLayer` from `@noetic-tools/code-agent`. See `packages/cli/docs/enhanced-prompt-engineering.md` for full documentation.
 

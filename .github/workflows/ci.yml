@@ -57,6 +57,11 @@ jobs:
       - name: Typecheck inspector
         run: bun run --cwd packages/inspector typecheck
 
+      # @noetic-tools/agent-plugins depends only on @noetic-tools/types, whose
+      # dist is built above.
+      - name: Typecheck agent-plugins
+        run: bun run --cwd packages/agent-plugins typecheck
+
       - name: Check export tags
         run: bun run check:exports
 
@@ -80,6 +85,9 @@ jobs:
 
       - name: Test inspector
         run: bun run --cwd packages/inspector test:ci
+
+      - name: Test agent-plugins
+        run: bun run --cwd packages/agent-plugins test:ci
 
       - name: Build web
         run: bun run --cwd packages/web test:build

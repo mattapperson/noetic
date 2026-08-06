@@ -34,7 +34,7 @@ Workspace packages under `packages/*`. Dependency direction (arrows = "depends o
 plugins ──→ cli ──→ code-agent ──→ core ←── eval
                                        │
                                        └──→ context ─→ types ←── sub-harness ←── sub-harness-{claude-code,codex,opencode,pi}
-                                                 └───────────↗
+                                                 └───────────↗ ↖── agent-plugins
 web (standalone — no workspace deps)
 ```
 
@@ -43,6 +43,7 @@ web (standalone — no workspace deps)
 - **`@noetic-tools/core`** — step primitives (`Step<I,O>` discriminated union), interpreter, runtime, error model, observability. Re-exports the public surface of `@noetic-tools/context` and `@noetic-tools/types`, so its `.`, `/portable`, `/unstable`, and `/internal/test` entry points are unchanged for consumers. Internal order (foundational → consumer): `types/schemas/errors` → `observability` → `builders/conditions/until` → `runtime` → `interpreter` → `adapters` → `patterns`.
 - **`@noetic-tools/sub-harness`** — base contract + helpers for coding-agent sub-harnesses (Claude Code, Codex, opencode, pi). Re-exports the `SubHarness` contract from `@noetic-tools/types` and adds `defineSubHarness`, the turn accumulator, registry, item builders, and error types. Depends only on `@noetic-tools/types`. **`@noetic-tools/core` must never import this package or any `sub-harness-*` adapter** — it resolves adapters from the types contract + a runtime registry, so no agent SDK enters core's dependency graph (enforced by `.sentrux/rules.toml`). See `specs/27-sub-harness-steps.md`.
 - **`@noetic-tools/sub-harness-{claude-code,codex,opencode,pi}`** — one adapter per coding agent; each exports a factory (`claudeCode()` etc.) returning a `SubHarness`, backed by the vendor SDK as an optional peer dependency. Used via `step.claudeCode(...)` or a `claude-code` JSON workflow node.
+- **`@noetic-tools/agent-plugins`** — a conformant [Agent Plugins](https://agent-plugins.org) v1 client. Discovers plugin packages (closed `plugin.json` manifest + the two portable component types: Agent Skills in `skills/`, MCP servers in `mcp.json`) and exposes them through the `agentPlugins()` context layer using the spec's progressive disclosure model. Depends only on `@noetic-tools/types`; it is the **only** package permitted to depend on `@modelcontextprotocol/sdk`, and **`@noetic-tools/core` must never import it** — same rule as the sub-harness adapters, so no vendor SDK or subprocess launcher enters core's graph (enforced by `.sentrux/rules.toml`). See `specs/30-agent-plugins.md`.
 - **`@noetic-tools/code-agent`** — tool implementations, plugin registry, skills, tasks, LSP, git worktree integration.
 - **`@noetic-tools/cli`** — Ink-based TUI harness. Six internal layers per `specs/22-cli-architecture.md`: `foundations → infra → domain → orchestration → presentation → entry`.
 - **`@noetic-tools/eval`** — eval framework, scorers, GEPA optimization, regression.

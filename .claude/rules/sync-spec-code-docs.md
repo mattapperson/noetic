@@ -36,6 +36,7 @@ They are mandatory, not optional.
 | `27-sub-harness-steps.md` | `packages/types/src/types/sub-harness.ts`, `interpreter/execute-sub-harness`, `builders/step-builders` (harness builders), `packages/sub-harness/src/`, `packages/sub-harness-*/src/` | `framework/sub-harnesses.mdx` |
 | `28-generative-ui.md` | `packages/types/src/types/output-codec.ts`, `packages/types/src/types/tool.ts` (`UiFragment`, `ToolUiDeclaration`), `packages/openui/src/` | `framework/generative-ui.mdx` |
 | `29-chat-platform-integration.md` | `packages/chat-sdk/src/`, `packages/core/src/runtime/channel-store.ts` (`getChannelStream`) | `framework/chat-sdk.mdx` |
+| `30-agent-plugins.md` | `packages/agent-plugins/src/` | `framework/context-layers/agent-plugins.mdx` |
 
 **Paths are relative to**: Specs → `specs/`, Source → `packages/core/src/` (except rows that name a full `packages/...` path), Docs → `packages/web/content/docs/`
 
