@@ -31,7 +31,29 @@ bun add @noetic-tools/agent-plugins
 
 ```ts
 import { agentPlugins } from '@noetic-tools/agent-plugins';
-import { context } from '@noetic-tools/core';
+import { AgentHarness } from '@noetic-tools/core';
+
+const plugins = agentPlugins({
+  roots: ['/home/alex/.agents/plugins'],
+  dataDir: '/home/alex/.agents/plugins-data',
+});
+
+const harness = new AgentHarness({
+  name: 'my-agent',
+  params: {},
+  // Context layers go under `context`, as a plain array.
+  context: [plugins],
+  // The harness does not pick up OPENROUTER_API_KEY on its own — name the
+  // provider explicitly, or model calls fail at run time.
+  llm: { provider: 'openrouter' },
+});
+```
+
+For a compile-time typed handle on `ctx.context['agent-plugins']`, wrap the same layer with `context()` and spread it into the harness:
+
+```ts
+import { agentPlugins } from '@noetic-tools/agent-plugins';
+import { context, type InferContext } from '@noetic-tools/core';
 
 const config = context([
   agentPlugins({
@@ -39,9 +61,17 @@ const config = context([
     dataDir: '/home/alex/.agents/plugins-data',
   }),
 ]);
+type Plugins = InferContext<typeof config>;
+
+// `config.layers` is a readonly tuple, so spread it for the harness:
+const layers = [...config.layers];
 ```
 
 Each immediate child of a `roots` directory that contains a `plugin.json` is loaded. Children without one are ignored, so a plugins directory can hold other things.
+
+<Callout type="warn">
+Point `roots` at the directory that **contains** plugins, not at a plugin itself. Getting this wrong finds nothing; the layer reports a `root-empty` diagnostic saying so, and names the mistake when the directory has its own `plugin.json`.
+</Callout>
 
 ## Configuration
 
@@ -97,7 +127,11 @@ Call callMcpTool to invoke a tool on a connected server.
 
 **Tier 3 — resources.** `readSkillResource` reads one bundled file at a time from `scripts/`, `references/`, or `assets/`.
 
-Because only activation changes the block, the layer implements `renderDelta`: a newly activated skill is published as a delta rather than rewriting the whole cached prefix.
+Because only activation changes the block, the layer implements `renderDelta`. The hook republishes the block **in full**: the runtime publishes a delta under `action="replace"`, so emitting only the new skill would tell the model that the index and every earlier activation had been superseded by a block containing neither. The benefit is cache stability rather than payload size — the anchored prefix stays byte-identical and the correction is appended.
+
+<Callout type="info">
+In practice the runtime seldom marks this layer's pin stale, so `renderDelta` rarely fires and the anchor is usually rewritten in place instead. That is runtime anchoring behavior, not something this layer controls.
+</Callout>
 
 ### Budget behavior
 
@@ -159,6 +193,9 @@ Diagnostics are also emitted onto the execution trace as `agent-plugins.diagnost
 | `mcp-server-invalid` | One server entry is invalid; siblings still load |
 | `mcp-transport-unsupported` | The host has not enabled that entry's transport |
 | `mcp-connect-failed` | The server was valid but would not start or connect |
+| `skill-warning` | A skill loaded, but carries a frontmatter key the spec does not define |
+| `root-unreadable` | A configured scan root could not be read |
+| `root-empty` | A scan root held no plugin directories — usually a misconfigured path |
 
 ## Security
 
@@ -167,7 +204,9 @@ The layer enforces the specification's containment rules, which matter because a
 - Every package path is resolved through `realpath` before use. A symlink may point outside the plugin directory, so a lexical check would let `skills/x` look contained while resolving to `/etc`. Paths that cannot be resolved are treated as escapes — the check fails closed.
 - `readSkillResource` is contained to the *skill* directory, which is stricter than the spec requires and stops one skill reading another's files.
 - MCP `command` values must be a single executable token, never a shell command string, so no user-authored string is ever parsed or escaped as shell syntax.
-- Plugin subprocesses receive a narrow environment allowlist, not the agent's environment. Ambient secrets — API keys and the like — are not passed through. `PLUGIN_ROOT` and `PLUGIN_DATA` are applied last, so a plugin cannot spoof them.
+- Plugin subprocesses receive a narrow environment allowlist, not the agent's environment. Ambient secrets — API keys and the like — are not passed through. `PLUGIN_ROOT` and `PLUGIN_DATA` are applied last, so a plugin cannot spoof them. Note that the MCP SDK's stdio transport also merges its own default environment (`HOME`, `SHELL`, `USER`, …) into the child and offers no way to suppress that, so the allowlist bounds what *this layer* forwards, not the child's total environment.
+- A plugin's configured `Authorization`, `mcp-session-id`, and other client-owned headers are dropped rather than sent, per the specification's precedence rule — otherwise a plugin could replace the agent's own credentials. Each drop is reported as a diagnostic.
+- Plugin-controlled text (descriptions, skill bodies) cannot forge this layer's own context tags, so a plugin cannot close the block and append text the model would read as a system instruction.
 - Configured `env` values and MCP headers are visible package data. The specification is explicit that they are not a secret mechanism; do not put credentials in either.
 
 ## Client extensions

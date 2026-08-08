@@ -24,19 +24,62 @@ const SKILL_NAME_PATTERN = /^(?!.*--)[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
 /**
  * @public The `SKILL.md` YAML frontmatter, per the Agent Skills specification.
  *
- * Strict: the spec enumerates the field set, and an unrecognized key is far
- * more likely to be a typo (`descripton`) than a deliberate extension — the
- * spec provides `metadata` for that. A typo that silently loaded would leave
- * the author with a skill the model never selects.
+ * **Open, not closed.** The specification enumerates the fields above but never
+ * says the set is closed — there is no MUST NOT about additional keys, and it
+ * says the opposite about the directory ("may contain any files and directories
+ * beyond the required SKILL.md"). Enumerating defined fields is not the same as
+ * forbidding others.
+ *
+ * This was `z.strictObject` and it was wrong. Agent Plugins §7.1 only obliges a
+ * client to skip a skill that does not conform; strict mode manufactured the
+ * non-conformance, and real skills paid for it — anything carrying `model:`,
+ * `argument-hint:`, or `disable-model-invocation:` (all common in the wild,
+ * including a skill in this very repository) silently never loaded.
+ *
+ * Unrecognized keys are still worth surfacing, because a typo like `descripton`
+ * really does leave a skill the model can never select. So they are reported as
+ * warnings and the skill loads anyway — a diagnostic, not a rejection.
  */
-export const SkillFrontmatterSchema = z.strictObject({
+export const SkillFrontmatterSchema = z.looseObject({
   name: z.string().min(1).max(64).regex(SKILL_NAME_PATTERN),
   description: z.string().min(1).max(1024),
   license: z.string().optional(),
   compatibility: z.string().min(1).max(500).optional(),
-  metadata: z.record(z.string(), z.string()).optional(),
+  /**
+   * The spec calls this "a map from string keys to string values", but YAML
+   * turns an unquoted `version: 1.0` into a number. Coercing scalars is far
+   * kinder than discarding the whole skill over a missing pair of quotes.
+   */
+  metadata: z
+    .record(
+      z.string(),
+      z.union([
+        z.string(),
+        z.number(),
+        z.boolean(),
+      ]),
+    )
+    .transform((entries) =>
+      Object.fromEntries(
+        Object.entries(entries).map(([key, value]) => [
+          key,
+          String(value),
+        ]),
+      ),
+    )
+    .optional(),
   'allowed-tools': z.string().optional(),
 });
+
+/**
+ * The fields the Agent Skills specification defines. Not a closed set — an
+ * unrecognized key is a warning, not a rejection.
+ *
+ * Derived from the schema rather than restated, so adding a field above cannot
+ * leave this list behind. A stale copy would warn about a field the client
+ * *does* support, which is the same false alarm the open schema exists to stop.
+ */
+const DEFINED_FIELDS = new Set(Object.keys(SkillFrontmatterSchema.shape));
 
 /** @public */
 export type SkillFrontmatter = z.infer<typeof SkillFrontmatterSchema>;
@@ -50,6 +93,13 @@ export interface ParsedSkill {
   frontmatter: SkillFrontmatter;
   /** The Markdown body after the frontmatter block — the skill's instructions. */
   body: string;
+  /**
+   * Non-fatal problems worth reporting: frontmatter keys the Agent Skills
+   * specification does not define. The skill loaded regardless — these exist so
+   * a typo like `descripton` is visible rather than silently costing the author
+   * a skill the model can never select.
+   */
+  warnings: string[];
 }
 
 /** @public Outcome of parsing a `SKILL.md` document. */
@@ -135,6 +185,17 @@ export function parseSkill(source: string, directoryName: string): SkillParseRes
     };
   }
 
+  const warnings: string[] = [];
+  if (typeof raw === 'object' && raw !== null) {
+    for (const key of Object.keys(raw)) {
+      if (!DEFINED_FIELDS.has(key)) {
+        warnings.push(
+          `frontmatter key '${key}' is not defined by the Agent Skills specification and was ignored`,
+        );
+      }
+    }
+  }
+
   if (parsed.data.name !== directoryName) {
     return {
       ok: false,
@@ -147,6 +208,7 @@ export function parseSkill(source: string, directoryName: string): SkillParseRes
     skill: {
       frontmatter: parsed.data,
       body: split.body,
+      warnings,
     },
   };
 }

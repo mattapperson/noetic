@@ -43,11 +43,19 @@ export {
   validateManifest,
 } from './manifest';
 export type {
+  DroppedHeader,
   McpConnectResult,
   McpSession,
   McpToolInfo,
 } from './mcp-client';
-export { buildSubprocessEnv, callMcpTool, closeSessions, connectMcpServer } from './mcp-client';
+export {
+  buildSubprocessEnv,
+  callMcpTool,
+  closeSessions,
+  connectMcpServer,
+  findClientOwnedHeaders,
+  stripClientOwnedHeaders,
+} from './mcp-client';
 export type {
   McpDocument,
   McpDocumentResult,

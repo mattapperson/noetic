@@ -182,17 +182,55 @@ describe('optional fields', () => {
     ).toBe(false);
   });
 
-  test('rejects a non-string metadata value', () => {
+  test('coerces a scalar metadata value rather than discarding the skill', () => {
+    // YAML turns an unquoted `version: 1.0` into a number. The spec calls
+    // metadata a string map, but losing a whole skill over a missing pair of
+    // quotes is a worse outcome than coercing.
+    const result = parseSkill(
+      doc('name: deploy\ndescription: X.\nmetadata:\n  count: 3\n  enabled: true'),
+      'deploy',
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+    expect(result.skill.frontmatter.metadata).toEqual({
+      count: '3',
+      enabled: 'true',
+    });
+  });
+
+  test('rejects a metadata value that is not a scalar at all', () => {
     expect(
-      parseSkill(doc('name: deploy\ndescription: X.\nmetadata:\n  count: 3'), 'deploy').ok,
+      parseSkill(doc('name: deploy\ndescription: X.\nmetadata:\n  nested:\n    a: b'), 'deploy').ok,
     ).toBe(false);
   });
 
-  test('rejects an unrecognized frontmatter field', () => {
-    // A typo like `descripton` would otherwise load a skill the model can
-    // never select, since it has no description to match against.
+  test('loads a skill carrying a field the spec does not define, and warns', () => {
+    // The Agent Skills spec enumerates its fields but never closes the set, so
+    // rejecting here would be stricter than the spec allows. `model:` and
+    // `disable-model-invocation:` are common in real skills.
+    const result = parseSkill(
+      doc('name: deploy\ndescription: X.\nmodel: opus\ndisable-model-invocation: true'),
+      'deploy',
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+    expect(result.skill.warnings).toHaveLength(2);
+    expect(result.skill.warnings.join(' ')).toContain('model');
+  });
+
+  test('warns about a typo rather than silently dropping the skill', () => {
+    // A typo like `descripton` still loads — but it is reported, so the author
+    // is not left with a skill the model can never select and no explanation.
     const result = parseSkill(doc('name: deploy\ndescription: X.\ndescripton: typo'), 'deploy');
-    expect(result.ok).toBe(false);
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+    expect(result.skill.warnings.join(' ')).toContain('descripton');
   });
 });
 

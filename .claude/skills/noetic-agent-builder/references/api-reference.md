@@ -622,8 +622,10 @@ agentPlugins({
 })
 // slot: Slot.PROCEDURAL (250) — skills are procedural knowledge
 // scope: 'thread' — activation is conversation state
-// placement: 'anchor' + renderDelta — the skill index is identical every turn,
-// so activating a skill publishes a delta instead of rewriting the cached prefix.
+// placement: 'anchor' + renderDelta. The delta republishes the block IN FULL:
+// the runtime publishes it under action="replace", so a partial delta would
+// tell the model the index and earlier activations had been superseded by a
+// block containing neither. The win is cache stability, not payload size.
 ```
 
 Progressive disclosure, as the Agent Skills spec prescribes:

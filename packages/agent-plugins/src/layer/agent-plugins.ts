@@ -14,13 +14,24 @@
  *      one at a time through `readSkillResource`.
  *
  * The index is stable for the life of the process, so it belongs in the
- * `'anchor'` band where the prompt cache can keep it. Activating a skill is
- * the only thing that changes the block, and `renderDelta` publishes just the
- * newly activated skill rather than rewriting the whole cached prefix.
+ * `'anchor'` band where the prompt cache can keep it. Activating a skill is the
+ * only thing that changes the block.
+ *
+ * `renderDelta` republishes the block in full rather than emitting just the new
+ * skill. The runtime publishes a delta under `action="replace"` ("these
+ * supersede the blocks with the same layer id"), so a partial delta would tell
+ * the model that the index and every earlier activation had been superseded by
+ * a block containing none of them. The saving is not payload size — it is that
+ * the anchored prefix stays byte-identical, so the prompt cache still hits.
+ *
+ * Note that as of writing the runtime rarely marks this layer's pin stale, so
+ * `renderDelta` seldom fires and the anchor is usually rewritten in place
+ * instead. That is a runtime anchoring behavior, not something this layer
+ * controls; the hook is correct for when it does fire.
  */
 
 import { mkdir, readdir, readFile, stat } from 'node:fs/promises';
-import { join, relative, sep } from 'node:path';
+import { isAbsolute, join, relative, sep } from 'node:path';
 import type { ContextLayer, ContextScope, ExecutionContext } from '@noetic-tools/types';
 import { estimateTokens, Slot } from '@noetic-tools/types';
 import { z } from 'zod';
@@ -29,9 +40,14 @@ import { DiagnosticCode, diagnostic } from '../diagnostics';
 import type { DiscoveredSkill, LoadedPlugin } from '../discovery';
 import { discoverPlugins } from '../discovery';
 import type { McpSession, McpToolInfo } from '../mcp-client';
-import { callMcpTool, closeSessions, connectMcpServer } from '../mcp-client';
-import type { McpTransport, ResolvedMcpServer } from '../mcp-config';
-import { DEFAULT_TRANSPORTS, resolveMcpServer } from '../mcp-config';
+import {
+  callMcpTool,
+  closeSessions,
+  connectMcpServer,
+  findClientOwnedHeaders,
+} from '../mcp-client';
+import type { ResolvedMcpServer } from '../mcp-config';
+import { DEFAULT_TRANSPORTS, McpTransport, resolveMcpServer } from '../mcp-config';
 import { containedPath, resolveRoot } from '../paths';
 
 //#region Configuration
@@ -179,6 +195,13 @@ function resolveSkillRef(
  * already what activation delivered.
  */
 async function listSkillResources(skillDir: string): Promise<string[]> {
+  // Resolve the root once. Every reported path is a `relative()` between two
+  // filesystem-resolved paths; comparing a resolved child against a raw root
+  // would emit `../…` strings the caller cannot read back.
+  const base = await resolveRoot(skillDir);
+  if (base === null) {
+    return [];
+  }
   const found: string[] = [];
 
   const walk = async (dir: string, depth: number): Promise<void> => {
@@ -195,7 +218,17 @@ async function listSkillResources(skillDir: string): Promise<string[]> {
       if (found.length >= MAX_RESOURCES) {
         return;
       }
-      const full = join(dir, entry);
+      // §4.1 rule 5 governs *access*, and enumerating a directory is access.
+      // `readdir` and `stat` both follow symlinks, so without this check a
+      // skill shipping `references -> ~/.ssh` gets its neighbour's filenames
+      // listed straight back to the model. Checked before descending, so an
+      // escaping link is never walked at all rather than filtered afterwards.
+      const contained = await containedPath(base, join(dir, entry));
+      if (!contained.ok) {
+        continue;
+      }
+      const full = contained.path;
+
       let isDir: boolean;
       try {
         isDir = (await stat(full)).isDirectory();
@@ -206,7 +239,7 @@ async function listSkillResources(skillDir: string): Promise<string[]> {
         await walk(full, depth + 1);
         continue;
       }
-      const rel = relative(skillDir, full).split(sep).join('/');
+      const rel = relative(base, full).split(sep).join('/');
       if (rel === 'SKILL.md') {
         continue;
       }
@@ -214,7 +247,7 @@ async function listSkillResources(skillDir: string): Promise<string[]> {
     }
   };
 
-  await walk(skillDir, 0);
+  await walk(base, 0);
   return found;
 }
 
@@ -222,24 +255,61 @@ async function listSkillResources(skillDir: string): Promise<string[]> {
 
 //#region Rendering
 
+/** The container tags this layer emits. Plugin text must not be able to forge one. */
+const OWN_TAG_PATTERN = /<(\/?)(agent_plugins|plugins|skills|mcp_servers|active_skills|skill)\b/gi;
+
+/**
+ * Escape a short, plugin-controlled metadata string.
+ *
+ * These lines sit in the index, which is anchored into *every* turn for every
+ * installed plugin — no activation required. A `description` is up to 1024
+ * attacker-chosen characters, so without escaping a plugin could close this
+ * layer's own tags and append text the model reads as a system instruction.
+ * Metadata is prose, never markup, so full escaping costs nothing.
+ */
+function escapeMeta(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/**
+ * Neutralize only this layer's own container tags inside free-form text.
+ *
+ * A skill body is instructions the author wrote for a model, and it legitimately
+ * contains markup and code — escaping every angle bracket would mangle it. The
+ * breakout vector is narrower than that: forging one of the tags this layer
+ * itself emits. Rewriting just those keeps `<div>` and `<T>` intact while making
+ * `</agent_plugins>` inert.
+ */
+function neutralizeOwnTags(text: string): string {
+  return text.replace(
+    OWN_TAG_PATTERN,
+    (_match, slash: string, tag: string) => `&lt;${slash}${tag}`,
+  );
+}
+
 function renderPluginLine(plugin: LoadedPlugin): string {
-  const version = plugin.manifest.version === undefined ? '' : ` v${plugin.manifest.version}`;
+  const version =
+    plugin.manifest.version === undefined ? '' : ` v${escapeMeta(plugin.manifest.version)}`;
   const description =
-    plugin.manifest.description === undefined ? '' : ` — ${plugin.manifest.description}`;
+    plugin.manifest.description === undefined
+      ? ''
+      : ` — ${escapeMeta(plugin.manifest.description)}`;
   return `- ${plugin.manifest.name}${version}${description}`;
 }
 
 function renderSkillLine(skill: DiscoveredSkill): string {
-  return `- ${skill.qualifiedId}: ${skill.frontmatter.description}`;
+  // `qualifiedId` is `<plugin>/<skill>`, and both halves are constrained to
+  // `[a-z0-9.-]` by their own name rules, so only the description is hostile.
+  return `- ${skill.qualifiedId}: ${escapeMeta(skill.frontmatter.description)}`;
 }
 
 function renderServerLine(session: McpSession): string {
-  const tools = session.tools.map((tool) => tool.name).join(', ');
-  return `- ${session.key}: ${tools || '(no tools)'}`;
+  const tools = session.tools.map((tool) => escapeMeta(tool.name)).join(', ');
+  return `- ${escapeMeta(session.key)}: ${tools || '(no tools)'}`;
 }
 
 function renderActivatedSkill(skill: DiscoveredSkill): string {
-  return `<skill id="${skill.qualifiedId}">\n${skill.body}\n</skill>`;
+  return `<skill id="${skill.qualifiedId}">\n${neutralizeOwnTags(skill.body)}\n</skill>`;
 }
 
 /**
@@ -399,10 +469,32 @@ async function connectServers(params: {
       }
       servers.push(resolved.server);
 
+      // §7.2.1: client-generated headers win. They are stripped rather than
+      // sent, so say so — a plugin author who set `Authorization` and saw it
+      // silently ignored would otherwise have no way to find out.
+      if (resolved.server.type !== McpTransport.Stdio) {
+        for (const dropped of findClientOwnedHeaders(resolved.server.headers)) {
+          params.diagnostics.push(
+            diagnostic({
+              code: DiagnosticCode.McpServerInvalid,
+              pluginDir: plugin.root,
+              pluginName: plugin.manifest.name,
+              component: declared.key,
+              detail: `configured header dropped — ${dropped.reason}`,
+            }),
+          );
+        }
+      }
+
       const connected = await connectMcpServer({
         server: resolved.server,
         pluginRoot: plugin.root,
-        pluginData: plugin.dataDir,
+        // `vars.pluginData`, NOT `plugin.dataDir`: the former is the created,
+        // filesystem-resolved path that `${PLUGIN_DATA}` already expanded to.
+        // Passing the raw one handed the subprocess a $PLUGIN_DATA that
+        // disagreed with its own expanded argv on any symlinked data dir —
+        // which is the common case (/var on macOS, a symlinked home).
+        pluginData: vars.pluginData,
         ...(params.baseEnv === undefined
           ? {}
           : {
@@ -551,10 +643,19 @@ export function agentPlugins(config: AgentPluginsConfig): AgentPluginsLayer {
   let liveScopes = 0;
 
   const load = async (): Promise<PluginIndex> => {
-    indexPromise ??= buildIndex(config).then((built) => {
-      index = built;
-      return built;
-    });
+    // `??=` alone memoized a *rejected* promise forever, so one failed scan
+    // poisoned the layer for the life of the process. Clearing on rejection
+    // lets the next init retry; the assignment is still synchronous, so
+    // concurrent inits continue to share one scan rather than double-spawning.
+    indexPromise ??= buildIndex(config)
+      .then((built) => {
+        index = built;
+        return built;
+      })
+      .catch((error: unknown) => {
+        indexPromise = undefined;
+        throw error;
+      });
     return indexPromise;
   };
 
@@ -682,6 +783,19 @@ export function agentPlugins(config: AgentPluginsConfig): AgentPluginsLayer {
             };
           }
 
+          // An absolute path would be silently reparented under the skill
+          // directory by `join`, producing an ENOENT that names a path nobody
+          // asked for and leaks the absolute skill directory. Say what is
+          // actually wrong instead.
+          if (isAbsolute(args.path)) {
+            return {
+              result: {
+                ok: false,
+                error: `'${args.path}' must be relative to the skill directory, not absolute`,
+              },
+            };
+          }
+
           // §4.1 rule 5: a package path resolving outside the plugin root is
           // denied. Containment is against the skill directory, which is
           // stricter and stops one skill reading another's files.
@@ -762,6 +876,14 @@ export function agentPlugins(config: AgentPluginsConfig): AgentPluginsLayer {
                   result: {
                     ok: outcome.ok,
                     content: outcome.content,
+                    // The output schema advertises `error`, so a failing call
+                    // has to populate it. Returning only `{ok:false, content}`
+                    // left the model to infer the failure from the payload.
+                    ...(outcome.ok
+                      ? {}
+                      : {
+                          error: `MCP tool '${args.tool}' on '${args.server}' reported a failure`,
+                        }),
                   },
                 };
               },
@@ -771,8 +893,12 @@ export function agentPlugins(config: AgentPluginsConfig): AgentPluginsLayer {
 
     hooks: {
       async init({ ctx }) {
-        const loaded = await load();
+        // Counted BEFORE the await. Incrementing afterwards meant a failed scan
+        // skipped the increment while the matching dispose still decremented,
+        // driving the count negative so that a later, genuinely-live scope was
+        // torn down at what looked like zero.
         liveScopes += 1;
+        const loaded = await load();
         reportDiagnostics(ctx, loaded.diagnostics);
         return {
           state: emptyState(),
@@ -793,24 +919,32 @@ export function agentPlugins(config: AgentPluginsConfig): AgentPluginsLayer {
 
       async renderDelta({ prevState, state, budget }) {
         const before = new Set(prevState?.activated ?? []);
-        const added = (state?.activated ?? []).filter((id) => !before.has(id));
-        if (added.length === 0) {
-          // Nothing activated — the pinned block is still accurate, and the
-          // default full republish would waste the cached prefix.
+        const after = state?.activated ?? [];
+        if (after.length === before.size && after.every((id) => before.has(id))) {
+          // Nothing changed, so the pinned block is still accurate. Returning
+          // `null` hands the runtime its default, which republishes the block
+          // in full — correct, just wasteful, and unnecessary here.
           return null;
         }
-        const loaded = currentIndex();
-        const bodies = added
-          .map((id) => loaded.skills.get(id))
-          .filter((skill): skill is DiscoveredSkill => skill !== undefined)
-          .map(renderActivatedSkill)
-          .join('\n');
-        const text = `<active_skills>\n${bodies}\n</active_skills>`;
-        if (budget > 0 && estimateTokens(text) > budget) {
-          // Over budget, the full republish is no worse and is complete.
-          return null;
-        }
-        return text;
+
+        // The whole block, not just what changed.
+        //
+        // The runtime publishes this under `action="replace"` with the header
+        // "These supersede the blocks with the same layer id earlier in this
+        // context." Returning only the newly activated skill therefore told the
+        // model that the plugin list, the entire skill index, and every
+        // previously loaded skill had been superseded by a block containing
+        // none of them — silently deleting the index it needs to find anything.
+        //
+        // The saving was never in the payload size: it is that the anchored
+        // prefix stays byte-identical, so the prompt cache still hits and the
+        // correction is appended rather than rewritten in place.
+        const text = renderWithinBudget({
+          index: currentIndex(),
+          activated: activatedSkills(state),
+          budget,
+        });
+        return text.length === 0 ? null : text;
       },
 
       async onSpawn({ parentState }) {
@@ -836,19 +970,28 @@ export function agentPlugins(config: AgentPluginsConfig): AgentPluginsLayer {
       },
 
       async dispose() {
-        liveScopes -= 1;
+        // Floored at zero. `DisposeParams` carries no scope identity, so this
+        // is a count rather than a set — and an unmatched dispose used to drive
+        // it negative, which then made the *next* dispose tear down sessions a
+        // live scope was still using. Clamping keeps an extra dispose inert.
+        liveScopes = Math.max(0, liveScopes - 1);
         if (liveScopes > 0) {
           return;
         }
         const loaded = index;
         if (loaded === undefined) {
+          // Nothing was ever built (or the scan failed). Drop any in-flight
+          // memo so a later init rescans rather than awaiting a dead promise.
+          indexPromise = undefined;
           return;
         }
         await closeSessions(loaded.sessions);
+        // Sessions are gone, but the discovered plugins, skills and diagnostics
+        // are not — a host that collects diagnostics at end-of-run reads them
+        // *after* teardown, and blanking `index` here returned it an empty list.
         loaded.sessions = [];
         loaded.tools = [];
         indexPromise = undefined;
-        index = undefined;
       },
     },
 

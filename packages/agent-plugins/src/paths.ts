@@ -13,7 +13,7 @@
  * treated as *not* contained. The check fails closed.
  */
 
-import { realpath } from 'node:fs/promises';
+import { lstat, realpath } from 'node:fs/promises';
 import { isAbsolute, resolve, sep } from 'node:path';
 
 //#region Types
@@ -48,6 +48,16 @@ function isWithin(parent: string, child: string): boolean {
   return child.startsWith(parent.endsWith(sep) ? parent : `${parent}${sep}`);
 }
 
+/** True for the "this path does not exist" errno, the only one worth walking up past. */
+function isNotFound(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error.code === 'ENOENT' || error.code === 'ENOTDIR')
+  );
+}
+
 /**
  * Resolve a path through the filesystem, walking up to the nearest existing
  * ancestor when the leaf itself does not exist yet.
@@ -57,6 +67,18 @@ function isWithin(parent: string, child: string): boolean {
  * subdirectory, for instance). Resolving the existing prefix and re-appending
  * the missing tail keeps the symlink guarantee — no existing component of the
  * path can redirect elsewhere — while still admitting not-yet-created leaves.
+ *
+ * Two rules make that guarantee hold, and both were learned the hard way:
+ *
+ *   - Only `ENOENT`/`ENOTDIR` may walk up. Treating *every* `realpath` failure
+ *     as "missing leaf" turned `EACCES` and `ELOOP` into synthesized paths that
+ *     were never resolved at all — the check failed open on exactly the inputs
+ *     it exists to catch.
+ *   - The deepest existing component is `lstat`ed. `realpath` reports ENOENT
+ *     for a *dangling* symlink, so without this a link pointing outside the
+ *     root at a target that does not exist yet would be re-appended verbatim
+ *     and reported as contained. Refusing to resolve past any symlinked leaf
+ *     is the conservative reading of §4.1.
  */
 async function resolveExistingPrefix(target: string): Promise<string | null> {
   const missing: string[] = [];
@@ -65,8 +87,23 @@ async function resolveExistingPrefix(target: string): Promise<string | null> {
   for (;;) {
     try {
       const real = await realpath(current);
-      return missing.length === 0 ? real : resolve(real, ...missing.reverse());
-    } catch {
+      if (missing.length === 0) {
+        return real;
+      }
+      // The first component past the resolved prefix is the one `realpath`
+      // could not follow. If it is a symlink, it is dangling — resolving
+      // through it would be a guess about where it will eventually point.
+      const head = missing[missing.length - 1];
+      if (head !== undefined && (await isSymlink(resolve(real, head)))) {
+        return null;
+      }
+      return resolve(real, ...missing.reverse());
+    } catch (error) {
+      if (!isNotFound(error)) {
+        // Unreadable for some other reason (permissions, symlink loop). Fail
+        // closed rather than inventing a path.
+        return null;
+      }
       const parent = resolve(current, '..');
       if (parent === current) {
         // Walked to the filesystem root without finding anything readable.
@@ -75,6 +112,15 @@ async function resolveExistingPrefix(target: string): Promise<string | null> {
       missing.push(current.slice(parent.length + (parent.endsWith(sep) ? 0 : 1)));
       current = parent;
     }
+  }
+}
+
+/** True when the path itself is a symlink. A missing path is not. */
+async function isSymlink(path: string): Promise<boolean> {
+  try {
+    return (await lstat(path)).isSymbolicLink();
+  } catch {
+    return false;
   }
 }
 
@@ -129,8 +175,13 @@ export async function containedPath(root: string, target: string): Promise<Conta
   // still contains a symlinked component reports a false escape — on macOS
   // every path under the system temp directory hits exactly that, since
   // `/var` is a symlink to `/private/var`.
-  const realRoot = await resolveExistingPrefix(resolve(root));
-  const real = await resolveExistingPrefix(attempted);
+  // Independent walks, so they run concurrently — `containedPath` is called
+  // once per entry in the skill-resource walk, and serializing them doubles
+  // the latency of every one of those.
+  const [realRoot, real] = await Promise.all([
+    resolveExistingPrefix(resolve(root)),
+    resolveExistingPrefix(attempted),
+  ]);
   if (realRoot === null || real === null) {
     return {
       ok: false,

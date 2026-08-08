@@ -23,6 +23,12 @@ export const DiagnosticCode = {
   ComponentTypeInvalid: 'component-type-invalid',
   /** §7.1 — a discovered skill does not conform to the Agent Skills spec. */
   SkillSkipped: 'skill-skipped',
+  /**
+   * A skill loaded, but something about it is worth reporting — most often a
+   * frontmatter key the Agent Skills specification does not define, which is
+   * legal but is also what a typo looks like.
+   */
+  SkillWarning: 'skill-warning',
   /** §7.2.2(2) — `mcp.json` is unusable, so MCP is disabled for this plugin. */
   McpDisabled: 'mcp-disabled',
   /** §7.2.2(3) — one server entry is invalid. Siblings still load. */
@@ -31,6 +37,14 @@ export const DiagnosticCode = {
   McpTransportUnsupported: 'mcp-transport-unsupported',
   /** §7.2.2(5) — the server was valid but failed to start, connect, or handshake. */
   McpConnectFailed: 'mcp-connect-failed',
+  /**
+   * A configured scan root could not be read. Not a spec rule — a
+   * configuration mistake, and the single most likely one, so it is reported
+   * rather than silently yielding zero plugins.
+   */
+  RootUnreadable: 'root-unreadable',
+  /** A configured scan root was readable but held no plugin directories. */
+  RootEmpty: 'root-empty',
 } as const;
 
 /** @public */

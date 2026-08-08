@@ -125,6 +125,15 @@ spec does not require, so passing the agent's whole environment — API keys
 included — to every plugin subprocess would leak secrets for no conformance
 benefit.
 
+That allowlist is not the whole story, and the difference matters to anyone
+reasoning about isolation: the MCP SDK's stdio transport unconditionally merges
+its own `getDefaultEnvironment()` into the child environment, so a subprocess
+also receives `HOME`, `SHELL`, `USER` and similar regardless of what is passed
+here. The SDK exposes no way to suppress that. What the allowlist does
+guarantee is that nothing from the *agent's* configuration — API keys,
+provider credentials — is forwarded, and that the reserved variables are still
+applied last.
+
 `PLUGIN_DATA` is created and resolved before its value can be substituted
 anywhere, since §9.1 defines it as an absolute, filesystem-resolved path. It is
 not created for a plugin that declares no MCP servers: discovery must not have
@@ -166,9 +175,17 @@ The Agent Skills spec prescribes three tiers, mapped onto the layer:
 | 2. Instructions | The `SKILL.md` body | `loadSkill`, then pinned for the thread |
 | 3. Resources | `scripts/`, `references/`, `assets/` files | `readSkillResource`, one at a time |
 
-Activation is the only thing that changes the rendered block, which is exactly
-the case `renderDelta` exists for: the newly activated skill is published as a
-delta instead of rewriting the cached prefix.
+Activation is the only thing that changes the rendered block, which is the case
+`renderDelta` exists for. The hook republishes the block **in full**: the
+runtime publishes a delta under `action="replace"`, whose header tells the model
+the new block supersedes the earlier one with the same layer id, so emitting
+only the newly activated skill would silently retract the index and every
+earlier activation. The saving is not payload size but cache stability — the
+anchored prefix stays byte-identical and the correction is appended.
+
+In practice the runtime seldom marks this layer's pin stale, so `renderDelta`
+rarely fires and the anchor is usually rewritten in place. That is runtime
+anchoring behavior rather than something this layer controls.
 
 Under budget pressure the layer sheds the **oldest** activated body first, then
 the next, and only trims the index as a last resort — the index is what lets
@@ -223,12 +240,24 @@ their contents, as §11.1 rule 3 requires.
 
 ## Conformance
 
-`packages/agent-plugins/test/conformance.test.ts` carries one test per
-Appendix A checkbox, driven by real plugin trees in temp directories — the only
-way to exercise symlink containment honestly. Live MCP behavior is covered
-end-to-end against a fixture stdio server that echoes back the environment it
-was launched with, so the §9.1 ordering is verified through a real subprocess
-rather than asserted about a config object.
+`packages/agent-plugins/test/conformance.test.ts` walks the Appendix A
+checklist, driven by real plugin trees in temp directories — the only way to
+exercise symlink containment honestly. Coverage is **not** one test per
+checkbox: several boxes are covered in the per-module suites instead
+(`mcp-config.test.ts` carries most of the `cwd`, URL, and header rules), and
+the remote-transport boxes have no direct coverage at all, because no HTTP or
+SSE server is stood up anywhere in the suite. `src/mcp/sse.ts` is untested.
+
+`test/hardening.test.ts` carries the regressions from the adversarial review of
+the first implementation: containment failing closed, prompt-block integrity,
+delta completeness, frontmatter openness, header precedence, and the lifecycle
+cases.
+
+Live stdio MCP behavior is covered end-to-end against a fixture server that
+echoes back the environment it was launched with. The §9.1 *ordering* is
+verified by calling `buildSubprocessEnv` directly with a synthetic server that
+declares a reserved variable — the public path cannot express that case,
+because validation rejects such an entry before it is ever launched.
 
 ## Future considerations
 

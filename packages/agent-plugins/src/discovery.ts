@@ -274,6 +274,18 @@ async function loadSkill(params: {
     return skip(`§7.1: ${parsed.detail}`);
   }
 
+  for (const warning of parsed.skill.warnings) {
+    diagnostics.push(
+      diagnostic({
+        code: DiagnosticCode.SkillWarning,
+        pluginDir: pluginRoot,
+        pluginName,
+        component: entry,
+        detail: `§7.1: ${warning}`,
+      }),
+    );
+  }
+
   return {
     id: entry,
     qualifiedId: `${pluginName}/${entry}`,
@@ -538,12 +550,24 @@ export async function discoverPlugins(
     let entries: string[];
     try {
       entries = await readdir(rootDir);
-    } catch {
-      // A configured root that does not exist yet is a normal state (no
-      // plugins installed), not a failure worth reporting per plugin.
+    } catch (error) {
+      // Reported, not swallowed. A misconfigured root is the most likely
+      // mistake a host can make, and silence made it undiagnosable: the layer
+      // simply found nothing and the agent told the user there were no skills.
+      diagnostics.push(
+        diagnostic({
+          code: DiagnosticCode.RootUnreadable,
+          pluginDir: rootDir,
+          detail: `scan root could not be read: ${error instanceof Error ? error.message : String(error)}`,
+        }),
+      );
       continue;
     }
 
+    // Counts directories that *look* like plugins, not ones that loaded. A root
+    // whose plugins all failed validation is not empty — those failures have
+    // their own diagnostics, and calling it empty would misdirect the reader.
+    let candidatesInRoot = 0;
     for (const entry of entries.sort()) {
       const dir = join(rootDir, entry);
       if ((await classify(dir)) !== FileKind.Directory) {
@@ -552,6 +576,7 @@ export async function discoverPlugins(
       if ((await classify(join(dir, 'plugin.json'))) === FileKind.Missing) {
         continue;
       }
+      candidatesInRoot += 1;
 
       const result = await loadPlugin(dir, dataRoot);
       diagnostics.push(...result.diagnostics);
@@ -574,6 +599,23 @@ export async function discoverPlugins(
       }
       claimed.set(name, result.plugin.root);
       plugins.push(result.plugin);
+    }
+
+    if (candidatesInRoot === 0) {
+      // The classic mistake is pointing `roots` at a plugin rather than at the
+      // directory containing plugins, so say so when that is what this looks
+      // like instead of leaving the host to guess.
+      const looksLikeAPlugin =
+        (await classify(join(rootDir, 'plugin.json'))) === FileKind.File
+          ? " — this directory has its own plugin.json, so it looks like a plugin: 'roots' should point at the directory that CONTAINS plugins"
+          : '';
+      diagnostics.push(
+        diagnostic({
+          code: DiagnosticCode.RootEmpty,
+          pluginDir: rootDir,
+          detail: `scan root contained no plugin directories${looksLikeAPlugin}`,
+        }),
+      );
     }
   }
 

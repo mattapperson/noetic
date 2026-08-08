@@ -46,7 +46,7 @@ const ctx = harness.createContext();
 const result = await harness.run(step, input, ctx);
 ```
 
-The agent harness manages execution, context creation, channels, context lifecycle, and detached spawns. When no `callModel` is provided, `AgentHarness` auto-detects from the `OPENROUTER_API_KEY` environment variable.
+The agent harness manages execution, context creation, channels, context lifecycle, and detached spawns. The LLM provider defaults to `'noetic'` (the Noetic platform, authenticated with `NOETIC_API_KEY`). For direct OpenRouter you must name it: `llm: { provider: 'openrouter' }`, which then reads `OPENROUTER_API_KEY`. Setting `OPENROUTER_API_KEY` alone is NOT picked up.
 
 The harness always holds a `SubprocessAdapter` — every `step.run`, `spawn`, and `harness.detachedSpawn` dispatches through `harness.subprocess.spawn(...)`. Zero-config harnesses use `createInMemorySubprocessAdapter()` (in-process, no overhead). Swap in `createLocalSubprocessAdapter({storage})` to run children out-of-process with durable handle manifests. Per-step and per-call `subprocess` overrides let one agent mix in-process and out-of-process dispatch — see the Key Rules section and the "Run an agent out-of-process" / "Survive a host crash" patterns in `references/composition-patterns.md`.
 

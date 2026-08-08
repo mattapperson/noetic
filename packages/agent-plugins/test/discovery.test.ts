@@ -378,7 +378,10 @@ describe('scanning roots', () => {
     expect(result.diagnostics).toHaveLength(0);
   });
 
-  test('tolerates a root that does not exist', async () => {
+  test('reports a root that does not exist instead of finding nothing quietly', async () => {
+    // Silence here made the most likely configuration mistake undiagnosable:
+    // the layer found no plugins and the agent simply told the user it had no
+    // skills, with nothing anywhere explaining why.
     const base = await tempDir();
     const result = await discoverPlugins(
       [
@@ -387,7 +390,27 @@ describe('scanning roots', () => {
       join(base, 'data'),
     );
     expect(result.plugins).toHaveLength(0);
-    expect(result.diagnostics).toHaveLength(0);
+    expect(result.diagnostics.map((d) => d.code)).toEqual([
+      DiagnosticCode.RootUnreadable,
+    ]);
+  });
+
+  test('names the likely cause when roots points at a plugin instead of its parent', async () => {
+    const { root } = await makePluginRoot([
+      {
+        manifest: manifest('p'),
+      },
+    ]);
+    // One level too deep — the classic mistake.
+    const result = await discoverPlugins(
+      [
+        join(root, 'p'),
+      ],
+      join(root, 'data'),
+    );
+    expect(result.plugins).toHaveLength(0);
+    const empty = result.diagnostics.find((d) => d.code === DiagnosticCode.RootEmpty);
+    expect(empty?.detail).toContain('looks like a plugin');
   });
 
   test('rejects the second plugin claiming an already-used name', async () => {

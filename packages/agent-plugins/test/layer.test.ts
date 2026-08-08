@@ -543,7 +543,12 @@ describe('budget degradation', () => {
 });
 
 describe('renderDelta', () => {
-  test('publishes only the newly activated skill', async () => {
+  test('publishes a self-complete block, not just the new skill', async () => {
+    // The runtime publishes this under action="replace" with the header "These
+    // supersede the blocks with the same layer id earlier in this context." A
+    // partial delta therefore tells the model the index and every previously
+    // loaded skill have been superseded by a block containing none of them.
+    // So the delta must carry everything that is still true.
     const { layer } = await fixtureLayer();
     await start(layer);
     const hook = layer.hooks.renderDelta;
@@ -570,9 +575,18 @@ describe('renderDelta', () => {
       ctx,
       budget: 4000,
     });
-    expect(delta).toContain('Draw it.');
-    // The already-pinned skill is not resent.
-    expect(delta).not.toContain('Step one. Step two.');
+
+    expect(delta).not.toBeNull();
+    const text = delta ?? '';
+    // The newly activated skill.
+    expect(text).toContain('Draw it.');
+    // The previously activated one — dropping it would retract instructions
+    // the model is still working from.
+    expect(text).toContain('Step one. Step two.');
+    // And the index, without which the model cannot discover anything else.
+    expect(text).toContain('reports/summarize:');
+    expect(text).toContain('reports/chart:');
+    expect(text).toContain('<plugins>');
   });
 
   test('falls back to a full republish when nothing was activated', async () => {
