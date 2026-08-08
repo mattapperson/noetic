@@ -62,30 +62,37 @@ describe('§4.1 containment fails closed', () => {
     expect(result.ok).toBe(true);
   });
 
-  test('refuses a path it cannot read, rather than synthesizing one (EACCES)', async () => {
-    // The walk-up used to catch *every* realpath failure, so an unreadable
-    // component was treated as "missing leaf" and re-appended unresolved. Only
-    // ENOENT/ENOTDIR may walk up; everything else fails closed.
-    const base = await tempDir();
-    const root = join(base, 'root');
-    const locked = join(root, 'locked');
-    await mkdir(locked, {
-      recursive: true,
-    });
-    await writeFile(join(locked, 'secret.txt'), 'x', 'utf8');
-    await chmod(locked, 0o000);
-    try {
-      const result = await containedPath(root, join(locked, 'secret.txt'));
-      expect(result.ok).toBe(false);
-      if (result.ok) {
-        return;
+  // `chmod 000` does not stop root, so this asserts nothing when the suite runs
+  // as root — a container CI runner, typically. Skipped rather than left to fail
+  // there for a reason that has nothing to do with the code under test.
+  const asRoot = typeof process.getuid === 'function' && process.getuid() === 0;
+  test.skipIf(asRoot)(
+    'refuses a path it cannot read, rather than synthesizing one (EACCES)',
+    async () => {
+      // The walk-up used to catch *every* realpath failure, so an unreadable
+      // component was treated as "missing leaf" and re-appended unresolved. Only
+      // ENOENT/ENOTDIR may walk up; everything else fails closed.
+      const base = await tempDir();
+      const root = join(base, 'root');
+      const locked = join(root, 'locked');
+      await mkdir(locked, {
+        recursive: true,
+      });
+      await writeFile(join(locked, 'secret.txt'), 'x', 'utf8');
+      await chmod(locked, 0o000);
+      try {
+        const result = await containedPath(root, join(locked, 'secret.txt'));
+        expect(result.ok).toBe(false);
+        if (result.ok) {
+          return;
+        }
+        expect(result.reason).toBe('unresolvable');
+      } finally {
+        // Restore, or the fixture cleanup cannot remove the tree.
+        await chmod(locked, 0o755);
       }
-      expect(result.reason).toBe('unresolvable');
-    } finally {
-      // Restore, or the fixture cleanup cannot remove the tree.
-      await chmod(locked, 0o755);
-    }
-  });
+    },
+  );
 
   test('refuses a symlink loop rather than synthesizing a path (ELOOP)', async () => {
     const base = await tempDir();
