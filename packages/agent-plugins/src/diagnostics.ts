@@ -38,6 +38,13 @@ export const DiagnosticCode = {
   /** §7.2.2(5) — the server was valid but failed to start, connect, or handshake. */
   McpConnectFailed: 'mcp-connect-failed',
   /**
+   * §7.2.1 — a configured header was dropped because the client owns that
+   * name. Distinct from `McpServerInvalid`: the entry is valid and connected,
+   * so a host filtering on that code would wrongly report a working server as
+   * broken.
+   */
+  McpHeaderDropped: 'mcp-header-dropped',
+  /**
    * A configured scan root could not be read. Not a spec rule — a
    * configuration mistake, and the single most likely one, so it is reported
    * rather than silently yielding zero plugins.

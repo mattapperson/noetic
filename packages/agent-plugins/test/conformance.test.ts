@@ -31,6 +31,15 @@ afterAll(cleanupFixtures);
 const ROOT_VAR = `\${${'PLUGIN_ROOT'}}`;
 const DATA_VAR = `\${${'PLUGIN_DATA'}}`;
 
+/** Scoped storage stub — this layer keeps nothing in durable storage. */
+const STORAGE = {
+  get: async () => null,
+  set: async () => {},
+  delete: async () => {},
+  list: async () => [],
+  getMany: async () => new Map(),
+};
+
 //#region Plugin loader
 
 describe('Appendix A — plugin loader', () => {
@@ -674,6 +683,143 @@ describe('Appendix A — resilience', () => {
       },
     });
   });
+});
+
+//#endregion
+
+//#region Appendix A boxes with no other home
+
+describe('Appendix A — remaining boxes', () => {
+  test('ignores component types outside v1 (§11.3 rule 1)', async () => {
+    // A plugin may ship directories for component types this spec version does
+    // not define (commands, hooks, agents). They must be neither loaded nor
+    // complained about — silence is the required behavior, not an oversight.
+    const { root, dataDir } = await makePluginRoot([
+      {
+        manifest: manifest('p'),
+        skills: {
+          real: skillDoc({
+            name: 'real',
+          }),
+        },
+        files: {
+          'commands/deploy.md': '# not a v1 component type',
+          'hooks/hooks.json': '{}',
+          'agents/reviewer.md': '# nor this',
+        },
+      },
+    ]);
+    const { plugins, diagnostics } = await discoverPlugins(
+      [
+        root,
+      ],
+      dataDir,
+    );
+    expect(plugins[0]?.skills.map((s) => s.id)).toEqual([
+      'real',
+    ]);
+    expect(diagnostics).toHaveLength(0);
+  });
+
+  test('resolves a bare command without a configured PATH (§7.2.1)', async () => {
+    // §7.2.1 leaves bare-command resolution to the platform search and forbids
+    // a conforming plugin from depending on a configured PATH. So a bare
+    // command must launch when the plugin configures no PATH at all.
+    const { root, dataDir } = await makePluginRoot([
+      {
+        manifest: manifest('bare'),
+        files: {
+          'bin/server.mjs': FIXTURE_SERVER,
+        },
+        mcp: mcpConfig({
+          fixture: {
+            type: 'stdio',
+            command: 'node',
+            args: [
+              `${ROOT_VAR}/bin/server.mjs`,
+            ],
+          },
+        }),
+      },
+    ]);
+    const layer = agentPlugins({
+      roots: [
+        root,
+      ],
+      dataDir,
+    });
+    const { ctx } = fakeExecutionContext();
+    await layer.hooks.init?.({
+      storage: STORAGE,
+      scopeKey: 'thread:test',
+      ctx,
+    });
+    try {
+      expect(layer.readMcpTools().map((t) => t.name)).toEqual([
+        'echo_env',
+      ]);
+    } finally {
+      await layer.hooks.dispose?.({
+        state: {
+          activated: [],
+        },
+      });
+    }
+  }, 20_000);
+
+  test('uses the declared transport for the initial attempt (§7.2.1)', async () => {
+    // A `streamable-http` entry must go out over HTTP, not be coerced into
+    // some other transport. Proven by a loopback server observing the request
+    // rather than by inspecting which class was constructed.
+    const seen: string[] = [];
+    const server = Bun.serve({
+      port: 0,
+      fetch(request) {
+        seen.push(`${request.method} ${new URL(request.url).pathname}`);
+        return new Response('no', {
+          status: 500,
+        });
+      },
+    });
+
+    try {
+      const { root, dataDir } = await makePluginRoot([
+        {
+          manifest: manifest('remote'),
+          mcp: mcpConfig({
+            api: {
+              type: 'streamable-http',
+              url: `http://127.0.0.1:${server.port}/mcp`,
+            },
+          }),
+        },
+      ]);
+      const layer = agentPlugins({
+        roots: [
+          root,
+        ],
+        dataDir,
+        connectTimeoutMs: 3000,
+      });
+      const { ctx } = fakeExecutionContext();
+      await layer.hooks.init?.({
+        storage: STORAGE,
+        scopeKey: 'thread:test',
+        ctx,
+      });
+      await layer.hooks.dispose?.({
+        state: {
+          activated: [],
+        },
+      });
+
+      // The declared transport was attempted, and no fallback followed it.
+      expect(seen.length).toBeGreaterThan(0);
+      expect(seen[0]).toBe('POST /mcp');
+    } finally {
+      server.stop(true);
+    }
+  }, 20_000);
 });
 
 //#endregion

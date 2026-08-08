@@ -242,22 +242,50 @@ their contents, as §11.1 rule 3 requires.
 
 `packages/agent-plugins/test/conformance.test.ts` walks the Appendix A
 checklist, driven by real plugin trees in temp directories — the only way to
-exercise symlink containment honestly. Coverage is **not** one test per
-checkbox: several boxes are covered in the per-module suites instead
-(`mcp-config.test.ts` carries most of the `cwd`, URL, and header rules), and
-the remote-transport boxes have no direct coverage at all, because no HTTP or
-SSE server is stood up anywhere in the suite. `src/mcp/sse.ts` is untested.
+exercise symlink containment honestly. Coverage is spread across the suite
+rather than one test per box: `mcp-config.test.ts` carries most of the `cwd`,
+URL, and header rules, and `paths.test.ts` the containment cases. All 19 boxes
+have direct coverage.
 
-`test/hardening.test.ts` carries the regressions from the adversarial review of
-the first implementation: containment failing closed, prompt-block integrity,
-delta completeness, frontmatter openness, header precedence, and the lifecycle
-cases.
+Two of them needed care to test rather than merely appear tested:
+
+- The §9.1 **ordering** cannot be exercised through the public path, because
+  validation rejects any entry declaring a reserved variable. It is tested by
+  calling `buildSubprocessEnv` directly with a synthetic server that declares
+  `PLUGIN_ROOT`, so the assertion fails if the spread order is reversed. The
+  earlier test only proved both names were present, which a reversed spread
+  would also satisfy.
+- Transport selection is proven by a loopback server observing the request,
+  not by inspecting which transport class was constructed.
+
+`test/hardening.test.ts` carries the regressions from the adversarial review:
+containment failing closed, prompt-block integrity, delta completeness,
+frontmatter openness, header precedence, and the lifecycle cases.
 
 Live stdio MCP behavior is covered end-to-end against a fixture server that
-echoes back the environment it was launched with. The §9.1 *ordering* is
-verified by calling `buildSubprocessEnv` directly with a synthetic server that
-declares a reserved variable — the public path cannot express that case,
-because validation rejects such an entry before it is ever launched.
+echoes back the environment it was launched with, so `PLUGIN_ROOT` and
+`PLUGIN_DATA` are observed inside a real subprocess.
+
+## Failure isolation is load-bearing, and bounded
+
+Two limits exist because a plugin is third-party code that can be hostile or
+merely broken:
+
+- **Every MCP connection is bounded** (`DEFAULT_CONNECT_TIMEOUT_MS`). A server
+  that opens its pipe and never answers `initialize` would otherwise hang
+  `connect()` forever, and with it the layer's `init` — which the runtime
+  resolves by *throwing*, aborting the whole agent execution and orphaning
+  every subprocess started alongside it. Servers connect concurrently, so the
+  timeout also bounds the whole connect phase rather than being multiplied by
+  the server count.
+- **Sizes are capped**: a `SKILL.md` is size-checked before it is read, since
+  its body is retained for the process lifetime and returned by `loadSkill` as
+  a single tool result, and the number of declared MCP servers is capped
+  because each one costs a process spawn.
+
+The layer declares `onInitError: 'disable'`. Plugins are enrichment, not
+load-bearing context: if discovery fails outright the right outcome is an agent
+with no skills and a diagnostic, not a dead execution.
 
 ## Future considerations
 

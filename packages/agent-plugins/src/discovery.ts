@@ -21,6 +21,27 @@ import { containedPath, resolveRoot } from './paths';
 import type { SkillFrontmatter } from './skill';
 import { parseSkill } from './skill';
 
+//#region Limits
+
+/**
+ * Cap on a `SKILL.md`. The body is read whole at discovery, retained on the
+ * layer for the process lifetime, and handed back by `loadSkill` as a single
+ * tool result that goes straight into the conversation — so an unbounded file
+ * is an unbounded tool result. The Agent Skills specification recommends
+ * bodies under ~5k tokens and 500 lines, so this is generous by two orders of
+ * magnitude while still refusing a 50MB file.
+ */
+const MAX_SKILL_BYTES = 256 * 1024;
+
+/**
+ * Cap on declared MCP servers per plugin. Parsing a thousand entries is cheap;
+ * what is not cheap is a thousand connection attempts, each with its own
+ * process spawn and timeout budget.
+ */
+const MAX_MCP_SERVERS = 64;
+
+//#endregion
+
 //#region Types
 
 /** @public One skill discovered inside a plugin (§7.1). */
@@ -260,6 +281,21 @@ async function loadSkill(params: {
     return skip(`§4.1: SKILL.md resolves outside the plugin root (${contained.reason})`);
   }
 
+  // Checked with `stat` before the read, so an oversized file is never pulled
+  // into memory even once.
+  try {
+    const { size } = await stat(contained.path);
+    if (size > MAX_SKILL_BYTES) {
+      return skip(
+        `§7.1: SKILL.md is ${size} bytes, over the ${MAX_SKILL_BYTES}-byte limit; split the detail into references/`,
+      );
+    }
+  } catch (error) {
+    return skip(
+      `§7.1: SKILL.md could not be inspected: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
   let source: string;
   try {
     source = await readFile(contained.path, 'utf8');
@@ -351,9 +387,20 @@ async function discoverMcpServers(params: {
   }
 
   const servers: DiscoveredMcpServer[] = [];
-  for (const [key, raw] of Object.entries(document.document.mcpServers).sort(([a], [b]) =>
+  const entries = Object.entries(document.document.mcpServers).sort(([a], [b]) =>
     a.localeCompare(b),
-  )) {
+  );
+  if (entries.length > MAX_MCP_SERVERS) {
+    diagnostics.push(
+      diagnostic({
+        code: DiagnosticCode.McpServerInvalid,
+        pluginDir: pluginRoot,
+        pluginName,
+        detail: `§7.2.1: ${entries.length} servers declared, over the ${MAX_MCP_SERVERS} limit; the remainder are ignored`,
+      }),
+    );
+  }
+  for (const [key, raw] of entries.slice(0, MAX_MCP_SERVERS)) {
     const entry = validateMcpEntry(raw);
     if (!entry.ok) {
       // §7.2.2 rule 3: skip this server, keep the others.

@@ -14,7 +14,7 @@
  * the inspector package that does not exist.
  */
 
-import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
+import type { FetchLike, Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 
 /** @public Fixed headers to send when connecting to the configured origin. */
 export interface SseRequestInit {
@@ -25,9 +25,16 @@ export interface SseRequestInit {
 export async function createSseTransport(
   url: URL,
   requestInit: SseRequestInit | undefined,
+  /** Origin-aware fetch, so a redirect cannot carry configured headers off-origin. */
+  fetchImpl?: FetchLike,
 ): Promise<Transport> {
   const { SSEClientTransport } = await import('@modelcontextprotocol/sdk/client/sse.js');
   return new SSEClientTransport(url, {
+    ...(fetchImpl === undefined
+      ? {}
+      : {
+          fetch: fetchImpl,
+        }),
     ...(requestInit === undefined
       ? {}
       : {

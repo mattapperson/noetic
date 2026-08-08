@@ -16,7 +16,7 @@ import { mkdir } from 'node:fs/promises';
 import { Client } from '@modelcontextprotocol/sdk/client';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
+import type { FetchLike, Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { createSseTransport } from './mcp/sse';
 import type { ResolvedMcpServer, ResolvedStdioServer } from './mcp-config';
 import { McpTransport } from './mcp-config';
@@ -184,6 +184,78 @@ export function findClientOwnedHeaders(headers: Record<string, string>): Dropped
     }));
 }
 
+/** Redirect hops to follow before giving up, matching the fetch default. */
+const MAX_REDIRECTS = 20;
+
+/**
+ * A `fetch` that drops plugin-configured headers when a redirect crosses an
+ * origin.
+ *
+ * §7.2.1: "A client MUST NOT forward configured headers to a different origin
+ * through a redirect … without explicit user authorization." Plain `fetch`
+ * follows redirects itself and re-sends custom headers to the new origin —
+ * verified on the wire, an `X-Tenant` carrying a tenant token reached a
+ * different-origin target through a 307. (`Authorization` is stripped by fetch
+ * itself; custom headers, which are exactly the ones §7.2.1 contemplates, are
+ * not.)
+ *
+ * So redirects are followed manually: same origin keeps the configured
+ * headers, a different origin re-issues without them.
+ */
+function originAwareFetch(configured: Record<string, string>): FetchLike {
+  const configuredNames = Object.keys(configured).map((name) => name.toLowerCase());
+
+  return async (input: string | URL, init?: RequestInit): Promise<Response> => {
+    let url = new URL(input);
+    const origin = url.origin;
+    let headers = new Headers(init?.headers);
+    // The per-hop init. A 303 — or a 301/302 on a POST — rewrites it to a
+    // bodyless GET, so it has to be a local rather than the parameter.
+    const request: RequestInit = {
+      ...init,
+    };
+    let response: Response;
+
+    for (let hop = 0; ; hop++) {
+      response = await fetch(url, {
+        ...request,
+        headers,
+        // Manual, so the decision about what to re-send is ours.
+        redirect: 'manual',
+      });
+
+      const location = response.headers.get('location');
+      if (location === null || response.status < 300 || response.status >= 400) {
+        return response;
+      }
+      if (hop >= MAX_REDIRECTS) {
+        return response;
+      }
+
+      url = new URL(location, url);
+      if (url.origin !== origin) {
+        // Crossed an origin: strip everything the plugin configured before
+        // following. Anything the SDK added (content-type, session id) stays.
+        const stripped = new Headers(headers);
+        for (const name of configuredNames) {
+          stripped.delete(name);
+        }
+        headers = stripped;
+      }
+      // A 303, or a 301/302 on a POST, becomes a GET without a body. Mutating
+      // `request` is what makes this take effect — the fetch above spreads
+      // `request`, so rewriting the `init` parameter would change nothing.
+      if (
+        response.status === 303 ||
+        ((response.status === 301 || response.status === 302) && request.method === 'POST')
+      ) {
+        request.method = 'GET';
+        request.body = undefined;
+      }
+    }
+  };
+}
+
 async function createTransport(params: {
   server: ResolvedMcpServer;
   pluginRoot: string;
@@ -219,8 +291,11 @@ async function createTransport(params: {
           headers: safeHeaders,
         };
 
+  const guardedFetch = originAwareFetch(safeHeaders);
+
   if (server.type === McpTransport.StreamableHttp) {
     return new StreamableHTTPClientTransport(url, {
+      fetch: guardedFetch,
       ...(requestInit === undefined
         ? {}
         : {
@@ -228,12 +303,69 @@ async function createTransport(params: {
           }),
     });
   }
-  return createSseTransport(url, requestInit);
+  return createSseTransport(url, requestInit, guardedFetch);
 }
 
 //#endregion
 
 //#region Connection
+
+/**
+ * How long one server gets to start, connect, handshake, and list its tools.
+ *
+ * Without a bound, a server that opens its pipe and then never answers
+ * `initialize` hangs `connect()` forever. That is not hypothetical: it takes
+ * the layer's `init` with it, and because the runtime's own init timeout
+ * *throws*, one unresponsive plugin aborts the entire agent execution and
+ * orphans every subprocess started alongside it. §7.2.2 rule 5 requires the
+ * opposite — the client must carry on when a server fails to start or
+ * handshake.
+ */
+export const DEFAULT_CONNECT_TIMEOUT_MS = 1e4;
+
+/**
+ * Race `work` against a deadline. On expiry the caller must close whatever
+ * `work` was waiting on — the losing promise keeps running otherwise, which is
+ * precisely how the subprocesses leaked.
+ */
+async function withDeadline<T>(
+  work: Promise<T>,
+  ms: number,
+): Promise<
+  | {
+      timedOut: false;
+      value: T;
+    }
+  | {
+      timedOut: true;
+    }
+> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<{
+    timedOut: true;
+  }>((settle) => {
+    timer = setTimeout(
+      () =>
+        settle({
+          timedOut: true,
+        }),
+      ms,
+    );
+  });
+  try {
+    return await Promise.race([
+      work.then((value) => ({
+        timedOut: false as const,
+        value,
+      })),
+      deadline,
+    ]);
+  } finally {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
+  }
+}
 
 /** Identifies this client to servers during the MCP handshake. */
 const CLIENT_INFO = {
@@ -254,8 +386,11 @@ export async function connectMcpServer(params: {
   pluginRoot: string;
   pluginData: string;
   baseEnv?: Record<string, string | undefined>;
+  /** Per-server budget for start + connect + handshake + tools/list. */
+  timeoutMs?: number;
 }): Promise<McpConnectResult> {
   const { server } = params;
+  const timeoutMs = params.timeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
 
   if (server.type === McpTransport.Stdio) {
     // §9.1: PLUGIN_DATA must exist and be writable before the subprocess
@@ -275,9 +410,26 @@ export async function connectMcpServer(params: {
 
   const client = new Client(CLIENT_INFO);
 
+  /** Close the client, swallowing the failure — teardown must not mask the cause. */
+  const abandon = async (): Promise<void> => {
+    await client.close().catch(() => {});
+  };
+
   try {
-    await client.connect(await createTransport(params));
+    const connected = await withDeadline(
+      createTransport(params).then((transport) => client.connect(transport)),
+      timeoutMs,
+    );
+    if (connected.timedOut) {
+      // Close it, or the subprocess outlives us with nobody holding a handle.
+      await abandon();
+      return {
+        ok: false,
+        detail: `§7.2.2: server did not complete the MCP handshake within ${timeoutMs}ms`,
+      };
+    }
   } catch (error) {
+    await abandon();
     return {
       ok: false,
       detail: `§7.2.2: connection failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -286,8 +438,15 @@ export async function connectMcpServer(params: {
 
   let tools: McpToolInfo[];
   try {
-    const listed = await client.listTools();
-    tools = listed.tools.map((tool) => ({
+    const listed = await withDeadline(client.listTools(), timeoutMs);
+    if (listed.timedOut) {
+      await abandon();
+      return {
+        ok: false,
+        detail: `§7.2.2: server did not answer tools/list within ${timeoutMs}ms`,
+      };
+    }
+    tools = listed.value.tools.map((tool) => ({
       qualifiedName: `${server.key}/${tool.name}`,
       name: tool.name,
       server: server.key,
@@ -301,7 +460,7 @@ export async function connectMcpServer(params: {
   } catch (error) {
     // The handshake succeeded but the server will not describe itself — it is
     // unusable, so close it rather than leave a session with no tools.
-    await client.close().catch(() => {});
+    await abandon();
     return {
       ok: false,
       detail: `§7.2.2: tools/list failed: ${error instanceof Error ? error.message : String(error)}`,

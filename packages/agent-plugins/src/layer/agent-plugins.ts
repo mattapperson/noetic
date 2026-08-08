@@ -30,6 +30,7 @@
  * controls; the hook is correct for when it does fire.
  */
 
+import type { Dirent } from 'node:fs';
 import { mkdir, readdir, readFile, stat } from 'node:fs/promises';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import type { ContextLayer, ContextScope, ExecutionContext } from '@noetic-tools/types';
@@ -44,6 +45,7 @@ import {
   callMcpTool,
   closeSessions,
   connectMcpServer,
+  DEFAULT_CONNECT_TIMEOUT_MS,
   findClientOwnedHeaders,
 } from '../mcp-client';
 import type { ResolvedMcpServer } from '../mcp-config';
@@ -80,6 +82,12 @@ export interface AgentPluginsConfig {
   connectMcp?: boolean;
   /** Ambient environment for the §9.1 inherited allowlist. Defaults to `process.env`. */
   baseEnv?: Record<string, string | undefined>;
+  /**
+   * Per-server budget for start + connect + handshake + tools/list. Defaults to
+   * {@link DEFAULT_CONNECT_TIMEOUT_MS}. Servers connect concurrently, so this
+   * also bounds the whole connect phase.
+   */
+  connectTimeoutMs?: number;
   slot?: number;
   scope?: ContextScope;
   budget?: ContextLayer['budget'];
@@ -195,9 +203,8 @@ function resolveSkillRef(
  * already what activation delivered.
  */
 async function listSkillResources(skillDir: string): Promise<string[]> {
-  // Resolve the root once. Every reported path is a `relative()` between two
-  // filesystem-resolved paths; comparing a resolved child against a raw root
-  // would emit `../…` strings the caller cannot read back.
+  // Resolve the root once. Every reported path is a `relative()` against this,
+  // so the names handed to the model are the ones they can pass back.
   const base = await resolveRoot(skillDir);
   if (base === null) {
     return [];
@@ -208,33 +215,44 @@ async function listSkillResources(skillDir: string): Promise<string[]> {
     if (depth > MAX_RESOURCE_DEPTH || found.length >= MAX_RESOURCES) {
       return;
     }
-    let entries: string[];
+    let entries: Dirent[];
     try {
-      entries = await readdir(dir);
+      entries = await readdir(dir, {
+        withFileTypes: true,
+      });
     } catch {
       return;
     }
-    for (const entry of entries.sort()) {
+    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
       if (found.length >= MAX_RESOURCES) {
         return;
       }
-      // §4.1 rule 5 governs *access*, and enumerating a directory is access.
-      // `readdir` and `stat` both follow symlinks, so without this check a
-      // skill shipping `references -> ~/.ssh` gets its neighbour's filenames
-      // listed straight back to the model. Checked before descending, so an
-      // escaping link is never walked at all rather than filtered afterwards.
-      const contained = await containedPath(base, join(dir, entry));
-      if (!contained.ok) {
-        continue;
+      const full = join(dir, entry.name);
+
+      // Only a symlink can leave the tree. Everything else is contained by
+      // construction, since its parent already is — so containment is checked
+      // where it can actually fail rather than on every entry, and the entry
+      // keeps the name it was found under. Resolving each entry to its target
+      // instead made an in-root `references -> shared/` report paths under
+      // `shared/…` that the model never saw, and enumerate them twice.
+      if (entry.isSymbolicLink()) {
+        const contained = await containedPath(base, full);
+        if (!contained.ok) {
+          continue;
+        }
       }
-      const full = contained.path;
 
       let isDir: boolean;
-      try {
-        isDir = (await stat(full)).isDirectory();
-      } catch {
-        continue;
+      if (entry.isSymbolicLink()) {
+        try {
+          isDir = (await stat(full)).isDirectory();
+        } catch {
+          continue;
+        }
+      } else {
+        isDir = entry.isDirectory();
       }
+
       if (isDir) {
         await walk(full, depth + 1);
         continue;
@@ -255,8 +273,22 @@ async function listSkillResources(skillDir: string): Promise<string[]> {
 
 //#region Rendering
 
-/** The container tags this layer emits. Plugin text must not be able to forge one. */
-const OWN_TAG_PATTERN = /<(\/?)(agent_plugins|plugins|skills|mcp_servers|active_skills|skill)\b/gi;
+/**
+ * The container tags this layer emits. Plugin text must not be able to forge
+ * one, so the neutralizing pattern is built from this list rather than
+ * restating it — adding a section below without updating a second hand-written
+ * regex would quietly reopen the injection hole.
+ */
+const OWN_TAGS = [
+  'agent_plugins',
+  'plugins',
+  'skills',
+  'mcp_servers',
+  'active_skills',
+  'skill',
+] as const;
+
+const OWN_TAG_PATTERN = new RegExp(`<(/?)(${OWN_TAGS.join('|')})\\b`, 'gi');
 
 /**
  * Escape a short, plugin-controlled metadata string.
@@ -268,7 +300,10 @@ const OWN_TAG_PATTERN = /<(\/?)(agent_plugins|plugins|skills|mcp_servers|active_
  * Metadata is prose, never markup, so full escaping costs nothing.
  */
 function escapeMeta(text: string): string {
-  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  // Only the angle brackets matter: nothing downstream decodes entities, so
+  // escaping `&` as well would turn "Tom & Jerry" into "Tom &amp; Jerry" in
+  // every description for no security benefit.
+  return text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 /**
@@ -413,13 +448,24 @@ async function connectServers(params: {
   plugins: readonly LoadedPlugin[];
   transports: readonly McpTransport[];
   baseEnv: Record<string, string | undefined> | undefined;
+  connectTimeoutMs: number;
   diagnostics: PluginDiagnostic[];
-}): Promise<{
-  servers: ResolvedMcpServer[];
-  sessions: McpSession[];
-}> {
+  /**
+   * Sessions are pushed here the moment they open, rather than only being
+   * returned at the end. If `init` is aborted partway — the runtime's own init
+   * timeout throws — whatever already connected is still reachable for
+   * `dispose` to close. Returning them only on success orphaned every
+   * subprocess that had started.
+   */
+  sink: McpSession[];
+}): Promise<ResolvedMcpServer[]> {
   const servers: ResolvedMcpServer[] = [];
-  const sessions: McpSession[] = [];
+
+  // Each plugin's declared entries, flattened, so connects can run
+  // concurrently. Serially they cost the sum of every server's startup — with
+  // `npx`-launched servers taking seconds apiece, a handful of plugins blew the
+  // runtime's 10s init budget and aborted the execution.
+  const pending: Array<() => Promise<void>> = [];
 
   for (const plugin of params.plugins) {
     if (plugin.mcpServers.length === 0) {
@@ -467,64 +513,64 @@ async function connectServers(params: {
         );
         continue;
       }
-      servers.push(resolved.server);
+      const server = resolved.server;
+      servers.push(server);
 
       // §7.2.1: client-generated headers win. They are stripped rather than
       // sent, so say so — a plugin author who set `Authorization` and saw it
       // silently ignored would otherwise have no way to find out.
-      if (resolved.server.type !== McpTransport.Stdio) {
-        for (const dropped of findClientOwnedHeaders(resolved.server.headers)) {
+      if (server.type !== McpTransport.Stdio) {
+        for (const dropped of findClientOwnedHeaders(server.headers)) {
           params.diagnostics.push(
             diagnostic({
-              code: DiagnosticCode.McpServerInvalid,
+              code: DiagnosticCode.McpHeaderDropped,
               pluginDir: plugin.root,
               pluginName: plugin.manifest.name,
               component: declared.key,
-              detail: `configured header dropped — ${dropped.reason}`,
+              detail: dropped.reason,
             }),
           );
         }
       }
 
-      const connected = await connectMcpServer({
-        server: resolved.server,
-        pluginRoot: plugin.root,
-        // `vars.pluginData`, NOT `plugin.dataDir`: the former is the created,
-        // filesystem-resolved path that `${PLUGIN_DATA}` already expanded to.
-        // Passing the raw one handed the subprocess a $PLUGIN_DATA that
-        // disagreed with its own expanded argv on any symlinked data dir —
-        // which is the common case (/var on macOS, a symlinked home).
-        pluginData: vars.pluginData,
-        ...(params.baseEnv === undefined
-          ? {}
-          : {
-              baseEnv: params.baseEnv,
+      pending.push(async () => {
+        const connected = await connectMcpServer({
+          server,
+          pluginRoot: plugin.root,
+          pluginData: vars.pluginData,
+          timeoutMs: params.connectTimeoutMs,
+          ...(params.baseEnv === undefined
+            ? {}
+            : {
+                baseEnv: params.baseEnv,
+              }),
+        });
+        if (!connected.ok) {
+          // §7.2.2 rule 5: a connection failure is isolated to this server.
+          params.diagnostics.push(
+            diagnostic({
+              code: DiagnosticCode.McpConnectFailed,
+              pluginDir: plugin.root,
+              pluginName: plugin.manifest.name,
+              component: declared.key,
+              detail: connected.detail,
             }),
+          );
+          return;
+        }
+        params.sink.push(connected.session);
       });
-      if (!connected.ok) {
-        // §7.2.2 rule 5: a connection failure is isolated to this server.
-        params.diagnostics.push(
-          diagnostic({
-            code: DiagnosticCode.McpConnectFailed,
-            pluginDir: plugin.root,
-            pluginName: plugin.manifest.name,
-            component: declared.key,
-            detail: connected.detail,
-          }),
-        );
-        continue;
-      }
-      sessions.push(connected.session);
     }
   }
 
-  return {
-    servers,
-    sessions,
-  };
+  await Promise.all(pending.map((run) => run()));
+  return servers;
 }
 
-async function buildIndex(config: AgentPluginsConfig): Promise<PluginIndex> {
+async function buildIndex(
+  config: AgentPluginsConfig,
+  sessionSink: McpSession[],
+): Promise<PluginIndex> {
   const discovered = await discoverPlugins(config.roots, config.dataDir);
   const diagnostics = [
     ...discovered.diagnostics,
@@ -538,24 +584,23 @@ async function buildIndex(config: AgentPluginsConfig): Promise<PluginIndex> {
   }
 
   const connectMcp = config.connectMcp !== false;
-  const { servers, sessions } = connectMcp
+  const servers = connectMcp
     ? await connectServers({
         plugins: discovered.plugins,
         transports: config.transports ?? DEFAULT_TRANSPORTS,
         baseEnv: config.baseEnv,
+        connectTimeoutMs: config.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS,
         diagnostics,
+        sink: sessionSink,
       })
-    : {
-        servers: [],
-        sessions: [],
-      };
+    : [];
 
   return {
     plugins: discovered.plugins,
     skills,
     servers,
-    sessions,
-    tools: sessions.flatMap((session) => session.tools),
+    sessions: sessionSink,
+    tools: sessionSink.flatMap((session) => session.tools),
     diagnostics,
   };
 }
@@ -636,6 +681,13 @@ export function agentPlugins(config: AgentPluginsConfig): AgentPluginsLayer {
   // The index is install-level, not thread-level: rescanning per thread would
   // relaunch every stdio server.
   let indexPromise: Promise<PluginIndex> | undefined;
+  /**
+   * Every session opened by this instance, recorded as it opens. `dispose` has
+   * to be able to close subprocesses started by an `init` that was aborted
+   * before it returned — reading them off the finished index closed nothing,
+   * because there was no finished index.
+   */
+  const liveSessions: McpSession[] = [];
   let index: PluginIndex | undefined;
   // Sessions are owned by the instance, not by any one scope. Counting live
   // inits stops the first thread to finish from tearing down subprocesses the
@@ -647,7 +699,7 @@ export function agentPlugins(config: AgentPluginsConfig): AgentPluginsLayer {
     // poisoned the layer for the life of the process. Clearing on rejection
     // lets the next init retry; the assignment is still synchronous, so
     // concurrent inits continue to share one scan rather than double-spawning.
-    indexPromise ??= buildIndex(config)
+    indexPromise ??= buildIndex(config, liveSessions)
       .then((built) => {
         index = built;
         return built;
@@ -692,6 +744,19 @@ export function agentPlugins(config: AgentPluginsConfig): AgentPluginsLayer {
     // The index is byte-identical every turn, so it belongs in the cached
     // prefix. Activation is the only mutation, and renderDelta handles it.
     placement: 'anchor',
+
+    // The runtime's default init budget is 10s, which is not enough to scan
+    // plugin roots and complete a handshake with every declared MCP server.
+    // Exceeding it does not degrade this layer — it throws, aborting the whole
+    // execution — so the budget is raised to sit above the per-server connect
+    // timeout rather than under it.
+    timeouts: {
+      init: 6e4,
+    },
+    // Plugins are enrichment, not load-bearing context. If discovery fails
+    // outright the right outcome is an agent with no skills and a diagnostic,
+    // not a dead execution.
+    onInitError: 'disable',
 
     provides: {
       plugins: {
@@ -978,19 +1043,19 @@ export function agentPlugins(config: AgentPluginsConfig): AgentPluginsLayer {
         if (liveScopes > 0) {
           return;
         }
-        const loaded = index;
-        if (loaded === undefined) {
-          // Nothing was ever built (or the scan failed). Drop any in-flight
-          // memo so a later init rescans rather than awaiting a dead promise.
-          indexPromise = undefined;
-          return;
+        // Closed from the instance-level sink rather than from `index`, so an
+        // init that was aborted partway still has its subprocesses reaped.
+        await closeSessions([
+          ...liveSessions,
+        ]);
+        liveSessions.length = 0;
+        if (index !== undefined) {
+          // Sessions are gone, but the discovered plugins, skills and
+          // diagnostics are not — a host collects diagnostics at end-of-run,
+          // which is after teardown, and blanking these returned it nothing.
+          index.sessions = [];
+          index.tools = [];
         }
-        await closeSessions(loaded.sessions);
-        // Sessions are gone, but the discovered plugins, skills and diagnostics
-        // are not — a host that collects diagnostics at end-of-run reads them
-        // *after* teardown, and blanking `index` here returned it an empty list.
-        loaded.sessions = [];
-        loaded.tools = [];
         indexPromise = undefined;
       },
     },

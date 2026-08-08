@@ -8,9 +8,11 @@
  * descendants". A nested `skills/a/b/SKILL.md` is not a skill, and treating it
  * as one would let a plugin smuggle in skills the author never declared.
  *
- * The frontmatter field set is closed by the Agent Skills spec, but unlike the
- * plugin manifest there is no report-and-ignore carve-out: a `SKILL.md` that
- * does not conform is skipped whole, and its siblings still load.
+ * The frontmatter field set is *open* — the Agent Skills spec enumerates the
+ * fields it defines but never forbids others, so an unrecognized key is a
+ * warning and the skill still loads. A `SKILL.md` that violates a rule the spec
+ * does state (a malformed `name`, a missing `description`) is skipped whole,
+ * and its siblings still load.
  */
 
 import YAML from 'yaml';
@@ -190,7 +192,7 @@ export function parseSkill(source: string, directoryName: string): SkillParseRes
     for (const key of Object.keys(raw)) {
       if (!DEFINED_FIELDS.has(key)) {
         warnings.push(
-          `frontmatter key '${key}' is not defined by the Agent Skills specification and was ignored`,
+          `frontmatter key '${key}' is not defined by the Agent Skills specification; it is preserved on the parsed frontmatter but this client gives it no meaning`,
         );
       }
     }
