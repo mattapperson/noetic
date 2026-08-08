@@ -24,10 +24,11 @@
  * a block containing none of them. The saving is not payload size — it is that
  * the anchored prefix stays byte-identical, so the prompt cache still hits.
  *
- * Note that as of writing the runtime rarely marks this layer's pin stale, so
- * `renderDelta` seldom fires and the anchor is usually rewritten in place
- * instead. That is a runtime anchoring behavior, not something this layer
- * controls; the hook is correct for when it does fire.
+ * A change landing on a turn where the runtime re-anchors is folded into fresh
+ * pins rather than published, since a new epoch has nothing to supersede. That
+ * is common early on, while the runtime is still probing whether the provider
+ * caches at all; it settles once the provider is judged. Either way the model
+ * sees the change, so the cost is a prefix rewrite rather than lost content.
  */
 
 import type { Dirent } from 'node:fs';

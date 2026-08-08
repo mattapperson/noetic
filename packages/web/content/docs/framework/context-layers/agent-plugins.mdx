@@ -130,7 +130,7 @@ Call callMcpTool to invoke a tool on a connected server.
 Because only activation changes the block, the layer implements `renderDelta`. The hook republishes the block **in full**: the runtime publishes a delta under `action="replace"`, so emitting only the new skill would tell the model that the index and every earlier activation had been superseded by a block containing neither. The benefit is cache stability rather than payload size — the anchored prefix stays byte-identical and the correction is appended.
 
 <Callout type="info">
-In practice the runtime seldom marks this layer's pin stale, so `renderDelta` rarely fires and the anchor is usually rewritten in place instead. That is runtime anchoring behavior, not something this layer controls.
+When a provider never reports a cache hit, the runtime probes it, and each probe re-anchors. A fresh epoch has nothing to supersede, so a change landing on a re-anchor turn is folded into the new pins rather than published as a delta — the model still sees it, in the anchor band. Once the provider is marked cache-blind the epoch settles and deltas publish normally. Early turns against a non-caching provider can look as though `renderDelta` never fires.
 </Callout>
 
 ### Budget behavior

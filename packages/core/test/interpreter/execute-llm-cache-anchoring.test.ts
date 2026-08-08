@@ -579,6 +579,104 @@ describe('executeLLM context anchoring', () => {
     expect(second).not.toContain('full-body-1');
   });
 
+  /**
+   * A provider that never reports a cache hit is probed rather than trusted
+   * forever: each probe re-anchors, and after `MAX_CONSECUTIVE_MISSES` it is
+   * marked blind and the epoch is left alone.
+   *
+   * The consequence is worth pinning, because it was reported as
+   * "`renderDelta` never fires". A fresh epoch has nothing to supersede, so a
+   * layer change that lands on a re-anchor turn is folded into the new pins
+   * instead of being published as a delta. The model still sees the change —
+   * it arrives in the anchor band rather than in a supersede — so this costs a
+   * prefix rewrite, not correctness.
+   */
+  it('folds a change landing on a re-anchor turn into fresh pins, losing no content', async () => {
+    const missReport = () => ({
+      items: [],
+      usage: {
+        inputTokens: 10_000,
+        outputTokens: 5,
+        cachedTokens: 0,
+      },
+      rounds: [
+        {
+          inputTokens: 10_000,
+          outputTokens: 5,
+          cachedTokens: 0,
+        },
+      ],
+    });
+    const { harness, requests } = withCapture({
+      responses: missReport,
+    });
+
+    // Changes exactly once, on turn 3 — which the probe schedule makes a
+    // re-anchor turn (miss recorded on turn 2, acted on at the next assembly).
+    let turn = 0;
+    const layers: ContextLayer[] = [
+      {
+        id: 'once',
+        slot: 100,
+        scope: 'thread',
+        placement: 'anchor',
+        hooks: {
+          async recall() {
+            turn += 1;
+            return turn >= 3 ? 'BODY-CHANGED' : 'BODY-ORIGINAL';
+          },
+          async renderDelta() {
+            return 'compact-change';
+          },
+        },
+      },
+    ];
+
+    await runTurns(harness, layers, 3);
+
+    const third = textsAt(requests, 2).join('\n');
+    // Folded in rather than superseded...
+    expect(third).not.toContain('compact-change');
+    // ...and the model sees the new content regardless, which is what matters.
+    expect(third).toContain('BODY-CHANGED');
+    expect(third).not.toContain('BODY-ORIGINAL');
+  });
+
+  /** Probing terminates: `misses` carries across epochs so the threshold is reachable. */
+  it('stops re-anchoring once a never-caching provider is marked blind', async () => {
+    const missReport = () => ({
+      items: [],
+      usage: {
+        inputTokens: 10_000,
+        outputTokens: 5,
+        cachedTokens: 0,
+      },
+      rounds: [
+        {
+          inputTokens: 10_000,
+          outputTokens: 5,
+          cachedTokens: 0,
+        },
+      ],
+    });
+    const { harness } = withCapture({
+      responses: missReport,
+    });
+    const layers = [
+      textLayer('a', () => 'A'),
+    ];
+
+    await runTurns(harness, layers, 10);
+
+    const store = harness.contextCache;
+    assert(store !== undefined);
+    const epoch = store.epochs.get('t:thread-1');
+    assert(epoch !== undefined);
+    expect(epoch.cacheBlind).toBe(true);
+    // Settled rather than re-anchoring forever: the epoch kept assembling.
+    expect(epoch.assemblies).toBeGreaterThan(1);
+  });
+
   it('republishes in full when renderDelta throws', async () => {
     const { harness, requests } = withCapture();
     let tick = 0;

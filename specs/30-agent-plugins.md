@@ -231,9 +231,17 @@ only the newly activated skill would silently retract the index and every
 earlier activation. The saving is not payload size but cache stability — the
 anchored prefix stays byte-identical and the correction is appended.
 
-In practice the runtime seldom marks this layer's pin stale, so `renderDelta`
-rarely fires and the anchor is usually rewritten in place. That is runtime
-anchoring behavior rather than something this layer controls.
+One runtime behavior is worth knowing, because it looks like a bug and is not.
+When a provider never reports a cache hit, the runtime *probes* it: each probe
+re-anchors, and a fresh epoch has nothing to supersede, so a change landing on
+a re-anchor turn is folded into the new pins instead of being published as a
+delta. The model still sees the change — it arrives in the anchor band rather
+than in a supersede — so the cost is a prefix rewrite, not correctness. After a
+few probes the provider is marked cache-blind, the epoch settles, and deltas
+publish normally. Early conversations against a non-caching provider can
+therefore look as though `renderDelta` never fires; it does, once anchoring
+settles. Pinned by
+`packages/core/test/interpreter/execute-llm-cache-anchoring.test.ts`.
 
 Under budget pressure the layer sheds the **oldest** activated body first, then
 the next, and only trims the index as a last resort — the index is what lets
