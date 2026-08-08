@@ -64,6 +64,14 @@ the execution trace as `agent-plugins.diagnostic` events. §11.3 rule 4 says
 clients SHOULD report; silent skipping is the failure mode that requirement
 exists to prevent.
 
+Not every diagnostic is a skip, and the codes should not be read as though they
+were. `SkillWarning` marks a skill that **loaded** but carries a frontmatter key
+the spec does not define; `McpHeaderDropped` marks a server that resolved and
+connected but had a client-owned header removed; `RootUnreadable` and
+`RootEmpty` are host misconfiguration rather than anything the plugin did
+wrong. A host that treats the presence of a diagnostic as "this component is
+unavailable" will be wrong in all four cases.
+
 ## Path containment (§4.1)
 
 Containment is decided on `realpath` output, never on lexical normalization. A
@@ -76,7 +84,36 @@ parent reports false escapes wherever the root itself sits behind a symlink.
 
 A path whose leaf does not exist yet resolves through its nearest existing
 ancestor, so a client can containment-check a directory it is about to create
-(a `PLUGIN_DATA` subdirectory) without weakening the symlink guarantee.
+(a `PLUGIN_DATA` subdirectory). Two rules keep that from becoming a hole, and
+both were learned by getting it wrong first:
+
+- **Only `ENOENT`/`ENOTDIR` may walk up.** Treating every `realpath` failure as
+  a missing leaf turned `EACCES` and `ELOOP` into synthesized paths that were
+  never resolved at all — the check failed *open* on exactly the inputs it
+  exists to catch.
+- **The deepest existing component is `lstat`ed.** `realpath` reports `ENOENT`
+  for a *dangling* symlink just as it does for a missing file, so without this
+  a link pointing out of the root at a target that did not exist yet was
+  re-appended verbatim and reported contained. Worse than a race: a dangling
+  symlink is a durable capability, and the attacker can materialize the target
+  at any later time.
+
+## Prompt-block integrity
+
+The rendered block carries plugin-controlled text, and the index carries it for
+every installed plugin on every turn with no activation required. Two different
+treatments, because the content differs:
+
+- **Metadata** (descriptions, versions, server keys) is escaped. It is prose,
+  never markup, so escaping the angle brackets costs nothing.
+- **Skill bodies** have only this layer's own container tags neutralized. A body
+  is instructions written for a model and legitimately contains code; escaping
+  every bracket would mangle it. What it must not do is forge a tag this layer
+  emits, which is the breakout vector.
+
+A body can still say anything a skill author wants — that is what a skill *is*.
+The invariant is containment, not persuasion: nothing a plugin writes can close
+the block or forge the index.
 
 ## MCP servers
 
@@ -95,6 +132,17 @@ Rules that JSON Schema cannot express, and that this client enforces:
   HTTP is permitted only for loopback hosts.
 - Header names are case-insensitive, so the same name under two casings is an
   ambiguity the client cannot resolve and invalidates the entry.
+- Headers the client owns — `Authorization`, `mcp-session-id`,
+  `mcp-protocol-version` and the transport's own — are removed during
+  *resolution*, so `ResolvedMcpServer.headers` means "what will be sent" rather
+  than "what was configured". §7.2.1 gives the client precedence, and the MCP
+  SDK merges configured headers last, so leaving this to the transport let a
+  plugin replace the agent's bearer token or pin a session id. Each removal is
+  reported.
+- Redirects are followed manually. Plain `fetch` re-sends custom headers across
+  an origin boundary, which §7.2.1 forbids without explicit authorization;
+  `Authorization` is stripped by fetch itself, but the custom headers the spec's
+  own example uses are not.
 - `env` must not declare `PLUGIN_ROOT` or `PLUGIN_DATA` (§9.2).
 
 ### Transports

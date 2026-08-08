@@ -13,6 +13,7 @@ import {
   cleanupFixtures,
   fakeExecutionContext,
   makePluginRoot,
+  makeScopedStorage,
   manifest,
   mcpConfig,
   skillDoc,
@@ -83,13 +84,7 @@ async function start(layer: AgentPluginsLayer): Promise<{
     throw new Error('layer has no init hook');
   }
   const result = await init({
-    storage: {
-      get: async () => null,
-      set: async () => {},
-      delete: async () => {},
-      list: async () => [],
-      getMany: async () => new Map(),
-    },
+    storage: makeScopedStorage(),
     scopeKey: 'thread:test',
     ctx,
   });

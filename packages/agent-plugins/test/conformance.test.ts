@@ -20,6 +20,7 @@ import {
   fakeExecutionContext,
   linkFixture,
   makePluginRoot,
+  makeScopedStorage,
   manifest,
   mcpConfig,
   skillDoc,
@@ -30,15 +31,6 @@ afterAll(cleanupFixtures);
 
 const ROOT_VAR = `\${${'PLUGIN_ROOT'}}`;
 const DATA_VAR = `\${${'PLUGIN_DATA'}}`;
-
-/** Scoped storage stub — this layer keeps nothing in durable storage. */
-const STORAGE = {
-  get: async () => null,
-  set: async () => {},
-  delete: async () => {},
-  list: async () => [],
-  getMany: async () => new Map(),
-};
 
 //#region Plugin loader
 
@@ -418,13 +410,7 @@ describe('Appendix A — MCP configuration', () => {
     });
     const { ctx } = fakeExecutionContext();
     await layer.hooks.init?.({
-      storage: {
-        get: async () => null,
-        set: async () => {},
-        delete: async () => {},
-        list: async () => [],
-        getMany: async () => new Map(),
-      },
+      storage: makeScopedStorage(),
       scopeKey: 'thread:test',
       ctx,
     });
@@ -661,13 +647,7 @@ describe('Appendix A — resilience', () => {
     });
     const { ctx } = fakeExecutionContext();
     await layer.hooks.init?.({
-      storage: {
-        get: async () => null,
-        set: async () => {},
-        delete: async () => {},
-        list: async () => [],
-        getMany: async () => new Map(),
-      },
+      storage: makeScopedStorage(),
       scopeKey: 'thread:test',
       ctx,
     });
@@ -750,7 +730,7 @@ describe('Appendix A — remaining boxes', () => {
     });
     const { ctx } = fakeExecutionContext();
     await layer.hooks.init?.({
-      storage: STORAGE,
+      storage: makeScopedStorage(),
       scopeKey: 'thread:test',
       ctx,
     });
@@ -803,7 +783,7 @@ describe('Appendix A — remaining boxes', () => {
       });
       const { ctx } = fakeExecutionContext();
       await layer.hooks.init?.({
-        storage: STORAGE,
+        storage: makeScopedStorage(),
         scopeKey: 'thread:test',
         ctx,
       });
@@ -929,13 +909,7 @@ describe('live stdio MCP server', () => {
     });
     const { ctx } = fakeExecutionContext();
     await layer.hooks.init?.({
-      storage: {
-        get: async () => null,
-        set: async () => {},
-        delete: async () => {},
-        list: async () => [],
-        getMany: async () => new Map(),
-      },
+      storage: makeScopedStorage(),
       scopeKey: 'thread:test',
       ctx,
     });
@@ -996,13 +970,7 @@ describe('live stdio MCP server', () => {
     });
     const { ctx } = fakeExecutionContext();
     await layer.hooks.init?.({
-      storage: {
-        get: async () => null,
-        set: async () => {},
-        delete: async () => {},
-        list: async () => [],
-        getMany: async () => new Map(),
-      },
+      storage: makeScopedStorage(),
       scopeKey: 'thread:test',
       ctx,
     });

@@ -43,7 +43,6 @@ export {
   validateManifest,
 } from './manifest';
 export type {
-  DroppedHeader,
   McpConnectResult,
   McpSession,
   McpToolInfo,
@@ -53,10 +52,10 @@ export {
   callMcpTool,
   closeSessions,
   connectMcpServer,
-  findClientOwnedHeaders,
-  stripClientOwnedHeaders,
+  DEFAULT_CONNECT_TIMEOUT_MS,
 } from './mcp-client';
 export type {
+  DroppedHeader,
   McpDocument,
   McpDocumentResult,
   McpEntryResult,
@@ -76,6 +75,7 @@ export {
   McpServerSchema,
   McpTransport as McpTransportKind,
   parseMcpDocument,
+  partitionHeaders,
   resolveMcpServer,
   validateMcpEntry,
 } from './mcp-config';

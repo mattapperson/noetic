@@ -10,7 +10,13 @@
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import type { ExecutionContext, FsAdapter, ShellAdapter } from '@noetic-tools/types';
+import type {
+  ContextLayer,
+  ExecutionContext,
+  FsAdapter,
+  ScopedStorage,
+  ShellAdapter,
+} from '@noetic-tools/types';
 import { estimateTokens } from '@noetic-tools/types';
 import { z } from 'zod';
 import { PLUGIN_SCHEMA_ID } from '../src/manifest';
@@ -265,6 +271,94 @@ export function fakeExecutionContext(): {
     ctx,
     events,
   };
+}
+
+//#endregion
+
+//#region Layer harness
+
+/**
+ * Scoped storage that stores nothing.
+ *
+ * This layer keeps only activation in durable state and reads none of it back
+ * at init, so every suite was writing the same five-method stub inline. Shared
+ * here rather than copied, matching `packages/core/test/_helpers.ts`.
+ */
+export function makeScopedStorage(): ScopedStorage {
+  return {
+    get: async () => null,
+    set: async () => {},
+    delete: async () => {},
+    list: async () => [],
+    getMany: async () => new Map(),
+  };
+}
+
+/** Run a layer's `init` and hand back the recording context it was given. */
+export async function startLayer(layer: ContextLayer): Promise<{
+  ctx: ExecutionContext;
+  events: RecordedEvent[];
+}> {
+  const { ctx, events } = fakeExecutionContext();
+  await layer.hooks.init?.({
+    storage: makeScopedStorage(),
+    scopeKey: 'thread:test',
+    ctx,
+  });
+  return {
+    ctx,
+    events,
+  };
+}
+
+/** Recall a layer and return its rendered text (`''` when it declines to render). */
+export async function recallLayer(
+  layer: ContextLayer,
+  state: unknown,
+  budget = 8000,
+): Promise<string> {
+  const { ctx } = fakeExecutionContext();
+  const result = await layer.hooks.recall?.({
+    log: {
+      items: [],
+      append: () => {},
+    },
+    query: '',
+    ctx,
+    state,
+    budget,
+  });
+  if (result === null || result === undefined) {
+    return '';
+  }
+  return typeof result === 'string' ? result : '';
+}
+
+/**
+ * Narrow a `provides` entry to a callable.
+ *
+ * The contract types `provides` as a union of data and function declarations,
+ * so a test has to discriminate before invoking one. A wrapper rather than the
+ * declaration itself: `LayerFunctionDecl` is invariant in its argument types,
+ * so the erased `unknown` form the union carries will not assign to a narrower
+ * one.
+ */
+export function layerFn(
+  layer: ContextLayer,
+  name: string,
+): (
+  args: Record<string, unknown>,
+  state: unknown,
+  ctx: ExecutionContext,
+) => Promise<{
+  result: unknown;
+  state?: unknown;
+}> {
+  const decl = layer.provides?.[name];
+  if (decl === undefined || decl.kind !== 'function') {
+    throw new Error(`layer does not expose a '${name}' function`);
+  }
+  return (args, state, ctx) => decl.execute(args, state, ctx);
 }
 
 //#endregion

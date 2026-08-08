@@ -46,10 +46,9 @@ import {
   closeSessions,
   connectMcpServer,
   DEFAULT_CONNECT_TIMEOUT_MS,
-  findClientOwnedHeaders,
 } from '../mcp-client';
-import type { ResolvedMcpServer } from '../mcp-config';
-import { DEFAULT_TRANSPORTS, McpTransport, resolveMcpServer } from '../mcp-config';
+import type { McpTransport, ResolvedMcpServer } from '../mcp-config';
+import { DEFAULT_TRANSPORTS, resolveMcpServer } from '../mcp-config';
 import { containedPath, resolveRoot } from '../paths';
 
 //#region Configuration
@@ -104,6 +103,16 @@ const MAX_RESOURCES = 200;
 
 /** Cap on a single resource read, mirroring the guard the file-reference layer uses. */
 const MAX_RESOURCE_BYTES = 1024 * 1024;
+
+/**
+ * How many MCP servers may be connecting at once.
+ *
+ * Unbounded concurrency is not free: 30 plugins declaring two servers each
+ * would launch 60 `npx` processes simultaneously, tens of megabytes apiece.
+ * A small pool costs almost no wall clock — startup is dominated by the
+ * slowest server, not the queue — and keeps peak memory sane.
+ */
+const MAX_CONCURRENT_CONNECTS = 8;
 
 //#endregion
 
@@ -202,7 +211,21 @@ function resolveSkillRef(
  * `readSkillResource`; `SKILL.md` itself is excluded because its content is
  * already what activation delivered.
  */
+/**
+ * Cache of skill directory → bundled resource paths.
+ *
+ * The walk costs up to `MAX_RESOURCES` round trips and ran on *every*
+ * `loadSkill`, including re-activation of a skill already in context — inside a
+ * model tool call, where latency is felt. The skill set is fixed for the life
+ * of the process (discovery runs once), so the answer cannot change.
+ */
+const resourceCache = new Map<string, string[]>();
+
 async function listSkillResources(skillDir: string): Promise<string[]> {
+  const cached = resourceCache.get(skillDir);
+  if (cached !== undefined) {
+    return cached;
+  }
   // Resolve the root once. Every reported path is a `relative()` against this,
   // so the names handed to the model are the ones they can pass back.
   const base = await resolveRoot(skillDir);
@@ -266,6 +289,7 @@ async function listSkillResources(skillDir: string): Promise<string[]> {
   };
 
   await walk(base, 0);
+  resourceCache.set(skillDir, found);
   return found;
 }
 
@@ -444,6 +468,24 @@ async function ensureDataDir(dataDir: string): Promise<string> {
   return (await resolveRoot(dataDir)) ?? dataDir;
 }
 
+/** Run tasks with at most `limit` in flight. Tasks never reject — they report. */
+async function runBounded(tasks: ReadonlyArray<() => Promise<void>>, limit: number): Promise<void> {
+  let next = 0;
+  const workers = Array.from({
+    length: Math.min(limit, tasks.length),
+  }).map(async () => {
+    for (;;) {
+      const index = next++;
+      const task = tasks[index];
+      if (task === undefined) {
+        return;
+      }
+      await task();
+    }
+  });
+  await Promise.all(workers);
+}
+
 async function connectServers(params: {
   plugins: readonly LoadedPlugin[];
   transports: readonly McpTransport[];
@@ -516,21 +558,19 @@ async function connectServers(params: {
       const server = resolved.server;
       servers.push(server);
 
-      // §7.2.1: client-generated headers win. They are stripped rather than
-      // sent, so say so — a plugin author who set `Authorization` and saw it
-      // silently ignored would otherwise have no way to find out.
-      if (server.type !== McpTransport.Stdio) {
-        for (const dropped of findClientOwnedHeaders(server.headers)) {
-          params.diagnostics.push(
-            diagnostic({
-              code: DiagnosticCode.McpHeaderDropped,
-              pluginDir: plugin.root,
-              pluginName: plugin.manifest.name,
-              component: declared.key,
-              detail: dropped.reason,
-            }),
-          );
-        }
+      // §7.2.1: client-generated headers win. Resolution already removed them,
+      // so this only reports — a plugin author who set `Authorization` and saw
+      // it quietly ignored would otherwise have no way to find out.
+      for (const dropped of resolved.droppedHeaders) {
+        params.diagnostics.push(
+          diagnostic({
+            code: DiagnosticCode.McpHeaderDropped,
+            pluginDir: plugin.root,
+            pluginName: plugin.manifest.name,
+            component: declared.key,
+            detail: dropped.reason,
+          }),
+        );
       }
 
       pending.push(async () => {
@@ -563,7 +603,7 @@ async function connectServers(params: {
     }
   }
 
-  await Promise.all(pending.map((run) => run()));
+  await runBounded(pending, MAX_CONCURRENT_CONNECTS);
   return servers;
 }
 

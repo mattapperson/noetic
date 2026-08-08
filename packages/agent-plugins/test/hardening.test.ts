@@ -8,67 +8,29 @@
  */
 
 import { afterAll, describe, expect, test } from 'bun:test';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DiagnosticCode } from '../src/diagnostics';
 import { discoverPlugins } from '../src/discovery';
 import { agentPlugins } from '../src/layer/agent-plugins';
-import {
-  buildSubprocessEnv,
-  findClientOwnedHeaders,
-  stripClientOwnedHeaders,
-} from '../src/mcp-client';
-import { McpTransport } from '../src/mcp-config';
+import { buildSubprocessEnv, connectMcpServer } from '../src/mcp-client';
+import { McpTransport, partitionHeaders, resolveMcpServer } from '../src/mcp-config';
 import { containedPath } from '../src/paths';
 import { parseSkill } from '../src/skill';
 import {
   cleanupFixtures,
   fakeExecutionContext,
+  layerFn,
   linkFixture,
   makePluginRoot,
   manifest,
+  recallLayer,
   skillDoc,
+  startLayer,
   tempDir,
 } from './_helpers';
 
 afterAll(cleanupFixtures);
-
-const STORAGE = {
-  get: async () => null,
-  set: async () => {},
-  delete: async () => {},
-  list: async () => [],
-  getMany: async () => new Map(),
-};
-
-async function startLayer(layer: ReturnType<typeof agentPlugins>): Promise<void> {
-  const { ctx } = fakeExecutionContext();
-  await layer.hooks.init?.({
-    storage: STORAGE,
-    scopeKey: 'thread:test',
-    ctx,
-  });
-}
-
-async function recallText(
-  layer: ReturnType<typeof agentPlugins>,
-  activated: string[],
-): Promise<string> {
-  const { ctx } = fakeExecutionContext();
-  const result = await layer.hooks.recall?.({
-    log: {
-      items: [],
-      append: () => {},
-    },
-    query: '',
-    ctx,
-    state: {
-      activated,
-    },
-    budget: 8000,
-  });
-  return typeof result === 'string' ? result : '';
-}
 
 //#region Containment fails closed
 
@@ -100,6 +62,44 @@ describe('§4.1 containment fails closed', () => {
     expect(result.ok).toBe(true);
   });
 
+  test('refuses a path it cannot read, rather than synthesizing one (EACCES)', async () => {
+    // The walk-up used to catch *every* realpath failure, so an unreadable
+    // component was treated as "missing leaf" and re-appended unresolved. Only
+    // ENOENT/ENOTDIR may walk up; everything else fails closed.
+    const base = await tempDir();
+    const root = join(base, 'root');
+    const locked = join(root, 'locked');
+    await mkdir(locked, {
+      recursive: true,
+    });
+    await writeFile(join(locked, 'secret.txt'), 'x', 'utf8');
+    await chmod(locked, 0o000);
+    try {
+      const result = await containedPath(root, join(locked, 'secret.txt'));
+      expect(result.ok).toBe(false);
+      if (result.ok) {
+        return;
+      }
+      expect(result.reason).toBe('unresolvable');
+    } finally {
+      // Restore, or the fixture cleanup cannot remove the tree.
+      await chmod(locked, 0o755);
+    }
+  });
+
+  test('refuses a symlink loop rather than synthesizing a path (ELOOP)', async () => {
+    const base = await tempDir();
+    const root = join(base, 'root');
+    await mkdir(root, {
+      recursive: true,
+    });
+    await linkFixture(join(root, 'a'), join(root, 'b'), 'dir');
+    await linkFixture(join(root, 'b'), join(root, 'a'), 'dir');
+
+    const result = await containedPath(root, join(root, 'a'));
+    expect(result.ok).toBe(false);
+  });
+
   test('does not enumerate filenames outside the skill directory', async () => {
     // `loadSkill` used to walk with symlink-following readdir/stat and no
     // containment check, so a skill shipping `references -> ~/.ssh` had its
@@ -127,12 +127,8 @@ describe('§4.1 containment fails closed', () => {
     });
     await startLayer(layer);
 
-    const decl = layer.provides?.loadSkill;
-    if (decl === undefined || decl.kind !== 'function') {
-      throw new Error('loadSkill should be exposed');
-    }
     const { ctx } = fakeExecutionContext();
-    const outcome = await decl.execute(
+    const outcome = await layerFn(layer, 'loadSkill')(
       {
         skill: 'p/peek',
       },
@@ -176,7 +172,9 @@ describe('plugin text cannot forge the context block', () => {
     });
     await startLayer(layer);
 
-    const text = await recallText(layer, []);
+    const text = await recallLayer(layer, {
+      activated: [],
+    });
     expect(text).not.toContain('<system>');
     expect(text.match(/<\/agent_plugins>/g)).toHaveLength(1);
   });
@@ -202,9 +200,11 @@ describe('plugin text cannot forge the context block', () => {
     });
     await startLayer(layer);
 
-    const text = await recallText(layer, [
-      'evil/evil',
-    ]);
+    const text = await recallLayer(layer, {
+      activated: [
+        'evil/evil',
+      ],
+    });
     // Exactly one real close, and it is the last thing in the block.
     expect(text.match(/<\/agent_plugins>/g)).toHaveLength(1);
     expect(text.trimEnd().endsWith('</agent_plugins>')).toBe(true);
@@ -233,9 +233,11 @@ describe('plugin text cannot forge the context block', () => {
     });
     await startLayer(layer);
 
-    const text = await recallText(layer, [
-      'p/s',
-    ]);
+    const text = await recallLayer(layer, {
+      activated: [
+        'p/s',
+      ],
+    });
     expect(text).toContain('<div>');
     expect(text).toContain('Array<T>');
   });
@@ -354,24 +356,168 @@ describe('Agent Skills frontmatter is an open set', () => {
 //#region MCP header precedence
 
 describe('§7.2.1 client-generated headers take precedence', () => {
-  test('strips headers the client owns, case-insensitively', () => {
-    const kept = stripClientOwnedHeaders({
-      Authorization: 'Bearer plugin-controlled',
-      'MCP-Session-Id': 'hijacked',
+  test('resolution removes them, so the resolved server is what will be sent', async () => {
+    // Enforced during resolution rather than at transport-construction time:
+    // `ResolvedMcpServer.headers` is read by `provides.mcpServers`, and it must
+    // not advertise a header the client will never send.
+    const result = await resolveMcpServer({
+      key: 'p/api',
+      config: {
+        type: 'streamable-http',
+        url: 'https://example.com/mcp',
+        headers: {
+          Authorization: 'Bearer plugin-controlled',
+          'MCP-Session-Id': 'hijacked',
+          'X-Tenant': 'public',
+        },
+      },
+      vars: {
+        pluginRoot: '/plugins/p',
+        pluginData: '/data/p',
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok || result.server.type === McpTransport.Stdio) {
+      return;
+    }
+    expect(result.server.headers).toEqual({
+      'X-Tenant': 'public',
+    });
+    expect(result.droppedHeaders.map((d) => d.name).sort()).toEqual([
+      'Authorization',
+      'MCP-Session-Id',
+    ]);
+  });
+
+  test('the stripped headers never reach the wire', async () => {
+    // The defect lived in the seam, not the helper: the SDK merges configured
+    // headers *last*, so a unit test of the filter would stay green even if the
+    // transport were wired straight to the raw configured set. This asserts on
+    // what a real server actually received.
+    const received: Array<Record<string, string>> = [];
+    const server = Bun.serve({
+      port: 0,
+      fetch(request) {
+        received.push(Object.fromEntries(request.headers));
+        return new Response('no', {
+          status: 500,
+        });
+      },
+    });
+
+    try {
+      const resolved = await resolveMcpServer({
+        key: 'p/api',
+        config: {
+          type: 'streamable-http',
+          url: `http://127.0.0.1:${server.port}/mcp`,
+          headers: {
+            Authorization: 'Bearer plugin-controlled',
+            'mcp-session-id': 'hijacked',
+            'X-Tenant': 'public',
+          },
+        },
+        vars: {
+          pluginRoot: '/plugins/p',
+          pluginData: '/data/p',
+        },
+      });
+      if (!resolved.ok) {
+        throw new Error('fixture should resolve');
+      }
+
+      await connectMcpServer({
+        server: resolved.server,
+        pluginRoot: '/plugins/p',
+        pluginData: '/data/p',
+        timeoutMs: 3000,
+      });
+
+      expect(received.length).toBeGreaterThan(0);
+      for (const headers of received) {
+        expect(headers.authorization).toBeUndefined();
+        expect(headers['mcp-session-id']).toBeUndefined();
+        // The legitimate custom header still goes out.
+        expect(headers['x-tenant']).toBe('public');
+      }
+    } finally {
+      server.stop(true);
+    }
+  }, 20_000);
+
+  test('configured headers do not follow a redirect across an origin', async () => {
+    // §7.2.1 forbids forwarding configured headers to a different origin
+    // through a redirect. `Authorization` is stripped by fetch itself, but
+    // custom headers — the ones the spec's own example uses — are not.
+    const atTarget: Array<Record<string, string>> = [];
+    const target = Bun.serve({
+      port: 0,
+      fetch(request) {
+        atTarget.push(Object.fromEntries(request.headers));
+        return new Response('ok', {
+          status: 500,
+        });
+      },
+    });
+    const redirector = Bun.serve({
+      port: 0,
+      fetch() {
+        return new Response(null, {
+          status: 307,
+          headers: {
+            location: `http://127.0.0.1:${target.port}/mcp`,
+          },
+        });
+      },
+    });
+
+    try {
+      const resolved = await resolveMcpServer({
+        key: 'p/api',
+        config: {
+          type: 'streamable-http',
+          url: `http://127.0.0.1:${redirector.port}/mcp`,
+          headers: {
+            'X-Tenant': 'SECRET-TENANT-TOKEN',
+          },
+        },
+        vars: {
+          pluginRoot: '/plugins/p',
+          pluginData: '/data/p',
+        },
+      });
+      if (!resolved.ok) {
+        throw new Error('fixture should resolve');
+      }
+
+      await connectMcpServer({
+        server: resolved.server,
+        pluginRoot: '/plugins/p',
+        pluginData: '/data/p',
+        timeoutMs: 3000,
+      });
+
+      expect(atTarget.length).toBeGreaterThan(0);
+      for (const headers of atTarget) {
+        expect(headers['x-tenant']).toBeUndefined();
+      }
+    } finally {
+      redirector.stop(true);
+      target.stop(true);
+    }
+  }, 20_000);
+
+  test('partitionHeaders matches case-insensitively', () => {
+    const { kept, dropped } = partitionHeaders({
+      AUTHORIZATION: 'Bearer x',
       'X-Tenant': 'public',
     });
     expect(kept).toEqual({
       'X-Tenant': 'public',
     });
-  });
-
-  test('reports what it dropped rather than dropping silently', () => {
-    const dropped = findClientOwnedHeaders({
-      authorization: 'Bearer x',
-      'X-Tenant': 'public',
-    });
     expect(dropped.map((d) => d.name)).toEqual([
-      'authorization',
+      'AUTHORIZATION',
     ]);
   });
 });
