@@ -2,7 +2,7 @@
  * Minimal SSE fan-out plus the JSON conventions shared by both servers:
  * `data: <json>\n\n` framing (openui-airbnb precedent) with a retry hint and
  * periodic ping comments so idle connections stay alive, and a Map/Set-safe
- * stringify (the fileReference layer's state holds a `Map`).
+ * stringify (the filesystem layer's state holds a `Map`).
  */
 
 const PING_INTERVAL_MS = 15e3;

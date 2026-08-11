@@ -23,9 +23,9 @@ function frameworkShaped(value: unknown): WorkflowDocument {
   return value;
 }
 
-function llm(id: string, instructions = 'do the thing'): WorkflowNode {
+function callModel(id: string, instructions = 'do the thing'): WorkflowNode {
   return {
-    kind: 'llm',
+    kind: 'callModel',
     id,
     instructions,
   };
@@ -50,7 +50,7 @@ function sources(edges: GraphEdge[], to: string): string[] {
 
 describe('toFlow', () => {
   it('brackets a lone leaf with start and end terminals', () => {
-    const { nodes, edges } = toFlow(doc(llm('only')));
+    const { nodes, edges } = toFlow(doc(callModel('only')));
 
     expect(nodes.map((n) => n.id)).toEqual([
       '~start',
@@ -71,9 +71,9 @@ describe('toFlow', () => {
         kind: 'sequence',
         id: 'seq',
         steps: [
-          llm('a'),
-          llm('b'),
-          llm('c'),
+          callModel('a'),
+          callModel('b'),
+          callModel('c'),
         ],
       }),
     );
@@ -91,16 +91,16 @@ describe('toFlow', () => {
     ]);
   });
 
-  it('splits a fork into paths and rejoins them at a join carrying the merge strategy', () => {
+  it('splits an inParallel node into paths and rejoins them at a join carrying the merge strategy', () => {
     const { nodes, edges } = toFlow(
       doc({
-        kind: 'fork',
+        kind: 'inParallel',
         id: 'fan',
         mode: 'all',
         merge: 'concat',
         paths: [
-          llm('left'),
-          llm('right'),
+          callModel('left'),
+          callModel('right'),
         ],
       }),
     );
@@ -117,13 +117,13 @@ describe('toFlow', () => {
     expect(node(nodes, 'fan~join').chips).toContain('merge concat');
   });
 
-  it('marks a dynamic fork as one path standing for many', () => {
+  it('marks a dynamic inParallel node as one path standing for many', () => {
     const { nodes, edges } = toFlow(
       doc({
-        kind: 'fork',
+        kind: 'inParallel',
         id: 'fan',
         mode: 'all',
-        each: llm('body'),
+        each: callModel('body'),
         over: 'items',
       }),
     );
@@ -132,19 +132,19 @@ describe('toFlow', () => {
     expect(edges.find((edge) => edge.to === 'body')?.label).toBe('per item');
   });
 
-  it('numbers branch routes, because the first match wins', () => {
+  it('numbers conditional routes, because the first match wins', () => {
     const { nodes, edges } = toFlow(
       doc({
-        kind: 'branch',
+        kind: 'conditional',
         id: 'gate',
         routes: [
           {
             match: 'yes',
-            target: llm('approve'),
+            target: callModel('approve'),
           },
           {
             match: 'yes please',
-            target: llm('shadowed'),
+            target: callModel('shadowed'),
           },
         ],
       }),
@@ -159,18 +159,18 @@ describe('toFlow', () => {
     expect(targets(edges, 'gate')).toContain('~end');
   });
 
-  it('routes a branch default without labelling it as a match', () => {
+  it('routes a conditional default without labelling it as a match', () => {
     const { edges } = toFlow(
       doc({
-        kind: 'branch',
+        kind: 'conditional',
         id: 'gate',
         routes: [
           {
             match: 'yes',
-            target: llm('approve'),
+            target: callModel('approve'),
           },
         ],
-        default: llm('fallback'),
+        default: callModel('fallback'),
       }),
     );
 
@@ -184,7 +184,7 @@ describe('toFlow', () => {
       doc({
         kind: 'loop',
         id: 'until-done',
-        body: llm('work'),
+        body: callModel('work'),
         until: {
           kind: 'maxSteps',
           n: 5,
@@ -216,7 +216,7 @@ describe('toFlow', () => {
       doc({
         kind: 'loop',
         id: 'forever',
-        body: llm('work'),
+        body: callModel('work'),
         until: {
           kind: 'noToolCalls',
         },
@@ -228,24 +228,24 @@ describe('toFlow', () => {
     expect(node(nodes, 'forever').chips).toContain('max 1000 (default)');
   });
 
-  it('gives `every` no exit, because it never returns', () => {
+  it('gives `schedule` no exit, because it never returns', () => {
     const { nodes, edges } = toFlow(
       doc({
         kind: 'sequence',
         id: 'seq',
         steps: [
           {
-            kind: 'every',
+            kind: 'schedule',
             id: 'tick',
-            step: llm('poll'),
-            ms: 1e3,
+            step: callModel('poll'),
+            interval: 1e3,
           },
-          llm('unreachable'),
+          callModel('unreachable'),
         ],
       }),
     );
 
-    // `executeEvery` only returns by throwing, so nothing downstream can run.
+    // The schedule interpreter only returns by throwing, so nothing downstream can run.
     // Drawing an edge to it would promise a step that never happens.
     expect(targets(edges, 'tick')).toEqual([
       'poll',
@@ -258,13 +258,13 @@ describe('toFlow', () => {
   it('does not label a race join with a merge strategy', () => {
     const { nodes } = toFlow(
       doc({
-        kind: 'fork',
+        kind: 'inParallel',
         id: 'first',
         mode: 'race',
         merge: 'concat',
         paths: [
-          llm('a'),
-          llm('b'),
+          callModel('a'),
+          callModel('b'),
         ],
       }),
     );
@@ -286,8 +286,8 @@ describe('toFlow', () => {
           kind: 'sequence',
           id: 'inner',
           steps: [
-            llm('first'),
-            llm('second'),
+            callModel('first'),
+            callModel('second'),
           ],
         }),
       }),
@@ -330,7 +330,7 @@ describe('toFlow', () => {
         id: 'seq',
         steps: [
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'script',
             execute: 'echo hi',
             retry: {
@@ -340,7 +340,7 @@ describe('toFlow', () => {
             },
           },
           {
-            kind: 'provide',
+            kind: 'withContext',
             id: 'scoped',
             layers: [
               'notes',
@@ -378,7 +378,7 @@ describe('toFlow', () => {
       doc({
         kind: 'spawn',
         id: 'child',
-        child: llm('inner'),
+        child: callModel('inner'),
         timeout: 3e4,
       }),
     );
@@ -414,8 +414,8 @@ describe('toFlow', () => {
         kind: 'sequence',
         id: 'seq',
         steps: [
-          llm('same'),
-          llm('same'),
+          callModel('same'),
+          callModel('same'),
         ],
       }),
     );
@@ -427,7 +427,7 @@ describe('toFlow', () => {
   });
 
   it('clips a long instruction to a single line', () => {
-    const { nodes } = toFlow(doc(llm('wordy', `first\nsecond ${'x'.repeat(300)}`)));
+    const { nodes } = toFlow(doc(callModel('wordy', `first\nsecond ${'x'.repeat(300)}`)));
 
     const detail = node(nodes, 'wordy').detail;
     assert(detail !== undefined);

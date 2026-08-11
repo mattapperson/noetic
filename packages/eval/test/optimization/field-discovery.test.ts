@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { Step, Tool } from '@noetic-tools/core';
-import { branch, spawn, step } from '@noetic-tools/core';
+import { spawn } from '@noetic-tools/core';
 import { z } from 'zod';
 import { discoverFields, enrichWithSourceLocations } from '../../src/optimization/field-discovery';
 import { OptimizeScope } from '../../src/types/eval';
@@ -35,14 +35,15 @@ function makeMockTool(name: string, description: string): Tool {
 }
 
 describe('discoverFields', () => {
-  test('finds instructions field in StepLLM', () => {
-    const llmStep = step.llm({
+  test('finds instructions field in StepCallModel', () => {
+    const callModelStep: Step = {
+      kind: 'callModel',
       id: 'my-llm',
       model: 'test-model',
       instructions: 'You are a helpful assistant.',
-    });
+    };
 
-    const fields = discoverFields(llmStep);
+    const fields = discoverFields(callModelStep);
 
     expect(fields).toHaveLength(1);
     expect(fields[0].path).toBe('my-llm.instructions');
@@ -51,9 +52,9 @@ describe('discoverFields', () => {
     expect(fields[0].fieldKind).toBe(FieldKind.Instructions);
   });
 
-  test('finds tool name and description in StepLLM with tools', () => {
-    const llmStep: Step = {
-      kind: 'llm',
+  test('finds tool name and description in StepCallModel with tools', () => {
+    const callModelStep: Step = {
+      kind: 'callModel',
       id: 'llm-with-tools',
       model: 'test-model',
       instructions: 'Be helpful',
@@ -62,7 +63,7 @@ describe('discoverFields', () => {
       ],
     };
 
-    const fields = discoverFields(llmStep);
+    const fields = discoverFields(callModelStep);
 
     expect(fields).toHaveLength(3);
     expect(fields[0].fieldKind).toBe(FieldKind.Instructions);
@@ -72,9 +73,9 @@ describe('discoverFields', () => {
     expect(fields[2].value).toBe('search');
   });
 
-  test('finds tool name and description in StepTool', () => {
+  test('finds tool name and description in StepInvokeTool', () => {
     const toolStep: Step = {
-      kind: 'tool',
+      kind: 'invokeTool',
       id: 'calc-step',
       tool: makeMockTool('calculator', 'Perform calculations'),
     };
@@ -90,16 +91,17 @@ describe('discoverFields', () => {
     expect(fields[1].fieldKind).toBe(FieldKind.ToolName);
   });
 
-  test('recurses into StepSpawn wrapping a StepLLM', () => {
-    const llmStep = step.llm({
+  test('recurses into StepSpawn wrapping a StepCallModel', () => {
+    const callModelStep: Step = {
+      kind: 'callModel',
       id: 'inner-llm',
       model: 'test-model',
       instructions: 'Inner system prompt',
-    });
+    };
 
     const spawnStep = spawn({
       id: 'outer-spawn',
-      child: llmStep,
+      child: callModelStep,
     });
 
     const fields = discoverFields(spawnStep);
@@ -109,46 +111,50 @@ describe('discoverFields', () => {
     expect(fields[0].value).toBe('Inner system prompt');
   });
 
-  test('finds fields in branch _optimizable children', () => {
-    const llmStep = step.llm({
+  test('finds fields in conditional _optimizable children', () => {
+    const callModelStep: Step = {
+      kind: 'callModel',
       id: 'branch-llm',
       model: 'test-model',
       instructions: 'Branch system',
-    });
+    };
 
-    const branchStep = branch({
+    const conditionalStep: Step = {
+      kind: 'conditional',
       id: 'my-branch',
       route: () => null,
       _optimizable: [
-        llmStep,
+        callModelStep,
       ],
-    });
+    };
 
-    const fields = discoverFields(branchStep);
+    const fields = discoverFields(conditionalStep);
 
     expect(fields).toHaveLength(1);
     expect(fields[0].path).toBe('my-branch.branch-llm.instructions');
     expect(fields[0].value).toBe('Branch system');
   });
 
-  test('returns empty array for StepRun', () => {
-    const runStep = step.run({
+  test('returns empty array for StepRunCode', () => {
+    const runCodeStep: Step = {
+      kind: 'runCode',
       id: 'my-run',
       execute: async (input: unknown) => input,
-    });
+    };
 
-    const fields = discoverFields(runStep);
+    const fields = discoverFields(runCodeStep);
 
     expect(fields).toHaveLength(0);
   });
 
-  test('returns empty array for StepLLM without instructions or tools', () => {
-    const llmStep = step.llm({
+  test('returns empty array for StepCallModel without instructions or tools', () => {
+    const callModelStep: Step = {
+      kind: 'callModel',
       id: 'bare-llm',
       model: 'test-model',
-    });
+    };
 
-    const fields = discoverFields(llmStep);
+    const fields = discoverFields(callModelStep);
 
     expect(fields).toHaveLength(0);
   });
@@ -250,8 +256,8 @@ describe('enrichWithSourceLocations', () => {
 });
 
 describe('discoverFields scope filtering', () => {
-  const llmStep: Step = {
-    kind: 'llm',
+  const callModelStep: Step = {
+    kind: 'callModel',
     id: 'scoped-llm',
     model: 'test-model',
     instructions: 'You are helpful',
@@ -269,7 +275,7 @@ describe('discoverFields scope filtering', () => {
   }
 
   test('scope prompts-only returns System and ToolDescription but not ToolName', () => {
-    const fields = discoverFields(llmStep, undefined, OptimizeScope.PromptsOnly);
+    const fields = discoverFields(callModelStep, undefined, OptimizeScope.PromptsOnly);
 
     const kinds = fields.map((f) => f.fieldKind);
     expect(kinds).toContain(FieldKind.Instructions);
@@ -279,17 +285,17 @@ describe('discoverFields scope filtering', () => {
   });
 
   test('scope flow-structure returns all three field kinds', () => {
-    const fields = discoverFields(llmStep, undefined, OptimizeScope.FlowStructure);
+    const fields = discoverFields(callModelStep, undefined, OptimizeScope.FlowStructure);
     expectAllThreeKinds(fields);
   });
 
   test('scope full returns all three field kinds', () => {
-    const fields = discoverFields(llmStep, undefined, OptimizeScope.Full);
+    const fields = discoverFields(callModelStep, undefined, OptimizeScope.Full);
     expectAllThreeKinds(fields);
   });
 
   test('scope undefined returns all fields without filtering', () => {
-    const fields = discoverFields(llmStep, undefined, undefined);
+    const fields = discoverFields(callModelStep, undefined, undefined);
     expectAllThreeKinds(fields);
   });
 });

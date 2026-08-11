@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'bun:test';
 import type { Step } from '@noetic-tools/core';
-import { step } from '@noetic-tools/core';
 
 import {
   createGepaAdapter,
@@ -37,16 +36,17 @@ function makeFields(): OptimizableField[] {
   ];
 }
 
-function makeLlmStep(): Step {
-  return step.llm({
+function makeCallModelStep(): Step {
+  return {
+    kind: 'callModel',
     id: 'agent',
     model: 'openai/gpt-4o-mini',
     instructions: 'original instructions',
-  });
+  };
 }
 
 function instructionsOf(s: Step): string | undefined {
-  if (s.kind !== 'llm') {
+  if (s.kind !== 'callModel') {
     return undefined;
   }
   return typeof s.instructions === 'string' ? s.instructions : undefined;
@@ -139,7 +139,7 @@ describe('createGepaAdapter evaluate', () => {
     const fields = makeFields();
     let receivedStep: Step | undefined;
     const adapter = createGepaAdapter({
-      step: makeLlmStep(),
+      step: makeCallModelStep(),
       fields,
       runEval: async (s) => {
         receivedStep = s;
@@ -182,7 +182,7 @@ describe('createGepaAdapter evaluate', () => {
   });
 
   test('destroyed markers evaluate the ORIGINAL step', async () => {
-    const original = makeLlmStep();
+    const original = makeCallModelStep();
     let receivedStep: Step | undefined;
     const adapter = createGepaAdapter({
       step: original,
@@ -212,7 +212,7 @@ describe('createGepaAdapter evaluate', () => {
   });
 
   test('missing component key evaluates the original step', async () => {
-    const original = makeLlmStep();
+    const original = makeCallModelStep();
     let receivedStep: Step | undefined;
     const adapter = createGepaAdapter({
       step: original,
@@ -249,7 +249,7 @@ describe('createGepaAdapter propose_new_texts', () => {
     const fields = makeFields();
     const fieldOrder = fields.map((f) => f.path);
     const adapter = createGepaAdapter({
-      step: makeLlmStep(),
+      step: makeCallModelStep(),
       fields,
       runEval: async () => ({}),
       componentId: COMPONENT_ID,
@@ -292,7 +292,7 @@ describe('createGepaAdapter propose_new_texts', () => {
   test('a throwing proposer falls back to the current value per field', async () => {
     const fields = makeFields();
     const adapter = createGepaAdapter({
-      step: makeLlmStep(),
+      step: makeCallModelStep(),
       fields,
       runEval: async () => ({}),
       componentId: COMPONENT_ID,
@@ -332,7 +332,7 @@ describe('createGepaAdapter propose_new_texts', () => {
   test('unparseable current candidate falls back to initial field values', async () => {
     const fields = makeFields();
     const adapter = createGepaAdapter({
-      step: makeLlmStep(),
+      step: makeCallModelStep(),
       fields,
       runEval: async () => ({}),
       componentId: COMPONENT_ID,

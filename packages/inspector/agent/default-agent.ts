@@ -7,7 +7,7 @@
  * `deps.traceExporter` (feeds the Trace tab) — pass both to the harness or
  * those panels go dark.
  *
- * The note tools write through `toolCtx.context` into the Working Memory
+ * The note tools write through `toolCtx.memory` into the scratchpad
  * layer's state — watch its tab light up when a note is saved, and the
  * Context tab render it into the next turn's window.
  *
@@ -22,20 +22,20 @@ import type {
 } from '@noetic-tools/core';
 import {
   AgentHarness,
-  historyWindow,
-  observationalContext,
-  planContext,
-  staticContent,
+  history,
+  instructions,
+  observations,
+  plan,
+  scratchpad,
   step,
-  temporalContext,
+  temporal,
   tool,
-  workingMemoryContext,
 } from '@noetic-tools/core';
 import { z } from 'zod';
 
 //#region Tools
 
-const WORKING_MEMORY_LAYER_ID = 'working-context';
+const SCRATCHPAD_LAYER_ID = 'scratchpad';
 
 const NotesSchema = z.object({
   notes: z.array(z.string()),
@@ -53,7 +53,7 @@ function readNotes(state: WorkingMemoryContextState | undefined): string[] {
 const saveNote = tool({
   name: 'save_note',
   description:
-    "Save a short note into working memory. Saved notes render into the agent's context window on every later turn.",
+    "Save a short note into the scratchpad. Saved notes render into the agent's context window on every later turn.",
   input: z.object({
     text: z.string().describe('The note to save.'),
   }),
@@ -62,11 +62,9 @@ const saveNote = tool({
     count: z.number(),
   }),
   async execute({ text }, toolCtx) {
-    const notes = readNotes(
-      toolCtx.context.get<WorkingMemoryContextState>(WORKING_MEMORY_LAYER_ID),
-    );
+    const notes = readNotes(toolCtx.memory.get<WorkingMemoryContextState>(SCRATCHPAD_LAYER_ID));
     notes.push(text);
-    toolCtx.context.set<WorkingMemoryContextState>(WORKING_MEMORY_LAYER_ID, {
+    toolCtx.memory.set<WorkingMemoryContextState>(SCRATCHPAD_LAYER_ID, {
       notes,
     });
     return {
@@ -78,14 +76,14 @@ const saveNote = tool({
 
 const listNotes = tool({
   name: 'list_notes',
-  description: 'List the notes currently held in working memory.',
+  description: 'List the notes currently held in the scratchpad.',
   input: z.object({}),
   output: z.object({
     notes: z.array(z.string()),
   }),
   async execute(_args, toolCtx) {
     return {
-      notes: readNotes(toolCtx.context.get<WorkingMemoryContextState>(WORKING_MEMORY_LAYER_ID)),
+      notes: readNotes(toolCtx.memory.get<WorkingMemoryContextState>(SCRATCHPAD_LAYER_ID)),
     };
   },
 });
@@ -120,15 +118,15 @@ export function createAgent(deps: { storage: StorageAdapter; traceExporter: Trac
     storage: deps.storage,
     traceExporter: deps.traceExporter,
     context: [
-      staticContent({
+      instructions({
         id: 'persona',
         load: async () => PERSONA,
       }),
-      workingMemoryContext(),
-      planContext(),
-      observationalContext(),
-      temporalContext(),
-      historyWindow(),
+      scratchpad(),
+      plan(),
+      observations(),
+      temporal(),
+      history(),
     ],
     llm: {
       provider: 'openrouter',

@@ -5,19 +5,17 @@
  * This is deliberately NOT the syntax tree. `workflowGraph()` in
  * `@noetic-tools/types` draws parent→child edges, which answers "how is this
  * JSON nested" — a question nobody looking at a plan is asking. A reader wants
- * to see execution: a `sequence` reads as a chain, a `fork` as a split and a
- * join, a `branch` as labelled routes off a gate, a `loop` as a body with a
- * line back to the top.
+ * to see execution: a `sequence` reads as a chain, an `inParallel` as a split
+ * and a join, a `conditional` as labelled routes off a gate, a `loop` as a
+ * body with a line back to the top.
  *
  * Structural nodes therefore either vanish into the shape they impose
- * (`sequence`) or become a small gate that owns the shape (`fork`, `branch`,
- * `loop`, `every`). A `subflow` ref stays a leaf and carries the name it
- * points at, so the viewer can open it.
+ * (`sequence`) or become a small gate that owns the shape (`inParallel`,
+ * `conditional`, `loop`, `schedule`). A `subflow` ref stays a leaf and carries
+ * the name it points at, so the viewer can open it.
  */
 
 import type {
-  BranchWorkflowNode,
-  ForkWorkflowNode,
   LoopWorkflowNode,
   UntilPredicate,
   WorkflowDocument,
@@ -28,8 +26,8 @@ import type {
 
 /**
  * What a graph node stands for. Every `WorkflowNode` kind keeps its own name;
- * the extras are drawn by the projection: `join` closes a fork, `start` and
- * `end` are the document's terminals.
+ * the extras are drawn by the projection: `join` closes an inParallel split,
+ * `start` and `end` are the document's terminals.
  */
 export type GraphNodeKind =
   | WorkflowNode['kind']
@@ -56,7 +54,7 @@ export interface GraphNode {
   ref?: string;
 }
 
-/** `back` edges return to a gate (loop, every); `isolated` cross into a spawned context. */
+/** `back` edges return to a gate (loop, schedule); `isolated` cross into a spawned context. */
 export type GraphEdgeVariant = 'default' | 'back' | 'isolated';
 
 export interface GraphEdge {
@@ -119,7 +117,9 @@ export function describeUntil(until: UntilPredicate): string {
     case 'maxCost':
       return `$${until.usd}`;
     case 'maxDuration':
-      return `${until.ms}ms`;
+      return `${until.duration}ms`;
+    case 'never':
+      return 'never';
     case 'noToolCalls':
       return 'no tool calls';
     case 'outputContains':
@@ -210,28 +210,28 @@ class FlowBuilder {
         return isArray(node.steps)
           ? this.chain(node.steps)
           : this.broken(node.id, 'sequence has no steps');
-      case 'fork':
-        return projectFork(this, node);
-      case 'branch':
+      case 'inParallel':
+        return projectInParallel(this, node);
+      case 'conditional':
         return isArray(node.routes)
-          ? projectBranch(this, node)
-          : this.broken(node.id, 'branch has no routes');
+          ? projectConditional(this, node)
+          : this.broken(node.id, 'conditional has no routes');
       case 'loop':
         return isNode(node.body)
           ? projectLoop(this, node)
           : this.broken(node.id, 'loop has no body');
-      case 'every':
+      case 'schedule':
         return isNode(node.step)
-          ? projectEvery(this, node)
-          : this.broken(node.id, 'every has no step');
+          ? projectSchedule(this, node)
+          : this.broken(node.id, 'schedule has no step');
       case 'spawn':
         return isNode(node.child)
           ? projectSpawn(this, node)
           : this.broken(node.id, 'spawn has no child');
-      case 'provide':
+      case 'withContext':
         return isNode(node.child)
-          ? projectProvide(this, node)
-          : this.broken(node.id, 'provide has no child');
+          ? projectWithContext(this, node)
+          : this.broken(node.id, 'withContext has no child');
       case 'subflow':
         return this.subflow(node);
       default:
@@ -343,10 +343,22 @@ class FlowBuilder {
 
 //#region Kind handlers
 
-type EveryNode = Extract<
+type InParallelNode = Extract<
   WorkflowNode,
   {
-    kind: 'every';
+    kind: 'inParallel';
+  }
+>;
+type ConditionalNode = Extract<
+  WorkflowNode,
+  {
+    kind: 'conditional';
+  }
+>;
+type ScheduleNode = Extract<
+  WorkflowNode,
+  {
+    kind: 'schedule';
   }
 >;
 type SubflowNode = Extract<
@@ -361,15 +373,15 @@ type SpawnNode = Extract<
     kind: 'spawn';
   }
 >;
-type ProvideNode = Extract<
+type WithContextNode = Extract<
   WorkflowNode,
   {
-    kind: 'provide';
+    kind: 'withContext';
   }
 >;
 
 /** Split into every path at once, then rejoin. The join carries the merge strategy. */
-function projectFork(builder: FlowBuilder, node: ForkWorkflowNode): Ports {
+function projectInParallel(builder: FlowBuilder, node: InParallelNode): Ports {
   const chips: string[] = [
     node.mode,
   ];
@@ -378,9 +390,9 @@ function projectFork(builder: FlowBuilder, node: ForkWorkflowNode): Ports {
   }
   const fork = builder.add({
     id: node.id,
-    kind: 'fork',
+    kind: 'inParallel',
     shape: 'gate',
-    title: 'fork',
+    title: 'inParallel',
     detail: node.each ? `each item of ${node.over ?? 'the input'}` : undefined,
     chips,
   });
@@ -402,8 +414,8 @@ function projectFork(builder: FlowBuilder, node: ForkWorkflowNode): Ports {
           ],
   });
 
-  // A dynamic fork instantiates one body per runtime item, so the single
-  // drawn path stands for N of them.
+  // A dynamic inParallel node instantiates one body per runtime item, so the
+  // single drawn path stands for N of them.
   const paths = node.each
     ? [
         node.each,
@@ -426,13 +438,13 @@ function projectFork(builder: FlowBuilder, node: ForkWorkflowNode): Ports {
   };
 }
 
-/** One route runs, so the routes never rejoin — every route's exits are the branch's. */
-function projectBranch(builder: FlowBuilder, node: BranchWorkflowNode): Ports {
+/** One route runs, so the routes never rejoin — every route's exits are the conditional's. */
+function projectConditional(builder: FlowBuilder, node: ConditionalNode): Ports {
   const gate = builder.add({
     id: node.id,
-    kind: 'branch',
+    kind: 'conditional',
     shape: 'gate',
-    title: 'branch',
+    title: 'conditional',
     detail: 'first match wins, case-insensitive substring',
     chips: [],
   });
@@ -495,18 +507,18 @@ function projectLoop(builder: FlowBuilder, node: LoopWorkflowNode): Ports {
 }
 
 /** A timer: the step runs, and the line back says it will run again. */
-function projectEvery(builder: FlowBuilder, node: EveryNode): Ports {
+function projectSchedule(builder: FlowBuilder, node: ScheduleNode): Ports {
   const chips = [
-    `every ${node.ms}ms`,
+    `every ${node.interval}ms`,
   ];
   if (node.onError) {
     chips.push(`on error: ${node.onError}`);
   }
   const gate = builder.add({
     id: node.id,
-    kind: 'every',
+    kind: 'schedule',
     shape: 'gate',
-    title: 'every',
+    title: 'schedule',
     detail: 'runs forever — nothing downstream of this ever runs',
     chips,
   });
@@ -515,7 +527,7 @@ function projectEvery(builder: FlowBuilder, node: EveryNode): Ports {
   for (const exit of body.exits) {
     builder.connect(exit, gate, 'next tick', 'back');
   }
-  // No exits: `executeEvery` only ever returns by throwing. Anything drawn
+  // No exits: the schedule interpreter only ever returns by throwing. Anything drawn
   // downstream of a timer would be a step the reader believes will run.
   return {
     entry: gate,
@@ -540,11 +552,11 @@ function projectSpawn(builder: FlowBuilder, node: SpawnNode): Ports {
   });
 }
 
-/** Same shape as spawn, but the change is which memory layers the child sees. */
-function projectProvide(builder: FlowBuilder, node: ProvideNode): Ports {
+/** Same shape as spawn, but the change is which context layers the child sees. */
+function projectWithContext(builder: FlowBuilder, node: WithContextNode): Ports {
   return wrapChild(builder, {
     id: node.id,
-    kind: 'provide',
+    kind: 'withContext',
     detail: 'child sees these layers',
     chips: [
       `layers: ${node.layers.join(', ')}`,
@@ -555,7 +567,7 @@ function projectProvide(builder: FlowBuilder, node: ProvideNode): Ports {
 
 interface WrapperSpec {
   id: string;
-  kind: 'spawn' | 'provide';
+  kind: 'spawn' | 'withContext';
   detail: string;
   chips: string[];
   child: WorkflowNode;
@@ -585,11 +597,11 @@ function wrapChild(builder: FlowBuilder, spec: WrapperSpec): Ports {
 
 function leafDetail(node: WorkflowNode): string | undefined {
   switch (node.kind) {
-    case 'llm':
+    case 'callModel':
       return clip(node.instructions);
-    case 'tool':
+    case 'invokeTool':
       return node.toolName;
-    case 'run':
+    case 'runCode':
       return clip(node.execute);
     case 'subflow':
       return node.ref ? `→ ${node.ref}` : 'inline workflow';
@@ -610,7 +622,7 @@ function leafDetail(node: WorkflowNode): string | undefined {
  */
 function leafChips(node: WorkflowNode): string[] {
   switch (node.kind) {
-    case 'llm': {
+    case 'callModel': {
       const chips: string[] = [];
       if (node.model) {
         chips.push(`model ${node.model}`);
@@ -623,7 +635,7 @@ function leafChips(node: WorkflowNode): string[] {
       }
       return chips;
     }
-    case 'run':
+    case 'runCode':
       return node.retry
         ? [
             `retry ×${node.retry.maxAttempts}`,

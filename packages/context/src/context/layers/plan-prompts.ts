@@ -265,19 +265,19 @@ const KIND_ENTRIES: Array<{
   line: string;
 }> = [
   {
-    kind: 'llm',
+    kind: 'callModel',
     group: 'leaf',
-    line: '`llm` — a model turn, driven by `instructions`; give it `tools` if it needs them',
+    line: '`callModel` — a model turn, driven by `instructions`; give it `tools` if it needs them',
   },
   {
-    kind: 'tool',
+    kind: 'invokeTool',
     group: 'leaf',
-    line: '`tool` — one deterministic tool call: `toolName` plus `args`',
+    line: '`invokeTool` — one deterministic tool call: `toolName` plus `args`',
   },
   {
-    kind: 'run',
+    kind: 'runCode',
     group: 'leaf',
-    line: '`run` — code in `execute`, run by a subprocess adapter the host must provide',
+    line: '`runCode` — code in `execute`, run by a subprocess adapter the host must provide',
   },
   {
     kind: 'claude-code',
@@ -290,14 +290,14 @@ const KIND_ENTRIES: Array<{
     line: '`sequence` — `steps` run in order, each fed the one before',
   },
   {
-    kind: 'fork',
+    kind: 'inParallel',
     group: 'structure',
-    line: '`fork` — `paths` run at once (or `each` over a runtime array); `mode` is `all`, `race` or `settle`, and `merge` says how the outputs of an `all` come back together',
+    line: '`inParallel` — `paths` run at once (or `each` over a runtime array); `mode` is `all`, `race` or `settle`, and `merge` says how the outputs of an `all` come back together',
   },
   {
-    kind: 'branch',
+    kind: 'conditional',
     group: 'structure',
-    line: '`branch` — the FIRST route whose `match` appears in the input wins, case-insensitively, so order the routes narrowest first; `default` catches the rest',
+    line: '`conditional` — the FIRST route whose `match` appears in the input wins, case-insensitively, so order the routes narrowest first; `default` catches the rest',
   },
   {
     kind: 'loop',
@@ -305,9 +305,9 @@ const KIND_ENTRIES: Array<{
     line: '`loop` — run `body`, then repeat while the `until` predicate does not hold; the body always runs at least once',
   },
   {
-    kind: 'every',
+    kind: 'schedule',
     group: 'structure',
-    line: '`every` — run `step` on an interval of `ms`, forever; nothing after it ever runs, so put it last',
+    line: '`schedule` — run `step` on an `interval` of milliseconds, forever; nothing after it ever runs, so put it last',
   },
   {
     kind: 'spawn',
@@ -315,9 +315,9 @@ const KIND_ENTRIES: Array<{
     line: '`spawn` — run `child` in an isolated context, so its work does not crowd this one',
   },
   {
-    kind: 'provide',
+    kind: 'withContext',
     group: 'structure',
-    line: '`provide` — run `child` with a named set of memory layers the host must have registered',
+    line: '`withContext` — run `child` with a named set of context layers the host must have registered',
   },
   {
     kind: 'subflow',

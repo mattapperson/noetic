@@ -40,7 +40,7 @@ function cloneAndReplace(step: Step, candidate: Candidate, prefix: string): Step
   const path = `${prefix}${step.id}`;
 
   switch (step.kind) {
-    case 'llm': {
+    case 'callModel': {
       // Only rewrite eager (string / array) forms. Function-form Lazy<T> fields
       // resolve at execution time against a live context, so optimizer candidate
       // substitution cannot apply to them — pass them through unchanged.
@@ -54,7 +54,7 @@ function cloneAndReplace(step: Step, candidate: Candidate, prefix: string): Step
         tools,
       };
     }
-    case 'tool': {
+    case 'invokeTool': {
       const name = candidate[`${path}.tool.name`] ?? step.tool.name;
       const description = candidate[`${path}.tool.description`] ?? step.tool.description;
       return {
@@ -71,7 +71,7 @@ function cloneAndReplace(step: Step, candidate: Candidate, prefix: string): Step
         ...step,
         child: cloneAndReplace(step.child, candidate, `${path}.`),
       };
-    case 'provide':
+    case 'withContext':
       return {
         ...step,
         child: cloneAndReplace(step.child, candidate, `${path}.`),
@@ -81,22 +81,22 @@ function cloneAndReplace(step: Step, candidate: Candidate, prefix: string): Step
         ...step,
         steps: step.steps.map((s) => cloneAndReplace(s, candidate, `${path}.`)),
       };
-    case 'every':
+    case 'schedule':
       return {
         ...step,
         step: cloneAndReplace(step.step, candidate, `${path}.`),
       };
-    case 'branch':
+    case 'conditional':
       return {
         ...step,
         _optimizable: cloneOptimizableChildren(step._optimizable, candidate, path),
       };
-    case 'fork':
+    case 'inParallel':
       return {
         ...step,
         _optimizable: cloneOptimizableChildren(step._optimizable, candidate, path),
       };
-    case 'run':
+    case 'runCode':
       return {
         ...step,
       };

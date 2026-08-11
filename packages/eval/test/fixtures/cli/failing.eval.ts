@@ -2,7 +2,7 @@ import { describe, it } from '../../../src';
 
 // Offline fixture: the thrown error is captured as a failed case.
 describe({
-  kind: 'run',
+  kind: 'runCode',
   id: 'fixture-fail',
 }, {
   objective: 'cli exit-code fixture (throwing case)',

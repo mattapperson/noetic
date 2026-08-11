@@ -35,9 +35,9 @@ const SCOPE_ALLOWED_KINDS: Record<ScopeValue, ReadonlySet<FieldKindValue>> = {
 
 //#region Helper Functions
 
-function extractLlmFields(
+function extractCallModelFields(
   step: Step & {
-    kind: 'llm';
+    kind: 'callModel';
   },
   path: string,
   fields: OptimizableField[],
@@ -75,9 +75,9 @@ function extractLlmFields(
   }
 }
 
-function extractToolFields(
+function extractInvokeToolFields(
   step: Step & {
-    kind: 'tool';
+    kind: 'invokeTool';
   },
   path: string,
   fields: OptimizableField[],
@@ -113,11 +113,11 @@ function walkStep(step: Step, prefix: string, fields: OptimizableField[]): void 
   const path = `${prefix}${step.id}`;
 
   switch (step.kind) {
-    case 'llm':
-      extractLlmFields(step, path, fields);
+    case 'callModel':
+      extractCallModelFields(step, path, fields);
       return;
-    case 'tool':
-      extractToolFields(step, path, fields);
+    case 'invokeTool':
+      extractInvokeToolFields(step, path, fields);
       return;
     case 'spawn':
       walkStep(step.child, `${path}.`, fields);
@@ -127,13 +127,13 @@ function walkStep(step: Step, prefix: string, fields: OptimizableField[]): void 
         walkStep(s, `${path}.`, fields);
       }
       return;
-    case 'branch':
+    case 'conditional':
       walkOptimizableChildren(step._optimizable, path, fields);
       return;
-    case 'fork':
+    case 'inParallel':
       walkOptimizableChildren(step._optimizable, path, fields);
       return;
-    case 'run':
+    case 'runCode':
       return;
   }
 }
