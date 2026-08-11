@@ -63,7 +63,7 @@ interface ItemLogSnapshot {
 
 Version history:
 
-- **v1 → v2** — the built-in context layers were renamed (`working-memory` → `working-context`, `observational-memory` → `observational-context`, `skills-memory` → `skills-context`). `layers` is keyed by layer id, so a v1 snapshot carries state under ids no current layer reads; restoring it would silently drop that state. No migration — discard via `CheckpointStore.clear()` and start fresh.
+- **v1 → v2** — built-in layer ids changed (`working-context` → `scratchpad`, `static-content` → `instructions`, `observational-context` → `observations`, `file-reference` → `filesystem`, `history-window` → `history`, and `durable-task-state` → `task-state`). `layers` is keyed by layer id, so a v1 snapshot carries state under ids no current layer reads; restoring it would silently drop that state. No migration — discard via `CheckpointStore.clear()` and start fresh.
 
 `frontier` is intentionally permissive: frame `state` is `unknown` because each step's state is user-defined. Callers that need specific shape guarantees parse at the call site.
 

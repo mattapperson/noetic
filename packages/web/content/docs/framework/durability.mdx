@@ -88,7 +88,7 @@ if (restored !== null) {
 }
 ```
 
-Returns `null` when no snapshot is recorded. Throws `NoeticConfigError` with `code: 'CHECKPOINT_SCHEMA_MISMATCH'` when the persisted `schemaVersion` is unknown — callers discard via `harness.clearCheckpoint(executionId)` and start fresh. Schema v1 snapshots (written before the context-layer rename) fall in this bucket: their `layers` record is keyed by the old `working-memory` / `observational-memory` ids, which no current layer reads, so they are rejected rather than restored with silently missing state. There is no migration path.
+Returns `null` when no snapshot is recorded. Throws `NoeticConfigError` with `code: 'CHECKPOINT_SCHEMA_MISMATCH'` when the persisted `schemaVersion` is unknown — callers discard via `harness.clearCheckpoint(executionId)` and start fresh. Schema v1 snapshots (written before the layer-id rename) fall in this bucket: their `layers` record uses ids such as `working-context`, `static-content`, and `history-window`, while current layers use `scratchpad`, `instructions`, and `history`. They are rejected rather than restored with silently missing state. There is no migration path.
 
 ## Step-Level Resume
 

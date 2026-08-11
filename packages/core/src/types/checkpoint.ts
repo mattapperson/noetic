@@ -10,12 +10,13 @@ import { z } from 'zod';
  * (`code === 'CHECKPOINT_SCHEMA_MISMATCH'`) so hosts can discard cleanly.
  *
  * Version history:
- * - v1 → v2: the built-in context layers were renamed (`working-memory` →
- *   `working-context`, `observational-memory` → `observational-context`,
- *   `skills-memory` → `skills-context`). `layers` is keyed by layer id, so a
- *   v1 snapshot carries state under ids no current layer reads — restoring it
- *   would silently drop that state. There is no migration; discard via
- *   `CheckpointStore.clear()` and start fresh.
+ * - v1 → v2: built-in layer ids changed (`working-context` → `scratchpad`,
+ *   `static-content` → `instructions`, `observational-context` →
+ *   `observations`, `file-reference` → `filesystem`, `history-window` →
+ *   `history`, and `durable-task-state` → `task-state`). `layers` is keyed by
+ *   layer id, so a v1 snapshot carries state under ids no current layer reads
+ *   — restoring it would silently drop that state. There is no migration;
+ *   discard via `CheckpointStore.clear()` and start fresh.
  */
 export const CheckpointSchemaVersion = 2;
 
