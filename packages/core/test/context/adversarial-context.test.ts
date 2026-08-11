@@ -749,7 +749,7 @@ describe('Working Memory: store with string state', () => {
       state: frameworkCast<WorkingMemoryContextState>(store.get(ctx.executionId, layer.id)),
     });
 
-    // When state is a string, typeof !== 'object', so the else branch runs:
+    // When state is a string, typeof !== 'object', so the else conditional runs:
     // return { state: safeArgs } — the entire string is lost and replaced
     expect(result).toBeDefined();
     assert(result !== undefined);

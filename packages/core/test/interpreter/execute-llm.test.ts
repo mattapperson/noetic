@@ -2,10 +2,10 @@ import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import type { ContextData, ContextLayer, ExecutionContext } from '@noetic-tools/context';
 import { historyWindow, projectHistoryLayers } from '@noetic-tools/context';
-import type { CallModelRequest, StepLLM } from '@noetic-tools/types';
+import type { CallModelRequest, StepCallModel } from '@noetic-tools/types';
 import { frameworkCast, isNoeticError, SteeringAction } from '@noetic-tools/types';
 import { z } from 'zod';
-import { executeLLM } from '../../src/interpreter/execute-action';
+import { executeCallModel } from '../../src/interpreter/execute-action';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import {
   makeLLMResponse,
@@ -14,10 +14,10 @@ import {
   makeMockHarness,
 } from '../_helpers';
 
-describe('executeLLM', () => {
+describe('executeCallModel', () => {
   it('calls the client and returns text output', async () => {
-    const step: StepLLM<ContextData, string, string> = {
-      kind: 'llm',
+    const step: StepCallModel<ContextData, string, string> = {
+      kind: 'callModel',
       id: 'test',
       model: 'gpt-4',
     };
@@ -25,13 +25,13 @@ describe('executeLLM', () => {
       makeLLMResponse('Hello world'),
     ]);
 
-    const result = await executeLLM(step, 'hi', ctx);
+    const result = await executeCallModel(step, 'hi', ctx);
     expect(result).toBe('Hello world');
   });
 
   it('appends input as user message to ItemLog', async () => {
-    const step: StepLLM<ContextData, string, string> = {
-      kind: 'llm',
+    const step: StepCallModel<ContextData, string, string> = {
+      kind: 'callModel',
       id: 'test',
       model: 'gpt-4',
     };
@@ -39,14 +39,14 @@ describe('executeLLM', () => {
       makeLLMResponse('Hello'),
     ]);
 
-    await executeLLM(step, 'hi', ctx);
+    await executeCallModel(step, 'hi', ctx);
     const userItems = ctx.itemLog.items.filter((i) => i.type === 'message' && i.role === 'user');
     expect(userItems).toHaveLength(1);
   });
 
   it('appends response items to ItemLog', async () => {
-    const step: StepLLM<ContextData, string, string> = {
-      kind: 'llm',
+    const step: StepCallModel<ContextData, string, string> = {
+      kind: 'callModel',
       id: 'test',
       model: 'gpt-4',
     };
@@ -54,7 +54,7 @@ describe('executeLLM', () => {
       makeLLMResponse('Hello'),
     ]);
 
-    await executeLLM(step, 'hi', ctx);
+    await executeCallModel(step, 'hi', ctx);
     const assistantItems = ctx.itemLog.items.filter(
       (i) => i.type === 'message' && i.role === 'assistant',
     );
@@ -62,8 +62,8 @@ describe('executeLLM', () => {
   });
 
   it('does not append user message for empty string input', async () => {
-    const step: StepLLM<ContextData, string, string> = {
-      kind: 'llm',
+    const step: StepCallModel<ContextData, string, string> = {
+      kind: 'callModel',
       id: 'test',
       model: 'gpt-4',
     };
@@ -71,14 +71,14 @@ describe('executeLLM', () => {
       makeLLMResponse('ok'),
     ]);
 
-    await executeLLM(step, '', ctx);
+    await executeCallModel(step, '', ctx);
     const userItems = ctx.itemLog.items.filter((i) => i.type === 'message' && i.role === 'user');
     expect(userItems).toHaveLength(0);
   });
 
   it('sets ctx.lastStepMeta with usage', async () => {
-    const step: StepLLM<ContextData, string, string> = {
-      kind: 'llm',
+    const step: StepCallModel<ContextData, string, string> = {
+      kind: 'callModel',
       id: 'test',
       model: 'gpt-4',
     };
@@ -92,15 +92,15 @@ describe('executeLLM', () => {
       }),
     ]);
 
-    await executeLLM(step, 'hi', ctx);
+    await executeCallModel(step, 'hi', ctx);
     expect(ctx.lastStepMeta).not.toBeNull();
     expect(ctx.lastStepMeta!.usage?.inputTokens).toBe(100);
     expect(ctx.lastStepMeta!.cost).toBe(0.01);
   });
 
   it('accumulates token usage on context', async () => {
-    const step: StepLLM<ContextData, string, string> = {
-      kind: 'llm',
+    const step: StepCallModel<ContextData, string, string> = {
+      kind: 'callModel',
       id: 'test',
       model: 'gpt-4',
     };
@@ -113,7 +113,7 @@ describe('executeLLM', () => {
       }),
     ]);
 
-    await executeLLM(step, 'hi', ctx);
+    await executeCallModel(step, 'hi', ctx);
     expect(ctx.tokens.input).toBe(100);
     expect(ctx.tokens.output).toBe(50);
     expect(ctx.tokens.total).toBe(150);
@@ -124,8 +124,8 @@ describe('executeLLM', () => {
       answer: z.string(),
       confidence: z.number(),
     });
-    const step: StepLLM<ContextData, string, z.infer<typeof schema>> = {
-      kind: 'llm',
+    const step: StepCallModel<ContextData, string, z.infer<typeof schema>> = {
+      kind: 'callModel',
       id: 'test',
       model: 'gpt-4',
       output: schema,
@@ -134,7 +134,7 @@ describe('executeLLM', () => {
       makeLLMResponse('{"answer":"42","confidence":0.95}'),
     ]);
 
-    const result = await executeLLM(step, 'hi', ctx);
+    const result = await executeCallModel(step, 'hi', ctx);
     expect(result).toEqual({
       answer: '42',
       confidence: 0.95,
@@ -145,8 +145,8 @@ describe('executeLLM', () => {
     const schema = z.object({
       answer: z.string(),
     });
-    const step: StepLLM<ContextData, string, z.infer<typeof schema>> = {
-      kind: 'llm',
+    const step: StepCallModel<ContextData, string, z.infer<typeof schema>> = {
+      kind: 'callModel',
       id: 'parse-fail',
       model: 'gpt-4',
       output: schema,
@@ -156,7 +156,7 @@ describe('executeLLM', () => {
     ]);
 
     try {
-      await executeLLM(step, 'hi', ctx);
+      await executeCallModel(step, 'hi', ctx);
       expect.unreachable('should have thrown');
     } catch (e) {
       assert(isNoeticError(e));
@@ -168,8 +168,8 @@ describe('executeLLM', () => {
     const schema = z.object({
       answer: z.string(),
     });
-    const step: StepLLM<ContextData, string, z.infer<typeof schema>> = {
-      kind: 'llm',
+    const step: StepCallModel<ContextData, string, z.infer<typeof schema>> = {
+      kind: 'callModel',
       id: 'parse-fail',
       model: 'gpt-4',
       output: schema,
@@ -179,7 +179,7 @@ describe('executeLLM', () => {
     ]);
 
     try {
-      await executeLLM(step, 'hi', ctx);
+      await executeCallModel(step, 'hi', ctx);
       expect.unreachable('should have thrown');
     } catch (e) {
       assert(isNoeticError(e));
@@ -188,8 +188,8 @@ describe('executeLLM', () => {
   });
 
   it('identifies tool calls in response', async () => {
-    const step: StepLLM<ContextData, string, string> = {
-      kind: 'llm',
+    const step: StepCallModel<ContextData, string, string> = {
+      kind: 'callModel',
       id: 'test',
       model: 'gpt-4',
     };
@@ -231,14 +231,14 @@ describe('executeLLM', () => {
       },
     ]);
 
-    await executeLLM(step, 'hi', ctx);
+    await executeCallModel(step, 'hi', ctx);
     expect(ctx.lastStepMeta!.toolCalls).toHaveLength(1);
     expect(ctx.lastStepMeta!.toolCalls![0].name).toBe('search');
   });
 
   it('stores responseItems in lastStepMeta', async () => {
-    const step: StepLLM<ContextData, string, string> = {
-      kind: 'llm',
+    const step: StepCallModel<ContextData, string, string> = {
+      kind: 'callModel',
       id: 'test',
       model: 'gpt-4',
     };
@@ -246,13 +246,13 @@ describe('executeLLM', () => {
       makeLLMResponse('ok'),
     ]);
 
-    await executeLLM(step, 'hi', ctx);
+    await executeCallModel(step, 'hi', ctx);
     expect(ctx.lastStepMeta!.responseItems).toHaveLength(1);
   });
 
   it('accumulates cost on context', async () => {
-    const step: StepLLM<ContextData, string, string> = {
-      kind: 'llm',
+    const step: StepCallModel<ContextData, string, string> = {
+      kind: 'callModel',
       id: 'test',
       model: 'gpt-4',
     };
@@ -266,19 +266,19 @@ describe('executeLLM', () => {
       }),
     ]);
 
-    await executeLLM(step, 'hi', ctx);
+    await executeCallModel(step, 'hi', ctx);
     expect(ctx.cost).toBe(0.05);
   });
 
   it('does not create user message for non-string input', async () => {
-    const step: StepLLM<
+    const step: StepCallModel<
       ContextData,
       {
         data: number;
       },
       string
     > = {
-      kind: 'llm',
+      kind: 'callModel',
       id: 'test',
       model: 'gpt-4',
     };
@@ -290,14 +290,14 @@ describe('executeLLM', () => {
     } = {
       data: 42,
     };
-    await executeLLM(step, input, ctx);
+    await executeCallModel(step, input, ctx);
     const userItems = ctx.itemLog.items.filter((i) => i.type === 'message' && i.role === 'user');
     expect(userItems).toHaveLength(0);
   });
 
   it('handles empty tools array', async () => {
-    const step: StepLLM<ContextData, string, string> = {
-      kind: 'llm',
+    const step: StepCallModel<ContextData, string, string> = {
+      kind: 'callModel',
       id: 'test',
       model: 'gpt-4',
       tools: [],
@@ -305,14 +305,14 @@ describe('executeLLM', () => {
     const ctx = makeMockContextWithClient([
       makeLLMResponse('ok'),
     ]);
-    await executeLLM(step, 'hi', ctx);
+    await executeCallModel(step, 'hi', ctx);
     // No error means empty tools were handled gracefully
     expect(ctx.lastStepMeta).not.toBeNull();
   });
 
   it('passes step.instructions through in the callModel request', async () => {
-    const step: StepLLM<ContextData, string, string> = {
-      kind: 'llm',
+    const step: StepCallModel<ContextData, string, string> = {
+      kind: 'callModel',
       id: 'test',
       model: 'gpt-4',
       instructions: 'You are Skippy',
@@ -327,15 +327,15 @@ describe('executeLLM', () => {
       harness,
     });
 
-    await executeLLM(step, 'hi', ctx);
+    await executeCallModel(step, 'hi', ctx);
     assert(capturedRequest !== undefined);
     expect(capturedRequest.instructions).toBe('You are Skippy');
     expect(ctx.lastStepMeta).not.toBeNull();
   });
 
   it('passes undefined instructions when step has no instructions', async () => {
-    const step: StepLLM<ContextData, string, string> = {
-      kind: 'llm',
+    const step: StepCallModel<ContextData, string, string> = {
+      kind: 'callModel',
       id: 'test',
       model: 'gpt-4',
     };
@@ -349,15 +349,15 @@ describe('executeLLM', () => {
       harness,
     });
 
-    await executeLLM(step, 'hi', ctx);
+    await executeCallModel(step, 'hi', ctx);
     assert(capturedRequest !== undefined);
     expect(capturedRequest.instructions).toBeUndefined();
     expect(ctx.lastStepMeta).not.toBeNull();
   });
 
   it('populates ctx.lastLayerUsage with per-layer recall token counts', async () => {
-    const step: StepLLM<ContextData, string, string> = {
-      kind: 'llm',
+    const step: StepCallModel<ContextData, string, string> = {
+      kind: 'callModel',
       id: 'test',
       model: 'gpt-4',
       instructions: 'sys',
@@ -424,7 +424,7 @@ describe('executeLLM', () => {
       },
     ];
 
-    await executeLLM(step, 'hi', ctx, layers);
+    await executeCallModel(step, 'hi', ctx, layers);
 
     assert(ctx.lastLayerUsage !== undefined);
     expect(ctx.lastLayerUsage.modelId).toBe('gpt-4');
@@ -449,8 +449,8 @@ describe('executeLLM', () => {
   });
 
   it('caps history items via projectHistory before sending to the model', async () => {
-    const step: StepLLM<ContextData, string, string> = {
-      kind: 'llm',
+    const step: StepCallModel<ContextData, string, string> = {
+      kind: 'callModel',
       id: 'test',
       model: 'gpt-4',
     };
@@ -501,7 +501,7 @@ describe('executeLLM', () => {
       },
     ];
 
-    await executeLLM(step, '', ctx, layers);
+    await executeCallModel(step, '', ctx, layers);
 
     assert(capturedRequest !== undefined);
     // The recorded request must contain at most 4 items (the cap), even though
@@ -513,8 +513,8 @@ describe('executeLLM', () => {
   });
 
   it('integrates the real historyWindow layer end-to-end via projectHistoryLayers', async () => {
-    const step: StepLLM<ContextData, string, string> = {
-      kind: 'llm',
+    const step: StepCallModel<ContextData, string, string> = {
+      kind: 'callModel',
       id: 'test',
       model: 'gpt-4',
     };
@@ -574,7 +574,7 @@ describe('executeLLM', () => {
       });
     }
 
-    await executeLLM(step, '', ctx, [
+    await executeCallModel(step, '', ctx, [
       realLayer,
     ]);
 
@@ -631,8 +631,8 @@ describe('executeLLM', () => {
       });
     }
 
-    const llmStep: StepLLM<ContextData, string, string> = {
-      kind: 'llm',
+    const llmStep: StepCallModel<ContextData, string, string> = {
+      kind: 'callModel',
       id: 'steered-usage',
       model: 'test/model',
     };
@@ -645,7 +645,7 @@ describe('executeLLM', () => {
           'allow',
         ],
       });
-      const result = await executeLLM(llmStep, 'input', ctx, [
+      const result = await executeCallModel(llmStep, 'input', ctx, [
         STEERING_LAYER,
       ]);
       expect(result).toBe('response-3');
@@ -663,7 +663,7 @@ describe('executeLLM', () => {
         ],
       });
       try {
-        await executeLLM(llmStep, 'input', ctx, [
+        await executeCallModel(llmStep, 'input', ctx, [
           STEERING_LAYER,
         ]);
         expect.unreachable('should have thrown');
@@ -684,7 +684,7 @@ describe('executeLLM', () => {
       });
       // Always Guide: 1 original + 3 retries, then the 4th response falls
       // through (retry budget exhausted).
-      const result = await executeLLM(llmStep, 'input', ctx, [
+      const result = await executeCallModel(llmStep, 'input', ctx, [
         STEERING_LAYER,
       ]);
       expect(result).toBe('response-4');
@@ -699,7 +699,7 @@ describe('executeLLM', () => {
           'allow',
         ],
       });
-      const result = await executeLLM(llmStep, 'input', ctx, [
+      const result = await executeCallModel(llmStep, 'input', ctx, [
         STEERING_LAYER,
       ]);
       expect(result).toBe('response-1');
@@ -710,9 +710,9 @@ describe('executeLLM', () => {
   });
 });
 
-describe('executeLLM cancellation', () => {
-  const step: StepLLM<ContextData, string, string> = {
-    kind: 'llm',
+describe('executeCallModel cancellation', () => {
+  const step: StepCallModel<ContextData, string, string> = {
+    kind: 'callModel',
     id: 'cancel-me',
     model: 'gpt-4',
   };
@@ -728,7 +728,7 @@ describe('executeLLM cancellation', () => {
       harness,
     });
 
-    await executeLLM(step, 'hi', ctx);
+    await executeCallModel(step, 'hi', ctx);
 
     assert(capturedRequest !== undefined);
     const signal = capturedRequest.signal;
@@ -753,7 +753,7 @@ describe('executeLLM cancellation', () => {
     };
 
     try {
-      await executeLLM(step, 'hi', ctx);
+      await executeCallModel(step, 'hi', ctx);
       throw new Error('should have thrown');
     } catch (e) {
       if (!isNoeticError(e)) {
@@ -787,7 +787,7 @@ describe('executeLLM cancellation', () => {
       harness,
     });
 
-    await executeLLM(step, 'hi', ctx);
+    await executeCallModel(step, 'hi', ctx);
 
     assert(capturedRequest !== undefined);
     expect(capturedRequest.signal).toBeUndefined();

@@ -8,9 +8,21 @@ import type { ContextData, ContextLayer } from '@noetic-tools/context';
 import type { NoeticError, Step } from '@noetic-tools/types';
 import { isNoeticError, SteeringAction } from '@noetic-tools/types';
 import { z } from 'zod';
-import { branch, channel, fork, loop, NoeticErrorImpl, step } from '../src/index';
-import { executeLLM } from '../src/interpreter/execute-action';
-import { executeBranch, executeFork, executeLoop } from '../src/interpreter/execute-control';
+import {
+  callModel,
+  channel,
+  conditional,
+  inParallel,
+  loop,
+  NoeticErrorImpl,
+  runCode,
+} from '../src/index';
+import { executeCallModel } from '../src/interpreter/execute-action';
+import {
+  executeConditional,
+  executeInParallel,
+  executeLoop,
+} from '../src/interpreter/execute-control';
 import { ChannelStore } from '../src/runtime/channel-store';
 import { ContextImpl } from '../src/runtime/context-impl';
 import { until } from '../src/until/predicates';
@@ -52,7 +64,7 @@ async function expectNoeticError(
 }
 
 async function expectInvalidMaxIterations(maxIterations: number): Promise<void> {
-  const bodyStep = step.run<ContextData, string, string>({
+  const bodyStep = runCode<ContextData, string, string>({
     id: 'noop',
     execute: async (input) => input,
   });
@@ -72,9 +84,9 @@ async function expectInvalidMaxIterations(maxIterations: number): Promise<void> 
 
 //#region Fork Edge Cases
 
-describe('empty fork paths', () => {
+describe('empty inParallel paths', () => {
   test('all mode calls merge with empty array', async () => {
-    const forkStep = fork({
+    const forkStep = inParallel({
       id: 'empty',
       mode: 'all',
       paths: () => [],
@@ -82,13 +94,13 @@ describe('empty fork paths', () => {
     });
 
     const ctx = makeMockContext();
-    const result = await executeFork(forkStep, 'input', ctx, simpleExecute);
+    const result = await executeInParallel(forkStep, 'input', ctx, simpleExecute);
 
     expect(result).toEqual([]);
   });
 
   test('race mode throws fork_partial', async () => {
-    const forkStep = fork({
+    const forkStep = inParallel({
       id: 'empty',
       mode: 'race',
       paths: () => [],
@@ -96,7 +108,7 @@ describe('empty fork paths', () => {
 
     const ctx = makeMockContext();
     const e = await expectNoeticError(
-      () => executeFork(forkStep, 'input', ctx, simpleExecute),
+      () => executeInParallel(forkStep, 'input', ctx, simpleExecute),
       'fork_partial',
     );
 
@@ -107,7 +119,7 @@ describe('empty fork paths', () => {
   });
 
   test('settle mode calls merge with empty array', async () => {
-    const forkStep = fork({
+    const forkStep = inParallel({
       id: 'empty',
       mode: 'settle',
       paths: () => [],
@@ -115,7 +127,7 @@ describe('empty fork paths', () => {
     });
 
     const ctx = makeMockContext();
-    const result = await executeFork(forkStep, 'input', ctx, simpleExecute);
+    const result = await executeInParallel(forkStep, 'input', ctx, simpleExecute);
 
     expect(result).toEqual([]);
   });
@@ -127,7 +139,7 @@ describe('empty fork paths', () => {
 
 describe('loop edge cases', () => {
   test('all iterations failing with onError returning skip hits maxIterations', async () => {
-    const failingStep = step.run<ContextData, string, string>({
+    const failingStep = runCode<ContextData, string, string>({
       id: 'always-fail',
       execute: async () => {
         throw new NoeticErrorImpl({
@@ -160,7 +172,7 @@ describe('loop edge cases', () => {
 
   test('predicate throws is treated as stop: true', async () => {
     let callCount = 0;
-    const bodyStep = step.run<ContextData, string, string>({
+    const bodyStep = runCode<ContextData, string, string>({
       id: 'counter',
       execute: async (input) => {
         callCount++;
@@ -241,7 +253,7 @@ describe('structured output parse failures', () => {
     const OutputSchema = z.object({
       answer: z.string(),
     });
-    const llmStep = step.llm<
+    const llmStep = callModel<
       ContextData,
       string,
       {
@@ -262,7 +274,7 @@ describe('structured output parse failures', () => {
     });
 
     const e = await expectNoeticError(
-      () => executeLLM(llmStep, 'test input', ctx),
+      () => executeCallModel(llmStep, 'test input', ctx),
       'model_parse_error',
     );
 
@@ -277,7 +289,7 @@ describe('structured output parse failures', () => {
     const OutputSchema = z.object({
       answer: z.string(),
     });
-    const llmStep = step.llm<
+    const llmStep = callModel<
       ContextData,
       string,
       {
@@ -298,7 +310,7 @@ describe('structured output parse failures', () => {
     });
 
     const e = await expectNoeticError(
-      () => executeLLM(llmStep, 'test input', ctx),
+      () => executeCallModel(llmStep, 'test input', ctx),
       'model_parse_error',
     );
 
@@ -314,7 +326,7 @@ describe('structured output parse failures', () => {
 
 describe('steering retry exhaustion', () => {
   test('falls through after MAX_STEERING_RETRIES', async () => {
-    const llmStep = step.llm<ContextData, string, string>({
+    const llmStep = callModel<ContextData, string, string>({
       id: 'steered',
       model: 'test/model',
     });
@@ -330,7 +342,7 @@ describe('steering retry exhaustion', () => {
       guidance: 'try again',
     });
 
-    // executeLLM only enters steering when layers array is non-empty
+    // executeCallModel only enters steering when layers array is non-empty
     const dummyLayer: ContextLayer = {
       id: 'dummy',
       slot: 1e2,
@@ -341,7 +353,7 @@ describe('steering retry exhaustion', () => {
     const ctx = makeMockContext({
       harness,
     });
-    const result = await executeLLM(llmStep, 'input', ctx, [
+    const result = await executeCallModel(llmStep, 'input', ctx, [
       dummyLayer,
     ]);
 
@@ -361,14 +373,14 @@ describe('steering retry exhaustion', () => {
 
 //#region Race Fork Abort
 
-describe('race fork aborts losers', () => {
+describe('race inParallel aborts losers', () => {
   test('winner resolves, loser context is aborted', async () => {
-    const fastStep = step.run<ContextData, string, string>({
+    const fastStep = runCode<ContextData, string, string>({
       id: 'fast',
       execute: async () => 'fast-wins',
     });
 
-    const slowStep = step.run<ContextData, string, string>({
+    const slowStep = runCode<ContextData, string, string>({
       id: 'slow',
       execute: async () => {
         await new Promise((resolve) => setTimeout(resolve, 2e2));
@@ -376,7 +388,7 @@ describe('race fork aborts losers', () => {
       },
     });
 
-    const forkStep = fork<ContextData, string, string>({
+    const forkStep = inParallel<ContextData, string, string>({
       id: 'race-abort',
       mode: 'race',
       paths: () => [
@@ -388,7 +400,7 @@ describe('race fork aborts losers', () => {
     const harness = makeMockHarness();
     const ctx = makeRealContext(harness);
 
-    const result = await executeFork(forkStep, 'go', ctx, simpleExecute);
+    const result = await executeInParallel(forkStep, 'go', ctx, simpleExecute);
 
     expect(result).toBe('fast-wins');
   });
@@ -398,12 +410,12 @@ describe('race fork aborts losers', () => {
 
 //#region Fork Concurrency
 
-describe('fork with concurrency=1 executes sequentially', () => {
+describe('inParallel with concurrency=1 executes sequentially', () => {
   test('paths run one at a time', async () => {
     const timestamps: number[][] = [];
 
     function makeTimedStep(index: number): Step<ContextData, string, string> {
-      return step.run<ContextData, string, string>({
+      return runCode<ContextData, string, string>({
         id: `timed-${index}`,
         execute: async () => {
           const start = Date.now();
@@ -418,8 +430,8 @@ describe('fork with concurrency=1 executes sequentially', () => {
       });
     }
 
-    const forkStep = fork<ContextData, string, string>({
-      id: 'sequential-fork',
+    const forkStep = inParallel<ContextData, string, string>({
+      id: 'sequential-inParallel',
       mode: 'all',
       paths: () => [
         makeTimedStep(0),
@@ -433,7 +445,7 @@ describe('fork with concurrency=1 executes sequentially', () => {
     const harness = makeMockHarness();
     const ctx = makeRealContext(harness);
 
-    await executeFork(forkStep, 'go', ctx, simpleExecute);
+    await executeInParallel(forkStep, 'go', ctx, simpleExecute);
 
     expect(timestamps.length).toBe(3);
     // Each path should start after the previous one ended
@@ -447,15 +459,15 @@ describe('fork with concurrency=1 executes sequentially', () => {
 
 //#region Branch Null Route
 
-describe('branch null route passes input through', () => {
+describe('conditional null route passes input through', () => {
   test('output === input when route returns null', async () => {
-    const branchStep = branch<ContextData, string, string>({
+    const branchStep = conditional<ContextData, string, string>({
       id: 'skip',
       route: () => null,
     });
 
     const ctx = makeMockContext();
-    const result = await executeBranch(branchStep, 'hello', ctx, simpleExecute);
+    const result = await executeConditional(branchStep, 'hello', ctx, simpleExecute);
 
     expect(result).toBe('hello');
   });

@@ -89,7 +89,7 @@ describe('Phase A adapter routing', () => {
     });
     const ctx = harness.createContext();
     const step: Step<ContextData, string, string> = {
-      kind: 'run',
+      kind: 'runCode',
       id: 'throws-sync',
       execute: () => {
         throw new Error('sync boom');
@@ -125,7 +125,7 @@ describe('Phase A adapter routing', () => {
     });
     const ctx = harness.createContext();
     const step: Step<ContextData, string, string> = {
-      kind: 'run',
+      kind: 'runCode',
       id: 'per-step-step',
       execute: async (input) => `echo:${input}`,
       subprocess: adapterB,
@@ -158,7 +158,7 @@ describe('Phase A adapter routing', () => {
     });
     const ctx = harness.createContext();
     const step: Step<ContextData, string, string> = {
-      kind: 'run',
+      kind: 'runCode',
       id: 'per-call-step',
       execute: async (input) => `echo:${input}`,
       subprocess: adapterB,
@@ -246,7 +246,7 @@ describe('Phase A adapter routing', () => {
     });
     const ctx = harness.createContext();
     const step: Step<ContextData, string, string> = {
-      kind: 'run',
+      kind: 'runCode',
       id: 'timeout-step',
       execute: async (input) => input,
     };

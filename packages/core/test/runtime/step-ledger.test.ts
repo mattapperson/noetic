@@ -5,9 +5,9 @@ import { describe, expect, it } from 'bun:test';
 import type { StorageAdapter } from '@noetic-tools/context';
 import type { Context, ContextData } from '@noetic-tools/types';
 import { isNoeticConfigError } from '@noetic-tools/types';
-import { fork } from '../../src/builders/control-flow-builders';
+import { inParallel } from '../../src/builders/control-flow-builders';
 import { loop } from '../../src/builders/loop-builder';
-import { step } from '../../src/builders/step-builders';
+import { runCode } from '../../src/builders/step-builders';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { createCheckpointStore } from '../../src/runtime/durable/checkpoint-store';
 import type { StepLedgerEntry, StepLedgerRetention } from '../../src/runtime/durable/step-ledger';
@@ -22,7 +22,7 @@ import { createInMemoryStorage } from '../../src/runtime/in-memory-storage';
 import { until } from '../../src/until/predicates';
 
 type Storage = ReturnType<typeof createInMemoryStorage>;
-type RunStep = ReturnType<typeof step.run<ContextData, string, string>>;
+type RunStep = ReturnType<typeof runCode<ContextData, string, string>>;
 
 function durableHarness(storage: Storage, retention?: StepLedgerRetention): AgentHarness {
   return new AgentHarness({
@@ -42,7 +42,7 @@ function durableHarness(storage: Storage, retention?: StepLedgerRetention): Agen
 
 /** A step that records every dispatch, so a re-run is observable. */
 function countingStep(id: string, calls: string[], out: (input: string) => string): RunStep {
-  return step.run<ContextData, string, string>({
+  return runCode<ContextData, string, string>({
     id,
     execute: async (input: string) => {
       calls.push(id);
@@ -54,7 +54,7 @@ function countingStep(id: string, calls: string[], out: (input: string) => strin
 /** Compose children the way the workflow hydrator does — a `run` step that dispatches
  *  each child through the harness. There is no standalone `sequence` builder. */
 function sequenceOf(harness: AgentHarness, id: string, children: RunStep[]): RunStep {
-  return step.run<ContextData, string, string>({
+  return runCode<ContextData, string, string>({
     id,
     execute: async (input: string, execCtx) => {
       let current = input;
@@ -94,7 +94,7 @@ function entryOfBytes(path: string, bytes: number): StepLedgerEntry {
   return {
     path,
     stepId: path,
-    kind: 'run',
+    kind: 'runCode',
     output: 'x'.repeat(bytes - 2),
     completedAt: '2026-07-26T00:00:00.000Z',
   };
@@ -132,7 +132,7 @@ describe('step ledger', () => {
     const storage = createInMemoryStorage();
     const harness = durableHarness(storage);
     let nth = 0;
-    const tree = step.run<ContextData, string, string>({
+    const tree = runCode<ContextData, string, string>({
       id: 'nondet',
       execute: async () => {
         nth += 1;
@@ -155,7 +155,7 @@ describe('step ledger', () => {
     const tree = loop<ContextData, string, string>({
       id: 'spin',
       steps: [
-        step.run<ContextData, string, string>({
+        runCode<ContextData, string, string>({
           id: 'body',
           execute: async (input: string) => {
             seen.push(input);
@@ -180,18 +180,18 @@ describe('step ledger', () => {
     expect(new Set(seen).size).toBe(seen.length);
   });
 
-  it('gives sibling fork paths distinct keys', async () => {
+  it('gives sibling inParallel paths distinct keys', async () => {
     const storage = createInMemoryStorage();
     const harness = durableHarness(storage);
-    const tree = fork<ContextData, string, string>({
+    const tree = inParallel<ContextData, string, string>({
       id: 'fan',
       mode: 'all',
       paths: () => [
-        step.run<ContextData, string, string>({
+        runCode<ContextData, string, string>({
           id: 'leg-a',
           execute: async () => 'x',
         }),
-        step.run<ContextData, string, string>({
+        runCode<ContextData, string, string>({
           id: 'leg-b',
           execute: async () => 'y',
         }),
@@ -286,7 +286,7 @@ describe('step ledger', () => {
     const storage = createInMemoryStorage();
     const harness = durableHarness(storage);
     let attempts = 0;
-    const tree = step.run<ContextData, string, string>({
+    const tree = runCode<ContextData, string, string>({
       id: 'flaky',
       execute: async () => {
         attempts += 1;
@@ -444,14 +444,14 @@ describe('step ledger retention config', () => {
     await ledger.record({
       path: 'fits',
       stepId: 'fits',
-      kind: 'run',
+      kind: 'runCode',
       output: 'é'.repeat(5),
       completedAt: '2026-07-26T00:00:00.000Z',
     });
     await ledger.record({
       path: 'over',
       stepId: 'over',
-      kind: 'run',
+      kind: 'runCode',
       output: 'é'.repeat(6),
       completedAt: '2026-07-26T00:00:00.000Z',
     });
@@ -479,7 +479,7 @@ describe('step ledger retention config', () => {
     await ledger.record({
       path: 'void',
       stepId: 'void',
-      kind: 'run',
+      kind: 'runCode',
       output: undefined,
       completedAt: '2026-07-26T00:00:00.000Z',
     });
@@ -503,7 +503,7 @@ describe('step ledger retention config', () => {
     await ledger.record({
       path: 'cyclic',
       stepId: 'cyclic',
-      kind: 'run',
+      kind: 'runCode',
       output: circular,
       completedAt: '2026-07-26T00:00:00.000Z',
     });
@@ -764,7 +764,7 @@ function entryAt(path: string, stepId: string, output: string): StepLedgerEntry 
   return {
     path,
     stepId,
-    kind: 'run',
+    kind: 'runCode',
     output,
     completedAt: '2026-01-01T00:00:00.000Z',
   };

@@ -20,7 +20,6 @@ import type { WorkflowDocument } from '@noetic-tools/core';
 import {
   AgentHarness,
   parseAndRunWorkflow,
-  step,
   validateWorkflow,
   workflowDepth,
 } from '@noetic-tools/core';
@@ -59,13 +58,13 @@ function buildPlannerInstructions(): string {
     '',
     'The only node kinds you need here, with their EXACT fields:',
     '- llm:      { "kind": "llm", "id": "<unique>", "model": "<model-id>", "instructions": "<system prompt>" }',
-    '- fork:     { "kind": "fork", "id": "<unique>", "mode": "settle", "merge": "concat", "paths": [<llm>, ...] }',
+    '- inParallel:     { "kind": "inParallel", "id": "<unique>", "mode": "settle", "merge": "concat", "paths": [<llm>, ...] }',
     '- sequence: { "kind": "sequence", "id": "<unique>", "steps": [<node>, ...] }',
     'The prompt field is named "instructions" (a string) — never "prompt".',
     '',
     'Design a "mixture-of-agents" workflow for the user question:',
     '1. The root is a "sequence" with two steps.',
-    '2. The sequence\'s first step is a "fork" (mode "settle" so a flaky model',
+    '2. The sequence\'s first step is a "inParallel" (mode "settle" so a flaky model',
     '   cannot abort the panel, merge "concat") with exactly four "llm" paths,',
     '   one per model, in this order:',
     PANEL_MODELS.map((m, i) => `   - path ${i + 1}: model "${m}"`).join('\n'),
@@ -103,7 +102,7 @@ async function generateWorkflow(
       ? `${base}\n\nYour previous attempt was invalid: ${lastError}\nFix it and try again.`
       : base;
 
-    const planner = step.llm({
+    const planner = callModel({
       id: `planner-${attempt}`,
       model: PLANNER_MODEL,
       instructions,

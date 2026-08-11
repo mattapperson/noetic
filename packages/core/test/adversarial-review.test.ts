@@ -2,7 +2,7 @@
  * Adversarial review test: Multi-Perspective Code Analyzer
  *
  * Builds and exercises a non-trivial multi-operator agent pipeline
- * combining step.run, step.llm, branch, fork (all + settle), loop,
+ * combining runCode, callModel, conditional, inParallel (all + settle), loop,
  * tool, and channel primitives.
  */
 
@@ -13,12 +13,14 @@ import type { Context, SettleResult, Step, Verdict } from '@noetic-tools/types';
 import { z } from 'zod';
 import {
   AgentHarness,
-  branch,
+  callModel,
   channel,
-  fork,
+  conditional,
+  inParallel,
+  invokeTool,
   isNoeticError,
   loop,
-  step,
+  runCode,
   tool,
   until,
 } from '../src/index';
@@ -68,7 +70,7 @@ const FindingsMessageSchema = z.object({
 //#region Shared Builders
 
 function buildClassifyStep(): Step<ContextData, string, Classification> {
-  return step.run<ContextData, string, Classification>({
+  return runCode<ContextData, string, Classification>({
     id: 'classify',
     execute: async (input) => {
       if (input.includes('class ') || input.length > 100) {
@@ -92,7 +94,7 @@ function buildClassifyStep(): Step<ContextData, string, Classification> {
 }
 
 function buildSimpleAnalysisStep(): Step<ContextData, string, string> {
-  return step.llm<ContextData, string, string>({
+  return callModel<ContextData, string, string>({
     id: 'simple-analysis',
     model: 'test-model',
     instructions: 'Analyze the given code snippet briefly.',
@@ -100,21 +102,21 @@ function buildSimpleAnalysisStep(): Step<ContextData, string, string> {
 }
 
 function buildParallelAnalysisFork(): Step<ContextData, string, string> {
-  return fork<ContextData, string, string>({
+  return inParallel<ContextData, string, string>({
     id: 'parallel-analysis',
     mode: 'all',
     paths: () => [
-      step.llm<ContextData, string, string>({
+      callModel<ContextData, string, string>({
         id: 'security-analysis',
         model: 'test-model',
         instructions: 'Analyze for security issues',
       }),
-      step.llm<ContextData, string, string>({
+      callModel<ContextData, string, string>({
         id: 'performance-analysis',
         model: 'test-model',
         instructions: 'Analyze for performance issues',
       }),
-      step.llm<ContextData, string, string>({
+      callModel<ContextData, string, string>({
         id: 'maintainability-analysis',
         model: 'test-model',
         instructions: 'Analyze for maintainability',
@@ -127,15 +129,15 @@ function buildParallelAnalysisFork(): Step<ContextData, string, string> {
 }
 
 function buildSettleFork(): Step<ContextData, string, string> {
-  return fork<ContextData, string, string>({
+  return inParallel<ContextData, string, string>({
     id: 'optional-extras',
     mode: 'settle',
     paths: () => [
-      step.run<ContextData, string, string>({
+      runCode<ContextData, string, string>({
         id: 'style-analysis',
         execute: async (input) => `Style OK for: ${input.slice(0, 20)}`,
       }),
-      step.run<ContextData, string, string>({
+      runCode<ContextData, string, string>({
         id: 'dependency-analysis',
         execute: async () => {
           throw new Error('Dependency service unavailable');
@@ -158,7 +160,7 @@ describe('adversarial review: multi-perspective code analyzer', () => {
   test('executes full pipeline with mocked LLM (simple path)', async () => {
     const classifyStep = buildClassifyStep();
 
-    const routeStep = branch<ContextData, string, string>({
+    const routeStep = conditional<ContextData, string, string>({
       id: 'route-by-complexity',
       route: async (input, ctx) => {
         const classification = await ctx.harness.run(classifyStep, input, ctx);
@@ -173,7 +175,7 @@ describe('adversarial review: multi-perspective code analyzer', () => {
     });
 
     const script = [
-      // The simple-analysis step.llm call
+      // The simple-analysis callModel call
       makeLLMResponse('Simple analysis: no issues found in add function', {
         usage: {
           inputTokens: 50,
@@ -205,10 +207,10 @@ describe('adversarial review: multi-perspective code analyzer', () => {
 
   //#region Test 2: Complex Branch with Fork and Merge
 
-  test('executes complex branch with fork and merge', async () => {
+  test('executes complex conditional with inParallel and merge', async () => {
     const classifyStep = buildClassifyStep();
 
-    const routeStep = branch<ContextData, string, string>({
+    const routeStep = conditional<ContextData, string, string>({
       id: 'route-by-complexity',
       route: async (input, ctx) => {
         const classification = await ctx.harness.run(classifyStep, input, ctx);
@@ -220,7 +222,7 @@ describe('adversarial review: multi-perspective code analyzer', () => {
     });
 
     const script = [
-      // 3 LLM calls for the parallel fork paths (text output)
+      // 3 LLM calls for the parallel inParallel paths (text output)
       makeLLMResponse('No SQL injection found, score: 9', {
         usage: {
           inputTokens: 40,
@@ -267,7 +269,7 @@ describe('adversarial review: multi-perspective code analyzer', () => {
 
   //#region Test 3: Fork Settle Handles Partial Failures
 
-  test('fork settle handles partial failures', async () => {
+  test('inParallel settle handles partial failures', async () => {
     const settleStep = buildSettleFork();
 
     const harness = new AgentHarness({
@@ -291,7 +293,7 @@ describe('adversarial review: multi-perspective code analyzer', () => {
     const refinementLoop = loop<ContextData, string, string>({
       id: 'refinement-loop',
       steps: [
-        step.run<ContextData, string, string>({
+        runCode<ContextData, string, string>({
           id: 'refine',
           execute: async (input) => {
             return `refined(${input})`;
@@ -347,7 +349,7 @@ describe('adversarial review: multi-perspective code analyzer', () => {
       mode: 'queue',
     });
 
-    const sendStep = step.run<ContextData, string, string>({
+    const sendStep = runCode<ContextData, string, string>({
       id: 'send-finding',
       execute: async (input, ctx) => {
         await ctx.send(findingsChannel, {
@@ -358,7 +360,7 @@ describe('adversarial review: multi-perspective code analyzer', () => {
       },
     });
 
-    const recvStep = step.run<ContextData, string, FindingsMessage>({
+    const recvStep = runCode<ContextData, string, FindingsMessage>({
       id: 'recv-finding',
       execute: async (_input, ctx) => {
         const msg = await ctx.recv(findingsChannel, {
@@ -402,7 +404,7 @@ describe('adversarial review: multi-perspective code analyzer', () => {
       },
     });
 
-    const toolStep = step.tool({
+    const toolStep = invokeTool({
       id: 'count-lines-step',
       tool: countLines,
     });
@@ -429,14 +431,14 @@ describe('adversarial review: multi-perspective code analyzer', () => {
 
   //#region Test 7: Null Branch Route Passes Input Through
 
-  test('null branch route passes input through', async () => {
-    const nullBranch = branch<ContextData, string, string>({
+  test('null conditional route passes input through', async () => {
+    const nullBranch = conditional<ContextData, string, string>({
       id: 'null-route',
       route: () => null,
     });
 
     const harness = new AgentHarness({
-      name: 'null-branch-test',
+      name: 'null-conditional-test',
       params: {},
     });
 
@@ -461,7 +463,7 @@ describe('adversarial review: multi-perspective code analyzer', () => {
       }),
     ];
 
-    const analysisStep = step.llm<ContextData, string, string>({
+    const analysisStep = callModel<ContextData, string, string>({
       id: 'compliance-analysis',
       model: 'test-model',
       instructions: 'Analyze the code.',
@@ -495,7 +497,7 @@ describe('adversarial review: multi-perspective code analyzer', () => {
   const HAS_API_KEY = !!process.env.OPENROUTER_API_KEY;
 
   test.skipIf(!HAS_API_KEY)('live OpenRouter smoke test', async () => {
-    const simpleStep = step.llm<ContextData, string, string>({
+    const simpleStep = callModel<ContextData, string, string>({
       id: 'live-llm',
       model: 'openai/gpt-4o-mini',
       instructions: 'You are a helpful assistant. Reply in one sentence.',
@@ -526,23 +528,23 @@ describe('adversarial review: multi-perspective code analyzer', () => {
 
   //#region Test 10: Full Pipeline Integration (Complex Path with Multiple Operators)
 
-  test('full pipeline integration with classify, branch, fork, settle, and loop', async () => {
+  test('full pipeline integration with classify, conditional, inParallel, settle, and loop', async () => {
     const classifyStep = buildClassifyStep();
 
-    // Build a loop that runs the settle fork then refines
+    // Build a loop that runs the settle inParallel then refines
     let settleCallCount = 0;
-    const settleWithCount = fork<ContextData, string, string>({
+    const settleWithCount = inParallel<ContextData, string, string>({
       id: 'optional-extras-counted',
       mode: 'settle',
       paths: () => [
-        step.run<ContextData, string, string>({
+        runCode<ContextData, string, string>({
           id: 'style-pass',
           execute: async (input) => {
             settleCallCount++;
             return `Style: ${input.slice(0, 15)}`;
           },
         }),
-        step.run<ContextData, string, string>({
+        runCode<ContextData, string, string>({
           id: 'dep-fail',
           execute: async () => {
             settleCallCount++;
@@ -569,7 +571,7 @@ describe('adversarial review: multi-perspective code analyzer', () => {
       });
     });
 
-    const pipeline = step.run<ContextData, string, string>({
+    const pipeline = runCode<ContextData, string, string>({
       id: 'pipeline',
       execute: async (input, ctx) => {
         // Step 1: Classify
@@ -580,7 +582,7 @@ describe('adversarial review: multi-perspective code analyzer', () => {
         if (classification.complexity === 'complex') {
           // Run a simple LLM step for integration test (avoids needing 3 parallel LLM mocks)
           analysisResult = await ctx.harness.run(
-            step.llm<ContextData, string, string>({
+            callModel<ContextData, string, string>({
               id: 'quick-analysis',
               model: 'test-model',
             }),
@@ -591,7 +593,7 @@ describe('adversarial review: multi-perspective code analyzer', () => {
           analysisResult = `Skipped deep analysis for ${classification.complexity} code`;
         }
 
-        // Step 3: Settle fork
+        // Step 3: Settle inParallel
         const settleResult = await ctx.harness.run(settleWithCount, input, ctx);
 
         // Step 4: Combine
@@ -615,7 +617,7 @@ describe('adversarial review: multi-perspective code analyzer', () => {
     expect(result).toContain('LLM response');
     expect(result).toContain('Style:');
     expect(settleCallCount).toBe(2); // Both settle paths ran
-    expect(llmCallCount).toBe(1); // One LLM call for the complex branch
+    expect(llmCallCount).toBe(1); // One LLM call for the complex conditional
     expect(ctx.tokens.input).toBeGreaterThan(0);
     expect(ctx.cost).toBeGreaterThan(0);
   });
@@ -630,7 +632,7 @@ describe('adversarial review: multi-perspective code analyzer', () => {
       mode: 'queue',
     });
 
-    const tryRecvStep = step.run<ContextData, string, FindingsMessage | null>({
+    const tryRecvStep = runCode<ContextData, string, FindingsMessage | null>({
       id: 'try-recv',
       execute: async (_input, ctx) => {
         return ctx.tryRecv(emptyChannel);
@@ -653,7 +655,7 @@ describe('adversarial review: multi-perspective code analyzer', () => {
   //#region Test 12: Error Propagation in Nested Steps
 
   test('isNoeticError identifies errors from nested execution', async () => {
-    const failingStep = step.run<ContextData, string, string>({
+    const failingStep = runCode<ContextData, string, string>({
       id: 'will-fail',
       execute: async () => {
         throw new Error('Deliberate failure in nested step');

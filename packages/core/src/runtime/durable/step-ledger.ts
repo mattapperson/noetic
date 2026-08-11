@@ -258,7 +258,7 @@ export interface StepLedgerStats {
  * The in-memory ledger a single execution carries: entries recovered from a previous
  * run (available for replay) plus the sequence counter for newly recorded ones.
  *
- * Shared by reference across fork/spawn children so one execution has one ledger —
+ * Shared by reference across inParallel/spawn children so one execution has one ledger —
  * path keys are globally unique across the step tree, so a flat map is correct. That
  * sharing is also why retention lives here rather than in the store: the sequence
  * cursor eviction walks belongs to the execution, not to the harness.
@@ -311,7 +311,7 @@ export class StepLedger {
    * The recorded output for `path`, when a previous run completed the same step there.
    * A divergence (different step id or kind at this path) discards the entry and every
    * entry recorded beneath it, then returns undefined so the step runs fresh — the
-   * subtree's recorded outputs belong to a branch that no longer exists.
+   * subtree's recorded outputs belong to a conditional that no longer exists.
    */
   take(
     path: string,
@@ -350,7 +350,7 @@ export class StepLedger {
     if (!this.retainable(entry)) {
       return;
     }
-    /* Reserve the sequence number BEFORE awaiting: concurrent fork legs record through
+    /* Reserve the sequence number BEFORE awaiting: concurrent inParallel legs record through
      * the one shared ledger, and two of them reading the same counter would write the
      * same key, silently overwriting a sibling's entry. A write that then fails leaves a
      * gap, which only makes the window below a slight over-estimate of the live count —

@@ -3,8 +3,8 @@ import assert from 'node:assert';
 import type { PlanExecutionEntry, PlanState } from '@noetic-tools/context';
 import { PlanPhase, PlanStyle, planContext } from '@noetic-tools/context';
 import type {
+  CallModelWorkflowNode,
   ContextLayer,
-  LlmWorkflowNode,
   SequenceWorkflowNode,
   SubflowWorkflowNode,
   WorkflowDocument,
@@ -15,9 +15,9 @@ import { makeCtx, makeItemLog, makeScopedStorage } from '../_helpers';
 
 //#region Test Fixtures
 
-function makeLlmNode(overrides?: Partial<LlmWorkflowNode>): LlmWorkflowNode {
+function makeLlmNode(overrides?: Partial<CallModelWorkflowNode>): CallModelWorkflowNode {
   return {
-    kind: 'llm',
+    kind: 'callModel',
     id: 'leaf',
     instructions: 'Do the thing',
     ...overrides,
@@ -191,7 +191,7 @@ describe('planContext layer', () => {
         phase: PlanPhase.Planning,
         prd: '# Old PRD',
         planTree: {
-          kind: 'llm',
+          kind: 'callModel',
           id: 'leaf',
           instructions: 'old shape',
         },
@@ -493,7 +493,7 @@ describe('planContext layer', () => {
     it('advertises only the node kinds the plan may actually use', async () => {
       const layer = planContext({
         allowedNodeKinds: [
-          'llm',
+          'callModel',
           'sequence',
           'subflow',
         ],
@@ -508,15 +508,15 @@ describe('planContext layer', () => {
         }),
       );
 
-      expect(text).toContain('`llm`');
+      expect(text).toContain('`callModel`');
       expect(text).toContain('restricted to the kinds');
-      expect(text).not.toContain('`fork`');
-      expect(text).not.toContain('`run`');
+      expect(text).not.toContain('`inParallel`');
+      expect(text).not.toContain('`runCode`');
       // The tool description is built from the same table, so the two agree.
       const setPlanTree = layer.provides!.setPlanTree;
       assert(setPlanTree.kind === 'function');
-      expect(setPlanTree.description).toContain('llm, sequence, subflow');
-      expect(setPlanTree.description).not.toContain('fork');
+      expect(setPlanTree.description).toContain('callModel, sequence, subflow');
+      expect(setPlanTree.description).not.toContain('inParallel');
     });
 
     it('trims the fattest state dump to the headroom rather than discarding it', async () => {
@@ -930,7 +930,7 @@ describe('planContext layer', () => {
           document: {
             version: 1,
             root: {
-              kind: 'llm',
+              kind: 'callModel',
               id: 'no-instructions',
             },
           },
@@ -1045,7 +1045,7 @@ describe('planContext layer', () => {
       const layer = planContext({
         allowedNodeKinds: [
           'sequence',
-          'llm',
+          'callModel',
           'subflow',
         ],
       });
@@ -1056,7 +1056,7 @@ describe('planContext layer', () => {
           document: makeDoc(
             makeSequence([
               {
-                kind: 'tool',
+                kind: 'invokeTool',
                 id: 'forbidden',
                 toolName: 'search',
               },
@@ -1066,7 +1066,7 @@ describe('planContext layer', () => {
         makePlanningState(),
         makeCtx(),
       );
-      expect(result.result).toContain('disallowed node kinds: tool');
+      expect(result.result).toContain('disallowed node kinds: invokeTool');
     });
 
     it('rejects subflow refs that are not valid workflow names', async () => {

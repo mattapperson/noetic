@@ -4,12 +4,12 @@ import { AgentHarness } from '../../src/harness/agent-harness';
 import { createScriptedCallModel, textOnlyResponse } from '../_helpers';
 
 describe('branching agent', () => {
-  it('buildBranchingAgent creates a loop wrapping a branch', () => {
+  it('buildBranchingAgent creates a loop wrapping a conditional', () => {
     const agent = buildBranchingAgent();
 
     expect(agent.kind).toBe('loop');
     expect(agent.id).toBe('ticket-processing-loop');
-    expect(agent.steps[0].kind).toBe('branch');
+    expect(agent.steps[0].kind).toBe('conditional');
     expect(agent.steps[0].id).toBe('ticket-router');
   });
 

@@ -1,16 +1,16 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import type { ContextData } from '@noetic-tools/context';
-import type { StepTool, ToolExecutionContext } from '@noetic-tools/types';
+import type { StepInvokeTool, ToolExecutionContext } from '@noetic-tools/types';
 import { frameworkCast, isNoeticError } from '@noetic-tools/types';
 import { z } from 'zod';
-import { executeTool } from '../../src/interpreter/execute-action';
+import { executeInvokeTool } from '../../src/interpreter/execute-action';
 import { makeMockContext, makeMockHarness } from '../_helpers';
 
 const mockCtx = makeMockContext();
 const mockHarness = makeMockHarness();
 
-describe('executeTool', () => {
+describe('executeInvokeTool', () => {
   it('calls tool.execute() and returns typed output', async () => {
     const tool = {
       name: 'add',
@@ -26,7 +26,7 @@ describe('executeTool', () => {
         sum: args.a + args.b,
       }),
     };
-    const s: StepTool<
+    const s: StepInvokeTool<
       ContextData,
       {
         a: number;
@@ -36,11 +36,11 @@ describe('executeTool', () => {
         sum: number;
       }
     > = {
-      kind: 'tool',
+      kind: 'invokeTool',
       id: 'add-test',
       tool,
     };
-    const result = await executeTool(
+    const result = await executeInvokeTool(
       s,
       {
         a: 3,
@@ -72,14 +72,14 @@ describe('executeTool', () => {
     type GreetInput = {
       name: string;
     };
-    const s: StepTool<
+    const s: StepInvokeTool<
       ContextData,
       GreetInput,
       {
         greeting: string;
       }
     > = {
-      kind: 'tool',
+      kind: 'invokeTool',
       id: 'greet-test',
       tool,
     };
@@ -88,7 +88,7 @@ describe('executeTool', () => {
     });
 
     try {
-      await executeTool(s, badInput, mockCtx, mockHarness);
+      await executeInvokeTool(s, badInput, mockCtx, mockHarness);
       expect.unreachable('should have thrown');
     } catch (e) {
       assert(isNoeticError(e));
@@ -120,7 +120,7 @@ describe('executeTool', () => {
         };
       },
     };
-    const s: StepTool<
+    const s: StepInvokeTool<
       ContextData,
       {
         query: string;
@@ -130,14 +130,14 @@ describe('executeTool', () => {
         results: string[];
       }
     > = {
-      kind: 'tool',
+      kind: 'invokeTool',
       id: 'search-test',
       tool,
       args: {
         limit: 5,
       },
     };
-    await executeTool(
+    await executeInvokeTool(
       s,
       {
         query: 'test',
@@ -162,12 +162,12 @@ describe('executeTool', () => {
         return 'ok';
       },
     };
-    const s: StepTool<ContextData, Record<string, never>, string> = {
-      kind: 'tool',
+    const s: StepInvokeTool<ContextData, Record<string, never>, string> = {
+      kind: 'invokeTool',
       id: 'ctx-test',
       tool,
     };
-    await executeTool(s, {}, mockCtx, mockHarness);
+    await executeInvokeTool(s, {}, mockCtx, mockHarness);
     assert(receivedToolCtx !== undefined);
     expect(receivedToolCtx.ctx).toBe(mockCtx);
     expect(receivedToolCtx.context).toBeDefined();
@@ -184,14 +184,14 @@ describe('executeTool', () => {
         throw new Error('tool broke');
       },
     };
-    const s: StepTool<ContextData, Record<string, never>, string> = {
-      kind: 'tool',
+    const s: StepInvokeTool<ContextData, Record<string, never>, string> = {
+      kind: 'invokeTool',
       id: 'fail-test',
       tool,
     };
 
     try {
-      await executeTool(s, {}, mockCtx, mockHarness);
+      await executeInvokeTool(s, {}, mockCtx, mockHarness);
       expect.unreachable('should have thrown');
     } catch (e) {
       assert(isNoeticError(e));

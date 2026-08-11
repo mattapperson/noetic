@@ -28,6 +28,7 @@ function makeTracingLayer(id: string, trace: string[]): ContextLayer {
     hooks: {
       async onComplete({ outcome }) {
         trace.push(`${id}:onComplete:${outcome}`);
+        return undefined;
       },
       async dispose() {
         trace.push(`${id}:dispose`);

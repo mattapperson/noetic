@@ -1,24 +1,16 @@
-/**
- * Local ReAct (Reason + Act) agent helper for the runnable examples.
- *
- * Composes the public primitives — `step.llm`, `loop`, `until`, `spawn` —
- * into the classic tool-use loop: an LLM step iterated until it stops
- * calling tools or hits its step/cost limits. Kept in `examples/` as a
- * demonstration of building agent patterns from primitives.
- */
-
 import type { ContextConfig, ContextData, ContextLayer } from '@noetic-tools/context';
 import type { StepLoop, StepSpawn, Tool } from '@noetic-tools/types';
-import { loop } from '../src/builders/loop-builder';
-import { spawn } from '../src/builders/spawn-builder';
-import { step } from '../src/builders/step-builders';
-import { any } from '../src/until/combinators';
-import { until } from '../src/until/predicates';
+import { resolveContextOption } from '../builders/context-option';
+import { loop } from '../builders/loop-builder';
+import { spawn } from '../builders/spawn-builder';
+import { callModel } from '../builders/step-builders';
+import { any } from '../until/combinators';
+import { until } from '../until/predicates';
 
 /**
- * Creates a ReAct agent loop: an LLM step with tools iterated until no tool
- * calls or limits are hit.
+ * Creates a ReAct (Reason + Act) agent loop: an LLM step with tools iterated until no tool calls or limits are hit.
  *
+ * @public
  * @param opts - Model, tools, optional instructions, step/cost limits, and context layers.
  * @returns A `StepLoop` (no context layers) or `StepSpawn` wrapping a loop (with them).
  */
@@ -29,8 +21,10 @@ export function react(opts: {
   maxSteps?: number;
   maxCost?: number;
   context?: ContextConfig | ContextLayer[];
+  /** @deprecated Renamed to `context`. */
+  memory?: ContextConfig | ContextLayer[];
 }): StepLoop<ContextData, string, string> | StepSpawn<ContextData, string, string> {
-  const llmStep = step.llm<ContextData, string, string>({
+  const llmStep = callModel<ContextData, string, string>({
     id: 'react-step',
     model: opts.model,
     instructions: opts.instructions,
@@ -53,7 +47,7 @@ export function react(opts: {
     ),
   });
 
-  const layers = opts.context;
+  const layers = resolveContextOption(opts);
   if (!layers) {
     return loopStep;
   }

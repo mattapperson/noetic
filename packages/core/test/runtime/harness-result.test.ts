@@ -22,7 +22,7 @@ import { createScriptedCallModel, makeMessage, textOnlyResponse } from '../_help
 //#region Helpers
 
 const echoStep: Step<ContextData, string, string> = {
-  kind: 'llm',
+  kind: 'callModel',
   id: 'echo',
   model: 'test/echo',
   tools: [],
@@ -374,7 +374,7 @@ describe('AgentHarness session accessors', () => {
       }),
     });
     const toolStep: Step<ContextData, string, string> = {
-      kind: 'llm',
+      kind: 'callModel',
       id: 'tooled',
       model: 'test/model',
       tools: [
@@ -1379,7 +1379,7 @@ describe('AgentHarness — item schema extensions', () => {
 describe('AgentHarness — emit option', () => {
   it('emit: false suppresses framework events inside callModel', async () => {
     const silentStep: Step<ContextData, string, string> = {
-      kind: 'llm',
+      kind: 'callModel',
       id: 'silent',
       model: 'test/echo',
       tools: [],

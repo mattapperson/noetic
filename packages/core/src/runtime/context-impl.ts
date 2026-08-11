@@ -82,8 +82,8 @@ export class ContextImpl implements Context<ContextData> {
   private readonly _createdAt: number;
   /**
    * Shared channel store for cross-context communication. Inherited by
-   * `fork` / `spawn` children so channels published by a sibling are visible
-   * to peers — see `executeFork` and `executeSpawn` in `interpreter/execute-action.ts`
+   * `inParallel` / `spawn` children so channels published by a sibling are visible
+   * to peers — see `executeInParallel` and `executeSpawn` in `interpreter/execute-action.ts`
    * and `interpreter/execute-control.ts`.
    * @internal
    */
@@ -97,14 +97,14 @@ export class ContextImpl implements Context<ContextData> {
    * Per-context abort fan-out. `abort()` fires it so operations blocked on
    * this context (channel `recv` waiters, parked back-pressure senders)
    * reject promptly with `{ kind: 'cancelled' }` instead of hanging until
-   * their timeout (spec 09, Cancellation item 2). Each fork/spawn child
+   * their timeout (spec 09, Cancellation item 2). Each inParallel/spawn child
    * constructs its own ContextImpl and therefore its own controller —
    * aborting a child never rejects the parent's waiters, while aborting a
    * parent DOES cascade down to every live child (see `_children`).
    */
   private readonly _abortController = new AbortController();
   /**
-   * Live child contexts (fork paths, spawn children) registered for the abort
+   * Live child contexts (inParallel paths, spawn children) registered for the abort
    * cascade. A child adds itself at construction and removes itself via
    * `detachFromParent()` when its execution settles, so a long-lived parent
    * driving a loop of spawns does not accumulate finished children.
@@ -130,7 +130,7 @@ export class ContextImpl implements Context<ContextData> {
   private readonly _segments: string[] = [];
 
   /**
-   * Path this context's steps hang under. Empty on a root context; a fork/spawn child
+   * Path this context's steps hang under. Empty on a root context; an inParallel/spawn child
    * inherits its parent's current path plus a discriminator, so a path key stays unique
    * across the whole step tree rather than restarting per child context.
    * @internal
@@ -146,7 +146,7 @@ export class ContextImpl implements Context<ContextData> {
 
   /**
    * Completion ledger for the execution this context belongs to. Shared by reference
-   * with fork/spawn children — one execution, one ledger.
+   * with inParallel/spawn children — one execution, one ledger.
    * @internal
    */
   readonly ledger?: StepLedger;
@@ -161,7 +161,7 @@ export class ContextImpl implements Context<ContextData> {
     span?: Span;
     channelStore?: ChannelStore;
     checkpointFn?: (ctx: Context) => Promise<void>;
-    /** Path this context's steps hang under (fork/spawn children inherit one). */
+    /** Path this context's steps hang under (inParallel/spawn children inherit one). */
     pathPrefix?: string;
     /** The execution's completion ledger, shared with children by reference. */
     ledger?: StepLedger;
@@ -233,7 +233,7 @@ export class ContextImpl implements Context<ContextData> {
   /**
    * @internal
    * Leave the parent's abort cascade. Called by the interpreter when a spawn
-   * child or fork path settles — a finished child has nothing left to cancel,
+   * child or inParallel path settles — a finished child has nothing left to cancel,
    * and holding it would leak for the remaining life of the parent.
    */
   detachFromParent(): void {
@@ -345,7 +345,7 @@ export class ContextImpl implements Context<ContextData> {
     // Reject everything blocked on this context (channel recv waiters,
     // parked back-pressure senders) with { kind: 'cancelled' }.
     this._abortController.abort(reason ?? 'context aborted');
-    // Cascade to live children (fork paths, spawn children). The registry is
+    // Cascade to live children (inParallel paths, spawn children). The registry is
     // cleared first so a child's own `detachFromParent()` during its unwind
     // cannot mutate the set we are iterating.
     const children = [

@@ -2,13 +2,14 @@ import { describe, expect, test } from 'bun:test';
 import assert from 'node:assert';
 import type { Context, WorkflowDocument, WorkflowNode } from '@noetic-tools/types';
 import { frameworkCast, isNoeticConfigError } from '@noetic-tools/types';
-import { step, stepWorkflow } from '../../src/builders/workflow-step';
+import { callModel, runCode } from '../../src/builders/step-builders';
+import { workflow } from '../../src/builders/workflow-step';
 import { makeMockContext, makeMockHarness, makeTestTool } from '../_helpers';
 
 const INLINE_DOC: WorkflowDocument = {
   version: 1,
   root: {
-    kind: 'llm',
+    kind: 'callModel',
     id: 'inner',
     instructions: 'do it',
   },
@@ -43,7 +44,7 @@ function makeRecordingContext(): {
       id: s.id ?? '',
       input: String(input),
     });
-    if (s.kind === 'run' && s.execute) {
+    if (s.kind === 'runCode' && s.execute) {
       return s.execute(String(input), execCtx);
     }
     return String(input);
@@ -56,10 +57,10 @@ function makeRecordingContext(): {
   };
 }
 
-describe('step.workflow — build-time validation', () => {
+describe('workflow — build-time validation', () => {
   test('empty id throws EMPTY_STEP_ID', () => {
     try {
-      stepWorkflow({
+      workflow({
         id: '  ',
         document: INLINE_DOC,
       });
@@ -72,7 +73,7 @@ describe('step.workflow — build-time validation', () => {
 
   test('both document and ref throws INVALID_WORKFLOW_SOURCE', () => {
     try {
-      stepWorkflow({
+      workflow({
         id: 'both',
         document: INLINE_DOC,
         ref: 'named',
@@ -86,7 +87,7 @@ describe('step.workflow — build-time validation', () => {
 
   test('neither document nor ref throws INVALID_WORKFLOW_SOURCE', () => {
     try {
-      stepWorkflow({
+      workflow({
         id: 'neither',
       });
       expect.unreachable('expected INVALID_WORKFLOW_SOURCE');
@@ -96,17 +97,16 @@ describe('step.workflow — build-time validation', () => {
     }
   });
 
-  test('the composed step namespace exposes the base builders plus workflow', () => {
-    expect(typeof step.run).toBe('function');
-    expect(typeof step.llm).toBe('function');
-    expect(typeof step.workflow).toBe('function');
-    expect(step.workflow).toBe(stepWorkflow);
+  test('the flattened builders and workflow are exported functions', () => {
+    expect(typeof runCode).toBe('function');
+    expect(typeof callModel).toBe('function');
+    expect(typeof workflow).toBe('function');
   });
 });
 
-describe('step.workflow — execution', () => {
+describe('workflow — execution', () => {
   test('missing harness throws MISSING_HARNESS_CONTEXT', async () => {
-    const built = stepWorkflow({
+    const built = workflow({
       id: 'wf-no-harness',
       document: INLINE_DOC,
     });
@@ -124,19 +124,19 @@ describe('step.workflow — execution', () => {
   });
 
   test('inline document hydrates and executes via the harness', async () => {
-    const built = stepWorkflow({
+    const built = workflow({
       id: 'wf-inline',
       document: INLINE_DOC,
     });
     const { ctx, executed } = makeRecordingContext();
     const result = await built.execute('hello', ctx);
     expect(result).toBe('hello');
-    expect(executed[0]?.kind).toBe('llm');
+    expect(executed[0]?.kind).toBe('callModel');
     expect(executed[0]?.id).toBe('inner');
   });
 
   test('ref resolves from the workflows registry', async () => {
-    const built = stepWorkflow({
+    const built = workflow({
       id: 'wf-ref',
       ref: 'named',
       workflows: new Map([
@@ -148,11 +148,11 @@ describe('step.workflow — execution', () => {
     });
     const { ctx, executed } = makeRecordingContext();
     await built.execute('in', ctx);
-    expect(executed[0]?.kind).toBe('llm');
+    expect(executed[0]?.kind).toBe('callModel');
   });
 
   test('unknown ref throws UNKNOWN_WORKFLOW_REFERENCE at execution time', async () => {
-    const built = stepWorkflow({
+    const built = workflow({
       id: 'wf-missing',
       ref: 'missing',
       workflows: new Map(),
@@ -177,7 +177,7 @@ describe('step.workflow — execution', () => {
         ref: 'a',
       },
     };
-    const built = stepWorkflow({
+    const built = workflow({
       id: 'wf-cycle',
       ref: 'a',
       workflows: new Map([
@@ -198,7 +198,7 @@ describe('step.workflow — execution', () => {
   });
 
   test("isolation: 'spawn' wraps the hydrated tree in a spawn step", async () => {
-    const built = stepWorkflow({
+    const built = workflow({
       id: 'wf-iso',
       document: INLINE_DOC,
       isolation: 'spawn',
@@ -214,12 +214,12 @@ describe('step.workflow — execution', () => {
     const doc: WorkflowDocument = {
       version: 1,
       root: {
-        kind: 'tool',
+        kind: 'invokeTool',
         id: 'use-tool',
         toolName: tool.name,
       },
     };
-    const withTools = stepWorkflow({
+    const withTools = workflow({
       id: 'wf-tools',
       document: doc,
       tools: [
@@ -230,7 +230,7 @@ describe('step.workflow — execution', () => {
     await withTools.execute('in', ctx);
     expect(executed[0]?.id).toBe('use-tool');
 
-    const withoutTools = stepWorkflow({
+    const withoutTools = workflow({
       id: 'wf-no-tools',
       document: doc,
     });
@@ -252,14 +252,14 @@ describe('step.workflow — execution', () => {
         id: 'seq',
         steps: [
           {
-            kind: 'llm',
+            kind: 'callModel',
             id: 'leaf',
             instructions: 'do it',
           },
         ],
       },
     };
-    const built = stepWorkflow({
+    const built = workflow({
       id: 'wf-two-harnesses',
       document: doc,
     });
@@ -280,7 +280,7 @@ describe('step.workflow — execution', () => {
   });
 
   test('repeated executions reuse the memoized hydrated tree', async () => {
-    const built = stepWorkflow({
+    const built = workflow({
       id: 'wf-memo',
       document: INLINE_DOC,
     });

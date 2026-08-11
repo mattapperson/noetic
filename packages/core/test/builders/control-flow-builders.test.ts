@@ -1,46 +1,46 @@
 import { describe, expect, it } from 'bun:test';
 import type { ContextData } from '@noetic-tools/context';
 import type { SettleResult } from '@noetic-tools/types';
-import { branch, fork } from '../../src/builders/control-flow-builders';
+import { conditional, inParallel } from '../../src/builders/control-flow-builders';
 import { makeMockContext } from '../_helpers';
 
-describe('fork builder', () => {
-  it('creates race mode fork', () => {
-    const f = fork<ContextData, string, string>({
+describe('inParallel builder', () => {
+  it('creates race mode inParallel', () => {
+    const f = inParallel<ContextData, string, string>({
       id: 'race-test',
       mode: 'race',
       paths: () => [
         {
-          kind: 'run',
+          kind: 'runCode',
           id: 'a',
           execute: async (i: string) => i,
         },
         {
-          kind: 'run',
+          kind: 'runCode',
           id: 'b',
           execute: async (i: string) => i,
         },
       ],
     });
-    expect(f.kind).toBe('fork');
+    expect(f.kind).toBe('inParallel');
     expect(f.mode).toBe('race');
     expect(f.id).toBe('race-test');
   });
 
-  it('creates all mode fork with merge', () => {
-    const f = fork<ContextData, string, string>({
+  it('creates all mode inParallel with merge', () => {
+    const f = inParallel<ContextData, string, string>({
       id: 'all-test',
       mode: 'all',
       paths: () => [
         {
-          kind: 'run',
+          kind: 'runCode',
           id: 'a',
           execute: async (i: string) => i,
         },
       ],
       merge: (results) => results.join(','),
     });
-    expect(f.kind).toBe('fork');
+    expect(f.kind).toBe('inParallel');
     expect(f.mode).toBe('all');
     expect(f.merge).toBeFunction();
     const merged = f.merge(
@@ -54,13 +54,13 @@ describe('fork builder', () => {
     expect(merged).toBe('a,b,c');
   });
 
-  it('creates settle mode fork with merge', () => {
-    const f = fork<ContextData, string, string>({
+  it('creates settle mode inParallel with merge', () => {
+    const f = inParallel<ContextData, string, string>({
       id: 'settle-test',
       mode: 'settle',
       paths: () => [
         {
-          kind: 'run',
+          kind: 'runCode',
           id: 'a',
           execute: async (i: string) => i,
         },
@@ -71,12 +71,12 @@ describe('fork builder', () => {
           .map((r) => r.value!)
           .join(','),
     });
-    expect(f.kind).toBe('fork');
+    expect(f.kind).toBe('inParallel');
     expect(f.mode).toBe('settle');
   });
 
   it('supports concurrency option', () => {
-    const f = fork<ContextData, string, string>({
+    const f = inParallel<ContextData, string, string>({
       id: 'conc-test',
       mode: 'all',
       paths: () => [],
@@ -88,7 +88,7 @@ describe('fork builder', () => {
 
   it('throws on empty id', () => {
     expect(() =>
-      fork<ContextData, string, string>({
+      inParallel<ContextData, string, string>({
         id: '',
         mode: 'race',
         paths: () => [],
@@ -98,11 +98,11 @@ describe('fork builder', () => {
 
   it('throws when all mode lacks merge', () => {
     expect(() =>
-      fork<ContextData, string, string>({
+      // @ts-expect-error — a merge-less inParallel matches no overload, so the
+      // mismatch surfaces on the call; runtime validation is what this test is
+      // asserting.
+      inParallel<ContextData, string, string>({
         id: 'test',
-        // @ts-expect-error — a merge-less fork falls through to the `settle`
-        // overload, so the mismatch surfaces here; runtime validation is what
-        // this test is asserting.
         mode: 'all',
         paths: () => [],
       }),
@@ -112,7 +112,7 @@ describe('fork builder', () => {
   it('throws when settle mode lacks merge', () => {
     expect(() =>
       // @ts-expect-error — intentionally passing invalid opts to test runtime validation
-      fork<ContextData, string, string>({
+      inParallel<ContextData, string, string>({
         id: 'test',
         mode: 'settle',
         paths: () => [],
@@ -121,12 +121,12 @@ describe('fork builder', () => {
   });
 
   it('paths is a function', () => {
-    const f = fork<ContextData, number, number>({
+    const f = inParallel<ContextData, number, number>({
       id: 'fn-test',
       mode: 'race',
       paths: (input) => [
         {
-          kind: 'run',
+          kind: 'runCode',
           id: `path-${input}`,
           execute: async (i: number) => i * 2,
         },
@@ -135,15 +135,15 @@ describe('fork builder', () => {
     expect(f.paths).toBeFunction();
     const paths = f.paths(5, makeMockContext());
     expect(paths).toHaveLength(1);
-    expect(paths[0].kind).toBe('run');
+    expect(paths[0].kind).toBe('runCode');
     expect(paths[0].id).toBe('path-5');
   });
 });
 
-describe('branch builder', () => {
+describe('conditional builder', () => {
   it('throws on empty id', () => {
     expect(() =>
-      branch<ContextData, string, string>({
+      conditional<ContextData, string, string>({
         id: '',
         route: () => null,
       }),
@@ -152,7 +152,7 @@ describe('branch builder', () => {
 
   it('throws on missing route', () => {
     expect(() =>
-      branch<ContextData, string, string>({
+      conditional<ContextData, string, string>({
         id: 'test',
         // @ts-expect-error — intentionally passing invalid opts to test runtime validation
         route: undefined,

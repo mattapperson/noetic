@@ -14,7 +14,7 @@ function makeSpawnStep<I, O>(
     kind: 'spawn',
     id,
     child: {
-      kind: 'run',
+      kind: 'runCode',
       id: `${id}-child`,
       execute,
     },

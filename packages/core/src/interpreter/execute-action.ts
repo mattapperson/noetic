@@ -56,12 +56,12 @@ import type {
   RecallLayerOutput,
   RetryPolicy,
   ServerToolSpec,
-  StepLLM,
+  StepCallModel,
+  StepInvokeTool,
   StepMeta,
-  StepProvide,
-  StepRun,
+  StepRunCode,
   StepSpawn,
-  StepTool,
+  StepWithContext,
   Tool,
 } from './action-types';
 import { isServerToolSpec, SteeringAction } from './action-types';
@@ -78,8 +78,8 @@ import {
 
 //#region run
 
-export async function executeRun<TContext, I, O>(
-  step: StepRun<TContext, I, O>,
+export async function executeRunCode<TContext, I, O>(
+  step: StepRunCode<TContext, I, O>,
   input: I,
   ctx: Context<TContext>,
 ): Promise<O> {
@@ -402,8 +402,8 @@ function finalizeStepOutput<O>(params: {
   return frameworkCast<O>(params.lastText);
 }
 
-export async function executeLLM<TContext, I, O>(
-  step: StepLLM<TContext, I, O>,
+export async function executeCallModel<TContext, I, O>(
+  step: StepCallModel<TContext, I, O>,
   input: I,
   ctx: Context<TContext>,
   layers?: ContextLayer[],
@@ -418,7 +418,7 @@ export async function executeLLM<TContext, I, O>(
   if (!resolvedModel || resolvedModel.trim() === '') {
     throw new NoeticConfigError({
       code: 'MISSING_MODEL',
-      message: `step.llm(${JSON.stringify(step.id)}) resolved model to an empty string.`,
+      message: `callModel(${JSON.stringify(step.id)}) resolved model to an empty string.`,
       hint: "Ensure `model` (or your `(ctx) => string` getter) returns a non-empty identifier, e.g. 'anthropic/claude-sonnet-4-20250514'.",
     });
   }
@@ -887,7 +887,7 @@ export async function executeSpawn<TContext, I, O>(
   // Build unified tool set for child from its step tree + layers, plus the
   // parent's unified tools. Sub-agents that read tools dynamically (via
   // `ctx.unifiedTools`) otherwise lose the harness tool pool at the spawn
-  // boundary — a child whose `step.llm` resolves `tools` from context would
+  // boundary — a child whose `callModel` resolves `tools` from context would
   // see nothing. Inheriting the parent's tools keeps the harness toolset
   // available across spawns; the child's own step/layer tools take precedence
   // on name collision (dedup keeps the first occurrence), and children that
@@ -967,7 +967,7 @@ export async function executeSpawn<TContext, I, O>(
 
 //#region provide
 
-function resolveLayers<TContext, I, O>(step: StepProvide<TContext, I, O>): ContextLayer[] {
+function resolveLayers<TContext, I, O>(step: StepWithContext<TContext, I, O>): ContextLayer[] {
   if (isContextConfig(step.context)) {
     return [
       ...step.context.layers,
@@ -1000,8 +1000,8 @@ function mergeLayers(
  * Unlike spawn, provide does not create a new itemLog or clone state.
  * Events flow through to the parent in real-time.
  */
-export async function executeProvide<TContext, I, O>(
-  step: StepProvide<TContext, I, O>,
+export async function executeWithContext<TContext, I, O>(
+  step: StepWithContext<TContext, I, O>,
   input: I,
   ctx: Context<TContext>,
   executeStep: ExecuteStepFn,
@@ -1079,7 +1079,7 @@ async function consumeToolGenerator(params: {
         event: next.value,
       },
     });
-    // A direct `step.tool` has no model call id — the step id keys its region.
+    // A direct `invokeTool` has no model call id — the step id keys its region.
     emitToolUi({
       ctx: params.ctx,
       tool: params.tool,
@@ -1091,8 +1091,8 @@ async function consumeToolGenerator(params: {
   }
 }
 
-export async function executeTool<TContext, I, O>(
-  step: StepTool<TContext, I, O>,
+export async function executeInvokeTool<TContext, I, O>(
+  step: StepInvokeTool<TContext, I, O>,
   input: I,
   ctx: Context<TContext>,
   harness: AgentHarnessContract,

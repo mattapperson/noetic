@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'bun:test';
 import type { ContextData } from '@noetic-tools/context';
-import type { Context, StepTool, StreamEvent, Tool } from '@noetic-tools/types';
+import type { Context, StepInvokeTool, StreamEvent, Tool } from '@noetic-tools/types';
 import { frameworkCast } from '@noetic-tools/types';
 import { z } from 'zod';
-import { executeTool } from '../../src/interpreter/execute-action';
+import { executeInvokeTool } from '../../src/interpreter/execute-action';
 import { emitToolUi } from '../../src/runtime/tool-ui';
 import { makeMockContext, makeMockHarness } from '../_helpers';
 
@@ -163,8 +163,8 @@ describe('emitToolUi', () => {
   });
 });
 
-describe('executeTool tool-UI integration', () => {
-  it('emits call then result fragments around a direct step.tool, keyed by step id', async () => {
+describe('executeInvokeTool tool-UI integration', () => {
+  it('emits call then result fragments around a direct invokeTool, keyed by step id', async () => {
     const { ctx, broadcaster, harness } = ctxWithBroadcaster();
     const tool: Tool = frameworkCast<Tool>({
       name: 'quote',
@@ -189,13 +189,13 @@ describe('executeTool tool-UI integration', () => {
         }),
       },
     });
-    const step: StepTool<ContextData, unknown, unknown> = {
-      kind: 'tool',
+    const step: StepInvokeTool<ContextData, unknown, unknown> = {
+      kind: 'invokeTool',
       id: 'quote-step',
       tool,
     };
 
-    const result = await executeTool(
+    const result = await executeInvokeTool(
       step,
       {
         carrier: 'ups',
@@ -218,7 +218,7 @@ describe('executeTool tool-UI integration', () => {
     });
   });
 
-  it('emits an error fragment when a direct step.tool throws', async () => {
+  it('emits an error fragment when a direct invokeTool throws', async () => {
     const { ctx, broadcaster, harness } = ctxWithBroadcaster();
     const tool = frameworkCast<Tool>({
       name: 'boom',
@@ -235,12 +235,12 @@ describe('executeTool tool-UI integration', () => {
         }),
       },
     });
-    const step: StepTool<ContextData, unknown, unknown> = {
-      kind: 'tool',
+    const step: StepInvokeTool<ContextData, unknown, unknown> = {
+      kind: 'invokeTool',
       id: 'boom-step',
       tool,
     };
-    await expect(executeTool(step, {}, ctx, harness)).rejects.toThrow();
+    await expect(executeInvokeTool(step, {}, ctx, harness)).rejects.toThrow();
     const fragments = broadcaster.events.filter((e) => e.type.endsWith('openui.fragment'));
     expect(fragments).toHaveLength(1);
     expect(fragments[0]?.data.source).toBe('root = Text("kaboom")');

@@ -206,7 +206,7 @@ interface StreamIdleWatchdog {
 /** @internal Create a watchdog that aborts `controller` when no
  *  {@link StreamIdleWatchdog.reset reset} is called within `timeoutMs`. When
  *  `timeoutMs <= 0`, returns an inert no-op so callers can always call `.reset()`
- *  / `.stop()` without a branch. Starts armed: the caller is responsible for
+ *  / `.stop()` without branching. Starts armed: the caller is responsible for
  *  `.stop()` in a `finally`. `onTimeout` runs before the abort so observers can
  *  emit a framework event with the original cause. Exported only for unit tests. */
 export function createStreamIdleWatchdog(

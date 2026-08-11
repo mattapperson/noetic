@@ -15,7 +15,7 @@ import type {
 } from '@noetic-tools/types';
 import { z } from 'zod';
 import { spawn } from '../src/builders/spawn-builder';
-import { step } from '../src/builders/step-builders';
+import { callModel } from '../src/builders/step-builders';
 import { tool } from '../src/builders/tool-builder';
 import { react } from './react-agent';
 
@@ -44,8 +44,8 @@ type CheckToolResult = {
 
 //#region Shared Helpers
 
-function buildSubAgentStep(id: string): ReturnType<typeof step.llm<ContextData, string, string>> {
-  return step.llm<ContextData, string, string>({
+function buildSubAgentStep(id: string): ReturnType<typeof callModel<ContextData, string, string>> {
+  return callModel<ContextData, string, string>({
     id,
     model: 'openai/gpt-4o',
     instructions: 'You are a research assistant. Answer concisely.',
@@ -55,7 +55,7 @@ function buildSubAgentStep(id: string): ReturnType<typeof step.llm<ContextData, 
 function buildConfiguredSubAgentStep(
   config: SubAgentConfig,
 ): ReturnType<typeof spawn<ContextData, string, string>> {
-  const llmStep = step.llm<ContextData, string, string>({
+  const llmStep = callModel<ContextData, string, string>({
     id: `${config.id}-llm`,
     model: config.model,
     instructions: config.instructions,

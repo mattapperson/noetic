@@ -63,7 +63,7 @@ describe('NoeticError', () => {
     it('fork_partial', () => {
       const e = new NoeticErrorImpl({
         kind: 'fork_partial',
-        stepId: 'fork-1',
+        stepId: 'inParallel-1',
         succeeded: [
           {
             stepId: 'a',
@@ -131,10 +131,10 @@ describe('NoeticError', () => {
     });
   });
 
-  describe('formatMessage default branch', () => {
+  describe('formatMessage default conditional', () => {
     it('unknown kind produces fallback message', () => {
       const e = new NoeticErrorImpl({
-        // @ts-expect-error — intentionally passing invalid kind to test runtime fallback branch
+        // @ts-expect-error — intentionally passing invalid kind to test runtime fallback conditional
         kind: 'totally_unknown',
       });
       expect(e.message).toContain('NoeticError');

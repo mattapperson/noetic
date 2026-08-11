@@ -26,7 +26,7 @@
           "properties": {
             "kind": {
               "type": "string",
-              "const": "llm"
+              "const": "callModel"
             },
             "id": {
               "type": "string",
@@ -118,7 +118,7 @@
           "properties": {
             "kind": {
               "type": "string",
-              "const": "tool"
+              "const": "invokeTool"
             },
             "id": {
               "type": "string",
@@ -148,7 +148,7 @@
           "properties": {
             "kind": {
               "type": "string",
-              "const": "run"
+              "const": "runCode"
             },
             "id": {
               "type": "string",
@@ -207,7 +207,7 @@
           "properties": {
             "kind": {
               "type": "string",
-              "const": "branch"
+              "const": "conditional"
             },
             "id": {
               "type": "string",
@@ -250,7 +250,7 @@
           "properties": {
             "kind": {
               "type": "string",
-              "const": "fork"
+              "const": "inParallel"
             },
             "id": {
               "type": "string",
@@ -338,7 +338,7 @@
           "properties": {
             "kind": {
               "type": "string",
-              "const": "provide"
+              "const": "withContext"
             },
             "id": {
               "type": "string",
@@ -426,7 +426,7 @@
           "properties": {
             "kind": {
               "type": "string",
-              "const": "every"
+              "const": "schedule"
             },
             "id": {
               "type": "string",
@@ -435,7 +435,7 @@
             "step": {
               "$ref": "#/$defs/WorkflowNode"
             },
-            "ms": {
+            "interval": {
               "type": "number",
               "minimum": 0
             },
@@ -451,7 +451,7 @@
             "kind",
             "id",
             "step",
-            "ms"
+            "interval"
           ],
           "additionalProperties": false
         },
@@ -852,14 +852,14 @@
               "type": "string",
               "const": "maxDuration"
             },
-            "ms": {
+            "duration": {
               "type": "number",
               "exclusiveMinimum": 0
             }
           },
           "required": [
             "kind",
-            "ms"
+            "duration"
           ],
           "additionalProperties": false
         },
@@ -869,6 +869,19 @@
             "kind": {
               "type": "string",
               "const": "noToolCalls"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "never"
             }
           },
           "required": [

@@ -8,7 +8,7 @@ import { AgentHarness } from '../../src/harness/agent-harness';
 //#region Test scaffolding
 
 const echoStep: Step<ContextData, string, string> = {
-  kind: 'llm',
+  kind: 'callModel',
   id: 'echo',
   model: 'test/echo',
   tools: [],
@@ -400,7 +400,7 @@ describe('AgentHarness delivery modes', () => {
       execute: async () => 'never called',
     };
     const stepWithTools: Step<ContextData, string, string> = {
-      kind: 'llm',
+      kind: 'callModel',
       id: 'tooled',
       model: 'test/echo',
       tools: [

@@ -199,7 +199,7 @@ describe('#48: memory init/recall/persist on harness.run()', () => {
       json: {
         version: 1,
         root: {
-          kind: 'llm',
+          kind: 'callModel',
           id: 'root',
           model: 'gpt-4',
           instructions: 'reply',

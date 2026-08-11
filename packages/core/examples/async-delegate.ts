@@ -13,7 +13,7 @@ import type { Channel, DetachedHandle, StepLoop } from '@noetic-tools/types';
 import { z } from 'zod';
 import { channel } from '../src/builders/channel-builder';
 import { loop } from '../src/builders/loop-builder';
-import { step } from '../src/builders/step-builders';
+import { callModel } from '../src/builders/step-builders';
 import { any } from '../src/until/combinators';
 import { until } from '../src/until/predicates';
 import { createAsyncLaunchTool, createCheckTool } from './delegate-tools';
@@ -45,7 +45,7 @@ export function buildAsyncDelegateAgent(opts: {
   return loop({
     id: 'async-delegate-loop',
     steps: [
-      step.llm({
+      callModel({
         id: 'async-delegate-llm',
         model: 'openai/gpt-4o',
         instructions: 'You are an assistant that can launch background sub-agents.',

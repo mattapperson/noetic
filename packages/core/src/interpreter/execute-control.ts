@@ -1,5 +1,5 @@
 /**
- * Control-flow step handlers: branch, fork, loop, every.
+ * Control-flow step handlers: conditional, inParallel, loop, every.
  */
 
 import type { ContextData } from '@noetic-tools/context';
@@ -11,13 +11,13 @@ import type {
   SettleResult,
   Snapshot,
   Step,
-  StepBranch,
-  StepEvery,
-  StepFork,
-  StepForkAll,
-  StepForkRace,
-  StepForkSettle,
+  StepConditional,
+  StepInParallel,
+  StepInParallelAll,
+  StepInParallelRace,
+  StepInParallelSettle,
   StepLoop,
+  StepSchedule,
   Verdict,
 } from '@noetic-tools/types';
 import { createMessage, frameworkCast, isNoeticError, NoeticErrorImpl } from '@noetic-tools/types';
@@ -29,17 +29,17 @@ import { contextToExecCtx, returnLayers, spawnLayers } from './action-deps';
 import { cloneWithGuard } from './clone-guard';
 import { getContextChannelStore, isContextImpl, isMutableContext } from './typeguards';
 
-//#region branch
+//#region conditional
 
-export async function executeBranch<TContext, I, O>(
-  step: StepBranch<TContext, I, O>,
+export async function executeConditional<TContext, I, O>(
+  step: StepConditional<TContext, I, O>,
   input: I,
   ctx: Context<TContext>,
   executeStep: ExecuteStepFn,
 ): Promise<O> {
   const selected = await step.route(input, ctx);
   if (selected === null) {
-    // Requires I assignable to O for null route — when no branch is selected,
+    // Requires I assignable to O for null route — when no conditional is selected,
     // the input passes through. Callers must ensure I is compatible with O.
     return frameworkCast<O>(input);
   }
@@ -48,7 +48,7 @@ export async function executeBranch<TContext, I, O>(
 
 //#endregion
 
-//#region fork
+//#region inParallel
 
 function createChildContexts(ctx: Context, count: number, stepId: string): ContextImpl[] {
   const threadId = isContextImpl(ctx) ? ctx.threadId : crypto.randomUUID();
@@ -78,7 +78,7 @@ function createChildContexts(ctx: Context, count: number, stepId: string): Conte
         resourceId,
         channelStore,
         cwdState: snapshotCwdState(ctx),
-        // Layers and the harness tool pool cross the fork boundary: without
+        // Layers and the harness tool pool cross the inParallel boundary: without
         // them an `llm` step inside a path would run with no context
         // projection and no layer tools, and a nested `spawn` would have no
         // parent layers to inherit. Per-path layer STATE is still isolated —
@@ -92,7 +92,7 @@ function createChildContexts(ctx: Context, count: number, stepId: string): Conte
 /**
  * Runs the context-layer child-boundary lifecycle around each forked path.
  *
- * A fork path is a child execution exactly like a spawn child: `onSpawn`
+ * An inParallel path is a child execution exactly like a spawn child: `onSpawn`
  * seeds its layer state from the parent's, and `onReturn` merges the path's
  * contribution back when it succeeds. Without this, layer state written
  * inside a path is keyed to the path's own execution id and is dropped when
@@ -100,7 +100,7 @@ function createChildContexts(ctx: Context, count: number, stepId: string): Conte
  * workers never reached the coordinator.
  *
  * Differences from `executeSpawn`, both deliberate:
- * - `onSpawn` items are NOT appended. A fork child already inherits the
+ * - `onSpawn` items are NOT appended. An inParallel child already inherits the
  *   parent's full item log; spawn children start empty, which is what those
  *   items exist to seed.
  * - `onReturn` calls are serialised. Paths finish concurrently and each merge
@@ -174,7 +174,7 @@ function createForkLayerBridge({
 
 /**
  * Wraps the interpreter's `executeStep` so every forked path runs inside the
- * layer child boundary. Contexts that are not one of this fork's children
+ * layer child boundary. Contexts that are not one of this inParallel's children
  * (nested steps within a path) pass straight through.
  */
 function withForkLayers(
@@ -217,8 +217,8 @@ export interface ExecuteForkOpts {
   itemSchemas?: ItemSchemaRegistry;
 }
 
-export async function executeFork<TContext, I, O>(
-  step: StepFork<TContext, I, O>,
+export async function executeInParallel<TContext, I, O>(
+  step: StepInParallel<TContext, I, O>,
   input: I,
   ctx: Context<TContext>,
   rawExecuteStep: ExecuteStepFn,
@@ -275,7 +275,7 @@ export async function executeFork<TContext, I, O>(
         throw new NoeticErrorImpl({
           kind: 'step_failed',
           stepId: 'unknown',
-          cause: new Error('Unknown fork mode'),
+          cause: new Error('Unknown inParallel mode'),
           retriesExhausted: false,
         });
       }
@@ -378,7 +378,7 @@ function classifyResults<T>(
 }
 
 async function executeAll<TContext, I, O>(
-  step: StepForkAll<TContext, I, O>,
+  step: StepInParallelAll<TContext, I, O>,
   paths: Step<TContext, I, O>[],
   _input: I,
   ctx: Context<TContext>,
@@ -398,7 +398,7 @@ async function executeAll<TContext, I, O>(
     if (firstFailureSeen) {
       throw new NoeticErrorImpl({
         kind: 'cancelled',
-        reason: `fork '${step.id}' sibling failed`,
+        reason: `inParallel '${step.id}' sibling failed`,
       });
     }
     try {
@@ -413,7 +413,7 @@ async function executeAll<TContext, I, O>(
         firstFailureSeen = true;
         for (let j = 0; j < childContexts.length; j++) {
           if (j !== i) {
-            childContexts[j].abort(`fork '${step.id}' sibling failed`);
+            childContexts[j].abort(`inParallel '${step.id}' sibling failed`);
           }
         }
       }
@@ -423,7 +423,7 @@ async function executeAll<TContext, I, O>(
   const settled = await runWithConcurrency(tasks, concurrency);
   const { succeeded, failed } = classifyResults(settled, paths);
 
-  // If the PARENT context was aborted mid-fork, the whole fork is cancelled —
+  // If the PARENT context was aborted mid-inParallel, the whole inParallel is cancelled —
   // surface 'cancelled', not a partial-failure shape (spec 09, item 3).
   if (ctx.aborted) {
     throw new NoeticErrorImpl({
@@ -446,7 +446,7 @@ async function executeAll<TContext, I, O>(
 }
 
 async function executeRace<TContext, I, O>(
-  step: StepForkRace<TContext, I, O>,
+  step: StepInParallelRace<TContext, I, O>,
   paths: Step<TContext, I, O>[],
   input: I,
   ctx: Context<TContext>,
@@ -525,7 +525,7 @@ async function executeRace<TContext, I, O>(
 }
 
 async function executeSettle<TContext, I, O>(
-  step: StepForkSettle<TContext, I, O>,
+  step: StepInParallelSettle<TContext, I, O>,
   paths: Step<TContext, I, O>[],
   input: I,
   ctx: Context<TContext>,
@@ -539,7 +539,7 @@ async function executeSettle<TContext, I, O>(
   );
   const settled = await runWithConcurrency(tasks, concurrency);
 
-  // Parent aborted mid-fork: the fork is cancelled, merge never runs
+  // Parent aborted mid-inParallel: the inParallel is cancelled, merge never runs
   // (spec 09, Cancellation item 3 — same rule as mode 'all').
   if (ctx.aborted) {
     throw new NoeticErrorImpl({
@@ -675,7 +675,7 @@ export async function executeLoop<TContext, I, O>(
       }
       // Cancellation is not a retriable error (spec 09): it must terminate
       // the loop promptly rather than be consumed by 'retry'/'skip'. Same
-      // guard as executeEvery's 'continue' policy below.
+      // guard as executeSchedule's 'continue' policy below.
       if (e.noeticError.kind === 'cancelled') {
         throw e;
       }
@@ -775,7 +775,7 @@ export async function executeLoop<TContext, I, O>(
 interface ParkContext<TContext> {
   ms: number;
   jitter: number;
-  wakeOn?: Channel<unknown>;
+  inbox?: Channel<unknown>;
   ctx: Context<TContext>;
   channelStore?: ChannelStore;
 }
@@ -795,7 +795,7 @@ function nextParkMs(ms: number, jitter: number): number {
 }
 
 /**
- * Parks for `ms` ms, returning early if `wakeOn` receives a message or the
+ * Parks for `ms` ms, returning early if `inbox` receives a message or the
  * context is aborted. Always resolves; never throws (cancellation surfaces on
  * the next iteration's abort check).
  */
@@ -837,7 +837,7 @@ function park<TContext>(parkCtx: ParkContext<TContext>): Promise<void> {
       }
     }, 5);
 
-    if (!parkCtx.wakeOn) {
+    if (!parkCtx.inbox) {
       return;
     }
     const { channelStore } = parkCtx;
@@ -845,13 +845,13 @@ function park<TContext>(parkCtx: ParkContext<TContext>): Promise<void> {
       // Non-consuming subscription so the body still observes the message that
       // woke us — `recv()` would dequeue queue-mode messages and leave the
       // body's drain loop empty.
-      wakeUnsub = channelStore.subscribeWake(parkCtx.wakeOn, settle);
+      wakeUnsub = channelStore.subscribeWake(parkCtx.inbox, settle);
       return;
     }
     // Contexts without a ContextImpl/channel store have no body draining the
     // channel anyway; the destructive `recv` is acceptable in that edge case.
     parkCtx.ctx
-      .recv(parkCtx.wakeOn, {
+      .recv(parkCtx.inbox, {
         timeout: Math.max(duration, 1) + 1e2,
       })
       .then(settle)
@@ -879,7 +879,7 @@ function throwCancelled(reason: string | undefined): never {
 
 /**
  * Executes an `every` step: runs the body step forever, paced by `ms ± jitter`,
- * woken early by `wakeOn`. Throws `cancelled` when the context is aborted.
+ * woken early by `inbox`. Throws `cancelled` when the context is aborted.
  *
  * On body throw, behavior depends on `onError`:
  * - `'continue'` (default): emit `every.iteration.error` span event and proceed
@@ -889,8 +889,8 @@ function throwCancelled(reason: string | undefined): never {
  * The body's output is discarded — `every` runs forever and does not accumulate
  * iteration outputs. Only ever returns by throwing on cancellation or `fail`.
  */
-export async function executeEvery<TContext, I, O>(
-  step: StepEvery<TContext, I, O>,
+export async function executeSchedule<TContext, I, O>(
+  step: StepSchedule<TContext, I, O>,
   input: I,
   ctx: Context<TContext>,
   executeStep: ExecuteStepFn,
@@ -925,9 +925,9 @@ export async function executeEvery<TContext, I, O>(
     }
 
     await park({
-      ms: step.ms,
+      ms: step.interval,
       jitter,
-      wakeOn: step.wakeOn,
+      inbox: step.inbox,
       ctx,
       channelStore,
     });

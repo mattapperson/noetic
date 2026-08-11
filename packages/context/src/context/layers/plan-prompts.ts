@@ -15,7 +15,7 @@
 
 import type { WorkflowDocument, WorkflowNode } from '@noetic-tools/types';
 import { walkWorkflow } from '@noetic-tools/types';
-import type { PlanState } from './plan';
+import type { PlanState } from './plan-context';
 
 //#region Types
 
@@ -307,7 +307,7 @@ const KIND_ENTRIES: Array<{
   {
     kind: 'schedule',
     group: 'structure',
-    line: '`schedule` — run `step` on an `interval` of milliseconds, forever; nothing after it ever runs, so put it last',
+    line: '`schedule` — run `step` on an `interval`, forever; nothing after it ever runs, so put it last',
   },
   {
     kind: 'spawn',
@@ -369,7 +369,7 @@ ${structure.join('\n')}
 **Shaping it**
 - Keep the tree the user reviews SMALL — about seven top-level nodes, readable at a glance. Push the mechanics down.
 - Factor detail into named workflows: define each with \`plan/setWorkflow\` \`{ "name": "<slug>", "document": {...} }\` and point at it with \`{ "kind": "subflow", "id": "...", "ref": "<slug>" }\`. Named workflows may reference each other but must not form a cycle, and every ref must resolve or the exit is rejected.
-- Fork work that is genuinely independent; sequence work where one step needs the last one's output. Do not fork for the look of it.
+- Fork work that is genuinely independent; sequence work where one step needs the last one's output. Do not inParallel for the look of it.
 - Prefer \`tool\` over \`llm\` wherever the step is deterministic. A model turn that always does the same thing is a slow, expensive tool call.
 - Always give a \`loop\` a \`maxIterations\`. Without one it stops at a hard ceiling of 1000 and fails the step.`;
 }

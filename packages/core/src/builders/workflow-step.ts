@@ -1,9 +1,9 @@
 /**
- * `step.workflow` — runs a `WorkflowDocument` as a single composable step.
+ * `workflow` — runs a `WorkflowDocument` as a single composable step.
  *
  * Lives beside `step-builders.ts` (rather than inside it) because the hydrator
- * imports the base `step` object; adding a hydrating builder there would create
- * an import cycle. This module composes the public `step` namespace instead.
+ * imports the base builders; adding a hydrating builder there would create an
+ * import cycle.
  */
 
 import type { ContextData, ContextLayer } from '@noetic-tools/context';
@@ -12,7 +12,7 @@ import type {
   ExecuteStepFn,
   OutputCodec,
   Step,
-  StepRun,
+  StepRunCode,
   SubHarness,
   SubHarnessKind,
   SubprocessAdapter,
@@ -21,14 +21,14 @@ import type {
 } from '@noetic-tools/types';
 import { frameworkCast, NoeticConfigError } from '@noetic-tools/types';
 import { spawn } from './spawn-builder';
-import * as stepBuilders from './step-builders';
+import { runCode } from './step-builders';
 import type { HydrationContext } from './workflow-hydrator';
 import { hydrateWorkflow } from './workflow-hydrator';
 
 //#region Types
 
-/** @public Options for `step.workflow`. */
-export interface StepWorkflowOpts {
+/** @public Options for `workflow`. */
+export interface WorkflowOpts {
   id: string;
   /** Inline workflow document. Mutually exclusive with `ref`. */
   document?: WorkflowDocument;
@@ -64,25 +64,25 @@ export interface StepWorkflowOpts {
  * workflow fails with `WORKFLOW_CYCLE` instead of recursing forever.
  *
  * @public
- * @param opts - See `StepWorkflowOpts`.
- * @returns A `StepRun` executing the workflow via the harness on the context.
+ * @param opts - See `WorkflowOpts`.
+ * @returns A `StepRunCode` executing the workflow via the harness on the context.
  * @throws `NoeticConfigError` with code `EMPTY_STEP_ID` if `id` is empty.
  * @throws `NoeticConfigError` with code `INVALID_WORKFLOW_SOURCE` unless exactly one of `document`/`ref` is set.
  * @throws `NoeticConfigError` with code `MISSING_HARNESS_CONTEXT` (at execution) without `ctx.harness`.
  * @throws `NoeticConfigError` with code `UNKNOWN_WORKFLOW_REFERENCE` (at execution) if `ref` names no registered workflow.
  */
-export function stepWorkflow(opts: StepWorkflowOpts): StepRun<ContextData, string, string> {
+export function workflow(opts: WorkflowOpts): StepRunCode<ContextData, string, string> {
   if (!opts.id || opts.id.trim() === '') {
     throw new NoeticConfigError({
       code: 'EMPTY_STEP_ID',
-      message: 'step.workflow() requires a non-empty id.',
-      hint: 'Pass a unique string as the id field, e.g. step.workflow({ id: "verify", ... }).',
+      message: 'workflow() requires a non-empty id.',
+      hint: 'Pass a unique string as the id field, e.g. workflow({ id: "verify", ... }).',
     });
   }
   if ((opts.document === undefined) === (opts.ref === undefined)) {
     throw new NoeticConfigError({
       code: 'INVALID_WORKFLOW_SOURCE',
-      message: `step.workflow('${opts.id}') requires exactly one of 'document' (inline) or 'ref' (named).`,
+      message: `workflow('${opts.id}') requires exactly one of 'document' (inline) or 'ref' (named).`,
       hint: "Pass document: { version: 1, root: ... } or ref: '<name>' with a workflows registry.",
     });
   }
@@ -98,14 +98,14 @@ export function stepWorkflow(opts: StepWorkflowOpts): StepRun<ContextData, strin
       }
     | undefined;
 
-  return stepBuilders.step.run({
+  return runCode({
     id: opts.id,
     execute: async (input: string, ctx: Context): Promise<string> => {
       const harness = ctx.harness;
       if (!harness) {
         throw new NoeticConfigError({
           code: 'MISSING_HARNESS_CONTEXT',
-          message: 'step.workflow requires a harness on the execution context.',
+          message: 'workflow requires a harness on the execution context.',
           hint: 'Execute this step via AgentHarness.run() or ensure ctx.harness is set.',
         });
       }
@@ -121,25 +121,19 @@ export function stepWorkflow(opts: StepWorkflowOpts): StepRun<ContextData, strin
   });
 }
 
-/** @public The step builder namespace: the base builders plus `workflow`. */
-export const step = {
-  ...stepBuilders.step,
-  workflow: stepWorkflow,
-} as const;
-
 //#endregion
 
 //#region Helpers
 
 function hydrate(
-  opts: StepWorkflowOpts,
+  opts: WorkflowOpts,
   executeStep: ExecuteStepFn,
 ): Step<ContextData, string, string> {
   const doc = opts.document ?? (opts.ref ? opts.workflows?.get(opts.ref) : undefined);
   if (!doc) {
     throw new NoeticConfigError({
       code: 'UNKNOWN_WORKFLOW_REFERENCE',
-      message: `Workflow '${opts.ref}' referenced by step.workflow('${opts.id}') is not registered.`,
+      message: `Workflow '${opts.ref}' referenced by workflow('${opts.id}') is not registered.`,
       hint: `Pass named workflows via the workflows option. Available: ${
         [
           ...(opts.workflows?.keys() ?? []),

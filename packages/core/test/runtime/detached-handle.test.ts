@@ -157,7 +157,7 @@ describe('AgentHarness.detachedSpawn', () => {
     const ctx = harness.createContext();
 
     const step: Step<ContextData, number, number> = {
-      kind: 'run',
+      kind: 'runCode',
       id: 'delayed',
       execute: async (input: number) => {
         await new Promise((r) => setTimeout(r, 20));
@@ -190,7 +190,7 @@ describe('AgentHarness.detachedSpawn', () => {
     const ctx = harness.createContext();
 
     const step: Step<ContextData, string, string> = {
-      kind: 'run',
+      kind: 'runCode',
       id: 'echo',
       execute: async (input: string) => input,
     };

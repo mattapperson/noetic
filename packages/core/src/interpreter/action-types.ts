@@ -16,12 +16,12 @@ export type {
   RecallLayerOutput,
   RetryPolicy,
   ServerToolSpec,
-  StepLLM,
+  StepCallModel,
+  StepInvokeTool,
   StepMeta,
-  StepProvide,
-  StepRun,
+  StepRunCode,
   StepSpawn,
-  StepTool,
+  StepWithContext,
   Tool,
 } from '@noetic-tools/types';
 export { isServerToolSpec, SteeringAction } from '@noetic-tools/types';

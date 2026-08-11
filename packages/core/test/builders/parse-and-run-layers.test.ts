@@ -13,13 +13,13 @@ import { createScriptedCallModel, makeLLMResponse } from '../_helpers';
 const DOC = {
   version: 1,
   root: {
-    kind: 'provide' as const,
+    kind: 'withContext' as const,
     id: 'with-layers',
     layers: [
       'task-state',
     ],
     child: {
-      kind: 'llm' as const,
+      kind: 'callModel' as const,
       id: 'inner',
       model: 'openai/gpt-4o-mini',
       instructions: 'work',

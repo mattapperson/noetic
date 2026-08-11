@@ -24,7 +24,7 @@ import {
 
 function makeStep(id: string): Step<ContextData, string, string> {
   return {
-    kind: 'run',
+    kind: 'runCode',
     id,
     execute: async () => `result-${id}`,
   };

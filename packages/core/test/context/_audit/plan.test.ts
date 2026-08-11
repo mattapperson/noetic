@@ -12,7 +12,7 @@ function makeDoc(): WorkflowDocument {
   return {
     version: 1,
     root: {
-      kind: 'llm',
+      kind: 'callModel',
       id: 'leaf',
       instructions: 'Do the thing',
     },

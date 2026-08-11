@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import type { ContextData } from '@noetic-tools/context';
-import type { Context, StepRun } from '@noetic-tools/types';
+import type { Context, StepRunCode } from '@noetic-tools/types';
 import { isNoeticError, NoeticErrorImpl } from '@noetic-tools/types';
-import { executeRun } from '../../src/interpreter/execute-action';
+import { executeRunCode } from '../../src/interpreter/execute-action';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import { makeMockContext, makeMockHarness } from '../_helpers';
 
@@ -41,41 +41,41 @@ function interceptDelays(): {
   };
 }
 
-describe('executeRun', () => {
+describe('executeRunCode', () => {
   it('calls execute function and returns output', async () => {
-    const s: StepRun<ContextData, string, number> = {
-      kind: 'run',
+    const s: StepRunCode<ContextData, string, number> = {
+      kind: 'runCode',
       id: 'test',
       execute: async (input) => input.length,
     };
-    const result = await executeRun(s, 'hello', mockCtx);
+    const result = await executeRunCode(s, 'hello', mockCtx);
     expect(result).toBe(5);
   });
 
   it('passes context to execute function', async () => {
     let receivedCtx: Context | undefined;
-    const s: StepRun<ContextData, string, string> = {
-      kind: 'run',
+    const s: StepRunCode<ContextData, string, string> = {
+      kind: 'runCode',
       id: 'test',
       execute: async (input, ctx) => {
         receivedCtx = ctx;
         return input;
       },
     };
-    await executeRun(s, 'test', mockCtx);
+    await executeRunCode(s, 'test', mockCtx);
     expect(receivedCtx).toBe(mockCtx);
   });
 
   it('throws step_failed on error without retry', async () => {
-    const s: StepRun<ContextData, string, string> = {
-      kind: 'run',
+    const s: StepRunCode<ContextData, string, string> = {
+      kind: 'runCode',
       id: 'failing',
       execute: async () => {
         throw new Error('boom');
       },
     };
     try {
-      await executeRun(s, 'test', mockCtx);
+      await executeRunCode(s, 'test', mockCtx);
       expect.unreachable('should have thrown');
     } catch (e) {
       assert(isNoeticError(e));
@@ -91,8 +91,8 @@ describe('executeRun', () => {
     const { delays, restore } = interceptDelays();
 
     let attempts = 0;
-    const s: StepRun<ContextData, string, string> = {
-      kind: 'run',
+    const s: StepRunCode<ContextData, string, string> = {
+      kind: 'runCode',
       id: 'retry-test',
       execute: async (_input) => {
         attempts++;
@@ -108,7 +108,7 @@ describe('executeRun', () => {
       },
     };
     try {
-      const result = await executeRun(s, 'test', mockCtx);
+      const result = await executeRunCode(s, 'test', mockCtx);
       expect(result).toBe('success');
       expect(attempts).toBe(3);
       // Fixed backoff: all delays should be 10
@@ -124,8 +124,8 @@ describe('executeRun', () => {
   it('retries with exponential backoff and exhausts', async () => {
     const { delays, restore } = interceptDelays();
     let attempts = 0;
-    const s: StepRun<ContextData, string, string> = {
-      kind: 'run',
+    const s: StepRunCode<ContextData, string, string> = {
+      kind: 'runCode',
       id: 'exhaust-test',
       execute: async () => {
         attempts++;
@@ -138,7 +138,7 @@ describe('executeRun', () => {
       },
     };
     try {
-      await executeRun(s, 'test', mockCtx);
+      await executeRunCode(s, 'test', mockCtx);
       expect.unreachable('should have thrown');
     } catch (e) {
       assert(isNoeticError(e));
@@ -159,8 +159,8 @@ describe('executeRun', () => {
     const { delays, restore } = interceptDelays();
 
     let attempts = 0;
-    const s: StepRun<ContextData, string, string> = {
-      kind: 'run',
+    const s: StepRunCode<ContextData, string, string> = {
+      kind: 'runCode',
       id: 'cap-test',
       execute: async () => {
         attempts++;
@@ -177,7 +177,7 @@ describe('executeRun', () => {
       },
     };
     try {
-      await executeRun(s, 'test', mockCtx);
+      await executeRunCode(s, 'test', mockCtx);
     } finally {
       restore();
     }
@@ -200,8 +200,8 @@ describe('executeRun', () => {
     const { delays, restore } = interceptDelays();
 
     let attempts = 0;
-    const s: StepRun<ContextData, string, string> = {
-      kind: 'run',
+    const s: StepRunCode<ContextData, string, string> = {
+      kind: 'runCode',
       id: 'default-cap-test',
       execute: async () => {
         attempts++;
@@ -217,7 +217,7 @@ describe('executeRun', () => {
       },
     };
     try {
-      await executeRun(s, 'test', mockCtx);
+      await executeRunCode(s, 'test', mockCtx);
     } finally {
       restore();
     }
@@ -231,8 +231,8 @@ describe('executeRun', () => {
     const { delays, restore } = interceptDelays();
 
     let attempts = 0;
-    const s: StepRun<ContextData, string, string> = {
-      kind: 'run',
+    const s: StepRunCode<ContextData, string, string> = {
+      kind: 'runCode',
       id: 'linear-test',
       execute: async () => {
         attempts++;
@@ -248,7 +248,7 @@ describe('executeRun', () => {
       },
     };
     try {
-      const result = await executeRun(s, 'test', mockCtx);
+      const result = await executeRunCode(s, 'test', mockCtx);
       expect(result).toBe('ok');
       expect(attempts).toBe(3);
       // Linear backoff: delay = initialDelay * attempt
@@ -267,8 +267,8 @@ describe('executeRun', () => {
         harness: makeMockHarness(),
       });
       let attempts = 0;
-      const s: StepRun<ContextData, string, string> = {
-        kind: 'run',
+      const s: StepRunCode<ContextData, string, string> = {
+        kind: 'runCode',
         id: 'cancel-test',
         execute: async () => {
           attempts++;
@@ -284,7 +284,7 @@ describe('executeRun', () => {
         },
       };
       try {
-        await executeRun(s, 'test', ctx);
+        await executeRunCode(s, 'test', ctx);
         expect.unreachable('should have thrown');
       } catch (e) {
         assert(isNoeticError(e));
@@ -301,8 +301,8 @@ describe('executeRun', () => {
         harness: makeMockHarness(),
       });
       let attempts = 0;
-      const s: StepRun<ContextData, string, string> = {
-        kind: 'run',
+      const s: StepRunCode<ContextData, string, string> = {
+        kind: 'runCode',
         id: 'abort-between',
         execute: async () => {
           attempts++;
@@ -317,7 +317,7 @@ describe('executeRun', () => {
         },
       };
       try {
-        await executeRun(s, 'test', ctx);
+        await executeRunCode(s, 'test', ctx);
         expect.unreachable('should have thrown');
       } catch (e) {
         assert(isNoeticError(e));
@@ -333,13 +333,13 @@ describe('executeRun', () => {
 
   describe('retry attempt boundaries (maxAttempts = 3)', () => {
     function failUntil(succeedOnAttempt: number): {
-      step: StepRun<ContextData, string, string>;
+      step: StepRunCode<ContextData, string, string>;
       attempts: () => number;
     } {
       let attempts = 0;
       return {
         step: {
-          kind: 'run',
+          kind: 'runCode',
           id: `boundary-${succeedOnAttempt}`,
           execute: async () => {
             attempts++;
@@ -360,20 +360,20 @@ describe('executeRun', () => {
 
     it('succeeds on attempt N-1 (2 of 3)', async () => {
       const { step: s, attempts } = failUntil(2);
-      expect(await executeRun(s, 'test', mockCtx)).toBe('ok');
+      expect(await executeRunCode(s, 'test', mockCtx)).toBe('ok');
       expect(attempts()).toBe(2);
     });
 
     it('succeeds on attempt N (3 of 3)', async () => {
       const { step: s, attempts } = failUntil(3);
-      expect(await executeRun(s, 'test', mockCtx)).toBe('ok');
+      expect(await executeRunCode(s, 'test', mockCtx)).toBe('ok');
       expect(attempts()).toBe(3);
     });
 
     it('fails when success would come on attempt N+1 (4 of 3)', async () => {
       const { step: s, attempts } = failUntil(4);
       try {
-        await executeRun(s, 'test', mockCtx);
+        await executeRunCode(s, 'test', mockCtx);
         expect.unreachable('should have thrown');
       } catch (e) {
         assert(isNoeticError(e));
@@ -386,15 +386,15 @@ describe('executeRun', () => {
   });
 
   it('wraps non-Error throws in NoeticErrorImpl', async () => {
-    const s: StepRun<ContextData, string, string> = {
-      kind: 'run',
+    const s: StepRunCode<ContextData, string, string> = {
+      kind: 'runCode',
       id: 'string-throw',
       execute: async () => {
         throw 'string error';
       },
     };
     try {
-      await executeRun(s, 'test', mockCtx);
+      await executeRunCode(s, 'test', mockCtx);
       expect.unreachable('should have thrown');
     } catch (e) {
       assert(isNoeticError(e));

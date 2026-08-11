@@ -5,16 +5,16 @@ import { createLayerStateStore, Slot } from '@noetic-tools/context';
 import type {
   Context,
   SettleResult,
-  StepForkAll,
-  StepForkRace,
-  StepForkSettle,
+  StepInParallelAll,
+  StepInParallelRace,
+  StepInParallelSettle,
 } from '@noetic-tools/types';
 import { frameworkCast, isNoeticError } from '@noetic-tools/types';
 import { z } from 'zod';
 import { channel } from '../../src/builders/channel-builder';
 import { loop } from '../../src/builders/loop-builder';
 import { execute } from '../../src/interpreter/execute';
-import { executeFork } from '../../src/interpreter/execute-control';
+import { executeInParallel } from '../../src/interpreter/execute-control';
 import { ChannelStore } from '../../src/runtime/channel-store';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import { until } from '../../src/until/predicates';
@@ -22,21 +22,21 @@ import { makeMessage, makeMockHarness, simpleExecute } from '../_helpers';
 
 const _StateSchema = z.record(z.string(), z.unknown());
 
-describe('executeFork', () => {
+describe('executeInParallel', () => {
   describe('all mode', () => {
     it('executes all paths and merges results', async () => {
-      const step: StepForkAll<ContextData, number, number> = {
-        kind: 'fork',
+      const step: StepInParallelAll<ContextData, number, number> = {
+        kind: 'inParallel',
         id: 'all-test',
         mode: 'all',
         paths: () => [
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'a',
             execute: async (i: number) => i * 2,
           },
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'b',
             execute: async (i: number) => i * 3,
           },
@@ -46,23 +46,23 @@ describe('executeFork', () => {
       const ctx = new ContextImpl({
         harness: makeMockHarness(),
       });
-      const result = await executeFork(step, 5, ctx, simpleExecute);
+      const result = await executeInParallel(step, 5, ctx, simpleExecute);
       expect(result).toBe(25); // 10 + 15
     });
 
     it('throws fork_partial when any path fails', async () => {
-      const step: StepForkAll<ContextData, string, string> = {
-        kind: 'fork',
+      const step: StepInParallelAll<ContextData, string, string> = {
+        kind: 'inParallel',
         id: 'fail-test',
         mode: 'all',
         paths: () => [
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'ok',
             execute: async () => 'success',
           },
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'fail',
             execute: async () => {
               throw new Error('boom');
@@ -75,7 +75,7 @@ describe('executeFork', () => {
         harness: makeMockHarness(),
       });
       try {
-        await executeFork(step, '', ctx, simpleExecute);
+        await executeInParallel(step, '', ctx, simpleExecute);
         expect.unreachable('should have thrown');
       } catch (e) {
         assert(isNoeticError(e));
@@ -88,13 +88,13 @@ describe('executeFork', () => {
     });
 
     it('state is isolated between paths', async () => {
-      const step: StepForkAll<ContextData, string, string> = {
-        kind: 'fork',
+      const step: StepInParallelAll<ContextData, string, string> = {
+        kind: 'inParallel',
         id: 'iso-test',
         mode: 'all',
         paths: () => [
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'a',
             // Fork gives child contexts; state is writable via Context interface
             execute: async (_: string, ctx: Context) => {
@@ -105,7 +105,7 @@ describe('executeFork', () => {
             },
           },
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'b',
             execute: async (_: string, ctx: Context) => {
               // Should NOT see a's mutation
@@ -121,7 +121,7 @@ describe('executeFork', () => {
           original: true,
         },
       });
-      const result = await executeFork(step, '', ctx, simpleExecute);
+      const result = await executeInParallel(step, '', ctx, simpleExecute);
       // b should see the original state, not a's mutation
       const bResult = result.split('|')[1];
       const bState = _StateSchema.parse(JSON.parse(bResult));
@@ -135,13 +135,13 @@ describe('executeFork', () => {
     it('respects concurrency limit', async () => {
       let maxConcurrent = 0;
       let current = 0;
-      const step: StepForkAll<ContextData, string, string> = {
-        kind: 'fork',
+      const step: StepInParallelAll<ContextData, string, string> = {
+        kind: 'inParallel',
         id: 'conc-test',
         mode: 'all',
         paths: () => [
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'a',
             execute: async () => {
               current++;
@@ -152,7 +152,7 @@ describe('executeFork', () => {
             },
           },
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'b',
             execute: async () => {
               current++;
@@ -163,7 +163,7 @@ describe('executeFork', () => {
             },
           },
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'c',
             execute: async () => {
               current++;
@@ -180,7 +180,7 @@ describe('executeFork', () => {
       const ctx = new ContextImpl({
         harness: makeMockHarness(),
       });
-      await executeFork(step, '', ctx, simpleExecute);
+      await executeInParallel(step, '', ctx, simpleExecute);
       expect(maxConcurrent).toBeLessThanOrEqual(2);
     });
 
@@ -188,7 +188,7 @@ describe('executeFork', () => {
       let maxConcurrent = 0;
       let current = 0;
       const makeTimedPath = (id: string) => ({
-        kind: 'run' as const,
+        kind: 'runCode' as const,
         id,
         execute: async () => {
           current++;
@@ -198,8 +198,8 @@ describe('executeFork', () => {
           return id;
         },
       });
-      const step: StepForkAll<ContextData, string, string> = {
-        kind: 'fork',
+      const step: StepInParallelAll<ContextData, string, string> = {
+        kind: 'inParallel',
         id: 'serial-test',
         mode: 'all',
         paths: () => [
@@ -213,7 +213,7 @@ describe('executeFork', () => {
       const ctx = new ContextImpl({
         harness: makeMockHarness(),
       });
-      const result = await executeFork(step, '', ctx, simpleExecute);
+      const result = await executeInParallel(step, '', ctx, simpleExecute);
       expect(maxConcurrent).toBe(1);
       expect(result).toBe('a,b,c');
     });
@@ -221,8 +221,8 @@ describe('executeFork', () => {
     it('paths() receives input and context', async () => {
       let capturedInput: string | undefined;
       let capturedCtx: Context | undefined;
-      const step: StepForkAll<ContextData, string, string> = {
-        kind: 'fork',
+      const step: StepInParallelAll<ContextData, string, string> = {
+        kind: 'inParallel',
         id: 'args-test',
         mode: 'all',
         paths: (input, ctx) => {
@@ -230,7 +230,7 @@ describe('executeFork', () => {
           capturedCtx = ctx;
           return [
             {
-              kind: 'run',
+              kind: 'runCode',
               id: 'a',
               execute: async () => 'done',
             },
@@ -241,20 +241,20 @@ describe('executeFork', () => {
       const ctx = new ContextImpl({
         harness: makeMockHarness(),
       });
-      await executeFork(step, 'test-input', ctx, simpleExecute);
+      await executeInParallel(step, 'test-input', ctx, simpleExecute);
       expect(capturedInput).toBe('test-input');
       expect(capturedCtx).toBe(ctx);
     });
 
     it('merge() receives context as second arg', async () => {
       let capturedCtx: Context | undefined;
-      const step: StepForkAll<ContextData, string, string> = {
-        kind: 'fork',
+      const step: StepInParallelAll<ContextData, string, string> = {
+        kind: 'inParallel',
         id: 'merge-ctx-test',
         mode: 'all',
         paths: () => [
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'a',
             execute: async () => 'done',
           },
@@ -267,13 +267,13 @@ describe('executeFork', () => {
       const ctx = new ContextImpl({
         harness: makeMockHarness(),
       });
-      await executeFork(step, '', ctx, simpleExecute);
+      await executeInParallel(step, '', ctx, simpleExecute);
       expect(capturedCtx).toBe(ctx);
     });
 
     it('handles empty paths', async () => {
-      const step: StepForkAll<ContextData, string, string> = {
-        kind: 'fork',
+      const step: StepInParallelAll<ContextData, string, string> = {
+        kind: 'inParallel',
         id: 'empty-all',
         mode: 'all',
         paths: () => [],
@@ -282,20 +282,20 @@ describe('executeFork', () => {
       const ctx = new ContextImpl({
         harness: makeMockHarness(),
       });
-      const result = await executeFork(step, '', ctx, simpleExecute);
+      const result = await executeInParallel(step, '', ctx, simpleExecute);
       expect(result).toBe('got 0');
     });
   });
 
   describe('race mode', () => {
     it('returns first completed result', async () => {
-      const step: StepForkRace<ContextData, string, string> = {
-        kind: 'fork',
+      const step: StepInParallelRace<ContextData, string, string> = {
+        kind: 'inParallel',
         id: 'race-test',
         mode: 'race',
         paths: () => [
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'slow',
             execute: async () => {
               await new Promise((r) => setTimeout(r, 200));
@@ -303,7 +303,7 @@ describe('executeFork', () => {
             },
           },
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'fast',
             execute: async () => {
               await new Promise((r) => setTimeout(r, 10));
@@ -315,18 +315,18 @@ describe('executeFork', () => {
       const ctx = new ContextImpl({
         harness: makeMockHarness(),
       });
-      const result = await executeFork(step, '', ctx, simpleExecute);
+      const result = await executeInParallel(step, '', ctx, simpleExecute);
       expect(result).toBe('fast');
     });
 
     it('winner state replaces parent state', async () => {
-      const step: StepForkRace<ContextData, string, string> = {
-        kind: 'fork',
+      const step: StepInParallelRace<ContextData, string, string> = {
+        kind: 'inParallel',
         id: 'state-test',
         mode: 'race',
         paths: () => [
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'winner',
             // Fork gives child contexts; state is writable via Context interface
             execute: async (_: string, ctx: Context) => {
@@ -337,7 +337,7 @@ describe('executeFork', () => {
             },
           },
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'loser',
             execute: async () => {
               await new Promise((r) => setTimeout(r, 200));
@@ -352,20 +352,20 @@ describe('executeFork', () => {
           original: true,
         },
       });
-      await executeFork(step, '', ctx, simpleExecute);
+      await executeInParallel(step, '', ctx, simpleExecute);
       const finalState = _StateSchema.parse(ctx.state);
       expect(finalState.winner).toBe(true);
     });
 
     it('aborts loser contexts after winner resolves', async () => {
       const childContexts: Context[] = [];
-      const step: StepForkRace<ContextData, string, string> = {
-        kind: 'fork',
+      const step: StepInParallelRace<ContextData, string, string> = {
+        kind: 'inParallel',
         id: 'abort-test',
         mode: 'race',
         paths: () => [
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'fast',
             // Fork gives child contexts; captured to check abort state
             execute: async (_: string, ctx: Context) => {
@@ -374,7 +374,7 @@ describe('executeFork', () => {
             },
           },
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'slow',
             execute: async (_: string, ctx: Context) => {
               childContexts.push(ctx);
@@ -387,7 +387,7 @@ describe('executeFork', () => {
       const ctx = new ContextImpl({
         harness: makeMockHarness(),
       });
-      const result = await executeFork(step, '', ctx, simpleExecute);
+      const result = await executeInParallel(step, '', ctx, simpleExecute);
       expect(result).toBe('winner');
       // Allow time for abort to propagate
       await new Promise((r) => setTimeout(r, 50));
@@ -399,13 +399,13 @@ describe('executeFork', () => {
     it('respects concurrency limit in race mode', async () => {
       let maxConcurrent = 0;
       let current = 0;
-      const step: StepForkRace<ContextData, string, string> = {
-        kind: 'fork',
+      const step: StepInParallelRace<ContextData, string, string> = {
+        kind: 'inParallel',
         id: 'race-conc-test',
         mode: 'race',
         paths: () => [
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'a',
             execute: async () => {
               current++;
@@ -416,7 +416,7 @@ describe('executeFork', () => {
             },
           },
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'b',
             execute: async () => {
               current++;
@@ -427,7 +427,7 @@ describe('executeFork', () => {
             },
           },
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'c',
             execute: async () => {
               current++;
@@ -443,25 +443,25 @@ describe('executeFork', () => {
       const ctx = new ContextImpl({
         harness: makeMockHarness(),
       });
-      await executeFork(step, '', ctx, simpleExecute);
+      await executeInParallel(step, '', ctx, simpleExecute);
       expect(maxConcurrent).toBeLessThanOrEqual(2);
     });
 
     it('all fail throws fork_partial', async () => {
-      const step: StepForkRace<ContextData, string, string> = {
-        kind: 'fork',
+      const step: StepInParallelRace<ContextData, string, string> = {
+        kind: 'inParallel',
         id: 'all-fail',
         mode: 'race',
         paths: () => [
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'a',
             execute: async () => {
               throw new Error('fail a');
             },
           },
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'b',
             execute: async () => {
               throw new Error('fail b');
@@ -473,7 +473,7 @@ describe('executeFork', () => {
         harness: makeMockHarness(),
       });
       try {
-        await executeFork(step, '', ctx, simpleExecute);
+        await executeInParallel(step, '', ctx, simpleExecute);
         expect.unreachable('should have thrown');
       } catch (e) {
         assert(isNoeticError(e));
@@ -485,8 +485,8 @@ describe('executeFork', () => {
     });
 
     it('throws fork_partial on empty paths', async () => {
-      const step: StepForkRace<ContextData, string, string> = {
-        kind: 'fork',
+      const step: StepInParallelRace<ContextData, string, string> = {
+        kind: 'inParallel',
         id: 'empty-race',
         mode: 'race',
         paths: () => [],
@@ -495,7 +495,7 @@ describe('executeFork', () => {
         harness: makeMockHarness(),
       });
       try {
-        await executeFork(step, '', ctx, simpleExecute);
+        await executeInParallel(step, '', ctx, simpleExecute);
         expect.unreachable('should have thrown');
       } catch (e) {
         assert(isNoeticError(e));
@@ -506,18 +506,18 @@ describe('executeFork', () => {
 
   describe('settle mode', () => {
     it('waits for all and never throws', async () => {
-      const step: StepForkSettle<ContextData, string, string> = {
-        kind: 'fork',
+      const step: StepInParallelSettle<ContextData, string, string> = {
+        kind: 'inParallel',
         id: 'settle-test',
         mode: 'settle',
         paths: () => [
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'ok',
             execute: async () => 'success',
           },
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'fail',
             execute: async () => {
               throw new Error('boom');
@@ -533,24 +533,24 @@ describe('executeFork', () => {
       const ctx = new ContextImpl({
         harness: makeMockHarness(),
       });
-      const result = await executeFork(step, '', ctx, simpleExecute);
+      const result = await executeInParallel(step, '', ctx, simpleExecute);
       expect(result).toBe('1 ok, 1 failed');
     });
 
     it('settle result has correct shape', async () => {
       let capturedResults: SettleResult<string>[] = [];
-      const step: StepForkSettle<ContextData, string, string> = {
-        kind: 'fork',
+      const step: StepInParallelSettle<ContextData, string, string> = {
+        kind: 'inParallel',
         id: 'shape-test',
         mode: 'settle',
         paths: () => [
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'a',
             execute: async () => 'value-a',
           },
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'b',
             execute: async () => {
               throw new Error('err-b');
@@ -565,7 +565,7 @@ describe('executeFork', () => {
       const ctx = new ContextImpl({
         harness: makeMockHarness(),
       });
-      await executeFork(step, '', ctx, simpleExecute);
+      await executeInParallel(step, '', ctx, simpleExecute);
 
       expect(capturedResults).toHaveLength(2);
       const fulfilled = capturedResults.find((r) => r.status === 'fulfilled')!;
@@ -578,8 +578,8 @@ describe('executeFork', () => {
     });
 
     it('handles empty paths', async () => {
-      const step: StepForkSettle<ContextData, string, string> = {
-        kind: 'fork',
+      const step: StepInParallelSettle<ContextData, string, string> = {
+        kind: 'inParallel',
         id: 'empty-settle',
         mode: 'settle',
         paths: () => [],
@@ -588,14 +588,14 @@ describe('executeFork', () => {
       const ctx = new ContextImpl({
         harness: makeMockHarness(),
       });
-      const result = await executeFork(step, '', ctx, simpleExecute);
+      const result = await executeInParallel(step, '', ctx, simpleExecute);
       expect(result).toBe('got 0');
     });
   });
 
   describe('channel store inheritance', () => {
     it('child contexts inherit channelStore so siblings can communicate', async () => {
-      const ch = channel<number>('fork-share', {
+      const ch = channel<number>('inParallel-share', {
         schema: z.number(),
         mode: 'queue',
       });
@@ -604,13 +604,13 @@ describe('executeFork', () => {
       let senderError: unknown = null;
       let received: number | null | undefined;
 
-      const step: StepForkAll<ContextData, void, void> = {
-        kind: 'fork',
+      const step: StepInParallelAll<ContextData, void, void> = {
+        kind: 'inParallel',
         id: 'channel-share',
         mode: 'all',
         paths: () => [
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'sender',
             execute: async (_input, c) => {
               try {
@@ -621,7 +621,7 @@ describe('executeFork', () => {
             },
           },
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'receiver',
             execute: async (_input, c) => {
               await new Promise((r) => setTimeout(r, 10));
@@ -636,7 +636,7 @@ describe('executeFork', () => {
         harness: makeMockHarness(),
         channelStore,
       });
-      await executeFork(step, undefined, ctx, simpleExecute);
+      await executeInParallel(step, undefined, ctx, simpleExecute);
       expect(senderError).toBeNull();
       assert(received !== undefined);
       expect(received).toBe(7);
@@ -680,7 +680,7 @@ describe('executeFork', () => {
     /** A path that records one artifact into its own (child) layer state. */
     function makeRecordingPath(id: string, file: string, store: LayerStateStore) {
       return {
-        kind: 'run' as const,
+        kind: 'runCode' as const,
         id,
         execute: async (_input: string, c: Context<ContextData>): Promise<string> => {
           const seeded = frameworkCast<ArtifactState | undefined>(store.get(c.id, 'artifacts'));
@@ -710,8 +710,8 @@ describe('executeFork', () => {
         ],
       });
 
-      const step: StepForkAll<ContextData, string, string> = {
-        kind: 'fork',
+      const step: StepInParallelAll<ContextData, string, string> = {
+        kind: 'inParallel',
         id: 'fan-out',
         mode: 'all',
         paths: () => [
@@ -721,7 +721,7 @@ describe('executeFork', () => {
         merge: (results) => results.join(','),
       };
 
-      const merged = await executeFork(step, '', ctx, simpleExecute, {
+      const merged = await executeInParallel(step, '', ctx, simpleExecute, {
         layerStore: store,
       });
       expect(merged).toBe('a.ts,b.ts');
@@ -753,14 +753,14 @@ describe('executeFork', () => {
         files: [],
       });
 
-      const step: StepForkSettle<ContextData, string, string> = {
-        kind: 'fork',
+      const step: StepInParallelSettle<ContextData, string, string> = {
+        kind: 'inParallel',
         id: 'partial-fan-out',
         mode: 'settle',
         paths: () => [
           makeRecordingPath('ok', 'ok.ts', store),
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'boom',
             execute: async (_input: string, c: Context<ContextData>): Promise<string> => {
               store.set(c.id, 'artifacts', {
@@ -776,7 +776,7 @@ describe('executeFork', () => {
           results.filter((r) => r.status === 'fulfilled').length.toString(),
       };
 
-      const fulfilled = await executeFork(step, '', ctx, simpleExecute, {
+      const fulfilled = await executeInParallel(step, '', ctx, simpleExecute, {
         layerStore: store,
       });
       expect(fulfilled).toBe('1');
@@ -800,13 +800,13 @@ describe('executeFork', () => {
       });
 
       const childIds: string[] = [];
-      const step: StepForkAll<ContextData, string, string> = {
-        kind: 'fork',
+      const step: StepInParallelAll<ContextData, string, string> = {
+        kind: 'inParallel',
         id: 'cleanup',
         mode: 'all',
         paths: () => [
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'p',
             execute: async (_input: string, c: Context<ContextData>): Promise<string> => {
               childIds.push(c.id);
@@ -822,7 +822,7 @@ describe('executeFork', () => {
         merge: (results) => results.join(''),
       };
 
-      await executeFork(step, '', ctx, simpleExecute, {
+      await executeInParallel(step, '', ctx, simpleExecute, {
         layerStore: store,
       });
       expect(childIds).toHaveLength(1);
@@ -850,13 +850,13 @@ describe('executeFork', () => {
 
       let childLayerIds: string[] = [];
       let childToolNames: string[] = [];
-      const step: StepForkAll<ContextData, string, string> = {
-        kind: 'fork',
+      const step: StepInParallelAll<ContextData, string, string> = {
+        kind: 'inParallel',
         id: 'inherit',
         mode: 'all',
         paths: () => [
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'p',
             execute: async (_input: string, c: Context<ContextData>): Promise<string> => {
               childLayerIds = (c.layers ?? []).map((l) => l.id);
@@ -868,7 +868,7 @@ describe('executeFork', () => {
         merge: (results) => results.join(''),
       };
 
-      await executeFork(step, '', ctx, simpleExecute, {
+      await executeInParallel(step, '', ctx, simpleExecute, {
         layerStore: createLayerStateStore(),
       });
       expect(childLayerIds).toEqual([
@@ -879,7 +879,7 @@ describe('executeFork', () => {
       ]);
     });
 
-    it('does not append onSpawn items — a fork child already has the parent log', async () => {
+    it('does not append onSpawn items — an inParallel child already has the parent log', async () => {
       const store = createLayerStateStore();
       const layer = makeArtifactLayer({
         onSpawn: async ({ parentState }) => ({
@@ -901,13 +901,13 @@ describe('executeFork', () => {
       });
 
       let childItemCount = -1;
-      const step: StepForkAll<ContextData, string, string> = {
-        kind: 'fork',
+      const step: StepInParallelAll<ContextData, string, string> = {
+        kind: 'inParallel',
         id: 'no-double-seed',
         mode: 'all',
         paths: () => [
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'p',
             execute: async (_input: string, c: Context<ContextData>): Promise<string> => {
               childItemCount = c.itemLog.items.length;
@@ -918,7 +918,7 @@ describe('executeFork', () => {
         merge: (results) => results.join(''),
       };
 
-      await executeFork(step, '', ctx, simpleExecute, {
+      await executeInParallel(step, '', ctx, simpleExecute, {
         layerStore: store,
       });
       expect(childItemCount).toBe(1);
@@ -929,13 +929,13 @@ describe('executeFork', () => {
       const ctx = new ContextImpl({
         harness: makeMockHarness(),
       });
-      const step: StepForkAll<ContextData, number, number> = {
-        kind: 'fork',
+      const step: StepInParallelAll<ContextData, number, number> = {
+        kind: 'inParallel',
         id: 'no-layers',
         mode: 'all',
         paths: () => [
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'a',
             execute: async (i: number) => i + 1,
           },
@@ -943,7 +943,7 @@ describe('executeFork', () => {
         merge: (results) => results.reduce((a, b) => a + b, 0),
       };
       expect(
-        await executeFork(step, 1, ctx, simpleExecute, {
+        await executeInParallel(step, 1, ctx, simpleExecute, {
           layerStore: store,
         }),
       ).toBe(2);
@@ -961,7 +961,7 @@ describe('executeFork', () => {
         id: 'slow-sibling',
         steps: [
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'slow-1',
             execute: async (i: number) => {
               await sleep(100);
@@ -969,7 +969,7 @@ describe('executeFork', () => {
             },
           },
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'slow-2',
             execute: async (i: number) => {
               siblingSecondStepRan++;
@@ -979,13 +979,13 @@ describe('executeFork', () => {
         ],
         until: until.maxSteps(1),
       });
-      const step: StepForkAll<ContextData, number, number> = {
-        kind: 'fork',
-        id: 'fail-fast-fork',
+      const step: StepInParallelAll<ContextData, number, number> = {
+        kind: 'inParallel',
+        id: 'fail-fast-inParallel',
         mode: 'all',
         paths: () => [
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'fail-fast',
             execute: async () => {
               throw new Error('instant boom');
@@ -999,7 +999,7 @@ describe('executeFork', () => {
         harness: makeMockHarness(),
       });
       try {
-        await executeFork(step, 1, ctx, execute);
+        await executeInParallel(step, 1, ctx, execute);
         expect.unreachable('should have thrown');
       } catch (e) {
         assert(isNoeticError(e));
@@ -1024,14 +1024,14 @@ describe('executeFork', () => {
 
     it('concurrency 1: paths queued behind a failure are skipped without executing', async () => {
       const executed: string[] = [];
-      const step: StepForkAll<ContextData, number, number> = {
-        kind: 'fork',
-        id: 'queued-skip-fork',
+      const step: StepInParallelAll<ContextData, number, number> = {
+        kind: 'inParallel',
+        id: 'queued-skip-inParallel',
         mode: 'all',
         concurrency: 1,
         paths: () => [
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'p1',
             execute: async () => {
               executed.push('p1');
@@ -1039,7 +1039,7 @@ describe('executeFork', () => {
             },
           },
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'p2',
             execute: async (i: number) => {
               executed.push('p2');
@@ -1047,7 +1047,7 @@ describe('executeFork', () => {
             },
           },
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'p3',
             execute: async (i: number) => {
               executed.push('p3');
@@ -1061,7 +1061,7 @@ describe('executeFork', () => {
         harness: makeMockHarness(),
       });
       try {
-        await executeFork(step, 1, ctx, execute);
+        await executeInParallel(step, 1, ctx, execute);
         expect.unreachable('should have thrown');
       } catch (e) {
         assert(isNoeticError(e));
@@ -1085,13 +1085,13 @@ describe('executeFork', () => {
     });
 
     it('a path that completed before the failure lands in succeeded', async () => {
-      const step: StepForkAll<ContextData, number, number> = {
-        kind: 'fork',
-        id: 'partial-success-fork',
+      const step: StepInParallelAll<ContextData, number, number> = {
+        kind: 'inParallel',
+        id: 'partial-success-inParallel',
         mode: 'all',
         paths: () => [
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'quick-success',
             execute: async (i: number) => {
               await sleep(10);
@@ -1099,7 +1099,7 @@ describe('executeFork', () => {
             },
           },
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'late-failure',
             execute: async () => {
               await sleep(50);
@@ -1113,7 +1113,7 @@ describe('executeFork', () => {
         harness: makeMockHarness(),
       });
       try {
-        await executeFork(step, 3, ctx, execute);
+        await executeInParallel(step, 3, ctx, execute);
         expect.unreachable('should have thrown');
       } catch (e) {
         assert(isNoeticError(e));
@@ -1131,14 +1131,14 @@ describe('executeFork', () => {
       }
     });
 
-    it('parent abort mid-fork surfaces cancelled, not fork_partial', async () => {
-      const step: StepForkAll<ContextData, number, number> = {
-        kind: 'fork',
-        id: 'parent-abort-fork',
+    it('parent abort mid-inParallel surfaces cancelled, not fork_partial', async () => {
+      const step: StepInParallelAll<ContextData, number, number> = {
+        kind: 'inParallel',
+        id: 'parent-abort-inParallel',
         mode: 'all',
         paths: () => [
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'steady',
             execute: async (i: number) => {
               await sleep(50);
@@ -1155,7 +1155,7 @@ describe('executeFork', () => {
         ctx.abort('caller cancelled');
       }, 10);
       try {
-        await executeFork(step, 1, ctx, execute);
+        await executeInParallel(step, 1, ctx, execute);
         expect.unreachable('should have thrown');
       } catch (e) {
         assert(isNoeticError(e));
@@ -1165,25 +1165,25 @@ describe('executeFork', () => {
       }
     });
 
-    it('all-success regression: fail-fast machinery does not disturb a clean fork', async () => {
-      const step: StepForkAll<ContextData, number, number> = {
-        kind: 'fork',
-        id: 'clean-fork',
+    it('all-success regression: fail-fast machinery does not disturb a clean inParallel', async () => {
+      const step: StepInParallelAll<ContextData, number, number> = {
+        kind: 'inParallel',
+        id: 'clean-inParallel',
         mode: 'all',
         concurrency: 2,
         paths: () => [
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'a',
             execute: async (i: number) => i + 1,
           },
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'b',
             execute: async (i: number) => i + 2,
           },
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'c',
             execute: async (i: number) => i + 3,
           },
@@ -1193,18 +1193,18 @@ describe('executeFork', () => {
       const ctx = new ContextImpl({
         harness: makeMockHarness(),
       });
-      expect(await executeFork(step, 10, ctx, execute)).toBe(36);
+      expect(await executeInParallel(step, 10, ctx, execute)).toBe(36);
     });
 
     it('parent abort cascades into the in-flight path contexts', async () => {
       const seen: Context<ContextData>[] = [];
-      const step: StepForkAll<ContextData, number, number> = {
-        kind: 'fork',
-        id: 'cascade-fork',
+      const step: StepInParallelAll<ContextData, number, number> = {
+        kind: 'inParallel',
+        id: 'cascade-inParallel',
         mode: 'all',
         paths: () => [
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'slow-a',
             execute: async (i: number, pathCtx) => {
               seen.push(pathCtx);
@@ -1213,7 +1213,7 @@ describe('executeFork', () => {
             },
           },
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'slow-b',
             execute: async (i: number, pathCtx) => {
               seen.push(pathCtx);
@@ -1231,7 +1231,7 @@ describe('executeFork', () => {
         ctx.abort('caller cancelled');
       }, 10);
 
-      await expect(executeFork(step, 1, ctx, execute)).rejects.toThrow();
+      await expect(executeInParallel(step, 1, ctx, execute)).rejects.toThrow();
 
       expect(seen).toHaveLength(2);
       for (const pathCtx of seen) {
@@ -1242,19 +1242,19 @@ describe('executeFork', () => {
       expect(ctx.children).toHaveLength(0);
     });
 
-    it('detaches path contexts once the fork settles', async () => {
-      const step: StepForkAll<ContextData, number, number> = {
-        kind: 'fork',
-        id: 'detach-fork',
+    it('detaches path contexts once the inParallel settles', async () => {
+      const step: StepInParallelAll<ContextData, number, number> = {
+        kind: 'inParallel',
+        id: 'detach-inParallel',
         mode: 'all',
         paths: () => [
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'a',
             execute: async (i: number) => i + 1,
           },
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'b',
             execute: async (i: number) => i + 2,
           },
@@ -1265,7 +1265,7 @@ describe('executeFork', () => {
         harness: makeMockHarness(),
       });
 
-      expect(await executeFork(step, 1, ctx, execute)).toBe(5);
+      expect(await executeInParallel(step, 1, ctx, execute)).toBe(5);
       expect(ctx.children).toHaveLength(0);
     });
   });

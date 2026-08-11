@@ -13,7 +13,7 @@ export interface DurableTaskState {
 }
 
 /**
- * How a child's `data` map is merged into the parent's at a spawn/fork return.
+ * How a child's `data` map is merged into the parent's at a spawn/inParallel return.
  *
  * - `'shallow'` — `{ ...parent, ...child }`. Concurrent children that write the
  *   same key clobber each other (last to return wins). Fine for a single child.

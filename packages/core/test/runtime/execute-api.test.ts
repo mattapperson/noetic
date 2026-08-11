@@ -7,7 +7,7 @@ import { AgentHarness } from '../../src/harness/agent-harness';
 import { createScriptedCallModel, makeMessage, textOnlyResponse } from '../_helpers';
 
 const echoStep: Step<ContextData, string, string> = {
-  kind: 'llm',
+  kind: 'callModel',
   id: 'echo',
   model: 'test/echo',
   tools: [],

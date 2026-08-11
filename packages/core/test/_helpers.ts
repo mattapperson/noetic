@@ -605,14 +605,14 @@ export function createDynamicCallModel(
   return async () => factory();
 }
 
-// ── Simple execute dispatcher (for loop/fork/spawn tests) ────────────
+// ── Simple execute dispatcher (for loop/inParallel/spawn tests) ────────────
 
 export const simpleExecute: ExecuteStepFn = async <TContext, I, O>(
   step: Step<TContext, I, O>,
   input: I,
   ctx: Context<TContext>,
 ): Promise<O> => {
-  if (step.kind === 'run') {
+  if (step.kind === 'runCode') {
     return step.execute(input, ctx);
   }
   throw new Error(`Unsupported step kind: ${step.kind}`);

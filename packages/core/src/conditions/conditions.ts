@@ -139,7 +139,7 @@ function isOtherwise<TContext, I, O>(
  *
  * @public
  * @param clauses - Ordered `WhenClause` and optional trailing `OtherwiseClause`.
- * @returns A route function suitable for `branch({ route })`.
+ * @returns A route function suitable for `conditional({ route })`.
  */
 export function semanticRoute<TContext = ContextData, I = unknown, O = unknown>(
   ...clauses: Clause<TContext, I, O>[]
@@ -186,7 +186,7 @@ interface SemanticSwitchAdvanced<TContext, I, O> {
  *
  * @public
  * @param opts - Simple form with `Record<string, Step>` cases, or advanced form with multi-label cases.
- * @returns A route function suitable for `branch({ route })`.
+ * @returns A route function suitable for `conditional({ route })`.
  */
 export function semanticSwitch<TContext = ContextData, I = unknown, O = unknown>(
   opts: SemanticSwitchSimple<TContext, I, O>,

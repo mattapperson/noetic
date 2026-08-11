@@ -2,7 +2,7 @@
  * SubHarness step handler: drives an external coding-agent harness
  * (Claude Code, Codex, opencode, pi) for one agentic turn and folds its output
  * back into the Noetic execution context — the harness analogue of
- * `executeLLM`.
+ * `executeCallModel`.
  */
 
 import type {

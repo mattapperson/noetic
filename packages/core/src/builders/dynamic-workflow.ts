@@ -13,12 +13,12 @@ import type {
   Tool,
 } from '@noetic-tools/types';
 import { frameworkCast, NoeticConfigError } from '@noetic-tools/types';
+import { callModel, runCode } from '../builders/step-builders';
+import type { HydrationContext } from '../builders/workflow-hydrator';
+import { hydrateWorkflow } from '../builders/workflow-hydrator';
 import { NoeticAttr } from '../observability/genai-attributes';
 import type { WorkflowDocument } from '../schemas/workflow';
 import { WorkflowDocumentSchema, workflowDepth, workflowGraph } from '../schemas/workflow';
-import { step } from './step-builders';
-import type { HydrationContext } from './workflow-hydrator';
-import { hydrateWorkflow } from './workflow-hydrator';
 
 //#region Types
 
@@ -51,9 +51,9 @@ A WorkflowNode is one of:
 - { "kind": "llm", "id": "<unique>", "instructions": "<prompt>", "model": "<optional>", "tools": ["<tool-name>", ...] }
 - { "kind": "tool", "id": "<unique>", "toolName": "<name>", "args": { ... } }
 - { "kind": "sequence", "id": "<unique>", "steps": [<WorkflowNode>, ...] }
-- { "kind": "fork", "id": "<unique>", "mode": "all"|"race"|"settle", "paths": [<WorkflowNode>, ...], "merge": "last"|"first"|"concat" }
+- { "kind": "inParallel", "id": "<unique>", "mode": "all"|"race"|"settle", "paths": [<WorkflowNode>, ...], "merge": "last"|"first"|"concat" }
 - { "kind": "loop", "id": "<unique>", "body": <WorkflowNode>, "until": { "kind": "maxSteps", "n": <number> } }
-- { "kind": "branch", "id": "<unique>", "routes": [{ "match": "<substring>", "target": <WorkflowNode> }], "default": <WorkflowNode> }
+- { "kind": "conditional", "id": "<unique>", "routes": [{ "match": "<substring>", "target": <WorkflowNode> }], "default": <WorkflowNode> }
 - { "kind": "spawn", "id": "<unique>", "child": <WorkflowNode> }
 - { "kind": "subflow", "id": "<unique>", "document": { "version": 1, "root": <WorkflowNode> } } (an inline sub-workflow run as one step; only emit the inline form — named refs require a registry this planner does not provide)
 - { "kind": "claude-code"|"codex"|"opencode"|"pi", "id": "<unique>", "prompt": "<turn prompt>", "settings": { "model": "<optional>", "permissionMode": "<optional>" } }
@@ -87,7 +87,7 @@ export function dynamicWorkflow(opts: DynamicWorkflowOpts): Step<ContextData, st
   const maxRevisions = opts.maxRevisions ?? DEFAULT_MAX_REVISIONS;
   const toolMap = buildToolMap(opts.tools);
 
-  return step.run({
+  return runCode({
     id: 'dynamic-workflow',
     execute: async (input: string, ctx: Context): Promise<string> => {
       const harness = ctx.harness;
@@ -116,7 +116,7 @@ export function dynamicWorkflow(opts: DynamicWorkflowOpts): Step<ContextData, st
           ? `${basePrompt}\n\nPrevious attempt failed with error: ${lastError}\nPlease fix the workflow and try again.`
           : basePrompt;
 
-        const plannerStep = step.llm({
+        const plannerStep = callModel({
           id: `dynamic-workflow-planner-${revision}`,
           model,
           instructions: prompt,

@@ -12,16 +12,16 @@ import { validateWorkflow } from '../../src/schemas/workflow';
 
 /** Every JSON-serialisable node kind the runtime accepts. */
 const NODE_KINDS = [
-  'llm',
-  'tool',
-  'run',
-  'branch',
-  'fork',
+  'callModel',
+  'invokeTool',
+  'runCode',
+  'conditional',
+  'inParallel',
   'spawn',
-  'provide',
+  'withContext',
   'loop',
   'sequence',
-  'every',
+  'schedule',
   'subflow',
   'claude-code',
   'codex',
@@ -35,6 +35,7 @@ const UNTIL_KINDS = [
   'maxCost',
   'maxDuration',
   'noToolCalls',
+  'never',
   'outputContains',
   'outputEquals',
   'converged',
@@ -46,7 +47,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-/** Collects the `kind` const of each variant under a `oneOf`/`anyOf` branch. */
+/** Collects the `kind` const of each variant under a `oneOf`/`anyOf` union. */
 function variantKinds(def: unknown): string[] {
   if (!isRecord(def)) {
     return [];
@@ -56,11 +57,11 @@ function variantKinds(def: unknown): string[] {
     return [];
   }
   const kinds: string[] = [];
-  for (const branch of branches) {
-    if (!isRecord(branch)) {
+  for (const variant of branches) {
+    if (!isRecord(variant)) {
       continue;
     }
-    const properties = branch.properties;
+    const properties = variant.properties;
     if (!isRecord(properties)) {
       continue;
     }

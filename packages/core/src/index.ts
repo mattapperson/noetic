@@ -19,11 +19,11 @@ export { channel } from './builders/channel-builder';
 /** @public */
 export { context } from './builders/context-builder';
 /** @public */
-export { branch, fork } from './builders/control-flow-builders';
+export { conditional, inParallel } from './builders/control-flow-builders';
 /** @public */
-export type { EveryOptions } from './builders/every';
+export type { ScheduleOptions } from './builders/every';
 /** @public */
-export { every } from './builders/every';
+export { schedule } from './builders/every';
 /** @public */
 export { layerData, layerFunction } from './builders/layer-provides-builders';
 /** @public */
@@ -31,9 +31,13 @@ export type { LoopConfig } from './builders/loop-builder';
 /** @public */
 export { loop } from './builders/loop-builder';
 /** @public */
-export { provide } from './builders/provide-builder';
+export { withContext } from './builders/provide-builder';
 /** @public */
 export { spawn } from './builders/spawn-builder';
+/** @public */
+export type { CallModelOpts, InvokeToolOpts, RunCodeOpts } from './builders/step-builders';
+/** @public */
+export { callModel, invokeTool, runCode, step } from './builders/step-builders';
 /** @public */
 export { tool, toolWithGenerator } from './builders/tool-builder';
 /** @public */
@@ -41,9 +45,9 @@ export type { HydrationContext } from './builders/workflow-hydrator';
 /** @public */
 export { hydrateNode, hydrateWorkflow } from './builders/workflow-hydrator';
 /** @public */
-export type { StepWorkflowOpts } from './builders/workflow-step';
+export type { WorkflowOpts } from './builders/workflow-step';
 /** @public */
-export { step } from './builders/workflow-step';
+export { workflow } from './builders/workflow-step';
 
 //#endregion
 
@@ -239,20 +243,20 @@ export { getRegistry, lookupStep, registerStep } from './runtime/step-registry';
 export { defaultItemSchemaRegistry, ItemSchema, ItemSchemaRegistry } from '@noetic-tools/types';
 /** @public */
 export type {
-  BranchRoute,
-  BranchWorkflowNode,
-  EveryWorkflowNode,
-  ForkWorkflowNode,
-  LlmWorkflowNode,
+  CallModelWorkflowNode,
+  ConditionalRoute,
+  ConditionalWorkflowNode,
+  InParallelWorkflowNode,
+  InvokeToolWorkflowNode,
   LoopWorkflowNode,
   MergeStrategy,
-  ProvideWorkflowNode,
+  ScheduleWorkflowNode,
   SequenceWorkflowNode,
   SpawnWorkflowNode,
   SubflowWorkflowNode,
   SubHarnessWorkflowNode,
-  ToolWorkflowNode,
   UntilPredicate,
+  WithContextWorkflowNode,
   WorkflowDocument,
   WorkflowNode,
 } from './schemas/workflow';
@@ -512,18 +516,18 @@ export type {
   SettleResult,
   Snapshot,
   Step,
-  StepBranch,
-  StepFork,
-  StepForkAll,
-  StepForkRace,
-  StepForkSettle,
-  StepLLM,
+  StepCallModel,
+  StepConditional,
+  StepInParallel,
+  StepInParallelAll,
+  StepInParallelRace,
+  StepInParallelSettle,
+  StepInvokeTool,
   StepLoop,
-  StepProvide,
-  StepRun,
+  StepRunCode,
   StepSpawn,
   StepSubHarness,
-  StepTool,
+  StepWithContext,
   Until,
   Verdict,
 } from '@noetic-tools/types';
