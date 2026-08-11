@@ -1,6 +1,6 @@
 # @noetic-tools/core
 
-Core primitives for the [Noetic](https://github.com/mattapperson/noetic) agent framework: step types, the interpreter, the runtime, the memory layer contract, and built-in patterns.
+Core primitives for the [Noetic](https://github.com/mattapperson/noetic) agent framework: step types, the interpreter, the runtime, and the context layer contract.
 
 ## Install
 
@@ -25,8 +25,8 @@ A complete, runnable program. Save it as `agent.mjs` and run `node agent.mjs`:
 ```ts
 import { AgentHarness, step } from '@noetic-tools/core';
 
-// 1. Define a single LLM step. `model` and `instructions` live here.
-const greet = step.llm({
+// 1. Define a single model-call step. `model` and `instructions` live here.
+const greet = step.callModel({
   id: 'greet',
   model: 'openai/gpt-4o-mini', // any OpenRouter model id (provider/model)
   instructions: 'You are a friendly assistant. Greet the user by name in one short sentence.',

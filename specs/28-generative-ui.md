@@ -339,7 +339,7 @@ reconnect:    client ──▶ transport ──▶ {document, vars, version} sna
 
 ## JSON workflow runtime
 
-An `llm` node opts into the codec by reference; the hydrator resolves the
+A `callModel` node opts into the codec by reference; the hydrator resolves the
 library from the workflow's `HydrationContext.uiLibraries` registry (the same
 registry-resolution pattern sub-harness nodes use for adapters). A codec is a
 runtime object, not JSON-expressible, so the node carries a *reference* and the
@@ -347,7 +347,7 @@ caller — who has `@noetic-tools/openui` — supplies the live codec:
 
 ```json
 {
-  "kind": "llm",
+  "kind": "callModel",
   "id": "dashboard",
   "model": "claude-sonnet-5",
   "instructions": "Render a sales dashboard",

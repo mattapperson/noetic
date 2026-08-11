@@ -19,14 +19,14 @@ const workflow = {
     id: 'research-pipeline',
     steps: [
       {
-        kind: 'llm',
+        kind: 'callModel',
         id: 'gather',
         model: 'openai/gpt-4o',
         instructions: 'Search for recent AI news',
         tools: ['webSearch'],
       },
       {
-        kind: 'llm',
+        kind: 'callModel',
         id: 'summarize',
         instructions: 'Summarize the findings above',
       },
@@ -73,7 +73,7 @@ A standard [JSON Schema (draft 2020-12)](https://json-schema.org/) is generated 
   // your-workflow.json
   "$schema": "https://noetic.tools/schema/noetic-workflow.schema.json",
   "version": 1,
-  "root": { "kind": "llm", "id": "answer", "instructions": "..." }
+  "root": { "kind": "callModel", "id": "answer", "instructions": "..." }
 }
 ```
 
@@ -81,15 +81,15 @@ Point your editor or validator at the bundled file (resolve it from the package,
 
 ## Node Kinds
 
-Eleven node kinds are available, plus the coding-agent kinds documented in [Sub-Harnesses](/docs/framework/sub-harnesses). Leaf nodes (`llm`, `tool`, `run`) perform work; structural nodes (`sequence`, `fork`, `branch`, `loop`, `spawn`, `provide`, `every`, `subflow`) compose them into trees.
+Eleven node kinds are available, plus the coding-agent kinds documented in [Sub-Harnesses](/docs/framework/sub-harnesses). Leaf nodes (`callModel`, `invokeTool`, `runCode`) perform work; structural nodes (`sequence`, `inParallel`, `conditional`, `loop`, `spawn`, `withContext`, `schedule`, `subflow`) compose them into trees.
 
-### llm
+### callModel
 
 Call an LLM with instructions and optional tools. Every `tools` entry is a uniform object `{ type, parameters? }`. The `type` value decides the entry: a **registered tool name** (a client tool resolved from the tool registry) or a reserved **server-tool** type the provider executes itself (web search, web fetch).
 
 ```json
 {
-  "kind": "llm",
+  "kind": "callModel",
   "id": "summarize",
   "model": "openai/gpt-4o",
   "instructions": "Summarize the input text in three bullet points",
@@ -109,13 +109,13 @@ Call an LLM with instructions and optional tools. Every `tools` entry is a unifo
 | `tools` | `{ type: string, parameters?: object }[]` | `undefined` | Uniform tool entries. **Client tool**: `{ "type": "<registered-tool-name>" }` — `type` is resolved against the registry; any `parameters` is ignored (the model supplies call args at runtime). **Server tool**: `{ "type": "openrouter:web_search" \| "openrouter:web_fetch", "parameters"?: {...} }` — run by the provider; `parameters` keys are camelCase (e.g. `maxResults`, `searchContextSize`), unknown keys dropped. Client vs server is decided by the `type` value. |
 | `params` | `object` | `undefined` | Model parameters: `temperature`, `topP`, `maxTokens`, `stopSequences`. |
 
-### run
+### runCode
 
 Run a serialised code body. Unlike the programmatic `step.runCode` (which carries a closure), the JSON form carries `execute` as a code **string**. The code is never `eval`'d in-process (Cloudflare Workers forbid `eval`); it is dispatched through a [subprocess adapter](/docs/framework/runtime) which runs the code and returns its stdout as the step output. The step input is passed to the subprocess on stdin.
 
 ```json
 {
-  "kind": "run",
+  "kind": "runCode",
   "id": "transform",
   "execute": "const input = require('fs').readFileSync(0, 'utf8'); process.stdout.write(input.toUpperCase());",
   "retry": { "maxAttempts": 3, "backoff": "exponential", "initialDelay": 100 },
@@ -130,15 +130,15 @@ Run a serialised code body. Unlike the programmatic `step.runCode` (which carrie
 | `retry` | `object` | `undefined` | Retry policy: `{ maxAttempts, backoff: 'fixed' \| 'linear' \| 'exponential', initialDelay, maxDelay? }`. |
 | `subprocess` | `string` | `undefined` | Named subprocess adapter ref, resolved via `HydrationContext.resolveSubprocess`. When omitted, the harness default (`ctx.subprocess`) is used. |
 
-> **Execution requires a subprocess adapter.** The `run` node does not execute code in the worker process. The host must supply a subprocess adapter capable of running the code body and capturing its stdout. A non-zero exit (or failed handle) surfaces as a thrown error.
+> **Execution requires a subprocess adapter.** The `runCode` node does not execute code in the worker process. The host must supply a subprocess adapter capable of running the code body and capturing its stdout. A non-zero exit (or failed handle) surfaces as a thrown error.
 
-### tool
+### invokeTool
 
 Invoke a registered tool directly.
 
 ```json
 {
-  "kind": "tool",
+  "kind": "invokeTool",
   "id": "calc-step",
   "toolName": "calculator",
   "args": { "expression": "2 + 2" }
@@ -160,8 +160,8 @@ Run steps sequentially, threading each output as the next step's input.
   "kind": "sequence",
   "id": "pipeline",
   "steps": [
-    { "kind": "llm", "id": "step-1", "instructions": "Extract key facts" },
-    { "kind": "llm", "id": "step-2", "instructions": "Write a summary from the facts above" }
+    { "kind": "callModel", "id": "step-1", "instructions": "Extract key facts" },
+    { "kind": "callModel", "id": "step-2", "instructions": "Write a summary from the facts above" }
   ]
 }
 ```
@@ -171,18 +171,18 @@ Run steps sequentially, threading each output as the next step's input.
 | `id` | `string` | required | Unique step identifier. |
 | `steps` | `WorkflowNode[]` | required | Ordered list of child nodes (min 1). |
 
-### fork
+### inParallel
 
 Run multiple paths concurrently with configurable merge strategy. A fork is either **static** (a fixed `paths` array) or **dynamic** (`each`: one child per item of a runtime-produced array). Supply exactly one of `paths` or `each`.
 
 ```json
 {
-  "kind": "fork",
+  "kind": "inParallel",
   "id": "parallel-search",
   "mode": "all",
   "paths": [
-    { "kind": "llm", "id": "search-a", "instructions": "Search topic A" },
-    { "kind": "llm", "id": "search-b", "instructions": "Search topic B" }
+    { "kind": "callModel", "id": "search-a", "instructions": "Search topic A" },
+    { "kind": "callModel", "id": "search-b", "instructions": "Search topic B" }
   ],
   "merge": "concat",
   "concurrency": 3
@@ -193,11 +193,11 @@ Dynamic fan-out — one child per array item (data-dependent N):
 
 ```json
 {
-  "kind": "fork",
+  "kind": "inParallel",
   "id": "per-item",
   "mode": "all",
   "over": "items",
-  "each": { "kind": "llm", "id": "worker", "instructions": "Process this item" },
+  "each": { "kind": "callModel", "id": "worker", "instructions": "Process this item" },
   "merge": "concat"
 }
 ```
@@ -212,19 +212,19 @@ Dynamic fan-out — one child per array item (data-dependent N):
 | `merge` | `'last' \| 'first' \| 'concat'` | `'last'` | How to combine results. Ignored in `race` mode. |
 | `concurrency` | `number` | `undefined` | Maximum concurrent paths. |
 
-### branch
+### conditional
 
 Route input to one of several targets based on substring matching.
 
 ```json
 {
-  "kind": "branch",
+  "kind": "conditional",
   "id": "router",
   "routes": [
-    { "match": "code", "target": { "kind": "llm", "id": "code-path", "instructions": "Write code" } },
-    { "match": "explain", "target": { "kind": "llm", "id": "explain-path", "instructions": "Explain the concept" } }
+    { "match": "code", "target": { "kind": "callModel", "id": "code-path", "instructions": "Write code" } },
+    { "match": "explain", "target": { "kind": "callModel", "id": "explain-path", "instructions": "Explain the concept" } }
   ],
-  "default": { "kind": "llm", "id": "fallback", "instructions": "Handle the request" }
+  "default": { "kind": "callModel", "id": "fallback", "instructions": "Handle the request" }
 }
 ```
 
@@ -242,7 +242,7 @@ Repeat a body node until a predicate is satisfied.
 {
   "kind": "loop",
   "id": "refine",
-  "body": { "kind": "llm", "id": "refine-step", "instructions": "Improve the draft" },
+  "body": { "kind": "callModel", "id": "refine-step", "instructions": "Improve the draft" },
   "until": { "kind": "maxSteps", "n": 5 },
   "maxIterations": 10
 }
@@ -263,7 +263,7 @@ Run a child node in an isolated child context.
 {
   "kind": "spawn",
   "id": "background-task",
-  "child": { "kind": "llm", "id": "worker", "instructions": "Process in background" },
+  "child": { "kind": "callModel", "id": "worker", "instructions": "Process in background" },
   "timeout": 30000
 }
 ```
@@ -273,26 +273,26 @@ Run a child node in an isolated child context.
 | `id` | `string` | required | Unique step identifier. |
 | `child` | `WorkflowNode` | required | The node to execute in a child context. |
 | `timeout` | `number` | `undefined` | Timeout in milliseconds. |
-| `layers` | `string[]` | `undefined` | Context layer names for the child, resolved from the hydration context registry (same resolution as `provide`). Omit to inherit the parent's layers; naming layers **replaces** them for the child. |
+| `layers` | `string[]` | `undefined` | Context layer names for the child, resolved from the hydration context registry (same resolution as `withContext`). Omit to inherit the parent's layers; naming layers **replaces** them for the child. |
 
 ```json
 {
   "kind": "spawn",
   "id": "worker",
-  "child": { "kind": "llm", "id": "work", "instructions": "Do the unit of work" },
+  "child": { "kind": "callModel", "id": "work", "instructions": "Do the unit of work" },
   "layers": ["durable-task-state"]
 }
 ```
 
-### provide
+### withContext
 
 Wrap a child node with context layers.
 
 ```json
 {
-  "kind": "provide",
+  "kind": "withContext",
   "id": "with-memory",
-  "child": { "kind": "llm", "id": "agent", "instructions": "..." },
+  "child": { "kind": "callModel", "id": "agent", "instructions": "..." },
   "layers": ["conversation-summary"]
 }
 ```
@@ -303,16 +303,16 @@ Wrap a child node with context layers.
 | `child` | `WorkflowNode` | required | The node to wrap. |
 | `layers` | `string[]` | required | Layer names. Currently layers are referenced by name but not resolved from a registry -- the harness's default layers are inherited instead. |
 
-### every
+### schedule
 
 Execute a step on a fixed interval (periodic scheduling).
 
 ```json
 {
-  "kind": "every",
+  "kind": "schedule",
   "id": "heartbeat",
-  "step": { "kind": "llm", "id": "check", "instructions": "Check system status" },
-  "ms": 60000,
+  "step": { "kind": "callModel", "id": "check", "instructions": "Check system status" },
+  "interval": 60000,
   "onError": "continue"
 }
 ```
@@ -321,7 +321,7 @@ Execute a step on a fixed interval (periodic scheduling).
 |---|---|---|---|
 | `id` | `string` | required | Unique step identifier. |
 | `step` | `WorkflowNode` | required | The node to execute each interval. |
-| `ms` | `number` | required | Interval in milliseconds. |
+| `interval` | `number` | required | Interval in milliseconds. |
 | `onError` | `'continue' \| 'fail'` | `undefined` | Whether to keep running or abort on error. |
 
 ### subflow
@@ -355,7 +355,7 @@ Loop termination conditions are expressed as named predicates. Each predicate is
 |---|---|---|
 | `maxSteps` | `n: number` | Stop after `n` iterations. |
 | `maxCost` | `usd: number` | Stop when cumulative cost exceeds `usd` dollars. |
-| `maxDuration` | `ms: number` | Stop after `ms` milliseconds. |
+| `maxDuration` | `duration: number` | Stop after `duration` milliseconds. |
 | `noToolCalls` | -- | Stop when the LLM produces no tool calls in a round. |
 | `outputContains` | `marker: string` | Stop when output contains the marker substring. |
 | `outputEquals` | `sentinel: string` | Stop when output exactly equals the sentinel. |
@@ -456,7 +456,7 @@ const result = await parseAndRunWorkflow({
 | `ctx` | `Context` | required | Execution context. |
 | `tools` | `Tool[]` | required | Available tools the workflow may reference by name. |
 | `maxDepth` | `number` | `5` | Maximum allowed workflow tree depth. |
-| `layers` | `ReadonlyMap<string, ContextLayer>` | `undefined` | Named context layers that `provide`/`spawn` nodes may reference. |
+| `layers` | `ReadonlyMap<string, ContextLayer>` | `undefined` | Named context layers that `withContext`/`spawn` nodes may reference. |
 | `workflows` | `ReadonlyMap<string, WorkflowDocument>` | `undefined` | Named sub-workflows that `subflow` nodes may reference via `ref`. |
 
 Returns `Promise<string>` -- the string output of the executed workflow.
@@ -465,7 +465,7 @@ Throws `NoeticConfigError` with code `WORKFLOW_VALIDATION_FAILED` if the JSON do
 
 ## Worked example: a model panel with an Opus judge
 
-A complete, runnable example lives at [`packages/core/examples/dynamic-judge-workflow.ts`](https://github.com/mattapperson/noetic/blob/main/packages/core/examples/dynamic-judge-workflow.ts). An Opus planner *generates* a workflow as JSON, the document is validated, and then it is executed: the question fans out to four different models in parallel (a `fork` node with `mode: "settle"`), and their concatenated answers are piped to an Opus judge that synthesises a single ideal response — the "mixture-of-agents" pattern, expressed entirely as data.
+A complete, runnable example lives at [`packages/core/examples/dynamic-judge-workflow.ts`](https://github.com/mattapperson/noetic/blob/main/packages/core/examples/dynamic-judge-workflow.ts). An Opus planner *generates* a workflow as JSON, the document is validated, and then it is executed: the question fans out to four different models in parallel (an `inParallel` node with `mode: "settle"`), and their concatenated answers are piped to an Opus judge that synthesises a single ideal response — the "mixture-of-agents" pattern, expressed entirely as data.
 
 ```bash
 OPENROUTER_API_KEY=sk-... bun examples/dynamic-judge-workflow.ts "Your question here"
@@ -482,19 +482,19 @@ The canonical, hand-checked version of the generated document is committed at [`
     "id": "multi-model-judge",
     "steps": [
       {
-        "kind": "fork",
+        "kind": "inParallel",
         "id": "panel",
         "mode": "settle",
         "merge": "concat",
         "paths": [
-          { "kind": "llm", "id": "answer-gpt", "model": "openai/gpt-4.1", "instructions": "Answer the question. Prefix with '## Candidate (openai/gpt-4.1)'." },
-          { "kind": "llm", "id": "answer-gemini", "model": "google/gemini-2.5-pro", "instructions": "Answer the question. Prefix with '## Candidate (google/gemini-2.5-pro)'." },
-          { "kind": "llm", "id": "answer-llama", "model": "meta-llama/llama-3.3-70b-instruct", "instructions": "Answer the question. Prefix with '## Candidate (meta-llama/llama-3.3-70b-instruct)'." },
-          { "kind": "llm", "id": "answer-deepseek", "model": "deepseek/deepseek-chat", "instructions": "Answer the question. Prefix with '## Candidate (deepseek/deepseek-chat)'." }
+          { "kind": "callModel", "id": "answer-gpt", "model": "openai/gpt-4.1", "instructions": "Answer the question. Prefix with '## Candidate (openai/gpt-4.1)'." },
+          { "kind": "callModel", "id": "answer-gemini", "model": "google/gemini-2.5-pro", "instructions": "Answer the question. Prefix with '## Candidate (google/gemini-2.5-pro)'." },
+          { "kind": "callModel", "id": "answer-llama", "model": "meta-llama/llama-3.3-70b-instruct", "instructions": "Answer the question. Prefix with '## Candidate (meta-llama/llama-3.3-70b-instruct)'." },
+          { "kind": "callModel", "id": "answer-deepseek", "model": "deepseek/deepseek-chat", "instructions": "Answer the question. Prefix with '## Candidate (deepseek/deepseek-chat)'." }
         ]
       },
       {
-        "kind": "llm",
+        "kind": "callModel",
         "id": "judge",
         "model": "anthropic/claude-opus-4.5",
         "instructions": "Compare the candidate answers, correct any errors, and output one synthesised best answer."
@@ -535,10 +535,10 @@ const result = await harness.run(rootStep, 'input text', ctx);
 |---|---|---|
 | `tools` | `ReadonlyMap<string, Tool>` | Tool registry mapping tool names to `Tool` instances. |
 | `executeStep` | `ExecuteStepFn` | Step executor function (typically `harness.run.bind(harness)`). |
-| `layers` | `ReadonlyMap<string, ContextLayer>` | Optional. Named context layers that `provide`/`spawn` nodes reference; an unknown name raises `UNKNOWN_LAYER_REFERENCE`. Without a registry, those nodes run with the harness-default layers. |
+| `layers` | `ReadonlyMap<string, ContextLayer>` | Optional. Named context layers that `withContext`/`spawn` nodes reference; an unknown name raises `UNKNOWN_LAYER_REFERENCE`. Without a registry, those nodes run with the harness-default layers. |
 | `subHarnesses` | `ReadonlyMap<SubHarnessKind, SubHarness>` | Optional. Adapters for `claude-code`/`codex`/`opencode`/`pi` nodes. |
-| `uiLibraries` | `ReadonlyMap<string, OutputCodec>` | Optional. Output codecs for `llm` nodes' `output` codec references. |
-| `resolveSubprocess` | `(ref: string) => SubprocessAdapter \| undefined` | Optional. Resolves a `run` node's named `subprocess` ref to an adapter. When a `run` node omits the ref, the harness default (`ctx.subprocess`) is used at execution time. |
+| `uiLibraries` | `ReadonlyMap<string, OutputCodec>` | Optional. Output codecs for `callModel` nodes' `output` codec references. |
+| `resolveSubprocess` | `(ref: string) => SubprocessAdapter \| undefined` | Optional. Resolves a `runCode` node's named `subprocess` ref to an adapter. When a `runCode` node omits the ref, the harness default (`ctx.subprocess`) is used at execution time. |
 | `workflows` | `ReadonlyMap<string, WorkflowDocument>` | Optional. Named sub-workflow documents that `subflow` nodes resolve via `ref` — lazily, so a live map may gain entries after hydration. |
 
 `hydrateWorkflow(doc, ctx)` converts a validated `WorkflowDocument` into its root `Step`. `hydrateNode(node, ctx)` converts a single `WorkflowNode`. Both return `Step<ContextData, string, string>` -- indistinguishable from programmatically built steps.
@@ -547,10 +547,10 @@ Throws `NoeticConfigError` with code `UNKNOWN_NODE_KIND` if a node kind is unrec
 
 ## Limitations
 
-- **`run` nodes need a subprocess adapter** -- the JSON `run` node carries its body as a code string and dispatches it through a subprocess adapter (it is never `eval`'d in-process). A host that uses `run` nodes must supply an adapter capable of running the code and capturing its stdout.
+- **`runCode` nodes need a subprocess adapter** -- the JSON `runCode` node carries its body as a code string and dispatches it through a subprocess adapter (it is never `eval`'d in-process). A host that uses `runCode` nodes must supply an adapter capable of running the code and capturing its stdout.
 - **Tools resolved by name** -- every tool referenced in the workflow must be passed in the `tools` array. The hydrator looks them up by `tool.name`.
 - **Subflow refs resolve at execution time** -- a `subflow` node's `ref` is looked up on first execution, not during hydration, so an unregistered name surfaces as `UNKNOWN_WORKFLOW_REFERENCE` when the node runs. Depth limits do not see through refs; cycle detection prevents infinite recursion, but acyclic ref fan-out is not bounded — hosts should cap registry size and breadth for untrusted documents.
-- **Branch routing is substring-based** -- branch routes use case-insensitive substring matching on the input string. Complex routing logic requires programmatic `conditional()` steps.
+- **Conditional routing is substring-based** -- `conditional` node routes use case-insensitive substring matching on the input string. Complex routing logic requires programmatic `conditional()` steps.
 
 ## Plans as Workflows
 
@@ -575,5 +575,5 @@ const verify = step.workflow({
 - [AgentHarness](/docs/framework/runtime) -- the execution engine that runs hydrated workflows.
 - [Steps](/docs/framework/steps) -- the step primitives that JSON nodes hydrate into.
 - [Loop & Until](/docs/framework/operators/loop-and-until) -- programmatic equivalents of JSON until predicates.
-- [In Parallel](/docs/framework/operators/in-parallel) -- the parallel operator that `fork` nodes hydrate into.
+- [In Parallel](/docs/framework/operators/in-parallel) -- the parallel operator that `inParallel` nodes hydrate into.
 - [Spawn](/docs/framework/operators/spawn) -- isolated child execution for `spawn` nodes.

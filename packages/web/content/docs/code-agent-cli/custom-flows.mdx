@@ -18,7 +18,7 @@ If you're new to the primitives, read [Operators](/docs/framework/operators) fir
 
 When the agent is in **plan mode** (`/plan` or `/mode plan`), it authors the plan as a `WorkflowDocument` — the same format the [JSON Workflow Runtime](/docs/framework/json-runtime) executes, validated against the published schema at `https://noetic.tools/schema/noetic-workflow.schema.json`. The [plan layer](/docs/framework/context-layers/plan) stores the reviewed tree via `plan/setPlanTree` plus any **named workflows** via `plan/setWorkflow`, and the tree references them with `subflow` nodes so the part a human approves stays small.
 
-All the runtime's node kinds are available — `llm`, `tool`, `sequence`, `fork`, `branch`, `loop`, `spawn`, `provide`, `every`, `subflow`, and the coding-agent kinds (`claude-code`, `codex`, `opencode`, `pi`). See the [node-kind reference](/docs/framework/json-runtime#node-kinds) for each shape. Hosts can narrow the allowed set with `PlanConfig.allowedNodeKinds`.
+All the runtime's node kinds are available — `callModel`, `invokeTool`, `sequence`, `inParallel`, `conditional`, `loop`, `spawn`, `withContext`, `schedule`, `subflow`, and the coding-agent kinds (`claude-code`, `codex`, `opencode`, `pi`). See the [node-kind reference](/docs/framework/json-runtime#node-kinds) for each shape. Hosts can narrow the allowed set with `PlanConfig.allowedNodeKinds`.
 
 ### Example
 
@@ -32,16 +32,16 @@ A plan that researches in parallel, summarises, then runs a separately-defined v
     "id": "audit",
     "steps": [
       {
-        "kind": "fork",
+        "kind": "inParallel",
         "id": "audit.gather",
         "mode": "all",
         "paths": [
-          { "kind": "tool", "id": "audit.deps",   "toolName": "agent", "args": { "subagent_type": "explore", "prompt": "List runtime dependencies in package.json with their versions." } },
-          { "kind": "tool", "id": "audit.tests",  "toolName": "agent", "args": { "subagent_type": "explore", "prompt": "Find all test files and report coverage gaps." } }
+          { "kind": "invokeTool", "id": "audit.deps",   "toolName": "agent", "args": { "subagent_type": "explore", "prompt": "List runtime dependencies in package.json with their versions." } },
+          { "kind": "invokeTool", "id": "audit.tests",  "toolName": "agent", "args": { "subagent_type": "explore", "prompt": "Find all test files and report coverage gaps." } }
         ]
       },
       {
-        "kind": "llm",
+        "kind": "callModel",
         "id": "audit.summarise",
         "instructions": "You received exploration reports. Write a one-page audit summary with risk callouts."
       },
@@ -55,8 +55,8 @@ with `verify` defined via `plan/setWorkflow` as its own document. Every `subflow
 
 ### Tool & preset resolution
 
-- `tools` entries on `llm` nodes and `toolName` on `tool` nodes are matched against the harness's live tool registry. Unknown names error at hydration.
-- Teammate presets are spawned through the `agent` tool (a `tool` node with `subagent_type` args): built-in skills with `agent-type`, plugin-contributed `subagentPresets`, and skills discovered from the project / user / plugin sources.
+- `tools` entries on `callModel` nodes and `toolName` on `invokeTool` nodes are matched against the harness's live tool registry. Unknown names error at hydration.
+- Teammate presets are spawned through the `agent` tool (an `invokeTool` node with `subagent_type` args): built-in skills with `agent-type`, plugin-contributed `subagentPresets`, and skills discovered from the project / user / plugin sources.
 
 ### Authoring presets for plan-mode
 

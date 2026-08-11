@@ -24,7 +24,7 @@ workspace source.
 
 ## What each smoke does
 
-- **core** — builds a `step.llm`, runs it through `AgentHarness` with
+- **core** — builds a `step.callModel`, runs it through `AgentHarness` with
   `provider: 'openrouter'`, and asserts a non-empty reply + token usage. This is
   the live network call, and it runs on every runtime.
 - **code-agent** — builds a code agent over the portable in-memory adapters,

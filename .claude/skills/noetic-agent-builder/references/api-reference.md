@@ -306,7 +306,7 @@ chat.onSubscribedMessage(noeticAgent({
 ```typescript
 until.maxSteps(n)              // Stop after n iterations
 until.maxCost(n)               // Stop when cumulative cost exceeds n
-until.maxDuration(ms)          // Stop after ms milliseconds
+until.maxDuration(duration)    // Stop after duration milliseconds
 until.noToolCalls()            // Stop when LLM doesn't call any tools
 until.verified(fn)             // Stop when verification passes
 until.never()                  // Never stop (for `schedule` / forever-loops with external abort)
@@ -1916,11 +1916,11 @@ import { WorkflowDocumentSchema, validateWorkflow } from '@noetic-tools/core';
 
 const doc = validateWorkflow({
   version: 1,
-  root: { kind: 'llm', id: 'step-1', instructions: 'Hello' },
+  root: { kind: 'callModel', id: 'step-1', instructions: 'Hello' },
 });
 ```
 
-Node kinds: `llm`, `tool`, `run`, `branch`, `fork`, `spawn`, `provide`, `loop`, `sequence`, `every`, `subflow`, plus the sub-harness kinds (`claude-code`, `codex`, `opencode`, `pi`).
+Node kinds: `callModel`, `invokeTool`, `runCode`, `conditional`, `inParallel`, `spawn`, `withContext`, `loop`, `sequence`, `schedule`, `subflow`, plus the sub-harness kinds (`claude-code`, `codex`, `opencode`, `pi`).
 
 A `subflow` node runs another workflow document as one step — inline (`document`) or by name (`ref`, resolved lazily from `HydrationContext.workflows` / `parseAndRunWorkflow`'s `workflows` option). Exactly one of `document`/`ref` is required. Unknown refs raise `UNKNOWN_WORKFLOW_REFERENCE` at execution; ref cycles raise `WORKFLOW_CYCLE`. There is also a `step.workflow({ id, document | ref, tools?, layers?, workflows?, isolation?: 'inherit' | 'spawn' })` builder that runs a document as a composable `StepRunCode` (main entry only, not `/portable`).
 
@@ -1941,9 +1941,9 @@ const ctx: HydrationContext = {
 const step = hydrateWorkflow(doc, ctx);
 ```
 
-An `llm` node opts into a generative-UI codec with `output: { codec: 'openui', library: '<ref>' }`; the hydrator resolves `<ref>` from `ctx.uiLibraries` to a live `OutputCodec` and throws `UNKNOWN_UI_LIBRARY_REFERENCE` if it is unregistered. See [Generative UI](#generative-ui-openui).
+A `callModel` node opts into a generative-UI codec with `output: { codec: 'openui', library: '<ref>' }`; the hydrator resolves `<ref>` from `ctx.uiLibraries` to a live `OutputCodec` and throws `UNKNOWN_UI_LIBRARY_REFERENCE` if it is unregistered. See [Generative UI](#generative-ui-openui).
 
-**Named context layers.** Both `provide` (`layers`, required) and `spawn` (`layers`, optional) node kinds resolve layer names from `ctx.layers` (a `ReadonlyMap<string, ContextLayer>`); an unregistered name throws `UNKNOWN_LAYER_REFERENCE`. A `spawn` node with no `layers` inherits the parent's layers — the default spawn behaviour; naming them replaces the inherited set for the child. Without `ctx.layers` supplied, named layers resolve to `[]` and the harness defaults apply.
+**Named context layers.** Both `withContext` (`layers`, required) and `spawn` (`layers`, optional) node kinds resolve layer names from `ctx.layers` (a `ReadonlyMap<string, ContextLayer>`); an unregistered name throws `UNKNOWN_LAYER_REFERENCE`. A `spawn` node with no `layers` inherits the parent's layers — the default spawn behaviour; naming them replaces the inherited set for the child. Without `ctx.layers` supplied, named layers resolve to `[]` and the harness defaults apply.
 
 ### dynamicWorkflow
 
@@ -2059,4 +2059,4 @@ const quoteShipping = tool({
 
 ### JSON workflow
 
-An `llm` node references a codec: `"output": { "codec": "openui", "library": "<ref>" }`, resolved from `HydrationContext.uiLibraries` (see [hydrateWorkflow](#hydrateworkflow--hydratenode)).
+A `callModel` node references a codec: `"output": { "codec": "openui", "library": "<ref>" }`, resolved from `HydrationContext.uiLibraries` (see [hydrateWorkflow](#hydrateworkflow--hydratenode)).

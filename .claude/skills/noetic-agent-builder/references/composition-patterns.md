@@ -567,7 +567,7 @@ plan({
   additionalAllowedTools: ['SearchDocs', 'ListIssues'],
   maxPrdLength: 1e5,
   maxDepth: 3,
-  allowedNodeKinds: ['sequence', 'llm', 'tool', 'subflow'],
+  allowedNodeKinds: ['sequence', 'callModel', 'invokeTool', 'subflow'],
 })
 ```
 
@@ -977,7 +977,7 @@ Key points:
 - The document is validated against `WorkflowDocumentSchema`, hydrated into a native `Step` tree via `hydrateWorkflow`, then executed with the same interpreter as hand-written compositions.
 - `maxRevisions` controls retry attempts when the LLM produces invalid JSON. Each retry includes the previous validation error as feedback.
 - `maxDepth` caps workflow tree depth to prevent runaway nesting.
-- No `step.runCode` in JSON — closures aren't serialisable. JSON workflows compose from `llm`, `tool`, and structural operator node kinds (`sequence`, `fork`, `loop`, `branch`, `spawn`, `provide`, `every`).
+- Inline closures don't serialise — a `runCode` node carries its body as a code string dispatched through a subprocess adapter. JSON workflows compose from `callModel`, `invokeTool`, `runCode`, and structural node kinds (`sequence`, `inParallel`, `loop`, `conditional`, `spawn`, `withContext`, `schedule`, `subflow`).
 - Tools are referenced by name in JSON and resolved from the `HydrationContext.tools` registry at hydration time.
 - A published JSON Schema (draft 2020-12) is generated from `WorkflowDocumentSchema` and shipped at the `@noetic-tools/core/schema` export subpath (`$id`: `https://noetic.tools/schema/noetic-workflow.schema.json`). Reference it via a `$schema` key in hand-written or LLM-generated documents for editor autocompletion and validation. **The `*.schema.json` files are generated — never hand-edit them. Whenever you change `WorkflowDocumentSchema` (or any node/predicate variant) in `packages/core/src/schemas/workflow.ts`, you MUST run `bun run gen:schema` in the same commit** to regenerate both the package artifact and the hosted web copy (`packages/web/public/schema/...`); a drift-gate test fails CI otherwise. See `.claude/rules/sync-spec-code-docs.md` Requirement 6.
 
@@ -1073,7 +1073,7 @@ The same four agents are JSON node kinds (`claude-code` / `codex` / `opencode` /
     "id": "plan-then-build",
     "steps": [
       {
-        "kind": "llm",
+        "kind": "callModel",
         "id": "plan",
         "model": "anthropic/claude-sonnet-4-20250514",
         "instructions": "Turn the request into a concrete, ordered implementation plan."

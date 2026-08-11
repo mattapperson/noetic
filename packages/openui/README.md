@@ -6,7 +6,7 @@ standard.
 Instead of answering with a text blob, an agent answers with a *user interface*
 built from components you registered. This package provides:
 
-- The **`openUi()` output codec** — plug a component library into `step.llm` as a
+- The **`openUi()` output codec** — plug a component library into `step.callModel` as a
   streaming output dialect; the model emits [OpenUI Lang](https://www.openui.com)
   and the step returns a materialized `UiDocument`.
 - The **`openUiSurface()` context layer** — the server-authoritative owner of UI
@@ -44,7 +44,7 @@ const library = createLibrary([
   defineComponent({ name: 'Text', props: z.object({ value: z.string() }) }),
 ]);
 
-const dashboard = step.llm<ContextData, string, unknown>({
+const dashboard = step.callModel<ContextData, string, unknown>({
   id: 'dashboard',
   model: 'claude-sonnet-5',
   output: openUi(library), // the model authors your UI instead of prose

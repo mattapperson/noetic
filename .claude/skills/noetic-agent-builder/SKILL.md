@@ -102,7 +102,7 @@ An agent can respond with a *UI* built from components you register, instead of 
 - **`openUiSurface({ library })`** -- a context layer that makes the server the authoritative owner of UI state (durable, resumable, visible to the model). Loop with `until: ui.submitted(surface, ref)` to wait for a form submit.
 - **Tool `ui` declarations** -- a tool defines `call`/`progress`/`result`/`error` render functions (built with `fragment(library)`) so its calls carry their own UI; works even without the codec installed.
 
-`serveOpenUi(harness, { surface })` exposes it to OpenUI's React client. In a JSON workflow, an `llm` node references a codec via `output: { codec: 'openui', library }` resolved from `HydrationContext.uiLibraries`. Full API: `references/api-reference.md` → Generative UI (OpenUI).
+`serveOpenUi(harness, { surface })` exposes it to OpenUI's React client. In a JSON workflow, a `callModel` node references a codec via `output: { codec: 'openui', library }` resolved from `HydrationContext.uiLibraries`. Full API: `references/api-reference.md` → Generative UI (OpenUI).
 
 ## How to Build an Agent
 

@@ -182,11 +182,11 @@ const handler = serveOpenUi(harness, { surface });
 
 ## JSON workflow runtime
 
-An `llm` node in a [JSON workflow](/docs/framework/json-runtime) opts into the codec by reference. Because a codec is a runtime object, the node names a `library` ref and the caller supplies the live codec through `HydrationContext.uiLibraries` — the same registry-resolution pattern [sub-harness nodes](/docs/framework/sub-harnesses#json-workflow-node) use for adapters:
+A `callModel` node in a [JSON workflow](/docs/framework/json-runtime) opts into the codec by reference. Because a codec is a runtime object, the node names a `library` ref and the caller supplies the live codec through `HydrationContext.uiLibraries` — the same registry-resolution pattern [sub-harness nodes](/docs/framework/sub-harnesses#json-workflow-node) use for adapters:
 
 ```json
 {
-  "kind": "llm",
+  "kind": "callModel",
   "id": "dashboard",
   "model": "claude-sonnet-5",
   "instructions": "Render a sales dashboard",

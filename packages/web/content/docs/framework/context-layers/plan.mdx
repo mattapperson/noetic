@@ -136,7 +136,7 @@ Additional tools can be allowed via `additionalAllowedTools` in the config.
 
 ## The Plan is a WorkflowDocument
 
-`plan/setPlanTree` stores a `WorkflowDocument` — the same portable JSON format the [JSON Workflow Runtime](/docs/framework/json-runtime) executes, with node kinds like `llm`, `tool`, `sequence`, `fork`, `branch`, `loop`, `spawn`, `subflow`, and the coding-agent kinds (`claude-code`, `codex`, `opencode`, `pi`).
+`plan/setPlanTree` stores a `WorkflowDocument` — the same portable JSON format the [JSON Workflow Runtime](/docs/framework/json-runtime) executes, with node kinds like `callModel`, `invokeTool`, `sequence`, `inParallel`, `conditional`, `loop`, `spawn`, `subflow`, and the coding-agent kinds (`claude-code`, `codex`, `opencode`, `pi`).
 
 The planning-phase instructions steer the model to keep the tree small (~7 top-level nodes a reviewer can scan) and factor mechanics into named workflows:
 
@@ -147,7 +147,7 @@ The planning-phase instructions steer the model to keep the tree small (~7 top-l
     "kind": "sequence",
     "id": "plan",
     "steps": [
-      { "kind": "llm", "id": "implement", "instructions": "Apply the PRD changes." },
+      { "kind": "callModel", "id": "implement", "instructions": "Apply the PRD changes." },
       { "kind": "subflow", "id": "verify", "ref": "verify-loop" }
     ]
   }

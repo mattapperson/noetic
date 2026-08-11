@@ -2,7 +2,7 @@
 
 Base contract and helpers for **Noetic sub-harnesses** — adapters that drive an
 external coding agent (Claude Code, Codex, opencode, pi) as a Noetic step, the
-same way `step.llm` drives a model.
+same way `step.callModel` drives a model.
 
 Each agent lives in its own `@noetic-tools/sub-harness-<name>` package and
 implements the `SubHarness` contract re-exported here. The Noetic interpreter
