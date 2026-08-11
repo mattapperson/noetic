@@ -98,7 +98,7 @@ export function createEvalContext(step: Step, options: EvalSuiteOptions): EvalCo
         name: 'eval',
         params: {},
         traceExporter: exporter,
-        llm: resolveEnvLlm(),
+        callModelDefaults: resolveEnvLlm(),
       });
 
       const ctx = harness.createContext();
