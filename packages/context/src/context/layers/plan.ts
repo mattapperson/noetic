@@ -14,7 +14,7 @@ import {
   workflowDepth,
 } from '@noetic-tools/types';
 import { z } from 'zod';
-import { layerData, layerFn } from '../layer-provides';
+import { layerData, layerFunction } from '../layer-provides';
 import {
   nodeKindList,
   PlanStyle,
@@ -405,7 +405,7 @@ const RECALL_RENDERERS: Partial<Record<PlanPhase, RecallRenderer>> = {
  * @param config - Optional configuration for scope, allowed tools, and limits.
  * @returns A `ContextLayer` providing plan mode, PRD storage, and execution tracking.
  */
-export function planContext(config?: PlanContextConfig): ContextLayer<PlanState> {
+export function plan(config?: PlanContextConfig): ContextLayer<PlanState> {
   const scope: ContextScope = config?.scope ?? 'thread';
   const maxPrdLength = config?.maxPrdLength ?? MAX_PRD_LENGTH;
   const maxWorkflows = config?.maxWorkflows ?? MAX_WORKFLOWS;
@@ -423,7 +423,7 @@ export function planContext(config?: PlanContextConfig): ContextLayer<PlanState>
 
   return {
     id: 'plan',
-    name: 'Plan Memory',
+    name: 'Plan',
     slot: PLAN_SLOT,
     scope,
     budget: {
@@ -450,7 +450,7 @@ export function planContext(config?: PlanContextConfig): ContextLayer<PlanState>
         }),
       }),
 
-      enterPlanMode: layerFn<
+      enterPlanMode: layerFunction<
         {
           goal?: string;
         },
@@ -487,7 +487,7 @@ export function planContext(config?: PlanContextConfig): ContextLayer<PlanState>
         },
       }),
 
-      updatePrd: layerFn<
+      updatePrd: layerFunction<
         {
           content: string;
         },
@@ -522,7 +522,7 @@ export function planContext(config?: PlanContextConfig): ContextLayer<PlanState>
         },
       }),
 
-      setPlanTree: layerFn<
+      setPlanTree: layerFunction<
         {
           document: unknown;
         },
@@ -587,7 +587,7 @@ export function planContext(config?: PlanContextConfig): ContextLayer<PlanState>
         },
       }),
 
-      setWorkflow: layerFn<
+      setWorkflow: layerFunction<
         {
           name: string;
           document: unknown;
@@ -662,7 +662,7 @@ export function planContext(config?: PlanContextConfig): ContextLayer<PlanState>
         },
       }),
 
-      removeWorkflow: layerFn<
+      removeWorkflow: layerFunction<
         {
           name: string;
         },
@@ -712,7 +712,7 @@ export function planContext(config?: PlanContextConfig): ContextLayer<PlanState>
         },
       }),
 
-      getWorkflow: layerFn<
+      getWorkflow: layerFunction<
         {
           name: string;
         },
@@ -740,7 +740,7 @@ export function planContext(config?: PlanContextConfig): ContextLayer<PlanState>
         },
       }),
 
-      exitPlanMode: layerFn<
+      exitPlanMode: layerFunction<
         {
           action: 'execute' | 'cancel';
         },

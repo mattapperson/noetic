@@ -7,7 +7,7 @@ import {
   Slot,
 } from '@noetic-tools/types';
 import { z } from 'zod';
-import { layerFn } from '../layer-provides';
+import { layerFunction } from '../layer-provides';
 
 //#region Public types
 
@@ -37,7 +37,7 @@ export interface TemporalSearchResult {
 
 /**
  * Extracts timestamped facts from a batch of conversation text. Host-injected so
- * the layer stays LLM-agnostic and tree-shakable (mirrors `observationalContext`'s
+ * the layer stays LLM-agnostic and tree-shakable (mirrors `observations`'s
  * `observer`). When omitted, the layer only buffers — it never fabricates facts.
  * @public
  */
@@ -55,7 +55,7 @@ export type FactSearcher = (input: {
 }) => Promise<TemporalSearchResult>;
 
 /**
- * Configuration for {@link temporalContext}.
+ * Configuration for {@link temporal}.
  * @public
  */
 export interface TemporalContextConfig {
@@ -310,7 +310,7 @@ async function accumulate(
  * returns matching facts and, when applicable, a resolved (possibly fuzzy) date.
  *
  * The layer is LLM-agnostic: the host injects `extract` and `search` callbacks
- * (mirrors `observationalContext`'s `observer`), keeping `context/` tree-shakable.
+ * (mirrors `observations`'s `observer`), keeping `context/` tree-shakable.
  * Without them, the layer still buffers text and the search tool returns the raw
  * ledger — it never fabricates facts. A `<current_datetime>` grounding block is
  * injected on recall by default to anchor relative-time reasoning.
@@ -319,7 +319,7 @@ async function accumulate(
  * @param config - Clock, scope, injected LLM callbacks, and tuning knobs.
  * @returns A `ContextLayer` with a fact-ledger store + `searchMemory` tool.
  */
-export function temporalContext(config?: TemporalContextConfig): ContextLayer<TemporalState> {
+export function temporal(config?: TemporalContextConfig): ContextLayer<TemporalState> {
   const now = config?.now ?? ((): Date => new Date());
   const threshold = config?.bufferThreshold ?? DEFAULT_BUFFER_THRESHOLD_TOKENS;
   const maxFacts = config?.maxFacts ?? DEFAULT_MAX_FACTS;
@@ -330,7 +330,7 @@ export function temporalContext(config?: TemporalContextConfig): ContextLayer<Te
 
   return {
     id: 'temporal',
-    name: 'Temporal Context',
+    name: 'Temporal',
     // Grounding sits near the top of the window, before reasoning content.
     slot: Slot.REMINDER,
     scope: config?.scope ?? 'resource',
@@ -351,7 +351,7 @@ export function temporalContext(config?: TemporalContextConfig): ContextLayer<Te
       onItemAppend: 60_000,
     },
     provides: {
-      searchMemory: layerFn<
+      searchMemory: layerFunction<
         {
           query: string;
         },

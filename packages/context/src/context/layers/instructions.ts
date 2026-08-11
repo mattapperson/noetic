@@ -1,7 +1,7 @@
 import type { ContextLayer, ContextScope } from '@noetic-tools/types';
 import { estimateTokens, Slot } from '@noetic-tools/types';
 
-interface StaticContentOpts {
+interface InstructionsOptions {
   id?: string;
   slot?: number;
   scope?: ContextScope;
@@ -16,11 +16,11 @@ interface StaticContentOpts {
  * @param opts - Configuration with a `load` function and optional id, slot, scope, and XML tag name.
  * @returns A `ContextLayer` that provides static instructional content to the model.
  */
-export function staticContent(opts: StaticContentOpts) {
+export function instructions(opts: InstructionsOptions) {
   const tag = opts.tag ?? 'instructions';
 
   return {
-    id: opts.id ?? 'static-content',
+    id: opts.id ?? 'instructions',
     slot: opts.slot ?? Slot.WORKING_MEMORY + 5,
     scope: opts.scope ?? 'resource',
     // Loaded once in `init` and never rewritten, so it can be pinned outright

@@ -1,7 +1,7 @@
 import type { ContextLayer } from '@noetic-tools/types';
 import { createMessage, estimateTokens, Slot } from '@noetic-tools/types';
 import { z } from 'zod';
-import { layerFn } from '../layer-provides';
+import { layerFunction } from '../layer-provides';
 
 export interface DurableTaskState {
   checkpoints: Array<{
@@ -26,7 +26,7 @@ export interface DurableTaskState {
  */
 export type DurableTaskDataMerge = 'shallow' | 'namespace';
 
-/** @public Options for {@link durableTaskState}. */
+/** @public Options for {@link taskState}. */
 export interface DurableTaskStateOptions {
   /**
    * Merge strategy for `data` at a child boundary. Defaults to `'shallow'`.
@@ -88,8 +88,8 @@ function mergeChildData({
  * (newest 50 kept) and `recall` trims its render to the allocated budget.
  *
  * The layer is writable from the model: `provides` exposes
- * `durable-task-state/recordArtifact` (append a produced/modified file path)
- * and `durable-task-state/setTaskData` (record a structured result under a
+ * `task-state/recordArtifact` (append a produced/modified file path)
+ * and `task-state/setTaskData` (record a structured result under a
  * key). Both survive the spawn boundary — a worker's artifacts merge back into
  * its coordinator via `onReturn`.
  *
@@ -97,11 +97,11 @@ function mergeChildData({
  * @param opts - Layer options; `mergeData` selects the `data` merge strategy at a child boundary.
  * @returns A `ContextLayer` scoped to the thread with durable task state.
  */
-export function durableTaskState(opts: DurableTaskStateOptions = {}) {
+export function taskState(opts: DurableTaskStateOptions = {}) {
   const mergeData: DurableTaskDataMerge = opts.mergeData ?? 'shallow';
   return {
-    id: 'durable-task-state' as const,
-    name: 'Durable Task State',
+    id: 'task-state' as const,
+    name: 'Task State',
     slot: Slot.WORKING_MEMORY + 10, // 110
     // 'thread' (not 'execution'): the layer's purpose is to persist task state
     // ACROSS executions/iterations within a thread. 'execution' scope rotates
@@ -116,7 +116,7 @@ export function durableTaskState(opts: DurableTaskStateOptions = {}) {
       store: 30_000,
     },
     provides: {
-      recordArtifact: layerFn<
+      recordArtifact: layerFunction<
         {
           path: string;
         },
@@ -149,7 +149,7 @@ export function durableTaskState(opts: DurableTaskStateOptions = {}) {
         },
       }),
 
-      setTaskData: layerFn<
+      setTaskData: layerFunction<
         {
           key: string;
           value: unknown;
@@ -204,7 +204,7 @@ export function durableTaskState(opts: DurableTaskStateOptions = {}) {
         }
         let view = state;
         let text = renderTaskState(view);
-        // `budget > 0` is the fail-open convention (see staticContent): a zero
+        // `budget > 0` is the fail-open convention (see instructions): a zero
         // allocation must not delete the task state from the view.
         if (budget > 0) {
           // Halve the OLDEST checkpoints while the render exceeds the budget —

@@ -2,7 +2,7 @@
 export { branch, fork } from '../builders/control-flow-builders';
 
 /** @public */
-export { layerData, layerFn } from '../builders/layer-provides-builders';
+export { layerData, layerFunction } from '../builders/layer-provides-builders';
 
 /** @public */
 export { loop } from '../builders/loop-builder';

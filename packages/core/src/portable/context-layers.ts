@@ -6,11 +6,11 @@
 /** @public */
 /** @public */
 export {
-  durableTaskState,
-  historyWindow,
-  observationalContext,
-  planContext,
-  temporalContext,
-  toolContextLayer,
-  workingMemoryContext,
+  history,
+  observations,
+  plan,
+  scratchpad,
+  taskState,
+  temporal,
+  toolCalls,
 } from '@noetic-tools/context';

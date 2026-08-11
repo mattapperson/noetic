@@ -990,11 +990,11 @@ async function renderFileReferenceDelta({
  *
  * @public
  */
-export function fileReference(opts?: FileReferenceOptions): ContextLayer<FileReferenceState> {
+export function filesystem(opts?: FileReferenceOptions): ContextLayer<FileReferenceState> {
   const runtime = createFileReferenceRuntime(opts);
   return {
-    id: 'file-reference',
-    name: 'File Reference',
+    id: 'filesystem',
+    name: 'Filesystem',
     slot: runtime.slot,
     scope: 'thread',
     budget: 'auto',

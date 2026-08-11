@@ -112,14 +112,14 @@ export interface ObservationalContextConfig {
  * @param config - Optional configuration for buffer threshold, max observations, scope, and observer function.
  * @returns A `ContextLayer` that accumulates and summarizes observations over time.
  */
-export function observationalContext(config?: ObservationalContextConfig) {
+export function observations(config?: ObservationalContextConfig) {
   const maxObs = config?.maxObservations ?? DEFAULT_MAX_OBSERVATIONS;
   const threshold = config?.bufferThreshold ?? DEFAULT_BUFFER_THRESHOLD_TOKENS;
   const observer = config?.observer;
 
   return {
-    id: 'observational-context' as const,
-    name: 'Observational Context',
+    id: 'observations' as const,
+    name: 'Observations',
     slot: Slot.OBSERVATIONS,
     scope: config?.scope ?? 'resource',
     budget: {

@@ -20,20 +20,6 @@
  */
 
 export type {
-  ObservationalMemoryConfig,
-  PlanMemoryConfig,
-  TemporalMemoryConfig,
-  WorkingMemoryConfig,
-  WorkingMemoryState,
-} from '@noetic-tools/context';
-export {
-  observationalMemory,
-  planMemory,
-  temporalMemory,
-  toolMemoryLayer,
-  workingMemory,
-} from '@noetic-tools/context';
-export type {
   ContextMemory,
   InferMemory,
   InferMemoryShape,

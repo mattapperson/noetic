@@ -1,7 +1,7 @@
 import type { ContextLayer, ContextScope, Tool, ToolContextDeclaration } from '@noetic-tools/types';
 import { Slot } from '@noetic-tools/types';
 
-interface ToolContextLayerOpts {
+interface ToolCallsOptions {
   slot?: number;
 }
 
@@ -16,10 +16,7 @@ const EXECUTION_SCOPE: ContextScope = 'execution';
  * @param opts - Optional slot override for the generated layers.
  * @returns An array of `ContextLayer` instances, one per unique tool context id.
  */
-export function toolContextLayer(
-  tools: ReadonlyArray<Tool>,
-  opts?: ToolContextLayerOpts,
-): ContextLayer[] {
+export function toolCalls(tools: ReadonlyArray<Tool>, opts?: ToolCallsOptions): ContextLayer[] {
   const seen = new Map<string, ToolContextDeclaration>();
 
   for (const t of tools) {

@@ -25,7 +25,7 @@ export type { EveryOptions } from './builders/every';
 /** @public */
 export { every } from './builders/every';
 /** @public */
-export { layerData, layerFn } from './builders/layer-provides-builders';
+export { layerData, layerFunction } from './builders/layer-provides-builders';
 /** @public */
 export type { LoopConfig } from './builders/loop-builder';
 /** @public */
@@ -147,21 +147,21 @@ export type {
 /** @public */
 /** @public */
 export {
-  durableTaskState,
-  fileReference,
+  filesystem,
   findFunctionCall,
-  historyWindow,
-  observationalContext,
+  history,
+  instructions,
+  observations,
   PlanPhase,
   PlanStyle,
-  planContext,
-  staticContent,
+  plan,
+  scratchpad,
   steering,
   storageGetMany,
   stripUnresolvedToolCalls,
-  temporalContext,
-  toolContextLayer,
-  workingMemoryContext,
+  taskState,
+  temporal,
+  toolCalls,
 } from '@noetic-tools/context';
 
 //#endregion

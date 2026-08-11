@@ -15,7 +15,7 @@
 
 import type { WorkflowDocument, WorkflowNode } from '@noetic-tools/types';
 import { walkWorkflow } from '@noetic-tools/types';
-import type { PlanState } from './plan-context';
+import type { PlanState } from './plan';
 
 //#region Types
 

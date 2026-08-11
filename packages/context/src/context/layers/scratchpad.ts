@@ -3,7 +3,7 @@ import { createMessage, estimateTokens, Slot } from '@noetic-tools/types';
 import type { ZodType } from 'zod';
 import { z } from 'zod';
 import { findFunctionCall } from '../function-call-utils';
-import { layerData, layerFn } from '../layer-provides';
+import { layerData, layerFunction } from '../layer-provides';
 
 export type WorkingMemoryContextState = string | Record<string, unknown>;
 
@@ -52,7 +52,7 @@ function deepMerge(
 }
 
 /**
- * Validate a MERGED working-context state against the configured schema (a
+ * Validate a MERGED scratchpad state against the configured schema (a
  * pure gate — the original value is returned, transforms are not applied).
  * Validating the merged state (not the raw update) keeps partial updates
  * legal under schemas with required fields. Throws on failure so the update
@@ -67,7 +67,7 @@ function applySchema(
   }
   const result = schema.safeParse(merged);
   if (!result.success) {
-    throw new Error(`working-context update rejected by schema: ${result.error.message}`);
+    throw new Error(`scratchpad update rejected by schema: ${result.error.message}`);
   }
   return merged;
 }
@@ -93,18 +93,18 @@ function safeMerge(
 }
 
 /**
- * Creates a mutable working context layer that the model can update via the `working-context/update` tool.
+ * Creates a mutable scratchpad context layer that the model can update via the `scratchpad/update` tool.
  *
  * @public
  * @param config - Optional configuration for scope, Zod schema, template, and read-only mode.
  * @returns A `ContextLayer` providing scratchpad state the model can read and write.
  */
-export function workingMemoryContext(config?: WorkingMemoryContextConfig) {
+export function scratchpad(config?: WorkingMemoryContextConfig) {
   const scope: ContextScope = config?.scope ?? 'thread';
 
   return {
-    id: 'working-context' as const,
-    name: 'Working Memory',
+    id: 'scratchpad' as const,
+    name: 'Scratchpad',
     slot: Slot.WORKING_MEMORY,
     scope,
     budget: {
@@ -115,7 +115,7 @@ export function workingMemoryContext(config?: WorkingMemoryContextConfig) {
       snapshot: layerData<WorkingMemoryContextState, WorkingMemoryContextState>({
         read: (state) => state,
       }),
-      update: layerFn<Record<string, unknown>, void, WorkingMemoryContextState>({
+      update: layerFunction<Record<string, unknown>, void, WorkingMemoryContextState>({
         description: 'Update the agent working context with new key-value pairs.',
         input: z.record(z.string(), z.unknown()),
         output: z.void(),
