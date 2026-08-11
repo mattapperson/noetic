@@ -1,6 +1,6 @@
 /**
- * The JSON workflow schema lives in `@noetic-tools/types` so the memory
- * package (which must not import core) can validate workflow documents.
+ * The JSON workflow schema lives in `@noetic-tools/types` so portable
+ * consumers can validate workflow documents without importing core.
  * This barrel keeps core's public and intra-core import paths unchanged.
  */
 
