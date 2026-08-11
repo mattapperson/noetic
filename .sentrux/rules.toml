@@ -198,18 +198,12 @@ order = 86
 # ship as standalone npm packages (@noetic-tools/context, @noetic-tools/types).
 # They sit BELOW every core layer: core imports them, never the reverse.
 # @noetic-tools/types is the dependency-free bottom; @noetic-tools/context
-# builds on types and is consumed by core. packages/memory is the deprecated
-# re-export shim for the pre-rename package name and holds no logic.
+# builds on types and is consumed by core.
 # ─────────────────────────────────────────────────────────────────────────────
 
 [[layers]]
 name = "noetic-context"
 paths = ["packages/context/src/**"]
-order = 88
-
-[[layers]]
-name = "noetic-memory-shim"
-paths = ["packages/memory/src/**"]
 order = 88
 
 [[layers]]
@@ -230,16 +224,6 @@ order = 90
 from = "packages/context/src/**"
 to = "packages/core/src/**"
 reason = "core depends on @noetic-tools/context; context must never import back into core (acyclic) and must stay tree-shakable from the interpreter/runtime"
-
-[[boundaries]]
-from = "packages/memory/src/**"
-to = "packages/core/src/**"
-reason = "@noetic-tools/memory is the frozen deprecation shim for @noetic-tools/context; it re-exports that package and nothing else, so it inherits the same no-import-back-into-core rule"
-
-[[boundaries]]
-from = "packages/context/src/**"
-to = "packages/memory/src/**"
-reason = "the deprecation shim depends on @noetic-tools/context, so the reverse edge would be a package cycle. They are same-order siblings, which sentrux leaves unconstrained unless stated explicitly"
 
 [[boundaries]]
 from = "packages/types/src/**"
@@ -558,11 +542,6 @@ reason = "core must never depend on a chat platform integration; the integration
 from = "packages/chat-sdk/src/**"
 to = "packages/core/src/**"
 reason = "@noetic-tools/chat-sdk depends only on @noetic-tools/types; it drives any harness through AgentHarnessContract, so core must stay out of its dependency graph"
-
-[[boundaries]]
-from = "packages/chat-sdk/src/**"
-to = "packages/memory/src/**"
-reason = "@noetic-tools/chat-sdk depends only on @noetic-tools/types; it must not reach into the memory package"
 
 [[boundaries]]
 from = "packages/chat-sdk/src/**"

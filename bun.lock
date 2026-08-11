@@ -41,7 +41,7 @@
     },
     "packages/context": {
       "name": "@noetic-tools/context",
-      "version": "1.0.0",
+      "version": "1.2.0",
       "dependencies": {
         "@noetic-tools/types": "workspace:*",
         "zod": "^4.0.0",
@@ -55,7 +55,7 @@
     },
     "packages/core": {
       "name": "@noetic-tools/core",
-      "version": "5.1.0",
+      "version": "5.3.0",
       "dependencies": {
         "@noetic-tools/context": "workspace:*",
         "@noetic-tools/types": "workspace:*",
@@ -122,19 +122,6 @@
         "postcss": "8.5.4",
         "tailwindcss": "4.1.8",
         "typescript": "5.8.3",
-      },
-    },
-    "packages/memory": {
-      "name": "@noetic-tools/memory",
-      "version": "3.1.0",
-      "dependencies": {
-        "@noetic-tools/context": "workspace:*",
-      },
-      "devDependencies": {
-        "bun-types": "latest",
-      },
-      "peerDependencies": {
-        "zod": "^4.0.0",
       },
     },
     "packages/openui": {
@@ -262,7 +249,7 @@
     },
     "packages/types": {
       "name": "@noetic-tools/types",
-      "version": "3.0.0",
+      "version": "3.1.0",
       "dependencies": {
         "@openrouter/agent": "^0.6.0",
         "zod": "^4.0.0",
@@ -496,8 +483,6 @@
     "@noetic-tools/core": ["@noetic-tools/core@workspace:packages/core"],
 
     "@noetic-tools/eval": ["@noetic-tools/eval@workspace:packages/eval"],
-
-    "@noetic-tools/memory": ["@noetic-tools/memory@workspace:packages/memory"],
 
     "@noetic-tools/openui": ["@noetic-tools/openui@workspace:packages/openui"],
 

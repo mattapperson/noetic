@@ -28,7 +28,6 @@ jobs:
         run: |
           bun run --cwd packages/types build
           bun run --cwd packages/context build
-          bun run --cwd packages/memory build
           bun run --cwd packages/core build
 
       - name: Lint
@@ -37,16 +36,13 @@ jobs:
       # NOTE: use `bun run --cwd <path> <script>`, NOT `bun --cwd <path> run <script>`.
       # The latter form no-ops on Bun >=1.3 (prints help, exits 0) — a false green.
       # Dists are already built up front by the "Build packages" step above, in
-      # dependency order (types → context → memory → core), so downstream typechecks/tests
+      # dependency order (types → context → core), so downstream typechecks/tests
       # resolve cross-package imports via the emitted dist.
       - name: Typecheck types
         run: bun run --cwd packages/types typecheck
 
       - name: Typecheck context
         run: bun run --cwd packages/context typecheck
-
-      - name: Typecheck memory (deprecated shim)
-        run: bun run --cwd packages/memory typecheck
 
       - name: Typecheck core
         run: bun run --cwd packages/core typecheck
@@ -68,9 +64,6 @@ jobs:
 
       - name: Test context
         run: bun run --cwd packages/context test:ci
-
-      - name: Test memory (deprecated shim)
-        run: bun run --cwd packages/memory test:ci
 
       - name: Test core
         run: bun run --cwd packages/core test:ci

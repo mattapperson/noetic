@@ -15,7 +15,6 @@ on:
     paths:
       - 'packages/types/**'
       - 'packages/context/**'
-      - 'packages/memory/**'
       - 'packages/core/**'
       - 'packages/openui/**'
       - 'packages/sub-harness/**'
@@ -140,66 +139,11 @@ jobs:
         run: npx --yes -p semantic-release@24 -p semantic-release-monorepo@8 -p @semantic-release/changelog@6 -p @semantic-release/git@10 -p conventional-changelog-conventionalcommits@7 semantic-release --extends semantic-release-monorepo
 
 
-  memory:
-    name: Release @noetic-tools/memory (deprecated shim)
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    needs: context
-    permissions:
-      contents: write
-      issues: write
-      pull-requests: write
-      id-token: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
-
-      - uses: oven-sh/setup-bun@v2
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Install dependencies
-        run: bun install
-
-      - name: Lint
-        run: bunx biome check packages/memory
-
-      - name: Typecheck
-        run: bun --cwd=packages/memory run typecheck
-
-      # The shim re-exports @noetic-tools/context, which itself needs
-      # @noetic-tools/types. Build both dists so the shim's own build (run by
-      # `prepublishOnly`) and the Node ESM smoke test can resolve them.
-      - name: Build dependencies (@noetic-tools/types, @noetic-tools/context)
-        run: |
-          bun --cwd=packages/types run build
-          bun --cwd=packages/context run build
-
-      - name: Build
-        run: bun --cwd=packages/memory run build
-
-      # See the types job. The shim's own `workspace:*` deps are pinned to concrete
-      # versions at publish time by `prepublishOnly` (scripts/pin-workspace-deps.ts).
-      - name: Detach package from workspace for npm
-        run: node -e "const fs=require('fs');const p=require('./package.json');delete p.workspaces;fs.writeFileSync('./package.json',JSON.stringify(p,null,2)+'\n')"
-
-      - name: Release
-        working-directory: packages/memory
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_CONFIG_PROVENANCE: 'true'
-        run: npx --yes -p semantic-release@24 -p semantic-release-monorepo@8 -p @semantic-release/changelog@6 -p @semantic-release/git@10 -p conventional-changelog-conventionalcommits@7 semantic-release --extends semantic-release-monorepo
-
   sub-harness:
     name: Release @noetic-tools/sub-harness
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: memory
+    needs: context
     permissions:
       contents: write
       issues: write
