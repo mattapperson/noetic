@@ -32,10 +32,10 @@ Noetic wraps every framework-level failure in a structured `NoeticError` discrim
 | `llm_refused` | `stepId`, `refusal: string` | The model returns a refusal instead of content. |
 | `llm_parse_error` | `stepId`, `raw: string`, `schema: ZodType`, `zodError: ZodError` | Structured output fails Zod validation. |
 | `llm_rate_limit` | `stepId`, `retryAfter?: number` | The LLM provider returns a rate-limit response. |
-| `fork_partial` | `stepId`, `succeeded[]`, `failed[]` | Thrown by fork mode `'all'` when any path fails, and by `'race'` when every path fails. (Mode `'settle'` never throws this — it reports failures in its `SettleResult` array instead.) |
+| `fork_partial` | `stepId`, `succeeded[]`, `failed[]` | Thrown by `inParallel` mode `'all'` when any path fails, and by `'race'` when every path fails. (Mode `'settle'` never throws this — it reports failures in its `SettleResult` array instead.) |
 | `channel_timeout` | `channelName`, `timeout: number` | A `recv()` call — or a back-pressured `send()` parked on a full queue — exceeded its timeout. |
 | `channel_closed` | `channelName` | Attempted to send on a closed external channel. |
-| `cancelled` | `reason?: string` | The execution was cancelled via `ctx.abort()` or `harness.cancel()` — including a parent's cancellation cascading into a `fork` path or `spawn` child. Pending channel `recv` calls (and parked back-pressure `send` calls) on the aborted context reject with this kind immediately, and an in-flight `llm` call or sub-harness turn is cut short. |
+| `cancelled` | `reason?: string` | The execution was cancelled via `ctx.abort()` or `harness.cancel()` — including a parent's cancellation cascading into an `inParallel` path or `spawn` child. Pending channel `recv` calls (and parked back-pressure `send` calls) on the aborted context reject with this kind immediately, and an in-flight model call or sub-harness turn is cut short. |
 | `budget_exceeded` | `field: 'cost' \| 'steps' \| 'duration'`, `limit`, `actual` | A budget guard detected the run exceeded its limits. |
 | `steering_denied` | `guidance?: string` | A context layer's steering hook (`beforeToolCall` / `afterModelCall`) returned a deny decision and the runtime blocked the action. `guidance` carries the corrective feedback, if any. |
 | `handle_evicted` | `handleId`, `stepId`, `gracePeriodMs` | `DetachedHandle.await()` found the subprocess adapter persistently returning `null` for a previously spawned handle (evicted by a restart without restore, or a storage inconsistency). Raised after a short grace period instead of polling forever. |
@@ -97,7 +97,7 @@ import { step, loop, until } from '@noetic-tools/core';
 
 const resilientLoop = loop({
   id: 'retry-loop',
-  steps: [step.llm({ id: 'generate', model: 'openai/gpt-4o' })],
+  steps: [step.callModel({ id: 'generate', model: 'openai/gpt-4o' })],
   until: until.noToolCalls(),
   onError(error, ctx) {
     if (error.kind === 'llm_rate_limit') {

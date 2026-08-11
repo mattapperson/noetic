@@ -14,7 +14,7 @@ streaming in statement by statement.
 It exercises the real generative-UI pipeline end to end against a live model:
 
 - **`createLibrary` / `defineComponent`** — the component vocabulary the model may render.
-- **`step.llm({ output: openUi(library) })`** — the streaming output codec; the model authors UI instead of prose.
+- **`step.callModel({ output: openUi(library) })`** — the streaming output codec; the model authors UI instead of prose.
 - **`openUiSurface()`** — the server-authoritative context layer that owns the mounted document across turns.
 - **real tools** (`search_listings` with `near`/`sort` + haversine distance, `quote_price`) — the model infers the search intent, calls them, then bakes the results into components.
 
@@ -59,7 +59,7 @@ live price + stat detail, or use the sort chips to re-sort.
  browser (Vite/React)                    server (Bun)
  ─────────────────────                    ────────────
  App.tsx     ─ POST /agent {prompt} ───▶  harness.run(stays, prompt, ctx)
-   │                                         │  step.llm + openUi(library) codec
+   │                                         │  step.callModel + openUi(library) codec
    │  ◀── SSE: statement × N, done ──────    │  + openUiSurface() layer
  parseDocument()  (noetic's real parser)     │  + search_listings / quote_price tools
    │                                         ▼

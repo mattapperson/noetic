@@ -251,7 +251,7 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
   /**
    * Subprocess abstraction. Always present (non-optional internally).
    * Defaults to createInMemorySubprocessAdapter() when the harness is
-   * constructed without an explicit `subprocess` option. All StepRun
+   * constructed without an explicit `subprocess` option. All StepRunCode
    * and StepSpawn dispatches route through this adapter unless the step
    * or detachedSpawn override supplies one; see 04-spawn for precedence.
    */
@@ -417,7 +417,7 @@ interface DetachedHandle<O> {
 - a long-lived `EventBroadcaster` that relays SDK and framework events across all turns,
 - an `itemLog` snapshot that carries conversation history from turn to turn.
 
-Before the first turn runs, the harness walks the step tree to collect all tools from LLM steps, merges them with layer-provided tools, and deduplicates by name. This **unified tool set** is stored on the turn's execution context and sent with every LLM call for prompt cache efficiency. Individual steps restrict the model to a subset via the Open Responses `tool_choice: { type: "allowed_tools" }` parameter. `run(step, input, ctx)` does the same lazily: when an embedder drives a step directly on a bare `createContext()` context, `run` populates that context's unified tool set (the step's tools plus the harness tools) if it is not already set, so directly-driven steps — and any sub-agents they spawn — see the harness toolset. `run` also runs the configured context layers' `init()` hooks once per context (keyed by `ctx.id`) before executing, so a harness built with `context` + `storage` rehydrates prior layer state, recalls it, and persists updates on the bare `run()` path — the same guarantee the session/`execute()` path gives. The init is idempotent: nested or repeated `run()` calls and the session turn path never re-init (which would clobber accumulated in-layer state by re-hydrating from storage); a deliberate `disposeLayers(ctx)` clears the guard so a later `run()` re-hydrates.
+Before the first turn runs, the harness walks the step tree to collect all tools from callModel steps, merges them with layer-provided tools, and deduplicates by name. This **unified tool set** is stored on the turn's execution context and sent with every LLM call for prompt cache efficiency. Individual steps restrict the model to a subset via the Open Responses `tool_choice: { type: "allowed_tools" }` parameter. `run(step, input, ctx)` does the same lazily: when an embedder drives a step directly on a bare `createContext()` context, `run` populates that context's unified tool set (the step's tools plus the harness tools) if it is not already set, so directly-driven steps — and any sub-agents they spawn — see the harness toolset. `run` also runs the configured context layers' `init()` hooks once per context (keyed by `ctx.id`) before executing, so a harness built with `context` + `storage` rehydrates prior layer state, recalls it, and persists updates on the bare `run()` path — the same guarantee the session/`execute()` path gives. The init is idempotent: nested or repeated `run()` calls and the session turn path never re-init (which would clobber accumulated in-layer state by re-hydrating from storage); a deliberate `disposeLayers(ctx)` clears the guard so a later `run()` re-hydrates.
 
 A session's runner starts turns lazily whenever the queue goes non-empty while the runner is idle. Each turn:
 
@@ -514,15 +514,15 @@ interface FrameworkStreamEvent {
 
 ### Streaming Scope
 
-Events from the entire step composition tree flow through `HarnessResult`. All LLM steps encountered during execution (including within loops, branches, forks, and spawns) emit SDK stream events. Non-LLM steps emit framework lifecycle events only.
+Events from the entire step composition tree flow through `HarnessResult`. All callModel steps encountered during execution (including within loops, conditionals, inParallel paths, and spawns) emit SDK stream events. Non-callModel steps emit framework lifecycle events only.
 
 ### Event Emission Control
 
-LLM steps support an optional `emit` field to control framework event emission:
+callModel steps support an optional `emit` field to control framework event emission:
 
 ```typescript
-step.llm({ id: 'quiet', model: '...', emit: false });           // suppress all
-step.llm({ id: 'selective', model: '...', emit: (type) => type === 'step_started' }); // filter
+step.callModel({ id: 'quiet', model: '...', emit: false });           // suppress all
+step.callModel({ id: 'selective', model: '...', emit: (type) => type === 'step_started' }); // filter
 ```
 
 - **`true`** (default): all framework events emitted.
@@ -584,7 +584,7 @@ type DeliveryMode = 'next-turn' | 'between-rounds' | 'interrupt';
 
 ### Shared cwd
 
-`AgentHarness` holds a long-lived `rootCwdState: CwdState`. Every root context (those created without a `parent`) shares the same `CwdState` reference, so successive `run()` calls observe each other's `cd`s. Spawned and forked children get a snapshot (POSIX-fork semantics) — child mutations do not leak to the parent. Worktree-isolated children are seeded via `createContext({ cwdInit: worktreePath })` or `detachedSpawn(..., { cwdInit })`.
+`AgentHarness` holds a long-lived `rootCwdState: CwdState`. Every root context (those created without a `parent`) shares the same `CwdState` reference, so successive `run()` calls observe each other's `cd`s. `spawn` and `inParallel` children get a snapshot (POSIX-fork semantics) — child mutations do not leak to the parent. Worktree-isolated children are seeded via `createContext({ cwdInit: worktreePath })` or `detachedSpawn(..., { cwdInit })`.
 
 The TUI calls `setRootCwd(nextCwd)` when the user issues a `!cd`, so the next agent turn's tools see the new cwd. The agent's Bash tool intercepts plain `cd` and mutates `cwdState` directly via `setToolCwd` — for the root context, this is the same object as `rootCwdState`, so `cd` round-trips into the TUI's prompt display on the next turn settle.
 
@@ -592,7 +592,7 @@ The TUI calls `setRootCwd(nextCwd)` when the user issues a `!cd`, so the next ag
 
 ### Harness-wide tools
 
-`AgentHarnessOpts.tools?: Tool[]` seeds a tool pool that is merged with tools collected from `initialStep` to form every context's `ctx.unifiedTools`. This is the supported way to supply tools when the workflow graph is fully static — i.e. when `step.llm.tools` is a `(ctx) => ctx.unifiedTools.filter(...)` getter rather than an eager array. Function-form `step.tools` are invisible to `collectAllTools`, so anything needed at the harness level must come in through `tools`.
+`AgentHarnessOpts.tools?: Tool[]` seeds a tool pool that is merged with tools collected from `initialStep` to form every context's `ctx.unifiedTools`. This is the supported way to supply tools when the workflow graph is fully static — i.e. when `step.callModel.tools` is a `(ctx) => ctx.unifiedTools.filter(...)` getter rather than an eager array. Function-form `step.tools` are invisible to `collectAllTools`, so anything needed at the harness level must come in through `tools`.
 
 Dedupe is **name-based, first-wins**. The merge order is `[...stepCollectedTools, ...harnessTools]`, so when a tool name appears in both sets, the step-collected instance wins and the harness-level instance is dropped. This matches the precedence a user would expect when a specific step hard-codes a tool while the harness supplies a default pool.
 
@@ -610,8 +610,8 @@ The harness validates items at trust boundaries (model output parsing, session r
 ### What's NOT on the AgentHarness
 
 - **`assembleView`** — view assembly (the Projector) is a standalone function in `context/projector.ts`. It calls `recallLayers`, allocates token budgets, and assembles system prompt item + layer output items + conversation history items into the View as `Item[]`. This is what `executeLLM` calls internally before sending items to the model.
-- **`executeFork`** — fork execution is handled by the core `run` switch. The `fork` variant calls `run` on each path internally.
-- **`summarize`** — summarization is just an LLM call. The `spawn` executor calls `run(step.llm({ id: 'summarize', ... }), ...)` internally.
+- **`executeFork`** — inParallel execution is handled by the core `run` switch. The `inParallel` variant calls `run` on each path internally.
+- **`summarize`** — summarization is just an LLM call. The `spawn` executor calls `run(step.callModel({ id: 'summarize', ... }), ...)` internally.
 
 ---
 
@@ -662,7 +662,7 @@ Returns `null` when no snapshot is recorded. Throws `NoeticConfigError` with `co
 ### Limitations
 
 - **LLM mid-stream** is re-issued on restart, not resumed. The item log's response-id dedupe guards against double-recording an identical response. See `07-context-and-event-log`.
-- **Non-idempotent `step.run` bodies** may run twice if a crash lands between execution and the following checkpoint. Write bodies that are safe to re-execute, or gate with an external idempotency key.
+- **Non-idempotent `step.runCode` bodies** may run twice if a crash lands between execution and the following checkpoint. Write bodies that are safe to re-execute, or gate with an external idempotency key.
 
 See `23-durable-execution` for the full durable-execution model, including `SubprocessAdapter.reattach`/`listLive` semantics, the durable IPC outbound queue, protocol v2 frames, and the host-restart recovery flow.
 
@@ -676,12 +676,12 @@ See `23-durable-execution` for the full durable-execution model, including `Subp
 
 ```typescript
 import { setHarness, AgentHarness } from '@noetic-tools/core';
-import { workingMemoryContext, semanticRecall } from '@noetic-tools/core';
+import { scratchpad, semanticRecall } from '@noetic-tools/core';
 
 setHarness(new AgentHarness({
   name: 'my-agent',
   params: { model: 'anthropic/claude-sonnet-4-20250514' },
-  context: [workingMemoryContext(), semanticRecall({ embedder })],
+  context: [scratchpad(), semanticRecall({ embedder })],
 }));
 ```
 

@@ -1,18 +1,18 @@
 ---
-title: branch
+title: conditional
 description: Conditional routing -- pick one step to execute or skip entirely.
 ---
 
 ## Quick Example
 
 ```ts
-import { branch, step } from '@noetic-tools/core';
+import { conditional, step } from '@noetic-tools/core';
 
-const triageAgent = branch({
+const triageAgent = conditional({
   id: 'triage',
   route: (input: string, ctx) => {
     if (input.includes('urgent')) {
-      return step.llm({
+      return step.callModel({
         id: 'urgent-handler',
         model: 'openai/gpt-4o',
         instructions: 'Handle this urgent request immediately.',
@@ -21,7 +21,7 @@ const triageAgent = branch({
     if (input.includes('ignore')) {
       return null; // skip -- no step executed
     }
-    return step.llm({
+    return step.callModel({
       id: 'default-handler',
       model: 'openai/gpt-4o-mini',
       instructions: 'Handle this routine request.',
@@ -32,7 +32,7 @@ const triageAgent = branch({
 
 ## What It Does
 
-`branch` is a runtime router. Its `route` function receives the step input and context, and returns either:
+`conditional` is a runtime router. Its `route` function receives the step input and context, and returns either:
 
 - A `Step` to execute, or
 - `null` to skip (the input passes through as-is).
@@ -48,18 +48,18 @@ This is the idiomatic way to add conditional logic to an Noetic pipeline. Instea
 
 ## How Null Routes Work
 
-When `route` returns `null`, the branch is skipped entirely. The input value is passed through as the output. This is useful for optional processing steps.
+When `route` returns `null`, the conditional is skipped entirely. The input value is passed through as the output. This is useful for optional processing steps.
 
 ```ts
-import { branch, step } from '@noetic-tools/core';
+import { conditional, step } from '@noetic-tools/core';
 
-const maybeTranslate = branch({
+const maybeTranslate = conditional({
   id: 'maybe-translate',
   route: (input: { text: string; lang: string }) => {
     if (input.lang === 'en') {
       return null; // already English, skip
     }
-    return step.llm({
+    return step.callModel({
       id: 'translate',
       model: 'openai/gpt-4o',
       instructions: `Translate the following text to English.`,
@@ -73,13 +73,13 @@ const maybeTranslate = branch({
 The `route` function creates steps at runtime, so you can parameterize them based on input.
 
 ```ts
-import { branch, step } from '@noetic-tools/core';
+import { conditional, step } from '@noetic-tools/core';
 
-const modelPicker = branch({
+const modelPicker = conditional({
   id: 'model-picker',
   route: (input: { task: string; budget: 'low' | 'high' }) => {
     const model = input.budget === 'high' ? 'openai/gpt-4o' : 'openai/gpt-4o-mini';
-    return step.llm({
+    return step.callModel({
       id: `${input.task}-llm`,
       model,
       instructions: `Perform the following task: ${input.task}`,
@@ -88,26 +88,26 @@ const modelPicker = branch({
 });
 ```
 
-## Nesting Branches
+## Nesting Conditionals
 
-Branches can return other branches, forks, or any other step type.
+A conditional's route can return other conditionals, `inParallel` groups, or any other step type.
 
 ```ts
-import { branch, fork, step } from '@noetic-tools/core';
+import { conditional, inParallel, step } from '@noetic-tools/core';
 
-const nested = branch({
+const nested = conditional({
   id: 'outer',
   route: (input: string) => {
     if (input === 'compare') {
-      return fork({
+      return inParallel({
         id: 'compare-models',
         mode: 'all',
         paths: () => [
-          step.llm({
+          step.callModel({
             id: 'model-a',
             model: 'openai/gpt-4o',
           }),
-          step.llm({
+          step.callModel({
             id: 'model-b',
             model: 'openai/gpt-4o-mini',
           }),
@@ -115,7 +115,7 @@ const nested = branch({
         merge: (results) => results.join('\n---\n'),
       });
     }
-    return step.llm({
+    return step.callModel({
       id: 'single',
       model: 'openai/gpt-4o',
     });
@@ -128,15 +128,15 @@ const nested = branch({
 The `route` function can be async, enabling AI-powered and embedding-based routing. Noetic provides condition helpers like `semanticSwitch`, `semanticRoute`, `embeddingMatch`, and `aiCondition` that return async route functions:
 
 ```ts validate=none
-import { branch, semanticSwitch, step } from '@noetic-tools/core';
+import { conditional, semanticSwitch, step } from '@noetic-tools/core';
 
-const router = branch({
+const router = conditional({
   id: 'semantic-router',
   route: semanticSwitch({
     embed,
     cases: {
-      'greeting or salutation': step.llm({ id: 'greet', model: 'openai/gpt-4o-mini' }),
-      'technical question': step.llm({ id: 'tech', model: 'openai/gpt-4o' }),
+      'greeting or salutation': step.callModel({ id: 'greet', model: 'openai/gpt-4o-mini' }),
+      'technical question': step.callModel({ id: 'tech', model: 'openai/gpt-4o' }),
     },
     threshold: 0.7,
   }),
@@ -147,6 +147,6 @@ See [Semantic Conditions](/docs/framework/operators/conditions) for the full API
 
 ## Related
 
-- [fork](/docs/framework/operators/fork) -- parallel execution for when you need multiple paths at once.
+- [inParallel](/docs/framework/operators/in-parallel) -- parallel execution for when you need multiple paths at once.
 - [Steps](/docs/framework/steps) -- the step types you can return from a route function.
-- [Loop & Until](/docs/framework/operators/loop-and-until) -- combine branching with iteration.
+- [Loop & Until](/docs/framework/operators/loop-and-until) -- combine conditional routing with iteration.

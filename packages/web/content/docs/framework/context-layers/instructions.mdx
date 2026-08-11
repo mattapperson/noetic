@@ -1,13 +1,13 @@
 ---
-title: Static Content
+title: Instructions
 description: A read-only context layer that loads instructional content once at init and injects it into every recall, wrapped in an XML tag.
 ---
 
 ## Overview
 
-Static Content is the simplest way to put fixed instructional material — style guides, project conventions, persona text — in front of the model on every turn. The content is loaded once by an async `load` function at `init`, wrapped in an XML tag, and returned verbatim from `recall`.
+Instructions is the simplest way to put fixed instructional material — style guides, project conventions, persona text — in front of the model on every turn. The content is loaded once by an async `load` function at `init`, wrapped in an XML tag, and returned verbatim from `recall`.
 
-- **Default slot**: `105` (`Slot.WORKING_MEMORY + 5`)
+- **Default slot**: `105` (`Slot.SCRATCHPAD + 5`)
 - **Default scope**: `resource`
 - **Budget**: none declared (treated as `'auto'`)
 - **[Placement](/docs/framework/context-layers#prompt-cache-anchoring)**: `'anchor'` — the content is loaded once and never changes, so it belongs in the cache-stable prefix
@@ -15,9 +15,9 @@ Static Content is the simplest way to put fixed instructional material — style
 ## Usage
 
 ```ts validate=none
-import { staticContent } from '@noetic-tools/core';
+import { instructions } from '@noetic-tools/core';
 
-const conventions = staticContent({
+const conventions = instructions({
   id: 'project-conventions',
   tag: 'project_conventions',
   load: async () => readFile('CONVENTIONS.md', 'utf-8'),
@@ -35,9 +35,9 @@ The model then sees:
 ## Configuration
 
 ```ts validate=none
-interface StaticContentOpts {
-  id?: string;            // default 'static-content'
-  slot?: number;          // default Slot.WORKING_MEMORY + 5
+interface InstructionsOptions {
+  id?: string;            // default 'instructions'
+  slot?: number;          // default Slot.SCRATCHPAD + 5
   scope?: ContextScope;    // default 'resource'
   load: () => Promise<string>;
   tag?: string;           // default 'instructions'
@@ -46,7 +46,7 @@ interface StaticContentOpts {
 
 | Field | Type | Default | Purpose |
 |---|---|---|---|
-| `id` | `string` | `'static-content'` | Layer id — set one per instance when stacking several static layers |
+| `id` | `string` | `'instructions'` | Layer id — set one per instance when stacking several instruction layers |
 | `slot` | `number` | `105` | Position in the assembled view |
 | `scope` | `ContextScope` | `'resource'` | Persistence boundary |
 | `load` | `() => Promise<string>` | required | Loads the content once at `init`. An empty result yields an empty layer |

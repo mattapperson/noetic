@@ -1,13 +1,13 @@
 # JSON Workflow Runtime
 
-> **Depends On:** `01-step-type` (Step, Until), `02-step-variants` (step.llm, step.tool), `03-control-flow` (branch, fork), `04-spawn` (spawn), `05-loop-and-until` (loop, until), `08-runtime` (AgentHarness), `13-patterns` (patterns namespace)
+> **Depends On:** `01-step-type` (Step, Until), `02-step-variants` (step.callModel, step.invokeTool), `03-control-flow` (conditional, inParallel), `04-spawn` (spawn), `05-loop-and-until` (loop, until), `08-runtime` (AgentHarness), `13-patterns` (patterns namespace)
 > **Exports:** `WorkflowDocument`, `WorkflowNode`, `WorkflowDocumentSchema`, `WorkflowNodeSchema`, `UntilPredicateSchema`, `MergeStrategySchema`, `hydrateWorkflow`, `hydrateNode`, `dynamicWorkflow`, `parseAndRunWorkflow`
 
 ---
 
 ## Motivation
 
-Step trees in noetic are built programmatically: TypeScript code calls builders like `step.llm(...)`, `loop(...)`, `fork(...)` and wires them together at compile time. This works when the workflow shape is known ahead of time.
+Step trees in noetic are built programmatically: TypeScript code calls builders like `step.callModel(...)`, `loop(...)`, `inParallel(...)` and wires them together at compile time. This works when the workflow shape is known ahead of time.
 
 But many agent patterns need the shape to emerge at runtime:
 
@@ -16,7 +16,7 @@ But many agent patterns need the shape to emerge at runtime:
 3. **User-authored workflows** -- End users or low-code tools define agent behavior as JSON configuration without writing TypeScript.
 4. **Replay and inspection** -- A JSON workflow is a complete, inspectable record of what the agent intended to do, independent of execution state.
 
-The JSON Workflow Runtime bridges these worlds: an LLM (or any producer) emits a `WorkflowDocument`, the runtime validates it, hydrates it into a native `Step` tree, and executes it with the same interpreter, memory layers, and observability as hand-written compositions.
+The JSON Workflow Runtime bridges these worlds: an LLM (or any producer) emits a `WorkflowDocument`, the runtime validates it, hydrates it into a native `Step` tree, and executes it with the same interpreter, context layers, and observability as hand-written compositions.
 
 ---
 
@@ -185,11 +185,11 @@ interface SpawnWorkflowNode {
 |-----------|----------|------------------------------------------------------|
 | `child`   | Yes      | The workflow subtree to execute in the child context. |
 | `timeout` | No       | Maximum wall-clock milliseconds for the child.       |
-| `layers`  | No       | Memory layer names resolved from the hydration context registry, same resolution as `provide` (unknown name → `UNKNOWN_LAYER_REFERENCE`). Omit to inherit the parent's layers, which is the default `spawn` behaviour (spec 04); naming layers **replaces** the inherited set for the child. |
+| `layers`  | No       | Context layer names resolved from the hydration context registry, same resolution as `provide` (unknown name → `UNKNOWN_LAYER_REFERENCE`). Omit to inherit the parent's layers, which is the default `spawn` behaviour (spec 04); naming layers **replaces** the inherited set for the child. |
 
 ### `provide`
 
-Scoped memory layer injection.
+Scoped context layer injection.
 
 ```typescript
 interface ProvideWorkflowNode {
@@ -203,7 +203,7 @@ interface ProvideWorkflowNode {
 | Field    | Required | Description                                                        |
 |----------|----------|--------------------------------------------------------------------|
 | `child`  | Yes      | The workflow subtree that receives the layers.                     |
-| `layers` | Yes      | Memory layer names resolved from the hydration context registry.   |
+| `layers` | Yes      | Context layer names resolved from the hydration context registry.   |
 
 ### `loop`
 
@@ -340,7 +340,7 @@ const UntilPredicateSchema: z.ZodType<UntilPredicate> = z.lazy(() =>
 
 ## Merge Strategies
 
-Fork nodes use a `MergeStrategy` to combine results from parallel paths. This replaces the closure-based `MergeFn<O>` from the native `fork()` builder with a named enum.
+Fork nodes use a `MergeStrategy` to combine results from parallel paths. This replaces the closure-based `MergeFn<O>` from the native `inParallel()` builder with a named enum.
 
 ```typescript
 type MergeStrategy = 'last' | 'first' | 'concat';
@@ -368,7 +368,7 @@ Hydration converts a `WorkflowDocument` into a live `Step` tree that the interpr
 interface HydrationContext {
   tools: ReadonlyMap<string, Tool>;
   executeStep: ExecuteStepFn;
-  layers?: ReadonlyMap<string, MemoryLayer>;
+  layers?: ReadonlyMap<string, ContextLayer>;
   subHarnesses?: ReadonlyMap<SubHarnessKind, SubHarness>;
   uiLibraries?: ReadonlyMap<string, OutputCodec>;
   resolveSubprocess?: (ref: string) => SubprocessAdapter | undefined;
@@ -381,7 +381,7 @@ interface HydrationContext {
 |----------------------|----------|--------------------------------------------------------------------------|
 | `tools`              | Yes      | Registry mapping tool names to live `Tool` objects.                      |
 | `executeStep`        | Yes      | The interpreter's `execute` function, threaded for recursive calls.      |
-| `layers`             | No       | Named memory layers for `provide` nodes and `spawn.layers`.              |
+| `layers`             | No       | Named context layers for `provide` nodes and `spawn.layers`.              |
 | `subHarnesses`       | No       | SubHarness adapters keyed by harness id (`claude-code`, `codex`, …).     |
 | `uiLibraries`        | No       | Output codecs for `llm` nodes' `output` codec references.                |
 | `resolveSubprocess`  | No       | Resolves a named subprocess adapter ref on a `run` node.                 |
@@ -418,16 +418,16 @@ Each node kind maps to a single existing builder:
 
 | Node Kind   | Builder                   | Notes                                                  |
 |-------------|---------------------------|--------------------------------------------------------|
-| `llm`       | `step.llm({...})`         | Tools resolved by name from `ctx.tools`.               |
-| `tool`      | `step.tool({...})`        | Tool resolved by name; throws `UNKNOWN_TOOL_REFERENCE`.|
-| `branch`    | `branch({route: ...})`    | Route function does substring matching on input.       |
-| `fork`      | `fork({...})`             | `paths` becomes a static function. Merge via strategy. |
+| `llm`       | `step.callModel({...})` | Tools resolved by name from `ctx.tools`.               |
+| `tool`      | `step.invokeTool({...})` | Tool resolved by name; throws `UNKNOWN_TOOL_REFERENCE`.|
+| `branch`    | `conditional({route: ...})` | Route function does substring matching on input.       |
+| `fork`      | `inParallel({...})` | `paths` becomes a static function. Merge via strategy. |
 | `spawn`     | `spawn({...})`            | Child hydrated recursively.                            |
-| `provide`   | `provide({...})`          | Layer names resolved from hydration context.           |
+| `provide`   | `withContext({...})` | Layer names resolved from hydration context.           |
 | `loop`      | `loop({...})`             | Until predicate hydrated to runtime `Until` function.  |
-| `sequence`  | `step.run` + chaining     | Steps piped sequentially via composed `execute` calls. |
-| `every`     | `every({...})`            | Maps directly to the `every()` builder.                |
-| `subflow`   | `step.run` wrapper        | Target document resolved lazily at first execution; sub-tree hydrated with suffixed ids. |
+| `sequence`  | `step.runCode` + chaining | Steps piped sequentially via composed `execute` calls. |
+| `every`     | `schedule({...})` | Maps directly to the `schedule()` builder.                |
+| `subflow`   | `step.runCode` wrapper | Target document resolved lazily at first execution; sub-tree hydrated with suffixed ids. |
 
 ### Tool Resolution
 
@@ -538,7 +538,7 @@ function parseAndRunWorkflow(opts: {
   tools: Tool[];
   input?: string;
   maxDepth?: number;
-  layers?: ReadonlyMap<string, MemoryLayer>;
+  layers?: ReadonlyMap<string, ContextLayer>;
   workflows?: ReadonlyMap<string, WorkflowDocument>;
 }): Promise<string>
 ```
@@ -561,7 +561,7 @@ const result = await parseAndRunWorkflow({
 
 ### No In-Process Closures
 
-Programmatic `step.run` accepts an `execute` closure, which is not JSON-serialisable. The `run` node instead carries its body as a code STRING dispatched through a subprocess adapter — never eval'd in-process. Arbitrary in-process computation must be expressed through tool calls or LLM steps.
+Programmatic `step.runCode` accepts an `execute` closure, which is not JSON-serialisable. The `run` node instead carries its body as a code STRING dispatched through a subprocess adapter — never eval'd in-process. Arbitrary in-process computation must be expressed through tool calls or LLM steps.
 
 ### Static Lazy Fields Only
 
@@ -579,7 +579,7 @@ Tree depth is enforced at parse time to prevent unbounded recursion in LLM-gener
 
 ## Plan-Memory Integration
 
-The plan memory layer (spec 12, `planMemory()`) authors plans directly in this format: `PlanState.planTree` is a `WorkflowDocument`, and `PlanState.workflows` is a `Record<string, WorkflowDocument>` of named workflows the tree references via `subflow` nodes. The layer validates documents at authoring time (schema, depth, optional node-kind profile, ref slug syntax) and rejects dangling refs and reference cycles before requesting approval.
+The plan layer (spec 12, `plan()`) authors plans directly in this format: `PlanState.planTree` is a `WorkflowDocument`, and `PlanState.workflows` is a `Record<string, WorkflowDocument>` of named workflows the tree references via `subflow` nodes. The layer validates documents at authoring time (schema, depth, optional node-kind profile, ref slug syntax) and rejects dangling refs and reference cycles before requesting approval.
 
 On approval, the host feeds both pieces straight into this runtime:
 
@@ -713,15 +713,15 @@ const WorkflowDocumentSchema = z.object({
 ## Cross-References
 
 - `Step<I, O>` discriminated union: `01-step-type`
-- `step.llm`, `step.tool` builders: `02-step-variants`
-- `branch()`, `fork()`, `MergeFn`: `03-control-flow`
+- `step.callModel`, `step.invokeTool` builders: `02-step-variants`
+- `conditional()`, `inParallel()`, `MergeFn`: `03-control-flow`
 - `spawn()`: `04-spawn`
-- `loop()`, `every()`, `until.*`, `any()`, `all()`: `05-loop-and-until`
+- `loop()`, `schedule()`, `until.*`, `any()`, `all()`: `05-loop-and-until`
 - `Context`, `Item`, `ItemLog`: `07-context-and-event-log`
 - `AgentHarness`, `Tool`: `08-runtime`
 - `NoeticError` kinds: `09-error-model`
-- `MemoryLayer`: `11-memory-layer-system`
-- `planMemory`, `PlanState`: `12-builtin-memory-layers`
+- `ContextLayer`: `11-context-layer-system`
+- `plan`, `PlanState`: `12-builtin-context-layers`
 - `compilePlan`, `adaptivePlan`, `PlanNodeSchema`: `13-patterns`
 
 ---
@@ -731,6 +731,6 @@ const WorkflowDocumentSchema = z.object({
 - **Custom until predicates via registered names.** A plugin could register a named predicate (e.g., `until.custom('myCheck')`) that the hydrator resolves from a predicate registry, similar to tool name resolution. This would allow domain-specific termination logic without extending the schema.
 - **URI workflow references.** The `subflow` node resolves named refs from an in-memory registry; a URI form could fetch documents from remote workflow libraries, reusing the same cycle detection.
 - **Streaming hydration.** For very large workflows, hydrate nodes lazily as execution reaches them rather than building the entire `Step` tree upfront. This reduces memory pressure and startup latency.
-- **Named memory layer resolution for `provide` nodes.** The current design uses string layer names, but the resolution mechanism is left to the `HydrationContext`. A standardised layer registry (analogous to the tool registry) would make `provide` nodes portable across different harness configurations.
+- **Named context layer resolution for `provide` nodes.** The current design uses string layer names, but the resolution mechanism is left to the `HydrationContext`. A standardised layer registry (analogous to the tool registry) would make `provide` nodes portable across different harness configurations.
 - **Workflow versioning and migration.** When `version` increments to `2`, a `migrateV1toV2` function would transform old documents automatically. The version field exists to enable this without breaking existing consumers.
 - **Conditional until predicates.** Predicates that inspect specific fields of structured output (e.g., `outputField('status', 'complete')`) rather than treating output as an opaque string.

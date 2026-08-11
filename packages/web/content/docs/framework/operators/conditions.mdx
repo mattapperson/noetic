@@ -3,7 +3,7 @@ title: Semantic Conditions
 description: AI-powered routing with embeddings, LLM classifiers, and condition combinators.
 ---
 
-Noetic provides a set of condition helpers that let you route pipeline inputs using embeddings, LLM classifiers, and boolean combinators. These helpers produce async route functions compatible with [`branch`](/docs/framework/operators/branch).
+Noetic provides a set of condition helpers that let you route pipeline inputs using embeddings, LLM classifiers, and boolean combinators. These helpers produce async route functions compatible with [`conditional`](/docs/framework/operators/conditional).
 
 ## Condition Type
 
@@ -24,19 +24,19 @@ Routes input to the most semantically similar case using cosine similarity on em
 **Simple form** -- string keys map directly to steps:
 
 ```ts
-import { branch, semanticSwitch, step } from '@noetic-tools/core';
+import { conditional, semanticSwitch, step } from '@noetic-tools/core';
 import type { EmbedFn } from '@noetic-tools/core';
 
 declare const embed: EmbedFn;
 
-const router = branch({
+const router = conditional({
   id: 'semantic-router',
   route: semanticSwitch({
     embed,
     cases: {
-      'greeting or salutation': step.llm({ id: 'greet', model: 'openai/gpt-4o-mini' }),
-      'technical question': step.llm({ id: 'tech', model: 'openai/gpt-4o' }),
-      'complaint or feedback': step.llm({ id: 'feedback', model: 'openai/gpt-4o' }),
+      'greeting or salutation': step.callModel({ id: 'greet', model: 'openai/gpt-4o-mini' }),
+      'technical question': step.callModel({ id: 'tech', model: 'openai/gpt-4o' }),
+      'complaint or feedback': step.callModel({ id: 'feedback', model: 'openai/gpt-4o' }),
     },
     threshold: 0.7,
   }),
@@ -48,21 +48,21 @@ const router = branch({
 ```ts
 declare const embed: EmbedFn;
 
-const router = branch({
+const router = conditional({
   id: 'semantic-router',
   route: semanticSwitch({
     embed,
     cases: [
       {
         labels: ['greeting', 'hello', 'hi there'],
-        step: step.llm({ id: 'greet', model: 'openai/gpt-4o-mini' }),
+        step: step.callModel({ id: 'greet', model: 'openai/gpt-4o-mini' }),
       },
       {
         labels: 'technical question',
-        step: step.llm({ id: 'tech', model: 'openai/gpt-4o' }),
+        step: step.callModel({ id: 'tech', model: 'openai/gpt-4o' }),
       },
     ],
-    default: step.llm({ id: 'fallback', model: 'openai/gpt-4o-mini' }),
+    default: step.callModel({ id: 'fallback', model: 'openai/gpt-4o-mini' }),
     threshold: 0.7,
   }),
 });
@@ -76,16 +76,16 @@ const router = branch({
 | `threshold` | `number` | No | Minimum cosine similarity (default `0.7`) |
 | `cache` | `StorageAdapter` | No | Persists label embeddings across invocations |
 
-When no case exceeds the threshold and no `default` is provided, the route returns `null` (branch skips).
+When no case exceeds the threshold and no `default` is provided, the route returns `null` (the conditional skips).
 
 ### `semanticRoute`
 
 Evaluates condition clauses in order and returns the first match. Built from [`when`](#when) and [`otherwise`](#otherwise) clauses.
 
 ```ts validate=none
-import { branch, semanticRoute, when, otherwise, embeddingMatch, aiCondition } from '@noetic-tools/core';
+import { conditional, semanticRoute, when, otherwise, embeddingMatch, aiCondition } from '@noetic-tools/core';
 
-const router = branch({
+const router = conditional({
   id: 'smart-router',
   route: semanticRoute(
     when(embeddingMatch(embed, 'greeting', 0.8), greetingStep),
@@ -223,7 +223,7 @@ const isUrgentGreeting = allCondition(
 Any function matching `Condition<I>` works with `when`, `anyCondition`, and `allCondition`:
 
 ```ts
-import { branch, semanticRoute, when, otherwise } from '@noetic-tools/core';
+import { conditional, semanticRoute, when, otherwise } from '@noetic-tools/core';
 import type { Condition, ContextData, Step } from '@noetic-tools/core';
 
 declare const helpStep: Step<ContextData, string>;
@@ -233,7 +233,7 @@ const containsKeyword: Condition<string> = async (input) => {
   return input.toLowerCase().includes('help');
 };
 
-const router = branch({
+const router = conditional({
   id: 'custom-router',
   route: semanticRoute(
     when(containsKeyword, helpStep),
@@ -265,6 +265,6 @@ Label vectors are cached under deterministic keys (`embed:<encoded-label>`). In-
 
 ## Related
 
-- [branch](/docs/framework/operators/branch) -- the control flow primitive that uses route functions.
-- [fork](/docs/framework/operators/fork) -- parallel execution.
+- [conditional](/docs/framework/operators/conditional) -- the control flow primitive that uses route functions.
+- [inParallel](/docs/framework/operators/in-parallel) -- parallel execution.
 - [Adapters](/docs/framework/api/adapter-types) -- `EmbedFn` type and `LlmProviderConfig`.

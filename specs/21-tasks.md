@@ -23,7 +23,7 @@ A task has:
   1. **plan-pass** — for tasks with no hierarchy yet, the daemon calls `harness.detachedSpawn(plannerStep, input, ctx, {subprocess: <localSubprocessAdapter>, cwdInit: taskDir})`. The adapter persists a handle manifest tagged with `{taskRole: 'planner', taskId}`; the planner's child runtime uses an LLM-driven `interview()` to produce a `TaskHierarchyInput` and persists it to `hierarchy/`.
   2. **implement-pass** — for triaged features whose linked leaf task has no worktree, the daemon provisions a worktree (`wt switch -c <branch>` with `git worktree add` fallback) and calls `harness.detachedSpawn(implementerStep, input, ctx, {subprocess, cwdInit: worktreePath})`. The adapter's manifest is tagged `{taskRole: 'implementer', taskId, featureId}`. The implementer drives a `react()` agent loop and flips the feature's `loopState` from `implementing` to `validating` on success or `blocked` on failure.
   3. **structured-tick** — for active hierarchies, advance slice/milestone state machines, dispatch `validatorRequestChan` events for `validating` features, and fire `mission:statusChanged` when `hierarchyStatus` transitions.
-  The validator flow consumes `validatorRequestChan` and runs the `runValidator` built by `buildAdversarialValidatorStep()` (the default Step-graph validator: `agent-ci` and an LLM-driven adversarial code review forked in parallel — see "Validator runner" below). Each phase is independent; a manual task can be planned without autopilot ever firing the implement-pass, and structured tasks created by hand skip the plan-pass entirely.
+  The validator flow consumes `validatorRequestChan` and runs the `runValidator` built by `buildAdversarialValidatorStep()` (the default Step-graph validator: `agent-ci` and an LLM-driven adversarial code review run in parallel via `inParallel` — see "Validator runner" below). Each phase is independent; a manual task can be planned without autopilot ever firing the implement-pass, and structured tasks created by hand skip the plan-pass entirely.
 
 A task may be both `worktree`-sourced and `structured`. All combinations of (source × hierarchy × autopilot) are valid.
 
@@ -439,14 +439,14 @@ const subprocess = createLocalSubprocessAdapter({ storage });
 
 ## Validator runner
 
-The daemon's validator dispatches `validatorRequestChan` items to `runValidator: RunValidatorFn`. The default production binding is `buildAdversarialValidatorStep()` from `adversarial-validator-flow.ts`, run via `harness.run(flow, args, ctx)`. The flow is a Step graph: a single `step.run` resolves the leaf task's worktree, then dispatches a `fork({mode: 'all'})` over two paths that run in parallel:
+The daemon's validator dispatches `validatorRequestChan` items to `runValidator: RunValidatorFn`. The default production binding is `buildAdversarialValidatorStep()` from `adversarial-validator-flow.ts`, run via `harness.run(flow, args, ctx)`. The flow is a Step graph: a single `step.runCode` resolves the leaf task's worktree, then dispatches a `inParallel({mode: 'all'})` over two paths that run in parallel:
 
 | Path | Step kind | Behaviour |
 |---|---|---|
-| `validator.agent-ci` | `step.run` wrapping a subprocess spawn | Runs `npx @redwoodjs/agent-ci run --quiet` in the worktree. Exit 0 → partial `pass`; non-zero → partial `fail`; missing binary → partial `pass` with `missing: true` (skip-on-missing default). |
-| `validator.adversarial-review` | `step.llm({output: AdversarialIssuesSchema})` | Reads `git diff main...HEAD` and re-emits a structured list of issues against the feature's acceptance criteria + assertions. Empty issue list → partial `pass`; any issues → partial `fail`. |
+| `validator.agent-ci` | `step.runCode` wrapping a subprocess spawn | Runs `npx @redwoodjs/agent-ci run --quiet` in the worktree. Exit 0 → partial `pass`; non-zero → partial `fail`; missing binary → partial `pass` with `missing: true` (skip-on-missing default). |
+| `validator.adversarial-review` | `step.callModel({output: AdversarialIssuesSchema})` | Reads `git diff main...HEAD` and re-emits a structured list of issues against the feature's acceptance criteria + assertions. Empty issue list → partial `pass`; any issues → partial `fail`. |
 
-The fork's `merge` reconciles both partials into a single `ValidatorRunOutcome`:
+The `inParallel`'s `merge` reconciles both partials into a single `ValidatorRunOutcome`:
 
 - agent-ci `error` → outcome `error` (adversarial result discarded).
 - agent-ci `fail` OR adversarial issues found → outcome `fail`. The adversarial reviewer's per-assertion findings populate `assertionOutcomes` so the fix-feature flow has structured failure data, not just free text.
@@ -460,7 +460,7 @@ The validator returns `error` immediately when the leaf task has no `worktreePat
 
 Contract:
 
-- **Slot.** `Slot.STEERING` (90), placing it ahead of working memory so steering nudges shape interpretation of every downstream block.
+- **Slot.** `Slot.STEERING` (90), placing it ahead of the scratchpad so steering nudges shape interpretation of every downstream block.
 - **Activation.** Conditional on `process.env.NOETIC_TASK_DIR`. When unset, `recall()` returns `null` and the layer is dormant — non-task agent runs never see steering content.
 - **Missing file.** ENOENT on `steering.md` is treated as "no steering content" (returns `null`), so half-populated task directories degrade gracefully.
 - **Output shape.** When a non-empty `steering.md` exists, `recall()` emits a developer-role block prefixed with `# Task Steering`.
@@ -557,7 +557,7 @@ When `viewMode === 'taskBoard'`, `app.tsx` renders the kanban board instead of t
 ## Cross-references
 
 - `08-runtime` — `FsAdapter`, `AgentHarness` lifecycle.
-- `11-context-layer-system` / `12-builtin-memory-layers` — slot conventions for the steering layer.
+- `11-context-layer-system` / `12-builtin-context-layers` — slot conventions for the steering layer.
 - `09-error-model` — handlers throw plain `Error` (not `NoeticError`); see `handlers/_shared.ts#formatError`.
 
 ## Future Considerations

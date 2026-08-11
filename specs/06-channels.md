@@ -51,7 +51,7 @@ const status = channel('status', {
 });
 
 // In a step: write to a channel
-step.run({
+step.runCode({
   id: 'research',
   execute: async (query, ctx) => {
     const results = await search(query);
@@ -61,7 +61,7 @@ step.run({
 });
 
 // In another step: read from a channel
-step.run({
+step.runCode({
   id: 'synthesize',
   execute: async (_, ctx) => {
     const allFindings = await ctx.recv(findings);  // typed as string[]
@@ -93,7 +93,7 @@ ctx.tryRecv(channel): T | null
 `tryRecv` is useful for polling patterns — checking whether new data has arrived without suspending the step. This is Go's `select/default` analogue.
 
 ```typescript
-step.run({
+step.runCode({
   id: 'check-updates',
   execute: async (_, ctx) => {
     const update = ctx.tryRecv(planUpdates);
@@ -210,11 +210,11 @@ Node.js is single-threaded, so `AgentHarness` handles are inherently thread-safe
 
 Channels are scoped to an execution tree. A channel created in a parent is accessible to all descendants unless a `spawn` boundary (see `04-spawn`) uses `contextIn: 'fresh'`. Fresh contexts get a new channel namespace — **except** for external channels, which survive fresh boundaries (scoped to root execution). To pass a non-external channel across a fresh boundary, use `contextIn: 'custom'` explicitly — this is the "you opted into this" escape hatch.
 
-`fork` and `spawn` child contexts inherit the parent's channel store by default — sibling fork paths can communicate via `send`/`recv`/`tryRecv` on the same channels, and a `spawn` child can interact with channels its parent created.
+`inParallel` and `spawn` child contexts inherit the parent's channel store by default — sibling parallel paths can communicate via `send`/`recv`/`tryRecv` on the same channels, and a `spawn` child can interact with channels its parent created.
 
 ### Wake-only subscription
 
-`every({ wakeOn })` (see `05-loop-and-until`) subscribes to a channel for wake notification *without* consuming any value. After a `send`, all wake subscribers fire once and are removed; queue/value-mode messages stay in their channel state for the body's next iteration to drain. This lets a body that uses `tryRecv` to drain a queue still see the wake message that woke it.
+`schedule({ inbox })` (see `05-loop-and-until`) subscribes to a channel for wake notification *without* consuming any value. After a `send`, all wake subscribers fire once and are removed; queue/value-mode messages stay in their channel state for the body's next iteration to drain. This lets a body that uses `tryRecv` to drain a queue still see the wake message that woke it.
 
 ### Lifecycle
 
@@ -314,7 +314,7 @@ function tryRecv<T>(ch: Channel<T>): T | null {
 }
 ```
 
-Within a `fork` (see `03-control-flow`), the agent harness runs paths as concurrent promises (not sequential), so `send` in one path can wake `recv` in another.
+Within a `inParallel` (see `03-control-flow`), the agent harness runs paths as concurrent promises (not sequential), so `send` in one path can wake `recv` in another.
 
 ### Topic Mode is Lossy
 

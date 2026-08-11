@@ -1,5 +1,5 @@
 ---
-title: step.run
+title: step.runCode
 description: Execute arbitrary async code as a typed step.
 ---
 
@@ -8,7 +8,7 @@ description: Execute arbitrary async code as a typed step.
 ```ts
 import { step } from '@noetic-tools/core';
 
-const transform = step.run({
+const transform = step.runCode({
   id: 'normalize-input',
   execute: async (input: string, ctx) => {
     return input.trim().toLowerCase();
@@ -18,7 +18,7 @@ const transform = step.run({
 
 ## What It Does
 
-`step.run` wraps any async function as a step. It is the escape hatch for custom logic -- API calls, database operations, file I/O, data transformations, or anything that is not a model call.
+`step.runCode` wraps any async function as a step. It is the escape hatch for custom logic -- API calls, database operations, file I/O, data transformations, or anything that is not a model call.
 
 The `execute` function receives two arguments:
 
@@ -30,15 +30,15 @@ The return value becomes the output of the step, passed to whatever comes next.
 ## Type Signature
 
 ```ts
-type RunStepOptions<TContext, I, O> = {
+type RunCodeStepOptions<TContext, I, O> = {
   id: string;
   execute: (input: I, ctx: Context<TContext>) => Promise<O>;
   retry?: RetryPolicy;
 };
 
-declare const stepRun: <TContext, I, O>(
-  opts: RunStepOptions<TContext, I, O>,
-) => StepRun<TContext, I, O>;
+declare const stepRunCode: <TContext, I, O>(
+  opts: RunCodeStepOptions<TContext, I, O>,
+) => StepRunCode<TContext, I, O>;
 ```
 
 `TContext` is the typed context shape (from `InferContext`), `I` is the input type, and `O` is the output type.
@@ -68,7 +68,7 @@ declare const stepRun: <TContext, I, O>(
 ```ts
 import { step } from '@noetic-tools/core';
 
-const fetchData = step.run({
+const fetchData = step.runCode({
   id: 'fetch-api',
   execute: async (url: string) => {
     const res = await fetch(url);
@@ -93,7 +93,7 @@ The `Context` object provides access to runtime state inside your execute functi
 ```ts
 import { step } from '@noetic-tools/core';
 
-const contextAware = step.run({
+const contextAware = step.runCode({
   id: 'context-example',
   execute: async (input: string, ctx) => {
     // Check if the run has been cancelled
@@ -105,7 +105,7 @@ const contextAware = step.run({
     console.log('Tokens used so far:', ctx.tokens.total);
 
     // Access context layer data
-    const snapshot = ctx.context['working-context'].snapshot;
+    const snapshot = ctx.context['scratchpad'].snapshot;
 
     return `Processed: ${input}`;
   },
@@ -116,6 +116,6 @@ The `ctx.context` property provides typed access to data and functions exposed b
 
 ## Related
 
-- [step.llm](/docs/framework/steps/llm) -- for language model calls.
-- [step.tool](/docs/framework/steps/tool) -- for direct tool invocation.
-- [Loop & Until](/docs/framework/operators/loop-and-until) -- use `step.run` as a loop body for custom iteration logic.
+- [step.callModel](/docs/framework/steps/call-model) -- for language model calls.
+- [step.invokeTool](/docs/framework/steps/invoke-tool) -- for direct tool invocation.
+- [Loop & Until](/docs/framework/operators/loop-and-until) -- use `step.runCode` as a loop body for custom iteration logic.

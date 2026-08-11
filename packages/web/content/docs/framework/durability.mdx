@@ -94,7 +94,7 @@ Returns `null` when no snapshot is recorded. Throws `NoeticConfigError` with `co
 
 A restored context knows *what happened* but not *how far it got*: the frontier records which steps were in flight, never which finished. So alongside the snapshot, a harness with a `checkpointStore` keeps a **step-completion ledger** — one entry per successfully completed step, carrying that step's output.
 
-A resumed run replays those outputs instead of re-running the steps. It is memoization, not fast-forward: an `llm` step re-run to "catch up" would return something different from what the rest of the run already observed, so the recorded value is what flows downstream. Only successes are recorded — a step that threw runs again — and a step whose identity changed at a recorded path runs fresh, discarding its recorded subtree.
+A resumed run replays those outputs instead of re-running the steps. It is memoization, not fast-forward: a `callModel` step re-run to "catch up" would return something different from what the rest of the run already observed, so the recorded value is what flows downstream. Only successes are recorded — a step that threw runs again — and a step whose identity changed at a recorded path runs fresh, discarding its recorded subtree.
 
 Entries live one key per step under `execution:<id>:ledger:<seq>`, so an append is O(1) regardless of run length. Nothing here is visible on a zero-config harness: without a `checkpointStore` the ledger is never constructed.
 
@@ -134,14 +134,14 @@ await harness.clearCheckpoint(executionId);
 
 Call it in two situations:
 
-- **The workflow changed.** Replay happens at the coarsest completed granularity — a composite step is an ordinary `run` step here, so a parent that finished replays wholesale without descending. An edit to one of its children is therefore invisible, and the old output wins. A host that edited the workflow must clear rather than resume onto the old ledger.
+- **The workflow changed.** Replay happens at the coarsest completed granularity — a composite step is an ordinary `runCode` step here, so a parent that finished replays wholesale without descending. An edit to one of its children is therefore invisible, and the old output wins. A host that edited the workflow must clear rather than resume onto the old ledger.
 - **The execution is done with** — finished, or abandoned. `checkpointStore.clear(executionId)` alone strands the ledger's per-step keys, because nothing else enumerates them.
 
 ### The Side-Effect Boundary
 
-Replaying an output replays a step's **value**, not its **effect**. A `run` step that wrote a file, or a `tool` step that opened a PR, returns its recorded output on replay while the effect is not redone — correct only if that effect was durable when it happened.
+Replaying an output replays a step's **value**, not its **effect**. A `runCode` step that wrote a file, or an `invokeTool` step that opened a PR, returns its recorded output on replay while the effect is not redone — correct only if that effect was durable when it happened.
 
-Core's ledger therefore covers control flow and `llm` steps. It does **not** claim exactly-once execution for tools: it has no durable pre-dispatch record and no way to know whether a given tool is idempotent. Fence effects at the tool/host boundary.
+Core's ledger therefore covers control flow and `callModel` steps. It does **not** claim exactly-once execution for tools: it has no durable pre-dispatch record and no way to know whether a given tool is idempotent. Fence effects at the tool/host boundary.
 
 ### Implement `getMany` on a networked adapter
 
@@ -186,7 +186,7 @@ Two rules:
 
 ### Limitations
 
-Durable execution can replay a step body whose prior completion's checkpoint failed to land. The framework cannot make arbitrary `step.run` bodies idempotent — write bodies that are safe to re-execute where durability matters, or gate with an external idempotency key.
+Durable execution can replay a step body whose prior completion's checkpoint failed to land. The framework cannot make arbitrary `step.runCode` bodies idempotent — write bodies that are safe to re-execute where durability matters, or gate with an external idempotency key.
 
 LLM mid-stream is not resumed. If the host dies while the model is generating, on restart the turn is re-issued. The item log's response-id dedupe catches identical responses; different responses win as a new turn.
 
@@ -304,7 +304,7 @@ const handle = harness.detachedSpawn(
 const result = await handle.await();
 ```
 
-Per-step overrides work the same way: set `subprocess: localAdapter` on a `step.run` or `spawn` opts and every dispatch of that step uses the local adapter regardless of the harness default.
+Per-step overrides work the same way: set `subprocess: localAdapter` on a `step.runCode` or `spawn` opts and every dispatch of that step uses the local adapter regardless of the harness default.
 
 ## Survive a Host Crash
 

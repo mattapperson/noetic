@@ -13,8 +13,9 @@ Have a question that isn't answered here? Open a
 ## What is Noetic?
 
 Noetic is a TypeScript agent framework that decomposes AI agent patterns into a
-small set of composable **step primitives** (`run`, `llm`, `claude-code`/`tool`,
-`branch`, `fork`, `spawn`, `loop`). It treats context-boundary management as a
+small set of composable **step primitives** (`runCode`, `callModel`, `invokeTool`,
+`conditional`, `inParallel`, `spawn`, `loop`, plus sub-harness kinds like
+`claude-code`). It treats context-boundary management as a
 first-class concern and ships a pluggable context system with well-defined
 lifecycle hooks. Patterns like ReAct, Ralph Wiggum, and task trees are short
 compositions of these primitives. See the [README](../README.md).

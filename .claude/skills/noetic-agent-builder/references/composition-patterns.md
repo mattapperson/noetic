@@ -5,42 +5,55 @@
 The simplest agent pattern. LLM calls tools in a loop until done.
 
 ```typescript
-import { react } from '@noetic-tools/core';
+import { AgentHarness, any, loop, step, until } from '@noetic-tools/core';
 
-const agent = react({
-  model: 'anthropic/claude-sonnet-4-20250514',
-  instructions: 'You are a helpful assistant.',
-  tools: [searchTool, calculatorTool],
-  maxSteps: 10,
+const agent = loop({
+  id: 'react',
+  steps: [
+    step.callModel({
+      id: 'assistant',
+      model: 'anthropic/claude-sonnet-4-20250514',
+      instructions: 'You are a helpful assistant.',
+      tools: [searchTool, calculatorTool],
+    }),
+  ],
+  until: any(until.noToolCalls(), until.maxSteps(10)),
 });
 
 const harness = new AgentHarness({ name: 'basic', initialStep: agent, params: {} });
 const result = await harness.execute('What is 2+2?');
 ```
 
-## Pattern: Agent with Memory
+## Pattern: Agent with Context Layers
 
-Add memory layers to give the agent persistent context across turns.
+Add context layers to give the agent persistent context across turns. Wrap the loop in a `spawn` boundary that carries the layers.
 
 ```typescript
-const agent = react({
-  model: 'anthropic/claude-sonnet-4-20250514',
-  instructions: 'You are a coding assistant.',
-  tools: [readFile, writeFile, runTests],
-  maxSteps: 25,
-  memory: [
-    workingMemory({ scope: 'resource' }),
-    observationalMemory({ bufferThreshold: 4_000 }),
-    ...toolMemoryLayer(allTools),
+const agent = spawn({
+  id: 'coding-agent',
+  child: loop({
+    id: 'react',
+    steps: [
+      step.callModel({
+        id: 'assistant',
+        model: 'anthropic/claude-sonnet-4-20250514',
+        instructions: 'You are a coding assistant.',
+        tools: [readFile, writeFile, runTests],
+      }),
+    ],
+    until: any(until.noToolCalls(), until.maxSteps(25)),
+  }),
+  context: [
+    scratchpad({ scope: 'resource' }),
+    observations({ bufferThreshold: 4_000 }),
+    ...toolCalls(allTools),
   ],
 });
 ```
 
-When `memory` is provided, `react()` auto-wraps the loop in a `spawn` boundary.
-
 ### Agent with CLI Enhanced Prompts
 
-The `@noetic-tools/cli` package provides enhanced prompt engineering layers under `src/memory/`. Import them from the CLI memory barrel when building agents that need behavioral guidelines, adaptive communication, environment context, and tool guidance:
+The `@noetic-tools/cli` package provides enhanced prompt engineering layers under `src/memory/`. Import them from the CLI barrel when building agents that need behavioral guidelines, adaptive communication, environment context, and tool guidance:
 
 ```typescript
 import {
@@ -51,14 +64,23 @@ import {
   planningModeLayer,
 } from '@noetic-tools/cli/src/memory/index.js';
 
-const agent = react({
-  model: 'anthropic/claude-sonnet-4-20250514',
-  instructions: 'You are a coding assistant.',
-  tools: codingTools,
-  maxSteps: 25,
-  memory: [
-    workingMemory({ scope: 'resource' }),
-    observationalMemory({ bufferThreshold: 4_000 }),
+const agent = spawn({
+  id: 'coding-agent',
+  child: loop({
+    id: 'react',
+    steps: [
+      step.callModel({
+        id: 'assistant',
+        model: 'anthropic/claude-sonnet-4-20250514',
+        instructions: 'You are a coding assistant.',
+        tools: codingTools,
+      }),
+    ],
+    until: any(until.noToolCalls(), until.maxSteps(25)),
+  }),
+  context: [
+    scratchpad({ scope: 'resource' }),
+    observations({ bufferThreshold: 4_000 }),
     promptEngineeringLayer(),
     communicationStyleLayer(),
     environmentContextLayer({ config: agentConfig, shell: shellAdapter }),
@@ -76,13 +98,23 @@ All CLI enhanced layers use `execution` scope and `Slot.PROCEDURAL` (250). The h
 Use the steering layer to enforce policies on tool usage and model output.
 
 ```typescript
-import { react, steering, SteeringAction } from '@noetic-tools/core';
+import { any, loop, spawn, steering, SteeringAction, step, until } from '@noetic-tools/core';
 
-const agent = react({
-  model: 'anthropic/claude-sonnet-4-20250514',
-  instructions: 'You are a helpful assistant.',
-  tools: [searchTool, deleteTool, writeTool],
-  memory: [
+const agent = spawn({
+  id: 'steered-agent',
+  child: loop({
+    id: 'react',
+    steps: [
+      step.callModel({
+        id: 'assistant',
+        model: 'anthropic/claude-sonnet-4-20250514',
+        instructions: 'You are a helpful assistant.',
+        tools: [searchTool, deleteTool, writeTool],
+      }),
+    ],
+    until: any(until.noToolCalls(), until.maxSteps(25)),
+  }),
+  context: [
     steering({
       rules: [
         {
@@ -111,7 +143,7 @@ const agent = react({
 });
 ```
 
-The steering layer runs at slot 90 (before all other memory layers). `Deny` blocks execution, `Guide` injects feedback for retries, `Allow` proceeds normally.
+The steering layer runs at slot 90 (before all other context layers). `Deny` blocks execution, `Guide` injects feedback for retries, `Allow` proceeds normally.
 
 ## Pattern: Sub-Agent Delegation via Tools
 
@@ -124,10 +156,17 @@ const delegateTool = tool({
   input: z.object({ task: z.string() }),
   output: z.string(),
   execute: async (args, toolCtx) => {
-    const subAgent = react({
-      model: 'anthropic/claude-sonnet-4-20250514',
-      instructions: `Complete this task: ${args.task}`,
-      tools: [searchTool],
+    const subAgent = loop({
+      id: 'sub-agent-loop',
+      steps: [
+        step.callModel({
+          id: 'sub-agent-llm',
+          model: 'anthropic/claude-sonnet-4-20250514',
+          instructions: `Complete this task: ${args.task}`,
+          tools: [searchTool],
+        }),
+      ],
+      until: any(until.noToolCalls(), until.maxSteps(15)),
     });
     const spawnStep = spawn({ id: 'sub-agent', child: subAgent });
     return toolCtx.harness.run(spawnStep, args.task, toolCtx.ctx);
@@ -149,7 +188,7 @@ const launchTool = tool({
   input: z.object({ task: z.string() }),
   output: z.object({ agentId: z.string() }),
   execute: async (args, toolCtx) => {
-    const subAgent = step.llm({ id: 'bg-agent', model: '...', instructions: '...' });
+    const subAgent = step.callModel({ id: 'bg-agent', model: '...', instructions: '...' });
     const handle = toolCtx.harness.detachedSpawn(subAgent, args.task, toolCtx.ctx);
     handles.set(handle.id, handle);
 
@@ -164,7 +203,7 @@ const launchTool = tool({
 
 const agent = loop({
   id: 'orchestrator',
-  steps: [step.llm({ id: 'llm', model: '...', tools: [launchTool] })],
+  steps: [step.callModel({ id: 'llm', model: '...', tools: [launchTool] })],
   until: any(until.noToolCalls(), until.maxSteps(10)),
   inbox,
   parkTimeout: 5e3,
@@ -173,19 +212,35 @@ const agent = loop({
 
 ## Pattern: Verify-and-Retry (Ralph Wiggum)
 
-Outer loop with verification. Each attempt gets a fresh context.
+Outer loop with verification wrapping an inner ReAct loop. Spawning the attempt gives each iteration a fresh context.
 
 ```typescript
-const migrator = ralphWiggum({
-  model: 'anthropic/claude-sonnet-4-20250514',
-  instructions: 'Migrate all tests from Jest to Vitest.',
-  tools: [shellTool, fileWriteTool, fileReadTool],
-  verify: async (output) => {
-    const result = await exec('bun test');
-    return { pass: result.exitCode === 0, feedback: result.stderr };
-  },
-  maxIterations: 50,
-  innerMaxSteps: 20,
+const attempt = spawn({
+  id: 'attempt',
+  child: loop({
+    id: 'attempt-loop',
+    steps: [
+      step.callModel({
+        id: 'migrate',
+        model: 'anthropic/claude-sonnet-4-20250514',
+        instructions: 'Migrate all tests from Jest to Vitest.',
+        tools: [shellTool, fileWriteTool, fileReadTool],
+      }),
+    ],
+    until: any(until.noToolCalls(), until.maxSteps(20)),
+  }),
+});
+
+const migrator = loop({
+  id: 'verify-retry',
+  steps: [attempt],
+  until: any(
+    until.verified(async (output) => {
+      const result = await exec('bun test');
+      return { pass: result.exitCode === 0, feedback: result.stderr };
+    }),
+    until.maxSteps(50),
+  ),
 });
 ```
 
@@ -194,13 +249,13 @@ const migrator = ralphWiggum({
 Multiple agents research in parallel, results merged:
 
 ```typescript
-const research = fork<string, string>({
+const research = inParallel<string, string>({
   id: 'parallel-research',
   mode: 'all',
   paths: (input) => [
-    spawn({ id: 'historical', child: step.llm({ id: 'h', model: '...', instructions: 'Historical perspective' }) }),
-    spawn({ id: 'technical', child: step.llm({ id: 't', model: '...', instructions: 'Technical perspective' }) }),
-    spawn({ id: 'societal', child: step.llm({ id: 's', model: '...', instructions: 'Societal perspective' }) }),
+    spawn({ id: 'historical', child: step.callModel({ id: 'h', model: '...', instructions: 'Historical perspective' }) }),
+    spawn({ id: 'technical', child: step.callModel({ id: 't', model: '...', instructions: 'Technical perspective' }) }),
+    spawn({ id: 'societal', child: step.callModel({ id: 's', model: '...', instructions: 'Societal perspective' }) }),
   ],
   merge: (results) => results.map((r, i) => `## Perspective ${i + 1}\n\n${r}`).join('\n\n'),
 });
@@ -208,13 +263,13 @@ const research = fork<string, string>({
 
 ## Pattern: Pipeline with Phases
 
-Sequential processing stages using branch + loop:
+Sequential processing stages using conditional + loop:
 
 ```typescript
 let phase = 0;
 const pipeline = loop({
   id: 'pipeline',
-  steps: [branch({
+  steps: [conditional({
     id: 'router',
     route: () => {
       if (phase === 0) return normalizeStep;
@@ -228,12 +283,12 @@ const pipeline = loop({
 });
 ```
 
-## Pattern: Tool-Owned Memory
+## Pattern: Tool-Owned State
 
-Tools declare their own memory via `ToolMemoryDeclaration`. The agent harness materializes layers automatically:
+Tools declare their own persistent state via `ToolContextDeclaration`. The agent harness materializes layers automatically:
 
 ```typescript
-const todoMemory: ToolMemoryDeclaration<TodoState> = {
+const todoContext: ToolContextDeclaration<TodoState> = {
   id: 'todos',  // shared across tools with the same id
   init: () => ({ items: [] }),
   recall: (state) => {
@@ -247,16 +302,16 @@ const writeTodosTool = tool({
   input: z.object({ items: z.array(z.string()) }),
   output: z.array(z.string()),
   execute: async (args, toolCtx) => {
-    const state = toolCtx.memory.get<TodoState>('todos') ?? { items: [] };
+    const state = toolCtx.context.get<TodoState>('todos') ?? { items: [] };
     state.items.push(...args.items.map(text => ({ text })));
-    toolCtx.memory.set('todos', state);
+    toolCtx.context.set('todos', state);
     return args.items;
   },
-  memory: todoMemory,
+  context: todoContext,
 });
 
-// Generate memory layers from tool declarations
-const layers = toolMemoryLayer([writeTodosTool, listTodosTool]);
+// Generate context layers from tool declarations
+const layers = toolCalls([writeTodosTool, listTodosTool]);
 ```
 
 ## Pattern: Static Instructions
@@ -264,7 +319,7 @@ const layers = toolMemoryLayer([writeTodosTool, listTodosTool]);
 Load instruction files into the LLM context:
 
 ```typescript
-const instructions = staticContent({
+const instructionsLayer = instructions({
   load: async () => {
     const text = await Bun.file('AGENTS.md').text();
     return text;
@@ -273,18 +328,18 @@ const instructions = staticContent({
 });
 ```
 
-## Pattern: Function-Call Memory
+## Pattern: Function-Call Layer State
 
-Let the LLM update memory layer state by emitting function calls. The `store()` hook intercepts via `findFunctionCall()`. No tool schema is registered -- instruct the LLM in the system prompt.
+Let the LLM update context layer state by emitting function calls. The `store()` hook intercepts via `findFunctionCall()`. No tool schema is registered -- instruct the LLM in the system prompt.
 
 ```typescript
 import { findFunctionCall, createMessage, estimateTokens, Slot } from '@noetic-tools/core';
-import type { MemoryLayer } from '@noetic-tools/core';
+import type { ContextLayer } from '@noetic-tools/core';
 
-function notesMemory(): MemoryLayer<{ notes: string[] }> {
+function notesLayer(): ContextLayer<{ notes: string[] }> {
   return {
     id: 'notes',
-    name: 'Notes Memory',
+    name: 'Notes Layer',
     slot: Slot.PROCEDURAL,
     scope: 'thread',
     budget: { min: 100, max: 500 },
@@ -316,16 +371,16 @@ function notesMemory(): MemoryLayer<{ notes: string[] }> {
 // "Call saveNote({ text: '...' }) to remember important observations."
 ```
 
-The built-in `workingMemory()` uses this same pattern with `updateWorkingMemory`.
+The built-in `scratchpad()` uses this same pattern with its `scratchpad/update` function.
 
-## Pattern: Custom Memory Layer
+## Pattern: Custom Context Layer
 
-Build a custom memory layer for domain-specific needs:
+Build a custom context layer for domain-specific needs:
 
 ```typescript
-const entityMemory: MemoryLayer<EntityState> = {
-  id: 'entity-memory',
-  name: 'Entity Memory',
+const entityLayer: ContextLayer<EntityState> = {
+  id: 'entity-layer',
+  name: 'Entity Layer',
   slot: Slot.ENTITY,
   scope: 'resource',
   hooks: {
@@ -355,7 +410,7 @@ const entityMemory: MemoryLayer<EntityState> = {
 A layer whose output is big and mostly stable belongs in the anchor band, ahead of history, where the prompt cache can hold it. Add `renderDelta` so the occasional change costs a few tokens at the end of the view instead of a full republish plus a re-billed window.
 
 ```typescript
-const catalogMemory: MemoryLayer<CatalogState> = {
+const catalogLayer: ContextLayer<CatalogState> = {
   id: 'catalog',
   slot: Slot.RAG,
   scope: 'thread',
@@ -385,7 +440,7 @@ const catalogMemory: MemoryLayer<CatalogState> = {
 The counterpart: a layer whose `recall()` commits something must be `'live'`, because a pinned replay would throw that commit away. The runtime forces this anyway — declaring it just makes the intent readable.
 
 ```typescript
-const feedbackMemory: MemoryLayer<FeedbackState> = {
+const feedbackLayer: ContextLayer<FeedbackState> = {
   id: 'feedback',
   slot: Slot.STEERING,
   scope: 'execution',
@@ -405,13 +460,13 @@ const feedbackMemory: MemoryLayer<FeedbackState> = {
 
 ## Pattern: Layer Provides
 
-Expose typed data and functions from a layer. Functions are automatically available as LLM tools. Use `memory()` + `InferMemory<>` for end-to-end type safety.
+Expose typed data and functions from a layer. Functions are automatically available as LLM tools. Use `context()` + `InferContext<>` for end-to-end type safety.
 
 ```typescript
 import { z } from 'zod';
 import {
-  memory, step, loop, spawn, until, any, layerData, layerFn, Slot,
-  type InferMemory, type MemoryLayer, type MemoryScope,
+  context, step, loop, spawn, until, any, layerData, layerFn, Slot,
+  type InferContext, type ContextLayer, type ContextScope,
 } from '@noetic-tools/core';
 
 interface TaskState {
@@ -423,8 +478,8 @@ interface TaskState {
 function taskLayer() {
   return {
     id: 'tasks' as const,
-    slot: Slot.WORKING_MEMORY,
-    scope: 'execution' as const satisfies MemoryScope,
+    slot: Slot.SCRATCHPAD,
+    scope: 'execution' as const satisfies ContextScope,
     hooks: {
       async init() {
         return { state: { tasks: [], completed: 0 } };
@@ -447,49 +502,59 @@ function taskLayer() {
         }),
       }),
     },
-  } satisfies MemoryLayer<TaskState>;
+  } satisfies ContextLayer<TaskState>;
 }
 
-// 1. Create typed memory config
-const mem = memory([taskLayer()]);
-type Mem = InferMemory<typeof mem>;
+// 1. Create typed context config
+const mem = context([taskLayer()]);
+type Mem = InferContext<typeof mem>;
 
-// 2. Code step reads data — fully typed via TMemory generic
-const checkStep = step.run<Mem>({
+// 2. Code step reads data — fully typed via the TContext generic
+const checkStep = step.runCode<Mem>({
   id: 'check-progress',
   execute: async (_input, ctx) => {
-    return `${ctx.memory.tasks.pending.length} tasks remaining`;
+    return `${ctx.context.tasks.pending.length} tasks remaining`;
   },
 });
 
-// 3. LLM step gets `tasks/complete` as a tool automatically
+// 3. The callModel step gets `tasks/complete` as a tool automatically
 const agent = spawn({
   id: 'task-agent',
   child: loop({
     id: 'task-loop',
     steps: [
-      step.llm({ id: 'work', model: 'anthropic/claude-sonnet-4', tools: [] }),
+      step.callModel({ id: 'work', model: 'anthropic/claude-sonnet-4', tools: [] }),
     ],
     until: any(until.noToolCalls(), until.maxSteps(10)),
   }),
-  memory: mem,
+  context: mem,
 });
 ```
 
-## Plan Mode with `planMemory()`
+## Plan Mode with `plan()`
 
-The `planMemory()` layer adds Claude Code-style plan mode to any agent. It restricts tools during planning and injects plan context during execution.
+The `plan()` layer adds Claude Code-style plan mode to any agent. It restricts tools during planning and injects plan context during execution.
 
 ### Basic Usage
 
 ```typescript
-import { planMemory, react } from '@noetic-tools/core';
+import { any, loop, plan, spawn, step, until } from '@noetic-tools/core';
 
-const agent = react({
+const assistant = step.callModel({
+  id: 'assistant',
   model: 'anthropic/claude-sonnet-4',
   instructions: 'You are a coding assistant.',
   tools: codingTools,
-  memory: [planMemory()],
+});
+
+const agent = spawn({
+  id: 'planning-agent',
+  child: loop({
+    id: 'agent-loop',
+    body: assistant,
+    until: any(until.noToolCalls(), until.maxSteps(25)),
+  }),
+  context: [plan()],
 });
 ```
 
@@ -498,7 +563,7 @@ When the model calls `plan/enterPlanMode`, tool calls are restricted to read-onl
 ### With Custom Allowed Tools
 
 ```typescript
-planMemory({
+plan({
   additionalAllowedTools: ['SearchDocs', 'ListIssues'],
   maxPrdLength: 1e5,
   maxDepth: 3,
@@ -526,7 +591,7 @@ const onExit = async (state) => {
 
 ### CLI Integration
 
-The CLI includes `planMemory()` by default. Users type `/plan` to enter plan mode. The agent explores with read-only tools, writes a PRD, structures the plan document plus named workflows, then exits to execute.
+The CLI includes `plan()` by default. Users type `/plan` to enter plan mode. The agent explores with read-only tools, writes a PRD, structures the plan document plus named workflows, then exits to execute.
 
 ---
 
@@ -587,17 +652,17 @@ Use `ctx.readLayerState<T>(layerId)` to inspect another layer's state before dec
 
 `minTurnsBetweenReminders` uses the layer's `assistantTurnCount` clock. The trigger won't fire again until that many assistant turns have elapsed since its last firing. Use `Number.POSITIVE_INFINITY` for "fire once per session."
 
-## Capping LLM history with `historyWindow()`
+## Capping LLM history with `history()`
 
-Long sessions accumulate every assistant message and tool round-trip in `itemLog`. Without intervention, the entire transcript is replayed on every LLM call, eventually blowing the model's context window. `historyWindow` caps the trailing items projected to the LLM **without** mutating storage:
+Long sessions accumulate every assistant message and tool round-trip in `itemLog`. Without intervention, the entire transcript is replayed on every LLM call, eventually blowing the model's context window. `history` caps the trailing items projected to the LLM **without** mutating storage:
 
 ```typescript
-import { historyWindow, observationalMemory, workingMemory } from '@noetic-tools/core';
+import { history, observations, scratchpad } from '@noetic-tools/core';
 
-const memory = [
-  workingMemory(),
-  observationalMemory(),
-  historyWindow({ maxItems: 40 }), // default
+const layers = [
+  scratchpad(),
+  observations(),
+  history({ maxItems: 40 }), // default
 ];
 ```
 
@@ -792,37 +857,37 @@ Key points:
 
 - The adapter's `listLive()` + `metadata.taskRole` / `taskId` / `featureId` tags are the single source of truth for "what is still running for this task". `findLiveTaskHandle({adapter, taskId, taskRole})` and `listLiveTaskHandles(adapter, taskId)` are the centralised queries.
 - Delete-guards, pause/cancel, kanban lookups, and live-chat routing all go through those queries — no `_planner.json` / `_implementer.json` sidecars to maintain.
-- The runner bootstrap (the child runtime spawned by `createLocalSubprocessAdapter`) constructs its own `AgentHarness` with task-scoped tools and drives a `react()` or `interview()` step. On success it commits in **audit → state → event** order; the adapter clears its manifest on exit automatically.
+- The runner bootstrap (the child runtime spawned by `createLocalSubprocessAdapter`) constructs its own `AgentHarness` with task-scoped tools and drives a ReAct-style loop or interview step. On success it commits in **audit → state → event** order; the adapter clears its manifest on exit automatically.
 - Durability is inherited from the shared adapter's file storage at `~/.noetic/subprocess/` — no hand-rolled `pidStarttime` sidecars.
 
 **Reusable helpers**: `verifyPidIdentity` (`agent-ci-control.ts`), `provisionWorktree` (`worktree-provision.ts`), `createShellValidator` (`hierarchy/daemon-validator.ts`), `createLlmInterviewResponder` (`llm-interview-responder.ts`).
 
 ## Pattern: Static Mode-Routing Workflow
 
-When a workflow has several distinct modes (e.g. plan → act → verify → fix → done) and the transition between modes is deterministic, express it as a single static step tree that routes on **memory state**, not on LLM output. This keeps the graph walkable by `collectAllTools` and the eval optimizer, while retaining per-mode sub-agents with different tool sets and instructions.
+When a workflow has several distinct modes (e.g. plan → act → verify → fix → done) and the transition between modes is deterministic, express it as a single static step tree that routes on **context-layer state**, not on LLM output. This keeps the graph walkable by `collectAllTools` and the eval optimizer, while retaining per-mode sub-agents with different tool sets and instructions.
 
 Three building blocks do the work:
 
-1. **A flow-state memory layer** carrying a `mode` field plus whatever bookkeeping the transitions need (attempt counts, findings, approval questions).
+1. **A flow-state context layer** carrying a `mode` field plus whatever bookkeeping the transitions need (attempt counts, findings, approval questions).
 2. **Sub-agents as module-level `Step` consts** — each mode is a `spawn()` around a `loop()` that reads `mode`-specific tools / instructions via lazy `(ctx) => ...` getters.
-3. **A `branch()` router** that reads `readFlowState(ctx).mode` and returns the matching sub-agent. Pair the outer `loop()` with `until.outputEquals(SENTINEL)` and a trailing `doneStep` that emits the sentinel to exit cleanly.
+3. **A `conditional()` router** that reads `readFlowState(ctx).mode` and returns the matching sub-agent. Pair the outer `loop()` with `until.outputEquals(SENTINEL)` and a trailing `doneStep` that emits the sentinel to exit cleanly.
 
 ```typescript
-// 1. Flow-state memory layer (schema omitted for brevity)
-export const flowMemory: MemoryLayer<FlowState> = { /* ... */ };
+// 1. Flow-state context layer (schema omitted for brevity)
+export const flowLayer: ContextLayer<FlowState> = { /* ... */ };
 
-export function readFlowState(ctx: Context<ContextMemory>): FlowState {
-  const raw = ctx.memory[FLOW_LAYER_ID]?.state;
+export function readFlowState(ctx: Context<ContextData>): FlowState {
+  const raw = ctx.context[FLOW_LAYER_ID]?.state;
   return FlowStateSchema.safeParse(raw).data ?? {};
 }
 
 // 2. Per-mode sub-agents — lazy instructions + filtered tools
-const planAgent: Step<ContextMemory, string, string> = spawn({
+const planAgent: Step<ContextData, string, string> = spawn({
   id: 'plan-agent',
   child: loop({
     id: 'plan-loop',
     steps: [
-      step.llm({
+      step.callModel({
         id: 'plan-chat',
         model: (ctx) => readParam(ctx, 'model', '', isString),
         instructions: (ctx) => PLAN_INSTRUCTIONS,
@@ -837,7 +902,7 @@ const planAgent: Step<ContextMemory, string, string> = spawn({
 
 // 3. Router + sentinel-driven exit
 const DONE_SENTINEL = '<<<workflow-done>>>';
-const doneStep: Step<ContextMemory, string, string> = step.run({
+const doneStep: Step<ContextData, string, string> = step.runCode({
   id: 'done',
   async execute() { return DONE_SENTINEL; },
 });
@@ -845,7 +910,7 @@ const doneStep: Step<ContextMemory, string, string> = step.run({
 const workflow = loop({
   id: 'mode-loop',
   steps: [
-    branch({
+    conditional({
       id: 'mode-dispatch',
       route: (_input, ctx) => {
         const mode = readFlowState(ctx).mode ?? 'plan';
@@ -853,7 +918,7 @@ const workflow = loop({
       },
       // Exposes all routes to collectAllTools so their unified tool pool
       // includes every sub-agent's tools, even the ones not currently reached.
-      _optimizable: frameworkCast<Step<ContextMemory>[]>([planAgent, actAgent, doneStep]),
+      _optimizable: frameworkCast<Step<ContextData>[]>([planAgent, actAgent, doneStep]),
     }),
   ],
   until: until.outputEquals(DONE_SENTINEL),
@@ -865,7 +930,7 @@ Key points:
 - Tools needed across modes must be supplied via `AgentHarness.tools` (since each step's `tools` is a `(ctx) => ...` getter, `collectAllTools` skips them). The per-step getter then filters `ctx.unifiedTools` down to that mode's allow-list.
 - `until.outputEquals` (not `outputContains`) is the right predicate for sentinels — exact equality avoids substring collisions when sub-agent output happens to quote the marker.
 - Each step that mutates flow state must call both `ctx.harness.setLayerState` (via `writeFlowState`) AND flush via `ctx.harness.storeLayers` so the next turn's rehydrate sees the post-mutation value instead of the stale pre-LLM snapshot.
-- The `_optimizable` list on `branch()` tells `collectAllTools` which routes exist — without it, tools in not-currently-routed sub-agents are invisible to the unified pool and their tool calls will be rejected as unknown.
+- The `_optimizable` list on `conditional()` tells `collectAllTools` which routes exist — without it, tools in not-currently-routed sub-agents are invisible to the unified pool and their tool calls will be rejected as unknown.
 
 Reference implementation: `packages/code-agent/src/agents/{plan,act,verify,fix,flow-state}.ts` + the `codeAgentWorkflow` export in `packages/code-agent/src/index.ts`.
 
@@ -912,7 +977,7 @@ Key points:
 - The document is validated against `WorkflowDocumentSchema`, hydrated into a native `Step` tree via `hydrateWorkflow`, then executed with the same interpreter as hand-written compositions.
 - `maxRevisions` controls retry attempts when the LLM produces invalid JSON. Each retry includes the previous validation error as feedback.
 - `maxDepth` caps workflow tree depth to prevent runaway nesting.
-- No `step.run` in JSON — closures aren't serialisable. JSON workflows compose from `llm`, `tool`, and structural operators (`sequence`, `fork`, `loop`, `branch`, `spawn`, `provide`, `every`).
+- No `step.runCode` in JSON — closures aren't serialisable. JSON workflows compose from `llm`, `tool`, and structural operator node kinds (`sequence`, `fork`, `loop`, `branch`, `spawn`, `provide`, `every`).
 - Tools are referenced by name in JSON and resolved from the `HydrationContext.tools` registry at hydration time.
 - A published JSON Schema (draft 2020-12) is generated from `WorkflowDocumentSchema` and shipped at the `@noetic-tools/core/schema` export subpath (`$id`: `https://noetic.tools/schema/noetic-workflow.schema.json`). Reference it via a `$schema` key in hand-written or LLM-generated documents for editor autocompletion and validation. **The `*.schema.json` files are generated — never hand-edit them. Whenever you change `WorkflowDocumentSchema` (or any node/predicate variant) in `packages/core/src/schemas/workflow.ts`, you MUST run `bun run gen:schema` in the same commit** to regenerate both the package artifact and the hosted web copy (`packages/web/public/schema/...`); a drift-gate test fails CI otherwise. See `.claude/rules/sync-spec-code-docs.md` Requirement 6.
 
@@ -933,19 +998,19 @@ const result = await parseAndRunWorkflow({
 
 ## Pattern: Plan with an LLM, Execute with a Coding Agent
 
-A sub-harness step (`step.claudeCode` / `step.codex` / `step.opencode` / `step.pi`) runs a real coding agent as a step. Compose it after a planning `llm` step in a sequence: the model decides *what* to do, the coding agent does it against the workspace.
+A sub-harness step (`step.claudeCode` / `step.codex` / `step.opencode` / `step.pi`) runs a real coding agent as a step. Compose it after a planning `callModel` step in a sequence: the model decides *what* to do, the coding agent does it against the workspace.
 
 ```typescript
 import { AgentHarness, step } from '@noetic-tools/core';
 import { claudeCode } from '@noetic-tools/sub-harness-claude-code';
 
-const plan = step.llm({
+const plan = step.callModel({
   id: 'plan',
   model: 'anthropic/claude-sonnet-4-20250514',
   instructions: 'Turn the request into a concrete, ordered implementation plan.',
 });
 
-const pipeline = step.run({
+const pipeline = step.runCode({
   id: 'plan-then-build',
   execute: async (input: string, ctx) => {
     const planned = await ctx.harness.run(plan, input, ctx);
@@ -966,9 +1031,9 @@ await harness.execute('Add input validation to the signup endpoint.');
 
 Key points:
 
-- The coding agent runs one turn against `ctx`'s workspace (cwd/fs/shell), forwards its events as `sub_harness_event` framework events, and charges `ctx.tokens`/`ctx.cost` like any LLM step.
+- The coding agent runs one turn against `ctx`'s workspace (cwd/fs/shell), forwards its events as `sub_harness_event` framework events, and charges `ctx.tokens`/`ctx.cost` like any `callModel` step.
 - `permissionMode` controls how freely the agent mutates files: `'plan'` (read-only planning), `'acceptEdits'`, `'bypassPermissions'`, or `'default'`.
-- Add `output: SomeSchema` to parse the agent's final text into a typed object, exactly like `step.llm`.
+- Add `output: SomeSchema` to parse the agent's final text into a typed object, exactly like `step.callModel`.
 
 ## Pattern: Reuse a Coding-Agent Session Across Steps
 
@@ -1053,10 +1118,10 @@ Key points:
 
 ## Pattern: Generative UI Interaction Loop
 
-An agent renders a UI, the user interacts, and the loop continues until they submit. The `openUiSurface()` layer owns the state on the server; a loop predicate reads it. Requires `@noetic-tools/openui` (depends only on memory + types; core never imports it).
+An agent renders a UI, the user interacts, and the loop continues until they submit. The `openUiSurface()` layer owns the state on the server; a loop predicate reads it. Requires `@noetic-tools/openui` (depends only on `@noetic-tools/context` + `@noetic-tools/types`; core never imports it).
 
 ```typescript
-import { AgentHarness, loop, memory, step, type ContextMemory } from '@noetic-tools/core';
+import { AgentHarness, context, loop, step, type ContextData } from '@noetic-tools/core';
 import { createLibrary, defineComponent, openUi, openUiSurface, ui } from '@noetic-tools/openui';
 import { z } from 'zod';
 
@@ -1070,7 +1135,7 @@ const surface = openUiSurface({ library });
 
 const checkout = loop({
   id: 'checkout',
-  body: step.llm<ContextMemory, string, unknown>({
+  body: step.callModel<ContextData, string, unknown>({
     id: 'render',
     model: 'claude-sonnet-5',
     tools: [validateAddress], // Query/Mutation bindings resolve against these tools
@@ -1083,7 +1148,7 @@ const harness = new AgentHarness({
   name: 'checkout-agent',
   initialStep: checkout,
   params: {},
-  memory: memory([surface]),
+  context: context([surface]),
 });
 ```
 

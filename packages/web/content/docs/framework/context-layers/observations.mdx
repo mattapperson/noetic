@@ -1,11 +1,11 @@
 ---
-title: Observational Context
+title: Observations
 description: A context layer that automatically extracts and distills facts from conversation history using a configurable observer function.
 ---
 
 ## Overview
 
-Observational Context accumulates conversation text into a buffer, and when the buffer crosses a token threshold, distills the content into a list of observations. These observations persist across turns and are injected as an `<observations>` block in the prompt.
+Observations accumulates conversation text into a buffer, and when the buffer crosses a token threshold, distills the content into a list of observations. These observations persist across turns and are injected as an `<observations>` block in the prompt.
 
 - **Slot**: `200` (`Slot.OBSERVATIONS`)
 - **Default scope**: `resource`
@@ -15,9 +15,9 @@ Observational Context accumulates conversation text into a buffer, and when the 
 ## Usage
 
 ```ts
-import { observationalContext } from '@noetic-tools/core';
+import { observations } from '@noetic-tools/core';
 
-const layer = observationalContext({
+const layer = observations({
   bufferThreshold: 2000,
   maxObservations: 50,
   observer: async (buffer) => {
@@ -30,7 +30,7 @@ const layer = observationalContext({
 ## Configuration
 
 ```ts validate=none
-interface ObservationalContextConfig {
+interface ObservationsConfig {
   bufferThreshold?: number;
   maxObservations?: number;
   scope?: 'thread' | 'resource';
@@ -50,7 +50,7 @@ type ObserverFn = (buffer: string[]) => Promise<string[]>;
 ## State Type
 
 ```ts validate=none
-interface ObservationalState {
+interface ObservationsState {
   observations: string[];
   buffer: string[];
   bufferTokens: number;
@@ -69,7 +69,7 @@ interface ObservationalState {
 
 ### init
 
-Loads saved `ObservationalState` from scoped storage. Falls back to empty arrays and zero counters.
+Loads saved `ObservationsState` from scoped storage. Falls back to empty arrays and zero counters.
 
 ### recall
 
@@ -96,9 +96,9 @@ Deep-clones the parent state to the child, so spawned agents inherit existing ob
 ## Example: LLM-Powered Observer
 
 ```ts validate=none
-import { observationalContext } from '@noetic-tools/core';
+import { observations } from '@noetic-tools/core';
 
-const layer = observationalContext({
+const layer = observations({
   observer: async (buffer) => {
     const text = buffer.join('\n');
     // Use any LLM call to extract structured facts

@@ -1,6 +1,6 @@
 # Eval and Optimization
 
-> **Depends On:** `01-step-type` (Step), `02-step-variants` (step.run, step.llm, Tool), `03-control-flow` (branch, fork), `04-spawn` (spawn), `05-loop-and-until` (loop, until), `07-context-and-event-log` (Context, Item), `08-agent-harness` (AgentHarness, run), `10-observability` (Span), `13-patterns` (react, ralphWiggum)
+> **Depends On:** `01-step-type` (Step), `02-step-variants` (step.runCode, step.callModel, Tool), `03-control-flow` (conditional, inParallel), `04-spawn` (spawn), `05-loop-and-until` (loop, until), `07-context-and-event-log` (Context, Item), `08-agent-harness` (AgentHarness, run), `10-observability` (Span), `13-patterns` (react, ralphWiggum)
 > **Exports:** `describe()`, `it()`, `EvalSuiteOptions`, `DescribeStep`, `ScorerFn`, `createScorer()`, `createAdapter()`, `Baseline`, `OptimizationLevel`, `discoverFieldsFromSource()`
 
 ---
@@ -242,20 +242,20 @@ function createScorer(opts: {
 
 ### Problem
 
-The optimizer needs to discover tunable fields inside step trees. Most steps are straightforward — walk the tree, find `model`, `system`, `tools` fields. But `branch` and `fork` steps contain dynamic functions (`route`, `paths`) that return steps at runtime, making their children invisible to static analysis.
+The optimizer needs to discover tunable fields inside step trees. Most steps are straightforward — walk the tree, find `model`, `system`, `tools` fields. But `conditional` and `inParallel` steps contain dynamic functions (`route`, `paths`) that return steps at runtime, making their children invisible to static analysis.
 
 ### Solution
 
-Builders for `branch` and `fork` annotate the step with an `_optimizable` property containing the statically-known children:
+Builders for `conditional` and `inParallel` annotate the step with an `_optimizable` property containing the statically-known children:
 
 ```typescript
 interface OptimizableAnnotation {
   children: Step<unknown, unknown>[];
 }
 
-// On branch steps:
+// On conditional steps:
 {
-  kind: 'branch',
+  kind: 'conditional',
   id: 'router',
   route: (input, ctx) => { /* dynamic logic */ },
   _optimizable: {
@@ -263,9 +263,9 @@ interface OptimizableAnnotation {
   },
 }
 
-// On fork steps:
+// On inParallel steps:
 {
-  kind: 'fork',
+  kind: 'inParallel',
   id: 'parallel-work',
   mode: 'all',
   paths: (input, ctx) => [stepA, stepB, stepC],
@@ -275,7 +275,7 @@ interface OptimizableAnnotation {
 }
 ```
 
-The `branch()` builder populates `_optimizable.children` from the steps passed to `.when()` and `.otherwise()`. The `fork()` builder populates it from the steps array passed to `.paths()` when the argument is a static array (not a function).
+The `conditional()` builder populates `_optimizable.children` from the steps passed to `.when()` and `.otherwise()`. The `inParallel()` builder populates it from the steps array passed to `.paths()` when the argument is a static array (not a function).
 
 **Invariant:** `_optimizable` is a development-time hint. The runtime interpreter ignores it entirely. Removing `_optimizable` has zero effect on execution.
 
@@ -325,17 +325,17 @@ function discoverFields(step: Step<unknown, unknown>): DiscoveredField[];
 The walker recursively traverses:
 - `loop.body` — descend into the loop body
 - `spawn.child` — descend into the spawn child
-- `fork._optimizable.children` — descend into annotated fork children
-- `branch._optimizable.children` — descend into annotated branch children
+- `inParallel._optimizable.children` — descend into annotated inParallel children
+- `conditional._optimizable.children` — descend into annotated conditional children
 
 Fields discovered per step kind:
 
 | Step Kind | L1 Fields | L2 Fields | L3 Fields |
 |-----------|-----------|-----------|-----------|
-| `llm` | `instructions`, `params` | `model`, `tools` | (topology) |
+| `callModel` | `instructions`, `params` | `model`, `tools` | (topology) |
 | `loop` | (from body) | `maxIterations` | `until` predicates |
 | `spawn` | (from child) | `timeout` | `context` layers |
-| `fork` | (from children) | `mode`, `concurrency` | path topology |
+| `inParallel` | (from children) | `mode`, `concurrency` | path topology |
 
 ### Phase 2: Mutator (Immutable Clone + Replacement)
 
@@ -457,7 +457,7 @@ The static analysis module:
 1. Takes an eval file path
 2. Follows imports to find agent/step definition source files using TypeScript module resolution
 3. Parses those imported source files into TypeScript ASTs (the eval file itself is excluded — only imported source modules are analyzed for builder calls)
-4. Walks the AST to find builder calls (`step.llm()`, `tool()`, `react()`, `ralphWiggum()`, `branch()`, `fork()`, `spawn()`, `loop()`)
+4. Walks the AST to find builder calls (`step.callModel()`, `tool()`, `react()`, `ralphWiggum()`, `conditional()`, `inParallel()`, `spawn()`, `loop()`)
 5. Extracts string literal values of optimizable fields (`instructions`, `description`, `name`) and their exact `SourceLocation` (file, line, column)
 6. Returns `OptimizableField[]` with populated `sourceLocation`
 
@@ -695,8 +695,8 @@ Runs the optimization pipeline after evaluation. The `--scope` flag controls the
 ## Cross-References
 
 - `Step<I, O>` discriminated union is defined in `01-step-type`
-- `step.run`, `step.llm`, `Tool` are defined in `02-step-variants`
-- `branch`, `fork` are defined in `03-control-flow`
+- `step.runCode`, `step.callModel`, `Tool` are defined in `02-step-variants`
+- `conditional`, `inParallel` are defined in `03-control-flow`
 - `spawn` is defined in `04-spawn`
 - `loop`, `until` are defined in `05-loop-and-until`
 - `Context`, `Item`, `TokenUsage` are defined in `07-context-and-event-log`

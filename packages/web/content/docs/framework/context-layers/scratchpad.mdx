@@ -1,0 +1,122 @@
+---
+title: Scratchpad
+description: A scratchpad context layer that persists structured or free-form notes across turns within a single execution.
+---
+
+## Overview
+
+Scratchpad is the simplest built-in context layer: a notepad the agent can read and write each turn. The LLM sees the current state as a `<scratchpad>` block in the prompt, and updates it by calling the `scratchpad/update` tool.
+
+- **Slot**: `100` (`Slot.SCRATCHPAD`)
+- **Default scope**: `thread`
+- **Default budget**: `{ min: 200, max: 1500 }`
+
+## Usage
+
+```ts
+import { scratchpad } from '@noetic-tools/core';
+
+const layer = scratchpad({
+  scope: 'thread',
+  readOnly: false,
+});
+```
+
+Register the layer on the harness (or via `spawn`'s `context` option):
+
+```ts validate=none
+const harness = new AgentHarness({
+  name: 'assistant',
+  initialStep: agent,
+  params: {},
+  context: [layer],
+});
+```
+
+## Configuration
+
+```ts validate=none
+interface ScratchpadConfig {
+  scope?: 'thread' | 'resource';
+  schema?: ZodType;
+  template?: string;
+  readOnly?: boolean;
+}
+```
+
+| Field | Type | Default | Purpose |
+|---|---|---|---|
+| `scope` | `'thread' \| 'resource'` | `'thread'` | Persistence boundary |
+| `schema` | `ZodType` | -- | Optional Zod schema for structured state (state becomes `Record<string, unknown>`). Updates are validated against it: the merged state must pass, or the update is rejected |
+| `template` | `string` | -- | Initial template content |
+| `readOnly` | `boolean` | `false` | When `true`, the `store` hook skips updates |
+
+## State Type
+
+```ts validate=none
+type ScratchpadState = string | Record<string, unknown>;
+```
+
+When no `schema` is provided, state is a plain string. When a schema is provided, state is an object and updates are deep-merged: object-valued keys merge recursively, while arrays and primitives replace. Prototype-pollution keys (`__proto__`, `constructor`) are stripped at every depth.
+
+## How It Works
+
+### init
+
+Loads saved state from `ScopedStorage`. Falls back to an empty string (no schema) or empty object (with schema). Persisted state that fails the configured schema is discarded and replaced with `{}` rather than aborting the execution.
+
+### recall
+
+If state is non-empty, wraps it in a `<scratchpad>` XML block and injects it as a `developer` message item.
+
+### store
+
+Watches for `scratchpad/update` function calls in the LLM response. When found, parses the JSON arguments and deep-merges them into the current state. Prototype keys (`__proto__`, `constructor`) are stripped for safety.
+
+When a `schema` is configured, the **merged** state is validated against it (so partial updates remain legal). A schema-violating update is dropped with a diagnostic on the `store` path, and throws as a tool error the model can see on the `scratchpad/update` tool path — either way the prior state is untouched.
+
+If `readOnly` is `true`, the store hook is a no-op.
+
+### onSpawn
+
+When scope is `'resource'`, the parent state is deep-cloned to the child. For `'thread'` scope, children do not inherit scratchpad state.
+
+## Example: Structured Scratchpad
+
+```ts
+import { z } from 'zod';
+import { scratchpad } from '@noetic-tools/core';
+
+const layer = scratchpad({
+  schema: z.object({
+    currentGoal: z.string(),
+    completedSteps: z.array(z.string()),
+    blockers: z.array(z.string()),
+  }),
+});
+```
+
+The LLM can then call `scratchpad/update` with `{ currentGoal: 'Deploy v2', completedSteps: ['write tests'] }` to update specific fields without overwriting the rest.
+
+## Provides
+
+Scratchpad exposes two entries via the `provides` API, making them accessible on `ctx.context['scratchpad']`:
+
+### `snapshot` (data)
+
+A read-only projection of the current scratchpad state.
+
+```ts validate=none
+const current = ctx.context['scratchpad'].snapshot;
+// Returns ScratchpadState (string | Record<string, unknown>)
+```
+
+### `update` (function)
+
+Merges key-value pairs into the current state. Accepts a `Record<string, unknown>` argument.
+
+```ts validate=none
+await ctx.context['scratchpad'].update({ currentGoal: 'Ship v2' });
+```
+
+Because `update` is a `layerFn`, the runtime automatically injects it as an LLM tool named `scratchpad/update`. The model can call this tool directly to modify the scratchpad during a conversation turn.

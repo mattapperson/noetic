@@ -1,5 +1,5 @@
 ---
-title: step.tool
+title: step.invokeTool
 description: Invoke a single tool directly as a typed step.
 ---
 
@@ -24,7 +24,7 @@ const calculator = tool({
   }),
 });
 
-const addStep = step.tool({
+const addStep = step.invokeTool({
   id: 'add-numbers',
   tool: calculator,
   args: {
@@ -35,13 +35,13 @@ const addStep = step.tool({
 
 ## What It Does
 
-`step.tool` invokes a single tool without going through an LLM. This is useful when you know exactly which tool to call -- for example, after a branch routes to a known action, or as part of a deterministic pipeline.
+`step.invokeTool` invokes a single tool without going through an LLM. This is useful when you know exactly which tool to call -- for example, after a conditional routes to a known action, or as part of a deterministic pipeline.
 
 The optional `args` field lets you preset some or all of the tool's inputs. At runtime, preset args are merged with the step input.
 
 ## The Tool Interface
 
-Every tool in Noetic follows the same interface, whether it is passed to `step.llm` or invoked directly via `step.tool`.
+Every tool in Noetic follows the same interface, whether it is passed to `step.callModel` or invoked directly via `step.invokeTool`.
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -56,7 +56,7 @@ Every tool in Noetic follows the same interface, whether it is passed to `step.l
 
 ## API Reference
 
-### step.tool Options
+### step.invokeTool Options
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -131,6 +131,6 @@ const deleteTool = tool({
 
 ## Related
 
-- [step.llm](/docs/framework/steps/llm) -- pass tools to an LLM and let the model decide when to call them.
-- [step.run](/docs/framework/steps/run) -- for arbitrary async logic that is not a tool.
+- [step.callModel](/docs/framework/steps/call-model) -- pass tools to an LLM and let the model decide when to call them.
+- [step.runCode](/docs/framework/steps/run-code) -- for arbitrary async logic that is not a tool.
 - [Steps overview](/docs/framework/steps) -- comparison of all three step types.

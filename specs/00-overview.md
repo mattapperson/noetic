@@ -7,7 +7,7 @@
 
 ## Why Another API
 
-Every existing TypeScript agent framework either provides too-high-level abstractions that can't express all patterns (Mastra, Vercel AI SDK), or provides a flexible-but-complex graph model that still misses key patterns (LangGraph). None of them treat context boundary management as a first-class concern, which means they can't naturally express Ralph Wiggum's fresh-context meta-loops or Slate's episodic thread weaving. And none of them provide a composable memory system where independently-authored context layers (working memory, semantic recall, observations, episodic context) participate in a well-defined lifecycle around each LLM call.
+Every existing TypeScript agent framework either provides too-high-level abstractions that can't express all patterns (Mastra, Vercel AI SDK), or provides a flexible-but-complex graph model that still misses key patterns (LangGraph). None of them treat context boundary management as a first-class concern, which means they can't naturally express Ralph Wiggum's fresh-context meta-loops or Slate's episodic thread weaving. And none of them provide a composable context system where independently-authored context layers (scratchpad, observations, and recipe layers like semantic recall) participate in a well-defined lifecycle around each LLM call.
 
 The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs, Slate Thread Weaving) look different on the surface but decompose into combinations of the same small set of operations. These operations are derived from the intersection of:
 
@@ -55,7 +55,7 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 
 2. **Execution infrastructure** (`07-context-and-event-log`, `08-agent-harness`, `09-error-model`, `10-observability`) — The engine that runs steps: context management, pluggable agent harness backends, error taxonomy, and tracing. Items-native (OpenResponses) — the framework uses `Item` types aligned with the OpenResponses format throughout, eliminating impedance mismatch with the LLM provider.
 
-3. **Memory system** (`11-context-layer-system`, `12-builtin-memory-layers`) — The `ContextLayer` contract (owned by `@noetic-tools/types`), lifecycle hook types, scope system, storage adapter contract, and built-in layer factories, all living in `@noetic-tools/context`. The View (what the LLM actually sees) is assembled by the Projector from the layer outputs + conversation history. **Boundary rule:** `@noetic-tools/context` depends only on `@noetic-tools/types` and MUST NOT import from `@noetic-tools/core`. This keeps memory tree-shakable and free of any transitive dependency on the interpreter or runtime.
+3. **Context system** (`11-context-layer-system`, `12-builtin-context-layers`) — The `ContextLayer` contract (owned by `@noetic-tools/types`), lifecycle hook types, scope system, storage adapter contract, and built-in layer factories, all living in `@noetic-tools/context`. The View (what the LLM actually sees) is assembled by the Projector from the layer outputs + conversation history. **Boundary rule:** `@noetic-tools/context` depends only on `@noetic-tools/types` and MUST NOT import from `@noetic-tools/core`. This keeps the context system tree-shakable and free of any transitive dependency on the interpreter or runtime.
 
 **Patterns** (`13-patterns`) are 15-30 line compositions of primitives. They prove the primitives are sufficient; they are not framework magic.
 
@@ -64,8 +64,8 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 | Spec | Feature | Role |
 |------|---------|------|
 | `01-step-type` | `Step<I,O>` discriminated union | Root type, interpreter signature |
-| `02-step-variants` | `run`, `llm`, `tool` variants + `Tool` type | Atomic units of work |
-| `03-control-flow` | `branch()`, `fork()` | Routing and parallelism |
+| `02-step-variants` | `runCode`, `callModel`, `invokeTool` variants + `Tool` type | Atomic units of work |
+| `03-control-flow` | `conditional()`, `inParallel()` | Routing and parallelism |
 | `04-spawn` | `spawn()` + context strategies | Context boundaries |
 | `05-loop-and-until` | `loop()`, `Until`, `Verdict` | Iteration and termination |
 | `06-channels` | `Channel<T>`, `send`/`recv`, `tryRecv`, `ExternalChannel`, `ChannelHandle` | Typed data flow |
@@ -74,7 +74,7 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 | `09-error-model` | `NoeticError` | Error taxonomy + propagation |
 | `10-observability` | `Span`, tracing | OpenTelemetry integration |
 | `11-context-layer-system` | `ContextLayer`, lifecycle, budget, scope, View assembly | Context contract |
-| `12-builtin-memory-layers` | 5 built-in factories + custom examples | Reference implementations |
+| `12-builtin-context-layers` | Built-in layer factories + custom examples | Reference implementations |
 | `13-patterns` | ReAct, Ralph Wiggum, Task Trees, Dual-Agent, etc. | Composition proofs |
 | `14-design-decisions` | Architectural rationale | Tradeoff documentation |
 | `15-build-sequence` | Implementation stages 1-10 | Build ordering |

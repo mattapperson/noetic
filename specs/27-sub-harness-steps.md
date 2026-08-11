@@ -1,7 +1,7 @@
 # 27 — Sub-Harness Steps
 
 Sub-harnesses let a Noetic step delegate a turn to an external coding-agent
-runtime — Claude Code, Codex, opencode, pi — exactly the way `step.llm`
+runtime — Claude Code, Codex, opencode, pi — exactly the way `step.callModel`
 delegates a turn to a language model. Each agent is packaged on its own
 (`@noetic-tools/sub-harness-<tool>`) and plugs in behind a single contract, so
 adding a new agent never touches `@noetic-tools/core`.
@@ -95,7 +95,7 @@ A sub-harness sees the conversation so far, not just its own prompt. Before
 appending the turn's prompt, `executeSubHarness` captures the prior items from
 `ctx.itemLog` (everything earlier LLM and sub-harness steps produced) and passes
 them as `SubHarnessStartOptions.history` when starting a fresh session. So when a
-coding agent runs after LLM steps — or on a later turn of a consecutive
+coding agent runs after callModel steps — or on a later turn of a consecutive
 `harness.execute()` conversation — it has full context and does not act confused.
 
 History seeds the **first** turn of a fresh session only; after that the
@@ -108,7 +108,7 @@ conversation.
 ### Output → harness events
 
 Every part a sub-harness emits is mapped onto the harness's observable event
-surface so a coding agent's output streams exactly like an LLM step's. The
+surface so a coding agent's output streams exactly like a callModel step's. The
 interpreter's `SubHarnessEventBridge` translates each `SubHarnessStreamPart`
 into the same `source: 'sdk'` broadcaster events the model-call path emits:
 

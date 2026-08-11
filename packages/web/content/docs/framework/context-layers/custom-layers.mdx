@@ -38,7 +38,7 @@ Built-in slot constants for reference:
 |---|---|
 | `REMINDER` | `80` |
 | `STEERING` | `90` |
-| `WORKING_MEMORY` | `100` |
+| `SCRATCHPAD` | `100` |
 | `ENTITY` | `150` |
 | `OBSERVATIONS` | `200` |
 | `PROCEDURAL` | `250` |
@@ -146,7 +146,7 @@ function myCustomLayer(): ContextLayer<MyLayerState> {
 Beyond `recall`/`store`, two hooks let a layer shape what the model sees without touching storage:
 
 - **`onItemAppend`** runs when input items (user messages, tool outputs — never LLM responses) are about to be appended. Layers compose in slot order, each receiving the previous layer's output. Return the items to actually append: pass them through unchanged, transform them, return `[]` to drop them, or include extras to inject. The result may also carry an updated `state` and a `rerender: true` request (with optional `timing` and `scope`) to re-run recall mid-turn.
-- **`projectHistory`** runs once per LLM step to project (cap, summarize, redact) the history portion of the context window. It is read-side only — `itemLog` storage is never mutated. See [History Window](/docs/framework/context-layers/history-window) for a layer built entirely from this hook.
+- **`projectHistory`** runs once per callModel step to project (cap, summarize, redact) the history portion of the context window. It is read-side only — `itemLog` storage is never mutated. See [History](/docs/framework/context-layers/history) for a layer built entirely from this hook.
 
 ## Step 6: Set Timeouts (Optional)
 
@@ -202,20 +202,20 @@ const myLayer: ContextLayer<MyLayerState> = {
 };
 ```
 
-Return `null` when you cannot summarise the change — the runtime republishes in full. The hook is only worth writing when the payload is large and its changes are small; `fileReference` uses it to send the one file that changed instead of the whole set.
+Return `null` when you cannot summarise the change — the runtime republishes in full. The hook is only worth writing when the payload is large and its changes are small; `filesystem` uses it to send the one file that changed instead of the whole set.
 
 ## Step 7: Register with the Agent
 
-Pass custom layers to a `react` pattern (or `spawn`'s `context` option):
+Pass custom layers to `spawn`'s `context` option (or the harness-level `context` array):
 
 ```ts validate=none
-const agent = react({
-  model: 'openai/gpt-4o',
-  instructions: 'You are a helpful assistant.',
+const agent = spawn({
+  id: 'assistant',
+  child: agentLoop,
   context: [
-    workingMemoryContext(),
+    scratchpad(),
     myCustomLayer(),
-    observationalContext(),
+    observations(),
   ],
 });
 ```
@@ -378,22 +378,22 @@ Note the `as const` on the `id` field and the `satisfies ContextLayer<MyLayerSta
 Wrap your layers in the `context()` builder to get full type inference:
 
 ```ts validate=none
-import { context, workingMemoryContext, type InferContext } from '@noetic-tools/core';
+import { context, scratchpad, type InferContext } from '@noetic-tools/core';
 
-const mem = context([workingMemoryContext(), myCustomLayer()]);
+const mem = context([scratchpad(), myCustomLayer()]);
 type Mem = InferContext<typeof mem>;
 
 // Mem is:
 // {
-//   'working-context': { snapshot: WorkingMemoryContextState; update: (args: Record<string, unknown>) => Promise<void> };
+//   'scratchpad': { snapshot: ScratchpadState; update: (args: Record<string, unknown>) => Promise<void> };
 //   'my-custom-layer': { entryCount: number; addEntry: (args: { text: string }) => Promise<void> };
 // }
 ```
 
-In a `step.run`, access the typed context:
+In a `step.runCode`, access the typed context:
 
 ```ts validate=none
-const myStep = step.run({
+const myStep = step.runCode({
   id: 'use-context',
   execute: async (input: string, ctx: Context<Mem>) => {
     const count = ctx.context['my-custom-layer'].entryCount;
@@ -409,4 +409,4 @@ Every `layerFn` in a layer's `provides` is automatically registered as an LLM to
 
 ## See Also
 
-- [Tool Context](/docs/framework/context-layers/tool-context) -- imperative state access via `toolCtx.context` and function-call state patterns
+- [Tool Calls](/docs/framework/context-layers/tool-calls) -- imperative state access via `toolCtx.context` and function-call state patterns

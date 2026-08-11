@@ -15,12 +15,12 @@ const notifications = channel('notifications', {
   capacity: 100,
 });
 
-const producer = step.run({ id: 'produce', execute: async (input: string, ctx) => {
+const producer = step.runCode({ id: 'produce', execute: async (input: string, ctx) => {
   await ctx.send(notifications, { message: input, level: 'info' });
   return input;
 }});
 
-const consumer = step.run({ id: 'consume', execute: async (_input: unknown, ctx) => {
+const consumer = step.runCode({ id: 'consume', execute: async (_input: unknown, ctx) => {
   const note = await ctx.recv(notifications, { timeout: 5_000 });
   console.log(`[${note.level}] ${note.message}`);
   return note;
@@ -209,7 +209,7 @@ const approval = channel('approval', {
   external: true,
 });
 
-const askForApproval = step.run({ id: 'ask-approval', execute: async (plan: string, ctx) => {
+const askForApproval = step.runCode({ id: 'ask-approval', execute: async (plan: string, ctx) => {
   // Send plan to user via your app layer...
   const decision = await ctx.recv(approval, { timeout: 300_000 }); // 5 min
   return decision;

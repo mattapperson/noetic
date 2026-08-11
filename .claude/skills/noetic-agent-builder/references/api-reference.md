@@ -2,47 +2,47 @@
 
 ## Builder Functions
 
-### step.run
+### step.runCode
 
 Pure async computation. The runtime can retry freely and doesn't track token usage.
 
 ```typescript
-step.run<TMemory = ContextMemory, I = unknown, O = unknown>({
+step.runCode<TContext = ContextData, I = unknown, O = unknown>({
   id: string;
-  execute: (input: I, ctx: Context<TMemory>) => Promise<O>;
+  execute: (input: I, ctx: Context<TContext>) => Promise<O>;
   retry?: RetryPolicy;
   subprocess?: SubprocessAdapter; // per-step adapter override
-}): StepRun<TMemory, I, O>
+}): StepRunCode<TContext, I, O>
 ```
 
 The optional `subprocess` field makes this specific step run through a different adapter — e.g. `createLocalSubprocessAdapter({storage})` for an out-of-process child, or an in-memory test double for unit tests. Resolution order at dispatch time is `detachedSpawn-overrides.subprocess ?? step.subprocess ?? harness.subprocess`. When omitted, the step uses the harness default.
 
-### step.llm
+### step.callModel
 
 Model call with optional tools and structured output.
 
 ```typescript
-type Lazy<T, TMemory = ContextMemory> =
+type Lazy<T, TContext = ContextData> =
   | T
-  | ((ctx: Context<TMemory>) => T | Promise<T>);
+  | ((ctx: Context<TContext>) => T | Promise<T>);
 
-step.llm<TMemory = ContextMemory, I = unknown, O = unknown>({
+step.callModel<TContext = ContextData, I = unknown, O = unknown>({
   id: string;
-  model: Lazy<string, TMemory>;                    // eager string or (ctx) => string
-  instructions?: Lazy<string | undefined, TMemory>;
-  tools?: Lazy<Tool[] | undefined, TMemory>;       // allowed tool subset (undefined = all, [] = none)
+  model: Lazy<string, TContext>;                    // eager string or (ctx) => string
+  instructions?: Lazy<string | undefined, TContext>;
+  tools?: Lazy<Tool[] | undefined, TContext>;       // allowed tool subset (undefined = all, [] = none)
   output?: ZodType<O> | OutputCodec<O>;            // Zod schema OR a streaming codec (see Generative UI)
   params?: ModelParams;
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
-}): StepLLM<TMemory, I, O>
+}): StepCallModel<TContext, I, O>
 ```
 
-`tools` specifies which tools the model may invoke for this step. Before execution, the harness collects all tools from every LLM step in the tree into a unified set. Every LLM call sends the full set (preserving prompt cache), while `tools` narrows the allowed subset via `tool_choice: { type: "allowed_tools" }`. Omit `tools` to allow all; set `tools: []` to disable tools for the step.
+`tools` specifies which tools the model may invoke for this step. Before execution, the harness collects all tools from every `callModel` step in the tree into a unified set. Every LLM call sends the full set (preserving prompt cache), while `tools` narrows the allowed subset via `tool_choice: { type: "allowed_tools" }`. Omit `tools` to allow all; set `tools: []` to disable tools for the step.
 
 **Lazy params.** `model`, `instructions`, and `tools` each accept either an eager value or a `(ctx) => value` getter resolved at step execution. Getters see the live `Context`, so a step can read `ctx.harness.config.params` or `ctx.unifiedTools` to produce per-run values without baking them in at build time. Function-form `tools` are NOT walked by `collectAllTools`; tools needed in the harness-wide pool should be registered via `AgentHarness.tools`. Eager `model` strings are validated at build time (empty → `MISSING_MODEL`); function-form models are validated after resolution with the same error code.
 
 ```typescript
-step.llm({
+step.callModel({
   id: 'plan-chat',
   model: (ctx) => ctx.harness.config.params.model as string,
   instructions: (ctx) => composeInstructions(ctx),
@@ -50,7 +50,7 @@ step.llm({
 });
 ```
 
-**Generic-param order.** The signature is `step.llm<TMemory, I, O>`, NOT `<I, O>`. Writing `step.llm<string, unknown>(...)` silently sets `TMemory = string`, which yields misleading errors when the step is composed into a harness whose context memory is anything else. Either pass all three (`step.llm<MyMemory, string, string>(...)`) or pass none and let inference drive from the object literal.
+**Generic-param order.** The signature is `step.callModel<TContext, I, O>`, NOT `<I, O>`. Writing `step.callModel<string, unknown>(...)` silently sets `TContext = string`, which yields misleading errors when the step is composed into a harness whose context shape is anything else. Either pass all three (`step.callModel<MyContext, string, string>(...)`) or pass none and let inference drive from the object literal.
 
 **Lazy params disable eval-optimizer rewrites.** `@noetic-tools/eval`'s optimizer walks the step tree and swaps candidate strings into `instructions` / tool `name` / tool `description`. It skips fields whose value is a function because there is no way to substitute a string for a getter without dropping the getter's runtime logic. Use eager values for any field you want the optimizer to tune; reserve function-form only for fields that genuinely need per-execution context.
 
@@ -58,67 +58,67 @@ step.llm({
 
 `output` accepts a Zod schema (assistant text is JSON-parsed and validated) OR an `OutputCodec<O>` — a streaming output dialect. The OpenUI codec (`openUi(library)`) makes the model render a UI instead of returning text; see [Generative UI](#generative-ui-openui).
 
-The agent harness assembles the View before calling the model: system message + memory layer items + conversation history. The `instructions` field becomes an `InputMessageItem` with `role: system`.
+The agent harness assembles the View before calling the model: system message + context layer items + conversation history. The `instructions` field becomes an `InputMessageItem` with `role: system`.
 
 `AgentHarness.execute` accepts a plain string, one item, or an item array. Use an `InputMessageItem` when the input needs structured content; its `content` array supports `input_text`, `input_image`, and `input_file` parts.
 
-### step.tool
+### step.invokeTool
 
 Direct tool execution (not via LLM selection).
 
 ```typescript
-step.tool<TMemory = ContextMemory, I = unknown, O = unknown>({
+step.invokeTool<TContext = ContextData, I = unknown, O = unknown>({
   id: string;
   tool: Tool<ZodType<I>, ZodType<O>>;
   args?: Partial<I>;
-}): StepTool<TMemory, I, O>
+}): StepInvokeTool<TContext, I, O>
 ```
 
-### branch
+### conditional
 
 Conditional routing. The `route` function returns a step to execute or `null` to pass through.
 
 ```typescript
-branch<I, O>({
+conditional<I, O>({
   id: string;
   route: (input: I, ctx: Context) => Step<I, O> | null;
-}): StepBranch<I, O>
+}): StepConditional<I, O>
 ```
 
-### fork
+### inParallel
 
 Parallel execution with three modes.
 
 ```typescript
 // Race: first to complete wins
-fork<I, O>({ id, mode: 'race', paths: () => Step[] })
+inParallel<I, O>({ id, mode: 'race', paths: () => Step[] })
 
 // All: wait for all, merge results
-fork<I, O>({ id, mode: 'all', paths: () => Step[], merge: (results) => O })
+inParallel<I, O>({ id, mode: 'all', paths: () => Step[], merge: (results) => O })
 
 // Settle: wait for all (including failures), merge
-fork<I, O>({ id, mode: 'settle', paths: () => Step[], merge: (results: SettleResult[]) => O })
+inParallel<I, O>({ id, mode: 'settle', paths: () => Step[], merge: (results: SettleResult[]) => O })
 ```
 
-Each fork path gets a deep clone of parent state. Mutations in one path don't affect siblings.
+Each parallel path gets a deep clone of parent state. Mutations in one path don't affect siblings.
 
-Each path is also a memory child boundary: it inherits the parent's layers and tool pool, `onSpawn` seeds its per-path layer state (items from `onSpawn` are NOT appended — the path already has the parent's item log), and `onReturn` merges a *successful* path back. Merges are serialised across paths, so concurrent workers don't clobber one parent state.
+Each path is also a context child boundary: it inherits the parent's layers and tool pool, `onSpawn` seeds its per-path layer state (items from `onSpawn` are NOT appended — the path already has the parent's item log), and `onReturn` merges a *successful* path back. Merges are serialised across paths, so concurrent workers don't clobber one parent state.
 
 ### spawn
 
-Child execution with context boundary. Memory layers control what state crosses the boundary.
+Child execution with context boundary. Context layers control what state crosses the boundary.
 
 ```typescript
-spawn<TMemory = ContextMemory, I = unknown, O = unknown>({
+spawn<TContext = ContextData, I = unknown, O = unknown>({
   id: string;
-  child: Step<TMemory, I, O>;
-  memory?: MemoryConfig | MemoryLayer[];
+  child: Step<TContext, I, O>;
+  context?: ContextConfig | ContextLayer[];
   timeout?: number;
   subprocess?: SubprocessAdapter; // per-step adapter override
-}): StepSpawn<TMemory, I, O>
+}): StepSpawn<TContext, I, O>
 ```
 
-Per-step `subprocess` mirrors `step.run` — use it to pin a specific spawn to an out-of-process adapter (real OS subprocess with durable handle manifests) or a test double (in-memory adapter that records the request for assertions). Resolution precedence is the same: `detachedSpawn-overrides.subprocess ?? step.subprocess ?? harness.subprocess`.
+Per-step `subprocess` mirrors `step.runCode` — use it to pin a specific spawn to an out-of-process adapter (real OS subprocess with durable handle manifests) or a test double (in-memory adapter that records the request for assertions). Resolution precedence is the same: `detachedSpawn-overrides.subprocess ?? step.subprocess ?? harness.subprocess`.
 
 ### loop
 
@@ -136,22 +136,22 @@ loop<I, O>({
 }): StepLoop<I, O>
 ```
 
-### every
+### schedule
 
 Schedule a step on a fixed interval, optionally woken sooner by a channel message. The operator runs forever until the executing context is aborted; cancellation flows through `harness.abort` and interrupts the parking promise immediately.
 
 ```typescript
-every<I, O>({
+schedule<I, O>({
   id: string;
   step: Step<I, O>;
-  ms: number;                          // period, start-to-start
-  wakeOn?: Channel<unknown>;           // any message cuts the wait short
+  interval: number;                    // period, start-to-start
+  inbox?: Channel<unknown>;            // any message cuts the wait short
   onError?: 'continue' | 'fail';       // default 'continue'
   jitter?: number;                     // default 0; ms ± randomized
-}): StepEvery<I, O>
+}): StepSchedule<I, O>
 ```
 
-`onError: 'continue'` (default) emits an `every.iteration.error` span event with the caught error attached, then re-loops — daemon-friendly. `onError: 'fail'` propagates and terminates the operator (and any enclosing `fork`). Returns `Step<I, void>` so it composes into `fork({ paths })` and `spawn({ child })` for orchestrating long-running scheduled work.
+`onError: 'continue'` (default) emits an `schedule.iteration.error` span event with the caught error attached, then re-loops — daemon-friendly. `onError: 'fail'` propagates and terminates the operator (and any enclosing `inParallel`). Returns `Step<I, void>` so it composes into `inParallel({ paths })` and `spawn({ child })` for orchestrating long-running scheduled work.
 
 ### tool
 
@@ -165,7 +165,7 @@ tool<I, O>({
   output: ZodType<O>;
   execute: (args: I, toolCtx: ToolExecutionContext) => Promise<O>;
   needsApproval?: boolean;
-  memory?: ToolMemoryDeclaration;
+  context?: ToolContextDeclaration;
   ui?: ToolUiDeclaration<I, O>;           // call/progress/result/error render fns (generative UI)
   itemSchemas?: ItemSchemaExtensions;     // { items?, developerMessages?, toolCalls?, toolResults? }
   decorateResultItem?: (params) => Item;  // enrich the harness-created tool-result item
@@ -185,19 +185,19 @@ is typed from `event` (the non-generator `tool()` has no events to render).
 
 ### step.claudeCode / step.codex / step.opencode / step.pi
 
-Sub-harness steps. Delegate one turn to an external coding-agent runtime (Claude Code, Codex, opencode, pi) the way `step.llm` delegates a turn to a model. Each builder is its own `Step.kind` (`'claude-code'`, `'codex'`, `'opencode'`, `'pi'`) but all share the `StepSubHarness` shape and one interpreter handler.
+Sub-harness steps. Delegate one turn to an external coding-agent runtime (Claude Code, Codex, opencode, pi) the way `step.callModel` delegates a turn to a model. Each builder is its own `Step.kind` (`'claude-code'`, `'codex'`, `'opencode'`, `'pi'`) but all share the `StepSubHarness` shape and one interpreter handler.
 
 ```typescript
-step.claudeCode<TMemory = ContextMemory, I = unknown, O = unknown>({
+step.claudeCode<TContext = ContextData, I = unknown, O = unknown>({
   id: string;
-  harness: Lazy<SubHarness, TMemory>;                 // adapter from the matching factory
-  prompt: Lazy<string, TMemory>;                      // the fresh turn input
+  harness: Lazy<SubHarness, TContext>;                 // adapter from the matching factory
+  prompt: Lazy<string, TContext>;                      // the fresh turn input
   settings?: SubHarnessSettings;
-  instructions?: Lazy<string | undefined, TMemory>;   // first-message system prompt
-  output?: ZodType<O>;                                // structured output, like step.llm
+  instructions?: Lazy<string | undefined, TContext>;   // first-message system prompt
+  output?: ZodType<O>;                                // structured output, like step.callModel
   session?: SubHarnessSessionPolicy;
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
-}): StepSubHarness<TMemory, I, O>
+}): StepSubHarness<TContext, I, O>
 // step.codex / step.opencode / step.pi take the identical opts.
 ```
 
@@ -244,7 +244,7 @@ interface SubHarnessSessionPolicy {
 
 **JSON workflow:** the same four agents are JSON node kinds (`claude-code` / `codex` / `opencode` / `pi`) with fields `prompt`, `instructions?`, `settings?`, `session?`. Adapters are resolved at hydration from `HydrationContext.subHarnesses` (a `Map<SubHarnessKind, SubHarness>`); build it with `createSubHarnessRegistry(claudeCode(), codex())` from `@noetic-tools/sub-harness`. An unregistered kind fails with `UNKNOWN_SUB_HARNESS_REFERENCE`.
 
-**The `SubHarness` contract + `defineSubHarness`.** The contract lives in `@noetic-tools/types` (next to `MemoryLayer`); `@noetic-tools/core` depends only on the *type* and runs adapter *instances* you pass in — it never imports an adapter package (enforced by `.sentrux/rules.toml`). To author a new adapter, depend on `@noetic-tools/sub-harness` and call `defineSubHarness`, supplying a *runner* (an async generator yielding `SubHarnessStreamPart`s for one turn):
+**The `SubHarness` contract + `defineSubHarness`.** The contract lives in `@noetic-tools/types` (next to `ContextLayer`); `@noetic-tools/core` depends only on the *type* and runs adapter *instances* you pass in — it never imports an adapter package (enforced by `.sentrux/rules.toml`). To author a new adapter, depend on `@noetic-tools/sub-harness` and call `defineSubHarness`, supplying a *runner* (an async generator yielding `SubHarnessStreamPart`s for one turn):
 
 ```typescript
 import { defineSubHarness, commonTool, type SubHarnessRunner } from '@noetic-tools/sub-harness';
@@ -309,7 +309,7 @@ until.maxCost(n)               // Stop when cumulative cost exceeds n
 until.maxDuration(ms)          // Stop after ms milliseconds
 until.noToolCalls()            // Stop when LLM doesn't call any tools
 until.verified(fn)             // Stop when verification passes
-until.never()                  // Never stop (for `every` / forever-loops with external abort)
+until.never()                  // Never stop (for `schedule` / forever-loops with external abort)
 until.converged(opts)          // Stop when output stabilizes
 until.outputContains(marker)   // Stop when last output text contains `marker` (substring)
 until.outputEquals(sentinel)   // Stop when last output text === `sentinel` (exact match)
@@ -321,36 +321,25 @@ all(...predicates)       // Stop when ALL predicates fire
 
 ## Patterns
 
-### react
-
-ReAct loop: LLM with tools, repeat until no tool calls.
+Recurring agent shapes are compositions of the primitives, not separate APIs. Two canonical recipes:
 
 ```typescript
-react({
-  model: string;
-  instructions?: string;
-  tools: Tool[];
-  maxSteps?: number;
-  maxCost?: number;
-  memory?: MemoryConfig | MemoryLayer[];
-}): StepLoop | StepSpawn
-```
+// ReAct: LLM with tools, repeat until no tool calls.
+const react = loop({
+  id: 'react',
+  steps: [step.callModel({ id: 'work', model, instructions, tools })],
+  until: any(until.noToolCalls(), until.maxSteps(25)),
+});
 
-When `memory` is provided, automatically wraps the loop in a `spawn` with those layers.
-
-### ralphWiggum
-
-Outer verify-and-retry loop wrapping inner ReAct. Each iteration gets a fresh context.
-
-```typescript
-ralphWiggum({
-  model: string;
-  instructions: string;
-  tools: Tool[];
-  verify: (output: unknown) => Promise<{ pass: boolean; feedback?: string }>;
-  maxIterations?: number;
-  innerMaxSteps?: number;
-}): StepLoop
+// Ralph Wiggum: outer verify-and-retry loop; each attempt spawns a fresh context.
+const ralph = loop({
+  id: 'verify-retry',
+  steps: [spawn({ id: 'attempt', child: react })],
+  until: any(
+    until.verified(async (output) => ({ pass: await checksPass(output) })),
+    until.maxSteps(50),
+  ),
+});
 ```
 
 ### interview
@@ -367,7 +356,7 @@ interview<Q, C>({
   onComplete: (envelope: C) => Promise<void>;
   maxQuestions?: number;          // default 8
   formatAnswer?: (a: InterviewQuestionAnswer) => string;
-}): Step<ContextMemory, string, InterviewResult<Q, C>>
+}): Step<ContextData, string, InterviewResult<Q, C>>
 
 type InterviewResult<Q, C> =
   | { status: 'complete'; envelope: C }
@@ -383,7 +372,7 @@ interface InterviewQuestionAnswer {
 
 `onComplete` fires once when the model emits the completion envelope. The returned step's output mirrors the final state for callers that prefer return-value style over the callback.
 
-### compilePlan / adaptivePlan
+### compilePlan
 
 Dynamic multi-agent task trees.
 
@@ -394,13 +383,9 @@ compilePlan<O>(
   constraints?: PlanConstraints,
   executeStep?: ExecuteStepFn,
 ): Step
-
-adaptivePlan<O>({
-  planner, agents, constraints, maxRevisions, executeStep?,
-}): Step
 ```
 
-**Important:** When plans mix sequential and parallel execution (e.g., a fork inside a sequential chain), `executeStep` must be provided. Without it, only `run`-kind children can be executed in sequential nodes. When using the eval framework, the agent harness's `run` method serves as `executeStep`:
+**Important:** When plans mix sequential and parallel execution (e.g., a parallel node inside a sequential chain), `executeStep` must be provided. Without it, only `runCode`-kind children can be executed in sequential nodes. When using the eval framework, the agent harness's `run` method serves as `executeStep`:
 
 ```typescript
 // callModel auto-detected from OPENROUTER_API_KEY when omitted
@@ -408,14 +393,14 @@ const harness = new AgentHarness({ name: 'planner', params: {} });
 const compiled = compilePlan(plan, agents, undefined, harness.run.bind(harness));
 ```
 
-## Memory Layers
+## Context Layers
 
-### MemoryLayer config fields
+### ContextLayer config fields
 
 Beyond `id`, `slot`, `scope`, `budget`, `hooks`, `provides`, `timeouts`, and `rerenderTiming`, a layer accepts:
 
 ```typescript
-interface MemoryLayer<TState> {
+interface ContextLayer<TState> {
   // ...
   /** What to do when init() throws. Default 'throw' (fail-loud: surface + abort). */
   onInitError?: 'throw' | 'disable';
@@ -426,13 +411,13 @@ interface MemoryLayer<TState> {
 }
 ```
 
-- **`onInitError`** — `'throw'` (default) surfaces the init error and aborts the execution; memory is load-bearing and silently disabling it hides failures (and for steering would fail *open*). `'disable'` logs a diagnostic and runs without the layer (its other hooks are skipped). Opt in only for non-critical layers.
+- **`onInitError`** — `'throw'` (default) surfaces the init error and aborts the execution; layer state is load-bearing and silently disabling it hides failures (and for steering would fail *open*). `'disable'` logs a diagnostic and runs without the layer (its other hooks are skipped). Opt in only for non-critical layers.
 - **`recallMode`** — `'atomic'` (default) runs `recall()` synchronously before the model call. `'eventual'` serves `recall()` from a per-harness cache that never blocks; the cache refreshes after the layer's `store()` produces new state, so the next turn sees it. Use `'eventual'` for slow recall paths that can tolerate one-turn staleness.
 - **`placement`** — which band of the assembled view this layer's `recall()` output lands in, and so whether it is pinned for the prompt cache. `'anchor'` sits before history and is pinned; `'live'` sits after history and re-renders every turn; `'auto'` (default) lets the runtime pick from observed churn. See [Prompt-cache anchoring](#prompt-cache-anchoring-placement).
 
 ### Projection & recall budget
 
-The recall token budget and the assembled context window are governed by a `ProjectionPolicy`, resolved per LLM step as `step.projection` → `harness.projection` (`AgentConfig.projection`) → `DEFAULT_PROJECTION`.
+The recall token budget and the assembled context window are governed by a `ProjectionPolicy`, resolved per `callModel` step as `step.projection` → `harness.projection` (`AgentConfig.projection`) → `DEFAULT_PROJECTION`.
 
 ```typescript
 interface ProjectionPolicy {
@@ -450,12 +435,12 @@ const DEFAULT_PROJECTION = { tokenBudget: 128_000, responseReserve: 4_000, overf
 ```typescript
 interface AgentConfig {
   // ...
-  projection?: ProjectionPolicy;   // default for all LLM steps
+  projection?: ProjectionPolicy;   // default for all callModel steps
   forceAtomicRecall?: boolean;     // recall every layer atomically, bypass the eventual cache
   contextCache?: ContextCacheConfig; // prompt-cache anchoring; on by default
 }
 
-interface StepLLM {
+interface StepCallModel {
   // ...
   projection?: ProjectionPolicy;   // overrides the harness default for this step
 }
@@ -529,30 +514,30 @@ interface RenderDeltaParams<TState> {
 renderDelta?(params: RenderDeltaParams<TState>): Promise<string | null>;
 ```
 
-Return a compact description of the change, or `null` to fall back to republishing the full new content. Never called for `'live'` layers. A hook that throws or exceeds the layer's `recall` timeout (default 5s) falls back to the default — a supersede is a correctness obligation and is never skipped because a hook misbehaved. Worth implementing only when a republish would be expensive: `fileReference` implements it to send just the files that changed plus a "no longer referenced" line.
+Return a compact description of the change, or `null` to fall back to republishing the full new content. Never called for `'live'` layers. A hook that throws or exceeds the layer's `recall` timeout (default 5s) falls back to the default — a supersede is a correctness obligation and is never skipped because a hook misbehaved. Worth implementing only when a republish would be expensive: `filesystem` implements it to send just the files that changed plus a "no longer referenced" line.
 
-### workingMemory
+### scratchpad
 
-Thread/resource-scoped structured state, updated via the `working-memory/update` tool (or the legacy `updateWorkingMemory` function call). Updates **deep-merge** into state: nested object keys merge recursively while arrays and primitives replace; `__proto__`/`constructor` are stripped at every depth. An object update applied over prior freeform-string state preserves the old string under a `_previous` key. With a `schema`, the **merged** state is validated on both update paths — a violating tool update throws (the model sees the error), a violating legacy update is dropped with a diagnostic, and corrupt persisted state falls back to `{}` at init.
+Thread/resource-scoped structured state, updated via the `scratchpad/update` tool. Updates **deep-merge** into state: nested object keys merge recursively while arrays and primitives replace; `__proto__`/`constructor` are stripped at every depth. An object update applied over prior freeform-string state preserves the old string under a `_previous` key. With a `schema`, the **merged** state is validated on update — a violating update throws (the model sees the error), and corrupt persisted state falls back to `{}` at init.
 
 ```typescript
-workingMemory({ scope?, schema?, template?, readOnly? })
+scratchpad({ scope?, schema?, template?, readOnly? })
 ```
 
-### observationalMemory
+### observations
 
 Accumulates text, distills to observations when buffer exceeds threshold. Buffers the full conversation: assistant output via `store`, plus user input and tool output via `onItemAppend`. `recall` trims output to the allocated budget.
 
 ```typescript
-observationalMemory({ bufferThreshold?, maxObservations?, scope?, observer? })
+observations({ bufferThreshold?, maxObservations?, scope?, observer? })
 ```
 
-### temporalMemory
+### temporal
 
 LLM-backed long-term memory for time-anchored recall. Distills the conversation into a key-value ledger of timestamped facts (`Record<isoTs, string[]>`) and answers temporal queries on demand. `recall` injects a `<current_datetime>` block (default on) so the model can resolve relative dates and compute differences. The `temporal/searchMemory` tool (auto-injected from `provides`) takes `{ query }` and returns `{ facts, date?, fuzzy? }`.
 
 ```typescript
-temporalMemory({
+temporal({
   now?, scope?,            // clock injection; 'thread' | 'resource' (default 'resource')
   extract?, search?,       // FactExtractor / FactSearcher — host-injected LLM callbacks
   bufferThreshold?,        // tokens before extract runs, default 2000
@@ -566,50 +551,50 @@ temporalMemory({
 // id 'temporal', slot Slot.REMINDER (80). LLM-agnostic: omit extract/search and the
 // layer only buffers / the tool returns the raw ledger (never fabricates facts).
 // Buffers assistant output (store) + user/tool input (onItemAppend) for extraction.
-// The code agent wires step.llm-backed callbacks and installs it by default.
+// The code agent wires step.callModel-backed callbacks and installs it by default.
 ```
 
-### durableTaskState
+### taskState
 
 Persists file lists and checkpoints across executions/iterations within a thread (scope `'thread'`, not `'execution'` — an execution-scoped key would rotate each run and defeat durable rehydration). Checkpoints are capped at the newest 50; `recall` trims its `<task_state>` render to the allocated budget (oldest checkpoints dropped first).
 
 ```typescript
-durableTaskState({ mergeData? })  // 'shallow' (default) | 'namespace'
-// id 'durable-task-state', slot 110, scope 'thread', budget { min: 100, max: 800 }
+taskState({ mergeData? })  // 'shallow' (default) | 'namespace'
+// id 'task-state', slot 110, scope 'thread', budget { min: 100, max: 800 }
 ```
 
-Writable by the model via `provides` → tools `durable-task-state/recordArtifact` (`{ path }` → appends to `files`, idempotent) and `durable-task-state/setTaskData` (`{ key, value }` → sets `data[key]`; refuses the reserved `__outcome`). Recorded artifacts cross child boundaries: `onReturn` unions `files` and merges `data`.
+Writable by the model via `provides` → tools `task-state/recordArtifact` (`{ path }` → appends to `files`, idempotent) and `task-state/setTaskData` (`{ key, value }` → sets `data[key]`; refuses the reserved `__outcome`). Recorded artifacts cross child boundaries: `onReturn` unions `files` and merges `data`.
 
-`mergeData` picks the `data` merge at a spawn/fork return: `'shallow'` is `{ ...parent, ...child }` (concurrent workers writing the same key clobber each other), `'namespace'` stores the child's map under `childCtx.executionId` — use it for coordinator/worker fan-out.
+`mergeData` picks the `data` merge at a spawn/inParallel return: `'shallow'` is `{ ...parent, ...child }` (concurrent workers writing the same key clobber each other), `'namespace'` stores the child's map under `childCtx.executionId` — use it for coordinator/worker fan-out.
 
-### fileReference
+### filesystem
 
 Tracks `#path/to/file` references in user messages: transforms them to anchor links, reads + LLM-scores each referenced file, and injects contents on recall (priority-ordered, budget-trimmed). New references are read and scored **in parallel**; the layer sets `timeouts: { onItemAppend: 30_000 }` since its append hook does fs + LLM work. Path security: lexical containment in `baseDir` plus a per-component symlink walk (any symlinked path component below `baseDir` is rejected unless `followSymlinks: true`).
 
 ```typescript
-fileReference({ baseDir?, slot?, scoringModel?, maxFileSize?, followSymlinks?, allowedExtensions? })
-// id 'file-reference', slot Slot.RAG (350), scope 'thread', budget 'auto'
+filesystem({ baseDir?, slot?, scoringModel?, maxFileSize?, followSymlinks?, allowedExtensions? })
+// id 'filesystem', slot Slot.RAG (350), scope 'thread', budget 'auto'
 // placement: 'anchor' — a large payload that changes a file at a time. Implements
 // renderDelta: a supersede carries only the changed file blocks plus a
 // "No longer referenced: ..." line, instead of republishing the whole set.
 ```
 
-### staticContent
+### instructions
 
 Loads content at init, injects as tagged XML block in every recall. When over budget, the recalled block is trimmed with the closing tag preserved (well-formed XML); a zero budget is fail-open (full content).
 
 ```typescript
-staticContent({ load: () => Promise<string>, tag?, id?, slot?, scope? })
+instructions({ load: () => Promise<string>, tag?, id?, slot?, scope? })
 // placement: 'anchor' — loaded once in init and never rewritten, so it is pinned
 // outright rather than waiting for churn telemetry to reach the same verdict.
 ```
 
-### historyWindow
+### history
 
 Caps the trailing items projected to the LLM each turn. Storage (`itemLog`, session JSON) is untouched — the cap is a read-side projection via the `projectHistory` hook. Defaults to `maxItems: 40`. Includes a minimum-exchange guarantee (always preserves at least one user + one assistant message), but that expansion is bounded to `maxItems × 4` so a tool-only burst can't grow the window unbounded. Re-attaches a head `system`/anchor message that fell outside the window, and strips orphan `function_call` / `function_call_output` at the slice boundary.
 
 ```typescript
-historyWindow({ maxItems?: number })  // default 40
+history({ maxItems?: number })  // default 40
 ```
 
 ### promptEngineeringLayer
@@ -617,7 +602,7 @@ historyWindow({ maxItems?: number })  // default 40
 Core behavioral guidelines with tool usage tracking and error-based adaptation. Part of the CLI's enhanced prompt engineering system (`@noetic-tools/cli`).
 
 ```typescript
-function promptEngineeringLayer(): MemoryLayer<PromptEngineeringState>
+function promptEngineeringLayer(): ContextLayer<PromptEngineeringState>
 ```
 
 | Property | Value |
@@ -635,7 +620,7 @@ Recall injects communication efficiency rules, tool-usage reminders based on fre
 Adaptive communication patterns (concise/normal/verbose) based on user message analysis. Part of the CLI's enhanced prompt engineering system (`@noetic-tools/cli`).
 
 ```typescript
-function communicationStyleLayer(): MemoryLayer<CommunicationStyleState>
+function communicationStyleLayer(): ContextLayer<CommunicationStyleState>
 ```
 
 | Property | Value |
@@ -658,7 +643,7 @@ interface EnvironmentContextConfig {
   shell: ShellAdapter;
 }
 
-function environmentContextLayer(config: EnvironmentContextConfig): MemoryLayer<EnvironmentContextState>
+function environmentContextLayer(config: EnvironmentContextConfig): ContextLayer<EnvironmentContextState>
 ```
 
 | Property | Value |
@@ -681,7 +666,7 @@ interface ToolGuidanceConfig {
   mode?: 'normal' | 'planning';
 }
 
-function toolGuidanceLayer(config: ToolGuidanceConfig): MemoryLayer<ToolGuidanceState>
+function toolGuidanceLayer(config: ToolGuidanceConfig): ContextLayer<ToolGuidanceState>
 ```
 
 | Property | Value |
@@ -704,7 +689,7 @@ interface PlanningModeConfig {
   currentMode: 'normal' | 'planning';
 }
 
-function planningModeLayer(config: PlanningModeConfig): MemoryLayer<PlanningModeState>
+function planningModeLayer(config: PlanningModeConfig): ContextLayer<PlanningModeState>
 ```
 
 | Property | Value |
@@ -729,7 +714,7 @@ interface SkillsLayerConfig {
 function skillsLayer(
   skills: SkillDefinition[],
   config: SkillsLayerConfig,
-): MemoryLayer<SkillsLayerState>
+): ContextLayer<SkillsLayerState>
 ```
 
 | Property | Value |
@@ -742,12 +727,12 @@ function skillsLayer(
 
 Recall lists model-invocable skills as `<available_skills>` when none are activated. Upon activation, injects full skill instructions. Store detects `activateSkill` calls, processes inline shell commands (`!`), and caches results (LRU, max 50). Spawn clones cache to child.
 
-### toolMemoryLayer
+### toolCalls
 
-Generates layers from `ToolMemoryDeclaration` on tools. Tools sharing the same `memory.id` share state. Defaults to `'execution'` scope.
+Generates layers from `ToolContextDeclaration` on tools. Tools sharing the same `context.id` share state. Defaults to `'execution'` scope.
 
 ```typescript
-toolMemoryLayer(tools: Tool[], opts?: { slot? })
+toolCalls(tools: Tool[], opts?: { slot? })
 ```
 
 ### createSteeringFileLayer (`@noetic-tools/cli`)
@@ -758,7 +743,7 @@ Surfaces a per-task `steering.md` file to the agent run servicing that task. The
 import { createSteeringFileLayer } from '@noetic-tools/cli/src/memory/steering-file-layer.js';
 
 const layer = createSteeringFileLayer();
-// slot:  Slot.STEERING (90) — ahead of working memory and observations
+// slot:  Slot.STEERING (90) — ahead of the scratchpad and observations
 // scope: 'execution'
 // budget: { min: 0, max: 8000 }
 ```
@@ -781,7 +766,7 @@ import { createFixFeedbackLayer } from '@noetic-tools/cli/src/commands/builtins/
 const layer = createFixFeedbackLayer({
   initial: { plan, description, accumulatedIssues, attempt: 1 },
 });
-// slot:  Slot.WORKING_MEMORY (100)
+// slot:  Slot.SCRATCHPAD (100)
 // scope: 'thread'
 // recall(): emits a developer-role "# Implementation context" block when state is non-empty.
 // provides.update: layerFn that merges new feedback (plan/description/issues/attempt).
@@ -807,22 +792,22 @@ const layer = createPlannerAttemptLayer({ projectRoot, maxAttempts? });
 
 `MAX_PLANNER_ATTEMPTS` (default 3) caps re-spawns per task so a permanently-failing planner can't burn unbounded LLM tokens on the autopilot's 60-second tick.
 
-### ToolMemoryDeclaration
+### ToolContextDeclaration
 
-Declared on a `Tool`'s `memory` property. The runtime auto-generates a `MemoryLayer` per unique `id`.
+Declared on a `Tool`'s `context` property. The runtime auto-generates a `ContextLayer` per unique `id`.
 
 ```typescript
-interface ToolMemoryDeclaration<TState = unknown> {
+interface ToolContextDeclaration<TState = unknown> {
   id?: string;                              // shared id (defaults to tool.name)
   init: () => TState;                       // factory for initial state
   recall: (state: TState) => string | null; // project into LLM context
 }
 ```
 
-Tools read/write state imperatively via `toolCtx.memory`:
+Tools read/write state imperatively via `toolCtx.context`:
 
 ```typescript
-interface ToolMemory {
+interface ToolContext {
   get<T>(layerId: string): T | undefined;
   set<T>(layerId: string, state: T): void;
 }
@@ -830,12 +815,12 @@ interface ToolMemory {
 
 ### findFunctionCall
 
-Utility for function-call memory patterns. Searches items for the first `function_call` matching a name, returns parsed JSON arguments.
+Utility for function-call layer-state patterns. Searches items for the first `function_call` matching a name, returns parsed JSON arguments.
 
 ```typescript
 import { findFunctionCall } from '@noetic-tools/core';
 
-const args = findFunctionCall(newItems, 'updateWorkingMemory');
+const args = findFunctionCall(newItems, 'saveNote');
 // Returns Record<string, unknown> | null
 ```
 
@@ -850,8 +835,8 @@ steering({
   rules: SteeringRule[];
   maxLedgerEntries?: number;  // default 100
   maxRetries?: number;        // default 1 (retries on unparseable verdict)
-  scope?: MemoryScope;        // default 'execution'
-}): MemoryLayer<SteeringState>
+  scope?: ContextScope;        // default 'execution'
+}): ContextLayer<SteeringState>
 // LLM-evaluated rules use callModel from the execution context (configured
 // via AgentHarness's `llm` option or OPENROUTER_API_KEY). If no LLM provider
 // is configured, LLM-evaluated rules throw NoeticConfigError (MISSING_CALL_MODEL).
@@ -875,13 +860,13 @@ interface SteeringRule {
 
 **Lifecycle hooks:** `beforeToolCall` (intercept tools), `afterModelCall` (validate responses), `recall` (inject async feedback), `onSpawn` (clone ledger).
 
-### planMemory
+### plan
 
 Manages PRD authoring and plan execution lifecycle. Enters a restricted "plan mode" where only read-only tools are allowed, the LLM writes a PRD and structures the plan as a JSON `WorkflowDocument` (spec 26) plus named sub-workflows, then exits to execution.
 
 ```typescript
-planMemory({
-  scope?: MemoryScope;                    // default 'thread'
+plan({
+  scope?: ContextScope;                    // default 'thread'
   additionalAllowedTools?: string[];      // extra tools allowed in plan mode
   maxPrdLength?: number;                  // default 50_000
   maxDepth?: number;                      // workflowDepth cap for tree + workflows; default 5
@@ -893,7 +878,7 @@ planMemory({
   additionalPlanInstructions?: string;
   onEnterSession?: () => Promise<{ slug: string }>;
   onExit?: (state: PlanState) => Promise<{ approved: boolean }>;
-}): MemoryLayer<PlanState>
+}): ContextLayer<PlanState>
 ```
 
 **State:** `{ phase, prd, planTree: WorkflowDocument | null, workflows: Record<string, WorkflowDocument>, executionLog, version, planSlug? }`. Phase transitions: `idle → planning → executing → completed/failed`.
@@ -922,34 +907,34 @@ planMemory({
 
 ## Layer Provides API
 
-Layers expose typed data and functions via the `provides` field. Data becomes direct properties and functions become async methods on `ctx.memory['layerId']`. Functions are also automatically injected as LLM tools (namespaced `layerId/fnName`).
+Layers expose typed data and functions via the `provides` field. Data becomes direct properties and functions become async methods on `ctx.context['layerId']`. Functions are also automatically injected as LLM tools (namespaced `layerId/fnName`).
 
-### memory()
+### context()
 
 Wraps a layer tuple for type-safe inference. Uses `const` type parameter to preserve literal types without `as const`.
 
 ```typescript
-memory<const T extends readonly MemoryLayer[]>(layers: T): MemoryConfig<T>
+context<const T extends readonly ContextLayer[]>(layers: T): ContextConfig<T>
 ```
 
-### InferMemory\<T\>
+### InferContext\<T\>
 
-Extracts the typed memory shape from a `MemoryConfig` (like `z.infer<>` for Zod).
+Extracts the typed context shape from a `ContextConfig` (like `z.infer<>` for Zod).
 
 ```typescript
-const mem = memory([workingMemory(), counterLayer()]);
-type Mem = InferMemory<typeof mem>;
-// Use as: step.run<Mem>({ execute: (input, ctx) => { ctx.memory.counter.value } })
+const layers = context([scratchpad(), counterLayer()]);
+type Ctx = InferContext<typeof layers>;
+// Use as: step.runCode<Ctx>({ execute: (input, ctx) => { ctx.context.counter.value } })
 ```
 
-### MemoryConfig
+### ContextConfig
 
 Typed wrapper preserving individual layer types for compile-time inference.
 
 ```typescript
-interface MemoryConfig<TLayers extends readonly MemoryLayer[] = readonly MemoryLayer[]> {
+interface ContextConfig<TLayers extends readonly ContextLayer[] = readonly ContextLayer[]> {
   readonly layers: TLayers;
-  readonly _shape: InferMemoryShape<TLayers>;  // phantom — never accessed at runtime
+  readonly _shape: InferContextShape<TLayers>;  // phantom — never accessed at runtime
 }
 ```
 
@@ -977,30 +962,30 @@ layerFn<TInput, TOutput, TState>({
 }): LayerFunctionDecl<TInput, TOutput, TState>
 ```
 
-### ctx.memory
+### ctx.context
 
 Layer provides keyed by layer ID. Data entries are live property reads; function entries are async callable methods.
 
 ```typescript
-const mem = memory([workingMemory()]);
-type Mem = InferMemory<typeof mem>;
+const layers = context([scratchpad()]);
+type Ctx = InferContext<typeof layers>;
 
-step.run<Mem>({
+step.runCode<Ctx>({
   id: 'work',
   execute: async (input, ctx) => {
-    ctx.memory['working-memory'].snapshot;        // WorkingMemoryState (live read)
-    await ctx.memory['working-memory'].update({ k: 1 }); // calls layerFn, updates state
+    ctx.context['scratchpad'].snapshot;        // ScratchpadState (live read)
+    await ctx.context['scratchpad'].update({ k: 1 }); // calls layerFn, updates state
   },
 });
 ```
 
 ### Automatic LLM tool injection
 
-Layer functions in `provides` are automatically exposed as tools to any `step.llm` running in the same context. Tool names are `layerId/functionName` (e.g. `working-memory/update`).
+Layer functions in `provides` are automatically exposed as tools to any `step.callModel` running in the same context. Tool names are `layerId/functionName` (e.g. `scratchpad/update`).
 
 ## CwdState (shared cwd)
 
-Every `Context` carries a mutable `cwdState: CwdState` that tools resolve relative paths against at execution time. The Bash tool intercepts plain `cd <path>` and mutates the shared state via `setToolCwd`; subsequent Read, Write, Edit, Ls, Grep, Find, lsp, and InteractiveTerminal calls see the new cwd. Spawned/forked children get a snapshot (POSIX-fork semantics).
+Every `Context` carries a mutable `cwdState: CwdState` that tools resolve relative paths against at execution time. The Bash tool intercepts plain `cd <path>` and mutates the shared state via `setToolCwd`; subsequent Read, Write, Edit, Ls, Grep, Find, lsp, and InteractiveTerminal calls see the new cwd. Spawned and parallel children get a snapshot (POSIX-fork semantics).
 
 ```typescript
 interface CwdState {
@@ -1029,7 +1014,7 @@ The mutation policy's `sessionCwd` is anchored to the launch cwd and does NOT fo
 
 ## FsAdapter
 
-Filesystem abstraction used by the harness, tools, memory layers, and skill discovery. Defaults to `createLocalFsAdapter()` (Node.js `fs/promises`).
+Filesystem abstraction used by the harness, tools, context layers, and skill discovery. Defaults to `createLocalFsAdapter()` (Node.js `fs/promises`).
 
 ```typescript
 interface FsStats {
@@ -1079,7 +1064,7 @@ tool({
   },
 });
 
-// In a memory layer hook:
+// In a context layer hook:
 hooks: {
   async init({ ctx }) {
     const data = await ctx.fs.readFileText('./state.json');
@@ -1088,7 +1073,7 @@ hooks: {
 }
 
 // From Context in a step:
-step.run({
+step.runCode({
   id: 'load',
   execute: async (input, ctx) => {
     return ctx.fs.readFileText('./data.txt');
@@ -1098,7 +1083,7 @@ step.run({
 
 ## ShellAdapter
 
-Shell execution abstraction used by the harness, tools, memory layers, and skill processing. Defaults to `createLocalShellAdapter()` (Bun.spawn). The `@noetic-tools/cli` package also provides `createEmulatedShellAdapter(fs)` backed by `just-bash` for sandboxed environments.
+Shell execution abstraction used by the harness, tools, context layers, and skill processing. Defaults to `createLocalShellAdapter()` (Bun.spawn). The `@noetic-tools/cli` package also provides `createEmulatedShellAdapter(fs)` backed by `just-bash` for sandboxed environments.
 
 ```typescript
 interface ShellExecOptions {
@@ -1162,7 +1147,7 @@ tool({
   },
 });
 
-// In a memory layer hook:
+// In a context layer hook:
 hooks: {
   async init({ ctx }) {
     const result = await ctx.shell.exec('git rev-parse HEAD', { cwd: '.' });
@@ -1210,7 +1195,7 @@ await harness.execute('follow-up', { threadId: 'thread-1' });
 await harness.abort({ threadId: 'thread-1', reason: 'user' });
 
 // Preview the items that would be sent on the next turn — accumulated history
-// plus harness-level memory layer recall outputs. Read-mostly debug helper for
+// plus harness-level context layer recall outputs. Read-mostly debug helper for
 // inspecting "what the model will see"; safe to call between turns.
 const items = await harness.previewRequestItems({ threadId: 'thread-1' });
 ```
@@ -1229,7 +1214,7 @@ const items = await harness.previewRequestItems({ threadId: 'thread-1' });
 
 ### Harness-wide Tools
 
-`AgentHarnessOpts.tools?: Tool[]` seeds a tool pool merged with tools collected from `initialStep` into every context's `ctx.unifiedTools`. Dedupe is **name-based, first-wins** — the merge order is `[...stepCollectedTools, ...harnessTools]`, so on a name collision the step-collected instance wins. This is the supported way to provide tools when the workflow graph is fully static and `step.llm.tools` is a `(ctx) => ctx.unifiedTools.filter(...)` getter — function-form `step.tools` cannot be walked by `collectAllTools`, so the harness option is the only way to make those tools visible to the pool.
+`AgentHarnessOpts.tools?: Tool[]` seeds a tool pool merged with tools collected from `initialStep` into every context's `ctx.unifiedTools`. Dedupe is **name-based, first-wins** — the merge order is `[...stepCollectedTools, ...harnessTools]`, so on a name collision the step-collected instance wins. This is the supported way to provide tools when the workflow graph is fully static and `step.callModel.tools` is a `(ctx) => ctx.unifiedTools.filter(...)` getter — function-form `step.tools` cannot be walked by `collectAllTools`, so the harness option is the only way to make those tools visible to the pool.
 
 ```typescript
 const harness = new AgentHarness({
@@ -1292,17 +1277,17 @@ const msg2 = harness.tryRecv(channel, ctx);
 
 | Call | Description |
 |------|-------------|
-| `ctx.abort(reason?)` | Synchronous, no layer teardown. Cascades **down** the execution tree — every live `fork` path and `spawn` child (and their descendants) is aborted too; never up, so aborting one path leaves the parent and siblings running. First call wins, so `ctx.abortReason` is stable. |
-| `await harness.cancel(ctx, reason?)` | Same abort, plus memory-layer teardown per context — `onComplete` with `outcome: 'aborted'`, then `dispose` — run bottom-up (children before parents). No-op on an already-cancelled context. |
+| `ctx.abort(reason?)` | Synchronous, no layer teardown. Cascades **down** the execution tree — every live `inParallel` path and `spawn` child (and their descendants) is aborted too; never up, so aborting one path leaves the parent and siblings running. First call wins, so `ctx.abortReason` is stable. |
+| `await harness.cancel(ctx, reason?)` | Same abort, plus context-layer teardown per context — `onComplete` with `outcome: 'aborted'`, then `dispose` — run bottom-up (children before parents). No-op on an already-cancelled context. |
 | `await harness.abort(scope?)` | Session-level: cancels the in-flight *turn* for a thread (queued messages preserved), which aborts that turn's context tree. |
 
-Cancellation reaches inside the work in flight: blocked `recv` / parked `send` reject with `cancelled`, the provider stream and tool-round loop stop mid-generation, and a sub-harness (`step.claudeCode` etc.) turn is interrupted through the adapter's abort signal. Tokens and cost already spent stay charged to the context; the truncated response is not returned — the step throws `cancelled`. Beyond those points it is cooperative: a `step.run` body that ignores `ctx.aborted` between `await`s runs to its next step boundary.
+Cancellation reaches inside the work in flight: blocked `recv` / parked `send` reject with `cancelled`, the provider stream and tool-round loop stop mid-generation, and a sub-harness (`step.claudeCode` etc.) turn is interrupted through the adapter's abort signal. Tokens and cost already spent stay charged to the context; the truncated response is not returned — the step throws `cancelled`. Beyond those points it is cooperative: a `step.runCode` body that ignores `ctx.aborted` between `await`s runs to its next step boundary.
 
 `DetachedHandle` is a thin wrapper over the adapter's `SubprocessHandle`. `.await()` polls `adapter.get()` until the handle reaches a terminal status, then reads the result from `handle.metadata.result` (or rehydrates `handle.metadata.error`). The default adapter (`createInMemorySubprocessAdapter()`) runs the step in-process on the microtask queue, so short-lived detached spawns resolve in sub-millisecond time; out-of-process adapters wait for the OS child to exit.
 
 ## Subprocess Adapters and Durable Execution
 
-The harness always holds a `SubprocessAdapter`. Every `step.run`, `spawn`, and `harness.detachedSpawn` dispatches through `harness.subprocess.spawn(...)`. In-process vs out-of-process is a property of the adapter, never of the step. Zero-config harnesses use `createInMemorySubprocessAdapter()`, so dispatch overhead is essentially zero and every pre-existing in-process path keeps its behaviour.
+The harness always holds a `SubprocessAdapter`. Every `step.runCode`, `spawn`, and `harness.detachedSpawn` dispatches through `harness.subprocess.spawn(...)`. In-process vs out-of-process is a property of the adapter, never of the step. Zero-config harnesses use `createInMemorySubprocessAdapter()`, so dispatch overhead is essentially zero and every pre-existing in-process path keeps its behaviour.
 
 ### The adapter interface
 
@@ -1384,7 +1369,7 @@ Pass a `checkpointStore` to the harness constructor to turn `harness.checkpoint(
 interface RestoreContextOptions {
   parent?: Context;
   state?: unknown;
-  memory?: MemoryLayer[];
+  context?: ContextLayer[];
 }
 
 harness.restore(executionId: string, opts?: RestoreContextOptions): Promise<Context | null>;
@@ -1417,7 +1402,7 @@ Both caps degrade resume rather than break it: a step with no entry simply re-ru
 
 Call `clearCheckpoint` when the **workflow changed** — replay happens at the coarsest completed granularity, so a finished parent replays wholesale and an edit to one of its children is never noticed — and when an execution is finished or abandoned, since `checkpointStore.clear()` alone strands the ledger's per-step keys.
 
-The ledger covers control flow and `llm` steps. It does not make tool execution exactly-once: fence effects at the tool/host boundary.
+The ledger covers control flow and `callModel` steps. It does not make tool execution exactly-once: fence effects at the tool/host boundary.
 
 ### `createFileStorage`
 
@@ -1450,7 +1435,7 @@ function storageGetMany<T>(
 
 Implementation contract: missing keys are **absent** from the returned map, never mapped to `null` (a falsy stored value is present); ordering is not guaranteed, so a caller that needs order iterates its own key list and looks values up. `createInMemoryStorage()` and `createFileStorage()` both implement it.
 
-`ScopedStorage` — what a memory layer's `init` hook receives — exposes `getMany` as a **required** method, with scope-relative keys in the result and the fallback supplied by the wrapper.
+`ScopedStorage` — what a context layer's `init` hook receives — exposes `getMany` as a **required** method, with scope-relative keys in the result and the fallback supplied by the wrapper.
 
 ### Host-restart recovery
 
@@ -1512,7 +1497,7 @@ Step builders auto-register at construction; `lookupStep` is the cross-process c
 const Slot = {
   REMINDER: 80,
   STEERING: 90,
-  WORKING_MEMORY: 100,
+  SCRATCHPAD: 100,
   ENTITY: 150,
   OBSERVATIONS: 200,
   PROCEDURAL: 250,
@@ -1528,18 +1513,18 @@ Slot orders layers **within** a band; `placement` picks the band. A slot-90 live
 
 ## Cross-layer state reads
 
-`ExecutionContext.readLayerState<T>(layerId)` returns a sibling layer's current state (or `undefined`). Used when a layer needs to inspect another layer's progress — e.g. the CLI reminder layer reads `plan-memory` to know whether plan mode is active:
+`ExecutionContext.readLayerState<T>(layerId)` returns a sibling layer's current state (or `undefined`). Used when a layer needs to inspect another layer's progress — e.g. the CLI reminder layer reads `plan` to know whether plan mode is active:
 
 ```typescript
-const plan = ctx.readLayerState<{ session?: { mode?: string } }>('plan-memory');
-if (plan?.session?.mode === 'planning') {
+const planState = ctx.readLayerState<{ session?: { mode?: string } }>('plan');
+if (planState?.session?.mode === 'planning') {
   // emit a plan-mode reminder
 }
 ```
 
 Treat returned values as read-only.
 
-## CLI-specific memory layers
+## CLI-specific context layers
 
 These are shipped by `@noetic-tools/cli` on top of the core framework:
 
@@ -1571,7 +1556,7 @@ const instructions = await loadAgentInstructions({ cwd, fs });
 const layer = agentMdLayer({ loader: () => Promise.resolve(instructions) });
 ```
 
-Surfaces `AGENT.md`, `.agent/rules/*.md`, and ancestor/user-global instruction files. Supports `@path.md` imports and skills-style `!command` inline execution (user-origin always; project-origin gated by `config.trustProjectEmbeddedCommands`). See `specs/12a-cli-memory-layers.md` for full discovery order.
+Surfaces `AGENT.md`, `.agent/rules/*.md`, and ancestor/user-global instruction files. Supports `@path.md` imports and skills-style `!command` inline execution (user-origin always; project-origin gated by `config.trustProjectEmbeddedCommands`). See `specs/12a-cli-context-layers.md` for full discovery order.
 
 ## CLI-specific tools
 
@@ -1627,7 +1612,7 @@ input:  { taskId: string; branch?: string }
 output: { task: Task; via: 'wt' | 'git' }
 
 // task_log / task_comment / task_steer — append to log.jsonl. `task_steer`
-// also writes/appends steering.md (read by the steering memory layer when
+// also writes/appends steering.md (read by the steering context layer when
 // NOETIC_TASK_DIR points at this task).
 input:  { taskId: string; message: string }
 output: { entry: LogEntry }     // task_log, task_comment
@@ -1714,7 +1699,7 @@ output: { entries: LogEntry[] }
 
 The full set is 23 tools, mirroring the 23 mutating + read CLI verbs (everything except `--help`). See `specs/21-tasks.md` for the verb table and the complete `Task` / `Milestone` / `Slice` / `Feature` / `Assertion` / `ValidatorRun` / `FixLineage` / `InterviewSession` schemas.
 
-## Memory Layer Hooks
+## Context Layer Hooks
 
 ### onItemAppend
 
@@ -1748,7 +1733,7 @@ type RerenderScope = 'self' | 'slot-after' | 'all';  // default: 'slot-after'
 
 **Layer configuration:**
 ```typescript
-interface MemoryLayer<TState> {
+interface ContextLayer<TState> {
   // ... other fields
   rerenderTiming?: 'immediate' | 'batched';  // default for this layer's re-renders
 }
@@ -1771,7 +1756,7 @@ const contentFilter = {
       };
     },
   },
-} satisfies MemoryLayer<null>;
+} satisfies ContextLayer<null>;
 ```
 
 **Example: Keyword-triggered context injection**
@@ -1802,7 +1787,7 @@ const keywordWatcher = {
       };
     },
   },
-} satisfies MemoryLayer<{ docs: Doc[] }>;
+} satisfies ContextLayer<{ docs: Doc[] }>;
 ```
 
 ### renderDelta
@@ -1846,7 +1831,7 @@ interface LastLayerUsage {
 }
 ```
 
-- `layers[i].tokenCount` comes from each memory layer's own `recall()` `tokenCount`. For a pinned layer, `items` and `tokenCount` are the pinned bytes — what the model saw — not the fresh render.
+- `layers[i].tokenCount` comes from each context layer's own `recall()` `tokenCount`. For a pinned layer, `items` and `tokenCount` are the pinned bytes — what the model saw — not the fresh render.
 - The other three buckets are estimated via the framework's 4-chars-per-token heuristic.
 - `placement`, `served`, `churnRate`, and `epoch` are what a `/context` view needs to explain *why* a layer costs what it does — a high `rebillTokens` on an anchored layer is the saving anchoring bought.
 - Use this to power introspection UIs (e.g., the CLI `/context` command). The snapshot is overwritten on the next call — export to your span if you need historical retention.
@@ -1861,7 +1846,7 @@ interface ToolExecutionContext {
   harness: AgentHarness;        // AgentHarness instance (guaranteed non-undefined)
   fs: FsAdapter;                // Filesystem adapter (from harness)
   shell: ShellAdapter;          // Shell adapter (from harness)
-  memory: ToolMemory;           // Per-layer state accessor (get/set by layer id)
+  context: ToolContext;         // Per-layer state accessor (get/set by layer id)
   assembledView: Item[];        // Current conversation view
   lastStepMeta: StepMeta | null;
 }
@@ -1937,7 +1922,7 @@ const doc = validateWorkflow({
 
 Node kinds: `llm`, `tool`, `run`, `branch`, `fork`, `spawn`, `provide`, `loop`, `sequence`, `every`, `subflow`, plus the sub-harness kinds (`claude-code`, `codex`, `opencode`, `pi`).
 
-A `subflow` node runs another workflow document as one step — inline (`document`) or by name (`ref`, resolved lazily from `HydrationContext.workflows` / `parseAndRunWorkflow`'s `workflows` option). Exactly one of `document`/`ref` is required. Unknown refs raise `UNKNOWN_WORKFLOW_REFERENCE` at execution; ref cycles raise `WORKFLOW_CYCLE`. There is also a `step.workflow({ id, document | ref, tools?, layers?, workflows?, isolation?: 'inherit' | 'spawn' })` builder that runs a document as a composable `StepRun` (main entry only, not `/portable`).
+A `subflow` node runs another workflow document as one step — inline (`document`) or by name (`ref`, resolved lazily from `HydrationContext.workflows` / `parseAndRunWorkflow`'s `workflows` option). Exactly one of `document`/`ref` is required. Unknown refs raise `UNKNOWN_WORKFLOW_REFERENCE` at execution; ref cycles raise `WORKFLOW_CYCLE`. There is also a `step.workflow({ id, document | ref, tools?, layers?, workflows?, isolation?: 'inherit' | 'spawn' })` builder that runs a document as a composable `StepRunCode` (main entry only, not `/portable`).
 
 ### hydrateWorkflow / hydrateNode
 
@@ -1958,7 +1943,7 @@ const step = hydrateWorkflow(doc, ctx);
 
 An `llm` node opts into a generative-UI codec with `output: { codec: 'openui', library: '<ref>' }`; the hydrator resolves `<ref>` from `ctx.uiLibraries` to a live `OutputCodec` and throws `UNKNOWN_UI_LIBRARY_REFERENCE` if it is unregistered. See [Generative UI](#generative-ui-openui).
 
-**Named memory layers.** Both `provide` (`layers`, required) and `spawn` (`layers`, optional) resolve layer names from `ctx.layers` (a `ReadonlyMap<string, MemoryLayer>`); an unregistered name throws `UNKNOWN_LAYER_REFERENCE`. A `spawn` node with no `layers` inherits the parent's layers — the default spawn behaviour; naming them replaces the inherited set for the child. Without `ctx.layers` supplied, named layers resolve to `[]` and the harness defaults apply.
+**Named context layers.** Both `provide` (`layers`, required) and `spawn` (`layers`, optional) node kinds resolve layer names from `ctx.layers` (a `ReadonlyMap<string, ContextLayer>`); an unregistered name throws `UNKNOWN_LAYER_REFERENCE`. A `spawn` node with no `layers` inherits the parent's layers — the default spawn behaviour; naming them replaces the inherited set for the child. Without `ctx.layers` supplied, named layers resolve to `[]` and the harness defaults apply.
 
 ### dynamicWorkflow
 
@@ -1998,9 +1983,9 @@ Named predicates for loop termination in JSON: `maxSteps`, `maxCost`, `maxDurati
 
 ## Generative UI (OpenUI)
 
-`@noetic-tools/openui` makes an agent respond with a UI built from components you register, following the [OpenUI](https://www.openui.com) standard. It depends only on `@noetic-tools/memory` + `@noetic-tools/types`; core sees two dialect-agnostic contracts (`OutputCodec`, `UiFragment`) and never imports the package. Three surfaces, adopted independently.
+`@noetic-tools/openui` makes an agent respond with a UI built from components you register, following the [OpenUI](https://www.openui.com) standard. It depends only on `@noetic-tools/context` + `@noetic-tools/types`; core sees two dialect-agnostic contracts (`OutputCodec`, `UiFragment`) and never imports the package. Three surfaces, adopted independently.
 
-### Output codec on step.llm
+### Output codec on step.callModel
 
 ```typescript
 import { createLibrary, defineComponent, openUi } from '@noetic-tools/openui';
@@ -2012,7 +1997,7 @@ const library = createLibrary([
   defineComponent({ name: 'Stack', props: z.object({ children: z.array(z.unknown()) }) }),
 ]);
 
-const dashboard = step.llm({ id: 'dashboard', model: 'claude-sonnet-5', output: openUi(library) });
+const dashboard = step.callModel({ id: 'dashboard', model: 'claude-sonnet-5', output: openUi(library) });
 // output resolves to a UiDocument; the model emits OpenUI Lang, streamed as openui.* events.
 ```
 
@@ -2020,14 +2005,14 @@ const dashboard = step.llm({ id: 'dashboard', model: 'claude-sonnet-5', output: 
 
 ### openUiSurface() — server-authoritative UI state
 
-Install as a memory layer so the SERVER owns the mounted document, reactive `$vars`, and interaction record — the client renderer is a projection of this state.
+Install as a context layer so the SERVER owns the mounted document, reactive `$vars`, and interaction record — the client renderer is a projection of this state.
 
 ```typescript
 import { openUiSurface, ui } from '@noetic-tools/openui';
 
-const surface = openUiSurface({ library });   // MemoryLayer<OpenUiSurfaceState>, slot 120, scope 'thread'
+const surface = openUiSurface({ library });   // ContextLayer<OpenUiSurfaceState>, slot 120, scope 'thread'
 
-const harness = new AgentHarness({ name: 'ui', initialStep: dashboard, params: {}, memory: memory([surface]) });
+const harness = new AgentHarness({ name: 'ui', initialStep: dashboard, params: {}, context: context([surface]) });
 ```
 
 | Hook | Behavior |
@@ -2042,7 +2027,7 @@ const harness = new AgentHarness({ name: 'ui', initialStep: dashboard, params: {
 
 ```typescript
 const checkout = loop({
-  body: step.llm({ id: 'render', model, tools: [quoteShipping], output: openUi(library) }),
+  body: step.callModel({ id: 'render', model, tools: [quoteShipping], output: openUi(library) }),
   until: ui.submitted(surface, 'checkout-form'),   // also: ui.interacted(surface, kind?), ui.toAssistant(surface)
 });
 ```
@@ -2066,7 +2051,7 @@ const quoteShipping = tool({
 });
 ```
 
-`ToolUiDeclaration` methods (`call`/`progress`/`result`/`error`) each return a `UiFragment | null`. The runtime emits them as `openui.fragment` framework events from BOTH model-requested tool calls and direct `step.tool` steps — and works even without the codec installed (deterministic tool cards, zero prompt cost).
+`ToolUiDeclaration` methods (`call`/`progress`/`result`/`error`) each return a `UiFragment | null`. The runtime emits them as `openui.fragment` framework events from BOTH model-requested tool calls and direct `step.invokeTool` steps — and works even without the codec installed (deterministic tool cards, zero prompt cost).
 
 ### Transport (`@noetic-tools/openui/server`)
 

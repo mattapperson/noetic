@@ -17,7 +17,7 @@ They are mandatory, not optional.
 | Spec | Source | Docs |
 |------|--------|------|
 | `01-step-type.md`, `02-step-variants.md` | `types/`, `builders/` | `steps/`, `api/step-types.mdx` |
-| `03-control-flow.md` | `interpreter/execute-branch`, `execute-fork` | `operators/branch.mdx`, `operators/fork.mdx` |
+| `03-control-flow.md` | `interpreter/execute-branch`, `execute-fork` | `operators/conditional.mdx`, `operators/in-parallel.mdx` |
 | `04-spawn.md` | `interpreter/execute-spawn` | `operators/spawn.mdx` |
 | `05-loop-and-until.md` | `until/`, `interpreter/execute-loop` | `operators/loop-and-until.mdx`, `api/until-types.mdx` |
 | `06-channels.md` | `runtime/channel-store` | `operators/channels.mdx`, `api/channel-types.mdx` |
@@ -27,7 +27,7 @@ They are mandatory, not optional.
 | `10-observability.md` | `observability/` | `observability.mdx` |
 | `11-context-layer-system.md`, `12-builtin-context-layers.md` | `packages/context/src/` (`ContextLayer` contract in `packages/types/src/types/context-layer.ts`) | `context-layers/`, `api/context-layer-types.mdx` |
 | (foundation types) | `packages/types/src/` | `api/` |
-| `13-patterns.md` | `patterns/` | `patterns/` |
+| `13-patterns.md` | `patterns/` | (public pattern docs removed — only `framework/json-runtime.mdx` documents `dynamicWorkflow`/`parseAndRunWorkflow`) |
 | `16-semantic-conditions.md` | `conditions/`, `adapters/` | `operators/conditions.mdx`, `api/adapter-types.mdx` |
 | `17-eval-and-optimization.md` | `packages/eval/src/` | (eval docs TBD) |
 | `22-cli-architecture.md` | `packages/cli/src/` | (cli docs TBD) |

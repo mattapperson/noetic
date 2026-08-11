@@ -9,15 +9,15 @@ Each stage produces a working system that can be tested. The spec updates after 
 
 ## Stage 1: Core Interpreter
 
-**Specs:** `01-step-type`, `02-step-variants` (run + llm mocked)
+**Specs:** `01-step-type`, `02-step-variants` (runCode + callModel mocked)
 
-The discriminated union `Step` type and the `execute` interpreter. Get the core switch working with `run`, `llm` (mocked), and `loop` + `until`. `ItemLog` established here — the LLM provider returns items, runtime appends to `ItemLog`. Write **ReAct** against this.
+The discriminated union `Step` type and the `execute` interpreter. Get the core switch working with `runCode`, `callModel` (mocked), and `loop` + `until`. `ItemLog` established here — the LLM provider returns items, runtime appends to `ItemLog`. Write **ReAct** against this.
 
-## Stage 2: Fork
+## Stage 2: inParallel
 
 **Specs:** `03-control-flow`
 
-`fork` with all three modes (`all`, `race`, `settle`). Write the parallel search pattern. This forces the merge types and `SettleResult` to be nailed down.
+`inParallel` with all three modes (`all`, `race`, `settle`). Write the parallel search pattern. This forces the merge types and `SettleResult` to be nailed down.
 
 ## Stage 3: Spawn with Fresh Context
 
@@ -39,23 +39,23 @@ Add external channel declaration (`external: true`), `getChannelHandle`, `Channe
 
 `spawn` with `summary` and `schema` contextOut strategies. Write **Slate thread weaving**. This forces the summary LLM call integration and the type overloads.
 
-## Stage 6: Branch and Plans
+## Stage 6: Conditional and Plans
 
-**Specs:** `03-control-flow` (branch), `13-patterns` (compilePlan, adaptivePlan)
+**Specs:** `03-control-flow` (conditional), `13-patterns` (compilePlan, adaptivePlan)
 
-`branch` and `compilePlan`. Write the **dynamic plan** pattern and **adaptive plan** loop. This forces agent resolution and the adaptive revision cycle.
+`conditional` and `compilePlan`. Write the **dynamic plan** pattern and **adaptive plan** loop. This forces agent resolution and the adaptive revision cycle.
 
 ## Stage 7: Context Layer System
 
-**Specs:** `11-context-layer-system`, `12-builtin-memory-layers` (workingMemoryContext)
+**Specs:** `11-context-layer-system`, `12-builtin-context-layers` (scratchpad)
 
-Implement the `ContextLayer` interface, the Projector (View assembly), and the `workingMemoryContext()` built-in. The Projector assembles system prompt item (`role: system`) + layer output items (`role: developer`) + conversation history items into `Item[]`. `recallLayers` returns `Item[]`. `storeLayers` receives `LLMResponse` (with items + usage). Write a ReAct agent with working memory and verify the recall/store lifecycle runs correctly on each iteration. This forces the budget allocation algorithm and the slot-ordering system.
+Implement the `ContextLayer` interface, the Projector (View assembly), and the `scratchpad()` built-in. The Projector assembles system prompt item (`role: system`) + layer output items (`role: developer`) + conversation history items into `Item[]`. `recallLayers` returns `Item[]`. `storeLayers` receives `LLMResponse` (with items + usage). Write a ReAct agent with a scratchpad and verify the recall/store lifecycle runs correctly on each iteration. This forces the budget allocation algorithm and the slot-ordering system.
 
 ## Stage 8: Context Layers Across Spawn Boundaries
 
-**Specs:** `11-context-layer-system` (onSpawn/onReturn), `12-builtin-memory-layers` (durableTaskState, observationalContext)
+**Specs:** `11-context-layer-system` (onSpawn/onReturn), `12-builtin-context-layers` (taskState, observations)
 
-Implement `onSpawn`/`onReturn` hooks. Write Ralph Wiggum with `workingMemoryContext({ scope: 'resource' })` and `durableTaskState()`. Verify that both structured state and task artifacts persist across fresh-context iterations while the ItemLog resets. Add `observationalContext()` and verify that observations compress across iterations.
+Implement `onSpawn`/`onReturn` hooks. Write Ralph Wiggum with `scratchpad({ scope: 'resource' })` and `taskState()`. Verify that both structured state and task artifacts persist across fresh-context iterations while the ItemLog resets. Add `observations()` and verify that observations compress across iterations.
 
 ## Stage 9: Error Model
 

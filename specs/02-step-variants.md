@@ -1,16 +1,16 @@
-# Step Variants: `run`, `llm`, `tool`, `provide`
+# Step Variants: `runCode`, `callModel`, `invokeTool`, `withContext`
 
 > **Depends On:** `01-step-type` (Step<I,O>, execute), `11-context-layer-system` (ContextLayer, ContextConfig)
-> **Exports:** `step.run()`, `step.llm()`, `step.tool()`, `step.provide()`, `StepRunOpts`, `StepLLMOpts`, `StepToolOpts`, `StepProvideOpts`, `Tool`, `RetryPolicy`, `ModelParams`
+> **Exports:** `step.runCode()`, `step.callModel()`, `step.invokeTool()`, `step.withContext()`, `StepRunCodeOpts`, `StepCallModelOpts`, `StepInvokeToolOpts`, `StepWithContextOpts`, `Tool`, `RetryPolicy`, `ModelParams`
 
 ---
 
-## Variant: `run` — Arbitrary Async Work
+## Variant: `runCode` — Arbitrary Async Work
 
 Pure computation. The agent harness can retry freely, cache results, and doesn't need to track token usage.
 
 ```typescript
-interface StepRunOpts<I, O> {
+interface StepRunCodeOpts<I, O> {
   id: string;
   execute: (input: I, ctx: Context) => Promise<O>;
   retry?: RetryPolicy;
@@ -36,7 +36,7 @@ interface RetryPolicy {
 The `subprocess` field is preserved verbatim across step registration and interpreter dispatch. The same adapter is consulted by `harness.run()`, `spawn()`, and `harness.detachedSpawn()` when the dispatched step has it set. See `04-spawn` for routing semantics and `23-durable-execution` for how adapters carry durable handle manifests.
 
 ```typescript
-const fetchData = step.run({
+const fetchData = step.runCode({
   id: 'fetch-user-data',
   execute: async (userId: string, ctx) => {
     const response = await fetch(`/api/users/${userId}`);
@@ -48,7 +48,7 @@ const fetchData = step.run({
 
 ---
 
-## Variant: `llm` — Single LLM Call
+## Variant: `callModel` — Single LLM Call
 
 Costs tokens, needs model routing (OpenRouter, gateway, etc.), generates trace metadata with GenAI semantic conventions. Output may contain tool calls that drive the next iteration.
 
@@ -57,7 +57,7 @@ type Lazy<T, TContext = ContextData> =
   | T
   | ((ctx: Context<TContext>) => T | Promise<T>);
 
-interface StepLLMOpts<TContext, O> {
+interface StepCallModelOpts<TContext, O> {
   id: string;
   model: Lazy<string, TContext>;                    // e.g. 'anthropic/claude-sonnet-4-20250514' — or a (ctx) => string getter
   instructions?: Lazy<string | undefined, TContext>;
@@ -80,11 +80,11 @@ interface ModelParams {
 `model`, `instructions`, and `tools` each accept either an eager value or a `(ctx) => value` getter resolved at step execution. Getters see the live `Context`, so a step can read `ctx.harness.config.params`, `ctx.unifiedTools`, or context layer state to produce per-run values without baking them in at build time.
 
 - **Eager vs lazy — semantics are identical** after resolution. An eager `model: 'gpt-4'` behaves the same as `model: () => 'gpt-4'`.
-- **Model validation moves to runtime for getters.** `step.llm()` validates eager `model` strings at build time; function-form models are validated after resolution inside `executeLLM` with the same `MISSING_MODEL` `NoeticConfigError`.
+- **Model validation moves to runtime for getters.** `step.callModel()` validates eager `model` strings at build time; function-form models are validated after resolution inside `executeLLM` with the same `MISSING_MODEL` `NoeticConfigError`.
 - **Function-form `tools` do NOT contribute to `ctx.unifiedTools`.** `collectAllTools` skips them since they can't be inspected without a live context. Tools needed in the harness-wide pool should be registered via `AgentHarness.tools` (see spec 08).
 
 ```typescript
-const planChat = step.llm({
+const planChat = step.callModel({
   id: 'plan-chat',
   model: (ctx) => ctx.harness.config.params.model as string,
   instructions: (ctx) => {
@@ -96,7 +96,7 @@ const planChat = step.llm({
 ```
 
 ```typescript
-const analyze = step.llm({
+const analyze = step.callModel({
   id: 'analyze-code',
   model: 'anthropic/claude-sonnet-4-20250514',
   instructions: 'You are a code reviewer. Analyze the code for bugs.',
@@ -131,9 +131,9 @@ const harness = new AgentHarness({
 
 ### Unified Tool Set
 
-Before execution begins, the agent harness walks the entire step tree and collects all `Tool` instances declared on LLM steps, plus tools provided by context layers. These are deduplicated by name (first-wins) into a **unified tool set** stored on the execution context.
+Before execution begins, the agent harness walks the entire step tree and collects all `Tool` instances declared on `callModel` steps, plus tools provided by context layers. These are deduplicated by name (first-wins) into a **unified tool set** stored on the execution context.
 
-Every LLM call receives the full unified tool set, preserving prompt cache across calls with different tool restrictions. Individual steps restrict which tools the model may invoke via the `tools` field on `StepLLMOpts`:
+Every LLM call receives the full unified tool set, preserving prompt cache across calls with different tool restrictions. Individual steps restrict which tools the model may invoke via the `tools` field on `StepCallModelOpts`:
 
 - `tools: undefined` (or omitted) — unrestricted, model may call any tool
 - `tools: [searchTool, readFileTool]` — model may only call these tools
@@ -145,7 +145,7 @@ The restriction is communicated to the provider via `tool_choice: { type: "allow
 
 The agent harness delegates LLM calls to the `@openrouter/sdk` internally. It:
 
-1. Merges `StepLLM.instructions` (from the step definition) with any system-role messages extracted from `items`, joined by `\n\n`. If only one source is present, that one is used. If neither is present, `instructions` is `undefined`.
+1. Merges `StepCallModel.instructions` (from the step definition) with any system-role messages extracted from `items`, joined by `\n\n`. If only one source is present, that one is used. If neither is present, `instructions` is `undefined`.
 2. Converts Noetic `Item[]` to OpenResponses input format.
 3. Wraps the unified `Tool[]` into SDK tool objects, binding `ctx` into each `execute` closure.
 4. Passes `tool_choice` with allowed subset when the step restricts tools.
@@ -175,14 +175,14 @@ const result = await execute(analyze, codeSnippet, ctx);
 
 ### What the LLM Actually Sees: The View
 
-An `llm` step does NOT simply send the `system` prompt and the raw input. The agent harness assembles a **View** — the complete `Item[]` array sent to the model — via the context layer system (see `11-context-layer-system`). Before each LLM call, the agent harness:
+A `callModel` step does NOT simply send the `system` prompt and the raw input. The agent harness assembles a **View** — the complete `Item[]` array sent to the model — via the context layer system (see `11-context-layer-system`). Before each LLM call, the agent harness:
 
 1. Runs `recall()` on each context layer to gather contextual content.
 2. Assembles system prompt item (`role: system`) + context layer output items (`role: developer`) + conversation history items into the View as `Item[]`.
 3. Sends the View to the model. The View is `Item[]` — directly passable to the LLM provider as input.
 4. After the response, runs `store()` on each context layer to persist learnings.
 
-The `instructions` field on `StepLLMOpts` becomes the agent's base instructions within the View (rendered as a `MessageItem` with `role: system`). Context layers inject additional context as `MessageItem` entries with `role: developer`.
+The `instructions` field on `StepCallModelOpts` becomes the agent's base instructions within the View (rendered as a `MessageItem` with `role: system`). Context layers inject additional context as `MessageItem` entries with `role: developer`.
 
 ### `StepMeta`
 
@@ -197,12 +197,12 @@ interface StepMeta {
 
 ---
 
-## Variant: `tool` — Single Tool Execution
+## Variant: `invokeTool` — Single Tool Execution
 
 May have side effects, may need human approval before execution (preventive gating), and may need sandboxing.
 
 ```typescript
-interface StepToolOpts<I, O> {
+interface StepInvokeToolOpts<I, O> {
   id: string;
   tool: Tool<I, O>;
   args?: Partial<I>;  // can override LLM-provided args
@@ -231,16 +231,16 @@ interface Tool<I extends ZodTypeAny = ZodTypeAny, O extends ZodTypeAny = ZodType
 }
 ```
 
-`toolContextLayer(tools)` generates one `ContextLayer` per unique `context.id` among the tools. Tools sharing the same id share state.
+`toolCalls(tools)` generates one `ContextLayer` per unique `context.id` among the tools. Tools sharing the same id share state.
 
 ---
 
-## Variant: `provide` — Scoped Context Layer Injection
+## Variant: `withContext` — Scoped Context Layer Injection
 
-Attaches context layers to a descendant step subtree without creating an isolated context. Analogous to React's `Context.Provider` — the layers are available to all descendant `llm` steps without the context boundary that `spawn` introduces.
+Attaches context layers to a descendant step subtree without creating an isolated context. Analogous to React's `Context.Provider` — the layers are available to all descendant `callModel` steps without the context boundary that `spawn` introduces.
 
 ```typescript
-interface StepProvideOpts<TContext, I, O> {
+interface StepWithContextOpts<TContext, I, O> {
   id: string;
   child: Step<TContext, I, O>;
   context: ContextConfig | ContextLayer[];
@@ -248,23 +248,23 @@ interface StepProvideOpts<TContext, I, O> {
 ```
 
 ```typescript
-const withContextLayers = step.provide({
-  id: 'inject-working-context',
+const withContextLayers = step.withContext({
+  id: 'inject-scratchpad',
   child: analyzeAndRespond,
-  context: context([workingMemoryContext(), semanticRecall({ embedder })]),
+  context: context([scratchpad(), semanticRecall({ embedder })]),
 });
 ```
 
 ### Semantics
 
 1. **No context boundary.** Unlike `spawn`, the child step shares the parent's `Context` and `ItemLog`. There is no `onSpawn`/`onReturn` lifecycle.
-2. **Layer merging.** The provided layers are appended to whatever layers the parent already has. Descendant `llm` steps see the merged set.
-3. **Scoped lifetime.** Provided layers are initialized when `provide` begins and disposed when the child completes. They do not outlive the `provide` boundary.
-4. **Composable.** `provide` steps can nest. Inner `provide` layers merge with outer ones. Duplicate layer IDs follow the same resolution rules as top-level layer deduplication (see `11-context-layer-system`).
+2. **Layer merging.** The provided layers are appended to whatever layers the parent already has. Descendant `callModel` steps see the merged set.
+3. **Scoped lifetime.** Provided layers are initialized when `withContext` begins and disposed when the child completes. They do not outlive the `withContext` boundary.
+4. **Composable.** `withContext` steps can nest. Inner `withContext` layers merge with outer ones. Duplicate layer IDs follow the same resolution rules as top-level layer deduplication (see `11-context-layer-system`).
 
-### When to Use `provide` vs `spawn`
+### When to Use `withContext` vs `spawn`
 
-| Concern | `provide` | `spawn` |
+| Concern | `withContext` | `spawn` |
 |---------|-----------|---------|
 | Context isolation | Shared — same ItemLog | Isolated — fresh ItemLog |
 | Context layers | Merged with parent | Replaced or propagated via `onSpawn` |
@@ -274,7 +274,7 @@ const withContextLayers = step.provide({
 
 ## Builder: `step.workflow` — JSON Workflow as a Step
 
-Runs a `WorkflowDocument` (spec 26) as a single composable step. Not a new `Step` kind — the builder returns a `StepRun` whose `execute` hydrates the document via the harness on the execution context and runs it.
+Runs a `WorkflowDocument` (spec 26) as a single composable step. Not a new `Step` kind — the builder returns a `StepRunCode` whose `execute` hydrates the document via the harness on the execution context and runs it.
 
 ```typescript
 step.workflow(opts: {
@@ -282,13 +282,13 @@ step.workflow(opts: {
   document?: WorkflowDocument;   // inline — XOR with ref
   ref?: string;                  // named, resolved from workflows
   tools?: Tool[];
-  layers?: ReadonlyMap<string, MemoryLayer>;
+  layers?: ReadonlyMap<string, ContextLayer>;
   workflows?: ReadonlyMap<string, WorkflowDocument>;
   subHarnesses?: ReadonlyMap<SubHarnessKind, SubHarness>;
   uiLibraries?: ReadonlyMap<string, OutputCodec>;
   resolveSubprocess?: (ref: string) => SubprocessAdapter | undefined;
   isolation?: 'inherit' | 'spawn';
-}): StepRun<ContextMemory, string, string>
+}): StepRunCode<ContextData, string, string>
 ```
 
 Semantics:
@@ -305,9 +305,9 @@ Semantics:
 
 The agent harness needs to treat them differently:
 
-- **LLM steps** have cost implications, need model routing, produce telemetry with GenAI semantic conventions, and their output may contain tool calls that drive the next iteration.
-- **Tool steps** may have side effects, may need human approval before execution, and may need sandboxing.
-- **Run steps** are pure computation — the agent harness can retry freely, cache results, and doesn't need to track token usage.
-- **Provide steps** are structural — they configure the context layer environment for a subtree without altering execution semantics or creating context boundaries.
+- **callModel steps** have cost implications, need model routing, produce telemetry with GenAI semantic conventions, and their output may contain tool calls that drive the next iteration.
+- **invokeTool steps** may have side effects, may need human approval before execution, and may need sandboxing.
+- **runCode steps** are pure computation — the agent harness can retry freely, cache results, and doesn't need to track token usage.
+- **withContext steps** are structural — they configure the context layer environment for a subtree without altering execution semantics or creating context boundaries.
 
 A single `step()` that inspects its arguments loses type safety and forces runtime introspection. Explicit variants mean the TypeScript compiler knows exactly what you're doing.

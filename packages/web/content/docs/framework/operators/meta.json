@@ -1,4 +1,4 @@
 {
   "title": "Operators",
-  "pages": ["branch", "fork", "conditions", "spawn", "provide", "loop-and-until", "channels"]
+  "pages": ["conditional", "in-parallel", "conditions", "spawn", "with-context", "loop-and-until", "channels"]
 }

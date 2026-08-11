@@ -1,24 +1,24 @@
 ---
 title: Custom Flows
-description: Two ways to build long-running, branching agent workflows — plan-mode JSON flows and programmatic Step compositions.
+description: Two ways to build long-running, multi-path agent workflows — plan-mode JSON flows and programmatic Step compositions.
 ---
 
-A **flow** is a state machine of agent work composed from the framework's primitives — `every`, `fork`, `spawn`, `branch`, `step.run`, `step.llm`, `step.tool`. Flows are how the CLI's daemon does background work (autopilot, validator, health, reconcile), and they're how you can extend the CLI with your own background or planned workflows.
+A **flow** is a state machine of agent work composed from the framework's primitives — `schedule`, `inParallel`, `spawn`, `conditional`, `step.runCode`, `step.callModel`, `step.invokeTool`. Flows are how the CLI's daemon does background work (autopilot, validator, health, reconcile), and they're how you can extend the CLI with your own background or planned workflows.
 
 There are two ways to author a flow:
 
 1. **Plan-mode workflow documents** — the LLM emits a JSON `WorkflowDocument` describing the plan during plan mode; the runtime hydrates each node into a concrete `Step`. Good for "I want the agent to design the flow, then execute it."
 2. **Programmatic Step compositions** — TypeScript code in a plugin or in your config. Good for long-running infrastructure (daemons, reactive workers, periodic jobs) you control directly.
 
-If you're new to the primitives, read [Operators](/docs/framework/operators) and the [Patterns](/docs/framework/patterns) section first.
+If you're new to the primitives, read [Operators](/docs/framework/operators) first.
 
 ---
 
 ## Plan-mode workflow documents
 
-When the agent is in **plan mode** (`/plan` or `/mode plan`), it authors the plan as a `WorkflowDocument` — the same format the [JSON Workflow Runtime](/docs/framework/json-runtime) executes, validated against the published schema at `https://noetic.tools/schema/noetic-workflow.schema.json`. The [plan context layer](/docs/framework/context-layers/plan-context) stores the reviewed tree via `plan/setPlanTree` plus any **named workflows** via `plan/setWorkflow`, and the tree references them with `subflow` nodes so the part a human approves stays small.
+When the agent is in **plan mode** (`/plan` or `/mode plan`), it authors the plan as a `WorkflowDocument` — the same format the [JSON Workflow Runtime](/docs/framework/json-runtime) executes, validated against the published schema at `https://noetic.tools/schema/noetic-workflow.schema.json`. The [plan layer](/docs/framework/context-layers/plan) stores the reviewed tree via `plan/setPlanTree` plus any **named workflows** via `plan/setWorkflow`, and the tree references them with `subflow` nodes so the part a human approves stays small.
 
-All the runtime's node kinds are available — `llm`, `tool`, `sequence`, `fork`, `branch`, `loop`, `spawn`, `provide`, `every`, `subflow`, and the coding-agent kinds (`claude-code`, `codex`, `opencode`, `pi`). See the [node-kind reference](/docs/framework/json-runtime#node-kinds) for each shape. Hosts can narrow the allowed set with `PlanMemoryConfig.allowedNodeKinds`.
+All the runtime's node kinds are available — `llm`, `tool`, `sequence`, `fork`, `branch`, `loop`, `spawn`, `provide`, `every`, `subflow`, and the coding-agent kinds (`claude-code`, `codex`, `opencode`, `pi`). See the [node-kind reference](/docs/framework/json-runtime#node-kinds) for each shape. Hosts can narrow the allowed set with `PlanConfig.allowedNodeKinds`.
 
 ### Example
 
@@ -71,60 +71,60 @@ Once registered, the LLM can reference the preset from `agent` tool calls in the
 
 ## Programmatic flows
 
-For long-running infrastructure, write the flow in TypeScript. The CLI's task daemon does this — the `every` / `fork` / `spawn` / `branch` / `step.run` builders compose into a tree that runs forever (or until the harness shuts down).
+For long-running infrastructure, write the flow in TypeScript. The CLI's task daemon does this — the `schedule` / `inParallel` / `spawn` / `conditional` / `step.runCode` builders compose into a tree that runs forever (or until the harness shuts down).
 
 ### The shape
 
 ```ts validate=none
-import type { ContextMemory, Step } from '@noetic-tools/core';
-import { every, fork, spawn, step, workingMemory } from '@noetic-tools/core';
+import type { ContextData, Step } from '@noetic-tools/core';
+import { schedule, inParallel, spawn, step, scratchpad } from '@noetic-tools/core';
 
-export function buildMyFlow(deps: MyFlowDeps): Step<ContextMemory, void, void> {
-  const tickEvery = every<ContextMemory, void, void>({
+export function buildMyFlow(deps: MyFlowDeps): Step<ContextData, void, void> {
+  const tick = schedule<ContextData, void, void>({
     id: 'my-flow.tick',
-    step: step.run<ContextMemory, void, void>({
+    step: step.runCode<ContextData, void, void>({
       id: 'my-flow.iter',
       execute: async (_in, ctx) => {
         // do work; ctx.send(channel, value), ctx.tryRecv(channel), etc.
       },
     }),
-    ms: 30_000,
+    interval: 30_000,
     onError: 'continue',
   });
 
-  return spawn<ContextMemory, void, void>({
+  return spawn<ContextData, void, void>({
     id: 'my-flow',
-    child: tickEvery,
-    memory: [workingMemory({ scope: 'thread', schema: MyMemorySchema })],
+    child: tick,
+    context: [scratchpad({ scope: 'thread', schema: MyStateSchema })],
   });
 }
 ```
 
-The harness drives the returned `Step` via `harness.run(...)` (sync) or `harness.detachedSpawn(...)` (background, no parent block). Memory-layer lifecycle, abort, observability, and cost tracking come for free.
+The harness drives the returned `Step` via `harness.run(...)` (sync) or `harness.detachedSpawn(...)` (background, no parent block). Context-layer lifecycle, abort, observability, and cost tracking come for free.
 
-### Channels and `wakeOn`
+### Channels and `inbox`
 
-`every` runs on an interval but can also wake immediately on a channel send. The validator flow uses this:
+`schedule` runs on an interval but can also wake immediately on a channel send. The validator flow uses this:
 
 ```ts validate=none
-every({
-  id: 'validator.every',
+schedule({
+  id: 'validator.schedule',
   step: validatorIterationStep,
-  ms: 30_000,
-  wakeOn: validatorRequestChan,   // send → tick now, don't wait 30s
+  interval: 30_000,
+  inbox: validatorRequestChan,    // send → tick now, don't wait 30s
   onError: 'continue',
 });
 ```
 
-`wakeOn` is essential for queue-driven workers — interactive sub-agent requests don't have to wait an interval before running.
+`inbox` is essential for queue-driven workers — interactive sub-agent requests don't have to wait an interval before running.
 
 ### Worked example: a slimmed-down validator
 
 The CLI's real validator drains a channel of `ValidatorRequest`s, runs tests for each requested feature, persists the run, and emits an outcome. Stripped to the bones:
 
 ```ts validate=none
-import type { ContextMemory, Step } from '@noetic-tools/core';
-import { every, step } from '@noetic-tools/core';
+import type { ContextData, Step } from '@noetic-tools/core';
+import { schedule, step } from '@noetic-tools/core';
 
 import { validatorRequestChan, validatorOutcomeChan } from './channels.js';
 
@@ -132,8 +132,8 @@ interface ValidatorDeps {
   runTests: (featureId: string) => Promise<{ status: 'pass' | 'fail'; result: unknown }>;
 }
 
-function buildIteration(deps: ValidatorDeps): Step<ContextMemory, void, void> {
-  return step.run<ContextMemory, void, void>({
+function buildIteration(deps: ValidatorDeps): Step<ContextData, void, void> {
+  return step.runCode<ContextData, void, void>({
     id: 'validator.iteration',
     execute: async (_in, ctx) => {
       while (true) {
@@ -152,12 +152,12 @@ function buildIteration(deps: ValidatorDeps): Step<ContextMemory, void, void> {
   });
 }
 
-export function buildValidatorEvery(deps: ValidatorDeps) {
-  return every<ContextMemory, void, void>({
-    id: 'validator.every',
+export function buildValidatorSchedule(deps: ValidatorDeps) {
+  return schedule<ContextData, void, void>({
+    id: 'validator.schedule',
     step: buildIteration(deps),
-    ms: 30_000,
-    wakeOn: validatorRequestChan,
+    interval: 30_000,
+    inbox: validatorRequestChan,
     onError: 'continue',
   });
 }
@@ -167,35 +167,35 @@ This is the same shape as the production flow at `packages/cli/src/tasks/runtime
 
 ### Composing several flows in a daemon
 
-The CLI's daemon roots all four periodic flows in a `fork({ mode: 'all' })` wrapped in a `spawn`:
+The CLI's daemon roots all four periodic flows in a `inParallel({ mode: 'all' })` wrapped in a `spawn`:
 
 ```ts validate=none
-import { every, fork, spawn, workingMemory } from '@noetic-tools/core';
+import { schedule, inParallel, spawn, scratchpad } from '@noetic-tools/core';
 
-const daemonInner = fork<ContextMemory, void, void>({
-  id: 'tasks.daemon-fork',
+const daemonInner = inParallel<ContextData, void, void>({
+  id: 'tasks.daemon-parallel',
   mode: 'all',
   paths: () => [
-    buildAutopilotEvery(deps.autopilot),
-    buildValidatorEvery(deps.validator),
-    buildHealthEvery(deps.health),
-    buildReconcileEvery(deps.reconcile),
-    buildEventsBridgeEvery(deps.eventsBridge),
+    buildAutopilotSchedule(deps.autopilot),
+    buildValidatorSchedule(deps.validator),
+    buildHealthSchedule(deps.health),
+    buildReconcileSchedule(deps.reconcile),
+    buildEventsBridgeSchedule(deps.eventsBridge),
   ],
   merge: () => undefined,
 });
 
-export const daemonFlow = spawn<ContextMemory, void, void>({
+export const daemonFlow = spawn<ContextData, void, void>({
   id: 'tasks.daemon',
   child: daemonInner,
-  memory: [
+  context: [
     createSteeringFileLayer(),
-    workingMemory({ scope: 'thread', schema: DaemonMemorySchema }),
+    scratchpad({ scope: 'thread', schema: DaemonStateSchema }),
   ],
 });
 ```
 
-`fork({ mode: 'all' })` runs all five `every`s in parallel; the spawn isolates them in their own memory scope (steering files, working memory) so they don't pollute the user's interactive session.
+`inParallel({ mode: 'all' })` runs all five `schedule`s in parallel; the spawn isolates them in their own context scope (steering files, scratchpad state) so they don't pollute the user's interactive session.
 
 ### Wiring a custom flow into the CLI
 
@@ -208,8 +208,8 @@ If you need to author a daemon-style background flow, drive it from plugin `init
 
 ## Where to read more
 
-- [Steps](/docs/framework/steps) — `step.run`, `step.llm`, `step.tool`.
-- [Operators](/docs/framework/operators) — `branch`, `fork`, `spawn`, `loop`, `every`.
-- [Channels](/docs/framework/operators/channels) — `ctx.send` / `ctx.tryRecv` / `wakeOn`.
-- [Patterns](/docs/framework/patterns) — composed agents (ReAct, dual-agent, task trees).
+- [Steps](/docs/framework/steps) — `step.runCode`, `step.callModel`, `step.invokeTool`.
+- [Operators](/docs/framework/operators) — `conditional`, `inParallel`, `spawn`, `loop`, `schedule`.
+- [Channels](/docs/framework/operators/channels) — `ctx.send` / `ctx.tryRecv` / `inbox`.
+- [Loop & Until](/docs/framework/operators/loop-and-until) — compose ReAct-style agents from `loop` + `step.callModel` + `until.*`.
 - [Runtime](/docs/framework/runtime) — `harness.run`, `harness.detachedSpawn`, abort, span creation.

@@ -10,7 +10,7 @@ import { loop, step, until } from '@noetic-tools/core';
 
 const agent = loop({
   id: 'chat-loop',
-  steps: [step.llm({
+  steps: [step.callModel({
     id: 'chat',
     model: 'openai/gpt-4o',
     instructions: 'You are a helpful assistant.',
@@ -149,7 +149,7 @@ const predicate = until.outputEquals('DONE');
 
 ### until.never()
 
-Never stop the loop. Pairs with operators like `every` that rely on external cancellation to terminate.
+Never stop the loop. Pairs with operators like `schedule` that rely on external cancellation to terminate.
 
 ```ts
 const predicate = until.never();
@@ -208,7 +208,7 @@ import { loop, step, until } from '@noetic-tools/core';
 
 const refiner = loop({
   id: 'refine-loop',
-  steps: [step.llm({
+  steps: [step.callModel({
     id: 'refiner',
     model: 'openai/gpt-4o',
     instructions: 'Improve the draft based on feedback.',
@@ -253,7 +253,7 @@ const inbox = channel('agent-inbox', { schema: z.string(), mode: 'queue' });
 
 const agent = loop({
   id: 'async-agent',
-  steps: [step.llm({
+  steps: [step.callModel({
     id: 'agent-llm',
     model: 'openai/gpt-4o',
     tools: [launchTool, checkTool],
@@ -300,28 +300,14 @@ If `onError` is not provided, errors propagate immediately.
 
 ## The ReAct Pattern
 
-The built-in `react()` helper is just a loop with `until.noToolCalls()`.
-
-```ts validate=none
-import { react } from '@noetic-tools/core';
-
-const agent = react({
-  model: 'openai/gpt-4o',
-  instructions: 'You are a helpful assistant.',
-  tools: [searchTool, calculatorTool],
-  maxSteps: 10,
-  maxCost: 1.00,
-});
-```
-
-This is equivalent to:
+A ReAct-style agent is just a `loop` around a `step.callModel` that stops when the model responds without tool calls — with `until.maxSteps` and `until.maxCost` as safety rails:
 
 ```ts validate=none
 import { any, loop, step, until } from '@noetic-tools/core';
 
 const agent = loop({
   id: 'react-loop',
-  steps: [step.llm({
+  steps: [step.callModel({
     id: 'react-step',
     model: 'openai/gpt-4o',
     instructions: 'You are a helpful assistant.',
@@ -339,4 +325,4 @@ const agent = loop({
 
 - [Steps](/docs/framework/steps) -- the step types you can use in a loop.
 - [Spawn](/docs/framework/operators/spawn) -- run a loop in an isolated child context.
-- [Control Flow](/docs/framework/operators) -- branch and fork for non-iterative operations.
+- [Control Flow](/docs/framework/operators) -- conditional and inParallel for non-iterative operations.

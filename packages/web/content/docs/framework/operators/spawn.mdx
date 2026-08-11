@@ -10,7 +10,7 @@ import { spawn, step } from '@noetic-tools/core';
 
 const isolated = spawn({
   id: 'sub-agent',
-  child: step.llm({
+  child: step.callModel({
     id: 'researcher',
     model: 'openai/gpt-4o',
     instructions: 'Research the topic thoroughly.',
@@ -72,7 +72,7 @@ const contextLayer: ContextLayer<ResearchState> = {
 
 const withContextLayers = spawn({
   id: 'research-agent',
-  child: step.llm({
+  child: step.callModel({
     id: 'researcher',
     model: 'openai/gpt-4o',
     instructions: 'Research the topic thoroughly.',
@@ -125,7 +125,7 @@ const researchAgent = spawn({
   id: 'delegated-research',
   child: loop({
     id: 'research-loop',
-    steps: [step.llm({
+    steps: [step.callModel({
       id: 'researcher-llm',
       model: 'openai/gpt-4o',
       instructions: 'You are a research assistant. Use tools to find information.',
@@ -234,7 +234,7 @@ const delegateTool = tool({
   input: z.object({ task: z.string() }),
   output: z.string(),
   execute: async (args: { task: string }, toolCtx) => {
-    const child = step.llm<ContextData, string, string>({
+    const child = step.callModel<ContextData, string, string>({
       id: 'sync-sub', model: 'openai/gpt-4o', instructions: 'Answer concisely.',
     });
     return toolCtx.harness.run(spawn({ id: 'sync-spawn', child }), args.task, toolCtx.ctx);
@@ -248,7 +248,7 @@ const launchTool = tool({
   input: z.object({ task: z.string() }),
   output: z.object({ agentId: z.string() }),
   execute: async (args: { task: string }, toolCtx) => {
-    const child = step.llm<ContextData, string, string>({
+    const child = step.callModel<ContextData, string, string>({
       id: 'async-sub', model: 'openai/gpt-4o', instructions: 'Answer concisely.',
     });
     const handle = toolCtx.harness.detachedSpawn(child, args.task, toolCtx.ctx);
@@ -267,7 +267,7 @@ const launchTool = tool({
 const agent = {
   kind: 'loop',
   id: 'smart-delegator',
-  steps: [step.llm({
+  steps: [step.callModel({
     id: 'orchestrator',
     model: 'openai/gpt-4o',
     instructions: `You are an orchestrator. You have two delegation tools:
@@ -289,7 +289,7 @@ When a background agent finishes, its result arrives via the inbox channel as a 
 
 ## SubprocessAdapter Routing
 
-Every `step.run`, `spawn`, and `harness.detachedSpawn` dispatches through a `SubprocessAdapter`. The harness defaults to `createInMemorySubprocessAdapter()` so zero-config callers keep their existing in-process behaviour; swap in a different adapter to change how a step actually runs.
+Every `step.runCode`, `spawn`, and `harness.detachedSpawn` dispatches through a `SubprocessAdapter`. The harness defaults to `createInMemorySubprocessAdapter()` so zero-config callers keep their existing in-process behaviour; swap in a different adapter to change how a step actually runs.
 
 ```ts
 import { spawn, step } from '@noetic-tools/core';
@@ -302,20 +302,20 @@ const subprocess = createLocalSubprocessAdapter({
 
 const isolated = spawn({
   id: 'sub-agent',
-  child: step.llm({ id: 'researcher', model: 'openai/gpt-4o' }),
+  child: step.callModel({ id: 'researcher', model: 'openai/gpt-4o' }),
   subprocess,                   // per-step override
 });
 ```
 
 ### Resolution Precedence
 
-When the interpreter dispatches a `run` or `spawn`, it resolves the adapter in this order:
+When the interpreter dispatches a `runCode` or `spawn`, it resolves the adapter in this order:
 
 1. **Per-call override** — the `overrides.subprocess` argument to `harness.detachedSpawn(step, input, ctx, overrides)`.
-2. **Per-step override** — the `subprocess` field on `StepRun` or `StepSpawn`.
+2. **Per-step override** — the `subprocess` field on `StepRunCode` or `StepSpawn`.
 3. **Harness default** — `harness.subprocess` (defaults to `createInMemorySubprocessAdapter()`).
 
-Other step kinds (`llm`, `tool`, `branch`, `fork`, `provide`, `loop`) always use the harness default.
+Other step kinds (`callModel`, `invokeTool`, `conditional`, `inParallel`, `withContext`, `loop`) always use the harness default.
 
 ### Step Registry
 
@@ -325,13 +325,13 @@ When an adapter crosses a process boundary, the child runtime must locate the st
 
 Adapters configured with a durable `StorageAdapter` persist a manifest per handle: `handleId`, `stepId`, `serializedInput`, `executionId`, and transport-specific identity (pid + `pidStarttime` for OS children; `socketPath` for IPC). On parent restart, `adapter.listLive()` rediscovers the still-running children and `adapter.reattach(handleId)` rebinds each handle. See the [Durability](/docs/framework/durability) page for the full restart flow.
 
-## provide vs spawn
+## withContext vs spawn
 
-Use [`provide`](/docs/framework/operators/provide) when you want to attach context layers to a subtree without isolating the child context. The child shares the parent's `ItemLog` and conversation history -- layers simply become available to all descendant steps.
+Use [`withContext`](/docs/framework/operators/with-context) when you want to attach context layers to a subtree without isolating the child context. The child shares the parent's `ItemLog` and conversation history -- layers simply become available to all descendant steps.
 
 Use `spawn` when you need full context isolation. The child starts with an empty `ItemLog`, and `onSpawn` / `onReturn` hooks control data flow across the boundary.
 
-| | `provide` | `spawn` |
+| | `withContext` | `spawn` |
 |---|---|---|
 | Child context | Shared with parent | Isolated (empty `ItemLog`) |
 | Context layers | Inherited by descendants | Spawn-local only |
@@ -339,7 +339,7 @@ Use `spawn` when you need full context isolation. The child starts with an empty
 
 ## Related
 
-- [provide](/docs/framework/operators/provide) -- attach context layers without context isolation.
-- [fork](/docs/framework/operators/fork) -- parallel execution without context isolation.
+- [withContext](/docs/framework/operators/with-context) -- attach context layers without context isolation.
+- [inParallel](/docs/framework/operators/in-parallel) -- parallel execution without context isolation.
 - [Loop & Until](/docs/framework/operators/loop-and-until) -- use a loop as a spawn child for iterative sub-agents.
 - [Overview](/docs/framework/overview) -- how spawn fits into the eight primitives.

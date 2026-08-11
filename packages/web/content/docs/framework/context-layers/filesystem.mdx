@@ -1,11 +1,11 @@
 ---
-title: File Reference
+title: Filesystem
 description: A context layer that tracks #path file references in user messages and injects priority-scored file contents into the context.
 ---
 
 ## Overview
 
-The File Reference layer watches user messages for `#path/to/file.ts`-style references. Each referenced file is read, scored for relevance, and injected into the context as a `# Referenced Files` developer message, ordered by priority. On every new message the layer re-checks tracked files for changes and triggers an immediate context re-render when content has changed, so the model always sees current file contents.
+The filesystem layer watches user messages for `#path/to/file.ts`-style references. Each referenced file is read, scored for relevance, and injected into the context as a `# Referenced Files` developer message, ordered by priority. On every new message the layer re-checks tracked files for changes and triggers an immediate context re-render when content has changed, so the model always sees current file contents.
 
 - **Slot**: `350` (`Slot.RAG`) by default
 - **Scope**: `thread`
@@ -17,9 +17,9 @@ The File Reference layer watches user messages for `#path/to/file.ts`-style refe
 ## Usage
 
 ```ts
-import { fileReference } from '@noetic-tools/core';
+import { filesystem } from '@noetic-tools/core';
 
-const layer = fileReference({
+const layer = filesystem({
   baseDir: '/workspace/my-project',
   maxFileSize: 512 * 1024,
 });
@@ -30,7 +30,7 @@ A user message like `Look at #src/index.ts and #package.json` tracks both files;
 ## Configuration
 
 ```ts validate=none
-interface FileReferenceOptions {
+interface FilesystemOptions {
   baseDir?: string;             // base for resolving relative paths (default: cwd)
   slot?: number;                // default Slot.RAG (350)
   scoringModel?: string;        // model for priority scoring

@@ -1,32 +1,32 @@
 ---
 title: Pipeline Agent
-description: A 3-stage text processing pipeline using branch, step.run, step.llm, loop, and prepareNext to chain sequential stages.
+description: A 3-stage text processing pipeline using conditional, step.runCode, step.callModel, loop, and prepareNext to chain sequential stages.
 ---
 
 ## Overview
 
-A text processing pipeline that normalizes input, analyzes it with an LLM, and formats the result into a structured report. Demonstrates how `branch` + `loop` + `prepareNext` create sequential multi-stage pipelines.
+A text processing pipeline that normalizes input, analyzes it with an LLM, and formats the result into a structured report. Demonstrates how `conditional` + `loop` + `prepareNext` create sequential multi-stage pipelines.
 
-**Primitives used**: `branch` + `step.run` + `step.llm` + `loop` + `prepareNext`
+**Primitives used**: `conditional` + `step.runCode` + `step.callModel` + `loop` + `prepareNext`
 
 ## How It Works
 
-1. **Stage 1** (`step.run`): Normalize whitespace and strip special characters
-2. **Stage 2** (`step.llm`): Analyze for sentiment, themes, and patterns
-3. **Stage 3** (`step.run`): Format into a structured report
+1. **Stage 1** (`step.runCode`): Normalize whitespace and strip special characters
+2. **Stage 2** (`step.callModel`): Analyze for sentiment, themes, and patterns
+3. **Stage 3** (`step.runCode`): Format into a structured report
 
-The `loop` runs 3 iterations. A `branch` routes to the correct stage based on a phase counter. `prepareNext` feeds each stage's output as the next stage's input and advances the phase.
+The `loop` runs 3 iterations. A `conditional` routes to the correct stage based on a phase counter. `prepareNext` feeds each stage's output as the next stage's input and advances the phase.
 
 ## Code
 
 ```ts
-import { branch } from '@noetic-tools/core';
+import { conditional } from '@noetic-tools/core';
 import type { ContextData } from '@noetic-tools/core';
 import { loop } from '@noetic-tools/core';
 import { step } from '@noetic-tools/core';
 import { until } from '@noetic-tools/core';
 
-const normalizeStage = step.run<ContextData, string, string>({
+const normalizeStage = step.runCode<ContextData, string, string>({
   id: 'normalize-text',
   execute: async (input) => {
     return input
@@ -36,13 +36,13 @@ const normalizeStage = step.run<ContextData, string, string>({
   },
 });
 
-const analyzeStage = step.llm<ContextData, string, string>({
+const analyzeStage = step.callModel<ContextData, string, string>({
   id: 'analyze-text',
   model: 'openai/gpt-4o',
   instructions: 'Analyze the text for sentiment, key themes, and patterns. Return labeled sections.',
 });
 
-const formatStage = step.run<ContextData, string, string>({
+const formatStage = step.runCode<ContextData, string, string>({
   id: 'format-report',
   execute: async (input) => {
     return ['=== Text Analysis Report ===', '', input, '', '=== End Report ==='].join('\n');
@@ -53,7 +53,7 @@ export function buildPipelineAgent() {
   const stages = [normalizeStage, analyzeStage, formatStage] as const;
   let phase = 0;
 
-  const router = branch<ContextData, string, string>({
+  const router = conditional<ContextData, string, string>({
     id: 'phase-router',
     route: () => stages[phase] ?? null,
   });
@@ -72,14 +72,14 @@ export function buildPipelineAgent() {
 
 ## Key Concepts
 
-### Branch as Sequencer
+### Conditional as Sequencer
 
-While `branch` is typically used for conditional routing, here it acts as a sequencer -- the phase counter determines which stage runs next. This turns a loop into a pipeline where each iteration runs a different step.
+While `conditional` is typically used for conditional routing, here it acts as a sequencer -- the phase counter determines which stage runs next. This turns a loop into a pipeline where each iteration runs a different step.
 
 ### prepareNext for Stage Chaining
 
 The `prepareNext` callback runs after each iteration. It receives the current output and returns the input for the next iteration. This is how the normalized text flows into the analyzer, and the analysis flows into the formatter.
 
-### Mixing Run and LLM Steps
+### Mixing runCode and callModel Steps
 
-Stages 1 and 3 are pure `step.run` (deterministic, no API call), while stage 2 is `step.llm`. This keeps costs down -- only the analysis step that genuinely needs reasoning uses the model.
+Stages 1 and 3 are pure `step.runCode` (deterministic, no API call), while stage 2 is `step.callModel`. This keeps costs down -- only the analysis step that genuinely needs reasoning uses the model.

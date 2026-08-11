@@ -1,11 +1,11 @@
 ---
-title: Plan Memory
+title: Plan
 description: PRD authoring and plan execution lifecycle with tool restrictions during planning.
 ---
 
 ## Overview
 
-Plan Memory manages a structured planning workflow: the agent enters a restricted "plan mode" where only read-only tools are allowed, writes a PRD document, optionally structures the plan as a JSON `WorkflowDocument`, then exits to execute the plan with full tool access.
+The plan layer manages a structured planning workflow: the agent enters a restricted "plan mode" where only read-only tools are allowed, writes a PRD document, optionally structures the plan as a JSON `WorkflowDocument`, then exits to execute the plan with full tool access.
 
 A plan's tree IS a workflow document ([JSON Workflow Runtime](/docs/framework/json-runtime)). Plans additionally store **named workflows** referenced from the tree via `subflow` nodes — the reviewed tree stays small while detailed mechanics live in separately-authored, separately-reviewable workflows.
 
@@ -16,9 +16,9 @@ A plan's tree IS a workflow document ([JSON Workflow Runtime](/docs/framework/js
 ## Usage
 
 ```ts
-import { planMemory } from '@noetic-tools/core';
+import { plan } from '@noetic-tools/core';
 
-const layer = planMemory();
+const layer = plan();
 ```
 
 The layer is included by default in the Noetic CLI. Users type `/plan` to enter plan mode.
@@ -26,8 +26,8 @@ The layer is included by default in the Noetic CLI. Users type `/plan` to enter 
 ## Configuration
 
 ```ts validate=none
-interface PlanMemoryConfig {
-  scope?: MemoryScope;
+interface PlanConfig {
+  scope?: ContextScope;
   additionalAllowedTools?: string[];
   maxPrdLength?: number;
   maxDepth?: number;
@@ -44,7 +44,7 @@ interface PlanMemoryConfig {
 
 | Field | Type | Default | Purpose |
 |---|---|---|---|
-| `scope` | `MemoryScope` | `'thread'` | Persistence scope |
+| `scope` | `ContextScope` | `'thread'` | Persistence scope |
 | `additionalAllowedTools` | `string[]` | -- | Extra tools allowed during plan mode |
 | `maxPrdLength` | `number` | `50000` | Maximum PRD content length |
 | `maxDepth` | `number` | `5` | Maximum structural depth (`workflowDepth`) of the plan tree and each named workflow |
@@ -62,9 +62,9 @@ interface PlanMemoryConfig {
 A planning turn can be spent two ways, and which one fits depends on whether the missing information is in the codebase or in the user's head.
 
 ```ts validate=none
-import { planMemory, PlanStyle } from '@noetic-tools/core';
+import { plan, PlanStyle } from '@noetic-tools/core';
 
-const layer = planMemory({ style: PlanStyle.Interview });
+const layer = plan({ style: PlanStyle.Interview });
 ```
 
 | Style | Shape of the turn | Reach for it when |
@@ -79,7 +79,7 @@ Both styles enforce the same turn-ending rule: a turn ends with `AskUserQuestion
 The layer ships no sub-agent tool. Set `subAgentTool` to the name of yours to add the parallel-exploration guidance to the briefing — how many explorers to launch (usually one, never more than three), when a second perspective is worth it, and what background to hand each agent so Phase 1's work is not thrown away at the Phase 2 boundary.
 
 ```ts validate=none
-planMemory({ subAgentTool: 'agent' });
+plan({ subAgentTool: 'agent' });
 ```
 
 Left unset, the briefing tells the model to explore directly. This is deliberate: instructing a model to call a tool that is not registered costs it a turn and teaches it nothing.
@@ -100,7 +100,7 @@ The layer manages a state machine with five phases:
 
 1. **idle** — No active plan. `recall` returns nothing.
 2. **planning** — Read-only tools only. LLM writes PRD, plan tree, and named workflows.
-3. **executing** — Full tool access. Plan context injected into each LLM call.
+3. **executing** — Full tool access. The plan is injected into the context of each model call.
 4. **completed** — Execution succeeded. Outcome recorded.
 5. **failed** — Execution failed or was aborted. Outcome recorded.
 

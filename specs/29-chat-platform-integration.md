@@ -80,5 +80,5 @@ Without a store, first-contact tracking is per-process.
 
 - Rendering OpenUI fragments (`28-generative-ui`) to Chat SDK cards/Block Kit.
 - Interview-pattern (`13-patterns`) integration with platform modals.
-- `plan_update` chunks from the plan memory layer.
+- `plan_update` chunks from the plan layer.
 - Cancelling in-flight vendor tool calls on turn abort, once the harness exposes an abort signal to tool executors.

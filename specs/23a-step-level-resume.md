@@ -1,7 +1,7 @@
 # Step-Level Resume
 
 > **Status:** IMPLEMENTED. Two things landed differently from the original design — see "Divergences from the original design" at the end.
-> **Depends On:** `23-durable-execution` (CheckpointSnapshot, CheckpointStore, restore flow), `01-step-type` (Step), `03-control-flow` (fork/branch), `05-loop-and-until` (loop, every), `07-context-and-event-log` (Context, ItemLog)
+> **Depends On:** `23-durable-execution` (CheckpointSnapshot, CheckpointStore, restore flow), `01-step-type` (Step), `03-control-flow` (inParallel/conditional), `05-loop-and-until` (loop, schedule), `07-context-and-event-log` (Context, ItemLog)
 > **Exports:** `StepLedgerEntry`, `StepLedgerEntrySchema`, `StepLedger`, `StepLedgerStore`, `StepLedgerWindow`, `createStepLedgerStore`, `StepLedgerRetention`, `StepLedgerStats`, `DEFAULT_STEP_LEDGER_RETENTION`, `resolveStepLedgerRetention`
 > **Source of truth:** `packages/core/src/runtime/durable/step-ledger.ts`, `packages/core/src/interpreter/execute.ts`, `packages/core/src/runtime/context-impl.ts`, `packages/core/src/runtime/durable/harness-checkpoints.ts`
 
@@ -21,7 +21,7 @@ The gap is that a restored context knows *what happened* but not *how far it got
 
 None of them are wired. In the current implementation:
 
-- `ContextImpl` accepts an optional `checkpointFn` (`runtime/context-impl.ts:105`) and `ctx.checkpoint()` calls it (`:206`), but **no construction site supplies it** — not `agent-harness.ts:696` (`createContext`), not `execute-action.ts:816` (spawn child), not `execute-control.ts:63` (fork child). `ctx.checkpoint()` is therefore a permanent no-op.
+- `ContextImpl` accepts an optional `checkpointFn` (`runtime/context-impl.ts:105`) and `ctx.checkpoint()` calls it (`:206`), but **no construction site supplies it** — not `agent-harness.ts:696` (`createContext`), not `execute-action.ts:816` (spawn child), not `execute-control.ts:63` (inParallel child). `ctx.checkpoint()` is therefore a permanent no-op.
 - No module in `packages/core/src` calls `harness.checkpoint(ctx)`. The only definition is the method itself (`agent-harness.ts:925`).
 
 So today a snapshot exists only if the host calls `harness.checkpoint(ctx)` by hand. **Wiring the four boundaries is prerequisite work for everything below**, and is worth landing on its own — it makes `23`'s existing promises true regardless of whether this spec proceeds.
@@ -30,9 +30,9 @@ So today a snapshot exists only if the host calls `harness.checkpoint(ctx)` by h
 
 `captureCheckpoint` serialises the frontier (`harness-checkpoints.ts:51`); `restoreFromCheckpoint` never reads it back. Restoring it would not be enough anyway, for two reasons.
 
-**The frontier records what is in flight, not what finished.** `execute()` pushes a frame before dispatch (`execute.ts:240`) and pops it in a `finally` (`:302`). A completed step leaves no trace. For a fork of 8 workers where 5 finished and 3 were mid-flight at snapshot time, the frontier holds the fork plus the 3 — the 5 completed ones are invisible.
+**The frontier records what is in flight, not what finished.** `execute()` pushes a frame before dispatch (`execute.ts:240`) and pops it in a `finally` (`:302`). A completed step leaves no trace. For an `inParallel` of 8 workers where 5 finished and 3 were mid-flight at snapshot time, the frontier holds the `inParallel` plus the 3 — the 5 completed ones are invisible.
 
-**Skipping is not enough; the output is load-bearing.** Steps consume the previous step's output. An `llm` step is non-deterministic, so re-running it to "catch up" produces a different value than the one the rest of the run already observed. Resume therefore has to *replay recorded outputs*, not skip work. It is memoization, not fast-forward.
+**Skipping is not enough; the output is load-bearing.** Steps consume the previous step's output. A `callModel` step is non-deterministic, so re-running it to "catch up" produces a different value than the one the rest of the run already observed. Resume therefore has to *replay recorded outputs*, not skip work. It is memoization, not fast-forward.
 
 ## Design
 
@@ -54,9 +54,9 @@ Failures are **not** recorded: a step that threw re-runs. Retry policies and `on
 
 ### Identity: the execution path key
 
-`stepId` alone cannot key the ledger. A loop re-executes its body steps under the same ids on every iteration (`execute-control.ts:640` — `for (const bodyStep of step.steps)` inside `while (true)`), and `every` does the same on a timer. Keying by `stepId` would let iteration 1's output replay into iteration 2.
+`stepId` alone cannot key the ledger. A loop re-executes its body steps under the same ids on every iteration (`execute-control.ts:640` — `for (const bodyStep of step.steps)` inside `while (true)`), and `schedule` does the same on a timer. Keying by `stepId` would let iteration 1's output replay into iteration 2.
 
-Dynamic forks are already safe by accident: `buildPerItemStep` suffixes both the wrapper id and the template's node ids with the item index (`workflow-hydrator.ts:688`, `:691`), so `fan-item-0` and `fan-item-1` are distinct. Static forks and loops have no such disambiguation.
+Dynamic `inParallel` fan-outs are already safe by accident: `buildPerItemStep` suffixes both the wrapper id and the template's node ids with the item index (`workflow-hydrator.ts:688`, `:691`), so `fan-item-0` and `fan-item-1` are distinct. Static `inParallel` steps and loops have no such disambiguation.
 
 The key is the frontier stack plus a per-parent occurrence ordinal:
 
@@ -66,7 +66,7 @@ root/plan#0/review-loop#0/body-llm#2
 
 `#n` is the n-th time that `stepId` has been dispatched under that parent frame. Derivation is nearly free — `execute()` already maintains the stack; the addition is an occurrence counter per `(parent frame, child stepId)` pair, incremented at `enterStep`.
 
-**Determinism requirement.** The key must be identical on replay given identical control flow. Sequential constructs satisfy this trivially. Concurrent fork paths do **not** if the ordinal is assigned on completion — completion order varies run to run. Assign the ordinal from the `paths` array index at dispatch (`execute-control.ts:221`), never from settle order.
+**Determinism requirement.** The key must be identical on replay given identical control flow. Sequential constructs satisfy this trivially. Concurrent `inParallel` paths do **not** if the ordinal is assigned on completion — completion order varies run to run. Assign the ordinal from the `paths` array index at dispatch (`execute-control.ts:221`), never from settle order.
 
 ### Recording
 
@@ -86,21 +86,21 @@ Replayed steps should emit a distinct `step_replayed` framework event rather tha
 
 ### What must not be memoized
 
-- **`every`** — a wall-clock scheduled step; replaying its output would collapse a schedule into a value.
+- **`schedule`** — a wall-clock scheduled step; replaying its output would collapse a schedule into a value.
 - **Steps whose value *is* the effect**, where the effect is not durable.
 - An explicit opt-out (`step.durable === false`) for authors who know their step must always run. No such field exists on `Step` today; it would be additive.
 
 ## The side-effect boundary
 
-Memoizing an output replays a step's **value**, not its **effect**. A `run` node that wrote a file, or a `tool` step that opened a PR, returns its recorded output on replay while the effect is not redone. That is correct only if the effect was durable at the moment it happened.
+Memoizing an output replays a step's **value**, not its **effect**. A `runCode` step that wrote a file, or an `invokeTool` step that opened a PR, returns its recorded output on replay while the effect is not redone. That is correct only if the effect was durable at the moment it happened.
 
 This is the same bet the Noetic platform's turn fence already makes, and the reason that fence sits at the **tool** boundary: tools are where effects live. That fence records a durable `tool.call_started` row *before* dispatch, so a crash mid-call is recoverable as a loud unknown-outcome rather than a silent re-run.
 
-**Recommendation: core's ledger covers control flow and `llm` steps; effects stay fenced at the tool/host boundary.** Core should not claim exactly-once for tool execution — it has no durable pre-dispatch record and no way to know whether a given tool is idempotent. Stating this explicitly matters, because "durable execution" invites the assumption that side effects are covered.
+**Recommendation: core's ledger covers control flow and `callModel` steps; effects stay fenced at the tool/host boundary.** Core should not claim exactly-once for tool execution — it has no durable pre-dispatch record and no way to know whether a given tool is idempotent. Stating this explicitly matters, because "durable execution" invites the assumption that side effects are covered.
 
 ## Interaction with context layers
 
-Layer state is already snapshotted (`layers`, keyed by `layerId`) and replayed into `layerStateStore` on restore. A replayed `llm` step must therefore **bypass the layer lifecycle entirely** — no recall, no store, no append pipeline. Re-running `store` hooks against restored state would double-fold every observation the pre-crash run already folded.
+Layer state is already snapshotted (`layers`, keyed by `layerId`) and replayed into `layerStateStore` on restore. A replayed `callModel` step must therefore **bypass the layer lifecycle entirely** — no recall, no store, no append pipeline. Re-running `store` hooks against restored state would double-fold every observation the pre-crash run already folded.
 
 The ledger and the layer snapshot must be captured atomically or they drift: a ledger newer than the layer state would replay steps whose folds are missing. Both live in one `CheckpointSnapshot` written through a single `StorageAdapter.set()`, so a single-key snapshot preserves this for free. **Sharding the ledger (below) breaks that atomicity** and needs an explicit ordering rule — write the ledger shard first, the snapshot second, and treat ledger entries beyond the snapshot's high-water mark as untrusted.
 
@@ -160,7 +160,7 @@ and re-does whatever effects the step has (see "The side-effect boundary"), neve
 replayed value that disagrees with the recorded run. Retention is observable — `StepLedger.stats`
 counts what was recorded, dropped, and evicted — and the first drop of each kind warns.
 
-Sequence numbers are reserved synchronously, before the append's `await`. Concurrent fork
+Sequence numbers are reserved synchronously, before the append's `await`. Concurrent `inParallel`
 legs record through the one shared ledger, and a counter read after an await would let two
 legs write the same key, silently losing a sibling's entry. `load()` therefore reports
 `nextSeq` from storage rather than deriving it from the recovered entry count, which
@@ -188,10 +188,10 @@ Hosts need it in two situations:
 ## Test plan
 
 - Loop body: two iterations, crash after iteration 2, resume replays both iterations' outputs in order and does not re-dispatch either.
-- Static fork: 5 paths, crash with 3 complete; resume replays 3, dispatches 2.
+- Static inParallel: 5 paths, crash with 3 complete; resume replays 3, dispatches 2.
 - Divergence: ledger entry at a path whose `stepId` changed → entry and its subtree discarded, step runs fresh.
-- Concurrent ordinal stability: a fork whose paths settle in a different order across runs produces identical path keys.
-- Non-determinism: an `llm` step with a scripted model returning different values per call; resume must surface the *recorded* value downstream.
+- Concurrent ordinal stability: an inParallel whose paths settle in a different order across runs produces identical path keys.
+- Non-determinism: a `callModel` step with a scripted model returning different values per call; resume must surface the *recorded* value downstream.
 - Layer non-double-fold: a folding layer plus a replayed step; layer state after resume equals layer state before crash.
 - v1 snapshot loads under v2 with an empty ledger and resumes nothing.
 - Retention config: defaults applied per axis; `Infinity` accepted; every non-positive or `NaN` cap throws `STEP_LEDGER_RETENTION_INVALID` at harness construction, not at first record.
@@ -199,13 +199,13 @@ Hosts need it in two situations:
 - Entry cap boundary: no eviction at the cap, oldest-first eviction one past it, and the retained set is the newest `maxEntries`.
 - Bounded-suffix resume: a run longer than `maxEntries` resumes with the evicted head re-dispatched and the retained tail replayed, every output matching the original run.
 - An oversized or unserialisable output is not recorded, and its step re-dispatches on resume while its neighbours still replay.
-- Concurrent records (fork legs through one shared ledger) land on distinct keys.
+- Concurrent records (inParallel legs through one shared ledger) land on distinct keys.
 - A resumed ledger never reuses a live sequence number, even when retention left a gap.
 - `harness.clearCheckpoint` removes the snapshot and every ledger shard.
 
 ## Sizing
 
-Prerequisite (wire the four firing boundaries) is small and independently valuable. The ledger itself is a moderate change concentrated in `execute()`, `harness-checkpoints.ts`, and the checkpoint schema, plus a new `step-ledger.ts`. The path-key work touches `ContextImpl`'s frontier bookkeeping and the fork dispatch site. The retention work (sharding) is the piece most likely to expand, and is the one worth prototyping first, since a design that is correct but writes O(n²) bytes will not ship.
+Prerequisite (wire the four firing boundaries) is small and independently valuable. The ledger itself is a moderate change concentrated in `execute()`, `harness-checkpoints.ts`, and the checkpoint schema, plus a new `step-ledger.ts`. The path-key work touches `ContextImpl`'s frontier bookkeeping and the inParallel dispatch site. The retention work (sharding) is the piece most likely to expand, and is the one worth prototyping first, since a design that is correct but writes O(n²) bytes will not ship.
 
 
 ## Divergences from the original design
@@ -228,7 +228,7 @@ The other three boundaries (post-`execute`, post-`runAppendPipeline`, and the ho
 ask-user enqueue) are wired.
 
 **Replay happens at the coarsest completed granularity.** A composite step is an ordinary
-`run` step in this framework — that is how the hydrator builds `sequence` — so a parent
+`runCode` step in this framework — that is how the hydrator builds `sequence` — so a parent
 that finished records its whole subtree's output, and a resumed run replays the parent
 without descending. This is right for a true resume and wrong for a *changed* workflow:
 editing a child under an unchanged parent has no effect on resume. A host that edited the

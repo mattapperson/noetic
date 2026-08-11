@@ -7,33 +7,33 @@
 
 ## The `Step<I, O>` Discriminated Union
 
-`Step` is a single type with eight variants. The runtime pattern-matches on `kind`. Builder functions (`step.run(...)`, `fork(...)`, etc.) are constructors for the union variants.
+`Step` is a single type with eight variants. The runtime pattern-matches on `kind`. Builder functions (`step.runCode(...)`, `inParallel(...)`, etc.) are constructors for the union variants.
 
 ```typescript
 type Step<I, O> =
-  | { kind: 'run';     id: string; execute: (input: I, ctx: Context) => Promise<O>; retry?: RetryPolicy; subprocess?: SubprocessAdapter }
-  | { kind: 'llm';     id: string; model: string; instructions?: string; tools?: Tool[]; output?: ZodType<O>; params?: ModelParams }
-  | { kind: 'tool';    id: string; tool: Tool; args?: unknown }
-  | { kind: 'branch';  id: string; route: (input: I, ctx: Context) => Step<I, O> | null }
-  | { kind: 'fork';    id: string; mode: 'all' | 'race' | 'settle'; paths: (input: I, ctx: Context) => Step<I, O>[]; merge?: MergeFn<O>; concurrency?: number }
+  | { kind: 'runCode';     id: string; execute: (input: I, ctx: Context) => Promise<O>; retry?: RetryPolicy; subprocess?: SubprocessAdapter }
+  | { kind: 'callModel';     id: string; model: string; instructions?: string; tools?: Tool[]; output?: ZodType<O>; params?: ModelParams }
+  | { kind: 'invokeTool';    id: string; tool: Tool; args?: unknown }
+  | { kind: 'conditional';  id: string; route: (input: I, ctx: Context) => Step<I, O> | null }
+  | { kind: 'inParallel';    id: string; mode: 'all' | 'race' | 'settle'; paths: (input: I, ctx: Context) => Step<I, O>[]; merge?: MergeFn<O>; concurrency?: number }
   | { kind: 'spawn';   id: string; child: Step<I, O>; context?: ContextLayer[]; timeout?: number; subprocess?: SubprocessAdapter }
-  | { kind: 'provide'; id: string; child: Step<I, O>; context: ContextConfig | ContextLayer[] }
+  | { kind: 'withContext'; id: string; child: Step<I, O>; context: ContextConfig | ContextLayer[] }
   | { kind: 'loop';    id: string; body: Step<I, O>; until: Until; maxIterations?: number; maxHistorySize?: number; prepareNext?: (output: O, verdict: Verdict, ctx: Context) => I; onError?: (error: NoeticError, ctx: Context) => 'retry' | 'skip' | 'abort' }
 ```
 
-The optional `subprocess?: SubprocessAdapter` field on `run` and `spawn` variants is a per-step adapter override. When set, the interpreter dispatches that step through the given adapter instead of the harness default. Resolution order at dispatch time is `detachedSpawn-overrides.subprocess ?? step.subprocess ?? harness.subprocess`. See `04-spawn` for adapter routing and `23-durable-execution` for durability guarantees.
+The optional `subprocess?: SubprocessAdapter` field on `runCode` and `spawn` variants is a per-step adapter override. When set, the interpreter dispatches that step through the given adapter instead of the harness default. Resolution order at dispatch time is `detachedSpawn-overrides.subprocess ?? step.subprocess ?? harness.subprocess`. See `04-spawn` for adapter routing and `23-durable-execution` for durability guarantees.
 
 Each variant is specified in its own feature spec:
 
 | Variant | Spec | Purpose |
 |---------|------|---------|
-| `run` | `02-step-variants` | Arbitrary async work |
-| `llm` | `02-step-variants` | Single LLM call |
-| `tool` | `02-step-variants` | Single tool execution |
-| `branch` | `03-control-flow` | Conditional routing |
-| `fork` | `03-control-flow` | Parallel execution |
+| `runCode` | `02-step-variants` | Arbitrary async work |
+| `callModel` | `02-step-variants` | Single LLM call |
+| `invokeTool` | `02-step-variants` | Single tool execution |
+| `conditional` | `03-control-flow` | Conditional routing |
+| `inParallel` | `03-control-flow` | Parallel execution |
 | `spawn` | `04-spawn` | Child execution with context boundary |
-| `provide` | `02-step-variants` | Scoped context layer injection |
+| `withContext` | `02-step-variants` | Scoped context layer injection |
 | `loop` | `05-loop-and-until` | Repeating execution with termination |
 
 ## The `execute()` Interpreter
@@ -43,14 +43,14 @@ The runtime is a single recursive interpreter:
 ```typescript
 async function execute<I, O>(step: Step<I, O>, input: I, ctx: Context): Promise<O> {
   switch (step.kind) {
-    case 'run':     return executeRun(step, input, ctx);
-    case 'llm':     return executeLLM(step, input, ctx);
-    case 'tool':    return executeTool(step, input, ctx);
-    case 'branch':  return executeBranch(step, input, ctx);
-    case 'fork':    return executeFork(step, input, ctx);
-    case 'spawn':   return executeSpawn(step, input, ctx);
-    case 'provide': return executeProvide(step, input, ctx);
-    case 'loop':    return executeLoop(step, input, ctx);
+    case 'runCode':     return executeRun(step, input, ctx);
+    case 'callModel':   return executeLLM(step, input, ctx);
+    case 'invokeTool':  return executeTool(step, input, ctx);
+    case 'conditional': return executeBranch(step, input, ctx);
+    case 'inParallel':  return executeFork(step, input, ctx);
+    case 'spawn':       return executeSpawn(step, input, ctx);
+    case 'withContext': return executeProvide(step, input, ctx);
+    case 'loop':        return executeLoop(step, input, ctx);
   }
 }
 ```

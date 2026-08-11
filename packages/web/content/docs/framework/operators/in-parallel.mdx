@@ -1,22 +1,22 @@
 ---
-title: fork
+title: inParallel
 description: Run multiple steps in parallel with race, all, or settle semantics.
 ---
 
 ## Quick Example
 
 ```ts
-import { fork, step } from '@noetic-tools/core';
+import { inParallel, step } from '@noetic-tools/core';
 
-const fastest = fork({
+const fastest = inParallel({
   id: 'fastest-response',
   mode: 'race',
   paths: (input: string) => [
-    step.llm({
+    step.callModel({
       id: 'model-a',
       model: 'openai/gpt-4o',
     }),
-    step.llm({
+    step.callModel({
       id: 'model-b',
       model: 'openai/gpt-4o-mini',
     }),
@@ -26,7 +26,7 @@ const fastest = fork({
 
 ## What It Does
 
-`fork` runs multiple steps concurrently and combines the results. There are three modes that determine how results are collected.
+`inParallel` runs multiple steps concurrently and combines the results. There are three modes that determine how results are collected.
 
 ## Modes
 
@@ -35,17 +35,17 @@ const fastest = fork({
 Returns the output of the first step to complete. All other paths are discarded.
 
 ```ts validate=none
-import { fork, step } from '@noetic-tools/core';
+import { inParallel, step } from '@noetic-tools/core';
 
-const raceExample = fork({
+const raceExample = inParallel({
   id: 'race-providers',
   mode: 'race',
   paths: (query: string) => [
-    step.run({
+    step.runCode({
       id: 'provider-a',
       execute: async (q) => fetchProviderA(q),
     }),
-    step.run({
+    step.runCode({
       id: 'provider-b',
       execute: async (q) => fetchProviderB(q),
     }),
@@ -60,21 +60,21 @@ No `merge` function is needed -- the winner's output is used directly.
 Waits for every path to complete, then calls `merge` with an array of all results.
 
 ```ts validate=none
-import { fork, step } from '@noetic-tools/core';
+import { inParallel, step } from '@noetic-tools/core';
 
-const allExample = fork({
+const allExample = inParallel({
   id: 'gather-research',
   mode: 'all',
   paths: (topic: string) => [
-    step.run({
+    step.runCode({
       id: 'academic',
       execute: async (t) => searchAcademic(t),
     }),
-    step.run({
+    step.runCode({
       id: 'news',
       execute: async (t) => searchNews(t),
     }),
-    step.run({
+    step.runCode({
       id: 'social',
       execute: async (t) => searchSocial(t),
     }),
@@ -83,7 +83,7 @@ const allExample = fork({
 });
 ```
 
-If any path throws, the entire fork throws `fork_partial`. The first genuine failure also cancels the remaining paths: siblings still queued behind the `concurrency` limit are skipped, and in-flight siblings are aborted cooperatively (they stop at their next step boundary or blocked channel operation) and then awaited. Cancelled siblings appear in `fork_partial.failed` with `error.kind === 'cancelled'`; paths that completed before the failure stay in `succeeded`. If the parent context itself is aborted mid-fork, the fork throws `cancelled` instead of `fork_partial`.
+If any path throws, the entire `inParallel` throws `fork_partial`. The first genuine failure also cancels the remaining paths: siblings still queued behind the `concurrency` limit are skipped, and in-flight siblings are aborted cooperatively (they stop at their next step boundary or blocked channel operation) and then awaited. Cancelled siblings appear in `fork_partial.failed` with `error.kind === 'cancelled'`; paths that completed before the failure stay in `succeeded`. If the parent context itself is aborted mid-run, the operator throws `cancelled` instead of `fork_partial`.
 
 ### settle
 
@@ -92,17 +92,17 @@ Like `all`, but collects both successes and failures. Each result is a `SettleRe
 ```ts validate=none
 import type { SettleResult } from '@noetic-tools/core';
 
-import { fork, step } from '@noetic-tools/core';
+import { inParallel, step } from '@noetic-tools/core';
 
-const settleExample = fork({
+const settleExample = inParallel({
   id: 'resilient-search',
   mode: 'settle',
   paths: (query: string) => [
-    step.run({
+    step.runCode({
       id: 'source-a',
       execute: async (q) => fetchSourceA(q),
     }),
-    step.run({
+    step.runCode({
       id: 'source-b',
       execute: async (q) => fetchSourceB(q),
     }),
@@ -148,10 +148,10 @@ const settleExample = fork({
 Limit how many paths run at once with `concurrency`.
 
 ```ts validate=none
-import { fork, step } from '@noetic-tools/core';
+import { inParallel, step } from '@noetic-tools/core';
 
-const throttled = fork({
-  id: 'throttled-fork',
+const throttled = inParallel({
+  id: 'throttled-parallel',
   mode: 'all',
   paths: (input: string) => generateManySteps(input),
   merge: (results) => results,
@@ -161,18 +161,18 @@ const throttled = fork({
 
 ## Context Layers
 
-Each path is a child execution. It inherits the parent's context layers and tool pool, so `llm` steps inside a path keep their context projection and layer tools, and a nested `spawn` has layers to inherit.
+Each path is a child execution. It inherits the parent's context layers and tool pool, so callModel steps inside a path keep their context projection and layer tools, and a nested `spawn` has layers to inherit.
 
 Layer *state* is per path:
 
-- `onSpawn` seeds each path's state from the parent's before the path runs. Items returned by `onSpawn` are not appended -- a fork child already has the parent's full item log.
+- `onSpawn` seeds each path's state from the parent's before the path runs. Items returned by `onSpawn` are not appended -- a parallel path already has the parent's full item log.
 - `onReturn` merges a successful path's contribution back into the parent. A failed path is not merged, and its state is discarded.
 - Merges run one at a time even though paths run concurrently, so no path's contribution is lost to a concurrent read-modify-write.
 
-For layers that collect artifacts from many workers, choose a merge strategy that namespaces per child -- see [`durableTaskState({ mergeData: 'namespace' })`](/docs/framework/context-layers/durable-task-state).
+For layers that collect artifacts from many workers, choose a merge strategy that namespaces per child -- see [`taskState({ mergeData: 'namespace' })`](/docs/framework/context-layers/task-state).
 
 ## Related
 
-- [branch](/docs/framework/operators/branch) -- conditional routing for single-path decisions.
+- [conditional](/docs/framework/operators/conditional) -- conditional routing for single-path decisions.
 - [Spawn](/docs/framework/operators/spawn) -- isolated child contexts for deeper isolation.
-- [Steps](/docs/framework/steps) -- the step types you can use as fork paths.
+- [Steps](/docs/framework/steps) -- the step types you can use as parallel paths.

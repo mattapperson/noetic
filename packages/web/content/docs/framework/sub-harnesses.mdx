@@ -5,7 +5,7 @@ description: Run a coding agent — Claude Code, Codex, opencode, pi — as a No
 
 ## Quick Example
 
-A sub-harness step delegates a turn to an external coding-agent runtime, exactly the way [`step.llm`](/docs/framework/steps) delegates a turn to a language model. You pick the agent with a builder (`step.claudeCode`, `step.codex`, `step.opencode`, `step.pi`) and hand it an adapter from the matching package:
+A sub-harness step delegates a turn to an external coding-agent runtime, exactly the way [`step.callModel`](/docs/framework/steps) delegates a turn to a language model. You pick the agent with a builder (`step.claudeCode`, `step.codex`, `step.opencode`, `step.pi`) and hand it an adapter from the matching package:
 
 ```ts
 import { AgentHarness, type ContextData, step } from '@noetic-tools/core';
@@ -64,7 +64,7 @@ step.claudeCode<TContext = ContextData, I = unknown, O = unknown>({
 | `prompt` | `string` or `(ctx) => string` | The fresh turn input. The prior conversation is passed separately as history (see [Conversation history](#conversation-history)), so this is only the new user turn. |
 | `settings` | `SubHarnessSettings` | Shared harness knobs — see below. |
 | `instructions` | `string` or `(ctx) => string \| undefined` | System instructions applied once on the first message of a fresh session. Never re-applied on resume. |
-| `output` | `ZodType<O>` | Optional Zod schema. When set, the agent's final text is JSON-parsed and validated, exactly like `step.llm`'s `output`. |
+| `output` | `ZodType<O>` | Optional Zod schema. When set, the agent's final text is JSON-parsed and validated, exactly like `step.callModel`'s `output`. |
 | `session` | `SubHarnessSessionPolicy` | Session reuse + teardown policy — see below. |
 | `emit` | `boolean` or filter fn | Framework-event emission (default `true`). |
 
@@ -102,13 +102,13 @@ interface SubHarnessSessionPolicy {
 
 ## Conversation history
 
-A sub-harness sees the conversation so far, not just its own prompt — so a coding agent run *after* `step.llm` steps (or on a later turn of a consecutive [`harness.execute()`](/docs/framework/runtime) conversation) has full context and doesn't act confused.
+A sub-harness sees the conversation so far, not just its own prompt — so a coding agent run *after* `step.callModel` steps (or on a later turn of a consecutive [`harness.execute()`](/docs/framework/runtime) conversation) has full context and doesn't act confused.
 
 Before appending the turn's prompt, the interpreter captures everything earlier steps put in the conversation (`ctx.itemLog`) and seeds it into a fresh session. You don't pass anything — it's automatic:
 
 ```ts validate=none
-// An earlier llm step established a fact in the conversation…
-const plan = step.llm({ id: 'plan', model, instructions: 'Note the deploy policy.' });
+// An earlier callModel step established a fact in the conversation…
+const plan = step.callModel({ id: 'plan', model, instructions: 'Note the deploy policy.' });
 // …and a later sub-harness step can act on it.
 const apply = step.claudeCode({
   id: 'apply',
@@ -122,7 +122,7 @@ History seeds the **first** turn of a fresh session only; after that the underly
 
 ## Observing the agent's output
 
-A sub-harness's output is mapped onto the *same* event surface as an LLM step's, so you observe a coding agent exactly like you observe a model — its text, reasoning, and tool calls flow through the runtime streams:
+A sub-harness's output is mapped onto the *same* event surface as a callModel step's, so you observe a coding agent exactly like you observe a model — its text, reasoning, and tool calls flow through the runtime streams:
 
 ```ts validate=none
 const harness = new AgentHarness({ name: 'reviewer', initialStep: review, params: {} });

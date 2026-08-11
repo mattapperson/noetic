@@ -44,7 +44,7 @@ The layer system is loosely inspired by reactive programming — not in the form
 - A **window section** — a portion of the context budget reserved for specific content (skills, reminders, entity facts)
 - A **map/reduce** over prior information — transforming raw history or storage into a condensed, relevant form (summarization layers, RAG layers, episodic context)
 
-**Context is scoped, not global.** LLM steps can share a converged context, operate in their own, or run in a child context forked from a parent via `spawn`. There is no ambient global context. Forked children are not fully isolated — they can receive updates from the parent context during their execution, and layers control whether and how those updates are incorporated.
+**Context is scoped, not global.** callModel steps can share a converged context, operate in their own, or run in a child context created from a parent via `spawn`. There is no ambient global context. Spawned children are not fully isolated — they can receive updates from the parent context during their execution, and layers control whether and how those updates are incorporated.
 
 **Internally reactive; externally hooks.** Users implementing custom layers do not write reactive pipelines. They implement lifecycle hooks (`recall`, `store`, `afterModelCall`, etc.) and the agent harness handles orchestration, ordering, budgeting, and re-evaluation. The reactive behavior is an implementation detail, not a user-facing API.
 
@@ -112,7 +112,7 @@ type BudgetConfig =
 export const Slot = {
   REMINDER:        80,
   STEERING:        90,
-  WORKING_MEMORY:  100,
+  SCRATCHPAD:  100,
   ENTITY:          150,
   OBSERVATIONS:    200,
   PROCEDURAL:      250,
@@ -150,7 +150,7 @@ interface ContextLayerHooks<TState = unknown> {
 
 `renderDelta` is called only for an **anchored** layer whose pinned output has gone stale, to describe the change compactly instead of republishing the whole block. Returning `null` — or throwing, or timing out — falls back to republishing the full new content. It is never called for `'live'` layers, which re-render anyway. See **Prompt-Cache Anchoring** below.
 
-`projectHistory` is a read-side hook: it receives the full historical items from `itemLog` and returns a (possibly narrower) projection used as `historyItems` in the next `assembleView` call. Layers compose in slot order, each receiving the output of the previous layer. Storage (`itemLog`, `accumulatedItems`) is never mutated by this hook — see `historyWindow` in spec 12 for the canonical use case.
+`projectHistory` is a read-side hook: it receives the full historical items from `itemLog` and returns a (possibly narrower) projection used as `historyItems` in the next `assembleView` call. Layers compose in slot order, each receiving the output of the previous layer. Storage (`itemLog`, `accumulatedItems`) is never mutated by this hook — see `history` in spec 12 for the canonical use case.
 
 ### Lifecycle Sequence
 
@@ -226,7 +226,7 @@ The runtime applies these invariants uniformly across the lifecycle:
 - **Disabled-layer skip.** A layer whose `init` threw with `onInitError: 'disable'` is marked disabled via an **explicit flag** on the layer state store (`disable`/`isDisabled`) and is skipped by *every* later hook — `recall`, `store`, `onSpawn`, `onComplete`, `dispose`, `onItemAppend`, `projectHistory`, `beforeToolCall`, `afterModelCall`. The flag — not the absence of state — is the disabled signal, so a layer that legitimately cleared its state keeps running (its hooks receive `undefined` state). The store distinguishes the two via `has` (any state entry, including an explicit `undefined`): an init-bearing layer with **no entry at all** was never initialized for the execution (e.g. a bare `harness.run()` outside a session) and is skipped — its hooks MUST NOT run with `undefined` state, since init never seeded the state they were written against. A custom state store without explicit tracking falls back to the legacy sentinel (init-bearing layer with no state), which cannot make the cleared/uninitialized distinction.
 - **State clearing.** `store` (and `onComplete`) detect the returned object with `'state' in result`, not `result.state !== undefined`, so a layer MAY clear its state by returning `{ state: undefined }`. Clearing deletes the durable key, so the next execution's `init` sees no saved state and falls back to its default. Clearing does NOT disable the layer.
 - **`onReturn` requirements.** Only the *child*'s state is required to merge. A parent that never initialized state can still be seeded from the child; `onReturn` is skipped only when the child produced no state.
-- **Child boundaries.** Both `spawn` (spec 04) and each `fork` path (spec 03) are child executions and run the `onSpawn`/`onReturn` pair. Fork paths merge one at a time even when they execute concurrently, so each merge sees the previous path's contribution.
+- **Child boundaries.** Both `spawn` (spec 04) and each `inParallel` path (spec 03) are child executions and run the `onSpawn`/`onReturn` pair. inParallel paths merge one at a time even when they execute concurrently, so each merge sees the previous path's contribution.
 - **`onSpawn` for init-less layers.** `onSpawn` runs for layers with no `init` hook (state legitimately `undefined`), consistent with `recall`. Only disabled layers (init present, no state) are skipped.
 
 ---
@@ -404,7 +404,7 @@ There is a single allocator, `allocateBudgets` (in `context/budget.ts`). It spli
 
 ### Policy Resolution
 
-The policy that drives both allocation and view assembly is resolved per LLM step:
+The policy that drives both allocation and view assembly is resolved per callModel step:
 
 ```
 step.projection  >  harness.projection  >  DEFAULT_PROJECTION
@@ -475,7 +475,7 @@ Each layer's `recallMode` controls whether its `recall()` blocks the model call:
 - **`'atomic'` (default)** — recall runs synchronously in the hot path. The harness waits for it before assembling the view, so the current turn always sees fresh output.
 - **`'eventual'`** — recall is served from a per-harness cache and never blocks. A cold or invalidated entry is recalled and cached; a warm entry is returned as-is. The cache entry is marked stale when the layer's own `store()` produces new state, so the *next* turn re-runs recall against the fresh state. This keeps a slow layer's `recall()` off the critical path.
 
-Both modes recall once per LLM step. The harness runs atomic layers (`recallLayersAtomic`) and eventual layers (`recallLayersEventual`) and merges the two result sets in slot order.
+Both modes recall once per callModel step. The harness runs atomic layers (`recallLayersAtomic`) and eventual layers (`recallLayersEventual`) and merges the two result sets in slot order.
 
 A harness configured with `forceAtomicRecall: true` treats **every** layer as atomic regardless of its `recallMode` — the eventual cache is bypassed entirely.
 
@@ -524,7 +524,7 @@ To read a different scope, declare the broader scope. No escape hatches.
 
 ## Layer Provides
 
-A context layer MAY declare a `provides` map exposing typed data projections and callable functions to the rest of the agent. This gives code steps structured access to layer state without reaching into layer internals, and gives LLM steps automatic tool access to layer capabilities.
+A context layer MAY declare a `provides` map exposing typed data projections and callable functions to the rest of the agent. This gives code steps structured access to layer state without reaching into layer internals, and gives callModel steps automatic tool access to layer capabilities.
 
 ### Declaration Types
 
@@ -592,7 +592,7 @@ Layers without `provides` produce an empty `{}` entry in `ctx.context`.
 
 ### Automatic LLM Tool Injection
 
-Every `LayerFunctionDecl` in a layer's `provides` map is automatically exposed as a tool to any LLM step running within the layer's context. Tool names are namespaced as `{layerId}/{functionName}` to avoid collisions across layers. The `description`, `input` schema, and `output` schema from the declaration are used directly as the tool definition. The agent harness handles argument validation, state lookup, and state updates transparently.
+Every `LayerFunctionDecl` in a layer's `provides` map is automatically exposed as a tool to any callModel step running within the layer's context. Tool names are namespaced as `{layerId}/{functionName}` to avoid collisions across layers. The `description`, `input` schema, and `output` schema from the declaration are used directly as the tool definition. The agent harness handles argument validation, state lookup, and state updates transparently.
 
 ### Builder Helpers
 
@@ -637,13 +637,13 @@ type InferContext<T extends ContextConfig> = T['_shape'];
 `TContext` is the first generic parameter on `Step` and `Context`, enabling end-to-end type safety:
 
 ```typescript
-const mem = context([workingMemoryContext(), counterLayer()]);
+const mem = context([scratchpad(), counterLayer()]);
 type Mem = InferContext<typeof mem>;
 
-step.run<Mem>({
+step.runCode<Mem>({
   id: 'work',
   execute: async (input, ctx) => {
-    ctx.context['working-context'].snapshot;  // typed
+    ctx.context['scratchpad'].snapshot;  // typed
     await ctx.context.counter.increment({ amount: 1 });  // typed
   },
 });
@@ -808,7 +808,7 @@ Layers never see epochs. `recall()` keeps its contract — return the current fu
 
 ### Cache Lineage
 
-Epochs are keyed by lineage, not execution: `depth === 0` keys on `threadId`, deeper executions key on their own `executionId`. A session mints a fresh `executionId` per turn, so keying on execution would re-anchor every turn and pin nothing; spawn and fork children inherit their parent's `threadId` but assemble a different view, so they must not inherit its pins.
+Epochs are keyed by lineage, not execution: `depth === 0` keys on `threadId`, deeper executions key on their own `executionId`. A session mints a fresh `executionId` per turn, so keying on execution would re-anchor every turn and pin nothing; spawn and inParallel children inherit their parent's `threadId` but assemble a different view, so they must not inherit its pins.
 
 ### Re-anchor Triggers
 
@@ -886,7 +886,7 @@ Set on the harness as `contextCache`. Anchoring is **on by default**; `enabled: 
 
 ### Limitation: History Overflow
 
-Once conversation history exceeds its budget, the projector drops from the front, which moves the anchor/history boundary and loses the history portion of the cache on every subsequent turn. The `[system][anchor]` prefix still caches. Pair anchoring with `historyWindow` (spec 12) to keep the boundary still.
+Once conversation history exceeds its budget, the projector drops from the front, which moves the anchor/history boundary and loses the history portion of the cache on every subsequent turn. The `[system][anchor]` prefix still caches. Pair anchoring with `history` (spec 12) to keep the boundary still.
 
 ### Hard Token Cap (`assembleView`)
 

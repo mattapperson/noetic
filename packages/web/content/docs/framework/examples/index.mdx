@@ -7,14 +7,14 @@ These examples demonstrate how Noetic's primitives combine to solve real problem
 
 | Example | Primitives Used | What It Does |
 |---|---|---|
-| [Branching Agent](/docs/framework/examples/branching-agent) | `branch` + `step.run` + `step.llm` + `loop` | Routes support tickets by keyword classification |
-| [Parallel Research](/docs/framework/examples/parallel-research) | `fork` (all) + `spawn` + `step.llm` | Researches a topic from 3 perspectives in parallel |
-| [Pipeline Agent](/docs/framework/examples/pipeline-agent) | `branch` + `step.run` + `step.llm` + `loop` + `prepareNext` | 3-stage text processing pipeline |
-| [Deep Agent](/docs/framework/examples/deep-agent) | `spawn` + `react` + `tool` + context layers | Full coding agent with filesystem, planning, delegation, and skills |
+| [Branching Agent](/docs/framework/examples/branching-agent) | `conditional` + `step.runCode` + `step.callModel` + `loop` | Routes support tickets by keyword classification |
+| [Parallel Research](/docs/framework/examples/parallel-research) | `inParallel` (all) + `spawn` + `step.callModel` | Researches a topic from 3 perspectives in parallel |
+| [Pipeline Agent](/docs/framework/examples/pipeline-agent) | `conditional` + `step.runCode` + `step.callModel` + `loop` + `prepareNext` | 3-stage text processing pipeline |
+| [Deep Agent](/docs/framework/examples/deep-agent) | `spawn` + `loop` + `step.callModel` + `tool` + context layers | Full coding agent with filesystem, planning, delegation, and skills |
 
 ## Running Examples
 
-All examples live in `packages/core/examples/` and require an `OPENROUTER_API_KEY` environment variable for LLM steps.
+All examples live in `packages/core/examples/` and require an `OPENROUTER_API_KEY` environment variable for callModel steps.
 
 ```bash
 cd packages/core

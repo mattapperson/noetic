@@ -55,7 +55,7 @@ Every [Context](/docs/framework/context) has a `span` property. You can add cust
 ```ts
 declare function doWork(input: string): string;
 
-const myStep = step.run({ id: 'annotated', execute: async (input: string, ctx) => {
+const myStep = step.runCode({ id: 'annotated', execute: async (input: string, ctx) => {
   ctx.span.setAttribute('input.length', input.length);
   ctx.span.addEvent('processing_started');
 
@@ -211,7 +211,7 @@ The harness emits one `llm.call` span per model call (one per tool round) and a 
 
 ## Workflow Run Span
 
-`parseAndRunWorkflow` opens a root `workflow.run` span that carries the static workflow graph — the *potential paths* of the DAG, independent of which branches actually run. Model and tool spans nest under it, so the exported trace mirrors the declared workflow with the executed path overlaid.
+`parseAndRunWorkflow` opens a root `workflow.run` span that carries the static workflow graph — the *potential paths* of the DAG, independent of which routes actually run. Model and tool spans nest under it, so the exported trace mirrors the declared workflow with the executed path overlaid.
 
 ### NoeticAttr Constants
 

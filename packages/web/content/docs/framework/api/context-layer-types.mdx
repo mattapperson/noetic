@@ -78,7 +78,7 @@ An **omitted** `budget` behaves like `'auto'`: the layer has infinite headroom a
 const SlotShape = {
   REMINDER: 80,
   STEERING: 90,
-  WORKING_MEMORY: 100,
+  SCRATCHPAD: 100,
   ENTITY: 150,
   OBSERVATIONS: 200,
   PROCEDURAL: 250,
@@ -112,7 +112,7 @@ interface ContextLayerHooks<TState = unknown> {
 - **`recall`** may also return a bare `string` shorthand — the runtime wraps it in a developer message and estimates its token count — or `null` to contribute nothing this turn.
 - **`beforeToolCall` / `afterModelCall`** are the steering hooks: they return a `SteeringDecision` (allow / deny / guide) plus updated state. A deny surfaces as a `NoeticError` kind `steering_denied`.
 - **`onItemAppend`** runs when input items (user messages, tool outputs) are about to be appended — layers compose in slot order, each receiving the previous layer's output. It can transform, drop, or inject items, and may request a context re-render. Not called for LLM response items (use `store`).
-- **`projectHistory`** projects (caps, transforms) the history portion of the context window once per LLM step. Read-side only — `itemLog` storage is never mutated.
+- **`projectHistory`** projects (caps, transforms) the history portion of the context window once per callModel step. Read-side only — `itemLog` storage is never mutated.
 - **`renderDelta`** is called for an anchored layer whose pinned output has gone stale, to describe the change compactly instead of re-sending the whole block. Return `null` to fall back to the default, which republishes the full new content. Never called for layers in the `'live'` band.
 
 ## Hook Parameter Types
@@ -531,4 +531,4 @@ Creates a `LayerFunctionDecl` that exposes a callable function on the context ob
 function context<const T extends readonly ContextLayer[]>(layers: T): ContextConfig<T>;
 ```
 
-Collects an **array** of layers into a `ContextConfig` with inferred `_shape` — e.g. `context([workingMemoryContext(), planContext()])`. Pass the result to `StepSpawn.context` or `AgentConfig` to get typed `ctx.context` access.
+Collects an **array** of layers into a `ContextConfig` with inferred `_shape` — e.g. `context([scratchpad(), plan()])`. Pass the result to `StepSpawn.context` or `AgentConfig` to get typed `ctx.context` access.

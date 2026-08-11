@@ -1,11 +1,11 @@
 ---
-title: History Window
+title: History
 description: A read-side context layer that caps the trailing items projected to the LLM without mutating storage.
 ---
 
 ## Overview
 
-`historyWindow` caps the number of trailing items projected to the LLM each turn. Storage (`itemLog`, `session.accumulatedItems`, session JSON) is untouched — the cap is a pure projection over the value handed to `assembleView`. Long-running sessions stay within the model's context window without losing transcript history.
+`history` caps the number of trailing items projected to the LLM each turn. Storage (`itemLog`, `session.accumulatedItems`, session JSON) is untouched — the cap is a pure projection over the value handed to `assembleView`. Long-running sessions stay within the model's context window without losing transcript history.
 
 - **Slot**: `275` (after recall-contributing layers)
 - **Default scope**: `'execution'`
@@ -15,22 +15,22 @@ description: A read-side context layer that caps the trailing items projected to
 ## Usage
 
 ```ts
-import { historyWindow, observationalContext, workingMemoryContext } from '@noetic-tools/core';
+import { history, observations, scratchpad } from '@noetic-tools/core';
 
 const layers = [
-  workingMemoryContext(),
-  observationalContext(),
-  historyWindow({ maxItems: 40 }),
+  scratchpad(),
+  observations(),
+  history({ maxItems: 40 }),
 ];
 ```
 
 ## Configuration
 
-`maxItems` is validated at construction time: it must be an integer in `[2, 10000]`, otherwise `historyWindow()` throws a `NoeticConfigError` with code `INVALID_HISTORY_WINDOW_MAX_ITEMS`.
+`maxItems` is validated at construction time: it must be an integer in `[2, 10000]`, otherwise `history()` throws a `NoeticConfigError` with code `INVALID_HISTORY_WINDOW_MAX_ITEMS`.
 
 ## Algorithm
 
-On every LLM step, the layer:
+On every callModel step, the layer:
 
 1. Slices the trailing `maxItems` from the input.
 2. Walks backward to ensure the projected window contains at least one user `message` AND one assistant `message`. If the slice lacks either role, the cap is temporarily exceeded — the **minimum-exchange guarantee**. The expansion is bounded by a hard cap of **`maxItems × 4`**, so a tool-only burst (many `function_call` / `function_call_output` items with no role messages) cannot grow the window back to the start of history.
@@ -52,7 +52,7 @@ Within a single `callModel` invocation's tool loop, that round's own `function_c
 
 ## CLI configuration
 
-The CLI installs `historyWindow` only when `AgentConfig.history.maxItems` is set. When unset, history is uncapped (the pre-existing default behaviour). Configure it via:
+The CLI installs `history` only when `AgentConfig.history.maxItems` is set. When unset, history is uncapped (the pre-existing default behaviour). Configure it via:
 
 - `noetic.config.ts`:
 
@@ -70,6 +70,6 @@ The CLI installs `historyWindow` only when `AgentConfig.history.maxItems` is set
 
   (`model`, `cwd`, `apiKey`, and `maxTurns` are required fields on `AgentConfig`.)
 
-- `/config` slash command → **Context** tab → **History Window (items)**. Leave blank to disable.
+- `/config` slash command → **Context** tab → **History (items)**. Leave blank to disable.
 
 Spawned sub-agents (teammates) inherit the same cap by default.

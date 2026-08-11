@@ -49,17 +49,17 @@ const embed = createOpenRouterEmbed(process.env.OPENROUTER_API_KEY);
 ### Usage with Semantic Routing
 
 ```ts
-import { branch, createOpenRouterEmbed, semanticSwitch, step } from '@noetic-tools/core';
+import { conditional, createOpenRouterEmbed, semanticSwitch, step } from '@noetic-tools/core';
 
 const embed = createOpenRouterEmbed(process.env.OPENROUTER_API_KEY);
 
-const router = branch({
+const router = conditional({
   id: 'semantic-router',
   route: semanticSwitch({
     embed,
     cases: {
-      'greeting or salutation': step.llm({ id: 'greet', model: 'openai/gpt-4o-mini' }),
-      'technical question': step.llm({ id: 'tech', model: 'openai/gpt-4o' }),
+      'greeting or salutation': step.callModel({ id: 'greet', model: 'openai/gpt-4o-mini' }),
+      'technical question': step.callModel({ id: 'tech', model: 'openai/gpt-4o' }),
     },
     threshold: 0.7,
   }),

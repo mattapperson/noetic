@@ -1,16 +1,16 @@
-# Control Flow: `branch` and `fork`
+# Control Flow: `conditional` and `inParallel`
 
 > **Depends On:** `01-step-type` (Step<I,O>), `09-error-model` (NoeticError)
-> **Exports:** `branch()`, `fork()`, `BranchOpts`, `ForkOpts`, `SettleResult`, `MergeFn`
+> **Exports:** `conditional()`, `inParallel()`, `ConditionalOpts`, `InParallelOpts`, `SettleResult`, `MergeFn`
 
 ---
 
-## `branch()` — Conditional Routing
+## `conditional()` — Conditional Routing
 
 Inspects a value and selects which step to execute next. Returns the actual `Step`, not a string node name.
 
 ```typescript
-interface BranchOpts<I, O> {
+interface ConditionalOpts<I, O> {
   id: string;
   route: (input: I, ctx: Context) => Step<I, O> | null | Promise<Step<I, O> | null>;
 }
@@ -19,7 +19,7 @@ interface BranchOpts<I, O> {
 The `route` function may be sync or async. Async routes enable embedding-based semantic routing and AI-driven conditions without blocking the type system.
 
 ```typescript
-const routeByLanguage = branch<CodeFile, AnalysisResult>({
+const routeByLanguage = conditional<CodeFile, AnalysisResult>({
   id: 'route-by-language',
   route: (file, ctx) => {
     switch (file.language) {
@@ -32,9 +32,9 @@ const routeByLanguage = branch<CodeFile, AnalysisResult>({
 });
 ```
 
-LangGraph's conditional edges return string node names (`return "node_a"`), which TypeScript can't verify. Here, the router returns actual `Step` objects — TypeScript enforces that all branches return compatible output types.
+LangGraph's conditional edges return string node names (`return "node_a"`), which TypeScript can't verify. Here, the router returns actual `Step` objects — TypeScript enforces that all routes return compatible output types.
 
-Returning `null` is a no-op (skip this branch). This is useful in loops where some iterations don't need a particular branch.
+Returning `null` is a no-op (skip this route). This is useful in loops where some iterations don't need a particular route.
 
 ### Semantic Condition Helpers
 
@@ -53,7 +53,7 @@ All embedding conditions accept an optional `cache: StorageAdapter` for persiste
 
 ---
 
-## `fork()` — Parallel Execution
+## `inParallel()` — Parallel Execution
 
 Splits execution into parallel paths and merges results.
 
@@ -65,12 +65,12 @@ Splits execution into parallel paths and merges results.
 | `race`   | Return first to complete, abort others | Competitive search, fastest model |
 | `settle` | Wait for all, collect results + errors | Fault-tolerant batch processing   |
 
-### Type-Safe Fork Options
+### Type-Safe inParallel Options
 
-The `merge` function is mandatory for `all` and `settle` modes — this eliminates `ForkResult` from the public API and ensures `fork` always produces `O`:
+The `merge` function is mandatory for `all` and `settle` modes — this eliminates a per-path result wrapper from the public API and ensures `inParallel` always produces `O`:
 
 ```typescript
-type ForkOpts<I, O> =
+type InParallelOpts<I, O> =
   | { id: string; mode: 'race';   paths: (input: I, ctx: Context) => Step<I, O>[]; concurrency?: number }
   | { id: string; mode: 'all';    paths: (input: I, ctx: Context) => Step<I, O>[]; merge: (results: O[], ctx: Context) => O; concurrency?: number }
   | { id: string; mode: 'settle'; paths: (input: I, ctx: Context) => Step<I, O>[]; merge: (results: SettleResult<O>[], ctx: Context) => O; concurrency?: number }
@@ -92,13 +92,13 @@ interface SettleResult<O> {
 The `paths` parameter is a function, not a static array. This enables LangGraph-style `Send` without a separate API:
 
 ```typescript
-const dynamicSearch = fork({
+const dynamicSearch = inParallel({
   id: 'parallel-search',
   mode: 'all',
   paths: (query, ctx) => {
     const engines = ['google', 'bing', 'arxiv', 'github'];
     return engines.map(engine =>
-      step.run({
+      step.runCode({
         id: `search-${engine}`,
         execute: async () => searchEngine(engine, query),
       })
@@ -111,7 +111,7 @@ const dynamicSearch = fork({
 
 ### State Isolation
 
-Each forked path receives a **deep clone** of the parent's `Context.state`. Mutations in one path do NOT affect other paths or the parent. After the fork completes:
+Each parallel path receives a **deep clone** of the parent's `Context.state`. Mutations in one path do NOT affect other paths or the parent. After the `inParallel` completes:
 
 - **`mode: 'all'`** / **`mode: 'settle'`** — The `merge` function receives the merged results. The parent's `Context.state` is NOT automatically updated from child mutations. If child state changes need to propagate, the `merge` function must return them as part of `O`.
 - **`mode: 'race'`** — The winning path's `Context.state` replaces the parent's state.
@@ -120,18 +120,18 @@ This mirrors `spawn`'s deep-clone guarantee (see `04-spawn`) and prevents race c
 
 ### Context Layers
 
-A forked path is a child execution. Each path inherits the parent's context layers and unified tool set, so `llm` steps inside a path keep their context projection and layer tools, and a nested `spawn` has parent layers to inherit.
+A parallel path is a child execution. Each path inherits the parent's context layers and unified tool set, so `callModel` steps inside a path keep their context projection and layer tools, and a nested `spawn` has parent layers to inherit.
 
 Layer **state** is per-path, bracketed by the same hooks `spawn` uses (see `11-context-layer-system`):
 
-- `onSpawn` seeds each path's layer state from the parent's before the path runs. Unlike `spawn`, items returned by `onSpawn` are NOT appended — a fork child already inherits the parent's full item log, which is what those items exist to seed for an otherwise-empty spawn child.
+- `onSpawn` seeds each path's layer state from the parent's before the path runs. Unlike `spawn`, items returned by `onSpawn` are NOT appended — an `inParallel` child already inherits the parent's full item log, which is what those items exist to seed for an otherwise-empty spawn child.
 - `onReturn` merges a path's contribution back into the parent when the path **succeeds**. Failed paths are not merged (matching `spawn`, whose `onReturn` is skipped when the child throws) and their layer state is discarded.
 - Merges are serialised across paths even though paths run concurrently: each `onReturn` is a read-modify-write of one parent state, so an unserialised merge would drop siblings' contributions.
 
-Layers that merge concurrent children should namespace by `childCtx.executionId` rather than merging keys shallowly — see `durableTaskState({ mergeData: 'namespace' })` in `12-builtin-memory-layers`.
+Layers that merge concurrent children should namespace by `childCtx.executionId` rather than merging keys shallowly — see `taskState({ mergeData: 'namespace' })` in `12-builtin-context-layers`.
 
 ### Error Behavior
 
-- **`mode: 'all'`** — If any path fails, cancel remaining paths and throw `fork_partial` (see `09-error-model`) with both succeeded and failed results. Cancellation is cooperative: paths still queued behind the `concurrency` limit are skipped, in-flight siblings are aborted and awaited (they stop at their next step boundary or blocked channel operation), and cancelled paths appear in `failed` with `{ kind: 'cancelled' }`. If the parent context itself is aborted mid-fork, the fork throws `cancelled`, not `fork_partial`.
+- **`mode: 'all'`** — If any path fails, cancel remaining paths and throw `fork_partial` (see `09-error-model`) with both succeeded and failed results. Cancellation is cooperative: paths still queued behind the `concurrency` limit are skipped, in-flight siblings are aborted and awaited (they stop at their next step boundary or blocked channel operation), and cancelled paths appear in `failed` with `{ kind: 'cancelled' }`. If the parent context itself is aborted mid-execution, the `inParallel` throws `cancelled`, not `fork_partial`.
 - **`mode: 'settle'`** — Never throws. Failed paths appear as `{ status: 'rejected' }` in the merge function's `SettleResult[]`. If ALL paths reject, the merge function still runs with an array of all-rejected `SettleResult` entries — it is the merge function's responsibility to handle this case (e.g., by throwing).
 - **`mode: 'race'`** — First success wins. If all fail, throw `fork_partial`.

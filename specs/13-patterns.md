@@ -1,6 +1,6 @@
 # Pattern Derivations
 
-> **Depends On:** `01-step-type` (Step, execute), `02-step-variants` (step.run, step.llm, Tool), `03-control-flow` (fork), `04-spawn` (spawn, contextIn, contextOut), `05-loop-and-until` (loop, until, any), `06-channels` (channel, ExternalChannel, ChannelHandle, tryRecv), `07-context-and-event-log` (Context, Item, ItemLog), `11-context-layer-system` (context layer lifecycle)
+> **Depends On:** `01-step-type` (Step, execute), `02-step-variants` (step.runCode, step.callModel, Tool), `03-control-flow` (inParallel), `04-spawn` (spawn, contextIn, contextOut), `05-loop-and-until` (loop, until, any), `06-channels` (channel, ExternalChannel, ChannelHandle, tryRecv), `07-context-and-event-log` (Context, Item, ItemLog), `11-context-layer-system` (context layer lifecycle)
 > **Exports:** `react()`, `ralphWiggum()`, `taskTree()`, `enforced()`, `recursiveLLM()`, `threadWeave()`, `remote()`, `compilePlan()`, `adaptivePlan()`, `dualAgent()`, `TaskNode`, `PlanNode`, `PlanNodeSchema`, `PlanConstraints`, `WorkerDispatch`
 
 ---
@@ -33,7 +33,7 @@ function react(opts: {
   maxCost?: number;
   context?: ContextLayer[];
 }) {
-  const llmStep = step.llm({
+  const llmStep = step.callModel({
     id: 'react-step',
     model: opts.model,
     instructions: opts.instructions,
@@ -55,7 +55,7 @@ function react(opts: {
 }
 ```
 
-**Primitives used:** `loop` + `step.llm` + `until.noToolCalls` + `until.maxSteps`.
+**Primitives used:** `loop` + `step.callModel` + `until.noToolCalls` + `until.maxSteps`.
 
 **ItemLog strategy:** Accumulate. No spawn boundary — tool call results append to the ItemLog. Context layers `recall()`/`store()` run each iteration.
 
@@ -105,7 +105,7 @@ function ralphWiggum(opts: {
 
 **Primitives used:** `loop` + `spawn(contextIn: fresh)` + `react` (inner) + `until.verified`.
 
-**Context layer interaction:** `durableTaskState()` handles task artifacts across fresh boundaries. `workingMemoryContext({ scope: 'resource' })` carries structured progress. `observationalContext()` compresses learnings from past iterations into the next View.
+**Context layer interaction:** `taskState()` handles task artifacts across fresh boundaries. `scratchpad({ scope: 'resource' })` carries structured progress. `observations()` compresses learnings from past iterations into the next View.
 
 **Usage:**
 
@@ -153,7 +153,7 @@ interface PlanConstraints {
 }
 ```
 
-`toolAllowlist` modifies the tool list passed to `step.llm` — the LLM never sees disallowed tools. `requireApproval` pauses execution and waits on a channel for human input. No tokens wasted on rejected tool calls.
+`toolAllowlist` modifies the tool list passed to `step.callModel` — the LLM never sees disallowed tools. `requireApproval` pauses execution and waits on a channel for human input. No tokens wasted on rejected tool calls.
 
 ---
 
@@ -172,7 +172,7 @@ function recursiveLLM<I, O>(opts: {
 }): Step<I, O>
 ```
 
-**Primitives used:** `step.run` (outer) + `fork` (parallel children) + `spawn(contextIn: custom, contextOut: summary)` + self-reference for recursion. Depth control via `ctx.depth`.
+**Primitives used:** `step.runCode` (outer) + `inParallel` (parallel children) + `spawn(contextIn: custom, contextOut: summary)` + self-reference for recursion. Depth control via `ctx.depth`.
 
 **Context layer interaction:** `scope: 'global'` layers (shared knowledge) available to all children. Each child's `onReturn` merges discoveries back into parent state.
 
@@ -198,15 +198,15 @@ interface WorkerDispatch {
 }
 ```
 
-**Primitives used:** `loop` (orchestrator rounds) + `fork` (parallel workers) + `spawn(contextIn: fresh, contextOut: summary)` + `react` (inner worker loop).
+**Primitives used:** `loop` (orchestrator rounds) + `inParallel` (parallel workers) + `spawn(contextIn: fresh, contextOut: summary)` + `react` (inner worker loop).
 
-**Context layer interaction:** Orchestrator's `observationalContext()` accumulates worker summaries. `sharedSwarmContext()` enables real-time finding sharing between concurrent workers.
+**Context layer interaction:** Orchestrator's `observations()` accumulates worker summaries. `sharedSwarmContext()` enables real-time finding sharing between concurrent workers.
 
 ---
 
 ## A2A Protocol
 
-A2A is `spawn` + `step.run` over HTTP. Remote agents are wrapped in Steps that compose like local ones.
+A2A is `spawn` + `step.runCode` over HTTP. Remote agents are wrapped in Steps that compose like local ones.
 
 ```typescript
 function remote<O = string>(opts: {
@@ -217,7 +217,7 @@ function remote<O = string>(opts: {
 }): Step<string, O>
 ```
 
-No separate "Protocol" primitive. A2A transport complexity (task lifecycle, SSE streaming, capability negotiation) is a runtime concern. Remote agents compose with `fork`, `loop`, `taskTree` identically to local steps.
+No separate "Protocol" primitive. A2A transport complexity (task lifecycle, SSE streaming, capability negotiation) is a runtime concern. Remote agents compose with `inParallel`, `loop`, `taskTree` identically to local steps.
 
 ---
 
@@ -280,19 +280,19 @@ function dualAgent(opts: {
   // External channel for user messages — writable from HTTP handlers
   const { userChannel } = opts;
 
-  // Shared working memory for plan coordination
-  const sharedMemory = workingMemoryContext({ scope: 'resource' });
+  // Shared scratchpad for plan coordination
+  const sharedMemory = scratchpad({ scope: 'resource' });
 
   // Conversational agent: responds to user, updates shared plan
   const conversationalLoop = loop({
     id: 'conversational-loop',
-    body: step.run({
+    body: step.runCode({
       id: 'handle-user-message',
       execute: async (_, ctx) => {
         const message = await ctx.recv(userChannel);
-        // LLM processes the message with access to shared working memory
+        // LLM processes the message with access to the shared scratchpad
         const response = await execute(
-          step.llm({
+          step.callModel({
             id: 'respond',
             model: opts.conversational.model,
             instructions: opts.conversational.instructions,
@@ -323,15 +323,15 @@ function dualAgent(opts: {
     }),
     until: any(
       until.verified(async (output) => {
-        // Worker checks shared working memory for completion
+        // Worker checks the shared scratchpad for completion
         return { pass: false };
       }),
       until.maxSteps(100),
     ),
   });
 
-  // Race: worker completing ends the fork
-  return fork({
+  // Race: worker completing ends the parallel group
+  return inParallel({
     id: 'dual-agent',
     mode: 'race',
     paths: () => [conversationalLoop, workerLoop],
@@ -339,7 +339,7 @@ function dualAgent(opts: {
 }
 ```
 
-**Primitives used:** `fork(race)` + `loop` + `spawn(fresh)` + `react` + `channel(external)` + `recv` + `tryRecv`.
+**Primitives used:** `inParallel(race)` + `loop` + `spawn(fresh)` + `react` + `channel(external)` + `recv` + `tryRecv`.
 
 **External HTTP handler using `ChannelHandle`:**
 
@@ -356,4 +356,4 @@ app.post('/api/message', (req, res) => {
 });
 ```
 
-**Context layer interaction:** `workingMemoryContext({ scope: 'resource' })` shared between conversational and worker agents enables plan coordination. The worker uses `tryRecv` to check for plan updates without blocking. External channels survive `contextIn: 'fresh'` boundaries because they're scoped to the root execution.
+**Context layer interaction:** `scratchpad({ scope: 'resource' })` shared between conversational and worker agents enables plan coordination. The worker uses `tryRecv` to check for plan updates without blocking. External channels survive `contextIn: 'fresh'` boundaries because they're scoped to the root execution.
