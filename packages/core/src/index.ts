@@ -288,19 +288,33 @@ export type { Channel, ChannelHandle, ExternalChannel } from '@noetic-tools/type
 /** @public */
 /** @public */
 export type {
+  InferSchemaInput,
+  InferSchemaOutput,
+  InputSchemaConfig,
   LLMResponse,
   LlmProviderConfig,
   ModelParams,
   RetryPolicy,
   RoundUsage,
+  SchemaValidationFailure,
+  SchemaValidationResult,
+  SchemaValidationSuccess,
   ServerToolSpec,
+  StandardJSONSchemaV1,
+  StandardSchemaV1,
   StepMeta,
   TokenUsage,
   Tool,
   ToolContextDeclaration,
 } from '@noetic-tools/types';
 /** @public */
-export { isServerToolSpec } from '@noetic-tools/types';
+export {
+  isServerToolSpec,
+  isStandardJsonSchema,
+  isZodSchema,
+  standardIssuesToZodError,
+  validateSchema,
+} from '@noetic-tools/types';
 
 //#endregion
 
