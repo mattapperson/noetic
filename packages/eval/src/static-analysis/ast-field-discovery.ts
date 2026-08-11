@@ -19,16 +19,21 @@ interface AstDiscoveryContext {
 //#region Constants
 
 const BUILDER_NAMES = new Set([
-  'branch',
-  'fork',
+  'conditional',
+  'inParallel',
   'spawn',
   'loop',
+  'callModel',
+  'runCode',
+  'invokeTool',
 ]);
 
+// Sub-harness builders remain namespaced under `step.<harness>()`.
 const STEP_METHOD_NAMES = new Set([
-  'llm',
-  'run',
-  'tool',
+  'claudeCode',
+  'codex',
+  'opencode',
+  'pi',
 ]);
 
 //#endregion

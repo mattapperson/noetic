@@ -2,12 +2,12 @@
  * Shared agent compositions for the example evals.
  *
  * Both helpers are built purely from `@noetic-tools/core` public primitives
- * (`step.llm`, `loop`, `spawn`, `until`) — they demonstrate how the classic
+ * (`callModel`, `loop`, `spawn`, `until`) — they demonstrate how the classic
  * ReAct and retry-with-feedback patterns compose from primitives.
  */
 
 import type { ContextData, StepLoop, Tool, VerifyFn } from '@noetic-tools/core';
-import { any, loop, spawn, step, until } from '@noetic-tools/core';
+import { any, callModel, loop, spawn, until } from '@noetic-tools/core';
 
 /**
  * ReAct (Reason + Act) agent loop: an LLM step with tools iterated until it
@@ -22,7 +22,7 @@ export function reactAgent(opts: {
   return loop<ContextData, string, string>({
     id: 'react-loop',
     steps: [
-      step.llm<ContextData, string, string>({
+      callModel<ContextData, string, string>({
         id: 'react-step',
         model: opts.model,
         instructions: opts.instructions,

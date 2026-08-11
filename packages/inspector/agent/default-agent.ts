@@ -7,7 +7,7 @@
  * `deps.traceExporter` (feeds the Trace tab) — pass both to the harness or
  * those panels go dark.
  *
- * The note tools write through `toolCtx.memory` into the scratchpad
+ * The note tools write through `toolCtx.context` into the scratchpad
  * layer's state — watch its tab light up when a note is saved, and the
  * Context tab render it into the next turn's window.
  *
@@ -27,7 +27,6 @@ import {
   observations,
   plan,
   scratchpad,
-  step,
   temporal,
   tool,
 } from '@noetic-tools/core';
@@ -62,9 +61,9 @@ const saveNote = tool({
     count: z.number(),
   }),
   async execute({ text }, toolCtx) {
-    const notes = readNotes(toolCtx.memory.get<WorkingMemoryContextState>(SCRATCHPAD_LAYER_ID));
+    const notes = readNotes(toolCtx.context.get<WorkingMemoryContextState>(SCRATCHPAD_LAYER_ID));
     notes.push(text);
-    toolCtx.memory.set<WorkingMemoryContextState>(SCRATCHPAD_LAYER_ID, {
+    toolCtx.context.set<WorkingMemoryContextState>(SCRATCHPAD_LAYER_ID, {
       notes,
     });
     return {
@@ -83,7 +82,7 @@ const listNotes = tool({
   }),
   async execute(_args, toolCtx) {
     return {
-      notes: readNotes(toolCtx.memory.get<WorkingMemoryContextState>(SCRATCHPAD_LAYER_ID)),
+      notes: readNotes(toolCtx.context.get<WorkingMemoryContextState>(SCRATCHPAD_LAYER_ID)),
     };
   },
 });
@@ -98,7 +97,7 @@ const PERSONA = [
   'and list_notes when they ask what you know so far.',
 ].join('\n');
 
-const chat = step.llm<ContextData, string, string>({
+const chat = callModel<ContextData, string, string>({
   id: 'chat',
   model: 'anthropic/claude-sonnet-4.5',
   instructions: PERSONA,
@@ -113,11 +112,15 @@ export function createAgent(deps: { storage: StorageAdapter; traceExporter: Trac
 } {
   const harness = new AgentHarness({
     name: 'inspector-agent',
-    initialStep: chat,
+    agentGraph: chat,
     params: {},
-    storage: deps.storage,
+    environment: {
+      storage: {
+        adapter: deps.storage,
+      },
+    },
     traceExporter: deps.traceExporter,
-    context: [
+    contextLayers: [
       instructions({
         id: 'persona',
         load: async () => PERSONA,
@@ -128,7 +131,7 @@ export function createAgent(deps: { storage: StorageAdapter; traceExporter: Trac
       temporal(),
       history(),
     ],
-    llm: {
+    callModelDefaults: {
       provider: 'openrouter',
     },
   });

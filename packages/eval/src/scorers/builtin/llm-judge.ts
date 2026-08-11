@@ -1,12 +1,12 @@
 import type { LlmProviderConfig } from '@noetic-tools/core';
-import { AgentHarness, step } from '@noetic-tools/core';
+import { AgentHarness, callModel } from '@noetic-tools/core';
 import type { ZodType } from 'zod';
 
 //#region Types
 
 export interface JudgeConfig {
   model?: string;
-  llm?: LlmProviderConfig;
+  callModel?: LlmProviderConfig;
 }
 
 interface JudgeRunConfig<T> {
@@ -26,7 +26,7 @@ const DEFAULT_MODEL = 'openai/gpt-4o-mini';
 export async function runJudge<T>(config: JudgeRunConfig<T>): Promise<T> {
   const model = config.judge?.model ?? DEFAULT_MODEL;
 
-  const judgeStep = step.llm({
+  const judgeStep = callModel({
     id: config.id,
     model,
     instructions: `${config.instructions}\n\nRespond ONLY with valid JSON matching the required schema.`,
@@ -35,7 +35,7 @@ export async function runJudge<T>(config: JudgeRunConfig<T>): Promise<T> {
   const harness = new AgentHarness({
     name: 'llm-judge',
     params: {},
-    llm: config.judge?.llm,
+    callModelDefaults: config.judge?.callModel,
   });
   const ctx = harness.createContext();
 

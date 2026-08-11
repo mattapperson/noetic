@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { step } from '@noetic-tools/core';
+import { callModel, runCode } from '@noetic-tools/core';
 
 import { buildWriteBackEntries, optimize } from '../../src/optimization/optimizer';
 import { OptimizeScope } from '../../src/types/eval';
@@ -116,7 +116,7 @@ describe('optimize() write-back semantics', () => {
     const source = "export const instructions = 'original instructions';";
     await fs.writeFile(agentFile, source, 'utf-8');
 
-    const testStep = step.llm({
+    const testStep = callModel({
       id: 'agent',
       model: 'openai/gpt-4o-mini',
       instructions: 'original instructions',
@@ -147,7 +147,7 @@ describe('optimize() write-back semantics', () => {
   });
 
   test('no optimizable fields short-circuits with writtenBack false', async () => {
-    const testStep = step.run({
+    const testStep = runCode({
       id: 'noop',
       execute: async (input: unknown) => input,
     });

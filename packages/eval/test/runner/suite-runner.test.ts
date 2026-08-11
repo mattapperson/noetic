@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { step } from '@noetic-tools/core';
+import { runCode } from '@noetic-tools/core';
 
 import type { SuiteDefinition } from '../../src/runner/describe';
 import { runSuite } from '../../src/runner/suite-runner';
@@ -15,7 +15,7 @@ function makeFixedScorer(score: number): ScorerFn {
 }
 
 function makeSuiteDefinition(fixedScore: number, passThreshold?: number): SuiteDefinition {
-  const echoStep = step.run({
+  const echoStep = runCode({
     id: 'echo',
     execute: async (input: unknown) => input,
   });
@@ -64,7 +64,7 @@ describe('runSuite passThreshold', () => {
   });
 
   test('no scores (empty) passes', async () => {
-    const echoStep = step.run({
+    const echoStep = runCode({
       id: 'echo',
       execute: async (input: unknown) => input,
     });
