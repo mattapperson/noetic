@@ -87,7 +87,7 @@ Context layer operations produce their own trace records:
 interface LayerTraceSpan {
   layerId: string;
   hook: 'init' | 'recall' | 'store' | 'onSpawn' | 'onReturn' | 'onComplete' | 'dispose';
-  durationMs: number;
+  duration: number;
   status: 'ok' | 'error' | 'timeout' | 'skipped';
   budget?: { allocated: number; used: number; yielded: number };
   itemCount?: number;
@@ -99,7 +99,7 @@ interface LayerTraceSpan {
 |---|---|
 | `layerId` | Which context layer produced this trace. |
 | `hook` | The lifecycle hook that executed. |
-| `durationMs` | How long the hook took. |
+| `duration` | How long the hook took, in milliseconds. |
 | `status` | Outcome: `ok`, `error`, `timeout`, or `skipped`. |
 | `budget` | Token budget allocation and usage (when applicable). |
 | `itemCount` | Number of items produced by recall. |

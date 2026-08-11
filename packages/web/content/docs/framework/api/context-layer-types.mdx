@@ -410,7 +410,7 @@ Observability data for a single layer hook execution.
 interface LayerTraceSpan {
   layerId: string;
   hook: 'init' | 'recall' | 'store' | 'onSpawn' | 'onReturn' | 'onComplete' | 'dispose';
-  durationMs: number;
+  duration: number;
   status: 'ok' | 'error' | 'timeout' | 'skipped';
   budget?: { allocated: number; used: number; yielded: number };
   itemCount?: number;

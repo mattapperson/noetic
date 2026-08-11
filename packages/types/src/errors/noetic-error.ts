@@ -73,7 +73,7 @@ function formatMessage(error: NoeticError): string {
         ? `Item type '${error.itemType}' did not match any registered item extension schema.`
         : `Item did not match any registered ${error.category} extension schema.`;
     case 'handle_evicted':
-      return `Subprocess handle '${error.handleId}' evicted (step '${error.stepId}'): adapter returned null for ${error.gracePeriodMs}ms`;
+      return `Subprocess handle '${error.handleId}' evicted (step '${error.stepId}'): adapter returned null for ${error.gracePeriod}ms`;
     default: {
       const _exhaustive: never = error;
       void _exhaustive;

@@ -60,7 +60,7 @@ Constraint: a harness `config.name` must not itself end in a `:`-prefixed event 
 
 ## Tools and approvals
 
-`chatTools({ chat, preset?, scope?, requireApproval?, approvalTimeoutMs? })` wraps Chat SDK's `createChatTools()` (post, DM, react, edit, delete, subscriptions) into Noetic `Tool`s via the general-purpose `fromAiSdkTool(name, aiTool, options?)`, which preserves the AI SDK tool's zod `inputSchema` and delegates `execute`. **Approval defaults follow the vendor:** Chat SDK ships its write tools gated (`needsApproval: true`), and the wrapper inherits that — `requireApproval` only overrides per tool or wholesale. A dynamic vendor predicate counts as gated.
+`chatTools({ chat, preset?, scope?, requireApproval?, approvalTimeout? })` wraps Chat SDK's `createChatTools()` (post, DM, react, edit, delete, subscriptions) into Noetic `Tool`s via the general-purpose `fromAiSdkTool(name, aiTool, options?)`, which preserves the AI SDK tool's zod `inputSchema` and delegates `execute`. **Approval defaults follow the vendor:** Chat SDK ships its write tools gated (`needsApproval: true`), and the wrapper inherits that — `requireApproval` only overrides per tool or wholesale. A dynamic vendor predicate counts as gated.
 
 Approval gating runs on external channels (`06-channels`), not the AI SDK loop:
 

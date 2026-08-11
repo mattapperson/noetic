@@ -25,8 +25,8 @@ export interface FromAiSdkToolOptions {
    * A dynamic vendor predicate counts as gated.
    */
   needsApproval?: boolean;
-  /** How long a gated call waits for a decision. Default 5 minutes. */
-  approvalTimeoutMs?: number;
+  /** How long a gated call waits for a decision, in milliseconds. Default 5 minutes. */
+  approvalTimeout?: number;
 }
 
 /**
@@ -50,7 +50,7 @@ export function fromAiSdkTool(
     ? frameworkCast<ZodTypeAny>(aiTool.inputSchema)
     : z.unknown();
   const needsApproval = options.needsApproval ?? vendorNeedsApproval(aiTool);
-  const timeout = options.approvalTimeoutMs ?? DEFAULT_APPROVAL_TIMEOUT;
+  const timeout = options.approvalTimeout ?? DEFAULT_APPROVAL_TIMEOUT;
 
   return {
     name,
@@ -89,7 +89,8 @@ export interface ChatToolsOptions {
    * default — Chat SDK gates its write tools.
    */
   requireApproval?: boolean | Record<string, boolean>;
-  approvalTimeoutMs?: number;
+  /** How long a gated call waits for a decision, in milliseconds. Default 5 minutes. */
+  approvalTimeout?: number;
 }
 
 /**
@@ -113,7 +114,7 @@ export async function chatTools(options: ChatToolsOptions): Promise<Tool[]> {
     tools.push(
       fromAiSdkTool(name, aiTool, {
         needsApproval: resolveApprovalFlag(options.requireApproval, name),
-        approvalTimeoutMs: options.approvalTimeoutMs,
+        approvalTimeout: options.approvalTimeout,
       }),
     );
   }

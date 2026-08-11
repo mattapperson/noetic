@@ -87,5 +87,6 @@ export type NoeticError =
       kind: 'handle_evicted';
       handleId: string;
       stepId: string;
-      gracePeriodMs: number;
+      /** Grace period in milliseconds. */
+      gracePeriod: number;
     };

@@ -136,7 +136,7 @@ interface LayerTraceSpan {
   /** Which hook was invoked. */
   hook: 'init' | 'recall' | 'store' | 'onSpawn' | 'onReturn' | 'onComplete' | 'dispose';
   /** Wall-clock duration in milliseconds. */
-  durationMs: number;
+  duration: number;
   /** Whether the hook succeeded. */
   status: 'ok' | 'error' | 'timeout' | 'skipped';
   /** For recall: tokens allocated vs. tokens used. */

@@ -252,7 +252,7 @@ export class DetachedHandleImpl<O> implements DetachedHandle<O> {
           kind: 'handle_evicted',
           handleId: initialHandle.id,
           stepId: this._stepId,
-          gracePeriodMs: HANDLE_EVICTED_GRACE_MS,
+          gracePeriod: HANDLE_EVICTED_GRACE_MS,
         });
       }
     };

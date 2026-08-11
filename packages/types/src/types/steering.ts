@@ -38,7 +38,8 @@ export interface LedgerEntry {
   toolName?: string;
   toolArgs?: unknown;
   success?: boolean;
-  durationMs?: number;
+  /** Duration in milliseconds. */
+  duration?: number;
   model?: string;
   tokenUsage?: {
     input: number;
