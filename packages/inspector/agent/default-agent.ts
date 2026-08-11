@@ -62,7 +62,9 @@ const saveNote = tool({
     count: z.number(),
   }),
   async execute({ text }, toolCtx) {
-    const notes = readNotes(toolCtx.context.get<WorkingMemoryContextState>(WORKING_MEMORY_LAYER_ID));
+    const notes = readNotes(
+      toolCtx.context.get<WorkingMemoryContextState>(WORKING_MEMORY_LAYER_ID),
+    );
     notes.push(text);
     toolCtx.context.set<WorkingMemoryContextState>(WORKING_MEMORY_LAYER_ID, {
       notes,

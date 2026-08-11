@@ -1,7 +1,8 @@
-import { ralphWiggum, tool } from '@noetic-tools/core';
+import { tool } from '@noetic-tools/core';
 import { z } from 'zod';
 
 import { describe, it, scorer } from '../src';
+import { retryWithFeedback } from './agents';
 
 //#region Tools
 
@@ -53,7 +54,7 @@ function createVerifier(requiredPatterns: string[]): (output: unknown) => Promis
 
 //#region Converges on First Try
 
-describe(ralphWiggum({
+describe(retryWithFeedback({
   model: 'anthropic/claude-sonnet-4',
   instructions:
     'You are a code writer. Write clean, working TypeScript code. Use the write_file tool.',
@@ -95,7 +96,7 @@ const feedbackCounter = {
   count: 0,
 };
 
-describe(ralphWiggum({
+describe(retryWithFeedback({
   model: 'anthropic/claude-sonnet-4',
   instructions:
     'You are a code writer. Follow feedback to improve your code. Use the write_file tool to write files.',
@@ -147,7 +148,7 @@ describe(ralphWiggum({
 
 //#region Tool Accuracy
 
-describe(ralphWiggum({
+describe(retryWithFeedback({
   model: 'anthropic/claude-sonnet-4',
   instructions: 'You are a code writer. Always use write_file to produce output.',
   tools: [

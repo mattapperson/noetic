@@ -17,7 +17,7 @@ import { z } from 'zod';
 import { spawn } from '../src/builders/spawn-builder';
 import { step } from '../src/builders/step-builders';
 import { tool } from '../src/builders/tool-builder';
-import { react } from '../src/patterns/react';
+import { react } from './react-agent';
 
 //#region Types
 

@@ -1,7 +1,8 @@
-import { react, tool } from '@noetic-tools/core';
+import { tool } from '@noetic-tools/core';
 import { z } from 'zod';
 
 import { describe, it, scorer } from '../src';
+import { reactAgent } from './agents';
 
 //#region Tools
 
@@ -36,7 +37,7 @@ const refundTool = tool({
 
 //#region Support Agent
 
-const supportAgent = react({
+const supportAgent = reactAgent({
   model: 'anthropic/claude-sonnet-4',
   instructions:
     'You are a customer support agent. Use the available tools to look up orders and issue refunds when appropriate. Be helpful and concise.',

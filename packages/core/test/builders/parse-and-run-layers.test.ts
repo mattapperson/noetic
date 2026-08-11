@@ -6,8 +6,8 @@
 import { describe, expect, it } from 'bun:test';
 import type { ContextLayer } from '@noetic-tools/context';
 import { frameworkCast, NoeticConfigError } from '@noetic-tools/types';
+import { parseAndRunWorkflow } from '../../src/builders/dynamic-workflow';
 import { AgentHarness } from '../../src/harness/agent-harness';
-import { parseAndRunWorkflow } from '../../src/patterns/dynamic-workflow';
 import { createScriptedCallModel, makeLLMResponse } from '../_helpers';
 
 const DOC = {

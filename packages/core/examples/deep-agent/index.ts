@@ -7,10 +7,10 @@
 
 import { observationalContext, staticContent, toolContextLayer } from '@noetic-tools/context';
 import type { ContextData, ContextLayer, StepLoop, StepSpawn } from '@noetic-tools/types';
-import { react } from '../../src/patterns/react';
 import { createExampleHarness } from '../create-example-harness';
 import type { SubAgentResolver } from '../delegate-tools';
 import { createConfigurableDelegateTool } from '../delegate-tools';
+import { react } from '../react-agent';
 import { skillsLayer } from './context/skills-layer';
 import { createFilesystemTools } from './tools/filesystem';
 import { createTodoTools } from './tools/todo';

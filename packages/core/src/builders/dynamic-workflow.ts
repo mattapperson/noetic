@@ -13,12 +13,12 @@ import type {
   Tool,
 } from '@noetic-tools/types';
 import { frameworkCast, NoeticConfigError } from '@noetic-tools/types';
-import { step } from '../builders/step-builders';
-import type { HydrationContext } from '../builders/workflow-hydrator';
-import { hydrateWorkflow } from '../builders/workflow-hydrator';
 import { NoeticAttr } from '../observability/genai-attributes';
 import type { WorkflowDocument } from '../schemas/workflow';
 import { WorkflowDocumentSchema, workflowDepth, workflowGraph } from '../schemas/workflow';
+import { step } from './step-builders';
+import type { HydrationContext } from './workflow-hydrator';
+import { hydrateWorkflow } from './workflow-hydrator';
 
 //#region Types
 

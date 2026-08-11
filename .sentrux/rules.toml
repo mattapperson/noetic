@@ -139,7 +139,7 @@ order = 50
 # ─────────────────────────────────────────────────────────────────────────────
 # Tier D — core-internal layers (packages/core/src/**)
 # Ordered per the dependency graph in specs/00-overview.md: harness →
-# patterns → adapters → interpreter → runtime → primitives →
+# adapters → interpreter → runtime → primitives →
 # context/observability → foundations.
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -147,11 +147,6 @@ order = 50
 name = "core-harness"
 paths = ["packages/core/src/harness/**"]
 order = 79
-
-[[layers]]
-name = "core-patterns"
-paths = ["packages/core/src/patterns/**"]
-order = 80
 
 [[layers]]
 name = "core-adapters"

@@ -19,8 +19,6 @@ interface AstDiscoveryContext {
 //#region Constants
 
 const BUILDER_NAMES = new Set([
-  'react',
-  'ralphWiggum',
   'branch',
   'fork',
   'spawn',

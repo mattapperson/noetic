@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'bun:test';
+import { parseAndRunWorkflow } from '../../src/builders/dynamic-workflow';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { GenAI, NoeticAttr } from '../../src/observability/genai-attributes';
 import { InMemoryExporter } from '../../src/observability/trace-exporter';
-import { parseAndRunWorkflow } from '../../src/patterns/dynamic-workflow';
 import { createScriptedCallModel, makeLLMResponse } from '../_helpers';
 
 const WORKFLOW = {

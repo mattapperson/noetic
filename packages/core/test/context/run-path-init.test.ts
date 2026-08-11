@@ -9,12 +9,30 @@
  * rehydrates on the next `.run()` (next process / DO turn).
  */
 import { describe, expect, it } from 'bun:test';
-import type { ContextLayer } from '@noetic-tools/context';
-import type { LLMResponse } from '@noetic-tools/types';
+import type { ContextData, ContextLayer } from '@noetic-tools/context';
+import type { LLMResponse, StepLoop } from '@noetic-tools/types';
+import { parseAndRunWorkflow } from '../../src/builders/dynamic-workflow';
+import { loop } from '../../src/builders/loop-builder';
+import { step } from '../../src/builders/step-builders';
 import { AgentHarness } from '../../src/harness/agent-harness';
-import { parseAndRunWorkflow } from '../../src/patterns/dynamic-workflow';
-import { react } from '../../src/patterns/react';
+import { any } from '../../src/until/combinators';
+import { until } from '../../src/until/predicates';
 import { createScriptedCallModel, makeStorage } from '../_helpers';
+
+/** Minimal ReAct-style loop: an LLM step iterated until no tool calls or the step cap. */
+function reactLoop(): StepLoop<ContextData, string, string> {
+  return loop<ContextData, string, string>({
+    id: 'react-loop',
+    steps: [
+      step.llm({
+        id: 'react-step',
+        model: 'gpt-4',
+        tools: [],
+      }),
+    ],
+    until: any(until.noToolCalls(), until.maxSteps(5)),
+  });
+}
 
 interface CountState {
   count: number;
@@ -52,7 +70,7 @@ function counterLayer(): ContextLayer<CountState> {
   };
 }
 
-/** A single assistant message terminates `react` (no tool calls). */
+/** A single assistant message terminates the loop (no tool calls). */
 function singleMessageScript(text: string): LLMResponse[] {
   return [
     {
@@ -94,15 +112,7 @@ describe('#48: memory init/recall/persist on harness.run()', () => {
       threadId: 'thread-1',
     });
 
-    await harness.run(
-      react({
-        model: 'gpt-4',
-        tools: [],
-        maxSteps: 5,
-      }),
-      'hello',
-      ctx,
-    );
+    await harness.run(reactLoop(), 'hello', ctx);
 
     // init + store mirror must have written the counter to durable storage.
     const keys = await storage.list('layers/');
@@ -129,15 +139,7 @@ describe('#48: memory init/recall/persist on harness.run()', () => {
     const ctx1 = harness1.createContext({
       threadId: 'thread-1',
     });
-    await harness1.run(
-      react({
-        model: 'gpt-4',
-        tools: [],
-        maxSteps: 5,
-      }),
-      'remember',
-      ctx1,
-    );
+    await harness1.run(reactLoop(), 'remember', ctx1);
 
     // Turn 2 — brand new harness (new process), same storage + threadId.
     const harness2 = new AgentHarness({
@@ -152,15 +154,7 @@ describe('#48: memory init/recall/persist on harness.run()', () => {
     const ctx2 = harness2.createContext({
       threadId: 'thread-1',
     });
-    await harness2.run(
-      react({
-        model: 'gpt-4',
-        tools: [],
-        maxSteps: 5,
-      }),
-      'recall',
-      ctx2,
-    );
+    await harness2.run(reactLoop(), 'recall', ctx2);
 
     // init rehydrated count=1, store bumped to 2.
     const keys = await storage.list('layers/');
