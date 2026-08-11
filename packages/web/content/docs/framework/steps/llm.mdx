@@ -30,7 +30,7 @@ const chat = step.llm({
 | `instructions` | `Lazy<string \| undefined>` | No | System prompt prepended to the conversation. Accepts a `(ctx) => string \| undefined` getter |
 | `tools` | `Lazy<Tool[] \| undefined>` | No | Allowed tool subset (`undefined` = all, `[]` = none). Accepts a `(ctx) => Tool[] \| undefined` getter; function-form tools are resolved per execution and do not contribute to the pre-computed `ctx.unifiedTools` |
 | `output` | `StandardSchemaV1<unknown, O>` | No | Schema for structured output — any [Standard Schema v1](https://standardschema.dev) validator (Zod is the default) |
-| `outputJsonSchema` | `Record<string, unknown>` | Only for non-Zod `output` | Explicit raw JSON Schema sent to the model as the structured-output constraint. Required when `output` is not a Zod schema — otherwise conversion throws `NoeticConfigError` with code `MISSING_JSON_SCHEMA`. Zod schemas derive it automatically via `z.toJSONSchema` |
+| `outputJsonSchema` | `Record<string, unknown>` | No | Explicit JSON Schema override/fallback for non-Zod output. Zod uses its native converter; other validators can implement StandardJSONSchemaV1. A validation-only schema must provide this field or conversion throws `MISSING_JSON_SCHEMA` |
 | `params` | `ModelParams` | No | Generation parameters |
 | `emit` | `boolean \| (eventType, data) => boolean` | No | Controls framework event emission for this step. Defaults to `true`; `false` suppresses all framework events; a filter function decides per event |
 | `projection` | `ProjectionPolicy` | No | Projection policy for this step's context window, overriding the harness-level default |
@@ -70,7 +70,7 @@ const extract = step.llm({
 });
 ```
 
-Any Standard Schema v1 validator works in place of Zod. Non-Zod schemas are validated via `~standard.validate` (sync or Promise results supported) and the parsed/transformed value is returned — but the model still needs a JSON Schema constraint, which can only be derived from Zod automatically, so pair a non-Zod `output` with an explicit `outputJsonSchema`. See [step.tool](/docs/framework/steps/tool#standard-schema-v1) for a non-Zod example with the escape hatch.
+Any Standard Schema v1 validator works in place of Zod. Non-Zod schemas are validated via `~standard.validate` (sync or Promise results supported) and the parsed/transformed value is returned. The model constraint resolves through Zod, then the [Standard JSON Schema v1](https://standardschema.dev/json-schema) trait, then `outputJsonSchema`. For non-Zod schemas, the explicit field overrides the trait and falls back when conversion throws. See [step.tool](/docs/framework/steps/tool#standard-schema-v1) for a Valibot trait example.
 
 If the model response does not match the schema, a validation error is thrown (`NoeticError` kind `llm_parse_error`; see [Error Model](/docs/framework/errors)).
 

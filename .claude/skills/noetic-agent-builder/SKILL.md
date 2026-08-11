@@ -52,7 +52,7 @@ The harness always holds a `SubprocessAdapter` — every `step.run`, `spawn`, an
 
 ### Tools
 
-Tools are defined with schemas for input/output validation — Zod by default, though any Standard Schema v1 validator is accepted (a non-Zod `input` exposed to a model also needs an explicit `inputJsonSchema`, or conversion throws `MISSING_JSON_SCHEMA`). Inside `execute`, tools receive `ToolExecutionContext` which provides `harness`, `ctx`, and `context` accessors:
+Tools are defined with schemas for input/output validation — Zod by default, though any Standard Schema v1 validator is accepted. Model-facing JSON Schema resolves through Zod, StandardJSONSchemaV1, then an explicit `inputJsonSchema` fallback. Inside `execute`, tools receive `ToolExecutionContext` which provides `harness`, `ctx`, and `context` accessors:
 
 ```typescript
 const myTool = tool({
@@ -123,7 +123,7 @@ For pattern-specific code examples, read `references/composition-patterns.md`.
 
 ### Step 2: Define Tools
 
-Define tools with Zod schemas (or any Standard Schema v1 validator plus `inputJsonSchema`). Tools that spawn sub-agents should use `toolCtx.harness.run()` or `toolCtx.harness.detachedSpawn()` -- never capture the harness in a closure.
+Define tools with Zod schemas or any Standard Schema v1 validator. Non-Zod validators should implement StandardJSONSchemaV1 or provide `inputJsonSchema`. Tools that spawn sub-agents should use `toolCtx.harness.run()` or `toolCtx.harness.detachedSpawn()` -- never capture the harness in a closure.
 
 Tools can declare persistent state via `ToolContextDeclaration`:
 

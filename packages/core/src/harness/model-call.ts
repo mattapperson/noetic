@@ -989,7 +989,9 @@ export class AgentHarnessModelCaller {
   }): void {
     const { fc, request, allItems, conversationInput } = params;
     const errorOutput = `Error: malformed JSON in tool arguments: ${fc.arguments}`;
-    const toolForCall = request.tools?.find((tool) => tool.name === fc.name);
+    const toolForCall = request.tools?.find(
+      (tool) => tool.name === fc.name || sanitizeToolNameForWire(tool.name) === fc.name,
+    );
     // Owner-scoped result validation (see executeFunctionCall).
     const outputItem = createToolResultItem({
       output: errorOutput,

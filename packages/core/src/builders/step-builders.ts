@@ -47,12 +47,11 @@ export interface StepLLMOpts<TContext, O> {
    * server tool the provider executes, e.g. web search/fetch).
    */
   tools?: Lazy<(Tool | ServerToolSpec)[] | undefined, TContext>;
-  /** Structured output: a Standard Schema (Zod, Valibot, …) or a streaming `OutputCodec` (e.g. OpenUI Lang). Non-Zod schemas require `outputJsonSchema`. */
+  /** Structured output: a Standard Schema (Zod, Valibot, …) or a streaming `OutputCodec` (e.g. OpenUI Lang). */
   output?: StandardSchemaV1<unknown, O> | OutputCodec<O>;
   /**
-   * Explicit raw JSON Schema sent to the model as the structured-output
-   * constraint. Required when `output` is a non-Zod Standard Schema; ignored
-   * for Zod schemas, whose JSON Schema is derived automatically.
+   * Explicit raw JSON Schema override sent to the model. For non-Zod schemas,
+   * it takes precedence over StandardJSONSchemaV1 conversion.
    */
   outputJsonSchema?: Record<string, unknown>;
   params?: ModelParams;

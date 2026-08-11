@@ -1,12 +1,20 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import type { ContextData, StandardSchemaV1, StepLLM, StepTool } from '@noetic-tools/types';
+import type {
+  ContextData,
+  StandardJSONSchemaV1,
+  StandardSchemaV1,
+  StepLLM,
+  StepTool,
+  Tool,
+} from '@noetic-tools/types';
 import {
   frameworkCast,
   isNoeticConfigError,
   isNoeticError,
   NoeticConfigError,
 } from '@noetic-tools/types';
+import { toStandardJsonSchema } from '@valibot/to-json-schema';
 import * as v from 'valibot';
 import { ZodError, z } from 'zod';
 import { convertTools, executeToolCall, resolveWireJsonSchema } from '../src/adapters/openrouter';
@@ -29,6 +37,9 @@ describe('tool() with Standard Schema (valibot)', () => {
       input: v.object({
         name: v.string(),
       }),
+      inputJsonSchema: {
+        type: 'object',
+      },
       output: v.object({
         greeting: v.string(),
       }),
@@ -60,6 +71,9 @@ describe('tool() with Standard Schema (valibot)', () => {
         }),
         v.transform((o) => o.text),
       ),
+      inputJsonSchema: {
+        type: 'object',
+      },
       output: v.number(),
       execute: async (args) => {
         const text: string = args;
@@ -80,6 +94,9 @@ describe('executeToolCall input validation', () => {
       input: v.object({
         name: v.string(),
       }),
+      inputJsonSchema: {
+        type: 'object',
+      },
       output: v.object({
         greeting: v.string(),
       }),
@@ -112,6 +129,9 @@ describe('executeToolCall input validation', () => {
         }),
         v.transform((o) => o.text.toUpperCase()),
       ),
+      inputJsonSchema: {
+        type: 'object',
+      },
       output: v.string(),
       execute: async (args) => {
         const text: string = args;
@@ -181,6 +201,9 @@ describe('executeTool (step.tool) with valibot', () => {
       input: v.object({
         name: v.string(),
       }),
+      inputJsonSchema: {
+        type: 'object',
+      },
       output: v.object({
         greeting: v.string(),
       }),
@@ -221,6 +244,9 @@ describe('executeTool (step.tool) with valibot', () => {
       input: v.object({
         name: v.string(),
       }),
+      inputJsonSchema: {
+        type: 'object',
+      },
       output: v.object({
         greeting: v.string(),
       }),
@@ -385,6 +411,152 @@ describe('step.llm structured output with Standard Schema', () => {
 });
 
 describe('JSON Schema wire boundaries', () => {
+  it('uses the StandardJSONSchemaV1 trait without inputJsonSchema', () => {
+    const input = toStandardJsonSchema(
+      v.object({
+        name: v.string(),
+      }),
+    );
+    const t = tool({
+      name: 'greet',
+      description: 'Greet by name',
+      input,
+      output: v.string(),
+      execute: async ({ name }) => `hi ${name}`,
+    });
+    const [sdkTool] = convertTools({
+      tools: [
+        t,
+      ],
+    });
+    const fn = frameworkCast<{
+      function: {
+        inputSchema: z.ZodTypeAny;
+      };
+    }>(sdkTool).function;
+    expect(
+      z.toJSONSchema(fn.inputSchema, {
+        target: 'draft-07',
+      }),
+    ).toMatchObject({
+      type: 'object',
+      properties: {
+        name: {
+          type: 'string',
+        },
+      },
+      required: [
+        'name',
+      ],
+    });
+  });
+
+  it('uses inputJsonSchema for a schema whose trait converter would throw', () => {
+    const input: StandardSchemaV1 & StandardJSONSchemaV1 = {
+      '~standard': {
+        version: 1,
+        vendor: 'throwing-test',
+        validate: (value: unknown) => ({
+          value,
+        }),
+        jsonSchema: {
+          input: () => {
+            throw new Error('unsupported target');
+          },
+          output: () => {
+            throw new Error('unsupported target');
+          },
+        },
+      },
+    };
+    const fallback = {
+      type: 'string',
+    };
+    expect(
+      resolveWireJsonSchema({
+        schema: input,
+        explicitJsonSchema: fallback,
+        what: 'test schema',
+      }),
+    ).toEqual(fallback);
+  });
+
+  it('maps a throwing trait converter without a fallback to MISSING_JSON_SCHEMA', () => {
+    const schema: StandardSchemaV1 & StandardJSONSchemaV1 = {
+      '~standard': {
+        version: 1,
+        vendor: 'throwing-test',
+        validate: (value: unknown) => ({
+          value,
+        }),
+        jsonSchema: {
+          input: () => {
+            throw new Error('unsupported target');
+          },
+          output: () => ({}),
+        },
+      },
+    };
+    expect(() =>
+      resolveWireJsonSchema({
+        schema,
+        what: 'test schema',
+      }),
+    ).toThrow('cannot be converted to JSON Schema');
+  });
+
+  it('lets explicit inputJsonSchema override the trait', () => {
+    const trait = toStandardJsonSchema(v.string());
+    const explicit = {
+      type: 'number',
+    };
+    expect(
+      resolveWireJsonSchema({
+        schema: trait,
+        explicitJsonSchema: explicit,
+        what: 'test schema',
+      }),
+    ).toEqual(explicit);
+  });
+
+  it('strips tilde-prefixed keys from trait output', () => {
+    const schema: StandardSchemaV1 & StandardJSONSchemaV1 = {
+      '~standard': {
+        version: 1,
+        vendor: 'sanitize-test',
+        validate: (value: unknown) => ({
+          value,
+        }),
+        jsonSchema: {
+          input: () => ({
+            type: 'object',
+            '~internal': true,
+            properties: {
+              value: {
+                type: 'string',
+                '~nested': true,
+              },
+            },
+          }),
+          output: () => ({}),
+        },
+      },
+    };
+    expect(
+      resolveWireJsonSchema({
+        schema,
+        what: 'test schema',
+      }),
+    ).toEqual({
+      type: 'object',
+      properties: {
+        value: {
+          type: 'string',
+        },
+      },
+    });
+  });
+
   it('emits the explicit raw JSON Schema for a non-Zod tool input', () => {
     const raw = {
       type: 'object',
@@ -418,7 +590,7 @@ describe('JSON Schema wire boundaries', () => {
       };
     }>(sdkTool).function;
     const generated = z.toJSONSchema(fn.inputSchema, {
-      target: 'draft-7',
+      target: 'draft-07',
     });
     expect(generated).toMatchObject(raw);
   });
@@ -449,7 +621,7 @@ describe('JSON Schema wire boundaries', () => {
   });
 
   it('throws MISSING_JSON_SCHEMA for a non-Zod tool input without inputJsonSchema', () => {
-    const t = tool({
+    const t = frameworkCast<Tool>({
       name: 'greet',
       description: 'Greet by name',
       input: v.object({
@@ -469,6 +641,30 @@ describe('JSON Schema wire boundaries', () => {
       assert(isNoeticConfigError(e));
       expect(e.code).toBe('MISSING_JSON_SCHEMA');
     }
+  });
+
+  it('uses the StandardJSONSchemaV1 trait for structured output', () => {
+    const schema = toStandardJsonSchema(
+      v.object({
+        answer: v.string(),
+      }),
+    );
+    expect(
+      resolveWireJsonSchema({
+        schema,
+        what: 'structured output schema',
+      }),
+    ).toMatchObject({
+      type: 'object',
+      properties: {
+        answer: {
+          type: 'string',
+        },
+      },
+      required: [
+        'answer',
+      ],
+    });
   });
 
   it('sends outputJsonSchema to the model for a non-Zod output schema', async () => {
@@ -566,7 +762,19 @@ describe('JSON Schema wire boundaries', () => {
         schema,
         what: 'structured output schema',
       }),
-    ).toEqual(z.toJSONSchema(schema));
+    ).toEqual({
+      $schema: 'http://json-schema.org/draft-07/schema#',
+      type: 'object',
+      properties: {
+        answer: {
+          type: 'string',
+        },
+      },
+      required: [
+        'answer',
+      ],
+      additionalProperties: false,
+    });
   });
 });
 
@@ -592,6 +800,9 @@ describe('step builders accept Standard Schema outputs', () => {
       input: v.object({
         name: v.string(),
       }),
+      inputJsonSchema: {
+        type: 'object',
+      },
       output: v.object({
         greeting: v.string(),
       }),

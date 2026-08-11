@@ -66,9 +66,8 @@ interface CallModelRequestBase {
   /** When provided, the harness sends a JSON Schema constraint to the model so it returns structured JSON. */
   outputSchema?: StandardSchemaV1;
   /**
-   * Explicit raw JSON Schema used as the structured-output constraint when
-   * `outputSchema` is not a Zod schema. Required in that case; ignored for
-   * Zod schemas, whose JSON Schema is derived automatically.
+   * Explicit raw JSON Schema override for the structured-output constraint.
+   * For non-Zod schemas, it takes precedence over StandardJSONSchemaV1 conversion.
    */
   outputJsonSchema?: Record<string, unknown>;
   /** Controls framework event emission. Defaults to `true`. Passed through from `StepLLM.emit`. */

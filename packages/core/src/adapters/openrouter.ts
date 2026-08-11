@@ -16,6 +16,7 @@ import type {
 import {
   frameworkCast,
   isAssistantMessage,
+  isStandardJsonSchema,
   isZodSchema,
   NoeticConfigError,
   SteeringAction,
@@ -314,11 +315,9 @@ export function sanitizeToolNameForWire(name: string): string {
 }
 
 /**
- * Resolve the JSON Schema sent to the model for a Standard Schema. Zod
- * schemas derive it via `z.toJSONSchema`; non-Zod schemas require the
- * explicit escape hatch (`inputJsonSchema` / `outputJsonSchema`), otherwise
- * the wire boundary throws `NoeticConfigError` with code
- * `MISSING_JSON_SCHEMA`.
+ * Resolve the JSON Schema sent to the model. Zod keeps its legacy-compatible
+ * fast path. For other validators, an explicit override wins over the Standard
+ * JSON Schema v1 companion trait.
  * @internal
  */
 export function resolveWireJsonSchema(params: {
@@ -328,24 +327,60 @@ export function resolveWireJsonSchema(params: {
 }): Record<string, unknown> {
   const { schema, explicitJsonSchema, what } = params;
   if (isZodSchema(schema)) {
-    return z.toJSONSchema(schema);
+    return sanitizeJsonSchema(
+      z.toJSONSchema(schema, {
+        target: 'draft-07',
+      }),
+    );
   }
   if (explicitJsonSchema) {
-    return explicitJsonSchema;
+    return sanitizeJsonSchema(explicitJsonSchema);
+  }
+  if (isStandardJsonSchema(schema)) {
+    try {
+      return sanitizeJsonSchema(
+        schema['~standard'].jsonSchema.input({
+          target: 'draft-07',
+        }),
+      );
+    } catch {
+      // Fall through to the actionable configuration error below.
+    }
   }
   throw new NoeticConfigError({
     code: 'MISSING_JSON_SCHEMA',
-    message: `The ${what} is not a Zod schema, so its JSON Schema cannot be derived automatically.`,
-    hint: 'Pass an explicit raw JSON Schema: `inputJsonSchema` on tool(), or `outputJsonSchema` on step.llm().',
+    message: `The ${what} cannot be converted to JSON Schema.`,
+    hint: 'Use a schema implementing StandardJSONSchemaV1 or pass `inputJsonSchema` on tool() / `outputJsonSchema` on step.llm().',
   });
+}
+
+function sanitizeJsonSchema(value: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => !key.startsWith('~'))
+      .map(([key, nested]) => [
+        key,
+        sanitizeJsonSchemaValue(nested),
+      ]),
+  );
+}
+
+function sanitizeJsonSchemaValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(sanitizeJsonSchemaValue);
+  }
+  if (typeof value === 'object' && value !== null) {
+    return sanitizeJsonSchema(frameworkCast<Record<string, unknown>>(value));
+  }
+  return value;
 }
 
 /**
  * The OpenRouter SDK requires a live Zod `inputSchema` and runs
  * `z.toJSONSchema` over it; it never executes these tool objects (Noetic owns
- * its tool loop). For non-Zod inputs, bridge the explicit raw JSON Schema
- * through a wire-only `z.any().meta(...)` so the SDK's conversion emits that
- * schema untouched. Noetic, not the SDK, validates tool-call args.
+ * its tool loop). For non-Zod inputs, bridge the resolved JSON Schema through
+ * a wire-only `z.any().meta(...)` so the SDK emits it unchanged. Noetic, not
+ * the SDK, validates tool-call args.
  */
 function inputSchemaForWire(tool: Tool): ZodTypeAny {
   if (isZodSchema(tool.input)) {

@@ -1,9 +1,9 @@
-import type { StandardSchemaV1 } from '@standard-schema/spec';
+import type { StandardJSONSchemaV1, StandardSchemaV1 } from '@standard-schema/spec';
 import type { ZodTypeAny, z } from 'zod';
 import { ZodError } from 'zod';
 import { frameworkCast } from '../util/framework-cast';
 
-export type { StandardSchemaV1 } from '@standard-schema/spec';
+export type { StandardJSONSchemaV1, StandardSchemaV1 } from '@standard-schema/spec';
 
 /**
  * Input type inferred from any Standard Schema. Zod schemas keep their exact
@@ -23,9 +23,39 @@ export type InferSchemaOutput<S extends StandardSchemaV1> = S extends ZodTypeAny
   ? z.output<S>
   : StandardSchemaV1.InferOutput<S>;
 
+/**
+ * JSON Schema configuration for a tool input schema. Zod and Standard JSON
+ * Schema implementations can derive their wire schema; validation-only
+ * Standard Schemas require an explicit fallback.
+ * @public
+ */
+export type InputSchemaConfig<S extends StandardSchemaV1> = StandardSchemaV1 extends S
+  ? {
+      inputJsonSchema?: Record<string, unknown>;
+    }
+  : S extends ZodTypeAny | StandardJSONSchemaV1
+    ? {
+        inputJsonSchema?: Record<string, unknown>;
+      }
+    : {
+        inputJsonSchema: Record<string, unknown>;
+      };
+
 /** @public Type guard for Zod schemas (detected via the `_zod` internals marker). */
 export function isZodSchema(schema: StandardSchemaV1): schema is ZodTypeAny {
   return '_zod' in schema;
+}
+
+/** @public Type guard for schemas implementing the Standard JSON Schema v1 companion spec. */
+export function isStandardJsonSchema(
+  schema: StandardSchemaV1,
+): schema is StandardSchemaV1 & StandardJSONSchemaV1 {
+  const standard = frameworkCast<{
+    jsonSchema?: {
+      input?: unknown;
+    };
+  }>(schema['~standard']);
+  return typeof standard.jsonSchema?.input === 'function';
 }
 
 /** @public Successful result of `validateSchema` — carries the parsed/transformed value. */

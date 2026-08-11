@@ -49,7 +49,7 @@ Every tool in Noetic follows the same interface, whether it is passed to `step.l
 | `description` | `string` | Yes | Human-readable description for the model |
 | `input` | `StandardSchemaV1<I>` | Yes | Schema defining the tool's input — any [Standard Schema v1](https://standardschema.dev) validator (Zod, Valibot, ArkType, …); Zod is the default |
 | `output` | `StandardSchemaV1<O>` | Yes | Schema defining the tool's output |
-| `inputJsonSchema` | `Record<string, unknown>` | Only for non-Zod `input` | Explicit raw JSON Schema sent to the model. Required when `input` is not a Zod schema and the tool is exposed to a model — otherwise tool conversion throws `NoeticConfigError` with code `MISSING_JSON_SCHEMA`. Zod inputs derive their JSON Schema automatically via `z.toJSONSchema` and ignore this field |
+| `inputJsonSchema` | `Record<string, unknown>` | No | Explicit JSON Schema override/fallback for non-Zod tool input. Zod uses its native converter; other validators can implement StandardJSONSchemaV1. A validation-only schema must provide this field or conversion throws `MISSING_JSON_SCHEMA` |
 | `execute` | `(args: I, toolCtx: ToolExecutionContext) => Promise<O>` | Yes | The function that runs the tool. The second argument is a `ToolExecutionContext` — `{ ctx, harness, fs, shell, context, assembledView, lastStepMeta }` — not the step `Context` itself (which is available as `toolCtx.ctx`) |
 | `needsApproval` | `boolean` | No | If `true`, the runtime should ask for human approval before executing |
 | `context` | `ToolContextDeclaration` | No | Declares tool-owned state; the runtime generates a context layer from it |
@@ -102,21 +102,19 @@ const UrlOutput = z.object({
 
 ## Standard Schema v1
 
-Tool schemas accept any Standard Schema v1 validator, not just Zod. At runtime the interpreter validates through the validator itself — Zod via `safeParse`, everything else via `~standard.validate` (sync or Promise results both supported) — and the parsed/transformed value is what `execute` receives. The model-facing JSON Schema, however, can only be auto-derived from Zod, so non-Zod tools exposed to a model must provide `inputJsonSchema` explicitly. This self-contained JSON Schema handoff bridges the Zod-bound `@openrouter/agent` wire boundary with no per-validator runtime dependencies.
+Tool schemas accept any Standard Schema v1 validator, not just Zod. Runtime validation uses Zod `safeParse` or `~standard.validate` (sync and Promise results are supported), and `execute` receives the parsed/transformed value.
+
+Model-facing JSON Schema uses three tiers: Zod's native converter, the [Standard JSON Schema v1](https://standardschema.dev/json-schema) companion trait, then `inputJsonSchema`. For non-Zod inputs, an explicit `inputJsonSchema` overrides the trait and falls back when the trait converter throws. Zod 4.2+, ArkType 2.1.28+, Zod Mini, VineJS, and Sury implement the trait; Valibot adds it with `toStandardJsonSchema()` from `@valibot/to-json-schema`. Validation-only schemas still require `inputJsonSchema`. Noetic adds no per-validator runtime dependency.
 
 ```ts
+import { toStandardJsonSchema } from '@valibot/to-json-schema';
 import * as v from 'valibot';
 import { tool } from '@noetic-tools/core';
 
 const search = tool({
   name: 'search',
   description: 'Search the knowledge base',
-  input: v.object({ query: v.string() }),
-  inputJsonSchema: {
-    type: 'object',
-    properties: { query: { type: 'string' } },
-    required: ['query'],
-  },
+  input: toStandardJsonSchema(v.object({ query: v.string() })),
   output: v.object({ results: v.array(v.string()) }),
   execute: async (args) => ({ results: ['Result 1', 'Result 2'] }),
 });

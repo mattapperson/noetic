@@ -48,6 +48,7 @@ interface ContextCallModelRequestBase {
   instructions?: string;
   params?: ModelParams;
   outputSchema?: StandardSchemaV1;
+  /** Explicit non-Zod override/fallback after StandardJSONSchemaV1 conversion. */
   outputJsonSchema?: Record<string, unknown>;
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
   signal?: AbortSignal;

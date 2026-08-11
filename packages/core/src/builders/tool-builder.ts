@@ -2,6 +2,7 @@ import type {
   FunctionCallItem,
   FunctionCallOutputItem,
   InferSchemaOutput,
+  InputSchemaConfig,
   Item,
   ItemSchemaExtensions,
   StandardSchemaV1,
@@ -16,17 +17,11 @@ import { resolveContextOption } from './context-option';
 
 //#region Types
 
-interface ToolConfig<I extends StandardSchemaV1, O extends StandardSchemaV1> {
+type ToolConfig<I extends StandardSchemaV1, O extends StandardSchemaV1> = {
   name: string;
   description: string;
   input: I;
   output: O;
-  /**
-   * Explicit raw JSON Schema for the input, sent to the LLM when `input` is
-   * not a Zod schema. Required for non-Zod inputs exposed to a model;
-   * otherwise tool conversion raises `NoeticConfigError` `MISSING_JSON_SCHEMA`.
-   */
-  inputJsonSchema?: Record<string, unknown>;
   itemSchemas?: Pick<ItemSchemaExtensions, 'toolCalls' | 'toolResults' | 'items'>;
   decorateResultItem?: (params: {
     baseItem: FunctionCallOutputItem;
@@ -47,20 +42,18 @@ interface ToolConfig<I extends StandardSchemaV1, O extends StandardSchemaV1> {
   memory?: ToolContextDeclaration;
   /** Optional UI declaration — the runtime emits the rendered fragments at call/progress/result points. */
   ui?: ToolUiDeclaration<I, O>;
-}
+} & InputSchemaConfig<I>;
 
-interface GeneratorToolConfig<
+type GeneratorToolConfig<
   I extends StandardSchemaV1,
   E extends StandardSchemaV1,
   O extends StandardSchemaV1,
-> {
+> = {
   name: string;
   description: string;
   input: I;
   event: E;
   output: O;
-  /** See `ToolConfig.inputJsonSchema`. */
-  inputJsonSchema?: Record<string, unknown>;
   itemSchemas?: Pick<ItemSchemaExtensions, 'toolCalls' | 'toolResults' | 'items'>;
   decorateResultItem?: (params: {
     baseItem: FunctionCallOutputItem;
@@ -81,7 +74,7 @@ interface GeneratorToolConfig<
   memory?: ToolContextDeclaration;
   /** Optional UI declaration — the runtime emits the rendered fragments at call/progress/result points. */
   ui?: ToolUiDeclaration<I, O, InferSchemaOutput<E>>;
-}
+} & InputSchemaConfig<I>;
 
 //#endregion
 
@@ -132,7 +125,7 @@ export function tool<I extends StandardSchemaV1, O extends StandardSchemaV1>(
     needsApproval: config.needsApproval,
     context: resolveContextOption(config),
     ui: config.ui,
-  } satisfies Tool<I, O>;
+  };
 }
 
 /**
@@ -160,7 +153,7 @@ export function toolWithGenerator<
     needsApproval: config.needsApproval,
     context: resolveContextOption(config),
     ui: config.ui,
-  } satisfies Tool<I, O>;
+  };
 }
 
 //#endregion

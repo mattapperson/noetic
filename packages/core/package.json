@@ -58,6 +58,7 @@
   },
   "devDependencies": {
     "@openrouter/agent": "^0.6.0",
+    "@valibot/to-json-schema": "1.7.1",
     "bun-types": "latest",
     "valibot": "1.4.2"
   },

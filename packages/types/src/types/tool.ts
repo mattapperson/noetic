@@ -71,10 +71,9 @@ export interface ToolUiDeclaration<
  * A tool definition that an LLM can invoke during execution.
  *
  * Input and output schemas accept any Standard Schema v1 implementation
- * (Zod, Valibot, ArkType, …). Zod schemas remain the fast path: their JSON
- * Schema is derived automatically via `z.toJSONSchema`. Non-Zod inputs
- * exposed to an LLM must carry an explicit `inputJsonSchema`, or tool
- * conversion raises `NoeticConfigError` with code `MISSING_JSON_SCHEMA`.
+ * (Zod, Valibot, ArkType, …). Zod remains the fast path; other validators
+ * can provide JSON Schema through the Standard JSON Schema v1 companion
+ * trait or an explicit `inputJsonSchema` override.
  *
  * The runtime passes a `ToolExecutionContext` (from `./tool-context`) as
  * the second argument to `execute`. Callers that need the concrete type
@@ -96,8 +95,8 @@ export interface Tool<
   output: O;
   /**
    * Explicit raw JSON Schema for the tool input, sent to the LLM wire format.
-   * Required when `input` is not a Zod schema and the tool is exposed to a
-   * model; ignored for Zod inputs, whose JSON Schema is derived automatically.
+   * For non-Zod schemas, overrides StandardJSONSchemaV1 conversion and serves
+   * as the required fallback for validation-only schemas.
    */
   inputJsonSchema?: Record<string, unknown>;
   /** Optional schema validating streaming events yielded during execution. */

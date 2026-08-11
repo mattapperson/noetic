@@ -32,7 +32,7 @@ step.llm<TMemory = ContextMemory, I = unknown, O = unknown>({
   instructions?: Lazy<string | undefined, TMemory>;
   tools?: Lazy<Tool[] | undefined, TMemory>;       // allowed tool subset (undefined = all, [] = none)
   output?: StandardSchemaV1<unknown, O> | OutputCodec<O>;  // any Standard Schema v1 (Zod default) OR a streaming codec (see Generative UI)
-  outputJsonSchema?: Record<string, unknown>;            // raw JSON Schema for the model — required when `output` is non-Zod (else MISSING_JSON_SCHEMA)
+  outputJsonSchema?: Record<string, unknown>;            // explicit fallback/override after Zod and StandardJSONSchemaV1
   params?: ModelParams;
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }): StepLLM<TMemory, I, O>
@@ -57,7 +57,7 @@ step.llm({
 
 `emit` controls framework event emission (default `true`). Set `false` to suppress all, or pass a filter function.
 
-`output` accepts any Standard Schema v1 schema (assistant text is JSON-parsed and validated; Zod runs `safeParse`, other validators run `~standard.validate` with sync/Promise support, and the parsed/transformed value is returned) OR an `OutputCodec<O>` — a streaming output dialect. Non-Zod schemas require `outputJsonSchema`, since the wire JSON Schema is auto-derived only from Zod (`z.toJSONSchema`); this explicit handoff bridges the Zod-bound `@openrouter/agent` boundary with no per-validator runtime dependencies. The OpenUI codec (`openUi(library)`) makes the model render a UI instead of returning text; see [Generative UI](#generative-ui-openui).
+`output` accepts any Standard Schema v1 schema (assistant text is JSON-parsed and validated; Zod runs `safeParse`, other validators run `~standard.validate` with sync/Promise support, and the parsed/transformed value is returned) OR an `OutputCodec<O>`. Model JSON Schema resolves through Zod's native converter, StandardJSONSchemaV1, then `outputJsonSchema`; the explicit field overrides the trait for non-Zod schemas and falls back when conversion throws. The OpenUI codec (`openUi(library)`) makes the model render a UI instead of returning text; see [Generative UI](#generative-ui-openui).
 
 The agent harness assembles the View before calling the model: system message + memory layer items + conversation history. The `instructions` field becomes an `InputMessageItem` with `role: system`.
 
@@ -164,7 +164,7 @@ tool<I, O>({
   description: string;
   input: StandardSchemaV1<I>;
   output: StandardSchemaV1<O>;
-  inputJsonSchema?: Record<string, unknown>;  // required for non-Zod input exposed to a model (else MISSING_JSON_SCHEMA)
+  inputJsonSchema?: Record<string, unknown>;  // explicit fallback/override after Zod and StandardJSONSchemaV1
   execute: (args: I, toolCtx: ToolExecutionContext) => Promise<O>;
   needsApproval?: boolean;
   memory?: ToolMemoryDeclaration;

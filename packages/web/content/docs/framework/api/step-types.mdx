@@ -60,7 +60,7 @@ The exported `Step` union additionally includes [`StepEvery`](#stepevery) for fi
 | `instructions` | `string` | no | System prompt / instructions for the model |
 | `tools` | `Tool[]` | no | Allowed tool subset (`undefined` = all, `[]` = none) |
 | `output` | `StandardSchemaV1<unknown, O> \| OutputCodec<O>` | no | Structured output schema (any Standard Schema v1; Zod is the default) or a streaming codec |
-| `outputJsonSchema` | `Record<string, unknown>` | no | Raw JSON Schema sent to the model as the structured-output constraint. Required for non-Zod `output` (`MISSING_JSON_SCHEMA` otherwise); ignored for Zod |
+| `outputJsonSchema` | `Record<string, unknown>` | no | Explicit JSON Schema override/fallback for non-Zod output. Conversion order is Zod → StandardJSONSchemaV1 → this field; validation-only schemas require it |
 | `params` | `ModelParams` | no | Sampling parameters |
 | `emit` | `boolean \| ((eventType, data) => boolean)` | no | Controls framework event emission for this step. Defaults to `true`. Pass `false` to suppress all framework events, or a filter function to allow specific events through. |
 
@@ -220,7 +220,7 @@ A step that runs a body step on a fixed-interval schedule, optionally woken soon
 | `description` | `string` | Tool description shown to the LLM. |
 | `input` | `StandardSchemaV1<I>` | Schema validating tool input arguments (any Standard Schema v1; Zod is the default). |
 | `output` | `StandardSchemaV1<O>` | Schema validating tool return value. |
-| `inputJsonSchema` | `Record<string, unknown>` | Optional raw JSON Schema sent to the model for this tool's input. Required when `input` is not a Zod schema and the tool is exposed to a model — conversion throws `NoeticConfigError` code `MISSING_JSON_SCHEMA` otherwise. Ignored for Zod inputs, whose JSON Schema is derived via `z.toJSONSchema`. |
+| `inputJsonSchema` | `Record<string, unknown>` | Explicit JSON Schema override/fallback for non-Zod input. Conversion order is Zod → StandardJSONSchemaV1 → this field; validation-only schemas require it. |
 | `event` | `StandardSchemaV1` | Optional schema validating streaming events yielded during execution. |
 | `itemSchemas` | `ItemSchemaExtensions` | Optional item schemas for tool-call/result extensions contributed by this tool. `toolResults` schemas are owner-scoped: they validate only this tool's own result items and never reject a sibling tool's results. Schemas are pure shape validators (gates, not normalizers) — the original item is returned on match, and Zod transforms/defaults are unsupported. |
 | `decorateResultItem` | `(params) => Item` | Decorate the harness-created tool-result item before it is appended/emitted. The decorated item must satisfy this tool's own `itemSchemas.toolResults` (when declared) — including for error outputs such as malformed-arguments results — or the round fails with `NoeticError` kind `item_schema_mismatch`. |

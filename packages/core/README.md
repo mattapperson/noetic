@@ -10,7 +10,7 @@ npm install @noetic-tools/core
 
 `@noetic-tools/core` depends on `@openrouter/agent` (the OpenRouter LLM adapter) and `zod`; your package manager installs both automatically. Runs on Node.js 18+ and Bun.
 
-Tool and structured-output schemas accept any [Standard Schema v1](https://standardschema.dev) validator — Zod remains the default (its JSON Schema is derived automatically); non-Zod validators (Valibot, ArkType, …) work too, with an explicit raw JSON Schema (`inputJsonSchema` / `outputJsonSchema`) wherever a schema must reach the model.
+Tool and structured-output schemas accept any [Standard Schema v1](https://standardschema.dev/schema) validator. Model-facing JSON Schema resolves through three tiers: Zod's native converter, the [Standard JSON Schema v1](https://standardschema.dev/json-schema) companion trait, then an explicit `inputJsonSchema` / `outputJsonSchema` override. Zod 4.2+, ArkType 2.1.28+, Zod Mini, VineJS, and Sury implement the companion trait; Valibot provides it via `toStandardJsonSchema()` from `@valibot/to-json-schema`.
 
 ## Set your API key
 

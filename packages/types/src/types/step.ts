@@ -129,14 +129,13 @@ export interface StepLLM<TContext = ContextData, _I = unknown, O = unknown> {
   /**
    * Structured output: a Standard Schema (assistant text is JSON-parsed and
    * validated) or a streaming `OutputCodec` (fed each text delta, produces
-   * the typed value at turn end). Non-Zod schemas require `outputJsonSchema`
-   * so the model receives a JSON Schema constraint.
+   * the typed value at turn end). Non-Zod schemas can derive the model
+   * constraint through StandardJSONSchemaV1 or provide `outputJsonSchema`.
    */
   output?: StandardSchemaV1<unknown, O> | OutputCodec<O>;
   /**
-   * Explicit raw JSON Schema sent to the model as the structured-output
-   * constraint. Required when `output` is a non-Zod Standard Schema; ignored
-   * for Zod schemas, whose JSON Schema is derived automatically.
+   * Explicit raw JSON Schema override sent to the model. For non-Zod schemas,
+   * it takes precedence over StandardJSONSchemaV1 conversion.
    */
   outputJsonSchema?: Record<string, unknown>;
   params?: ModelParams;
