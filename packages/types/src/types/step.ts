@@ -61,14 +61,15 @@ export type Until = (snapshot: Snapshot) => Verdict | Promise<Verdict>;
 
 /**
  * Field type that accepts either an eager value or a `(ctx) => value` getter.
- * Used by `step.llm` for params that may vary per execution (model, instructions,
- * tool list). The getter runs at step execution time with the live context.
+ * Used by `step.callModel` for params that may vary per execution (model,
+ * instructions, tool list). The getter runs at step execution time with the
+ * live context.
  * @public
  */
 export type Lazy<T, TContext = ContextData> = T | ((ctx: Context<TContext>) => T | Promise<T>);
 
 /**
- * Outcome of a single path in a `settle`-mode fork (mirrors `Promise.allSettled`).
+ * Outcome of a single path in a `settle`-mode inParallel step (mirrors `Promise.allSettled`).
  * @public
  */
 export interface SettleResult<O> {
@@ -84,20 +85,20 @@ export interface SettleResult<O> {
 
 /** @public Discriminated union of all step kinds that can be composed into an execution tree. */
 export type Step<TContext = ContextData, I = unknown, O = unknown> =
-  | StepRun<TContext, I, O>
-  | StepLLM<TContext, I, O>
+  | StepRunCode<TContext, I, O>
+  | StepCallModel<TContext, I, O>
   | StepSubHarness<TContext, I, O>
-  | StepTool<TContext, I, O>
-  | StepBranch<TContext, I, O>
-  | StepFork<TContext, I, O>
+  | StepInvokeTool<TContext, I, O>
+  | StepConditional<TContext, I, O>
+  | StepInParallel<TContext, I, O>
   | StepSpawn<TContext, I, O>
-  | StepProvide<TContext, I, O>
+  | StepWithContext<TContext, I, O>
   | StepLoop<TContext, I, O>
-  | StepEvery<TContext, I, O>;
+  | StepSchedule<TContext, I, O>;
 
 /** @public A step that executes arbitrary async logic via a user-supplied function. */
-export interface StepRun<TContext = ContextData, I = unknown, O = unknown> {
-  kind: 'run';
+export interface StepRunCode<TContext = ContextData, I = unknown, O = unknown> {
+  kind: 'runCode';
   id: string;
   execute: (input: I, ctx: Context<TContext>) => Promise<O>;
   retry?: RetryPolicy;
@@ -111,8 +112,8 @@ export interface StepRun<TContext = ContextData, I = unknown, O = unknown> {
 }
 
 /** @public A step that sends a prompt to a language model and returns its response. */
-export interface StepLLM<TContext = ContextData, _I = unknown, O = unknown> {
-  kind: 'llm';
+export interface StepCallModel<TContext = ContextData, _I = unknown, O = unknown> {
+  kind: 'callModel';
   id: string;
   /** Model id. Accepts either an eager string or a `(ctx) => string` getter. */
   model: Lazy<string, TContext>;
@@ -170,17 +171,17 @@ export interface StepSubHarness<TContext = ContextData, _I = unknown, O = unknow
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }
 
-/** @public A step that invokes a single tool directly, bypassing the LLM. */
-export interface StepTool<_TContext = ContextData, I = unknown, O = unknown> {
-  kind: 'tool';
+/** @public A step that invokes a single tool directly, bypassing the model. */
+export interface StepInvokeTool<_TContext = ContextData, I = unknown, O = unknown> {
+  kind: 'invokeTool';
   id: string;
   tool: Tool<ZodType<I>, ZodType<O>>;
   args?: Partial<I>;
 }
 
 /** @public A step that dynamically selects and executes one of several possible sub-steps. */
-export interface StepBranch<TContext = ContextData, I = unknown, O = unknown> {
-  kind: 'branch';
+export interface StepConditional<TContext = ContextData, I = unknown, O = unknown> {
+  kind: 'conditional';
   id: string;
   route: (
     input: I,
@@ -189,15 +190,15 @@ export interface StepBranch<TContext = ContextData, I = unknown, O = unknown> {
   _optimizable?: Step<TContext>[];
 }
 
-/** @public Union of fork step variants (`race`, `all`, `settle`) for concurrent path execution. */
-export type StepFork<TContext = ContextData, I = unknown, O = unknown> =
-  | StepForkRace<TContext, I, O>
-  | StepForkAll<TContext, I, O>
-  | StepForkSettle<TContext, I, O>;
+/** @public Union of inParallel step variants (`race`, `all`, `settle`) for concurrent path execution. */
+export type StepInParallel<TContext = ContextData, I = unknown, O = unknown> =
+  | StepInParallelRace<TContext, I, O>
+  | StepInParallelAll<TContext, I, O>
+  | StepInParallelSettle<TContext, I, O>;
 
-/** @public A fork step that returns the result of the first path to complete. */
-export interface StepForkRace<TContext = ContextData, I = unknown, O = unknown> {
-  kind: 'fork';
+/** @public An inParallel step that returns the result of the first path to complete. */
+export interface StepInParallelRace<TContext = ContextData, I = unknown, O = unknown> {
+  kind: 'inParallel';
   id: string;
   mode: 'race';
   paths: (input: I, ctx: Context<TContext>) => Step<TContext, I, O>[];
@@ -205,9 +206,9 @@ export interface StepForkRace<TContext = ContextData, I = unknown, O = unknown> 
   _optimizable?: Step<TContext>[];
 }
 
-/** @public A fork step that runs all paths and merges their results. */
-export interface StepForkAll<TContext = ContextData, I = unknown, O = unknown> {
-  kind: 'fork';
+/** @public An inParallel step that runs all paths and merges their results. */
+export interface StepInParallelAll<TContext = ContextData, I = unknown, O = unknown> {
+  kind: 'inParallel';
   id: string;
   mode: 'all';
   paths: (input: I, ctx: Context<TContext>) => Step<TContext, I, O>[];
@@ -216,9 +217,9 @@ export interface StepForkAll<TContext = ContextData, I = unknown, O = unknown> {
   _optimizable?: Step<TContext>[];
 }
 
-/** @public A fork step that runs all paths and collects fulfilled/rejected outcomes. */
-export interface StepForkSettle<TContext = ContextData, I = unknown, O = unknown> {
-  kind: 'fork';
+/** @public An inParallel step that runs all paths and collects fulfilled/rejected outcomes. */
+export interface StepInParallelSettle<TContext = ContextData, I = unknown, O = unknown> {
+  kind: 'inParallel';
   id: string;
   mode: 'settle';
   paths: (input: I, ctx: Context<TContext>) => Step<TContext, I, O>[];
@@ -233,8 +234,8 @@ export interface StepForkSettle<TContext = ContextData, I = unknown, O = unknown
  * Spawn and detachedSpawn break the inheritance chain.
  * @public
  */
-export interface StepProvide<TContext = ContextData, I = unknown, O = unknown> {
-  kind: 'provide';
+export interface StepWithContext<TContext = ContextData, I = unknown, O = unknown> {
+  kind: 'withContext';
   id: string;
   child: Step<TContext, I, O>;
   context: ContextConfig | ContextLayer[];
@@ -282,34 +283,34 @@ export interface StepLoop<TContext = ContextData, I = unknown, O = unknown> {
 }
 
 /**
- * Error policy for the `every` operator when its body step throws.
+ * Error policy for the `schedule` operator when its body step throws.
  * - `'continue'` (default): emit a span event recording the error and continue parking.
  * - `'fail'`: re-throw, terminating the operator.
  * @public
  */
-export type EveryErrorPolicy = 'continue' | 'fail';
+export type ScheduleErrorPolicy = 'continue' | 'fail';
 
 /**
  * A step that runs a body step on a fixed-interval schedule, optionally woken
- * sooner by a wake channel. Runs forever until the executing context is cancelled.
+ * sooner by an inbox channel. Runs forever until the executing context is cancelled.
  *
- * The operator output is `void` — `every` does not accumulate iteration outputs.
+ * The operator output is `void` — `schedule` does not accumulate iteration outputs.
  * The `O` type parameter exists only to anchor the body step's output type.
  *
  * @public
  */
-export interface StepEvery<TContext = ContextData, I = unknown, O = unknown> {
-  kind: 'every';
+export interface StepSchedule<TContext = ContextData, I = unknown, O = unknown> {
+  kind: 'schedule';
   /** Unique step identifier used in traces and error messages. */
   id: string;
   /** Body step executed on each iteration. */
   step: Step<TContext, I, O>;
   /** Park duration between iterations in milliseconds. Must be >= 0. */
-  ms: number;
+  interval: number;
   /** Optional channel that wakes the parking interval when any value arrives. */
-  wakeOn?: Channel<unknown>;
+  inbox?: Channel<unknown>;
   /** Behavior when `step` throws. Defaults to `'continue'`. */
-  onError?: EveryErrorPolicy;
+  onError?: ScheduleErrorPolicy;
   /** Random jitter applied to the park duration in milliseconds. Must be >= 0. Default 0. */
   jitter?: number;
 }

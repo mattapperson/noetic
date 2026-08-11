@@ -124,12 +124,12 @@ export interface ContextRecallLayerOutput {
 
 export type ContextStep<TContext = ContextData, I = unknown, O = unknown> =
   | {
-      readonly kind: 'run';
+      readonly kind: 'runCode';
       readonly id: string;
       readonly execute: (input: I, ctx: Context<TContext>) => Promise<O>;
     }
   | {
-      readonly kind: 'llm';
+      readonly kind: 'callModel';
       readonly id: string;
       readonly output?: ZodType<O>;
     }

@@ -9,19 +9,19 @@ export type NoeticError =
       retriesExhausted: boolean;
     }
   | {
-      kind: 'llm_refused';
+      kind: 'model_refused';
       stepId: string;
       refusal: string;
     }
   | {
-      kind: 'llm_parse_error';
+      kind: 'model_parse_error';
       stepId: string;
       raw: string;
       schema: ZodType;
       zodError: ZodError;
     }
   | {
-      kind: 'llm_rate_limit';
+      kind: 'model_rate_limit';
       stepId: string;
       retryAfter?: number;
     }

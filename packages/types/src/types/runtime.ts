@@ -65,12 +65,12 @@ interface CallModelRequestBase {
   params?: ModelParams;
   /** When provided, the harness sends a JSON Schema constraint to the model so it returns structured JSON. */
   outputSchema?: ZodType;
-  /** Controls framework event emission. Defaults to `true`. Passed through from `StepLLM.emit`. */
+  /** Controls framework event emission. Defaults to `true`. Passed through from `StepCallModel.emit`. */
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
   /**
    * @internal
    * Framework-internal carrier for OpenRouter server tools (web search/fetch).
-   * Server tools are an authoring concept inside `StepLLM.tools` — the
+   * Server tools are an authoring concept inside `StepCallModel.tools` — the
    * interpreter partitions those entries out of the client `tools` list and
    * stamps the specs here so the model caller can wrap them via the SDK's
    * `serverTool()` and append them to the SDK tools array. NOT an authored

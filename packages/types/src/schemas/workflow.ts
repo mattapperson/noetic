@@ -2,8 +2,8 @@
  * Zod schemas for JSON-serialisable workflow definitions.
  *
  * A `WorkflowDocument` is a portable, JSON-safe representation of a noetic
- * step tree. It covers every step kind. The `run` node carries its body as a
- * code STRING (not an in-process closure) dispatched through a subprocess
+ * step tree. It covers every step kind. The `runCode` node carries its body as
+ * a code STRING (not an in-process closure) dispatched through a subprocess
  * adapter, keeping the document JSON-safe. The hydrator in
  * `@noetic-tools/core` (`builders/workflow-hydrator.ts`) converts a validated
  * document back into live `Step` objects via the existing builders.
@@ -36,10 +36,13 @@ export type UntilPredicate =
     }
   | {
       kind: 'maxDuration';
-      ms: number;
+      duration: number;
     }
   | {
       kind: 'noToolCalls';
+    }
+  | {
+      kind: 'never';
     }
   | {
       kind: 'outputContains';
@@ -72,11 +75,15 @@ const MaxCostPredicateSchema = z.object({
 
 const MaxDurationPredicateSchema = z.object({
   kind: z.literal('maxDuration'),
-  ms: z.number().positive(),
+  duration: z.number().positive(),
 });
 
 const NoToolCallsPredicateSchema = z.object({
   kind: z.literal('noToolCalls'),
+});
+
+const NeverPredicateSchema = z.object({
+  kind: z.literal('never'),
 });
 
 const OutputContainsPredicateSchema = z.object({
@@ -113,6 +120,7 @@ export const UntilPredicateSchema: z.ZodType<UntilPredicate> = z
     MaxCostPredicateSchema,
     MaxDurationPredicateSchema,
     NoToolCallsPredicateSchema,
+    NeverPredicateSchema,
     OutputContainsPredicateSchema,
     OutputEqualsPredicateSchema,
     ConvergedPredicateSchema,
@@ -135,10 +143,10 @@ export const MergeStrategy = {
   Concat: 'concat',
 } as const;
 
-/** @public Named merge strategy for fork nodes. */
+/** @public Named merge strategy for inParallel nodes. */
 export type MergeStrategy = (typeof MergeStrategy)[keyof typeof MergeStrategy];
 
-/** @public Zod schema for the named merge strategy used by `fork` nodes. */
+/** @public Zod schema for the named merge strategy used by `inParallel` nodes. */
 export const MergeStrategySchema = z.enum([
   'last',
   'first',
@@ -161,7 +169,7 @@ const ModelParamsSchema = z.object({
 //#region Tool Entries
 
 /**
- * A uniform tool entry on an `llm` node. Every entry is an object keyed by
+ * A uniform tool entry on a `callModel` node. Every entry is an object keyed by
  * `type`:
  *   - A CLIENT tool is `{ type: "<registered-tool-name>" }`. The hydrator
  *     resolves `type` against the tool registry; `parameters` (if present) is
@@ -174,7 +182,7 @@ const ModelParamsSchema = z.object({
  * Server vs client is decided by the `type` value (a reserved `openrouter:*`
  * server-tool literal vs an arbitrary tool name), not by the entry's shape.
  */
-const LlmToolEntrySchema = z.object({
+const CallModelToolEntrySchema = z.object({
   type: z.string().min(1),
   parameters: z.record(z.string(), z.unknown()).optional(),
 });
@@ -183,7 +191,7 @@ const LlmToolEntrySchema = z.object({
 
 //#region Retry Policy
 
-/** Retry policy for a `run` node, mirroring `RetryPolicy` in `@noetic-tools/types`. */
+/** Retry policy for a `runCode` node, mirroring `RetryPolicy` in `@noetic-tools/types`. */
 const RetryPolicySchema = z.object({
   maxAttempts: z.number().int().positive(),
   backoff: z.enum([
@@ -234,7 +242,7 @@ interface WorkflowNodeBase {
 }
 
 /**
- * A reference to a streaming `OutputCodec` for an `llm` node's structured
+ * A reference to a streaming `OutputCodec` for a `callModel` node's structured
  * output. The hydrator resolves `library` from `HydrationContext.uiLibraries`
  * to a live codec (e.g. `openUi(myLibrary)` from `@noetic-tools/openui`), the
  * same registry-resolution pattern sub-harness nodes use for adapters. Kept a
@@ -247,8 +255,8 @@ export interface OutputCodecRef {
   library: string;
 }
 
-export interface LlmWorkflowNode extends WorkflowNodeBase {
-  kind: 'llm';
+export interface CallModelWorkflowNode extends WorkflowNodeBase {
+  kind: 'callModel';
   model?: string;
   instructions: string;
   /**
@@ -258,28 +266,29 @@ export interface LlmWorkflowNode extends WorkflowNodeBase {
    * parameters?: {...} }` (executed by the provider). Client vs server is
    * decided by the `type` value.
    */
-  tools?: z.infer<typeof LlmToolEntrySchema>[];
+  tools?: z.infer<typeof CallModelToolEntrySchema>[];
   params?: z.infer<typeof ModelParamsSchema>;
   /** Streaming output-codec reference, resolved from `HydrationContext.uiLibraries`. */
   output?: OutputCodecRef;
 }
 
-export interface ToolWorkflowNode extends WorkflowNodeBase {
-  kind: 'tool';
+export interface InvokeToolWorkflowNode extends WorkflowNodeBase {
+  kind: 'invokeTool';
   toolName: string;
   args?: Record<string, unknown>;
 }
 
 /**
- * A node that runs a serialised code body. Unlike the programmatic `step.run`
- * (which carries a closure), the JSON form carries `execute` as a code STRING.
+ * A node that runs a serialised code body. Unlike the programmatic
+ * `step.runCode` (which carries a closure), the JSON form carries `execute` as
+ * a code STRING.
  * The code is never eval'd in-process (Cloudflare Workers forbid eval); it is
  * dispatched through a subprocess adapter (`ctx.subprocess`, or a named adapter
  * resolved by ref). Execution therefore requires a subprocess adapter capable
  * of running the code and returning its stdout.
  */
-export interface RunWorkflowNode extends WorkflowNodeBase {
-  kind: 'run';
+export interface RunCodeWorkflowNode extends WorkflowNodeBase {
+  kind: 'runCode';
   /** Source code executed in the subprocess. Receives the step input on stdin. */
   execute: string;
   /** Optional retry policy applied to the step. */
@@ -288,19 +297,19 @@ export interface RunWorkflowNode extends WorkflowNodeBase {
   subprocess?: string;
 }
 
-export interface BranchRoute {
+export interface ConditionalRoute {
   match: string;
   target: WorkflowNode;
 }
 
-export interface BranchWorkflowNode extends WorkflowNodeBase {
-  kind: 'branch';
-  routes: BranchRoute[];
+export interface ConditionalWorkflowNode extends WorkflowNodeBase {
+  kind: 'conditional';
+  routes: ConditionalRoute[];
   default?: WorkflowNode;
 }
 
-export interface ForkWorkflowNode extends WorkflowNodeBase {
-  kind: 'fork';
+export interface InParallelWorkflowNode extends WorkflowNodeBase {
+  kind: 'inParallel';
   mode: 'race' | 'all' | 'settle';
   /**
    * Static fan-out: one child per entry. Mutually exclusive with `each` —
@@ -313,8 +322,8 @@ export interface ForkWorkflowNode extends WorkflowNodeBase {
    */
   each?: WorkflowNode;
   /**
-   * Selector key into the fork input (parsed as JSON) locating the array to
-   * fan out over. When omitted, the input string itself is parsed as a JSON
+   * Selector key into the inParallel input (parsed as JSON) locating the array
+   * to fan out over. When omitted, the input string itself is parsed as a JSON
    * array. Only meaningful with `each`.
    */
   over?: string;
@@ -328,15 +337,15 @@ export interface SpawnWorkflowNode extends WorkflowNodeBase {
   timeout?: number;
   /**
    * Memory layers the child runs with, by registered name (resolved from
-   * `HydrationContext.layers`, like `provide`). Omit to inherit the parent's
-   * layers — the default spawn behaviour. Naming layers here REPLACES the
-   * inherited set for the child, so list every layer the child needs.
+   * `HydrationContext.layers`, like `withContext`). Omit to inherit the
+   * parent's layers — the default spawn behaviour. Naming layers here REPLACES
+   * the inherited set for the child, so list every layer the child needs.
    */
   layers?: string[];
 }
 
-export interface ProvideWorkflowNode extends WorkflowNodeBase {
-  kind: 'provide';
+export interface WithContextWorkflowNode extends WorkflowNodeBase {
+  kind: 'withContext';
   child: WorkflowNode;
   layers: string[];
 }
@@ -353,10 +362,10 @@ export interface SequenceWorkflowNode extends WorkflowNodeBase {
   steps: WorkflowNode[];
 }
 
-export interface EveryWorkflowNode extends WorkflowNodeBase {
-  kind: 'every';
+export interface ScheduleWorkflowNode extends WorkflowNodeBase {
+  kind: 'schedule';
   step: WorkflowNode;
-  ms: number;
+  interval: number;
   onError?: 'continue' | 'fail';
 }
 
@@ -390,16 +399,16 @@ export interface SubflowWorkflowNode extends WorkflowNodeBase {
 
 /** @public Discriminated union of all JSON-serialisable workflow node kinds. */
 export type WorkflowNode =
-  | LlmWorkflowNode
-  | ToolWorkflowNode
-  | RunWorkflowNode
-  | BranchWorkflowNode
-  | ForkWorkflowNode
+  | CallModelWorkflowNode
+  | InvokeToolWorkflowNode
+  | RunCodeWorkflowNode
+  | ConditionalWorkflowNode
+  | InParallelWorkflowNode
   | SpawnWorkflowNode
-  | ProvideWorkflowNode
+  | WithContextWorkflowNode
   | LoopWorkflowNode
   | SequenceWorkflowNode
-  | EveryWorkflowNode
+  | ScheduleWorkflowNode
   | SubflowWorkflowNode
   | SubHarnessWorkflowNode;
 
@@ -418,46 +427,46 @@ const OutputCodecRefSchema = z.object({
   library: z.string().min(1),
 });
 
-const LlmNodeSchema = z.object({
-  kind: z.literal('llm'),
+const CallModelNodeSchema = z.object({
+  kind: z.literal('callModel'),
   ...SHARED_FIELDS,
   model: z.string().optional(),
   instructions: z.string(),
-  tools: z.array(LlmToolEntrySchema).optional(),
+  tools: z.array(CallModelToolEntrySchema).optional(),
   params: ModelParamsSchema.optional(),
   output: OutputCodecRefSchema.optional(),
 });
 
-const ToolNodeSchema = z.object({
-  kind: z.literal('tool'),
+const InvokeToolNodeSchema = z.object({
+  kind: z.literal('invokeTool'),
   ...SHARED_FIELDS,
   toolName: z.string().min(1),
   args: z.record(z.string(), z.unknown()).optional(),
 });
 
-const RunNodeSchema = z.object({
-  kind: z.literal('run'),
+const RunCodeNodeSchema = z.object({
+  kind: z.literal('runCode'),
   ...SHARED_FIELDS,
   execute: z.string().min(1),
   retry: RetryPolicySchema.optional(),
   subprocess: z.string().min(1).optional(),
 });
 
-const BranchRouteSchema = z.object({
+const ConditionalRouteSchema = z.object({
   match: z.string().min(1),
   target: z.lazy(() => WorkflowNodeSchema),
 });
 
-const BranchNodeSchema = z.object({
-  kind: z.literal('branch'),
+const ConditionalNodeSchema = z.object({
+  kind: z.literal('conditional'),
   ...SHARED_FIELDS,
-  routes: z.array(BranchRouteSchema).min(1),
+  routes: z.array(ConditionalRouteSchema).min(1),
   default: WorkflowNodeRef.optional(),
 });
 
-const ForkNodeSchema = z
+const InParallelNodeSchema = z
   .object({
-    kind: z.literal('fork'),
+    kind: z.literal('inParallel'),
     ...SHARED_FIELDS,
     mode: z.enum([
       'race',
@@ -471,7 +480,7 @@ const ForkNodeSchema = z
     concurrency: z.number().int().positive().optional(),
   })
   .refine((node) => (node.paths === undefined) !== (node.each === undefined), {
-    message: "fork node requires exactly one of 'paths' (static) or 'each' (dynamic).",
+    message: "inParallel node requires exactly one of 'paths' (static) or 'each' (dynamic).",
   });
 
 const SpawnNodeSchema = z.object({
@@ -482,8 +491,8 @@ const SpawnNodeSchema = z.object({
   layers: z.array(z.string().min(1)).min(1).optional(),
 });
 
-const ProvideNodeSchema = z.object({
-  kind: z.literal('provide'),
+const WithContextNodeSchema = z.object({
+  kind: z.literal('withContext'),
   ...SHARED_FIELDS,
   child: WorkflowNodeRef,
   layers: z.array(z.string().min(1)).min(1),
@@ -503,11 +512,11 @@ const SequenceNodeSchema = z.object({
   steps: z.array(WorkflowNodeRef).min(1),
 });
 
-const EveryNodeSchema = z.object({
-  kind: z.literal('every'),
+const ScheduleNodeSchema = z.object({
+  kind: z.literal('schedule'),
   ...SHARED_FIELDS,
   step: WorkflowNodeRef,
-  ms: z.number().nonnegative(),
+  interval: z.number().nonnegative(),
   onError: z
     .enum([
       'continue',
@@ -550,16 +559,16 @@ const PiNodeSchema = subHarnessNodeSchema('pi');
 /** @public Zod schema validating a single `WorkflowNode` (any JSON-safe kind). */
 export const WorkflowNodeSchema: z.ZodType<WorkflowNode> = z
   .discriminatedUnion('kind', [
-    LlmNodeSchema,
-    ToolNodeSchema,
-    RunNodeSchema,
-    BranchNodeSchema,
-    ForkNodeSchema,
+    CallModelNodeSchema,
+    InvokeToolNodeSchema,
+    RunCodeNodeSchema,
+    ConditionalNodeSchema,
+    InParallelNodeSchema,
     SpawnNodeSchema,
-    ProvideNodeSchema,
+    WithContextNodeSchema,
     LoopNodeSchema,
     SequenceNodeSchema,
-    EveryNodeSchema,
+    ScheduleNodeSchema,
     SubflowNodeSchema,
     ClaudeCodeNodeSchema,
     CodexNodeSchema,
@@ -602,7 +611,7 @@ function childNodes(node: WorkflowNode): WorkflowNode[] {
   switch (node.kind) {
     case 'sequence':
       return node.steps;
-    case 'fork':
+    case 'inParallel':
       if (node.each) {
         return [
           node.each,
@@ -610,7 +619,7 @@ function childNodes(node: WorkflowNode): WorkflowNode[] {
       }
       return node.paths ?? [];
     case 'spawn':
-    case 'provide':
+    case 'withContext':
       return [
         node.child,
       ];
@@ -618,11 +627,11 @@ function childNodes(node: WorkflowNode): WorkflowNode[] {
       return [
         node.body,
       ];
-    case 'every':
+    case 'schedule':
       return [
         node.step,
       ];
-    case 'branch': {
+    case 'conditional': {
       const children = node.routes.map((r) => r.target);
       if (node.default) {
         children.push(node.default);
@@ -696,7 +705,7 @@ export function workflowGraph(root: WorkflowNode): WorkflowGraph {
 
 /**
  * Returns the maximum depth of a workflow tree.
- * Leaf nodes (`llm`, `tool`) have depth 0. Structural nodes add +1.
+ * Leaf nodes (`callModel`, `invokeTool`) have depth 0. Structural nodes add +1.
  * A `subflow` ref counts as a leaf — depth does not see through named refs.
  */
 export function workflowDepth(node: WorkflowNode): number {
