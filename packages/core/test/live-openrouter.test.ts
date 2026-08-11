@@ -24,7 +24,7 @@ describe.skipIf(!RUN_LIVE)('live OpenRouter integration', () => {
     const harness = new AgentHarness({
       name: 'live-simple-test',
       params: {},
-      llm: {
+      callModelDefaults: {
         provider: 'openrouter',
         apiKey: process.env.OPENROUTER_API_KEY!,
       },
@@ -67,7 +67,7 @@ describe.skipIf(!RUN_LIVE)('live OpenRouter integration', () => {
     const harness = new AgentHarness({
       name: 'live-structured-test',
       params: {},
-      llm: {
+      callModelDefaults: {
         provider: 'openrouter',
         apiKey: process.env.OPENROUTER_API_KEY!,
       },
@@ -116,7 +116,7 @@ describe.skipIf(!RUN_LIVE)('live OpenRouter integration', () => {
     const harness = new AgentHarness({
       name: 'live-tool-test',
       params: {},
-      llm: {
+      callModelDefaults: {
         provider: 'openrouter',
         apiKey: process.env.OPENROUTER_API_KEY!,
       },
@@ -181,7 +181,7 @@ describe.skipIf(!RUN_LIVE)('live OpenRouter integration', () => {
     const harness = new AgentHarness({
       name: 'live-loop-test',
       params: {},
-      llm: {
+      callModelDefaults: {
         provider: 'openrouter',
         apiKey: process.env.OPENROUTER_API_KEY!,
       },
@@ -236,7 +236,7 @@ describe.skipIf(!RUN_LIVE)('live OpenRouter integration', () => {
     const harness = new AgentHarness({
       name: 'live-pipeline-test',
       params: {},
-      llm: {
+      callModelDefaults: {
         provider: 'openrouter',
         apiKey: process.env.OPENROUTER_API_KEY!,
       },

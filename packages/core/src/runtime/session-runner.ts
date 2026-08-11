@@ -5,6 +5,7 @@ import type {
   HarnessStatus,
   InputMessageItem,
   Item,
+  SessionUsage,
 } from '@noetic-tools/types';
 import { emitFrameworkEvent } from './broadcaster-utils';
 import { EventBroadcaster } from './event-broadcaster';
@@ -114,6 +115,12 @@ export class SessionRunner {
   private status: HarnessStatus = {
     kind: 'idle',
   };
+  /** Cumulative token/cost accounting across every turn this session has run,
+   *  including turns that failed or were aborted after partial model work. */
+  private totalInputTokens = 0;
+  private totalOutputTokens = 0;
+  private totalCachedTokens = 0;
+  private totalCost = 0;
   private currentController?: AbortController;
   private currentCtx?: Context;
   private loopPromise?: Promise<void>;
@@ -137,6 +144,16 @@ export class SessionRunner {
 
   getStatus(): HarnessStatus {
     return this.status;
+  }
+
+  /** Cumulative token usage and cost across all turns this session has run. */
+  getUsage(): SessionUsage {
+    return {
+      inputTokens: this.totalInputTokens,
+      outputTokens: this.totalOutputTokens,
+      cachedTokens: this.totalCachedTokens > 0 ? this.totalCachedTokens : undefined,
+      cost: this.totalCost > 0 ? this.totalCost : undefined,
+    };
   }
 
   /** Resolves once the queue has been drained and the runner is idle with a
@@ -290,6 +307,12 @@ export class SessionRunner {
       });
       this.rejectWaiters(error);
     } finally {
+      // Accumulate the turn's token accounting whatever the outcome — an
+      // aborted turn still consumed whatever the model billed before the cut.
+      this.totalInputTokens += ctx.tokens.input;
+      this.totalOutputTokens += ctx.tokens.output;
+      this.totalCachedTokens += ctx.tokens.cached ?? 0;
+      this.totalCost += ctx.cost;
       this.currentCtx = undefined;
       this.currentController = undefined;
       this.status = {

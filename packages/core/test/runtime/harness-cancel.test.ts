@@ -11,7 +11,7 @@ function makeHarness(context?: ContextLayer[]): AgentHarness {
   return new AgentHarness({
     name: 'test',
     params: {},
-    context,
+    contextLayers: context,
     _testCallModel: createScriptedCallModel([
       textOnlyResponse('ok'),
     ]),

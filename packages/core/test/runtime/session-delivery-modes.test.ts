@@ -139,7 +139,7 @@ describe('AgentHarness delivery modes', () => {
 
     const harness = new AgentHarness({
       name: 'test',
-      initialStep: echoStep,
+      agentGraph: echoStep,
       params: {},
       _testCallModel: gated.call,
     });
@@ -184,7 +184,7 @@ describe('AgentHarness delivery modes', () => {
     let callIdx = 0;
     const harness = new AgentHarness({
       name: 'test',
-      initialStep: echoStep,
+      agentGraph: echoStep,
       params: {},
       _testCallModel: async () => {
         callIdx++;
@@ -208,7 +208,7 @@ describe('AgentHarness delivery modes', () => {
     const gated = makeGatedCallModel();
     const harness = new AgentHarness({
       name: 'test',
-      initialStep: echoStep,
+      agentGraph: echoStep,
       params: {},
       _testCallModel: gated.call,
     });
@@ -245,7 +245,7 @@ describe('AgentHarness delivery modes', () => {
     const gated = makeGatedCallModel();
     const harness = new AgentHarness({
       name: 'test',
-      initialStep: echoStep,
+      agentGraph: echoStep,
       params: {},
       _testCallModel: gated.call,
     });
@@ -284,7 +284,7 @@ describe('AgentHarness delivery modes', () => {
   test('turn_started framework event embeds delivered message ids', async () => {
     const harness = new AgentHarness({
       name: 'myagent',
-      initialStep: echoStep,
+      agentGraph: echoStep,
       params: {},
       _testCallModel: async () => textResponse('ok'),
     });
@@ -324,7 +324,7 @@ describe('AgentHarness delivery modes', () => {
     let i = 0;
     const harness = new AgentHarness({
       name: 'test',
-      initialStep: echoStep,
+      agentGraph: echoStep,
       params: {},
       _testCallModel: async () => {
         const text = responses[i++];
@@ -354,7 +354,7 @@ describe('AgentHarness delivery modes', () => {
   test('messageId option round-trips to turn_started.messageIds', async () => {
     const harness = new AgentHarness({
       name: 'myagent',
-      initialStep: echoStep,
+      agentGraph: echoStep,
       params: {},
       _testCallModel: async () => textResponse('ok'),
     });
@@ -411,7 +411,7 @@ describe('AgentHarness delivery modes', () => {
     const seenResourceIds: Array<string | undefined> = [];
     const harness = new AgentHarness({
       name: 'test',
-      initialStep: stepWithTools,
+      agentGraph: stepWithTools,
       params: {},
       _testCallModel: async (request: CallModelRequest) => {
         if ('ctx' in request && request.ctx) {
@@ -440,7 +440,7 @@ describe('AgentHarness delivery modes', () => {
     let callIdx = 0;
     const harness = new AgentHarness({
       name: 'test',
-      initialStep: echoStep,
+      agentGraph: echoStep,
       params: {},
       _testCallModel: async () => {
         const i = callIdx++;

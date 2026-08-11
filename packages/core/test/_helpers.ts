@@ -491,6 +491,10 @@ export function makeMockHarness(): AgentHarnessContract {
       kind: 'idle',
     }),
     getQueueSize: () => 0,
+    getUsage: () => ({
+      inputTokens: 0,
+      outputTokens: 0,
+    }),
     seedSessionHistory: () => {},
     rootCwdState: {
       cwd: process.cwd(),

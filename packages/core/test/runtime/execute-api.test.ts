@@ -17,7 +17,7 @@ describe('AgentHarness.execute()', () => {
   it('accepts a string input and returns the agent output', async () => {
     const harness = new AgentHarness({
       name: 'test',
-      initialStep: echoStep,
+      agentGraph: echoStep,
       params: {},
       _testCallModel: createScriptedCallModel([
         textOnlyResponse('echo: hello'),
@@ -34,7 +34,7 @@ describe('AgentHarness.execute()', () => {
 
     const harness = new AgentHarness({
       name: 'test',
-      initialStep: echoStep,
+      agentGraph: echoStep,
       params: {},
       _testCallModel: createScriptedCallModel([
         textOnlyResponse('echo: from item'),
@@ -54,7 +54,7 @@ describe('AgentHarness.execute()', () => {
 
     const harness = new AgentHarness({
       name: 'test',
-      initialStep: echoStep,
+      agentGraph: echoStep,
       params: {},
       _testCallModel: createScriptedCallModel([
         textOnlyResponse('echo: second'),
@@ -69,7 +69,7 @@ describe('AgentHarness.execute()', () => {
   it('forwards ExecuteOptions to the context', async () => {
     const harness = new AgentHarness({
       name: 'test',
-      initialStep: echoStep,
+      agentGraph: echoStep,
       params: {},
       _testCallModel: createScriptedCallModel([
         textOnlyResponse('ok'),
@@ -104,7 +104,7 @@ describe('AgentHarness.execute()', () => {
   it('isolates sessions by threadId', async () => {
     const harness = new AgentHarness({
       name: 'test',
-      initialStep: echoStep,
+      agentGraph: echoStep,
       params: {},
       _testCallModel: createScriptedCallModel([
         textOnlyResponse('first'),

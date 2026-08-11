@@ -354,14 +354,14 @@ function finalizeCodecOutput<O>(
   return session.finish(lastText);
 }
 
-/** JSON-parse + Zod-validate the assistant text, raising `llm_parse_error`. */
+/** JSON-parse + Zod-validate the assistant text, raising `model_parse_error`. */
 function parseSchemaOutput<O>(schema: ZodType<O>, lastText: string, stepId: string): O {
   try {
     return schema.parse(JSON.parse(lastText));
   } catch (e) {
     if (e instanceof SyntaxError || e instanceof ZodError) {
       throw new NoeticErrorImpl({
-        kind: 'llm_parse_error',
+        kind: 'model_parse_error',
         stepId,
         raw: lastText,
         schema,

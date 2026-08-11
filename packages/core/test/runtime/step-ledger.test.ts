@@ -28,11 +28,15 @@ function durableHarness(storage: Storage, retention?: StepLedgerRetention): Agen
   return new AgentHarness({
     name: 'ledger-test',
     params: {},
-    storage,
-    checkpointStore: createCheckpointStore({
-      storage,
-    }),
-    stepLedgerRetention: retention,
+    environment: {
+      storage: {
+        adapter: storage,
+        checkpointStore: createCheckpointStore({
+          storage,
+        }),
+        stepLedgerRetention: retention,
+      },
+    },
   });
 }
 
@@ -259,7 +263,11 @@ describe('step ledger', () => {
     const harness = new AgentHarness({
       name: 'ephemeral',
       params: {},
-      storage,
+      environment: {
+        storage: {
+          adapter: storage,
+        },
+      },
     });
     const calls: string[] = [];
 

@@ -18,17 +18,17 @@ describe('NoeticError', () => {
       expect(e.message).toContain('boom');
     });
 
-    it('llm_refused', () => {
+    it('model_refused', () => {
       const e = new NoeticErrorImpl({
-        kind: 'llm_refused',
+        kind: 'model_refused',
         stepId: 'llm-1',
         refusal: 'I cannot help with that',
       });
-      expect(e.noeticError.kind).toBe('llm_refused');
+      expect(e.noeticError.kind).toBe('model_refused');
       expect(e.message).toContain('refused');
     });
 
-    it('llm_parse_error', () => {
+    it('model_parse_error', () => {
       const schema = z.object({
         x: z.number(),
       });
@@ -40,23 +40,23 @@ describe('NoeticError', () => {
         },
       ]);
       const e = new NoeticErrorImpl({
-        kind: 'llm_parse_error',
+        kind: 'model_parse_error',
         stepId: 'p',
         raw: 'bad',
         schema,
         zodError,
       });
-      expect(e.noeticError.kind).toBe('llm_parse_error');
+      expect(e.noeticError.kind).toBe('model_parse_error');
       expect(e.message).toContain('parse error');
     });
 
-    it('llm_rate_limit', () => {
+    it('model_rate_limit', () => {
       const e = new NoeticErrorImpl({
-        kind: 'llm_rate_limit',
+        kind: 'model_rate_limit',
         stepId: 'rl',
         retryAfter: 5e3,
       });
-      expect(e.noeticError.kind).toBe('llm_rate_limit');
+      expect(e.noeticError.kind).toBe('model_rate_limit');
       expect(e.message).toContain('rate limited');
     });
 

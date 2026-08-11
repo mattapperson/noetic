@@ -297,7 +297,7 @@ describe('executeSubHarness', () => {
     }
   });
 
-  it('throws llm_parse_error when structured output is unparseable', async () => {
+  it('throws model_parse_error when structured output is unparseable', async () => {
     const { ctx } = harnessCtx();
     const harnessStep = step.claudeCode({
       id: 'bad-json',
@@ -314,7 +314,7 @@ describe('executeSubHarness', () => {
       throw new Error('expected throw');
     } catch (e) {
       assert(isNoeticError(e));
-      expect(e.noeticError.kind).toBe('llm_parse_error');
+      expect(e.noeticError.kind).toBe('model_parse_error');
     }
   });
 

@@ -141,7 +141,7 @@ describe('executeLLM', () => {
     });
   });
 
-  it('throws llm_parse_error on invalid JSON', async () => {
+  it('throws model_parse_error on invalid JSON', async () => {
     const schema = z.object({
       answer: z.string(),
     });
@@ -160,11 +160,11 @@ describe('executeLLM', () => {
       expect.unreachable('should have thrown');
     } catch (e) {
       assert(isNoeticError(e));
-      expect(e.noeticError.kind).toBe('llm_parse_error');
+      expect(e.noeticError.kind).toBe('model_parse_error');
     }
   });
 
-  it('throws llm_parse_error on schema validation failure', async () => {
+  it('throws model_parse_error on schema validation failure', async () => {
     const schema = z.object({
       answer: z.string(),
     });
@@ -183,7 +183,7 @@ describe('executeLLM', () => {
       expect.unreachable('should have thrown');
     } catch (e) {
       assert(isNoeticError(e));
-      expect(e.noeticError.kind).toBe('llm_parse_error');
+      expect(e.noeticError.kind).toBe('model_parse_error');
     }
   });
 

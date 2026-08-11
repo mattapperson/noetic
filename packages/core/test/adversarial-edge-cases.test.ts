@@ -237,7 +237,7 @@ describe('channel edge cases', () => {
 //#region LLM Parse Edge Cases
 
 describe('structured output parse failures', () => {
-  test('non-JSON text throws llm_parse_error', async () => {
+  test('non-JSON text throws model_parse_error', async () => {
     const OutputSchema = z.object({
       answer: z.string(),
     });
@@ -263,17 +263,17 @@ describe('structured output parse failures', () => {
 
     const e = await expectNoeticError(
       () => executeLLM(llmStep, 'test input', ctx),
-      'llm_parse_error',
+      'model_parse_error',
     );
 
     const err = e.noeticError;
-    assert(err.kind === 'llm_parse_error');
+    assert(err.kind === 'model_parse_error');
     expect(err.raw).toBe('not json at all');
     expect(err.schema).toBeDefined();
     expect(err.zodError).toBeDefined();
   });
 
-  test('valid JSON but wrong schema throws llm_parse_error', async () => {
+  test('valid JSON but wrong schema throws model_parse_error', async () => {
     const OutputSchema = z.object({
       answer: z.string(),
     });
@@ -299,11 +299,11 @@ describe('structured output parse failures', () => {
 
     const e = await expectNoeticError(
       () => executeLLM(llmStep, 'test input', ctx),
-      'llm_parse_error',
+      'model_parse_error',
     );
 
     const err = e.noeticError;
-    assert(err.kind === 'llm_parse_error');
+    assert(err.kind === 'model_parse_error');
     expect(err.zodError.issues.length).toBeGreaterThan(0);
   });
 });

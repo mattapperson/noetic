@@ -298,7 +298,7 @@ export async function executeSubHarness<TContext, I, O>(
     } catch (e) {
       if (e instanceof SyntaxError || e instanceof ZodError) {
         throw new NoeticErrorImpl({
-          kind: 'llm_parse_error',
+          kind: 'model_parse_error',
           stepId: step.id,
           raw: lastText,
           schema: step.output,

@@ -216,7 +216,7 @@ describe('AgentHarness session accessors', () => {
   it('getAgentResponse() returns items, usage, and text', async () => {
     const harness = new AgentHarness({
       name: 'test',
-      initialStep: echoStep,
+      agentGraph: echoStep,
       params: {},
       _testCallModel: createScriptedCallModel([
         textOnlyResponse('response text'),
@@ -231,10 +231,67 @@ describe('AgentHarness session accessors', () => {
     expect(response.usage.outputTokens).toBe(5);
   });
 
+  it('getUsage() returns zeros for a session that has not run', () => {
+    const harness = new AgentHarness({
+      name: 'test',
+      agentGraph: echoStep,
+      params: {},
+      _testCallModel: createScriptedCallModel([
+        textOnlyResponse('unused'),
+      ]),
+    });
+    expect(harness.getUsage()).toEqual({
+      inputTokens: 0,
+      outputTokens: 0,
+    });
+    expect(
+      harness.getUsage({
+        threadId: 'never-ran',
+      }),
+    ).toEqual({
+      inputTokens: 0,
+      outputTokens: 0,
+    });
+  });
+
+  it('getUsage() accumulates token usage across turns on the same session', async () => {
+    const harness = new AgentHarness({
+      name: 'test',
+      agentGraph: echoStep,
+      params: {},
+      _testCallModel: createScriptedCallModel([
+        textOnlyResponse('first'),
+        textOnlyResponse('second'),
+      ]),
+    });
+
+    await harness.execute('one');
+    await harness.getAgentResponse();
+    const afterFirst = harness.getUsage();
+    expect(afterFirst.inputTokens).toBe(10);
+    expect(afterFirst.outputTokens).toBe(5);
+
+    await harness.execute('two');
+    await harness.getAgentResponse();
+    const afterSecond = harness.getUsage();
+    expect(afterSecond.inputTokens).toBe(20);
+    expect(afterSecond.outputTokens).toBe(10);
+
+    // Sessions are thread-scoped: another thread's accounting stays untouched.
+    expect(
+      harness.getUsage({
+        threadId: 'other-thread',
+      }),
+    ).toEqual({
+      inputTokens: 0,
+      outputTokens: 0,
+    });
+  });
+
   it('getFullStream() yields framework events for step and turn lifecycle', async () => {
     const harness = new AgentHarness({
       name: 'myagent',
-      initialStep: echoStep,
+      agentGraph: echoStep,
       params: {},
       _testCallModel: createScriptedCallModel([
         textOnlyResponse('streamed'),
@@ -292,7 +349,7 @@ describe('AgentHarness session accessors', () => {
   it('multiple stream accessors share the same session broadcaster', async () => {
     const harness = new AgentHarness({
       name: 'test',
-      initialStep: echoStep,
+      agentGraph: echoStep,
       params: {},
       _testCallModel: createScriptedCallModel([
         textOnlyResponse('multi'),
@@ -326,7 +383,7 @@ describe('AgentHarness session accessors', () => {
     };
     const harness = new AgentHarness({
       name: 'test',
-      initialStep: toolStep,
+      agentGraph: toolStep,
       params: {},
     });
     const fakeClient = new DecoratingToolClient('noop', '{}');
@@ -930,12 +987,14 @@ describe('AgentHarness — item schema extensions', () => {
     });
     const harness = new AgentHarness({
       name: 'test',
-      initialStep: echoStep,
+      agentGraph: echoStep,
       params: {},
       itemSchemas: {
-        items: [
-          CustomItemSchema,
-        ],
+        schemas: {
+          items: [
+            CustomItemSchema,
+          ],
+        },
       },
       _testCallModel: async () => ({
         items: [
@@ -1041,14 +1100,16 @@ describe('AgentHarness — item schema extensions', () => {
     });
     const harness = new AgentHarness({
       name: 'test',
-      initialStep: echoStep,
+      agentGraph: echoStep,
       params: {},
       itemSchemas: {
-        items: [
-          CustomMemoryItemSchema,
-        ],
+        schemas: {
+          items: [
+            CustomMemoryItemSchema,
+          ],
+        },
       },
-      context: [
+      contextLayers: [
         {
           id: 'custom-memory',
           slot: 100,
@@ -1295,7 +1356,7 @@ describe('AgentHarness — item schema extensions', () => {
   it('rejects unregistered extension response items by default', async () => {
     const harness = new AgentHarness({
       name: 'test',
-      initialStep: echoStep,
+      agentGraph: echoStep,
       params: {},
       _testCallModel: async () => ({
         items: [
@@ -1327,7 +1388,7 @@ describe('AgentHarness — emit option', () => {
 
     const harness = new AgentHarness({
       name: 'myagent',
-      initialStep: silentStep,
+      agentGraph: silentStep,
       params: {},
       _testCallModel: createScriptedCallModel([
         textOnlyResponse('quiet'),

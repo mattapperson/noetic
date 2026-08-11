@@ -185,7 +185,7 @@ describe('adversarial review: multi-perspective code analyzer', () => {
 
     const harness = new AgentHarness({
       name: 'code-analyzer-simple',
-      initialStep: routeStep,
+      agentGraph: routeStep,
       params: {},
       _testCallModel: createScriptedCallModel(script),
     });
@@ -503,9 +503,9 @@ describe('adversarial review: multi-perspective code analyzer', () => {
 
     const harness = new AgentHarness({
       name: 'live-smoke-test',
-      initialStep: simpleStep,
+      agentGraph: simpleStep,
       params: {},
-      llm: {
+      callModelDefaults: {
         provider: 'openrouter',
         apiKey: process.env.OPENROUTER_API_KEY!,
       },

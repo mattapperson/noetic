@@ -119,7 +119,9 @@ describe('Phase A adapter routing', () => {
     const harness = new AgentHarness({
       name: 'per-step-override',
       params: {},
-      subprocess: adapterA,
+      environment: {
+        subprocess: adapterA,
+      },
     });
     const ctx = harness.createContext();
     const step: Step<ContextData, string, string> = {
@@ -150,7 +152,9 @@ describe('Phase A adapter routing', () => {
     const harness = new AgentHarness({
       name: 'per-call-override',
       params: {},
-      subprocess: adapterA,
+      environment: {
+        subprocess: adapterA,
+      },
     });
     const ctx = harness.createContext();
     const step: Step<ContextData, string, string> = {
@@ -236,7 +240,9 @@ describe('Phase A adapter routing', () => {
     const harness = new AgentHarness({
       name: 'timeout-harness',
       params: {},
-      subprocess: neverSettling,
+      environment: {
+        subprocess: neverSettling,
+      },
     });
     const ctx = harness.createContext();
     const step: Step<ContextData, string, string> = {

@@ -196,6 +196,11 @@ export { dynamicWorkflow, parseAndRunWorkflow } from './builders/dynamic-workflo
 //#region Runtime
 
 /** @public */
+export type {
+  AgentEnvironmentConfig,
+  StorageEnvironmentConfig,
+} from './harness/agent-harness';
+/** @public */
 export { AgentHarness } from './harness/agent-harness';
 /** @public */
 export type {
@@ -471,9 +476,11 @@ export type {
   DeliveryMode,
   ExecuteOptions,
   HarnessStatus,
+  ItemSchemaConfig,
   ReanchorReason,
   RecallLayerOutput,
   SessionScope,
+  SessionUsage,
 } from '@noetic-tools/types';
 
 //#endregion

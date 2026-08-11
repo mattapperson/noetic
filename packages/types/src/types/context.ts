@@ -99,7 +99,7 @@ export interface RestoreContextOptions {
   /** Opaque per-execution state, same as `createContext({ state })`. */
   state?: unknown;
   /** Context layers for the restored context. Defaults to the harness's configured layers. */
-  context?: ContextLayer[];
+  contextLayers?: ContextLayer[];
 }
 
 export interface ContextRerenderRequest {
@@ -122,12 +122,12 @@ export interface ContextRecallLayerOutput {
 
 export type ContextStep<TContext = ContextData, I = unknown, O = unknown> =
   | {
-      readonly kind: 'runCode';
+      readonly kind: 'run';
       readonly id: string;
       readonly execute: (input: I, ctx: Context<TContext>) => Promise<O>;
     }
   | {
-      readonly kind: 'callModel';
+      readonly kind: 'llm';
       readonly id: string;
       readonly output?: ZodType<O>;
     }
@@ -176,7 +176,7 @@ export interface ContextHarness {
     state?: unknown;
     threadId?: string;
     resourceId?: string;
-    context?: ContextLayer[];
+    contextLayers?: ContextLayer[];
     cwdInit?: string;
   }): Context;
   setRootCwd(nextCwd: string): void;
@@ -258,6 +258,13 @@ export interface ContextHarness {
   abort(scope?: unknown): Promise<void>;
   getStatus(scope?: unknown): ContextHarnessStatus;
   getQueueSize(scope?: unknown): number;
+  /** Cumulative token usage and cost a session has accumulated across its turns. */
+  getUsage(scope?: unknown): {
+    readonly inputTokens: number;
+    readonly outputTokens: number;
+    readonly cachedTokens?: number;
+    readonly cost?: number;
+  };
   seedSessionHistory(threadId: string, items: ReadonlyArray<import('./items').Item>): void;
   executeRerender(
     requests: ContextRerenderRequest[],
@@ -301,6 +308,14 @@ export interface Context<TContext = ContextData, TState = unknown> {
   readonly layers?: ContextLayer[];
   /** Layer provides keyed by layer ID. Access data/functions via `ctx.context['layerId'].prop`. */
   readonly context: TContext;
+  /**
+   * @deprecated Renamed to `context`. Reads through to the same object.
+   *
+   * Required, not optional: pre-rename code does `ctx.memory['layerId']`, and an
+   * optional field would make that a `possibly undefined` compile error — which
+   * is exactly the break this alias exists to prevent.
+   */
+  readonly memory: TContext;
   /** Unified tool set collected from all LLM steps in the step tree before execution. */
   readonly unifiedTools?: ReadonlyArray<Tool>;
   /** Runtime item schema registry active for this context. */

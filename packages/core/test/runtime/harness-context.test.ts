@@ -11,15 +11,15 @@ import { createScriptedCallModel, makeLayer, textOnlyResponse } from '../_helper
 
 //#region Tests
 
-describe('AgentHarness memory', () => {
-  describe('createContext with harness-level memory', () => {
-    it('context inherits harness memory by default', () => {
+describe('AgentHarness context layers', () => {
+  describe('createContext with harness-level context layers', () => {
+    it('context inherits harness contextLayers by default', () => {
       const layer = makeLayer('harness-layer', {
         slot: Slot.STEERING,
       });
       const harness = new AgentHarness({
         name: 'test',
-        context: [
+        contextLayers: [
           layer,
         ],
         params: {},
@@ -34,7 +34,7 @@ describe('AgentHarness memory', () => {
       expect(ctx.layers![0].id).toBe('harness-layer');
     });
 
-    it('per-call memory overrides harness memory', () => {
+    it('per-call contextLayers override harness contextLayers', () => {
       const harnessLayer = makeLayer('harness-layer', {
         slot: Slot.STEERING,
       });
@@ -43,7 +43,7 @@ describe('AgentHarness memory', () => {
       });
       const harness = new AgentHarness({
         name: 'test',
-        context: [
+        contextLayers: [
           harnessLayer,
         ],
         params: {},
@@ -53,7 +53,7 @@ describe('AgentHarness memory', () => {
       });
 
       const ctx = harness.createContext({
-        context: [
+        contextLayers: [
           callLayer,
         ],
       });
@@ -61,7 +61,7 @@ describe('AgentHarness memory', () => {
       expect(ctx.layers![0].id).toBe('call-layer');
     });
 
-    it('no memory on harness or call produces undefined layers', () => {
+    it('no contextLayers on harness or call produces undefined layers', () => {
       const harness = new AgentHarness({
         name: 'test',
         params: {},
@@ -132,7 +132,7 @@ describe('AgentHarness memory', () => {
       };
       const harness = new AgentHarness({
         name: 'test',
-        context: [
+        contextLayers: [
           layer,
         ],
         params: {},
@@ -200,7 +200,7 @@ describe('AgentHarness memory', () => {
       };
       const harness = new AgentHarness({
         name: 'test',
-        context: [
+        contextLayers: [
           layer,
         ],
         params: {},
@@ -271,7 +271,7 @@ describe('AgentHarness memory', () => {
       };
       const harness = new AgentHarness({
         name: 'test',
-        context: [
+        contextLayers: [
           failingLayer,
         ],
         params: {},
@@ -288,8 +288,8 @@ describe('AgentHarness memory', () => {
     });
   });
 
-  describe('execute with harness-level memory', () => {
-    it('execute passes harness memory to context', async () => {
+  describe('execute with harness-level context layers', () => {
+    it('execute passes harness contextLayers to context', async () => {
       const layer = makeLayer('exec-layer', {
         slot: Slot.STEERING,
       });
@@ -297,7 +297,7 @@ describe('AgentHarness memory', () => {
 
       const harness = new AgentHarness({
         name: 'test',
-        initialStep: {
+        agentGraph: {
           kind: 'run',
           id: 'capture',
           execute: async (_input, ctx) => {
@@ -305,7 +305,7 @@ describe('AgentHarness memory', () => {
             return 'done';
           },
         },
-        context: [
+        contextLayers: [
           layer,
         ],
         params: {},

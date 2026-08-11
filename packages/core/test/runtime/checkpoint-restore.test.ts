@@ -154,8 +154,12 @@ describe('AgentHarness.checkpoint + restore', () => {
     const h1 = new AgentHarness({
       name: 'noeticTest',
       params: {},
-      storage,
-      checkpointStore,
+      environment: {
+        storage: {
+          adapter: storage,
+          checkpointStore,
+        },
+      },
     });
     const ctx = h1.createContext({});
     await h1.checkpoint(ctx);
@@ -163,8 +167,12 @@ describe('AgentHarness.checkpoint + restore', () => {
     const h2 = new AgentHarness({
       name: 'noeticTest',
       params: {},
-      storage,
-      checkpointStore,
+      environment: {
+        storage: {
+          adapter: storage,
+          checkpointStore,
+        },
+      },
     });
     const restored = await h2.restore(originalId);
     expect(restored).not.toBeNull();
@@ -179,8 +187,12 @@ describe('AgentHarness.checkpoint + restore', () => {
     const h = new AgentHarness({
       name: 'noeticTest',
       params: {},
-      storage,
-      checkpointStore,
+      environment: {
+        storage: {
+          adapter: storage,
+          checkpointStore,
+        },
+      },
     });
     expect(await h.restore('never-stored')).toBeNull();
   });
@@ -203,9 +215,13 @@ function makeHarnessPair(context?: ContextLayer[]): {
   const config = {
     name: 'noeticTest',
     params: {},
-    storage,
-    checkpointStore,
-    context,
+    environment: {
+      storage: {
+        adapter: storage,
+        checkpointStore,
+      },
+    },
+    contextLayers: context,
   };
   return {
     origin: new AgentHarness(config),
@@ -246,7 +262,7 @@ describe('AgentHarness.restore context wiring', () => {
       const ctx = origin.createContext({});
       await origin.checkpoint(ctx);
       const restored = await resumed.restore(ctx.id, {
-        context: [
+        contextLayers: [
           overrideLayer,
         ],
       });
@@ -315,7 +331,7 @@ describe('AgentHarness.restore context wiring', () => {
     await origin.checkpoint(ctx);
 
     const restored = await resumed.restore(ctx.id, {
-      context: [
+      contextLayers: [
         makeLayer('call-layer', {
           slot: Slot.WORKING_MEMORY,
         }),

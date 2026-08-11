@@ -102,10 +102,14 @@ describe('#48: memory init/recall/persist on harness.run()', () => {
     const harness = new AgentHarness({
       name: 'a',
       params: {},
-      context: [
+      contextLayers: [
         counterLayer(),
       ],
-      storage,
+      environment: {
+        storage: {
+          adapter: storage,
+        },
+      },
       _testCallModel: createScriptedCallModel(singleMessageScript('ok')),
     });
     const ctx = harness.createContext({
@@ -130,10 +134,14 @@ describe('#48: memory init/recall/persist on harness.run()', () => {
     const harness1 = new AgentHarness({
       name: 'a',
       params: {},
-      context: [
+      contextLayers: [
         counterLayer(),
       ],
-      storage,
+      environment: {
+        storage: {
+          adapter: storage,
+        },
+      },
       _testCallModel: createScriptedCallModel(singleMessageScript('ok')),
     });
     const ctx1 = harness1.createContext({
@@ -145,10 +153,14 @@ describe('#48: memory init/recall/persist on harness.run()', () => {
     const harness2 = new AgentHarness({
       name: 'a',
       params: {},
-      context: [
+      contextLayers: [
         counterLayer(),
       ],
-      storage,
+      environment: {
+        storage: {
+          adapter: storage,
+        },
+      },
       _testCallModel: createScriptedCallModel(singleMessageScript('ok')),
     });
     const ctx2 = harness2.createContext({
@@ -169,10 +181,14 @@ describe('#48: memory init/recall/persist on harness.run()', () => {
     const harness = new AgentHarness({
       name: 'a',
       params: {},
-      context: [
+      contextLayers: [
         counterLayer(),
       ],
-      storage,
+      environment: {
+        storage: {
+          adapter: storage,
+        },
+      },
       _testCallModel: createScriptedCallModel(singleMessageScript('ok')),
     });
     const ctx = harness.createContext({

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { ZodError, z } from 'zod';
 import { isNoeticError, NoeticErrorImpl } from '../src/errors/noetic-error';
 
 describe('isNoeticError', () => {
@@ -61,5 +62,40 @@ describe('isNoeticError', () => {
   it('returns false for null and undefined', () => {
     expect(isNoeticError(null)).toBe(false);
     expect(isNoeticError(undefined)).toBe(false);
+  });
+});
+
+describe('model_* error kinds', () => {
+  it('model_refused carries the kind and a Model-prefixed message', () => {
+    const err = new NoeticErrorImpl({
+      kind: 'model_refused',
+      stepId: 's1',
+      refusal: 'no',
+    });
+    expect(err.noeticError.kind).toBe('model_refused');
+    expect(err.message).toContain("Model refused at step 's1'");
+  });
+
+  it('model_parse_error carries the kind and a Model-prefixed message', () => {
+    const err = new NoeticErrorImpl({
+      kind: 'model_parse_error',
+      stepId: 's2',
+      raw: '{',
+      schema: z.object({}),
+      zodError: new ZodError([]),
+    });
+    expect(err.noeticError.kind).toBe('model_parse_error');
+    expect(err.message).toContain("Model parse error at step 's2'");
+  });
+
+  it('model_rate_limit carries the kind and a Model-prefixed message', () => {
+    const err = new NoeticErrorImpl({
+      kind: 'model_rate_limit',
+      stepId: 's3',
+      retryAfter: 250,
+    });
+    expect(err.noeticError.kind).toBe('model_rate_limit');
+    expect(err.message).toContain("Model rate limited at step 's3'");
+    expect(err.message).toContain('retry after 250ms');
   });
 });
