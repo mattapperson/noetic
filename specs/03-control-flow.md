@@ -98,7 +98,7 @@ const dynamicSearch = inParallel({
   paths: (query, ctx) => {
     const engines = ['google', 'bing', 'arxiv', 'github'];
     return engines.map(engine =>
-      step.runCode({
+      runCode({
         id: `search-${engine}`,
         execute: async () => searchEngine(engine, query),
       })

@@ -1,19 +1,19 @@
 ---
 title: Pipeline Agent
-description: A 3-stage text processing pipeline using conditional, step.runCode, step.callModel, loop, and prepareNext to chain sequential stages.
+description: A 3-stage text processing pipeline using conditional, runCode, callModel, loop, and prepareNext to chain sequential stages.
 ---
 
 ## Overview
 
 A text processing pipeline that normalizes input, analyzes it with an LLM, and formats the result into a structured report. Demonstrates how `conditional` + `loop` + `prepareNext` create sequential multi-stage pipelines.
 
-**Primitives used**: `conditional` + `step.runCode` + `step.callModel` + `loop` + `prepareNext`
+**Primitives used**: `conditional` + `runCode` + `callModel` + `loop` + `prepareNext`
 
 ## How It Works
 
-1. **Stage 1** (`step.runCode`): Normalize whitespace and strip special characters
-2. **Stage 2** (`step.callModel`): Analyze for sentiment, themes, and patterns
-3. **Stage 3** (`step.runCode`): Format into a structured report
+1. **Stage 1** (`runCode`): Normalize whitespace and strip special characters
+2. **Stage 2** (`callModel`): Analyze for sentiment, themes, and patterns
+3. **Stage 3** (`runCode`): Format into a structured report
 
 The `loop` runs 3 iterations. A `conditional` routes to the correct stage based on a phase counter. `prepareNext` feeds each stage's output as the next stage's input and advances the phase.
 
@@ -23,10 +23,10 @@ The `loop` runs 3 iterations. A `conditional` routes to the correct stage based 
 import { conditional } from '@noetic-tools/core';
 import type { ContextData } from '@noetic-tools/core';
 import { loop } from '@noetic-tools/core';
-import { step } from '@noetic-tools/core';
+import { callModel, runCode } from '@noetic-tools/core';
 import { until } from '@noetic-tools/core';
 
-const normalizeStage = step.runCode<ContextData, string, string>({
+const normalizeStage = runCode<ContextData, string, string>({
   id: 'normalize-text',
   execute: async (input) => {
     return input
@@ -36,13 +36,13 @@ const normalizeStage = step.runCode<ContextData, string, string>({
   },
 });
 
-const analyzeStage = step.callModel<ContextData, string, string>({
+const analyzeStage = callModel<ContextData, string, string>({
   id: 'analyze-text',
   model: 'openai/gpt-4o',
   instructions: 'Analyze the text for sentiment, key themes, and patterns. Return labeled sections.',
 });
 
-const formatStage = step.runCode<ContextData, string, string>({
+const formatStage = runCode<ContextData, string, string>({
   id: 'format-report',
   execute: async (input) => {
     return ['=== Text Analysis Report ===', '', input, '', '=== End Report ==='].join('\n');
@@ -82,4 +82,4 @@ The `prepareNext` callback runs after each iteration. It receives the current ou
 
 ### Mixing runCode and callModel Steps
 
-Stages 1 and 3 are pure `step.runCode` (deterministic, no API call), while stage 2 is `step.callModel`. This keeps costs down -- only the analysis step that genuinely needs reasoning uses the model.
+Stages 1 and 3 are pure `runCode` (deterministic, no API call), while stage 2 is `callModel`. This keeps costs down -- only the analysis step that genuinely needs reasoning uses the model.

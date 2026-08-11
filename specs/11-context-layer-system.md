@@ -640,7 +640,7 @@ type InferContext<T extends ContextConfig> = T['_shape'];
 const mem = context([scratchpad(), counterLayer()]);
 type Mem = InferContext<typeof mem>;
 
-step.runCode<Mem>({
+runCode<Mem>({
   id: 'work',
   execute: async (input, ctx) => {
     ctx.context['scratchpad'].snapshot;  // typed

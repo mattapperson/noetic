@@ -31,7 +31,7 @@ export OPENROUTER_API_KEY=sk-or-...
 Build a ReAct agent that loops over a callModel step, calling tools until the model has its answer. Here is the **whole program** — save it as `agent.mjs` and run `node agent.mjs`:
 
 ```ts
-import { AgentHarness, any, loop, step, until } from '@noetic-tools/core';
+import { AgentHarness, any, callModel, loop, until } from '@noetic-tools/core';
 import { z } from 'zod';
 
 // A tool the agent can call. Inputs and outputs are validated with zod.
@@ -46,7 +46,7 @@ const searchTool = {
 };
 
 // A model call, looped until the model stops calling tools.
-const assistant = step.callModel({
+const assistant = callModel({
   id: 'assistant',
   model: 'openai/gpt-4o', // OpenRouter model id (provider/model)
   instructions: 'You are a helpful research assistant.',
@@ -55,17 +55,17 @@ const assistant = step.callModel({
 
 const agent = loop({
   id: 'agent-loop',
-  body: assistant,
+  steps: [assistant],
   until: any(until.noToolCalls(), until.maxSteps(5)),
 });
 
 // The harness runs the agent. `name` and `params` are required;
-// `llm` selects the provider and reads OPENROUTER_API_KEY from the env.
+// `callModelDefaults` selects the provider and reads OPENROUTER_API_KEY from the env.
 const harness = new AgentHarness({
   name: 'researcher',
-  initialStep: agent,
+  agentGraph: agent,
   params: {},
-  llm: { provider: 'openrouter' },
+  callModelDefaults: { provider: 'openrouter' },
 });
 
 await harness.execute('What are the latest developments in AI?');
@@ -86,12 +86,12 @@ Run it and the model's final answer prints to your terminal.
 
 > **Model ids** use OpenRouter's `provider/model` format (e.g. `openai/gpt-4o`, `anthropic/claude-sonnet-4`). Browse them at [openrouter.ai/models](https://openrouter.ai/models).
 
-That is the whole ReAct shape expressed in three primitives: `step.callModel`, `until.noToolCalls`, and a `loop`. Everything else in Noetic composes the same way -- see [Loop & Until](/docs/framework/operators/loop-and-until).
+That is the whole ReAct shape expressed in three primitives: `callModel`, `until.noToolCalls`, and a `loop`. Everything else in Noetic composes the same way -- see [Loop & Until](/docs/framework/operators/loop-and-until).
 
 ## Next Steps
 
 - [Overview](/docs/framework/overview) -- understand Noetic's philosophy and the 8 primitives.
-- [Steps](/docs/framework/steps) -- learn about `step.runCode`, `step.callModel`, and `step.invokeTool`.
+- [Steps](/docs/framework/steps) -- learn about `runCode`, `callModel`, and `invokeTool`.
 - [AgentHarness](/docs/framework/runtime) -- the runtime that executes agents.
 - [Control Flow](/docs/framework/operators) -- `conditional` and `inParallel` for routing and parallel logic.
 - [Loop & Until](/docs/framework/operators/loop-and-until) -- iteration with termination predicates.

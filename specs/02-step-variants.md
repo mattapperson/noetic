@@ -1,7 +1,7 @@
 # Step Variants: `runCode`, `callModel`, `invokeTool`, `withContext`
 
 > **Depends On:** `01-step-type` (Step<I,O>, execute), `11-context-layer-system` (ContextLayer, ContextConfig)
-> **Exports:** `step.runCode()`, `step.callModel()`, `step.invokeTool()`, `step.withContext()`, `StepRunCodeOpts`, `StepCallModelOpts`, `StepInvokeToolOpts`, `StepWithContextOpts`, `Tool`, `RetryPolicy`, `ModelParams`
+> **Exports:** `runCode()`, `callModel()`, `invokeTool()`, `withContext()`, `StepRunCodeOpts`, `StepCallModelOpts`, `StepInvokeToolOpts`, `StepWithContextOpts`, `Tool`, `RetryPolicy`, `ModelParams`
 
 ---
 
@@ -36,7 +36,7 @@ interface RetryPolicy {
 The `subprocess` field is preserved verbatim across step registration and interpreter dispatch. The same adapter is consulted by `harness.run()`, `spawn()`, and `harness.detachedSpawn()` when the dispatched step has it set. See `04-spawn` for routing semantics and `23-durable-execution` for how adapters carry durable handle manifests.
 
 ```typescript
-const fetchData = step.runCode({
+const fetchData = runCode({
   id: 'fetch-user-data',
   execute: async (userId: string, ctx) => {
     const response = await fetch(`/api/users/${userId}`);
@@ -80,11 +80,11 @@ interface ModelParams {
 `model`, `instructions`, and `tools` each accept either an eager value or a `(ctx) => value` getter resolved at step execution. Getters see the live `Context`, so a step can read `ctx.harness.config.params`, `ctx.unifiedTools`, or context layer state to produce per-run values without baking them in at build time.
 
 - **Eager vs lazy — semantics are identical** after resolution. An eager `model: 'gpt-4'` behaves the same as `model: () => 'gpt-4'`.
-- **Model validation moves to runtime for getters.** `step.callModel()` validates eager `model` strings at build time; function-form models are validated after resolution inside `executeLLM` with the same `MISSING_MODEL` `NoeticConfigError`.
+- **Model validation moves to runtime for getters.** `callModel()` validates eager `model` strings at build time; function-form models are validated after resolution inside `executeLLM` with the same `MISSING_MODEL` `NoeticConfigError`.
 - **Function-form `tools` do NOT contribute to `ctx.unifiedTools`.** `collectAllTools` skips them since they can't be inspected without a live context. Tools needed in the harness-wide pool should be registered via `AgentHarness.tools` (see spec 08).
 
 ```typescript
-const planChat = step.callModel({
+const planChat = callModel({
   id: 'plan-chat',
   model: (ctx) => ctx.harness.config.params.model as string,
   instructions: (ctx) => {
@@ -96,7 +96,7 @@ const planChat = step.callModel({
 ```
 
 ```typescript
-const analyze = step.callModel({
+const analyze = callModel({
   id: 'analyze-code',
   model: 'anthropic/claude-sonnet-4-20250514',
   instructions: 'You are a code reviewer. Analyze the code for bugs.',
@@ -125,7 +125,7 @@ The agent harness constructs and manages the OpenRouter client internally. There
 import { AgentHarness } from '@noetic-tools/core';
 
 const harness = new AgentHarness({
-  llm: { provider: 'openrouter', apiKey: process.env.OPENROUTER_API_KEY },
+  callModelDefaults: { provider: 'openrouter', apiKey: process.env.OPENROUTER_API_KEY },
 });
 ```
 
@@ -248,7 +248,7 @@ interface StepWithContextOpts<TContext, I, O> {
 ```
 
 ```typescript
-const withContextLayers = step.withContext({
+const withContextLayers = withContext({
   id: 'inject-scratchpad',
   child: analyzeAndRespond,
   context: context([scratchpad(), semanticRecall({ embedder })]),
@@ -272,12 +272,12 @@ const withContextLayers = step.withContext({
 
 ---
 
-## Builder: `step.workflow` — JSON Workflow as a Step
+## Builder: `workflow` — JSON Workflow as a Step
 
 Runs a `WorkflowDocument` (spec 26) as a single composable step. Not a new `Step` kind — the builder returns a `StepRunCode` whose `execute` hydrates the document via the harness on the execution context and runs it.
 
 ```typescript
-step.workflow(opts: {
+workflow(opts: {
   id: string;
   document?: WorkflowDocument;   // inline — XOR with ref
   ref?: string;                  // named, resolved from workflows
@@ -297,7 +297,7 @@ Semantics:
 - **Isolation.** `'inherit'` (default) runs the hydrated tree in the caller's session; `'spawn'` wraps it in `spawn({ id: `${id}-spawn` })` for a fresh context boundary.
 - **Cycle safety.** When built from a `ref`, that name seeds the subflow ancestry chain, so a self-referencing named workflow fails with `WORKFLOW_CYCLE` instead of recursing.
 - **Errors.** `EMPTY_STEP_ID`; `INVALID_WORKFLOW_SOURCE` unless exactly one of `document`/`ref` is set; at execution time `MISSING_HARNESS_CONTEXT` without `ctx.harness` and `UNKNOWN_WORKFLOW_REFERENCE` for an unregistered `ref`.
-- **Portability.** `step.workflow` lives on the main entry's `step` namespace only; the `/portable` surface exports the base namespace without it, keeping the hydrator out of restricted runtimes.
+- **Portability.** `workflow` is exported from the main entry only; the `/portable` surface omits it, keeping the hydrator out of restricted runtimes.
 
 ---
 

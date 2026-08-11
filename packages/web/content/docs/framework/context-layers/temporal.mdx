@@ -87,4 +87,4 @@ Without an injected `search` callback the tool degrades gracefully, returning th
 
 ## Design
 
-The layer is LLM-agnostic: `extract` and `search` are host-injected (mirroring `observations`'s `observer`), keeping the context package tree-shakable. The code agent wires structured `step.callModel` calls as the callbacks and installs `temporal()` in its default stack.
+The layer is LLM-agnostic: `extract` and `search` are host-injected (mirroring `observations`'s `observer`), keeping the context package tree-shakable. The code agent wires structured `callModel` calls as the callbacks and installs `temporal()` in its default stack.

@@ -111,7 +111,7 @@ Call an LLM with instructions and optional tools. Every `tools` entry is a unifo
 
 ### runCode
 
-Run a serialised code body. Unlike the programmatic `step.runCode` (which carries a closure), the JSON form carries `execute` as a code **string**. The code is never `eval`'d in-process (Cloudflare Workers forbid `eval`); it is dispatched through a [subprocess adapter](/docs/framework/runtime) which runs the code and returns its stdout as the step output. The step input is passed to the subprocess on stdin.
+Run a serialised code body. Unlike the programmatic `runCode` (which carries a closure), the JSON form carries `execute` as a code **string**. The code is never `eval`'d in-process (Cloudflare Workers forbid `eval`); it is dispatched through a [subprocess adapter](/docs/framework/runtime) which runs the code and returns its stdout as the step output. The step input is passed to the subprocess on stdin.
 
 ```json
 {
@@ -404,7 +404,7 @@ const agent = dynamicWorkflow({
 
 const harness = new AgentHarness({
   name: 'planner',
-  initialStep: agent,
+  agentGraph: agent,
   params: {},
 });
 
@@ -554,12 +554,12 @@ Throws `NoeticConfigError` with code `UNKNOWN_NODE_KIND` if a node kind is unrec
 
 ## Plans as Workflows
 
-The [plan layer](/docs/framework/context-layers/plan) authors plans directly in this format: the reviewed plan tree is a `WorkflowDocument`, and the plan's named workflows feed the `workflows` registry. Composition also works from code — `step.workflow` runs a document (inline or by `ref`) as a single composable step:
+The [plan layer](/docs/framework/context-layers/plan) authors plans directly in this format: the reviewed plan tree is a `WorkflowDocument`, and the plan's named workflows feed the `workflows` registry. Composition also works from code — `workflow` runs a document (inline or by `ref`) as a single composable step:
 
 ```ts validate=none
-import { step } from '@noetic-tools/core';
+import { workflow } from '@noetic-tools/core';
 
-const verify = step.workflow({
+const verify = workflow({
   id: 'verify',
   ref: 'verify-loop',
   workflows: new Map([['verify-loop', verifyDoc]]),
@@ -568,7 +568,7 @@ const verify = step.workflow({
 });
 ```
 
-`step.workflow` resolves the document lazily, memoizes the hydrated tree, and requires exactly one of `document` / `ref` (`INVALID_WORKFLOW_SOURCE` otherwise).
+`workflow` resolves the document lazily, memoizes the hydrated tree, and requires exactly one of `document` / `ref` (`INVALID_WORKFLOW_SOURCE` otherwise).
 
 ## Related Pages
 

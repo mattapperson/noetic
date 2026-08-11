@@ -7,13 +7,13 @@ description: A full-featured coding agent with filesystem access, task planning,
 
 This example recreates the core capabilities of [DeepAgentsJS](https://github.com/langchain-ai/deepagentsjs) — a LangGraph-based framework for building AI coding agents — using only Noetic's seven step primitives.
 
-The key insight: **middleware = tools + context layers**. Every piece of DeepAgentsJS middleware decomposes into either a tool (for mutations/actions) or a context layer (for context projection), composed together with `spawn` + `loop` + `step.callModel` for isolation.
+The key insight: **middleware = tools + context layers**. Every piece of DeepAgentsJS middleware decomposes into either a tool (for mutations/actions) or a context layer (for context projection), composed together with `spawn` + `loop` + `callModel` for isolation.
 
 ## Architecture Mapping
 
 | DeepAgentsJS Concept | Noetic Equivalent |
 |---|---|
-| `createDeepAgent()` | `spawn` wrapping a `loop` + `step.callModel`, with `context` layers on the spawn boundary |
+| `createDeepAgent()` | `spawn` wrapping a `loop` + `callModel`, with `context` layers on the spawn boundary |
 | todoListMiddleware | `tool()` definitions with `ToolContextDeclaration` + `toolCalls()` |
 | filesystemMiddleware | `tool()` definitions using Node.js `fs` |
 | subAgentMiddleware | `createConfigurableDelegateTool()` using `toolCtx.harness` |
@@ -141,10 +141,10 @@ observations({
 
 ## Main Composition
 
-The `buildDeepAgent` function composes everything from `spawn`, `loop`, and `step.callModel`:
+The `buildDeepAgent` function composes everything from `spawn`, `loop`, and `callModel`:
 
 ```ts
-import { any, instructions, loop, observations, spawn, step, toolCalls, until } from '@noetic-tools/core';
+import { any, callModel, instructions, loop, observations, spawn, toolCalls, until } from '@noetic-tools/core';
 import type { ContextData, ContextLayer, StepSpawn, Tool } from '@noetic-tools/core';
 
 interface DeepAgentConfig {
@@ -172,7 +172,7 @@ export function buildDeepAgent(
 
   const agentLoop = loop({
     id: 'deep-agent-loop',
-    steps: [step.callModel<ContextData, string, string>({
+    steps: [callModel<ContextData, string, string>({
       id: 'deep-agent-llm',
       model: config.model,
       instructions: config.instructions,

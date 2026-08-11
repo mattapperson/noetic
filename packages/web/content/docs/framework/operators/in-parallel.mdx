@@ -6,17 +6,17 @@ description: Run multiple steps in parallel with race, all, or settle semantics.
 ## Quick Example
 
 ```ts
-import { inParallel, step } from '@noetic-tools/core';
+import { callModel, inParallel } from '@noetic-tools/core';
 
 const fastest = inParallel({
   id: 'fastest-response',
   mode: 'race',
   paths: (input: string) => [
-    step.callModel({
+    callModel({
       id: 'model-a',
       model: 'openai/gpt-4o',
     }),
-    step.callModel({
+    callModel({
       id: 'model-b',
       model: 'openai/gpt-4o-mini',
     }),
@@ -35,17 +35,17 @@ const fastest = inParallel({
 Returns the output of the first step to complete. All other paths are discarded.
 
 ```ts validate=none
-import { inParallel, step } from '@noetic-tools/core';
+import { inParallel, runCode } from '@noetic-tools/core';
 
 const raceExample = inParallel({
   id: 'race-providers',
   mode: 'race',
   paths: (query: string) => [
-    step.runCode({
+    runCode({
       id: 'provider-a',
       execute: async (q) => fetchProviderA(q),
     }),
-    step.runCode({
+    runCode({
       id: 'provider-b',
       execute: async (q) => fetchProviderB(q),
     }),
@@ -60,21 +60,21 @@ No `merge` function is needed -- the winner's output is used directly.
 Waits for every path to complete, then calls `merge` with an array of all results.
 
 ```ts validate=none
-import { inParallel, step } from '@noetic-tools/core';
+import { inParallel, runCode } from '@noetic-tools/core';
 
 const allExample = inParallel({
   id: 'gather-research',
   mode: 'all',
   paths: (topic: string) => [
-    step.runCode({
+    runCode({
       id: 'academic',
       execute: async (t) => searchAcademic(t),
     }),
-    step.runCode({
+    runCode({
       id: 'news',
       execute: async (t) => searchNews(t),
     }),
-    step.runCode({
+    runCode({
       id: 'social',
       execute: async (t) => searchSocial(t),
     }),
@@ -92,17 +92,17 @@ Like `all`, but collects both successes and failures. Each result is a `SettleRe
 ```ts validate=none
 import type { SettleResult } from '@noetic-tools/core';
 
-import { inParallel, step } from '@noetic-tools/core';
+import { inParallel, runCode } from '@noetic-tools/core';
 
 const settleExample = inParallel({
   id: 'resilient-search',
   mode: 'settle',
   paths: (query: string) => [
-    step.runCode({
+    runCode({
       id: 'source-a',
       execute: async (q) => fetchSourceA(q),
     }),
-    step.runCode({
+    runCode({
       id: 'source-b',
       execute: async (q) => fetchSourceB(q),
     }),
@@ -148,7 +148,7 @@ const settleExample = inParallel({
 Limit how many paths run at once with `concurrency`.
 
 ```ts validate=none
-import { inParallel, step } from '@noetic-tools/core';
+import { inParallel } from '@noetic-tools/core';
 
 const throttled = inParallel({
   id: 'throttled-parallel',

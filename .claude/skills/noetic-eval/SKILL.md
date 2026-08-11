@@ -15,12 +15,12 @@ Evals are organized into suites via `describe()`. Each suite wraps an `AgentHarn
 
 ```typescript
 import { describe, it, scorer } from '@noetic-tools/eval';
-import { any, loop, step, until } from '@noetic-tools/core';
+import { any, callModel, loop, until } from '@noetic-tools/core';
 
 const agent = loop({
   id: 'support-loop',
   steps: [
-    step.callModel({
+    callModel({
       id: 'support',
       model: 'anthropic/claude-sonnet-4-20250514',
       instructions: 'You are a support agent.',

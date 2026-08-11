@@ -6,9 +6,9 @@ description: The Context object tracks execution state, metrics, and conversatio
 ## Quick Example
 
 ```ts
-import { step } from '@noetic-tools/core';
+import { runCode } from '@noetic-tools/core';
 
-const greet = step.runCode({ id: 'greet', execute: async (input: string, ctx) => {
+const greet = runCode({ id: 'greet', execute: async (input: string, ctx) => {
   console.log(`Execution ${ctx.id}, step #${ctx.stepCount}`);
   console.log(`Tokens so far: ${ctx.tokens.total}`);
 

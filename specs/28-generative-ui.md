@@ -8,7 +8,7 @@ surfaces that compose but adopt independently:
 
 1. **Transport** — an OpenUI-speaking server boundary around `AgentHarness`, so
    OpenUI's own client stack (`@openuidev/react-ui`) talks to a Noetic agent.
-2. **Model-authored UI** — an output codec on `step.callModel` that parses streamed
+2. **Model-authored UI** — an output codec on `callModel` that parses streamed
    OpenUI Lang, paired with a context layer that owns the resulting UI state.
 3. **Tool-authored UI** — a per-tool declaration of programmatic render
    functions, so tool calls and results carry their own UI fragments.
@@ -124,7 +124,7 @@ import { openUi, createLibrary, defineComponent } from '@noetic-tools/openui';
 
 const lib = createLibrary([defineComponent(/* … */)]);
 
-const dashboard = step.callModel({
+const dashboard = callModel({
   id: 'dashboard',
   model: 'claude-sonnet-5',
   tools: [salesTool],
@@ -245,7 +245,7 @@ import { ui } from '@noetic-tools/openui';
 
 const checkout = loop({
   id: 'checkout',
-  steps: [step.callModel({ id: 'render', model, tools: [quoteShipping], output: openUi(lib) })],
+  steps: [callModel({ id: 'render', model, tools: [quoteShipping], output: openUi(lib) })],
   until: ui.submitted(surface, 'checkout-form'), // reads the surface layer's live state
 });
 ```
@@ -319,7 +319,7 @@ existing Noetic agent requires no changes to that agent's steps.
 ## Event flow
 
 ```
-agent turn:   step.callModel ──deltas──▶ openUi codec ──openui.node/state/query──▶ transport ──▶ client
+agent turn:   callModel ──deltas──▶ openUi codec ──openui.node/state/query──▶ transport ──▶ client
                                         │
                               afterModelCall: validate + fold into surface, version++
                                         │

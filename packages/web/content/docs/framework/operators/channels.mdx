@@ -7,7 +7,7 @@ description: Typed communication channels for inter-step and inter-process messa
 
 ```ts
 import { z } from 'zod';
-import { channel, step } from '@noetic-tools/core';
+import { channel, runCode } from '@noetic-tools/core';
 
 const notifications = channel('notifications', {
   schema: z.object({ message: z.string(), level: z.enum(['info', 'warn', 'error']) }),
@@ -15,12 +15,12 @@ const notifications = channel('notifications', {
   capacity: 100,
 });
 
-const producer = step.runCode({ id: 'produce', execute: async (input: string, ctx) => {
+const producer = runCode({ id: 'produce', execute: async (input: string, ctx) => {
   await ctx.send(notifications, { message: input, level: 'info' });
   return input;
 }});
 
-const consumer = step.runCode({ id: 'consume', execute: async (_input: unknown, ctx) => {
+const consumer = runCode({ id: 'consume', execute: async (_input: unknown, ctx) => {
   const note = await ctx.recv(notifications, { timeout: 5_000 });
   console.log(`[${note.level}] ${note.message}`);
   return note;
@@ -201,7 +201,7 @@ A typical human-in-the-loop pattern:
 
 ```ts validate=none
 import { z } from 'zod';
-import { channel, step, loop, until } from '@noetic-tools/core';
+import { channel, loop, runCode, until } from '@noetic-tools/core';
 
 const approval = channel('approval', {
   schema: z.enum(['approve', 'reject']),
@@ -209,7 +209,7 @@ const approval = channel('approval', {
   external: true,
 });
 
-const askForApproval = step.runCode({ id: 'ask-approval', execute: async (plan: string, ctx) => {
+const askForApproval = runCode({ id: 'ask-approval', execute: async (plan: string, ctx) => {
   // Send plan to user via your app layer...
   const decision = await ctx.recv(approval, { timeout: 300_000 }); // 5 min
   return decision;

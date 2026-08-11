@@ -24,7 +24,7 @@ Routes input to the most semantically similar case using cosine similarity on em
 **Simple form** -- string keys map directly to steps:
 
 ```ts
-import { conditional, semanticSwitch, step } from '@noetic-tools/core';
+import { callModel, conditional, semanticSwitch } from '@noetic-tools/core';
 import type { EmbedFn } from '@noetic-tools/core';
 
 declare const embed: EmbedFn;
@@ -34,9 +34,9 @@ const router = conditional({
   route: semanticSwitch({
     embed,
     cases: {
-      'greeting or salutation': step.callModel({ id: 'greet', model: 'openai/gpt-4o-mini' }),
-      'technical question': step.callModel({ id: 'tech', model: 'openai/gpt-4o' }),
-      'complaint or feedback': step.callModel({ id: 'feedback', model: 'openai/gpt-4o' }),
+      'greeting or salutation': callModel({ id: 'greet', model: 'openai/gpt-4o-mini' }),
+      'technical question': callModel({ id: 'tech', model: 'openai/gpt-4o' }),
+      'complaint or feedback': callModel({ id: 'feedback', model: 'openai/gpt-4o' }),
     },
     threshold: 0.7,
   }),
@@ -55,14 +55,14 @@ const router = conditional({
     cases: [
       {
         labels: ['greeting', 'hello', 'hi there'],
-        step: step.callModel({ id: 'greet', model: 'openai/gpt-4o-mini' }),
+        step: callModel({ id: 'greet', model: 'openai/gpt-4o-mini' }),
       },
       {
         labels: 'technical question',
-        step: step.callModel({ id: 'tech', model: 'openai/gpt-4o' }),
+        step: callModel({ id: 'tech', model: 'openai/gpt-4o' }),
       },
     ],
-    default: step.callModel({ id: 'fallback', model: 'openai/gpt-4o-mini' }),
+    default: callModel({ id: 'fallback', model: 'openai/gpt-4o-mini' }),
     threshold: 0.7,
   }),
 });

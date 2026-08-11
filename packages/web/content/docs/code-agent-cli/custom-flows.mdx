@@ -3,7 +3,7 @@ title: Custom Flows
 description: Two ways to build long-running, multi-path agent workflows — plan-mode JSON flows and programmatic Step compositions.
 ---
 
-A **flow** is a state machine of agent work composed from the framework's primitives — `schedule`, `inParallel`, `spawn`, `conditional`, `step.runCode`, `step.callModel`, `step.invokeTool`. Flows are how the CLI's daemon does background work (autopilot, validator, health, reconcile), and they're how you can extend the CLI with your own background or planned workflows.
+A **flow** is a state machine of agent work composed from the framework's primitives — `schedule`, `inParallel`, `spawn`, `conditional`, `runCode`, `callModel`, `invokeTool`. Flows are how the CLI's daemon does background work (autopilot, validator, health, reconcile), and they're how you can extend the CLI with your own background or planned workflows.
 
 There are two ways to author a flow:
 
@@ -71,18 +71,18 @@ Once registered, the LLM can reference the preset from `agent` tool calls in the
 
 ## Programmatic flows
 
-For long-running infrastructure, write the flow in TypeScript. The CLI's task daemon does this — the `schedule` / `inParallel` / `spawn` / `conditional` / `step.runCode` builders compose into a tree that runs forever (or until the harness shuts down).
+For long-running infrastructure, write the flow in TypeScript. The CLI's task daemon does this — the `schedule` / `inParallel` / `spawn` / `conditional` / `runCode` builders compose into a tree that runs forever (or until the harness shuts down).
 
 ### The shape
 
 ```ts validate=none
 import type { ContextData, Step } from '@noetic-tools/core';
-import { schedule, inParallel, spawn, step, scratchpad } from '@noetic-tools/core';
+import { inParallel, runCode, schedule, scratchpad, spawn } from '@noetic-tools/core';
 
 export function buildMyFlow(deps: MyFlowDeps): Step<ContextData, void, void> {
   const tick = schedule<ContextData, void, void>({
     id: 'my-flow.tick',
-    step: step.runCode<ContextData, void, void>({
+    step: runCode<ContextData, void, void>({
       id: 'my-flow.iter',
       execute: async (_in, ctx) => {
         // do work; ctx.send(channel, value), ctx.tryRecv(channel), etc.
@@ -124,7 +124,7 @@ The CLI's real validator drains a channel of `ValidatorRequest`s, runs tests for
 
 ```ts validate=none
 import type { ContextData, Step } from '@noetic-tools/core';
-import { schedule, step } from '@noetic-tools/core';
+import { runCode, schedule } from '@noetic-tools/core';
 
 import { validatorRequestChan, validatorOutcomeChan } from './channels.js';
 
@@ -133,7 +133,7 @@ interface ValidatorDeps {
 }
 
 function buildIteration(deps: ValidatorDeps): Step<ContextData, void, void> {
-  return step.runCode<ContextData, void, void>({
+  return runCode<ContextData, void, void>({
     id: 'validator.iteration',
     execute: async (_in, ctx) => {
       while (true) {
@@ -208,8 +208,8 @@ If you need to author a daemon-style background flow, drive it from plugin `init
 
 ## Where to read more
 
-- [Steps](/docs/framework/steps) — `step.runCode`, `step.callModel`, `step.invokeTool`.
+- [Steps](/docs/framework/steps) — `runCode`, `callModel`, `invokeTool`.
 - [Operators](/docs/framework/operators) — `conditional`, `inParallel`, `spawn`, `loop`, `schedule`.
 - [Channels](/docs/framework/operators/channels) — `ctx.send` / `ctx.tryRecv` / `inbox`.
-- [Loop & Until](/docs/framework/operators/loop-and-until) — compose ReAct-style agents from `loop` + `step.callModel` + `until.*`.
+- [Loop & Until](/docs/framework/operators/loop-and-until) — compose ReAct-style agents from `loop` + `callModel` + `until.*`.
 - [Runtime](/docs/framework/runtime) — `harness.run`, `harness.detachedSpawn`, abort, span creation.

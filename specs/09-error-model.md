@@ -10,9 +10,9 @@
 ```typescript
 type NoeticError =
   | { kind: 'step_failed';          stepId: string; cause: Error; retriesExhausted: boolean }
-  | { kind: 'llm_refused';          stepId: string; refusal: string }
-  | { kind: 'llm_parse_error';      stepId: string; raw: string; schema: ZodType; zodError: ZodError }
-  | { kind: 'llm_rate_limit';       stepId: string; retryAfter?: number }
+  | { kind: 'model_refused';          stepId: string; refusal: string }
+  | { kind: 'model_parse_error';      stepId: string; raw: string; schema: ZodType; zodError: ZodError }
+  | { kind: 'model_rate_limit';       stepId: string; retryAfter?: number }
   | { kind: 'fork_partial';         stepId: string; succeeded: Array<{ stepId: string; value: unknown }>; failed: Array<{ stepId: string; error: NoeticError }> }
   | { kind: 'spawn_summary_failed'; stepId: string; childOutput: unknown; summaryCause: Error }
   | { kind: 'channel_timeout';      channelName: string; timeout: number }

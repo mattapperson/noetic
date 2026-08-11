@@ -6,7 +6,7 @@ standard.
 Instead of answering with a text blob, an agent answers with a *user interface*
 built from components you registered. This package provides:
 
-- The **`openUi()` output codec** — plug a component library into `step.callModel` as a
+- The **`openUi()` output codec** — plug a component library into `callModel` as a
   streaming output dialect; the model emits [OpenUI Lang](https://www.openui.com)
   and the step returns a materialized `UiDocument`.
 - The **`openUiSurface()` context layer** — the server-authoritative owner of UI
@@ -35,7 +35,7 @@ npm install @noetic-tools/openui
 ## Quick example
 
 ```ts
-import { AgentHarness, type ContextData, step } from '@noetic-tools/core';
+import { AgentHarness, callModel, type ContextData } from '@noetic-tools/core';
 import { createLibrary, defineComponent, openUi } from '@noetic-tools/openui';
 import { z } from 'zod';
 
@@ -44,13 +44,13 @@ const library = createLibrary([
   defineComponent({ name: 'Text', props: z.object({ value: z.string() }) }),
 ]);
 
-const dashboard = step.callModel<ContextData, string, unknown>({
+const dashboard = callModel<ContextData, string, unknown>({
   id: 'dashboard',
   model: 'claude-sonnet-5',
   output: openUi(library), // the model authors your UI instead of prose
 });
 
-const harness = new AgentHarness({ name: 'ui-agent', initialStep: dashboard, params: {} });
+const harness = new AgentHarness({ name: 'ui-agent', agentGraph: dashboard, params: {} });
 const ctx = harness.createContext();
 const doc = await harness.run(dashboard, 'Show a welcome card', ctx);
 ```

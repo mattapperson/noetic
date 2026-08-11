@@ -40,13 +40,13 @@ export const CODE_PRE_STYLE: CSSProperties = {
 
 export const PRIMITIVE_COLORS = {
   // steps
-  llm: 'tui-green',
-  tool: 'tui-green',
-  run: 'tui-green',
+  callModel: 'tui-green',
+  invokeTool: 'tui-green',
+  runCode: 'tui-green',
   // operators
   spawn: 'tui-cyan',
-  fork: 'tui-cyan',
-  branch: 'tui-cyan',
+  inParallel: 'tui-cyan',
+  conditional: 'tui-cyan',
   loop: 'tui-cyan',
   channel: 'tui-cyan',
 } as const satisfies Record<string, string>;

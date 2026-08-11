@@ -27,9 +27,9 @@ Register the layer on the harness (or via `spawn`'s `context` option):
 ```ts validate=none
 const harness = new AgentHarness({
   name: 'assistant',
-  initialStep: agent,
+  agentGraph: agent,
   params: {},
-  context: [layer],
+  contextLayers: [layer],
 });
 ```
 

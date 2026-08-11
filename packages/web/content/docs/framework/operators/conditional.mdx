@@ -6,13 +6,13 @@ description: Conditional routing -- pick one step to execute or skip entirely.
 ## Quick Example
 
 ```ts
-import { conditional, step } from '@noetic-tools/core';
+import { callModel, conditional } from '@noetic-tools/core';
 
 const triageAgent = conditional({
   id: 'triage',
   route: (input: string, ctx) => {
     if (input.includes('urgent')) {
-      return step.callModel({
+      return callModel({
         id: 'urgent-handler',
         model: 'openai/gpt-4o',
         instructions: 'Handle this urgent request immediately.',
@@ -21,7 +21,7 @@ const triageAgent = conditional({
     if (input.includes('ignore')) {
       return null; // skip -- no step executed
     }
-    return step.callModel({
+    return callModel({
       id: 'default-handler',
       model: 'openai/gpt-4o-mini',
       instructions: 'Handle this routine request.',
@@ -51,7 +51,7 @@ This is the idiomatic way to add conditional logic to an Noetic pipeline. Instea
 When `route` returns `null`, the conditional is skipped entirely. The input value is passed through as the output. This is useful for optional processing steps.
 
 ```ts
-import { conditional, step } from '@noetic-tools/core';
+import { callModel, conditional } from '@noetic-tools/core';
 
 const maybeTranslate = conditional({
   id: 'maybe-translate',
@@ -59,7 +59,7 @@ const maybeTranslate = conditional({
     if (input.lang === 'en') {
       return null; // already English, skip
     }
-    return step.callModel({
+    return callModel({
       id: 'translate',
       model: 'openai/gpt-4o',
       instructions: `Translate the following text to English.`,
@@ -73,13 +73,13 @@ const maybeTranslate = conditional({
 The `route` function creates steps at runtime, so you can parameterize them based on input.
 
 ```ts
-import { conditional, step } from '@noetic-tools/core';
+import { callModel, conditional } from '@noetic-tools/core';
 
 const modelPicker = conditional({
   id: 'model-picker',
   route: (input: { task: string; budget: 'low' | 'high' }) => {
     const model = input.budget === 'high' ? 'openai/gpt-4o' : 'openai/gpt-4o-mini';
-    return step.callModel({
+    return callModel({
       id: `${input.task}-llm`,
       model,
       instructions: `Perform the following task: ${input.task}`,
@@ -93,7 +93,7 @@ const modelPicker = conditional({
 A conditional's route can return other conditionals, `inParallel` groups, or any other step type.
 
 ```ts
-import { conditional, inParallel, step } from '@noetic-tools/core';
+import { callModel, conditional, inParallel } from '@noetic-tools/core';
 
 const nested = conditional({
   id: 'outer',
@@ -103,11 +103,11 @@ const nested = conditional({
         id: 'compare-models',
         mode: 'all',
         paths: () => [
-          step.callModel({
+          callModel({
             id: 'model-a',
             model: 'openai/gpt-4o',
           }),
-          step.callModel({
+          callModel({
             id: 'model-b',
             model: 'openai/gpt-4o-mini',
           }),
@@ -115,7 +115,7 @@ const nested = conditional({
         merge: (results) => results.join('\n---\n'),
       });
     }
-    return step.callModel({
+    return callModel({
       id: 'single',
       model: 'openai/gpt-4o',
     });
@@ -128,15 +128,15 @@ const nested = conditional({
 The `route` function can be async, enabling AI-powered and embedding-based routing. Noetic provides condition helpers like `semanticSwitch`, `semanticRoute`, `embeddingMatch`, and `aiCondition` that return async route functions:
 
 ```ts validate=none
-import { conditional, semanticSwitch, step } from '@noetic-tools/core';
+import { callModel, conditional, semanticSwitch } from '@noetic-tools/core';
 
 const router = conditional({
   id: 'semantic-router',
   route: semanticSwitch({
     embed,
     cases: {
-      'greeting or salutation': step.callModel({ id: 'greet', model: 'openai/gpt-4o-mini' }),
-      'technical question': step.callModel({ id: 'tech', model: 'openai/gpt-4o' }),
+      'greeting or salutation': callModel({ id: 'greet', model: 'openai/gpt-4o-mini' }),
+      'technical question': callModel({ id: 'tech', model: 'openai/gpt-4o' }),
     },
     threshold: 0.7,
   }),

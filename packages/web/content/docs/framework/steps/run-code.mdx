@@ -1,14 +1,14 @@
 ---
-title: step.runCode
+title: runCode
 description: Execute arbitrary async code as a typed step.
 ---
 
 ## Quick Example
 
 ```ts
-import { step } from '@noetic-tools/core';
+import { runCode } from '@noetic-tools/core';
 
-const transform = step.runCode({
+const transform = runCode({
   id: 'normalize-input',
   execute: async (input: string, ctx) => {
     return input.trim().toLowerCase();
@@ -18,7 +18,7 @@ const transform = step.runCode({
 
 ## What It Does
 
-`step.runCode` wraps any async function as a step. It is the escape hatch for custom logic -- API calls, database operations, file I/O, data transformations, or anything that is not a model call.
+`runCode` wraps any async function as a step. It is the escape hatch for custom logic -- API calls, database operations, file I/O, data transformations, or anything that is not a model call.
 
 The `execute` function receives two arguments:
 
@@ -66,9 +66,9 @@ declare const stepRunCode: <TContext, I, O>(
 ## Retry Example
 
 ```ts
-import { step } from '@noetic-tools/core';
+import { runCode } from '@noetic-tools/core';
 
-const fetchData = step.runCode({
+const fetchData = runCode({
   id: 'fetch-api',
   execute: async (url: string) => {
     const res = await fetch(url);
@@ -91,9 +91,9 @@ const fetchData = step.runCode({
 The `Context` object provides access to runtime state inside your execute function.
 
 ```ts
-import { step } from '@noetic-tools/core';
+import { runCode } from '@noetic-tools/core';
 
-const contextAware = step.runCode({
+const contextAware = runCode({
   id: 'context-example',
   execute: async (input: string, ctx) => {
     // Check if the run has been cancelled
@@ -116,6 +116,6 @@ The `ctx.context` property provides typed access to data and functions exposed b
 
 ## Related
 
-- [step.callModel](/docs/framework/steps/call-model) -- for language model calls.
-- [step.invokeTool](/docs/framework/steps/invoke-tool) -- for direct tool invocation.
-- [Loop & Until](/docs/framework/operators/loop-and-until) -- use `step.runCode` as a loop body for custom iteration logic.
+- [callModel](/docs/framework/steps/call-model) -- for language model calls.
+- [invokeTool](/docs/framework/steps/invoke-tool) -- for direct tool invocation.
+- [Loop & Until](/docs/framework/operators/loop-and-until) -- use `runCode` as a loop body for custom iteration logic.

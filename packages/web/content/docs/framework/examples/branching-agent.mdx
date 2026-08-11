@@ -1,21 +1,21 @@
 ---
 title: Branching Agent
-description: A support ticket router using conditional, step.runCode, step.callModel, and loop to classify and handle tickets by keyword.
+description: A support ticket router using conditional, runCode, callModel, and loop to classify and handle tickets by keyword.
 ---
 
 ## Overview
 
 A support ticket router that classifies incoming tickets by keyword and routes them to different handlers. Demonstrates how `conditional` selects a step at runtime based on input, combined with `loop` to process the ticket.
 
-**Primitives used**: `conditional` + `step.runCode` + `step.callModel` + `loop`
+**Primitives used**: `conditional` + `runCode` + `callModel` + `loop`
 
 ## How It Works
 
 1. Input arrives as a support ticket string
 2. `conditional` inspects the input for keyword matches:
-   - Billing keywords (invoice, refund, etc.) -> deterministic `step.runCode` response
-   - Technical keywords (error, bug, etc.) -> `step.callModel` for reasoning
-   - Everything else -> `step.runCode` fallback
+   - Billing keywords (invoice, refund, etc.) -> deterministic `runCode` response
+   - Technical keywords (error, bug, etc.) -> `callModel` for reasoning
+   - Everything else -> `runCode` fallback
 3. The conditional is wrapped in `loop({ until: until.maxSteps(1) })` to show conditional routing inside a loop body
 
 ## Code
@@ -24,7 +24,7 @@ A support ticket router that classifies incoming tickets by keyword and routes t
 import { conditional } from '@noetic-tools/core';
 import type { ContextData } from '@noetic-tools/core';
 import { loop } from '@noetic-tools/core';
-import { step } from '@noetic-tools/core';
+import { callModel, runCode } from '@noetic-tools/core';
 import { until } from '@noetic-tools/core';
 
 const BILLING_KEYWORDS = ['invoice', 'charge', 'refund', 'billing', 'payment', 'subscription'];
@@ -35,7 +35,7 @@ function containsKeyword(input: string, keywords: readonly string[]): boolean {
   return keywords.some((kw) => lower.includes(kw));
 }
 
-const billingHandler = step.runCode<ContextData, string, string>({
+const billingHandler = runCode<ContextData, string, string>({
   id: 'billing-handler',
   execute: async (input) => {
     return [
@@ -49,13 +49,13 @@ const billingHandler = step.runCode<ContextData, string, string>({
   },
 });
 
-const technicalHandler = step.callModel<ContextData, string, string>({
+const technicalHandler = callModel<ContextData, string, string>({
   id: 'technical-handler',
   model: 'openai/gpt-4o',
   instructions: 'You are a technical support specialist. Analyze the issue and provide troubleshooting steps.',
 });
 
-const fallbackHandler = step.runCode<ContextData, string, string>({
+const fallbackHandler = runCode<ContextData, string, string>({
   id: 'fallback-handler',
   execute: async (input) => {
     return `General Support: We received your ticket: "${input}". Expected response: 48 hours.`;
@@ -88,7 +88,7 @@ export function buildBranchingAgent() {
 
 ### Mixing Deterministic and callModel Steps
 
-Not every path needs an LLM call. Billing tickets get a deterministic `step.runCode` response (fast, cheap, predictable), while technical tickets use `step.callModel` for reasoning. This is a practical pattern for production agents where some paths are well-understood.
+Not every path needs an LLM call. Billing tickets get a deterministic `runCode` response (fast, cheap, predictable), while technical tickets use `callModel` for reasoning. This is a practical pattern for production agents where some paths are well-understood.
 
 ### Conditional Inside Loop
 

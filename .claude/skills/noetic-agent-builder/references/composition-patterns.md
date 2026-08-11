@@ -5,12 +5,12 @@
 The simplest agent pattern. LLM calls tools in a loop until done.
 
 ```typescript
-import { AgentHarness, any, loop, step, until } from '@noetic-tools/core';
+import { AgentHarness, any, callModel, loop, until } from '@noetic-tools/core';
 
 const agent = loop({
   id: 'react',
   steps: [
-    step.callModel({
+    callModel({
       id: 'assistant',
       model: 'anthropic/claude-sonnet-4-20250514',
       instructions: 'You are a helpful assistant.',
@@ -20,7 +20,7 @@ const agent = loop({
   until: any(until.noToolCalls(), until.maxSteps(10)),
 });
 
-const harness = new AgentHarness({ name: 'basic', initialStep: agent, params: {} });
+const harness = new AgentHarness({ name: 'basic', agentGraph: agent, params: {} });
 const result = await harness.execute('What is 2+2?');
 ```
 
@@ -34,7 +34,7 @@ const agent = spawn({
   child: loop({
     id: 'react',
     steps: [
-      step.callModel({
+      callModel({
         id: 'assistant',
         model: 'anthropic/claude-sonnet-4-20250514',
         instructions: 'You are a coding assistant.',
@@ -69,7 +69,7 @@ const agent = spawn({
   child: loop({
     id: 'react',
     steps: [
-      step.callModel({
+      callModel({
         id: 'assistant',
         model: 'anthropic/claude-sonnet-4-20250514',
         instructions: 'You are a coding assistant.',
@@ -98,14 +98,14 @@ All CLI enhanced layers use `execution` scope and `Slot.PROCEDURAL` (250). The h
 Use the steering layer to enforce policies on tool usage and model output.
 
 ```typescript
-import { any, loop, spawn, steering, SteeringAction, step, until } from '@noetic-tools/core';
+import { any, callModel, loop, spawn, steering, SteeringAction, until } from '@noetic-tools/core';
 
 const agent = spawn({
   id: 'steered-agent',
   child: loop({
     id: 'react',
     steps: [
-      step.callModel({
+      callModel({
         id: 'assistant',
         model: 'anthropic/claude-sonnet-4-20250514',
         instructions: 'You are a helpful assistant.',
@@ -159,7 +159,7 @@ const delegateTool = tool({
     const subAgent = loop({
       id: 'sub-agent-loop',
       steps: [
-        step.callModel({
+        callModel({
           id: 'sub-agent-llm',
           model: 'anthropic/claude-sonnet-4-20250514',
           instructions: `Complete this task: ${args.task}`,
@@ -188,7 +188,7 @@ const launchTool = tool({
   input: z.object({ task: z.string() }),
   output: z.object({ agentId: z.string() }),
   execute: async (args, toolCtx) => {
-    const subAgent = step.callModel({ id: 'bg-agent', model: '...', instructions: '...' });
+    const subAgent = callModel({ id: 'bg-agent', model: '...', instructions: '...' });
     const handle = toolCtx.harness.detachedSpawn(subAgent, args.task, toolCtx.ctx);
     handles.set(handle.id, handle);
 
@@ -203,7 +203,7 @@ const launchTool = tool({
 
 const agent = loop({
   id: 'orchestrator',
-  steps: [step.callModel({ id: 'llm', model: '...', tools: [launchTool] })],
+  steps: [callModel({ id: 'llm', model: '...', tools: [launchTool] })],
   until: any(until.noToolCalls(), until.maxSteps(10)),
   inbox,
   parkTimeout: 5e3,
@@ -220,7 +220,7 @@ const attempt = spawn({
   child: loop({
     id: 'attempt-loop',
     steps: [
-      step.callModel({
+      callModel({
         id: 'migrate',
         model: 'anthropic/claude-sonnet-4-20250514',
         instructions: 'Migrate all tests from Jest to Vitest.',
@@ -253,9 +253,9 @@ const research = inParallel<string, string>({
   id: 'parallel-research',
   mode: 'all',
   paths: (input) => [
-    spawn({ id: 'historical', child: step.callModel({ id: 'h', model: '...', instructions: 'Historical perspective' }) }),
-    spawn({ id: 'technical', child: step.callModel({ id: 't', model: '...', instructions: 'Technical perspective' }) }),
-    spawn({ id: 'societal', child: step.callModel({ id: 's', model: '...', instructions: 'Societal perspective' }) }),
+    spawn({ id: 'historical', child: callModel({ id: 'h', model: '...', instructions: 'Historical perspective' }) }),
+    spawn({ id: 'technical', child: callModel({ id: 't', model: '...', instructions: 'Technical perspective' }) }),
+    spawn({ id: 'societal', child: callModel({ id: 's', model: '...', instructions: 'Societal perspective' }) }),
   ],
   merge: (results) => results.map((r, i) => `## Perspective ${i + 1}\n\n${r}`).join('\n\n'),
 });
@@ -510,7 +510,7 @@ const mem = context([taskLayer()]);
 type Mem = InferContext<typeof mem>;
 
 // 2. Code step reads data — fully typed via the TContext generic
-const checkStep = step.runCode<Mem>({
+const checkStep = runCode<Mem>({
   id: 'check-progress',
   execute: async (_input, ctx) => {
     return `${ctx.context.tasks.pending.length} tasks remaining`;
@@ -523,7 +523,7 @@ const agent = spawn({
   child: loop({
     id: 'task-loop',
     steps: [
-      step.callModel({ id: 'work', model: 'anthropic/claude-sonnet-4', tools: [] }),
+      callModel({ id: 'work', model: 'anthropic/claude-sonnet-4', tools: [] }),
     ],
     until: any(until.noToolCalls(), until.maxSteps(10)),
   }),
@@ -538,9 +538,9 @@ The `plan()` layer adds Claude Code-style plan mode to any agent. It restricts t
 ### Basic Usage
 
 ```typescript
-import { any, loop, plan, spawn, step, until } from '@noetic-tools/core';
+import { any, callModel, loop, plan, spawn, until } from '@noetic-tools/core';
 
-const assistant = step.callModel({
+const assistant = callModel({
   id: 'assistant',
   model: 'anthropic/claude-sonnet-4',
   instructions: 'You are a coding assistant.',
@@ -551,7 +551,7 @@ const agent = spawn({
   id: 'planning-agent',
   child: loop({
     id: 'agent-loop',
-    body: assistant,
+    steps: [assistant],
     until: any(until.noToolCalls(), until.maxSteps(25)),
   }),
   context: [plan()],
@@ -695,9 +695,9 @@ const subprocess = createLocalSubprocessAdapterNode({
 // Option A — default for every spawn on this harness:
 const harness = new AgentHarness({
   name: 'out-of-process',
-  initialStep: agent,
+  agentGraph: agent,
   params: {},
-  subprocess,
+  environment: { subprocess },
 });
 
 // Option B — per-step override (only this spawn goes out-of-process):
@@ -741,10 +741,14 @@ const checkpointStorage = createFileStorage({
 
 const harness = new AgentHarness({
   name: 'crash-proof',
-  initialStep: agent,
+  agentGraph: agent,
   params: {},
-  subprocess: createLocalSubprocessAdapter({ storage: subprocessStorage }),
-  checkpointStore: createCheckpointStore({ storage: checkpointStorage }),
+  environment: {
+    subprocess: createLocalSubprocessAdapter({ storage: subprocessStorage }),
+    storage: {
+      checkpointStore: createCheckpointStore({ storage: checkpointStorage }),
+    },
+  },
 });
 
 // Anything the harness spawns + every turn's state is durably recorded.
@@ -765,7 +769,7 @@ for (const [handleId, restoredCtx] of contexts) {
 
 - `reattachLiveChildren` is a thin helper — under the hood it calls `harness.subprocess.listLive()` and then `harness.restore(executionId)` per live handle. Third-party hosts can call those directly without importing `@noetic-tools/cli`.
 - Subprocess manifests and checkpoint snapshots live at distinct roots (`~/.noetic/subprocess` vs `~/.noetic/checkpoints`). Override both via `NOETIC_HOME=/some/dir` if needed.
-- `checkpoint()` is a no-op when `checkpointStore` is absent; `listLive()` returns the empty set when the adapter has no storage. Durability is opt-in and degrades gracefully.
+- `checkpoint()` is a no-op when `environment.storage.checkpointStore` is absent; `listLive()` returns the empty set when the adapter has no storage. Durability is opt-in and degrades gracefully.
 - The default in-memory adapter also accepts a `storage` option for tests that want manifest round-trip behaviour without launching real OS children.
 
 ## Durable IPC server (tasks-system pattern)
@@ -887,7 +891,7 @@ const planAgent: Step<ContextData, string, string> = spawn({
   child: loop({
     id: 'plan-loop',
     steps: [
-      step.callModel({
+      callModel({
         id: 'plan-chat',
         model: (ctx) => readParam(ctx, 'model', '', isString),
         instructions: (ctx) => PLAN_INSTRUCTIONS,
@@ -902,7 +906,7 @@ const planAgent: Step<ContextData, string, string> = spawn({
 
 // 3. Router + sentinel-driven exit
 const DONE_SENTINEL = '<<<workflow-done>>>';
-const doneStep: Step<ContextData, string, string> = step.runCode({
+const doneStep: Step<ContextData, string, string> = runCode({
   id: 'done',
   async execute() { return DONE_SENTINEL; },
 });
@@ -963,7 +967,7 @@ const agent = dynamicWorkflow({
 
 const harness = new AgentHarness({
   name: 'dynamic-planner',
-  initialStep: agent,
+  agentGraph: agent,
   params: {},
 });
 
@@ -1001,16 +1005,16 @@ const result = await parseAndRunWorkflow({
 A sub-harness step (`step.claudeCode` / `step.codex` / `step.opencode` / `step.pi`) runs a real coding agent as a step. Compose it after a planning `callModel` step in a sequence: the model decides *what* to do, the coding agent does it against the workspace.
 
 ```typescript
-import { AgentHarness, step } from '@noetic-tools/core';
+import { AgentHarness, callModel, runCode, step } from '@noetic-tools/core';
 import { claudeCode } from '@noetic-tools/sub-harness-claude-code';
 
-const plan = step.callModel({
+const plan = callModel({
   id: 'plan',
   model: 'anthropic/claude-sonnet-4-20250514',
   instructions: 'Turn the request into a concrete, ordered implementation plan.',
 });
 
-const pipeline = step.runCode({
+const pipeline = runCode({
   id: 'plan-then-build',
   execute: async (input: string, ctx) => {
     const planned = await ctx.harness.run(plan, input, ctx);
@@ -1025,7 +1029,7 @@ const pipeline = step.runCode({
   },
 });
 
-const harness = new AgentHarness({ name: 'builder', initialStep: pipeline, params: {} });
+const harness = new AgentHarness({ name: 'builder', agentGraph: pipeline, params: {} });
 await harness.execute('Add input validation to the signup endpoint.');
 ```
 
@@ -1033,7 +1037,7 @@ Key points:
 
 - The coding agent runs one turn against `ctx`'s workspace (cwd/fs/shell), forwards its events as `sub_harness_event` framework events, and charges `ctx.tokens`/`ctx.cost` like any `callModel` step.
 - `permissionMode` controls how freely the agent mutates files: `'plan'` (read-only planning), `'acceptEdits'`, `'bypassPermissions'`, or `'default'`.
-- Add `output: SomeSchema` to parse the agent's final text into a typed object, exactly like `step.callModel`.
+- Add `output: SomeSchema` to parse the agent's final text into a typed object, exactly like `callModel`.
 
 ## Pattern: Reuse a Coding-Agent Session Across Steps
 
@@ -1121,7 +1125,7 @@ Key points:
 An agent renders a UI, the user interacts, and the loop continues until they submit. The `openUiSurface()` layer owns the state on the server; a loop predicate reads it. Requires `@noetic-tools/openui` (depends only on `@noetic-tools/context` + `@noetic-tools/types`; core never imports it).
 
 ```typescript
-import { AgentHarness, context, loop, step, type ContextData } from '@noetic-tools/core';
+import { AgentHarness, callModel, context, type ContextData, loop } from '@noetic-tools/core';
 import { createLibrary, defineComponent, openUi, openUiSurface, ui } from '@noetic-tools/openui';
 import { z } from 'zod';
 
@@ -1135,20 +1139,22 @@ const surface = openUiSurface({ library });
 
 const checkout = loop({
   id: 'checkout',
-  body: step.callModel<ContextData, string, unknown>({
-    id: 'render',
-    model: 'claude-sonnet-5',
-    tools: [validateAddress], // Query/Mutation bindings resolve against these tools
-    output: openUi(library),
-  }),
+  steps: [
+    callModel<ContextData, string, unknown>({
+      id: 'render',
+      model: 'claude-sonnet-5',
+      tools: [validateAddress], // Query/Mutation bindings resolve against these tools
+      output: openUi(library),
+    }),
+  ],
   until: ui.submitted(surface, 'checkout-form'),
 });
 
 const harness = new AgentHarness({
   name: 'checkout-agent',
-  initialStep: checkout,
+  agentGraph: checkout,
   params: {},
-  context: context([surface]),
+  contextLayers: [surface],
 });
 ```
 
@@ -1175,7 +1181,7 @@ const chat = new Chat({ adapters: [slack()], state: redis() });
 
 const harness = new AgentHarness({
   name: 'support-bot',
-  initialStep: agentLoop,
+  agentGraph: agentLoop,
   params: {},
   tools: await chatTools({ chat }), // write tools keep the vendor's approval gate
 });

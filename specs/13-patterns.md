@@ -1,6 +1,6 @@
 # Pattern Derivations
 
-> **Depends On:** `01-step-type` (Step, execute), `02-step-variants` (step.runCode, step.callModel, Tool), `03-control-flow` (inParallel), `04-spawn` (spawn, contextIn, contextOut), `05-loop-and-until` (loop, until, any), `06-channels` (channel, ExternalChannel, ChannelHandle, tryRecv), `07-context-and-event-log` (Context, Item, ItemLog), `11-context-layer-system` (context layer lifecycle)
+> **Depends On:** `01-step-type` (Step, execute), `02-step-variants` (runCode, callModel, Tool), `03-control-flow` (inParallel), `04-spawn` (spawn, contextIn, contextOut), `05-loop-and-until` (loop, until, any), `06-channels` (channel, ExternalChannel, ChannelHandle, tryRecv), `07-context-and-event-log` (Context, Item, ItemLog), `11-context-layer-system` (context layer lifecycle)
 > **Exports:** `react()`, `ralphWiggum()`, `taskTree()`, `enforced()`, `recursiveLLM()`, `threadWeave()`, `remote()`, `compilePlan()`, `adaptivePlan()`, `dualAgent()`, `TaskNode`, `PlanNode`, `PlanNodeSchema`, `PlanConstraints`, `WorkerDispatch`
 
 ---
@@ -33,7 +33,7 @@ function react(opts: {
   maxCost?: number;
   context?: ContextLayer[];
 }) {
-  const llmStep = step.callModel({
+  const llmStep = callModel({
     id: 'react-step',
     model: opts.model,
     instructions: opts.instructions,
@@ -42,7 +42,7 @@ function react(opts: {
 
   const loopStep = loop({
     id: 'react-loop',
-    body: llmStep,
+    steps: [llmStep],
     until: any(
       until.noToolCalls(),
       until.maxSteps(opts.maxSteps ?? 10),
@@ -55,7 +55,7 @@ function react(opts: {
 }
 ```
 
-**Primitives used:** `loop` + `step.callModel` + `until.noToolCalls` + `until.maxSteps`.
+**Primitives used:** `loop` + `callModel` + `until.noToolCalls` + `until.maxSteps`.
 
 **ItemLog strategy:** Accumulate. No spawn boundary — tool call results append to the ItemLog. Context layers `recall()`/`store()` run each iteration.
 
@@ -83,12 +83,14 @@ function ralphWiggum(opts: {
 
   return loop({
     id: 'ralph-wiggum-loop',
-    body: spawn({
-      id: 'ralph-iteration',
-      child: inner,
-      contextIn: { strategy: 'fresh' },
-      contextOut: { strategy: 'full' },
-    }),
+    steps: [
+      spawn({
+        id: 'ralph-iteration',
+        child: inner,
+        contextIn: { strategy: 'fresh' },
+        contextOut: { strategy: 'full' },
+      }),
+    ],
     until: any(
       until.verified(opts.verify),
       until.maxSteps(opts.maxIterations ?? 50),
@@ -153,7 +155,7 @@ interface PlanConstraints {
 }
 ```
 
-`toolAllowlist` modifies the tool list passed to `step.callModel` — the LLM never sees disallowed tools. `requireApproval` pauses execution and waits on a channel for human input. No tokens wasted on rejected tool calls.
+`toolAllowlist` modifies the tool list passed to `callModel` — the LLM never sees disallowed tools. `requireApproval` pauses execution and waits on a channel for human input. No tokens wasted on rejected tool calls.
 
 ---
 
@@ -172,7 +174,7 @@ function recursiveLLM<I, O>(opts: {
 }): Step<I, O>
 ```
 
-**Primitives used:** `step.runCode` (outer) + `inParallel` (parallel children) + `spawn(contextIn: custom, contextOut: summary)` + self-reference for recursion. Depth control via `ctx.depth`.
+**Primitives used:** `runCode` (outer) + `inParallel` (parallel children) + `spawn(contextIn: custom, contextOut: summary)` + self-reference for recursion. Depth control via `ctx.depth`.
 
 **Context layer interaction:** `scope: 'global'` layers (shared knowledge) available to all children. Each child's `onReturn` merges discoveries back into parent state.
 
@@ -206,7 +208,7 @@ interface WorkerDispatch {
 
 ## A2A Protocol
 
-A2A is `spawn` + `step.runCode` over HTTP. Remote agents are wrapped in Steps that compose like local ones.
+A2A is `spawn` + `runCode` over HTTP. Remote agents are wrapped in Steps that compose like local ones.
 
 ```typescript
 function remote<O = string>(opts: {
@@ -286,41 +288,45 @@ function dualAgent(opts: {
   // Conversational agent: responds to user, updates shared plan
   const conversationalLoop = loop({
     id: 'conversational-loop',
-    body: step.runCode({
-      id: 'handle-user-message',
-      execute: async (_, ctx) => {
-        const message = await ctx.recv(userChannel);
-        // LLM processes the message with access to the shared scratchpad
-        const response = await execute(
-          step.callModel({
-            id: 'respond',
-            model: opts.conversational.model,
-            instructions: opts.conversational.instructions,
-            tools: opts.conversational.tools,
-          }),
-          message,
-          ctx,
-        );
-        return response;
-      },
-    }),
+    steps: [
+      runCode({
+        id: 'handle-user-message',
+        execute: async (_, ctx) => {
+          const message = await ctx.recv(userChannel);
+          // LLM processes the message with access to the shared scratchpad
+          const response = await execute(
+            callModel({
+              id: 'respond',
+              model: opts.conversational.model,
+              instructions: opts.conversational.instructions,
+              tools: opts.conversational.tools,
+            }),
+            message,
+            ctx,
+          );
+          return response;
+        },
+      }),
+    ],
     until: until.maxSteps(1000),
   });
 
   // Background worker: executes plan, checks for updates via tryRecv
   const workerLoop = loop({
     id: 'worker-loop',
-    body: spawn({
-      id: 'worker-iteration',
-      child: react({
-        model: opts.worker.model,
-        instructions: opts.worker.instructions,
-        tools: opts.worker.tools,
-        maxSteps: opts.maxWorkerSteps ?? 20,
+    steps: [
+      spawn({
+        id: 'worker-iteration',
+        child: react({
+          model: opts.worker.model,
+          instructions: opts.worker.instructions,
+          tools: opts.worker.tools,
+          maxSteps: opts.maxWorkerSteps ?? 20,
+        }),
+        contextIn: { strategy: 'fresh' },
+        contextOut: { strategy: 'full' },
       }),
-      contextIn: { strategy: 'fresh' },
-      contextOut: { strategy: 'full' },
-    }),
+    ],
     until: any(
       until.verified(async (output) => {
         // Worker checks the shared scratchpad for completion

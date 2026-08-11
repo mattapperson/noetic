@@ -21,10 +21,10 @@ A TypeScript agent framework that decomposes AI agent patterns into eight compos
 
 | Primitive | Kind | Purpose |
 |-----------|------|---------|
-| `step.runCode` | `runCode` | Pure async computation with retry support |
-| `step.callModel` | `callModel` | LLM call with tools, structured output, and layered context |
+| `runCode` | `runCode` | Pure async computation with retry support |
+| `callModel` | `callModel` | LLM call with tools, structured output, and layered context |
 | `step.claudeCode` | `claude-code`, `codex`, `opencode`, `pi` | Delegate a turn to a coding agent (sub-harness) |
-| `step.invokeTool` | `invokeTool` | Direct tool execution with Zod-validated I/O |
+| `invokeTool` | `invokeTool` | Direct tool execution with Zod-validated I/O |
 | `conditional` | `conditional` | Conditional routing — returns a step or null |
 | `inParallel` | `inParallel` | Parallel execution — race, all, or settle modes |
 | `spawn` | `spawn` | Child execution with an isolated context boundary |
@@ -77,21 +77,25 @@ bun run build
 ## Quick Example
 
 ```typescript
-import { step, loop, until } from '@noetic-tools/core';
-import { AgentHarness } from '@noetic-tools/core/runtime';
+import { AgentHarness, any, callModel, loop, until } from '@noetic-tools/core';
 
 // A ReAct agent is just a loop of LLM calls
-const agent = loop(
-  step.callModel({
-    model: 'openai/gpt-4o',
-    system: 'You are a helpful assistant.',
-    tools: [searchTool, calculatorTool],
-  }),
-  until.noToolCalls(),
-);
+const agent = loop({
+  id: 'react-loop',
+  steps: [
+    callModel({
+      id: 'assistant',
+      model: 'openai/gpt-4o',
+      instructions: 'You are a helpful assistant.',
+      tools: [searchTool, calculatorTool],
+    }),
+  ],
+  until: any(until.noToolCalls(), until.maxSteps(10)),
+});
 
-const harness = new AgentHarness();
-const result = await harness.run(agent, { query: 'What is 12! ?' });
+const harness = new AgentHarness({ name: 'assistant', agentGraph: agent, params: {} });
+await harness.execute('What is 12! ?');
+const { text } = await harness.getAgentResponse();
 ```
 
 ## Context Layers

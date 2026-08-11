@@ -166,7 +166,7 @@ Detached spawns pair naturally with the loop inbox channel (see `05-loop-and-unt
 
 ## SubprocessAdapter Routing
 
-Every `step.runCode(...)`, `spawn(...)`, and `harness.detachedSpawn(...)` dispatches through a `SubprocessAdapter`. In-process vs out-of-process is a property of the adapter, never of the step. The harness always holds one; `AgentHarness` defaults to `createInMemorySubprocessAdapter()` so zero-config callers keep their current synchronous, in-process behaviour.
+Every `runCode(...)`, `spawn(...)`, and `harness.detachedSpawn(...)` dispatches through a `SubprocessAdapter`. In-process vs out-of-process is a property of the adapter, never of the step. The harness always holds one; `AgentHarness` defaults to `createInMemorySubprocessAdapter()` so zero-config callers keep their current synchronous, in-process behaviour.
 
 ### Adapter Resolution
 
@@ -210,7 +210,7 @@ and calls `adapter.spawn(request)`. The adapter returns a `SubprocessHandle`; fo
 
 When an adapter crosses a process boundary, the child runtime must locate the step body by id. Every step builder auto-registers its result in a shared **step registry** (`@noetic-tools/core/runtime/step-registry`):
 
-- `registerStep(step)` — called automatically by `step.runCode()`, `step.callModel()`, `step.invokeTool()`, `spawn()`, `withContext()`, `loop()`, and other constructors whenever `step.id` is non-empty.
+- `registerStep(step)` — called automatically by `runCode()`, `callModel()`, `invokeTool()`, `spawn()`, `withContext()`, `loop()`, and other constructors whenever `step.id` is non-empty.
 - `lookupStep(id)` — called by the child runtime (after importing the user's entry module) to retrieve the step definition.
 - `getRegistry()` — read-only view, mainly for tests and debugging.
 
@@ -233,4 +233,4 @@ On host restart the surviving handle can be rediscovered via `adapter.listLive()
 
 ### Idempotency Guidance
 
-Durable execution means the same step body may be replayed under certain failure paths — for example, a crash that lands between step completion and the following checkpoint write. The framework cannot make arbitrary `step.runCode` bodies idempotent. Use stable step ids, and write step bodies whose side effects are safe to re-execute or guarded by an external idempotency key.
+Durable execution means the same step body may be replayed under certain failure paths — for example, a crash that lands between step completion and the following checkpoint write. The framework cannot make arbitrary `runCode` bodies idempotent. Use stable step ids, and write step bodies whose side effects are safe to re-execute or guarded by an external idempotency key.

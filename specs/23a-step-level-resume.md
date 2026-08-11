@@ -136,7 +136,7 @@ interface StepLedgerRetention {
   maxEntries?: number;
 }
 
-new AgentHarness({ /* … */ checkpointStore, stepLedgerRetention: { maxEntries: 5e3 } });
+new AgentHarness({ /* … */ environment: { storage: { checkpointStore, stepLedgerRetention: { maxEntries: 5e3 } } } });
 ```
 
 `Infinity` on either axis disables that cap.

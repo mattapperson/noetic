@@ -29,7 +29,7 @@ We originally chose `contextIn` x `contextOut` as two independent axes. The orig
 
 ## Error taxonomy vs. generic `Error` propagation
 
-We chose a discriminated union `NoeticError` (see `09-error-model`) because different errors require different recovery strategies. `llm_parse_error` includes the raw text for re-prompting. `fork_partial` includes both succeeded and failed results. `spawn_summary_failed` preserves the child's output. The tradeoff: callers must pattern-match on error kinds instead of catching generic `Error`, but they get actionable information.
+We chose a discriminated union `NoeticError` (see `09-error-model`) because different errors require different recovery strategies. `model_parse_error` includes the raw text for re-prompting. `fork_partial` includes both succeeded and failed results. `spawn_summary_failed` preserves the child's output. The tradeoff: callers must pattern-match on error kinds instead of catching generic `Error`, but they get actionable information.
 
 ## Channels as standalone objects vs. state properties
 
@@ -73,7 +73,7 @@ OpenResponses distinguishes `system` (user-authored instructions) from `develope
 
 ## Options object for `channel()` factory
 
-We moved from positional `channel(name, schema, mode)` to `channel(name, { schema, mode, ... })` (see `06-channels`). The positional form would grow unwieldy as we add `external`, `capacity`, and future options. The options object is more extensible, consistent with other builders (`step.callModel({...})`, `spawn({...})`), and avoids a growing positional parameter list. The tradeoff: slightly more verbose for the simplest case, but the API is self-documenting and won't need breaking changes when new options are added.
+We moved from positional `channel(name, schema, mode)` to `channel(name, { schema, mode, ... })` (see `06-channels`). The positional form would grow unwieldy as we add `external`, `capacity`, and future options. The options object is more extensible, consistent with other builders (`callModel({...})`, `spawn({...})`), and avoids a growing positional parameter list. The tradeoff: slightly more verbose for the simplest case, but the API is self-documenting and won't need breaking changes when new options are added.
 
 ## Context layers replace contextIn/contextOut on spawn
 

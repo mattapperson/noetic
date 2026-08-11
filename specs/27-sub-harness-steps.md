@@ -1,7 +1,7 @@
 # 27 — Sub-Harness Steps
 
 Sub-harnesses let a Noetic step delegate a turn to an external coding-agent
-runtime — Claude Code, Codex, opencode, pi — exactly the way `step.callModel`
+runtime — Claude Code, Codex, opencode, pi — exactly the way `callModel`
 delegates a turn to a language model. Each agent is packaged on its own
 (`@noetic-tools/sub-harness-<tool>`) and plugs in behind a single contract, so
 adding a new agent never touches `@noetic-tools/core`.

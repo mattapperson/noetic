@@ -206,7 +206,7 @@ Return `null` when you cannot summarise the change — the runtime republishes i
 
 ## Step 7: Register with the Agent
 
-Pass custom layers to `spawn`'s `context` option (or the harness-level `context` array):
+Pass custom layers to `spawn`'s `context` option (or the harness-level `contextLayers` array):
 
 ```ts validate=none
 const agent = spawn({
@@ -220,13 +220,13 @@ const agent = spawn({
 });
 ```
 
-Configure persistence via `AgentConfig.storage` on the harness:
+Configure persistence via `environment.storage.adapter` on the harness:
 
 ```ts validate=none
 const harness = new AgentHarness({
   name: 'my-agent',
   params: {},
-  storage: myStorageAdapter,
+  environment: { storage: { adapter: myStorageAdapter } },
 });
 ```
 
@@ -390,10 +390,10 @@ type Mem = InferContext<typeof mem>;
 // }
 ```
 
-In a `step.runCode`, access the typed context:
+In a `runCode`, access the typed context:
 
 ```ts validate=none
-const myStep = step.runCode({
+const myStep = runCode({
   id: 'use-context',
   execute: async (input: string, ctx: Context<Mem>) => {
     const count = ctx.context['my-custom-layer'].entryCount;

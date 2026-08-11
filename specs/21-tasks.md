@@ -439,12 +439,12 @@ const subprocess = createLocalSubprocessAdapter({ storage });
 
 ## Validator runner
 
-The daemon's validator dispatches `validatorRequestChan` items to `runValidator: RunValidatorFn`. The default production binding is `buildAdversarialValidatorStep()` from `adversarial-validator-flow.ts`, run via `harness.run(flow, args, ctx)`. The flow is a Step graph: a single `step.runCode` resolves the leaf task's worktree, then dispatches a `inParallel({mode: 'all'})` over two paths that run in parallel:
+The daemon's validator dispatches `validatorRequestChan` items to `runValidator: RunValidatorFn`. The default production binding is `buildAdversarialValidatorStep()` from `adversarial-validator-flow.ts`, run via `harness.run(flow, args, ctx)`. The flow is a Step graph: a single `runCode` resolves the leaf task's worktree, then dispatches a `inParallel({mode: 'all'})` over two paths that run in parallel:
 
 | Path | Step kind | Behaviour |
 |---|---|---|
-| `validator.agent-ci` | `step.runCode` wrapping a subprocess spawn | Runs `npx @redwoodjs/agent-ci run --quiet` in the worktree. Exit 0 → partial `pass`; non-zero → partial `fail`; missing binary → partial `pass` with `missing: true` (skip-on-missing default). |
-| `validator.adversarial-review` | `step.callModel({output: AdversarialIssuesSchema})` | Reads `git diff main...HEAD` and re-emits a structured list of issues against the feature's acceptance criteria + assertions. Empty issue list → partial `pass`; any issues → partial `fail`. |
+| `validator.agent-ci` | `runCode` wrapping a subprocess spawn | Runs `npx @redwoodjs/agent-ci run --quiet` in the worktree. Exit 0 → partial `pass`; non-zero → partial `fail`; missing binary → partial `pass` with `missing: true` (skip-on-missing default). |
+| `validator.adversarial-review` | `callModel({output: AdversarialIssuesSchema})` | Reads `git diff main...HEAD` and re-emits a structured list of issues against the feature's acceptance criteria + assertions. Empty issue list → partial `pass`; any issues → partial `fail`. |
 
 The `inParallel`'s `merge` reconciles both partials into a single `ValidatorRunOutcome`:
 

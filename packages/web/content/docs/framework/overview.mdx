@@ -15,10 +15,10 @@ Noetic's entire execution model is built from eight primitives. Each one is a `S
 
 | Primitive | Kind | Purpose |
 | --- | --- | --- |
-| [`step.runCode`](/docs/framework/steps/run-code) | `runCode` | Execute arbitrary async code |
-| [`step.callModel`](/docs/framework/steps/call-model) | `callModel` | Call a language model |
+| [`runCode`](/docs/framework/steps/run-code) | `runCode` | Execute arbitrary async code |
+| [`callModel`](/docs/framework/steps/call-model) | `callModel` | Call a language model |
 | [`step.claudeCode`](/docs/framework/sub-harnesses) | `claude-code`, `codex`, `opencode`, `pi` | Delegate a turn to a coding agent (sub-harness) |
-| [`step.invokeTool`](/docs/framework/steps/invoke-tool) | `invokeTool` | Invoke a single tool directly |
+| [`invokeTool`](/docs/framework/steps/invoke-tool) | `invokeTool` | Invoke a single tool directly |
 | [`conditional`](/docs/framework/operators/conditional) | `conditional` | Conditional routing -- pick one step or skip |
 | [`inParallel`](/docs/framework/operators/in-parallel) | `inParallel` | Parallel execution -- race, all, or settle |
 | [`spawn`](/docs/framework/operators/spawn) | `spawn` | Isolated child execution with context strategies |
@@ -29,19 +29,19 @@ Noetic's entire execution model is built from eight primitives. Each one is a `S
 Primitives nest freely. A `loop` body can be a `callModel` step, a `conditional`, or even another `loop`. An `inParallel` can fan out into spawned sub-agents. The type system keeps inputs and outputs aligned at every boundary.
 
 ```ts
-import { conditional, inParallel, spawn, step, until } from '@noetic-tools/core';
+import { callModel, conditional, inParallel, spawn, until } from '@noetic-tools/core';
 
 // A conditional that picks between two model calls
 const router = conditional({
   id: 'pick-model',
   route: (input: string, ctx) => {
     if (input.includes('code')) {
-      return step.callModel({
+      return callModel({
         id: 'code-llm',
         model: 'openai/gpt-4o',
       });
     }
-    return step.callModel({
+    return callModel({
       id: 'chat-llm',
       model: 'openai/gpt-4o-mini',
     });

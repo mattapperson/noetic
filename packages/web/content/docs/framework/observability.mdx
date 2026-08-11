@@ -11,7 +11,7 @@ import { AgentHarness, InMemoryExporter } from '@noetic-tools/core';
 const exporter = new InMemoryExporter();
 const harness = new AgentHarness({
   name: 'traced-agent',
-  initialStep: myStep,
+  agentGraph: myStep,
   params: {},
   traceExporter: exporter,
 });
@@ -55,7 +55,7 @@ Every [Context](/docs/framework/context) has a `span` property. You can add cust
 ```ts
 declare function doWork(input: string): string;
 
-const myStep = step.runCode({ id: 'annotated', execute: async (input: string, ctx) => {
+const myStep = runCode({ id: 'annotated', execute: async (input: string, ctx) => {
   ctx.span.setAttribute('input.length', input.length);
   ctx.span.addEvent('processing_started');
 

@@ -32,17 +32,19 @@ bun add -d @ax-llm/ax
 ## Write a suite
 
 ```ts
-import { any, loop, step, until } from '@noetic-tools/core';
+import { any, callModel, loop, until } from '@noetic-tools/core';
 import { describe, it, scorer } from '@noetic-tools/eval';
 
 const agent = loop({
   id: 'router-loop',
-  body: step.callModel({
-    id: 'router',
-    model: 'anthropic/claude-sonnet-4',
-    instructions: 'You are a ticket routing agent...',
-    tools: [classifyTool, escalateTool],
-  }),
+  steps: [
+    callModel({
+      id: 'router',
+      model: 'anthropic/claude-sonnet-4',
+      instructions: 'You are a ticket routing agent...',
+      tools: [classifyTool, escalateTool],
+    }),
+  ],
   until: any(until.noToolCalls(), until.maxSteps(6)),
 });
 

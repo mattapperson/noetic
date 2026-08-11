@@ -51,7 +51,7 @@ const status = channel('status', {
 });
 
 // In a step: write to a channel
-step.runCode({
+runCode({
   id: 'research',
   execute: async (query, ctx) => {
     const results = await search(query);
@@ -61,7 +61,7 @@ step.runCode({
 });
 
 // In another step: read from a channel
-step.runCode({
+runCode({
   id: 'synthesize',
   execute: async (_, ctx) => {
     const allFindings = await ctx.recv(findings);  // typed as string[]
@@ -93,7 +93,7 @@ ctx.tryRecv(channel): T | null
 `tryRecv` is useful for polling patterns — checking whether new data has arrived without suspending the step. This is Go's `select/default` analogue.
 
 ```typescript
-step.runCode({
+runCode({
   id: 'check-updates',
   execute: async (_, ctx) => {
     const update = ctx.tryRecv(planUpdates);

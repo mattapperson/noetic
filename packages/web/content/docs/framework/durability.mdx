@@ -21,10 +21,14 @@ const checkpointStorage = createFileStorage({
 
 const harness = new AgentHarness({
   name: 'durable-agent',
-  initialStep: agent,
+  agentGraph: agent,
   params: {},
-  subprocess: createLocalSubprocessAdapter({ storage: subprocessStorage }),
-  checkpointStore: createCheckpointStore({ storage: checkpointStorage }),
+  environment: {
+    subprocess: createLocalSubprocessAdapter({ storage: subprocessStorage }),
+    storage: {
+      checkpointStore: createCheckpointStore({ storage: checkpointStorage }),
+    },
+  },
 });
 ```
 
@@ -108,10 +112,14 @@ import { AgentHarness, DEFAULT_STEP_LEDGER_RETENTION } from '@noetic-tools/core'
 const harness = new AgentHarness({
   name: 'durable-agent',
   params: {},
-  checkpointStore,
-  stepLedgerRetention: {
-    maxEntryBytes: 128 * 1024, // default: largest output recorded, UTF-8 bytes of its JSON
-    maxEntries: 1e3,           // default: entries retained per execution
+  environment: {
+    storage: {
+      checkpointStore,
+      stepLedgerRetention: {
+        maxEntryBytes: 128 * 1024, // default: largest output recorded, UTF-8 bytes of its JSON
+        maxEntries: 1e3,           // default: entries retained per execution
+      },
+    },
   },
 });
 ```
@@ -186,7 +194,7 @@ Two rules:
 
 ### Limitations
 
-Durable execution can replay a step body whose prior completion's checkpoint failed to land. The framework cannot make arbitrary `step.runCode` bodies idempotent — write bodies that are safe to re-execute where durability matters, or gate with an external idempotency key.
+Durable execution can replay a step body whose prior completion's checkpoint failed to land. The framework cannot make arbitrary `runCode` bodies idempotent — write bodies that are safe to re-execute where durability matters, or gate with an external idempotency key.
 
 LLM mid-stream is not resumed. If the host dies while the model is generating, on restart the turn is re-issued. The item log's response-id dedupe catches identical responses; different responses win as a new turn.
 
@@ -304,7 +312,7 @@ const handle = harness.detachedSpawn(
 const result = await handle.await();
 ```
 
-Per-step overrides work the same way: set `subprocess: localAdapter` on a `step.runCode` or `spawn` opts and every dispatch of that step uses the local adapter regardless of the harness default.
+Per-step overrides work the same way: set `subprocess: localAdapter` on a `runCode` or `spawn` opts and every dispatch of that step uses the local adapter regardless of the harness default.
 
 ## Survive a Host Crash
 
@@ -312,14 +320,18 @@ Per-step overrides work the same way: set `subprocess: localAdapter` on a `step.
 // First boot: configure durable storage.
 const harness = new AgentHarness({
   name: 'crash-proof',
-  initialStep: agent,
+  agentGraph: agent,
   params: {},
-  subprocess: createLocalSubprocessAdapter({
-    storage: createFileStorage({ root: `${process.env.HOME}/.noetic/subprocess` }),
-  }),
-  checkpointStore: createCheckpointStore({
-    storage: createFileStorage({ root: `${process.env.HOME}/.noetic/checkpoints` }),
-  }),
+  environment: {
+    subprocess: createLocalSubprocessAdapter({
+      storage: createFileStorage({ root: `${process.env.HOME}/.noetic/subprocess` }),
+    }),
+    storage: {
+      checkpointStore: createCheckpointStore({
+        storage: createFileStorage({ root: `${process.env.HOME}/.noetic/checkpoints` }),
+      }),
+    },
+  },
 });
 
 // Launch a long-lived child.
@@ -349,6 +361,6 @@ Without the full stack, the surfaces that depend on it are no-ops and the harnes
 
 ## Related Pages
 
-- [AgentHarness](/docs/framework/runtime) — the `subprocess` and `checkpointStore` options.
+- [AgentHarness](/docs/framework/runtime) — the `environment.subprocess` and `environment.storage.checkpointStore` options.
 - [Spawn](/docs/framework/operators/spawn) — `subprocess` override on `spawn` and `detachedSpawn`.
 - [Context](/docs/framework/context) — `ctx.checkpoint()` semantics and item log dedupe.

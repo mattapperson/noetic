@@ -6,11 +6,11 @@ description: Attach context layers to descendant steps without creating an isola
 ## Quick Example
 
 ```ts validate=none
-import { withContext, step } from '@noetic-tools/core';
+import { callModel, withContext } from '@noetic-tools/core';
 
 const withLayers = withContext({
   id: 'with-knowledge',
-  child: step.callModel({
+  child: callModel({
     id: 'researcher',
     model: 'openai/gpt-4o',
     instructions: 'Research the topic thoroughly.',
@@ -40,14 +40,14 @@ This is the primitive for scoping context layers to a section of your execution 
 Attach a knowledge base layer only to a specific subtree, without affecting sibling steps:
 
 ```ts validate=none
-import { withContext, step } from '@noetic-tools/core';
+import { callModel, withContext } from '@noetic-tools/core';
 
 const researchPhase = withContext({
   id: 'research-with-knowledge',
   child: {
     kind: 'loop',
     id: 'research-loop',
-    steps: [step.callModel({
+    steps: [callModel({
       id: 'researcher-llm',
       model: 'openai/gpt-4o',
       instructions: 'You are a research assistant.',

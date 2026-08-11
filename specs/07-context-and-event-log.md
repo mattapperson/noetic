@@ -333,9 +333,9 @@ If the host process dies while the model is actively streaming, there is no part
 
 This is acceptable for interactive and batch workloads; it is not a resumable stream. Callers that need strict once-only token generation must gate with their own idempotency key outside the framework.
 
-### Non-Idempotent `step.runCode` Bodies
+### Non-Idempotent `runCode` Bodies
 
-Durable execution can replay a step body whose prior execution completed but whose completion checkpoint never landed. Arbitrary user code cannot be made idempotent by the framework. Use stable step ids, and write `step.runCode` bodies whose side effects are safe to re-execute (or guarded by an external idempotency key that the body consults).
+Durable execution can replay a step body whose prior execution completed but whose completion checkpoint never landed. Arbitrary user code cannot be made idempotent by the framework. Use stable step ids, and write `runCode` bodies whose side effects are safe to re-execute (or guarded by an external idempotency key that the body consults).
 
 ## Circular Reference with Channels
 

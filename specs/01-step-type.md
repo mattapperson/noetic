@@ -7,7 +7,7 @@
 
 ## The `Step<I, O>` Discriminated Union
 
-`Step` is a single type with eight variants. The runtime pattern-matches on `kind`. Builder functions (`step.runCode(...)`, `inParallel(...)`, etc.) are constructors for the union variants.
+`Step` is a single type with eight variants. The runtime pattern-matches on `kind`. Builder functions (`runCode(...)`, `inParallel(...)`, etc.) are constructors for the union variants.
 
 ```typescript
 type Step<I, O> =
@@ -18,7 +18,7 @@ type Step<I, O> =
   | { kind: 'inParallel';    id: string; mode: 'all' | 'race' | 'settle'; paths: (input: I, ctx: Context) => Step<I, O>[]; merge?: MergeFn<O>; concurrency?: number }
   | { kind: 'spawn';   id: string; child: Step<I, O>; context?: ContextLayer[]; timeout?: number; subprocess?: SubprocessAdapter }
   | { kind: 'withContext'; id: string; child: Step<I, O>; context: ContextConfig | ContextLayer[] }
-  | { kind: 'loop';    id: string; body: Step<I, O>; until: Until; maxIterations?: number; maxHistorySize?: number; prepareNext?: (output: O, verdict: Verdict, ctx: Context) => I; onError?: (error: NoeticError, ctx: Context) => 'retry' | 'skip' | 'abort' }
+  | { kind: 'loop';    id: string; steps: ReadonlyArray<Step<I, O>>; until: Until; maxIterations?: number; maxHistorySize?: number; prepareNext?: (output: O, verdict: Verdict, ctx: Context) => I; onError?: (error: NoeticError, ctx: Context) => 'retry' | 'skip' | 'abort' }
 ```
 
 The optional `subprocess?: SubprocessAdapter` field on `runCode` and `spawn` variants is a per-step adapter override. When set, the interpreter dispatches that step through the given adapter instead of the harness default. Resolution order at dispatch time is `detachedSpawn-overrides.subprocess ?? step.subprocess ?? harness.subprocess`. See `04-spawn` for adapter routing and `23-durable-execution` for durability guarantees.

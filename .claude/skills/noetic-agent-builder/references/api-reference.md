@@ -2,12 +2,12 @@
 
 ## Builder Functions
 
-### step.runCode
+### runCode
 
 Pure async computation. The runtime can retry freely and doesn't track token usage.
 
 ```typescript
-step.runCode<TContext = ContextData, I = unknown, O = unknown>({
+runCode<TContext = ContextData, I = unknown, O = unknown>({
   id: string;
   execute: (input: I, ctx: Context<TContext>) => Promise<O>;
   retry?: RetryPolicy;
@@ -17,7 +17,7 @@ step.runCode<TContext = ContextData, I = unknown, O = unknown>({
 
 The optional `subprocess` field makes this specific step run through a different adapter — e.g. `createLocalSubprocessAdapter({storage})` for an out-of-process child, or an in-memory test double for unit tests. Resolution order at dispatch time is `detachedSpawn-overrides.subprocess ?? step.subprocess ?? harness.subprocess`. When omitted, the step uses the harness default.
 
-### step.callModel
+### callModel
 
 Model call with optional tools and structured output.
 
@@ -26,7 +26,7 @@ type Lazy<T, TContext = ContextData> =
   | T
   | ((ctx: Context<TContext>) => T | Promise<T>);
 
-step.callModel<TContext = ContextData, I = unknown, O = unknown>({
+callModel<TContext = ContextData, I = unknown, O = unknown>({
   id: string;
   model: Lazy<string, TContext>;                    // eager string or (ctx) => string
   instructions?: Lazy<string | undefined, TContext>;
@@ -42,7 +42,7 @@ step.callModel<TContext = ContextData, I = unknown, O = unknown>({
 **Lazy params.** `model`, `instructions`, and `tools` each accept either an eager value or a `(ctx) => value` getter resolved at step execution. Getters see the live `Context`, so a step can read `ctx.harness.config.params` or `ctx.unifiedTools` to produce per-run values without baking them in at build time. Function-form `tools` are NOT walked by `collectAllTools`; tools needed in the harness-wide pool should be registered via `AgentHarness.tools`. Eager `model` strings are validated at build time (empty → `MISSING_MODEL`); function-form models are validated after resolution with the same error code.
 
 ```typescript
-step.callModel({
+callModel({
   id: 'plan-chat',
   model: (ctx) => ctx.harness.config.params.model as string,
   instructions: (ctx) => composeInstructions(ctx),
@@ -50,7 +50,7 @@ step.callModel({
 });
 ```
 
-**Generic-param order.** The signature is `step.callModel<TContext, I, O>`, NOT `<I, O>`. Writing `step.callModel<string, unknown>(...)` silently sets `TContext = string`, which yields misleading errors when the step is composed into a harness whose context shape is anything else. Either pass all three (`step.callModel<MyContext, string, string>(...)`) or pass none and let inference drive from the object literal.
+**Generic-param order.** The signature is `callModel<TContext, I, O>`, NOT `<I, O>`. Writing `callModel<string, unknown>(...)` silently sets `TContext = string`, which yields misleading errors when the step is composed into a harness whose context shape is anything else. Either pass all three (`callModel<MyContext, string, string>(...)`) or pass none and let inference drive from the object literal.
 
 **Lazy params disable eval-optimizer rewrites.** `@noetic-tools/eval`'s optimizer walks the step tree and swaps candidate strings into `instructions` / tool `name` / tool `description`. It skips fields whose value is a function because there is no way to substitute a string for a getter without dropping the getter's runtime logic. Use eager values for any field you want the optimizer to tune; reserve function-form only for fields that genuinely need per-execution context.
 
@@ -62,12 +62,12 @@ The agent harness assembles the View before calling the model: system message + 
 
 `AgentHarness.execute` accepts a plain string, one item, or an item array. Use an `InputMessageItem` when the input needs structured content; its `content` array supports `input_text`, `input_image`, and `input_file` parts.
 
-### step.invokeTool
+### invokeTool
 
 Direct tool execution (not via LLM selection).
 
 ```typescript
-step.invokeTool<TContext = ContextData, I = unknown, O = unknown>({
+invokeTool<TContext = ContextData, I = unknown, O = unknown>({
   id: string;
   tool: Tool<ZodType<I>, ZodType<O>>;
   args?: Partial<I>;
@@ -118,7 +118,7 @@ spawn<TContext = ContextData, I = unknown, O = unknown>({
 }): StepSpawn<TContext, I, O>
 ```
 
-Per-step `subprocess` mirrors `step.runCode` — use it to pin a specific spawn to an out-of-process adapter (real OS subprocess with durable handle manifests) or a test double (in-memory adapter that records the request for assertions). Resolution precedence is the same: `detachedSpawn-overrides.subprocess ?? step.subprocess ?? harness.subprocess`.
+Per-step `subprocess` mirrors `runCode` — use it to pin a specific spawn to an out-of-process adapter (real OS subprocess with durable handle manifests) or a test double (in-memory adapter that records the request for assertions). Resolution precedence is the same: `detachedSpawn-overrides.subprocess ?? step.subprocess ?? harness.subprocess`.
 
 ### loop
 
@@ -181,11 +181,11 @@ is typed from `event` (the non-generator `tool()` has no events to render).
 - A tool's `toolResults` schemas validate ONLY that tool's own result items (strictly: a result matching none of them fails the round with `NoeticError` kind `item_schema_mismatch`). They never reject a sibling tool's results; tools without `itemSchemas` fall back to the base structural parse.
 - Schemas are **gates, not normalizers**: on match the original item is returned unchanged (undeclared fields like the framework-generated `id`/`status` survive). Zod `.transform()` / `.default()` in extension schemas are unsupported.
 - `decorateResultItem` output must satisfy the tool's own `toolResults` schemas — including for error outputs (e.g. malformed-arguments results), so declare error-shaped results or make decorated fields tolerant.
-- Harness-level `itemSchemas` (on `AgentHarness` opts) stay global and apply to every item at trust boundaries.
+- Harness-level `itemSchemas.schemas` (on `AgentHarness` opts, an `ItemSchemaConfig` of `{ schemas?, strict? }`) stay global and apply to every item at trust boundaries.
 
 ### step.claudeCode / step.codex / step.opencode / step.pi
 
-Sub-harness steps. Delegate one turn to an external coding-agent runtime (Claude Code, Codex, opencode, pi) the way `step.callModel` delegates a turn to a model. Each builder is its own `Step.kind` (`'claude-code'`, `'codex'`, `'opencode'`, `'pi'`) but all share the `StepSubHarness` shape and one interpreter handler.
+Sub-harness steps. Delegate one turn to an external coding-agent runtime (Claude Code, Codex, opencode, pi) the way `callModel` delegates a turn to a model. Each builder is its own `Step.kind` (`'claude-code'`, `'codex'`, `'opencode'`, `'pi'`) but all share the `StepSubHarness` shape and one interpreter handler.
 
 ```typescript
 step.claudeCode<TContext = ContextData, I = unknown, O = unknown>({
@@ -194,7 +194,7 @@ step.claudeCode<TContext = ContextData, I = unknown, O = unknown>({
   prompt: Lazy<string, TContext>;                      // the fresh turn input
   settings?: SubHarnessSettings;
   instructions?: Lazy<string | undefined, TContext>;   // first-message system prompt
-  output?: ZodType<O>;                                // structured output, like step.callModel
+  output?: ZodType<O>;                                // structured output, like callModel
   session?: SubHarnessSessionPolicy;
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }): StepSubHarness<TContext, I, O>
@@ -327,7 +327,7 @@ Recurring agent shapes are compositions of the primitives, not separate APIs. Tw
 // ReAct: LLM with tools, repeat until no tool calls.
 const react = loop({
   id: 'react',
-  steps: [step.callModel({ id: 'work', model, instructions, tools })],
+  steps: [callModel({ id: 'work', model, instructions, tools })],
   until: any(until.noToolCalls(), until.maxSteps(25)),
 });
 
@@ -551,7 +551,7 @@ temporal({
 // id 'temporal', slot Slot.REMINDER (80). LLM-agnostic: omit extract/search and the
 // layer only buffers / the tool returns the raw ledger (never fabricates facts).
 // Buffers assistant output (store) + user/tool input (onItemAppend) for extraction.
-// The code agent wires step.callModel-backed callbacks and installs it by default.
+// The code agent wires callModel-backed callbacks and installs it by default.
 ```
 
 ### taskState
@@ -924,7 +924,7 @@ Extracts the typed context shape from a `ContextConfig` (like `z.infer<>` for Zo
 ```typescript
 const layers = context([scratchpad(), counterLayer()]);
 type Ctx = InferContext<typeof layers>;
-// Use as: step.runCode<Ctx>({ execute: (input, ctx) => { ctx.context.counter.value } })
+// Use as: runCode<Ctx>({ execute: (input, ctx) => { ctx.context.counter.value } })
 ```
 
 ### ContextConfig
@@ -970,7 +970,7 @@ Layer provides keyed by layer ID. Data entries are live property reads; function
 const layers = context([scratchpad()]);
 type Ctx = InferContext<typeof layers>;
 
-step.runCode<Ctx>({
+runCode<Ctx>({
   id: 'work',
   execute: async (input, ctx) => {
     ctx.context['scratchpad'].snapshot;        // ScratchpadState (live read)
@@ -981,7 +981,7 @@ step.runCode<Ctx>({
 
 ### Automatic LLM tool injection
 
-Layer functions in `provides` are automatically exposed as tools to any `step.callModel` running in the same context. Tool names are `layerId/functionName` (e.g. `scratchpad/update`).
+Layer functions in `provides` are automatically exposed as tools to any `callModel` running in the same context. Tool names are `layerId/functionName` (e.g. `scratchpad/update`).
 
 ## CwdState (shared cwd)
 
@@ -1073,7 +1073,7 @@ hooks: {
 }
 
 // From Context in a step:
-step.runCode({
+runCode({
   id: 'load',
   execute: async (input, ctx) => {
     return ctx.fs.readFileText('./data.txt');
@@ -1158,7 +1158,7 @@ hooks: {
 
 ## AgentHarness
 
-`AgentHarness` is generic over `TParams`. The `config` property exposes `AgentConfig<TParams>`, and steps/tools access params via `ctx.harness.config.params`. The `fs` property exposes the `FsAdapter` (defaults to `createLocalFsAdapter()`). The `shell` property exposes the `ShellAdapter` (defaults to `createLocalShellAdapter()`).
+`AgentHarness` is generic over `TParams`. The `config` property exposes `AgentConfig<TParams>`, and steps/tools access params via `ctx.harness.config.params`. Execution surfaces are configured via the `environment` option (`{ storage?: { adapter?, checkpointStore?, layerStateStore?, stepLedgerRetention? }, fs?, shell?, subprocess? }`); every field defaults to an in-memory adapter. The `fs` property exposes the configured `FsAdapter`, and `shell` the configured `ShellAdapter`. Default context layers come in through `contextLayers`, and the default model-provider configuration through `callModelDefaults` (an `LlmProviderConfig`).
 
 ### Sessions and the Message Queue
 
@@ -1167,7 +1167,7 @@ Each `threadId` is a **session**: a long-lived broadcaster + message queue + ite
 ```typescript
 const harness = new AgentHarness({
   name: 'my-agent',
-  initialStep: myStep,
+  agentGraph: myStep,
   params: { model: 'anthropic/claude-sonnet-4-20250514' },
   defaultDeliveryMode: 'next-turn',
 });
@@ -1210,16 +1210,16 @@ const items = await harness.previewRequestItems({ threadId: 'thread-1' });
 
 ### Stream Idle Timeout
 
-`AgentHarnessOpts.streamIdleTimeoutMs` (default `120_000`; set `0` or negative to disable) aborts an in-flight provider call if its SSE stream emits no events for that many milliseconds. On timeout, the harness emits `{name}:llm_call_stalled` and the surrounding turn fails with `turn_aborted { reason: "llm stream idle timeout after <N>ms" }`. Use a smaller value for snappier recovery in interactive UIs, a larger value for long-running batch runs with slow models.
+Every in-flight provider call is guarded by a stream-idle watchdog with a fixed 120-second window. The watchdog re-arms on every SSE event; if the stream goes silent for the full window, the harness emits `{name}:model_call_stalled` and the surrounding turn fails with `turn_aborted { reason: "model stream idle timeout after <N>ms" }`, so a provider that quietly drops the connection surfaces as an error rather than a hang.
 
 ### Harness-wide Tools
 
-`AgentHarnessOpts.tools?: Tool[]` seeds a tool pool merged with tools collected from `initialStep` into every context's `ctx.unifiedTools`. Dedupe is **name-based, first-wins** — the merge order is `[...stepCollectedTools, ...harnessTools]`, so on a name collision the step-collected instance wins. This is the supported way to provide tools when the workflow graph is fully static and `step.callModel.tools` is a `(ctx) => ctx.unifiedTools.filter(...)` getter — function-form `step.tools` cannot be walked by `collectAllTools`, so the harness option is the only way to make those tools visible to the pool.
+`AgentHarnessOpts.tools?: Tool[]` seeds a tool pool merged with tools collected from `agentGraph` into every context's `ctx.unifiedTools`. Dedupe is **name-based, first-wins** — the merge order is `[...stepCollectedTools, ...harnessTools]`, so on a name collision the step-collected instance wins. This is the supported way to provide tools when the workflow graph is fully static and `callModel.tools` is a `(ctx) => ctx.unifiedTools.filter(...)` getter — function-form `step.tools` cannot be walked by `collectAllTools`, so the harness option is the only way to make those tools visible to the pool.
 
 ```typescript
 const harness = new AgentHarness({
   name: 'my-agent',
-  initialStep: myStaticWorkflow,
+  agentGraph: myStaticWorkflow,
   tools: [readTool, writeTool, bashTool],
   params: { model: 'anthropic/claude-sonnet-4-20250514' },
 });
@@ -1281,13 +1281,13 @@ const msg2 = harness.tryRecv(channel, ctx);
 | `await harness.cancel(ctx, reason?)` | Same abort, plus context-layer teardown per context — `onComplete` with `outcome: 'aborted'`, then `dispose` — run bottom-up (children before parents). No-op on an already-cancelled context. |
 | `await harness.abort(scope?)` | Session-level: cancels the in-flight *turn* for a thread (queued messages preserved), which aborts that turn's context tree. |
 
-Cancellation reaches inside the work in flight: blocked `recv` / parked `send` reject with `cancelled`, the provider stream and tool-round loop stop mid-generation, and a sub-harness (`step.claudeCode` etc.) turn is interrupted through the adapter's abort signal. Tokens and cost already spent stay charged to the context; the truncated response is not returned — the step throws `cancelled`. Beyond those points it is cooperative: a `step.runCode` body that ignores `ctx.aborted` between `await`s runs to its next step boundary.
+Cancellation reaches inside the work in flight: blocked `recv` / parked `send` reject with `cancelled`, the provider stream and tool-round loop stop mid-generation, and a sub-harness (`step.claudeCode` etc.) turn is interrupted through the adapter's abort signal. Tokens and cost already spent stay charged to the context; the truncated response is not returned — the step throws `cancelled`. Beyond those points it is cooperative: a `runCode` body that ignores `ctx.aborted` between `await`s runs to its next step boundary.
 
 `DetachedHandle` is a thin wrapper over the adapter's `SubprocessHandle`. `.await()` polls `adapter.get()` until the handle reaches a terminal status, then reads the result from `handle.metadata.result` (or rehydrates `handle.metadata.error`). The default adapter (`createInMemorySubprocessAdapter()`) runs the step in-process on the microtask queue, so short-lived detached spawns resolve in sub-millisecond time; out-of-process adapters wait for the OS child to exit.
 
 ## Subprocess Adapters and Durable Execution
 
-The harness always holds a `SubprocessAdapter`. Every `step.runCode`, `spawn`, and `harness.detachedSpawn` dispatches through `harness.subprocess.spawn(...)`. In-process vs out-of-process is a property of the adapter, never of the step. Zero-config harnesses use `createInMemorySubprocessAdapter()`, so dispatch overhead is essentially zero and every pre-existing in-process path keeps its behaviour.
+The harness always holds a `SubprocessAdapter`. Every `runCode`, `spawn`, and `harness.detachedSpawn` dispatches through `harness.subprocess.spawn(...)`. In-process vs out-of-process is a property of the adapter, never of the step. Zero-config harnesses use `createInMemorySubprocessAdapter()`, so dispatch overhead is essentially zero and every pre-existing in-process path keeps its behaviour.
 
 ### The adapter interface
 
@@ -1361,7 +1361,7 @@ interface CheckpointStore {
 function createCheckpointStore(opts: { storage: StorageAdapter }): CheckpointStore;
 ```
 
-Pass a `checkpointStore` to the harness constructor to turn `harness.checkpoint(ctx)` and `harness.restore(executionId)` into real crash-recovery hooks. Snapshots fire automatically after every `execute()`, `detachedSpawn()` settlement, ask-user enqueue, and `runAppendPipeline`. Failures are swallowed with `console.warn` so durability issues never abort a successful step.
+Pass a checkpoint store to the harness constructor via `environment.storage.checkpointStore` to turn `harness.checkpoint(ctx)` and `harness.restore(executionId)` into real crash-recovery hooks. Snapshots fire automatically after every `execute()`, `detachedSpawn()` settlement, ask-user enqueue, and `runAppendPipeline`. Failures are swallowed with `console.warn` so durability issues never abort a successful step.
 
 #### Restoring a decorated context
 
@@ -1369,7 +1369,7 @@ Pass a `checkpointStore` to the harness constructor to turn `harness.checkpoint(
 interface RestoreContextOptions {
   parent?: Context;
   state?: unknown;
-  context?: ContextLayer[];
+  contextLayers?: ContextLayer[];
 }
 
 harness.restore(executionId: string, opts?: RestoreContextOptions): Promise<Context | null>;
@@ -1390,8 +1390,12 @@ interface StepLedgerRetention {
 const harness = new AgentHarness({
   name: 'durable',
   params: {},
-  checkpointStore,
-  stepLedgerRetention: { maxEntries: 5e3 },   // Infinity disables a cap
+  environment: {
+    storage: {
+      checkpointStore,
+      stepLedgerRetention: { maxEntries: 5e3 },   // Infinity disables a cap
+    },
+  },
 });
 
 // Discards the snapshot AND every ledger shard for one execution.
@@ -1922,7 +1926,7 @@ const doc = validateWorkflow({
 
 Node kinds: `callModel`, `invokeTool`, `runCode`, `conditional`, `inParallel`, `spawn`, `withContext`, `loop`, `sequence`, `schedule`, `subflow`, plus the sub-harness kinds (`claude-code`, `codex`, `opencode`, `pi`).
 
-A `subflow` node runs another workflow document as one step — inline (`document`) or by name (`ref`, resolved lazily from `HydrationContext.workflows` / `parseAndRunWorkflow`'s `workflows` option). Exactly one of `document`/`ref` is required. Unknown refs raise `UNKNOWN_WORKFLOW_REFERENCE` at execution; ref cycles raise `WORKFLOW_CYCLE`. There is also a `step.workflow({ id, document | ref, tools?, layers?, workflows?, isolation?: 'inherit' | 'spawn' })` builder that runs a document as a composable `StepRunCode` (main entry only, not `/portable`).
+A `subflow` node runs another workflow document as one step — inline (`document`) or by name (`ref`, resolved lazily from `HydrationContext.workflows` / `parseAndRunWorkflow`'s `workflows` option). Exactly one of `document`/`ref` is required. Unknown refs raise `UNKNOWN_WORKFLOW_REFERENCE` at execution; ref cycles raise `WORKFLOW_CYCLE`. There is also a `workflow({ id, document | ref, tools?, layers?, workflows?, isolation?: 'inherit' | 'spawn' })` builder that runs a document as a composable `StepRunCode` (main entry only, not `/portable`).
 
 ### hydrateWorkflow / hydrateNode
 
@@ -1985,7 +1989,7 @@ Named predicates for loop termination in JSON: `maxSteps`, `maxCost`, `maxDurati
 
 `@noetic-tools/openui` makes an agent respond with a UI built from components you register, following the [OpenUI](https://www.openui.com) standard. It depends only on `@noetic-tools/context` + `@noetic-tools/types`; core sees two dialect-agnostic contracts (`OutputCodec`, `UiFragment`) and never imports the package. Three surfaces, adopted independently.
 
-### Output codec on step.callModel
+### Output codec on callModel
 
 ```typescript
 import { createLibrary, defineComponent, openUi } from '@noetic-tools/openui';
@@ -1997,7 +2001,7 @@ const library = createLibrary([
   defineComponent({ name: 'Stack', props: z.object({ children: z.array(z.unknown()) }) }),
 ]);
 
-const dashboard = step.callModel({ id: 'dashboard', model: 'claude-sonnet-5', output: openUi(library) });
+const dashboard = callModel({ id: 'dashboard', model: 'claude-sonnet-5', output: openUi(library) });
 // output resolves to a UiDocument; the model emits OpenUI Lang, streamed as openui.* events.
 ```
 
@@ -2012,7 +2016,7 @@ import { openUiSurface, ui } from '@noetic-tools/openui';
 
 const surface = openUiSurface({ library });   // ContextLayer<OpenUiSurfaceState>, slot 120, scope 'thread'
 
-const harness = new AgentHarness({ name: 'ui', initialStep: dashboard, params: {}, context: context([surface]) });
+const harness = new AgentHarness({ name: 'ui', agentGraph: dashboard, params: {}, contextLayers: [surface] });
 ```
 
 | Hook | Behavior |
@@ -2027,7 +2031,8 @@ const harness = new AgentHarness({ name: 'ui', initialStep: dashboard, params: {
 
 ```typescript
 const checkout = loop({
-  body: step.callModel({ id: 'render', model, tools: [quoteShipping], output: openUi(library) }),
+  id: 'checkout',
+  steps: [callModel({ id: 'render', model, tools: [quoteShipping], output: openUi(library) })],
   until: ui.submitted(surface, 'checkout-form'),   // also: ui.interacted(surface, kind?), ui.toAssistant(surface)
 });
 ```
@@ -2051,7 +2056,7 @@ const quoteShipping = tool({
 });
 ```
 
-`ToolUiDeclaration` methods (`call`/`progress`/`result`/`error`) each return a `UiFragment | null`. The runtime emits them as `openui.fragment` framework events from BOTH model-requested tool calls and direct `step.invokeTool` steps — and works even without the codec installed (deterministic tool cards, zero prompt cost).
+`ToolUiDeclaration` methods (`call`/`progress`/`result`/`error`) each return a `UiFragment | null`. The runtime emits them as `openui.fragment` framework events from BOTH model-requested tool calls and direct `invokeTool` steps — and works even without the codec installed (deterministic tool cards, zero prompt cost).
 
 ### Transport (`@noetic-tools/openui/server`)
 

@@ -5,14 +5,14 @@ description: The three step primitives -- runCode, callModel, and invokeTool -- 
 
 Steps are the building blocks of every Noetic agent. Each step takes typed input, does one thing, and returns typed output. There are three kinds.
 
-## step.runCode -- Custom Logic
+## runCode -- Custom Logic
 
 Execute any async function. Use it for API calls, database queries, transformations, or anything that is not an LLM call.
 
 ```ts
-import { step } from '@noetic-tools/core';
+import { runCode } from '@noetic-tools/core';
 
-const fetchUser = step.runCode({
+const fetchUser = runCode({
   id: 'fetch-user',
   execute: async (userId: string, ctx) => {
     const res = await fetch(`https://api.example.com/users/${userId}`);
@@ -23,17 +23,17 @@ const fetchUser = step.runCode({
 
 `execute` receives the step input and a `Context` object. Return whatever your downstream steps need.
 
-See [step.runCode deep dive](/docs/framework/steps/run-code).
+See [runCode deep dive](/docs/framework/steps/run-code).
 
-## step.callModel -- Language Model Call
+## callModel -- Language Model Call
 
 Call a language model with a system prompt, optional tools, and optional structured output.
 
 ```ts
 import { z } from 'zod';
-import { step } from '@noetic-tools/core';
+import { callModel } from '@noetic-tools/core';
 
-const classify = step.callModel({
+const classify = callModel({
   id: 'classify-intent',
   model: 'openai/gpt-4o-mini',
   instructions: 'Classify the user message as one of: question, command, chitchat.',
@@ -49,15 +49,15 @@ const classify = step.callModel({
 
 When you provide an `output` Zod schema, the framework requests structured output from the model and validates the response at runtime.
 
-See [step.callModel deep dive](/docs/framework/steps/call-model).
+See [callModel deep dive](/docs/framework/steps/call-model).
 
-## step.invokeTool -- Direct Tool Invocation
+## invokeTool -- Direct Tool Invocation
 
 Invoke a single tool without going through an LLM. Useful when you know exactly which tool to call and with what arguments.
 
 ```ts
 import { z } from 'zod';
-import { step, tool } from '@noetic-tools/core';
+import { invokeTool, tool } from '@noetic-tools/core';
 
 const weatherTool = tool({
   name: 'get-weather',
@@ -77,7 +77,7 @@ const weatherTool = tool({
   },
 });
 
-const getWeather = step.invokeTool({
+const getWeather = invokeTool({
   id: 'weather-lookup',
   tool: weatherTool,
   args: {
@@ -88,11 +88,11 @@ const getWeather = step.invokeTool({
 
 The optional `args` field lets you preset some or all of the tool's inputs. At runtime, preset args are merged with the step input.
 
-See [step.invokeTool deep dive](/docs/framework/steps/invoke-tool).
+See [invokeTool deep dive](/docs/framework/steps/invoke-tool).
 
 ## Comparison
 
-| | `step.runCode` | `step.callModel` | `step.invokeTool` |
+| | `runCode` | `callModel` | `invokeTool` |
 | --- | --- | --- | --- |
 | Custom code | Yes | No | No |
 | LLM call | No | Yes | No |

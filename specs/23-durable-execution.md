@@ -335,8 +335,8 @@ Both root defaults respect `NOETIC_HOME` (if set, the roots become `$NOETIC_HOME
 **What durable execution does not guarantee:**
 
 - **LLM mid-stream.** A crash mid-stream forces a turn re-issue on restart. The item log's response-id dedupe guards against double-recording an identical response; a different response wins as a new turn.
-- **Non-idempotent `step.runCode` bodies.** A crash between step completion and the following checkpoint write can replay a step body whose side effects already landed. The framework cannot make arbitrary user code idempotent; use stable step ids and idempotent bodies where durability matters.
-- **Third-party state outside the framework.** If a `step.runCode` mutates an external database, the database's state is not part of the snapshot. Callers that need cross-system consistency must integrate with their database's own transaction / idempotency primitives.
+- **Non-idempotent `runCode` bodies.** A crash between step completion and the following checkpoint write can replay a step body whose side effects already landed. The framework cannot make arbitrary user code idempotent; use stable step ids and idempotent bodies where durability matters.
+- **Third-party state outside the framework.** If a `runCode` mutates an external database, the database's state is not part of the snapshot. Callers that need cross-system consistency must integrate with their database's own transaction / idempotency primitives.
 - **Adapter-specific identity drift.** The local adapter's `reattach` verifies `pidStarttime` against `ps`, which is a best-effort check; a truly adversarial pid recycle within `<1s` can evade detection. Out-of-the-box this is safe enough for interactive workloads; production-critical usage should run the child under a supervisor that owns pid identity.
 
 ## Examples
@@ -355,10 +355,12 @@ const checkpointStore = createCheckpointStore({ storage });
 
 const harness = new AgentHarness({
   name: 'durable-agent',
-  initialStep: myAgent,
+  agentGraph: myAgent,
   params: {},
-  subprocess,
-  checkpointStore,
+  environment: {
+    subprocess,
+    storage: { checkpointStore },
+  },
 });
 ```
 

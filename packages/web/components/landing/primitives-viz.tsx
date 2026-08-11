@@ -20,28 +20,28 @@ interface Primitive {
 const PRIMITIVES: Primitive[] = [
   // steps
   {
-    name: 'llm',
+    name: 'callModel',
     description: 'Call a language model',
     signature: '(params: ModelParams) => Step',
     color: 'green',
     colSpan: 2,
-    href: '/docs/framework/steps/llm',
+    href: '/docs/framework/steps/call-model',
   },
   {
-    name: 'tool',
+    name: 'invokeTool',
     description: 'Invoke an external tool',
     signature: '(name, input, fn) => Step',
     color: 'green',
     colSpan: 1,
-    href: '/docs/framework/steps/tool',
+    href: '/docs/framework/steps/invoke-tool',
   },
   {
-    name: 'run',
+    name: 'runCode',
     description: 'Execute a pure function',
     signature: '(fn: (ctx) => T) => Step',
     color: 'green',
     colSpan: 1,
-    href: '/docs/framework/steps/run',
+    href: '/docs/framework/steps/run-code',
   },
   // operators
   {
@@ -53,20 +53,20 @@ const PRIMITIVES: Primitive[] = [
     href: '/docs/framework/operators/spawn',
   },
   {
-    name: 'fork',
+    name: 'inParallel',
     description: 'Parallel step execution',
     signature: '({ mode, paths }) => Step',
     color: 'cyan',
     colSpan: 1,
-    href: '/docs/framework/operators/fork',
+    href: '/docs/framework/operators/in-parallel',
   },
   {
-    name: 'branch',
+    name: 'conditional',
     description: 'Conditional step selection',
     signature: '(route: (input) => Step) => Step',
     color: 'cyan',
     colSpan: 1,
-    href: '/docs/framework/operators/branch',
+    href: '/docs/framework/operators/conditional',
   },
   {
     name: 'loop',

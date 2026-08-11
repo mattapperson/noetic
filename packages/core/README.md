@@ -23,20 +23,20 @@ export OPENROUTER_API_KEY=sk-or-...
 A complete, runnable program. Save it as `agent.mjs` and run `node agent.mjs`:
 
 ```ts
-import { AgentHarness, step } from '@noetic-tools/core';
+import { AgentHarness, callModel } from '@noetic-tools/core';
 
 // 1. Define a single model-call step. `model` and `instructions` live here.
-const greet = step.callModel({
+const greet = callModel({
   id: 'greet',
   model: 'openai/gpt-4o-mini', // any OpenRouter model id (provider/model)
   instructions: 'You are a friendly assistant. Greet the user by name in one short sentence.',
 });
 
-// 2. Create the harness. `name` and `params` are required; `llm` selects the provider.
+// 2. Create the harness. `name` and `params` are required; `callModelDefaults` selects the provider.
 const harness = new AgentHarness({
   name: 'greeter',
   params: {},
-  llm: { provider: 'openrouter' }, // apiKey defaults to process.env.OPENROUTER_API_KEY
+  callModelDefaults: { provider: 'openrouter' }, // apiKey defaults to process.env.OPENROUTER_API_KEY
 });
 
 // 3. Run the step with a context and print the model's reply.

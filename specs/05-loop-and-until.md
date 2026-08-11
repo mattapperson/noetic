@@ -182,7 +182,7 @@ const inbox = channel('agent-inbox', { schema: z.string(), mode: 'queue' });
 const agentLoop = {
   kind: 'loop',
   id: 'async-agent',
-  steps: [step.callModel({ id: 'agent-llm', model: 'gpt-4o', tools: [launchTool] })],
+  steps: [callModel({ id: 'agent-llm', model: 'gpt-4o', tools: [launchTool] })],
   until: until.noToolCalls(),
   inbox,
   parkTimeout: 3e4,  // wait up to 30s for sub-agent results
@@ -241,7 +241,7 @@ const poller = schedule({
   jitter: 5_000,             // ±5s to spread load
   inbox: wake,               // external trigger to poll immediately
   onError: 'continue',
-  step: step.runCode({
+  step: runCode({
     id: 'fetch-jobs',
     execute: async (_, ctx) => fetchAndDispatchPendingJobs(ctx),
   }),

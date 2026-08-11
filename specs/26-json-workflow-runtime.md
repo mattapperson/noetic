@@ -1,13 +1,13 @@
 # JSON Workflow Runtime
 
-> **Depends On:** `01-step-type` (Step, Until), `02-step-variants` (step.callModel, step.invokeTool), `03-control-flow` (conditional, inParallel), `04-spawn` (spawn), `05-loop-and-until` (loop, until), `08-runtime` (AgentHarness), `13-patterns` (patterns namespace)
+> **Depends On:** `01-step-type` (Step, Until), `02-step-variants` (callModel, invokeTool), `03-control-flow` (conditional, inParallel), `04-spawn` (spawn), `05-loop-and-until` (loop, until), `08-runtime` (AgentHarness), `13-patterns` (patterns namespace)
 > **Exports:** `WorkflowDocument`, `WorkflowNode`, `WorkflowDocumentSchema`, `WorkflowNodeSchema`, `UntilPredicateSchema`, `MergeStrategySchema`, `hydrateWorkflow`, `hydrateNode`, `dynamicWorkflow`, `parseAndRunWorkflow`
 
 ---
 
 ## Motivation
 
-Step trees in noetic are built programmatically: TypeScript code calls builders like `step.callModel(...)`, `loop(...)`, `inParallel(...)` and wires them together at compile time. This works when the workflow shape is known ahead of time.
+Step trees in noetic are built programmatically: TypeScript code calls builders like `callModel(...)`, `loop(...)`, `inParallel(...)` and wires them together at compile time. This works when the workflow shape is known ahead of time.
 
 But many agent patterns need the shape to emerge at runtime:
 
@@ -418,16 +418,16 @@ Each node kind maps to a single existing builder:
 
 | Node Kind   | Builder                   | Notes                                                  |
 |-------------|---------------------------|--------------------------------------------------------|
-| `callModel`       | `step.callModel({...})` | Tools resolved by name from `ctx.tools`.               |
-| `invokeTool`      | `step.invokeTool({...})` | Tool resolved by name; throws `UNKNOWN_TOOL_REFERENCE`.|
+| `callModel`       | `callModel({...})` | Tools resolved by name from `ctx.tools`.               |
+| `invokeTool`      | `invokeTool({...})` | Tool resolved by name; throws `UNKNOWN_TOOL_REFERENCE`.|
 | `conditional`    | `conditional({route: ...})` | Route function does substring matching on input.       |
 | `inParallel`      | `inParallel({...})` | `paths` becomes a static function. Merge via strategy. |
 | `spawn`     | `spawn({...})`            | Child hydrated recursively.                            |
 | `withContext`   | `withContext({...})` | Layer names resolved from hydration context.           |
 | `loop`      | `loop({...})`             | Until predicate hydrated to runtime `Until` function.  |
-| `sequence`  | `step.runCode` + chaining | Steps piped sequentially via composed `execute` calls. |
+| `sequence`  | `runCode` + chaining | Steps piped sequentially via composed `execute` calls. |
 | `schedule`     | `schedule({...})` | Maps directly to the `schedule()` builder.                |
-| `subflow`   | `step.runCode` wrapper | Target document resolved lazily at first execution; sub-tree hydrated with suffixed ids. |
+| `subflow`   | `runCode` wrapper | Target document resolved lazily at first execution; sub-tree hydrated with suffixed ids. |
 
 ### Tool Resolution
 
@@ -561,7 +561,7 @@ const result = await parseAndRunWorkflow({
 
 ### No In-Process Closures
 
-Programmatic `step.runCode` accepts an `execute` closure, which is not JSON-serialisable. The `runCode` node instead carries its body as a code STRING dispatched through a subprocess adapter — never eval'd in-process. Arbitrary in-process computation must be expressed through tool calls or LLM steps.
+Programmatic `runCode` accepts an `execute` closure, which is not JSON-serialisable. The `runCode` node instead carries its body as a code STRING dispatched through a subprocess adapter — never eval'd in-process. Arbitrary in-process computation must be expressed through tool calls or LLM steps.
 
 ### Static Lazy Fields Only
 
@@ -713,7 +713,7 @@ const WorkflowDocumentSchema = z.object({
 ## Cross-References
 
 - `Step<I, O>` discriminated union: `01-step-type`
-- `step.callModel`, `step.invokeTool` builders: `02-step-variants`
+- `callModel`, `invokeTool` builders: `02-step-variants`
 - `conditional()`, `inParallel()`, `MergeFn`: `03-control-flow`
 - `spawn()`: `04-spawn`
 - `loop()`, `schedule()`, `until.*`, `any()`, `all()`: `05-loop-and-until`

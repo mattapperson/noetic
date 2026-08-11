@@ -1,14 +1,14 @@
 ---
-title: step.callModel
+title: callModel
 description: Call a language model with tools, structured output, and system prompts.
 ---
 
 ## Quick Example
 
 ```ts
-import { step } from '@noetic-tools/core';
+import { callModel } from '@noetic-tools/core';
 
-const chat = step.callModel({
+const chat = callModel({
   id: 'chat',
   model: 'openai/gpt-4o',
   instructions: 'You are a helpful assistant.',
@@ -17,7 +17,7 @@ const chat = step.callModel({
 
 ## What It Does
 
-`step.callModel` calls a language model. You provide the model name and optionally a system prompt, tools, structured output schema, and generation parameters. The interpreter handles message formatting, tool execution loops, and response parsing.
+`callModel` calls a language model. You provide the model name and optionally a system prompt, tools, structured output schema, and generation parameters. The interpreter handles message formatting, tool execution loops, and response parsing.
 
 ## API Reference
 
@@ -47,7 +47,7 @@ const chat = step.callModel({
 
 ### Tool Interface
 
-Tools passed to `step.callModel` follow the standard Noetic `Tool` interface. See [step.invokeTool](/docs/framework/steps/invoke-tool) for the full definition.
+Tools passed to `callModel` follow the standard Noetic `Tool` interface. See [invokeTool](/docs/framework/steps/invoke-tool) for the full definition.
 
 ## Structured Output
 
@@ -55,9 +55,9 @@ Provide a Zod schema to `output` and the model response will be parsed and valid
 
 ```ts
 import { z } from 'zod';
-import { step } from '@noetic-tools/core';
+import { callModel } from '@noetic-tools/core';
 
-const extract = step.callModel({
+const extract = callModel({
   id: 'extract-entities',
   model: 'openai/gpt-4o',
   instructions: 'Extract named entities from the text.',
@@ -75,7 +75,7 @@ If the model response does not match the schema, a validation error is thrown.
 
 ```ts
 import { z } from 'zod';
-import { step, tool } from '@noetic-tools/core';
+import { callModel, tool } from '@noetic-tools/core';
 
 const searchTool = tool({
   name: 'search',
@@ -93,7 +93,7 @@ const searchTool = tool({
   },
 });
 
-const researcher = step.callModel({
+const researcher = callModel({
   id: 'research',
   model: 'openai/gpt-4o',
   instructions: 'Answer the question using the search tool.',
@@ -118,9 +118,9 @@ Functions declared in a context layer's `provides` field are automatically inclu
 ## Tuning Generation
 
 ```ts
-import { step } from '@noetic-tools/core';
+import { callModel } from '@noetic-tools/core';
 
-const creative = step.callModel({
+const creative = callModel({
   id: 'brainstorm',
   model: 'openai/gpt-4o',
   instructions: 'Generate creative ideas.',
@@ -133,6 +133,6 @@ const creative = step.callModel({
 
 ## Related
 
-- [step.runCode](/docs/framework/steps/run-code) -- custom async logic.
-- [step.invokeTool](/docs/framework/steps/invoke-tool) -- invoke a tool directly without an LLM.
+- [runCode](/docs/framework/steps/run-code) -- custom async logic.
+- [invokeTool](/docs/framework/steps/invoke-tool) -- invoke a tool directly without an LLM.
 - [Loop & Until](/docs/framework/operators/loop-and-until) -- wrap a callModel step in a ReAct-style loop.

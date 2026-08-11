@@ -33,14 +33,14 @@ Noetic maps these to composable primitives:
 
 | Claude Code Subsystem | Noetic Primitive | Controls |
 |---|---|---|
-| QueryEngine (LLM + tool loop) | `loop([step.callModel(...)], until.noToolCalls())` | Execution flow |
-| Tool System (per-agent tool sets) | `tools` param on `step.callModel()` | What the model **can call** — different per agent type |
-| Agent type switching | `conditional()` inside the loop | Which `step.callModel()` (with which tools) runs each iteration |
+| QueryEngine (LLM + tool loop) | `loop([callModel(...)], until.noToolCalls())` | Execution flow |
+| Tool System (per-agent tool sets) | `tools` param on `callModel()` | What the model **can call** — different per agent type |
+| Agent type switching | `conditional()` inside the loop | Which `callModel()` (with which tools) runs each iteration |
 | Plan/Act Mode | `conditional()` over mode state | Which agent types are available |
 | Context layers | `context` on `AgentHarness` | What context layers are available to steps |
 | Compaction | `observations()` layer | What the model **sees in context** |
 
-**Key principle**: Each agent type is a different `step.callModel()` with its own `tools` array. The `tools` param is the hard capability boundary — it defines what function calls the LLM can make. Context layers are a separate concern that controls prompt context (what the model sees), not capabilities (what the model can do).
+**Key principle**: Each agent type is a different `callModel()` with its own `tools` array. The `tools` param is the hard capability boundary — it defines what function calls the LLM can make. Context layers are a separate concern that controls prompt context (what the model sees), not capabilities (what the model can do).
 
 Everything runs through a single `AgentHarness` instance.
 
@@ -55,16 +55,16 @@ import { AgentHarness } from '@noetic-tools/core';
 
 const harness = new AgentHarness({
   name: 'claude-code-agent',
-  initialStep: mainLoop,       // a loop() — see below
-  context: contextLayers,        // context layers for context management
+  agentGraph: mainLoop,          // a loop() — see below
+  contextLayers,                 // context layers for context management
   params: {},
-  llm: { provider: 'openrouter' },
+  callModelDefaults: { provider: 'openrouter' },
 });
 
 const result = await harness.execute(userInput);
 ```
 
-The `AgentHarness` **is** the agent. The `initialStep` is the loop that defines what the agent does. `context` provides context layers (compaction, steering, scratchpad) to every execution. Calling `execute()` creates a fresh context with those layers and runs the step.
+The `AgentHarness` **is** the agent. The `agentGraph` is the loop that defines what the agent does. `contextLayers` provides context layers (compaction, steering, scratchpad) to every execution. Calling `execute()` creates a fresh context with those layers and runs the step.
 
 Events (tool calls, model responses) flow through the harness in real-time — there's no isolation boundary between the main loop and the UI. Reserve `spawn` for sub-agents that need isolated contexts.
 
@@ -72,7 +72,7 @@ Events (tool calls, model responses) flow through the harness in real-time — t
 
 ## Tool Sets Per Agent Type
 
-Claude Code has 5 built-in agent types. The primary difference between them is their **tool set** — each `step.callModel()` gets a different `tools` array:
+Claude Code has 5 built-in agent types. The primary difference between them is their **tool set** — each `callModel()` gets a different `tools` array:
 
 | Agent Type | Model | Tool Set | Notes |
 |---|---|---|---|
@@ -82,32 +82,32 @@ Claude Code has 5 built-in agent types. The primary difference between them is t
 | **General** | parent model | `[glob, grep, read, write, edit, bash]` | Full capability — only type that writes project files |
 | **Guide** | `haiku` | `[glob, grep, read, web_fetch]` | Documentation lookup |
 
-Define each as a pre-built `step.callModel()`:
+Define each as a pre-built `callModel()`:
 
 ```typescript
-import { step } from '@noetic-tools/core';
+import { callModel } from '@noetic-tools/core';
 
 const readOnlyTools = createCodebaseTools(rootDir);          // glob, grep, read, bash-readonly
 const fullTools = [...readOnlyTools, ...createWriteTools(rootDir)]; // + write, edit, bash
 const verifyTools = [...readOnlyTools, ...createTmpWriteTools()];  // + bash limited to /tmp
 const guideTools = [...readOnlyTools, ...createWebTools()];        // + web_fetch
 
-// Each agent type = a step.callModel with its own tools and system prompt
-const exploreStep = step.callModel({
+// Each agent type = a callModel with its own tools and system prompt
+const exploreStep = callModel({
   id: 'explore',
   model: 'anthropic/claude-haiku-4',
   system: 'You are a fast codebase exploration agent. Read files, search code, report findings.',
   tools: readOnlyTools,
 });
 
-const planStep = step.callModel({
+const planStep = callModel({
   id: 'plan',
   model: 'anthropic/claude-sonnet-4-20250514',
   system: 'You are a software architect. Explore the code, then output a step-by-step implementation plan.',
   tools: readOnlyTools,
 });
 
-const verifyStep = step.callModel({
+const verifyStep = callModel({
   id: 'verify',
   model: 'anthropic/claude-sonnet-4-20250514',
   system: [
@@ -117,14 +117,14 @@ const verifyStep = step.callModel({
   tools: verifyTools,
 });
 
-const generalStep = step.callModel({
+const generalStep = callModel({
   id: 'general',
   model: 'anthropic/claude-sonnet-4-20250514',
   system: 'Complete the task fully. Do not gold-plate, but do not leave it half-done.',
   tools: fullTools,
 });
 
-const guideStep = step.callModel({
+const guideStep = callModel({
   id: 'guide',
   model: 'anthropic/claude-haiku-4',
   system: 'You answer questions about Claude Code, the Agent SDK, and the Claude API.',
@@ -132,13 +132,13 @@ const guideStep = step.callModel({
 });
 ```
 
-No factories, no resolvers, no dynamic step construction. Each agent type is a static `step.callModel()` with its tools baked in.
+No factories, no resolvers, no dynamic step construction. Each agent type is a static `callModel()` with its tools baked in.
 
 ---
 
 ## Routing Between Agent Types
 
-The core pattern: the loop body contains a `conditional` that routes each iteration to the appropriate `step.callModel()` based on state. The model's output from one iteration feeds into the routing decision for the next.
+The core pattern: the loop body contains a `conditional` that routes each iteration to the appropriate `callModel()` based on state. The model's output from one iteration feeds into the routing decision for the next.
 
 ```typescript
 import { conditional } from '@noetic-tools/core';
@@ -164,7 +164,7 @@ const agentRouter = conditional({
 
 Each iteration of the loop:
 1. The `conditional` reads the current agent type from state
-2. Routes to that type's `step.callModel()` (with its specific tools)
+2. Routes to that type's `callModel()` (with its specific tools)
 3. The model runs with only those tools available
 4. Output flows to the next iteration, where a coordinator step decides what to do next
 
@@ -223,7 +223,7 @@ const setModeTool = tool({
 
 The loop body has two steps per iteration:
 1. **Coordinator step** — an LLM that decides what to do next (which agent type, what task). It has only delegation/control tools, no codebase tools.
-2. **Agent router** — a `conditional` that routes to the chosen agent type's `step.callModel()` with its specific tools.
+2. **Agent router** — a `conditional` that routes to the chosen agent type's `callModel()` with its specific tools.
 
 ```typescript
 import {
@@ -243,31 +243,31 @@ const guideTools = [...readOnlyTools, ...createWebTools()];
 
 // --- Pre-built agent steps (each with its own tools) ---
 const agentSteps = {
-  explore: step.callModel({
+  explore: callModel({
     id: 'explore',
     model: 'anthropic/claude-haiku-4',
     system: 'You are a fast codebase exploration agent. Report findings concisely.',
     tools: readOnlyTools,
   }),
-  plan: step.callModel({
+  plan: callModel({
     id: 'plan',
     model: MODEL,
     system: 'You are a software architect. Produce a step-by-step implementation plan.',
     tools: readOnlyTools,
   }),
-  verification: step.callModel({
+  verification: callModel({
     id: 'verify',
     model: MODEL,
     system: 'You are an adversarial verifier. Run builds/tests/lints. End with VERDICT: PASS/FAIL/NEEDS_REVISION.',
     tools: verifyTools,
   }),
-  general: step.callModel({
+  general: callModel({
     id: 'general',
     model: MODEL,
     system: 'Complete the task fully.',
     tools: fullTools,
   }),
-  'claude-code-guide': step.callModel({
+  'claude-code-guide': callModel({
     id: 'guide',
     model: 'anthropic/claude-haiku-4',
     system: 'You answer questions about Claude Code, the Agent SDK, and the Claude API.',
@@ -276,7 +276,7 @@ const agentSteps = {
 };
 
 // --- Coordinator step (decides what agent to use next) ---
-const coordinatorStep = step.callModel({
+const coordinatorStep = callModel({
   id: 'coordinator',
   model: MODEL,
   system: COORDINATOR_SYSTEM_PROMPT,
@@ -310,7 +310,7 @@ const agentRouter = conditional({
 // --- The harness IS the agent ---
 const harness = new AgentHarness({
   name: 'claude-code-agent',
-  initialStep: loop({
+  agentGraph: loop({
     id: 'main-loop',
     steps: [coordinatorStep, agentRouter],
     until: any(
@@ -319,12 +319,12 @@ const harness = new AgentHarness({
       until.maxCost(10),
     ),
   }),
-  context: [
+  contextLayers: [
     scratchpad({ scope: 'thread' }),
     observations({ bufferThreshold: 3_000 }),
   ],
   params: {},
-  llm: { provider: 'openrouter' },
+  callModelDefaults: { provider: 'openrouter' },
 });
 
 const result = await harness.execute('Add a dark mode toggle to the settings page.');
@@ -365,8 +365,8 @@ The loop-with-router approach above is sequential — one agent type per iterati
 
 | Pattern | When | How |
 |---|---|---|
-| **Conditional in loop** | Sequential agent switching (explore → plan → implement → verify) | `conditional()` routes to different `step.callModel()` configs |
-| **Sync spawn** | Need a sub-agent result before continuing | `spawn()` inside a `step.runCode()` via `harness.run()` |
+| **Conditional in loop** | Sequential agent switching (explore → plan → implement → verify) | `conditional()` routes to different `callModel()` configs |
+| **Sync spawn** | Need a sub-agent result before continuing | `spawn()` inside a `runCode()` via `harness.run()` |
 | **Async detached spawn** | Can continue while sub-agent works | `detachedSpawn()` + inbox channel |
 
 ### Adding Async Delegation
@@ -550,27 +550,27 @@ const guideTools = [...readOnlyTools, ...createWebTools()];
 // ─── Agent steps (each with its own tools — the hard capability boundary) ───
 
 const agentSteps: Record<string, Step> = {
-  explore: step.callModel({
+  explore: callModel({
     id: 'explore', model: 'anthropic/claude-haiku-4',
     system: 'Fast codebase exploration. Report findings concisely.',
     tools: readOnlyTools,
   }),
-  plan: step.callModel({
+  plan: callModel({
     id: 'plan', model: MODEL,
     system: 'Software architect. Produce a step-by-step implementation plan.',
     tools: readOnlyTools,
   }),
-  verification: step.callModel({
+  verification: callModel({
     id: 'verify', model: MODEL,
     system: 'Adversarial verifier. Run builds/tests/lints. End with VERDICT: PASS/FAIL/NEEDS_REVISION.',
     tools: verifyTools,
   }),
-  general: step.callModel({
+  general: callModel({
     id: 'general', model: MODEL,
     system: 'Complete the task. Do not gold-plate, do not leave half-done.',
     tools: fullTools,
   }),
-  'claude-code-guide': step.callModel({
+  'claude-code-guide': callModel({
     id: 'guide', model: 'anthropic/claude-haiku-4',
     system: 'Answer questions about Claude Code, the Agent SDK, and the Claude API.',
     tools: guideTools,
@@ -605,7 +605,7 @@ const selectAgentTool = tool({
 
 // ─── Coordinator step (decides what to do, has no codebase tools) ───
 
-const coordinatorStep = step.callModel({
+const coordinatorStep = callModel({
   id: 'coordinator',
   model: MODEL,
   system: `You are a software engineering coordinator.
@@ -630,7 +630,7 @@ Call set_mode({ mode: "act" }) to enable general and verification agents.
   tools: [setModeTool, selectAgentTool],
 });
 
-// ─── Router: routes to the selected agent type's step.callModel ───
+// ─── Router: routes to the selected agent type's callModel ───
 
 const PLAN_MODE_AGENTS = new Set(['explore', 'plan', 'claude-code-guide']);
 
@@ -652,7 +652,7 @@ const agentRouter = conditional({
 
 const harness = new AgentHarness({
   name: 'claude-code-agent',
-  initialStep: loop({
+  agentGraph: loop({
     id: 'main-loop',
     steps: [coordinatorStep, agentRouter],
     until: any(
@@ -661,13 +661,13 @@ const harness = new AgentHarness({
       until.maxCost(10),
     ),
   }),
-  context: [
+  contextLayers: [
     doomLoopDetector,                                // steering: intercepts repetitive patterns
     scratchpad({ scope: 'thread' }),              // prompt: scratchpad for task state
     observations({ bufferThreshold: 3_000 }), // prompt: compressed history
   ],
   params: {},
-  llm: { provider: 'openrouter' },
+  callModelDefaults: { provider: 'openrouter' },
 });
 
 const result = await harness.execute('Add a dark mode toggle to the settings page.');
@@ -710,7 +710,7 @@ Iteration 5:
 | **Agent continuation** (`SendMessage` to existing agent) | `detachedSpawn` is fire-and-forget; can't add messages to a running agent's conversation | Use `inbox` channel on the sub-agent's loop — messages arrive as developer items via `parkTimeout` |
 | **Request transformer pipeline** (SortTools, ImageHandling, etc.) | No user-facing request transform hook | Implement in a context layer's `recall` hook (for prompt-side transforms) |
 | **Interactive permission prompts** (`needsApproval` → user confirms in UI) | The flag exists on `tool()` but has no built-in UI | Pause on `ctx.recv(approvalChannel)`, external UI calls `handle.send('approved')` |
-| **Dynamic model downgrade** (200k+ context → cheaper model in plan mode) | `step.callModel` model is fixed at build time | Use `conditional()` to route to different `step.callModel` configs based on `ctx.tokens.total` |
+| **Dynamic model downgrade** (200k+ context → cheaper model in plan mode) | `callModel` model is fixed at build time | Use `conditional()` to route to different `callModel` configs based on `ctx.tokens.total` |
 | **Prompt cache key preservation** | Provider-specific optimization not exposed | Would require a custom adapter layer |
 | **tmux pane routing for teams** | No process/terminal management | External concern — Noetic handles agent logic, not UI |
 | **`criticalSystemReminder`** (re-injected every turn for verification) | No per-turn system injection outside context layers | Use `instructions({ load: async () => reminder })` — it injects at `recall`, which fires before every LLM call |

@@ -30,7 +30,7 @@ Context layers expose typed data and functions via `ctx.context['layerId']`. Use
 const mem = context([scratchpad()]);
 type Mem = InferContext<typeof mem>;
 
-step.runCode<Mem>({
+runCode<Mem>({
   id: 'work',
   execute: async (input, ctx) => {
     ctx.context['scratchpad'].snapshot;  // typed
@@ -48,7 +48,7 @@ const result = await harness.run(step, input, ctx);
 
 The agent harness manages execution, context creation, channels, context lifecycle, and detached spawns. When no `callModel` is provided, `AgentHarness` auto-detects from the `OPENROUTER_API_KEY` environment variable.
 
-The harness always holds a `SubprocessAdapter` — every `step.runCode`, `spawn`, and `harness.detachedSpawn` dispatches through `harness.subprocess.spawn(...)`. Zero-config harnesses use `createInMemorySubprocessAdapter()` (in-process, no overhead). Swap in `createLocalSubprocessAdapter({storage})` to run children out-of-process with durable handle manifests. Per-step and per-call `subprocess` overrides let one agent mix in-process and out-of-process dispatch — see the Key Rules section and the "Run an agent out-of-process" / "Survive a host crash" patterns in `references/composition-patterns.md`.
+The harness always holds a `SubprocessAdapter` — every `runCode`, `spawn`, and `harness.detachedSpawn` dispatches through `harness.subprocess.spawn(...)`. Zero-config harnesses use `createInMemorySubprocessAdapter()` (in-process, no overhead). Swap in `createLocalSubprocessAdapter({storage})` to run children out-of-process with durable handle manifests. Per-step and per-call `subprocess` overrides let one agent mix in-process and out-of-process dispatch — see the Key Rules section and the "Run an agent out-of-process" / "Survive a host crash" patterns in `references/composition-patterns.md`.
 
 ### Tools
 
@@ -98,7 +98,7 @@ A layer's `placement` picks its band -- `'anchor'` (before history, pinned for a
 
 An agent can respond with a *UI* built from components you register, instead of text. This is opt-in via `@noetic-tools/openui` (depends only on context + types; core never imports it). Three composable surfaces:
 
-- **`step.callModel({ output: openUi(library) })`** -- the model emits [OpenUI Lang](https://www.openui.com) and the step returns a `UiDocument`. `output` accepts a Zod schema OR an `OutputCodec`.
+- **`callModel({ output: openUi(library) })`** -- the model emits [OpenUI Lang](https://www.openui.com) and the step returns a `UiDocument`. `output` accepts a Zod schema OR an `OutputCodec`.
 - **`openUiSurface({ library })`** -- a context layer that makes the server the authoritative owner of UI state (durable, resumable, visible to the model). Loop with `until: ui.submitted(surface, ref)` to wait for a form submit.
 - **Tool `ui` declarations** -- a tool defines `call`/`progress`/`result`/`error` render functions (built with `fragment(library)`) so its calls carry their own UI; works even without the codec installed.
 
@@ -110,14 +110,14 @@ An agent can respond with a *UI* built from components you register, instead of 
 
 | Goal | Pattern | Composition |
 |------|---------|-------------|
-| LLM with tools, stop when done | ReAct | `loop({ steps: [step.callModel({ ...tools })], until: any(until.noToolCalls(), until.maxSteps(n)) })` |
+| LLM with tools, stop when done | ReAct | `loop({ steps: [callModel({ ...tools })], until: any(until.noToolCalls(), until.maxSteps(n)) })` |
 | Multi-attempt with verification | Ralph Wiggum | outer `loop` + `until.verified(fn)` around a fresh-context `spawn` of the inner ReAct loop |
 | Parallel perspectives, merged | Parallel Research | `inParallel(all)` + `spawn` |
 | Background sub-agents | Async Delegation | `detachedSpawn` + inbox channel |
 | Sequential pipeline | Phase Router | `conditional` + `loop` + `prepareNext` |
 | Multi-agent task tree | Plan Execution | `compilePlan()` |
 | Run a real coding agent (Claude Code / Codex / opencode / pi) as a step | Sub-Harness Step | `step.claudeCode` / `step.codex` / `step.opencode` / `step.pi` |
-| Agent responds with a UI (not text) | Generative UI | `step.callModel({ output: openUi(library) })` + `openUiSurface()` |
+| Agent responds with a UI (not text) | Generative UI | `callModel({ output: openUi(library) })` + `openUiSurface()` |
 
 For pattern-specific code examples, read `references/composition-patterns.md`.
 
@@ -156,7 +156,7 @@ const agent = spawn({
   child: loop({
     id: 'react-loop',
     steps: [
-      step.callModel({
+      callModel({
         id: 'work',
         model: 'anthropic/claude-sonnet-4-20250514',
         instructions: 'Your system prompt here.',
@@ -170,7 +170,7 @@ const agent = spawn({
 
 const harness = new AgentHarness({
   name: 'agent',
-  initialStep: agent,
+  agentGraph: agent,
   params: {},
 });
 

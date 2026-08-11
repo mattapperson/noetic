@@ -165,7 +165,7 @@ function temporal(config?: TemporalConfig): ContextLayer<TemporalState>
 |------|------|-------------|
 | `searchMemory` | `layerFn` | Given `{ query }`, returns `TemporalSearchResult`. Exposed as the `temporal/searchMemory` LLM tool. Delegates to the injected `search` callback; without one, returns the raw `[ts] fact` ledger so the tool degrades gracefully. |
 
-**Design:** The layer is LLM-agnostic — `extract`/`search` are injected by the host (mirroring `observations()`'s `observer`), so `@noetic-tools/context` stays tree-shakable. The code agent wires structured `step.callModel` calls as the callbacks and installs `temporal()` in its default stack.
+**Design:** The layer is LLM-agnostic — `extract`/`search` are injected by the host (mirroring `observations()`'s `observer`), so `@noetic-tools/context` stays tree-shakable. The code agent wires structured `callModel` calls as the callbacks and installs `temporal()` in its default stack.
 
 ---
 

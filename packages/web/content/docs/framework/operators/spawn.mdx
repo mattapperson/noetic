@@ -6,11 +6,11 @@ description: Run a child step in an isolated context with optional spawn-local c
 ## Quick Example
 
 ```ts
-import { spawn, step } from '@noetic-tools/core';
+import { callModel, spawn } from '@noetic-tools/core';
 
 const isolated = spawn({
   id: 'sub-agent',
-  child: step.callModel({
+  child: callModel({
     id: 'researcher',
     model: 'openai/gpt-4o',
     instructions: 'Research the topic thoroughly.',
@@ -46,7 +46,7 @@ Spawn-local context layers control what the child sees and how results are trans
 - **`onReturn` hooks** transform the child's results before they flow back to the parent. Layers can summarize, filter, or restructure the output.
 
 ```ts
-import { createMessage, spawn, step } from '@noetic-tools/core';
+import { callModel, createMessage, spawn } from '@noetic-tools/core';
 import type { ContextLayer } from '@noetic-tools/core';
 
 interface ResearchState {
@@ -72,7 +72,7 @@ const contextLayer: ContextLayer<ResearchState> = {
 
 const withContextLayers = spawn({
   id: 'research-agent',
-  child: step.callModel({
+  child: callModel({
     id: 'researcher',
     model: 'openai/gpt-4o',
     instructions: 'Research the topic thoroughly.',
@@ -96,7 +96,7 @@ const spawned = spawn({
 ## Real-World Example: Research Delegation with Context Layers
 
 ```ts validate=none
-import { createMessage, loop, spawn, step, until } from '@noetic-tools/core';
+import { callModel, createMessage, loop, spawn, until } from '@noetic-tools/core';
 import type { ContextLayer } from '@noetic-tools/core';
 
 interface BriefingState {
@@ -125,7 +125,7 @@ const researchAgent = spawn({
   id: 'delegated-research',
   child: loop({
     id: 'research-loop',
-    steps: [step.callModel({
+    steps: [callModel({
       id: 'researcher-llm',
       model: 'openai/gpt-4o',
       instructions: 'You are a research assistant. Use tools to find information.',
@@ -219,7 +219,7 @@ const agentLoop = {
 Give the LLM both a sync and async delegation tool. The LLM decides at runtime which to use based on the task — blocking when it needs the result immediately, or launching in the background when it can continue working.
 
 ```ts
-import { channel, spawn, step, tool, until } from '@noetic-tools/core';
+import { callModel, channel, spawn, tool, until } from '@noetic-tools/core';
 import type { ContextData } from '@noetic-tools/core';
 import { z } from 'zod';
 
@@ -234,7 +234,7 @@ const delegateTool = tool({
   input: z.object({ task: z.string() }),
   output: z.string(),
   execute: async (args: { task: string }, toolCtx) => {
-    const child = step.callModel<ContextData, string, string>({
+    const child = callModel<ContextData, string, string>({
       id: 'sync-sub', model: 'openai/gpt-4o', instructions: 'Answer concisely.',
     });
     return toolCtx.harness.run(spawn({ id: 'sync-spawn', child }), args.task, toolCtx.ctx);
@@ -248,7 +248,7 @@ const launchTool = tool({
   input: z.object({ task: z.string() }),
   output: z.object({ agentId: z.string() }),
   execute: async (args: { task: string }, toolCtx) => {
-    const child = step.callModel<ContextData, string, string>({
+    const child = callModel<ContextData, string, string>({
       id: 'async-sub', model: 'openai/gpt-4o', instructions: 'Answer concisely.',
     });
     const handle = toolCtx.harness.detachedSpawn(child, args.task, toolCtx.ctx);
@@ -267,7 +267,7 @@ const launchTool = tool({
 const agent = {
   kind: 'loop',
   id: 'smart-delegator',
-  steps: [step.callModel({
+  steps: [callModel({
     id: 'orchestrator',
     model: 'openai/gpt-4o',
     instructions: `You are an orchestrator. You have two delegation tools:
@@ -289,10 +289,10 @@ When a background agent finishes, its result arrives via the inbox channel as a 
 
 ## SubprocessAdapter Routing
 
-Every `step.runCode`, `spawn`, and `harness.detachedSpawn` dispatches through a `SubprocessAdapter`. The harness defaults to `createInMemorySubprocessAdapter()` so zero-config callers keep their existing in-process behaviour; swap in a different adapter to change how a step actually runs.
+Every `runCode`, `spawn`, and `harness.detachedSpawn` dispatches through a `SubprocessAdapter`. The harness defaults to `createInMemorySubprocessAdapter()` so zero-config callers keep their existing in-process behaviour; swap in a different adapter to change how a step actually runs.
 
 ```ts
-import { spawn, step } from '@noetic-tools/core';
+import { callModel, spawn } from '@noetic-tools/core';
 import { createFileStorage, createLocalSubprocessAdapter } from '@noetic-tools/platform-node';
 
 // Run this spawn out-of-process with durable handle manifests.
@@ -302,7 +302,7 @@ const subprocess = createLocalSubprocessAdapter({
 
 const isolated = spawn({
   id: 'sub-agent',
-  child: step.callModel({ id: 'researcher', model: 'openai/gpt-4o' }),
+  child: callModel({ id: 'researcher', model: 'openai/gpt-4o' }),
   subprocess,                   // per-step override
 });
 ```

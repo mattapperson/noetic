@@ -41,7 +41,7 @@ The `recall` function returns `string | null` -- a shorthand the runtime accepts
 Pass your tools to `toolCalls()` to generate the layers, then include both in your agent:
 
 ```ts validate=none
-import { loop, spawn, step, toolCalls, until } from '@noetic-tools/core';
+import { callModel, loop, spawn, toolCalls, until } from '@noetic-tools/core';
 
 const tools = [writeTodos, updateTodo, listTodos];
 
@@ -49,7 +49,7 @@ const agent = spawn({
   id: 'planner',
   child: loop({
     id: 'planner-loop',
-    steps: [step.callModel({
+    steps: [callModel({
       id: 'planner-llm',
       model: 'anthropic/claude-sonnet-4',
       instructions: 'You are a task planner.',
@@ -285,7 +285,7 @@ const agent = spawn({
   id: 'researcher',
   child: loop({
     id: 'researcher-loop',
-    steps: [step.callModel({
+    steps: [callModel({
       id: 'researcher-llm',
       model: 'anthropic/claude-sonnet-4',
       instructions: `You are a research assistant.
@@ -313,7 +313,7 @@ const agent = spawn({
   id: 'planner',
   child: loop({
     id: 'planner-loop',
-    steps: [step.callModel({
+    steps: [callModel({
       id: 'planner-llm',
       model: 'anthropic/claude-sonnet-4',
       instructions: 'You are a planner. Use todos to track tasks. Call updateNotes to save observations.',

@@ -141,7 +141,7 @@ Tabs (TUI-style tab bar), each rendering a `<TuiWindow>` snippet:
 | `ReAct reasoning loop` | ~15-line ReAct via `loop` / `callModel` / `invokeTool` + `until` |
 | `5-layer context in 10 lines` | `AgentHarness` configured with a stack of context layers |
 | `Sandboxed harness` | Swappable `FsAdapter` / `ShellAdapter` routing tools, skills, and context |
-| `Extend any primitive` | Custom `step.runCode` with typed context |
+| `Extend any primitive` | Custom `runCode` with typed context |
 
 ---
 
@@ -194,7 +194,7 @@ Group assignment + color follow the legend; final labels/grouping are confirmed 
 | Card | Value | Link |
 |------|-------|------|
 | Durable execution | Checkpoint and resume; long runs survive crashes. | `/docs/framework/durability` |
-| Runs anywhere | Node, the browser, or a sandbox — swap `fs` / `shell` / `llm` adapters; Mirage virtual filesystem. | — (no dedicated doc page yet) |
+| Runs anywhere | Node, the browser, or a sandbox — swap `fs` / `shell` / model-provider adapters; Mirage virtual filesystem. | — (no dedicated doc page yet) |
 | JSON workflow runtime | Define and run an agent declaratively from JSON. | `/docs/framework/json-runtime` |
 
 Cards reuse the existing bento/card styles (`tui-bento`, surface backgrounds, `TuiBadge`, `HOVER_BG`). No code window — Code Peek carries the examples.

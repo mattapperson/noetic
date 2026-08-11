@@ -249,7 +249,7 @@ AST-based static analysis that parses TypeScript source files to discover optimi
 function discoverFieldsFromSource(evalFilePath: string): OptimizableField[];
 ```
 
-Follows imports from the eval file, parses builder calls (`step.callModel`, `tool`, etc.), and extracts `instructions`, `description`, `name` field values with their `SourceLocation`. `SourceLocation.line` and `.column` are 1-based package-wide (discovery, adapter stack capture, and the source writer all agree).
+Follows imports from the eval file, parses builder calls (`callModel`, `tool`, etc.), and extracts `instructions`, `description`, `name` field values with their `SourceLocation`. `SourceLocation.line` and `.column` are 1-based package-wide (discovery, adapter stack capture, and the source writer all agree).
 
 ### `enrichWithSourceLocations(runtimeFields, astFields)`
 
