@@ -41,7 +41,7 @@ export function fromAiSdkTool(
   name: string,
   aiTool: AiSdkToolLike,
   options: FromAiSdkToolOptions = {},
-): Tool {
+): Tool<ZodTypeAny, ZodTypeAny> {
   const { execute } = aiTool;
   if (typeof execute !== 'function') {
     throw new Error(`AI SDK tool '${name}' has no execute function and cannot be wrapped.`);

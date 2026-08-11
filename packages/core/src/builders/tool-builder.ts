@@ -1,8 +1,10 @@
 import type {
   FunctionCallItem,
   FunctionCallOutputItem,
+  InferSchemaOutput,
   Item,
   ItemSchemaExtensions,
+  StandardSchemaV1,
   Tool,
   ToolContextDeclaration,
   ToolExecutionContext,
@@ -10,26 +12,34 @@ import type {
   ToolUiDeclaration,
 } from '@noetic-tools/types';
 import { NoeticConfigError } from '@noetic-tools/types';
-import type { ZodTypeAny, z } from 'zod';
 import { resolveContextOption } from './context-option';
 
 //#region Types
 
-interface ToolConfig<I extends ZodTypeAny, O extends ZodTypeAny> {
+interface ToolConfig<I extends StandardSchemaV1, O extends StandardSchemaV1> {
   name: string;
   description: string;
   input: I;
   output: O;
+  /**
+   * Explicit raw JSON Schema for the input, sent to the LLM when `input` is
+   * not a Zod schema. Required for non-Zod inputs exposed to a model;
+   * otherwise tool conversion raises `NoeticConfigError` `MISSING_JSON_SCHEMA`.
+   */
+  inputJsonSchema?: Record<string, unknown>;
   itemSchemas?: Pick<ItemSchemaExtensions, 'toolCalls' | 'toolResults' | 'items'>;
   decorateResultItem?: (params: {
     baseItem: FunctionCallOutputItem;
     callItem: FunctionCallItem;
-    args: z.infer<I>;
-    result: z.infer<O> | undefined;
+    args: InferSchemaOutput<I>;
+    result: InferSchemaOutput<O> | undefined;
     output: string;
     error?: boolean;
   }) => Item | ToolResultExtensionItem;
-  execute: (args: z.infer<I>, toolCtx: ToolExecutionContext) => Promise<z.infer<O>>;
+  execute: (
+    args: InferSchemaOutput<I>,
+    toolCtx: ToolExecutionContext,
+  ) => Promise<InferSchemaOutput<O>>;
   needsApproval?: boolean;
   /** Optional context declaration — the runtime generates a ContextLayer from this via toolContextLayer(). */
   context?: ToolContextDeclaration;
@@ -39,32 +49,38 @@ interface ToolConfig<I extends ZodTypeAny, O extends ZodTypeAny> {
   ui?: ToolUiDeclaration<I, O>;
 }
 
-interface GeneratorToolConfig<I extends ZodTypeAny, E extends ZodTypeAny, O extends ZodTypeAny> {
+interface GeneratorToolConfig<
+  I extends StandardSchemaV1,
+  E extends StandardSchemaV1,
+  O extends StandardSchemaV1,
+> {
   name: string;
   description: string;
   input: I;
   event: E;
   output: O;
+  /** See `ToolConfig.inputJsonSchema`. */
+  inputJsonSchema?: Record<string, unknown>;
   itemSchemas?: Pick<ItemSchemaExtensions, 'toolCalls' | 'toolResults' | 'items'>;
   decorateResultItem?: (params: {
     baseItem: FunctionCallOutputItem;
     callItem: FunctionCallItem;
-    args: z.infer<I>;
-    result: z.infer<O> | undefined;
+    args: InferSchemaOutput<I>;
+    result: InferSchemaOutput<O> | undefined;
     output: string;
     error?: boolean;
   }) => Item | ToolResultExtensionItem;
   execute: (
-    args: z.infer<I>,
+    args: InferSchemaOutput<I>,
     toolCtx: ToolExecutionContext,
-  ) => AsyncGenerator<z.infer<E>, z.infer<O>>;
+  ) => AsyncGenerator<InferSchemaOutput<E>, InferSchemaOutput<O>>;
   needsApproval?: boolean;
   /** Optional context declaration — the runtime generates a ContextLayer from this via toolContextLayer(). */
   context?: ToolContextDeclaration;
   /** @deprecated Renamed to `context`. */
   memory?: ToolContextDeclaration;
   /** Optional UI declaration — the runtime emits the rendered fragments at call/progress/result points. */
-  ui?: ToolUiDeclaration<I, O, z.infer<E>>;
+  ui?: ToolUiDeclaration<I, O, InferSchemaOutput<E>>;
 }
 
 //#endregion
@@ -94,11 +110,12 @@ function validateToolConfig(name: string, execute: unknown): void {
 //#region Public API
 
 /**
- * Creates a typed Tool with Zod schema inference for input and output.
+ * Creates a typed Tool with Standard Schema inference for input and output.
+ * Accepts Zod, Valibot, or any Standard Schema v1 implementation.
  *
  * @public
  */
-export function tool<I extends ZodTypeAny, O extends ZodTypeAny>(
+export function tool<I extends StandardSchemaV1, O extends StandardSchemaV1>(
   config: ToolConfig<I, O>,
 ): Tool<I, O> {
   validateToolConfig(config.name, config.execute);
@@ -108,6 +125,7 @@ export function tool<I extends ZodTypeAny, O extends ZodTypeAny>(
     description: config.description,
     input: config.input,
     output: config.output,
+    inputJsonSchema: config.inputJsonSchema,
     itemSchemas: config.itemSchemas,
     decorateResultItem: config.decorateResultItem,
     execute: config.execute,
@@ -122,9 +140,11 @@ export function tool<I extends ZodTypeAny, O extends ZodTypeAny>(
  *
  * @public
  */
-export function toolWithGenerator<I extends ZodTypeAny, E extends ZodTypeAny, O extends ZodTypeAny>(
-  config: GeneratorToolConfig<I, E, O>,
-): Tool<I, O> {
+export function toolWithGenerator<
+  I extends StandardSchemaV1,
+  E extends StandardSchemaV1,
+  O extends StandardSchemaV1,
+>(config: GeneratorToolConfig<I, E, O>): Tool<I, O> {
   validateToolConfig(config.name, config.execute);
 
   return {
@@ -133,6 +153,7 @@ export function toolWithGenerator<I extends ZodTypeAny, E extends ZodTypeAny, O 
     input: config.input,
     event: config.event,
     output: config.output,
+    inputJsonSchema: config.inputJsonSchema,
     itemSchemas: config.itemSchemas,
     decorateResultItem: config.decorateResultItem,
     execute: config.execute,

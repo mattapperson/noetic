@@ -59,7 +59,8 @@ The exported `Step` union additionally includes [`StepEvery`](#stepevery) for fi
 | `model` | `string` | yes | Model identifier |
 | `instructions` | `string` | no | System prompt / instructions for the model |
 | `tools` | `Tool[]` | no | Allowed tool subset (`undefined` = all, `[]` = none) |
-| `output` | `ZodType<O>` | no | Structured output schema |
+| `output` | `StandardSchemaV1<unknown, O> \| OutputCodec<O>` | no | Structured output schema (any Standard Schema v1; Zod is the default) or a streaming codec |
+| `outputJsonSchema` | `Record<string, unknown>` | no | Raw JSON Schema sent to the model as the structured-output constraint. Required for non-Zod `output` (`MISSING_JSON_SCHEMA` otherwise); ignored for Zod |
 | `params` | `ModelParams` | no | Sampling parameters |
 | `emit` | `boolean \| ((eventType, data) => boolean)` | no | Controls framework event emission for this step. Defaults to `true`. Pass `false` to suppress all framework events, or a filter function to allow specific events through. |
 
@@ -71,7 +72,7 @@ The exported `Step` union additionally includes [`StepEvery`](#stepevery) for fi
 |---|---|---|---|
 | `kind` | `'tool'` | yes | Discriminant |
 | `id` | `string` | yes | Step identifier |
-| `tool` | `Tool<ZodType<I>, ZodType<O>>` | yes | Tool definition |
+| `tool` | `Tool<StandardSchemaV1<unknown, I>, StandardSchemaV1<unknown, O>>` | yes | Tool definition |
 | `args` | `Partial<I>` | no | Preset arguments |
 
 ## StepBranch
@@ -217,12 +218,13 @@ A step that runs a body step on a fixed-interval schedule, optionally woken soon
 |---|---|---|
 | `name` | `string` | Tool name (used by the LLM for selection). |
 | `description` | `string` | Tool description shown to the LLM. |
-| `input` | `ZodType<I>` | Zod schema validating tool input arguments. |
-| `output` | `ZodType<O>` | Zod schema validating tool return value. |
-| `event` | `ZodType` | Optional Zod schema validating streaming events yielded during execution. |
+| `input` | `StandardSchemaV1<I>` | Schema validating tool input arguments (any Standard Schema v1; Zod is the default). |
+| `output` | `StandardSchemaV1<O>` | Schema validating tool return value. |
+| `inputJsonSchema` | `Record<string, unknown>` | Optional raw JSON Schema sent to the model for this tool's input. Required when `input` is not a Zod schema and the tool is exposed to a model — conversion throws `NoeticConfigError` code `MISSING_JSON_SCHEMA` otherwise. Ignored for Zod inputs, whose JSON Schema is derived via `z.toJSONSchema`. |
+| `event` | `StandardSchemaV1` | Optional schema validating streaming events yielded during execution. |
 | `itemSchemas` | `ItemSchemaExtensions` | Optional item schemas for tool-call/result extensions contributed by this tool. `toolResults` schemas are owner-scoped: they validate only this tool's own result items and never reject a sibling tool's results. Schemas are pure shape validators (gates, not normalizers) — the original item is returned on match, and Zod transforms/defaults are unsupported. |
 | `decorateResultItem` | `(params) => Item` | Decorate the harness-created tool-result item before it is appended/emitted. The decorated item must satisfy this tool's own `itemSchemas.toolResults` (when declared) — including for error outputs such as malformed-arguments results — or the round fails with `NoeticError` kind `item_schema_mismatch`. |
-| `execute` | `(args: z.infer<I>, toolCtx: ToolExecutionContext) => Promise<z.infer<O>> \| AsyncGenerator<unknown, z.infer<O>>` | Async function (or generator) that performs the tool's work. |
+| `execute` | `(args: InferSchemaOutput<I>, toolCtx: ToolExecutionContext) => Promise<InferSchemaOutput<O>> \| AsyncGenerator<unknown, InferSchemaOutput<O>>` | Async function (or generator) that performs the tool's work. `InferSchemaOutput` is `z.output` for Zod schemas and `StandardSchemaV1.InferOutput` otherwise. |
 | `needsApproval` | `boolean` | Optional. When `true`, execution pauses for human approval before running. |
 | `context` | `ToolContextDeclaration` | Optional. Declares tool-owned state the runtime materializes into a `ContextLayer`. |
 

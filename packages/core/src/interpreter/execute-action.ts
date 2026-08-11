@@ -2,7 +2,7 @@
  * Action step handlers: run, llm, spawn, provide, tool.
  */
 
-import type { OutputCodec } from '@noetic-tools/types';
+import type { OutputCodec, StandardSchemaV1 } from '@noetic-tools/types';
 import {
   createMessage,
   estimateTokens,
@@ -12,9 +12,8 @@ import {
   isOutputCodec,
   NoeticConfigError,
   NoeticErrorImpl,
+  validateSchema,
 } from '@noetic-tools/types';
-import type { ZodType } from 'zod';
-import { ZodError } from 'zod';
 import type { EmitOption } from '../runtime/broadcaster-utils';
 import { emitToolUi } from '../runtime/tool-ui';
 import type { ItemSchemaRegistry, LayerStateStore } from './action-deps';
@@ -69,6 +68,7 @@ import { cloneWithGuard } from './clone-guard';
 import { collectAllTools, deduplicateTools } from './collect-tools';
 import { prepareBandedView, stampAnchoringAttributes } from './context-assembly';
 import { trackUsage } from './message-helpers';
+import { parseStructuredOutput } from './structured-output';
 import {
   getContextChannelStore,
   isContextImpl,
@@ -290,20 +290,20 @@ async function runInputPipeline({
  * it is kept off `outputSchema` (which drives JSON-schema formatting).
  */
 function resolveOutputMode<O>(
-  output: ZodType<O> | OutputCodec<O> | undefined,
+  output: StandardSchemaV1 | OutputCodec<O> | undefined,
   baseInstructions: string | undefined,
 ): {
   outputCodec: OutputCodec<O> | undefined;
-  outputSchema: ZodType<O> | undefined;
+  outputSchema: StandardSchemaV1 | undefined;
   resolvedInstructions: string | undefined;
 } {
-  // A generic type predicate does not reliably narrow a `ZodType<O> |
+  // A generic type predicate does not reliably narrow a `StandardSchemaV1 |
   // OutputCodec<O>` union through a free type parameter, so bridge the two
   // branches with the sanctioned framework cast — `isOutputCodec` guarantees
   // the discriminant at runtime.
   const isCodec = isOutputCodec<O>(output);
   const outputCodec = isCodec ? frameworkCast<OutputCodec<O>>(output) : undefined;
-  const outputSchema = isCodec ? undefined : frameworkCast<ZodType<O> | undefined>(output);
+  const outputSchema = isCodec ? undefined : frameworkCast<StandardSchemaV1 | undefined>(output);
   const codecInstructions = outputCodec?.instructions;
   const resolvedInstructions =
     codecInstructions !== undefined
@@ -354,50 +354,27 @@ function finalizeCodecOutput<O>(
   return session.finish(lastText);
 }
 
-/** JSON-parse + Zod-validate the assistant text, raising `llm_parse_error`. */
-function parseSchemaOutput<O>(schema: ZodType<O>, lastText: string, stepId: string): O {
-  try {
-    return schema.parse(JSON.parse(lastText));
-  } catch (e) {
-    if (e instanceof SyntaxError || e instanceof ZodError) {
-      throw new NoeticErrorImpl({
-        kind: 'llm_parse_error',
-        stepId,
-        raw: lastText,
-        schema,
-        zodError:
-          e instanceof ZodError
-            ? e
-            : new ZodError([
-                {
-                  code: 'custom',
-                  message: `Invalid JSON: ${e.message}`,
-                  path: [],
-                },
-              ]),
-      });
-    }
-    throw e;
-  }
-}
-
 /**
  * Turn the finished assistant text into the step's typed output: a streaming
- * codec, a Zod schema, or raw text passthrough.
+ * codec, a Standard Schema, or raw text passthrough.
  */
-function finalizeStepOutput<O>(params: {
+async function finalizeStepOutput<O>(params: {
   stepId: string;
   emit: EmitOption | undefined;
   outputCodec: OutputCodec<O> | undefined;
-  outputSchema: ZodType<O> | undefined;
+  outputSchema: StandardSchemaV1 | undefined;
   lastText: string;
   ctx: Context<ContextData>;
-}): O {
+}): Promise<O> {
   if (params.outputCodec) {
     return finalizeCodecOutput(params.outputCodec, params.lastText, params.ctx, params.emit);
   }
   if (params.outputSchema) {
-    return parseSchemaOutput(params.outputSchema, params.lastText, params.stepId);
+    return parseStructuredOutput<O>({
+      schema: params.outputSchema,
+      rawText: params.lastText,
+      stepId: params.stepId,
+    });
   }
   return frameworkCast<O>(params.lastText);
 }
@@ -631,6 +608,7 @@ export async function executeLLM<TContext, I, O>(
           tools: resolvedTools,
           params: step.params,
           outputSchema: outputSchema,
+          outputJsonSchema: step.outputJsonSchema,
           emit: step.emit,
           _serverTools,
           ctx: baseCtx,
@@ -646,6 +624,7 @@ export async function executeLLM<TContext, I, O>(
           instructions: resolvedInstructions,
           params: step.params,
           outputSchema: outputSchema,
+          outputJsonSchema: step.outputJsonSchema,
           emit: step.emit,
           _serverTools,
           nodeId: step.id,
@@ -1101,23 +1080,19 @@ export async function executeTool<TContext, I, O>(
   const baseCtx = frameworkCast<Context<ContextData>>(ctx);
   const args = step.args ? Object.assign({}, input, step.args) : input;
 
-  const parseResult = step.tool.input.safeParse(args);
+  const parseResult = await validateSchema(step.tool.input, args);
   if (!parseResult.success) {
     throw new NoeticErrorImpl({
       kind: 'step_failed',
       stepId: step.id,
-      cause: new Error(`Tool input validation failed: ${parseResult.error.message}`),
+      cause: new Error(`Tool input validation failed: ${parseResult.zodError.message}`),
       retriesExhausted: false,
     });
   }
+  const parsedArgs = parseResult.value;
 
   if (layers && layers.length > 0) {
-    const decision = await harness.beforeToolCall(
-      layers,
-      step.tool.name,
-      parseResult.data,
-      baseCtx,
-    );
+    const decision = await harness.beforeToolCall(layers, step.tool.name, parsedArgs, baseCtx);
     if (decision.action !== SteeringAction.Allow) {
       throw new NoeticErrorImpl({
         kind: 'steering_denied',
@@ -1131,11 +1106,11 @@ export async function executeTool<TContext, I, O>(
     tool: step.tool,
     callId: step.id,
     phase: 'call',
-    args: parseResult.data,
+    args: parsedArgs,
   });
   try {
     const toolCtx = buildToolExecutionContext(baseCtx, harness);
-    const execResult = step.tool.execute(parseResult.data, toolCtx);
+    const execResult = step.tool.execute(parsedArgs, toolCtx);
 
     const result = isAsyncGenerator(execResult)
       ? await consumeToolGenerator({
@@ -1143,7 +1118,7 @@ export async function executeTool<TContext, I, O>(
           stepId: step.id,
           tool: step.tool,
           ctx: baseCtx,
-          args: parseResult.data,
+          args: parsedArgs,
         })
       : await execResult;
 
@@ -1152,7 +1127,7 @@ export async function executeTool<TContext, I, O>(
       tool: step.tool,
       callId: step.id,
       phase: 'result',
-      args: parseResult.data,
+      args: parsedArgs,
       output: result,
     });
     return frameworkCast<O>(result);
@@ -1162,7 +1137,7 @@ export async function executeTool<TContext, I, O>(
       tool: step.tool,
       callId: step.id,
       phase: 'error',
-      args: parseResult.data,
+      args: parsedArgs,
       error: e,
     });
     if (e instanceof NoeticErrorImpl) {

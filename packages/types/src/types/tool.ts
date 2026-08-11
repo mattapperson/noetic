@@ -1,4 +1,4 @@
-import type { ZodTypeAny, z } from 'zod';
+import type { StandardSchemaV1 } from '@standard-schema/spec';
 import type {
   FunctionCallItem,
   FunctionCallOutputItem,
@@ -6,10 +6,11 @@ import type {
   ItemSchemaExtensions,
   ToolResultExtensionItem,
 } from './items';
+import type { InferSchemaOutput } from './schema';
 
-type ToolExecutionResult<O extends ZodTypeAny> =
-  | Promise<z.infer<O>>
-  | AsyncGenerator<unknown, z.infer<O>>;
+type ToolExecutionResult<O extends StandardSchemaV1> =
+  | Promise<InferSchemaOutput<O>>
+  | AsyncGenerator<unknown, InferSchemaOutput<O>>;
 
 /**
  * Declares tool-owned state that the runtime materializes into a ContextLayer.
@@ -52,22 +53,28 @@ export interface UiFragment {
  * @public
  */
 export interface ToolUiDeclaration<
-  I extends ZodTypeAny = ZodTypeAny,
-  O extends ZodTypeAny = ZodTypeAny,
+  I extends StandardSchemaV1 = StandardSchemaV1,
+  O extends StandardSchemaV1 = StandardSchemaV1,
   E = unknown,
 > {
   /** Rendered as soon as the call streams in — args may be partial. */
-  call?(args: Partial<z.infer<I>>): UiFragment | null;
+  call?(args: Partial<InferSchemaOutput<I>>): UiFragment | null;
   /** Re-rendered on each event an AsyncGenerator `execute` yields. Receives all events so far. */
   progress?(events: E[]): UiFragment | null;
   /** Replaces the tool's region on successful completion. */
-  result?(output: z.infer<O>, args: z.infer<I>): UiFragment | null;
+  result?(output: InferSchemaOutput<O>, args: InferSchemaOutput<I>): UiFragment | null;
   /** Replaces the tool's region when execution throws. */
-  error?(err: unknown, args: z.infer<I>): UiFragment | null;
+  error?(err: unknown, args: InferSchemaOutput<I>): UiFragment | null;
 }
 
 /**
  * A tool definition that an LLM can invoke during execution.
+ *
+ * Input and output schemas accept any Standard Schema v1 implementation
+ * (Zod, Valibot, ArkType, …). Zod schemas remain the fast path: their JSON
+ * Schema is derived automatically via `z.toJSONSchema`. Non-Zod inputs
+ * exposed to an LLM must carry an explicit `inputJsonSchema`, or tool
+ * conversion raises `NoeticConfigError` with code `MISSING_JSON_SCHEMA`.
  *
  * The runtime passes a `ToolExecutionContext` (from `./tool-context`) as
  * the second argument to `execute`. Callers that need the concrete type
@@ -75,25 +82,34 @@ export interface ToolUiDeclaration<
  * re-exports it with `ToolExecutionContext` substituted in.
  * @public
  */
-export interface Tool<I extends ZodTypeAny = ZodTypeAny, O extends ZodTypeAny = ZodTypeAny> {
+export interface Tool<
+  I extends StandardSchemaV1 = StandardSchemaV1,
+  O extends StandardSchemaV1 = StandardSchemaV1,
+> {
   /** Unique tool name used by the LLM for selection. */
   name: string;
   /** Human-readable description shown to the LLM. */
   description: string;
-  /** Zod schema validating tool input arguments. */
+  /** Schema validating tool input arguments (any Standard Schema v1). */
   input: I;
-  /** Zod schema validating tool return value. */
+  /** Schema validating tool return value (any Standard Schema v1). */
   output: O;
-  /** Optional Zod schema validating streaming events yielded during execution. */
-  event?: ZodTypeAny;
+  /**
+   * Explicit raw JSON Schema for the tool input, sent to the LLM wire format.
+   * Required when `input` is not a Zod schema and the tool is exposed to a
+   * model; ignored for Zod inputs, whose JSON Schema is derived automatically.
+   */
+  inputJsonSchema?: Record<string, unknown>;
+  /** Optional schema validating streaming events yielded during execution. */
+  event?: StandardSchemaV1;
   /** Optional item schemas contributed by this tool for tool call/result extensions. */
   itemSchemas?: Pick<ItemSchemaExtensions, 'toolCalls' | 'toolResults' | 'items'>;
   /** Decorate the harness-created tool result item before it is appended/emitted. */
   decorateResultItem?(params: {
     baseItem: FunctionCallOutputItem;
     callItem: FunctionCallItem;
-    args: z.infer<I>;
-    result: z.infer<O> | undefined;
+    args: InferSchemaOutput<I>;
+    result: InferSchemaOutput<O> | undefined;
     output: string;
     error?: boolean;
   }): Item | ToolResultExtensionItem;
@@ -103,7 +119,7 @@ export interface Tool<I extends ZodTypeAny = ZodTypeAny, O extends ZodTypeAny = 
    * this type a dependency leaf. Use `tool()` from `builders/` or cast at
    * the call site to get a typed handle.
    */
-  execute(args: z.infer<I>, toolCtx: unknown): ToolExecutionResult<O>;
+  execute(args: InferSchemaOutput<I>, toolCtx: unknown): ToolExecutionResult<O>;
   /** When true, execution pauses for human approval before running. */
   needsApproval?: boolean;
   /** Optional context declaration — the runtime generates a ContextLayer from this. */

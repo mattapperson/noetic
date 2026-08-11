@@ -8,6 +8,7 @@ import type {
   LLMResponse,
   RoundUsage,
   Span,
+  StandardSchemaV1,
   Tool,
   TraceExporter,
 } from '@noetic-tools/types';
@@ -15,8 +16,6 @@ import { frameworkCast, NoeticConfigError } from '@noetic-tools/types';
 import type * as OpenRouterAgent from '@openrouter/agent';
 import type { OpenRouter } from '@openrouter/agent';
 import { serverTool } from '@openrouter/agent';
-import type { ZodType } from 'zod';
-import { z } from 'zod';
 import {
   convertTools,
   executeToolCall,
@@ -24,6 +23,7 @@ import {
   extractSystemInstruction,
   extractUsage,
   itemsToInput,
+  resolveWireJsonSchema,
   sanitizeToolNameForWire,
 } from '../adapters/openrouter';
 import { isFunctionCall } from '../interpreter/typeguards';
@@ -37,14 +37,21 @@ const MAX_TOOL_ROUNDS = 32;
 const MAX_RECOVERY_CONTINUATIONS = 3;
 const EPHEMERAL_CONTINUE_INPUT = 'continue';
 
-function buildTextFormat(schema: ZodType): {
+function buildTextFormat(
+  schema: StandardSchemaV1,
+  explicitJsonSchema?: Record<string, unknown>,
+): {
   format: {
     type: 'json_schema';
     name: string;
     schema: Record<string, unknown>;
   };
 } {
-  const jsonSchema = z.toJSONSchema(schema);
+  const jsonSchema = resolveWireJsonSchema({
+    schema,
+    explicitJsonSchema,
+    what: 'structured output schema',
+  });
   return {
     format: {
       type: 'json_schema',
@@ -516,7 +523,9 @@ export class AgentHarnessModelCaller {
     const rounds: RoundUsage[] = [];
     let totalCost = 0;
     const conversationInput = itemsToInput(prepared.remaining);
-    const textFormat = request.outputSchema ? buildTextFormat(request.outputSchema) : undefined;
+    const textFormat = request.outputSchema
+      ? buildTextFormat(request.outputSchema, request.outputJsonSchema)
+      : undefined;
     let round = 0;
     let invalidRecoveryContinuations = 0;
     let toolLimitRecoveryContinuations = 0;

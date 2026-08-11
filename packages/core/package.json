@@ -58,7 +58,8 @@
   },
   "devDependencies": {
     "@openrouter/agent": "^0.6.0",
-    "bun-types": "latest"
+    "bun-types": "latest",
+    "valibot": "1.4.2"
   },
   "peerDependencies": {
     "@openrouter/agent": "^0.6.0",

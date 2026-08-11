@@ -1,4 +1,4 @@
-import type { ZodType } from 'zod';
+import type { StandardSchemaV1 } from '@standard-schema/spec';
 import type { ItemSchemaRegistry } from '../schemas/item';
 import type { Channel, ChannelHandle, ExternalChannel } from './channel';
 import type { LLMResponse, ModelParams, StepMeta, TokenUsage } from './common';
@@ -47,7 +47,8 @@ interface ContextCallModelRequestBase {
   items: ReadonlyArray<import('./items').Item>;
   instructions?: string;
   params?: ModelParams;
-  outputSchema?: ZodType;
+  outputSchema?: StandardSchemaV1;
+  outputJsonSchema?: Record<string, unknown>;
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
   signal?: AbortSignal;
 }
@@ -131,7 +132,7 @@ export type ContextStep<TContext = ContextData, I = unknown, O = unknown> =
   | {
       readonly kind: 'llm';
       readonly id: string;
-      readonly output?: ZodType<O>;
+      readonly output?: StandardSchemaV1<unknown, O>;
     }
   | {
       readonly kind: 'loop';

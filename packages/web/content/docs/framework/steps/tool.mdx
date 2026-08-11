@@ -47,8 +47,9 @@ Every tool in Noetic follows the same interface, whether it is passed to `step.l
 | --- | --- | --- | --- |
 | `name` | `string` | Yes | Tool name (used in LLM function calling) |
 | `description` | `string` | Yes | Human-readable description for the model |
-| `input` | `ZodType<I>` | Yes | Zod schema defining the tool's input |
-| `output` | `ZodType<O>` | Yes | Zod schema defining the tool's output |
+| `input` | `StandardSchemaV1<I>` | Yes | Schema defining the tool's input — any [Standard Schema v1](https://standardschema.dev) validator (Zod, Valibot, ArkType, …); Zod is the default |
+| `output` | `StandardSchemaV1<O>` | Yes | Schema defining the tool's output |
+| `inputJsonSchema` | `Record<string, unknown>` | Only for non-Zod `input` | Explicit raw JSON Schema sent to the model. Required when `input` is not a Zod schema and the tool is exposed to a model — otherwise tool conversion throws `NoeticConfigError` with code `MISSING_JSON_SCHEMA`. Zod inputs derive their JSON Schema automatically via `z.toJSONSchema` and ignore this field |
 | `execute` | `(args: I, toolCtx: ToolExecutionContext) => Promise<O>` | Yes | The function that runs the tool. The second argument is a `ToolExecutionContext` — `{ ctx, harness, fs, shell, context, assembledView, lastStepMeta }` — not the step `Context` itself (which is available as `toolCtx.ctx`) |
 | `needsApproval` | `boolean` | No | If `true`, the runtime should ask for human approval before executing |
 | `context` | `ToolContextDeclaration` | No | Declares tool-owned state; the runtime generates a context layer from it |
@@ -61,7 +62,7 @@ Every tool in Noetic follows the same interface, whether it is passed to `step.l
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
 | `id` | `string` | Yes | Unique step identifier |
-| `tool` | `Tool<ZodType<I>, ZodType<O>>` | Yes | The tool to invoke |
+| `tool` | `Tool<StandardSchemaV1<unknown, I>, StandardSchemaV1<unknown, O>>` | Yes | The tool to invoke |
 | `args` | `Partial<I>` | No | Preset arguments merged with step input |
 
 ## Defining a Tool
@@ -98,6 +99,30 @@ const UrlOutput = z.object({
   status: z.number(),
 });
 ```
+
+## Standard Schema v1
+
+Tool schemas accept any Standard Schema v1 validator, not just Zod. At runtime the interpreter validates through the validator itself — Zod via `safeParse`, everything else via `~standard.validate` (sync or Promise results both supported) — and the parsed/transformed value is what `execute` receives. The model-facing JSON Schema, however, can only be auto-derived from Zod, so non-Zod tools exposed to a model must provide `inputJsonSchema` explicitly. This self-contained JSON Schema handoff bridges the Zod-bound `@openrouter/agent` wire boundary with no per-validator runtime dependencies.
+
+```ts
+import * as v from 'valibot';
+import { tool } from '@noetic-tools/core';
+
+const search = tool({
+  name: 'search',
+  description: 'Search the knowledge base',
+  input: v.object({ query: v.string() }),
+  inputJsonSchema: {
+    type: 'object',
+    properties: { query: { type: 'string' } },
+    required: ['query'],
+  },
+  output: v.object({ results: v.array(v.string()) }),
+  execute: async (args) => ({ results: ['Result 1', 'Result 2'] }),
+});
+```
+
+Standard Schema support covers tool input/output/event schemas and `step.llm` / sub-harness structured output only. Channels, context-layer schemas, item extension schemas, and JSON workflow schemas remain Zod-specific.
 
 ## Human-in-the-Loop Approval
 

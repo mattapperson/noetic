@@ -41,7 +41,7 @@
     },
     "packages/context": {
       "name": "@noetic-tools/context",
-      "version": "1.0.0",
+      "version": "1.2.0",
       "dependencies": {
         "@noetic-tools/types": "workspace:*",
         "zod": "^4.0.0",
@@ -55,7 +55,7 @@
     },
     "packages/core": {
       "name": "@noetic-tools/core",
-      "version": "5.1.0",
+      "version": "5.3.0",
       "dependencies": {
         "@noetic-tools/context": "workspace:*",
         "@noetic-tools/types": "workspace:*",
@@ -65,6 +65,7 @@
       "devDependencies": {
         "@openrouter/agent": "^0.6.0",
         "bun-types": "latest",
+        "valibot": "1.4.2",
       },
       "peerDependencies": {
         "@openrouter/agent": "^0.6.0",
@@ -262,9 +263,10 @@
     },
     "packages/types": {
       "name": "@noetic-tools/types",
-      "version": "3.0.0",
+      "version": "3.1.0",
       "dependencies": {
         "@openrouter/agent": "^0.6.0",
+        "@standard-schema/spec": "1.1.0",
         "zod": "^4.0.0",
       },
       "devDependencies": {
@@ -1180,6 +1182,8 @@
     "use-sync-external-store": ["use-sync-external-store@1.6.0", "", { "peerDependencies": { "react": "^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0" } }, "sha512-Pp6GSwGP/NrPIrxVFAIkOQeyw8lFenOHijQWkUTrDvrF4ALqylP2C/KCkeS9dpUM3KvYRQhna5vt7IL95+ZQ9w=="],
 
     "util-deprecate": ["util-deprecate@1.0.2", "", {}, "sha512-EPD5q1uXyFxJpCrLnCc1nHnq3gOa6DZBocAIiI2TaSCA7VCJ1UJDMagCzIkXNsUYfD1daK//LTEQ8xiIbrHtcw=="],
+
+    "valibot": ["valibot@1.4.2", "", { "peerDependencies": { "typescript": ">=5" }, "optionalPeers": ["typescript"] }, "sha512-gjdCvJ6d3RyHAneqxMYMW9QMCwYMb3jpOO0IyHZV1bnRHFBHrX3VkIILt5XYR0WhwHiH7Mty8ovuPZ/O3gamrg=="],
 
     "vfile": ["vfile@6.0.3", "", { "dependencies": { "@types/unist": "^3.0.0", "vfile-message": "^4.0.0" } }, "sha512-KzIbH/9tXat2u30jf+smMwFCsno4wHVdNmzFyL+T/L3UGqqk6JKfVqOFOZEpZSHADH1k40ab6NUIXZq422ov3Q=="],
 

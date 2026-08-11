@@ -10,15 +10,19 @@ import type {
   Item,
   LLMResponse,
   MessageItem,
+  StandardSchemaV1,
   Tool,
 } from '@noetic-tools/types';
 import {
   frameworkCast,
   isAssistantMessage,
+  isZodSchema,
   NoeticConfigError,
   SteeringAction,
+  validateSchema,
 } from '@noetic-tools/types';
 import type * as OpenRouterAgent from '@openrouter/agent';
+import type { ZodTypeAny } from 'zod';
 import { z } from 'zod';
 import { buildToolExecutionContext } from '../runtime/tool-context';
 import { emitToolUi } from '../runtime/tool-ui';
@@ -309,6 +313,53 @@ export function sanitizeToolNameForWire(name: string): string {
   return name.replace(/[^a-zA-Z0-9_-]/g, '_');
 }
 
+/**
+ * Resolve the JSON Schema sent to the model for a Standard Schema. Zod
+ * schemas derive it via `z.toJSONSchema`; non-Zod schemas require the
+ * explicit escape hatch (`inputJsonSchema` / `outputJsonSchema`), otherwise
+ * the wire boundary throws `NoeticConfigError` with code
+ * `MISSING_JSON_SCHEMA`.
+ * @internal
+ */
+export function resolveWireJsonSchema(params: {
+  schema: StandardSchemaV1;
+  explicitJsonSchema?: Record<string, unknown>;
+  what: string;
+}): Record<string, unknown> {
+  const { schema, explicitJsonSchema, what } = params;
+  if (isZodSchema(schema)) {
+    return z.toJSONSchema(schema);
+  }
+  if (explicitJsonSchema) {
+    return explicitJsonSchema;
+  }
+  throw new NoeticConfigError({
+    code: 'MISSING_JSON_SCHEMA',
+    message: `The ${what} is not a Zod schema, so its JSON Schema cannot be derived automatically.`,
+    hint: 'Pass an explicit raw JSON Schema: `inputJsonSchema` on tool(), or `outputJsonSchema` on step.llm().',
+  });
+}
+
+/**
+ * The OpenRouter SDK requires a live Zod `inputSchema` and runs
+ * `z.toJSONSchema` over it; it never executes these tool objects (Noetic owns
+ * its tool loop). For non-Zod inputs, bridge the explicit raw JSON Schema
+ * through a wire-only `z.any().meta(...)` so the SDK's conversion emits that
+ * schema untouched. Noetic, not the SDK, validates tool-call args.
+ */
+function inputSchemaForWire(tool: Tool): ZodTypeAny {
+  if (isZodSchema(tool.input)) {
+    return tool.input;
+  }
+  return z.any().meta(
+    resolveWireJsonSchema({
+      schema: tool.input,
+      explicitJsonSchema: tool.inputJsonSchema,
+      what: `input schema of tool '${tool.name}'`,
+    }),
+  );
+}
+
 /** @internal */
 export function convertTools({ tools }: ConvertToolsParams): SdkTool[] {
   return tools.map((t) =>
@@ -317,7 +368,7 @@ export function convertTools({ tools }: ConvertToolsParams): SdkTool[] {
       function: {
         name: sanitizeToolNameForWire(t.name),
         description: t.description,
-        inputSchema: t.input,
+        inputSchema: inputSchemaForWire(t),
       },
     }),
   );
@@ -384,6 +435,15 @@ export async function executeToolCall(params: ExecuteToolCallParams): Promise<{
     }
   }
 
+  const validated = await validateSchema(matchedTool.input, params.args);
+  if (!validated.success) {
+    return {
+      output: `Error: invalid arguments for tool '${params.toolName}': ${validated.zodError.message}`,
+      error: true,
+    };
+  }
+  const parsedArgs = validated.value;
+
   const toolCtx = buildToolExecutionContext(params.context, params.harness);
   const callId = params.callId;
   const uiBase =
@@ -392,7 +452,7 @@ export async function executeToolCall(params: ExecuteToolCallParams): Promise<{
           ctx: params.context,
           tool: matchedTool,
           callId,
-          args: params.args,
+          args: parsedArgs,
         }
       : undefined;
   if (uiBase) {
@@ -402,7 +462,7 @@ export async function executeToolCall(params: ExecuteToolCallParams): Promise<{
     });
   }
   try {
-    const executionResult = matchedTool.execute(params.args, toolCtx);
+    const executionResult = matchedTool.execute(parsedArgs, toolCtx);
     // Generator tools stream progress; drive them here so tool-UI `progress`
     // fragments emit per yield (the non-UI case just consumes to the return).
     let result: unknown;

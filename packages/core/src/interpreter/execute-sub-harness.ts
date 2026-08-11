@@ -26,9 +26,9 @@ import {
   NoeticConfigError,
   NoeticErrorImpl,
 } from '@noetic-tools/types';
-import { ZodError } from 'zod';
 import { resolveLazy } from './execute-action';
 import { trackUsage } from './message-helpers';
+import { parseStructuredOutput } from './structured-output';
 import { SubHarnessEventBridge } from './sub-harness-events';
 import { isContextImpl, isFunctionCall, isMutableContext } from './typeguards';
 
@@ -292,30 +292,11 @@ export async function executeSubHarness<TContext, I, O>(
   const lastText = result.text.length > 0 ? result.text : extractAssistantText(result.items);
 
   if (step.output) {
-    try {
-      const parsed = JSON.parse(lastText);
-      return step.output.parse(parsed);
-    } catch (e) {
-      if (e instanceof SyntaxError || e instanceof ZodError) {
-        throw new NoeticErrorImpl({
-          kind: 'llm_parse_error',
-          stepId: step.id,
-          raw: lastText,
-          schema: step.output,
-          zodError:
-            e instanceof ZodError
-              ? e
-              : new ZodError([
-                  {
-                    code: 'custom',
-                    message: `Invalid JSON: ${e.message}`,
-                    path: [],
-                  },
-                ]),
-        });
-      }
-      throw e;
-    }
+    return parseStructuredOutput<O>({
+      schema: step.output,
+      rawText: lastText,
+      stepId: step.id,
+    });
   }
 
   return frameworkCast<O>(lastText);

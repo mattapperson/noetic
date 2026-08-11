@@ -10,6 +10,8 @@ npm install @noetic-tools/core
 
 `@noetic-tools/core` depends on `@openrouter/agent` (the OpenRouter LLM adapter) and `zod`; your package manager installs both automatically. Runs on Node.js 18+ and Bun.
 
+Tool and structured-output schemas accept any [Standard Schema v1](https://standardschema.dev) validator — Zod remains the default (its JSON Schema is derived automatically); non-Zod validators (Valibot, ArkType, …) work too, with an explicit raw JSON Schema (`inputJsonSchema` / `outputJsonSchema`) wherever a schema must reach the model.
+
 ## Set your API key
 
 Noetic talks to LLMs through [OpenRouter](https://openrouter.ai). Grab a key at [openrouter.ai/keys](https://openrouter.ai/keys) and export it — the runtime reads `OPENROUTER_API_KEY` by default:

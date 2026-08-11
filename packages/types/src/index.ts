@@ -23,6 +23,7 @@ export * from './types/items';
 export * from './types/observability';
 export * from './types/output-codec';
 export * from './types/runtime';
+export * from './types/schema';
 export * from './types/shell-adapter';
 export * from './types/steering';
 export * from './types/step';

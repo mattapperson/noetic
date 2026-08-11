@@ -24,14 +24,16 @@ type Step<TContext, I, O> =
 
 The `kind` field is the discriminant. A simple `switch (step.kind)` gives you exhaustive handling with full type narrowing.
 
-## Why Zod Everywhere
+## Why Zod by Default, Standard Schema at the Model Boundary
 
-Tool inputs, tool outputs, channel payloads, structured LLM output, plan nodes, and layer state schemas all use Zod. A single validation library means:
+Tool inputs, tool outputs, structured LLM output, and sub-harness structured output accept any [Standard Schema v1](https://standardschema.dev) validator, with Zod as the default and fast path. Everything else — channel payloads, plan nodes, layer state schemas, item extension schemas, JSON workflow schemas — remains Zod-specific. Zod as the default means:
 
 - **Runtime type safety** at every system boundary (user input, LLM output, tool results, channel messages)
 - **Automatic TypeScript inference** -- define a schema once, get the type for free
-- **Consistent error messages** -- Zod's `ZodError` with path information everywhere
-- **JSON Schema generation** for LLM function calling -- Zod schemas translate directly to the format models expect
+- **Consistent error messages** -- `ZodError` with path information everywhere; non-Zod validation failures are adapted into a synthetic `ZodError` so the error surface stays single
+- **JSON Schema generation** for LLM function calling -- Zod schemas translate directly (via `z.toJSONSchema`) to the format models expect
+
+Non-Zod validators are validated through the Standard Schema `~standard.validate` hook (sync or Promise). The model wire boundary, however, is Zod-bound: `@openrouter/agent` expects Zod input schemas and runs `z.toJSONSchema` itself. Rather than take a runtime dependency on each validator's JSON-Schema converter (or on `@standard-community/standard-json`, whose converter peers and maturity don't meet the bar), Noetic bridges that boundary with a self-contained handoff: the user supplies the raw JSON Schema explicitly (`inputJsonSchema` on tools, `outputJsonSchema` on `step.llm`), and it is passed through untouched. No per-validator runtime dependencies; missing escape hatches fail fast with `NoeticConfigError` code `MISSING_JSON_SCHEMA`.
 
 The alternative (separate runtime validation + TypeScript types) leads to drift and duplication.
 
