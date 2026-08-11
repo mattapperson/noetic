@@ -3,9 +3,9 @@ import type { ContextLayer } from '@noetic-tools/context';
 import {
   createLayerStateStore,
   initLayers,
+  instructions,
   recallLayers,
   Slot,
-  staticContent,
 } from '@noetic-tools/context';
 import { frameworkCast } from '@noetic-tools/types';
 import { makeCtx, makeItemLog, makeStorage } from '../_helpers';
@@ -16,9 +16,9 @@ function asLayers(layer: ContextLayer<string>): ContextLayer[] {
   ]);
 }
 
-describe('staticContent', () => {
+describe('instructions', () => {
   it('loads content at init and recalls as tagged string', async () => {
-    const layer = staticContent({
+    const layer = instructions({
       load: async () => 'You are a helpful assistant.',
     });
     const store = createLayerStateStore();
@@ -54,16 +54,16 @@ describe('staticContent', () => {
   });
 
   it('uses default id, slot, and scope', () => {
-    const layer = staticContent({
+    const layer = instructions({
       load: async () => 'content',
     });
-    expect(layer.id).toBe('static-content');
+    expect(layer.id).toBe('instructions');
     expect(layer.slot).toBe(Slot.WORKING_MEMORY + 5);
     expect(layer.scope).toBe('resource');
   });
 
   it('allows custom tag', async () => {
-    const layer = staticContent({
+    const layer = instructions({
       load: async () => 'rules here',
       tag: 'rules',
     });
@@ -85,7 +85,7 @@ describe('staticContent', () => {
   });
 
   it('returns null when content is empty', async () => {
-    const layer = staticContent({
+    const layer = instructions({
       load: async () => '',
     });
     const store = createLayerStateStore();
@@ -119,7 +119,7 @@ describe('staticContent', () => {
   });
 
   it('omits name field', () => {
-    const layer = staticContent({
+    const layer = instructions({
       load: async () => 'content',
     });
     expect('name' in layer).toBe(false);
@@ -127,7 +127,7 @@ describe('staticContent', () => {
 
   describe('budget trim (M4)', () => {
     async function recallWithBudget(content: string, budget: number): Promise<string> {
-      const layer = staticContent({
+      const layer = instructions({
         load: async () => content,
       });
       const store = createLayerStateStore();

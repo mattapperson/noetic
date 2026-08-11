@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   createLayerStateStore,
-  fileReference,
+  filesystem,
   initLayers,
   runAppendPipeline,
 } from '@noetic-tools/context';
@@ -63,7 +63,7 @@ function getRecallContent(result: RecallObject | string | null): string {
 
 //#endregion
 
-describe('fileReference AUDIT', () => {
+describe('filesystem AUDIT', () => {
   let tempDir: string;
 
   beforeEach(async () => {
@@ -110,7 +110,7 @@ describe('fileReference AUDIT', () => {
   // self-limit to `budget` (it is the canonical budget-respecting layer).
   it('AUDIT-A: recall tokenCount must not exceed the supplied budget', async () => {
     const store = createLayerStateStore();
-    const layer = fileReference({
+    const layer = filesystem({
       baseDir: tempDir,
     });
 
@@ -143,7 +143,7 @@ describe('fileReference AUDIT', () => {
       text: 'Check #big.ts',
     });
 
-    const state = store.get<FileRefStateView>('exec-budget', 'file-reference');
+    const state = store.get<FileRefStateView>('exec-budget', 'filesystem');
 
     const BUDGET = 80;
     const recallResult = await callRecall(layer, {
@@ -171,7 +171,7 @@ describe('fileReference AUDIT', () => {
   // huge file.
   it('AUDIT-B: a single oversized file truncated for budget must shrink to roughly the budget', async () => {
     const store = createLayerStateStore();
-    const layer = fileReference({
+    const layer = filesystem({
       baseDir: tempDir,
     });
 
@@ -203,7 +203,7 @@ describe('fileReference AUDIT', () => {
       text: 'Check #many.ts',
     });
 
-    const state = store.get<FileRefStateView>('exec-trunc', 'file-reference');
+    const state = store.get<FileRefStateView>('exec-trunc', 'filesystem');
 
     const BUDGET = 100;
     const recallResult = await callRecall(layer, {
@@ -228,7 +228,7 @@ describe('fileReference AUDIT', () => {
   // tracked (and rendered) twice, double-counting tokens.
   it('AUDIT-C: two references resolving to the same file must dedupe to one entry', async () => {
     const store = createLayerStateStore();
-    const layer = fileReference({
+    const layer = filesystem({
       baseDir: tempDir,
     });
 
@@ -253,7 +253,7 @@ describe('fileReference AUDIT', () => {
       text: 'See #config.json and #./config.json',
     });
 
-    const state = store.get<FileRefStateView>('exec-dedup', 'file-reference');
+    const state = store.get<FileRefStateView>('exec-dedup', 'filesystem');
     expect(state?.files.size).toBe(1);
   });
 
@@ -263,7 +263,7 @@ describe('fileReference AUDIT', () => {
   // condition (too large / permission) is fixed.
   it('AUDIT-D: a file that errored then became valid must recover its content', async () => {
     const store = createLayerStateStore();
-    const layer = fileReference({
+    const layer = filesystem({
       baseDir: tempDir,
       maxFileSize: 50,
     });
@@ -290,9 +290,7 @@ describe('fileReference AUDIT', () => {
       text: 'Check #data.ts',
     });
 
-    const errored = store
-      .get<FileRefStateView>('exec-recover', 'file-reference')
-      ?.files.get('data.ts');
+    const errored = store.get<FileRefStateView>('exec-recover', 'filesystem')?.files.get('data.ts');
     expect(errored?.error).toContain('FILE_TOO_LARGE');
 
     // Now shrink the file so it is readable.
@@ -307,7 +305,7 @@ describe('fileReference AUDIT', () => {
     });
 
     const recovered = store
-      .get<FileRefStateView>('exec-recover', 'file-reference')
+      .get<FileRefStateView>('exec-recover', 'filesystem')
       ?.files.get('data.ts');
     expect(recovered?.error).toBeUndefined();
     expect(recovered?.content).toBe('ok');

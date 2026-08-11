@@ -1,11 +1,10 @@
 import type { ContextConfig, ContextData, ContextLayer } from '@noetic-tools/context';
 import type { StepLoop, StepSpawn, Tool } from '@noetic-tools/types';
-import { resolveContextOption } from '../builders/context-option';
-import { loop } from '../builders/loop-builder';
-import { spawn } from '../builders/spawn-builder';
-import { callModel } from '../builders/step-builders';
-import { any } from '../until/combinators';
-import { until } from '../until/predicates';
+import { loop } from '../src/builders/loop-builder';
+import { spawn } from '../src/builders/spawn-builder';
+import { callModel } from '../src/builders/step-builders';
+import { any } from '../src/until/combinators';
+import { until } from '../src/until/predicates';
 
 /**
  * Creates a ReAct (Reason + Act) agent loop: an LLM step with tools iterated until no tool calls or limits are hit.
@@ -21,8 +20,6 @@ export function react(opts: {
   maxSteps?: number;
   maxCost?: number;
   context?: ContextConfig | ContextLayer[];
-  /** @deprecated Renamed to `context`. */
-  memory?: ContextConfig | ContextLayer[];
 }): StepLoop<ContextData, string, string> | StepSpawn<ContextData, string, string> {
   const llmStep = callModel<ContextData, string, string>({
     id: 'react-step',
@@ -47,7 +44,7 @@ export function react(opts: {
     ),
   });
 
-  const layers = resolveContextOption(opts);
+  const layers = opts.context;
   if (!layers) {
     return loopStep;
   }

@@ -2,7 +2,6 @@ import type { ContextConfig, ContextData, ContextLayer } from '@noetic-tools/con
 import type { Step, StepWithContext } from '@noetic-tools/types';
 import { NoeticConfigError } from '@noetic-tools/types';
 import { getDefaultRegistrar } from '../types/step-registrar';
-import { resolveContextOption } from './context-option';
 
 /**
  * Creates a provide step that attaches context layers to its child without creating an isolated context.
@@ -20,14 +19,7 @@ import { resolveContextOption } from './context-option';
 export function withContext<TContext = ContextData, I = unknown, O = unknown>(opts: {
   id: string;
   child: Step<TContext, I, O>;
-  /**
-   * Optional in the type only so the deprecated `memory` spelling remains a
-   * valid way to supply the layers. Exactly one of the two is required — the
-   * runtime enforces it, the same way `id` and `child` are enforced.
-   */
-  context?: ContextConfig | ContextLayer[];
-  /** @deprecated Renamed to `context`. */
-  memory?: ContextConfig | ContextLayer[];
+  context: ContextConfig | ContextLayer[];
 }): StepWithContext<TContext, I, O> {
   if (!opts.id?.trim()) {
     throw new NoeticConfigError({
@@ -43,12 +35,12 @@ export function withContext<TContext = ContextData, I = unknown, O = unknown>(op
       hint: 'Provide a child step to execute with the provided context layers.',
     });
   }
-  const layers = resolveContextOption(opts);
+  const layers = opts.context;
   if (!layers) {
     throw new NoeticConfigError({
       code: 'MISSING_CONTEXT_LAYERS',
       message: 'withContext() requires context layers.',
-      hint: 'Pass context: [workingMemoryContext()]. The `memory` key is the deprecated spelling of `context`.',
+      hint: 'Pass context: [scratchpad()].',
     });
   }
   const built: StepWithContext<TContext, I, O> = {

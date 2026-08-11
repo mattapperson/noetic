@@ -1,5 +1,5 @@
 /**
- * ADVERSARIAL AUDIT — temporalContext() & observationalContext().
+ * ADVERSARIAL AUDIT — temporal() & observations().
  *
  * Each test asserts the CORRECT behavior. A FAILING test = a confirmed bug in
  * the layer. Tests that pass are NOT bugs.
@@ -8,12 +8,12 @@
  * - recall({ budget }) is TRUSTED to self-limit its output to `budget` tokens;
  *   nothing downstream enforces it (spec 12, "Checklist" item 5: "Respect the
  *   `budget` parameter in recall(). Trim your output to fit.").
- * - temporalContext caps the ledger to `maxFacts` ("oldest dropped beyond this").
+ * - temporal caps the ledger to `maxFacts` ("oldest dropped beyond this").
  */
 
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import { observationalContext, temporalContext } from '@noetic-tools/context';
+import { observations, temporal } from '@noetic-tools/context';
 import type { Item } from '@noetic-tools/types';
 import { estimateTokens, frameworkCast } from '@noetic-tools/types';
 import { assistantMessage, makeCtx, makeItemLog, makeScopedStorage } from '../../_helpers';
@@ -27,17 +27,17 @@ function rendered(result: { items: Item[] }): string {
   return msg.content.map((p) => ('text' in p ? p.text : '')).join('');
 }
 
-describe('AUDIT observationalContext', () => {
+describe('AUDIT observations', () => {
   it('BUG: recall must trim output to the token budget', async () => {
-    const layer = observationalContext();
-    const observations = Array.from(
+    const layer = observations();
+    const observationList = Array.from(
       {
         length: 40,
       },
       (_, i) => `${LONG} observation ${i}`,
     );
     const state = {
-      observations,
+      observations: observationList,
       buffer: [],
       bufferTokens: 0,
       version: 1,
@@ -61,9 +61,9 @@ describe('AUDIT observationalContext', () => {
   });
 });
 
-describe('AUDIT temporalContext', () => {
+describe('AUDIT temporal', () => {
   it('BUG: recall(injectLedger) must trim output to the token budget', async () => {
-    const layer = temporalContext({
+    const layer = temporal({
       injectLedger: true,
       groundDateTime: false,
       now: () => new Date('2020-01-01T00:00:00Z'),
@@ -106,7 +106,7 @@ describe('AUDIT temporalContext', () => {
     // A single extraction returns 3 facts at the SAME timestamp; maxFacts = 2.
     // Correct behavior: keep up to maxFacts facts. Bug: the whole bucket (the
     // newest and only data) is evicted, leaving an empty ledger.
-    const layer = temporalContext({
+    const layer = temporal({
       maxFacts: 2,
       bufferThreshold: 1,
       now: () => new Date('2020-06-01T00:00:00Z'),
@@ -158,7 +158,7 @@ describe('AUDIT temporalContext', () => {
   });
 
   it('CONTROL: ledger cap across multiple timestamps drops oldest only (should PASS)', async () => {
-    const layer = temporalContext({
+    const layer = temporal({
       maxFacts: 2,
       bufferThreshold: 1,
       now: () => new Date('2020-06-01T00:00:00Z'),
@@ -216,8 +216,8 @@ describe('AUDIT temporalContext', () => {
     // reads `output_text` (assistant) parts — so user-stated facts and tool
     // outputs are never buffered. The only way to capture INPUT items is the
     // onItemAppend hook, which neither layer implements.
-    const obs = observationalContext();
-    const tmp = temporalContext();
+    const obs = observations();
+    const tmp = temporal();
     const obsHooks = frameworkCast<Record<string, unknown>>(obs.hooks);
     const tmpHooks = frameworkCast<Record<string, unknown>>(tmp.hooks);
     expect(obsHooks['onItemAppend']).toBeDefined();
@@ -225,9 +225,9 @@ describe('AUDIT temporalContext', () => {
   });
 });
 
-describe('temporalContext timeouts (M8)', () => {
+describe('temporal timeouts (M8)', () => {
   it('pins LLM-headroom timeouts for store AND onItemAppend', () => {
-    const layer = temporalContext();
+    const layer = temporal();
     expect(layer.timeouts).toEqual({
       store: 60_000,
       onItemAppend: 60_000,

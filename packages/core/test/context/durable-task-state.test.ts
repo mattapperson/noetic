@@ -1,20 +1,20 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import type { DurableTaskState } from '@noetic-tools/context';
-import { durableTaskState } from '@noetic-tools/context';
+import { taskState } from '@noetic-tools/context';
 import { makeCtx, makeItemLog, makeScopedStorage } from '../_helpers';
 
-describe('durableTaskState', () => {
+describe('taskState', () => {
   it('has correct id and slot', () => {
-    const layer = durableTaskState();
-    expect(layer.id).toBe('durable-task-state');
+    const layer = taskState();
+    expect(layer.id).toBe('task-state');
     expect(layer.slot).toBe(110);
     // 'thread' so checkpoints persist across executions within a thread.
     expect(layer.scope).toBe('thread');
   });
 
   it('init/recall lifecycle', async () => {
-    const layer = durableTaskState();
+    const layer = taskState();
     const result = await layer.hooks.init!({
       storage: makeScopedStorage(),
       scopeKey: 'exec-1',
@@ -43,7 +43,7 @@ describe('durableTaskState', () => {
   });
 
   it('onSpawn always provides child state', async () => {
-    const layer = durableTaskState();
+    const layer = taskState();
     const parentState = {
       checkpoints: [
         {
@@ -69,7 +69,7 @@ describe('durableTaskState', () => {
   });
 
   it('store hook accumulates checkpoints', async () => {
-    const layer = durableTaskState();
+    const layer = taskState();
     const state: DurableTaskState = {
       checkpoints: [],
       files: [],
@@ -109,7 +109,7 @@ describe('durableTaskState', () => {
   });
 
   it('onReturn with conflicting keys: child overwrites parent', async () => {
-    const layer = durableTaskState();
+    const layer = taskState();
     const parentState: DurableTaskState = {
       checkpoints: [],
       files: [],
@@ -139,7 +139,7 @@ describe('durableTaskState', () => {
   });
 
   it('onReturn merges child artifacts back', async () => {
-    const layer = durableTaskState();
+    const layer = taskState();
     const parentState: DurableTaskState = {
       checkpoints: [
         {
@@ -188,7 +188,7 @@ describe('durableTaskState', () => {
   });
 
   it('onComplete returns state with outcome and checkpoint', async () => {
-    const layer = durableTaskState();
+    const layer = taskState();
     const state: DurableTaskState = {
       checkpoints: [],
       files: [],
@@ -207,7 +207,7 @@ describe('durableTaskState', () => {
   });
 
   it('onComplete returns state with failure outcome', async () => {
-    const layer = durableTaskState();
+    const layer = taskState();
     const state: DurableTaskState = {
       checkpoints: [
         {
@@ -230,7 +230,7 @@ describe('durableTaskState', () => {
   });
 
   it('onComplete stamps the completing execution depth, not 0', async () => {
-    const layer = durableTaskState();
+    const layer = taskState();
     const result = await layer.hooks.onComplete!({
       log: makeItemLog(),
       ctx: makeCtx({
@@ -257,14 +257,14 @@ describe('durableTaskState', () => {
     }
 
     it('exposes recordArtifact and setTaskData as layer functions', () => {
-      const layer = durableTaskState();
+      const layer = taskState();
       assert(layer.provides !== undefined);
       expect(layer.provides.recordArtifact.kind).toBe('function');
       expect(layer.provides.setTaskData.kind).toBe('function');
     });
 
     it('recordArtifact appends a file path to state', async () => {
-      const layer = durableTaskState();
+      const layer = taskState();
       const { result, state } = await layer.provides.recordArtifact.execute(
         {
           path: 'src/a.ts',
@@ -280,7 +280,7 @@ describe('durableTaskState', () => {
     });
 
     it('recordArtifact is idempotent for an already-recorded path', async () => {
-      const layer = durableTaskState();
+      const layer = taskState();
       const first = await layer.provides.recordArtifact.execute(
         {
           path: 'src/a.ts',
@@ -302,7 +302,7 @@ describe('durableTaskState', () => {
     });
 
     it('recordArtifact rejects an empty path via its input schema', () => {
-      const layer = durableTaskState();
+      const layer = taskState();
       const parsed = layer.provides.recordArtifact.input.safeParse({
         path: '',
       });
@@ -310,7 +310,7 @@ describe('durableTaskState', () => {
     });
 
     it('setTaskData records a structured value under a key', async () => {
-      const layer = durableTaskState();
+      const layer = taskState();
       const { state } = await layer.provides.setTaskData.execute(
         {
           key: 'pr',
@@ -328,7 +328,7 @@ describe('durableTaskState', () => {
     });
 
     it('setTaskData refuses the reserved __outcome key and leaves state untouched', async () => {
-      const layer = durableTaskState();
+      const layer = taskState();
       const before = emptyState();
       const { result, state } = await layer.provides.setTaskData.execute(
         {
@@ -343,7 +343,7 @@ describe('durableTaskState', () => {
     });
 
     it('artifacts written by a child survive onReturn into the parent', async () => {
-      const layer = durableTaskState();
+      const layer = taskState();
       const childWithFile = await layer.provides.recordArtifact.execute(
         {
           path: 'worker.ts',
@@ -389,7 +389,7 @@ describe('durableTaskState', () => {
     }
 
     it('namespaces each child under its execution id instead of clobbering', async () => {
-      const layer = durableTaskState({
+      const layer = taskState({
         mergeData: 'namespace',
       });
       const afterFirst = await layer.hooks.onReturn!({
@@ -428,7 +428,7 @@ describe('durableTaskState', () => {
     });
 
     it("shallow (default) loses the first worker's value for the same key", async () => {
-      const layer = durableTaskState();
+      const layer = taskState();
       const afterFirst = await layer.hooks.onReturn!({
         childState: stateWithData({
           result: 'from-worker-a',
@@ -457,7 +457,7 @@ describe('durableTaskState', () => {
     });
 
     it('namespace mode still unions files and concatenates checkpoints', async () => {
-      const layer = durableTaskState({
+      const layer = taskState({
         mergeData: 'namespace',
       });
       const merged = await layer.hooks.onReturn!({
@@ -514,7 +514,7 @@ describe('durableTaskState', () => {
     }
 
     async function storeOnce(state: DurableTaskState): Promise<DurableTaskState> {
-      const layer = durableTaskState();
+      const layer = taskState();
       const result = await layer.hooks.store!({
         newItems: [],
         log: makeItemLog(),
@@ -552,7 +552,7 @@ describe('durableTaskState', () => {
     });
 
     it('onReturn 40 + 40 checkpoints merges to 50 (newest kept)', async () => {
-      const layer = durableTaskState();
+      const layer = taskState();
       const result = await layer.hooks.onReturn!({
         childState: {
           checkpoints: makeCheckpoints(40, 1_000),
@@ -578,7 +578,7 @@ describe('durableTaskState', () => {
     });
 
     it('onComplete caps at 50 too', async () => {
-      const layer = durableTaskState();
+      const layer = taskState();
       const result = await layer.hooks.onComplete!({
         log: makeItemLog(),
         ctx: makeCtx(),
@@ -594,7 +594,7 @@ describe('durableTaskState', () => {
     });
 
     async function recallText(state: DurableTaskState, budget: number): Promise<string> {
-      const layer = durableTaskState();
+      const layer = taskState();
       const recalled = await layer.hooks.recall!({
         log: makeItemLog(),
         query: '',
@@ -665,7 +665,7 @@ describe('durableTaskState', () => {
     });
 
     it('cap holds across rehydration (cross-execution)', async () => {
-      const layer = durableTaskState();
+      const layer = taskState();
       const storage = makeScopedStorage();
       await storage.set('state', {
         checkpoints: makeCheckpoints(50),

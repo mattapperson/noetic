@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import type { ContextData, ContextLayer, ExecutionContext } from '@noetic-tools/context';
-import { historyWindow, projectHistoryLayers } from '@noetic-tools/context';
+import { history, projectHistoryLayers } from '@noetic-tools/context';
 import type { CallModelRequest, StepCallModel } from '@noetic-tools/types';
 import { frameworkCast, isNoeticError, SteeringAction } from '@noetic-tools/types';
 import { z } from 'zod';
@@ -370,7 +370,7 @@ describe('executeCallModel', () => {
     };
     harness.recallLayers = async () => [
       {
-        layerId: 'planContext',
+        layerId: 'plan',
         items: [
           {
             id: 'plan-1',
@@ -388,7 +388,7 @@ describe('executeCallModel', () => {
         tokenCount: 42,
       },
       {
-        layerId: 'workingMemoryContext',
+        layerId: 'scratchpad',
         items: [
           {
             id: 'wm-1',
@@ -411,13 +411,13 @@ describe('executeCallModel', () => {
     });
     const layers: ContextLayer[] = [
       {
-        id: 'planContext',
+        id: 'plan',
         slot: 100,
         scope: 'execution',
         hooks: {},
       },
       {
-        id: 'workingMemoryContext',
+        id: 'scratchpad',
         slot: 110,
         scope: 'execution',
         hooks: {},
@@ -430,9 +430,9 @@ describe('executeCallModel', () => {
     expect(ctx.lastLayerUsage.modelId).toBe('gpt-4');
     expect(ctx.lastLayerUsage.executionId).toBe(ctx.id);
     expect(ctx.lastLayerUsage.layers).toHaveLength(2);
-    expect(ctx.lastLayerUsage.layers[0]?.layerId).toBe('planContext');
+    expect(ctx.lastLayerUsage.layers[0]?.layerId).toBe('plan');
     expect(ctx.lastLayerUsage.layers[0]?.tokenCount).toBe(42);
-    expect(ctx.lastLayerUsage.layers[1]?.layerId).toBe('workingMemoryContext');
+    expect(ctx.lastLayerUsage.layers[1]?.layerId).toBe('scratchpad');
     expect(ctx.lastLayerUsage.layers[1]?.tokenCount).toBe(17);
 
     // Recall items must reach the model via assembleView, prepended before history.
@@ -460,7 +460,7 @@ describe('executeCallModel', () => {
       capturedRequest = request;
       return makeLLMResponse('done');
     };
-    // Slice the trailing 4 items — emulates a historyWindow with maxItems: 4.
+    // Slice the trailing 4 items — emulates a history with maxItems: 4.
     harness.projectHistory = async (_layers, items) => items.slice(-4);
     const ctx = new ContextImpl({
       harness,
@@ -512,7 +512,7 @@ describe('executeCallModel', () => {
     expect(ctx.itemLog.items.length).toBeGreaterThanOrEqual(20);
   });
 
-  it('integrates the real historyWindow layer end-to-end via projectHistoryLayers', async () => {
+  it('integrates the real history layer end-to-end via projectHistoryLayers', async () => {
     const step: StepCallModel<ContextData, string, string> = {
       kind: 'callModel',
       id: 'test',
@@ -524,7 +524,7 @@ describe('executeCallModel', () => {
       capturedRequest = request;
       return makeLLMResponse('done');
     };
-    const realLayer = historyWindow({
+    const realLayer = history({
       maxItems: 4,
     });
     // Wire the real layer's projectHistory hook through projectHistoryLayers

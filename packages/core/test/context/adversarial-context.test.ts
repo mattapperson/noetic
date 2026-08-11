@@ -19,14 +19,14 @@ import {
   allocateBudgets,
   createLayerStateStore,
   disposeLayers,
-  durableTaskState,
   findFunctionCall,
   initLayers,
-  observationalContext,
+  observations,
   recallLayers,
+  scratchpad,
   steering,
   storeLayers,
-  workingMemoryContext,
+  taskState,
 } from '@noetic-tools/context';
 import type { Item, LLMResponse, SteeringState } from '@noetic-tools/types';
 import { frameworkCast, SteeringAction } from '@noetic-tools/types';
@@ -555,7 +555,7 @@ describe('Steering: async pendingAsync race condition', () => {
 
 describe('Working Memory: falsy state edge cases', () => {
   it('treats empty string state as empty (returns null from recall)', async () => {
-    const layer = workingMemoryContext();
+    const layer = scratchpad();
     const store = createLayerStateStore();
     const ctx = makeCtx();
     const storage = makeStorage();
@@ -586,7 +586,7 @@ describe('Working Memory: falsy state edge cases', () => {
   });
 
   it('[BUG] numeric 0 state treated as empty due to !state check', async () => {
-    const layer = workingMemoryContext();
+    const layer = scratchpad();
     const store = createLayerStateStore();
     const ctx = makeCtx();
 
@@ -606,7 +606,7 @@ describe('Working Memory: falsy state edge cases', () => {
   });
 
   it('[BUG] boolean false state treated as empty due to !state check', async () => {
-    const layer = workingMemoryContext();
+    const layer = scratchpad();
     const store = createLayerStateStore();
     const ctx = makeCtx();
 
@@ -627,7 +627,7 @@ describe('Working Memory: falsy state edge cases', () => {
 
 describe('Working Memory: prototype pollution', () => {
   it('strips top-level __proto__ from updateWorkingMemory args', async () => {
-    const layer = workingMemoryContext({
+    const layer = scratchpad({
       schema: undefined,
     });
     const store = createLayerStateStore();
@@ -673,7 +673,7 @@ describe('Working Memory: prototype pollution', () => {
   });
 
   it('nested __proto__ in values does not pollute prototype chain', async () => {
-    const layer = workingMemoryContext({
+    const layer = scratchpad({
       schema: undefined,
     });
     const store = createLayerStateStore();
@@ -716,7 +716,7 @@ describe('Working Memory: prototype pollution', () => {
 
 describe('Working Memory: store with string state', () => {
   it('[BUG] string state replaced entirely by updateWorkingMemory args object', async () => {
-    const layer = workingMemoryContext();
+    const layer = scratchpad();
     const store = createLayerStateStore();
     const ctx = makeCtx();
     const storage = makeStorage();
@@ -767,7 +767,7 @@ describe('Working Memory: store with string state', () => {
 describe('Observational Memory: empty buffer at threshold', () => {
   it('observer called when pre-existing bufferTokens cross threshold', async () => {
     let observerCalledWith: string[] | null = null;
-    const layer = observationalContext({
+    const layer = observations({
       bufferThreshold: 100,
       observer: async (buffer) => {
         observerCalledWith = buffer;
@@ -818,7 +818,7 @@ describe('Observational Memory: empty buffer at threshold', () => {
   });
 
   it('default observer produces misleading "Processed 0 items" on empty buffer', async () => {
-    const layer = observationalContext({
+    const layer = observations({
       bufferThreshold: 0, // Always trigger compression
     });
 
@@ -874,7 +874,7 @@ describe('Observational Memory: empty buffer at threshold', () => {
 
 describe('Observational Memory: onSpawn ignores scope', () => {
   it('[BUG] thread-scoped layer still propagates state to child via onSpawn', async () => {
-    const layer = observationalContext({
+    const layer = observations({
       scope: 'thread',
     });
 
@@ -917,7 +917,7 @@ describe('Observational Memory: onSpawn ignores scope', () => {
 
 describe('Durable Task State: onComplete checkpoint depth', () => {
   it('onComplete records the completing execution depth', async () => {
-    const layer = durableTaskState();
+    const layer = taskState();
     const store = createLayerStateStore();
     const ctx = makeCtx({
       depth: 5,
@@ -952,7 +952,7 @@ describe('Durable Task State: onComplete checkpoint depth', () => {
   });
 
   it('store hook correctly uses ctx.depth from execution context', async () => {
-    const layer = durableTaskState();
+    const layer = taskState();
     const store = createLayerStateStore();
     const ctx = makeCtx({
       depth: 3,
@@ -1283,10 +1283,10 @@ describe('Layer lifecycle: disabled layer detection', () => {
 
 describe('Cross-layer full lifecycle', () => {
   it('init->recall->store->recall->dispose with working memory + observational', async () => {
-    const wm = workingMemoryContext({
+    const wm = scratchpad({
       scope: 'resource',
     });
-    const obs = observationalContext({
+    const obs = observations({
       bufferThreshold: 10,
     });
     const layers = [

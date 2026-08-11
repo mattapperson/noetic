@@ -308,14 +308,6 @@ export interface Context<TContext = ContextData, TState = unknown> {
   readonly layers?: ContextLayer[];
   /** Layer provides keyed by layer ID. Access data/functions via `ctx.context['layerId'].prop`. */
   readonly context: TContext;
-  /**
-   * @deprecated Renamed to `context`. Reads through to the same object.
-   *
-   * Required, not optional: pre-rename code does `ctx.memory['layerId']`, and an
-   * optional field would make that a `possibly undefined` compile error — which
-   * is exactly the break this alias exists to prevent.
-   */
-  readonly memory: TContext;
   /** Unified tool set collected from all LLM steps in the step tree before execution. */
   readonly unifiedTools?: ReadonlyArray<Tool>;
   /** Runtime item schema registry active for this context. */

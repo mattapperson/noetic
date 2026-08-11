@@ -4,7 +4,7 @@ import {
   initLayers,
   recallLayers,
   Slot,
-  toolContextLayer,
+  toolCalls,
 } from '@noetic-tools/context';
 import type { Tool, ToolContextDeclaration } from '@noetic-tools/types';
 import { frameworkCast } from '@noetic-tools/types';
@@ -15,7 +15,7 @@ interface TodoState {
   items: string[];
 }
 
-describe('toolContextLayer', () => {
+describe('toolCalls', () => {
   const todoMemory = frameworkCast<ToolContextDeclaration>({
     id: 'todos',
     init: () => ({
@@ -46,7 +46,7 @@ describe('toolContextLayer', () => {
       makeTodoTool('update_todo'),
       makeTodoTool('list_todos'),
     ];
-    const layers = toolContextLayer(tools);
+    const layers = toolCalls(tools);
     expect(layers).toHaveLength(1);
     expect(layers[0].id).toBe('todos');
   });
@@ -63,7 +63,7 @@ describe('toolContextLayer', () => {
         recall: () => null,
       },
     };
-    const layers = toolContextLayer([
+    const layers = toolCalls([
       toolWithoutId,
     ]);
     expect(layers).toHaveLength(1);
@@ -78,14 +78,14 @@ describe('toolContextLayer', () => {
       output: z.string(),
       execute: async () => 'ok',
     };
-    const layers = toolContextLayer([
+    const layers = toolCalls([
       plainTool,
     ]);
     expect(layers).toHaveLength(0);
   });
 
   it('uses default slot and execution scope', () => {
-    const layers = toolContextLayer([
+    const layers = toolCalls([
       makeTodoTool('t'),
     ]);
     expect(layers[0].slot).toBe(Slot.WORKING_MEMORY + 10);
@@ -93,7 +93,7 @@ describe('toolContextLayer', () => {
   });
 
   it('allows custom slot', () => {
-    const layers = toolContextLayer(
+    const layers = toolCalls(
       [
         makeTodoTool('t'),
       ],
@@ -105,7 +105,7 @@ describe('toolContextLayer', () => {
   });
 
   it('init and recall lifecycle work end-to-end', async () => {
-    const layers = toolContextLayer([
+    const layers = toolCalls([
       makeTodoTool('t'),
     ]);
     const store = createLayerStateStore();
@@ -145,7 +145,7 @@ describe('toolContextLayer', () => {
   });
 
   it('recall returns string when state has data', async () => {
-    const layers = toolContextLayer([
+    const layers = toolCalls([
       makeTodoTool('t'),
     ]);
     const store = createLayerStateStore();

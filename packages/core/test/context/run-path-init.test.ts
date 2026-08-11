@@ -13,7 +13,7 @@ import type { ContextData, ContextLayer } from '@noetic-tools/context';
 import type { LLMResponse, StepLoop } from '@noetic-tools/types';
 import { parseAndRunWorkflow } from '../../src/builders/dynamic-workflow';
 import { loop } from '../../src/builders/loop-builder';
-import { step } from '../../src/builders/step-builders';
+import { callModel } from '../../src/builders/step-builders';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { any } from '../../src/until/combinators';
 import { until } from '../../src/until/predicates';
@@ -24,7 +24,7 @@ function reactLoop(): StepLoop<ContextData, string, string> {
   return loop<ContextData, string, string>({
     id: 'react-loop',
     steps: [
-      step.llm({
+      callModel({
         id: 'react-step',
         model: 'gpt-4',
         tools: [],

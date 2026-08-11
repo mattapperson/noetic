@@ -4,11 +4,11 @@ import type { DurableTaskState } from '@noetic-tools/context';
 import {
   beforeToolCallLayers,
   createLayerStateStore,
-  durableTaskState,
   initLayers,
   mostRestrictive,
   steering,
   storeLayers,
+  taskState,
 } from '@noetic-tools/context';
 import type { ContextLayer, SteeringConfig, SteeringRule } from '@noetic-tools/types';
 import { frameworkCast, SteeringAction } from '@noetic-tools/types';
@@ -207,11 +207,11 @@ describe('AUDIT: steering — maxRetries config', () => {
   });
 });
 
-describe('AUDIT: durableTaskState — durability across executions', () => {
+describe('AUDIT: taskState — durability across executions', () => {
   it('rehydrates persisted task state in a fresh execution', async () => {
     const storage = makeStorage();
     const layers = [
-      asLayer(durableTaskState()),
+      asLayer(taskState()),
     ];
 
     // ── Execution A: init, store a checkpoint ──
@@ -234,7 +234,7 @@ describe('AUDIT: durableTaskState — durability across executions', () => {
       storage,
     });
 
-    const stateA = storeA.get<DurableTaskState>(ctxA.executionId, 'durable-task-state');
+    const stateA = storeA.get<DurableTaskState>(ctxA.executionId, 'task-state');
     assert(stateA);
     expect(stateA.checkpoints.length).toBeGreaterThan(0);
 
@@ -250,7 +250,7 @@ describe('AUDIT: durableTaskState — durability across executions', () => {
       store: storeB,
     });
 
-    const stateB = storeB.get<DurableTaskState>(ctxB.executionId, 'durable-task-state');
+    const stateB = storeB.get<DurableTaskState>(ctxB.executionId, 'task-state');
     assert(stateB);
     // The whole point of a "durable" task-state layer: prior checkpoints survive.
     expect(stateB.checkpoints.length).toBeGreaterThan(0);

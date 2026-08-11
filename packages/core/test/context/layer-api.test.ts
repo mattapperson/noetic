@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 import type { ContextLayer, ContextScope } from '@noetic-tools/context';
-import { resolveLayerTools, Slot, workingMemoryContext } from '@noetic-tools/context';
+import { resolveLayerTools, Slot, scratchpad } from '@noetic-tools/context';
 import { frameworkCast } from '@noetic-tools/types';
 import { z } from 'zod';
 import { createInMemoryFsAdapter } from '../../src/adapters/in-memory-fs-adapter';
 import { createInMemoryShellAdapter } from '../../src/adapters/in-memory-shell-adapter';
-import { layerData, layerFn } from '../../src/builders/layer-provides-builders';
+import { layerData, layerFunction } from '../../src/builders/layer-provides-builders';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import { makeMockContext, makeMockHarness } from '../_helpers';
 
@@ -49,7 +49,7 @@ function makeCounterLayer() {
       value: layerData<number, CounterState>({
         read: (state) => state.count,
       }),
-      increment: layerFn<
+      increment: layerFunction<
         {
           amount: number;
         },
@@ -71,7 +71,7 @@ function makeCounterLayer() {
           };
         },
       }),
-      peek: layerFn<Record<string, never>, number, CounterState>({
+      peek: layerFunction<Record<string, never>, number, CounterState>({
         description: 'Read the counter without mutating.',
         input: z.object({}),
         output: z.number(),
@@ -409,11 +409,11 @@ describe('resolveLayerTools', () => {
 
 //#endregion
 
-//#region workingMemoryContext provides
+//#region scratchpad provides
 
-describe('workingMemoryContext provides', () => {
+describe('scratchpad provides', () => {
   it('exposes snapshot data and update function', () => {
-    const wm = workingMemoryContext();
+    const wm = scratchpad();
     expect(wm.provides).toBeDefined();
     expect(wm.provides?.snapshot).toBeDefined();
     expect(wm.provides?.update).toBeDefined();
@@ -422,7 +422,7 @@ describe('workingMemoryContext provides', () => {
   });
 
   it('snapshot reads current state', () => {
-    const wm = workingMemoryContext();
+    const wm = scratchpad();
     const snapshot = wm.provides?.snapshot;
     expect(snapshot).toBeDefined();
     expect(snapshot?.kind).toBe('data');
@@ -439,7 +439,7 @@ describe('workingMemoryContext provides', () => {
   });
 
   it('update merges into object state', async () => {
-    const wm = workingMemoryContext();
+    const wm = scratchpad();
     const update = wm.provides?.update;
     expect(update).toBeDefined();
     expect(update?.kind).toBe('function');

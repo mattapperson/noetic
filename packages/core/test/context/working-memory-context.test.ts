@@ -1,19 +1,14 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import {
-  createLayerStateStore,
-  initLayers,
-  storeLayers,
-  workingMemoryContext,
-} from '@noetic-tools/context';
+import { createLayerStateStore, initLayers, scratchpad, storeLayers } from '@noetic-tools/context';
 import type { FunctionCallItem } from '@noetic-tools/types';
 import { z } from 'zod';
 import { makeCtx, makeItemLog, makeScopedStorage, makeStorage } from '../_helpers';
 
-describe('workingMemoryContext layer', () => {
+describe('scratchpad layer', () => {
   it('has correct id and slot', () => {
-    const layer = workingMemoryContext();
-    expect(layer.id).toBe('working-context');
+    const layer = scratchpad();
+    expect(layer.id).toBe('scratchpad');
     expect(layer.slot).toBe(100);
     expect(layer.scope).toBe('thread');
   });
@@ -23,7 +18,7 @@ describe('workingMemoryContext layer', () => {
     await storage.set('state', {
       notes: 'hello',
     });
-    const layer = workingMemoryContext();
+    const layer = scratchpad();
     const result = await layer.hooks.init!({
       storage,
       scopeKey: 'thread-1',
@@ -35,7 +30,7 @@ describe('workingMemoryContext layer', () => {
   });
 
   it('init defaults to empty string for non-schema mode', async () => {
-    const layer = workingMemoryContext();
+    const layer = scratchpad();
     const result = await layer.hooks.init!({
       storage: makeScopedStorage(),
       scopeKey: 'thread-1',
@@ -45,7 +40,7 @@ describe('workingMemoryContext layer', () => {
   });
 
   it('recall renders working_memory block', async () => {
-    const layer = workingMemoryContext();
+    const layer = scratchpad();
     const result = await layer.hooks.recall!({
       log: makeItemLog(),
       query: '',
@@ -68,7 +63,7 @@ describe('workingMemoryContext layer', () => {
   });
 
   it('recall returns null when empty', async () => {
-    const layer = workingMemoryContext();
+    const layer = scratchpad();
     const result = await layer.hooks.recall!({
       log: makeItemLog(),
       query: '',
@@ -80,7 +75,7 @@ describe('workingMemoryContext layer', () => {
   });
 
   it('recall returns null when empty object', async () => {
-    const layer = workingMemoryContext();
+    const layer = scratchpad();
     const result = await layer.hooks.recall!({
       log: makeItemLog(),
       query: '',
@@ -92,7 +87,7 @@ describe('workingMemoryContext layer', () => {
   });
 
   it('store watches for updateWorkingMemory', async () => {
-    const layer = workingMemoryContext();
+    const layer = scratchpad();
     const funcCall: FunctionCallItem = {
       id: 'fc1',
       status: 'completed',
@@ -127,7 +122,7 @@ describe('workingMemoryContext layer', () => {
   });
 
   it('store does not update in readOnly mode', async () => {
-    const layer = workingMemoryContext({
+    const layer = scratchpad({
       readOnly: true,
     });
     const funcCall: FunctionCallItem = {
@@ -161,7 +156,7 @@ describe('workingMemoryContext layer', () => {
   });
 
   it('onSpawn propagates for resource scope', async () => {
-    const layer = workingMemoryContext({
+    const layer = scratchpad({
       scope: 'resource',
     });
     const result = await layer.hooks.onSpawn!({
@@ -176,7 +171,7 @@ describe('workingMemoryContext layer', () => {
   });
 
   it('onSpawn returns null for thread scope', async () => {
-    const layer = workingMemoryContext({
+    const layer = scratchpad({
       scope: 'thread',
     });
     const result = await layer.hooks.onSpawn!({
@@ -189,7 +184,7 @@ describe('workingMemoryContext layer', () => {
   });
 
   it('store deep-merges nested objects (sibling keys preserved)', async () => {
-    const layer = workingMemoryContext();
+    const layer = scratchpad();
     const funcCall: FunctionCallItem = {
       id: 'fc1',
       status: 'completed',
@@ -230,7 +225,7 @@ describe('workingMemoryContext layer', () => {
   });
 
   it('respects custom scope config', () => {
-    const layer = workingMemoryContext({
+    const layer = scratchpad({
       scope: 'resource',
     });
     expect(layer.scope).toBe('resource');
@@ -241,14 +236,14 @@ describe('workingMemoryContext layer', () => {
       count: z.number(),
     });
 
-    function updateFn(layer: ReturnType<typeof workingMemoryContext>) {
+    function updateFn(layer: ReturnType<typeof scratchpad>) {
       const decl = layer.provides.update;
       assert(decl.kind === 'function');
       return decl;
     }
 
     it('valid update via the tool passes and merges', async () => {
-      const layer = workingMemoryContext({
+      const layer = scratchpad({
         schema: CountSchema,
       });
       const outcome = await updateFn(layer).execute(
@@ -266,7 +261,7 @@ describe('workingMemoryContext layer', () => {
     });
 
     it('invalid update via the tool throws and leaves state untouched', async () => {
-      const layer = workingMemoryContext({
+      const layer = scratchpad({
         schema: CountSchema,
       });
       const state = {
@@ -280,7 +275,7 @@ describe('workingMemoryContext layer', () => {
           state,
           makeCtx(),
         ),
-      ).rejects.toThrow('working-context update rejected by schema');
+      ).rejects.toThrow('scratchpad update rejected by schema');
       // The prior state object is untouched (gate, not mutation).
       expect(state).toEqual({
         count: 1,
@@ -288,7 +283,7 @@ describe('workingMemoryContext layer', () => {
     });
 
     it('partial update merged over valid state passes (merged state validated)', async () => {
-      const layer = workingMemoryContext({
+      const layer = scratchpad({
         schema: CountSchema,
       });
       // The update alone would fail the schema (no count); the MERGED state passes.
@@ -308,7 +303,7 @@ describe('workingMemoryContext layer', () => {
     });
 
     it('legacy store() path rejects schema-violating updates (storeLayers drops + diagnostic)', async () => {
-      const layer = workingMemoryContext({
+      const layer = scratchpad({
         schema: CountSchema,
       });
       const funcCall: FunctionCallItem = {
@@ -358,7 +353,7 @@ describe('workingMemoryContext layer', () => {
       expect(store.get<Record<string, unknown>>(ctx.executionId, layer.id)).toEqual({
         count: 1,
       });
-      expect(diagnostics).toContain('working-context:store');
+      expect(diagnostics).toContain('scratchpad:store');
     });
 
     it('init falls back to {} when persisted state fails the schema', async () => {
@@ -366,7 +361,7 @@ describe('workingMemoryContext layer', () => {
       await storage.set('state', {
         count: 'corrupt',
       });
-      const layer = workingMemoryContext({
+      const layer = scratchpad({
         schema: CountSchema,
       });
       const result = await layer.hooks.init!({
@@ -382,7 +377,7 @@ describe('workingMemoryContext layer', () => {
       await storage.set('state', {
         count: 3,
       });
-      const layer = workingMemoryContext({
+      const layer = scratchpad({
         schema: CountSchema,
       });
       const result = await layer.hooks.init!({
@@ -396,7 +391,7 @@ describe('workingMemoryContext layer', () => {
     });
 
     it('no schema → updates are not validated (regression)', async () => {
-      const layer = workingMemoryContext();
+      const layer = scratchpad();
       const outcome = await updateFn(layer).execute(
         {
           anything: [

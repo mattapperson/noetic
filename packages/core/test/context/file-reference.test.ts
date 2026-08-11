@@ -5,7 +5,7 @@ import * as path from 'node:path';
 import type { ContextLayer, RecallParams } from '@noetic-tools/context';
 import {
   createLayerStateStore,
-  fileReference,
+  filesystem,
   initLayers,
   runAppendPipeline,
 } from '@noetic-tools/context';
@@ -19,7 +19,7 @@ function callRecall(
   return layer.hooks.recall!(params);
 }
 
-describe('fileReference', () => {
+describe('filesystem', () => {
   let tempDir: string;
 
   beforeEach(async () => {
@@ -127,7 +127,7 @@ describe('fileReference', () => {
 
   it('transforms file references to anchor links', async () => {
     const store = createLayerStateStore();
-    const layer = fileReference({
+    const layer = filesystem({
       baseDir: tempDir,
     });
 
@@ -166,7 +166,7 @@ describe('fileReference', () => {
 
   it('extracts multiple file references', async () => {
     const store = createLayerStateStore();
-    const layer = fileReference({
+    const layer = filesystem({
       baseDir: tempDir,
     });
 
@@ -207,7 +207,7 @@ describe('fileReference', () => {
 
   it('tracks files in state', async () => {
     const store = createLayerStateStore();
-    const layer = fileReference({
+    const layer = filesystem({
       baseDir: tempDir,
     });
 
@@ -241,14 +241,14 @@ describe('fileReference', () => {
 
     const state = store.get<{
       files: Map<string, unknown>;
-    }>('exec-state', 'file-reference');
+    }>('exec-state', 'filesystem');
     expect(state?.files.size).toBe(1);
     expect(state?.files.has('tracked.ts')).toBe(true);
   });
 
   it('handles deleted files', async () => {
     const store = createLayerStateStore();
-    const layer = fileReference({
+    const layer = filesystem({
       baseDir: tempDir,
     });
 
@@ -286,14 +286,14 @@ describe('fileReference', () => {
           deleted: boolean;
         }
       >;
-    }>('exec-deleted', 'file-reference');
+    }>('exec-deleted', 'filesystem');
     const fileInfo = state?.files.get('nonexistent.ts');
     expect(fileInfo?.deleted).toBe(true);
   });
 
   it('requests re-render when files change', async () => {
     const store = createLayerStateStore();
-    const layer = fileReference({
+    const layer = filesystem({
       baseDir: tempDir,
     });
 
@@ -346,7 +346,7 @@ describe('fileReference', () => {
 
   it('handles paths with special characters', async () => {
     const store = createLayerStateStore();
-    const layer = fileReference({
+    const layer = filesystem({
       baseDir: tempDir,
     });
 
@@ -384,7 +384,7 @@ describe('fileReference', () => {
 
   it('deduplicates repeated references', async () => {
     const store = createLayerStateStore();
-    const layer = fileReference({
+    const layer = filesystem({
       baseDir: tempDir,
     });
 
@@ -418,13 +418,13 @@ describe('fileReference', () => {
 
     const state = store.get<{
       files: Map<string, unknown>;
-    }>('exec-dup', 'file-reference');
+    }>('exec-dup', 'filesystem');
     expect(state?.files.size).toBe(1);
   });
 
   it('passes through items without file references', async () => {
     const store = createLayerStateStore();
-    const layer = fileReference({
+    const layer = filesystem({
       baseDir: tempDir,
     });
 
@@ -462,7 +462,7 @@ describe('fileReference', () => {
   describe('recall()', () => {
     it('returns file contents ordered by priority', async () => {
       const store = createLayerStateStore();
-      const layer = fileReference({
+      const layer = filesystem({
         baseDir: tempDir,
       });
 
@@ -504,7 +504,7 @@ describe('fileReference', () => {
       const state = store.get<{
         files: TrackedFileMap;
         baseDir: string;
-      }>('exec-priority', 'file-reference');
+      }>('exec-priority', 'filesystem');
       if (state) {
         const lowFile = state.files.get('low.ts');
         const highFile = state.files.get('high.ts');
@@ -535,7 +535,7 @@ describe('fileReference', () => {
 
     it('shows error messages for files with errors', async () => {
       const store = createLayerStateStore();
-      const layer = fileReference({
+      const layer = filesystem({
         baseDir: tempDir,
         allowedExtensions: [
           '.ts',
@@ -570,7 +570,7 @@ describe('fileReference', () => {
         store,
       });
 
-      const state = store.get<TestFileRefState>('exec-errors', 'file-reference');
+      const state = store.get<TestFileRefState>('exec-errors', 'filesystem');
 
       // Call recall
       const recallResult = await callRecall(layer, {
@@ -588,7 +588,7 @@ describe('fileReference', () => {
 
     it('truncates content that exceeds budget', async () => {
       const store = createLayerStateStore();
-      const layer = fileReference({
+      const layer = filesystem({
         baseDir: tempDir,
       });
 
@@ -625,7 +625,7 @@ describe('fileReference', () => {
         store,
       });
 
-      const state = store.get<TestFileRefState>('exec-truncate', 'file-reference');
+      const state = store.get<TestFileRefState>('exec-truncate', 'filesystem');
 
       // Call recall with very small budget
       const recallResult = await callRecall(layer, {
@@ -645,7 +645,7 @@ describe('fileReference', () => {
 
     it('shows deleted file message', async () => {
       const store = createLayerStateStore();
-      const layer = fileReference({
+      const layer = filesystem({
         baseDir: tempDir,
       });
 
@@ -692,7 +692,7 @@ describe('fileReference', () => {
         store,
       });
 
-      const state = store.get<TestFileRefState>('exec-del-recall', 'file-reference');
+      const state = store.get<TestFileRefState>('exec-del-recall', 'filesystem');
 
       // Call recall
       const recallResult = await callRecall(layer, {
@@ -710,7 +710,7 @@ describe('fileReference', () => {
 
     it('returns empty for no files', async () => {
       const store = createLayerStateStore();
-      const layer = fileReference({
+      const layer = filesystem({
         baseDir: tempDir,
       });
 
@@ -726,7 +726,7 @@ describe('fileReference', () => {
         store,
       });
 
-      const state = store.get<TestFileRefState>('exec-empty', 'file-reference');
+      const state = store.get<TestFileRefState>('exec-empty', 'filesystem');
 
       const recallResult = await callRecall(layer, {
         state,
@@ -744,7 +744,7 @@ describe('fileReference', () => {
   describe('security', () => {
     it('pattern does not match absolute paths', async () => {
       const store = createLayerStateStore();
-      const layer = fileReference({
+      const layer = filesystem({
         baseDir: tempDir,
       });
 
@@ -776,14 +776,14 @@ describe('fileReference', () => {
 
       const state = store.get<{
         files: Map<string, unknown>;
-      }>('exec-abs', 'file-reference');
+      }>('exec-abs', 'filesystem');
       // Pattern doesn't match absolute paths at all
       expect(state?.files.size).toBe(0);
     });
 
     it('rejects path traversal attempts', async () => {
       const store = createLayerStateStore();
-      const layer = fileReference({
+      const layer = filesystem({
         baseDir: tempDir,
       });
 
@@ -823,14 +823,14 @@ describe('fileReference', () => {
             error?: string;
           }
         >;
-      }>('exec-traversal', 'file-reference');
+      }>('exec-traversal', 'filesystem');
       const fileInfo = state?.files.get('../outside.ts');
       expect(fileInfo?.error).toContain('PATH_TRAVERSAL');
     });
 
     it('rejects disallowed file extensions', async () => {
       const store = createLayerStateStore();
-      const layer = fileReference({
+      const layer = filesystem({
         baseDir: tempDir,
         allowedExtensions: [
           '.ts',
@@ -871,14 +871,14 @@ describe('fileReference', () => {
             error?: string;
           }
         >;
-      }>('exec-ext', 'file-reference');
+      }>('exec-ext', 'filesystem');
       const fileInfo = state?.files.get('secret.exe');
       expect(fileInfo?.error).toContain('DISALLOWED_EXTENSION');
     });
 
     it('rejects files exceeding size limit', async () => {
       const store = createLayerStateStore();
-      const layer = fileReference({
+      const layer = filesystem({
         baseDir: tempDir,
         maxFileSize: 100, // 100 bytes
       });
@@ -917,7 +917,7 @@ describe('fileReference', () => {
             error?: string;
           }
         >;
-      }>('exec-size', 'file-reference');
+      }>('exec-size', 'filesystem');
       const fileInfo = state?.files.get('large.ts');
       expect(fileInfo?.error).toContain('FILE_TOO_LARGE');
     });
@@ -946,7 +946,7 @@ describe('fileReference', () => {
       followSymlinks?: boolean;
     }): Promise<PipelineRunResult> {
       const store = createLayerStateStore();
-      const layer = fileReference({
+      const layer = filesystem({
         baseDir: args.baseDir,
         followSymlinks: args.followSymlinks,
       });
@@ -974,7 +974,7 @@ describe('fileReference', () => {
       });
       const state = store.get<{
         files: Map<string, TrackedFileProbe>;
-      }>(args.executionId, 'file-reference');
+      }>(args.executionId, 'filesystem');
       return {
         layer,
         ctx,
@@ -1149,7 +1149,7 @@ describe('fileReference', () => {
   describe('pattern matching', () => {
     it('ignores hashtags without file extensions', async () => {
       const store = createLayerStateStore();
-      const layer = fileReference({
+      const layer = filesystem({
         baseDir: tempDir,
       });
 
@@ -1182,7 +1182,7 @@ describe('fileReference', () => {
 
       const state = store.get<{
         files: Map<string, unknown>;
-      }>('exec-hashtag', 'file-reference');
+      }>('exec-hashtag', 'filesystem');
       // No files should be tracked
       expect(state?.files.size).toBe(0);
       // Text should pass through unchanged
@@ -1192,7 +1192,7 @@ describe('fileReference', () => {
 
     it('matches files with extensions', async () => {
       const store = createLayerStateStore();
-      const layer = fileReference({
+      const layer = filesystem({
         baseDir: tempDir,
       });
 
@@ -1227,7 +1227,7 @@ describe('fileReference', () => {
 
       const state = store.get<{
         files: Map<string, unknown>;
-      }>('exec-match', 'file-reference');
+      }>('exec-match', 'filesystem');
       expect(state?.files.size).toBe(2);
       expect(state?.files.has('real.ts')).toBe(true);
       expect(state?.files.has('also/nested.js')).toBe(true);
@@ -1236,7 +1236,7 @@ describe('fileReference', () => {
 
   describe('append-pipeline timeout headroom + parallel scoring (M8)', () => {
     it('factory pins onItemAppend timeout at 30s (fs + LLM work cannot fit the 5s default)', () => {
-      const layer = fileReference();
+      const layer = filesystem();
       expect(layer.timeouts?.onItemAppend).toBe(30_000);
     });
 
@@ -1246,7 +1246,7 @@ describe('fileReference', () => {
       await createTestFile('p2.ts', 'two');
       await createTestFile('p3.ts', 'three');
 
-      const layer = fileReference({
+      const layer = filesystem({
         baseDir: tempDir,
       });
       const store = createLayerStateStore();
@@ -1306,7 +1306,7 @@ describe('fileReference', () => {
             priority: number;
           }
         >;
-      }>('exec-parallel', 'file-reference');
+      }>('exec-parallel', 'filesystem');
       expect(state?.files.size).toBe(3);
       for (const ref of [
         'p1.ts',

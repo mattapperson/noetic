@@ -9,11 +9,11 @@
 import { describe, expect, it } from 'bun:test';
 import {
   createLayerStateStore,
-  historyWindow,
+  history,
   initLayers,
+  instructions,
   recallLayers,
-  staticContent,
-  workingMemoryContext,
+  scratchpad,
 } from '@noetic-tools/context';
 import type { ContextLayer, Item } from '@noetic-tools/types';
 import { frameworkCast } from '@noetic-tools/types';
@@ -31,7 +31,7 @@ import {
 
 const STUB_CTX = makeCtx();
 
-async function project(layer: ReturnType<typeof historyWindow>, items: Item[]): Promise<Item[]> {
+async function project(layer: ReturnType<typeof history>, items: Item[]): Promise<Item[]> {
   if (!layer.hooks.projectHistory) {
     throw new Error('layer missing projectHistory hook');
   }
@@ -62,7 +62,7 @@ describe('AUDIT history-window', () => {
       items.push(call);
       items.push(makeFunctionCallOutput(call.callId, 'ok', `fco-${i}`));
     }
-    const layer = historyWindow({
+    const layer = history({
       maxItems: 4,
     });
     const projected = await project(layer, items);
@@ -83,7 +83,7 @@ describe('AUDIT history-window', () => {
         items.push(makeMessage('assistant', `m-${i}`, `id-${i}`));
       }
     }
-    const layer = historyWindow({
+    const layer = history({
       maxItems: 4,
     });
     const projected = await project(layer, items);
@@ -99,7 +99,7 @@ describe('AUDIT history-window', () => {
       makeMessage('assistant', 'reply', 'a-reply'),
       makeMessage('assistant', 'extra', 'a-extra'),
     ];
-    const layer = historyWindow({
+    const layer = history({
       maxItems: 2,
     });
     const projected = await project(layer, items);
@@ -116,7 +116,7 @@ describe('AUDIT history-window', () => {
       items.push(call);
       items.push(makeFunctionCallOutput(call.callId, 'ok', `fco-${i}`));
     }
-    const layer = historyWindow({
+    const layer = history({
       maxItems: 5,
     });
     const projected = await project(layer, items);
@@ -143,7 +143,7 @@ describe('AUDIT history-window', () => {
 
 //#region working-memory probes
 
-function wmStore(layer: ReturnType<typeof workingMemoryContext>, newItems: Item[], state: unknown) {
+function wmStore(layer: ReturnType<typeof scratchpad>, newItems: Item[], state: unknown) {
   if (!layer.hooks.store) {
     throw new Error('no store hook');
   }
@@ -158,7 +158,7 @@ function wmStore(layer: ReturnType<typeof workingMemoryContext>, newItems: Item[
 
 describe('AUDIT working-memory', () => {
   it('PROBE: store deep-merges nested objects (spec: "Deep-merges structured state")', async () => {
-    const layer = workingMemoryContext({
+    const layer = scratchpad({
       schema: z.object({}),
     });
     const state = {
@@ -199,7 +199,7 @@ describe('AUDIT working-memory', () => {
   });
 
   it('PROBE: provides.update deep-merges nested objects', async () => {
-    const layer = workingMemoryContext({
+    const layer = scratchpad({
       schema: z.object({}),
     });
     const decl = layer.provides.update;
@@ -229,7 +229,7 @@ describe('AUDIT working-memory', () => {
   });
 
   it('PROBE: __proto__ key is stripped from the merged state (spec claims protection)', async () => {
-    const layer = workingMemoryContext({
+    const layer = scratchpad({
       schema: z.object({}),
     });
     const poison = JSON.parse('{"__proto__": {"polluted": true}, "safe": 1}');
@@ -251,7 +251,7 @@ describe('AUDIT working-memory', () => {
   it('PROBE: an object update does not silently discard prior freeform string state', async () => {
     // Freeform mode (no schema): init defaults state to ''. If an update arrives,
     // the prior freeform content should not be destroyed without trace.
-    const layer = workingMemoryContext();
+    const layer = scratchpad();
     const call = makeFunctionCall(
       'updateWorkingMemory',
       JSON.stringify({
@@ -285,7 +285,7 @@ function asLayers(layer: ContextLayer<string>): ContextLayer[] {
 describe('AUDIT static-content', () => {
   it('PROBE: recall respects the token budget (spec checklist #5)', async () => {
     const big = 'x'.repeat(8000); // ~2000 tokens at 4 chars/token
-    const layer = staticContent({
+    const layer = instructions({
       load: async () => big,
     });
     const store = createLayerStateStore();

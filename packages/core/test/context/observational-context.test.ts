@@ -1,19 +1,19 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import type { ObservationalState } from '@noetic-tools/context';
-import { observationalContext } from '@noetic-tools/context';
+import { observations } from '@noetic-tools/context';
 import type { MessageItem } from '@noetic-tools/types';
 import { makeCtx, makeItemLog, makeScopedStorage } from '../_helpers';
 
-describe('observationalContext', () => {
+describe('observations', () => {
   it('has correct id and slot', () => {
-    const layer = observationalContext();
-    expect(layer.id).toBe('observational-context');
+    const layer = observations();
+    expect(layer.id).toBe('observations');
     expect(layer.slot).toBe(200);
   });
 
   it('init loads state from storage', async () => {
-    const layer = observationalContext();
+    const layer = observations();
     const result = await layer.hooks.init!({
       storage: makeScopedStorage(),
       scopeKey: 'user-1',
@@ -28,7 +28,7 @@ describe('observationalContext', () => {
   });
 
   it('recall renders observations', async () => {
-    const layer = observationalContext();
+    const layer = observations();
     const state = {
       observations: [
         'Tool X returns errors',
@@ -56,7 +56,7 @@ describe('observationalContext', () => {
 
   it('store accumulates and compresses at threshold', async () => {
     // Token-based threshold: "test output" ≈ 3 tokens, so threshold 5 triggers after 2 items
-    const layer = observationalContext({
+    const layer = observations({
       bufferThreshold: 5,
     });
     const state: ObservationalState = {
@@ -124,7 +124,7 @@ describe('observationalContext', () => {
   });
 
   it('onSpawn clones state', async () => {
-    const layer = observationalContext();
+    const layer = observations();
     const parentState = {
       observations: [
         'obs1',
@@ -144,9 +144,9 @@ describe('observationalContext', () => {
   });
 });
 
-describe('observationalContext timeouts (M8)', () => {
+describe('observations timeouts (M8)', () => {
   it('pins LLM-headroom timeouts for store AND onItemAppend', () => {
-    const layer = observationalContext();
+    const layer = observations();
     // Both hooks run the same LLM-backed accumulate path; onItemAppend must
     // not be limited by the 5s pipeline default.
     expect(layer.timeouts).toEqual({

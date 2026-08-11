@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import { historyWindow } from '@noetic-tools/context';
+import { history } from '@noetic-tools/context';
 import type { Item } from '@noetic-tools/types';
 import { isNoeticConfigError } from '@noetic-tools/types';
 import {
@@ -22,7 +22,7 @@ function buildItems(roles: ReadonlyArray<'user' | 'assistant'>): Item[] {
 
 const STUB_CTX = makeCtx();
 
-async function project(layer: ReturnType<typeof historyWindow>, items: Item[]): Promise<Item[]> {
+async function project(layer: ReturnType<typeof history>, items: Item[]): Promise<Item[]> {
   if (!layer.hooks.projectHistory) {
     throw new Error('layer missing projectHistory hook');
   }
@@ -36,10 +36,10 @@ async function project(layer: ReturnType<typeof historyWindow>, items: Item[]): 
   ];
 }
 
-describe('historyWindow', () => {
+describe('history', () => {
   describe('caps trailing items', () => {
     it('slices to last maxItems when over the cap', async () => {
-      const layer = historyWindow({
+      const layer = history({
         maxItems: 4,
       });
       const items = [
@@ -61,7 +61,7 @@ describe('historyWindow', () => {
     });
 
     it('returns input unchanged when items.length <= maxItems', async () => {
-      const layer = historyWindow({
+      const layer = history({
         maxItems: 10,
       });
       const items = buildItems([
@@ -75,7 +75,7 @@ describe('historyWindow', () => {
     });
 
     it('honors a custom maxItems', async () => {
-      const layer = historyWindow({
+      const layer = history({
         maxItems: 2,
       });
       const items = buildItems([
@@ -93,7 +93,7 @@ describe('historyWindow', () => {
 
   describe('minimum-exchange guarantee', () => {
     it('expands backward to include a user message when slice has only assistant', async () => {
-      const layer = historyWindow({
+      const layer = history({
         maxItems: 2,
       });
       const items: Item[] = [
@@ -108,7 +108,7 @@ describe('historyWindow', () => {
     });
 
     it('expands backward to include an assistant message when slice has only user', async () => {
-      const layer = historyWindow({
+      const layer = history({
         maxItems: 2,
       });
       const items: Item[] = [
@@ -122,7 +122,7 @@ describe('historyWindow', () => {
     });
 
     it('does not expand when slice already contains both roles', async () => {
-      const layer = historyWindow({
+      const layer = history({
         maxItems: 2,
       });
       const items: Item[] = [
@@ -141,7 +141,7 @@ describe('historyWindow', () => {
     it('strips orphaned function_call when its output is just past the slice', async () => {
       const call = makeFunctionCall('read', '{}', 'fc-1');
       const output = makeFunctionCallOutput(call.callId, 'ok', 'fco-1');
-      const layer = historyWindow({
+      const layer = history({
         maxItems: 3,
       });
       const items: Item[] = [
@@ -172,7 +172,7 @@ describe('historyWindow', () => {
     it('drops a function_call_output left behind when its call is dropped by the slice', async () => {
       const call = makeFunctionCall('read', '{}', 'fc-orphan');
       const output = makeFunctionCallOutput(call.callId, 'ok', 'fco-orphan');
-      const layer = historyWindow({
+      const layer = history({
         maxItems: 3,
       });
       const items: Item[] = [
@@ -191,7 +191,7 @@ describe('historyWindow', () => {
 
   describe('opt-in semantics', () => {
     it('default maxItems is 40', async () => {
-      const layer = historyWindow();
+      const layer = history();
       const items: Item[] = Array.from(
         {
           length: 50,
@@ -213,7 +213,7 @@ describe('historyWindow', () => {
   describe('maxItems validation', () => {
     it('rejects maxItems below the floor', () => {
       try {
-        historyWindow({
+        history({
           maxItems: 1,
         });
         expect.unreachable('should have thrown');
@@ -231,7 +231,7 @@ describe('historyWindow', () => {
         Number.POSITIVE_INFINITY,
       ]) {
         try {
-          historyWindow({
+          history({
             maxItems: bad,
           });
           expect.unreachable(`should have thrown for ${bad}`);
@@ -244,7 +244,7 @@ describe('historyWindow', () => {
 
     it('rejects non-integer values', () => {
       try {
-        historyWindow({
+        history({
           maxItems: 3.5,
         });
         expect.unreachable('should have thrown');
@@ -255,7 +255,7 @@ describe('historyWindow', () => {
 
     it('rejects values above the ceiling', () => {
       try {
-        historyWindow({
+        history({
           maxItems: 1e4 + 1,
         });
         expect.unreachable('should have thrown');
@@ -267,7 +267,7 @@ describe('historyWindow', () => {
 
   describe('boundary behaviour around maxItems', () => {
     it('passes input through by reference at maxItems - 1', async () => {
-      const layer = historyWindow({
+      const layer = history({
         maxItems: 4,
       });
       const items: Item[] = buildItems([
@@ -285,7 +285,7 @@ describe('historyWindow', () => {
     });
 
     it('passes input through by reference at exactly maxItems', async () => {
-      const layer = historyWindow({
+      const layer = history({
         maxItems: 4,
       });
       const items: Item[] = buildItems([
@@ -303,7 +303,7 @@ describe('historyWindow', () => {
     });
 
     it('returns a fresh array (not the input) at maxItems + 1', async () => {
-      const layer = historyWindow({
+      const layer = history({
         maxItems: 4,
       });
       const items: Item[] = buildItems([

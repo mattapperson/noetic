@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import type { PlanState } from '@noetic-tools/context';
-import { PlanPhase, planContext } from '@noetic-tools/context';
+import { PlanPhase, plan } from '@noetic-tools/context';
 import type { WorkflowDocument } from '@noetic-tools/types';
 import { frameworkCast } from '@noetic-tools/types';
 import { makeCtx, makeItemLog } from '../../_helpers';
@@ -66,13 +66,13 @@ interface PlanStatusView {
 
 //#endregion
 
-describe('AUDIT: planContext', () => {
+describe('AUDIT: plan', () => {
   // BUG A: terminal phases (completed/failed) are a permanent dead-end.
   // After a plan completes, the only transition back to idle is exitPlanMode
   // 'cancel', which requires phase === planning. enterPlanMode requires idle.
   // So once a plan finishes, the (thread-scoped) layer can never start another.
   it('A: can start a new plan after a previous one completes', async () => {
-    const layer = planContext();
+    const layer = plan();
     const enter = layer.provides!.enterPlanMode;
     const updatePrd = layer.provides!.updatePrd;
     const setTree = layer.provides!.setPlanTree;
@@ -156,7 +156,7 @@ describe('AUDIT: planContext', () => {
   // checklist #5: "Respect the budget parameter in recall(). Trim your output to
   // fit."). A PRD even at the enforced max (50k chars) blows a 3k-token budget ~4x.
   it('B: recall respects the budget cap', async () => {
-    const layer = planContext();
+    const layer = plan();
     assert(layer.hooks.recall);
     const budget = 3e3;
     const result = await layer.hooks.recall({
@@ -177,7 +177,7 @@ describe('AUDIT: planContext', () => {
   // own check (`if (!state.prd)`) treats '' as "no PRD" and refuses to execute.
   // The two disagree about whether a PRD exists.
   it('C: status.hasPrd agrees with exitPlanMode about an empty PRD', async () => {
-    const layer = planContext();
+    const layer = plan();
     const updatePrd = layer.provides!.updatePrd;
     const status = layer.provides!.status;
     const exit = layer.provides!.exitPlanMode;
@@ -217,7 +217,7 @@ describe('AUDIT: planContext', () => {
   // BUG D: recall in executing phase with a null planTree renders the literal
   // string "null" into the <active_plan> block (JSON.stringify(null)).
   it('D: recall does not emit literal "null" for a missing plan tree', async () => {
-    const layer = planContext();
+    const layer = plan();
     assert(layer.hooks.recall);
     const result = await layer.hooks.recall({
       log: makeItemLog(),
