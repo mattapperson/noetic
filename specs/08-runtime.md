@@ -632,7 +632,7 @@ Any caller may also invoke `harness.checkpoint(ctx)` explicitly. Snapshots are k
 
 Snapshot content (Zod-validated by `CheckpointSnapshotSchema`):
 
-- `schemaVersion` — literal `1` today; bumped on backward-incompatible change.
+- `schemaVersion` — literal `2` today; bumped on backward-incompatible change (v2 rejects pre-rename v1 snapshots whose layer state is keyed by the old `*-memory` layer ids).
 - `executionId`, `threadId`, `resourceId` — identity.
 - `frontier` — stack of `FrontierFrame { stepId, input, state? }` entries (the execution frontier).
 - `layers` — `Record<layerId, state>` captured via `layerStateStore.get(executionId, layerId)`.

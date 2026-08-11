@@ -22,10 +22,10 @@ Durability is opt-in and composable. A zero-config harness has no `CheckpointSto
 ## `CheckpointSnapshot` schema
 
 ```typescript
-const CheckpointSchemaVersion = 1;
+const CheckpointSchemaVersion = 2;
 
 interface CheckpointSnapshot {
-  schemaVersion: 1;
+  schemaVersion: 2;
   executionId: string;
   threadId?: string;
   resourceId?: string;
@@ -60,6 +60,10 @@ interface ItemLogSnapshot {
 ```
 
 `schemaVersion` is a literal, not a range. `restore()` validates the observed version via the Zod schema; a mismatch surfaces `NoeticConfigError` with `code: 'CHECKPOINT_SCHEMA_MISMATCH'` and a hint pointing to `CheckpointStore.clear()`. Future bumps must enumerate a migration path; the framework does not silently coerce.
+
+Version history:
+
+- **v1 → v2** — the built-in context layers were renamed (`working-memory` → `working-context`, `observational-memory` → `observational-context`, `skills-memory` → `skills-context`). `layers` is keyed by layer id, so a v1 snapshot carries state under ids no current layer reads; restoring it would silently drop that state. No migration — discard via `CheckpointStore.clear()` and start fresh.
 
 `frontier` is intentionally permissive: frame `state` is `unknown` because each step's state is user-defined. Callers that need specific shape guarantees parse at the call site.
 

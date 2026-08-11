@@ -28,7 +28,7 @@ describe('CheckpointStore', () => {
       storage,
     });
     const snapshot: CheckpointSnapshot = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       executionId: 'exec-abc',
       threadId: 't-1',
       resourceId: 'u-1',
@@ -83,7 +83,7 @@ describe('CheckpointStore', () => {
       storage: createInMemoryStorage(),
     });
     const base: CheckpointSnapshot = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       executionId: 'a',
       frontier: [],
       layers: {},
@@ -116,7 +116,7 @@ describe('CheckpointStore', () => {
       storage: createInMemoryStorage(),
     });
     const snap: CheckpointSnapshot = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       executionId: 'x',
       frontier: [],
       layers: {},

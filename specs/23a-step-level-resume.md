@@ -106,7 +106,7 @@ The ledger and the layer snapshot must be captured atomically or they drift: a l
 
 ## Schema and migration
 
-**No schema bump was needed.** Sharding the ledger under its own keys (below) kept it out of `CheckpointSnapshot` entirely, so `CheckpointSchemaVersion` stays `1` and a pre-ledger snapshot restores exactly as before — it simply recovers an empty ledger and resumes nothing. That is strictly better than the v1→v2 migration this section originally proposed.
+**No schema bump was needed for the ledger.** Sharding the ledger under its own keys (below) kept it out of `CheckpointSnapshot` entirely, so the ledger never forces a `CheckpointSchemaVersion` bump and a pre-ledger snapshot restores exactly as before — it simply recovers an empty ledger and resumes nothing. That is strictly better than the schema migration this section originally proposed. (The version has since been bumped for an unrelated reason — the context-layer id renames; see `23-durable-execution` § Version history.)
 
 ## Size and retention
 
