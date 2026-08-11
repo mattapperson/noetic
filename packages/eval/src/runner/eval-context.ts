@@ -1,4 +1,4 @@
-import type { Step } from '@noetic-tools/core';
+import type { LlmProviderConfig, Step } from '@noetic-tools/core';
 import { AgentHarness, InMemoryExporter } from '@noetic-tools/core';
 
 import type { EvalSuiteOptions, ScoreResult } from '../types/eval';
@@ -50,6 +50,25 @@ function sanitizeScoreResult(result: ScoreResult): ScoreResult {
   };
 }
 
+/**
+ * Resolve the harness LLM provider from the environment. A Noetic platform key
+ * wins (matching the harness default of `provider: 'noetic'`); otherwise fall
+ * back to direct OpenRouter so suites gated on `OPENROUTER_API_KEY` can run.
+ * The key itself is never copied into config — the harness reads it from the
+ * environment for the selected provider.
+ */
+function resolveEnvLlm(): LlmProviderConfig | undefined {
+  if (process.env.NOETIC_API_KEY) {
+    return undefined;
+  }
+  if (process.env.OPENROUTER_API_KEY) {
+    return {
+      provider: 'openrouter',
+    };
+  }
+  return undefined;
+}
+
 async function runScorers(opts: RunScorersOpts): Promise<ScoreResult[]> {
   const results = await Promise.all(
     opts.scorers.map((scorer) => scorer(opts.execution, opts.objective, opts.background)),
@@ -79,6 +98,7 @@ export function createEvalContext(step: Step, options: EvalSuiteOptions): EvalCo
         name: 'eval',
         params: {},
         traceExporter: exporter,
+        llm: resolveEnvLlm(),
       });
 
       const ctx = harness.createContext();
