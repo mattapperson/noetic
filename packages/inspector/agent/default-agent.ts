@@ -7,7 +7,7 @@
  * `deps.traceExporter` (feeds the Trace tab) — pass both to the harness or
  * those panels go dark.
  *
- * The note tools write through `toolCtx.memory` into the Working Memory
+ * The note tools write through `toolCtx.context` into the Working Memory
  * layer's state — watch its tab light up when a note is saved, and the
  * Context tab render it into the next turn's window.
  *
@@ -62,9 +62,9 @@ const saveNote = tool({
     count: z.number(),
   }),
   async execute({ text }, toolCtx) {
-    const notes = readNotes(toolCtx.memory.get<WorkingMemoryContextState>(WORKING_MEMORY_LAYER_ID));
+    const notes = readNotes(toolCtx.context.get<WorkingMemoryContextState>(WORKING_MEMORY_LAYER_ID));
     notes.push(text);
-    toolCtx.memory.set<WorkingMemoryContextState>(WORKING_MEMORY_LAYER_ID, {
+    toolCtx.context.set<WorkingMemoryContextState>(WORKING_MEMORY_LAYER_ID, {
       notes,
     });
     return {
@@ -83,7 +83,7 @@ const listNotes = tool({
   }),
   async execute(_args, toolCtx) {
     return {
-      notes: readNotes(toolCtx.memory.get<WorkingMemoryContextState>(WORKING_MEMORY_LAYER_ID)),
+      notes: readNotes(toolCtx.context.get<WorkingMemoryContextState>(WORKING_MEMORY_LAYER_ID)),
     };
   },
 });

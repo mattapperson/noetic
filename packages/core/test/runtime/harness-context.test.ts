@@ -200,7 +200,7 @@ describe('AgentHarness memory', () => {
       };
       const harness = new AgentHarness({
         name: 'test',
-        memory: [
+        context: [
           layer,
         ],
         params: {},

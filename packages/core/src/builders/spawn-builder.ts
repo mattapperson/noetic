@@ -2,7 +2,6 @@ import type { ContextConfig, ContextData, ContextLayer } from '@noetic-tools/con
 import type { Step, StepSpawn, SubprocessAdapter } from '@noetic-tools/types';
 import { NoeticConfigError } from '@noetic-tools/types';
 import { getDefaultRegistrar } from '../types/step-registrar';
-import { resolveContextOption } from './context-option';
 
 //#region Types
 
@@ -10,8 +9,6 @@ interface SpawnOpts<TContext, I, O> {
   id: string;
   child: Step<TContext, I, O>;
   context?: ContextConfig | ContextLayer[];
-  /** @deprecated Renamed to `context`. */
-  memory?: ContextConfig | ContextLayer[];
   timeout?: number;
   /**
    * Optional per-step subprocess adapter override. The interpreter routes
@@ -62,7 +59,7 @@ export function spawn<TContext = ContextData, I = unknown, O = unknown>(
     kind: 'spawn',
     id: opts.id,
     child: opts.child,
-    context: resolveContextOption(opts),
+    context: opts.context,
     timeout: opts.timeout,
     subprocess: opts.subprocess,
   };

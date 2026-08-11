@@ -111,7 +111,6 @@ import { AgentHarnessModelCaller } from './model-call';
 
 export { createStreamIdleWatchdog } from './model-call';
 
-import { resolveContextOption } from '../builders/context-option';
 import { buildItemSchemaRegistry } from './model-schema';
 
 //#region Types
@@ -121,8 +120,6 @@ interface AgentHarnessOpts<TParams extends Record<string, unknown> = Record<stri
   initialStep?: Step<ContextData, string, string>;
   /** Default context layers applied to every context created via `createContext()` / `execute()`. */
   context?: ContextLayer[];
-  /** @deprecated Renamed to `context`. */
-  memory?: ContextLayer[];
   storage?: StorageAdapter;
   hooks?: AgentHooks;
   /**
@@ -476,7 +473,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     this.stepLedgerRetention = resolveStepLedgerRetention(opts.stepLedgerRetention);
     this.initialStep = opts.initialStep;
     this.harnessTools = opts.tools ?? [];
-    this._contextLayers = resolveContextOption(opts);
+    this._contextLayers = opts.context;
     this.callModelOverride = opts._testCallModel;
     this.client = opts._testCallModel ? undefined : createClient(opts.llm, opts.contextCache);
     this.channelStore = new ChannelStore();
@@ -636,7 +633,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
             threadId,
             resourceId: perTurnOptions.resourceId,
             state: perTurnOptions.state,
-            context: resolveContextOption(perTurnOptions),
+            context: perTurnOptions.context,
             _broadcaster: session.runner.broadcaster,
           });
           const ext = frameworkCast<Context & SessionCtxExtension>(ctx);
@@ -818,8 +815,6 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     threadId?: string;
     resourceId?: string;
     context?: ContextLayer[];
-    /** @deprecated Renamed to `context`. */
-    memory?: ContextLayer[];
     /**
      * Initial cwd for the new context. When set, takes precedence over both
      * the parent snapshot and the harness root cwd — used by worktree
@@ -829,10 +824,10 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     _broadcaster?: EventBroadcaster;
   }): Context {
     const resolved = opts ?? {};
-    // `ContextImpl` takes the layers as `layers`, so both option spellings are
+    // `ContextImpl` takes the layers as `layers`, so the `context` option is
     // dropped from `rest` rather than spread through under the wrong name.
-    const { context: _context, memory: _memory, cwdInit, ...rest } = resolved;
-    const effectiveLayers = resolveContextOption(resolved) ?? this._contextLayers;
+    const { context, cwdInit, ...rest } = resolved;
+    const effectiveLayers = context ?? this._contextLayers;
     const itemSchemas = buildItemSchemaRegistry({
       base: this.itemSchemas,
       layers: effectiveLayers,

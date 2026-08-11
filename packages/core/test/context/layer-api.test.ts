@@ -348,8 +348,6 @@ describe('resolveLayerTools', () => {
       fs: harness.fs,
       shell: harness.shell,
       context: layerState,
-      // Deprecated alias — same accessor object, as the runtime builds it.
-      memory: layerState,
       assembledView: [],
       lastStepMeta: null,
     };

@@ -2,7 +2,6 @@
  * @noetic-tools/types — foundational type contracts and primitives shared
  * across the Noetic framework.
  */
-export * from './deprecated';
 export * from './errors/noetic-config-error';
 export * from './errors/noetic-error';
 export * from './schemas/item';

@@ -125,8 +125,6 @@ export interface ExecuteOptions {
   state?: unknown;
   /** Context layers to apply to the execution context. Overrides harness-level layers if provided. */
   context?: ContextLayer[];
-  /** @deprecated Renamed to `context`. */
-  memory?: ContextLayer[];
   /** Override the harness's default delivery mode for this message only. */
   deliveryMode?: DeliveryMode;
   /**
@@ -268,8 +266,6 @@ export interface AgentHarnessContract<
     threadId?: string;
     resourceId?: string;
     context?: ContextLayer[];
-    /** @deprecated Renamed to `context`. */
-    memory?: ContextLayer[];
     /** Override the new context's initial cwd. */
     cwdInit?: string;
   }): Context;

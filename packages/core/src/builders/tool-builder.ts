@@ -11,7 +11,6 @@ import type {
 } from '@noetic-tools/types';
 import { NoeticConfigError } from '@noetic-tools/types';
 import type { ZodTypeAny, z } from 'zod';
-import { resolveContextOption } from './context-option';
 
 //#region Types
 
@@ -33,8 +32,6 @@ interface ToolConfig<I extends ZodTypeAny, O extends ZodTypeAny> {
   needsApproval?: boolean;
   /** Optional context declaration — the runtime generates a ContextLayer from this via toolContextLayer(). */
   context?: ToolContextDeclaration;
-  /** @deprecated Renamed to `context`. */
-  memory?: ToolContextDeclaration;
   /** Optional UI declaration — the runtime emits the rendered fragments at call/progress/result points. */
   ui?: ToolUiDeclaration<I, O>;
 }
@@ -61,8 +58,6 @@ interface GeneratorToolConfig<I extends ZodTypeAny, E extends ZodTypeAny, O exte
   needsApproval?: boolean;
   /** Optional context declaration — the runtime generates a ContextLayer from this via toolContextLayer(). */
   context?: ToolContextDeclaration;
-  /** @deprecated Renamed to `context`. */
-  memory?: ToolContextDeclaration;
   /** Optional UI declaration — the runtime emits the rendered fragments at call/progress/result points. */
   ui?: ToolUiDeclaration<I, O, z.infer<E>>;
 }
@@ -112,7 +107,7 @@ export function tool<I extends ZodTypeAny, O extends ZodTypeAny>(
     decorateResultItem: config.decorateResultItem,
     execute: config.execute,
     needsApproval: config.needsApproval,
-    context: resolveContextOption(config),
+    context: config.context,
     ui: config.ui,
   } satisfies Tool<I, O>;
 }
@@ -137,7 +132,7 @@ export function toolWithGenerator<I extends ZodTypeAny, E extends ZodTypeAny, O 
     decorateResultItem: config.decorateResultItem,
     execute: config.execute,
     needsApproval: config.needsApproval,
-    context: resolveContextOption(config),
+    context: config.context,
     ui: config.ui,
   } satisfies Tool<I, O>;
 }

@@ -318,11 +318,7 @@ export function makeMockContext(overrides?: Partial<Context>): Context {
     aborted: false,
     abort: () => {},
     ...overrides,
-    // Re-derived AFTER the spread: an override that sets only `context` would
-    // otherwise leave `memory` pointing at the orphaned original, a divergence
-    // ContextImpl cannot produce (its `memory` is a getter over `context`).
     context: overrides?.context ?? contextData,
-    memory: overrides?.memory ?? overrides?.context ?? contextData,
   };
 }
 
@@ -426,8 +422,6 @@ export function makeMockToolContext(ctx?: Context): ToolExecutionContext {
     fs: harness.fs,
     shell: harness.shell,
     context: toolContext,
-    // Deprecated alias — same accessor object, as buildToolExecutionContext does.
-    memory: toolContext,
     assembledView: resolvedCtx.itemLog.items,
     lastStepMeta: null,
   };

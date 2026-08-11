@@ -280,11 +280,6 @@ export class ContextImpl implements Context<ContextData> {
     return this._contextData;
   }
 
-  /** @deprecated Renamed to `context`. Returns the same object. */
-  get memory(): ContextData {
-    return this.context;
-  }
-
   recv<T>(
     ch: Channel<T>,
     opts?: {

@@ -610,14 +610,3 @@ export type { ConvergeConfig, VerifyFn } from './until/predicates';
 export { until } from './until/predicates';
 
 //#endregion
-
-//#region Deprecated aliases
-
-/**
- * Pre-rename names for the context layer system — `MemoryLayer`, `memory()`,
- * `workingMemory`, and friends. Each carries its own `@deprecated` pointer to
- * its replacement in `./deprecated`. Removed in the next major.
- */
-export * from './deprecated';
-
-//#endregion

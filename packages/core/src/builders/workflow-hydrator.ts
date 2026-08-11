@@ -264,12 +264,6 @@ function hydrateToolNode(
           fs: execCtx.fs,
           shell: execCtx.shell,
           context: layerState,
-          // Deprecated alias — the same accessor object, as
-          // `buildToolExecutionContext` does. `Tool.execute` takes its second
-          // argument as `unknown`, so nothing here is structurally checked
-          // against `ToolExecutionContext`; the annotation above is what makes
-          // a missing field a compile error instead of a runtime `undefined`.
-          memory: layerState,
           assembledView: execCtx.itemLog.items,
           lastStepMeta: execCtx.lastStepMeta,
         };

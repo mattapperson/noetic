@@ -1,6 +1,5 @@
 import type { ContextConfig, ContextData, ContextLayer } from '@noetic-tools/context';
 import type { StepLoop, StepSpawn, Tool } from '@noetic-tools/types';
-import { resolveContextOption } from '../builders/context-option';
 import { loop } from '../builders/loop-builder';
 import { spawn } from '../builders/spawn-builder';
 import { step } from '../builders/step-builders';
@@ -21,8 +20,6 @@ export function react(opts: {
   maxSteps?: number;
   maxCost?: number;
   context?: ContextConfig | ContextLayer[];
-  /** @deprecated Renamed to `context`. */
-  memory?: ContextConfig | ContextLayer[];
 }): StepLoop<ContextData, string, string> | StepSpawn<ContextData, string, string> {
   const llmStep = step.llm<ContextData, string, string>({
     id: 'react-step',
@@ -47,7 +44,7 @@ export function react(opts: {
     ),
   });
 
-  const layers = resolveContextOption(opts);
+  const layers = opts.context;
   if (!layers) {
     return loopStep;
   }
