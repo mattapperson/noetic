@@ -482,7 +482,7 @@ function hydrateWithContextNode(
     child: hydrateNode(node.child, ctx),
     context: resolveNamedLayers({
       names: node.layers,
-      nodeKind: 'provide',
+      nodeKind: 'withContext',
       nodeId: node.id,
       ctx,
     }),

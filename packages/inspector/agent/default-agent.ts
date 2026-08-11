@@ -22,6 +22,7 @@ import type {
 } from '@noetic-tools/core';
 import {
   AgentHarness,
+  callModel,
   history,
   instructions,
   observations,

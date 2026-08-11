@@ -48,8 +48,8 @@ The workflow document must be valid JSON with this structure:
 }
 
 A WorkflowNode is one of:
-- { "kind": "llm", "id": "<unique>", "instructions": "<prompt>", "model": "<optional>", "tools": ["<tool-name>", ...] }
-- { "kind": "tool", "id": "<unique>", "toolName": "<name>", "args": { ... } }
+- { "kind": "callModel", "id": "<unique>", "instructions": "<prompt>", "model": "<optional>", "tools": ["<tool-name>", ...] }
+- { "kind": "invokeTool", "id": "<unique>", "toolName": "<name>", "args": { ... } }
 - { "kind": "sequence", "id": "<unique>", "steps": [<WorkflowNode>, ...] }
 - { "kind": "inParallel", "id": "<unique>", "mode": "all"|"race"|"settle", "paths": [<WorkflowNode>, ...], "merge": "last"|"first"|"concat" }
 - { "kind": "loop", "id": "<unique>", "body": <WorkflowNode>, "until": { "kind": "maxSteps", "n": <number> } }
@@ -166,7 +166,7 @@ export interface ParseAndRunWorkflowOpts {
   input?: string;
   maxDepth?: number;
   /**
-   * Context layers the document's `provide` / `spawn` nodes may reference by name.
+   * Context layers the document's `withContext` / `spawn` nodes may reference by name.
    * Without a registry those nodes resolve to NO layers rather than failing, so a
    * host that runs layer-bearing workflows must pass its layers here.
    */

@@ -1,5 +1,5 @@
 // `parseAndRunWorkflow` forwards its layer registry into hydration. Without it, a
-// `provide` node's named layers resolve to NOTHING rather than failing (the hydrator
+// `withContext` node's named layers resolve to NOTHING rather than failing (the hydrator
 // treats an absent registry as "host runs with harness defaults"), so a host that runs
 // layer-bearing documents silently loses every layer it declared.
 
@@ -52,7 +52,7 @@ function makeHarness(): AgentHarness {
 }
 
 describe('parseAndRunWorkflow layer registry', () => {
-  it('resolves a provide node against the registry it is given', async () => {
+  it('resolves a withContext node against the registry it is given', async () => {
     const recalls: string[] = [];
     const harness = makeHarness();
 
