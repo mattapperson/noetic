@@ -6,7 +6,7 @@ import type {
   StepSubprocessRequest,
   SubprocessAdapter,
 } from '@noetic-tools/types';
-import { DetachedHandleImpl } from '../runtime/detached-handle';
+import { DetachedHandleImpl } from '../util/detached-handle';
 import { executeNoAdapter } from './execute';
 
 //#region Adapter resolution

@@ -391,6 +391,472 @@ const RECALL_RENDERERS: Partial<Record<PlanPhase, RecallRenderer>> = {
 
 //#endregion
 
+//#region Layer Options
+
+/** Fully-resolved layer configuration shared by the provide executors and hooks. */
+interface PlanLayerOptions {
+  maxPrdLength: number;
+  maxWorkflows: number;
+  maxWorkflowChars: number;
+  limits: DocumentLimits;
+  allowedTools: Set<string>;
+  style: PlanStyle;
+  subAgentTool?: string;
+  additionalPlanInstructions?: string;
+  onEnterSession?: PlanEnterSessionCallback;
+  onExit?: PlanExitCallback;
+}
+
+function resolvePlanOptions(config?: PlanContextConfig): PlanLayerOptions {
+  return {
+    maxPrdLength: config?.maxPrdLength ?? MAX_PRD_LENGTH,
+    maxWorkflows: config?.maxWorkflows ?? MAX_WORKFLOWS,
+    maxWorkflowChars: config?.maxWorkflowChars ?? MAX_WORKFLOW_CHARS,
+    limits: {
+      maxDepth: config?.maxDepth ?? MAX_DEPTH,
+      allowedNodeKinds: config?.allowedNodeKinds,
+    },
+    allowedTools: buildAllowedTools(config),
+    style: config?.style ?? PlanStyle.Phased,
+    subAgentTool: config?.subAgentTool,
+    additionalPlanInstructions: config?.additionalPlanInstructions,
+    onEnterSession: config?.onEnterSession,
+    onExit: config?.onExit,
+  };
+}
+
+//#endregion
+
+//#region Provide Executors
+
+interface PlanToolResult {
+  result: string;
+  state: PlanState;
+}
+
+async function executeEnterPlanMode(
+  args: {
+    goal?: string;
+  },
+  state: PlanState,
+  options: PlanLayerOptions,
+): Promise<PlanToolResult> {
+  if (state.phase === PlanPhase.Planning || state.phase === PlanPhase.Executing) {
+    return {
+      result: `Cannot enter plan mode: a plan is already active (phase "${state.phase}").`,
+      state,
+    };
+  }
+  const session = options.onEnterSession ? await options.onEnterSession() : null;
+  return {
+    result: 'Plan mode activated. Explore the codebase, then call plan/updatePrd.',
+    state: {
+      ...state,
+      phase: PlanPhase.Planning,
+      prd: args.goal ? `# Goal\n\n${args.goal}\n` : null,
+      planTree: null,
+      workflows: {},
+      executionLog: [],
+      version: state.version + 1,
+      planSlug: session?.slug ?? null,
+    },
+  };
+}
+
+async function executeUpdatePrd(
+  args: {
+    content: string;
+  },
+  state: PlanState,
+  options: PlanLayerOptions,
+): Promise<PlanToolResult> {
+  if (state.phase !== PlanPhase.Planning) {
+    return {
+      result: `Cannot update PRD: current phase is "${state.phase}". Enter plan mode first.`,
+      state,
+    };
+  }
+  if (args.content.length > options.maxPrdLength) {
+    return {
+      result: `PRD content exceeds maximum length of ${options.maxPrdLength} characters.`,
+      state,
+    };
+  }
+  return {
+    result: 'PRD updated successfully.',
+    state: {
+      ...state,
+      prd: args.content,
+    },
+  };
+}
+
+async function executeSetPlanTree(
+  args: {
+    document: unknown;
+  },
+  state: PlanState,
+  options: PlanLayerOptions,
+): Promise<PlanToolResult> {
+  if (state.phase !== PlanPhase.Planning) {
+    return {
+      result: `Cannot set plan tree: current phase is "${state.phase}". Enter plan mode first.`,
+      state,
+    };
+  }
+  const parsed = parseDocument(args.document);
+  if (!parsed.ok) {
+    return {
+      result: `Cannot set plan tree: ${parsed.error}. See ${SCHEMA_URL}.`,
+      state,
+    };
+  }
+  const limitError = checkDocumentLimits(parsed.doc, options.limits);
+  if (limitError) {
+    return {
+      result: `Cannot set plan tree: ${limitError}.`,
+      state,
+    };
+  }
+  const defined = new Set(Object.keys(state.workflows));
+  const dangling = [
+    ...new Set(collectSubflowRefs(parsed.doc).filter((ref) => !defined.has(ref))),
+  ];
+  const result =
+    dangling.length > 0
+      ? `Plan tree set. Subflow refs not yet defined: ${dangling.join(
+          ', ',
+        )} — define each with plan/setWorkflow, then call plan/exitPlanMode.`
+      : 'Plan tree set successfully. Call plan/exitPlanMode to request approval.';
+  return {
+    result,
+    state: {
+      ...state,
+      planTree: parsed.doc,
+    },
+  };
+}
+
+async function executeSetWorkflow(
+  args: {
+    name: string;
+    document: unknown;
+  },
+  state: PlanState,
+  options: PlanLayerOptions,
+): Promise<PlanToolResult> {
+  if (state.phase !== PlanPhase.Planning) {
+    return {
+      result: `Cannot set workflow: current phase is "${state.phase}". Enter plan mode first.`,
+      state,
+    };
+  }
+  if (!WORKFLOW_NAME_RE.test(args.name)) {
+    return {
+      result: `Cannot set workflow: "${args.name}" is not a valid name. Use a lowercase slug (a-z, 0-9, -, _), max 64 chars, e.g. "run-tests".`,
+      state,
+    };
+  }
+  const replacing = args.name in state.workflows;
+  if (!replacing && Object.keys(state.workflows).length >= options.maxWorkflows) {
+    return {
+      result: `Cannot set workflow: the plan already has ${options.maxWorkflows} workflows. Remove one with plan/removeWorkflow or replace an existing name.`,
+      state,
+    };
+  }
+  const parsed = parseDocument(args.document);
+  if (!parsed.ok) {
+    return {
+      result: `Cannot set workflow "${args.name}": ${parsed.error}. See ${SCHEMA_URL}.`,
+      state,
+    };
+  }
+  const serializedLength = JSON.stringify(parsed.doc).length;
+  if (serializedLength > options.maxWorkflowChars) {
+    return {
+      result: `Cannot set workflow "${args.name}": document is ${serializedLength} chars, over the ${options.maxWorkflowChars} limit. Split it into smaller named workflows.`,
+      state,
+    };
+  }
+  const limitError = checkDocumentLimits(parsed.doc, options.limits);
+  if (limitError) {
+    return {
+      result: `Cannot set workflow "${args.name}": ${limitError}.`,
+      state,
+    };
+  }
+  const workflows = {
+    ...state.workflows,
+    [args.name]: parsed.doc,
+  };
+  const names = Object.keys(workflows).sort().join(', ');
+  return {
+    result: `Workflow "${args.name}" ${replacing ? 'set (replaced previous version)' : 'created'}. ${
+      Object.keys(workflows).length
+    } workflow(s) defined: ${names}. Call plan/exitPlanMode when the plan is complete.`,
+    state: {
+      ...state,
+      workflows,
+    },
+  };
+}
+
+async function executeRemoveWorkflow(
+  args: {
+    name: string;
+  },
+  state: PlanState,
+): Promise<PlanToolResult> {
+  if (state.phase !== PlanPhase.Planning) {
+    return {
+      result: `Cannot remove workflow: current phase is "${state.phase}". Enter plan mode first.`,
+      state,
+    };
+  }
+  if (!(args.name in state.workflows)) {
+    const existing = Object.keys(state.workflows).sort().join(', ') || '(none)';
+    return {
+      result: `No workflow named "${args.name}". Existing workflows: ${existing}.`,
+      state,
+    };
+  }
+  const workflows = {
+    ...state.workflows,
+  };
+  delete workflows[args.name];
+  const remaining: PlanState = {
+    ...state,
+    workflows,
+  };
+  const stillReferenced = findDanglingRefs(remaining).filter((entry) =>
+    entry.startsWith(`"${args.name}"`),
+  );
+  const warning =
+    stillReferenced.length > 0
+      ? ` Warning: it is still referenced by subflow nodes (${stillReferenced.join(
+          '; ',
+        )}) — update those or re-add it before exiting.`
+      : '';
+  return {
+    result: `Workflow "${args.name}" removed.${warning}`,
+    state: remaining,
+  };
+}
+
+async function executeGetWorkflow(
+  args: {
+    name: string;
+  },
+  state: PlanState,
+): Promise<PlanToolResult> {
+  const doc = state.workflows[args.name];
+  if (!doc) {
+    const existing = Object.keys(state.workflows).sort().join(', ') || '(none)';
+    return {
+      result: `No workflow named "${args.name}". Existing workflows: ${existing}.`,
+      state,
+    };
+  }
+  return {
+    result: JSON.stringify(doc, null, 2),
+    state,
+  };
+}
+
+async function executeExitPlanMode(
+  args: {
+    action: 'execute' | 'cancel';
+  },
+  state: PlanState,
+  options: PlanLayerOptions,
+): Promise<PlanToolResult> {
+  if (state.phase !== PlanPhase.Planning) {
+    return {
+      result: `Cannot exit plan mode: current phase is "${state.phase}".`,
+      state,
+    };
+  }
+
+  if (args.action === 'cancel') {
+    return {
+      result: 'Plan cancelled. Returned to idle.',
+      state: createDefaultState(),
+    };
+  }
+
+  if (!state.prd) {
+    return {
+      result: 'Cannot execute: no PRD has been written. Call plan/updatePrd first.',
+      state,
+    };
+  }
+  if (!state.planTree) {
+    return {
+      result: 'Cannot execute: no plan tree has been set. Call plan/setPlanTree first.',
+      state,
+    };
+  }
+
+  // Structural validation runs before onExit so the user is never
+  // asked to approve a plan that cannot hydrate.
+  const dangling = findDanglingRefs(state);
+  if (dangling.length > 0) {
+    return {
+      result: `Cannot execute: subflow refs have no matching workflow: ${dangling.join(
+        '; ',
+      )}. Define them with plan/setWorkflow or remove the references.`,
+      state,
+    };
+  }
+  const cycle = findWorkflowCycle(state.workflows);
+  if (cycle) {
+    return {
+      result: `Cannot execute: workflows reference each other in a cycle: ${cycle.join(
+        ' -> ',
+      )}. Break the cycle before exiting.`,
+      state,
+    };
+  }
+
+  if (options.onExit) {
+    const { approved } = await options.onExit(state);
+    if (!approved) {
+      return {
+        result:
+          'User did not approve the plan. Stay in plan mode, address their feedback, and call plan/exitPlanMode again when ready.',
+        state,
+      };
+    }
+  }
+
+  return {
+    result: 'Plan mode exited. Execution phase begun.',
+    state: {
+      ...state,
+      phase: PlanPhase.Executing,
+    },
+  };
+}
+
+//#endregion
+
+//#region Hooks
+
+/** Renders the phase-appropriate recall payload, or null when the layer sits the turn out. */
+function renderPlanRecall(
+  state: PlanState,
+  budget: number,
+  options: PlanLayerOptions,
+): {
+  items: ReturnType<typeof createMessage>[];
+  tokenCount: number;
+} | null {
+  if (state.phase === PlanPhase.Idle) {
+    return null;
+  }
+
+  const renderer = RECALL_RENDERERS[state.phase];
+  if (!renderer) {
+    return null;
+  }
+
+  // estimateTokens counts ~4 chars per token, so budget*4 chars is the
+  // ceiling the renderer must fit under.
+  const content = renderer(state, {
+    style: options.style,
+    allowedTools: [
+      ...options.allowedTools,
+    ].sort(),
+    allowedNodeKinds: options.limits.allowedNodeKinds,
+    subAgentTool: options.subAgentTool,
+    extra: options.additionalPlanInstructions,
+    maxChars: budget * 4,
+  });
+  // A budget too small for even the compact briefing buys nothing but a
+  // fragment of a rule, so the layer sits the turn out.
+  if (content === null) {
+    return null;
+  }
+  return {
+    items: [
+      createMessage(content, 'developer'),
+    ],
+    tokenCount: estimateTokens(content),
+  };
+}
+
+function buildPlanHooks(options: PlanLayerOptions): ContextLayer<PlanState>['hooks'] {
+  return {
+    async init({ storage }) {
+      const saved = await storage.get<PlanState>('state');
+      return {
+        state: saved ? normalizeState(saved) : createDefaultState(),
+      };
+    },
+
+    async recall({ state, budget }) {
+      return renderPlanRecall(state, budget, options);
+    },
+
+    async beforeToolCall({ toolName, state }) {
+      if (state.phase !== PlanPhase.Planning) {
+        return {
+          decision: {
+            action: SteeringAction.Allow,
+          },
+          state,
+        };
+      }
+
+      if (options.allowedTools.has(toolName)) {
+        return {
+          decision: {
+            action: SteeringAction.Allow,
+          },
+          state,
+        };
+      }
+
+      return {
+        decision: {
+          action: SteeringAction.Deny,
+          guidance: `Plan mode is active. "${toolName}" is not allowed during planning. Use read-only tools (Read, Grep, Find, Ls) to explore the codebase, then call plan/updatePrd to write your PRD.`,
+        },
+        state,
+      };
+    },
+
+    async onSpawn({ parentState }) {
+      return {
+        childState: structuredClone(parentState),
+      };
+    },
+
+    async onComplete({ state, outcome }) {
+      if (state.phase !== PlanPhase.Executing) {
+        return;
+      }
+
+      return {
+        state: {
+          ...state,
+          phase: outcome === 'success' ? PlanPhase.Completed : PlanPhase.Failed,
+          executionLog: trimExecutionLog([
+            ...state.executionLog,
+            {
+              timestamp: Date.now(),
+              version: state.version,
+              outcome,
+            },
+          ]),
+        },
+      };
+    },
+  };
+}
+
+//#endregion
+
 //#region Public API
 
 /**
@@ -407,19 +873,7 @@ const RECALL_RENDERERS: Partial<Record<PlanPhase, RecallRenderer>> = {
  */
 export function plan(config?: PlanContextConfig): ContextLayer<PlanState> {
   const scope: ContextScope = config?.scope ?? 'thread';
-  const maxPrdLength = config?.maxPrdLength ?? MAX_PRD_LENGTH;
-  const maxWorkflows = config?.maxWorkflows ?? MAX_WORKFLOWS;
-  const maxWorkflowChars = config?.maxWorkflowChars ?? MAX_WORKFLOW_CHARS;
-  const limits: DocumentLimits = {
-    maxDepth: config?.maxDepth ?? MAX_DEPTH,
-    allowedNodeKinds: config?.allowedNodeKinds,
-  };
-  const allowedTools = buildAllowedTools(config);
-  const style = config?.style ?? PlanStyle.Phased;
-  const subAgentTool = config?.subAgentTool;
-  const additionalPlanInstructions = config?.additionalPlanInstructions;
-  const onEnterSession = config?.onEnterSession;
-  const onExit = config?.onExit;
+  const options = resolvePlanOptions(config);
 
   return {
     id: 'plan',
@@ -463,28 +917,7 @@ export function plan(config?: PlanContextConfig): ContextLayer<PlanState> {
           goal: z.string().optional(),
         }),
         output: z.string(),
-        execute: async (args, state) => {
-          if (state.phase === PlanPhase.Planning || state.phase === PlanPhase.Executing) {
-            return {
-              result: `Cannot enter plan mode: a plan is already active (phase "${state.phase}").`,
-              state,
-            };
-          }
-          const session = onEnterSession ? await onEnterSession() : null;
-          return {
-            result: 'Plan mode activated. Explore the codebase, then call plan/updatePrd.',
-            state: {
-              ...state,
-              phase: PlanPhase.Planning,
-              prd: args.goal ? `# Goal\n\n${args.goal}\n` : null,
-              planTree: null,
-              workflows: {},
-              executionLog: [],
-              version: state.version + 1,
-              planSlug: session?.slug ?? null,
-            },
-          };
-        },
+        execute: (args, state) => executeEnterPlanMode(args, state, options),
       }),
 
       updatePrd: layerFunction<
@@ -499,27 +932,7 @@ export function plan(config?: PlanContextConfig): ContextLayer<PlanState> {
           content: z.string(),
         }),
         output: z.string(),
-        execute: async (args, state) => {
-          if (state.phase !== PlanPhase.Planning) {
-            return {
-              result: `Cannot update PRD: current phase is "${state.phase}". Enter plan mode first.`,
-              state,
-            };
-          }
-          if (args.content.length > maxPrdLength) {
-            return {
-              result: `PRD content exceeds maximum length of ${maxPrdLength} characters.`,
-              state,
-            };
-          }
-          return {
-            result: 'PRD updated successfully.',
-            state: {
-              ...state,
-              prd: args.content,
-            },
-          };
-        },
+        execute: (args, state) => executeUpdatePrd(args, state, options),
       }),
 
       setPlanTree: layerFunction<
@@ -534,7 +947,7 @@ export function plan(config?: PlanContextConfig): ContextLayer<PlanState> {
           // Drawn from the same table as the briefing's kind list, so the two
           // can never disagree about what this plan is allowed to use.
           `WorkflowNode is a discriminated union on "kind" (${nodeKindList(
-            config?.allowedNodeKinds,
+            options.limits.allowedNodeKinds,
           )}); every node needs a unique "id". ` +
           'Keep this tree SMALL — reference named workflows with { "kind": "subflow", "id": "...", "ref": "<workflow-name>" } and define them via plan/setWorkflow. ' +
           `Schema: ${SCHEMA_URL}`,
@@ -546,45 +959,7 @@ export function plan(config?: PlanContextConfig): ContextLayer<PlanState> {
           document: z.unknown(),
         }),
         output: z.string(),
-        execute: async (args, state) => {
-          if (state.phase !== PlanPhase.Planning) {
-            return {
-              result: `Cannot set plan tree: current phase is "${state.phase}". Enter plan mode first.`,
-              state,
-            };
-          }
-          const parsed = parseDocument(args.document);
-          if (!parsed.ok) {
-            return {
-              result: `Cannot set plan tree: ${parsed.error}. See ${SCHEMA_URL}.`,
-              state,
-            };
-          }
-          const limitError = checkDocumentLimits(parsed.doc, limits);
-          if (limitError) {
-            return {
-              result: `Cannot set plan tree: ${limitError}.`,
-              state,
-            };
-          }
-          const defined = new Set(Object.keys(state.workflows));
-          const dangling = [
-            ...new Set(collectSubflowRefs(parsed.doc).filter((ref) => !defined.has(ref))),
-          ];
-          const result =
-            dangling.length > 0
-              ? `Plan tree set. Subflow refs not yet defined: ${dangling.join(
-                  ', ',
-                )} — define each with plan/setWorkflow, then call plan/exitPlanMode.`
-              : 'Plan tree set successfully. Call plan/exitPlanMode to request approval.';
-          return {
-            result,
-            state: {
-              ...state,
-              planTree: parsed.doc,
-            },
-          };
-        },
+        execute: (args, state) => executeSetPlanTree(args, state, options),
       }),
 
       setWorkflow: layerFunction<
@@ -604,62 +979,7 @@ export function plan(config?: PlanContextConfig): ContextLayer<PlanState> {
           document: z.unknown(),
         }),
         output: z.string(),
-        execute: async (args, state) => {
-          if (state.phase !== PlanPhase.Planning) {
-            return {
-              result: `Cannot set workflow: current phase is "${state.phase}". Enter plan mode first.`,
-              state,
-            };
-          }
-          if (!WORKFLOW_NAME_RE.test(args.name)) {
-            return {
-              result: `Cannot set workflow: "${args.name}" is not a valid name. Use a lowercase slug (a-z, 0-9, -, _), max 64 chars, e.g. "run-tests".`,
-              state,
-            };
-          }
-          const replacing = args.name in state.workflows;
-          if (!replacing && Object.keys(state.workflows).length >= maxWorkflows) {
-            return {
-              result: `Cannot set workflow: the plan already has ${maxWorkflows} workflows. Remove one with plan/removeWorkflow or replace an existing name.`,
-              state,
-            };
-          }
-          const parsed = parseDocument(args.document);
-          if (!parsed.ok) {
-            return {
-              result: `Cannot set workflow "${args.name}": ${parsed.error}. See ${SCHEMA_URL}.`,
-              state,
-            };
-          }
-          const serializedLength = JSON.stringify(parsed.doc).length;
-          if (serializedLength > maxWorkflowChars) {
-            return {
-              result: `Cannot set workflow "${args.name}": document is ${serializedLength} chars, over the ${maxWorkflowChars} limit. Split it into smaller named workflows.`,
-              state,
-            };
-          }
-          const limitError = checkDocumentLimits(parsed.doc, limits);
-          if (limitError) {
-            return {
-              result: `Cannot set workflow "${args.name}": ${limitError}.`,
-              state,
-            };
-          }
-          const workflows = {
-            ...state.workflows,
-            [args.name]: parsed.doc,
-          };
-          const names = Object.keys(workflows).sort().join(', ');
-          return {
-            result: `Workflow "${args.name}" ${replacing ? 'set (replaced previous version)' : 'created'}. ${
-              Object.keys(workflows).length
-            } workflow(s) defined: ${names}. Call plan/exitPlanMode when the plan is complete.`,
-            state: {
-              ...state,
-              workflows,
-            },
-          };
-        },
+        execute: (args, state) => executeSetWorkflow(args, state, options),
       }),
 
       removeWorkflow: layerFunction<
@@ -674,42 +994,7 @@ export function plan(config?: PlanContextConfig): ContextLayer<PlanState> {
           name: z.string().min(1),
         }),
         output: z.string(),
-        execute: async (args, state) => {
-          if (state.phase !== PlanPhase.Planning) {
-            return {
-              result: `Cannot remove workflow: current phase is "${state.phase}". Enter plan mode first.`,
-              state,
-            };
-          }
-          if (!(args.name in state.workflows)) {
-            const existing = Object.keys(state.workflows).sort().join(', ') || '(none)';
-            return {
-              result: `No workflow named "${args.name}". Existing workflows: ${existing}.`,
-              state,
-            };
-          }
-          const workflows = {
-            ...state.workflows,
-          };
-          delete workflows[args.name];
-          const remaining: PlanState = {
-            ...state,
-            workflows,
-          };
-          const stillReferenced = findDanglingRefs(remaining).filter((entry) =>
-            entry.startsWith(`"${args.name}"`),
-          );
-          const warning =
-            stillReferenced.length > 0
-              ? ` Warning: it is still referenced by subflow nodes (${stillReferenced.join(
-                  '; ',
-                )}) — update those or re-add it before exiting.`
-              : '';
-          return {
-            result: `Workflow "${args.name}" removed.${warning}`,
-            state: remaining,
-          };
-        },
+        execute: (args, state) => executeRemoveWorkflow(args, state),
       }),
 
       getWorkflow: layerFunction<
@@ -724,20 +1009,7 @@ export function plan(config?: PlanContextConfig): ContextLayer<PlanState> {
           name: z.string().min(1),
         }),
         output: z.string(),
-        execute: async (args, state) => {
-          const doc = state.workflows[args.name];
-          if (!doc) {
-            const existing = Object.keys(state.workflows).sort().join(', ') || '(none)';
-            return {
-              result: `No workflow named "${args.name}". Existing workflows: ${existing}.`,
-              state,
-            };
-          }
-          return {
-            result: JSON.stringify(doc, null, 2),
-            state,
-          };
-        },
+        execute: (args, state) => executeGetWorkflow(args, state),
       }),
 
       exitPlanMode: layerFunction<
@@ -756,174 +1028,10 @@ export function plan(config?: PlanContextConfig): ContextLayer<PlanState> {
           ]),
         }),
         output: z.string(),
-        execute: async (args, state) => {
-          if (state.phase !== PlanPhase.Planning) {
-            return {
-              result: `Cannot exit plan mode: current phase is "${state.phase}".`,
-              state,
-            };
-          }
-
-          if (args.action === 'cancel') {
-            return {
-              result: 'Plan cancelled. Returned to idle.',
-              state: createDefaultState(),
-            };
-          }
-
-          if (!state.prd) {
-            return {
-              result: 'Cannot execute: no PRD has been written. Call plan/updatePrd first.',
-              state,
-            };
-          }
-          if (!state.planTree) {
-            return {
-              result: 'Cannot execute: no plan tree has been set. Call plan/setPlanTree first.',
-              state,
-            };
-          }
-
-          // Structural validation runs before onExit so the user is never
-          // asked to approve a plan that cannot hydrate.
-          const dangling = findDanglingRefs(state);
-          if (dangling.length > 0) {
-            return {
-              result: `Cannot execute: subflow refs have no matching workflow: ${dangling.join(
-                '; ',
-              )}. Define them with plan/setWorkflow or remove the references.`,
-              state,
-            };
-          }
-          const cycle = findWorkflowCycle(state.workflows);
-          if (cycle) {
-            return {
-              result: `Cannot execute: workflows reference each other in a cycle: ${cycle.join(
-                ' -> ',
-              )}. Break the cycle before exiting.`,
-              state,
-            };
-          }
-
-          if (onExit) {
-            const { approved } = await onExit(state);
-            if (!approved) {
-              return {
-                result:
-                  'User did not approve the plan. Stay in plan mode, address their feedback, and call plan/exitPlanMode again when ready.',
-                state,
-              };
-            }
-          }
-
-          return {
-            result: 'Plan mode exited. Execution phase begun.',
-            state: {
-              ...state,
-              phase: PlanPhase.Executing,
-            },
-          };
-        },
+        execute: (args, state) => executeExitPlanMode(args, state, options),
       }),
     },
-    hooks: {
-      async init({ storage }) {
-        const saved = await storage.get<PlanState>('state');
-        return {
-          state: saved ? normalizeState(saved) : createDefaultState(),
-        };
-      },
-
-      async recall({ state, budget }) {
-        if (state.phase === PlanPhase.Idle) {
-          return null;
-        }
-
-        const renderer = RECALL_RENDERERS[state.phase];
-        if (!renderer) {
-          return null;
-        }
-
-        // estimateTokens counts ~4 chars per token, so budget*4 chars is the
-        // ceiling the renderer must fit under.
-        const content = renderer(state, {
-          style,
-          allowedTools: [
-            ...allowedTools,
-          ].sort(),
-          allowedNodeKinds: limits.allowedNodeKinds,
-          subAgentTool,
-          extra: additionalPlanInstructions,
-          maxChars: budget * 4,
-        });
-        // A budget too small for even the compact briefing buys nothing but a
-        // fragment of a rule, so the layer sits the turn out.
-        if (content === null) {
-          return null;
-        }
-        return {
-          items: [
-            createMessage(content, 'developer'),
-          ],
-          tokenCount: estimateTokens(content),
-        };
-      },
-
-      async beforeToolCall({ toolName, state }) {
-        if (state.phase !== PlanPhase.Planning) {
-          return {
-            decision: {
-              action: SteeringAction.Allow,
-            },
-            state,
-          };
-        }
-
-        if (allowedTools.has(toolName)) {
-          return {
-            decision: {
-              action: SteeringAction.Allow,
-            },
-            state,
-          };
-        }
-
-        return {
-          decision: {
-            action: SteeringAction.Deny,
-            guidance: `Plan mode is active. "${toolName}" is not allowed during planning. Use read-only tools (Read, Grep, Find, Ls) to explore the codebase, then call plan/updatePrd to write your PRD.`,
-          },
-          state,
-        };
-      },
-
-      async onSpawn({ parentState }) {
-        return {
-          childState: structuredClone(parentState),
-        };
-      },
-
-      async onComplete({ state, outcome }) {
-        if (state.phase !== PlanPhase.Executing) {
-          return;
-        }
-
-        return {
-          state: {
-            ...state,
-            phase: outcome === 'success' ? PlanPhase.Completed : PlanPhase.Failed,
-            executionLog: trimExecutionLog([
-              ...state.executionLog,
-              {
-                timestamp: Date.now(),
-                version: state.version,
-                outcome,
-              },
-            ]),
-          },
-        };
-      },
-    },
+    hooks: buildPlanHooks(options),
   } satisfies ContextLayer<PlanState>;
 }
 

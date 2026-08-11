@@ -5,7 +5,7 @@ import type { Step, StepSubprocessRequest } from '@noetic-tools/types';
 import { DetachedStatus, isNoeticError } from '@noetic-tools/types';
 import { createInMemorySubprocessAdapter } from '../../src/adapters/in-memory-subprocess-adapter';
 import { AgentHarness } from '../../src/harness/agent-harness';
-import { DetachedHandleImpl } from '../../src/runtime/detached-handle';
+import { DetachedHandleImpl } from '../../src/util/detached-handle';
 
 //#region Helpers
 

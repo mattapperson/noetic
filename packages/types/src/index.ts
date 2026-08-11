@@ -10,6 +10,7 @@ export * from './types/channel';
 export * from './types/common';
 export * from './types/context';
 export * from './types/context-cache';
+export * from './types/context-harness';
 export * from './types/context-layer';
 export * from './types/context-parts/item-log';
 export * from './types/context-parts/layer-usage';

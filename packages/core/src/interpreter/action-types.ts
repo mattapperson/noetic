@@ -6,12 +6,14 @@ export type {
 } from '@noetic-tools/context';
 export type {
   AgentHarnessContract,
+  CallModelRequest,
   Context,
   ContextRerenderRequest,
   ExecuteStepFn,
   FunctionCallItem,
   InputMessageItem,
   Item,
+  LLMResponse,
   ProjectionPolicy,
   RecallLayerOutput,
   RetryPolicy,

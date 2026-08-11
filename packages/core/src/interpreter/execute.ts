@@ -10,9 +10,9 @@ import type {
 import { frameworkCast, NoeticErrorImpl } from '@noetic-tools/types';
 import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../runtime/broadcaster-utils';
 import { ContextImpl } from '../runtime/context-impl';
-import { DetachedHandleImpl } from '../runtime/detached-handle';
 import type { StepLedger } from '../runtime/durable/step-ledger';
 import type { EventBroadcaster } from '../runtime/event-broadcaster';
+import { DetachedHandleImpl } from '../util/detached-handle';
 import {
   executeCallModel,
   executeInvokeTool,

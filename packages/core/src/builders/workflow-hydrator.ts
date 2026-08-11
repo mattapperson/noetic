@@ -25,7 +25,6 @@ import type {
   Until,
 } from '@noetic-tools/types';
 import { frameworkCast, isServerToolSpec, NoeticConfigError } from '@noetic-tools/types';
-import { DetachedHandleImpl } from '../runtime/detached-handle';
 import type {
   CallModelWorkflowNode,
   OutputCodecRef,
@@ -36,6 +35,7 @@ import type {
 } from '../schemas/workflow';
 import { all, any } from '../until/combinators';
 import { until } from '../until/predicates';
+import { DetachedHandleImpl } from '../util/detached-handle';
 
 import { conditional, inParallel } from './control-flow-builders';
 import { schedule } from './every';
