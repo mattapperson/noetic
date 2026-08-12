@@ -508,10 +508,10 @@ function layerData<T, TState>(opts: {
 
 Creates a `LayerDataDecl` that derives a value from layer state. Takes an options object with a single `read` function.
 
-### layerFn
+### layerFunction
 
 ```ts validate=none
-function layerFn<TInput, TOutput, TState>(opts: {
+function layerFunction<TInput, TOutput, TState>(opts: {
   description: string;
   input: ZodType<TInput>;
   output: ZodType<TOutput>;

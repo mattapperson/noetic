@@ -57,7 +57,7 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 
 3. **Context system** (`11-context-layer-system`, `12-builtin-context-layers`) — The `ContextLayer` contract (owned by `@noetic-tools/types`), lifecycle hook types, scope system, storage adapter contract, and built-in layer factories, all living in `@noetic-tools/context`. The View (what the LLM actually sees) is assembled by the Projector from the layer outputs + conversation history. **Boundary rule:** `@noetic-tools/context` depends only on `@noetic-tools/types` and MUST NOT import from `@noetic-tools/core`. This keeps the context system tree-shakable and free of any transitive dependency on the interpreter or runtime.
 
-**Patterns** (`13-patterns`) are 15-30 line compositions of primitives. They prove the primitives are sufficient; they are not framework magic.
+**Patterns** (`13-patterns`) are 15-30 line compositions of primitives that live in application code — core ships no pattern builders. They prove the primitives are sufficient; they are not framework magic.
 
 ## Spec Index
 
@@ -75,7 +75,7 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 | `10-observability` | `Span`, tracing | OpenTelemetry integration |
 | `11-context-layer-system` | `ContextLayer`, lifecycle, budget, scope, View assembly | Context contract |
 | `12-builtin-context-layers` | Built-in layer factories + custom examples | Reference implementations |
-| `13-patterns` | ReAct, Ralph Wiggum, Task Trees, Dual-Agent, etc. | Composition proofs |
+| `13-patterns` | ReAct, verify-and-retry, delegation, runner-loop primitives | Composition proofs |
 | `14-design-decisions` | Architectural rationale | Tradeoff documentation |
 | `15-build-sequence` | Implementation stages 1-10 | Build ordering |
 | `22-cli-architecture` | `@noetic-tools/cli` layer hierarchy, subprocess adapter wiring | CLI internals |
@@ -96,7 +96,7 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
                     \      /                 |
                    08-agent-harness           |
                        |                     |
-                  13-patterns (uses all primitives)
+              13-patterns (app compositions, all primitives)
                        |
                        ↓ re-exports
 ── @noetic-tools/context ──────────────────────────────────────────────

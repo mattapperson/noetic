@@ -32,6 +32,7 @@ Build a ReAct agent that loops over a callModel step, calling tools until the mo
 
 ```ts
 import { AgentHarness, any, callModel, loop, until } from '@noetic-tools/core';
+import type { ContextData } from '@noetic-tools/core';
 import { z } from 'zod';
 
 // A tool the agent can call. Inputs and outputs are validated with zod.
@@ -45,8 +46,9 @@ const searchTool = {
   },
 };
 
-// A model call, looped until the model stops calling tools.
-const assistant = callModel({
+// A model call, looped until the model stops calling tools. The generics name
+// the context shape and the step's input/output types the harness expects.
+const assistant = callModel<ContextData, string, string>({
   id: 'assistant',
   model: 'openai/gpt-4o', // OpenRouter model id (provider/model)
   instructions: 'You are a helpful research assistant.',

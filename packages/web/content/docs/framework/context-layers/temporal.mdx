@@ -73,7 +73,7 @@ type FactSearcher = (input: {
 
 ## The `searchMemory` Tool
 
-The layer provides one `layerFn`, exposed to the model as the `temporal/searchMemory` tool and to code as `ctx.context['temporal'].searchMemory({ query })`:
+The layer provides one `layerFunction`, exposed to the model as the `temporal/searchMemory` tool and to code as `ctx.context['temporal'].searchMemory({ query })`:
 
 ```ts validate=none
 type TemporalSearchResult = {

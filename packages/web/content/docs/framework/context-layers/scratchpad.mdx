@@ -119,4 +119,4 @@ Merges key-value pairs into the current state. Accepts a `Record<string, unknown
 await ctx.context['scratchpad'].update({ currentGoal: 'Ship v2' });
 ```
 
-Because `update` is a `layerFn`, the runtime automatically injects it as an LLM tool named `scratchpad/update`. The model can call this tool directly to modify the scratchpad during a conversation turn.
+Because `update` is a `layerFunction`, the runtime automatically injects it as an LLM tool named `scratchpad/update`. The model can call this tool directly to modify the scratchpad during a conversation turn.

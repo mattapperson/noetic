@@ -1,6 +1,6 @@
 # JSON Workflow Runtime
 
-> **Depends On:** `01-step-type` (Step, Until), `02-step-variants` (callModel, invokeTool), `03-control-flow` (conditional, inParallel), `04-spawn` (spawn), `05-loop-and-until` (loop, until), `08-runtime` (AgentHarness), `13-patterns` (patterns namespace)
+> **Depends On:** `01-step-type` (Step, Until), `02-step-variants` (callModel, invokeTool), `03-control-flow` (conditional, inParallel), `04-spawn` (spawn), `05-loop-and-until` (loop, until), `08-runtime` (AgentHarness)
 > **Exports:** `WorkflowDocument`, `WorkflowNode`, `WorkflowDocumentSchema`, `WorkflowNodeSchema`, `UntilPredicateSchema`, `MergeStrategySchema`, `hydrateWorkflow`, `hydrateNode`, `dynamicWorkflow`, `parseAndRunWorkflow`
 
 ---
@@ -722,7 +722,7 @@ const WorkflowDocumentSchema = z.object({
 - `NoeticError` kinds: `09-error-model`
 - `ContextLayer`: `11-context-layer-system`
 - `plan`, `PlanState`: `12-builtin-context-layers`
-- `compilePlan`, `adaptivePlan`, `PlanNodeSchema`: `13-patterns`
+- Hand-written compositions of the same primitives: `13-patterns`
 
 ---
 

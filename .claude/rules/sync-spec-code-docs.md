@@ -27,12 +27,12 @@ They are mandatory, not optional.
 | `10-observability.md` | `observability/` | `observability.mdx` |
 | `11-context-layer-system.md`, `12-builtin-context-layers.md` | `packages/context/src/` (`ContextLayer` contract in `packages/types/src/types/context-layer.ts`) | `context-layers/`, `api/context-layer-types.mdx` |
 | (foundation types) | `packages/types/src/` | `api/` |
-| `13-patterns.md` | `patterns/` | (public pattern docs removed — only `framework/json-runtime.mdx` documents `dynamicWorkflow`/`parseAndRunWorkflow`) |
+| `13-patterns.md` | `runtime/durable/`, `packages/core/examples/` | (public pattern docs removed — only `framework/json-runtime.mdx` documents `dynamicWorkflow`/`parseAndRunWorkflow`) |
 | `16-semantic-conditions.md` | `conditions/`, `adapters/` | `operators/conditions.mdx`, `api/adapter-types.mdx` |
 | `17-eval-and-optimization.md` | `packages/eval/src/` | (eval docs TBD) |
-| `22-cli-architecture.md` | `packages/cli/src/` | (cli docs TBD) |
+| `12a-cli-context-layers.md`, `21-tasks.md`, `22-cli-architecture.md` | (none — the CLI is implemented in the separate `noetic-internal` repo; these specs stay here as its contract, so there is no in-repo source to keep in sync) | `code-agent-cli/` |
 | `25-platform-packages.md` | `packages/platform-node/src/`, `packages/platform-browser/src/` | `framework/platform-packages.mdx` |
-| `26-json-workflow-runtime.md` | `schemas/workflow.ts`, `builders/workflow-hydrator.ts`, `patterns/dynamic-workflow.ts` | `framework/json-runtime.mdx` (+ run `bun run gen:schema`, see Requirement 6) |
+| `26-json-workflow-runtime.md` | `schemas/workflow.ts`, `builders/workflow-hydrator.ts`, `builders/dynamic-workflow.ts` | `framework/json-runtime.mdx` (+ run `bun run gen:schema`, see Requirement 6) |
 | `27-sub-harness-steps.md` | `packages/types/src/types/sub-harness.ts`, `interpreter/execute-sub-harness`, `builders/step-builders` (harness builders), `packages/sub-harness/src/`, `packages/sub-harness-*/src/` | `framework/sub-harnesses.mdx` |
 | `28-generative-ui.md` | `packages/types/src/types/output-codec.ts`, `packages/types/src/types/tool.ts` (`UiFragment`, `ToolUiDeclaration`), `packages/openui/src/` | `framework/generative-ui.mdx` |
 | `29-chat-platform-integration.md` | `packages/chat-sdk/src/`, `packages/core/src/runtime/channel-store.ts` (`getChannelStream`) | `framework/chat-sdk.mdx` |
@@ -43,8 +43,8 @@ They are mandatory, not optional.
 
 | Source Area | Skill File |
 |-------------|------------|
-| `builders/`, `types/`, `patterns/`, `packages/context/src/context/layers/` | `.claude/skills/noetic-agent-builder/references/api-reference.md` |
-| `patterns/`, `examples/` | `.claude/skills/noetic-agent-builder/references/composition-patterns.md` |
+| `builders/`, `types/`, `packages/context/src/context/layers/` | `.claude/skills/noetic-agent-builder/references/api-reference.md` |
+| `runtime/durable/`, `examples/` | `.claude/skills/noetic-agent-builder/references/composition-patterns.md` |
 | Any public API change | `.claude/skills/noetic-agent-builder/SKILL.md` (if core concepts change) |
 | `packages/eval/src/runner/`, `packages/eval/src/scorers/` | `.claude/skills/noetic-eval/references/api-reference.md` |
 | `packages/eval/src/optimization/`, `packages/eval/src/cli/` | `.claude/skills/noetic-eval/references/api-reference.md` |

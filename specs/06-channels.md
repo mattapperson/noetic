@@ -151,7 +151,7 @@ const handle = harness.getChannelHandle(userMessages, executionId);
 
 ### Scope Rule
 
-External channels survive `contextIn: 'fresh'` spawn boundaries. They are scoped to the **root execution**, not individual spawn boundaries. This is analogous to `scope: 'resource'` context layers — they represent user-level communication, not execution-level state.
+External channels are unaffected by `spawn` boundaries. A spawned child starts with an empty ItemLog and, when `context` is set, a replaced layer stack (see `04-spawn`) — but it shares its parent's channel store by reference, so channel state is never re-namespaced at a boundary. Handles and subscriptions are scoped to the **root execution** instead: only a root `run()` opens and closes an execution id, so a `spawn` never opens a new channel scope nor closes an existing one. This is analogous to `scope: 'resource'` context layers — they represent user-level communication, not execution-level state.
 
 ### Lifecycle
 
@@ -208,9 +208,9 @@ Node.js is single-threaded, so `AgentHarness` handles are inherently thread-safe
 
 ### Scope
 
-Channels are scoped to an execution tree. A channel created in a parent is accessible to all descendants unless a `spawn` boundary (see `04-spawn`) uses `contextIn: 'fresh'`. Fresh contexts get a new channel namespace — **except** for external channels, which survive fresh boundaries (scoped to root execution). To pass a non-external channel across a fresh boundary, use `contextIn: 'custom'` explicitly — this is the "you opted into this" escape hatch.
+Channels are scoped to the harness, not to a boundary within it. Channel state lives in one store per `AgentHarness` and is keyed by channel **name**, so a channel a parent created is accessible to every descendant. There is no per-boundary channel namespace to opt out of or into: a `spawn` boundary (see `04-spawn`) resets the child's ItemLog, and `context` replaces its layer stack, but neither touches channels.
 
-`inParallel` and `spawn` child contexts inherit the parent's channel store by default — sibling parallel paths can communicate via `send`/`recv`/`tryRecv` on the same channels, and a `spawn` child can interact with channels its parent created.
+`inParallel` paths and `spawn` children therefore receive the parent's channel store by reference — sibling parallel paths can communicate via `send`/`recv`/`tryRecv` on the same channels, and a `spawn` child can interact with channels its parent created. Because keying is by name within the harness, two executions that use the same channel name share one channel; isolate traffic with distinct channel names rather than by relying on execution boundaries.
 
 ### Wake-only subscription
 

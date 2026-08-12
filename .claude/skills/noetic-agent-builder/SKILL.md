@@ -48,7 +48,7 @@ const result = await harness.run(step, input, ctx);
 
 The agent harness manages execution, context creation, channels, context lifecycle, and detached spawns. When no `callModel` is provided, `AgentHarness` auto-detects from the `OPENROUTER_API_KEY` environment variable.
 
-The harness always holds a `SubprocessAdapter` — every `runCode`, `spawn`, and `harness.detachedSpawn` dispatches through `harness.subprocess.spawn(...)`. Zero-config harnesses use `createInMemorySubprocessAdapter()` (in-process, no overhead). Swap in `createLocalSubprocessAdapter({storage})` to run children out-of-process with durable handle manifests. Per-step and per-call `subprocess` overrides let one agent mix in-process and out-of-process dispatch — see the Key Rules section and the "Run an agent out-of-process" / "Survive a host crash" patterns in `references/composition-patterns.md`.
+The harness always holds a `SubprocessAdapter` — every `runCode`, `spawn`, and `harness.detachedSpawn` dispatches through `harness.subprocess.spawn(...)`. Zero-config harnesses use `createInMemorySubprocessAdapter()` from `@noetic-tools/core` (in-process, no overhead). Swap in `createLocalSubprocessAdapter({storage})` from `@noetic-tools/platform-node` to run children out-of-process with durable handle manifests. Per-step and per-call `subprocess` overrides let one agent mix in-process and out-of-process dispatch — see the Key Rules section and the "Run an agent out-of-process" / "Survive a host crash" patterns in `references/composition-patterns.md`.
 
 ### Tools
 
@@ -82,7 +82,7 @@ Context layers inject context into the LLM view (via `recall`) and persist state
 - **`toolCalls()`** -- auto-generated layers from tool `context` declarations
 - **`openUiSurface()`** (from `@noetic-tools/openui`) -- server-authoritative generative-UI state; see [Generative UI](#generative-ui-openui)
 
-The `@noetic-tools/cli` package provides additional enhanced prompt layers (`promptEngineeringLayer`, `communicationStyleLayer`, `environmentContextLayer`, `toolGuidanceLayer`, `planningModeLayer`) that implement behavioral guidelines, adaptive communication, environment detection, tool preferences, and plan-mode guidance. Progressive skill disclosure is provided separately by `skillsLayer` from `@noetic-tools/code-agent`. See `packages/cli/docs/enhanced-prompt-engineering.md` for full documentation.
+The `@noetic-tools/cli` package provides additional enhanced prompt layers (`promptEngineeringLayer`, `communicationStyleLayer`, `environmentContextLayer`, `toolGuidanceLayer`, `planningModeLayer`) that implement behavioral guidelines, adaptive communication, environment detection, tool preferences, and plan-mode guidance. The CLI is developed in a separate repository (`github.com/mattapperson/noetic-internal`) — import those layers from the published barrel, never from a `src/` subpath. Progressive skill disclosure is not a published built-in; the reference implementation is `packages/core/examples/deep-agent/context/skills-layer.ts`. See `references/api-reference.md` → CLI enhanced-prompt layers for signatures.
 
 Recall can return a `RecallResult` object or a plain `string` (shorthand -- the agent harness wraps it in a developer message).
 
@@ -115,7 +115,7 @@ An agent can respond with a *UI* built from components you register, instead of 
 | Parallel perspectives, merged | Parallel Research | `inParallel(all)` + `spawn` |
 | Background sub-agents | Async Delegation | `detachedSpawn` + inbox channel |
 | Sequential pipeline | Phase Router | `conditional` + `loop` + `prepareNext` |
-| Multi-agent task tree | Plan Execution | `compilePlan()` |
+| Multi-agent task tree | Plan Execution | hand-compose `loop` + `inParallel` + `conditional` + `spawn`, or emit a `WorkflowDocument` and run it with `parseAndRunWorkflow` |
 | Run a real coding agent (Claude Code / Codex / opencode / pi) as a step | Sub-Harness Step | `step.claudeCode` / `step.codex` / `step.opencode` / `step.pi` |
 | Agent responds with a UI (not text) | Generative UI | `callModel({ output: openUi(library) })` + `openUiSurface()` |
 
@@ -211,7 +211,7 @@ Observability:
 
 ## Key Rules
 
-1. **`Step<I, O>` is invariant** -- `Step<string, string>` is NOT assignable to `Step<unknown, unknown>`. When a framework API expects `Step` (defaulting to `Step<unknown, unknown>`), use `frameworkCast<Step>(myStep)` from `@noetic-tools/core` at the boundary. To accept any step in a custom API, use a structural type like `{ kind: Step['kind']; id: string }` instead of `Step` directly
+1. **`Step<I, O>` is invariant** -- `Step<string, string>` is NOT assignable to `Step<unknown, unknown>`. When a framework API expects `Step` (defaulting to `Step<unknown, unknown>`), use `frameworkCast<Step>(myStep)` from `@noetic-tools/core/unstable` at the boundary. To accept any step in a custom API, use a structural type like `{ kind: Step['kind']; id: string }` instead of `Step` directly
 2. **Tools receive the harness via `toolCtx.harness`** -- never pass the harness as a closure parameter to tool factories
 2. **`spawn` creates context boundaries** -- context layers decide what state crosses via `onSpawn`/`onReturn` hooks
 3. **Detached spawns use `toolCtx.ctx`** -- always use the parent context, never `harness.createContext()`, to preserve depth tracking and thread/resource IDs
@@ -231,15 +231,15 @@ For complete builder signatures, context layer APIs, agent harness methods, and 
 | Concept | Source Path |
 |---------|------------|
 | Builders | `packages/core/src/builders/` |
-| Step types | `packages/core/src/types/step.ts` |
-| Tool types | `packages/core/src/types/common.ts` |
+| Step types | `packages/types/src/types/step.ts` |
+| Tool types | `packages/types/src/types/tool.ts` |
 | Context layer types | `packages/types/src/types/context-layer.ts` |
-| Patterns | `packages/core/src/patterns/` |
+| JSON workflow runtime | `packages/core/src/builders/dynamic-workflow.ts`, `packages/core/src/builders/workflow-hydrator.ts` |
 | Context layers | `packages/context/src/context/layers/` |
 | Prompt-cache anchoring | `packages/context/src/context/cache-anchoring.ts`, `packages/core/src/interpreter/context-assembly.ts` |
 | Generative UI (OpenUI) | `packages/openui/src/` (codec, `openUiSurface`, `fragment`, `/server`) |
-| AgentHarness | `packages/core/src/runtime/agent-harness.ts` |
+| AgentHarness | `packages/core/src/harness/agent-harness.ts` |
 | Interpreter | `packages/core/src/interpreter/` |
-| Specs | `specs/` (numbered 00-16) |
+| Specs | `specs/` (numbered 00-29) |
 | Examples | `packages/core/examples/` |
 | Docs | `packages/web/content/docs/` |

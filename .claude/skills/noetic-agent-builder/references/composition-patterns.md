@@ -53,7 +53,7 @@ const agent = spawn({
 
 ### Agent with CLI Enhanced Prompts
 
-The `@noetic-tools/cli` package provides enhanced prompt engineering layers under `src/memory/`. Import them from the CLI barrel when building agents that need behavioral guidelines, adaptive communication, environment context, and tool guidance:
+The `@noetic-tools/cli` package provides enhanced prompt engineering layers. **The CLI is developed in a separate repository** (`github.com/mattapperson/noetic-internal`), so there is no `packages/cli` in this workspace — import from the published barrel, never from a `src/` subpath:
 
 ```typescript
 import {
@@ -62,7 +62,7 @@ import {
   environmentContextLayer,
   toolGuidanceLayer,
   planningModeLayer,
-} from '@noetic-tools/cli/src/memory/index.js';
+} from '@noetic-tools/cli';
 
 const agent = spawn({
   id: 'coding-agent',
@@ -465,7 +465,7 @@ Expose typed data and functions from a layer. Functions are automatically availa
 ```typescript
 import { z } from 'zod';
 import {
-  context, step, loop, spawn, until, any, layerData, layerFn, Slot,
+  context, step, loop, spawn, until, any, layerData, layerFunction, Slot,
   type InferContext, type ContextLayer, type ContextScope,
 } from '@noetic-tools/core';
 
@@ -489,7 +489,7 @@ function taskLayer() {
       pending: layerData<string[], TaskState>({
         read: (state) => state.tasks,
       }),
-      complete: layerFn<{ task: string }, void, TaskState>({
+      complete: layerFunction<{ task: string }, void, TaskState>({
         description: 'Mark a task as complete.',
         input: z.object({ task: z.string() }),
         output: z.void(),
@@ -679,14 +679,13 @@ Properties of the projection:
 Swap the adapter to run a specific spawn in its own OS child process. The step composition is unchanged; only the dispatch path differs.
 
 ```typescript
-import { createFileStorage, createLocalSubprocessAdapter } from '@noetic-tools/core';
-// Note: the Node-specific adapter factory lives under the `node` subpath:
-import { createLocalSubprocessAdapter as createLocalSubprocessAdapterNode }
-  from '@noetic-tools/core/adapters/node';
+// The Node-only adapter factories live in `@noetic-tools/platform-node`;
+// `@noetic-tools/core` ships only contracts and in-memory adapters.
+import { createFileStorage, createLocalSubprocessAdapter } from '@noetic-tools/platform-node';
 
 // One adapter per process, reused across spawns. Persists handle manifests
 // through file storage so a host crash can later reattach.
-const subprocess = createLocalSubprocessAdapterNode({
+const subprocess = createLocalSubprocessAdapter({
   storage: createFileStorage({
     root: `${process.env.HOME}/.noetic/subprocess`,
   }),
@@ -723,13 +722,8 @@ const handle = harness.detachedSpawn(agent, input, ctx, {
 When the host that launched a long-running child can crash, configure durable storage so the child survives independently and the parent context can be rebuilt on restart.
 
 ```typescript
-import {
-  AgentHarness,
-  createFileStorage,
-  createCheckpointStore,
-} from '@noetic-tools/core';
-import { createLocalSubprocessAdapter } from '@noetic-tools/core/adapters/node';
-import { reattachLiveChildren } from '@noetic-tools/cli';
+import { AgentHarness, createCheckpointStore } from '@noetic-tools/core';
+import { createFileStorage, createLocalSubprocessAdapter } from '@noetic-tools/platform-node';
 
 // Three roots: subprocess manifests, checkpoint snapshots, per-project task state.
 const subprocessStorage = createFileStorage({
@@ -756,9 +750,17 @@ const handle = harness.detachedSpawn(backgroundWorkerStep, input, parentCtx);
 
 // ... process crashes ...
 
-// On second boot, construct the same harness against the same roots and:
-const { handles, contexts } = await reattachLiveChildren(harness);
-for (const [handleId, restoredCtx] of contexts) {
+// On second boot, construct the same harness against the same roots, then
+// rediscover the live children and rebuild a context per execution:
+for (const live of await harness.subprocess.listLive()) {
+  const executionId = live.metadata?.executionId;
+  if (executionId === undefined) {
+    continue;
+  }
+  const restoredCtx = await harness.restore(executionId);
+  if (restoredCtx === null) {
+    continue; // no checkpoint snapshot for this execution
+  }
   // restoredCtx has the pre-crash item log, layer state, and cwd.
   // Re-subscribe to the handle's IPC stream, replay pending ask-user
   // modals, keep going.
@@ -767,7 +769,7 @@ for (const [handleId, restoredCtx] of contexts) {
 
 **Key points**:
 
-- `reattachLiveChildren` is a thin helper — under the hood it calls `harness.subprocess.listLive()` and then `harness.restore(executionId)` per live handle. Third-party hosts can call those directly without importing `@noetic-tools/cli`.
+- Recovery is two primitives: `harness.subprocess.listLive()` rediscovers children from the persisted manifest, and `harness.restore(executionId)` rebuilds each context from its checkpoint (returning `null` when no snapshot exists). The Noetic CLI ships a `reattachLiveChildren` convenience wrapper over exactly this loop, but it lives in a separate repository — any host can call the two primitives directly.
 - Subprocess manifests and checkpoint snapshots live at distinct roots (`~/.noetic/subprocess` vs `~/.noetic/checkpoints`). Override both via `NOETIC_HOME=/some/dir` if needed.
 - `checkpoint()` is a no-op when `environment.storage.checkpointStore` is absent; `listLive()` returns the empty set when the adapter has no storage. Durability is opt-in and degrades gracefully.
 - The default in-memory adapter also accepts a `storage` option for tests that want manifest round-trip behaviour without launching real OS children.
@@ -780,8 +782,8 @@ Long-lived task runners (planner, implementer, agent-ci) expose their harness ov
 import {
   AgentIpcServer,
   createDurableOutboundQueue,
-} from '@noetic-tools/core/adapters/node';
-import { createFileStorage } from '@noetic-tools/core';
+  createFileStorage,
+} from '@noetic-tools/platform-node';
 
 const storage = createFileStorage({
   root: `${process.env.HOME}/.noetic/subprocess`,
@@ -806,7 +808,7 @@ await server.start();
 **When to compose `DurableOutboundQueue` manually** (without `AgentIpcServer`): any framed byte stream — WebSocket, TCP, plain JSONL file — can use the same pattern.
 
 ```typescript
-import { createDurableOutboundQueue } from '@noetic-tools/core/adapters/node';
+import { createDurableOutboundQueue } from '@noetic-tools/platform-node';
 
 const queue = await createDurableOutboundQueue({ storage, socketPath });
 
@@ -828,43 +830,40 @@ for (const entry of await queue.frameRange(resume.ackedThrough + 1)) {
 }
 ```
 
-`PROTOCOL_VERSION = 2` in `@noetic-tools/core/adapters/node/agent-ipc-protocol.ts`. The v2 frames (`durable`, `durableResume`, `durableAck`) are backwards compatible — peers that don't opt in neither emit nor receive them.
+`PROTOCOL_VERSION = 2` in `packages/platform-node/src/agent-ipc-protocol.ts`. The v2 frames (`durable`, `durableResume`, `durableAck`) are backwards compatible — peers that don't opt in neither emit nor receive them.
 
 ## Subprocess-spawned task agent (planner / implementer)
 
-The tasks system (`@noetic-tools/code-agent/tasks`) uses a thin wrapper over the generic "run an agent out-of-process" + "survive a host crash" patterns above. Each runner is a `harness.detachedSpawn` call against the shared tasks `SubprocessAdapter`:
+A task runner (planner, implementer, reviewer…) is a thin composition of the generic "run an agent out-of-process" + "survive a host crash" patterns above: one `harness.detachedSpawn` call against a shared, durably-stored `SubprocessAdapter`, with the adapter's own manifest as the source of truth for "what is still running".
 
 ```typescript
-import { findLiveTaskHandle } from '@noetic-tools/code-agent/tasks';
-
-// Launcher: refuse to start if a live runner is already attached.
-const existing = await findLiveTaskHandle({
-  adapter: subprocess,
-  taskId,
-  taskRole: 'planner',
+// One shared adapter per host, backed by file storage so the manifest
+// survives a restart.
+const subprocess = createLocalSubprocessAdapter({
+  storage: createFileStorage({ root: `${process.env.HOME}/.noetic/subprocess` }),
 });
-if (existing !== null) {
+
+// Launcher: refuse to start if a live runner already exists for this task.
+// The adapter's manifest is queried directly — no sidecar files.
+const live = await subprocess.listLive();
+const existing = live.find((h) => h.metadata?.executionId === plannerExecutionId);
+if (existing !== undefined) {
   throw new Error(`planner already attached: ${existing.id}`);
 }
 
-// Spawn. Metadata tags are how delete-guards, pause/cancel, and live-chat
-// resolve the right handle later — no sidecar files needed.
 const handle = harness.detachedSpawn(plannerStep, input, ctx, {
   subprocess,
   cwdInit: taskDir,
-  // metadata goes on the StepSubprocessRequest internally; the adapter
-  // merges it onto handle.metadata.
 });
 ```
 
 Key points:
 
-- The adapter's `listLive()` + `metadata.taskRole` / `taskId` / `featureId` tags are the single source of truth for "what is still running for this task". `findLiveTaskHandle({adapter, taskId, taskRole})` and `listLiveTaskHandles(adapter, taskId)` are the centralised queries.
-- Delete-guards, pause/cancel, kanban lookups, and live-chat routing all go through those queries — no `_planner.json` / `_implementer.json` sidecars to maintain.
-- The runner bootstrap (the child runtime spawned by `createLocalSubprocessAdapter`) constructs its own `AgentHarness` with task-scoped tools and drives a ReAct-style loop or interview step. On success it commits in **audit → state → event** order; the adapter clears its manifest on exit automatically.
+- Derive the runner's `executionId` deterministically from the task identity (e.g. `` `${taskId}:planner` ``) so `listLive()` alone answers "is this runner already attached?". `SubprocessHandleMetadata` carries `executionId`, `result`, and `error`; the same id is what `harness.restore(executionId)` rebuilds a context from.
+- Delete-guards, pause/cancel, kanban lookups, and live-chat routing can all go through that one query — no `_planner.json` / `_implementer.json` sidecars to maintain.
+- The runner bootstrap (the child runtime spawned by `createLocalSubprocessAdapter`) constructs its own `AgentHarness` with task-scoped tools and drives a ReAct-style loop or interview step. The adapter clears its manifest entry on exit automatically.
 - Durability is inherited from the shared adapter's file storage at `~/.noetic/subprocess/` — no hand-rolled `pidStarttime` sidecars.
-
-**Reusable helpers**: `verifyPidIdentity` (`agent-ci-control.ts`), `provisionWorktree` (`worktree-provision.ts`), `createShellValidator` (`hierarchy/daemon-validator.ts`), `createLlmInterviewResponder` (`llm-interview-responder.ts`).
+- The Noetic CLI's tasks system is the reference consumer of this pattern (worktree provisioning, pid-identity checks, LLM interview responders), but it is developed in a separate repository and is not importable from this workspace.
 
 ## Pattern: Static Mode-Routing Workflow
 
@@ -936,19 +935,17 @@ Key points:
 - Each step that mutates flow state must call both `ctx.harness.setLayerState` (via `writeFlowState`) AND flush via `ctx.harness.storeLayers` so the next turn's rehydrate sees the post-mutation value instead of the stale pre-LLM snapshot.
 - The `_optimizable` list on `conditional()` tells `collectAllTools` which routes exist — without it, tools in not-currently-routed sub-agents are invisible to the unified pool and their tool calls will be rejected as unknown.
 
-Reference implementation: `packages/code-agent/src/agents/{plan,act,verify,fix,flow-state}.ts` + the `codeAgentWorkflow` export in `packages/code-agent/src/index.ts`.
-
-Driving `codeAgentWorkflow` headlessly (no interactive turn loop): create a context, force the starting mode, and run the workflow directly with the task as input. `@noetic-tools/code-agent` exports `writeFlowState` / `persistFlowState` / `readFlowState` for this. Passing the task as the `run` input is what delivers it to the spawned act sub-agent; `run` populates `ctx.unifiedTools` (and spawned sub-agents inherit it) so the act loop has the harness tools, and sub-agent usage rolls up onto `ctx`.
+Driving the workflow headlessly (no interactive turn loop): create a context, force the starting mode by writing the flow layer's state, and run the workflow directly with the task as input. Pair the pattern-local `readFlowState` above with `writeFlowState` (sets layer state) and `persistFlowState` (flushes via `harness.storeLayers`). Passing the task as the `run` input is what delivers it to the spawned sub-agent; `run` populates `ctx.unifiedTools` (and spawned sub-agents inherit it) so the mode loop has the harness tools, and sub-agent usage rolls up onto `ctx`.
 
 ```typescript
-const ctx = agent.createContext();
-writeFlowState(ctx, { mode: 'act' }); // skip the plan-approval gate (auto-approved)
+const ctx = harness.createContext();
+writeFlowState(ctx, { mode: 'act' }); // skip the plan-approval gate
 await persistFlowState(ctx);
-const result = await agent.run(codeAgentWorkflow, task, ctx);
-// ctx.tokens / ctx.cost include the spawned act/verify/fix sub-agents
+const result = await harness.run(workflow, task, ctx);
+// ctx.tokens / ctx.cost include the spawned per-mode sub-agents
 ```
 
-When no `AskUserQuestion` tool is registered, the plan path also auto-approves on its own (`autoApproveStep`), so starting in `plan` mode is the alternative; forcing `act` skips planning entirely.
+When no `AskUserQuestion` tool is registered, give the plan path its own auto-approval step so it can't stall waiting on a user; forcing `act` skips planning entirely. The Noetic CLI's code agent is the reference consumer of this pattern (plan / act / verify / fix modes over a shared flow-state layer), but it is developed in a separate repository and is not importable from this workspace.
 
 ## Pattern: Dynamic Workflow (LLM-Generated JSON)
 

@@ -1,6 +1,6 @@
 # Eval and Optimization
 
-> **Depends On:** `01-step-type` (Step), `02-step-variants` (runCode, callModel, Tool), `03-control-flow` (conditional, inParallel), `04-spawn` (spawn), `05-loop-and-until` (loop, until), `07-context-and-event-log` (Context, Item), `08-agent-harness` (AgentHarness, run), `10-observability` (Span), `13-patterns` (react, ralphWiggum)
+> **Depends On:** `01-step-type` (Step), `02-step-variants` (runCode, callModel, Tool), `03-control-flow` (conditional, inParallel), `04-spawn` (spawn), `05-loop-and-until` (loop, until), `07-context-and-event-log` (Context, Item), `08-runtime` (AgentHarness, run), `10-observability` (Span), `13-patterns` (agent compositions)
 > **Exports:** `describe()`, `it()`, `EvalSuiteOptions`, `DescribeStep`, `ScorerFn`, `createScorer()`, `createAdapter()`, `Baseline`, `OptimizationLevel`, `discoverFieldsFromSource()`
 
 ---
@@ -457,7 +457,7 @@ The static analysis module:
 1. Takes an eval file path
 2. Follows imports to find agent/step definition source files using TypeScript module resolution
 3. Parses those imported source files into TypeScript ASTs (the eval file itself is excluded — only imported source modules are analyzed for builder calls)
-4. Walks the AST to find builder calls (`callModel()`, `tool()`, `react()`, `ralphWiggum()`, `conditional()`, `inParallel()`, `spawn()`, `loop()`)
+4. Walks the AST to find builder calls (`callModel()`, `runCode()`, `invokeTool()`, `tool()`, `conditional()`, `inParallel()`, `spawn()`, `loop()`) and sub-harness step calls (`step.claudeCode()`, `step.codex()`, `step.opencode()`, `step.pi()`)
 5. Extracts string literal values of optimizable fields (`instructions`, `description`, `name`) and their exact `SourceLocation` (file, line, column)
 6. Returns `OptimizableField[]` with populated `sourceLocation`
 
@@ -700,7 +700,7 @@ Runs the optimization pipeline after evaluation. The `--scope` flag controls the
 - `spawn` is defined in `04-spawn`
 - `loop`, `until` are defined in `05-loop-and-until`
 - `Context`, `Item`, `TokenUsage` are defined in `07-context-and-event-log`
-- `AgentHarness`, `run` are defined in `08-agent-harness`
+- `AgentHarness`, `run` are defined in `08-runtime`
 - `Span` is defined in `10-observability`
 - `ContextLayer` is defined in `11-context-layer-system`
-- `react`, `ralphWiggum` patterns are defined in `13-patterns`
+- Agent compositions (ReAct, verify-and-retry) are in `13-patterns`

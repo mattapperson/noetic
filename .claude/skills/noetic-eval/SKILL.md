@@ -297,7 +297,7 @@ const results = await runAllSuites(getSuites());
 ### Common Pitfalls
 
 - **Missing `OPENROUTER_API_KEY`**: Evals using `callModel` steps will fail without the env var set
-- **`compilePlan` with mixed execution**: Nested plans mixing sequential and parallel require `executeStep` — pure eval context cannot execute `inParallel` steps inside sequential chains without it
+- **Hydrated workflows with mixed execution**: `hydrateWorkflow`'s `HydrationContext` requires an `executeStep` — a pure eval context cannot execute `inParallel` nodes inside sequential chains without it. Pass `harness.run.bind(harness)`, or use `parseAndRunWorkflow`, which wires it for you
 - **Verify return type**: `until.verified` predicate functions must return `{ pass: boolean; feedback?: string }` (note: `pass`, not `passed`)
 
 ## Source Locations

@@ -15,7 +15,7 @@ runCode<TContext = ContextData, I = unknown, O = unknown>({
 }): StepRunCode<TContext, I, O>
 ```
 
-The optional `subprocess` field makes this specific step run through a different adapter — e.g. `createLocalSubprocessAdapter({storage})` for an out-of-process child, or an in-memory test double for unit tests. Resolution order at dispatch time is `detachedSpawn-overrides.subprocess ?? step.subprocess ?? harness.subprocess`. When omitted, the step uses the harness default.
+The optional `subprocess` field makes this specific step run through a different adapter — e.g. `createLocalSubprocessAdapter({storage})` from `@noetic-tools/platform-node` for an out-of-process child, or an in-memory test double for unit tests. Resolution order at dispatch time is `detachedSpawn-overrides.subprocess ?? step.subprocess ?? harness.subprocess`. When omitted, the step uses the harness default.
 
 ### callModel
 
@@ -372,26 +372,37 @@ interface InterviewQuestionAnswer {
 
 `onComplete` fires once when the model emits the completion envelope. The returned step's output mirrors the final state for callers that prefer return-value style over the callback.
 
-### compilePlan
+### Dynamic multi-agent task trees
 
-Dynamic multi-agent task trees.
+There is no plan-compiler builder. A task tree is either hand-composed from the
+control-flow primitives, or expressed as a JSON `WorkflowDocument` and hydrated
+by the JSON workflow runtime.
+
+**Hand-composed:** nest `loop`, `inParallel`, `conditional`, and `spawn` — one
+`spawn` per sub-agent so each child gets a fresh context, `inParallel` for
+sibling fan-out, and a `loop` + `until` predicate around anything that needs
+retries. See `references/composition-patterns.md` for worked trees.
+
+**Document-driven:** build (or have the model emit) a `WorkflowDocument` and run
+it with `parseAndRunWorkflow`; `dynamicWorkflow` wraps the same thing as a step,
+and `hydrateWorkflow(doc, hydrationCtx)` turns a document into a `Step` you can
+nest like any other (its `HydrationContext` needs at least `tools` and
+`executeStep`). The `plan()` context layer stores exactly this shape —
+`PlanState.planTree` is a `WorkflowDocument` and `PlanState.workflows` maps onto
+the runtime's named-workflow registry — so an approved plan executes directly:
 
 ```typescript
-compilePlan<O>(
-  plan: PlanNode,
-  agents: Record<string, (prompt: string) => Step>,
-  constraints?: PlanConstraints,
-  executeStep?: ExecuteStepFn,
-): Step
+const output = await parseAndRunWorkflow({
+  json: planState.planTree,
+  harness,
+  ctx,
+  tools,
+  workflows: new Map(Object.entries(planState.workflows)),
+});
 ```
 
-**Important:** When plans mix sequential and parallel execution (e.g., a parallel node inside a sequential chain), `executeStep` must be provided. Without it, only `runCode`-kind children can be executed in sequential nodes. When using the eval framework, the agent harness's `run` method serves as `executeStep`:
-
-```typescript
-// callModel auto-detected from OPENROUTER_API_KEY when omitted
-const harness = new AgentHarness({ name: 'planner', params: {} });
-const compiled = compilePlan(plan, agents, undefined, harness.run.bind(harness));
-```
+The harness supplies `executeStep` internally (`harness.run`), so nested
+`inParallel` inside a sequential chain needs no extra wiring.
 
 ## Context Layers
 
@@ -597,9 +608,19 @@ Caps the trailing items projected to the LLM each turn. Storage (`itemLog`, sess
 history({ maxItems?: number })  // default 40
 ```
 
+### CLI enhanced-prompt layers (external)
+
+The five layers below (`promptEngineeringLayer`, `communicationStyleLayer`,
+`environmentContextLayer`, `toolGuidanceLayer`, `planningModeLayer`) ship with the
+Noetic CLI, which is developed in a separate repository
+(`github.com/mattapperson/noetic-internal`). They are **not** part of this workspace —
+there is no `packages/cli` here, so import them from the published
+`@noetic-tools/cli` barrel and never from a `src/` subpath. They are documented here
+because they are useful reference designs for layers of your own.
+
 ### promptEngineeringLayer
 
-Core behavioral guidelines with tool usage tracking and error-based adaptation. Part of the CLI's enhanced prompt engineering system (`@noetic-tools/cli`).
+Core behavioral guidelines with tool usage tracking and error-based adaptation. Part of the CLI enhanced-prompt set (external — see the note above).
 
 ```typescript
 function promptEngineeringLayer(): ContextLayer<PromptEngineeringState>
@@ -617,7 +638,7 @@ Recall injects communication efficiency rules, tool-usage reminders based on fre
 
 ### communicationStyleLayer
 
-Adaptive communication patterns (concise/normal/verbose) based on user message analysis. Part of the CLI's enhanced prompt engineering system (`@noetic-tools/cli`).
+Adaptive communication patterns (concise/normal/verbose) based on user message analysis. Part of the CLI enhanced-prompt set (external — see the note above).
 
 ```typescript
 function communicationStyleLayer(): ContextLayer<CommunicationStyleState>
@@ -635,7 +656,7 @@ Recall renders style-specific communication guidelines. Store analyzes user mess
 
 ### environmentContextLayer
 
-Dynamic environment detection providing platform, git, Node.js, shell, and package-manager context. Part of the CLI's enhanced prompt engineering system (`@noetic-tools/cli`).
+Dynamic environment detection providing platform, git, Node.js, shell, and package-manager context. Part of the CLI enhanced-prompt set (external — see the note above).
 
 ```typescript
 interface EnvironmentContextConfig {
@@ -658,7 +679,7 @@ Init probes the environment via the shell adapter (git, node, shell type, packag
 
 ### toolGuidanceLayer
 
-Context-aware tool usage instructions with preference hierarchy and mode awareness. Part of the CLI's enhanced prompt engineering system (`@noetic-tools/cli`).
+Context-aware tool usage instructions with preference hierarchy and mode awareness. Part of the CLI enhanced-prompt set (external — see the note above).
 
 ```typescript
 interface ToolGuidanceConfig {
@@ -681,7 +702,7 @@ Recall emits a tool preference hierarchy (e.g. "Use Read tool, NOT cat/head/tail
 
 ### planningModeLayer
 
-Specialized guidance for plan-mode operations with workflow-document authoring and phase tracking. Part of the CLI's enhanced prompt engineering system (`@noetic-tools/cli`).
+Specialized guidance for plan-mode operations with workflow-document authoring and phase tracking. Part of the CLI enhanced-prompt set (external — see the note above).
 
 ```typescript
 interface PlanningModeConfig {
@@ -704,28 +725,36 @@ Recall returns null when not active. When active, injects workflow-document node
 
 ### skillsLayer
 
-Progressive skill disclosure with inline command processing. Part of `@noetic-tools/code-agent` (re-exported through `@noetic-tools/cli`).
+Progressive skill disclosure — the model sees a name + description per skill and pulls
+full instructions on demand. Not a published built-in: the reference implementation is
+`packages/core/examples/deep-agent/context/skills-layer.ts`, which you copy and adapt.
 
 ```typescript
-interface SkillsLayerConfig {
-  cwd: string;
+interface SkillDefinition {
+  name: string;
+  description: string;
+  instructions: string;
 }
 
-function skillsLayer(
-  skills: SkillDefinition[],
-  config: SkillsLayerConfig,
-): ContextLayer<SkillsLayerState>
+interface SkillsLayerState {
+  definitions: SkillDefinition[];
+  activatedSkills: string[];
+}
+
+function skillsLayer(skills: SkillDefinition[]): ContextLayer<SkillsLayerState>
 ```
 
 | Property | Value |
 |----------|-------|
-| **id** | `skills-memory` |
+| **id** | `skills-context` |
 | **slot** | `Slot.PROCEDURAL` (250) |
 | **scope** | `execution` |
 | **budget** | `{ min: 300, max: 2000 }` |
 | **hooks** | `init`, `recall`, `store`, `onSpawn` |
 
-Recall lists model-invocable skills as `<available_skills>` when none are activated. Upon activation, injects full skill instructions. Store detects `activateSkill` calls, processes inline shell commands (`!`), and caches results (LRU, max 50). Spawn clones cache to child.
+Recall emits an `<available_skills>` block (one `name` + `description` per skill), appends the full `### Instructions` body of every activated skill, and closes with a line telling the model to call `activateSkill({ name })`. Store uses `findFunctionCall(newItems, 'activateSkill')` and appends the named skill to `state.activatedSkills` (ignoring unknown names and repeats). Spawn deep-clones parent state to the child.
+
+The Noetic CLI ships an extended variant of this layer (a `cwd` config, inline shell-command expansion inside skill bodies, and an LRU result cache), but it is developed in a separate repository and is not importable from this workspace.
 
 ### toolCalls
 
@@ -735,13 +764,20 @@ Generates layers from `ToolContextDeclaration` on tools. Tools sharing the same 
 toolCalls(tools: Tool[], opts?: { slot? })
 ```
 
-### createSteeringFileLayer (`@noetic-tools/cli`)
+### CLI task-system layers (external)
+
+The three layers below (`createSteeringFileLayer`, `createFixFeedbackLayer`,
+`createPlannerAttemptLayer`) are internal to the Noetic CLI's task system, which lives in
+a separate repository (`github.com/mattapperson/noetic-internal`). They are not exported
+from this workspace and not importable from the `@noetic-tools/cli` barrel — treat them
+as worked examples of scoping and slot choice. The contract they implement is specified
+in `specs/21-tasks.md`.
+
+### createSteeringFileLayer (CLI-internal)
 
 Surfaces a per-task `steering.md` file to the agent run servicing that task. The harness factory mounts it unconditionally; activation is gated by the `NOETIC_TASK_DIR` env var that the task launcher sets when spawning agent-ci for a specific task. Non-task agent runs see no steering content.
 
 ```typescript
-import { createSteeringFileLayer } from '@noetic-tools/cli/src/memory/steering-file-layer.js';
-
 const layer = createSteeringFileLayer();
 // slot:  Slot.STEERING (90) — ahead of the scratchpad and observations
 // scope: 'execution'
@@ -756,38 +792,34 @@ Behaviour:
 
 The layer carries no state (`state: null`); everything is resolved at recall time, so a steering file edited mid-session takes effect on the next recall. See `specs/21-tasks.md` for the full task-system contract.
 
-### createFixFeedbackLayer (`@noetic-tools/cli`)
+### createFixFeedbackLayer (CLI-internal)
 
 Thread-scoped layer that carries the implementer's retry-feedback bundle (parent-task plan, description, accumulated assertion failures, attempt count) across iterations of the implementer↔validator retry loop.
 
 ```typescript
-import { createFixFeedbackLayer } from '@noetic-tools/cli/src/commands/builtins/tasks/memory/fix-feedback-layer.js';
-
 const layer = createFixFeedbackLayer({
   initial: { plan, description, accumulatedIssues, attempt: 1 },
 });
 // slot:  Slot.SCRATCHPAD (100)
 // scope: 'thread'
 // recall(): emits a developer-role "# Implementation context" block when state is non-empty.
-// provides.update: layerFn that merges new feedback (plan/description/issues/attempt).
+// provides.update: layerFunction that merges new feedback (plan/description/issues/attempt).
 // onSpawn: clones parent state to the child so a sub-flow inherits the bundle.
 ```
 
 The implementer-runner seeds this layer's `initial` from disk (parent task description + accumulated `assertionOutcomes` from prior validator runs in the feature's fix lineage), so each retry's react loop sees prior failures via `recall()` without depending on chat-history continuation.
 
-### createPlannerAttemptLayer (`@noetic-tools/cli`)
+### createPlannerAttemptLayer (CLI-internal)
 
 Resource-scoped layer that tracks per-task planner-attempt counts and persists them to `<projectRoot>/.noetic/tasks/_planner-attempts.json`. The autopilot's plan-pass reads the file directly to gate retry budget; the planner subprocess increments via `recordAttempt`.
 
 ```typescript
-import { createPlannerAttemptLayer, MAX_PLANNER_ATTEMPTS } from '@noetic-tools/cli/src/commands/builtins/tasks/memory/planner-attempt-layer.js';
-
 const layer = createPlannerAttemptLayer({ projectRoot, maxAttempts? });
 // slot:  Slot.REMINDER (80) — code-only, no recall surface
 // scope: 'resource'
 // provides.snapshot: layerData → { attempts, maxAttempts }
-// provides.recordAttempt: layerFn → increment + persist
-// provides.clearAttempts: layerFn → drop a task's counter
+// provides.recordAttempt: layerFunction → increment + persist
+// provides.clearAttempts: layerFunction → drop a task's counter
 ```
 
 `MAX_PLANNER_ATTEMPTS` (default 3) caps re-spawns per task so a permanently-failing planner can't burn unbounded LLM tokens on the autopilot's 60-second tick.
@@ -948,12 +980,12 @@ layerData<T, TState>({
 }): LayerDataDecl<T, TState>
 ```
 
-### layerFn
+### layerFunction
 
 Creates a callable function backed by layer state. Input is Zod-validated at runtime.
 
 ```typescript
-layerFn<TInput, TOutput, TState>({
+layerFunction<TInput, TOutput, TState>({
   description: string;
   input: ZodType<TInput>;
   output: ZodType<TOutput>;
@@ -974,7 +1006,7 @@ runCode<Ctx>({
   id: 'work',
   execute: async (input, ctx) => {
     ctx.context['scratchpad'].snapshot;        // ScratchpadState (live read)
-    await ctx.context['scratchpad'].update({ k: 1 }); // calls layerFn, updates state
+    await ctx.context['scratchpad'].update({ k: 1 }); // calls layerFunction, updates state
   },
 });
 ```
@@ -1014,7 +1046,7 @@ The mutation policy's `sessionCwd` is anchored to the launch cwd and does NOT fo
 
 ## FsAdapter
 
-Filesystem abstraction used by the harness, tools, context layers, and skill discovery. Defaults to `createLocalFsAdapter()` (Node.js `fs/promises`).
+Filesystem abstraction used by the harness, tools, context layers, and skill discovery. Defaults to `createInMemoryFsAdapter()` from `@noetic-tools/core` — core ships only contracts and in-memory adapters. For real disk access, pass `createLocalFsAdapter()` from `@noetic-tools/platform-node` (Node.js `fs/promises`).
 
 ```typescript
 interface FsStats {
@@ -1043,12 +1075,16 @@ interface FsAdapter {
 Pass a custom adapter to the harness:
 
 ```typescript
-import { AgentHarness, createLocalFsAdapter } from '@noetic-tools/core';
+import { AgentHarness } from '@noetic-tools/core';
+// Node-only adapters live in the platform package, never in core.
+import { createLocalFsAdapter } from '@noetic-tools/platform-node';
 
 const harness = new AgentHarness({
   name: 'my-agent',
   params: {},
-  fs: myCustomFsAdapter,  // optional, defaults to createLocalFsAdapter()
+  environment: {
+    fs: createLocalFsAdapter(),  // optional, defaults to createInMemoryFsAdapter()
+  },
 });
 ```
 
@@ -1083,7 +1119,7 @@ runCode({
 
 ## ShellAdapter
 
-Shell execution abstraction used by the harness, tools, context layers, and skill processing. Defaults to `createLocalShellAdapter()` (Bun.spawn). The `@noetic-tools/cli` package also provides `createEmulatedShellAdapter(fs)` backed by `just-bash` for sandboxed environments.
+Shell execution abstraction used by the harness, tools, context layers, and skill processing. Defaults to `createInMemoryShellAdapter()` from `@noetic-tools/core` — core ships only contracts and in-memory adapters. To run real commands, pass `createLocalShellAdapter()` from `@noetic-tools/platform-node` (Bun.spawn).
 
 ```typescript
 interface ShellExecOptions {
@@ -1106,7 +1142,7 @@ interface ShellAdapter {
 }
 
 interface CreateLocalShellAdapterOptions {
-  /** Wrap commands through `rtk rewrite` for token-efficient output. Default false in core. */
+  /** Wrap commands through `rtk rewrite` for token-efficient output. Default false. */
   useRtk?: boolean;
 }
 
@@ -1117,17 +1153,20 @@ interface LocalShellAdapter extends ShellAdapter {
 }
 ```
 
-`createLocalShellAdapter(opts?)` accepts `{ useRtk }`. When `true`, every command is rewritten through [`rtk rewrite`](https://github.com/rtk-ai/rtk) (a Rust CLI proxy that filters and summarizes output) before exec. Best-effort: any failure falls through to raw `sh -c`. Defaults to `false` in `@noetic-tools/core` so non-CLI embedders keep raw shell semantics; `@noetic-tools/cli` opts in via its own bootstrap and fails fast when rtk is missing on PATH.
+`createLocalShellAdapter(opts?)` (from `@noetic-tools/platform-node`) accepts `{ useRtk }`. When `true`, every command is rewritten through [`rtk rewrite`](https://github.com/rtk-ai/rtk) (a Rust CLI proxy that filters and summarizes output) before exec. Best-effort: any failure falls through to raw `sh -c`. Defaults to `false` so embedders keep raw shell semantics; `@noetic-tools/cli` opts in via its own bootstrap and fails fast when rtk is missing on PATH.
 
 Pass a custom adapter to the harness:
 
 ```typescript
-import { AgentHarness, createLocalShellAdapter } from '@noetic-tools/core';
+import { AgentHarness } from '@noetic-tools/core';
+import { createLocalShellAdapter } from '@noetic-tools/platform-node';
 
 const harness = new AgentHarness({
   name: 'my-agent',
   params: {},
-  shell: myCustomShellAdapter,  // optional, defaults to createLocalShellAdapter()
+  environment: {
+    shell: createLocalShellAdapter(),  // optional, defaults to createInMemoryShellAdapter()
+  },
 });
 
 // Or opt into rtk wrapping explicitly:
@@ -1257,8 +1296,7 @@ const isolatedHandle = harness.detachedSpawn(step, input, ctx, {
 });
 
 // Per-call subprocess adapter override (run a specific spawn out-of-process)
-import { createLocalSubprocessAdapter } from '@noetic-tools/core/adapters/node';
-import { createFileStorage } from '@noetic-tools/core';
+import { createFileStorage, createLocalSubprocessAdapter } from '@noetic-tools/platform-node';
 const localAdapter = createLocalSubprocessAdapter({
   storage: createFileStorage({ root: `${process.env.HOME}/.noetic/subprocess` }),
 });
@@ -1317,13 +1355,14 @@ interface SubprocessAdapter {
 ### Factories
 
 ```typescript
-// In-process dispatcher (default; also the test double).
+// From `@noetic-tools/core`: in-process dispatcher (default; also the test double).
 function createInMemorySubprocessAdapter(opts?: {
   storage?: StorageAdapter;                                   // persist manifests for listLive/reattach
   metadataInjector?: (request: SubprocessRequest) => Partial<SubprocessHandleMetadata>;
 }): SubprocessAdapter;
 
-// OS-child-process backend. Persists full handle manifests (pid,
+// From `@noetic-tools/platform-node`: OS-child-process backend. Persists
+// full handle manifests (pid,
 // pidStarttime, socketPath, cwd, stepId, serializedInput, executionId,
 // metadata) through `storage` when given one. Without storage, listLive()
 // returns the empty set and reattach() returns null.
@@ -1339,7 +1378,7 @@ function createLocalSubprocessAdapter(opts?: {
 
 ```typescript
 interface CheckpointSnapshot {
-  schemaVersion: 1;
+  schemaVersion: 2;  // `CheckpointSchemaVersion`; v1 snapshots are rejected with CHECKPOINT_SCHEMA_MISMATCH
   executionId: string;
   threadId?: string;
   resourceId?: string;
@@ -1411,6 +1450,7 @@ The ledger covers control flow and `callModel` steps. It does not make tool exec
 ### `createFileStorage`
 
 ```typescript
+// from '@noetic-tools/platform-node'
 function createFileStorage(opts?: { root?: string }): StorageAdapter;
 ```
 
@@ -1437,28 +1477,38 @@ function storageGetMany<T>(
 
 **Never call `storage.getMany` directly.** Use `storageGetMany(storage, keys)`, which delegates when the backend implements it and sweeps `get` in parallel when it does not. This is what `StepLedgerStore.load()` (restore path) and the semantic-condition embedding cache use.
 
-Implementation contract: missing keys are **absent** from the returned map, never mapped to `null` (a falsy stored value is present); ordering is not guaranteed, so a caller that needs order iterates its own key list and looks values up. `createInMemoryStorage()` and `createFileStorage()` both implement it.
+Implementation contract: missing keys are **absent** from the returned map, never mapped to `null` (a falsy stored value is present); ordering is not guaranteed, so a caller that needs order iterates its own key list and looks values up. `createInMemoryStorage()` (from `@noetic-tools/core`) and `createFileStorage()` (from `@noetic-tools/platform-node`) both implement it.
 
 `ScopedStorage` — what a context layer's `init` hook receives — exposes `getMany` as a **required** method, with scope-relative keys in the result and the fallback supplied by the wrapper.
 
 ### Host-restart recovery
 
-```typescript
-// packages/cli/src/cli/reattach-live-children.ts
-import { reattachLiveChildren } from '@noetic-tools/cli';
+Recovery after a host restart is two harness calls — no dedicated API:
 
-const { handles, contexts } = await reattachLiveChildren(harness);
-// handles: ReadonlyArray<SubprocessHandle>
-// contexts: ReadonlyMap<handleId, Context>   // one entry per handle that
-//                                            // carried an executionId and
-//                                            // had a snapshot on disk
+```typescript
+// Rediscover children the previous process left running.
+const handles = await harness.subprocess.listLive();
+//   ReadonlyArray<SubprocessHandle>  ({ id, status, startedAt, metadata? })
+
+for (const handle of handles) {
+  const executionId = handle.metadata?.executionId;
+  if (executionId === undefined) {
+    continue;
+  }
+  // Rebuild that child's context from its checkpoint.
+  const ctx = await harness.restore(executionId);
+  if (ctx === null) {
+    continue; // live handle, but no snapshot on disk
+  }
+  // ctx carries the pre-crash item log, layer state, and cwd.
+}
 ```
 
-Calls `harness.subprocess.listLive()` first, then `harness.restore(executionId)` per live handle. With no durable storage configured it returns empty collections — cheap no-op on every startup path.
+With no durable storage configured `listLive()` returns an empty array and `restore()` returns `null` — a cheap no-op on every startup path. The Noetic CLI wraps exactly this loop in a `reattachLiveChildren(harness)` helper, but that lives in a separate repository; any host can call the two primitives directly.
 
 ### Runtime primitives for long-lived runners
 
-`@noetic-tools/core/runtime` exports four primitives the tasks-system runners (and third-party long-running agents) use to compose their loop:
+`@noetic-tools/core` exports four primitives the tasks-system runners (and third-party long-running agents) use to compose their loop:
 
 ```typescript
 // Single-shot resolve/reject signal.
@@ -1493,7 +1543,7 @@ Step builders auto-register at construction; `lookupStep` is the cross-process c
 
 ### Durable IPC (advanced)
 
-`@noetic-tools/core/adapters/node` additionally exposes `AgentIpcServer`, `AgentIpcClient`, the v2 wire protocol, and a `DurableOutboundQueue` primitive. The server composes the queue when a `StorageAdapter` is supplied: outbound frames are numbered, persisted, and replayed from the client's last ack on reconnect. Protocol frames `durable`, `durableResume`, `durableAck` carry the wire envelope. See the framework/durability.mdx page for the full end-to-end pattern.
+`@noetic-tools/platform-node` additionally exposes `AgentIpcServer`, `AgentIpcClient`, the v2 wire protocol, and a `DurableOutboundQueue` primitive (via `createDurableOutboundQueue`). The server composes the queue when a `StorageAdapter` is supplied: outbound frames are numbered, persisted, and replayed from the client's last ack on reconnect. Protocol frames `durable`, `durableResume`, `durableAck` carry the wire envelope. See the framework/durability.mdx page for the full end-to-end pattern.
 
 ## Slot Constants
 
@@ -1530,7 +1580,9 @@ Treat returned values as read-only.
 
 ## CLI-specific context layers
 
-These are shipped by `@noetic-tools/cli` on top of the core framework:
+These are shipped by `@noetic-tools/cli` on top of the core framework. The CLI is
+developed in a separate repository (`github.com/mattapperson/noetic-internal`), so import
+them from the published barrel — there is no `packages/cli` in this workspace.
 
 ### `reminderLayer(opts)`
 
@@ -1564,16 +1616,17 @@ Surfaces `AGENT.md`, `.agent/rules/*.md`, and ancestor/user-global instruction f
 
 ## CLI-specific tools
 
-These are shipped by `@noetic-tools/cli` on top of the core framework.
+These are shipped by `@noetic-tools/cli` on top of the core framework, from the separate
+CLI repository. The task tools are CLI-internal (not on the published barrel); the
+signatures below describe the contract in `specs/21-tasks.md`, not an import you can make
+from this workspace.
 
 ### `taskTools(opts)` — Task management
 
 The `task_*` tool prefix gives agents 1:1 parity with the `noetic tasks <verb>` CLI. Tools are registered by the harness factory and are **default-on**; opt out via `tools.tasks: false` in `noetic.config.ts`. A read-only variant exposes only `task_show`, `task_list`, and `task_logs` — used in planning mode and other contexts where the agent must observe but not mutate.
 
 ```typescript
-import { taskTools } from '@noetic-tools/cli/src/commands/builtins/tasks/tools.js';
-import type { TaskStoreContext } from '@noetic-tools/cli/src/commands/builtins/tasks/fs-store.js';
-
+// TaskStoreContext — { fs: FsAdapter; projectRoot: string }
 const ctx: TaskStoreContext = { fs, projectRoot };
 
 // Full task surface (mutators + queries).
@@ -1861,9 +1914,12 @@ interface ToolExecutionContext {
 
 ## CLI Plugin Hooks
 
-Plugins loaded by `@noetic-tools/cli` implement the `NoeticPlugin` interface
-(`packages/cli/src/plugins/types.ts`). The hooks below aggregate contributions
-from every loaded plugin alongside the CLI's built-ins.
+Plugins loaded by `@noetic-tools/cli` implement the `NoeticPlugin` interface, exported
+from that package's barrel (the CLI itself is developed in a separate repository, so
+there is no `packages/cli` source to read here — see
+`packages/web/content/docs/code-agent-cli/plugins.mdx` for the authored reference). The
+hooks below aggregate contributions from every loaded plugin alongside the CLI's
+built-ins.
 
 ### `lspServers?(ctx): ReadonlyArray<LspServerContribution>`
 

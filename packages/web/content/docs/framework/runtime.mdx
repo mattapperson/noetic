@@ -7,6 +7,7 @@ description: The AgentHarness executes agent steps, manages context, and coordin
 
 ```ts
 import { AgentHarness, any, callModel, loop, until } from '@noetic-tools/core';
+import type { ContextData } from '@noetic-tools/core';
 import { z } from 'zod';
 
 const searchTool = {
@@ -19,7 +20,7 @@ const searchTool = {
 
 const agent = loop({
   id: 'researcher-loop',
-  steps: [callModel({
+  steps: [callModel<ContextData, string, string>({
     id: 'researcher-llm',
     model: 'openai/gpt-4o',
     instructions: 'You are a research assistant.',

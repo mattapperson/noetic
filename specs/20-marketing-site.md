@@ -112,13 +112,13 @@ Seven primitives: `callModel`, `invokeTool`, `runCode` (steps); `spawn`, `inPara
 
 | Element | Content |
 |---------|---------|
-| Tag | `ready to use` |
-| H2 | "Batteries included" |
-| Subhead | "Common agent patterns built-in for convenience." |
+| Tag | `compose it yourself` |
+| H2 | "Patterns are just compositions" |
+| Subhead | "Common agent patterns in a few lines of the same primitives — no pattern library to learn." |
 | Body | "Each pattern is a composition of the primitives above — no special cases, no hidden behavior. Read the source. Fork it. The framework doesn't care." |
 | Below | Pattern cards |
 
-Patterns: ReAct (~15 lines), Ralph Wiggum (~10), Task Trees (~40), Adaptive Plans (~35), Thread Weaving (~25), Dual Agent (~20). Each card shows the primitives it composes and links to its doc page.
+Patterns: ReAct (~15 lines), Ralph Wiggum (~10), Task Trees (~40), Thread Weaving (~25), Dual Agent (~20). Each card shows a one-line description, its line-count estimate, and badges for the primitives it composes. There are no per-pattern doc pages — the cards illustrate what a composition costs, they do not link into a pattern reference.
 
 **SVG:** `PatternsIsometricSvg` — small primitive nodes converging into a larger "pattern" node, then flowing out as a result.
 

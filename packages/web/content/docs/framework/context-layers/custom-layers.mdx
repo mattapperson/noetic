@@ -314,11 +314,11 @@ State written by **any** path — `store()` hooks, `provides` functions, `onComp
 
 The `provides` field exposes typed data and functions from your layer. Data entries are accessible in code steps via `ctx.context['layerId'].prop`. Function entries are also automatically injected as LLM tools, namespaced as `layerId/fnName`.
 
-Use the `layerData()` and `layerFn()` builders:
+Use the `layerData()` and `layerFunction()` builders:
 
 ```ts
 import { z } from 'zod';
-import { createMessage, layerData, layerFn } from '@noetic-tools/core';
+import { createMessage, layerData, layerFunction } from '@noetic-tools/core';
 import type { ContextLayer } from '@noetic-tools/core';
 
 interface MyLayerState {
@@ -339,7 +339,7 @@ function myCustomLayer() {
         read: (state) => state.entries.length,
       }),
       // Function: callable from code and auto-injected as LLM tool
-      addEntry: layerFn<{ text: string }, void, MyLayerState>({
+      addEntry: layerFunction<{ text: string }, void, MyLayerState>({
         description: 'Add a new entry to the custom layer.',
         input: z.object({ text: z.string() }),
         output: z.void(),
@@ -405,7 +405,7 @@ const myStep = runCode({
 
 ### Auto-Injected LLM Tools
 
-Every `layerFn` in a layer's `provides` is automatically registered as an LLM tool. The tool name follows the `layerId/fnName` convention. In the example above, the model sees a tool named `my-custom-layer/addEntry` with the description and input schema you defined.
+Every `layerFunction` in a layer's `provides` is automatically registered as an LLM tool. The tool name follows the `layerId/fnName` convention. In the example above, the model sees a tool named `my-custom-layer/addEntry` with the description and input schema you defined.
 
 ## See Also
 

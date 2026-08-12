@@ -32,7 +32,7 @@ interface FsAdapter {
 }
 ```
 
-`createLocalFsAdapter()` returns the default implementation backed by Node.js `fs/promises`. The agent harness uses this when no custom adapter is provided.
+`createInMemoryFsAdapter(seed?)` is the harness default — a process-local, POSIX-like in-memory tree, optionally seeded with initial file contents. Hosts that need real disk access pass an adapter explicitly: `@noetic-tools/platform-node` provides `createLocalFsAdapter()`, backed by Node.js `fs/promises`.
 
 `appendFile` is required to support append-only audit/event logs without read-then-write race windows. On POSIX, the local adapter opens the file with `O_APPEND`, which guarantees atomic placement at end-of-file for sub-`PIPE_BUF` writes (4 KiB on Linux/macOS) — concurrent writers see no interleaving as long as each call's payload stays under that ceiling.
 
@@ -65,7 +65,7 @@ interface ShellAdapter {
 }
 ```
 
-`createLocalShellAdapter(opts?)` returns the default implementation that spawns real OS shell processes via `Bun.spawn`. The `@noetic-tools/cli` package also provides `createEmulatedShellAdapter(fs)` backed by `just-bash`, which bridges to the `FsAdapter` so emulated commands see the same files as the framework.
+`createInMemoryShellAdapter()` is the harness default. It executes nothing — every `exec` returns exit code `127` with an explanatory stderr — so a portable harness surfaces a missing shell instead of silently depending on a host process. Hosts that need real execution pass an adapter explicitly: `@noetic-tools/platform-node` provides `createLocalShellAdapter(opts?)`, which spawns OS shell processes via `Bun.spawn`. Any other backend — a Worker or container bridge, or an emulated shell wired to the same `FsAdapter` so emulated commands see the same files as the framework — is a host-supplied implementation of this one-method contract; core ships no emulated adapter.
 
 The adapter is threaded through the same path as `FsAdapter`: `AgentHarness.shell` → `Context.shell` → `ToolExecutionContext.shell` → `ExecutionContext.shell`.
 

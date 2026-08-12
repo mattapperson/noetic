@@ -79,6 +79,6 @@ Without a store, first-contact tracking is per-process.
 ## Future Considerations
 
 - Rendering OpenUI fragments (`28-generative-ui`) to Chat SDK cards/Block Kit.
-- Interview-pattern (`13-patterns`) integration with platform modals.
+- Platform modals as a structured-input surface for a clarifying-question composition (`13-patterns`) — the agent asks for missing fields through a modal instead of free-text turns.
 - `plan_update` chunks from the plan layer.
 - Cancelling in-flight vendor tool calls on turn abort, once the harness exposes an abort signal to tool executors.

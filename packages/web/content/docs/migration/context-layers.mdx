@@ -49,6 +49,11 @@ shape:
 
 ```ts
 import { AgentHarness, callModel, scratchpad } from '@noetic-tools/core';
+import type { StorageAdapter } from '@noetic-tools/core';
+
+// Your platform's storage adapter, e.g. `createFileStorage()` from
+// `@noetic-tools/platform-node`.
+declare const storage: StorageAdapter;
 
 const harness = new AgentHarness({
   name: 'assistant',

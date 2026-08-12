@@ -2,7 +2,7 @@
 
 > **Module:** `@noetic-tools/context` (source at `packages/context/src/context/layers/**`); re-exported by `@noetic-tools/core`.
 > **Depends On:** `11-context-layer-system` (ContextLayer, ContextLayerHooks, Slot, ScopedStorage, BudgetConfig, all hook param types)
-> **Exports:** `instructions()`, `history()`, `scratchpad()`, `observations()`, `temporal()`, `filesystem()`, `plan()`, `taskState()`, `toolCalls()`, `steering()`, `ScratchpadConfig`, `ObservationsConfig`, `TemporalConfig`, `TemporalFact`, `TemporalSearchResult`, `FactExtractor`, `FactSearcher`, `DurableTaskState`, `TaskStateOptions`, `SteeringConfig`, `SteeringRule`, `PlanConfig`, `PlanState`, `PlanPhase`, `PlanExecutionEntry`
+> **Exports:** `instructions()`, `history()`, `scratchpad()`, `observations()`, `temporal()`, `filesystem()`, `plan()`, `taskState()`, `toolCalls()`, `steering()`, `ScratchpadConfig`, `ObservationsConfig`, `TemporalConfig`, `TemporalFact`, `TemporalSearchResult`, `FactExtractor`, `FactSearcher`, `TaskState`, `TaskStateOptions`, `SteeringConfig`, `SteeringRule`, `PlanConfig`, `PlanState`, `PlanPhase`, `PlanExecutionEntry`
 
 ---
 
@@ -48,12 +48,12 @@ The scratchpad exposes two declarations via its `provides` map, making state ava
 | Name | Kind | Description |
 |------|------|-------------|
 | `snapshot` | `layerData` | Returns the current scratchpad state as-is. |
-| `update` | `layerFn` | Merges new key-value pairs into the state. Exposed as `scratchpad/update` LLM tool. |
+| `update` | `layerFunction` | Merges new key-value pairs into the state. Exposed as `scratchpad/update` LLM tool. |
 
 ```typescript
 provides: {
   snapshot: layerData({ read: (state) => state }),
-  update: layerFn({
+  update: layerFunction({
     description: 'Update the agent scratchpad with new key-value pairs.',
     input: z.record(z.string(), z.unknown()),
     output: z.void(),
@@ -163,7 +163,7 @@ function temporal(config?: TemporalConfig): ContextLayer<TemporalState>
 
 | Name | Kind | Description |
 |------|------|-------------|
-| `searchMemory` | `layerFn` | Given `{ query }`, returns `TemporalSearchResult`. Exposed as the `temporal/searchMemory` LLM tool. Delegates to the injected `search` callback; without one, returns the raw `[ts] fact` ledger so the tool degrades gracefully. |
+| `searchMemory` | `layerFunction` | Given `{ query }`, returns `TemporalSearchResult`. Exposed as the `temporal/searchMemory` LLM tool. Delegates to the injected `search` callback; without one, returns the raw `[ts] fact` ledger so the tool degrades gracefully. |
 
 **Design:** The layer is LLM-agnostic — `extract`/`search` are injected by the host (mirroring `observations()`'s `observer`), so `@noetic-tools/context` stays tree-shakable. The code agent wires structured `callModel` calls as the callbacks and installs `temporal()` in its default stack.
 
@@ -174,20 +174,20 @@ function temporal(config?: TemporalConfig): ContextLayer<TemporalState>
 Persists task-level artifacts (files modified, progress checkpoints, arbitrary data) across spawn boundaries and across executions within a thread. This replaces a standalone `Persistence` interface — all state that survives across fresh-context iterations is managed uniformly through context layers.
 
 ```typescript
-interface DurableTaskState {
+interface TaskState {
   checkpoints: Array<{ timestamp: number; depth: number }>;
   files: string[];
   data: Record<string, unknown>;
 }
 
-type DurableTaskDataMerge = 'shallow' | 'namespace';
+type TaskStateDataMerge = 'shallow' | 'namespace';
 
 interface TaskStateOptions {
   /** How `data` merges at a child boundary. Default: `'shallow'`. */
-  mergeData?: DurableTaskDataMerge;
+  mergeData?: TaskStateDataMerge;
 }
 
-function taskState(opts?: TaskStateOptions): ContextLayer<DurableTaskState>
+function taskState(opts?: TaskStateOptions): ContextLayer<TaskState>
 ```
 
 | Property | Value |
@@ -534,13 +534,13 @@ Both styles end a turn the same way: with `AskUserQuestion`, or with `plan/exitP
 | Name | Kind | Description |
 |------|------|-------------|
 | `status` | `layerData` | Read-only projection: `{ phase, hasPrd, hasPlanTree, workflowNames, version }`. |
-| `enterPlanMode` | `layerFn` | Transitions idle → planning. Accepts optional `goal` string to seed the PRD. Resets workflows from any prior plan. |
-| `updatePrd` | `layerFn` | Replaces the PRD content. Only works in planning phase. Validates max length. |
-| `setPlanTree` | `layerFn` | Sets the plan as `{ document: WorkflowDocument }`. Validates schema, depth, `allowedNodeKinds`, and subflow-ref slug syntax. Refs to not-yet-defined workflows are allowed — the success message enumerates them. |
-| `setWorkflow` | `layerFn` | Creates or replaces a named workflow (`{ name, document }`, upsert). Validates name slug, count cap (replacing at the cap is allowed), serialized size cap, depth, and `allowedNodeKinds`. |
-| `removeWorkflow` | `layerFn` | Deletes a named workflow. Warns when the tree or another workflow still references it. |
-| `getWorkflow` | `layerFn` | Returns a stored workflow's pretty-printed JSON. Read-only, works in any phase. |
-| `exitPlanMode` | `layerFn` | Exits plan mode. `action: 'execute'` validates PRD + tree exist, that every subflow ref (in the tree and inside stored workflows) names a stored workflow, and that named workflows form no reference cycle — all **before** invoking `onExit`, so the user is never asked to approve a plan that cannot hydrate. `action: 'cancel'` resets to idle. |
+| `enterPlanMode` | `layerFunction` | Transitions idle → planning. Accepts optional `goal` string to seed the PRD. Resets workflows from any prior plan. |
+| `updatePrd` | `layerFunction` | Replaces the PRD content. Only works in planning phase. Validates max length. |
+| `setPlanTree` | `layerFunction` | Sets the plan as `{ document: WorkflowDocument }`. Validates schema, depth, `allowedNodeKinds`, and subflow-ref slug syntax. Refs to not-yet-defined workflows are allowed — the success message enumerates them. |
+| `setWorkflow` | `layerFunction` | Creates or replaces a named workflow (`{ name, document }`, upsert). Validates name slug, count cap (replacing at the cap is allowed), serialized size cap, depth, and `allowedNodeKinds`. |
+| `removeWorkflow` | `layerFunction` | Deletes a named workflow. Warns when the tree or another workflow still references it. |
+| `getWorkflow` | `layerFunction` | Returns a stored workflow's pretty-printed JSON. Read-only, works in any phase. |
+| `exitPlanMode` | `layerFunction` | Exits plan mode. `action: 'execute'` validates PRD + tree exist, that every subflow ref (in the tree and inside stored workflows) names a stored workflow, and that named workflows form no reference cycle — all **before** invoking `onExit`, so the user is never asked to approve a plan that cannot hydrate. `action: 'cancel'` resets to idle. |
 
 **Executing an approved plan:** `PlanState.planTree` is a `WorkflowDocument` and `PlanState.workflows` maps directly onto the JSON workflow runtime's registry, so a host executes the plan with `parseAndRunWorkflow`:
 
