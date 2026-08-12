@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { ContextData } from '@noetic-tools/context';
 import type { SettleResult } from '@noetic-tools/types';
+import { frameworkCast } from '@noetic-tools/types';
 import { conditional, inParallel } from '../../src/builders/control-flow-builders';
 import { makeMockContext } from '../_helpers';
 
@@ -96,12 +97,19 @@ describe('inParallel builder', () => {
     ).toThrow('non-empty id');
   });
 
+  // A merge-less all/settle call is a type error by design — the overloads
+  // require `merge` for those modes. Widen the builder through frameworkCast so
+  // these tests exercise the RUNTIME validation without depending on which line
+  // tsc pins the overload mismatch to (it differs between src and dist
+  // resolution, which made `@ts-expect-error` here unstable across gates).
+  const mergelessInParallel =
+    frameworkCast<(opts: { id: string; mode: 'all' | 'settle'; paths: () => [] }) => unknown>(
+      inParallel,
+    );
+
   it('throws when all mode lacks merge', () => {
     expect(() =>
-      // @ts-expect-error — a merge-less inParallel matches no overload, so the
-      // mismatch surfaces on the call; runtime validation is what this test is
-      // asserting.
-      inParallel<ContextData, string, string>({
+      mergelessInParallel({
         id: 'test',
         mode: 'all',
         paths: () => [],
@@ -111,8 +119,7 @@ describe('inParallel builder', () => {
 
   it('throws when settle mode lacks merge', () => {
     expect(() =>
-      // @ts-expect-error — intentionally passing invalid opts to test runtime validation
-      inParallel<ContextData, string, string>({
+      mergelessInParallel({
         id: 'test',
         mode: 'settle',
         paths: () => [],
