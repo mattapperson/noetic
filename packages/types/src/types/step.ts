@@ -1,4 +1,4 @@
-import type { ZodType } from 'zod';
+import type { StandardSchemaV1 } from '@standard-schema/spec';
 import type { Channel } from './channel';
 import type { ModelParams, RetryPolicy, ServerToolSpec, StepMeta } from './common';
 import type { Context } from './context';
@@ -128,11 +128,17 @@ export interface StepCallModel<TContext = ContextData, _I = unknown, O = unknown
    */
   tools?: Lazy<(Tool | ServerToolSpec)[] | undefined, TContext>;
   /**
-   * Structured output: a Zod schema (assistant text is JSON-parsed and
+   * Structured output: a Standard Schema (assistant text is JSON-parsed and
    * validated) or a streaming `OutputCodec` (fed each text delta, produces
-   * the typed value at turn end).
+   * the typed value at turn end). Non-Zod schemas can derive the model
+   * constraint through StandardJSONSchemaV1 or provide `outputJsonSchema`.
    */
-  output?: ZodType<O> | OutputCodec<O>;
+  output?: StandardSchemaV1<unknown, O> | OutputCodec<O>;
+  /**
+   * Explicit raw JSON Schema override sent to the model. For non-Zod schemas,
+   * it takes precedence over StandardJSONSchemaV1 conversion.
+   */
+  outputJsonSchema?: Record<string, unknown>;
   params?: ModelParams;
   /** Controls framework event emission for this step. Defaults to `true`. Set `false` to suppress all framework events. A filter function receives `(eventType, data)` and returns `boolean`. */
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
@@ -163,8 +169,8 @@ export interface StepSubHarness<TContext = ContextData, _I = unknown, O = unknow
   settings?: SubHarnessSettings;
   /** System instructions applied on the first message of a fresh session. */
   instructions?: Lazy<string | undefined, TContext>;
-  /** When set, the assistant text is JSON-parsed and validated against this schema. */
-  output?: ZodType<O>;
+  /** When set, the assistant text is JSON-parsed and validated against this Standard Schema. */
+  output?: StandardSchemaV1<unknown, O>;
   /** Session reuse + teardown policy across steps. */
   session?: SubHarnessSessionPolicy;
   /** Controls framework event emission for this step. Defaults to `true`. */
@@ -175,7 +181,7 @@ export interface StepSubHarness<TContext = ContextData, _I = unknown, O = unknow
 export interface StepInvokeTool<_TContext = ContextData, I = unknown, O = unknown> {
   kind: 'invokeTool';
   id: string;
-  tool: Tool<ZodType<I>, ZodType<O>>;
+  tool: Tool<StandardSchemaV1<unknown, I>, StandardSchemaV1<unknown, O>>;
   args?: Partial<I>;
 }
 

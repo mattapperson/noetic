@@ -11,7 +11,7 @@
 type NoeticError =
   | { kind: 'step_failed';          stepId: string; cause: Error; retriesExhausted: boolean }
   | { kind: 'model_refused';          stepId: string; refusal: string }
-  | { kind: 'model_parse_error';      stepId: string; raw: string; schema: ZodType; zodError: ZodError }
+  | { kind: 'model_parse_error';      stepId: string; raw: string; schema: StandardSchemaV1; zodError: ZodError }
   | { kind: 'model_rate_limit';       stepId: string; retryAfter?: number }
   | { kind: 'fork_partial';         stepId: string; succeeded: Array<{ stepId: string; value: unknown }>; failed: Array<{ stepId: string; error: NoeticError }> }
   | { kind: 'spawn_summary_failed'; stepId: string; childOutput: unknown; summaryCause: Error }
@@ -53,7 +53,9 @@ The child's work succeeded — don't discard it. Throw `spawn_summary_failed` wi
 
 ### LLM Parse Error
 
-The LLM returned text that didn't match the Zod schema. Includes the `raw` text so the caller can attempt recovery (re-prompt, manual parse, etc.).
+The LLM returned text that didn't match the structured-output schema. Includes the `raw` text so the caller can attempt recovery (re-prompt, manual parse, etc.).
+
+`schema` is typed as `StandardSchemaV1` since `step.llm`/`step.subHarness` outputs accept any Standard Schema v1 validator. `zodError` remains populated for backward compatibility: for Zod schemas it is the real `ZodError`; for non-Zod schemas the vendor's Standard Schema issues are adapted into a synthetic `ZodError` of `custom` issues, so consumers keep a single error surface.
 
 ### Item Schema Mismatch
 

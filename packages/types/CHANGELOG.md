@@ -1,3 +1,7 @@
+## @noetic-tools/types-v3.2.0 (2026-08-12)
+
+* feat(core): support Standard Schema validators (#67) ([1751b6a](https://github.com/mattapperson/noetic/commit/1751b6a)), closes [#67](https://github.com/mattapperson/noetic/issues/67)
+
 ## @noetic-tools/types-v3.1.0 (2026-08-03)
 
 * feat(types): add context-layer placement, renderDelta, and cache-anchoring types ([c7f53b4](https://github.com/mattapperson/noetic/commit/c7f53b4))

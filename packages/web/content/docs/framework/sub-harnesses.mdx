@@ -51,7 +51,7 @@ step.claudeCode<TContext = ContextData, I = unknown, O = unknown>({
   prompt: string | ((ctx: Context<TContext>) => string);         // the turn prompt
   settings?: SubHarnessSettings;
   instructions?: string | ((ctx: Context<TContext>) => string | undefined);
-  output?: ZodType<O>;
+  output?: StandardSchemaV1<unknown, O>;
   session?: SubHarnessSessionPolicy;
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }): StepSubHarness<TContext, I, O>
@@ -64,7 +64,7 @@ step.claudeCode<TContext = ContextData, I = unknown, O = unknown>({
 | `prompt` | `string` or `(ctx) => string` | The fresh turn input. The prior conversation is passed separately as history (see [Conversation history](#conversation-history)), so this is only the new user turn. |
 | `settings` | `SubHarnessSettings` | Shared harness knobs — see below. |
 | `instructions` | `string` or `(ctx) => string \| undefined` | System instructions applied once on the first message of a fresh session. Never re-applied on resume. |
-| `output` | `ZodType<O>` | Optional Zod schema. When set, the agent's final text is JSON-parsed and validated, exactly like `callModel`'s `output`. |
+| `output` | `StandardSchemaV1<unknown, O>` | Optional output schema (any Standard Schema v1; Zod is the default). When set, the agent's final text is JSON-parsed and validated, exactly like `callModel`'s `output`. Unlike `callModel`, no JSON Schema is sent to a model, so non-Zod schemas need no escape hatch. |
 | `session` | `SubHarnessSessionPolicy` | Session reuse + teardown policy — see below. |
 | `emit` | `boolean` or filter fn | Framework-event emission (default `true`). |
 

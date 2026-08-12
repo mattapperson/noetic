@@ -31,7 +31,8 @@ callModel<TContext = ContextData, I = unknown, O = unknown>({
   model: Lazy<string, TContext>;                    // eager string or (ctx) => string
   instructions?: Lazy<string | undefined, TContext>;
   tools?: Lazy<Tool[] | undefined, TContext>;       // allowed tool subset (undefined = all, [] = none)
-  output?: ZodType<O> | OutputCodec<O>;            // Zod schema OR a streaming codec (see Generative UI)
+  output?: StandardSchemaV1<unknown, O> | OutputCodec<O>;  // any Standard Schema v1 (Zod default) OR a streaming codec (see Generative UI)
+  outputJsonSchema?: Record<string, unknown>;            // explicit fallback/override after Zod and StandardJSONSchemaV1
   params?: ModelParams;
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }): StepCallModel<TContext, I, O>
@@ -56,7 +57,7 @@ callModel({
 
 `emit` controls framework event emission (default `true`). Set `false` to suppress all, or pass a filter function.
 
-`output` accepts a Zod schema (assistant text is JSON-parsed and validated) OR an `OutputCodec<O>` — a streaming output dialect. The OpenUI codec (`openUi(library)`) makes the model render a UI instead of returning text; see [Generative UI](#generative-ui-openui).
+`output` accepts any Standard Schema v1 schema (assistant text is JSON-parsed and validated; Zod runs `safeParse`, other validators run `~standard.validate` with sync/Promise support, and the parsed/transformed value is returned) OR an `OutputCodec<O>`. Model JSON Schema resolves through Zod's native converter, StandardJSONSchemaV1, then `outputJsonSchema`; the explicit field overrides the trait for non-Zod schemas and falls back when conversion throws. The OpenUI codec (`openUi(library)`) makes the model render a UI instead of returning text; see [Generative UI](#generative-ui-openui).
 
 The agent harness assembles the View before calling the model: system message + context layer items + conversation history. The `instructions` field becomes an `InputMessageItem` with `role: system`.
 
@@ -69,7 +70,7 @@ Direct tool execution (not via LLM selection).
 ```typescript
 invokeTool<TContext = ContextData, I = unknown, O = unknown>({
   id: string;
-  tool: Tool<ZodType<I>, ZodType<O>>;
+  tool: Tool<StandardSchemaV1<unknown, I>, StandardSchemaV1<unknown, O>>;
   args?: Partial<I>;
 }): StepInvokeTool<TContext, I, O>
 ```
@@ -155,14 +156,15 @@ schedule<I, O>({
 
 ### tool
 
-Typed tool factory with Zod validation.
+Typed tool factory with Standard Schema validation (Zod default, any Standard Schema v1 validator accepted).
 
 ```typescript
 tool<I, O>({
   name: string;
   description: string;
-  input: ZodType<I>;
-  output: ZodType<O>;
+  input: StandardSchemaV1<I>;
+  output: StandardSchemaV1<O>;
+  inputJsonSchema?: Record<string, unknown>;  // explicit fallback/override after Zod and StandardJSONSchemaV1
   execute: (args: I, toolCtx: ToolExecutionContext) => Promise<O>;
   needsApproval?: boolean;
   context?: ToolContextDeclaration;
@@ -194,7 +196,7 @@ step.claudeCode<TContext = ContextData, I = unknown, O = unknown>({
   prompt: Lazy<string, TContext>;                      // the fresh turn input
   settings?: SubHarnessSettings;
   instructions?: Lazy<string | undefined, TContext>;   // first-message system prompt
-  output?: ZodType<O>;                                // structured output, like callModel
+  output?: StandardSchemaV1<unknown, O>;                 // structured output, like callModel (no model JSON Schema needed, so no escape hatch)
   session?: SubHarnessSessionPolicy;
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }): StepSubHarness<TContext, I, O>

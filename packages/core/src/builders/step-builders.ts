@@ -6,6 +6,7 @@ import type {
   OutputCodec,
   RetryPolicy,
   ServerToolSpec,
+  StandardSchemaV1,
   StepCallModel,
   StepInvokeTool,
   StepRunCode,
@@ -18,7 +19,6 @@ import type {
   Tool,
 } from '@noetic-tools/types';
 import { NoeticConfigError } from '@noetic-tools/types';
-import type { ZodType } from 'zod';
 import { getDefaultRegistrar } from '../types/step-registrar';
 
 //#region Types
@@ -47,15 +47,20 @@ export interface CallModelOpts<TContext, O> {
    * server tool the provider executes, e.g. web search/fetch).
    */
   tools?: Lazy<(Tool | ServerToolSpec)[] | undefined, TContext>;
-  /** Structured output: a Zod schema or a streaming `OutputCodec` (e.g. OpenUI Lang). */
-  output?: ZodType<O> | OutputCodec<O>;
+  /** Structured output: a Standard Schema (Zod, Valibot, …) or a streaming `OutputCodec` (e.g. OpenUI Lang). */
+  output?: StandardSchemaV1<unknown, O> | OutputCodec<O>;
+  /**
+   * Explicit raw JSON Schema override sent to the model. For non-Zod schemas,
+   * it takes precedence over StandardJSONSchemaV1 conversion.
+   */
+  outputJsonSchema?: Record<string, unknown>;
   params?: ModelParams;
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }
 
 export interface InvokeToolOpts<I, O> {
   id: string;
-  tool: Tool<ZodType<I>, ZodType<O>>;
+  tool: Tool<StandardSchemaV1<unknown, I>, StandardSchemaV1<unknown, O>>;
   args?: Partial<I>;
 }
 
@@ -69,8 +74,8 @@ export interface StepSubHarnessOpts<TContext, O> {
   settings?: SubHarnessSettings;
   /** System instructions applied on the first message of a fresh session. */
   instructions?: Lazy<string | undefined, TContext>;
-  /** Optional Zod schema; when set the assistant text is JSON-parsed and validated. */
-  output?: ZodType<O>;
+  /** Optional Standard Schema; when set the assistant text is JSON-parsed and validated. */
+  output?: StandardSchemaV1<unknown, O>;
   /** Session reuse + teardown policy across steps. */
   session?: SubHarnessSessionPolicy;
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);

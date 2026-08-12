@@ -1,4 +1,4 @@
-import type { ZodType } from 'zod';
+import type { StandardSchemaV1 } from '@standard-schema/spec';
 import type { Channel, ChannelHandle, ExternalChannel } from './channel';
 import type { LLMResponse, ModelParams, ServerToolSpec } from './common';
 import type { Context, CwdState, RestoreContextOptions } from './context';
@@ -70,7 +70,12 @@ interface CallModelRequestBase {
   instructions?: string;
   params?: ModelParams;
   /** When provided, the harness sends a JSON Schema constraint to the model so it returns structured JSON. */
-  outputSchema?: ZodType;
+  outputSchema?: StandardSchemaV1;
+  /**
+   * Explicit raw JSON Schema override for the structured-output constraint.
+   * For non-Zod schemas, it takes precedence over StandardJSONSchemaV1 conversion.
+   */
+  outputJsonSchema?: Record<string, unknown>;
   /** Controls framework event emission. Defaults to `true`. Passed through from `StepLLM.emit`. */
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
   /**

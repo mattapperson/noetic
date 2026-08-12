@@ -15,7 +15,7 @@ All agent patterns compose through a single `Step<TContext, I, O>` type. Steps a
 
 - **`runCode`** -- pure async computation
 - **`callModel`** -- model call with optional tools and structured output
-- **`invokeTool`** -- direct tool execution with Zod-validated I/O
+- **`invokeTool`** -- direct tool execution with schema-validated I/O (Zod by default; any Standard Schema v1 validator accepted)
 - **`conditional`** -- conditional routing (returns a step or null)
 - **`inParallel`** -- parallel execution (race, all, or settle)
 - **`spawn`** -- new context boundary with optional context layers
@@ -52,7 +52,7 @@ The harness always holds a `SubprocessAdapter` — every `runCode`, `spawn`, and
 
 ### Tools
 
-Tools are defined with Zod schemas for input/output validation. Inside `execute`, tools receive `ToolExecutionContext` which provides `harness`, `ctx`, and `context` accessors:
+Tools are defined with schemas for input/output validation — Zod by default, though any Standard Schema v1 validator is accepted. Model-facing JSON Schema resolves through Zod, StandardJSONSchemaV1, then an explicit `inputJsonSchema` fallback. Inside `execute`, tools receive `ToolExecutionContext` which provides `harness`, `ctx`, and `context` accessors:
 
 ```typescript
 const myTool = tool({
@@ -98,7 +98,7 @@ A layer's `placement` picks its band -- `'anchor'` (before history, pinned for a
 
 An agent can respond with a *UI* built from components you register, instead of text. This is opt-in via `@noetic-tools/openui` (depends only on context + types; core never imports it). Three composable surfaces:
 
-- **`callModel({ output: openUi(library) })`** -- the model emits [OpenUI Lang](https://www.openui.com) and the step returns a `UiDocument`. `output` accepts a Zod schema OR an `OutputCodec`.
+- **`callModel({ output: openUi(library) })`** -- the model emits [OpenUI Lang](https://www.openui.com) and the step returns a `UiDocument`. `output` accepts a Standard Schema (Zod default) OR an `OutputCodec`.
 - **`openUiSurface({ library })`** -- a context layer that makes the server the authoritative owner of UI state (durable, resumable, visible to the model). Loop with `until: ui.submitted(surface, ref)` to wait for a form submit.
 - **Tool `ui` declarations** -- a tool defines `call`/`progress`/`result`/`error` render functions (built with `fragment(library)`) so its calls carry their own UI; works even without the codec installed.
 
@@ -123,7 +123,7 @@ For pattern-specific code examples, read `references/composition-patterns.md`.
 
 ### Step 2: Define Tools
 
-Define tools with Zod schemas. Tools that spawn sub-agents should use `toolCtx.harness.run()` or `toolCtx.harness.detachedSpawn()` -- never capture the harness in a closure.
+Define tools with Zod schemas or any Standard Schema v1 validator. Non-Zod validators should implement StandardJSONSchemaV1 or provide `inputJsonSchema`. Tools that spawn sub-agents should use `toolCtx.harness.run()` or `toolCtx.harness.detachedSpawn()` -- never capture the harness in a closure.
 
 Tools can declare persistent state via `ToolContextDeclaration`:
 

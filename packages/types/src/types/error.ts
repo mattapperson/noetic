@@ -1,4 +1,5 @@
-import type { ZodError, ZodType } from 'zod';
+import type { StandardSchemaV1 } from '@standard-schema/spec';
+import type { ZodError } from 'zod';
 
 /** @public Discriminated union of all structured error kinds raised by the runtime. */
 export type NoeticError =
@@ -17,7 +18,8 @@ export type NoeticError =
       kind: 'model_parse_error';
       stepId: string;
       raw: string;
-      schema: ZodType;
+      schema: StandardSchemaV1;
+      /** Real `ZodError` for Zod schemas; synthetic `custom` issues adapted from the vendor's Standard Schema issues otherwise. */
       zodError: ZodError;
     }
   | {

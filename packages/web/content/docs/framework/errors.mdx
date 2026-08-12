@@ -30,7 +30,7 @@ Noetic wraps every framework-level failure in a structured `NoeticError` discrim
 |---|---|---|
 | `step_failed` | `stepId`, `cause: Error`, `retriesExhausted` | A step throws after exhausting retries. |
 | `model_refused` | `stepId`, `refusal: string` | The model returns a refusal instead of content. |
-| `model_parse_error` | `stepId`, `raw: string`, `schema: ZodType`, `zodError: ZodError` | Structured output fails Zod validation. |
+| `model_parse_error` | `stepId`, `raw: string`, `schema: StandardSchemaV1`, `zodError: ZodError` | Structured output fails schema validation. `schema` is the Standard Schema v1 validator; `zodError` stays populated for backward compatibility — the real `ZodError` for Zod schemas, a synthetic `custom`-issue `ZodError` adapted from the vendor's Standard Schema issues otherwise. |
 | `model_rate_limit` | `stepId`, `retryAfter?: number` | The LLM provider returns a rate-limit response. |
 | `fork_partial` | `stepId`, `succeeded[]`, `failed[]` | Thrown by `inParallel` mode `'all'` when any path fails, and by `'race'` when every path fails. (Mode `'settle'` never throws this — it reports failures in its `SettleResult` array instead.) |
 | `channel_timeout` | `channelName`, `timeout: number` | A `recv()` call — or a back-pressured `send()` parked on a full queue — exceeded its timeout. |
@@ -47,7 +47,7 @@ Noetic wraps every framework-level failure in a structured `NoeticError` discrim
 type NoeticError =
   | { kind: 'step_failed'; stepId: string; cause: Error; retriesExhausted: boolean }
   | { kind: 'model_refused'; stepId: string; refusal: string }
-  | { kind: 'model_parse_error'; stepId: string; raw: string; schema: ZodType; zodError: ZodError }
+  | { kind: 'model_parse_error'; stepId: string; raw: string; schema: StandardSchemaV1; zodError: ZodError }
   | { kind: 'model_rate_limit'; stepId: string; retryAfter?: number }
   | { kind: 'fork_partial'; stepId: string; succeeded: Array<{ stepId: string; value: unknown }>; failed: Array<{ stepId: string; error: NoeticError }> }
   | { kind: 'channel_timeout'; channelName: string; timeout: number }

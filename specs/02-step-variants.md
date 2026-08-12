@@ -62,7 +62,8 @@ interface StepCallModelOpts<TContext, O> {
   model: Lazy<string, TContext>;                    // e.g. 'anthropic/claude-sonnet-4-20250514' — or a (ctx) => string getter
   instructions?: Lazy<string | undefined, TContext>;
   tools?: Lazy<Tool[] | undefined, TContext>;       // allowed tool subset (undefined = all, [] = none)
-  output?: ZodType<O>;                             // structured output schema
+  output?: StandardSchemaV1<unknown, O>;          // structured output schema (any Standard Schema v1)
+  outputJsonSchema?: Record<string, unknown>;     // explicit JSON Schema override for non-Zod `output`
   params?: ModelParams;                            // temperature, topP, etc.
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }
@@ -94,6 +95,12 @@ const planChat = callModel({
   tools: (ctx) => (ctx.unifiedTools ?? []).filter((t) => PLAN_MODE_TOOL_NAMES.has(t.name)),
 });
 ```
+
+### Structured Output Schemas: Standard Schema v1
+
+`output` accepts any [Standard Schema v1](https://standardschema.dev/schema) validator (Zod, Valibot, ArkType, …). Zod schemas remain the validation fast path; other schemas run `schema['~standard'].validate` (sync or Promise), and the parsed/transformed value becomes the step output.
+
+The model constraint uses a tiered conversion chain: Zod first via `z.toJSONSchema(..., { target: 'draft-07' })`, then the [Standard JSON Schema v1](https://standardschema.dev/json-schema) companion trait via `schema['~standard'].jsonSchema.input({ target: 'draft-07' })`, then the explicit `outputJsonSchema` fallback/override. Zod 4.2+, ArkType 2.1.28+, Zod Mini, VineJS, and Sury implement the trait; Valibot provides it through `toStandardJsonSchema()` from `@valibot/to-json-schema`. A validation-only schema with neither the trait nor an explicit override fails with `MISSING_JSON_SCHEMA`. This keeps the Zod-bound `@openrouter/agent` adaptation self-contained and adds no per-validator runtime dependency to Noetic.
 
 ```typescript
 const analyze = callModel({
@@ -220,18 +227,24 @@ interface ToolContextDeclaration<TState = unknown> {
   recall: (state: TState) => string | null;
 }
 
-interface Tool<I extends ZodTypeAny = ZodTypeAny, O extends ZodTypeAny = ZodTypeAny> {
+interface Tool<I extends StandardSchemaV1 = StandardSchemaV1, O extends StandardSchemaV1 = StandardSchemaV1> {
   name: string;
   description: string;
-  input: I;
-  output: O;
-  execute: (args: z.infer<I>, ctx: Context) => Promise<z.infer<O>>;
+  input: I;                      // any Standard Schema v1
+  output: O;                     // any Standard Schema v1
+  inputJsonSchema?: Record<string, unknown>;  // explicit override/fallback for non-Zod input
+  event?: StandardSchemaV1;      // validates streaming events yielded during execution
+  execute: (args: InferSchemaOutput<I>, ctx: Context) => Promise<InferSchemaOutput<O>>;
   needsApproval?: boolean;  // preventive gating, not reactive throwing
   context?: ToolContextDeclaration;
 }
 ```
 
 `toolCalls(tools)` generates one `ContextLayer` per unique `context.id` among the tools. Tools sharing the same id share state.
+
+Tool `input`/`output`/`event` accept any Standard Schema v1 validator. The runtime validates tool input through `validateSchema` (Zod `safeParse` fast path, otherwise `~standard.validate` with sync/Promise support), and the parsed/transformed input is what `execute` receives. As before, `output` and `event` describe and infer tool values but are not runtime validation boundaries. Tool input JSON Schema uses the same Zod → StandardJSONSchemaV1 → explicit `inputJsonSchema` chain. For non-Zod schemas, `inputJsonSchema` overrides the trait and also serves as the fallback if the trait converter throws; a validation-only schema must provide it.
+
+Zod stays the default everywhere else in the framework — channels, context-layer schemas, item extension schemas, and JSON workflow schemas remain Zod-specific.
 
 ---
 
