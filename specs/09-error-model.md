@@ -55,7 +55,7 @@ The child's work succeeded — don't discard it. Throw `spawn_summary_failed` wi
 
 The LLM returned text that didn't match the structured-output schema. Includes the `raw` text so the caller can attempt recovery (re-prompt, manual parse, etc.).
 
-`schema` is typed as `StandardSchemaV1` since `step.llm`/`step.subHarness` outputs accept any Standard Schema v1 validator. `zodError` remains populated for backward compatibility: for Zod schemas it is the real `ZodError`; for non-Zod schemas the vendor's Standard Schema issues are adapted into a synthetic `ZodError` of `custom` issues, so consumers keep a single error surface.
+`schema` is typed as `StandardSchemaV1` since `callModel`/sub-harness step outputs accept any Standard Schema v1 validator. `zodError` remains populated for backward compatibility: for Zod schemas it is the real `ZodError`; for non-Zod schemas the vendor's Standard Schema issues are adapted into a synthetic `ZodError` of `custom` issues, so consumers keep a single error surface.
 
 ### Item Schema Mismatch
 

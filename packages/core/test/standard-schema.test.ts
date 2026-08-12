@@ -4,8 +4,8 @@ import type {
   ContextData,
   StandardJSONSchemaV1,
   StandardSchemaV1,
-  StepLLM,
-  StepTool,
+  StepCallModel,
+  StepInvokeTool,
   Tool,
 } from '@noetic-tools/types';
 import {
@@ -18,10 +18,10 @@ import { toStandardJsonSchema } from '@valibot/to-json-schema';
 import * as v from 'valibot';
 import { ZodError, z } from 'zod';
 import { convertTools, executeToolCall, resolveWireJsonSchema } from '../src/adapters/openrouter';
-import { step } from '../src/builders/step-builders';
+import { callModel, invokeTool } from '../src/builders/step-builders';
 import { tool } from '../src/builders/tool-builder';
 import { AgentHarness } from '../src/harness/agent-harness';
-import { executeLLM, executeTool } from '../src/interpreter/execute-action';
+import { executeCallModel, executeInvokeTool } from '../src/interpreter/execute-action';
 import {
   makeLLMResponse,
   makeMockContext,
@@ -190,7 +190,7 @@ describe('executeToolCall input validation', () => {
   });
 });
 
-describe('executeTool (step.tool) with valibot', () => {
+describe('executeInvokeTool (invokeTool) with valibot', () => {
   const ctx = makeMockContext();
   const harness = makeMockHarness();
 
@@ -211,7 +211,7 @@ describe('executeTool (step.tool) with valibot', () => {
         greeting: `hi ${args.name}`,
       }),
     });
-    const s: StepTool<
+    const s: StepInvokeTool<
       ContextData,
       {
         name: string;
@@ -220,11 +220,11 @@ describe('executeTool (step.tool) with valibot', () => {
         greeting: string;
       }
     > = {
-      kind: 'tool',
+      kind: 'invokeTool',
       id: 'greet-step',
       tool: t,
     };
-    const result = await executeTool(
+    const result = await executeInvokeTool(
       s,
       {
         name: 'ada',
@@ -254,7 +254,7 @@ describe('executeTool (step.tool) with valibot', () => {
         greeting: `hi ${args.name}`,
       }),
     });
-    const s: StepTool<
+    const s: StepInvokeTool<
       ContextData,
       {
         name: string;
@@ -263,12 +263,12 @@ describe('executeTool (step.tool) with valibot', () => {
         greeting: string;
       }
     > = {
-      kind: 'tool',
+      kind: 'invokeTool',
       id: 'greet-step',
       tool: t,
     };
     try {
-      await executeTool(
+      await executeInvokeTool(
         s,
         frameworkCast<{
           name: string;
@@ -286,7 +286,7 @@ describe('executeTool (step.tool) with valibot', () => {
   });
 });
 
-describe('step.llm structured output with Standard Schema', () => {
+describe('callModel structured output with Standard Schema', () => {
   it('validates valibot output and preserves transformed data', async () => {
     const schema = v.pipe(
       v.object({
@@ -294,8 +294,8 @@ describe('step.llm structured output with Standard Schema', () => {
       }),
       v.transform((o) => o.answer),
     );
-    const s: StepLLM<ContextData, string, string> = {
-      kind: 'llm',
+    const s: StepCallModel<ContextData, string, string> = {
+      kind: 'callModel',
       id: 'valibot-out',
       model: 'gpt-4',
       output: schema,
@@ -314,7 +314,7 @@ describe('step.llm structured output with Standard Schema', () => {
     const ctx = makeMockContextWithClient([
       makeLLMResponse('{"answer":"42"}'),
     ]);
-    const result = await executeLLM(s, 'hi', ctx);
+    const result = await executeCallModel(s, 'hi', ctx);
     const answer: string = result;
     expect(answer).toBe('42');
   });
@@ -348,14 +348,14 @@ describe('step.llm structured output with Standard Schema', () => {
         },
       },
     };
-    const s: StepLLM<
+    const s: StepCallModel<
       ContextData,
       string,
       {
         ok: true;
       }
     > = {
-      kind: 'llm',
+      kind: 'callModel',
       id: 'custom-out',
       model: 'gpt-4',
       output: schema,
@@ -366,18 +366,18 @@ describe('step.llm structured output with Standard Schema', () => {
     const ctx = makeMockContextWithClient([
       makeLLMResponse('{"ok":true}'),
     ]);
-    const result = await executeLLM(s, 'hi', ctx);
+    const result = await executeCallModel(s, 'hi', ctx);
     expect(result).toEqual({
       ok: true,
     });
   });
 
-  it('maps valibot failures into llm_parse_error with a synthetic ZodError', async () => {
+  it('maps valibot failures into model_parse_error with a synthetic ZodError', async () => {
     const schema = v.object({
       answer: v.string(),
     });
-    const s: StepLLM<ContextData, string, v.InferOutput<typeof schema>> = {
-      kind: 'llm',
+    const s: StepCallModel<ContextData, string, v.InferOutput<typeof schema>> = {
+      kind: 'callModel',
       id: 'valibot-fail',
       model: 'gpt-4',
       output: schema,
@@ -389,12 +389,12 @@ describe('step.llm structured output with Standard Schema', () => {
       makeLLMResponse('{"wrong":"field"}'),
     ]);
     try {
-      await executeLLM(s, 'hi', ctx);
+      await executeCallModel(s, 'hi', ctx);
       expect.unreachable('should have thrown');
     } catch (e) {
       assert(isNoeticError(e));
-      expect(e.noeticError.kind).toBe('llm_parse_error');
-      if (e.noeticError.kind !== 'llm_parse_error') {
+      expect(e.noeticError.kind).toBe('model_parse_error');
+      if (e.noeticError.kind !== 'model_parse_error') {
         return;
       }
       expect(e.noeticError.schema).toBe(schema);
@@ -779,8 +779,8 @@ describe('JSON Schema wire boundaries', () => {
 });
 
 describe('step builders accept Standard Schema outputs', () => {
-  it('step.llm infers output type from a valibot schema', () => {
-    const s = step.llm({
+  it('callModel infers output type from a valibot schema', () => {
+    const s = callModel({
       id: 'infer-llm',
       model: 'gpt-4',
       output: v.object({
@@ -793,7 +793,7 @@ describe('step builders accept Standard Schema outputs', () => {
     expect(s.output).toBeDefined();
   });
 
-  it('step.tool accepts a valibot-backed tool', () => {
+  it('invokeTool accepts a valibot-backed tool', () => {
     const t = tool({
       name: 'greet',
       description: 'Greet by name',
@@ -810,7 +810,7 @@ describe('step builders accept Standard Schema outputs', () => {
         greeting: `hi ${args.name}`,
       }),
     });
-    const s = step.tool({
+    const s = invokeTool({
       id: 'infer-tool',
       tool: t,
     });

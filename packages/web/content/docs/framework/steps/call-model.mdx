@@ -72,7 +72,7 @@ const extract = callModel({
 
 Any Standard Schema v1 validator works in place of Zod. Non-Zod schemas are validated via `~standard.validate` (sync or Promise results supported) and the parsed/transformed value is returned. The model constraint resolves through Zod, then the [Standard JSON Schema v1](https://standardschema.dev/json-schema) trait, then `outputJsonSchema`. For non-Zod schemas, the explicit field overrides the trait and falls back when conversion throws. See [step.tool](/docs/framework/steps/tool#standard-schema-v1) for a Valibot trait example.
 
-If the model response does not match the schema, a validation error is thrown (`NoeticError` kind `llm_parse_error`; see [Error Model](/docs/framework/errors)).
+If the model response does not match the schema, a validation error is thrown (`NoeticError` kind `model_parse_error`; see [Error Model](/docs/framework/errors)).
 
 ## With Tools
 
