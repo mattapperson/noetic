@@ -17,7 +17,12 @@ import {
   filterReasoningStream,
   filterTextStream,
 } from '../../src/runtime/session-streams';
-import { createScriptedCallModel, makeMessage, textOnlyResponse } from '../_helpers';
+import {
+  createScriptedCallModel,
+  makeLLMResponse,
+  makeMessage,
+  textOnlyResponse,
+} from '../_helpers';
 
 //#region Helpers
 
@@ -286,6 +291,126 @@ describe('AgentHarness session accessors', () => {
       inputTokens: 0,
       outputTokens: 0,
     });
+  });
+
+  it('omits cachedTokens on session and per-turn usage when no cache figure was reported', async () => {
+    const harness = new AgentHarness({
+      name: 'test',
+      agentGraph: echoStep,
+      params: {},
+      _testCallModel: createScriptedCallModel([
+        // `textOnlyResponse` carries no `cachedTokens` — the provider says
+        // nothing about caching at all.
+        textOnlyResponse('no cache info'),
+      ]),
+    });
+
+    await harness.execute('hi');
+    const response = await harness.getAgentResponse();
+    const usage = harness.getUsage();
+    expect(usage.inputTokens).toBe(10);
+    expect(usage.cachedTokens).toBeUndefined();
+    // The per-turn `HarnessResponse.usage` carries the same semantics.
+    expect(response.usage.cachedTokens).toBeUndefined();
+  });
+
+  it('reports cachedTokens 0 on session and per-turn usage when a turn reported zero', async () => {
+    const harness = new AgentHarness({
+      name: 'test',
+      agentGraph: echoStep,
+      params: {},
+      _testCallModel: createScriptedCallModel([
+        makeLLMResponse('nothing cached', {
+          usage: {
+            inputTokens: 10,
+            outputTokens: 5,
+            cachedTokens: 0,
+          },
+        }),
+      ]),
+    });
+
+    await harness.execute('hi');
+    const response = await harness.getAgentResponse();
+    const usage = harness.getUsage();
+    // An explicit report of 0 must NOT collapse to undefined — callers need to
+    // tell "nothing was cached" from "this provider says nothing about caching".
+    expect(usage.cachedTokens).toBe(0);
+    // Same pin on the per-turn `HarnessResponse.usage`, which used to collapse
+    // a reported 0 to `undefined` via a `> 0` guard in buildResponse.
+    expect(response.usage.cachedTokens).toBe(0);
+  });
+
+  it('getUsage() accumulates cachedTokens across turns that report them', async () => {
+    const harness = new AgentHarness({
+      name: 'test',
+      agentGraph: echoStep,
+      params: {},
+      _testCallModel: createScriptedCallModel([
+        makeLLMResponse('first', {
+          usage: {
+            inputTokens: 10,
+            outputTokens: 5,
+            cachedTokens: 4,
+          },
+        }),
+        makeLLMResponse('second', {
+          usage: {
+            inputTokens: 10,
+            outputTokens: 5,
+            cachedTokens: 6,
+          },
+        }),
+      ]),
+    });
+
+    await harness.execute('one');
+    await harness.getAgentResponse();
+    expect(harness.getUsage().cachedTokens).toBe(4);
+
+    await harness.execute('two');
+    await harness.getAgentResponse();
+    expect(harness.getUsage().cachedTokens).toBe(10);
+  });
+
+  it('getUsage() still accounts for a turn that failed after the model billed', async () => {
+    // The model call is nested inside a `runCode` graph so the throw happens
+    // AFTER usage was tracked — a `_testCallModel` that throws would never
+    // accrue anything to accumulate.
+    let harnessRef: AgentHarness | undefined;
+    const modelThenThrow: Step<ContextData, string, string> = {
+      kind: 'runCode',
+      id: 'model-then-throw',
+      execute: async (input, execCtx) => {
+        assert(harnessRef);
+        await harnessRef.run(echoStep, input, execCtx);
+        throw new Error('boom after the model billed');
+      },
+    };
+
+    const harness = new AgentHarness({
+      name: 'test',
+      agentGraph: modelThenThrow,
+      params: {},
+      _testCallModel: createScriptedCallModel([
+        makeLLMResponse('billed', {
+          usage: {
+            inputTokens: 10,
+            outputTokens: 5,
+            cachedTokens: 3,
+          },
+        }),
+      ]),
+    });
+    harnessRef = harness;
+
+    await harness.execute('hi');
+    await expect(harness.getAgentResponse()).rejects.toThrow(/boom after the model billed/);
+
+    const usage = harness.getUsage();
+    expect(usage.inputTokens).toBe(10);
+    expect(usage.outputTokens).toBe(5);
+    expect(usage.cachedTokens).toBe(3);
   });
 
   it('getFullStream() yields framework events for step and turn lifecycle', async () => {

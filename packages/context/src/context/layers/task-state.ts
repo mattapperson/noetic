@@ -3,7 +3,7 @@ import { createMessage, estimateTokens, Slot } from '@noetic-tools/types';
 import { z } from 'zod';
 import { layerFunction } from '../layer-provides';
 
-export interface DurableTaskState {
+export interface TaskState {
   checkpoints: Array<{
     timestamp: number;
     depth: number;
@@ -24,16 +24,16 @@ export interface DurableTaskState {
  *
  * @public
  */
-export type DurableTaskDataMerge = 'shallow' | 'namespace';
+export type TaskStateDataMerge = 'shallow' | 'namespace';
 
 /** @public Options for {@link taskState}. */
-export interface DurableTaskStateOptions {
+export interface TaskStateOptions {
   /**
    * Merge strategy for `data` at a child boundary. Defaults to `'shallow'`.
    * Use `'namespace'` for coordinator/worker fan-out, where several children
    * return concurrently into one parent.
    */
-  mergeData?: DurableTaskDataMerge;
+  mergeData?: TaskStateDataMerge;
 }
 
 /**
@@ -44,16 +44,14 @@ export interface DurableTaskStateOptions {
  */
 const MAX_CHECKPOINTS = 50;
 
-function trimCheckpoints(
-  checkpoints: DurableTaskState['checkpoints'],
-): DurableTaskState['checkpoints'] {
+function trimCheckpoints(checkpoints: TaskState['checkpoints']): TaskState['checkpoints'] {
   if (checkpoints.length <= MAX_CHECKPOINTS) {
     return checkpoints;
   }
   return checkpoints.slice(checkpoints.length - MAX_CHECKPOINTS);
 }
 
-function renderTaskState(state: DurableTaskState): string {
+function renderTaskState(state: TaskState): string {
   return `<task_state>\n${JSON.stringify(state, null, 2)}\n</task_state>`;
 }
 
@@ -63,10 +61,10 @@ function mergeChildData({
   childExecutionId,
   mergeData,
 }: {
-  parent: DurableTaskState;
-  childState: DurableTaskState;
+  parent: TaskState;
+  childState: TaskState;
   childExecutionId: string;
-  mergeData: DurableTaskDataMerge;
+  mergeData: TaskStateDataMerge;
 }): Record<string, unknown> {
   if (mergeData === 'shallow') {
     return {
@@ -97,8 +95,8 @@ function mergeChildData({
  * @param opts - Layer options; `mergeData` selects the `data` merge strategy at a child boundary.
  * @returns A `ContextLayer` scoped to the thread with durable task state.
  */
-export function taskState(opts: DurableTaskStateOptions = {}) {
-  const mergeData: DurableTaskDataMerge = opts.mergeData ?? 'shallow';
+export function taskState(opts: TaskStateOptions = {}) {
+  const mergeData: TaskStateDataMerge = opts.mergeData ?? 'shallow';
   return {
     id: 'task-state' as const,
     name: 'Task State',
@@ -121,7 +119,7 @@ export function taskState(opts: DurableTaskStateOptions = {}) {
           path: string;
         },
         string,
-        DurableTaskState
+        TaskState
       >({
         description:
           'Record a file this task produced or modified. Recorded paths survive the task boundary and merge back into the parent task.',
@@ -155,7 +153,7 @@ export function taskState(opts: DurableTaskStateOptions = {}) {
           value: unknown;
         },
         string,
-        DurableTaskState
+        TaskState
       >({
         description:
           'Record a structured result for this task under a key (e.g. a PR url, a verdict, a summary). Values survive the task boundary and merge back into the parent task.',
@@ -188,7 +186,7 @@ export function taskState(opts: DurableTaskStateOptions = {}) {
     },
     hooks: {
       async init({ storage }) {
-        const saved = await storage.get<DurableTaskState>('state');
+        const saved = await storage.get<TaskState>('state');
         return {
           state: saved ?? {
             checkpoints: [],
@@ -233,13 +231,13 @@ export function taskState(opts: DurableTaskStateOptions = {}) {
       },
 
       async store({ state, ctx }) {
-        const currentState: DurableTaskState = state ?? {
+        const currentState: TaskState = state ?? {
           checkpoints: [],
           files: [],
           data: {},
         };
         // Add a checkpoint for each store call (capped, newest kept)
-        const newState: DurableTaskState = {
+        const newState: TaskState = {
           ...currentState,
           checkpoints: trimCheckpoints([
             ...currentState.checkpoints,
@@ -318,5 +316,5 @@ export function taskState(opts: DurableTaskStateOptions = {}) {
         };
       },
     },
-  } satisfies ContextLayer<DurableTaskState>;
+  } satisfies ContextLayer<TaskState>;
 }

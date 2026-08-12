@@ -219,9 +219,9 @@ function parseHeroChrome(text: string): HeroChrome {
   };
 }
 
-// The Ink layout uses fixed Box widths: label=18, tokens=8, pct=7. When the
-// label is exactly 18 chars (e.g. "durable-task-state") it abuts the tokens
-// column with no whitespace, defeating any \s-based regex. Parse by columns.
+// The Ink layout uses fixed Box widths: label=18, tokens=8, pct=7. A label that
+// fills its column exactly abuts the tokens column with no whitespace,
+// defeating any \s-based regex. Parse by columns.
 const LABEL_COL = 18;
 const TOKEN_COL = 8;
 const PCT_COL = 7;

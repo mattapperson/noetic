@@ -7,7 +7,7 @@ import {
   Slot,
 } from '@noetic-tools/types';
 
-export interface ObservationalState {
+export interface ObservationsState {
   observations: string[];
   buffer: string[];
   bufferTokens: number;
@@ -19,7 +19,7 @@ const DEFAULT_MAX_OBSERVATIONS = 50;
 
 export type ObserverFn = (buffer: string[]) => Promise<string[]>;
 
-function emptyObservationalState(): ObservationalState {
+function emptyObservationsState(): ObservationsState {
   return {
     observations: [],
     buffer: [],
@@ -40,10 +40,10 @@ interface AccumulateConfig {
  * `onItemAppend` (user/tool input).
  */
 async function accumulate(
-  s: ObservationalState,
+  s: ObservationsState,
   texts: string[],
   cfg: AccumulateConfig,
-): Promise<ObservationalState> {
+): Promise<ObservationsState> {
   const newBuffer = [
     ...s.buffer,
     ...texts,
@@ -98,7 +98,7 @@ function renderObservationsWithinBudget(
   return null;
 }
 
-export interface ObservationalContextConfig {
+export interface ObservationsConfig {
   bufferThreshold?: number;
   maxObservations?: number;
   scope?: 'thread' | 'resource';
@@ -112,7 +112,7 @@ export interface ObservationalContextConfig {
  * @param config - Optional configuration for buffer threshold, max observations, scope, and observer function.
  * @returns A `ContextLayer` that accumulates and summarizes observations over time.
  */
-export function observations(config?: ObservationalContextConfig) {
+export function observations(config?: ObservationsConfig) {
   const maxObs = config?.maxObservations ?? DEFAULT_MAX_OBSERVATIONS;
   const threshold = config?.bufferThreshold ?? DEFAULT_BUFFER_THRESHOLD_TOKENS;
   const observer = config?.observer;
@@ -134,9 +134,9 @@ export function observations(config?: ObservationalContextConfig) {
     },
     hooks: {
       async init({ storage }) {
-        const saved = await storage.get<ObservationalState>('state');
+        const saved = await storage.get<ObservationsState>('state');
         return {
-          state: saved ?? emptyObservationalState(),
+          state: saved ?? emptyObservationsState(),
         };
       },
 
@@ -159,7 +159,7 @@ export function observations(config?: ObservationalContextConfig) {
 
       // Captures assistant output text.
       async store({ newItems, state }) {
-        const s = state ?? emptyObservationalState();
+        const s = state ?? emptyObservationsState();
         const texts = collectOutputText(newItems);
         return {
           state: await accumulate(s, texts, {
@@ -172,7 +172,7 @@ export function observations(config?: ObservationalContextConfig) {
 
       // Captures user input and tool output text (pass-through; no transform).
       async onItemAppend({ items, state }) {
-        const s = state ?? emptyObservationalState();
+        const s = state ?? emptyObservationsState();
         const texts = collectInputText(items);
         if (texts.length === 0) {
           return {
@@ -195,5 +195,5 @@ export function observations(config?: ObservationalContextConfig) {
         };
       },
     },
-  } satisfies ContextLayer<ObservationalState>;
+  } satisfies ContextLayer<ObservationsState>;
 }

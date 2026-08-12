@@ -21,6 +21,7 @@
     "@noetic-tools/sub-harness": "workspace:*",
     "@noetic-tools/sub-harness-claude-code": "workspace:*",
     "@noetic-tools/sub-harness-codex": "workspace:*",
+    "bun-types": "latest",
     "zod": "^4.0.0"
   },
   "scripts": {
@@ -33,6 +34,7 @@
     "format": "bunx biome format --write .",
     "format:check": "bunx biome format .",
     "check:exports": "bun scripts/check-export-tags.ts",
+    "typecheck:examples": "bunx tsc --noEmit -p examples",
     "example:sub-harness": "bun examples/sub-harness-e2e.ts",
     "inspect": "bun packages/inspector/server/host.ts"
   },

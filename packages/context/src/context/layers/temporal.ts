@@ -58,7 +58,7 @@ export type FactSearcher = (input: {
  * Configuration for {@link temporal}.
  * @public
  */
-export interface TemporalContextConfig {
+export interface TemporalConfig {
   /** Returns "now" for date grounding/extraction. Defaults to the system clock. */
   now?: () => Date;
   /** Context scope. Defaults to `'resource'` (long-term, cross-session). */
@@ -319,7 +319,7 @@ async function accumulate(
  * @param config - Clock, scope, injected LLM callbacks, and tuning knobs.
  * @returns A `ContextLayer` with a fact-ledger store + `searchMemory` tool.
  */
-export function temporal(config?: TemporalContextConfig): ContextLayer<TemporalState> {
+export function temporal(config?: TemporalConfig): ContextLayer<TemporalState> {
   const now = config?.now ?? ((): Date => new Date());
   const threshold = config?.bufferThreshold ?? DEFAULT_BUFFER_THRESHOLD_TOKENS;
   const maxFacts = config?.maxFacts ?? DEFAULT_MAX_FACTS;

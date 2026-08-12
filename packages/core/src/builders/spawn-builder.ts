@@ -64,7 +64,7 @@ export function spawn<TContext = ContextData, I = unknown, O = unknown>(
     subprocess: opts.subprocess,
   };
   getDefaultRegistrar().register(built);
-  // Ensure the child is addressable by id — builders for `run`/`llm`/`tool`
+  // Ensure the child is addressable by id — builders for `runCode`/`callModel`/`invokeTool`
   // self-register, but a caller can construct a step literal and pass it as
   // `child` without going through a builder.
   getDefaultRegistrar().register(opts.child);

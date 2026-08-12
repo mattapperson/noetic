@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import type { DurableTaskState } from '@noetic-tools/context';
+import type { TaskState } from '@noetic-tools/context';
 import {
   beforeToolCallLayers,
   createLayerStateStore,
@@ -234,7 +234,7 @@ describe('AUDIT: taskState — durability across executions', () => {
       storage,
     });
 
-    const stateA = storeA.get<DurableTaskState>(ctxA.executionId, 'task-state');
+    const stateA = storeA.get<TaskState>(ctxA.executionId, 'task-state');
     assert(stateA);
     expect(stateA.checkpoints.length).toBeGreaterThan(0);
 
@@ -250,7 +250,7 @@ describe('AUDIT: taskState — durability across executions', () => {
       store: storeB,
     });
 
-    const stateB = storeB.get<DurableTaskState>(ctxB.executionId, 'task-state');
+    const stateB = storeB.get<TaskState>(ctxB.executionId, 'task-state');
     assert(stateB);
     // The whole point of a "durable" task-state layer: prior checkpoints survive.
     expect(stateB.checkpoints.length).toBeGreaterThan(0);

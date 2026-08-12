@@ -494,7 +494,7 @@ describe('executeCallModel', () => {
     }
     const layers: ContextLayer[] = [
       {
-        id: 'history-window',
+        id: 'history',
         slot: 275,
         scope: 'execution',
         hooks: {},

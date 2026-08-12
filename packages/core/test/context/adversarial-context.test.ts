@@ -10,10 +10,10 @@ import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import type {
   ContextLayer,
-  DurableTaskState,
   ExecutionContext,
-  ObservationalState,
-  WorkingMemoryContextState,
+  ObservationsState,
+  ScratchpadState,
+  TaskState,
 } from '@noetic-tools/context';
 import {
   allocateBudgets,
@@ -53,7 +53,7 @@ function isCheckpointState(val: unknown): val is {
   return Array.isArray(val.checkpoints);
 }
 
-function isObservationalState(val: unknown): val is {
+function isObservationsState(val: unknown): val is {
   observations: string[];
 } {
   if (!isRecord(val)) {
@@ -577,7 +577,7 @@ describe('Working Memory: falsy state edge cases', () => {
       log: makeItemLog(),
       query: '',
       ctx,
-      state: frameworkCast<WorkingMemoryContextState>(state),
+      state: frameworkCast<ScratchpadState>(state),
       budget: 1e3,
     });
 
@@ -597,7 +597,7 @@ describe('Working Memory: falsy state edge cases', () => {
       log: makeItemLog(),
       query: '',
       ctx,
-      state: frameworkCast<WorkingMemoryContextState>(0),
+      state: frameworkCast<ScratchpadState>(0),
       budget: 1e3,
     });
 
@@ -616,7 +616,7 @@ describe('Working Memory: falsy state edge cases', () => {
       log: makeItemLog(),
       query: '',
       ctx,
-      state: frameworkCast<WorkingMemoryContextState>(false),
+      state: frameworkCast<ScratchpadState>(false),
       budget: 1e3,
     });
 
@@ -659,7 +659,7 @@ describe('Working Memory: prototype pollution', () => {
       log: makeItemLog(),
       response: makeLLMResponse('test'),
       ctx,
-      state: frameworkCast<WorkingMemoryContextState>(store.get(ctx.executionId, layer.id)),
+      state: frameworkCast<ScratchpadState>(store.get(ctx.executionId, layer.id)),
     });
 
     expect(result).toBeDefined();
@@ -701,7 +701,7 @@ describe('Working Memory: prototype pollution', () => {
       log: makeItemLog(),
       response: makeLLMResponse('test'),
       ctx,
-      state: frameworkCast<WorkingMemoryContextState>(store.get(ctx.executionId, layer.id)),
+      state: frameworkCast<ScratchpadState>(store.get(ctx.executionId, layer.id)),
     });
 
     assert(result !== undefined);
@@ -746,7 +746,7 @@ describe('Working Memory: store with string state', () => {
       log: makeItemLog(),
       response: makeLLMResponse('test'),
       ctx,
-      state: frameworkCast<WorkingMemoryContextState>(store.get(ctx.executionId, layer.id)),
+      state: frameworkCast<ScratchpadState>(store.get(ctx.executionId, layer.id)),
     });
 
     // When state is a string, typeof !== 'object', so the else conditional runs:
@@ -808,7 +808,7 @@ describe('Observational Memory: empty buffer at threshold', () => {
       log: makeItemLog(),
       response,
       ctx,
-      state: frameworkCast<ObservationalState>(store.get(ctx.executionId, layer.id)),
+      state: frameworkCast<ObservationsState>(store.get(ctx.executionId, layer.id)),
     });
 
     // The observer should have been called since totalBufferTokens >= 100
@@ -860,14 +860,14 @@ describe('Observational Memory: empty buffer at threshold', () => {
       log: makeItemLog(),
       response,
       ctx,
-      state: frameworkCast<ObservationalState>(store.get(ctx.executionId, layer.id)),
+      state: frameworkCast<ObservationsState>(store.get(ctx.executionId, layer.id)),
     });
 
     // bufferTokens is 0, threshold is 0, so 0 >= 0 triggers compression
     // But newBuffer is empty (no message items) → default observer: "Processed 0 items"
     expect(result).toBeDefined();
     assert(result !== undefined);
-    assert(isObservationalState(result.state));
+    assert(isObservationsState(result.state));
     expect(result.state.observations).toContain('Processed 0 items');
   });
 });
@@ -904,7 +904,7 @@ describe('Observational Memory: onSpawn ignores scope', () => {
     expect(result).not.toBeNull();
     assert(result !== null);
     expect(result.childState).toBeDefined();
-    assert(isObservationalState(result.childState));
+    assert(isObservationsState(result.childState));
     expect(result.childState.observations).toEqual([
       'parent observation',
     ]);
@@ -937,7 +937,7 @@ describe('Durable Task State: onComplete checkpoint depth', () => {
     const result = await layer.hooks.onComplete!({
       log: makeItemLog(),
       ctx,
-      state: frameworkCast<DurableTaskState>(state),
+      state: frameworkCast<TaskState>(state),
       outcome: 'success',
     });
 
@@ -973,7 +973,7 @@ describe('Durable Task State: onComplete checkpoint depth', () => {
       log: makeItemLog(),
       response: makeLLMResponse('test'),
       ctx,
-      state: frameworkCast<DurableTaskState>(store.get(ctx.executionId, layer.id)),
+      state: frameworkCast<TaskState>(store.get(ctx.executionId, layer.id)),
     });
 
     expect(result).toBeDefined();

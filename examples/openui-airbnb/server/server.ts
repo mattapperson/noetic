@@ -5,7 +5,7 @@
  *                              OpenUI Lang back statement-by-statement as SSE
  *   GET  /agent              → snapshot of the current document
  *
- * The turn is 100% the real pipeline: `harness.run` executes `step.llm` with the
+ * The turn is 100% the real pipeline: `harness.run` executes `callModel` with the
  * `openUi(library)` codec and the `openUiSurface()` layer, the model calls the
  * `search_listings`/`quote_price` tools, and the returned value is a materialized
  * `UiDocument`. We then stream that document's statements to the client (paced so

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import type { Step, Tool } from '@noetic-tools/core';
-import { spawn } from '@noetic-tools/core';
+import type { Step, SubHarness, SubHarnessKind, SubHarnessSession, Tool } from '@noetic-tools/core';
+import { callModel, loop, schedule, spawn, step, until, withContext } from '@noetic-tools/core';
 import { z } from 'zod';
 import { discoverFields, enrichWithSourceLocations } from '../../src/optimization/field-discovery';
 import { OptimizeScope } from '../../src/types/eval';
@@ -31,6 +31,32 @@ function makeMockTool(name: string, description: string): Tool {
     input: z.unknown(),
     output: z.unknown(),
     execute: async () => 'result',
+  };
+}
+
+function mockSubHarness(kind: SubHarnessKind): SubHarness {
+  return {
+    specificationVersion: 'harness-v1',
+    harnessId: kind,
+    async doStart(): Promise<SubHarnessSession> {
+      return {
+        sessionId: 's',
+        isResume: false,
+        async doPromptTurn() {
+          return {
+            items: [],
+            text: '',
+          };
+        },
+        async doStop() {
+          return {
+            harnessId: kind,
+            sessionId: 's',
+            state: null,
+          };
+        },
+      };
+    },
   };
 }
 
@@ -158,6 +184,164 @@ describe('discoverFields', () => {
 
     expect(fields).toHaveLength(0);
   });
+});
+
+// Regression: `walkStep`'s switch silently fell through for composite kinds it
+// had no case for, so an agent rooted in one of them discovered ZERO optimizable
+// fields and `optimize()` reported success having optimized nothing. Every
+// composite kind must recurse into its children.
+describe('discoverFields composite recursion', () => {
+  function makeInnerCallModel(id: string): Step {
+    return callModel({
+      id,
+      model: 'test-model',
+      instructions: `Inner prompt for ${id}`,
+    });
+  }
+
+  test('recurses into withContext child', () => {
+    const wrapped = withContext({
+      id: 'provider',
+      child: makeInnerCallModel('ctx-llm'),
+      context: [],
+    });
+
+    const fields = discoverFields(wrapped);
+
+    expect(fields).toHaveLength(1);
+    expect(fields[0].path).toBe('provider.ctx-llm.instructions');
+    expect(fields[0].value).toBe('Inner prompt for ctx-llm');
+    expect(fields[0].fieldKind).toBe(FieldKind.Instructions);
+  });
+
+  test('recurses into every loop body step', () => {
+    const looped = loop({
+      id: 'my-loop',
+      steps: [
+        makeInnerCallModel('loop-llm-a'),
+        makeInnerCallModel('loop-llm-b'),
+      ],
+      until: until.maxSteps(1),
+    });
+
+    const fields = discoverFields(looped);
+
+    expect(fields.map((f) => f.path)).toEqual([
+      'my-loop.loop-llm-a.instructions',
+      'my-loop.loop-llm-b.instructions',
+    ]);
+  });
+
+  test('recurses into schedule body step', () => {
+    const scheduled = schedule({
+      id: 'my-schedule',
+      step: makeInnerCallModel('sched-llm'),
+      interval: 0,
+    });
+
+    const fields = discoverFields(scheduled);
+
+    expect(fields).toHaveLength(1);
+    expect(fields[0].path).toBe('my-schedule.sched-llm.instructions');
+    expect(fields[0].value).toBe('Inner prompt for sched-llm');
+  });
+
+  test('recurses through nested composites down to the leaf callModel', () => {
+    const nested = withContext({
+      id: 'provider',
+      child: loop({
+        id: 'inner-loop',
+        steps: [
+          spawn({
+            id: 'inner-spawn',
+            child: makeInnerCallModel('deep-llm'),
+          }),
+        ],
+        until: until.maxSteps(1),
+      }),
+      context: [],
+    });
+
+    const fields = discoverFields(nested);
+
+    expect(fields).toHaveLength(1);
+    expect(fields[0].path).toBe('provider.inner-loop.inner-spawn.deep-llm.instructions');
+  });
+});
+
+describe('discoverFields sub-harness step kinds', () => {
+  // Sub-harness prompts/instructions are `Lazy<string>` and the mutator passes
+  // these kinds through unchanged, so discovery must contribute no fields —
+  // surfacing them would produce candidates no mutator can apply. The point of
+  // these cases is that they are explicit no-ops, not silent fall-through.
+  const SUB_HARNESS_BUILDERS = [
+    {
+      kind: 'claude-code' as const,
+      build: (): Step =>
+        step.claudeCode({
+          id: 'cc',
+          harness: mockSubHarness('claude-code'),
+          prompt: 'do a thing',
+          instructions: 'Be terse',
+        }),
+    },
+    {
+      kind: 'codex' as const,
+      build: (): Step =>
+        step.codex({
+          id: 'cx',
+          harness: mockSubHarness('codex'),
+          prompt: 'do a thing',
+          instructions: 'Be terse',
+        }),
+    },
+    {
+      kind: 'opencode' as const,
+      build: (): Step =>
+        step.opencode({
+          id: 'oc',
+          harness: mockSubHarness('opencode'),
+          prompt: 'do a thing',
+          instructions: 'Be terse',
+        }),
+    },
+    {
+      kind: 'pi' as const,
+      build: (): Step =>
+        step.pi({
+          id: 'pi',
+          harness: mockSubHarness('pi'),
+          prompt: 'do a thing',
+          instructions: 'Be terse',
+        }),
+    },
+  ];
+
+  for (const { kind, build } of SUB_HARNESS_BUILDERS) {
+    test(`${kind} yields no fields without throwing`, () => {
+      expect(discoverFields(build())).toHaveLength(0);
+    });
+
+    test(`${kind} nested in a composite does not block sibling discovery`, () => {
+      const composite = loop({
+        id: 'mixed-loop',
+        steps: [
+          build(),
+          callModel({
+            id: 'sibling-llm',
+            model: 'test-model',
+            instructions: 'Sibling prompt',
+          }),
+        ],
+        until: until.maxSteps(1),
+      });
+
+      const fields = discoverFields(composite);
+
+      expect(fields).toHaveLength(1);
+      expect(fields[0].path).toBe('mixed-loop.sibling-llm.instructions');
+    });
+  }
 });
 
 describe('enrichWithSourceLocations', () => {

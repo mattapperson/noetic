@@ -71,6 +71,12 @@ export interface TokenUsage {
   input: number;
   output: number;
   total: number;
+  /**
+   * Prompt tokens served from the provider's cache, summed across every model
+   * call on this execution. `undefined` — not `0` — while no call has reported a
+   * cache figure, preserving the `RoundUsage` distinction between "nothing was
+   * cached" and "this provider says nothing about caching".
+   */
   cached?: number;
 }
 

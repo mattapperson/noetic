@@ -397,7 +397,7 @@ describe('hydrateNode — spawn', () => {
 
   test('resolves named layers onto the spawned child', () => {
     const mockLayer: ContextLayer = frameworkCast({
-      id: 'durable-task-state',
+      id: 'task-state',
       slot: 110,
     });
     const node: WorkflowNode = {
@@ -409,13 +409,13 @@ describe('hydrateNode — spawn', () => {
         instructions: 'run',
       },
       layers: [
-        'durable-task-state',
+        'task-state',
       ],
     };
     const ctx = makeHydrationContext();
     ctx.layers = new Map([
       [
-        'durable-task-state',
+        'task-state',
         mockLayer,
       ],
     ]);

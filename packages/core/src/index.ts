@@ -121,22 +121,22 @@ export { execute } from './interpreter/execute';
 /** @public */
 /** @public */
 export type {
-  DurableTaskState,
   FactExtractor,
   FactSearcher,
-  HistoryWindowConfig,
-  ObservationalContextConfig,
-  ObservationalState,
-  PlanContextConfig,
+  HistoryConfig,
+  ObservationsConfig,
+  ObservationsState,
+  PlanConfig,
   PlanEnterSessionCallback,
   PlanExecutionEntry,
   PlanExitCallback,
   PlanState,
-  TemporalContextConfig,
+  ScratchpadConfig,
+  ScratchpadState,
+  TaskState,
+  TemporalConfig,
   TemporalFact,
   TemporalSearchResult,
-  WorkingMemoryContextConfig,
-  WorkingMemoryContextState,
 } from '@noetic-tools/context';
 /** @public */
 /** @public */

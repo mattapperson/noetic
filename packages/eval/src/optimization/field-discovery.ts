@@ -127,6 +127,12 @@ function walkStep(step: Step, prefix: string, fields: OptimizableField[]): void 
         walkStep(s, `${path}.`, fields);
       }
       return;
+    case 'withContext':
+      walkStep(step.child, `${path}.`, fields);
+      return;
+    case 'schedule':
+      walkStep(step.step, `${path}.`, fields);
+      return;
     case 'conditional':
       walkOptimizableChildren(step._optimizable, path, fields);
       return;
@@ -135,6 +141,23 @@ function walkStep(step: Step, prefix: string, fields: OptimizableField[]): void 
       return;
     case 'runCode':
       return;
+    // Sub-harness steps (claude-code, codex, opencode, pi) carry their prompt
+    // and instructions as Lazy<string> — eager forms could in principle be
+    // discovered, but the mutator does not model that surface, so surfacing
+    // fields here would produce candidates no mutator can apply. Contribute
+    // nothing, matching `applyCandidate`'s pass-through for these kinds.
+    case 'claude-code':
+    case 'codex':
+    case 'opencode':
+    case 'pi':
+      return;
+    default: {
+      // A new composite Step kind must add a recursion case above, or GEPA
+      // silently discovers zero fields for agents rooted in it.
+      const _exhaustive: never = step;
+      void _exhaustive;
+      return;
+    }
   }
 }
 

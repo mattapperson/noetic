@@ -16,9 +16,9 @@
 
 import type {
   ContextData,
+  ScratchpadState,
   StorageAdapter,
   TraceExporter,
-  WorkingMemoryContextState,
 } from '@noetic-tools/core';
 import {
   AgentHarness,
@@ -41,7 +41,7 @@ const NotesSchema = z.object({
   notes: z.array(z.string()),
 });
 
-function readNotes(state: WorkingMemoryContextState | undefined): string[] {
+function readNotes(state: ScratchpadState | undefined): string[] {
   const parsed = NotesSchema.safeParse(state);
   return parsed.success
     ? [
@@ -62,9 +62,9 @@ const saveNote = tool({
     count: z.number(),
   }),
   async execute({ text }, toolCtx) {
-    const notes = readNotes(toolCtx.context.get<WorkingMemoryContextState>(SCRATCHPAD_LAYER_ID));
+    const notes = readNotes(toolCtx.context.get<ScratchpadState>(SCRATCHPAD_LAYER_ID));
     notes.push(text);
-    toolCtx.context.set<WorkingMemoryContextState>(SCRATCHPAD_LAYER_ID, {
+    toolCtx.context.set<ScratchpadState>(SCRATCHPAD_LAYER_ID, {
       notes,
     });
     return {
@@ -83,7 +83,7 @@ const listNotes = tool({
   }),
   async execute(_args, toolCtx) {
     return {
-      notes: readNotes(toolCtx.context.get<WorkingMemoryContextState>(SCRATCHPAD_LAYER_ID)),
+      notes: readNotes(toolCtx.context.get<ScratchpadState>(SCRATCHPAD_LAYER_ID)),
     };
   },
 });

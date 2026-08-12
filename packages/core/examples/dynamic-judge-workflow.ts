@@ -16,9 +16,10 @@
  * committed alongside it at `examples/multi-model-judge.workflow.json`.
  */
 
-import type { WorkflowDocument } from '@noetic-tools/core';
+import type { ContextData, WorkflowDocument } from '@noetic-tools/core';
 import {
   AgentHarness,
+  callModel,
   parseAndRunWorkflow,
   validateWorkflow,
   workflowDepth,
@@ -57,20 +58,20 @@ function buildPlannerInstructions(): string {
     '{ "version": 1, "root": <WorkflowNode> }',
     '',
     'The only node kinds you need here, with their EXACT fields:',
-    '- llm:      { "kind": "llm", "id": "<unique>", "model": "<model-id>", "instructions": "<system prompt>" }',
-    '- inParallel:     { "kind": "inParallel", "id": "<unique>", "mode": "settle", "merge": "concat", "paths": [<llm>, ...] }',
-    '- sequence: { "kind": "sequence", "id": "<unique>", "steps": [<node>, ...] }',
+    '- callModel:  { "kind": "callModel", "id": "<unique>", "model": "<model-id>", "instructions": "<system prompt>" }',
+    '- inParallel: { "kind": "inParallel", "id": "<unique>", "mode": "settle", "merge": "concat", "paths": [<callModel>, ...] }',
+    '- sequence:   { "kind": "sequence", "id": "<unique>", "steps": [<node>, ...] }',
     'The prompt field is named "instructions" (a string) — never "prompt".',
     '',
     'Design a "mixture-of-agents" workflow for the user question:',
     '1. The root is a "sequence" with two steps.',
-    '2. The sequence\'s first step is a "inParallel" (mode "settle" so a flaky model',
-    '   cannot abort the panel, merge "concat") with exactly four "llm" paths,',
+    '2. The sequence\'s first step is an "inParallel" (mode "settle" so a flaky model',
+    '   cannot abort the panel, merge "concat") with exactly four "callModel" paths,',
     '   one per model, in this order:',
     PANEL_MODELS.map((m, i) => `   - path ${i + 1}: model "${m}"`).join('\n'),
-    '   Each panel llm answers the question and prefixes its reply with a',
+    '   Each panel callModel answers the question and prefixes its reply with a',
     "   '## Candidate (<model>)' header line so the judge can tell them apart.",
-    `3. The sequence's second step is an "llm" judge with model "${JUDGE_MODEL}"`,
+    `3. The sequence's second step is a "callModel" judge with model "${JUDGE_MODEL}"`,
     '   that receives the concatenated candidate answers and synthesises one',
     '   ideal response, outputting only the final answer.',
     '',
@@ -102,7 +103,7 @@ async function generateWorkflow(
       ? `${base}\n\nYour previous attempt was invalid: ${lastError}\nFix it and try again.`
       : base;
 
-    const planner = callModel({
+    const planner = callModel<ContextData, string, string>({
       id: `planner-${attempt}`,
       model: PLANNER_MODEL,
       instructions,
@@ -142,7 +143,7 @@ async function main(): Promise<void> {
   const harness = new AgentHarness({
     name: 'dynamic-judge-workflow',
     params: {},
-    llm: {
+    callModelDefaults: {
       provider: 'openrouter',
       apiKey,
     },

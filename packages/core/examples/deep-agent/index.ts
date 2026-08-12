@@ -5,7 +5,7 @@
  * Run: OPENROUTER_API_KEY=xxx bun run examples/deep-agent/index.ts
  */
 
-import { observationalContext, staticContent, toolContextLayer } from '@noetic-tools/context';
+import { instructions, observations, toolCalls } from '@noetic-tools/context';
 import type { ContextData, ContextLayer, StepLoop, StepSpawn } from '@noetic-tools/types';
 import { createExampleHarness } from '../create-example-harness';
 import type { SubAgentResolver } from '../delegate-tools';
@@ -47,7 +47,7 @@ export function buildDeepAgent(
   const layers: ContextLayer[] = [
     ...(config.instructionFiles?.length
       ? [
-          staticContent({
+          instructions({
             load: async () => {
               const results = await Promise.allSettled(
                 (config.instructionFiles ?? []).map((p) => Bun.file(p).text()),
@@ -61,13 +61,13 @@ export function buildDeepAgent(
           }),
         ]
       : []),
-    ...toolContextLayer(allTools),
+    ...toolCalls(allTools),
     ...(config.skills?.length
       ? [
           skillsLayer(config.skills),
         ]
       : []),
-    observationalContext({
+    observations({
       bufferThreshold: 4_000,
       observer: async (buffer) => [
         `Summary: processed ${buffer.length} exchanges covering: ${buffer.map((b) => b.slice(0, 50)).join('; ')}`,

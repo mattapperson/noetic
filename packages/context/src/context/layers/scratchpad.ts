@@ -5,9 +5,9 @@ import { z } from 'zod';
 import { findFunctionCall } from '../function-call-utils';
 import { layerData, layerFunction } from '../layer-provides';
 
-export type WorkingMemoryContextState = string | Record<string, unknown>;
+export type ScratchpadState = string | Record<string, unknown>;
 
-export interface WorkingMemoryContextConfig {
+export interface ScratchpadConfig {
   scope?: 'thread' | 'resource';
   schema?: ZodType;
   template?: string;
@@ -58,10 +58,7 @@ function deepMerge(
  * legal under schemas with required fields. Throws on failure so the update
  * is rejected and the prior state stays untouched.
  */
-function applySchema(
-  schema: ZodType | undefined,
-  merged: WorkingMemoryContextState,
-): WorkingMemoryContextState {
+function applySchema(schema: ZodType | undefined, merged: ScratchpadState): ScratchpadState {
   if (!schema) {
     return merged;
   }
@@ -72,10 +69,7 @@ function applySchema(
   return merged;
 }
 
-function safeMerge(
-  state: WorkingMemoryContextState,
-  args: Record<string, unknown>,
-): WorkingMemoryContextState {
+function safeMerge(state: ScratchpadState, args: Record<string, unknown>): ScratchpadState {
   if (typeof state === 'object' && state !== null) {
     return deepMerge(state, args);
   }
@@ -99,7 +93,7 @@ function safeMerge(
  * @param config - Optional configuration for scope, Zod schema, template, and read-only mode.
  * @returns A `ContextLayer` providing scratchpad state the model can read and write.
  */
-export function scratchpad(config?: WorkingMemoryContextConfig) {
+export function scratchpad(config?: ScratchpadConfig) {
   const scope: ContextScope = config?.scope ?? 'thread';
 
   return {
@@ -112,10 +106,10 @@ export function scratchpad(config?: WorkingMemoryContextConfig) {
       max: 1_500,
     },
     provides: {
-      snapshot: layerData<WorkingMemoryContextState, WorkingMemoryContextState>({
+      snapshot: layerData<ScratchpadState, ScratchpadState>({
         read: (state) => state,
       }),
-      update: layerFunction<Record<string, unknown>, void, WorkingMemoryContextState>({
+      update: layerFunction<Record<string, unknown>, void, ScratchpadState>({
         description: 'Update the agent working context with new key-value pairs.',
         input: z.record(z.string(), z.unknown()),
         output: z.void(),
@@ -129,7 +123,7 @@ export function scratchpad(config?: WorkingMemoryContextConfig) {
     },
     hooks: {
       async init({ storage }) {
-        const saved = await storage.get<WorkingMemoryContextState>('state');
+        const saved = await storage.get<ScratchpadState>('state');
         // Corrupt persisted state (fails the configured schema) falls back to
         // the default rather than aborting the execution.
         if (saved !== null && config?.schema && !config.schema.safeParse(saved).success) {
@@ -137,7 +131,7 @@ export function scratchpad(config?: WorkingMemoryContextConfig) {
             state: {},
           };
         }
-        const state: WorkingMemoryContextState = saved ?? (config?.schema ? {} : '');
+        const state: ScratchpadState = saved ?? (config?.schema ? {} : '');
         return {
           state,
         };
@@ -182,5 +176,5 @@ export function scratchpad(config?: WorkingMemoryContextConfig) {
         return null;
       },
     },
-  } satisfies ContextLayer<WorkingMemoryContextState>;
+  } satisfies ContextLayer<ScratchpadState>;
 }

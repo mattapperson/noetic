@@ -37,7 +37,7 @@ const ANCHOR_SCAN_LIMIT = 4;
 //#region Types
 
 /** @public Configuration for the {@link history} layer. */
-export interface HistoryWindowConfig {
+export interface HistoryConfig {
   /** Cap on the number of trailing items projected to the LLM. Defaults to 40. */
   maxItems?: number;
 }
@@ -49,7 +49,7 @@ export interface HistoryWindowConfig {
 function validateMaxItems(value: number): void {
   if (!Number.isInteger(value) || value < MIN_MAX_ITEMS || value > MAX_MAX_ITEMS) {
     throw new NoeticConfigError({
-      code: 'INVALID_HISTORY_WINDOW_MAX_ITEMS',
+      code: 'INVALID_HISTORY_MAX_ITEMS',
       message: `history: maxItems must be an integer in [${MIN_MAX_ITEMS}, ${MAX_MAX_ITEMS}], got ${value}`,
       hint: 'Pass a sensible cap such as { maxItems: 40 }, or omit the layer to keep history uncapped.',
     });
@@ -123,7 +123,7 @@ function findHeadAnchor(items: ReadonlyArray<Item>, windowStart: number): Item |
  * @param config - Optional `{ maxItems }`. Defaults to 40.
  * @returns A `ContextLayer` that contributes only a `projectHistory` hook.
  */
-export function history(config?: HistoryWindowConfig): ContextLayer<null> {
+export function history(config?: HistoryConfig): ContextLayer<null> {
   const maxItems = config?.maxItems ?? DEFAULT_MAX_ITEMS;
   validateMaxItems(maxItems);
 

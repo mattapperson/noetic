@@ -34,17 +34,17 @@ export interface WorkflowOpts {
   document?: WorkflowDocument;
   /** Named workflow resolved from `workflows`. Mutually exclusive with `document`. */
   ref?: string;
-  /** Client tools the document's `llm`/`tool` nodes may reference by name. Default: none. */
+  /** Client tools the document's `callModel`/`invokeTool` nodes may reference by name. Default: none. */
   tools?: Tool[];
-  /** Named context layers for `provide`/`spawn` nodes. */
+  /** Named context layers for `withContext`/`spawn` nodes. */
   layers?: ReadonlyMap<string, ContextLayer>;
   /** Named sub-workflows for `subflow` nodes — and for resolving `ref` itself. */
   workflows?: ReadonlyMap<string, WorkflowDocument>;
   /** SubHarness adapters for `claude-code`/`codex`/`opencode`/`pi` nodes. */
   subHarnesses?: ReadonlyMap<SubHarnessKind, SubHarness>;
-  /** Output codecs for `llm` nodes' `output` codec references. */
+  /** Output codecs for `callModel` nodes' `output` codec references. */
   uiLibraries?: ReadonlyMap<string, OutputCodec>;
-  /** Resolver for named subprocess adapters on `run` nodes. */
+  /** Resolver for named subprocess adapters on `runCode` nodes. */
   resolveSubprocess?: (ref: string) => SubprocessAdapter | undefined;
   /** `'inherit'` (default) runs in the caller's session; `'spawn'` isolates via `spawn()`. */
   isolation?: 'inherit' | 'spawn';

@@ -15,6 +15,7 @@
         "@noetic-tools/sub-harness": "workspace:*",
         "@noetic-tools/sub-harness-claude-code": "workspace:*",
         "@noetic-tools/sub-harness-codex": "workspace:*",
+        "bun-types": "latest",
         "zod": "^4.0.0",
       },
     },

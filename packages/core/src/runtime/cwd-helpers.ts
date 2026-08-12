@@ -43,7 +43,7 @@ export function setToolCwd(
 
 /**
  * @public Snapshot a parent's cwd state for a child Context. Spawned/forked
- * children must not share the parent's `CwdState` reference — POSIX-inParallel
+ * children must not share the parent's `CwdState` reference — POSIX-fork
  * semantics require child mutations stay local to the child.
  */
 export function snapshotCwdState(parent: Context): CwdState {

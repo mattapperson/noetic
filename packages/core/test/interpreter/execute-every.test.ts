@@ -158,7 +158,7 @@ describe('executeSchedule', () => {
     }
 
     expect(count).toBe(2);
-    const errorEvents = events.filter((ev) => ev.name === 'every.iteration.error');
+    const errorEvents = events.filter((ev) => ev.name === 'schedule.iteration.error');
     expect(errorEvents).toHaveLength(1);
     const ev = errorEvents[0];
     assert(ev.attributes !== undefined);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import type { DurableTaskState } from '@noetic-tools/context';
+import type { TaskState } from '@noetic-tools/context';
 import { taskState } from '@noetic-tools/context';
 import { makeCtx, makeItemLog, makeScopedStorage } from '../_helpers';
 
@@ -70,7 +70,7 @@ describe('taskState', () => {
 
   it('store hook accumulates checkpoints', async () => {
     const layer = taskState();
-    const state: DurableTaskState = {
+    const state: TaskState = {
       checkpoints: [],
       files: [],
       data: {},
@@ -110,14 +110,14 @@ describe('taskState', () => {
 
   it('onReturn with conflicting keys: child overwrites parent', async () => {
     const layer = taskState();
-    const parentState: DurableTaskState = {
+    const parentState: TaskState = {
       checkpoints: [],
       files: [],
       data: {
         key: 'parent-value',
       },
     };
-    const childState: DurableTaskState = {
+    const childState: TaskState = {
       checkpoints: [],
       files: [],
       data: {
@@ -140,7 +140,7 @@ describe('taskState', () => {
 
   it('onReturn merges child artifacts back', async () => {
     const layer = taskState();
-    const parentState: DurableTaskState = {
+    const parentState: TaskState = {
       checkpoints: [
         {
           timestamp: 1,
@@ -154,7 +154,7 @@ describe('taskState', () => {
         x: 1,
       },
     };
-    const childState: DurableTaskState = {
+    const childState: TaskState = {
       checkpoints: [
         {
           timestamp: 2,
@@ -189,7 +189,7 @@ describe('taskState', () => {
 
   it('onComplete returns state with outcome and checkpoint', async () => {
     const layer = taskState();
-    const state: DurableTaskState = {
+    const state: TaskState = {
       checkpoints: [],
       files: [],
       data: {},
@@ -208,7 +208,7 @@ describe('taskState', () => {
 
   it('onComplete returns state with failure outcome', async () => {
     const layer = taskState();
-    const state: DurableTaskState = {
+    const state: TaskState = {
       checkpoints: [
         {
           timestamp: 1,
@@ -248,7 +248,7 @@ describe('taskState', () => {
   });
 
   describe('write API (provides)', () => {
-    function emptyState(): DurableTaskState {
+    function emptyState(): TaskState {
       return {
         checkpoints: [],
         files: [],
@@ -380,7 +380,7 @@ describe('taskState', () => {
   });
 
   describe("mergeData: 'namespace' (fan-out)", () => {
-    function stateWithData(data: Record<string, unknown>): DurableTaskState {
+    function stateWithData(data: Record<string, unknown>): TaskState {
       return {
         checkpoints: [],
         files: [],
@@ -501,7 +501,7 @@ describe('taskState', () => {
   });
 
   describe('checkpoint cap + budget-aware recall (M5)', () => {
-    function makeCheckpoints(count: number, startTs = 0): DurableTaskState['checkpoints'] {
+    function makeCheckpoints(count: number, startTs = 0): TaskState['checkpoints'] {
       return Array.from(
         {
           length: count,
@@ -513,7 +513,7 @@ describe('taskState', () => {
       );
     }
 
-    async function storeOnce(state: DurableTaskState): Promise<DurableTaskState> {
+    async function storeOnce(state: TaskState): Promise<TaskState> {
       const layer = taskState();
       const result = await layer.hooks.store!({
         newItems: [],
@@ -533,7 +533,7 @@ describe('taskState', () => {
     }
 
     it('60 stores cap at 50 checkpoints, newest survive', async () => {
-      let state: DurableTaskState = {
+      let state: TaskState = {
         checkpoints: [],
         files: [],
         data: {},
@@ -593,7 +593,7 @@ describe('taskState', () => {
       expect(result.state.checkpoints).toHaveLength(50);
     });
 
-    async function recallText(state: DurableTaskState, budget: number): Promise<string> {
+    async function recallText(state: TaskState, budget: number): Promise<string> {
       const layer = taskState();
       const recalled = await layer.hooks.recall!({
         log: makeItemLog(),
@@ -612,7 +612,7 @@ describe('taskState', () => {
     }
 
     it('recall respects the budget by halving oldest checkpoints (N / N+1 boundary)', async () => {
-      const state: DurableTaskState = {
+      const state: TaskState = {
         checkpoints: makeCheckpoints(50),
         files: [
           'a.ts',
@@ -639,7 +639,7 @@ describe('taskState', () => {
     });
 
     it('recall char-slices with closing tag when even zero checkpoints overflow', async () => {
-      const state: DurableTaskState = {
+      const state: TaskState = {
         checkpoints: [],
         files: Array.from(
           {
@@ -655,7 +655,7 @@ describe('taskState', () => {
     });
 
     it('budget 0 returns the full render untrimmed (fail-open, pinned)', async () => {
-      const state: DurableTaskState = {
+      const state: TaskState = {
         checkpoints: makeCheckpoints(50),
         files: [],
         data: {},

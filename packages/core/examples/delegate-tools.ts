@@ -21,7 +21,7 @@ import { react } from './react-agent';
 
 //#region Types
 
-interface SubAgentConfig {
+export interface SubAgentConfig {
   id: string;
   model: string;
   instructions: string;

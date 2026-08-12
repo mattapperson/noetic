@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import type { ObservationalState } from '@noetic-tools/context';
+import type { ObservationsState } from '@noetic-tools/context';
 import { observations } from '@noetic-tools/context';
 import type { MessageItem } from '@noetic-tools/types';
 import { makeCtx, makeItemLog, makeScopedStorage } from '../_helpers';
@@ -59,7 +59,7 @@ describe('observations', () => {
     const layer = observations({
       bufferThreshold: 5,
     });
-    const state: ObservationalState = {
+    const state: ObservationsState = {
       observations: [],
       buffer: [],
       bufferTokens: 0,

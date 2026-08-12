@@ -219,7 +219,7 @@ describe('history', () => {
         expect.unreachable('should have thrown');
       } catch (e) {
         assert(isNoeticConfigError(e));
-        expect(e.code).toBe('INVALID_HISTORY_WINDOW_MAX_ITEMS');
+        expect(e.code).toBe('INVALID_HISTORY_MAX_ITEMS');
       }
     });
 
@@ -237,7 +237,7 @@ describe('history', () => {
           expect.unreachable(`should have thrown for ${bad}`);
         } catch (e) {
           assert(isNoeticConfigError(e));
-          expect(e.code).toBe('INVALID_HISTORY_WINDOW_MAX_ITEMS');
+          expect(e.code).toBe('INVALID_HISTORY_MAX_ITEMS');
         }
       }
     });

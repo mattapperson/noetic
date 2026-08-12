@@ -22,8 +22,12 @@ import {
   renderPlanning,
   renderTerminal,
 } from './plan-prompts';
+import type { PlanExecutionEntry, PlanState } from './plan-state';
+import { PlanPhase } from './plan-state';
 
 export { PlanStyle } from './plan-prompts';
+export type { PlanExecutionEntry, PlanState } from './plan-state';
+export { PlanPhase } from './plan-state';
 
 //#region Constants
 
@@ -63,35 +67,6 @@ const ALLOWED_TOOLS_IN_PLAN_MODE = new Set([
 
 //#region Types
 
-export const PlanPhase = {
-  Idle: 'idle',
-  Planning: 'planning',
-  Executing: 'executing',
-  Completed: 'completed',
-  Failed: 'failed',
-} as const;
-
-export type PlanPhase = (typeof PlanPhase)[keyof typeof PlanPhase];
-
-export interface PlanExecutionEntry {
-  timestamp: number;
-  version: number;
-  outcome: 'success' | 'failure' | 'aborted';
-}
-
-export interface PlanState {
-  phase: PlanPhase;
-  prd: string | null;
-  /** The reviewed plan: a complete JSON workflow document. */
-  planTree: WorkflowDocument | null;
-  /** Named workflows referenced from the tree via `{ kind: 'subflow', ref }` nodes. */
-  workflows: Record<string, WorkflowDocument>;
-  executionLog: PlanExecutionEntry[];
-  version: number;
-  /** Identifier of the on-disk plan session (set by `onEnterSession` host callback). */
-  planSlug?: string | null;
-}
-
 /** Host-supplied callback invoked when entering plan mode. Returns a session identifier the host owns (e.g. on-disk dir slug). */
 export type PlanEnterSessionCallback = () => Promise<{
   slug: string;
@@ -105,7 +80,7 @@ export type PlanExitCallback = (state: PlanState) => Promise<{
   approved: boolean;
 }>;
 
-export interface PlanContextConfig {
+export interface PlanConfig {
   scope?: ContextScope;
   additionalAllowedTools?: string[];
   maxPrdLength?: number;
@@ -340,7 +315,7 @@ function findWorkflowCycle(workflows: Record<string, WorkflowDocument>): string[
   return null;
 }
 
-function buildAllowedTools(config?: PlanContextConfig): Set<string> {
+function buildAllowedTools(config?: PlanConfig): Set<string> {
   if (!config?.additionalAllowedTools?.length) {
     return ALLOWED_TOOLS_IN_PLAN_MODE;
   }
@@ -407,7 +382,7 @@ interface PlanLayerOptions {
   onExit?: PlanExitCallback;
 }
 
-function resolvePlanOptions(config?: PlanContextConfig): PlanLayerOptions {
+function resolvePlanOptions(config?: PlanConfig): PlanLayerOptions {
   return {
     maxPrdLength: config?.maxPrdLength ?? MAX_PRD_LENGTH,
     maxWorkflows: config?.maxWorkflows ?? MAX_WORKFLOWS,
@@ -871,7 +846,7 @@ function buildPlanHooks(options: PlanLayerOptions): ContextLayer<PlanState>['hoo
  * @param config - Optional configuration for scope, allowed tools, and limits.
  * @returns A `ContextLayer` providing plan mode, PRD storage, and execution tracking.
  */
-export function plan(config?: PlanContextConfig): ContextLayer<PlanState> {
+export function plan(config?: PlanConfig): ContextLayer<PlanState> {
   const scope: ContextScope = config?.scope ?? 'thread';
   const options = resolvePlanOptions(config);
 

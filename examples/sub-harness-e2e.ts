@@ -10,7 +10,7 @@
  * Run: bun examples/sub-harness-e2e.ts
  */
 
-import type { ExecuteStepFn } from '@noetic-tools/core';
+import type { ContextData, ExecuteStepFn } from '@noetic-tools/core';
 import {
   AgentHarness,
   createMessage,
@@ -18,6 +18,7 @@ import {
   step,
   validateWorkflow,
 } from '@noetic-tools/core';
+import { frameworkCast } from '@noetic-tools/core/unstable';
 import type { SubHarnessRunner } from '@noetic-tools/sub-harness';
 import { createSubHarnessRegistry } from '@noetic-tools/sub-harness';
 import { claudeCode } from '@noetic-tools/sub-harness-claude-code';
@@ -113,7 +114,10 @@ async function main(): Promise<void> {
       runner: echoRunner('TODO: ship it'),
     }),
   );
-  const executeStep: ExecuteStepFn = (s, i, c) => harness.run(s, i, c);
+  // ExecuteStepFn is generic over the caller's TContext while harness.run pins
+  // ContextData — bridged with frameworkCast, mirroring the internal idiom in
+  // dynamic-workflow.ts and workflow-step.ts.
+  const executeStep: ExecuteStepFn = frameworkCast(harness.run.bind(harness));
   const hydrated = hydrateWorkflow(validated, {
     tools: new Map(),
     executeStep,
@@ -150,7 +154,7 @@ async function main(): Promise<void> {
   const streamHarness = new AgentHarness({
     name: 'stream-demo',
     params: {},
-    initialStep: step.claudeCode({
+    agentGraph: step.claudeCode({
       id: 'stream',
       harness: claudeCode({
         runner: echoRunner('streamed agent output'),
@@ -209,7 +213,7 @@ async function main(): Promise<void> {
       finishReason: 'stop',
     };
   };
-  const ctxStep = step.claudeCode({
+  const ctxStep = step.claudeCode<ContextData, unknown, string>({
     id: 'ctx',
     harness: claudeCode({
       runner: contextRunner,

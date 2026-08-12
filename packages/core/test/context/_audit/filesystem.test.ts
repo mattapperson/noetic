@@ -12,7 +12,7 @@ import type { ContextLayer, Item, RecallParams } from '@noetic-tools/types';
 import { estimateTokens } from '@noetic-tools/types';
 import { makeCtx, makeItemLog, makeMessage, makeStorage } from '../../_helpers';
 
-//#region Local helpers (mirrors file-reference.test.ts)
+//#region Local helpers (mirrors filesystem.test.ts)
 
 function callRecall(
   layer: ContextLayer,

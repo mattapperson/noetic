@@ -1,5 +1,5 @@
 /**
- * Control-flow step handlers: conditional, inParallel, loop, every.
+ * Control-flow step handlers: conditional, inParallel, loop, schedule.
  */
 
 import type { ContextData } from '@noetic-tools/context';
@@ -39,7 +39,7 @@ export async function executeConditional<TContext, I, O>(
 ): Promise<O> {
   const selected = await step.route(input, ctx);
   if (selected === null) {
-    // Requires I assignable to O for null route — when no conditional is selected,
+    // Requires I assignable to O for null route — when no route is selected,
     // the input passes through. Callers must ensure I is compatible with O.
     return frameworkCast<O>(input);
   }
@@ -79,7 +79,7 @@ function createChildContexts(ctx: Context, count: number, stepId: string): Conte
         channelStore,
         cwdState: snapshotCwdState(ctx),
         // Layers and the harness tool pool cross the inParallel boundary: without
-        // them an `llm` step inside a path would run with no context
+        // them a `callModel` step inside a path would run with no context
         // projection and no layer tools, and a nested `spawn` would have no
         // parent layers to inherit. Per-path layer STATE is still isolated —
         // see `createForkLayerBridge`.
@@ -96,7 +96,7 @@ function createChildContexts(ctx: Context, count: number, stepId: string): Conte
  * seeds its layer state from the parent's, and `onReturn` merges the path's
  * contribution back when it succeeds. Without this, layer state written
  * inside a path is keyed to the path's own execution id and is dropped when
- * the path ends — so `durable-task-state` artifacts recorded by fan-out
+ * the path ends — so `task-state` artifacts recorded by fan-out
  * workers never reached the coordinator.
  *
  * Differences from `executeSpawn`, both deliberate:
@@ -864,7 +864,7 @@ function park<TContext>(parkCtx: ParkContext<TContext>): Promise<void> {
 function recordIterationError<TContext>(ctx: Context<TContext>, error: unknown): void {
   const message = error instanceof Error ? error.message : String(error);
   const stack = error instanceof Error && error.stack ? error.stack : '';
-  ctx.span.addEvent('every.iteration.error', {
+  ctx.span.addEvent('schedule.iteration.error', {
     message,
     stack,
   });
@@ -878,15 +878,15 @@ function throwCancelled(reason: string | undefined): never {
 }
 
 /**
- * Executes an `every` step: runs the body step forever, paced by `ms ± jitter`,
+ * Executes a `schedule` step: runs the body step forever, paced by `ms ± jitter`,
  * woken early by `inbox`. Throws `cancelled` when the context is aborted.
  *
  * On body throw, behavior depends on `onError`:
- * - `'continue'` (default): emit `every.iteration.error` span event and proceed
+ * - `'continue'` (default): emit `schedule.iteration.error` span event and proceed
  *   to the park step as if no error occurred.
  * - `'fail'`: re-throw, terminating the operator.
  *
- * The body's output is discarded — `every` runs forever and does not accumulate
+ * The body's output is discarded — `schedule` runs forever and does not accumulate
  * iteration outputs. Only ever returns by throwing on cancellation or `fail`.
  */
 export async function executeSchedule<TContext, I, O>(

@@ -1,5 +1,5 @@
 /**
- * ADVERSARIAL AUDIT — context layers history-window / working-memory / static-content.
+ * ADVERSARIAL AUDIT — context layers history / scratchpad / instructions.
  *
  * Each test asserts the CORRECT (intended) behavior so that, where the
  * implementation is buggy, the test FAILS now. Confirmed failures are reported
@@ -45,9 +45,9 @@ async function project(layer: ReturnType<typeof history>, items: Item[]): Promis
   ];
 }
 
-//#region history-window probes
+//#region history probes
 
-describe('AUDIT history-window', () => {
+describe('AUDIT history', () => {
   it('PROBE: cap bounds projected size even when recent turns are tool-only (no assistant text)', async () => {
     // Realistic tool-heavy agent: the assistant emits function_call items with
     // NO accompanying assistant `message` item. The only assistant TEXT message
@@ -141,7 +141,7 @@ describe('AUDIT history-window', () => {
 
 //#endregion
 
-//#region working-memory probes
+//#region scratchpad probes
 
 function wmStore(layer: ReturnType<typeof scratchpad>, newItems: Item[], state: unknown) {
   if (!layer.hooks.store) {
@@ -156,7 +156,7 @@ function wmStore(layer: ReturnType<typeof scratchpad>, newItems: Item[], state: 
   });
 }
 
-describe('AUDIT working-memory', () => {
+describe('AUDIT scratchpad', () => {
   it('PROBE: store deep-merges nested objects (spec: "Deep-merges structured state")', async () => {
     const layer = scratchpad({
       schema: z.object({}),
@@ -274,7 +274,7 @@ describe('AUDIT working-memory', () => {
 
 //#endregion
 
-//#region static-content probes
+//#region instructions probes
 
 function asLayers(layer: ContextLayer<string>): ContextLayer[] {
   return frameworkCast<ContextLayer[]>([
@@ -282,7 +282,7 @@ function asLayers(layer: ContextLayer<string>): ContextLayer[] {
   ]);
 }
 
-describe('AUDIT static-content', () => {
+describe('AUDIT instructions', () => {
   it('PROBE: recall respects the token budget (spec checklist #5)', async () => {
     const big = 'x'.repeat(8000); // ~2000 tokens at 4 chars/token
     const layer = instructions({

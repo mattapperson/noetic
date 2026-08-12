@@ -54,14 +54,14 @@ export interface HydrationContext {
   /** SubHarness adapters keyed by harness id, resolving `claude-code`/`codex`/… nodes. */
   subHarnesses?: ReadonlyMap<SubHarnessKind, SubHarness>;
   /**
-   * Output codecs keyed by the `library` ref an `llm` node's `output` codec
+   * Output codecs keyed by the `library` ref a `callModel` node's `output` codec
    * reference names — the live codec built from a component library, e.g.
    * `new Map([['dashboard-lib', openUi(dashboardLibrary)]])` from
    * `@noetic-tools/openui`. Resolved the same way sub-harness adapters are.
    */
   uiLibraries?: ReadonlyMap<string, OutputCodec>;
   /**
-   * Resolves a named subprocess adapter ref declared on a `run` node's
+   * Resolves a named subprocess adapter ref declared on a `runCode` node's
    * `subprocess` field. When a node omits the ref, the step falls back to
    * `ctx.subprocess` at execution time.
    */
@@ -185,7 +185,7 @@ function hydrateCallModelNode(
 }
 
 /**
- * Resolve an `llm` node's `output` codec reference to a live `OutputCodec`.
+ * Resolve a `callModel` node's `output` codec reference to a live `OutputCodec`.
  *
  * Hydrated steps are typed `<string, string>` (the JSON boundary erases output
  * types), so the resolved codec is cast to the step's erased output type — the
@@ -410,7 +410,7 @@ function hydrateInParallelNode(
 }
 
 /**
- * Resolves layer names declared on a `provide` / `spawn` node against the
+ * Resolves layer names declared on a `withContext` / `spawn` node against the
  * registry on `HydrationContext.layers`. Returns `[]` when no registry was
  * supplied — the host runs with its harness-default layers in that case.
  */
@@ -842,7 +842,7 @@ function suffixNodeIds(node: WorkflowNode, suffix: string): WorkflowNode {
 //#region Run Node Helpers
 
 /**
- * Resolves the subprocess adapter for a `run` node. When the node names an
+ * Resolves the subprocess adapter for a `runCode` node. When the node names an
  * adapter ref, the host must supply a `resolveSubprocess` resolver; otherwise
  * the step falls back to the harness adapter on the execution context.
  */
@@ -868,7 +868,7 @@ function resolveSubprocessAdapter(opts: {
 }
 
 /**
- * Dispatches a `run` node's code string through a subprocess adapter: ships the
+ * Dispatches a `runCode` node's code string through a subprocess adapter: ships the
  * code plus the JSON-stringified input as a process request (input on stdin),
  * waits for the handle to settle, and returns the captured stdout as the step
  * output. A non-zero exit / failed handle surfaces as a thrown error.

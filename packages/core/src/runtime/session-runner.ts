@@ -119,7 +119,10 @@ export class SessionRunner {
    *  including turns that failed or were aborted after partial model work. */
   private totalInputTokens = 0;
   private totalOutputTokens = 0;
-  private totalCachedTokens = 0;
+  /** `undefined` until some turn reports a cache figure, so a provider that
+   *  explicitly reported 0 cached tokens stays distinguishable from a provider
+   *  that reports nothing about caching at all (see `SessionUsage`). */
+  private totalCachedTokens: number | undefined;
   private totalCost = 0;
   private currentController?: AbortController;
   private currentCtx?: Context;
@@ -151,7 +154,7 @@ export class SessionRunner {
     return {
       inputTokens: this.totalInputTokens,
       outputTokens: this.totalOutputTokens,
-      cachedTokens: this.totalCachedTokens > 0 ? this.totalCachedTokens : undefined,
+      cachedTokens: this.totalCachedTokens,
       cost: this.totalCost > 0 ? this.totalCost : undefined,
     };
   }
@@ -311,7 +314,11 @@ export class SessionRunner {
       // aborted turn still consumed whatever the model billed before the cut.
       this.totalInputTokens += ctx.tokens.input;
       this.totalOutputTokens += ctx.tokens.output;
-      this.totalCachedTokens += ctx.tokens.cached ?? 0;
+      // Only ever leave `undefined` behind when NO turn reported a figure —
+      // a turn that reported 0 must surface as 0, not "unreported".
+      if (ctx.tokens.cached !== undefined) {
+        this.totalCachedTokens = (this.totalCachedTokens ?? 0) + ctx.tokens.cached;
+      }
       this.totalCost += ctx.cost;
       this.currentCtx = undefined;
       this.currentController = undefined;
@@ -346,7 +353,11 @@ function buildResponse(text: string, ctx: Context): HarnessResponse {
     usage: {
       inputTokens: ctx.tokens.input,
       outputTokens: ctx.tokens.output,
-      cachedTokens: ctx.tokens.cached && ctx.tokens.cached > 0 ? ctx.tokens.cached : undefined,
+      // Passed through verbatim: `ctx.tokens.cached` is already
+      // undefined-unless-reported, so collapsing a reported 0 to `undefined`
+      // here would re-erase the distinction between "nothing was cached" and
+      // "this provider says nothing about caching". Matches `SessionUsage`.
+      cachedTokens: ctx.tokens.cached,
     },
     cost: ctx.cost > 0 ? ctx.cost : undefined,
     text,

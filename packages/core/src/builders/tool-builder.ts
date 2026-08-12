@@ -30,7 +30,7 @@ interface ToolConfig<I extends ZodTypeAny, O extends ZodTypeAny> {
   }) => Item | ToolResultExtensionItem;
   execute: (args: z.infer<I>, toolCtx: ToolExecutionContext) => Promise<z.infer<O>>;
   needsApproval?: boolean;
-  /** Optional context declaration — the runtime generates a ContextLayer from this via toolContextLayer(). */
+  /** Optional context declaration — the runtime generates a ContextLayer from this via toolCalls(). */
   context?: ToolContextDeclaration;
   /** Optional UI declaration — the runtime emits the rendered fragments at call/progress/result points. */
   ui?: ToolUiDeclaration<I, O>;
@@ -56,7 +56,7 @@ interface GeneratorToolConfig<I extends ZodTypeAny, E extends ZodTypeAny, O exte
     toolCtx: ToolExecutionContext,
   ) => AsyncGenerator<z.infer<E>, z.infer<O>>;
   needsApproval?: boolean;
-  /** Optional context declaration — the runtime generates a ContextLayer from this via toolContextLayer(). */
+  /** Optional context declaration — the runtime generates a ContextLayer from this via toolCalls(). */
   context?: ToolContextDeclaration;
   /** Optional UI declaration — the runtime emits the rendered fragments at call/progress/result points. */
   ui?: ToolUiDeclaration<I, O, z.infer<E>>;

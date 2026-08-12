@@ -10,7 +10,7 @@ export function createExampleHarness(): AgentHarness {
   return new AgentHarness({
     name: 'test',
     params: {},
-    llm: {
+    callModelDefaults: {
       provider: 'openrouter',
     },
   });

@@ -174,7 +174,7 @@ interface AgentHarnessOpts<TParams extends Record<string, unknown> = Record<stri
    * Harness-wide tool pool. Merged (identity-deduplicated) with tools
    * collected from `agentGraph` to form every context's `unifiedTools`.
    * Use this when the workflow step tree is static and tools are supplied
-   * per harness instance rather than baked into individual `step.llm` calls.
+   * per harness instance rather than baked into individual `step.callModel` calls.
    */
   tools?: Tool[];
   params: TParams;

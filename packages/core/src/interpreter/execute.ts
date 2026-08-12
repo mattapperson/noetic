@@ -79,7 +79,7 @@ function buildSpawnOpts<TContext>(ctx: Context<TContext>): {
 }
 
 /**
- * Resolve the per-step framework-event emit option. Both `llm` and the harness
+ * Resolve the per-step framework-event emit option. Both `callModel` and the harness
  * step kinds carry an `emit` field; every other kind defaults to enabled.
  */
 function resolveStepEmit<TContext, I, O>(
@@ -172,8 +172,9 @@ export async function executeNoAdapter<TContext, I, O>(
     case 'spawn':
       return executeSpawn(step, input, ctx, (s, i, c) => execute(s, i, c), buildSpawnOpts(ctx));
     default:
-      // Kinds that don't currently route through the adapter (llm, tool,
-      // conditional, inParallel, provide, loop, every). Delegate back to `execute()`
+      // Kinds that don't currently route through the adapter (callModel,
+      // invokeTool, conditional, inParallel, withContext, loop, schedule).
+      // Delegate back to `execute()`
       // so they exercise the normal dispatch table, framework-event emits,
       // abort checks, and depth guard.
       return execute(step, input, ctx);
@@ -183,7 +184,7 @@ export async function executeNoAdapter<TContext, I, O>(
 /**
  * Resume path: when a previous run recorded this exact step at `ledgerPath`,
  * replay its output instead of re-running. Held as a helper (rather than inline
- * in `execute`) so the resume conditional stays flat: it pops the frontier itself —
+ * in `execute`) so the resume branch stays flat: it pops the frontier itself —
  * the caller returns before the normal `leaveStep` runs — and emits
  * `step_replayed`. Returns `{ hit: false }` when there is nothing to replay so
  * the caller dispatches the step normally.

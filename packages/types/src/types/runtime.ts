@@ -172,7 +172,12 @@ export interface SessionUsage {
   readonly outputTokens: number;
   /** Undefined when no turn reported a cache figure, so callers can tell "provider says nothing about caching" from "nothing was cached". */
   readonly cachedTokens?: number;
-  /** Undefined when no cost was reported. */
+  /**
+   * Undefined when the accumulated cost is zero. Unlike `cachedTokens` this
+   * cannot distinguish "no provider reported a cost" from "the work was free" —
+   * per-turn cost is a plain number that starts at 0, so there is no
+   * "unreported" signal to preserve.
+   */
   readonly cost?: number;
 }
 

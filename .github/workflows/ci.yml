@@ -53,6 +53,9 @@ jobs:
       - name: Typecheck inspector
         run: bun run --cwd packages/inspector typecheck
 
+      - name: Typecheck root examples
+        run: bun run typecheck:examples
+
       - name: Check export tags
         run: bun run check:exports
 

@@ -5,6 +5,8 @@
  * mapped onto Noetic's type system.
  */
 
+import type { SubAgentConfig, SubAgentResolver } from '../delegate-tools';
+
 //#region Todo Types
 
 const TodoStatus = {
@@ -58,7 +60,13 @@ interface DeepAgentConfig {
 
 //#endregion
 
-export type { SubAgentConfig, SubAgentResolver } from '../delegate-tools';
-
-export type { DeepAgentConfig, SkillDefinition, SkillsLayerState, TodoItem, TodoState };
+export type {
+  DeepAgentConfig,
+  SkillDefinition,
+  SkillsLayerState,
+  SubAgentConfig,
+  SubAgentResolver,
+  TodoItem,
+  TodoState,
+};
 export { TodoStatus };

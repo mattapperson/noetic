@@ -4,7 +4,7 @@
  * The frontier records which steps were IN FLIGHT at snapshot time; it says nothing
  * about which ones finished, and a finished step leaves no trace once `leaveStep` pops
  * it. Resume therefore needs a separate record — and it must carry each step's OUTPUT,
- * not merely a "done" flag: steps consume the previous step's value, and an `llm` step
+ * not merely a "done" flag: steps consume the previous step's value, and a `callModel` step
  * re-run to catch up produces a different one than the rest of the run already saw.
  *
  * Entries are stored one key per step so appends are O(1). Folding the whole ledger
@@ -311,7 +311,7 @@ export class StepLedger {
    * The recorded output for `path`, when a previous run completed the same step there.
    * A divergence (different step id or kind at this path) discards the entry and every
    * entry recorded beneath it, then returns undefined so the step runs fresh — the
-   * subtree's recorded outputs belong to a conditional that no longer exists.
+   * subtree's recorded outputs belong to a branch that no longer exists.
    */
   take(
     path: string,

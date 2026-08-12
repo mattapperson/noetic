@@ -351,7 +351,7 @@ export async function executeToolCall(params: ExecuteToolCallParams): Promise<{
   // Model sees sanitised tool names (see `sanitizeToolNameForWire`). Match
   // against both the original and sanitised name so internal identity (e.g.
   // `plan/updatePrd` used by steering whitelists, skill docs, and the
-  // `planContext.beforeToolCall` hook) stays intact while the wire name is
+  // `plan()` layer's `beforeToolCall` hook) stays intact while the wire name is
   // provider-compliant.
   const matchedTool = params.tools.find(
     (t) => t.name === params.toolName || sanitizeToolNameForWire(t.name) === params.toolName,
