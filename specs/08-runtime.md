@@ -604,6 +604,7 @@ The harness validates items at trust boundaries (model output parsing, session r
 
 - **Model output parsing** uses the harness registry extended with the round's context-layer and tool schemas. Items matching a known base type always pass even when extension schemas are registered.
 - **Tool result items** are validated against the harness registry extended with **only the called tool's** `itemSchemas.toolResults` — one tool's schemas never reject a sibling tool's result items, and tools without schemas fall back to the base structural parse.
+- The same builder path is shared by both the model tool-loop and JSON-workflow `invokeTool` nodes, so `decorateResultItem` hooks and owner-scoped `toolResults` validation apply identically regardless of who issued the call.
 - Extension schemas are **gates, not normalizers**: on match the original item is returned unchanged, including fields the schema does not declare. Zod transforms and defaults in extension schemas are unsupported.
 - Validation failures raise `NoeticError` kind `item_schema_mismatch` (see `09-error-model`).
 

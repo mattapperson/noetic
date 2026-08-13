@@ -593,7 +593,7 @@ Tree depth is enforced at parse time to prevent unbounded recursion in LLM-gener
 
 ## Plan-Memory Integration
 
-The plan layer (spec 12, `plan()`) authors plans directly in this format: `PlanState.planTree` is a `WorkflowDocument`, and `PlanState.workflows` is a `Record<string, WorkflowDocument>` of named workflows the tree references via `subflow` nodes. The layer validates documents at authoring time (schema, depth, optional node-kind profile, ref slug syntax) and rejects dangling refs and reference cycles before requesting approval.
+The plan layer (spec 12, `plan()`) authors plans directly in this format: `PlanState.planTree` is a `WorkflowDocument`, and `PlanState.workflows` is a `Record<string, WorkflowDocument>` of named workflows the tree references via `subflow` nodes. The layer validates documents at authoring time (schema, duplicate node ids, depth, optional node-kind profile, ref slug syntax) and rejects dangling refs and reference cycles before requesting approval. Persisted plan documents are normalized through the same duplicate-id gate on load, so stale invalid state is dropped instead of surviving until execution time.
 
 On approval, the host feeds both pieces straight into this runtime:
 

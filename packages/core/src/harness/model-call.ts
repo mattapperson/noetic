@@ -29,9 +29,10 @@ import { GenAI, NoeticAttr, ToolAttr } from '../observability/genai-attributes';
 import type { MessageQueue, QueuedMessage } from '../runtime/message-queue';
 import { executeToolCall } from '../tooling/tool-execution';
 import { sanitizeToolNameForWire } from '../tooling/tool-name';
+import { createToolResultItem } from '../tooling/tool-result-item';
 import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../util/broadcaster-utils';
 import type { EventBroadcaster } from '../util/event-broadcaster';
-import { buildItemSchemaRegistry, createToolResultItem } from './model-schema.js';
+import { buildItemSchemaRegistry } from './model-schema.js';
 
 const MAX_TOOL_ROUNDS = 32;
 const MAX_RECOVERY_CONTINUATIONS = 3;

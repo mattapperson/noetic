@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { WorkflowNode } from '../../src/schemas/workflow';
 import {
+  findDuplicateNodeIds,
   UntilPredicateSchema,
   validateWorkflow,
   WorkflowDocumentSchema,
@@ -607,6 +608,89 @@ describe('UntilPredicateSchema', () => {
       kind: 'unknown',
     };
     expect(UntilPredicateSchema.safeParse(pred).success).toBe(false);
+  });
+});
+
+describe('findDuplicateNodeIds', () => {
+  test('collects duplicates per document scope, including inline subflows', () => {
+    const duplicates = findDuplicateNodeIds({
+      kind: 'sequence',
+      id: 'root',
+      steps: [
+        {
+          kind: 'callModel',
+          id: 'dup',
+          instructions: 'outer-a',
+        },
+        {
+          kind: 'callModel',
+          id: 'dup',
+          instructions: 'outer-b',
+        },
+        {
+          kind: 'subflow',
+          id: 'nested',
+          document: {
+            version: 1,
+            root: {
+              kind: 'sequence',
+              id: 'inner-root',
+              steps: [
+                {
+                  kind: 'callModel',
+                  id: 'dup',
+                  instructions: 'inner-a',
+                },
+                {
+                  kind: 'invokeTool',
+                  id: 'dup',
+                  toolName: 'search',
+                },
+              ],
+            },
+          },
+        },
+      ],
+    });
+    expect(duplicates).toEqual([
+      {
+        id: 'dup',
+        firstKind: 'callModel',
+        secondKind: 'callModel',
+      },
+      {
+        id: 'dup',
+        firstKind: 'invokeTool',
+        secondKind: 'callModel',
+      },
+    ]);
+  });
+
+  test('does not report an id reused between outer and nested documents', () => {
+    const duplicates = findDuplicateNodeIds({
+      kind: 'sequence',
+      id: 'root',
+      steps: [
+        {
+          kind: 'callModel',
+          id: 'shared',
+          instructions: 'outer',
+        },
+        {
+          kind: 'subflow',
+          id: 'nested',
+          document: {
+            version: 1,
+            root: {
+              kind: 'callModel',
+              id: 'shared',
+              instructions: 'inner',
+            },
+          },
+        },
+      ],
+    });
+    expect(duplicates).toEqual([]);
   });
 });
 

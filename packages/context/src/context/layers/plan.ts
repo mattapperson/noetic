@@ -7,6 +7,7 @@ import type {
 import {
   createMessage,
   estimateTokens,
+  findDuplicateNodeIds,
   Slot,
   SteeringAction,
   WorkflowDocumentSchema,
@@ -144,13 +145,10 @@ function createDefaultState(): PlanState {
  * model simply re-authors it — rather than failing init.
  */
 function normalizeState(saved: PlanState): PlanState {
-  const tree =
-    saved.planTree !== null && WorkflowDocumentSchema.safeParse(saved.planTree).success
-      ? saved.planTree
-      : null;
+  const tree = saved.planTree !== null && isUsableDocument(saved.planTree) ? saved.planTree : null;
   const workflows: Record<string, WorkflowDocument> = {};
   for (const [name, doc] of Object.entries(saved.workflows ?? {})) {
-    if (WorkflowDocumentSchema.safeParse(doc).success) {
+    if (isUsableDocument(doc)) {
       workflows[name] = doc;
     }
   }
@@ -159,6 +157,22 @@ function normalizeState(saved: PlanState): PlanState {
     planTree: tree,
     workflows,
   };
+}
+
+/**
+ * A persisted document is usable only if it passes the same gates as
+ * `validateWorkflow` in `@noetic-tools/types`: Zod shape validation plus
+ * per-document-scope node-id uniqueness. The uniqueness half uses the
+ * types-level `findDuplicateNodeIds` helper — the plan layer must not import
+ * core, and must not let a duplicate-id document through that the runtime
+ * would later reject (or worse, replay ambiguously).
+ */
+function isUsableDocument(candidate: unknown): candidate is WorkflowDocument {
+  const parsed = WorkflowDocumentSchema.safeParse(candidate);
+  if (!parsed.success) {
+    return false;
+  }
+  return findDuplicateNodeIds(parsed.data.root).length === 0;
 }
 
 /**
@@ -195,6 +209,15 @@ function parseDocument(input: unknown):
     return {
       ok: false,
       error: issues,
+    };
+  }
+  // The same uniqueness gate `validateWorkflow` applies (see isUsableDocument).
+  const duplicates = findDuplicateNodeIds(parsed.data.root);
+  if (duplicates.length > 0) {
+    const first = duplicates[0];
+    return {
+      ok: false,
+      error: `duplicate node id '${first?.id}' (kinds: '${first?.firstKind}', '${first?.secondKind}') — node ids must be unique across the document`,
     };
   }
   return {

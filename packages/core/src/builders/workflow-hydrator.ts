@@ -22,7 +22,12 @@ import type {
   Tool,
   Until,
 } from '@noetic-tools/types';
-import { frameworkCast, isServerToolSpec, NoeticConfigError } from '@noetic-tools/types';
+import {
+  defaultItemSchemaRegistry,
+  frameworkCast,
+  isServerToolSpec,
+  NoeticConfigError,
+} from '@noetic-tools/types';
 import type {
   CallModelWorkflowNode,
   OutputCodecRef,
@@ -32,6 +37,7 @@ import type {
   WorkflowNode,
 } from '../schemas/workflow';
 import { executeToolCall } from '../tooling/tool-execution';
+import { createToolResultItem } from '../tooling/tool-result-item';
 import { all, any } from '../until/combinators';
 import { until } from '../until/predicates';
 import { DetachedHandleImpl } from '../util/detached-handle';
@@ -278,14 +284,25 @@ function hydrateInvokeToolNode(
           callId,
         });
         /* Close the transcript pair: a function_call with no matching output
-         * item is an asymmetric transcript some providers reject outright. */
-        execCtx.itemLog.append({
-          id: `${callId}-output`,
-          type: 'function_call_output' as const,
-          status: 'completed' as const,
-          callId,
+         * item is an asymmetric transcript some providers reject outright.
+         * Build the output item through the SAME shared path the model
+         * tool-loop uses (`createToolResultItem`): the tool's
+         * `decorateResultItem` hook runs, and the item is validated against
+         * the owner-scoped item-schema registry — a bare hand-built item
+         * would skip both. */
+        const outputItem = createToolResultItem({
           output: call.output,
+          callId,
+          roundItemSchemas: (execCtx.itemSchemas ?? defaultItemSchemaRegistry).extend(
+            resolved.itemSchemas,
+          ),
+          tool: resolved,
+          callItem: frameworkCast(callItem),
+          args,
+          result: call.result,
+          error: call.error,
         });
+        execCtx.itemLog.append(outputItem);
         if (call.error) {
           throw new NoeticConfigError({
             code: 'WORKFLOW_TOOL_CALL_FAILED',

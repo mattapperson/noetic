@@ -246,6 +246,7 @@ export type {
   CallModelWorkflowNode,
   ConditionalRoute,
   ConditionalWorkflowNode,
+  DuplicateNodeId,
   InParallelWorkflowNode,
   InvokeToolWorkflowNode,
   LoopWorkflowNode,
@@ -262,6 +263,7 @@ export type {
 } from './schemas/workflow';
 /** @public */
 export {
+  findDuplicateNodeIds,
   MergeStrategySchema,
   UntilPredicateSchema,
   validateWorkflow,

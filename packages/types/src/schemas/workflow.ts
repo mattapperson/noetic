@@ -709,8 +709,15 @@ function inlineSubflowRoots(root: WorkflowNode): WorkflowNode[] {
   return roots;
 }
 
-/** Enforces id uniqueness within one document scope (no subflow descent). */
-function assertUniqueWithinScope(root: WorkflowNode): void {
+/** A node id used more than once within a single document scope. */
+export interface DuplicateNodeId {
+  id: string;
+  firstKind: WorkflowNode['kind'];
+  secondKind: WorkflowNode['kind'];
+}
+
+/** Collects id collisions within one document scope (no subflow descent). */
+function findDuplicatesWithinScope(root: WorkflowNode, out: DuplicateNodeId[]): void {
   const seen = new Map<string, WorkflowNode['kind']>();
   const stack: WorkflowNode[] = [
     root,
@@ -722,11 +729,12 @@ function assertUniqueWithinScope(root: WorkflowNode): void {
     }
     const existing = seen.get(node.id);
     if (existing !== undefined) {
-      throw new NoeticConfigError({
-        code: 'DUPLICATE_NODE_ID',
-        message: `Workflow node id '${node.id}' is used more than once (kinds: '${existing}', '${node.kind}'). Node ids must be unique across the document.`,
-        hint: 'Give every node a distinct id — resume replay, the step registry, and trace graphs all key on it.',
+      out.push({
+        id: node.id,
+        firstKind: existing,
+        secondKind: node.kind,
       });
+      continue;
     }
     seen.set(node.id, node.kind);
     stack.push(...sameScopeChildNodes(node));
@@ -734,23 +742,42 @@ function assertUniqueWithinScope(root: WorkflowNode): void {
 }
 
 /**
- * Enforce node-id uniqueness per document scope. Shape validation cannot
- * express this, and downstream machinery quietly corrupts without it: the step
- * registry is latest-wins (a duplicate silently shadows its sibling),
- * `workflowGraph` emits ambiguous edges, and — worst — the step ledger keys
- * resume replay by paths built from step ids, so duplicate-id siblings line up
- * as occurrences of ONE step and can replay each other's recorded outputs. A
- * planner LLM emitting `"id": "step1"` twice is not hypothetical.
+ * Find every node-id collision in a workflow document, per document scope.
+ * Shape validation cannot express this, and downstream machinery quietly
+ * corrupts without it: the step registry is latest-wins (a duplicate silently
+ * shadows its sibling), `workflowGraph` emits ambiguous edges, and — worst —
+ * the step ledger keys resume replay by paths built from step ids, so
+ * duplicate-id siblings line up as occurrences of ONE step and can replay each
+ * other's recorded outputs. A planner LLM emitting `"id": "step1"` twice is
+ * not hypothetical.
  *
  * Each document is its own scope: an inline `subflow` document's ids are
  * suffixed with `-${node.id}` at hydration, so an id shared between the outer
- * document and a nested one is unambiguous at runtime and stays legal. Every
- * inline sub-workflow is validated independently against its own subtree.
+ * document and a nested one is unambiguous at runtime and is NOT reported.
+ * Every inline sub-workflow is checked independently against its own subtree.
+ *
+ * This is the non-throwing form of the uniqueness gate in `validateWorkflow`,
+ * exported so authoring surfaces that must not import core (e.g. the `plan()`
+ * context layer) can apply the same rule and report it in their own idiom.
  */
-function assertUniqueNodeIds(root: WorkflowNode): void {
-  assertUniqueWithinScope(root);
+export function findDuplicateNodeIds(root: WorkflowNode): DuplicateNodeId[] {
+  const duplicates: DuplicateNodeId[] = [];
+  findDuplicatesWithinScope(root, duplicates);
   for (const subRoot of inlineSubflowRoots(root)) {
-    assertUniqueNodeIds(subRoot);
+    duplicates.push(...findDuplicateNodeIds(subRoot));
+  }
+  return duplicates;
+}
+
+/** Throwing form of `findDuplicateNodeIds` — see that function for scope rules. */
+function assertUniqueNodeIds(root: WorkflowNode): void {
+  const first = findDuplicateNodeIds(root)[0];
+  if (first) {
+    throw new NoeticConfigError({
+      code: 'DUPLICATE_NODE_ID',
+      message: `Workflow node id '${first.id}' is used more than once (kinds: '${first.firstKind}', '${first.secondKind}'). Node ids must be unique across the document.`,
+      hint: 'Give every node a distinct id — resume replay, the step registry, and trace graphs all key on it.',
+    });
   }
 }
 

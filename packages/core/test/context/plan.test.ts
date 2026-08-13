@@ -246,6 +246,44 @@ describe('plan layer', () => {
       });
       expect(recall).not.toBeNull();
     });
+
+    it('drops persisted documents that fail the duplicate-id gate', async () => {
+      const storage = makeScopedStorage();
+      const good = makeDoc();
+      const duplicateDoc = makeDoc(
+        makeSequence([
+          makeLlmNode({
+            id: 'dup',
+            instructions: 'a',
+          }),
+          makeLlmNode({
+            id: 'dup',
+            instructions: 'b',
+          }),
+        ]),
+      );
+      await storage.set('state', {
+        ...makePlanningState({
+          planTree: duplicateDoc,
+        }),
+        workflows: {
+          good,
+          duplicate: duplicateDoc,
+        },
+      });
+
+      const layer = plan();
+      const result = await layer.hooks.init!({
+        storage,
+        scopeKey: 'thread-1',
+        ctx: makeCtx(),
+      });
+
+      expect(result.state.planTree).toBeNull();
+      expect(result.state.workflows).toEqual({
+        good,
+      });
+    });
   });
 
   //#endregion
@@ -1125,6 +1163,33 @@ describe('plan layer', () => {
         'Plan tree set successfully. Call plan/exitPlanMode to request approval.',
       );
     });
+
+    it('rejects a duplicate node id in the plan tree', async () => {
+      const layer = plan();
+      const fn = layer.provides!.setPlanTree;
+      assert(fn.kind === 'function');
+      const result = await fn.execute(
+        {
+          document: makeDoc(
+            makeSequence([
+              makeLlmNode({
+                id: 'dup',
+                instructions: 'a',
+              }),
+              makeLlmNode({
+                id: 'dup',
+                instructions: 'b',
+              }),
+            ]),
+          ),
+        },
+        makePlanningState(),
+        makeCtx(),
+      );
+      expect(result.result).toContain('duplicate node id');
+      expect(result.result).toContain("'dup'");
+      expect(planState(result.state).planTree).toBeNull();
+    });
   });
 
   describe('setWorkflow', () => {
@@ -1375,6 +1440,34 @@ describe('plan layer', () => {
         makeCtx(),
       );
       expect(result.result).toContain('Cannot set workflow "bad"');
+    });
+
+    it('rejects a duplicate node id in a named workflow', async () => {
+      const layer = plan();
+      const fn = layer.provides!.setWorkflow;
+      assert(fn.kind === 'function');
+      const result = await fn.execute(
+        {
+          name: 'bad',
+          document: makeDoc(
+            makeSequence([
+              makeLlmNode({
+                id: 'dup',
+                instructions: 'a',
+              }),
+              makeLlmNode({
+                id: 'dup',
+                instructions: 'b',
+              }),
+            ]),
+          ),
+        },
+        makePlanningState(),
+        makeCtx(),
+      );
+      expect(result.result).toContain('duplicate node id');
+      expect(result.result).toContain('Cannot set workflow "bad"');
+      expect(planState(result.state).workflows).toEqual({});
     });
   });
 
