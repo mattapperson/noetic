@@ -100,6 +100,31 @@ describe('SubHarnessTurnAccumulator', () => {
     expect(result.usage.total).toBe(15);
   });
 
+  test('retains reasoning deltas as a reasoning item ahead of the answer', () => {
+    const acc = new SubHarnessTurnAccumulator();
+    acc.push({
+      type: 'reasoning-delta',
+      delta: 'let me think ',
+    });
+    acc.push({
+      type: 'reasoning-delta',
+      delta: 'about this…',
+    });
+    acc.push({
+      type: 'text-delta',
+      delta: 'the answer',
+    });
+    acc.push({
+      type: 'finish',
+      finishReason: 'stop',
+    });
+    const result = acc.result();
+    expect(result.items).toHaveLength(2);
+    expect(result.items[0]?.type).toBe('reasoning');
+    expect(JSON.stringify(result.items[0])).toContain('let me think about this…');
+    expect(result.items[1]?.type).toBe('message');
+  });
+
   test('emits no assistant item when there is no text', () => {
     const acc = new SubHarnessTurnAccumulator();
     acc.push({

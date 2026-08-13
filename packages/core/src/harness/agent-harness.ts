@@ -442,7 +442,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
    * multiple steps. Reached by the interpreter's harness handler via
    * `frameworkCast`; do not access from outside core.
    */
-  readonly subHarnessSessions = new Map<string, SubHarnessSession>();
+  readonly subHarnessSessions = new Map<string, Promise<SubHarnessSession>>();
   readonly layerStateStore: LayerStateStore;
   /** Per-harness memoization cache for `recallMode: 'eventual'` layers. */
   readonly recallCache: RecallCache;

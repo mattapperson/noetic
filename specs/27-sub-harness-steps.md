@@ -140,9 +140,27 @@ unrecognized rather than dropping it.
 ### Session reuse
 
 `session.reuse` keys a live session that survives across steps (stored on the
-`AgentHarness`). `session.onComplete` chooses the teardown: `'stop'` (default for
+`AgentHarness`). The store holds PROMISES of sessions, so two steps racing on
+the same key (e.g. parallel legs) dedupe onto one `doStart`; a failed start
+removes the key so a later step can retry. Driving concurrent TURNS on one
+reused session remains unsupported — sessions are conversational state.
+`session.onComplete` chooses the teardown: `'stop'` (default for
 a fresh session) persists and stops the runtime, `'detach'` parks it, `'destroy'`
 discards it. A reused session is kept alive by default.
+
+### Turn failure, idle watchdog, and reasoning retention
+
+A turn that finishes with `finishReason: 'error'` fails the step with a
+`step_failed` error whose message includes the last output; the turn's items
+and usage are still applied to the context first (the spend is real, the
+transcript is the evidence), but the partial result is never returned as
+success. Each turn is also guarded by an idle watchdog: no stream part for
+`settings.extra.idleTimeoutMs` (default 120_000, `0` disables) aborts the
+per-turn signal and fails the step, so a wedged vendor session cannot hang the
+run. Finally, the turn accumulator retains accumulated `reasoning-delta` text
+as a `reasoning` item (built by the `reasoningItem()` builder) ahead of the
+assistant message, so the item log, checkpoints, and eval scorers see the
+agent's thinking.
 
 ## JSON workflow nodes
 

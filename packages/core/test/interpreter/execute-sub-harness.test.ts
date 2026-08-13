@@ -556,3 +556,359 @@ describe('executeSubHarness', () => {
 
   //#endregion
 });
+
+describe('sub-harness session/turn reliability', () => {
+  it("fails the step when a turn finishes with finishReason 'error'", async () => {
+    const { ctx } = harnessCtx();
+    const adapter: SubHarness = {
+      specificationVersion: 'harness-v1',
+      harnessId: 'claude-code',
+      async doStart(): Promise<SubHarnessSession> {
+        return {
+          sessionId: 'session-1',
+          isResume: false,
+          async doPromptTurn(turn): Promise<SubHarnessTurnResult> {
+            turn.emit({
+              type: 'text-delta',
+              delta: 'partial work before crash',
+            });
+            return {
+              items: [
+                makeMessage('assistant', 'partial work before crash'),
+              ],
+              text: 'partial work before crash',
+              finishReason: 'error',
+            };
+          },
+          async doStop() {
+            return {
+              harnessId: 'claude-code',
+              sessionId: 'session-1',
+              state: null,
+            };
+          },
+        };
+      },
+    };
+
+    try {
+      await execute(
+        step.claudeCode({
+          id: 'failing-turn',
+          harness: adapter,
+          prompt: 'do the thing',
+        }),
+        undefined,
+        ctx,
+      );
+      throw new Error('should have thrown');
+    } catch (e) {
+      if (!isNoeticError(e)) {
+        throw e;
+      }
+      expect(e.noeticError.kind).toBe('step_failed');
+      expect(e.message).toContain('partial work before crash');
+    }
+    // The spend/transcript are still applied — the evidence is in the log.
+    expect(ctx.itemLog.items.some((i) => i.type === 'message' && i.role === 'assistant')).toBe(
+      true,
+    );
+  });
+
+  it("evicts and destroys a reused session when finishReason is 'error'", async () => {
+    const harness = new AgentHarness({
+      name: 'test',
+      params: {},
+    });
+    let starts = 0;
+    let destroys = 0;
+    const adapter: SubHarness = {
+      specificationVersion: 'harness-v1',
+      harnessId: 'claude-code',
+      async doStart(): Promise<SubHarnessSession> {
+        starts++;
+        const current = starts;
+        return {
+          sessionId: `session-${current}`,
+          isResume: false,
+          async doPromptTurn(): Promise<SubHarnessTurnResult> {
+            if (current === 1) {
+              return {
+                items: [],
+                text: 'failed',
+                finishReason: 'error',
+              };
+            }
+            return {
+              items: [
+                makeMessage('assistant', 'recovered'),
+              ],
+              text: 'recovered',
+            };
+          },
+          async doStop() {
+            return {
+              harnessId: 'claude-code',
+              sessionId: `session-${current}`,
+              state: null,
+            };
+          },
+          async doDestroy() {
+            destroys++;
+          },
+        };
+      },
+    };
+    const mk = (id: string) =>
+      step.claudeCode({
+        id,
+        harness: adapter,
+        prompt: 'go',
+        session: {
+          reuse: 'error-session',
+        },
+      });
+
+    await expect(execute(mk('first'), undefined, harness.createContext())).rejects.toThrow(
+      "finishReason 'error'",
+    );
+    expect(await execute(mk('second'), undefined, harness.createContext())).toBe('recovered');
+    expect(starts).toBe(2);
+    expect(destroys).toBe(1);
+  });
+
+  it('cuts a stalled turn with the idle watchdog', async () => {
+    const { ctx } = harnessCtx();
+    const adapter: SubHarness = {
+      specificationVersion: 'harness-v1',
+      harnessId: 'claude-code',
+      async doStart(): Promise<SubHarnessSession> {
+        return {
+          sessionId: 'session-1',
+          isResume: false,
+          async doPromptTurn(turn): Promise<SubHarnessTurnResult> {
+            turn.emit({
+              type: 'text-delta',
+              delta: 'starting…',
+            });
+            // Hang until the turn signal aborts, then reject like a vendor SDK.
+            await new Promise<void>((resolve) => {
+              turn.signal?.addEventListener('abort', () => resolve(), {
+                once: true,
+              });
+            });
+            throw new Error('aborted by watchdog');
+          },
+          async doStop() {
+            return {
+              harnessId: 'claude-code',
+              sessionId: 'session-1',
+              state: null,
+            };
+          },
+        };
+      },
+    };
+
+    const t0 = performance.now();
+    try {
+      await execute(
+        step.claudeCode({
+          id: 'stalling-turn',
+          harness: adapter,
+          prompt: 'hang forever',
+          settings: {
+            extra: {
+              idleTimeoutMs: 50,
+            },
+          },
+        }),
+        undefined,
+        ctx,
+      );
+      throw new Error('should have thrown');
+    } catch (e) {
+      if (!isNoeticError(e)) {
+        throw e;
+      }
+      expect(performance.now() - t0).toBeLessThan(5_000);
+      expect(e.noeticError.kind).toBe('step_failed');
+      expect(e.message).toContain('idle');
+    }
+  });
+
+  it('evicts and destroys a reused session when its turn fails', async () => {
+    const harness = new AgentHarness({
+      name: 'test',
+      params: {},
+    });
+    let starts = 0;
+    let destroys = 0;
+    const adapter: SubHarness = {
+      specificationVersion: 'harness-v1',
+      harnessId: 'claude-code',
+      async doStart(): Promise<SubHarnessSession> {
+        starts++;
+        const current = starts;
+        return {
+          sessionId: `session-${current}`,
+          isResume: false,
+          async doPromptTurn(turn): Promise<SubHarnessTurnResult> {
+            if (current === 1) {
+              throw new Error('wedged session');
+            }
+            turn.emit({
+              type: 'text-delta',
+              delta: 'recovered',
+            });
+            return {
+              items: [
+                makeMessage('assistant', 'recovered'),
+              ],
+              text: 'recovered',
+            };
+          },
+          async doStop() {
+            return {
+              harnessId: 'claude-code',
+              sessionId: `session-${current}`,
+              state: null,
+            };
+          },
+          async doDestroy() {
+            destroys++;
+          },
+        };
+      },
+    };
+    const mk = (id: string) =>
+      step.claudeCode({
+        id,
+        harness: adapter,
+        prompt: 'go',
+        session: {
+          reuse: 'recoverable-session',
+        },
+      });
+
+    await expect(execute(mk('first'), undefined, harness.createContext())).rejects.toThrow(
+      'wedged session',
+    );
+    expect(await execute(mk('second'), undefined, harness.createContext())).toBe('recovered');
+    expect(starts).toBe(2);
+    expect(destroys).toBe(1);
+  });
+
+  it('dedupes session start when two steps race on one reuse key', async () => {
+    const harness = new AgentHarness({
+      name: 'test',
+      params: {},
+    });
+    let starts = 0;
+    const adapter: SubHarness = {
+      specificationVersion: 'harness-v1',
+      harnessId: 'claude-code',
+      async doStart(): Promise<SubHarnessSession> {
+        starts++;
+        // Slow start: without promise-valued dedupe both racers pass the
+        // store check during this window and start duplicate sessions.
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return {
+          sessionId: 'session-1',
+          isResume: false,
+          async doPromptTurn(turn): Promise<SubHarnessTurnResult> {
+            turn.emit({
+              type: 'text-delta',
+              delta: 'ok',
+            });
+            return {
+              items: [
+                makeMessage('assistant', 'ok'),
+              ],
+              text: 'ok',
+            };
+          },
+          async doStop() {
+            return {
+              harnessId: 'claude-code',
+              sessionId: 'session-1',
+              state: null,
+            };
+          },
+        };
+      },
+    };
+    const mk = (id: string) =>
+      step.claudeCode({
+        id,
+        harness: adapter,
+        prompt: 'go',
+        session: {
+          reuse: 'shared-session',
+        },
+      });
+
+    await Promise.all([
+      execute(mk('racer-1'), undefined, harness.createContext()),
+      execute(mk('racer-2'), undefined, harness.createContext()),
+    ]);
+    expect(starts).toBe(1);
+  });
+
+  it('clears the reuse key when session start fails so a later step can retry', async () => {
+    const harness = new AgentHarness({
+      name: 'test',
+      params: {},
+    });
+    let attempts = 0;
+    const adapter: SubHarness = {
+      specificationVersion: 'harness-v1',
+      harnessId: 'claude-code',
+      async doStart(): Promise<SubHarnessSession> {
+        attempts++;
+        if (attempts === 1) {
+          throw new Error('vendor start failed');
+        }
+        return {
+          sessionId: 'session-2',
+          isResume: false,
+          async doPromptTurn(turn): Promise<SubHarnessTurnResult> {
+            turn.emit({
+              type: 'text-delta',
+              delta: 'recovered',
+            });
+            return {
+              items: [
+                makeMessage('assistant', 'recovered'),
+              ],
+              text: 'recovered',
+            };
+          },
+          async doStop() {
+            return {
+              harnessId: 'claude-code',
+              sessionId: 'session-2',
+              state: null,
+            };
+          },
+        };
+      },
+    };
+    const mk = (id: string) =>
+      step.claudeCode({
+        id,
+        harness: adapter,
+        prompt: 'go',
+        session: {
+          reuse: 'flaky-session',
+        },
+      });
+
+    await expect(execute(mk('first'), undefined, harness.createContext())).rejects.toThrow(
+      'vendor start failed',
+    );
+    const result = await execute(mk('second'), undefined, harness.createContext());
+    expect(result).toBe('recovered');
+    expect(attempts).toBe(2);
+  });
+});

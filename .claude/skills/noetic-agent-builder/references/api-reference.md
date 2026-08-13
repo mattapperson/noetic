@@ -266,7 +266,7 @@ export const myAgent = (settings = {}) =>
   });
 ```
 
-Stream-part kinds: `stream-start`, `text-delta`, `reasoning-delta`, `tool-call`, `tool-result`, `file-change`, `finish` (carries `usage`/`cost`), `error`, `raw`. The union has a paired Zod schema `SubHarnessStreamPartSchema`. A `SubHarnessSession` requires only `doPromptTurn` + `doStop`; `doContinueTurn` / `doSuspendTurn` / `doDetach` / `doDestroy` / `doCompact` are optional and signalled by presence (absent → throw `SubHarnessCapabilityError`). Base package also exports `SubHarnessTurnAccumulator`, the `asItems` / `assistantMessageItem` / `functionCallItem` item builders, and `SubHarnessStartError`.
+Stream-part kinds: `stream-start`, `text-delta`, `reasoning-delta`, `tool-call`, `tool-result`, `file-change`, `finish` (carries `usage`/`cost`), `error`, `raw`. The union has a paired Zod schema `SubHarnessStreamPartSchema`. A `SubHarnessSession` requires only `doPromptTurn` + `doStop`; `doContinueTurn` / `doSuspendTurn` / `doDetach` / `doDestroy` / `doCompact` are optional and signalled by presence (absent → throw `SubHarnessCapabilityError`). Base package also exports `SubHarnessTurnAccumulator`, the `asItems` / `assistantMessageItem` / `functionCallItem` / `reasoningItem` item builders, and `SubHarnessStartError`. A turn with `finishReason: 'error'` fails the step (`step_failed`) after its items/usage are applied; each turn has an idle watchdog (`settings.extra.idleTimeoutMs`, default 120s, 0 disables) that aborts a stalled turn; `reasoning-delta` text is retained as a `reasoning` item; concurrent first turns on one `session.reuse` key dedupe onto a single `doStart` (the store holds promises).
 
 ### channel
 
