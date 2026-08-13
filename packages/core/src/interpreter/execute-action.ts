@@ -114,7 +114,7 @@ export async function executeRunCode<TContext, I, O>(
       lastError = e instanceof Error ? e : new Error(String(e));
 
       if (attempt < maxAttempts - 1 && retry) {
-        const delay = computeDelay(retry, attempt);
+        const delay = computeRetryDelay(retry, attempt);
         await new Promise((r) => setTimeout(r, delay));
       }
     }
@@ -128,7 +128,8 @@ export async function executeRunCode<TContext, I, O>(
   });
 }
 
-function computeDelay(retry: RetryPolicy, attempt: number): number {
+/** @internal Pure retry delay calculation for deterministic tests. */
+export function computeRetryDelay(retry: RetryPolicy, attempt: number): number {
   let delay: number;
   switch (retry.backoff) {
     case 'fixed':
