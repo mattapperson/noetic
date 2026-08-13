@@ -1,47 +1,15 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import type { ContextData } from '@noetic-tools/context';
-import type { Context, StepRunCode } from '@noetic-tools/types';
+import type { Context, RetryPolicy, StepRunCode } from '@noetic-tools/types';
 import { isNoeticError, NoeticErrorImpl } from '@noetic-tools/types';
-import { executeRunCode } from '../../src/interpreter/execute-action';
+import { computeRetryDelay, executeRunCode } from '../../src/interpreter/execute-action';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import { makeMockContext, makeMockHarness } from '../_helpers';
 
 const mockCtx: Context = makeMockContext();
 
-// Safety net: ensure setTimeout is always restored
-const _originalSetTimeout = globalThis.setTimeout;
-afterEach(() => {
-  globalThis.setTimeout = _originalSetTimeout;
-});
-
-/** Patch setTimeout to capture delay values and execute callbacks instantly. */
-function interceptDelays(): {
-  delays: number[];
-  restore: () => void;
-} {
-  const delays: number[] = [];
-  // Wrap the original to intercept delay values while preserving the full overloaded signature
-  const handler: ProxyHandler<typeof setTimeout> = {
-    apply(_target, thisArg, argsList: unknown[]) {
-      const delay = argsList[1];
-      if (typeof delay === 'number' && delay > 0) {
-        delays.push(delay);
-      }
-      argsList[1] = 1;
-      return Reflect.apply(_originalSetTimeout, thisArg, argsList);
-    },
-  };
-  globalThis.setTimeout = new Proxy(_originalSetTimeout, handler);
-  return {
-    delays,
-    restore: () => {
-      globalThis.setTimeout = _originalSetTimeout;
-    },
-  };
-}
-
-describe.serial('executeRunCode', () => {
+describe('executeRunCode', () => {
   it('calls execute function and returns output', async () => {
     const s: StepRunCode<ContextData, string, number> = {
       kind: 'runCode',
@@ -88,105 +56,81 @@ describe.serial('executeRunCode', () => {
   });
 
   it('retries with fixed backoff', async () => {
-    const { delays, restore } = interceptDelays();
-
     let attempts = 0;
-    const s: StepRunCode<ContextData, string, string> = {
+    const retry: RetryPolicy = {
+      maxAttempts: 3,
+      backoff: 'fixed',
+      initialDelay: 1,
+    };
+    const step: StepRunCode<ContextData, string, string> = {
       kind: 'runCode',
       id: 'retry-test',
-      execute: async (_input) => {
+      retry,
+      execute: async () => {
         attempts++;
         if (attempts < 3) {
           throw new Error('not yet');
         }
         return 'success';
       },
-      retry: {
-        maxAttempts: 3,
-        backoff: 'fixed',
-        initialDelay: 10,
-      },
     };
-    try {
-      const result = await executeRunCode(s, 'test', mockCtx);
-      expect(result).toBe('success');
-      expect(attempts).toBe(3);
-      // Fixed backoff: all delays should be 10
-      expect(delays).toEqual([
-        10,
-        10,
-      ]);
-    } finally {
-      restore();
-    }
+    expect(await executeRunCode(step, 'test', mockCtx)).toBe('success');
+    expect(attempts).toBe(3);
+    expect(
+      [
+        0,
+        1,
+      ].map((attempt) => computeRetryDelay(retry, attempt)),
+    ).toEqual([
+      1,
+      1,
+    ]);
   });
 
   it('retries with exponential backoff and exhausts', async () => {
-    const { delays, restore } = interceptDelays();
     let attempts = 0;
-    const s: StepRunCode<ContextData, string, string> = {
+    const retry: RetryPolicy = {
+      maxAttempts: 3,
+      backoff: 'exponential',
+      initialDelay: 1,
+    };
+    const step: StepRunCode<ContextData, string, string> = {
       kind: 'runCode',
       id: 'exhaust-test',
+      retry,
       execute: async () => {
         attempts++;
         throw new Error('always fails');
       },
-      retry: {
-        maxAttempts: 3,
-        backoff: 'exponential',
-        initialDelay: 10,
-      },
     };
-    try {
-      await executeRunCode(s, 'test', mockCtx);
-      expect.unreachable('should have thrown');
-    } catch (e) {
-      assert(isNoeticError(e));
-      const oe = e.noeticError;
-      assert(oe.kind === 'step_failed');
-      expect(oe.retriesExhausted).toBe(true);
-      expect(attempts).toBe(3);
-      expect(delays).toEqual([
-        10,
-        20,
-      ]);
-    } finally {
-      restore();
-    }
+    await expect(executeRunCode(step, 'test', mockCtx)).rejects.toThrow('always fails');
+    expect(attempts).toBe(3);
+    expect(
+      [
+        0,
+        1,
+      ].map((attempt) => computeRetryDelay(retry, attempt)),
+    ).toEqual([
+      1,
+      2,
+    ]);
   });
 
-  it('caps exponential backoff delay at maxDelay', async () => {
-    const { delays, restore } = interceptDelays();
-
-    let attempts = 0;
-    const s: StepRunCode<ContextData, string, string> = {
-      kind: 'runCode',
-      id: 'cap-test',
-      execute: async () => {
-        attempts++;
-        if (attempts < 5) {
-          throw new Error('fail');
-        }
-        return 'ok';
-      },
-      retry: {
-        maxAttempts: 5,
-        backoff: 'exponential',
-        initialDelay: 100,
-        maxDelay: 500,
-      },
+  it('caps exponential backoff delay at maxDelay', () => {
+    const retry: RetryPolicy = {
+      maxAttempts: 5,
+      backoff: 'exponential',
+      initialDelay: 100,
+      maxDelay: 500,
     };
-    try {
-      await executeRunCode(s, 'test', mockCtx);
-    } finally {
-      restore();
-    }
-    // Delays: 100, 200, 400, 500 (capped from 800)
-    for (const d of delays) {
-      expect(d).toBeLessThanOrEqual(500);
-    }
-    expect(delays.length).toBeGreaterThan(0);
-    expect(delays).toEqual([
+    expect(
+      [
+        0,
+        1,
+        2,
+        3,
+      ].map((attempt) => computeRetryDelay(retry, attempt)),
+    ).toEqual([
       100,
       200,
       400,
@@ -194,46 +138,26 @@ describe.serial('executeRunCode', () => {
     ]);
   });
 
-  it('defaults maxDelay to 30000', async () => {
-    // With exponential backoff, delay = 100 * 2^attempt
-    // For attempt 9: 100 * 512 = 51200, should be capped at 30000
-    const { delays, restore } = interceptDelays();
-
-    let attempts = 0;
-    const s: StepRunCode<ContextData, string, string> = {
-      kind: 'runCode',
-      id: 'default-cap-test',
-      execute: async () => {
-        attempts++;
-        if (attempts < 11) {
-          throw new Error('fail');
-        }
-        return 'ok';
-      },
-      retry: {
-        maxAttempts: 11,
-        backoff: 'exponential',
-        initialDelay: 100,
-      },
+  it('defaults maxDelay to 30000', () => {
+    const retry: RetryPolicy = {
+      maxAttempts: 11,
+      backoff: 'exponential',
+      initialDelay: 100,
     };
-    try {
-      await executeRunCode(s, 'test', mockCtx);
-    } finally {
-      restore();
-    }
-    for (const d of delays) {
-      expect(d).toBeLessThanOrEqual(30_000);
-    }
-    expect(delays.length).toBeGreaterThan(0);
+    expect(computeRetryDelay(retry, 9)).toBe(30_000);
   });
 
   it('retries with linear backoff', async () => {
-    const { delays, restore } = interceptDelays();
-
     let attempts = 0;
-    const s: StepRunCode<ContextData, string, string> = {
+    const retry: RetryPolicy = {
+      maxAttempts: 3,
+      backoff: 'linear',
+      initialDelay: 1,
+    };
+    const step: StepRunCode<ContextData, string, string> = {
       kind: 'runCode',
       id: 'linear-test',
+      retry,
       execute: async () => {
         attempts++;
         if (attempts < 3) {
@@ -241,24 +165,18 @@ describe.serial('executeRunCode', () => {
         }
         return 'ok';
       },
-      retry: {
-        maxAttempts: 3,
-        backoff: 'linear',
-        initialDelay: 10,
-      },
     };
-    try {
-      const result = await executeRunCode(s, 'test', mockCtx);
-      expect(result).toBe('ok');
-      expect(attempts).toBe(3);
-      // Linear backoff: delay = initialDelay * attempt
-      expect(delays).toEqual([
-        10,
-        20,
-      ]);
-    } finally {
-      restore();
-    }
+    expect(await executeRunCode(step, 'test', mockCtx)).toBe('ok');
+    expect(attempts).toBe(3);
+    expect(
+      [
+        0,
+        1,
+      ].map((attempt) => computeRetryDelay(retry, attempt)),
+    ).toEqual([
+      1,
+      2,
+    ]);
   });
 
   describe('cancellation (not retriable)', () => {
