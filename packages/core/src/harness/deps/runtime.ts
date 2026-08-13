@@ -6,6 +6,8 @@ export type { RestoreCheckpointOptions } from '../../runtime/durable/harness-che
 export {
   captureCheckpoint,
   clearCheckpoint,
+  ItemLogPersistence,
+  itemLogOwnerKey,
   restoreFromCheckpoint,
 } from '../../runtime/durable/harness-checkpoints';
 export type {

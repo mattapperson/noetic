@@ -60,6 +60,8 @@ import {
   filterReasoningStream,
   filterTextStream,
   ItemLogImpl,
+  ItemLogPersistence,
+  itemLogOwnerKey,
   resolveStepLedgerRetention,
   restoreFromCheckpoint,
   SessionRunner,
@@ -427,6 +429,11 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
    */
   readonly stepLedgerStore?: StepLedgerStore;
   /**
+   * Per-harness item-log persistence watermarks for O(delta) checkpoint batches.
+   * @internal
+   */
+  readonly itemLogPersistence = new ItemLogPersistence();
+  /**
    * Resolved retention bounds for that ledger. Validated at construction so a bad cap
    * is a loud config error rather than a run that silently records nothing.
    * @internal
@@ -679,6 +686,13 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       validated.append(item);
     }
     session.log.truncateTo(0);
+    this.itemLogPersistence.rollback(
+      itemLogOwnerKey({
+        threadId,
+        id: '',
+      }),
+      0,
+    );
     for (const item of validated.items) {
       session.log.append(item);
     }
@@ -740,6 +754,13 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
         },
         rollbackTurn: () => {
           sessionLog.truncateTo(turnWatermark);
+          this.itemLogPersistence.rollback(
+            itemLogOwnerKey({
+              threadId,
+              id: '',
+            }),
+            turnWatermark,
+          );
         },
         runTurn: async (ctx, _turn, signal) => {
           if (!this.agentGraph) {

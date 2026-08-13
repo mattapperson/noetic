@@ -103,4 +103,26 @@ describe('CheckpointSnapshot schema version', () => {
     }
     expect(isNoeticConfigError(thrown)).toBe(true);
   });
+
+  it('load accepts v2 snapshots carrying persistedCount on itemLog', async () => {
+    const storage = createInMemoryStorage();
+    await storage.set(`${CheckpointKeys.ExecPrefix}exec-batches${CheckpointKeys.SnapshotSuffix}`, {
+      schemaVersion: 2,
+      executionId: 'exec-batches',
+      frontier: [],
+      layers: {},
+      cwd: null,
+      askUser: [],
+      itemLog: {
+        items: [],
+        persistedCount: 3,
+      },
+      capturedAt: new Date().toISOString(),
+    });
+    const store = createCheckpointStore({
+      storage,
+    });
+    const loaded = await store.load('exec-batches');
+    expect(loaded?.itemLog.persistedCount).toBe(3);
+  });
 });

@@ -640,7 +640,7 @@ Snapshot content (Zod-validated by `CheckpointSnapshotSchema`):
 - `layers` — `Record<layerId, state>` captured via `layerStateStore.get(executionId, layerId)`.
 - `cwd` — `{ current, previous }`.
 - `askUser` — pending ask-user requests (populated when the code-agent's `AskUserService` integrates with the store).
-- `itemLog` — `{ items: Item[] }`, the full item log.
+- `itemLog` — either `{ items: Item[] }` for legacy inline snapshots, or `{ items: [], persistedCount: number }` when the transcript lives in append-only batches keyed by log owner (`execution:<ownerKey>:itemLog:<offset>`).
 - `capturedAt` — ISO-8601 timestamp.
 
 ### Restore Contract
@@ -648,7 +648,7 @@ Snapshot content (Zod-validated by `CheckpointSnapshotSchema`):
 `harness.restore(executionId)` reads the snapshot and rebuilds a `Context`:
 
 1. Replays layer state into `layerStateStore` under the same executionId so context projectors observe continuity.
-2. Re-parses `itemLog.items` via the harness's `ItemSchemaRegistry` (the same gate production traffic passes through).
+2. Re-parses `itemLog.items` via the harness's `ItemSchemaRegistry` (the same gate production traffic passes through). When `persistedCount` is present and the store supports batch loading, restore stitches the first contiguous durable prefix from the owner-keyed item batches and seeds the harness watermark from the recovered count.
 3. Seeds a new context with `threadId`, `resourceId`, and `cwdInit` from the snapshot.
 4. Returns a `Context` whose `.id` is overridden to the original `executionId` so downstream readers correlate across the restart.
 

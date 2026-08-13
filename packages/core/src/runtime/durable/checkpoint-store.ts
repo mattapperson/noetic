@@ -1,4 +1,5 @@
 import type { StorageAdapter } from '@noetic-tools/context';
+import { storageGetMany } from '@noetic-tools/context';
 import { NoeticConfigError } from '@noetic-tools/types';
 import type { CheckpointSnapshot } from '../../types/checkpoint';
 import { CheckpointSnapshotSchema } from '../../types/checkpoint';
@@ -52,6 +53,31 @@ export interface CheckpointStore {
   save(snapshot: CheckpointSnapshot): Promise<void>;
   /** Load the snapshot for an execution, or `null` if none is recorded. */
   load(executionId: string): Promise<CheckpointSnapshot | null>;
+  /**
+   * Append an item-log batch starting at item index `offset`. Batches are the
+   * O(delta) alternative to inlining the whole log in every snapshot; the
+   * batch key embeds `offset` so a retried write is idempotent.
+   *
+   * `ownerKey` is an opaque owner identity, not an execution id — the session
+   * owns the log across every turn in a thread, so callers pass
+   * `thread:<threadId>` (falling back to `execution:<id>` for threadless
+   * one-shot contexts).
+   */
+  appendItems?(ownerKey: string, offset: number, items: unknown[]): Promise<void>;
+  /**
+   * Load and stitch persisted item batches, returning the first `count` items
+   * in order.
+   *
+   * Stitching is continuity-checked: a batch is accepted only when its start
+   * offset equals the number of items stitched so far. The first gap or
+   * overlap ends the stitch, returning a short but contiguous prefix.
+   */
+  loadItems?(ownerKey: string, count: number): Promise<unknown[]>;
+  /**
+   * Drop every persisted item batch for `ownerKey` whose start offset is at or
+   * beyond `offset`, trimming the one batch that straddles the cut.
+   */
+  truncateItems?(ownerKey: string, offset: number): Promise<void>;
   /** List every `executionId` that has a persisted snapshot. */
   list(): Promise<
     ReadonlyArray<{
@@ -73,6 +99,29 @@ export interface CreateCheckpointStoreOptions {
 
 function snapshotKey(executionId: string): string {
   return `${EXEC_KEY_PREFIX}${executionId}${SNAPSHOT_SUFFIX}`;
+}
+
+/** Prefix owning every item-log batch for one log owner. */
+function itemBatchPrefix(ownerKey: string): string {
+  return `${EXEC_KEY_PREFIX}${ownerKey}${ITEM_LOG_SUFFIX}:`;
+}
+
+/** Zero-padded so lexicographic key order matches item order under `list()`. */
+function itemBatchKey(ownerKey: string, offset: number): string {
+  return `${itemBatchPrefix(ownerKey)}${String(offset).padStart(8, '0')}`;
+}
+
+/** The start offset a batch key encodes, or null when the suffix is not one. */
+function itemBatchOffset(ownerKey: string, key: string): number | null {
+  const prefix = itemBatchPrefix(ownerKey);
+  if (!key.startsWith(prefix)) {
+    return null;
+  }
+  const suffix = key.slice(prefix.length);
+  if (suffix.length === 0 || !/^\d+$/.test(suffix)) {
+    return null;
+  }
+  return Number(suffix);
 }
 
 function executionIdFromSnapshotKey(key: string): string | null {
@@ -149,6 +198,63 @@ export function createCheckpointStore(options: CreateCheckpointStoreOptions): Ch
     return out;
   }
 
+  async function appendItems(ownerKey: string, offset: number, items: unknown[]): Promise<void> {
+    await storage.set(itemBatchKey(ownerKey, offset), items);
+  }
+
+  async function loadItems(ownerKey: string, count: number): Promise<unknown[]> {
+    const keys = (await storage.list(itemBatchPrefix(ownerKey))).sort();
+    const batches = await storageGetMany<unknown[]>(storage, keys);
+    const out: unknown[] = [];
+    for (const key of keys) {
+      const offset = itemBatchOffset(ownerKey, key);
+      if (offset === null || offset !== out.length) {
+        break;
+      }
+      const batch = batches.get(key);
+      if (!batch) {
+        break;
+      }
+      out.push(...batch);
+      if (out.length >= count) {
+        break;
+      }
+    }
+    return out.slice(0, count);
+  }
+
+  async function truncateItems(ownerKey: string, offset: number): Promise<void> {
+    const keyed: Array<{
+      key: string;
+      offset: number;
+    }> = [];
+    for (const key of await storage.list(itemBatchPrefix(ownerKey))) {
+      const batchOffset = itemBatchOffset(ownerKey, key);
+      if (batchOffset === null) {
+        continue;
+      }
+      keyed.push({
+        key,
+        offset: batchOffset,
+      });
+    }
+    keyed.sort((a, b) => a.offset - b.offset);
+    const straddleCandidate = keyed.filter((entry) => entry.offset < offset).pop();
+    for (const entry of keyed) {
+      if (entry.offset >= offset) {
+        await storage.delete(entry.key);
+      }
+    }
+    if (!straddleCandidate) {
+      return;
+    }
+    const batch = await storage.get<unknown[]>(straddleCandidate.key);
+    if (!batch || straddleCandidate.offset + batch.length <= offset) {
+      return;
+    }
+    await storage.set(straddleCandidate.key, batch.slice(0, offset - straddleCandidate.offset));
+  }
+
   async function clear(executionId: string): Promise<void> {
     await storage.delete(snapshotKey(executionId));
   }
@@ -156,6 +262,9 @@ export function createCheckpointStore(options: CreateCheckpointStoreOptions): Ch
   return {
     save,
     load,
+    appendItems,
+    loadItems,
+    truncateItems,
     list,
     clear,
   };
