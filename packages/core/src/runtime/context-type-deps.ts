@@ -14,5 +14,5 @@ export type {
   Tool,
 } from '@noetic-tools/types';
 export type { FrontierFrame } from '../types/checkpoint';
+export type { EventBroadcaster } from '../util/event-broadcaster';
 export type { ChannelStore } from './channel-store';
-export type { EventBroadcaster } from './event-broadcaster';

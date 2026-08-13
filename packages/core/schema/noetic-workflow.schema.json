@@ -156,7 +156,8 @@
             },
             "execute": {
               "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "maxLength": 262144
             },
             "retry": {
               "type": "object",
@@ -222,6 +223,13 @@
                   "match": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "matchMode": {
+                    "type": "string",
+                    "enum": [
+                      "substring",
+                      "exact"
+                    ]
                   },
                   "target": {
                     "$ref": "#/$defs/WorkflowNode"

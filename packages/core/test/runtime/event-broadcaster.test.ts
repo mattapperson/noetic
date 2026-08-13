@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import type { StreamEvent } from '@noetic-tools/types';
-import { EventBroadcaster } from '../../src/runtime/event-broadcaster';
+import { EventBroadcaster } from '../../src/util/event-broadcaster';
 
 function textDelta(text: string): StreamEvent {
   return {

@@ -32,7 +32,8 @@ function makeMockSubprocess(opts?: { fail?: boolean }): {
     async spawn(request: ProcessSubprocessRequest): Promise<SubprocessHandle> {
       calls.push(request);
       const id = `mock-${calls.length}`;
-      const code = String(request.metadata?.code ?? '');
+      // The code travels in argv (`node -e <code>`), not metadata.
+      const code = String(request.args?.[1] ?? '');
       const stdin = request.stdin ?? '';
       handles.set(id, {
         id,
@@ -1391,7 +1392,9 @@ describe('hydrateNode — run', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0].kind).toBe('process');
     expect(calls[0].stdin).toBe('the-input');
-    expect(calls[0].metadata?.code).toBe('process.stdout.write("hi")');
+    // Code travels as argv (node -e <code>); metadata carries identification only.
+    expect(calls[0].args?.[1]).toBe('process.stdout.write("hi")');
+    expect(calls[0].metadata?.code).toBeUndefined();
   });
 
   test('resolves a named subprocess ref via HydrationContext.resolveSubprocess', async () => {

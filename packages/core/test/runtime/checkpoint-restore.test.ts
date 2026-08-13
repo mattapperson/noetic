@@ -13,12 +13,12 @@ import type { ContextLayer } from '@noetic-tools/context';
 import { Slot } from '@noetic-tools/context';
 import type { Item } from '@noetic-tools/types';
 import { AgentHarness } from '../../src/harness/agent-harness';
-import { getBroadcaster } from '../../src/runtime/broadcaster-utils';
 import { createCheckpointStore } from '../../src/runtime/durable/checkpoint-store';
 import type { RestoreCheckpointOptions } from '../../src/runtime/durable/harness-checkpoints';
-import { EventBroadcaster } from '../../src/runtime/event-broadcaster';
 import { createInMemoryStorage } from '../../src/runtime/in-memory-storage';
 import type { CheckpointSnapshot } from '../../src/types/checkpoint';
+import { getBroadcaster } from '../../src/util/broadcaster-utils';
+import { EventBroadcaster } from '../../src/util/event-broadcaster';
 import { makeLayer, makeMessage } from '../_helpers';
 
 describe('CheckpointStore', () => {

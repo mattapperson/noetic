@@ -7,8 +7,8 @@ import type {
   Item,
   SessionUsage,
 } from '@noetic-tools/types';
-import { emitFrameworkEvent } from './broadcaster-utils';
-import { EventBroadcaster } from './event-broadcaster';
+import { emitFrameworkEvent } from '../util/broadcaster-utils';
+import { EventBroadcaster } from '../util/event-broadcaster';
 import type { QueuedMessage } from './message-queue';
 import { MessageQueue } from './message-queue';
 

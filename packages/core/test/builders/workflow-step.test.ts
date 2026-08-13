@@ -217,6 +217,12 @@ describe('workflow — execution', () => {
         kind: 'invokeTool',
         id: 'use-tool',
         toolName: tool.name,
+        // `args` must satisfy the tool's declared input schema: invokeTool
+        // nodes dispatch through `executeToolCall`, which validates before
+        // execute.
+        args: {
+          query: 'in',
+        },
       },
     };
     const withTools = workflow({

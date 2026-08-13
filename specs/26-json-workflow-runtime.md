@@ -125,15 +125,17 @@ interface InvokeToolWorkflowNode {
 | `toolName` | Yes      | Name of a tool in the hydration context registry.   |
 | `args`     | No       | Static arguments passed to the tool at execution.   |
 
+An `invokeTool` node dispatches through the same shared execution path as the model tool-loop (`executeToolCall`): arguments are validated against the tool's input schema, steering hooks (`beforeToolCall`) run when the context carries layers, and tool-UI fragments emit. The transcript records both the `function_call` item and its matching `function_call_output`. A failed call throws `WORKFLOW_TOOL_CALL_FAILED`.
+
 ### `conditional`
 
-Conditional routing based on substring matching against the input.
+Conditional routing based on matching against the input.
 
 ```typescript
 interface ConditionalWorkflowNode {
   kind: 'conditional';
   id: string;
-  routes: Array<{ match: string; target: WorkflowNode }>;
+  routes: Array<{ match: string; matchMode?: 'substring' | 'exact'; target: WorkflowNode }>;
   default?: WorkflowNode;
 }
 ```
@@ -143,7 +145,7 @@ interface ConditionalWorkflowNode {
 | `routes`  | Yes      | Ordered list of match/target pairs. First matching route wins.     |
 | `default` | No       | Fallback node when no route matches. Omitting produces a no-op.   |
 
-Each route's `match` string is tested as a case-insensitive substring against the string representation of the input. This keeps the JSON schema simple and LLM-friendly; closures are not JSON-serialisable.
+Each route's `match` string is tested case-insensitively against the string representation of the input, lowercased once at hydration. `matchMode: 'substring'` (the default) fires when the trimmed input CONTAINS the pattern — beware, route `'cat'` fires for input `'concatenate'`; `matchMode: 'exact'` requires the trimmed input to EQUAL the pattern. This keeps the JSON schema simple and LLM-friendly; closures are not JSON-serialisable.
 
 ### `inParallel`
 
@@ -166,6 +168,8 @@ interface InParallelWorkflowNode {
 | `paths`       | Yes      | Array of child nodes to execute in parallel.                |
 | `merge`       | No       | How to combine results. Default: `last`.                    |
 | `concurrency` | No       | Maximum number of paths running simultaneously.             |
+
+The dynamic fan-out form (`each` + `over`, exactly one of `paths`/`each`) instantiates the `each` template once per item of a runtime-produced array. Template hydration is cached per item INDEX — hydration (and its step-registry registration) depends only on the index, not the item — so an inParallel invoked repeatedly reuses one hydrated step per index instead of re-registering the same `-${i}` ids on every invocation; the thin per-item wrapper is rebuilt per call but reuses its id, keeping the registry bounded.
 
 ### `spawn`
 
@@ -444,13 +448,13 @@ This is a hard failure -- partial hydration with missing tools is not supported.
 
 ### Branch Route Hydration
 
-Branch `routes` are hydrated into a `route` function that tests each `match` string as a case-insensitive substring against `String(input)`:
+Branch `routes` are hydrated into a `route` function that lowercases each `match` once at hydration and tests it case-insensitively against `String(input)`, honoring the route's `matchMode` (`substring` by default, `exact` for full-input equality):
 
 ```typescript
 route: (input, ctx) => {
-  const text = String(input).toLowerCase();
-  for (const { match, target } of routes) {
-    if (text.includes(match.toLowerCase())) {
+  const text = String(input).trim().toLowerCase();
+  for (const { match, exact, target } of routes) {
+    if (exact ? text === match : text.includes(match)) {
       return hydrateNode(target, hydrationCtx);
     }
   }
@@ -500,15 +504,21 @@ function dynamicWorkflow(opts: {
   tools: Map<string, Tool>;
   maxRevisions?: number;
   maxDepth?: number;
+  layers?: ReadonlyMap<string, ContextLayer>;
+  subHarnesses?: ReadonlyMap<SubHarnessKind, SubHarness>;
+  uiLibraries?: ReadonlyMap<string, OutputCodec>;
+  workflows?: ReadonlyMap<string, WorkflowDocument>;
 }): Step<string, string>
 ```
+
+The four registry options are forwarded to hydration, mirroring `HydrationContext`: without `subHarnesses` a generated sub-harness node can never resolve, and without `workflows` a generated `subflow` ref cannot either.
 
 Execution flow:
 
 1. Call the LLM with `WorkflowDocumentSchema` as the structured output schema.
-2. Validate the response against `WorkflowDocumentSchema`.
+2. Validate the response with `validateWorkflow` (Zod shape + node-id uniqueness).
 3. If validation fails and revisions remain, feed the validation errors back to the LLM and retry from step 1.
-4. If validation succeeds, hydrate the document via `hydrateWorkflow`.
+4. If validation succeeds, hydrate the document via `hydrateWorkflow`. Hydration failures (`NoeticConfigError` — unknown tool/harness/layer/workflow refs) are planner-repairable, so they feed the revision loop exactly like validation failures; execution errors after hydration still propagate.
 5. Execute the hydrated `Step` tree with the current context.
 
 ```typescript
@@ -524,7 +534,7 @@ const planner = dynamicWorkflow({
 const result = await execute(planner, 'Analyze the codebase and fix all lint errors', ctx);
 ```
 
-`maxRevisions` defaults to `2`. Each revision re-prompts the LLM with the previous attempt and the validation error. If all revisions are exhausted, execution throws `WORKFLOW_GENERATION_FAILED`.
+`maxRevisions` defaults to `3`. Each revision re-prompts the LLM with the previous attempt and the validation or hydration error. If all revisions are exhausted, execution throws `WORKFLOW_VALIDATION_FAILED`.
 
 ### `parseAndRunWorkflow` -- Pre-Built Workflows
 
@@ -561,7 +571,11 @@ const result = await parseAndRunWorkflow({
 
 ### No In-Process Closures
 
-Programmatic `runCode` accepts an `execute` closure, which is not JSON-serialisable. The `runCode` node instead carries its body as a code STRING dispatched through a subprocess adapter — never eval'd in-process. Arbitrary in-process computation must be expressed through tool calls or LLM steps.
+Programmatic `runCode` accepts an `execute` closure, which is not JSON-serialisable. The `runCode` node instead carries its body as a code STRING dispatched through a subprocess adapter — never eval'd in-process. Arbitrary in-process computation must be expressed through tool calls or LLM steps. The code string is capped at 256 KiB-equivalent length (262,144 UTF-16 code units): it is embedded in the document, shipped to the subprocess as an argv entry (OS argv limits are of this order), and can end up in trace attributes, so an unbounded string is a document-size and checkpoint-size hazard with no legitimate use.
+
+### Node Id Uniqueness
+
+`validateWorkflow` enforces node-id uniqueness per document scope (`DUPLICATE_NODE_ID`). Shape validation cannot express this, and downstream machinery quietly corrupts without it: the step registry is latest-wins, `workflowGraph` emits ambiguous edges, and the step ledger keys resume replay by id-derived paths, so duplicate-id siblings can replay each other's recorded outputs. Each document is its own scope — an inline `subflow` document's ids are suffixed with `-${node.id}` at hydration, so an id shared between the outer document and a nested one stays legal; every inline sub-workflow is validated independently.
 
 ### Static Lazy Fields Only
 
@@ -601,7 +615,9 @@ The JSON Workflow Runtime introduces the following `NoeticConfigError` codes:
 
 | Code                           | When                                                                     |
 |--------------------------------|--------------------------------------------------------------------------|
-| `WORKFLOW_VALIDATION_FAILED`   | Document fails schema validation or exceeds `maxDepth` at parse time.    |
+| `WORKFLOW_VALIDATION_FAILED`   | Document fails validation (shape, id uniqueness, depth) at parse time, or the planner exhausts its revision budget. |
+| `DUPLICATE_NODE_ID`            | A node id appears twice in the same document scope at validation time.   |
+| `WORKFLOW_TOOL_CALL_FAILED`    | An `invokeTool` node's call failed validation, steering, or execution.   |
 | `UNKNOWN_NODE_KIND`            | A node kind has no registered hydrator.                                  |
 | `UNKNOWN_TOOL_REFERENCE`       | A tool name in the document is not in the hydration registry.            |
 | `UNKNOWN_LAYER_REFERENCE`      | A layer name on a `withContext`/`spawn` node is not in the layer registry.   |

@@ -126,7 +126,7 @@ Run a serialised code body. Unlike the programmatic `runCode` (which carries a c
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `id` | `string` | required | Unique step identifier. |
-| `execute` | `string` | required | Source code dispatched to the subprocess. Receives the step input on stdin; its stdout becomes the step output. |
+| `execute` | `string` | required | Source code dispatched to the subprocess. Receives the step input on stdin; its stdout becomes the step output. Capped at 262,144 characters (256 KiB-equivalent) — the string travels as an OS argv entry and can land in trace attributes. |
 | `retry` | `object` | `undefined` | Retry policy: `{ maxAttempts, backoff: 'fixed' \| 'linear' \| 'exponential', initialDelay, maxDelay? }`. |
 | `subprocess` | `string` | `undefined` | Named subprocess adapter ref, resolved via `HydrationContext.resolveSubprocess`. When omitted, the harness default (`ctx.subprocess`) is used. |
 
@@ -150,6 +150,8 @@ Invoke a registered tool directly.
 | `id` | `string` | required | Unique step identifier. |
 | `toolName` | `string` | required | Name of a tool in the tool registry. |
 | `args` | `Record<string, unknown>` | `{}` | Arguments passed to the tool's `execute` function. |
+
+`invokeTool` nodes dispatch through the same execution path as model-driven tool calls: `args` are validated against the tool's input schema before execution, steering hooks run when the context carries layers, and tool-UI fragments emit. A failed call throws `NoeticConfigError` with code `WORKFLOW_TOOL_CALL_FAILED` and names the tool, node, and reason.
 
 ### sequence
 
@@ -231,7 +233,7 @@ Route input to one of several targets based on substring matching.
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `id` | `string` | required | Unique step identifier. |
-| `routes` | `{ match: string, target: WorkflowNode }[]` | required | Ordered matching rules. First match wins (case-insensitive substring). |
+| `routes` | `{ match: string, matchMode?: 'substring' \| 'exact', target: WorkflowNode }[]` | required | Ordered matching rules. First match wins (case-insensitive). `matchMode` defaults to `'substring'` — beware, route `'cat'` fires for input `'concatenate'`; `'exact'` requires the whole trimmed input to equal the pattern. |
 | `default` | `WorkflowNode` | `undefined` | Fallback node when no route matches. |
 
 ### loop
@@ -420,9 +422,13 @@ const response = await harness.getAgentResponse();
 | `instructions` | `string` | `undefined` | Additional instructions prepended to the planner prompt. |
 | `tools` | `Tool[]` | required | Tools the generated workflow may reference by name. |
 | `maxDepth` | `number` | `5` | Maximum allowed tree depth for generated workflows. |
-| `maxRevisions` | `number` | `3` | Retries with error feedback on validation failure. |
+| `maxRevisions` | `number` | `3` | Retries with error feedback on validation or hydration failure. |
+| `layers` | `ReadonlyMap<string, ContextLayer>` | `undefined` | Context layers a generated `withContext`/`spawn` node may reference by name. |
+| `subHarnesses` | `ReadonlyMap<SubHarnessKind, SubHarness>` | `undefined` | Sub-harness adapters a generated `claude-code`/`codex`/… node resolves against. |
+| `uiLibraries` | `ReadonlyMap<string, OutputCodec>` | `undefined` | Output codecs a generated `callModel` node's `output` codec ref resolves against. |
+| `workflows` | `ReadonlyMap<string, WorkflowDocument>` | `undefined` | Named sub-workflows a generated `subflow` node may reference via `ref`. |
 
-Throws `NoeticConfigError` with code `WORKFLOW_VALIDATION_FAILED` if the planner cannot produce a valid workflow within the revision limit.
+Throws `NoeticConfigError` with code `WORKFLOW_VALIDATION_FAILED` if the planner cannot produce a valid workflow within the revision limit. Hydration failures — unknown tool, harness, layer, or workflow references — feed the same revision loop with a register-your-refs hint, so the planner can repair them like shape errors.
 
 ## parseAndRunWorkflow()
 
@@ -461,7 +467,7 @@ const result = await parseAndRunWorkflow({
 
 Returns `Promise<string>` -- the string output of the executed workflow.
 
-Throws `NoeticConfigError` with code `WORKFLOW_VALIDATION_FAILED` if the JSON does not match `WorkflowDocumentSchema`. Throws `NoeticConfigError` with code `UNKNOWN_TOOL_REFERENCE` if a tool name cannot be resolved.
+Throws `NoeticConfigError` with code `WORKFLOW_VALIDATION_FAILED` if the JSON does not match `WorkflowDocumentSchema`, or `DUPLICATE_NODE_ID` if a node id appears twice in the same document scope (an inline `subflow` document is its own scope — its ids are suffixed at hydration, so reusing an outer id inside one is legal). Throws `NoeticConfigError` with code `UNKNOWN_TOOL_REFERENCE` if a tool name cannot be resolved.
 
 ## Worked example: a model panel with an Opus judge
 
@@ -550,7 +556,7 @@ Throws `NoeticConfigError` with code `UNKNOWN_NODE_KIND` if a node kind is unrec
 - **`runCode` nodes need a subprocess adapter** -- the JSON `runCode` node carries its body as a code string and dispatches it through a subprocess adapter (it is never `eval`'d in-process). A host that uses `runCode` nodes must supply an adapter capable of running the code and capturing its stdout.
 - **Tools resolved by name** -- every tool referenced in the workflow must be passed in the `tools` array. The hydrator looks them up by `tool.name`.
 - **Subflow refs resolve at execution time** -- a `subflow` node's `ref` is looked up on first execution, not during hydration, so an unregistered name surfaces as `UNKNOWN_WORKFLOW_REFERENCE` when the node runs. Depth limits do not see through refs; cycle detection prevents infinite recursion, but acyclic ref fan-out is not bounded — hosts should cap registry size and breadth for untrusted documents.
-- **Conditional routing is substring-based** -- `conditional` node routes use case-insensitive substring matching on the input string. Complex routing logic requires programmatic `conditional()` steps.
+- **Conditional routing is substring-based by default** -- `conditional` node routes use case-insensitive matching on the input string: substring unless a route sets `matchMode: 'exact'`. Complex routing logic requires programmatic `conditional()` steps.
 
 ## Plans as Workflows
 

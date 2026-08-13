@@ -18,19 +18,19 @@ import type { OpenRouter } from '@openrouter/agent';
 import { serverTool } from '@openrouter/agent';
 import {
   convertTools,
-  executeToolCall,
   extractOutputItems,
   extractSystemInstruction,
   extractUsage,
   itemsToInput,
   resolveWireJsonSchema,
-  sanitizeToolNameForWire,
 } from '../adapters/openrouter';
 import { isFunctionCall } from '../interpreter/typeguards';
 import { GenAI, NoeticAttr, ToolAttr } from '../observability/genai-attributes';
-import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../runtime/broadcaster-utils';
-import type { EventBroadcaster } from '../runtime/event-broadcaster';
 import type { MessageQueue, QueuedMessage } from '../runtime/message-queue';
+import { executeToolCall } from '../tooling/tool-execution';
+import { sanitizeToolNameForWire } from '../tooling/tool-name';
+import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../util/broadcaster-utils';
+import type { EventBroadcaster } from '../util/event-broadcaster';
 import { buildItemSchemaRegistry, createToolResultItem } from './model-schema.js';
 
 const MAX_TOOL_ROUNDS = 32;
