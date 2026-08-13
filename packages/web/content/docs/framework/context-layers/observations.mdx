@@ -10,7 +10,7 @@ Observations accumulates conversation text into a buffer, and when the buffer cr
 - **Slot**: `200` (`Slot.OBSERVATIONS`)
 - **Default scope**: `resource`
 - **Default budget**: `{ min: 500, max: 2500 }`
-- **Hook timeouts**: `store` and `onItemAppend` both `60000` ms (both hooks run the LLM-backed distillation path)
+- **Hook timeouts**: none — distillation is deferred off the turn path, so the default hook timeouts apply
 
 ## Usage
 
@@ -79,9 +79,11 @@ If observations exist, formats them as a bulleted list inside an `<observations>
 
 1. Extracts text content from new `message` items in the LLM response.
 2. Appends the text to the buffer and updates the token count.
-3. When `bufferTokens` reaches `bufferThreshold`, calls the `observer` function with the full buffer.
-4. The observer returns distilled observation strings, which are appended to the observations list (capped at `maxObservations`).
-5. The buffer resets to empty.
+3. When `bufferTokens` reaches `bufferThreshold`, dispatches the `observer` with the full buffer **in the background** — the hook returns immediately without awaiting the LLM call.
+4. When the observer resolves, its distilled observations drain into state on the next `store`/`onItemAppend` (capped at `maxObservations`). If the observer rejects, the batch is retained and retried on a later hook — nothing is silently dropped.
+5. The buffer resets to empty when a batch is dispatched.
+
+Deferred batches are keyed per scope key: one layer instance serves every thread/resource on a harness, so results always drain back into the scope that produced them. Because draining only happens in `store`/`onItemAppend`, `recall` never mutates state.
 
 If no custom `observer` is provided, a simple fallback records `"Processed N items"`.
 

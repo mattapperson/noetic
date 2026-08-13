@@ -95,13 +95,14 @@ function observations(config?: ObservationsConfig): ContextLayer<ObservationsSta
 | **slot** | `Slot.OBSERVATIONS` (200) |
 | **scope** | `config.scope ?? 'resource'` |
 | **budget** | `{ min: 500, max: 2500 }` |
-| **timeouts** | `{ store: 60_000, onItemAppend: 60_000 }` (both hooks run the LLM-backed distillation path) |
 | **hooks** | `init`, `recall`, `store`, `onItemAppend`, `onSpawn` |
+
+Distillation is deferred: when the buffer crosses the threshold, the observer batch is dispatched in the background (fire-and-collect) instead of being awaited in the hook. The completed batch drains into state on the next `store`/`onItemAppend`, so an LLM-backed observer never blocks the turn and the layer needs no hook-timeout override. Deferred batches are keyed per scope key — one layer instance serves every thread/resource on a harness, so a shared bucket would cross-contaminate scopes. A rejected observer batch is retained and retried on a later hook (nothing is silently dropped), and rejections are always handled so they can never surface as unhandled.
 
 **Behavior:**
 - `init`: Loads versioned state from storage.
-- `recall`: Renders observations as `<observations>` bullet list in a `MessageItem` with `role: developer`. Trims output to the allocated budget.
-- `store`: Buffers **assistant output** items. When the token threshold is reached, runs the observer LLM on the buffer. Compacts if over `maxObservations`.
+- `recall`: Renders observations as `<observations>` bullet list in a `MessageItem` with `role: developer`. Trims output to the allocated budget. Never mutates state (draining happens in `store`/`onItemAppend`, keeping `recall` pure and the layer anchorable).
+- `store`: Buffers **assistant output** items. When the token threshold is reached, dispatches the observer on the buffer in the background; completed batches drain in here. Compacts if over `maxObservations`.
 - `onItemAppend`: Buffers **user input and tool output** items the same way `store` buffers assistant output, so observations are distilled from the full conversation, not just the model's replies.
 - `onSpawn`: Clones observations to child.
 
