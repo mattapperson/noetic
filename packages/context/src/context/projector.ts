@@ -1,5 +1,10 @@
-import type { Item, ProjectionPolicy } from '@noetic-tools/types';
-import { estimateTokens } from '@noetic-tools/types';
+import type { CompactionItem, Item, ProjectionPolicy } from '@noetic-tools/types';
+import {
+  COMPACTION_ITEM_TYPE,
+  createMessage,
+  estimateTokens,
+  frameworkCast,
+} from '@noetic-tools/types';
 import { stripUnresolvedToolCalls } from './strip-unresolved';
 
 //#region Types
@@ -18,6 +23,36 @@ interface AssembleViewParams {
   policy?: ProjectionPolicy;
 }
 
+/** @public Result of measuring folded history against a compaction threshold. */
+export interface HistoryPressure {
+  /** Estimated tokens of the folded history. */
+  historyTokens: number;
+  /** The `compactAt` threshold in effect. */
+  compactAt: number;
+  /** True when historyTokens > compactAt — compaction should run. */
+  overThreshold: boolean;
+}
+
+/** @public Parameters for `createCompaction`. */
+export interface CreateCompactionParams {
+  /** The RAW item log the compaction indexes into. */
+  items: ReadonlyArray<Item>;
+  /** How many leading raw-log items the summary replaces. */
+  replacesUntil: number;
+  /** The summary that stands in for the replaced prefix. */
+  summary: string;
+}
+
+/** @public Parameters for `compactHistory`. */
+export interface CompactHistoryParams {
+  /** The RAW item log to compact. */
+  log: ReadonlyArray<Item>;
+  /** How many trailing raw-log items to leave uncompacted. */
+  keepRecent: number;
+  /** Produces the summary for the covered prefix. */
+  summarize: (replaced: ReadonlyArray<Item>) => string | Promise<string>;
+}
+
 //#endregion
 
 //#region Helpers
@@ -25,6 +60,18 @@ interface AssembleViewParams {
 /** Conservative per-item token estimate (serialized form ⇒ never under-counts). */
 function itemTokens(item: Item): number {
   return estimateTokens(JSON.stringify(item));
+}
+
+function isCompactionItem(item: Item): item is Item & CompactionItem {
+  return item.type === COMPACTION_ITEM_TYPE;
+}
+
+/** Render a compaction summary as a developer message the model can read. */
+function renderCompaction(compaction: CompactionItem): Item {
+  return createMessage(
+    `<compacted_history items="${compaction.replacedCount}">\n${compaction.summary}\n</compacted_history>`,
+    'developer',
+  );
 }
 
 function totalTokens(items: ReadonlyArray<Item>): number {
@@ -159,6 +206,141 @@ export function assembleView({
     ...deltaItems,
     ...tailItems,
   ];
+}
+
+/**
+ * @public Fold recorded compactions into a history view.
+ *
+ * The item log is append-only; a compaction is an ordinary logged item that
+ * declares "the first `replacesUntil` items are summarized by `summary`".
+ * Folding keeps the log immutable (checkpoints, forks, and audits see the full
+ * record) while the model sees `[summary, ...items after replacesUntil]`.
+ *
+ * When multiple compactions exist, the one with the highest `replacesUntil`
+ * wins (later compactions subsume earlier ones — their summaries were produced
+ * with the earlier summary already in view). Compaction items themselves never
+ * appear in the folded view; the winning one renders as a developer message.
+ *
+ * Runs BEFORE the band assembler, so a compaction genuinely reduces what
+ * `assembleView` has to fit — and therefore how much history it has to trim.
+ */
+export function foldCompactions(items: ReadonlyArray<Item>): Item[] {
+  let winner: CompactionItem | null = null;
+  for (const item of items) {
+    if (isCompactionItem(item) && (!winner || item.replacesUntil > winner.replacesUntil)) {
+      winner = item;
+    }
+  }
+  if (!winner) {
+    return items.filter((i) => !isCompactionItem(i));
+  }
+  const kept: Item[] = [
+    renderCompaction(winner),
+  ];
+  for (let i = winner.replacesUntil; i < items.length; i++) {
+    const item = items[i];
+    if (isCompactionItem(item)) {
+      continue;
+    }
+    kept.push(item);
+  }
+  // A fold boundary can strand a tool call whose output was compacted away
+  // (or vice versa); repair the seam the same way the trimmer does.
+  return stripUnresolvedToolCalls(kept);
+}
+
+/**
+ * @public Whether a log carries any compaction record.
+ *
+ * Lets a caller skip `foldCompactions` (and its copy) on the overwhelmingly
+ * common no-compaction path while still guaranteeing that a compaction item
+ * never reaches a provider un-folded.
+ */
+export function hasCompaction(items: ReadonlyArray<Item>): boolean {
+  return items.some(isCompactionItem);
+}
+
+/**
+ * @public Measure history pressure against the policy's compaction threshold.
+ *
+ * The caller surfaces `overThreshold` to whatever drives compaction. That is
+ * the complementary half of the band assembler's budget enforcement:
+ * `assembleView` still trims the oldest history when the view will not fit, but
+ * it does so silently. This says when the trim is coming, so the caller can
+ * compact — replacing the prefix with a summary — instead of losing it.
+ */
+export function historyPressure(
+  historyItems: ReadonlyArray<Item>,
+  policy: ProjectionPolicy,
+): HistoryPressure {
+  const historyTokens = totalTokens(foldCompactions(historyItems));
+  const compactAt =
+    policy.compactAt ??
+    Math.max(0, Math.floor((policy.tokenBudget - policy.responseReserve) * 0.8));
+  return {
+    historyTokens,
+    compactAt,
+    overThreshold: historyTokens > compactAt,
+  };
+}
+
+/**
+ * @public Build the compaction record for a history prefix.
+ *
+ * The caller supplies the summary (an LLM call, a heuristic, or a verbatim
+ * digest — compaction is a composition point, not engine policy) and appends
+ * the returned item to the log. Idempotent with respect to prior compactions:
+ * `replacesUntil` indexes the RAW log, including any earlier compaction items
+ * in the prefix, so stacking compactions is well-defined.
+ */
+export function createCompaction(params: CreateCompactionParams): CompactionItem {
+  const replaced = params.items.slice(0, params.replacesUntil);
+  const summaryTokens = estimateTokens(params.summary);
+  return {
+    id: crypto.randomUUID(),
+    type: COMPACTION_ITEM_TYPE,
+    status: 'completed',
+    replacesUntil: params.replacesUntil,
+    summary: params.summary,
+    replacedCount: replaced.length,
+    tokensSaved: Math.max(0, totalTokens(replaced) - summaryTokens),
+  };
+}
+
+/**
+ * @public Compact a log down to its most recent `keepRecent` items.
+ *
+ * A thin convenience over `createCompaction`: it works out `replacesUntil` from
+ * `keepRecent`, calls `summarize` with exactly the items being replaced, and
+ * returns the record for the CALLER to append (`ctx.itemLog.append(...)`).
+ * Appending is left to the caller because compaction is an explicit, logged
+ * decision — the projector never mutates a log behind the runtime's back.
+ *
+ * Returns `null` when there is nothing to compact.
+ */
+export async function compactHistory(params: CompactHistoryParams): Promise<CompactionItem | null> {
+  const replacesUntil = params.log.length - Math.max(0, params.keepRecent);
+  if (replacesUntil <= 0) {
+    return null;
+  }
+  const summary = await params.summarize(params.log.slice(0, replacesUntil));
+  return createCompaction({
+    items: params.log,
+    replacesUntil,
+    summary,
+  });
+}
+
+/**
+ * @public Append-safe view of a compaction record.
+ *
+ * `CompactionItem` is deliberately outside the `Item` union — nothing renders
+ * it directly, the projector folds it — but it must reach `ItemLog.append`,
+ * which takes an `Item`. This is the one sanctioned bridge; the item type is
+ * registered with the schema registry so the append validates.
+ */
+export function compactionAsItem(compaction: CompactionItem): Item {
+  return frameworkCast<Item>(compaction);
 }
 
 //#endregion
