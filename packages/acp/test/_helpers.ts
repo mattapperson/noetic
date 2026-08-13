@@ -223,6 +223,8 @@ export interface AcpTestRig {
   calls: FakeAgentCalls;
   /** Every notification the host observed. */
   updates: AcpSessionNotification[];
+  /** Every `fs/*` and `terminal/*` call the host observed, allowed and refused. */
+  activity: AcpClientActivity[];
   fs: MemoryFs;
   shell: RecordingShell;
   close(): Promise<void>;
@@ -239,7 +241,7 @@ export interface AcpTestRigOptions {
   shell?: RecordingShell;
   cwd?: string;
   signal?: AbortSignal;
-  /** Observe the agent's `fs/*` and `terminal/*` calls. */
+  /** Additionally observe the agent's `fs/*` and `terminal/*` calls. */
   onActivity?: (activity: AcpClientActivity) => void;
 }
 
@@ -252,6 +254,7 @@ export async function createAcpTestRig(opts: AcpTestRigOptions = {}): Promise<Ac
   const script = opts.script ?? {};
   const calls = emptyCalls();
   const updates: AcpSessionNotification[] = [];
+  const activity: AcpClientActivity[] = [];
   const fs = opts.fs ?? new MemoryFs();
   const shell = opts.shell ?? new RecordingShell();
   const cwd = opts.cwd ?? '/workspace';
@@ -323,7 +326,9 @@ export async function createAcpTestRig(opts: AcpTestRigOptions = {}): Promise<Ac
     onSessionUpdate: (notification) => {
       updates.push(notification);
     },
-    onClientActivity: opts.onActivity,
+    onClientActivity: (entry) => {
+      activity.push(entry);
+    },
   };
 
   const connection = await openAcpConnection({
@@ -338,6 +343,7 @@ export async function createAcpTestRig(opts: AcpTestRigOptions = {}): Promise<Ac
     host,
     calls,
     updates,
+    activity,
     fs,
     shell,
     async close() {

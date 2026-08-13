@@ -8,6 +8,7 @@ export type {
   StorageAdapter,
 } from '@noetic-tools/context';
 export type {
+  AcpKeepAlive,
   AcpLiveSession,
   AcpSessionInfo,
   AgentConfig,

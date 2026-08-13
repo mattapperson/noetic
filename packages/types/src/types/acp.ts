@@ -224,12 +224,20 @@ export interface AcpClientCapabilityConfig {
 }
 
 /**
- * The runtime surface an ACP connection is given to satisfy client-side
- * requests. Because file reads/writes and terminal commands are served from
- * Noetic's own adapters, everything the sub-agent touches passes through the
- * same sandboxing, virtual-filesystem, and audit machinery as first-party steps.
+ * The client methods an agent can invoke on us. Closed by ACP spec version 1,
+ * so a literal union rather than `string`: a typo in a descriptor is a compile
+ * error, and consumers narrowing on `activity.method` get exhaustiveness.
  * @public
  */
+export type AcpClientMethod =
+  | 'fs/read_text_file'
+  | 'fs/write_text_file'
+  | 'terminal/create'
+  | 'terminal/output'
+  | 'terminal/wait_for_exit'
+  | 'terminal/kill'
+  | 'terminal/release';
+
 /**
  * One client-side operation an agent performed — or was refused. Emitted for
  * every `fs/*` and `terminal/*` call the agent makes.
@@ -241,7 +249,7 @@ export interface AcpClientCapabilityConfig {
  */
 export interface AcpClientActivity {
   /** The ACP client method invoked, e.g. `fs/read_text_file`. */
-  method: string;
+  method: AcpClientMethod;
   /** Path involved, for the `fs/*` family and `terminal/create`'s cwd. */
   path?: string;
   /** Command line, for `terminal/create`. */
@@ -254,6 +262,13 @@ export interface AcpClientActivity {
   reason?: string;
 }
 
+/**
+ * The runtime surface an ACP connection is given to satisfy client-side
+ * requests. Because file reads/writes and terminal commands are served from
+ * Noetic's own adapters, everything the sub-agent touches passes through the
+ * same sandboxing, virtual-filesystem, and audit machinery as first-party steps.
+ * @public
+ */
 export interface AcpClientHost {
   /** Working directory for the session (resolved from `ctx.cwdState.cwd`). */
   readonly cwd: string;
@@ -513,8 +528,10 @@ export interface AcpSessionPolicy {
  * @public
  */
 export interface AcpSessionInfo {
-  /** The `session.reuse` key it is held under. */
+  /** Opaque handle for this session — pass it back to `getAcpSession`/`cancelAcpSession`. */
   key: string;
+  /** The `session.reuse` key the step named, when it named one. */
+  reuseKey?: string;
   /** `agentId` of the adapter driving it. */
   agentId: string;
   /** The agent's own session id. */

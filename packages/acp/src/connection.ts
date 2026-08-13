@@ -35,6 +35,8 @@ import {
   PROTOCOL_VERSION,
 } from '@zed-industries/agent-client-protocol';
 import { clientCapabilitiesFor, NoeticAcpClient } from './client';
+import type { WatchedTransport } from './liveness';
+import { watchTransport } from './liveness';
 import { AcpTurnAccumulator } from './turn';
 
 //#region Types
@@ -102,6 +104,8 @@ class AcpSessionImpl implements AcpSession {
     readonly modes: acp.SessionModeState | undefined,
     private readonly models: acp.SessionModelState | undefined,
     private commands: acp.AvailableCommand[],
+    /** Rejects if the agent dies, so a request cannot outlive it. */
+    private readonly death: Promise<never>,
   ) {}
 
   get availableCommands(): ReadonlyArray<acp.AvailableCommand> {
@@ -131,12 +135,15 @@ class AcpSessionImpl implements AcpSession {
       once: true,
     });
     try {
-      const response = await this.agent.prompt({
-        sessionId: this.sessionId,
-        prompt: [
-          ...opts.content,
-        ],
-      });
+      const response = await Promise.race([
+        this.agent.prompt({
+          sessionId: this.sessionId,
+          prompt: [
+            ...opts.content,
+          ],
+        }),
+        this.death,
+      ]);
       return accumulator.result({
         stopReason: response.stopReason,
       });
@@ -159,10 +166,13 @@ class AcpSessionImpl implements AcpSession {
         capability: 'session/set_mode',
       });
     }
-    await this.agent.setSessionMode({
-      sessionId: this.sessionId,
-      modeId,
-    });
+    await Promise.race([
+      this.agent.setSessionMode({
+        sessionId: this.sessionId,
+        modeId,
+      }),
+      this.death,
+    ]);
   }
 
   async setModel(modelId: string): Promise<void> {
@@ -172,10 +182,13 @@ class AcpSessionImpl implements AcpSession {
         capability: 'session/set_model',
       });
     }
-    await this.agent.setSessionModel({
-      sessionId: this.sessionId,
-      modelId,
-    });
+    await Promise.race([
+      this.agent.setSessionModel({
+        sessionId: this.sessionId,
+        modelId,
+      }),
+      this.death,
+    ]);
   }
 }
 
@@ -194,6 +207,7 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
     readonly agentCapabilities: acp.AgentCapabilities,
     readonly authMethods: ReadonlyArray<acp.AuthMethod>,
     readonly protocolVersion: number,
+    private readonly watch: WatchedTransport,
   ) {}
 
   /** The sink the client hands every `session/update` notification. */
@@ -204,16 +218,22 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
   }
 
   async authenticate(methodId: string): Promise<void> {
-    await this.agent.authenticate({
-      methodId,
-    });
+    await Promise.race([
+      this.agent.authenticate({
+        methodId,
+      }),
+      this.watch.death,
+    ]);
   }
 
   async newSession(opts: AcpNewSessionOptions): Promise<AcpSession> {
-    const response = await this.agent.newSession({
-      cwd: opts.cwd,
-      mcpServers: this.checkedMcpServers(opts.mcpServers),
-    });
+    const response = await Promise.race([
+      this.agent.newSession({
+        cwd: opts.cwd,
+        mcpServers: this.checkedMcpServers(opts.mcpServers),
+      }),
+      this.watch.death,
+    ]);
     return this.track(
       new AcpSessionImpl(
         this.agentId,
@@ -222,6 +242,7 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
         response.modes ?? undefined,
         response.models ?? undefined,
         [],
+        this.watch.death,
       ),
     );
   }
@@ -236,20 +257,36 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
     // Register before the call: `session/load` replays the conversation through
     // `session/update` notifications, which must not be dropped on the floor.
     const session = this.track(
-      new AcpSessionImpl(this.agentId, this.agent, opts.sessionId, undefined, undefined, []),
+      new AcpSessionImpl(
+        this.agentId,
+        this.agent,
+        opts.sessionId,
+        undefined,
+        undefined,
+        [],
+        this.watch.death,
+      ),
     );
-    await this.agent.loadSession({
-      sessionId: opts.sessionId,
-      cwd: opts.cwd,
-      mcpServers: this.checkedMcpServers(opts.mcpServers),
-    });
+    await Promise.race([
+      this.agent.loadSession({
+        sessionId: opts.sessionId,
+        cwd: opts.cwd,
+        mcpServers: this.checkedMcpServers(opts.mcpServers),
+      }),
+      this.watch.death,
+    ]);
     return session;
   }
 
   async close(): Promise<void> {
     this.sessions.clear();
+    // Reject anything still in flight first. Once the transport is down
+    // nothing can answer it, so a pending request would hang forever.
+    this.watch.shutdown('connection was closed');
+    // Close the transport BEFORE releasing terminals, so the agent cannot ask
+    // for another one during teardown.
+    await this.transport.close().catch(() => undefined);
     await this.client.dispose();
-    await this.transport.close();
   }
 
   //#region internals
@@ -317,18 +354,25 @@ export async function openAcpConnection(
       host.onSessionUpdate(notification);
     },
   });
+  // The protocol library never rejects pending responses when the stream ends,
+  // so without this a dead agent leaves every request hanging forever.
+  const watch = watchTransport(opts.agentId, opts.transport, opts.signal);
   const agent = new ClientSideConnection(
     () => client,
-    ndJsonStream(opts.transport.writable, opts.transport.readable),
+    ndJsonStream(opts.transport.writable, watch.readable),
   );
 
   let initialized: acp.InitializeResponse;
   try {
-    initialized = await agent.initialize({
-      protocolVersion: PROTOCOL_VERSION,
-      clientCapabilities: clientCapabilitiesFor(host),
-    });
+    initialized = await Promise.race([
+      agent.initialize({
+        protocolVersion: PROTOCOL_VERSION,
+        clientCapabilities: clientCapabilitiesFor(host),
+      }),
+      watch.death,
+    ]);
   } catch (error) {
+    watch.shutdown('failed the initialize handshake');
     await opts.transport.close().catch(() => undefined);
     throw new AcpConnectError({
       agentId: opts.agentId,
@@ -345,6 +389,7 @@ export async function openAcpConnection(
     initialized.agentCapabilities ?? {},
     initialized.authMethods ?? [],
     initialized.protocolVersion,
+    watch,
   );
   sink = connection.sink;
   return connection;

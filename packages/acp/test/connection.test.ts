@@ -5,11 +5,26 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { AcpCapabilityError, isAcpCapabilityError } from '@noetic-tools/types';
+import type { AcpClientHost, AcpTransport } from '@noetic-tools/types';
+import {
+  AcpCapabilityError,
+  AcpConnectError,
+  frameworkCast,
+  isAcpCapabilityError,
+} from '@noetic-tools/types';
 import type * as acp from '@zed-industries/agent-client-protocol';
 import { PROTOCOL_VERSION } from '@zed-industries/agent-client-protocol';
-import { assertPromptContentSupported } from '../src/connection';
+import { assertPromptContentSupported, openAcpConnection } from '../src/connection';
 import { createAcpTestRig, textChunk } from './_helpers';
+
+/** The bare minimum host: liveness tests never reach fs, shell, or permissions. */
+function hostStub(): AcpClientHost {
+  return frameworkCast<AcpClientHost>({
+    cwd: '/workspace',
+    threadId: 'thread-1',
+    onSessionUpdate: () => undefined,
+  });
+}
 
 const TEXT_PROMPT: acp.ContentBlock[] = [
   {
@@ -329,6 +344,91 @@ describe('prompt turn', () => {
     expect(rig.calls.cancel[0]?.sessionId).toBe(session.sessionId);
 
     await rig.close();
+  });
+});
+
+describe('agent liveness', () => {
+  /**
+   * A transport whose readable we can close on demand, standing in for an
+   * agent that dies — a missing binary, a crash on startup, an OOM mid-turn.
+   */
+  function deadEndTransport(): {
+    transport: AcpTransport;
+    kill(): void;
+  } {
+    const outbound = new TransformStream<Uint8Array, Uint8Array>();
+    const inbound = new TransformStream<Uint8Array, Uint8Array>();
+    const writer = inbound.writable.getWriter();
+    return {
+      transport: {
+        readable: inbound.readable,
+        writable: outbound.writable,
+        async close() {
+          await writer.close().catch(() => undefined);
+        },
+      },
+      kill() {
+        void writer.close().catch(() => undefined);
+      },
+    };
+  }
+
+  // Regression: the protocol library breaks its read loop on end-of-stream
+  // without rejecting the responses still pending, so a dead agent used to
+  // leave `initialize` (and every later request) unsettled forever. A step
+  // built on it hung with no error and no timeout.
+  test('a handshake against an agent that never answers rejects when it dies', async () => {
+    const dead = deadEndTransport();
+    const host = hostStub();
+
+    const pending = openAcpConnection({
+      agentId: 'dead-agent',
+      transport: dead.transport,
+      host,
+    });
+    dead.kill();
+
+    expect(pending).rejects.toThrow(AcpConnectError);
+  });
+
+  test('aborting the connect signal rejects a hung handshake', async () => {
+    const dead = deadEndTransport();
+    const controller = new AbortController();
+
+    const pending = openAcpConnection({
+      agentId: 'slow-agent',
+      transport: dead.transport,
+      host: hostStub(),
+      signal: controller.signal,
+    });
+    controller.abort();
+
+    expect(pending).rejects.toThrow(AcpConnectError);
+  });
+
+  test('a turn interrupted by the agent dying rejects instead of hanging', async () => {
+    let killTheAgent: (() => void) | undefined;
+    const rig = await createAcpTestRig({
+      script: {
+        onPrompt: async () => {
+          // Never answers — the agent goes away mid-turn instead.
+          killTheAgent?.();
+          await new Promise(() => undefined);
+        },
+      },
+    });
+    killTheAgent = () => {
+      void rig.connection.close();
+    };
+    const session = await rig.connection.newSession({
+      cwd: '/workspace',
+    });
+
+    expect(
+      session.prompt({
+        content: TEXT_PROMPT,
+      }),
+    ).rejects.toThrow();
   });
 });
 

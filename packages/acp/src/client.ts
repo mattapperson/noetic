@@ -259,29 +259,33 @@ export class NoeticAcpClient implements acp.Client {
 
   //#region internals
 
-  /** Report one client-side operation to the host's observer, if it has one. */
-  private record(activity: AcpClientActivity): void {
-    this.host.onClientActivity?.(activity);
-  }
-
   /**
    * Run a client method, reporting it either way. A refusal is the more
    * interesting record of the two — it is the moment an agent reached for
    * something it was not allowed to have.
+   *
+   * Read the observer at call time, never snapshot it: the host is rebound per
+   * turn, so a session shared across steps must report to the CURRENT step.
    */
   private async audited<T>(
     activity: Omit<AcpClientActivity, 'allowed'>,
     run: () => Promise<T>,
   ): Promise<T> {
+    const observer = this.host.onClientActivity;
+    // `fs/read_text_file` is hot — a coding agent reads constantly — so a host
+    // with no observer pays nothing for the descriptor it would discard.
+    if (!observer) {
+      return await run();
+    }
     try {
       const result = await run();
-      this.record({
+      observer({
         ...activity,
         allowed: true,
       });
       return result;
     } catch (e) {
-      this.record({
+      observer({
         ...activity,
         allowed: false,
         reason: e instanceof Error ? e.message : String(e),

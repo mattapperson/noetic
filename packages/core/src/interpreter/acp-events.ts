@@ -86,22 +86,8 @@ export class AcpEventBridge {
    * actually asked us to do, refusals included.
    */
   forwardActivity(activity: AcpClientActivity): void {
-    if (!this.broadcaster) {
-      return;
-    }
-    const data = {
-      stepId: this.stepId,
-      agentId: this.agentId,
+    this.framework('acp_client_activity', {
       ...activity,
-    };
-    if (!shouldEmit(this.emitOption, 'acp_client_activity', data)) {
-      return;
-    }
-    emitFrameworkEvent({
-      broadcaster: this.broadcaster,
-      agentName: this.agentName,
-      eventType: 'acp_client_activity',
-      data,
     });
   }
 
@@ -110,20 +96,10 @@ export class AcpEventBridge {
     if (!this.broadcaster) {
       return;
     }
-    const data = {
-      stepId: this.stepId,
-      agentId: this.agentId,
+    this.framework('acp_event', {
       sessionId: notification.sessionId,
       update: notification.update,
-    };
-    if (shouldEmit(this.emitOption, 'acp_event', data)) {
-      emitFrameworkEvent({
-        broadcaster: this.broadcaster,
-        agentName: this.agentName,
-        eventType: 'acp_event',
-        data,
-      });
-    }
+    });
     this.translate(notification.update);
   }
 
@@ -162,6 +138,31 @@ export class AcpEventBridge {
   }
 
   //#region internals
+
+  /**
+   * Emit one framework event under this step's envelope. The `sdk` sibling
+   * below does the same job for the model-stream surface; both gate on
+   * `emitOption` so `emit: false` silences every surface at once.
+   */
+  private framework(eventType: string, payload: Record<string, unknown>): void {
+    if (!this.broadcaster) {
+      return;
+    }
+    const data = {
+      stepId: this.stepId,
+      agentId: this.agentId,
+      ...payload,
+    };
+    if (!shouldEmit(this.emitOption, eventType, data)) {
+      return;
+    }
+    emitFrameworkEvent({
+      broadcaster: this.broadcaster,
+      agentName: this.agentName,
+      eventType,
+      data,
+    });
+  }
 
   private sdk(type: string, data: Record<string, unknown>, outputIndex?: number): void {
     if (!this.broadcaster) {

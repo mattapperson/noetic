@@ -1,6 +1,7 @@
 import { frameworkCast, ItemSchemaRegistry, NoeticConfigError } from '@noetic-tools/types';
 import { SpanImpl } from '../observability/span-impl';
 import { NoopExporter } from '../observability/trace-exporter';
+import { AcpSessionStore } from './acp-session-store';
 import {
   createInMemoryFsAdapter,
   createInMemoryShellAdapter,
@@ -444,12 +445,11 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
    * `frameworkCast`; do not access from outside core.
    */
   /**
-   * @internal Live ACP connections keyed by `session.reuse`. Reached by the
-   * interpreter via `frameworkCast`; use {@link listAcpSessions},
-   * {@link getAcpSession}, {@link cancelAcpSession}, and
-   * {@link closeAcpSessions} from outside core.
+   * @internal Live ACP connections. Reached by the interpreter via
+   * `frameworkCast`; use {@link listAcpSessions}, {@link getAcpSession},
+   * {@link cancelAcpSession}, and {@link closeAcpSessions} from outside core.
    */
-  readonly acpSessions = new Map<string, AcpLiveSession>();
+  readonly acpSessions = new AcpSessionStore();
 
   /**
    * Snapshot of every live ACP sub-agent, for a UI that wants to show what is
@@ -458,22 +458,12 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
    * @public
    */
   listAcpSessions(): AcpSessionInfo[] {
-    return [
-      ...this.acpSessions.entries(),
-    ].map(([key, entry]) => ({
-      key,
-      agentId: entry.agentId,
-      sessionId: entry.session.sessionId,
-      keepAlive: entry.keepAlive,
-      currentModeId: entry.session.modes?.currentModeId,
-      availableModes: entry.session.modes?.availableModes ?? [],
-      availableCommands: entry.session.availableCommands,
-    }));
+    return this.acpSessions.list();
   }
 
   /**
-   * The live connection + session behind a `session.reuse` key, or `undefined`
-   * when nothing is held under it.
+   * The live connection + session behind a handle from {@link listAcpSessions}
+   * (or a step's `session.reuse` key), or `undefined` when nothing matches.
    * @public
    */
   getAcpSession(key: string): AcpLiveSession | undefined {
@@ -484,7 +474,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
    * Interrupt whatever the sub-agent under `key` is doing, via `session/cancel`.
    * The connection stays open and the turn still returns — with the `cancelled`
    * stop reason, which the running step surfaces as a `cancelled` error.
-   * Returns false when no session is held under that key.
+   * Returns false when nothing matches the key.
    * @public
    */
   async cancelAcpSession(key: string): Promise<boolean> {
@@ -504,29 +494,9 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
    * @public
    */
   async closeAcpSessions(): Promise<void> {
-    await this.closeAcpSessionsWhere(() => true);
+    await this.acpSessions.closeAll();
   }
 
-  /**
-   * Collect the connections a finished root run owns. `keepAlive: 'harness'`
-   * opted out of that collection, so it survives until {@link closeAcpSessions}.
-   */
-  private async closeAcpSessionsAfterRun(): Promise<void> {
-    await this.closeAcpSessionsWhere((entry) => entry.keepAlive !== 'harness');
-  }
-
-  private async closeAcpSessionsWhere(
-    predicate: (entry: AcpLiveSession) => boolean,
-  ): Promise<void> {
-    const doomed: AcpLiveSession[] = [];
-    for (const [key, entry] of this.acpSessions) {
-      if (predicate(entry)) {
-        doomed.push(entry);
-        this.acpSessions.delete(key);
-      }
-    }
-    await Promise.all(doomed.map((entry) => entry.connection.close().catch(() => undefined)));
-  }
   readonly layerStateStore: LayerStateStore;
   /** Per-harness memoization cache for `recallMode: 'eventual'` layers. */
   readonly recallCache: RecallCache;
@@ -889,7 +859,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       } else {
         this.rootRunDepth.delete(ctx.id);
         this.channelStore.closeExecution(ctx.id);
-        await this.closeAcpSessionsAfterRun();
+        await this.acpSessions.closeOwnedBy(ctx.id);
       }
     }
   }

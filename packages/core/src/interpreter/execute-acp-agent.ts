@@ -17,7 +17,6 @@ import type {
   AcpLiveSession,
   AcpPermissionOutcome,
   AcpPermissionSteerer,
-  AcpSession,
   AcpSessionPolicy,
   AcpTurnResult,
   Context,
@@ -37,6 +36,7 @@ import {
   NoeticErrorImpl,
   SteeringAction,
 } from '@noetic-tools/types';
+import type { AcpSessionStore } from '../harness/acp-session-store';
 import { AcpEventBridge } from './acp-events';
 import { withHistoryPrompt } from './acp-history';
 import { resolveLazy } from './execute-action';
@@ -51,16 +51,26 @@ import { isContextImpl, isFunctionCall, isMutableContext } from './typeguards';
  * reached via `frameworkCast`, mirroring how the interpreter reaches
  * `layerStateStore`.
  */
-interface AcpSessionStore {
-  acpSessions: Map<string, AcpLiveSession>;
-}
-
 //#endregion
 
 //#region Helpers
 
-function sessionStore(ctx: Context<ContextData>): Map<string, AcpLiveSession> {
-  return frameworkCast<AcpSessionStore>(ctx.harness).acpSessions;
+function sessionStore(ctx: Context<ContextData>): AcpSessionStore {
+  return frameworkCast<{
+    acpSessions: AcpSessionStore;
+  }>(ctx.harness).acpSessions;
+}
+
+/**
+ * The root of the context chain. Run-scoped sessions are filed under it so
+ * concurrent runs on one harness cannot see or tear down each other's agents.
+ */
+function rootContextId(ctx: Context<ContextData>): string {
+  let current: Context<ContextData> = ctx;
+  while (current.parent) {
+    current = frameworkCast<Context<ContextData>>(current.parent);
+  }
+  return current.id;
 }
 
 function abortSignalOf(ctx: Context<ContextData>): AbortSignal | undefined {
@@ -313,7 +323,9 @@ function assertReuseIsKeptAlive<TContext, I, O>(step: StepAcpAgent<TContext, I, 
 
 interface SessionResolution {
   live: AcpLiveSession;
-  reuseKey?: string;
+  /** Handle the session is filed under in the harness store. */
+  key: string;
+  keepAlive: AcpKeepAlive;
   /** True when this step opened the connection rather than reusing one. */
   fresh: boolean;
 }
@@ -330,70 +342,71 @@ async function openSession<TContext, I, O>(opts: {
   /** MCP servers for the session, already resolved from the step. */
   servers?: Parameters<AcpAgentConnection['newSession']>[0]['mcpServers'];
 }): Promise<SessionResolution> {
-  const reuseKey = opts.step.session?.reuse;
   const store = sessionStore(opts.baseCtx);
-  if (reuseKey) {
-    const existing = store.get(reuseKey);
-    if (existing) {
-      if (existing.agentId !== opts.agent.agentId) {
-        throw new NoeticConfigError({
-          code: 'ACP_SESSION_AGENT_CONFLICT',
-          message: `step.acpAgent(${JSON.stringify(opts.step.id)}) reuses session '${reuseKey}', which was opened by the '${existing.agentId}' agent, with a '${opts.agent.agentId}' agent.`,
-          hint: 'A reused session is one live connection to one agent. Give every step sharing a `session.reuse` key the same agent, or use separate keys.',
-        });
-      }
-      assertCapabilitiesCompatible(opts.step, existing);
-      // Point the existing connection at THIS step before it takes a turn.
-      bindHostToStep(existing.host, opts.binding);
-      return {
-        live: existing,
-        reuseKey,
-        fresh: false,
-      };
-    }
-  }
+  const keepAlive = keepAliveOf(opts.step.session);
+  const reuseKey = opts.step.session?.reuse;
+  const parts = {
+    keepAlive,
+    rootId: rootContextId(opts.baseCtx),
+    reuseKey,
+  };
+  // Registered under a key even without `session.reuse`: anything kept past
+  // its step has to be reachable, or nothing can ever close it.
+  const key = store.keyFor(parts);
 
-  const connection = await opts.agent.connect({
-    host: opts.host,
-    signal: abortSignalOf(opts.baseCtx),
+  const { live, fresh } = await store.acquire(key, parts, async () => {
+    const connection = await opts.agent.connect({
+      host: opts.host,
+      signal: abortSignalOf(opts.baseCtx),
+    });
+
+    // From here on the connection owns a live agent (usually a child process).
+    // Anything that throws before the caller can take responsibility for it
+    // must close it first — otherwise the agent outlives the step and, because
+    // its stdio keeps the event loop alive, the host never exits.
+    try {
+      const loadId = opts.step.session?.load;
+      const session = loadId
+        ? await connection.loadSession({
+            sessionId: loadId,
+            cwd: opts.cwd,
+            mcpServers: opts.servers,
+          })
+        : await connection.newSession({
+            cwd: opts.cwd,
+            mcpServers: opts.servers,
+          });
+      return {
+        connection,
+        session,
+        host: opts.host,
+        agentId: opts.agent.agentId,
+        keepAlive,
+      };
+    } catch (e) {
+      await connection.close().catch(() => undefined);
+      throw e;
+    }
   });
 
-  // From here on the connection owns a live agent (usually a child process).
-  // Anything that throws before the caller can take responsibility for it must
-  // close it first — otherwise the agent outlives the step and, because its
-  // stdio keeps the event loop alive, the host never exits.
-  let session: AcpSession;
-  try {
-    const loadId = opts.step.session?.load;
-    session = loadId
-      ? await connection.loadSession({
-          sessionId: loadId,
-          cwd: opts.cwd,
-          mcpServers: opts.servers,
-        })
-      : await connection.newSession({
-          cwd: opts.cwd,
-          mcpServers: opts.servers,
-        });
-  } catch (e) {
-    await connection.close().catch(() => undefined);
-    throw e;
+  if (!fresh) {
+    if (live.agentId !== opts.agent.agentId) {
+      throw new NoeticConfigError({
+        code: 'ACP_SESSION_AGENT_CONFLICT',
+        message: `step.acpAgent(${JSON.stringify(opts.step.id)}) reuses session '${reuseKey}', which was opened by the '${live.agentId}' agent, with a '${opts.agent.agentId}' agent.`,
+        hint: 'A reused session is one live connection to one agent. Give every step sharing a `session.reuse` key the same agent, or use separate keys.',
+      });
+    }
+    assertCapabilitiesCompatible(opts.step, live);
+    // Point the existing connection at THIS step before it takes a turn.
+    bindHostToStep(live.host, opts.binding);
   }
 
-  const live: AcpLiveSession = {
-    connection,
-    session,
-    host: opts.host,
-    agentId: opts.agent.agentId,
-    keepAlive: keepAliveOf(opts.step.session),
-  };
-  if (reuseKey) {
-    store.set(reuseKey, live);
-  }
   return {
     live,
-    reuseKey,
-    fresh: true,
+    key,
+    keepAlive,
+    fresh,
   };
 }
 
@@ -404,16 +417,15 @@ async function openSession<TContext, I, O>(opts: {
  */
 async function finalizeSession(
   resolution: SessionResolution,
-  policy: AcpSessionPolicy | undefined,
   baseCtx: Context<ContextData>,
 ): Promise<void> {
-  if (keepAliveOf(policy) !== 'step') {
+  if (resolution.keepAlive !== 'step') {
     return;
   }
-  await resolution.live.connection.close();
-  if (resolution.reuseKey) {
-    sessionStore(baseCtx).delete(resolution.reuseKey);
-  }
+  // Teardown must not fail a turn whose work already landed in the item log —
+  // the stdio transport throws from `close()` if the child ever errored.
+  await resolution.live.connection.close().catch(() => undefined);
+  sessionStore(baseCtx).forget(resolution.key);
 }
 
 //#endregion
@@ -506,8 +518,9 @@ export async function executeAcpAgent<TContext, I, O>(
       await resolution.live.session.setModel(model);
     }
   } catch (e) {
-    if (!resolution.reuseKey) {
+    if (resolution.fresh) {
       await resolution.live.connection.close().catch(() => undefined);
+      sessionStore(baseCtx).forget(resolution.key);
     }
     throw e;
   }
@@ -535,8 +548,9 @@ export async function executeAcpAgent<TContext, I, O>(
   } catch (e) {
     // Best-effort teardown of a fresh connection before surfacing the failure;
     // a reused one is left intact for a later step to retry against.
-    if (!resolution.reuseKey) {
+    if (resolution.fresh) {
       await resolution.live.connection.close().catch(() => undefined);
+      sessionStore(baseCtx).forget(resolution.key);
     }
     if (e instanceof NoeticErrorImpl) {
       throw e;
@@ -557,7 +571,7 @@ export async function executeAcpAgent<TContext, I, O>(
 
   bridge.finalize(result);
   applyTurnResult(baseCtx, result);
-  await finalizeSession(resolution, step.session, baseCtx);
+  await finalizeSession(resolution, baseCtx);
   assertTurnSucceeded(step.id, result, baseCtx);
 
   const lastText = result.text.length > 0 ? result.text : extractAssistantText(result.items);

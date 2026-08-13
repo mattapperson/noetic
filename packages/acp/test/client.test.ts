@@ -6,7 +6,6 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import type { AcpClientActivity } from '@noetic-tools/types';
 import type * as acp from '@zed-industries/agent-client-protocol';
 import { sliceLines } from '../src/client';
 import type { AcpTestRigOptions } from './_helpers';
@@ -442,15 +441,11 @@ describe('client activity audit', () => {
     const fs = new MemoryFs();
     fs.files.set('/workspace/inside.txt', 'ok');
     const shell = new RecordingShell();
-    const activity: AcpClientActivity[] = [];
 
     const rig = await createAcpTestRig({
       fs,
       shell,
       cwd: '/workspace',
-      onActivity: (a) => {
-        activity.push(a);
-      },
       script: {
         onPrompt: async (conn, params) => {
           await conn
@@ -484,9 +479,9 @@ describe('client activity audit', () => {
       content: PROMPT,
     });
 
-    expect(activity).toHaveLength(3);
+    expect(rig.activity).toHaveLength(3);
 
-    const [read, refused, terminal] = activity;
+    const [read, refused, terminal] = rig.activity;
     expect(read?.method).toBe('fs/read_text_file');
     expect(read?.path).toBe('/workspace/inside.txt');
     expect(read?.allowed).toBe(true);
@@ -506,14 +501,10 @@ describe('client activity audit', () => {
   });
 
   test('records a refusal from a withdrawn capability too', async () => {
-    const activity: AcpClientActivity[] = [];
     const rig = await createAcpTestRig({
       cwd: '/workspace',
       capabilities: {
         terminal: false,
-      },
-      onActivity: (a) => {
-        activity.push(a);
       },
       script: {
         onPrompt: async (conn, params) => {
@@ -533,8 +524,8 @@ describe('client activity audit', () => {
       content: PROMPT,
     });
 
-    expect(activity).toHaveLength(1);
-    expect(activity[0]?.allowed).toBe(false);
+    expect(rig.activity).toHaveLength(1);
+    expect(rig.activity[0]?.allowed).toBe(false);
     await rig.close();
   });
 });

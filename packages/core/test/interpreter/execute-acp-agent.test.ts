@@ -27,7 +27,7 @@ import type {
 } from '@noetic-tools/types';
 import { frameworkCast, isNoeticConfigError, isNoeticError } from '@noetic-tools/types';
 import { z } from 'zod';
-import { step } from '../../src/builders/step-builders';
+import { runCode, step } from '../../src/builders/step-builders';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { execute } from '../../src/interpreter/execute';
 import { makeMessage } from '../_helpers';
@@ -460,11 +460,11 @@ describe('executeAcpAgent — session lifecycle', () => {
 
     await harness.run(acpStep, undefined, harness.createContext());
     expect(closes).toBe(0);
-    expect(harness.acpSessions.size).toBe(1);
+    expect(harness.listAcpSessions().length).toBe(1);
 
     await harness.closeAcpSessions();
     expect(closes).toBe(1);
-    expect(harness.acpSessions.size).toBe(0);
+    expect(harness.listAcpSessions().length).toBe(0);
   });
 
   it('closeAcpSessions is idempotent', async () => {
@@ -765,7 +765,13 @@ describe('AgentHarness — live ACP session control surface', () => {
     expect(sessions).toHaveLength(1);
     const info = sessions[0];
     assert(info);
-    expect(info.key).toBe('live-key');
+    // `key` is an opaque handle (scoped so concurrent runs cannot collide);
+    // the step's own key is reported separately.
+    expect(info.reuseKey).toBe('live-key');
+    expect(info.key).toContain('live-key');
+    expect(harness.getAcpSession(info.key)).toBeDefined();
+    // Looking up by the step's reuse key still works, for convenience.
+    expect(harness.getAcpSession('live-key')).toBeDefined();
     expect(info.agentId).toBe('claude-code');
     expect(info.keepAlive).toBe('harness');
     expect(info.currentModeId).toBe('plan');
@@ -818,6 +824,129 @@ describe('AgentHarness — live ACP session control surface', () => {
   it('cancelling an unknown key reports false rather than throwing', async () => {
     const { harness } = harnessCtx();
     expect(await harness.cancelAcpSession('nope')).toBe(false);
+  });
+});
+
+describe('executeAcpAgent — session store correctness', () => {
+  // Regression (F2): registration used to happen only when the step named a
+  // `reuse` key, so a session kept past its step with no key was held by
+  // nobody — not swept at the end of the run, and out of reach of
+  // `closeAcpSessions()`. With stdio that is a child process that keeps the
+  // host alive forever.
+  it.each([
+    'run',
+    'harness',
+  ] as const)('registers a keepAlive: %s session even without a reuse key', async (keepAlive) => {
+    const { harness } = harnessCtx();
+    let closes = 0;
+    const acpStep = step.acpAgent({
+      id: `anon-${keepAlive}`,
+      agent: fakeAgent({
+        onClose: () => {
+          closes++;
+        },
+      }),
+      prompt: 'go',
+      session: {
+        keepAlive,
+      },
+    });
+
+    await harness.run(acpStep, undefined, harness.createContext());
+
+    if (keepAlive === 'run') {
+      // Swept with the run that opened it.
+      expect(closes).toBe(1);
+      return;
+    }
+    // Held for the owner — but reachable, which is the whole point.
+    expect(harness.listAcpSessions()).toHaveLength(1);
+    await harness.closeAcpSessions();
+    expect(closes).toBe(1);
+  });
+
+  // Regression (F3): the end-of-run sweep closed every session the harness
+  // held, with no notion of who owned it — so a short run killed a concurrent
+  // long one's agent mid-turn.
+  it("one run finishing does not close a concurrent run's session", async () => {
+    const { harness } = harnessCtx();
+    let closes = 0;
+    const agent = fakeAgent({
+      onClose: () => {
+        closes++;
+      },
+    });
+    const longStep = step.acpAgent({
+      id: 'long',
+      agent,
+      prompt: 'slow',
+      session: {
+        reuse: 'shared-name',
+        keepAlive: 'run',
+      },
+    });
+    const shortStep = step.acpAgent({
+      id: 'short',
+      agent,
+      prompt: 'fast',
+      session: {
+        reuse: 'shared-name',
+        keepAlive: 'run',
+      },
+    });
+
+    // Two independent root runs on one harness, as a server would have.
+    const longCtx = harness.createContext();
+    const longRun = harness.run(longStep, undefined, longCtx);
+    await harness.run(shortStep, undefined, harness.createContext());
+    await longRun;
+
+    // Each run opened and closed exactly its own connection.
+    expect(closes).toBe(2);
+  });
+
+  // Regression (F4): `get` → `await connect()` → `set` left a window where two
+  // parallel steps sharing a key both missed, both connected, and the second
+  // registration orphaned the first — unreachable and never closed.
+  it('parallel steps sharing a reuse key open exactly one connection', async () => {
+    const { harness } = harnessCtx();
+    let connects = 0;
+    let closes = 0;
+    const agent = fakeAgent({
+      onConnect: () => {
+        connects++;
+      },
+      onClose: () => {
+        closes++;
+      },
+    });
+    const mk = (id: string) =>
+      step.acpAgent({
+        id,
+        agent,
+        prompt: 'go',
+        session: {
+          reuse: 'shared',
+          keepAlive: 'run',
+        },
+      });
+
+    const ctx = harness.createContext();
+    const flow = runCode({
+      id: 'parallel-flow',
+      execute: async (_input: unknown, inner) => {
+        await Promise.all([
+          inner.harness.run(mk('a'), undefined, inner),
+          inner.harness.run(mk('b'), undefined, inner),
+        ]);
+        return 'done';
+      },
+    });
+    await harness.run(flow, undefined, ctx);
+
+    expect(connects).toBe(1);
+    expect(closes).toBe(1);
+    expect(harness.listAcpSessions()).toHaveLength(0);
   });
 });
 
