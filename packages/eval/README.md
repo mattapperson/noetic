@@ -76,7 +76,9 @@ noetic-eval --watch             # re-run on change
 noetic-eval --json              # machine-readable results
 noetic-eval --save-baseline     # record current scores
 noetic-eval --check             # fail if scores regress from the baseline
-noetic-eval --scope <scope> --budget <n>   # optimization run
+noetic-eval -u --scope <scope>            # optimization run
+noetic-eval --concurrency <n>             # bound cases running per suite
+noetic-eval -u --force-dirty              # override dirty-file write guard
 ```
 
 ## License
