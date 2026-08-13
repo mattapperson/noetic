@@ -460,7 +460,7 @@ interface StepCallModel {
 }
 ```
 
-- A single allocator (`allocateBudgets`) splits the recall budget: each layer's `budget.min` is satisfied first, then ~60% of the remainder funds a proportional pool across layers (by headroom `max − min`; `'auto'` and **omitted** budgets have infinite headroom and split the pool after finite layers take their share — the pool is fully conserved) and ~40% is reserved for conversation history. A layer never exceeds its `max`. NaN inputs throw `NoeticConfigError` (`INVALID_BUDGET_INPUT`); `Infinity` = uncapped.
+- A single allocator (`allocateBudgets`) splits the recall budget deterministically: each layer's `budget.min` is satisfied first from the full available window, then only the discretionary remainder is rationed as `min(available × 0.25, available − totalMin)` across headroom (`cap − min`). `'auto'` and **omitted** budgets use a fixed 2000-token cap; explicit `Infinity` stays uncapped. A layer never exceeds its cap. NaN inputs throw `NoeticConfigError` (`INVALID_BUDGET_INPUT`); `Infinity` = uncapped.
 - `assembleView` then holds the final view to a hard cap (`tokenBudget − responseReserve`) and lays it out in bands:
 
   ```

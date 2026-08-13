@@ -428,41 +428,37 @@ function allocateBudgets(opts: {
   totalBudget: number;       // policy.tokenBudget
   systemPromptTokens: number;
   responseReserve: number;   // policy.responseReserve
-}): { allocations: { layerId: string; allocated: number }[]; historyBudget: number } {
+}): { allocations: { layerId: string; allocated: number }[] } {
   // Input validation: NaN in totalBudget/systemPromptTokens/responseReserve
   // throws NoeticConfigError (code INVALID_BUDGET_INPUT). Infinity is allowed
   // (= uncapped budget); fractional values are accepted.
   const available = opts.totalBudget - opts.responseReserve - opts.systemPromptTokens;
   if (available <= 0) {
-    // Every layer gets 0; history gets 0.
+    // Every layer gets 0.
   }
 
-  // Phase 1: satisfy each layer's minimum first.
-  let remaining = available;
-  for (const layer of opts.layers) {
-    const min = extractMin(layer.budget);   // {min,max}.min, else 0
-    allocate(layer.id, min);
-    remaining -= min;
-  }
+  // Phase 1: satisfy each layer's minimum first, from the FULL available
+  // window. Scale down proportionally only when the mins alone overcommit it.
 
-  // Phase 2: distribute a proportional pool above the minimums.
-  //   60% of what remains funds the layers (by headroom = max - min,
-  //   where 'auto'/undefined max is +Infinity), 40% is reserved for history.
-  const layerPool = remaining * 0.6;
-  const historyBudget = remaining * 0.4;
-  // each layer's share is its headroom proportion of layerPool, clamped to headroom
+  // Phase 2: distribute only the discretionary remainder.
+  // The remainder pool is min(available * 0.25, available - totalMin).
+  // Each layer's share is proportional to headroom = cap - min, clamped to
+  // cap. 'auto' and omitted budgets use a fixed 2000-token cap. Explicit
+  // Infinity caps still absorb whatever finite layers leave behind.
 }
 ```
 
-- **Minimums are satisfied first**, in array order.
-- The remaining budget is split: **60% into a proportional pool** distributed across layers by headroom (`max − min`; `'auto'`/`undefined` budgets have infinite headroom and split the pool among themselves after finite layers take their share), and **40% reserved for conversation history** (`historyBudget`).
-- **The pool is conserved.** Finite shares are single-priced: each finite layer's share (in a mixed finite/infinite population, `min(headroom, half-pool proportional)`) is computed once, and the infinite-headroom layers split exactly `layerPool − Σ finiteShare`. No part of the pool is silently lost.
-- A layer's final allocation never exceeds its `max`.
+- **Minimums are satisfied first from the full available window** (`totalBudget − responseReserve − systemPromptTokens`), not from the discretionary pool. Declaring `{ min: 10000, max: 12000 }` means "this block needs 10k to be coherent," and the allocator honors that floor whenever the window can.
+- **Declared mins scale down proportionally only when they alone overcommit the available window.** In that case, nothing else is distributed.
+- **Only the discretionary remainder is rationed.** The allocator offers layers at most **25% of the available window** above their floors, capped again by what the mins left behind: `min(available × 0.25, available − totalMin)`.
+- **`'auto'` and omitted budgets are deterministic.** They use a fixed **2000-token cap**, not infinite headroom. Layers that need more must declare it explicitly.
+- **Explicit `Infinity` caps remain uncapped.** In a mixed finite/uncapped set, finite layers take their proportional/clamped share and uncapped layers split the remainder.
+- A layer's final allocation never exceeds its cap.
 - **Input contract.** `totalBudget`, `systemPromptTokens`, and `responseReserve` MUST NOT be NaN — the allocator throws `NoeticConfigError` (code `INVALID_BUDGET_INPUT`). `Infinity` is a coherent "uncapped" budget and is accepted; fractional values are accepted.
 
 ### Budget Yielding
 
-When `recall()` returns `tokenCount` less than allocated, the difference goes to conversation history. The Projector MUST NOT reallocate to other layers (prevents cascading re-recalls).
+When `recall()` returns `tokenCount` less than allocated, the difference simply remains available to history when `assembleView` fits the final prompt. The Projector MUST NOT reallocate it to other layers (prevents cascading re-recalls).
 
 ### Budget Verification
 

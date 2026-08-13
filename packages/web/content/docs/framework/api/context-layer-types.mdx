@@ -70,7 +70,7 @@ type BudgetConfig =
   | 'auto';
 ```
 
-An **omitted** `budget` behaves like `'auto'`: the layer has infinite headroom and splits the proportional pool with the other auto layers after finite layers take their share.
+An **omitted** `budget` behaves like `'auto'`: the layer gets the same fixed 2000-token default cap as an explicit `'auto'` budget. Declare a number or `{ min, max }` when a layer needs more.
 
 ## Slot Constants
 
