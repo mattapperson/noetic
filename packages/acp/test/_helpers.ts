@@ -217,6 +217,8 @@ function emptyCalls(): FakeAgentCalls {
 /** @public A live ACP test rig: connected client + agent-side observations. */
 export interface AcpTestRig {
   connection: AcpAgentConnection;
+  /** The very host object handed to the connection — rebind it to simulate a step change. */
+  host: AcpClientHost;
   calls: FakeAgentCalls;
   /** Every notification the host observed. */
   updates: AcpSessionNotification[];
@@ -329,6 +331,7 @@ export async function createAcpTestRig(opts: AcpTestRigOptions = {}): Promise<Ac
 
   return {
     connection,
+    host,
     calls,
     updates,
     fs,

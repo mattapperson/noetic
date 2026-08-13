@@ -13,6 +13,7 @@ import assert from 'node:assert';
 import type {
   AcpAgent,
   AcpAgentConnection,
+  AcpClientHost,
   AcpContentBlock,
   AcpNewSessionOptions,
   AcpPromptOptions,
@@ -43,7 +44,7 @@ interface FakeAgentOpts {
   modes?: AcpSessionModeState;
   /** Notifications the agent pushes during the turn. */
   updates?: AcpSessionNotification[];
-  onConnect?: () => void;
+  onConnect?: (host: AcpClientHost) => void;
   onNewSession?: (opts: AcpNewSessionOptions) => void;
   onPrompt?: (opts: AcpPromptOptions) => void;
   onClose?: () => void;
@@ -62,7 +63,7 @@ function fakeAgent(opts: FakeAgentOpts = {}): AcpAgent {
     specificationVersion: 'acp-v1',
     agentId,
     async connect(connect): Promise<AcpAgentConnection> {
-      opts.onConnect?.();
+      opts.onConnect?.(connect.host);
       const makeSession = (sessionId: string): AcpSession => ({
         sessionId,
         modes: opts.modes,
@@ -463,6 +464,214 @@ describe('executeAcpAgent — session lifecycle', () => {
     await execute(acpStep, undefined, ctx);
 
     expect(newSessions).toBe(0);
+  });
+});
+
+describe('executeAcpAgent — a session shared across steps', () => {
+  // Regression: the client host carries the per-turn policy, steering hook, and
+  // event sink, but it is created once when the connection opens. Leaving it
+  // bound to the opening step made every later step answer permissions with the
+  // FIRST step's policy and stream its output to the first step's (already
+  // finalized) event bridge — silently, and in the documented
+  // "investigate read-only, then fix with edits" pattern.
+  async function runTwoSteps(): Promise<{
+    host: AcpClientHost;
+    closes: number;
+  }> {
+    const { ctx } = harnessCtx();
+    let host: AcpClientHost | undefined;
+    let closes = 0;
+    const agent = fakeAgent({
+      onConnect: (h) => {
+        host = h;
+      },
+      onClose: () => {
+        closes++;
+      },
+    });
+
+    const investigate = step.acpAgent({
+      id: 'investigate',
+      agent,
+      prompt: 'look',
+      permissions: {
+        default: 'deny',
+      },
+      session: {
+        reuse: 'shared',
+      },
+    });
+    const fix = step.acpAgent({
+      id: 'fix',
+      agent,
+      prompt: 'edit',
+      permissions: {
+        allow: [
+          {
+            kind: 'edit',
+          },
+        ],
+      },
+      session: {
+        reuse: 'shared',
+      },
+    });
+
+    await execute(investigate, undefined, ctx);
+    await execute(fix, undefined, ctx);
+    assert(host);
+    return {
+      host,
+      closes,
+    };
+  }
+
+  it("rebinds the host to the current step's permission policy", async () => {
+    const { host } = await runTwoSteps();
+
+    // The second step's broader policy must be in force, not the opener's deny.
+    expect(host.permissions?.default).toBeUndefined();
+    expect(host.permissions?.allow).toEqual([
+      {
+        kind: 'edit',
+      },
+    ]);
+  });
+
+  it("routes session updates to the current step's event bridge", async () => {
+    const { ctx } = harnessCtx();
+    let host: AcpClientHost | undefined;
+    const agent = fakeAgent({
+      onConnect: (h) => {
+        host = h;
+      },
+    });
+    const first = step.acpAgent({
+      id: 'first',
+      agent,
+      prompt: 'one',
+      session: {
+        reuse: 'shared',
+      },
+    });
+    await execute(first, undefined, ctx);
+    assert(host);
+    const afterFirst = host.onSessionUpdate;
+
+    const second = step.acpAgent({
+      id: 'second',
+      agent,
+      prompt: 'two',
+      session: {
+        reuse: 'shared',
+      },
+    });
+    await execute(second, undefined, ctx);
+
+    // A fresh sink per turn is what carries the correct stepId downstream.
+    expect(host.onSessionUpdate).not.toBe(afterFirst);
+  });
+
+  it('reuses one connection but keeps it open between steps', async () => {
+    const { closes } = await runTwoSteps();
+    expect(closes).toBe(0);
+  });
+
+  // Regression: `onComplete: 'keep'` used to mean "keep forever" — nothing ever
+  // emptied the harness's session store. With the stdio transport that leaves a
+  // child process running whose stdio keeps the event loop alive, so the host
+  // never exits. Reuse is scoped to the root run.
+  it('closes a kept session when the root run finishes', async () => {
+    const { harness } = harnessCtx();
+    let closes = 0;
+    const agent = fakeAgent({
+      onClose: () => {
+        closes++;
+      },
+    });
+    const kept = step.acpAgent({
+      id: 'kept',
+      agent,
+      prompt: 'go',
+      session: {
+        reuse: 'shared',
+        onComplete: 'keep',
+      },
+    });
+
+    const ctx = harness.createContext();
+    await harness.run(kept, undefined, ctx);
+
+    expect(closes).toBe(1);
+  });
+
+  it('rejects reusing a session key across two different agents', async () => {
+    const { ctx } = harnessCtx();
+    const first = step.acpAgent({
+      id: 'a',
+      agent: fakeAgent({
+        agentId: 'claude-code',
+      }),
+      prompt: 'one',
+      session: {
+        reuse: 'shared',
+      },
+    });
+    const second = step.acpAgent({
+      id: 'b',
+      agent: fakeAgent({
+        agentId: 'codex',
+      }),
+      prompt: 'two',
+      session: {
+        reuse: 'shared',
+      },
+    });
+
+    await execute(first, undefined, ctx);
+    try {
+      await execute(second, undefined, ctx);
+      throw new Error('expected throw');
+    } catch (e) {
+      assert(isNoeticConfigError(e));
+      expect(e.code).toBe('ACP_SESSION_AGENT_CONFLICT');
+    }
+  });
+
+  it('rejects reusing a session with different clientCapabilities', async () => {
+    const { ctx } = harnessCtx();
+    const agent = fakeAgent();
+    const first = step.acpAgent({
+      id: 'a',
+      agent,
+      prompt: 'one',
+      clientCapabilities: {
+        writeTextFile: false,
+      },
+      session: {
+        reuse: 'shared',
+      },
+    });
+    const second = step.acpAgent({
+      id: 'b',
+      agent,
+      prompt: 'two',
+      clientCapabilities: {
+        writeTextFile: true,
+      },
+      session: {
+        reuse: 'shared',
+      },
+    });
+
+    await execute(first, undefined, ctx);
+    try {
+      await execute(second, undefined, ctx);
+      throw new Error('expected throw');
+    } catch (e) {
+      assert(isNoeticConfigError(e));
+      expect(e.code).toBe('ACP_SESSION_CAPABILITY_CONFLICT');
+    }
   });
 });
 

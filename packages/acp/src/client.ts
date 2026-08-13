@@ -68,7 +68,18 @@ function parentDir(path: string): string | undefined {
 
 /** @public Options for {@link NoeticAcpClient}. */
 export interface NoeticAcpClientOptions {
+  /**
+   * The live host. Held by reference, never copied: the runtime rebinds its
+   * per-turn fields when a session is reused, and a copy would freeze every
+   * later step to the policy of the step that opened the connection.
+   */
   host: AcpClientHost;
+  /**
+   * Where `session/update` notifications go. Separate from the host so the
+   * connection can fan them out to its own turn accumulator as well, without
+   * having to wrap (and thereby copy) the host.
+   */
+  onNotify: (notification: acp.SessionNotification) => void;
 }
 
 /**
@@ -79,17 +90,27 @@ export interface NoeticAcpClientOptions {
  */
 export class NoeticAcpClient implements acp.Client {
   private readonly host: AcpClientHost;
-  private readonly permissions: AcpPermissionResolverOptions;
+  private readonly onNotify: (notification: acp.SessionNotification) => void;
   private readonly terminals: TerminalRegistry;
 
   constructor(opts: NoeticAcpClientOptions) {
     this.host = opts.host;
-    this.permissions = {
-      policy: opts.host.permissions,
-      steer: opts.host.steerPermission,
-      handler: opts.host.onPermissionRequest,
-    };
+    this.onNotify = opts.onNotify;
     this.terminals = new TerminalRegistry(opts.host.shell, opts.host.cwd);
+  }
+
+  /**
+   * Read the permission tiers off the host at CALL time, never snapshot them.
+   * A connection outlives the step that opened it, and the host is rebound
+   * per turn — snapshotting would answer every later step with the first
+   * step's policy.
+   */
+  private get permissions(): AcpPermissionResolverOptions {
+    return {
+      policy: this.host.permissions,
+      steer: this.host.steerPermission,
+      handler: this.host.onPermissionRequest,
+    };
   }
 
   /** Release every terminal this connection created. */
@@ -113,7 +134,7 @@ export class NoeticAcpClient implements acp.Client {
   }
 
   async sessionUpdate(params: acp.SessionNotification): Promise<void> {
-    this.host.onSessionUpdate(params);
+    this.onNotify(params);
   }
 
   //#endregion

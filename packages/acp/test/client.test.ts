@@ -8,7 +8,7 @@
 import { describe, expect, test } from 'bun:test';
 import type * as acp from '@zed-industries/agent-client-protocol';
 import { sliceLines } from '../src/client';
-import { createAcpTestRig, MemoryFs, RecordingShell } from './_helpers';
+import { createAcpTestRig, MemoryFs, RecordingShell, textChunk } from './_helpers';
 
 const PROMPT: acp.ContentBlock[] = [
   {
@@ -518,6 +518,106 @@ describe('permission round-trips', () => {
       outcome: 'selected',
       optionId: 'no',
     });
+    await rig.close();
+  });
+});
+
+describe('host rebinding (session reused across steps)', () => {
+  const OPTIONS: acp.PermissionOption[] = [
+    {
+      optionId: 'yes',
+      name: 'Allow',
+      kind: 'allow_once',
+    },
+    {
+      optionId: 'no',
+      name: 'Reject',
+      kind: 'reject_once',
+    },
+  ];
+
+  // Regression: `openAcpConnection` used to spread the host into a new object,
+  // so the client held a COPY. A connection outlives the step that opened it,
+  // and the runtime rebinds the host per turn — with a copy, every later step
+  // sharing the session was silently answered with the first step's policy.
+  test('the client reads the permission policy off the host at call time', async () => {
+    const outcomes: string[] = [];
+    const rig = await createAcpTestRig({
+      policy: {
+        default: 'deny',
+      },
+      script: {
+        onPrompt: async (conn, params) => {
+          const res = await conn.requestPermission({
+            sessionId: params.sessionId,
+            options: OPTIONS,
+            toolCall: {
+              toolCallId: 'c1',
+              title: 'Edit a file',
+              kind: 'edit',
+            },
+          });
+          outcomes.push(res.outcome.outcome === 'selected' ? res.outcome.optionId : 'cancelled');
+        },
+      },
+    });
+    const session = await rig.connection.newSession({
+      cwd: '/workspace',
+    });
+
+    await session.prompt({
+      content: PROMPT,
+    });
+
+    // Simulate the runtime rebinding the host for the next step's turn.
+    rig.host.permissions = {
+      allow: [
+        {
+          kind: 'edit',
+        },
+      ],
+    };
+    await session.prompt({
+      content: PROMPT,
+    });
+
+    expect(outcomes).toEqual([
+      'no',
+      'yes',
+    ]);
+    await rig.close();
+  });
+
+  test('the client routes notifications through the host at call time', async () => {
+    const first: string[] = [];
+    const second: string[] = [];
+    const rig = await createAcpTestRig({
+      script: {
+        onPrompt: async (conn, params) => {
+          await conn.sessionUpdate(textChunk(params.sessionId, 'hello'));
+        },
+      },
+    });
+    const session = await rig.connection.newSession({
+      cwd: '/workspace',
+    });
+
+    rig.host.onSessionUpdate = () => {
+      first.push('x');
+    };
+    await session.prompt({
+      content: PROMPT,
+    });
+
+    rig.host.onSessionUpdate = () => {
+      second.push('x');
+    };
+    await session.prompt({
+      content: PROMPT,
+    });
+
+    expect(first).toHaveLength(1);
+    expect(second).toHaveLength(1);
     await rig.close();
   });
 });

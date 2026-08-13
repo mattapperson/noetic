@@ -1061,7 +1061,9 @@ const fix = step.acpAgent({
 ```
 
 - `reuse` keys a connection + session stored on the `AgentHarness`; the same key resolves to the same live session across steps.
-- `onComplete`: `'keep'` (the default for a reused session) leaves it live; `'close'` ends the connection and stops the agent. Use `'close'` on the last step.
+- `onComplete`: `'keep'` (the default for a reused session) leaves it live; `'close'` ends the connection and stops the agent. Reuse is scoped to a root run — the harness closes whatever it still holds when the run finishes — so the two steps must be part of ONE run (e.g. nested `ctx.harness.run` calls, a `sequence`, or a `loop`), not two `harness.execute()` calls.
+- Each step gets its own `permissions`: the host is rebound per turn, so `fix`'s broader policy really does apply even though `investigate` opened the connection.
+- The agent and `clientCapabilities` are fixed per connection; a step joining the session with different ones throws `ACP_SESSION_AGENT_CONFLICT` / `ACP_SESSION_CAPABILITY_CONFLICT`.
 - `session.load` resumes an ACP session id from an earlier run, for agents that advertise `loadSession`.
 
 ## Pattern: Coding Agent as a JSON Workflow Node

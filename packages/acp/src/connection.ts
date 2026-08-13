@@ -303,18 +303,19 @@ export async function openAcpConnection(
   opts: OpenAcpConnectionOptions,
 ): Promise<AcpAgentConnection> {
   // The sink is late-bound: the client needs it at construction, but it can
-  // only dispatch once the connection exists to hold the session map.
+  // only dispatch once the connection exists to hold the session map. The host
+  // is passed through BY REFERENCE — copying it here would freeze the per-turn
+  // policy and event sink to whichever step opened the connection, silently
+  // ignoring the configuration of every step that later reuses the session.
   let sink: NotificationSink | undefined;
-  const host: AcpClientHost = {
-    ...opts.host,
-    onSessionUpdate: (notification) => {
-      sink?.(notification);
-      opts.host.onSessionUpdate(notification);
-    },
-  };
+  const host = opts.host;
 
   const client = new NoeticAcpClient({
     host,
+    onNotify: (notification) => {
+      sink?.(notification);
+      host.onSessionUpdate(notification);
+    },
   });
   const agent = new ClientSideConnection(
     () => client,

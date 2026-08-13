@@ -443,6 +443,20 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
    * `frameworkCast`; do not access from outside core.
    */
   readonly acpSessions = new Map<string, AcpLiveSession>();
+
+  /**
+   * Close every ACP connection kept alive for reuse. A connection owns a live
+   * agent — usually a child process whose stdio keeps the event loop alive —
+   * so a session held past the run that opened it does not just leak, it stops
+   * the host from exiting. Reuse is therefore scoped to a root run.
+   */
+  private async closeAcpSessions(): Promise<void> {
+    const live = [
+      ...this.acpSessions.values(),
+    ];
+    this.acpSessions.clear();
+    await Promise.all(live.map((entry) => entry.connection.close().catch(() => undefined)));
+  }
   readonly layerStateStore: LayerStateStore;
   /** Per-harness memoization cache for `recallMode: 'eventual'` layers. */
   readonly recallCache: RecallCache;
@@ -805,6 +819,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       } else {
         this.rootRunDepth.delete(ctx.id);
         this.channelStore.closeExecution(ctx.id);
+        await this.closeAcpSessions();
       }
     }
   }

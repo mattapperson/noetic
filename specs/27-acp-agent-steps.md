@@ -214,6 +214,26 @@ A fresh session defaults to `'close'`; a reused one defaults to `'keep'`.
 `session.load` resumes an existing ACP session id via `session/load` instead of
 creating a new one.
 
+**Reuse is scoped to a root run.** A connection owns a live agent — usually a
+child process whose stdio keeps the event loop alive — so the harness closes
+every session it still holds when the root run finishes. `'keep'` therefore
+means "keep for the rest of this run", not "keep forever": a session held past
+its run would stop the host from exiting.
+
+**Per-turn state follows the current step.** The client host carries the
+permission policy, the steering hook, the async handler, and the event sink, and
+the runtime rebinds it before every turn. A session shared by several steps
+answers each step with *that step's* configuration and streams its output to
+*that step's* event bridge — not the ones belonging to whichever step happened
+to open the connection. The host is held by reference the whole way down; the
+protocol client reads it at call time rather than snapshotting it.
+
+**Connection-level settings must agree.** `clientCapabilities` is negotiated
+once during `initialize`, and one connection speaks to one agent, so a step that
+joins an existing session cannot change either. Doing so is a configuration
+error (`ACP_SESSION_CAPABILITY_CONFLICT`, `ACP_SESSION_AGENT_CONFLICT`) rather
+than a silently ignored request.
+
 ### Output → harness events
 
 Every `session/update` notification is mapped onto the harness's observable

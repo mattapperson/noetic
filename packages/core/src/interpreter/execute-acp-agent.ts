@@ -198,25 +198,74 @@ function buildSteerer(
   };
 }
 
-function buildHost<TContext, I, O>(opts: {
+interface HostBindingOptions<TContext, I, O> {
   step: StepAcpAgent<TContext, I, O>;
   ctx: Context<ContextData>;
-  cwd: string;
   layers?: ContextLayer[];
   onUpdate: AcpClientHost['onSessionUpdate'];
-}): AcpClientHost {
-  return {
+}
+
+/**
+ * Point an existing host at the step that is about to take a turn.
+ *
+ * A connection outlives the step that opened it, so everything per-turn —
+ * permissions, steering, the async handler, the event sink — must be rebound
+ * before each turn. Without this, a session shared by several steps answers
+ * every later step with the FIRST step's policy and streams its output to the
+ * first step's (already finalized) event bridge.
+ */
+function bindHostToStep<TContext, I, O>(
+  host: AcpClientHost,
+  opts: HostBindingOptions<TContext, I, O>,
+): void {
+  host.permissions = opts.step.permissions;
+  host.steerPermission = buildSteerer(opts.ctx, opts.layers);
+  host.onPermissionRequest = opts.step.onPermissionRequest;
+  host.onSessionUpdate = opts.onUpdate;
+}
+
+function buildHost<TContext, I, O>(
+  opts: HostBindingOptions<TContext, I, O> & {
+    cwd: string;
+  },
+): AcpClientHost {
+  const host: AcpClientHost = {
     cwd: opts.cwd,
     fs: opts.ctx.fs,
     shell: opts.ctx.shell,
     threadId: opts.ctx.threadId,
     signal: abortSignalOf(opts.ctx),
+    // Connection-level: ACP negotiates the capability set once, in `initialize`.
     capabilities: opts.step.clientCapabilities,
-    permissions: opts.step.permissions,
-    steerPermission: buildSteerer(opts.ctx, opts.layers),
-    onPermissionRequest: opts.step.onPermissionRequest,
     onSessionUpdate: opts.onUpdate,
   };
+  bindHostToStep(host, opts);
+  return host;
+}
+
+/**
+ * `clientCapabilities` is negotiated once per connection, so a step joining an
+ * existing session cannot change it. Silently ignoring the request would hand
+ * back a session with different permissions than the step asked for, so this
+ * is a configuration error instead.
+ */
+function assertCapabilitiesCompatible<TContext, I, O>(
+  step: StepAcpAgent<TContext, I, O>,
+  live: AcpLiveSession,
+): void {
+  const requested = step.clientCapabilities;
+  if (requested === undefined) {
+    return;
+  }
+  const current = live.host.capabilities;
+  if (JSON.stringify(requested) === JSON.stringify(current ?? {})) {
+    return;
+  }
+  throw new NoeticConfigError({
+    code: 'ACP_SESSION_CAPABILITY_CONFLICT',
+    message: `step.acpAgent(${JSON.stringify(step.id)}) reuses session '${step.session?.reuse}' but requests different clientCapabilities than the connection was opened with.`,
+    hint: 'ACP negotiates client capabilities once per connection. Give every step sharing a `session.reuse` key the same `clientCapabilities`, or use a separate session.',
+  });
 }
 
 //#endregion
@@ -237,6 +286,8 @@ async function openSession<TContext, I, O>(opts: {
   baseCtx: Context<ContextData>;
   cwd: string;
   host: AcpClientHost;
+  /** Per-turn host binding, reapplied when an existing session is reused. */
+  binding: HostBindingOptions<TContext, I, O>;
   /** MCP servers for the session, already resolved from the step. */
   servers?: Parameters<AcpAgentConnection['newSession']>[0]['mcpServers'];
 }): Promise<SessionResolution> {
@@ -245,6 +296,16 @@ async function openSession<TContext, I, O>(opts: {
   if (reuseKey) {
     const existing = store.get(reuseKey);
     if (existing) {
+      if (existing.agentId !== opts.agent.agentId) {
+        throw new NoeticConfigError({
+          code: 'ACP_SESSION_AGENT_CONFLICT',
+          message: `step.acpAgent(${JSON.stringify(opts.step.id)}) reuses session '${reuseKey}', which was opened by the '${existing.agentId}' agent, with a '${opts.agent.agentId}' agent.`,
+          hint: 'A reused session is one live connection to one agent. Give every step sharing a `session.reuse` key the same agent, or use separate keys.',
+        });
+      }
+      assertCapabilitiesCompatible(opts.step, existing);
+      // Point the existing connection at THIS step before it takes a turn.
+      bindHostToStep(existing.host, opts.binding);
       return {
         live: existing,
         reuseKey,
@@ -283,6 +344,8 @@ async function openSession<TContext, I, O>(opts: {
   const live: AcpLiveSession = {
     connection,
     session,
+    host: opts.host,
+    agentId: opts.agent.agentId,
   };
   if (reuseKey) {
     store.set(reuseKey, live);
@@ -356,14 +419,17 @@ export async function executeAcpAgent<TContext, I, O>(
   }
 
   const bridge = new AcpEventBridge(step, agent.agentId, baseCtx);
-  const host = buildHost({
+  const binding = {
     step,
     ctx: baseCtx,
-    cwd,
     layers,
-    onUpdate: (notification) => {
+    onUpdate: (notification: Parameters<AcpClientHost['onSessionUpdate']>[0]) => {
       bridge.forward(notification);
     },
+  };
+  const host = buildHost({
+    ...binding,
+    cwd,
   });
 
   const resolution = await openSession({
@@ -373,6 +439,7 @@ export async function executeAcpAgent<TContext, I, O>(
     baseCtx,
     cwd,
     host,
+    binding,
     servers: servers
       ? [
           ...servers,

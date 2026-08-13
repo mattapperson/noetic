@@ -193,18 +193,31 @@ export interface AcpClientHost {
   readonly threadId: string;
   /** Abort signal for the surrounding execution. */
   readonly signal?: AbortSignal;
-  /** Capability advertisement overrides. */
+  /**
+   * Capability advertisement overrides. Connection-level: ACP negotiates the
+   * client capability set once during `initialize`, so this cannot change for
+   * the life of a connection.
+   */
   readonly capabilities?: AcpClientCapabilityConfig;
   /**
    * Permission resolution, in the order it is consulted: the declarative
    * policy, then steering, then the async handler. The protocol client owns the
    * resolution logic; the host only supplies the inputs.
+   *
+   * These are **per-turn**, and deliberately mutable: a session reused across
+   * several steps must answer with the CURRENT step's policy, not the one that
+   * happened to open the connection. The client reads them at call time, so
+   * the runtime updates them before each turn.
    */
-  readonly permissions?: AcpPermissionPolicy;
-  readonly steerPermission?: AcpPermissionSteerer;
-  readonly onPermissionRequest?: AcpPermissionHandler;
-  /** Receive every `session/update` notification for the active session. */
-  onSessionUpdate(notification: acp.SessionNotification): void;
+  permissions?: AcpPermissionPolicy;
+  steerPermission?: AcpPermissionSteerer;
+  onPermissionRequest?: AcpPermissionHandler;
+  /**
+   * Receive every `session/update` notification for the active session. Also
+   * per-turn — it routes to the running step's event bridge, so a reused
+   * session's output is attributed to the step that actually asked for it.
+   */
+  onSessionUpdate: (notification: acp.SessionNotification) => void;
 }
 
 //#endregion
@@ -324,6 +337,14 @@ export interface AcpAgentConnection {
 export interface AcpLiveSession {
   connection: AcpAgentConnection;
   session: AcpSession;
+  /**
+   * The host this connection was opened with. The runtime rebinds its
+   * per-turn fields before every turn, so a session shared by several steps
+   * honours each step's own permissions, steering, and event stream.
+   */
+  host: AcpClientHost;
+  /** `agentId` of the adapter that opened this connection, for reuse conflict checks. */
+  agentId: string;
 }
 
 /** @public Options handed to {@link AcpAgent.connect}. */
@@ -369,6 +390,10 @@ export interface AcpSessionPolicy {
    * Lifecycle action when the step completes. `'close'` ends the connection and
    * stops the agent; `'keep'` leaves it live for a later step. Defaults to
    * `'close'` for a fresh session and `'keep'` for a reused one.
+   *
+   * `'keep'` is scoped to the run: the harness closes every session it still
+   * holds when the root run finishes. A connection owns a live agent process,
+   * so one held past its run would keep the host from exiting.
    */
   onComplete?: 'close' | 'keep';
   /**
