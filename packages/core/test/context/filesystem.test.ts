@@ -1235,9 +1235,66 @@ describe('filesystem', () => {
   });
 
   describe('append-pipeline timeout headroom + parallel scoring (M8)', () => {
-    it('factory pins onItemAppend timeout at 30s (fs + LLM work cannot fit the 5s default)', () => {
-      const layer = filesystem();
-      expect(layer.timeouts?.onItemAppend).toBe(30_000);
+    it('sizes the onItemAppend timeout to the work actually configured', () => {
+      // Default is heuristic-only scoring: fs reads fit a tighter budget than
+      // the 5s pipeline default allows, but need nothing like 30s.
+      expect(filesystem().timeouts?.onItemAppend).toBe(10_000);
+      // Opting into LLM scoring adds a model round-trip per new reference.
+      expect(
+        filesystem({
+          scoringModel: 'anthropic/claude-haiku-4-5-20251001',
+        }).timeouts?.onItemAppend,
+      ).toBe(30_000);
+    });
+
+    it('never calls the model when no scoringModel is configured (heuristic default)', async () => {
+      await createTestFile('h1.ts', 'heuristic target');
+
+      const layer = filesystem({
+        baseDir: tempDir,
+      });
+      const store = createLayerStateStore();
+      let modelCalls = 0;
+      const ctx = makeCtx({
+        executionId: 'exec-heuristic',
+        callModel: async () => {
+          modelCalls++;
+          throw new Error('implicit model call');
+        },
+      });
+      await initLayers({
+        layers: [
+          layer,
+        ],
+        ctx,
+        storage: makeStorage(),
+        store,
+      });
+
+      await runAppendPipeline({
+        layers: [
+          layer,
+        ],
+        items: [
+          makeUserMessage('Look at #h1.ts'),
+        ],
+        ctx,
+        log: makeItemLog(),
+        store,
+      });
+
+      expect(modelCalls).toBe(0);
+      const state = store.get<{
+        files: Map<
+          string,
+          {
+            priority: number;
+          }
+        >;
+      }>('exec-heuristic', 'filesystem');
+      // Heuristic path: the query contains the basename, so the path-match
+      // branch scores 80 — no model was involved either way.
+      expect(state?.files.get('h1.ts')?.priority).toBe(80);
     });
 
     it('scores multiple new references in parallel (wall time ≪ sequential), all tracked', async () => {
@@ -1248,6 +1305,9 @@ describe('filesystem', () => {
 
       const layer = filesystem({
         baseDir: tempDir,
+        // Required: LLM scoring is opt-in, so without a model the scoring path
+        // never runs and the wall-clock parallelism assertion below is vacuous.
+        scoringModel: 'test/scorer',
       });
       const store = createLayerStateStore();
       const ctx = makeCtx({
