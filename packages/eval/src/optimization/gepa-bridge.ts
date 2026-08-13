@@ -6,6 +6,7 @@ import { frameworkCast } from '@noetic-tools/core/unstable';
 import type { Candidate, OptimizableField, OptimizationResult } from '../types/optimizer';
 import type { EnvLlmCredentials } from '../utils/env-llm';
 import { resolveEnvLlmCredentials } from '../utils/env-llm';
+import { runPool } from '../utils/run-pool';
 import { averageNumbers } from '../utils/scores';
 import { applyCandidate } from './mutator';
 
@@ -66,6 +67,9 @@ const DEFAULT_TEACHER_MODEL = 'openai/gpt-4o';
 const DEFAULT_NUM_TRIALS = 5;
 const DEFAULT_EARLY_STOPPING = 3;
 const DEFAULT_MAX_METRIC_CALLS = 10;
+
+/** Concurrent teacher proposals per reflection round (independent LLM calls). */
+const PROPOSAL_CONCURRENCY = 4;
 
 /**
  * The student program is a fixed single-component carrier: GEPA mutates its
@@ -335,7 +339,9 @@ export function createGepaAdapter(
 
     // Takes precedence over GEPA's free-form reflection, which would destroy
     // the field markers. The teacher improves each field value individually
-    // and WE reassemble the marker structure.
+    // and WE reassemble the marker structure. Proposals run through a
+    // bounded pool — they are independent LLM calls, and a 12-field step
+    // paid 12 sequential teacher round trips per GEPA iteration serially.
     async propose_new_texts(
       candidate: Readonly<Record<string, string>>,
       reflectiveDataset: Readonly<Record<string, unknown[]>>,
@@ -347,15 +353,21 @@ export function createGepaAdapter(
         const parsed = parseFieldText(currentText) ?? initialCandidate;
         const feedback = extractFeedback(reflectiveDataset[component]);
 
+        const proposals = await runPool(
+          fieldOrder.map((path) => () => {
+            const currentValue = parsed[path] ?? initialCandidate[path] ?? '';
+            return safePropose({
+              path,
+              currentValue,
+              feedback,
+            });
+          }),
+          PROPOSAL_CONCURRENCY,
+        );
         const improved: Candidate = {};
-        for (const path of fieldOrder) {
-          const currentValue = parsed[path] ?? initialCandidate[path] ?? '';
-          improved[path] = await safePropose({
-            path,
-            currentValue,
-            feedback,
-          });
-        }
+        fieldOrder.forEach((path, i) => {
+          improved[path] = proposals[i];
+        });
         result[component] = serializeFields(improved, fieldOrder);
       }
       return result;

@@ -127,7 +127,13 @@ function buildCodingAgentRecommendation(
 //#region Public API
 
 export async function optimize(options: OptimizeOptions): Promise<OptimizeResult> {
-  const fields = options.preEnrichedFields ?? discoverFields(options.step);
+  /* The scope MUST reach discovery: without it, PromptsOnly still discovers
+   * ToolName fields — which the teacher then mutates and write-back splices
+   * into source, breaking every name-keyed reference (steering whitelists,
+   * allowedToolNames). The CLI pre-filters via preEnrichedFields, which
+   * masked this for programmatic callers. */
+  const fields =
+    options.preEnrichedFields ?? discoverFields(options.step, undefined, options.scope);
 
   if (fields.length === 0) {
     return {

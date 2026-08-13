@@ -26,6 +26,7 @@ export { createEvalContext } from './runner/eval-context';
 export { it } from './runner/it';
 export { clearSuites, getSuites } from './runner/registry';
 export { runAllSuites, runSuite } from './runner/suite-runner';
+export { resolveJudgeProvider, runJudge } from './scorers/builtin/llm-judge';
 // Scorers
 export { scorer } from './scorers/index';
 export { createScorer } from './scorers/scorer-pipeline';
