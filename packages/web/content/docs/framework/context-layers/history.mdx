@@ -50,6 +50,32 @@ The projection runs against `ctx.itemLog.items` but never mutates it. As a resul
 
 Within a single `callModel` invocation's tool loop, that round's own `function_call` and `function_call_output` items accumulate in the wire payload until the call returns. The cap fires at **turn boundaries**, not mid-call — capping mid-flight would corrupt the active tool flow.
 
+## Compaction
+
+Capping bounds item *count*; it cannot preserve what falls outside the window. A **recorded compaction** is the explicit alternative: a `CompactionItem` appended to the log declares "the first `replacesUntil` items are summarized by `summary`". The log stays append-only (checkpoints, forks, and audits keep the full record) while the folded view the model sees collapses the replaced prefix to a `<compacted_history>` developer message.
+
+The helpers live in `@noetic-tools/core` (re-exported from `@noetic-tools/context`):
+
+- `foldCompactions(items)` — project the model view from the raw log. Highest `replacesUntil` wins; compaction records never reach a provider; the fold seam strips orphan tool calls. Run it on history before `assembleView` — and before this layer's cap — so a compaction genuinely shrinks what has to fit.
+- `hasCompaction(items)` — cheap check to skip the fold on the common no-compaction path.
+- `historyPressure(historyItems, policy)` — measures the **folded** history against `policy.compactAt` (default 80% of `tokenBudget − responseReserve`), so writing a compaction genuinely relieves pressure.
+- `createCompaction({ items, replacesUntil, summary })` / `compactHistory({ log, keepRecent, summarize })` — build the record. The caller supplies the summary (an LLM step, a heuristic, a digest) and appends the record; the projector never mutates a log.
+- `compactionAsItem(compaction)` — the sanctioned bridge to `ctx.itemLog.append(...)`.
+
+```ts validate=none
+import { compactHistory, compactionAsItem, historyPressure } from '@noetic-tools/core';
+
+const pressure = historyPressure(ctx.itemLog.items, policy);
+if (pressure.overThreshold) {
+  const compaction = await compactHistory({
+    log: ctx.itemLog.items,
+    keepRecent: 20,
+    summarize: (replaced) => summarizeSomehow(replaced), // your LLM step or heuristic
+  });
+  if (compaction) ctx.itemLog.append(compactionAsItem(compaction));
+}
+```
+
 ## CLI configuration
 
 The CLI installs `history` only when `AgentConfig.history.maxItems` is set. When unset, history is uncapped (the pre-existing default behaviour). Configure it via:
