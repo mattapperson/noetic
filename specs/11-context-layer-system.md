@@ -787,6 +787,8 @@ The item log is append-only; a **compaction** is an ordinary logged item (a `Com
 - `compactHistory({ log, keepRecent, summarize })` — thin convenience: works out `replacesUntil` from `keepRecent`, awaits `summarize` on exactly the replaced prefix, and returns the record for the **caller** to append (`ctx.itemLog.append(...)`). Returns `null` when there is nothing to compact.
 - `compactionAsItem(compaction)` — the one sanctioned bridge from `CompactionItem` to the `Item` that `ItemLog.append` takes; the type is registered with the schema registry so the append validates.
 
+The runtime applies the fold on every model request path. `callModel` assembly folds the projected log **before** the system/history partition — `replacesUntil` indexes the raw log, so folding a system-stripped array would drift the cut point and silently eat live turns; system items are hoisted from pre-fold positions so a compaction whose covered prefix includes the system prompt still leaves the model its instructions. The no-layers path folds the raw log directly, and `previewRequestItems` folds identically, so a preview never shows the raw record in place of the summary the model would actually read. When the folded history still exceeds `compactAt`, the step emits one `context_pressure` framework event (`{ nodeId, historyTokens, compactAt }`, spec 08) per execution, measured post-fold so writing a compaction genuinely relieves the pressure.
+
 ---
 
 ## Prompt-Cache Anchoring

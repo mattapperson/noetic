@@ -109,6 +109,44 @@ describe('foldCompactions', () => {
     expect(folded.some((i) => i.type === COMPACTION_ITEM_TYPE)).toBe(false);
   });
 
+  it('indexes the array it is given, so a caller must not pre-strip it', () => {
+    // `replacesUntil` is a RAW-log index. Removing items before folding shifts
+    // the cut point forward by one per removal and eats live turns past the
+    // boundary — the reason the interpreter folds before it partitions.
+    const log: Item[] = [
+      makeMessage('system', 'sys'),
+      makeMessage('user', 'live-1'),
+      makeMessage('user', 'live-2'),
+    ];
+    const compaction = compactionAsItem(
+      createCompaction({
+        items: log,
+        replacesUntil: 1,
+        summary: 's',
+      }),
+    );
+
+    const whole = foldCompactions([
+      ...log,
+      compaction,
+    ]);
+    expect(viewTexts(whole)).toEqual([
+      '<compacted_h',
+      'live-1',
+      'live-2',
+    ]);
+
+    // The same record folded over a system-stripped array loses `live-1`.
+    const preStripped = foldCompactions([
+      ...log.filter((i) => !(i.type === 'message' && i.role === 'system')),
+      compaction,
+    ]);
+    expect(viewTexts(preStripped)).toEqual([
+      '<compacted_h',
+      'live-2',
+    ]);
+  });
+
   it('strips a tool call whose output the fold compacted away', () => {
     // The call survives the fold boundary but its output does not — an
     // unresolved call would make the provider reject the request.

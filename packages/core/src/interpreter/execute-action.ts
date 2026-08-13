@@ -29,7 +29,10 @@ import {
   DEFAULT_PROJECTION,
   defaultItemSchemaRegistry,
   emitFrameworkEvent,
+  foldCompactions,
   getBroadcaster,
+  hasCompaction,
+  historyPressure,
   lineageKey,
   noteCacheOutcome,
   resolveCacheConfig,
@@ -518,11 +521,127 @@ async function gatherRecallResults(params: {
 }
 
 /**
+ * Emit `context_pressure` when the folded history has crossed the policy's
+ * `compactAt` threshold, at most once per step execution.
+ *
+ * `assembleView` still enforces the token budget by dropping the oldest turns,
+ * but it does so silently. This is the signal that lets an agent (or the host
+ * app) record a compaction — replacing that prefix with a summary — instead of
+ * losing it. Measured post-fold, so a compaction genuinely turns the signal off.
+ *
+ * Returns the new "already emitted" state, so the caller tracks the once-only
+ * guarantee without branching on it: a steering retry re-sends the same view, so
+ * re-emitting would only repeat itself.
+ *
+ * The latch closes only on an ACTUAL emission. An assembly that stayed under the
+ * threshold (or whose event a `shouldEmit` filter rejected) leaves the flag as it
+ * found it — otherwise a first assembly with room to spare would disarm the event
+ * for the rest of the step, and a steering retry that appended enough to cross
+ * `compactAt` would trim the oldest turns in the silence the event exists to break.
+ */
+function emitContextPressureOnce(params: {
+  historyItems: ReadonlyArray<Item>;
+  policy: ProjectionPolicy;
+  nodeId: string;
+  emit: EmitOption | undefined;
+  ctx: Context<ContextData>;
+  alreadyEmitted: boolean;
+}): boolean {
+  if (params.alreadyEmitted) {
+    return true;
+  }
+  const pressure = historyPressure(params.historyItems, params.policy);
+  if (!pressure.overThreshold) {
+    return params.alreadyEmitted;
+  }
+  const data = {
+    nodeId: params.nodeId,
+    historyTokens: pressure.historyTokens,
+    compactAt: pressure.compactAt,
+  };
+  if (!shouldEmit(params.emit, 'context_pressure', data)) {
+    return params.alreadyEmitted;
+  }
+  emitFrameworkEvent({
+    broadcaster: getBroadcaster(params.ctx),
+    agentName: params.ctx.harness.config.name,
+    eventType: 'context_pressure',
+    data,
+  });
+  return true;
+}
+
+/** The layer-bearing path's two history bands, split out of the projected log. */
+interface PartitionedHistory {
+  /** System messages, hoisted to the front. Never dropped by the budget. */
+  systemItems: Item[];
+  /** Everything else, compactions folded. */
+  historyItems: Item[];
+}
+
+/**
+ * Split the projected log into the system band and the history band, folding any
+ * recorded compaction on the way.
+ *
+ * Order of operations matters twice over:
+ *
+ * 1. The fold runs on the WHOLE projected array, because
+ *    `CompactionItem.replacesUntil` indexes the log the record was created
+ *    against (`ctx.itemLog.items`). Folding a system/tail-stripped array would
+ *    apply that index to a shorter list, so the cut point lands past its
+ *    intended position and silently eats one live turn per stripped item — and
+ *    the same log would then produce a different history depending on whether
+ *    layers are configured, since the no-layers path folds unstripped.
+ * 2. System items are hoisted from the array as it stood BEFORE the fold, so a
+ *    compaction whose covered prefix happens to include the system prompt still
+ *    leaves the model its instructions. They are then skipped when the folded
+ *    result is walked, so each appears exactly once — in the band the budget
+ *    never trims.
+ *
+ * The fold renders the winning compaction as a `developer` message carrying a
+ * fresh id, so neither the system test nor the tail test below can claim it and
+ * the summary always reaches history.
+ */
+function partitionProjectedHistory(params: {
+  projected: ReadonlyArray<Item>;
+  tailIds: ReadonlySet<string>;
+}): PartitionedHistory {
+  const systemItems: Item[] = [];
+  for (const item of params.projected) {
+    if (item.type === 'message' && item.role === 'system') {
+      systemItems.push(item);
+    }
+  }
+  const folded = hasCompaction(params.projected)
+    ? foldCompactions(params.projected)
+    : params.projected;
+  const historyItems: Item[] = [];
+  for (const item of folded) {
+    // Hoisted above, into a band that is never dropped.
+    if (item.type === 'message' && item.role === 'system') {
+      continue;
+    }
+    // Steering guidance is re-placed at the tail; skip it here so the retry
+    // does not see the same correction twice.
+    if ('id' in item && typeof item.id === 'string' && params.tailIds.has(item.id)) {
+      continue;
+    }
+    historyItems.push(item);
+  }
+  return {
+    systemItems,
+    historyItems,
+  };
+}
+
+/**
  * Builds the items the model sees for one attempt: system messages stay at the
  * front, the banded anchor/live/delta output rides between them and history,
  * and steering guidance from a prior retry lands at the very tail. The
  * projector enforces the token budget (drops highest-slot layer output, then
- * oldest history).
+ * oldest history). Recorded compactions are folded BEFORE the bands claim
+ * their budget, and a real threshold crossing emits `context_pressure` once
+ * per step execution.
  */
 async function assembleTurnItems(params: {
   ctx: Context<ContextData>;
@@ -530,37 +649,60 @@ async function assembleTurnItems(params: {
   banded: BandedView;
   steeringTail: InputMessageItem[];
   viewPolicy: ProjectionPolicy;
-}): Promise<ReadonlyArray<Item>> {
+  nodeId: string;
+  emit: EmitOption | undefined;
+  pressureEmitted: boolean;
+}): Promise<{
+  items: ReadonlyArray<Item>;
+  pressureEmitted: boolean;
+}> {
   const { ctx, layers, banded, steeringTail, viewPolicy } = params;
   const rawHistoryItems: ReadonlyArray<Item> = ctx.itemLog.items;
   if (layers === undefined || layers.length === 0) {
-    return rawHistoryItems;
+    // Fold even here: the model must read the summary, never the raw record.
+    // Preserve array identity on the common no-compaction path.
+    const items = hasCompaction(rawHistoryItems)
+      ? foldCompactions(rawHistoryItems)
+      : rawHistoryItems;
+    const pressureEmitted = emitContextPressureOnce({
+      historyItems: items,
+      policy: viewPolicy,
+      nodeId: params.nodeId,
+      emit: params.emit,
+      ctx,
+      alreadyEmitted: params.pressureEmitted,
+    });
+    return {
+      items,
+      pressureEmitted,
+    };
   }
   const projectedHistoryItems = await ctx.harness.projectHistory(layers, rawHistoryItems, ctx);
-  const systemItems: Item[] = [];
-  const nonSystemHistory: Item[] = [];
-  const tailIds = new Set(steeringTail.map((i) => i.id));
-  for (const item of projectedHistoryItems) {
-    if (item.type === 'message' && item.role === 'system') {
-      systemItems.push(item);
-      continue;
-    }
-    // Steering guidance is re-placed at the tail; skip it here so the retry
-    // does not see the same correction twice.
-    if ('id' in item && typeof item.id === 'string' && tailIds.has(item.id)) {
-      continue;
-    }
-    nonSystemHistory.push(item);
-  }
-  return assembleView({
-    systemPromptItems: systemItems,
-    layerOutputItems: banded.anchorItems,
-    historyItems: nonSystemHistory,
-    liveLayerItems: banded.liveItems,
-    deltaItems: banded.deltaItems,
-    tailItems: steeringTail,
-    policy: viewPolicy,
+  const { systemItems, historyItems } = partitionProjectedHistory({
+    projected: projectedHistoryItems,
+    tailIds: new Set(steeringTail.map((i) => i.id)),
   });
+  // Announce the trim that is coming, before the assembler performs it.
+  const pressureEmitted = emitContextPressureOnce({
+    historyItems,
+    policy: viewPolicy,
+    nodeId: params.nodeId,
+    emit: params.emit,
+    ctx,
+    alreadyEmitted: params.pressureEmitted,
+  });
+  return {
+    items: assembleView({
+      systemPromptItems: systemItems,
+      layerOutputItems: banded.anchorItems,
+      historyItems,
+      liveLayerItems: banded.liveItems,
+      deltaItems: banded.deltaItems,
+      tailItems: steeringTail,
+      policy: viewPolicy,
+    }),
+    pressureEmitted,
+  };
 }
 
 interface BuildModelRequestParams<TContext, I, O> {
@@ -772,15 +914,21 @@ export async function executeCallModel<TContext, I, O>(
   // live band and the supersedes, rather than wherever history happens to put it.
   let steeringTail: InputMessageItem[] = [];
   let cacheJudged = false;
+  let pressureEmitted = false;
 
   while (retries <= MAX_STEERING_RETRIES) {
-    const assembledItems = await assembleTurnItems({
+    const assembled = await assembleTurnItems({
       ctx: baseCtx,
       layers,
       banded,
       steeringTail,
       viewPolicy,
+      nodeId: step.id,
+      emit: step.emit,
+      pressureEmitted,
     });
+    pressureEmitted = assembled.pressureEmitted;
+    const assembledItems = assembled.items;
 
     const request = buildModelRequest({
       step,
