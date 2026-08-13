@@ -342,6 +342,41 @@ const layers = [
 
 ---
 
+## `filesystem()`
+
+Tracks `#path/to/file` references in user messages and injects priority-scored file contents into the context.
+
+```typescript
+interface FileReferenceOptions {
+  baseDir?: string;             // base for resolving relative paths, default cwd
+  slot?: number;                // default Slot.RAG
+  scoringModel?: string;        // OPT-IN: LLM relevance scoring; default heuristic, no model call
+  maxFileSize?: number;         // default 1MB
+  followSymlinks?: boolean;     // default false (security)
+  allowedExtensions?: string[]; // default: common code/text extensions
+}
+
+function filesystem(opts?: FileReferenceOptions): ContextLayer<FileReferenceState>
+```
+
+| Property | Value |
+|----------|-------|
+| **id** | `'filesystem'` |
+| **slot** | `Slot.RAG` (350) |
+| **scope** | `'thread'` |
+| **budget** | `'auto'` |
+| **timeouts** | `{ onItemAppend: 10_000 }` for file reads; `30_000` when `scoringModel` is configured (each new reference then runs an LLM scoring call) |
+| **hooks** | `init`, `onItemAppend`, `recall`, `renderDelta` |
+| **placement** | `'anchor'` |
+
+**Behavior:**
+- `onItemAppend`: Scans user messages for `#path` references, transforms them to markdown anchor links, reads new references in parallel, and re-reads tracked files for change detection (content hash). Absolute paths are rejected; reads are gated by containment, symlink rejection, an extension allowlist, and a size cap.
+- **Scoring is heuristic by default** — a path/query match heuristic scores each new reference 0-100 with **no model call**. LLM-backed scoring against the current user query happens only when `scoringModel` is explicitly configured; this is a deliberate breaking change from the previous implicit small-model default, which silently issued an LLM call per new reference inside the append pipeline.
+- `recall`: Renders a `# Referenced Files` developer message ordered by priority, budget-trimmed (head + tail with a truncation marker).
+- `renderDelta`: Publishes only changed/dropped file blocks.
+
+---
+
 ## Custom Layer Examples (Informative)
 
 ### RAG Knowledge Base
