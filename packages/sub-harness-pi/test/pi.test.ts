@@ -64,8 +64,10 @@ describe('pi adapter', () => {
     assert(result.usage);
     expect(result.usage.total).toBe(5);
     expect(result.cost).toBe(0.004);
-    // Reasoning does not produce an item; only the assistant message does.
-    expect(result.items).toHaveLength(1);
+    // Reasoning is preserved as an item ahead of the assistant message.
+    expect(result.items).toHaveLength(2);
+    expect(result.items[0]?.type).toBe('reasoning');
+    expect(result.items[1]?.type).toBe('message');
     // stream-start + reasoning-delta + 2 text-deltas + finish forwarded to emit.
     expect(emitted).toHaveLength(5);
     expect(emitted.some((p) => p.type === 'reasoning-delta')).toBe(true);

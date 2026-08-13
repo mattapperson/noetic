@@ -41,7 +41,13 @@ import { isContextImpl, isFunctionCall, isMutableContext } from './typeguards';
  * mirroring how the interpreter reaches `layerStateStore`.
  */
 interface SubHarnessSessionStore {
-  subHarnessSessions: Map<string, SubHarnessSession>;
+  /**
+   * Keyed by `step.session.reuse`. Values are PROMISES so two steps racing on
+   * the same key (e.g. parallel legs) dedupe onto one `doStart` instead of
+   * both starting and one leaking. Driving concurrent TURNS on one reused
+   * session remains unsupported — sessions are conversational state.
+   */
+  subHarnessSessions: Map<string, Promise<SubHarnessSession>>;
 }
 
 type TeardownMode = NonNullable<SubHarnessSessionPolicy['onComplete']>;
@@ -50,7 +56,7 @@ type TeardownMode = NonNullable<SubHarnessSessionPolicy['onComplete']>;
 
 //#region Helpers
 
-function sessionStore(ctx: Context<ContextData>): Map<string, SubHarnessSession> {
+function sessionStore(ctx: Context<ContextData>): Map<string, Promise<SubHarnessSession>> {
   return frameworkCast<SubHarnessSessionStore>(ctx.harness).subHarnessSessions;
 }
 
@@ -90,6 +96,17 @@ function resolveTurnText<I>(resolvedPrompt: string | undefined, input: I): strin
  */
 function abortSignalOf(ctx: Context<ContextData>): AbortSignal | undefined {
   return isContextImpl(ctx) ? ctx.abortSignal : undefined;
+}
+
+/** Default idle timeout for a sub-harness turn; `settings.extra.idleTimeoutMs` overrides (0 disables). */
+const DEFAULT_SUB_HARNESS_IDLE_TIMEOUT_MS = 120_000;
+
+function resolveIdleTimeoutMs(extra: Record<string, unknown> | undefined): number {
+  const raw = extra?.idleTimeoutMs;
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    return raw;
+  }
+  return DEFAULT_SUB_HARNESS_IDLE_TIMEOUT_MS;
 }
 
 function buildRunContext(ctx: Context<ContextData>): SubHarnessRunContext {
@@ -156,6 +173,30 @@ interface SessionResolution {
   reuseKey?: string;
 }
 
+/**
+ * Start one session. Kept as a named function so callers can hold the pending
+ * promise — it returns synchronously, before the instruction resolve inside it
+ * awaits, which is what lets the reuse store be populated without a dedupe
+ * window.
+ */
+function startSession<TContext, I, O>(
+  step: StepSubHarness<TContext, I, O>,
+  harness: SubHarness,
+  ctx: Context<TContext>,
+  baseCtx: Context<ContextData>,
+  history: ReadonlyArray<Item>,
+): Promise<SubHarnessSession> {
+  return resolveLazy(step.instructions, ctx).then((instructions) =>
+    harness.doStart({
+      settings: step.settings,
+      instructions,
+      history,
+      ctx: buildRunContext(baseCtx),
+      signal: abortSignalOf(baseCtx),
+    }),
+  );
+}
+
 async function startOrReuseSession<TContext, I, O>(
   step: StepSubHarness<TContext, I, O>,
   harness: SubHarness,
@@ -169,24 +210,32 @@ async function startOrReuseSession<TContext, I, O>(
     const existing = store.get(reuseKey);
     if (existing) {
       return {
-        session: existing,
+        session: await existing,
         reuseKey,
       };
     }
   }
 
-  const session = await harness.doStart({
-    settings: step.settings,
-    instructions: await resolveLazy(step.instructions, ctx),
-    history,
-    ctx: buildRunContext(baseCtx),
-    signal: abortSignalOf(baseCtx),
-  });
+  // Build the start promise SYNCHRONOUSLY (the instruction resolve happens
+  // inside it) so the store.set below lands before any await — otherwise two
+  // steps racing on the key both pass the store check during the instruction
+  // resolution and start duplicate sessions.
+  const startPromise = startSession(step, harness, ctx, baseCtx, history);
   if (reuseKey) {
-    store.set(reuseKey, session);
+    store.set(reuseKey, startPromise);
+    try {
+      return {
+        session: await startPromise,
+        reuseKey,
+      };
+    } catch (e) {
+      // A failed start must not poison the key for later retries.
+      store.delete(reuseKey);
+      throw e;
+    }
   }
   return {
-    session,
+    session: await startPromise,
     reuseKey,
   };
 }
@@ -251,21 +300,56 @@ export async function executeSubHarness<TContext, I, O>(
   const bridge = new SubHarnessEventBridge(step, baseCtx);
   bridge.begin();
 
+  // Idle watchdog: an external coding agent is a real process that can hang
+  // (CLI waiting on stdin, SDK deadlock). The model-call path has a
+  // stream-idle watchdog; this is its analogue for sub-harness turns — no
+  // stream part for `idleTimeoutMs` aborts the per-turn signal. Every
+  // forwarded part feeds the watchdog.
+  const idleTimeoutMs = resolveIdleTimeoutMs(step.settings?.extra);
+  const turnController = new AbortController();
+  const ctxSignal = abortSignalOf(baseCtx);
+  const turnSignal = ctxSignal
+    ? AbortSignal.any([
+        ctxSignal,
+        turnController.signal,
+      ])
+    : turnController.signal;
+  let idleStalled = false;
+  let idleTimer: ReturnType<typeof setTimeout> | null = null;
+  const armWatchdog = (): void => {
+    if (idleTimeoutMs <= 0) {
+      return;
+    }
+    if (idleTimer) {
+      clearTimeout(idleTimer);
+    }
+    idleTimer = setTimeout(() => {
+      idleStalled = true;
+      turnController.abort(`sub-harness turn idle for ${idleTimeoutMs}ms`);
+    }, idleTimeoutMs);
+  };
+  armWatchdog();
+
   let result: SubHarnessTurnResult;
   try {
     result = await resolution.session.doPromptTurn({
       prompt: turnText,
-      emit: (part) => bridge.forward(part),
+      emit: (part) => {
+        armWatchdog();
+        bridge.forward(part);
+      },
       // Per-turn signal, so a session reused across turns is cancelled by the
-      // context running the CURRENT turn rather than the one that started it.
-      signal: abortSignalOf(baseCtx),
+      // context running the CURRENT turn rather than the one that started it,
+      // and the idle watchdog can cut a stalled turn.
+      signal: turnSignal,
     });
   } catch (e) {
-    // Best-effort teardown of a fresh session before surfacing the failure;
-    // reused sessions are left intact for a later step to retry against.
-    if (!resolution.reuseKey) {
-      await teardownSession(resolution.session, 'destroy').catch(() => undefined);
+    // A failed turn may leave the external runtime wedged or partially
+    // advanced. Never reuse it: evict the promise before best-effort teardown.
+    if (resolution.reuseKey) {
+      sessionStore(baseCtx).delete(resolution.reuseKey);
     }
+    await teardownSession(resolution.session, 'destroy').catch(() => undefined);
     if (e instanceof NoeticErrorImpl) {
       throw e;
     }
@@ -277,16 +361,52 @@ export async function executeSubHarness<TContext, I, O>(
         reason: baseCtx.abortReason ?? 'context aborted',
       });
     }
+    if (idleStalled) {
+      throw new NoeticErrorImpl({
+        kind: 'step_failed',
+        stepId: step.id,
+        cause: new Error(
+          `Sub-harness turn produced no output for ${idleTimeoutMs}ms (idle timeout).`,
+        ),
+        retriesExhausted: false,
+      });
+    }
     throw new NoeticErrorImpl({
       kind: 'step_failed',
       stepId: step.id,
       cause: e instanceof Error ? e : new Error(String(e)),
       retriesExhausted: false,
     });
+  } finally {
+    if (idleTimer) {
+      clearTimeout(idleTimer);
+    }
   }
 
   bridge.finalize(result);
   applyTurnResult(baseCtx, result);
+
+  // A turn the AGENT reports as failed must not flow downstream as a normal
+  // answer. The items/usage are already applied (the spend is real and the
+  // transcript is the evidence); the step itself fails so loop onError /
+  // callers can retry or abort instead of trusting a broken result.
+  if (result.finishReason === 'error') {
+    if (resolution.reuseKey) {
+      sessionStore(baseCtx).delete(resolution.reuseKey);
+    }
+    await teardownSession(resolution.session, 'destroy').catch(() => undefined);
+    throw new NoeticErrorImpl({
+      kind: 'step_failed',
+      stepId: step.id,
+      cause: new Error(
+        `Sub-harness turn finished with finishReason 'error'. Last output: ${
+          (result.text || extractAssistantText(result.items)).slice(0, 500) || '(none)'
+        }`,
+      ),
+      retriesExhausted: false,
+    });
+  }
+
   await finalizeSession(resolution, step.session, baseCtx);
 
   const lastText = result.text.length > 0 ? result.text : extractAssistantText(result.items);

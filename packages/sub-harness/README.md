@@ -18,9 +18,10 @@ runs a sub-harness via `step.claudeCode(...)`, `step.codex(...)`, etc., or via a
 - **`SubHarnessStreamPart` (+ Zod schema)** — the event model an adapter emits
   during a turn.
 - **`SubHarnessTurnAccumulator`** — collects stream parts into a
-  `SubHarnessTurnResult` (assistant message + tool-call Items, text, usage).
-- **`assistantMessageItem` / `functionCallItem`** — build Noetic `Item`s from
-  agent output.
+  `SubHarnessTurnResult` (reasoning + assistant message + tool-call Items,
+  text, usage).
+- **`assistantMessageItem` / `functionCallItem` / `reasoningItem`** — build
+  Noetic `Item`s from agent output.
 - **`createSubHarnessRegistry`** — key adapters by id for JSON-workflow
   hydration (`HydrationContext.subHarnesses`).
 - **`commonTool`** — declare the cross-harness built-in tool vocabulary.

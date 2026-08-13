@@ -44,7 +44,7 @@ export {
   SubHarnessStartError,
 } from './errors';
 export { formatConversation, withHistoryPrompt } from './history';
-export { asItems, assistantMessageItem, functionCallItem } from './items';
+export { asItems, assistantMessageItem, functionCallItem, reasoningItem } from './items';
 export type { SubHarnessRegistry } from './registry';
 export { createSubHarnessRegistry } from './registry';
 export type { SubHarnessTurnAccumulatorOptions } from './turn';

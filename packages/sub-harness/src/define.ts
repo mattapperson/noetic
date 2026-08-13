@@ -95,6 +95,9 @@ function createRunnerSession(
       return accumulator.result();
     },
     async doStop() {
+      // Stateless runner sessions persist nothing: `state: null` means "no
+      // resume payload exists" — resuming a stopped runner session starts
+      // fresh. Adapters with real session state override the whole session.
       return {
         harnessId: def.harnessId,
         sessionId,

@@ -97,7 +97,7 @@ interface SubHarnessSessionPolicy {
 }
 ```
 
-- `reuse` keys a live session (workspace + conversation history + running runtime) that survives across steps. Two steps with the same `reuse` key share one session, so the second turn sees the first turn's history. A reused session is kept alive by default.
+- `reuse` keys a live session (workspace + conversation history + running runtime) that survives across steps. Two steps with the same `reuse` key share one session, so the second turn sees the first turn's history. Concurrent first turns on one key dedupe onto a single session start. A reused session is kept alive by default.
 - `onComplete` chooses teardown: `'stop'` (default for a fresh session) persists state and stops the runtime, `'detach'` parks it for later resume, `'destroy'` discards it with no resume state.
 
 ## Conversation history
@@ -140,6 +140,12 @@ Two guarantees back this:
 
 - **All output is mapped.** Every part an adapter emits — `text-delta`, `reasoning-delta`, `tool-call`, `file-change`, `finish`, … — becomes the corresponding stream event. Adapters never drop vendor output: anything unrecognized is surfaced as a `raw` part rather than discarded.
 - **A turn always emits.** Even an adapter that streams nothing still brackets the turn with a completion event, and a result returned without streaming is synthesized into events. Set `emit: false` on the step to suppress all of it.
+
+### Turn failure and the idle watchdog
+
+A turn the agent reports as failed (`finishReason: 'error'`) fails the step with a `step_failed` error — partial output is kept in the item log as evidence, but it is never returned as a successful result. And because an external coding agent is a real process that can hang, each turn is guarded by an idle watchdog: if no stream part arrives for `settings.extra.idleTimeoutMs` (default 120s, `0` disables), the turn is aborted and the step fails instead of hanging the run.
+
+Reasoning deltas are retained as a `reasoning` item in the turn result, so the item log, checkpoints, and eval scorers see the agent's thinking.
 
 ## JSON workflow node
 
@@ -225,7 +231,7 @@ The stream-part union covers `stream-start`, `text-delta`, `reasoning-delta`, `t
 
 `commonTool(nativeName, commonName?, description?)` maps an agent's native tool name (Claude's `Bash`, Codex's `shell`, pi's `bash`) to a shared cross-harness name (`shell`), so consumers can recognize "the same kind of tool" across agents.
 
-The base package also exports the building blocks the lifecycle uses internally: `SubHarnessTurnAccumulator` (collects stream parts into a `SubHarnessTurnResult`), the `asItems` / `assistantMessageItem` / `functionCallItem` item builders, and the `SubHarnessCapabilityError` / `SubHarnessStartError` error types (with `isSubHarnessCapabilityError` / `isSubHarnessStartError` guards). A `SubHarnessSession` requires only `doPromptTurn` and `doStop`; the rest of the lifecycle (`doContinueTurn`, `doSuspendTurn`, `doDetach`, `doDestroy`, `doCompact`) is optional and signalled by presence. An adapter that cannot satisfy an optional capability throws `SubHarnessCapabilityError` from the relevant method rather than advertising a static capabilities object.
+The base package also exports the building blocks the lifecycle uses internally: `SubHarnessTurnAccumulator` (collects stream parts into a `SubHarnessTurnResult`), the `asItems` / `assistantMessageItem` / `functionCallItem` / `reasoningItem` item builders, and the `SubHarnessCapabilityError` / `SubHarnessStartError` error types (with `isSubHarnessCapabilityError` / `isSubHarnessStartError` guards). A `SubHarnessSession` requires only `doPromptTurn` and `doStop`; the rest of the lifecycle (`doContinueTurn`, `doSuspendTurn`, `doDetach`, `doDestroy`, `doCompact`) is optional and signalled by presence. An adapter that cannot satisfy an optional capability throws `SubHarnessCapabilityError` from the relevant method rather than advertising a static capabilities object.
 
 ## Core decoupling guarantee
 

@@ -5,8 +5,23 @@
  * constructible.
  */
 
-import type { FunctionCallItem, Item, MessageItem } from '@noetic-tools/types';
+import type { FunctionCallItem, Item, MessageItem, ReasoningItem } from '@noetic-tools/types';
 import { frameworkCast } from '@noetic-tools/types';
+
+/** @public Build a reasoning Item from accumulated thinking text. */
+export function reasoningItem(text: string, id?: string): ReasoningItem {
+  return frameworkCast<ReasoningItem>({
+    id: id ?? `reasoning-${crypto.randomUUID()}`,
+    type: 'reasoning',
+    status: 'completed',
+    content: [
+      {
+        type: 'reasoning_text',
+        text,
+      },
+    ],
+  });
+}
 
 /** @public Build an assistant message Item from plain text. */
 export function assistantMessageItem(text: string, id?: string): MessageItem {
