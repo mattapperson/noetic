@@ -141,12 +141,12 @@ Every retained implementation PR must:
 | 7 | `lukeparke/openrouter-doom-loop` | [#74](https://github.com/mattapperson/noetic/pull/74) | pending | no feedback | independent | 2026-08-12 opened |
 | 8 | `lukeparke/openrouter-deferred-observations` | [#75](https://github.com/mattapperson/noetic/pull/75) | pending | no feedback | independent | 2026-08-12 opened |
 | 9 | `lukeparke/openrouter-filesystem-scoring` | [#76](https://github.com/mattapperson/noetic/pull/76) | pending | no feedback | breaking default | 2026-08-12 opened |
-| 10 | — | — | — | — | validation dropped via #67 | 2026-08-12 audit complete |
-| 11 | — | [#69 separate](https://github.com/mattapperson/noetic/pull/69) | #69 currently failing | — | avoid #69 behavior | 2026-08-12 audit complete |
-| 12 | — | — | — | — | independent; blocks 13 | 2026-08-12 audit complete |
+| 10 | — | — | — | — | deferred after review found function-tool correctness and mutation-contract gaps; validation dropped via #67 | 2026-08-12 implementation rejected pending redesign |
+| 11 | `lukeparke/openrouter-runtime-efficiency` | [#78](https://github.com/mattapperson/noetic/pull/78) | pending | no feedback | excludes [#69](https://github.com/mattapperson/noetic/pull/69) behavior | 2026-08-12 opened |
+| 12 | `lukeparke/openrouter-session-log` | [#79](https://github.com/mattapperson/noetic/pull/79) | pending | no feedback | blocks 13 | 2026-08-12 opened |
 | 13 | — | — | — | — | blocked by 12 | 2026-08-12 audit complete |
 | 14 | — | — | — | — | independent; blocks 20 | 2026-08-12 audit complete |
-| 15 | — | — | — | — | independent; blocks 16 | 2026-08-12 audit complete |
+| 15 | `lukeparke/openrouter-compaction-primitives` | [#80](https://github.com/mattapperson/noetic/pull/80) | pending | no feedback | blocks 16 | 2026-08-12 opened |
 | 16 | — | — | — | — | blocked by 15 | 2026-08-12 audit complete |
 | 17 | — | — | — | — | blocked by 16; RFC/breaking | 2026-08-12 audit complete |
 | 18 | `lukeparke/openrouter-context-input` | [#77](https://github.com/mattapperson/noetic/pull/77) | pending | no feedback | independent | 2026-08-12 opened |
