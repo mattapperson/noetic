@@ -415,7 +415,9 @@ interface DetachedHandle<O> {
 
 - a FIFO `MessageQueue`,
 - a long-lived `EventBroadcaster` that relays SDK and framework events across all turns,
-- an `itemLog` snapshot that carries conversation history from turn to turn.
+- one live `ItemLogImpl` shared by every turn context in the session.
+
+The shared log eliminates per-turn copy-out/copy-back. A turn captures its starting length and truncates back to that watermark on failure or cancellation, so failed turns leave no partial input, model output, or tool results. History seeding validates the entire replacement before mutating the live log.
 
 Before the first turn runs, the harness walks the step tree to collect all tools from callModel steps, merges them with layer-provided tools, and deduplicates by name. This **unified tool set** is stored on the turn's execution context and sent with every LLM call for prompt cache efficiency. Individual steps restrict the model to a subset via the Open Responses `tool_choice: { type: "allowed_tools" }` parameter. `run(step, input, ctx)` does the same lazily: when an embedder drives a step directly on a bare `createContext()` context, `run` populates that context's unified tool set (the step's tools plus the harness tools) if it is not already set, so directly-driven steps — and any sub-agents they spawn — see the harness toolset. `run` also runs the configured context layers' `init()` hooks once per context (keyed by `ctx.id`) before executing, so a harness built with `contextLayers` + a storage adapter rehydrates prior layer state, recalls it, and persists updates on the bare `run()` path — the same guarantee the session/`execute()` path gives. The init is idempotent: nested or repeated `run()` calls and the session turn path never re-init (which would clobber accumulated in-layer state by re-hydrating from storage); a deliberate `disposeLayers(ctx)` clears the guard so a later `run()` re-hydrates.
 
@@ -638,7 +640,7 @@ Snapshot content (Zod-validated by `CheckpointSnapshotSchema`):
 - `layers` — `Record<layerId, state>` captured via `layerStateStore.get(executionId, layerId)`.
 - `cwd` — `{ current, previous }`.
 - `askUser` — pending ask-user requests (populated when the code-agent's `AskUserService` integrates with the store).
-- `itemLog` — `{ items: Item[] }`, the full item log.
+- `itemLog` — either `{ items: Item[] }` for legacy inline snapshots, or `{ items: [], persistedCount: number }` when the transcript lives in append-only batches keyed by log owner (`execution:<ownerKey>:itemLog:<offset>`).
 - `capturedAt` — ISO-8601 timestamp.
 
 ### Restore Contract
@@ -646,7 +648,7 @@ Snapshot content (Zod-validated by `CheckpointSnapshotSchema`):
 `harness.restore(executionId)` reads the snapshot and rebuilds a `Context`:
 
 1. Replays layer state into `layerStateStore` under the same executionId so context projectors observe continuity.
-2. Re-parses `itemLog.items` via the harness's `ItemSchemaRegistry` (the same gate production traffic passes through).
+2. Re-parses `itemLog.items` via the harness's `ItemSchemaRegistry` (the same gate production traffic passes through). When `persistedCount` is present and the store supports batch loading, restore stitches the first contiguous durable prefix from the owner-keyed item batches and seeds the harness watermark from the recovered count.
 3. Seeds a new context with `threadId`, `resourceId`, and `cwdInit` from the snapshot.
 4. Returns a `Context` whose `.id` is overridden to the original `executionId` so downstream readers correlate across the restart.
 

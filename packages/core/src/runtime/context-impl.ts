@@ -155,6 +155,13 @@ export class ContextImpl implements Context<ContextData> {
     harness: AgentHarnessContract;
     parent?: Context;
     items?: Item[];
+    /**
+     * Share an existing log instead of building a fresh one from `items`.
+     * The session runner passes its session-owned log here so every turn in a
+     * thread appends to ONE log — no copy-forward/copy-back per turn.
+     * Mutually exclusive with `items`.
+     */
+    itemLog?: ItemLogImpl;
     state?: unknown;
     threadId?: string;
     resourceId?: string;
@@ -200,13 +207,17 @@ export class ContextImpl implements Context<ContextData> {
     };
     this._broadcaster = opts._broadcaster;
 
-    const log = new ItemLogImpl(this.itemSchemas);
-    if (opts.items) {
-      for (const item of opts.items) {
-        log.append(item);
+    if (opts.itemLog) {
+      this.itemLog = opts.itemLog;
+    } else {
+      const log = new ItemLogImpl(this.itemSchemas);
+      if (opts.items) {
+        for (const item of opts.items) {
+          log.append(item);
+        }
       }
+      this.itemLog = log;
     }
-    this.itemLog = log;
 
     // Join the parent's abort cascade last, so the child is fully constructed
     // before an already-aborted parent aborts it.

@@ -468,6 +468,10 @@ When `recall()` returns `tokenCount` less than allocated, the difference goes to
 
 The agent harness independently counts tokens. If layer-reported count diverges by >10%, the agent harness count is authoritative and a warning is emitted.
 
+## Warm Layer Hydration
+
+Session turns may carry initialized layer state forward without re-running `init`. Warm state is keyed by `(layer.id, resolveScopeKey(layer.scope, ctx))`, not by thread alone: resource-scoped state must cold-init when the resource changes, global state shares one bucket across threads, and thread state carries across turns. Execution-scoped layers always cold-init. Preview contexts are transient and never become a warm source. Each warm carry re-registers durable write-through targets for the new execution id.
+
 ## Recall Modes
 
 Each layer's `recallMode` controls whether its `recall()` blocks the model call:

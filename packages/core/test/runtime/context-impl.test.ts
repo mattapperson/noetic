@@ -4,6 +4,7 @@ import { isNoeticError } from '@noetic-tools/types';
 import { z } from 'zod';
 import { ChannelStore } from '../../src/runtime/channel-store';
 import { ContextImpl, collectContextTree } from '../../src/runtime/context-impl';
+import { ItemLogImpl } from '../../src/runtime/item-log-impl';
 import { makeMockContext, makeMockHarness } from '../_helpers';
 
 function makeTestItem(): InputMessageItem {
@@ -472,5 +473,51 @@ describe('collectContextTree', () => {
     expect(collectContextTree(foreign)).toEqual([
       foreign,
     ]);
+  });
+});
+
+describe('ContextImpl shared itemLog option', () => {
+  /**
+   * The session runner hands every turn's context the ONE session-owned log.
+   * Appending through the context must land on the shared instance, and reads
+   * through either handle must observe the other's writes — that identity is
+   * what replaces the old copy-forward/copy-back history.
+   */
+  test('a context constructed with `itemLog` shares the instance by reference', () => {
+    const shared = new ItemLogImpl();
+    shared.append(makeTestItem());
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+      itemLog: shared,
+    });
+
+    expect(ctx.itemLog).toBe(shared);
+    expect(ctx.itemLog.items).toHaveLength(1);
+
+    // Writes through the context land on the shared log...
+    ctx.itemLog.append({
+      ...makeTestItem(),
+      id: 'item-2',
+    });
+    expect(shared.items).toHaveLength(2);
+
+    // ...and a rollback through the shared handle is visible to the context.
+    shared.truncateTo(1);
+    expect(ctx.itemLog.items).toHaveLength(1);
+  });
+
+  test('without `itemLog`, a context still builds its own log from `items`', () => {
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+      items: [
+        makeTestItem(),
+      ],
+    });
+    expect(ctx.itemLog.items).toHaveLength(1);
+    // Mutating the context's log must not reach into any other instance.
+    const other = new ContextImpl({
+      harness: makeMockHarness(),
+    });
+    expect(other.itemLog.items).toHaveLength(0);
   });
 });

@@ -55,7 +55,8 @@ interface PendingAskUserSnapshot {
 }
 
 interface ItemLogSnapshot {
-  items: unknown[];                       // re-parsed via ItemSchemaRegistry on load
+  items: unknown[];                       // inline legacy shape, or [] when batched
+  persistedCount?: number;                // durable item count when batches are used
 }
 ```
 
@@ -69,7 +70,7 @@ Version history:
 
 `layers` is keyed by `layerId`; `restore()` re-inserts each entry into `harness.layerStateStore` under the original `executionId` so projections observe continuity. Layers that didn't publish state at snapshot time are absent from the record (not `null`).
 
-`itemLog.items` is serialised as `unknown[]` and re-parsed on load via `harness.itemSchemas.parseMany(...)` — the same gate production traffic passes through, so extension item shapes are validated identically.
+`itemLog.items` is serialised as `unknown[]` and re-parsed on load via `harness.itemSchemas.parseMany(...)` — the same gate production traffic passes through, so extension item shapes are validated identically. When the store supports item batches, the snapshot carries `persistedCount` and the transcript itself lives outside the snapshot as append-only batches under `execution:<ownerKey>:itemLog:<offset>`; restore stitches the first contiguous durable prefix from those batches.
 
 ## Checkpoint lifecycle
 
@@ -82,7 +83,7 @@ Version history:
 3. **Ask-user enqueue** — when a pending prompt is added to the ask-user queue. A restarted host can replay the modal to the TUI without losing state.
 4. **Post-`runAppendPipeline`** — after the append pipeline resolves. Layer state can mutate as items land, and the snapshot must follow that mutation.
 
-Any caller may additionally invoke `harness.checkpoint(ctx)` explicitly (e.g. after a long-running tool call settles). Snapshots are cheap: a few kilobytes per execution, one `StorageAdapter.set()` call.
+Any caller may additionally invoke `harness.checkpoint(ctx)` explicitly (e.g. after a long-running tool call settles). Snapshot writes stay O(layers + frontier): when batching is enabled only the delta item batch is appended, while the snapshot itself carries the durable item count. If a turn or seeded history rolls the shared session log back, the next checkpoint truncates orphaned durable batches before appending again, so restore cannot resurrect discarded transcript items.
 
 ### Idempotency
 
@@ -99,7 +100,7 @@ A failing `store.save` is logged via `console.warn` and swallowed. **A failing c
 1. Reads the snapshot via `checkpointStore.load(executionId)`. Returns `null` if no snapshot is recorded.
 2. Validates `schemaVersion` (throws `CHECKPOINT_SCHEMA_MISMATCH` on mismatch).
 3. Replays `layers` into `harness.layerStateStore` keyed by the original `executionId`, so context projectors and `ctx.context[layerId]` accessors observe continuity across the restart.
-4. Re-parses `itemLog.items` through `harness.itemSchemas` to recover typed `Item[]`.
+4. Re-parses `itemLog.items` through `harness.itemSchemas` to recover typed `Item[]`. When `persistedCount` is present and the store supports `loadItems`, restore loads the item batches through the same owner key capture used and clamps the harness watermark to the contiguous prefix actually recovered.
 5. Calls `harness.createContext({...opts, items, threadId, resourceId, cwdInit: snapshot.cwd?.current, context: opts?.context ?? harness._contextLayers})` to produce a fresh context seeded with the snapshot's item log, identity, and cwd.
 6. Overrides the returned context's `.id` to the original `executionId` so downstream adapter-correlation keeps working.
 7. Attaches the recovered step ledger (`23a-step-level-resume`) keyed to that same id.
