@@ -164,6 +164,14 @@ const ErrorFrameSchema = z.object({
   error: z.object({
     kind: z.string().min(1),
     message: z.string().min(1),
+    /**
+     * When the failed frame was a `send`, the message id it carried — so
+     * the client can reject exactly the matching ack waiter instead of
+     * failing every in-flight send (which made unrelated messages that DID
+     * execute look failed, inviting duplicate retries). Optional: errors
+     * from unparseable or non-send frames have nothing to correlate.
+     */
+    messageId: z.string().min(1).optional(),
   }),
 });
 

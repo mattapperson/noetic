@@ -230,14 +230,14 @@ function nowIso(): string {
  * in either case the process we recorded is no longer the one running
  * under that pid, so rebinding would be unsafe.
  */
-export function hydrateFromManifest(
+export async function hydrateFromManifest(
   manifest: LocalManifest,
   signaller: ProcessSignaller,
-): SubprocessHandle | null {
+): Promise<SubprocessHandle | null> {
   if (!signaller.isAlive(manifest.pid)) {
     return null;
   }
-  const currentStart = signaller.startTime(manifest.pid);
+  const currentStart = await signaller.startTime(manifest.pid);
   if (manifest.pidStarttime !== null && currentStart !== null) {
     if (currentStart !== manifest.pidStarttime) {
       return null;

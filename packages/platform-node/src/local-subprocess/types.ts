@@ -10,5 +10,11 @@ export type SubprocessSignal = 'SIGTERM' | 'SIGSTOP' | 'SIGCONT';
 export interface ProcessSignaller {
   kill(target: number, signal: SubprocessSignal): void;
   isAlive(pid: number): boolean;
-  startTime(pid: number): string | null;
+  /**
+   * Stable start-time identity token for `pid`, or null when unreadable.
+   * May be sync or async: the default signaller reads `/proc` (sync, µs) on
+   * Linux and shells out to `ps` elsewhere; an async implementation lets a
+   * host avoid blocking the event loop on that fork. Callers must await.
+   */
+  startTime(pid: number): string | null | Promise<string | null>;
 }
