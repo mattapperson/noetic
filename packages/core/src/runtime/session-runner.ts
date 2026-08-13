@@ -42,6 +42,13 @@ export interface SessionRunnerOpts {
   readonly agentName: string;
   readonly runTurn: RunTurnFn;
   readonly createContext: CreateContextFn;
+  /**
+   * Roll back session-owned state after a failed/aborted turn. With a shared
+   * session log (single-owner history), a failed turn's partial items must be
+   * discarded explicitly to preserve the "failed turns leave no trace"
+   * contract the old copy-back gave for free.
+   */
+  readonly rollbackTurn?: () => void;
 }
 
 //#endregion
@@ -111,6 +118,7 @@ export class SessionRunner {
   private readonly agentName: string;
   private readonly runTurn: RunTurnFn;
   private readonly createContext: CreateContextFn;
+  private readonly rollbackTurn?: () => void;
 
   private status: HarnessStatus = {
     kind: 'idle',
@@ -139,6 +147,7 @@ export class SessionRunner {
     this.agentName = opts.agentName;
     this.runTurn = opts.runTurn;
     this.createContext = opts.createContext;
+    this.rollbackTurn = opts.rollbackTurn;
 
     this.queue.subscribe(() => {
       this.kick();
@@ -245,37 +254,39 @@ export class SessionRunner {
     // the harness's createContext callback receives Item[] directly and
     // seeds the context without re-converting.
     const items = mergeInputsToItems(messages);
-    const ctx = this.createContext(items, turnId, messages);
-    this.currentCtx = ctx;
+    let ctx: Context | undefined;
 
-    emitFrameworkEvent({
-      broadcaster: this.broadcaster,
-      agentName: this.agentName,
-      eventType: 'turn_started',
-      data: {
-        turnId,
-        messageIds: messages.map((m) => m.id),
-      },
-    });
-    // Input items never appear in the SDK stream — item_appended is what
-    // carries them into getItemStream (and any other log-faithful consumer).
-    for (const item of items) {
+    try {
+      ctx = this.createContext(items, turnId, messages);
+      this.currentCtx = ctx;
+
       emitFrameworkEvent({
         broadcaster: this.broadcaster,
         agentName: this.agentName,
-        eventType: 'item_appended',
+        eventType: 'turn_started',
         data: {
-          item,
+          turnId,
+          messageIds: messages.map((m) => m.id),
         },
       });
-    }
+      // Input items never appear in the SDK stream — item_appended is what
+      // carries them into getItemStream (and any other log-faithful consumer).
+      for (const item of items) {
+        emitFrameworkEvent({
+          broadcaster: this.broadcaster,
+          agentName: this.agentName,
+          eventType: 'item_appended',
+          data: {
+            item,
+          },
+        });
+      }
 
-    const turn: TurnContext = {
-      turnId,
-      session: this,
-    };
+      const turn: TurnContext = {
+        turnId,
+        session: this,
+      };
 
-    try {
       const text = await this.runTurn(ctx, turn, controller.signal);
       const response = buildResponse(text, ctx);
       this.lastResponse = response;
@@ -299,6 +310,7 @@ export class SessionRunner {
     } catch (err: unknown) {
       const error = err instanceof Error ? err : new Error(String(err));
       this.lastError = error;
+      this.rollbackTurn?.();
       emitFrameworkEvent({
         broadcaster: this.broadcaster,
         agentName: this.agentName,
@@ -312,14 +324,16 @@ export class SessionRunner {
     } finally {
       // Accumulate the turn's token accounting whatever the outcome — an
       // aborted turn still consumed whatever the model billed before the cut.
-      this.totalInputTokens += ctx.tokens.input;
-      this.totalOutputTokens += ctx.tokens.output;
-      // Only ever leave `undefined` behind when NO turn reported a figure —
-      // a turn that reported 0 must surface as 0, not "unreported".
-      if (ctx.tokens.cached !== undefined) {
-        this.totalCachedTokens = (this.totalCachedTokens ?? 0) + ctx.tokens.cached;
+      if (ctx) {
+        this.totalInputTokens += ctx.tokens.input;
+        this.totalOutputTokens += ctx.tokens.output;
+        // Only ever leave `undefined` behind when NO turn reported a figure —
+        // a turn that reported 0 must surface as 0, not "unreported".
+        if (ctx.tokens.cached !== undefined) {
+          this.totalCachedTokens = (this.totalCachedTokens ?? 0) + ctx.tokens.cached;
+        }
+        this.totalCost += ctx.cost;
       }
-      this.totalCost += ctx.cost;
       this.currentCtx = undefined;
       this.currentController = undefined;
       this.status = {
