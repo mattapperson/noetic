@@ -415,7 +415,9 @@ interface DetachedHandle<O> {
 
 - a FIFO `MessageQueue`,
 - a long-lived `EventBroadcaster` that relays SDK and framework events across all turns,
-- an `itemLog` snapshot that carries conversation history from turn to turn.
+- one live `ItemLogImpl` shared by every turn context in the session.
+
+The shared log eliminates per-turn copy-out/copy-back. A turn captures its starting length and truncates back to that watermark on failure or cancellation, so failed turns leave no partial input, model output, or tool results. History seeding validates the entire replacement before mutating the live log.
 
 Before the first turn runs, the harness walks the step tree to collect all tools from callModel steps, merges them with layer-provided tools, and deduplicates by name. This **unified tool set** is stored on the turn's execution context and sent with every LLM call for prompt cache efficiency. Individual steps restrict the model to a subset via the Open Responses `tool_choice: { type: "allowed_tools" }` parameter. `run(step, input, ctx)` does the same lazily: when an embedder drives a step directly on a bare `createContext()` context, `run` populates that context's unified tool set (the step's tools plus the harness tools) if it is not already set, so directly-driven steps — and any sub-agents they spawn — see the harness toolset. `run` also runs the configured context layers' `init()` hooks once per context (keyed by `ctx.id`) before executing, so a harness built with `contextLayers` + a storage adapter rehydrates prior layer state, recalls it, and persists updates on the bare `run()` path — the same guarantee the session/`execute()` path gives. The init is idempotent: nested or repeated `run()` calls and the session turn path never re-init (which would clobber accumulated in-layer state by re-hydrating from storage); a deliberate `disposeLayers(ctx)` clears the guard so a later `run()` re-hydrates.
 
