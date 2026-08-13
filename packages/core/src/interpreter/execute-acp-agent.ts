@@ -15,6 +15,7 @@ import type {
   AcpLiveSession,
   AcpPermissionOutcome,
   AcpPermissionSteerer,
+  AcpSession,
   AcpSessionPolicy,
   AcpTurnResult,
   Context,
@@ -256,17 +257,28 @@ async function openSession<TContext, I, O>(opts: {
     host: opts.host,
     signal: abortSignalOf(opts.baseCtx),
   });
-  const loadId = opts.step.session?.load;
-  const session = loadId
-    ? await connection.loadSession({
-        sessionId: loadId,
-        cwd: opts.cwd,
-        mcpServers: opts.servers,
-      })
-    : await connection.newSession({
-        cwd: opts.cwd,
-        mcpServers: opts.servers,
-      });
+
+  // From here on the connection owns a live agent (usually a child process).
+  // Anything that throws before the caller can take responsibility for it must
+  // close it first — otherwise the agent outlives the step and, because its
+  // stdio keeps the event loop alive, the host never exits.
+  let session: AcpSession;
+  try {
+    const loadId = opts.step.session?.load;
+    session = loadId
+      ? await connection.loadSession({
+          sessionId: loadId,
+          cwd: opts.cwd,
+          mcpServers: opts.servers,
+        })
+      : await connection.newSession({
+          cwd: opts.cwd,
+          mcpServers: opts.servers,
+        });
+  } catch (e) {
+    await connection.close().catch(() => undefined);
+    throw e;
+  }
 
   const live: AcpLiveSession = {
     connection,
@@ -368,13 +380,23 @@ export async function executeAcpAgent<TContext, I, O>(
       : undefined,
   });
 
-  const mode = await resolveLazy(step.mode, ctx);
-  if (mode) {
-    await resolution.live.session.setMode(mode);
-  }
-  const model = await resolveLazy(step.model, ctx);
-  if (model) {
-    await resolution.live.session.setModel(model);
+  // Mode/model selection is part of setting the turn up, so a failure here is
+  // torn down exactly like a failed turn — a fresh connection must not be left
+  // holding a live agent.
+  try {
+    const mode = await resolveLazy(step.mode, ctx);
+    if (mode) {
+      await resolution.live.session.setMode(mode);
+    }
+    const model = await resolveLazy(step.model, ctx);
+    if (model) {
+      await resolution.live.session.setModel(model);
+    }
+  } catch (e) {
+    if (!resolution.reuseKey) {
+      await resolution.live.connection.close().catch(() => undefined);
+    }
+    throw e;
   }
 
   bridge.begin();

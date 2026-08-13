@@ -367,7 +367,14 @@ async function main(): Promise<void> {
     console.log('\n── Path H: LIVE agent over stdio (@zed-industries/claude-code-acp) ──');
     const liveStep = step.acpAgent<ContextData, unknown, string>({
       id: 'live',
-      agent: claudeCode(),
+      agent: claudeCode({
+        // Claude Code refuses to launch nested inside another Claude Code
+        // session. Spawning it as an ACP subprocess is exactly the supported
+        // usage, so clear the marker the parent session sets.
+        env: {
+          CLAUDECODE: undefined,
+        },
+      }),
       prompt: 'Reply with exactly: ACP_OK',
       permissions: {
         default: 'deny',
@@ -375,7 +382,7 @@ async function main(): Promise<void> {
     });
     const outH = await harness.run(liveStep, undefined, harness.createContext());
     console.log('  output:', JSON.stringify(outH));
-    ok('a real ACP agent completed a turn', outH.length > 0);
+    ok('a real ACP agent completed a turn', outH.includes('ACP_OK'));
   } else {
     console.log('\n── Path H: skipped (set ACP_LIVE_AGENT=1 to run against a real agent) ──');
   }

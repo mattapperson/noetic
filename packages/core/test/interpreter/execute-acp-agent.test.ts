@@ -49,6 +49,8 @@ interface FakeAgentOpts {
   onClose?: () => void;
   onSetMode?: (modeId: string) => void;
   throwOnTurn?: Error;
+  throwOnNewSession?: Error;
+  throwOnSetMode?: Error;
 }
 
 function fakeAgent(opts: FakeAgentOpts = {}): AcpAgent {
@@ -95,6 +97,9 @@ function fakeAgent(opts: FakeAgentOpts = {}): AcpAgent {
         },
         async setMode(modeId) {
           opts.onSetMode?.(modeId);
+          if (opts.throwOnSetMode) {
+            throw opts.throwOnSetMode;
+          }
         },
         async setModel() {
           // Model selection is a no-op in the fake.
@@ -112,6 +117,9 @@ function fakeAgent(opts: FakeAgentOpts = {}): AcpAgent {
         },
         async newSession(newSession) {
           opts.onNewSession?.(newSession);
+          if (opts.throwOnNewSession) {
+            throw opts.throwOnNewSession;
+          }
           sessionCounter += 1;
           return makeSession(`session-${sessionCounter}`);
         },
@@ -538,6 +546,66 @@ describe('executeAcpAgent — stop reasons and errors', () => {
     } catch (e) {
       assert(isNoeticError(e));
       expect(e.noeticError.kind).toBe('step_failed');
+    }
+    expect(closes).toBe(1);
+  });
+
+  // Regression: a connection owns a live agent (usually a child process) whose
+  // stdio keeps the host's event loop alive. Failing to close it after a failed
+  // session setup does not just leak — it hangs the process forever.
+  it('closes the connection when session creation fails', async () => {
+    const { ctx } = harnessCtx();
+    let closes = 0;
+    const acpStep = step.acpAgent({
+      id: 'bad-session',
+      agent: fakeAgent({
+        throwOnNewSession: new Error('agent refused to open a session'),
+        onClose: () => {
+          closes++;
+        },
+      }),
+      prompt: 'go',
+    });
+
+    try {
+      await execute(acpStep, undefined, ctx);
+      throw new Error('expected throw');
+    } catch (e) {
+      expect(String(e)).toContain('agent refused to open a session');
+    }
+    expect(closes).toBe(1);
+  });
+
+  it('closes the connection when mode selection fails', async () => {
+    const { ctx } = harnessCtx();
+    let closes = 0;
+    const acpStep = step.acpAgent({
+      id: 'bad-mode',
+      agent: fakeAgent({
+        modes: {
+          currentModeId: 'default',
+          availableModes: [
+            {
+              id: 'default',
+              name: 'Default',
+              description: null,
+            },
+          ],
+        },
+        throwOnSetMode: new Error('unknown mode'),
+        onClose: () => {
+          closes++;
+        },
+      }),
+      prompt: 'go',
+      mode: 'nonexistent',
+    });
+
+    try {
+      await execute(acpStep, undefined, ctx);
+      throw new Error('expected throw');
+    } catch (e) {
+      expect(String(e)).toContain('unknown mode');
     }
     expect(closes).toBe(1);
   });
