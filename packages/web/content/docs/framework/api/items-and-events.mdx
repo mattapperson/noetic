@@ -437,6 +437,7 @@ In addition to OpenResponses streaming events, Noetic emits framework-level even
 | `{name}:tool_call_started` | Before each tool call | `name`, `callId` |
 | `{name}:tool_call_completed` | After each tool call | `name`, `callId`, `error` |
 | `{name}:tool_round_completed` | After all tool calls in a round | `round`, `toolCount` |
+| `{name}:context_pressure` | Folded history crossed the projection policy's `compactAt` threshold — emitted once per `callModel` step execution, only on a real crossing | `nodeId`, `historyTokens`, `compactAt` |
 
 Framework events are available through `harness.execute(input).getFullStream()` alongside SDK events. They can be distinguished by the `source` field:
 

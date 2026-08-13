@@ -62,6 +62,8 @@ The helpers live in `@noetic-tools/core` (re-exported from `@noetic-tools/contex
 - `createCompaction({ items, replacesUntil, summary })` / `compactHistory({ log, keepRecent, summarize })` — build the record. The caller supplies the summary (an LLM step, a heuristic, a digest) and appends the record; the projector never mutates a log.
 - `compactionAsItem(compaction)` — the sanctioned bridge to `ctx.itemLog.append(...)`.
 
+The runtime folds for you: every model request path (`callModel` assembly and `previewRequestItems`) folds compactions out of history **before** the system/history partition and before `assembleView` claims the budget, so a recorded compaction demonstrably shrinks what the model receives while the raw log stays intact. When the folded history still exceeds `compactAt`, the step emits one `context_pressure` framework event (`{nodeId, historyTokens, compactAt}`) per execution — the signal to record a compaction instead of letting the assembler silently drop the oldest turns.
+
 ```ts validate=none
 import { compactHistory, compactionAsItem, historyPressure } from '@noetic-tools/core';
 
