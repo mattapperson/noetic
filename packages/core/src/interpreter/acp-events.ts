@@ -137,6 +137,24 @@ export class AcpEventBridge {
     }
   }
 
+  /**
+   * Close a turn that failed. The bracket a consumer waits on must be honoured
+   * even when the turn dies mid-stream, so an open message is closed and the
+   * response completes with an error rather than the stream simply stopping.
+   */
+  abort(cause: unknown): void {
+    if (!this.broadcaster || this.completed) {
+      return;
+    }
+    this.closeMessage();
+    this.start();
+    this.sdk('response.completed', {
+      stopReason: 'error',
+      error: cause instanceof Error ? cause.message : String(cause),
+    });
+    this.completed = true;
+  }
+
   //#region internals
 
   /**

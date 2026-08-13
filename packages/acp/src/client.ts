@@ -125,12 +125,22 @@ export class NoeticAcpClient implements acp.Client {
     params: acp.RequestPermissionRequest,
   ): Promise<acp.RequestPermissionResponse> {
     const outcome = await resolvePermission(params, this.permissions);
+    const selected = selectPermissionOption(
+      outcome,
+      params.options,
+      this.permissions.policy?.persist === true,
+    );
+    if (!selected) {
+      // Answering `cancelled` here would tell a conforming agent the whole turn
+      // was cancelled, killing the step over one tool. Fail loudly on our side
+      // instead of lying on the wire.
+      throw RequestError.invalidParams({
+        reason: `no permission option matches the '${outcome.decision}' decision`,
+        offered: params.options.map((option) => option.kind),
+      });
+    }
     return {
-      outcome: selectPermissionOption(
-        outcome,
-        params.options,
-        this.permissions.policy?.persist === true,
-      ),
+      outcome: selected,
     };
   }
 
@@ -272,8 +282,10 @@ export class NoeticAcpClient implements acp.Client {
     run: () => Promise<T>,
   ): Promise<T> {
     const observer = this.host.onClientActivity;
-    // `fs/read_text_file` is hot — a coding agent reads constantly — so a host
-    // with no observer pays nothing for the descriptor it would discard.
+    // The caller has already built the descriptor by the time we get here, so
+    // this only skips the two spreads below — not the descriptor itself. It
+    // matters for embedders that drive the client directly; the interpreter
+    // always installs an observer, so in-harness this branch never fires.
     if (!observer) {
       return await run();
     }

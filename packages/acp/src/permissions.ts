@@ -135,16 +135,25 @@ function preferenceFor(
  * Translate a decision into one of the options the agent actually offered.
  *
  * An explicit `optionId` wins when the agent offered it. Otherwise the decision
- * picks by option `kind`, honouring `persist`. If the agent offered nothing
- * matching the decision the request is cancelled rather than answered with an
- * option that means something else — cancelling stops the tool, which is the
- * safe reading for both an unfulfillable allow and an unfulfillable deny.
+ * picks by option `kind`, honouring `persist`.
+ *
+ * `cancelled` is reserved. The specification defines it as *the prompt turn was
+ * cancelled* — a conforming agent that receives it aborts the whole turn and
+ * answers `stopReason: 'cancelled'`. Returning it for a merely-denied tool
+ * therefore kills the entire step over one refusal, so a deny falls back to any
+ * reject option the agent offered, in either flavour, before giving up.
+ *
+ * When the agent genuinely offered nothing usable, {@link selectPermissionOption}
+ * returns `undefined` and the caller raises a Noetic-side error rather than
+ * telling the agent something untrue.
  */
 export function selectPermissionOption(
   outcome: AcpPermissionOutcome,
   options: ReadonlyArray<AcpPermissionOption>,
   persist = false,
-): AcpRequestPermissionOutcome {
+): AcpRequestPermissionOutcome | undefined {
+  // The one case where `cancelled` is the truth: the decision really is
+  // "abandon this turn".
   if (outcome.decision === 'cancel') {
     return {
       outcome: 'cancelled',
@@ -168,9 +177,7 @@ export function selectPermissionOption(
       };
     }
   }
-  return {
-    outcome: 'cancelled',
-  };
+  return undefined;
 }
 
 //#endregion

@@ -47,9 +47,16 @@ interface TerminalRecord {
   readonly byteLimit?: number;
   /** Assigned immediately after construction, once the record can be closed over. */
   done: Promise<void>;
-  chunks: Buffer[];
-  bytes: number;
+  /** Retained output, already trimmed to `byteLimit`. */
+  output: Buffer;
   truncated: boolean;
+  /**
+   * Set by `kill()`. The exit status cannot be derived from how `exec` settled:
+   * the shipped local adapter RESOLVES on a signal-driven abort (only a timeout
+   * rejects), so inferring "killed" from a rejection reported a clean exit for
+   * every killed command.
+   */
+  killed: boolean;
   exitStatus: AcpTerminalExitStatus | null;
 }
 
@@ -91,17 +98,17 @@ function toEnvRecord(env?: ReadonlyArray<AcpEnvVariable>): Record<string, string
   return record;
 }
 
+/** The status of a command we killed, whichever way `exec` chose to settle. */
+const KILLED_STATUS: AcpTerminalExitStatus = {
+  exitCode: null,
+  signal: 'SIGTERM',
+};
+
 /**
  * Exit status for a rejected `exec`. The adapter signals a timeout kill through
  * the message channel, which ACP represents as a signal rather than a code.
  */
-function exitStatusFromError(error: unknown, aborted: boolean): AcpTerminalExitStatus {
-  if (aborted) {
-    return {
-      exitCode: null,
-      signal: 'SIGKILL',
-    };
-  }
+function exitStatusFromError(error: unknown): AcpTerminalExitStatus {
   const message = error instanceof Error ? error.message : String(error);
   if (message.startsWith('timeout:')) {
     return {
@@ -113,6 +120,25 @@ function exitStatusFromError(error: unknown, aborted: boolean): AcpTerminalExitS
     exitCode: 1,
     signal: null,
   };
+}
+
+/**
+ * Trim to the last `limit` bytes, then forward past any UTF-8 continuation
+ * bytes so the result never starts mid-character.
+ *
+ * ACP asks the client to truncate *from the beginning of the output*; dropping
+ * whole chunks instead meant one over-limit chunk destroyed the entire buffer —
+ * a `npm test` producing megabytes could read back empty.
+ */
+function trimToLimit(buffer: Buffer, limit: number): Buffer {
+  if (buffer.byteLength <= limit) {
+    return buffer;
+  }
+  let start = buffer.byteLength - limit;
+  while (start < buffer.byteLength && (buffer[start] & 0xc0) === 0x80) {
+    start++;
+  }
+  return buffer.subarray(start);
 }
 
 //#endregion
@@ -127,6 +153,7 @@ function exitStatusFromError(error: unknown, aborted: boolean): AcpTerminalExitS
 export class TerminalRegistry {
   private readonly terminals = new Map<string, TerminalRecord>();
   private nextId = 0;
+  private disposed = false;
 
   constructor(
     private readonly shell: ShellAdapter,
@@ -135,6 +162,11 @@ export class TerminalRegistry {
 
   /** Start a command and return its handle id. */
   create(opts: CreateTerminalOptions): string {
+    if (this.disposed) {
+      // Closing the connection is supposed to guarantee no command outlives it;
+      // spawning one during or after teardown would orphan a child process.
+      throw new Error('cannot create a terminal: the ACP connection is closing');
+    }
     const id = `acp-term-${this.nextId++}`;
     const byteLimit =
       typeof opts.outputByteLimit === 'number' && opts.outputByteLimit > 0
@@ -146,9 +178,9 @@ export class TerminalRegistry {
       abort: new AbortController(),
       byteLimit,
       done: Promise.resolve(),
-      chunks: [],
-      bytes: 0,
+      output: Buffer.alloc(0),
       truncated: false,
+      killed: false,
       exitStatus: null,
     };
     this.terminals.set(id, record);
@@ -169,18 +201,22 @@ export class TerminalRegistry {
       });
       // A shell adapter that buffers rather than streams reports its output
       // only here; append it when `onData` delivered nothing.
-      if (record.chunks.length === 0) {
+      if (record.output.byteLength === 0) {
         const combined = `${result.stdout}${result.stderr}`;
         if (combined.length > 0) {
           appendChunk(record, Buffer.from(combined, 'utf8'));
         }
       }
-      record.exitStatus = {
-        exitCode: result.exitCode,
-        signal: null,
-      };
+      // `killed` is the authority, not how `exec` settled: the local adapter
+      // resolves normally on a signal-driven abort.
+      record.exitStatus = record.killed
+        ? KILLED_STATUS
+        : {
+            exitCode: result.exitCode,
+            signal: null,
+          };
     } catch (error) {
-      record.exitStatus = exitStatusFromError(error, record.abort.signal.aborted);
+      record.exitStatus = record.killed ? KILLED_STATUS : exitStatusFromError(error);
     }
   }
 
@@ -191,7 +227,7 @@ export class TerminalRegistry {
       return null;
     }
     return {
-      output: Buffer.concat(record.chunks).toString('utf8'),
+      output: record.output.toString('utf8'),
       truncated: record.truncated,
       exitStatus: record.exitStatus,
     };
@@ -213,6 +249,7 @@ export class TerminalRegistry {
     if (!record) {
       return false;
     }
+    record.killed = true;
     record.abort.abort();
     await record.done;
     return true;
@@ -227,6 +264,7 @@ export class TerminalRegistry {
 
   /** Release every live terminal. Called when the session closes. */
   async releaseAll(): Promise<void> {
+    this.disposed = true;
     const ids = [
       ...this.terminals.keys(),
     ];
@@ -234,22 +272,22 @@ export class TerminalRegistry {
   }
 }
 
-/** Append output, dropping the oldest bytes once the cap is exceeded. */
+/** Append output, dropping the oldest BYTES once the cap is exceeded. */
 function appendChunk(record: TerminalRecord, data: Buffer): void {
-  record.chunks.push(data);
-  record.bytes += data.byteLength;
+  const combined = Buffer.concat([
+    record.output,
+    data,
+  ]);
   const limit = record.byteLimit;
   if (limit === undefined) {
+    record.output = combined;
     return;
   }
-  while (record.bytes > limit && record.chunks.length > 0) {
-    const dropped = record.chunks.shift();
-    if (!dropped) {
-      break;
-    }
-    record.bytes -= dropped.byteLength;
+  const trimmed = trimToLimit(combined, limit);
+  if (trimmed.byteLength < combined.byteLength) {
     record.truncated = true;
   }
+  record.output = trimmed;
 }
 
 //#endregion

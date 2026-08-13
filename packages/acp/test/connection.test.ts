@@ -557,6 +557,77 @@ describe('capability gating', () => {
   });
 });
 
+describe('prompt content gating (enforced on the real path)', () => {
+  // Regression: `assertPromptContentSupported` existed, was exported, and had
+  // four tests — but nothing on a runtime path ever called it. The spec and
+  // docs promised an `AcpCapabilityError` "before anything reaches the wire";
+  // the block actually went on the wire and failed inside the agent.
+  test('an image is refused when the agent did not advertise image support', async () => {
+    const rig = await createAcpTestRig();
+    const session = await rig.connection.newSession({
+      cwd: '/workspace',
+    });
+
+    expect(
+      session.prompt({
+        content: [
+          {
+            type: 'image',
+            data: 'AAAA',
+            mimeType: 'image/png',
+          },
+        ],
+      }),
+    ).rejects.toThrow(AcpCapabilityError);
+    // Nothing reached the agent.
+    expect(rig.calls.prompt).toHaveLength(0);
+
+    await rig.close();
+  });
+
+  test('an image goes through once the agent advertises it', async () => {
+    const rig = await createAcpTestRig({
+      script: {
+        capabilities: {
+          promptCapabilities: {
+            image: true,
+          },
+        },
+      },
+    });
+    const session = await rig.connection.newSession({
+      cwd: '/workspace',
+    });
+
+    await session.prompt({
+      content: [
+        {
+          type: 'image',
+          data: 'AAAA',
+          mimeType: 'image/png',
+        },
+      ],
+    });
+
+    expect(rig.calls.prompt).toHaveLength(1);
+    await rig.close();
+  });
+
+  test('plain text is always allowed', async () => {
+    const rig = await createAcpTestRig();
+    const session = await rig.connection.newSession({
+      cwd: '/workspace',
+    });
+
+    await session.prompt({
+      content: TEXT_PROMPT,
+    });
+
+    expect(rig.calls.prompt).toHaveLength(1);
+    await rig.close();
+  });
+});
+
 describe('assertPromptContentSupported', () => {
   test('rejects image content when the agent does not advertise it', () => {
     expect(() =>

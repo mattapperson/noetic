@@ -44,17 +44,13 @@ import { trackUsage } from './message-helpers';
 import { parseStructuredOutput } from './structured-output';
 import { isContextImpl, isFunctionCall, isMutableContext } from './typeguards';
 
-//#region Types
+//#region Helpers
 
 /**
  * The cross-step session store, hung off the concrete `AgentHarness` and
  * reached via `frameworkCast`, mirroring how the interpreter reaches
  * `layerStateStore`.
  */
-//#endregion
-
-//#region Helpers
-
 function sessionStore(ctx: Context<ContextData>): AcpSessionStore {
   return frameworkCast<{
     acpSessions: AcpSessionStore;
@@ -142,6 +138,7 @@ function applyTurnResult(ctx: Context<ContextData>, result: AcpTurnResult): void
     usage: result.usage ? llmResponse.usage : undefined,
     cost: result.cost,
     responseItems: result.items,
+    acpStopReason: result.stopReason,
   };
   if (isMutableContext(ctx)) {
     ctx.lastStepMeta = meta;
@@ -333,7 +330,6 @@ interface SessionResolution {
 async function openSession<TContext, I, O>(opts: {
   step: StepAcpAgent<TContext, I, O>;
   agent: AcpAgent;
-  ctx: Context<TContext>;
   baseCtx: Context<ContextData>;
   cwd: string;
   host: AcpClientHost;
@@ -430,6 +426,72 @@ async function finalizeSession(
 
 //#endregion
 
+/**
+ * Release a connection this step opened, before surfacing a failure. A reused
+ * one is left intact for a later step to retry against.
+ */
+async function discardIfFresh(
+  resolution: SessionResolution,
+  baseCtx: Context<ContextData>,
+): Promise<void> {
+  if (!resolution.fresh) {
+    return;
+  }
+  await resolution.live.connection.close().catch(() => undefined);
+  sessionStore(baseCtx).forget(resolution.key);
+}
+
+/**
+ * Apply the step's mode and model before its turn. Part of setting the turn up,
+ * so a failure tears down exactly like a failed turn rather than leaving a
+ * fresh connection holding a live agent.
+ */
+async function applySessionSelection<TContext, I, O>(
+  step: StepAcpAgent<TContext, I, O>,
+  ctx: Context<TContext>,
+  resolution: SessionResolution,
+  baseCtx: Context<ContextData>,
+): Promise<void> {
+  try {
+    const mode = await resolveLazy(step.mode, ctx);
+    if (mode) {
+      await resolution.live.session.setMode(mode);
+    }
+    const model = await resolveLazy(step.model, ctx);
+    if (model) {
+      await resolution.live.session.setModel(model);
+    }
+  } catch (e) {
+    await discardIfFresh(resolution, baseCtx);
+    throw e;
+  }
+}
+
+/** Turn a failed turn into the step's typed error, after closing the bracket. */
+function turnFailure(
+  step: {
+    id: string;
+  },
+  cause: unknown,
+  baseCtx: Context<ContextData>,
+): NoeticErrorImpl {
+  if (cause instanceof NoeticErrorImpl) {
+    return cause;
+  }
+  if (baseCtx.aborted) {
+    return new NoeticErrorImpl({
+      kind: 'cancelled',
+      reason: baseCtx.abortReason ?? 'context aborted',
+    });
+  }
+  return new NoeticErrorImpl({
+    kind: 'step_failed',
+    stepId: step.id,
+    cause: cause instanceof Error ? cause : new Error(String(cause)),
+    retriesExhausted: false,
+  });
+}
+
 //#region Public API
 
 export async function executeAcpAgent<TContext, I, O>(
@@ -493,7 +555,6 @@ export async function executeAcpAgent<TContext, I, O>(
   const resolution = await openSession({
     step,
     agent,
-    ctx,
     baseCtx,
     cwd,
     host,
@@ -505,25 +566,7 @@ export async function executeAcpAgent<TContext, I, O>(
       : undefined,
   });
 
-  // Mode/model selection is part of setting the turn up, so a failure here is
-  // torn down exactly like a failed turn — a fresh connection must not be left
-  // holding a live agent.
-  try {
-    const mode = await resolveLazy(step.mode, ctx);
-    if (mode) {
-      await resolution.live.session.setMode(mode);
-    }
-    const model = await resolveLazy(step.model, ctx);
-    if (model) {
-      await resolution.live.session.setModel(model);
-    }
-  } catch (e) {
-    if (resolution.fresh) {
-      await resolution.live.connection.close().catch(() => undefined);
-      sessionStore(baseCtx).forget(resolution.key);
-    }
-    throw e;
-  }
+  await applySessionSelection(step, ctx, resolution, baseCtx);
 
   bridge.begin();
 
@@ -546,27 +589,12 @@ export async function executeAcpAgent<TContext, I, O>(
       signal: abortSignalOf(baseCtx),
     });
   } catch (e) {
-    // Best-effort teardown of a fresh connection before surfacing the failure;
-    // a reused one is left intact for a later step to retry against.
-    if (resolution.fresh) {
-      await resolution.live.connection.close().catch(() => undefined);
-      sessionStore(baseCtx).forget(resolution.key);
-    }
-    if (e instanceof NoeticErrorImpl) {
-      throw e;
-    }
-    if (baseCtx.aborted) {
-      throw new NoeticErrorImpl({
-        kind: 'cancelled',
-        reason: baseCtx.abortReason ?? 'context aborted',
-      });
-    }
-    throw new NoeticErrorImpl({
-      kind: 'step_failed',
-      stepId: step.id,
-      cause: e instanceof Error ? e : new Error(String(e)),
-      retriesExhausted: false,
-    });
+    // Close the turn on the event surface before rethrowing. A consumer driving
+    // a UI off `getFullStream()` saw `response.created` and would otherwise
+    // wait forever for a completion that never comes — the stream just stops.
+    bridge.abort(e);
+    await discardIfFresh(resolution, baseCtx);
+    throw turnFailure(step, e, baseCtx);
   }
 
   bridge.finalize(result);

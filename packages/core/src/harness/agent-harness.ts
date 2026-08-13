@@ -439,12 +439,6 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   private readonly defaultDeliveryMode: DeliveryMode;
   private readonly sessions = new Map<string, Session>();
   /**
-   * @internal Cross-step harness sessions keyed by `step.session.reuse`, kept
-   * alive for the life of this harness so reused coding-agent sessions span
-   * multiple steps. Reached by the interpreter's harness handler via
-   * `frameworkCast`; do not access from outside core.
-   */
-  /**
    * @internal Live ACP connections. Reached by the interpreter via
    * `frameworkCast`; use {@link listAcpSessions}, {@link getAcpSession},
    * {@link cancelAcpSession}, and {@link closeAcpSessions} from outside core.

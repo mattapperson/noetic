@@ -106,6 +106,8 @@ class AcpSessionImpl implements AcpSession {
     private commands: acp.AvailableCommand[],
     /** Rejects if the agent dies, so a request cannot outlive it. */
     private readonly death: Promise<never>,
+    /** What the agent said it accepts, enforced before a turn goes on the wire. */
+    private readonly promptCapabilities: acp.PromptCapabilities | undefined,
   ) {}
 
   get availableCommands(): ReadonlyArray<acp.AvailableCommand> {
@@ -124,6 +126,10 @@ class AcpSessionImpl implements AcpSession {
   }
 
   async prompt(opts: AcpPromptOptions): Promise<AcpTurnResult> {
+    // The specification requires clients to restrict prompt content to what the
+    // agent advertised, so an unsupported block is refused here rather than
+    // failing opaquely inside the agent.
+    assertPromptContentSupported(this.agentId, opts.content, this.promptCapabilities);
     const accumulator = new AcpTurnAccumulator();
     this.activeTurn = accumulator;
     const onAbort = () => {
@@ -243,6 +249,7 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
         response.models ?? undefined,
         [],
         this.watch.death,
+        this.agentCapabilities.promptCapabilities,
       ),
     );
   }
@@ -265,6 +272,7 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
         undefined,
         [],
         this.watch.death,
+        this.agentCapabilities.promptCapabilities,
       ),
     );
     await Promise.race([
@@ -282,7 +290,7 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
     this.sessions.clear();
     // Reject anything still in flight first. Once the transport is down
     // nothing can answer it, so a pending request would hang forever.
-    this.watch.shutdown('connection was closed');
+    this.watch.shutdown();
     // Close the transport BEFORE releasing terminals, so the agent cannot ask
     // for another one during teardown.
     await this.transport.close().catch(() => undefined);

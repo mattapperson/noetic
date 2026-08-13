@@ -299,13 +299,46 @@ describe('selectPermissionOption', () => {
     });
   });
 
-  test('cancels when the agent offered nothing matching the decision', () => {
+  // `cancelled` means "the whole turn was cancelled" to a conforming agent, so
+  // it must never stand in for "no option fit". The caller raises a Noetic-side
+  // error instead of killing the step over one tool.
+  test('reports no selection when the agent offered nothing matching the decision', () => {
     expect(
       selectPermissionOption(
         {
           decision: 'allow',
         },
         [
+          REJECT_ONCE,
+        ],
+      ),
+    ).toBeUndefined();
+  });
+
+  test('a deny falls back to reject_always when reject_once was not offered', () => {
+    expect(
+      selectPermissionOption(
+        {
+          decision: 'deny',
+        },
+        [
+          REJECT_ALWAYS,
+        ],
+      ),
+    ).toEqual({
+      outcome: 'selected',
+      optionId: 'r2',
+    });
+  });
+
+  test('only an explicit cancel decision yields the cancelled outcome', () => {
+    expect(
+      selectPermissionOption(
+        {
+          decision: 'cancel',
+        },
+        [
+          ALLOW_ONCE,
           REJECT_ONCE,
         ],
       ),

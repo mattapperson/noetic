@@ -362,12 +362,19 @@ describe('terminal capabilities', () => {
       content: PROMPT,
     });
 
-    expect(exit?.signal).toBe('SIGKILL');
+    // The shell adapter RESOLVES on abort rather than throwing, so a killed
+    // command is only distinguishable from a clean exit because the registry
+    // tracks the kill itself.
+    expect(exit?.signal).toBe('SIGTERM');
     expect(exit?.exitCode).toBeNull();
     await rig.close();
   });
 
-  test('output is truncated to the requested byte limit, oldest first', async () => {
+  // Regression: trimming dropped whole CHUNKS, so a single chunk larger than
+  // the limit destroyed 100% of the output — a `npm test` producing megabytes
+  // read back empty, with only `truncated: true` as a hint. ACP asks the client
+  // to truncate from the beginning of the output, keeping the tail.
+  test('truncation keeps the tail rather than discarding everything', async () => {
     const shell = new RecordingShell();
     shell.script.set('big', {
       stdout: 'abcdefghij',
@@ -395,9 +402,78 @@ describe('terminal capabilities', () => {
       content: PROMPT,
     });
 
-    // The single 10-byte chunk exceeds the 4-byte cap, so it is dropped whole
-    // and the response is flagged as truncated rather than silently complete.
+    expect(output?.output).toBe('ghij');
     expect(output?.truncated).toBe(true);
+    await rig.close();
+  });
+
+  test('output under the limit is kept whole and not flagged', async () => {
+    const shell = new RecordingShell();
+    shell.script.set('small', {
+      stdout: 'abc',
+    });
+    let output: acp.TerminalOutputResponse | undefined;
+
+    const rig = await createAcpTestRig({
+      shell,
+      script: {
+        onPrompt: async (conn, params) => {
+          const terminal = await conn.createTerminal({
+            sessionId: params.sessionId,
+            command: 'small',
+            outputByteLimit: 16,
+          });
+          await terminal.waitForExit();
+          output = await terminal.currentOutput();
+        },
+      },
+    });
+    const session = await rig.connection.newSession({
+      cwd: '/workspace',
+    });
+    await session.prompt({
+      content: PROMPT,
+    });
+
+    expect(output?.output).toBe('abc');
+    expect(output?.truncated).toBe(false);
+    await rig.close();
+  });
+
+  test('truncation never splits a multi-byte character', async () => {
+    const shell = new RecordingShell();
+    // Four 3-byte characters; a 7-byte limit lands mid-character.
+    shell.script.set('unicode', {
+      stdout: '日本語だ',
+    });
+    let output: acp.TerminalOutputResponse | undefined;
+
+    const rig = await createAcpTestRig({
+      shell,
+      script: {
+        onPrompt: async (conn, params) => {
+          const terminal = await conn.createTerminal({
+            sessionId: params.sessionId,
+            command: 'unicode',
+            outputByteLimit: 7,
+          });
+          await terminal.waitForExit();
+          output = await terminal.currentOutput();
+        },
+      },
+    });
+    const session = await rig.connection.newSession({
+      cwd: '/workspace',
+    });
+    await session.prompt({
+      content: PROMPT,
+    });
+
+    // 12 bytes total, limit 7 → the window starts mid-`本`, so it advances to
+    // the next clean boundary and drops the partial character rather than
+    // emitting a replacement one. Slightly under the limit beats corrupt.
+    expect(output?.output).toBe('語だ');
+    expect(output?.output).not.toContain('\ufffd');
     await rig.close();
   });
 

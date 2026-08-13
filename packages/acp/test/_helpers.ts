@@ -136,8 +136,16 @@ export class RecordingShell implements ShellAdapter {
         abortSignalPromise(options.signal),
       ]);
     }
+    // Matches the shipped local adapter: a signal-driven abort RESOLVES, and
+    // only a timeout rejects. A double that threw here would let the registry
+    // pass by inferring "killed" from a rejection — which fails against every
+    // real adapter.
     if (options.signal?.aborted === true) {
-      throw new Error('aborted');
+      return {
+        stdout: '',
+        stderr: '',
+        exitCode: null,
+      };
     }
     const stdout = scripted?.stdout ?? '';
     if (stdout.length > 0) {

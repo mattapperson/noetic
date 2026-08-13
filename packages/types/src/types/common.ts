@@ -103,6 +103,12 @@ export interface StepMeta {
   usage?: RoundUsage;
   cost?: number;
   responseItems?: ReadonlyArray<Item>;
+  /**
+   * Why an ACP agent stopped its turn. Set only by `acp-agent` steps, and the
+   * only way a caller can tell a truncated turn (`max_tokens`,
+   * `max_turn_requests`) from a complete one — both return normally.
+   */
+  acpStopReason?: string;
 }
 
 /** @public Structured response returned by a model adapter after an LLM call. */

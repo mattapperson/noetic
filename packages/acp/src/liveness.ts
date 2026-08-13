@@ -52,8 +52,9 @@ export function watchTransport(
   transport: AcpTransport,
   signal?: AbortSignal,
 ): WatchedTransport {
+  // Doubles as the "already dead" flag: cleared on the first `die`, so the
+  // rejection can only ever fire once.
   let reject: ((reason: unknown) => void) | undefined;
-  let settled = false;
 
   const death = new Promise<never>((_resolve, rejectFn) => {
     reject = rejectFn;
@@ -64,11 +65,15 @@ export function watchTransport(
   death.catch(() => undefined);
 
   const die = (reason: string) => {
-    if (settled) {
+    const rejectDeath = reject;
+    if (!rejectDeath) {
       return;
     }
-    settled = true;
-    reject?.(
+    reject = undefined;
+    // Whatever killed the connection, the signal can no longer tell us
+    // anything — drop the listener so it stops pinning this scope.
+    signal?.removeEventListener('abort', onAbort);
+    rejectDeath(
       new AcpConnectError({
         agentId,
         message: `ACP agent '${agentId}' ${reason}, so in-flight requests can never be answered.`,
@@ -81,8 +86,8 @@ export function watchTransport(
     once: true,
   });
 
-  // A pass-through that reports end-of-stream. `flush` fires on a clean end,
-  // `cancel` when the reader tears down early.
+  // A pass-through that reports end-of-stream: `flush` fires once the agent's
+  // readable is exhausted, however it ended.
   const readable = transport.readable.pipeThrough(
     new TransformStream<Uint8Array, Uint8Array>({
       flush() {
@@ -95,7 +100,6 @@ export function watchTransport(
     readable,
     death,
     shutdown(reason = 'connection was closed') {
-      signal?.removeEventListener('abort', onAbort);
       die(reason);
     },
   };
