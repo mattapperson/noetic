@@ -13,9 +13,13 @@ import { readFileSync } from 'node:fs';
 import {
   allocateBudgets,
   assembleView,
+  compactionAsItem,
   completeLayers,
+  createCompaction,
   createLayerStateStore,
   disposeLayers,
+  foldCompactions,
+  historyPressure,
   initLayers,
   recallLayers,
   returnLayers,
@@ -23,7 +27,7 @@ import {
   spawnLayers,
   storeLayers,
 } from '@noetic-tools/context';
-import type { ContextLayer, Item } from '@noetic-tools/types';
+import type { ContextLayer, Item, ProjectionPolicy } from '@noetic-tools/types';
 import {
   makeCtx,
   makeItemLog,
@@ -225,6 +229,37 @@ describe('AUDIT-3 assembleView token cap', () => {
     // CORRECT: 'truncate' with a 100-token budget must drop items. Current code
     // only branches on 'sliding_window' → 'truncate' is a silent no-op.
     expect(view.length).toBeLessThan(500);
+  });
+
+  it('3c: the trim that AUDIT-3 relies on is observable, and compaction relieves it', () => {
+    // The complement of 3a: assembleView is allowed to drop history, but the
+    // caller must be able to see it coming and do something cheaper about it.
+    const history: Item[] = Array.from(
+      {
+        length: 500,
+      },
+      (_, i) => makeMessage('user', `msg-${i}`),
+    );
+    const policy: ProjectionPolicy = {
+      tokenBudget: 1_000,
+      responseReserve: 0,
+      overflow: 'sliding_window',
+    };
+    // 1. The pressure is visible BEFORE the assembler silently drops anything.
+    expect(historyPressure(history, policy).overThreshold).toBe(true);
+    // 2. A logged compaction relieves it...
+    const compaction = createCompaction({
+      items: history,
+      replacesUntil: 495,
+      summary: 'first 495 messages: greetings',
+    });
+    const withCompaction = [
+      ...history,
+      compactionAsItem(compaction),
+    ];
+    expect(historyPressure(withCompaction, policy).overThreshold).toBe(false);
+    // 3. ...by replacing the covered prefix with the summary, not discarding it.
+    expect(foldCompactions(withCompaction)).toHaveLength(1 + 5);
   });
 });
 
