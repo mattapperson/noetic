@@ -80,6 +80,26 @@ Set `allowAnyPath: true` to lift it entirely, when you genuinely want an unconfi
 **A `permissions` policy does not do this job.** It answers `session/request_permission`, which covers the agent's own *tool calls*. `fs/read_text_file`, `fs/write_text_file`, and `terminal/*` are client methods the agent invokes on you directly — an agent that simply never asks is never gated by a policy, however strict. Path confinement and `clientCapabilities` are the controls that bind.
 </Callout>
 
+### Seeing what the agent touched
+
+Every `fs/*` and `terminal/*` call the agent makes is emitted as an `acp_client_activity` framework event — allowed and refused alike:
+
+```ts
+import type { AgentHarness } from '@noetic-tools/core';
+
+declare const harness: AgentHarness;
+
+for await (const ev of harness.getFullStream()) {
+  if (ev.source === 'framework' && ev.type.endsWith(':acp_client_activity')) {
+    console.log(ev.data.allowed ? 'ok ' : 'REFUSED', ev.data.method, ev.data.path ?? ev.data.command);
+  }
+}
+```
+
+This is an *observed* record, not the agent's account of itself. A `tool_call` update says what the agent claims it did; this says what it actually asked the client to do — including the reaches that were turned down, which is usually the more interesting line in the log.
+
+It covers the client methods only. Work the agent does entirely inside its own process, and anything a terminal command does after it starts, is not visible here.
+
 ### What confinement does not stop
 
 - **Symlinks inside the workspace pointing out of it.** The check is lexical and does not touch the filesystem. If that matters, supply an `FsAdapter` that resolves real paths and re-checks.

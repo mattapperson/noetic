@@ -159,6 +159,20 @@ is `clientCapabilities.terminal: false`. Confinement narrows what a
 cooperative-but-careless agent reaches; it is not a security sandbox against a
 hostile one, which needs a real sandbox behind a transport.
 
+### Observing client-side activity
+
+Every `fs/*` and `terminal/*` call an agent makes is reported to the host as an
+{@link AcpClientActivity} and emitted as an `acp_client_activity` framework
+event, whether it was served or refused. This is an *observed* record rather
+than the agent's self-report: a `tool_call` update says what the agent claims it
+did, while this says what it actually asked the client to do — and a refusal is
+the more interesting record of the two, being the moment an agent reached for
+something it was not allowed to have.
+
+Its scope is the client boundary. Work done entirely inside the agent's own
+process is invisible to it, as is whatever a terminal command does once
+running.
+
 ## Permissions
 
 `session/request_permission` is a baseline client responsibility. Noetic answers

@@ -6,6 +6,7 @@
  */
 
 import { describe, expect, test } from 'bun:test';
+import type { AcpClientActivity } from '@noetic-tools/types';
 import type * as acp from '@zed-industries/agent-client-protocol';
 import { sliceLines } from '../src/client';
 import type { AcpTestRigOptions } from './_helpers';
@@ -432,6 +433,108 @@ describe('terminal capabilities', () => {
 
     expect(failure).toBeDefined();
     expect(shell.calls).toHaveLength(0);
+    await rig.close();
+  });
+});
+
+describe('client activity audit', () => {
+  test('records what the agent actually touched, allowed and refused alike', async () => {
+    const fs = new MemoryFs();
+    fs.files.set('/workspace/inside.txt', 'ok');
+    const shell = new RecordingShell();
+    const activity: AcpClientActivity[] = [];
+
+    const rig = await createAcpTestRig({
+      fs,
+      shell,
+      cwd: '/workspace',
+      onActivity: (a) => {
+        activity.push(a);
+      },
+      script: {
+        onPrompt: async (conn, params) => {
+          await conn
+            .readTextFile({
+              sessionId: params.sessionId,
+              path: '/workspace/inside.txt',
+            })
+            .catch(() => undefined);
+          await conn
+            .readTextFile({
+              sessionId: params.sessionId,
+              path: '/etc/passwd',
+            })
+            .catch(() => undefined);
+          await conn
+            .createTerminal({
+              sessionId: params.sessionId,
+              command: 'ls',
+              args: [
+                '-la',
+              ],
+            })
+            .catch(() => undefined);
+        },
+      },
+    });
+    const session = await rig.connection.newSession({
+      cwd: '/workspace',
+    });
+    await session.prompt({
+      content: PROMPT,
+    });
+
+    expect(activity).toHaveLength(3);
+
+    const [read, refused, terminal] = activity;
+    expect(read?.method).toBe('fs/read_text_file');
+    expect(read?.path).toBe('/workspace/inside.txt');
+    expect(read?.allowed).toBe(true);
+
+    // The refusal is the more interesting record: an agent reached for
+    // something it was not allowed to have, and that is now observable.
+    expect(refused?.method).toBe('fs/read_text_file');
+    expect(refused?.path).toBe('/etc/passwd');
+    expect(refused?.allowed).toBe(false);
+    expect(refused?.reason).toBeDefined();
+
+    expect(terminal?.method).toBe('terminal/create');
+    expect(terminal?.command).toBe('ls -la');
+    expect(terminal?.allowed).toBe(true);
+
+    await rig.close();
+  });
+
+  test('records a refusal from a withdrawn capability too', async () => {
+    const activity: AcpClientActivity[] = [];
+    const rig = await createAcpTestRig({
+      cwd: '/workspace',
+      capabilities: {
+        terminal: false,
+      },
+      onActivity: (a) => {
+        activity.push(a);
+      },
+      script: {
+        onPrompt: async (conn, params) => {
+          await conn
+            .createTerminal({
+              sessionId: params.sessionId,
+              command: 'whoami',
+            })
+            .catch(() => undefined);
+        },
+      },
+    });
+    const session = await rig.connection.newSession({
+      cwd: '/workspace',
+    });
+    await session.prompt({
+      content: PROMPT,
+    });
+
+    expect(activity).toHaveLength(1);
+    expect(activity[0]?.allowed).toBe(false);
     await rig.close();
   });
 });

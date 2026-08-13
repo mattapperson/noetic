@@ -10,6 +10,7 @@
 import type {
   AcpAgentConnection,
   AcpBoundPermissionHandler,
+  AcpClientActivity,
   AcpClientHost,
   AcpPermissionPolicy,
   AcpPermissionSteerer,
@@ -238,6 +239,8 @@ export interface AcpTestRigOptions {
   shell?: RecordingShell;
   cwd?: string;
   signal?: AbortSignal;
+  /** Observe the agent's `fs/*` and `terminal/*` calls. */
+  onActivity?: (activity: AcpClientActivity) => void;
 }
 
 /**
@@ -320,6 +323,7 @@ export async function createAcpTestRig(opts: AcpTestRigOptions = {}): Promise<Ac
     onSessionUpdate: (notification) => {
       updates.push(notification);
     },
+    onClientActivity: opts.onActivity,
   };
 
   const connection = await openAcpConnection({

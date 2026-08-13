@@ -13,13 +13,13 @@
  * method-not-found rather than silently doing the work anyway.
  */
 
-import type { AcpClientHost } from '@noetic-tools/types';
+import type { AcpClientActivity, AcpClientHost } from '@noetic-tools/types';
 import type * as acp from '@zed-industries/agent-client-protocol';
 import { RequestError } from '@zed-industries/agent-client-protocol';
 import { isAbsolutePath, isWithinRoots } from './paths';
 import type { AcpPermissionResolverOptions } from './permissions';
 import { resolvePermission, selectPermissionOption } from './permissions';
-import { TerminalRegistry } from './terminals';
+import { buildCommandLine, TerminalRegistry } from './terminals';
 
 //#region Capability advertisement
 
@@ -143,23 +143,42 @@ export class NoeticAcpClient implements acp.Client {
   //#region File system
 
   async readTextFile(params: acp.ReadTextFileRequest): Promise<acp.ReadTextFileResponse> {
-    this.assertCapability(this.host.capabilities?.readTextFile !== false, 'fs/read_text_file');
-    this.assertPathAllowed(params.path);
-    const content = await this.host.fs.readFileText(params.path);
-    return {
-      content: sliceLines(content, params.line, params.limit),
-    };
+    return this.audited(
+      {
+        method: 'fs/read_text_file',
+        path: params.path,
+      },
+      async () => {
+        this.assertCapability(this.host.capabilities?.readTextFile !== false, 'fs/read_text_file');
+        this.assertPathAllowed(params.path);
+        const content = await this.host.fs.readFileText(params.path);
+        return {
+          content: sliceLines(content, params.line, params.limit),
+        };
+      },
+    );
   }
 
   async writeTextFile(params: acp.WriteTextFileRequest): Promise<acp.WriteTextFileResponse> {
-    this.assertCapability(this.host.capabilities?.writeTextFile !== false, 'fs/write_text_file');
-    this.assertPathAllowed(params.path);
-    const dir = parentDir(params.path);
-    if (dir) {
-      await this.host.fs.mkdir(dir);
-    }
-    await this.host.fs.writeFile(params.path, params.content);
-    return {};
+    return this.audited(
+      {
+        method: 'fs/write_text_file',
+        path: params.path,
+      },
+      async () => {
+        this.assertCapability(
+          this.host.capabilities?.writeTextFile !== false,
+          'fs/write_text_file',
+        );
+        this.assertPathAllowed(params.path);
+        const dir = parentDir(params.path);
+        if (dir) {
+          await this.host.fs.mkdir(dir);
+        }
+        await this.host.fs.writeFile(params.path, params.content);
+        return {};
+      },
+    );
   }
 
   //#endregion
@@ -167,22 +186,31 @@ export class NoeticAcpClient implements acp.Client {
   //#region Terminals
 
   async createTerminal(params: acp.CreateTerminalRequest): Promise<acp.CreateTerminalResponse> {
-    this.assertTerminalCapability('terminal/create');
-    // Confines where a command STARTS, not where it can go — a shell can `cd`
-    // anywhere the host user can. Withdrawing the terminal capability is the
-    // only hard boundary; this just stops the obvious case.
-    if (typeof params.cwd === 'string') {
-      this.assertPathAllowed(params.cwd);
-    }
-    return {
-      terminalId: this.terminals.create({
-        command: params.command,
-        args: params.args,
-        cwd: params.cwd,
-        env: params.env,
-        outputByteLimit: params.outputByteLimit,
-      }),
-    };
+    return this.audited(
+      {
+        method: 'terminal/create',
+        command: buildCommandLine(params.command, params.args),
+        path: params.cwd ?? undefined,
+      },
+      async () => {
+        this.assertTerminalCapability('terminal/create');
+        // Confines where a command STARTS, not where it can go — a shell can
+        // `cd` anywhere the host user can. Withdrawing the terminal capability
+        // is the only hard boundary; this just stops the obvious case.
+        if (typeof params.cwd === 'string') {
+          this.assertPathAllowed(params.cwd);
+        }
+        return {
+          terminalId: this.terminals.create({
+            command: params.command,
+            args: params.args,
+            cwd: params.cwd,
+            env: params.env,
+            outputByteLimit: params.outputByteLimit,
+          }),
+        };
+      },
+    );
   }
 
   async terminalOutput(params: acp.TerminalOutputRequest): Promise<acp.TerminalOutputResponse> {
@@ -230,6 +258,37 @@ export class NoeticAcpClient implements acp.Client {
   //#endregion
 
   //#region internals
+
+  /** Report one client-side operation to the host's observer, if it has one. */
+  private record(activity: AcpClientActivity): void {
+    this.host.onClientActivity?.(activity);
+  }
+
+  /**
+   * Run a client method, reporting it either way. A refusal is the more
+   * interesting record of the two — it is the moment an agent reached for
+   * something it was not allowed to have.
+   */
+  private async audited<T>(
+    activity: Omit<AcpClientActivity, 'allowed'>,
+    run: () => Promise<T>,
+  ): Promise<T> {
+    try {
+      const result = await run();
+      this.record({
+        ...activity,
+        allowed: true,
+      });
+      return result;
+    } catch (e) {
+      this.record({
+        ...activity,
+        allowed: false,
+        reason: e instanceof Error ? e.message : String(e),
+      });
+      throw e;
+    }
+  }
 
   /**
    * The roots an agent may reach: the session working directory plus whatever

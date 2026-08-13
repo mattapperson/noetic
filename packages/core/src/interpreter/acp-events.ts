@@ -15,6 +15,7 @@
  */
 
 import type {
+  AcpClientActivity,
   AcpSessionNotification,
   AcpTurnResult,
   Context,
@@ -77,6 +78,31 @@ export class AcpEventBridge {
    */
   begin(): void {
     this.start();
+  }
+
+  /**
+   * Record one client-side operation the agent performed. Unlike a `tool_call`
+   * update — which is the agent's own account of what it did — this is what it
+   * actually asked us to do, refusals included.
+   */
+  forwardActivity(activity: AcpClientActivity): void {
+    if (!this.broadcaster) {
+      return;
+    }
+    const data = {
+      stepId: this.stepId,
+      agentId: this.agentId,
+      ...activity,
+    };
+    if (!shouldEmit(this.emitOption, 'acp_client_activity', data)) {
+      return;
+    }
+    emitFrameworkEvent({
+      broadcaster: this.broadcaster,
+      agentName: this.agentName,
+      eventType: 'acp_client_activity',
+      data,
+    });
   }
 
   /** Forward one notification: a structured framework event + the mapped sdk events. */

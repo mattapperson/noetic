@@ -230,6 +230,30 @@ export interface AcpClientCapabilityConfig {
  * same sandboxing, virtual-filesystem, and audit machinery as first-party steps.
  * @public
  */
+/**
+ * One client-side operation an agent performed — or was refused. Emitted for
+ * every `fs/*` and `terminal/*` call the agent makes.
+ *
+ * This is an *observed* record, not the agent's self-report: `tool_call`
+ * updates say what the agent claims it did, while this says what it actually
+ * asked the client to do, including the calls that were turned down.
+ * @public
+ */
+export interface AcpClientActivity {
+  /** The ACP client method invoked, e.g. `fs/read_text_file`. */
+  method: string;
+  /** Path involved, for the `fs/*` family and `terminal/create`'s cwd. */
+  path?: string;
+  /** Command line, for `terminal/create`. */
+  command?: string;
+  /** Terminal handle, for the `terminal/*` family. */
+  terminalId?: string;
+  /** False when the call was refused — by a withdrawn capability or confinement. */
+  allowed: boolean;
+  /** Why it was refused. */
+  reason?: string;
+}
+
 export interface AcpClientHost {
   /** Working directory for the session (resolved from `ctx.cwdState.cwd`). */
   readonly cwd: string;
@@ -264,6 +288,12 @@ export interface AcpClientHost {
    * session's output is attributed to the step that actually asked for it.
    */
   onSessionUpdate: (notification: acp.SessionNotification) => void;
+  /**
+   * Receive every `fs/*` and `terminal/*` call the agent makes, allowed or
+   * refused. Per-turn like {@link onSessionUpdate}, so activity is attributed
+   * to the step that actually caused it.
+   */
+  onClientActivity?: (activity: AcpClientActivity) => void;
 }
 
 //#endregion

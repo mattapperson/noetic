@@ -32,6 +32,8 @@ ACP is bidirectional: the agent does not reach for the machine itself, it asks t
 - `session/request_permission` → a declarative policy, then steering, then an async handler; the default is **deny**
 - `session/update` → the harness event surface, so ACP output streams like a `callModel` step's
 
+Every `fs/*` and `terminal/*` call is also emitted as an `acp_client_activity` event, allowed or refused — an observed record of what the agent reached for, not its own account of itself.
+
 Because every ACP agent is a uniform JSON-RPC peer, there is no vendor SDK per agent and no closed list of supported agents.
 
 ## Agents

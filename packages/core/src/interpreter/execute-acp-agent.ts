@@ -10,6 +10,7 @@
 import type {
   AcpAgent,
   AcpAgentConnection,
+  AcpClientActivity,
   AcpClientHost,
   AcpContentBlock,
   AcpKeepAlive,
@@ -204,6 +205,8 @@ interface HostBindingOptions<TContext, I, O> {
   ctx: Context<ContextData>;
   /** `agentId` of the adapter taking the turn, surfaced to permission handlers. */
   agentId: string;
+  /** Sink for the agent's `fs/*` and `terminal/*` calls. */
+  onActivity: NonNullable<AcpClientHost['onClientActivity']>;
   layers?: ContextLayer[];
   onUpdate: AcpClientHost['onSessionUpdate'];
 }
@@ -234,6 +237,7 @@ function bindHostToStep<TContext, I, O>(
         })
     : undefined;
   host.onSessionUpdate = opts.onUpdate;
+  host.onClientActivity = opts.onActivity;
 }
 
 function buildHost<TContext, I, O>(
@@ -250,6 +254,7 @@ function buildHost<TContext, I, O>(
     // Connection-level: ACP negotiates the capability set once, in `initialize`.
     capabilities: opts.step.clientCapabilities,
     onSessionUpdate: opts.onUpdate,
+    onClientActivity: opts.onActivity,
   };
   bindHostToStep(host, opts);
   return host;
@@ -463,6 +468,9 @@ export async function executeAcpAgent<TContext, I, O>(
     layers,
     onUpdate: (notification: Parameters<AcpClientHost['onSessionUpdate']>[0]) => {
       bridge.forward(notification);
+    },
+    onActivity: (activity: AcpClientActivity) => {
+      bridge.forwardActivity(activity);
     },
   };
   const host = buildHost({
