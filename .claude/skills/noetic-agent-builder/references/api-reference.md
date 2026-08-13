@@ -113,7 +113,7 @@ Child execution with context boundary. Context layers control what state crosses
 spawn<TContext = ContextData, I = unknown, O = unknown>({
   id: string;
   child: Step<TContext, I, O>;
-  context?: ContextConfig | ContextLayer[];
+  context?: ContextInput;
   timeout?: number;
   subprocess?: SubprocessAdapter; // per-step adapter override
 }): StepSpawn<TContext, I, O>
@@ -971,6 +971,18 @@ interface ContextConfig<TLayers extends readonly ContextLayer[] = readonly Conte
   readonly _shape: InferContextShape<TLayers>;  // phantom — never accessed at runtime
 }
 ```
+
+### ContextInput
+
+What every context-accepting entry point takes: a bare layer list, or anything carrying one — notably the `ContextConfig` from `context()`.
+
+```typescript
+type ContextInput =
+  | ReadonlyArray<ContextLayer>
+  | { readonly layers: ReadonlyArray<ContextLayer> };
+```
+
+Spelled structurally (not `ContextConfig | ContextLayer[]`) because `ContextConfig` is invariant in `TLayers` via `_shape`, so a concrete `ContextConfig<readonly [SomeLayer]>` is not assignable to the defaulted `ContextConfig`.
 
 ### layerData
 

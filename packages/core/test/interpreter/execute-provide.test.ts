@@ -295,9 +295,11 @@ describe('executeWithContext', () => {
             return 'done';
           },
         },
-        context: [
-          layer,
-        ],
+        context: {
+          layers: [
+            layer,
+          ],
+        },
       };
 
       await executeWithContext(step, 'input', ctx, simpleExecute);

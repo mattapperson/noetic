@@ -13,7 +13,7 @@
 interface SpawnOpts<I, O> {
   id: string;
   child: Step<I, O>;
-  context?: ContextLayer[];
+  context?: ContextInput;
   timeout?: number;
   /**
    * Per-step subprocess adapter override. Takes precedence over the harness

@@ -43,8 +43,8 @@ import type {
   AgentHarnessContract,
   CallModelRequest,
   Context,
-  ContextConfig,
   ContextData,
+  ContextInput,
   ContextLayer,
   ContextRerenderRequest,
   ExecuteStepFn,
@@ -912,8 +912,15 @@ interface CollectSpawnItemsParams {
   itemSchemas?: ItemSchemaRegistry;
 }
 
-function isContextConfig(value: unknown): value is ContextConfig {
-  return typeof value === 'object' && value !== null && 'layers' in value;
+/**
+ * Discriminates the two members of `ContextInput`. Checks `!Array.isArray`
+ * first: the array member is a `ReadonlyArray`, which a `'layers' in value`
+ * test alone does not narrow away.
+ */
+function hasLayersField(value: ContextInput): value is {
+  readonly layers: ReadonlyArray<ContextLayer>;
+} {
+  return !Array.isArray(value) && 'layers' in value && Array.isArray(value.layers);
 }
 
 function resolveLayersForSpawn<TContext, I, O>(
@@ -923,12 +930,14 @@ function resolveLayersForSpawn<TContext, I, O>(
   if (!step.context) {
     return parentLayers ?? [];
   }
-  if (isContextConfig(step.context)) {
+  if (hasLayersField(step.context)) {
     return [
       ...step.context.layers,
     ];
   }
-  return step.context;
+  return [
+    ...step.context,
+  ];
 }
 
 async function collectSpawnItems({
@@ -1085,12 +1094,14 @@ export async function executeSpawn<TContext, I, O>(
 //#region provide
 
 function resolveLayers<TContext, I, O>(step: StepWithContext<TContext, I, O>): ContextLayer[] {
-  if (isContextConfig(step.context)) {
+  if (hasLayersField(step.context)) {
     return [
       ...step.context.layers,
     ];
   }
-  return step.context;
+  return [
+    ...step.context,
+  ];
 }
 
 function mergeLayers(

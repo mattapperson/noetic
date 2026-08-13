@@ -62,7 +62,7 @@ function react(opts: {
   tools: Tool[];
   maxSteps?: number;
   maxCost?: number;
-  context?: ContextConfig | ContextLayer[];
+  context?: ContextInput;
 }) {
   const llmStep = callModel({
     id: 'react-step',
