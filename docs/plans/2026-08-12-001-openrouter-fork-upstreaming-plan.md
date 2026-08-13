@@ -138,9 +138,9 @@ Every retained implementation PR must:
 | 4 | `lukeparke/openrouter-eval-safety` | [#72](https://github.com/mattapperson/noetic/pull/72) | pending | no feedback | blocks 5 | 2026-08-12 opened |
 | 5 | — | — | — | — | blocked by 4 merge | 2026-08-12 audit complete |
 | 6 | `lukeparke/openrouter-openui-hardening` | [#73](https://github.com/mattapperson/noetic/pull/73) | pending | no feedback | independent | 2026-08-12 opened |
-| 7 | — | — | — | — | independent | 2026-08-12 audit complete |
-| 8 | — | — | — | — | independent | 2026-08-12 audit complete |
-| 9 | — | — | — | — | independent, breaking default | 2026-08-12 audit complete |
+| 7 | `lukeparke/openrouter-doom-loop` | [#74](https://github.com/mattapperson/noetic/pull/74) | pending | no feedback | independent | 2026-08-12 opened |
+| 8 | `lukeparke/openrouter-deferred-observations` | [#75](https://github.com/mattapperson/noetic/pull/75) | pending | no feedback | independent | 2026-08-12 opened |
+| 9 | `lukeparke/openrouter-filesystem-scoring` | [#76](https://github.com/mattapperson/noetic/pull/76) | pending | no feedback | breaking default | 2026-08-12 opened |
 | 10 | — | — | — | — | validation dropped via #67 | 2026-08-12 audit complete |
 | 11 | — | [#69 separate](https://github.com/mattapperson/noetic/pull/69) | #69 currently failing | — | avoid #69 behavior | 2026-08-12 audit complete |
 | 12 | — | — | — | — | independent; blocks 13 | 2026-08-12 audit complete |
@@ -149,7 +149,7 @@ Every retained implementation PR must:
 | 15 | — | — | — | — | independent; blocks 16 | 2026-08-12 audit complete |
 | 16 | — | — | — | — | blocked by 15 | 2026-08-12 audit complete |
 | 17 | — | — | — | — | blocked by 16; RFC/breaking | 2026-08-12 audit complete |
-| 18 | — | — | — | — | independent | 2026-08-12 audit complete |
+| 18 | `lukeparke/openrouter-context-input` | [#77](https://github.com/mattapperson/noetic/pull/77) | pending | no feedback | independent | 2026-08-12 opened |
 | 19 | — | — | — | — | design review required | 2026-08-12 audit complete |
 | 20 | — | — | — | — | blocked by 14 + 19 | 2026-08-12 audit complete |
 
