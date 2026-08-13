@@ -5,7 +5,7 @@
  * `StepCallModel.output`: instead of JSON-parsing the assistant text once at turn
  * end, a codec is fed each text delta as it streams and produces a typed
  * value when the turn finishes. OpenUI Lang is one dialect; the contract
- * lives here — next to `ContextLayer` and `SubHarness` — so `core` and
+ * lives here — next to `ContextLayer` and `AcpAgent` — so `core` and
  * dialect packages both depend on it without forming a cycle.
  */
 

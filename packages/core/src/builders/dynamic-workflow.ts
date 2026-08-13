@@ -59,11 +59,11 @@ A WorkflowNode is one of:
 - { "kind": "withContext", "id": "<unique>", "child": <WorkflowNode>, "layers": ["<layer-name>", ...] } (run the child with named context layers; only emit if the task names layers that exist, since this planner provides no layer registry and unknown names resolve to NO layers)
 - { "kind": "schedule", "id": "<unique>", "step": <WorkflowNode>, "interval": <ms>, "onError": "continue"|"fail" } (re-runs the step forever on an interval and never returns — only emit for an explicitly daemon-style task)
 - { "kind": "subflow", "id": "<unique>", "document": { "version": 1, "root": <WorkflowNode> } } (an inline sub-workflow run as one step; only emit the inline form — named refs require a registry this planner does not provide)
-- { "kind": "claude-code"|"codex"|"opencode"|"pi", "id": "<unique>", "prompt": "<turn prompt>", "settings": { "model": "<optional>", "permissionMode": "<optional>" } }
+- { "kind": "acp-agent", "id": "<unique>", "agent": "<registered agent id, e.g. claude-code>", "prompt": "<turn prompt>", "mode": "<optional session mode>", "model": "<optional>" }
 
 Every entry of a callModel node's "tools" is an OBJECT, never a bare string. Use { "type": "<tool-name>" } to let the model call one of the tools listed below. Two provider-executed tools are also available without being listed: { "type": "openrouter:web_search" } and { "type": "openrouter:web_fetch" }, each accepting an optional "parameters" object.
 
-SubHarness nodes (claude-code, codex, opencode, pi) delegate a turn to an external coding agent; only emit one if a matching harness adapter is registered for the workflow.
+An acp-agent node delegates a turn to an external coding agent over the Agent Client Protocol; only emit one if a matching agent adapter is registered for the workflow.
 
 An UntilPredicate (the "until" field of a loop) is one of:
 { "kind": "maxSteps", "n": <positive int> }, { "kind": "maxCost", "usd": <positive number> }, { "kind": "maxDuration", "duration": <ms> }, { "kind": "noToolCalls" }, { "kind": "never" } (never stops — pair with "maxIterations"), { "kind": "outputContains", "marker": "<text>" }, { "kind": "outputEquals", "sentinel": "<text>" }, { "kind": "converged", "threshold": <optional 0-1> }, { "kind": "any", "predicates": [<UntilPredicate>, ...] }, { "kind": "all", "predicates": [<UntilPredicate>, ...] }.

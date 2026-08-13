@@ -185,88 +185,110 @@ is typed from `event` (the non-generator `tool()` has no events to render).
 - `decorateResultItem` output must satisfy the tool's own `toolResults` schemas — including for error outputs (e.g. malformed-arguments results), so declare error-shaped results or make decorated fields tolerant.
 - Harness-level `itemSchemas.schemas` (on `AgentHarness` opts, an `ItemSchemaConfig` of `{ schemas?, strict? }`) stay global and apply to every item at trust boundaries.
 
-### step.claudeCode / step.codex / step.opencode / step.pi
+### step.acpAgent
 
-Sub-harness steps. Delegate one turn to an external coding-agent runtime (Claude Code, Codex, opencode, pi) the way `callModel` delegates a turn to a model. Each builder is its own `Step.kind` (`'claude-code'`, `'codex'`, `'opencode'`, `'pi'`) but all share the `StepSubHarness` shape and one interpreter handler.
+Delegates one turn to an external coding agent over the [Agent Client Protocol](https://agentclientprotocol.com/), the way `callModel` delegates a turn to a model. **One** `Step.kind` (`'acp-agent'`) covers every agent: the agent is passed in as an adapter, so supporting a new one never changes this API or the published workflow schema.
 
 ```typescript
-step.claudeCode<TContext = ContextData, I = unknown, O = unknown>({
+step.acpAgent<TContext = ContextData, I = unknown, O = unknown>({
   id: string;
-  harness: Lazy<SubHarness, TContext>;                 // adapter from the matching factory
-  prompt: Lazy<string, TContext>;                      // the fresh turn input
-  settings?: SubHarnessSettings;
-  instructions?: Lazy<string | undefined, TContext>;   // first-message system prompt
-  output?: StandardSchemaV1<unknown, O>;                 // structured output, like callModel (no model JSON Schema needed, so no escape hatch)
-  session?: SubHarnessSessionPolicy;
+  agent: Lazy<AcpAgent, TContext>;                     // preset or custom adapter
+  prompt?: Lazy<string, TContext>;                     // plain-text turn input ('' → use step input)
+  content?: Lazy<ReadonlyArray<AcpContentBlock> | undefined, TContext>;  // image/audio/resource blocks
+  mcpServers?: Lazy<ReadonlyArray<AcpMcpServer> | undefined, TContext>;
+  cwd?: Lazy<string | undefined, TContext>;            // defaults to ctx.cwdState.cwd
+  mode?: Lazy<string | undefined, TContext>;           // session/set_mode before the turn
+  model?: Lazy<string | undefined, TContext>;          // session/set_model before the turn
+  permissions?: AcpPermissionPolicy;
+  onPermissionRequest?: AcpPermissionHandler;
+  clientCapabilities?: AcpClientCapabilityConfig;
+  output?: StandardSchemaV1<unknown, O>;               // structured output, like callModel
+  session?: AcpSessionPolicy;
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
-}): StepSubHarness<TContext, I, O>
-// step.codex / step.opencode / step.pi take the identical opts.
+}): StepAcpAgent<TContext, I, O>
 ```
 
-The adapter comes from the matching package's factory, and its `harnessId` must equal the builder kind:
+Agents come from `@noetic-tools/acp`. A preset is only a launch recipe — there is no vendor SDK:
 
 ```typescript
-import { claudeCode } from '@noetic-tools/sub-harness-claude-code';
-import { codex } from '@noetic-tools/sub-harness-codex';
-import { opencode } from '@noetic-tools/sub-harness-opencode';
-import { pi } from '@noetic-tools/sub-harness-pi';
+import { claudeCode, codex, gemini, customAcpAgent } from '@noetic-tools/acp';
 
-const review = step.claudeCode({
+const review = step.acpAgent({
   id: 'review',
-  harness: claudeCode({ model: 'claude-opus-4-8' }),
+  agent: claudeCode(),                                  // npx @zed-industries/claude-code-acp
   prompt: 'Review the staged diff and summarize the riskiest change.',
-  settings: { permissionMode: 'plan' },
+  mode: 'plan',
+  permissions: { default: 'deny', allow: [{ kind: 'read' }] },
 });
 ```
 
-The interpreter mirrors `executeLLM`: it appends the prompt as a user item, starts (or reuses) a session, drives one turn, forwards each stream part as a `sub_harness_event` framework event, appends the turn's items to the item log, charges `ctx.tokens`/`ctx.cost`, records `ctx.lastStepMeta`, tears the session down per policy, and returns the assistant text (or the parsed `output`).
+`codex()`, `gemini()`, and `customAcpAgent({ agentId, command, args, env, transport })` take the same shape. Every preset accepts `command` / `args` / `env` overrides plus a `transport` for non-stdio reach.
 
-**Settings** (`SubHarnessSettings`, shared across agents; the adapter factory takes the same shape as its defaults, merged under each step's `settings`):
+The interpreter mirrors `executeCallModel`: it appends the prompt as a user item, opens (or reuses) a connection + session, applies `mode`/`model`, drives one `session/prompt`, forwards each notification as an `acp_event` framework event, appends the turn's items to the item log, charges `ctx.tokens`/`ctx.cost`, records `ctx.lastStepMeta`, tears the connection down per policy, and returns the assistant text (or the parsed `output`).
+
+**Client capabilities.** ACP inverts control: the agent asks the client to read/write files and run terminals. Noetic serves those from `ctx.fs` and `ctx.shell`, so a sub-agent's file and shell access is sandboxed and audited like a first-party step. `clientCapabilities` withdraws one — the agent is then told the method does not exist:
 
 ```typescript
-interface SubHarnessSettings {
-  model?: string;
-  permissionMode?: 'default' | 'plan' | 'acceptEdits' | 'bypassPermissions';
-  maxTurns?: number;
-  allowedTools?: ReadonlyArray<string>;
-  extra?: Record<string, unknown>;   // adapter-specific passthrough
+interface AcpClientCapabilityConfig {
+  readTextFile?: boolean;   // fs/read_text_file  (default true)
+  writeTextFile?: boolean;  // fs/write_text_file (default true)
+  terminal?: boolean;       // terminal/*         (default true)
 }
 ```
 
-**Session policy** (`SubHarnessSessionPolicy`):
+**Permissions.** `session/request_permission` resolves in three tiers, first decisive wins: the `permissions` policy, then steering's `beforeToolCall` (a **veto** tier — only a non-allow decision is acted on), then `onPermissionRequest`. When all abstain the policy `default` applies, and that default is `'deny'`.
 
 ```typescript
-interface SubHarnessSessionPolicy {
-  reuse?: string;                              // share one live session across steps by key
-  onComplete?: 'stop' | 'detach' | 'destroy'; // 'stop' (default) persists+stops; 'detach' parks; 'destroy' discards
+interface AcpPermissionPolicy {
+  default?: 'allow' | 'deny' | 'cancel';   // defaults to 'deny'
+  allow?: ReadonlyArray<{ kind?: AcpToolKind; title?: string | RegExp }>;
+  deny?: ReadonlyArray<{ kind?: AcpToolKind; title?: string | RegExp }>;  // checked before allow
+  persist?: boolean;                        // prefer allow_always / reject_always
 }
 ```
 
-**Errors:** `EMPTY_STEP_ID` (empty `id`), `MISSING_SUB_HARNESS` (no `harness`), `SUB_HARNESS_KIND_MISMATCH` (adapter's `harnessId` ≠ builder kind — e.g. a `codex()` adapter passed to `step.claudeCode`).
-
-**JSON workflow:** the same four agents are JSON node kinds (`claude-code` / `codex` / `opencode` / `pi`) with fields `prompt`, `instructions?`, `settings?`, `session?`. Adapters are resolved at hydration from `HydrationContext.subHarnesses` (a `Map<SubHarnessKind, SubHarness>`); build it with `createSubHarnessRegistry(claudeCode(), codex())` from `@noetic-tools/sub-harness`. An unregistered kind fails with `UNKNOWN_SUB_HARNESS_REFERENCE`.
-
-**The `SubHarness` contract + `defineSubHarness`.** The contract lives in `@noetic-tools/types` (next to `ContextLayer`); `@noetic-tools/core` depends only on the *type* and runs adapter *instances* you pass in — it never imports an adapter package (enforced by `.sentrux/rules.toml`). To author a new adapter, depend on `@noetic-tools/sub-harness` and call `defineSubHarness`, supplying a *runner* (an async generator yielding `SubHarnessStreamPart`s for one turn):
+**Session policy** (`AcpSessionPolicy`):
 
 ```typescript
-import { defineSubHarness, commonTool, type SubHarnessRunner } from '@noetic-tools/sub-harness';
-
-const runner: SubHarnessRunner = async function* (input) {
-  // input: { prompt, ctx (cwd/fs/shell/subprocess/threadId), settings, instructions, signal }
-  yield { type: 'text-delta', delta: '…' };
-  yield { type: 'finish', finishReason: 'stop', usage: { input: 10, output: 5 } };
-};
-
-export const myAgent = (settings = {}) =>
-  defineSubHarness({
-    harnessId: 'codex',                                  // a SubHarnessKind
-    runner,
-    builtinTools: [commonTool('bash', 'shell', 'Run a shell command')],
-    defaultSettings: settings,
-  });
+interface AcpSessionPolicy {
+  reuse?: string;                 // share one live connection + session across steps by key
+  onComplete?: 'close' | 'keep';  // fresh defaults to 'close', reused to 'keep'
+  load?: string;                  // resume an existing ACP session id via session/load
+}
 ```
 
-Stream-part kinds: `stream-start`, `text-delta`, `reasoning-delta`, `tool-call`, `tool-result`, `file-change`, `finish` (carries `usage`/`cost`), `error`, `raw`. The union has a paired Zod schema `SubHarnessStreamPartSchema`. A `SubHarnessSession` requires only `doPromptTurn` + `doStop`; `doContinueTurn` / `doSuspendTurn` / `doDetach` / `doDestroy` / `doCompact` are optional and signalled by presence (absent → throw `SubHarnessCapabilityError`). Base package also exports `SubHarnessTurnAccumulator`, the `asItems` / `assistantMessageItem` / `functionCallItem` item builders, and `SubHarnessStartError`.
+**Stop reasons:** `end_turn`, `max_tokens`, and `max_turn_requests` return normally (the reason lands on `ctx.lastStepMeta`); `refusal` throws `model_refused`; `cancelled` throws `cancelled`. Aborting the context sends `session/cancel`.
+
+**Errors:** `EMPTY_STEP_ID` (empty `id`), `MISSING_ACP_AGENT` (no `agent`), `MISSING_PROMPT` (neither `prompt` nor `content`). Asking for a capability the agent did not advertise — `loadSession`, a mode, a model, image/audio/embedded content, an HTTP/SSE MCP server — throws `AcpCapabilityError` before anything reaches the wire; a failed handshake throws `AcpConnectError`.
+
+**JSON workflow:** one node kind, `acp-agent`, with fields `agent` (registry key), `prompt`, and optional `cwd` / `mode` / `model` / `mcpServers` / `permissions` / `clientCapabilities` / `session`. Adapters resolve at hydration from `HydrationContext.acpAgents` (a `Map<string, AcpAgent>`); build it with `createAcpAgentRegistry(claudeCode(), codex())`. The registry is an **open** set — a new agent needs an entry, not a schema change. An unregistered key fails with `UNKNOWN_ACP_AGENT_REFERENCE`.
+
+**Authoring an agent + testing.** The `AcpAgent` contract lives in `@noetic-tools/types` (next to `ContextLayer`); `@noetic-tools/core` depends only on the *type* and runs adapter *instances* you pass in — it never imports `@noetic-tools/acp` (enforced by `.sentrux/rules.toml`). Build an adapter with `defineAcpAgent({ agentId, transport })`. For tests, `loopbackTransport` stands an in-process agent on the far end of a **real** protocol connection, so the wire format is exercised without spawning anything:
+
+```typescript
+import { defineAcpAgent, loopbackTransport } from '@noetic-tools/acp';
+
+const fake = defineAcpAgent({
+  agentId: 'fake',
+  transport: loopbackTransport((conn) => ({
+    async initialize(params) {
+      return { protocolVersion: params.protocolVersion, agentCapabilities: {}, authMethods: [] };
+    },
+    async newSession() { return { sessionId: 's1' }; },
+    async authenticate() { return {}; },
+    async prompt(params) {
+      await conn.sessionUpdate({
+        sessionId: params.sessionId,
+        update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'done' } },
+      });
+      return { stopReason: 'end_turn' };
+    },
+    async cancel() {},
+  })),
+});
+```
+
+The Node stdio transport lives at `@noetic-tools/acp/stdio`, so the package's main entry stays runtime-neutral.
 
 ### channel
 
@@ -1321,7 +1343,7 @@ const msg2 = harness.tryRecv(channel, ctx);
 | `await harness.cancel(ctx, reason?)` | Same abort, plus context-layer teardown per context — `onComplete` with `outcome: 'aborted'`, then `dispose` — run bottom-up (children before parents). No-op on an already-cancelled context. |
 | `await harness.abort(scope?)` | Session-level: cancels the in-flight *turn* for a thread (queued messages preserved), which aborts that turn's context tree. |
 
-Cancellation reaches inside the work in flight: blocked `recv` / parked `send` reject with `cancelled`, the provider stream and tool-round loop stop mid-generation, and a sub-harness (`step.claudeCode` etc.) turn is interrupted through the adapter's abort signal. Tokens and cost already spent stay charged to the context; the truncated response is not returned — the step throws `cancelled`. Beyond those points it is cooperative: a `runCode` body that ignores `ctx.aborted` between `await`s runs to its next step boundary.
+Cancellation reaches inside the work in flight: blocked `recv` / parked `send` reject with `cancelled`, the provider stream and tool-round loop stop mid-generation, and an ACP agent (`step.acpAgent`) turn is interrupted via `session/cancel`. Tokens and cost already spent stay charged to the context; the truncated response is not returned — the step throws `cancelled`. Beyond those points it is cooperative: a `runCode` body that ignores `ctx.aborted` between `await`s runs to its next step boundary.
 
 `DetachedHandle` is a thin wrapper over the adapter's `SubprocessHandle`. `.await()` polls `adapter.get()` until the handle reaches a terminal status, then reads the result from `handle.metadata.result` (or rehydrates `handle.metadata.error`). The default adapter (`createInMemorySubprocessAdapter()`) runs the step in-process on the microtask queue, so short-lived detached spawns resolve in sub-millisecond time; out-of-process adapters wait for the OS child to exit.
 
@@ -1982,7 +2004,7 @@ const doc = validateWorkflow({
 });
 ```
 
-Node kinds: `callModel`, `invokeTool`, `runCode`, `conditional`, `inParallel`, `spawn`, `withContext`, `loop`, `sequence`, `schedule`, `subflow`, plus the sub-harness kinds (`claude-code`, `codex`, `opencode`, `pi`).
+Node kinds: `callModel`, `invokeTool`, `runCode`, `conditional`, `inParallel`, `spawn`, `withContext`, `loop`, `sequence`, `schedule`, `subflow`, plus `acp-agent`.
 
 A `subflow` node runs another workflow document as one step — inline (`document`) or by name (`ref`, resolved lazily from `HydrationContext.workflows` / `parseAndRunWorkflow`'s `workflows` option). Exactly one of `document`/`ref` is required. Unknown refs raise `UNKNOWN_WORKFLOW_REFERENCE` at execution; ref cycles raise `WORKFLOW_CYCLE`. There is also a `workflow({ id, document | ref, tools?, layers?, workflows?, isolation?: 'inherit' | 'spawn' })` builder that runs a document as a composable `StepRunCode` (main entry only, not `/portable`).
 
@@ -1995,8 +2017,8 @@ import type { HydrationContext } from '@noetic-tools/core';
 const ctx: HydrationContext = {
   tools: new Map([['search', searchTool]]),
   executeStep: harness.run.bind(harness),
-  // Optional: resolve sub-harness nodes and generative-UI output codecs.
-  // subHarnesses: new Map([['claude-code', claudeCode({ model })]]),
+  // Optional: resolve acp-agent nodes and generative-UI output codecs.
+  // acpAgents: createAcpAgentRegistry(claudeCode(), codex()),
   // uiLibraries: new Map([['dashboard-lib', openUi(dashboardLibrary)]]),
 };
 

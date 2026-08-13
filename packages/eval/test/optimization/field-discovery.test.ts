@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { Step, SubHarness, SubHarnessKind, SubHarnessSession, Tool } from '@noetic-tools/core';
+import type { AcpAgent, Step, Tool } from '@noetic-tools/core';
 import { callModel, loop, schedule, spawn, step, until, withContext } from '@noetic-tools/core';
 import { z } from 'zod';
 import { discoverFields, enrichWithSourceLocations } from '../../src/optimization/field-discovery';
@@ -34,28 +34,12 @@ function makeMockTool(name: string, description: string): Tool {
   };
 }
 
-function mockSubHarness(kind: SubHarnessKind): SubHarness {
+function mockAcpAgent(agentId: string): AcpAgent {
   return {
-    specificationVersion: 'harness-v1',
-    harnessId: kind,
-    async doStart(): Promise<SubHarnessSession> {
-      return {
-        sessionId: 's',
-        isResume: false,
-        async doPromptTurn() {
-          return {
-            items: [],
-            text: '',
-          };
-        },
-        async doStop() {
-          return {
-            harnessId: kind,
-            sessionId: 's',
-            state: null,
-          };
-        },
-      };
+    specificationVersion: 'acp-v1',
+    agentId,
+    async connect() {
+      throw new Error('field discovery never connects to an agent');
     },
   };
 }
@@ -269,79 +253,42 @@ describe('discoverFields composite recursion', () => {
   });
 });
 
-describe('discoverFields sub-harness step kinds', () => {
-  // Sub-harness prompts/instructions are `Lazy<string>` and the mutator passes
-  // these kinds through unchanged, so discovery must contribute no fields —
-  // surfacing them would produce candidates no mutator can apply. The point of
-  // these cases is that they are explicit no-ops, not silent fall-through.
-  const SUB_HARNESS_BUILDERS = [
-    {
-      kind: 'claude-code' as const,
-      build: (): Step =>
-        step.claudeCode({
-          id: 'cc',
-          harness: mockSubHarness('claude-code'),
-          prompt: 'do a thing',
-          instructions: 'Be terse',
-        }),
-    },
-    {
-      kind: 'codex' as const,
-      build: (): Step =>
-        step.codex({
-          id: 'cx',
-          harness: mockSubHarness('codex'),
-          prompt: 'do a thing',
-          instructions: 'Be terse',
-        }),
-    },
-    {
-      kind: 'opencode' as const,
-      build: (): Step =>
-        step.opencode({
-          id: 'oc',
-          harness: mockSubHarness('opencode'),
-          prompt: 'do a thing',
-          instructions: 'Be terse',
-        }),
-    },
-    {
-      kind: 'pi' as const,
-      build: (): Step =>
-        step.pi({
-          id: 'pi',
-          harness: mockSubHarness('pi'),
-          prompt: 'do a thing',
-          instructions: 'Be terse',
-        }),
-    },
-  ];
-
-  for (const { kind, build } of SUB_HARNESS_BUILDERS) {
-    test(`${kind} yields no fields without throwing`, () => {
-      expect(discoverFields(build())).toHaveLength(0);
-    });
-
-    test(`${kind} nested in a composite does not block sibling discovery`, () => {
-      const composite = loop({
-        id: 'mixed-loop',
-        steps: [
-          build(),
-          callModel({
-            id: 'sibling-llm',
-            model: 'test-model',
-            instructions: 'Sibling prompt',
-          }),
-        ],
-        until: until.maxSteps(1),
-      });
-
-      const fields = discoverFields(composite);
-
-      expect(fields).toHaveLength(1);
-      expect(fields[0].path).toBe('mixed-loop.sibling-llm.instructions');
+describe('discoverFields acp-agent steps', () => {
+  // An ACP agent's prompt is `Lazy<string>` and the mutator passes the kind
+  // through unchanged, so discovery must contribute no fields — surfacing them
+  // would produce candidates no mutator can apply. These cases exist to make
+  // that an explicit no-op rather than a silent fall-through.
+  function acpStep(id: string): Step {
+    return step.acpAgent({
+      id,
+      agent: mockAcpAgent('claude-code'),
+      prompt: 'do a thing',
     });
   }
+
+  test('an acp-agent step yields no fields without throwing', () => {
+    expect(discoverFields(acpStep('cc'))).toHaveLength(0);
+  });
+
+  test('an acp-agent step nested in a composite does not block sibling discovery', () => {
+    const composite = loop({
+      id: 'mixed-loop',
+      steps: [
+        acpStep('cc'),
+        callModel({
+          id: 'sibling-llm',
+          model: 'test-model',
+          instructions: 'Sibling prompt',
+        }),
+      ],
+      until: until.maxSteps(1),
+    });
+
+    const fields = discoverFields(composite);
+
+    expect(fields).toHaveLength(1);
+    expect(fields[0].path).toBe('mixed-loop.sibling-llm.instructions');
+  });
 });
 
 describe('enrichWithSourceLocations', () => {

@@ -1,16 +1,19 @@
 import type { StandardSchemaV1 } from '@standard-schema/spec';
+import type {
+  AcpAgent,
+  AcpClientCapabilityConfig,
+  AcpContentBlock,
+  AcpMcpServer,
+  AcpPermissionHandler,
+  AcpPermissionPolicy,
+  AcpSessionPolicy,
+} from './acp';
 import type { Channel } from './channel';
 import type { ModelParams, RetryPolicy, ServerToolSpec, StepMeta } from './common';
 import type { Context } from './context';
 import type { ContextConfig, ContextData, ContextLayer, ProjectionPolicy } from './context-layer';
 import type { NoeticError } from './error';
 import type { OutputCodec } from './output-codec';
-import type {
-  SubHarness,
-  SubHarnessKind,
-  SubHarnessSessionPolicy,
-  SubHarnessSettings,
-} from './sub-harness';
 import type { SubprocessAdapter } from './subprocess-adapter';
 import type { Tool } from './tool';
 
@@ -87,7 +90,7 @@ export interface SettleResult<O> {
 export type Step<TContext = ContextData, I = unknown, O = unknown> =
   | StepRunCode<TContext, I, O>
   | StepCallModel<TContext, I, O>
-  | StepSubHarness<TContext, I, O>
+  | StepAcpAgent<TContext, I, O>
   | StepInvokeTool<TContext, I, O>
   | StepConditional<TContext, I, O>
   | StepInParallel<TContext, I, O>
@@ -147,32 +150,46 @@ export interface StepCallModel<TContext = ContextData, _I = unknown, O = unknown
 }
 
 /**
- * A step that delegates a turn to an external coding-agent harness
- * (Claude Code, Codex, opencode, pi). Each harness kind is a distinct
- * `Step.kind`, but every variant shares this shape and is executed by one
- * interpreter handler.
+ * A step that delegates a turn to an external coding agent over the Agent
+ * Client Protocol. One step kind serves every ACP-speaking agent — the agent
+ * itself is supplied as an adapter, so the set of supported agents is open.
  * @public
  */
-export interface StepSubHarness<TContext = ContextData, _I = unknown, O = unknown> {
-  /** The harness kind, equal to the backing adapter's `harnessId`. */
-  kind: SubHarnessKind;
+export interface StepAcpAgent<TContext = ContextData, _I = unknown, O = unknown> {
+  kind: 'acp-agent';
   id: string;
   /**
-   * The harness adapter that runs the turn. Eager or `(ctx) => SubHarness`.
+   * The ACP agent adapter that runs the turn. Eager or `(ctx) => AcpAgent`.
    * Programmatic builders take it inline; the JSON hydrator resolves it from
-   * the workflow's harness registry and inlines it here.
+   * the workflow's agent registry and inlines it here.
    */
-  harness: Lazy<SubHarness, TContext>;
-  /** Turn prompt. Eager string or `(ctx) => string` getter. */
-  prompt: Lazy<string, TContext>;
-  /** Shared harness settings (model, permission mode, …). */
-  settings?: SubHarnessSettings;
-  /** System instructions applied on the first message of a fresh session. */
-  instructions?: Lazy<string | undefined, TContext>;
+  agent: Lazy<AcpAgent, TContext>;
+  /** Turn prompt as plain text. Eager string or `(ctx) => string` getter. */
+  prompt?: Lazy<string, TContext>;
+  /**
+   * Full ACP prompt content — images, audio, resource links, embedded context.
+   * Appended after `prompt` when both are given. Validated against the agent's
+   * advertised `promptCapabilities` before the turn is sent.
+   */
+  content?: Lazy<ReadonlyArray<AcpContentBlock> | undefined, TContext>;
+  /** MCP servers to expose to the agent for this session. */
+  mcpServers?: Lazy<ReadonlyArray<AcpMcpServer> | undefined, TContext>;
+  /** Working directory for the session. Defaults to `ctx.cwdState.cwd`. */
+  cwd?: Lazy<string | undefined, TContext>;
+  /** Session mode to switch to before prompting (e.g. `'plan'`). */
+  mode?: Lazy<string | undefined, TContext>;
+  /** Model to select before prompting, for agents that expose model selection. */
+  model?: Lazy<string | undefined, TContext>;
+  /** Declarative answer to the agent's permission requests. */
+  permissions?: AcpPermissionPolicy;
+  /** Async resolver consulted when policy and steering both abstain. */
+  onPermissionRequest?: AcpPermissionHandler;
+  /** Which client capabilities to advertise to the agent. */
+  clientCapabilities?: AcpClientCapabilityConfig;
   /** When set, the assistant text is JSON-parsed and validated against this Standard Schema. */
   output?: StandardSchemaV1<unknown, O>;
   /** Session reuse + teardown policy across steps. */
-  session?: SubHarnessSessionPolicy;
+  session?: AcpSessionPolicy;
   /** Controls framework event emission for this step. Defaults to `true`. */
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }

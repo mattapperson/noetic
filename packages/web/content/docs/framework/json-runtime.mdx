@@ -81,7 +81,7 @@ Point your editor or validator at the bundled file (resolve it from the package,
 
 ## Node Kinds
 
-Eleven node kinds are available, plus the coding-agent kinds documented in [Sub-Harnesses](/docs/framework/sub-harnesses). Leaf nodes (`callModel`, `invokeTool`, `runCode`) perform work; structural nodes (`sequence`, `inParallel`, `conditional`, `loop`, `spawn`, `withContext`, `schedule`, `subflow`) compose them into trees.
+Eleven node kinds are available, plus the `acp-agent` kind documented in [ACP Agent Steps](/docs/framework/acp-agents). Leaf nodes (`callModel`, `invokeTool`, `runCode`) perform work; structural nodes (`sequence`, `inParallel`, `conditional`, `loop`, `spawn`, `withContext`, `schedule`, `subflow`) compose them into trees.
 
 ### callModel
 
@@ -536,7 +536,7 @@ const result = await harness.run(rootStep, 'input text', ctx);
 | `tools` | `ReadonlyMap<string, Tool>` | Tool registry mapping tool names to `Tool` instances. |
 | `executeStep` | `ExecuteStepFn` | Step executor function (typically `harness.run.bind(harness)`). |
 | `layers` | `ReadonlyMap<string, ContextLayer>` | Optional. Named context layers that `withContext`/`spawn` nodes reference; an unknown name raises `UNKNOWN_LAYER_REFERENCE`. Without a registry, those nodes run with the harness-default layers. |
-| `subHarnesses` | `ReadonlyMap<SubHarnessKind, SubHarness>` | Optional. Adapters for `claude-code`/`codex`/`opencode`/`pi` nodes. |
+| `acpAgents` | `ReadonlyMap<string, AcpAgent>` | Optional. ACP agent adapters keyed by `agentId`, resolving an `acp-agent` node's `agent` field. |
 | `uiLibraries` | `ReadonlyMap<string, OutputCodec>` | Optional. Output codecs for `callModel` nodes' `output` codec references. |
 | `resolveSubprocess` | `(ref: string) => SubprocessAdapter \| undefined` | Optional. Resolves a `runCode` node's named `subprocess` ref to an adapter. When a `runCode` node omits the ref, the harness default (`ctx.subprocess`) is used at execution time. |
 | `workflows` | `ReadonlyMap<string, WorkflowDocument>` | Optional. Named sub-workflow documents that `subflow` nodes resolve via `ref` — lazily, so a live map may gain entries after hydration. |

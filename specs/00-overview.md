@@ -19,15 +19,15 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 ## Packages
 
 ```
-@noetic-tools/context  →  @noetic-tools/types  ←  @noetic-tools/sub-harness
-        ↑                        ↑                          ↑
-@noetic-tools/core  ←  @noetic-tools/eval        @noetic-tools/sub-harness-{claude-code,codex,opencode,pi}
+@noetic-tools/context  →  @noetic-tools/types  ←  @noetic-tools/acp
+        ↑                        ↑
+@noetic-tools/core  ←  @noetic-tools/eval
       ↑
       ├── @noetic-tools/platform-node
       └── @noetic/platform-browser
 ```
 
-`@noetic-tools/core` depends only on the `SubHarness` *type* in `@noetic-tools/types`; it never imports a sub-harness adapter package (the dependency edge above runs adapters → contract, never core → adapter).
+`@noetic-tools/core` depends only on the `AcpAgent` *type* in `@noetic-tools/types`; it never imports `@noetic-tools/acp` (the dependency edge above runs client → contract, never core → client).
 
 - **`@noetic-tools/types`** — The dependency-free foundation. Owns the conversation `Item` data model, LLM config (`LlmProviderConfig`, `ModelParams`, `LLMResponse`, `TokenUsage`), execution context + steering contracts, the platform adapter interfaces (`FsAdapter`, `ShellAdapter`, `SubprocessAdapter`), the error model (`NoeticErrorImpl`), the `Item` schema, and the `ContextLayer` contract (`types/context-layer.ts`, also exposed at the `@noetic-tools/types/contract` subpath). Depends on nothing in the workspace.
 
@@ -39,9 +39,7 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 
 - **`@noetic/platform-browser`** — Browser / edge-runtime glue: runtime-neutral adapter re-exports. Contains no `node:*` imports. See `25-platform-packages`.
 
-- **`@noetic-tools/sub-harness`** — The base contract and helpers for coding-agent sub-harnesses (Claude Code, Codex, opencode, pi run as Noetic steps). Re-exports the `SubHarness` contract from `@noetic-tools/types` and adds `defineSubHarness`, the turn accumulator, item builders, the registry, the common-tool vocabulary, and shared error types. Depends only on `@noetic-tools/types`. See `27-sub-harness-steps`.
-
-- **`@noetic-tools/sub-harness-{claude-code,codex,opencode,pi}`** — Per-tool sub-harness adapters. Each implements the `SubHarness` contract via `defineSubHarness` (vendor SDK behind an injectable runner) and exports a factory (`claudeCode()`, `codex()`, …). Depends on `@noetic-tools/sub-harness` + `@noetic-tools/types` — never on `@noetic-tools/core`.
+- **`@noetic-tools/acp`** — An Agent Client Protocol client, letting any ACP-speaking coding agent (Claude Code, Codex, Gemini CLI, …) run as a Noetic step. Owns the protocol library, capability negotiation, the session/turn drivers, the client-side `fs/*` + `terminal/*` + permission handlers backed by Noetic's own adapters, the transports (stdio, loopback), and the agent presets. Depends only on `@noetic-tools/types` — never on `@noetic-tools/core`. See `27-acp-agent-steps`.
 
 - **`@noetic-tools/openui`** — Generative UI via the OpenUI standard: the `openUi()` output codec (streaming OpenUI Lang parser), the `openUiSurface()` context layer (server-authoritative UI state), the typed `fragment()` builder for tool-authored UI, and the `./server` transport for OpenUI's client stack. Depends on `@noetic-tools/context` + `@noetic-tools/types` — never on `@noetic-tools/core` (core sees only the dialect-agnostic `OutputCodec` / `UiFragment` contracts in `types`). See `28-generative-ui`.
 

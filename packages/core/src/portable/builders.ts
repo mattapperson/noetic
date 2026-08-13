@@ -10,7 +10,7 @@ export { loop } from '../builders/loop-builder';
 /** @public */
 export { spawn } from '../builders/spawn-builder';
 
-// The base builders plus the sub-harness `step` namespace, without
+// The base builders plus the ACP `step` namespace, without
 // `workflow` — the portable surface stays free of the hydrator so
 // restricted runtimes don't pull it in.
 /** @public */

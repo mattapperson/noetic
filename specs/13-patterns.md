@@ -24,7 +24,7 @@ The primitives every pattern in this document draws on:
 | Context isolation | `spawn`, `withContext` | `04-spawn`, `11-context-layer-system` |
 | Cross-boundary state | context layers | `11-context-layer-system` |
 | External messaging | `channel`, `ExternalChannel`, `ChannelHandle` | `06-channels` |
-| Delegating to a coding agent | `step.claudeCode`, `step.codex`, `step.opencode`, `step.pi` | `27-sub-harness-steps` |
+| Delegating to a coding agent | `step.acpAgent` | `27-acp-agent-steps` |
 
 The one runtime-shaped exception is the **JSON workflow runtime** (`dynamicWorkflow`, `parseAndRunWorkflow`), which hydrates a validated `WorkflowDocument` into a native `Step` tree so the *shape* can be produced at runtime by a model. It is a runtime, not a pattern — see `26-json-workflow-runtime`.
 

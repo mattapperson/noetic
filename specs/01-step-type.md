@@ -23,7 +23,7 @@ type Step<I, O> =
 
 The optional `subprocess?: SubprocessAdapter` field on `runCode` and `spawn` variants is a per-step adapter override. When set, the interpreter dispatches that step through the given adapter instead of the harness default. Resolution order at dispatch time is `detachedSpawn-overrides.subprocess ?? step.subprocess ?? harness.subprocess`. See `04-spawn` for adapter routing and `23-durable-execution` for durability guarantees.
 
-Schemas on `llm` output and `Tool` input/output/event accept any [Standard Schema v1](https://standardschema.dev/schema) validator. Model-facing JSON Schema resolves through Zod's native converter, then the [Standard JSON Schema v1](https://standardschema.dev/json-schema) companion trait, then an explicit raw JSON Schema override (`outputJsonSchema`, tool `inputJsonSchema`). Validation scope is limited to these tool/LLM/sub-harness boundaries — channels, context-layer schemas, item extension schemas, sub-harness params, and JSON workflow schemas remain Zod-specific. See `02-step-variants`.
+Schemas on `llm` output and `Tool` input/output/event accept any [Standard Schema v1](https://standardschema.dev/schema) validator. Model-facing JSON Schema resolves through Zod's native converter, then the [Standard JSON Schema v1](https://standardschema.dev/json-schema) companion trait, then an explicit raw JSON Schema override (`outputJsonSchema`, tool `inputJsonSchema`). Validation scope is limited to these tool/LLM/ACP-agent boundaries — channels, context-layer schemas, item extension schemas, and JSON workflow schemas remain Zod-specific. See `02-step-variants`.
 
 Each variant is specified in its own feature spec:
 

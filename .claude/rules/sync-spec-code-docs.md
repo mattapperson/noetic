@@ -33,7 +33,7 @@ They are mandatory, not optional.
 | `12a-cli-context-layers.md`, `21-tasks.md`, `22-cli-architecture.md` | (none — the CLI is implemented in the separate `noetic-internal` repo; these specs stay here as its contract, so there is no in-repo source to keep in sync) | `code-agent-cli/` |
 | `25-platform-packages.md` | `packages/platform-node/src/`, `packages/platform-browser/src/` | `framework/platform-packages.mdx` |
 | `26-json-workflow-runtime.md` | `schemas/workflow.ts`, `builders/workflow-hydrator.ts`, `builders/dynamic-workflow.ts` | `framework/json-runtime.mdx` (+ run `bun run gen:schema`, see Requirement 6) |
-| `27-sub-harness-steps.md` | `packages/types/src/types/sub-harness.ts`, `interpreter/execute-sub-harness`, `builders/step-builders` (harness builders), `packages/sub-harness/src/`, `packages/sub-harness-*/src/` | `framework/sub-harnesses.mdx` |
+| `27-acp-agent-steps.md` | `packages/types/src/types/acp.ts`, `interpreter/execute-acp-agent`, `interpreter/acp-events`, `builders/step-builders` (`step.acpAgent`), `packages/acp/src/` | `framework/acp-agents.mdx` |
 | `28-generative-ui.md` | `packages/types/src/types/output-codec.ts`, `packages/types/src/types/tool.ts` (`UiFragment`, `ToolUiDeclaration`), `packages/openui/src/` | `framework/generative-ui.mdx` |
 | `29-chat-platform-integration.md` | `packages/chat-sdk/src/`, `packages/core/src/runtime/channel-store.ts` (`getChannelStream`) | `framework/chat-sdk.mdx` |
 

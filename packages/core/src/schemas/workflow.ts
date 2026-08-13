@@ -5,6 +5,7 @@
  */
 
 export type {
+  AcpAgentWorkflowNode,
   CallModelWorkflowNode,
   ConditionalRoute,
   ConditionalWorkflowNode,
@@ -17,7 +18,6 @@ export type {
   SequenceWorkflowNode,
   SpawnWorkflowNode,
   SubflowWorkflowNode,
-  SubHarnessWorkflowNode,
   UntilPredicate,
   WithContextWorkflowNode,
   WorkflowDocument,

@@ -17,7 +17,7 @@ chat.onSubscribedMessage(noeticAgent({ harness }));
 
 ## Architecture
 
-The package mirrors the sub-harness adapter shape (`27-sub-harness-steps`):
+The package mirrors the ACP client's package shape (`27-acp-agent-steps`):
 
 - Depends only on `@noetic-tools/types`. It drives any harness through `ChatHarness`, a structural subset of `AgentHarnessContract` (`execute`, `getFullStream`, `getItemStream`, `seedSessionHistory`, `getChannelHandle`, `getChannelStream`, `getStatus`, `getQueueSize`, `abort`).
 - `chat` is an **optional peer dependency**. The core loop needs it only at the type level — the package ships structural mirrors (`ChatThreadLike`, `ChatMessageLike`, `ChatStreamChunk`) of the handful of shapes it touches, pinned to the real package by a compile-time compatibility test. `chatTools()` imports `chat/ai` lazily and fails with an install hint when the peer (or its `ai` peer) is absent.

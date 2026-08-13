@@ -297,7 +297,7 @@ workflow(opts: {
   tools?: Tool[];
   layers?: ReadonlyMap<string, ContextLayer>;
   workflows?: ReadonlyMap<string, WorkflowDocument>;
-  subHarnesses?: ReadonlyMap<SubHarnessKind, SubHarness>;
+  acpAgents?: ReadonlyMap<string, AcpAgent>;
   uiLibraries?: ReadonlyMap<string, OutputCodec>;
   resolveSubprocess?: (ref: string) => SubprocessAdapter | undefined;
   isolation?: 'inherit' | 'spawn';

@@ -7,12 +7,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 All scripts run from the repo root unless noted.
 
 - `bun install` — install workspace deps (postinstall patches `@openrouter/agent`)
-- `bun test` — runs the package suites **sequentially** in this order: `types → context → openui → sub-harness → sub-harness-{claude-code,codex,opencode,pi} → chat-sdk → core → eval → inspector`. `platform-node` and `platform-browser` have their own `test` scripts but are **not** in the root chain — run them per-package.
+- `bun test` — runs the package suites **sequentially** in this order: `types → context → openui → acp → chat-sdk → core → eval → inspector`. `platform-node` and `platform-browser` have their own `test` scripts but are **not** in the root chain — run them per-package.
 - `bun test:ci` — same plus coverage enforcement (diff gate from baseline)
 - `bun run lint` / `bun run lint:fix` — biome
 - `bun run check:exports` — validates `@public` JSDoc tags on core's entry points (`bun scripts/check-export-tags.ts`)
 - `bun run typecheck:examples` — typechecks the root `examples/` project
-- `bun run example:sub-harness` — runs `examples/sub-harness-e2e.ts`
+- `bun run example:acp` — runs `examples/acp-e2e.ts` (set `ACP_LIVE_AGENT=1` to include the live spawned-agent path)
 - `bun run inspect` — starts the inspector host (`packages/inspector/server/host.ts`)
 - `cd packages/core && bun run gen:schema` — regenerate the published JSON Schema for dynamic workflows from `WorkflowDocumentSchema`. **MUST run (same commit) whenever you change the JSON-workflow Zod schema in `packages/core/src/schemas/workflow.ts`** — it rewrites both the package artifact (`packages/core/schema/noetic-workflow.schema.json`) and the hosted copy (`packages/web/public/schema/noetic-workflow.schema.json`, served at the schema's `$id`). A drift-gate test fails CI if either is stale. Never hand-edit the generated `*.schema.json` files. See `.claude/rules/sync-spec-code-docs.md` Requirement 6.
 
@@ -37,22 +37,20 @@ inspector ──→ platform-node ──→ core ──→ context ──→ typ
          platform-browser ────→ core         │          │
                                    openui ───┘──────────┤
                                         chat-sdk ───────┤
-sub-harness-{claude-code,codex,opencode,pi} ─→ sub-harness ─→ types
+                                             acp ───────┘
 
 web (standalone — no workspace deps)
 ```
 
 Every edge above is the complete set: `types` depends on nothing; `context`,
-`chat-sdk`, and `sub-harness` depend only on `types`; each `sub-harness-*`
-adapter on `sub-harness` + `types`; `openui` and `core` on `context` + `types`;
-`eval`, `platform-node`, and `platform-browser` on `core`; `inspector` on `core`
-+ `platform-node`; `web` on nothing.
+`chat-sdk`, and `acp` depend only on `types`; `openui` and `core` on `context` +
+`types`; `eval`, `platform-node`, and `platform-browser` on `core`; `inspector`
+on `core` + `platform-node`; `web` on nothing.
 
-The 15 packages under `packages/`: `chat-sdk`, `context`, `core`, `eval`,
-`inspector`, `openui`, `platform-browser`, `platform-node`, `sub-harness`,
-`sub-harness-claude-code`, `sub-harness-codex`, `sub-harness-opencode`,
-`sub-harness-pi`, `types`, `web`. Most publish under the `@noetic-tools/` scope;
-`inspector`, `platform-browser`, and `web` use `@noetic/`.
+The 11 packages under `packages/`: `acp`, `chat-sdk`, `context`, `core`, `eval`,
+`inspector`, `openui`, `platform-browser`, `platform-node`, `types`, `web`. Most
+publish under the `@noetic-tools/` scope; `inspector`, `platform-browser`, and
+`web` use `@noetic/`.
 
 The Noetic CLI (`@noetic-tools/cli`), its code-agent tooling
 (`@noetic-tools/code-agent`), and the `@noetic/plugin-*` packages are **not in
@@ -64,8 +62,7 @@ this repo under `packages/web/content/docs/code-agent-cli/`.
 - **`@noetic-tools/types`** — the dependency-free foundation: the conversation `Item` data model, LLM config (`LlmProviderConfig`, `ModelParams`, `LLMResponse`), execution context + steering contracts, the `ContextLayer` contract (also exported at the `./contract` subpath), platform adapter interfaces, the error model, and the `Item` schema. Imported by `context` and `core`; depends on nothing in the workspace.
 - **`@noetic-tools/context`** — the context layer system: lifecycle, budget/projection machinery (`assembleView`, `allocateBudgets`, layer state stores, scoping), and the built-in layers (instructions/history/scratchpad/observations/temporal/steering/filesystem/plan/task-state/tool-calls). Depends only on `@noetic-tools/types`; re-exports the `ContextLayer` contract so it is the one-stop import for context-layer authoring. Must stay free of imports from `core` (acyclic + tree-shakable).
 - **`@noetic-tools/core`** — step primitives (`Step<I,O>` discriminated union), interpreter, runtime, error model, observability. Re-exports the public surface of `@noetic-tools/context` and `@noetic-tools/types`, so its `.`, `/portable`, `/unstable`, and `/internal/test` entry points are unchanged for consumers. Internal order (foundational → consumer): `types/schemas/util` → `observability` → `builders/conditions/until` → `runtime` → `interpreter` → `adapters` → `harness`.
-- **`@noetic-tools/sub-harness`** — base contract + helpers for coding-agent sub-harnesses (Claude Code, Codex, opencode, pi). Re-exports the `SubHarness` contract from `@noetic-tools/types` and adds `defineSubHarness`, the turn accumulator, registry, item builders, and error types. Depends only on `@noetic-tools/types`. **`@noetic-tools/core` must never import this package or any `sub-harness-*` adapter** — it resolves adapters from the types contract + a runtime registry, so no agent SDK enters core's dependency graph (enforced by `.sentrux/rules.toml`). See `specs/27-sub-harness-steps.md`.
-- **`@noetic-tools/sub-harness-{claude-code,codex,opencode,pi}`** — one adapter per coding agent; each exports a factory (`claudeCode()` etc.) returning a `SubHarness`, backed by the vendor SDK as an optional peer dependency. Used via `step.claudeCode(...)` or a `claude-code` JSON workflow node.
+- **`@noetic-tools/acp`** — an [Agent Client Protocol](https://agentclientprotocol.com/) client: runs any ACP-speaking coding agent (Claude Code, Codex, Gemini CLI, …) as a step via `step.acpAgent(...)` or an `acp-agent` JSON workflow node. Owns the protocol library, capability negotiation, session/turn drivers, the client-side `fs/*` + `terminal/*` + permission handlers (backed by Noetic's own `FsAdapter`/`ShellAdapter`, so a sub-agent's file and shell access is sandboxed and audited like a first-party step), the transports, and the agent presets. The `.` entry is runtime-neutral; the Node stdio transport lives at `./stdio`. Depends only on `@noetic-tools/types`. **`@noetic-tools/core` must never import this package** — it resolves agents from the types contract + a runtime registry, so neither the protocol library nor an agent binary enters core's dependency graph (enforced by `.sentrux/rules.toml`). See `specs/27-acp-agent-steps.md`.
 - **`@noetic-tools/openui`** — generative UI via the OpenUI standard: the `openUi()` output codec (streaming OpenUI Lang parser), the `openUiSurface()` context layer, the typed `fragment()` builder for tool-authored UI, and an OpenUI-speaking transport at `./server`. Depends on `context` + `types` only; **core never imports it**. See `specs/28-generative-ui.md`.
 - **`@noetic-tools/chat-sdk`** — chat-sdk.dev integration: run a harness as the brain of a multi-platform chat bot via `chat.onSubscribedMessage(noeticAgent(...))`. Depends only on `types`. See `specs/29-chat-platform-integration.md`.
 - **`@noetic-tools/platform-node`** / **`@noetic/platform-browser`** — the platform adapter implementations. Core ships only contracts + in-memory adapters; `platform-node` adds the local fs/shell/subprocess adapters, file storage, the durable outbound queue, and the agent IPC client/server/protocol, while `platform-browser` re-exports core's runtime-neutral in-memory adapters with no `node:*` imports. Both depend on `core`. See `specs/25-platform-packages.md`.

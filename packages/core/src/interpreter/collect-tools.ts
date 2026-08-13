@@ -50,12 +50,9 @@ function walkStep(step: Step, out: Tool[]): void {
 
     case 'runCode':
     case 'invokeTool':
-    // SubHarness steps run their own built-in tools inside the external agent;
-    // they contribute nothing to the host unified tool set.
-    case 'claude-code':
-    case 'codex':
-    case 'opencode':
-    case 'pi':
+    // An ACP agent runs its own tools inside the external agent process; it
+    // contributes nothing to the host unified tool set.
+    case 'acp-agent':
       return;
 
     case 'conditional':

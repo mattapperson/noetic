@@ -1,6 +1,6 @@
 ---
 name: noetic-agent-builder
-description: This skill provides guidance for building AI agents with the Noetic framework. It should be used when creating, modifying, or composing agent patterns using Noetic's step primitives, context layers, tools, sub-harness (coding-agent) steps, generative UI (OpenUI), chat platform integration (chat-sdk.dev), and agent harness. Triggers include mentions of "agent", "react pattern", "context layer", "spawn", "tool", "loop", "sub-harness", "step.claudeCode", "Claude Code / Codex / opencode / pi as a step", "generative UI", "OpenUI", "openUi codec", "openUiSurface", "tool ui / render fragment", "chat-sdk", "noeticAgent", "Slack bot / Discord bot / Teams bot with Noetic", "getChannelStream", or any Noetic-specific API usage in the packages/core directory.
+description: This skill provides guidance for building AI agents with the Noetic framework. It should be used when creating, modifying, or composing agent patterns using Noetic's step primitives, context layers, tools, ACP coding-agent steps, generative UI (OpenUI), chat platform integration (chat-sdk.dev), and agent harness. Triggers include mentions of "agent", "react pattern", "context layer", "spawn", "tool", "loop", "acp", "agent client protocol", "step.acpAgent", "Claude Code / Codex / Gemini CLI as a step", "generative UI", "OpenUI", "openUi codec", "openUiSurface", "tool ui / render fragment", "chat-sdk", "noeticAgent", "Slack bot / Discord bot / Teams bot with Noetic", "getChannelStream", or any Noetic-specific API usage in the packages/core directory.
 ---
 
 # Building Agents with Noetic
@@ -20,7 +20,7 @@ All agent patterns compose through a single `Step<TContext, I, O>` type. Steps a
 - **`inParallel`** -- parallel execution (race, all, or settle)
 - **`spawn`** -- new context boundary with optional context layers
 - **`loop`** -- iteration with termination predicates
-- **`claude-code` / `codex` / `opencode` / `pi`** -- sub-harness steps: delegate one turn to an external coding agent via `step.claudeCode` / `step.codex` / `step.opencode` / `step.pi` (adapter from `@noetic-tools/sub-harness-*`); see `references/api-reference.md`
+- **`acp-agent`** -- delegate one turn to an external coding agent over the Agent Client Protocol via `step.acpAgent` (adapter from `@noetic-tools/acp`: `claudeCode()`, `codex()`, `gemini()`, `customAcpAgent()`); see `references/api-reference.md`
 
 ### Typed Context Access
 
@@ -116,7 +116,7 @@ An agent can respond with a *UI* built from components you register, instead of 
 | Background sub-agents | Async Delegation | `detachedSpawn` + inbox channel |
 | Sequential pipeline | Phase Router | `conditional` + `loop` + `prepareNext` |
 | Multi-agent task tree | Plan Execution | hand-compose `loop` + `inParallel` + `conditional` + `spawn`, or emit a `WorkflowDocument` and run it with `parseAndRunWorkflow` |
-| Run a real coding agent (Claude Code / Codex / opencode / pi) as a step | Sub-Harness Step | `step.claudeCode` / `step.codex` / `step.opencode` / `step.pi` |
+| Run a real coding agent (Claude Code / Codex / Gemini CLI) as a step | ACP Agent Step | `step.acpAgent` |
 | Agent responds with a UI (not text) | Generative UI | `callModel({ output: openUi(library) })` + `openUiSurface()` |
 
 For pattern-specific code examples, read `references/composition-patterns.md`.

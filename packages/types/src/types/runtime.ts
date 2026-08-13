@@ -380,7 +380,7 @@ export interface AgentHarnessContract<
    * (`onComplete` with `outcome: 'aborted'`, then `dispose`) bottom-up.
    *
    * Blocked channel operations reject with `cancelled`, the in-flight model
-   * call and sub-harness turn are cut short, and the next step boundary throws
+   * call and ACP agent turn are cut short, and the next step boundary throws
    * `cancelled`. Idempotent: cancelling an already-cancelled context is a
    * no-op. Use `ctx.abort()` when you want the signal without layer teardown.
    */

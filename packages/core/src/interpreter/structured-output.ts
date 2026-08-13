@@ -8,7 +8,7 @@ import {
 
 /**
  * JSON-parse + validate assistant text against a Standard Schema, raising
- * `model_parse_error`. Shared by the LLM step and sub-harness step handlers.
+ * `model_parse_error`. Shared by the LLM step and ACP agent step handlers.
  *
  * Zod schemas keep the original `safeParse` error; other vendors' Standard
  * Schema issues are adapted into a synthetic `ZodError` of `custom` issues so

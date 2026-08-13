@@ -1,0 +1,441 @@
+/**
+ * ACP step handler: drives an external coding agent over the Agent Client
+ * Protocol for one prompt turn and folds its output back into the Noetic
+ * execution context — the ACP analogue of `executeCallModel`.
+ *
+ * Core reaches the agent only through the `@noetic-tools/types` contract, so no
+ * protocol library or agent SDK enters its dependency graph.
+ */
+
+import type {
+  AcpAgent,
+  AcpAgentConnection,
+  AcpClientHost,
+  AcpContentBlock,
+  AcpLiveSession,
+  AcpPermissionOutcome,
+  AcpPermissionSteerer,
+  AcpSessionPolicy,
+  AcpTurnResult,
+  Context,
+  ContextData,
+  ContextLayer,
+  FunctionCallItem,
+  Item,
+  LLMResponse,
+  StepAcpAgent,
+  StepMeta,
+} from '@noetic-tools/types';
+import {
+  createMessage,
+  extractAssistantText,
+  frameworkCast,
+  NoeticConfigError,
+  NoeticErrorImpl,
+  SteeringAction,
+} from '@noetic-tools/types';
+import { AcpEventBridge } from './acp-events';
+import { withHistoryPrompt } from './acp-history';
+import { resolveLazy } from './execute-action';
+import { trackUsage } from './message-helpers';
+import { parseStructuredOutput } from './structured-output';
+import { isContextImpl, isFunctionCall, isMutableContext } from './typeguards';
+
+//#region Types
+
+/**
+ * The cross-step session store, hung off the concrete `AgentHarness` and
+ * reached via `frameworkCast`, mirroring how the interpreter reaches
+ * `layerStateStore`.
+ */
+interface AcpSessionStore {
+  acpSessions: Map<string, AcpLiveSession>;
+}
+
+//#endregion
+
+//#region Helpers
+
+function sessionStore(ctx: Context<ContextData>): Map<string, AcpLiveSession> {
+  return frameworkCast<AcpSessionStore>(ctx.harness).acpSessions;
+}
+
+function abortSignalOf(ctx: Context<ContextData>): AbortSignal | undefined {
+  return isContextImpl(ctx) ? ctx.abortSignal : undefined;
+}
+
+async function resolveAgent<TContext, I, O>(
+  step: StepAcpAgent<TContext, I, O>,
+  ctx: Context<TContext>,
+): Promise<AcpAgent> {
+  const resolved = await resolveLazy(step.agent, ctx);
+  if (!resolved) {
+    throw new NoeticConfigError({
+      code: 'MISSING_ACP_AGENT',
+      message: `step.acpAgent(${JSON.stringify(step.id)}) resolved no agent adapter.`,
+      hint: 'Pass an agent factory result, e.g. agent: claudeCode() from @noetic-tools/acp.',
+    });
+  }
+  return resolved;
+}
+
+/**
+ * Build the turn's prompt content. Plain text comes first (seeded with the
+ * conversation so far on a fresh session), then any explicit content blocks.
+ */
+function buildContent(opts: {
+  text: string;
+  blocks?: ReadonlyArray<AcpContentBlock>;
+}): AcpContentBlock[] {
+  const content: AcpContentBlock[] = [];
+  if (opts.text.length > 0) {
+    content.push({
+      type: 'text',
+      text: opts.text,
+    });
+  }
+  if (opts.blocks) {
+    content.push(...opts.blocks);
+  }
+  return content;
+}
+
+function toLlmResponse(result: AcpTurnResult): LLMResponse {
+  return {
+    items: result.items,
+    usage: {
+      inputTokens: result.usage?.input ?? 0,
+      outputTokens: result.usage?.output ?? 0,
+      cachedTokens: result.usage?.cached,
+    },
+    cost: result.cost,
+  };
+}
+
+function applyTurnResult(ctx: Context<ContextData>, result: AcpTurnResult): void {
+  const toolCalls: FunctionCallItem[] = [];
+  for (const item of result.items) {
+    ctx.itemLog.append(item);
+    if (isFunctionCall(item)) {
+      toolCalls.push(item);
+    }
+  }
+
+  const llmResponse = toLlmResponse(result);
+  trackUsage(ctx, llmResponse);
+
+  const meta: StepMeta = {
+    toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+    usage: result.usage ? llmResponse.usage : undefined,
+    cost: result.cost,
+    responseItems: result.items,
+  };
+  if (isMutableContext(ctx)) {
+    ctx.lastStepMeta = meta;
+  }
+}
+
+/**
+ * Turn a stop reason into the step's outcome. A refusal and a cancellation are
+ * genuine failures with dedicated error kinds; a token or turn cap is a normal
+ * return whose reason is recorded on `lastStepMeta` for the caller to inspect.
+ */
+function assertTurnSucceeded(
+  stepId: string,
+  result: AcpTurnResult,
+  ctx: Context<ContextData>,
+): void {
+  if (result.stopReason === 'cancelled') {
+    throw new NoeticErrorImpl({
+      kind: 'cancelled',
+      reason: ctx.abortReason ?? 'the ACP agent reported a cancelled turn',
+    });
+  }
+  if (result.stopReason === 'refusal') {
+    throw new NoeticErrorImpl({
+      kind: 'model_refused',
+      stepId,
+      refusal: result.text.length > 0 ? result.text : 'the ACP agent refused to continue',
+    });
+  }
+}
+
+//#endregion
+
+//#region Client host
+
+/**
+ * Bridge the agent's permission requests into the steering pipeline.
+ *
+ * Steering is a **veto** tier: `beforeToolCall` returns `allow` both when a rule
+ * explicitly permits the call *and* when no steering hook exists at all, so
+ * treating `allow` as decisive would silently grant every permission. Only a
+ * non-allow decision is acted on; anything else abstains and the next tier
+ * (the step's handler, then the policy default) decides.
+ */
+function buildSteerer(
+  ctx: Context<ContextData>,
+  layers: ContextLayer[] | undefined,
+): AcpPermissionSteerer | undefined {
+  if (!layers || layers.length === 0) {
+    return undefined;
+  }
+  return async (request): Promise<AcpPermissionOutcome | undefined> => {
+    const decision = await ctx.harness.beforeToolCall(
+      layers,
+      request.toolCall.title ?? request.toolCall.toolCallId,
+      request.toolCall.rawInput,
+      ctx,
+    );
+    if (decision.action === SteeringAction.Allow) {
+      return undefined;
+    }
+    return {
+      decision: 'deny',
+      reason: decision.guidance ?? `steering ${decision.action}`,
+    };
+  };
+}
+
+function buildHost<TContext, I, O>(opts: {
+  step: StepAcpAgent<TContext, I, O>;
+  ctx: Context<ContextData>;
+  cwd: string;
+  layers?: ContextLayer[];
+  onUpdate: AcpClientHost['onSessionUpdate'];
+}): AcpClientHost {
+  return {
+    cwd: opts.cwd,
+    fs: opts.ctx.fs,
+    shell: opts.ctx.shell,
+    threadId: opts.ctx.threadId,
+    signal: abortSignalOf(opts.ctx),
+    capabilities: opts.step.clientCapabilities,
+    permissions: opts.step.permissions,
+    steerPermission: buildSteerer(opts.ctx, opts.layers),
+    onPermissionRequest: opts.step.onPermissionRequest,
+    onSessionUpdate: opts.onUpdate,
+  };
+}
+
+//#endregion
+
+//#region Session lifecycle
+
+interface SessionResolution {
+  live: AcpLiveSession;
+  reuseKey?: string;
+  /** True when this step opened the connection rather than reusing one. */
+  fresh: boolean;
+}
+
+async function openSession<TContext, I, O>(opts: {
+  step: StepAcpAgent<TContext, I, O>;
+  agent: AcpAgent;
+  ctx: Context<TContext>;
+  baseCtx: Context<ContextData>;
+  cwd: string;
+  host: AcpClientHost;
+  /** MCP servers for the session, already resolved from the step. */
+  servers?: Parameters<AcpAgentConnection['newSession']>[0]['mcpServers'];
+}): Promise<SessionResolution> {
+  const reuseKey = opts.step.session?.reuse;
+  const store = sessionStore(opts.baseCtx);
+  if (reuseKey) {
+    const existing = store.get(reuseKey);
+    if (existing) {
+      return {
+        live: existing,
+        reuseKey,
+        fresh: false,
+      };
+    }
+  }
+
+  const connection = await opts.agent.connect({
+    host: opts.host,
+    signal: abortSignalOf(opts.baseCtx),
+  });
+  const loadId = opts.step.session?.load;
+  const session = loadId
+    ? await connection.loadSession({
+        sessionId: loadId,
+        cwd: opts.cwd,
+        mcpServers: opts.servers,
+      })
+    : await connection.newSession({
+        cwd: opts.cwd,
+        mcpServers: opts.servers,
+      });
+
+  const live: AcpLiveSession = {
+    connection,
+    session,
+  };
+  if (reuseKey) {
+    store.set(reuseKey, live);
+  }
+  return {
+    live,
+    reuseKey,
+    fresh: true,
+  };
+}
+
+/**
+ * Tear the connection down per policy. A reused session stays alive by default;
+ * a fresh one is closed, which also stops the agent process.
+ */
+async function finalizeSession(
+  resolution: SessionResolution,
+  policy: AcpSessionPolicy | undefined,
+  baseCtx: Context<ContextData>,
+): Promise<void> {
+  const mode = policy?.onComplete ?? (resolution.reuseKey ? 'keep' : 'close');
+  if (mode === 'keep') {
+    return;
+  }
+  await resolution.live.connection.close();
+  if (resolution.reuseKey) {
+    sessionStore(baseCtx).delete(resolution.reuseKey);
+  }
+}
+
+//#endregion
+
+//#region Public API
+
+export async function executeAcpAgent<TContext, I, O>(
+  step: StepAcpAgent<TContext, I, O>,
+  input: I,
+  ctx: Context<TContext>,
+  layers?: ContextLayer[],
+): Promise<O> {
+  const baseCtx = frameworkCast<Context<ContextData>>(ctx);
+
+  const agent = await resolveAgent(step, ctx);
+  const resolvedPrompt = await resolveLazy(step.prompt, ctx);
+  const blocks = await resolveLazy(step.content, ctx);
+  const promptText =
+    resolvedPrompt && resolvedPrompt.length > 0
+      ? resolvedPrompt
+      : typeof input === 'string'
+        ? input
+        : '';
+  if (promptText.trim() === '' && (!blocks || blocks.length === 0)) {
+    throw new NoeticConfigError({
+      code: 'MISSING_PROMPT',
+      message: `step.acpAgent(${JSON.stringify(step.id)}) resolved an empty prompt.`,
+      hint: 'Provide a non-empty `prompt` or `content`, or pass a string input to the step.',
+    });
+  }
+
+  const cwd = (await resolveLazy(step.cwd, ctx)) ?? baseCtx.cwdState.cwd;
+  const servers = await resolveLazy(step.mcpServers, ctx);
+
+  // Capture the conversation so far BEFORE appending this turn's prompt, so a
+  // fresh session can be seeded with it and the agent is not left guessing at
+  // what earlier steps established.
+  const priorHistory: Item[] = [
+    ...baseCtx.itemLog.items,
+  ];
+  if (promptText.length > 0) {
+    baseCtx.itemLog.append(createMessage(promptText, 'user'));
+  }
+
+  const bridge = new AcpEventBridge(step, agent.agentId, baseCtx);
+  const host = buildHost({
+    step,
+    ctx: baseCtx,
+    cwd,
+    layers,
+    onUpdate: (notification) => {
+      bridge.forward(notification);
+    },
+  });
+
+  const resolution = await openSession({
+    step,
+    agent,
+    ctx,
+    baseCtx,
+    cwd,
+    host,
+    servers: servers
+      ? [
+          ...servers,
+        ]
+      : undefined,
+  });
+
+  const mode = await resolveLazy(step.mode, ctx);
+  if (mode) {
+    await resolution.live.session.setMode(mode);
+  }
+  const model = await resolveLazy(step.model, ctx);
+  if (model) {
+    await resolution.live.session.setModel(model);
+  }
+
+  bridge.begin();
+
+  let result: AcpTurnResult;
+  try {
+    result = await resolution.live.session.prompt({
+      content: buildContent({
+        // History seeds only a freshly opened session; a reused one already
+        // owns its conversation on the agent side.
+        text: resolution.fresh
+          ? withHistoryPrompt({
+              prompt: promptText,
+              history: priorHistory,
+            })
+          : promptText,
+        blocks,
+      }),
+      // Per-turn signal, so a session reused across turns is cancelled by the
+      // context running the CURRENT turn rather than the one that opened it.
+      signal: abortSignalOf(baseCtx),
+    });
+  } catch (e) {
+    // Best-effort teardown of a fresh connection before surfacing the failure;
+    // a reused one is left intact for a later step to retry against.
+    if (!resolution.reuseKey) {
+      await resolution.live.connection.close().catch(() => undefined);
+    }
+    if (e instanceof NoeticErrorImpl) {
+      throw e;
+    }
+    if (baseCtx.aborted) {
+      throw new NoeticErrorImpl({
+        kind: 'cancelled',
+        reason: baseCtx.abortReason ?? 'context aborted',
+      });
+    }
+    throw new NoeticErrorImpl({
+      kind: 'step_failed',
+      stepId: step.id,
+      cause: e instanceof Error ? e : new Error(String(e)),
+      retriesExhausted: false,
+    });
+  }
+
+  bridge.finalize(result);
+  applyTurnResult(baseCtx, result);
+  await finalizeSession(resolution, step.session, baseCtx);
+  assertTurnSucceeded(step.id, result, baseCtx);
+
+  const lastText = result.text.length > 0 ? result.text : extractAssistantText(result.items);
+
+  if (step.output) {
+    return parseStructuredOutput<O>({
+      schema: step.output,
+      rawText: lastText,
+      stepId: step.id,
+    });
+  }
+
+  return frameworkCast<O>(lastText);
+}
+
+//#endregion

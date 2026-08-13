@@ -8,16 +8,13 @@
 
 import type { ContextData, ContextLayer } from '@noetic-tools/context';
 import type {
+  AcpAgent,
   Context,
   ExecuteStepFn,
   OutputCodec,
   ProcessSubprocessRequest,
   ServerToolSpec,
   Step,
-  SubHarness,
-  SubHarnessKind,
-  SubHarnessSessionPolicy,
-  SubHarnessSettings,
   SubprocessAdapter,
   Tool,
   ToolContext,
@@ -51,13 +48,17 @@ export interface HydrationContext {
   tools: ReadonlyMap<string, Tool>;
   executeStep: ExecuteStepFn;
   layers?: ReadonlyMap<string, ContextLayer>;
-  /** SubHarness adapters keyed by harness id, resolving `claude-code`/`codex`/… nodes. */
-  subHarnesses?: ReadonlyMap<SubHarnessKind, SubHarness>;
+  /**
+   * ACP agent adapters keyed by `agentId`, resolving an `acp-agent` node's
+   * `agent` field. An OPEN registry — supporting a new agent needs no schema
+   * change, only another entry here.
+   */
+  acpAgents?: ReadonlyMap<string, AcpAgent>;
   /**
    * Output codecs keyed by the `library` ref a `callModel` node's `output` codec
    * reference names — the live codec built from a component library, e.g.
    * `new Map([['dashboard-lib', openUi(dashboardLibrary)]])` from
-   * `@noetic-tools/openui`. Resolved the same way sub-harness adapters are.
+   * `@noetic-tools/openui`. Resolved the same way ACP agent adapters are.
    */
   uiLibraries?: ReadonlyMap<string, OutputCodec>;
   /**
@@ -78,17 +79,6 @@ export interface HydrationContext {
    */
   subflowAncestry?: ReadonlySet<string>;
 }
-
-interface SubHarnessBuilderOpts {
-  id: string;
-  harness: SubHarness;
-  prompt: string;
-  instructions?: string;
-  settings?: SubHarnessSettings;
-  session?: SubHarnessSessionPolicy;
-}
-
-type SubHarnessStepBuilder = (opts: SubHarnessBuilderOpts) => Step<ContextData, string, string>;
 
 type NodeHydrator = (
   node: WorkflowNode,
@@ -546,39 +536,31 @@ function hydrateScheduleNode(
   });
 }
 
-const SUB_HARNESS_BUILDERS: Record<SubHarnessKind, SubHarnessStepBuilder> = {
-  'claude-code': (opts) => step.claudeCode(opts),
-  codex: (opts) => step.codex(opts),
-  opencode: (opts) => step.opencode(opts),
-  pi: (opts) => step.pi(opts),
-};
-
-function hydrateSubHarnessNode(
+function hydrateAcpAgentNode(
   node: WorkflowNode,
   ctx: HydrationContext,
 ): Step<ContextData, string, string> {
-  if (
-    node.kind !== 'claude-code' &&
-    node.kind !== 'codex' &&
-    node.kind !== 'opencode' &&
-    node.kind !== 'pi'
-  ) {
+  if (node.kind !== 'acp-agent') {
     return frameworkCast(undefined);
   }
-  const harness = ctx.subHarnesses?.get(node.kind);
-  if (!harness) {
+  const agent = ctx.acpAgents?.get(node.agent);
+  if (!agent) {
     throw new NoeticConfigError({
-      code: 'UNKNOWN_SUB_HARNESS_REFERENCE',
-      message: `SubHarness '${node.kind}' referenced in workflow node '${node.id}' is not registered.`,
-      hint: `Pass harness adapters via HydrationContext.subHarnesses, e.g. new Map([['${node.kind}', ${node.kind.replace(/-([a-z])/g, (_, c) => c.toUpperCase())}({ model })]]).`,
+      code: 'UNKNOWN_ACP_AGENT_REFERENCE',
+      message: `ACP agent '${node.agent}' referenced in workflow node '${node.id}' is not registered.`,
+      hint: 'Pass agent adapters via HydrationContext.acpAgents, e.g. createAcpAgentRegistry(claudeCode()) from @noetic-tools/acp.',
     });
   }
-  return SUB_HARNESS_BUILDERS[node.kind]({
+  return step.acpAgent({
     id: node.id,
-    harness,
+    agent,
     prompt: node.prompt,
-    instructions: node.instructions,
-    settings: node.settings,
+    cwd: node.cwd,
+    mode: node.mode,
+    model: node.model,
+    mcpServers: node.mcpServers,
+    permissions: node.permissions,
+    clientCapabilities: node.clientCapabilities,
     session: node.session,
   });
 }
@@ -683,10 +665,7 @@ const NODE_HYDRATORS: Record<string, NodeHydrator> = {
   sequence: hydrateSequenceNode,
   schedule: hydrateScheduleNode,
   subflow: hydrateSubflowNode,
-  'claude-code': hydrateSubHarnessNode,
-  codex: hydrateSubHarnessNode,
-  opencode: hydrateSubHarnessNode,
-  pi: hydrateSubHarnessNode,
+  'acp-agent': hydrateAcpAgentNode,
 };
 
 //#endregion

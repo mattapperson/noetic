@@ -141,15 +141,11 @@ function walkStep(step: Step, prefix: string, fields: OptimizableField[]): void 
       return;
     case 'runCode':
       return;
-    // Sub-harness steps (claude-code, codex, opencode, pi) carry their prompt
-    // and instructions as Lazy<string> — eager forms could in principle be
-    // discovered, but the mutator does not model that surface, so surfacing
-    // fields here would produce candidates no mutator can apply. Contribute
-    // nothing, matching `applyCandidate`'s pass-through for these kinds.
-    case 'claude-code':
-    case 'codex':
-    case 'opencode':
-    case 'pi':
+    // An ACP agent step carries its prompt as Lazy<string> — an eager form
+    // could in principle be discovered, but the mutator does not model that
+    // surface, so surfacing fields here would produce candidates no mutator can
+    // apply. Contribute nothing, matching `applyCandidate`'s pass-through.
+    case 'acp-agent':
       return;
     default: {
       // A new composite Step kind must add a recursion case above, or GEPA

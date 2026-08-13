@@ -8,13 +8,12 @@
 
 import type { ContextData, ContextLayer } from '@noetic-tools/context';
 import type {
+  AcpAgent,
   Context,
   ExecuteStepFn,
   OutputCodec,
   Step,
   StepRunCode,
-  SubHarness,
-  SubHarnessKind,
   SubprocessAdapter,
   Tool,
   WorkflowDocument,
@@ -40,8 +39,8 @@ export interface WorkflowOpts {
   layers?: ReadonlyMap<string, ContextLayer>;
   /** Named sub-workflows for `subflow` nodes — and for resolving `ref` itself. */
   workflows?: ReadonlyMap<string, WorkflowDocument>;
-  /** SubHarness adapters for `claude-code`/`codex`/`opencode`/`pi` nodes. */
-  subHarnesses?: ReadonlyMap<SubHarnessKind, SubHarness>;
+  /** ACP agent adapters, keyed by `agentId`, for `acp-agent` nodes. */
+  acpAgents?: ReadonlyMap<string, AcpAgent>;
   /** Output codecs for `callModel` nodes' `output` codec references. */
   uiLibraries?: ReadonlyMap<string, OutputCodec>;
   /** Resolver for named subprocess adapters on `runCode` nodes. */
@@ -151,7 +150,7 @@ function hydrate(
     executeStep,
     layers: opts.layers,
     workflows: opts.workflows,
-    subHarnesses: opts.subHarnesses,
+    acpAgents: opts.acpAgents,
     uiLibraries: opts.uiLibraries,
     resolveSubprocess: opts.resolveSubprocess,
     subflowAncestry: opts.ref

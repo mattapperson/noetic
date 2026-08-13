@@ -55,7 +55,7 @@ The child's work succeeded — don't discard it. Throw `spawn_summary_failed` wi
 
 The LLM returned text that didn't match the structured-output schema. Includes the `raw` text so the caller can attempt recovery (re-prompt, manual parse, etc.).
 
-`schema` is typed as `StandardSchemaV1` since `callModel`/sub-harness step outputs accept any Standard Schema v1 validator. `zodError` remains populated for backward compatibility: for Zod schemas it is the real `ZodError`; for non-Zod schemas the vendor's Standard Schema issues are adapted into a synthetic `ZodError` of `custom` issues, so consumers keep a single error surface.
+`schema` is typed as `StandardSchemaV1` since `callModel`/ACP-agent step outputs accept any Standard Schema v1 validator. `zodError` remains populated for backward compatibility: for Zod schemas it is the real `ZodError`; for non-Zod schemas the vendor's Standard Schema issues are adapted into a synthetic `ZodError` of `custom` issues, so consumers keep a single error surface.
 
 ### Item Schema Mismatch
 
@@ -94,9 +94,9 @@ Cancellation covers the whole execution tree rooted at the cancelled context:
 2. **Blocking operations.** Any pending `recv` or back-pressure `send` on a channel immediately rejects with `{ kind: 'cancelled' }`. The blocked Promise resolves with the error — it does not hang.
 3. **inParallel paths.** In `race` mode, non-winning paths are cancelled using the same mechanism. In `all`/`settle` mode, if cancellation arrives mid-execution, all paths are cancelled and the `inParallel` throws `cancelled` (not `fork_partial`).
 4. **Loop iterations.** If cancellation arrives during a loop body, the current iteration's step is cancelled. The loop does NOT run another iteration. `onError` is NOT consulted — cancellation is not a retriable error.
-5. **In-flight model calls and sub-harness turns.** The executing context's
-   abort signal is threaded into the model call and into the sub-harness
-   adapter's session/turn, so cancellation cuts the stream and the tool-round
+5. **In-flight model calls and ACP agent turns.** The executing context's
+   abort signal is threaded into the model call and into the ACP session's
+   turn (which issues `session/cancel`), so cancellation cuts the stream and the tool-round
    loop mid-flight rather than waiting for a long generation to finish. Tokens
    and cost already spent are charged to the context; the truncated response is
    not returned as the step's output — the step throws `cancelled`.

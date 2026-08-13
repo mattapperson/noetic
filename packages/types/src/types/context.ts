@@ -116,7 +116,7 @@ export interface Context<TContext = ContextData, TState = unknown> {
    *
    * Aborting rejects operations blocked on the context (channel `recv` waiters,
    * parked back-pressure senders) with `cancelled`, cuts short the in-flight
-   * model call or sub-harness turn, and makes the next step boundary throw
+   * model call or ACP agent turn, and makes the next step boundary throw
    * `cancelled`. Context-layer teardown is NOT run — use
    * `harness.cancel(ctx, reason)` for that.
    */

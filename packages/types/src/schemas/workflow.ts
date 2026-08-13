@@ -10,7 +10,6 @@
  */
 
 import { z } from 'zod';
-import type { SubHarnessKind } from '../types/sub-harness';
 
 //#region Until Predicate Types
 
@@ -205,32 +204,87 @@ const RetryPolicySchema = z.object({
 
 //#endregion
 
-//#region SubHarness Settings
+//#region ACP Agent Settings
 
-const HarnessSettingsSchema = z.object({
-  model: z.string().optional(),
-  permissionMode: z
-    .enum([
-      'default',
-      'plan',
-      'acceptEdits',
-      'bypassPermissions',
-    ])
-    .optional(),
-  maxTurns: z.number().int().positive().optional(),
-  allowedTools: z.array(z.string()).optional(),
-  extra: z.record(z.string(), z.unknown()).optional(),
+/** ACP `ToolKind` — the agent's own classification of a tool call. */
+const AcpToolKindSchema = z.enum([
+  'read',
+  'edit',
+  'delete',
+  'move',
+  'search',
+  'execute',
+  'think',
+  'fetch',
+  'switch_mode',
+  'other',
+]);
+
+const AcpPermissionDecisionSchema = z.enum([
+  'allow',
+  'deny',
+  'cancel',
+]);
+
+/**
+ * A permission rule. Both fields are optional matchers; an omitted field
+ * matches anything. `title` is a case-insensitive substring match here — the
+ * programmatic API additionally accepts a `RegExp`, which JSON cannot express.
+ */
+const AcpPermissionRuleSchema = z.object({
+  kind: AcpToolKindSchema.optional(),
+  title: z.string().min(1).optional(),
 });
 
-const HarnessSessionPolicySchema = z.object({
+const AcpPermissionPolicySchema = z.object({
+  default: AcpPermissionDecisionSchema.optional(),
+  allow: z.array(AcpPermissionRuleSchema).optional(),
+  deny: z.array(AcpPermissionRuleSchema).optional(),
+  persist: z.boolean().optional(),
+});
+
+const AcpClientCapabilityConfigSchema = z.object({
+  readTextFile: z.boolean().optional(),
+  writeTextFile: z.boolean().optional(),
+  terminal: z.boolean().optional(),
+});
+
+const AcpNamedValueSchema = z.object({
+  name: z.string(),
+  value: z.string(),
+});
+
+/** ACP `McpServer`. Stdio is untagged and mandatory for every agent; http/sse are capability-gated. */
+const AcpMcpServerSchema = z.union([
+  z.object({
+    type: z.literal('http'),
+    name: z.string().min(1),
+    url: z.string(),
+    headers: z.array(AcpNamedValueSchema),
+  }),
+  z.object({
+    type: z.literal('sse'),
+    name: z.string().min(1),
+    url: z.string(),
+    headers: z.array(AcpNamedValueSchema),
+  }),
+  z.object({
+    name: z.string().min(1),
+    command: z.string().min(1),
+    args: z.array(z.string()),
+    env: z.array(AcpNamedValueSchema),
+  }),
+]);
+
+const AcpSessionPolicySchema = z.object({
   reuse: z.string().min(1).optional(),
   onComplete: z
     .enum([
-      'stop',
-      'detach',
-      'destroy',
+      'close',
+      'keep',
     ])
     .optional(),
+  load: z.string().min(1).optional(),
 });
 
 //#endregion
@@ -245,7 +299,7 @@ interface WorkflowNodeBase {
  * A reference to a streaming `OutputCodec` for a `callModel` node's structured
  * output. The hydrator resolves `library` from `HydrationContext.uiLibraries`
  * to a live codec (e.g. `openUi(myLibrary)` from `@noetic-tools/openui`), the
- * same registry-resolution pattern sub-harness nodes use for adapters. Kept a
+ * same registry-resolution pattern `acp-agent` nodes use for adapters. Kept a
  * *reference* because a codec is a runtime object, not JSON-expressible.
  */
 export interface OutputCodecRef {
@@ -370,16 +424,26 @@ export interface ScheduleWorkflowNode extends WorkflowNodeBase {
 }
 
 /**
- * A node that delegates a turn to a coding-agent harness. `kind` is the harness
- * id (e.g. `claude-code`); the hydrator resolves the matching adapter from the
- * workflow's harness registry.
+ * A node that delegates a turn to an external coding agent over the Agent
+ * Client Protocol. `agent` is a registry key resolved from
+ * `HydrationContext.acpAgents` — an OPEN set, so supporting a new agent never
+ * changes this schema.
  */
-export interface SubHarnessWorkflowNode extends WorkflowNodeBase {
-  kind: SubHarnessKind;
+export interface AcpAgentWorkflowNode extends WorkflowNodeBase {
+  kind: 'acp-agent';
+  /** Registry key for the ACP agent adapter (e.g. `claude-code`). */
+  agent: string;
   prompt: string;
-  instructions?: string;
-  settings?: z.infer<typeof HarnessSettingsSchema>;
-  session?: z.infer<typeof HarnessSessionPolicySchema>;
+  /** Absolute working directory for the session. Defaults to the runtime cwd. */
+  cwd?: string;
+  /** Session mode to switch to before prompting. */
+  mode?: string;
+  /** Model to select before prompting. */
+  model?: string;
+  mcpServers?: z.infer<typeof AcpMcpServerSchema>[];
+  permissions?: z.infer<typeof AcpPermissionPolicySchema>;
+  clientCapabilities?: z.infer<typeof AcpClientCapabilityConfigSchema>;
+  session?: z.infer<typeof AcpSessionPolicySchema>;
 }
 
 /**
@@ -410,7 +474,7 @@ export type WorkflowNode =
   | SequenceWorkflowNode
   | ScheduleWorkflowNode
   | SubflowWorkflowNode
-  | SubHarnessWorkflowNode;
+  | AcpAgentWorkflowNode;
 
 //#endregion
 
@@ -539,22 +603,19 @@ const SubflowNodeSchema = z
     message: "subflow node requires exactly one of 'document' (inline) or 'ref' (named).",
   });
 
-/** Builds the schema for a single harness node kind (`claude-code`, `codex`, …). */
-function subHarnessNodeSchema<K extends SubHarnessKind>(kind: K) {
-  return z.object({
-    kind: z.literal(kind),
-    ...SHARED_FIELDS,
-    prompt: z.string().min(1),
-    instructions: z.string().optional(),
-    settings: HarnessSettingsSchema.optional(),
-    session: HarnessSessionPolicySchema.optional(),
-  });
-}
-
-const ClaudeCodeNodeSchema = subHarnessNodeSchema('claude-code');
-const CodexNodeSchema = subHarnessNodeSchema('codex');
-const OpencodeNodeSchema = subHarnessNodeSchema('opencode');
-const PiNodeSchema = subHarnessNodeSchema('pi');
+const AcpAgentNodeSchema = z.object({
+  kind: z.literal('acp-agent'),
+  ...SHARED_FIELDS,
+  agent: z.string().min(1),
+  prompt: z.string().min(1),
+  cwd: z.string().min(1).optional(),
+  mode: z.string().min(1).optional(),
+  model: z.string().min(1).optional(),
+  mcpServers: z.array(AcpMcpServerSchema).optional(),
+  permissions: AcpPermissionPolicySchema.optional(),
+  clientCapabilities: AcpClientCapabilityConfigSchema.optional(),
+  session: AcpSessionPolicySchema.optional(),
+});
 
 /** @public Zod schema validating a single `WorkflowNode` (any JSON-safe kind). */
 export const WorkflowNodeSchema: z.ZodType<WorkflowNode> = z
@@ -570,10 +631,7 @@ export const WorkflowNodeSchema: z.ZodType<WorkflowNode> = z
     SequenceNodeSchema,
     ScheduleNodeSchema,
     SubflowNodeSchema,
-    ClaudeCodeNodeSchema,
-    CodexNodeSchema,
-    OpencodeNodeSchema,
-    PiNodeSchema,
+    AcpAgentNodeSchema,
   ])
   .meta({
     id: 'WorkflowNode',

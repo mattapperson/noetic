@@ -11,6 +11,6 @@
     "types": ["bun-types"],
     "lib": ["ESNext", "DOM"]
   },
-  "include": ["sub-harness-e2e.ts", "openui-airbnb/server/**/*.ts"],
+  "include": ["acp-e2e.ts", "openui-airbnb/server/**/*.ts"],
   "exclude": ["openui-airbnb/client"]
 }

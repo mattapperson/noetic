@@ -19,7 +19,7 @@ const WORKSPACE_PACKAGES = [
   'context',
   'core',
   'platform-node',
-  'sub-harness',
+  'acp',
 ] as const;
 
 const EXTERNAL_PACKAGES = [

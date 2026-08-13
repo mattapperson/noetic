@@ -17,7 +17,7 @@ Noetic's entire execution model is built from eight primitives. Each one is a `S
 | --- | --- | --- |
 | [`runCode`](/docs/framework/steps/run-code) | `runCode` | Execute arbitrary async code |
 | [`callModel`](/docs/framework/steps/call-model) | `callModel` | Call a language model |
-| [`step.claudeCode`](/docs/framework/sub-harnesses) | `claude-code`, `codex`, `opencode`, `pi` | Delegate a turn to a coding agent (sub-harness) |
+| [`step.acpAgent`](/docs/framework/acp-agents) | `acp-agent` | Delegate a turn to a coding agent over the Agent Client Protocol |
 | [`invokeTool`](/docs/framework/steps/invoke-tool) | `invokeTool` | Invoke a single tool directly |
 | [`conditional`](/docs/framework/operators/conditional) | `conditional` | Conditional routing -- pick one step or skip |
 | [`inParallel`](/docs/framework/operators/in-parallel) | `inParallel` | Parallel execution -- race, all, or settle |
@@ -63,7 +63,7 @@ The `AgentHarness` orchestrates execution, manages context, and wires up observa
 
 - [Getting Started](/docs) -- install and run your first agent.
 - [Steps](/docs/framework/steps) -- deep dive into `runCode`, `callModel`, and `invokeTool`.
-- [Sub-Harness Steps](/docs/framework/sub-harnesses) -- run a coding agent (Claude Code, Codex, opencode, pi) as a step.
+- [ACP Agent Steps](/docs/framework/acp-agents) -- run a coding agent (Claude Code, Codex, Gemini CLI) as a step.
 - [Control Flow](/docs/framework/operators) -- conditional routing and parallel execution.
 - [Spawn](/docs/framework/operators/spawn) -- isolated child agents.
 - [Loop & Until](/docs/framework/operators/loop-and-until) -- iteration and termination.

@@ -1,5 +1,12 @@
 import type { ContextData } from '@noetic-tools/context';
 import type {
+  AcpAgent,
+  AcpClientCapabilityConfig,
+  AcpContentBlock,
+  AcpMcpServer,
+  AcpPermissionHandler,
+  AcpPermissionPolicy,
+  AcpSessionPolicy,
   Context,
   Lazy,
   ModelParams,
@@ -7,14 +14,10 @@ import type {
   RetryPolicy,
   ServerToolSpec,
   StandardSchemaV1,
+  StepAcpAgent,
   StepCallModel,
   StepInvokeTool,
   StepRunCode,
-  StepSubHarness,
-  SubHarness,
-  SubHarnessKind,
-  SubHarnessSessionPolicy,
-  SubHarnessSettings,
   SubprocessAdapter,
   Tool,
 } from '@noetic-tools/types';
@@ -64,67 +67,71 @@ export interface InvokeToolOpts<I, O> {
   args?: Partial<I>;
 }
 
-export interface StepSubHarnessOpts<TContext, O> {
+export interface StepAcpAgentOpts<TContext, O> {
   id: string;
-  /** The harness adapter created by a `@noetic-tools/sub-harness-*` factory. Eager or `(ctx) => SubHarness`. */
-  harness: Lazy<SubHarness, TContext>;
-  /** Turn prompt. Eager string or `(ctx) => string` getter. */
-  prompt: Lazy<string, TContext>;
-  /** Shared harness settings (model, permission mode, …). */
-  settings?: SubHarnessSettings;
-  /** System instructions applied on the first message of a fresh session. */
-  instructions?: Lazy<string | undefined, TContext>;
+  /** An ACP agent adapter, e.g. `claudeCode()` from `@noetic-tools/acp`. Eager or `(ctx) => AcpAgent`. */
+  agent: Lazy<AcpAgent, TContext>;
+  /** Turn prompt as plain text. Eager string or `(ctx) => string` getter. */
+  prompt?: Lazy<string, TContext>;
+  /**
+   * Full ACP prompt content — images, audio, resource links, embedded context.
+   * Appended after `prompt`. Rejected before the turn is sent when the agent
+   * did not advertise the matching prompt capability.
+   */
+  content?: Lazy<ReadonlyArray<AcpContentBlock> | undefined, TContext>;
+  /** MCP servers to expose to the agent for this session. */
+  mcpServers?: Lazy<ReadonlyArray<AcpMcpServer> | undefined, TContext>;
+  /** Working directory for the session. Defaults to `ctx.cwdState.cwd`. */
+  cwd?: Lazy<string | undefined, TContext>;
+  /** Session mode to switch to before prompting (e.g. `'plan'`). */
+  mode?: Lazy<string | undefined, TContext>;
+  /** Model to select before prompting, for agents that expose model selection. */
+  model?: Lazy<string | undefined, TContext>;
+  /** Declarative answer to the agent's permission requests. Defaults to denying. */
+  permissions?: AcpPermissionPolicy;
+  /** Async resolver consulted when the policy and steering both abstain. */
+  onPermissionRequest?: AcpPermissionHandler;
+  /** Which client capabilities to advertise to the agent. */
+  clientCapabilities?: AcpClientCapabilityConfig;
   /** Optional Standard Schema; when set the assistant text is JSON-parsed and validated. */
   output?: StandardSchemaV1<unknown, O>;
   /** Session reuse + teardown policy across steps. */
-  session?: SubHarnessSessionPolicy;
+  session?: AcpSessionPolicy;
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }
 
 //#endregion
 
-//#region SubHarness builder helper
+//#region ACP agent builder helper
 
 /**
- * Shared construction for every harness step kind. Each `step.<kind>()` is a
- * thin wrapper so the kinds stay individually typed while the validation and
- * registration live in one place.
+ * Validation shared by `step.acpAgent`. Kept separate from the builder so the
+ * checks stay readable and the builder stays a one-liner.
  */
-function buildSubHarnessStep<TContext, I, O>(
-  kind: SubHarnessKind,
-  builderName: string,
-  opts: StepSubHarnessOpts<TContext, O>,
-): StepSubHarness<TContext, I, O> {
+function validateAcpAgentOpts<TContext, O>(opts: StepAcpAgentOpts<TContext, O>): void {
   if (!opts.id || opts.id.trim() === '') {
     throw new NoeticConfigError({
       code: 'EMPTY_STEP_ID',
-      message: `${builderName}() requires a non-empty id.`,
-      hint: `Pass a unique string as the id field, e.g. ${builderName}({ id: "review", ... }).`,
+      message: 'step.acpAgent() requires a non-empty id.',
+      hint: 'Pass a unique string as the id field, e.g. step.acpAgent({ id: "review", ... }).',
     });
   }
-  if (!opts.harness) {
+  if (!opts.agent) {
     throw new NoeticConfigError({
-      code: 'MISSING_SUB_HARNESS',
-      message: `${builderName}() requires a harness adapter.`,
-      hint: `Pass a harness factory result, e.g. harness: ${builderName.replace('step.', '')}({ model }).`,
+      code: 'MISSING_ACP_AGENT',
+      message: 'step.acpAgent() requires an agent adapter.',
+      hint: 'Pass an agent factory result, e.g. agent: claudeCode() from @noetic-tools/acp.',
     });
   }
-  // Eager adapters are validated now; function-form adapters are validated
-  // post-resolution in executeSubHarness so the same SUB_HARNESS_KIND_MISMATCH
-  // error surfaces whether the caller passes an adapter or a getter.
-  if (typeof opts.harness !== 'function' && opts.harness.harnessId !== kind) {
+  // Presence, not emptiness: an empty `prompt` is a valid way to say "use the
+  // step's runtime input as the prompt", which the handler supports.
+  if (opts.prompt === undefined && opts.content === undefined) {
     throw new NoeticConfigError({
-      code: 'SUB_HARNESS_KIND_MISMATCH',
-      message: `${builderName}() was given a '${opts.harness.harnessId}' harness.`,
-      hint: `Use the matching builder, e.g. step.${opts.harness.harnessId}({ ... }).`,
+      code: 'MISSING_PROMPT',
+      message: 'step.acpAgent() requires a prompt or content blocks.',
+      hint: 'Pass `prompt` for plain text, or `content` for image/audio/resource blocks.',
     });
   }
-  const built: StepSubHarness<TContext, I, O> = {
-    kind,
-    ...opts,
-  };
-  getDefaultRegistrar().register(built);
-  return built;
 }
 
 //#endregion
@@ -252,65 +259,40 @@ export function invokeTool<TContext = ContextData, I = unknown, O = unknown>(
 }
 
 /**
- * The sub-harness step builder namespace. Unlike the flattened base builders
- * (`runCode`, `callModel`, `invokeTool`), the coding-agent harness builders
- * stay grouped under `step` — their `step.<harness>()` API is unchanged.
+ * The ACP step builder namespace. Unlike the flattened base builders
+ * (`runCode`, `callModel`, `invokeTool`), the coding-agent builder stays
+ * grouped under `step`.
  *
  * @public
  */
 export const step = {
   /**
-   * Creates a step that delegates a turn to the Claude Code harness.
+   * Creates a step that delegates a turn to an external coding agent over the
+   * Agent Client Protocol.
+   *
+   * One builder covers every ACP-speaking agent: the agent itself is supplied
+   * as an adapter, so adding an agent never changes this API or the published
+   * workflow schema.
    *
    * @public
    * @param opts.id - Unique step identifier.
-   * @param opts.harness - A `claudeCode(...)` adapter from `@noetic-tools/sub-harness-claude-code`.
+   * @param opts.agent - An agent adapter, e.g. `claudeCode()` from `@noetic-tools/acp`.
    * @param opts.prompt - The turn prompt; eager string or `(ctx) => string` getter.
-   * @param opts.settings - Shared harness settings (model, permission mode, …).
-   * @param opts.output - Optional Zod schema enabling structured output parsing.
-   * @returns A `StepSubHarness` of kind `claude-code`, auto-registered in the step registry.
-   * @throws `NoeticConfigError` `EMPTY_STEP_ID` / `MISSING_SUB_HARNESS` / `SUB_HARNESS_KIND_MISMATCH`.
+   * @param opts.permissions - Declarative policy answering the agent's permission requests.
+   * @param opts.output - Optional Standard Schema enabling structured output parsing.
+   * @returns A `StepAcpAgent`, auto-registered in the step registry.
+   * @throws `NoeticConfigError` `EMPTY_STEP_ID` / `MISSING_ACP_AGENT` / `MISSING_PROMPT`.
    */
-  claudeCode<TContext = ContextData, I = unknown, O = unknown>(
-    opts: StepSubHarnessOpts<TContext, O>,
-  ): StepSubHarness<TContext, I, O> {
-    return buildSubHarnessStep('claude-code', 'step.claudeCode', opts);
-  },
-
-  /**
-   * Creates a step that delegates a turn to the Codex harness.
-   * @public
-   * @param opts - See {@link step.claudeCode}; `opts.harness` is a `codex(...)` adapter.
-   * @returns A `StepSubHarness` of kind `codex`.
-   */
-  codex<TContext = ContextData, I = unknown, O = unknown>(
-    opts: StepSubHarnessOpts<TContext, O>,
-  ): StepSubHarness<TContext, I, O> {
-    return buildSubHarnessStep('codex', 'step.codex', opts);
-  },
-
-  /**
-   * Creates a step that delegates a turn to the opencode harness.
-   * @public
-   * @param opts - See {@link step.claudeCode}; `opts.harness` is an `opencode(...)` adapter.
-   * @returns A `StepSubHarness` of kind `opencode`.
-   */
-  opencode<TContext = ContextData, I = unknown, O = unknown>(
-    opts: StepSubHarnessOpts<TContext, O>,
-  ): StepSubHarness<TContext, I, O> {
-    return buildSubHarnessStep('opencode', 'step.opencode', opts);
-  },
-
-  /**
-   * Creates a step that delegates a turn to the pi harness.
-   * @public
-   * @param opts - See {@link step.claudeCode}; `opts.harness` is a `pi(...)` adapter.
-   * @returns A `StepSubHarness` of kind `pi`.
-   */
-  pi<TContext = ContextData, I = unknown, O = unknown>(
-    opts: StepSubHarnessOpts<TContext, O>,
-  ): StepSubHarness<TContext, I, O> {
-    return buildSubHarnessStep('pi', 'step.pi', opts);
+  acpAgent<TContext = ContextData, I = unknown, O = unknown>(
+    opts: StepAcpAgentOpts<TContext, O>,
+  ): StepAcpAgent<TContext, I, O> {
+    validateAcpAgentOpts(opts);
+    const built: StepAcpAgent<TContext, I, O> = {
+      kind: 'acp-agent',
+      ...opts,
+    };
+    getDefaultRegistrar().register(built);
+    return built;
   },
 };
 

@@ -172,7 +172,7 @@ Signals that the execution should be cancelled. After calling `abort`:
 | `ctx.aborted` | `true` |
 | `ctx.abortReason` | The reason string you passed |
 
-Loops check `ctx.aborted` at the top of every iteration and throw a `cancelled` error if set. Aborting also promptly rejects any blocked `recv` waiters and parked `send` calls on this context with a `cancelled` error, so channel-blocked steps unwind immediately instead of waiting out their timeouts. The in-flight model call or sub-harness turn is cut short too — the context's abort signal reaches the provider stream and the coding-agent adapter, so a long generation does not have to finish first.
+Loops check `ctx.aborted` at the top of every iteration and throw a `cancelled` error if set. Aborting also promptly rejects any blocked `recv` waiters and parked `send` calls on this context with a `cancelled` error, so channel-blocked steps unwind immediately instead of waiting out their timeouts. The in-flight model call or ACP agent turn is cut short too — the context's abort signal reaches the provider stream and the coding-agent adapter, so a long generation does not have to finish first.
 
 The first `abort` wins: later calls are no-ops, so `ctx.abortReason` reflects the reason that actually stopped the execution.
 

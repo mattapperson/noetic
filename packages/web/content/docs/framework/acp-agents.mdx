@@ -1,0 +1,323 @@
+---
+title: ACP Agent Steps
+description: Run any coding agent that speaks the Agent Client Protocol — Claude Code, Codex, Gemini CLI — as a Noetic step.
+---
+
+## Quick Example
+
+An ACP step delegates a turn to an external coding agent, exactly the way [`callModel`](/docs/framework/steps) delegates a turn to a language model. One builder covers every agent; the agent itself is an adapter you pass in:
+
+```ts
+import { AgentHarness, type ContextData, step } from '@noetic-tools/core';
+import { claudeCode } from '@noetic-tools/acp';
+
+const review = step.acpAgent<ContextData, string, string>({
+  id: 'review',
+  agent: claudeCode(),
+  prompt: 'Review the working tree and summarize the risks',
+  permissions: { default: 'deny', allow: [{ kind: 'read' }] },
+});
+
+const harness = new AgentHarness({ name: 'reviewer', params: {}, agentGraph: review });
+const summary = await harness.execute('go');
+```
+
+The integration is the [Agent Client Protocol](https://agentclientprotocol.com/) (ACP), a JSON-RPC 2.0 standard in which **Noetic is the Client and the coding agent is the Agent**. Because every ACP agent is a uniform protocol peer, there is no vendor SDK per agent and no closed list of supported agents.
+
+## Why a protocol instead of an SDK per agent
+
+ACP inverts the usual control flow. The agent does not reach for the machine itself — it asks the client to read files, write files, and run terminals, and it asks permission before running a tool.
+
+That means **a sub-agent's file and shell access flows through Noetic's own adapters**: the same sandboxing, virtual filesystem, and audit path as a first-party step, instead of around them through a vendor SDK.
+
+It also brings capabilities a hand-rolled adapter has no way to express: permission requests, plans, session modes, slash commands, MCP server passthrough, multimodal prompts, typed stop reasons, and real cancellation.
+
+## Agents
+
+`@noetic-tools/acp` ships presets for the agents that speak ACP today. Each is only a launch recipe — which binary to run, with which flags:
+
+```ts
+import { claudeCode, codex, gemini, customAcpAgent } from '@noetic-tools/acp';
+
+claudeCode();                       // npx @zed-industries/claude-code-acp
+codex();                            // npx @zed-industries/codex-acp
+gemini();                           // gemini --experimental-acp
+
+customAcpAgent({                    // any other ACP-speaking binary
+  agentId: 'my-agent',
+  command: 'my-acp-agent',
+  args: ['--stdio'],
+});
+```
+
+Every preset accepts `command`, `args`, and `env` overrides, plus a `transport` for reaching an agent that is not a local child process.
+
+## Permissions
+
+ACP requires the client to answer `session/request_permission` before the agent runs a tool. Noetic resolves it in three tiers — the first decisive one wins:
+
+1. **The step's `permissions` policy.** Declarative rules matched on the ACP tool `kind` and `title`. `deny` is evaluated before `allow`, so an explicit refusal always beats a broad grant.
+2. **Steering.** The same `beforeToolCall` pipeline that governs first-party tool calls, so one rule set covers both. Steering acts as a **veto**: only a non-allow decision is acted on, because `allow` is also what an empty rule set returns.
+3. **`onPermissionRequest`.** An async handler — the human-in-the-loop hatch that a synchronous predicate cannot express.
+
+When all three abstain, the policy `default` applies. That default is **`deny`**: an unattended agent should not gain blanket approval by omission.
+
+```ts
+import { step } from '@noetic-tools/core';
+import { claudeCode } from '@noetic-tools/acp';
+
+declare const askAHuman: (title: string) => Promise<boolean>;
+
+step.acpAgent({
+  id: 'guarded',
+  agent: claudeCode(),
+  prompt: 'Fix the failing test',
+  permissions: {
+    default: 'deny',
+    allow: [{ kind: 'read' }, { kind: 'edit' }],
+    deny: [{ title: 'rm -rf' }],
+    persist: true, // prefer allow_always / reject_always when offered
+  },
+  async onPermissionRequest(request) {
+    return { decision: (await askAHuman(request.toolCall.title ?? '')) ? 'allow' : 'deny' };
+  },
+});
+```
+
+`title` accepts a case-insensitive substring or a `RegExp`. The resolved decision is translated into one of the options the agent actually offered; if none matches, the request is cancelled rather than answered with an option meaning something else.
+
+## Client capabilities
+
+Noetic serves the agent's requests from the execution context's adapters:
+
+| ACP client method | Backed by |
+|---|---|
+| `fs/read_text_file` | `ctx.fs`, honouring the spec's 1-indexed `line` / `limit` window |
+| `fs/write_text_file` | `ctx.fs`, creating parent directories |
+| `terminal/create`, `output`, `wait_for_exit`, `kill`, `release` | `ctx.shell`, with an output byte cap and per-terminal cancellation |
+| `session/request_permission` | The resolver above |
+
+Withdraw one and the agent is told the method does not exist, so it never attempts the work:
+
+```ts
+import { step } from '@noetic-tools/core';
+import { claudeCode } from '@noetic-tools/acp';
+
+step.acpAgent({
+  id: 'read-only-review',
+  agent: claudeCode(),
+  prompt: 'Review, do not change anything',
+  clientCapabilities: { writeTextFile: false, terminal: false },
+});
+```
+
+## Prompt content
+
+`prompt` carries plain text. `content` carries the full ACP content-block array — images, audio, resource links, embedded context — appended after it:
+
+```ts
+import { step } from '@noetic-tools/core';
+import { gemini } from '@noetic-tools/acp';
+
+declare const pngBase64: string;
+
+step.acpAgent({
+  id: 'describe',
+  agent: gemini(),
+  prompt: 'What is wrong with this screenshot?',
+  content: [{ type: 'image', data: pngBase64, mimeType: 'image/png' }],
+});
+```
+
+The specification requires clients to restrict content to what the agent advertised during `initialize`, so sending an image to an agent that did not advertise image support throws `AcpCapabilityError` **before** anything reaches the wire.
+
+An empty `prompt` means "use the step's runtime input as the prompt".
+
+## Modes, models, and MCP servers
+
+```ts
+import { step } from '@noetic-tools/core';
+import { claudeCode } from '@noetic-tools/acp';
+
+step.acpAgent({
+  id: 'plan-first',
+  agent: claudeCode(),
+  prompt: 'Design the migration',
+  mode: 'plan',                     // session/set_mode before the turn
+  model: 'claude-opus-4-8',         // session/set_model before the turn
+  mcpServers: [
+    { name: 'db', command: 'mcp-db', args: [], env: [] },
+  ],
+});
+```
+
+Each is checked against what the agent advertised. Asking for a mode from an agent that reports none, or an HTTP MCP server from an agent without `mcpCapabilities.http`, throws `AcpCapabilityError` rather than failing opaquely mid-turn.
+
+## Conversation history
+
+An ACP session owns its history on the agent side, but a freshly opened session knows nothing about the Noetic steps that ran before it. Before appending the turn's prompt, the runtime captures the prior items from `ctx.itemLog` and folds them into the first prompt of a **fresh** session as a transcript preamble — so a coding agent running after a chain of `callModel` steps understands what was already established. A reused session is not re-seeded.
+
+## Sessions
+
+```ts
+import { step } from '@noetic-tools/core';
+import { claudeCode } from '@noetic-tools/acp';
+
+step.acpAgent({
+  id: 'first',
+  agent: claudeCode(),
+  prompt: 'Start the refactor',
+  session: { reuse: 'refactor' },   // keep this connection alive across steps
+});
+
+step.acpAgent({
+  id: 'second',
+  agent: claudeCode(),
+  prompt: 'Now update the tests',
+  session: { reuse: 'refactor', onComplete: 'close' },
+});
+```
+
+`reuse` keys a live connection + session that survives between steps. `onComplete` chooses the teardown: `'close'` ends the connection and stops the agent, `'keep'` leaves it live. A fresh session defaults to `'close'`; a reused one defaults to `'keep'`. `session.load` resumes an existing ACP session id instead of creating a new one, for agents that advertise `loadSession`.
+
+## Stop reasons
+
+| Stop reason | Result |
+|---|---|
+| `end_turn` | Normal return |
+| `max_tokens`, `max_turn_requests` | Normal return; recorded on `ctx.lastStepMeta` |
+| `refusal` | Throws a `NoeticError` of kind `model_refused` |
+| `cancelled` | Throws a `NoeticError` of kind `cancelled` |
+
+Aborting the step's context sends `session/cancel`. Per the specification the agent still answers the original prompt with the `cancelled` stop reason, which becomes the typed error.
+
+## Streaming
+
+Everything the agent emits reaches the harness's event surface, so ACP output streams exactly like a `callModel` step's:
+
+```ts
+import type { AgentHarness } from '@noetic-tools/core';
+
+declare const harness: AgentHarness;
+
+for await (const chunk of harness.getTextStream()) {
+  process.stdout.write(chunk);
+}
+```
+
+| ACP update | Surfaces as |
+|---|---|
+| `agent_message_chunk` | `getTextStream()`, `getFullStream()` |
+| `agent_thought_chunk` | `getReasoningStream()` |
+| `tool_call` | `getItemStream()` as a function call |
+| `plan`, `available_commands_update`, `current_mode_update`, `tool_call_update` | `getFullStream()` as `acp.<update>` |
+
+Every notification is *also* emitted raw as an `acp_event` framework event. A turn always brackets with `response.created` / `response.completed`, and an agent that returns a result without streaming has its output synthesized into events rather than silently swallowed. `emit: false` on the step suppresses all of it.
+
+## Structured output
+
+```ts
+import { step } from '@noetic-tools/core';
+import { claudeCode } from '@noetic-tools/acp';
+import { z } from 'zod';
+
+const Review = z.object({ risks: z.array(z.string()), verdict: z.enum(['ship', 'hold']) });
+
+const review = step.acpAgent({
+  id: 'review',
+  agent: claudeCode(),
+  prompt: 'Review the diff. Reply with JSON matching the schema.',
+  output: Review,
+});
+```
+
+The assistant text is JSON-parsed and validated, raising `model_parse_error` on a mismatch — identical to `callModel`.
+
+## JSON workflows
+
+The same agents are available in the [JSON runtime](/docs/framework/json-runtime) as a single node kind. The `agent` field is a registry key, so supporting a new agent needs another registry entry, not a schema change:
+
+```json
+{
+  "kind": "acp-agent",
+  "id": "review",
+  "agent": "claude-code",
+  "prompt": "Review the diff",
+  "mode": "plan",
+  "permissions": { "default": "deny", "allow": [{ "kind": "read" }] }
+}
+```
+
+```ts
+import { hydrateWorkflow, type ExecuteStepFn, type WorkflowDocument } from '@noetic-tools/core';
+import { claudeCode, codex, createAcpAgentRegistry } from '@noetic-tools/acp';
+
+declare const document: WorkflowDocument;
+declare const executeStep: ExecuteStepFn;
+
+const hydrated = hydrateWorkflow(document, {
+  tools: new Map(),
+  executeStep,
+  acpAgents: createAcpAgentRegistry(claudeCode(), codex()),
+});
+```
+
+A node naming an unregistered agent fails hydration with `UNKNOWN_ACP_AGENT_REFERENCE`.
+
+## Testing an ACP step
+
+`loopbackTransport` stands an in-process agent on the far end of a real protocol connection — full handshake, sessions, notifications, and client callbacks, with no process to spawn:
+
+```ts
+import { defineAcpAgent, loopbackTransport } from '@noetic-tools/acp';
+
+const fake = defineAcpAgent({
+  agentId: 'fake',
+  transport: loopbackTransport((conn) => ({
+    async initialize(params) {
+      return { protocolVersion: params.protocolVersion, agentCapabilities: {}, authMethods: [] };
+    },
+    async newSession() {
+      return { sessionId: 'session-1' };
+    },
+    async authenticate() {
+      return {};
+    },
+    async prompt(params) {
+      await conn.sessionUpdate({
+        sessionId: params.sessionId,
+        update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'done' } },
+      });
+      return { stopReason: 'end_turn' };
+    },
+    async cancel() {},
+  })),
+});
+```
+
+Because the wire protocol really runs, this catches contract mistakes a hand-rolled stub would hide.
+
+## Custom transports
+
+An agent is reachable over anything that yields a duplex byte stream. The default is a local child process over stdio; supply `transport` for anything else — a socket, a sandbox bridge, a remote host:
+
+```ts
+import { defineAcpAgent } from '@noetic-tools/acp';
+
+declare const readable: ReadableStream<Uint8Array>;
+declare const writable: WritableStream<Uint8Array>;
+declare const socket: { close: () => void };
+
+const remote = defineAcpAgent({
+  agentId: 'remote-agent',
+  transport: async () => ({
+    readable,
+    writable,
+    close: async () => {
+      socket.close();
+    },
+  }),
+});
+```
+
+The Node stdio transport lives at `@noetic-tools/acp/stdio`, so the package's main entry stays free of `node:*` and safe to bundle for the browser.

@@ -42,7 +42,7 @@ core ──→ types            (core never imports openui)
 `@noetic-tools/core` imports only the contracts from `@noetic-tools/types` and
 resolves codec/library instances from the step or the hydration registry. No
 OpenUI code enters core's dependency graph — the same decoupling invariant as
-sub-harnesses (`27-sub-harness-steps`), enforced by `.sentrux/rules.toml`
+the ACP client (`27-acp-agent-steps`), enforced by `.sentrux/rules.toml`
 (`core → openui` forbidden, `context → openui` forbidden).
 
 ## Contracts in `types`
@@ -341,7 +341,7 @@ reconnect:    client ──▶ transport ──▶ {document, vars, version} sna
 
 A `callModel` node opts into the codec by reference; the hydrator resolves the
 library from the workflow's `HydrationContext.uiLibraries` registry (the same
-registry-resolution pattern sub-harness nodes use for adapters). A codec is a
+registry-resolution pattern `acp-agent` nodes use for adapters). A codec is a
 runtime object, not JSON-expressible, so the node carries a *reference* and the
 caller — who has `@noetic-tools/openui` — supplies the live codec:
 

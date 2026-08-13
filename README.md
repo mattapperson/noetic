@@ -23,7 +23,7 @@ A TypeScript agent framework that decomposes AI agent patterns into eight compos
 |-----------|------|---------|
 | `runCode` | `runCode` | Pure async computation with retry support |
 | `callModel` | `callModel` | LLM call with tools, structured output, and layered context |
-| `step.claudeCode` | `claude-code`, `codex`, `opencode`, `pi` | Delegate a turn to a coding agent (sub-harness) |
+| `step.acpAgent` | `acp-agent` | Delegate a turn to a coding agent over the Agent Client Protocol |
 | `invokeTool` | `invokeTool` | Direct tool execution with Zod-validated I/O |
 | `conditional` | `conditional` | Conditional routing — returns a step or null |
 | `inParallel` | `inParallel` | Parallel execution — race, all, or settle modes |

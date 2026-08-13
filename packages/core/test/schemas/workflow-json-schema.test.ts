@@ -23,10 +23,7 @@ const NODE_KINDS = [
   'sequence',
   'schedule',
   'subflow',
-  'claude-code',
-  'codex',
-  'opencode',
-  'pi',
+  'acp-agent',
 ] as const;
 
 /** Every named until predicate kind the runtime accepts. */

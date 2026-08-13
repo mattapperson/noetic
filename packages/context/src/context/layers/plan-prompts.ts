@@ -280,9 +280,9 @@ const KIND_ENTRIES: Array<{
     line: '`runCode` — code in `execute`, run by a subprocess adapter the host must provide',
   },
   {
-    kind: 'claude-code',
+    kind: 'acp-agent',
     group: 'leaf',
-    line: '`claude-code`, `codex`, `opencode`, `pi` — hand a `prompt` to a coding agent',
+    line: '`acp-agent` — hand a `prompt` to an external coding agent named by `agent` (e.g. `claude-code`, `codex`, `gemini`)',
   },
   {
     kind: 'sequence',
@@ -326,24 +326,12 @@ const KIND_ENTRIES: Array<{
   },
 ];
 
-/** The harness kinds share one line, so they are folded into the `claude-code` entry. */
-const HARNESS_KINDS: WorkflowNode['kind'][] = [
-  'claude-code',
-  'codex',
-  'opencode',
-  'pi',
-];
-
 function kindEntries(allowed?: WorkflowNode['kind'][]): typeof KIND_ENTRIES {
   if (!allowed) {
     return KIND_ENTRIES;
   }
   const permitted = new Set<string>(allowed);
-  return KIND_ENTRIES.filter((entry) =>
-    entry.kind === 'claude-code'
-      ? HARNESS_KINDS.some((kind) => permitted.has(kind))
-      : permitted.has(entry.kind),
-  );
+  return KIND_ENTRIES.filter((entry) => permitted.has(entry.kind));
 }
 
 function treeGuide(schemaUrl: string, allowed?: WorkflowNode['kind'][]): string {

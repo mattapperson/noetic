@@ -58,6 +58,7 @@
   "dependencies": {
     "@openrouter/agent": "^0.6.0",
     "@standard-schema/spec": "1.1.0",
+    "@zed-industries/agent-client-protocol": "^0.4.5",
     "zod": "^4.0.0"
   },
   "scripts": {

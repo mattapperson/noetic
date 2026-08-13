@@ -35,7 +35,7 @@ const doc = await harness.run(dashboard, 'Show a welcome card', ctx);
 
 ## What is generative UI?
 
-Generative UI lets an agent answer with a *user interface* built from components you registered, rather than a text blob. Noetic implements the [OpenUI](https://www.openui.com) standard through the `@noetic-tools/openui` package, which depends only on [`@noetic-tools/context`](/docs/framework/context-layers) and `@noetic-tools/types` — never on core. Core sees two dialect-agnostic contracts (`OutputCodec` and `UiFragment`) and resolves everything else from the package, exactly the way [sub-harnesses](/docs/framework/sub-harnesses) are decoupled.
+Generative UI lets an agent answer with a *user interface* built from components you registered, rather than a text blob. Noetic implements the [OpenUI](https://www.openui.com) standard through the `@noetic-tools/openui` package, which depends only on [`@noetic-tools/context`](/docs/framework/context-layers) and `@noetic-tools/types` — never on core. Core sees two dialect-agnostic contracts (`OutputCodec` and `UiFragment`) and resolves everything else from the package, exactly the way the [ACP client](/docs/framework/acp-agents) is decoupled.
 
 There are three surfaces, adopted independently:
 
@@ -182,7 +182,7 @@ const handler = serveOpenUi(harness, { surface });
 
 ## JSON workflow runtime
 
-A `callModel` node in a [JSON workflow](/docs/framework/json-runtime) opts into the codec by reference. Because a codec is a runtime object, the node names a `library` ref and the caller supplies the live codec through `HydrationContext.uiLibraries` — the same registry-resolution pattern [sub-harness nodes](/docs/framework/sub-harnesses#json-workflow-node) use for adapters:
+A `callModel` node in a [JSON workflow](/docs/framework/json-runtime) opts into the codec by reference. Because a codec is a runtime object, the node names a `library` ref and the caller supplies the live codec through `HydrationContext.uiLibraries` — the same registry-resolution pattern [`acp-agent` nodes](/docs/framework/acp-agents#json-workflows) use for adapters:
 
 ```json
 {

@@ -11,7 +11,7 @@ They are mandatory, not optional.
 4. **Minimal interfaces** - Only include required fields, don't speculate
 5. **Static return types** - Always declare return types on functions
 6. **ESM literal enums** - Prefer literal enums over TypeScript native enums
-7. **Zod schemas** - Use for all API interfaces and runtime validation (tool/`step.llm`/sub-harness schemas additionally accept any Standard Schema v1 validator; use StandardJSONSchemaV1 or an explicit JSON Schema fallback at model boundaries; Zod remains required everywhere else — channels, layers, item schemas, workflows)
+7. **Zod schemas** - Use for all API interfaces and runtime validation (tool/`step.llm`/ACP agent schemas additionally accept any Standard Schema v1 validator; use StandardJSONSchemaV1 or an explicit JSON Schema fallback at model boundaries; Zod remains required everywhere else — channels, layers, item schemas, workflows)
 8. **Use `satisfies`** - Instead of `as` type casting (retains literal type)
 9. **Static strings** - Never type as `string`, use literal types
 10. **No speculative type guards** - See below

@@ -100,14 +100,11 @@ function cloneAndReplace(step: Step, candidate: Candidate, prefix: string): Step
       return {
         ...step,
       };
-    // Sub-harness steps (claude-code, codex, opencode, pi) carry their prompt
-    // and instructions as Lazy<string> — eager forms could in principle be
-    // candidate-substituted, but the mutator does not yet model that surface.
-    // Pass through unchanged so the optimizer remains a no-op for these kinds.
-    case 'claude-code':
-    case 'codex':
-    case 'opencode':
-    case 'pi':
+    // An ACP agent step carries its prompt as Lazy<string> — an eager form
+    // could in principle be candidate-substituted, but the mutator does not yet
+    // model that surface. Pass through unchanged so the optimizer stays a
+    // no-op for this kind.
+    case 'acp-agent':
       return {
         ...step,
       };

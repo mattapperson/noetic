@@ -346,13 +346,12 @@ describe('toFlow', () => {
               'notes',
             ],
             child: {
-              kind: 'codex',
+              kind: 'acp-agent',
               id: 'agent',
+              agent: 'codex',
               prompt: 'do it',
-              settings: {
-                model: 'default',
-                permissionMode: 'default',
-              },
+              model: 'default',
+              mode: 'default',
             },
           },
         ],
@@ -368,6 +367,7 @@ describe('toFlow', () => {
     ]);
     // Chips name their field, so two fields holding "default" stay distinct.
     expect(node(nodes, 'agent').chips).toEqual([
+      'agent codex',
       'model default',
       'mode default',
     ]);

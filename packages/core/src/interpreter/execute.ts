@@ -13,6 +13,7 @@ import { ContextImpl } from '../runtime/context-impl';
 import type { StepLedger } from '../runtime/durable/step-ledger';
 import type { EventBroadcaster } from '../runtime/event-broadcaster';
 import { DetachedHandleImpl } from '../util/detached-handle';
+import { executeAcpAgent } from './execute-acp-agent';
 import {
   executeCallModel,
   executeInvokeTool,
@@ -26,7 +27,6 @@ import {
   executeLoop,
   executeSchedule,
 } from './execute-control';
-import { executeSubHarness } from './execute-sub-harness';
 import { isMutableContext } from './typeguards';
 
 //#region Constants
@@ -85,13 +85,7 @@ function buildSpawnOpts<TContext>(ctx: Context<TContext>): {
 function resolveStepEmit<TContext, I, O>(
   step: Step<TContext, I, O>,
 ): boolean | ((eventType: string, data: Record<string, unknown>) => boolean) | undefined {
-  if (
-    step.kind === 'callModel' ||
-    step.kind === 'claude-code' ||
-    step.kind === 'codex' ||
-    step.kind === 'opencode' ||
-    step.kind === 'pi'
-  ) {
+  if (step.kind === 'callModel' || step.kind === 'acp-agent') {
     return step.emit;
   }
   return undefined;
@@ -358,11 +352,8 @@ export async function execute<TContext = ContextData, I = unknown, O = unknown>(
       case 'callModel':
         result = await executeCallModel(step, input, ctx, baseCtx.layers);
         break;
-      case 'claude-code':
-      case 'codex':
-      case 'opencode':
-      case 'pi':
-        result = await executeSubHarness(step, input, ctx);
+      case 'acp-agent':
+        result = await executeAcpAgent(step, input, ctx, baseCtx.layers);
         break;
       case 'invokeTool':
         result = await executeInvokeTool(step, input, ctx, baseCtx.harness);

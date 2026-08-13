@@ -8,6 +8,7 @@ export type {
   StorageAdapter,
 } from '@noetic-tools/context';
 export type {
+  AcpLiveSession,
   AgentConfig,
   AgentHarnessContract,
   AgentHooks,
@@ -38,7 +39,6 @@ export type {
   Step,
   StreamEvent,
   StreamingItem,
-  SubHarnessSession,
   SubprocessAdapter,
   Tool,
   TraceExporter,

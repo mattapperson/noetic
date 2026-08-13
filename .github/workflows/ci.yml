@@ -44,6 +44,9 @@ jobs:
       - name: Typecheck context
         run: bun run --cwd packages/context typecheck
 
+      - name: Typecheck acp
+        run: bun run --cwd packages/acp typecheck
+
       - name: Typecheck core
         run: bun run --cwd packages/core typecheck
 
@@ -67,6 +70,9 @@ jobs:
 
       - name: Test context
         run: bun run --cwd packages/context test:ci
+
+      - name: Test acp
+        run: bun run --cwd packages/acp test:ci
 
       - name: Test core
         run: bun run --cwd packages/core test:ci

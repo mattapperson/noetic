@@ -21,7 +21,7 @@ body:
         - "@noetic-tools/eval"
         - "@noetic-tools/cli"
         - "@noetic-tools/code-agent"
-        - "sub-harness / sub-harness-*"
+        - "acp"
         - "@noetic-tools/openui"
         - "@noetic/web (docs site)"
         - "Other / not sure"

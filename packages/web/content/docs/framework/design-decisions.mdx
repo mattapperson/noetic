@@ -26,7 +26,7 @@ The `kind` field is the discriminant. A simple `switch (step.kind)` gives you ex
 
 ## Why Zod by Default, Standard Schema at the Model Boundary
 
-Tool inputs, tool outputs, structured LLM output, and sub-harness structured output accept any [Standard Schema v1](https://standardschema.dev) validator, with Zod as the default and fast path. Everything else — channel payloads, plan nodes, layer state schemas, item extension schemas, JSON workflow schemas — remains Zod-specific. Zod as the default means:
+Tool inputs, tool outputs, structured LLM output, and ACP agent structured output accept any [Standard Schema v1](https://standardschema.dev) validator, with Zod as the default and fast path. Everything else — channel payloads, plan nodes, layer state schemas, item extension schemas, JSON workflow schemas — remains Zod-specific. Zod as the default means:
 
 - **Runtime type safety** at every system boundary (user input, LLM output, tool results, channel messages)
 - **Automatic TypeScript inference** -- define a schema once, get the type for free

@@ -605,10 +605,7 @@ function leafDetail(node: WorkflowNode): string | undefined {
       return clip(node.execute);
     case 'subflow':
       return node.ref ? `→ ${node.ref}` : 'inline workflow';
-    case 'claude-code':
-    case 'codex':
-    case 'opencode':
-    case 'pi':
+    case 'acp-agent':
       return clip(node.prompt);
     default:
       return undefined;
@@ -617,8 +614,8 @@ function leafDetail(node: WorkflowNode): string | undefined {
 
 /**
  * Chips name the field they came from. A bare value tells the reader nothing
- * when two fields hold the same one — a harness node with `model: 'default'`
- * and `permissionMode: 'default'` would otherwise wear two identical pills.
+ * when two fields hold the same one — an `acp-agent` node with `agent: 'codex'`
+ * and `model: 'codex'` would otherwise wear two identical pills.
  */
 function leafChips(node: WorkflowNode): string[] {
   switch (node.kind) {
@@ -641,16 +638,15 @@ function leafChips(node: WorkflowNode): string[] {
             `retry ×${node.retry.maxAttempts}`,
           ]
         : [];
-    case 'claude-code':
-    case 'codex':
-    case 'opencode':
-    case 'pi': {
-      const chips: string[] = [];
-      if (node.settings?.model) {
-        chips.push(`model ${node.settings.model}`);
+    case 'acp-agent': {
+      const chips: string[] = [
+        `agent ${node.agent}`,
+      ];
+      if (node.model) {
+        chips.push(`model ${node.model}`);
       }
-      if (node.settings?.permissionMode) {
-        chips.push(`mode ${node.settings.permissionMode}`);
+      if (node.mode) {
+        chips.push(`mode ${node.mode}`);
       }
       if (node.session?.reuse) {
         chips.push(`session ${node.session.reuse}`);

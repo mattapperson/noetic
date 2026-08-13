@@ -2,10 +2,9 @@ import { describe, expect, test } from 'bun:test';
 import assert from 'node:assert';
 import type { ContextLayer } from '@noetic-tools/context';
 import type {
+  AcpAgent,
   OutputCodec,
   ProcessSubprocessRequest,
-  SubHarness,
-  SubHarnessKind,
   SubprocessAdapter,
   SubprocessHandle,
   Tool,
@@ -1101,82 +1100,88 @@ describe('hydrateNode — predicate boundary N+1', () => {
   });
 });
 
-describe('hydrateNode — harness', () => {
-  function fakeHarness(harnessId: SubHarnessKind): SubHarness {
+describe('hydrateNode — acp-agent', () => {
+  function fakeAgent(agentId: string): AcpAgent {
     return {
-      specificationVersion: 'harness-v1',
-      harnessId,
-      async doStart() {
-        return {
-          sessionId: 's',
-          isResume: false,
-          async doPromptTurn() {
-            return {
-              items: [],
-              text: '',
-            };
-          },
-          async doStop() {
-            return {
-              harnessId,
-              sessionId: 's',
-              state: null,
-            };
-          },
-        };
+      specificationVersion: 'acp-v1',
+      agentId,
+      async connect() {
+        throw new Error('not connected in hydration tests');
       },
     };
   }
 
-  function ctxWithHarness(harnessId: SubHarnessKind): HydrationContext {
+  function ctxWithAgent(agentId: string): HydrationContext {
     return {
       tools: new Map(),
       executeStep: async (_step, input) => frameworkCast(input),
-      subHarnesses: new Map([
+      acpAgents: new Map([
         [
-          harnessId,
-          fakeHarness(harnessId),
+          agentId,
+          fakeAgent(agentId),
         ],
       ]),
     };
   }
 
-  test('hydrates a claude-code node into a StepSubHarness with the resolved adapter', () => {
+  test('hydrates an acp-agent node into a StepAcpAgent with the resolved adapter', () => {
     const node: WorkflowNode = {
-      kind: 'claude-code',
+      kind: 'acp-agent',
       id: 'review',
+      agent: 'claude-code',
       prompt: 'review the diff',
-      settings: {
-        model: 'claude-opus-4-8',
-      },
+      mode: 'plan',
     };
-    const result = hydrateNode(node, ctxWithHarness('claude-code'));
-    expect(result.kind).toBe('claude-code');
+    const result = hydrateNode(node, ctxWithAgent('claude-code'));
+    expect(result.kind).toBe('acp-agent');
     expect(result.id).toBe('review');
   });
 
-  test('hydrates each harness kind from the registry', () => {
-    const kinds: SubHarnessKind[] = [
+  test('the agent registry is an open set — any id resolves', () => {
+    const agentIds = [
       'claude-code',
       'codex',
-      'opencode',
-      'pi',
+      'gemini',
+      'some-future-agent',
     ];
-    for (const kind of kinds) {
+    for (const agentId of agentIds) {
       const node: WorkflowNode = {
-        kind,
-        id: `n-${kind}`,
+        kind: 'acp-agent',
+        id: `n-${agentId}`,
+        agent: agentId,
         prompt: 'go',
       };
-      const result = hydrateNode(node, ctxWithHarness(kind));
-      expect(result.kind).toBe(kind);
+      const result = hydrateNode(node, ctxWithAgent(agentId));
+      expect(result.kind).toBe('acp-agent');
     }
   });
 
-  test('throws UNKNOWN_HARNESS_REFERENCE when no adapter is registered', () => {
+  test('carries the permission policy through to the step', () => {
     const node: WorkflowNode = {
-      kind: 'codex',
+      kind: 'acp-agent',
+      id: 'guarded',
+      agent: 'claude-code',
+      prompt: 'go',
+      permissions: {
+        default: 'deny',
+        allow: [
+          {
+            kind: 'read',
+          },
+        ],
+      },
+    };
+    const result = hydrateNode(node, ctxWithAgent('claude-code'));
+    assert(result.kind === 'acp-agent');
+    expect(result.permissions?.default).toBe('deny');
+    expect(result.permissions?.allow).toHaveLength(1);
+  });
+
+  test('throws UNKNOWN_ACP_AGENT_REFERENCE when no adapter is registered', () => {
+    const node: WorkflowNode = {
+      kind: 'acp-agent',
       id: 'x',
+      agent: 'codex',
       prompt: 'go',
     };
     try {
@@ -1184,7 +1189,7 @@ describe('hydrateNode — harness', () => {
       throw new Error('expected throw');
     } catch (e) {
       assert(isNoeticConfigError(e));
-      expect(e.code).toBe('UNKNOWN_SUB_HARNESS_REFERENCE');
+      expect(e.code).toBe('UNKNOWN_ACP_AGENT_REFERENCE');
     }
   });
 });

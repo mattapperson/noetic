@@ -62,7 +62,7 @@ describe('Type definitions', () => {
   });
 
   // Regression: `StepSpawn` was accidentally dropped from `@noetic-tools/core`'s
-  // public re-export block during the sub-harness merge (only `StepSubHarness`
+  // public re-export block during a step-kind merge (only the new step type
   // was added next to it). Doc snippets that import it via `@noetic-tools/core`
   // — and any downstream consumer that does the same — broke. This is a
   // typecheck-level assertion: if the re-export disappears again, tsc fails on

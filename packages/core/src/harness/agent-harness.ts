@@ -64,6 +64,7 @@ import {
   snapshotCwdState,
 } from './deps/runtime';
 import type {
+  AcpLiveSession,
   AgentConfig,
   AgentHarnessContract,
   AgentHooks,
@@ -100,7 +101,6 @@ import type {
   StorageAdapter,
   StreamEvent,
   StreamingItem,
-  SubHarnessSession,
   SubprocessAdapter,
   Tool,
   TraceExporter,
@@ -442,7 +442,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
    * multiple steps. Reached by the interpreter's harness handler via
    * `frameworkCast`; do not access from outside core.
    */
-  readonly subHarnessSessions = new Map<string, SubHarnessSession>();
+  readonly acpSessions = new Map<string, AcpLiveSession>();
   readonly layerStateStore: LayerStateStore;
   /** Per-harness memoization cache for `recallMode: 'eventual'` layers. */
   readonly recallCache: RecallCache;
@@ -1201,7 +1201,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
    *
    * Aborting a context rejects everything blocked on it (channel `recv`
    * waiters, parked senders) with `{ kind: 'cancelled' }`, stops its in-flight
-   * model call and sub-harness turn, and makes the next step boundary throw
+   * model call and ACP agent turn, and makes the next step boundary throw
    * `cancelled`.
    *
    * Cancellation is cooperative: a layer hook already in flight is allowed to

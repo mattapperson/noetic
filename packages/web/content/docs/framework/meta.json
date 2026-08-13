@@ -1,13 +1,13 @@
 {
   "title": "Framework",
-  "description": "The Noetic framework for building agents — steps, operators, context layers, runtime.",
+  "description": "The Noetic framework for building agents \u2014 steps, operators, context layers, runtime.",
   "root": true,
   "pages": [
     "index",
     "overview",
     "---Primitives---",
     "steps",
-    "sub-harnesses",
+    "acp-agents",
     "generative-ui",
     "operators",
     "---Integrations---",

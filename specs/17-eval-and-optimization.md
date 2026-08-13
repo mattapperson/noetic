@@ -457,7 +457,7 @@ The static analysis module:
 1. Takes an eval file path
 2. Follows imports to find agent/step definition source files using TypeScript module resolution
 3. Parses those imported source files into TypeScript ASTs (the eval file itself is excluded — only imported source modules are analyzed for builder calls)
-4. Walks the AST to find builder calls (`callModel()`, `runCode()`, `invokeTool()`, `tool()`, `conditional()`, `inParallel()`, `spawn()`, `loop()`) and sub-harness step calls (`step.claudeCode()`, `step.codex()`, `step.opencode()`, `step.pi()`)
+4. Walks the AST to find builder calls (`callModel()`, `runCode()`, `invokeTool()`, `tool()`, `conditional()`, `inParallel()`, `spawn()`, `loop()`) and ACP agent step calls (`step.acpAgent()`)
 5. Extracts string literal values of optimizable fields (`instructions`, `description`, `name`) and their exact `SourceLocation` (file, line, column)
 6. Returns `OptimizableField[]` with populated `sourceLocation`
 

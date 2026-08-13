@@ -243,6 +243,7 @@ export { getRegistry, lookupStep, registerStep } from './runtime/step-registry';
 export { defaultItemSchemaRegistry, ItemSchema, ItemSchemaRegistry } from '@noetic-tools/types';
 /** @public */
 export type {
+  AcpAgentWorkflowNode,
   CallModelWorkflowNode,
   ConditionalRoute,
   ConditionalWorkflowNode,
@@ -254,7 +255,6 @@ export type {
   SequenceWorkflowNode,
   SpawnWorkflowNode,
   SubflowWorkflowNode,
-  SubHarnessWorkflowNode,
   UntilPredicate,
   WithContextWorkflowNode,
   WorkflowDocument,
@@ -530,6 +530,7 @@ export type {
   SettleResult,
   Snapshot,
   Step,
+  StepAcpAgent,
   StepCallModel,
   StepConditional,
   StepInParallel,
@@ -540,7 +541,6 @@ export type {
   StepLoop,
   StepRunCode,
   StepSpawn,
-  StepSubHarness,
   StepWithContext,
   Until,
   Verdict,
@@ -548,27 +548,56 @@ export type {
 
 //#endregion
 
-//#region Types — SubHarness adapters
+//#region Types — ACP agents
 
 /** @public */
 export type {
-  SubHarness,
-  SubHarnessBuiltinTool,
-  SubHarnessContinueState,
-  SubHarnessContinueTurnOptions,
-  SubHarnessFinishReason,
-  SubHarnessPromptTurnOptions,
-  SubHarnessResumeState,
-  SubHarnessRunContext,
-  SubHarnessSession,
-  SubHarnessSessionPolicy,
-  SubHarnessSettings,
-  SubHarnessStartOptions,
-  SubHarnessStreamPart,
-  SubHarnessTurnResult,
+  AcpAgent,
+  AcpAgentCapabilities,
+  AcpAgentConnection,
+  AcpAuthMethod,
+  AcpAvailableCommand,
+  AcpClientCapabilityConfig,
+  AcpClientHost,
+  AcpConnectOptions,
+  AcpContentBlock,
+  AcpLiveSession,
+  AcpLoadSessionOptions,
+  AcpMcpServer,
+  AcpNewSessionOptions,
+  AcpPermissionHandler,
+  AcpPermissionOption,
+  AcpPermissionOutcome,
+  AcpPermissionPolicy,
+  AcpPermissionRule,
+  AcpPermissionSteerer,
+  AcpPlanEntry,
+  AcpPromptCapabilities,
+  AcpPromptOptions,
+  AcpRequestPermissionRequest,
+  AcpSession,
+  AcpSessionMode,
+  AcpSessionModeState,
+  AcpSessionNotification,
+  AcpSessionPolicy,
+  AcpStopReason,
+  AcpToolCallContent,
+  AcpToolCallStatus,
+  AcpToolKind,
+  AcpTransport,
+  AcpTransportFactory,
+  AcpTransportOptions,
+  AcpTurnResult,
 } from '@noetic-tools/types';
 /** @public */
-export { SUB_HARNESS_KINDS, SubHarnessKind, SubHarnessStreamPartSchema } from '@noetic-tools/types';
+export {
+  ACP_AGENT_STEP_KIND,
+  AcpCapabilityError,
+  AcpConnectError,
+  AcpPermissionDecision,
+  isAcpCapabilityError,
+  isAcpConnectError,
+} from '@noetic-tools/types';
 
 //#endregion
 

@@ -62,7 +62,7 @@ Authoring documents by hand or reviewing LLM-generated ones, reference the schem
 
 ## WorkflowNode Union
 
-`WorkflowNode` is a discriminated union on `kind`. Each variant maps to an existing `Step` builder. All nodes share a common `id` field. Sub-harness node kinds (`claude-code`, `codex`, `opencode`, `pi`) are specified in `27-sub-harness-steps`.
+`WorkflowNode` is a discriminated union on `kind`. Each variant maps to an existing `Step` builder. All nodes share a common `id` field. The `acp-agent` node kind is specified in `27-acp-agent-steps`.
 
 ```typescript
 type WorkflowNode =
@@ -77,7 +77,7 @@ type WorkflowNode =
   | SequenceWorkflowNode
   | ScheduleWorkflowNode
   | SubflowWorkflowNode
-  | SubHarnessWorkflowNode;
+  | AcpAgentWorkflowNode;
 ```
 
 ### `callModel`
@@ -369,7 +369,7 @@ interface HydrationContext {
   tools: ReadonlyMap<string, Tool>;
   executeStep: ExecuteStepFn;
   layers?: ReadonlyMap<string, ContextLayer>;
-  subHarnesses?: ReadonlyMap<SubHarnessKind, SubHarness>;
+  acpAgents?: ReadonlyMap<string, AcpAgent>;
   uiLibraries?: ReadonlyMap<string, OutputCodec>;
   resolveSubprocess?: (ref: string) => SubprocessAdapter | undefined;
   workflows?: ReadonlyMap<string, WorkflowDocument>;
@@ -382,7 +382,7 @@ interface HydrationContext {
 | `tools`              | Yes      | Registry mapping tool names to live `Tool` objects.                      |
 | `executeStep`        | Yes      | The interpreter's `execute` function, threaded for recursive calls.      |
 | `layers`             | No       | Named context layers for `withContext` nodes and `spawn.layers`.              |
-| `subHarnesses`       | No       | SubHarness adapters keyed by harness id (`claude-code`, `codex`, …).     |
+| `acpAgents`          | No       | ACP agent adapters keyed by `agentId` (`claude-code`, `codex`, …). Open set. |
 | `uiLibraries`        | No       | Output codecs for `callModel` nodes' `output` codec references.                |
 | `resolveSubprocess`  | No       | Resolves a named subprocess adapter ref on a `runCode` node.                 |
 | `workflows`          | No       | Named sub-workflow documents that `subflow` nodes resolve via `ref`.     |
@@ -605,7 +605,7 @@ The JSON Workflow Runtime introduces the following `NoeticConfigError` codes:
 | `UNKNOWN_NODE_KIND`            | A node kind has no registered hydrator.                                  |
 | `UNKNOWN_TOOL_REFERENCE`       | A tool name in the document is not in the hydration registry.            |
 | `UNKNOWN_LAYER_REFERENCE`      | A layer name on a `withContext`/`spawn` node is not in the layer registry.   |
-| `UNKNOWN_SUB_HARNESS_REFERENCE`| A sub-harness node's adapter is not registered.                          |
+| `UNKNOWN_ACP_AGENT_REFERENCE`  | An `acp-agent` node's adapter is not registered.                         |
 | `UNKNOWN_UI_LIBRARY_REFERENCE` | A `callModel` node's `output.library` is not in the codec registry.           |
 | `UNKNOWN_SUBPROCESS_REFERENCE` | A `runCode` node's `subprocess` ref cannot be resolved.                      |
 | `UNKNOWN_UNTIL_PREDICATE`      | An until predicate kind is unrecognised.                                 |
