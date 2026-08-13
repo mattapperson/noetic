@@ -4,10 +4,11 @@
  * Used by the sync-delegate, async-delegate, and dynamic-delegate examples.
  */
 
-import type { ContextData, ContextLayer } from '@noetic-tools/context';
+import type { ContextData } from '@noetic-tools/context';
 import type {
   AgentHarnessContract,
   Channel,
+  ContextInput,
   DetachedHandle,
   DetachedStatus,
   Tool,
@@ -26,7 +27,7 @@ export interface SubAgentConfig {
   model: string;
   instructions: string;
   tools?: Tool[];
-  context?: ContextLayer[];
+  context?: ContextInput;
 }
 
 export type SubAgentResolver = (task: string) => SubAgentConfig;

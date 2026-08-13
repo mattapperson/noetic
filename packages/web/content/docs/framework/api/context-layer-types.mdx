@@ -431,10 +431,16 @@ type ContextData = Readonly<Record<string, Record<string, unknown>>>;
 A typed context configuration that carries a phantom `_shape` for compile-time context access. Created via the `context()` builder.
 
 ```ts validate=none
-interface ContextConfig<TLayers extends ContextLayer[] = ContextLayer[]> {
-  layers: TLayers;
-  _shape: InferContextShape<TLayers>;
+interface ContextConfig<
+  TLayers extends readonly ContextLayer[] = readonly ContextLayer[],
+> {
+  readonly layers: TLayers;
+  readonly _shape: InferContextShape<TLayers>;
 }
+
+type ContextInput =
+  | ReadonlyArray<ContextLayer>
+  | { readonly layers: ReadonlyArray<ContextLayer> };
 ```
 
 | Field | Type | Description |

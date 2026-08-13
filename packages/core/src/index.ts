@@ -423,6 +423,7 @@ export type {
   CompleteParams,
   ContextConfig,
   ContextData,
+  ContextInput,
   ContextLayer,
   ContextLayerHooks,
   DisposeParams,
@@ -527,6 +528,7 @@ export { LedgerEntryKind, SteeringAction } from '@noetic-tools/types';
 /** @public */
 export type {
   ExecuteStepFn,
+  Lazy,
   SettleResult,
   Snapshot,
   Step,
@@ -539,6 +541,7 @@ export type {
   StepInvokeTool,
   StepLoop,
   StepRunCode,
+  StepSchedule,
   StepSpawn,
   StepSubHarness,
   StepWithContext,

@@ -2,7 +2,7 @@ import type { StandardSchemaV1 } from '@standard-schema/spec';
 import type { Channel } from './channel';
 import type { ModelParams, RetryPolicy, ServerToolSpec, StepMeta } from './common';
 import type { Context } from './context';
-import type { ContextConfig, ContextData, ContextLayer, ProjectionPolicy } from './context-layer';
+import type { ContextData, ContextInput, ProjectionPolicy } from './context-layer';
 import type { NoeticError } from './error';
 import type { OutputCodec } from './output-codec';
 import type {
@@ -244,7 +244,7 @@ export interface StepWithContext<TContext = ContextData, I = unknown, O = unknow
   kind: 'withContext';
   id: string;
   child: Step<TContext, I, O>;
-  context: ContextConfig | ContextLayer[];
+  context: ContextInput;
 }
 
 /** @public A step that launches a child execution with its own context scope. */
@@ -252,7 +252,7 @@ export interface StepSpawn<TContext = ContextData, I = unknown, O = unknown> {
   kind: 'spawn';
   id: string;
   child: Step<TContext, I, O>;
-  context?: ContextConfig | ContextLayer[];
+  context?: ContextInput;
   timeout?: number;
   /**
    * Per-step subprocess adapter override applied when the interpreter
