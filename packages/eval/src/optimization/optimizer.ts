@@ -18,6 +18,8 @@ import { assertWritableUnderVersionControl } from './write-guard';
 
 //#region Types
 
+type GepaBridgeModule = Pick<typeof import('./gepa-bridge'), 'optimizeWithGepa'>;
+
 export interface OptimizeOptions {
   step: Step;
   scope: OptimizeConfig['scope'];
@@ -33,6 +35,7 @@ export interface OptimizeOptions {
   codingAgent?: CodingAgent;
   preEnrichedFields?: OptimizableField[];
   gepa?: GepaConfig;
+  loadGepaBridge?: () => Promise<GepaBridgeModule>;
 }
 
 export interface OptimizeResult {
@@ -148,7 +151,8 @@ export async function optimize(options: OptimizeOptions): Promise<OptimizeResult
   /* Loaded on demand: gepa-bridge pulls in `@ax-llm/ax`, an OPTIONAL peer
    * dependency. A static import would make every `@noetic-tools/eval` consumer —
    * including suites that only use describe/it/scorer — need it installed. */
-  const { optimizeWithGepa } = await import('./gepa-bridge');
+  const loadGepaBridge = options.loadGepaBridge ?? (() => import('./gepa-bridge'));
+  const { optimizeWithGepa } = await loadGepaBridge();
   const result = await optimizeWithGepa({
     step: options.step,
     fields,

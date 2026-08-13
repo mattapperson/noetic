@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
@@ -283,9 +283,10 @@ describe('optimize() write-back guard', () => {
   }
 
   /** The offline GEPA fallback never changes the candidate, so tests that need
-   * a changed candidate stub the bridge (optimizer loads it via dynamic import). */
-  function stubChangedCandidate(newValue = 'improved instructions'): void {
-    mock.module('../../src/optimization/gepa-bridge', () => ({
+   * a changed candidate inject a bridge loader instead of using `mock.module`.
+   * Bun keeps mocked dynamic-import modules cached even after `mock.restore()`. */
+  function loadChangedCandidate(newValue = 'improved instructions') {
+    return async () => ({
       optimizeWithGepa: async () => ({
         bestCandidate: {
           'agent.instructions': newValue,
@@ -293,15 +294,11 @@ describe('optimize() write-back guard', () => {
         score: 1,
         iterations: 1,
       }),
-    }));
+    });
   }
 
-  afterEach(() => {
-    mock.restore();
-  });
-
   test('refuses to write back into an untracked file', async () => {
-    stubChangedCandidate();
+    const loadGepaBridge = loadChangedCandidate();
     makeRepo(tmpDir);
     const { filePath, source, location } = await writeAgentFile();
     // Deliberately NOT committed: write-back must refuse to destroy uncommitted work.
@@ -322,13 +319,14 @@ describe('optimize() write-back guard', () => {
         runEval: async () => ({
           'case.scorer': 0.9,
         }),
+        loadGepaBridge,
       }),
     ).rejects.toBeInstanceOf(WriteGuardError);
     expect(await fs.readFile(filePath, 'utf-8')).toBe(source);
   });
 
   test('refuses to write back into a dirty tracked file', async () => {
-    stubChangedCandidate();
+    const loadGepaBridge = loadChangedCandidate();
     makeRepo(tmpDir);
     const { filePath, location } = await writeAgentFile();
     commitAll(tmpDir);
@@ -350,12 +348,13 @@ describe('optimize() write-back guard', () => {
         runEval: async () => ({
           'case.scorer': 0.9,
         }),
+        loadGepaBridge,
       }),
     ).rejects.toBeInstanceOf(WriteGuardError);
   });
 
   test('forceDirty overrides the guard and writes back', async () => {
-    stubChangedCandidate();
+    const loadGepaBridge = loadChangedCandidate();
     makeRepo(tmpDir);
     const { filePath, location } = await writeAgentFile();
 
@@ -375,6 +374,7 @@ describe('optimize() write-back guard', () => {
       runEval: async () => ({
         'case.scorer': 0.9,
       }),
+      loadGepaBridge,
     });
 
     expect(result.writtenBack).toBe(true);
@@ -419,7 +419,7 @@ describe('optimize() write-back guard', () => {
   });
 
   test('write-back skips files the coding agent just rewrote (stale locations)', async () => {
-    stubChangedCandidate();
+    const loadGepaBridge = loadChangedCandidate();
     makeRepo(tmpDir);
     const { filePath, source, location } = await writeAgentFile();
     commitAll(tmpDir);
@@ -449,6 +449,7 @@ describe('optimize() write-back guard', () => {
       runEval: async () => ({
         'case.scorer': 0.9,
       }),
+      loadGepaBridge,
     });
 
     expect(result.codingAgentResult?.success).toBe(true);
