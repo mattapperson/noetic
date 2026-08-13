@@ -152,6 +152,10 @@ export function allocateBudgets({
     allocated: Math.floor(mins[i] * minScale),
   }));
   if (minScale < 1) {
+    let unallocated = Math.floor(available) - allocations.reduce((sum, a) => sum + a.allocated, 0);
+    for (let i = 0; i < allocations.length && unallocated > 0; i++, unallocated--) {
+      allocations[i].allocated += 1;
+    }
     return {
       allocations,
     };
@@ -172,8 +176,9 @@ export function allocateBudgets({
       continue;
     }
     const share = Math.min(headrooms[i], (headrooms[i] / finiteTotal) * finitePool);
-    allocations[i].allocated += Math.floor(share);
-    finiteUsed += share;
+    const allocatedShare = Math.floor(share);
+    allocations[i].allocated += allocatedShare;
+    finiteUsed += allocatedShare;
   }
   if (infiniteCount > 0) {
     const perInfinite = (remainder - finiteUsed) / infiniteCount;
