@@ -145,7 +145,7 @@ Every retained implementation PR must:
 | 11 | `lukeparke/openrouter-runtime-efficiency` | [#78](https://github.com/mattapperson/noetic/pull/78) | pending | no feedback | excludes [#69](https://github.com/mattapperson/noetic/pull/69) behavior | 2026-08-12 opened |
 | 12 | `lukeparke/openrouter-session-log` | [#79](https://github.com/mattapperson/noetic/pull/79) | pending | no feedback | blocks 13 | 2026-08-12 opened |
 | 13 | — | — | — | — | blocked by 12 | 2026-08-12 audit complete |
-| 14 | — | — | — | — | independent; blocks 20 | 2026-08-12 audit complete |
+| 14 | `lukeparke/openrouter-workflow-hardening` | [#84](https://github.com/mattapperson/noetic/pull/84) | pending | clean-context review addressed | blocks 20 | 2026-08-12 opened |
 | 15 | `lukeparke/openrouter-compaction-primitives` | [#80](https://github.com/mattapperson/noetic/pull/80) | pending | no feedback | blocks 16 | 2026-08-12 opened |
 | 16 | — | — | — | — | blocked by 15 | 2026-08-12 audit complete |
 | 17 | — | — | — | — | blocked by 16; RFC/breaking | 2026-08-12 audit complete |
