@@ -132,12 +132,12 @@ Every retained implementation PR must:
 
 | Item | Branch | PR | CI | Reviews | Merge SHA / dependency | Last update |
 |---:|---|---|---|---|---|---|
-| 1 | — | — | — | — | independent | 2026-08-12 audit complete |
+| 1 | `lukeparke/openrouter-file-storage` | [#70](https://github.com/mattapperson/noetic/pull/70) | CI/DCO/structural pass; compat blocked by missing upstream `OPENROUTER_API_KEY` | no feedback | review-ready; external compat dependency documented | 2026-08-12 opened |
 | 2 | — | — | — | — | soft after 1 | 2026-08-12 audit complete |
-| 3 | — | — | — | — | independent | 2026-08-12 audit complete |
-| 4 | — | — | — | — | independent; blocks 5 | 2026-08-12 audit complete |
-| 5 | — | — | — | — | blocked by 4 | 2026-08-12 audit complete |
-| 6 | — | — | — | — | independent | 2026-08-12 audit complete |
+| 3 | `lukeparke/openrouter-sub-harness-reliability` | [#71](https://github.com/mattapperson/noetic/pull/71) | pending | no feedback | independent | 2026-08-12 opened |
+| 4 | `lukeparke/openrouter-eval-safety` | [#72](https://github.com/mattapperson/noetic/pull/72) | pending | no feedback | blocks 5 | 2026-08-12 opened |
+| 5 | — | — | — | — | blocked by 4 merge | 2026-08-12 audit complete |
+| 6 | `lukeparke/openrouter-openui-hardening` | [#73](https://github.com/mattapperson/noetic/pull/73) | pending | no feedback | independent | 2026-08-12 opened |
 | 7 | — | — | — | — | independent | 2026-08-12 audit complete |
 | 8 | — | — | — | — | independent | 2026-08-12 audit complete |
 | 9 | — | — | — | — | independent, breaking default | 2026-08-12 audit complete |
