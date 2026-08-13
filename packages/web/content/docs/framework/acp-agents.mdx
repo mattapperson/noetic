@@ -22,7 +22,13 @@ const harness = new AgentHarness({ name: 'reviewer', params: {}, agentGraph: rev
 const summary = await harness.execute('go');
 ```
 
-The integration is the [Agent Client Protocol](https://agentclientprotocol.com/) (ACP), a JSON-RPC 2.0 standard in which **Noetic is the Client and the coding agent is the Agent**. Because every ACP agent is a uniform protocol peer, there is no vendor SDK per agent and no closed list of supported agents.
+The integration is the [Agent Client Protocol](https://agentclientprotocol.com/) (ACP), a JSON-RPC 2.0 standard in which **Noetic is the Client and the coding agent is the Agent**.
+
+Because every ACP agent is a uniform protocol peer, there is no vendor SDK per agent and no closed list of supported agents.
+
+<Callout>
+Coming from `@noetic-tools/sub-harness-*`? Those packages are deprecated — see [Migrating from Sub-Harnesses](/docs/framework/migrating-from-sub-harnesses).
+</Callout>
 
 ## Why a protocol instead of an SDK per agent
 
@@ -522,3 +528,78 @@ const remote = defineAcpAgent({
 ```
 
 The Node stdio transport lives at `@noetic-tools/acp/stdio`, so the package's main entry stays free of `node:*` and safe to bundle for the browser.
+
+## API reference
+
+Everything `@noetic-tools/acp` exports. Internal helpers — the item builders, turn accumulator, terminal registry, permission engine — are deliberately not exported; they are implementation detail and free to change.
+
+### Agents
+
+| Export | What it is |
+|---|---|
+| `claudeCode(opts?)` | Preset for `@zed-industries/claude-code-acp`. |
+| `codex(opts?)` | Preset for `@zed-industries/codex-acp`. |
+| `gemini(opts?)` | Preset for Gemini CLI's native ACP mode. |
+| `customAcpAgent(opts)` | Any other ACP-speaking binary. Needs a `command` or a `transport`. |
+| `AcpPresetOptions` | `command` / `args` / `env` / `transport` overrides accepted by every preset. |
+| `AcpProcessSpec` | How to launch an agent as a local child process. |
+| `defineAcpAgent(opts)` | Build an `AcpAgent` from a transport factory — the constructor behind every preset. |
+| `DefineAcpAgentOptions` | `agentId`, `transport`, `env`. |
+| `createAcpAgentRegistry(...agents)` | Build the `Map<string, AcpAgent>` a JSON workflow hydrates against. |
+| `AcpAgentRegistry` | That map's type. |
+
+### Transports
+
+| Export | What it is |
+|---|---|
+| `loopbackTransport(toAgent)` | Stands an in-process agent on the far end of a real protocol connection. The recommended way to test an ACP step. |
+| `createAcpLoopbackPair()` | The two raw ends, when you want to drive both sides yourself. |
+| `AcpLoopbackPair` | That pair's type. |
+| `stdioAcpTransport(spec)` | Node stdio over a child process. Lives at `@noetic-tools/acp/stdio`. |
+
+### Human-in-the-loop permissions
+
+| Export | What it is |
+|---|---|
+| `askUserForPermission(opts?)` | Builds an `onPermissionRequest` handler that asks a human over channels. |
+| `AskUserForPermissionOptions` | `timeout` (default 5 min) and `onTimeout` (default deny). |
+| `acpPermissionRequests` | Queue channel carrying prompts out. Subscribe **once** per harness. |
+| `acpPermissionDecisions` | Topic channel carrying answers back, filtered by `requestId`. |
+| `resolveAcpPermission(handle, reply)` | Answer a prompt from outside the execution. |
+| `ACP_PERMISSION_SCOPE` | Harness-lifetime scope id for the subscription and write handle. |
+| `AcpPermissionPrompt` / `Schema` | What a reviewer receives: agent, step, thread, tool title/kind, raw input, the agent's own options. |
+| `AcpPermissionReply` / `Schema` | The answer: `decision`, optional `optionId` and `reason`. |
+
+### Path confinement
+
+| Export | What it is |
+|---|---|
+| `isAbsolutePath(path)` | The spec requires absolute paths; this is the check the client applies. |
+| `normalizePath(path)` | Lexical normalisation — collapses `.`, `..`, duplicate separators. |
+| `isWithinRoots(path, roots)` | Whether a path is inside the allowed roots. |
+
+Exported so a host writing a constraining `FsAdapter` can apply the same rules the client does — including resolving symlinks, which the client's lexical check deliberately does not.
+
+### Advanced: building a client by hand
+
+For embedding an ACP connection outside a Noetic step — a custom runtime, a bridge, a test harness. `step.acpAgent` is the supported path; these are the pieces underneath it.
+
+| Export | What it is |
+|---|---|
+| `openAcpConnection(opts)` | Open a transport, negotiate `initialize`, return the connection. |
+| `OpenAcpConnectionOptions` | `agentId`, `transport`, `host`, `signal`. |
+| `NoeticAcpClient` | The ACP `Client` implementation, backed by an `AcpClientHost`. |
+| `NoeticAcpClientOptions` | `host` plus the notification sink. |
+
+### From `@noetic-tools/core`
+
+| Export | What it is |
+|---|---|
+| `step.acpAgent(opts)` | The step. |
+| `acpAgentTool(opts)` | The same agent as a tool a model can call. |
+| `harness.listAcpSessions()` | Live sub-agents: handle, agent, session, mode, commands, keep-alive. |
+| `harness.getAcpSession(key)` | One live connection + session. |
+| `harness.cancelAcpSession(key)` | `session/cancel` — the connection stays open. |
+| `harness.closeAcpSessions()` | Release everything held. Idempotent. |
+
+The contract types (`AcpAgent`, `AcpSession`, `AcpClientHost`, `AcpTransport`, the permission and protocol types) live in `@noetic-tools/types` and are re-exported from core.

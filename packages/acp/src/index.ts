@@ -2,35 +2,55 @@
  * `@noetic-tools/acp` — an Agent Client Protocol client for Noetic.
  *
  * Drives any ACP-speaking coding agent as a step, and answers the protocol's
- * client-side responsibilities (`fs/*`, `terminal/*`, `session/request_permission`)
- * from Noetic's own adapters, so a sub-agent's file and shell access is subject
- * to the same sandboxing and audit as first-party steps.
+ * client-side responsibilities (`fs/*`, `terminal/*`,
+ * `session/request_permission`) from Noetic's own adapters — with `fs/*` paths
+ * confined to the session working directory by default, since ACP places
+ * boundary enforcement on the client.
  *
  * The Node stdio transport lives at the `@noetic-tools/acp/stdio` subpath; this
  * entry point is runtime-neutral.
+ *
+ * Everything exported here is public API. Internal helpers — the item builders,
+ * the turn accumulator, the terminal registry, the permission engine, the
+ * capability and path assertions — are deliberately not re-exported: they are
+ * implementation detail of the client and are free to change.
  */
 
+//#region Agents
+
+/** @public */
 export type { AcpPresetOptions, AcpProcessSpec } from './agents';
+/** @public */
 export { claudeCode, codex, customAcpAgent, gemini } from './agents';
-export type { NoeticAcpClientOptions } from './client';
-export { clientCapabilitiesFor, NoeticAcpClient, sliceLines } from './client';
-export type { OpenAcpConnectionOptions } from './connection';
-export { assertPromptContentSupported, openAcpConnection } from './connection';
+/** @public */
 export type { DefineAcpAgentOptions } from './define';
+/** @public */
 export { defineAcpAgent } from './define';
-export {
-  asItems,
-  assistantMessageItem,
-  contentBlockText,
-  functionCallItem,
-  functionCallOutputItem,
-} from './items';
-export { isAbsolutePath, isWithinRoots, normalizePath } from './paths';
+/** @public */
+export type { AcpAgentRegistry } from './registry';
+/** @public */
+export { createAcpAgentRegistry } from './registry';
+
+//#endregion
+
+//#region Transports
+
+/** @public */
+export type { AcpLoopbackPair } from './transport-loopback';
+/** @public */
+export { createAcpLoopbackPair, loopbackTransport } from './transport-loopback';
+
+//#endregion
+
+//#region Human-in-the-loop permissions
+
+/** @public */
 export type {
   AcpPermissionPrompt,
   AcpPermissionReply,
   AskUserForPermissionOptions,
 } from './permission-channel';
+/** @public */
 export {
   ACP_PERMISSION_SCOPE,
   AcpPermissionPromptSchema,
@@ -40,25 +60,35 @@ export {
   askUserForPermission,
   resolveAcpPermission,
 } from './permission-channel';
-export type {
-  AcpPermissionResolverOptions,
-  AcpRequestPermissionOutcome,
-} from './permissions';
-export {
-  evaluatePolicy,
-  resolvePermission,
-  ruleMatches,
-  selectPermissionOption,
-} from './permissions';
-export type { AcpAgentRegistry } from './registry';
-export { createAcpAgentRegistry } from './registry';
-export type {
-  AcpEnvVariable,
-  AcpTerminalExitStatus,
-  CreateTerminalOptions,
-  TerminalOutputSnapshot,
-} from './terminals';
-export { buildCommandLine, quoteShellArg, TerminalRegistry } from './terminals';
-export type { AcpLoopbackPair } from './transport-loopback';
-export { createAcpLoopbackPair, loopbackTransport } from './transport-loopback';
-export { AcpTurnAccumulator, renderToolCallContent } from './turn';
+
+//#endregion
+
+//#region Path confinement
+
+/**
+ * Exposed so a host writing a constraining `FsAdapter` can apply the same rules
+ * the client does — including resolving symlinks, which the client's lexical
+ * check deliberately does not do.
+ * @public
+ */
+export { isAbsolutePath, isWithinRoots, normalizePath } from './paths';
+
+//#endregion
+
+//#region Advanced: building a client by hand
+
+/** @public */
+export type { NoeticAcpClientOptions } from './client';
+/** @public */
+export { NoeticAcpClient } from './client';
+/**
+ * For embedding an ACP connection outside a Noetic step — a custom runtime, a
+ * bridge, a test harness. `step.acpAgent` is the supported path; these are the
+ * pieces underneath it.
+ * @public
+ */
+export type { OpenAcpConnectionOptions } from './connection';
+/** @public */
+export { openAcpConnection } from './connection';
+
+//#endregion
