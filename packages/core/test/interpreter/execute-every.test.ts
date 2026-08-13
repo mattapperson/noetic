@@ -494,3 +494,90 @@ describe('executeSchedule', () => {
     ]);
   });
 });
+
+describe('deterministic park jitter', () => {
+  const originalSetTimeout = globalThis.setTimeout;
+
+  /** Capture the requested delay of every setTimeout while making each fire in 1ms. */
+  function interceptDelays(): {
+    delays: number[];
+    restore: () => void;
+  } {
+    const delays: number[] = [];
+    const handler: ProxyHandler<typeof setTimeout> = {
+      apply(target, thisArg, argsList: unknown[]) {
+        const delay = argsList[1];
+        if (typeof delay === 'number' && delay > 0) {
+          delays.push(delay);
+        }
+        argsList[1] = 1;
+        return Reflect.apply(target, thisArg, argsList);
+      },
+    };
+    globalThis.setTimeout = new Proxy(originalSetTimeout, handler);
+    return {
+      delays,
+      restore: () => {
+        globalThis.setTimeout = originalSetTimeout;
+      },
+    };
+  }
+
+  async function runParkedSchedule(stepId: string): Promise<number[]> {
+    const { delays, restore } = interceptDelays();
+    try {
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
+      let count = 0;
+      const s = schedule<ContextData, void, void>({
+        id: stepId,
+        step: {
+          kind: 'runCode',
+          id: 'tick',
+          execute: async () => {
+            count++;
+            if (count >= 5) {
+              ctx.abort('done');
+            }
+          },
+        },
+        interval: 200,
+        jitter: 100,
+      });
+      await executeSchedule(s, undefined, ctx, simpleExecute).catch(() => {});
+      // The abort poll uses setInterval, so the only setTimeout delays inside
+      // the park window are the park durations themselves.
+      return delays.filter((d) => d >= 100 && d <= 300);
+    } finally {
+      restore();
+    }
+  }
+
+  it('same step id replays an identical park-duration sequence', async () => {
+    const a = await runParkedSchedule('det-jitter');
+    const b = await runParkedSchedule('det-jitter');
+    // 5 iterations, abort during the 5th body → 4 parks.
+    expect(a.length).toBe(4);
+    expect(a).toEqual(b);
+    // The avalanche pass keeps successive iterations decorrelated — without
+    // it bare FNV-1a would park every iteration at a near-constant offset.
+    expect(new Set(a).size).toBe(a.length);
+  });
+
+  it('different step ids land on different jitter phases', async () => {
+    const a = await runParkedSchedule('det-jitter-a');
+    const b = await runParkedSchedule('det-jitter-b');
+    expect(a.length).toBe(4);
+    expect(b.length).toBe(4);
+    expect(a).not.toEqual(b);
+  });
+
+  it('every park duration stays within [interval - jitter, interval + jitter]', async () => {
+    const delays = await runParkedSchedule('det-jitter-clamp');
+    for (const d of delays) {
+      expect(d).toBeGreaterThanOrEqual(100);
+      expect(d).toBeLessThanOrEqual(300);
+    }
+  });
+});

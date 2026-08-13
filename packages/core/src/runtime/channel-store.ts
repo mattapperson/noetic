@@ -69,6 +69,16 @@ interface ChannelState<T> {
    * through `queueWaiters` instead and never appear here.
    */
   externalSubscribers: Set<ExternalSubscriber<T>>;
+  /**
+   * Live `subscribe()` readers holding a reference to THIS state object,
+   * across all modes. Queue-mode readers compete through `queueWaiters` and
+   * never appear in `externalSubscribers`, but their `takeShared`/`parkShared`
+   * closures still capture this object — so reaping the map entry while one is
+   * alive would fork the channel: internal senders would write to a freshly
+   * minted state while the orphaned reader parks forever on this one. Reaping
+   * is therefore gated on this reaching zero.
+   */
+  liveSubscribers: number;
 }
 
 export class ChannelStore {
@@ -98,6 +108,7 @@ export class ChannelStore {
         topicSubscribers: new Set(),
         wakeSubscribers: new Set(),
         externalSubscribers: new Set(),
+        liveSubscribers: 0,
       };
       this.channels.set(channel.name, frameworkCast<ChannelState<unknown>>(state));
     }
@@ -307,6 +318,7 @@ export class ChannelStore {
       case 'queue': {
         const head = this.dequeueHead(state);
         if (head) {
+          this.maybeReap(channel.name);
           return head.value;
         }
         // capacity-0 edge: senders can be parked while the queue is empty —
@@ -314,6 +326,7 @@ export class ChannelStore {
         if (state.pendingSenders.length > 0) {
           const sender = state.pendingSenders.shift()!;
           sender.resolve();
+          this.maybeReap(channel.name);
           return sender.value;
         }
         return this.waitWithTimeout(state.queueWaiters, channel.name, timeout, signal);
@@ -372,17 +385,24 @@ export class ChannelStore {
   tryRecv<T>(channel: Channel<T>): T | null {
     const state = this.getOrCreate(channel);
 
-    switch (state.mode) {
-      case 'value':
-        return state.hasValue ? state.currentValue! : null;
-      case 'queue': {
-        // Explicit head check (not `?? null`): a stored `undefined` must come
-        // back as `undefined`, distinguishable from the empty-queue sentinel.
-        const head = this.dequeueHead(state);
-        return head ? head.value : null;
+    // `finally` so the entry `getOrCreate` just minted for a probe of a
+    // never-used channel is freed too — polling an idle channel must not grow
+    // the store.
+    try {
+      switch (state.mode) {
+        case 'value':
+          return state.hasValue ? state.currentValue! : null;
+        case 'queue': {
+          // Explicit head check (not `?? null`): a stored `undefined` must come
+          // back as `undefined`, distinguishable from the empty-queue sentinel.
+          const head = this.dequeueHead(state);
+          return head ? head.value : null;
+        }
+        case 'topic':
+          return null;
       }
-      case 'topic':
-        return null;
+    } finally {
+      this.maybeReap(channel.name);
     }
   }
 
@@ -406,6 +426,11 @@ export class ChannelStore {
           clearTimeout(timer);
         }
         removeAbortListener?.();
+        // Deferred: a delivering path settles this waiter before splicing it
+        // out of `waiters`, so an immediate reap would still see it parked.
+        queueMicrotask(() => {
+          this.maybeReap(channelName);
+        });
       };
       const wrappedResolve = (v: T) => {
         cleanup();
@@ -540,6 +565,10 @@ export class ChannelStore {
           : undefined,
       onFinish: () => {
         state.externalSubscribers.delete(subscriber);
+        if (state.liveSubscribers > 0) {
+          state.liveSubscribers -= 1;
+        }
+        this.maybeReap(channel.name);
         const byExecution = this.subscribersByExecution.get(executionId);
         if (byExecution) {
           byExecution.delete(erased);
@@ -550,6 +579,9 @@ export class ChannelStore {
       },
     });
     const erased = frameworkCast<ExternalSubscriber<unknown>>(subscriber);
+    // Counted for every mode: queue readers are absent from
+    // `externalSubscribers` but still capture `state` in their closures.
+    state.liveSubscribers += 1;
     if (state.mode !== 'queue') {
       state.externalSubscribers.add(subscriber);
     }
@@ -563,6 +595,46 @@ export class ChannelStore {
     }
     byExecution.add(erased);
     return subscriber;
+  }
+
+  /**
+   * Free a channel entry that holds nothing and nobody is waiting on. Without
+   * this the map grows one entry per channel NAME for the store's lifetime,
+   * and callers that mint per-delegation channel names (uuid-suffixed inbox /
+   * outbox / result channels) leak unboundedly.
+   *
+   * Reuse after reaping is transparent: `getOrCreate` recreates the state with
+   * identical semantics, because everything that carried meaning is gone by
+   * definition. The predicate must stay exhaustive over every field that holds
+   * a value or a reference — see `liveSubscribers` for the subtle one.
+   */
+  private reapIfIdle<T>(name: string, state: ChannelState<T>): void {
+    if (
+      state.queue.length === 0 &&
+      !state.hasValue &&
+      state.valueWaiters.length === 0 &&
+      state.queueWaiters.length === 0 &&
+      state.pendingSenders.length === 0 &&
+      state.topicSubscribers.size === 0 &&
+      state.wakeSubscribers.size === 0 &&
+      state.externalSubscribers.size === 0 &&
+      state.liveSubscribers === 0
+    ) {
+      this.channels.delete(name);
+    }
+  }
+
+  /** Look up `name` and reap it if fully drained. */
+  private maybeReap(name: string): void {
+    const state = this.channels.get(name);
+    if (state) {
+      this.reapIfIdle(name, state);
+    }
+  }
+
+  /** @internal Live channel-state entries — the observable surface for reaping. */
+  get channelCount(): number {
+    return this.channels.size;
   }
 
   /** Shift the queue head and promote the oldest parked sender into the freed slot. */
@@ -764,11 +836,11 @@ class ExternalSubscriber<T> implements AsyncIterableIterator<T> {
       }
     }
     this.done = true;
-    this.opts.onFinish();
     for (const entry of this.parked.splice(0)) {
       entry.unpark();
       entry.settleDone();
     }
+    this.opts.onFinish();
     for (const waiter of this.waiters.splice(0)) {
       waiter({
         value: undefined,

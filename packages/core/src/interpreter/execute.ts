@@ -128,6 +128,15 @@ async function dispatchViaAdapter<TContext, I, O>(
   executor: () => Promise<O>,
 ): Promise<O> {
   const adapter = resolveStepAdapter(step, ctx);
+  // Fast path: the default in-memory adapter (no durable manifests) adds a
+  // handle + promise round-trip per step purely to funnel into
+  // `_localExecutor`. runCode is the hottest structural step — skip the
+  // plumbing when nothing durable can observe it. Adapters WITH storage (or
+  // out-of-process adapters) always take the full path so reattach manifests
+  // and handle bookkeeping stay intact.
+  if (adapter._inline === true) {
+    return executor();
+  }
   const request: StepSubprocessRequest = {
     kind: 'step',
     stepId: step.id,
