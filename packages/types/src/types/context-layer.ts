@@ -477,4 +477,14 @@ export interface ProjectionPolicy {
   overflow: 'truncate' | 'summarize' | 'sliding_window';
   overflowModel?: string;
   windowSize?: number;
+  /**
+   * History-token threshold that arms compaction. When the folded history
+   * exceeds this, `historyPressure` reports `overThreshold` so an agent (or
+   * the host app) can compact instead of letting the assembler silently drop
+   * the oldest turns. Compaction itself stays explicit: record a
+   * `CompactionItem` in the log (see `createCompaction` / `compactHistory`).
+   *
+   * Defaults to 80% of `tokenBudget - responseReserve` when omitted.
+   */
+  compactAt?: number;
 }
