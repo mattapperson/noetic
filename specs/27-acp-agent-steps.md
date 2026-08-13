@@ -205,20 +205,35 @@ Aborting the step's context sends `session/cancel`; per the specification the
 agent still answers the original `session/prompt` with the `cancelled` stop
 reason, which the handler turns into the typed error.
 
-### Session reuse
+### Session reuse and lifetime
 
-`session.reuse` keys a live connection + session that survives across steps
-(stored on the `AgentHarness`). `session.onComplete` chooses the teardown:
-`'close'` ends the connection and stops the agent, `'keep'` leaves it live.
-A fresh session defaults to `'close'`; a reused one defaults to `'keep'`.
+A connection owns a live agent — usually a child process whose stdio keeps the
+event loop alive — so **keeping one is never inferred**. `session.keepAlive`
+names the scope, and it defaults to closing with the step:
+
+| `keepAlive` | The connection is |
+|---|---|
+| `'step'` (default) | closed when the step finishes |
+| `'run'` | kept for the rest of the root run, then closed by the harness |
+| `'harness'` | kept until the caller runs `harness.closeAcpSessions()` — nothing closes it for you |
+
+`session.reuse` shares a kept connection under an id, so later steps take their
+turns against the same agent. It requires `keepAlive: 'run'` or `'harness'`: a
+connection closed at the end of its step has nothing left to share, so naming a
+reuse key without a scope raises `ACP_REUSE_WITHOUT_KEEPALIVE` rather than
+silently upgrading the scope on the step's behalf.
+
+```ts
+// Shared for the rest of this run, collected automatically.
+session: { reuse: 'bugfix', keepAlive: 'run' }
+
+// Kept past the run — a warm agent across several harness.execute() calls.
+// The caller owns it: `await harness.closeAcpSessions()` when done.
+session: { reuse: 'assistant', keepAlive: 'harness' }
+```
+
 `session.load` resumes an existing ACP session id via `session/load` instead of
 creating a new one.
-
-**Reuse is scoped to a root run.** A connection owns a live agent — usually a
-child process whose stdio keeps the event loop alive — so the harness closes
-every session it still holds when the root run finishes. `'keep'` therefore
-means "keep for the rest of this run", not "keep forever": a session held past
-its run would stop the host from exiting.
 
 **Per-turn state follows the current step.** The client host carries the
 permission policy, the steering hook, the async handler, and the event sink, and

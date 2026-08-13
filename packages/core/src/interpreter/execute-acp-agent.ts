@@ -12,6 +12,7 @@ import type {
   AcpAgentConnection,
   AcpClientHost,
   AcpContentBlock,
+  AcpKeepAlive,
   AcpLiveSession,
   AcpPermissionOutcome,
   AcpPermissionSteerer,
@@ -272,6 +273,28 @@ function assertCapabilitiesCompatible<TContext, I, O>(
 
 //#region Session lifecycle
 
+/** Keeping a connection is always explicit; the default closes it with the step. */
+function keepAliveOf(policy: AcpSessionPolicy | undefined): AcpKeepAlive {
+  return policy?.keepAlive ?? 'step';
+}
+
+/**
+ * Sharing a connection only means something if the connection outlives the
+ * step. Rather than silently upgrading the scope, say so — the step is asking
+ * for two different things and has only named one.
+ */
+function assertReuseIsKeptAlive<TContext, I, O>(step: StepAcpAgent<TContext, I, O>): void {
+  const policy = step.session;
+  if (!policy?.reuse || keepAliveOf(policy) !== 'step') {
+    return;
+  }
+  throw new NoeticConfigError({
+    code: 'ACP_REUSE_WITHOUT_KEEPALIVE',
+    message: `step.acpAgent(${JSON.stringify(step.id)}) sets session.reuse '${policy.reuse}' but leaves keepAlive at 'step', so the connection closes before any other step can share it.`,
+    hint: "Add `keepAlive: 'run'` to share the connection for the rest of the run, or `keepAlive: 'harness'` to keep it past the run and close it yourself with `harness.closeAcpSessions()`.",
+  });
+}
+
 interface SessionResolution {
   live: AcpLiveSession;
   reuseKey?: string;
@@ -346,6 +369,7 @@ async function openSession<TContext, I, O>(opts: {
     session,
     host: opts.host,
     agentId: opts.agent.agentId,
+    keepAlive: keepAliveOf(opts.step.session),
   };
   if (reuseKey) {
     store.set(reuseKey, live);
@@ -358,16 +382,16 @@ async function openSession<TContext, I, O>(opts: {
 }
 
 /**
- * Tear the connection down per policy. A reused session stays alive by default;
- * a fresh one is closed, which also stops the agent process.
+ * Tear the connection down per policy. Nothing is kept unless the step asked
+ * for it: only `keepAlive: 'run' | 'harness'` survives the step, and the run
+ * scope is collected by the harness when the root run finishes.
  */
 async function finalizeSession(
   resolution: SessionResolution,
   policy: AcpSessionPolicy | undefined,
   baseCtx: Context<ContextData>,
 ): Promise<void> {
-  const mode = policy?.onComplete ?? (resolution.reuseKey ? 'keep' : 'close');
-  if (mode === 'keep') {
+  if (keepAliveOf(policy) !== 'step') {
     return;
   }
   await resolution.live.connection.close();
@@ -387,6 +411,8 @@ export async function executeAcpAgent<TContext, I, O>(
   layers?: ContextLayer[],
 ): Promise<O> {
   const baseCtx = frameworkCast<Context<ContextData>>(ctx);
+
+  assertReuseIsKeptAlive(step);
 
   const agent = await resolveAgent(step, ctx);
   const resolvedPrompt = await resolveLazy(step.prompt, ctx);

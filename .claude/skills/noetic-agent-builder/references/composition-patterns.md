@@ -1047,7 +1047,7 @@ const investigate = step.acpAgent({
   agent: claudeCode(),
   prompt: 'Find the root cause of the failing auth test. Do not change code yet.',
   permissions: { allow: [{ kind: 'read' }] },       // read-only investigation
-  session: { reuse: 'bugfix' },                     // 'keep' is the default for a reused session
+  session: { reuse: 'bugfix', keepAlive: 'run' },   // shared for the rest of this run
 });
 
 const fix = step.acpAgent({
@@ -1056,12 +1056,12 @@ const fix = step.acpAgent({
   // Same `reuse` key → same session, so the agent already has its findings in context.
   prompt: 'Now apply the minimal fix for the root cause you found.',
   permissions: { allow: [{ kind: 'read' }, { kind: 'edit' }] },
-  session: { reuse: 'bugfix', onComplete: 'close' }, // last step tears it down
+  session: { reuse: 'bugfix', keepAlive: 'run' },
 });
 ```
 
 - `reuse` keys a connection + session stored on the `AgentHarness`; the same key resolves to the same live session across steps.
-- `onComplete`: `'keep'` (the default for a reused session) leaves it live; `'close'` ends the connection and stops the agent. Reuse is scoped to a root run — the harness closes whatever it still holds when the run finishes — so the two steps must be part of ONE run (e.g. nested `ctx.harness.run` calls, a `sequence`, or a `loop`), not two `harness.execute()` calls.
+- `keepAlive` is the opt-in that makes sharing possible, and it defaults to `'step'` (closed with the step). `'run'` keeps the connection for the rest of the root run and the harness collects it — so the two steps must be part of ONE run (nested `ctx.harness.run` calls, a `sequence`, a `loop`), not two `harness.execute()` calls. `'harness'` keeps it past the run for a warm agent across turns; nothing closes that one for you, so pair it with `await harness.closeAcpSessions()`. A `reuse` key without a `keepAlive` scope throws `ACP_REUSE_WITHOUT_KEEPALIVE`.
 - Each step gets its own `permissions`: the host is rebound per turn, so `fix`'s broader policy really does apply even though `investigate` opened the connection.
 - The agent and `clientCapabilities` are fixed per connection; a step joining the session with different ones throws `ACP_SESSION_AGENT_CONFLICT` / `ACP_SESSION_CAPABILITY_CONFLICT`.
 - `session.load` resumes an ACP session id from an earlier run, for agents that advertise `loadSession`.
@@ -1089,7 +1089,7 @@ const fix = step.acpAgent({
         "agent": "claude-code",
         "prompt": "Implement the plan above in the current repo.",
         "permissions": { "default": "deny", "allow": [{ "kind": "read" }, { "kind": "edit" }] },
-        "session": { "reuse": "build", "onComplete": "close" }
+        "session": { "reuse": "build", "keepAlive": "run" }
       }
     ]
   }

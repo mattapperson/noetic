@@ -278,10 +278,15 @@ const AcpMcpServerSchema = z.union([
 
 const AcpSessionPolicySchema = z.object({
   reuse: z.string().min(1).optional(),
-  onComplete: z
+  /**
+   * How long the connection is kept alive. Defaults to `step`; `run` and
+   * `harness` are explicit opt-ins because a connection owns a live agent.
+   */
+  keepAlive: z
     .enum([
-      'close',
-      'keep',
+      'step',
+      'run',
+      'harness',
     ])
     .optional(),
   load: z.string().min(1).optional(),

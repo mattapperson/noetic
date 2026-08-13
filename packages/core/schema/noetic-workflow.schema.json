@@ -745,11 +745,12 @@
                   "type": "string",
                   "minLength": 1
                 },
-                "onComplete": {
+                "keepAlive": {
                   "type": "string",
                   "enum": [
-                    "close",
-                    "keep"
+                    "step",
+                    "run",
+                    "harness"
                   ]
                 },
                 "load": {

@@ -390,6 +390,7 @@ describe('executeAcpAgent — session lifecycle', () => {
       prompt: 'one',
       session: {
         reuse: 'shared',
+        keepAlive: 'run',
       },
     });
     const second = step.acpAgent({
@@ -398,6 +399,7 @@ describe('executeAcpAgent — session lifecycle', () => {
       prompt: 'two',
       session: {
         reuse: 'shared',
+        keepAlive: 'run',
       },
     });
 
@@ -408,41 +410,84 @@ describe('executeAcpAgent — session lifecycle', () => {
     expect(closes).toBe(0);
   });
 
-  it("onComplete: 'close' tears down a reused session and drops it from the store", async () => {
+  // Maintaining a connection is opt-in: a reuse key alone is not enough, and
+  // silently upgrading the scope would hide that the step asked for two
+  // different things and named only one.
+  it('rejects a reuse key without an explicit keepAlive scope', async () => {
     const { ctx } = harnessCtx();
     let connects = 0;
-    let closes = 0;
-    const agent = fakeAgent({
-      onConnect: () => {
-        connects++;
-      },
-      onClose: () => {
-        closes++;
-      },
-    });
-    const first = step.acpAgent({
-      id: 'a',
-      agent,
-      prompt: 'one',
-      session: {
-        reuse: 'shared',
-        onComplete: 'close',
-      },
-    });
-    const second = step.acpAgent({
-      id: 'b',
-      agent,
-      prompt: 'two',
+    const acpStep = step.acpAgent({
+      id: 'half-asked',
+      agent: fakeAgent({
+        onConnect: () => {
+          connects++;
+        },
+      }),
+      prompt: 'go',
       session: {
         reuse: 'shared',
       },
     });
 
-    await execute(first, undefined, ctx);
-    await execute(second, undefined, ctx);
+    try {
+      await execute(acpStep, undefined, ctx);
+      throw new Error('expected throw');
+    } catch (e) {
+      assert(isNoeticConfigError(e));
+      expect(e.code).toBe('ACP_REUSE_WITHOUT_KEEPALIVE');
+    }
+    // Rejected before anything was spawned.
+    expect(connects).toBe(0);
+  });
+
+  it("keepAlive: 'harness' survives the root run and is closed by the owner", async () => {
+    const { harness } = harnessCtx();
+    let closes = 0;
+    const acpStep = step.acpAgent({
+      id: 'long-lived',
+      agent: fakeAgent({
+        onClose: () => {
+          closes++;
+        },
+      }),
+      prompt: 'go',
+      session: {
+        reuse: 'shared',
+        keepAlive: 'harness',
+      },
+    });
+
+    await harness.run(acpStep, undefined, harness.createContext());
+    expect(closes).toBe(0);
+    expect(harness.acpSessions.size).toBe(1);
+
+    await harness.closeAcpSessions();
+    expect(closes).toBe(1);
+    expect(harness.acpSessions.size).toBe(0);
+  });
+
+  it('closeAcpSessions is idempotent', async () => {
+    const { harness } = harnessCtx();
+    let closes = 0;
+    const acpStep = step.acpAgent({
+      id: 'long-lived',
+      agent: fakeAgent({
+        onClose: () => {
+          closes++;
+        },
+      }),
+      prompt: 'go',
+      session: {
+        reuse: 'shared',
+        keepAlive: 'harness',
+      },
+    });
+
+    await harness.run(acpStep, undefined, harness.createContext());
+    await harness.closeAcpSessions();
+    await harness.closeAcpSessions();
 
     expect(closes).toBe(1);
-    expect(connects).toBe(2);
   });
 
   it('resumes an existing ACP session id via session.load', async () => {
@@ -499,6 +544,7 @@ describe('executeAcpAgent — a session shared across steps', () => {
       },
       session: {
         reuse: 'shared',
+        keepAlive: 'run',
       },
     });
     const fix = step.acpAgent({
@@ -514,6 +560,7 @@ describe('executeAcpAgent — a session shared across steps', () => {
       },
       session: {
         reuse: 'shared',
+        keepAlive: 'run',
       },
     });
 
@@ -552,6 +599,7 @@ describe('executeAcpAgent — a session shared across steps', () => {
       prompt: 'one',
       session: {
         reuse: 'shared',
+        keepAlive: 'run',
       },
     });
     await execute(first, undefined, ctx);
@@ -564,6 +612,7 @@ describe('executeAcpAgent — a session shared across steps', () => {
       prompt: 'two',
       session: {
         reuse: 'shared',
+        keepAlive: 'run',
       },
     });
     await execute(second, undefined, ctx);
@@ -581,7 +630,7 @@ describe('executeAcpAgent — a session shared across steps', () => {
   // emptied the harness's session store. With the stdio transport that leaves a
   // child process running whose stdio keeps the event loop alive, so the host
   // never exits. Reuse is scoped to the root run.
-  it('closes a kept session when the root run finishes', async () => {
+  it("closes a keepAlive: 'run' session when the root run finishes", async () => {
     const { harness } = harnessCtx();
     let closes = 0;
     const agent = fakeAgent({
@@ -595,7 +644,7 @@ describe('executeAcpAgent — a session shared across steps', () => {
       prompt: 'go',
       session: {
         reuse: 'shared',
-        onComplete: 'keep',
+        keepAlive: 'run',
       },
     });
 
@@ -615,6 +664,7 @@ describe('executeAcpAgent — a session shared across steps', () => {
       prompt: 'one',
       session: {
         reuse: 'shared',
+        keepAlive: 'run',
       },
     });
     const second = step.acpAgent({
@@ -625,6 +675,7 @@ describe('executeAcpAgent — a session shared across steps', () => {
       prompt: 'two',
       session: {
         reuse: 'shared',
+        keepAlive: 'run',
       },
     });
 
@@ -650,6 +701,7 @@ describe('executeAcpAgent — a session shared across steps', () => {
       },
       session: {
         reuse: 'shared',
+        keepAlive: 'run',
       },
     });
     const second = step.acpAgent({
@@ -661,6 +713,7 @@ describe('executeAcpAgent — a session shared across steps', () => {
       },
       session: {
         reuse: 'shared',
+        keepAlive: 'run',
       },
     });
 

@@ -157,33 +157,76 @@ Each is checked against what the agent advertised. Asking for a mode from an age
 
 An ACP session owns its history on the agent side, but a freshly opened session knows nothing about the Noetic steps that ran before it. Before appending the turn's prompt, the runtime captures the prior items from `ctx.itemLog` and folds them into the first prompt of a **fresh** session as a transcript preamble — so a coding agent running after a chain of `callModel` steps understands what was already established. A reused session is not re-seeded.
 
-## Sessions
+## Sessions and lifetime
+
+A connection owns a live agent process, so **keeping one is never inferred**. `session.keepAlive` names the scope, and it defaults to closing with the step:
+
+| `keepAlive` | The connection is |
+|---|---|
+| `'step'` (default) | closed when the step finishes |
+| `'run'` | kept for the rest of the root run, then closed for you |
+| `'harness'` | kept until you call `harness.closeAcpSessions()` — nothing closes it for you |
+
+`session.reuse` shares a kept connection under an id, so later steps take their turns against the same agent:
 
 ```ts
 import { step } from '@noetic-tools/core';
 import { claudeCode } from '@noetic-tools/acp';
 
-step.acpAgent({
-  id: 'first',
+const investigate = step.acpAgent({
+  id: 'investigate',
   agent: claudeCode(),
-  prompt: 'Start the refactor',
-  session: { reuse: 'refactor' },   // keep this connection alive across steps
+  prompt: 'Find the root cause of the failing auth test. Do not change code yet.',
+  permissions: { allow: [{ kind: 'read' }] },
+  session: { reuse: 'bugfix', keepAlive: 'run' },
 });
 
-step.acpAgent({
-  id: 'second',
+const fix = step.acpAgent({
+  id: 'fix',
   agent: claudeCode(),
-  prompt: 'Now update the tests',
-  session: { reuse: 'refactor', onComplete: 'close' },
+  // Same key → same session, so the agent still has its findings in context.
+  prompt: 'Now apply the minimal fix for the root cause you found.',
+  permissions: { allow: [{ kind: 'read' }, { kind: 'edit' }] },
+  session: { reuse: 'bugfix', keepAlive: 'run' },
 });
 ```
 
-`reuse` keys a live connection + session that survives between steps. `onComplete` chooses the teardown: `'close'` ends the connection and stops the agent, `'keep'` leaves it live. A fresh session defaults to `'close'`; a reused one defaults to `'keep'`. `session.load` resumes an existing ACP session id instead of creating a new one, for agents that advertise `loadSession`.
-Three things to know about sharing a session:
+`reuse` requires `keepAlive: 'run'` or `'harness'` — a connection closed at the end of its step has nothing left to share — so a reuse key without a scope throws `ACP_REUSE_WITHOUT_KEEPALIVE` rather than quietly extending the lifetime on your behalf.
 
-- **Reuse is scoped to a root run.** A connection owns a live agent process, so the harness closes every session it still holds when the run finishes. `'keep'` means "for the rest of this run", not "forever" — a session outliving its run would stop your process from exiting. Steps sharing a session must therefore be part of one run (a `sequence`, a `loop`, or nested `ctx.harness.run` calls), not separate `harness.execute()` calls.
-- **Each step gets its own policy.** The permission policy, steering hook, handler, and event stream are rebound before every turn, so the "investigate read-only, then fix with edits" pattern really works: the second step's broader permissions do apply, even though the first step opened the connection.
+### Keeping an agent warm across runs
+
+`keepAlive: 'harness'` opts out of automatic collection entirely, for a long-lived harness that wants one warm coding agent across several turns of a conversation:
+
+```ts
+import { AgentHarness, step } from '@noetic-tools/core';
+import { claudeCode } from '@noetic-tools/acp';
+
+declare const harness: AgentHarness;
+
+// An empty `prompt` means "use whatever input the step was given", so each
+// turn of the conversation reaches the same warm agent.
+const assistant = step.acpAgent({
+  id: 'assistant',
+  agent: claudeCode(),
+  prompt: '',
+  session: { reuse: 'assistant', keepAlive: 'harness' },
+});
+
+try {
+  // …many harness.execute() calls later:
+} finally {
+  await harness.closeAcpSessions();
+}
+```
+
+Nothing closes a `'harness'` session for you. An undisposed connection keeps its agent process running, which keeps your host process from exiting — so own it deliberately, ideally in a `finally`.
+
+Two more things to know about sharing a session:
+
+- **Each step gets its own policy.** The permission policy, steering hook, handler, and event stream are rebound before every turn, so the pattern above really works: `fix`'s broader permissions do apply, even though `investigate` opened the connection.
 - **The agent and `clientCapabilities` are fixed per connection.** ACP negotiates capabilities once, and a connection speaks to one agent. A step joining an existing session with a different agent or different `clientCapabilities` throws `ACP_SESSION_AGENT_CONFLICT` / `ACP_SESSION_CAPABILITY_CONFLICT` rather than silently getting something other than it asked for.
+
+`session.load` resumes an existing ACP session id instead of creating a new one, for agents that advertise `loadSession`.
 
 ## Stop reasons
 

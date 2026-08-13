@@ -251,11 +251,15 @@ interface AcpPermissionPolicy {
 
 ```typescript
 interface AcpSessionPolicy {
-  reuse?: string;                 // share one live connection + session across steps by key
-  onComplete?: 'close' | 'keep';  // fresh defaults to 'close', reused to 'keep'
-  load?: string;                  // resume an existing ACP session id via session/load
+  reuse?: string;                             // share a kept connection across steps by key
+  keepAlive?: 'step' | 'run' | 'harness';     // default 'step' — closed when the step ends
+  load?: string;                              // resume an existing ACP session id via session/load
 }
 ```
+
+A connection owns a live agent process, so **keeping one is always an explicit opt-in**: `keepAlive` defaults to `'step'`. `'run'` keeps it for the rest of the root run and the harness collects it; `'harness'` keeps it until the caller runs `await harness.closeAcpSessions()` — nothing closes that one for you, and leaving it open keeps the host process alive.
+
+`reuse` requires `keepAlive: 'run'` or `'harness'` (a connection closed with its step has nothing to share); a reuse key without a scope throws `ACP_REUSE_WITHOUT_KEEPALIVE`. Per-turn state (`permissions`, `onPermissionRequest`, steering, the event stream) is rebound before every turn, so each step gets its own. `clientCapabilities` and the agent itself are connection-level: a step joining an existing session with different ones throws `ACP_SESSION_CAPABILITY_CONFLICT` / `ACP_SESSION_AGENT_CONFLICT`.
 
 **Stop reasons:** `end_turn`, `max_tokens`, and `max_turn_requests` return normally (the reason lands on `ctx.lastStepMeta`); `refusal` throws `model_refused`; `cancelled` throws `cancelled`. Aborting the context sends `session/cancel`.
 

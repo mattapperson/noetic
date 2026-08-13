@@ -345,6 +345,8 @@ export interface AcpLiveSession {
   host: AcpClientHost;
   /** `agentId` of the adapter that opened this connection, for reuse conflict checks. */
   agentId: string;
+  /** How long this connection is kept alive; decides who closes it and when. */
+  keepAlive: AcpKeepAlive;
 }
 
 /** @public Options handed to {@link AcpAgent.connect}. */
@@ -380,27 +382,64 @@ export interface AcpAgent {
  * Controls how an ACP connection is reused and torn down across steps.
  * @public
  */
+/**
+ * How long an ACP connection outlives the step that opened it.
+ *
+ * A connection owns a live agent — usually a child process whose stdio keeps
+ * the event loop alive — so keeping one is never inferred. Every level beyond
+ * the default is something the step asks for explicitly.
+ * @public
+ */
+export const AcpKeepAlive = {
+  /** Closed when the step finishes. The default. */
+  Step: 'step',
+  /** Kept for the rest of the root run, then closed by the harness. */
+  Run: 'run',
+  /** Kept until {@link AcpSessionDisposer.closeAcpSessions} is called. Nothing closes it for you. */
+  Harness: 'harness',
+} as const;
+
+/** @public Union of connection keep-alive scopes. */
+export type AcpKeepAlive = (typeof AcpKeepAlive)[keyof typeof AcpKeepAlive];
+
+/**
+ * Controls how an ACP connection is shared and how long it is kept alive.
+ * @public
+ */
 export interface AcpSessionPolicy {
   /**
-   * Reuse a live connection + session keyed by this id across steps. When
-   * omitted, each step gets a fresh session that is closed on completion.
+   * Share one live connection + session under this id, so later steps take
+   * their turns against the same agent. Requires {@link keepAlive} `'run'` or
+   * `'harness'` — a connection closed at the end of its step has nothing left
+   * to share.
    */
   reuse?: string;
   /**
-   * Lifecycle action when the step completes. `'close'` ends the connection and
-   * stops the agent; `'keep'` leaves it live for a later step. Defaults to
-   * `'close'` for a fresh session and `'keep'` for a reused one.
+   * How long to keep the connection alive. Defaults to `'step'`: the
+   * connection is closed as soon as the step finishes, so nothing is
+   * maintained unless the step says so.
    *
-   * `'keep'` is scoped to the run: the harness closes every session it still
-   * holds when the root run finishes. A connection owns a live agent process,
-   * so one held past its run would keep the host from exiting.
+   * `'harness'` hands ownership to the caller — the runtime will not close it,
+   * and an undisposed connection keeps the host process from exiting. Call
+   * `harness.closeAcpSessions()` when the work is done.
    */
-  onComplete?: 'close' | 'keep';
+  keepAlive?: AcpKeepAlive;
   /**
    * Resume this ACP session id via `session/load` instead of creating a new one.
    * Requires the agent's `loadSession` capability.
    */
   load?: string;
+}
+
+/**
+ * The disposal surface for connections kept past their run. Implemented by
+ * `AgentHarness`; declared here so callers can hold the capability without
+ * depending on the concrete runtime.
+ * @public
+ */
+export interface AcpSessionDisposer {
+  /** Close every ACP connection this harness still holds. Idempotent. */
+  closeAcpSessions(): Promise<void>;
 }
 
 //#endregion

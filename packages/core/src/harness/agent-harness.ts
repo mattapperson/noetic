@@ -445,17 +445,35 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   readonly acpSessions = new Map<string, AcpLiveSession>();
 
   /**
-   * Close every ACP connection kept alive for reuse. A connection owns a live
-   * agent — usually a child process whose stdio keeps the event loop alive —
-   * so a session held past the run that opened it does not just leak, it stops
-   * the host from exiting. Reuse is therefore scoped to a root run.
+   * Close every ACP connection this harness still holds, whatever its
+   * keep-alive scope. A connection owns a live agent — usually a child process
+   * whose stdio keeps the event loop alive — so a `keepAlive: 'harness'`
+   * session must be closed by its owner or the host will not exit. Idempotent.
+   * @public
    */
-  private async closeAcpSessions(): Promise<void> {
-    const live = [
-      ...this.acpSessions.values(),
-    ];
-    this.acpSessions.clear();
-    await Promise.all(live.map((entry) => entry.connection.close().catch(() => undefined)));
+  async closeAcpSessions(): Promise<void> {
+    await this.closeAcpSessionsWhere(() => true);
+  }
+
+  /**
+   * Collect the connections a finished root run owns. `keepAlive: 'harness'`
+   * opted out of that collection, so it survives until {@link closeAcpSessions}.
+   */
+  private async closeAcpSessionsAfterRun(): Promise<void> {
+    await this.closeAcpSessionsWhere((entry) => entry.keepAlive !== 'harness');
+  }
+
+  private async closeAcpSessionsWhere(
+    predicate: (entry: AcpLiveSession) => boolean,
+  ): Promise<void> {
+    const doomed: AcpLiveSession[] = [];
+    for (const [key, entry] of this.acpSessions) {
+      if (predicate(entry)) {
+        doomed.push(entry);
+        this.acpSessions.delete(key);
+      }
+    }
+    await Promise.all(doomed.map((entry) => entry.connection.close().catch(() => undefined)));
   }
   readonly layerStateStore: LayerStateStore;
   /** Per-harness memoization cache for `recallMode: 'eventual'` layers. */
@@ -819,7 +837,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       } else {
         this.rootRunDepth.delete(ctx.id);
         this.channelStore.closeExecution(ctx.id);
-        await this.closeAcpSessions();
+        await this.closeAcpSessionsAfterRun();
       }
     }
   }
