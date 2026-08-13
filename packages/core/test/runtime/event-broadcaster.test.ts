@@ -202,12 +202,46 @@ describe('EventBroadcaster', () => {
       next = await iter.next();
     }
 
-    // After reading 'a', buffer was [a,b,c] → emit d,e trims to [c,d,e].
-    // Iterator cursor adjusts so it continues from 'c' onward.
+    // After reading 'a', consumed-watermark trim already dropped it. The
+    // maxBufferSize=3 backstop then keeps [c,d,e] of the unread suffix.
     expect(remaining).toHaveLength(3);
     expect(remaining[0].data.delta).toBe('c');
     expect(remaining[1].data.delta).toBe('d');
     expect(remaining[2].data.delta).toBe('e');
+  });
+
+  it('trims behind the slowest live consumer', async () => {
+    const bc = new EventBroadcaster();
+    const iter = bc[Symbol.asyncIterator]();
+
+    bc.emit(textDelta('a'));
+    bc.emit(textDelta('b'));
+    expect(bc.bufferSize).toBe(2);
+
+    expect((await iter.next()).done).toBe(false);
+    expect(bc.bufferSize).toBe(1);
+    expect((await iter.next()).done).toBe(false);
+    expect(bc.bufferSize).toBe(0);
+
+    bc.emit(textDelta('c'));
+    bc.complete();
+    expect((await iter.next()).value?.data.delta).toBe('c');
+  });
+
+  it('starts late joiners at the consumed watermark after a first consumer exists', async () => {
+    const bc = new EventBroadcaster();
+    const first = bc[Symbol.asyncIterator]();
+
+    bc.emit(textDelta('early'));
+    expect((await first.next()).value?.data.delta).toBe('early');
+
+    const late = collect(bc);
+    bc.emit(textDelta('after'));
+    bc.complete();
+
+    const events = await late;
+    expect(events).toHaveLength(1);
+    expect(events[0].data.delta).toBe('after');
   });
 
   it('stops buffering when all consumers have departed', async () => {

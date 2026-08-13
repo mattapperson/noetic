@@ -502,19 +502,19 @@ export async function executeToolCall(params: ExecuteToolCallParams): Promise<{
     // fragments emit per yield (the non-UI case just consumes to the return).
     let result: unknown;
     if (isAsyncGenerator(executionResult)) {
-      const events: unknown[] = [];
       for (;;) {
         const next = await executionResult.next();
         if (next.done) {
           result = next.value;
           break;
         }
-        events.push(next.value);
         if (uiBase) {
           emitToolUi({
             ...uiBase,
             phase: 'progress',
-            events,
+            events: [
+              next.value,
+            ],
           });
         }
       }

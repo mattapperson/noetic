@@ -1177,15 +1177,12 @@ async function consumeToolGenerator(params: {
 }): Promise<unknown> {
   const broadcaster = getBroadcaster(params.ctx);
   const agentName = params.ctx.harness.config.name;
-  const events: unknown[] = [];
-
   while (true) {
     const next = await params.generator.next();
     if (next.done) {
       return next.value;
     }
 
-    events.push(next.value);
     emitFrameworkEvent({
       broadcaster,
       agentName,
@@ -1203,7 +1200,9 @@ async function consumeToolGenerator(params: {
       callId: params.stepId,
       phase: 'progress',
       args: params.args,
-      events,
+      events: [
+        next.value,
+      ],
     });
   }
 }

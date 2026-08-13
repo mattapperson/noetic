@@ -28,7 +28,7 @@ export interface EmitToolUiParams {
   phase: ToolUiPhase;
   /** Parsed tool args (partial at `call` time). */
   args: unknown;
-  /** Events seen so far — for `progress`. */
+  /** Latest yield only — for `progress`. Tools that need history accumulate it themselves. */
   events?: unknown[];
   /** The tool's return value — for `result`. */
   output?: unknown;

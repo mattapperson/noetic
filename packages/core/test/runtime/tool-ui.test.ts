@@ -245,4 +245,63 @@ describe('executeInvokeTool tool-UI integration', () => {
     expect(fragments).toHaveLength(1);
     expect(fragments[0]?.data.source).toBe('root = Text("kaboom")');
   });
+
+  it('passes only the latest yield into ui.progress', async () => {
+    const { ctx, broadcaster, harness } = ctxWithBroadcaster();
+    const seen: number[][] = [];
+    const tool = frameworkCast<Tool>({
+      name: 'stream',
+      description: 'stream',
+      input: z.object({}),
+      output: z.object({
+        done: z.boolean(),
+      }),
+      execute: async function* () {
+        yield {
+          pct: 10,
+        };
+        yield {
+          pct: 90,
+        };
+        return {
+          done: true,
+        };
+      },
+      ui: {
+        progress: (events: unknown[]) => {
+          seen.push(
+            events.map((event) => {
+              if (typeof event === 'object' && event !== null && 'pct' in event) {
+                return Number(event.pct);
+              }
+              return -1;
+            }),
+          );
+          return {
+            dialect: 'openui-lang/0.5',
+            source: `root = Text("${seen.length}")`,
+          };
+        },
+      },
+    });
+    const step: StepInvokeTool<ContextData, unknown, unknown> = {
+      kind: 'invokeTool',
+      id: 'stream-step',
+      tool,
+    };
+    const result = await executeInvokeTool(step, {}, ctx, harness);
+    expect(result).toEqual({
+      done: true,
+    });
+    expect(seen).toEqual([
+      [
+        10,
+      ],
+      [
+        90,
+      ],
+    ]);
+    const fragments = broadcaster.events.filter((e) => e.type.endsWith('openui.fragment'));
+    expect(fragments).toHaveLength(2);
+  });
 });

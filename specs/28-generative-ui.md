@@ -93,7 +93,7 @@ interface UiFragment {
 interface ToolUiDeclaration<I extends ZodTypeAny, O extends ZodTypeAny, E = unknown> {
   /** Rendered as soon as the call streams in — args may be partial. */
   call?(args: Partial<z.infer<I>>): UiFragment | null;
-  /** Re-rendered on each event the tool's AsyncGenerator `execute` yields. */
+  /** Re-rendered on each yield. Receives only the latest event (single-element array). */
   progress?(events: E[]): UiFragment | null;
   /** Replaces the region on completion. */
   result?(output: z.infer<O>, args: z.infer<I>): UiFragment | null;
