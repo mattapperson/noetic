@@ -11,6 +11,7 @@ import type {
   Tool,
 } from '@noetic-tools/types';
 import { frameworkCast, isNoeticConfigError, isServerToolSpec } from '@noetic-tools/types';
+import { z } from 'zod';
 import type { HydrationContext } from '../../src/builders/workflow-hydrator';
 import { hydrateNode, hydrateWorkflow } from '../../src/builders/workflow-hydrator';
 import type { WorkflowDocument, WorkflowNode } from '../../src/schemas/workflow';
@@ -32,7 +33,8 @@ function makeMockSubprocess(opts?: { fail?: boolean }): {
     async spawn(request: ProcessSubprocessRequest): Promise<SubprocessHandle> {
       calls.push(request);
       const id = `mock-${calls.length}`;
-      const code = String(request.metadata?.code ?? '');
+      // The code travels in argv (`node -e <code>`), not metadata.
+      const code = String(request.args?.[1] ?? '');
       const stdin = request.stdin ?? '';
       handles.set(id, {
         id,
@@ -223,6 +225,62 @@ describe('hydrateNode — tool', () => {
     };
     const ctx = makeHydrationContext();
     expect(() => hydrateNode(node, ctx)).toThrow('missing');
+  });
+});
+
+describe('hydrateNode — invokeTool result items', () => {
+  test('uses the shared tool-result path for decorated workflow tool outputs', async () => {
+    const decoratedTool = makeTestTool({
+      name: 'decorated-tool',
+      output: z.object({
+        result: z.string(),
+      }),
+      itemSchemas: {
+        toolResults: [
+          z.object({
+            id: z.string(),
+            status: z.literal('completed'),
+            type: z.literal('function_call_output'),
+            callId: z.string(),
+            output: z.string(),
+            card: z.object({
+              title: z.string(),
+            }),
+          }),
+        ],
+      },
+      decorateResultItem: ({ baseItem }) => ({
+        ...baseItem,
+        card: {
+          title: 'Decorated result',
+        },
+      }),
+    });
+    const node: WorkflowNode = {
+      kind: 'invokeTool',
+      id: 'tool-step',
+      toolName: 'decorated-tool',
+      args: {
+        query: 'hello',
+      },
+    };
+    const ctx = makeHydrationContext([
+      decoratedTool,
+    ]);
+    const result = hydrateNode(node, ctx);
+    assert(result.kind === 'runCode');
+
+    const execCtx = makeMockContext();
+    await result.execute('', execCtx);
+
+    const outputItem = execCtx.itemLog.items.find((item) => item.type === 'function_call_output');
+    expect(outputItem).toMatchObject({
+      type: 'function_call_output',
+      status: 'completed',
+      card: {
+        title: 'Decorated result',
+      },
+    });
   });
 });
 
@@ -1391,7 +1449,9 @@ describe('hydrateNode — run', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0].kind).toBe('process');
     expect(calls[0].stdin).toBe('the-input');
-    expect(calls[0].metadata?.code).toBe('process.stdout.write("hi")');
+    // Code travels as argv (node -e <code>); metadata carries identification only.
+    expect(calls[0].args?.[1]).toBe('process.stdout.write("hi")');
+    expect(calls[0].metadata?.code).toBeUndefined();
   });
 
   test('resolves a named subprocess ref via HydrationContext.resolveSubprocess', async () => {

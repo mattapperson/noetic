@@ -10,6 +10,7 @@
  */
 
 import { z } from 'zod';
+import { NoeticConfigError } from '../errors/noetic-config-error';
 import type { SubHarnessKind } from '../types/sub-harness';
 
 //#region Until Predicate Types
@@ -298,7 +299,16 @@ export interface RunCodeWorkflowNode extends WorkflowNodeBase {
 }
 
 export interface ConditionalRoute {
+  /** The pattern tested against the conditional input (case-insensitive). */
   match: string;
+  /**
+   * How `match` is tested. `substring` (default): the trimmed, lowercased
+   * input CONTAINS the lowercased pattern — beware, route 'cat' fires for
+   * input 'concatenate'. `exact`: the trimmed, lowercased input EQUALS the
+   * lowercased pattern. Routes are tested in order; first match wins, so
+   * put more specific routes before broader ones.
+   */
+  matchMode?: 'substring' | 'exact';
   target: WorkflowNode;
 }
 
@@ -422,6 +432,15 @@ const SHARED_FIELDS = {
   id: z.string().min(1),
 } as const;
 
+/**
+ * `execute` is capped: a runCode node's code string is embedded in the
+ * document, shipped to the subprocess as an argv entry (OS argv limits are
+ * of this order), and can end up in trace attributes — an unbounded string
+ * is a document-size and checkpoint-size hazard with no legitimate use.
+ * Named LENGTH, not BYTES, because Zod's `.max()` counts UTF-16 code units.
+ */
+const MAX_RUN_CODE_LENGTH = 256 * 1024;
+
 const OutputCodecRefSchema = z.object({
   codec: z.literal('openui'),
   library: z.string().min(1),
@@ -447,13 +466,19 @@ const InvokeToolNodeSchema = z.object({
 const RunCodeNodeSchema = z.object({
   kind: z.literal('runCode'),
   ...SHARED_FIELDS,
-  execute: z.string().min(1),
+  execute: z.string().min(1).max(MAX_RUN_CODE_LENGTH),
   retry: RetryPolicySchema.optional(),
   subprocess: z.string().min(1).optional(),
 });
 
 const ConditionalRouteSchema = z.object({
   match: z.string().min(1),
+  matchMode: z
+    .enum([
+      'substring',
+      'exact',
+    ])
+    .optional(),
   target: z.lazy(() => WorkflowNodeSchema),
 });
 
@@ -651,9 +676,120 @@ function childNodes(node: WorkflowNode): WorkflowNode[] {
   }
 }
 
-/** Validates a candidate workflow document. Throws `ZodError` on invalid input. */
+/**
+ * Direct children of `node` that belong to the SAME document scope. Identical
+ * to `childNodes` except that an inline `subflow` document is not descended
+ * into: the hydrator suffixes a subflow's node ids with `-${node.id}`, so its
+ * ids live in their own namespace (see `assertUniqueNodeIds`).
+ */
+function sameScopeChildNodes(node: WorkflowNode): WorkflowNode[] {
+  if (node.kind === 'subflow') {
+    return [];
+  }
+  return childNodes(node);
+}
+
+/** Every inline sub-workflow document root reachable from `root`, at any depth. */
+function inlineSubflowRoots(root: WorkflowNode): WorkflowNode[] {
+  const roots: WorkflowNode[] = [];
+  const stack: WorkflowNode[] = [
+    root,
+  ];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (!node) {
+      continue;
+    }
+    if (node.kind === 'subflow' && node.document) {
+      roots.push(node.document.root);
+      continue;
+    }
+    stack.push(...childNodes(node));
+  }
+  return roots;
+}
+
+/** A node id used more than once within a single document scope. */
+export interface DuplicateNodeId {
+  id: string;
+  firstKind: WorkflowNode['kind'];
+  secondKind: WorkflowNode['kind'];
+}
+
+/** Collects id collisions within one document scope (no subflow descent). */
+function findDuplicatesWithinScope(root: WorkflowNode, out: DuplicateNodeId[]): void {
+  const seen = new Map<string, WorkflowNode['kind']>();
+  const stack: WorkflowNode[] = [
+    root,
+  ];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (!node) {
+      continue;
+    }
+    const existing = seen.get(node.id);
+    if (existing !== undefined) {
+      out.push({
+        id: node.id,
+        firstKind: existing,
+        secondKind: node.kind,
+      });
+      continue;
+    }
+    seen.set(node.id, node.kind);
+    stack.push(...sameScopeChildNodes(node));
+  }
+}
+
+/**
+ * Find every node-id collision in a workflow document, per document scope.
+ * Shape validation cannot express this, and downstream machinery quietly
+ * corrupts without it: the step registry is latest-wins (a duplicate silently
+ * shadows its sibling), `workflowGraph` emits ambiguous edges, and — worst —
+ * the step ledger keys resume replay by paths built from step ids, so
+ * duplicate-id siblings line up as occurrences of ONE step and can replay each
+ * other's recorded outputs. A planner LLM emitting `"id": "step1"` twice is
+ * not hypothetical.
+ *
+ * Each document is its own scope: an inline `subflow` document's ids are
+ * suffixed with `-${node.id}` at hydration, so an id shared between the outer
+ * document and a nested one is unambiguous at runtime and is NOT reported.
+ * Every inline sub-workflow is checked independently against its own subtree.
+ *
+ * This is the non-throwing form of the uniqueness gate in `validateWorkflow`,
+ * exported so authoring surfaces that must not import core (e.g. the `plan()`
+ * context layer) can apply the same rule and report it in their own idiom.
+ */
+export function findDuplicateNodeIds(root: WorkflowNode): DuplicateNodeId[] {
+  const duplicates: DuplicateNodeId[] = [];
+  findDuplicatesWithinScope(root, duplicates);
+  for (const subRoot of inlineSubflowRoots(root)) {
+    duplicates.push(...findDuplicateNodeIds(subRoot));
+  }
+  return duplicates;
+}
+
+/** Throwing form of `findDuplicateNodeIds` — see that function for scope rules. */
+function assertUniqueNodeIds(root: WorkflowNode): void {
+  const first = findDuplicateNodeIds(root)[0];
+  if (first) {
+    throw new NoeticConfigError({
+      code: 'DUPLICATE_NODE_ID',
+      message: `Workflow node id '${first.id}' is used more than once (kinds: '${first.firstKind}', '${first.secondKind}'). Node ids must be unique across the document.`,
+      hint: 'Give every node a distinct id — resume replay, the step registry, and trace graphs all key on it.',
+    });
+  }
+}
+
+/**
+ * Validates a candidate workflow document: Zod shape validation plus
+ * per-document-scope node-id uniqueness. Throws `ZodError` on shape errors and
+ * `NoeticConfigError` (`code: 'DUPLICATE_NODE_ID'`) on id collisions.
+ */
 export function validateWorkflow(input: unknown): WorkflowDocument {
-  return WorkflowDocumentSchema.parse(input);
+  const doc = WorkflowDocumentSchema.parse(input);
+  assertUniqueNodeIds(doc.root);
+  return doc;
 }
 
 /** Walks a workflow tree depth-first, yielding each node. */

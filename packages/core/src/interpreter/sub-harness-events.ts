@@ -20,9 +20,9 @@ import type {
   SubHarnessStreamPart,
   SubHarnessTurnResult,
 } from '@noetic-tools/types';
-import type { EmitOption } from '../runtime/broadcaster-utils';
-import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../runtime/broadcaster-utils';
-import type { EventBroadcaster } from '../runtime/event-broadcaster';
+import type { EmitOption } from '../util/broadcaster-utils';
+import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../util/broadcaster-utils';
+import type { EventBroadcaster } from '../util/event-broadcaster';
 import { isFunctionCall } from './typeguards';
 
 export class SubHarnessEventBridge {

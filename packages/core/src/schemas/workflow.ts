@@ -8,6 +8,7 @@ export type {
   CallModelWorkflowNode,
   ConditionalRoute,
   ConditionalWorkflowNode,
+  DuplicateNodeId,
   InParallelWorkflowNode,
   InvokeToolWorkflowNode,
   LoopWorkflowNode,
@@ -25,6 +26,7 @@ export type {
   WorkflowNode,
 } from '@noetic-tools/types';
 export {
+  findDuplicateNodeIds,
   MergeStrategy,
   MergeStrategySchema,
   UntilPredicateSchema,

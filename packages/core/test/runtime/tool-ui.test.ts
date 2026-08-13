@@ -4,7 +4,7 @@ import type { Context, StepInvokeTool, StreamEvent, Tool } from '@noetic-tools/t
 import { frameworkCast } from '@noetic-tools/types';
 import { z } from 'zod';
 import { executeInvokeTool } from '../../src/interpreter/execute-action';
-import { emitToolUi } from '../../src/runtime/tool-ui';
+import { emitToolUi } from '../../src/tooling/tool-ui';
 import { makeMockContext, makeMockHarness } from '../_helpers';
 
 /** A recording broadcaster satisfying the `_broadcaster` structural check. */

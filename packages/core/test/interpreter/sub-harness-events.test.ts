@@ -11,8 +11,8 @@ import type {
 import { step } from '../../src/builders/step-builders';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { execute } from '../../src/interpreter/execute';
-import { EventBroadcaster } from '../../src/runtime/event-broadcaster';
 import { buildItemStream, filterTextStream } from '../../src/runtime/session-streams';
+import { EventBroadcaster } from '../../src/util/event-broadcaster';
 import { makeFunctionCall, makeMessage } from '../_helpers';
 
 //#region Adapters

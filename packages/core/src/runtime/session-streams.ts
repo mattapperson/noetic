@@ -1,6 +1,6 @@
 import type { Item, ItemSchemaRegistry, StreamEvent, StreamingItem } from '@noetic-tools/types';
 import { defaultItemSchemaRegistry, frameworkCast } from '@noetic-tools/types';
-import type { EventBroadcaster } from './event-broadcaster';
+import type { EventBroadcaster } from '../util/event-broadcaster';
 
 //#region Types
 

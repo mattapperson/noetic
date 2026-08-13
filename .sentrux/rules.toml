@@ -172,6 +172,16 @@ paths = [
 ]
 order = 84
 
+# The shared tool-execution path (`executeToolCall` plus its tool-context and
+# tool-UI helpers). Extracted from `adapters/` so the JSON workflow hydrator
+# in `builders/` can dispatch tool nodes through the same gates as the model
+# tool-loop without a builders→adapters reverse edge. Same tier as
+# core-primitives: both may import each other and anything below.
+[[layers]]
+name = "core-tooling"
+paths = ["packages/core/src/tooling/**"]
+order = 84
+
 [[layers]]
 name = "core-observability"
 paths = ["packages/core/src/observability/**"]

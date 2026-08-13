@@ -1,7 +1,4 @@
-import type { ContextLayer } from '@noetic-tools/context';
 import type {
-  AgentHarnessContract,
-  Context,
   InputContentPart,
   InputFilePart,
   InputImagePart,
@@ -19,14 +16,11 @@ import {
   isStandardJsonSchema,
   isZodSchema,
   NoeticConfigError,
-  SteeringAction,
-  validateSchema,
 } from '@noetic-tools/types';
 import type * as OpenRouterAgent from '@openrouter/agent';
 import type { ZodTypeAny } from 'zod';
 import { z } from 'zod';
-import { buildToolExecutionContext } from '../runtime/tool-context';
-import { emitToolUi } from '../runtime/tool-ui';
+import { sanitizeToolNameForWire } from '../tooling/tool-name';
 import type { EmbedFn } from '../types/embed';
 
 //#region Provider Types
@@ -304,17 +298,6 @@ function cacheWriteTokensOf(details: unknown): number | undefined {
 // make tool interactions invisible to Noetic's itemLog, token tracking,
 // and observability. Instead, the AgentHarness manages the tool loop.
 /**
- * Provider APIs (Anthropic via OpenRouter) enforce tool names match
- * `^[a-zA-Z0-9_-]{1,64}$`. Noetic's internal layer-tool names use `layerId/fn`
- * which contains a forbidden `/`. We translate to a wire-safe form only at
- * the SDK boundary; internal tool-name identity (and every codebase reference
- * to names like `plan/updatePrd`) is preserved.
- */
-export function sanitizeToolNameForWire(name: string): string {
-  return name.replace(/[^a-zA-Z0-9_-]/g, '_');
-}
-
-/**
  * Resolve the JSON Schema sent to the model. Zod keeps its legacy-compatible
  * fast path. For other validators, an explicit override wins over the Standard
  * JSON Schema v1 companion trait.
@@ -407,144 +390,6 @@ export function convertTools({ tools }: ConvertToolsParams): SdkTool[] {
       },
     }),
   );
-}
-
-/** @internal */
-export interface ExecuteToolCallParams {
-  toolName: string;
-  args: unknown;
-  tools: ReadonlyArray<Tool>;
-  context: Context;
-  harness: AgentHarnessContract;
-  layers?: ContextLayer[];
-  /** The model's `function_call` id — keys this call's tool-UI region. */
-  callId?: string;
-}
-
-function isAsyncGenerator(value: unknown): value is AsyncGenerator<unknown, unknown> {
-  if (typeof value !== 'object' || value === null) {
-    return false;
-  }
-  return Symbol.asyncIterator in value;
-}
-
-/** @internal Execute a single tool call with steering checks. */
-export async function executeToolCall(params: ExecuteToolCallParams): Promise<{
-  output: string;
-  result?: unknown;
-  error?: boolean;
-}> {
-  // Model sees sanitised tool names (see `sanitizeToolNameForWire`). Match
-  // against both the original and sanitised name so internal identity (e.g.
-  // `plan/updatePrd` used by steering whitelists, skill docs, and the
-  // `plan()` layer's `beforeToolCall` hook) stays intact while the wire name is
-  // provider-compliant.
-  const matchedTool = params.tools.find(
-    (t) => t.name === params.toolName || sanitizeToolNameForWire(t.name) === params.toolName,
-  );
-  if (!matchedTool) {
-    return {
-      output: `Error: unknown tool '${params.toolName}'`,
-      error: true,
-    };
-  }
-
-  if (params.layers && params.layers.length > 0) {
-    const decision = await params.harness.beforeToolCall(
-      params.layers,
-      params.toolName,
-      params.args,
-      params.context,
-    );
-    if (decision.action === SteeringAction.Deny) {
-      return {
-        output: `Tool call denied: ${decision.guidance ?? 'steering rule violation'}`,
-        error: true,
-      };
-    }
-    if (decision.action === SteeringAction.Guide) {
-      return {
-        output: `Tool call redirected: ${decision.guidance}`,
-        error: true,
-      };
-    }
-  }
-
-  const validated = await validateSchema(matchedTool.input, params.args);
-  if (!validated.success) {
-    return {
-      output: `Error: invalid arguments for tool '${params.toolName}': ${validated.zodError.message}`,
-      error: true,
-    };
-  }
-  const parsedArgs = validated.value;
-
-  const toolCtx = buildToolExecutionContext(params.context, params.harness);
-  const callId = params.callId;
-  const uiBase =
-    callId !== undefined
-      ? {
-          ctx: params.context,
-          tool: matchedTool,
-          callId,
-          args: parsedArgs,
-        }
-      : undefined;
-  if (uiBase) {
-    emitToolUi({
-      ...uiBase,
-      phase: 'call',
-    });
-  }
-  try {
-    const executionResult = matchedTool.execute(parsedArgs, toolCtx);
-    // Generator tools stream progress; drive them here so tool-UI `progress`
-    // fragments emit per yield (the non-UI case just consumes to the return).
-    let result: unknown;
-    if (isAsyncGenerator(executionResult)) {
-      const events: unknown[] = [];
-      for (;;) {
-        const next = await executionResult.next();
-        if (next.done) {
-          result = next.value;
-          break;
-        }
-        events.push(next.value);
-        if (uiBase) {
-          emitToolUi({
-            ...uiBase,
-            phase: 'progress',
-            events,
-          });
-        }
-      }
-    } else {
-      result = await executionResult;
-    }
-    if (uiBase) {
-      emitToolUi({
-        ...uiBase,
-        phase: 'result',
-        output: result,
-      });
-    }
-    return {
-      output: typeof result === 'string' ? result : JSON.stringify(result),
-      result,
-    };
-  } catch (e) {
-    if (uiBase) {
-      emitToolUi({
-        ...uiBase,
-        phase: 'error',
-        error: e,
-      });
-    }
-    return {
-      output: `Error: ${e instanceof Error ? e.message : String(e)}`,
-      error: true,
-    };
-  }
 }
 
 //#endregion

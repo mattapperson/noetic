@@ -11,12 +11,12 @@ import {
 import { z } from 'zod';
 import { tool } from '../../src/builders/tool-builder';
 import { AgentHarness } from '../../src/harness/agent-harness';
-import { EventBroadcaster } from '../../src/runtime/event-broadcaster';
 import {
   buildItemStream,
   filterReasoningStream,
   filterTextStream,
 } from '../../src/runtime/session-streams';
+import { EventBroadcaster } from '../../src/util/event-broadcaster';
 import {
   createScriptedCallModel,
   makeLLMResponse,

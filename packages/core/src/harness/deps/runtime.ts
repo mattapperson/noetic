@@ -18,7 +18,6 @@ export {
   resolveStepLedgerRetention,
   StepLedger,
 } from '../../runtime/durable/step-ledger';
-export type { EventBroadcaster } from '../../runtime/event-broadcaster';
 export { createInMemoryStorage } from '../../runtime/in-memory-storage';
 export type { QueuedMessage } from '../../runtime/message-queue';
 export { SessionRunner } from '../../runtime/session-runner';
@@ -27,3 +26,4 @@ export {
   filterReasoningStream,
   filterTextStream,
 } from '../../runtime/session-streams';
+export type { EventBroadcaster } from '../../util/event-broadcaster';

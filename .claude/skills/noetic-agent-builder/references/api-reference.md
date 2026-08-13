@@ -1984,6 +1984,8 @@ const doc = validateWorkflow({
 
 Node kinds: `callModel`, `invokeTool`, `runCode`, `conditional`, `inParallel`, `spawn`, `withContext`, `loop`, `sequence`, `schedule`, `subflow`, plus the sub-harness kinds (`claude-code`, `codex`, `opencode`, `pi`).
 
+Validation is `validateWorkflow` = Zod shape + per-document-scope node-id uniqueness (`DUPLICATE_NODE_ID` — an inline `subflow` document is its own scope). `invokeTool` nodes dispatch through the shared tool-execution path (argument validation, steering, tool-UI), not a bare `tool.execute`. `conditional` routes accept `matchMode: 'substring' | 'exact'` (default `'substring'`). `runCode.execute` is capped at 262,144 characters.
+
 A `subflow` node runs another workflow document as one step — inline (`document`) or by name (`ref`, resolved lazily from `HydrationContext.workflows` / `parseAndRunWorkflow`'s `workflows` option). Exactly one of `document`/`ref` is required. Unknown refs raise `UNKNOWN_WORKFLOW_REFERENCE` at execution; ref cycles raise `WORKFLOW_CYCLE`. There is also a `workflow({ id, document | ref, tools?, layers?, workflows?, isolation?: 'inherit' | 'spawn' })` builder that runs a document as a composable `StepRunCode` (main entry only, not `/portable`).
 
 ### hydrateWorkflow / hydrateNode
@@ -2019,8 +2021,12 @@ const agent = dynamicWorkflow({
   tools: [searchTool, calcTool],
   maxDepth: 5,
   maxRevisions: 3,
+  // Optional registries forwarded to hydration:
+  // layers, subHarnesses, uiLibraries, workflows
 });
 ```
+
+Validation AND hydration failures (unknown tool/harness/layer/workflow refs) feed the planner revision loop as error feedback; execution errors after hydration propagate.
 
 ### parseAndRunWorkflow
 
