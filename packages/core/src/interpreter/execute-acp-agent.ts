@@ -202,6 +202,8 @@ function buildSteerer(
 interface HostBindingOptions<TContext, I, O> {
   step: StepAcpAgent<TContext, I, O>;
   ctx: Context<ContextData>;
+  /** `agentId` of the adapter taking the turn, surfaced to permission handlers. */
+  agentId: string;
   layers?: ContextLayer[];
   onUpdate: AcpClientHost['onSessionUpdate'];
 }
@@ -221,7 +223,16 @@ function bindHostToStep<TContext, I, O>(
 ): void {
   host.permissions = opts.step.permissions;
   host.steerPermission = buildSteerer(opts.ctx, opts.layers);
-  host.onPermissionRequest = opts.step.onPermissionRequest;
+  // Bind the executing context into the handler so the protocol client never
+  // has to know about `Context` — it just asks a question and gets an answer.
+  const handler = opts.step.onPermissionRequest;
+  host.onPermissionRequest = handler
+    ? (request) =>
+        handler(request, opts.ctx, {
+          agentId: opts.agentId,
+          stepId: opts.step.id,
+        })
+    : undefined;
   host.onSessionUpdate = opts.onUpdate;
 }
 
@@ -448,6 +459,7 @@ export async function executeAcpAgent<TContext, I, O>(
   const binding = {
     step,
     ctx: baseCtx,
+    agentId: agent.agentId,
     layers,
     onUpdate: (notification: Parameters<AcpClientHost['onSessionUpdate']>[0]) => {
       bridge.forward(notification);

@@ -17,8 +17,8 @@
  */
 
 import type {
+  AcpBoundPermissionHandler,
   AcpPermissionDecision,
-  AcpPermissionHandler,
   AcpPermissionOption,
   AcpPermissionOutcome,
   AcpPermissionPolicy,
@@ -33,7 +33,7 @@ import type {
 export interface AcpPermissionResolverOptions {
   policy?: AcpPermissionPolicy;
   steer?: AcpPermissionSteerer;
-  handler?: AcpPermissionHandler;
+  handler?: AcpBoundPermissionHandler;
 }
 
 /** The concrete ACP outcome payload sent back to the agent. */

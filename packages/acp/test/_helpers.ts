@@ -9,8 +9,8 @@
 
 import type {
   AcpAgentConnection,
+  AcpBoundPermissionHandler,
   AcpClientHost,
-  AcpPermissionHandler,
   AcpPermissionPolicy,
   AcpPermissionSteerer,
   AcpSessionNotification,
@@ -232,7 +232,7 @@ export interface AcpTestRigOptions {
   script?: FakeAgentScript;
   policy?: AcpPermissionPolicy;
   steer?: AcpPermissionSteerer;
-  handler?: AcpPermissionHandler;
+  handler?: AcpBoundPermissionHandler;
   capabilities?: AcpClientHost['capabilities'];
   fs?: MemoryFs;
   shell?: RecordingShell;

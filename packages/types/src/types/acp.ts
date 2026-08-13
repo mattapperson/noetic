@@ -21,6 +21,7 @@
 
 import type * as acp from '@zed-industries/agent-client-protocol';
 import type { TokenUsage } from './common';
+import type { Context } from './context';
 import type { FsAdapter } from './fs-adapter';
 import type { Item } from './items';
 import type { ShellAdapter } from './shell-adapter';
@@ -141,9 +142,38 @@ export interface AcpPermissionPolicy {
 /**
  * Async escape hatch for decisions a declarative policy cannot express —
  * human-in-the-loop approval, a remote policy service, an LLM judge.
+ *
+ * Receives the executing {@link Context} because reaching a human almost always
+ * means reaching a channel: `ctx.send` the request out, `ctx.recv` the decision
+ * back. Without it a handler could only answer from what it closed over.
  * @public
  */
 export type AcpPermissionHandler = (
+  request: acp.RequestPermissionRequest,
+  ctx: Context,
+  info: AcpPermissionRequestInfo,
+) => Promise<AcpPermissionOutcome>;
+
+/**
+ * Which agent and step raised a permission request. The protocol request says
+ * what the agent wants to do but not who is asking, and a human answering
+ * needs both to make sense of the prompt.
+ * @public
+ */
+export interface AcpPermissionRequestInfo {
+  /** `agentId` of the adapter whose turn raised the request. */
+  agentId: string;
+  /** Id of the step whose turn raised it. */
+  stepId: string;
+}
+
+/**
+ * The handler as the protocol client sees it — already bound to the executing
+ * context by the runtime. Keeps `Context` out of the client, which only needs
+ * to ask the question and get an answer.
+ * @public
+ */
+export type AcpBoundPermissionHandler = (
   request: acp.RequestPermissionRequest,
 ) => Promise<AcpPermissionOutcome>;
 
@@ -211,7 +241,7 @@ export interface AcpClientHost {
    */
   permissions?: AcpPermissionPolicy;
   steerPermission?: AcpPermissionSteerer;
-  onPermissionRequest?: AcpPermissionHandler;
+  onPermissionRequest?: AcpBoundPermissionHandler;
   /**
    * Receive every `session/update` notification for the active session. Also
    * per-turn — it routes to the running step's event bridge, so a reused
@@ -429,6 +459,27 @@ export interface AcpSessionPolicy {
    * Requires the agent's `loadSession` capability.
    */
   load?: string;
+}
+
+/**
+ * A snapshot of one live ACP sub-agent — what a UI needs to show it and offer
+ * actions on it, without handing out the connection itself.
+ * @public
+ */
+export interface AcpSessionInfo {
+  /** The `session.reuse` key it is held under. */
+  key: string;
+  /** `agentId` of the adapter driving it. */
+  agentId: string;
+  /** The agent's own session id. */
+  sessionId: string;
+  keepAlive: AcpKeepAlive;
+  /** Current mode, when the agent supports modes. */
+  currentModeId?: string;
+  /** Modes the agent offers, for a mode switcher. */
+  availableModes: ReadonlyArray<acp.SessionMode>;
+  /** Slash commands the agent currently advertises. */
+  availableCommands: ReadonlyArray<acp.AvailableCommand>;
 }
 
 /**

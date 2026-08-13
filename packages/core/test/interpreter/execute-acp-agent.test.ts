@@ -49,6 +49,7 @@ interface FakeAgentOpts {
   onPrompt?: (opts: AcpPromptOptions) => void;
   onClose?: () => void;
   onSetMode?: (modeId: string) => void;
+  onCancel?: () => void;
   throwOnTurn?: Error;
   throwOnNewSession?: Error;
   throwOnSetMode?: Error;
@@ -94,7 +95,7 @@ function fakeAgent(opts: FakeAgentOpts = {}): AcpAgent {
           };
         },
         async cancel() {
-          // No in-flight work to interrupt in the fake.
+          opts.onCancel?.();
         },
         async setMode(modeId) {
           opts.onSetMode?.(modeId);
@@ -725,6 +726,98 @@ describe('executeAcpAgent — a session shared across steps', () => {
       assert(isNoeticConfigError(e));
       expect(e.code).toBe('ACP_SESSION_CAPABILITY_CONFLICT');
     }
+  });
+});
+
+describe('AgentHarness — live ACP session control surface', () => {
+  it('lists what is running, with the mode and commands a UI needs', async () => {
+    const { harness } = harnessCtx();
+    const acpStep = step.acpAgent({
+      id: 'live',
+      agent: fakeAgent({
+        agentId: 'claude-code',
+        modes: {
+          currentModeId: 'plan',
+          availableModes: [
+            {
+              id: 'plan',
+              name: 'Plan',
+              description: null,
+            },
+            {
+              id: 'code',
+              name: 'Code',
+              description: null,
+            },
+          ],
+        },
+      }),
+      prompt: 'go',
+      session: {
+        reuse: 'live-key',
+        keepAlive: 'harness',
+      },
+    });
+
+    await harness.run(acpStep, undefined, harness.createContext());
+
+    const sessions = harness.listAcpSessions();
+    expect(sessions).toHaveLength(1);
+    const info = sessions[0];
+    assert(info);
+    expect(info.key).toBe('live-key');
+    expect(info.agentId).toBe('claude-code');
+    expect(info.keepAlive).toBe('harness');
+    expect(info.currentModeId).toBe('plan');
+    expect(info.availableModes).toHaveLength(2);
+
+    await harness.closeAcpSessions();
+  });
+
+  it('reports nothing once sessions are collected', async () => {
+    const { harness } = harnessCtx();
+    const acpStep = step.acpAgent({
+      id: 'ephemeral',
+      agent: fakeAgent(),
+      prompt: 'go',
+    });
+
+    await harness.run(acpStep, undefined, harness.createContext());
+
+    expect(harness.listAcpSessions()).toHaveLength(0);
+    expect(harness.getAcpSession('anything')).toBeUndefined();
+  });
+
+  it('cancels a live session through the protocol', async () => {
+    const { harness } = harnessCtx();
+    let cancels = 0;
+    const acpStep = step.acpAgent({
+      id: 'live',
+      agent: fakeAgent({
+        onCancel: () => {
+          cancels++;
+        },
+      }),
+      prompt: 'go',
+      session: {
+        reuse: 'live-key',
+        keepAlive: 'harness',
+      },
+    });
+
+    await harness.run(acpStep, undefined, harness.createContext());
+
+    expect(await harness.cancelAcpSession('live-key')).toBe(true);
+    expect(cancels).toBe(1);
+    // The connection stays open — cancel interrupts the turn, it does not close.
+    expect(harness.listAcpSessions()).toHaveLength(1);
+
+    await harness.closeAcpSessions();
+  });
+
+  it('cancelling an unknown key reports false rather than throwing', async () => {
+    const { harness } = harnessCtx();
+    expect(await harness.cancelAcpSession('nope')).toBe(false);
   });
 });
 

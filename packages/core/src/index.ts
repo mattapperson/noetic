@@ -15,6 +15,10 @@ export { createOpenRouterEmbed } from './adapters/openrouter';
 //#region Builders
 
 /** @public */
+export type { AcpAgentToolOptions } from './builders/acp-agent-tool';
+/** @public */
+export { acpAgentTool } from './builders/acp-agent-tool';
+/** @public */
 export { channel } from './builders/channel-builder';
 /** @public */
 export { context } from './builders/context-builder';
@@ -557,10 +561,12 @@ export type {
   AcpAgentConnection,
   AcpAuthMethod,
   AcpAvailableCommand,
+  AcpBoundPermissionHandler,
   AcpClientCapabilityConfig,
   AcpClientHost,
   AcpConnectOptions,
   AcpContentBlock,
+  AcpKeepAlive,
   AcpLiveSession,
   AcpLoadSessionOptions,
   AcpMcpServer,
@@ -569,6 +575,7 @@ export type {
   AcpPermissionOption,
   AcpPermissionOutcome,
   AcpPermissionPolicy,
+  AcpPermissionRequestInfo,
   AcpPermissionRule,
   AcpPermissionSteerer,
   AcpPlanEntry,
@@ -576,6 +583,8 @@ export type {
   AcpPromptOptions,
   AcpRequestPermissionRequest,
   AcpSession,
+  AcpSessionDisposer,
+  AcpSessionInfo,
   AcpSessionMode,
   AcpSessionModeState,
   AcpSessionNotification,

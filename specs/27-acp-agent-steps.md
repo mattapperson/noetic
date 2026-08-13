@@ -278,6 +278,99 @@ becomes a `FunctionCallItem`, and a completed `tool_call_update` becomes a
 `FunctionCallOutputItem` whose output renders the ACP content structurally —
 diffs and terminal references included, never dropped.
 
+## Driving an agent from a model, and from a human
+
+A step puts the agent where the *author* decided it goes. Two other surfaces
+put it where the *model* or the *user* decides.
+
+### As a tool the model can call
+
+`acpAgentTool()` wraps an agent as a `Tool`, so a `callModel` step can delegate
+by calling it:
+
+```ts
+import { acpAgentTool, callModel } from '@noetic-tools/core';
+import { claudeCode } from '@noetic-tools/acp';
+
+callModel({
+  id: 'plan',
+  model: 'anthropic/claude-sonnet-4-20250514',
+  instructions: 'Plan the work. Delegate implementation to the coding agent.',
+  tools: [
+    acpAgentTool({
+      agent: claudeCode(),
+      permissions: { allow: [{ kind: 'read' }, { kind: 'edit' }] },
+      // A reuse key lets the model hold a conversation with the agent across
+      // several calls instead of starting cold each time.
+      session: { reuse: 'delegate', keepAlive: 'run' },
+    }),
+  ],
+});
+```
+
+The tool takes `{ prompt }` and returns `{ text }`. Underneath it runs the same
+`step.acpAgent` through `harness.run` on the calling tool's context, so the
+delegated turn lands in the same item log, usage totals, and event stream as any
+other step — it is a real step, not a side channel. The default name is
+`delegate_to_<agentId>`.
+
+### Permission requests routed to a person
+
+A declarative policy can only answer what it was told in advance. When the
+decision belongs to a human, `askUserForPermission()` publishes the request on
+an external channel and parks until an answer comes back:
+
+```ts
+import { askUserForPermission } from '@noetic-tools/acp';
+
+step.acpAgent({
+  id: 'review',
+  agent: claudeCode(),
+  prompt: 'Fix the failing test',
+  permissions: { default: 'deny' },          // policy abstains …
+  onPermissionRequest: askUserForPermission(), // … so the human decides
+});
+```
+
+The integration subscribes once per harness and answers:
+
+```ts
+const decisions = harness.getChannelHandle(acpPermissionDecisions, ACP_PERMISSION_SCOPE);
+for await (const prompt of harness.getChannelStream(acpPermissionRequests, ACP_PERMISSION_SCOPE)) {
+  const optionId = await showApprovalCard(prompt);  // prompt.options are the agent's own
+  resolveAcpPermission(decisions, { requestId: prompt.requestId, decision: 'allow', optionId });
+}
+```
+
+Requests use a queue (each belongs to exactly one reviewer) and decisions a
+topic (broadcast, each waiter filters for its `requestId`) — the shape
+`@noetic-tools/chat-sdk` already uses for tool approvals. The handler parks on
+the decision topic *before* publishing its request, because topic delivery
+reaches only subscribers parked at send time; publishing first would let a fast
+reviewer answer into the void. An unanswered prompt denies on timeout rather
+than hanging the agent's turn: waiting must not become approval.
+
+Because reaching a person means reaching a channel, `onPermissionRequest`
+receives `(request, ctx, info)` — the executing context, plus which agent and
+step are asking.
+
+### Inspecting and steering what is live
+
+The harness exposes the connections it holds, so a UI can show running
+sub-agents and act on them:
+
+```ts
+harness.listAcpSessions();       // key, agentId, sessionId, mode, commands, keepAlive
+harness.getAcpSession(key);      // the live connection + session
+await harness.cancelAcpSession(key);  // session/cancel; connection stays open
+await harness.closeAcpSessions();     // release everything held
+```
+
+This surface is deliberately read-and-interrupt only. Turns are driven by
+steps, so nothing here can start work behind the runtime's back — a turn run
+outside a step would bypass the item log, usage accounting, and the event
+bridge. Follow-up prompts go through a step with the same `session.reuse` key.
+
 ## JSON workflow nodes
 
 One node kind, with the agent named by a registry key:

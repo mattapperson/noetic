@@ -26,6 +26,20 @@ export {
   functionCallOutputItem,
 } from './items';
 export type {
+  AcpPermissionPrompt,
+  AcpPermissionReply,
+  AskUserForPermissionOptions,
+} from './permission-channel';
+export {
+  ACP_PERMISSION_SCOPE,
+  AcpPermissionPromptSchema,
+  AcpPermissionReplySchema,
+  acpPermissionDecisions,
+  acpPermissionRequests,
+  askUserForPermission,
+  resolveAcpPermission,
+} from './permission-channel';
+export type {
   AcpPermissionResolverOptions,
   AcpRequestPermissionOutcome,
 } from './permissions';

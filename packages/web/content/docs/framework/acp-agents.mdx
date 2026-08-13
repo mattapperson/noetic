@@ -281,6 +281,103 @@ const review = step.acpAgent({
 
 The assistant text is JSON-parsed and validated, raising `model_parse_error` on a mismatch — identical to `callModel`.
 
+## Letting the model delegate
+
+A step decides *for* the model when the agent runs. `acpAgentTool()` hands that decision to the model instead, by wrapping the agent as a tool it can call:
+
+```ts
+import { acpAgentTool, callModel } from '@noetic-tools/core';
+import { claudeCode } from '@noetic-tools/acp';
+
+callModel({
+  id: 'plan',
+  model: 'anthropic/claude-sonnet-4-20250514',
+  instructions: 'Plan the work. Delegate implementation to the coding agent.',
+  tools: [
+    acpAgentTool({
+      agent: claudeCode(),
+      permissions: { allow: [{ kind: 'read' }, { kind: 'edit' }] },
+      // Lets the model hold a conversation with the agent across calls
+      // instead of starting cold each time.
+      session: { reuse: 'delegate', keepAlive: 'run' },
+    }),
+  ],
+});
+```
+
+The tool takes `{ prompt }` and returns `{ text }`, and is named `delegate_to_<agentId>` unless you say otherwise. Override `description` to steer *when* the model delegates — that matters far more than the wording.
+
+Underneath it runs the same `step.acpAgent`, so the delegated turn lands in the same item log, usage totals, and event stream as any other step.
+
+## Letting a human decide
+
+A declarative policy can only answer what you told it in advance. When the decision belongs to a person, `askUserForPermission()` publishes the request on an external channel and waits for an answer:
+
+```ts
+import { step } from '@noetic-tools/core';
+import { askUserForPermission, claudeCode } from '@noetic-tools/acp';
+
+step.acpAgent({
+  id: 'review',
+  agent: claudeCode(),
+  prompt: 'Fix the failing test',
+  permissions: { default: 'deny' },            // policy abstains…
+  onPermissionRequest: askUserForPermission(), // …so the human decides
+});
+```
+
+Subscribe once per harness and answer:
+
+```ts
+import type { AgentHarness } from '@noetic-tools/core';
+import {
+  ACP_PERMISSION_SCOPE,
+  acpPermissionDecisions,
+  acpPermissionRequests,
+  resolveAcpPermission,
+} from '@noetic-tools/acp';
+
+declare const harness: AgentHarness;
+declare const showApprovalCard: (prompt: { title: string }) => Promise<string>;
+
+const decisions = harness.getChannelHandle(acpPermissionDecisions, ACP_PERMISSION_SCOPE);
+
+for await (const prompt of harness.getChannelStream(
+  acpPermissionRequests,
+  ACP_PERMISSION_SCOPE,
+)) {
+  // prompt.options are the agent's OWN options — present those, don't invent any.
+  const optionId = await showApprovalCard(prompt);
+  resolveAcpPermission(decisions, {
+    requestId: prompt.requestId,
+    decision: 'allow',
+    optionId,
+  });
+}
+```
+
+The prompt carries what a reviewer needs: `agentId`, `stepId`, `threadId`, the tool `title` and `kind`, the raw input, and the agent's own options.
+
+Subscribe **once** — requests are a queue, so a second subscriber would steal them. Decisions are a topic, broadcast to every waiting handler, each filtering for its own `requestId`. An unanswered prompt denies when it times out (5 minutes by default): waiting must never become approval. Override with `askUserForPermission({ timeout, onTimeout })`.
+
+## Inspecting and steering live sub-agents
+
+The harness exposes the connections it is holding, so a UI can show what is running and act on it:
+
+```ts
+import type { AgentHarness } from '@noetic-tools/core';
+
+declare const harness: AgentHarness;
+declare const key: string;
+
+harness.listAcpSessions();  // key, agentId, sessionId, mode, commands, keepAlive
+harness.getAcpSession(key);
+await harness.cancelAcpSession(key);  // session/cancel — the connection stays open
+await harness.closeAcpSessions();     // release everything held
+```
+
+This is read-and-interrupt only, on purpose. Turns are driven by steps, so nothing here starts work behind the runtime's back — a turn run outside a step would bypass the item log, usage accounting, and the event bridge. Send a follow-up with a step sharing the same `session.reuse` key.
+
 ## JSON workflows
 
 The same agents are available in the [JSON runtime](/docs/framework/json-runtime) as a single node kind. The `agent` field is a registry key, so supporting a new agent needs another registry entry, not a schema change:

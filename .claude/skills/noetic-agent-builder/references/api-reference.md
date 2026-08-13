@@ -294,6 +294,54 @@ const fake = defineAcpAgent({
 
 The Node stdio transport lives at `@noetic-tools/acp/stdio`, so the package's main entry stays runtime-neutral.
 
+### acpAgentTool
+
+Wraps an ACP agent as a `Tool`, so a `callModel` step can delegate by calling it. The model decides *when*; a step decides *for* it.
+
+```typescript
+acpAgentTool({
+  agent: AcpAgent;                       // e.g. claudeCode()
+  name?: string;                         // default `delegate_to_<agentId>`
+  description?: string;                  // steer WHEN the model delegates
+  cwd?, mode?, model?, mcpServers?, permissions?, onPermissionRequest?, clientCapabilities?,
+  session?: AcpSessionPolicy;            // reuse + keepAlive → a conversation across calls
+}): Tool  // input { prompt }, output { text }
+```
+
+Runs the same `step.acpAgent` via `harness.run` on the tool's own context, so the delegated turn lands in the same item log, usage totals, and event stream. Throws `MISSING_ACP_AGENT` with no adapter.
+
+### Human-in-the-loop ACP permissions
+
+`askUserForPermission()` (from `@noetic-tools/acp`) builds an `onPermissionRequest` handler that publishes to an external channel and parks for an answer — the same request/decision shape `@noetic-tools/chat-sdk` uses for tool approvals.
+
+```typescript
+import {
+  ACP_PERMISSION_SCOPE, acpPermissionRequests, acpPermissionDecisions,
+  askUserForPermission, resolveAcpPermission,
+} from '@noetic-tools/acp';
+
+step.acpAgent({ …, permissions: { default: 'deny' }, onPermissionRequest: askUserForPermission() });
+
+// once per harness:
+const decisions = harness.getChannelHandle(acpPermissionDecisions, ACP_PERMISSION_SCOPE);
+for await (const p of harness.getChannelStream(acpPermissionRequests, ACP_PERMISSION_SCOPE)) {
+  resolveAcpPermission(decisions, { requestId: p.requestId, decision: 'allow', optionId: p.options[0].optionId });
+}
+```
+
+Requests are a queue (subscribe ONCE — a second subscriber steals them); decisions are a topic (broadcast, filtered by `requestId`). The handler parks before publishing, since topic delivery reaches only subscribers parked at send time. An unanswered prompt denies on timeout (5 min default; `askUserForPermission({ timeout, onTimeout })`). Because reaching a person means reaching a channel, `onPermissionRequest` receives `(request, ctx, info)` where `info` is `{ agentId, stepId }`.
+
+### Live ACP session control
+
+```typescript
+harness.listAcpSessions(): AcpSessionInfo[]   // key, agentId, sessionId, keepAlive, mode, commands
+harness.getAcpSession(key): AcpLiveSession | undefined
+harness.cancelAcpSession(key): Promise<boolean>   // session/cancel; connection stays open
+harness.closeAcpSessions(): Promise<void>         // release everything held; idempotent
+```
+
+Read-and-interrupt only: turns are driven by steps, so a turn started here would bypass the item log, usage accounting, and event bridge. Follow-ups go through a step sharing the `session.reuse` key.
+
 ### channel
 
 Typed inter-step communication.

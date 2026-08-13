@@ -65,6 +65,7 @@ import {
 } from './deps/runtime';
 import type {
   AcpLiveSession,
+  AcpSessionInfo,
   AgentConfig,
   AgentHarnessContract,
   AgentHooks,
@@ -442,7 +443,58 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
    * multiple steps. Reached by the interpreter's harness handler via
    * `frameworkCast`; do not access from outside core.
    */
+  /**
+   * @internal Live ACP connections keyed by `session.reuse`. Reached by the
+   * interpreter via `frameworkCast`; use {@link listAcpSessions},
+   * {@link getAcpSession}, {@link cancelAcpSession}, and
+   * {@link closeAcpSessions} from outside core.
+   */
   readonly acpSessions = new Map<string, AcpLiveSession>();
+
+  /**
+   * Snapshot of every live ACP sub-agent, for a UI that wants to show what is
+   * running and let a user act on it. Read-only: a session's turns are driven
+   * by steps, so nothing here can start work behind the runtime's back.
+   * @public
+   */
+  listAcpSessions(): AcpSessionInfo[] {
+    return [
+      ...this.acpSessions.entries(),
+    ].map(([key, entry]) => ({
+      key,
+      agentId: entry.agentId,
+      sessionId: entry.session.sessionId,
+      keepAlive: entry.keepAlive,
+      currentModeId: entry.session.modes?.currentModeId,
+      availableModes: entry.session.modes?.availableModes ?? [],
+      availableCommands: entry.session.availableCommands,
+    }));
+  }
+
+  /**
+   * The live connection + session behind a `session.reuse` key, or `undefined`
+   * when nothing is held under it.
+   * @public
+   */
+  getAcpSession(key: string): AcpLiveSession | undefined {
+    return this.acpSessions.get(key);
+  }
+
+  /**
+   * Interrupt whatever the sub-agent under `key` is doing, via `session/cancel`.
+   * The connection stays open and the turn still returns — with the `cancelled`
+   * stop reason, which the running step surfaces as a `cancelled` error.
+   * Returns false when no session is held under that key.
+   * @public
+   */
+  async cancelAcpSession(key: string): Promise<boolean> {
+    const entry = this.acpSessions.get(key);
+    if (!entry) {
+      return false;
+    }
+    await entry.session.cancel();
+    return true;
+  }
 
   /**
    * Close every ACP connection this harness still holds, whatever its
