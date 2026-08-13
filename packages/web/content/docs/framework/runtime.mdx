@@ -193,6 +193,7 @@ Framework events emitted during execution:
 | `{name}:tool_call_started` | Before each tool call. |
 | `{name}:tool_call_completed` | After each tool call. |
 | `{name}:tool_round_completed` | After all tool calls in a round. |
+| `{name}:doom_loop_detected` | The doom-loop guard tripped; the call is about to fail. Data: `{ round, fingerprint, identicalRounds }`. |
 | `{name}:model_call_started` | Before each provider call. Data: `{ round, messageCount, toolCount }`. |
 | `{name}:model_call_first_event` | First SDK event received (time-to-first-token marker). Only emitted when a broadcaster is attached to the context. Data: `{ round }`. |
 | `{name}:model_call_completed` | Provider response fully received. Data: `{ round, itemCount }`. |
@@ -203,6 +204,12 @@ callModel steps support an `emit` option to control step/tool framework event em
 ### Stream Idle Timeout
 
 Each provider call is guarded by a watchdog that aborts the round if no SSE event arrives for 120 seconds. The watchdog re-arms on every stream event, so slow-but-alive responses are never cut short. On timeout, `{name}:model_call_stalled` is emitted and the surrounding turn fails with `turn_aborted { reason: "model stream idle timeout after <N>ms" }`, so upstream providers that quietly drop a connection surface as errors rather than hangs.
+
+### Doom-Loop Guard
+
+The model loop fingerprints every completed tool round — its tool calls (name + canonical arguments) paired with the outputs they produced — and fails the call with a `Doom loop detected` error after a configurable streak of consecutive byte-identical rounds, emitting `{name}:doom_loop_detected` first. Because results are part of the fingerprint, a polling loop whose results evolve (a progress counter, a changing status) never trips; a poll whose result is genuinely constant is indistinguishable from a stuck model and will trip.
+
+Configure the streak per call with `doomLoopIdenticalRounds` on the `callModel` request: it counts identical rounds beyond the first, defaults to `3` (the 4th identical round trips), and `0` (or any non-positive value) disables the guard.
 
 ## run()
 

@@ -91,6 +91,23 @@ interface CallModelRequestBase {
   /** Optional signal for cancelling the in-flight call (used by session abort). */
   signal?: AbortSignal;
   /**
+   * Consecutive identical tool rounds (beyond the first) after which the
+   * doom-loop guard aborts the call. Defaults to `3`, i.e. the 4th identical
+   * round trips it. Pass a non-positive value to disable the guard entirely.
+   *
+   * A round counts as identical only when both the tool calls (name + canonical
+   * arguments) and the tool OUTPUTS repeat byte-for-byte, so a polling loop
+   * whose results evolve — a progress counter, a changing status, a timestamp —
+   * never trips the guard however long it runs.
+   *
+   * The caveat is a poll whose result is genuinely constant: a `check_build`
+   * that returns the identical `"pending"` string on every attempt is
+   * indistinguishable from a stuck model and will trip at the threshold. Raise
+   * the threshold or pass `0` for such agents, or have the tool include
+   * something that advances (an attempt count or elapsed time) in its output.
+   */
+  doomLoopIdenticalRounds?: number;
+  /**
    * @internal Parent span for the model-call spans this request produces. When
    * omitted, the caller falls back to `ctx.span`. Set by `parseAndRunWorkflow`
    * so model/tool spans nest under the root `workflow.run` span.

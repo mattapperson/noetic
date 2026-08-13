@@ -469,6 +469,14 @@ Each queued message carries a `DeliveryMode`:
 
 The harness runs a per-round watchdog over each provider call's SSE stream. The idle timeout is fixed at 120 seconds — long enough that slow models are never falsely aborted, short enough that a stalled SSE becomes a visible error rather than a silent hang. The watchdog re-arms on every stream event; if no event arrives within the window, the round is aborted, `{name}:model_call_stalled` is emitted, and the surrounding turn fails with `turn_aborted { reason: "model stream idle timeout after <N>ms" }`. This prevents silent hangs when a provider drops the connection without sending a terminal event.
 
+### Doom-Loop Guard
+
+The model loop fingerprints every completed tool round as its tool calls (name + canonical arguments, keys sorted at every depth, order-insensitive) PAIRED WITH the tool outputs they produced (joined by `callId`, not position). When the streak of consecutive byte-identical rounds reaches the threshold, the loop emits `{name}:doom_loop_detected` and the call fails with a `Doom loop detected: N consecutive rounds of identical tool calls and results (...)` error instead of burning the remaining tool rounds on a dead end. The verdict is passed at the top of the loop iteration, before another provider call is spent.
+
+Because results are part of the fingerprint, a legitimate polling loop — same request, evolving results (a progress counter, a changing status) — never trips the guard. The caveat is a poll whose result is genuinely constant (e.g. a `check_build` that returns the identical `"pending"` string every time): it is indistinguishable from a stuck model and trips at the threshold. Such agents should raise the threshold, disable the guard, or have the tool include something that advances (attempt count, elapsed time) in its output.
+
+The threshold is configured per call via `CallModelRequest.doomLoopIdenticalRounds`: it counts identical rounds BEYOND the first, defaults to `3` (the 4th identical round trips), and any non-positive value disables the guard entirely. State is per-`callModel` call and never leaks across turns.
+
 ### StreamEvent
 
 Events have a `source` discriminant: `'sdk'` for raw OpenResponses SSE events, `'framework'` for Noetic lifecycle events. Framework events use the harness `config.name` as prefix (e.g., `myagent:step_started`).
@@ -506,6 +514,7 @@ interface FrameworkStreamEvent {
 | `{name}:tool_call_started` | Emitted before each tool call. Data: `{ name, callId }` |
 | `{name}:tool_call_completed` | Emitted after each tool call. Data: `{ name, callId, error }` |
 | `{name}:tool_round_completed` | Emitted after all tool calls in a round. Data: `{ round, toolCount }` |
+| `{name}:doom_loop_detected` | Emitted when the doom-loop guard trips, immediately before the call fails. Data: `{ round, fingerprint, identicalRounds }` — `fingerprint` is the request-side tool-call fingerprint (canonical name + args); tool outputs are folded into the streak decision but not into the payload. |
 | `{name}:model_call_started` | Emitted before each provider call in the tool-round loop. Data: `{ round, messageCount, toolCount }` |
 | `{name}:model_call_first_event` | Emitted when the first SDK event for the call arrives. Useful for measuring time-to-first-token. Only emitted when a broadcaster is attached to the context. Data: `{ round }` |
 | `{name}:model_call_completed` | Emitted after the provider's response is fully received. Data: `{ round, itemCount }` |

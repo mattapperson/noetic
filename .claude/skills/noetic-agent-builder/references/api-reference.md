@@ -1253,6 +1253,10 @@ const items = await harness.previewRequestItems({ threadId: 'thread-1' });
 
 Every in-flight provider call is guarded by a stream-idle watchdog with a fixed 120-second window. The watchdog re-arms on every SSE event; if the stream goes silent for the full window, the harness emits `{name}:model_call_stalled` and the surrounding turn fails with `turn_aborted { reason: "model stream idle timeout after <N>ms" }`, so a provider that quietly drops the connection surfaces as an error rather than a hang.
 
+### Doom-Loop Guard
+
+The model loop fingerprints every completed tool round — tool calls (name + canonical arguments) paired with the outputs they produced — and after a streak of consecutive byte-identical rounds emits `{name}:doom_loop_detected` and fails the call with `Doom loop detected: N consecutive rounds of identical tool calls and results (...)`, instead of burning all remaining tool rounds on a dead end. A polling loop whose results evolve never trips; a poll with a genuinely constant result (e.g. always `"pending"`) is indistinguishable from a stuck model and will trip — raise the threshold, disable the guard, or have the tool include something that advances in its output. Configure per call via `CallModelRequest.doomLoopIdenticalRounds`: identical rounds beyond the first, default `3` (4th identical round trips), non-positive disables.
+
 ### Harness-wide Tools
 
 `AgentHarnessOpts.tools?: Tool[]` seeds a tool pool merged with tools collected from `agentGraph` into every context's `ctx.unifiedTools`. Dedupe is **name-based, first-wins** — the merge order is `[...stepCollectedTools, ...harnessTools]`, so on a name collision the step-collected instance wins. This is the supported way to provide tools when the workflow graph is fully static and `callModel.tools` is a `(ctx) => ctx.unifiedTools.filter(...)` getter — function-form `step.tools` cannot be walked by `collectAllTools`, so the harness option is the only way to make those tools visible to the pool.
