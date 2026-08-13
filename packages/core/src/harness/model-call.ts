@@ -34,6 +34,179 @@ import type { MessageQueue, QueuedMessage } from '../runtime/message-queue';
 import { buildItemSchemaRegistry, createToolResultItem } from './model-schema.js';
 
 const MAX_TOOL_ROUNDS = 32;
+/**
+ * Default consecutive identical tool ROUNDS (beyond the first) that trip the
+ * doom-loop guard — a round being "identical" means the same tool calls *and*
+ * the same tool outputs. Override per call via
+ * `CallModelRequest.doomLoopIdenticalRounds`.
+ */
+const DOOM_LOOP_IDENTICAL_ROUNDS = 3;
+
+/**
+ * Resolve the doom-loop threshold for a call. `undefined` keeps the default;
+ * any non-positive value (including `NaN`, which fails the comparison) disables
+ * the guard entirely rather than tripping it on the first round.
+ */
+function resolveDoomLoopThreshold(request: CallModelRequest): number {
+  const configured = request.doomLoopIdenticalRounds;
+  if (configured === undefined) {
+    return DOOM_LOOP_IDENTICAL_ROUNDS;
+  }
+  return configured > 0 ? configured : 0;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** Sort object keys at every depth. Array order is semantic and is preserved. */
+function sortKeysDeep(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(sortKeysDeep);
+  }
+  if (!isPlainRecord(value)) {
+    return value;
+  }
+  const sorted: Record<string, unknown> = {};
+  for (const key of Object.keys(value).sort()) {
+    sorted[key] = sortKeysDeep(value[key]);
+  }
+  return sorted;
+}
+
+/** Canonicalize a JSON string (keys sorted at every depth) so cosmetic key-order
+ *  differences don't defeat the doom-loop fingerprint. Used for both tool
+ *  arguments and tool outputs. Falls back to the raw string for non-JSON and
+ *  scalar payloads. */
+function canonicalizeJson(raw: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return raw;
+  }
+  if (!isPlainRecord(parsed) && !Array.isArray(parsed)) {
+    return raw;
+  }
+  return JSON.stringify(sortKeysDeep(parsed));
+}
+
+/** One tool call's request side: name + canonical args. */
+function fingerprintToolCall(call: { name: string; arguments: string }): string {
+  return `${call.name}(${canonicalizeJson(call.arguments)})`;
+}
+
+/** Fingerprint a round's tool calls: name + canonical args, order-insensitive.
+ *  Request side only — this is what the `doom_loop_detected` event reports, since
+ *  folding whole tool outputs into an event payload would bloat it. */
+function fingerprintToolCalls(
+  calls: ReadonlyArray<{
+    name: string;
+    arguments: string;
+  }>,
+): string {
+  return calls.map(fingerprintToolCall).sort().join('|');
+}
+
+/** A single tool result produced by a round, paired with the call it answers. */
+interface ToolRoundOutput {
+  callId: string;
+  output: string;
+}
+
+/**
+ * Full round fingerprint: each call's request side paired with the OUTPUT it
+ * produced, sorted so provider-side call reordering doesn't matter.
+ *
+ * Folding the results in is what keeps legitimate polling loops alive. A
+ * poll-until-ready tool is identical on the request side by construction, so a
+ * request-only fingerprint cannot tell `check_build({id})` → `{progress: 40%}`
+ * from a model stuck re-asking the same dead question. Pairing call with result
+ * means only a round that repeats the same requests *and* byte-identical
+ * results counts toward the streak.
+ */
+function fingerprintRound(
+  calls: ReadonlyArray<{
+    callId: string;
+    name: string;
+    arguments: string;
+  }>,
+  outputs: ReadonlyArray<ToolRoundOutput>,
+): string {
+  const outputByCallId = new Map(
+    outputs.map((o) => [
+      o.callId,
+      o.output,
+    ]),
+  );
+  return calls
+    .map(
+      (fc) =>
+        `${fingerprintToolCall(fc)}=>${canonicalizeJson(outputByCallId.get(fc.callId) ?? '')}`,
+    )
+    .sort()
+    .join('|');
+}
+
+/** Per-`callModel` doom-loop streak state. Never shared across calls. */
+interface DoomLoopState {
+  /** Request+result fingerprint of the last completed round — the streak key. */
+  lastRoundFingerprint: string;
+  /** Request-side-only fingerprint of the same round, for the event payload. */
+  lastCallFingerprint: string;
+  identicalRounds: number;
+  /** Tool names from the most recent round, for the error/event message. */
+  lastToolNames: ReadonlyArray<string>;
+}
+
+/**
+ * Fold a just-completed round into the streak. Takes the round's tool calls and
+ * the outputs they produced, so the streak key covers both sides — the whole
+ * point of the guard's polling tolerance (see `fingerprintRound`).
+ */
+function recordDoomLoopRound(params: {
+  state: DoomLoopState;
+  calls: ReadonlyArray<{
+    callId: string;
+    name: string;
+    arguments: string;
+  }>;
+  outputs: ReadonlyArray<ToolRoundOutput>;
+}): void {
+  const { state } = params;
+  const fingerprint = fingerprintRound(params.calls, params.outputs);
+  state.identicalRounds =
+    fingerprint === state.lastRoundFingerprint ? state.identicalRounds + 1 : 0;
+  state.lastRoundFingerprint = fingerprint;
+  state.lastCallFingerprint = fingerprintToolCalls(params.calls);
+  state.lastToolNames = params.calls.map((fc) => fc.name);
+}
+
+/**
+ * Trip the doom-loop guard when the streak of byte-identical rounds reaches the
+ * threshold. A threshold of `0` disables the guard.
+ */
+function assertNotDoomLooping(params: {
+  state: DoomLoopState;
+  threshold: number;
+  round: number;
+  emitIfAllowed: (eventType: string, data: Record<string, unknown>) => void;
+}): void {
+  const { state } = params;
+  if (params.threshold <= 0 || state.identicalRounds < params.threshold) {
+    return;
+  }
+  const identicalRounds = state.identicalRounds + 1;
+  params.emitIfAllowed('doom_loop_detected', {
+    round: params.round,
+    fingerprint: state.lastCallFingerprint,
+    identicalRounds,
+  });
+  throw new Error(
+    `Doom loop detected: ${identicalRounds} consecutive rounds of identical tool calls and results (${state.lastToolNames.join(', ')}).`,
+  );
+}
+
 const MAX_RECOVERY_CONTINUATIONS = 3;
 const EPHEMERAL_CONTINUE_INPUT = 'continue';
 
@@ -530,8 +703,30 @@ export class AgentHarnessModelCaller {
     let invalidRecoveryContinuations = 0;
     let toolLimitRecoveryContinuations = 0;
     let useEphemeralContinue = false;
+    // Doom-loop guard: fingerprint each completed round as its tool calls (name
+    // + canonical args) PAIRED WITH the outputs they produced. N identical
+    // consecutive rounds means the model is stuck re-asking a question whose
+    // answer never changes; fail fast instead of burning the remaining
+    // MAX_TOOL_ROUNDS on the same dead end. Because results are part of the
+    // fingerprint, a polling loop whose results evolve never trips.
+    // State is per-call, so it never leaks across turns.
+    const doomLoopThreshold = resolveDoomLoopThreshold(request);
+    const doomLoop: DoomLoopState = {
+      lastRoundFingerprint: '',
+      lastCallFingerprint: '',
+      identicalRounds: 0,
+      lastToolNames: [],
+    };
 
     while (!request.signal?.aborted) {
+      // Verdict on the streak accumulated by previously completed rounds. Sits
+      // ahead of the model call so a confirmed dead end costs no further tokens.
+      assertNotDoomLooping({
+        state: doomLoop,
+        threshold: doomLoopThreshold,
+        round,
+        emitIfAllowed: prepared.emitIfAllowed,
+      });
       const recoveryContinuation = useEphemeralContinue;
       useEphemeralContinue = false;
       if (round > 0 && request.ctx && hasSessionQueue(request.ctx)) {
@@ -684,7 +879,7 @@ export class AgentHarnessModelCaller {
       if (functionCalls.length === 0 || !request.tools) {
         break;
       }
-      await this.executeToolRound({
+      const roundOutputs = await this.executeToolRound({
         functionCalls,
         request,
         allItems,
@@ -693,6 +888,15 @@ export class AgentHarnessModelCaller {
         emitIfAllowed: prepared.emitIfAllowed,
         spans,
         modelSpan,
+      });
+      // Fold the round we just finished — requests AND their outputs — into the
+      // doom-loop streak. The results only exist now, which is why the streak
+      // updates here and the verdict is passed at the top of the next iteration,
+      // before another model call is spent.
+      recordDoomLoopRound({
+        state: doomLoop,
+        calls: functionCalls,
+        outputs: roundOutputs,
       });
 
       round += 1;
@@ -864,7 +1068,7 @@ export class AgentHarnessModelCaller {
     emitIfAllowed: (eventType: string, data: Record<string, unknown>) => void;
     spans: CallSpanCollector;
     modelSpan: Span;
-  }): Promise<void> {
+  }): Promise<ToolRoundOutput[]> {
     const { functionCalls, request, allItems, conversationInput, spans, modelSpan } = params;
     params.emitIfAllowed('tool_round_started', {
       round: params.round,
@@ -879,6 +1083,9 @@ export class AgentHarnessModelCaller {
         arguments: fc.arguments,
       });
     }
+    // Returned to the caller so the doom-loop fingerprint can pair each request
+    // with the result it produced — see `fingerprintRound`.
+    const outputs: ToolRoundOutput[] = [];
     for (const fc of functionCalls) {
       if (request.signal?.aborted) {
         break;
@@ -887,18 +1094,21 @@ export class AgentHarnessModelCaller {
         (tool) => tool.name === fc.name || sanitizeToolNameForWire(tool.name) === fc.name,
       );
       spans.recordToolSpan(modelSpan, fc.name, toolForCall?.needsApproval ?? false);
-      await this.executeFunctionCall({
-        fc,
-        request,
-        allItems,
-        conversationInput,
-        emitIfAllowed: params.emitIfAllowed,
-      });
+      outputs.push(
+        await this.executeFunctionCall({
+          fc,
+          request,
+          allItems,
+          conversationInput,
+          emitIfAllowed: params.emitIfAllowed,
+        }),
+      );
     }
     params.emitIfAllowed('tool_round_completed', {
       round: params.round,
       toolCount: functionCalls.length,
     });
+    return outputs;
   }
 
   private async executeFunctionCall(params: {
@@ -912,7 +1122,7 @@ export class AgentHarnessModelCaller {
     allItems: Item[];
     conversationInput: ReturnType<typeof itemsToInput>;
     emitIfAllowed: (eventType: string, data: Record<string, unknown>) => void;
-  }): Promise<void> {
+  }): Promise<ToolRoundOutput> {
     const { fc, request, allItems, conversationInput } = params;
     params.emitIfAllowed('tool_call_started', {
       name: fc.name,
@@ -922,14 +1132,13 @@ export class AgentHarnessModelCaller {
     try {
       parsedArgs = JSON.parse(fc.arguments);
     } catch {
-      this.recordMalformedToolCall({
+      return this.recordMalformedToolCall({
         fc,
         request,
         allItems,
         conversationInput,
         emitIfAllowed: params.emitIfAllowed,
       });
-      return;
     }
     if (!request.tools) {
       throw new Error(
@@ -973,6 +1182,10 @@ export class AgentHarnessModelCaller {
       callId: fc.callId,
       error: false,
     });
+    return {
+      callId: fc.callId,
+      output: toolResult.output,
+    };
   }
 
   private recordMalformedToolCall(params: {
@@ -986,7 +1199,7 @@ export class AgentHarnessModelCaller {
     allItems: Item[];
     conversationInput: ReturnType<typeof itemsToInput>;
     emitIfAllowed: (eventType: string, data: Record<string, unknown>) => void;
-  }): void {
+  }): ToolRoundOutput {
     const { fc, request, allItems, conversationInput } = params;
     const errorOutput = `Error: malformed JSON in tool arguments: ${fc.arguments}`;
     const toolForCall = request.tools?.find(
@@ -1013,6 +1226,10 @@ export class AgentHarnessModelCaller {
       callId: fc.callId,
       error: true,
     });
+    return {
+      callId: fc.callId,
+      output: errorOutput,
+    };
   }
 
   private handleToolRoundLimit(params: {

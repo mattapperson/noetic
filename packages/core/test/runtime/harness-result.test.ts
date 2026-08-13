@@ -115,7 +115,9 @@ function functionCallResponse(callNumber: number): MockModelResponse {
         type: 'function_call',
         callId,
         name: 'noop',
-        arguments: '{}',
+        // Varied per round: this fixture exercises the tool-round LIMIT path;
+        // identical arguments would (correctly) trip the doom-loop guard first.
+        arguments: `{"step":${callNumber}}`,
       },
     ],
     usage: {
@@ -123,6 +125,62 @@ function functionCallResponse(callNumber: number): MockModelResponse {
       outputTokens: 1,
     },
   });
+}
+
+interface PollingClientConfig {
+  toolName: string;
+  /** Sent verbatim on every round — a poll's request side never varies. */
+  toolArgs: string;
+  /** Round index at which the model stops polling and answers. */
+  stopAfterRounds: number;
+}
+
+/**
+ * A model that polls one tool with BYTE-IDENTICAL arguments every round until
+ * the tool reports ready, then answers. This is the exact shape of a legitimate
+ * wait/poll loop: the request side cannot vary, only the result can.
+ */
+class PollingClient {
+  calls = 0;
+  private readonly config: PollingClientConfig;
+
+  constructor(config: PollingClientConfig) {
+    this.config = config;
+  }
+
+  callModel(): {
+    getFullResponsesStream: () => AsyncIterable<unknown>;
+    getResponse: () => Promise<MockModelResponse>;
+  } {
+    const callNumber = this.calls++;
+    const { toolName, toolArgs, stopAfterRounds } = this.config;
+    return {
+      async *getFullResponsesStream() {},
+      getResponse: async () => {
+        if (callNumber >= stopAfterRounds) {
+          return messageResponse(`resp-final-${callNumber}`, 'build is ready');
+        }
+        return frameworkCast<MockModelResponse>({
+          id: `resp-${callNumber}`,
+          status: 'completed',
+          output: [
+            {
+              id: `fc-${callNumber}`,
+              status: 'completed',
+              type: 'function_call',
+              callId: `call_${callNumber}`,
+              name: toolName,
+              arguments: toolArgs,
+            },
+          ],
+          usage: {
+            inputTokens: 1,
+            outputTokens: 1,
+          },
+        });
+      },
+    };
+  }
 }
 
 class ToolLimitRecoveryClient {
@@ -533,6 +591,463 @@ describe('AgentHarness session accessors', () => {
     expect(
       collected.some((item) => item.type === 'function_call_output' && item.callId === 'call-noop'),
     ).toBe(true);
+  });
+
+  it('throws a structured doom-loop error on repeated identical tool rounds', async () => {
+    class StuckClient {
+      calls = 0;
+      callModel(): {
+        getFullResponsesStream: () => AsyncIterable<unknown>;
+        getResponse: () => Promise<MockModelResponse>;
+      } {
+        const callNumber = this.calls++;
+        return {
+          async *getFullResponsesStream() {},
+          getResponse: async () =>
+            frameworkCast<MockModelResponse>({
+              id: `resp-${callNumber}`,
+              status: 'completed',
+              output: [
+                {
+                  id: `fc-${callNumber}`,
+                  status: 'completed',
+                  type: 'function_call',
+                  callId: `call_${callNumber}`,
+                  name: 'noop',
+                  arguments: '{}', // identical every round — a stuck model
+                },
+              ],
+              usage: {
+                inputTokens: 1,
+                outputTokens: 1,
+              },
+            }),
+        };
+      }
+    }
+    const fakeClient = new StuckClient();
+    const noopTool = tool({
+      name: 'noop',
+      description: 'Always returns ok',
+      input: z.object({}),
+      output: z.object({
+        ok: z.boolean(),
+      }),
+      execute: async () => ({
+        ok: true,
+      }),
+    });
+    const harness = new AgentHarness({
+      name: 'test',
+      params: {},
+    });
+    frameworkCast<{
+      client: StuckClient;
+    }>(harness).client = fakeClient;
+    const ctx = harness.createContext();
+
+    await expect(
+      harness.callModel({
+        model: 'test/model',
+        items: [
+          makeMessage('user', 'go'),
+        ],
+        tools: [
+          noopTool,
+        ],
+        ctx,
+      }),
+    ).rejects.toThrow('Doom loop detected');
+    // Guard trips after 4 identical rounds (1 + DOOM_LOOP_IDENTICAL_ROUNDS),
+    // not after the 32-round limit.
+    expect(fakeClient.calls).toBeLessThan(10);
+  });
+
+  it('does not trip the doom-loop guard when only a nested argument value differs', async () => {
+    // The fingerprint canonicalizes arguments by sorting keys at EVERY depth. A
+    // top-level-only key allowlist would collapse `{"filter":{"page":N}}` to
+    // `{"filter":{}}` for all N and abort this healthy run.
+    class NestedArgsClient {
+      calls = 0;
+      callModel(): {
+        getFullResponsesStream: () => AsyncIterable<unknown>;
+        getResponse: () => Promise<MockModelResponse>;
+      } {
+        const callNumber = this.calls++;
+        return {
+          async *getFullResponsesStream() {},
+          getResponse: async () => {
+            if (callNumber >= 6) {
+              return messageResponse(`resp-final-${callNumber}`, 'done');
+            }
+            return frameworkCast<MockModelResponse>({
+              id: `resp-${callNumber}`,
+              status: 'completed',
+              output: [
+                {
+                  id: `fc-${callNumber}`,
+                  status: 'completed',
+                  type: 'function_call',
+                  callId: `call_${callNumber}`,
+                  name: 'search',
+                  arguments: `{"filter":{"page":${callNumber},"kind":"doc"}}`,
+                },
+              ],
+              usage: {
+                inputTokens: 1,
+                outputTokens: 1,
+              },
+            });
+          },
+        };
+      }
+    }
+    const fakeClient = new NestedArgsClient();
+    const searchTool = tool({
+      name: 'search',
+      description: 'Paginated search',
+      input: z.object({
+        filter: z.object({
+          page: z.number(),
+          kind: z.string(),
+        }),
+      }),
+      output: z.object({
+        ok: z.boolean(),
+      }),
+      execute: async () => ({
+        ok: true,
+      }),
+    });
+    const harness = new AgentHarness({
+      name: 'test',
+      params: {},
+    });
+    frameworkCast<{
+      client: NestedArgsClient;
+    }>(harness).client = fakeClient;
+    const ctx = harness.createContext();
+
+    const response = await harness.callModel({
+      model: 'test/model',
+      items: [
+        makeMessage('user', 'go'),
+      ],
+      tools: [
+        searchTool,
+      ],
+      ctx,
+    });
+
+    // Six distinct tool rounds ran to completion, then the final message.
+    expect(fakeClient.calls).toBe(7);
+    expect(
+      response.items.some((item) => item.type === 'message' && item.role === 'assistant'),
+    ).toBe(true);
+  });
+
+  it('does not trip the doom-loop guard on a polling loop whose tool results evolve', async () => {
+    // The canonical false positive (finding #15): `check_build` is called with
+    // byte-identical arguments on every attempt — that IS what polling looks
+    // like — and only the RESULT advances. A request-only fingerprint aborts
+    // this run on the 4th poll, two polls before the build is ready.
+    const readyOnPoll = 6;
+    const fakeClient = new PollingClient({
+      toolName: 'check_build',
+      toolArgs: '{"id":"build-7"}',
+      stopAfterRounds: readyOnPoll,
+    });
+    let pollsServed = 0;
+    const checkBuildTool = tool({
+      name: 'check_build',
+      description: 'Poll a build until it is ready',
+      input: z.object({
+        id: z.string(),
+      }),
+      output: z.object({
+        status: z.string(),
+        progress: z.number(),
+      }),
+      execute: async () => {
+        pollsServed += 1;
+        // Progress advances on every poll, so consecutive rounds are never
+        // byte-identical on the result side.
+        return pollsServed >= readyOnPoll
+          ? {
+              status: 'ready',
+              progress: 100,
+            }
+          : {
+              status: 'pending',
+              progress: pollsServed * 15,
+            };
+      },
+    });
+    const harness = new AgentHarness({
+      name: 'test',
+      params: {},
+    });
+    frameworkCast<{
+      client: PollingClient;
+    }>(harness).client = fakeClient;
+    const ctx = harness.createContext();
+
+    const response = await harness.callModel({
+      model: 'test/model',
+      items: [
+        makeMessage('user', 'wait for build-7'),
+      ],
+      tools: [
+        checkBuildTool,
+      ],
+      ctx,
+    });
+
+    // Survived well past the 4-round threshold and reached the ready state.
+    expect(pollsServed).toBe(readyOnPoll);
+    expect(fakeClient.calls).toBe(readyOnPoll + 1);
+    expect(
+      response.items.some((item) => item.type === 'message' && item.role === 'assistant'),
+    ).toBe(true);
+  });
+
+  it('still trips the doom-loop guard when request AND result are both identical', async () => {
+    // The other half of the fix: folding results in must not defang the guard.
+    // A tool whose output never changes is indistinguishable from a stuck model.
+    const fakeClient = new PollingClient({
+      toolName: 'check_build',
+      toolArgs: '{"id":"build-7"}',
+      stopAfterRounds: Number.MAX_SAFE_INTEGER,
+    });
+    let pollsServed = 0;
+    const stuckPollTool = tool({
+      name: 'check_build',
+      description: 'Poll a build that never progresses',
+      input: z.object({
+        id: z.string(),
+      }),
+      output: z.object({
+        status: z.string(),
+      }),
+      execute: async () => {
+        pollsServed += 1;
+        return {
+          status: 'pending',
+        };
+      },
+    });
+    const harness = new AgentHarness({
+      name: 'test',
+      params: {},
+    });
+    frameworkCast<{
+      client: PollingClient;
+    }>(harness).client = fakeClient;
+    const ctx = harness.createContext();
+
+    await expect(
+      harness.callModel({
+        model: 'test/model',
+        items: [
+          makeMessage('user', 'wait for build-7'),
+        ],
+        tools: [
+          stuckPollTool,
+        ],
+        ctx,
+      }),
+    ).rejects.toThrow('Doom loop detected');
+    // Four identical rounds ran (1 + DOOM_LOOP_IDENTICAL_ROUNDS), then the
+    // guard tripped at the top of the fifth before spending another call.
+    expect(pollsServed).toBe(4);
+    expect(fakeClient.calls).toBe(4);
+  });
+
+  it('disables the doom-loop guard entirely when doomLoopIdenticalRounds is 0', async () => {
+    // An opt-out for poll-heavy agents whose tool output is genuinely constant.
+    // Without the guard the run instead terminates via the tool-round limit.
+    const fakeClient = new PollingClient({
+      toolName: 'check_build',
+      toolArgs: '{"id":"build-7"}',
+      stopAfterRounds: Number.MAX_SAFE_INTEGER,
+    });
+    const constantPollTool = tool({
+      name: 'check_build',
+      description: 'Poll a build that never progresses',
+      input: z.object({
+        id: z.string(),
+      }),
+      output: z.object({
+        status: z.string(),
+      }),
+      execute: async () => ({
+        status: 'pending',
+      }),
+    });
+    const harness = new AgentHarness({
+      name: 'test',
+      params: {},
+    });
+    frameworkCast<{
+      client: PollingClient;
+    }>(harness).client = fakeClient;
+    const ctx = harness.createContext();
+
+    await expect(
+      harness.callModel({
+        model: 'test/model',
+        items: [
+          makeMessage('user', 'wait for build-7'),
+        ],
+        tools: [
+          constantPollTool,
+        ],
+        ctx,
+        doomLoopIdenticalRounds: 0,
+      }),
+    ).rejects.toThrow('exceeded maximum tool rounds');
+    // Ran far past the 4-round doom threshold — only MAX_TOOL_ROUNDS stopped it.
+    expect(fakeClient.calls).toBeGreaterThan(30);
+  });
+
+  it('respects a custom doomLoopIdenticalRounds threshold', async () => {
+    const fakeClient = new PollingClient({
+      toolName: 'check_build',
+      toolArgs: '{"id":"build-7"}',
+      stopAfterRounds: Number.MAX_SAFE_INTEGER,
+    });
+    const constantPollTool = tool({
+      name: 'check_build',
+      description: 'Poll a build that never progresses',
+      input: z.object({
+        id: z.string(),
+      }),
+      output: z.object({
+        status: z.string(),
+      }),
+      execute: async () => ({
+        status: 'pending',
+      }),
+    });
+    const harness = new AgentHarness({
+      name: 'test',
+      params: {},
+    });
+    frameworkCast<{
+      client: PollingClient;
+    }>(harness).client = fakeClient;
+    const ctx = harness.createContext();
+
+    await expect(
+      harness.callModel({
+        model: 'test/model',
+        items: [
+          makeMessage('user', 'wait for build-7'),
+        ],
+        tools: [
+          constantPollTool,
+        ],
+        ctx,
+        doomLoopIdenticalRounds: 8,
+      }),
+    ).rejects.toThrow('9 consecutive rounds of identical tool calls and results');
+    // Threshold 8 means the 9th identical round trips — nine rounds executed.
+    expect(fakeClient.calls).toBe(9);
+  });
+
+  it('pairs each parallel tool result with its own call, not by position', async () => {
+    // Two parallel reads whose results are stable but DIFFERENT from each other.
+    // A fingerprint that concatenated results positionally instead of joining on
+    // callId would still be stable here, so the real assertion is the negative
+    // one below: swapping which file returns which body must break the streak.
+    class ParallelReadClient {
+      calls = 0;
+      callModel(): {
+        getFullResponsesStream: () => AsyncIterable<unknown>;
+        getResponse: () => Promise<MockModelResponse>;
+      } {
+        const callNumber = this.calls++;
+        return {
+          async *getFullResponsesStream() {},
+          getResponse: async () =>
+            frameworkCast<MockModelResponse>({
+              id: `resp-${callNumber}`,
+              status: 'completed',
+              output: [
+                {
+                  id: `fc-a-${callNumber}`,
+                  status: 'completed',
+                  type: 'function_call',
+                  callId: `call_a_${callNumber}`,
+                  name: 'read_file',
+                  arguments: '{"path":"a.txt"}',
+                },
+                {
+                  id: `fc-b-${callNumber}`,
+                  status: 'completed',
+                  type: 'function_call',
+                  callId: `call_b_${callNumber}`,
+                  name: 'read_file',
+                  arguments: '{"path":"b.txt"}',
+                },
+              ],
+              usage: {
+                inputTokens: 1,
+                outputTokens: 1,
+              },
+            }),
+        };
+      }
+    }
+    const fakeClient = new ParallelReadClient();
+    // Bodies swap between a.txt and b.txt on every round: the multiset of
+    // results is constant, only the call→result pairing changes. Correct
+    // pairing sees two distinct rounds and never trips; positional pairing
+    // would see one repeated round and abort.
+    let roundsServed = 0;
+    const readFileTool = tool({
+      name: 'read_file',
+      description: 'Read a file',
+      input: z.object({
+        path: z.string(),
+      }),
+      output: z.object({
+        body: z.string(),
+      }),
+      execute: async (args) => {
+        // Two calls per round; flip the mapping each round.
+        const swapped = Math.floor(roundsServed / 2) % 2 === 1;
+        roundsServed += 1;
+        const isA = args.path === 'a.txt';
+        return {
+          body: isA === swapped ? 'BODY-B' : 'BODY-A',
+        };
+      },
+    });
+    const harness = new AgentHarness({
+      name: 'test',
+      params: {},
+    });
+    frameworkCast<{
+      client: ParallelReadClient;
+    }>(harness).client = fakeClient;
+    const ctx = harness.createContext();
+
+    await expect(
+      harness.callModel({
+        model: 'test/model',
+        items: [
+          makeMessage('user', 'read both'),
+        ],
+        tools: [
+          readFileTool,
+        ],
+        ctx,
+      }),
+    ).rejects.toThrow('exceeded maximum tool rounds');
+    // Never tripped the doom guard: the alternating pairing kept every
+    // consecutive pair of rounds distinct, so only MAX_TOOL_ROUNDS stopped it.
+    expect(fakeClient.calls).toBeGreaterThan(30);
   });
 
   it('recovers from the tool-round limit with an ephemeral continue retry', async () => {
