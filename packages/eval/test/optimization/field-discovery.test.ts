@@ -93,8 +93,10 @@ describe('discoverFields', () => {
 
     expect(fields).toHaveLength(3);
     expect(fields[0].fieldKind).toBe(FieldKind.Instructions);
+    expect(fields[1].path).toBe('llm-with-tools.tools.0.description');
     expect(fields[1].fieldKind).toBe(FieldKind.ToolDescription);
     expect(fields[1].value).toBe('Search the web');
+    expect(fields[2].path).toBe('llm-with-tools.tools.0.name');
     expect(fields[2].fieldKind).toBe(FieldKind.ToolName);
     expect(fields[2].value).toBe('search');
   });

@@ -3,6 +3,7 @@ import type { Step } from '@noetic-tools/core';
 import type { OptimizeConfig } from '../types/eval';
 import { OptimizeScope } from '../types/eval';
 import type {
+  ApplyResult,
   Candidate,
   CodingAgent,
   OptimizableField,
@@ -13,19 +14,28 @@ import { discoverFields } from './field-discovery';
 import type { GepaConfig } from './gepa-bridge';
 import type { WriteBackEntry, WriteBackReport } from './source-writer';
 import { writeOptimizedValues } from './source-writer';
+import { assertWritableUnderVersionControl } from './write-guard';
 
 //#region Types
+
+type GepaBridgeModule = Pick<typeof import('./gepa-bridge'), 'optimizeWithGepa'>;
 
 export interface OptimizeOptions {
   step: Step;
   scope: OptimizeConfig['scope'];
   runEval: (step: Step) => Promise<Record<string, number>>;
   maxMetricCalls?: number;
-  budget?: number;
   dryRun?: boolean;
+  /**
+   * Skip the version-control write-back guard. By default every target file
+   * must be git-tracked and unmodified before the optimizer rewrites it —
+   * see write-guard.ts. CLI: --force-dirty.
+   */
+  forceDirty?: boolean;
   codingAgent?: CodingAgent;
   preEnrichedFields?: OptimizableField[];
   gepa?: GepaConfig;
+  loadGepaBridge?: () => Promise<GepaBridgeModule>;
 }
 
 export interface OptimizeResult {
@@ -41,6 +51,12 @@ export interface OptimizeResult {
   writtenBack: boolean;
   /** Per-entry outcome of the write-back pass (absent under `dryRun` or when nothing changed). */
   writeBackReport?: WriteBackReport;
+  /**
+   * Outcome of the L3 coding-agent pass (absent when no agent ran). A failed
+   * apply is reported, never swallowed — the caller decides whether a partial
+   * optimization is acceptable.
+   */
+  codingAgentResult?: ApplyResult;
 }
 
 //#endregion
@@ -114,7 +130,13 @@ function buildCodingAgentRecommendation(
 //#region Public API
 
 export async function optimize(options: OptimizeOptions): Promise<OptimizeResult> {
-  const fields = options.preEnrichedFields ?? discoverFields(options.step);
+  /* The scope MUST reach discovery: without it, PromptsOnly still discovers
+   * ToolName fields — which the teacher then mutates and write-back splices
+   * into source, breaking every name-keyed reference (steering whitelists,
+   * allowedToolNames). The CLI pre-filters via preEnrichedFields, which
+   * masked this for programmatic callers. */
+  const fields =
+    options.preEnrichedFields ?? discoverFields(options.step, undefined, options.scope);
 
   if (fields.length === 0) {
     return {
@@ -129,34 +151,77 @@ export async function optimize(options: OptimizeOptions): Promise<OptimizeResult
   /* Loaded on demand: gepa-bridge pulls in `@ax-llm/ax`, an OPTIONAL peer
    * dependency. A static import would make every `@noetic-tools/eval` consumer —
    * including suites that only use describe/it/scorer — need it installed. */
-  const { optimizeWithGepa } = await import('./gepa-bridge');
+  const loadGepaBridge = options.loadGepaBridge ?? (() => import('./gepa-bridge'));
+  const { optimizeWithGepa } = await loadGepaBridge();
   const result = await optimizeWithGepa({
     step: options.step,
     fields,
     runEval: options.runEval,
     maxMetricCalls: options.maxMetricCalls,
-    budget: options.budget,
     gepa: options.gepa,
   });
 
-  // L3 optimization: delegate structural changes to coding agent
-  if (options.scope === OptimizeScope.Full && options.codingAgent) {
+  const entriesToWrite = options.dryRun ? [] : buildWriteBackEntries(fields, result.bestCandidate);
+  const runAgent = options.scope === OptimizeScope.Full && options.codingAgent !== undefined;
+
+  /* Version-control guard runs BEFORE anything mutates files — over the union
+   * of the L1 write-back targets and the L3 agent's target files. Running the
+   * agent first meant the guard then saw the agent's own uncommitted edits as
+   * "dirty" and blocked the literal write-back it exists to protect. */
+  const agentTargetFiles = runAgent
+    ? buildCodingAgentRecommendation(fields, result).targetFiles.map((f) => f.path)
+    : [];
+  const filesToGuard = [
+    ...new Set([
+      ...entriesToWrite.map((e) => e.sourceLocation.filePath),
+      ...agentTargetFiles,
+    ]),
+  ];
+  if (filesToGuard.length > 0) {
+    const guarded = assertWritableUnderVersionControl(filesToGuard, options.forceDirty);
+    if (options.forceDirty && guarded.some((v) => v.status !== 'clean')) {
+      console.warn(
+        `optimize: writing into ${guarded.filter((v) => v.status !== 'clean').length} dirty/untracked file(s) under --force-dirty.`,
+      );
+    }
+  }
+
+  // L3 optimization: delegate structural changes to the coding agent. Its
+  // result is surfaced, never discarded — a failed apply must be visible.
+  let codingAgentResult: ApplyResult | undefined;
+  if (runAgent && options.codingAgent) {
     const recommendation = buildCodingAgentRecommendation(fields, result);
-    await options.codingAgent.apply(recommendation);
+    codingAgentResult = await options.codingAgent.apply(recommendation);
+    if (!codingAgentResult.success) {
+      console.warn(
+        `optimize: coding agent apply failed${codingAgentResult.error ? `: ${codingAgentResult.error}` : ''}`,
+      );
+    }
   }
 
   let writtenBack = false;
   let writeBackReport: WriteBackReport | undefined;
-  if (!options.dryRun) {
-    const entriesToWrite = buildWriteBackEntries(fields, result.bestCandidate);
-    if (entriesToWrite.length > 0) {
-      writeBackReport = await writeOptimizedValues(entriesToWrite);
-      for (const skip of writeBackReport.skipped) {
-        const { filePath, line, column } = skip.sourceLocation;
-        console.warn(`Write-back skipped at ${filePath}:${line}:${column}: ${skip.reason}`);
-      }
-      writtenBack = writeBackReport.written > 0 && writeBackReport.skipped.length === 0;
+  if (entriesToWrite.length > 0) {
+    /* Files the agent just rewrote have stale source locations — the line/col
+     * recorded at discovery no longer describes the file. Splicing anyway
+     * would corrupt source (the mismatch guard catches value drift, but a
+     * moved literal at the same position would still splice wrong). Skip
+     * those entries and report them. */
+    const agentChanged = new Set(codingAgentResult?.changedFiles ?? []);
+    const safeEntries = entriesToWrite.filter((e) => !agentChanged.has(e.sourceLocation.filePath));
+    const staleEntries = entriesToWrite.filter((e) => agentChanged.has(e.sourceLocation.filePath));
+    writeBackReport = await writeOptimizedValues(safeEntries);
+    for (const stale of staleEntries) {
+      writeBackReport.skipped.push({
+        sourceLocation: stale.sourceLocation,
+        reason: 'file rewritten by the coding agent this run; source location is stale',
+      });
     }
+    for (const skip of writeBackReport.skipped) {
+      const { filePath, line, column } = skip.sourceLocation;
+      console.warn(`Write-back skipped at ${filePath}:${line}:${column}: ${skip.reason}`);
+    }
+    writtenBack = writeBackReport.written > 0 && writeBackReport.skipped.length === 0;
   }
 
   return {
@@ -166,6 +231,7 @@ export async function optimize(options: OptimizeOptions): Promise<OptimizeResult
     iterations: result.iterations,
     writtenBack,
     writeBackReport,
+    codingAgentResult,
   };
 }
 

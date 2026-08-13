@@ -10,13 +10,15 @@ function replaceToolListFields(
   candidate: Candidate,
   path: string,
 ): (Tool | ServerToolSpec)[] {
-  return tools.map((t) => {
+  return tools.map((t, i) => {
     // Server tools (web_search/web_fetch) have no optimizable fields — pass through.
     if (isServerToolSpec(t)) {
       return t;
     }
-    const name = candidate[`${path}.tools.${t.name}.name`] ?? t.name;
-    const description = candidate[`${path}.tools.${t.name}.description`] ?? t.description;
+    /* Index-keyed to match field-discovery: renaming a tool must not
+     * invalidate the candidate keys for its other fields. */
+    const name = candidate[`${path}.tools.${i}.name`] ?? t.name;
+    const description = candidate[`${path}.tools.${i}.description`] ?? t.description;
     return {
       ...t,
       name,

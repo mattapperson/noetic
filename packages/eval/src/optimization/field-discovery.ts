@@ -55,24 +55,30 @@ function extractCallModelFields(
   if (!Array.isArray(step.tools)) {
     return;
   }
-  for (const t of step.tools) {
+  step.tools.forEach((t, i) => {
     // Server tools (web_search/web_fetch) carry no optimizable name/description.
     if (isServerToolSpec(t)) {
-      continue;
+      return;
     }
+    /* Tool fields are keyed by array INDEX, not by name. The name is itself an
+     * optimizable field: keying by it meant a candidate that renamed a tool
+     * invalidated every other candidate key for that tool on the next
+     * applyCandidate pass (lookup by new name, keys built from old name), and
+     * two tools could collide if the teacher renamed one onto the other. The
+     * index is stable for the lifetime of an optimization run. */
     fields.push({
-      path: `${path}.tools.${t.name}.description`,
+      path: `${path}.tools.${i}.description`,
       value: t.description,
       stepId: step.id,
       fieldKind: FieldKind.ToolDescription,
     });
     fields.push({
-      path: `${path}.tools.${t.name}.name`,
+      path: `${path}.tools.${i}.name`,
       value: t.name,
       stepId: step.id,
       fieldKind: FieldKind.ToolName,
     });
-  }
+  });
 }
 
 function extractInvokeToolFields(

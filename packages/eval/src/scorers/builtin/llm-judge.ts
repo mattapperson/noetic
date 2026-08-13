@@ -35,20 +35,55 @@ export function resolveJudgeProvider(judge?: JudgeConfig): LlmProviderConfig | u
   return judge?.callModel ?? resolveEnvLlm();
 }
 
+/**
+ * Judge step + harness caches. A 50-case suite runs the SAME judge (same id,
+ * instructions, model) 50 times; rebuilding the step and a fresh harness per
+ * call cost an allocation each and — worse — gave every call a fresh context
+ * with nothing shared, so provider prompt caches never saw a repeated prefix.
+ * One step per (id, model, instructions) and one harness per provider config
+ * make every judge call after the first byte-identical up to the case input.
+ */
+const judgeStepCache = new Map<string, ReturnType<typeof callModel>>();
+const judgeHarnessCache = new Map<string, AgentHarness>();
+
+function judgeStepFor(
+  id: string,
+  model: string,
+  instructions: string,
+): ReturnType<typeof callModel> {
+  const key = `${id}\u0000${model}\u0000${instructions}`;
+  let cached = judgeStepCache.get(key);
+  if (!cached) {
+    cached = callModel({
+      id,
+      model,
+      instructions: `${instructions}\n\nRespond ONLY with valid JSON matching the required schema.`,
+    });
+    judgeStepCache.set(key, cached);
+  }
+  return cached;
+}
+
+function judgeHarnessFor(callModelDefaults?: LlmProviderConfig): AgentHarness {
+  const key = JSON.stringify(callModelDefaults ?? null);
+  let cached = judgeHarnessCache.get(key);
+  if (!cached) {
+    cached = new AgentHarness({
+      name: 'llm-judge',
+      params: {},
+      callModelDefaults,
+    });
+    judgeHarnessCache.set(key, cached);
+  }
+  return cached;
+}
+
 export async function runJudge<T>(config: JudgeRunConfig<T>): Promise<T> {
   const model = config.judge?.model ?? DEFAULT_MODEL;
-
-  const judgeStep = callModel({
-    id: config.id,
-    model,
-    instructions: `${config.instructions}\n\nRespond ONLY with valid JSON matching the required schema.`,
-  });
-
-  const harness = new AgentHarness({
-    name: 'llm-judge',
-    params: {},
-    callModelDefaults: resolveJudgeProvider(config.judge),
-  });
+  const judgeStep = judgeStepFor(config.id, model, config.instructions);
+  const harness = judgeHarnessFor(resolveJudgeProvider(config.judge));
+  // A fresh context per call keeps judge invocations independent (no shared
+  // history); the shared harness/step give them a stable prompt prefix.
   const ctx = harness.createContext();
 
   const raw = await harness.run(judgeStep, config.input, ctx);

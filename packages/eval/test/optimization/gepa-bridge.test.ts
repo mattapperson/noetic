@@ -29,7 +29,7 @@ function makeFields(): OptimizableField[] {
       fieldKind: FieldKind.Instructions,
     },
     {
-      path: 'agent.tools.search.description',
+      path: 'agent.tools.0.description',
       value: 'original tool description',
       stepId: 'agent',
       fieldKind: FieldKind.ToolDescription,
@@ -154,7 +154,7 @@ describe('createGepaAdapter evaluate', () => {
 
     const improved: Candidate = {
       [INSTRUCTIONS_PATH]: 'improved instructions',
-      'agent.tools.search.description': 'improved tool description',
+      'agent.tools.0.description': 'improved tool description',
     };
     const text = serializeFields(
       improved,
@@ -263,7 +263,7 @@ describe('createGepaAdapter propose_new_texts', () => {
     const currentText = serializeFields(
       {
         [INSTRUCTIONS_PATH]: 'original instructions',
-        'agent.tools.search.description': 'original tool description',
+        'agent.tools.0.description': 'original tool description',
       },
       fieldOrder,
     );
@@ -286,7 +286,7 @@ describe('createGepaAdapter propose_new_texts', () => {
     const parsed = parseFieldText(result[COMPONENT_ID]);
     expect(parsed).toEqual({
       [INSTRUCTIONS_PATH]: 'original instructions (improved)',
-      'agent.tools.search.description': 'original tool description (improved)',
+      'agent.tools.0.description': 'original tool description (improved)',
     });
   });
 
@@ -313,7 +313,7 @@ describe('createGepaAdapter propose_new_texts', () => {
         [COMPONENT_ID]: serializeFields(
           {
             [INSTRUCTIONS_PATH]: 'original instructions',
-            'agent.tools.search.description': 'original tool description',
+            'agent.tools.0.description': 'original tool description',
           },
           fields.map((f) => f.path),
         ),
@@ -326,7 +326,7 @@ describe('createGepaAdapter propose_new_texts', () => {
 
     expect(parseFieldText(result[COMPONENT_ID])).toEqual({
       [INSTRUCTIONS_PATH]: 'original instructions',
-      'agent.tools.search.description': 'original tool description v2',
+      'agent.tools.0.description': 'original tool description v2',
     });
   });
 
@@ -355,7 +355,7 @@ describe('createGepaAdapter propose_new_texts', () => {
 
     expect(parseFieldText(result[COMPONENT_ID])).toEqual({
       [INSTRUCTIONS_PATH]: 'original instructions!',
-      'agent.tools.search.description': 'original tool description!',
+      'agent.tools.0.description': 'original tool description!',
     });
   });
 });
@@ -368,7 +368,7 @@ describe('extractBestCandidate', () => {
   const fields = makeFields();
   const initialCandidate: Candidate = {
     [INSTRUCTIONS_PATH]: 'original instructions',
-    'agent.tools.search.description': 'original tool description',
+    'agent.tools.0.description': 'original tool description',
   };
   const fieldOrder = fields.map((f) => f.path);
 
