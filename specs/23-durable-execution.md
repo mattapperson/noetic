@@ -191,7 +191,7 @@ interface LocalSubprocessManifest {
 Entries live under the harness's `StorageAdapter`, default root `~/.noetic/subprocess/` (via `createFileStorage({root: resolveSubprocessRoot()})`). On `reattach(handleId)` the adapter:
 
 1. Loads the manifest entry.
-2. Re-queries `pidStarttime` against `ps -p <pid> -o lstart=`. A mismatch means the pid was recycled and the original child is gone — the handle is marked `stopped` and the manifest cleared. A match means the original child is still alive.
+2. Re-queries `pidStarttime` — on Linux via the `/proc/<pid>/stat` starttime fast path (field 22, read in microseconds), falling back to `ps -p <pid> -o lstart=` elsewhere or when `/proc` is restricted. `ProcessSignaller.startTime` may be sync or async; callers must await. A mismatch means the pid was recycled and the original child is gone — the handle is marked `stopped` and the manifest cleared. A match means the original child is still alive.
 3. Rebinds the unix-domain socket at `socketPath` so the IPC server resumes accepting frames.
 4. Returns a rehydrated `SubprocessHandle` whose `status` reflects current liveness.
 
@@ -248,7 +248,8 @@ Invariants:
 
 - `headSeq` is the highest seq ever assigned. Appends start at `headSeq + 1`. Monotonic across the queue's lifetime; never reused even after full compaction.
 - `lastAckedSeq <= headSeq`. No frame with `seq <= lastAckedSeq` is persisted.
-- `ackUpTo(seq)` advances `lastAckedSeq` and deletes every frame in `(previousAck, seq]`.
+- `ackUpTo(seq)` advances `lastAckedSeq` and deletes every frame in `(previousAck, seq]` — by computed key, not a storage scan; `storage.delete` on an already-gone key is a no-op, so gaps cost nothing.
+- `clear()` removes every persisted frame and settles the ack watermark (`lastAckedSeq := headSeq`) but does **not** reset `headSeq` — a queue that appends again continues the sequence, so clients holding a pre-clear delivery watermark don't silently drop new frames. `queueSize()` is `headSeq - lastAckedSeq`.
 
 Recovery: on load, the queue walks the `frame:` prefix and merges with the cached `meta` doc. A crash between frame write and meta flush leaves a frame whose seq is above the cached `headSeq`; the scan detects it and bumps `headSeq = max(cachedHead, scannedSeq)`.
 
@@ -292,6 +293,12 @@ A server that composes a `DurableOutboundQueue` wraps every non-handshake outbou
 3. Send `{ type: 'durable', seq, frame: originalFrameObject }` on the socket.
 
 On a client reconnect that carries a `durableResume { ackedThrough }` handshake, the server replays `queue.frameRange(ackedThrough + 1)` in order before resuming live emission. On a `durableAck { throughSeq }` the server calls `queue.ackUpTo(throughSeq)` to compact.
+
+Server-side dispatch and backpressure guarantees:
+
+- **Ordered dispatch** — frames from one client execute strictly in arrival order via a per-client promise chain, so a `send` and an `abort` arriving in one TCP chunk cannot race and two `send`s reach `harness.execute` in send order.
+- **Broadcast backpressure** — a client whose kernel-side socket buffer exceeds 4 MiB (stalled consumer: suspended TUI, dead SSH hop) is disconnected rather than buffered unboundedly. A durable client reconnects and resumes by seq; a non-durable client was always best-effort.
+- **Correlated errors** — error frames for a failed `send` carry that send's `messageId`, so the client rejects only the matching ack waiter instead of failing every in-flight send (which made successfully executed messages look failed and invited duplicate retries). Uncorrelated errors still fail all waiters rather than hang a chained `await client.send(...)`.
 
 ### Client integration
 

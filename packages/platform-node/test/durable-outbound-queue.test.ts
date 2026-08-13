@@ -152,7 +152,7 @@ describe('DurableOutboundQueue', () => {
     ]);
   });
 
-  it('clear wipes every persisted frame + meta', async () => {
+  it('clear wipes every persisted frame but keeps headSeq monotonic', async () => {
     const storage = createInMemoryStorage();
     const queue = await createDurableOutboundQueue({
       storage,
@@ -161,16 +161,52 @@ describe('DurableOutboundQueue', () => {
     await queue.append('a');
     await queue.append('b');
     await queue.clear();
-    expect(queue.getHeadSeq()).toBe(0);
-    expect(queue.getLastAckedSeq()).toBe(0);
+    /* Invariant 1: a seq is NEVER reused, clear included. The old reset-to-0
+     * behaviour made post-clear appends restart at seq 1 — and a client still
+     * holding a pre-clear delivery watermark (dedupe is `seq <= delivered`)
+     * silently dropped every new frame up to it. */
+    expect(queue.getHeadSeq()).toBe(2);
+    expect(queue.getLastAckedSeq()).toBe(2);
     expect(await queue.queueSize()).toBe(0);
+    expect(await queue.frameRange(1)).toEqual([]);
 
-    // A fresh queue on the same storage + socketPath starts clean.
+    // Appends after clear continue the sequence — never restart.
+    const entry = await queue.append('c');
+    expect(entry.seq).toBe(3);
+
+    // A queue rehydrated from the same storage sees the preserved counters.
     const next = await createDurableOutboundQueue({
       storage,
       socketPath: '/tmp/clear',
     });
-    expect(next.getHeadSeq()).toBe(0);
+    expect(next.getHeadSeq()).toBe(3);
+  });
+
+  it('ack deletes by computed key: acked frames gone, later frames intact', async () => {
+    const storage = createInMemoryStorage();
+    const queue = await createDurableOutboundQueue({
+      storage,
+      socketPath: '/tmp/computed-ack',
+    });
+    for (const f of [
+      'f1',
+      'f2',
+      'f3',
+      'f4',
+    ]) {
+      await queue.append(f);
+    }
+    await queue.ackUpTo(2);
+    expect((await queue.frameRange(1)).map((e) => e.frame)).toEqual([
+      'f3',
+      'f4',
+    ]);
+    expect(await queue.queueSize()).toBe(2);
+    // Ack past head clamps; ack below watermark is a no-op.
+    await queue.ackUpTo(99);
+    expect(await queue.queueSize()).toBe(0);
+    await queue.ackUpTo(1);
+    expect(queue.getLastAckedSeq()).toBe(4);
   });
 
   it('queueSize reflects only frames above the ack watermark', async () => {

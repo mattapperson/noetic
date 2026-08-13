@@ -82,9 +82,15 @@ export interface DurableOutboundQueue {
    * frames as acknowledged.
    */
   ackUpTo(throughSeq: number): Promise<void>;
-  /** Remove every persisted frame + reset meta — used on a clean shutdown. */
+  /**
+   * Remove every persisted frame and settle the ack watermark — used on a
+   * clean shutdown. `headSeq` is NOT reset (invariant 1: a seq is never
+   * reused), so a queue that appends again after `clear()` continues the
+   * sequence rather than restarting at 1 under clients that still hold a
+   * pre-clear delivery watermark.
+   */
   clear(): Promise<void>;
-  /** Number of frames currently persisted. Exposed for test assertions. */
+  /** Number of frames currently un-acked (`headSeq - lastAckedSeq`). */
   queueSize(): Promise<number>;
   /** Monotonic head seq — every appended frame gets head+1, head+2, …. */
   getHeadSeq(): number;
@@ -242,16 +248,14 @@ export async function createDurableOutboundQueue(
     const effective = Math.min(throughSeq, headSeq);
     const previous = lastAckedSeq;
     lastAckedSeq = effective;
-    // Delete frames in `(previous, effective]`.
-    const keys = await storage.list(framePrefix);
-    for (const key of keys) {
-      const seq = parseSeqFromFrameKey(key, socketId);
-      if (seq === null) {
-        continue;
-      }
-      if (seq > previous && seq <= effective) {
-        await storage.delete(key);
-      }
+    /* Frame keys are computable from their seq — delete `(previous,
+     * effective]` directly instead of a storage.list() scan. Acks fire on
+     * every client watermark push, and a per-ack scan over a namespace that
+     * shares its backing directory with checkpoints and ledger shards made
+     * each ack O(total keys). `storage.delete` on an already-gone key is a
+     * no-op by contract, so gaps (from clear/compaction) cost nothing. */
+    for (let seq = previous + 1; seq <= effective; seq++) {
+      await storage.delete(frameKey(socketId, seq));
     }
     await flushMeta();
   }
@@ -261,21 +265,22 @@ export async function createDurableOutboundQueue(
     for (const key of keys) {
       await storage.delete(key);
     }
-    await storage.delete(metaKey(socketId));
-    headSeq = 0;
-    lastAckedSeq = 0;
+    /* headSeq stays MONOTONIC through a clear — invariant 1 says a seq is
+     * never reused. Resetting to 0 here meant a queue cleared and then
+     * appended-to restarted at seq 1, and any client still holding a
+     * pre-clear `highestDeliveredDurableSeq` watermark would silently drop
+     * every new frame up to it (client dedupe is `seq <= highestDelivered`).
+     * Frames are gone; the counter is not. `lastAckedSeq` advances to
+     * headSeq (everything persisted is deleted ⇒ everything is settled),
+     * and the meta doc records both so a restart doesn't resurrect 0. */
+    lastAckedSeq = headSeq;
+    await flushMeta();
   }
 
   async function queueSize(): Promise<number> {
-    const keys = await storage.list(framePrefix);
-    let count = 0;
-    for (const key of keys) {
-      const seq = parseSeqFromFrameKey(key, socketId);
-      if (seq !== null && seq > lastAckedSeq) {
-        count += 1;
-      }
-    }
-    return count;
+    /* In-memory bounds are authoritative: appends only persist inside
+     * `(lastAckedSeq, headSeq]` and acks delete below the watermark. */
+    return headSeq - lastAckedSeq;
   }
 
   return {
