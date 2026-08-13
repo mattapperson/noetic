@@ -223,36 +223,51 @@ export function createCheckpointStore(options: CreateCheckpointStoreOptions): Ch
     return out.slice(0, count);
   }
 
-  async function truncateItems(ownerKey: string, offset: number): Promise<void> {
-    const keyed: Array<{
+  async function listItemBatches(ownerKey: string): Promise<
+    Array<{
       key: string;
       offset: number;
-    }> = [];
-    for (const key of await storage.list(itemBatchPrefix(ownerKey))) {
-      const batchOffset = itemBatchOffset(ownerKey, key);
-      if (batchOffset === null) {
-        continue;
-      }
-      keyed.push({
-        key,
-        offset: batchOffset,
-      });
-    }
-    keyed.sort((a, b) => a.offset - b.offset);
-    const straddleCandidate = keyed.filter((entry) => entry.offset < offset).pop();
-    for (const entry of keyed) {
-      if (entry.offset >= offset) {
-        await storage.delete(entry.key);
-      }
-    }
-    if (!straddleCandidate) {
+    }>
+  > {
+    const entries = (await storage.list(itemBatchPrefix(ownerKey))).flatMap((key) => {
+      const offset = itemBatchOffset(ownerKey, key);
+      return offset === null
+        ? []
+        : [
+            {
+              key,
+              offset,
+            },
+          ];
+    });
+    return entries.sort((a, b) => a.offset - b.offset);
+  }
+
+  async function trimStraddlingBatch(
+    candidate:
+      | {
+          key: string;
+          offset: number;
+        }
+      | undefined,
+    offset: number,
+  ): Promise<void> {
+    if (!candidate) {
       return;
     }
-    const batch = await storage.get<unknown[]>(straddleCandidate.key);
-    if (!batch || straddleCandidate.offset + batch.length <= offset) {
-      return;
+    const batch = await storage.get<unknown[]>(candidate.key);
+    if (batch && candidate.offset + batch.length > offset) {
+      await storage.set(candidate.key, batch.slice(0, offset - candidate.offset));
     }
-    await storage.set(straddleCandidate.key, batch.slice(0, offset - straddleCandidate.offset));
+  }
+
+  async function truncateItems(ownerKey: string, offset: number): Promise<void> {
+    const entries = await listItemBatches(ownerKey);
+    const straddling = entries.filter((entry) => entry.offset < offset).pop();
+    await Promise.all(
+      entries.filter((entry) => entry.offset >= offset).map((entry) => storage.delete(entry.key)),
+    );
+    await trimStraddlingBatch(straddling, offset);
   }
 
   async function clear(executionId: string): Promise<void> {
