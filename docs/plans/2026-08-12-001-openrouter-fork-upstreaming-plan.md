@@ -133,7 +133,7 @@ Every retained implementation PR must:
 | Item | Branch | PR | CI | Reviews | Merge SHA / dependency | Last update |
 |---:|---|---|---|---|---|---|
 | 1 | `lukeparke/openrouter-file-storage` | [#70](https://github.com/mattapperson/noetic/pull/70) | CI/DCO/structural pass; compat blocked by missing upstream `OPENROUTER_API_KEY` | no feedback | review-ready; external compat dependency documented | 2026-08-12 opened |
-| 2 | — | — | — | — | soft after 1 | 2026-08-12 audit complete |
+| 2 | `lukeparke/openrouter-queue-ipc` | [#81](https://github.com/mattapperson/noetic/pull/81) | pending | no feedback | independent of #70 after split | 2026-08-12 opened |
 | 3 | `lukeparke/openrouter-sub-harness-reliability` | [#71](https://github.com/mattapperson/noetic/pull/71) | pending | no feedback | independent | 2026-08-12 opened |
 | 4 | `lukeparke/openrouter-eval-safety` | [#72](https://github.com/mattapperson/noetic/pull/72) | pending | no feedback | blocks 5 | 2026-08-12 opened |
 | 5 | — | — | — | — | blocked by 4 merge | 2026-08-12 audit complete |
@@ -150,8 +150,8 @@ Every retained implementation PR must:
 | 16 | — | — | — | — | blocked by 15 | 2026-08-12 audit complete |
 | 17 | — | — | — | — | blocked by 16; RFC/breaking | 2026-08-12 audit complete |
 | 18 | `lukeparke/openrouter-context-input` | [#77](https://github.com/mattapperson/noetic/pull/77) | pending | no feedback | independent | 2026-08-12 opened |
-| 19 | — | — | — | — | design review required | 2026-08-12 audit complete |
-| 20 | — | — | — | — | blocked by 14 + 19 | 2026-08-12 audit complete |
+| 19 | — | — | — | — | proposal committed at `docs/plans/2026-08-12-002-multi-agent-patterns-proposal.md`; recommends examples/docs and rejects core policy reversal | 2026-08-12 design proposal complete |
+| 20 | — | — | — | — | deferred/redesign required: examples cannot be declarative hydration targets; requires accepted package/registry plus item 14 | 2026-08-12 explicitly blocked |
 
 ## Program risks
 
