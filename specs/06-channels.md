@@ -218,7 +218,7 @@ Channels are scoped to the harness, not to a boundary within it. Channel state l
 
 ### Lifecycle
 
-Channels are created on first reference and garbage-collected when the execution tree completes. Queue channels buffer indefinitely within an execution (bounded by `capacity`, default 1000 items). When the buffer is full, internal senders block (back-pressure); external senders drop oldest (see above). Topic channels are ephemeral — items are delivered to currently-waiting receivers and dropped if no one is listening.
+Channels are created on first reference and garbage-collected when the execution tree completes. Additionally, a channel entry whose state is fully drained — empty queue, no held value, no parked waiters or senders, no topic/wake subscribers, no external registration, and no live stream readers — is reaped immediately rather than retained for the store's lifetime, so per-delegation channel names (e.g. uuid-suffixed one-shot channels) do not leak. Reuse after reaping is transparent: the next reference recreates an identical fresh state. Queue channels buffer indefinitely within an execution (bounded by `capacity`, default 1000 items). When the buffer is full, internal senders block (back-pressure); external senders drop oldest (see above). Topic channels are ephemeral — items are delivered to currently-waiting receivers and dropped if no one is listening.
 
 ### Default Timeout and Deadlock Prevention
 

@@ -700,6 +700,12 @@ export async function executeLoop<TContext, I, O>(
     if (history.length > maxHistory) {
       history.splice(0, history.length - maxHistory);
     }
+    // One frozen view per iteration, shared with the snapshot below. The old
+    // per-snapshot spread copied the whole array every verdict evaluation —
+    // O(history) per iteration for mutation protection freeze() gives for free.
+    const frozenHistory = Object.freeze([
+      ...history,
+    ]);
 
     // Extract text from output for snapshot
     if (typeof output === 'string') {
@@ -720,9 +726,7 @@ export async function executeLoop<TContext, I, O>(
       cost: ctx.cost,
       lastOutput: output,
       lastText,
-      history: [
-        ...history,
-      ],
+      history: frameworkCast<unknown[]>(frozenHistory),
       depth: ctx.depth,
       lastStepMeta: isMutableContext(baseCtx) ? baseCtx.lastStepMeta : null,
     };
@@ -775,18 +779,57 @@ export async function executeLoop<TContext, I, O>(
 interface ParkContext<TContext> {
   ms: number;
   jitter: number;
+  /** Jitter seed (the step id) — see `jitterFactor`. */
+  seed: string;
+  /** Iteration counter, so successive parks land on different phases. */
+  iteration: number;
   inbox?: Channel<unknown>;
   ctx: Context<TContext>;
   channelStore?: ChannelStore;
 }
 
-/** Returns the next park duration in ms, applying random jitter clamped to `[ms - jitter, ms + jitter]`. */
-function nextParkMs(ms: number, jitter: number): number {
+/**
+ * Deterministic jitter: FNV-1a over `(seed, iteration)` mapped to [-1, 1).
+ * `Math.random()` here would make park durations differ between a run and its
+ * durable replay — the same nondeterminism the workflow runtime bans from
+ * scripts. Hash-based jitter keeps the fleet-desynchronization property
+ * (different step ids → different phases) while staying replayable.
+ *
+ * The murmur3 finalizer is load-bearing, not decoration: bare FNV-1a over
+ * `${seed}#${iteration}` only perturbs the trailing digit, so consecutive
+ * iterations of one seed land within ~0.04 of each other and the step would
+ * park at a near-constant offset instead of jittering. The avalanche step
+ * restores per-iteration spread.
+ */
+function jitterFactor(seed: string, iteration: number): number {
+  let h = 0x811c9dc5;
+  const input = `${seed}#${iteration}`;
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  h ^= h >>> 16;
+  h = Math.imul(h, 0x85ebca6b);
+  h ^= h >>> 13;
+  h = Math.imul(h, 0xc2b2ae35);
+  h ^= h >>> 16;
+  // Unsigned 32-bit → [0, 1) → [-1, 1).
+  return ((h >>> 0) / 0x100000000) * 2 - 1;
+}
+
+interface NextParkParams {
+  ms: number;
+  jitter: number;
+  seed: string;
+  iteration: number;
+}
+
+/** Returns the next park duration in ms, applying deterministic jitter clamped to `[ms - jitter, ms + jitter]`. */
+function nextParkMs({ ms, jitter, seed, iteration }: NextParkParams): number {
   if (jitter <= 0) {
     return ms;
   }
-  // Math.random() returns [0, 1); shift to [-1, 1) so jitter is symmetric.
-  const offset = (Math.random() * 2 - 1) * jitter;
+  const offset = jitterFactor(seed, iteration) * jitter;
   const value = ms + offset;
   if (value < 0) {
     return 0;
@@ -800,7 +843,12 @@ function nextParkMs(ms: number, jitter: number): number {
  * the next iteration's abort check).
  */
 function park<TContext>(parkCtx: ParkContext<TContext>): Promise<void> {
-  const duration = nextParkMs(parkCtx.ms, parkCtx.jitter);
+  const duration = nextParkMs({
+    ms: parkCtx.ms,
+    jitter: parkCtx.jitter,
+    seed: parkCtx.seed,
+    iteration: parkCtx.iteration,
+  });
 
   return new Promise<void>((resolve) => {
     let settled = false;
@@ -900,6 +948,7 @@ export async function executeSchedule<TContext, I, O>(
   // Resolve once — the channel store reference is stable for the lifetime
   // of the every loop, no need to re-derive it per park.
   const channelStore = getContextChannelStore(ctx);
+  let iteration = 0;
 
   while (true) {
     if (ctx.aborted) {
@@ -927,6 +976,8 @@ export async function executeSchedule<TContext, I, O>(
     await park({
       ms: step.interval,
       jitter,
+      seed: step.id,
+      iteration: iteration++,
       inbox: step.inbox,
       ctx,
       channelStore,

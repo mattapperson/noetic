@@ -15,7 +15,7 @@
  * tests; this file focuses on adapter routing end-to-end from `detachedSpawn`.
  */
 
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, spyOn } from 'bun:test';
 import assert from 'node:assert';
 import type { ContextData } from '@noetic-tools/context';
 import type {
@@ -28,6 +28,8 @@ import type {
 import { isNoeticError } from '@noetic-tools/types';
 import { createInMemorySubprocessAdapter } from '../../src/adapters/in-memory-subprocess-adapter';
 import { AgentHarness } from '../../src/harness/agent-harness';
+import { execute } from '../../src/interpreter/execute';
+import { createInMemoryStorage } from '../../src/runtime/in-memory-storage';
 
 //#region Recording adapter
 
@@ -270,3 +272,93 @@ describe('Phase A adapter routing', () => {
 });
 
 //#endregion
+
+describe('inline dispatch (_inline fast path)', () => {
+  it('storage-less in-memory adapter is marked _inline, non-enumerably', () => {
+    const adapter = createInMemorySubprocessAdapter();
+    expect(adapter._inline).toBe(true);
+    expect(Object.keys(adapter)).not.toContain('_inline');
+    expect(JSON.stringify(adapter)).not.toContain('_inline');
+  });
+
+  it('storage-backed in-memory adapter is NOT inline-eligible', () => {
+    const adapter = createInMemorySubprocessAdapter({
+      storage: createInMemoryStorage(),
+    });
+    expect(adapter._inline).toBe(false);
+  });
+
+  it('nested runCode dispatch skips adapter.spawn when nothing durable can observe it', async () => {
+    const adapter = createInMemorySubprocessAdapter();
+    const spawnSpy = spyOn(adapter, 'spawn');
+    const harness = new AgentHarness({
+      name: 'inline-dispatch',
+      params: {},
+      environment: {
+        subprocess: adapter,
+      },
+    });
+    const ctx = harness.createContext();
+    const step: Step<ContextData, string, string> = {
+      kind: 'runCode',
+      id: 'inline-step',
+      execute: async (input) => `echo:${input}`,
+    };
+
+    const result = await execute(step, 'hi', ctx);
+    expect(result).toBe('echo:hi');
+    expect(spawnSpy).not.toHaveBeenCalled();
+    spawnSpy.mockRestore();
+  });
+
+  it('nested runCode dispatch still routes through a storage-backed adapter', async () => {
+    const adapter = createInMemorySubprocessAdapter({
+      storage: createInMemoryStorage(),
+    });
+    const spawnSpy = spyOn(adapter, 'spawn');
+    const harness = new AgentHarness({
+      name: 'durable-dispatch',
+      params: {},
+      environment: {
+        subprocess: adapter,
+      },
+    });
+    const ctx = harness.createContext();
+    const step: Step<ContextData, string, string> = {
+      kind: 'runCode',
+      id: 'durable-step',
+      execute: async (input) => `echo:${input}`,
+    };
+
+    const result = await execute(step, 'hi', ctx);
+    expect(result).toBe('echo:hi');
+    expect(spawnSpy).toHaveBeenCalledTimes(1);
+    spawnSpy.mockRestore();
+  });
+
+  it('inline dispatch propagates the typed step_failed error directly', async () => {
+    const harness = new AgentHarness({
+      name: 'inline-throws',
+      params: {},
+    });
+    const ctx = harness.createContext();
+    const step: Step<ContextData, string, string> = {
+      kind: 'runCode',
+      id: 'inline-sync-throw',
+      execute: () => {
+        throw new Error('sync boom');
+      },
+    };
+
+    try {
+      await execute(step, 'irrelevant', ctx);
+      expect.unreachable('execute() should have rejected');
+    } catch (err) {
+      assert(isNoeticError(err));
+      const ne = err.noeticError;
+      assert(ne.kind === 'step_failed');
+      expect(ne.stepId).toBe('inline-sync-throw');
+      expect(ne.cause.message).toBe('sync boom');
+    }
+  });
+});

@@ -204,7 +204,7 @@ interface ScheduleOptions<I, O> {
   interval: number;           // park duration between iterations (>= 0)
   inbox?: Channel<unknown>;   // any value on this channel wakes the park
   onError?: 'continue' | 'fail';   // default 'continue'
-  jitter?: number;            // ms of symmetric random jitter (>= 0, default 0)
+  jitter?: number;            // ms of symmetric deterministic jitter (>= 0, default 0)
 }
 
 schedule<I, O>(opts: ScheduleOptions<I, O>): StepSchedule<I, O>;
@@ -213,7 +213,7 @@ schedule<I, O>(opts: ScheduleOptions<I, O>): StepSchedule<I, O>;
 ### Semantics
 
 1. The first iteration starts immediately; the body step is invoked with `input`.
-2. After the body returns, `schedule` parks for `interval ± jitter` ms or until any value is sent on `inbox` — whichever happens first. The park observes the wake non-consumingly: a queue-mode wake message stays on the queue so the next iteration's body can drain it via `tryRecv`.
+2. After the body returns, `schedule` parks for `interval ± jitter` ms or until any value is sent on `inbox` — whichever happens first. The park observes the wake non-consumingly: a queue-mode wake message stays on the queue so the next iteration's body can drain it via `tryRecv`. Jitter is deterministic: the offset derives from a hash of `(step id, iteration)` (FNV-1a with a murmur3 finalizer for per-iteration avalanche), so a replayed run reproduces the same park-duration sequence while distinct step ids still desynchronize across a fleet.
 3. The park resolves immediately when the executing context is aborted; the next iteration's abort check then surfaces a `cancelled` `NoeticError`.
 4. The operator output is `void`. `schedule` does not accumulate iteration outputs.
 5. `schedule` only terminates by throw — either `cancelled` from abort, or the body's error under `onError: 'fail'`.
