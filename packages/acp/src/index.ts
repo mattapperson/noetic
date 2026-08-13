@@ -25,6 +25,7 @@ export {
   functionCallItem,
   functionCallOutputItem,
 } from './items';
+export { isAbsolutePath, isWithinRoots, normalizePath } from './paths';
 export type {
   AcpPermissionPrompt,
   AcpPermissionReply,

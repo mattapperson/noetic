@@ -15,9 +15,14 @@ shape.
 ACP is bidirectional. The agent does not reach for the machine itself: it asks
 the client to read files, write files, and run terminals, and it asks permission
 before running a tool. Implementing the client side means **a sub-agent's file
-and shell access flows through Noetic's own adapters** — the same sandboxing,
-virtual filesystem, and audit path as first-party steps — instead of around
-them through a vendor SDK.
+and shell access goes through Noetic's own adapters** rather than around them
+through a vendor SDK — so a host that supplies an in-memory or virtual
+`FsAdapter` genuinely constrains what the agent can touch, and the client is the
+one place a boundary can be enforced at all.
+
+That boundary is enforced here rather than left to the adapter: `fs/*` paths
+are confined to the session working directory by default. Terminals are a
+different matter, and the honest limit is stated below.
 
 It also brings capabilities that have no representation in a hand-rolled
 adapter: permission requests, plans, session modes, slash commands, MCP server
@@ -120,6 +125,39 @@ Advertised `ClientCapabilities` are computed from what the host can actually
 back, narrowed by the step's `clientCapabilities`. A withdrawn capability is
 answered with a JSON-RPC method-not-found rather than quietly doing the work
 anyway — a read-only review step genuinely cannot write.
+
+## Filesystem confinement
+
+ACP puts boundary enforcement on the client, and a `permissions` policy does not
+serve that purpose: it answers `session/request_permission`, which covers the
+agent's *tool calls*, while `fs/*` and `terminal/*` are client methods the agent
+invokes directly. An agent that never asks is never gated by a policy, however
+strict. So the boundary lives in the client.
+
+By default an agent reaches the session working directory and nothing else.
+`fs/read_text_file` and `fs/write_text_file` reject, before touching the
+`FsAdapter`:
+
+- any path outside the allowed roots,
+- `..` traversal out of them, including forms that land outside after
+  normalization,
+- a sibling directory that merely shares the root's name prefix
+  (`/workspace-secrets` is not inside `/workspace`),
+- relative paths — the specification requires absolute ones, so a relative path
+  is malformed input rather than something to resolve against a guessed base.
+
+`clientCapabilities.additionalDirectories` widens the set;
+`clientCapabilities.allowAnyPath` removes it. `terminal/create` confines its
+starting `cwd` the same way.
+
+**Limits, stated plainly.** The check is lexical: a symlink inside the workspace
+pointing outside it is not caught, because resolving that requires the
+filesystem and this layer stays runtime-neutral — a host that needs it supplies
+an `FsAdapter` that resolves and re-checks. A terminal command can `cd` anywhere
+the host user can once it is running, so the only hard boundary for shell access
+is `clientCapabilities.terminal: false`. Confinement narrows what a
+cooperative-but-careless agent reaches; it is not a security sandbox against a
+hostile one, which needs a real sandbox behind a transport.
 
 ## Permissions
 

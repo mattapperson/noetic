@@ -8,6 +8,7 @@
 import { describe, expect, test } from 'bun:test';
 import type * as acp from '@zed-industries/agent-client-protocol';
 import { sliceLines } from '../src/client';
+import type { AcpTestRigOptions } from './_helpers';
 import { createAcpTestRig, MemoryFs, RecordingShell, textChunk } from './_helpers';
 
 const PROMPT: acp.ContentBlock[] = [
@@ -135,6 +136,123 @@ describe('fs capabilities', () => {
 
     expect(failure).toBeDefined();
     expect(fs.files.has('/workspace/out.txt')).toBe(false);
+    await rig.close();
+  });
+});
+
+describe('filesystem confinement', () => {
+  /** Drive one agent-side read and report what came back. */
+  async function agentReads(
+    path: string,
+    capabilities?: AcpTestRigOptions['capabilities'],
+  ): Promise<string> {
+    const fs = new MemoryFs();
+    fs.files.set('/workspace/inside.txt', 'workspace-file');
+    fs.files.set('/etc/passwd', 'root:x:0:0');
+    fs.files.set('/workspace-secrets/keys.txt', 'sibling-secret');
+    let outcome = '';
+
+    const rig = await createAcpTestRig({
+      fs,
+      cwd: '/workspace',
+      capabilities,
+      script: {
+        onPrompt: async (conn, params) => {
+          try {
+            outcome = (
+              await conn.readTextFile({
+                sessionId: params.sessionId,
+                path,
+              })
+            ).content;
+          } catch {
+            outcome = 'BLOCKED';
+          }
+        },
+      },
+    });
+    const session = await rig.connection.newSession({
+      cwd: '/workspace',
+    });
+    await session.prompt({
+      content: PROMPT,
+    });
+    await rig.close();
+    return outcome;
+  }
+
+  test('a file inside the workspace is served', async () => {
+    expect(await agentReads('/workspace/inside.txt')).toBe('workspace-file');
+  });
+
+  // Regression: the client used to pass every path straight to the adapter.
+  // With the local adapter that is a raw `node:fs` passthrough, so an agent
+  // could read anything the host user could — and a `permissions` policy did
+  // NOT stop it, because `fs/*` are client methods the agent calls directly
+  // rather than tool calls it asks permission for.
+  test('a path outside the workspace is refused', async () => {
+    expect(await agentReads('/etc/passwd')).toBe('BLOCKED');
+  });
+
+  test('parent traversal out of the workspace is refused', async () => {
+    expect(await agentReads('/workspace/../etc/passwd')).toBe('BLOCKED');
+  });
+
+  test('a sibling directory sharing the workspace name prefix is refused', async () => {
+    expect(await agentReads('/workspace-secrets/keys.txt')).toBe('BLOCKED');
+  });
+
+  test('a relative path is refused — the spec requires absolute paths', async () => {
+    expect(await agentReads('etc/passwd')).toBe('BLOCKED');
+  });
+
+  test('additionalDirectories widens the boundary deliberately', async () => {
+    expect(
+      await agentReads('/etc/passwd', {
+        additionalDirectories: [
+          '/etc',
+        ],
+      }),
+    ).toBe('root:x:0:0');
+  });
+
+  test('allowAnyPath removes the boundary for callers who want that', async () => {
+    expect(
+      await agentReads('/etc/passwd', {
+        allowAnyPath: true,
+      }),
+    ).toBe('root:x:0:0');
+  });
+
+  test('a write outside the workspace is refused and never reaches the adapter', async () => {
+    const fs = new MemoryFs();
+    let failed = false;
+    const rig = await createAcpTestRig({
+      fs,
+      cwd: '/workspace',
+      script: {
+        onPrompt: async (conn, params) => {
+          try {
+            await conn.writeTextFile({
+              sessionId: params.sessionId,
+              path: '/etc/cron.d/backdoor',
+              content: 'pwned',
+            });
+          } catch {
+            failed = true;
+          }
+        },
+      },
+    });
+    const session = await rig.connection.newSession({
+      cwd: '/workspace',
+    });
+    await session.prompt({
+      content: PROMPT,
+    });
+
+    expect(failed).toBe(true);
+    expect(fs.files.has('/etc/cron.d/backdoor')).toBe(false);
     await rig.close();
   });
 });

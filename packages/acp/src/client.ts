@@ -16,6 +16,7 @@
 import type { AcpClientHost } from '@noetic-tools/types';
 import type * as acp from '@zed-industries/agent-client-protocol';
 import { RequestError } from '@zed-industries/agent-client-protocol';
+import { isAbsolutePath, isWithinRoots } from './paths';
 import type { AcpPermissionResolverOptions } from './permissions';
 import { resolvePermission, selectPermissionOption } from './permissions';
 import { TerminalRegistry } from './terminals';
@@ -143,6 +144,7 @@ export class NoeticAcpClient implements acp.Client {
 
   async readTextFile(params: acp.ReadTextFileRequest): Promise<acp.ReadTextFileResponse> {
     this.assertCapability(this.host.capabilities?.readTextFile !== false, 'fs/read_text_file');
+    this.assertPathAllowed(params.path);
     const content = await this.host.fs.readFileText(params.path);
     return {
       content: sliceLines(content, params.line, params.limit),
@@ -151,6 +153,7 @@ export class NoeticAcpClient implements acp.Client {
 
   async writeTextFile(params: acp.WriteTextFileRequest): Promise<acp.WriteTextFileResponse> {
     this.assertCapability(this.host.capabilities?.writeTextFile !== false, 'fs/write_text_file');
+    this.assertPathAllowed(params.path);
     const dir = parentDir(params.path);
     if (dir) {
       await this.host.fs.mkdir(dir);
@@ -165,6 +168,12 @@ export class NoeticAcpClient implements acp.Client {
 
   async createTerminal(params: acp.CreateTerminalRequest): Promise<acp.CreateTerminalResponse> {
     this.assertTerminalCapability('terminal/create');
+    // Confines where a command STARTS, not where it can go — a shell can `cd`
+    // anywhere the host user can. Withdrawing the terminal capability is the
+    // only hard boundary; this just stops the obvious case.
+    if (typeof params.cwd === 'string') {
+      this.assertPathAllowed(params.cwd);
+    }
     return {
       terminalId: this.terminals.create({
         command: params.command,
@@ -221,6 +230,42 @@ export class NoeticAcpClient implements acp.Client {
   //#endregion
 
   //#region internals
+
+  /**
+   * The roots an agent may reach: the session working directory plus whatever
+   * the step explicitly added.
+   */
+  private get allowedRoots(): string[] {
+    return [
+      this.host.cwd,
+      ...(this.host.capabilities?.additionalDirectories ?? []),
+    ];
+  }
+
+  /**
+   * Reject a path outside the workspace before it reaches the adapter.
+   *
+   * The specification requires absolute paths, so a relative one is malformed
+   * input rather than something to resolve against a guessed base.
+   */
+  private assertPathAllowed(path: string): void {
+    if (!isAbsolutePath(path)) {
+      throw RequestError.invalidParams({
+        path,
+        reason: 'the Agent Client Protocol requires absolute paths',
+      });
+    }
+    if (this.host.capabilities?.allowAnyPath === true) {
+      return;
+    }
+    if (!isWithinRoots(path, this.allowedRoots)) {
+      throw RequestError.invalidParams({
+        path,
+        reason: 'path is outside the session working directory',
+        allowedRoots: this.allowedRoots,
+      });
+    }
+  }
 
   private assertTerminalCapability(method: string): void {
     this.assertCapability(this.host.capabilities?.terminal !== false, method);

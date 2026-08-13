@@ -25,7 +25,7 @@ console.log(await harness.execute('go'));
 
 ## What this package does
 
-ACP is bidirectional: the agent does not reach for the machine itself, it asks the client to read files, write files, and run terminals, and it asks permission before running a tool. This package implements that client side against Noetic's own adapters, so **a sub-agent's file and shell access flows through the same sandboxing, virtual filesystem, and audit path as a first-party step**.
+ACP is bidirectional: the agent does not reach for the machine itself, it asks the client to read files, write files, and run terminals, and it asks permission before running a tool. This package implements that client side against Noetic's own adapters, so a sub-agent's file and shell access goes through them rather than around them — and **`fs/*` paths are confined to the session working directory by default**, since ACP puts boundary enforcement on the client.
 
 - `fs/read_text_file`, `fs/write_text_file` → the execution context's `FsAdapter`
 - `terminal/create`, `output`, `wait_for_exit`, `kill`, `release` → its `ShellAdapter`

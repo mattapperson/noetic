@@ -205,6 +205,22 @@ export interface AcpClientCapabilityConfig {
   writeTextFile?: boolean;
   /** Serve the `terminal/*` family from the host's {@link ShellAdapter}. */
   terminal?: boolean;
+  /**
+   * Directories the agent may reach in addition to the session working
+   * directory, which is always allowed. Use for a monorepo sibling, a shared
+   * cache, or a scratch dir outside the workspace.
+   */
+  additionalDirectories?: ReadonlyArray<string>;
+  /**
+   * Lift filesystem confinement entirely, letting the agent read and write any
+   * absolute path the host process can.
+   *
+   * Off by default, and worth leaving off: ACP places boundary enforcement on
+   * the client, and a `permissions` policy does not substitute for it — that
+   * answers `session/request_permission`, which covers the agent's tool calls,
+   * not the `fs/*` methods it invokes on the client directly.
+   */
+  allowAnyPath?: boolean;
 }
 
 /**

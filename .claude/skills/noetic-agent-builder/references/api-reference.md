@@ -233,8 +233,12 @@ interface AcpClientCapabilityConfig {
   readTextFile?: boolean;   // fs/read_text_file  (default true)
   writeTextFile?: boolean;  // fs/write_text_file (default true)
   terminal?: boolean;       // terminal/*         (default true)
+  additionalDirectories?: ReadonlyArray<string>;  // reachable beyond cwd
+  allowAnyPath?: boolean;   // lift confinement entirely (default false)
 }
 ```
+
+**Filesystem confinement.** `fs/*` paths are confined to the session cwd by default; outside paths, `..` traversal, name-prefix siblings (`/workspace-secrets` vs `/workspace`), and relative paths are all refused before reaching the `FsAdapter`. **A `permissions` policy does NOT do this** — it answers `session/request_permission`, which covers the agent's *tool calls*, while `fs/*` and `terminal/*` are client methods the agent calls directly. An agent that never asks is never gated by a policy. Limits: the check is lexical (a symlink inside the workspace pointing out is not caught), and `terminal/create` confines only the starting cwd — a command can `cd` anywhere, so `terminal: false` is the only hard boundary for shell access.
 
 **Permissions.** `session/request_permission` resolves in three tiers, first decisive wins: the `permissions` policy, then steering's `beforeToolCall` (a **veto** tier — only a non-allow decision is acted on), then `onPermissionRequest`. When all abstain the policy `default` applies, and that default is `'deny'`.
 

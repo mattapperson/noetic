@@ -28,7 +28,7 @@ The integration is the [Agent Client Protocol](https://agentclientprotocol.com/)
 
 ACP inverts the usual control flow. The agent does not reach for the machine itself — it asks the client to read files, write files, and run terminals, and it asks permission before running a tool.
 
-That means **a sub-agent's file and shell access flows through Noetic's own adapters**: the same sandboxing, virtual filesystem, and audit path as a first-party step, instead of around them through a vendor SDK.
+That means **a sub-agent's file and shell access goes through Noetic's own adapters** instead of around them through a vendor SDK — so a host that supplies an in-memory or virtual `FsAdapter` genuinely constrains what the agent can reach, and the client becomes the one place a boundary can be enforced at all. Noetic enforces one by default: see [Filesystem confinement](#filesystem-confinement).
 
 It also brings capabilities a hand-rolled adapter has no way to express: permission requests, plans, session modes, slash commands, MCP server passthrough, multimodal prompts, typed stop reasons, and real cancellation.
 
@@ -51,6 +51,42 @@ customAcpAgent({                    // any other ACP-speaking binary
 ```
 
 Every preset accepts `command`, `args`, and `env` overrides, plus a `transport` for reaching an agent that is not a local child process.
+
+## Filesystem confinement
+
+ACP puts boundary enforcement on the **client**: the agent asks for a path, and the client decides whether it may have it. Nothing in the protocol constrains what it asks for.
+
+By default an agent reaches the session working directory and nothing else. Absolute paths outside it, `..` traversal out of it, and relative paths (which the spec forbids on the wire) are all refused with a JSON-RPC invalid-params error before they reach your `FsAdapter`.
+
+```ts
+import { step } from '@noetic-tools/core';
+import { claudeCode } from '@noetic-tools/acp';
+
+step.acpAgent({
+  id: 'review',
+  agent: claudeCode(),
+  prompt: 'Review the diff',
+  cwd: '/srv/project',
+  clientCapabilities: {
+    // Reachable in addition to cwd — a monorepo sibling, a shared cache.
+    additionalDirectories: ['/srv/shared-cache'],
+  },
+});
+```
+
+Set `allowAnyPath: true` to lift it entirely, when you genuinely want an unconfined agent.
+
+<Callout type="warn">
+**A `permissions` policy does not do this job.** It answers `session/request_permission`, which covers the agent's own *tool calls*. `fs/read_text_file`, `fs/write_text_file`, and `terminal/*` are client methods the agent invokes on you directly — an agent that simply never asks is never gated by a policy, however strict. Path confinement and `clientCapabilities` are the controls that bind.
+</Callout>
+
+### What confinement does not stop
+
+- **Symlinks inside the workspace pointing out of it.** The check is lexical and does not touch the filesystem. If that matters, supply an `FsAdapter` that resolves real paths and re-checks.
+- **What a terminal command does once running.** `terminal/create` confines the *starting* `cwd`, but a shell can `cd` anywhere the host user can. The only hard boundary for shell access is withdrawing it: `clientCapabilities: { terminal: false }`.
+- **Anything, if you pass `allowAnyPath: true`.**
+
+Confinement narrows what a *cooperative-but-careless* agent reaches. It is not a security sandbox against a hostile one — for that, run the agent in a real sandbox (container, VM) and point a transport at it.
 
 ## Permissions
 
