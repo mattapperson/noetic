@@ -147,7 +147,7 @@ Every retained implementation PR must:
 | 13 | — | — | — | — | blocked by 12 | 2026-08-12 audit complete |
 | 14 | `lukeparke/openrouter-workflow-hardening` | [#84](https://github.com/mattapperson/noetic/pull/84) | pending | clean-context review addressed | blocks 20 | 2026-08-12 opened |
 | 15 | `lukeparke/openrouter-compaction-primitives` | [#80](https://github.com/mattapperson/noetic/pull/80) | pending | no feedback | blocks 16 | 2026-08-12 opened |
-| 16 | — | — | — | — | blocked by 15 | 2026-08-12 audit complete |
+| 16 | `lukeparke/openrouter-compaction-runtime` | [#85](https://github.com/mattapperson/noetic/pull/85) | pending | clean-context review addressed | depends on #80; rebase through main after merge | 2026-08-12 opened |
 | 17 | — | — | — | — | blocked by 16; RFC/breaking | 2026-08-12 audit complete |
 | 18 | `lukeparke/openrouter-context-input` | [#77](https://github.com/mattapperson/noetic/pull/77) | pending | no feedback | independent | 2026-08-12 opened |
 | 19 | — | — | — | — | proposal committed at `docs/plans/2026-08-12-002-multi-agent-patterns-proposal.md`; recommends examples/docs and rejects core policy reversal | 2026-08-12 design proposal complete |
