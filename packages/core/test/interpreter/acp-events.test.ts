@@ -291,6 +291,72 @@ describe('AcpEventBridge', () => {
     expect(completed.data.stopReason).toBe('max_tokens');
   });
 
+  // Regression: `finalize` ran only on the success path, so a turn that threw
+  // left `response.created` open with no completion — a consumer driving a UI
+  // off `getFullStream()` waited forever on a response that never finished.
+  it('closes the bracket with an error reason when the turn throws', () => {
+    const { bridge, events } = bridgeCtx(STEP);
+
+    bridge.begin();
+    bridge.forward(textChunk('partial'));
+    bridge.abort(new Error('agent died mid-turn'));
+
+    const completed = events.find((e) => e.type === 'response.completed');
+    assert(completed);
+    expect(completed.data.stopReason).toBe('error');
+    expect(String(completed.data.error)).toContain('agent died mid-turn');
+    // The open message is closed too, not left dangling.
+    expect(events.filter((e) => e.type === 'response.output_item.added')).toHaveLength(1);
+    expect(events.filter((e) => e.type === 'response.output_item.done')).toHaveLength(1);
+  });
+
+  it('aborting after a clean finalize does not double-complete', () => {
+    const { bridge, events } = bridgeCtx(STEP);
+
+    bridge.begin();
+    bridge.finalize(emptyResult());
+    bridge.abort(new Error('too late'));
+
+    expect(events.filter((e) => e.type === 'response.completed')).toHaveLength(1);
+  });
+
+  it('output items finish in index order', () => {
+    const { bridge, events } = bridgeCtx(STEP);
+
+    bridge.begin();
+    bridge.forward(textChunk('hello'));
+    // A tool call known only from the result, synthesized during finalize.
+    bridge.finalize(
+      emptyResult({
+        text: 'hello',
+        items: [
+          frameworkCast({
+            id: 'call-1',
+            type: 'function_call',
+            status: 'completed',
+            name: 'Read',
+            callId: 'call-1',
+            arguments: '{}',
+          }),
+        ],
+      }),
+    );
+
+    // The message (index 0) must close before the tool call (index 1) opens;
+    // emitting them the other way round reads as interleaved output.
+    const order = events
+      .filter(
+        (e) => e.type === 'response.output_item.done' || e.type === 'response.output_item.added',
+      )
+      .map((e) => `${e.type}@${e.outputIndex}`);
+    expect(order).toEqual([
+      'response.output_item.added@0',
+      'response.output_item.done@0',
+      'response.output_item.added@1',
+      'response.output_item.done@1',
+    ]);
+  });
+
   it('emit: false suppresses every event', () => {
     const { bridge, events } = bridgeCtx({
       id: 'quiet',

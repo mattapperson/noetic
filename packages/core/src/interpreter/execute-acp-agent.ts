@@ -16,6 +16,7 @@ import type {
   AcpContentBlock,
   AcpKeepAlive,
   AcpLiveSession,
+  AcpMcpServer,
   AcpPermissionOutcome,
   AcpPermissionSteerer,
   AcpSessionPolicy,
@@ -287,6 +288,43 @@ function normalizedCapabilities(config: AcpClientCapabilityConfig | undefined): 
 }
 
 /**
+ * `cwd` and `mcpServers` are fixed when the session is created, so a step
+ * joining an existing one cannot change them either.
+ *
+ * These used to be dropped in silence while a mismatched `clientCapabilities`
+ * threw — so a step that named different MCP servers simply got none of them,
+ * with no diagnostic. Connection-scoped settings should all fail the same way.
+ */
+function assertSessionScopedSettingsMatch<TContext, I, O>(
+  step: StepAcpAgent<TContext, I, O>,
+  live: AcpLiveSession,
+  cwd: string,
+  servers: ReadonlyArray<AcpMcpServer> | undefined,
+): void {
+  const conflict = (setting: string, hint: string): NoeticConfigError =>
+    new NoeticConfigError({
+      code: 'ACP_SESSION_SETTING_CONFLICT',
+      message: `step.acpAgent(${JSON.stringify(step.id)}) reuses session '${step.session?.reuse}' but requests a different ${setting} than the session was created with.`,
+      hint,
+    });
+
+  if (cwd !== live.cwd) {
+    throw conflict(
+      'cwd',
+      'A session is created in one working directory. Give every step sharing a `session.reuse` key the same `cwd`, or use a separate session.',
+    );
+  }
+  // Only a step that asks for servers can conflict; omitting them means
+  // "whatever the session already has".
+  if (servers && JSON.stringify(servers) !== JSON.stringify(live.mcpServers ?? [])) {
+    throw conflict(
+      'set of MCP servers',
+      'MCP servers are attached when the session is created. Give every step sharing a `session.reuse` key the same `mcpServers`, or use a separate session.',
+    );
+  }
+}
+
+/**
  * `clientCapabilities` is negotiated once per connection, so a step joining an
  * existing session cannot change it. Silently ignoring the request would hand
  * back a session with different permissions than the step asked for, so this
@@ -397,6 +435,8 @@ async function openSession<TContext, I, O>(opts: {
         host: opts.host,
         agentId: opts.agent.agentId,
         keepAlive,
+        cwd: opts.cwd,
+        mcpServers: opts.servers,
       };
     } catch (e) {
       await connection.close().catch(() => undefined);
@@ -405,6 +445,7 @@ async function openSession<TContext, I, O>(opts: {
   });
 
   if (!fresh) {
+    assertSessionScopedSettingsMatch(opts.step, live, opts.cwd, opts.servers);
     if (live.agentId !== opts.agent.agentId) {
       throw new NoeticConfigError({
         code: 'ACP_SESSION_AGENT_CONFLICT',

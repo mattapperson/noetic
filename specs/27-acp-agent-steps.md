@@ -323,11 +323,14 @@ As a result `getTextStream()`, `getReasoningStream()`, `getItemStream()`, and
 `getFullStream()` all surface ACP output. Every notification is *also* emitted
 raw as an `acp_event` framework event for protocol-native consumers.
 
-**A turn always emits its output.** The bridge brackets every turn with
-`response.created` (on `begin()`) and `response.completed` carrying the stop
-reason (on `finalize()`), so even an agent that streams nothing emits a
-lifecycle — and `finalize()` synthesizes the text and tool-call events from the
-result when the stream carried none. `emit: false` suppresses all of it.
+**A turn always closes its bracket.** The bridge opens every turn with
+`response.created` and closes it with `response.completed` — carrying the stop
+reason on success, and an `error` reason when the turn throws. An agent that
+streams nothing still emits a lifecycle, and the text and tool-call events are
+synthesized from the result when the stream carried none. This matters most on
+the failure path: a consumer driving a UI off `getFullStream()` would otherwise
+wait forever on a response that never completes. `emit: false` suppresses all
+of it.
 
 Items follow the same rule: assistant text becomes a `MessageItem`, a `tool_call`
 becomes a `FunctionCallItem`, and a completed `tool_call_update` becomes a

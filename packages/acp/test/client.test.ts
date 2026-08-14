@@ -8,6 +8,7 @@
 import { describe, expect, test } from 'bun:test';
 import type * as acp from '@zed-industries/agent-client-protocol';
 import { sliceLines } from '../src/client';
+import { TerminalRegistry } from '../src/terminals';
 import type { AcpTestRigOptions } from './_helpers';
 import { createAcpTestRig, MemoryFs, RecordingShell, textChunk } from './_helpers';
 
@@ -606,6 +607,82 @@ describe('client activity audit', () => {
   });
 });
 
+describe('terminal lifecycle during teardown', () => {
+  // Regression: `releaseAll` snapshotted the terminal list with no guard, and
+  // the connection released terminals BEFORE closing the transport — so the
+  // agent could keep issuing `terminal/create` throughout teardown and orphan a
+  // child process, which is exactly what closing the connection is supposed to
+  // prevent.
+  test('a terminal cannot be created once the registry is disposed', async () => {
+    const shell = new RecordingShell();
+    const registry = new TerminalRegistry(shell, '/workspace');
+
+    registry.create({
+      command: 'first',
+    });
+    await registry.releaseAll();
+
+    expect(() =>
+      registry.create({
+        command: 'after-dispose',
+      }),
+    ).toThrow(/closing/);
+    // Only the pre-dispose command ever reached the shell.
+    expect(shell.calls).toHaveLength(1);
+  });
+
+  test('releasing kills the commands still running', async () => {
+    const shell = new RecordingShell();
+    shell.script.set('sleep 60', {
+      hold: new Promise<void>(() => undefined),
+    });
+    const registry = new TerminalRegistry(shell, '/workspace');
+
+    const id = registry.create({
+      command: 'sleep',
+      args: [
+        '60',
+      ],
+    });
+    await registry.releaseAll();
+
+    // The handle is gone and the command was aborted rather than left running.
+    expect(registry.output(id)).toBeNull();
+    expect(shell.calls[0]?.options.signal?.aborted).toBe(true);
+  });
+
+  test('closing the connection releases the terminals it created', async () => {
+    const shell = new RecordingShell();
+    shell.script.set('sleep 60', {
+      hold: new Promise<void>(() => undefined),
+    });
+    const rig = await createAcpTestRig({
+      shell,
+      script: {
+        onPrompt: async (conn, params) => {
+          await conn.createTerminal({
+            sessionId: params.sessionId,
+            command: 'sleep',
+            args: [
+              '60',
+            ],
+          });
+        },
+      },
+    });
+    const session = await rig.connection.newSession({
+      cwd: '/workspace',
+    });
+    await session.prompt({
+      content: PROMPT,
+    });
+
+    await rig.connection.close();
+
+    expect(shell.calls[0]?.options.signal?.aborted).toBe(true);
+  });
+});
+
 describe('permission round-trips', () => {
   const OPTIONS: acp.PermissionOption[] = [
     {
@@ -935,5 +1012,19 @@ describe('sliceLines', () => {
 
   test('null line and limit are treated as absent', () => {
     expect(sliceLines(CONTENT, null, null)).toBe(CONTENT);
+  });
+
+  test('a limit of zero returns nothing', () => {
+    expect(sliceLines(CONTENT, 1, 0)).toBe('');
+  });
+
+  // Out of schema, but a raw negative slice bound would quietly mean
+  // "all but the last N lines" — a plausible answer to a malformed request.
+  test('a negative limit returns nothing rather than a plausible-looking slice', () => {
+    expect(sliceLines(CONTENT, 2, -2)).toBe('');
+  });
+
+  test('a line past the end returns nothing', () => {
+    expect(sliceLines(CONTENT, 99)).toBe('');
   });
 });

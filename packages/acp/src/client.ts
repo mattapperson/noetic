@@ -45,7 +45,10 @@ export function clientCapabilitiesFor(host: AcpClientHost): acp.ClientCapabiliti
  */
 export function sliceLines(content: string, line?: number | null, limit?: number | null): string {
   const start = typeof line === 'number' && line > 1 ? line - 1 : 0;
-  const count = typeof limit === 'number' ? limit : undefined;
+  // A negative `limit` is out of schema, but passing it through would become a
+  // negative slice bound and quietly mean "all but the last N lines" — a
+  // plausible-looking answer to a malformed request. Read it as zero lines.
+  const count = typeof limit === 'number' ? Math.max(0, limit) : undefined;
   if (start === 0 && count === undefined) {
     return content;
   }

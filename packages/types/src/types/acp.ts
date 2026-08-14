@@ -438,6 +438,10 @@ export interface AcpLiveSession {
   agentId: string;
   /** How long this connection is kept alive; decides who closes it and when. */
   keepAlive: AcpKeepAlive;
+  /** Working directory the session was created in — fixed for its lifetime. */
+  cwd: string;
+  /** MCP servers attached at creation — also fixed for its lifetime. */
+  mcpServers?: ReadonlyArray<acp.McpServer>;
 }
 
 /** @public Options handed to {@link AcpAgent.connect}. */

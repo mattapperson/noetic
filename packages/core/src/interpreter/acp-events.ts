@@ -122,12 +122,15 @@ export class AcpEventBridge {
       );
       this.sawText = true;
     }
+    // Close the message before synthesizing tool calls, so output items finish
+    // in index order. Emitting them first left item 0 closing after items 1..n,
+    // which reads as interleaved output to a consumer tracking `outputIndex`.
+    this.closeMessage();
     for (const item of result.items) {
       if (isFunctionCall(item) && !this.announcedToolCalls.has(item.callId)) {
         this.emitToolCall(item.callId, item.name, item.arguments);
       }
     }
-    this.closeMessage();
     if (!this.completed) {
       this.start();
       this.sdk('response.completed', {

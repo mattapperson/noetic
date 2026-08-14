@@ -324,7 +324,7 @@ for await (const chunk of harness.getTextStream()) {
 | `tool_call` | `getItemStream()` as a function call |
 | `plan`, `available_commands_update`, `current_mode_update`, `tool_call_update` | `getFullStream()` as `acp.<update>` |
 
-Every notification is *also* emitted raw as an `acp_event` framework event. A turn always brackets with `response.created` / `response.completed`, and an agent that returns a result without streaming has its output synthesized into events rather than silently swallowed. `emit: false` on the step suppresses all of it.
+Every notification is *also* emitted raw as an `acp_event` framework event. A turn always closes its bracket: `response.created` on the way in, `response.completed` on the way out — with the stop reason on success, an `error` reason when the turn throws. An agent that returns a result without streaming has its output synthesized rather than silently swallowed. `emit: false` on the step suppresses all of it.
 
 ## Structured output
 
