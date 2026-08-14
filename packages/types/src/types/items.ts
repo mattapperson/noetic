@@ -152,6 +152,33 @@ export interface FunctionCallOutputItem {
 /** @public Item produced by an extension schema registered by a tool, context layer, or harness. */
 export type ExtensionItem = ItemBase & Record<string, unknown>;
 
+/** @public Item type identifying a recorded history compaction. */
+export const COMPACTION_ITEM_TYPE = 'noetic:compaction' as const;
+
+/**
+ * @public A recorded compaction: a summary that REPLACES a contiguous prefix of
+ * conversation history. Lives in the item log like any other item, so
+ * compaction survives checkpoints/resume for free and forked logs share it.
+ *
+ * `replacesUntil` is the item-log index (exclusive) of the last item the
+ * summary covers. Folding the log (`foldCompactions`) drops items before that
+ * index and renders the summary in their place. Compactions may stack: a later
+ * compaction with a higher `replacesUntil` subsumes an earlier one.
+ */
+export interface CompactionItem {
+  readonly id: string;
+  readonly type: typeof COMPACTION_ITEM_TYPE;
+  readonly status: 'completed';
+  /** Item-log index (exclusive) up to which history is replaced by `summary`. */
+  readonly replacesUntil: number;
+  /** The compacted summary of the replaced items. */
+  readonly summary: string;
+  /** Count of items replaced, for diagnostics. */
+  readonly replacedCount: number;
+  /** Estimated tokens saved by this compaction, for diagnostics. */
+  readonly tokensSaved?: number;
+}
+
 /** @public Developer-role message item refined by a context-layer extension schema. */
 export type DeveloperMessageExtensionItem = InputMessageItem & {
   readonly role: 'developer';

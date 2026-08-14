@@ -2,7 +2,7 @@
 
 > **Module:** `@noetic-tools/context` (source at `packages/context/src/**`); the `ContextLayer` contract is owned by `@noetic-tools/types` (`packages/types/src/types/context-layer.ts`, also at the `@noetic-tools/types/contract` subpath). Both are re-exported by `@noetic-tools/core`.
 > **Depends On:** `07-context-and-event-log` (ItemLog, Item — type import only), `10-observability` (LayerTraceSpan, trace conventions), `04-spawn` (SpawnOpts — referenced in SpawnParams)
-> **Exports:** `ContextLayer`, `ContextLayerHooks`, `ContextScope`, `BudgetConfig`, `Slot`, `InitParams`, `InitResult`, `RecallParams`, `RecallResult`, `StoreParams`, `StoreResult`, `SpawnParams`, `SpawnResult`, `ReturnParams`, `ReturnResult`, `CompleteParams`, `DisposeParams`, `BeforeToolCallParams`, `BeforeToolCallResult`, `AfterModelCallParams`, `AfterModelCallResult`, `OnItemAppendParams`, `OnItemAppendResult`, `RerenderScope`, `ParentUpdateParams`, `ParentUpdateResult`, `ExecutionOutcome`, `ExecutionContext`, `ScopedStorage`, `StorageAdapter`, `ProjectionPolicy`, `LayerTimeouts`, `LayerProvides`, `LayerDataDecl`, `LayerFunctionDecl`, `ContextConfig`, `InferContext`, `InferContextShape`, `layerData`, `layerFunction`, `context`, `storageGetMany`, `LayerPlacement`, `RenderDeltaParams`, `ContextCacheConfig`, `ContextCacheStore`, `ContextEpoch`, `AnchorPin`, `LayerChurn`, `ReanchorReason`
+> **Exports:** `ContextLayer`, `ContextLayerHooks`, `ContextScope`, `BudgetConfig`, `Slot`, `InitParams`, `InitResult`, `RecallParams`, `RecallResult`, `StoreParams`, `StoreResult`, `SpawnParams`, `SpawnResult`, `ReturnParams`, `ReturnResult`, `CompleteParams`, `DisposeParams`, `BeforeToolCallParams`, `BeforeToolCallResult`, `AfterModelCallParams`, `AfterModelCallResult`, `OnItemAppendParams`, `OnItemAppendResult`, `RerenderScope`, `ParentUpdateParams`, `ParentUpdateResult`, `ExecutionOutcome`, `ExecutionContext`, `ScopedStorage`, `StorageAdapter`, `ProjectionPolicy`, `LayerTimeouts`, `LayerProvides`, `LayerDataDecl`, `LayerFunctionDecl`, `ContextConfig`, `InferContext`, `InferContextShape`, `layerData`, `layerFunction`, `context`, `storageGetMany`, `LayerPlacement`, `RenderDeltaParams`, `ContextCacheConfig`, `ContextCacheStore`, `ContextEpoch`, `AnchorPin`, `LayerChurn`, `ReanchorReason`, `foldCompactions`, `hasCompaction`, `historyPressure`, `HistoryPressure`, `createCompaction`, `CreateCompactionParams`, `compactHistory`, `CompactHistoryParams`, `compactionAsItem`
 
 ## Module Boundary
 
@@ -14,7 +14,7 @@ The context layer system lives in `@noetic-tools/context` (`packages/context/src
 | `ContextScope`, `ScopedStorage`, `StorageAdapter` | Projector (View assembly algorithm) in `projector.ts` |
 | `BudgetConfig`, `Slot` | budget algorithm; `allocateBudgets` in `budget.ts` |
 | `ExecutionContext` (layer-facing read-only view) | built-in layer factories under `context/layers/` |
-| `ProjectionPolicy` | Projector implementation in `projector.ts` |
+| `ProjectionPolicy` | Projector implementation in `projector.ts` (incl. the compaction helpers: `foldCompactions`, `historyPressure`, `createCompaction`, `compactHistory`, `hasCompaction`, `compactionAsItem`) |
 
 `Context` (the full execution object) lives in `@noetic-tools/core`'s `runtime/`; the `contextToExecCtx` mapping (Context → ExecutionContext) bridges core to the context contract.
 
@@ -428,41 +428,37 @@ function allocateBudgets(opts: {
   totalBudget: number;       // policy.tokenBudget
   systemPromptTokens: number;
   responseReserve: number;   // policy.responseReserve
-}): { allocations: { layerId: string; allocated: number }[]; historyBudget: number } {
+}): { allocations: { layerId: string; allocated: number }[] } {
   // Input validation: NaN in totalBudget/systemPromptTokens/responseReserve
   // throws NoeticConfigError (code INVALID_BUDGET_INPUT). Infinity is allowed
   // (= uncapped budget); fractional values are accepted.
   const available = opts.totalBudget - opts.responseReserve - opts.systemPromptTokens;
   if (available <= 0) {
-    // Every layer gets 0; history gets 0.
+    // Every layer gets 0.
   }
 
-  // Phase 1: satisfy each layer's minimum first.
-  let remaining = available;
-  for (const layer of opts.layers) {
-    const min = extractMin(layer.budget);   // {min,max}.min, else 0
-    allocate(layer.id, min);
-    remaining -= min;
-  }
+  // Phase 1: satisfy each layer's minimum first, from the FULL available
+  // window. Scale down proportionally only when the mins alone overcommit it.
 
-  // Phase 2: distribute a proportional pool above the minimums.
-  //   60% of what remains funds the layers (by headroom = max - min,
-  //   where 'auto'/undefined max is +Infinity), 40% is reserved for history.
-  const layerPool = remaining * 0.6;
-  const historyBudget = remaining * 0.4;
-  // each layer's share is its headroom proportion of layerPool, clamped to headroom
+  // Phase 2: distribute only the discretionary remainder.
+  // The remainder pool is min(available * 0.25, available - totalMin).
+  // Each layer's share is proportional to headroom = cap - min, clamped to
+  // cap. 'auto' and omitted budgets use a fixed 2000-token cap. Explicit
+  // Infinity caps still absorb whatever finite layers leave behind.
 }
 ```
 
-- **Minimums are satisfied first**, in array order.
-- The remaining budget is split: **60% into a proportional pool** distributed across layers by headroom (`max − min`; `'auto'`/`undefined` budgets have infinite headroom and split the pool among themselves after finite layers take their share), and **40% reserved for conversation history** (`historyBudget`).
-- **The pool is conserved.** Finite shares are single-priced: each finite layer's share (in a mixed finite/infinite population, `min(headroom, half-pool proportional)`) is computed once, and the infinite-headroom layers split exactly `layerPool − Σ finiteShare`. No part of the pool is silently lost.
-- A layer's final allocation never exceeds its `max`.
+- **Minimums are satisfied first from the full available window** (`totalBudget − responseReserve − systemPromptTokens`), not from the discretionary pool. Declaring `{ min: 10000, max: 12000 }` means "this block needs 10k to be coherent," and the allocator honors that floor whenever the window can.
+- **Declared mins scale down proportionally only when they alone overcommit the available window.** In that case, nothing else is distributed.
+- **Only the discretionary remainder is rationed.** The allocator offers layers at most **25% of the available window** above their floors, capped again by what the mins left behind: `min(available × 0.25, available − totalMin)`.
+- **`'auto'` and omitted budgets are deterministic.** They use a fixed **2000-token cap**, not infinite headroom. Layers that need more must declare it explicitly.
+- **Explicit `Infinity` caps remain uncapped.** In a mixed finite/uncapped set, finite layers take their proportional/clamped share and uncapped layers split the remainder.
+- A layer's final allocation never exceeds its cap.
 - **Input contract.** `totalBudget`, `systemPromptTokens`, and `responseReserve` MUST NOT be NaN — the allocator throws `NoeticConfigError` (code `INVALID_BUDGET_INPUT`). `Infinity` is a coherent "uncapped" budget and is accepted; fractional values are accepted.
 
 ### Budget Yielding
 
-When `recall()` returns `tokenCount` less than allocated, the difference goes to conversation history. The Projector MUST NOT reallocate to other layers (prevents cascading re-recalls).
+When `recall()` returns `tokenCount` less than allocated, the difference simply remains available to history when `assembleView` fits the final prompt. The Projector MUST NOT reallocate it to other layers (prevents cascading re-recalls).
 
 ### Budget Verification
 
@@ -758,6 +754,8 @@ interface ProjectionPolicy {
   overflow: 'truncate' | 'summarize' | 'sliding_window';
   overflowModel?: string;
   windowSize?: number;
+  compactAt?: number;  // folded-history token threshold that arms compaction;
+                       // defaults to 80% of (tokenBudget - responseReserve)
 }
 ```
 
@@ -773,6 +771,19 @@ interface ProjectionPolicy {
 6. Conversation history gets the remaining budget, with overflow policy applied
 7. Result is Item[] — directly passable to the LLM provider
 ```
+
+### History Compaction
+
+The item log is append-only; a **compaction** is an ordinary logged item (a `CompactionItem`, spec 07) declaring "the first `replacesUntil` items are summarized by `summary`". Folding keeps the log immutable — checkpoints, forks, and audits see the full record — while the model sees `[summary, ...items after replacesUntil]`. The projector owns the pure helpers; recording a compaction is always an explicit, caller-driven decision, never something the projector does behind the runtime's back.
+
+- `foldCompactions(items)` — projects the model view from the raw log. When multiple compactions exist the highest `replacesUntil` wins (later compactions subsume earlier ones). The replaced prefix collapses to a rendered `<compacted_history>` developer message; compaction records themselves never appear in the folded view, so one never reaches a provider un-folded. The fold seam strips unresolved tool calls, the same repair the history trimmer applies. Run it on history **before** the band assembler so a compaction genuinely reduces what `assembleView` has to fit.
+- `hasCompaction(items)` — cheap check that lets a caller skip the fold (and its copy) on the common no-compaction path.
+- `historyPressure(historyItems, policy)` — measures the **folded** history against `policy.compactAt` (default 80% of `tokenBudget − responseReserve`) and reports `{ historyTokens, compactAt, overThreshold }`. Measuring the folded view means writing a compaction genuinely relieves pressure. This is the observable complement of the assembler's silent front-drop: it says when the trim is coming so the caller can compact instead of losing the prefix.
+- `createCompaction({ items, replacesUntil, summary })` — builds the record (`replacedCount` + `tokensSaved` bookkeeping, floored at 0). The caller supplies the summary — an LLM call, a heuristic, or a verbatim digest; summarization is a composition point, not engine policy. `replacesUntil` indexes the RAW log, including earlier compaction items, so stacking compactions is well-defined.
+- `compactHistory({ log, keepRecent, summarize })` — thin convenience: works out `replacesUntil` from `keepRecent`, awaits `summarize` on exactly the replaced prefix, and returns the record for the **caller** to append (`ctx.itemLog.append(...)`). Returns `null` when there is nothing to compact.
+- `compactionAsItem(compaction)` — the one sanctioned bridge from `CompactionItem` to the `Item` that `ItemLog.append` takes; the type is registered with the schema registry so the append validates.
+
+The runtime applies the fold on every model request path. `callModel` assembly folds the projected log **before** the system/history partition — `replacesUntil` indexes the raw log, so folding a system-stripped array would drift the cut point and silently eat live turns; system items are hoisted from pre-fold positions so a compaction whose covered prefix includes the system prompt still leaves the model its instructions. The no-layers path folds the raw log directly, and `previewRequestItems` folds identically, so a preview never shows the raw record in place of the summary the model would actually read. When the folded history still exceeds `compactAt`, the step emits one `context_pressure` framework event (`{ nodeId, historyTokens, compactAt }`, spec 08) per execution, measured post-fold so writing a compaction genuinely relieves the pressure.
 
 ---
 
@@ -886,7 +897,7 @@ Set on the harness as `contextCache`. Anchoring is **on by default**; `enabled: 
 
 ### Limitation: History Overflow
 
-Once conversation history exceeds its budget, the projector drops from the front, which moves the anchor/history boundary and loses the history portion of the cache on every subsequent turn. The `[system][anchor]` prefix still caches. Pair anchoring with `history` (spec 12) to keep the boundary still.
+Once conversation history exceeds its budget, the projector drops from the front, which moves the anchor/history boundary and loses the history portion of the cache on every subsequent turn. The `[system][anchor]` prefix still caches. Pair anchoring with `history` (spec 12) to keep the boundary still, or record a compaction so the prefix collapses to a stable summary instead of sliding.
 
 ### Hard Token Cap (`assembleView`)
 

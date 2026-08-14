@@ -517,6 +517,7 @@ interface ProjectionPolicy {
   overflow: 'truncate' | 'summarize' | 'sliding_window';
   overflowModel?: string;
   windowSize?: number;
+  compactAt?: number;  // folded-history threshold that arms compaction (default 80% of budget − reserve)
 }
 
 // Fallback when neither step nor harness configures one:
@@ -537,7 +538,7 @@ interface StepCallModel {
 }
 ```
 
-- A single allocator (`allocateBudgets`) splits the recall budget: each layer's `budget.min` is satisfied first, then ~60% of the remainder funds a proportional pool across layers (by headroom `max − min`; `'auto'` and **omitted** budgets have infinite headroom and split the pool after finite layers take their share — the pool is fully conserved) and ~40% is reserved for conversation history. A layer never exceeds its `max`. NaN inputs throw `NoeticConfigError` (`INVALID_BUDGET_INPUT`); `Infinity` = uncapped.
+- A single allocator (`allocateBudgets`) splits the recall budget deterministically: each layer's `budget.min` is satisfied first from the full available window, then only the discretionary remainder is rationed as `min(available × 0.25, available − totalMin)` across headroom (`cap − min`). `'auto'` and **omitted** budgets use a fixed 2000-token cap; explicit `Infinity` stays uncapped. A layer never exceeds its cap. NaN inputs throw `NoeticConfigError` (`INVALID_BUDGET_INPUT`); `Infinity` = uncapped.
 - `assembleView` then holds the final view to a hard cap (`tokenBudget − responseReserve`) and lays it out in bands:
 
   ```
@@ -546,6 +547,8 @@ interface StepCallModel {
 
   Both layer bands arrive slot-ascending. The budget is claimed in this order: system items (never dropped), anchor output, live output, the tail, then the supersedes — with history taking whatever is left and keeping the most recent turns. Within a layer band each non-fitting item is dropped **individually** (later-slot items that still fit are kept); history is trimmed as a contiguous recent window and orphan tool calls are stripped at the boundary. Supersedes are never dropped — each corrects a pinned block already in the view, so dropping one would leave the model reading content known to be stale. History absorbs the cost instead.
 - `forceAtomicRecall: true` makes every layer atomic regardless of `recallMode`.
+
+**Compaction** is the explicit alternative to the assembler's silent front-drop: append a `CompactionItem` (`'noetic:compaction'`) to the log and the folded view collapses the replaced prefix to a `<compacted_history>` developer message while the raw log (checkpoints, forks) keeps everything. Helpers: `historyPressure(items, policy)` (measures the folded view against `compactAt`), `compactHistory({ log, keepRecent, summarize })` / `createCompaction(...)` (build the record — the caller supplies the summary and appends it via `compactionAsItem`), `foldCompactions(items)` (project the model view; run before `assembleView`), `hasCompaction(items)`.
 
 ### Prompt-cache anchoring (`placement`)
 

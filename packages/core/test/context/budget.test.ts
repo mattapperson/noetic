@@ -17,6 +17,16 @@ function makeLayer(id: string, budget?: BudgetConfig): ContextLayer {
   };
 }
 
+// Declared mins are satisfied out of the full available window
+// (totalBudget - responseReserve - systemPromptTokens); only the discretionary
+// remainder on top of them is 25% of that window.
+// History no longer takes a per-turn budget line from the allocator: what the
+// assembler can fit is decided in assembleView, and compaction is how history
+// shrinks (see historyPressure).
+const POOL_SHARE = 0.25;
+// Cap assigned to 'auto'/omitted budgets — deterministic, not infinite.
+const AUTO_CAP = 2_000;
+
 describe('allocateBudgets', () => {
   it('satisfies minimums first', () => {
     const layers = [
@@ -39,22 +49,6 @@ describe('allocateBudgets', () => {
     expect(allocations[1].allocated).toBeGreaterThanOrEqual(300);
   });
 
-  it('reserves 40% for history', () => {
-    const layers = [
-      makeLayer('a', {
-        min: 0,
-        max: 5_000,
-      }),
-    ];
-    const { historyBudget } = allocateBudgets({
-      layers,
-      totalBudget: 10_000,
-      systemPromptTokens: 0,
-      responseReserve: 0,
-    });
-    expect(historyBudget).toBe(4_000);
-  });
-
   it('handles zero available budget', () => {
     const layers = [
       makeLayer('a', {
@@ -62,25 +56,24 @@ describe('allocateBudgets', () => {
         max: 1_000,
       }),
     ];
-    const { allocations, historyBudget } = allocateBudgets({
+    const { allocations } = allocateBudgets({
       layers,
       totalBudget: 100,
       systemPromptTokens: 50,
       responseReserve: 50,
     });
     expect(allocations[0].allocated).toBe(0);
-    expect(historyBudget).toBe(0);
   });
 
-  it('distributes proportionally to max headroom', () => {
+  it('distributes proportionally to cap headroom, clamped to caps', () => {
     const layers = [
       makeLayer('a', {
         min: 0,
-        max: 3_000,
+        max: 300,
       }),
       makeLayer('b', {
         min: 0,
-        max: 1_000,
+        max: 100,
       }),
     ];
     const { allocations } = allocateBudgets({
@@ -89,12 +82,12 @@ describe('allocateBudgets', () => {
       systemPromptTokens: 0,
       responseReserve: 0,
     });
-    // 60% of 10000 = 6000 for layers; a gets 3/4 = 4500 capped to 3000, b gets 1/4 = 1500 capped to 1000
-    expect(allocations[0].allocated).toBe(3_000);
-    expect(allocations[1].allocated).toBe(1_000);
+    // pool = 2500; headrooms 300/100 → both fully satisfiable within the pool.
+    expect(allocations[0].allocated).toBe(300);
+    expect(allocations[1].allocated).toBe(100);
   });
 
-  it('handles numeric budget config', () => {
+  it('handles numeric budget config as a cap', () => {
     const layers = [
       makeLayer('a', 500),
     ];
@@ -107,7 +100,7 @@ describe('allocateBudgets', () => {
     expect(allocations[0].allocated).toBe(500);
   });
 
-  it('Infinity headroom layers split equally', () => {
+  it('auto layers get the default cap, split when pool-constrained', () => {
     const layers = [
       makeLayer('a', 'auto'),
       makeLayer('b', 'auto'),
@@ -118,9 +111,26 @@ describe('allocateBudgets', () => {
       systemPromptTokens: 0,
       responseReserve: 0,
     });
-    // 60% of 10000 = 6000 for layers, split equally between 2 auto layers
-    expect(allocations[0].allocated).toBe(3_000);
-    expect(allocations[1].allocated).toBe(3_000);
+    // pool = 2500; two auto caps of 2000 each (4000 total headroom) →
+    // proportional split of the pool: 1250 each.
+    expect(allocations[0].allocated).toBe(1_250);
+    expect(allocations[1].allocated).toBe(1_250);
+  });
+
+  it('a single auto layer is clamped to the default cap, not the pool', () => {
+    const layers = [
+      makeLayer('a', 'auto'),
+    ];
+    const { allocations } = allocateBudgets({
+      layers,
+      totalBudget: 100_000,
+      systemPromptTokens: 0,
+      responseReserve: 0,
+    });
+    // pool = 25000 but the auto cap bounds the layer at 2000 — the rendered
+    // block is the same size whatever the model's context length, which is what
+    // makes it cacheable.
+    expect(allocations[0].allocated).toBe(AUTO_CAP);
   });
 
   it('negative available budget yields all zero allocations', () => {
@@ -132,7 +142,7 @@ describe('allocateBudgets', () => {
       makeLayer('b', 'auto'),
     ];
     // systemPromptTokens + responseReserve > totalBudget
-    const { allocations, historyBudget } = allocateBudgets({
+    const { allocations } = allocateBudgets({
       layers,
       totalBudget: 100,
       systemPromptTokens: 5_000,
@@ -140,46 +150,33 @@ describe('allocateBudgets', () => {
     });
     expect(allocations[0].allocated).toBe(0);
     expect(allocations[1].allocated).toBe(0);
-    expect(historyBudget).toBe(0);
   });
 
-  it('handles auto budget config', () => {
-    const layers = [
-      makeLayer('a', 'auto'),
-    ];
-    const { allocations } = allocateBudgets({
-      layers,
-      totalBudget: 10_000,
-      systemPromptTokens: 0,
-      responseReserve: 0,
-    });
-    // 60% of 10000 (layerPool ratio) allocated to single auto layer
-    expect(allocations[0].allocated).toBe(6_000);
-  });
-
-  it('a layer that omits budget gets an auto share, not 0', () => {
+  it('a layer that omits budget gets the auto cap treatment, not 0', () => {
     const layers = [
       makeLayer('no-budget'),
       makeLayer('auto', 'auto'),
     ];
     const { allocations } = allocateBudgets({
       layers,
-      totalBudget: 10_000,
+      totalBudget: 100_000,
       systemPromptTokens: 0,
       responseReserve: 0,
     });
-    // Omitted budget = infinite headroom: splits the 6000 pool with 'auto'.
-    expect(allocations[0].allocated).toBe(3_000);
-    expect(allocations[1].allocated).toBe(3_000);
+    expect(allocations[0].allocated).toBe(AUTO_CAP);
+    expect(allocations[1].allocated).toBe(AUTO_CAP);
   });
 
-  it('conserves the pool when finite and auto layers mix (verifier repro)', () => {
+  it('mins that exceed the pool but fit the window are still satisfied in full', () => {
     const layers = [
-      makeLayer('finite', {
-        min: 0,
-        max: 4_800,
+      makeLayer('a', {
+        min: 2_000,
+        max: 3_000,
       }),
-      makeLayer('auto', 'auto'),
+      makeLayer('b', {
+        min: 6_000,
+        max: 8_000,
+      }),
     ];
     const { allocations } = allocateBudgets({
       layers,
@@ -187,38 +184,84 @@ describe('allocateBudgets', () => {
       systemPromptTokens: 0,
       responseReserve: 0,
     });
-    // layerPool = 6000; finite gets min(4800, half-pool 3000) = 3000;
-    // auto gets the REST of the pool — nothing vanishes.
-    expect(allocations[0].allocated).toBe(3_000);
-    expect(allocations[1].allocated).toBe(3_000);
-    const sum = allocations.reduce((s, a) => s + a.allocated, 0);
-    expect(sum).toBe(6_000);
+    // mins total 8000 — over the 2500 pool, but well inside the 10000 window.
+    // The pool bounds the discretionary remainder only, never the floors.
+    expect(allocations[0].allocated).toBeGreaterThanOrEqual(2_000);
+    expect(allocations[1].allocated).toBeGreaterThanOrEqual(6_000);
   });
 
-  it.each([
-    // [finiteMax, expectedFinite, expectedAuto] — half-pool clamp boundary at 3000
-    [
-      2_999,
-      2_999,
-      3_001,
-    ],
-    [
-      3_000,
-      3_000,
-      3_000,
-    ],
-    [
-      3_001,
-      3_000,
-      3_000,
-    ],
-  ])('clamp switchover boundary: finite max %d → finite %d / auto %d (pool conserved)', (finiteMax, expectedFinite, expectedAuto) => {
+  it('scales minimums down proportionally only when they overcommit the window', () => {
     const layers = [
-      makeLayer('finite', {
-        min: 0,
-        max: finiteMax,
+      makeLayer('a', {
+        min: 2_000,
+        max: 3_000,
       }),
-      makeLayer('auto', 'auto'),
+      makeLayer('b', {
+        min: 6_000,
+        max: 8_000,
+      }),
+    ];
+    const { allocations } = allocateBudgets({
+      layers,
+      totalBudget: 4_000,
+      systemPromptTokens: 0,
+      responseReserve: 0,
+    });
+    // available = 4000, mins total 8000 → scale = 4000/8000, nothing else split.
+    const sum = allocations.reduce((s, a) => s + a.allocated, 0);
+    expect(sum).toBeLessThanOrEqual(4_000);
+    expect(allocations[0].allocated).toBe(1_000);
+    expect(allocations[1].allocated).toBe(3_000);
+  });
+
+  it('a min larger than the pool survives a small window (32k/4k regression)', () => {
+    const layers = [
+      makeLayer('a', {
+        min: 10_000,
+        max: 12_000,
+      }),
+    ];
+    const { allocations } = allocateBudgets({
+      layers,
+      totalBudget: 32_000,
+      systemPromptTokens: 0,
+      responseReserve: 4_000,
+    });
+    // available = 28000; the 25% pool is 7000, below the declared 10000 min.
+    // The floor comes out of the window first, then the remainder tops it up to
+    // the cap — squeezing the min into the pool would silently render a
+    // truncated block.
+    expect(allocations[0].allocated).toBe(12_000);
+  });
+
+  it('two min-declaring layers both keep their floors on a small window', () => {
+    const layers = [
+      makeLayer('a', {
+        min: 3_000,
+        max: 4_000,
+      }),
+      makeLayer('b', {
+        min: 5_000,
+        max: 6_000,
+      }),
+    ];
+    const { allocations } = allocateBudgets({
+      layers,
+      totalBudget: 32_000,
+      systemPromptTokens: 0,
+      responseReserve: 4_000,
+    });
+    // mins total 8000 > the 7000 pool, but available is 28000.
+    expect(allocations[0].allocated).toBe(4_000);
+    expect(allocations[1].allocated).toBe(6_000);
+  });
+
+  it('the discretionary remainder never exceeds what the mins left behind', () => {
+    const layers = [
+      makeLayer('a', {
+        min: 9_000,
+        max: Number.POSITIVE_INFINITY,
+      }),
     ];
     const { allocations } = allocateBudgets({
       layers,
@@ -226,10 +269,34 @@ describe('allocateBudgets', () => {
       systemPromptTokens: 0,
       responseReserve: 0,
     });
-    expect(allocations[0].allocated).toBeCloseTo(expectedFinite, 6);
-    expect(allocations[1].allocated).toBeCloseTo(expectedAuto, 6);
+    // available = 10000, min = 9000 → remainder is capped at 1000, not the
+    // 2500 pool share, so the total stays inside the window.
+    expect(allocations[0].allocated).toBe(10_000);
+  });
+
+  it('explicit Infinity caps split the remainder after finite caps', () => {
+    const layers = [
+      makeLayer('finite', {
+        min: 0,
+        max: 400,
+      }),
+      makeLayer('uncapped', {
+        min: 0,
+        max: Number.POSITIVE_INFINITY,
+      }),
+    ];
+    const { allocations } = allocateBudgets({
+      layers,
+      totalBudget: 10_000,
+      systemPromptTokens: 0,
+      responseReserve: 0,
+    });
+    // pool = 2500; finite gets its full 400 cap; the uncapped layer absorbs
+    // the rest. Pool is conserved (floor() may shave a token).
     const sum = allocations.reduce((s, a) => s + a.allocated, 0);
-    expect(sum).toBeCloseTo(6_000, 6);
+    expect(allocations[0].allocated).toBe(400);
+    expect(sum).toBeGreaterThanOrEqual(2_499);
+    expect(sum).toBeLessThanOrEqual(2_500);
   });
 
   it.each([
@@ -264,7 +331,7 @@ describe('allocateBudgets', () => {
       }),
       makeLayer('auto', 'auto'),
     ];
-    const { allocations, historyBudget } = allocateBudgets({
+    const { allocations } = allocateBudgets({
       layers,
       totalBudget: Number.POSITIVE_INFINITY,
       systemPromptTokens: 0,
@@ -274,22 +341,38 @@ describe('allocateBudgets', () => {
       expect(Number.isNaN(a.allocated)).toBe(false);
     }
     expect(allocations[0].allocated).toBe(1_000); // capped at max
-    expect(allocations[1].allocated).toBe(Number.POSITIVE_INFINITY);
-    expect(historyBudget).toBe(Number.POSITIVE_INFINITY);
+    expect(allocations[1].allocated).toBe(AUTO_CAP); // capped at the auto default
   });
 
   it('fractional budgets are accepted (pinned)', () => {
     const layers = [
       makeLayer('auto', 'auto'),
     ];
-    const { allocations, historyBudget } = allocateBudgets({
+    const { allocations } = allocateBudgets({
       layers,
       totalBudget: 0.5,
       systemPromptTokens: 0,
       responseReserve: 0,
     });
-    expect(allocations[0].allocated).toBeCloseTo(0.3, 9);
-    expect(historyBudget).toBeCloseTo(0.2, 9);
+    // pool = 0.125 — sub-token pools floor to 0.
+    expect(allocations[0].allocated).toBe(0);
+  });
+
+  it('pool share constant is pinned', () => {
+    const layers = [
+      makeLayer('a', {
+        min: 0,
+        max: Number.POSITIVE_INFINITY,
+      }),
+    ];
+    const { allocations } = allocateBudgets({
+      layers,
+      totalBudget: 40_000,
+      systemPromptTokens: 0,
+      responseReserve: 0,
+    });
+    // A single uncapped layer absorbs the whole pool: 25% of 40000.
+    expect(allocations[0].allocated).toBe(40_000 * POOL_SHARE);
   });
 });
 
