@@ -11,6 +11,7 @@ import type {
   AcpAgent,
   AcpAgentConnection,
   AcpClientActivity,
+  AcpClientCapabilityConfig,
   AcpClientHost,
   AcpContentBlock,
   AcpKeepAlive,
@@ -36,7 +37,7 @@ import {
   NoeticErrorImpl,
   SteeringAction,
 } from '@noetic-tools/types';
-import type { AcpSessionStore } from '../harness/acp-session-store';
+import type { AcpSessionStore } from '../runtime/acp-session-store';
 import { AcpEventBridge } from './acp-events';
 import { withHistoryPrompt } from './acp-history';
 import { resolveLazy } from './execute-action';
@@ -268,10 +269,33 @@ function buildHost<TContext, I, O>(
 }
 
 /**
+ * The capability set as the wire sees it, so two spellings of the same policy
+ * compare equal. Matches the defaults `clientCapabilitiesFor` applies in the
+ * protocol client — an omitted field and an explicitly-`true` one are the same
+ * request, and field order is not a difference at all.
+ */
+function normalizedCapabilities(config: AcpClientCapabilityConfig | undefined): string {
+  return JSON.stringify({
+    readTextFile: config?.readTextFile !== false,
+    writeTextFile: config?.writeTextFile !== false,
+    terminal: config?.terminal !== false,
+    allowAnyPath: config?.allowAnyPath === true,
+    additionalDirectories: [
+      ...(config?.additionalDirectories ?? []),
+    ].sort(),
+  });
+}
+
+/**
  * `clientCapabilities` is negotiated once per connection, so a step joining an
  * existing session cannot change it. Silently ignoring the request would hand
  * back a session with different permissions than the step asked for, so this
  * is a configuration error instead.
+ *
+ * Compared field by field after normalisation: comparing raw JSON made
+ * `{a,b}` conflict with `{b,a}`, and an omitted capability conflict with the
+ * default it resolves to — telling an author to make two identical policies
+ * identical.
  */
 function assertCapabilitiesCompatible<TContext, I, O>(
   step: StepAcpAgent<TContext, I, O>,
@@ -281,8 +305,7 @@ function assertCapabilitiesCompatible<TContext, I, O>(
   if (requested === undefined) {
     return;
   }
-  const current = live.host.capabilities;
-  if (JSON.stringify(requested) === JSON.stringify(current ?? {})) {
+  if (normalizedCapabilities(requested) === normalizedCapabilities(live.host.capabilities)) {
     return;
   }
   throw new NoeticConfigError({
@@ -291,10 +314,6 @@ function assertCapabilitiesCompatible<TContext, I, O>(
     hint: 'ACP negotiates client capabilities once per connection. Give every step sharing a `session.reuse` key the same `clientCapabilities`, or use a separate session.',
   });
 }
-
-//#endregion
-
-//#region Session lifecycle
 
 /** Keeping a connection is always explicit; the default closes it with the step. */
 function keepAliveOf(policy: AcpSessionPolicy | undefined): AcpKeepAlive {

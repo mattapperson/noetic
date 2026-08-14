@@ -96,6 +96,15 @@ export function assertPromptContentSupported(
 class AcpSessionImpl implements AcpSession {
   /** Set for the duration of a turn; notifications fan out to it. */
   private activeTurn?: AcpTurnAccumulator;
+  /**
+   * Tail of the turn queue. An ACP session is one conversation, and its
+   * notifications carry no turn id — so two turns in flight at once fan into
+   * whichever accumulator was installed last, silently truncating one and
+   * corrupting the other. Turns are therefore serialised rather than rejected:
+   * a model can emit parallel `acpAgentTool` calls sharing a session, and both
+   * deserve a correct answer, just not simultaneously.
+   */
+  private queue: Promise<unknown> = Promise.resolve();
 
   constructor(
     private readonly agentId: string,
@@ -128,8 +137,21 @@ class AcpSessionImpl implements AcpSession {
   async prompt(opts: AcpPromptOptions): Promise<AcpTurnResult> {
     // The specification requires clients to restrict prompt content to what the
     // agent advertised, so an unsupported block is refused here rather than
-    // failing opaquely inside the agent.
+    // failing opaquely inside the agent. Checked before queueing, so a bad
+    // request fails immediately instead of after an unrelated turn.
     assertPromptContentSupported(this.agentId, opts.content, this.promptCapabilities);
+
+    // Wait for any turn already running on this session, then take our place at
+    // the tail. A failed predecessor must not poison the queue.
+    const ours = this.queue.then(
+      () => this.runTurn(opts),
+      () => this.runTurn(opts),
+    );
+    this.queue = ours.catch(() => undefined);
+    return await ours;
+  }
+
+  private async runTurn(opts: AcpPromptOptions): Promise<AcpTurnResult> {
     const accumulator = new AcpTurnAccumulator();
     this.activeTurn = accumulator;
     const onAbort = () => {

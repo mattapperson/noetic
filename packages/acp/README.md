@@ -19,8 +19,9 @@ const review = step.acpAgent({
   permissions: { default: 'deny', allow: [{ kind: 'read' }] },
 });
 
-const harness = new AgentHarness({ name: 'reviewer', params: {}, agentGraph: review });
-console.log(await harness.execute('go'));
+const harness = new AgentHarness({ name: 'reviewer', params: {} });
+const summary = await harness.run(review, 'go', harness.createContext());
+console.log(summary);
 ```
 
 ## What this package does
@@ -48,7 +49,7 @@ Each preset is only a launch recipe (which binary, which flags) and accepts `com
 
 | Import | Contents |
 |---|---|
-| `@noetic-tools/acp` | Protocol client, permission resolver, terminal registry, agent presets, loopback transport. Runtime-neutral — no `node:*`. |
+| `@noetic-tools/acp` | Protocol client, permission resolver, terminal registry, agent presets, loopback transport. No static `node:*` import; `child_process` loads only when a stdio connection opens. |
 | `@noetic-tools/acp/stdio` | The Node stdio transport (`node:child_process`). Presets reach it through a lazy `import()`. |
 
 ## Testing

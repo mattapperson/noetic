@@ -6,8 +6,12 @@
  * protocol code — that is the whole point of standardising on ACP. Any agent
  * not listed here works through {@link customAcpAgent}.
  *
- * The stdio transport is loaded through a lazy dynamic import so this module
- * stays free of `node:*` and the package's main entry remains runtime-neutral.
+ * The stdio transport is reached through a dynamic `import()`, so this module
+ * has no static `node:*` import and nothing loads `child_process` until a
+ * connection is actually opened. Note that is a runtime property, not a
+ * bundling one: the specifier is static, so a bundler still resolves and
+ * includes `./stdio`. A browser build wanting it excluded should alias or
+ * externalise `@noetic-tools/acp/stdio`.
  */
 
 import type { AcpAgent, AcpTransport, AcpTransportFactory } from '@noetic-tools/types';

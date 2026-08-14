@@ -390,7 +390,7 @@ reason = "@noetic-tools/openui depends on @noetic-tools/context (the openUiSurfa
 [[boundaries]]
 from = "packages/core/src/**"
 to = "packages/acp/src/**"
-reason = "core resolves ACP agents via the @noetic-tools/types contract + a runtime registry; it must never import @noetic-tools/acp or pull the Agent Client Protocol library into its dependency graph"
+reason = "core resolves ACP agents via the @noetic-tools/types contract + a runtime registry; it must never import @noetic-tools/acp, so no protocol code is loaded at runtime by core (this rule checks source imports; the npm dependency tree still contains the protocol package via @noetic-tools/types)"
 
 [[boundaries]]
 from = "packages/acp/src/**"

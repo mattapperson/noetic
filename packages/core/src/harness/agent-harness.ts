@@ -1,7 +1,7 @@
 import { frameworkCast, ItemSchemaRegistry, NoeticConfigError } from '@noetic-tools/types';
 import { SpanImpl } from '../observability/span-impl';
 import { NoopExporter } from '../observability/trace-exporter';
-import { AcpSessionStore } from './acp-session-store';
+import { AcpSessionStore } from '../runtime/acp-session-store';
 import {
   createInMemoryFsAdapter,
   createInMemoryShellAdapter,

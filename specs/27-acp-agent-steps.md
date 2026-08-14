@@ -124,7 +124,11 @@ one-shot. Three transports ship:
 Advertised `ClientCapabilities` are computed from what the host can actually
 back, narrowed by the step's `clientCapabilities`. A withdrawn capability is
 answered with a JSON-RPC method-not-found rather than quietly doing the work
-anyway — a read-only review step genuinely cannot write.
+anyway.
+
+Withdrawing `writeTextFile` alone does not make a step read-only: a shell
+redirect through `terminal/create` writes just as well. A genuinely read-only
+step withdraws both, as the docs example does.
 
 ## Filesystem confinement
 
@@ -448,9 +452,16 @@ published JSON Schema is regenerated from the Zod source (`bun run gen:schema`).
 `@noetic-tools/core` imports only the *contract types* from
 `@noetic-tools/types` and resolves *agent instances* from the step
 (`step.agent`) or the hydration registry. It never imports `@noetic-tools/acp`,
-so neither the protocol library nor any agent binary enters core's dependency
-graph. This is enforced by `.sentrux/rules.toml` (`core → acp` forbidden, and
-the reverse).
+so **no protocol code is loaded at runtime by core** — the emitted
+`packages/types/dist` has no `import`/`require` of the protocol package, only
+type-only re-exports that erase at compile time. Enforced by
+`.sentrux/rules.toml` (`core → acp` forbidden, and the reverse).
+
+The npm dependency tree is a separate question, and the honest answer is
+different: `@noetic-tools/types` declares the protocol package as a real
+`dependency` so its `.d.ts` re-exports resolve for consumers, which means
+installing core installs it (and a second zod major alongside the workspace's).
+Runtime import graph clean; install graph not.
 
 ## Future Considerations
 

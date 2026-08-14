@@ -18,8 +18,10 @@ const review = step.acpAgent<ContextData, string, string>({
   permissions: { default: 'deny', allow: [{ kind: 'read' }] },
 });
 
-const harness = new AgentHarness({ name: 'reviewer', params: {}, agentGraph: review });
-const summary = await harness.execute('go');
+// `run` returns the step's output; `execute` starts a run and reports through
+// the harness streams instead.
+const harness = new AgentHarness({ name: 'reviewer', params: {} });
+const summary = await harness.run(review, 'go', harness.createContext());
 ```
 
 The integration is the [Agent Client Protocol](https://agentclientprotocol.com/) (ACP), a JSON-RPC 2.0 standard in which **Noetic is the Client and the coding agent is the Agent**.
@@ -527,7 +529,7 @@ const remote = defineAcpAgent({
 });
 ```
 
-The Node stdio transport lives at `@noetic-tools/acp/stdio`, so the package's main entry stays free of `node:*` and safe to bundle for the browser.
+The Node stdio transport lives at `@noetic-tools/acp/stdio`. The main entry has no static `node:*` import and never loads `child_process` unless a stdio connection is opened — but that is a runtime property: the dynamic `import('./stdio')` uses a static specifier, so a bundler still pulls the module in. A browser build should alias or externalise `@noetic-tools/acp/stdio`.
 
 ## API reference
 

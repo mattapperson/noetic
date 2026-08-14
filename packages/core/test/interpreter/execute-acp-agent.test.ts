@@ -690,6 +690,59 @@ describe('executeAcpAgent — a session shared across steps', () => {
     }
   });
 
+  // Regression: comparing raw JSON made two spellings of the SAME policy
+  // conflict — different key order, or an omitted capability against the
+  // default it resolves to — telling the author to make two identical policies
+  // identical.
+  it.each([
+    [
+      'a different key order',
+      {
+        writeTextFile: false,
+        terminal: false,
+      },
+      {
+        terminal: false,
+        writeTextFile: false,
+      },
+    ],
+    [
+      'omitted capabilities versus their explicit defaults',
+      undefined,
+      {
+        readTextFile: true,
+        writeTextFile: true,
+        terminal: true,
+      },
+    ],
+  ] as const)('accepts %s as the same policy', async (_label, first, second) => {
+    const { ctx } = harnessCtx();
+    const agent = fakeAgent();
+    const a = step.acpAgent({
+      id: 'first-cap',
+      agent,
+      prompt: 'one',
+      clientCapabilities: first,
+      session: {
+        reuse: 'shared',
+        keepAlive: 'run',
+      },
+    });
+    const b = step.acpAgent({
+      id: 'second-cap',
+      agent,
+      prompt: 'two',
+      clientCapabilities: second,
+      session: {
+        reuse: 'shared',
+        keepAlive: 'run',
+      },
+    });
+
+    await execute(a, undefined, ctx);
+    await execute(b, undefined, ctx);
+  });
+
   it('rejects reusing a session with different clientCapabilities', async () => {
     const { ctx } = harnessCtx();
     const agent = fakeAgent();

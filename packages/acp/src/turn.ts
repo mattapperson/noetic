@@ -3,7 +3,8 @@
  * {@link AcpTurnResult}: Noetic conversation items, the assistant text, the
  * agent's plan, its slash commands, and its final mode.
  *
- * Every one of ACP's eight update variants is handled — nothing is dropped.
+ * All eight of ACP's update variants are handled; see `user_message_chunk`
+ * below for the one whose payload is deliberately not turned into an item.
  */
 
 import type {
@@ -167,8 +168,11 @@ export class AcpTurnAccumulator {
       return;
     }
     if (update.sessionUpdate === 'user_message_chunk') {
-      // Replayed history from `session/load`. It is already in the Noetic item
-      // log, so it is surfaced as an event but not re-appended as an item.
+      // Replayed history, sent when the agent reloads a session. It reaches the
+      // event stream but is not added to the turn's items: for a session this
+      // Noetic run started, the same messages are already in the item log and
+      // would double. For a `session.load` of a session Noetic never ran, that
+      // history is genuinely not captured here — see the note in the spec.
       return;
     }
     if (update.sessionUpdate === 'tool_call') {

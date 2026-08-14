@@ -432,6 +432,87 @@ describe('agent liveness', () => {
   });
 });
 
+describe('concurrent turns on one session', () => {
+  // Regression: `activeTurn` was a single field, so a second concurrent prompt
+  // overwrote it and every notification fanned into the newest accumulator.
+  // Turn A lost its tail and turn B gained it — silent corruption, no error,
+  // undetectable by either caller. Reachable whenever two steps share a
+  // `session.reuse` key under `inParallel`, and easier still now that a model
+  // can emit parallel `acpAgentTool` calls.
+  test('two turns started at once each get their own output', async () => {
+    const rig = await createAcpTestRig({
+      script: {
+        onPrompt: async (conn, params) => {
+          const which = params.prompt
+            .map((block) => (block.type === 'text' ? block.text : ''))
+            .join('');
+          await conn.sessionUpdate(textChunk(params.sessionId, `<${which}-start>`));
+          // Yield, so an unserialised implementation interleaves here.
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          await conn.sessionUpdate(textChunk(params.sessionId, `<${which}-end>`));
+        },
+      },
+    });
+    const session = await rig.connection.newSession({
+      cwd: '/workspace',
+    });
+
+    const [a, b] = await Promise.all([
+      session.prompt({
+        content: [
+          {
+            type: 'text',
+            text: 'a',
+          },
+        ],
+      }),
+      session.prompt({
+        content: [
+          {
+            type: 'text',
+            text: 'b',
+          },
+        ],
+      }),
+    ]);
+
+    expect(a.text).toBe('<a-start><a-end>');
+    expect(b.text).toBe('<b-start><b-end>');
+
+    await rig.close();
+  });
+
+  test('a failed turn does not poison the ones queued behind it', async () => {
+    let attempt = 0;
+    const rig = await createAcpTestRig({
+      script: {
+        onPrompt: async (conn, params) => {
+          attempt += 1;
+          if (attempt === 1) {
+            throw new Error('first turn exploded');
+          }
+          await conn.sessionUpdate(textChunk(params.sessionId, 'second turn fine'));
+        },
+      },
+    });
+    const session = await rig.connection.newSession({
+      cwd: '/workspace',
+    });
+
+    const first = session.prompt({
+      content: TEXT_PROMPT,
+    });
+    const second = session.prompt({
+      content: TEXT_PROMPT,
+    });
+
+    expect(first).rejects.toThrow();
+    expect((await second).text).toBe('second turn fine');
+
+    await rig.close();
+  });
+});
+
 describe('capability gating', () => {
   test('loadSession throws AcpCapabilityError when unadvertised', async () => {
     const rig = await createAcpTestRig();
