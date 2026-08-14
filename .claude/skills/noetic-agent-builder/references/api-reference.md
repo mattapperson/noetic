@@ -222,7 +222,7 @@ const review = step.acpAgent({
 });
 ```
 
-`codex()`, `gemini()`, and `customAcpAgent({ agentId, command, args, env, transport })` take the same shape. Every preset accepts `command` / `args` / `env` overrides plus a `transport` for non-stdio reach.
+`codex()`, `gemini()`, `opencode()` (native `opencode acp`), `pi()` (community `pi-acp` adapter), and `customAcpAgent({ agentId, command, args, env, transport })` take the same shape. Every preset accepts `command` / `args` / `env` overrides plus a `transport` for non-stdio reach.
 
 The interpreter mirrors `executeCallModel`: it appends the prompt as a user item, opens (or reuses) a connection + session, applies `mode`/`model`, drives one `session/prompt`, forwards each notification as an `acp_event` framework event, appends the turn's items to the item log, charges `ctx.tokens`/`ctx.cost`, records `ctx.lastStepMeta`, tears the connection down per policy, and returns the assistant text (or the parsed `output`).
 

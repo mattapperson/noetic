@@ -12,7 +12,7 @@ All scripts run from the repo root unless noted.
 - `bun run lint` / `bun run lint:fix` — biome
 - `bun run check:exports` — validates `@public` JSDoc tags on core's entry points (`bun scripts/check-export-tags.ts`)
 - `bun run typecheck:examples` — typechecks the root `examples/` project
-- `bun run example:acp` — runs `examples/acp-e2e.ts` (set `ACP_LIVE_AGENT=1` to include the live spawned-agent path)
+- `bun run example:acp` — runs `examples/acp-e2e.ts` (set `ACP_LIVE_AGENT=1` for the live spawned-agent path; add `OPENROUTER_API_KEY` for the live model→agent delegation path)
 - `bun run inspect` — starts the inspector host (`packages/inspector/server/host.ts`)
 - `cd packages/core && bun run gen:schema` — regenerate the published JSON Schema for dynamic workflows from `WorkflowDocumentSchema`. **MUST run (same commit) whenever you change the JSON-workflow Zod schema in `packages/types/src/schemas/workflow.ts` (core’s `schemas/workflow.ts` only re-exports it)** — it rewrites both the package artifact (`packages/core/schema/noetic-workflow.schema.json`) and the hosted copy (`packages/web/public/schema/noetic-workflow.schema.json`, served at the schema's `$id`). A drift-gate test fails CI if either is stale. Never hand-edit the generated `*.schema.json` files. See `.claude/rules/sync-spec-code-docs.md` Requirement 6.
 

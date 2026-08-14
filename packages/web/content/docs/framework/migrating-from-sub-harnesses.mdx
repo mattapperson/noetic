@@ -107,10 +107,10 @@ Capabilities the old adapters had no way to express:
 
 ## opencode and pi
 
-These had adapters in the old system and have no preset in the new one: their ACP support is unconfirmed, and shipping a preset that may not work is worse than not shipping one. If they speak ACP in your setup, reach them directly — no framework change needed:
+Both have presets, verified against the real binaries:
 
 ```ts
-import { customAcpAgent } from '@noetic-tools/acp';
-
-customAcpAgent({ agentId: 'opencode', command: 'opencode', args: ['acp'] });
+import { opencode, pi } from '@noetic-tools/acp';
 ```
+
+opencode speaks ACP natively — the preset runs its official `opencode acp` command. pi has no native ACP mode yet, so its preset goes through the community [`pi-acp`](https://github.com/svkozak/pi-acp) adapter — the same bridge Zed's agent registry points at. If the pi preset misbehaves, the issue likely belongs in that adapter rather than in pi or Noetic.

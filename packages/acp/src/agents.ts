@@ -136,6 +136,44 @@ export function gemini(opts: AcpPresetOptions = {}): AcpAgent {
 }
 
 /**
+ * opencode, which speaks ACP natively via its `opencode acp` command.
+ * @public
+ */
+export function opencode(opts: AcpPresetOptions = {}): AcpAgent {
+  return preset(
+    'opencode',
+    {
+      command: 'opencode',
+      args: [
+        'acp',
+      ],
+    },
+    opts,
+  );
+}
+
+/**
+ * The pi coding agent, reached through the community `pi-acp` adapter — the
+ * same adapter Zed's agent registry points at. pi itself has no native ACP
+ * mode yet, so this preset depends on a third-party bridge; if it misbehaves,
+ * the issue belongs there rather than in pi or here.
+ * @public
+ */
+export function pi(opts: AcpPresetOptions = {}): AcpAgent {
+  return preset(
+    'pi',
+    {
+      command: 'npx',
+      args: [
+        '-y',
+        'pi-acp',
+      ],
+    },
+    opts,
+  );
+}
+
+/**
  * Any other ACP-speaking agent. Because the protocol is uniform, this is a
  * first-class way to use an agent — not a fallback.
  * @public

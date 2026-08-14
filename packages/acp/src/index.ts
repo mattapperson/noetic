@@ -21,7 +21,7 @@
 /** @public */
 export type { AcpPresetOptions, AcpProcessSpec } from './agents';
 /** @public */
-export { claudeCode, codex, customAcpAgent, gemini } from './agents';
+export { claudeCode, codex, customAcpAgent, gemini, opencode, pi } from './agents';
 /** @public */
 export type { DefineAcpAgentOptions } from './define';
 /** @public */

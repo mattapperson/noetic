@@ -40,10 +40,10 @@ Because every ACP agent is a uniform JSON-RPC peer, there is no vendor SDK per a
 ## Agents
 
 ```ts
-import { claudeCode, codex, gemini, customAcpAgent } from '@noetic-tools/acp';
+import { claudeCode, codex, gemini, opencode, pi, customAcpAgent } from '@noetic-tools/acp';
 ```
 
-Each preset is only a launch recipe (which binary, which flags) and accepts `command` / `args` / `env` overrides plus a `transport` for agents that are not local child processes. `customAcpAgent({ agentId, command, args })` covers anything else that speaks the protocol.
+Each preset is only a launch recipe (which binary, which flags) and accepts `command` / `args` / `env` overrides plus a `transport` for agents that are not local child processes. opencode speaks ACP natively; pi is reached through the community `pi-acp` adapter. `customAcpAgent({ agentId, command, args })` covers anything else that speaks the protocol.
 
 ## Entry points
 

@@ -30,6 +30,8 @@ import type {
 } from '@noetic-tools/core';
 import {
   AgentHarness,
+  acpAgentTool,
+  callModel,
   createMessage,
   hydrateWorkflow,
   step,
@@ -385,6 +387,50 @@ async function main(): Promise<void> {
     ok('a real ACP agent completed a turn', outH.includes('ACP_OK'));
   } else {
     console.log('\n── Path H: skipped (set ACP_LIVE_AGENT=1 to run against a real agent) ──');
+  }
+
+  // ── Path I (opt-in): a REAL model delegates to a REAL agent via acpAgentTool ──
+  // The one integration the loopback tests cannot reach: a live LLM deciding to
+  // call the ACP tool, and a live coding agent answering it. Needs both an
+  // OpenRouter key and Claude Code credentials, so it is gated on both.
+  if (process.env.ACP_LIVE_AGENT === '1' && process.env.OPENROUTER_API_KEY) {
+    console.log('\n── Path I: LIVE model delegates to a LIVE agent (acpAgentTool) ──');
+    const delegatingHarness = new AgentHarness({
+      name: 'delegator',
+      params: {},
+      callModelDefaults: {
+        provider: 'openrouter',
+      },
+    });
+    const planThenDelegate = callModel<ContextData, string>({
+      id: 'delegate',
+      model: 'anthropic/claude-sonnet-4.5',
+      instructions:
+        'You have a coding agent available as a tool. When asked to have it do something, ' +
+        'call the tool with a clear instruction. Then reply with exactly what it returned.',
+      tools: [
+        acpAgentTool({
+          agent: claudeCode({
+            env: {
+              CLAUDECODE: undefined,
+            },
+          }),
+          permissions: {
+            default: 'deny',
+          },
+        }),
+      ],
+    });
+    const outI = await delegatingHarness.run<string, string>(
+      frameworkCast(planThenDelegate),
+      'Ask the coding agent to reply with exactly: DELEGATED_OK',
+      delegatingHarness.createContext(),
+    );
+    await delegatingHarness.closeAcpSessions();
+    console.log('  model output:', JSON.stringify(outI));
+    ok('a real model delegated to a real agent', outI.includes('DELEGATED_OK'));
+  } else if (process.env.ACP_LIVE_AGENT === '1') {
+    console.log('\n── Path I: skipped (needs OPENROUTER_API_KEY for the live model) ──');
   }
 
   console.log(process.exitCode ? '\n❌ FAILED' : '\n✅ ALL PATHS PASSED');

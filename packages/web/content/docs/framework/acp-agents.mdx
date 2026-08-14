@@ -45,11 +45,13 @@ It also brings capabilities a hand-rolled adapter has no way to express: permiss
 `@noetic-tools/acp` ships presets for the agents that speak ACP today. Each is only a launch recipe — which binary to run, with which flags:
 
 ```ts
-import { claudeCode, codex, gemini, customAcpAgent } from '@noetic-tools/acp';
+import { claudeCode, codex, gemini, opencode, pi, customAcpAgent } from '@noetic-tools/acp';
 
 claudeCode();                       // npx @zed-industries/claude-code-acp
 codex();                            // npx @zed-industries/codex-acp
 gemini();                           // gemini --experimental-acp
+opencode();                         // opencode acp  (native ACP)
+pi();                               // npx pi-acp    (community adapter)
 
 customAcpAgent({                    // any other ACP-speaking binary
   agentId: 'my-agent',
@@ -542,6 +544,8 @@ Everything `@noetic-tools/acp` exports. Internal helpers — the item builders, 
 | `claudeCode(opts?)` | Preset for `@zed-industries/claude-code-acp`. |
 | `codex(opts?)` | Preset for `@zed-industries/codex-acp`. |
 | `gemini(opts?)` | Preset for Gemini CLI's native ACP mode. |
+| `opencode(opts?)` | Preset for opencode's native `opencode acp` command. |
+| `pi(opts?)` | Preset for pi, via the community `pi-acp` adapter. |
 | `customAcpAgent(opts)` | Any other ACP-speaking binary. Needs a `command` or a `transport`. |
 | `AcpPresetOptions` | `command` / `args` / `env` / `transport` overrides accepted by every preset. |
 | `AcpProcessSpec` | How to launch an agent as a local child process. |
