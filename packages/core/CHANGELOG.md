@@ -1,3 +1,7 @@
+## @noetic-tools/core-v5.4.2 (2026-08-19)
+
+* test(core): pin the anchoring behaviour that reads as a renderDelta bug ([b2cffe1](https://github.com/mattapperson/noetic/commit/b2cffe1)), closes [#1](https://github.com/mattapperson/noetic/issues/1) [#2](https://github.com/mattapperson/noetic/issues/2) [#3](https://github.com/mattapperson/noetic/issues/3)
+
 ## @noetic-tools/core-v5.4.1 (2026-08-14)
 
 * feat!: replace the sub-harness system with an Agent Client Protocol client (#89) ([eb4710d](https://github.com/mattapperson/noetic/commit/eb4710d)), closes [#89](https://github.com/mattapperson/noetic/issues/89)
