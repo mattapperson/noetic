@@ -7,6 +7,7 @@ import type {
   Item,
   SessionUsage,
 } from '@noetic-tools/types';
+import { isNoeticError } from '@noetic-tools/types';
 import { emitFrameworkEvent } from './broadcaster-utils';
 import { EventBroadcaster } from './event-broadcaster';
 import type { QueuedMessage } from './message-queue';
@@ -306,6 +307,9 @@ export class SessionRunner {
         data: {
           turnId,
           reason: error.message,
+          // The typed kind ('cancelled', 'model_refused', …) so consumers can
+          // classify the abort without parsing the human-readable message.
+          errorKind: isNoeticError(error) ? error.noeticError.kind : undefined,
         },
       });
       this.rejectWaiters(error);

@@ -198,6 +198,7 @@ function buildSteerer(
       request.toolCall.title ?? request.toolCall.toolCallId,
       request.toolCall.rawInput,
       ctx,
+      request.toolCall.toolCallId,
     );
     if (decision.action === SteeringAction.Allow) {
       return undefined;

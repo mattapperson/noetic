@@ -75,6 +75,49 @@ export { isAbsolutePath, isWithinRoots, normalizePath } from './paths';
 
 //#endregion
 
+//#region Server direction: serving a harness as an ACP agent
+
+/** @public */
+export type { ClientFsAdapterOptions, ClientShellAdapterOptions } from './client-adapters';
+/**
+ * Adapters backed by the ACP client's `fs/*` and `terminal/*` methods —
+ * usually reached through `AcpServeSessionInit.client` in a per-session
+ * harness factory rather than constructed by hand.
+ * @public
+ */
+export { clientFsAdapter, clientShellAdapter } from './client-adapters';
+/** @public */
+export type { AcpServedAgent } from './serve';
+/**
+ * Adapt a harness into an ACP `Agent` factory — compose with
+ * `loopbackTransport(toAcpAgent(harness))` for in-process serving, or bind it
+ * to process stdio with `serveAcp` from `@noetic-tools/acp/server`.
+ * @public
+ */
+export { toAcpAgent } from './serve';
+/** @public */
+export type { ServeTurnOutcome } from './serve-events';
+/** @public */
+export { evaluateServePolicy } from './serve-permissions';
+/** @public */
+export type {
+  AcpPresentableTool,
+  AcpServeCommand,
+  AcpServeCommandContext,
+  AcpServeHarness,
+  AcpServeHarnessSource,
+  AcpServeHistory,
+  AcpServeOptions,
+  AcpServePermissionDecision,
+  AcpServePermissionPolicy,
+  AcpServePermissionPrompt,
+  AcpServePermissionReply,
+  AcpServePermissionRule,
+  AcpServeSessionInit,
+} from './serve-types';
+
+//#endregion
+
 //#region Advanced: building a client by hand
 
 /** @public */

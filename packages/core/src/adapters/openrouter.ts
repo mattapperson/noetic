@@ -455,6 +455,7 @@ export async function executeToolCall(params: ExecuteToolCallParams): Promise<{
       params.toolName,
       params.args,
       params.context,
+      params.callId,
     );
     if (decision.action === SteeringAction.Deny) {
       return {

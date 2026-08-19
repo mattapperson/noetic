@@ -157,3 +157,80 @@ describe('toolWithGenerator()', () => {
     expect(t.ui).toBeUndefined();
   });
 });
+
+describe('ToolAcpDeclaration passthrough', () => {
+  it('tool() carries the acp declaration onto the Tool', () => {
+    const t = tool({
+      name: 'edit_file',
+      description: 'Edit a file',
+      input: z.object({
+        path: z.string(),
+      }),
+      output: Output,
+      execute: async () => ({
+        price: 1,
+      }),
+      acp: {
+        kind: 'edit',
+        title: (args) => `Edit ${args.path}`,
+        locations: (args) => [
+          args.path,
+        ],
+      },
+    });
+    assert(t.acp);
+    expect(t.acp.kind).toBe('edit');
+    assert(typeof t.acp.title === 'function');
+    expect(
+      t.acp.title({
+        path: '/tmp/a.ts',
+      }),
+    ).toBe('Edit /tmp/a.ts');
+    assert(t.acp.locations);
+    expect(
+      t.acp.locations({
+        path: '/tmp/a.ts',
+      }),
+    ).toEqual([
+      '/tmp/a.ts',
+    ]);
+  });
+
+  it('toolWithGenerator() carries the acp declaration onto the Tool', () => {
+    const t = toolWithGenerator({
+      name: 'run_build',
+      description: 'Run the build',
+      input: Input,
+      output: Output,
+      event: Progress,
+      async *execute() {
+        yield {
+          pct: 1,
+        };
+        return {
+          price: 2,
+        };
+      },
+      acp: {
+        kind: 'execute',
+        title: 'Run the build',
+      },
+    });
+    assert(t.acp);
+    expect(t.acp.kind).toBe('execute');
+    expect(t.acp.title).toBe('Run the build');
+  });
+
+  it('omits acp when the config does not declare one', () => {
+    const t = tool({
+      name: 'quote',
+      description: 'Quote a price',
+      input: Input,
+      output: Output,
+      execute: async () => ({
+        price: 1,
+      }),
+    });
+    expect(t.acp).toBeUndefined();
+  });
+});

@@ -346,6 +346,44 @@ harness.closeAcpSessions(): Promise<void>         // release everything held; id
 
 Read-and-interrupt only: turns are driven by steps, so a turn started here would bypass the item log, usage accounting, and event bridge. Follow-ups go through a step sharing the `session.reuse` key.
 
+### Serving a harness AS an ACP agent (server direction, spec 31)
+
+The inverse of `step.acpAgent`: expose the harness so ACP clients (Zed, other editors, another Noetic harness) drive it.
+
+```typescript
+import { serveAcp } from '@noetic-tools/acp/server';   // Node stdio entry
+import { toAcpAgent, loopbackTransport } from '@noetic-tools/acp';  // runtime-neutral
+
+// One-liner: bind to the current process's stdio; run until the client disconnects.
+await serveAcp(harness).closed;   // handle: { closed: Promise<void>, close(): Promise<void> }
+
+serveAcp(harnessOrFactory, {
+  tools,            // ReadonlyArray<{ name, acp? }> — presentation source (tool.acp: { kind, title, locations });
+                    // REQUIRED when permissions.rules use `kind` (else ACP_SERVE_KIND_RULES_WITHOUT_TOOLS)
+  permissions: {    // gate over first-party tool calls; default 'allow' (author curated the tools)
+    default: 'allow' | 'ask' | 'deny',
+    rules: [{ tool?, kind?, decision }],  // checked deny → ask → allow
+    askTimeoutMs,   // unanswered ask denies (5 min default)
+  },
+  onPermissionRequest, // (prompt) => Promise<{ decision }> — answer asks in-process instead of the wire
+  history: { load(sessionId), save(sessionId, item) },  // presence advertises loadSession
+  commands: [{ name, description, run?(argsText, { sessionId, cwd }) }],  // '/name' routes to run
+});
+
+// Per-session isolation: factory form receives { sessionId, cwd, mcpServers, client }.
+// client.fs / client.shell are adapters backed by the EDITOR's fs/* + terminal/*
+// (unsaved buffers!); wire into environment. Wire-inexpressible ops reject AcpCapabilityError.
+serveAcp((session) => new AgentHarness({ ..., initialCwd: session.cwd,
+  environment: { fs: session.client.fs, shell: session.client.shell } }));
+
+// toAcpAgent returns the (conn) => Agent factory loopbackTransport accepts —
+// in-process serving, testing, and Noetic-in-Noetic composition:
+step.acpAgent({ id: 'sub', agent: customAcpAgent({ agentId: 'researcher',
+  transport: loopbackTransport(toAcpAgent(subHarness)) }), prompt: '…' });
+```
+
+The gate is injected per-turn via `ExecuteOptions.extraContextLayers` (ADDITIVE — the harness's own layers keep running; plain `contextLayers` overrides/replaces them) and fails closed via `onBeforeToolCallError: 'deny'`. Session id = harness `threadId` verbatim. `session/cancel` → `harness.abort({ threadId })` → `stopReason: 'cancelled'`. Tool calls stream as ACP `tool_call`/`tool_call_update` (status `pending` while an ask is parked). The gate rides `beforeToolCall` layer hooks, which receive the pending call's `callId` (same id as the `tool_call_started` framework event; the event always precedes the gate).
+
 ### channel
 
 Typed inter-step communication.
@@ -495,6 +533,8 @@ interface ContextLayer<TState> {
   // ...
   /** What to do when init() throws. Default 'throw' (fail-loud: surface + abort). */
   onInitError?: 'throw' | 'disable';
+  /** What a failed beforeToolCall hook means. Default 'abstain'; 'deny' makes a gating layer fail CLOSED. */
+  onBeforeToolCallError?: 'abstain' | 'deny';
   /** Whether recall() blocks the model call. Default 'atomic'. */
   recallMode?: 'atomic' | 'eventual';
   /** Which band of the view recall() output lands in. Default 'auto'. */
@@ -502,6 +542,7 @@ interface ContextLayer<TState> {
 }
 ```
 
+- **`onBeforeToolCallError`** — `'abstain'` (default) logs a diagnostic and lets remaining layers / the default decide when a `beforeToolCall` hook throws or times out — right for observational layers. `'deny'` denies the pending tool call instead — required for permission GATES, where abstention would collapse into silent approval. `beforeToolCall` hooks also receive the pending call's `callId` (same id as the `tool_call_started` framework event, which always precedes the gate).
 - **`onInitError`** — `'throw'` (default) surfaces the init error and aborts the execution; layer state is load-bearing and silently disabling it hides failures (and for steering would fail *open*). `'disable'` logs a diagnostic and runs without the layer (its other hooks are skipped). Opt in only for non-critical layers.
 - **`recallMode`** — `'atomic'` (default) runs `recall()` synchronously before the model call. `'eventual'` serves `recall()` from a per-harness cache that never blocks; the cache refreshes after the layer's `store()` produces new state, so the next turn sees it. Use `'eventual'` for slow recall paths that can tolerate one-turn staleness.
 - **`placement`** — which band of the assembled view this layer's `recall()` output lands in, and so whether it is pinned for the prompt cache. `'anchor'` sits before history and is pinned; `'live'` sits after history and re-renders every turn; `'auto'` (default) lets the runtime pick from observed churn. See [Prompt-cache anchoring](#prompt-cache-anchoring-placement).

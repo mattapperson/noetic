@@ -40,7 +40,7 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 
 - **`@noetic/platform-browser`** — Browser / edge-runtime glue: runtime-neutral adapter re-exports. Contains no `node:*` imports. See `25-platform-packages`.
 
-- **`@noetic-tools/acp`** — An Agent Client Protocol client, letting any ACP-speaking coding agent (Claude Code, Codex, Gemini CLI, …) run as a Noetic step. Owns the protocol library, capability negotiation, the session/turn drivers, the client-side `fs/*` + `terminal/*` + permission handlers backed by Noetic's own adapters, the transports (stdio, loopback), and the agent presets. Depends only on `@noetic-tools/types` — never on `@noetic-tools/core`. See `27-acp-agent-steps`.
+- **`@noetic-tools/acp`** — Both directions of the Agent Client Protocol. The client side lets any ACP-speaking coding agent (Claude Code, Codex, Gemini CLI, …) run as a Noetic step: the protocol library, capability negotiation, the session/turn drivers, the client-side `fs/*` + `terminal/*` + permission handlers backed by Noetic's own adapters, the transports (stdio, loopback), and the agent presets (`27-acp-agent-steps`). The server side (`toAcpAgent()`, `serveAcp()` at `./server`) exposes an `AgentHarness` *as* an ACP agent so editors like Zed can drive it (`30-acp-server`). Depends only on `@noetic-tools/types` — never on `@noetic-tools/core`.
 
 - **`@noetic-tools/agent-plugins`** — An [Agent Plugins](https://agent-plugins.org) v1 client: discovers plugin packages (a closed `plugin.json` manifest plus the two portable component types, Agent Skills and MCP servers) and exposes them through the `agentPlugins()` context layer using the spec's progressive disclosure model. The only package permitted to depend on the MCP SDK. Depends on `@noetic-tools/types` — never on `@noetic-tools/core` or `@noetic-tools/context`. See `30-agent-plugins`.
 
@@ -81,8 +81,11 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 | `15-build-sequence` | Implementation stages 1-10 | Build ordering |
 | `22-cli-architecture` | `@noetic-tools/cli` layer hierarchy, subprocess adapter wiring | CLI internals |
 | `23-durable-execution` | `CheckpointSnapshot`, `reattach`/`listLive`, durable IPC, host-restart flow | Crash-recovery model |
+| `27-acp-agent-steps` | `step.acpAgent`, `acpAgentTool()`, `@noetic-tools/acp` client | External coding agents as steps |
 | `28-generative-ui` | `OutputCodec`, `ToolUiDeclaration`, `openUiSurface()` layer, OpenUI transport | Generative UI (OpenUI) |
+| `29-chat-platform-integration` | `noeticAgent()`, `@noetic-tools/chat-sdk` | Harness as a chat-platform bot |
 | `30-agent-plugins` | `plugin.json` / `mcp.json` validation, skill discovery, `agentPlugins()` layer | Agent Plugins v1 client |
+| `31-acp-server` | `toAcpAgent()`, `serveAcp()`, `ToolAcpDeclaration` | Harness as an ACP agent (server direction) |
 
 ## Dependency Graph
 

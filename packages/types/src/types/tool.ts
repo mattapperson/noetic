@@ -1,4 +1,5 @@
 import type { StandardSchemaV1 } from '@standard-schema/spec';
+import type { AcpToolKind } from './acp';
 import type {
   FunctionCallItem,
   FunctionCallOutputItem,
@@ -68,6 +69,35 @@ export interface ToolUiDeclaration<
 }
 
 /**
+ * How a tool call presents in an ACP client's UI when the harness is served
+ * as an ACP agent (`toAcpAgent`/`serveAcp` in `@noetic-tools/acp`).
+ *
+ * Presentation only — it never gates anything. An undeclared tool falls back
+ * to kind `other` with its name as the title. Declared as methods (bivariant
+ * params) for the same reason as `ToolUiDeclaration`.
+ * @public
+ */
+export interface ToolAcpDeclaration<I extends StandardSchemaV1 = StandardSchemaV1> {
+  /** ACP tool kind (`read`, `edit`, `execute`, …) for editor rendering. */
+  kind?: AcpToolKind;
+  /** Human-readable title; a function receives the call's parsed args. */
+  title?: string | ToolAcpTitleFn<I>;
+  /** File paths the call affects, surfaced as ACP `locations`. */
+  locations?(args: InferSchemaOutput<I>): string[];
+}
+
+/**
+ * Bivariant function type for `ToolAcpDeclaration.title` — a union member
+ * cannot use method syntax, so the method-bearing object type is indexed to
+ * recover the same bivariance `ToolUiDeclaration`'s methods get, keeping a
+ * concretely-typed tool assignable to the erased `Tool` form.
+ * @public
+ */
+export type ToolAcpTitleFn<I extends StandardSchemaV1 = StandardSchemaV1> = {
+  bivariant(args: InferSchemaOutput<I>): string;
+}['bivariant'];
+
+/**
  * A tool definition that an LLM can invoke during execution.
  *
  * Input and output schemas accept any Standard Schema v1 implementation
@@ -125,4 +155,6 @@ export interface Tool<
   context?: ToolContextDeclaration;
   /** Optional UI declaration — the runtime emits the rendered fragments at call/progress/result points. */
   ui?: ToolUiDeclaration<I, O>;
+  /** Optional ACP presentation — how the call renders in an ACP client when the harness is served as an agent. */
+  acp?: ToolAcpDeclaration<I>;
 }

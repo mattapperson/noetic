@@ -492,3 +492,47 @@ describe('renderToolCallContent', () => {
     expect(renderToolCallContent([])).toBe('');
   });
 });
+
+describe('contentBlockText', () => {
+  test('renders every block variant without dropping anything', async () => {
+    const { contentBlockText } = await import('../src/items');
+    expect(
+      contentBlockText({
+        type: 'text',
+        text: 'plain',
+      }),
+    ).toBe('plain');
+    expect(
+      contentBlockText({
+        type: 'resource_link',
+        uri: 'file:///a.ts',
+        name: 'a.ts',
+      }),
+    ).toBe('[resource: file:///a.ts]');
+    expect(
+      contentBlockText({
+        type: 'resource',
+        resource: {
+          uri: 'file:///b.ts',
+          text: 'embedded body',
+        },
+      }),
+    ).toBe('embedded body');
+    expect(
+      contentBlockText({
+        type: 'resource',
+        resource: {
+          uri: 'file:///blob.bin',
+          blob: 'AAAA',
+        },
+      }),
+    ).toBe('[resource: file:///blob.bin]');
+    expect(
+      contentBlockText({
+        type: 'audio',
+        data: 'AAAA',
+        mimeType: 'audio/wav',
+      }),
+    ).toBe('[audio: audio/wav]');
+  });
+});

@@ -716,6 +716,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
             resourceId: perTurnOptions.resourceId,
             state: perTurnOptions.state,
             contextLayers: perTurnOptions.contextLayers,
+            extraContextLayers: perTurnOptions.extraContextLayers,
             _broadcaster: session.runner.broadcaster,
           });
           const ext = frameworkCast<Context & SessionCtxExtension>(ctx);
@@ -898,6 +899,8 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     threadId?: string;
     resourceId?: string;
     contextLayers?: ContextLayer[];
+    /** Additional layers appended AFTER the effective set — never replaces it. */
+    extraContextLayers?: ContextLayer[];
     /**
      * Initial cwd for the new context. When set, takes precedence over both
      * the parent snapshot and the harness root cwd — used by worktree
@@ -909,8 +912,15 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     const resolved = opts ?? {};
     // `ContextImpl` takes the layers as `layers`, so the option spelling is
     // dropped from `rest` rather than spread through under the wrong name.
-    const { contextLayers, cwdInit, ...rest } = resolved;
-    const effectiveLayers = contextLayers ?? this._contextLayers;
+    const { contextLayers, extraContextLayers, cwdInit, ...rest } = resolved;
+    const baseLayers = contextLayers ?? this._contextLayers;
+    const effectiveLayers =
+      extraContextLayers && extraContextLayers.length > 0
+        ? [
+            ...(baseLayers ?? []),
+            ...extraContextLayers,
+          ]
+        : baseLayers;
     const itemSchemas = buildItemSchemaRegistry({
       base: this.itemSchemas,
       layers: effectiveLayers,
@@ -1320,6 +1330,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     toolName: string,
     toolArgs: unknown,
     ctx: Context,
+    callId?: string,
   ): Promise<SteeringDecision> {
     const hasHook = layers.some((l) => l.hooks.beforeToolCall);
     if (!hasHook) {
@@ -1331,6 +1342,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       layers,
       toolName,
       toolArgs,
+      callId,
       ctx: this.toExecCtx(ctx),
       store: this.layerStateStore,
     });

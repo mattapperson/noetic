@@ -8,6 +8,7 @@
     "---Primitives---",
     "steps",
     "acp-agents",
+    "acp-server",
     "migrating-from-sub-harnesses",
     "generative-ui",
     "operators",

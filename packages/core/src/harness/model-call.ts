@@ -971,7 +971,8 @@ export class AgentHarnessModelCaller {
     params.emitIfAllowed('tool_call_completed', {
       name: fc.name,
       callId: fc.callId,
-      error: false,
+      error: toolResult.error === true,
+      output: toolResult.output,
     });
   }
 
@@ -1012,6 +1013,7 @@ export class AgentHarnessModelCaller {
       name: fc.name,
       callId: fc.callId,
       error: true,
+      output: errorOutput,
     });
   }
 

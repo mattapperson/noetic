@@ -8,6 +8,7 @@
  */
 
 import type { AcpTransport, AcpTransportFactory } from '@noetic-tools/types';
+import { frameworkCast } from '@noetic-tools/types';
 import type * as acp from '@zed-industries/agent-client-protocol';
 import { AgentSideConnection, ndJsonStream } from '@zed-industries/agent-client-protocol';
 
@@ -64,10 +65,14 @@ export function loopbackTransport(
 ): AcpTransportFactory {
   return async (): Promise<AcpTransport> => {
     const pair = createAcpLoopbackPair();
+    let agent: acp.Agent | undefined;
     // The connection registers its own message pump on construction; holding
     // the reference keeps it alive for the life of the transport.
     const connection = new AgentSideConnection(
-      toAgent,
+      (conn) => {
+        agent = toAgent(conn);
+        return agent;
+      },
       ndJsonStream(pair.agent.writable, pair.agent.readable),
     );
     return {
@@ -76,6 +81,16 @@ export function loopbackTransport(
       async close() {
         void connection;
         await pair.client.close();
+        // A served Noetic agent (and any agent following the same shape)
+        // exposes dispose() to cancel its live sessions; without this, the
+        // in-process path would leave sessions running after the client is
+        // gone — only the stdio entry's stdin handlers would ever clean up.
+        const disposable = frameworkCast<{
+          dispose?: () => Promise<void>;
+        }>(agent);
+        if (typeof disposable?.dispose === 'function') {
+          await disposable.dispose().catch(() => undefined);
+        }
       },
     };
   };

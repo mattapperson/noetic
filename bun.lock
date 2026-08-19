@@ -27,6 +27,8 @@
         "zod": "^4.0.0",
       },
       "devDependencies": {
+        "@noetic-tools/context": "workspace:*",
+        "@noetic-tools/core": "workspace:*",
         "bun-types": "latest",
       },
       "peerDependencies": {

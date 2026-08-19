@@ -589,26 +589,11 @@ function buildModelRequest<TContext, I, O>(
   const { step, ctx, layers } = params;
   const _serverTools = params.serverToolSpecs.length > 0 ? params.serverToolSpecs : undefined;
   const signal = isContextImpl(ctx) ? ctx.abortSignal : undefined;
-  if (params.resolvedTools) {
-    return {
-      model: params.resolvedModel,
-      items: params.assembledItems,
-      instructions: params.resolvedInstructions,
-      tools: params.resolvedTools,
-      params: step.params,
-      outputSchema: params.outputSchema,
-      outputJsonSchema: params.step.outputJsonSchema,
-      emit: step.emit,
-      _serverTools,
-      ctx,
-      layers,
-      allowedToolNames: params.allowedToolNames,
-      nodeId: step.id,
-      parentSpan: ctx.span,
-      signal,
-    };
-  }
-  return {
+  // One construction for both shapes: the tool fields vary, but `ctx` (which
+  // carries the broadcaster — without it a tool-less call streams NOTHING to
+  // getFullStream/getTextStream) and `layers` must be attached either way.
+  // The two hand-maintained branches this replaces had drifted exactly there.
+  const base = {
     model: params.resolvedModel,
     items: params.assembledItems,
     instructions: params.resolvedInstructions,
@@ -617,10 +602,20 @@ function buildModelRequest<TContext, I, O>(
     outputJsonSchema: params.step.outputJsonSchema,
     emit: step.emit,
     _serverTools,
+    ctx,
+    layers,
     nodeId: step.id,
     parentSpan: ctx.span,
     signal,
   };
+  if (params.resolvedTools) {
+    return {
+      ...base,
+      tools: params.resolvedTools,
+      allowedToolNames: params.allowedToolNames,
+    };
+  }
+  return base;
 }
 
 /**
@@ -1229,9 +1224,44 @@ export async function executeInvokeTool<TContext, I, O>(
   }
   const parsedArgs = parseResult.value;
 
+  // The started event precedes the gate so a parked call (e.g. one awaiting an
+  // external permission decision) is visible as pending rather than invisible
+  // until approved — the same ordering the model-driven path guarantees.
+  const broadcaster = getBroadcaster(baseCtx);
+  const agentName = baseCtx.harness.config.name;
+  emitFrameworkEvent({
+    broadcaster,
+    agentName,
+    eventType: 'tool_call_started',
+    data: {
+      name: step.tool.name,
+      callId: step.id,
+    },
+  });
+  const emitCompleted = (error: boolean, output?: string): void => {
+    emitFrameworkEvent({
+      broadcaster,
+      agentName,
+      eventType: 'tool_call_completed',
+      data: {
+        name: step.tool.name,
+        callId: step.id,
+        error,
+        output,
+      },
+    });
+  };
+
   if (layers && layers.length > 0) {
-    const decision = await harness.beforeToolCall(layers, step.tool.name, parsedArgs, baseCtx);
+    const decision = await harness.beforeToolCall(
+      layers,
+      step.tool.name,
+      parsedArgs,
+      baseCtx,
+      step.id,
+    );
     if (decision.action !== SteeringAction.Allow) {
+      emitCompleted(true, `Tool call denied: ${decision.guidance ?? 'steering rule violation'}`);
       throw new NoeticErrorImpl({
         kind: 'steering_denied',
         guidance: decision.guidance,
@@ -1268,6 +1298,7 @@ export async function executeInvokeTool<TContext, I, O>(
       args: parsedArgs,
       output: result,
     });
+    emitCompleted(false, typeof result === 'string' ? result : JSON.stringify(result));
     return frameworkCast<O>(result);
   } catch (e) {
     emitToolUi({
@@ -1278,6 +1309,7 @@ export async function executeInvokeTool<TContext, I, O>(
       args: parsedArgs,
       error: e,
     });
+    emitCompleted(true, e instanceof Error ? e.message : String(e));
     if (e instanceof NoeticErrorImpl) {
       throw e;
     }

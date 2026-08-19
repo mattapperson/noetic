@@ -5,6 +5,8 @@ Codex, Gemini CLI, anything that speaks the protocol — exactly the way
 `callModel` delegates a turn to a language model. The integration is the
 [Agent Client Protocol](https://agentclientprotocol.com/) (ACP): a JSON-RPC 2.0
 standard in which **Noetic is the Client and the coding agent is the Agent**.
+(The other direction — a Noetic harness serving *as* the Agent for ACP clients
+like Zed — is `31-acp-server`.)
 
 Because every ACP agent is a uniform JSON-RPC peer, there are no per-vendor SDKs
 and no closed set of supported agents. One step kind, one package, one adapter
@@ -468,10 +470,6 @@ Runtime import graph clean; install graph not.
 
 ## Future Considerations
 
-- **ACP server direction** — expose an `AgentHarness` as an ACP Agent over
-  stdio, so Zed and other ACP clients can drive a Noetic harness. The contract
-  and package layout leave room for it; nothing in the client direction assumes
-  it is absent.
 - Protocol features still in draft upstream (`session/resume`, `session/list`,
   `elicitation/*`, session config options, usage reporting) arrive with a
   version bump of `@zed-industries/agent-client-protocol`.

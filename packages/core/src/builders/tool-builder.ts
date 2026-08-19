@@ -7,6 +7,7 @@ import type {
   ItemSchemaExtensions,
   StandardSchemaV1,
   Tool,
+  ToolAcpDeclaration,
   ToolContextDeclaration,
   ToolExecutionContext,
   ToolResultExtensionItem,
@@ -39,6 +40,8 @@ type ToolConfig<I extends StandardSchemaV1, O extends StandardSchemaV1> = {
   context?: ToolContextDeclaration;
   /** Optional UI declaration — the runtime emits the rendered fragments at call/progress/result points. */
   ui?: ToolUiDeclaration<I, O>;
+  /** Optional ACP presentation — how the call renders in an ACP client when the harness is served as an agent. */
+  acp?: ToolAcpDeclaration<I>;
 } & InputSchemaConfig<I>;
 
 type GeneratorToolConfig<
@@ -69,6 +72,8 @@ type GeneratorToolConfig<
   context?: ToolContextDeclaration;
   /** Optional UI declaration — the runtime emits the rendered fragments at call/progress/result points. */
   ui?: ToolUiDeclaration<I, O, InferSchemaOutput<E>>;
+  /** Optional ACP presentation — how the call renders in an ACP client when the harness is served as an agent. */
+  acp?: ToolAcpDeclaration<I>;
 } & InputSchemaConfig<I>;
 
 //#endregion
@@ -120,6 +125,7 @@ export function tool<I extends StandardSchemaV1, O extends StandardSchemaV1>(
     needsApproval: config.needsApproval,
     context: config.context,
     ui: config.ui,
+    acp: config.acp,
   };
 }
 
@@ -148,6 +154,7 @@ export function toolWithGenerator<
     needsApproval: config.needsApproval,
     context: config.context,
     ui: config.ui,
+    acp: config.acp,
   };
 }
 

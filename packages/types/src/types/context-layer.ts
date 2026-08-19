@@ -447,6 +447,16 @@ export interface ContextLayer<TState = unknown> {
    */
   onInitError?: 'throw' | 'disable';
   /**
+   * What a failed `beforeToolCall` hook (throw or timeout) means for the
+   * pending tool call.
+   * - `'abstain'` (default): log a diagnostic and let the remaining layers /
+   *   the default decide — correct for observational layers, where a bug must
+   *   not block every tool.
+   * - `'deny'`: the call is denied — correct for permission GATES, where a
+   *   failed check must fail closed rather than silently approving.
+   */
+  onBeforeToolCallError?: 'abstain' | 'deny';
+  /**
    * Recall mode controlling whether this layer's `recall()` blocks the model call.
    * - `'atomic'` (default): recall runs synchronously in the hot path; the
    *   harness waits for it before assembling the view.

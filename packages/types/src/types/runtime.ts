@@ -114,12 +114,17 @@ interface CallModelRequestWithTools extends CallModelRequestBase {
   allowedToolNames?: string[];
 }
 
-/** @public Request shape when no tools are provided — ctx is only needed for tool
- *  execution callbacks in convertTools, so it is omitted here. */
+/**
+ * @public Request shape when no tools are provided. `ctx` is still accepted —
+ * it carries the session broadcaster, without which a tool-less call streams
+ * nothing to `getFullStream`/`getTextStream` — it just isn't *required* the
+ * way the tools variant needs it for execution callbacks.
+ */
 interface CallModelRequestWithoutTools extends CallModelRequestBase {
   tools?: undefined;
-  ctx?: undefined;
-  layers?: undefined;
+  ctx?: Context;
+  layers?: ContextLayer[];
+  allowedToolNames?: undefined;
 }
 
 /** @public Request object for `AgentHarnessContract.callModel()`. Encapsulates all parameters needed for an LLM call using only Noetic types. */
@@ -136,6 +141,13 @@ export interface ExecuteOptions {
   state?: unknown;
   /** Context layers to apply to the execution context. Overrides harness-level layers if provided. */
   contextLayers?: ContextLayer[];
+  /**
+   * Additional context layers appended AFTER the effective layer set
+   * (harness-level layers, or `contextLayers` when that override is given).
+   * Use this to inject a per-turn layer — a permission gate, an observer —
+   * without discarding the layers the harness was built with.
+   */
+  extraContextLayers?: ContextLayer[];
   /** Override the harness's default delivery mode for this message only. */
   deliveryMode?: DeliveryMode;
   /**
@@ -302,6 +314,8 @@ export interface AgentHarnessContract<
     threadId?: string;
     resourceId?: string;
     contextLayers?: ContextLayer[];
+    /** Additional layers appended AFTER the effective layer set (see `ExecuteOptions.extraContextLayers`). */
+    extraContextLayers?: ContextLayer[];
     /** Override the new context's initial cwd. */
     cwdInit?: string;
   }): Context;
@@ -395,6 +409,7 @@ export interface AgentHarnessContract<
     toolName: string,
     toolArgs: unknown,
     ctx: Context,
+    callId?: string,
   ): Promise<SteeringDecision>;
   afterModelCall(
     layers: ContextLayer[],

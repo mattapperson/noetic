@@ -49,8 +49,10 @@ interface ContextCallModelRequestWithTools extends ContextCallModelRequestBase {
 
 interface ContextCallModelRequestWithoutTools extends ContextCallModelRequestBase {
   tools?: undefined;
-  ctx?: undefined;
-  layers?: undefined;
+  /** Accepted without tools — it carries the broadcaster for streaming (see `CallModelRequestWithoutTools`). */
+  ctx?: Context;
+  layers?: ContextLayer[];
+  allowedToolNames?: undefined;
 }
 
 export type ContextCallModelRequest =
@@ -148,6 +150,7 @@ export interface ContextHarness {
     toolName: string,
     toolArgs: unknown,
     ctx: Context,
+    callId?: string,
   ): Promise<SteeringDecision>;
   afterModelCall(
     layers: ContextLayer[],

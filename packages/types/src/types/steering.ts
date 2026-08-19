@@ -55,6 +55,15 @@ export interface LedgerEntry {
 export interface BeforeToolCallParams<TState = unknown> {
   toolName: string;
   toolArgs: unknown;
+  /**
+   * Correlation id of the pending call — the same id carried by the
+   * `tool_call_started` framework event (the model's `callId` on model-driven
+   * calls, the step id on a direct `invokeTool`). Lets a gating layer tie its
+   * decision to the call it is reported as, e.g. when forwarding the request
+   * to an external approver. Optional because a custom caller of the gate may
+   * have no call identity; every built-in tool-executing path supplies it.
+   */
+  callId?: string;
   ctx: ExecutionContext;
   state: TState;
 }

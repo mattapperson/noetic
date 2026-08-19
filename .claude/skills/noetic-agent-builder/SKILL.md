@@ -20,7 +20,7 @@ All agent patterns compose through a single `Step<TContext, I, O>` type. Steps a
 - **`inParallel`** -- parallel execution (race, all, or settle)
 - **`spawn`** -- new context boundary with optional context layers
 - **`loop`** -- iteration with termination predicates
-- **`acp-agent`** -- delegate one turn to an external coding agent over the Agent Client Protocol via `step.acpAgent` (adapter from `@noetic-tools/acp`: `claudeCode()`, `codex()`, `gemini()`, `customAcpAgent()`); see `references/api-reference.md`
+- **`acp-agent`** -- delegate one turn to an external coding agent over the Agent Client Protocol via `step.acpAgent` (adapter from `@noetic-tools/acp`: `claudeCode()`, `codex()`, `gemini()`, `customAcpAgent()`); the reverse direction — serving a harness AS an ACP agent for editors like Zed — is `serveAcp()` / `toAcpAgent()`; see `references/api-reference.md`
 
 ### Typed Context Access
 
