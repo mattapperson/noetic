@@ -18,11 +18,11 @@ import {
   createLayerStateStore,
   disposeLayers,
   initLayers,
-  observationalContext,
+  observations,
   recallLayers,
+  scratchpad,
   steering,
   storeLayers,
-  workingMemoryContext,
 } from '@noetic-tools/context';
 import type { CallModelRequest, LLMResponse, SteeringState } from '@noetic-tools/types';
 import { SteeringAction } from '@noetic-tools/types';
@@ -292,7 +292,7 @@ describe('Observational Memory: real LLM observer', () => {
     async () => {
       assert(testCallModel !== undefined);
 
-      const layer = observationalContext({
+      const layer = observations({
         bufferThreshold: 10, // Low threshold to trigger quickly
         observer: async (buffer) => {
           assert(testCallModel !== undefined);
@@ -400,7 +400,7 @@ describe('Observational Memory: real LLM observer', () => {
 
 describe('Working Memory: full lifecycle', () => {
   test('init→recall(empty)→store→recall(populated)→store(update)→recall(merged)→dispose', async () => {
-    const wm = workingMemoryContext({
+    const wm = scratchpad({
       scope: 'resource',
     });
     const store = createLayerStateStore();

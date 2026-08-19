@@ -8,19 +8,19 @@ import type {
   ContextCacheConfig,
   Item,
   LLMResponse,
-  StepLLM,
+  StepCallModel,
 } from '@noetic-tools/types';
 import { createMessage, SteeringAction } from '@noetic-tools/types';
 import type { BandedView } from '../../src/interpreter/context-assembly';
 import { stampAnchoringAttributes } from '../../src/interpreter/context-assembly';
-import { executeLLM } from '../../src/interpreter/execute-action';
+import { executeCallModel } from '../../src/interpreter/execute-action';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import { makeFunctionCallOutput, makeLLMResponse, makeMockHarness } from '../_helpers';
 
 //#region Helpers
 
-const STEP: StepLLM<ContextData, string, string> = {
-  kind: 'llm',
+const STEP: StepCallModel<ContextData, string, string> = {
+  kind: 'callModel',
   id: 'test',
   model: 'gpt-4',
 };
@@ -122,13 +122,13 @@ async function runTurns(
       harness,
       threadId: 'thread-1',
     });
-    await executeLLM(STEP, `turn-${i}`, ctx, layers);
+    await executeCallModel(STEP, `turn-${i}`, ctx, layers);
   }
 }
 
 //#endregion
 
-describe('executeLLM context anchoring', () => {
+describe('executeCallModel context anchoring', () => {
   it('replays pinned bytes for a layer that re-renders every turn', async () => {
     const { harness, requests } = withCapture();
     let tick = 0;
@@ -206,7 +206,7 @@ describe('executeLLM context anchoring', () => {
       harness,
       threadId: 'thread-1',
     });
-    await executeLLM(STEP, 'a', first, layers);
+    await executeCallModel(STEP, 'a', first, layers);
     quiet = true;
     await runTurns(harness, layers, 2);
 
@@ -248,13 +248,13 @@ describe('executeLLM context anchoring', () => {
       harness,
       threadId: 'thread-1',
     });
-    await executeLLM(STEP, 'a', first, layers);
+    await executeCallModel(STEP, 'a', first, layers);
     second = true;
     const next = new ContextImpl({
       harness,
       threadId: 'thread-1',
     });
-    await executeLLM(STEP, 'b', next, layers);
+    await executeCallModel(STEP, 'b', next, layers);
 
     const sent = requests[1];
     assert(sent !== undefined);
@@ -279,14 +279,14 @@ describe('executeLLM context anchoring', () => {
       harness,
       threadId: 'thread-1',
     });
-    await executeLLM(STEP, 'a', first, [
+    await executeCallModel(STEP, 'a', first, [
       base,
     ]);
     const second = new ContextImpl({
       harness,
       threadId: 'thread-1',
     });
-    await executeLLM(STEP, 'b', second, [
+    await executeCallModel(STEP, 'b', second, [
       base,
       late,
     ]);
@@ -324,7 +324,7 @@ describe('executeLLM context anchoring', () => {
       harness,
       threadId: 'thread-1',
     });
-    await executeLLM(STEP, 'x', ctx, layers);
+    await executeCallModel(STEP, 'x', ctx, layers);
 
     const store = harness.contextCache;
     assert(store !== undefined);
@@ -422,13 +422,13 @@ describe('executeLLM context anchoring', () => {
       harness,
       threadId: 'thread-1',
     });
-    await executeLLM(STEP, 'first', ctxA, layers);
+    await executeCallModel(STEP, 'first', ctxA, layers);
     tick = 1;
     const ctxB = new ContextImpl({
       harness,
       threadId: 'thread-1',
     });
-    await executeLLM(STEP, 'second', ctxB, layers);
+    await executeCallModel(STEP, 'second', ctxB, layers);
 
     const updates = textsAt(requests, 1).filter((t) => t.includes('<context_updates'));
     expect(updates).toHaveLength(1);
@@ -461,7 +461,7 @@ describe('executeLLM context anchoring', () => {
       threadId: 'thread-1',
     });
     ctx.itemLog.append(createMessage('older turn', 'user'));
-    await executeLLM(STEP, 'hi', ctx, layers);
+    await executeCallModel(STEP, 'hi', ctx, layers);
 
     const seen = textsAt(requests, 0);
     expect(seen.indexOf('live-content')).toBeGreaterThan(seen.indexOf('older turn'));
@@ -479,7 +479,7 @@ describe('executeLLM context anchoring', () => {
       threadId: 'thread-1',
     });
     ctx.itemLog.append(createMessage('older turn', 'user'));
-    await executeLLM(STEP, 'hi', ctx, layers);
+    await executeCallModel(STEP, 'hi', ctx, layers);
 
     const seen = textsAt(requests, 0);
     expect(seen.indexOf('anchor-content')).toBeLessThan(seen.indexOf('older turn'));
@@ -540,13 +540,13 @@ describe('executeLLM context anchoring', () => {
       harness,
       threadId: 'thread-1',
     });
-    await executeLLM(STEP, 'first', ctxA, layers);
+    await executeCallModel(STEP, 'first', ctxA, layers);
     quiet = true;
     const ctxB = new ContextImpl({
       harness,
       threadId: 'thread-1',
     });
-    await executeLLM(STEP, 'second', ctxB, layers);
+    await executeCallModel(STEP, 'second', ctxB, layers);
 
     const second = textsAt(requests, 1).join('\n');
     expect(second).toContain('action="retract"');
@@ -711,12 +711,12 @@ describe('executeLLM context anchoring', () => {
       harness,
       threadId: 'thread-1',
     });
-    await executeLLM(STEP, 'first', ctxA, layers);
+    await executeCallModel(STEP, 'first', ctxA, layers);
     const ctxB = new ContextImpl({
       harness,
       threadId: 'thread-1',
     });
-    await executeLLM(STEP, 'second', ctxB, layers);
+    await executeCallModel(STEP, 'second', ctxB, layers);
 
     const usage = ctxB.lastLayerUsage;
     assert(usage !== undefined);
@@ -739,13 +739,13 @@ describe('executeLLM context anchoring', () => {
       harness,
       threadId: 'thread-1',
     });
-    await executeLLM(STEP, 'parent', parent, layers);
+    await executeCallModel(STEP, 'parent', parent, layers);
     const child = new ContextImpl({
       harness,
       threadId: 'thread-1',
       parent,
     });
-    await executeLLM(STEP, 'child', child, layers);
+    await executeCallModel(STEP, 'child', child, layers);
 
     // The child anchors its own fresh render rather than replaying the parent's.
     expect(textsAt(requests, 1)).toContain('now: 1');
@@ -761,7 +761,7 @@ describe('executeLLM context anchoring', () => {
       harness,
       threadId: 'thread-1',
     });
-    await executeLLM(
+    await executeCallModel(
       {
         ...STEP,
         instructions: 'first prompt',
@@ -774,7 +774,7 @@ describe('executeLLM context anchoring', () => {
       harness,
       threadId: 'thread-1',
     });
-    await executeLLM(
+    await executeCallModel(
       {
         ...STEP,
         instructions: 'a different prompt',
@@ -806,7 +806,7 @@ describe('executeLLM context anchoring', () => {
       threadId: 'thread-1',
     });
     ctx.itemLog.append(createMessage('older turn', 'user'));
-    await executeLLM(STEP, 'hi', ctx, layers);
+    await executeCallModel(STEP, 'hi', ctx, layers);
 
     // Even an explicit live placement renders before history with caching off.
     const seen = textsAt(requests, 0);
@@ -846,7 +846,7 @@ describe('executeLLM context anchoring', () => {
       harness,
       threadId: 'thread-1',
     });
-    await executeLLM(STEP, 'hi', ctx, layers);
+    await executeCallModel(STEP, 'hi', ctx, layers);
 
     expect(recalls).toBe(1);
     expect(requests).toHaveLength(2);
@@ -876,7 +876,7 @@ describe('executeLLM context anchoring', () => {
       harness,
       threadId: 'thread-1',
     });
-    await executeLLM(STEP, 'hi', ctx, layers);
+    await executeCallModel(STEP, 'hi', ctx, layers);
 
     const retry = textsAt(requests, 1);
     expect(retry.filter((t) => t === 'try again please')).toHaveLength(1);

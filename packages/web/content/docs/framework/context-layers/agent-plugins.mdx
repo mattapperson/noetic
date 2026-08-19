@@ -41,11 +41,11 @@ const plugins = agentPlugins({
 const harness = new AgentHarness({
   name: 'my-agent',
   params: {},
-  // Context layers go under `context`, as a plain array.
-  context: [plugins],
+  // Context layers go under `contextLayers`, as a plain array.
+  contextLayers: [plugins],
   // The harness does not pick up OPENROUTER_API_KEY on its own — name the
   // provider explicitly, or model calls fail at run time.
-  llm: { provider: 'openrouter' },
+  callModelDefaults: { provider: 'openrouter' },
 });
 ```
 

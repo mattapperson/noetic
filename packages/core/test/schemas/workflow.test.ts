@@ -14,7 +14,7 @@ describe('WorkflowDocumentSchema', () => {
     const doc = {
       version: 1,
       root: {
-        kind: 'llm',
+        kind: 'callModel',
         id: 'step-1',
         instructions: 'say hello',
       },
@@ -26,7 +26,7 @@ describe('WorkflowDocumentSchema', () => {
   test('rejects missing version', () => {
     const doc = {
       root: {
-        kind: 'llm',
+        kind: 'callModel',
         id: 'step-1',
         instructions: 'say hello',
       },
@@ -39,7 +39,7 @@ describe('WorkflowDocumentSchema', () => {
     const doc = {
       version: 2,
       root: {
-        kind: 'llm',
+        kind: 'callModel',
         id: 'step-1',
         instructions: 'hello',
       },
@@ -52,7 +52,7 @@ describe('WorkflowDocumentSchema', () => {
     const doc = {
       version: 1,
       root: {
-        kind: 'llm',
+        kind: 'callModel',
         id: '',
         instructions: 'hello',
       },
@@ -65,7 +65,7 @@ describe('WorkflowDocumentSchema', () => {
 describe('WorkflowNodeSchema — llm', () => {
   test('parses llm with all fields', () => {
     const node = {
-      kind: 'llm',
+      kind: 'callModel',
       id: 'llm-1',
       model: 'openai/gpt-4o',
       instructions: 'do stuff',
@@ -91,7 +91,7 @@ describe('WorkflowNodeSchema — llm', () => {
 
   test('parses llm with only required fields', () => {
     const node = {
-      kind: 'llm',
+      kind: 'callModel',
       id: 'llm-2',
       instructions: 'minimal',
     };
@@ -101,7 +101,7 @@ describe('WorkflowNodeSchema — llm', () => {
 
   test('rejects llm without instructions', () => {
     const node = {
-      kind: 'llm',
+      kind: 'callModel',
       id: 'llm-3',
     };
     const result = WorkflowNodeSchema.safeParse(node);
@@ -112,7 +112,7 @@ describe('WorkflowNodeSchema — llm', () => {
 describe('WorkflowNodeSchema — tool', () => {
   test('parses tool node', () => {
     const node = {
-      kind: 'tool',
+      kind: 'invokeTool',
       id: 'tool-1',
       toolName: 'search',
       args: {
@@ -125,7 +125,7 @@ describe('WorkflowNodeSchema — tool', () => {
 
   test('rejects tool without toolName', () => {
     const node = {
-      kind: 'tool',
+      kind: 'invokeTool',
       id: 'tool-2',
     };
     const result = WorkflowNodeSchema.safeParse(node);
@@ -133,23 +133,23 @@ describe('WorkflowNodeSchema — tool', () => {
   });
 });
 
-describe('WorkflowNodeSchema — branch', () => {
-  test('parses branch with routes and default', () => {
+describe('WorkflowNodeSchema — conditional', () => {
+  test('parses conditional with routes and default', () => {
     const node = {
-      kind: 'branch',
-      id: 'branch-1',
+      kind: 'conditional',
+      id: 'conditional-1',
       routes: [
         {
           match: 'yes',
           target: {
-            kind: 'llm',
+            kind: 'callModel',
             id: 'yes-path',
             instructions: 'confirmed',
           },
         },
       ],
       default: {
-        kind: 'llm',
+        kind: 'callModel',
         id: 'fallback',
         instructions: 'default path',
       },
@@ -158,10 +158,10 @@ describe('WorkflowNodeSchema — branch', () => {
     expect(result.success).toBe(true);
   });
 
-  test('rejects branch with empty routes', () => {
+  test('rejects conditional with empty routes', () => {
     const node = {
-      kind: 'branch',
-      id: 'branch-2',
+      kind: 'conditional',
+      id: 'conditional-2',
       routes: [],
     };
     const result = WorkflowNodeSchema.safeParse(node);
@@ -169,20 +169,20 @@ describe('WorkflowNodeSchema — branch', () => {
   });
 });
 
-describe('WorkflowNodeSchema — fork', () => {
-  test('parses fork with race mode', () => {
+describe('WorkflowNodeSchema — inParallel', () => {
+  test('parses inParallel with race mode', () => {
     const node = {
-      kind: 'fork',
-      id: 'fork-1',
+      kind: 'inParallel',
+      id: 'inParallel-1',
       mode: 'race',
       paths: [
         {
-          kind: 'llm',
+          kind: 'callModel',
           id: 'path-a',
           instructions: 'a',
         },
         {
-          kind: 'llm',
+          kind: 'callModel',
           id: 'path-b',
           instructions: 'b',
         },
@@ -192,14 +192,14 @@ describe('WorkflowNodeSchema — fork', () => {
     expect(result.success).toBe(true);
   });
 
-  test('parses fork with all mode and merge', () => {
+  test('parses inParallel with all mode and merge', () => {
     const node = {
-      kind: 'fork',
-      id: 'fork-2',
+      kind: 'inParallel',
+      id: 'inParallel-2',
       mode: 'all',
       paths: [
         {
-          kind: 'llm',
+          kind: 'callModel',
           id: 'p1',
           instructions: 'a',
         },
@@ -213,12 +213,12 @@ describe('WorkflowNodeSchema — fork', () => {
 
   test('rejects invalid mode', () => {
     const node = {
-      kind: 'fork',
-      id: 'fork-3',
+      kind: 'inParallel',
+      id: 'inParallel-3',
       mode: 'invalid',
       paths: [
         {
-          kind: 'llm',
+          kind: 'callModel',
           id: 'p1',
           instructions: 'a',
         },
@@ -235,7 +235,7 @@ describe('WorkflowNodeSchema — spawn', () => {
       kind: 'spawn',
       id: 'spawn-1',
       child: {
-        kind: 'llm',
+        kind: 'callModel',
         id: 'spawned',
         instructions: 'run',
       },
@@ -249,10 +249,10 @@ describe('WorkflowNodeSchema — spawn', () => {
 describe('WorkflowNodeSchema — provide', () => {
   test('parses provide with layers', () => {
     const node = {
-      kind: 'provide',
+      kind: 'withContext',
       id: 'provide-1',
       child: {
-        kind: 'llm',
+        kind: 'callModel',
         id: 'inner',
         instructions: 'work',
       },
@@ -266,10 +266,10 @@ describe('WorkflowNodeSchema — provide', () => {
 
   test('rejects empty layers', () => {
     const node = {
-      kind: 'provide',
+      kind: 'withContext',
       id: 'provide-2',
       child: {
-        kind: 'llm',
+        kind: 'callModel',
         id: 'inner',
         instructions: 'work',
       },
@@ -286,7 +286,7 @@ describe('WorkflowNodeSchema — loop', () => {
       kind: 'loop',
       id: 'loop-1',
       body: {
-        kind: 'llm',
+        kind: 'callModel',
         id: 'body',
         instructions: 'iterate',
       },
@@ -304,7 +304,7 @@ describe('WorkflowNodeSchema — loop', () => {
       kind: 'loop',
       id: 'loop-2',
       body: {
-        kind: 'llm',
+        kind: 'callModel',
         id: 'body',
         instructions: 'iterate',
       },
@@ -325,12 +325,12 @@ describe('WorkflowNodeSchema — sequence', () => {
       id: 'seq-1',
       steps: [
         {
-          kind: 'llm',
+          kind: 'callModel',
           id: 'first',
           instructions: 'step 1',
         },
         {
-          kind: 'llm',
+          kind: 'callModel',
           id: 'second',
           instructions: 'step 2',
         },
@@ -351,48 +351,48 @@ describe('WorkflowNodeSchema — sequence', () => {
   });
 });
 
-describe('WorkflowNodeSchema — every', () => {
-  test('parses every with step and ms', () => {
+describe('WorkflowNodeSchema — schedule', () => {
+  test('parses schedule with step and interval', () => {
     const node = {
-      kind: 'every',
-      id: 'every-1',
+      kind: 'schedule',
+      id: 'schedule-1',
       step: {
-        kind: 'llm',
+        kind: 'callModel',
         id: 'periodic',
         instructions: 'check',
       },
-      ms: 1e3,
+      interval: 1e3,
     };
     const result = WorkflowNodeSchema.safeParse(node);
     expect(result.success).toBe(true);
   });
 
-  test('parses every with onError', () => {
+  test('parses schedule with onError', () => {
     const node = {
-      kind: 'every',
-      id: 'every-2',
+      kind: 'schedule',
+      id: 'schedule-2',
       step: {
-        kind: 'llm',
+        kind: 'callModel',
         id: 'periodic',
         instructions: 'check',
       },
-      ms: 5e2,
+      interval: 5e2,
       onError: 'fail',
     };
     const result = WorkflowNodeSchema.safeParse(node);
     expect(result.success).toBe(true);
   });
 
-  test('rejects negative ms', () => {
+  test('rejects negative interval', () => {
     const node = {
-      kind: 'every',
-      id: 'every-neg',
+      kind: 'schedule',
+      id: 'schedule-neg',
       step: {
-        kind: 'llm',
+        kind: 'callModel',
         id: 'periodic',
         instructions: 'check',
       },
-      ms: -1,
+      interval: -1,
     };
     const result = WorkflowNodeSchema.safeParse(node);
     expect(result.success).toBe(false);
@@ -407,7 +407,7 @@ describe('WorkflowNodeSchema — subflow', () => {
       document: {
         version: 1,
         root: {
-          kind: 'llm',
+          kind: 'callModel',
           id: 'inner',
           instructions: 'do it',
         },
@@ -436,7 +436,7 @@ describe('WorkflowNodeSchema — subflow', () => {
       document: {
         version: 1,
         root: {
-          kind: 'llm',
+          kind: 'callModel',
           id: 'inner',
           instructions: 'do it',
         },
@@ -472,7 +472,7 @@ describe('WorkflowNodeSchema — subflow', () => {
       document: {
         version: 1,
         root: {
-          kind: 'llm',
+          kind: 'callModel',
           id: 'inner',
         },
       },
@@ -521,7 +521,7 @@ describe('UntilPredicateSchema', () => {
   test('validates maxDuration', () => {
     const pred = {
       kind: 'maxDuration',
-      ms: 3e4,
+      duration: 3e4,
     };
     expect(UntilPredicateSchema.safeParse(pred).success).toBe(true);
   });
@@ -615,14 +615,14 @@ describe('validateWorkflow', () => {
     const doc = {
       version: 1,
       root: {
-        kind: 'llm',
+        kind: 'callModel',
         id: 'step-1',
         instructions: 'test',
       },
     };
     const result = validateWorkflow(doc);
     expect(result.version).toBe(1);
-    expect(result.root.kind).toBe('llm');
+    expect(result.root.kind).toBe('callModel');
   });
 
   test('throws on invalid input', () => {
@@ -641,22 +641,22 @@ describe('walkWorkflow', () => {
       id: 'root',
       steps: [
         {
-          kind: 'llm',
+          kind: 'callModel',
           id: 'a',
           instructions: 'a',
         },
         {
-          kind: 'fork',
+          kind: 'inParallel',
           id: 'f',
           mode: 'all',
           paths: [
             {
-              kind: 'llm',
+              kind: 'callModel',
               id: 'b',
               instructions: 'b',
             },
             {
-              kind: 'llm',
+              kind: 'callModel',
               id: 'c',
               instructions: 'c',
             },
@@ -676,22 +676,22 @@ describe('walkWorkflow', () => {
     ]);
   });
 
-  test('walks branch routes and default', () => {
+  test('walks conditional routes and default', () => {
     const tree: WorkflowNode = {
-      kind: 'branch',
+      kind: 'conditional',
       id: 'br',
       routes: [
         {
           match: 'yes',
           target: {
-            kind: 'llm',
+            kind: 'callModel',
             id: 'y',
             instructions: 'yes',
           },
         },
       ],
       default: {
-        kind: 'llm',
+        kind: 'callModel',
         id: 'def',
         instructions: 'default',
       },
@@ -711,7 +711,7 @@ describe('walkWorkflow', () => {
       kind: 'loop',
       id: 'lp',
       body: {
-        kind: 'llm',
+        kind: 'callModel',
         id: 'inner',
         instructions: 'iterate',
       },
@@ -738,7 +738,7 @@ describe('walkWorkflow — subflow', () => {
       document: {
         version: 1,
         root: {
-          kind: 'llm',
+          kind: 'callModel',
           id: 'inner',
           instructions: 'deep',
         },
@@ -775,7 +775,7 @@ describe('walkWorkflow — subflow', () => {
       document: {
         version: 1,
         root: {
-          kind: 'llm',
+          kind: 'callModel',
           id: 'inner',
           instructions: 'deep',
         },
@@ -788,7 +788,7 @@ describe('walkWorkflow — subflow', () => {
 describe('workflowDepth', () => {
   test('leaf node has depth 0', () => {
     const node: WorkflowNode = {
-      kind: 'llm',
+      kind: 'callModel',
       id: 'leaf',
       instructions: 'hi',
     };
@@ -797,7 +797,7 @@ describe('workflowDepth', () => {
 
   test('tool node has depth 0', () => {
     const node: WorkflowNode = {
-      kind: 'tool',
+      kind: 'invokeTool',
       id: 'leaf',
       toolName: 'search',
     };
@@ -810,7 +810,7 @@ describe('workflowDepth', () => {
       id: 'seq',
       steps: [
         {
-          kind: 'llm',
+          kind: 'callModel',
           id: 'a',
           instructions: 'a',
         },
@@ -821,7 +821,7 @@ describe('workflowDepth', () => {
 
   test('nested structure sums depth', () => {
     const node: WorkflowNode = {
-      kind: 'fork',
+      kind: 'inParallel',
       id: 'outer',
       mode: 'all',
       paths: [
@@ -829,7 +829,7 @@ describe('workflowDepth', () => {
           kind: 'spawn',
           id: 'mid',
           child: {
-            kind: 'llm',
+            kind: 'callModel',
             id: 'inner',
             instructions: 'deep',
           },

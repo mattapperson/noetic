@@ -1,0 +1,116 @@
+---
+title: Migrating from Sub-Harnesses
+description: The sub-harness packages are deprecated and replaced by @noetic-tools/acp. What changed, and how to move.
+---
+
+<Callout type="warn">
+**`@noetic-tools/sub-harness` and `@noetic-tools/sub-harness-{claude-code,codex,opencode,pi}` are deprecated.** They receive no further updates. Everything they did is now in [`@noetic-tools/acp`](/docs/framework/acp-agents), built on the [Agent Client Protocol](https://agentclientprotocol.com/).
+</Callout>
+
+## Why it changed
+
+The sub-harness system was a Noetic-invented contract wrapping a different vendor SDK per agent, normalising everything into a nine-variant stream union. Three problems followed from that shape:
+
+- **Adding an agent was a framework change.** The agent kind was a closed enum baked into `Step.kind`, the interpreter, *and* the published JSON Schema. A fifth agent meant editing core.
+- **It was lossy by construction.** Permissions, plans, session modes, slash commands, MCP passthrough, multimodal prompts, and terminals had no representation — they landed in a `raw` passthrough or were dropped.
+- **The agent ran outside Noetic's adapters.** A coding agent read files and ran commands through its own SDK, so nothing passed through `ctx.fs` or `ctx.shell` — no interception point, and no way to constrain it.
+
+ACP is a JSON-RPC standard covering all of it, in which Noetic is the **Client** and the coding agent is the **Agent**. Because the agent asks the client to read files and run terminals rather than doing it itself, the client becomes the place a boundary can exist — which is why `fs/*` access is now confined to the session working directory by default.
+
+## Moving your code
+
+### Steps
+
+```ts validate=none
+// Before — @noetic-tools/sub-harness-claude-code no longer exists
+import { step } from '@noetic-tools/core';
+import { claudeCode } from '@noetic-tools/sub-harness-claude-code';
+
+step.claudeCode({
+  id: 'review',
+  harness: claudeCode({ model: 'claude-opus-4-8' }),
+  prompt: 'Review the diff',
+  settings: { permissionMode: 'plan' },
+  session: { reuse: 'review', onComplete: 'stop' },
+});
+```
+
+```ts
+// After
+import { step } from '@noetic-tools/core';
+import { claudeCode } from '@noetic-tools/acp';
+
+step.acpAgent({
+  id: 'review',
+  agent: claudeCode(),
+  prompt: 'Review the diff',
+  mode: 'plan',
+  permissions: { default: 'deny', allow: [{ kind: 'read' }] },
+  session: { reuse: 'review', keepAlive: 'run' },
+});
+```
+
+### The mapping
+
+| Before | After |
+|---|---|
+| `step.claudeCode` / `step.codex` / `step.opencode` / `step.pi` | `step.acpAgent({ agent })` — one kind, open set of agents |
+| `@noetic-tools/sub-harness-<tool>` | `@noetic-tools/acp` — one package, presets inside it |
+| `harness:` | `agent:` |
+| `settings.model` | `model:` (or the agent's own `env`) |
+| `settings.permissionMode` | `mode:` for the agent's session mode; `permissions:` for what it may do |
+| `settings.allowedTools` | `permissions:` rules, matched on ACP tool `kind` and `title` |
+| `instructions:` | Fold into `prompt:` — ACP has no separate system-instruction slot |
+| `session.onComplete: 'stop' \| 'detach' \| 'destroy'` | `session.keepAlive: 'step' \| 'run' \| 'harness'` |
+| `SubHarness*` types | `Acp*` types, re-exported from core |
+| `HydrationContext.subHarnesses` | `HydrationContext.acpAgents`, keyed by free-form `agentId` |
+| `UNKNOWN_SUB_HARNESS_REFERENCE` | `UNKNOWN_ACP_AGENT_REFERENCE` |
+| `sub_harness_event` framework event | `acp_event`, plus `acp_client_activity` |
+| JSON node `{ "kind": "claude-code" }` | `{ "kind": "acp-agent", "agent": "claude-code" }` |
+
+### Session lifetime is now opt-in
+
+`onComplete` inferred the lifetime — a fresh session defaulted to closing, a reused one to staying alive. `keepAlive` states it, and defaults to `'step'`:
+
+```ts validate=none
+session: { reuse: 'bugfix', keepAlive: 'run' }         // shared for the rest of the run
+session: { reuse: 'assistant', keepAlive: 'harness' }  // survives runs; you call closeAcpSessions()
+```
+
+A `reuse` key without a `keepAlive` scope throws `ACP_REUSE_WITHOUT_KEEPALIVE` rather than silently extending the lifetime.
+
+### Permissions replace `permissionMode`
+
+`permissionMode` was a single vendor knob. ACP asks the client per tool call, so you answer with a policy, optionally escalating to steering or a human:
+
+```ts validate=none
+permissions: {
+  default: 'deny',
+  allow: [{ kind: 'read' }, { kind: 'edit' }],
+  deny: [{ title: 'rm -rf' }],
+}
+```
+
+Note the boundary this does **not** draw: a policy answers `session/request_permission`, which covers the agent's *tool calls*. `fs/*` and `terminal/*` are client methods the agent calls directly. Those are governed by [path confinement and `clientCapabilities`](/docs/framework/acp-agents#filesystem-confinement).
+
+## What you gain
+
+Capabilities the old adapters had no way to express:
+
+- **Permission requests**, answerable by policy, steering, or [a human over a channel](/docs/framework/acp-agents#letting-a-human-decide).
+- **Path confinement** on `fs/*`, on by default.
+- **An audit trail** — every file and command the agent touched, allowed or refused, as `acp_client_activity`.
+- **Plans, session modes, and slash commands**, surfaced on the event stream and via `listAcpSessions()`.
+- **MCP server passthrough**, and multimodal prompts gated on what the agent advertised.
+- **Model-driven delegation** via [`acpAgentTool()`](/docs/framework/acp-agents#letting-the-model-delegate).
+- **An open agent set** — supporting a new agent needs a registry entry, not a framework change.
+
+## opencode and pi
+
+Both have presets, verified against the real binaries:
+
+```ts
+import { opencode, pi } from '@noetic-tools/acp';
+```
+
+opencode speaks ACP natively — the preset runs its official `opencode acp` command. pi has no native ACP mode yet, so its preset goes through the community [`pi-acp`](https://github.com/svkozak/pi-acp) adapter — the same bridge Zed's agent registry points at. If the pi preset misbehaves, the issue likely belongs in that adapter rather than in pi or Noetic.

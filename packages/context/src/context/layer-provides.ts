@@ -28,7 +28,7 @@ export function layerData<T, TState>(opts: {
  * @param opts.execute - Async function receiving args, current state, and execution context.
  * @returns A `LayerFunctionDecl` to include in a layer's `provides`.
  */
-export function layerFn<TInput, TOutput, TState>(opts: {
+export function layerFunction<TInput, TOutput, TState>(opts: {
   description: string;
   input: ZodType<TInput>;
   output: ZodType<TOutput>;

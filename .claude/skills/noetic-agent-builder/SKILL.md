@@ -1,11 +1,11 @@
 ---
 name: noetic-agent-builder
-description: This skill provides guidance for building AI agents with the Noetic framework. It should be used when creating, modifying, or composing agent patterns using Noetic's step primitives, context layers, tools, sub-harness (coding-agent) steps, generative UI (OpenUI), chat platform integration (chat-sdk.dev), and agent harness. Triggers include mentions of "agent", "react pattern", "context layer", "spawn", "tool", "loop", "sub-harness", "step.claudeCode", "Claude Code / Codex / opencode / pi as a step", "generative UI", "OpenUI", "openUi codec", "openUiSurface", "tool ui / render fragment", "chat-sdk", "noeticAgent", "Slack bot / Discord bot / Teams bot with Noetic", "getChannelStream", "agent plugins", "agent-plugins.org", "SKILL.md", "Agent Skills", "mcp.json", "MCP server", "agentPlugins", "loadSkill", or any Noetic-specific API usage in the packages/core directory.
+description: This skill provides guidance for building AI agents with the Noetic framework. It should be used when creating, modifying, or composing agent patterns using Noetic's step primitives, context layers, tools, ACP coding-agent steps, generative UI (OpenUI), chat platform integration (chat-sdk.dev), and agent harness. Triggers include mentions of "agent", "react pattern", "context layer", "spawn", "tool", "loop", "acp", "agent client protocol", "step.acpAgent", "Claude Code / Codex / Gemini CLI as a step", "generative UI", "OpenUI", "openUi codec", "openUiSurface", "tool ui / render fragment", "chat-sdk", "noeticAgent", "Slack bot / Discord bot / Teams bot with Noetic", "getChannelStream", "agent plugins", "agent-plugins.org", "SKILL.md", "Agent Skills", "mcp.json", "MCP server", "agentPlugins", "loadSkill", or any Noetic-specific API usage in the packages/core directory.
 ---
 
 # Building Agents with Noetic
 
-Noetic is a TypeScript agent framework where all agent patterns decompose into compositions of seven step primitives: `run`, `llm`, `tool`, `branch`, `fork`, `spawn`, and `loop`. Context boundaries are first-class concepts, and the context layer system controls what state flows across them.
+Noetic is a TypeScript agent framework where all agent patterns decompose into compositions of seven step primitives: `runCode`, `callModel`, `invokeTool`, `conditional`, `inParallel`, `spawn`, and `loop`. Context boundaries are first-class concepts, and the context layer system controls what state flows across them.
 
 ## Core Concepts
 
@@ -13,27 +13,27 @@ Noetic is a TypeScript agent framework where all agent patterns decompose into c
 
 All agent patterns compose through a single `Step<TContext, I, O>` type. Steps are pure data (no side effects until executed). The agent harness dispatches by `step.kind`:
 
-- **`run`** -- pure async computation
-- **`llm`** -- model call with optional tools and structured output
-- **`tool`** -- direct tool execution with Zod-validated I/O
-- **`branch`** -- conditional routing (returns a step or null)
-- **`fork`** -- parallel execution (race, all, or settle)
+- **`runCode`** -- pure async computation
+- **`callModel`** -- model call with optional tools and structured output
+- **`invokeTool`** -- direct tool execution with schema-validated I/O (Zod by default; any Standard Schema v1 validator accepted)
+- **`conditional`** -- conditional routing (returns a step or null)
+- **`inParallel`** -- parallel execution (race, all, or settle)
 - **`spawn`** -- new context boundary with optional context layers
 - **`loop`** -- iteration with termination predicates
-- **`claude-code` / `codex` / `opencode` / `pi`** -- sub-harness steps: delegate one turn to an external coding agent via `step.claudeCode` / `step.codex` / `step.opencode` / `step.pi` (adapter from `@noetic-tools/sub-harness-*`); see `references/api-reference.md`
+- **`acp-agent`** -- delegate one turn to an external coding agent over the Agent Client Protocol via `step.acpAgent` (adapter from `@noetic-tools/acp`: `claudeCode()`, `codex()`, `gemini()`, `customAcpAgent()`); see `references/api-reference.md`
 
 ### Typed Context Access
 
 Context layers expose typed data and functions via `ctx.context['layerId']`. Use the `context()` builder with `InferContext<>` for compile-time type safety:
 
 ```typescript
-const mem = context([workingMemoryContext()]);
+const mem = context([scratchpad()]);
 type Mem = InferContext<typeof mem>;
 
-step.run<Mem>({
+runCode<Mem>({
   id: 'work',
   execute: async (input, ctx) => {
-    ctx.context['working-context'].snapshot;  // typed
+    ctx.context['scratchpad'].snapshot;  // typed
   },
 });
 ```
@@ -46,13 +46,13 @@ const ctx = harness.createContext();
 const result = await harness.run(step, input, ctx);
 ```
 
-The agent harness manages execution, context creation, channels, context lifecycle, and detached spawns. The LLM provider defaults to `'noetic'` (the Noetic platform, authenticated with `NOETIC_API_KEY`). For direct OpenRouter you must name it: `llm: { provider: 'openrouter' }`, which then reads `OPENROUTER_API_KEY`. Setting `OPENROUTER_API_KEY` alone is NOT picked up.
+The agent harness manages execution, context creation, channels, context lifecycle, and detached spawns. The LLM provider defaults to `'noetic'` (the Noetic platform, authenticated with `NOETIC_API_KEY`). For direct OpenRouter you must name it: `callModelDefaults: { provider: 'openrouter' }`, which then reads `OPENROUTER_API_KEY`. Setting `OPENROUTER_API_KEY` alone is NOT picked up.
 
-The harness always holds a `SubprocessAdapter` — every `step.run`, `spawn`, and `harness.detachedSpawn` dispatches through `harness.subprocess.spawn(...)`. Zero-config harnesses use `createInMemorySubprocessAdapter()` (in-process, no overhead). Swap in `createLocalSubprocessAdapter({storage})` to run children out-of-process with durable handle manifests. Per-step and per-call `subprocess` overrides let one agent mix in-process and out-of-process dispatch — see the Key Rules section and the "Run an agent out-of-process" / "Survive a host crash" patterns in `references/composition-patterns.md`.
+The harness always holds a `SubprocessAdapter` — every `runCode`, `spawn`, and `harness.detachedSpawn` dispatches through `harness.subprocess.spawn(...)`. Zero-config harnesses use `createInMemorySubprocessAdapter()` from `@noetic-tools/core` (in-process, no overhead). Swap in `createLocalSubprocessAdapter({storage})` from `@noetic-tools/platform-node` to run children out-of-process with durable handle manifests. Per-step and per-call `subprocess` overrides let one agent mix in-process and out-of-process dispatch — see the Key Rules section and the "Run an agent out-of-process" / "Survive a host crash" patterns in `references/composition-patterns.md`.
 
 ### Tools
 
-Tools are defined with Zod schemas for input/output validation. Inside `execute`, tools receive `ToolExecutionContext` which provides `harness`, `ctx`, and `context` accessors:
+Tools are defined with schemas for input/output validation — Zod by default, though any Standard Schema v1 validator is accepted. Model-facing JSON Schema resolves through Zod, StandardJSONSchemaV1, then an explicit `inputJsonSchema` fallback. Inside `execute`, tools receive `ToolExecutionContext` which provides `harness`, `ctx`, and `context` accessors:
 
 ```typescript
 const myTool = tool({
@@ -75,15 +75,15 @@ A tool may also declare `context` (auto-generated context layer) and `ui` (gener
 
 Context layers inject context into the LLM view (via `recall`) and persist state from responses (via `store`). Built-in layers:
 
-- **`workingMemoryContext()`** -- structured state updated via `updateWorkingMemory` tool call
-- **`observationalContext()`** -- buffer + distillation of observations
-- **`durableTaskState()`** -- file checkpoints across fresh context boundaries
-- **`staticContent()`** -- immutable instruction injection from loaded content
-- **`toolContextLayer()`** -- auto-generated layers from tool `context` declarations
+- **`scratchpad()`** -- structured state updated via the `scratchpad/update` tool call
+- **`observations()`** -- buffer + distillation of observations
+- **`taskState()`** -- file checkpoints across fresh context boundaries
+- **`instructions()`** -- immutable instruction injection from loaded content
+- **`toolCalls()`** -- auto-generated layers from tool `context` declarations
 - **`openUiSurface()`** (from `@noetic-tools/openui`) -- server-authoritative generative-UI state; see [Generative UI](#generative-ui-openui)
 - **`agentPlugins()`** (from `@noetic-tools/agent-plugins`) -- an [Agent Plugins](https://agent-plugins.org) v1 client: discovers plugin packages and exposes their Agent Skills (`SKILL.md`) and MCP servers (`mcp.json`) with progressive disclosure; see `references/api-reference.md`
 
-The `@noetic-tools/cli` package provides additional enhanced prompt layers (`promptEngineeringLayer`, `communicationStyleLayer`, `environmentContextLayer`, `toolGuidanceLayer`, `planningModeLayer`) that implement behavioral guidelines, adaptive communication, environment detection, tool preferences, and plan-mode guidance. Progressive skill disclosure is provided separately by `skillsLayer` from `@noetic-tools/code-agent`. See `packages/cli/docs/enhanced-prompt-engineering.md` for full documentation.
+The `@noetic-tools/cli` package provides additional enhanced prompt layers (`promptEngineeringLayer`, `communicationStyleLayer`, `environmentContextLayer`, `toolGuidanceLayer`, `planningModeLayer`) that implement behavioral guidelines, adaptive communication, environment detection, tool preferences, and plan-mode guidance. The CLI is developed in a separate repository (`github.com/mattapperson/noetic-internal`) — import those layers from the published barrel, never from a `src/` subpath. Progressive skill disclosure is not a published built-in; the reference implementation is `packages/core/examples/deep-agent/context/skills-layer.ts`. See `references/api-reference.md` → CLI enhanced-prompt layers for signatures.
 
 Recall can return a `RecallResult` object or a plain `string` (shorthand -- the agent harness wraps it in a developer message).
 
@@ -99,11 +99,11 @@ A layer's `placement` picks its band -- `'anchor'` (before history, pinned for a
 
 An agent can respond with a *UI* built from components you register, instead of text. This is opt-in via `@noetic-tools/openui` (depends only on context + types; core never imports it). Three composable surfaces:
 
-- **`step.llm({ output: openUi(library) })`** -- the model emits [OpenUI Lang](https://www.openui.com) and the step returns a `UiDocument`. `output` accepts a Zod schema OR an `OutputCodec`.
+- **`callModel({ output: openUi(library) })`** -- the model emits [OpenUI Lang](https://www.openui.com) and the step returns a `UiDocument`. `output` accepts a Standard Schema (Zod default) OR an `OutputCodec`.
 - **`openUiSurface({ library })`** -- a context layer that makes the server the authoritative owner of UI state (durable, resumable, visible to the model). Loop with `until: ui.submitted(surface, ref)` to wait for a form submit.
 - **Tool `ui` declarations** -- a tool defines `call`/`progress`/`result`/`error` render functions (built with `fragment(library)`) so its calls carry their own UI; works even without the codec installed.
 
-`serveOpenUi(harness, { surface })` exposes it to OpenUI's React client. In a JSON workflow, an `llm` node references a codec via `output: { codec: 'openui', library }` resolved from `HydrationContext.uiLibraries`. Full API: `references/api-reference.md` → Generative UI (OpenUI).
+`serveOpenUi(harness, { surface })` exposes it to OpenUI's React client. In a JSON workflow, a `callModel` node references a codec via `output: { codec: 'openui', library }` resolved from `HydrationContext.uiLibraries`. Full API: `references/api-reference.md` → Generative UI (OpenUI).
 
 ## How to Build an Agent
 
@@ -111,20 +111,20 @@ An agent can respond with a *UI* built from components you register, instead of 
 
 | Goal | Pattern | Composition |
 |------|---------|-------------|
-| LLM with tools, stop when done | ReAct | `react()` |
-| Multi-attempt with verification | Ralph Wiggum | `ralphWiggum()` |
-| Parallel perspectives, merged | Parallel Research | `fork(all)` + `spawn` |
+| LLM with tools, stop when done | ReAct | `loop({ steps: [callModel({ ...tools })], until: any(until.noToolCalls(), until.maxSteps(n)) })` |
+| Multi-attempt with verification | Ralph Wiggum | outer `loop` + `until.verified(fn)` around a fresh-context `spawn` of the inner ReAct loop |
+| Parallel perspectives, merged | Parallel Research | `inParallel(all)` + `spawn` |
 | Background sub-agents | Async Delegation | `detachedSpawn` + inbox channel |
-| Sequential pipeline | Phase Router | `branch` + `loop` + `prepareNext` |
-| Multi-agent task tree | Plan Execution | `compilePlan()` / `adaptivePlan()` |
-| Run a real coding agent (Claude Code / Codex / opencode / pi) as a step | Sub-Harness Step | `step.claudeCode` / `step.codex` / `step.opencode` / `step.pi` |
-| Agent responds with a UI (not text) | Generative UI | `step.llm({ output: openUi(library) })` + `openUiSurface()` |
+| Sequential pipeline | Phase Router | `conditional` + `loop` + `prepareNext` |
+| Multi-agent task tree | Plan Execution | hand-compose `loop` + `inParallel` + `conditional` + `spawn`, or emit a `WorkflowDocument` and run it with `parseAndRunWorkflow` |
+| Run a real coding agent (Claude Code / Codex / Gemini CLI) as a step | ACP Agent Step | `step.acpAgent` |
+| Agent responds with a UI (not text) | Generative UI | `callModel({ output: openUi(library) })` + `openUiSurface()` |
 
 For pattern-specific code examples, read `references/composition-patterns.md`.
 
 ### Step 2: Define Tools
 
-Define tools with Zod schemas. Tools that spawn sub-agents should use `toolCtx.harness.run()` or `toolCtx.harness.detachedSpawn()` -- never capture the harness in a closure.
+Define tools with Zod schemas or any Standard Schema v1 validator. Non-Zod validators should implement StandardJSONSchemaV1 or provide `inputJsonSchema`. Tools that spawn sub-agents should use `toolCtx.harness.run()` or `toolCtx.harness.detachedSpawn()` -- never capture the harness in a closure.
 
 Tools can declare persistent state via `ToolContextDeclaration`:
 
@@ -136,32 +136,42 @@ context: {
 }
 ```
 
-Use `toolContextLayer(allTools)` to generate the corresponding context layers.
+Use `toolCalls(allTools)` to generate the corresponding context layers.
 
 ### Step 3: Configure Context
 
 Select context layers based on what context the agent needs:
 
-- Static instructions? Use `staticContent({ load, tag })`
-- Tool-managed state? Use `toolContextLayer(tools)`
-- Structured progress? Use `workingMemoryContext({ scope: 'resource' })`
-- Observation compression? Use `observationalContext({ bufferThreshold })`
-- File artifacts? Use `durableTaskState({ baseDir })`
+- Static instructions? Use `instructions({ load, tag })`
+- Tool-managed state? Use `toolCalls(tools)`
+- Structured progress? Use `scratchpad({ scope: 'resource' })`
+- Observation compression? Use `observations({ bufferThreshold })`
+- File artifacts? Use `taskState({ baseDir })`
 
 ### Step 4: Compose and Execute
 
 ```typescript
-const agent = react({
-  model: 'anthropic/claude-sonnet-4-20250514',
-  instructions: 'Your system prompt here.',
-  tools: allTools,
-  maxSteps: 25,
-  context: layers,  // auto-wraps in spawn when provided
+// A ReAct agent is a loop of model calls, spawned with its context layers.
+const agent = spawn({
+  id: 'agent',
+  child: loop({
+    id: 'react-loop',
+    steps: [
+      callModel({
+        id: 'work',
+        model: 'anthropic/claude-sonnet-4-20250514',
+        instructions: 'Your system prompt here.',
+        tools: allTools,
+      }),
+    ],
+    until: any(until.noToolCalls(), until.maxSteps(25)),
+  }),
+  context: layers,
 });
 
 const harness = new AgentHarness({
   name: 'agent',
-  initialStep: agent,
+  agentGraph: agent,
   params: {},
 });
 
@@ -202,14 +212,14 @@ Observability:
 
 ## Key Rules
 
-1. **`Step<I, O>` is invariant** -- `Step<string, string>` is NOT assignable to `Step<unknown, unknown>`. When a framework API expects `Step` (defaulting to `Step<unknown, unknown>`), use `frameworkCast<Step>(myStep)` from `@noetic-tools/core` at the boundary. To accept any step in a custom API, use a structural type like `{ kind: Step['kind']; id: string }` instead of `Step` directly
+1. **`Step<I, O>` is invariant** -- `Step<string, string>` is NOT assignable to `Step<unknown, unknown>`. When a framework API expects `Step` (defaulting to `Step<unknown, unknown>`), use `frameworkCast<Step>(myStep)` from `@noetic-tools/core/unstable` at the boundary. To accept any step in a custom API, use a structural type like `{ kind: Step['kind']; id: string }` instead of `Step` directly
 2. **Tools receive the harness via `toolCtx.harness`** -- never pass the harness as a closure parameter to tool factories
 2. **`spawn` creates context boundaries** -- context layers decide what state crosses via `onSpawn`/`onReturn` hooks
 3. **Detached spawns use `toolCtx.ctx`** -- always use the parent context, never `harness.createContext()`, to preserve depth tracking and thread/resource IDs
 4. **Token/cost metadata lives on `ctx.lastStepMeta`** -- return values are pure business data
 5. **`until.noToolCalls()` checks the outer loop** -- the inner tool call loop is handled by `callModel`
 6. **Placement picks the band, slot orders within it** -- anchored layer output renders before history, live output after it; lower slots come first inside a band. Use `Slot` constants, and set `placement: 'live'` on any layer whose `recall()` mutates state
-7. **Fork paths get cloned state** -- mutations in one path don't affect siblings
+7. **Parallel paths get cloned state** -- mutations in one `inParallel` path don't affect siblings
 8. **SubprocessAdapter precedence is `detachedSpawn-overrides.subprocess ?? step.subprocess ?? harness.subprocess`** -- reach for a per-step override to run one specific spawn out-of-process while keeping the rest in-process, or a per-call override on `detachedSpawn` to do the same without touching the step definition
 9. **Durability is opt-in and composed of three surfaces** -- `checkpointStore` (parent execution state), `subprocess` adapter durability (live-child manifests), and durable IPC (`DurableOutboundQueue`). Configure the ones you need; absent surfaces are no-ops and the harness degrades gracefully
 
@@ -222,15 +232,15 @@ For complete builder signatures, context layer APIs, agent harness methods, and 
 | Concept | Source Path |
 |---------|------------|
 | Builders | `packages/core/src/builders/` |
-| Step types | `packages/core/src/types/step.ts` |
-| Tool types | `packages/core/src/types/common.ts` |
+| Step types | `packages/types/src/types/step.ts` |
+| Tool types | `packages/types/src/types/tool.ts` |
 | Context layer types | `packages/types/src/types/context-layer.ts` |
-| Patterns | `packages/core/src/patterns/` |
+| JSON workflow runtime | `packages/core/src/builders/dynamic-workflow.ts`, `packages/core/src/builders/workflow-hydrator.ts` |
 | Context layers | `packages/context/src/context/layers/` |
 | Prompt-cache anchoring | `packages/context/src/context/cache-anchoring.ts`, `packages/core/src/interpreter/context-assembly.ts` |
 | Generative UI (OpenUI) | `packages/openui/src/` (codec, `openUiSurface`, `fragment`, `/server`) |
-| AgentHarness | `packages/core/src/runtime/agent-harness.ts` |
+| AgentHarness | `packages/core/src/harness/agent-harness.ts` |
 | Interpreter | `packages/core/src/interpreter/` |
-| Specs | `specs/` (numbered 00-16) |
+| Specs | `specs/` (numbered 00-29) |
 | Examples | `packages/core/examples/` |
 | Docs | `packages/web/content/docs/` |

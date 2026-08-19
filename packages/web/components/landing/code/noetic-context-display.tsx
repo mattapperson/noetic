@@ -66,7 +66,7 @@ const LAYER_DETAILS: Record<string, Omit<LayerInfo, 'id'>> = {
     itemCount: 1,
     preview: '[reminder] Daily standup pings due 9am UTC.',
   },
-  'durable-task-state': {
+  'task-state': {
     state: 'active',
     tokens: '20',
     itemCount: 1,
@@ -324,7 +324,7 @@ function LayerTabContent({ layer }: { layer: LayerInfo }): ReactNode {
             color: VAPOR.muted,
           }}
         >
-          Some layers (e.g. planContext) only activate once a corresponding flow has started.
+          Some layers (e.g. plan()) only activate once a corresponding flow has started.
         </span>
       </div>
     );

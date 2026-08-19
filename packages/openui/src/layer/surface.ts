@@ -200,7 +200,7 @@ function renderWithinBudget(state: OpenUiSurfaceState, budget: number): string {
     version: state.version,
   };
   let text = renderSurface(view);
-  // `budget > 0` is the fail-open convention (see staticContent / durableTaskState):
+  // `budget > 0` is the fail-open convention (see instructions / taskState):
   // a zero allocation must not delete the surface from the view.
   if (budget > 0) {
     // Drop the OLDEST interactions first, then halve statements — recent

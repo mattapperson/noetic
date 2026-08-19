@@ -12,7 +12,7 @@ Episodic Context captures summaries of past conversations or execution episodes.
 
 ## Concept
 
-Each time an agent completes an execution, the `onComplete` hook generates a summary of the conversation and stores it as an episode. On future runs, the `recall` hook retrieves the most recent or most relevant episodes and injects them into the prompt, giving the agent temporal context.
+Each time an agent completes an execution, the `onComplete` hook generates a summary of the conversation and stores it as an episode. On future runs, the `recall` hook retrieves the most recent or most relevant episodes and injects them into the prompt, giving the agent continuity across sessions.
 
 ## Building an Episodic Context Layer
 

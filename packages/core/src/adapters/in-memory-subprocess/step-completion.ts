@@ -41,7 +41,7 @@ export async function completeProcessRun({
         error: serializeError(err),
       },
     });
-    // Same rationale as the success branch above — clear the durable
+    // Same rationale as the success path above — clear the durable
     // manifest so `listLive()` doesn't resurrect this handle on reboot.
     await clearIfDurable(handle.id);
   }

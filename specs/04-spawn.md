@@ -142,7 +142,7 @@ Tools receive a `ToolExecutionContext` as their second argument, which provides 
 
 ## Parent Context Updates to Spawned Children
 
-`spawn` creates a child context — not `fork`. `fork` branches share the parent context entirely and do not trigger `onParentUpdate`. This section applies only to `spawn` boundaries.
+`spawn` creates a child context — not `inParallel`. `inParallel` paths share the parent context entirely and do not trigger `onParentUpdate`. This section applies only to `spawn` boundaries.
 
 A spawned child does not run in complete isolation from its parent. While the child has its own ItemLog and context convergence, the parent's layers may continue to produce state changes during the child's execution. The child can receive these updates and decide how to respond.
 
@@ -166,11 +166,11 @@ Detached spawns pair naturally with the loop inbox channel (see `05-loop-and-unt
 
 ## SubprocessAdapter Routing
 
-Every `step.run(...)`, `spawn(...)`, and `harness.detachedSpawn(...)` dispatches through a `SubprocessAdapter`. In-process vs out-of-process is a property of the adapter, never of the step. The harness always holds one; `AgentHarness` defaults to `createInMemorySubprocessAdapter()` so zero-config callers keep their current synchronous, in-process behaviour.
+Every `runCode(...)`, `spawn(...)`, and `harness.detachedSpawn(...)` dispatches through a `SubprocessAdapter`. In-process vs out-of-process is a property of the adapter, never of the step. The harness always holds one; `AgentHarness` defaults to `createInMemorySubprocessAdapter()` so zero-config callers keep their current synchronous, in-process behaviour.
 
 ### Adapter Resolution
 
-When the interpreter dispatches a `run` or `spawn`, it resolves the active adapter as:
+When the interpreter dispatches a `runCode` or `spawn`, it resolves the active adapter as:
 
 ```
 resolveStepAdapter(step, detachedOverride) =
@@ -180,10 +180,10 @@ resolveStepAdapter(step, detachedOverride) =
 Precedence:
 
 1. **Per-call override** — the `overrides.subprocess` argument to `harness.detachedSpawn(step, input, ctx, overrides)`.
-2. **Per-step override** — the `subprocess` field on `StepRun` / `StepSpawn`.
+2. **Per-step override** — the `subprocess` field on `StepRunCode` / `StepSpawn`.
 3. **Harness default** — `harness.subprocess`.
 
-Other step kinds (`llm`, `tool`, `branch`, `fork`, `provide`, `loop`, `every`) always fall through to the harness default; they do not carry their own `subprocess` field.
+Other step kinds (`callModel`, `invokeTool`, `conditional`, `inParallel`, `withContext`, `loop`, `schedule`) always fall through to the harness default; they do not carry their own `subprocess` field.
 
 ### The Step Request
 
@@ -204,13 +204,13 @@ interface StepSubprocessRequest {
 }
 ```
 
-and calls `adapter.spawn(request)`. The adapter returns a `SubprocessHandle`; for `run` the interpreter awaits settlement and unwraps `handle.metadata.result` (or rehydrates `handle.metadata.error`); for `detachedSpawn` the adapter's handle is wrapped in a `DetachedHandle` whose `.await()` polls `adapter.get()` until the status reaches a terminal value.
+and calls `adapter.spawn(request)`. The adapter returns a `SubprocessHandle`; for `runCode` the interpreter awaits settlement and unwraps `handle.metadata.result` (or rehydrates `handle.metadata.error`); for `detachedSpawn` the adapter's handle is wrapped in a `DetachedHandle` whose `.await()` polls `adapter.get()` until the status reaches a terminal value.
 
 ### Step Registry and Cross-Process Lookup
 
 When an adapter crosses a process boundary, the child runtime must locate the step body by id. Every step builder auto-registers its result in a shared **step registry** (`@noetic-tools/core/runtime/step-registry`):
 
-- `registerStep(step)` — called automatically by `step.run()`, `step.llm()`, `step.tool()`, `spawn()`, `provide()`, `loop()`, and other constructors whenever `step.id` is non-empty.
+- `registerStep(step)` — called automatically by `runCode()`, `callModel()`, `invokeTool()`, `spawn()`, `withContext()`, `loop()`, and other constructors whenever `step.id` is non-empty.
 - `lookupStep(id)` — called by the child runtime (after importing the user's entry module) to retrieve the step definition.
 - `getRegistry()` — read-only view, mainly for tests and debugging.
 
@@ -233,4 +233,4 @@ On host restart the surviving handle can be rediscovered via `adapter.listLive()
 
 ### Idempotency Guidance
 
-Durable execution means the same step body may be replayed under certain failure paths — for example, a crash that lands between step completion and the following checkpoint write. The framework cannot make arbitrary `step.run` bodies idempotent. Use stable step ids, and write step bodies whose side effects are safe to re-execute or guarded by an external idempotency key.
+Durable execution means the same step body may be replayed under certain failure paths — for example, a crash that lands between step completion and the following checkpoint write. The framework cannot make arbitrary `runCode` bodies idempotent. Use stable step ids, and write step bodies whose side effects are safe to re-execute or guarded by an external idempotency key.

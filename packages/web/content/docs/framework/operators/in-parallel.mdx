@@ -1,0 +1,178 @@
+---
+title: inParallel
+description: Run multiple steps in parallel with race, all, or settle semantics.
+---
+
+## Quick Example
+
+```ts
+import { callModel, inParallel } from '@noetic-tools/core';
+
+const fastest = inParallel({
+  id: 'fastest-response',
+  mode: 'race',
+  paths: (input: string) => [
+    callModel({
+      id: 'model-a',
+      model: 'openai/gpt-4o',
+    }),
+    callModel({
+      id: 'model-b',
+      model: 'openai/gpt-4o-mini',
+    }),
+  ],
+});
+```
+
+## What It Does
+
+`inParallel` runs multiple steps concurrently and combines the results. There are three modes that determine how results are collected.
+
+## Modes
+
+### race
+
+Returns the output of the first step to complete. All other paths are discarded.
+
+```ts validate=none
+import { inParallel, runCode } from '@noetic-tools/core';
+
+const raceExample = inParallel({
+  id: 'race-providers',
+  mode: 'race',
+  paths: (query: string) => [
+    runCode({
+      id: 'provider-a',
+      execute: async (q) => fetchProviderA(q),
+    }),
+    runCode({
+      id: 'provider-b',
+      execute: async (q) => fetchProviderB(q),
+    }),
+  ],
+});
+```
+
+No `merge` function is needed -- the winner's output is used directly.
+
+### all
+
+Waits for every path to complete, then calls `merge` with an array of all results.
+
+```ts validate=none
+import { inParallel, runCode } from '@noetic-tools/core';
+
+const allExample = inParallel({
+  id: 'gather-research',
+  mode: 'all',
+  paths: (topic: string) => [
+    runCode({
+      id: 'academic',
+      execute: async (t) => searchAcademic(t),
+    }),
+    runCode({
+      id: 'news',
+      execute: async (t) => searchNews(t),
+    }),
+    runCode({
+      id: 'social',
+      execute: async (t) => searchSocial(t),
+    }),
+  ],
+  merge: (results) => results.flat(),
+});
+```
+
+If any path throws, the entire `inParallel` throws `fork_partial`. The first genuine failure also cancels the remaining paths: siblings still queued behind the `concurrency` limit are skipped, and in-flight siblings are aborted cooperatively (they stop at their next step boundary or blocked channel operation) and then awaited. Cancelled siblings appear in `fork_partial.failed` with `error.kind === 'cancelled'`; paths that completed before the failure stay in `succeeded`. If the parent context itself is aborted mid-run, the operator throws `cancelled` instead of `fork_partial`.
+
+### settle
+
+Like `all`, but collects both successes and failures. Each result is a `SettleResult` with a `status` field.
+
+```ts validate=none
+import type { SettleResult } from '@noetic-tools/core';
+
+import { inParallel, runCode } from '@noetic-tools/core';
+
+const settleExample = inParallel({
+  id: 'resilient-search',
+  mode: 'settle',
+  paths: (query: string) => [
+    runCode({
+      id: 'source-a',
+      execute: async (q) => fetchSourceA(q),
+    }),
+    runCode({
+      id: 'source-b',
+      execute: async (q) => fetchSourceB(q),
+    }),
+  ],
+  merge: (results: SettleResult<string>[]) => {
+    const successes = results
+      .filter((r) => r.status === 'fulfilled')
+      .map((r) => r.value);
+    return successes.join('\n');
+  },
+});
+```
+
+## SettleResult Type
+
+| Property | Type | Description |
+| --- | --- | --- |
+| `stepId` | `string` | The id of the step that produced this result |
+| `status` | `'fulfilled' \| 'rejected'` | Whether the step succeeded or failed |
+| `value` | `O \| undefined` | The output value (present when fulfilled) |
+| `error` | `NoeticError \| undefined` | The error (present when rejected) |
+
+## API Reference
+
+### Common Options (all modes)
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `id` | `string` | Yes | Unique step identifier |
+| `mode` | `'race' \| 'all' \| 'settle'` | Yes | Execution mode |
+| `paths` | `(input: I, ctx: Context<TContext>) => Step<TContext, I, O>[]` | Yes | Function returning the steps to run |
+| `concurrency` | `number` | No | Max parallel executions |
+
+### Mode-Specific Options
+
+| Property | Modes | Type | Description |
+| --- | --- | --- | --- |
+| `merge` | `all` | `(results: O[], ctx: Context<TContext>) => O` | Combine all outputs into one |
+| `merge` | `settle` | `(results: SettleResult<O>[], ctx: Context<TContext>) => O` | Combine settled results into one |
+
+## Concurrency Control
+
+Limit how many paths run at once with `concurrency`.
+
+```ts validate=none
+import { inParallel } from '@noetic-tools/core';
+
+const throttled = inParallel({
+  id: 'throttled-parallel',
+  mode: 'all',
+  paths: (input: string) => generateManySteps(input),
+  merge: (results) => results,
+  concurrency: 3, // at most 3 paths execute simultaneously
+});
+```
+
+## Context Layers
+
+Each path is a child execution. It inherits the parent's context layers and tool pool, so callModel steps inside a path keep their context projection and layer tools, and a nested `spawn` has layers to inherit.
+
+Layer *state* is per path:
+
+- `onSpawn` seeds each path's state from the parent's before the path runs. Items returned by `onSpawn` are not appended -- a parallel path already has the parent's full item log.
+- `onReturn` merges a successful path's contribution back into the parent. A failed path is not merged, and its state is discarded.
+- Merges run one at a time even though paths run concurrently, so no path's contribution is lost to a concurrent read-modify-write.
+
+For layers that collect artifacts from many workers, choose a merge strategy that namespaces per child -- see [`taskState({ mergeData: 'namespace' })`](/docs/framework/context-layers/task-state).
+
+## Related
+
+- [conditional](/docs/framework/operators/conditional) -- conditional routing for single-path decisions.
+- [Spawn](/docs/framework/operators/spawn) -- isolated child contexts for deeper isolation.
+- [Steps](/docs/framework/steps) -- the step types you can use as parallel paths.

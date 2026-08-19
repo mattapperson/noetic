@@ -17,12 +17,17 @@ import {
   filterReasoningStream,
   filterTextStream,
 } from '../../src/runtime/session-streams';
-import { createScriptedCallModel, makeMessage, textOnlyResponse } from '../_helpers';
+import {
+  createScriptedCallModel,
+  makeLLMResponse,
+  makeMessage,
+  textOnlyResponse,
+} from '../_helpers';
 
 //#region Helpers
 
 const echoStep: Step<ContextData, string, string> = {
-  kind: 'llm',
+  kind: 'callModel',
   id: 'echo',
   model: 'test/echo',
   tools: [],
@@ -216,7 +221,7 @@ describe('AgentHarness session accessors', () => {
   it('getAgentResponse() returns items, usage, and text', async () => {
     const harness = new AgentHarness({
       name: 'test',
-      initialStep: echoStep,
+      agentGraph: echoStep,
       params: {},
       _testCallModel: createScriptedCallModel([
         textOnlyResponse('response text'),
@@ -231,10 +236,187 @@ describe('AgentHarness session accessors', () => {
     expect(response.usage.outputTokens).toBe(5);
   });
 
+  it('getUsage() returns zeros for a session that has not run', () => {
+    const harness = new AgentHarness({
+      name: 'test',
+      agentGraph: echoStep,
+      params: {},
+      _testCallModel: createScriptedCallModel([
+        textOnlyResponse('unused'),
+      ]),
+    });
+    expect(harness.getUsage()).toEqual({
+      inputTokens: 0,
+      outputTokens: 0,
+    });
+    expect(
+      harness.getUsage({
+        threadId: 'never-ran',
+      }),
+    ).toEqual({
+      inputTokens: 0,
+      outputTokens: 0,
+    });
+  });
+
+  it('getUsage() accumulates token usage across turns on the same session', async () => {
+    const harness = new AgentHarness({
+      name: 'test',
+      agentGraph: echoStep,
+      params: {},
+      _testCallModel: createScriptedCallModel([
+        textOnlyResponse('first'),
+        textOnlyResponse('second'),
+      ]),
+    });
+
+    await harness.execute('one');
+    await harness.getAgentResponse();
+    const afterFirst = harness.getUsage();
+    expect(afterFirst.inputTokens).toBe(10);
+    expect(afterFirst.outputTokens).toBe(5);
+
+    await harness.execute('two');
+    await harness.getAgentResponse();
+    const afterSecond = harness.getUsage();
+    expect(afterSecond.inputTokens).toBe(20);
+    expect(afterSecond.outputTokens).toBe(10);
+
+    // Sessions are thread-scoped: another thread's accounting stays untouched.
+    expect(
+      harness.getUsage({
+        threadId: 'other-thread',
+      }),
+    ).toEqual({
+      inputTokens: 0,
+      outputTokens: 0,
+    });
+  });
+
+  it('omits cachedTokens on session and per-turn usage when no cache figure was reported', async () => {
+    const harness = new AgentHarness({
+      name: 'test',
+      agentGraph: echoStep,
+      params: {},
+      _testCallModel: createScriptedCallModel([
+        // `textOnlyResponse` carries no `cachedTokens` — the provider says
+        // nothing about caching at all.
+        textOnlyResponse('no cache info'),
+      ]),
+    });
+
+    await harness.execute('hi');
+    const response = await harness.getAgentResponse();
+    const usage = harness.getUsage();
+    expect(usage.inputTokens).toBe(10);
+    expect(usage.cachedTokens).toBeUndefined();
+    // The per-turn `HarnessResponse.usage` carries the same semantics.
+    expect(response.usage.cachedTokens).toBeUndefined();
+  });
+
+  it('reports cachedTokens 0 on session and per-turn usage when a turn reported zero', async () => {
+    const harness = new AgentHarness({
+      name: 'test',
+      agentGraph: echoStep,
+      params: {},
+      _testCallModel: createScriptedCallModel([
+        makeLLMResponse('nothing cached', {
+          usage: {
+            inputTokens: 10,
+            outputTokens: 5,
+            cachedTokens: 0,
+          },
+        }),
+      ]),
+    });
+
+    await harness.execute('hi');
+    const response = await harness.getAgentResponse();
+    const usage = harness.getUsage();
+    // An explicit report of 0 must NOT collapse to undefined — callers need to
+    // tell "nothing was cached" from "this provider says nothing about caching".
+    expect(usage.cachedTokens).toBe(0);
+    // Same pin on the per-turn `HarnessResponse.usage`, which used to collapse
+    // a reported 0 to `undefined` via a `> 0` guard in buildResponse.
+    expect(response.usage.cachedTokens).toBe(0);
+  });
+
+  it('getUsage() accumulates cachedTokens across turns that report them', async () => {
+    const harness = new AgentHarness({
+      name: 'test',
+      agentGraph: echoStep,
+      params: {},
+      _testCallModel: createScriptedCallModel([
+        makeLLMResponse('first', {
+          usage: {
+            inputTokens: 10,
+            outputTokens: 5,
+            cachedTokens: 4,
+          },
+        }),
+        makeLLMResponse('second', {
+          usage: {
+            inputTokens: 10,
+            outputTokens: 5,
+            cachedTokens: 6,
+          },
+        }),
+      ]),
+    });
+
+    await harness.execute('one');
+    await harness.getAgentResponse();
+    expect(harness.getUsage().cachedTokens).toBe(4);
+
+    await harness.execute('two');
+    await harness.getAgentResponse();
+    expect(harness.getUsage().cachedTokens).toBe(10);
+  });
+
+  it('getUsage() still accounts for a turn that failed after the model billed', async () => {
+    // The model call is nested inside a `runCode` graph so the throw happens
+    // AFTER usage was tracked — a `_testCallModel` that throws would never
+    // accrue anything to accumulate.
+    let harnessRef: AgentHarness | undefined;
+    const modelThenThrow: Step<ContextData, string, string> = {
+      kind: 'runCode',
+      id: 'model-then-throw',
+      execute: async (input, execCtx) => {
+        assert(harnessRef);
+        await harnessRef.run(echoStep, input, execCtx);
+        throw new Error('boom after the model billed');
+      },
+    };
+
+    const harness = new AgentHarness({
+      name: 'test',
+      agentGraph: modelThenThrow,
+      params: {},
+      _testCallModel: createScriptedCallModel([
+        makeLLMResponse('billed', {
+          usage: {
+            inputTokens: 10,
+            outputTokens: 5,
+            cachedTokens: 3,
+          },
+        }),
+      ]),
+    });
+    harnessRef = harness;
+
+    await harness.execute('hi');
+    await expect(harness.getAgentResponse()).rejects.toThrow(/boom after the model billed/);
+
+    const usage = harness.getUsage();
+    expect(usage.inputTokens).toBe(10);
+    expect(usage.outputTokens).toBe(5);
+    expect(usage.cachedTokens).toBe(3);
+  });
+
   it('getFullStream() yields framework events for step and turn lifecycle', async () => {
     const harness = new AgentHarness({
       name: 'myagent',
-      initialStep: echoStep,
+      agentGraph: echoStep,
       params: {},
       _testCallModel: createScriptedCallModel([
         textOnlyResponse('streamed'),
@@ -292,7 +474,7 @@ describe('AgentHarness session accessors', () => {
   it('multiple stream accessors share the same session broadcaster', async () => {
     const harness = new AgentHarness({
       name: 'test',
-      initialStep: echoStep,
+      agentGraph: echoStep,
       params: {},
       _testCallModel: createScriptedCallModel([
         textOnlyResponse('multi'),
@@ -317,7 +499,7 @@ describe('AgentHarness session accessors', () => {
       }),
     });
     const toolStep: Step<ContextData, string, string> = {
-      kind: 'llm',
+      kind: 'callModel',
       id: 'tooled',
       model: 'test/model',
       tools: [
@@ -326,7 +508,7 @@ describe('AgentHarness session accessors', () => {
     };
     const harness = new AgentHarness({
       name: 'test',
-      initialStep: toolStep,
+      agentGraph: toolStep,
       params: {},
     });
     const fakeClient = new DecoratingToolClient('noop', '{}');
@@ -930,12 +1112,14 @@ describe('AgentHarness — item schema extensions', () => {
     });
     const harness = new AgentHarness({
       name: 'test',
-      initialStep: echoStep,
+      agentGraph: echoStep,
       params: {},
       itemSchemas: {
-        items: [
-          CustomItemSchema,
-        ],
+        schemas: {
+          items: [
+            CustomItemSchema,
+          ],
+        },
       },
       _testCallModel: async () => ({
         items: [
@@ -1041,14 +1225,16 @@ describe('AgentHarness — item schema extensions', () => {
     });
     const harness = new AgentHarness({
       name: 'test',
-      initialStep: echoStep,
+      agentGraph: echoStep,
       params: {},
       itemSchemas: {
-        items: [
-          CustomMemoryItemSchema,
-        ],
+        schemas: {
+          items: [
+            CustomMemoryItemSchema,
+          ],
+        },
       },
-      context: [
+      contextLayers: [
         {
           id: 'custom-memory',
           slot: 100,
@@ -1295,7 +1481,7 @@ describe('AgentHarness — item schema extensions', () => {
   it('rejects unregistered extension response items by default', async () => {
     const harness = new AgentHarness({
       name: 'test',
-      initialStep: echoStep,
+      agentGraph: echoStep,
       params: {},
       _testCallModel: async () => ({
         items: [
@@ -1318,7 +1504,7 @@ describe('AgentHarness — item schema extensions', () => {
 describe('AgentHarness — emit option', () => {
   it('emit: false suppresses framework events inside callModel', async () => {
     const silentStep: Step<ContextData, string, string> = {
-      kind: 'llm',
+      kind: 'callModel',
       id: 'silent',
       model: 'test/echo',
       tools: [],
@@ -1327,7 +1513,7 @@ describe('AgentHarness — emit option', () => {
 
     const harness = new AgentHarness({
       name: 'myagent',
-      initialStep: silentStep,
+      agentGraph: silentStep,
       params: {},
       _testCallModel: createScriptedCallModel([
         textOnlyResponse('quiet'),

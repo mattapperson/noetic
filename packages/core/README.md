@@ -1,6 +1,6 @@
 # @noetic-tools/core
 
-Core primitives for the [Noetic](https://github.com/mattapperson/noetic) agent framework: step types, the interpreter, the runtime, the memory layer contract, and built-in patterns.
+Core primitives for the [Noetic](https://github.com/mattapperson/noetic) agent framework: step types, the interpreter, the runtime, and the context layer contract.
 
 ## Install
 
@@ -9,6 +9,8 @@ npm install @noetic-tools/core
 ```
 
 `@noetic-tools/core` depends on `@openrouter/agent` (the OpenRouter LLM adapter) and `zod`; your package manager installs both automatically. Runs on Node.js 18+ and Bun.
+
+Tool and structured-output schemas accept any [Standard Schema v1](https://standardschema.dev/schema) validator. Model-facing JSON Schema resolves through three tiers: Zod's native converter, the [Standard JSON Schema v1](https://standardschema.dev/json-schema) companion trait, then an explicit `inputJsonSchema` / `outputJsonSchema` override. Zod 4.2+, ArkType 2.1.28+, Zod Mini, VineJS, and Sury implement the companion trait; Valibot provides it via `toStandardJsonSchema()` from `@valibot/to-json-schema`.
 
 ## Set your API key
 
@@ -23,20 +25,20 @@ export OPENROUTER_API_KEY=sk-or-...
 A complete, runnable program. Save it as `agent.mjs` and run `node agent.mjs`:
 
 ```ts
-import { AgentHarness, step } from '@noetic-tools/core';
+import { AgentHarness, callModel } from '@noetic-tools/core';
 
-// 1. Define a single LLM step. `model` and `instructions` live here.
-const greet = step.llm({
+// 1. Define a single model-call step. `model` and `instructions` live here.
+const greet = callModel({
   id: 'greet',
   model: 'openai/gpt-4o-mini', // any OpenRouter model id (provider/model)
   instructions: 'You are a friendly assistant. Greet the user by name in one short sentence.',
 });
 
-// 2. Create the harness. `name` and `params` are required; `llm` selects the provider.
+// 2. Create the harness. `name` and `params` are required; `callModelDefaults` selects the provider.
 const harness = new AgentHarness({
   name: 'greeter',
   params: {},
-  llm: { provider: 'openrouter' }, // apiKey defaults to process.env.OPENROUTER_API_KEY
+  callModelDefaults: { provider: 'openrouter' }, // apiKey defaults to process.env.OPENROUTER_API_KEY
 });
 
 // 3. Run the step with a context and print the model's reply.

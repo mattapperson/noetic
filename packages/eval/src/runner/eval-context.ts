@@ -2,6 +2,7 @@ import type { Step } from '@noetic-tools/core';
 import { AgentHarness, InMemoryExporter } from '@noetic-tools/core';
 
 import type { EvalSuiteOptions, ScoreResult } from '../types/eval';
+import { resolveEnvLlm } from '../utils/env-llm';
 import type { EvalExecution, ScorerFn } from './eval-execution';
 
 //#region Types
@@ -79,6 +80,7 @@ export function createEvalContext(step: Step, options: EvalSuiteOptions): EvalCo
         name: 'eval',
         params: {},
         traceExporter: exporter,
+        callModelDefaults: resolveEnvLlm(),
       });
 
       const ctx = harness.createContext();

@@ -1,10 +1,10 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { Step } from '@noetic-tools/core';
-import { step } from '@noetic-tools/core';
 
 import {
   createGepaAdapter,
   extractBestCandidate,
+  optimizeWithGepa,
   parseFieldText,
   serializeFields,
 } from '../../src/optimization/gepa-bridge';
@@ -37,16 +37,17 @@ function makeFields(): OptimizableField[] {
   ];
 }
 
-function makeLlmStep(): Step {
-  return step.llm({
+function makeCallModelStep(): Step {
+  return {
+    kind: 'callModel',
     id: 'agent',
     model: 'openai/gpt-4o-mini',
     instructions: 'original instructions',
-  });
+  };
 }
 
 function instructionsOf(s: Step): string | undefined {
-  if (s.kind !== 'llm') {
+  if (s.kind !== 'callModel') {
     return undefined;
   }
   return typeof s.instructions === 'string' ? s.instructions : undefined;
@@ -139,7 +140,7 @@ describe('createGepaAdapter evaluate', () => {
     const fields = makeFields();
     let receivedStep: Step | undefined;
     const adapter = createGepaAdapter({
-      step: makeLlmStep(),
+      step: makeCallModelStep(),
       fields,
       runEval: async (s) => {
         receivedStep = s;
@@ -182,7 +183,7 @@ describe('createGepaAdapter evaluate', () => {
   });
 
   test('destroyed markers evaluate the ORIGINAL step', async () => {
-    const original = makeLlmStep();
+    const original = makeCallModelStep();
     let receivedStep: Step | undefined;
     const adapter = createGepaAdapter({
       step: original,
@@ -212,7 +213,7 @@ describe('createGepaAdapter evaluate', () => {
   });
 
   test('missing component key evaluates the original step', async () => {
-    const original = makeLlmStep();
+    const original = makeCallModelStep();
     let receivedStep: Step | undefined;
     const adapter = createGepaAdapter({
       step: original,
@@ -249,7 +250,7 @@ describe('createGepaAdapter propose_new_texts', () => {
     const fields = makeFields();
     const fieldOrder = fields.map((f) => f.path);
     const adapter = createGepaAdapter({
-      step: makeLlmStep(),
+      step: makeCallModelStep(),
       fields,
       runEval: async () => ({}),
       componentId: COMPONENT_ID,
@@ -292,7 +293,7 @@ describe('createGepaAdapter propose_new_texts', () => {
   test('a throwing proposer falls back to the current value per field', async () => {
     const fields = makeFields();
     const adapter = createGepaAdapter({
-      step: makeLlmStep(),
+      step: makeCallModelStep(),
       fields,
       runEval: async () => ({}),
       componentId: COMPONENT_ID,
@@ -332,7 +333,7 @@ describe('createGepaAdapter propose_new_texts', () => {
   test('unparseable current candidate falls back to initial field values', async () => {
     const fields = makeFields();
     const adapter = createGepaAdapter({
-      step: makeLlmStep(),
+      step: makeCallModelStep(),
       fields,
       runEval: async () => ({}),
       componentId: COMPONENT_ID,
@@ -509,6 +510,96 @@ describe('extractBestCandidate', () => {
     expect(frontier).toHaveLength(2);
     expect(frontier[0][INSTRUCTIONS_PATH]).toBe('variant A');
     expect(frontier[1]).toEqual(initialCandidate);
+  });
+});
+
+//#endregion
+
+//#region Environment Resolution
+
+/**
+ * `optimizeWithGepa` needs a literal API key because the GEPA student/teacher
+ * LMs talk to an OpenAI-wire endpoint through the ax SDK rather than through the
+ * harness. Either provider satisfies that; with neither configured it must fall
+ * back to a single offline evaluation instead of failing the run.
+ *
+ * These cases only exercise the offline branch, so they never open a socket. The
+ * provider-precedence contract itself is covered in `test/utils/env-llm.test.ts`.
+ * Ambient keys are saved, cleared, and restored — never asserted on.
+ */
+describe('optimizeWithGepa environment resolution', () => {
+  let savedOpenrouterApiKey: string | undefined;
+  let savedNoeticApiKey: string | undefined;
+
+  beforeEach(() => {
+    savedOpenrouterApiKey = process.env.OPENROUTER_API_KEY;
+    savedNoeticApiKey = process.env.NOETIC_API_KEY;
+    delete process.env.OPENROUTER_API_KEY;
+    delete process.env.NOETIC_API_KEY;
+  });
+
+  afterEach(() => {
+    if (savedOpenrouterApiKey !== undefined) {
+      process.env.OPENROUTER_API_KEY = savedOpenrouterApiKey;
+    }
+    if (savedNoeticApiKey !== undefined) {
+      process.env.NOETIC_API_KEY = savedNoeticApiKey;
+    }
+  });
+
+  test('falls back to one offline evaluation when neither provider key is set', async () => {
+    const evaluated: Step[] = [];
+    const result = await optimizeWithGepa({
+      step: makeCallModelStep(),
+      fields: makeFields(),
+      runEval: async (s: Step) => {
+        evaluated.push(s);
+        return {
+          accuracy: 1,
+          latency: 0,
+        };
+      },
+    });
+
+    expect(evaluated).toHaveLength(1);
+    expect(result.iterations).toBe(1);
+    expect(result.score).toBe(0.5);
+  });
+
+  test('offline fallback evaluates the initial candidate unchanged', async () => {
+    const evaluated: Step[] = [];
+    const result = await optimizeWithGepa({
+      step: makeCallModelStep(),
+      fields: makeFields(),
+      runEval: async (s: Step) => {
+        evaluated.push(s);
+        return {
+          accuracy: 1,
+        };
+      },
+    });
+
+    expect(instructionsOf(evaluated[0])).toBe('original instructions');
+    expect(result.bestCandidate[INSTRUCTIONS_PATH]).toBe('original instructions');
+  });
+
+  test('short-circuits with no fields to optimize, without evaluating anything', async () => {
+    let calls = 0;
+    const result = await optimizeWithGepa({
+      step: makeCallModelStep(),
+      fields: [],
+      runEval: async () => {
+        calls++;
+        return {
+          accuracy: 1,
+        };
+      },
+    });
+
+    expect(calls).toBe(0);
+    expect(result.iterations).toBe(0);
+    expect(result.score).toBe(0);
+    expect(result.bestCandidate).toEqual({});
   });
 });
 

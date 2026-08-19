@@ -32,14 +32,20 @@ bun add -d @ax-llm/ax
 ## Write a suite
 
 ```ts
-import { react } from '@noetic-tools/core';
+import { any, callModel, loop, until } from '@noetic-tools/core';
 import { describe, it, scorer } from '@noetic-tools/eval';
 
-const agent = react({
-  model: 'anthropic/claude-sonnet-4',
-  instructions: 'You are a ticket routing agent...',
-  tools: [classifyTool, escalateTool],
-  maxSteps: 6,
+const agent = loop({
+  id: 'router-loop',
+  steps: [
+    callModel({
+      id: 'router',
+      model: 'anthropic/claude-sonnet-4',
+      instructions: 'You are a ticket routing agent...',
+      tools: [classifyTool, escalateTool],
+    }),
+  ],
+  until: any(until.noToolCalls(), until.maxSteps(6)),
 });
 
 describe(agent, { objective: 'Routes billing tickets to the billing category' }, () => {

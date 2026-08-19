@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'bun:test';
+import { parseAndRunWorkflow } from '../../src/builders/dynamic-workflow';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { GenAI, NoeticAttr } from '../../src/observability/genai-attributes';
 import { InMemoryExporter } from '../../src/observability/trace-exporter';
-import { parseAndRunWorkflow } from '../../src/patterns/dynamic-workflow';
 import { createScriptedCallModel, makeLLMResponse } from '../_helpers';
 
 const WORKFLOW = {
@@ -12,13 +12,13 @@ const WORKFLOW = {
     id: 'root',
     steps: [
       {
-        kind: 'llm' as const,
+        kind: 'callModel' as const,
         id: 'first',
         model: 'openai/gpt-4o-mini',
         instructions: 'say hi',
       },
       {
-        kind: 'llm' as const,
+        kind: 'callModel' as const,
         id: 'second',
         model: 'openai/gpt-4o-mini',
         instructions: 'say bye',
@@ -65,11 +65,11 @@ describe('workflow run span (issue #50 follow-up)', () => {
     const nodes = JSON.parse(String(nodesAttr));
     expect(nodes).toContainEqual({
       id: 'first',
-      kind: 'llm',
+      kind: 'callModel',
     });
     expect(nodes).toContainEqual({
       id: 'second',
-      kind: 'llm',
+      kind: 'callModel',
     });
 
     // Model-call spans nest under the run span and share its trace.

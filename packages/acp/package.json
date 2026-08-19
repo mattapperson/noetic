@@ -1,0 +1,72 @@
+{
+  "name": "@noetic-tools/acp",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Agent Client Protocol client for Noetic. Drives any ACP-speaking coding agent (Claude Code, Codex, Gemini CLI, …) as a step, serving fs/*, terminal/*, and permission requests from Noetic's own adapters.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mattapperson/noetic.git",
+    "directory": "packages/acp"
+  },
+  "homepage": "https://github.com/mattapperson/noetic#readme",
+  "bugs": {
+    "url": "https://github.com/mattapperson/noetic/issues"
+  },
+  "keywords": [
+    "noetic",
+    "agents",
+    "acp",
+    "agent-client-protocol",
+    "claude-code",
+    "codex",
+    "coding-agent"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "bun": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./stdio": {
+      "bun": "./src/stdio.ts",
+      "types": "./dist/stdio.d.ts",
+      "default": "./dist/stdio.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "bun-types": "latest"
+  },
+  "peerDependencies": {
+    "zod": "^4.0.0"
+  },
+  "dependencies": {
+    "@noetic-tools/types": "workspace:*",
+    "@zed-industries/agent-client-protocol": "^0.4.5",
+    "zod": "^4.0.0"
+  },
+  "scripts": {
+    "build": "bunx tsc -p tsconfig.build.json && bun scripts/add-js-extensions.ts",
+    "verify:esm": "bun scripts/verify-node-esm.ts",
+    "prepublishOnly": "rm -rf dist && bun run build && bun run verify:esm && bun scripts/pin-workspace-deps.ts && bun scripts/strip-dev-conditions.ts",
+    "test": "bun test",
+    "test:coverage": "bun test --coverage --coverage-reporter=text --coverage-reporter=lcov",
+    "test:ci": "bun test --coverage --coverage-reporter=lcov",
+    "typecheck": "bunx tsc --noEmit",
+    "lint": "bunx biome check .",
+    "lint:fix": "bunx biome check --fix .",
+    "format": "bunx biome format --write .",
+    "format:check": "bunx biome format ."
+  }
+}

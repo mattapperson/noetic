@@ -4,9 +4,9 @@ import type { ContextData } from '@noetic-tools/context';
 import { isNoeticError, NoeticErrorImpl } from '@noetic-tools/types';
 import { z } from 'zod';
 import { channel } from '../../src/builders/channel-builder';
-import { every } from '../../src/builders/every';
+import { schedule } from '../../src/builders/every';
 import { execute } from '../../src/interpreter/execute';
-import { executeEvery } from '../../src/interpreter/execute-control';
+import { executeSchedule } from '../../src/interpreter/execute-control';
 import { SpanImpl } from '../../src/observability/span-impl';
 import { ChannelStore } from '../../src/runtime/channel-store';
 import { ContextImpl } from '../../src/runtime/context-impl';
@@ -28,13 +28,13 @@ function makeCapturingSpan(): {
   };
 }
 
-describe('executeEvery', () => {
+describe('executeSchedule', () => {
   it('paces 3 iterations at ms=50 in >= 100ms total', async () => {
     let count = 0;
-    const everyStep = every<ContextData, number, number>({
+    const everyStep = schedule<ContextData, number, number>({
       id: 'pacing-every',
       step: {
-        kind: 'run',
+        kind: 'runCode',
         id: 'tick',
         execute: async (input: number) => {
           count++;
@@ -45,7 +45,7 @@ describe('executeEvery', () => {
           return input;
         },
       },
-      ms: 50,
+      interval: 50,
     });
 
     const ctx = new ContextImpl({
@@ -53,7 +53,7 @@ describe('executeEvery', () => {
     });
     const start = Date.now();
     try {
-      await executeEvery(everyStep, 0, ctx, simpleExecute);
+      await executeSchedule(everyStep, 0, ctx, simpleExecute);
       expect.unreachable('should have thrown cancelled');
     } catch (e) {
       assert(isNoeticError(e));
@@ -65,7 +65,7 @@ describe('executeEvery', () => {
     expect(elapsed).toBeGreaterThanOrEqual(100);
   });
 
-  it('wakeOn channel cuts park short — next iter starts within ~5ms of send', async () => {
+  it('inbox channel cuts park short — next iter starts within ~5ms of send', async () => {
     const wake = channel('wake', {
       schema: z.string(),
       mode: 'queue',
@@ -80,10 +80,10 @@ describe('executeEvery', () => {
       channelStore,
     });
 
-    const everyStep = every<ContextData, void, void>({
+    const everyStep = schedule<ContextData, void, void>({
       id: 'wake-every',
       step: {
-        kind: 'run',
+        kind: 'runCode',
         id: 'tick',
         execute: async () => {
           iterTimestamps.push(Date.now());
@@ -93,8 +93,8 @@ describe('executeEvery', () => {
           }
         },
       },
-      ms: 5e3,
-      wakeOn: wake,
+      interval: 5e3,
+      inbox: wake,
     });
 
     // Schedule the wake send shortly after start so the first park
@@ -105,7 +105,7 @@ describe('executeEvery', () => {
     }, 30);
 
     try {
-      await executeEvery(everyStep, undefined, ctx, simpleExecute);
+      await executeSchedule(everyStep, undefined, ctx, simpleExecute);
       expect.unreachable('should have thrown cancelled');
     } catch (e) {
       assert(isNoeticError(e));
@@ -131,10 +131,10 @@ describe('executeEvery', () => {
       span,
     });
 
-    const everyStep = every<ContextData, void, void>({
+    const everyStep = schedule<ContextData, void, void>({
       id: 'continue-every',
       step: {
-        kind: 'run',
+        kind: 'runCode',
         id: 'flaky',
         execute: async () => {
           count++;
@@ -146,11 +146,11 @@ describe('executeEvery', () => {
           }
         },
       },
-      ms: 10,
+      interval: 10,
     });
 
     try {
-      await executeEvery(everyStep, undefined, ctx, simpleExecute);
+      await executeSchedule(everyStep, undefined, ctx, simpleExecute);
       expect.unreachable('should have thrown cancelled');
     } catch (e) {
       assert(isNoeticError(e));
@@ -158,7 +158,7 @@ describe('executeEvery', () => {
     }
 
     expect(count).toBe(2);
-    const errorEvents = events.filter((ev) => ev.name === 'every.iteration.error');
+    const errorEvents = events.filter((ev) => ev.name === 'schedule.iteration.error');
     expect(errorEvents).toHaveLength(1);
     const ev = errorEvents[0];
     assert(ev.attributes !== undefined);
@@ -168,16 +168,16 @@ describe('executeEvery', () => {
 
   it("onError 'fail' propagates and operator terminates with that error", async () => {
     const failure = new Error('fatal boom');
-    const everyStep = every<ContextData, void, void>({
+    const everyStep = schedule<ContextData, void, void>({
       id: 'fail-every',
       step: {
-        kind: 'run',
+        kind: 'runCode',
         id: 'fail',
         execute: async () => {
           throw failure;
         },
       },
-      ms: 1e3,
+      interval: 1e3,
       onError: 'fail',
     });
 
@@ -187,7 +187,7 @@ describe('executeEvery', () => {
 
     let caught: unknown;
     try {
-      await executeEvery(everyStep, undefined, ctx, simpleExecute);
+      await executeSchedule(everyStep, undefined, ctx, simpleExecute);
       expect.unreachable('should have thrown');
     } catch (e) {
       caught = e;
@@ -197,17 +197,17 @@ describe('executeEvery', () => {
 
   it('abort during long park returns control within ~50ms', async () => {
     let started = false;
-    const everyStep = every<ContextData, void, void>({
+    const everyStep = schedule<ContextData, void, void>({
       id: 'abort-park-every',
       step: {
-        kind: 'run',
+        kind: 'runCode',
         id: 'mark',
         execute: async () => {
           started = true;
         },
       },
       // 5 seconds — far longer than the test should take if abort works.
-      ms: 5e3,
+      interval: 5e3,
     });
 
     const ctx = new ContextImpl({
@@ -222,7 +222,7 @@ describe('executeEvery', () => {
     const start = Date.now();
     let caught: unknown;
     try {
-      await executeEvery(everyStep, undefined, ctx, simpleExecute);
+      await executeSchedule(everyStep, undefined, ctx, simpleExecute);
       expect.unreachable('should have thrown cancelled');
     } catch (e) {
       caught = e;
@@ -246,10 +246,10 @@ describe('executeEvery', () => {
       harness: makeMockHarness(),
     });
 
-    const everyStep = every<ContextData, void, void>({
+    const everyStep = schedule<ContextData, void, void>({
       id: 'jitter-every',
       step: {
-        kind: 'run',
+        kind: 'runCode',
         id: 'tick',
         execute: async () => {
           timestamps.push(Date.now());
@@ -259,12 +259,12 @@ describe('executeEvery', () => {
           }
         },
       },
-      ms,
+      interval: ms,
       jitter,
     });
 
     try {
-      await executeEvery(everyStep, undefined, ctx, simpleExecute);
+      await executeSchedule(everyStep, undefined, ctx, simpleExecute);
       expect.unreachable('should have thrown cancelled');
     } catch (e) {
       assert(isNoeticError(e));
@@ -289,10 +289,10 @@ describe('executeEvery', () => {
     const ctx = new ContextImpl({
       harness: makeMockHarness(),
     });
-    const everyStep = every<ContextData, void, void>({
+    const everyStep = schedule<ContextData, void, void>({
       id: 'dispatch-every',
       step: {
-        kind: 'run',
+        kind: 'runCode',
         id: 'tick',
         execute: async () => {
           count++;
@@ -301,7 +301,7 @@ describe('executeEvery', () => {
           }
         },
       },
-      ms: 10,
+      interval: 10,
     });
 
     try {
@@ -320,10 +320,10 @@ describe('executeEvery', () => {
       harness: makeMockHarness(),
     });
 
-    const everyStep = every<ContextData, void, void>({
+    const everyStep = schedule<ContextData, void, void>({
       id: 'cancel-not-swallowed',
       step: {
-        kind: 'run',
+        kind: 'runCode',
         id: 'cancellable',
         execute: async () => {
           calls++;
@@ -336,11 +336,11 @@ describe('executeEvery', () => {
           });
         },
       },
-      ms: 1,
+      interval: 1,
     });
 
     try {
-      await executeEvery(everyStep, undefined, ctx, simpleExecute);
+      await executeSchedule(everyStep, undefined, ctx, simpleExecute);
       expect.unreachable('should have thrown cancelled');
     } catch (e) {
       assert(isNoeticError(e));
@@ -356,20 +356,20 @@ describe('executeEvery', () => {
     ctx.abort('preempted');
 
     let count = 0;
-    const everyStep = every<ContextData, void, void>({
+    const everyStep = schedule<ContextData, void, void>({
       id: 'pre-aborted-every',
       step: {
-        kind: 'run',
+        kind: 'runCode',
         id: 'tick',
         execute: async () => {
           count++;
         },
       },
-      ms: 5,
+      interval: 5,
     });
 
     try {
-      await executeEvery(everyStep, undefined, ctx, simpleExecute);
+      await executeSchedule(everyStep, undefined, ctx, simpleExecute);
       expect.unreachable('should have thrown cancelled');
     } catch (e) {
       assert(isNoeticError(e));
@@ -378,15 +378,15 @@ describe('executeEvery', () => {
     expect(count).toBe(0);
   });
 
-  it('park completes after ms when no wakeOn and not aborted', async () => {
+  it('park completes after ms when no inbox and not aborted', async () => {
     let count = 0;
     const ctx = new ContextImpl({
       harness: makeMockHarness(),
     });
-    const everyStep = every<ContextData, void, void>({
+    const everyStep = schedule<ContextData, void, void>({
       id: 'plain-park-every',
       step: {
-        kind: 'run',
+        kind: 'runCode',
         id: 'tick',
         execute: async () => {
           count++;
@@ -395,12 +395,12 @@ describe('executeEvery', () => {
           }
         },
       },
-      ms: 30,
+      interval: 30,
     });
 
     const start = Date.now();
     try {
-      await executeEvery(everyStep, undefined, ctx, simpleExecute);
+      await executeSchedule(everyStep, undefined, ctx, simpleExecute);
     } catch {
       // expected cancelled
     }
@@ -415,21 +415,21 @@ describe('executeEvery', () => {
     const ctx = new ContextImpl({
       harness: makeMockHarness(),
     });
-    const everyStep = every<ContextData, void, void>({
+    const everyStep = schedule<ContextData, void, void>({
       id: 'no-second-iter-every',
       step: {
-        kind: 'run',
+        kind: 'runCode',
         id: 'tick',
         execute: async () => {
           count++;
           ctx.abort('done after first');
         },
       },
-      ms: 10,
+      interval: 10,
     });
 
     try {
-      await executeEvery(everyStep, undefined, ctx, simpleExecute);
+      await executeSchedule(everyStep, undefined, ctx, simpleExecute);
     } catch {
       // expected cancelled
     }
@@ -438,7 +438,7 @@ describe('executeEvery', () => {
     expect(count).toBe(1);
   });
 
-  it('wakeOn on a queue channel does not consume the message — body sees it', async () => {
+  it('inbox on a queue channel does not consume the message — body sees it', async () => {
     const wake = channel<string>('wake-queue', {
       schema: z.string(),
       mode: 'queue',
@@ -451,10 +451,10 @@ describe('executeEvery', () => {
       channelStore,
     });
 
-    const everyStep = every<ContextData, void, void>({
+    const everyStep = schedule<ContextData, void, void>({
       id: 'queue-wake',
       step: {
-        kind: 'run',
+        kind: 'runCode',
         id: 'drain',
         execute: async (_input, c) => {
           while (true) {
@@ -469,8 +469,8 @@ describe('executeEvery', () => {
           }
         },
       },
-      ms: 5_000,
-      wakeOn: wake,
+      interval: 5_000,
+      inbox: wake,
     });
 
     setTimeout(() => {
@@ -481,7 +481,7 @@ describe('executeEvery', () => {
     }, 80);
 
     try {
-      await executeEvery(everyStep, undefined, ctx, simpleExecute);
+      await executeSchedule(everyStep, undefined, ctx, simpleExecute);
       expect.unreachable('should have thrown cancelled');
     } catch (e) {
       assert(isNoeticError(e));

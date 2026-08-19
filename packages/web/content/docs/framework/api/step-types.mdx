@@ -10,24 +10,24 @@ The `Step` type is a discriminated union over the `kind` field:
 ```ts
 import type {
   Step,
-  StepBranch,
-  StepFork,
-  StepLLM,
+  StepConditional,
+  StepInParallel,
+  StepCallModel,
   StepLoop,
-  StepProvide,
-  StepRun,
+  StepWithContext,
+  StepRunCode,
   StepSpawn,
-  StepTool,
+  StepInvokeTool,
 } from '@noetic-tools/core';
 
 type _AssertShape<TContext, I, O> =
-  | StepRun<TContext, I, O>
-  | StepLLM<TContext, I, O>
-  | StepTool<TContext, I, O>
-  | StepBranch<TContext, I, O>
-  | StepFork<TContext, I, O>
+  | StepRunCode<TContext, I, O>
+  | StepCallModel<TContext, I, O>
+  | StepInvokeTool<TContext, I, O>
+  | StepConditional<TContext, I, O>
+  | StepInParallel<TContext, I, O>
   | StepSpawn<TContext, I, O>
-  | StepProvide<TContext, I, O>
+  | StepWithContext<TContext, I, O>
   | StepLoop<TContext, I, O>;
 
 type _AssertSubset<TContext, I, O> = _AssertShape<TContext, I, O> extends Step<TContext, I, O>
@@ -35,104 +35,105 @@ type _AssertSubset<TContext, I, O> = _AssertShape<TContext, I, O> extends Step<T
   : false;
 ```
 
-The exported `Step` union additionally includes [`StepEvery`](#stepevery) for fixed-interval scheduling.
+The exported `Step` union additionally includes [`StepSchedule`](#stepschedule) for fixed-interval scheduling.
 
-## StepRun
+## StepRunCode
 
-`StepRun<TContext, I, O>`
+`StepRunCode<TContext, I, O>`
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `kind` | `'run'` | yes | Discriminant |
+| `kind` | `'runCode'` | yes | Discriminant |
 | `id` | `string` | yes | Step identifier |
 | `execute` | `(input: I, ctx: Context<TContext>) => Promise<O>` | yes | Async function to execute |
 | `retry` | `RetryPolicy` | no | Retry configuration |
 
-## StepLLM
+## StepCallModel
 
-`StepLLM<TContext, I, O>`
+`StepCallModel<TContext, I, O>`
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `kind` | `'llm'` | yes | Discriminant |
+| `kind` | `'callModel'` | yes | Discriminant |
 | `id` | `string` | yes | Step identifier |
 | `model` | `string` | yes | Model identifier |
 | `instructions` | `string` | no | System prompt / instructions for the model |
 | `tools` | `Tool[]` | no | Allowed tool subset (`undefined` = all, `[]` = none) |
-| `output` | `ZodType<O>` | no | Structured output schema |
+| `output` | `StandardSchemaV1<unknown, O> \| OutputCodec<O>` | no | Structured output schema (any Standard Schema v1; Zod is the default) or a streaming codec |
+| `outputJsonSchema` | `Record<string, unknown>` | no | Explicit JSON Schema override/fallback for non-Zod output. Conversion order is Zod → StandardJSONSchemaV1 → this field; validation-only schemas require it |
 | `params` | `ModelParams` | no | Sampling parameters |
 | `emit` | `boolean \| ((eventType, data) => boolean)` | no | Controls framework event emission for this step. Defaults to `true`. Pass `false` to suppress all framework events, or a filter function to allow specific events through. |
 
-## StepTool
+## StepInvokeTool
 
-`StepTool<TContext, I, O>`
+`StepInvokeTool<TContext, I, O>`
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `kind` | `'tool'` | yes | Discriminant |
+| `kind` | `'invokeTool'` | yes | Discriminant |
 | `id` | `string` | yes | Step identifier |
-| `tool` | `Tool<ZodType<I>, ZodType<O>>` | yes | Tool definition |
+| `tool` | `Tool<StandardSchemaV1<unknown, I>, StandardSchemaV1<unknown, O>>` | yes | Tool definition |
 | `args` | `Partial<I>` | no | Preset arguments |
 
-## StepBranch
+## StepConditional
 
-`StepBranch<TContext, I, O>`
+`StepConditional<TContext, I, O>`
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `kind` | `'branch'` | yes | Discriminant |
+| `kind` | `'conditional'` | yes | Discriminant |
 | `id` | `string` | yes | Step identifier |
 | `route` | `(input: I, ctx: Context<TContext>) => Step<TContext, I, O> \| null` | yes | Routing function (null skips) |
 
-## StepFork
+## StepInParallel
 
-Fork has three mode variants, each a separate interface.
+inParallel has three mode variants, each a separate interface.
 
-### StepForkRace
+### StepInParallelRace
 
-`StepForkRace<TContext, I, O>`
+`StepInParallelRace<TContext, I, O>`
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `kind` | `'fork'` | yes | Discriminant |
+| `kind` | `'inParallel'` | yes | Discriminant |
 | `id` | `string` | yes | Step identifier |
 | `mode` | `'race'` | yes | First completion wins |
 | `paths` | `(input: I, ctx: Context<TContext>) => Step<TContext, I, O>[]` | yes | Path factory |
 | `concurrency` | `number` | no | Max parallel paths |
 
-### StepForkAll
+### StepInParallelAll
 
-`StepForkAll<TContext, I, O>`
+`StepInParallelAll<TContext, I, O>`
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `kind` | `'fork'` | yes | Discriminant |
+| `kind` | `'inParallel'` | yes | Discriminant |
 | `id` | `string` | yes | Step identifier |
 | `mode` | `'all'` | yes | Wait for all paths |
 | `paths` | `(input: I, ctx: Context<TContext>) => Step<TContext, I, O>[]` | yes | Path factory |
 | `merge` | `(results: O[], ctx: Context<TContext>) => O` | yes | Merge function |
 | `concurrency` | `number` | no | Max parallel paths |
 
-### StepForkSettle
+### StepInParallelSettle
 
-`StepForkSettle<TContext, I, O>`
+`StepInParallelSettle<TContext, I, O>`
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `kind` | `'fork'` | yes | Discriminant |
+| `kind` | `'inParallel'` | yes | Discriminant |
 | `id` | `string` | yes | Step identifier |
 | `mode` | `'settle'` | yes | Wait for all, include errors |
 | `paths` | `(input: I, ctx: Context<TContext>) => Step<TContext, I, O>[]` | yes | Path factory |
 | `merge` | `(results: SettleResult<O>[], ctx: Context<TContext>) => O` | yes | Merge function |
 | `concurrency` | `number` | no | Max parallel paths |
 
-## StepProvide
+## StepWithContext
 
-`StepProvide<TContext, I, O>`
+`StepWithContext<TContext, I, O>`
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `kind` | `'provide'` | yes | Discriminant |
+| `kind` | `'withContext'` | yes | Discriminant |
 | `id` | `string` | yes | Step identifier |
 | `child` | `Step<TContext, I, O>` | yes | Child step to execute with the provided layers |
 | `context` | `ContextConfig \| ContextLayer[]` | yes | Context layers available to all descendant steps |
@@ -166,19 +167,19 @@ Fork has three mode variants, each a separate interface.
 | `prepareNext` | `(output: O, verdict: Verdict, ctx: Context<TContext>) => I` | no | Transform output to next input |
 | `onError` | `(error: NoeticError, ctx: Context<TContext>) => 'retry' \| 'skip' \| 'abort'` | no | Error handler |
 
-## StepEvery
+## StepSchedule
 
-`StepEvery<TContext, I, O>`
+`StepSchedule<TContext, I, O>`
 
-A step that runs a body step on a fixed-interval schedule, optionally woken sooner by a wake channel. Runs forever until the executing context is cancelled. The operator output is `void` — `every` does not accumulate iteration outputs.
+A step that runs a body step on a fixed-interval schedule, optionally woken sooner by a wake channel. Runs forever until the executing context is cancelled. The operator output is `void` — `schedule` does not accumulate iteration outputs.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `kind` | `'every'` | yes | Discriminant |
+| `kind` | `'schedule'` | yes | Discriminant |
 | `id` | `string` | yes | Step identifier |
 | `step` | `Step<TContext, I, O>` | yes | Body step executed on each iteration |
-| `ms` | `number` | yes | Park duration between iterations in milliseconds. Must be `>= 0`. |
-| `wakeOn` | `Channel<unknown>` | no | Channel that wakes the parking interval when any value arrives |
+| `interval` | `number` | yes | Park duration between iterations in milliseconds. Must be `>= 0`. |
+| `inbox` | `Channel<unknown>` | no | Channel that wakes the parking interval when any value arrives |
 | `onError` | `'continue' \| 'fail'` | no | Behavior when `step` throws. Defaults to `'continue'` (record the error and keep parking). |
 | `jitter` | `number` | no | Random jitter applied to the park duration in milliseconds. Must be `>= 0`. Defaults to `0`. |
 
@@ -217,12 +218,13 @@ A step that runs a body step on a fixed-interval schedule, optionally woken soon
 |---|---|---|
 | `name` | `string` | Tool name (used by the LLM for selection). |
 | `description` | `string` | Tool description shown to the LLM. |
-| `input` | `ZodType<I>` | Zod schema validating tool input arguments. |
-| `output` | `ZodType<O>` | Zod schema validating tool return value. |
-| `event` | `ZodType` | Optional Zod schema validating streaming events yielded during execution. |
+| `input` | `StandardSchemaV1<I>` | Schema validating tool input arguments (any Standard Schema v1; Zod is the default). |
+| `output` | `StandardSchemaV1<O>` | Schema validating tool return value. |
+| `inputJsonSchema` | `Record<string, unknown>` | Explicit JSON Schema override/fallback for non-Zod input. Conversion order is Zod → StandardJSONSchemaV1 → this field; validation-only schemas require it. |
+| `event` | `StandardSchemaV1` | Optional schema validating streaming events yielded during execution. |
 | `itemSchemas` | `ItemSchemaExtensions` | Optional item schemas for tool-call/result extensions contributed by this tool. `toolResults` schemas are owner-scoped: they validate only this tool's own result items and never reject a sibling tool's results. Schemas are pure shape validators (gates, not normalizers) — the original item is returned on match, and Zod transforms/defaults are unsupported. |
 | `decorateResultItem` | `(params) => Item` | Decorate the harness-created tool-result item before it is appended/emitted. The decorated item must satisfy this tool's own `itemSchemas.toolResults` (when declared) — including for error outputs such as malformed-arguments results — or the round fails with `NoeticError` kind `item_schema_mismatch`. |
-| `execute` | `(args: z.infer<I>, toolCtx: ToolExecutionContext) => Promise<z.infer<O>> \| AsyncGenerator<unknown, z.infer<O>>` | Async function (or generator) that performs the tool's work. |
+| `execute` | `(args: InferSchemaOutput<I>, toolCtx: ToolExecutionContext) => Promise<InferSchemaOutput<O>> \| AsyncGenerator<unknown, InferSchemaOutput<O>>` | Async function (or generator) that performs the tool's work. `InferSchemaOutput` is `z.output` for Zod schemas and `StandardSchemaV1.InferOutput` otherwise. |
 | `needsApproval` | `boolean` | Optional. When `true`, execution pauses for human approval before running. |
 | `context` | `ToolContextDeclaration` | Optional. Declares tool-owned state the runtime materializes into a `ContextLayer`. |
 

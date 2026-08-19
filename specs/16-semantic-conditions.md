@@ -1,6 +1,6 @@
 # Semantic Conditions and Embedding-Based Routing
 
-> **Depends On:** `03-control-flow` (branch, StepBranch), `05-loop-and-until` (ConvergeConfig)
+> **Depends On:** `03-control-flow` (conditional, StepConditional), `05-loop-and-until` (ConvergeConfig)
 > **Exports:** `Condition`, `WhenClause`, `OtherwiseClause`, `when()`, `otherwise()`, `semanticRoute()`, `semanticSwitch()`, `embeddingMatch()`, `aiCondition()`, `anyCondition()`, `allCondition()`, `cosineSimilarity()`, `EmbedFn`
 
 ---
@@ -43,7 +43,7 @@ Fallback marker. Returns an `OtherwiseClause<I, O>`.
 
 Evaluates `WhenClause` conditions in order, returns the step from the first match. Falls through to `OtherwiseClause` if present. Returns `null` if no match and no otherwise.
 
-Returns `(input: I, ctx: Context) => Promise<Step<I, O> | null>` — compatible with `StepBranch.route`.
+Returns `(input: I, ctx: Context) => Promise<Step<I, O> | null>` — compatible with `StepConditional.route`.
 
 ### `semanticSwitch(opts)`
 

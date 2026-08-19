@@ -41,7 +41,7 @@ declare interface HarnessApi<TParams extends Record<string, unknown> = Record<st
     state?: unknown;
     threadId?: string;
     resourceId?: string;
-    context?: ContextLayer[];
+    contextLayers?: ContextLayer[];
     cwdInit?: string;
   }): Context;
 
@@ -117,7 +117,7 @@ declare interface RerenderRequest {
 | `config` | The `AgentConfig<TParams>` the harness was constructed with. |
 | `fs` | The `FsAdapter` the harness was constructed with (defaults to `createLocalFsAdapter()`). All filesystem operations — CLI tools, skill discovery, and context layers — route through this adapter. |
 | `shell` | The `ShellAdapter` (defaults to `createLocalShellAdapter()`). Tools that need a real shell go through this. |
-| `subprocess` | The `SubprocessAdapter` used by `step.run.subprocess` requests and detached spawns. Defaults to an in-memory adapter. |
+| `subprocess` | The `SubprocessAdapter` used by `runCode.subprocess` requests and detached spawns. Defaults to an in-memory adapter. |
 | `rootCwdState` | Long-lived shared cwd state, seeded into every root context the harness creates so successive runs and the TUI observe each other's `cd`s. |
 | `callModel(request)` | Issue a single LLM call, bypassing the session/queue runner. Used by plugins that need one-shot generation. |
 | `execute(input, options?)` | Enqueue a message on the session identified by `options.threadId`. Resolves once the message is accepted into the queue — not when the model responds. |
@@ -177,8 +177,9 @@ interface ExecuteOptions {
   threadId?: string;
   resourceId?: string;
   state?: unknown;
-  context?: ContextLayer[];
+  contextLayers?: ContextLayer[];
   deliveryMode?: DeliveryMode;
+  messageId?: string;
 }
 
 interface SessionScope {
@@ -235,7 +236,7 @@ type StreamingItem = Item & { readonly isComplete: boolean };
 
 ## AgentConfig
 
-Declarative configuration for an agent harness. Generic over `TParams`, an arbitrary key-value record accessible via `ctx.harness.config.params`. Filesystem and shell adapters are passed to the `AgentHarness` constructor and exposed as `harness.fs` / `harness.shell`; they are not part of `AgentConfig` itself.
+Declarative configuration for an agent harness. Generic over `TParams`, an arbitrary key-value record accessible via `ctx.harness.config.params`. Filesystem and shell adapters are passed to the `AgentHarness` constructor via `environment` and exposed as `harness.fs` / `harness.shell`; they are not part of `AgentConfig` itself.
 
 ```ts
 declare interface AgentConfigShape<
@@ -245,8 +246,7 @@ declare interface AgentConfigShape<
   storage?: StorageAdapter;
   hooks?: AgentHooks;
   params: TParams;
-  itemSchemas?: unknown;
-  strictItemSchemas?: boolean;
+  itemSchemas?: { schemas?: unknown; strict?: boolean };
   projection?: ProjectionPolicy;
   forceAtomicRecall?: boolean;
   contextCache?: unknown;
@@ -259,9 +259,8 @@ declare interface AgentConfigShape<
 | `storage` | `StorageAdapter` | no | Storage backend for context persistence. Defaults to an in-memory adapter. |
 | `hooks` | `AgentHooks` | no | Before/after step hooks. |
 | `params` | `TParams` | yes | Arbitrary key-value parameters available to every step and tool via `ctx.harness.config.params`. |
-| `itemSchemas` | `ItemSchemaExtensions` | no | Harness-wide item-schema extensions used to validate emitted and returned items. Global by design; tool-contributed `toolResults` schemas are owner-scoped to each tool's own result items. Extension schemas are gates, not normalizers — the original item is returned on match. Mismatches raise `NoeticError` kind `item_schema_mismatch`. |
-| `strictItemSchemas` | `boolean` | no | Whether unknown extension item types must match a registered schema. Defaults to `true`. |
-| `projection` | `ProjectionPolicy` | no | Default projection policy for all LLM steps. Individual steps override it via `step.projection`. |
+| `itemSchemas` | `ItemSchemaConfig` | no | Item schema extensions and validation strictness: `{ schemas?: ItemSchemaExtensions, strict?: boolean }`. `schemas` is global by design; tool-contributed `toolResults` schemas are owner-scoped to each tool's own result items. Extension schemas are gates, not normalizers — the original item is returned on match. Mismatches raise `NoeticError` kind `item_schema_mismatch`. `strict` (default `true`) controls whether unknown extension item types must match a registered schema. |
+| `projection` | `ProjectionPolicy` | no | Default projection policy for all callModel steps. Individual steps override it via `step.projection`. |
 | `forceAtomicRecall` | `boolean` | no | Recall every layer atomically regardless of its `recallMode`, disabling cached/eventual recall. |
 | `contextCache` | [`ContextCacheConfig`](/docs/framework/api/context-layer-types#contextcacheconfig) | no | Tuning for prompt-cache anchoring. On by default; pass `{ enabled: false }` to render every layer before history as it did before bands existed. |
 

@@ -8,7 +8,7 @@ surfaces that compose but adopt independently:
 
 1. **Transport** — an OpenUI-speaking server boundary around `AgentHarness`, so
    OpenUI's own client stack (`@openuidev/react-ui`) talks to a Noetic agent.
-2. **Model-authored UI** — an output codec on `step.llm` that parses streamed
+2. **Model-authored UI** — an output codec on `callModel` that parses streamed
    OpenUI Lang, paired with a context layer that owns the resulting UI state.
 3. **Tool-authored UI** — a per-tool declaration of programmatic render
    functions, so tool calls and results carry their own UI fragments.
@@ -27,7 +27,7 @@ core ──→ types            (core never imports openui)
 ```
 
 - **`@noetic-tools/types`** — owns the two dialect-agnostic contracts:
-  `OutputCodec` (generalizing `StepLLM.output`) and `UiFragment` /
+  `OutputCodec` (generalizing `StepCallModel.output`) and `UiFragment` /
   `ToolUiDeclaration` (on `Tool`). Neither mentions OpenUI; both are string- and
   schema-shaped so `types` stays a dependency leaf.
 - **`@noetic-tools/openui`** — everything OpenUI-specific: the `openUi()` output
@@ -42,17 +42,17 @@ core ──→ types            (core never imports openui)
 `@noetic-tools/core` imports only the contracts from `@noetic-tools/types` and
 resolves codec/library instances from the step or the hydration registry. No
 OpenUI code enters core's dependency graph — the same decoupling invariant as
-sub-harnesses (`27-sub-harness-steps`), enforced by `.sentrux/rules.toml`
+the ACP client (`27-acp-agent-steps`), enforced by `.sentrux/rules.toml`
 (`core → openui` forbidden, `context → openui` forbidden).
 
 ## Contracts in `types`
 
 ### `OutputCodec`
 
-`StepLLM.output` accepts a Zod schema or a codec:
+`StepCallModel.output` accepts a Zod schema or a codec:
 
 ```ts
-interface StepLLM<TContext, _I, O> {
+interface StepCallModel<TContext, _I, O> {
   // ...
   output?: ZodType<O> | OutputCodec<O>;
 }
@@ -124,7 +124,7 @@ import { openUi, createLibrary, defineComponent } from '@noetic-tools/openui';
 
 const lib = createLibrary([defineComponent(/* … */)]);
 
-const dashboard = step.llm({
+const dashboard = callModel({
   id: 'dashboard',
   model: 'claude-sonnet-5',
   tools: [salesTool],
@@ -150,7 +150,7 @@ one registry, so data fetches execute as ordinary tool executions with full
 
 ## The `openUiSurface()` context layer
 
-The layer is the server-side owner of UI state, modeled on `durableTaskState`
+The layer is the server-side owner of UI state, modeled on `taskState`
 (thread-scoped durable state rendered into the View) and `steering`
 (enforcement hooks).
 
@@ -181,7 +181,7 @@ function openUiSurface(config: { library: UiLibrary }): ContextLayer<OpenUiSurfa
 | Property | Value |
 |----------|-------|
 | **id** | `'openui-surface'` |
-| **slot** | `Slot.WORKING_MEMORY + 20` (120) |
+| **slot** | `Slot.SCRATCHPAD + 20` (120) |
 | **scope** | `'thread'` |
 | **budget** | `{ min: 150, max: 1200 }` |
 | **recallMode** | `'atomic'` |
@@ -202,7 +202,7 @@ function openUiSurface(config: { library: UiLibrary }): ContextLayer<OpenUiSurfa
 - `recall`: renders a budget-trimmed `<ui_surface>` block — mounted components,
   current `vars`, filled/submitted forms, fresh query results. The raw document
   stays in state; the View gets a summary (same render-and-trim discipline as
-  `durableTaskState`).
+  `taskState`).
 - `projectHistory`: collapses superseded OpenUI Lang output in history to a
   one-line placeholder (`[rendered ui v3 — superseded]`). The current surface is
   already in the recall block; keeping every prior render verbatim would pay
@@ -245,7 +245,7 @@ import { ui } from '@noetic-tools/openui';
 
 const checkout = loop({
   id: 'checkout',
-  steps: [step.llm({ id: 'render', model, tools: [quoteShipping], output: openUi(lib) })],
+  steps: [callModel({ id: 'render', model, tools: [quoteShipping], output: openUi(lib) })],
   until: ui.submitted(surface, 'checkout-form'), // reads the surface layer's live state
 });
 ```
@@ -319,7 +319,7 @@ existing Noetic agent requires no changes to that agent's steps.
 ## Event flow
 
 ```
-agent turn:   step.llm ──deltas──▶ openUi codec ──openui.node/state/query──▶ transport ──▶ client
+agent turn:   callModel ──deltas──▶ openUi codec ──openui.node/state/query──▶ transport ──▶ client
                                         │
                               afterModelCall: validate + fold into surface, version++
                                         │
@@ -332,22 +332,22 @@ client event: <AgentInterface> ──▶ transport ──▶ ui-event item ─�
               reduce into vars/interactions, drop keystroke noise, immediate re-render
                                         │
               next recall(): <ui_surface> block ──▶ model sees current UI
-              until/branch predicates: getLayerState(executionId, 'openui-surface')
+              until/conditional predicates: getLayerState(executionId, 'openui-surface')
 
 reconnect:    client ──▶ transport ──▶ {document, vars, version} snapshot ──▶ rehydrate
 ```
 
 ## JSON workflow runtime
 
-An `llm` node opts into the codec by reference; the hydrator resolves the
+A `callModel` node opts into the codec by reference; the hydrator resolves the
 library from the workflow's `HydrationContext.uiLibraries` registry (the same
-registry-resolution pattern sub-harness nodes use for adapters). A codec is a
+registry-resolution pattern `acp-agent` nodes use for adapters). A codec is a
 runtime object, not JSON-expressible, so the node carries a *reference* and the
 caller — who has `@noetic-tools/openui` — supplies the live codec:
 
 ```json
 {
-  "kind": "llm",
+  "kind": "callModel",
   "id": "dashboard",
   "model": "claude-sonnet-5",
   "instructions": "Render a sales dashboard",

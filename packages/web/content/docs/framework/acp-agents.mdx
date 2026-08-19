@@ -1,0 +1,611 @@
+---
+title: ACP Agent Steps
+description: Run any coding agent that speaks the Agent Client Protocol — Claude Code, Codex, Gemini CLI — as a Noetic step.
+---
+
+## Quick Example
+
+An ACP step delegates a turn to an external coding agent, exactly the way [`callModel`](/docs/framework/steps) delegates a turn to a language model. One builder covers every agent; the agent itself is an adapter you pass in:
+
+```ts
+import { AgentHarness, type ContextData, step } from '@noetic-tools/core';
+import { claudeCode } from '@noetic-tools/acp';
+
+const review = step.acpAgent<ContextData, string, string>({
+  id: 'review',
+  agent: claudeCode(),
+  prompt: 'Review the working tree and summarize the risks',
+  permissions: { default: 'deny', allow: [{ kind: 'read' }] },
+});
+
+// `run` returns the step's output; `execute` starts a run and reports through
+// the harness streams instead.
+const harness = new AgentHarness({ name: 'reviewer', params: {} });
+const summary = await harness.run(review, 'go', harness.createContext());
+```
+
+The integration is the [Agent Client Protocol](https://agentclientprotocol.com/) (ACP), a JSON-RPC 2.0 standard in which **Noetic is the Client and the coding agent is the Agent**.
+
+Because every ACP agent is a uniform protocol peer, there is no vendor SDK per agent and no closed list of supported agents.
+
+<Callout>
+Coming from `@noetic-tools/sub-harness-*`? Those packages are deprecated — see [Migrating from Sub-Harnesses](/docs/framework/migrating-from-sub-harnesses).
+</Callout>
+
+## Why a protocol instead of an SDK per agent
+
+ACP inverts the usual control flow. The agent does not reach for the machine itself — it asks the client to read files, write files, and run terminals, and it asks permission before running a tool.
+
+That means **a sub-agent's file and shell access goes through Noetic's own adapters** instead of around them through a vendor SDK — so a host that supplies an in-memory or virtual `FsAdapter` genuinely constrains what the agent can reach, and the client becomes the one place a boundary can be enforced at all. Noetic enforces one by default: see [Filesystem confinement](#filesystem-confinement).
+
+It also brings capabilities a hand-rolled adapter has no way to express: permission requests, plans, session modes, slash commands, MCP server passthrough, multimodal prompts, typed stop reasons, and real cancellation.
+
+## Agents
+
+`@noetic-tools/acp` ships presets for the agents that speak ACP today. Each is only a launch recipe — which binary to run, with which flags:
+
+```ts
+import { claudeCode, codex, gemini, opencode, pi, customAcpAgent } from '@noetic-tools/acp';
+
+claudeCode();                       // npx @zed-industries/claude-code-acp
+codex();                            // npx @zed-industries/codex-acp
+gemini();                           // gemini --experimental-acp
+opencode();                         // opencode acp  (native ACP)
+pi();                               // npx pi-acp    (community adapter)
+
+customAcpAgent({                    // any other ACP-speaking binary
+  agentId: 'my-agent',
+  command: 'my-acp-agent',
+  args: ['--stdio'],
+});
+```
+
+Every preset accepts `command`, `args`, and `env` overrides, plus a `transport` for reaching an agent that is not a local child process.
+
+## Filesystem confinement
+
+ACP puts boundary enforcement on the **client**: the agent asks for a path, and the client decides whether it may have it. Nothing in the protocol constrains what it asks for.
+
+By default an agent reaches the session working directory and nothing else. Absolute paths outside it, `..` traversal out of it, and relative paths (which the spec forbids on the wire) are all refused with a JSON-RPC invalid-params error before they reach your `FsAdapter`.
+
+```ts
+import { step } from '@noetic-tools/core';
+import { claudeCode } from '@noetic-tools/acp';
+
+step.acpAgent({
+  id: 'review',
+  agent: claudeCode(),
+  prompt: 'Review the diff',
+  cwd: '/srv/project',
+  clientCapabilities: {
+    // Reachable in addition to cwd — a monorepo sibling, a shared cache.
+    additionalDirectories: ['/srv/shared-cache'],
+  },
+});
+```
+
+Set `allowAnyPath: true` to lift it entirely, when you genuinely want an unconfined agent.
+
+<Callout type="warn">
+**A `permissions` policy does not do this job.** It answers `session/request_permission`, which covers the agent's own *tool calls*. `fs/read_text_file`, `fs/write_text_file`, and `terminal/*` are client methods the agent invokes on you directly — an agent that simply never asks is never gated by a policy, however strict. Path confinement and `clientCapabilities` are the controls that bind.
+</Callout>
+
+### Seeing what the agent touched
+
+Every `fs/*` and `terminal/*` call the agent makes is emitted as an `acp_client_activity` framework event — allowed and refused alike:
+
+```ts
+import type { AgentHarness } from '@noetic-tools/core';
+
+declare const harness: AgentHarness;
+
+for await (const ev of harness.getFullStream()) {
+  if (ev.source === 'framework' && ev.type.endsWith(':acp_client_activity')) {
+    console.log(ev.data.allowed ? 'ok ' : 'REFUSED', ev.data.method, ev.data.path ?? ev.data.command);
+  }
+}
+```
+
+This is an *observed* record, not the agent's account of itself. A `tool_call` update says what the agent claims it did; this says what it actually asked the client to do — including the reaches that were turned down, which is usually the more interesting line in the log.
+
+It covers the client methods only. Work the agent does entirely inside its own process, and anything a terminal command does after it starts, is not visible here.
+
+### What confinement does not stop
+
+- **Symlinks inside the workspace pointing out of it.** The check is lexical and does not touch the filesystem. If that matters, supply an `FsAdapter` that resolves real paths and re-checks.
+- **What a terminal command does once running.** `terminal/create` confines the *starting* `cwd`, but a shell can `cd` anywhere the host user can. The only hard boundary for shell access is withdrawing it: `clientCapabilities: { terminal: false }`.
+- **Anything, if you pass `allowAnyPath: true`.**
+
+Confinement narrows what a *cooperative-but-careless* agent reaches. It is not a security sandbox against a hostile one — for that, run the agent in a real sandbox (container, VM) and point a transport at it.
+
+## Permissions
+
+ACP requires the client to answer `session/request_permission` before the agent runs a tool. Noetic resolves it in three tiers — the first decisive one wins:
+
+1. **The step's `permissions` policy.** Declarative rules matched on the ACP tool `kind` and `title`. `deny` is evaluated before `allow`, so an explicit refusal always beats a broad grant.
+2. **Steering.** The same `beforeToolCall` pipeline that governs first-party tool calls, so one rule set covers both. Steering acts as a **veto**: only a non-allow decision is acted on, because `allow` is also what an empty rule set returns.
+3. **`onPermissionRequest`.** An async handler — the human-in-the-loop hatch that a synchronous predicate cannot express.
+
+When all three abstain, the policy `default` applies. That default is **`deny`**: an unattended agent should not gain blanket approval by omission.
+
+```ts
+import { step } from '@noetic-tools/core';
+import { claudeCode } from '@noetic-tools/acp';
+
+declare const askAHuman: (title: string) => Promise<boolean>;
+
+step.acpAgent({
+  id: 'guarded',
+  agent: claudeCode(),
+  prompt: 'Fix the failing test',
+  permissions: {
+    default: 'deny',
+    allow: [{ kind: 'read' }, { kind: 'edit' }],
+    deny: [{ title: 'rm -rf' }],
+    persist: true, // prefer allow_always / reject_always when offered
+  },
+  async onPermissionRequest(request) {
+    return { decision: (await askAHuman(request.toolCall.title ?? '')) ? 'allow' : 'deny' };
+  },
+});
+```
+
+`title` accepts a case-insensitive substring or a `RegExp`. The resolved decision is translated into one of the options the agent actually offered; if none matches, the request is cancelled rather than answered with an option meaning something else.
+
+## Client capabilities
+
+Noetic serves the agent's requests from the execution context's adapters:
+
+| ACP client method | Backed by |
+|---|---|
+| `fs/read_text_file` | `ctx.fs`, honouring the spec's 1-indexed `line` / `limit` window |
+| `fs/write_text_file` | `ctx.fs`, creating parent directories |
+| `terminal/create`, `output`, `wait_for_exit`, `kill`, `release` | `ctx.shell`, with an output byte cap and per-terminal cancellation |
+| `session/request_permission` | The resolver above |
+
+Withdraw one and the agent is told the method does not exist, so it never attempts the work:
+
+```ts
+import { step } from '@noetic-tools/core';
+import { claudeCode } from '@noetic-tools/acp';
+
+step.acpAgent({
+  id: 'read-only-review',
+  agent: claudeCode(),
+  prompt: 'Review, do not change anything',
+  clientCapabilities: { writeTextFile: false, terminal: false },
+});
+```
+
+## Prompt content
+
+`prompt` carries plain text. `content` carries the full ACP content-block array — images, audio, resource links, embedded context — appended after it:
+
+```ts
+import { step } from '@noetic-tools/core';
+import { gemini } from '@noetic-tools/acp';
+
+declare const pngBase64: string;
+
+step.acpAgent({
+  id: 'describe',
+  agent: gemini(),
+  prompt: 'What is wrong with this screenshot?',
+  content: [{ type: 'image', data: pngBase64, mimeType: 'image/png' }],
+});
+```
+
+The specification requires clients to restrict content to what the agent advertised during `initialize`, so sending an image to an agent that did not advertise image support throws `AcpCapabilityError` **before** anything reaches the wire.
+
+An empty `prompt` means "use the step's runtime input as the prompt".
+
+## Modes, models, and MCP servers
+
+```ts
+import { step } from '@noetic-tools/core';
+import { claudeCode } from '@noetic-tools/acp';
+
+step.acpAgent({
+  id: 'plan-first',
+  agent: claudeCode(),
+  prompt: 'Design the migration',
+  mode: 'plan',                     // session/set_mode before the turn
+  model: 'claude-opus-4-8',         // session/set_model before the turn
+  mcpServers: [
+    { name: 'db', command: 'mcp-db', args: [], env: [] },
+  ],
+});
+```
+
+Each is checked against what the agent advertised. Asking for a mode from an agent that reports none, or an HTTP MCP server from an agent without `mcpCapabilities.http`, throws `AcpCapabilityError` rather than failing opaquely mid-turn.
+
+## Conversation history
+
+An ACP session owns its history on the agent side, but a freshly opened session knows nothing about the Noetic steps that ran before it. Before appending the turn's prompt, the runtime captures the prior items from `ctx.itemLog` and folds them into the first prompt of a **fresh** session as a transcript preamble — so a coding agent running after a chain of `callModel` steps understands what was already established. A reused session is not re-seeded.
+
+## Sessions and lifetime
+
+A connection owns a live agent process, so **keeping one is never inferred**. `session.keepAlive` names the scope, and it defaults to closing with the step:
+
+| `keepAlive` | The connection is |
+|---|---|
+| `'step'` (default) | closed when the step finishes |
+| `'run'` | kept for the rest of the root run, then closed for you |
+| `'harness'` | kept until you call `harness.closeAcpSessions()` — nothing closes it for you |
+
+`session.reuse` shares a kept connection under an id, so later steps take their turns against the same agent:
+
+```ts
+import { step } from '@noetic-tools/core';
+import { claudeCode } from '@noetic-tools/acp';
+
+const investigate = step.acpAgent({
+  id: 'investigate',
+  agent: claudeCode(),
+  prompt: 'Find the root cause of the failing auth test. Do not change code yet.',
+  permissions: { allow: [{ kind: 'read' }] },
+  session: { reuse: 'bugfix', keepAlive: 'run' },
+});
+
+const fix = step.acpAgent({
+  id: 'fix',
+  agent: claudeCode(),
+  // Same key → same session, so the agent still has its findings in context.
+  prompt: 'Now apply the minimal fix for the root cause you found.',
+  permissions: { allow: [{ kind: 'read' }, { kind: 'edit' }] },
+  session: { reuse: 'bugfix', keepAlive: 'run' },
+});
+```
+
+`reuse` requires `keepAlive: 'run'` or `'harness'` — a connection closed at the end of its step has nothing left to share — so a reuse key without a scope throws `ACP_REUSE_WITHOUT_KEEPALIVE` rather than quietly extending the lifetime on your behalf.
+
+### Keeping an agent warm across runs
+
+`keepAlive: 'harness'` opts out of automatic collection entirely, for a long-lived harness that wants one warm coding agent across several turns of a conversation:
+
+```ts
+import { AgentHarness, step } from '@noetic-tools/core';
+import { claudeCode } from '@noetic-tools/acp';
+
+declare const harness: AgentHarness;
+
+// An empty `prompt` means "use whatever input the step was given", so each
+// turn of the conversation reaches the same warm agent.
+const assistant = step.acpAgent({
+  id: 'assistant',
+  agent: claudeCode(),
+  prompt: '',
+  session: { reuse: 'assistant', keepAlive: 'harness' },
+});
+
+try {
+  // …many harness.execute() calls later:
+} finally {
+  await harness.closeAcpSessions();
+}
+```
+
+Nothing closes a `'harness'` session for you. An undisposed connection keeps its agent process running, which keeps your host process from exiting — so own it deliberately, ideally in a `finally`.
+
+Two more things to know about sharing a session:
+
+- **Each step gets its own policy.** The permission policy, steering hook, handler, and event stream are rebound before every turn, so the pattern above really works: `fix`'s broader permissions do apply, even though `investigate` opened the connection.
+- **The agent and `clientCapabilities` are fixed per connection.** ACP negotiates capabilities once, and a connection speaks to one agent. A step joining an existing session with a different agent or different `clientCapabilities` throws `ACP_SESSION_AGENT_CONFLICT` / `ACP_SESSION_CAPABILITY_CONFLICT` rather than silently getting something other than it asked for.
+
+`session.load` resumes an existing ACP session id instead of creating a new one, for agents that advertise `loadSession`.
+
+## Stop reasons
+
+| Stop reason | Result |
+|---|---|
+| `end_turn` | Normal return |
+| `max_tokens`, `max_turn_requests` | Normal return; recorded on `ctx.lastStepMeta` |
+| `refusal` | Throws a `NoeticError` of kind `model_refused` |
+| `cancelled` | Throws a `NoeticError` of kind `cancelled` |
+
+Aborting the step's context sends `session/cancel`. Per the specification the agent still answers the original prompt with the `cancelled` stop reason, which becomes the typed error.
+
+## Streaming
+
+Everything the agent emits reaches the harness's event surface, so ACP output streams exactly like a `callModel` step's:
+
+```ts
+import type { AgentHarness } from '@noetic-tools/core';
+
+declare const harness: AgentHarness;
+
+for await (const chunk of harness.getTextStream()) {
+  process.stdout.write(chunk);
+}
+```
+
+| ACP update | Surfaces as |
+|---|---|
+| `agent_message_chunk` | `getTextStream()`, `getFullStream()` |
+| `agent_thought_chunk` | `getReasoningStream()` |
+| `tool_call` | `getItemStream()` as a function call |
+| `plan`, `available_commands_update`, `current_mode_update`, `tool_call_update` | `getFullStream()` as `acp.<update>` |
+
+Every notification is *also* emitted raw as an `acp_event` framework event. A turn always closes its bracket: `response.created` on the way in, `response.completed` on the way out — with the stop reason on success, an `error` reason when the turn throws. An agent that returns a result without streaming has its output synthesized rather than silently swallowed. `emit: false` on the step suppresses all of it.
+
+## Structured output
+
+```ts
+import { step } from '@noetic-tools/core';
+import { claudeCode } from '@noetic-tools/acp';
+import { z } from 'zod';
+
+const Review = z.object({ risks: z.array(z.string()), verdict: z.enum(['ship', 'hold']) });
+
+const review = step.acpAgent({
+  id: 'review',
+  agent: claudeCode(),
+  prompt: 'Review the diff. Reply with JSON matching the schema.',
+  output: Review,
+});
+```
+
+The assistant text is JSON-parsed and validated, raising `model_parse_error` on a mismatch — identical to `callModel`.
+
+## Letting the model delegate
+
+A step decides *for* the model when the agent runs. `acpAgentTool()` hands that decision to the model instead, by wrapping the agent as a tool it can call:
+
+```ts
+import { acpAgentTool, callModel } from '@noetic-tools/core';
+import { claudeCode } from '@noetic-tools/acp';
+
+callModel({
+  id: 'plan',
+  model: 'anthropic/claude-sonnet-4-20250514',
+  instructions: 'Plan the work. Delegate implementation to the coding agent.',
+  tools: [
+    acpAgentTool({
+      agent: claudeCode(),
+      permissions: { allow: [{ kind: 'read' }, { kind: 'edit' }] },
+      // Lets the model hold a conversation with the agent across calls
+      // instead of starting cold each time.
+      session: { reuse: 'delegate', keepAlive: 'run' },
+    }),
+  ],
+});
+```
+
+The tool takes `{ prompt }` and returns `{ text }`, and is named `delegate_to_<agentId>` unless you say otherwise. Override `description` to steer *when* the model delegates — that matters far more than the wording.
+
+Underneath it runs the same `step.acpAgent`, so the delegated turn lands in the same item log, usage totals, and event stream as any other step.
+
+## Letting a human decide
+
+A declarative policy can only answer what you told it in advance. When the decision belongs to a person, `askUserForPermission()` publishes the request on an external channel and waits for an answer:
+
+```ts
+import { step } from '@noetic-tools/core';
+import { askUserForPermission, claudeCode } from '@noetic-tools/acp';
+
+step.acpAgent({
+  id: 'review',
+  agent: claudeCode(),
+  prompt: 'Fix the failing test',
+  permissions: { default: 'deny' },            // policy abstains…
+  onPermissionRequest: askUserForPermission(), // …so the human decides
+});
+```
+
+Subscribe once per harness and answer:
+
+```ts
+import type { AgentHarness } from '@noetic-tools/core';
+import {
+  ACP_PERMISSION_SCOPE,
+  acpPermissionDecisions,
+  acpPermissionRequests,
+  resolveAcpPermission,
+} from '@noetic-tools/acp';
+
+declare const harness: AgentHarness;
+declare const showApprovalCard: (prompt: { title: string }) => Promise<string>;
+
+const decisions = harness.getChannelHandle(acpPermissionDecisions, ACP_PERMISSION_SCOPE);
+
+for await (const prompt of harness.getChannelStream(
+  acpPermissionRequests,
+  ACP_PERMISSION_SCOPE,
+)) {
+  // prompt.options are the agent's OWN options — present those, don't invent any.
+  const optionId = await showApprovalCard(prompt);
+  resolveAcpPermission(decisions, {
+    requestId: prompt.requestId,
+    decision: 'allow',
+    optionId,
+  });
+}
+```
+
+The prompt carries what a reviewer needs: `agentId`, `stepId`, `threadId`, the tool `title` and `kind`, the raw input, and the agent's own options.
+
+Subscribe **once** — requests are a queue, so a second subscriber would steal them. Decisions are a topic, broadcast to every waiting handler, each filtering for its own `requestId`. An unanswered prompt denies when it times out (5 minutes by default): waiting must never become approval. Override with `askUserForPermission({ timeout, onTimeout })`.
+
+## Inspecting and steering live sub-agents
+
+The harness exposes the connections it is holding, so a UI can show what is running and act on it:
+
+```ts
+import type { AgentHarness } from '@noetic-tools/core';
+
+declare const harness: AgentHarness;
+declare const key: string;
+
+harness.listAcpSessions();  // key, agentId, sessionId, mode, commands, keepAlive
+harness.getAcpSession(key);
+await harness.cancelAcpSession(key);  // session/cancel — the connection stays open
+await harness.closeAcpSessions();     // release everything held
+```
+
+This is read-and-interrupt only, on purpose. Turns are driven by steps, so nothing here starts work behind the runtime's back — a turn run outside a step would bypass the item log, usage accounting, and the event bridge. Send a follow-up with a step sharing the same `session.reuse` key.
+
+## JSON workflows
+
+The same agents are available in the [JSON runtime](/docs/framework/json-runtime) as a single node kind. The `agent` field is a registry key, so supporting a new agent needs another registry entry, not a schema change:
+
+```json
+{
+  "kind": "acp-agent",
+  "id": "review",
+  "agent": "claude-code",
+  "prompt": "Review the diff",
+  "mode": "plan",
+  "permissions": { "default": "deny", "allow": [{ "kind": "read" }] }
+}
+```
+
+```ts
+import { hydrateWorkflow, type ExecuteStepFn, type WorkflowDocument } from '@noetic-tools/core';
+import { claudeCode, codex, createAcpAgentRegistry } from '@noetic-tools/acp';
+
+declare const document: WorkflowDocument;
+declare const executeStep: ExecuteStepFn;
+
+const hydrated = hydrateWorkflow(document, {
+  tools: new Map(),
+  executeStep,
+  acpAgents: createAcpAgentRegistry(claudeCode(), codex()),
+});
+```
+
+A node naming an unregistered agent fails hydration with `UNKNOWN_ACP_AGENT_REFERENCE`.
+
+## Testing an ACP step
+
+`loopbackTransport` stands an in-process agent on the far end of a real protocol connection — full handshake, sessions, notifications, and client callbacks, with no process to spawn:
+
+```ts
+import { defineAcpAgent, loopbackTransport } from '@noetic-tools/acp';
+
+const fake = defineAcpAgent({
+  agentId: 'fake',
+  transport: loopbackTransport((conn) => ({
+    async initialize(params) {
+      return { protocolVersion: params.protocolVersion, agentCapabilities: {}, authMethods: [] };
+    },
+    async newSession() {
+      return { sessionId: 'session-1' };
+    },
+    async authenticate() {
+      return {};
+    },
+    async prompt(params) {
+      await conn.sessionUpdate({
+        sessionId: params.sessionId,
+        update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'done' } },
+      });
+      return { stopReason: 'end_turn' };
+    },
+    async cancel() {},
+  })),
+});
+```
+
+Because the wire protocol really runs, this catches contract mistakes a hand-rolled stub would hide.
+
+## Custom transports
+
+An agent is reachable over anything that yields a duplex byte stream. The default is a local child process over stdio; supply `transport` for anything else — a socket, a sandbox bridge, a remote host:
+
+```ts
+import { defineAcpAgent } from '@noetic-tools/acp';
+
+declare const readable: ReadableStream<Uint8Array>;
+declare const writable: WritableStream<Uint8Array>;
+declare const socket: { close: () => void };
+
+const remote = defineAcpAgent({
+  agentId: 'remote-agent',
+  transport: async () => ({
+    readable,
+    writable,
+    close: async () => {
+      socket.close();
+    },
+  }),
+});
+```
+
+The Node stdio transport lives at `@noetic-tools/acp/stdio`. The main entry has no static `node:*` import and never loads `child_process` unless a stdio connection is opened — but that is a runtime property: the dynamic `import('./stdio')` uses a static specifier, so a bundler still pulls the module in. A browser build should alias or externalise `@noetic-tools/acp/stdio`.
+
+## API reference
+
+Everything `@noetic-tools/acp` exports. Internal helpers — the item builders, turn accumulator, terminal registry, permission engine — are deliberately not exported; they are implementation detail and free to change.
+
+### Agents
+
+| Export | What it is |
+|---|---|
+| `claudeCode(opts?)` | Preset for `@zed-industries/claude-code-acp`. |
+| `codex(opts?)` | Preset for `@zed-industries/codex-acp`. |
+| `gemini(opts?)` | Preset for Gemini CLI's native ACP mode. |
+| `opencode(opts?)` | Preset for opencode's native `opencode acp` command. |
+| `pi(opts?)` | Preset for pi, via the community `pi-acp` adapter. |
+| `customAcpAgent(opts)` | Any other ACP-speaking binary. Needs a `command` or a `transport`. |
+| `AcpPresetOptions` | `command` / `args` / `env` / `transport` overrides accepted by every preset. |
+| `AcpProcessSpec` | How to launch an agent as a local child process. |
+| `defineAcpAgent(opts)` | Build an `AcpAgent` from a transport factory — the constructor behind every preset. |
+| `DefineAcpAgentOptions` | `agentId`, `transport`, `env`. |
+| `createAcpAgentRegistry(...agents)` | Build the `Map<string, AcpAgent>` a JSON workflow hydrates against. |
+| `AcpAgentRegistry` | That map's type. |
+
+### Transports
+
+| Export | What it is |
+|---|---|
+| `loopbackTransport(toAgent)` | Stands an in-process agent on the far end of a real protocol connection. The recommended way to test an ACP step. |
+| `createAcpLoopbackPair()` | The two raw ends, when you want to drive both sides yourself. |
+| `AcpLoopbackPair` | That pair's type. |
+| `stdioAcpTransport(spec)` | Node stdio over a child process. Lives at `@noetic-tools/acp/stdio`. |
+
+### Human-in-the-loop permissions
+
+| Export | What it is |
+|---|---|
+| `askUserForPermission(opts?)` | Builds an `onPermissionRequest` handler that asks a human over channels. |
+| `AskUserForPermissionOptions` | `timeout` (default 5 min) and `onTimeout` (default deny). |
+| `acpPermissionRequests` | Queue channel carrying prompts out. Subscribe **once** per harness. |
+| `acpPermissionDecisions` | Topic channel carrying answers back, filtered by `requestId`. |
+| `resolveAcpPermission(handle, reply)` | Answer a prompt from outside the execution. |
+| `ACP_PERMISSION_SCOPE` | Harness-lifetime scope id for the subscription and write handle. |
+| `AcpPermissionPrompt` / `Schema` | What a reviewer receives: agent, step, thread, tool title/kind, raw input, the agent's own options. |
+| `AcpPermissionReply` / `Schema` | The answer: `decision`, optional `optionId` and `reason`. |
+
+### Path confinement
+
+| Export | What it is |
+|---|---|
+| `isAbsolutePath(path)` | The spec requires absolute paths; this is the check the client applies. |
+| `normalizePath(path)` | Lexical normalisation — collapses `.`, `..`, duplicate separators. |
+| `isWithinRoots(path, roots)` | Whether a path is inside the allowed roots. |
+
+Exported so a host writing a constraining `FsAdapter` can apply the same rules the client does — including resolving symlinks, which the client's lexical check deliberately does not.
+
+### Advanced: building a client by hand
+
+For embedding an ACP connection outside a Noetic step — a custom runtime, a bridge, a test harness. `step.acpAgent` is the supported path; these are the pieces underneath it.
+
+| Export | What it is |
+|---|---|
+| `openAcpConnection(opts)` | Open a transport, negotiate `initialize`, return the connection. |
+| `OpenAcpConnectionOptions` | `agentId`, `transport`, `host`, `signal`. |
+| `NoeticAcpClient` | The ACP `Client` implementation, backed by an `AcpClientHost`. |
+| `NoeticAcpClientOptions` | `host` plus the notification sink. |
+
+### From `@noetic-tools/core`
+
+| Export | What it is |
+|---|---|
+| `step.acpAgent(opts)` | The step. |
+| `acpAgentTool(opts)` | The same agent as a tool a model can call. |
+| `harness.listAcpSessions()` | Live sub-agents: handle, agent, session, mode, commands, keep-alive. |
+| `harness.getAcpSession(key)` | One live connection + session. |
+| `harness.cancelAcpSession(key)` | `session/cancel` — the connection stays open. |
+| `harness.closeAcpSessions()` | Release everything held. Idempotent. |
+
+The contract types (`AcpAgent`, `AcpSession`, `AcpClientHost`, `AcpTransport`, the permission and protocol types) live in `@noetic-tools/types` and are re-exported from core.

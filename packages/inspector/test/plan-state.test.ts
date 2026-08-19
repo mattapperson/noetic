@@ -8,7 +8,7 @@ import { readPlanState } from '../lib/plan-state';
 const GOOD: WorkflowDocument = {
   version: 1,
   root: {
-    kind: 'llm',
+    kind: 'callModel',
     id: 'leaf',
     instructions: 'do the thing',
   },

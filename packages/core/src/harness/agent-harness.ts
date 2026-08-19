@@ -1,6 +1,7 @@
 import { frameworkCast, ItemSchemaRegistry, NoeticConfigError } from '@noetic-tools/types';
 import { SpanImpl } from '../observability/span-impl';
 import { NoopExporter } from '../observability/trace-exporter';
+import { AcpSessionStore } from '../runtime/acp-session-store';
 import {
   createInMemoryFsAdapter,
   createInMemoryShellAdapter,
@@ -64,6 +65,8 @@ import {
   snapshotCwdState,
 } from './deps/runtime';
 import type {
+  AcpLiveSession,
+  AcpSessionInfo,
   AgentConfig,
   AgentHarnessContract,
   AgentHooks,
@@ -86,12 +89,13 @@ import type {
   HarnessResponse,
   HarnessStatus,
   Item,
-  ItemSchemaExtensions,
+  ItemSchemaConfig,
   LLMResponse,
   LlmProviderConfig,
   ProjectionPolicy,
   RecallLayerOutput,
   SessionScope,
+  SessionUsage,
   ShellAdapter,
   Span,
   SteeringDecision,
@@ -99,7 +103,6 @@ import type {
   StorageAdapter,
   StreamEvent,
   StreamingItem,
-  SubHarnessSession,
   SubprocessAdapter,
   Tool,
   TraceExporter,
@@ -111,35 +114,21 @@ import { AgentHarnessModelCaller } from './model-call';
 
 export { createStreamIdleWatchdog } from './model-call';
 
-import { resolveContextOption } from '../builders/context-option';
 import { buildItemSchemaRegistry } from './model-schema';
 
 //#region Types
 
-interface AgentHarnessOpts<TParams extends Record<string, unknown> = Record<string, unknown>> {
-  name: string;
-  initialStep?: Step<ContextData, string, string>;
-  /** Default context layers applied to every context created via `createContext()` / `execute()`. */
-  context?: ContextLayer[];
-  /** @deprecated Renamed to `context`. */
-  memory?: ContextLayer[];
-  storage?: StorageAdapter;
-  hooks?: AgentHooks;
+/**
+ * Storage-scoped environment configuration for `AgentHarness`.
+ *
+ * @public
+ */
+export interface StorageEnvironmentConfig {
   /**
-   * Harness-wide tool pool. Merged (identity-deduplicated) with tools
-   * collected from `initialStep` to form every context's `unifiedTools`.
-   * Use this when the workflow step tree is static and tools are supplied
-   * per harness instance rather than baked into individual `step.llm` calls.
+   * Key-value storage adapter backing context-layer persistence and the
+   * step-completion ledger. Defaults to an in-memory adapter.
    */
-  tools?: Tool[];
-  params: TParams;
-  paramsSchema?: ZodType<TParams>;
-  /** Filesystem adapter. Defaults to local node:fs when not provided. */
-  fs?: FsAdapter;
-  /** Shell adapter. Defaults to local sh when not provided. */
-  shell?: ShellAdapter;
-  /** Subprocess adapter. Defaults to an in-memory, same-process adapter. */
-  subprocess?: SubprocessAdapter;
+  adapter?: StorageAdapter;
   /**
    * Checkpoint store used by `harness.checkpoint(ctx)` / `harness.restore()`.
    * When absent, checkpoint/restore are no-ops — a zero-config harness keeps
@@ -147,6 +136,8 @@ interface AgentHarnessOpts<TParams extends Record<string, unknown> = Record<stri
    * to enable durable execution.
    */
   checkpointStore?: CheckpointStore;
+  /** Layer-state store override. Defaults to an in-memory store. */
+  layerStateStore?: LayerStateStore;
   /**
    * Bounds on the step-completion ledger that backs step-level resume. Only meaningful
    * alongside a `checkpointStore`. Defaults to `DEFAULT_STEP_LEDGER_RETENTION` — 128 KiB
@@ -155,11 +146,47 @@ interface AgentHarnessOpts<TParams extends Record<string, unknown> = Record<stri
    * never correctness.
    */
   stepLedgerRetention?: StepLedgerRetention;
-  llm?: LlmProviderConfig;
-  /** Harness-wide item schema extensions. */
-  itemSchemas?: ItemSchemaExtensions;
-  /** Whether unknown extension item types must match a registered schema. Defaults to true. */
-  strictItemSchemas?: boolean;
+}
+
+/**
+ * Execution-environment configuration for `AgentHarness`: the storage,
+ * filesystem, shell, and subprocess surfaces the agent runs against.
+ *
+ * @public
+ */
+export interface AgentEnvironmentConfig {
+  /** Storage configuration: adapter, durability stores, ledger retention. */
+  storage?: StorageEnvironmentConfig;
+  /** Filesystem adapter. Defaults to an in-memory adapter. */
+  fs?: FsAdapter;
+  /** Shell adapter. Defaults to an in-memory adapter. */
+  shell?: ShellAdapter;
+  /** Subprocess adapter. Defaults to an in-memory, same-process adapter. */
+  subprocess?: SubprocessAdapter;
+}
+
+interface AgentHarnessOpts<TParams extends Record<string, unknown> = Record<string, unknown>> {
+  name: string;
+  /** Root step tree executed for every turn submitted via `execute()`. */
+  agentGraph?: Step<ContextData, string, string>;
+  /** Default context layers applied to every context created via `createContext()` / `execute()`. */
+  contextLayers?: ContextLayer[];
+  hooks?: AgentHooks;
+  /**
+   * Harness-wide tool pool. Merged (identity-deduplicated) with tools
+   * collected from `agentGraph` to form every context's `unifiedTools`.
+   * Use this when the workflow step tree is static and tools are supplied
+   * per harness instance rather than baked into individual `step.callModel` calls.
+   */
+  tools?: Tool[];
+  params: TParams;
+  paramsSchema?: ZodType<TParams>;
+  /** Execution environment: storage, filesystem, shell, subprocess. */
+  environment?: AgentEnvironmentConfig;
+  /** Default provider configuration for model calls made through this harness. */
+  callModelDefaults?: LlmProviderConfig;
+  /** Harness-wide item schema extensions and validation strictness. */
+  itemSchemas?: ItemSchemaConfig;
   /** Default projection policy for all LLM steps. Individual steps override via `step.projection`. */
   projection?: ProjectionPolicy;
   /** When true, every layer is recalled atomically regardless of its `recallMode`. */
@@ -167,15 +194,8 @@ interface AgentHarnessOpts<TParams extends Record<string, unknown> = Record<stri
   /** Tuning for prompt-cache anchoring. See `ContextCacheConfig` for the defaults. */
   contextCache?: ContextCacheConfig;
   traceExporter?: TraceExporter;
-  layerStateStore?: LayerStateStore;
   /** Default delivery mode for messages that don't specify one. Defaults to `next-turn`. */
   defaultDeliveryMode?: DeliveryMode;
-  /**
-   * Abort the in-flight model call if the provider stream emits no events for this
-   * many milliseconds. Defaults to `DEFAULT_STREAM_IDLE_TIMEOUT_MS` (120s).
-   * Pass `0` or a negative number to disable the watchdog.
-   */
-  streamIdleTimeoutMs?: number;
   /**
    * Initial working directory for the harness. Used as the seed value for the
    * shared `cwdState.cwd` on every Context this harness creates, including
@@ -404,7 +424,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
    * @internal
    */
   readonly stepLedgerRetention: Required<StepLedgerRetention>;
-  private readonly initialStep?: Step<ContextData, string, string>;
+  private readonly agentGraph?: Step<ContextData, string, string>;
   /** Harness-wide tool pool merged into every context's `unifiedTools`. */
   private readonly harnessTools: ReadonlyArray<Tool>;
   /** @internal Context layers configured for this harness. Exposed non-private
@@ -417,15 +437,60 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   private readonly rootRunDepth = new Map<string, number>();
   private readonly callModelOverride?: (request: CallModelRequest) => Promise<LLMResponse>;
   private readonly defaultDeliveryMode: DeliveryMode;
-  private readonly streamIdleTimeoutMs: number;
   private readonly sessions = new Map<string, Session>();
   /**
-   * @internal Cross-step harness sessions keyed by `step.session.reuse`, kept
-   * alive for the life of this harness so reused coding-agent sessions span
-   * multiple steps. Reached by the interpreter's harness handler via
-   * `frameworkCast`; do not access from outside core.
+   * @internal Live ACP connections. Reached by the interpreter via
+   * `frameworkCast`; use {@link listAcpSessions}, {@link getAcpSession},
+   * {@link cancelAcpSession}, and {@link closeAcpSessions} from outside core.
    */
-  readonly subHarnessSessions = new Map<string, SubHarnessSession>();
+  readonly acpSessions = new AcpSessionStore();
+
+  /**
+   * Snapshot of every live ACP sub-agent, for a UI that wants to show what is
+   * running and let a user act on it. Read-only: a session's turns are driven
+   * by steps, so nothing here can start work behind the runtime's back.
+   * @public
+   */
+  listAcpSessions(): AcpSessionInfo[] {
+    return this.acpSessions.list();
+  }
+
+  /**
+   * The live connection + session behind a handle from {@link listAcpSessions}
+   * (or a step's `session.reuse` key), or `undefined` when nothing matches.
+   * @public
+   */
+  getAcpSession(key: string): AcpLiveSession | undefined {
+    return this.acpSessions.get(key);
+  }
+
+  /**
+   * Interrupt whatever the sub-agent under `key` is doing, via `session/cancel`.
+   * The connection stays open and the turn still returns — with the `cancelled`
+   * stop reason, which the running step surfaces as a `cancelled` error.
+   * Returns false when nothing matches the key.
+   * @public
+   */
+  async cancelAcpSession(key: string): Promise<boolean> {
+    const entry = this.acpSessions.get(key);
+    if (!entry) {
+      return false;
+    }
+    await entry.session.cancel();
+    return true;
+  }
+
+  /**
+   * Close every ACP connection this harness still holds, whatever its
+   * keep-alive scope. A connection owns a live agent — usually a child process
+   * whose stdio keeps the event loop alive — so a `keepAlive: 'harness'`
+   * session must be closed by its owner or the host will not exit. Idempotent.
+   * @public
+   */
+  async closeAcpSessions(): Promise<void> {
+    await this.acpSessions.closeAll();
+  }
+
   readonly layerStateStore: LayerStateStore;
   /** Per-harness memoization cache for `recallMode: 'eventual'` layers. */
   readonly recallCache: RecallCache;
@@ -452,46 +517,48 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
 
   constructor(opts: AgentHarnessOpts<TParams>) {
     const validatedParams = opts.paramsSchema ? opts.paramsSchema.parse(opts.params) : opts.params;
+    const environment = opts.environment;
+    const storageEnv = environment?.storage;
 
     this.config = {
       name: opts.name,
-      storage: opts.storage ?? createInMemoryStorage(),
+      storage: storageEnv?.adapter ?? createInMemoryStorage(),
       hooks: opts.hooks,
       params: validatedParams,
       itemSchemas: opts.itemSchemas,
-      strictItemSchemas: opts.strictItemSchemas ?? true,
       projection: opts.projection,
       forceAtomicRecall: opts.forceAtomicRecall,
       contextCache: opts.contextCache,
     };
-    this.fs = opts.fs ?? createInMemoryFsAdapter();
-    this.shell = opts.shell ?? createInMemoryShellAdapter();
-    this.subprocess = opts.subprocess ?? createInMemorySubprocessAdapter();
-    this.checkpointStore = opts.checkpointStore;
-    this.stepLedgerStore = opts.checkpointStore
+    this.fs = environment?.fs ?? createInMemoryFsAdapter();
+    this.shell = environment?.shell ?? createInMemoryShellAdapter();
+    this.subprocess = environment?.subprocess ?? createInMemorySubprocessAdapter();
+    this.checkpointStore = storageEnv?.checkpointStore;
+    this.stepLedgerStore = storageEnv?.checkpointStore
       ? createStepLedgerStore({
           storage: this.config.storage ?? createInMemoryStorage(),
         })
       : undefined;
-    this.stepLedgerRetention = resolveStepLedgerRetention(opts.stepLedgerRetention);
-    this.initialStep = opts.initialStep;
+    this.stepLedgerRetention = resolveStepLedgerRetention(storageEnv?.stepLedgerRetention);
+    this.agentGraph = opts.agentGraph;
     this.harnessTools = opts.tools ?? [];
-    this._contextLayers = resolveContextOption(opts);
+    this._contextLayers = opts.contextLayers;
     this.callModelOverride = opts._testCallModel;
-    this.client = opts._testCallModel ? undefined : createClient(opts.llm, opts.contextCache);
+    this.client = opts._testCallModel
+      ? undefined
+      : createClient(opts.callModelDefaults, opts.contextCache);
     this.channelStore = new ChannelStore();
     this.traceExporter = opts.traceExporter ?? new NoopExporter();
     this.layerStateStore =
-      opts.layerStateStore ??
+      storageEnv?.layerStateStore ??
       createLayerStateStore((layerId, hook, error) => {
         console.warn(`[noetic] context layer '${layerId}' ${hook} error:`, error);
       });
     this.recallCache = createRecallCache();
     this.contextCache = createContextCacheStore();
     this.defaultDeliveryMode = opts.defaultDeliveryMode ?? 'next-turn';
-    this.streamIdleTimeoutMs = opts.streamIdleTimeoutMs ?? DEFAULT_STREAM_IDLE_TIMEOUT_MS;
-    this.itemSchemas = new ItemSchemaRegistry(opts.itemSchemas, {
-      strictUnknownExtensions: opts.strictItemSchemas ?? true,
+    this.itemSchemas = new ItemSchemaRegistry(opts.itemSchemas?.schemas, {
+      strictUnknownExtensions: opts.itemSchemas?.strict ?? true,
     });
     this.rootCwdState = {
       cwd: opts.initialCwd ?? '/',
@@ -515,12 +582,12 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   //#region Session Accessors
 
   execute(input: ExecuteInput, options?: ExecuteOptions): Promise<void> {
-    if (!this.initialStep) {
+    if (!this.agentGraph) {
       return Promise.reject(
         new NoeticConfigError({
           code: 'NO_STEP_CONFIGURED',
-          message: 'No initialStep configured on this harness.',
-          hint: 'Pass `initialStep` in constructor options, or use run() directly.',
+          message: 'No agentGraph configured on this harness.',
+          hint: 'Pass `agentGraph` in constructor options, or use run() directly.',
         }),
       );
     }
@@ -602,6 +669,18 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     return session ? session.runner.queue.size : 0;
   }
 
+  getUsage(scope?: SessionScope): SessionUsage {
+    const threadId = scope?.threadId ?? DEFAULT_THREAD_ID;
+    const session = this.sessions.get(threadId);
+    if (!session) {
+      return {
+        inputTokens: 0,
+        outputTokens: 0,
+      };
+    }
+    return session.runner.getUsage();
+  }
+
   seedSessionHistory(threadId: string, items: ReadonlyArray<Item>): void {
     const session = this.getOrCreateSession(threadId);
     session.accumulatedItems = [
@@ -636,15 +715,15 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
             threadId,
             resourceId: perTurnOptions.resourceId,
             state: perTurnOptions.state,
-            context: resolveContextOption(perTurnOptions),
+            contextLayers: perTurnOptions.contextLayers,
             _broadcaster: session.runner.broadcaster,
           });
           const ext = frameworkCast<Context & SessionCtxExtension>(ctx);
           ext._sessionQueue = session.runner.queue;
           ext._sessionBetweenRounds = true;
           ext._sessionRunnerAgentName = this.config.name;
-          if (this.initialStep || this.harnessTools.length > 0) {
-            const stepTools = this.initialStep ? collectAllTools(this.initialStep) : [];
+          if (this.agentGraph || this.harnessTools.length > 0) {
+            const stepTools = this.agentGraph ? collectAllTools(this.agentGraph) : [];
             this.setUnifiedTools(ctx, [
               ...stepTools,
               ...this.harnessTools,
@@ -653,11 +732,11 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
           return ctx;
         },
         runTurn: async (ctx, _turn, signal) => {
-          if (!this.initialStep) {
+          if (!this.agentGraph) {
             throw new NoeticConfigError({
               code: 'NO_STEP_CONFIGURED',
-              message: 'No initialStep configured on this harness.',
-              hint: 'Pass `initialStep` in constructor options.',
+              message: 'No agentGraph configured on this harness.',
+              hint: 'Pass `agentGraph` in constructor options.',
             });
           }
           // Wire signal-abort to context-abort so the interpreter bails cleanly.
@@ -674,7 +753,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
               },
             );
           }
-          const result = await this.initAndRun(this.initialStep, '', ctx);
+          const result = await this.initAndRun(this.agentGraph, '', ctx);
           // Snapshot final items into session history for the next turn.
           session.accumulatedItems = [
             ...ctx.itemLog.items,
@@ -709,7 +788,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       itemSchemas: this.itemSchemas,
       client: this.client,
       callModelOverride: this.callModelOverride,
-      streamIdleTimeoutMs: this.streamIdleTimeoutMs,
+      streamIdleTimeoutMs: DEFAULT_STREAM_IDLE_TIMEOUT_MS,
       harness: this,
       traceExporter: this.traceExporter,
     }).callModel(request);
@@ -774,6 +853,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       } else {
         this.rootRunDepth.delete(ctx.id);
         this.channelStore.closeExecution(ctx.id);
+        await this.acpSessions.closeOwnedBy(ctx.id);
       }
     }
   }
@@ -817,9 +897,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     state?: unknown;
     threadId?: string;
     resourceId?: string;
-    context?: ContextLayer[];
-    /** @deprecated Renamed to `context`. */
-    memory?: ContextLayer[];
+    contextLayers?: ContextLayer[];
     /**
      * Initial cwd for the new context. When set, takes precedence over both
      * the parent snapshot and the harness root cwd — used by worktree
@@ -829,10 +907,10 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     _broadcaster?: EventBroadcaster;
   }): Context {
     const resolved = opts ?? {};
-    // `ContextImpl` takes the layers as `layers`, so both option spellings are
+    // `ContextImpl` takes the layers as `layers`, so the option spelling is
     // dropped from `rest` rather than spread through under the wrong name.
-    const { context: _context, memory: _memory, cwdInit, ...rest } = resolved;
-    const effectiveLayers = resolveContextOption(resolved) ?? this._contextLayers;
+    const { contextLayers, cwdInit, ...rest } = resolved;
+    const effectiveLayers = contextLayers ?? this._contextLayers;
     const itemSchemas = buildItemSchemaRegistry({
       base: this.itemSchemas,
       layers: effectiveLayers,
@@ -1022,7 +1100,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     const ctx = this.createContext({
       items: historyItems,
       threadId,
-      context: this._contextLayers,
+      contextLayers: this._contextLayers,
     });
     const layers = ctx.layers ?? [];
     if (layers.length === 0) {
@@ -1172,7 +1250,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
    *
    * Aborting a context rejects everything blocked on it (channel `recv`
    * waiters, parked senders) with `{ kind: 'cancelled' }`, stops its in-flight
-   * model call and sub-harness turn, and makes the next step boundary throw
+   * model call and ACP agent turn, and makes the next step boundary throw
    * `cancelled`.
    *
    * Cancellation is cooperative: a layer hook already in flight is allowed to

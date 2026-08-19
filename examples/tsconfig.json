@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "customConditions": ["bun"],
+    "esModuleInterop": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "types": ["bun-types"],
+    "lib": ["ESNext", "DOM"]
+  },
+  "include": ["acp-e2e.ts", "openui-airbnb/server/**/*.ts"],
+  "exclude": ["openui-airbnb/client"]
+}

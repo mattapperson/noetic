@@ -6,22 +6,24 @@ export type {
 } from '@noetic-tools/context';
 export type {
   AgentHarnessContract,
+  CallModelRequest,
   Context,
   ContextRerenderRequest,
   ExecuteStepFn,
   FunctionCallItem,
   InputMessageItem,
   Item,
+  LLMResponse,
   ProjectionPolicy,
   RecallLayerOutput,
   RetryPolicy,
   ServerToolSpec,
-  StepLLM,
+  StepCallModel,
+  StepInvokeTool,
   StepMeta,
-  StepProvide,
-  StepRun,
+  StepRunCode,
   StepSpawn,
-  StepTool,
+  StepWithContext,
   Tool,
 } from '@noetic-tools/types';
 export { isServerToolSpec, SteeringAction } from '@noetic-tools/types';

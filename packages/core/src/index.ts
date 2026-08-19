@@ -15,25 +15,33 @@ export { createOpenRouterEmbed } from './adapters/openrouter';
 //#region Builders
 
 /** @public */
+export type { AcpAgentToolOptions } from './builders/acp-agent-tool';
+/** @public */
+export { acpAgentTool } from './builders/acp-agent-tool';
+/** @public */
 export { channel } from './builders/channel-builder';
 /** @public */
 export { context } from './builders/context-builder';
 /** @public */
-export { branch, fork } from './builders/control-flow-builders';
+export { conditional, inParallel } from './builders/control-flow-builders';
 /** @public */
-export type { EveryOptions } from './builders/every';
+export type { ScheduleOptions } from './builders/every';
 /** @public */
-export { every } from './builders/every';
+export { schedule } from './builders/every';
 /** @public */
-export { layerData, layerFn } from './builders/layer-provides-builders';
+export { layerData, layerFunction } from './builders/layer-provides-builders';
 /** @public */
 export type { LoopConfig } from './builders/loop-builder';
 /** @public */
 export { loop } from './builders/loop-builder';
 /** @public */
-export { provide } from './builders/provide-builder';
+export { withContext } from './builders/provide-builder';
 /** @public */
 export { spawn } from './builders/spawn-builder';
+/** @public */
+export type { CallModelOpts, InvokeToolOpts, RunCodeOpts } from './builders/step-builders';
+/** @public */
+export { callModel, invokeTool, runCode, step } from './builders/step-builders';
 /** @public */
 export { tool, toolWithGenerator } from './builders/tool-builder';
 /** @public */
@@ -41,9 +49,9 @@ export type { HydrationContext } from './builders/workflow-hydrator';
 /** @public */
 export { hydrateNode, hydrateWorkflow } from './builders/workflow-hydrator';
 /** @public */
-export type { StepWorkflowOpts } from './builders/workflow-step';
+export type { WorkflowOpts } from './builders/workflow-step';
 /** @public */
-export { step } from './builders/workflow-step';
+export { workflow } from './builders/workflow-step';
 
 //#endregion
 
@@ -117,22 +125,22 @@ export { execute } from './interpreter/execute';
 /** @public */
 /** @public */
 export type {
-  DurableTaskState,
   FactExtractor,
   FactSearcher,
-  HistoryWindowConfig,
-  ObservationalContextConfig,
-  ObservationalState,
-  PlanContextConfig,
+  HistoryConfig,
+  ObservationsConfig,
+  ObservationsState,
+  PlanConfig,
   PlanEnterSessionCallback,
   PlanExecutionEntry,
   PlanExitCallback,
   PlanState,
-  TemporalContextConfig,
+  ScratchpadConfig,
+  ScratchpadState,
+  TaskState,
+  TemporalConfig,
   TemporalFact,
   TemporalSearchResult,
-  WorkingMemoryContextConfig,
-  WorkingMemoryContextState,
 } from '@noetic-tools/context';
 /** @public */
 /** @public */
@@ -147,21 +155,21 @@ export type {
 /** @public */
 /** @public */
 export {
-  durableTaskState,
-  fileReference,
+  filesystem,
   findFunctionCall,
-  historyWindow,
-  observationalContext,
+  history,
+  instructions,
+  observations,
   PlanPhase,
   PlanStyle,
-  planContext,
-  staticContent,
+  plan,
+  scratchpad,
   steering,
   storageGetMany,
   stripUnresolvedToolCalls,
-  temporalContext,
-  toolContextLayer,
-  workingMemoryContext,
+  taskState,
+  temporal,
+  toolCalls,
 } from '@noetic-tools/context';
 
 //#endregion
@@ -184,29 +192,22 @@ export { createInMemoryStorage } from './runtime/in-memory-storage';
 
 //#endregion
 
-//#region Patterns
+//#region JSON Workflow Runtime
 
 /** @public */
-export type { DynamicWorkflowOpts, ParseAndRunWorkflowOpts } from './patterns/dynamic-workflow';
+export type { DynamicWorkflowOpts, ParseAndRunWorkflowOpts } from './builders/dynamic-workflow';
 /** @public */
-export { dynamicWorkflow, parseAndRunWorkflow } from './patterns/dynamic-workflow';
-/** @public */
-export type { InterviewOpts, InterviewQuestionAnswer, InterviewResult } from './patterns/interview';
-/** @public */
-export { interview } from './patterns/interview';
-/** @public */
-export type { PlanConstraints, PlanNode } from './patterns/plans';
-/** @public */
-export { adaptivePlan, compilePlan, PlanNodeSchema } from './patterns/plans';
-/** @public */
-export { ralphWiggum } from './patterns/ralph-wiggum';
-/** @public */
-export { react } from './patterns/react';
+export { dynamicWorkflow, parseAndRunWorkflow } from './builders/dynamic-workflow';
 
 //#endregion
 
 //#region Runtime
 
+/** @public */
+export type {
+  AgentEnvironmentConfig,
+  StorageEnvironmentConfig,
+} from './harness/agent-harness';
 /** @public */
 export { AgentHarness } from './harness/agent-harness';
 /** @public */
@@ -246,20 +247,20 @@ export { getRegistry, lookupStep, registerStep } from './runtime/step-registry';
 export { defaultItemSchemaRegistry, ItemSchema, ItemSchemaRegistry } from '@noetic-tools/types';
 /** @public */
 export type {
-  BranchRoute,
-  BranchWorkflowNode,
-  EveryWorkflowNode,
-  ForkWorkflowNode,
-  LlmWorkflowNode,
+  AcpAgentWorkflowNode,
+  CallModelWorkflowNode,
+  ConditionalRoute,
+  ConditionalWorkflowNode,
+  InParallelWorkflowNode,
+  InvokeToolWorkflowNode,
   LoopWorkflowNode,
   MergeStrategy,
-  ProvideWorkflowNode,
+  ScheduleWorkflowNode,
   SequenceWorkflowNode,
   SpawnWorkflowNode,
   SubflowWorkflowNode,
-  SubHarnessWorkflowNode,
-  ToolWorkflowNode,
   UntilPredicate,
+  WithContextWorkflowNode,
   WorkflowDocument,
   WorkflowNode,
 } from './schemas/workflow';
@@ -288,19 +289,33 @@ export type { Channel, ChannelHandle, ExternalChannel } from '@noetic-tools/type
 /** @public */
 /** @public */
 export type {
+  InferSchemaInput,
+  InferSchemaOutput,
+  InputSchemaConfig,
   LLMResponse,
   LlmProviderConfig,
   ModelParams,
   RetryPolicy,
   RoundUsage,
+  SchemaValidationFailure,
+  SchemaValidationResult,
+  SchemaValidationSuccess,
   ServerToolSpec,
+  StandardJSONSchemaV1,
+  StandardSchemaV1,
   StepMeta,
   TokenUsage,
   Tool,
   ToolContextDeclaration,
 } from '@noetic-tools/types';
 /** @public */
-export { isServerToolSpec } from '@noetic-tools/types';
+export {
+  isServerToolSpec,
+  isStandardJsonSchema,
+  isZodSchema,
+  standardIssuesToZodError,
+  validateSchema,
+} from '@noetic-tools/types';
 
 //#endregion
 
@@ -483,9 +498,11 @@ export type {
   DeliveryMode,
   ExecuteOptions,
   HarnessStatus,
+  ItemSchemaConfig,
   ReanchorReason,
   RecallLayerOutput,
   SessionScope,
+  SessionUsage,
 } from '@noetic-tools/types';
 
 //#endregion
@@ -517,45 +534,79 @@ export type {
   SettleResult,
   Snapshot,
   Step,
-  StepBranch,
-  StepFork,
-  StepForkAll,
-  StepForkRace,
-  StepForkSettle,
-  StepLLM,
+  StepAcpAgent,
+  StepCallModel,
+  StepConditional,
+  StepInParallel,
+  StepInParallelAll,
+  StepInParallelRace,
+  StepInParallelSettle,
+  StepInvokeTool,
   StepLoop,
-  StepProvide,
-  StepRun,
+  StepRunCode,
   StepSpawn,
-  StepSubHarness,
-  StepTool,
+  StepWithContext,
   Until,
   Verdict,
 } from '@noetic-tools/types';
 
 //#endregion
 
-//#region Types — SubHarness adapters
+//#region Types — ACP agents
 
 /** @public */
 export type {
-  SubHarness,
-  SubHarnessBuiltinTool,
-  SubHarnessContinueState,
-  SubHarnessContinueTurnOptions,
-  SubHarnessFinishReason,
-  SubHarnessPromptTurnOptions,
-  SubHarnessResumeState,
-  SubHarnessRunContext,
-  SubHarnessSession,
-  SubHarnessSessionPolicy,
-  SubHarnessSettings,
-  SubHarnessStartOptions,
-  SubHarnessStreamPart,
-  SubHarnessTurnResult,
+  AcpAgent,
+  AcpAgentCapabilities,
+  AcpAgentConnection,
+  AcpAuthMethod,
+  AcpAvailableCommand,
+  AcpBoundPermissionHandler,
+  AcpClientCapabilityConfig,
+  AcpClientHost,
+  AcpConnectOptions,
+  AcpContentBlock,
+  AcpKeepAlive,
+  AcpLiveSession,
+  AcpLoadSessionOptions,
+  AcpMcpServer,
+  AcpNewSessionOptions,
+  AcpPermissionHandler,
+  AcpPermissionOption,
+  AcpPermissionOutcome,
+  AcpPermissionPolicy,
+  AcpPermissionRequestInfo,
+  AcpPermissionRule,
+  AcpPermissionSteerer,
+  AcpPlanEntry,
+  AcpPromptCapabilities,
+  AcpPromptOptions,
+  AcpRequestPermissionRequest,
+  AcpSession,
+  AcpSessionDisposer,
+  AcpSessionInfo,
+  AcpSessionMode,
+  AcpSessionModeState,
+  AcpSessionNotification,
+  AcpSessionPolicy,
+  AcpStopReason,
+  AcpToolCallContent,
+  AcpToolCallStatus,
+  AcpToolKind,
+  AcpTransport,
+  AcpTransportFactory,
+  AcpTransportOptions,
+  AcpTurnResult,
 } from '@noetic-tools/types';
 /** @public */
-export { SUB_HARNESS_KINDS, SubHarnessKind, SubHarnessStreamPartSchema } from '@noetic-tools/types';
+export {
+  ACP_AGENT_STEP_KIND,
+  AcpCapabilityError,
+  AcpConnectError,
+  AcpPermissionDecision,
+  isAcpCapabilityError,
+  isAcpConnectError,
+} from '@noetic-tools/types';
 
 //#endregion
 
@@ -608,16 +659,5 @@ export { all, any } from './until/combinators';
 export type { ConvergeConfig, VerifyFn } from './until/predicates';
 /** @public */
 export { until } from './until/predicates';
-
-//#endregion
-
-//#region Deprecated aliases
-
-/**
- * Pre-rename names for the context layer system — `MemoryLayer`, `memory()`,
- * `workingMemory`, and friends. Each carries its own `@deprecated` pointer to
- * its replacement in `./deprecated`. Removed in the next major.
- */
-export * from './deprecated';
 
 //#endregion

@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { step } from '@noetic-tools/core';
+import { runCode } from '@noetic-tools/core';
 
 import { createEvalContext } from '../../src/runner/eval-context';
 
 describe('createEvalContext()', () => {
   test('creates context with objective and background', () => {
-    const testStep = step.run({
+    const testStep = runCode({
       id: 'echo',
       execute: async (input: unknown) => input,
     });
@@ -21,7 +21,7 @@ describe('createEvalContext()', () => {
   });
 
   test('execute() returns EvalExecution with output and context', async () => {
-    const testStep = step.run({
+    const testStep = runCode({
       id: 'doubler',
       execute: async (input: unknown) => Number(input) * 2,
     });
@@ -40,7 +40,7 @@ describe('createEvalContext()', () => {
   });
 
   test('execute() with string input returns correct output', async () => {
-    const testStep = step.run({
+    const testStep = runCode({
       id: 'greeter',
       execute: async (input: unknown) => `hello ${input}`,
     });
@@ -55,7 +55,7 @@ describe('createEvalContext()', () => {
   });
 
   test('score() invokes scorer functions', async () => {
-    const testStep = step.run({
+    const testStep = runCode({
       id: 'echo',
       execute: async (input: unknown) => input,
     });
@@ -82,7 +82,7 @@ describe('createEvalContext()', () => {
   });
 
   test('score() sanitizes out-of-range scores from scorers bypassing the pipeline', async () => {
-    const testStep = step.run({
+    const testStep = runCode({
       id: 'echo',
       execute: async (input: unknown) => input,
     });
@@ -111,7 +111,7 @@ describe('createEvalContext()', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'eval-context-baseline-'));
     process.chdir(tmpDir);
     try {
-      const testStep = step.run({
+      const testStep = runCode({
         id: 'echo',
         execute: async (input: unknown) => input,
       });

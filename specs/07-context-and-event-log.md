@@ -74,7 +74,7 @@ interface CwdState {
 
 - The Bash tool intercepts plain `cd <path>` and mutates `cwdState` via `setToolCwd`. Compound forms (`cd foo && bar`) still go through the shell and do not persist cwd, matching POSIX.
 - Other path-using tools (Read, Write, Edit, Ls, Grep, Find, lsp, InteractiveTerminal) resolve paths from `cwdState.cwd` at execution time via the `getToolCwd(ctx, fallback)` helper. Their factory `cwd` becomes a fallback used only when `cwdState` is absent (e.g. partial test contexts).
-- Spawned and forked children receive a snapshot of the parent's `cwdState`; child mutations do not propagate to the parent (POSIX-fork semantics).
+- `spawn` and `inParallel` children receive a snapshot of the parent's `cwdState`; child mutations do not propagate to the parent (POSIX-fork semantics).
 - The mutation policy's `sessionCwd` stays anchored to the harness launch cwd. `cd` does not widen the sandbox.
 
 ---
@@ -90,7 +90,7 @@ interface ItemLog {
 }
 ```
 
-`ItemLog` is unbounded — storage grows monotonically across turns and never shrinks. Capping the items projected to the LLM is a separate, read-side concern owned by context layers via the `projectHistory` hook (see `11-context-layer-system`); the canonical built-in is `historyWindow` (spec 12). Because the cap is a projection, it leaves session save/restore, `getAgentResponse`, and any UI that reads `itemLog` unaffected.
+`ItemLog` is unbounded — storage grows monotonically across turns and never shrinks. Capping the items projected to the LLM is a separate, read-side concern owned by context layers via the `projectHistory` hook (see `11-context-layer-system`); the canonical built-in is `history` (spec 12). Because the cap is a projection, it leaves session save/restore, `getAgentResponse`, and any UI that reads `itemLog` unaffected.
 
 ---
 
@@ -333,9 +333,9 @@ If the host process dies while the model is actively streaming, there is no part
 
 This is acceptable for interactive and batch workloads; it is not a resumable stream. Callers that need strict once-only token generation must gate with their own idempotency key outside the framework.
 
-### Non-Idempotent `step.run` Bodies
+### Non-Idempotent `runCode` Bodies
 
-Durable execution can replay a step body whose prior execution completed but whose completion checkpoint never landed. Arbitrary user code cannot be made idempotent by the framework. Use stable step ids, and write `step.run` bodies whose side effects are safe to re-execute (or guarded by an external idempotency key that the body consults).
+Durable execution can replay a step body whose prior execution completed but whose completion checkpoint never landed. Arbitrary user code cannot be made idempotent by the framework. Use stable step ids, and write `runCode` bodies whose side effects are safe to re-execute (or guarded by an external idempotency key that the body consults).
 
 ## Circular Reference with Channels
 

@@ -22,10 +22,10 @@ Durability is opt-in and composable. A zero-config harness has no `CheckpointSto
 ## `CheckpointSnapshot` schema
 
 ```typescript
-const CheckpointSchemaVersion = 1;
+const CheckpointSchemaVersion = 2;
 
 interface CheckpointSnapshot {
-  schemaVersion: 1;
+  schemaVersion: 2;
   executionId: string;
   threadId?: string;
   resourceId?: string;
@@ -60,6 +60,10 @@ interface ItemLogSnapshot {
 ```
 
 `schemaVersion` is a literal, not a range. `restore()` validates the observed version via the Zod schema; a mismatch surfaces `NoeticConfigError` with `code: 'CHECKPOINT_SCHEMA_MISMATCH'` and a hint pointing to `CheckpointStore.clear()`. Future bumps must enumerate a migration path; the framework does not silently coerce.
+
+Version history:
+
+- **v1 → v2** — built-in layer ids changed (`working-context` → `scratchpad`, `static-content` → `instructions`, `observational-context` → `observations`, `file-reference` → `filesystem`, `history-window` → `history`, and `durable-task-state` → `task-state`). `layers` is keyed by layer id, so a v1 snapshot carries state under ids no current layer reads; restoring it would silently drop that state. No migration — discard via `CheckpointStore.clear()` and start fresh.
 
 `frontier` is intentionally permissive: frame `state` is `unknown` because each step's state is user-defined. Callers that need specific shape guarantees parse at the call site.
 
@@ -331,8 +335,8 @@ Both root defaults respect `NOETIC_HOME` (if set, the roots become `$NOETIC_HOME
 **What durable execution does not guarantee:**
 
 - **LLM mid-stream.** A crash mid-stream forces a turn re-issue on restart. The item log's response-id dedupe guards against double-recording an identical response; a different response wins as a new turn.
-- **Non-idempotent `step.run` bodies.** A crash between step completion and the following checkpoint write can replay a step body whose side effects already landed. The framework cannot make arbitrary user code idempotent; use stable step ids and idempotent bodies where durability matters.
-- **Third-party state outside the framework.** If a `step.run` mutates an external database, the database's state is not part of the snapshot. Callers that need cross-system consistency must integrate with their database's own transaction / idempotency primitives.
+- **Non-idempotent `runCode` bodies.** A crash between step completion and the following checkpoint write can replay a step body whose side effects already landed. The framework cannot make arbitrary user code idempotent; use stable step ids and idempotent bodies where durability matters.
+- **Third-party state outside the framework.** If a `runCode` mutates an external database, the database's state is not part of the snapshot. Callers that need cross-system consistency must integrate with their database's own transaction / idempotency primitives.
 - **Adapter-specific identity drift.** The local adapter's `reattach` verifies `pidStarttime` against `ps`, which is a best-effort check; a truly adversarial pid recycle within `<1s` can evade detection. Out-of-the-box this is safe enough for interactive workloads; production-critical usage should run the child under a supervisor that owns pid identity.
 
 ## Examples
@@ -351,10 +355,12 @@ const checkpointStore = createCheckpointStore({ storage });
 
 const harness = new AgentHarness({
   name: 'durable-agent',
-  initialStep: myAgent,
+  agentGraph: myAgent,
   params: {},
-  subprocess,
-  checkpointStore,
+  environment: {
+    subprocess,
+    storage: { checkpointStore },
+  },
 });
 ```
 

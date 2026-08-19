@@ -42,8 +42,8 @@ describe('layer-usage', () => {
     ctx.itemLog.append(makeMessageItem('history-1', 'free-floating user message'));
 
     const recallResults: RecallLayerOutput[] = [
-      makeRecall('planContext', 'plan summary', 42),
-      makeRecall('workingMemoryContext', 'scratchpad', 17),
+      makeRecall('plan', 'plan summary', 42),
+      makeRecall('scratchpad', 'scratchpad', 17),
     ];
 
     const usage = computeLayerUsage({
@@ -58,9 +58,9 @@ describe('layer-usage', () => {
     expect(usage.executionId).toBe(ctx.id);
     expect(usage.layers.length).toBe(2);
     // Sorted alphabetically by layerId.
-    expect(usage.layers[0]?.layerId).toBe('planContext');
+    expect(usage.layers[0]?.layerId).toBe('plan');
     expect(usage.layers[0]?.tokenCount).toBe(42);
-    expect(usage.layers[1]?.layerId).toBe('workingMemoryContext');
+    expect(usage.layers[1]?.layerId).toBe('scratchpad');
     expect(usage.layers[1]?.tokenCount).toBe(17);
     expect(usage.systemPromptTokens).toBe(estimateTokens('system prompt body'));
 
@@ -73,8 +73,8 @@ describe('layer-usage', () => {
   test('layer entries preserve the recalled items so UI can show per-layer contents', () => {
     const ctx = makeCtx();
     const recallResults: RecallLayerOutput[] = [
-      makeRecall('planContext', 'plan summary', 42),
-      makeRecall('workingMemoryContext', 'scratchpad', 17),
+      makeRecall('plan', 'plan summary', 42),
+      makeRecall('scratchpad', 'scratchpad', 17),
     ];
 
     const usage = computeLayerUsage({
@@ -85,14 +85,14 @@ describe('layer-usage', () => {
       recallResults,
     });
 
-    expect(usage.layers[0]?.layerId).toBe('planContext');
+    expect(usage.layers[0]?.layerId).toBe('plan');
     expect(usage.layers[0]?.items.length).toBe(1);
     const planItem = usage.layers[0]?.items[0];
-    expect(planItem && 'id' in planItem && planItem.id).toBe('planContext-msg');
-    expect(usage.layers[1]?.layerId).toBe('workingMemoryContext');
+    expect(planItem && 'id' in planItem && planItem.id).toBe('plan-msg');
+    expect(usage.layers[1]?.layerId).toBe('scratchpad');
     expect(usage.layers[1]?.items.length).toBe(1);
     const wmItem = usage.layers[1]?.items[0];
-    expect(wmItem && 'id' in wmItem && wmItem.id).toBe('workingMemoryContext-msg');
+    expect(wmItem && 'id' in wmItem && wmItem.id).toBe('scratchpad-msg');
   });
 
   test('commitLayerUsage writes onto ctx.lastLayerUsage', () => {

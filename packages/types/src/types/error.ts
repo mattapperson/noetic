@@ -1,4 +1,5 @@
-import type { ZodError, ZodType } from 'zod';
+import type { StandardSchemaV1 } from '@standard-schema/spec';
+import type { ZodError } from 'zod';
 
 /** @public Discriminated union of all structured error kinds raised by the runtime. */
 export type NoeticError =
@@ -9,19 +10,20 @@ export type NoeticError =
       retriesExhausted: boolean;
     }
   | {
-      kind: 'llm_refused';
+      kind: 'model_refused';
       stepId: string;
       refusal: string;
     }
   | {
-      kind: 'llm_parse_error';
+      kind: 'model_parse_error';
       stepId: string;
       raw: string;
-      schema: ZodType;
+      schema: StandardSchemaV1;
+      /** Real `ZodError` for Zod schemas; synthetic `custom` issues adapted from the vendor's Standard Schema issues otherwise. */
       zodError: ZodError;
     }
   | {
-      kind: 'llm_rate_limit';
+      kind: 'model_rate_limit';
       stepId: string;
       retryAfter?: number;
     }
@@ -87,5 +89,6 @@ export type NoeticError =
       kind: 'handle_evicted';
       handleId: string;
       stepId: string;
-      gracePeriodMs: number;
+      /** Grace period in milliseconds. */
+      gracePeriod: number;
     };

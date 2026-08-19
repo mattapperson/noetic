@@ -39,8 +39,12 @@ describe.skipIf(!SHOULD_RUN)('checkpoint perf (file-backed)', () => {
       const harness = new AgentHarness({
         name: 'benchHarness',
         params: {},
-        storage,
-        checkpointStore,
+        environment: {
+          storage: {
+            adapter: storage,
+            checkpointStore,
+          },
+        },
       });
       const ctx = harness.createContext({});
       const samples: number[] = [];

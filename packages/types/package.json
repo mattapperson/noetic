@@ -1,6 +1,6 @@
 {
   "name": "@noetic-tools/types",
-  "version": "3.1.0",
+  "version": "3.2.2",
   "type": "module",
   "description": "Foundational type contracts and primitives shared across the Noetic framework (items, LLM config, adapters, steering, errors).",
   "license": "Apache-2.0",
@@ -57,6 +57,8 @@
   },
   "dependencies": {
     "@openrouter/agent": "^0.6.0",
+    "@standard-schema/spec": "1.1.0",
+    "@zed-industries/agent-client-protocol": "^0.4.5",
     "zod": "^4.0.0"
   },
   "scripts": {

@@ -100,9 +100,9 @@ The hero is `position: sticky; height: 100vh` and fades out on scroll; the rest 
 | Body | "Reasoning loops, parallel workloads, sub-agents — all of it falls out of these seven. The ReAct pattern is 15 lines. A task tree is 40. You can read both in under a minute." |
 | Below | Legend (steps = green, operators = cyan) + bento grid of the seven primitives |
 
-Seven primitives: `llm`, `tool`, `run` (steps); `spawn`, `fork`, `branch`, `loop` (operators). Each card links to its doc page.
+Seven primitives: `callModel`, `invokeTool`, `runCode` (steps); `spawn`, `inParallel`, `conditional`, `loop` (operators). Each card links to its doc page.
 
-**SVG:** `PrimitivesIsometricSvg` — three nodes (`llm` green, `tool` cyan, `loop` amber) on 45° wires with open arrows; `loop` has a dashed amber feedback wire back to `llm`, forming a visible cycle. Glowing spheres travel all paths.
+**SVG:** `PrimitivesIsometricSvg` — three nodes (`callModel` green, `invokeTool` cyan, `loop` amber) on 45° wires with open arrows; `loop` has a dashed amber feedback wire back to `callModel`, forming a visible cycle. Glowing spheres travel all paths.
 
 ---
 
@@ -112,13 +112,13 @@ Seven primitives: `llm`, `tool`, `run` (steps); `spawn`, `fork`, `branch`, `loop
 
 | Element | Content |
 |---------|---------|
-| Tag | `ready to use` |
-| H2 | "Batteries included" |
-| Subhead | "Common agent patterns built-in for convenience." |
+| Tag | `compose it yourself` |
+| H2 | "Patterns are just compositions" |
+| Subhead | "Common agent patterns in a few lines of the same primitives — no pattern library to learn." |
 | Body | "Each pattern is a composition of the primitives above — no special cases, no hidden behavior. Read the source. Fork it. The framework doesn't care." |
 | Below | Pattern cards |
 
-Patterns: ReAct (~15 lines), Ralph Wiggum (~10), Task Trees (~40), Adaptive Plans (~35), Thread Weaving (~25), Dual Agent (~20). Each card shows the primitives it composes and links to its doc page.
+Patterns: ReAct (~15 lines), Ralph Wiggum (~10), Task Trees (~40), Thread Weaving (~25), Dual Agent (~20). Each card shows a one-line description, its line-count estimate, and badges for the primitives it composes. There are no per-pattern doc pages — the cards illustrate what a composition costs, they do not link into a pattern reference.
 
 **SVG:** `PatternsIsometricSvg` — small primitive nodes converging into a larger "pattern" node, then flowing out as a result.
 
@@ -138,10 +138,10 @@ Tabs (TUI-style tab bar), each rendering a `<TuiWindow>` snippet:
 
 | Tab label | Shows |
 |-----------|-------|
-| `ReAct reasoning loop` | ~15-line ReAct via `loop` / `llm` / `tool` + `until` |
+| `ReAct reasoning loop` | ~15-line ReAct via `loop` / `callModel` / `invokeTool` + `until` |
 | `5-layer context in 10 lines` | `AgentHarness` configured with a stack of context layers |
 | `Sandboxed harness` | Swappable `FsAdapter` / `ShellAdapter` routing tools, skills, and context |
-| `Extend any primitive` | Custom `step.run` with typed context |
+| `Extend any primitive` | Custom `runCode` with typed context |
 
 ---
 
@@ -156,22 +156,22 @@ Tabs (TUI-style tab bar), each rendering a `<TuiWindow>` snippet:
 | Tag | `// context management` |
 | H2 | "Unparalleled context management" |
 | Subhead | "Long multi-turn conversations without blowing up the context window." |
-| Body | "Working memory, observation extraction, plan tracking, durable checkpoints, and more — assemble the layers you need or build your own. Token costs stay predictable as conversations grow." |
+| Body | "Scratchpad state, observation extraction, plan tracking, durable checkpoints, and more — assemble the layers you need or build your own. Token costs stay predictable as conversations grow." |
 | Below | Legend (working / retrieval / persistence) + grid of the nine layers and a custom-layer tile |
 
 The grid shows the **nine exported context layers** plus a "build your own" tile:
 
 | Layer (label) | Export | Group |
 |---------------|--------|-------|
-| Working Memory | `workingMemoryContext` | working |
-| Observational Context | `observationalContext` | working |
+| Scratchpad | `scratchpad` | working |
+| Observations | `observations` | working |
 | Steering | `steering` | working |
-| Static Content | `staticContent` | working |
-| History Window | `historyWindow` | retrieval |
-| File Reference | `fileReference` | retrieval |
-| Tool Context | `toolContextLayer` | retrieval |
-| Plan Context | `planContext` | persistence |
-| Durable Task State | `durableTaskState` | persistence |
+| Instructions | `instructions` | working |
+| History | `history` | retrieval |
+| Filesystem | `filesystem` | retrieval |
+| Tool Calls | `toolCalls` | retrieval |
+| Plan | `plan` | persistence |
+| Task State | `taskState` | persistence |
 | Custom Layers | (build your own — e.g. semantic recall, episodic summaries) | — |
 
 Group assignment + color follow the legend; final labels/grouping are confirmed against `docs/framework/context-layers/*`. "Semantic recall" and "episodic context" are documented build-it-yourself recipes, not exported layers, so they appear only via the custom-layer tile/link (`docs/framework/context-layers/custom-layers`).
@@ -194,7 +194,7 @@ Group assignment + color follow the legend; final labels/grouping are confirmed 
 | Card | Value | Link |
 |------|-------|------|
 | Durable execution | Checkpoint and resume; long runs survive crashes. | `/docs/framework/durability` |
-| Runs anywhere | Node, the browser, or a sandbox — swap `fs` / `shell` / `llm` adapters; Mirage virtual filesystem. | — (no dedicated doc page yet) |
+| Runs anywhere | Node, the browser, or a sandbox — swap `fs` / `shell` / model-provider adapters; Mirage virtual filesystem. | — (no dedicated doc page yet) |
 | JSON workflow runtime | Define and run an agent declaratively from JSON. | `/docs/framework/json-runtime` |
 
 Cards reuse the existing bento/card styles (`tui-bento`, surface backgrounds, `TuiBadge`, `HOVER_BG`). No code window — Code Peek carries the examples.

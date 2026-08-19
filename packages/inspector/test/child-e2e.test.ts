@@ -20,18 +20,18 @@ const BASE = `http://localhost:${PORT}`;
 
 const STUB_AGENT = `
 import type { StorageAdapter, TraceExporter } from '@noetic-tools/core';
-import { AgentHarness, step, workingMemoryContext } from '@noetic-tools/core';
+import { AgentHarness, callModel, scratchpad } from '@noetic-tools/core';
 
 export function createAgent(deps: { storage: StorageAdapter; traceExporter: TraceExporter }): {
   harness: AgentHarness;
 } {
   const harness = new AgentHarness({
     name: 'stub-agent',
-    initialStep: step.llm({ id: 'chat', model: 'stub/model' }),
+    agentGraph: callModel({ id: 'chat', model: 'stub/model' }),
     params: {},
-    storage: deps.storage,
+    environment: { storage: { adapter: deps.storage } },
     traceExporter: deps.traceExporter,
-    context: [workingMemoryContext()],
+    contextLayers: [scratchpad()],
     _testCallModel: async () => ({
       items: [
         {
@@ -133,7 +133,7 @@ describe('agent child end-to-end', () => {
       id: string;
     }> = await (await fetch(`${BASE}/layers`)).json();
     expect(layers.map((layer) => layer.id)).toEqual([
-      'working-context',
+      'scratchpad',
     ]);
   });
 

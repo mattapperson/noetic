@@ -1,1 +1,1 @@
-export { layerData, layerFn } from '@noetic-tools/context';
+export { layerData, layerFunction } from '@noetic-tools/context';

@@ -1,1 +1,1 @@
-{"title":"Context Layers","pages":["index","working-memory-context","observational-context","temporal-context","semantic-recall","episodic-context","steering","file-reference","static-content","history-window","durable-task-state","plan-context","agent-plugins","custom-layers","tool-context"]}
+{"title":"Context Layers","pages":["index","instructions","history","scratchpad","observations","temporal","filesystem","plan","task-state","tool-calls","steering","agent-plugins","custom-layers","semantic-recall","episodic-context"]}

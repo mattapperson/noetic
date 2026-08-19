@@ -318,11 +318,7 @@ export function makeMockContext(overrides?: Partial<Context>): Context {
     aborted: false,
     abort: () => {},
     ...overrides,
-    // Re-derived AFTER the spread: an override that sets only `context` would
-    // otherwise leave `memory` pointing at the orphaned original, a divergence
-    // ContextImpl cannot produce (its `memory` is a getter over `context`).
     context: overrides?.context ?? contextData,
-    memory: overrides?.memory ?? overrides?.context ?? contextData,
   };
 }
 
@@ -426,8 +422,6 @@ export function makeMockToolContext(ctx?: Context): ToolExecutionContext {
     fs: harness.fs,
     shell: harness.shell,
     context: toolContext,
-    // Deprecated alias — same accessor object, as buildToolExecutionContext does.
-    memory: toolContext,
     assembledView: resolvedCtx.itemLog.items,
     lastStepMeta: null,
   };
@@ -497,6 +491,10 @@ export function makeMockHarness(): AgentHarnessContract {
       kind: 'idle',
     }),
     getQueueSize: () => 0,
+    getUsage: () => ({
+      inputTokens: 0,
+      outputTokens: 0,
+    }),
     seedSessionHistory: () => {},
     rootCwdState: {
       cwd: process.cwd(),
@@ -607,14 +605,14 @@ export function createDynamicCallModel(
   return async () => factory();
 }
 
-// ── Simple execute dispatcher (for loop/fork/spawn tests) ────────────
+// ── Simple execute dispatcher (for loop/inParallel/spawn tests) ────────────
 
 export const simpleExecute: ExecuteStepFn = async <TContext, I, O>(
   step: Step<TContext, I, O>,
   input: I,
   ctx: Context<TContext>,
 ): Promise<O> => {
-  if (step.kind === 'run') {
+  if (step.kind === 'runCode') {
     return step.execute(input, ctx);
   }
   throw new Error(`Unsupported step kind: ${step.kind}`);

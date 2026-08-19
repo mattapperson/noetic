@@ -7,24 +7,17 @@ description: Complete type reference for all @noetic-tools/core exports, organiz
 
 | Export | Kind | Description |
 |---|---|---|
-| `step.run()` | function | Custom async function step |
-| `step.llm()` | function | LLM inference step |
-| `step.tool()` | function | Tool invocation step |
+| `runCode()` | function | Custom async function step |
+| `callModel()` | function | LLM inference step |
+| `invokeTool()` | function | Tool invocation step |
 | `tool()` | function | Typed tool definition builder |
-| `branch()` | function | Conditional routing |
-| `fork()` | function | Parallel execution (race/all/settle) |
+| `conditional()` | function | Conditional routing |
+| `inParallel()` | function | Parallel execution (race/all/settle) |
+| `loop()` | function | Iterate body steps until a predicate stops |
+| `withContext()` | function | Attach context layers to a subtree |
+| `schedule()` | function | Fixed-interval recurring execution |
 | `spawn()` | function | Isolated child execution |
 | `channel()` | function | Typed communication channel |
-
-## Patterns
-
-| Export | Kind | Description |
-|---|---|---|
-| `react()` | function | ReAct agent loop |
-| `ralphWiggum()` | function | Self-refining agent |
-| `compilePlan()` | function | Static plan compilation |
-| `adaptivePlan()` | function | Dynamic plan with revision |
-| `PlanNodeSchema` | Zod schema | Validator for `PlanNode` objects |
 
 ## AgentHarness
 
@@ -35,11 +28,11 @@ description: Complete type reference for all @noetic-tools/core exports, organiz
 | `ItemLogImpl` | class | Item log implementation |
 | `ChannelStore` | class | Channel state management |
 | `execute()` | function | Top-level step executor |
-| `executeLLM()` | function | LLM step executor |
-| `executeRun()` | function | Run step executor |
-| `executeTool()` | function | Tool step executor |
-| `executeBranch()` | function | Branch step executor |
-| `executeFork()` | function | Fork step executor |
+| `executeLLM()` | function | callModel step executor |
+| `executeRun()` | function | runCode step executor |
+| `executeTool()` | function | invokeTool step executor |
+| `executeBranch()` | function | conditional step executor |
+| `executeFork()` | function | inParallel step executor |
 | `executeSpawn()` | function | Spawn step executor |
 | `executeLoop()` | function | Loop step executor |
 
@@ -47,9 +40,9 @@ description: Complete type reference for all @noetic-tools/core exports, organiz
 
 | Export | Kind | Description |
 |---|---|---|
-| `workingMemoryContext()` | function | Working context layer factory |
-| `observationalContext()` | function | Observational context layer factory |
-| `durableTaskState()` | function | Durable task state layer factory |
+| `scratchpad()` | function | Scratchpad context layer factory |
+| `observations()` | function | Observations context layer factory |
+| `taskState()` | function | Task state layer factory |
 | `assembleView()` | function | Merge layer outputs into prompt |
 | `allocateBudgets()` | function | Distribute token budgets across layers |
 | `checkBudget()` | function | Verify budget constraints |
@@ -99,7 +92,7 @@ description: Complete type reference for all @noetic-tools/core exports, organiz
 
 ## Type Reference Pages
 
-- [Step Types](/docs/framework/api/step-types) -- Step, StepRun, StepLLM, StepTool, StepBranch, StepFork, StepSpawn, StepLoop
+- [Step Types](/docs/framework/api/step-types) -- Step, StepRunCode, StepCallModel, StepInvokeTool, StepConditional, StepInParallel, StepSpawn, StepLoop
 - [Channel Types](/docs/framework/api/channel-types) -- Channel, ExternalChannel, ChannelHandle
 - [Context Types](/docs/framework/api/context-types) -- Context, ItemLog, Item, ContentPart
 - [Items & Events](/docs/framework/api/items-and-events) -- Standard items, extension items, streaming events, OpenResponses compatibility

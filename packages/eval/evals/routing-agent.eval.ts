@@ -1,7 +1,8 @@
-import { react, tool } from '@noetic-tools/core';
+import { tool } from '@noetic-tools/core';
 import { z } from 'zod';
 
 import { describe, it, scorer } from '../src';
+import { reactAgent } from './agents';
 
 //#region Tools
 
@@ -31,7 +32,7 @@ const escalateTool = tool({
 
 //#region Routing Agent
 
-const routingAgent = react({
+const routingAgent = reactAgent({
   model: 'anthropic/claude-sonnet-4',
   instructions:
     'You are a ticket routing agent. Classify incoming tickets using the classify_ticket tool. Escalate urgent tickets using the escalate tool. Always classify before deciding whether to escalate.',

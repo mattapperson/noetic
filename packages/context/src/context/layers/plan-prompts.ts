@@ -15,7 +15,7 @@
 
 import type { WorkflowDocument, WorkflowNode } from '@noetic-tools/types';
 import { walkWorkflow } from '@noetic-tools/types';
-import type { PlanState } from './plan-context';
+import type { PlanState } from './plan-state';
 
 //#region Types
 
@@ -265,24 +265,24 @@ const KIND_ENTRIES: Array<{
   line: string;
 }> = [
   {
-    kind: 'llm',
+    kind: 'callModel',
     group: 'leaf',
-    line: '`llm` — a model turn, driven by `instructions`; give it `tools` if it needs them',
+    line: '`callModel` — a model turn, driven by `instructions`; give it `tools` if it needs them',
   },
   {
-    kind: 'tool',
+    kind: 'invokeTool',
     group: 'leaf',
-    line: '`tool` — one deterministic tool call: `toolName` plus `args`',
+    line: '`invokeTool` — one deterministic tool call: `toolName` plus `args`',
   },
   {
-    kind: 'run',
+    kind: 'runCode',
     group: 'leaf',
-    line: '`run` — code in `execute`, run by a subprocess adapter the host must provide',
+    line: '`runCode` — code in `execute`, run by a subprocess adapter the host must provide',
   },
   {
-    kind: 'claude-code',
+    kind: 'acp-agent',
     group: 'leaf',
-    line: '`claude-code`, `codex`, `opencode`, `pi` — hand a `prompt` to a coding agent',
+    line: '`acp-agent` — hand a `prompt` to an external coding agent named by `agent` (e.g. `claude-code`, `codex`, `gemini`)',
   },
   {
     kind: 'sequence',
@@ -290,14 +290,14 @@ const KIND_ENTRIES: Array<{
     line: '`sequence` — `steps` run in order, each fed the one before',
   },
   {
-    kind: 'fork',
+    kind: 'inParallel',
     group: 'structure',
-    line: '`fork` — `paths` run at once (or `each` over a runtime array); `mode` is `all`, `race` or `settle`, and `merge` says how the outputs of an `all` come back together',
+    line: '`inParallel` — `paths` run at once (or `each` over a runtime array); `mode` is `all`, `race` or `settle`, and `merge` says how the outputs of an `all` come back together',
   },
   {
-    kind: 'branch',
+    kind: 'conditional',
     group: 'structure',
-    line: '`branch` — the FIRST route whose `match` appears in the input wins, case-insensitively, so order the routes narrowest first; `default` catches the rest',
+    line: '`conditional` — the FIRST route whose `match` appears in the input wins, case-insensitively, so order the routes narrowest first; `default` catches the rest',
   },
   {
     kind: 'loop',
@@ -305,9 +305,9 @@ const KIND_ENTRIES: Array<{
     line: '`loop` — run `body`, then repeat while the `until` predicate does not hold; the body always runs at least once',
   },
   {
-    kind: 'every',
+    kind: 'schedule',
     group: 'structure',
-    line: '`every` — run `step` on an interval of `ms`, forever; nothing after it ever runs, so put it last',
+    line: '`schedule` — run `step` on an `interval`, forever; nothing after it ever runs, so put it last',
   },
   {
     kind: 'spawn',
@@ -315,9 +315,9 @@ const KIND_ENTRIES: Array<{
     line: '`spawn` — run `child` in an isolated context, so its work does not crowd this one',
   },
   {
-    kind: 'provide',
+    kind: 'withContext',
     group: 'structure',
-    line: '`provide` — run `child` with a named set of memory layers the host must have registered',
+    line: '`withContext` — run `child` with a named set of context layers the host must have registered',
   },
   {
     kind: 'subflow',
@@ -326,24 +326,12 @@ const KIND_ENTRIES: Array<{
   },
 ];
 
-/** The harness kinds share one line, so they are folded into the `claude-code` entry. */
-const HARNESS_KINDS: WorkflowNode['kind'][] = [
-  'claude-code',
-  'codex',
-  'opencode',
-  'pi',
-];
-
 function kindEntries(allowed?: WorkflowNode['kind'][]): typeof KIND_ENTRIES {
   if (!allowed) {
     return KIND_ENTRIES;
   }
   const permitted = new Set<string>(allowed);
-  return KIND_ENTRIES.filter((entry) =>
-    entry.kind === 'claude-code'
-      ? HARNESS_KINDS.some((kind) => permitted.has(kind))
-      : permitted.has(entry.kind),
-  );
+  return KIND_ENTRIES.filter((entry) => permitted.has(entry.kind));
 }
 
 function treeGuide(schemaUrl: string, allowed?: WorkflowNode['kind'][]): string {
@@ -369,8 +357,8 @@ ${structure.join('\n')}
 **Shaping it**
 - Keep the tree the user reviews SMALL — about seven top-level nodes, readable at a glance. Push the mechanics down.
 - Factor detail into named workflows: define each with \`plan/setWorkflow\` \`{ "name": "<slug>", "document": {...} }\` and point at it with \`{ "kind": "subflow", "id": "...", "ref": "<slug>" }\`. Named workflows may reference each other but must not form a cycle, and every ref must resolve or the exit is rejected.
-- Fork work that is genuinely independent; sequence work where one step needs the last one's output. Do not fork for the look of it.
-- Prefer \`tool\` over \`llm\` wherever the step is deterministic. A model turn that always does the same thing is a slow, expensive tool call.
+- Fan out work that is genuinely independent; sequence work where one step needs the last one's output. Do not fan out for the look of it.
+- Prefer \`invokeTool\` over \`callModel\` wherever the step is deterministic. A model turn that always does the same thing is a slow, expensive tool call.
 - Always give a \`loop\` a \`maxIterations\`. Without one it stops at a hard ceiling of 1000 and fails the step.`;
 }
 

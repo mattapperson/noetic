@@ -16,24 +16,25 @@
   ],
   "devDependencies": {
     "@biomejs/biome": "^2.3.11",
+    "@noetic-tools/acp": "workspace:*",
     "@noetic-tools/core": "workspace:*",
     "@noetic-tools/openui": "workspace:*",
-    "@noetic-tools/sub-harness": "workspace:*",
-    "@noetic-tools/sub-harness-claude-code": "workspace:*",
-    "@noetic-tools/sub-harness-codex": "workspace:*",
+    "bun-types": "latest",
+    "yaml": "^2.9.0",
     "zod": "^4.0.0"
   },
   "scripts": {
     "postinstall": "node scripts/patch-sdk.js",
-    "test": "bun --cwd=packages/types run test && bun --cwd=packages/context run test && bun --cwd=packages/memory run test && bun --cwd=packages/openui run test && bun --cwd=packages/agent-plugins run test && bun --cwd=packages/sub-harness run test && bun --cwd=packages/sub-harness-claude-code run test && bun --cwd=packages/sub-harness-codex run test && bun --cwd=packages/sub-harness-opencode run test && bun --cwd=packages/sub-harness-pi run test && bun --cwd=packages/chat-sdk run test && bun --cwd=packages/core run test && bun --cwd=packages/eval run test && bun --cwd=packages/inspector run test",
-    "test:coverage": "bun --cwd=packages/types run test:coverage && bun --cwd=packages/context run test:coverage && bun --cwd=packages/memory run test:coverage && bun --cwd=packages/openui run test:coverage && bun --cwd=packages/agent-plugins run test:coverage && bun --cwd=packages/sub-harness run test:coverage && bun --cwd=packages/sub-harness-claude-code run test:coverage && bun --cwd=packages/sub-harness-codex run test:coverage && bun --cwd=packages/sub-harness-opencode run test:coverage && bun --cwd=packages/sub-harness-pi run test:coverage && bun --cwd=packages/chat-sdk run test:coverage && bun --cwd=packages/core run test:coverage && bun --cwd=packages/eval run test:coverage && bun --cwd=packages/inspector run test:coverage",
-    "test:ci": "bun --cwd=packages/types run test:ci && bun --cwd=packages/context run test:ci && bun --cwd=packages/memory run test:ci && bun --cwd=packages/openui run test:ci && bun --cwd=packages/agent-plugins run test:ci && bun --cwd=packages/sub-harness run test:ci && bun --cwd=packages/sub-harness-claude-code run test:ci && bun --cwd=packages/sub-harness-codex run test:ci && bun --cwd=packages/sub-harness-opencode run test:ci && bun --cwd=packages/sub-harness-pi run test:ci && bun --cwd=packages/chat-sdk run test:ci && bun --cwd=packages/core run test:ci && bun --cwd=packages/eval run test:ci && bun --cwd=packages/inspector run test:ci",
+    "test": "bun --cwd=packages/types run test && bun --cwd=packages/context run test && bun --cwd=packages/openui run test && bun --cwd=packages/agent-plugins run test && bun --cwd=packages/acp run test && bun --cwd=packages/chat-sdk run test && bun --cwd=packages/core run test && bun --cwd=packages/eval run test && bun --cwd=packages/inspector run test",
+    "test:coverage": "bun --cwd=packages/types run test:coverage && bun --cwd=packages/context run test:coverage && bun --cwd=packages/openui run test:coverage && bun --cwd=packages/agent-plugins run test:coverage && bun --cwd=packages/acp run test:coverage && bun --cwd=packages/chat-sdk run test:coverage && bun --cwd=packages/core run test:coverage && bun --cwd=packages/eval run test:coverage && bun --cwd=packages/inspector run test:coverage",
+    "test:ci": "bun --cwd=packages/types run test:ci && bun --cwd=packages/context run test:ci && bun --cwd=packages/openui run test:ci && bun --cwd=packages/agent-plugins run test:ci && bun --cwd=packages/acp run test:ci && bun --cwd=packages/chat-sdk run test:ci && bun --cwd=packages/core run test:ci && bun --cwd=packages/eval run test:ci && bun --cwd=packages/inspector run test:ci",
     "lint": "bunx biome check .",
     "lint:fix": "bunx biome check --fix .",
     "format": "bunx biome format --write .",
     "format:check": "bunx biome format .",
     "check:exports": "bun scripts/check-export-tags.ts",
-    "example:sub-harness": "bun examples/sub-harness-e2e.ts",
+    "typecheck:examples": "bunx tsc --noEmit -p examples",
+    "example:acp": "bun examples/acp-e2e.ts",
     "inspect": "bun packages/inspector/server/host.ts"
   },
   "dependencies": {

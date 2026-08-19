@@ -12,7 +12,7 @@ import { createScriptedCallModel, makeLLMResponse, makeMockHarness } from '../_h
 describe('execute() switch', () => {
   it('dispatches run step', async () => {
     const step: Step<ContextData, string, number> = {
-      kind: 'run',
+      kind: 'runCode',
       id: 'test',
       execute: async (input: string) => input.length,
     };
@@ -40,7 +40,7 @@ describe('execute() switch', () => {
       },
       string
     > = {
-      kind: 'tool',
+      kind: 'invokeTool',
       id: 'echo-tool',
       tool,
     };
@@ -61,7 +61,7 @@ describe('execute() switch', () => {
 
   it('dispatches llm step via mock callModel', async () => {
     const step: Step<ContextData, string, string> = {
-      kind: 'llm',
+      kind: 'callModel',
       id: 'llm-test',
       model: 'test-model',
     };
@@ -78,7 +78,7 @@ describe('execute() switch', () => {
 
   it('throws when harness has no client configured', async () => {
     const step: Step<ContextData, string, string> = {
-      kind: 'llm',
+      kind: 'callModel',
       id: 'test',
       model: 'x',
     };
@@ -90,7 +90,7 @@ describe('execute() switch', () => {
 
   it('increments stepCount', async () => {
     const step: Step<ContextData, string, string> = {
-      kind: 'run',
+      kind: 'runCode',
       id: 'test',
       execute: async (input: string) => input,
     };
@@ -117,7 +117,7 @@ describe('execute() switch', () => {
     }
     expect(ctx.depth).toBe(64);
     const step: Step<ContextData, string, string> = {
-      kind: 'run',
+      kind: 'runCode',
       id: 'deep',
       execute: async (input: string) => input,
     };
@@ -138,7 +138,7 @@ describe('execute() switch', () => {
     });
     ctx.abort('test abort');
     const step: Step<ContextData, string, string> = {
-      kind: 'run',
+      kind: 'runCode',
       id: 'test',
       execute: async (input: string) => input,
     };
@@ -152,12 +152,12 @@ describe('execute() switch', () => {
     }
   });
 
-  it('branch step routes correctly', async () => {
+  it('conditional step routes correctly', async () => {
     const ctx = new ContextImpl({
       harness: makeMockHarness(),
     });
     const branchStep: Step<ContextData, string, string> = {
-      kind: 'branch',
+      kind: 'conditional',
       id: 'b',
       route: () => null,
     };
@@ -203,7 +203,7 @@ describe('AgentHarness', () => {
     });
     const ctx = harness.createContext();
     const step: Step<ContextData, string, number> = {
-      kind: 'run',
+      kind: 'runCode',
       id: 'len',
       execute: async (s: string) => s.length,
     };
@@ -221,7 +221,7 @@ describe('AgentHarness', () => {
     });
     const ctx = harness.createContext();
     const step: Step<ContextData, string, string> = {
-      kind: 'llm',
+      kind: 'callModel',
       id: 'test',
       model: 'gpt-4',
     };

@@ -58,7 +58,7 @@ interface ChannelState<T> {
   topicSubscribers: Set<(value: T) => void>;
   /**
    * Non-consuming wake subscribers — fired by every `send()` regardless of mode,
-   * after the primary delivery path runs. Used by `every({ wakeOn })` so the body
+   * after the primary delivery path runs. Used by `schedule({ inbox })` so the body
    * still sees pending queue / value entries on the next iteration.
    */
   wakeSubscribers: Set<() => void>;

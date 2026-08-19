@@ -9,8 +9,8 @@
 
 import type { ContextData } from '@noetic-tools/context';
 import type { StepLoop, StepSpawn } from '@noetic-tools/types';
-import { react } from '../src/patterns/react';
 import { createSyncDelegateTool } from './delegate-tools';
+import { react } from './react-agent';
 
 //#region Agent Builder
 

@@ -47,7 +47,7 @@ Slots determine the order in which layer outputs are injected into the prompt, w
 const Slot = {
   REMINDER: 80,
   STEERING: 90,
-  WORKING_MEMORY: 100,
+  SCRATCHPAD: 100,
   ENTITY: 150,
   OBSERVATIONS: 200,
   PROCEDURAL: 250,
@@ -199,10 +199,10 @@ Built-in layers ship with the placement that suits them:
 
 | Layer | Placement |
 |---|---|
-| [`staticContent`](/docs/framework/context-layers/static-content) | `'anchor'` |
-| [`fileReference`](/docs/framework/context-layers/file-reference) | `'anchor'`, and implements `renderDelta` |
+| [`instructions`](/docs/framework/context-layers/instructions) | `'anchor'` |
+| [`filesystem`](/docs/framework/context-layers/filesystem) | `'anchor'`, and implements `renderDelta` |
 | [`steering`](/docs/framework/context-layers/steering) | `'live'` |
-| [`temporalContext`](/docs/framework/context-layers/temporal-context) | `'live'` with `groundDateTime`, otherwise `'auto'` |
+| [`temporal`](/docs/framework/context-layers/temporal) | `'live'` with `groundDateTime`, otherwise `'auto'` |
 | everything else | `'auto'` |
 
 A layer whose `recall()` returns new state is **never** pinned, whatever its `placement` says: replaying an older render would drop the very thing that call committed. Steering drains its guidance queue as it renders, which is why it is live.
@@ -217,7 +217,7 @@ When a pinned layer's fresh output stops matching its pin, the runtime does not 
 <context_updates epoch="t:thread-1#0">
 These supersede the blocks with the same layer id earlier in this context.
 Where they disagree, these are correct.
-<update layer="file-reference" action="replace">
+<update layer="filesystem" action="replace">
 ...
 </update>
 </context_updates>
@@ -244,7 +244,7 @@ A provider that reports no cache figures, or that misses persistently, stops bei
 
 Once conversation history outgrows its share of the token budget, the oldest items start dropping each turn. That moves the boundary between the anchor band and history, so **the history portion of the cache is lost on every turn** even though `[system][anchor]` still caches. This is how the projector has always worked; anchoring does not change it, and a run that looks like it "stopped working" after a long conversation is usually this.
 
-Cap history with [`historyWindow`](/docs/framework/context-layers/history-window) so the drop happens at a size you chose, and the layer bands keep their full share of the budget instead of competing with an unbounded transcript.
+Cap history with [`history`](/docs/framework/context-layers/history) so the drop happens at a size you chose, and the layer bands keep their full share of the budget instead of competing with an unbounded transcript.
 
 ### ContextCacheConfig
 
@@ -336,29 +336,29 @@ Layers can expose typed data and functions via the `provides` field. Provided en
 Use the `context()` builder and `InferContext<>` utility type for compile-time type safety:
 
 ```ts
-import { context, workingMemoryContext, type Context, type InferContext } from '@noetic-tools/core';
+import { context, scratchpad, type Context, type InferContext } from '@noetic-tools/core';
 
-const mem = context([workingMemoryContext()]);
+const mem = context([scratchpad()]);
 type Mem = InferContext<typeof mem>;
 
 declare const ctx: Context<Mem>;
 
 // In a step, ctx.context is fully typed:
-const snap = ctx.context['working-context'].snapshot; // WorkingMemoryContextState
-await ctx.context['working-context'].update({ key: 'value' });
+const snap = ctx.context['scratchpad'].snapshot; // ScratchpadState
+await ctx.context['scratchpad'].update({ key: 'value' });
 ```
 
-See [Custom Layers](/docs/framework/context-layers/custom-layers) for how to define your own `provides` entries using `layerData()` and `layerFn()`.
+See [Custom Layers](/docs/framework/context-layers/custom-layers) for how to define your own `provides` entries using `layerData()` and `layerFunction()`.
 
 ## Next Steps
 
-- [Working Memory](/docs/framework/context-layers/working-memory-context) -- scratchpad for the current turn
-- [Observational Context](/docs/framework/context-layers/observational-context) -- auto-extracted facts
-- [Temporal Context](/docs/framework/context-layers/temporal-context) -- timestamped fact ledger with relative-time recall
+- [Scratchpad](/docs/framework/context-layers/scratchpad) -- working notes that persist across turns
+- [Observations](/docs/framework/context-layers/observations) -- auto-extracted facts
+- [Temporal](/docs/framework/context-layers/temporal) -- timestamped fact ledger with relative-time recall
 - [Steering](/docs/framework/context-layers/steering) -- rule-based allow/deny/guide control over tool calls and responses
-- [File Reference](/docs/framework/context-layers/file-reference) -- `#path` file tracking with priority-scored content injection
-- [Static Content](/docs/framework/context-layers/static-content) -- load-once instructional content
-- [History Window](/docs/framework/context-layers/history-window) -- cap items sent to the LLM
+- [Filesystem](/docs/framework/context-layers/filesystem) -- `#path` file tracking with priority-scored content injection
+- [Instructions](/docs/framework/context-layers/instructions) -- load-once instructional content
+- [History](/docs/framework/context-layers/history) -- cap items sent to the LLM
 - [Custom Layers](/docs/framework/context-layers/custom-layers) -- build your own
-- [Plan Context](/docs/framework/context-layers/plan-context) -- PRD authoring and plan execution lifecycle
-- [Tool Context](/docs/framework/context-layers/tool-context) -- imperative state access and function-call state
+- [Plan](/docs/framework/context-layers/plan) -- PRD authoring and plan execution lifecycle
+- [Tool Calls](/docs/framework/context-layers/tool-calls) -- imperative state access and function-call state

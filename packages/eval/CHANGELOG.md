@@ -1,3 +1,11 @@
+## @noetic-tools/eval-v1.0.2 (2026-08-14)
+
+* feat!: replace the sub-harness system with an Agent Client Protocol client (#89) ([eb4710d](https://github.com/mattapperson/noetic/commit/eb4710d)), closes [#89](https://github.com/mattapperson/noetic/issues/89)
+
+## @noetic-tools/eval-v1.0.1 (2026-08-12)
+
+* feat!: unify Noetic public API naming (#68) ([38cb18f](https://github.com/mattapperson/noetic/commit/38cb18f)), closes [#68](https://github.com/mattapperson/noetic/issues/68)
+
 ## @noetic-tools/eval-v1.0.0 (2026-07-15)
 
 * [codex] Add noetic plan-act code agent workflow (#36) ([8a41820](https://github.com/mattapperson/noetic/commit/8a41820)), closes [#36](https://github.com/mattapperson/noetic/issues/36)

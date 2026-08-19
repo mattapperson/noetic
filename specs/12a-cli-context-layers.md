@@ -1,6 +1,6 @@
 # 12a — CLI-Specific Context Layers
 
-> **Depends On:** `11-context-layer-system` (Slot, ContextLayer, hooks), `12-builtin-memory-layers` (base built-ins)
+> **Depends On:** `11-context-layer-system` (Slot, ContextLayer, hooks), `12-builtin-context-layers` (base built-ins)
 > **Status:** Stable
 
 This spec documents context layers shipped with `@noetic-tools/cli` that are not part of the core framework. They compose on top of the base layers defined in `12-builtin-context-layers.md`.
@@ -145,9 +145,9 @@ The reminder layer and agent-md layer are registered in `packages/cli/src/harnes
 |------|-------|
 | 80 (REMINDER) | `reminder` |
 | 90 (STEERING) | `plan` |
-| 100 (WORKING_MEMORY) | `working-context` |
+| 100 (SCRATCHPAD) | `scratchpad` |
 | 195 | `agent-md` |
-| 200 (OBSERVATIONS) | `observational-context` |
-| 250+ | `file-reference`, `durable-task-state`, tool-context layers, plugin layers, `skills` |
+| 200 (OBSERVATIONS) | `observations` |
+| 250+ | `filesystem`, `task-state`, toolCalls layers, plugin layers, `skills` |
 
 The reminder layer fires before steering so its developer messages are visible in the turn assembly; the agent-md layer sits just ahead of observations so project/user instructions establish context before runtime observations.

@@ -28,7 +28,7 @@ describe('CheckpointStore', () => {
       storage,
     });
     const snapshot: CheckpointSnapshot = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       executionId: 'exec-abc',
       threadId: 't-1',
       resourceId: 'u-1',
@@ -83,7 +83,7 @@ describe('CheckpointStore', () => {
       storage: createInMemoryStorage(),
     });
     const base: CheckpointSnapshot = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       executionId: 'a',
       frontier: [],
       layers: {},
@@ -116,7 +116,7 @@ describe('CheckpointStore', () => {
       storage: createInMemoryStorage(),
     });
     const snap: CheckpointSnapshot = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       executionId: 'x',
       frontier: [],
       layers: {},
@@ -154,8 +154,12 @@ describe('AgentHarness.checkpoint + restore', () => {
     const h1 = new AgentHarness({
       name: 'noeticTest',
       params: {},
-      storage,
-      checkpointStore,
+      environment: {
+        storage: {
+          adapter: storage,
+          checkpointStore,
+        },
+      },
     });
     const ctx = h1.createContext({});
     await h1.checkpoint(ctx);
@@ -163,8 +167,12 @@ describe('AgentHarness.checkpoint + restore', () => {
     const h2 = new AgentHarness({
       name: 'noeticTest',
       params: {},
-      storage,
-      checkpointStore,
+      environment: {
+        storage: {
+          adapter: storage,
+          checkpointStore,
+        },
+      },
     });
     const restored = await h2.restore(originalId);
     expect(restored).not.toBeNull();
@@ -179,8 +187,12 @@ describe('AgentHarness.checkpoint + restore', () => {
     const h = new AgentHarness({
       name: 'noeticTest',
       params: {},
-      storage,
-      checkpointStore,
+      environment: {
+        storage: {
+          adapter: storage,
+          checkpointStore,
+        },
+      },
     });
     expect(await h.restore('never-stored')).toBeNull();
   });
@@ -203,9 +215,13 @@ function makeHarnessPair(context?: ContextLayer[]): {
   const config = {
     name: 'noeticTest',
     params: {},
-    storage,
-    checkpointStore,
-    context,
+    environment: {
+      storage: {
+        adapter: storage,
+        checkpointStore,
+      },
+    },
+    contextLayers: context,
   };
   return {
     origin: new AgentHarness(config),
@@ -229,10 +245,9 @@ describe('AgentHarness.restore context wiring', () => {
     expect(getBroadcaster(restored)).toBe(broadcaster);
   });
 
-  it('lets the caller swap the context layers on restore, under either key', async () => {
+  it('lets the caller swap the context layers on restore', async () => {
     // `restore` forwards its opts straight to `createContext`, which owns the
-    // context/memory resolution and the harness-default fallback. These three
-    // cases pin that delegation: without them the compat path is untested.
+    // harness-default fallback. These cases pin that delegation.
     const harnessLayer = makeLayer('from-harness', {
       slot: 100,
     });
@@ -240,9 +255,6 @@ describe('AgentHarness.restore context wiring', () => {
       slot: 100,
     });
 
-    // Written as two explicit literals rather than a loop over a key union:
-    // a computed key widens to an index signature, so a typo would still
-    // compile and the check would silently become runtime-only.
     {
       const { origin, resumed } = makeHarnessPair([
         harnessLayer,
@@ -250,24 +262,7 @@ describe('AgentHarness.restore context wiring', () => {
       const ctx = origin.createContext({});
       await origin.checkpoint(ctx);
       const restored = await resumed.restore(ctx.id, {
-        context: [
-          overrideLayer,
-        ],
-      });
-      assert(restored);
-      expect(restored.layers).toEqual([
-        overrideLayer,
-      ]);
-    }
-
-    {
-      const { origin, resumed } = makeHarnessPair([
-        harnessLayer,
-      ]);
-      const ctx = origin.createContext({});
-      await origin.checkpoint(ctx);
-      const restored = await resumed.restore(ctx.id, {
-        memory: [
+        contextLayers: [
           overrideLayer,
         ],
       });
@@ -336,7 +331,7 @@ describe('AgentHarness.restore context wiring', () => {
     await origin.checkpoint(ctx);
 
     const restored = await resumed.restore(ctx.id, {
-      context: [
+      contextLayers: [
         makeLayer('call-layer', {
           slot: Slot.WORKING_MEMORY,
         }),

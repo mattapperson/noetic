@@ -19,18 +19,26 @@ interface AstDiscoveryContext {
 //#region Constants
 
 const BUILDER_NAMES = new Set([
-  'react',
-  'ralphWiggum',
-  'branch',
-  'fork',
+  'conditional',
+  'inParallel',
   'spawn',
   'loop',
+  'callModel',
+  'runCode',
+  'invokeTool',
+  // Not a step builder: `tool()` is the tool *definition* helper, routed to
+  // `processToolBuilderCall` instead of `processBuilderObjectLiteral`. Omitting
+  // it makes that branch unreachable, silently dropping every tool name and
+  // description — which spec 17 lists as L1-optimizable.
+  'tool',
 ]);
 
+// Sub-harness builders remain namespaced under `step.<harness>()`.
 const STEP_METHOD_NAMES = new Set([
-  'llm',
-  'run',
-  'tool',
+  'claudeCode',
+  'codex',
+  'opencode',
+  'pi',
 ]);
 
 //#endregion

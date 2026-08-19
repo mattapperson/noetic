@@ -15,7 +15,7 @@ const approvals = channel('approvals', {
 
 function sendingStep(values: string[]): Step<ContextData, string, string> {
   return {
-    kind: 'run',
+    kind: 'runCode',
     id: 'sender',
     execute: async (input: string, ctx) => {
       for (const value of values) {
@@ -87,7 +87,7 @@ describe('AgentHarness.getChannelStream', () => {
       'inner',
     ]);
     const outer: Step<ContextData, string, string> = {
-      kind: 'run',
+      kind: 'runCode',
       id: 'outer',
       execute: async (input: string, innerCtx) => {
         await innerCtx.harness.run(inner, input, innerCtx);
@@ -125,7 +125,7 @@ describe('AgentHarness.getChannelStream', () => {
     expect(handle.closed).toBe(true);
 
     const observer: Step<ContextData, string, string> = {
-      kind: 'run',
+      kind: 'runCode',
       id: 'observer',
       execute: async (input: string) => {
         // Mid-run the reused id must be open again for external senders.

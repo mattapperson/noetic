@@ -5,7 +5,7 @@ import { until } from '../../src/until/predicates';
 
 describe('loop builder', () => {
   const body = {
-    kind: 'run' as const,
+    kind: 'runCode' as const,
     id: 'child',
     execute: async (i: string) => i,
   };

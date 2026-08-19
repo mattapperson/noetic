@@ -1,5 +1,5 @@
 import type { LlmProviderConfig } from '@noetic-tools/core';
-import { AgentHarness, step } from '@noetic-tools/core';
+import { AgentHarness, callModel } from '@noetic-tools/core';
 import type { ZodType } from 'zod';
 
 import type { EvalExecution, ScoreResult, ScorerFn } from './types';
@@ -10,13 +10,13 @@ interface ScorerPipelineConfig {
   id: string;
   judge?: {
     model: string;
-    llm?: LlmProviderConfig;
+    callModel?: LlmProviderConfig;
   };
 }
 
 interface JudgeConfig {
   model: string;
-  llm?: LlmProviderConfig;
+  callModel?: LlmProviderConfig;
 }
 
 interface PipelineStep1 {
@@ -89,7 +89,7 @@ function buildAnalyzeScorerFn<T, R>(
     const prompt = analyzeConfig.createPrompt(preprocessed, objective);
 
     const model = judge?.model ?? 'openai/gpt-4o-mini';
-    const judgeStep = step.llm({
+    const judgeStep = callModel({
       id: `${pipelineId}-judge`,
       model,
       instructions: prompt,
@@ -98,7 +98,7 @@ function buildAnalyzeScorerFn<T, R>(
     const harness = new AgentHarness({
       name: 'scorer-analyze',
       params: {},
-      llm: judge?.llm,
+      callModelDefaults: judge?.callModel,
     });
     const ctx = harness.createContext();
     const raw = await harness.run(judgeStep, background, ctx);
@@ -178,7 +178,7 @@ function makePipelineStep4(
           }
 
           const model = judge.model ?? 'openai/gpt-4o-mini';
-          const reasonStep = step.llm({
+          const reasonStep = callModel({
             id: `${pipelineId}-reason`,
             model,
             instructions: reasonConfig.createPrompt(result.score),
@@ -187,7 +187,7 @@ function makePipelineStep4(
           const harness = new AgentHarness({
             name: 'scorer-reason',
             params: {},
-            llm: judge.llm,
+            callModelDefaults: judge.callModel,
           });
           const ctx = harness.createContext();
           const reason = await harness.run(reasonStep, '', ctx);

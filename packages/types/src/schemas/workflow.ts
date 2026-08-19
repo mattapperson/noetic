@@ -2,15 +2,14 @@
  * Zod schemas for JSON-serialisable workflow definitions.
  *
  * A `WorkflowDocument` is a portable, JSON-safe representation of a noetic
- * step tree. It covers every step kind. The `run` node carries its body as a
- * code STRING (not an in-process closure) dispatched through a subprocess
+ * step tree. It covers every step kind. The `runCode` node carries its body as
+ * a code STRING (not an in-process closure) dispatched through a subprocess
  * adapter, keeping the document JSON-safe. The hydrator in
  * `@noetic-tools/core` (`builders/workflow-hydrator.ts`) converts a validated
  * document back into live `Step` objects via the existing builders.
  */
 
 import { z } from 'zod';
-import type { SubHarnessKind } from '../types/sub-harness';
 
 //#region Until Predicate Types
 
@@ -36,10 +35,13 @@ export type UntilPredicate =
     }
   | {
       kind: 'maxDuration';
-      ms: number;
+      duration: number;
     }
   | {
       kind: 'noToolCalls';
+    }
+  | {
+      kind: 'never';
     }
   | {
       kind: 'outputContains';
@@ -72,11 +74,15 @@ const MaxCostPredicateSchema = z.object({
 
 const MaxDurationPredicateSchema = z.object({
   kind: z.literal('maxDuration'),
-  ms: z.number().positive(),
+  duration: z.number().positive(),
 });
 
 const NoToolCallsPredicateSchema = z.object({
   kind: z.literal('noToolCalls'),
+});
+
+const NeverPredicateSchema = z.object({
+  kind: z.literal('never'),
 });
 
 const OutputContainsPredicateSchema = z.object({
@@ -113,6 +119,7 @@ export const UntilPredicateSchema: z.ZodType<UntilPredicate> = z
     MaxCostPredicateSchema,
     MaxDurationPredicateSchema,
     NoToolCallsPredicateSchema,
+    NeverPredicateSchema,
     OutputContainsPredicateSchema,
     OutputEqualsPredicateSchema,
     ConvergedPredicateSchema,
@@ -135,10 +142,10 @@ export const MergeStrategy = {
   Concat: 'concat',
 } as const;
 
-/** @public Named merge strategy for fork nodes. */
+/** @public Named merge strategy for inParallel nodes. */
 export type MergeStrategy = (typeof MergeStrategy)[keyof typeof MergeStrategy];
 
-/** @public Zod schema for the named merge strategy used by `fork` nodes. */
+/** @public Zod schema for the named merge strategy used by `inParallel` nodes. */
 export const MergeStrategySchema = z.enum([
   'last',
   'first',
@@ -161,7 +168,7 @@ const ModelParamsSchema = z.object({
 //#region Tool Entries
 
 /**
- * A uniform tool entry on an `llm` node. Every entry is an object keyed by
+ * A uniform tool entry on a `callModel` node. Every entry is an object keyed by
  * `type`:
  *   - A CLIENT tool is `{ type: "<registered-tool-name>" }`. The hydrator
  *     resolves `type` against the tool registry; `parameters` (if present) is
@@ -174,7 +181,7 @@ const ModelParamsSchema = z.object({
  * Server vs client is decided by the `type` value (a reserved `openrouter:*`
  * server-tool literal vs an arbitrary tool name), not by the entry's shape.
  */
-const LlmToolEntrySchema = z.object({
+const CallModelToolEntrySchema = z.object({
   type: z.string().min(1),
   parameters: z.record(z.string(), z.unknown()).optional(),
 });
@@ -183,7 +190,7 @@ const LlmToolEntrySchema = z.object({
 
 //#region Retry Policy
 
-/** Retry policy for a `run` node, mirroring `RetryPolicy` in `@noetic-tools/types`. */
+/** Retry policy for a `runCode` node, mirroring `RetryPolicy` in `@noetic-tools/types`. */
 const RetryPolicySchema = z.object({
   maxAttempts: z.number().int().positive(),
   backoff: z.enum([
@@ -197,32 +204,92 @@ const RetryPolicySchema = z.object({
 
 //#endregion
 
-//#region SubHarness Settings
+//#region ACP Agent Settings
 
-const HarnessSettingsSchema = z.object({
-  model: z.string().optional(),
-  permissionMode: z
-    .enum([
-      'default',
-      'plan',
-      'acceptEdits',
-      'bypassPermissions',
-    ])
-    .optional(),
-  maxTurns: z.number().int().positive().optional(),
-  allowedTools: z.array(z.string()).optional(),
-  extra: z.record(z.string(), z.unknown()).optional(),
+/** ACP `ToolKind` — the agent's own classification of a tool call. */
+const AcpToolKindSchema = z.enum([
+  'read',
+  'edit',
+  'delete',
+  'move',
+  'search',
+  'execute',
+  'think',
+  'fetch',
+  'switch_mode',
+  'other',
+]);
+
+const AcpPermissionDecisionSchema = z.enum([
+  'allow',
+  'deny',
+  'cancel',
+]);
+
+/**
+ * A permission rule. Both fields are optional matchers; an omitted field
+ * matches anything. `title` is a case-insensitive substring match here — the
+ * programmatic API additionally accepts a `RegExp`, which JSON cannot express.
+ */
+const AcpPermissionRuleSchema = z.object({
+  kind: AcpToolKindSchema.optional(),
+  title: z.string().min(1).optional(),
 });
 
-const HarnessSessionPolicySchema = z.object({
+const AcpPermissionPolicySchema = z.object({
+  default: AcpPermissionDecisionSchema.optional(),
+  allow: z.array(AcpPermissionRuleSchema).optional(),
+  deny: z.array(AcpPermissionRuleSchema).optional(),
+  persist: z.boolean().optional(),
+});
+
+const AcpClientCapabilityConfigSchema = z.object({
+  readTextFile: z.boolean().optional(),
+  writeTextFile: z.boolean().optional(),
+  terminal: z.boolean().optional(),
+});
+
+const AcpNamedValueSchema = z.object({
+  name: z.string(),
+  value: z.string(),
+});
+
+/** ACP `McpServer`. Stdio is untagged and mandatory for every agent; http/sse are capability-gated. */
+const AcpMcpServerSchema = z.union([
+  z.object({
+    type: z.literal('http'),
+    name: z.string().min(1),
+    url: z.string(),
+    headers: z.array(AcpNamedValueSchema),
+  }),
+  z.object({
+    type: z.literal('sse'),
+    name: z.string().min(1),
+    url: z.string(),
+    headers: z.array(AcpNamedValueSchema),
+  }),
+  z.object({
+    name: z.string().min(1),
+    command: z.string().min(1),
+    args: z.array(z.string()),
+    env: z.array(AcpNamedValueSchema),
+  }),
+]);
+
+const AcpSessionPolicySchema = z.object({
   reuse: z.string().min(1).optional(),
-  onComplete: z
+  /**
+   * How long the connection is kept alive. Defaults to `step`; `run` and
+   * `harness` are explicit opt-ins because a connection owns a live agent.
+   */
+  keepAlive: z
     .enum([
-      'stop',
-      'detach',
-      'destroy',
+      'step',
+      'run',
+      'harness',
     ])
     .optional(),
+  load: z.string().min(1).optional(),
 });
 
 //#endregion
@@ -234,10 +301,10 @@ interface WorkflowNodeBase {
 }
 
 /**
- * A reference to a streaming `OutputCodec` for an `llm` node's structured
+ * A reference to a streaming `OutputCodec` for a `callModel` node's structured
  * output. The hydrator resolves `library` from `HydrationContext.uiLibraries`
  * to a live codec (e.g. `openUi(myLibrary)` from `@noetic-tools/openui`), the
- * same registry-resolution pattern sub-harness nodes use for adapters. Kept a
+ * same registry-resolution pattern `acp-agent` nodes use for adapters. Kept a
  * *reference* because a codec is a runtime object, not JSON-expressible.
  */
 export interface OutputCodecRef {
@@ -247,8 +314,8 @@ export interface OutputCodecRef {
   library: string;
 }
 
-export interface LlmWorkflowNode extends WorkflowNodeBase {
-  kind: 'llm';
+export interface CallModelWorkflowNode extends WorkflowNodeBase {
+  kind: 'callModel';
   model?: string;
   instructions: string;
   /**
@@ -258,28 +325,29 @@ export interface LlmWorkflowNode extends WorkflowNodeBase {
    * parameters?: {...} }` (executed by the provider). Client vs server is
    * decided by the `type` value.
    */
-  tools?: z.infer<typeof LlmToolEntrySchema>[];
+  tools?: z.infer<typeof CallModelToolEntrySchema>[];
   params?: z.infer<typeof ModelParamsSchema>;
   /** Streaming output-codec reference, resolved from `HydrationContext.uiLibraries`. */
   output?: OutputCodecRef;
 }
 
-export interface ToolWorkflowNode extends WorkflowNodeBase {
-  kind: 'tool';
+export interface InvokeToolWorkflowNode extends WorkflowNodeBase {
+  kind: 'invokeTool';
   toolName: string;
   args?: Record<string, unknown>;
 }
 
 /**
- * A node that runs a serialised code body. Unlike the programmatic `step.run`
- * (which carries a closure), the JSON form carries `execute` as a code STRING.
+ * A node that runs a serialised code body. Unlike the programmatic
+ * `step.runCode` (which carries a closure), the JSON form carries `execute` as
+ * a code STRING.
  * The code is never eval'd in-process (Cloudflare Workers forbid eval); it is
  * dispatched through a subprocess adapter (`ctx.subprocess`, or a named adapter
  * resolved by ref). Execution therefore requires a subprocess adapter capable
  * of running the code and returning its stdout.
  */
-export interface RunWorkflowNode extends WorkflowNodeBase {
-  kind: 'run';
+export interface RunCodeWorkflowNode extends WorkflowNodeBase {
+  kind: 'runCode';
   /** Source code executed in the subprocess. Receives the step input on stdin. */
   execute: string;
   /** Optional retry policy applied to the step. */
@@ -288,19 +356,19 @@ export interface RunWorkflowNode extends WorkflowNodeBase {
   subprocess?: string;
 }
 
-export interface BranchRoute {
+export interface ConditionalRoute {
   match: string;
   target: WorkflowNode;
 }
 
-export interface BranchWorkflowNode extends WorkflowNodeBase {
-  kind: 'branch';
-  routes: BranchRoute[];
+export interface ConditionalWorkflowNode extends WorkflowNodeBase {
+  kind: 'conditional';
+  routes: ConditionalRoute[];
   default?: WorkflowNode;
 }
 
-export interface ForkWorkflowNode extends WorkflowNodeBase {
-  kind: 'fork';
+export interface InParallelWorkflowNode extends WorkflowNodeBase {
+  kind: 'inParallel';
   mode: 'race' | 'all' | 'settle';
   /**
    * Static fan-out: one child per entry. Mutually exclusive with `each` —
@@ -313,8 +381,8 @@ export interface ForkWorkflowNode extends WorkflowNodeBase {
    */
   each?: WorkflowNode;
   /**
-   * Selector key into the fork input (parsed as JSON) locating the array to
-   * fan out over. When omitted, the input string itself is parsed as a JSON
+   * Selector key into the inParallel input (parsed as JSON) locating the array
+   * to fan out over. When omitted, the input string itself is parsed as a JSON
    * array. Only meaningful with `each`.
    */
   over?: string;
@@ -328,15 +396,15 @@ export interface SpawnWorkflowNode extends WorkflowNodeBase {
   timeout?: number;
   /**
    * Memory layers the child runs with, by registered name (resolved from
-   * `HydrationContext.layers`, like `provide`). Omit to inherit the parent's
-   * layers — the default spawn behaviour. Naming layers here REPLACES the
-   * inherited set for the child, so list every layer the child needs.
+   * `HydrationContext.layers`, like `withContext`). Omit to inherit the
+   * parent's layers — the default spawn behaviour. Naming layers here REPLACES
+   * the inherited set for the child, so list every layer the child needs.
    */
   layers?: string[];
 }
 
-export interface ProvideWorkflowNode extends WorkflowNodeBase {
-  kind: 'provide';
+export interface WithContextWorkflowNode extends WorkflowNodeBase {
+  kind: 'withContext';
   child: WorkflowNode;
   layers: string[];
 }
@@ -353,24 +421,34 @@ export interface SequenceWorkflowNode extends WorkflowNodeBase {
   steps: WorkflowNode[];
 }
 
-export interface EveryWorkflowNode extends WorkflowNodeBase {
-  kind: 'every';
+export interface ScheduleWorkflowNode extends WorkflowNodeBase {
+  kind: 'schedule';
   step: WorkflowNode;
-  ms: number;
+  interval: number;
   onError?: 'continue' | 'fail';
 }
 
 /**
- * A node that delegates a turn to a coding-agent harness. `kind` is the harness
- * id (e.g. `claude-code`); the hydrator resolves the matching adapter from the
- * workflow's harness registry.
+ * A node that delegates a turn to an external coding agent over the Agent
+ * Client Protocol. `agent` is a registry key resolved from
+ * `HydrationContext.acpAgents` — an OPEN set, so supporting a new agent never
+ * changes this schema.
  */
-export interface SubHarnessWorkflowNode extends WorkflowNodeBase {
-  kind: SubHarnessKind;
+export interface AcpAgentWorkflowNode extends WorkflowNodeBase {
+  kind: 'acp-agent';
+  /** Registry key for the ACP agent adapter (e.g. `claude-code`). */
+  agent: string;
   prompt: string;
-  instructions?: string;
-  settings?: z.infer<typeof HarnessSettingsSchema>;
-  session?: z.infer<typeof HarnessSessionPolicySchema>;
+  /** Absolute working directory for the session. Defaults to the runtime cwd. */
+  cwd?: string;
+  /** Session mode to switch to before prompting. */
+  mode?: string;
+  /** Model to select before prompting. */
+  model?: string;
+  mcpServers?: z.infer<typeof AcpMcpServerSchema>[];
+  permissions?: z.infer<typeof AcpPermissionPolicySchema>;
+  clientCapabilities?: z.infer<typeof AcpClientCapabilityConfigSchema>;
+  session?: z.infer<typeof AcpSessionPolicySchema>;
 }
 
 /**
@@ -390,18 +468,18 @@ export interface SubflowWorkflowNode extends WorkflowNodeBase {
 
 /** @public Discriminated union of all JSON-serialisable workflow node kinds. */
 export type WorkflowNode =
-  | LlmWorkflowNode
-  | ToolWorkflowNode
-  | RunWorkflowNode
-  | BranchWorkflowNode
-  | ForkWorkflowNode
+  | CallModelWorkflowNode
+  | InvokeToolWorkflowNode
+  | RunCodeWorkflowNode
+  | ConditionalWorkflowNode
+  | InParallelWorkflowNode
   | SpawnWorkflowNode
-  | ProvideWorkflowNode
+  | WithContextWorkflowNode
   | LoopWorkflowNode
   | SequenceWorkflowNode
-  | EveryWorkflowNode
+  | ScheduleWorkflowNode
   | SubflowWorkflowNode
-  | SubHarnessWorkflowNode;
+  | AcpAgentWorkflowNode;
 
 //#endregion
 
@@ -418,46 +496,46 @@ const OutputCodecRefSchema = z.object({
   library: z.string().min(1),
 });
 
-const LlmNodeSchema = z.object({
-  kind: z.literal('llm'),
+const CallModelNodeSchema = z.object({
+  kind: z.literal('callModel'),
   ...SHARED_FIELDS,
   model: z.string().optional(),
   instructions: z.string(),
-  tools: z.array(LlmToolEntrySchema).optional(),
+  tools: z.array(CallModelToolEntrySchema).optional(),
   params: ModelParamsSchema.optional(),
   output: OutputCodecRefSchema.optional(),
 });
 
-const ToolNodeSchema = z.object({
-  kind: z.literal('tool'),
+const InvokeToolNodeSchema = z.object({
+  kind: z.literal('invokeTool'),
   ...SHARED_FIELDS,
   toolName: z.string().min(1),
   args: z.record(z.string(), z.unknown()).optional(),
 });
 
-const RunNodeSchema = z.object({
-  kind: z.literal('run'),
+const RunCodeNodeSchema = z.object({
+  kind: z.literal('runCode'),
   ...SHARED_FIELDS,
   execute: z.string().min(1),
   retry: RetryPolicySchema.optional(),
   subprocess: z.string().min(1).optional(),
 });
 
-const BranchRouteSchema = z.object({
+const ConditionalRouteSchema = z.object({
   match: z.string().min(1),
   target: z.lazy(() => WorkflowNodeSchema),
 });
 
-const BranchNodeSchema = z.object({
-  kind: z.literal('branch'),
+const ConditionalNodeSchema = z.object({
+  kind: z.literal('conditional'),
   ...SHARED_FIELDS,
-  routes: z.array(BranchRouteSchema).min(1),
+  routes: z.array(ConditionalRouteSchema).min(1),
   default: WorkflowNodeRef.optional(),
 });
 
-const ForkNodeSchema = z
+const InParallelNodeSchema = z
   .object({
-    kind: z.literal('fork'),
+    kind: z.literal('inParallel'),
     ...SHARED_FIELDS,
     mode: z.enum([
       'race',
@@ -471,7 +549,7 @@ const ForkNodeSchema = z
     concurrency: z.number().int().positive().optional(),
   })
   .refine((node) => (node.paths === undefined) !== (node.each === undefined), {
-    message: "fork node requires exactly one of 'paths' (static) or 'each' (dynamic).",
+    message: "inParallel node requires exactly one of 'paths' (static) or 'each' (dynamic).",
   });
 
 const SpawnNodeSchema = z.object({
@@ -482,8 +560,8 @@ const SpawnNodeSchema = z.object({
   layers: z.array(z.string().min(1)).min(1).optional(),
 });
 
-const ProvideNodeSchema = z.object({
-  kind: z.literal('provide'),
+const WithContextNodeSchema = z.object({
+  kind: z.literal('withContext'),
   ...SHARED_FIELDS,
   child: WorkflowNodeRef,
   layers: z.array(z.string().min(1)).min(1),
@@ -503,11 +581,11 @@ const SequenceNodeSchema = z.object({
   steps: z.array(WorkflowNodeRef).min(1),
 });
 
-const EveryNodeSchema = z.object({
-  kind: z.literal('every'),
+const ScheduleNodeSchema = z.object({
+  kind: z.literal('schedule'),
   ...SHARED_FIELDS,
   step: WorkflowNodeRef,
-  ms: z.number().nonnegative(),
+  interval: z.number().nonnegative(),
   onError: z
     .enum([
       'continue',
@@ -530,41 +608,35 @@ const SubflowNodeSchema = z
     message: "subflow node requires exactly one of 'document' (inline) or 'ref' (named).",
   });
 
-/** Builds the schema for a single harness node kind (`claude-code`, `codex`, …). */
-function subHarnessNodeSchema<K extends SubHarnessKind>(kind: K) {
-  return z.object({
-    kind: z.literal(kind),
-    ...SHARED_FIELDS,
-    prompt: z.string().min(1),
-    instructions: z.string().optional(),
-    settings: HarnessSettingsSchema.optional(),
-    session: HarnessSessionPolicySchema.optional(),
-  });
-}
-
-const ClaudeCodeNodeSchema = subHarnessNodeSchema('claude-code');
-const CodexNodeSchema = subHarnessNodeSchema('codex');
-const OpencodeNodeSchema = subHarnessNodeSchema('opencode');
-const PiNodeSchema = subHarnessNodeSchema('pi');
+const AcpAgentNodeSchema = z.object({
+  kind: z.literal('acp-agent'),
+  ...SHARED_FIELDS,
+  agent: z.string().min(1),
+  prompt: z.string().min(1),
+  cwd: z.string().min(1).optional(),
+  mode: z.string().min(1).optional(),
+  model: z.string().min(1).optional(),
+  mcpServers: z.array(AcpMcpServerSchema).optional(),
+  permissions: AcpPermissionPolicySchema.optional(),
+  clientCapabilities: AcpClientCapabilityConfigSchema.optional(),
+  session: AcpSessionPolicySchema.optional(),
+});
 
 /** @public Zod schema validating a single `WorkflowNode` (any JSON-safe kind). */
 export const WorkflowNodeSchema: z.ZodType<WorkflowNode> = z
   .discriminatedUnion('kind', [
-    LlmNodeSchema,
-    ToolNodeSchema,
-    RunNodeSchema,
-    BranchNodeSchema,
-    ForkNodeSchema,
+    CallModelNodeSchema,
+    InvokeToolNodeSchema,
+    RunCodeNodeSchema,
+    ConditionalNodeSchema,
+    InParallelNodeSchema,
     SpawnNodeSchema,
-    ProvideNodeSchema,
+    WithContextNodeSchema,
     LoopNodeSchema,
     SequenceNodeSchema,
-    EveryNodeSchema,
+    ScheduleNodeSchema,
     SubflowNodeSchema,
-    ClaudeCodeNodeSchema,
-    CodexNodeSchema,
-    OpencodeNodeSchema,
-    PiNodeSchema,
+    AcpAgentNodeSchema,
   ])
   .meta({
     id: 'WorkflowNode',
@@ -602,7 +674,7 @@ function childNodes(node: WorkflowNode): WorkflowNode[] {
   switch (node.kind) {
     case 'sequence':
       return node.steps;
-    case 'fork':
+    case 'inParallel':
       if (node.each) {
         return [
           node.each,
@@ -610,7 +682,7 @@ function childNodes(node: WorkflowNode): WorkflowNode[] {
       }
       return node.paths ?? [];
     case 'spawn':
-    case 'provide':
+    case 'withContext':
       return [
         node.child,
       ];
@@ -618,11 +690,11 @@ function childNodes(node: WorkflowNode): WorkflowNode[] {
       return [
         node.body,
       ];
-    case 'every':
+    case 'schedule':
       return [
         node.step,
       ];
-    case 'branch': {
+    case 'conditional': {
       const children = node.routes.map((r) => r.target);
       if (node.default) {
         children.push(node.default);
@@ -696,7 +768,7 @@ export function workflowGraph(root: WorkflowNode): WorkflowGraph {
 
 /**
  * Returns the maximum depth of a workflow tree.
- * Leaf nodes (`llm`, `tool`) have depth 0. Structural nodes add +1.
+ * Leaf nodes (`callModel`, `invokeTool`) have depth 0. Structural nodes add +1.
  * A `subflow` ref counts as a leaf — depth does not see through named refs.
  */
 export function workflowDepth(node: WorkflowNode): number {

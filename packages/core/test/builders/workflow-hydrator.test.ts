@@ -2,10 +2,9 @@ import { describe, expect, test } from 'bun:test';
 import assert from 'node:assert';
 import type { ContextLayer } from '@noetic-tools/context';
 import type {
+  AcpAgent,
   OutputCodec,
   ProcessSubprocessRequest,
-  SubHarness,
-  SubHarnessKind,
   SubprocessAdapter,
   SubprocessHandle,
   Tool,
@@ -82,23 +81,23 @@ function makeHydrationContext(
 }
 
 describe('hydrateNode — llm', () => {
-  test('produces StepLLM with correct fields', () => {
+  test('produces StepCallModel with correct fields', () => {
     const node: WorkflowNode = {
-      kind: 'llm',
+      kind: 'callModel',
       id: 'test-llm',
       model: 'openai/gpt-4o-mini',
       instructions: 'Say hello',
     };
     const ctx = makeHydrationContext();
     const result = hydrateNode(node, ctx);
-    expect(result.kind).toBe('llm');
+    expect(result.kind).toBe('callModel');
     expect(result.id).toBe('test-llm');
   });
 
   test('resolves tool names from registry', () => {
     const testTool = makeTestTool();
     const node: WorkflowNode = {
-      kind: 'llm',
+      kind: 'callModel',
       id: 'llm-tools',
       instructions: 'Use tools',
       tools: [
@@ -111,15 +110,15 @@ describe('hydrateNode — llm', () => {
       testTool,
     ]);
     const result = hydrateNode(node, ctx);
-    expect(result.kind).toBe('llm');
-    assert(result.kind === 'llm');
+    expect(result.kind).toBe('callModel');
+    assert(result.kind === 'callModel');
     const resolvedTools = typeof result.tools === 'function' ? undefined : result.tools;
     expect(resolvedTools).toHaveLength(1);
   });
 
   test('throws UNKNOWN_TOOL_REFERENCE for missing tool', () => {
     const node: WorkflowNode = {
-      kind: 'llm',
+      kind: 'callModel',
       id: 'llm-bad-tool',
       instructions: 'Use tools',
       tools: [
@@ -141,7 +140,7 @@ describe('hydrateNode — llm', () => {
       }),
     };
     const node: WorkflowNode = {
-      kind: 'llm',
+      kind: 'callModel',
       id: 'llm-ui',
       instructions: 'Render a dashboard',
       output: {
@@ -159,13 +158,13 @@ describe('hydrateNode — llm', () => {
       ]),
     };
     const result = hydrateNode(node, ctx);
-    assert(result.kind === 'llm');
+    assert(result.kind === 'callModel');
     expect(result.output).toBe(codec);
   });
 
   test('throws UNKNOWN_UI_LIBRARY_REFERENCE for an unregistered library', () => {
     const node: WorkflowNode = {
-      kind: 'llm',
+      kind: 'callModel',
       id: 'llm-bad-ui',
       instructions: 'Render',
       output: {
@@ -186,12 +185,12 @@ describe('hydrateNode — llm', () => {
 
   test('llm node without an output ref leaves output undefined', () => {
     const node: WorkflowNode = {
-      kind: 'llm',
+      kind: 'callModel',
       id: 'llm-plain',
       instructions: 'Say hello',
     };
     const result = hydrateNode(node, makeHydrationContext());
-    assert(result.kind === 'llm');
+    assert(result.kind === 'callModel');
     expect(result.output).toBeUndefined();
   });
 });
@@ -200,7 +199,7 @@ describe('hydrateNode — tool', () => {
   test('produces a step that executes the tool', async () => {
     const testTool = makeTestTool();
     const node: WorkflowNode = {
-      kind: 'tool',
+      kind: 'invokeTool',
       id: 'tool-step',
       toolName: 'test-tool',
       args: {
@@ -211,13 +210,13 @@ describe('hydrateNode — tool', () => {
       testTool,
     ]);
     const result = hydrateNode(node, ctx);
-    expect(result.kind).toBe('run');
+    expect(result.kind).toBe('runCode');
     expect(result.id).toBe('tool-step');
   });
 
   test('throws UNKNOWN_TOOL_REFERENCE for missing tool', () => {
     const node: WorkflowNode = {
-      kind: 'tool',
+      kind: 'invokeTool',
       id: 'tool-bad',
       toolName: 'missing',
     };
@@ -226,42 +225,42 @@ describe('hydrateNode — tool', () => {
   });
 });
 
-describe('hydrateNode — branch', () => {
-  test('produces StepBranch', () => {
+describe('hydrateNode — conditional', () => {
+  test('produces StepConditional', () => {
     const node: WorkflowNode = {
-      kind: 'branch',
-      id: 'branch-test',
+      kind: 'conditional',
+      id: 'conditional-test',
       routes: [
         {
           match: 'yes',
           target: {
-            kind: 'llm',
+            kind: 'callModel',
             id: 'yes-step',
             instructions: 'affirm',
           },
         },
       ],
       default: {
-        kind: 'llm',
+        kind: 'callModel',
         id: 'default-step',
         instructions: 'nope',
       },
     };
     const ctx = makeHydrationContext();
     const result = hydrateNode(node, ctx);
-    expect(result.kind).toBe('branch');
-    expect(result.id).toBe('branch-test');
+    expect(result.kind).toBe('conditional');
+    expect(result.id).toBe('conditional-test');
   });
 
   test('route function matches substring', async () => {
     const node: WorkflowNode = {
-      kind: 'branch',
-      id: 'branch-match',
+      kind: 'conditional',
+      id: 'conditional-match',
       routes: [
         {
           match: 'approve',
           target: {
-            kind: 'llm',
+            kind: 'callModel',
             id: 'approved',
             instructions: 'approved',
           },
@@ -270,7 +269,7 @@ describe('hydrateNode — branch', () => {
     };
     const ctx = makeHydrationContext();
     const result = hydrateNode(node, ctx);
-    assert(result.kind === 'branch');
+    assert(result.kind === 'conditional');
     const selected = await result.route('I approve this', makeMockContext());
     expect(selected).not.toBeNull();
     expect(selected?.id).toBe('approved');
@@ -278,46 +277,46 @@ describe('hydrateNode — branch', () => {
 
   test('route function returns default for no match', async () => {
     const node: WorkflowNode = {
-      kind: 'branch',
-      id: 'branch-default',
+      kind: 'conditional',
+      id: 'conditional-default',
       routes: [
         {
           match: 'xyz',
           target: {
-            kind: 'llm',
+            kind: 'callModel',
             id: 'xyz-step',
             instructions: 'xyz',
           },
         },
       ],
       default: {
-        kind: 'llm',
+        kind: 'callModel',
         id: 'fallback',
         instructions: 'fallback',
       },
     };
     const ctx = makeHydrationContext();
     const result = hydrateNode(node, ctx);
-    assert(result.kind === 'branch');
+    assert(result.kind === 'conditional');
     const selected = await result.route('no match here', makeMockContext());
     expect(selected?.id).toBe('fallback');
   });
 });
 
-describe('hydrateNode — fork', () => {
-  test('produces StepFork race', () => {
+describe('hydrateNode — inParallel', () => {
+  test('produces StepInParallel race', () => {
     const node: WorkflowNode = {
-      kind: 'fork',
-      id: 'fork-race',
+      kind: 'inParallel',
+      id: 'inParallel-race',
       mode: 'race',
       paths: [
         {
-          kind: 'llm',
+          kind: 'callModel',
           id: 'p1',
           instructions: 'a',
         },
         {
-          kind: 'llm',
+          kind: 'callModel',
           id: 'p2',
           instructions: 'b',
         },
@@ -325,19 +324,19 @@ describe('hydrateNode — fork', () => {
     };
     const ctx = makeHydrationContext();
     const result = hydrateNode(node, ctx);
-    expect(result.kind).toBe('fork');
-    assert(result.kind === 'fork');
+    expect(result.kind).toBe('inParallel');
+    assert(result.kind === 'inParallel');
     expect(result.mode).toBe('race');
   });
 
-  test('produces StepFork all with merge', () => {
+  test('produces StepInParallel all with merge', () => {
     const node: WorkflowNode = {
-      kind: 'fork',
-      id: 'fork-all',
+      kind: 'inParallel',
+      id: 'inParallel-all',
       mode: 'all',
       paths: [
         {
-          kind: 'llm',
+          kind: 'callModel',
           id: 'p1',
           instructions: 'a',
         },
@@ -346,8 +345,8 @@ describe('hydrateNode — fork', () => {
     };
     const ctx = makeHydrationContext();
     const result = hydrateNode(node, ctx);
-    expect(result.kind).toBe('fork');
-    assert(result.kind === 'fork');
+    expect(result.kind).toBe('inParallel');
+    assert(result.kind === 'inParallel');
     assert(result.mode === 'all');
     const merged = result.merge(
       [
@@ -366,7 +365,7 @@ describe('hydrateNode — spawn', () => {
       kind: 'spawn',
       id: 'spawn-test',
       child: {
-        kind: 'llm',
+        kind: 'callModel',
         id: 'child',
         instructions: 'run',
       },
@@ -377,7 +376,7 @@ describe('hydrateNode — spawn', () => {
     expect(result.kind).toBe('spawn');
     assert(result.kind === 'spawn');
     expect(result.timeout).toBe(1e4);
-    expect(result.child.kind).toBe('llm');
+    expect(result.child.kind).toBe('callModel');
   });
 
   test('leaves memory undefined when no layers are named (child inherits parent layers)', () => {
@@ -385,7 +384,7 @@ describe('hydrateNode — spawn', () => {
       kind: 'spawn',
       id: 'spawn-inherit',
       child: {
-        kind: 'llm',
+        kind: 'callModel',
         id: 'child',
         instructions: 'run',
       },
@@ -397,25 +396,25 @@ describe('hydrateNode — spawn', () => {
 
   test('resolves named layers onto the spawned child', () => {
     const mockLayer: ContextLayer = frameworkCast({
-      id: 'durable-task-state',
+      id: 'task-state',
       slot: 110,
     });
     const node: WorkflowNode = {
       kind: 'spawn',
       id: 'spawn-with-layers',
       child: {
-        kind: 'llm',
+        kind: 'callModel',
         id: 'child',
         instructions: 'run',
       },
       layers: [
-        'durable-task-state',
+        'task-state',
       ],
     };
     const ctx = makeHydrationContext();
     ctx.layers = new Map([
       [
-        'durable-task-state',
+        'task-state',
         mockLayer,
       ],
     ]);
@@ -431,7 +430,7 @@ describe('hydrateNode — spawn', () => {
       kind: 'spawn',
       id: 'spawn-bad-layer',
       child: {
-        kind: 'llm',
+        kind: 'callModel',
         id: 'child',
         instructions: 'run',
       },
@@ -458,7 +457,7 @@ describe('hydrateNode — loop', () => {
       kind: 'loop',
       id: 'loop-test',
       body: {
-        kind: 'llm',
+        kind: 'callModel',
         id: 'body',
         instructions: 'iterate',
       },
@@ -481,7 +480,7 @@ describe('hydrateNode — loop', () => {
       kind: 'loop',
       id: 'loop-pred',
       body: {
-        kind: 'llm',
+        kind: 'callModel',
         id: 'body',
         instructions: 'iterate',
       },
@@ -515,7 +514,7 @@ describe('hydrateNode — loop', () => {
       kind: 'loop',
       id: 'loop-boundary',
       body: {
-        kind: 'llm',
+        kind: 'callModel',
         id: 'body',
         instructions: 'iterate',
       },
@@ -549,7 +548,7 @@ describe('hydrateNode — loop', () => {
       kind: 'loop',
       id: 'loop-boundary-n',
       body: {
-        kind: 'llm',
+        kind: 'callModel',
         id: 'body',
         instructions: 'iterate',
       },
@@ -580,18 +579,18 @@ describe('hydrateNode — loop', () => {
 });
 
 describe('hydrateNode — sequence', () => {
-  test('produces StepRun that chains children', () => {
+  test('produces StepRunCode that chains children', () => {
     const node: WorkflowNode = {
       kind: 'sequence',
       id: 'seq-test',
       steps: [
         {
-          kind: 'llm',
+          kind: 'callModel',
           id: 'step-1',
           instructions: 'first',
         },
         {
-          kind: 'llm',
+          kind: 'callModel',
           id: 'step-2',
           instructions: 'second',
         },
@@ -599,7 +598,7 @@ describe('hydrateNode — sequence', () => {
     };
     const ctx = makeHydrationContext();
     const result = hydrateNode(node, ctx);
-    expect(result.kind).toBe('run');
+    expect(result.kind).toBe('runCode');
     expect(result.id).toBe('seq-test');
   });
 });
@@ -632,7 +631,7 @@ describe('hydrateNode — subflow', () => {
           input: String(input),
           step,
         });
-        if (step.kind === 'run') {
+        if (step.kind === 'runCode') {
           return frameworkCast(await step.execute(frameworkCast(input), execCtx));
         }
         return frameworkCast(input);
@@ -645,7 +644,7 @@ describe('hydrateNode — subflow', () => {
   }
 
   const innerLlm = (id = 'inner'): WorkflowNode => ({
-    kind: 'llm',
+    kind: 'callModel',
     id,
     instructions: 'do it',
   });
@@ -661,8 +660,8 @@ describe('hydrateNode — subflow', () => {
     };
     const { ctx, executed } = makeExecutingContext();
     const wrapper = hydrateNode(node, ctx);
-    expect(wrapper.kind).toBe('run');
-    assert(wrapper.kind === 'run');
+    expect(wrapper.kind).toBe('runCode');
+    assert(wrapper.kind === 'runCode');
     const result = await wrapper.execute('hello', makeMockContext());
     expect(result).toBe('hello');
     expect(executed).toHaveLength(1);
@@ -687,7 +686,7 @@ describe('hydrateNode — subflow', () => {
     };
     const { ctx, executed } = makeExecutingContext(workflows);
     const wrapper = hydrateNode(node, ctx);
-    assert(wrapper.kind === 'run');
+    assert(wrapper.kind === 'runCode');
     await wrapper.execute('in', makeMockContext());
     expect(executed[0]?.id).toBe('inner-sub');
   });
@@ -704,7 +703,7 @@ describe('hydrateNode — subflow', () => {
     };
     const { ctx, executed } = makeExecutingContext();
     const wrapper = hydrateNode(node, ctx);
-    assert(wrapper.kind === 'run');
+    assert(wrapper.kind === 'runCode');
     await wrapper.execute('runtime', makeMockContext());
     expect(executed[0]?.input).toBe('literal');
   });
@@ -717,7 +716,7 @@ describe('hydrateNode — subflow', () => {
     };
     const { ctx } = makeExecutingContext(new Map());
     const wrapper = hydrateNode(node, ctx);
-    assert(wrapper.kind === 'run');
+    assert(wrapper.kind === 'runCode');
     try {
       await wrapper.execute('in', makeMockContext());
       expect.unreachable('expected UNKNOWN_WORKFLOW_REFERENCE');
@@ -749,7 +748,7 @@ describe('hydrateNode — subflow', () => {
     };
     const { ctx } = makeExecutingContext(workflows);
     const wrapper = hydrateNode(node, ctx);
-    assert(wrapper.kind === 'run');
+    assert(wrapper.kind === 'runCode');
     try {
       await wrapper.execute('in', makeMockContext());
       expect.unreachable('expected WORKFLOW_CYCLE');
@@ -791,7 +790,7 @@ describe('hydrateNode — subflow', () => {
     };
     const { ctx } = makeExecutingContext(workflows);
     const wrapper = hydrateNode(node, ctx);
-    assert(wrapper.kind === 'run');
+    assert(wrapper.kind === 'runCode');
     try {
       await wrapper.execute('in', makeMockContext());
       expect.unreachable('expected WORKFLOW_CYCLE');
@@ -829,8 +828,8 @@ describe('hydrateNode — subflow', () => {
       },
       ctx,
     );
-    assert(first.kind === 'run');
-    assert(second.kind === 'run');
+    assert(first.kind === 'runCode');
+    assert(second.kind === 'runCode');
     await first.execute('x', makeMockContext());
     await second.execute('y', makeMockContext());
     expect(executed.map((e) => e.id)).toEqual([
@@ -854,7 +853,7 @@ describe('hydrateNode — subflow', () => {
       version: 1,
       root: innerLlm(),
     });
-    assert(wrapper.kind === 'run');
+    assert(wrapper.kind === 'runCode');
     await wrapper.execute('in', makeMockContext());
     expect(executed[0]?.id).toBe('inner-sub');
   });
@@ -870,7 +869,7 @@ describe('hydrateNode — subflow', () => {
     };
     const { ctx, executed } = makeExecutingContext();
     const wrapper = hydrateNode(node, ctx);
-    assert(wrapper.kind === 'run');
+    assert(wrapper.kind === 'runCode');
     await wrapper.execute('one', makeMockContext());
     await wrapper.execute('two', makeMockContext());
     expect(executed).toHaveLength(2);
@@ -879,23 +878,23 @@ describe('hydrateNode — subflow', () => {
 });
 
 describe('hydrateNode — every', () => {
-  test('produces StepEvery', () => {
+  test('produces StepSchedule', () => {
     const node: WorkflowNode = {
-      kind: 'every',
+      kind: 'schedule',
       id: 'every-test',
       step: {
-        kind: 'llm',
+        kind: 'callModel',
         id: 'periodic',
         instructions: 'check',
       },
-      ms: 1e3,
+      interval: 1e3,
       onError: 'fail',
     };
     const ctx = makeHydrationContext();
     const result = hydrateNode(node, ctx);
-    expect(result.kind).toBe('every');
-    assert(result.kind === 'every');
-    expect(result.ms).toBe(1e3);
+    expect(result.kind).toBe('schedule');
+    assert(result.kind === 'schedule');
+    expect(result.interval).toBe(1e3);
     expect(result.onError).toBe('fail');
   });
 });
@@ -909,12 +908,12 @@ describe('hydrateWorkflow', () => {
         id: 'root',
         steps: [
           {
-            kind: 'llm',
+            kind: 'callModel',
             id: 'first',
             instructions: 'hello',
           },
           {
-            kind: 'llm',
+            kind: 'callModel',
             id: 'second',
             instructions: 'world',
           },
@@ -923,22 +922,22 @@ describe('hydrateWorkflow', () => {
     };
     const ctx = makeHydrationContext();
     const result = hydrateWorkflow(doc, ctx);
-    expect(result.kind).toBe('run');
+    expect(result.kind).toBe('runCode');
     expect(result.id).toBe('root');
   });
 });
 
 describe('hydrateNode — provide', () => {
-  test('produces StepProvide with resolved layers', () => {
+  test('produces StepWithContext with resolved layers', () => {
     const mockLayer: ContextLayer = frameworkCast({
       id: 'test-layer',
       slot: 0,
     });
     const node: WorkflowNode = {
-      kind: 'provide',
+      kind: 'withContext',
       id: 'provide-test',
       child: {
-        kind: 'llm',
+        kind: 'callModel',
         id: 'inner',
         instructions: 'work',
       },
@@ -954,17 +953,17 @@ describe('hydrateNode — provide', () => {
       ],
     ]);
     const result = hydrateNode(node, ctx);
-    expect(result.kind).toBe('provide');
-    assert(result.kind === 'provide');
+    expect(result.kind).toBe('withContext');
+    assert(result.kind === 'withContext');
     expect(result.id).toBe('provide-test');
   });
 
   test('passes through child when no layers registry', () => {
     const node: WorkflowNode = {
-      kind: 'provide',
+      kind: 'withContext',
       id: 'provide-no-layers',
       child: {
-        kind: 'llm',
+        kind: 'callModel',
         id: 'inner',
         instructions: 'work',
       },
@@ -974,7 +973,7 @@ describe('hydrateNode — provide', () => {
     };
     const ctx = makeHydrationContext();
     const result = hydrateNode(node, ctx);
-    expect(result.kind).toBe('provide');
+    expect(result.kind).toBe('withContext');
   });
 });
 
@@ -984,7 +983,7 @@ describe('hydrateNode — error cases', () => {
       kind: 'loop',
       id: 'loop-bad',
       body: {
-        kind: 'llm',
+        kind: 'callModel',
         id: 'body',
         instructions: 'iterate',
       },
@@ -1005,7 +1004,7 @@ describe('hydrateNode — error cases', () => {
 
   test('throws UNKNOWN_TOOL_REFERENCE for missing llm tool', () => {
     const node: WorkflowNode = {
-      kind: 'llm',
+      kind: 'callModel',
       id: 'llm-bad-tool',
       instructions: 'test',
       tools: [
@@ -1026,7 +1025,7 @@ describe('hydrateNode — error cases', () => {
 
   test('throws UNKNOWN_TOOL_REFERENCE for missing tool node', () => {
     const node: WorkflowNode = {
-      kind: 'tool',
+      kind: 'invokeTool',
       id: 'tool-bad',
       toolName: 'missing',
     };
@@ -1042,10 +1041,10 @@ describe('hydrateNode — error cases', () => {
 
   test('throws UNKNOWN_LAYER_REFERENCE for missing provide layer', () => {
     const node: WorkflowNode = {
-      kind: 'provide',
+      kind: 'withContext',
       id: 'provide-bad',
       child: {
-        kind: 'llm',
+        kind: 'callModel',
         id: 'inner',
         instructions: 'work',
       },
@@ -1071,7 +1070,7 @@ describe('hydrateNode — predicate boundary N+1', () => {
       kind: 'loop',
       id: 'loop-np1',
       body: {
-        kind: 'llm',
+        kind: 'callModel',
         id: 'body',
         instructions: 'iterate',
       },
@@ -1101,82 +1100,88 @@ describe('hydrateNode — predicate boundary N+1', () => {
   });
 });
 
-describe('hydrateNode — harness', () => {
-  function fakeHarness(harnessId: SubHarnessKind): SubHarness {
+describe('hydrateNode — acp-agent', () => {
+  function fakeAgent(agentId: string): AcpAgent {
     return {
-      specificationVersion: 'harness-v1',
-      harnessId,
-      async doStart() {
-        return {
-          sessionId: 's',
-          isResume: false,
-          async doPromptTurn() {
-            return {
-              items: [],
-              text: '',
-            };
-          },
-          async doStop() {
-            return {
-              harnessId,
-              sessionId: 's',
-              state: null,
-            };
-          },
-        };
+      specificationVersion: 'acp-v1',
+      agentId,
+      async connect() {
+        throw new Error('not connected in hydration tests');
       },
     };
   }
 
-  function ctxWithHarness(harnessId: SubHarnessKind): HydrationContext {
+  function ctxWithAgent(agentId: string): HydrationContext {
     return {
       tools: new Map(),
       executeStep: async (_step, input) => frameworkCast(input),
-      subHarnesses: new Map([
+      acpAgents: new Map([
         [
-          harnessId,
-          fakeHarness(harnessId),
+          agentId,
+          fakeAgent(agentId),
         ],
       ]),
     };
   }
 
-  test('hydrates a claude-code node into a StepSubHarness with the resolved adapter', () => {
+  test('hydrates an acp-agent node into a StepAcpAgent with the resolved adapter', () => {
     const node: WorkflowNode = {
-      kind: 'claude-code',
+      kind: 'acp-agent',
       id: 'review',
+      agent: 'claude-code',
       prompt: 'review the diff',
-      settings: {
-        model: 'claude-opus-4-8',
-      },
+      mode: 'plan',
     };
-    const result = hydrateNode(node, ctxWithHarness('claude-code'));
-    expect(result.kind).toBe('claude-code');
+    const result = hydrateNode(node, ctxWithAgent('claude-code'));
+    expect(result.kind).toBe('acp-agent');
     expect(result.id).toBe('review');
   });
 
-  test('hydrates each harness kind from the registry', () => {
-    const kinds: SubHarnessKind[] = [
+  test('the agent registry is an open set — any id resolves', () => {
+    const agentIds = [
       'claude-code',
       'codex',
-      'opencode',
-      'pi',
+      'gemini',
+      'some-future-agent',
     ];
-    for (const kind of kinds) {
+    for (const agentId of agentIds) {
       const node: WorkflowNode = {
-        kind,
-        id: `n-${kind}`,
+        kind: 'acp-agent',
+        id: `n-${agentId}`,
+        agent: agentId,
         prompt: 'go',
       };
-      const result = hydrateNode(node, ctxWithHarness(kind));
-      expect(result.kind).toBe(kind);
+      const result = hydrateNode(node, ctxWithAgent(agentId));
+      expect(result.kind).toBe('acp-agent');
     }
   });
 
-  test('throws UNKNOWN_HARNESS_REFERENCE when no adapter is registered', () => {
+  test('carries the permission policy through to the step', () => {
     const node: WorkflowNode = {
-      kind: 'codex',
+      kind: 'acp-agent',
+      id: 'guarded',
+      agent: 'claude-code',
+      prompt: 'go',
+      permissions: {
+        default: 'deny',
+        allow: [
+          {
+            kind: 'read',
+          },
+        ],
+      },
+    };
+    const result = hydrateNode(node, ctxWithAgent('claude-code'));
+    assert(result.kind === 'acp-agent');
+    expect(result.permissions?.default).toBe('deny');
+    expect(result.permissions?.allow).toHaveLength(1);
+  });
+
+  test('throws UNKNOWN_ACP_AGENT_REFERENCE when no adapter is registered', () => {
+    const node: WorkflowNode = {
+      kind: 'acp-agent',
       id: 'x',
+      agent: 'codex',
       prompt: 'go',
     };
     try {
@@ -1184,7 +1189,7 @@ describe('hydrateNode — harness', () => {
       throw new Error('expected throw');
     } catch (e) {
       assert(isNoeticConfigError(e));
-      expect(e.code).toBe('UNKNOWN_SUB_HARNESS_REFERENCE');
+      expect(e.code).toBe('UNKNOWN_ACP_AGENT_REFERENCE');
     }
   });
 });
@@ -1193,7 +1198,7 @@ describe('hydrateNode — llm server tools (via tools array)', () => {
   test('carries an inline server-tool spec through tools alongside a client tool', () => {
     const testTool = makeTestTool();
     const node: WorkflowNode = {
-      kind: 'llm',
+      kind: 'callModel',
       id: 'search',
       instructions: 'Search the web',
       tools: [
@@ -1215,7 +1220,7 @@ describe('hydrateNode — llm server tools (via tools array)', () => {
         testTool,
       ]),
     );
-    assert(result.kind === 'llm');
+    assert(result.kind === 'callModel');
     const tools = typeof result.tools === 'function' ? [] : (result.tools ?? []);
     // Client tool resolved from the registry + inline server-tool spec, in order.
     expect(tools).toHaveLength(2);
@@ -1231,7 +1236,7 @@ describe('hydrateNode — llm server tools (via tools array)', () => {
 
   test('a tools array of only server specs hydrates with no client tools', () => {
     const node: WorkflowNode = {
-      kind: 'llm',
+      kind: 'callModel',
       id: 'fetch',
       instructions: 'Fetch a URL',
       tools: [
@@ -1241,28 +1246,28 @@ describe('hydrateNode — llm server tools (via tools array)', () => {
       ],
     };
     const result = hydrateNode(node, makeHydrationContext());
-    assert(result.kind === 'llm');
+    assert(result.kind === 'callModel');
     const tools = typeof result.tools === 'function' ? [] : (result.tools ?? []);
     expect(tools).toHaveLength(1);
     expect(isServerToolSpec(tools[0])).toBe(true);
   });
 });
 
-describe('hydrateNode — dynamic fork (each / over)', () => {
+describe('hydrateNode — dynamic inParallel (each / over)', () => {
   test('fan-out width follows the input array length (no over)', () => {
     const node: WorkflowNode = {
-      kind: 'fork',
+      kind: 'inParallel',
       id: 'fan',
       mode: 'all',
       each: {
-        kind: 'llm',
+        kind: 'callModel',
         id: 'worker',
         instructions: 'process item',
       },
       merge: 'concat',
     };
     const result = hydrateNode(node, makeHydrationContext());
-    assert(result.kind === 'fork');
+    assert(result.kind === 'inParallel');
     assert(result.mode === 'all');
     const ctx = makeMockContext();
     const three = result.paths(
@@ -1293,19 +1298,19 @@ describe('hydrateNode — dynamic fork (each / over)', () => {
 
   test('selects the array via `over` from a JSON object input', () => {
     const node: WorkflowNode = {
-      kind: 'fork',
+      kind: 'inParallel',
       id: 'fan2',
       mode: 'settle',
       over: 'items',
       each: {
-        kind: 'llm',
+        kind: 'callModel',
         id: 'worker',
         instructions: 'process item',
       },
       merge: 'last',
     };
     const result = hydrateNode(node, makeHydrationContext());
-    assert(result.kind === 'fork');
+    assert(result.kind === 'inParallel');
     const paths = result.paths(
       JSON.stringify({
         items: [
@@ -1320,18 +1325,18 @@ describe('hydrateNode — dynamic fork (each / over)', () => {
 
   test('throws INVALID_FORK_INPUT when the input is not an array', () => {
     const node: WorkflowNode = {
-      kind: 'fork',
+      kind: 'inParallel',
       id: 'fan3',
       mode: 'all',
       each: {
-        kind: 'llm',
+        kind: 'callModel',
         id: 'worker',
         instructions: 'process item',
       },
       merge: 'concat',
     };
     const result = hydrateNode(node, makeHydrationContext());
-    assert(result.kind === 'fork');
+    assert(result.kind === 'inParallel');
     try {
       result.paths(
         JSON.stringify({
@@ -1346,19 +1351,19 @@ describe('hydrateNode — dynamic fork (each / over)', () => {
     }
   });
 
-  test('static paths fork is unchanged', () => {
+  test('static paths inParallel is unchanged', () => {
     const node: WorkflowNode = {
-      kind: 'fork',
+      kind: 'inParallel',
       id: 'static',
       mode: 'all',
       paths: [
         {
-          kind: 'llm',
+          kind: 'callModel',
           id: 'p1',
           instructions: 'a',
         },
         {
-          kind: 'llm',
+          kind: 'callModel',
           id: 'p2',
           instructions: 'b',
         },
@@ -1366,7 +1371,7 @@ describe('hydrateNode — dynamic fork (each / over)', () => {
       merge: 'concat',
     };
     const result = hydrateNode(node, makeHydrationContext());
-    assert(result.kind === 'fork');
+    assert(result.kind === 'inParallel');
     expect(result.paths(frameworkCast('ignored'), makeMockContext())).toHaveLength(2);
   });
 });
@@ -1375,13 +1380,13 @@ describe('hydrateNode — run', () => {
   test('dispatches the code string + input through the subprocess and returns stdout', async () => {
     const { adapter, calls } = makeMockSubprocess();
     const node: WorkflowNode = {
-      kind: 'run',
+      kind: 'runCode',
       id: 'compute',
       execute: 'process.stdout.write("hi")',
     };
     const result = hydrateNode(node, makeHydrationContext());
-    expect(result.kind).toBe('run');
-    assert(result.kind === 'run');
+    expect(result.kind).toBe('runCode');
+    assert(result.kind === 'runCode');
     const ctx = makeMockContext({
       subprocess: adapter,
     });
@@ -1397,7 +1402,7 @@ describe('hydrateNode — run', () => {
   test('resolves a named subprocess ref via HydrationContext.resolveSubprocess', async () => {
     const { adapter, calls } = makeMockSubprocess();
     const node: WorkflowNode = {
-      kind: 'run',
+      kind: 'runCode',
       id: 'compute-ref',
       execute: 'code-body',
       subprocess: 'sandbox',
@@ -1407,7 +1412,7 @@ describe('hydrateNode — run', () => {
       resolveSubprocess: (ref) => (ref === 'sandbox' ? adapter : undefined),
     };
     const result = hydrateNode(node, ctx);
-    assert(result.kind === 'run');
+    assert(result.kind === 'runCode');
     const out = await result.execute('in', makeMockContext());
     expect(out).toBe('OUT:code-body|in');
     expect(calls).toHaveLength(1);
@@ -1415,13 +1420,13 @@ describe('hydrateNode — run', () => {
 
   test('throws UNKNOWN_SUBPROCESS_REFERENCE when the named ref cannot be resolved', async () => {
     const node: WorkflowNode = {
-      kind: 'run',
+      kind: 'runCode',
       id: 'compute-bad',
       execute: 'code',
       subprocess: 'missing',
     };
     const result = hydrateNode(node, makeHydrationContext());
-    assert(result.kind === 'run');
+    assert(result.kind === 'runCode');
     try {
       await result.execute('in', makeMockContext());
       expect.unreachable('should have thrown');
@@ -1436,12 +1441,12 @@ describe('hydrateNode — run', () => {
       fail: true,
     });
     const node: WorkflowNode = {
-      kind: 'run',
+      kind: 'runCode',
       id: 'compute-fail',
       execute: 'boom',
     };
     const result = hydrateNode(node, makeHydrationContext());
-    assert(result.kind === 'run');
+    assert(result.kind === 'runCode');
     await expect(
       result.execute(
         'in',

@@ -1,3 +1,12 @@
+## @noetic-tools/core-v5.4.1 (2026-08-14)
+
+* feat!: replace the sub-harness system with an Agent Client Protocol client (#89) ([eb4710d](https://github.com/mattapperson/noetic/commit/eb4710d)), closes [#89](https://github.com/mattapperson/noetic/issues/89)
+
+## @noetic-tools/core-v5.4.0 (2026-08-12)
+
+* feat!: unify Noetic public API naming (#68) ([38cb18f](https://github.com/mattapperson/noetic/commit/38cb18f)), closes [#68](https://github.com/mattapperson/noetic/issues/68)
+* feat(core): support Standard Schema validators (#67) ([1751b6a](https://github.com/mattapperson/noetic/commit/1751b6a)), closes [#67](https://github.com/mattapperson/noetic/issues/67)
+
 ## @noetic-tools/core-v5.3.0 (2026-08-03)
 
 * feat(core): anchor the prompt prefix and ask providers to cache it ([77d7685](https://github.com/mattapperson/noetic/commit/77d7685))

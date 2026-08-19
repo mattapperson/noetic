@@ -1,11 +1,11 @@
 /**
- * Streaming output-dialect contracts for `step.llm`.
+ * Streaming output-dialect contracts for `step.callModel`.
  *
  * An `OutputCodec` is the dialect-agnostic alternative to a Zod schema in
- * `StepLLM.output`: instead of JSON-parsing the assistant text once at turn
+ * `StepCallModel.output`: instead of JSON-parsing the assistant text once at turn
  * end, a codec is fed each text delta as it streams and produces a typed
  * value when the turn finishes. OpenUI Lang is one dialect; the contract
- * lives here — next to `ContextLayer` and `SubHarness` — so `core` and
+ * lives here — next to `ContextLayer` and `AcpAgent` — so `core` and
  * dialect packages both depend on it without forming a cycle.
  */
 
@@ -38,8 +38,8 @@ export interface OutputCodecSession<O = unknown> {
 }
 
 /**
- * A streaming output dialect for `step.llm`. Discriminated from a Zod schema
- * in `StepLLM.output` by the `kind: 'codec'` tag.
+ * A streaming output dialect for `step.callModel`. Discriminated from a Zod schema
+ * in `StepCallModel.output` by the `kind: 'codec'` tag.
  * @public
  */
 export interface OutputCodec<O = unknown> {
@@ -51,7 +51,7 @@ export interface OutputCodec<O = unknown> {
 }
 
 /**
- * Narrows a `StepLLM.output` value to an `OutputCodec`. A Zod schema has no
+ * Narrows a `StepCallModel.output` value to an `OutputCodec`. A Zod schema has no
  * `kind: 'codec'` tag, so the discriminant is unambiguous.
  * @public
  */

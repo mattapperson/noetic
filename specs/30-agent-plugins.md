@@ -24,11 +24,11 @@ to run stdio servers. Neither belongs anywhere lower in the stack:
 - `@noetic-tools/context` must stay `types`-only and free of platform coupling
   so a context layer can be imported into a browser bundle.
 - `@noetic-tools/core` must never acquire a vendor SDK in its dependency
-  graph — the same rule that keeps sub-harness adapters out of core.
+  graph — the same rule that keeps the ACP client out of core.
 
-So the package sits alongside `@noetic-tools/sub-harness` and
-`@noetic-tools/openui`: a consumer package built on the `ContextLayer` contract
-in `@noetic-tools/types`, composed in by a host rather than imported by core.
+So the package sits alongside `@noetic-tools/acp` and `@noetic-tools/openui`: a
+consumer package built on the `ContextLayer` contract in `@noetic-tools/types`,
+composed in by a host rather than imported by core.
 `.sentrux/rules.toml` enforces both directions.
 
 Because the package is Node-targeted by definition, it reads the filesystem

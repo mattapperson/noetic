@@ -29,16 +29,16 @@ Noetic wraps every framework-level failure in a structured `NoeticError` discrim
 | `kind` | Key Fields | When it occurs |
 |---|---|---|
 | `step_failed` | `stepId`, `cause: Error`, `retriesExhausted` | A step throws after exhausting retries. |
-| `llm_refused` | `stepId`, `refusal: string` | The model returns a refusal instead of content. |
-| `llm_parse_error` | `stepId`, `raw: string`, `schema: ZodType`, `zodError: ZodError` | Structured output fails Zod validation. |
-| `llm_rate_limit` | `stepId`, `retryAfter?: number` | The LLM provider returns a rate-limit response. |
-| `fork_partial` | `stepId`, `succeeded[]`, `failed[]` | Thrown by fork mode `'all'` when any path fails, and by `'race'` when every path fails. (Mode `'settle'` never throws this — it reports failures in its `SettleResult` array instead.) |
+| `model_refused` | `stepId`, `refusal: string` | The model returns a refusal instead of content. |
+| `model_parse_error` | `stepId`, `raw: string`, `schema: StandardSchemaV1`, `zodError: ZodError` | Structured output fails schema validation. `schema` is the Standard Schema v1 validator; `zodError` stays populated for backward compatibility — the real `ZodError` for Zod schemas, a synthetic `custom`-issue `ZodError` adapted from the vendor's Standard Schema issues otherwise. |
+| `model_rate_limit` | `stepId`, `retryAfter?: number` | The LLM provider returns a rate-limit response. |
+| `fork_partial` | `stepId`, `succeeded[]`, `failed[]` | Thrown by `inParallel` mode `'all'` when any path fails, and by `'race'` when every path fails. (Mode `'settle'` never throws this — it reports failures in its `SettleResult` array instead.) |
 | `channel_timeout` | `channelName`, `timeout: number` | A `recv()` call — or a back-pressured `send()` parked on a full queue — exceeded its timeout. |
 | `channel_closed` | `channelName` | Attempted to send on a closed external channel. |
-| `cancelled` | `reason?: string` | The execution was cancelled via `ctx.abort()` or `harness.cancel()` — including a parent's cancellation cascading into a `fork` path or `spawn` child. Pending channel `recv` calls (and parked back-pressure `send` calls) on the aborted context reject with this kind immediately, and an in-flight `llm` call or sub-harness turn is cut short. |
+| `cancelled` | `reason?: string` | The execution was cancelled via `ctx.abort()` or `harness.cancel()` — including a parent's cancellation cascading into an `inParallel` path or `spawn` child. Pending channel `recv` calls (and parked back-pressure `send` calls) on the aborted context reject with this kind immediately, and an in-flight model call or ACP agent turn is cut short. |
 | `budget_exceeded` | `field: 'cost' \| 'steps' \| 'duration'`, `limit`, `actual` | A budget guard detected the run exceeded its limits. |
 | `steering_denied` | `guidance?: string` | A context layer's steering hook (`beforeToolCall` / `afterModelCall`) returned a deny decision and the runtime blocked the action. `guidance` carries the corrective feedback, if any. |
-| `handle_evicted` | `handleId`, `stepId`, `gracePeriodMs` | `DetachedHandle.await()` found the subprocess adapter persistently returning `null` for a previously spawned handle (evicted by a restart without restore, or a storage inconsistency). Raised after a short grace period instead of polling forever. |
+| `handle_evicted` | `handleId`, `stepId`, `gracePeriod` | `DetachedHandle.await()` found the subprocess adapter persistently returning `null` for a previously spawned handle (evicted by a restart without restore, or a storage inconsistency). Raised after a short grace period instead of polling forever. |
 | `item_schema_mismatch` | `category: 'items' \| 'developerMessages' \| 'toolCalls' \| 'toolResults'`, `itemType?: string` | An item failed extension-schema validation in the `ItemSchemaRegistry`: a category item (e.g. a tool result) matched none of the schemas registered for its category, or an unknown item type matched no registered schema under strict mode. `itemType` is set for the unknown-type case. |
 
 ### Full Type Definition
@@ -46,16 +46,16 @@ Noetic wraps every framework-level failure in a structured `NoeticError` discrim
 ```ts validate=none
 type NoeticError =
   | { kind: 'step_failed'; stepId: string; cause: Error; retriesExhausted: boolean }
-  | { kind: 'llm_refused'; stepId: string; refusal: string }
-  | { kind: 'llm_parse_error'; stepId: string; raw: string; schema: ZodType; zodError: ZodError }
-  | { kind: 'llm_rate_limit'; stepId: string; retryAfter?: number }
+  | { kind: 'model_refused'; stepId: string; refusal: string }
+  | { kind: 'model_parse_error'; stepId: string; raw: string; schema: StandardSchemaV1; zodError: ZodError }
+  | { kind: 'model_rate_limit'; stepId: string; retryAfter?: number }
   | { kind: 'fork_partial'; stepId: string; succeeded: Array<{ stepId: string; value: unknown }>; failed: Array<{ stepId: string; error: NoeticError }> }
   | { kind: 'channel_timeout'; channelName: string; timeout: number }
   | { kind: 'channel_closed'; channelName: string }
   | { kind: 'cancelled'; reason?: string }
   | { kind: 'budget_exceeded'; field: 'cost' | 'steps' | 'duration'; limit: number; actual: number }
   | { kind: 'steering_denied'; guidance?: string }
-  | { kind: 'handle_evicted'; handleId: string; stepId: string; gracePeriodMs: number }
+  | { kind: 'handle_evicted'; handleId: string; stepId: string; gracePeriod: number }
   | { kind: 'item_schema_mismatch'; category: 'items' | 'developerMessages' | 'toolCalls' | 'toolResults'; itemType?: string };
 ```
 
@@ -93,14 +93,14 @@ This is an `instanceof` check against `NoeticErrorImpl` with a structural fallba
 Loops accept an `onError` callback that receives the structured error and returns a recovery action:
 
 ```ts
-import { step, loop, until } from '@noetic-tools/core';
+import { callModel, loop, until } from '@noetic-tools/core';
 
 const resilientLoop = loop({
   id: 'retry-loop',
-  steps: [step.llm({ id: 'generate', model: 'openai/gpt-4o' })],
+  steps: [callModel({ id: 'generate', model: 'openai/gpt-4o' })],
   until: until.noToolCalls(),
   onError(error, ctx) {
-    if (error.kind === 'llm_rate_limit') {
+    if (error.kind === 'model_rate_limit') {
       return 'retry';  // Try the same iteration again
     }
     if (error.kind === 'step_failed' && !error.retriesExhausted) {
@@ -128,7 +128,7 @@ if (isNoeticError(e)) {
   const err = e.noeticError;
 
   switch (err.kind) {
-    case 'llm_parse_error':
+    case 'model_parse_error':
       // TypeScript knows: err.raw, err.schema, err.zodError
       console.log('Validation errors:', err.zodError.issues);
       break;

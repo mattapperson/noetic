@@ -4,7 +4,9 @@ import { clearSuites, getSuites, runAllSuites } from '../../src';
 
 //#region Constants
 
-const HAS_API_KEY = Boolean(process.env.OPENROUTER_API_KEY);
+/** The eval harness resolves its provider from whichever key is configured:
+ *  NOETIC_API_KEY (Noetic platform, the default) or OPENROUTER_API_KEY (BYOK). */
+const HAS_API_KEY = Boolean(process.env.NOETIC_API_KEY || process.env.OPENROUTER_API_KEY);
 const ONLINE_TIMEOUT = 12e4; // 2 minutes per eval
 
 //#endregion

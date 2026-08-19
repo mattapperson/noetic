@@ -2,7 +2,7 @@
  * Action step handlers: run, llm, spawn, provide, tool.
  */
 
-import type { OutputCodec } from '@noetic-tools/types';
+import type { OutputCodec, StandardSchemaV1 } from '@noetic-tools/types';
 import {
   createMessage,
   estimateTokens,
@@ -12,9 +12,8 @@ import {
   isOutputCodec,
   NoeticConfigError,
   NoeticErrorImpl,
+  validateSchema,
 } from '@noetic-tools/types';
-import type { ZodType } from 'zod';
-import { ZodError } from 'zod';
 import type { EmitOption } from '../runtime/broadcaster-utils';
 import { emitToolUi } from '../runtime/tool-ui';
 import type { ItemSchemaRegistry, LayerStateStore } from './action-deps';
@@ -42,6 +41,7 @@ import {
 } from './action-deps';
 import type {
   AgentHarnessContract,
+  CallModelRequest,
   Context,
   ContextConfig,
   ContextData,
@@ -52,23 +52,26 @@ import type {
   FunctionCallItem,
   InputMessageItem,
   Item,
+  LLMResponse,
   ProjectionPolicy,
   RecallLayerOutput,
   RetryPolicy,
   ServerToolSpec,
-  StepLLM,
+  StepCallModel,
+  StepInvokeTool,
   StepMeta,
-  StepProvide,
-  StepRun,
+  StepRunCode,
   StepSpawn,
-  StepTool,
+  StepWithContext,
   Tool,
 } from './action-types';
 import { isServerToolSpec, SteeringAction } from './action-types';
 import { cloneWithGuard } from './clone-guard';
 import { collectAllTools, deduplicateTools } from './collect-tools';
+import type { BandedView } from './context-assembly';
 import { prepareBandedView, stampAnchoringAttributes } from './context-assembly';
 import { trackUsage } from './message-helpers';
+import { parseStructuredOutput } from './structured-output';
 import {
   getContextChannelStore,
   isContextImpl,
@@ -78,8 +81,8 @@ import {
 
 //#region run
 
-export async function executeRun<TContext, I, O>(
-  step: StepRun<TContext, I, O>,
+export async function executeRunCode<TContext, I, O>(
+  step: StepRunCode<TContext, I, O>,
   input: I,
   ctx: Context<TContext>,
 ): Promise<O> {
@@ -290,20 +293,20 @@ async function runInputPipeline({
  * it is kept off `outputSchema` (which drives JSON-schema formatting).
  */
 function resolveOutputMode<O>(
-  output: ZodType<O> | OutputCodec<O> | undefined,
+  output: StandardSchemaV1 | OutputCodec<O> | undefined,
   baseInstructions: string | undefined,
 ): {
   outputCodec: OutputCodec<O> | undefined;
-  outputSchema: ZodType<O> | undefined;
+  outputSchema: StandardSchemaV1 | undefined;
   resolvedInstructions: string | undefined;
 } {
-  // A generic type predicate does not reliably narrow a `ZodType<O> |
+  // A generic type predicate does not reliably narrow a `StandardSchemaV1 |
   // OutputCodec<O>` union through a free type parameter, so bridge the two
   // branches with the sanctioned framework cast — `isOutputCodec` guarantees
   // the discriminant at runtime.
   const isCodec = isOutputCodec<O>(output);
   const outputCodec = isCodec ? frameworkCast<OutputCodec<O>>(output) : undefined;
-  const outputSchema = isCodec ? undefined : frameworkCast<ZodType<O> | undefined>(output);
+  const outputSchema = isCodec ? undefined : frameworkCast<StandardSchemaV1 | undefined>(output);
   const codecInstructions = outputCodec?.instructions;
   const resolvedInstructions =
     codecInstructions !== undefined
@@ -354,56 +357,322 @@ function finalizeCodecOutput<O>(
   return session.finish(lastText);
 }
 
-/** JSON-parse + Zod-validate the assistant text, raising `llm_parse_error`. */
-function parseSchemaOutput<O>(schema: ZodType<O>, lastText: string, stepId: string): O {
-  try {
-    return schema.parse(JSON.parse(lastText));
-  } catch (e) {
-    if (e instanceof SyntaxError || e instanceof ZodError) {
-      throw new NoeticErrorImpl({
-        kind: 'llm_parse_error',
-        stepId,
-        raw: lastText,
-        schema,
-        zodError:
-          e instanceof ZodError
-            ? e
-            : new ZodError([
-                {
-                  code: 'custom',
-                  message: `Invalid JSON: ${e.message}`,
-                  path: [],
-                },
-              ]),
-      });
-    }
-    throw e;
-  }
-}
-
 /**
  * Turn the finished assistant text into the step's typed output: a streaming
- * codec, a Zod schema, or raw text passthrough.
+ * codec, a Standard Schema, or raw text passthrough.
  */
-function finalizeStepOutput<O>(params: {
+async function finalizeStepOutput<O>(params: {
   stepId: string;
   emit: EmitOption | undefined;
   outputCodec: OutputCodec<O> | undefined;
-  outputSchema: ZodType<O> | undefined;
+  outputSchema: StandardSchemaV1 | undefined;
   lastText: string;
   ctx: Context<ContextData>;
-}): O {
+}): Promise<O> {
   if (params.outputCodec) {
     return finalizeCodecOutput(params.outputCodec, params.lastText, params.ctx, params.emit);
   }
   if (params.outputSchema) {
-    return parseSchemaOutput(params.outputSchema, params.lastText, params.stepId);
+    return parseStructuredOutput<O>({
+      schema: params.outputSchema,
+      rawText: params.lastText,
+      stepId: params.stepId,
+    });
   }
   return frameworkCast<O>(params.lastText);
 }
 
-export async function executeLLM<TContext, I, O>(
-  step: StepLLM<TContext, I, O>,
+interface PartitionedStepTools {
+  clientStepTools: Tool[] | undefined;
+  serverToolSpecs: ServerToolSpec[];
+}
+
+/**
+ * `step.tools` is heterogeneous: client `Tool`s plus inline OpenRouter
+ * server-tool specs (web search/fetch). Partition them — client tools flow
+ * through the unified-tool / allowedToolNames / steering machinery as before;
+ * server-tool specs bypass it entirely and are stamped onto the model request
+ * (`_serverTools`) for the model caller to wrap via the SDK's `serverTool()`.
+ * `undefined` (unrestricted) is preserved as-is; only a present array is
+ * partitioned so the `[] = opt-out` semantics of step.tools stay intact.
+ */
+function partitionStepTools(
+  resolvedStepTools: (Tool | ServerToolSpec)[] | undefined,
+): PartitionedStepTools {
+  if (resolvedStepTools === undefined) {
+    return {
+      clientStepTools: undefined,
+      serverToolSpecs: [],
+    };
+  }
+  const clientStepTools: Tool[] = [];
+  const serverToolSpecs: ServerToolSpec[] = [];
+  for (const entry of resolvedStepTools) {
+    if (isServerToolSpec(entry)) {
+      serverToolSpecs.push(entry);
+      continue;
+    }
+    clientStepTools.push(entry);
+  }
+  return {
+    clientStepTools,
+    serverToolSpecs,
+  };
+}
+
+/**
+ * Append user input — through layer pipeline if layers exist, otherwise direct.
+ * The append pipeline may request a context re-render (e.g. a layer that
+ * expanded an input reference into new content); applied after recall.
+ */
+async function appendUserInput<I>(params: {
+  ctx: Context<ContextData>;
+  layers: ContextLayer[] | undefined;
+  input: I;
+}): Promise<ContextRerenderRequest[]> {
+  const { ctx, layers, input } = params;
+  if (typeof input !== 'string' || input.length === 0) {
+    return [];
+  }
+  if (layers !== undefined && layers.length > 0) {
+    return await runInputPipeline({
+      ctx,
+      layers,
+      input,
+    });
+  }
+  ctx.itemLog.append(createMessage(input, 'user'));
+  return [];
+}
+
+/**
+ * Splits the context budget across layers via `allocateBudgets`. An empty map
+ * when the step runs without layers.
+ */
+function computeBudgetMap(params: {
+  layers: ContextLayer[] | undefined;
+  policy: ProjectionPolicy;
+  systemPromptTokens: number;
+}): Map<string, number> {
+  const { layers, policy, systemPromptTokens } = params;
+  if (layers === undefined || layers.length === 0) {
+    return new Map<string, number>();
+  }
+  const { allocations } = allocateBudgets({
+    layers,
+    totalBudget: policy.tokenBudget,
+    systemPromptTokens,
+    responseReserve: policy.responseReserve,
+  });
+  return new Map(
+    allocations.map((a) => [
+      a.layerId,
+      a.allocated,
+    ]),
+  );
+}
+
+/**
+ * Recall once per LLM step: atomic layers run in the hot path; eventual layers
+ * are served from cache. Results drive both the assembled context window and
+ * the per-layer usage breakdown (ctx.lastLayerUsage). Recall fires before the
+ * steering retry loop because retries replay the same context. Re-render
+ * requests collected from the input-append pipeline are applied on top.
+ */
+async function gatherRecallResults(params: {
+  ctx: Context<ContextData>;
+  layers: ContextLayer[] | undefined;
+  recallQuery: string;
+  budgetMap: Map<string, number>;
+  slotOf: Map<string, number>;
+  rerenderRequests: ContextRerenderRequest[];
+}): Promise<ReadonlyArray<RecallLayerOutput>> {
+  const { ctx, layers, recallQuery, budgetMap, slotOf, rerenderRequests } = params;
+  if (layers === undefined || layers.length === 0) {
+    return emptyRecall;
+  }
+  const atomic = await ctx.harness.recallLayersAtomic(layers, recallQuery, ctx, budgetMap);
+  const eventual = await ctx.harness.recallLayersEventual(layers, recallQuery, ctx, budgetMap);
+  let recallResults: ReadonlyArray<RecallLayerOutput> = [
+    ...atomic,
+    ...eventual,
+  ].sort((a, b) => (slotOf.get(a.layerId) ?? 0) - (slotOf.get(b.layerId) ?? 0));
+
+  if (rerenderRequests.length > 0) {
+    const rerendered = await ctx.harness.executeRerender(
+      rerenderRequests,
+      layers,
+      ctx,
+      budgetMap,
+      recallQuery,
+    );
+    recallResults = mergeRecallResults(
+      [
+        ...recallResults,
+      ],
+      rerendered,
+      slotOf,
+    );
+  }
+  return recallResults;
+}
+
+/**
+ * Builds the items the model sees for one attempt: system messages stay at the
+ * front, the banded anchor/live/delta output rides between them and history,
+ * and steering guidance from a prior retry lands at the very tail. The
+ * projector enforces the token budget (drops highest-slot layer output, then
+ * oldest history).
+ */
+async function assembleTurnItems(params: {
+  ctx: Context<ContextData>;
+  layers: ContextLayer[] | undefined;
+  banded: BandedView;
+  steeringTail: InputMessageItem[];
+  viewPolicy: ProjectionPolicy;
+}): Promise<ReadonlyArray<Item>> {
+  const { ctx, layers, banded, steeringTail, viewPolicy } = params;
+  const rawHistoryItems: ReadonlyArray<Item> = ctx.itemLog.items;
+  if (layers === undefined || layers.length === 0) {
+    return rawHistoryItems;
+  }
+  const projectedHistoryItems = await ctx.harness.projectHistory(layers, rawHistoryItems, ctx);
+  const systemItems: Item[] = [];
+  const nonSystemHistory: Item[] = [];
+  const tailIds = new Set(steeringTail.map((i) => i.id));
+  for (const item of projectedHistoryItems) {
+    if (item.type === 'message' && item.role === 'system') {
+      systemItems.push(item);
+      continue;
+    }
+    // Steering guidance is re-placed at the tail; skip it here so the retry
+    // does not see the same correction twice.
+    if ('id' in item && typeof item.id === 'string' && tailIds.has(item.id)) {
+      continue;
+    }
+    nonSystemHistory.push(item);
+  }
+  return assembleView({
+    systemPromptItems: systemItems,
+    layerOutputItems: banded.anchorItems,
+    historyItems: nonSystemHistory,
+    liveLayerItems: banded.liveItems,
+    deltaItems: banded.deltaItems,
+    tailItems: steeringTail,
+    policy: viewPolicy,
+  });
+}
+
+interface BuildModelRequestParams<TContext, I, O> {
+  step: StepCallModel<TContext, I, O>;
+  ctx: Context<ContextData>;
+  layers: ContextLayer[] | undefined;
+  resolvedModel: string;
+  resolvedInstructions: string | undefined;
+  resolvedTools: Tool[] | undefined;
+  allowedToolNames: string[] | undefined;
+  outputSchema: StandardSchemaV1<unknown, O> | undefined;
+  serverToolSpecs: ServerToolSpec[];
+  assembledItems: ReadonlyArray<Item>;
+}
+
+/**
+ * Builds the callModel request for one attempt. Cancellation reaches INSIDE
+ * the model call, not just the step boundary: the caller's abort signal stops
+ * the stream and the tool-round loop mid flight, so `ctx.abort()` /
+ * `harness.cancel()` don't wait out a long generation before taking effect
+ * (spec 09, Cancellation item 2).
+ */
+function buildModelRequest<TContext, I, O>(
+  params: BuildModelRequestParams<TContext, I, O>,
+): CallModelRequest {
+  const { step, ctx, layers } = params;
+  const _serverTools = params.serverToolSpecs.length > 0 ? params.serverToolSpecs : undefined;
+  const signal = isContextImpl(ctx) ? ctx.abortSignal : undefined;
+  if (params.resolvedTools) {
+    return {
+      model: params.resolvedModel,
+      items: params.assembledItems,
+      instructions: params.resolvedInstructions,
+      tools: params.resolvedTools,
+      params: step.params,
+      outputSchema: params.outputSchema,
+      outputJsonSchema: params.step.outputJsonSchema,
+      emit: step.emit,
+      _serverTools,
+      ctx,
+      layers,
+      allowedToolNames: params.allowedToolNames,
+      nodeId: step.id,
+      parentSpan: ctx.span,
+      signal,
+    };
+  }
+  return {
+    model: params.resolvedModel,
+    items: params.assembledItems,
+    instructions: params.resolvedInstructions,
+    params: step.params,
+    outputSchema: params.outputSchema,
+    outputJsonSchema: params.step.outputJsonSchema,
+    emit: step.emit,
+    _serverTools,
+    nodeId: step.id,
+    parentSpan: ctx.span,
+    signal,
+  };
+}
+
+/**
+ * Records a finished model response on the context: appends response items to
+ * the log, publishes `lastStepMeta`, and commits the per-layer usage breakdown
+ * (what the model was actually shown, pinned replays included — raw recall
+ * output would report content it never saw).
+ */
+function recordTurnOutcome(params: {
+  ctx: Context<ContextData>;
+  response: LLMResponse;
+  resolvedModel: string;
+  resolvedInstructions: string | undefined;
+  resolvedTools: Tool[] | undefined;
+  banded: BandedView;
+}): void {
+  const { ctx, response, banded } = params;
+  const toolCalls: FunctionCallItem[] = [];
+  for (const item of response.items) {
+    ctx.itemLog.append(item);
+    if (isFunctionCall(item)) {
+      toolCalls.push(item);
+    }
+  }
+
+  const meta: StepMeta = {
+    toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+    usage: response.usage,
+    cost: response.cost,
+    responseItems: response.items,
+  };
+
+  if (isMutableContext(ctx)) {
+    ctx.lastStepMeta = meta;
+  }
+
+  commitLayerUsage(
+    ctx,
+    computeLayerUsage({
+      ctx,
+      modelId: params.resolvedModel,
+      instructions: params.resolvedInstructions,
+      tools: params.resolvedTools,
+      recallResults: banded.servedPerLayer,
+      serveInfo: banded.serveInfo,
+      epoch: banded.epoch,
+    }),
+  );
+}
+
+export async function executeCallModel<TContext, I, O>(
+  step: StepCallModel<TContext, I, O>,
   input: I,
   ctx: Context<TContext>,
   layers?: ContextLayer[],
@@ -418,7 +687,7 @@ export async function executeLLM<TContext, I, O>(
   if (!resolvedModel || resolvedModel.trim() === '') {
     throw new NoeticConfigError({
       code: 'MISSING_MODEL',
-      message: `step.llm(${JSON.stringify(step.id)}) resolved model to an empty string.`,
+      message: `callModel(${JSON.stringify(step.id)}) resolved model to an empty string.`,
       hint: "Ensure `model` (or your `(ctx) => string` getter) returns a non-empty identifier, e.g. 'anthropic/claude-sonnet-4-20250514'.",
     });
   }
@@ -428,42 +697,13 @@ export async function executeLLM<TContext, I, O>(
     baseInstructions,
   );
   const resolvedStepTools = await resolveLazy(step.tools, ctx);
+  const { clientStepTools, serverToolSpecs } = partitionStepTools(resolvedStepTools);
 
-  // `step.tools` is heterogeneous: client `Tool`s plus inline OpenRouter
-  // server-tool specs (web search/fetch). Partition them — client tools flow
-  // through the unified-tool / allowedToolNames / steering machinery as before;
-  // server-tool specs bypass it entirely and are stamped onto the model request
-  // (`_serverTools`) for the model caller to wrap via the SDK's `serverTool()`.
-  // `undefined` (unrestricted) is preserved as-is; only a present array is
-  // partitioned so the `[] = opt-out` semantics of step.tools stay intact.
-  let clientStepTools: Tool[] | undefined;
-  const serverToolSpecs: ServerToolSpec[] = [];
-  if (resolvedStepTools !== undefined) {
-    clientStepTools = [];
-    for (const entry of resolvedStepTools) {
-      if (isServerToolSpec(entry)) {
-        serverToolSpecs.push(entry);
-      } else {
-        clientStepTools.push(entry);
-      }
-    }
-  }
-
-  // Append user input — through layer pipeline if layers exist, otherwise direct.
-  // The append pipeline may request a context re-render (e.g. a layer that
-  // expanded an input reference into new content); applied after recall below.
-  let rerenderRequests: ContextRerenderRequest[] = [];
-  if (typeof input === 'string' && input.length > 0) {
-    if (hasLayers) {
-      rerenderRequests = await runInputPipeline({
-        ctx: baseCtx,
-        layers,
-        input,
-      });
-    } else {
-      baseCtx.itemLog.append(createMessage(input, 'user'));
-    }
-  }
+  const rerenderRequests = await appendUserInput({
+    ctx: baseCtx,
+    layers,
+    input,
+  });
 
   const { tools: resolvedTools, allowedToolNames } = resolveToolsAndRestrictions(
     clientStepTools,
@@ -484,26 +724,12 @@ export async function executeLLM<TContext, I, O>(
     tokenBudget: Math.max(0, policy.tokenBudget - systemPromptTokens),
   };
 
-  let budgetMap = new Map<string, number>();
-  if (hasLayers) {
-    const { allocations } = allocateBudgets({
-      layers,
-      totalBudget: policy.tokenBudget,
-      systemPromptTokens,
-      responseReserve: policy.responseReserve,
-    });
-    budgetMap = new Map(
-      allocations.map((a) => [
-        a.layerId,
-        a.allocated,
-      ]),
-    );
-  }
+  const budgetMap = computeBudgetMap({
+    layers,
+    policy,
+    systemPromptTokens,
+  });
 
-  // Recall once per LLM step: atomic layers run in the hot path; eventual layers
-  // are served from cache. Results drive both the assembled context window and
-  // the per-layer usage breakdown (ctx.lastLayerUsage). Recall fires before the
-  // steering retry loop because retries replay the same context.
   const recallQuery = typeof input === 'string' ? input : '';
   const slotOf = new Map(
     (layers ?? []).map((l) => [
@@ -511,43 +737,15 @@ export async function executeLLM<TContext, I, O>(
       l.slot,
     ]),
   );
-  let recallResults: ReadonlyArray<RecallLayerOutput> = emptyRecall;
-  if (hasLayers) {
-    const atomic = await baseCtx.harness.recallLayersAtomic(
-      layers,
-      recallQuery,
-      baseCtx,
-      budgetMap,
-    );
-    const eventual = await baseCtx.harness.recallLayersEventual(
-      layers,
-      recallQuery,
-      baseCtx,
-      budgetMap,
-    );
-    recallResults = [
-      ...atomic,
-      ...eventual,
-    ].sort((a, b) => (slotOf.get(a.layerId) ?? 0) - (slotOf.get(b.layerId) ?? 0));
+  const recallResults = await gatherRecallResults({
+    ctx: baseCtx,
+    layers,
+    recallQuery,
+    budgetMap,
+    slotOf,
+    rerenderRequests,
+  });
 
-    // Apply re-render requests collected from the input-append pipeline.
-    if (rerenderRequests.length > 0) {
-      const rerendered = await baseCtx.harness.executeRerender(
-        rerenderRequests,
-        layers,
-        baseCtx,
-        budgetMap,
-        recallQuery,
-      );
-      recallResults = mergeRecallResults(
-        [
-          ...recallResults,
-        ],
-        rerendered,
-        slotOf,
-      );
-    }
-  }
   // Split recall output into the cache-stable anchor band and the live band,
   // replaying pinned anchors and gathering any changes into one supersede
   // message. Runs once, outside the retry loop, for the same reason recall does:
@@ -576,82 +774,26 @@ export async function executeLLM<TContext, I, O>(
   let cacheJudged = false;
 
   while (retries <= MAX_STEERING_RETRIES) {
-    const rawHistoryItems: ReadonlyArray<Item> = baseCtx.itemLog.items;
-    const projectedHistoryItems = hasLayers
-      ? await baseCtx.harness.projectHistory(layers, rawHistoryItems, baseCtx)
-      : rawHistoryItems;
-    let assembledItems: ReadonlyArray<Item>;
-    if (hasLayers) {
-      // Keep system messages at the front; the projector enforces the token
-      // budget (drops highest-slot layer output, then oldest history).
-      const systemItems: Item[] = [];
-      const nonSystemHistory: Item[] = [];
-      const tailIds = new Set(steeringTail.map((i) => i.id));
-      for (const item of projectedHistoryItems) {
-        if (item.type === 'message' && item.role === 'system') {
-          systemItems.push(item);
-          continue;
-        }
-        // Steering guidance is re-placed at the tail; skip it here so the retry
-        // does not see the same correction twice.
-        if ('id' in item && typeof item.id === 'string' && tailIds.has(item.id)) {
-          continue;
-        }
-        nonSystemHistory.push(item);
-      }
-      assembledItems = assembleView({
-        systemPromptItems: systemItems,
-        layerOutputItems: banded.anchorItems,
-        historyItems: nonSystemHistory,
-        liveLayerItems: banded.liveItems,
-        deltaItems: banded.deltaItems,
-        tailItems: steeringTail,
-        policy: viewPolicy,
-      });
-    } else {
-      assembledItems =
-        projectedHistoryItems === rawHistoryItems
-          ? rawHistoryItems
-          : [
-              ...projectedHistoryItems,
-            ];
-    }
+    const assembledItems = await assembleTurnItems({
+      ctx: baseCtx,
+      layers,
+      banded,
+      steeringTail,
+      viewPolicy,
+    });
 
-    const _serverTools = serverToolSpecs.length > 0 ? serverToolSpecs : undefined;
-    // Cancellation reaches INSIDE the model call, not just the step boundary:
-    // the caller's abort signal stops the stream and the tool-round loop mid
-    // flight, so `ctx.abort()` / `harness.cancel()` don't wait out a long
-    // generation before taking effect (spec 09, Cancellation item 2).
-    const signal = isContextImpl(baseCtx) ? baseCtx.abortSignal : undefined;
-    const request = resolvedTools
-      ? {
-          model: resolvedModel,
-          items: assembledItems,
-          instructions: resolvedInstructions,
-          tools: resolvedTools,
-          params: step.params,
-          outputSchema: outputSchema,
-          emit: step.emit,
-          _serverTools,
-          ctx: baseCtx,
-          layers,
-          allowedToolNames,
-          nodeId: step.id,
-          parentSpan: baseCtx.span,
-          signal,
-        }
-      : {
-          model: resolvedModel,
-          items: assembledItems,
-          instructions: resolvedInstructions,
-          params: step.params,
-          outputSchema: outputSchema,
-          emit: step.emit,
-          _serverTools,
-          nodeId: step.id,
-          parentSpan: baseCtx.span,
-          signal,
-        };
+    const request = buildModelRequest({
+      step,
+      ctx: baseCtx,
+      layers,
+      resolvedModel,
+      resolvedInstructions,
+      resolvedTools,
+      allowedToolNames,
+      outputSchema,
+      serverToolSpecs,
+      assembledItems,
+    });
     const response = await baseCtx.harness.callModel(request);
 
     // Track tokens/cost for EVERY model call, including responses steering
@@ -717,39 +859,14 @@ export async function executeLLM<TContext, I, O>(
       }
     }
 
-    const toolCalls: FunctionCallItem[] = [];
-    for (const item of response.items) {
-      baseCtx.itemLog.append(item);
-      if (isFunctionCall(item)) {
-        toolCalls.push(item);
-      }
-    }
-
-    const meta: StepMeta = {
-      toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-      usage: response.usage,
-      cost: response.cost,
-      responseItems: response.items,
-    };
-
-    if (isMutableContext(baseCtx)) {
-      baseCtx.lastStepMeta = meta;
-    }
-
-    commitLayerUsage(
-      baseCtx,
-      computeLayerUsage({
-        ctx: baseCtx,
-        modelId: resolvedModel,
-        instructions: resolvedInstructions,
-        tools: resolvedTools,
-        // What the model was actually shown, pinned replays included — raw
-        // recall output would report content it never saw.
-        recallResults: banded.servedPerLayer,
-        serveInfo: banded.serveInfo,
-        epoch: banded.epoch,
-      }),
-    );
+    recordTurnOutcome({
+      ctx: baseCtx,
+      response,
+      resolvedModel,
+      resolvedInstructions,
+      resolvedTools,
+      banded,
+    });
 
     if (hasLayers) {
       await baseCtx.harness.storeLayers(layers, response, baseCtx);
@@ -887,7 +1004,7 @@ export async function executeSpawn<TContext, I, O>(
   // Build unified tool set for child from its step tree + layers, plus the
   // parent's unified tools. Sub-agents that read tools dynamically (via
   // `ctx.unifiedTools`) otherwise lose the harness tool pool at the spawn
-  // boundary — a child whose `step.llm` resolves `tools` from context would
+  // boundary — a child whose `callModel` resolves `tools` from context would
   // see nothing. Inheriting the parent's tools keeps the harness toolset
   // available across spawns; the child's own step/layer tools take precedence
   // on name collision (dedup keeps the first occurrence), and children that
@@ -967,7 +1084,7 @@ export async function executeSpawn<TContext, I, O>(
 
 //#region provide
 
-function resolveLayers<TContext, I, O>(step: StepProvide<TContext, I, O>): ContextLayer[] {
+function resolveLayers<TContext, I, O>(step: StepWithContext<TContext, I, O>): ContextLayer[] {
   if (isContextConfig(step.context)) {
     return [
       ...step.context.layers,
@@ -1000,8 +1117,8 @@ function mergeLayers(
  * Unlike spawn, provide does not create a new itemLog or clone state.
  * Events flow through to the parent in real-time.
  */
-export async function executeProvide<TContext, I, O>(
-  step: StepProvide<TContext, I, O>,
+export async function executeWithContext<TContext, I, O>(
+  step: StepWithContext<TContext, I, O>,
   input: I,
   ctx: Context<TContext>,
   executeStep: ExecuteStepFn,
@@ -1079,7 +1196,7 @@ async function consumeToolGenerator(params: {
         event: next.value,
       },
     });
-    // A direct `step.tool` has no model call id — the step id keys its region.
+    // A direct `invokeTool` has no model call id — the step id keys its region.
     emitToolUi({
       ctx: params.ctx,
       tool: params.tool,
@@ -1091,8 +1208,8 @@ async function consumeToolGenerator(params: {
   }
 }
 
-export async function executeTool<TContext, I, O>(
-  step: StepTool<TContext, I, O>,
+export async function executeInvokeTool<TContext, I, O>(
+  step: StepInvokeTool<TContext, I, O>,
   input: I,
   ctx: Context<TContext>,
   harness: AgentHarnessContract,
@@ -1101,23 +1218,19 @@ export async function executeTool<TContext, I, O>(
   const baseCtx = frameworkCast<Context<ContextData>>(ctx);
   const args = step.args ? Object.assign({}, input, step.args) : input;
 
-  const parseResult = step.tool.input.safeParse(args);
+  const parseResult = await validateSchema(step.tool.input, args);
   if (!parseResult.success) {
     throw new NoeticErrorImpl({
       kind: 'step_failed',
       stepId: step.id,
-      cause: new Error(`Tool input validation failed: ${parseResult.error.message}`),
+      cause: new Error(`Tool input validation failed: ${parseResult.zodError.message}`),
       retriesExhausted: false,
     });
   }
+  const parsedArgs = parseResult.value;
 
   if (layers && layers.length > 0) {
-    const decision = await harness.beforeToolCall(
-      layers,
-      step.tool.name,
-      parseResult.data,
-      baseCtx,
-    );
+    const decision = await harness.beforeToolCall(layers, step.tool.name, parsedArgs, baseCtx);
     if (decision.action !== SteeringAction.Allow) {
       throw new NoeticErrorImpl({
         kind: 'steering_denied',
@@ -1131,11 +1244,11 @@ export async function executeTool<TContext, I, O>(
     tool: step.tool,
     callId: step.id,
     phase: 'call',
-    args: parseResult.data,
+    args: parsedArgs,
   });
   try {
     const toolCtx = buildToolExecutionContext(baseCtx, harness);
-    const execResult = step.tool.execute(parseResult.data, toolCtx);
+    const execResult = step.tool.execute(parsedArgs, toolCtx);
 
     const result = isAsyncGenerator(execResult)
       ? await consumeToolGenerator({
@@ -1143,7 +1256,7 @@ export async function executeTool<TContext, I, O>(
           stepId: step.id,
           tool: step.tool,
           ctx: baseCtx,
-          args: parseResult.data,
+          args: parsedArgs,
         })
       : await execResult;
 
@@ -1152,7 +1265,7 @@ export async function executeTool<TContext, I, O>(
       tool: step.tool,
       callId: step.id,
       phase: 'result',
-      args: parseResult.data,
+      args: parsedArgs,
       output: result,
     });
     return frameworkCast<O>(result);
@@ -1162,7 +1275,7 @@ export async function executeTool<TContext, I, O>(
       tool: step.tool,
       callId: step.id,
       phase: 'error',
-      args: parseResult.data,
+      args: parsedArgs,
       error: e,
     });
     if (e instanceof NoeticErrorImpl) {

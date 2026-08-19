@@ -11,7 +11,7 @@ function makeHarness(context?: ContextLayer[]): AgentHarness {
   return new AgentHarness({
     name: 'test',
     params: {},
-    context,
+    contextLayers: context,
     _testCallModel: createScriptedCallModel([
       textOnlyResponse('ok'),
     ]),
@@ -28,6 +28,7 @@ function makeTracingLayer(id: string, trace: string[]): ContextLayer {
     hooks: {
       async onComplete({ outcome }) {
         trace.push(`${id}:onComplete:${outcome}`);
+        return undefined;
       },
       async dispose() {
         trace.push(`${id}:dispose`);

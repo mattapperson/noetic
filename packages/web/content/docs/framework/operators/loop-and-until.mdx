@@ -6,11 +6,11 @@ description: Repeat a step until a termination predicate says stop.
 ## Quick Example
 
 ```ts validate=none
-import { loop, step, until } from '@noetic-tools/core';
+import { callModel, loop, until } from '@noetic-tools/core';
 
 const agent = loop({
   id: 'chat-loop',
-  steps: [step.llm({
+  steps: [callModel({
     id: 'chat',
     model: 'openai/gpt-4o',
     instructions: 'You are a helpful assistant.',
@@ -91,7 +91,7 @@ Stop when cumulative cost reaches the threshold.
 const predicate = until.maxCost(0.50);
 ```
 
-### until.maxDuration(ms)
+### until.maxDuration(duration)
 
 Stop when elapsed time exceeds the limit.
 
@@ -149,7 +149,7 @@ const predicate = until.outputEquals('DONE');
 
 ### until.never()
 
-Never stop the loop. Pairs with operators like `every` that rely on external cancellation to terminate.
+Never stop the loop. Pairs with operators like `schedule` that rely on external cancellation to terminate.
 
 ```ts
 const predicate = until.never();
@@ -204,11 +204,11 @@ const stopCondition = all(
 By default, the last step's output is fed directly as the next iteration's input (requires `I` and `O` to be the same type). Use `prepareNext` when they differ, or when you want to inject feedback.
 
 ```ts validate=none
-import { loop, step, until } from '@noetic-tools/core';
+import { callModel, loop, until } from '@noetic-tools/core';
 
 const refiner = loop({
   id: 'refine-loop',
-  steps: [step.llm({
+  steps: [callModel({
     id: 'refiner',
     model: 'openai/gpt-4o',
     instructions: 'Improve the draft based on feedback.',
@@ -246,14 +246,14 @@ When `until` returns `{ stop: true }` and `inbox` is set:
 3. If no message is found (or timeout expires), the loop truly stops
 
 ```ts validate=none
-import { channel, loop, step, until } from '@noetic-tools/core';
+import { callModel, channel, loop, until } from '@noetic-tools/core';
 import { z } from 'zod';
 
 const inbox = channel('agent-inbox', { schema: z.string(), mode: 'queue' });
 
 const agent = loop({
   id: 'async-agent',
-  steps: [step.llm({
+  steps: [callModel({
     id: 'agent-llm',
     model: 'openai/gpt-4o',
     tools: [launchTool, checkTool],
@@ -300,28 +300,14 @@ If `onError` is not provided, errors propagate immediately.
 
 ## The ReAct Pattern
 
-The built-in `react()` helper is just a loop with `until.noToolCalls()`.
+A ReAct-style agent is just a `loop` around a `callModel` that stops when the model responds without tool calls — with `until.maxSteps` and `until.maxCost` as safety rails:
 
 ```ts validate=none
-import { react } from '@noetic-tools/core';
-
-const agent = react({
-  model: 'openai/gpt-4o',
-  instructions: 'You are a helpful assistant.',
-  tools: [searchTool, calculatorTool],
-  maxSteps: 10,
-  maxCost: 1.00,
-});
-```
-
-This is equivalent to:
-
-```ts validate=none
-import { any, loop, step, until } from '@noetic-tools/core';
+import { any, callModel, loop, until } from '@noetic-tools/core';
 
 const agent = loop({
   id: 'react-loop',
-  steps: [step.llm({
+  steps: [callModel({
     id: 'react-step',
     model: 'openai/gpt-4o',
     instructions: 'You are a helpful assistant.',
@@ -339,4 +325,4 @@ const agent = loop({
 
 - [Steps](/docs/framework/steps) -- the step types you can use in a loop.
 - [Spawn](/docs/framework/operators/spawn) -- run a loop in an isolated child context.
-- [Control Flow](/docs/framework/operators) -- branch and fork for non-iterative operations.
+- [Control Flow](/docs/framework/operators) -- conditional and inParallel for non-iterative operations.
