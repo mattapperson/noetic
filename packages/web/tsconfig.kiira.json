@@ -25,6 +25,7 @@
       "@noetic-tools/cli": ["./.typecheck-snippets-shims/noetic-cli.d.ts"],
       "@noetic-tools/platform-node": ["../platform-node/src/index.ts"],
       "@noetic-tools/acp": ["../acp/src/index.ts"],
+      "@noetic-tools/acp/server": ["../acp/src/server.ts"],
       "@noetic-tools/eval": ["../eval/src/index.ts"],
       "@noetic/plugin-powerline": ["../plugin-powerline/src/index.tsx"],
       "@noetic/plugin-design-deck": ["../plugin-design-deck/src/index.tsx"]

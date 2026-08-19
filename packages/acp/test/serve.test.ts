@@ -93,71 +93,147 @@ interface ServeMockHarness extends AcpServeHarness {
  * tool calls, with `tool_call_started` emitted BEFORE the gate is awaited
  * (the spec-31 ordering the real interpreter guarantees).
  */
+interface MockEventBuffer {
+  emit(event: StreamEvent): void;
+  consume(): AsyncIterator<StreamEvent>;
+  liveConsumers(): number;
+}
+
+/** Emulates the real broadcaster's replay + discard-when-unconsumed rules. */
+function createMockEventBuffer(): MockEventBuffer {
+  const buffer: StreamEvent[] = [];
+  const wakeups: Array<() => void> = [];
+  let everAttached = false;
+  let liveConsumers = 0;
+  return {
+    liveConsumers: () => liveConsumers,
+    emit(event) {
+      if (everAttached && liveConsumers === 0) {
+        return;
+      }
+      buffer.push(event);
+      for (const wake of wakeups.splice(0)) {
+        wake();
+      }
+    },
+    consume() {
+      everAttached = true;
+      liveConsumers++;
+      let cursor = 0;
+      let finished = false;
+      const finish = (): void => {
+        if (!finished) {
+          finished = true;
+          liveConsumers--;
+        }
+      };
+      return {
+        async next(): Promise<IteratorResult<StreamEvent>> {
+          while (!finished) {
+            if (cursor < buffer.length) {
+              return {
+                value: buffer[cursor++],
+                done: false,
+              };
+            }
+            await new Promise<void>((resolve) => {
+              wakeups.push(resolve);
+            });
+          }
+          return {
+            value: undefined,
+            done: true,
+          };
+        },
+        return(): Promise<IteratorResult<StreamEvent>> {
+          finish();
+          return Promise.resolve({
+            value: undefined,
+            done: true,
+          });
+        },
+      };
+    },
+  };
+}
+
+interface MockItemStream {
+  getItemStream(): AsyncIterable<StreamingItem>;
+  closed(): boolean;
+}
+
+function createMockItemStream(script: ServeMockScript): MockItemStream {
+  let closed = false;
+  const wakeups: Array<() => void> = [];
+  return {
+    closed: () => closed,
+    getItemStream() {
+      return {
+        [Symbol.asyncIterator]: () => {
+          let cursor = 0;
+          let released = false;
+          const items = script.items ?? [];
+          return {
+            async next(): Promise<IteratorResult<StreamingItem>> {
+              if (released) {
+                return {
+                  value: undefined,
+                  done: true,
+                };
+              }
+              if (cursor < items.length) {
+                const value = items[cursor++];
+                if (value === undefined) {
+                  return {
+                    value: undefined,
+                    done: true,
+                  };
+                }
+                return {
+                  value,
+                  done: false,
+                };
+              }
+              if (script.holdItemStream) {
+                await new Promise<void>((resolve) => {
+                  wakeups.push(resolve);
+                });
+              }
+              return {
+                value: undefined,
+                done: true,
+              };
+            },
+            async return(): Promise<IteratorResult<StreamingItem>> {
+              released = true;
+              closed = true;
+              for (const wake of wakeups.splice(0)) {
+                wake();
+              }
+              return {
+                value: undefined,
+                done: true,
+              };
+            },
+          };
+        },
+      };
+    },
+  };
+}
+
 function serveMockHarness(script: ServeMockScript): ServeMockHarness {
   const executed: ServeMockHarness['executed'] = [];
   const seeded: ServeMockHarness['seeded'] = [];
   const aborts: ServeMockHarness['aborts'] = [];
   const gateDecisions: ServeMockHarness['gateDecisions'] = [];
-
-  const buffer: StreamEvent[] = [];
-  const wakeups: Array<() => void> = [];
-  let everAttached = false;
-  let liveConsumers = 0;
+  const events = createMockEventBuffer();
+  const itemStream = createMockItemStream(script);
+  const emit = events.emit;
   let turnCounter = 0;
   let currentTurnId: string | null = null;
   let aborted = false;
   let turnSettled: Promise<void> = Promise.resolve();
-  let itemStreamClosed = false;
-  const itemWakeups: Array<() => void> = [];
-
-  const emit = (event: StreamEvent): void => {
-    if (everAttached && liveConsumers === 0) {
-      return;
-    }
-    buffer.push(event);
-    for (const wake of wakeups.splice(0)) {
-      wake();
-    }
-  };
-
-  function consume(): AsyncIterator<StreamEvent> {
-    everAttached = true;
-    liveConsumers++;
-    let cursor = 0;
-    let finished = false;
-    const finish = (): void => {
-      if (!finished) {
-        finished = true;
-        liveConsumers--;
-      }
-    };
-    return {
-      async next(): Promise<IteratorResult<StreamEvent>> {
-        while (!finished) {
-          if (cursor < buffer.length) {
-            return {
-              value: buffer[cursor++],
-              done: false,
-            };
-          }
-          await new Promise<void>((resolve) => {
-            wakeups.push(resolve);
-          });
-        }
-        return {
-          value: undefined,
-          done: true,
-        };
-      },
-      return(): Promise<IteratorResult<StreamEvent>> {
-        finish();
-        return Promise.resolve({
-          value: undefined,
-          done: true,
-        });
-      },
-    };
-  }
 
   async function runGatedTool(tool: ScriptedToolCall, layers: ContextLayer[]): Promise<void> {
     emit(
@@ -251,63 +327,12 @@ function serveMockHarness(script: ServeMockScript): ServeMockHarness {
       turnSettled = runTurnBody(turnId, options?.extraContextLayers ?? []);
       return Promise.resolve();
     },
-    itemStreamClosed: () => itemStreamClosed,
-    liveEventConsumers: () => liveConsumers,
-    getItemStream() {
-      return {
-        [Symbol.asyncIterator]: () => {
-          let cursor = 0;
-          let released = false;
-          const items = script.items ?? [];
-          return {
-            async next(): Promise<IteratorResult<StreamingItem>> {
-              if (released) {
-                return {
-                  value: undefined,
-                  done: true,
-                };
-              }
-              if (cursor < items.length) {
-                const value = items[cursor++];
-                if (value === undefined) {
-                  return {
-                    value: undefined,
-                    done: true,
-                  };
-                }
-                return {
-                  value,
-                  done: false,
-                };
-              }
-              if (script.holdItemStream) {
-                await new Promise<void>((resolve) => {
-                  itemWakeups.push(resolve);
-                });
-              }
-              return {
-                value: undefined,
-                done: true,
-              };
-            },
-            async return(): Promise<IteratorResult<StreamingItem>> {
-              released = true;
-              itemStreamClosed = true;
-              for (const wake of itemWakeups.splice(0)) {
-                wake();
-              }
-              return {
-                value: undefined,
-                done: true,
-              };
-            },
-          };
-        },
-      };
-    },
+    itemStreamClosed: () => itemStream.closed(),
+    liveEventConsumers: () => events.liveConsumers(),
+    getItemStream: () => itemStream.getItemStream(),
     getFullStream() {
       return {
-        [Symbol.asyncIterator]: () => consume(),
+        [Symbol.asyncIterator]: () => events.consume(),
       };
     },
     seedSessionHistory(threadId, items) {

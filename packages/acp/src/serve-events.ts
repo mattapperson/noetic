@@ -201,138 +201,32 @@ function readNestedUpdate(event: StreamEvent): ServeSessionUpdate | null {
  * `session/update` notifications, and return how the turn ended.
  */
 export async function pumpTurnEvents(params: PumpTurnParams): Promise<ServeTurnOutcome> {
-  let claimed = false;
-  let primary = false;
-  let turnId: string | null = null;
-  const argsByCallId = new Map<string, unknown>();
-  /** Calls started but not completed — flushed at the turn boundary so the client is never left with a spinner. */
-  const openCalls = new Set<string>();
-
-  const flushOpenCalls = async (status: 'completed' | 'failed'): Promise<void> => {
-    for (const toolCallId of openCalls) {
-      await notifyIfPrimary(params, primary, {
-        sessionUpdate: 'tool_call_update',
-        toolCallId,
-        status,
-      });
-    }
-    openCalls.clear();
+  const state: TurnState = {
+    params,
+    primary: false,
+    turnId: null,
+    argsByCallId: new Map<string, unknown>(),
+    openCalls: new Set<string>(),
   };
+  let claimed = false;
 
   for await (const event of params.events) {
     if (!claimed) {
       const claim = matchClaim(event, params.messageId);
       if (claim.kind === 'ours') {
         claimed = true;
-        primary = claim.primary;
-        turnId = claim.turnId;
+        state.primary = claim.primary;
+        state.turnId = claim.turnId;
       }
       continue;
     }
-
     if (event.source === 'sdk') {
-      if (event.type === 'response.output_text.delta' && typeof event.data.delta === 'string') {
-        await notifyIfPrimary(params, primary, textChunk('agent_message_chunk', event.data.delta));
-        continue;
-      }
-      if (event.type === 'response.reasoning.delta' && typeof event.data.delta === 'string') {
-        await notifyIfPrimary(params, primary, textChunk('agent_thought_chunk', event.data.delta));
-        continue;
-      }
-      const fc = readFunctionCallArgs(event);
-      if (fc) {
-        argsByCallId.set(fc.callId, fc.args);
-        continue;
-      }
-      const nested = readNestedUpdate(event);
-      if (nested) {
-        await notifyIfPrimary(params, primary, nested);
-      }
+      await handleSdkEvent(state, event);
       continue;
     }
-
-    if (hasEventName(event, 'tool_call_started')) {
-      const call = readToolCall(event);
-      if (call) {
-        openCalls.add(call.callId);
-        const presentation = params.present(call.name, call.callId, argsByCallId.get(call.callId));
-        await notifyIfPrimary(params, primary, {
-          sessionUpdate: 'tool_call',
-          toolCallId: call.callId,
-          title: presentation.title,
-          kind: presentation.kind,
-          status: presentation.status,
-          locations: presentation.locations,
-          rawInput: asRecord(argsByCallId.get(call.callId)),
-        });
-      }
-      continue;
-    }
-    if (hasEventName(event, 'tool_call_completed')) {
-      const call = readToolCall(event);
-      if (call) {
-        openCalls.delete(call.callId);
-        const output = typeof event.data.output === 'string' ? event.data.output : undefined;
-        await notifyIfPrimary(params, primary, {
-          sessionUpdate: 'tool_call_update',
-          toolCallId: call.callId,
-          status: event.data.error === true ? 'failed' : 'completed',
-          // The tool's output (or failure text) as renderable content — the
-          // spec's "completed with the output as content, failed carrying the
-          // error".
-          content:
-            output !== undefined
-              ? [
-                  {
-                    type: 'content',
-                    content: {
-                      type: 'text',
-                      text: output,
-                    },
-                  },
-                ]
-              : undefined,
-        });
-      }
-      continue;
-    }
-    if (hasEventName(event, 'turn_completed') && matchesTurn(event, turnId)) {
-      await flushOpenCalls('completed');
-      return {
-        kind: 'stop',
-        stopReason: 'end_turn',
-      };
-    }
-    if (hasEventName(event, 'turn_aborted') && matchesTurn(event, turnId)) {
-      await flushOpenCalls('failed');
-      // The typed error kind (spec 31 gate contract) classifies the abort;
-      // the session-level cancel flag covers aborts that carry no kind (a
-      // host-initiated harness.abort has only a reason string).
-      const errorKind = typeof event.data.errorKind === 'string' ? event.data.errorKind : undefined;
-      if (errorKind === 'cancelled' || params.cancelRequested()) {
-        return {
-          kind: 'stop',
-          stopReason: 'cancelled',
-        };
-      }
-      if (errorKind === 'model_refused') {
-        return {
-          kind: 'stop',
-          stopReason: 'refusal',
-        };
-      }
-      if (errorKind === 'budget_exceeded') {
-        // The closest wire vocabulary for a spent token budget — an editor
-        // renders it as a native budget stop instead of a generic error.
-        return {
-          kind: 'stop',
-          stopReason: 'max_tokens',
-        };
-      }
-      return {
-        kind: 'error',
-        message: typeof event.data.reason === 'string' ? event.data.reason : 'turn aborted',
-      };
+    const outcome = await handleFrameworkEvent(state, event);
+    if (outcome) {
+      return outcome;
     }
   }
 
@@ -343,6 +237,152 @@ export async function pumpTurnEvents(params: PumpTurnParams): Promise<ServeTurnO
     kind: 'stop',
     stopReason: 'cancelled',
   };
+}
+
+interface TurnState {
+  params: PumpTurnParams;
+  primary: boolean;
+  turnId: string | null;
+  argsByCallId: Map<string, unknown>;
+  /** Calls started but not completed — flushed at the turn boundary so the client is never left with a spinner. */
+  openCalls: Set<string>;
+}
+
+async function flushOpenCalls(state: TurnState, status: 'completed' | 'failed'): Promise<void> {
+  for (const toolCallId of state.openCalls) {
+    await notifyIfPrimary(state.params, state.primary, {
+      sessionUpdate: 'tool_call_update',
+      toolCallId,
+      status,
+    });
+  }
+  state.openCalls.clear();
+}
+
+async function handleSdkEvent(state: TurnState, event: StreamEvent): Promise<void> {
+  const { params, primary } = state;
+  if (event.type === 'response.output_text.delta' && typeof event.data.delta === 'string') {
+    await notifyIfPrimary(params, primary, textChunk('agent_message_chunk', event.data.delta));
+    return;
+  }
+  if (event.type === 'response.reasoning.delta' && typeof event.data.delta === 'string') {
+    await notifyIfPrimary(params, primary, textChunk('agent_thought_chunk', event.data.delta));
+    return;
+  }
+  const fc = readFunctionCallArgs(event);
+  if (fc) {
+    state.argsByCallId.set(fc.callId, fc.args);
+    return;
+  }
+  const nested = readNestedUpdate(event);
+  if (nested) {
+    await notifyIfPrimary(params, primary, nested);
+  }
+}
+
+async function handleToolCallStarted(state: TurnState, event: StreamEvent): Promise<void> {
+  const call = readToolCall(event);
+  if (!call) {
+    return;
+  }
+  state.openCalls.add(call.callId);
+  const args = state.argsByCallId.get(call.callId);
+  const presentation = state.params.present(call.name, call.callId, args);
+  await notifyIfPrimary(state.params, state.primary, {
+    sessionUpdate: 'tool_call',
+    toolCallId: call.callId,
+    title: presentation.title,
+    kind: presentation.kind,
+    status: presentation.status,
+    locations: presentation.locations,
+    rawInput: asRecord(args),
+  });
+}
+
+async function handleToolCallCompleted(state: TurnState, event: StreamEvent): Promise<void> {
+  const call = readToolCall(event);
+  if (!call) {
+    return;
+  }
+  state.openCalls.delete(call.callId);
+  const output = typeof event.data.output === 'string' ? event.data.output : undefined;
+  await notifyIfPrimary(state.params, state.primary, {
+    sessionUpdate: 'tool_call_update',
+    toolCallId: call.callId,
+    status: event.data.error === true ? 'failed' : 'completed',
+    // The tool's output (or failure text) as renderable content — the spec's
+    // "completed with the output as content, failed carrying the error".
+    content:
+      output !== undefined
+        ? [
+            {
+              type: 'content',
+              content: {
+                type: 'text',
+                text: output,
+              },
+            },
+          ]
+        : undefined,
+  });
+}
+
+async function handleTurnAborted(state: TurnState, event: StreamEvent): Promise<ServeTurnOutcome> {
+  await flushOpenCalls(state, 'failed');
+  // The typed error kind (spec 31 gate contract) classifies the abort; the
+  // session-level cancel flag covers aborts that carry no kind (a
+  // host-initiated harness.abort has only a reason string).
+  const errorKind = typeof event.data.errorKind === 'string' ? event.data.errorKind : undefined;
+  if (errorKind === 'cancelled' || state.params.cancelRequested()) {
+    return {
+      kind: 'stop',
+      stopReason: 'cancelled',
+    };
+  }
+  if (errorKind === 'model_refused') {
+    return {
+      kind: 'stop',
+      stopReason: 'refusal',
+    };
+  }
+  if (errorKind === 'budget_exceeded') {
+    // The closest wire vocabulary for a spent token budget — an editor
+    // renders it as a native budget stop instead of a generic error.
+    return {
+      kind: 'stop',
+      stopReason: 'max_tokens',
+    };
+  }
+  return {
+    kind: 'error',
+    message: typeof event.data.reason === 'string' ? event.data.reason : 'turn aborted',
+  };
+}
+
+/** Returns an outcome when the event is this turn's boundary; null otherwise. */
+async function handleFrameworkEvent(
+  state: TurnState,
+  event: StreamEvent,
+): Promise<ServeTurnOutcome | null> {
+  if (hasEventName(event, 'tool_call_started')) {
+    await handleToolCallStarted(state, event);
+    return null;
+  }
+  if (hasEventName(event, 'tool_call_completed')) {
+    await handleToolCallCompleted(state, event);
+    return null;
+  }
+  if (hasEventName(event, 'turn_completed') && matchesTurn(event, state.turnId)) {
+    await flushOpenCalls(state, 'completed');
+    return {
+      kind: 'stop',
+      stopReason: 'end_turn',
+    };
+  }
+  if (hasEventName(event, 'turn_aborted') && matchesTurn(event, state.turnId)) {
+    return handleTurnAborted(state, event);
+  }
+  return null;
 }
 
 async function notifyIfPrimary(
