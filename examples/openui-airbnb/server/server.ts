@@ -23,7 +23,7 @@
 
 import type { Context } from '@noetic-tools/core';
 import type { UiDocument } from '@noetic-tools/openui';
-import { serializeAssignment } from '@noetic-tools/openui';
+import { serializeStatement } from '@noetic-tools/openui';
 import { createStaysHarness, stays } from './agent';
 
 const PORT = Number(process.env.PORT ?? 8787);
@@ -62,16 +62,16 @@ function streamTurn(prompt: string): Response {
         lastDoc = doc;
         // Reveal each statement in author order — real model output, paced.
         for (const ref of doc.order) {
-          const assignment = doc.assignments[ref];
-          if (!assignment) {
+          const statement = doc.statements[ref];
+          if (!statement) {
             continue;
           }
           controller.enqueue(
             frame({
               type: 'statement',
-              ref: assignment.ref,
-              kind: assignment.kind,
-              source: serializeAssignment(assignment),
+              ref: statement.ref,
+              kind: statement.kind,
+              source: serializeStatement(statement),
             }),
           );
           await delay(ref === doc.root ? 0 : 110);
@@ -104,9 +104,9 @@ function streamTurn(prompt: string): Response {
 function snapshotResponse(): Response {
   const source = lastDoc
     ? lastDoc.order
-        .map((r) => lastDoc?.assignments[r])
+        .map((r) => lastDoc?.statements[r])
         .filter(Boolean)
-        .map((a) => serializeAssignment(a!))
+        .map((a) => serializeStatement(a!))
         .join('\n')
     : '';
   return Response.json(

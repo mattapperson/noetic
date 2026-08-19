@@ -116,6 +116,22 @@ describe('afterModelCall folding', () => {
     expect(result.state?.version).toBe(1);
     expect(ctx.traceEvents.some((e) => e.name === 'openui.validation')).toBe(true);
   });
+
+  test('violations on statements not reachable from root still guide the model', async () => {
+    // Regression guard: a turn can render a valid root plus a broken orphan
+    // statement; the orphan must not validate silently.
+    const { surface, state } = await initState();
+    const result = await foldRender(
+      surface,
+      state,
+      [
+        'root = Card("ok")',
+        'x = Sparkline([1])',
+      ].join('\n'),
+    );
+    expect(result.decision.action).toBe('guide');
+    expect(result.decision.guidance).toContain("unknown component 'Sparkline'");
+  });
 });
 
 describe('onItemAppend ui-event reduction', () => {

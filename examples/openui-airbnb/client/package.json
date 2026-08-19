@@ -8,6 +8,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@openuidev/react-lang": "0.2.11",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "zod": "4.0.5"

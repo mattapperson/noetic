@@ -1,22 +1,13 @@
-import { resolve } from 'node:path';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
-// The client renders with noetic's REAL OpenUI Lang parser. It's pure (imports
-// only ./document, no node/context deps), so we alias it straight to source and
-// let esbuild compile the TS — no build step, no bundling the whole package.
-const OPENUI_SRC = resolve(__dirname, '../../../packages/openui/src/lang');
-
+// The client renders OpenUI Lang with @openuidev/react-lang's <Renderer>, so
+// there's no local parser to alias — the server streams Lang source and the
+// Renderer parses it in the browser.
 export default defineConfig({
   plugins: [
     react(),
   ],
-  resolve: {
-    alias: {
-      '@openui/parser': resolve(OPENUI_SRC, 'parser.ts'),
-      '@openui/document': resolve(OPENUI_SRC, 'document.ts'),
-    },
-  },
   server: {
     port: 5173,
     // Proxy the agent so the browser and server share an origin (no CORS in play).

@@ -27,7 +27,7 @@ import {
 } from '@noetic-tools/types';
 import { z } from 'zod';
 import type { UiDocument } from '../lang/document';
-import { emptyDocument, mergeDocument, serializeAssignment } from '../lang/document';
+import { emptyDocument, mergeDocument, serializeStatement } from '../lang/document';
 import { parseDocument } from '../lang/parser';
 import type { UiLibrary } from '../library';
 import { validateDocument } from '../library';
@@ -192,9 +192,9 @@ function renderWithinBudget(state: OpenUiSurfaceState, budget: number): string {
   let view: SurfaceView = {
     root: state.document.root,
     statements: state.document.order
-      .map((ref) => state.document.assignments[ref])
+      .map((ref) => state.document.statements[ref])
       .filter((a): a is NonNullable<typeof a> => a !== undefined)
-      .map(serializeAssignment),
+      .map(serializeStatement),
     vars: state.vars,
     interactions: state.interactions,
     version: state.version,

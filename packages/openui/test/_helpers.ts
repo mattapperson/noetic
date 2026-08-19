@@ -135,32 +135,37 @@ export function makeResponse(text: string): LLMResponse {
 
 /** The shared test component library. */
 export function testLibrary() {
-  return createLibrary([
-    defineComponent({
-      name: 'Card',
-      description: 'A titled container',
-      props: z.object({
-        title: z.string(),
-        children: z.array(z.unknown()).optional(),
+  return createLibrary(
+    [
+      defineComponent({
+        name: 'Card',
+        description: 'A titled container',
+        props: z.object({
+          title: z.string(),
+          children: z.array(z.unknown()).optional(),
+        }),
       }),
-    }),
-    defineComponent({
-      name: 'Text',
-      props: z.object({
-        value: z.string(),
+      defineComponent({
+        name: 'Text',
+        props: z.object({
+          value: z.string(),
+        }),
       }),
-    }),
-    defineComponent({
-      name: 'Progress',
-      props: z.object({
-        pct: z.number().min(0).max(100),
+      defineComponent({
+        name: 'Progress',
+        props: z.object({
+          pct: z.number().min(0).max(100),
+        }),
       }),
-    }),
-    defineComponent({
-      name: 'Stack',
-      props: z.object({
-        children: z.array(z.unknown()),
+      defineComponent({
+        name: 'Stack',
+        props: z.object({
+          children: z.array(z.unknown()),
+        }),
       }),
-    }),
-  ]);
+    ],
+    {
+      root: 'Stack',
+    },
+  );
 }

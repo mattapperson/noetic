@@ -134,7 +134,7 @@ describe('SSE framing round-trip', () => {
       document: {
         dialect: 'openui-lang/0.5',
         root: 'root',
-        assignments: {},
+        statements: {},
         order: [],
         diagnostics: [],
       },

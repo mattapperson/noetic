@@ -1,16 +1,17 @@
 /**
- * App orchestration. Owns no UI *design* state — it holds the accumulated OpenUI
- * Lang the agent has streamed, parses it with noetic's real `parseDocument`, and
- * projects it through the renderer. A prompt (or a card interaction) starts a
+ * App orchestration. Owns no UI *design* state — it accumulates the raw OpenUI
+ * Lang source the agent streams and hands it to react-lang's <Renderer>, which
+ * parses, evaluates reactive `$state`, and projects it through the Airbnb
+ * library. A prompt (or a card interaction routed through `onAction`) starts a
  * turn; statements stream in and the surface materializes live.
  */
 
-import { parseDocument } from '@openui/parser';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { renderDocument, renderPartial } from './render';
+import type { ActionEvent } from '@openuidev/react-lang';
+import { BuiltinActionType, Renderer } from '@openuidev/react-lang';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { airbnbLibrary } from './components';
 import type { ServerMessage } from './transport';
 import { runTurn } from './transport';
-import type { RenderContext } from './types';
 
 type Phase = 'idle' | 'thinking' | 'streaming' | 'ready';
 
@@ -18,7 +19,6 @@ const OPENING_PROMPT = 'Find Annapolis stays near City Dock and let me sort by d
 
 export function App(): React.ReactNode {
   const [source, setSource] = useState('');
-  const [vars, setVars] = useState<Record<string, unknown>>({});
   const [phase, setPhase] = useState<Phase>('idle');
   const turnBuffer = useRef<string[]>([]);
   const started = useRef(false);
@@ -29,7 +29,6 @@ export function App(): React.ReactNode {
     await runTurn(prompt, (msg: ServerMessage) => {
       if (msg.type === 'snapshot' && msg.source.length > 0) {
         setSource(msg.source);
-        setVars(msg.vars);
       }
       if (msg.type === 'statement') {
         turnBuffer.current.push(msg.source);
@@ -54,55 +53,35 @@ export function App(): React.ReactNode {
     runPrompt,
   ]);
 
-  const doc = useMemo(
-    () => parseDocument(source),
-    [
-      source,
-    ],
-  );
-
-  // The document's own `$state` lines are the source of truth for reactive vars;
-  // local edits (onSet) layer on top so inputs stay responsive between turns.
-  const mergedVars = useMemo(() => {
-    const fromDoc: Record<string, unknown> = {};
-    for (const ref of doc.order) {
-      const a = doc.assignments[ref];
-      if (a?.kind === 'state' && a.expr.kind === 'literal') {
-        fromDoc[a.ref.replace(/^\$/, '')] = a.expr.value;
+  // Card/chip/button interactions surface here as ActionEvents. `@Set` and
+  // `@Run` steps are applied inside the Renderer (reactive store); a
+  // ContinueConversation (`@ToAssistant`) is what drives the next agent turn.
+  const handleAction = useCallback(
+    (event: ActionEvent) => {
+      if (event.type === BuiltinActionType.ContinueConversation && event.humanFriendlyMessage) {
+        void runPrompt(event.humanFriendlyMessage);
       }
-    }
-    return {
-      ...fromDoc,
-      ...vars,
-    };
-  }, [
-    doc,
-    vars,
-  ]);
-
-  const ctx: RenderContext = useMemo(
-    () => ({
-      vars: mergedVars,
-      onIntent: (message: string) => void runPrompt(message),
-      onSet: (name: string, value: unknown) =>
-        setVars((v) => ({
-          ...v,
-          [name]: value,
-        })),
-    }),
+    },
     [
-      mergedVars,
       runPrompt,
     ],
   );
 
-  const view = doc.root ? renderDocument(doc, ctx) : renderPartial(doc, ctx);
   const busy = phase === 'thinking' || phase === 'streaming';
 
   return (
     <div className="app">
       {busy && <ThinkingBar phase={phase} />}
-      {view ?? <Booting />}
+      {source.length > 0 ? (
+        <Renderer
+          response={source}
+          library={airbnbLibrary}
+          isStreaming={busy}
+          onAction={handleAction}
+        />
+      ) : (
+        <Booting />
+      )}
     </div>
   );
 }
