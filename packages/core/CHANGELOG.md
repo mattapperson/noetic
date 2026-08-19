@@ -1,3 +1,7 @@
+## @noetic-tools/core-v5.5.0 (2026-08-19)
+
+* feat(acp): serve a harness as an ACP agent ([68bdc20](https://github.com/mattapperson/noetic/commit/68bdc20))
+
 ## @noetic-tools/core-v5.4.2 (2026-08-19)
 
 * test(core): pin the anchoring behaviour that reads as a renderDelta bug ([b2cffe1](https://github.com/mattapperson/noetic/commit/b2cffe1)), closes [#1](https://github.com/mattapperson/noetic/issues/1) [#2](https://github.com/mattapperson/noetic/issues/2) [#3](https://github.com/mattapperson/noetic/issues/3)
