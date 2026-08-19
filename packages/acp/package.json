@@ -1,6 +1,6 @@
 {
   "name": "@noetic-tools/acp",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "type": "module",
   "description": "Both directions of the Agent Client Protocol for Noetic. Drives any ACP-speaking coding agent (Claude Code, Codex, Gemini CLI, …) as a step, and serves a Noetic harness as an ACP agent for editors like Zed (toAcpAgent / serveAcp).",
   "license": "Apache-2.0",

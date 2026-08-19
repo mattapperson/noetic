@@ -1,3 +1,7 @@
+## @noetic-tools/acp-v1.1.1 (2026-08-19)
+
+* fix(acp): green CI on main — kiira subpath mapping and complexity refactors ([dd3c4e1](https://github.com/mattapperson/noetic/commit/dd3c4e1))
+
 ## @noetic-tools/acp-v1.1.0 (2026-08-19)
 
 * feat(acp): serve a harness as an ACP agent ([68bdc20](https://github.com/mattapperson/noetic/commit/68bdc20))
