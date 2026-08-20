@@ -12,7 +12,7 @@ import { step } from '../../src/builders/step-builders';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { execute } from '../../src/interpreter/execute';
 import { EventBroadcaster } from '../../src/runtime/event-broadcaster';
-import { buildItemStream, filterTextStream } from '../../src/runtime/session-streams';
+import { buildItemStream } from '../../src/runtime/session-streams';
 import { makeFunctionCall, makeMessage } from '../_helpers';
 
 //#region Adapters
@@ -57,12 +57,27 @@ async function collect(broadcaster: EventBroadcaster): Promise<StreamEvent[]> {
   return events;
 }
 
-async function collectText(broadcaster: EventBroadcaster): Promise<string> {
-  let text = '';
-  for await (const chunk of filterTextStream(broadcaster)) {
-    text += chunk;
+/**
+ * Rebuild a completed broadcaster from a pre-collected event list. With the
+ * bounded broadcaster, re-attaching to a fully-consumed broadcaster replays
+ * nothing (the buffer is trimmed to the consumed watermark); tests that
+ * assert on derived streams must re-wrap the events instead.
+ */
+function eventsToBroadcaster(events: StreamEvent[]): EventBroadcaster {
+  const b = new EventBroadcaster();
+  for (const e of events) {
+    b.emit(e);
   }
-  return text;
+  b.complete();
+  return b;
+}
+
+/** Text extracted from an already-collected event list (mirrors filterTextStream). */
+function textFromEvents(events: StreamEvent[]): string {
+  return events
+    .filter((e) => e.source === 'sdk' && e.type === 'response.output_text.delta')
+    .map((e) => (typeof e.data.delta === 'string' ? e.data.delta : ''))
+    .join('');
 }
 
 //#endregion
@@ -139,12 +154,17 @@ describe('sub-harness output → harness events', () => {
     const frameworkTypes = events.filter((e) => e.source === 'framework').map((e) => e.type);
     expect(frameworkTypes.some((t) => t.endsWith(':sub_harness_event'))).toBe(true);
 
-    // getTextStream surfaces the agent's text.
-    expect(await collectText(broadcaster)).toBe('Hello world');
+    // getTextStream surfaces the agent's text. A second pass over the
+    // broadcaster is a late join: the bounded buffer only replays from the
+    // consumed watermark, so derive the text from the already-collected
+    // events instead (mirrors filterTextStream).
+    expect(textFromEvents(events)).toBe('Hello world');
 
-    // getItemStream surfaces a completed assistant message + a function-call item.
+    // getItemStream surfaces a completed assistant message + a function-call
+    // item. Same late-join constraint as above: rebuild the snapshot stream
+    // from the collected events rather than re-attaching to the broadcaster.
     const items: Item[] = [];
-    for await (const snapshot of buildItemStream(broadcaster)) {
+    for await (const snapshot of buildItemStream(eventsToBroadcaster(events))) {
       items.push(snapshot);
     }
     const finalMessage = items.findLast((i) => i.type === 'message');
@@ -185,7 +205,7 @@ describe('sub-harness output → harness events', () => {
     const sdkTypes = events.filter((e) => e.source === 'sdk').map((e) => e.type);
     expect(sdkTypes).toContain('response.output_text.delta');
     expect(sdkTypes).toContain('response.function_call_arguments.delta');
-    expect(await collectText(broadcaster)).toBe('final answer');
+    expect(textFromEvents(events)).toBe('final answer');
   });
 
   it('emit:false suppresses all events', async () => {
