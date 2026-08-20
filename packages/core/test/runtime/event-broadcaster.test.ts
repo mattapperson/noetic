@@ -202,12 +202,46 @@ describe('EventBroadcaster', () => {
       next = await iter.next();
     }
 
-    // After reading 'a', buffer was [a,b,c] → emit d,e trims to [c,d,e].
-    // Iterator cursor adjusts so it continues from 'c' onward.
+    // After reading 'a', consumed-watermark trim already dropped it. The
+    // maxBufferSize=3 backstop then keeps [c,d,e] of the unread suffix.
     expect(remaining).toHaveLength(3);
     expect(remaining[0].data.delta).toBe('c');
     expect(remaining[1].data.delta).toBe('d');
     expect(remaining[2].data.delta).toBe('e');
+  });
+
+  it('trims behind the slowest live consumer', async () => {
+    const bc = new EventBroadcaster();
+    const iter = bc[Symbol.asyncIterator]();
+
+    bc.emit(textDelta('a'));
+    bc.emit(textDelta('b'));
+    expect(bc.bufferSize).toBe(2);
+
+    expect((await iter.next()).done).toBe(false);
+    expect(bc.bufferSize).toBe(1);
+    expect((await iter.next()).done).toBe(false);
+    expect(bc.bufferSize).toBe(0);
+
+    bc.emit(textDelta('c'));
+    bc.complete();
+    expect((await iter.next()).value?.data.delta).toBe('c');
+  });
+
+  it('starts late joiners at the consumed watermark after a first consumer exists', async () => {
+    const bc = new EventBroadcaster();
+    const first = bc[Symbol.asyncIterator]();
+
+    bc.emit(textDelta('early'));
+    expect((await first.next()).value?.data.delta).toBe('early');
+
+    const late = collect(bc);
+    bc.emit(textDelta('after'));
+    bc.complete();
+
+    const events = await late;
+    expect(events).toHaveLength(1);
+    expect(events[0].data.delta).toBe('after');
   });
 
   it('stops buffering when all consumers have departed', async () => {
@@ -232,6 +266,112 @@ describe('EventBroadcaster', () => {
     bc.emit(textDelta('early-1'));
     bc.emit(textDelta('early-2'));
     expect(bc.bufferSize).toBe(2);
+  });
+});
+
+describe('EventBroadcaster bounded-memory regression (DEV-819)', () => {
+  it('buffer never exceeds maxBufferSize under large publish volume with no consumer', () => {
+    const bc = new EventBroadcaster({
+      maxBufferSize: 100,
+    });
+
+    // Publish 50x the cap. The pre-fix (unbounded) implementation retained
+    // every event; the bounded one must hold exactly at the cap.
+    for (let i = 0; i < 5_000; i++) {
+      bc.emit(textDelta(`e-${i}`));
+      // Structural invariant on every emit, not just at the end.
+      expect(bc.bufferSize).toBeLessThanOrEqual(100);
+    }
+    expect(bc.bufferSize).toBe(100);
+
+    // Drop-oldest: only the newest window survives.
+    const buffer = bc.getBuffer();
+    expect(buffer[0]?.data.delta).toBe('e-4900');
+    expect(buffer[buffer.length - 1]?.data.delta).toBe('e-4999');
+  });
+
+  it('buffer stays bounded with a live slow consumer and default cap', () => {
+    // Default cap is 10k. Publish 30k events with a subscriber that never
+    // reads — the cap backstop must hold regardless of the watermark trim.
+    const bc = new EventBroadcaster();
+    bc[Symbol.asyncIterator](); // subscribe but never read
+
+    for (let i = 0; i < 30_000; i++) {
+      bc.emit(textDelta(`e-${i}`));
+    }
+    expect(bc.bufferSize).toBeLessThanOrEqual(10_000);
+  });
+
+  it('buffer stays near zero with an active consumer keeping up', async () => {
+    const bc = new EventBroadcaster();
+    const iter = bc[Symbol.asyncIterator]();
+
+    for (let i = 0; i < 1_000; i++) {
+      bc.emit(textDelta(`e-${i}`));
+      const next = await iter.next();
+      expect(next.done).toBe(false);
+      // Consumed-watermark trim keeps the buffer at 0 behind a caught-up
+      // reader — the unbounded pre-fix code grew this to i+1.
+      expect(bc.bufferSize).toBe(0);
+    }
+    bc.complete();
+  });
+
+  it('unsubscribe frees per-subscriber state: after the last consumer departs, emits are discarded', async () => {
+    const bc = new EventBroadcaster({
+      maxBufferSize: 10,
+    });
+    const iter1 = bc[Symbol.asyncIterator]();
+    const iter2 = bc[Symbol.asyncIterator]();
+
+    bc.emit(textDelta('a'));
+    await iter1.next();
+    await iter2.next();
+    await iter1.return?.();
+    await iter2.return?.();
+
+    // Both consumers gone: new emits must not accumulate (post-fix discard
+    // path), so the buffer cannot grow past zero even under volume.
+    for (let i = 0; i < 1_000; i++) {
+      bc.emit(textDelta(`post-${i}`));
+    }
+    expect(bc.bufferSize).toBe(0);
+
+    // A new subscriber after the gap starts fresh — no stale replay.
+    const lateEvents = collect(bc);
+    bc.complete();
+    // Started before complete, so it sees only post-subscribe events — and
+    // there are none, since everything emitted during the gap was discarded.
+    expect(await lateEvents).toHaveLength(0);
+  });
+
+  it('eviction notifies live iterators so a lagging consumer is not stranded', async () => {
+    // A consumer that falls behind past the cap has its cursor clamped; it
+    // must still terminate cleanly with the retained window rather than hang.
+    const bc = new EventBroadcaster({
+      maxBufferSize: 5,
+    });
+    const iter = bc[Symbol.asyncIterator]();
+
+    for (let i = 0; i < 20; i++) {
+      bc.emit(textDelta(`e-${i}`));
+    }
+    bc.complete();
+
+    const remaining: StreamEvent[] = [];
+    let next = await iter.next();
+    while (!next.done) {
+      remaining.push(next.value);
+      next = await iter.next();
+    }
+    // Only the newest 5 survive; oldest were evicted per drop-oldest policy.
+    expect(remaining.map((e) => e.data.delta)).toEqual([
+      'e-15',
+      'e-16',
+      'e-17',
+      'e-18',
+      'e-19',
+    ]);
   });
 });
 

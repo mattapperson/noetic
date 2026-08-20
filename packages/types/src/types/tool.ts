@@ -60,7 +60,7 @@ export interface ToolUiDeclaration<
 > {
   /** Rendered as soon as the call streams in — args may be partial. */
   call?(args: Partial<InferSchemaOutput<I>>): UiFragment | null;
-  /** Re-rendered on each event an AsyncGenerator `execute` yields. Receives all events so far. */
+  /** Re-rendered on each AsyncGenerator yield. Receives only the latest event (single-element array). */
   progress?(events: E[]): UiFragment | null;
   /** Replaces the tool's region on successful completion. */
   result?(output: InferSchemaOutput<O>, args: InferSchemaOutput<I>): UiFragment | null;

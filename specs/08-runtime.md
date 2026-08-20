@@ -533,7 +533,7 @@ The `emit` option propagates through `CallModelRequest` to `callModel()`, contro
 
 ### Bounded Buffer
 
-The internal `EventBroadcaster` buffer is capped at 10,000 events. When the buffer exceeds this limit, oldest events are trimmed and active iterator cursors are adjusted. Once all consumers have departed, new events are discarded to prevent unbounded memory growth. Late subscribers receive only the retained window.
+The internal `EventBroadcaster` trims behind the slowest live consumer, so retained events stay proportional to unread backlog rather than total run length. Events emitted before the first consumer attaches are replayed from the start. After any consumer exists, late joiners start at the consumed watermark, not event zero. A 10,000-event `maxBufferSize` remains as a pre-consumer / stuck-consumer safety backstop: when the buffer exceeds this limit, oldest events are trimmed and active iterator cursors are adjusted. Once all consumers have departed, new events are discarded.
 
 ### Error Handling
 

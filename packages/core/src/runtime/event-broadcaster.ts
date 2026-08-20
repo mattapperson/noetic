@@ -20,15 +20,13 @@ const DEFAULT_MAX_BUFFER_SIZE = 1e4;
 /**
  * Multi-consumer broadcast channel with replay support for streaming events.
  *
- * Each consumer gets an independent iterator that replays buffered events
- * from the start, then receives new events as they are emitted.
+ * Each consumer gets an independent iterator. Events emitted before the first
+ * consumer attaches are replayed from the start (capped at `maxBufferSize`).
+ * Once any consumer exists, the buffer trims behind the slowest live reader;
+ * late joiners start at that watermark, not event zero.
  *
- * The buffer is bounded to `maxBufferSize` events (default 10,000). When the
- * buffer exceeds this limit, oldest events are trimmed and iterator cursors
- * are adjusted. Once all consumers have departed, new events are discarded
- * to prevent unbounded memory growth. This bounded buffer serves as the
- * backpressure mechanism — no additional flow control is needed for typical
- * LLM response sizes.
+ * `maxBufferSize` (default 10,000) is only a pre-consumer / stuck-consumer
+ * safety backstop. Once all consumers have departed, new events are discarded.
  *
  * @internal
  */
@@ -56,19 +54,40 @@ export class EventBroadcaster {
     }
 
     this.buffer.push(event);
-
-    // Trim buffer if it exceeds max size
-    if (this.buffer.length > this.maxBufferSize) {
-      const trimCount = this.buffer.length - this.maxBufferSize;
-      this.buffer.splice(0, trimCount);
-      // Adjust all active iterator cursors
-      for (const iter of this.iterators) {
-        iter.adjustCursor(trimCount);
-      }
-    }
+    this.trimToMaxSize();
 
     for (const iter of this.iterators) {
       iter.notify();
+    }
+  }
+
+  /** Drop events every live consumer has already read. */
+  trimConsumed(): void {
+    if (this.iterators.size === 0) {
+      return;
+    }
+
+    let minCursor = Number.POSITIVE_INFINITY;
+    for (const iter of this.iterators) {
+      if (iter.readCursor < minCursor) {
+        minCursor = iter.readCursor;
+      }
+    }
+    this.dropFront(minCursor);
+  }
+
+  private trimToMaxSize(): void {
+    const overflow = this.buffer.length - this.maxBufferSize;
+    this.dropFront(overflow);
+  }
+
+  private dropFront(count: number): void {
+    if (count <= 0) {
+      return;
+    }
+    this.buffer.splice(0, count);
+    for (const iter of this.iterators) {
+      iter.adjustCursor(count);
     }
   }
 
@@ -120,6 +139,7 @@ export class EventBroadcaster {
   /** @internal Remove an iterator from the set. */
   removeIterator(iter: BroadcastIterator): void {
     this.iterators.delete(iter);
+    this.trimConsumed();
   }
 
   /** @internal Current buffer length (for testing). */
@@ -146,6 +166,11 @@ class BroadcastIterator implements AsyncIterator<StreamEvent> {
 
   constructor(broadcaster: EventBroadcaster) {
     this.broadcaster = broadcaster;
+  }
+
+  /** Buffer-relative read cursor. */
+  get readCursor(): number {
+    return this.cursor;
   }
 
   /** Adjust cursor when buffer is trimmed. */
@@ -231,6 +256,7 @@ class BroadcastIterator implements AsyncIterator<StreamEvent> {
     if (this.cursor < buffer.length) {
       const event = buffer[this.cursor];
       this.cursor++;
+      this.broadcaster.trimConsumed();
       return {
         done: false,
         value: event,
