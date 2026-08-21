@@ -27,7 +27,9 @@ import {
   recallLayers,
   recallLayersAtomic,
   recallLayersEventual,
+  registerDurableTargets,
   resolveLayerTools,
+  resolveScopeKey,
   runAppendPipeline,
   storeLayers,
 } from './deps/context';
@@ -58,6 +60,7 @@ import {
   createStepLedgerStore,
   filterReasoningStream,
   filterTextStream,
+  ItemLogImpl,
   resolveStepLedgerRetention,
   restoreFromCheckpoint,
   SessionRunner,
@@ -208,7 +211,14 @@ interface AgentHarnessOpts<TParams extends Record<string, unknown> = Record<stri
 
 interface Session {
   readonly runner: SessionRunner;
-  accumulatedItems: Item[];
+  /**
+   * The single session-owned conversation log. Every turn's context shares
+   * this instance by reference — there is no per-turn copy-forward or
+   * copy-back, and `previewRequestItems` reads the same object the turn
+   * writes. Failed/aborted turns are rolled back to a watermark by the
+   * runner so they leave no trace, preserving the old copy semantics.
+   */
+  readonly log: ItemLogImpl;
 }
 
 //#endregion
@@ -503,6 +513,26 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
    * `ctx.id` (the layer-state store's executionId).
    */
   private readonly initializedExecutions = new Set<string>();
+  /**
+   * `<layerId>@<scopeKey>` → the execution that last hydrated that layer's state
+   * (warm layer-state carry-forward).
+   *
+   * Keyed by BUCKET, not by thread. A layer's state lives under
+   * `resolveScopeKey(layer.scope, ctx)`, and for 'resource' and 'global' scope
+   * that key is not a function of the thread: two turns on one thread with
+   * different `resourceId`s address different resource buckets, and every thread
+   * in the process shares the one global bucket. Keying on thread identity gets
+   * both wrong in opposite directions — it carries state ACROSS resource buckets
+   * (one tenant's state into another's, then persisted there, because
+   * `registerDurableTargets` re-points write-through at the new scope key), and
+   * it FAILS to carry state across threads sharing the global bucket (each
+   * thread resumes its own stale copy, so the write-through mirror makes the last
+   * writer win and drops the others' updates).
+   *
+   * Keying by bucket makes both a function of the same fact: a layer continues
+   * from whatever execution last touched the bucket it is about to read.
+   */
+  private readonly hydratedLayers = new Map<string, string>();
   readonly traceExporter: TraceExporter;
   /**
    * Long-lived shared cwd state. The same reference is seeded into every
@@ -514,6 +544,13 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
    *  in `runtime/durable/` (restore) can parse persisted items. Do not
    *  access from outside core. */
   readonly itemSchemas: ItemSchemaRegistry;
+  /**
+   * Memoized harness-base ∪ harness-layer item registry, used for the shared
+   * session log. `_contextLayers` is readonly and set once in the constructor,
+   * so the extension is a pure function of construction options — see
+   * `sessionItemSchemas`.
+   */
+  private _sessionItemSchemasCache?: ItemSchemaRegistry;
 
   constructor(opts: AgentHarnessOpts<TParams>) {
     const validatedParams = opts.paramsSchema ? opts.paramsSchema.parse(opts.params) : opts.params;
@@ -683,9 +720,16 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
 
   seedSessionHistory(threadId: string, items: ReadonlyArray<Item>): void {
     const session = this.getOrCreateSession(threadId);
-    session.accumulatedItems = [
-      ...items,
-    ];
+    // Validate the entire replacement first so one bad item cannot destroy
+    // existing history or leave a partially seeded shared log.
+    const validated = new ItemLogImpl(this.sessionItemSchemas());
+    for (const item of items) {
+      validated.append(item);
+    }
+    session.log.truncateTo(0);
+    for (const item of validated.items) {
+      session.log.append(item);
+    }
   }
 
   private getOrCreateSession(threadId: string): Session {
@@ -694,8 +738,17 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       return existing;
     }
 
+    // The LAYER-EXTENDED registry, not the harness base. The session log is
+    // shared with every context this thread builds, and `createContext` extends
+    // the base with the layers' `itemSchemas` — so a log bound to the base would
+    // reject exactly the custom item types those layers declare, on both the
+    // `seedSessionHistory` path and mid-turn (`onItemAppend`, tool results).
+    const sessionLog = new ItemLogImpl(this.sessionItemSchemas());
+    // Watermark captured at turn start (before the turn's input lands); a
+    // failed turn truncates back to it so partial items leave no trace.
+    let turnWatermark = 0;
     const session: Session = {
-      accumulatedItems: [],
+      log: sessionLog,
       runner: new SessionRunner({
         threadId,
         agentName: this.config.name,
@@ -706,12 +759,14 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
         // time and doesn't apply here.
         createContext: (items, _turnId, messages) => {
           const perTurnOptions: ExecuteOptions = messages[0]?.options ?? {};
-          const allItems: Item[] = [
-            ...session.accumulatedItems,
-            ...items,
-          ];
+          // Append this turn's input to the SESSION log and hand the same log
+          // to the context — single owner, zero per-turn copies.
+          turnWatermark = sessionLog.length;
+          for (const item of items) {
+            sessionLog.append(item);
+          }
           const ctx = this.createContext({
-            items: allItems,
+            itemLog: sessionLog,
             threadId,
             resourceId: perTurnOptions.resourceId,
             state: perTurnOptions.state,
@@ -731,6 +786,9 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
             ]);
           }
           return ctx;
+        },
+        rollbackTurn: () => {
+          sessionLog.truncateTo(turnWatermark);
         },
         runTurn: async (ctx, _turn, signal) => {
           if (!this.agentGraph) {
@@ -755,10 +813,6 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
             );
           }
           const result = await this.initAndRun(this.agentGraph, '', ctx);
-          // Snapshot final items into session history for the next turn.
-          session.accumulatedItems = [
-            ...ctx.itemLog.items,
-          ];
           return result;
         },
       }),
@@ -865,8 +919,19 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
    * treated as disabled. Guarded so nested/repeated `run()` calls and the
    * session turn path never re-init — re-init would re-hydrate from storage and
    * clobber accumulated in-memory state.
+   *
+   * Turns addressing the same layer scope bucket take the WARM path: layer
+   * state carries forward in-memory rather than being re-read from storage
+   * (sequential reads, each with a 10s timeout, every turn). `transient: true`
+   * opts a throwaway context out of publishing itself as a warm source — see
+   * `previewRequestItems`, which tears its execution's state down again.
    */
-  private async ensureLayersInit(ctx: Context): Promise<void> {
+  private async ensureLayersInit(
+    ctx: Context,
+    opts?: {
+      transient?: boolean;
+    },
+  ): Promise<void> {
     const layers = ctx.layers;
     const storage = this.config.storage;
     if (!layers || layers.length === 0 || !storage) {
@@ -876,7 +941,162 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       return;
     }
     this.initializedExecutions.add(ctx.id);
-    await this.initLayers(layers, ctx, storage);
+    const warmKeys = this.resolveWarmKeys(layers, ctx);
+    await this.tryWarmInit({
+      warmKeys,
+      layers,
+      ctx,
+      storage,
+    });
+    if (!opts?.transient) {
+      for (const [layerId, warmKey] of warmKeys) {
+        // Only publish for layers this execution actually holds state for; a
+        // layer whose init failed with `onInitError: 'disable'` has nothing to
+        // hand the next turn.
+        if (this.layerStateStore.has?.(ctx.id, layerId)) {
+          this.hydratedLayers.set(warmKey, ctx.id);
+        }
+      }
+    }
+  }
+
+  /**
+   * The warm-cache key for each layer: its id plus the storage bucket it
+   * resolves to for `ctx`. Execution-scoped layers are omitted — they never
+   * carry forward, and their scope key is `ctx.id`, so an entry would be a
+   * per-run leak.
+   */
+  private resolveWarmKeys(
+    layers: ReadonlyArray<ContextLayer>,
+    ctx: Context,
+  ): ReadonlyMap<string, string> {
+    const execCtx = this.toExecCtx(ctx);
+    const keys = new Map<string, string>();
+    for (const layer of layers) {
+      if (layer.scope === 'execution') {
+        continue;
+      }
+      keys.set(layer.id, `${layer.id}@${resolveScopeKey(layer.scope, execCtx)}`);
+    }
+    return keys;
+  }
+
+  /**
+   * Warm path: some previous execution already hydrated these layers from
+   * storage. Copy the live in-memory state forward to the new executionId
+   * instead of re-running every init. The state store is the source of truth
+   * between turns — its durable write-through keeps storage in sync.
+   *
+   * Resolved PER LAYER against `(layer, scopeKey)`, which is the identity of the
+   * storage bucket the layer's state actually lives in. A layer therefore carries
+   * forward from the last execution that touched ITS bucket, whatever thread that
+   * was: a resource-scoped layer on a turn with a new `resourceId` finds no entry
+   * for the new bucket and cold-inits from it, while a global-scoped layer shares
+   * one entry across every thread, so an increment on thread B is what thread A's
+   * next turn continues from. Execution-scoped layers are per-run by contract and
+   * never carry forward.
+   *
+   * Every layer this did not carry forward is cold-inited here, so the caller
+   * needs no fallback — the return value is informational.
+   */
+  private async tryWarmInit({
+    warmKeys,
+    layers,
+    ctx,
+    storage,
+  }: {
+    warmKeys: ReadonlyMap<string, string>;
+    layers: ContextLayer[];
+    ctx: Context;
+    storage: StorageAdapter;
+  }): Promise<boolean> {
+    const carried = this.carryLayerStateForward({
+      warmKeys,
+      layers,
+      ctx,
+    });
+    // Cold-init covers execution-scoped layers, layers whose bucket has no warm
+    // entry, and layers that were never hydrated in the first place.
+    const cold = layers.filter(
+      (l) => l.scope === 'execution' || !this.layerStateStore.has?.(ctx.id, l.id),
+    );
+    if (cold.length > 0) {
+      await this.initLayers(cold, ctx, storage);
+    }
+    if (carried === 0) {
+      // `initLayers` already registered durable targets for every layer it ran,
+      // which — with nothing carried — is all of them.
+      return false;
+    }
+    // Re-point write-through at the new execution id for the carried layers too,
+    // so their state keeps mirroring durably without a re-`init`.
+    registerDurableTargets({
+      layers: layers.filter((l) => l.scope !== 'execution'),
+      ctx: this.toExecCtx(ctx),
+      storage,
+      store: this.layerStateStore,
+    });
+    return true;
+  }
+
+  /**
+   * Copy each layer's live state forward from whichever execution last hydrated
+   * that layer's bucket. Returns how many layers were carried.
+   */
+  private carryLayerStateForward({
+    warmKeys,
+    layers,
+    ctx,
+  }: {
+    warmKeys: ReadonlyMap<string, string>;
+    layers: ReadonlyArray<ContextLayer>;
+    ctx: Context;
+  }): number {
+    let copied = 0;
+    for (const layer of layers) {
+      const warmKey = warmKeys.get(layer.id);
+      if (warmKey === undefined) {
+        // Execution scope — `resolveWarmKeys` omits it.
+        continue;
+      }
+      const warm = this.hydratedLayers.get(warmKey);
+      // `warm === ctx.id` is a re-entrant init of the same execution: there is
+      // nothing to copy, and copying onto itself would be a no-op anyway.
+      if (warm === undefined || warm === ctx.id) {
+        continue;
+      }
+      if (!this.layerStateStore.has?.(warm, layer.id)) {
+        // The warm execution's state was torn down (dispose/cleanup). Drop the
+        // stale pointer so later turns stop probing it.
+        this.hydratedLayers.delete(warmKey);
+        continue;
+      }
+      this.layerStateStore.set(ctx.id, layer.id, this.layerStateStore.get(warm, layer.id));
+      copied++;
+    }
+    return copied;
+  }
+
+  /**
+   * Item registry for the SHARED SESSION LOG: the harness base extended with
+   * the harness-level context layers' `itemSchemas`.
+   *
+   * Deliberately keyed to the HARNESS layer set, not a turn's. `createContext`
+   * lets a caller pass per-turn `contextLayers`, and those layers' item types
+   * are validated by that context's own (wider) registry on the paths that build
+   * one — but the log outlives any single turn and is shared by all of them, so
+   * binding it to one turn's layer set would make what the log accepts depend on
+   * whichever turn happened to create the session. Harness-level layers are the
+   * stable set every turn on the thread has, so they are the log's contract; a
+   * per-turn layer that declares a brand-new item type and appends it to the
+   * shared log must also be declared at harness level.
+   */
+  private sessionItemSchemas(): ItemSchemaRegistry {
+    this._sessionItemSchemasCache ??= buildItemSchemaRegistry({
+      base: this.itemSchemas,
+      layers: this._contextLayers,
+    });
+    return this._sessionItemSchemasCache;
   }
 
   detachedSpawn<I, O>(
@@ -895,6 +1115,8 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   createContext(opts?: {
     parent?: Context;
     items?: Item[];
+    /** @internal Share the session-owned log instead of seeding from `items`. */
+    itemLog?: ItemLogImpl;
     state?: unknown;
     threadId?: string;
     resourceId?: string;
@@ -1104,7 +1326,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     const existingSession = this.sessions.get(threadId);
     const historyItems: Item[] = existingSession
       ? [
-          ...existingSession.accumulatedItems,
+          ...existingSession.log.items,
         ]
       : [];
     const ctx = this.createContext({
@@ -1117,7 +1339,14 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       return historyItems;
     }
     try {
-      await this.ensureLayersInit(ctx);
+      /* `transient`: this context's state is torn down in the `finally` below, so
+       * it must NOT become a warm-hydration source — a real turn that followed
+       * it would find a pointer to wiped state, carry nothing forward, and
+       * silently cold-init (correct, but the warm win evaporates after any
+       * preview, which a TUI may issue on every keystroke). */
+      await this.ensureLayersInit(ctx, {
+        transient: true,
+      });
       const recallResults = await this.recallLayers(layers, '', ctx);
       // Band the output the way a real turn would, but read-only: a preview
       // must not pin, count churn, or age the epoch, or looking at a
@@ -1175,6 +1404,14 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     // Drop the init guard so a deliberate dispose→run cycle re-hydrates from
     // storage (disposeLayers also clears the layer-state store for this id).
     this.initializedExecutions.delete(ctx.id);
+    // ...and any warm pointer aimed at this execution, whose state is about to
+    // be wiped. A stale pointer only degrades to a cold init, but dropping it
+    // here keeps the two guards from disagreeing about what is hydrated.
+    for (const [warmKey, executionId] of this.hydratedLayers) {
+      if (executionId === ctx.id) {
+        this.hydratedLayers.delete(warmKey);
+      }
+    }
     await disposeLayers({
       layers,
       ctx: this.toExecCtx(ctx),

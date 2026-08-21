@@ -481,8 +481,14 @@ export async function initLayers({ layers, ctx, storage, store }: InitLayersPara
  * and `store()` hooks — are mirrored durably; `store()` is not special.
  * 'execution' scope is excluded: its scope key rotates each run, so there is
  * nothing durable to mirror.
+ *
+ * Exported (rather than private to `initLayers`) because a host that carries
+ * layer state forward across executions — warm hydration, see
+ * `AgentHarness.ensureLayersInit` — has to re-point write-through at the new
+ * executionId WITHOUT re-running `init`, which is the whole point of carrying
+ * state forward.
  */
-function registerDurableTargets({
+export function registerDurableTargets({
   layers,
   ctx,
   storage,

@@ -24,4 +24,23 @@ export class ItemLogImpl implements ItemLog {
     this._items.push(this.itemSchemas.parse(item));
     this._frozenCache = null;
   }
+
+  /** @internal Current length — used as a rollback watermark by the session runner. */
+  get length(): number {
+    return this._items.length;
+  }
+
+  /**
+   * @internal Roll the log back to a previously-captured watermark. Used ONLY
+   * by the session runner to discard a failed/aborted turn's partial items so
+   * a shared session log preserves the same "failed turns leave no trace"
+   * semantics the copy-based history had.
+   */
+  truncateTo(watermark: number): void {
+    if (watermark < 0 || watermark >= this._items.length) {
+      return;
+    }
+    this._items.length = watermark;
+    this._frozenCache = null;
+  }
 }
