@@ -14,7 +14,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: oven-sh/setup-bun@v2
+      # Install Bun from the official release archive. Pinned version for a
+      # deterministic toolchain, and arch-aware (x64/aarch64) so the same step
+      # runs on GitHub's x64 runners and arm64 containers (e.g. local-ci on
+      # Apple Silicon). Replaces oven-sh/setup-bun@v2, whose version resolution
+      # calls api.github.com with the job token — unavailable in sandboxed
+      # runners — and whose action cache is not portable.
+      - name: Set up Bun
+        env:
+          BUN_VERSION: 1.3.14
+        run: |
+          case "$(uname -m)" in
+            x86_64) BUN_ASSET="bun-linux-x64" ;;
+            aarch64) BUN_ASSET="bun-linux-aarch64" ;;
+            *) echo "::error::Unsupported architecture: $(uname -m)"; exit 1 ;;
+          esac
+          curl -fsSL "https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/${BUN_ASSET}.zip" -o /tmp/bun.zip
+          unzip -oq /tmp/bun.zip -d /tmp/bun-extract
+          BUN_BIN="$(find /tmp/bun-extract -type f -name bun | head -1)"
+          sudo install -m 0755 "$BUN_BIN" /usr/local/bin/bun
+          sudo ln -sf /usr/local/bin/bun /usr/local/bin/bunx
+          bun --version
 
       - name: Install dependencies
         run: bun install
@@ -82,10 +102,15 @@ jobs:
 
       - name: Install lychee
         run: |
+          case "$(uname -m)" in
+            x86_64) LYCHEE_ASSET="lychee-x86_64-unknown-linux-gnu.tar.gz" ;;
+            aarch64) LYCHEE_ASSET="lychee-aarch64-unknown-linux-gnu.tar.gz" ;;
+            *) echo "::error::Unsupported architecture: $(uname -m)"; exit 1 ;;
+          esac
           curl -fsSL \
-            "https://github.com/lycheeverse/lychee/releases/download/lychee-v0.24.2/lychee-x86_64-unknown-linux-gnu.tar.gz" \
-            | tar xz --strip-components=1 lychee-x86_64-unknown-linux-gnu/lychee
-          sudo mv lychee /usr/local/bin/
+            "https://github.com/lycheeverse/lychee/releases/download/lychee-v0.24.2/${LYCHEE_ASSET}" \
+            | tar xz --strip-components=1 "${LYCHEE_ASSET%.tar.gz}/lychee"
+          sudo install -m 0755 lychee /usr/local/bin/lychee
           lychee --version
 
       - name: Link check
@@ -114,10 +139,21 @@ jobs:
         env:
           SENTRUX_VERSION: v0.5.7
         run: |
+          case "$(uname -m)" in
+            x86_64) SENTRUX_ASSET="sentrux-linux-x86_64" ;;
+            aarch64) SENTRUX_ASSET="sentrux-linux-aarch64" ;;
+            *) echo "::error::Unsupported architecture: $(uname -m)"; exit 1 ;;
+          esac
+          # The aarch64 build links GTK; the x86_64 build does not. GitHub's
+          # runners ship GTK already, so only arm64 containers need this.
+          if [ "$(uname -m)" = "aarch64" ]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq libgtk-3-0t64
+          fi
           curl -fsSL \
-            "https://github.com/sentrux/sentrux/releases/download/${SENTRUX_VERSION}/sentrux-linux-x86_64" \
-            -o /usr/local/bin/sentrux
-          chmod +x /usr/local/bin/sentrux
+            "https://github.com/sentrux/sentrux/releases/download/${SENTRUX_VERSION}/${SENTRUX_ASSET}" \
+            -o /tmp/sentrux
+          sudo install -m 0755 /tmp/sentrux /usr/local/bin/sentrux
           sentrux --version
 
       - name: Structural regression gate

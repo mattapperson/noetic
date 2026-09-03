@@ -27,7 +27,7 @@ export * from './types/schema';
 export * from './types/shell-adapter';
 export * from './types/steering';
 export * from './types/step';
-export * from './types/step-effect';
+export * from './types/step';
 export * from './types/sub-harness';
 export * from './types/subprocess-adapter';
 export * from './types/tool';

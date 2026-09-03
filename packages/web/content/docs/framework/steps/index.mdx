@@ -99,7 +99,9 @@ import { effectStep } from '@noetic-tools/core';
 import { effectStep as effectRuntime } from '@noetic-tools/effect';
 import { Effect } from 'effect';
 
-const enrich = effectRuntime({
+declare const fetchMetadata: (input: string) => Promise<string>;
+
+const enrich = effectRuntime<string, string, never>({
   program: (input: string) => Effect.tryPromise(() => fetchMetadata(input)),
   stepId: 'enrich',
 });

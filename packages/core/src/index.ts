@@ -531,12 +531,14 @@ export { LedgerEntryKind, SteeringAction } from '@noetic-tools/types';
 
 /** @public */
 export type {
+  EffectStepRuntime,
   ExecuteStepFn,
   SettleResult,
   Snapshot,
   Step,
   StepCallModel,
   StepConditional,
+  StepEffect,
   StepInParallel,
   StepInParallelAll,
   StepInParallelRace,

@@ -29,6 +29,8 @@
       "@noetic-tools/sub-harness-opencode": ["../sub-harness-opencode/src/index.ts"],
       "@noetic-tools/sub-harness-pi": ["../sub-harness-pi/src/index.ts"],
       "@noetic-tools/eval": ["../eval/src/index.ts"],
+      "@noetic-tools/effect": ["../effect/src/index.ts"],
+      "effect": ["../effect/node_modules/effect/dist/index.d.ts"],
       "@noetic/plugin-powerline": ["../plugin-powerline/src/index.tsx"],
       "@noetic/plugin-design-deck": ["../plugin-design-deck/src/index.tsx"]
     }
