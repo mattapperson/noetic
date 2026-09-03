@@ -605,6 +605,8 @@ function leafDetail(node: WorkflowNode): string | undefined {
       return clip(node.execute);
     case 'subflow':
       return node.ref ? `→ ${node.ref}` : 'inline workflow';
+    case 'effect':
+      return node.ref ? `→ ${node.ref}` : 'effect runtime';
     case 'claude-code':
     case 'codex':
     case 'opencode':
@@ -657,6 +659,10 @@ function leafChips(node: WorkflowNode): string[] {
       }
       return chips;
     }
+    case 'effect':
+      return [
+        `runtime ${node.ref}`,
+      ];
     default:
       return [];
   }

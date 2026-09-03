@@ -380,6 +380,11 @@ paths = ["packages/sub-harness-pi/src/**"]
 order = 49
 
 [[layers]]
+name = "effect-adapter"
+paths = ["packages/effect/src/**"]
+order = 49
+
+[[layers]]
 name = "sub-harness"
 paths = ["packages/sub-harness/src/**"]
 order = 87
@@ -429,6 +434,16 @@ reason = "core resolves sub-harnesses via the @noetic-tools/types contract + a r
 from = "packages/core/src/**"
 to = "packages/sub-harness-pi/src/**"
 reason = "core resolves sub-harnesses via the @noetic-tools/types contract + a runtime registry; it must never import the sub-harness-pi package or pull an agent SDK into its dependency graph"
+
+[[boundaries]]
+from = "packages/core/src/**"
+to = "packages/effect/src/**"
+reason = "core executes effect steps through the EffectStepRuntime contract in @noetic-tools/types; it must never import @noetic-tools/effect or pull the effect SDK into its dependency graph"
+
+[[boundaries]]
+from = "packages/effect/src/**"
+to = "packages/core/src/**"
+reason = "@noetic-tools/effect depends only on @noetic-tools/types; it must never import core (acyclic, keeps the adapter layer core-free)"
 
 [[boundaries]]
 from = "packages/sub-harness/src/**"

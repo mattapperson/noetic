@@ -56,6 +56,8 @@ function walkStep(step: Step, out: Tool[]): void {
     case 'codex':
     case 'opencode':
     case 'pi':
+    // Effect steps run a user program with no host-registered tools.
+    case 'effect':
       return;
 
     case 'conditional':

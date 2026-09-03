@@ -26,6 +26,7 @@ import {
   executeLoop,
   executeSchedule,
 } from './execute-control';
+import { executeEffect } from './execute-effect';
 import { executeSubHarness } from './execute-sub-harness';
 import { isMutableContext } from './typeguards';
 
@@ -90,7 +91,8 @@ function resolveStepEmit<TContext, I, O>(
     step.kind === 'claude-code' ||
     step.kind === 'codex' ||
     step.kind === 'opencode' ||
-    step.kind === 'pi'
+    step.kind === 'pi' ||
+    step.kind === 'effect'
   ) {
     return step.emit;
   }
@@ -391,6 +393,9 @@ export async function execute<TContext = ContextData, I = unknown, O = unknown>(
         break;
       case 'schedule':
         result = await executeSchedule(step, input, ctx, (s, i, c) => execute(s, i, c));
+        break;
+      case 'effect':
+        result = await executeEffect(step, input, ctx);
         break;
       default: {
         const _exhaustive: never = step;

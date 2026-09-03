@@ -108,6 +108,9 @@ function cloneAndReplace(step: Step, candidate: Candidate, prefix: string): Step
     case 'codex':
     case 'opencode':
     case 'pi':
+    // Effect steps close over their program in the runtime; there is no
+    // optimizable field surface. Pass through unchanged.
+    case 'effect':
       return {
         ...step,
       };

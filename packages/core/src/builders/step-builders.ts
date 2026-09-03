@@ -1,6 +1,7 @@
 import type { ContextData } from '@noetic-tools/context';
 import type {
   Context,
+  EffectStepRuntime,
   Lazy,
   ModelParams,
   OutputCodec,
@@ -8,6 +9,7 @@ import type {
   ServerToolSpec,
   StandardSchemaV1,
   StepCallModel,
+  StepEffect,
   StepInvokeTool,
   StepRunCode,
   StepSubHarness,
@@ -313,5 +315,70 @@ export const step = {
     return buildSubHarnessStep('pi', 'step.pi', opts);
   },
 };
+
+//#endregion
+
+//#region Effect builder
+
+export interface EffectStepOpts<TContext, I, O> {
+  /** Unique step identifier used in traces and error messages. */
+  id: string;
+  /**
+   * The Effect runtime closing over the program. Eager or `(ctx) => EffectStepRuntime`
+   * getter. Typically the result of `effectStep(program)` from `@noetic-tools/effect`,
+   * or a hand-rolled `{ run }` object when bridging another runtime.
+   */
+  runtime: Lazy<EffectStepRuntime<TContext, I, O>, TContext>;
+  /** Optional Standard Schema validating the step input before the program runs. */
+  inputSchema?: StandardSchemaV1<unknown, I>;
+  /** Optional Standard Schema validating the program result before it reaches the parent step. */
+  output?: StandardSchemaV1<unknown, O>;
+  /** Retry policy applied around the program (interpreter-side, not Effect-side). */
+  retry?: RetryPolicy;
+  /** Controls framework event emission for this step. Defaults to `true`. */
+  emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
+}
+
+/**
+ * Creates a step that runs an Effect (effect-ts) program under the
+ * interpreter's supervision.
+ *
+ * @public
+ * @param opts.id - Unique step identifier used in traces and error messages.
+ * @param opts.runtime - An `EffectStepRuntime` — typically `effectStep(program)`
+ *   from `@noetic-tools/effect` — closing over the Effect program and its services.
+ * @param opts.inputSchema - Optional Standard Schema validating the step input
+ *   before the program runs (an Effect Schema works via `Schema.toStandardSchemaV1`).
+ * @param opts.output - Optional Standard Schema validating the program result.
+ * @param opts.retry - Optional retry policy applied around the program.
+ * @returns A `StepEffect` that can be composed into larger pipelines. The step
+ *   is auto-registered in the shared step registry.
+ * @throws `NoeticConfigError` with code `EMPTY_STEP_ID` if `id` is empty.
+ * @throws `NoeticConfigError` with code `MISSING_EFFECT_RUNTIME` if `runtime` is not provided.
+ */
+export function effectStep<TContext = ContextData, I = unknown, O = unknown>(
+  opts: EffectStepOpts<TContext, I, O>,
+): StepEffect<TContext, I, O> {
+  if (!opts.id || opts.id.trim() === '') {
+    throw new NoeticConfigError({
+      code: 'EMPTY_STEP_ID',
+      message: 'effectStep() requires a non-empty id.',
+      hint: 'Pass a unique string as the id field, e.g. effectStep({ id: "my-effect", ... }).',
+    });
+  }
+  if (!opts.runtime) {
+    throw new NoeticConfigError({
+      code: 'MISSING_EFFECT_RUNTIME',
+      message: 'effectStep() requires a runtime closing over the Effect program.',
+      hint: 'Pass effectStep(myProgram) from @noetic-tools/effect, or a { run(input, ctx, signal) } object.',
+    });
+  }
+  const built: StepEffect<TContext, I, O> = {
+    kind: 'effect',
+    ...opts,
+  };
+  getDefaultRegistrar().register(built);
+  return built;
+}
 
 //#endregion

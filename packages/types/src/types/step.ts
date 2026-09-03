@@ -5,6 +5,7 @@ import type { Context } from './context';
 import type { ContextConfig, ContextData, ContextLayer, ProjectionPolicy } from './context-layer';
 import type { NoeticError } from './error';
 import type { OutputCodec } from './output-codec';
+import type { StepEffect } from './step-effect';
 import type {
   SubHarness,
   SubHarnessKind,
@@ -94,7 +95,8 @@ export type Step<TContext = ContextData, I = unknown, O = unknown> =
   | StepSpawn<TContext, I, O>
   | StepWithContext<TContext, I, O>
   | StepLoop<TContext, I, O>
-  | StepSchedule<TContext, I, O>;
+  | StepSchedule<TContext, I, O>
+  | StepEffect<TContext, I, O>;
 
 /** @public A step that executes arbitrary async logic via a user-supplied function. */
 export interface StepRunCode<TContext = ContextData, I = unknown, O = unknown> {

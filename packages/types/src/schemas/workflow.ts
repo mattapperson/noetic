@@ -383,6 +383,19 @@ export interface SubHarnessWorkflowNode extends WorkflowNodeBase {
 }
 
 /**
+ * A node that runs an Effect (effect-ts) program. The program is a runtime
+ * object, not JSON-expressible, so the node carries a *reference* resolved
+ * from `HydrationContext.effectRuntimes` at hydration time — the same
+ * registry-resolution pattern as harness adapters and UI libraries.
+ * @public
+ */
+export interface EffectWorkflowNode extends WorkflowNodeBase {
+  kind: 'effect';
+  /** Registry key resolved from `HydrationContext.effectRuntimes`. */
+  ref: string;
+}
+
+/**
  * A node that runs another workflow document as a sub-step. The document is
  * either inline or a named reference resolved from `HydrationContext.workflows`
  * at execution time. Supply exactly one of `document` / `ref`.
@@ -410,7 +423,8 @@ export type WorkflowNode =
   | SequenceWorkflowNode
   | ScheduleWorkflowNode
   | SubflowWorkflowNode
-  | SubHarnessWorkflowNode;
+  | SubHarnessWorkflowNode
+  | EffectWorkflowNode;
 
 //#endregion
 
@@ -556,6 +570,17 @@ const CodexNodeSchema = subHarnessNodeSchema('codex');
 const OpencodeNodeSchema = subHarnessNodeSchema('opencode');
 const PiNodeSchema = subHarnessNodeSchema('pi');
 
+/**
+ * An `effect` node references a registered Effect runtime by name. Kept a
+ * *reference* because the runtime closes over a live Effect program — a
+ * runtime object, not JSON-expressible.
+ */
+const EffectNodeSchema = z.object({
+  kind: z.literal('effect'),
+  ...SHARED_FIELDS,
+  ref: z.string().min(1),
+});
+
 /** @public Zod schema validating a single `WorkflowNode` (any JSON-safe kind). */
 export const WorkflowNodeSchema: z.ZodType<WorkflowNode> = z
   .discriminatedUnion('kind', [
@@ -574,6 +599,7 @@ export const WorkflowNodeSchema: z.ZodType<WorkflowNode> = z
     CodexNodeSchema,
     OpencodeNodeSchema,
     PiNodeSchema,
+    EffectNodeSchema,
   ])
   .meta({
     id: 'WorkflowNode',

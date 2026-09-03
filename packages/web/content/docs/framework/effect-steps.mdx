@@ -1,0 +1,116 @@
+---
+title: Effect Steps
+description: Run Effect (effect-ts) programs as supervised Noetic steps.
+---
+
+## Quick Example
+
+An `effect` step runs an [Effect v4](https://effect.website) program under the interpreter's supervision. You wrap the program with `effectStep()` from `@noetic-tools/effect` and hand the resulting runtime to `effectStep()` from `@noetic-tools/core`:
+
+```ts
+import { effectStep, type ContextData } from '@noetic-tools/core';
+import { effectStep as effectRuntime } from '@noetic-tools/effect';
+import { Effect } from 'effect';
+
+const enrich = effectRuntime({
+  program: (input: string) =>
+    Effect.gen(function* () {
+      const meta = yield* Effect.tryPromise(() => fetchMetadata(input));
+      return `${input} (${meta.size} bytes)`;
+    }),
+  stepId: 'enrich',
+  describe: { summary: 'enrich input with metadata' },
+});
+
+const step = effectStep<ContextData, string, string>({ id: 'enrich', runtime: enrich });
+```
+
+The step composes with everything else in the interpreter: it participates in [retry policies](#retry), emits `step_started`/`step_completed` [framework events](/docs/framework/observability), is recorded in the [durable ledger](/docs/framework/durability) for resume, and reports errors through the standard [`NoeticError` model](/docs/framework/errors).
+
+## How supervision works
+
+Noetic and Effect each own one side of the step boundary:
+
+- **Noetic owns the outside**: retry policy, abort checks, framework events, ledger durability, and error normalization. From the interpreter's point of view an `effect` step is just another async unit of work.
+- **Effect owns the inside**: fiber-internal concurrency, services, scopes, and typed errors. The program runs verbatim with `Effect.runPromiseExit` — noetic does not re-implement any Effect machinery.
+
+The bridge between them is the context's abort signal: `Effect.runPromiseExit(program, { signal })` binds noetic cancellation to Effect interruption. Aborting the context interrupts the fiber mid-run, and the interruption surfaces as a `NoeticError` of kind `cancelled` — so [loops](/docs/framework/operators), `inParallel` settle forks, and durable resumes observe exactly the same error surface as native steps.
+
+## Error mapping
+
+Effect's `Cause` maps onto noetic's error model deterministically:
+
+| Effect Cause | Noetic surface | Notes |
+|---|---|---|
+| typed failure (`Effect.fail`) | `step_failed` | retried like any step failure |
+| typed failure + `mapError` | your `NoeticError` | the mapper's payload is thrown as-is |
+| interruption (abort, `Effect.interrupt`) | `cancelled` | never retried (spec 09) |
+| defect (`Effect.die`) | `step_failed` around the defect | bugs are not laundered into expected failures |
+
+```ts
+const runtime = effectRuntime({
+  program: Effect.fail({ _tag: 'RateLimited', retryAfter: 30 }),
+  stepId: 'call-upstream',
+  mapError: (e): NoeticError =>
+    e._tag === 'RateLimited'
+      ? { kind: 'model_rate_limit', stepId: 'call-upstream', retryAfter: e.retryAfter }
+      : undefined, // falls back to step_failed
+});
+```
+
+## Input and output schemas
+
+`effectStep()` accepts Standard Schemas on both edges of the program. Because Effect v4's `Schema` speaks [Standard Schema v1](https://standardschema.dev) natively (via `Schema.toStandardSchemaV1`), an Effect Schema validates a step's input and output exactly like a Zod schema does elsewhere in the framework:
+
+```ts
+import { Schema } from 'effect';
+
+const step = effectStep({
+  id: 'score',
+  runtime,
+  inputSchema: Schema.toStandardSchemaV1(Schema.Struct({ text: Schema.String })),
+  output: Schema.toStandardSchemaV1(Schema.Struct({ score: Schema.Number })),
+});
+```
+
+## Retry
+
+`retry` is interpreted by noetic, not by Effect — the same `RetryPolicy` arithmetic that `runCode` uses wraps the program:
+
+```ts
+const step = effectStep<ContextData, void, Report>({
+  id: 'flaky-sync',
+  runtime,
+  retry: { maxAttempts: 3, backoff: 'exponential', initialDelay: 200 },
+});
+```
+
+A `cancelled` rejection bypasses retry: cancellation is never a retriable error.
+
+## JSON workflows
+
+The `effect` workflow node references a registered runtime by name — a live Effect program is not JSON-expressible, so the document carries only the reference and hydration resolves it from `HydrationContext.effectRuntimes` (the same registry pattern as harness adapters and UI libraries):
+
+```json
+{
+  "version": 1,
+  "root": { "kind": "effect", "id": "enrich", "ref": "enrich" }
+}
+```
+
+```ts
+import { hydrateWorkflow } from '@noetic-tools/core';
+
+const step = hydrateWorkflow(
+  { version: 1, root: { kind: 'effect', id: 'enrich', ref: 'enrich' } },
+  {
+    tools: new Map(),
+    executeStep,
+    effectRuntimes: new Map([['enrich', runtime]]),
+  },
+);
+```
+
+## Architecture
+
+`@noetic-tools/effect` depends only on `@noetic-tools/types`, with `effect` as an **optional peer dependency** — install the version your programs need. `@noetic-tools/core` never imports the package: it executes `effect` steps through the structural `EffectStepRuntime` contract in `@noetic-tools/types`, the same isolation shape as the [sub-harness adapters](/docs/framework/sub-harnesses). A hand-rolled `{ run(input, ctx, signal) }` object satisfies the contract without any Effect dependency, which makes the seam useful for bridging other runtimes too.

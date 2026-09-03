@@ -6,6 +6,7 @@
  * Application code should NEVER import from this path.
  */
 
+export { executeEffect } from './interpreter/execute-effect';
 export { SpanImpl } from './observability/span-impl';
 export { ChannelStore } from './runtime/channel-store';
 export { ContextImpl } from './runtime/context-impl';

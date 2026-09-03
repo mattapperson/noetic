@@ -35,9 +35,14 @@ export { withContext } from './builders/provide-builder';
 /** @public */
 export { spawn } from './builders/spawn-builder';
 /** @public */
-export type { CallModelOpts, InvokeToolOpts, RunCodeOpts } from './builders/step-builders';
+export type {
+  CallModelOpts,
+  EffectStepOpts,
+  InvokeToolOpts,
+  RunCodeOpts,
+} from './builders/step-builders';
 /** @public */
-export { callModel, invokeTool, runCode, step } from './builders/step-builders';
+export { callModel, effectStep, invokeTool, runCode, step } from './builders/step-builders';
 /** @public */
 export { tool, toolWithGenerator } from './builders/tool-builder';
 /** @public */

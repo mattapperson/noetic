@@ -150,6 +150,9 @@ function walkStep(step: Step, prefix: string, fields: OptimizableField[]): void 
     case 'codex':
     case 'opencode':
     case 'pi':
+    // Effect steps close over their program in the runtime — same pass-through
+    // rationale as the sub-harness kinds above.
+    case 'effect':
       return;
     default: {
       // A new composite Step kind must add a recursion case above, or GEPA

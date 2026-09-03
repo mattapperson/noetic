@@ -90,15 +90,34 @@ The optional `args` field lets you preset some or all of the tool's inputs. At r
 
 See [invokeTool deep dive](/docs/framework/steps/invoke-tool).
 
+## effect -- Effect Program
+
+Run an [Effect v4](https://effect.website) program as a supervised step. The interpreter supplies the abort signal (noetic cancel → fiber interruption), applies the retry policy, and maps Effect's `Cause` onto the `NoeticError` model.
+
+```ts
+import { effectStep } from '@noetic-tools/core';
+import { effectStep as effectRuntime } from '@noetic-tools/effect';
+import { Effect } from 'effect';
+
+const enrich = effectRuntime({
+  program: (input: string) => Effect.tryPromise(() => fetchMetadata(input)),
+  stepId: 'enrich',
+});
+
+const step = effectStep({ id: 'enrich', runtime: enrich });
+```
+
+See [Effect steps](/docs/framework/effect-steps).
+
 ## Comparison
 
-| | `runCode` | `callModel` | `invokeTool` |
-| --- | --- | --- | --- |
-| Custom code | Yes | No | No |
-| LLM call | No | Yes | No |
-| Tool execution | No | Via `tools` array | Direct |
-| Structured output | You control | Via Zod `output` | Via tool `output` schema |
-| Retry policy | Yes | No | No |
+| | `runCode` | `callModel` | `invokeTool` | `effect` |
+| --- | --- | --- | --- | --- |
+| Custom code | Yes | No | No | Program |
+| LLM call | No | Yes | No | No |
+| Tool execution | No | Via `tools` array | Direct | No |
+| Structured output | You control | Via Zod `output` | Via tool `output` schema | Via Standard Schema |
+| Retry policy | Yes | No | No | Yes |
 
 ## Next Steps
 

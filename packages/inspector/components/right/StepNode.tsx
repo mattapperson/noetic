@@ -33,6 +33,7 @@ const GLYPHS: Record<GraphNodeKind, string> = {
   codex: '⌥',
   opencode: '⌥',
   pi: '⌥',
+  effect: 'λ',
   start: '●',
   end: '◼',
   malformed: '⚠',

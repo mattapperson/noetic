@@ -27,6 +27,7 @@ const NODE_KINDS = [
   'codex',
   'opencode',
   'pi',
+  'effect',
 ] as const;
 
 /** Every named until predicate kind the runtime accepts. */

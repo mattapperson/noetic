@@ -9,6 +9,7 @@
 import type { ContextData, ContextLayer } from '@noetic-tools/context';
 import type {
   Context,
+  EffectStepRuntime,
   ExecuteStepFn,
   OutputCodec,
   ProcessSubprocessRequest,
@@ -42,7 +43,7 @@ import { schedule } from './every';
 import { loop } from './loop-builder';
 import { withContext } from './provide-builder';
 import { spawn } from './spawn-builder';
-import { callModel, runCode, step } from './step-builders';
+import { callModel, effectStep, runCode, step } from './step-builders';
 
 //#region Types
 
@@ -72,6 +73,14 @@ export interface HydrationContext {
    * entries after hydration.
    */
   workflows?: ReadonlyMap<string, WorkflowDocument>;
+  /**
+   * Effect runtimes keyed by the `ref` an `effect` node names. The runtime
+   * closes over a live Effect program, so workflows carry only the reference;
+   * resolution follows the same registry pattern as sub-harness adapters and
+   * UI libraries. Resolution is lazy-friendly: a live map view may gain
+   * entries after hydration.
+   */
+  effectRuntimes?: ReadonlyMap<string, EffectStepRuntime<unknown, unknown>>;
   /**
    * Ancestor ref chain for cycle detection on named sub-workflow references.
    * Threaded internally by the subflow hydrator — callers never set it.
@@ -584,6 +593,36 @@ function hydrateSubHarnessNode(
 }
 
 /**
+ * Hydrates an `effect` node: resolves the node's `ref` against
+ * `HydrationContext.effectRuntimes` and inlines the runtime into a live
+ * `StepEffect` — the same registry-resolution pattern as sub-harness adapters.
+ */
+function hydrateEffectNode(
+  node: WorkflowNode,
+  ctx: HydrationContext,
+): Step<ContextData, string, string> {
+  if (node.kind !== 'effect') {
+    return frameworkCast(undefined);
+  }
+  const runtime = ctx.effectRuntimes?.get(node.ref);
+  if (!runtime) {
+    throw new NoeticConfigError({
+      code: 'UNKNOWN_EFFECT_RUNTIME_REFERENCE',
+      message: `Effect runtime '${node.ref}' referenced in workflow node '${node.id}' is not registered.`,
+      hint: `Pass Effect runtimes via HydrationContext.effectRuntimes, e.g. new Map([['${node.ref}', effectStep(myProgram)]]) from @noetic-tools/effect. Available: ${
+        [
+          ...(ctx.effectRuntimes?.keys() ?? []),
+        ].join(', ') || '(none)'
+      }.`,
+    });
+  }
+  return effectStep({
+    id: node.id,
+    runtime: frameworkCast<EffectStepRuntime<ContextData, string, string>>(runtime),
+  });
+}
+
+/**
  * Hydrates a `subflow` node lazily: the target document resolves and hydrates
  * on first execution, memoized. Lazy because `HydrationContext.workflows` may
  * be a live view that gains entries after hydration, and because it keeps
@@ -687,6 +726,7 @@ const NODE_HYDRATORS: Record<string, NodeHydrator> = {
   codex: hydrateSubHarnessNode,
   opencode: hydrateSubHarnessNode,
   pi: hydrateSubHarnessNode,
+  effect: hydrateEffectNode,
 };
 
 //#endregion

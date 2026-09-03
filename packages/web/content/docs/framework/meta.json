@@ -8,6 +8,7 @@
     "---Primitives---",
     "steps",
     "sub-harnesses",
+    "effect-steps",
     "generative-ui",
     "operators",
     "---Integrations---",
