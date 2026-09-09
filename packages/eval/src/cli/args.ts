@@ -11,8 +11,10 @@ export interface CliArgs {
   watch: boolean;
   optimize: boolean;
   scope: OptimizeScopeValue;
-  budget?: number;
   dryRun: boolean;
+  forceDirty: boolean;
+  /** Max cases running concurrently within a suite (default 4). */
+  concurrency?: number;
   saveBaseline: boolean;
   check: boolean;
 }
@@ -68,21 +70,25 @@ const argHandlers: Record<string, ArgHandler> = {
     args.scope = next;
     return 1;
   },
-  '--budget': (args, argv, i) => {
-    const next = argv[i + 1];
-    if (next === undefined) {
-      throw new UsageError('--budget requires a numeric value');
-    }
-    const parsed = Number.parseFloat(next);
-    if (Number.isNaN(parsed)) {
-      throw new UsageError(`Invalid --budget value "${next}" (expected a number)`);
-    }
-    args.budget = parsed;
-    return 1;
-  },
   '--dry-run': (args) => {
     args.dryRun = true;
     return 0;
+  },
+  '--force-dirty': (args) => {
+    args.forceDirty = true;
+    return 0;
+  },
+  '--concurrency': (args, argv, i) => {
+    const next = argv[i + 1];
+    if (next === undefined) {
+      throw new UsageError('--concurrency requires a value (a positive integer)');
+    }
+    const parsed = Number(next);
+    if (!Number.isInteger(parsed) || parsed < 1) {
+      throw new UsageError(`Invalid --concurrency value "${next}" (expected a positive integer)`);
+    }
+    args.concurrency = parsed;
+    return 1;
   },
   '--save-baseline': (args) => {
     args.saveBaseline = true;
@@ -111,6 +117,7 @@ export function parseCliArgs(argv: string[]): CliArgs {
     optimize: false,
     scope: OptimizeScope.PromptsOnly,
     dryRun: false,
+    forceDirty: false,
     saveBaseline: false,
     check: false,
   };
