@@ -42,6 +42,7 @@ export { spawn } from './builders/spawn-builder';
 export type { CallModelOpts, InvokeToolOpts, RunCodeOpts } from './builders/step-builders';
 /** @public */
 export { callModel, invokeTool, runCode, step } from './builders/step-builders';
+/** @public */
 export type {
   GeneratorToolConfig,
   ToolConfig,
