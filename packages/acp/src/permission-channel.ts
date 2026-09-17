@@ -72,7 +72,7 @@ export const AcpPermissionPromptSchema = z.object({
   /** ACP tool classification (`read`, `edit`, `execute`, …), when the agent set one. */
   kind: z.string().optional(),
   /** Raw tool input, for a UI that wants to show the command or diff. */
-  rawInput: z.record(z.string(), z.unknown()).optional(),
+  rawInput: z.unknown().optional(),
   /** Exactly the options the agent offered — a UI should present these, not invent its own. */
   options: z.array(PermissionOptionSchema),
 });

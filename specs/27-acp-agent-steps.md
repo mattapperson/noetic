@@ -41,7 +41,7 @@ core ─→ types          (resolves agents via contract + registry)
   `AcpSession`, `AcpTransport`, `AcpClientHost`, the permission types, and
   `StepAcpAgent`. It lives here — next to `ContextLayer` — so both `core` and
   `acp` depend on it without forming a cycle. Protocol types are re-exported
-  verbatim from `@zed-industries/agent-client-protocol` rather than mirrored, so
+  verbatim from `@agentclientprotocol/sdk` rather than mirrored, so
   the wire surface cannot drift from the specification.
 - **`@noetic-tools/acp`** — the protocol client: capability negotiation, the
   session/turn drivers, the client-side `fs/*` + `terminal/*` + permission
@@ -75,6 +75,7 @@ interface AcpAgentConnection {
 interface AcpSession {
   readonly sessionId: string;
   readonly modes?: AcpSessionModeState;
+  readonly configOptions?: ReadonlyArray<AcpSessionConfigOption>;
   readonly availableCommands: ReadonlyArray<AcpAvailableCommand>;
   prompt(opts: AcpPromptOptions): Promise<AcpTurnResult>;
   cancel(): Promise<void>;
@@ -475,13 +476,37 @@ type-only re-exports that erase at compile time. Enforced by
 The npm dependency tree is a separate question, and the honest answer is
 different: `@noetic-tools/types` declares the protocol package as a real
 `dependency` so its `.d.ts` re-exports resolve for consumers, which means
-installing core installs it (and a second zod major alongside the workspace's).
+installing core installs it.
 Runtime import graph clean; install graph not.
 
 ## Future Considerations
 
-- Protocol features still in draft upstream (`session/resume`, `session/list`,
-  `elicitation/*`, session config options, usage reporting) arrive with a
-  version bump of `@zed-industries/agent-client-protocol`.
+- Additional protocol operations such as `session/resume`, `session/list`, and
+  `elicitation/*` require explicit Noetic APIs even when the SDK accepts their wire types.
 - Feeding ACP `plan` updates into the plan context layer, so a sub-agent's plan
   becomes part of the host agent's visible state.
+
+
+## Current session updates and model choices
+
+The protocol client uses `@agentclientprotocol/sdk` 1.4.0. It accepts its current
+session update union and forwards every update unchanged through the host and
+raw `acp_event` event. Non-text updates also appear as `acp.<sessionUpdate>` SDK
+events. Transcript accumulation handles known transcript fields without
+mistaking new update types for a mode change.
+
+`AcpSession.configOptions` and `AcpSessionInfo.configOptions` expose the current
+advertised configuration choices. `setModel` selects the option whose category
+is `model` through `session/set_config_option`; it fails with a capability error
+if the agent offers no such select option. Both initial and loaded sessions
+retain choices, and `config_option_update` replaces them. The deprecated
+`session/set_model` operation is not used.
+
+`usage_update.used` is context occupancy, `size` is context capacity, and its
+optional `cost` is cumulative session cost with a currency. None is a billed
+token delta. These values remain on raw events. Prompt-response usage remains
+verbatim in `AcpTurnResult.reportedUsage` and `response.completed.acpUsage`;
+it does not enter Noetic's aggregate usage, since agents may report session totals.
+The existing `usage` and `cost` result fields remain explicit adapter-supplied
+deltas. JSON-RPC errors retain both their message and a string `data.message`
+in step failures and aborted-turn events.

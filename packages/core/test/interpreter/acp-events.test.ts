@@ -374,3 +374,34 @@ describe('AcpEventBridge', () => {
     expect(events).toHaveLength(0);
   });
 });
+
+it('forwards context usage without converting occupancy or cumulative cost to billed usage', () => {
+  const { bridge, events } = bridgeCtx(STEP);
+  const update = {
+    sessionUpdate: 'usage_update',
+    used: 22001,
+    size: 258400,
+    cost: {
+      amount: 0.12,
+      currency: 'USD',
+    },
+  } satisfies AcpSessionNotification['update'];
+  bridge.forward({
+    sessionId: 's1',
+    update,
+  });
+  const reportedUsage = {
+    inputTokens: 100,
+    outputTokens: 20,
+    totalTokens: 120,
+  };
+  bridge.finalize(
+    emptyResult({
+      reportedUsage,
+    }),
+  );
+  expect(events.find((event) => event.type === 'acp.usage_update')?.data.update).toEqual(update);
+  expect(events.find((event) => event.type === 'response.completed')?.data.acpUsage).toEqual(
+    reportedUsage,
+  );
+});

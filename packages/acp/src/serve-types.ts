@@ -6,6 +6,7 @@
  * `@noetic-tools/types`.
  */
 
+import type * as acp from '@agentclientprotocol/sdk';
 import type {
   AcpMcpServer,
   AcpToolKind,
@@ -19,7 +20,6 @@ import type {
   StreamingItem,
   ToolAcpDeclaration,
 } from '@noetic-tools/types';
-import type * as acp from '@zed-industries/agent-client-protocol';
 
 //#region Harness contract
 

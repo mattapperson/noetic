@@ -5,6 +5,8 @@
  */
 
 import { describe, expect, test } from 'bun:test';
+import type * as acp from '@agentclientprotocol/sdk';
+import { PROTOCOL_VERSION } from '@agentclientprotocol/sdk';
 import type { AcpClientHost, AcpTransport } from '@noetic-tools/types';
 import {
   AcpCapabilityError,
@@ -12,8 +14,6 @@ import {
   frameworkCast,
   isAcpCapabilityError,
 } from '@noetic-tools/types';
-import type * as acp from '@zed-industries/agent-client-protocol';
-import { PROTOCOL_VERSION } from '@zed-industries/agent-client-protocol';
 import { assertPromptContentSupported, openAcpConnection } from '../src/connection';
 import { createAcpTestRig, textChunk } from './_helpers';
 
@@ -793,3 +793,162 @@ function assertFunctionCallOutput(item: unknown): asserts item is {
 }
 
 //#endregion
+
+describe('current protocol updates', () => {
+  test('forwards context occupancy and config updates without charging them as tokens', async () => {
+    const usage = {
+      sessionUpdate: 'usage_update',
+      used: 22001,
+      size: 258400,
+      cost: {
+        amount: 0.12,
+        currency: 'USD',
+      },
+    } satisfies acp.SessionNotification['update'];
+    const model = {
+      id: 'model',
+      name: 'Model',
+      category: 'model',
+      type: 'select',
+      currentValue: 'small',
+      options: [
+        {
+          value: 'small',
+          name: 'Small',
+        },
+        {
+          value: 'large',
+          name: 'Large',
+        },
+      ],
+    } satisfies acp.SessionConfigOption;
+    const rig = await createAcpTestRig({
+      script: {
+        configOptions: [
+          model,
+        ],
+        usage: {
+          inputTokens: 100,
+          outputTokens: 20,
+          totalTokens: 120,
+        },
+        onPrompt: async (conn, params) => {
+          await conn.sessionUpdate({
+            sessionId: params.sessionId,
+            update: {
+              sessionUpdate: 'current_mode_update',
+              currentModeId: 'code',
+            },
+          });
+          await conn.sessionUpdate({
+            sessionId: params.sessionId,
+            update: usage,
+          });
+          await conn.sessionUpdate({
+            sessionId: params.sessionId,
+            update: {
+              sessionUpdate: 'config_option_update',
+              configOptions: [
+                {
+                  ...model,
+                  currentValue: 'large',
+                },
+              ],
+            },
+          });
+          await conn.sessionUpdate(textChunk(params.sessionId, 'done'));
+        },
+      },
+    });
+    try {
+      const session = await rig.connection.newSession({
+        cwd: '/workspace',
+      });
+      expect(session.configOptions).toEqual([
+        model,
+      ]);
+      await session.setModel('large');
+      expect(rig.calls.setModel).toEqual([
+        {
+          sessionId: session.sessionId,
+          configId: 'model',
+          value: 'large',
+        },
+      ]);
+      const result = await session.prompt({
+        content: TEXT_PROMPT,
+      });
+      expect(result.text).toBe('done');
+      expect(result.currentModeId).toBe('code');
+      expect(result.usage).toBeUndefined();
+      expect(result.cost).toBeUndefined();
+      expect(result.reportedUsage).toEqual({
+        inputTokens: 100,
+        outputTokens: 20,
+        totalTokens: 120,
+      });
+      expect(rig.updates.map((n) => n.update)).toContainEqual(usage);
+      expect(session.configOptions?.[0]?.currentValue).toBe('large');
+    } finally {
+      await rig.close();
+    }
+  });
+
+  test('rejects model selection when no model config option was advertised', async () => {
+    const rig = await createAcpTestRig();
+    try {
+      const session = await rig.connection.newSession({
+        cwd: '/workspace',
+      });
+      await expect(session.setModel('invented')).rejects.toBeInstanceOf(AcpCapabilityError);
+      expect(rig.calls.setModel).toEqual([]);
+    } finally {
+      await rig.close();
+    }
+  });
+});
+
+test('loaded sessions retain advertised model choices', async () => {
+  const model = {
+    id: 'model',
+    name: 'Model',
+    category: 'model',
+    type: 'select',
+    currentValue: 'small',
+    options: [
+      {
+        value: 'small',
+        name: 'Small',
+      },
+    ],
+  } satisfies acp.SessionConfigOption;
+  const rig = await createAcpTestRig({
+    script: {
+      capabilities: {
+        loadSession: true,
+      },
+      configOptions: [
+        model,
+      ],
+    },
+  });
+  try {
+    const session = await rig.connection.loadSession({
+      sessionId: 'saved',
+      cwd: '/workspace',
+    });
+    expect(session.configOptions).toEqual([
+      model,
+    ]);
+    await session.setModel('small');
+    expect(rig.calls.setModel).toEqual([
+      {
+        sessionId: 'saved',
+        configId: 'model',
+        value: 'small',
+      },
+    ]);
+  } finally {
+    await rig.close();
+  }
+});

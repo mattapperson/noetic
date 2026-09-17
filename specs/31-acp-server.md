@@ -450,7 +450,7 @@ capability, the harness contract grows it publicly first.
   `params` and modes to the editor), `elicitation/create` (a structured-input
   surface for clarifying-question compositions, cf. `29`'s modal note), and
   `usage_update` (backed by `getUsage`). These land with a version bump of
-  `@zed-industries/agent-client-protocol`; the `history` and `commands` seams
+  `@agentclientprotocol/sdk`; the `history` and `commands` seams
   are shaped to absorb them.
 - **Session modes** mapped to steering configs or graph variants
   (`setSessionMode` → an author-provided `onModeChange`).

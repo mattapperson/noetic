@@ -39,6 +39,7 @@ import {
   SteeringAction,
 } from '@noetic-tools/types';
 import type { AcpSessionStore } from '../runtime/acp-session-store';
+import { errorMessage } from '../util/error-message';
 import { AcpEventBridge } from './acp-events';
 import { withHistoryPrompt } from './acp-history';
 import { resolveLazy } from './execute-action';
@@ -535,8 +536,8 @@ function turnFailure(
   },
   cause: unknown,
   baseCtx: Context<ContextData>,
-): NoeticErrorImpl {
-  if (cause instanceof NoeticErrorImpl) {
+): NoeticErrorImpl | NoeticConfigError {
+  if (cause instanceof NoeticErrorImpl || cause instanceof NoeticConfigError) {
     return cause;
   }
   if (baseCtx.aborted) {
@@ -548,7 +549,9 @@ function turnFailure(
   return new NoeticErrorImpl({
     kind: 'step_failed',
     stepId: step.id,
-    cause: cause instanceof Error ? cause : new Error(String(cause)),
+    cause: new Error(errorMessage(cause), {
+      cause,
+    }),
     retriesExhausted: false,
   });
 }
@@ -625,9 +628,13 @@ export async function executeAcpAgent<TContext, I, O>(
           ...servers,
         ]
       : undefined,
+  }).catch((cause: unknown) => {
+    throw turnFailure(step, cause, baseCtx);
   });
 
-  await applySessionSelection(step, ctx, resolution, baseCtx);
+  await applySessionSelection(step, ctx, resolution, baseCtx).catch((cause: unknown) => {
+    throw turnFailure(step, cause, baseCtx);
+  });
 
   bridge.begin();
 

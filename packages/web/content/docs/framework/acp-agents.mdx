@@ -210,7 +210,7 @@ step.acpAgent({
   agent: claudeCode(),
   prompt: 'Design the migration',
   mode: 'plan',                     // session/set_mode before the turn
-  model: 'claude-opus-4-8',         // session/set_model before the turn
+  model: 'claude-opus-4-8',         // advertised model config option before the turn
   mcpServers: [
     { name: 'db', command: 'mcp-db', args: [], env: [] },
   ],
@@ -619,3 +619,25 @@ For embedding an ACP connection outside a Noetic step — a custom runtime, a br
 | `harness.closeAcpSessions()` | Release everything held. Idempotent. |
 
 The contract types (`AcpAgent`, `AcpSession`, `AcpClientHost`, `AcpTransport`, the permission and protocol types) live in `@noetic-tools/types` and are re-exported from core.
+
+
+## Session choices and usage events
+
+The ACP client uses the official `@agentclientprotocol/sdk`. Inspect
+`session.configOptions` (also returned by `harness.listAcpSessions()`) to show
+model choices the agent actually offers. `step.acpAgent({ model: ... })` and
+`session.setModel()` use the advertised `model` select option through
+`session/set_config_option`. An agent without this option reports a capability
+error rather than silently accepting a model it cannot select.
+
+Current protocol updates, including `usage_update` and `config_option_update`,
+reach the raw `acp_event` stream. Updates without a model-stream equivalent also
+appear under `acp.<sessionUpdate>`. For `usage_update`, `used` means tokens in
+context, `size` means context capacity, and `cost` is cumulative session cost
+with a currency. Do not add these snapshots to billed token or cost totals.
+Prompt-response usage is available unchanged as `AcpTurnResult.reportedUsage`
+and `response.completed.acpUsage`; it is kept out of aggregate Noetic usage
+because providers may report session totals.
+
+Protocol failures preserve the remote message and any `data.message` detail,
+so authentication and provider version errors remain readable in step failures.

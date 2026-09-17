@@ -7,6 +7,8 @@
  * rather than a hand-rolled stand-in.
  */
 
+import type * as acp from '@agentclientprotocol/sdk';
+import { AgentSideConnection, ndJsonStream } from '@agentclientprotocol/sdk';
 import type {
   AcpAgentConnection,
   AcpBoundPermissionHandler,
@@ -22,8 +24,6 @@ import type {
   ShellExecResult,
 } from '@noetic-tools/types';
 import { frameworkCast } from '@noetic-tools/types';
-import type * as acp from '@zed-industries/agent-client-protocol';
-import { AgentSideConnection, ndJsonStream } from '@zed-industries/agent-client-protocol';
 import { openAcpConnection } from '../src/connection';
 import { createAcpLoopbackPair } from '../src/transport-loopback';
 
@@ -185,9 +185,10 @@ export interface FakeAgentScript {
   authMethods?: acp.AuthMethod[];
   /** Mode state returned from `session/new`. */
   modes?: acp.SessionModeState;
-  models?: acp.SessionModelState;
+  configOptions?: acp.SessionConfigOption[];
   /** Stop reason returned from `session/prompt`. Defaults to `end_turn`. */
   stopReason?: acp.PromptResponse['stopReason'];
+  usage?: acp.Usage;
   /**
    * Driven on every prompt turn. Receives the live connection so it can push
    * `session/update` notifications and call back into the client.
@@ -206,7 +207,7 @@ export interface FakeAgentCalls {
   prompt: acp.PromptRequest[];
   cancel: acp.CancelNotification[];
   setMode: acp.SetSessionModeRequest[];
-  setModel: acp.SetSessionModelRequest[];
+  setModel: acp.SetSessionConfigOptionRequest[];
   authenticate: acp.AuthenticateRequest[];
 }
 
@@ -286,12 +287,14 @@ export async function createAcpTestRig(opts: AcpTestRigOptions = {}): Promise<Ac
         return {
           sessionId: `session-${sessionCounter}`,
           modes: script.modes,
-          models: script.models,
+          configOptions: script.configOptions,
         };
       },
       async loadSession(params) {
         calls.loadSession.push(params);
-        return {};
+        return {
+          configOptions: script.configOptions,
+        };
       },
       async authenticate(params) {
         calls.authenticate.push(params);
@@ -301,15 +304,18 @@ export async function createAcpTestRig(opts: AcpTestRigOptions = {}): Promise<Ac
         calls.setMode.push(params);
         return {};
       },
-      async setSessionModel(params) {
+      async setSessionConfigOption(params) {
         calls.setModel.push(params);
-        return {};
+        return {
+          configOptions: script.configOptions ?? [],
+        };
       },
       async prompt(params) {
         calls.prompt.push(params);
         const stopReason = await script.onPrompt?.(conn, params);
         return {
           stopReason: stopReason ?? script.stopReason ?? 'end_turn',
+          usage: script.usage,
         };
       },
       async cancel(params) {

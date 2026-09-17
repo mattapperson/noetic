@@ -13,9 +13,9 @@
  * method-not-found rather than silently doing the work anyway.
  */
 
+import type * as acp from '@agentclientprotocol/sdk';
+import { RequestError } from '@agentclientprotocol/sdk';
 import type { AcpClientActivity, AcpClientHost } from '@noetic-tools/types';
-import type * as acp from '@zed-industries/agent-client-protocol';
-import { RequestError } from '@zed-industries/agent-client-protocol';
 import { isAbsolutePath, isWithinRoots } from './paths';
 import type { AcpPermissionResolverOptions } from './permissions';
 import { resolvePermission, selectPermissionOption } from './permissions';
@@ -253,7 +253,7 @@ export class NoeticAcpClient implements acp.Client {
     };
   }
 
-  async killTerminal(params: acp.KillTerminalCommandRequest): Promise<acp.KillTerminalResponse> {
+  async killTerminal(params: acp.KillTerminalRequest): Promise<acp.KillTerminalResponse> {
     this.assertTerminalCapability('terminal/kill');
     const killed = await this.terminals.kill(params.terminalId);
     if (!killed) {

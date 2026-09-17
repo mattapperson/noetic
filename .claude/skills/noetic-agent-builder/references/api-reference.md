@@ -2296,3 +2296,14 @@ Errors propagate; failed bodies skip `afterStep`. Cancellation during `beforeSte
 prevents the body from starting. Parallel child contexts can call hooks at the
 same time. Keep hook side effects safe to retry. Callback closures stay in their
 process; configure worker hooks separately for out-of-process execution.
+
+### ACP model choices and raw usage
+
+`AcpSession.configOptions` and `AcpSessionInfo.configOptions` expose advertised
+`AcpSessionConfigOption` values and update with `config_option_update`.
+`setModel(id)` selects the `model` category using `session/set_config_option`;
+agents without that option reject model selection.
+`AcpTurnResult.reportedUsage` preserves raw prompt-response usage, also emitted
+as `response.completed.acpUsage`. It is not a token delta. `acp.usage_update`
+carries context occupancy (`used`), capacity (`size`), and optional cumulative
+session cost; do not charge them to Noetic aggregate usage.

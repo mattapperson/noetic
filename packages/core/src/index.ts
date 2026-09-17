@@ -583,6 +583,7 @@ export type {
   AcpPromptOptions,
   AcpRequestPermissionRequest,
   AcpSession,
+  AcpSessionConfigOption,
   AcpSessionDisposer,
   AcpSessionInfo,
   AcpSessionMode,

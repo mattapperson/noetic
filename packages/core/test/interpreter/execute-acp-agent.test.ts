@@ -50,7 +50,7 @@ interface FakeAgentOpts {
   onClose?: () => void;
   onSetMode?: (modeId: string) => void;
   onCancel?: () => void;
-  throwOnTurn?: Error;
+  throwOnTurn?: unknown;
   throwOnNewSession?: Error;
   throwOnSetMode?: Error;
 }
@@ -1223,4 +1223,42 @@ describe('step.acpAgent builder validation', () => {
       expect(e.code).toBe('MISSING_PROMPT');
     }
   });
+});
+
+it.each([
+  [
+    {
+      code: -32000,
+      message: 'Authentication required',
+    },
+    'Authentication required',
+  ],
+  [
+    {
+      code: -32603,
+      message: 'Internal error',
+      data: {
+        message: 'Codex requires an update',
+      },
+    },
+    'Internal error: Codex requires an update',
+  ],
+])('keeps JSON-RPC step failure details readable', async (cause, message) => {
+  const { ctx } = harnessCtx();
+  const task = step.acpAgent({
+    id: `rpc-${crypto.randomUUID()}`,
+    agent: fakeAgent({
+      throwOnTurn: cause,
+    }),
+    prompt: 'go',
+  });
+  try {
+    await execute(task, undefined, ctx);
+    throw new Error('expected failure');
+  } catch (error) {
+    assert(isNoeticError(error));
+    expect(error.noeticError.kind).toBe('step_failed');
+    expect(error.message).toContain(message);
+    expect(error.message).not.toContain('[object Object]');
+  }
 });
