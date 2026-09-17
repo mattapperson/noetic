@@ -110,6 +110,16 @@ one-shot. Three transports ship:
 | `loopbackTransport` | An in-process agent. Runs the real wire protocol with no process — the recommended way to test an ACP-backed step. |
 | custom | Anything yielding a duplex byte stream: a socket, a sandbox bridge, a remote host. |
 
+The stdio factory waits for spawn and rejects missing executables or invalid working
+directories with `AcpConnectError`. An already-aborted signal launches nothing.
+`close()` and abort share one bounded shutdown: destroy the local pipes, send
+SIGTERM to the dedicated POSIX process group, then SIGKILL after 300 ms and wait
+up to 300 ms for the leader to exit. Windows uses `taskkill /T /F`, bounded to one
+second. Repeated close calls share their completion (and any shutdown failure).
+This is process cleanup, not containment: descendants that create their own
+session escape the POSIX group; on Windows a tree whose leader already exited
+cannot be recovered by `taskkill`.
+
 ## Client-side capabilities
 
 `@noetic-tools/acp` implements the ACP `Client` interface against an

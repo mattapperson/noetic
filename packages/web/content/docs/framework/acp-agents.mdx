@@ -533,6 +533,16 @@ const remote = defineAcpAgent({
 
 The Node stdio transport lives at `@noetic-tools/acp/stdio`. The main entry has no static `node:*` import and never loads `child_process` unless a stdio connection is opened — but that is a runtime property: the dynamic `import('./stdio')` uses a static specifier, so a bundler still pulls the module in. A browser build should alias or externalise `@noetic-tools/acp/stdio`.
 
+Closing a stdio transport or aborting its signal closes the host's pipes and stops
+its process group, including children launched by CLI wrappers. POSIX shutdown
+escalates from SIGTERM to SIGKILL after 300 ms; Windows uses `taskkill /T /F` with
+a one-second limit. Repeated `close()` calls share the shutdown promise. Missing
+executables and invalid working directories fail when opening the transport.
+Descendants that detach into a new session are outside the POSIX group; Windows
+cannot recover a tree after its parent has already exited. These cleanup rules
+are not a sandbox.
+
+
 ## API reference
 
 Everything `@noetic-tools/acp` exports. Internal helpers — the item builders, turn accumulator, terminal registry, permission engine — are deliberately not exported; they are implementation detail and free to change.
