@@ -1,4 +1,5 @@
 import type { StandardSchemaV1 } from '@standard-schema/spec';
+import type { AgentHooks } from './agent-hooks';
 import type { Channel, ChannelHandle, ExternalChannel } from './channel';
 import type { LLMResponse, ModelParams } from './common';
 import type { Context, CwdState, RestoreContextOptions } from './context';
@@ -109,6 +110,7 @@ export type ContextStep<TContext = ContextData, I = unknown, O = unknown> =
 export interface ContextHarness {
   readonly config: {
     readonly name: string;
+    readonly hooks?: AgentHooks;
     readonly params: Record<string, unknown>;
     /** Harness-wide default projection policy; a step's `projection` overrides it. */
     readonly projection?: ProjectionPolicy;

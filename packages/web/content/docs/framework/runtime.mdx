@@ -336,6 +336,20 @@ const harness = new AgentHarness({
 });
 ```
 
+Hooks run for each actual step dispatch, including operators and their nested steps.
+A loop invokes them again for each body execution; parallel paths invoke them with
+their own contexts and can overlap. `beforeStep` is awaited before the body runs.
+`afterStep` is awaited only after the body succeeds, before the completion event,
+ledger record, and checkpoint. It receives the body's output and the same context.
+
+A hook rejection fails the dispatch and propagates to the caller. A failed body
+never calls `afterStep`. If the context was already cancelled, neither hook runs;
+if it is cancelled while `beforeStep` awaits, the body does not run. Replayed
+ledger entries skip both hooks, since no work runs again. Hook side effects must
+follow the same idempotency rules as step bodies: failed dispatches can be retried.
+Hooks configured in one process are not serialized into subprocess workers; each
+worker must configure its own hooks.
+
 ## Resuming a session from disk
 
 `harness.seedSessionHistory(threadId, items)` populates a fresh session's accumulated items before the next `execute()` call. Pair it with append-only persistence (one `Item` per line in a JSONL file) to make a chat survive subprocess restarts:

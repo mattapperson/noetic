@@ -1,4 +1,5 @@
 import type { StandardSchemaV1 } from '@standard-schema/spec';
+import type { AgentHooks } from './agent-hooks';
 import type { Channel, ChannelHandle, ExternalChannel } from './channel';
 import type { LLMResponse, ModelParams, ServerToolSpec } from './common';
 import type { Context, CwdState, RestoreContextOptions } from './context';
@@ -15,11 +16,7 @@ import type { Step } from './step';
 import type { SubprocessAdapter } from './subprocess-adapter';
 import type { Tool } from './tool';
 
-/** @public Optional lifecycle hooks invoked before and after each step execution. */
-export interface AgentHooks {
-  beforeStep?: (step: Step, ctx: Context) => Promise<void>;
-  afterStep?: (step: Step, result: unknown, ctx: Context) => Promise<void>;
-}
+export type { AgentHooks } from './agent-hooks';
 
 /** @public Item-schema configuration: extension schemas plus validation strictness. */
 export interface ItemSchemaConfig {

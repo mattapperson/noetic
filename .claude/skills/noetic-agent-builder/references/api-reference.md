@@ -2285,3 +2285,14 @@ const quoteShipping = tool({
 ### JSON workflow
 
 A `callModel` node references a codec: `"output": { "codec": "openui", "library": "<ref>" }`, resolved from `HydrationContext.uiLibraries` (see [hydrateWorkflow](#hydrateworkflow--hydratenode)).
+
+### Agent step hooks
+
+`AgentHarness({ hooks: { beforeStep, afterStep }, ... })` awaits hooks around each
+actual step dispatch, including operators and nested steps. `beforeStep(step, ctx)`
+runs before the body; `afterStep(step, result, ctx)` runs after success and before
+completion events, the ledger write, and checkpoint. Replayed steps skip hooks.
+Errors propagate; failed bodies skip `afterStep`. Cancellation during `beforeStep`
+prevents the body from starting. Parallel child contexts can call hooks at the
+same time. Keep hook side effects safe to retry. Callback closures stay in their
+process; configure worker hooks separately for out-of-process execution.

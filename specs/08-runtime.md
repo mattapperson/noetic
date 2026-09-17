@@ -839,3 +839,19 @@ On `send`, the server calls `harness.execute(text, { threadId, messageId })` —
 ### Resume
 
 On runner startup, the IPC server reads `<taskDir>/chat.jsonl` and calls `harness.seedSessionHistory(threadId, items)` before any `execute()` is issued. Conversations therefore survive subprocess restarts: the next runner spawn replays prior items into the fresh session and the user's chat continues from where it left off.
+
+## Step lifecycle hooks
+
+`AgentHooks.beforeStep` and `afterStep` surround each actual interpreter dispatch.
+They are awaited and receive the dispatched step and its execution context;
+`afterStep` also receives the output. Operators call their own hooks, and each
+nested step calls its hooks independently. Loop passes call hooks on every pass;
+parallel child contexts may invoke hooks concurrently.
+
+Replay bypasses both hooks. Pre-dispatch depth and abort checks run before hooks.
+Cancellation during `beforeStep` prevents the body from starting. Body failure
+skips `afterStep`. Hook errors propagate and fail the dispatch, unwinding its
+frontier. The success event, ledger write, and checkpoint follow `afterStep`, so
+its state changes enter the checkpoint. Hook effects obey step retry/idempotency
+rules. Adapter dispatch calls hooks once in the dispatching process; workers do
+not inherit callback closures and must configure their own hooks.
