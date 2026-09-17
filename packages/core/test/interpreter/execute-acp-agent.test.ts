@@ -44,6 +44,7 @@ interface FakeAgentOpts {
   modes?: AcpSessionModeState;
   /** Notifications the agent pushes during the turn. */
   updates?: AcpSessionNotification[];
+  replay?: AcpSessionNotification[];
   onConnect?: (host: AcpClientHost) => void;
   onNewSession?: (opts: AcpNewSessionOptions) => void;
   onPrompt?: (opts: AcpPromptOptions) => void;
@@ -126,6 +127,9 @@ function fakeAgent(opts: FakeAgentOpts = {}): AcpAgent {
           return makeSession(`session-${sessionCounter}`);
         },
         async loadSession(load) {
+          for (const update of opts.replay ?? []) {
+            connect.host.onSessionUpdate(update);
+          }
           return makeSession(load.sessionId);
         },
         async close() {
@@ -510,6 +514,75 @@ describe('executeAcpAgent — session lifecycle', () => {
     await execute(acpStep, undefined, ctx);
 
     expect(newSessions).toBe(0);
+  });
+
+  it('marks loaded history as replay and streams only the new turn as SDK output', async () => {
+    const { ctx } = harnessCtx();
+    const events: {
+      source: string;
+      type: string;
+      data: Record<string, unknown>;
+    }[] = [];
+    const captured = frameworkCast<
+      typeof ctx & {
+        _broadcaster: unknown;
+      }
+    >(ctx);
+    captured._broadcaster = {
+      emit(event: (typeof events)[number]) {
+        events.push(event);
+      },
+    };
+    const chunk = (text: string): AcpSessionNotification => ({
+      sessionId: 'saved',
+      update: {
+        sessionUpdate: 'agent_message_chunk',
+        content: {
+          type: 'text',
+          text,
+        },
+      },
+    });
+    await execute(
+      step.acpAgent({
+        id: 'follow-up',
+        agent: fakeAgent({
+          replay: [
+            chunk('old answer'),
+          ],
+          updates: [
+            chunk('new answer'),
+          ],
+        }),
+        prompt: 'continue',
+        session: {
+          load: 'saved',
+        },
+      }),
+      undefined,
+      ctx,
+    );
+
+    const raw = events.filter((event) => event.type.endsWith(':acp_event'));
+    expect(raw).toHaveLength(2);
+    expect(raw[0]?.data).toMatchObject({
+      stepId: 'follow-up',
+      sessionId: 'saved',
+      replay: true,
+    });
+    expect(raw[1]?.data).toMatchObject({
+      stepId: 'follow-up',
+      sessionId: 'saved',
+    });
+    expect(raw[1]?.data.replay).toBeUndefined();
+    expect(
+      events
+        .filter((event) => event.type === 'response.output_text.delta')
+        .map((event) => event.data.delta),
+    ).toEqual([
+      'new answer',
+    ]);
+    expect(events.filter((event) => event.type === 'response.created')).toHaveLength(1);
   });
 });
 

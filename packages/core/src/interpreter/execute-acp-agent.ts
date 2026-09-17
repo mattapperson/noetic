@@ -392,6 +392,7 @@ async function openSession<TContext, I, O>(opts: {
   baseCtx: Context<ContextData>;
   cwd: string;
   host: AcpClientHost;
+  onReplay: AcpClientHost['onSessionUpdate'];
   /** Per-turn host binding, reapplied when an existing session is reused. */
   binding: HostBindingOptions<TContext, I, O>;
   /** MCP servers for the session, already resolved from the step. */
@@ -421,6 +422,9 @@ async function openSession<TContext, I, O>(opts: {
     // its stdio keeps the event loop alive, the host never exits.
     try {
       const loadId = opts.step.session?.load;
+      if (loadId) {
+        opts.host.onSessionUpdate = opts.onReplay;
+      }
       const session = loadId
         ? await connection.loadSession({
             sessionId: loadId,
@@ -443,6 +447,8 @@ async function openSession<TContext, I, O>(opts: {
     } catch (e) {
       await connection.close().catch(() => undefined);
       throw e;
+    } finally {
+      opts.host.onSessionUpdate = opts.binding.onUpdate;
     }
   });
 
@@ -623,6 +629,7 @@ export async function executeAcpAgent<TContext, I, O>(
     cwd,
     host,
     binding,
+    onReplay: (notification) => bridge.forward(notification, true),
     servers: servers
       ? [
           ...servers,

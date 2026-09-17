@@ -314,6 +314,8 @@ Two more things to know about sharing a session:
 
 `session.load` resumes an existing ACP session id instead of creating a new one, for agents that advertise `loadSession`.
 
+History streamed while loading appears only in raw `acp_event` events with `data.replay: true`, along with the step and session IDs. It does not produce new text, reasoning, or tool-call output on the SDK event streams. Chat views that read raw ACP events should skip replay when rendering the current turn.
+
 ## Stop reasons
 
 | Stop reason | Result |

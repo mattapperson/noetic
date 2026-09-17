@@ -94,6 +94,46 @@ const STEP = {
 //#endregion
 
 describe('AcpEventBridge', () => {
+  it('keeps replay raw without changing the new turn or hiding its fallback output', () => {
+    const { bridge, events } = bridgeCtx(STEP);
+    bridge.forward(textChunk('old answer'), true);
+    bridge.forward(
+      {
+        sessionId: 's1',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'old-call',
+          title: 'Read file',
+          status: 'completed',
+        },
+      },
+      true,
+    );
+    expect(events).toHaveLength(2);
+    for (const event of events) {
+      expect(event.source).toBe('framework');
+      expect(event.data).toMatchObject({
+        stepId: 'review',
+        sessionId: 's1',
+        replay: true,
+      });
+    }
+    bridge.begin();
+    bridge.finalize(
+      emptyResult({
+        text: 'new answer',
+      }),
+    );
+    expect(
+      events
+        .filter((event) => event.type === 'response.output_text.delta')
+        .map((event) => event.data.delta),
+    ).toEqual([
+      'new answer',
+    ]);
+    expect(events.filter((event) => event.type === 'response.output_item.added')).toHaveLength(1);
+  });
+
   it('brackets a turn with response.created and response.completed', () => {
     const { bridge, events } = bridgeCtx(STEP);
 
