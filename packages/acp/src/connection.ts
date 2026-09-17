@@ -106,7 +106,7 @@ class AcpSessionImpl implements AcpSession {
     private readonly agentId: string,
     private readonly agent: acp.Agent,
     readonly sessionId: string,
-    readonly modes: acp.SessionModeState | undefined,
+    private modeState: acp.SessionModeState | undefined,
     private options: acp.SessionConfigOption[] | undefined,
     private commands: acp.AvailableCommand[],
     /** Rejects if the agent dies, so a request cannot outlive it. */
@@ -114,6 +114,10 @@ class AcpSessionImpl implements AcpSession {
     /** What the agent said it accepts, enforced before a turn goes on the wire. */
     private readonly promptCapabilities: acp.PromptCapabilities | undefined,
   ) {}
+
+  get modes(): acp.SessionModeState | undefined {
+    return this.modeState;
+  }
 
   get configOptions(): ReadonlyArray<acp.SessionConfigOption> {
     return this.options ?? [];
@@ -123,7 +127,10 @@ class AcpSessionImpl implements AcpSession {
     return this.commands;
   }
 
-  applySettings(settings: Pick<acp.NewSessionResponse, 'configOptions'>): void {
+  applySettings(settings: Pick<acp.LoadSessionResponse, 'modes' | 'configOptions'>): void {
+    if (settings.modes) {
+      this.modeState = settings.modes;
+    }
     if (settings.configOptions) {
       this.options = settings.configOptions;
     }

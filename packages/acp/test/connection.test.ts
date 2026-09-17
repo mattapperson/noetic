@@ -908,7 +908,20 @@ describe('current protocol updates', () => {
   });
 });
 
-test('loaded sessions retain advertised model choices', async () => {
+test('loaded sessions retain advertised mode and model choices', async () => {
+  const modes: acp.SessionModeState = {
+    currentModeId: 'default',
+    availableModes: [
+      {
+        id: 'default',
+        name: 'Default',
+      },
+      {
+        id: 'read-only',
+        name: 'Read only',
+      },
+    ],
+  };
   const model = {
     id: 'model',
     name: 'Model',
@@ -927,6 +940,7 @@ test('loaded sessions retain advertised model choices', async () => {
       capabilities: {
         loadSession: true,
       },
+      modes,
       configOptions: [
         model,
       ],
@@ -937,6 +951,14 @@ test('loaded sessions retain advertised model choices', async () => {
       sessionId: 'saved',
       cwd: '/workspace',
     });
+    expect(session.modes).toEqual(modes);
+    await session.setMode('read-only');
+    expect(rig.calls.setMode).toEqual([
+      {
+        sessionId: 'saved',
+        modeId: 'read-only',
+      },
+    ]);
     expect(session.configOptions).toEqual([
       model,
     ]);
@@ -948,6 +970,26 @@ test('loaded sessions retain advertised model choices', async () => {
         value: 'small',
       },
     ]);
+  } finally {
+    await rig.close();
+  }
+});
+
+test('loaded sessions reject mode selection when no modes were advertised', async () => {
+  const rig = await createAcpTestRig({
+    script: {
+      capabilities: {
+        loadSession: true,
+      },
+    },
+  });
+  try {
+    const session = await rig.connection.loadSession({
+      sessionId: 'saved',
+      cwd: '/workspace',
+    });
+    await expect(session.setMode('read-only')).rejects.toBeInstanceOf(AcpCapabilityError);
+    expect(rig.calls.setMode).toEqual([]);
   } finally {
     await rig.close();
   }

@@ -293,6 +293,7 @@ export async function createAcpTestRig(opts: AcpTestRigOptions = {}): Promise<Ac
       async loadSession(params) {
         calls.loadSession.push(params);
         return {
+          modes: script.modes,
           configOptions: script.configOptions,
         };
       },
