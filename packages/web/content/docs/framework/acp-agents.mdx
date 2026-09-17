@@ -47,8 +47,8 @@ It also brings capabilities a hand-rolled adapter has no way to express: permiss
 ```ts
 import { claudeCode, codex, gemini, opencode, pi, customAcpAgent } from '@noetic-tools/acp';
 
-claudeCode();                       // npx @zed-industries/claude-code-acp
-codex();                            // npx @zed-industries/codex-acp
+claudeCode();                       // npx @agentclientprotocol/claude-agent-acp
+codex();                            // npx @agentclientprotocol/codex-acp
 gemini();                           // gemini --experimental-acp
 opencode();                         // opencode acp  (native ACP)
 pi();                               // npx pi-acp    (community adapter)
@@ -61,6 +61,26 @@ customAcpAgent({                    // any other ACP-speaking binary
 ```
 
 Every preset accepts `command`, `args`, and `env` overrides, plus a `transport` for reaching an agent that is not a local child process.
+
+Claude Code and Codex use the maintained `@agentclientprotocol` bridges. Their npm
+binaries run Node entrypoints; the Codex bridge includes a compatible Codex backend.
+Use `CODEX_PATH` to choose another backend and `CODEX_CONFIG` for JSON configuration:
+
+```ts
+import { codex } from '@noetic-tools/acp';
+
+codex({
+  env: {
+    CODEX_PATH: '/usr/local/bin/codex',
+    CODEX_CONFIG: JSON.stringify({ model: 'your-model-id' }),
+  },
+});
+```
+
+`args` are appended to the ACP bridge command. Codex CLI flags such as `-c` are
+not bridge configuration; use `CODEX_CONFIG` instead. For an installed bridge or
+an exact package version, use `customAcpAgent` with its command and arguments,
+or supply a `transport`.
 
 ## Filesystem confinement
 
@@ -551,8 +571,8 @@ Everything `@noetic-tools/acp` exports. Internal helpers — the item builders, 
 
 | Export | What it is |
 |---|---|
-| `claudeCode(opts?)` | Preset for `@zed-industries/claude-code-acp`. |
-| `codex(opts?)` | Preset for `@zed-industries/codex-acp`. |
+| `claudeCode(opts?)` | Preset for `@agentclientprotocol/claude-agent-acp`. |
+| `codex(opts?)` | Preset for `@agentclientprotocol/codex-acp`. |
 | `gemini(opts?)` | Preset for Gemini CLI's native ACP mode. |
 | `opencode(opts?)` | Preset for opencode's native `opencode acp` command. |
 | `pi(opts?)` | Preset for pi, via the community `pi-acp` adapter. |

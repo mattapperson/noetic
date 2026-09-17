@@ -12,7 +12,7 @@
  *   bun examples/acp-e2e.ts
  *
  * Set `ACP_LIVE_AGENT=1` to run the final path against a real spawned agent
- * (`npx @zed-industries/claude-code-acp`) instead — that path needs Claude Code
+ * (`npx @agentclientprotocol/claude-agent-acp`) instead — that path needs Claude Code
  * credentials and network access, so it is opt-in.
  */
 
@@ -366,7 +366,7 @@ async function main(): Promise<void> {
 
   // ── Path H (opt-in): a real spawned ACP agent over stdio ──────────────────
   if (process.env.ACP_LIVE_AGENT === '1') {
-    console.log('\n── Path H: LIVE agent over stdio (@zed-industries/claude-code-acp) ──');
+    console.log('\n── Path H: LIVE agent over stdio (@agentclientprotocol/claude-agent-acp) ──');
     const liveStep = step.acpAgent<ContextData, unknown, string>({
       id: 'live',
       agent: claudeCode({

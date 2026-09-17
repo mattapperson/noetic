@@ -82,8 +82,8 @@ function preset(agentId: string, base: AcpProcessSpec, opts: AcpPresetOptions = 
 //#region Presets
 
 /**
- * Claude Code via `@zed-industries/claude-code-acp`, the ACP bridge over the
- * Claude Code SDK.
+ * Claude Code via `@agentclientprotocol/claude-agent-acp`, the ACP bridge over the
+ * Claude Agent SDK.
  * @public
  */
 export function claudeCode(opts: AcpPresetOptions = {}): AcpAgent {
@@ -93,7 +93,7 @@ export function claudeCode(opts: AcpPresetOptions = {}): AcpAgent {
       command: 'npx',
       args: [
         '-y',
-        '@zed-industries/claude-code-acp',
+        '@agentclientprotocol/claude-agent-acp',
       ],
     },
     opts,
@@ -101,7 +101,7 @@ export function claudeCode(opts: AcpPresetOptions = {}): AcpAgent {
 }
 
 /**
- * OpenAI Codex via `@zed-industries/codex-acp`.
+ * OpenAI Codex via `@agentclientprotocol/codex-acp`.
  * @public
  */
 export function codex(opts: AcpPresetOptions = {}): AcpAgent {
@@ -111,7 +111,7 @@ export function codex(opts: AcpPresetOptions = {}): AcpAgent {
       command: 'npx',
       args: [
         '-y',
-        '@zed-industries/codex-acp',
+        '@agentclientprotocol/codex-acp',
       ],
     },
     opts,

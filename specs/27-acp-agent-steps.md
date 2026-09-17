@@ -121,6 +121,15 @@ This is process cleanup, not containment: descendants that create their own
 session escape the POSIX group; on Windows a tree whose leader already exited
 cannot be recovered by `taskkill`.
 
+The Claude Code and Codex presets launch
+`npx -y @agentclientprotocol/claude-agent-acp` and
+`npx -y @agentclientprotocol/codex-acp`, respectively. Both packages expose Node entrypoints
+at `dist/index.js`; the Codex adapter starts its bundled `@openai/codex` backend.
+Host applications can override that backend with `env.CODEX_PATH` and pass Codex
+configuration as JSON in `env.CODEX_CONFIG`. Preset `args` remain appended to the
+bridge command, not forwarded as Codex CLI configuration flags. Custom transport
+overrides bypass the launch recipe and still receive the preset environment.
+
 ## Client-side capabilities
 
 `@noetic-tools/acp` implements the ACP `Client` interface against an
