@@ -336,6 +336,7 @@ Fields discovered per step kind:
 | `loop` | (from body) | `maxIterations` | `until` predicates |
 | `spawn` | (from child) | `timeout` | `context` layers |
 | `inParallel` | (from children) | `mode`, `concurrency` | path topology |
+| `decide` | question `instructions`, `criteria` | `model`, cut-points (`threshold`, `minConfidence`) | (topology) |
 
 ### Phase 2: Mutator (Immutable Clone + Replacement)
 

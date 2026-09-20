@@ -7,7 +7,7 @@
 
 ## The `Step<I, O>` Discriminated Union
 
-`Step` is a single type with eight variants. The runtime pattern-matches on `kind`. Builder functions (`runCode(...)`, `inParallel(...)`, etc.) are constructors for the union variants.
+`Step` is a single type whose variants are listed below; the table is the authoritative set, so no count is repeated here to drift out of date. The runtime pattern-matches on `kind`. Builder functions (`runCode(...)`, `inParallel(...)`, etc.) are constructors for the union variants.
 
 ```typescript
 type Step<I, O> =
@@ -37,6 +37,7 @@ Each variant is specified in its own feature spec:
 | `spawn` | `04-spawn` | Child execution with context boundary |
 | `withContext` | `02-step-variants` | Scoped context layer injection |
 | `loop` | `05-loop-and-until` | Repeating execution with termination |
+| `decide` | `32-system-one-decisions` | Typed decisions from a System One model |
 
 ## The `execute()` Interpreter
 
@@ -57,7 +58,7 @@ async function execute<I, O>(step: Step<I, O>, input: I, ctx: Context): Promise<
 }
 ```
 
-This makes the "everything is a Step" claim true at the type level. The primitive count debate dissolves: one type, eight variants.
+This makes the "everything is a Step" claim true at the type level. The primitive count debate dissolves: one type, one variant per execution primitive, enumerated in the table above.
 
 ## The `O` Contract
 

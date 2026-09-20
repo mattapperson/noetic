@@ -1,7 +1,7 @@
 # Loop and Until: Iteration and Termination
 
 > **Depends On:** `01-step-type` (Step<I,O>), `06-channels` (Channel), `07-context-and-event-log` (Context), `09-error-model` (NoeticError)
-> **Exports:** `loop()`, `LoopConfig`, `schedule()`, `ScheduleOptions`, `Until`, `Verdict`, `Snapshot`, `until.*` predicates, `any()`, `all()`, `VerifyFn`, `ConvergeConfig`
+> **Exports:** `loop()`, `LoopConfig`, `schedule()`, `ScheduleOptions`, `Until`, `Verdict`, `Snapshot`, `until.*` predicates (including `until.decided()`, specified in `32-system-one-decisions`), `any()`, `all()`, `VerifyFn`, `ConvergeConfig`
 
 ---
 

@@ -38,18 +38,19 @@ inspector ──→ platform-node ──→ core ──→ context ──→ typ
                                    openui ───┘──────────┤
                                         chat-sdk ───────┤
                                              acp ───────┤
-                                   agent-plugins ───────┘
+                                   agent-plugins ───────┤
+                                      system-one ───────┘
 
 web (standalone — no workspace deps)
 ```
 
 Every edge above is the complete set: `types` depends on nothing; `context`,
-`chat-sdk`, `acp`, and `agent-plugins` depend only on `types`; `openui` and `core` on `context` +
+`chat-sdk`, `acp`, `agent-plugins`, and `system-one` depend only on `types` (plus, for `system-one`, `zod` and the vendor SDK); `openui` and `core` on `context` +
 `types`; `eval`, `platform-node`, and `platform-browser` on `core`; `inspector`
 on `core` + `platform-node`; `web` on nothing.
 
-The 11 packages under `packages/`: `acp`, `chat-sdk`, `context`, `core`, `eval`,
-`inspector`, `openui`, `platform-browser`, `platform-node`, `types`, `web`. Most
+The 12 packages under `packages/`: `acp`, `chat-sdk`, `context`, `core`, `eval`,
+`inspector`, `openui`, `platform-browser`, `platform-node`, `system-one`, `types`, `web`. Most
 publish under the `@noetic-tools/` scope; `inspector`, `platform-browser`, and
 `web` use `@noetic/`.
 

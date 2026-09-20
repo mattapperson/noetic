@@ -62,7 +62,7 @@ Authoring documents by hand or reviewing LLM-generated ones, reference the schem
 
 ## WorkflowNode Union
 
-`WorkflowNode` is a discriminated union on `kind`. Each variant maps to an existing `Step` builder. All nodes share a common `id` field. The `acp-agent` node kind is specified in `27-acp-agent-steps`.
+`WorkflowNode` is a discriminated union on `kind`. Each variant maps to an existing `Step` builder. All nodes share a common `id` field. The `acp-agent` node kind is specified in `27-acp-agent-steps`, and `decide` in `32-system-one-decisions`.
 
 ```typescript
 type WorkflowNode =
@@ -127,13 +127,16 @@ interface InvokeToolWorkflowNode {
 
 ### `conditional`
 
-Conditional routing based on substring matching against the input.
+Conditional routing against the input. A route's `match` is either a bare string (substring, the
+original form) or a predicate, so a node whose output is structured JSON can be routed on a field
+rather than on text. The predicate union is specified in `32-system-one-decisions`, which
+introduced it for the `decide` node.
 
 ```typescript
 interface ConditionalWorkflowNode {
   kind: 'conditional';
   id: string;
-  routes: Array<{ match: string; target: WorkflowNode }>;
+  routes: Array<{ match: string | RoutePredicate; target: WorkflowNode }>;
   default?: WorkflowNode;
 }
 ```
@@ -143,7 +146,7 @@ interface ConditionalWorkflowNode {
 | `routes`  | Yes      | Ordered list of match/target pairs. First matching route wins.     |
 | `default` | No       | Fallback node when no route matches. Omitting produces a no-op.   |
 
-Each route's `match` string is tested as a case-insensitive substring against the string representation of the input. This keeps the JSON schema simple and LLM-friendly; closures are not JSON-serialisable.
+A bare `match` string is tested as a case-insensitive substring against the string representation of the input; that remains the default and no existing document changes. A predicate form additionally allows exact match and field-scoped comparison against JSON input. Closures remain unrepresentable either way, which is the constraint the predicate union works within.
 
 ### `inParallel`
 

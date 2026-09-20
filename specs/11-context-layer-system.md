@@ -655,6 +655,14 @@ Layer factories MUST use `satisfies ContextLayer<TState>` (not a return type ann
 
 ## Future Considerations
 
+- **Cancellation and accounting in hooks.** `ExecutionContext` carries no `AbortSignal`, and its
+  `cost` is a number copied at construction rather than a live counter. A hook that performs
+  real work therefore cannot be cancelled by the harness, and its spend cannot reach `ctx.cost`,
+  `until.maxCost`, or the eval cost scorer. `decisionCompaction`
+  (`32-system-one-decisions`) is the first layer to hit both: it compensates with its own
+  `AbortController` and records spend on its span, which is strictly weaker. Closing this means
+  giving `ExecutionContext` a signal and live counters, which affects every layer.
+
 ### Narrowed Scope (Not Yet Designed)
 
 A potential optimization: allow a layer to declare interest in a specific subset of a parent scope rather than the whole thing. A specialist layer — one that cares only about user preferences or an active task list — could subscribe only to those keys and avoid receiving or processing unrelated parent context changes.
