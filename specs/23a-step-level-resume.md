@@ -77,10 +77,16 @@ Append on successful return, at the point `step_completed` is emitted (`execute.
 On `restore`, the ledger is loaded into the context. In `execute()`, before dispatch:
 
 1. Compute the path key.
-2. If an entry exists at that key **and** its `stepId` and `kind` match the step about to run, return `entry.output` without dispatching.
-3. If an entry exists but diverges (different `stepId` or `kind` at that path), discard it and every entry whose path has it as a prefix, then run fresh.
+2. If an entry exists at that key **and** its `stepId`, `kind` and recorded input hash all match the step about to run, return `entry.output` without dispatching.
+3. If an entry exists but diverges (different `stepId`, `kind`, or input hash at that path), discard it, every entry whose path has it as a prefix, **and every entry sequenced after it under the same parent**, then run fresh.
 
 Divergence handling mirrors the platform's tool fence, which found the same problem one layer up: `turn-tool-fencing.ts` matches a recorded call on name **and** args hash and re-executes on any mismatch, because a model that rewrote the call invalidated the prior attempt's record.
+
+**Why the hash, and why siblings.** Comparing `stepId` and `kind` alone asks whether the same step ran here, never whether it was asked the same question. That is tolerable while every memoized step produces prose a human will read, and intolerable once one selects a branch: a step replayed against changed input picks a path the transcript never shows, and nothing downstream reveals the substitution. Subtree discard does not contain it either, because a step's consumers are usually its **siblings**. In a sequence `[classify, conditional]` the two sit at adjacent ordinals under one parent, so discarding only the subtree leaves the `conditional` replaying a branch chosen from an answer that no longer exists. Forward invalidation is what makes the resumed run a state that actually occurred.
+
+**What this needs that the ledger does not have.** `enterStep` counts occurrences per `(parent, stepId)` and encodes them into the path as `/<stepId>#<n>`, so two different siblings are each `#0` and nothing records which dispatched first; `discardSubtree` is a prefix match with no notion of ordering. Implementing rule 3 therefore requires a **stored per-parent dispatch ordinal**, distinct from the store's completion-ordered sequence, which this spec already rules out for ordering because settle order varies run to run. Until that exists, a hash mismatch must **fail the resume with an explicit conflict** rather than replaying a partially invalidated state: resuming into a mix is the outcome the rule exists to prevent, and refusing is always a conforming way to avoid it.
+
+The first step kind to force this is `decide` (`32-system-one-decisions`), whose whole purpose is routing off live input. The rule is stated generally because the exposure is general.
 
 Replayed steps should emit a distinct `step_replayed` framework event rather than a synthetic `step_started`/`step_completed` pair, so traces and any attached UI can tell a resumed run from a fresh one instead of showing work that never happened.
 
