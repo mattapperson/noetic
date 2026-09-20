@@ -77,6 +77,7 @@ import { decisionCondition, decisionSwitch } from '@noetic-tools/core';
 conditional({
   id: 'route',
   route: decisionSwitch({
+    of: triage,                      // carries the question map, so `r` is typed
     answer: (r) => r.queue,          // reads the existing answer
     minConfidence: 0.7,              // below this, fall through to default
     cases: { billing: billingFlow, technical: technicalFlow },
@@ -84,7 +85,7 @@ conditional({
   }),
 });
 
-when(decisionCondition({ answer: (r) => r.urgent, threshold: 0.8 }), pageOncall);
+when(decisionCondition({ of: triage, answer: (r) => r.urgent, threshold: 0.8 }), pageOncall);
 ```
 
 `decisionCondition`, `decisionSwitch` and `until.decided` each take either `client`

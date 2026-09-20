@@ -77,8 +77,8 @@ Append on successful return, at the point `step_completed` is emitted (`execute.
 On `restore`, the ledger is loaded into the context. In `execute()`, before dispatch:
 
 1. Compute the path key.
-2. If an entry exists at that key **and** its `stepId` and `kind` match the step about to run, return `entry.output` without dispatching.
-3. If an entry exists but diverges (different `stepId` or `kind` at that path), discard it and every entry whose path has it as a prefix, then run fresh.
+2. If an entry exists at that key **and** its `stepId`, `kind` and recorded input hash all match the step about to run, return `entry.output` without dispatching.
+3. If an entry exists but diverges (different `stepId`, `kind`, or input hash at that path), discard it, every entry whose path has it as a prefix, and every entry sequenced after it under the same parent, then run fresh. Sibling invalidation matters because a step's consumers are usually its siblings, not its descendants.
 
 Divergence handling mirrors the platform's tool fence, which found the same problem one layer up: `turn-tool-fencing.ts` matches a recorded call on name **and** args hash and re-executes on any mismatch, because a model that rewrote the call invalidated the prior attempt's record.
 
@@ -107,8 +107,9 @@ or fails the resume with an explicit conflict. Subtree discard alone is not enou
 decision's consumers are usually its siblings.
 
 This exposure is not unique to `decide`; it belongs to any step whose output selects a branch,
-and the prose above claiming the rule "mirrors the tool fence... name **and** args hash" is not
-what the rule or the implementation currently does (see issue #101).
+which is why the rule above is stated generally rather than per kind. The shipped ledger
+currently compares `stepId` and `kind` only, so the input hash is the part implementation has
+to catch up to (issue #101).
 
 **Recommendation: core's ledger covers control flow and `callModel` steps; effects stay fenced at the tool/host boundary.** Core should not claim exactly-once for tool execution — it has no durable pre-dispatch record and no way to know whether a given tool is idempotent. Stating this explicitly matters, because "durable execution" invites the assumption that side effects are covered.
 
