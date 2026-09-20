@@ -32,12 +32,14 @@ They are mandatory, not optional.
 | `17-eval-and-optimization.md` | `packages/eval/src/` | (eval docs TBD) |
 | `12a-cli-context-layers.md`, `21-tasks.md`, `22-cli-architecture.md` | (none — the CLI is implemented in the separate `noetic-internal` repo; these specs stay here as its contract, so there is no in-repo source to keep in sync) | `code-agent-cli/` |
 | `25-platform-packages.md` | `packages/platform-node/src/`, `packages/platform-browser/src/` | `framework/platform-packages.mdx` |
-| `26-json-workflow-runtime.md` | `schemas/workflow.ts`, `builders/workflow-hydrator.ts`, `builders/dynamic-workflow.ts` | `framework/json-runtime.mdx` (+ run `bun run gen:schema`, see Requirement 6) |
+| `26-json-workflow-runtime.md` | `schemas/workflow.ts`, `builders/workflow-hydrator.ts` (incl. `conditional` route predicates), `builders/dynamic-workflow.ts` | `framework/json-runtime.mdx` (+ run `bun run gen:schema`, see Requirement 6) |
 | `27-acp-agent-steps.md` | `packages/types/src/types/acp.ts`, `interpreter/execute-acp-agent`, `interpreter/acp-events`, `builders/step-builders` (`step.acpAgent`), `packages/acp/src/` | `framework/acp-agents.mdx` |
 | `28-generative-ui.md` | `packages/types/src/types/output-codec.ts`, `packages/types/src/types/tool.ts` (`UiFragment`, `ToolUiDeclaration`), `packages/openui/src/` | `framework/generative-ui.mdx` |
 | `29-chat-platform-integration.md` | `packages/chat-sdk/src/`, `packages/core/src/runtime/channel-store.ts` (`getChannelStream`) | `framework/chat-sdk.mdx` |
 | `30-agent-plugins.md` | `packages/agent-plugins/src/` | `framework/context-layers/agent-plugins.mdx` |
 | `31-acp-server.md` | `packages/acp/src/` (serve/`toAcpAgent`, `./server` entry, client-backed adapters), `packages/types/src/types/tool.ts` (`ToolAcpDeclaration`), `packages/types/src/types/steering.ts` (`BeforeToolCallParams.callId`) | `framework/acp-server.mdx` |
+| `32-system-one-decisions.md` | `packages/types/src/types/system-one.ts`, `interpreter/execute-decide`, `builders/step-builders` (`step.decide`), `packages/types/src/schemas/workflow.ts` + `builders/workflow-hydrator.ts` (`decide` node), `runtime/durable/step-ledger.ts` (`decide` content hash), `packages/system-one/src/` | `framework/system-one-decisions.mdx` (+ run `bun run gen:schema`, see Requirement 6) |
+| `33-decision-compaction.md` | `packages/context/src/context/layers/decision-compaction.ts` | `framework/system-one-decisions.mdx` |
 
 **Paths are relative to**: Specs → `specs/`, Source → `packages/core/src/` (except rows that name a full `packages/...` path), Docs → `packages/web/content/docs/`
 

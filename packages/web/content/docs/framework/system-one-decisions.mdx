@@ -1,0 +1,281 @@
+---
+title: System One Decisions
+description: Typed, calibrated decisions instead of text. One state, many questions, one round trip.
+---
+
+A System One model answers typed questions about a state and returns values your code can use
+directly: a yes/no probability, a chosen label, a level on a rubric. No prose, no parsing, no
+output tokens. It answers in 70 to 500ms, and asking twenty questions costs about what asking
+one costs, because the sampler evaluates them in parallel.
+
+That last property is what shapes every example below. The cheap design is one request carrying
+every question a turn could need, including ones you might not use.
+
+```ts
+import { step } from '@noetic-tools/core';
+import { choice, jev, noul, score } from '@noetic-tools/system-one';
+
+const triage = step.decide({
+  id: 'triage',
+  client: jev(),                       // reads TYPESAFE_API_KEY
+  state: (ticket: string) => ticket,
+  questions: {
+    urgent: noul('Does this express urgency?'),
+    queue: choice('Which queue handles this?', {
+      billing: 'payment, invoices, refunds',
+      technical: 'bugs, outages, errors',
+    }),
+  },
+});
+// result.urgent.noul   -> number
+// result.queue.choice  -> 'billing' | 'technical'
+```
+
+<Callout type="warn">
+Every surface on this page is `@unstable`: it may change shape or be removed in a minor
+release. See the graduation criteria in `specs/32-system-one-decisions.md`, and
+`specs/33-decision-compaction.md` for the compaction layer.
+</Callout>
+
+## Thresholds are backend-relative
+
+`confidence` measures how concentrated the probability distribution is, not how likely the
+answer is to be correct. No backend publishes a calibration guarantee, and the reference
+self-hosted build warns that its probabilities depend on option ordering. A threshold tuned
+against hosted inference does not transfer to a self-hosted endpoint even though the wire
+format is identical. Re-validate after any swap.
+
+## Triage: one request, many questions
+
+Ask everything upfront, including questions that only matter on some branches. The speculative
+ones are close to free, and the alternative is a second round trip once you know you need them.
+
+```ts
+const questions = {
+  urgent: noul('Does this express urgency?'),
+  queue: choice('Which queue handles this?', {
+    billing: 'payment, invoices, refunds',
+    technical: 'bugs, outages, errors',
+    other: null,
+  }),
+  // Only meaningful when queue === 'technical'. Asked anyway.
+  severity: score('How severe is the defect?', [
+    'cosmetic, no user impact',
+    'degraded for some users',
+    'total outage',
+  ]),
+} as const;
+
+const triage = step.decide({ id: 'triage', client, state: (t: Ticket) => t.body, questions });
+```
+
+Downstream code ignores what it does not need, and makes no further inference calls:
+
+```ts
+import { conditional, when } from '@noetic-tools/core';
+import { decisionCondition, decisionSwitch } from '@noetic-tools/core';
+
+conditional({
+  id: 'route',
+  route: decisionSwitch({
+    of: triage,                      // carries the question map, so `r` is typed
+    answer: (r) => r.queue,          // reads the existing answer
+    minConfidence: 0.7,              // below this, fall through to default
+    cases: { billing: billingFlow, technical: technicalFlow },
+    default: askAHuman,
+  }),
+});
+
+when(decisionCondition({ of: triage, answer: (r) => r.urgent, threshold: 0.8 }), pageOncall);
+```
+
+`decisionCondition`, `decisionSwitch` and `until.decided` each take either `client`
+(evaluate now) or `answer` (reuse a result), never both. The other three cannot read:
+`step.decide` is the evaluation, `decisionCompaction` scores transcript items nothing
+asked about, and `decisionScorer` judges a finished eval run.
+
+## Retrieval reranking
+
+Candidates are dynamic, so `questions` is a projector rather than a literal. Give every
+candidate a stable id: the answer map is keyed by question id, and positional keys break the
+moment retrieval returns a different order.
+
+```ts
+const rerank = step.decide({
+  id: 'rerank',
+  client,
+  state: (r: { query: string; docs: Doc[] }) => r.query,
+  questions: (r) =>
+    Object.fromEntries(
+      r.docs.map((d) => [`doc_${d.id}`, noul(`Does this document answer the query?\n\n${d.text}`)]),
+    ),
+});
+
+const ranked = (result, docs) =>
+  [...docs].sort((a, b) => result[`doc_${b.id}`].noul - result[`doc_${a.id}`].noul);
+```
+
+Two limits worth planning for. A dynamic `questions` is invisible to the prompt optimizer, which
+reads static fields only. And a large candidate set can exceed the per-request budget, so page
+the candidates and merge the rankings rather than assuming one request holds them all;
+`client.limits` tells you where the ceiling is.
+
+## Dynamic tool selection
+
+The available tools vary per turn, which is exactly why `questions` sees the input.
+
+```ts
+const pickTool = step.decide({
+  id: 'pick-tool',
+  client,
+  state: (t: Turn) => ({ goal: t.goal, recent: t.recentSteps }),
+  questions: (t) => ({
+    tool: choice(
+      'Which tool best advances the goal?',
+      Object.fromEntries(t.tools.map((x) => [x.name, x.description])),
+    ),
+    sufficient: noul('Is the goal already met, with no further tool needed?'),
+  }),
+});
+```
+
+Check `sufficient` before acting on `tool`. A choice question always returns one of its options,
+so a model with nothing useful to pick still picks something; abstention has to be a separate
+question. Gate destructive tools on `tool.confidence` as well as the label.
+
+## Hierarchical classification
+
+Walk the taxonomy one level at a time, with each level's children supplying the next question's
+options. Two requests for a two-level taxonomy beats one request enumerating every leaf.
+
+```ts
+async function classify(text: string, taxonomy: Node[], client: SystemOneClient) {
+  let level = taxonomy;
+  const path: string[] = [];
+  while (level.length > 0) {
+    const { answers } = await client.evaluate({
+      state: text,
+      questions: {
+        node: choice('Which category fits best?',
+          Object.fromEntries(level.map((n) => [n.id, n.description]))),
+      },
+    });
+    if (answers.node.confidence < 0.6) break;   // stop at the last confident level
+    path.push(answers.node.choice);
+    level = level.find((n) => n.id === answers.node.choice)?.children ?? [];
+  }
+  return path;
+}
+```
+
+Stopping on low confidence returns a partial path, which is usually more useful than a confident
+leaf reached through a coin flip at the top.
+
+This example calls `client.evaluate` directly because the depth is not known up front. That is
+supported, but it steps outside the shared execution path: the spend does not reach `ctx.cost`,
+the rounds are not traced as `decide.*` events, and a resumed run re-asks rather than replaying.
+When the depth *is* bounded, prefer one `step.decide` per level.
+
+## A verification gate
+
+Score an output against a rubric before releasing it. Structured levels are supported and come
+back structured in `legend`.
+
+```ts
+const verify = step.decide({
+  id: 'verify',
+  client,
+  state: (d: Draft) => ({ request: d.request, reply: d.reply }),
+  questions: {
+    grounded: noul('Is every claim in the reply supported by the request?', {
+      true: 'every factual claim traces to the request',
+      false: 'any claim is unsupported or invented',
+    }),
+    quality: score('How complete is the reply?', [
+      { what: 'ignores the request', examples: ['off-topic', 'empty'] },
+      { what: 'partially answers it' },
+      { what: 'fully answers it' },
+    ]),
+  },
+});
+```
+
+`quality.score` is a probability-weighted mean on `0..levels-1`, so it is continuous and lands
+between levels: `1.3` is a real value, and `criteria[answer.score]` is always wrong. Compare it
+against a cut-point.
+
+## Loop termination
+
+`until.decided` judges a state you build from the loop snapshot. Judging `lastText` alone cannot
+work: "Paris" fully answers one question and half of another.
+
+```ts
+import { loop, until } from '@noetic-tools/core';
+
+loop({
+  id: 'research',
+  steps: [investigate],
+  until: until.any(
+    until.decided({
+      client,
+      state: (s) => ({ task: s.history[0], latest: s.lastText }),
+      question: noul('Has the task been fully answered by the latest reply?'),
+      onError: 'continue',    // default: a judge outage must not end the loop
+    }),
+    until.maxSteps(10),
+  ),
+});
+```
+
+Always pair it with a bound. `onError: 'continue'` keeps a backend failure from ending the loop
+early, which means the bound is what guarantees termination.
+
+## Compaction
+
+`decisionCompaction()` scores each tool call in the transcript and deletes the ones that no
+longer earn their tokens. It never summarizes: everything it keeps is byte-identical.
+
+```ts
+import { decisionCompaction, history } from '@noetic-tools/context';
+
+new AgentHarness({
+  name: 'coder',
+  contextLayers: [
+    history({ maxItems: 80 }),
+    decisionCompaction({
+      client,
+      keepThreshold: 0.2,                     // start low, raise against measurement
+      timeouts: { projectHistory: 30_000 },
+      enabled: () => process.env.COMPACTION !== 'off',
+    }),
+  ],
+});
+```
+
+Three things to know before enabling it:
+
+- **Which way the threshold points.** An item is kept when `P(needed) >= keepThreshold`, so a
+  *higher* value deletes more. Too high silently drops context the next call needed and you
+  cannot see what went missing; too low only wastes tokens. Start low.
+- **It only prunes what `history()` kept**, because it runs after it. Size `maxItems`
+  generously, and expect the delivered count to be at or below it rather than equal to it.
+- **Telemetry needs a tracing backend.** The layer records span events, which are inert
+  without one. Failures otherwise surface only as a `console.warn` diagnostic.
+
+## Self-hosted backends
+
+Any endpoint speaking the same wire format works, including
+[openjev-sglang](https://github.com/ekzhang/openjev-sglang):
+
+```ts
+import { openSystemOne } from '@noetic-tools/system-one';
+
+const client = openSystemOne({
+  baseUrl: 'http://localhost:8000',
+  model: 'Qwen/Qwen3.6-35B-A3B',
+  limits: { maxChoiceCardinality: 64 },       // self-hosted builds allow fewer options
+});
+```
+
+Swapping the client is a one-line change to the wiring. It is not a one-line change to
+behaviour: re-validate every threshold against the new backend.

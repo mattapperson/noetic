@@ -96,6 +96,13 @@ Memoizing an output replays a step's **value**, not its **effect**. A `runCode` 
 
 This is the same bet the Noetic platform's turn fence already makes, and the reason that fence sits at the **tool** boundary: tools are where effects live. That fence records a durable `tool.call_started` row *before* dispatch, so a crash mid-call is recoverable as a loud unknown-outcome rather than a silent re-run.
 
+**`decide` steps are memoized.** A `32-system-one-decisions` `decide` step has no side effects
+and a small serializable output, so it is a straightforward member of the memo set. It is also
+the first step kind whose output drives *control flow*, which exposes a limitation in the rule
+above: replaying a decision against changed input selects a branch the transcript never shows.
+Strengthening the rule to compare inputs, and to invalidate siblings rather than only
+descendants, is tracked separately in issue #101.
+
 **Recommendation: core's ledger covers control flow and `callModel` steps; effects stay fenced at the tool/host boundary.** Core should not claim exactly-once for tool execution — it has no durable pre-dispatch record and no way to know whether a given tool is idempotent. Stating this explicitly matters, because "durable execution" invites the assumption that side effects are covered.
 
 ## Interaction with context layers

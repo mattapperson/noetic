@@ -38,18 +38,19 @@ inspector ──→ platform-node ──→ core ──→ context ──→ typ
                                    openui ───┘──────────┤
                                         chat-sdk ───────┤
                                              acp ───────┤
-                                   agent-plugins ───────┘
+                                   agent-plugins ───────┤
+                                      system-one ───────┘
 
 web (standalone — no workspace deps)
 ```
 
 Every edge above is the complete set: `types` depends on nothing; `context`,
-`chat-sdk`, `acp`, and `agent-plugins` depend only on `types`; `openui` and `core` on `context` +
+`chat-sdk`, `acp`, `agent-plugins`, and `system-one` depend only on `types` (plus, for `system-one`, `zod` and the vendor SDK); `openui` and `core` on `context` +
 `types`; `eval`, `platform-node`, and `platform-browser` on `core`; `inspector`
 on `core` + `platform-node`; `web` on nothing.
 
-The 11 packages under `packages/`: `acp`, `chat-sdk`, `context`, `core`, `eval`,
-`inspector`, `openui`, `platform-browser`, `platform-node`, `types`, `web`. Most
+The 12 packages under `packages/`: `acp`, `chat-sdk`, `context`, `core`, `eval`,
+`inspector`, `openui`, `platform-browser`, `platform-node`, `system-one`, `types`, `web`. Most
 publish under the `@noetic-tools/` scope; `inspector`, `platform-browser`, and
 `web` use `@noetic/`.
 
@@ -72,7 +73,7 @@ this repo under `packages/web/content/docs/code-agent-cli/`.
 - **`@noetic/inspector`** — a local web inspector (Next.js + Monaco): edit agent TypeScript, chat with it, and watch per-layer state, the assembled context window, token composition, the plan graph, framework events, and traces. Depends on `core` + `platform-node`; run it with `bun run inspect`.
 - **`@noetic/web`** — the docs site (Next.js + fumadocs). Standalone: no workspace dependencies. Its doc snippets are typechecked against real `@noetic-tools/*` source through `tsconfig.kiira.json` path mappings, not through a built `dist/`.
 
-`specs/` is the source of architectural truth. `specs/00-overview.md` has the package graph and the numbered specs (`01-step-type` through `29-chat-platform-integration`) each map to a concrete source directory (see `.claude/rules/sync-spec-code-docs.md` for the table). Runtime code must stay consistent with its spec. A few specs — `12a-cli-context-layers.md`, `21-tasks.md`, `22-cli-architecture.md` — describe the CLI, whose implementation lives in the separate `noetic-internal` repo; they remain the contract for that code but have no source directory here.
+`specs/` is the source of architectural truth. `specs/00-overview.md` has the package graph and the numbered specs (`01-step-type` through `33-decision-compaction`) each map to a concrete source directory (see `.claude/rules/sync-spec-code-docs.md` for the table). Runtime code must stay consistent with its spec. A few specs — `12a-cli-context-layers.md`, `21-tasks.md`, `22-cli-architecture.md` — describe the CLI, whose implementation lives in the separate `noetic-internal` repo; they remain the contract for that code but have no source directory here.
 
 ## `.sentrux/rules.toml` — MUST update when
 

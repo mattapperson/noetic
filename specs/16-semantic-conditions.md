@@ -1,7 +1,7 @@
 # Semantic Conditions and Embedding-Based Routing
 
 > **Depends On:** `03-control-flow` (conditional, StepConditional), `05-loop-and-until` (ConvergeConfig)
-> **Exports:** `Condition`, `WhenClause`, `OtherwiseClause`, `when()`, `otherwise()`, `semanticRoute()`, `semanticSwitch()`, `embeddingMatch()`, `aiCondition()`, `anyCondition()`, `allCondition()`, `cosineSimilarity()`, `EmbedFn`
+> **Exports:** `Condition`, `WhenClause`, `OtherwiseClause`, `when()`, `otherwise()`, `semanticRoute()`, `semanticSwitch()`, `embeddingMatch()`, `aiCondition()`, `anyCondition()`, `allCondition()`, `cosineSimilarity()`, `EmbedFn`; `decisionCondition()` and `decisionSwitch()` are specified in `32-system-one-decisions`
 
 ---
 

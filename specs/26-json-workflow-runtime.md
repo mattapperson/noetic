@@ -62,7 +62,7 @@ Authoring documents by hand or reviewing LLM-generated ones, reference the schem
 
 ## WorkflowNode Union
 
-`WorkflowNode` is a discriminated union on `kind`. Each variant maps to an existing `Step` builder. All nodes share a common `id` field. The `acp-agent` node kind is specified in `27-acp-agent-steps`.
+`WorkflowNode` is a discriminated union on `kind`. Each variant maps to an existing `Step` builder. All nodes share a common `id` field. The `acp-agent` node kind is specified in `27-acp-agent-steps`, and `decide` in `32-system-one-decisions`.
 
 ```typescript
 type WorkflowNode =
@@ -127,23 +127,42 @@ interface InvokeToolWorkflowNode {
 
 ### `conditional`
 
-Conditional routing based on substring matching against the input.
+Conditional routing against the input.
 
 ```typescript
 interface ConditionalWorkflowNode {
   kind: 'conditional';
   id: string;
-  routes: Array<{ match: string; target: WorkflowNode }>;
+  routes: Array<{ match: string | RoutePredicate; target: WorkflowNode }>;
   default?: WorkflowNode;
 }
+
+type RoutePredicate =
+  | { kind: 'outputContains'; value: string }   // the original behaviour
+  | { kind: 'outputEquals'; value: string }
+  | { kind: 'field'; path: string; equals: JsonValue }
+  | { kind: 'field'; path: string; gte: number };
 ```
+
+A route's `match` is either a bare string or a `RoutePredicate`. The bare string is exactly the
+original behaviour and stays the default, so no existing document changes; it is equivalent to
+`outputContains`.
+
+The predicate form exists because a string-output node may still emit *structured* text. A
+`runCode` or `invokeTool` node returning JSON, or a `decide` node
+(`32-system-one-decisions`) returning an answer map, can only be routed today by
+substring-matching its serialized form, which is brittle and cannot express a numeric
+comparison at all. `field` parses the input as JSON and reads a dotted path; a non-JSON input
+or a missing path is simply "no match", so a predicate never throws on unexpected input.
+
+These predicates are ordinary stable schema, not tied to any one node kind's lifecycle.
 
 | Field     | Required | Description                                                        |
 |-----------|----------|--------------------------------------------------------------------|
 | `routes`  | Yes      | Ordered list of match/target pairs. First matching route wins.     |
 | `default` | No       | Fallback node when no route matches. Omitting produces a no-op.   |
 
-Each route's `match` string is tested as a case-insensitive substring against the string representation of the input. This keeps the JSON schema simple and LLM-friendly; closures are not JSON-serialisable.
+Closures remain unrepresentable either way, which is the constraint the predicate union works within: matching stays declarative and JSON-serialisable.
 
 ### `inParallel`
 
