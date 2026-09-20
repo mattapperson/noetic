@@ -87,7 +87,8 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 | `29-chat-platform-integration` | `noeticAgent()`, `@noetic-tools/chat-sdk` | Harness as a chat-platform bot |
 | `30-agent-plugins` | `plugin.json` / `mcp.json` validation, skill discovery, `agentPlugins()` layer | Agent Plugins v1 client |
 | `31-acp-server` | `toAcpAgent()`, `serveAcp()`, `ToolAcpDeclaration` | Harness as an ACP agent (server direction) |
-| `32-system-one-decisions` | `SystemOneClient`, `step.decide()`, `decisionCompaction()`, `@noetic-tools/system-one` | Typed, calibrated decisions instead of text |
+| `32-system-one-decisions` | `SystemOneClient`, `step.decide()`, `@noetic-tools/system-one` | Typed, calibrated decisions instead of text |
+| `33-decision-compaction` | `decisionCompaction()` | Deleting stale tool traffic by decision rather than summarizing |
 
 ## Dependency Graph
 

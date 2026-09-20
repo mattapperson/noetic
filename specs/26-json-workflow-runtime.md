@@ -127,10 +127,7 @@ interface InvokeToolWorkflowNode {
 
 ### `conditional`
 
-Conditional routing against the input. A route's `match` is either a bare string (substring, the
-original form) or a predicate, so a node whose output is structured JSON can be routed on a field
-rather than on text. The predicate union is specified in `32-system-one-decisions`, which
-introduced it for the `decide` node.
+Conditional routing against the input.
 
 ```typescript
 interface ConditionalWorkflowNode {
@@ -139,14 +136,33 @@ interface ConditionalWorkflowNode {
   routes: Array<{ match: string | RoutePredicate; target: WorkflowNode }>;
   default?: WorkflowNode;
 }
+
+type RoutePredicate =
+  | { kind: 'outputContains'; value: string }   // the original behaviour
+  | { kind: 'outputEquals'; value: string }
+  | { kind: 'field'; path: string; equals: JsonValue }
+  | { kind: 'field'; path: string; gte: number };
 ```
+
+A route's `match` is either a bare string or a `RoutePredicate`. The bare string is exactly the
+original behaviour and stays the default, so no existing document changes; it is equivalent to
+`outputContains`.
+
+The predicate form exists because a string-output node may still emit *structured* text. A
+`runCode` or `invokeTool` node returning JSON, or a `decide` node
+(`32-system-one-decisions`) returning an answer map, can only be routed today by
+substring-matching its serialized form, which is brittle and cannot express a numeric
+comparison at all. `field` parses the input as JSON and reads a dotted path; a non-JSON input
+or a missing path is simply "no match", so a predicate never throws on unexpected input.
+
+These predicates are ordinary stable schema, not tied to any one node kind's lifecycle.
 
 | Field     | Required | Description                                                        |
 |-----------|----------|--------------------------------------------------------------------|
 | `routes`  | Yes      | Ordered list of match/target pairs. First matching route wins.     |
 | `default` | No       | Fallback node when no route matches. Omitting produces a no-op.   |
 
-A bare `match` string is tested as a case-insensitive substring against the string representation of the input; that remains the default and no existing document changes. A predicate form additionally allows exact match and field-scoped comparison against JSON input. Closures remain unrepresentable either way, which is the constraint the predicate union works within.
+Closures remain unrepresentable either way, which is the constraint the predicate union works within: matching stays declarative and JSON-serialisable.
 
 ### `inParallel`
 

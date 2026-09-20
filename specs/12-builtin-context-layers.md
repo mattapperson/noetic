@@ -2,7 +2,7 @@
 
 > **Module:** `@noetic-tools/context` (source at `packages/context/src/context/layers/**`); re-exported by `@noetic-tools/core`.
 > **Depends On:** `11-context-layer-system` (ContextLayer, ContextLayerHooks, Slot, ScopedStorage, BudgetConfig, all hook param types)
-> **Exports:** `instructions()`, `history()`, `scratchpad()`, `observations()`, `temporal()`, `filesystem()`, `plan()`, `taskState()`, `toolCalls()`, `steering()`, `ScratchpadConfig`, `ObservationsConfig`, `TemporalConfig`, `TemporalFact`, `TemporalSearchResult`, `FactExtractor`, `FactSearcher`, `TaskState`, `TaskStateOptions`, `SteeringConfig`, `SteeringRule`, `PlanConfig`, `PlanState`, `PlanPhase`, `PlanExecutionEntry`; `decisionCompaction()` is specified in `32-system-one-decisions`
+> **Exports:** `instructions()`, `history()`, `scratchpad()`, `observations()`, `temporal()`, `filesystem()`, `plan()`, `taskState()`, `toolCalls()`, `steering()`, `ScratchpadConfig`, `ObservationsConfig`, `TemporalConfig`, `TemporalFact`, `TemporalSearchResult`, `FactExtractor`, `FactSearcher`, `TaskState`, `TaskStateOptions`, `SteeringConfig`, `SteeringRule`, `PlanConfig`, `PlanState`, `PlanPhase`, `PlanExecutionEntry`; `decisionCompaction()` is specified in `33-decision-compaction`
 
 ---
 

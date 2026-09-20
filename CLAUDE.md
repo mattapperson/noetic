@@ -73,7 +73,7 @@ this repo under `packages/web/content/docs/code-agent-cli/`.
 - **`@noetic/inspector`** — a local web inspector (Next.js + Monaco): edit agent TypeScript, chat with it, and watch per-layer state, the assembled context window, token composition, the plan graph, framework events, and traces. Depends on `core` + `platform-node`; run it with `bun run inspect`.
 - **`@noetic/web`** — the docs site (Next.js + fumadocs). Standalone: no workspace dependencies. Its doc snippets are typechecked against real `@noetic-tools/*` source through `tsconfig.kiira.json` path mappings, not through a built `dist/`.
 
-`specs/` is the source of architectural truth. `specs/00-overview.md` has the package graph and the numbered specs (`01-step-type` through `29-chat-platform-integration`) each map to a concrete source directory (see `.claude/rules/sync-spec-code-docs.md` for the table). Runtime code must stay consistent with its spec. A few specs — `12a-cli-context-layers.md`, `21-tasks.md`, `22-cli-architecture.md` — describe the CLI, whose implementation lives in the separate `noetic-internal` repo; they remain the contract for that code but have no source directory here.
+`specs/` is the source of architectural truth. `specs/00-overview.md` has the package graph and the numbered specs (`01-step-type` through `33-decision-compaction`) each map to a concrete source directory (see `.claude/rules/sync-spec-code-docs.md` for the table). Runtime code must stay consistent with its spec. A few specs — `12a-cli-context-layers.md`, `21-tasks.md`, `22-cli-architecture.md` — describe the CLI, whose implementation lives in the separate `noetic-internal` repo; they remain the contract for that code but have no source directory here.
 
 ## `.sentrux/rules.toml` — MUST update when
 

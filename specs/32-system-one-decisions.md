@@ -1,7 +1,7 @@
 # 32: System One Decisions
 
 > **Depends On:** `01-step-type` (Step union), `11-context-layer-system` (`ContextLayer` contract, `projectHistory`), `16-semantic-conditions` (`Condition`, `semanticSwitch`), `05-loop-and-until` (`UntilPredicate`), `17-eval-and-optimization` (scorers), `23a-step-level-resume` (ledger), `14-design-decisions` (`@unstable` on a public surface)
-> **Exports:** `SystemOneClient`, `SystemOneLimits`, `DecisionQuestion`, `DecisionAnswer`, `DecideResult` (`@noetic-tools/types`); `noul()`, `choice()`, `score()`, `jev()`, `openSystemOne()` (`@noetic-tools/system-one`); `step.decide()` (`@noetic-tools/core`); `decisionCompaction()` (`@noetic-tools/context`); `decisionCondition()`, `decisionSwitch()`, `until.decided()` (`@noetic-tools/core`); `decisionScorer()` (`@noetic-tools/eval`)
+> **Exports:** `SystemOneClient`, `SystemOneLimits`, `DecisionQuestion`, `DecisionAnswer`, `DecideResult` (`@noetic-tools/types`); `noul()`, `choice()`, `score()`, `jev()`, `openSystemOne()` (`@noetic-tools/system-one`); `step.decide()` (`@noetic-tools/core`); `decisionCondition()`, `decisionSwitch()`, `until.decided()` (`@noetic-tools/core`); `decisionScorer()` (`@noetic-tools/eval`)
 
 ---
 
@@ -47,7 +47,6 @@ tag is a commitment to resolve that uncertainty, not a permanent hedge:
 |---|---|
 | `SystemOneClient`, `step.decide` | The vendor API is stable **or** a second independent `/v1/systemone` implementation ships |
 | `@noetic-tools/system-one` | `@typesafe-ai/sdk` reaches 1.0 |
-| `decisionCompaction()` | Measured false-deletion behaviour on real transcripts, and a `keepThreshold` policy justified by it. The harness existing is not the bar; a result from it is |
 
 Graduation removes one JSDoc tag and changes no import path.
 
@@ -71,7 +70,16 @@ Graduation removes one JSDoc tag and changes no import path.
 
 `core`, `context`, and `eval` **never import `@noetic-tools/system-one`**; each takes the
 client by injection. All three edges are `[[boundaries]]` rules in `.sentrux/rules.toml` with a
-`reason`, mirroring the boundaries `@noetic-tools/agent-plugins` carries. An agent that composes
+`reason`, mirroring the boundaries `@noetic-tools/agent-plugins` carries.
+
+That injection is also why `decisionCompaction()` ships from `@noetic-tools/context` rather
+than from the client package, which is the opposite of how `openui` and `agent-plugins` ship
+theirs. Those two must, because their layers import protocol code and cannot work without it.
+This one needs only a contract already in `types`, so it follows the idiom `observations()` and
+`temporal()` use: the capability arrives as an injected function and `@noetic-tools/context`
+stays tree-shakable (`12-builtin-context-layers`). The cost, worth naming: `context`'s exports
+are no longer uniformly offline, so a reader skimming for built-ins that need no I/O has to
+check. An agent that composes
 `step.decide` without constructing a client pulls in no transport, and swapping hosted inference
 for a self-hosted endpoint is a one-line change to the wiring.
 
@@ -261,17 +269,11 @@ The adapter translates rather than re-exports. Measured against `@typesafe-ai/sd
 but an SDK-built question is **not** assignable to Noetic's, because the SDK's `instructions` is
 optional and nullable where Noetic's is required.
 
-**This paragraph is the single statement of SDK compatibility in the spec**; everywhere else
-refers here rather than restating a direction, because a version-pinned compile result goes
-stale the moment either side's types move, and a restated one goes stale silently. Testing
-invariant 7 compiles the fixture in both directions, so an SDK bump breaks a test rather than
-quietly falsifying prose.
-
-One-directional assignability is enough to rule out re-exporting the SDK's builders, since
-their output would not satisfy the contract. It is not, on its own, the reason to own a
-translation layer. That reason is vendor-neutrality: the contract keeps its shape when a second
-provider appears, and the response validation the generic `evaluate` requires is adapter work
-no re-export performs.
+That rules out re-exporting the SDK's builders, whose output would not satisfy the contract.
+It is not by itself the reason to own a translation layer: that reason is vendor-neutrality,
+plus the response validation the generic `evaluate` requires, which no re-export performs.
+This is the only place the measured direction is stated; testing invariant 7 compiles the
+fixture so an SDK bump breaks a test rather than this paragraph.
 
 ### Question builders
 
@@ -374,9 +376,8 @@ list, or a taxonomy's children to smuggle the input through a context layer to r
 deciding about it. `client` stays `Lazy` (ctx-only) like `step.acpAgent`'s `agent`; it does not
 vary per input.
 
-A literal `questions` is the **optimizable** form: `discoverFields` walks by step kind and reads
-named static fields, so a projector is opaque to it. The tradeoff is explicit rather than
-hidden, and it is the author's to make.
+A literal `questions` is the **optimizable** form and a projector is not; see "Evaluation and
+optimization" for why and what it costs.
 
 **Not `step.callModel`.** `CallModelRequest` is shaped around items, tools, streaming, and
 output codecs. A decision has none of those and no output tokens to bill; a separate step kind
@@ -411,9 +412,17 @@ would leave the `conditional` replaying its recorded `billing` branch while `dec
 `technical`, resuming into a state that never existed.
 
 An input-hash mismatch therefore invalidates **forward**: the entry, its subtree, and every
-entry sequenced after it under the same parent, with their subtrees. Ordinals are assigned at
-dispatch and deterministic (`23a`), so "after" is well defined; where it cannot be computed the
-resume fails with an explicit conflict rather than replaying a mixed state. Tests cover the
+entry sequenced after it under the same parent, with their subtrees.
+
+**"After" is not computable from today's ledger keys, and that gap is the work.** `enterStep`
+counts occurrences per `(parent, stepId)` and encodes them into the path as `/<stepId>#<n>`, so
+two different siblings are each `#0` and nothing records which dispatched first; `discardSubtree`
+is a prefix match and has no notion of ordering. Forward invalidation therefore requires a
+stored per-parent dispatch ordinal, distinct from the store's completion-ordered sequence, which
+`23a` rules out for this purpose because settle order varies run to run. Until that exists, the
+conforming behaviour is the fallback, not the optimisation: **fail the resume with an explicit
+conflict**. Replaying a mixed state is never acceptable; invalidating precisely is the
+improvement. Tests cover the
 composite case, not a bare `decide`: a recorded `[decide, conditional]` resumed with changed
 input must re-run both.
 
@@ -422,143 +431,15 @@ belongs to `23a` rather than here (#101).
 
 ---
 
-## `decisionCompaction()`: the context layer
+## `decisionCompaction()`
 
-A `projectHistory` layer: a read-side projection of what the next model call sees. It never
-mutates the item log.
+A `projectHistory` context layer that deletes stale tool traffic rather than summarizing it,
+judged by a `SystemOneClient` taken by injection. It is the first consumer of this contract and
+the only one whose graduation depends on measurement rather than on the protocol settling, so
+it is specified separately in **`33-decision-compaction`**.
 
-### Delete, never summarize
-
-Summarizing a transcript loses what an agent most needs verbatim: exact file paths, exact error
-strings, constraints the user stated once. This layer only *removes* or *truncates* tool traffic.
-Every item it keeps is byte-identical to what was logged; user and assistant prose is never
-rewritten. Adapted, with attribution, from
-[`tamaratran/fast-jev-compaction`](https://github.com/tamaratran/fast-jev-compaction) (MIT).
-
-### Algorithm
-
-1. **Pair.** Match `function_call` to `function_call_output` by `callId`.
-2. **Pin.** The last `preserveExchanges` complete exchanges (default 1) are never scored,
-   expanded to whole exchanges with the primitive `history()` uses. `preserveRecentMessages`
-   is an item-count ceiling on the pinned region, so one 300-tool-call turn cannot pin
-   everything; when fewer than `preserveExchanges` user messages exist (a spawned child, a
-   scheduled step) the layer falls back to that trailing-item pin. A pair with *either* side
-   pinned is excluded from scoring.
-3. **Build state.** Render the transcript with tool *results* replaced by placeholders
-   (`ok, 4213 chars (omitted)`): the judge decides relevance from the call and a size hint, not
-   the payload. This is the layer's load-bearing assumption and it is unproven, inherited from
-   `fast-jev-compaction` as a design choice, validated only once the calibration harness exists.
-4. **Fit.** `maxStateTokens` bounds the state **plus the longest single question**, not the
-   state alone, so fitting reserves question overhead before comparing: the budget is
-   `maxStateTokens - tokens(longest question)`. Checking the rendered state by itself lets a
-   31,950-token state with a 100-token question clear both limits and still exceed a 32,000
-   per-question bound at the backend. If the state is over budget, apply progressively:
-   truncate tool inputs 1000 → 200 → 60 chars; abridge long text head+tail; collapse old
-   unpinned messages; fold runs of call-only messages. Record the stage reached. Sizing uses
-   the client's own tokenizer where it exposes one, and a conservative `estimateTokens`
-   otherwise, since a backend's tokenizer is not knowable from here and undercounting is the
-   direction that fails.
-5. **Score.** Two nouls per unpinned call (*should this call remain?* *should its result
-   remain?*) in **one** request carrying the layer's `AbortSignal`. Calls that do not fit under
-   `client.limits.maxRequestTokens` are left unscored.
-6. **Decide.** `keepResult ≥ threshold` → keep both. Else `keepCall ≥ threshold` → keep the call,
-   truncate the result to `truncateHeadChars`. Else drop both.
-7. **Rebuild.** Reassemble in original order, then `stripUnresolvedToolCalls`, so no output
-   survives without its call.
-
-### Options
-
-| Option | Default | Meaning |
-|---|---|---|
-| `client` | *required* | The `SystemOneClient` to judge with |
-| `slot` | `HISTORY_WINDOW_SLOT + 5` | After `history()`; see below |
-| `keepThreshold` | **required** | Noul probability at or above which an item is kept |
-| `preserveExchanges` | `1` | Complete trailing exchanges never scored |
-| `preserveRecentMessages` | `6` | Ceiling on the pinned region, in items; also the fallback pin |
-| `triggerAtTokens` | `0.6 × budget` | Skip the layer below this |
-| `truncateHeadChars` | `300` | Head kept when a result is truncated rather than dropped |
-| `timeouts.projectHistory` | **required** | Hard outer bound; must exceed the backend's worst case |
-| `enabled` | `() => true` | Kill switch, re-evaluated every turn |
-
-**Which way `keepThreshold` points.** An item is kept when `P(needed) >= keepThreshold`, so
-raising the bar keeps *less*:
-
-| `keepThreshold` | Effect | Failure mode |
-|---|---|---|
-| low (≈0.2) | keeps almost everything | wastes tokens; recoverable, and visible in the bill |
-| high (≈0.9) | keeps only near-certain items | deletes context the next call needed; **undetectable**, because the item is simply absent |
-
-The two failures are not symmetric, so the safe direction is *down*. Authors start low and raise
-it against measurement, watching false deletions rather than token savings. There is no default
-because a midpoint would arbitrate that asymmetry with a statistic nobody has calibrated for
-this task; picking one is the author's call, made with their own data.
-
-### Where it runs
-
-After `history()` (slot 280), so it judges exactly the window that will be sent and one request
-covers it. Two consequences:
-
-- Compaction only prunes what `history()` kept. Size `history({ maxItems })` generously when
-  composing it; the ceiling is `maxItems × 4`.
-- The delivered count is `≤ maxItems`, not `= maxItems`. `compaction.complete` carries the ratio
-  of delivered items to `history()`'s cap so the gap is observable.
-
-### One request, then fall back
-
-Compaction is capped at a single evaluation. The state is re-sent with every batch, so a
-K-batch compaction pays K× the state cost, and K grows precisely when the transcript is largest
-and the time budget tightest. Scoring what fits and leaving the rest is strictly better than
-multiplying cost to achieve zero.
-
-### Shared primitive; what "pinned" means
-
-`history()`'s exchange-expansion helper is extracted to a shared utility both layers import, so
-they cannot drift in what they call an exchange. "Pinned" means *never scored or dropped by this
-layer*, not a promise the exchange reaches the model, which a later windowing layer could still
-slice. With the default ordering that cannot happen.
-
-### Failure policy
-
-Fails **open**: on error or timeout the projection is the input, unchanged. The lifecycle already
-provides this: `projectHistoryLayers` catches, records a diagnostic, and carries the previous
-items forward.
-
-Timeouts must abort, not just stop waiting. The lifecycle's `withTimeout` is a `Promise.race`
-that never cancels the loser, so a timed-out hook leaves its HTTP calls and retries running; every
-turn against a slow backend, those orphans accumulate against the rate limit. The layer creates an
-`AbortController` **at hook entry**, armed for 0.8× the registered `timeouts.projectHistory`,
-and passes its signal through `client.evaluate({ signal })`, which cancels the request and its
-pending retries. The registered value is required because the lifecycle default is 5s, far too
-short for a network call with retries.
-
-### Operability
-
-- **Kill switch.** `enabled` is a predicate re-evaluated every turn. A predicate reading an
-  environment variable or config store can be flipped fleet-wide mid-incident; the docs show
-  that form as the default recipe. A hard-coded `() => false` is a composition change like any
-  other.
-- **Telemetry, as span events rather than framework events.** The layer records `compaction.complete` /
-  `compaction.failed` / `compaction.timeout` via `ctx.trace.addEvent` with item counts in and
-  out, tokens saved, the delivered-vs-cap ratio, latency, and error class. Never `state` or
-  item content. A `projectHistory` hook receives `ExecutionContext`, which exposes only
-  `trace.*`; the broadcaster behind `emitFrameworkEvent` needs a full `Context` no layer hook
-  has. And `trace.addEvent` forwards to `ctx.span.addEvent`, a no-op without a tracing backend.
-  **compaction telemetry exists only when the host has configured one.** Framework-event parity
-  for layer hooks would be an `ExecutionContext` change belonging to spec 11.
-
-### Opt-in, and one policy among several
-
-`ProjectionPolicy.overflow` keeps its existing values and default. Composing this layer is an
-explicit act; no existing agent silently acquires a network dependency.
-
-Compaction is one context policy, not the only one this contract is meant to carry. A future
-admission or retention layer (what enters memory, what survives a session) takes a
-`SystemOneClient` by injection and reuses what this layer uses: the shared execution path, an
-injected client rather than a bundled transport, fail-open semantics, and the same
-`ExecutionContext` limits. None of them needs bespoke integration, and none should invent its
-own.
-
----
+It is listed among the six callers in "One execution path" below, where its failure policy
+(fail open) and its two `ExecutionContext` limits are stated alongside the others.
 
 ## Decision-backed upgrades to existing surfaces
 
@@ -597,10 +478,9 @@ decisionSwitch({
 A case may raise the floor but not lower it, so an irreversible branch can demand more
 certainty than a benign one without a caller weakening the global bar by accident.
 
-**Abstention is a separate question, not a low score.** A `choice` always returns one of its
-options, so a model with nothing good to pick still picks something and may be confident about
-it. Where "none of these" is a real outcome, ask a `noul` alongside and check it first; the
-tool-selection pattern in the docs shows the shape.
+**Abstention is a separate question, not a low score.** Where "none of these" is a real
+outcome, ask a `noul` alongside and check it first. The docs' tool-selection example shows the
+shape and why a low `confidence` does not substitute.
 
 `semanticSwitch` stays; it needs no inference provider and runs offline.
 
@@ -627,7 +507,7 @@ It also has a read form: when the loop body ends in a `step.decide`, the predica
 that answer instead of asking again, since `Snapshot.lastOutput` carries it.
 
 ```typescript
-until.decided({ of: checkDone, answer: (r) => r.done })   // `of` types the read, as above
+until.decided({ of: checkDone, answer: (r) => r.done })   // `of` types the read; see Batching
 ```
 
 **It catches its own failures**, because the interpreter turns a thrown predicate into
@@ -787,9 +667,17 @@ optimizable like any other.
 | L2 | `model`, and the numeric cut-points a caller applies (`threshold`, `minConfidence`) |
 | L3 | topology, as for other kinds |
 
-Only a **literal** `questions` map is discoverable. A projector is opaque to the walker, so a
-dynamic question set trades automatic optimization for runtime flexibility; `discoverFields`
-reports zero fields for that step rather than pretending otherwise.
+Only a **literal** `questions` map is discoverable, and it needs a walker rule that does not
+exist yet. Prompt optimization reads source through `ast-field-discovery.ts`, whose builder set
+is flat: every existing case reads plain properties off one object literal. A `questions` map is
+the first field whose value is a *map of further builder calls*, so the rule has to be stated
+rather than inferred: **walk the map per property, treating each property's `noul()`/`choice()`/
+`score()` call as its own field group.** Without that, an implementer sees a call expression,
+applies the existing "value is a function means projector" reasoning, and silently reports zero
+fields for a fully literal map.
+
+A projector genuinely is opaque, and reports zero fields: a dynamic question set trades
+automatic optimization for runtime flexibility.
 
 **Judge provenance is recorded** on every decision: model id and resolved version, in scorer
 `metadata` and on the trace. Without it, a regression run cannot tell an agent that got worse
@@ -812,21 +700,13 @@ string input. Its output is `stringifyResult(DecideResult)`, the hydrator's exis
 shared with `invokeTool` and `runCode`, which preserves every answer, `confidence`, and
 `probabilities`.
 
-Routing on it is a change to `conditional`, not `decide`. A route is today a bare substring
-(`match: string`, `includes` on the lowercased input). It becomes a predicate union mirroring the
-`UntilPredicate` kinds in the same file:
-
-```typescript
-{ kind: 'outputContains', value: string }          // today's behaviour; a bare string means this
-{ kind: 'outputEquals',   value: string }
-{ kind: 'field', path: string, equals: JsonValue } // path 'queue.choice', equals 'billing'
-{ kind: 'field', path: string, gte: number }        // path 'queue.confidence', gte 0.7
-```
-
-`field` predicates parse the input as JSON and read a dotted path; non-JSON input or a missing
-path is "no match". This gives JSON authors the confidence-gated escalation `decisionSwitch()`
-offers in TypeScript, on any string-output node. Schema changes require `bun run gen:schema` in
-the same commit.
+Routing on that output uses `conditional`'s route predicates, specified in
+`26-json-workflow-runtime`. A `decide` node is their first consumer but not their only one: any
+node emitting structured JSON can route on a field. The two that matter here are
+`{ kind: 'field', path: 'queue.choice', equals: 'billing' }` and
+`{ kind: 'field', path: 'queue.confidence', gte: 0.7 }`, which together give JSON authors the
+confidence-gated escalation `decisionSwitch()` offers in TypeScript. Schema changes require
+`bun run gen:schema` in the same commit.
 
 ### Stability for JSON consumers
 
@@ -850,28 +730,16 @@ carry them for every listed kind and for no other. Graduating a node deletes one
 
 ## Testing invariants
 
-Beyond `.claude/rules/testing.md`:
+Beyond `.claude/rules/testing.md`. Compaction's own invariants are in `33-decision-compaction`.
 
 1. Every error kind in the mapping table has a negative test asserting `e.noeticError.kind`.
-2. Property test over generated transcripts: **no `function_call_output` survives without its
-   `function_call`**.
-3. **Kept items are byte-identical** to their inputs, the anti-summarization invariant.
-4. Fail-open: a throwing client yields the input items unchanged.
-5. A timed-out compaction **aborts its in-flight request**, asserted through the real
-   `projectHistoryLayers` wrapper with slow-preprocessing and slow-client doubles: the client's
-   `signal` fires *before* the lifecycle's `withTimeout` rejects.
-6. The single-request cap: against limits that cannot hold every question, exactly one
-   `evaluate` call, under `maxRequestTokens`, with overflow calls left unscored and unmodified.
-7. The **contract-conformance test**: adapter satisfies `SystemOneClient`; each SDK error class
+2. The **contract-conformance test**: adapter satisfies `SystemOneClient`; each SDK error class
    maps to its kind; the worked example compiles in both directions. This is the drift gate.
-8. Live-provider tests use `test.skipIf(!process.env.TYPESAFE_API_KEY)`; the unit tier runs
+3. Live-provider tests use `test.skipIf(!process.env.TYPESAFE_API_KEY)`; the unit tier runs
    against a fake client and is always on. Being skip-gated, the live tier is not the drift gate.
-9. **Resume replays only on matching content**, through the real ledger: same `stepId`/`kind`
+4. **Resume replays only on matching content**, through the real ledger: same `stepId`/`kind`
    with different resolved `state` re-calls the backend; identical content replays with zero
    calls and a `step_replayed` event.
-10. **Pinning survives its edge cases**: no user message at all falls back to the item pin and
-    still scores something; one exchange of 300 tool pairs pins at most `preserveRecentMessages`
-    items; no pair with either side pinned is scored.
 
 ---
 
@@ -889,12 +757,6 @@ refinement ledger.
   seam for response validation or pre-1.0 churn.
 - **Lazy `jev()` construction.** Would move a missing credential into a fail-open hook and make
   it a permanent silent no-op; the repo's factories fail eagerly.
-- **Multi-batch compaction.** K batches re-send the state K times, worst exactly when the
-  transcript is largest; the single-request cap degrades to the cheap path instead.
-- **Compaction before `history()`, bounded to its prospective window.** Requires knowing
-  `history()`'s private constants, coupling two layers the slot system keeps independent.
-- **A default `keepThreshold`.** A midpoint arbitrates an asymmetric failure with an
-  uncalibrated statistic; the harness is the precondition for any default.
 - **Deriving a per-attempt SDK timeout from the signal.** Redundant: the signal already cancels
   request and retries at the deadline, and `AbortSignal` exposes no remaining-time property.
 - **A `select` field on the JSON `decide` node.** A fourth string-collapse convention that
@@ -915,6 +777,3 @@ refinement ledger.
   into one request would make decisions nearly free. Needs a scheduling primitive Noetic lacks.
 - **Local-first backend.** A llama.cpp-class backend would remove the network dependency for
   offline agents, at the cost of a second transport that does not speak `/v1/systemone`.
-- **Calibration harness.** An eval suite measuring a backend's calibration error on the user's
-  own data. A precondition for a default `keepThreshold` and for graduating the compaction
-  layer.

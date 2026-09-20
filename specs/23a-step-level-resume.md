@@ -77,8 +77,8 @@ Append on successful return, at the point `step_completed` is emitted (`execute.
 On `restore`, the ledger is loaded into the context. In `execute()`, before dispatch:
 
 1. Compute the path key.
-2. If an entry exists at that key **and** its `stepId`, `kind` and recorded input hash all match the step about to run, return `entry.output` without dispatching.
-3. If an entry exists but diverges (different `stepId`, `kind`, or input hash at that path), discard it, every entry whose path has it as a prefix, and every entry sequenced after it under the same parent, then run fresh. Sibling invalidation matters because a step's consumers are usually its siblings, not its descendants.
+2. If an entry exists at that key **and** its `stepId` and `kind` match the step about to run, return `entry.output` without dispatching.
+3. If an entry exists but diverges (different `stepId` or `kind` at that path), discard it and every entry whose path has it as a prefix, then run fresh.
 
 Divergence handling mirrors the platform's tool fence, which found the same problem one layer up: `turn-tool-fencing.ts` matches a recorded call on name **and** args hash and re-executes on any mismatch, because a model that rewrote the call invalidated the prior attempt's record.
 
@@ -96,20 +96,12 @@ Memoizing an output replays a step's **value**, not its **effect**. A `runCode` 
 
 This is the same bet the Noetic platform's turn fence already makes, and the reason that fence sits at the **tool** boundary: tools are where effects live. That fence records a durable `tool.call_started` row *before* dispatch, so a crash mid-call is recoverable as a loud unknown-outcome rather than a silent re-run.
 
-**`decide` steps are memoized too, and they need one guard the others do not.** A
-`32-system-one-decisions` `decide` step has no side effects and a small serializable output, so
-it is the easiest possible member of the memo set. But its output drives *control flow*, and the
-replay check above compares only `stepId` and `kind`: it never looks at what a step was asked. A
-decision replayed against changed input silently selects a branch the transcript never shows. So
-a `decide` entry also records a hash of its resolved inputs, and a mismatch invalidates
-**forward** (the entry, its subtree, and every entry sequenced after it under the same parent)
-or fails the resume with an explicit conflict. Subtree discard alone is not enough, because a
-decision's consumers are usually its siblings.
-
-This exposure is not unique to `decide`; it belongs to any step whose output selects a branch,
-which is why the rule above is stated generally rather than per kind. The shipped ledger
-currently compares `stepId` and `kind` only, so the input hash is the part implementation has
-to catch up to (issue #101).
+**`decide` steps are memoized.** A `32-system-one-decisions` `decide` step has no side effects
+and a small serializable output, so it is a straightforward member of the memo set. It is also
+the first step kind whose output drives *control flow*, which exposes a limitation in the rule
+above: replaying a decision against changed input selects a branch the transcript never shows.
+Strengthening the rule to compare inputs, and to invalidate siblings rather than only
+descendants, is tracked separately in issue #101.
 
 **Recommendation: core's ledger covers control flow and `callModel` steps; effects stay fenced at the tool/host boundary.** Core should not claim exactly-once for tool execution — it has no durable pre-dispatch record and no way to know whether a given tool is idempotent. Stating this explicitly matters, because "durable execution" invites the assumption that side effects are covered.
 

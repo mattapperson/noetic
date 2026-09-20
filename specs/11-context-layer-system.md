@@ -659,7 +659,7 @@ Layer factories MUST use `satisfies ContextLayer<TState>` (not a return type ann
   `cost` is a number copied at construction rather than a live counter. A hook that performs
   real work therefore cannot be cancelled by the harness, and its spend cannot reach `ctx.cost`,
   `until.maxCost`, or the eval cost scorer. `decisionCompaction`
-  (`32-system-one-decisions`) is the first layer to hit both: it compensates with its own
+  (`33-decision-compaction`) is the first layer to hit both: it compensates with its own
   `AbortController` and records spend on its span, which is strictly weaker. Closing this means
   giving `ExecutionContext` a signal and live counters, which affects every layer.
 
