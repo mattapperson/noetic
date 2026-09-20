@@ -75,6 +75,47 @@ OpenResponses distinguishes `system` (user-authored instructions) from `develope
 
 We moved from positional `channel(name, schema, mode)` to `channel(name, { schema, mode, ... })` (see `06-channels`). The positional form would grow unwieldy as we add `external`, `capacity`, and future options. The options object is more extensible, consistent with other builders (`callModel({...})`, `spawn({...})`), and avoids a growing positional parameter list. The tradeoff: slightly more verbose for the simplest case, but the API is self-documenting and won't need breaking changes when new options are added.
 
+## `@unstable` on a public surface vs. withholding a feature until it is stable
+
+A new surface built on a young external contract poses a dilemma: ship it and the published API
+is committed before the contract has settled, or withhold it and users get nothing while we
+wait. We chose a third option — ship it from the main entry point tagged **`@unstable`**
+alongside `@public`.
+
+**The tag and the `./unstable` entry point are different things that share one promise.** The
+promise is: *this may change shape or be removed in a minor release.* The `./unstable` module
+applies it to framework-extension internals, and adds an audience restriction of its own — those
+symbols are for people writing context layers and runtime backends, not application code. The
+tag on a main-entry export applies the same promise to something ordinary application authors
+are meant to use. Same weakened guarantee, different audience; the restriction belongs to that
+module, not to the tag.
+
+An `@unstable` main-entry export is therefore real, supported, and documented. Only its
+stability changes — and that is precisely what lets us ship against an unsettled contract,
+because the alternative is a surface we could retract only with a major version bump.
+
+Two details make it work rather than merely label it. First, such a surface is **not** moved
+behind its own subpath. Subpath separation is right for `./unstable`, whose audience should feel
+friction, and wrong here: it would force every early adopter to rewrite imports at graduation,
+punishing exactly the people who took the risk. Graduation is the removal of one JSDoc tag,
+invisible to callers. Second, every `@unstable` public surface must state **what would graduate
+it**, so the tag is a commitment to resolve the uncertainty rather than a permanent hedge.
+
+The release guarantee is social — semantic-release reads commit footers, not JSDoc, and no tool
+can infer whether a change was *intended* as breaking. The answer is not to build release tooling
+that guesses, but to make the consequence visible where the human actually decides: extend
+`scripts/check-export-tags.ts` to require a `Graduates when:` clause on every `@public
+@unstable` export. Separately — and *not* as a precondition for any one feature — emit
+`packages/core/api-surface.md`, a committed manifest of every exported symbol and its stability
+class, drift-gated by `check:exports` the way the workflow JSON Schema is drift-gated by its own
+test. The two are easy to conflate but solve different problems: the clause keeps this
+convention honest, while the manifest addresses an older gap, that a *stable* symbol can change
+shape with nothing prompting a reviewer to ask about the footer. A contributor changing a promise then sees it as a
+diff in review. That is a structural guard on the decision rather than a lock on the code, and
+it also covers the pre-existing case of a *stable* symbol quietly changing shape.
+
+Until that lands the convention rests on review discipline alone.
+
 ## Context layers replace contextIn/contextOut on spawn
 
 We chose to remove `contextIn` and `contextOut` from `StepSpawn` and unify context flow under the context layer system (see `04-spawn`, `11-context-layer-system`). Previously, spawn had two independent strategy axes controlling ItemLog flow, while context layers had `onSpawn`/`onReturn` hooks that were never called from `executeSpawn`. The two systems were disconnected.

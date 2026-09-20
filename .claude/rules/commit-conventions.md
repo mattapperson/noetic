@@ -52,6 +52,32 @@ feat(core)!: rename Step.execute to Step.run
 
 Use a `BREAKING CHANGE:` footer (the reliable signal); see the note above.
 
+## Unstable Surfaces
+
+A symbol tagged **`@unstable`** carries a weaker stability promise: it may change shape or be
+removed in a **minor** release. That covers both the `./unstable` entry point's exports and a
+main-entry export tagged `@public @unstable` — a surface application authors are meant to use,
+whose shape is not settled yet. See `specs/14-design-decisions.md`.
+
+This is enforced socially, by commit hygiene — semantic-release reads commit footers, not JSDoc:
+
+- **Changing or removing a `@unstable` export is a `feat` or `fix`, and MUST NOT carry a
+  `BREAKING CHANGE:` footer.** Omitting the footer is the whole mechanism; adding it would cut a
+  major and defeat the point of having shipped it as unstable.
+- Say so in the body — e.g. `UNSTABLE: step.decide's questions field is now required` — so the
+  changelog shows which weakened promise was exercised.
+- **Graduating** a surface (removing the `@unstable` tag) is a `feat`. It only strengthens the
+  promise, so it is never breaking.
+- Once the tag is gone, normal semver applies and removal needs a `BREAKING CHANGE:` footer.
+
+Pairing the tags needs no tooling change: `scripts/check-export-tags.ts` only tests that a
+main-entry export's JSDoc *contains* `@public` and lacks `@internal`, so `@public @unstable`
+passes. Keep both — dropping `@public` fails the gate.
+
+Convention: every `@public @unstable` export documents a `Graduates when: …` clause in its
+JSDoc, so a weakened promise is a commitment to resolve the uncertainty rather than a permanent
+hedge. Nothing enforces this yet — see `specs/14-design-decisions.md` for the guard that would.
+
 ## Suppressing Releases
 
 There is no per-commit type that suppresses a release — every core change is at
