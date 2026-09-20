@@ -1,4 +1,4 @@
-# 32 — System One Decisions
+# 32: System One Decisions
 
 > **Depends On:** `01-step-type` (Step union), `11-context-layer-system` (`ContextLayer` contract, `projectHistory`), `16-semantic-conditions` (`Condition`, `semanticSwitch`), `05-loop-and-until` (`UntilPredicate`), `17-eval-and-optimization` (scorers), `23a-step-level-resume` (ledger), `14-design-decisions` (`@unstable` on a public surface)
 > **Exports:** `SystemOneClient`, `SystemOneLimits`, `DecisionQuestion`, `DecisionAnswer`, `DecideResult` (`@noetic-tools/types`); `noul()`, `choice()`, `score()`, `jev()`, `openSystemOne()` (`@noetic-tools/system-one`); `step.decide()` (`@noetic-tools/core`); `decisionCompaction()` (`@noetic-tools/context`); `decisionCondition()`, `decisionSwitch()`, `until.decided()` (`@noetic-tools/core`); `decisionScorer()` (`@noetic-tools/eval`)
@@ -9,12 +9,12 @@ An agent loop makes dozens of small decisions per turn that have nothing to do w
 prose: *is this request urgent? which sub-agent handles it? is the loop done? is this stale
 transcript entry still worth its tokens?* Today each one costs a full autoregressive round trip.
 `aiCondition` sends a system prompt, waits for a chat completion, `JSON.parse`s the reply, and
-on any malformed output silently returns `false` — a 1–3 second, cents-scale, untyped answer to
+on any malformed output silently returns `false`. That is a 1 to 3 second, cents-scale, untyped answer to
 a yes/no question.
 
 A **System One model** answers the same question in 70–500ms, returns a *typed* value with a
-probability attached, and charges for input only. The vendor's central claim — which this spec
-relies on but has not independently measured — is that evaluating N questions against one
+probability attached, and charges for input only. The vendor's central claim, which this spec
+relies on but has not independently measured, is that evaluating N questions against one
 state costs about the same wall-clock as evaluating one. If so, batching every decision in a
 turn into a single call is the cheap path rather than the expensive one.
 
@@ -47,7 +47,7 @@ tag is a commitment to resolve that uncertainty, not a permanent hedge:
 |---|---|
 | `SystemOneClient`, `step.decide` | The vendor API is stable **or** a second independent `/v1/systemone` implementation ships |
 | `@noetic-tools/system-one` | `@typesafe-ai/sdk` reaches 1.0 |
-| `decisionCompaction()` | The calibration harness exists and a default `keepThreshold` can be justified from measurement |
+| `decisionCompaction()` | Measured false-deletion behaviour on real transcripts, and a `keepThreshold` policy justified by it. The harness existing is not the bar; a result from it is |
 
 Graduation removes one JSDoc tag and changes no import path.
 
@@ -78,12 +78,12 @@ for a self-hosted endpoint is a one-line change to the wiring.
 It is not a one-line change to *behaviour*. The contract guarantees the shape of an answer,
 never its distribution: no backend publishes a calibration guarantee, and the reference
 self-hosted implementation warns its probabilities are order-dependent and uncalibrated. Any
-threshold — `keepThreshold`, a confidence gate — is **backend-relative and must be re-validated
+threshold (`keepThreshold`, a confidence gate) is **backend-relative and must be re-validated
 after a swap**.
 
 ---
 
-## The contract — `@noetic-tools/types`
+## The contract: `@noetic-tools/types`
 
 ### Questions
 
@@ -103,7 +103,7 @@ export interface NoulQuestion {
   readonly type: 'noul';
   readonly instructions: DecisionState;
   /** Optional prose pinning what `true` and `false` mean at the boundary. */
-  readonly criteria?: { readonly true: string; readonly false: string };
+  readonly criteria?: { readonly true: DecisionState; readonly false: DecisionState };
 }
 
 /** @public Pick exactly one option. `O` is the literal union of option keys. */
@@ -111,7 +111,7 @@ export interface ChoiceQuestion<O extends string = string> {
   readonly type: 'choice';
   readonly instructions: DecisionState;
   /** Option key → description. `null` means "the key speaks for itself". */
-  readonly criteria: Readonly<Record<O, string | null>>;
+  readonly criteria: Readonly<Record<O, DecisionState | null>>;
 }
 
 /** @public Rate against ordered levels, lowest first. */
@@ -145,13 +145,17 @@ export interface ChoiceAnswer<O extends string = string> {
 export interface ScoreAnswer {
   readonly type: 'score';
   /**
-   * Probability-weighted mean of the level numbers — NOT an index. It is
+   * Probability-weighted mean of the level numbers, NOT an index. It is
    * continuous and routinely lands between levels (`1.3` from
    * `0×0.0 + 1×0.70 + 2×0.30`), so `criteria[answer.score]` is always wrong.
    */
   readonly score: number;
-  /** Level number (stringified) → that level's description. */
-  readonly legend: Readonly<Record<string, string>>;
+  /**
+   * Level number (stringified) → that level's description, with the rubric's
+   * own value types preserved. A structured level comes back structured; the
+   * backend does not flatten it, so neither does this.
+   */
+  readonly legend: Readonly<Record<string, DecisionState>>;
   readonly probabilities: Readonly<Record<string, number>>;
   readonly confidence: number;
 }
@@ -166,10 +170,17 @@ raises `NoeticConfigError` `DECISION_STATE_NOT_SERIALIZABLE` naming the offendin
 
 ### Client
 
+The contract is generic over the question map, so question ids and option literals survive the
+call. A non-generic `evaluate` would erase `answers` to `Record<string, DecisionAnswer>`, and
+every typed result above it would be a cast.
+
 ```typescript
-export interface DecisionRequest {
+/** @public A map of question id → question. The unit of one evaluation. */
+export type QuestionMap = Readonly<Record<string, DecisionQuestion>>;
+
+export interface DecisionRequest<QS extends QuestionMap = QuestionMap> {
   readonly state: DecisionState;
-  readonly questions: Readonly<Record<string, DecisionQuestion>>;
+  readonly questions: QS;
   readonly signal?: AbortSignal;
 }
 
@@ -180,11 +191,22 @@ export interface DecisionUsage {
   readonly cost?: number;
 }
 
-export interface DecisionResponse {
+export interface DecisionResponse<QS extends QuestionMap = QuestionMap> {
   readonly model: string;
-  readonly answers: Readonly<Record<string, DecisionAnswer>>;
+  /** Same keys as the request's questions, each narrowed to its answer type. */
+  readonly answers: DecideResult<QS>;
   readonly usage: DecisionUsage;
 }
+
+/** @public Maps one question to the answer it produces. */
+export type AnswerFor<Q> =
+  Q extends NoulQuestion ? NoulAnswer
+  : Q extends ChoiceQuestion<infer O> ? ChoiceAnswer<O>
+  : Q extends ScoreQuestion ? ScoreAnswer
+  : never;
+
+/** @public The typed result of evaluating a question map. */
+export type DecideResult<QS extends QuestionMap> = { readonly [K in keyof QS]: AnswerFor<QS[K]> };
 
 /** @public Declared capabilities, so a caller can size a request without hard-coding vendor numbers. */
 export interface SystemOneLimits {
@@ -199,23 +221,30 @@ export interface SystemOneLimits {
 export interface SystemOneClient {
   readonly model: string;
   readonly limits: SystemOneLimits;
-  evaluate(request: DecisionRequest): Promise<DecisionResponse>;
+  evaluate<QS extends QuestionMap>(request: DecisionRequest<QS>): Promise<DecisionResponse<QS>>;
 }
 ```
+
+The static type is a promise the wire cannot keep, so an implementation **validates before it
+returns**: every requested id is present, each answer's `type` matches the question that asked
+it, and a `choice` value is one of that question's declared options. A violation raises
+`NoeticConfigError` `DECISION_ANSWER_INVALID` naming the id. Without that check the generic is
+an unchecked cast wearing a type signature, which is worse than the erased version because it
+looks safe.
 
 `limits` lives on the contract because backends differ: hosted Jev allows 255 choice options,
 the reference self-hosted build allows 64.
 
 ---
 
-## `@noetic-tools/system-one` — the client package
+## `@noetic-tools/system-one`: the client package
 
 Also known as the **Jev** / `/v1/systemone` protocol; if you arrived from TypeSafe's docs or
 from `openjev-sglang`, this is that protocol.
 
 Depends on `@noetic-tools/types`, `zod` (dependency and `^4` peer, as `acp` declares it), and
 the vendor's official `@typesafe-ai/sdk`. By convention it is the only Noetic package that
-depends on that SDK, as `agent-plugins` is for the MCP SDK; note this is convention, not a gate —
+depends on that SDK, as `agent-plugins` is for the MCP SDK; note this is convention, not a gate:
 sentrux checks source imports, not `package.json` dependencies.
 
 ### The adapter
@@ -226,10 +255,23 @@ endpoints too. What Noetic keeps for itself is the **vendor-neutral `SystemOneCl
 core and the layers know only that contract, and this package is the adapter between it and
 one concrete SDK. A future OpenRouter provider is a second adapter behind the same interface.
 
-The adapter is a real translation layer, not a re-export, because the two type hierarchies are
-incompatible in both directions under `strict`: the SDK's `instructions` is optional and
-nullable where Noetic's is required, and Noetic's `DecisionState` is not assignable to the SDK's
-`EntryType`. Owning that mapping is what contains a pre-1.0 SDK's churn to this package.
+The adapter translates rather than re-exports. Measured against `@typesafe-ai/sdk@0.6.0` under
+`strict` (TypeScript 5.9.3), the two hierarchies differ in exactly one direction: a Noetic
+`DecisionState` or `DecisionQuestion` **is** assignable to the SDK's `EntryType` / `Question`,
+but an SDK-built question is **not** assignable to Noetic's, because the SDK's `instructions` is
+optional and nullable where Noetic's is required.
+
+**This paragraph is the single statement of SDK compatibility in the spec**; everywhere else
+refers here rather than restating a direction, because a version-pinned compile result goes
+stale the moment either side's types move, and a restated one goes stale silently. Testing
+invariant 7 compiles the fixture in both directions, so an SDK bump breaks a test rather than
+quietly falsifying prose.
+
+One-directional assignability is enough to rule out re-exporting the SDK's builders, since
+their output would not satisfy the contract. It is not, on its own, the reason to own a
+translation layer. That reason is vendor-neutrality: the contract keeps its shape when a second
+provider appears, and the response validation the generic `evaluate` requires is adapter work
+no re-export performs.
 
 ### Question builders
 
@@ -266,7 +308,7 @@ openSystemOne(opts: { baseUrl: string; model: string; limits?: Partial<SystemOne
 ```
 
 Both construct the SDK client eagerly, so a missing key fails once, loudly, at the composition
-call site — as `createOpenRouterEmbed` does — with the SDK's `TypeSafeError` mapped to
+call site, as `createOpenRouterEmbed` does, with the SDK's `TypeSafeError` mapped to
 `NoeticConfigError` `SYSTEM_ONE_MISSING_API_KEY`. They differ only in base URL, model id,
 declared `limits`, and whether a key is required.
 
@@ -278,7 +320,7 @@ declared `limits`, and whether a key is required.
 ```typescript
 | {
     kind: 'system_one_failed';
-    /** Provider label for diagnostics, e.g. 'jev' — never the base URL or key. */
+    /** Provider label for diagnostics, e.g. 'jev'. Never the base URL or key. */
     provider: string;
     status?: number;
     /** Whether the SDK had exhausted its retries on this class. */
@@ -299,14 +341,14 @@ The SDK owns retry and backoff; the adapter only translates:
 | `PermissionDeniedError` / `NotFoundError` | `system_one_failed` `retryable: false` | no |
 | `APIUserAbortError` | rethrown as the runtime's cancellation | n/a |
 
-A contract-conformance test — the drift gate a pre-1.0 dependency needs, and one that runs
-without credentials — asserts that the adapter satisfies `SystemOneClient`, that each SDK error
+A contract-conformance test, the drift gate a pre-1.0 dependency needs and one that runs
+without credentials, asserts that the adapter satisfies `SystemOneClient`, that each SDK error
 class maps to the documented kind, and that the worked example above compiles as a type-level
 fixture in both directions. That last assertion is what an SDK bump breaks first.
 
 ---
 
-## `step.decide` — the step primitive
+## `step.decide`: the step primitive
 
 ```typescript
 step.decide({
@@ -323,40 +365,71 @@ step.decide({
 })
 ```
 
-Adds `kind: 'decide'` to the `Step` union. The output is a typed record keyed by question id —
-`type DecideResult<QS> = { [K in keyof QS]: AnswerFor<QS[K]> }` — so `result.urgent.noul` is
-`number` and `result.queue.choice` is `'billing' | 'technical'`.
+Adds `kind: 'decide'` to the `Step` union. The output is `DecideResult<QS>` (see the contract),
+so `result.urgent.noul` is `number` and `result.queue.choice` is `'billing' | 'technical'`.
 
-`client` and `questions` are `Lazy`, resolvable from `ctx` like `step.acpAgent`'s `agent`.
-`state` is not: it is a two-argument projector `(input, ctx) => DecisionState`, because it exists
-to read the current turn's input and `Lazy` resolution is ctx-only.
+**Both `state` and `questions` see the turn's input**, each a literal or an `(input, ctx)`
+projector. A ctx-only `questions` would force an author with retrieved candidates, a live tool
+list, or a taxonomy's children to smuggle the input through a context layer to reach the thing
+deciding about it. `client` stays `Lazy` (ctx-only) like `step.acpAgent`'s `agent`; it does not
+vary per input.
+
+A literal `questions` is the **optimizable** form: `discoverFields` walks by step kind and reads
+named static fields, so a projector is opaque to it. The tradeoff is explicit rather than
+hidden, and it is the author's to make.
 
 **Not `step.callModel`.** `CallModelRequest` is shaped around items, tools, streaming, and
 output codecs. A decision has none of those and no output tokens to bill; a separate step kind
 keeps both abstractions honest.
 
-**Usage.** `trackDecisionUsage(ctx, response.usage)` mirrors `trackUsage`, so decisions appear in
-session cost alongside model calls.
+**Output convention.** Per `01-step-type`, `O` is the business value: the step returns
+`DecideResult<QS>` and nothing else. Model identity, usage, cost and latency go to the `Context`
+and the trace, never the return value.
+
+**Usage and cost.** `trackDecisionUsage(ctx, response.usage)` folds tokens **and cost** into
+`ctx.tokens` / `ctx.cost`. Cost has to be populated for that to mean anything: nothing
+downstream prices a decision, so an `undefined` `usage.cost` leaves decision spend at zero in
+session reporting, in the eval `cost` scorer (which only reads `execution.context.cost`), and in
+`until.maxCost`. The adapter computes it from reported tokens and a pricing source: `jev()`
+applies the provider's published input rate and accepts a `pricing` override; `openSystemOne()`
+leaves `cost` undefined by default, the honest answer for a self-hosted endpoint with no
+per-token price. The rate in force is recorded on the trace.
 
 **Observability.** Emits `decide.start` / `decide.complete` framework events carrying question
-ids, model, latency, and per-question `confidence` — never the state.
+ids, model, latency, and per-question `confidence`. Never the state.
 
 **Durable resume.** `decide` joins the memoized set alongside `callModel` (`23a`): a resumed run
 replays the recorded answers and routes exactly as the pre-crash run did. The ledger's replay
-check compares only `stepId` and `kind`, which is tolerable for prose-producing steps and not for
-one whose job is control flow off live input — so a `decide` entry also records a hash of the
-resolved `state` and `questions`, and a mismatch re-runs instead of replaying.
+check compares only `stepId` and `kind`, which is tolerable for prose-producing steps and not
+for one whose job is control flow off live input. A `decide` entry therefore also records a hash
+of its resolved `state` and `questions`, and `take()` compares it.
+
+That guard has to live in the ledger, not the step. `discardSubtree` fires only on an id/kind
+mismatch, and a decision's consumers are usually its **siblings**, not its descendants: in
+`[decide, conditional]` the two sit at adjacent ordinals under one parent. A step-local re-run
+would leave the `conditional` replaying its recorded `billing` branch while `decide` now answers
+`technical`, resuming into a state that never existed.
+
+An input-hash mismatch therefore invalidates **forward**: the entry, its subtree, and every
+entry sequenced after it under the same parent, with their subtrees. Ordinals are assigned at
+dispatch and deterministic (`23a`), so "after" is well defined; where it cannot be computed the
+resume fails with an explicit conflict rather than replaying a mixed state. Tests cover the
+composite case, not a bare `decide`: a recorded `[decide, conditional]` resumed with changed
+input must re-run both.
+
+The exposure generalises to any step whose output drives control flow, so the general rule
+belongs to `23a` rather than here (#101).
 
 ---
 
-## `decisionCompaction()` — the context layer
+## `decisionCompaction()`: the context layer
 
 A `projectHistory` layer: a read-side projection of what the next model call sees. It never
 mutates the item log.
 
 ### Delete, never summarize
 
-Summarizing a transcript loses what an agent most needs verbatim — exact file paths, exact error
+Summarizing a transcript loses what an agent most needs verbatim: exact file paths, exact error
 strings, constraints the user stated once. This layer only *removes* or *truncates* tool traffic.
 Every item it keeps is byte-identical to what was logged; user and assistant prose is never
 rewritten. Adapted, with attribution, from
@@ -373,13 +446,20 @@ rewritten. Adapted, with attribution, from
    pinned is excluded from scoring.
 3. **Build state.** Render the transcript with tool *results* replaced by placeholders
    (`ok, 4213 chars (omitted)`): the judge decides relevance from the call and a size hint, not
-   the payload. This is the layer's load-bearing assumption and it is unproven — inherited from
+   the payload. This is the layer's load-bearing assumption and it is unproven, inherited from
    `fast-jev-compaction` as a design choice, validated only once the calibration harness exists.
-4. **Fit.** If the rendered state exceeds `client.limits.maxStateTokens`, apply progressively:
+4. **Fit.** `maxStateTokens` bounds the state **plus the longest single question**, not the
+   state alone, so fitting reserves question overhead before comparing: the budget is
+   `maxStateTokens - tokens(longest question)`. Checking the rendered state by itself lets a
+   31,950-token state with a 100-token question clear both limits and still exceed a 32,000
+   per-question bound at the backend. If the state is over budget, apply progressively:
    truncate tool inputs 1000 → 200 → 60 chars; abridge long text head+tail; collapse old
-   unpinned messages; fold runs of call-only messages. Record the stage reached.
-5. **Score.** Two nouls per unpinned call — *should this call remain?* *should its result
-   remain?* — in **one** request carrying the layer's `AbortSignal`. Calls that do not fit under
+   unpinned messages; fold runs of call-only messages. Record the stage reached. Sizing uses
+   the client's own tokenizer where it exposes one, and a conservative `estimateTokens`
+   otherwise, since a backend's tokenizer is not knowable from here and undercounting is the
+   direction that fails.
+5. **Score.** Two nouls per unpinned call (*should this call remain?* *should its result
+   remain?*) in **one** request carrying the layer's `AbortSignal`. Calls that do not fit under
    `client.limits.maxRequestTokens` are left unscored.
 6. **Decide.** `keepResult ≥ threshold` → keep both. Else `keepCall ≥ threshold` → keep the call,
    truncate the result to `truncateHeadChars`. Else drop both.
@@ -400,10 +480,18 @@ rewritten. Adapted, with attribution, from
 | `timeouts.projectHistory` | **required** | Hard outer bound; must exceed the backend's worst case |
 | `enabled` | `() => true` | Kill switch, re-evaluated every turn |
 
-`keepThreshold` has no default because the failure directions are asymmetric: too low silently
-deletes context the next call needed, undetectably; too high only wastes tokens. A midpoint
-would arbitrate that with an uncalibrated statistic. Authors start conservatively (≈0.9, the
-vendor's "act automatically" tier) and lower it against measurement.
+**Which way `keepThreshold` points.** An item is kept when `P(needed) >= keepThreshold`, so
+raising the bar keeps *less*:
+
+| `keepThreshold` | Effect | Failure mode |
+|---|---|---|
+| low (≈0.2) | keeps almost everything | wastes tokens; recoverable, and visible in the bill |
+| high (≈0.9) | keeps only near-certain items | deletes context the next call needed; **undetectable**, because the item is simply absent |
+
+The two failures are not symmetric, so the safe direction is *down*. Authors start low and raise
+it against measurement, watching false deletions rather than token savings. There is no default
+because a midpoint would arbitrate that asymmetry with a statistic nobody has calibrated for
+this task; picking one is the author's call, made with their own data.
 
 ### Where it runs
 
@@ -418,7 +506,7 @@ covers it. Two consequences:
 ### One request, then fall back
 
 Compaction is capped at a single evaluation. The state is re-sent with every batch, so a
-K-batch compaction pays K× the state cost — and K grows precisely when the transcript is largest
+K-batch compaction pays K× the state cost, and K grows precisely when the transcript is largest
 and the time budget tightest. Scoring what fits and leaving the rest is strictly better than
 multiplying cost to achieve zero.
 
@@ -426,13 +514,13 @@ multiplying cost to achieve zero.
 
 `history()`'s exchange-expansion helper is extracted to a shared utility both layers import, so
 they cannot drift in what they call an exchange. "Pinned" means *never scored or dropped by this
-layer* — not a promise the exchange reaches the model, which a later windowing layer could still
+layer*, not a promise the exchange reaches the model, which a later windowing layer could still
 slice. With the default ordering that cannot happen.
 
 ### Failure policy
 
 Fails **open**: on error or timeout the projection is the input, unchanged. The lifecycle already
-provides this — `projectHistoryLayers` catches, records a diagnostic, and carries the previous
+provides this: `projectHistoryLayers` catches, records a diagnostic, and carries the previous
 items forward.
 
 Timeouts must abort, not just stop waiting. The lifecycle's `withTimeout` is a `Promise.race`
@@ -449,19 +537,26 @@ short for a network call with retries.
   environment variable or config store can be flipped fleet-wide mid-incident; the docs show
   that form as the default recipe. A hard-coded `() => false` is a composition change like any
   other.
-- **Telemetry — span events, not framework events.** The layer records `compaction.complete` /
+- **Telemetry, as span events rather than framework events.** The layer records `compaction.complete` /
   `compaction.failed` / `compaction.timeout` via `ctx.trace.addEvent` with item counts in and
-  out, tokens saved, the delivered-vs-cap ratio, latency, and error class — never `state` or
+  out, tokens saved, the delivered-vs-cap ratio, latency, and error class. Never `state` or
   item content. A `projectHistory` hook receives `ExecutionContext`, which exposes only
   `trace.*`; the broadcaster behind `emitFrameworkEvent` needs a full `Context` no layer hook
-  has. And `trace.addEvent` forwards to `ctx.span.addEvent`, a no-op without a tracing backend —
+  has. And `trace.addEvent` forwards to `ctx.span.addEvent`, a no-op without a tracing backend.
   **compaction telemetry exists only when the host has configured one.** Framework-event parity
   for layer hooks would be an `ExecutionContext` change belonging to spec 11.
 
-### Opt-in
+### Opt-in, and one policy among several
 
 `ProjectionPolicy.overflow` keeps its existing values and default. Composing this layer is an
 explicit act; no existing agent silently acquires a network dependency.
+
+Compaction is one context policy, not the only one this contract is meant to carry. A future
+admission or retention layer (what enters memory, what survives a session) takes a
+`SystemOneClient` by injection and reuses what this layer uses: the shared execution path, an
+injected client rather than a bundled transport, fail-open semantics, and the same
+`ExecutionContext` limits. None of them needs bespoke integration, and none should invent its
+own.
 
 ---
 
@@ -477,7 +572,7 @@ decisionCondition({ client, prompt: 'Is this a refund request?', threshold: 0.5 
 
 Returns a `Condition<I>`, composable with `when`, `anyCondition`, `allCondition`. `aiCondition`
 gains an optional `client`; when supplied it takes the decision path, retiring the silent
-`return false` on parse failure — there is no parse step, and a transport failure throws.
+`return false` on parse failure: there is no parse step, and a transport failure throws.
 
 ### `decisionSwitch()`
 
@@ -491,35 +586,224 @@ decisionSwitch({
     refund: { criteria: 'wants money back', step: refundFlow },
     bug:    { criteria: 'reports broken behaviour', step: bugFlow },
   },
-  minConfidence: 0.7,   // below this, fall through to `default`
+  minConfidence: 0.7,   // floor for every case
+  cases: {
+    refund: { criteria: 'wants money back', step: refundFlow, minConfidence: 0.9 },  // per-case
+  },
   default: askAHuman,
 })
 ```
+
+A case may raise the floor but not lower it, so an irreversible branch can demand more
+certainty than a benign one without a caller weakening the global bar by accident.
+
+**Abstention is a separate question, not a low score.** A `choice` always returns one of its
+options, so a model with nothing good to pick still picks something and may be confident about
+it. Where "none of these" is a real outcome, ask a `noul` alongside and check it first; the
+tool-selection pattern in the docs shows the shape.
 
 `semanticSwitch` stays; it needs no inference provider and runs offline.
 
 ### `until.decided()`
 
 ```typescript
-loop({ until: until.decided({ client, prompt: 'Has the user’s question been fully answered?' }) })
+loop({
+  until: until.decided({
+    client,
+    state: (s) => ({ task: s.history[0], latest: s.lastText }),
+    question: noul('Has the task been fully answered by the latest reply?'),
+    onError: 'continue',   // default
+  }),
+})
 ```
 
-An `UntilPredicate` judging the snapshot's `lastText`. Composes with `any`/`all`, so it pairs
-naturally with `maxSteps` as a safety bound.
+**It needs a state projector, not just `lastText`.** "Has the user's question been fully
+answered?" cannot be judged from the answer alone: "Paris" fully answers one request and half
+of another, and both render the same judging request. `state` builds the evidence from the
+`Snapshot` (`history`, `lastOutput`, `lastText`, `stepCount`), and the question is an ordinary
+`noul` so its wording is visible and optimizable rather than buried in a `prompt` string.
+
+It also has a read form: when the loop body ends in a `step.decide`, the predicate can consume
+that answer instead of asking again, since `Snapshot.lastOutput` carries it.
+
+```typescript
+until.decided({ of: checkDone, answer: (r) => r.done })   // `of` types the read, as above
+```
+
+**It catches its own failures**, because the interpreter turns a thrown predicate into
+`{ stop: true }` (`execute-control.ts:733-739`): an unhandled judge outage would end the loop
+and present partial work as finished. `onError: 'continue'` (default) returns `{ stop: false }`
+with a reason and leaves `maxSteps` to bound the loop; `'stop'` opts back into the interpreter's
+behaviour. Pair it with a bound either way.
 
 ### `decisionScorer()`
 
-An eval scorer using `score` against an ordered rubric: the weighted-mean level becomes
-`ScoreResult.score`, and the distribution and `confidence` go in `metadata`, so regression runs
-can flag *judge* instability separately from *agent* regression.
+An eval scorer using `score` against an ordered rubric.
+
+**It must normalize.** `ScoreAnswer.score` is a probability-weighted mean on `0..levels-1`,
+while the runner clamps every `ScoreResult.score` into `[0,1]`
+(`eval-context.ts` `sanitizeScoreResult`). Passing the raw level through would send `1.3`, `2`
+and `4` all to `1.0`, collapsing most of a multilevel rubric into a perfect score and hiding
+every regression inside it. So the scorer reports `score / (levels - 1)`, and declares
+direction: `higher: 'better'` (default) or `'worse'`, which inverts to `1 - normalized` so a
+severity rubric scores the way an evaluator expects.
+
+`metadata` carries the raw level, the distribution, `confidence`, and the judge's model id and
+version. That provenance is what lets a regression run attribute a change to the judge rather
+than the agent.
+
+---
+
+## One execution path
+
+Decisions are reached from six places: `step.decide`, `decisionCondition`, `decisionSwitch`,
+`until.decided`, `decisionCompaction`, and `decisionScorer`. They share one execution path, so
+that validation, cancellation, accounting and tracing are decided once rather than six times.
+What they do **not** share is the failure policy, because the right answer genuinely differs by
+caller. Each is stated rather than inherited:
+
+| Caller | On judge failure | Why |
+|---|---|---|
+| `step.decide` | throw | The decision is the step's entire product. |
+| `decisionCondition` | throw | Fabricating `false` is the `aiCondition` bug this replaces, so this one is deliberately not configurable. |
+| `decisionSwitch` | route to `default`, else throw | Matches its own low-confidence behaviour. |
+| `until.decided` | continue, with a reason | A thrown predicate becomes `stop: true`, presenting partial work as finished. |
+| `decisionCompaction` | fail open, keep input items | Losing compaction costs tokens; losing context costs correctness. |
+| `decisionScorer` | scorer error | A `0` score is indistinguishable from a real regression. |
+
+Shared by all six:
+
+- **Validation.** The response is checked against the question map before any caller sees it
+  (`DECISION_ANSWER_INVALID`).
+- **Cancellation.** Every call carries an `AbortSignal`; callers thread their own deadline in.
+- **Deadlines.** Owned by the caller, since only it knows its budget. The compaction layer's
+  0.8x rule is one instance, not the general law.
+- **Accounting.** For the four callers holding a live `Context` (`step.decide`,
+  `decisionCondition`, `decisionSwitch`, `until.decided`), `trackDecisionUsage` folds tokens and
+  cost into `ctx.tokens` / `ctx.cost`. The other two cannot and must not: `decisionCompaction`
+  has only `ExecutionContext` (see below), and `decisionScorer` judges a run that has already
+  finished, so writing judge spend into `execution.context.cost` would retroactively bill the
+  agent for the cost of grading it and corrupt the very `cost` scorer reading that field. A
+  scorer's own spend goes to its `metadata` and the trace, never the scored run's counters.
+- **Tracing.** `decide.*` framework events where a full `Context` exists; span events where
+  only `ExecutionContext` does.
+- **Replay.** Only `step.decide` is ledger-memoized. Conditions, predicates, layer hooks and
+  scorers are re-evaluated on resume, because they are not steps and have no ledger path. A
+  `decisionCondition` inside a replayed `conditional` is not re-asked at all, since the
+  `conditional` replays its recorded branch.
+
+**Calling `client.evaluate` directly is a seventh path, and it is legitimate.** The contract is
+public, and some shapes genuinely need it: a taxonomy walk of unknown depth is a loop over
+requests, not a static step tree. What it forfeits should be explicit rather than discovered.
+Direct use keeps response validation, which lives inside `evaluate`, and gives up the other
+five facilities: no `trackDecisionUsage`, so the spend is invisible to `ctx.cost` and
+`until.maxCost`; no `decide.*` events; no ledger memoization, so a resumed run re-asks and may
+answer differently; and nothing for `discoverFields` to optimize. Reach for it when the shape
+demands it, and prefer a `step.decide` per round when the rounds are bounded.
+
+**Two of those facilities do not reach layer hooks today, and saying so is part of the
+contract.** A hook receives `ExecutionContext`, which carries no `AbortSignal` and whose `cost`
+is a number copied at construction (`exec-context-factory.ts`), not a live counter. So a
+decision made inside `decisionCompaction` cannot be cancelled by the harness and its spend never
+reaches `ctx.cost`, `until.maxCost`, or the eval cost scorer. The layer compensates with its own
+`AbortController` and records spend on its span, which is strictly weaker. Closing the gap means
+giving `ExecutionContext` a signal and live counters, an API change affecting every layer, and
+it belongs to `11-context-layer-system`.
+
+---
+
+## Batching: evaluate once, reuse
+
+Adding questions to a request is close to free, so the protocol's own guidance is to ask
+everything at once and let downstream code ignore what it does not need. The failure mode this
+design has to avoid is the opposite: six helpers on one turn, each opening its own request for
+one question.
+
+`of` is not decoration. `QS` has to reach the reader from a real argument: a lone
+`answer: (r) => r.queue` leaves `QS` inferable only from the callback's own parameter, so
+TypeScript falls back to the `QuestionMap` constraint and `r.queue` widens to a union of every
+answer kind (verified against tsc 5.9.3). Naming the source step fixes the inference and
+documents the data dependency at the same time.
+
+**Three of the six helpers are constructible two ways**: `decisionCondition`, `decisionSwitch`
+and `until.decided` each either **evaluate**, given a `client` and a question, or **read** an
+answer already obtained. The other three cannot, and the reason is structural rather than an
+omission: `step.decide` *is* the evaluation; `decisionCompaction` scores transcript items that
+no prior step asked about; `decisionScorer` judges a finished eval execution, not a step output.
+
+```typescript
+const questions = {
+  urgent:   noul('Does this express urgency?'),
+  queue:    choice('Which queue?', { billing: '...', technical: '...' }),
+  severity: score('How severe?', ['cosmetic', 'degraded', 'outage']),   // speculative: free
+} as const;
+
+const triage = step.decide({ id: 'triage', client, state: (t: Ticket) => t.body, questions });
+
+// Downstream: no further inference. `of` names the step whose answers these read.
+conditional({
+  id: 'route',
+  route: decisionSwitch({
+    of: triage,                        // carries the question map, so `r` is typed
+    answer: (r) => r.queue,
+    minConfidence: 0.7,
+    cases: { billing: billingFlow, technical: technicalFlow },
+    default: askAHuman,
+  }),
+});
+
+when(decisionCondition({ of: triage, answer: (r) => r.urgent, threshold: 0.8 }), escalate);
+```
+
+**Candidate sets have two contracts.** Question ids are the only identity an answer carries, so
+a caller generating questions per candidate must key them by a **stable candidate id**, never by
+position: retrieval returning a different order would otherwise silently reassign every score.
+Duplicate keys are a caller error, and the map literal type makes them unrepresentable. And when
+candidates exceed `client.limits.maxRequestTokens`, page them rather than truncating: each
+`noul` is scored independently against the same state, so probabilities from separate pages are
+comparable and the merged ranking is sound. A `choice` over candidates is not pageable the same
+way, since its options compete within one distribution; use per-candidate `noul` for sets that
+may overflow.
+
+`answer` and `client` are mutually exclusive wherever both exist, and typed as a union so
+supplying both fails to compile. This is ordinary composition
+through the existing `conditional` / `inParallel` / loop APIs rather than a new orchestration
+primitive, which is why automatic cross-turn batching stays future work: authors who want one
+request already have one.
+
+---
+
+## Evaluation and optimization
+
+`decisionScorer` covers using a System One model **as** a judge. The inverse matters too: the
+questions, criteria and thresholds in an agent are prompt surfaces, and they should be
+optimizable like any other.
+
+`discoverFields` walks by step kind and reads named static fields, so `decide` contributes:
+
+| Level | Fields |
+|---|---|
+| L1 | each question's `instructions`, and its `criteria` prose |
+| L2 | `model`, and the numeric cut-points a caller applies (`threshold`, `minConfidence`) |
+| L3 | topology, as for other kinds |
+
+Only a **literal** `questions` map is discoverable. A projector is opaque to the walker, so a
+dynamic question set trades automatic optimization for runtime flexibility; `discoverFields`
+reports zero fields for that step rather than pretending otherwise.
+
+**Judge provenance is recorded** on every decision: model id and resolved version, in scorer
+`metadata` and on the trace. Without it, a regression run cannot tell an agent that got worse
+from a judge that changed underneath it, and a silent `jev-latest` bump would read as an agent
+regression. This is also why `jev()` resolves and records the concrete version behind an alias
+rather than storing the alias.
 
 ---
 
 ## JSON workflow
 
 `kind: 'decide'` joins the `WorkflowNode` union. The node names its client by key, resolved from
-a `systemOneClients` registry on the hydration context — the same open-registry shape as
-`acpAgents` — so a document can never name a base URL or carry a key.
+a `systemOneClients` registry on the hydration context (the same open-registry shape as
+`acpAgents`), so a document can never name a base URL or carry a key.
 
 ### State in, string out
 
@@ -557,8 +841,8 @@ export const UNSTABLE_WORKFLOW_NODES: Readonly<Record<string, string>> = {
 ```
 
 A helper emits, for each listed kind, a `description` prefixed `UNSTABLE:` with the same
-`Graduates when:` clause the JSDoc convention uses — the channel editors actually surface on
-hover — and an `x-noetic-stability: "unstable"` annotation for tooling (Zod 4's `.meta()`
+`Graduates when:` clause the JSDoc convention uses (the channel editors actually surface on
+hover), and an `x-noetic-stability: "unstable"` annotation for tooling (Zod 4's `.meta()`
 carries both through `toJSONSchema`). The schema drift-gate test asserts both published copies
 carry them for every listed kind and for no other. Graduating a node deletes one map entry.
 
@@ -571,7 +855,7 @@ Beyond `.claude/rules/testing.md`:
 1. Every error kind in the mapping table has a negative test asserting `e.noeticError.kind`.
 2. Property test over generated transcripts: **no `function_call_output` survives without its
    `function_call`**.
-3. **Kept items are byte-identical** to their inputs — the anti-summarization invariant.
+3. **Kept items are byte-identical** to their inputs, the anti-summarization invariant.
 4. Fail-open: a throwing client yields the input items unchanged.
 5. A timed-out compaction **aborts its in-flight request**, asserted through the real
    `projectHistoryLayers` wrapper with slow-preprocessing and slow-client doubles: the client's
@@ -600,8 +884,9 @@ refinement ledger.
   provider must not force a rename.
 - **Hand-rolled HTTP transport.** The official SDK is zero-dependency, already ships the
   machinery, and reaches self-hosted endpoints via `baseURL`.
-- **Re-exporting the SDK's question builders.** Provably fails to typecheck against the contract
-  in both directions, and a re-export has no seam to absorb pre-1.0 churn.
+- **Re-exporting the SDK's question builders.** An SDK-built question does not satisfy the
+  contract (see "The adapter" for the measured direction and version), and a re-export has no
+  seam for response validation or pre-1.0 churn.
 - **Lazy `jev()` construction.** Would move a missing credential into a fail-open hook and make
   it a permanent silent no-op; the repo's factories fail eagerly.
 - **Multi-batch compaction.** K batches re-send the state K times, worst exactly when the
@@ -618,7 +903,7 @@ refinement ledger.
   JSON form: documents fail validation, need a second `$schema`, then a rewrite at graduation.
 - **Tool-call guardrails.** The `beforeToolCall` contract denies on timeout, so a fail-closed
   gate backed by a hosted model makes third-party latency a hard ceiling on tool execution.
-  Revisiting needs a bounded staleness cache or allowlist bypass — its own spec.
+  Revisiting needs a bounded staleness cache or allowlist bypass, which is its own spec.
 
 ---
 
@@ -633,6 +918,3 @@ refinement ledger.
 - **Calibration harness.** An eval suite measuring a backend's calibration error on the user's
   own data. A precondition for a default `keepThreshold` and for graduating the compaction
   layer.
-- **Cancellation reaching layer hooks.** `ExecutionContext` carries no abort signal, so a
-  cancelled execution mid-compaction runs until the layer's own deadline. A gap in the hook
-  contract; belongs in `11-context-layer-system`.
