@@ -30,8 +30,53 @@ export interface StdioAgentSpec {
  * host's logs instead of vanishing.
  * @public
  */
+const GRACE_MS = 750;
+
+/** Stop a launcher and its descendants without signaling the host's process group. */
+function signalTree(pid: number | undefined, signal: NodeJS.Signals): void {
+  if (!pid) {
+    return;
+  }
+  try {
+    if (process.platform === 'win32') {
+      // taskkill handles a wrapped executable's descendants; /F is the force step.
+      const killer = spawn(
+        'taskkill',
+        [
+          '/PID',
+          String(pid),
+          '/T',
+          ...(signal === 'SIGKILL'
+            ? [
+                '/F',
+              ]
+            : []),
+        ],
+        {
+          stdio: 'ignore',
+          windowsHide: true,
+        },
+      );
+      killer.on('error', () => undefined);
+      killer.unref();
+    } else {
+      process.kill(-pid, signal); // detached child is leader of its own group
+    }
+  } catch (error) {
+    if (!(error && typeof error === 'object' && 'code' in error && error.code === 'ESRCH')) {
+      throw error;
+    }
+  }
+}
+
 export function stdioAcpTransport(spec: StdioAgentSpec): AcpTransportFactory {
   return async (opts): Promise<AcpTransport> => {
+    if (opts.signal?.aborted) {
+      throw new AcpConnectError({
+        agentId: spec.agentId,
+        message: `ACP agent '${spec.agentId}' was cancelled before launch.`,
+      });
+    }
     const child = spawn(
       spec.command,
       [
@@ -49,48 +94,77 @@ export function stdioAcpTransport(spec: StdioAgentSpec): AcpTransportFactory {
           'pipe',
           'inherit',
         ],
+        detached: process.platform !== 'win32',
+        windowsHide: true,
       },
     );
-
+    // Keep the error listener through close. ENOENT is emitted asynchronously.
+    let spawnError: Error | undefined;
+    child.on('error', (error: Error) => {
+      spawnError = error;
+    });
     const stdin = child.stdin;
     const stdout = child.stdout;
+    let closePromise: Promise<void> | undefined;
+    const stop = (): Promise<void> => {
+      if (closePromise) {
+        return closePromise;
+      }
+      opts.signal?.removeEventListener('abort', onAbort);
+      // Destroy pipes now even if the launcher ignores TERM or a grandchild
+      // holds stdout open. This also releases blocked readers and writers.
+      stdin?.destroy();
+      stdout?.destroy();
+      closePromise = new Promise<void>((resolve) => {
+        if (!child.pid) {
+          resolve();
+          return;
+        }
+        // Give cooperative agents time to exit, then kill the whole process
+        // group, including descendants that inherited the stdio pipes.
+        try {
+          signalTree(child.pid, 'SIGTERM');
+        } catch {
+          /* force below */
+        }
+        const grace = setTimeout(() => {
+          try {
+            signalTree(child.pid, 'SIGKILL');
+          } catch {
+            /* bounded cleanup */
+          }
+          resolve();
+        }, GRACE_MS);
+        // Keep this timer referenced so close() cannot resolve by process exit
+        // before descendant cleanup. The timeout bounds close even if ignored.
+        void grace;
+      });
+      return closePromise;
+    };
+    const onAbort = () => {
+      void stop();
+    };
     if (!stdin || !stdout) {
-      child.kill();
+      await stop();
       throw new AcpConnectError({
         agentId: spec.agentId,
         message: `ACP agent '${spec.agentId}' was spawned without usable stdio pipes.`,
       });
     }
-
-    // A missing binary surfaces asynchronously on the child, long after spawn()
-    // returned. Capture it so the failure is reported against the agent rather
-    // than escaping as an unhandled 'error' event.
-    let spawnError: Error | undefined;
-    child.once('error', (error: Error) => {
-      spawnError = error;
-    });
-
-    const onAbort = () => {
-      child.kill();
-    };
     opts.signal?.addEventListener('abort', onAbort, {
       once: true,
     });
-
-    let closed = false;
+    const readable = frameworkCast<ReadableStream<Uint8Array>>(Readable.toWeb(stdout));
+    const writable = frameworkCast<WritableStream<Uint8Array>>(Writable.toWeb(stdin));
+    // Abort may race with listener installation after spawn.
+    if (opts.signal?.aborted) {
+      onAbort();
+    }
     return {
-      // `node:stream`'s web-stream types are structurally the same as the
-      // global ones but nominally distinct, so the bridge is cast once here
-      // rather than leaking a Node-specific type through the transport contract.
-      readable: frameworkCast<ReadableStream<Uint8Array>>(Readable.toWeb(stdout)),
-      writable: frameworkCast<WritableStream<Uint8Array>>(Writable.toWeb(stdin)),
+      readable,
+      writable,
       async close() {
-        if (closed) {
-          return;
-        }
-        closed = true;
-        opts.signal?.removeEventListener('abort', onAbort);
-        child.kill();
+        await stop();
         if (spawnError) {
           throw new AcpConnectError({
             agentId: spec.agentId,
