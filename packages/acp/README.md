@@ -43,7 +43,7 @@ Because every ACP agent is a uniform JSON-RPC peer, there is no vendor SDK per a
 import { claudeCode, codex, gemini, opencode, pi, customAcpAgent } from '@noetic-tools/acp';
 ```
 
-Each preset is only a launch recipe (which binary, which flags) and accepts `command` / `args` / `env` overrides plus a `transport` for agents that are not local child processes. opencode speaks ACP natively; pi is reached through the community `pi-acp` adapter. `customAcpAgent({ agentId, command, args })` covers anything else that speaks the protocol.
+Each preset is only a launch recipe (which binary, which flags) and accepts `command` / `args` / `env` overrides plus a `transport` for agents that are not local child processes. `claudeCode()` launches `npx -y @agentclientprotocol/claude-agent-acp` (Node 22 or newer); `codex()` launches `npx -y @agentclientprotocol/codex-acp`. The default recipes fetch packages through `npx` and may require provider sign-in or credentials. Use an explicit `command` or `transport` to supply a locally managed agent instead. opencode speaks ACP natively; pi is reached through the community `pi-acp` adapter. `customAcpAgent({ agentId, command, args })` covers anything else that speaks the protocol.
 
 ## Entry points
 
