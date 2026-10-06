@@ -72,7 +72,7 @@ export interface AttachCompletionArgs {
  * once the handle is registered (so the `on('close')` callback can
  * close over the factory's handle map + save/clearIfDurable closures).
  */
-export function spawnStepChild(args: SpawnStepChildArgs): SpawnStepChildResult {
+export async function spawnStepChild(args: SpawnStepChildArgs): Promise<SpawnStepChildResult> {
   let asyncSpawnError: unknown = null;
   const child = args.spawnFn(args.bootstrapCommand, args.bootstrapArgs, {
     cwd: args.request.overrides.cwdInit,
@@ -100,7 +100,7 @@ export function spawnStepChild(args: SpawnStepChildArgs): SpawnStepChildResult {
   }
 
   const pid = child.pid;
-  const pidStarttime = args.signaller.startTime(pid);
+  const pidStarttime = await args.signaller.startTime(pid);
 
   // Write the request envelope to stdin as a single newline-terminated JSON
   // frame. The child parses one frame on boot.

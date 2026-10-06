@@ -175,6 +175,13 @@ interface ClientState {
   buffer: string;
   /** Whether this client has issued `subscribe`. */
   subscribed: boolean;
+  /**
+   * Per-client dispatch chain. Frames from one client execute strictly in
+   * arrival order — a `send` and an `abort` in one TCP chunk must not race,
+   * and two `send`s must reach `harness.execute` in the order sent. A fire-
+   * and-forget `void dispatchLine(...)` per line gave no such guarantee.
+   */
+  dispatchChain: Promise<void>;
 }
 
 interface FrameContext {
@@ -194,6 +201,17 @@ type FrameHandler = (frame: ClientFrame, ctx: FrameContext) => Promise<void>;
  * that works on macOS works everywhere we care about.
  */
 const MAX_UNIX_SOCKET_PATH_BYTES = 104;
+
+/**
+ * Disconnect a client whose kernel-side socket buffer backs up past this
+ * many bytes. A stalled consumer (TUI suspended with ^Z, dead SSH hop)
+ * otherwise makes Node buffer every broadcast frame in process memory,
+ * unbounded, while both stream pumps keep producing. Disconnecting is the
+ * safe move in both modes: a durable client resumes by seq via
+ * `durableResume` replay and loses nothing; a non-durable client was
+ * always best-effort streaming.
+ */
+const MAX_SOCKET_BUFFERED_BYTES = 4 * 1024 * 1024;
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -243,6 +261,18 @@ function writeFrame(socket: Socket, frame: ServerFrame): void {
   }
   try {
     socket.write(encodeFrame(frame));
+    /* Backpressure guard: `write()` returning false just means "buffering";
+     * that's fine transiently. What is NOT fine is a consumer that never
+     * drains — cap the buffered bytes and cut the connection. The client's
+     * `close` handler removes it from the set; a durable client reconnects
+     * and resumes by seq. */
+    if (socket.writableLength > MAX_SOCKET_BUFFERED_BYTES) {
+      socket.destroy(
+        new Error(
+          `agent-ipc-server: client write buffer exceeded ${MAX_SOCKET_BUFFERED_BYTES} bytes (stalled consumer)`,
+        ),
+      );
+    }
   } catch {
     // Synchronous write throw is rare but possible (e.g. socket entered
     // an erroring state between the `destroyed` check and the call).
@@ -673,6 +703,7 @@ export class AgentIpcServer {
       socket,
       buffer: '',
       subscribed: false,
+      dispatchChain: Promise.resolve(),
     };
     this.clients.add(client);
     socket.setEncoding('utf8');
@@ -702,7 +733,13 @@ export class AgentIpcServer {
       const line = client.buffer.slice(0, nl);
       client.buffer = client.buffer.slice(nl + 1);
       if (line.length > 0) {
-        void this.dispatchLine(client, line);
+        /* Serialize per client: each frame's handler runs after the previous
+         * one settles, so frames arriving in one chunk keep their order
+         * (send-then-abort, send-then-send). dispatchLine never rejects
+         * (its own catch writes an error frame), but chain through catch
+         * anyway so an unexpected throw can't wedge the chain. */
+        const next = client.dispatchChain.then(() => this.dispatchLine(client, line));
+        client.dispatchChain = next.catch(() => undefined);
       }
       nl = client.buffer.indexOf('\n');
     }
@@ -745,6 +782,13 @@ export class AgentIpcServer {
         error: {
           kind: 'handler_error',
           message: errorMessage(err),
+          // Correlate send failures so the client rejects only the matching
+          // ack waiter — other in-flight sends may have executed fine.
+          ...(frame.type === 'send'
+            ? {
+                messageId: frame.messageId,
+              }
+            : {}),
         },
       });
     }

@@ -544,15 +544,25 @@ export class AgentIpcClient {
     if (frame.type === 'error') {
       // Error frames are non-fatal: a single bad frame from a peer or a
       // transient handler exception should not tear down the chat
-      // connection. Surface to any in-flight `send` ack waiter so that
-      // call rejects, and stash the error so callers can inspect it via
+      // connection. Stash the error so callers can inspect it via
       // `getLastError()`. Streaming continues.
       const err = new Error(`server error (${frame.error.kind}): ${frame.error.message}`);
       this.lastError = err;
-      // Server only emits acks against `send`; the only deferred we can
-      // reasonably correlate is one of the pending send waiters. Without
-      // a messageId on the error frame we can't pinpoint which — fail
-      // them all so a chained `await client.send(...)` doesn't hang.
+      const correlatedId = frame.error.messageId;
+      if (correlatedId !== undefined) {
+        // The server told us exactly which send failed — reject only that
+        // waiter. Other in-flight sends may have executed fine; failing
+        // them too made callers retry messages that already ran.
+        const pending = this.pendingAcks.get(correlatedId);
+        if (pending) {
+          this.pendingAcks.delete(correlatedId);
+          pending.reject(err);
+        }
+        return;
+      }
+      // Uncorrelated error (unparseable frame, non-send handler): we can't
+      // pinpoint a waiter, so fail them all rather than hang a chained
+      // `await client.send(...)`.
       for (const pending of this.pendingAcks.values()) {
         pending.reject(err);
       }

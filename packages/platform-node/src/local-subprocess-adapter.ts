@@ -1,4 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import type {
   ProcessSubprocessRequest,
@@ -68,7 +69,36 @@ function isErrnoException(err: unknown): err is NodeJS.ErrnoException {
   return typeof err === 'object' && err !== null && 'code' in err;
 }
 
+/**
+ * Linux fast path: field 22 of `/proc/<pid>/stat` is the process start time
+ * in clock ticks since boot — a stable pid-recycle discriminator readable in
+ * microseconds, vs ~10ms to fork `ps`. The value only needs to be a stable
+ * identity token (compared for equality against the persisted manifest),
+ * not a human-readable date, so the raw tick count is fine. Fields are
+ * located from the LAST `)` because field 2 (comm) can itself contain
+ * spaces and parens.
+ */
+function readProcStatStartTime(pid: number): string | null {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const afterComm = stat.slice(stat.lastIndexOf(')') + 2);
+    const fields = afterComm.split(' ');
+    // afterComm starts at field 3 ("state"), so starttime (field 22) is index 19.
+    const starttime = fields[19];
+    return starttime && starttime.length > 0 ? `proc:${starttime}` : null;
+  } catch {
+    return null;
+  }
+}
+
 function readPidStartTime(pid: number): string | null {
+  if (process.platform === 'linux') {
+    const viaProc = readProcStatStartTime(pid);
+    if (viaProc !== null) {
+      return viaProc;
+    }
+    // Fall through to ps — /proc may be restricted (containers, hardening).
+  }
   try {
     const out = execFileSync(
       'ps',
@@ -234,7 +264,7 @@ export function createLocalSubprocessAdapter(
 
     const now = nowIso();
     const pid = child.pid;
-    const pidStarttime = signaller.startTime(pid);
+    const pidStarttime = await signaller.startTime(pid);
     const handle = await save({
       id: `subprocess-${crypto.randomUUID()}`,
       status: 'running',
@@ -328,7 +358,7 @@ export function createLocalSubprocessAdapter(
       );
     }
 
-    const spawned = spawnStepChild({
+    const spawned = await spawnStepChild({
       spawnFn,
       signaller,
       request,
@@ -470,7 +500,7 @@ export function createLocalSubprocessAdapter(
       if (!manifest) {
         return null;
       }
-      const handle = hydrateFromManifest(manifest, signaller);
+      const handle = await hydrateFromManifest(manifest, signaller);
       if (!handle) {
         // Pid drift or process gone — clear the stale manifest so
         // subsequent listLive calls don't re-surface it forever.
@@ -492,11 +522,18 @@ export function createLocalSubprocessAdapter(
       }
       if (storage) {
         const manifests = await listLocalManifests(storage);
-        for (const manifest of manifests) {
-          if (live.has(manifest.handleId)) {
-            continue;
-          }
-          const hydrated = hydrateFromManifest(manifest, signaller);
+        const candidates = manifests.filter((m) => !live.has(m.handleId));
+        /* Hydrate in parallel: each check may read /proc or fork `ps`, and a
+         * restart with N persisted manifests paid them serially before. Each
+         * result carries its own manifest so the pairing survives the reorder
+         * a bare `Promise.all` over handles would invite. */
+        const hydratedAll = await Promise.all(
+          candidates.map(async (manifest) => ({
+            manifest,
+            hydrated: await hydrateFromManifest(manifest, signaller),
+          })),
+        );
+        for (const { manifest, hydrated } of hydratedAll) {
           if (!hydrated) {
             await clearIfDurable(manifest.handleId);
             continue;
