@@ -1,7 +1,7 @@
 # Context and Item Log
 
 > **Depends On:** `06-channels` (Channel — for send/recv/tryRecv signatures), `08-runtime` (AgentHarness — for harness reference), `10-observability` (Span)
-> **Exports:** `Context`, `ItemLog`, `Item`, `OutputItem`, `MessageItem`, `FunctionCallItem`, `FunctionCallOutputItem`, `ReasoningItem`, `WebSearchItem`, `FileSearchItem`, `ImageGenerationItem`, `ServerToolItem`, `InputMessageItem`, `ContentPart`, `OutputTextPart`, `RefusalPart`, `InputTextPart`, `InputImagePart`, `InputFilePart`, `InputContentPart`, `ReasoningTextPart`, `SummaryTextPart`, `StepMeta`, `TokenUsage`, `LLMResponse`, `LayerUsageEntry`, `LastLayerUsage`
+> **Exports:** `Context`, `ItemLog`, `Item`, `OutputItem`, `MessageItem`, `FunctionCallItem`, `FunctionCallOutputItem`, `ReasoningItem`, `WebSearchItem`, `FileSearchItem`, `ImageGenerationItem`, `ServerToolItem`, `InputMessageItem`, `ContentPart`, `OutputTextPart`, `RefusalPart`, `InputTextPart`, `InputImagePart`, `InputFilePart`, `InputContentPart`, `ReasoningTextPart`, `SummaryTextPart`, `CompactionItem`, `COMPACTION_ITEM_TYPE`, `StepMeta`, `TokenUsage`, `LLMResponse`, `LayerUsageEntry`, `LastLayerUsage`
 
 ---
 
@@ -220,6 +220,28 @@ type Item = OutputItem | InputMessageItem | FunctionCallOutputItem;
 ```
 
 Server tool items use the `prefix:name` convention established by the OpenResponses `ResponsesServerToolOutput` type. The prefix identifies the vendor or domain (e.g., `openrouter`, `noetic`, `myapp`) and the name identifies the specific item kind. None of the standard item types contain a colon, so the presence of `:` in the type string cleanly distinguishes server tool outputs from standard items.
+
+### Framework-owned Records: `CompactionItem`
+
+```typescript
+const COMPACTION_ITEM_TYPE = 'noetic:compaction';
+
+interface CompactionItem {
+  readonly id: string;
+  readonly type: typeof COMPACTION_ITEM_TYPE;
+  readonly status: 'completed';
+  /** Item-log index (exclusive) up to which history is replaced by `summary`. */
+  readonly replacesUntil: number;
+  /** The compacted summary of the replaced items. */
+  readonly summary: string;
+  /** Count of items replaced, for diagnostics. */
+  readonly replacedCount: number;
+  /** Estimated tokens saved by this compaction, for diagnostics. */
+  readonly tokensSaved?: number;
+}
+```
+
+A compaction record is a framework item, deliberately **outside** the `Item` union — nothing renders it directly; the projector folds it (see spec 11, *History Compaction*). It is registered with the strict item-schema registry (`isKnownBaseType`) so it can be appended to a real `ItemLog` — recording compaction in the log rather than in engine state is what makes it survive checkpoint/resume and shared by forked logs. The allowance is a single-type exception: other unknown `noetic:*` types are still rejected.
 
 ---
 

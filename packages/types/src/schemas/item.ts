@@ -21,6 +21,7 @@
 import { z } from 'zod';
 import { NoeticErrorImpl } from '../errors/noetic-error';
 import type { Item, ItemSchemaExtensions } from '../types/items';
+import { COMPACTION_ITEM_TYPE } from '../types/items';
 
 function isItemLike(value: unknown): value is Item {
   if (typeof value !== 'object' || value === null) {
@@ -100,6 +101,16 @@ function relevantCategories(value: unknown): ItemSchemaCategory[] {
   return categories;
 }
 
+const CompactionItemSchema = z.object({
+  id: z.string().min(1),
+  type: z.literal(COMPACTION_ITEM_TYPE),
+  status: z.literal('completed'),
+  replacesUntil: z.number().int().nonnegative(),
+  summary: z.string(),
+  replacedCount: z.number().int().nonnegative(),
+  tokensSaved: z.number().nonnegative().optional(),
+});
+
 function isKnownBaseType(type: string): boolean {
   return (
     type === 'message' ||
@@ -109,6 +120,12 @@ function isKnownBaseType(type: string): boolean {
     type === 'web_search_call' ||
     type === 'file_search_call' ||
     type === 'image_generation_call' ||
+    // A compaction record is a framework item, not a provider item: it is
+    // deliberately outside the `Item` union (nothing renders it directly — the
+    // projector folds it), but it MUST be appendable to a real item log or
+    // compaction cannot survive a checkpoint, which is the whole point of
+    // recording it in the log rather than in engine state.
+    type === COMPACTION_ITEM_TYPE ||
     type.startsWith('openrouter:')
   );
 }
@@ -153,6 +170,10 @@ export class ItemSchemaRegistry {
 
   parse(value: unknown): Item {
     const base = ItemSchema.parse(value);
+    if (base.type === COMPACTION_ITEM_TYPE) {
+      CompactionItemSchema.parse(value);
+      return base;
+    }
     const categories = relevantCategories(base);
     const schemas = categories.flatMap((category) => schemasForCategory(this.extensions, category));
 

@@ -254,6 +254,31 @@ interface FunctionCallOutputItem {
 | `output` | `string` | JSON-encoded tool output |
 | `status` | `string` | Lifecycle status. Includes `failed` as a Noetic extension. |
 
+### CompactionItem
+
+A recorded history compaction: a summary that replaces a contiguous prefix of conversation history. Deliberately **outside** the `Item` union — nothing renders it directly; the projector folds it (`foldCompactions`). It is registered with the strict item-schema registry so it can live in the `ItemLog`, which is what lets compaction survive checkpoint/resume and be shared by forked logs. See [History](../context-layers/history.mdx#compaction).
+
+```ts validate=none
+const COMPACTION_ITEM_TYPE = 'noetic:compaction';
+
+interface CompactionItem {
+  readonly id: string;
+  readonly type: typeof COMPACTION_ITEM_TYPE;
+  readonly status: 'completed';
+  readonly replacesUntil: number;
+  readonly summary: string;
+  readonly replacedCount: number;
+  readonly tokensSaved?: number;
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `replacesUntil` | `number` | Item-log index (exclusive) up to which history is replaced by `summary` |
+| `summary` | `string` | The compacted summary of the replaced items |
+| `replacedCount` | `number` | Count of items replaced (diagnostics) |
+| `tokensSaved` | `number` | Estimated tokens saved, floored at 0 (diagnostics, optional) |
+
 ### Item Union
 
 All item types that can appear in an `ItemLog`:
@@ -412,6 +437,7 @@ In addition to OpenResponses streaming events, Noetic emits framework-level even
 | `{name}:tool_call_started` | Before each tool call | `name`, `callId` |
 | `{name}:tool_call_completed` | After each tool call | `name`, `callId`, `error` |
 | `{name}:tool_round_completed` | After all tool calls in a round | `round`, `toolCount` |
+| `{name}:context_pressure` | Folded history crossed the projection policy's `compactAt` threshold — emitted once per `callModel` step execution, only on a real crossing | `nodeId`, `historyTokens`, `compactAt` |
 
 Framework events are available through `harness.execute(input).getFullStream()` alongside SDK events. They can be distinguished by the `source` field:
 

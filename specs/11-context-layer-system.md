@@ -2,7 +2,7 @@
 
 > **Module:** `@noetic-tools/context` (source at `packages/context/src/**`); the `ContextLayer` contract is owned by `@noetic-tools/types` (`packages/types/src/types/context-layer.ts`, also at the `@noetic-tools/types/contract` subpath). Both are re-exported by `@noetic-tools/core`.
 > **Depends On:** `07-context-and-event-log` (ItemLog, Item — type import only), `10-observability` (LayerTraceSpan, trace conventions), `04-spawn` (SpawnOpts — referenced in SpawnParams)
-> **Exports:** `ContextLayer`, `ContextLayerHooks`, `ContextScope`, `BudgetConfig`, `Slot`, `InitParams`, `InitResult`, `RecallParams`, `RecallResult`, `StoreParams`, `StoreResult`, `SpawnParams`, `SpawnResult`, `ReturnParams`, `ReturnResult`, `CompleteParams`, `DisposeParams`, `BeforeToolCallParams`, `BeforeToolCallResult`, `AfterModelCallParams`, `AfterModelCallResult`, `OnItemAppendParams`, `OnItemAppendResult`, `RerenderScope`, `ParentUpdateParams`, `ParentUpdateResult`, `ExecutionOutcome`, `ExecutionContext`, `ScopedStorage`, `StorageAdapter`, `ProjectionPolicy`, `LayerTimeouts`, `LayerProvides`, `LayerDataDecl`, `LayerFunctionDecl`, `ContextConfig`, `InferContext`, `InferContextShape`, `layerData`, `layerFunction`, `context`, `storageGetMany`, `LayerPlacement`, `RenderDeltaParams`, `ContextCacheConfig`, `ContextCacheStore`, `ContextEpoch`, `AnchorPin`, `LayerChurn`, `ReanchorReason`
+> **Exports:** `ContextLayer`, `ContextLayerHooks`, `ContextScope`, `BudgetConfig`, `Slot`, `InitParams`, `InitResult`, `RecallParams`, `RecallResult`, `StoreParams`, `StoreResult`, `SpawnParams`, `SpawnResult`, `ReturnParams`, `ReturnResult`, `CompleteParams`, `DisposeParams`, `BeforeToolCallParams`, `BeforeToolCallResult`, `AfterModelCallParams`, `AfterModelCallResult`, `OnItemAppendParams`, `OnItemAppendResult`, `RerenderScope`, `ParentUpdateParams`, `ParentUpdateResult`, `ExecutionOutcome`, `ExecutionContext`, `ScopedStorage`, `StorageAdapter`, `ProjectionPolicy`, `LayerTimeouts`, `LayerProvides`, `LayerDataDecl`, `LayerFunctionDecl`, `ContextConfig`, `InferContext`, `InferContextShape`, `layerData`, `layerFunction`, `context`, `storageGetMany`, `LayerPlacement`, `RenderDeltaParams`, `ContextCacheConfig`, `ContextCacheStore`, `ContextEpoch`, `AnchorPin`, `LayerChurn`, `ReanchorReason`, `foldCompactions`, `hasCompaction`, `historyPressure`, `HistoryPressure`, `createCompaction`, `CreateCompactionParams`, `compactHistory`, `CompactHistoryParams`, `compactionAsItem`
 
 ## Module Boundary
 
@@ -14,7 +14,7 @@ The context layer system lives in `@noetic-tools/context` (`packages/context/src
 | `ContextScope`, `ScopedStorage`, `StorageAdapter` | Projector (View assembly algorithm) in `projector.ts` |
 | `BudgetConfig`, `Slot` | budget algorithm; `allocateBudgets` in `budget.ts` |
 | `ExecutionContext` (layer-facing read-only view) | built-in layer factories under `context/layers/` |
-| `ProjectionPolicy` | Projector implementation in `projector.ts` |
+| `ProjectionPolicy` | Projector implementation in `projector.ts` (incl. the compaction helpers: `foldCompactions`, `historyPressure`, `createCompaction`, `compactHistory`, `hasCompaction`, `compactionAsItem`) |
 
 `Context` (the full execution object) lives in `@noetic-tools/core`'s `runtime/`; the `contextToExecCtx` mapping (Context → ExecutionContext) bridges core to the context contract.
 
@@ -758,6 +758,8 @@ interface ProjectionPolicy {
   overflow: 'truncate' | 'summarize' | 'sliding_window';
   overflowModel?: string;
   windowSize?: number;
+  compactAt?: number;  // folded-history token threshold that arms compaction;
+                       // defaults to 80% of (tokenBudget - responseReserve)
 }
 ```
 
@@ -773,6 +775,19 @@ interface ProjectionPolicy {
 6. Conversation history gets the remaining budget, with overflow policy applied
 7. Result is Item[] — directly passable to the LLM provider
 ```
+
+### History Compaction
+
+The item log is append-only; a **compaction** is an ordinary logged item (a `CompactionItem`, spec 07) declaring "the first `replacesUntil` items are summarized by `summary`". Folding keeps the log immutable — checkpoints, forks, and audits see the full record — while the model sees `[summary, ...items after replacesUntil]`. The projector owns the pure helpers; recording a compaction is always an explicit, caller-driven decision, never something the projector does behind the runtime's back.
+
+- `foldCompactions(items)` — projects the model view from the raw log. When multiple compactions exist the highest `replacesUntil` wins (later compactions subsume earlier ones). The replaced prefix collapses to a rendered `<compacted_history>` developer message; compaction records themselves never appear in the folded view, so one never reaches a provider un-folded. The fold seam strips unresolved tool calls, the same repair the history trimmer applies. Run it on history **before** the band assembler so a compaction genuinely reduces what `assembleView` has to fit.
+- `hasCompaction(items)` — cheap check that lets a caller skip the fold (and its copy) on the common no-compaction path.
+- `historyPressure(historyItems, policy)` — measures the **folded** history against `policy.compactAt` (default 80% of `tokenBudget − responseReserve`) and reports `{ historyTokens, compactAt, overThreshold }`. Measuring the folded view means writing a compaction genuinely relieves pressure. This is the observable complement of the assembler's silent front-drop: it says when the trim is coming so the caller can compact instead of losing the prefix.
+- `createCompaction({ items, replacesUntil, summary })` — builds the record (`replacedCount` + `tokensSaved` bookkeeping, floored at 0). The caller supplies the summary — an LLM call, a heuristic, or a verbatim digest; summarization is a composition point, not engine policy. `replacesUntil` indexes the RAW log, including earlier compaction items, so stacking compactions is well-defined.
+- `compactHistory({ log, keepRecent, summarize })` — thin convenience: works out `replacesUntil` from `keepRecent`, awaits `summarize` on exactly the replaced prefix, and returns the record for the **caller** to append (`ctx.itemLog.append(...)`). Returns `null` when there is nothing to compact.
+- `compactionAsItem(compaction)` — the one sanctioned bridge from `CompactionItem` to the `Item` that `ItemLog.append` takes; the type is registered with the schema registry so the append validates.
+
+The runtime applies the fold on every model request path. `callModel` assembly folds the projected log **before** the system/history partition — `replacesUntil` indexes the raw log, so folding a system-stripped array would drift the cut point and silently eat live turns; system items are hoisted from pre-fold positions so a compaction whose covered prefix includes the system prompt still leaves the model its instructions. The no-layers path folds the raw log directly, and `previewRequestItems` folds identically, so a preview never shows the raw record in place of the summary the model would actually read. When the folded history still exceeds `compactAt`, the step emits one `context_pressure` framework event (`{ nodeId, historyTokens, compactAt }`, spec 08) per execution, measured post-fold so writing a compaction genuinely relieves the pressure.
 
 ---
 
@@ -886,7 +901,7 @@ Set on the harness as `contextCache`. Anchoring is **on by default**; `enabled: 
 
 ### Limitation: History Overflow
 
-Once conversation history exceeds its budget, the projector drops from the front, which moves the anchor/history boundary and loses the history portion of the cache on every subsequent turn. The `[system][anchor]` prefix still caches. Pair anchoring with `history` (spec 12) to keep the boundary still.
+Once conversation history exceeds its budget, the projector drops from the front, which moves the anchor/history boundary and loses the history portion of the cache on every subsequent turn. The `[system][anchor]` prefix still caches. Pair anchoring with `history` (spec 12) to keep the boundary still, or record a compaction so the prefix collapses to a stable summary instead of sliding.
 
 ### Hard Token Cap (`assembleView`)
 

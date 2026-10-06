@@ -284,6 +284,7 @@ interface ProjectionPolicy {
   overflow: 'truncate' | 'summarize' | 'sliding_window';
   overflowModel?: string;
   windowSize?: number;
+  compactAt?: number;
 }
 ```
 
@@ -294,6 +295,7 @@ interface ProjectionPolicy {
 | `overflow` | `'truncate' \| 'summarize' \| 'sliding_window'` | yes | Strategy when total recall exceeds budget |
 | `overflowModel` | `string` | no | Model for summarization overflow |
 | `windowSize` | `number` | no | Items to keep for sliding window overflow |
+| `compactAt` | `number` | no | Folded-history token threshold that arms compaction; `historyPressure` reports `overThreshold` above it. Defaults to 80% of `tokenBudget − responseReserve` |
 
 ## ContextCacheConfig
 
