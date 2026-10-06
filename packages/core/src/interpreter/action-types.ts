@@ -1,6 +1,6 @@
 export type {
-  ContextConfig,
   ContextData,
+  ContextInput,
   ContextLayer,
   ExecutionContext,
 } from '@noetic-tools/context';

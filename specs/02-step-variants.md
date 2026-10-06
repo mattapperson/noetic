@@ -256,9 +256,11 @@ Attaches context layers to a descendant step subtree without creating an isolate
 interface StepWithContextOpts<TContext, I, O> {
   id: string;
   child: Step<TContext, I, O>;
-  context: ContextConfig | ContextLayer[];
+  context: ContextInput;
 }
 ```
+
+`ContextInput` is `ReadonlyArray<ContextLayer> | { readonly layers: ReadonlyArray<ContextLayer> }` — a bare layer list or anything carrying one, notably the `ContextConfig` that `context()` returns. It is spelled structurally rather than as `ContextConfig | ContextLayer[]` because `ContextConfig` is invariant in its `TLayers` parameter (the phantom `_shape` field), so the concrete config `context()` infers is not assignable to the defaulted `ContextConfig<readonly ContextLayer[]>`.
 
 ```typescript
 const withContextLayers = withContext({

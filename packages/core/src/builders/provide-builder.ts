@@ -1,4 +1,4 @@
-import type { ContextConfig, ContextData, ContextLayer } from '@noetic-tools/context';
+import type { ContextData, ContextInput } from '@noetic-tools/context';
 import type { Step, StepWithContext } from '@noetic-tools/types';
 import { NoeticConfigError } from '@noetic-tools/types';
 import { getDefaultRegistrar } from '../types/step-registrar';
@@ -19,7 +19,7 @@ import { getDefaultRegistrar } from '../types/step-registrar';
 export function withContext<TContext = ContextData, I = unknown, O = unknown>(opts: {
   id: string;
   child: Step<TContext, I, O>;
-  context: ContextConfig | ContextLayer[];
+  context: ContextInput;
 }): StepWithContext<TContext, I, O> {
   if (!opts.id?.trim()) {
     throw new NoeticConfigError({

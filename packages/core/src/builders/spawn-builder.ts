@@ -1,4 +1,4 @@
-import type { ContextConfig, ContextData, ContextLayer } from '@noetic-tools/context';
+import type { ContextData, ContextInput } from '@noetic-tools/context';
 import type { Step, StepSpawn, SubprocessAdapter } from '@noetic-tools/types';
 import { NoeticConfigError } from '@noetic-tools/types';
 import { getDefaultRegistrar } from '../types/step-registrar';
@@ -8,7 +8,7 @@ import { getDefaultRegistrar } from '../types/step-registrar';
 interface SpawnOpts<TContext, I, O> {
   id: string;
   child: Step<TContext, I, O>;
-  context?: ContextConfig | ContextLayer[];
+  context?: ContextInput;
   timeout?: number;
   /**
    * Optional per-step subprocess adapter override. The interpreter routes

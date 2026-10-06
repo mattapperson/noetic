@@ -32,13 +32,13 @@ This is the primitive for sub-agents, delegation, and sandboxed execution.
 | --- | --- | --- | --- |
 | `id` | `string` | Yes | Unique step identifier |
 | `child` | `Step<TContext, I, O>` | Yes | The step to execute in isolation |
-| `context` | `ContextConfig \| ContextLayer[]` | No | Spawn-local context layers (use the `context()` builder for typed access) |
+| `context` | `ContextInput` | No | Spawn-local context layers (use the `context()` builder for typed access) |
 | `timeout` | `number` | No | Timeout in milliseconds |
 | `subprocess` | `SubprocessAdapter` | No | Per-step adapter override; see [SubprocessAdapter Routing](#subprocessadapter-routing) below. |
 
 ## Context Layers
 
-The `context` field accepts either a raw `ContextLayer[]` array or a `ContextConfig` object produced by the `context()` builder. The builder provides typed access to layer state and is the recommended approach.
+The `context` field accepts a `ContextInput`: either a raw `ContextLayer[]` array or a `ContextConfig` object produced by the `context()` builder. The builder provides typed access to layer state and is the recommended approach.
 
 Spawn-local context layers control what the child sees and how results are transformed when the child completes.
 

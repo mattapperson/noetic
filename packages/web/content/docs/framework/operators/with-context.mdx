@@ -33,7 +33,7 @@ This is the primitive for scoping context layers to a section of your execution 
 | --- | --- | --- | --- |
 | `id` | `string` | Yes | Unique step identifier |
 | `child` | `Step<TContext, I, O>` | Yes | The step to execute with the provided layers |
-| `context` | `ContextConfig \| ContextLayer[]` | Yes | Context layers available to all descendant steps |
+| `context` | `ContextInput` | Yes | Context layers available to all descendant steps. Accepts a layer array or a `context()` config. |
 
 ## Example: Scoped Knowledge Layer
 

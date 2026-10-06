@@ -119,6 +119,29 @@ export interface ContextConfig<TLayers extends readonly ContextLayer[] = readonl
 }
 
 /**
+ * What every context-accepting entry point takes: either a bare list of layers
+ * or anything carrying a `layers` list — notably the `ContextConfig` the
+ * `context()` builder returns.
+ *
+ * Declared structurally rather than as `ContextConfig | ContextLayer[]` because
+ * `ContextConfig` is **invariant** in `TLayers`: the phantom `_shape` field puts
+ * `TLayers` in an invariant position, so the concrete
+ * `ContextConfig<readonly [SomeLayer]>` that `context()` infers is not
+ * assignable to the defaulted `ContextConfig<readonly ContextLayer[]>`.
+ * Spelling the union as `ContextConfig | ContextLayer[]` therefore rejects the
+ * builder's own output at its primary destination. Matching on the `layers`
+ * field instead accepts every config the builder produces while still refusing
+ * unrelated objects.
+ *
+ * @public
+ */
+export type ContextInput =
+  | ReadonlyArray<ContextLayer>
+  | {
+      readonly layers: ReadonlyArray<ContextLayer>;
+    };
+
+/**
  * Extract the typed context shape from a ContextConfig.
  * Constrains structurally on the phantom `_shape` field rather than on
  * `ContextConfig` itself: `ContextConfig` is invariant in `TLayers` (the `_shape`

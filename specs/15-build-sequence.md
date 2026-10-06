@@ -23,7 +23,7 @@ The discriminated union `Step` type and the `execute` interpreter. Get the core 
 
 **Specs:** `04-spawn`
 
-`spawn`, where the child starts with an empty `ItemLog` and the optional `context` (a `ContextConfig` or `ContextLayer[]`) replaces the parent's layers for the child. Write a **verify-and-retry** loop: a spawned attempt, a verdict on its output, and a retry that feeds the failure back in. This forces context isolation and the `prepareNext` feedback loop. State persistence across spawn boundaries is deferred to Stage 7 (context layers).
+`spawn`, where the child starts with an empty `ItemLog` and the optional `context` (`ContextInput`) replaces the parent's layers for the child. Write a **verify-and-retry** loop: a spawned attempt, a verdict on its output, and a retry that feeds the failure back in. This forces context isolation and the `prepareNext` feedback loop. State persistence across spawn boundaries is deferred to Stage 7 (context layers).
 
 ## Stage 4: Channels and External Channels
 

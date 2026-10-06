@@ -136,7 +136,7 @@ inParallel has three mode variants, each a separate interface.
 | `kind` | `'withContext'` | yes | Discriminant |
 | `id` | `string` | yes | Step identifier |
 | `child` | `Step<TContext, I, O>` | yes | Child step to execute with the provided layers |
-| `context` | `ContextConfig \| ContextLayer[]` | yes | Context layers available to all descendant steps |
+| `context` | `ContextInput` | yes | Context layers available to all descendant steps. Accepts a layer array or a `context()` config. |
 
 ## StepSpawn
 
@@ -147,7 +147,7 @@ inParallel has three mode variants, each a separate interface.
 | `kind` | `'spawn'` | yes | Discriminant |
 | `id` | `string` | yes | Step identifier |
 | `child` | `Step<TContext, I, O>` | yes | Child step to execute |
-| `context` | `ContextConfig \| ContextLayer[]` | no | Spawn-local context layers |
+| `context` | `ContextInput` | no | Spawn-local context layers. Accepts a layer array or a `context()` config. |
 | `timeout` | `number` | no | Timeout in milliseconds |
 
 ## StepLoop

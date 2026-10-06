@@ -16,8 +16,8 @@ type Step<I, O> =
   | { kind: 'invokeTool';    id: string; tool: Tool; args?: unknown }
   | { kind: 'conditional';  id: string; route: (input: I, ctx: Context) => Step<I, O> | null }
   | { kind: 'inParallel';    id: string; mode: 'all' | 'race' | 'settle'; paths: (input: I, ctx: Context) => Step<I, O>[]; merge?: MergeFn<O>; concurrency?: number }
-  | { kind: 'spawn';   id: string; child: Step<I, O>; context?: ContextLayer[]; timeout?: number; subprocess?: SubprocessAdapter }
-  | { kind: 'withContext'; id: string; child: Step<I, O>; context: ContextConfig | ContextLayer[] }
+  | { kind: 'spawn';   id: string; child: Step<I, O>; context?: ContextInput; timeout?: number; subprocess?: SubprocessAdapter }
+  | { kind: 'withContext'; id: string; child: Step<I, O>; context: ContextInput }
   | { kind: 'loop';    id: string; steps: ReadonlyArray<Step<I, O>>; until: Until; maxIterations?: number; maxHistorySize?: number; prepareNext?: (output: O, verdict: Verdict, ctx: Context) => I; onError?: (error: NoeticError, ctx: Context) => 'retry' | 'skip' | 'abort' }
 ```
 
