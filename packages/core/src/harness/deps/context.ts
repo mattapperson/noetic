@@ -17,7 +17,9 @@ export {
   recallLayers,
   recallLayersAtomic,
   recallLayersEventual,
+  registerDurableTargets,
   resolveLayerTools,
+  resolveScopeKey,
   runAppendPipeline,
   storeLayers,
 } from '@noetic-tools/context';

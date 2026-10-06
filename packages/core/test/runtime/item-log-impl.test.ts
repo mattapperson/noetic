@@ -143,3 +143,83 @@ describe('ItemLogImpl', () => {
     expect(log.items[4].type).toBe('openrouter:datetime');
   });
 });
+
+describe('ItemLogImpl.length + truncateTo (session rollback watermark)', () => {
+  const seed = (count: number): ItemLogImpl => {
+    const log = new ItemLogImpl();
+    for (let i = 0; i < count; i++) {
+      log.append(makeInputMessage(`m${i}`));
+    }
+    return log;
+  };
+
+  it('length tracks appends', () => {
+    const log = new ItemLogImpl();
+    expect(log.length).toBe(0);
+    log.append(makeInputMessage('m1'));
+    expect(log.length).toBe(1);
+    log.append(makeInputMessage('m2'));
+    expect(log.length).toBe(2);
+  });
+
+  it('truncateTo drops every item at or after the watermark', () => {
+    const log = seed(3);
+    log.truncateTo(1);
+    expect(log.length).toBe(1);
+    expect(log.items.map((i) => ('id' in i ? i.id : ''))).toEqual([
+      'm0',
+    ]);
+  });
+
+  it('truncateTo(0) empties the log', () => {
+    const log = seed(2);
+    log.truncateTo(0);
+    expect(log.length).toBe(0);
+    expect(log.items).toEqual([]);
+  });
+
+  it('invalidates the frozen snapshot so a later read sees the truncation', () => {
+    const log = seed(2);
+    // Materialise the cache first — a stale cache would keep returning 2 items.
+    expect(log.items).toHaveLength(2);
+    log.truncateTo(1);
+    expect(log.items).toHaveLength(1);
+  });
+
+  // Boundary sweep at N-1 / N / N+1 around the current length (N = 3): only
+  // watermarks strictly below the length truncate; >= length and negative are
+  // no-ops so a stale/out-of-range watermark can never grow or corrupt the log.
+  it('truncateTo(length - 1) truncates', () => {
+    const log = seed(3);
+    log.truncateTo(2);
+    expect(log.length).toBe(2);
+  });
+
+  it('truncateTo(length) is a no-op', () => {
+    const log = seed(3);
+    log.truncateTo(3);
+    expect(log.length).toBe(3);
+  });
+
+  it('truncateTo(length + 1) is a no-op', () => {
+    const log = seed(3);
+    log.truncateTo(4);
+    expect(log.length).toBe(3);
+  });
+
+  it('truncateTo(negative) is a no-op', () => {
+    const log = seed(3);
+    log.truncateTo(-1);
+    expect(log.length).toBe(3);
+  });
+
+  it('appending after a truncation continues from the watermark', () => {
+    const log = seed(3);
+    log.truncateTo(1);
+    log.append(makeInputMessage('after'));
+    expect(log.items.map((i) => ('id' in i ? i.id : ''))).toEqual([
+      'm0',
+      'after',
+    ]);
+  });
+});
