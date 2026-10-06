@@ -166,3 +166,57 @@ describe('serializeDocument / mergeDocument', () => {
     expect(a.expr.args[0].value).toBe('2');
   });
 });
+
+describe('prose-safe statement scanning', () => {
+  test('a stray open bracket in PROSE does not swallow subsequent statements', () => {
+    const parser = new OpenUiLangParser();
+    // The prose line pins depth open; the old scanner would swallow every
+    // following newline into one never-completing mega-statement.
+    const completed = [
+      ...parser.push('Here is your dashboard (with charts):\n'),
+      ...parser.push('root = Card("Sales")\n'),
+      ...parser.push('$tab = "a"\n'),
+    ];
+    expect(completed.map((a) => a.ref)).toEqual([
+      'root',
+      '$tab',
+    ]);
+    const doc = parser.end();
+    expect(doc.root).toBe('root');
+    // The prose line surfaces as a diagnostic, not a black hole.
+    expect(doc.diagnostics.length).toBe(1);
+  });
+
+  test('a stray quote in PROSE does not pin the string state open', () => {
+    const parser = new OpenUiLangParser();
+    const completed = [
+      ...parser.push('Rendering "sales" view now\n'),
+      ...parser.push('root = Text("hi")\n'),
+    ];
+    expect(completed.map((a) => a.ref)).toEqual([
+      'root',
+    ]);
+  });
+
+  test('assignment-shaped buffers still continue across newlines', () => {
+    const parser = new OpenUiLangParser();
+    const completed = [
+      ...parser.push('root = Stack([\n  Text("a"),\n  Text("b")\n])\n'),
+    ];
+    expect(completed.map((a) => a.ref)).toEqual([
+      'root',
+    ]);
+    expect(parser.end().root).toBe('root');
+  });
+
+  test('diagnostics report the statement start line, not the flush line', () => {
+    const doc = parseDocument(
+      [
+        'root = Card("ok")',
+        '',
+        'this is prose on line 3',
+      ].join('\n'),
+    );
+    expect(doc.diagnostics[0]?.line).toBe(3);
+  });
+});

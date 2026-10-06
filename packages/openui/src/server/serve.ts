@@ -41,6 +41,8 @@ export interface OpenUiRequestBody {
 
 //#region Handler
 
+const activePromptStreams = new WeakMap<object, Set<string>>();
+
 const SSE_HEADERS: Record<string, string> = {
   'content-type': 'text/event-stream',
   'cache-control': 'no-cache',
@@ -57,37 +59,71 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-function sseStream(
-  agentName: string,
-  first: OpenUiServerMessage,
-  events: AsyncIterable<StreamEvent>,
-): Response {
+interface SseStreamOptions {
+  agentName: string;
+  first: OpenUiServerMessage;
+  events: AsyncIterable<StreamEvent>;
+  /** Runs once the pump ends — normal completion, error, OR client disconnect. */
+  onFinished?: () => void;
+}
+
+function sseStream({ agentName, first, events, onFinished }: SseStreamOptions): Response {
   const encoder = new TextEncoder();
+  /* `cancel()` fires when the client disconnects; without it the pump loop
+   * kept iterating the broadcaster into a dead controller until `done` —
+   * enqueue on a cancelled stream throws, abandoning the iterator without
+   * return(), and long turns pumped events to nobody. */
+  let cancelled = false;
+  let iterator: AsyncIterator<StreamEvent> | undefined;
   const body = new ReadableStream<Uint8Array>({
     async start(controller) {
-      controller.enqueue(encoder.encode(encodeSseFrame(first)));
+      const send = (message: OpenUiServerMessage): boolean => {
+        if (cancelled) {
+          return false;
+        }
+        try {
+          controller.enqueue(encoder.encode(encodeSseFrame(message)));
+          return true;
+        } catch {
+          cancelled = true;
+          return false;
+        }
+      };
+      send(first);
       try {
-        for await (const event of events) {
-          const message = translateStreamEvent(event, agentName);
+        iterator = events[Symbol.asyncIterator]();
+        for (;;) {
+          const next = await iterator.next();
+          if (next.done || cancelled) {
+            break;
+          }
+          const message = translateStreamEvent(next.value, agentName);
           if (message === null) {
             continue;
           }
-          controller.enqueue(encoder.encode(encodeSseFrame(message)));
-          if (message.type === 'done') {
+          if (!send(message) || message.type === 'done') {
             break;
           }
         }
       } catch (e) {
-        controller.enqueue(
-          encoder.encode(
-            encodeSseFrame({
-              type: 'error',
-              message: e instanceof Error ? e.message : String(e),
-            }),
-          ),
-        );
+        send({
+          type: 'error',
+          message: e instanceof Error ? e.message : String(e),
+        });
+      } finally {
+        onFinished?.();
+        await iterator?.return?.().catch(() => undefined);
       }
-      controller.close();
+      if (!cancelled) {
+        try {
+          controller.close();
+        } catch {
+          // already closed by cancellation
+        }
+      }
+    },
+    cancel() {
+      cancelled = true;
     },
   });
   return new Response(body, {
@@ -104,25 +140,32 @@ export function serveOpenUi(
   options: ServeOpenUiOptions,
 ): (request: OpenUiRequest) => Promise<Response> {
   const agentName = harness.config.name;
-  const scope = options.threadId
+  const threadId = options.threadId;
+  const scope = threadId
     ? {
-        threadId: options.threadId,
+        threadId,
       }
     : undefined;
+  /* One prompt stream at a time per harness + thread. Multiple handlers can
+   * wrap the same harness, so the lock must not be closure-local. */
+  const promptKey = threadId ?? '__default__';
+  let activePrompts = activePromptStreams.get(harness);
+  if (!activePrompts) {
+    activePrompts = new Set();
+    activePromptStreams.set(harness, activePrompts);
+  }
+
+  const emptySnapshot: OpenUiServerMessage = {
+    type: 'snapshot',
+    source: '',
+    vars: {},
+    version: 0,
+  };
 
   return async (request: OpenUiRequest): Promise<Response> => {
     if (request.method === 'GET') {
-      const state = options.surface.readState();
-      return jsonResponse(
-        state
-          ? snapshotMessage(state)
-          : {
-              type: 'snapshot',
-              source: '',
-              vars: {},
-              version: 0,
-            },
-      );
+      const state = options.surface.readState(threadId);
+      return jsonResponse(state ? snapshotMessage(state) : emptySnapshot);
     }
 
     if (request.method !== 'POST') {
@@ -147,9 +190,15 @@ export function serveOpenUi(
         );
       }
       await harness.execute(createUiEventItem(parsed.data), scope);
+      // Echo the seq + the version the client can poll against (GET returns
+      // the authoritative surface). The event applies asynchronously, so the
+      // version here is pre-application — a strictly-greater version on the
+      // next GET confirms the event landed.
       return jsonResponse(
         {
           accepted: true,
+          seq: parsed.data.seq,
+          version: options.surface.readState(threadId)?.version ?? 0,
         },
         202,
       );
@@ -164,17 +213,32 @@ export function serveOpenUi(
       );
     }
 
-    const state = options.surface.readState();
-    const first: OpenUiServerMessage = state
-      ? snapshotMessage(state)
-      : {
-          type: 'snapshot',
-          source: '',
-          vars: {},
-          version: 0,
-        };
-    await harness.execute(body.prompt, scope);
-    return sseStream(agentName, first, harness.getFullStream(scope));
+    if (activePrompts.has(promptKey)) {
+      return jsonResponse(
+        {
+          error: 'a prompt turn is already streaming on this thread; retry when it completes',
+        },
+        409,
+      );
+    }
+    activePrompts.add(promptKey);
+
+    const state = options.surface.readState(threadId);
+    const first: OpenUiServerMessage = state ? snapshotMessage(state) : emptySnapshot;
+    try {
+      await harness.execute(body.prompt, scope);
+    } catch (e) {
+      activePrompts.delete(promptKey);
+      throw e;
+    }
+    return sseStream({
+      agentName,
+      first,
+      events: harness.getFullStream(scope),
+      onFinished: () => {
+        activePrompts.delete(promptKey);
+      },
+    });
   };
 }
 
