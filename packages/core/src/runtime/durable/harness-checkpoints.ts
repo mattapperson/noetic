@@ -33,6 +33,7 @@ export type RestoreCheckpointOptions = RestoreContextOptions & {
  */
 export interface CheckpointHarnessHandle {
   readonly checkpointStore?: CheckpointStore;
+  readonly itemLogPersistence: ItemLogPersistence;
   readonly stepLedgerStore?: StepLedgerStore;
   readonly stepLedgerRetention?: StepLedgerRetention;
   readonly layerStateStore: LayerStateStore;
@@ -51,6 +52,70 @@ export interface CheckpointHarnessHandle {
 
 //#region captureCheckpoint
 
+export class ItemLogPersistence {
+  private readonly counts = new Map<string, number>();
+  private readonly dirtyFrom = new Map<string, number>();
+
+  get(ownerKey: string): number {
+    return this.counts.get(ownerKey) ?? 0;
+  }
+
+  set(ownerKey: string, count: number): void {
+    this.counts.set(ownerKey, count);
+  }
+
+  rollback(ownerKey: string, length: number): void {
+    const current = this.counts.get(ownerKey);
+    if (current === undefined || current <= length) {
+      return;
+    }
+    this.counts.set(ownerKey, length);
+    const existing = this.dirtyFrom.get(ownerKey);
+    this.dirtyFrom.set(ownerKey, existing === undefined ? length : Math.min(existing, length));
+  }
+
+  dirtyOffset(ownerKey: string): number | undefined {
+    return this.dirtyFrom.get(ownerKey);
+  }
+
+  clearDirty(ownerKey: string): void {
+    this.dirtyFrom.delete(ownerKey);
+  }
+
+  delete(ownerKey: string): void {
+    this.counts.delete(ownerKey);
+    this.dirtyFrom.delete(ownerKey);
+  }
+}
+
+export function itemLogOwnerKey(owner: { threadId?: string; id: string }): string {
+  return owner.threadId ? `thread:${owner.threadId}` : `execution:${owner.id}`;
+}
+
+async function discardRolledBackBatches(
+  h: CheckpointHarnessHandle,
+  store: CheckpointStore,
+  ownerKey: string,
+): Promise<void> {
+  const dirtyFrom = h.itemLogPersistence.dirtyOffset(ownerKey);
+  if (dirtyFrom === undefined) {
+    return;
+  }
+  if (!store.truncateItems) {
+    h.itemLogPersistence.clearDirty(ownerKey);
+    return;
+  }
+  try {
+    await store.truncateItems(ownerKey, dirtyFrom);
+    h.itemLogPersistence.clearDirty(ownerKey);
+  } catch (err) {
+    console.warn(
+      `AgentHarness.checkpoint: failed to discard rolled-back item batches for "${ownerKey}":`,
+      err,
+    );
+  }
+}
+
 /**
  * Snapshot the execution state at a checkpoint boundary. No-op when no
  * `CheckpointStore` is configured — zero-config harnesses preserve
@@ -66,12 +131,32 @@ export async function captureCheckpoint(h: CheckpointHarnessHandle, ctx: Context
     return;
   }
   const impl = ctx instanceof ContextImpl ? ctx : null;
-  const frontier: FrontierFrame[] = impl ? impl.serialiseFrontier() : [];
+  const frontier: FrontierFrame[] = impl
+    ? impl.serialiseFrontier().map((frame) => ({
+        stepId: frame.stepId,
+        input: undefined,
+      }))
+    : [];
   const layers: Record<string, unknown> = {};
   for (const layer of ctx.layers ?? []) {
     const state = h.layerStateStore.get<unknown>(ctx.id, layer.id);
     if (state !== undefined) {
       layers[layer.id] = state;
+    }
+  }
+  const allItems = ctx.itemLog.items;
+  const ownerKey = itemLogOwnerKey(ctx);
+  await discardRolledBackBatches(h, store, ownerKey);
+  const already = h.itemLogPersistence.get(ownerKey);
+  if (allItems.length > already && store.appendItems) {
+    const batch = allItems.slice(already);
+    try {
+      await store.appendItems(ownerKey, already, [
+        ...batch,
+      ]);
+      h.itemLogPersistence.set(ownerKey, allItems.length);
+    } catch (err) {
+      console.warn(`AgentHarness.checkpoint: failed to persist item batch for "${ownerKey}":`, err);
     }
   }
   const snapshot: CheckpointSnapshot = {
@@ -85,16 +170,17 @@ export async function captureCheckpoint(h: CheckpointHarnessHandle, ctx: Context
       current: ctx.cwdState.cwd,
       previous: ctx.cwdState.previousCwd,
     },
-    // Ask-user queue snapshot is empty at the core layer — the code-agent
-    // host is responsible for pushing pending prompts through this store
-    // via `AskUserService` integration. Carrying the shape from day one
-    // means future producers don't bump the schema version.
     askUser: [],
-    itemLog: {
-      items: [
-        ...ctx.itemLog.items,
-      ],
-    },
+    itemLog: store.appendItems
+      ? {
+          items: [],
+          persistedCount: h.itemLogPersistence.get(ownerKey),
+        }
+      : {
+          items: [
+            ...allItems,
+          ],
+        },
     capturedAt: new Date().toISOString(),
   };
   try {
@@ -148,7 +234,17 @@ export async function restoreFromCheckpoint(
   for (const [layerId, state] of Object.entries(snapshot.layers)) {
     h.layerStateStore.set(executionId, layerId, state);
   }
-  const items: Item[] = h.itemSchemas.parseMany(snapshot.itemLog.items);
+  let rawItems: unknown[] = snapshot.itemLog.items;
+  const persistedCount = snapshot.itemLog.persistedCount ?? 0;
+  if (persistedCount > 0 && store.loadItems) {
+    const ownerKey = itemLogOwnerKey({
+      threadId: snapshot.threadId,
+      id: executionId,
+    });
+    rawItems = await store.loadItems(ownerKey, persistedCount);
+    h.itemLogPersistence.set(ownerKey, Math.min(persistedCount, rawItems.length));
+  }
+  const items: Item[] = h.itemSchemas.parseMany(rawItems);
   const cwdInit = snapshot.cwd?.current ?? undefined;
   /* Caller wiring first, snapshot second: a host may legitimately swap the context
    * layers or hang the restored execution under a new parent, but it must never be

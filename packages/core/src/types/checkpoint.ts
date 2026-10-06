@@ -82,6 +82,12 @@ export type PendingAskUserSnapshot = z.infer<typeof PendingAskUserSnapshotSchema
  */
 export const ItemLogSnapshotSchema = z.object({
   items: z.array(z.unknown()),
+  /**
+   * When present, the log itself lives outside the snapshot as append-only
+   * batches and this counts the durable items to stitch back on restore.
+   * Absent on legacy inline snapshots.
+   */
+  persistedCount: z.number().int().nonnegative().optional(),
 });
 
 /** @public Item log portion of a snapshot. */

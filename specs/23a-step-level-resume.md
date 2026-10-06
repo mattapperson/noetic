@@ -150,10 +150,10 @@ new AgentHarness({ /* … */ environment: { storage: { checkpointStore, stepLedg
    nothing an adapter could persist, so nothing is recorded.
 2. **Total entries.** Recording past `maxEntries` deletes the oldest entry, so resume is
    best-effort over a bounded **suffix** of the run: the tail replays, the head runs
-   again. The bound is on the sequence *window* (`nextSeq - oldestSeq`), which is what
-   makes eviction O(1) — an exact row count would need a `list()` per append, the very
-   cost sharding removed. A gap from a failed write makes the window a slight
-   over-estimate, so eviction fires marginally early, never late.
+   again. The bound is on the sequence *window* (`nextSeq - oldestSeq`) MINUS known
+   failed-append gaps, which keeps eviction O(1) without counting outage holes as live
+   entries. An exact row count would need a `list()` per append, the very cost sharding
+   removed.
 
 Both degradations reduce to the same thing: a step with no entry re-runs. That costs work
 and re-does whatever effects the step has (see "The side-effect boundary"), never a
@@ -162,9 +162,11 @@ counts what was recorded, dropped, and evicted — and the first drop of each ki
 
 Sequence numbers are reserved synchronously, before the append's `await`. Concurrent `inParallel`
 legs record through the one shared ledger, and a counter read after an await would let two
-legs write the same key, silently losing a sibling's entry. `load()` therefore reports
-`nextSeq` from storage rather than deriving it from the recovered entry count, which
-retention's gaps would place *inside* the live window.
+legs write the same key, silently losing a sibling's entry. Failed appends are remembered as
+explicit gaps until eviction's cursor passes them, so a clustered outage cannot evict real
+entries to satisfy a phantom count. `load()` therefore reports `nextSeq` from storage rather
+than deriving it from the recovered entry count, which retention's gaps would place *inside*
+the live window.
 
 ## Clearing a ledger
 
@@ -201,6 +203,7 @@ Hosts need it in two situations:
 - An oversized or unserialisable output is not recorded, and its step re-dispatches on resume while its neighbours still replay.
 - Concurrent records (inParallel legs through one shared ledger) land on distinct keys.
 - A resumed ledger never reuses a live sequence number, even when retention left a gap.
+- A burst of failed appends (reserved sequence numbers with no stored rows) never causes phantom eviction of live entries.
 - `harness.clearCheckpoint` removes the snapshot and every ledger shard.
 
 ## Sizing

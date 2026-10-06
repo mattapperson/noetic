@@ -41,7 +41,7 @@ function interceptDelays(): {
   };
 }
 
-describe('executeRunCode', () => {
+describe.serial('executeRunCode', () => {
   it('calls execute function and returns output', async () => {
     const s: StepRunCode<ContextData, string, number> = {
       kind: 'runCode',

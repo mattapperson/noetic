@@ -270,6 +270,8 @@ export class StepLedger {
   private seq: number;
   /** Lowest sequence number still in storage — advances as eviction proceeds. */
   private oldestSeq: number;
+  /** Sequence numbers reserved by failed appends — gaps with no stored row. */
+  private readonly gapSeqs = new Set<number>();
   private readonly store?: StepLedgerStore;
   private readonly executionId: string;
   private readonly retention: Required<StepLedgerRetention>;
@@ -352,14 +354,14 @@ export class StepLedger {
     }
     /* Reserve the sequence number BEFORE awaiting: concurrent inParallel legs record through
      * the one shared ledger, and two of them reading the same counter would write the
-     * same key, silently overwriting a sibling's entry. A write that then fails leaves a
-     * gap, which only makes the window below a slight over-estimate of the live count —
-     * eviction runs marginally early, never late. */
+     * same key, silently overwriting a sibling's entry. Failed writes are tracked as
+     * gaps so eviction does not count them as live entries. */
     const seq = this.seq;
     this.seq = seq + 1;
     try {
       await this.store.append(this.executionId, seq, entry);
     } catch (error) {
+      this.gapSeqs.add(seq);
       console.warn(
         `StepLedger: failed to record "${entry.path}":`,
         error instanceof Error ? error.message : String(error),
@@ -409,8 +411,12 @@ export class StepLedger {
     if (!store) {
       return;
     }
-    while (this.seq - this.oldestSeq > this.retention.maxEntries) {
+    while (this.seq - this.oldestSeq - this.gapCountInWindow() > this.retention.maxEntries) {
       const victim = this.oldestSeq;
+      if (this.gapSeqs.delete(victim)) {
+        this.oldestSeq = victim + 1;
+        continue;
+      }
       try {
         await store.delete(this.executionId, victim);
       } catch (error) {
@@ -425,6 +431,21 @@ export class StepLedger {
       this.oldestSeq = victim + 1;
       this.counts.evicted += 1;
     }
+  }
+
+  private gapCountInWindow(): number {
+    if (this.gapSeqs.size === 0) {
+      return 0;
+    }
+    let n = 0;
+    for (const gap of this.gapSeqs) {
+      if (gap >= this.oldestSeq) {
+        n += 1;
+      } else {
+        this.gapSeqs.delete(gap);
+      }
+    }
+    return n;
   }
 
   /** One warning per reason per execution — a long run would otherwise flood the log. */

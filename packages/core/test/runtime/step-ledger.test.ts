@@ -546,6 +546,51 @@ describe('step ledger retention config', () => {
     expect(await ledgerKeys(storage, 'exec')).toHaveLength(3);
   });
 
+  it('a storage-outage burst of failed appends never evicts live entries (D3)', async () => {
+    const storage = createInMemoryStorage();
+    const store = createStepLedgerStore({
+      storage,
+    });
+    let failing = false;
+    const flaky: typeof store = {
+      ...store,
+      append: async (executionId, seq, entry) => {
+        if (failing) {
+          throw new Error('storage outage');
+        }
+        return store.append(executionId, seq, entry);
+      },
+    };
+    const ledger = new StepLedger({
+      executionId: 'exec',
+      store: flaky,
+      retention: {
+        maxEntries: 5,
+      },
+    });
+
+    for (let i = 0; i < 5; i++) {
+      await ledger.record(entryOfBytes(`live-${i}`, 8));
+    }
+    failing = true;
+    for (let i = 0; i < 10; i++) {
+      await ledger.record(entryOfBytes(`lost-${i}`, 8));
+    }
+    failing = false;
+
+    expect(await ledgerKeys(storage, 'exec')).toHaveLength(5);
+    expect(ledger.stats.evicted).toBe(0);
+
+    await ledger.record(entryOfBytes('live-5', 8));
+    const retained = [
+      ...(await store.load('exec')).entries.keys(),
+    ];
+    expect(retained).toHaveLength(5);
+    expect(retained).not.toContain('live-0');
+    expect(retained).toContain('live-5');
+    expect(ledger.stats.evicted).toBe(1);
+  });
+
   it('gives concurrent records distinct keys', async () => {
     /* Fork legs record through the one shared ledger while in flight together. If the
      * sequence number were read after an await they would land on the same key and one

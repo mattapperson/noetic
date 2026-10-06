@@ -131,6 +131,41 @@ describe('CheckpointStore', () => {
     await store.clear('x');
     expect(await store.load('x')).toBeNull();
   });
+
+  it('clear does not remove thread-owned item batches', async () => {
+    const storage = createInMemoryStorage();
+    const store = createCheckpointStore({
+      storage,
+    });
+    assert(store.appendItems);
+    assert(store.loadItems);
+    await store.save({
+      schemaVersion: 2,
+      executionId: 'x',
+      threadId: 'main',
+      frontier: [],
+      layers: {},
+      cwd: null,
+      askUser: [],
+      itemLog: {
+        items: [],
+        persistedCount: 2,
+      },
+      capturedAt: new Date().toISOString(),
+    });
+    await store.appendItems('thread:main', 0, [
+      'a',
+      'b',
+    ]);
+
+    await store.clear('x');
+
+    expect(await store.load('x')).toBeNull();
+    expect(await store.loadItems('thread:main', 2)).toEqual([
+      'a',
+      'b',
+    ]);
+  });
 });
 
 describe('AgentHarness.checkpoint + restore', () => {
