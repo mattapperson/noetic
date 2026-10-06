@@ -331,6 +331,8 @@ function history(config?: { maxItems?: number }): ContextLayer<null>
 
 The CLI exposes the cap via `AgentConfig.history.maxItems`. When unset, the layer is not installed and history is uncapped.
 
+**Compaction composes with the cap**: `history()` bounds item *count*; a recorded compaction (spec 11, *History Compaction*) replaces the old prefix with a summary instead of dropping it. Fold first (`foldCompactions`), then cap — the fold seam and the slice boundary both strip orphan tool calls.
+
 ```typescript
 // Direct usage in core
 const layers = [
