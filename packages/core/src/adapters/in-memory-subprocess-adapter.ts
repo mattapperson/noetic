@@ -42,6 +42,11 @@ export function createInMemorySubprocessAdapter(
   options: CreateInMemorySubprocessAdapterOptions = {},
 ): SubprocessAdapter {
   const handles = new Map<string, SubprocessHandle>();
+  const inlineEligible =
+    options.storage === undefined &&
+    options.run === undefined &&
+    options.stepRunner === undefined &&
+    options.metadataInjector === undefined;
   const active = new Set<string>();
   const storage = options.storage;
 
@@ -168,7 +173,7 @@ export function createInMemorySubprocessAdapter(
     };
   }
 
-  return {
+  const adapter: SubprocessAdapter = {
     async spawn(request) {
       if (isStepRequest(request)) {
         return spawnStepHandle(request);
@@ -278,6 +283,13 @@ export function createInMemorySubprocessAdapter(
       ];
     },
   };
+  // In-process + no durable manifests ⇒ dispatch may inline (see execute.ts).
+  // Non-enumerable so it never leaks into spreads or JSON.
+  Object.defineProperty(adapter, '_inline', {
+    value: inlineEligible,
+    enumerable: false,
+  });
+  return adapter;
 }
 
 //#endregion

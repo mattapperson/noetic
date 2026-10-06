@@ -874,3 +874,46 @@ describe('executeLoop inbox channel', () => {
     });
   });
 });
+
+describe('loop snapshot history', () => {
+  it('each iteration sees a frozen history view; later iterations cannot mutate earlier snapshots', async () => {
+    const snapshots: Snapshot[] = [];
+    const loopStep = loop<ContextData, number, number>({
+      id: 'frozen-history-loop',
+      steps: [
+        {
+          kind: 'runCode',
+          id: 'inc',
+          execute: async (input: number) => input + 1,
+        },
+      ],
+      until: (snapshot) => {
+        snapshots.push(snapshot);
+        return {
+          stop: snapshot.stepCount >= 3,
+        };
+      },
+    });
+
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
+    await executeLoop(loopStep, 0, ctx, simpleExecute);
+
+    expect(snapshots.length).toBe(3);
+    for (const [i, snapshot] of snapshots.entries()) {
+      expect(Object.isFrozen(snapshot.history)).toBe(true);
+      expect(snapshot.history.length).toBe(i + 1);
+    }
+    // Snapshot 1's history must still read [1] after iterations 2 and 3 ran —
+    // the loop trims/pushes its live array, never a shared snapshot view.
+    expect(snapshots[0]?.history).toEqual([
+      1,
+    ]);
+    expect(snapshots[2]?.history).toEqual([
+      1,
+      2,
+      3,
+    ]);
+  });
+});

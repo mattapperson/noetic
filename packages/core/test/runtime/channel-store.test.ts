@@ -675,3 +675,131 @@ describe('ChannelStore', () => {
     });
   });
 });
+
+describe('channel state reaping', () => {
+  it('frees a queue channel once fully drained, and recreates it transparently', async () => {
+    const store = new ChannelStore();
+    const ch = channel<string>('one-shot', {
+      schema: z.string(),
+      mode: 'queue',
+    });
+    await store.send(ch, 'a');
+    expect(store.channelCount).toBe(1);
+    expect(store.tryRecv(ch)).toBe('a');
+    // Drained → reaped.
+    expect(store.channelCount).toBe(0);
+    // Reuse after reap behaves like a fresh channel.
+    await store.send(ch, 'b');
+    expect(store.tryRecv(ch)).toBe('b');
+    expect(store.channelCount).toBe(0);
+  });
+
+  it('probing an idle channel with tryRecv does not grow the store', () => {
+    const store = new ChannelStore();
+    for (let i = 0; i < 100; i++) {
+      const ch = channel<string>(`probe-${i}`, {
+        schema: z.string(),
+        mode: 'queue',
+      });
+      expect(store.tryRecv(ch)).toBeNull();
+    }
+    expect(store.channelCount).toBe(0);
+  });
+
+  it('does NOT reap a channel holding buffered items, waiters, or a value', async () => {
+    const store = new ChannelStore();
+    const buffered = channel<string>('buffered', {
+      schema: z.string(),
+      mode: 'queue',
+    });
+    await store.send(buffered, 'kept');
+    const valueCh = channel<string>('val', {
+      schema: z.string(),
+      mode: 'value',
+    });
+    await store.send(valueCh, 'latest');
+    expect(store.channelCount).toBe(2);
+  });
+
+  it('a timed-out waiter leaves the channel reaped, not leaked', async () => {
+    const store = new ChannelStore();
+    const ch = channel<string>('waiter-timeout', {
+      schema: z.string(),
+      mode: 'queue',
+    });
+    await expect(store.recv(ch, 10)).rejects.toThrow();
+    // Reap is deferred a microtask after settle.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(store.channelCount).toBe(0);
+  });
+
+  it('never reaps under a live queue-mode stream, even after an internal recv times out', async () => {
+    // The hazard the naive predicate misses. A queue-mode subscriber is NOT in
+    // `externalSubscribers` (it competes through `queueWaiters`), but its
+    // takeShared/parkShared closures capture the state OBJECT. Reaping here
+    // would fork the channel: the later send lands on a freshly minted state
+    // and the subscriber's next() hangs forever.
+    const store = new ChannelStore();
+    const ch = channel<number>('live-stream-q', {
+      schema: z.number(),
+      mode: 'queue',
+      external: true,
+    });
+    const stream = store.subscribe(ch, 'exec-reap');
+    const iterator = stream[Symbol.asyncIterator]();
+
+    await expect(store.recv(ch, 10)).rejects.toThrow();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(store.channelCount).toBe(1);
+
+    const next = iterator.next();
+    await store.send(ch, 7);
+    expect((await next).value).toBe(7);
+
+    // Ending the stream releases the last reference, so the entry is freed.
+    await iterator.return?.();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(store.channelCount).toBe(0);
+  });
+
+  it('never reaps under a live topic-mode stream between sends', async () => {
+    const store = new ChannelStore();
+    const ch = channel<number>('live-stream-t', {
+      schema: z.number(),
+      mode: 'topic',
+      external: true,
+    });
+    const stream = store.subscribe(ch, 'exec-reap-topic');
+    const iterator = stream[Symbol.asyncIterator]();
+
+    store.send(ch, 1);
+    expect((await iterator.next()).value).toBe(1);
+    // Buffer drained, no waiters — but the subscriber is still live.
+    expect(store.channelCount).toBe(1);
+
+    store.send(ch, 2);
+    expect((await iterator.next()).value).toBe(2);
+
+    await iterator.return?.();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(store.channelCount).toBe(0);
+  });
+
+  it('closeExecution releases the channel entry once buffered values drain', async () => {
+    const store = new ChannelStore();
+    const ch = channel<number>('close-reap', {
+      schema: z.number(),
+      mode: 'topic',
+      external: true,
+    });
+    const stream = store.subscribe(ch, 'exec-close-reap');
+    const iterator = stream[Symbol.asyncIterator]();
+    store.send(ch, 1);
+    expect((await iterator.next()).value).toBe(1);
+    expect(store.channelCount).toBe(1);
+
+    store.closeExecution('exec-close-reap');
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(store.channelCount).toBe(0);
+  });
+});

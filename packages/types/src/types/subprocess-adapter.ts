@@ -196,6 +196,13 @@ export interface SubprocessAdapter {
    * persisted manifest.
    */
   listLive(): Promise<ReadonlyArray<SubprocessHandle>>;
+  /**
+   * @internal Set by an adapter that runs in-process and persists no durable
+   * manifests, so step dispatch may call the local executor directly instead
+   * of spawning a handle nothing can observe. Never set by out-of-process
+   * adapters or by any adapter given a `StorageAdapter`.
+   */
+  _inline?: boolean;
 }
 
 //#endregion

@@ -199,6 +199,8 @@ interface SubprocessAdapter {
 }
 ```
 
+An adapter that runs step requests in-process and persists no durable manifests (the storage-less in-memory adapter) may additionally mark itself `@internal _inline`, in which case the interpreter's nested `runCode`/`spawn` dispatch calls the local executor directly instead of round-tripping a handle nothing durable could observe. Adapters with storage, and all out-of-process adapters, always take the full spawn path.
+
 `createInMemorySubprocessAdapter(opts?)` is the default test double. It dispatches step requests through the in-process execute pipeline via a closure the interpreter attaches to the request, records the handle in memory, and settles synchronously on the microtask queue. Options:
 
 - `storage?: StorageAdapter` — when supplied, the adapter persists handle manifests through the store so `listLive()` survives adapter re-creation within the process lifetime. `reattach()` is implemented as an idempotent replay of the persisted step request; "reattach" here is honestly a test-double semantic rather than a process resume, consistent with the adapter's role as the default in-process backend.
