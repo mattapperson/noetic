@@ -10,7 +10,9 @@ provides:
 - The **`ContextLayer` contract** — the interface every layer implements.
 - The **lifecycle, budget, and projection machinery** that converges layer
   outputs into the assembled LLM context (`assembleView`, `allocateBudgets`,
-  layer state stores, scoping).
+  layer state stores, scoping), plus the **compaction helpers**
+  (`foldCompactions`, `historyPressure`, `createCompaction`, `compactHistory`)
+  for replacing an old history prefix with a logged summary.
 - The **built-in layers**: instructions, history, scratchpad, observations,
   temporal, filesystem, plan, task state, tool calls, and steering.
 

@@ -125,9 +125,12 @@ export { execute } from './interpreter/execute';
 /** @public */
 /** @public */
 export type {
+  CompactHistoryParams,
+  CreateCompactionParams,
   FactExtractor,
   FactSearcher,
   HistoryConfig,
+  HistoryPressure,
   ObservationsConfig,
   ObservationsState,
   PlanConfig,
@@ -155,9 +158,15 @@ export type {
 /** @public */
 /** @public */
 export {
+  compactHistory,
+  compactionAsItem,
+  createCompaction,
   filesystem,
   findFunctionCall,
+  foldCompactions,
+  hasCompaction,
   history,
+  historyPressure,
   instructions,
   observations,
   PlanPhase,
