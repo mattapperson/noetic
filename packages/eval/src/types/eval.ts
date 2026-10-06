@@ -24,8 +24,8 @@ export interface EvalSuiteOptions {
 
 export interface OptimizeConfig {
   scope: OptimizeScope;
+  /** Hard cap on candidate evaluations (GEPA's real cost lever). */
   maxMetricCalls?: number;
-  budget?: number;
   codingAgent?: import('./optimizer').CodingAgent;
   dryRun?: boolean;
 }
