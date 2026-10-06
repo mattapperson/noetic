@@ -43,7 +43,11 @@ interface FileReferenceOptions {
   baseDir?: string;
   /** Slot position (defaults to Slot.RAG) */
   slot?: number;
-  /** Model to use for priority scoring */
+  /**
+   * Model for LLM-backed relevance scoring of referenced files. OPT-IN: when
+   * omitted, a fast path-heuristic scores references (no model call), keeping
+   * the user's turn free of an extra LLM round-trip per new #file reference.
+   */
   scoringModel?: string;
   /** Maximum file size in bytes (defaults to 1MB) */
   maxFileSize?: number;
@@ -414,7 +418,8 @@ interface ScoreFileRelevanceParams {
 async function scoreFileRelevance(params: ScoreFileRelevanceParams): Promise<number> {
   const { filePath, fileContent, userQuery, ctx, model } = params;
 
-  if (!ctx.callModel) {
+  // No scoring model configured (the default) or no model access: heuristic.
+  if (!model || !ctx.callModel) {
     const queryLower = userQuery.toLowerCase();
     const pathLower = filePath.toLowerCase();
     if (pathLower.includes(queryLower) || queryLower.includes(pathBasename(pathLower))) {
@@ -480,7 +485,7 @@ function createFileReferenceRuntime(opts?: FileReferenceOptions): FileReferenceR
   return {
     baseDir,
     slot: opts?.slot ?? Slot.RAG,
-    scoringModel: opts?.scoringModel ?? 'anthropic/claude-haiku-4-5-20251001',
+    scoringModel: opts?.scoringModel?.trim() ?? '',
     readOpts: {
       maxFileSize,
       followSymlinks,
@@ -983,7 +988,8 @@ async function renderFileReferenceDelta({
  *
  * Behavior:
  * - Transforms references to markdown anchor links `[#path/to/file](#path-to-file)`
- * - Scores file relevance using LLM when first referenced
+ * - Scores file relevance when first referenced — path-match heuristic by
+ *   default; LLM scoring only when `scoringModel` is explicitly configured
  * - Injects file contents into context via recall(), ordered by priority
  * - Detects file changes on each new message, triggers immediate re-render
  * - Shows warning for deleted files
@@ -1003,10 +1009,10 @@ export function filesystem(opts?: FileReferenceOptions): ContextLayer<FileRefere
     // anchoring plus a compact supersede is worth the most on.
     placement: 'anchor',
     timeouts: {
-      // onItemAppend reads files AND runs an LLM scoring call per new
-      // reference (parallelized) — the 5s pipeline default silently drops the
-      // transform + state update on timeout, killing the layer's feature.
-      onItemAppend: 30_000,
+      // onItemAppend reads files; when an LLM scoringModel is opted in it also
+      // scores each new reference — keep headroom so a timeout doesn't
+      // silently drop the transform + state update.
+      onItemAppend: runtime.scoringModel ? 30_000 : 10_000,
     },
     hooks: {
       init: () => initFileReferenceState(runtime.baseDir),
