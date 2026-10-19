@@ -1,5 +1,4 @@
 import type { StandardSchemaV1 } from '@standard-schema/spec';
-import type { AgentHooks } from './agent-hooks';
 import type { Channel, ChannelHandle, ExternalChannel } from './channel';
 import type { LLMResponse, ModelParams, ServerToolSpec } from './common';
 import type { Context, CwdState, RestoreContextOptions } from './context';
@@ -12,11 +11,9 @@ import type { ExecuteInput, Item, ItemSchemaExtensions } from './items';
 import type { Span, TraceExporter } from './observability';
 import type { ShellAdapter } from './shell-adapter';
 import type { SteeringDecision } from './steering';
-import type { Step } from './step';
+import type { AgentHooks, Step } from './step';
 import type { SubprocessAdapter } from './subprocess-adapter';
 import type { Tool } from './tool';
-
-export type { AgentHooks } from './agent-hooks';
 
 /** @public Item-schema configuration: extension schemas plus validation strictness. */
 export interface ItemSchemaConfig {

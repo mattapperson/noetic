@@ -1,5 +1,4 @@
 import type { StandardSchemaV1 } from '@standard-schema/spec';
-import type { AgentHooks } from './agent-hooks';
 import type { Channel, ChannelHandle, ExternalChannel } from './channel';
 import type { LLMResponse, ModelParams } from './common';
 import type { Context, CwdState, RestoreContextOptions } from './context';
@@ -12,6 +11,7 @@ import type { ExecuteInput, Item } from './items';
 import type { Span, TraceExporter } from './observability';
 import type { ShellAdapter } from './shell-adapter';
 import type { SteeringDecision } from './steering';
+import type { AgentHooks } from './step';
 import type { SubprocessAdapter } from './subprocess-adapter';
 import type { Tool } from './tool';
 
