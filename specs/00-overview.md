@@ -81,6 +81,7 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 | `22-cli-architecture` | `@noetic-tools/cli` layer hierarchy, subprocess adapter wiring | CLI internals |
 | `23-durable-execution` | `CheckpointSnapshot`, `reattach`/`listLive`, durable IPC, host-restart flow | Crash-recovery model |
 | `28-generative-ui` | `OutputCodec`, `ToolUiDeclaration`, `openUiSurface()` layer, OpenUI transport | Generative UI (OpenUI) |
+| `30-decide` | `step.decide()`, `step.routeSwitch()`, `decisionsHistoryLayer()`, `harness.decide()` | Typed decisions and routing |
 
 ## Dependency Graph
 
