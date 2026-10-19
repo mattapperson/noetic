@@ -59,7 +59,16 @@ interface AcpAgent {
   readonly specificationVersion: 'acp-v1';
   /** Free-form, e.g. 'claude-code'. An OPEN set — no enum. */
   readonly agentId: string;
+  /** Where the agent reads an API key, so a step can pass one. */
+  readonly apiKey?: AcpApiKey;
   connect(opts: AcpConnectOptions): Promise<AcpAgentConnection>;
+}
+
+interface AcpConnectOptions {
+  host: AcpClientHost;
+  signal?: AbortSignal;
+  /** Layered over the adapter's own env for transports that launch a process. */
+  env?: Record<string, string | undefined>;
 }
 
 interface AcpAgentConnection {
@@ -252,6 +261,46 @@ the turn's items to the item log, charges `ctx.tokens`/`ctx.cost`, records
 `ctx.lastStepMeta`, tears the connection down per policy, and returns the
 assistant text (or the parsed `output`).
 
+### Environment and authentication
+
+`env` and `auth` live on the step, and both take effect when the step opens a
+connection.
+
+```ts
+step.acpAgent({
+  id: 'fix',
+  agent: codex(),
+  prompt: 'Fix the failing test',
+  env: { CODEX_CONFIG: '{"model":"gpt-5-codex"}' },
+  auth: (ctx) => ({ apiKey: ctx.params.openaiKey }),
+});
+```
+
+`env` is layered over the adapter's own (`codex({ env })`), which is layered
+over the host process environment.
+
+ACP's `authenticate` carries only a method id — never a credential — so an API
+key reaches the agent through its environment. An adapter declares where with
+`apiKey: { env, methodId? }`; `auth.apiKey` is placed in that variable, and
+`methodId`, when the adapter names one, is run with `authenticate` after
+`initialize`:
+
+| Preset | `apiKey.env` | `apiKey.methodId` |
+|---|---|---|
+| `claudeCode()` | `ANTHROPIC_API_KEY` | — (the bridge reads the key itself) |
+| `codex()` | `CODEX_API_KEY` | `api-key` |
+| `gemini()` | `GEMINI_API_KEY` | `gemini-api-key` |
+| `opencode()`, `pi()` | — (the variable depends on the provider) | — |
+
+`auth.methodId` overrides the adapter's method or names one on its own, with no
+key. It must be one of the agent's advertised `authMethods`
+(`ACP_AUTH_METHOD_UNKNOWN`), and not a terminal method, which the protocol
+forbids passing to `authenticate` (`ACP_AUTH_METHOD_TERMINAL`). A key for an
+adapter that names no variable is `ACP_API_KEY_UNSUPPORTED`. All three are
+raised before the turn, and a connection already opened is closed first.
+`auth` is `Lazy`, so a key can come from the context per run rather than live in
+the step tree.
+
 ### Prompt content
 
 `prompt` carries plain text; `content` carries the full ACP `ContentBlock[]` —
@@ -322,10 +371,12 @@ to open the connection. The host is held by reference the whole way down; the
 protocol client reads it at call time rather than snapshotting it.
 
 **Connection-level settings must agree.** `clientCapabilities` is negotiated
-once during `initialize`, and one connection speaks to one agent, so a step that
-joins an existing session cannot change either. Doing so is a configuration
-error (`ACP_SESSION_CAPABILITY_CONFLICT`, `ACP_SESSION_AGENT_CONFLICT`) rather
-than a silently ignored request.
+once during `initialize`, one connection speaks to one agent, and `env` and
+`auth` reach the agent only at launch, so a step that joins an existing session
+cannot change any of them. Doing so is a configuration error
+(`ACP_SESSION_CAPABILITY_CONFLICT`, `ACP_SESSION_AGENT_CONFLICT`,
+`ACP_SESSION_SETTING_CONFLICT`) rather than a silently ignored request. A
+joining step that omits `env` and `auth` accepts whatever the session has.
 
 ### Output → harness events
 
@@ -463,9 +514,17 @@ One node kind, with the agent named by a registry key:
   "agent": "claude-code",
   "prompt": "Review the diff",
   "mode": "plan",
-  "permissions": { "default": "deny", "allow": [{ "kind": "read" }] }
+  "permissions": { "default": "deny", "allow": [{ "kind": "read" }] },
+  "clientCapabilities": { "additionalDirectories": ["/shared/fixtures"] },
+  "env": { "CODEX_CONFIG": "{\"model\":\"gpt-5-codex\"}" },
+  "auth": { "apiKeyRef": "openai" }
 }
 ```
+
+A document must not carry a credential, so `auth.apiKeyRef` names one and the
+hydrator resolves it through `HydrationContext.resolveSecret(ref)` each time
+the node runs; an unresolved name fails the node with
+`UNKNOWN_SECRET_REFERENCE`. `env` holds plain values only.
 
 The hydrator resolves `agent` from `HydrationContext.acpAgents`, an **open**
 registry: supporting a new agent needs another entry, not a schema change. An

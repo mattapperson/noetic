@@ -13,6 +13,8 @@ import assert from 'node:assert';
 import type {
   AcpAgent,
   AcpAgentConnection,
+  AcpApiKey,
+  AcpAuthMethod,
   AcpClientHost,
   AcpContentBlock,
   AcpNewSessionOptions,
@@ -45,7 +47,10 @@ interface FakeAgentOpts {
   /** Notifications the agent pushes during the turn. */
   updates?: AcpSessionNotification[];
   replay?: AcpSessionNotification[];
-  onConnect?: (host: AcpClientHost) => void;
+  onConnect?: (host: AcpClientHost, env?: Record<string, string | undefined>) => void;
+  apiKey?: AcpApiKey;
+  authMethods?: AcpAuthMethod[];
+  onAuthenticate?: (methodId: string) => void;
   onNewSession?: (opts: AcpNewSessionOptions) => void;
   onPrompt?: (opts: AcpPromptOptions) => void;
   onClose?: () => void;
@@ -64,8 +69,9 @@ function fakeAgent(opts: FakeAgentOpts = {}): AcpAgent {
   return {
     specificationVersion: 'acp-v1',
     agentId,
+    apiKey: opts.apiKey,
     async connect(connect): Promise<AcpAgentConnection> {
-      opts.onConnect?.(connect.host);
+      opts.onConnect?.(connect.host, connect.env);
       const makeSession = (sessionId: string): AcpSession => ({
         sessionId,
         modes: opts.modes,
@@ -113,10 +119,10 @@ function fakeAgent(opts: FakeAgentOpts = {}): AcpAgent {
         agentCapabilities: {
           loadSession: true,
         },
-        authMethods: [],
+        authMethods: opts.authMethods ?? [],
         protocolVersion: 1,
-        async authenticate() {
-          // No auth in the fake.
+        async authenticate(methodId) {
+          opts.onAuthenticate?.(methodId);
         },
         async newSession(newSession) {
           opts.onNewSession?.(newSession);
@@ -1334,4 +1340,335 @@ it.each([
     expect(error.message).toContain(message);
     expect(error.message).not.toContain('[object Object]');
   }
+});
+
+describe('executeAcpAgent — launch env and auth', () => {
+  const apiKeyMethod: AcpAuthMethod = {
+    id: 'api-key',
+    name: 'API key',
+  };
+
+  it("layers the step's env onto the connection", async () => {
+    const { ctx } = harnessCtx();
+    let env: Record<string, string | undefined> | undefined;
+    const acpStep = step.acpAgent({
+      id: 'env',
+      agent: fakeAgent({
+        onConnect: (_host, connectEnv) => {
+          env = connectEnv;
+        },
+      }),
+      prompt: 'go',
+      env: {
+        FEATURE_FLAG: 'on',
+      },
+    });
+
+    await execute(acpStep, undefined, ctx);
+
+    expect(env).toEqual({
+      FEATURE_FLAG: 'on',
+    });
+    expect(messageTexts(ctx)).toContain('done');
+  });
+
+  it("puts auth.apiKey in the adapter's variable and runs its method", async () => {
+    const { ctx } = harnessCtx();
+    let env: Record<string, string | undefined> | undefined;
+    const methods: string[] = [];
+    const acpStep = step.acpAgent({
+      id: 'keyed',
+      agent: fakeAgent({
+        apiKey: {
+          env: 'CODEX_API_KEY',
+          methodId: 'api-key',
+        },
+        authMethods: [
+          apiKeyMethod,
+        ],
+        onConnect: (_host, connectEnv) => {
+          env = connectEnv;
+        },
+        onAuthenticate: (methodId) => methods.push(methodId),
+      }),
+      prompt: 'go',
+      env: {
+        OTHER: '1',
+      },
+      auth: () => ({
+        apiKey: 'sk-test',
+      }),
+    });
+
+    await execute(acpStep, undefined, ctx);
+
+    expect(env).toEqual({
+      OTHER: '1',
+      CODEX_API_KEY: 'sk-test',
+    });
+    expect(methods).toEqual([
+      'api-key',
+    ]);
+    expect(messageTexts(ctx)).toContain('done');
+  });
+
+  it('passes a key without authenticating when the adapter names no method', async () => {
+    const { ctx } = harnessCtx();
+    let env: Record<string, string | undefined> | undefined;
+    const methods: string[] = [];
+    const acpStep = step.acpAgent({
+      id: 'env-only-key',
+      agent: fakeAgent({
+        apiKey: {
+          env: 'ANTHROPIC_API_KEY',
+        },
+        onConnect: (_host, connectEnv) => {
+          env = connectEnv;
+        },
+        onAuthenticate: (methodId) => methods.push(methodId),
+      }),
+      prompt: 'go',
+      auth: {
+        apiKey: 'sk-ant',
+      },
+    });
+
+    await execute(acpStep, undefined, ctx);
+
+    expect(env).toEqual({
+      ANTHROPIC_API_KEY: 'sk-ant',
+    });
+    expect(methods).toEqual([]);
+    expect(messageTexts(ctx)).toContain('done');
+  });
+
+  it('runs an explicit auth.methodId without a key', async () => {
+    const { ctx } = harnessCtx();
+    const methods: string[] = [];
+    const acpStep = step.acpAgent({
+      id: 'method',
+      agent: fakeAgent({
+        authMethods: [
+          apiKeyMethod,
+        ],
+        onAuthenticate: (methodId) => methods.push(methodId),
+      }),
+      prompt: 'go',
+      auth: {
+        methodId: 'api-key',
+      },
+    });
+
+    await execute(acpStep, undefined, ctx);
+
+    expect(methods).toEqual([
+      'api-key',
+    ]);
+    expect(messageTexts(ctx)).toContain('done');
+  });
+
+  it('throws ACP_API_KEY_UNSUPPORTED when the adapter names no key variable', async () => {
+    const { ctx } = harnessCtx();
+    let connects = 0;
+    const acpStep = step.acpAgent({
+      id: 'no-key-slot',
+      agent: fakeAgent({
+        onConnect: () => {
+          connects++;
+        },
+      }),
+      prompt: 'go',
+      auth: {
+        apiKey: 'sk-test',
+      },
+    });
+
+    try {
+      await execute(acpStep, undefined, ctx);
+      throw new Error('expected throw');
+    } catch (e) {
+      assert(isNoeticConfigError(e));
+      expect(e.code).toBe('ACP_API_KEY_UNSUPPORTED');
+    }
+    expect(connects).toBe(0);
+    expect(ctx.itemLog.items).toHaveLength(0);
+  });
+
+  it('throws ACP_AUTH_METHOD_UNKNOWN and closes the connection', async () => {
+    const { ctx } = harnessCtx();
+    let closes = 0;
+    const acpStep = step.acpAgent({
+      id: 'unknown-method',
+      agent: fakeAgent({
+        authMethods: [
+          apiKeyMethod,
+        ],
+        onClose: () => {
+          closes++;
+        },
+      }),
+      prompt: 'go',
+      auth: {
+        methodId: 'oauth',
+      },
+    });
+
+    try {
+      await execute(acpStep, undefined, ctx);
+      throw new Error('expected throw');
+    } catch (e) {
+      assert(isNoeticConfigError(e));
+      expect(e.code).toBe('ACP_AUTH_METHOD_UNKNOWN');
+      expect(e.hint).toContain('api-key');
+    }
+    expect(closes).toBe(1);
+  });
+
+  it('throws ACP_AUTH_METHOD_TERMINAL rather than passing a terminal method on', async () => {
+    const { ctx } = harnessCtx();
+    const methods: string[] = [];
+    const acpStep = step.acpAgent({
+      id: 'terminal-method',
+      agent: fakeAgent({
+        authMethods: [
+          {
+            id: 'login',
+            name: 'Log in',
+            type: 'terminal',
+          },
+        ],
+        onAuthenticate: (methodId) => methods.push(methodId),
+      }),
+      prompt: 'go',
+      auth: {
+        methodId: 'login',
+      },
+    });
+
+    try {
+      await execute(acpStep, undefined, ctx);
+      throw new Error('expected throw');
+    } catch (e) {
+      assert(isNoeticConfigError(e));
+      expect(e.code).toBe('ACP_AUTH_METHOD_TERMINAL');
+    }
+    expect(methods).toEqual([]);
+  });
+
+  describe('on a reused session', () => {
+    const shared = {
+      reuse: 'shared',
+      keepAlive: 'run',
+    } as const;
+
+    it('accepts a joining step that sets no env or auth', async () => {
+      const { ctx } = harnessCtx();
+      let connects = 0;
+      const agent = fakeAgent({
+        onConnect: () => {
+          connects++;
+        },
+      });
+      await execute(
+        step.acpAgent({
+          id: 'first',
+          agent,
+          prompt: 'one',
+          env: {
+            A: '1',
+          },
+          session: shared,
+        }),
+        undefined,
+        ctx,
+      );
+      await execute(
+        step.acpAgent({
+          id: 'second',
+          agent,
+          prompt: 'two',
+          session: shared,
+        }),
+        undefined,
+        ctx,
+      );
+
+      expect(connects).toBe(1);
+      expect(messageTexts(ctx)).toContain('two');
+    });
+
+    it('accepts the same env written in a different key order', async () => {
+      const { ctx } = harnessCtx();
+      const agent = fakeAgent();
+      await execute(
+        step.acpAgent({
+          id: 'first',
+          agent,
+          prompt: 'one',
+          env: {
+            A: '1',
+            B: '2',
+          },
+          session: shared,
+        }),
+        undefined,
+        ctx,
+      );
+      await execute(
+        step.acpAgent({
+          id: 'second',
+          agent,
+          prompt: 'two',
+          env: {
+            B: '2',
+            A: '1',
+          },
+          session: shared,
+        }),
+        undefined,
+        ctx,
+      );
+
+      expect(messageTexts(ctx)).toContain('two');
+    });
+
+    it('rejects a joining step with a different env', async () => {
+      const { ctx } = harnessCtx();
+      const agent = fakeAgent();
+      await execute(
+        step.acpAgent({
+          id: 'first',
+          agent,
+          prompt: 'one',
+          env: {
+            A: '1',
+          },
+          session: shared,
+        }),
+        undefined,
+        ctx,
+      );
+
+      try {
+        await execute(
+          step.acpAgent({
+            id: 'second',
+            agent,
+            prompt: 'two',
+            env: {
+              A: '2',
+            },
+            session: shared,
+          }),
+          undefined,
+          ctx,
+        );
+        throw new Error('expected throw');
+      } catch (e) {
+        assert(isNoeticConfigError(e));
+        expect(e.code).toBe('ACP_SESSION_SETTING_CONFLICT');
+        expect(e.message).toContain('env or auth');
+      }
+    });
+  });
 });

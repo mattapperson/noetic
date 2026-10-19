@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { claudeCode, codex } from '../src/agents';
+import { claudeCode, codex, customAcpAgent, gemini, opencode, pi } from '../src/agents';
 import { loopbackTransport } from '../src/transport-loopback';
 import { MemoryFs, RecordingShell } from './_helpers';
 
@@ -125,4 +125,98 @@ describe('maintained ACP presets', () => {
       await connection.close();
     });
   }
+});
+
+describe('preset API key variables', () => {
+  it.each([
+    [
+      claudeCode(),
+      {
+        env: 'ANTHROPIC_API_KEY',
+      },
+    ],
+    [
+      codex(),
+      {
+        env: 'CODEX_API_KEY',
+        methodId: 'api-key',
+      },
+    ],
+    [
+      gemini(),
+      {
+        env: 'GEMINI_API_KEY',
+        methodId: 'gemini-api-key',
+      },
+    ],
+  ])('%#: names where the bridge reads its key', (agent, apiKey) => {
+    expect(agent.apiKey).toEqual(apiKey);
+  });
+
+  it('leaves provider-dependent agents without one', () => {
+    expect(opencode().apiKey).toBeUndefined();
+    expect(pi().apiKey).toBeUndefined();
+  });
+
+  it('lets an override or a custom agent declare one', () => {
+    const apiKey = {
+      env: 'MY_KEY',
+    };
+    expect(
+      claudeCode({
+        apiKey,
+      }).apiKey,
+    ).toEqual(apiKey);
+    expect(
+      customAcpAgent({
+        agentId: 'mine',
+        command: 'mine-acp',
+        apiKey,
+      }).apiKey,
+    ).toEqual(apiKey);
+  });
+});
+
+describe('connection env', () => {
+  it("layers connect's env over the preset's", async () => {
+    const transport = loopbackTransport(() => ({
+      initialize: async () => ({
+        protocolVersion: 1,
+        agentCapabilities: {},
+      }),
+      authenticate: async () => ({}),
+      newSession: async () => ({
+        sessionId: 'test-session',
+      }),
+      prompt: async () => ({
+        stopReason: 'end_turn',
+      }),
+      cancel: async () => {},
+    }));
+    let seen: Record<string, string | undefined> | undefined;
+    const agent = codex({
+      env: {
+        A: 'preset',
+        B: 'preset',
+      },
+      transport: async (opts) => {
+        seen = opts.env;
+        return transport(opts);
+      },
+    });
+    const connection = await agent.connect({
+      host: host('/workspace'),
+      env: {
+        B: 'step',
+        CODEX_API_KEY: 'sk-test',
+      },
+    });
+    await connection.close();
+
+    expect(seen).toEqual({
+      A: 'preset',
+      B: 'step',
+      CODEX_API_KEY: 'sk-test',
+    });
+  });
 });

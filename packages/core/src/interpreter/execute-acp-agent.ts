@@ -42,6 +42,8 @@ import type { AcpSessionStore } from '../runtime/acp-session-store';
 import { errorMessage } from '../util/error-message';
 import { AcpEventBridge } from './acp-events';
 import { withHistoryPrompt } from './acp-history';
+import type { AcpLaunch } from './acp-launch';
+import { authenticate, resolveLaunch } from './acp-launch';
 import { resolveLazy } from './execute-action';
 import { trackUsage } from './message-helpers';
 import { parseStructuredOutput } from './structured-output';
@@ -290,8 +292,8 @@ function normalizedCapabilities(config: AcpClientCapabilityConfig | undefined): 
 }
 
 /**
- * `cwd` and `mcpServers` are fixed when the session is created, so a step
- * joining an existing one cannot change them either.
+ * `cwd`, `mcpServers`, `env`, and `auth` are fixed when the session is
+ * created, so a step joining an existing one cannot change them either.
  *
  * These used to be dropped in silence while a mismatched `clientCapabilities`
  * threw — so a step that named different MCP servers simply got none of them,
@@ -302,6 +304,7 @@ function assertSessionScopedSettingsMatch<TContext, I, O>(
   live: AcpLiveSession,
   cwd: string,
   servers: ReadonlyArray<AcpMcpServer> | undefined,
+  launch: AcpLaunch,
 ): void {
   const conflict = (setting: string, hint: string): NoeticConfigError =>
     new NoeticConfigError({
@@ -322,6 +325,12 @@ function assertSessionScopedSettingsMatch<TContext, I, O>(
     throw conflict(
       'set of MCP servers',
       'MCP servers are attached when the session is created. Give every step sharing a `session.reuse` key the same `mcpServers`, or use a separate session.',
+    );
+  }
+  if (launch.requested && launch.fingerprint !== live.launch) {
+    throw conflict(
+      'env or auth',
+      'The agent is launched and signed in once per connection. Give every step sharing a `session.reuse` key the same `env` and `auth`, or omit them on the steps that join.',
     );
   }
 }
@@ -397,6 +406,7 @@ async function openSession<TContext, I, O>(opts: {
   binding: HostBindingOptions<TContext, I, O>;
   /** MCP servers for the session, already resolved from the step. */
   servers?: Parameters<AcpAgentConnection['newSession']>[0]['mcpServers'];
+  launch: AcpLaunch;
 }): Promise<SessionResolution> {
   const store = sessionStore(opts.baseCtx);
   const keepAlive = keepAliveOf(opts.step.session);
@@ -414,6 +424,7 @@ async function openSession<TContext, I, O>(opts: {
     const connection = await opts.agent.connect({
       host: opts.host,
       signal: abortSignalOf(opts.baseCtx),
+      env: opts.launch.env,
     });
 
     // From here on the connection owns a live agent (usually a child process).
@@ -421,6 +432,10 @@ async function openSession<TContext, I, O>(opts: {
     // must close it first — otherwise the agent outlives the step and, because
     // its stdio keeps the event loop alive, the host never exits.
     try {
+      await authenticate(connection, opts.launch, {
+        stepId: opts.step.id,
+        agentId: opts.agent.agentId,
+      });
       const loadId = opts.step.session?.load;
       if (loadId) {
         opts.host.onSessionUpdate = opts.onReplay;
@@ -443,6 +458,7 @@ async function openSession<TContext, I, O>(opts: {
         keepAlive,
         cwd: opts.cwd,
         mcpServers: opts.servers,
+        launch: opts.launch.fingerprint,
       };
     } catch (e) {
       await connection.close().catch(() => undefined);
@@ -453,7 +469,7 @@ async function openSession<TContext, I, O>(opts: {
   });
 
   if (!fresh) {
-    assertSessionScopedSettingsMatch(opts.step, live, opts.cwd, opts.servers);
+    assertSessionScopedSettingsMatch(opts.step, live, opts.cwd, opts.servers, opts.launch);
     if (live.agentId !== opts.agent.agentId) {
       throw new NoeticConfigError({
         code: 'ACP_SESSION_AGENT_CONFLICT',
@@ -593,6 +609,7 @@ export async function executeAcpAgent<TContext, I, O>(
 
   const cwd = (await resolveLazy(step.cwd, ctx)) ?? baseCtx.cwdState.cwd;
   const servers = await resolveLazy(step.mcpServers, ctx);
+  const launch = await resolveLaunch(step, agent, ctx);
 
   // Capture the conversation so far BEFORE appending this turn's prompt, so a
   // fresh session can be seeded with it and the agent is not left guessing at
@@ -630,6 +647,7 @@ export async function executeAcpAgent<TContext, I, O>(
     host,
     binding,
     onReplay: (notification) => bridge.forward(notification, true),
+    launch,
     servers: servers
       ? [
           ...servers,

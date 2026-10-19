@@ -559,6 +559,8 @@ export type {
   AcpAgent,
   AcpAgentCapabilities,
   AcpAgentConnection,
+  AcpApiKey,
+  AcpAuthConfig,
   AcpAuthMethod,
   AcpAvailableCommand,
   AcpBoundPermissionHandler,

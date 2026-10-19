@@ -82,6 +82,42 @@ not bridge configuration; use `CODEX_CONFIG` instead. For an installed bridge or
 an exact package version, use `customAcpAgent` with its command and arguments,
 or supply a `transport`.
 
+## Environment and API keys
+
+`env` and `auth` go on the step, so two steps can drive the same preset with different settings:
+
+```ts
+import { step } from '@noetic-tools/core';
+import { codex } from '@noetic-tools/acp';
+
+declare const openaiKey: string;
+
+const fix = step.acpAgent({
+  id: 'fix',
+  agent: codex(),
+  prompt: 'Fix the failing test',
+  env: { CODEX_CONFIG: JSON.stringify({ model: 'your-model-id' }) },
+  auth: { apiKey: openaiKey },
+});
+```
+
+The step's `env` is layered over the preset's, which is layered over the host's environment.
+
+ACP has no field for a credential — `authenticate` takes only a method id — so `auth.apiKey` is handed to the agent in the variable its preset reads, and the preset's auth method, if it has one, runs after the handshake:
+
+| Preset | Key variable | Auth method |
+|---|---|---|
+| `claudeCode()` | `ANTHROPIC_API_KEY` | none needed |
+| `codex()` | `CODEX_API_KEY` | `api-key` |
+| `gemini()` | `GEMINI_API_KEY` | `gemini-api-key` |
+| `opencode()`, `pi()` | depends on the provider — set it in `env` | — |
+
+For a custom agent, declare the variable yourself: `customAcpAgent({ agentId, command, apiKey: { env: 'MY_AGENT_KEY', methodId: 'api-key' } })`.
+
+`auth.methodId` picks any other advertised method. Terminal logins (`type: 'terminal'`) are refused with `ACP_AUTH_METHOD_TERMINAL`, since the protocol forbids passing them to `authenticate`; sign in with the agent's own CLI first instead. An unknown method throws `ACP_AUTH_METHOD_UNKNOWN`, listing the ones the agent offers, and a key for an agent with no key variable throws `ACP_API_KEY_UNSUPPORTED`.
+
+`auth` also accepts a `(ctx) => …` getter, so the key can come from the run rather than sit in the step tree.
+
 ## Filesystem confinement
 
 ACP puts boundary enforcement on the **client**: the agent asks for a path, and the client decides whether it may have it. Nothing in the protocol constrains what it asks for.
@@ -477,9 +513,13 @@ The same agents are available in the [JSON runtime](/docs/framework/json-runtime
   "agent": "claude-code",
   "prompt": "Review the diff",
   "mode": "plan",
-  "permissions": { "default": "deny", "allow": [{ "kind": "read" }] }
+  "permissions": { "default": "deny", "allow": [{ "kind": "read" }] },
+  "clientCapabilities": { "additionalDirectories": ["/shared/fixtures"] },
+  "auth": { "apiKeyRef": "anthropic" }
 }
 ```
+
+A workflow document should never hold a credential, so `auth.apiKeyRef` names one and the host resolves it with `resolveSecret` each time the node runs:
 
 ```ts
 import { hydrateWorkflow, type ExecuteStepFn, type WorkflowDocument } from '@noetic-tools/core';
@@ -487,15 +527,17 @@ import { claudeCode, codex, createAcpAgentRegistry } from '@noetic-tools/acp';
 
 declare const document: WorkflowDocument;
 declare const executeStep: ExecuteStepFn;
+declare const secrets: Map<string, string>;
 
 const hydrated = hydrateWorkflow(document, {
   tools: new Map(),
   executeStep,
   acpAgents: createAcpAgentRegistry(claudeCode(), codex()),
+  resolveSecret: (ref) => secrets.get(ref),
 });
 ```
 
-A node naming an unregistered agent fails hydration with `UNKNOWN_ACP_AGENT_REFERENCE`.
+A node naming an unregistered agent fails hydration with `UNKNOWN_ACP_AGENT_REFERENCE`; a secret that does not resolve fails the node with `UNKNOWN_SECRET_REFERENCE`. `env` is also accepted on the node, for plain values only.
 
 ## Testing an ACP step
 

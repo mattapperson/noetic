@@ -447,6 +447,12 @@ export interface AcpLiveSession {
   cwd: string;
   /** MCP servers attached at creation — also fixed for its lifetime. */
   mcpServers?: ReadonlyArray<acp.McpServer>;
+  /**
+   * The `env` and `auth` the connection was opened with, as one comparable
+   * string. Both reach the agent only at launch, so a step joining the
+   * session must ask for the same ones or none at all.
+   */
+  launch: string;
 }
 
 /** @public Options handed to {@link AcpAgent.connect}. */
@@ -454,6 +460,44 @@ export interface AcpConnectOptions {
   /** The runtime surface backing client-side ACP methods. */
   host: AcpClientHost;
   signal?: AbortSignal;
+  /**
+   * Environment for the agent process, layered over the adapter's own. Takes
+   * effect only for transports that launch a process.
+   */
+  env?: Record<string, string | undefined>;
+}
+
+/**
+ * Where an agent reads an API key. ACP's `authenticate` carries only a method
+ * id, so a key reaches the agent through its environment; `methodId` names the
+ * method that then consumes it, for agents that need one.
+ * @public
+ */
+export interface AcpApiKey {
+  /** Environment variable the agent reads the key from, e.g. `ANTHROPIC_API_KEY`. */
+  env: string;
+  /** Auth method to run once the key is in place. Omit when the agent reads the key on its own. */
+  methodId?: string;
+}
+
+/**
+ * How a step authenticates with its agent. Applied when the step opens a
+ * connection; a step joining a live session must ask for the same.
+ * @public
+ */
+export interface AcpAuthConfig {
+  /**
+   * API key handed to the agent through the variable its adapter names in
+   * {@link AcpAgent.apiKey}.
+   */
+  apiKey?: string;
+  /**
+   * One of the agent's advertised `authMethods`, run with `authenticate` after
+   * `initialize`. Defaults to the adapter's `apiKey.methodId` when `apiKey` is
+   * set. Terminal methods are refused: the protocol forbids passing them to
+   * `authenticate`.
+   */
+  methodId?: string;
 }
 
 /**
@@ -470,6 +514,8 @@ export interface AcpAgent {
    * observability, and error messages.
    */
   readonly agentId: string;
+  /** Where the agent reads an API key, so a step can pass one with `auth.apiKey`. */
+  readonly apiKey?: AcpApiKey;
   /** Open a transport, run `initialize`, and return the negotiated connection. */
   connect(opts: AcpConnectOptions): Promise<AcpAgentConnection>;
 }

@@ -14,7 +14,7 @@
  * externalise `@noetic-tools/acp/stdio`.
  */
 
-import type { AcpAgent, AcpTransport, AcpTransportFactory } from '@noetic-tools/types';
+import type { AcpAgent, AcpApiKey, AcpTransport, AcpTransportFactory } from '@noetic-tools/types';
 import { defineAcpAgent } from './define';
 
 //#region Lazy stdio
@@ -56,9 +56,17 @@ export interface AcpPresetOptions {
   env?: Record<string, string | undefined>;
   /** Supply a non-stdio transport (remote agent, test loopback, sandbox bridge). */
   transport?: AcpTransportFactory;
+  /** Override where the agent reads an API key, e.g. a bridge reading a different variable. */
+  apiKey?: AcpApiKey;
 }
 
-function preset(agentId: string, base: AcpProcessSpec, opts: AcpPresetOptions = {}): AcpAgent {
+function preset(
+  agentId: string,
+  base: AcpProcessSpec & {
+    apiKey?: AcpApiKey;
+  },
+  opts: AcpPresetOptions = {},
+): AcpAgent {
   const spec: AcpProcessSpec = {
     command: opts.command ?? base.command,
     args: [
@@ -74,6 +82,7 @@ function preset(agentId: string, base: AcpProcessSpec, opts: AcpPresetOptions = 
     agentId,
     transport: opts.transport ?? lazyStdioTransport(agentId, spec),
     env: spec.env,
+    apiKey: opts.apiKey ?? base.apiKey,
   });
 }
 
@@ -95,6 +104,10 @@ export function claudeCode(opts: AcpPresetOptions = {}): AcpAgent {
         '-y',
         '@agentclientprotocol/claude-agent-acp',
       ],
+      // The bridge reads the key itself; it advertises no API-key method.
+      apiKey: {
+        env: 'ANTHROPIC_API_KEY',
+      },
     },
     opts,
   );
@@ -113,6 +126,10 @@ export function codex(opts: AcpPresetOptions = {}): AcpAgent {
         '-y',
         '@agentclientprotocol/codex-acp',
       ],
+      apiKey: {
+        env: 'CODEX_API_KEY',
+        methodId: 'api-key',
+      },
     },
     opts,
   );
@@ -130,6 +147,10 @@ export function gemini(opts: AcpPresetOptions = {}): AcpAgent {
       args: [
         '--experimental-acp',
       ],
+      apiKey: {
+        env: 'GEMINI_API_KEY',
+        methodId: 'gemini-api-key',
+      },
     },
     opts,
   );
@@ -184,6 +205,8 @@ export function customAcpAgent(opts: {
   args?: ReadonlyArray<string>;
   env?: Record<string, string | undefined>;
   transport?: AcpTransportFactory;
+  /** Where the agent reads an API key, so a step can pass one with `auth.apiKey`. */
+  apiKey?: AcpApiKey;
 }): AcpAgent {
   if (!opts.transport && !opts.command) {
     throw new TypeError(
@@ -199,6 +222,7 @@ export function customAcpAgent(opts: {
     },
     {
       transport: opts.transport,
+      apiKey: opts.apiKey,
     },
   );
 }

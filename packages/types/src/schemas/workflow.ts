@@ -247,6 +247,20 @@ const AcpClientCapabilityConfigSchema = z.object({
   readTextFile: z.boolean().optional(),
   writeTextFile: z.boolean().optional(),
   terminal: z.boolean().optional(),
+  /** Absolute directories `fs/*` may reach besides the session working directory. */
+  additionalDirectories: z.array(z.string().min(1)).optional(),
+  /** Lift the `fs/*` path confinement entirely. */
+  allowAnyPath: z.boolean().optional(),
+});
+
+/**
+ * ACP auth for a workflow node. A document must not carry a credential, so the
+ * key is named by `apiKeyRef` and resolved through
+ * `HydrationContext.resolveSecret` when the node runs.
+ */
+const AcpWorkflowAuthSchema = z.object({
+  methodId: z.string().min(1).optional(),
+  apiKeyRef: z.string().min(1).optional(),
 });
 
 const AcpNamedValueSchema = z.object({
@@ -449,6 +463,9 @@ export interface AcpAgentWorkflowNode extends WorkflowNodeBase {
   permissions?: z.infer<typeof AcpPermissionPolicySchema>;
   clientCapabilities?: z.infer<typeof AcpClientCapabilityConfigSchema>;
   session?: z.infer<typeof AcpSessionPolicySchema>;
+  /** Environment for the agent process. Use `auth.apiKeyRef` for credentials, not this. */
+  env?: Record<string, string>;
+  auth?: z.infer<typeof AcpWorkflowAuthSchema>;
 }
 
 /**
@@ -620,6 +637,8 @@ const AcpAgentNodeSchema = z.object({
   permissions: AcpPermissionPolicySchema.optional(),
   clientCapabilities: AcpClientCapabilityConfigSchema.optional(),
   session: AcpSessionPolicySchema.optional(),
+  env: z.record(z.string(), z.string()).optional(),
+  auth: AcpWorkflowAuthSchema.optional(),
 });
 
 /** @public Zod schema validating a single `WorkflowNode` (any JSON-safe kind). */

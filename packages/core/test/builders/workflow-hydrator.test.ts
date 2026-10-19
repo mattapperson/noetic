@@ -1177,6 +1177,106 @@ describe('hydrateNode — acp-agent', () => {
     expect(result.permissions?.allow).toHaveLength(1);
   });
 
+  test('carries env and path capabilities through to the step', () => {
+    const node: WorkflowNode = {
+      kind: 'acp-agent',
+      id: 'configured',
+      agent: 'claude-code',
+      prompt: 'go',
+      env: {
+        FEATURE_FLAG: 'on',
+      },
+      clientCapabilities: {
+        additionalDirectories: [
+          '/shared',
+        ],
+        allowAnyPath: false,
+      },
+    };
+    const result = hydrateNode(node, ctxWithAgent('claude-code'));
+    assert(result.kind === 'acp-agent');
+    expect(result.env).toEqual({
+      FEATURE_FLAG: 'on',
+    });
+    expect(result.clientCapabilities?.additionalDirectories).toEqual([
+      '/shared',
+    ]);
+  });
+
+  test('passes auth.methodId through without a secret lookup', () => {
+    const node: WorkflowNode = {
+      kind: 'acp-agent',
+      id: 'method',
+      agent: 'codex',
+      prompt: 'go',
+      auth: {
+        methodId: 'api-key',
+      },
+    };
+    const result = hydrateNode(node, ctxWithAgent('codex'));
+    assert(result.kind === 'acp-agent');
+    expect(result.auth).toEqual({
+      methodId: 'api-key',
+    });
+  });
+
+  test('resolves auth.apiKeyRef through resolveSecret when the node runs', async () => {
+    const refs: string[] = [];
+    const node: WorkflowNode = {
+      kind: 'acp-agent',
+      id: 'keyed',
+      agent: 'codex',
+      prompt: 'go',
+      auth: {
+        apiKeyRef: 'openai',
+        methodId: 'api-key',
+      },
+    };
+    const result = hydrateNode(node, {
+      ...ctxWithAgent('codex'),
+      resolveSecret: async (ref) => {
+        refs.push(ref);
+        return 'sk-test';
+      },
+    });
+    assert(result.kind === 'acp-agent');
+    assert(typeof result.auth === 'function');
+    // The key is fetched at run time, not captured during hydration.
+    expect(refs).toEqual([]);
+
+    const auth = await result.auth(makeMockContext());
+
+    expect(auth).toEqual({
+      apiKey: 'sk-test',
+      methodId: 'api-key',
+    });
+    expect(refs).toEqual([
+      'openai',
+    ]);
+  });
+
+  test('throws UNKNOWN_SECRET_REFERENCE when the secret does not resolve', async () => {
+    const node: WorkflowNode = {
+      kind: 'acp-agent',
+      id: 'missing-secret',
+      agent: 'codex',
+      prompt: 'go',
+      auth: {
+        apiKeyRef: 'nowhere',
+      },
+    };
+    const result = hydrateNode(node, ctxWithAgent('codex'));
+    assert(result.kind === 'acp-agent');
+    assert(typeof result.auth === 'function');
+    try {
+      await result.auth(makeMockContext());
+      throw new Error('expected throw');
+    } catch (e) {
+      assert(isNoeticConfigError(e));
+      expect(e.code).toBe('UNKNOWN_SECRET_REFERENCE');
+    }
+  });
+
   test('throws UNKNOWN_ACP_AGENT_REFERENCE when no adapter is registered', () => {
     const node: WorkflowNode = {
       kind: 'acp-agent',

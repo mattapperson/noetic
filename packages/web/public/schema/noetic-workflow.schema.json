@@ -734,6 +734,16 @@
                 },
                 "terminal": {
                   "type": "boolean"
+                },
+                "additionalDirectories": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "allowAnyPath": {
+                  "type": "boolean"
                 }
               },
               "additionalProperties": false
@@ -754,6 +764,29 @@
                   ]
                 },
                 "load": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "additionalProperties": false
+            },
+            "env": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "auth": {
+              "type": "object",
+              "properties": {
+                "methodId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "apiKeyRef": {
                   "type": "string",
                   "minLength": 1
                 }
