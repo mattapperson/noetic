@@ -12,14 +12,14 @@
  * forming a cycle. Core calls only the methods declared here — the ACP library's
  * `ClientSideConnection` never enters core's dependency graph.
  *
- * Protocol types are re-used verbatim from `@zed-industries/agent-client-protocol`
+ * Protocol types are re-used verbatim from `@agentclientprotocol/sdk`
  * (spec version 1) rather than mirrored, so the wire surface cannot drift from
  * the specification.
  *
  * @see https://agentclientprotocol.com/
  */
 
-import type * as acp from '@zed-industries/agent-client-protocol';
+import type * as acp from '@agentclientprotocol/sdk';
 import type { TokenUsage } from './common';
 import type { Context } from './context';
 import type { FsAdapter } from './fs-adapter';
@@ -347,8 +347,11 @@ export interface AcpTurnResult {
   items: Item[];
   /** Concatenated assistant text of the turn. */
   text: string;
+  /** Billed token delta supplied by an adapter, never context-window occupancy. */
   usage?: TokenUsage;
   cost?: number;
+  /** Raw ACP prompt-response usage; kept separate because providers may report session totals. */
+  reportedUsage?: acp.Usage;
   /** Plan entries reported via `plan` updates, latest snapshot wins. */
   plan?: ReadonlyArray<acp.PlanEntry>;
   /** Slash commands the agent advertised during the turn. */
@@ -383,6 +386,8 @@ export interface AcpSession {
   readonly sessionId: string;
   /** Mode state when the agent supports session modes. */
   readonly modes?: acp.SessionModeState;
+  /** Current configuration choices, including model choices when advertised. */
+  readonly configOptions?: ReadonlyArray<acp.SessionConfigOption>;
   /** Slash commands currently offered, refreshed by `available_commands_update`. */
   readonly availableCommands: ReadonlyArray<acp.AvailableCommand>;
   /** Run one prompt turn to completion. */
@@ -391,7 +396,7 @@ export interface AcpSession {
   cancel(): Promise<void>;
   /** Switch mode. Throws when the agent advertised no modes. */
   setMode(modeId: string): Promise<void>;
-  /** Switch model. Throws when the agent advertised no models. */
+  /** Select the value of the advertised model configuration option. */
   setModel(modelId: string): Promise<void>;
 }
 
@@ -442,6 +447,12 @@ export interface AcpLiveSession {
   cwd: string;
   /** MCP servers attached at creation — also fixed for its lifetime. */
   mcpServers?: ReadonlyArray<acp.McpServer>;
+  /**
+   * The `env` and `auth` the connection was opened with, as one comparable
+   * string. Both reach the agent only at launch, so a step joining the
+   * session must ask for the same ones or none at all.
+   */
+  launch: string;
 }
 
 /** @public Options handed to {@link AcpAgent.connect}. */
@@ -449,6 +460,44 @@ export interface AcpConnectOptions {
   /** The runtime surface backing client-side ACP methods. */
   host: AcpClientHost;
   signal?: AbortSignal;
+  /**
+   * Environment for the agent process, layered over the adapter's own. Takes
+   * effect only for transports that launch a process.
+   */
+  env?: Record<string, string | undefined>;
+}
+
+/**
+ * Where an agent reads an API key. ACP's `authenticate` carries only a method
+ * id, so a key reaches the agent through its environment; `methodId` names the
+ * method that then consumes it, for agents that need one.
+ * @public
+ */
+export interface AcpApiKey {
+  /** Environment variable the agent reads the key from, e.g. `ANTHROPIC_API_KEY`. */
+  env: string;
+  /** Auth method to run once the key is in place. Omit when the agent reads the key on its own. */
+  methodId?: string;
+}
+
+/**
+ * How a step authenticates with its agent. Applied when the step opens a
+ * connection; a step joining a live session must ask for the same.
+ * @public
+ */
+export interface AcpAuthConfig {
+  /**
+   * API key handed to the agent through the variable its adapter names in
+   * {@link AcpAgent.apiKey}.
+   */
+  apiKey?: string;
+  /**
+   * One of the agent's advertised `authMethods`, run with `authenticate` after
+   * `initialize`. Defaults to the adapter's `apiKey.methodId` when `apiKey` is
+   * set. Terminal methods are refused: the protocol forbids passing them to
+   * `authenticate`.
+   */
+  methodId?: string;
 }
 
 /**
@@ -465,6 +514,8 @@ export interface AcpAgent {
    * observability, and error messages.
    */
   readonly agentId: string;
+  /** Where the agent reads an API key, so a step can pass one with `auth.apiKey`. */
+  readonly apiKey?: AcpApiKey;
   /** Open a transport, run `initialize`, and return the negotiated connection. */
   connect(opts: AcpConnectOptions): Promise<AcpAgentConnection>;
 }
@@ -545,6 +596,8 @@ export interface AcpSessionInfo {
   currentModeId?: string;
   /** Modes the agent offers, for a mode switcher. */
   availableModes: ReadonlyArray<acp.SessionMode>;
+  /** Current config choices, including model options when advertised. */
+  configOptions?: ReadonlyArray<acp.SessionConfigOption>;
   /** Slash commands the agent currently advertises. */
   availableCommands: ReadonlyArray<acp.AvailableCommand>;
 }
@@ -639,12 +692,13 @@ export type {
   PlanEntry as AcpPlanEntry,
   PromptCapabilities as AcpPromptCapabilities,
   RequestPermissionRequest as AcpRequestPermissionRequest,
+  SessionConfigOption as AcpSessionConfigOption,
   SessionMode as AcpSessionMode,
   SessionModeState as AcpSessionModeState,
   SessionNotification as AcpSessionNotification,
   ToolCallContent as AcpToolCallContent,
   ToolCallStatus as AcpToolCallStatus,
   ToolKind as AcpToolKind,
-} from '@zed-industries/agent-client-protocol';
+} from '@agentclientprotocol/sdk';
 
 //#endregion

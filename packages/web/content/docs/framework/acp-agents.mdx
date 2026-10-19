@@ -47,8 +47,8 @@ It also brings capabilities a hand-rolled adapter has no way to express: permiss
 ```ts
 import { claudeCode, codex, gemini, opencode, pi, customAcpAgent } from '@noetic-tools/acp';
 
-claudeCode();                       // npx @zed-industries/claude-code-acp
-codex();                            // npx @zed-industries/codex-acp
+claudeCode();                       // npx @agentclientprotocol/claude-agent-acp
+codex();                            // npx @agentclientprotocol/codex-acp
 gemini();                           // gemini --experimental-acp
 opencode();                         // opencode acp  (native ACP)
 pi();                               // npx pi-acp    (community adapter)
@@ -61,6 +61,62 @@ customAcpAgent({                    // any other ACP-speaking binary
 ```
 
 Every preset accepts `command`, `args`, and `env` overrides, plus a `transport` for reaching an agent that is not a local child process.
+
+Claude Code and Codex use the maintained `@agentclientprotocol` bridges. Their npm
+binaries run Node entrypoints; the Codex bridge includes a compatible Codex backend.
+Use `CODEX_PATH` to choose another backend and `CODEX_CONFIG` for JSON configuration:
+
+```ts
+import { codex } from '@noetic-tools/acp';
+
+codex({
+  env: {
+    CODEX_PATH: '/usr/local/bin/codex',
+    CODEX_CONFIG: JSON.stringify({ model: 'your-model-id' }),
+  },
+});
+```
+
+`args` are appended to the ACP bridge command. Codex CLI flags such as `-c` are
+not bridge configuration; use `CODEX_CONFIG` instead. For an installed bridge or
+an exact package version, use `customAcpAgent` with its command and arguments,
+or supply a `transport`.
+
+## Environment and API keys
+
+`env` and `auth` go on the step, so two steps can drive the same preset with different settings:
+
+```ts
+import { step } from '@noetic-tools/core';
+import { codex } from '@noetic-tools/acp';
+
+declare const openaiKey: string;
+
+const fix = step.acpAgent({
+  id: 'fix',
+  agent: codex(),
+  prompt: 'Fix the failing test',
+  env: { CODEX_CONFIG: JSON.stringify({ model: 'your-model-id' }) },
+  auth: { apiKey: openaiKey },
+});
+```
+
+The step's `env` is layered over the preset's, which is layered over the host's environment.
+
+ACP has no field for a credential — `authenticate` takes only a method id — so `auth.apiKey` is handed to the agent in the variable its preset reads, and the preset's auth method, if it has one, runs after the handshake:
+
+| Preset | Key variable | Auth method |
+|---|---|---|
+| `claudeCode()` | `ANTHROPIC_API_KEY` | none needed |
+| `codex()` | `CODEX_API_KEY` | `api-key` |
+| `gemini()` | `GEMINI_API_KEY` | `gemini-api-key` |
+| `opencode()`, `pi()` | depends on the provider — set it in `env` | — |
+
+For a custom agent, declare the variable yourself: `customAcpAgent({ agentId, command, apiKey: { env: 'MY_AGENT_KEY', methodId: 'api-key' } })`.
+
+`auth.methodId` picks any other advertised method. Terminal logins (`type: 'terminal'`) are refused with `ACP_AUTH_METHOD_TERMINAL`, since the protocol forbids passing them to `authenticate`; sign in with the agent's own CLI first instead. An unknown method throws `ACP_AUTH_METHOD_UNKNOWN`, listing the ones the agent offers, and a key for an agent with no key variable throws `ACP_API_KEY_UNSUPPORTED`.
+
+`auth` also accepts a `(ctx) => …` getter, so the key can come from the run rather than sit in the step tree.
 
 ## Filesystem confinement
 
@@ -210,7 +266,7 @@ step.acpAgent({
   agent: claudeCode(),
   prompt: 'Design the migration',
   mode: 'plan',                     // session/set_mode before the turn
-  model: 'claude-opus-4-8',         // session/set_model before the turn
+  model: 'claude-opus-4-8',         // advertised model config option before the turn
   mcpServers: [
     { name: 'db', command: 'mcp-db', args: [], env: [] },
   ],
@@ -293,6 +349,8 @@ Two more things to know about sharing a session:
 - **The agent and `clientCapabilities` are fixed per connection.** ACP negotiates capabilities once, and a connection speaks to one agent. A step joining an existing session with a different agent or different `clientCapabilities` throws `ACP_SESSION_AGENT_CONFLICT` / `ACP_SESSION_CAPABILITY_CONFLICT` rather than silently getting something other than it asked for.
 
 `session.load` resumes an existing ACP session id instead of creating a new one, for agents that advertise `loadSession`.
+
+History streamed while loading appears only in raw `acp_event` events with `data.replay: true`, along with the step and session IDs. It does not produce new text, reasoning, or tool-call output on the SDK event streams. Chat views that read raw ACP events should skip replay when rendering the current turn.
 
 ## Stop reasons
 
@@ -455,9 +513,13 @@ The same agents are available in the [JSON runtime](/docs/framework/json-runtime
   "agent": "claude-code",
   "prompt": "Review the diff",
   "mode": "plan",
-  "permissions": { "default": "deny", "allow": [{ "kind": "read" }] }
+  "permissions": { "default": "deny", "allow": [{ "kind": "read" }] },
+  "clientCapabilities": { "additionalDirectories": ["/shared/fixtures"] },
+  "auth": { "apiKeyRef": "anthropic" }
 }
 ```
+
+A workflow document should never hold a credential, so `auth.apiKeyRef` names one and the host resolves it with `resolveSecret` each time the node runs:
 
 ```ts
 import { hydrateWorkflow, type ExecuteStepFn, type WorkflowDocument } from '@noetic-tools/core';
@@ -465,15 +527,17 @@ import { claudeCode, codex, createAcpAgentRegistry } from '@noetic-tools/acp';
 
 declare const document: WorkflowDocument;
 declare const executeStep: ExecuteStepFn;
+declare const secrets: Map<string, string>;
 
 const hydrated = hydrateWorkflow(document, {
   tools: new Map(),
   executeStep,
   acpAgents: createAcpAgentRegistry(claudeCode(), codex()),
+  resolveSecret: (ref) => secrets.get(ref),
 });
 ```
 
-A node naming an unregistered agent fails hydration with `UNKNOWN_ACP_AGENT_REFERENCE`.
+A node naming an unregistered agent fails hydration with `UNKNOWN_ACP_AGENT_REFERENCE`; a secret that does not resolve fails the node with `UNKNOWN_SECRET_REFERENCE`. `env` is also accepted on the node, for plain values only.
 
 ## Testing an ACP step
 
@@ -533,6 +597,16 @@ const remote = defineAcpAgent({
 
 The Node stdio transport lives at `@noetic-tools/acp/stdio`. The main entry has no static `node:*` import and never loads `child_process` unless a stdio connection is opened — but that is a runtime property: the dynamic `import('./stdio')` uses a static specifier, so a bundler still pulls the module in. A browser build should alias or externalise `@noetic-tools/acp/stdio`.
 
+Closing a stdio transport or aborting its signal closes the host's pipes and stops
+its process group, including children launched by CLI wrappers. POSIX shutdown
+escalates from SIGTERM to SIGKILL after 300 ms; Windows uses `taskkill /T /F` with
+a one-second limit. Repeated `close()` calls share the shutdown promise. Missing
+executables and invalid working directories fail when opening the transport.
+Descendants that detach into a new session are outside the POSIX group; Windows
+cannot recover a tree after its parent has already exited. These cleanup rules
+are not a sandbox.
+
+
 ## API reference
 
 Everything `@noetic-tools/acp` exports. Internal helpers — the item builders, turn accumulator, terminal registry, permission engine — are deliberately not exported; they are implementation detail and free to change.
@@ -541,8 +615,8 @@ Everything `@noetic-tools/acp` exports. Internal helpers — the item builders, 
 
 | Export | What it is |
 |---|---|
-| `claudeCode(opts?)` | Preset for `@zed-industries/claude-code-acp`. |
-| `codex(opts?)` | Preset for `@zed-industries/codex-acp`. |
+| `claudeCode(opts?)` | Preset for `@agentclientprotocol/claude-agent-acp`. |
+| `codex(opts?)` | Preset for `@agentclientprotocol/codex-acp`. |
 | `gemini(opts?)` | Preset for Gemini CLI's native ACP mode. |
 | `opencode(opts?)` | Preset for opencode's native `opencode acp` command. |
 | `pi(opts?)` | Preset for pi, via the community `pi-acp` adapter. |
@@ -609,3 +683,25 @@ For embedding an ACP connection outside a Noetic step — a custom runtime, a br
 | `harness.closeAcpSessions()` | Release everything held. Idempotent. |
 
 The contract types (`AcpAgent`, `AcpSession`, `AcpClientHost`, `AcpTransport`, the permission and protocol types) live in `@noetic-tools/types` and are re-exported from core.
+
+
+## Session choices and usage events
+
+The ACP client uses the official `@agentclientprotocol/sdk`. Inspect
+`session.configOptions` (also returned by `harness.listAcpSessions()`) to show
+model choices the agent actually offers. `step.acpAgent({ model: ... })` and
+`session.setModel()` use the advertised `model` select option through
+`session/set_config_option`. An agent without this option reports a capability
+error rather than silently accepting a model it cannot select.
+
+Current protocol updates, including `usage_update` and `config_option_update`,
+reach the raw `acp_event` stream. Updates without a model-stream equivalent also
+appear under `acp.<sessionUpdate>`. For `usage_update`, `used` means tokens in
+context, `size` means context capacity, and `cost` is cumulative session cost
+with a currency. Do not add these snapshots to billed token or cost totals.
+Prompt-response usage is available unchanged as `AcpTurnResult.reportedUsage`
+and `response.completed.acpUsage`; it is kept out of aggregate Noetic usage
+because providers may report session totals.
+
+Protocol failures preserve the remote message and any `data.message` detail,
+so authentication and provider version errors remain readable in step failures.

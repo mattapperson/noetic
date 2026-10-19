@@ -10,6 +10,9 @@
  * `execute`, the streams, `seedSessionHistory`, `abort` — and nothing else.
  */
 
+import type * as acp from '@agentclientprotocol/sdk';
+import type { AgentSideConnection } from '@agentclientprotocol/sdk';
+import { PROTOCOL_VERSION, RequestError } from '@agentclientprotocol/sdk';
 import type {
   AcpContentBlock,
   AcpToolKind,
@@ -21,9 +24,6 @@ import type {
   StreamingItem,
 } from '@noetic-tools/types';
 import { frameworkCast, NoeticConfigError } from '@noetic-tools/types';
-import type * as acp from '@zed-industries/agent-client-protocol';
-import type { AgentSideConnection } from '@zed-industries/agent-client-protocol';
-import { PROTOCOL_VERSION, RequestError } from '@zed-industries/agent-client-protocol';
 import { clientFsAdapter, clientShellAdapter } from './client-adapters';
 import { contentBlockText } from './items';
 import { isAbsolutePath } from './paths';

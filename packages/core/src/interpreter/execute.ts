@@ -345,6 +345,15 @@ export async function execute<TContext = ContextData, I = unknown, O = unknown>(
 
   let result: O;
   try {
+    const hooks = baseCtx.harness.config.hooks;
+    await hooks?.beforeStep?.(frameworkCast<Step>(step), baseCtx);
+    // A guard hook may stop the context while it awaits user input.
+    if (ctx.aborted) {
+      throw new NoeticErrorImpl({
+        kind: 'cancelled',
+        reason: ctx.abortReason ?? 'context aborted',
+      });
+    }
     switch (step.kind) {
       case 'runCode':
         result = await dispatchViaAdapter(step, input, ctx, () => executeRunCode(step, input, ctx));
@@ -394,6 +403,7 @@ export async function execute<TContext = ContextData, I = unknown, O = unknown>(
         });
       }
     }
+    await hooks?.afterStep?.(frameworkCast<Step>(step), result, baseCtx);
   } finally {
     if (impl && step.id.length > 0) {
       impl.leaveStep(step.id);

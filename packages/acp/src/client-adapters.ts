@@ -12,10 +12,10 @@
  * needs those falls back to a local adapter for them.
  */
 
+import type * as acp from '@agentclientprotocol/sdk';
+import type { AgentSideConnection } from '@agentclientprotocol/sdk';
 import type { FsAdapter, FsStats, ShellAdapter, ShellExecResult } from '@noetic-tools/types';
 import { AcpCapabilityError, frameworkCast, TIMEOUT_ERROR_PREFIX } from '@noetic-tools/types';
-import type * as acp from '@zed-industries/agent-client-protocol';
-import type { AgentSideConnection } from '@zed-industries/agent-client-protocol';
 
 const CLIENT_AGENT_ID = 'acp-client';
 

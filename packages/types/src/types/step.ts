@@ -1,6 +1,7 @@
 import type { StandardSchemaV1 } from '@standard-schema/spec';
 import type {
   AcpAgent,
+  AcpAuthConfig,
   AcpClientCapabilityConfig,
   AcpContentBlock,
   AcpMcpServer,
@@ -99,6 +100,14 @@ export type Step<TContext = ContextData, I = unknown, O = unknown> =
   | StepLoop<TContext, I, O>
   | StepSchedule<TContext, I, O>;
 
+/** @public Optional lifecycle hooks invoked before and after each step execution. */
+export interface AgentHooks {
+  /** Awaited before dispatch; skipped on replay. Rejection prevents the body from running. */
+  beforeStep?: (step: Step, ctx: Context) => Promise<void>;
+  /** Awaited after success, before checkpointing. Skipped on failure and replay; rejection fails the dispatch. */
+  afterStep?: (step: Step, result: unknown, ctx: Context) => Promise<void>;
+}
+
 /** @public A step that executes arbitrary async logic via a user-supplied function. */
 export interface StepRunCode<TContext = ContextData, I = unknown, O = unknown> {
   kind: 'runCode';
@@ -180,6 +189,16 @@ export interface StepAcpAgent<TContext = ContextData, _I = unknown, O = unknown>
   mode?: Lazy<string | undefined, TContext>;
   /** Model to select before prompting, for agents that expose model selection. */
   model?: Lazy<string | undefined, TContext>;
+  /**
+   * Environment for the agent process, layered over the adapter's own `env`.
+   * Applied when the step opens a connection.
+   */
+  env?: Lazy<Record<string, string | undefined> | undefined, TContext>;
+  /**
+   * API key and auth method for the agent. Resolved per run, so the key can
+   * come from the context instead of living in the step tree.
+   */
+  auth?: Lazy<AcpAuthConfig | undefined, TContext>;
   /** Declarative answer to the agent's permission requests. */
   permissions?: AcpPermissionPolicy;
   /** Async resolver consulted when policy and steering both abstain. */

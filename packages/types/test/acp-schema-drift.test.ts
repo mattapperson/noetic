@@ -9,7 +9,7 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import type * as acp from '@zed-industries/agent-client-protocol';
+import type * as acp from '@agentclientprotocol/sdk';
 import { WorkflowNodeSchema } from '../src/schemas/workflow';
 
 /**

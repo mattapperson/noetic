@@ -9,8 +9,10 @@
 import type { ContextData, ContextLayer } from '@noetic-tools/context';
 import type {
   AcpAgent,
+  AcpAuthConfig,
   Context,
   ExecuteStepFn,
+  Lazy,
   OutputCodec,
   ProcessSubprocessRequest,
   ServerToolSpec,
@@ -67,6 +69,11 @@ export interface HydrationContext {
    * `ctx.subprocess` at execution time.
    */
   resolveSubprocess?: (ref: string) => SubprocessAdapter | undefined;
+  /**
+   * Resolves a credential named by an `acp-agent` node's `auth.apiKeyRef`, so
+   * the key never lives in the document. Called each time the node runs.
+   */
+  resolveSecret?: (ref: string) => string | undefined | Promise<string | undefined>;
   /**
    * Named sub-workflow documents that `subflow` nodes resolve via `ref`.
    * Resolution is lazy (first execution), so a live map view may gain
@@ -562,7 +569,47 @@ function hydrateAcpAgentNode(
     permissions: node.permissions,
     clientCapabilities: node.clientCapabilities,
     session: node.session,
+    env: node.env,
+    auth: workflowAuth(node, ctx),
   });
+}
+
+/**
+ * The node's `auth`, with `apiKeyRef` swapped for a getter that asks the host
+ * for the key when the node runs.
+ */
+function workflowAuth(
+  node: Extract<
+    WorkflowNode,
+    {
+      kind: 'acp-agent';
+    }
+  >,
+  ctx: HydrationContext,
+): Lazy<AcpAuthConfig | undefined> {
+  const auth = node.auth;
+  const ref = auth?.apiKeyRef;
+  if (ref === undefined) {
+    return auth
+      ? {
+          methodId: auth.methodId,
+        }
+      : undefined;
+  }
+  return async () => {
+    const apiKey = await ctx.resolveSecret?.(ref);
+    if (apiKey === undefined) {
+      throw new NoeticConfigError({
+        code: 'UNKNOWN_SECRET_REFERENCE',
+        message: `Secret '${ref}' referenced in acp-agent node '${node.id}' could not be resolved.`,
+        hint: 'Pass a `resolveSecret(ref)` function in the HydrationContext that returns the key.',
+      });
+    }
+    return {
+      methodId: auth?.methodId,
+      apiKey,
+    };
+  };
 }
 
 /**

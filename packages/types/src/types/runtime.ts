@@ -11,15 +11,9 @@ import type { ExecuteInput, Item, ItemSchemaExtensions } from './items';
 import type { Span, TraceExporter } from './observability';
 import type { ShellAdapter } from './shell-adapter';
 import type { SteeringDecision } from './steering';
-import type { Step } from './step';
+import type { AgentHooks, Step } from './step';
 import type { SubprocessAdapter } from './subprocess-adapter';
 import type { Tool } from './tool';
-
-/** @public Optional lifecycle hooks invoked before and after each step execution. */
-export interface AgentHooks {
-  beforeStep?: (step: Step, ctx: Context) => Promise<void>;
-  afterStep?: (step: Step, result: unknown, ctx: Context) => Promise<void>;
-}
 
 /** @public Item-schema configuration: extension schemas plus validation strictness. */
 export interface ItemSchemaConfig {

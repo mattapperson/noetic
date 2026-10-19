@@ -11,6 +11,7 @@ import type { ExecuteInput, Item } from './items';
 import type { Span, TraceExporter } from './observability';
 import type { ShellAdapter } from './shell-adapter';
 import type { SteeringDecision } from './steering';
+import type { AgentHooks } from './step';
 import type { SubprocessAdapter } from './subprocess-adapter';
 import type { Tool } from './tool';
 
@@ -109,6 +110,7 @@ export type ContextStep<TContext = ContextData, I = unknown, O = unknown> =
 export interface ContextHarness {
   readonly config: {
     readonly name: string;
+    readonly hooks?: AgentHooks;
     readonly params: Record<string, unknown>;
     /** Harness-wide default projection policy; a step's `projection` overrides it. */
     readonly projection?: ProjectionPolicy;

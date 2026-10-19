@@ -199,6 +199,8 @@ step.acpAgent<TContext = ContextData, I = unknown, O = unknown>({
   cwd?: Lazy<string | undefined, TContext>;            // defaults to ctx.cwdState.cwd
   mode?: Lazy<string | undefined, TContext>;           // session/set_mode before the turn
   model?: Lazy<string | undefined, TContext>;          // session/set_model before the turn
+  env?: Lazy<Record<string, string | undefined> | undefined, TContext>;  // over the preset's env, at launch
+  auth?: Lazy<AcpAuthConfig | undefined, TContext>;    // { apiKey?, methodId? }, applied at launch
   permissions?: AcpPermissionPolicy;
   onPermissionRequest?: AcpPermissionHandler;
   clientCapabilities?: AcpClientCapabilityConfig;
@@ -215,14 +217,16 @@ import { claudeCode, codex, gemini, customAcpAgent } from '@noetic-tools/acp';
 
 const review = step.acpAgent({
   id: 'review',
-  agent: claudeCode(),                                  // npx @zed-industries/claude-code-acp
+  agent: claudeCode(),                                  // npx @agentclientprotocol/claude-agent-acp
   prompt: 'Review the staged diff and summarize the riskiest change.',
   mode: 'plan',
   permissions: { default: 'deny', allow: [{ kind: 'read' }] },
 });
 ```
 
-`codex()`, `gemini()`, `opencode()` (native `opencode acp`), `pi()` (community `pi-acp` adapter), and `customAcpAgent({ agentId, command, args, env, transport })` take the same shape. Every preset accepts `command` / `args` / `env` overrides plus a `transport` for non-stdio reach.
+`codex()`, `gemini()`, `opencode()` (native `opencode acp`), `pi()` (community `pi-acp` adapter), and `customAcpAgent({ agentId, command, args, env, transport, apiKey })` take the same shape. Every preset accepts `command` / `args` / `env` / `apiKey` overrides plus a `transport` for non-stdio reach.
+
+**API keys.** ACP's `authenticate` takes only a method id, so `auth.apiKey` goes into the variable the preset names in `agent.apiKey` (`claudeCode` → `ANTHROPIC_API_KEY`; `codex` → `CODEX_API_KEY` + method `api-key`; `gemini` → `GEMINI_API_KEY` + method `gemini-api-key`; `opencode` / `pi` have none — set the provider's variable in `env`). Errors: `ACP_API_KEY_UNSUPPORTED`, `ACP_AUTH_METHOD_UNKNOWN`, `ACP_AUTH_METHOD_TERMINAL`; a reusing step with different `env`/`auth` is `ACP_SESSION_SETTING_CONFLICT`.
 
 The interpreter mirrors `executeCallModel`: it appends the prompt as a user item, opens (or reuses) a connection + session, applies `mode`/`model`, drives one `session/prompt`, forwards each notification as an `acp_event` framework event, appends the turn's items to the item log, charges `ctx.tokens`/`ctx.cost`, records `ctx.lastStepMeta`, tears the connection down per policy, and returns the assistant text (or the parsed `output`).
 
@@ -269,7 +273,7 @@ A connection owns a live agent process, so **keeping one is always an explicit o
 
 **Errors:** `EMPTY_STEP_ID` (empty `id`), `MISSING_ACP_AGENT` (no `agent`), `MISSING_PROMPT` (neither `prompt` nor `content`). Asking for a capability the agent did not advertise — `loadSession`, a mode, a model, image/audio/embedded content, an HTTP/SSE MCP server — throws `AcpCapabilityError` before anything reaches the wire; a failed handshake throws `AcpConnectError`.
 
-**JSON workflow:** one node kind, `acp-agent`, with fields `agent` (registry key), `prompt`, and optional `cwd` / `mode` / `model` / `mcpServers` / `permissions` / `clientCapabilities` / `session`. Adapters resolve at hydration from `HydrationContext.acpAgents` (a `Map<string, AcpAgent>`); build it with `createAcpAgentRegistry(claudeCode(), codex())`. The registry is an **open** set — a new agent needs an entry, not a schema change. An unregistered key fails with `UNKNOWN_ACP_AGENT_REFERENCE`.
+**JSON workflow:** one node kind, `acp-agent`, with fields `agent` (registry key), `prompt`, and optional `cwd` / `mode` / `model` / `mcpServers` / `permissions` / `clientCapabilities` / `session` / `env` / `auth`. `auth` is `{ methodId?, apiKeyRef? }`: the key is named, never inlined, and resolved per run through `HydrationContext.resolveSecret(ref)` (`UNKNOWN_SECRET_REFERENCE` when it does not resolve). Adapters resolve at hydration from `HydrationContext.acpAgents` (a `Map<string, AcpAgent>`); build it with `createAcpAgentRegistry(claudeCode(), codex())`. The registry is an **open** set — a new agent needs an entry, not a schema change. An unregistered key fails with `UNKNOWN_ACP_AGENT_REFERENCE`.
 
 **Authoring an agent + testing.** The `AcpAgent` contract lives in `@noetic-tools/types` (next to `ContextLayer`); `@noetic-tools/core` depends only on the *type* and runs adapter *instances* you pass in — it never imports `@noetic-tools/acp` (enforced by `.sentrux/rules.toml`). Build an adapter with `defineAcpAgent({ agentId, transport })`. For tests, `loopbackTransport` stands an in-process agent on the far end of a **real** protocol connection, so the wire format is exercised without spawning anything:
 
@@ -2285,3 +2289,25 @@ const quoteShipping = tool({
 ### JSON workflow
 
 A `callModel` node references a codec: `"output": { "codec": "openui", "library": "<ref>" }`, resolved from `HydrationContext.uiLibraries` (see [hydrateWorkflow](#hydrateworkflow--hydratenode)).
+
+### Agent step hooks
+
+`AgentHarness({ hooks: { beforeStep, afterStep }, ... })` awaits hooks around each
+actual step dispatch, including operators and nested steps. `beforeStep(step, ctx)`
+runs before the body; `afterStep(step, result, ctx)` runs after success and before
+completion events, the ledger write, and checkpoint. Replayed steps skip hooks.
+Errors propagate; failed bodies skip `afterStep`. Cancellation during `beforeStep`
+prevents the body from starting. Parallel child contexts can call hooks at the
+same time. Keep hook side effects safe to retry. Callback closures stay in their
+process; configure worker hooks separately for out-of-process execution.
+
+### ACP model choices and raw usage
+
+`AcpSession.configOptions` and `AcpSessionInfo.configOptions` expose advertised
+`AcpSessionConfigOption` values and update with `config_option_update`.
+`setModel(id)` selects the `model` category using `session/set_config_option`;
+agents without that option reject model selection.
+`AcpTurnResult.reportedUsage` preserves raw prompt-response usage, also emitted
+as `response.completed.acpUsage`. It is not a token delta. `acp.usage_update`
+carries context occupancy (`used`), capacity (`size`), and optional cumulative
+session cost; do not charge them to Noetic aggregate usage.

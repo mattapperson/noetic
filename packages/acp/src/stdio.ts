@@ -1,17 +1,9 @@
-/**
- * Node stdio transport — the standard way to reach a local ACP agent.
- *
- * Lives behind the `@noetic-tools/acp/stdio` subpath so the package's main
- * entry stays runtime-neutral: nothing in `.` imports `node:*`, and a browser
- * bundle never pulls in `child_process`. The agent presets reach this through a
- * lazy dynamic import, so `claudeCode()` works with no extra wiring while
- * keeping the dependency off the main graph.
- */
-
+/** Node-only ACP transport; the main entry never imports child_process. */
 import { spawn } from 'node:child_process';
 import { Readable, Writable } from 'node:stream';
 import type { AcpTransport, AcpTransportFactory } from '@noetic-tools/types';
 import { AcpConnectError, frameworkCast } from '@noetic-tools/types';
+import { stopProcess } from './stdio-process';
 
 /** @public How to launch an ACP agent as a child process. */
 export interface StdioAgentSpec {
@@ -25,13 +17,22 @@ export interface StdioAgentSpec {
 }
 
 /**
- * Build a transport factory that spawns `spec.command` and speaks ACP over its
- * stdin/stdout. The child's stderr is inherited so agent diagnostics reach the
- * host's logs instead of vanishing.
+ * Spawn an ACP agent with inherited stderr. Closing or aborting closes the pipes
+ * and stops its process group (Windows: process tree), with bounded escalation.
+ * Descendants that detach into their own session must manage their own lifetime.
  * @public
  */
 export function stdioAcpTransport(spec: StdioAgentSpec): AcpTransportFactory {
   return async (opts): Promise<AcpTransport> => {
+    const fail = (cause: unknown): AcpConnectError =>
+      new AcpConnectError({
+        agentId: spec.agentId,
+        message: `ACP agent '${spec.agentId}' (${spec.command}) could not start or stop.`,
+        cause,
+      });
+    if (opts.signal?.aborted) {
+      throw fail(opts.signal.reason);
+    }
     const child = spawn(
       spec.command,
       [
@@ -49,56 +50,48 @@ export function stdioAcpTransport(spec: StdioAgentSpec): AcpTransportFactory {
           'pipe',
           'inherit',
         ],
+        // Wrappers often launch the real agent as a grandchild. Give those children
+        // their own group so shutdown cannot signal the host's process group.
+        detached: process.platform !== 'win32',
+        windowsHide: true,
       },
     );
-
-    const stdin = child.stdin;
-    const stdout = child.stdout;
-    if (!stdin || !stdout) {
-      child.kill();
-      throw new AcpConnectError({
-        agentId: spec.agentId,
-        message: `ACP agent '${spec.agentId}' was spawned without usable stdio pipes.`,
+    const pid = child.pid;
+    let closing: Promise<void> | undefined;
+    const close = (): Promise<void> => {
+      closing ??= stopProcess(child, pid).catch((error) => {
+        throw fail(error);
       });
-    }
-
-    // A missing binary surfaces asynchronously on the child, long after spawn()
-    // returned. Capture it so the failure is reported against the agent rather
-    // than escaping as an unhandled 'error' event.
-    let spawnError: Error | undefined;
-    child.once('error', (error: Error) => {
-      spawnError = error;
-    });
-
-    const onAbort = () => {
-      child.kill();
+      opts.signal?.removeEventListener('abort', onAbort);
+      return closing;
+    };
+    // Observe failures here; an explicit close still receives the same failure.
+    const onAbort = (): void => {
+      void close().catch(() => undefined);
     };
     opts.signal?.addEventListener('abort', onAbort, {
       once: true,
     });
-
-    let closed = false;
+    if (opts.signal?.aborted) {
+      onAbort();
+    }
+    try {
+      await new Promise<void>((resolve, reject) => {
+        child.once('spawn', resolve);
+        child.once('error', reject);
+      });
+      if (opts.signal?.aborted) {
+        throw opts.signal.reason;
+      }
+    } catch (error) {
+      await close();
+      throw fail(error);
+    }
     return {
-      // `node:stream`'s web-stream types are structurally the same as the
-      // global ones but nominally distinct, so the bridge is cast once here
-      // rather than leaking a Node-specific type through the transport contract.
-      readable: frameworkCast<ReadableStream<Uint8Array>>(Readable.toWeb(stdout)),
-      writable: frameworkCast<WritableStream<Uint8Array>>(Writable.toWeb(stdin)),
-      async close() {
-        if (closed) {
-          return;
-        }
-        closed = true;
-        opts.signal?.removeEventListener('abort', onAbort);
-        child.kill();
-        if (spawnError) {
-          throw new AcpConnectError({
-            agentId: spec.agentId,
-            message: `ACP agent '${spec.agentId}' (${spec.command}) failed to start.`,
-            cause: spawnError,
-          });
-        }
-      },
+      // Node's web-stream types are nominally distinct from the global types.
+      readable: frameworkCast<ReadableStream<Uint8Array>>(Readable.toWeb(child.stdout)),
+      writable: frameworkCast<WritableStream<Uint8Array>>(Writable.toWeb(child.stdin)),
+      close,
     };
   };
 }

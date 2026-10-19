@@ -1,6 +1,7 @@
 import type { ContextData } from '@noetic-tools/context';
 import type {
   AcpAgent,
+  AcpAuthConfig,
   AcpClientCapabilityConfig,
   AcpContentBlock,
   AcpMcpServer,
@@ -87,6 +88,16 @@ export interface StepAcpAgentOpts<TContext, O> {
   mode?: Lazy<string | undefined, TContext>;
   /** Model to select before prompting, for agents that expose model selection. */
   model?: Lazy<string | undefined, TContext>;
+  /**
+   * Environment for the agent process, layered over the adapter's own `env`.
+   * Applied when the step opens a connection.
+   */
+  env?: Lazy<Record<string, string | undefined> | undefined, TContext>;
+  /**
+   * API key and auth method for the agent. Resolved per run, so the key can
+   * come from the context instead of living in the step tree.
+   */
+  auth?: Lazy<AcpAuthConfig | undefined, TContext>;
   /** Declarative answer to the agent's permission requests. Defaults to denying. */
   permissions?: AcpPermissionPolicy;
   /** Async resolver consulted when the policy and steering both abstain. */

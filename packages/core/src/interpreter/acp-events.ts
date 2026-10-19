@@ -25,6 +25,7 @@ import type {
 import type { EmitOption } from '../runtime/broadcaster-utils';
 import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../runtime/broadcaster-utils';
 import type { EventBroadcaster } from '../runtime/event-broadcaster';
+import { errorMessage } from '../util/error-message';
 import { isFunctionCall } from './typeguards';
 
 type SessionUpdate = AcpSessionNotification['update'];
@@ -91,15 +92,24 @@ export class AcpEventBridge {
     });
   }
 
-  /** Forward one notification: a structured framework event + the mapped sdk events. */
-  forward(notification: AcpSessionNotification): void {
+  /** Forward a raw notification; map only new turn output into SDK events. */
+  forward(notification: AcpSessionNotification, replay = false): void {
     if (!this.broadcaster) {
       return;
     }
     this.framework('acp_event', {
       sessionId: notification.sessionId,
       update: notification.update,
+      ...(replay
+        ? {
+            replay: true,
+          }
+        : {}),
     });
+    // Loading a session streams old history, not output from this turn.
+    if (replay) {
+      return;
+    }
     this.translate(notification.update);
   }
 
@@ -135,6 +145,7 @@ export class AcpEventBridge {
       this.start();
       this.sdk('response.completed', {
         stopReason: result.stopReason,
+        acpUsage: result.reportedUsage,
       });
       this.completed = true;
     }
@@ -153,7 +164,7 @@ export class AcpEventBridge {
     this.start();
     this.sdk('response.completed', {
       stopReason: 'error',
-      error: cause instanceof Error ? cause.message : String(cause),
+      error: errorMessage(cause),
     });
     this.completed = true;
   }

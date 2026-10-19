@@ -10,6 +10,7 @@
 import type {
   AcpAgent,
   AcpAgentConnection,
+  AcpApiKey,
   AcpConnectOptions,
   AcpTransportFactory,
 } from '@noetic-tools/types';
@@ -26,6 +27,8 @@ export interface DefineAcpAgentOptions {
   transport: AcpTransportFactory;
   /** Environment layered onto every connection this agent opens. */
   env?: Record<string, string | undefined>;
+  /** Where the agent reads an API key, so a step can pass one with `auth.apiKey`. */
+  apiKey?: AcpApiKey;
 }
 
 /** @public Build an {@link AcpAgent} from a transport factory. */
@@ -33,10 +36,14 @@ export function defineAcpAgent(def: DefineAcpAgentOptions): AcpAgent {
   return {
     specificationVersion: 'acp-v1',
     agentId: def.agentId,
+    apiKey: def.apiKey,
     async connect(opts: AcpConnectOptions): Promise<AcpAgentConnection> {
       const transport = await def.transport({
         cwd: opts.host.cwd,
-        env: def.env,
+        env: {
+          ...def.env,
+          ...opts.env,
+        },
         signal: opts.signal ?? opts.host.signal,
       });
       return await openAcpConnection({
