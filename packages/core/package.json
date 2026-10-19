@@ -57,11 +57,11 @@
     "access": "public"
   },
   "devDependencies": {
-    "@openrouter/agent": "^0.6.0",
+    "@openrouter/agent": "^0.11.0",
     "bun-types": "latest"
   },
   "peerDependencies": {
-    "@openrouter/agent": "^0.6.0",
+    "@openrouter/agent": "^0.11.0",
     "zod": "^4.0.0"
   },
   "peerDependenciesMeta": {
@@ -72,7 +72,8 @@
   "dependencies": {
     "@noetic-tools/context": "workspace:*",
     "@noetic-tools/types": "workspace:*",
-    "@openrouter/agent": "^0.6.0",
+    "@openrouter/agent": "^0.11.0",
+    "@openrouter/sdk": "1.4.25",
     "zod": "^4.0.0"
   },
   "scripts": {
