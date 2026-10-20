@@ -239,7 +239,7 @@ describe('routeSwitch workflow node', () => {
     },
   };
   const leaf = (id: string) => ({
-    kind: 'llm',
+    kind: 'callModel',
     id,
     instructions: id,
   });

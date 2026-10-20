@@ -1,4 +1,5 @@
-import type { ZodTypeAny, z } from 'zod';
+import type { StandardSchemaV1 } from '@standard-schema/spec';
+import type { AcpToolKind } from './acp';
 import type {
   FunctionCallItem,
   FunctionCallOutputItem,
@@ -6,10 +7,11 @@ import type {
   ItemSchemaExtensions,
   ToolResultExtensionItem,
 } from './items';
+import type { InferSchemaOutput } from './schema';
 
-type ToolExecutionResult<O extends ZodTypeAny> =
-  | Promise<z.infer<O>>
-  | AsyncGenerator<unknown, z.infer<O>>;
+type ToolExecutionResult<O extends StandardSchemaV1> =
+  | Promise<InferSchemaOutput<O>>
+  | AsyncGenerator<unknown, InferSchemaOutput<O>>;
 
 /**
  * Declares tool-owned state that the runtime materializes into a ContextLayer.
@@ -52,22 +54,56 @@ export interface UiFragment {
  * @public
  */
 export interface ToolUiDeclaration<
-  I extends ZodTypeAny = ZodTypeAny,
-  O extends ZodTypeAny = ZodTypeAny,
+  I extends StandardSchemaV1 = StandardSchemaV1,
+  O extends StandardSchemaV1 = StandardSchemaV1,
   E = unknown,
 > {
   /** Rendered as soon as the call streams in — args may be partial. */
-  call?(args: Partial<z.infer<I>>): UiFragment | null;
+  call?(args: Partial<InferSchemaOutput<I>>): UiFragment | null;
   /** Re-rendered on each event an AsyncGenerator `execute` yields. Receives all events so far. */
   progress?(events: E[]): UiFragment | null;
   /** Replaces the tool's region on successful completion. */
-  result?(output: z.infer<O>, args: z.infer<I>): UiFragment | null;
+  result?(output: InferSchemaOutput<O>, args: InferSchemaOutput<I>): UiFragment | null;
   /** Replaces the tool's region when execution throws. */
-  error?(err: unknown, args: z.infer<I>): UiFragment | null;
+  error?(err: unknown, args: InferSchemaOutput<I>): UiFragment | null;
 }
 
 /**
+ * How a tool call presents in an ACP client's UI when the harness is served
+ * as an ACP agent (`toAcpAgent`/`serveAcp` in `@noetic-tools/acp`).
+ *
+ * Presentation only — it never gates anything. An undeclared tool falls back
+ * to kind `other` with its name as the title. Declared as methods (bivariant
+ * params) for the same reason as `ToolUiDeclaration`.
+ * @public
+ */
+export interface ToolAcpDeclaration<I extends StandardSchemaV1 = StandardSchemaV1> {
+  /** ACP tool kind (`read`, `edit`, `execute`, …) for editor rendering. */
+  kind?: AcpToolKind;
+  /** Human-readable title; a function receives the call's parsed args. */
+  title?: string | ToolAcpTitleFn<I>;
+  /** File paths the call affects, surfaced as ACP `locations`. */
+  locations?(args: InferSchemaOutput<I>): string[];
+}
+
+/**
+ * Bivariant function type for `ToolAcpDeclaration.title` — a union member
+ * cannot use method syntax, so the method-bearing object type is indexed to
+ * recover the same bivariance `ToolUiDeclaration`'s methods get, keeping a
+ * concretely-typed tool assignable to the erased `Tool` form.
+ * @public
+ */
+export type ToolAcpTitleFn<I extends StandardSchemaV1 = StandardSchemaV1> = {
+  bivariant(args: InferSchemaOutput<I>): string;
+}['bivariant'];
+
+/**
  * A tool definition that an LLM can invoke during execution.
+ *
+ * Input and output schemas accept any Standard Schema v1 implementation
+ * (Zod, Valibot, ArkType, …). Zod remains the fast path; other validators
+ * can provide JSON Schema through the Standard JSON Schema v1 companion
+ * trait or an explicit `inputJsonSchema` override.
  *
  * The runtime passes a `ToolExecutionContext` (from `./tool-context`) as
  * the second argument to `execute`. Callers that need the concrete type
@@ -75,25 +111,34 @@ export interface ToolUiDeclaration<
  * re-exports it with `ToolExecutionContext` substituted in.
  * @public
  */
-export interface Tool<I extends ZodTypeAny = ZodTypeAny, O extends ZodTypeAny = ZodTypeAny> {
+export interface Tool<
+  I extends StandardSchemaV1 = StandardSchemaV1,
+  O extends StandardSchemaV1 = StandardSchemaV1,
+> {
   /** Unique tool name used by the LLM for selection. */
   name: string;
   /** Human-readable description shown to the LLM. */
   description: string;
-  /** Zod schema validating tool input arguments. */
+  /** Schema validating tool input arguments (any Standard Schema v1). */
   input: I;
-  /** Zod schema validating tool return value. */
+  /** Schema validating tool return value (any Standard Schema v1). */
   output: O;
-  /** Optional Zod schema validating streaming events yielded during execution. */
-  event?: ZodTypeAny;
+  /**
+   * Explicit raw JSON Schema for the tool input, sent to the LLM wire format.
+   * For non-Zod schemas, overrides StandardJSONSchemaV1 conversion and serves
+   * as the required fallback for validation-only schemas.
+   */
+  inputJsonSchema?: Record<string, unknown>;
+  /** Optional schema validating streaming events yielded during execution. */
+  event?: StandardSchemaV1;
   /** Optional item schemas contributed by this tool for tool call/result extensions. */
   itemSchemas?: Pick<ItemSchemaExtensions, 'toolCalls' | 'toolResults' | 'items'>;
   /** Decorate the harness-created tool result item before it is appended/emitted. */
   decorateResultItem?(params: {
     baseItem: FunctionCallOutputItem;
     callItem: FunctionCallItem;
-    args: z.infer<I>;
-    result: z.infer<O> | undefined;
+    args: InferSchemaOutput<I>;
+    result: InferSchemaOutput<O> | undefined;
     output: string;
     error?: boolean;
   }): Item | ToolResultExtensionItem;
@@ -103,11 +148,13 @@ export interface Tool<I extends ZodTypeAny = ZodTypeAny, O extends ZodTypeAny = 
    * this type a dependency leaf. Use `tool()` from `builders/` or cast at
    * the call site to get a typed handle.
    */
-  execute(args: z.infer<I>, toolCtx: unknown): ToolExecutionResult<O>;
+  execute(args: InferSchemaOutput<I>, toolCtx: unknown): ToolExecutionResult<O>;
   /** When true, execution pauses for human approval before running. */
   needsApproval?: boolean;
   /** Optional context declaration — the runtime generates a ContextLayer from this. */
   context?: ToolContextDeclaration;
   /** Optional UI declaration — the runtime emits the rendered fragments at call/progress/result points. */
   ui?: ToolUiDeclaration<I, O>;
+  /** Optional ACP presentation — how the call renders in an ACP client when the harness is served as an agent. */
+  acp?: ToolAcpDeclaration<I>;
 }

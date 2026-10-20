@@ -1,12 +1,14 @@
 import type { LlmProviderConfig } from '@noetic-tools/core';
-import { AgentHarness, step } from '@noetic-tools/core';
+import { AgentHarness, callModel } from '@noetic-tools/core';
 import type { ZodType } from 'zod';
+
+import { resolveEnvLlm } from '../../utils/env-llm';
 
 //#region Types
 
 export interface JudgeConfig {
   model?: string;
-  llm?: LlmProviderConfig;
+  callModel?: LlmProviderConfig;
 }
 
 interface JudgeRunConfig<T> {
@@ -23,10 +25,20 @@ interface JudgeRunConfig<T> {
 
 const DEFAULT_MODEL = 'openai/gpt-4o-mini';
 
+/**
+ * Pick the LLM provider for a judge run. An explicit `judge.callModel` always
+ * wins; otherwise fall back to the environment. Without that fallback an
+ * OpenRouter-only environment fails every judge suite with NO_LLM_PROVIDER,
+ * because the harness's own default is `provider: 'noetic'`.
+ */
+export function resolveJudgeProvider(judge?: JudgeConfig): LlmProviderConfig | undefined {
+  return judge?.callModel ?? resolveEnvLlm();
+}
+
 export async function runJudge<T>(config: JudgeRunConfig<T>): Promise<T> {
   const model = config.judge?.model ?? DEFAULT_MODEL;
 
-  const judgeStep = step.llm({
+  const judgeStep = callModel({
     id: config.id,
     model,
     instructions: `${config.instructions}\n\nRespond ONLY with valid JSON matching the required schema.`,
@@ -35,7 +47,7 @@ export async function runJudge<T>(config: JudgeRunConfig<T>): Promise<T> {
   const harness = new AgentHarness({
     name: 'llm-judge',
     params: {},
-    llm: config.judge?.llm,
+    callModelDefaults: resolveJudgeProvider(config.judge),
   });
   const ctx = harness.createContext();
 

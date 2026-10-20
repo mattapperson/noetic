@@ -40,6 +40,12 @@ export interface HarnessResponse {
   readonly usage: {
     readonly inputTokens: number;
     readonly outputTokens: number;
+    /**
+     * Prompt tokens served from the provider's cache across the turns this
+     * response covers. `undefined` — not `0` — while no model call has reported
+     * a cache figure, preserving the `RoundUsage` distinction between "nothing
+     * was cached" and "this provider says nothing about caching".
+     */
     readonly cachedTokens?: number;
   };
   readonly cost?: number;

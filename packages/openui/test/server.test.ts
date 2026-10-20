@@ -93,7 +93,27 @@ describe('translateStreamEvent', () => {
         AGENT,
       ),
     ).toBeNull();
-    expect(translateStreamEvent(framework('llm_call_started'), AGENT)).toBeNull();
+    // Only the `openui.*` framework suffixes carry UI payloads; every other
+    // framework event from this agent is passed over. Pair the two directions so
+    // the negative case can't start passing vacuously against a renamed event.
+    expect(
+      translateStreamEvent(
+        framework('model_call_started', {
+          model: 'openai/gpt-4o-mini',
+        }),
+        AGENT,
+      ),
+    ).toBeNull();
+    expect(
+      translateStreamEvent(
+        framework('openui.node', {
+          ref: 'root',
+          kind: 'component',
+          source: 'root = Card("Hi")',
+        }),
+        AGENT,
+      ),
+    ).not.toBeNull();
     // a differently-named agent's events must not be claimed
     expect(
       translateStreamEvent(

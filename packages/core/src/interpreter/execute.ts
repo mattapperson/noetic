@@ -2,7 +2,7 @@ import type { ContextData, ContextLayer, LayerStateStore } from '@noetic-tools/c
 import type {
   Context,
   Step,
-  StepRun,
+  StepRunCode,
   StepSpawn,
   StepSubprocessRequest,
   SubprocessAdapter,
@@ -10,19 +10,24 @@ import type {
 import { frameworkCast, NoeticErrorImpl } from '@noetic-tools/types';
 import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../runtime/broadcaster-utils';
 import { ContextImpl } from '../runtime/context-impl';
-import { DetachedHandleImpl } from '../runtime/detached-handle';
 import type { StepLedger } from '../runtime/durable/step-ledger';
 import type { EventBroadcaster } from '../runtime/event-broadcaster';
+import { DetachedHandleImpl } from '../util/detached-handle';
+import { executeAcpAgent } from './execute-acp-agent';
 import {
-  executeLLM,
-  executeProvide,
-  executeRun,
+  executeCallModel,
+  executeInvokeTool,
+  executeRunCode,
   executeSpawn,
-  executeTool,
+  executeWithContext,
 } from './execute-action';
-import { executeBranch, executeEvery, executeFork, executeLoop } from './execute-control';
+import {
+  executeConditional,
+  executeInParallel,
+  executeLoop,
+  executeSchedule,
+} from './execute-control';
 import { executeDecide } from './execute-decide';
-import { executeSubHarness } from './execute-sub-harness';
 import { isMutableContext } from './typeguards';
 
 //#region Constants
@@ -75,20 +80,14 @@ function buildSpawnOpts<TContext>(ctx: Context<TContext>): {
 }
 
 /**
- * Resolve the per-step framework-event emit option. `llm`, `decide`, and the
- * harness step kinds carry an `emit` field; every other kind defaults to enabled.
+ * Resolve the per-step framework-event emit option. `callModel`, `decide`, and
+ * the harness step kinds carry an `emit` field; every other kind defaults to
+ * enabled.
  */
 function resolveStepEmit<TContext, I, O>(
   step: Step<TContext, I, O>,
 ): boolean | ((eventType: string, data: Record<string, unknown>) => boolean) | undefined {
-  if (
-    step.kind === 'llm' ||
-    step.kind === 'decide' ||
-    step.kind === 'claude-code' ||
-    step.kind === 'codex' ||
-    step.kind === 'opencode' ||
-    step.kind === 'pi'
-  ) {
+  if (step.kind === 'callModel' || step.kind === 'decide' || step.kind === 'acp-agent') {
     return step.emit;
   }
   return undefined;
@@ -103,7 +102,7 @@ function resolveStepAdapter<TContext, I, O>(
   step: Step<TContext, I, O>,
   ctx: Context<TContext>,
 ): SubprocessAdapter {
-  if ((step.kind === 'run' || step.kind === 'spawn') && step.subprocess) {
+  if ((step.kind === 'runCode' || step.kind === 'spawn') && step.subprocess) {
     return step.subprocess;
   }
   return ctx.harness.subprocess;
@@ -119,7 +118,7 @@ function resolveStepAdapter<TContext, I, O>(
  * `_localExecutor` and run the step in a child runtime.
  */
 async function dispatchViaAdapter<TContext, I, O>(
-  step: StepRun<TContext, I, O> | StepSpawn<TContext, I, O>,
+  step: StepRunCode<TContext, I, O> | StepSpawn<TContext, I, O>,
   input: I,
   ctx: Context<TContext>,
   executor: () => Promise<O>,
@@ -150,7 +149,7 @@ async function dispatchViaAdapter<TContext, I, O>(
  * @internal
  * Dispatch a step at the per-kind handler level without adapter routing.
  *
- * Used as the top-level `_localExecutor` for `StepRun` / `StepSpawn`
+ * Used as the top-level `_localExecutor` for `StepRunCode` / `StepSpawn`
  * dispatches: the outer adapter call already recorded the request, so
  * running the handler directly avoids a re-entrant adapter round-trip
  * inside the same logical step. Nested step dispatches (e.g. `executeSpawn`
@@ -164,13 +163,14 @@ export async function executeNoAdapter<TContext, I, O>(
   ctx: Context<TContext>,
 ): Promise<O> {
   switch (step.kind) {
-    case 'run':
-      return executeRun(step, input, ctx);
+    case 'runCode':
+      return executeRunCode(step, input, ctx);
     case 'spawn':
       return executeSpawn(step, input, ctx, (s, i, c) => execute(s, i, c), buildSpawnOpts(ctx));
     default:
-      // Kinds that don't currently route through the adapter (llm, tool,
-      // branch, fork, provide, loop, every). Delegate back to `execute()`
+      // Kinds that don't currently route through the adapter (callModel,
+      // invokeTool, conditional, inParallel, withContext, loop, schedule).
+      // Delegate back to `execute()`
       // so they exercise the normal dispatch table, framework-event emits,
       // abort checks, and depth guard.
       return execute(step, input, ctx);
@@ -348,29 +348,26 @@ export async function execute<TContext = ContextData, I = unknown, O = unknown>(
   let result: O;
   try {
     switch (step.kind) {
-      case 'run':
-        result = await dispatchViaAdapter(step, input, ctx, () => executeRun(step, input, ctx));
+      case 'runCode':
+        result = await dispatchViaAdapter(step, input, ctx, () => executeRunCode(step, input, ctx));
         break;
-      case 'llm':
-        result = await executeLLM(step, input, ctx, baseCtx.layers);
+      case 'callModel':
+        result = await executeCallModel(step, input, ctx, baseCtx.layers);
         break;
-      case 'claude-code':
-      case 'codex':
-      case 'opencode':
-      case 'pi':
-        result = await executeSubHarness(step, input, ctx);
+      case 'acp-agent':
+        result = await executeAcpAgent(step, input, ctx, baseCtx.layers);
         break;
-      case 'tool':
-        result = await executeTool(step, input, ctx, baseCtx.harness);
+      case 'invokeTool':
+        result = await executeInvokeTool(step, input, ctx, baseCtx.harness);
         break;
       case 'decide':
         result = await executeDecide(step, input, ctx, baseCtx.layers);
         break;
-      case 'branch':
-        result = await executeBranch(step, input, ctx, (s, i, c) => execute(s, i, c));
+      case 'conditional':
+        result = await executeConditional(step, input, ctx, (s, i, c) => execute(s, i, c));
         break;
-      case 'fork':
-        result = await executeFork(step, input, ctx, (s, i, c) => execute(s, i, c), {
+      case 'inParallel':
+        result = await executeInParallel(step, input, ctx, (s, i, c) => execute(s, i, c), {
           // Fork paths are child executions: the layer store lets their
           // `onSpawn`/`onReturn` boundary run (see `createForkLayerBridge`).
           layerStore: harnessWithLayerStore(baseCtx).layerStateStore,
@@ -382,14 +379,14 @@ export async function execute<TContext = ContextData, I = unknown, O = unknown>(
           executeSpawn(step, input, ctx, (s, i, c) => execute(s, i, c), buildSpawnOpts(ctx)),
         );
         break;
-      case 'provide':
-        result = await executeProvide(step, input, ctx, (s, i, c) => execute(s, i, c));
+      case 'withContext':
+        result = await executeWithContext(step, input, ctx, (s, i, c) => execute(s, i, c));
         break;
       case 'loop':
         result = await executeLoop(step, input, ctx, (s, i, c) => execute(s, i, c));
         break;
-      case 'every':
-        result = await executeEvery(step, input, ctx, (s, i, c) => execute(s, i, c));
+      case 'schedule':
+        result = await executeSchedule(step, input, ctx, (s, i, c) => execute(s, i, c));
         break;
       default: {
         const _exhaustive: never = step;

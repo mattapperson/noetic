@@ -8,7 +8,7 @@ describe('spawn builder', () => {
     const s = spawn({
       id: 'test-spawn',
       child: {
-        kind: 'run',
+        kind: 'runCode',
         id: 'child',
         execute: async (i: string) => i,
       },
@@ -21,7 +21,7 @@ describe('spawn builder', () => {
     const s = spawn({
       id: 'timeout-spawn',
       child: {
-        kind: 'run',
+        kind: 'runCode',
         id: 'child',
         execute: async (i: string) => i,
       },
@@ -35,7 +35,7 @@ describe('spawn builder', () => {
       spawn({
         id: '',
         child: {
-          kind: 'run',
+          kind: 'runCode',
           id: 'child',
           execute: async (i: string) => i,
         },
@@ -48,7 +48,7 @@ describe('spawn builder', () => {
       spawn({
         id: '  ',
         child: {
-          kind: 'run',
+          kind: 'runCode',
           id: 'child',
           execute: async (i: string) => i,
         },
@@ -78,7 +78,7 @@ describe('spawn builder', () => {
     const s = spawn({
       id: 'memory-spawn',
       child: {
-        kind: 'run',
+        kind: 'runCode',
         id: 'child',
         execute: async (i: string) => i,
       },

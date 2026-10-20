@@ -24,7 +24,7 @@ export function isContextImpl(ctx: Context<ContextData>): ctx is ContextImpl {
 /**
  * Co-located with `isContextImpl` so the import of `ContextImpl` flows through
  * the same module other interpreters pull it from, sidestepping a circular
- * TDZ when this helper is used by `executeEvery` in `execute-control.ts`.
+ * TDZ when this helper is used by `executeSchedule` in `execute-control.ts`.
  */
 export function getContextChannelStore<TContext>(ctx: Context<TContext>): ChannelStore | undefined {
   if (ctx instanceof ContextImpl) {

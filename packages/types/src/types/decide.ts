@@ -229,7 +229,7 @@ export interface DecisionRecord {
 
 /**
  * A chat model's estimate did not match the requested shape. The interpreter
- * turns it into `llm_parse_error`, which needs the step id this layer lacks.
+ * turns it into `model_parse_error`, which needs the step id this layer lacks.
  * @public
  */
 export class DecideOutputError extends Error {

@@ -6,7 +6,7 @@ A TypeScript agent framework that decomposes AI agent patterns into eight compos
 
 - **Everything is a `Step<I, O>`** — a typed, serializable unit of work
 - **No hidden control flow** — no magic base classes, no runtime surprises
-- **Primitives compose freely** — a loop can contain a branch, which can contain forked spawned agents
+- **Primitives compose freely** — a loop can contain a conditional, which can contain parallel spawned agents
 - **Context is pluggable** — agents pay only for the features they use
 
 ## Packages
@@ -21,12 +21,12 @@ A TypeScript agent framework that decomposes AI agent patterns into eight compos
 
 | Primitive | Kind | Purpose |
 |-----------|------|---------|
-| `step.run` | `run` | Pure async computation with retry support |
-| `step.llm` | `llm` | LLM call with tools, structured output, and layered context |
-| `step.claudeCode` | `claude-code`, `codex`, `opencode`, `pi` | Delegate a turn to a coding agent (sub-harness) |
-| `step.tool` | `tool` | Direct tool execution with Zod-validated I/O |
-| `branch` | `branch` | Conditional routing — returns a step or null |
-| `fork` | `fork` | Parallel execution — race, all, or settle modes |
+| `runCode` | `runCode` | Pure async computation with retry support |
+| `callModel` | `callModel` | LLM call with tools, structured output, and layered context |
+| `step.acpAgent` | `acp-agent` | Delegate a turn to a coding agent over the Agent Client Protocol |
+| `invokeTool` | `invokeTool` | Direct tool execution with Zod-validated I/O |
+| `conditional` | `conditional` | Conditional routing — returns a step or null |
+| `inParallel` | `inParallel` | Parallel execution — race, all, or settle modes |
 | `spawn` | `spawn` | Child execution with an isolated context boundary |
 | `loop` | `loop` | Iteration with termination predicates and an inbox |
 
@@ -77,21 +77,25 @@ bun run build
 ## Quick Example
 
 ```typescript
-import { step, loop, until } from '@noetic-tools/core';
-import { AgentHarness } from '@noetic-tools/core/runtime';
+import { AgentHarness, any, callModel, loop, until } from '@noetic-tools/core';
 
 // A ReAct agent is just a loop of LLM calls
-const agent = loop(
-  step.llm({
-    model: 'openai/gpt-4o',
-    system: 'You are a helpful assistant.',
-    tools: [searchTool, calculatorTool],
-  }),
-  until.noToolCalls(),
-);
+const agent = loop({
+  id: 'react-loop',
+  steps: [
+    callModel({
+      id: 'assistant',
+      model: 'openai/gpt-4o',
+      instructions: 'You are a helpful assistant.',
+      tools: [searchTool, calculatorTool],
+    }),
+  ],
+  until: any(until.noToolCalls(), until.maxSteps(10)),
+});
 
-const harness = new AgentHarness();
-const result = await harness.run(agent, { query: 'What is 12! ?' });
+const harness = new AgentHarness({ name: 'assistant', agentGraph: agent, params: {} });
+await harness.execute('What is 12! ?');
+const { text } = await harness.getAgentResponse();
 ```
 
 ## Context Layers
@@ -100,11 +104,11 @@ Context layers participate in execution via lifecycle hooks (`init`, `recall`, `
 
 | Layer | Slot | Purpose |
 |-------|------|---------|
-| `workingMemoryContext` | 100 | Short-term facts and observations |
-| `observationalContext` | 200 | Timestamped event log |
-| `durableTaskState` | 250 | Persisted task artifacts |
-| `staticContent` | 350 | Unchanging background facts |
-| `toolContextLayer` | auto | Per-tool state from `Tool.context` declarations |
+| `scratchpad` | 100 | Short-term facts and observations |
+| `observations` | 200 | Timestamped event log |
+| `taskState` | 250 | Persisted task artifacts |
+| `instructions` | 350 | Unchanging background facts |
+| `toolCalls` | auto | Per-tool state from `Tool.context` declarations |
 
 ## Evaluation
 

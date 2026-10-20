@@ -15,7 +15,7 @@ import type { Channel, DetachedHandle, StepLoop } from '@noetic-tools/types';
 import { z } from 'zod';
 import { channel } from '../src/builders/channel-builder';
 import { loop } from '../src/builders/loop-builder';
-import { step } from '../src/builders/step-builders';
+import { callModel } from '../src/builders/step-builders';
 import { any } from '../src/until/combinators';
 import { until } from '../src/until/predicates';
 import { createAsyncLaunchTool, createSyncDelegateTool } from './delegate-tools';
@@ -47,7 +47,7 @@ export function buildDynamicDelegateAgent(opts: {
   return loop({
     id: 'dynamic-delegate-loop',
     steps: [
-      step.llm({
+      callModel({
         id: 'dynamic-delegate-llm',
         model: 'openai/gpt-4o',
         instructions: `You are an orchestrator with two delegation strategies:

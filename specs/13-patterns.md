@@ -1,39 +1,70 @@
-# Pattern Derivations
+# Patterns
 
-> **Depends On:** `01-step-type` (Step, execute), `02-step-variants` (step.run, step.llm, Tool), `03-control-flow` (fork), `04-spawn` (spawn, contextIn, contextOut), `05-loop-and-until` (loop, until, any), `06-channels` (channel, ExternalChannel, ChannelHandle, tryRecv), `07-context-and-event-log` (Context, Item, ItemLog), `11-context-layer-system` (context layer lifecycle)
-> **Exports:** `react()`, `ralphWiggum()`, `taskTree()`, `enforced()`, `recursiveLLM()`, `threadWeave()`, `remote()`, `compilePlan()`, `adaptivePlan()`, `dualAgent()`, `TaskNode`, `PlanNode`, `PlanNodeSchema`, `PlanConstraints`, `WorkerDispatch`
+> **Depends On:** `01-step-type` (Step, execute), `02-step-variants` (runCode, callModel, invokeTool, Tool), `03-control-flow` (conditional, inParallel), `04-spawn` (spawn, context), `05-loop-and-until` (loop, until, any, all), `06-channels` (channel, ExternalChannel, ChannelHandle, tryRecv), `07-context-and-event-log` (Context, Item, ItemLog), `11-context-layer-system` (context layer lifecycle)
+> **Exports:** `createDetachedSignal()`, `runnableLoop()`, `createStallNudgeHook()`, `createNudgeMessage()`, `seedFromItems()`, `DEFAULT_NUDGE_MESSAGE_TEXT`, `DetachedSignal`, `RunnableLoopOpts`, `RunnableLoopHarness`, `AfterFirstTurnContext`, `StallNudgeOpts`, `CreateNudgeMessageOpts`, `SessionSeedHarness`
 
 ---
 
-Every pattern is 15-30 lines of primitive composition. The implementations below are real, not pseudocode.
+## Patterns Are Compositions, Not Builders
 
-Spawn-based patterns (`spawn`, `detachedSpawn`, `ralphWiggum`, `dualAgent`, etc.) route through the harness `SubprocessAdapter` — in-memory by default, out-of-process when the caller supplies a different adapter via `spawn({subprocess})` / `harness.detachedSpawn(..., {subprocess})`. The composition shapes below are unchanged; adapter routing is transparent. See `04-spawn` for the routing rules and `23-durable-execution` for durability when an out-of-process adapter is used.
+`@noetic-tools/core` ships **no bundled agent patterns**. There is no `react()` builder, no verify-and-retry builder, no plan compiler. A pattern is 15-30 lines of primitive composition that lives in application code.
 
-Long-lived runner loops — the tasks-system planner / implementer / agent-ci subprocesses and user code that wants the same shape — are built from four primitives that live in `@noetic-tools/core` under `runtime/`:
+This is the point of the primitive set, not a gap in it. A pattern baked into the framework fixes its own termination rules, context boundaries, and feedback shape; every real agent eventually needs to change one of those, and then the built-in becomes an obstacle. Composed locally, a pattern is ordinary code the author can read, fork, and instrument.
 
-- `createDetachedSignal<T>()` — single-shot resolve/reject signal used by the runner loop to surface the final outcome.
-- `runnableLoop(opts)` — generic turn-driver: seed the session from prior items, run the first turn, and await the signal.
-- `createStallNudgeHook(opts)` — two-strike nudge composable with the runner loop. After sending the nudge it awaits the nudged turn's real completion via `harness.getAgentResponse` (raced against the outcome signal) before re-checking for a stall — `execute()` is enqueue-only, so a microtask-scale wait would always escalate.
-- `seedFromItems(harness, threadId, items)` — path-free session seeding that accepts an `Item[]` the caller has loaded.
+The primitives every pattern in this document draws on:
 
-These are the generic composition parts the built-in tasks runners use under the hood; they are exported so third-party runners (custom agents, CI wrappers, daemons) can build the same shape against any `SubprocessAdapter`.
+| Concern | Primitive | Spec |
+|---------|-----------|------|
+| Deterministic work | `runCode` | `02-step-variants` |
+| Model call with tools | `callModel` | `02-step-variants` |
+| Direct tool invocation | `invokeTool` | `02-step-variants` |
+| Iteration + termination | `loop`, `until.*`, `any`, `all`, `prepareNext` | `05-loop-and-until` |
+| Routing | `conditional` | `03-control-flow` |
+| Fan-out | `inParallel` (`all` / `race` / `settle`) | `03-control-flow` |
+| Context isolation | `spawn`, `withContext` | `04-spawn`, `11-context-layer-system` |
+| Cross-boundary state | context layers | `11-context-layer-system` |
+| External messaging | `channel`, `ExternalChannel`, `ChannelHandle` | `06-channels` |
+| Delegating to a coding agent | `step.acpAgent` | `27-acp-agent-steps` |
+
+The one runtime-shaped exception is the **JSON workflow runtime** (`dynamicWorkflow`, `parseAndRunWorkflow`), which hydrates a validated `WorkflowDocument` into a native `Step` tree so the *shape* can be produced at runtime by a model. It is a runtime, not a pattern — see `26-json-workflow-runtime`.
+
+---
+
+## Runnable Compositions
+
+Each of these is executable source in the repository, kept working as the primitive set evolves. They are the normative examples of "what a pattern looks like".
+
+| Composition | Where | Primitives |
+|-------------|-------|------------|
+| ReAct | `packages/core/examples/react-agent.ts` | `loop` + `callModel` + `until.noToolCalls` + optional `spawn` |
+| ReAct (eval variant) | `packages/eval/evals/agents.ts` (`reactAgent`) | `loop` + `callModel` + `any(until.noToolCalls, until.maxSteps)` |
+| Verify-and-retry with fresh context | `packages/eval/evals/agents.ts` (`retryWithFeedback`) | `loop` + `spawn` + `until.verified` + `prepareNext` |
+| Keyword routing | `packages/core/examples/branching-agent.ts` | `conditional` + `runCode` + `callModel` + `loop` |
+| Parallel research fan-out | `packages/core/examples/parallel-research.ts` | `inParallel` (`all`) + `spawn` + `callModel` + merge |
+| Staged pipeline | `packages/core/examples/pipeline-agent.ts` | `conditional` as sequencer + `prepareNext` |
+| Sync sub-agent delegation | `packages/core/examples/sync-delegate.ts` | tool → `spawn` (parent blocks) |
+| Async sub-agent delegation | `packages/core/examples/async-delegate.ts` | tool → detached spawn + inbox `channel` |
+| Model-chosen delegation | `packages/core/examples/dynamic-delegate.ts` | both delegation tools, selected by tool call |
+| LLM-generated workflow (judge / mixture-of-agents) | `packages/core/examples/dynamic-judge-workflow.ts` | `dynamicWorkflow` + `inParallel` + `callModel` |
+| Middleware-stack agent | `packages/core/examples/deep-agent/` | tools + context layers + `spawn` |
 
 ---
 
 ## ReAct
 
-ReAct is: call the LLM with tools, repeat until no tool calls.
+ReAct is: call the model with tools, repeat until it stops calling tools.
 
 ```typescript
+// Application code, not a core export. Runnable source: packages/core/examples/react-agent.ts
 function react(opts: {
   model: string;
   instructions?: string;
   tools: Tool[];
   maxSteps?: number;
   maxCost?: number;
-  context?: ContextLayer[];
+  context?: ContextConfig | ContextLayer[];
 }) {
-  const llmStep = step.llm({
+  const llmStep = callModel({
     id: 'react-step',
     model: opts.model,
     instructions: opts.instructions,
@@ -42,7 +73,7 @@ function react(opts: {
 
   const loopStep = loop({
     id: 'react-loop',
-    body: llmStep,
+    steps: [llmStep],
     until: any(
       until.noToolCalls(),
       until.maxSteps(opts.maxSteps ?? 10),
@@ -50,27 +81,28 @@ function react(opts: {
     ),
   });
 
-  if (!opts.context) return loopStep;
+  if (!opts.context) {
+    return loopStep;
+  }
   return spawn({ id: 'react-agent', child: loopStep, context: opts.context });
 }
 ```
 
-**Primitives used:** `loop` + `step.llm` + `until.noToolCalls` + `until.maxSteps`.
-
-**ItemLog strategy:** Accumulate. No spawn boundary — tool call results append to the ItemLog. Context layers `recall()`/`store()` run each iteration.
+**ItemLog strategy:** accumulate. Without a `spawn` boundary, tool results append to the ItemLog and the context layer `recall()`/`store()` lifecycle runs on every iteration.
 
 ---
 
-## Ralph Wiggum Loop
+## Verify-and-Retry with Fresh Context
 
-Wraps an inner pattern in an outer loop where each iteration gets a fresh ItemLog. All state that survives across iterations is managed by context layers.
+An outer loop where each iteration runs an inner agent inside `spawn`, so every attempt starts from a fresh ItemLog. Everything that must survive an attempt is held by context layers; the verifier's feedback re-enters through `prepareNext`.
 
 ```typescript
-function ralphWiggum(opts: {
+// Application code, not a core export. Runnable source: packages/eval/evals/agents.ts
+function retryWithFeedback(opts: {
   model: string;
   instructions: string;
   tools: Tool[];
-  verify: (output: unknown) => Promise<{ pass: boolean; feedback?: string }>;
+  verify: VerifyFn;
   maxIterations?: number;
   innerMaxSteps?: number;
 }) {
@@ -82,18 +114,13 @@ function ralphWiggum(opts: {
   });
 
   return loop({
-    id: 'ralph-wiggum-loop',
-    body: spawn({
-      id: 'ralph-iteration',
-      child: inner,
-      contextIn: { strategy: 'fresh' },
-      contextOut: { strategy: 'full' },
-    }),
+    id: 'retry-with-feedback-loop',
+    steps: [spawn({ id: 'retry-iteration', child: inner })],
     until: any(
       until.verified(opts.verify),
       until.maxSteps(opts.maxIterations ?? 50),
     ),
-    prepareNext: (output, verdict, ctx) => {
+    prepareNext: (_output, verdict) => {
       if (verdict.feedback) {
         return `Previous attempt feedback: ${verdict.feedback}\nContinue working.`;
       }
@@ -103,257 +130,34 @@ function ralphWiggum(opts: {
 }
 ```
 
-**Primitives used:** `loop` + `spawn(contextIn: fresh)` + `react` (inner) + `until.verified`.
-
-**Context layer interaction:** `durableTaskState()` handles task artifacts across fresh boundaries. `workingMemoryContext({ scope: 'resource' })` carries structured progress. `observationalContext()` compresses learnings from past iterations into the next View.
-
-**Usage:**
-
-```typescript
-const migrator = ralphWiggum({
-  model: 'anthropic/claude-sonnet-4-20250514',
-  instructions: fs.readFileSync('PROMPT.md', 'utf-8'),
-  tools: [shellTool, fileWriteTool, fileReadTool, gitTool],
-  verify: async (output) => {
-    const result = await exec('npm test');
-    return { pass: result.exitCode === 0, feedback: result.stderr };
-  },
-  maxIterations: 50,
-});
-
-const result = await execute(migrator, 'Migrate all tests from Jest to Vitest', ctx);
-```
+**Context layer interaction:** `taskState()` carries task artifacts across the fresh boundary, `scratchpad({ scope: 'resource' })` carries structured progress, and `observations()` compresses what earlier attempts learned into the next View. See `12-builtin-context-layers`.
 
 ---
 
-## Task Trees with Plan Enforcement
+## Subprocess Routing
 
-A task tree is a recursive structure: each node either executes directly (leaf) or decomposes into children.
+Every spawn-based composition routes through the harness `SubprocessAdapter` — in-memory by default, out-of-process when the caller supplies a different adapter via `spawn({ subprocess })` or `harness.detachedSpawn(step, input, ctx, { subprocess })`. Precedence is `overrides ?? step ?? harness`.
 
-```typescript
-interface TaskNode<I, O> {
-  id: string;
-  execute: Step<I, O>;
-  children?: TaskNode<any, any>[];
-  childExecution?: 'parallel' | 'sequential';
-  merge?: (childResults: any[], ctx: Context) => O;
-}
-```
-
-No string IDs for dependencies. Data flows through the tree structure itself. Sequential children pipe output → input. Parallel children receive the parent's output and their results are merged.
-
-### `enforced()` — Preventive Plan Enforcement
-
-```typescript
-interface PlanConstraints {
-  toolAllowlist?: Record<string, string[]>;
-  maxStepsPerNode?: number;
-  requireApproval?: string[];
-  validate?: (taskId: string, input: unknown, ctx: Context) => Promise<boolean>;
-}
-```
-
-`toolAllowlist` modifies the tool list passed to `step.llm` — the LLM never sees disallowed tools. `requireApproval` pauses execution and waits on a channel for human input. No tokens wasted on rejected tool calls.
+Adapter routing is transparent to the composition: none of the shapes above change when the adapter does. See `04-spawn` for the routing rules and `23-durable-execution` for durability once an out-of-process adapter is in play.
 
 ---
 
-## Recursive LLM Decomposition
+## Runner-Loop Primitives
 
-An agent that decomposes its task by spawning child instances of itself with focused sub-context.
+A long-lived runner loop — a daemon, a CI wrapper, a service that owns one agent thread and drives it to an outcome — is not a step composition. It sits *outside* the interpreter, seeding a session, driving turns, and waiting on an outcome that may arrive from an external event rather than from a step returning. `@noetic-tools/core` exports the small pieces of that shape so runner loops do not each reinvent them:
 
-```typescript
-function recursiveLLM<I, O>(opts: {
-  model: string;
-  instructions: string;
-  tools?: Tool[];
-  decompose: (input: I, ctx: Context) => Promise<I[] | null>;
-  merge: (results: O[], ctx: Context) => Promise<O>;
-  maxDepth: number;
-}): Step<I, O>
-```
+- **`createDetachedSignal<T>()`** → `DetachedSignal<T>`: a single-shot resolve/reject signal whose `done` promise carries the loop's final outcome.
+- **`runnableLoop(opts: RunnableLoopOpts<T>): Promise<T>`**: the generic turn driver over a `RunnableLoopHarness` (`seedSessionHistory`, `execute`, `getAgentResponse`). With `priorItems` it seeds the session and awaits the signal; with `initialMessage` it seeds, runs the first turn, invokes `afterFirstTurn`, then awaits the signal; with neither it is a pure listener.
+- **`createStallNudgeHook(opts: StallNudgeOpts<T>)`**: a two-strike `afterFirstTurn` hook. On the first stall it sends one nudge, then awaits the nudged turn's *real* completion via `harness.getAgentResponse` raced against the outcome signal — `execute()` is enqueue-only, so a microtask-scale wait would always escalate. If the loop is still stalled on the re-check it calls `onStall()` and settles the signal with `buildStalledOutcome()`. A settled signal or a pending external message short-circuits either strike.
+- **`createNudgeMessage(opts: CreateNudgeMessageOpts)`** and **`DEFAULT_NUDGE_MESSAGE_TEXT`**: build the nudge `InputMessageItem` the hook sends.
+- **`seedFromItems(harness: SessionSeedHarness, threadId, items)`**: path-free session seeding from an `Item[]` the caller has already loaded; a no-op on an empty array.
 
-**Primitives used:** `step.run` (outer) + `fork` (parallel children) + `spawn(contextIn: custom, contextOut: summary)` + self-reference for recursion. Depth control via `ctx.depth`.
-
-**Context layer interaction:** `scope: 'global'` layers (shared knowledge) available to all children. Each child's `onReturn` merges discoveries back into parent state.
+They are exported, not internal, so third-party runners (custom agents, CI wrappers, daemons) can assemble the same shape against any `SubprocessAdapter`.
 
 ---
 
-## Slate Thread Weaving
+## Future Considerations
 
-An orchestrator dispatches parallel worker threads. Workers run in fresh contexts and return episodic summaries.
-
-```typescript
-function threadWeave<O>(opts: {
-  orchestrator: { model: string; instructions: string };
-  workers: Record<string, { model: string; instructions: string; tools: Tool[] }>;
-  dispatch: Step<string, WorkerDispatch[]>;
-  maxParallel?: number;
-  maxRounds?: number;
-}): Step<string, O>
-
-interface WorkerDispatch {
-  workerName: string;
-  prompt: string;
-  tools?: string[];
-}
-```
-
-**Primitives used:** `loop` (orchestrator rounds) + `fork` (parallel workers) + `spawn(contextIn: fresh, contextOut: summary)` + `react` (inner worker loop).
-
-**Context layer interaction:** Orchestrator's `observationalContext()` accumulates worker summaries. `sharedSwarmContext()` enables real-time finding sharing between concurrent workers.
-
----
-
-## A2A Protocol
-
-A2A is `spawn` + `step.run` over HTTP. Remote agents are wrapped in Steps that compose like local ones.
-
-```typescript
-function remote<O = string>(opts: {
-  url: string;
-  output?: ZodTypeAny;
-  auth?: { type: 'bearer'; token: string };
-  timeout?: number;
-}): Step<string, O>
-```
-
-No separate "Protocol" primitive. A2A transport complexity (task lifecycle, SSE streaming, capability negotiation) is a runtime concern. Remote agents compose with `fork`, `loop`, `taskTree` identically to local steps.
-
----
-
-## Dynamic Plans: `compilePlan` and `adaptivePlan`
-
-### Schema
-
-```typescript
-const PlanNodeSchema: z.ZodType<PlanNode> = z.lazy(() =>
-  z.object({
-    id: z.string(),
-    description: z.string(),
-    assignee: z.string(),
-    execution: z.enum(['sequential', 'parallel']).default('sequential'),
-    children: z.array(PlanNodeSchema).optional(),
-  })
-);
-```
-
-### Compiler
-
-```typescript
-function compilePlan<O>(
-  plan: PlanNode,
-  agents: Record<string, (prompt: string) => Step<string, unknown>>,
-  constraints?: PlanConstraints,
-): Step<string, O>
-```
-
-Invalid agent references throw with available options listed.
-
-### Adaptive Plans
-
-For agents that modify their own execution structure:
-
-```typescript
-function adaptivePlan<O>(opts: {
-  planner: Step<string, PlanNode>;
-  agents: Record<string, (prompt: string) => Step<string, unknown>>;
-  constraints: PlanConstraints;
-  maxRevisions: number;
-}): Step<string, O>
-```
-
-Wraps `compilePlan` in a plan → validate → execute → revise loop. Feeds validation errors and partial failure results back to the planner.
-
----
-
-## Dual-Agent: Conversational + Background Worker
-
-A conversational agent paired with a background worker that processes tasks asynchronously. External channels enable human-in-the-loop messaging into a running execution.
-
-```typescript
-function dualAgent(opts: {
-  conversational: { model: string; instructions: string; tools: Tool[] };
-  worker: { model: string; instructions: string; tools: Tool[] };
-  userChannel: ExternalChannel<string>;
-  maxWorkerSteps?: number;
-}): Step<string, string> {
-  // External channel for user messages — writable from HTTP handlers
-  const { userChannel } = opts;
-
-  // Shared working memory for plan coordination
-  const sharedMemory = workingMemoryContext({ scope: 'resource' });
-
-  // Conversational agent: responds to user, updates shared plan
-  const conversationalLoop = loop({
-    id: 'conversational-loop',
-    body: step.run({
-      id: 'handle-user-message',
-      execute: async (_, ctx) => {
-        const message = await ctx.recv(userChannel);
-        // LLM processes the message with access to shared working memory
-        const response = await execute(
-          step.llm({
-            id: 'respond',
-            model: opts.conversational.model,
-            instructions: opts.conversational.instructions,
-            tools: opts.conversational.tools,
-          }),
-          message,
-          ctx,
-        );
-        return response;
-      },
-    }),
-    until: until.maxSteps(1000),
-  });
-
-  // Background worker: executes plan, checks for updates via tryRecv
-  const workerLoop = loop({
-    id: 'worker-loop',
-    body: spawn({
-      id: 'worker-iteration',
-      child: react({
-        model: opts.worker.model,
-        instructions: opts.worker.instructions,
-        tools: opts.worker.tools,
-        maxSteps: opts.maxWorkerSteps ?? 20,
-      }),
-      contextIn: { strategy: 'fresh' },
-      contextOut: { strategy: 'full' },
-    }),
-    until: any(
-      until.verified(async (output) => {
-        // Worker checks shared working memory for completion
-        return { pass: false };
-      }),
-      until.maxSteps(100),
-    ),
-  });
-
-  // Race: worker completing ends the fork
-  return fork({
-    id: 'dual-agent',
-    mode: 'race',
-    paths: () => [conversationalLoop, workerLoop],
-  });
-}
-```
-
-**Primitives used:** `fork(race)` + `loop` + `spawn(fresh)` + `react` + `channel(external)` + `recv` + `tryRecv`.
-
-**External HTTP handler using `ChannelHandle`:**
-
-```typescript
-// Outside the execution — e.g., in an Express route handler
-const handle = runtime.getChannelHandle(userChannel, executionId);
-
-app.post('/api/message', (req, res) => {
-  if (handle.closed) {
-    return res.status(410).json({ error: 'Execution completed' });
-  }
-  handle.send(req.body.message);  // typed, lifecycle-aware
-  res.json({ ok: true });
-});
-```
-
-**Context layer interaction:** `workingMemoryContext({ scope: 'resource' })` shared between conversational and worker agents enables plan coordination. The worker uses `tryRecv` to check for plan updates without blocking. External channels survive `contextIn: 'fresh'` boundaries because they're scoped to the root execution.
+- **A pattern cookbook package.** The compositions above live as examples so they stay executable. A separate, versioned `@noetic-tools/patterns` package could ship them as copy-ready source (not as re-exported builders) with their own tests.
+- **Recursive decomposition helper.** Self-spawning decompose/merge agents currently repeat depth bookkeeping in user code; a depth-aware `spawn` helper (reading `ctx.depth`) would remove that boilerplate without reintroducing a pattern builder.
+- **Remote steps.** An agent reachable over HTTP is `spawn` + `runCode` behind a transport. A first-class remote step would need task lifecycle, streaming, and capability negotiation to be runtime concerns rather than composition concerns.

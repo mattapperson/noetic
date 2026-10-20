@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'bun:test';
 import type { ContextData } from '@noetic-tools/context';
-import { branch } from '../../src/builders/control-flow-builders';
+import { conditional } from '../../src/builders/control-flow-builders';
 import { otherwise, semanticRoute, when } from '../../src/conditions/conditions';
-import { executeBranch } from '../../src/interpreter/execute-control';
+import { executeConditional } from '../../src/interpreter/execute-control';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import { makeMockHarness, mockEmbed, simpleExecute } from '../_helpers';
 
-describe('semantic branch integration', () => {
-  it('branch() with semanticRoute routes through executeBranch', async () => {
+describe('semantic conditional integration', () => {
+  it('conditional() with semanticRoute routes through executeConditional', async () => {
     const embed = mockEmbed({
       'hello there': [
         1,
@@ -22,18 +22,18 @@ describe('semantic branch integration', () => {
     });
 
     const greetingStep = {
-      kind: 'run' as const,
+      kind: 'runCode' as const,
       id: 'greeting-handler',
       execute: async () => 'handled greeting',
     };
     const fallbackStep = {
-      kind: 'run' as const,
+      kind: 'runCode' as const,
       id: 'fallback-handler',
       execute: async () => 'handled fallback',
     };
 
-    const step = branch<ContextData, string, string>({
-      id: 'semantic-branch',
+    const step = conditional<ContextData, string, string>({
+      id: 'semantic-conditional',
       route: semanticRoute(
         when(async (input: string) => {
           const [inputVec] = await embed([
@@ -56,19 +56,19 @@ describe('semantic branch integration', () => {
     const ctx = new ContextImpl({
       harness: makeMockHarness(),
     });
-    const result = await executeBranch(step, 'hello there', ctx, simpleExecute);
+    const result = await executeConditional(step, 'hello there', ctx, simpleExecute);
     expect(result).toBe('handled greeting');
   });
 
-  it('async route in branch() works end-to-end', async () => {
-    const step = branch<ContextData, string, string>({
-      id: 'async-branch',
+  it('async route in conditional() works end-to-end', async () => {
+    const step = conditional<ContextData, string, string>({
+      id: 'async-conditional',
       route: async (input) => {
         // Simulate async operation
         await Promise.resolve();
         if (input === 'match') {
           return {
-            kind: 'run' as const,
+            kind: 'runCode' as const,
             id: 'matched',
             execute: async () => 'matched!',
           };
@@ -80,10 +80,10 @@ describe('semantic branch integration', () => {
     const ctx = new ContextImpl({
       harness: makeMockHarness(),
     });
-    const matched = await executeBranch(step, 'match', ctx, simpleExecute);
+    const matched = await executeConditional(step, 'match', ctx, simpleExecute);
     expect(matched).toBe('matched!');
 
-    const passthrough = await executeBranch(step, 'no-match', ctx, simpleExecute);
+    const passthrough = await executeConditional(step, 'no-match', ctx, simpleExecute);
     expect(passthrough).toBe('no-match');
   });
 });

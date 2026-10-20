@@ -255,7 +255,7 @@ function toNativeState(
 /**
  * Map one provider answer. Only an explicit `refusal` becomes a `Refusal`; a
  * missing or mistyped answer comes back `undefined` so validation raises
- * `llm_parse_error` instead of passing a provider fault off as the model
+ * `model_parse_error` instead of passing a provider fault off as the model
  * declining.
  */
 function fromNativeAnswer(

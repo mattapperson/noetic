@@ -4,12 +4,12 @@ import { AgentHarness } from '../../src/harness/agent-harness';
 import { createScriptedCallModel, textOnlyResponse } from '../_helpers';
 
 describe('pipeline agent', () => {
-  it('buildPipelineAgent creates a loop wrapping a branch', () => {
+  it('buildPipelineAgent creates a loop wrapping a conditional', () => {
     const agent = buildPipelineAgent();
 
     expect(agent.kind).toBe('loop');
     expect(agent.id).toBe('pipeline-loop');
-    expect(agent.steps[0].kind).toBe('branch');
+    expect(agent.steps[0].kind).toBe('conditional');
     expect(agent.steps[0].id).toBe('phase-router');
   });
 

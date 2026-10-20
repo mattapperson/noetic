@@ -19,7 +19,7 @@ describe('executeLoop', () => {
       id: 'test-loop',
       steps: [
         {
-          kind: 'run',
+          kind: 'runCode',
           id: 'inc',
           execute: async (input: number) => {
             count++;
@@ -44,7 +44,7 @@ describe('executeLoop', () => {
       id: 'prep-loop',
       steps: [
         {
-          kind: 'run',
+          kind: 'runCode',
           id: 'echo',
           execute: async (input: string) => {
             inputs.push(input);
@@ -71,7 +71,7 @@ describe('executeLoop', () => {
       id: 'retry-loop',
       steps: [
         {
-          kind: 'run',
+          kind: 'runCode',
           id: 'flaky',
           execute: async (_input: string) => {
             attempts++;
@@ -105,7 +105,7 @@ describe('executeLoop', () => {
       id: 'skip-loop',
       steps: [
         {
-          kind: 'run',
+          kind: 'runCode',
           id: 'sometimes-fail',
           execute: async (input: number) => {
             callCount++;
@@ -139,7 +139,7 @@ describe('executeLoop', () => {
       id: 'abort-loop',
       steps: [
         {
-          kind: 'run',
+          kind: 'runCode',
           id: 'fail',
           execute: async () => {
             throw new NoeticErrorImpl({
@@ -173,7 +173,7 @@ describe('executeLoop', () => {
       id: 'cancel-retry-loop',
       steps: [
         {
-          kind: 'run',
+          kind: 'runCode',
           id: 'cancelled-body',
           execute: async () => {
             executions++;
@@ -217,7 +217,7 @@ describe('executeLoop', () => {
       id: 'cancel-skip-loop',
       steps: [
         {
-          kind: 'run',
+          kind: 'runCode',
           id: 'cancelled-body',
           execute: async () => {
             executions++;
@@ -252,7 +252,7 @@ describe('executeLoop', () => {
       id: 'pred-throw-loop',
       steps: [
         {
-          kind: 'run',
+          kind: 'runCode',
           id: 'inc',
           execute: async (input: number) => {
             count++;
@@ -279,7 +279,7 @@ describe('executeLoop', () => {
       id: 'snap-loop',
       steps: [
         {
-          kind: 'run',
+          kind: 'runCode',
           id: 'echo',
           execute: async (input: string) => `output-${input}`,
         },
@@ -313,7 +313,7 @@ describe('executeLoop', () => {
       id: 'ceiling-loop',
       steps: [
         {
-          kind: 'run',
+          kind: 'runCode',
           id: 'inc',
           execute: async (input: number) => input + 1,
         },
@@ -344,7 +344,7 @@ describe('executeLoop', () => {
       id: 'default-ceiling-loop',
       steps: [
         {
-          kind: 'run',
+          kind: 'runCode',
           id: 'inc',
           execute: async (input: number) => {
             count++;
@@ -375,7 +375,7 @@ describe('executeLoop', () => {
       id: 'retry-ceiling-loop',
       steps: [
         {
-          kind: 'run',
+          kind: 'runCode',
           id: 'always-fail',
           execute: async () => {
             attempts++;
@@ -414,7 +414,7 @@ describe('executeLoop', () => {
       id: 'abort-mid-loop',
       steps: [
         {
-          kind: 'run',
+          kind: 'runCode',
           id: 'inc',
           execute: async (input: number) => {
             count++;
@@ -444,7 +444,7 @@ describe('executeLoop', () => {
       id: 'nan-loop',
       steps: [
         {
-          kind: 'run',
+          kind: 'runCode',
           id: 'inc',
           execute: async (input: number) => input + 1,
         },
@@ -471,7 +471,7 @@ describe('executeLoop', () => {
       id: 'zero-loop',
       steps: [
         {
-          kind: 'run',
+          kind: 'runCode',
           id: 'inc',
           execute: async (input: number) => input + 1,
         },
@@ -499,7 +499,7 @@ describe('executeLoop', () => {
       id: 'history-loop',
       steps: [
         {
-          kind: 'run',
+          kind: 'runCode',
           id: 'inc',
           execute: async (input: number) => input + 1,
         },
@@ -531,7 +531,7 @@ describe('executeLoop', () => {
       id: 'skip-first-loop',
       steps: [
         {
-          kind: 'run',
+          kind: 'runCode',
           id: 'fail-then-ok',
           execute: async (_input: string) => {
             callCount++;
@@ -566,7 +566,7 @@ describe('executeLoop', () => {
       id: 'neg-loop',
       steps: [
         {
-          kind: 'run',
+          kind: 'runCode',
           id: 'inc',
           execute: async (input: number) => input + 1,
         },
@@ -596,7 +596,7 @@ describe('executeLoop', () => {
       id: 'verify-loop',
       steps: [
         {
-          kind: 'run',
+          kind: 'runCode',
           id: 'attempt',
           execute: async (_input: string) => {
             iteration++;
@@ -636,7 +636,7 @@ describe('executeLoop', () => {
       id: 'multi-step-loop',
       steps: [
         {
-          kind: 'run',
+          kind: 'runCode',
           id: 'double',
           execute: async (input: number) => {
             order.push('double');
@@ -644,7 +644,7 @@ describe('executeLoop', () => {
           },
         },
         {
-          kind: 'run',
+          kind: 'runCode',
           id: 'add-one',
           execute: async (input: number) => {
             order.push('add-one');
@@ -700,7 +700,7 @@ describe('executeLoop inbox channel', () => {
       id: 'inbox-continue-loop',
       steps: [
         {
-          kind: 'run',
+          kind: 'runCode',
           id: 'inc',
           execute: async (input: number) => {
             callCount++;
@@ -730,7 +730,7 @@ describe('executeLoop inbox channel', () => {
       id: 'inbox-empty-loop',
       steps: [
         {
-          kind: 'run',
+          kind: 'runCode',
           id: 'inc',
           execute: async (input: number) => {
             callCount++;
@@ -756,7 +756,7 @@ describe('executeLoop inbox channel', () => {
       id: 'inbox-park-loop',
       steps: [
         {
-          kind: 'run',
+          kind: 'runCode',
           id: 'inc',
           execute: async (input: number) => {
             callCount++;
@@ -786,7 +786,7 @@ describe('executeLoop inbox channel', () => {
       id: 'inbox-abort-loop',
       steps: [
         {
-          kind: 'run',
+          kind: 'runCode',
           id: 'inc',
           execute: async (input: number) => input + 1,
         },
@@ -824,7 +824,7 @@ describe('executeLoop inbox channel', () => {
       id: 'inbox-timeout-loop',
       steps: [
         {
-          kind: 'run',
+          kind: 'runCode',
           id: 'inc',
           execute: async (input: number) => {
             callCount++;
@@ -850,7 +850,7 @@ describe('executeLoop inbox channel', () => {
       id: 'inbox-log-loop',
       steps: [
         {
-          kind: 'run',
+          kind: 'runCode',
           id: 'inc',
           execute: async (input: number) => input + 1,
         },

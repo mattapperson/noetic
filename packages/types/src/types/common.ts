@@ -72,6 +72,12 @@ export interface TokenUsage {
   input: number;
   output: number;
   total: number;
+  /**
+   * Prompt tokens served from the provider's cache, summed across every model
+   * call on this execution. `undefined` — not `0` — while no call has reported a
+   * cache figure, preserving the `RoundUsage` distinction between "nothing was
+   * cached" and "this provider says nothing about caching".
+   */
   cached?: number;
 }
 
@@ -98,6 +104,12 @@ export interface StepMeta {
   usage?: RoundUsage;
   cost?: number;
   responseItems?: ReadonlyArray<Item>;
+  /**
+   * Why an ACP agent stopped its turn. Set only by `acp-agent` steps, and the
+   * only way a caller can tell a truncated turn (`max_tokens`,
+   * `max_turn_requests`) from a complete one — both return normally.
+   */
+  acpStopReason?: string;
   /** Set by `decide` steps. */
   decision?: DecisionMeta;
 }

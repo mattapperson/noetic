@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { toJson } from '../server/sse';
 
 describe('toJson', () => {
-  it('encodes Map values (the fileReference layer state shape)', () => {
+  it('encodes Map values (the filesystem layer state shape)', () => {
     const value = {
       files: new Map([
         [

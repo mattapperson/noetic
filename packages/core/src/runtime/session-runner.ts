@@ -5,7 +5,9 @@ import type {
   HarnessStatus,
   InputMessageItem,
   Item,
+  SessionUsage,
 } from '@noetic-tools/types';
+import { isNoeticError } from '@noetic-tools/types';
 import { emitFrameworkEvent } from './broadcaster-utils';
 import { EventBroadcaster } from './event-broadcaster';
 import type { QueuedMessage } from './message-queue';
@@ -114,6 +116,15 @@ export class SessionRunner {
   private status: HarnessStatus = {
     kind: 'idle',
   };
+  /** Cumulative token/cost accounting across every turn this session has run,
+   *  including turns that failed or were aborted after partial model work. */
+  private totalInputTokens = 0;
+  private totalOutputTokens = 0;
+  /** `undefined` until some turn reports a cache figure, so a provider that
+   *  explicitly reported 0 cached tokens stays distinguishable from a provider
+   *  that reports nothing about caching at all (see `SessionUsage`). */
+  private totalCachedTokens: number | undefined;
+  private totalCost = 0;
   private currentController?: AbortController;
   private currentCtx?: Context;
   private loopPromise?: Promise<void>;
@@ -137,6 +148,16 @@ export class SessionRunner {
 
   getStatus(): HarnessStatus {
     return this.status;
+  }
+
+  /** Cumulative token usage and cost across all turns this session has run. */
+  getUsage(): SessionUsage {
+    return {
+      inputTokens: this.totalInputTokens,
+      outputTokens: this.totalOutputTokens,
+      cachedTokens: this.totalCachedTokens,
+      cost: this.totalCost > 0 ? this.totalCost : undefined,
+    };
   }
 
   /** Resolves once the queue has been drained and the runner is idle with a
@@ -286,10 +307,23 @@ export class SessionRunner {
         data: {
           turnId,
           reason: error.message,
+          // The typed kind ('cancelled', 'model_refused', …) so consumers can
+          // classify the abort without parsing the human-readable message.
+          errorKind: isNoeticError(error) ? error.noeticError.kind : undefined,
         },
       });
       this.rejectWaiters(error);
     } finally {
+      // Accumulate the turn's token accounting whatever the outcome — an
+      // aborted turn still consumed whatever the model billed before the cut.
+      this.totalInputTokens += ctx.tokens.input;
+      this.totalOutputTokens += ctx.tokens.output;
+      // Only ever leave `undefined` behind when NO turn reported a figure —
+      // a turn that reported 0 must surface as 0, not "unreported".
+      if (ctx.tokens.cached !== undefined) {
+        this.totalCachedTokens = (this.totalCachedTokens ?? 0) + ctx.tokens.cached;
+      }
+      this.totalCost += ctx.cost;
       this.currentCtx = undefined;
       this.currentController = undefined;
       this.status = {
@@ -323,7 +357,11 @@ function buildResponse(text: string, ctx: Context): HarnessResponse {
     usage: {
       inputTokens: ctx.tokens.input,
       outputTokens: ctx.tokens.output,
-      cachedTokens: ctx.tokens.cached && ctx.tokens.cached > 0 ? ctx.tokens.cached : undefined,
+      // Passed through verbatim: `ctx.tokens.cached` is already
+      // undefined-unless-reported, so collapsing a reported 0 to `undefined`
+      // here would re-erase the distinction between "nothing was cached" and
+      // "this provider says nothing about caching". Matches `SessionUsage`.
+      cachedTokens: ctx.tokens.cached,
     },
     cost: ctx.cost > 0 ? ctx.cost : undefined,
     text,

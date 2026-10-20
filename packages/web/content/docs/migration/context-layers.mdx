@@ -1,152 +1,104 @@
 ---
-title: Memory Layers → Context Layers
-description: The memory layer system is now the context layer system. Every old name still works through a deprecated alias — here is what changed and what to rename.
+title: Context Layer Naming Migration
+description: Breaking migration from the former memory/context layer names to Noetic's final context-layer API.
 ---
 
-# Memory Layers → Context Layers
+# Context Layer Naming Migration
 
-Noetic's layer system was named after one thing a few layers happened to do
-(store memories) rather than what all of them are for: **assembling the model's
-context window** on every turn — recall, budget allocation, history projection,
-the item-append pipeline, steering.
+This release makes the context-layer vocabulary consistent across builders,
+layer IDs, storage keys, workflow documents, and tool names. It is a
+**breaking change**: Noetic does not provide deprecated aliases, accept legacy
+configuration keys, or ship `@noetic-tools/memory`.
 
-So `MemoryLayer` is now `ContextLayer`, and `@noetic-tools/memory` is now
-[`@noetic-tools/context`](https://www.npmjs.com/package/@noetic-tools/context).
+Import context APIs from `@noetic-tools/context` or the equivalent re-exports
+from `@noetic-tools/core`.
 
-<Callout type="info">
-  **This is a minor release, not a breaking one.** Every pre-rename name still
-  resolves through a `@deprecated` alias, and every pre-rename config key is
-  still accepted. You can upgrade without touching your code, then rename at
-  your own pace.
-
-  The one genuine behaviour change is the two renamed layer IDs — see
-  [What actually breaks](#what-actually-breaks).
-</Callout>
-
-## Package
+## Package and contract changes
 
 ```diff
 - import { workingMemory } from '@noetic-tools/memory';
-+ import { workingMemoryContext } from '@noetic-tools/context';
++ import { scratchpad } from '@noetic-tools/context';
 ```
 
-`@noetic-tools/memory` is still published and now re-exports
-`@noetic-tools/context` wholesale, so the old specifier keeps working. It
-receives no further changes.
+`@noetic-tools/memory` has been removed. The layer contract uses
+`ContextLayer`, and layer data is exposed through `ctx.context` and
+`toolCtx.context`.
 
-Most applications import from `@noetic-tools/core`, which re-exports the whole
-surface — those are unaffected by the package rename.
+## Builder migration
 
-## Types
-
-| Before | After |
+| Before | Final API |
 |---|---|
-| `MemoryLayer<TState>` | `ContextLayer<TState>` |
-| `MemoryHooks<TState>` | `ContextLayerHooks<TState>` |
-| `MemoryConfig<TLayers>` | `ContextConfig<TLayers>` |
-| `ContextMemory` | `ContextData` |
-| `InferMemory<T>` | `InferContext<T>` |
-| `InferMemoryShape<T>` | `InferContextShape<T>` |
-| `MemoryScope` | `ContextScope` |
-| `MemoryCallModelRequest` | `LayerCallModelRequest` |
-| `MemoryTraceSpan` | `LayerTraceSpan` |
-| `ToolMemory` | `ToolContext` |
-| `ToolMemoryDeclaration` | `ToolContextDeclaration` |
-| `WorkingMemoryConfig` / `WorkingMemoryState` | `WorkingMemoryContextConfig` / `WorkingMemoryContextState` |
-| `ObservationalMemoryConfig` | `ObservationalContextConfig` |
-| `TemporalMemoryConfig` | `TemporalContextConfig` |
-| `PlanMemoryConfig` | `PlanContextConfig` |
+| `workingMemoryContext()` | `scratchpad()` |
+| `observationalContext()` | `observations()` |
+| `temporalContext()` | `temporal()` |
+| `planContext()` | `plan()` |
+| `toolContextLayer()` | `toolCalls()` |
+| `staticContent()` | `instructions()` |
+| `fileReference()` | `filesystem()` |
+| `historyWindow()` | `history()` |
+| `durableTaskState()` | `taskState()` |
+| `layerFn()` | `layerFunction()` |
 
-The generic parameter `TMemory` is now `TContext` — `Step<TContext, I, O>`.
-That is a positional parameter, so it only matters if you named it explicitly.
+`steering()` is unchanged. Episodic and semantic recall remain documentation
+recipes rather than exported built-in layers.
 
-Unchanged: `BudgetConfig`, `LayerTimeouts`, `LayerDataDecl`, `LayerFunctionDecl`,
-`LayerProvides`, `LayerHandle`, `Slot`, `StorageAdapter`, `ScopedStorage`, every
-hook param/result type, `RerenderScope`, `ProjectionPolicy`.
+## Harness and step migration
 
-## Builders
+Use `contextLayers` for default layers and the final AgentHarness configuration
+shape:
 
-| Before | After |
-|---|---|
-| `memory([...])` | `context([...])` |
-| `workingMemory()` | `workingMemoryContext()` |
-| `observationalMemory()` | `observationalContext()` |
-| `temporalMemory()` | `temporalContext()` |
-| `planMemory()` | `planContext()` |
-| `toolMemoryLayer()` | `toolContextLayer()` |
+```ts
+import { AgentHarness, callModel, scratchpad } from '@noetic-tools/core';
+import type { StorageAdapter } from '@noetic-tools/core';
 
-`historyWindow`, `steering`, `fileReference`, `staticContent`, and
-`durableTaskState` are unchanged.
+// Your platform's storage adapter, e.g. `createFileStorage()` from
+// `@noetic-tools/platform-node`.
+declare const storage: StorageAdapter;
 
-`workingMemory` keeps "memory" in its new name on purpose: *working memory* is a
-term of art, and the layer really is a small mutable scratchpad the model reads
-and writes. The others were named after the system, not the concept.
-
-## The `memory:` config key
-
-Renamed to `context:` on `provide`, `spawn`, `tool`, `react`, the `AgentHarness`
-constructor, `createContext`, `execute`, and `restore`.
-
-```diff
-  step.provide({
-    id: 'with-layers',
-    child: agent,
--   memory: [workingMemory()],
-+   context: [workingMemoryContext()],
-  })
+const harness = new AgentHarness({
+  name: 'assistant',
+  agentGraph: callModel({
+    id: 'respond',
+    model: 'openai/gpt-4o',
+  }),
+  params: {},
+  contextLayers: [scratchpad()],
+  environment: {
+    storage: {
+      adapter: storage,
+    },
+  },
+});
 ```
 
-Both keys are accepted. If you pass both, `context` wins.
+The former `memory:` configuration key, `ctx.memory`, `toolCtx.memory`,
+`initialStep`, flat environment adapters, and `llm` harness option have been
+removed. See [AgentHarness](/docs/framework/runtime) for the full final
+configuration surface.
 
-The JSON workflow format is **unchanged** — `provide` and `spawn` nodes already
-used a `layers` array, and still do:
+## Persisted state and checkpoints
 
-```json
-{ "kind": "provide", "layers": ["todo"], "child": { "...": "..." } }
-```
+Built-in layer IDs changed with their builders:
 
-## `ctx.memory` → `ctx.context`
-
-```diff
-- const todos = ctx.memory['todo'].items;
-+ const todos = ctx.context['todo'].items;
-```
-
-Same inside a tool: `toolCtx.memory` → `toolCtx.context`. Both old accessors
-still return the identical object.
-
-## What actually breaks
-
-Two built-in layers changed their `id`, and layer IDs are not just internal:
-
-| Layer | Old id | New id |
+| Final builder | Old layer ID | Final layer ID |
 |---|---|---|
-| `workingMemoryContext()` | `working-memory` | `working-context` |
-| `observationalContext()` | `observational-memory` | `observational-context` |
+| `scratchpad()` | `working-context` | `scratchpad` |
+| `instructions()` | `static-content` | `instructions` |
+| `observations()` | `observational-context` | `observations` |
+| `filesystem()` | `file-reference` | `filesystem` |
+| `history()` | `history-window` | `history` |
+| `taskState()` | `durable-task-state` | `task-state` |
 
-That id is used in four places, so changing it has real consequences:
+Layer IDs namespace storage (`layers/{layerId}/…`), checkpoint state, and
+model-visible layer tools. `CheckpointSchemaVersion` is now 2; version-1
+snapshots are rejected with `CHECKPOINT_SCHEMA_MISMATCH` instead of restoring
+with silently missing layer state. Clear the old checkpoint and start a fresh
+execution—there is no automatic migration path.
 
-1. **The tool name the model sees.** `working-memory/update` is now
-   `working-context/update`. This invalidates prompt caches and will break any
-   eval fixture or transcript assertion that matches on the old tool name.
-2. **Persisted layer state.** Scoped storage keys are
-   `layers/{layerId}/{scopeKey}/`, so previously stored `working-memory` and
-   `observational-memory` state is **not** migrated and will not be read back.
-   Affected agents start those two layers from their initial state.
-3. **Checkpoint restore.** Snapshots are keyed by layer id, so restoring a
-   checkpoint written before the upgrade will not repopulate these two layers.
-4. **Workflow JSON** that names them in `provide.layers[]` / `spawn.layers[]`
-   must be updated to the new strings.
+JSON workflow documents that name built-in layers must use the final IDs.
 
-Every other built-in layer id (`temporal`, `plan`, `steering`, `history-window`,
-`file-reference`, `durable-task-state`) is unchanged, as are the `ContextScope`
-values (`'thread' | 'resource' | 'global' | 'execution'`) and `Slot.WORKING_MEMORY`.
+## Additional resources
 
-If preserving that state matters to you, pin the previous major before
-upgrading, or set the ids explicitly on your own layer instances.
-
-## Docs
-
-`/docs/framework/memory/*` moved to `/docs/framework/context-layers/*` and
-`/docs/framework/api/memory-types` to `/docs/framework/api/context-layer-types`.
-The old URLs redirect.
+- [Context layers](/docs/framework/context-layers)
+- [AgentHarness](/docs/framework/runtime)
+- [Durability](/docs/framework/durability)

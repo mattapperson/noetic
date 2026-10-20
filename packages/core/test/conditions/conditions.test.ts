@@ -26,7 +26,7 @@ import {
 
 function makeStep(id: string): Step<ContextData, string, string> {
   return {
-    kind: 'run',
+    kind: 'runCode',
     id,
     execute: async () => `result-${id}`,
   };
@@ -103,7 +103,7 @@ describe('aiCondition', () => {
     expect(await at('x', mockCtxWithLlm('{"answer": {"yes": 0.81}}'))).toBe(true);
   });
 
-  it('throws llm_parse_error on a malformed response instead of answering no', async () => {
+  it('throws model_parse_error on a malformed response instead of answering no', async () => {
     const ctx = mockCtxWithLlm('not json');
     const condition = aiCondition<string>({
       model: 'test-model',
@@ -114,7 +114,7 @@ describe('aiCondition', () => {
       expect.unreachable();
     } catch (e) {
       assert(isNoeticError(e));
-      expect(e.noeticError.kind).toBe('llm_parse_error');
+      expect(e.noeticError.kind).toBe('model_parse_error');
     }
   });
 });

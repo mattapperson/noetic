@@ -8,14 +8,14 @@ on: the conversation `Item` data model, LLM configuration (`LlmProviderConfig`,
 platform adapter interfaces (`FsAdapter`, `ShellAdapter`, `SubprocessAdapter`),
 the error model, and the `Item` schema.
 
-It is consumed by [`@noetic-tools/memory`](https://www.npmjs.com/package/@noetic-tools/memory)
+It is consumed by [`@noetic-tools/context`](https://www.npmjs.com/package/@noetic-tools/context)
 and [`@noetic-tools/core`](https://www.npmjs.com/package/@noetic-tools/core),
 both of which re-export the parts relevant to their public surface. Application
 code normally imports these types from `@noetic-tools/core` rather than from
 this package directly.
 
-The `MemoryLayer` contract is additionally exported at the
-`@noetic-tools/types/contract` subpath for memory-layer authors who want the
+The `ContextLayer` contract is additionally exported at the
+`@noetic-tools/types/contract` subpath for context-layer authors who want the
 contract without the rest of the vocabulary.
 
 ## License

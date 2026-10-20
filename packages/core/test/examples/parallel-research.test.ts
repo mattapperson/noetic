@@ -4,10 +4,10 @@ import { AgentHarness } from '../../src/harness/agent-harness';
 import { createScriptedCallModel, textOnlyResponse } from '../_helpers';
 
 describe('parallel research agent', () => {
-  it('buildParallelResearchAgent creates a fork in all mode', () => {
+  it('buildParallelResearchAgent creates an inParallel in all mode', () => {
     const agent = buildParallelResearchAgent();
 
-    expect(agent.kind).toBe('fork');
+    expect(agent.kind).toBe('inParallel');
     expect(agent.id).toBe('parallel-research');
     expect(agent.mode).toBe('all');
   });

@@ -2,12 +2,12 @@ import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import type { ContextLayer } from '@noetic-tools/context';
 import {
-  fileReference,
-  observationalContext,
-  staticContent,
+  filesystem,
+  instructions,
+  observations,
+  scratchpad,
   steering,
-  temporalContext,
-  workingMemoryContext,
+  temporal,
 } from '@noetic-tools/context';
 import type { Item } from '@noetic-tools/types';
 import { createMessage } from '@noetic-tools/types';
@@ -36,12 +36,12 @@ describe('built-in layer placements', () => {
 
   // The `<current_datetime>` block changes every turn by construction.
   it('renders temporal live while it grounds the clock', () => {
-    expect(temporalContext().placement).toBe('live');
+    expect(temporal().placement).toBe('live');
   });
 
   it('lets temporal anchor when it only carries the fact ledger', () => {
     expect(
-      temporalContext({
+      temporal({
         groundDateTime: false,
         injectLedger: true,
       }).placement,
@@ -50,22 +50,22 @@ describe('built-in layer placements', () => {
 
   it('anchors static content, which never changes after init', () => {
     expect(
-      staticContent({
+      instructions({
         load: async () => 'body',
       }).placement,
     ).toBe('anchor');
   });
 
   it('anchors file references', () => {
-    expect(fileReference().placement).toBe('anchor');
+    expect(filesystem().placement).toBe('anchor');
   });
 
   // Layers whose churn depends entirely on the workload declare nothing and let
   // the runtime decide from what it observes.
   it('leaves a workload-dependent layer undeclared', () => {
     const workload: ContextLayer[] = [
-      workingMemoryContext(),
-      observationalContext(),
+      scratchpad(),
+      observations(),
     ];
 
     for (const layer of workload) {
@@ -74,8 +74,8 @@ describe('built-in layer placements', () => {
   });
 });
 
-describe('fileReference renderDelta', () => {
-  const hook = fileReference().hooks.renderDelta;
+describe('filesystem renderDelta', () => {
+  const hook = filesystem().hooks.renderDelta;
 
   async function render(prev: Item[], next: Item[]): Promise<string | null> {
     assert(hook !== undefined);

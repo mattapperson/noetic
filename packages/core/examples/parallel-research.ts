@@ -1,18 +1,18 @@
 /**
  * Parallel Research Agent
  *
- * Demonstrates: fork (all mode) + spawn + step.llm
+ * Demonstrates: inParallel (all mode) + spawn + callModel
  *
  * Forks into 3 parallel spawn-wrapped LLM calls, each researching a different
- * perspective (historical, technical, societal). Uses fork.all with a merge
+ * perspective (historical, technical, societal). Uses inParallel.all with a merge
  * function that combines results into a multi-section summary.
  */
 
 import type { ContextData } from '@noetic-tools/context';
-import type { StepForkAll } from '@noetic-tools/types';
-import { fork } from '../src/builders/control-flow-builders';
+import type { StepInParallelAll } from '@noetic-tools/types';
+import { inParallel } from '../src/builders/control-flow-builders';
 import { spawn } from '../src/builders/spawn-builder';
-import { step } from '../src/builders/step-builders';
+import { callModel } from '../src/builders/step-builders';
 
 //#region Perspective Definitions
 
@@ -54,15 +54,15 @@ const PERSPECTIVES = [
 //#region Agent Builder
 
 /** Builds a parallel research agent that forks into perspective-specific sub-agents. */
-export function buildParallelResearchAgent(): StepForkAll<ContextData, string, string> {
-  return fork<ContextData, string, string>({
+export function buildParallelResearchAgent(): StepInParallelAll<ContextData, string, string> {
+  return inParallel<ContextData, string, string>({
     id: 'parallel-research',
     mode: 'all',
     paths: () =>
       PERSPECTIVES.map((perspective) =>
         spawn<ContextData, string, string>({
           id: `research-${perspective.id}`,
-          child: step.llm<ContextData, string, string>({
+          child: callModel<ContextData, string, string>({
             id: `llm-${perspective.id}`,
             model: 'openai/gpt-4o',
             instructions: perspective.instructions,

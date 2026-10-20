@@ -1,27 +1,27 @@
 /**
- * The JSON workflow schema lives in `@noetic-tools/types` so the memory
- * package (which must not import core) can validate workflow documents.
+ * The JSON workflow schema lives in `@noetic-tools/types` so portable
+ * consumers can validate workflow documents without importing core.
  * This barrel keeps core's public and intra-core import paths unchanged.
  */
 
 export type {
-  BranchRoute,
-  BranchWorkflowNode,
+  AcpAgentWorkflowNode,
+  CallModelWorkflowNode,
+  ConditionalRoute,
+  ConditionalWorkflowNode,
   DecideWorkflowNode,
-  EveryWorkflowNode,
-  ForkWorkflowNode,
-  LlmWorkflowNode,
+  InParallelWorkflowNode,
+  InvokeToolWorkflowNode,
   LoopWorkflowNode,
   OutputCodecRef,
-  ProvideWorkflowNode,
   RouteSwitchWorkflowNode,
-  RunWorkflowNode,
+  RunCodeWorkflowNode,
+  ScheduleWorkflowNode,
   SequenceWorkflowNode,
   SpawnWorkflowNode,
   SubflowWorkflowNode,
-  SubHarnessWorkflowNode,
-  ToolWorkflowNode,
   UntilPredicate,
+  WithContextWorkflowNode,
   WorkflowDocument,
   WorkflowGraph,
   WorkflowNode,

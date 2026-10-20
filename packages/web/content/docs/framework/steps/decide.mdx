@@ -1,14 +1,14 @@
 ---
-title: step.decide
+title: decide
 description: Ask a model typed questions about the current context and get typed answers with probabilities.
 ---
 
 ## Quick Example
 
 ```ts
-import { step } from '@noetic-tools/core';
+import { decide } from '@noetic-tools/core';
 
-const triage = step.decide({
+const triage = decide({
   id: 'triage',
   model: 'typesafe/jev-1.14',
   instructions: 'Support ticket triage.',
@@ -43,9 +43,9 @@ const triage = step.decide({
 
 ## What It Does
 
-`step.decide` asks a model one or more typed questions about the current context and returns a typed answer for each, with probabilities. `step.llm` produces text and tool calls that join the conversation; `step.decide` produces a small value for your code to branch on, and leaves the conversation untouched.
+`decide` asks a model one or more typed questions about the current context and returns a typed answer for each, with probabilities. `callModel` produces text and tool calls that join the conversation; `decide` produces a small value for your code to branch on, and leaves the conversation untouched.
 
-Use it to pick a route, gate a step, or grade an input. To route straight from the answers, wrap it in [`step.routeSwitch`](/docs/framework/operators/route-switch).
+Use it to pick a route, gate a step, or grade an input. To route straight from the answers, wrap it in [`routeSwitch`](/docs/framework/operators/route-switch).
 
 ## Questions
 
@@ -118,11 +118,11 @@ interface Refusal {
 A model may decline a single question. That question answers `Refusal` and the rest answer as usual. Every answer is typed `AnswerFor<Q> | Refusal`, so the compiler makes you check `type` before you read `value`:
 
 ```ts
-import { AgentHarness, step } from '@noetic-tools/core';
+import { AgentHarness, decide } from '@noetic-tools/core';
 
 declare const harness: AgentHarness;
 
-const check = step.decide({
+const check = decide({
   id: 'check',
   model: 'typesafe/jev-1.14',
   questions: {
@@ -149,7 +149,7 @@ Two fields are easy to misread:
 
 ## What the Model Sees
 
-`step.decide` takes no state argument. It builds the state from the context system:
+`decide` takes no state argument. It builds the state from the context system:
 
 | Source | Controlled by | Sent as |
 | --- | --- | --- |
@@ -158,7 +158,7 @@ Two fields are easy to misread:
 | History | `view: 'full'` | entries, oldest first |
 | Typed layer data | `context` selector | one JSON entry named `context` |
 
-- **`view: 'full'`** (default) runs the same recall, `projectHistory`, and budget path as `step.llm`.
+- **`view: 'full'`** (default) runs the same recall, `projectHistory`, and budget path as `callModel`.
 - **`view: 'layers'`** keeps layer recall and drops history.
 - **`view: 'none'`** sends only the input, `instructions`, and the `context` selector.
 
@@ -169,12 +169,12 @@ The view is budgeted with `DECISION_PROJECTION` (8,000 tokens, `overflow: 'trunc
 Use `context` to send typed layer data, instead of (or as well as) the rendered view. The returned object goes to the model as one JSON entry named `context`, so its keys cannot clash with `input` or the view. To type `ctx.context`, annotate the selector's parameter:
 
 ```ts
-import { step } from '@noetic-tools/core';
+import { decide } from '@noetic-tools/core';
 import type { Context } from '@noetic-tools/core';
 
 type Billing = { billing: { plan: 'free' | 'pro' } };
 
-const refundCheck = step.decide({
+const refundCheck = decide({
   id: 'refund-check',
   model: 'typesafe/jev-1.14',
   view: 'none',
@@ -193,7 +193,7 @@ const refundCheck = step.decide({
 });
 ```
 
-Do not pass type arguments to `step.decide`. The question map is inferred, and type arguments would reset it and lose every choice and level name. Annotating the selector is how you name the context type. An empty `questions` map is a type error.
+Do not pass type arguments to `decide`. The question map is inferred, and type arguments would reset it and lose every choice and level name. Annotating the selector is how you name the context type. An empty `questions` map is a type error.
 
 ### No conversation side effects
 
@@ -202,7 +202,7 @@ A decision watches the conversation; it never joins it.
 - The input is **not** appended to `ctx.itemLog`, and no response items are appended.
 - Steering hooks (`beforeToolCall`, `afterModelCall`) do not run. A decide call has no tools.
 - Layer `store()` does not run. Layers hear about decisions through the [`onDecision`](/docs/framework/context-layers/custom-layers#reacting-to-decisions-with-ondecision) hook instead.
-- Layer recall **peeks** (`RecallOptions.peek`): each `recall()` gets a deep copy of its state, state it returns is rendered but not kept, and eventual-layer output is not cached. The steering layer drains its queue as it renders; without a peek, a decision would eat guidance meant for the next `llm` call. A layer whose state cannot be copied (it holds functions) is left out of the decision's view.
+- Layer recall **peeks** (`RecallOptions.peek`): each `recall()` gets a deep copy of its state, state it returns is rendered but not kept, and eventual-layer output is not cached. The steering layer drains its queue as it renders; without a peek, a decision would eat guidance meant for the next `callModel` call. A layer whose state cannot be copied (it holds functions) is left out of the decision's view.
 
 The step does record its cost: usage and cost roll into `ctx.tokens` and `ctx.cost`. `ctx.lastStepMeta` is merged, not replaced: it gains `usage`, `cost`, and `decision` (`{ modelId, source, refused }`, where `refused` lists the ids of refused questions), and keeps the previous step's `toolCalls`, so a loop's `until.noToolCalls()` still sees them. To keep answers for later steps, add [`decisionsHistoryLayer`](/docs/framework/context-layers/decisions-history).
 
@@ -216,18 +216,18 @@ Any model can answer. How it answers depends on the model.
 
 **Native.** Decision models such as `typesafe/jev-1.14` answer every question in one pass and return calibrated distributions rather than sampled text. A model is native when OpenRouter lists `decisions` among its output modalities; the harness looks this up once per model id and caches the result. A lookup that fails for any reason but a 404 is not cached: that call takes the estimated path, and the next call asks again. The native path needs an OpenRouter client, so configure the harness's `llm` provider (or set `OPENROUTER_API_KEY`). Without one, every model takes the estimated path.
 
-On the native path, only an explicit refusal from the provider becomes a `Refusal`. A missing or mistyped answer fails the step with `llm_parse_error`, rather than passing a provider fault off as the model declining. Every answer's `probabilities` has an entry for each outcome (`0` when the provider sent none). A boolean `criteria` with only one side cannot be sent as criteria, so it joins the instructions as `Yes means: …` (or `No means: …`).
+On the native path, only an explicit refusal from the provider becomes a `Refusal`. A missing or mistyped answer fails the step with `model_parse_error`, rather than passing a provider fault off as the model declining. Every answer's `probabilities` has an entry for each outcome (`0` when the provider sent none). A boolean `criteria` with only one side cannot be sent as criteria, so it joins the instructions as `Yes means: …` (or `No means: …`).
 
 **Estimated.** Any other model, such as `openai/gpt-4o-mini`, answers through a structured-output call that asks for a probability per outcome. Choice and score probabilities are scaled to sum to 1, `confidence` is the top probability, and a score's `value` is the weighted level index. Set `samples` to run the call several times in parallel and average the results (the runs use `temperature: 0.7` when `samples > 1`, and `0` otherwise). `samples` is ignored on the native path.
 
-A sample that fails or does not parse is dropped, and the rest are averaged. The step fails only when no sample parses; it then throws `llm_parse_error`, and still counts the tokens and cost the samples spent. The `decide.call` span ends and exports either way.
+A sample that fails or does not parse is dropped, and the rest are averaged. The step fails only when no sample parses; it then throws `model_parse_error`, and still counts the tokens and cost the samples spent. The `decide.call` span ends and exports either way.
 
 `ctx.lastStepMeta.decision.source` tells you which path answered: `'native'` or `'estimated'`. Self-reported probabilities are not calibrated. Use them for routing thresholds, not for measurement.
 
 ```ts
-import { step } from '@noetic-tools/core';
+import { decide } from '@noetic-tools/core';
 
-const isSpam = step.decide({
+const isSpam = decide({
   id: 'is-spam',
   model: 'openai/gpt-4o-mini',
   samples: 3,
@@ -245,7 +245,7 @@ const isSpam = step.decide({
 `model` is optional. A step without one uses `decisionModel` from the harness config:
 
 ```ts
-import { AgentHarness, step } from '@noetic-tools/core';
+import { AgentHarness, decide } from '@noetic-tools/core';
 
 const harness = new AgentHarness({
   name: 'support',
@@ -253,7 +253,7 @@ const harness = new AgentHarness({
   decisionModel: 'typesafe/jev-1.14',
 });
 
-const triage = step.decide({
+const triage = decide({
   id: 'triage',
   questions: {
     isUrgent: {
@@ -280,11 +280,11 @@ const triage = step.decide({
 | `samples` | `number` | No | Runs to average on the estimated path. Positive integer. Default `1` |
 | `emit` | `boolean \| (eventType, data) => boolean` | No | Controls framework event emission for this step |
 
-`step.decide()` returns a `DecideStep`, which keeps the literal question map so `step.routeSwitch` can infer the questions, choices, and levels.
+`decide()` returns a `DecideStep`, which keeps the literal question map so `routeSwitch` can infer the questions, choices, and levels.
 
 ## Errors
 
-`step.decide()` checks its options when you build the step and throws `NoeticConfigError`:
+`decide()` checks its options when you build the step and throws `NoeticConfigError`:
 
 | Code | Condition |
 | --- | --- |
@@ -298,8 +298,8 @@ At run time:
 | Condition | Error |
 | --- | --- |
 | No model on the step or the harness | `NoeticConfigError` `MISSING_MODEL` |
-| Malformed or incomplete response (a question unanswered, an unknown choice or level, a probability outside `[0, 1]`) | `NoeticError` `llm_parse_error` |
-| Provider rate limit | `NoeticError` `llm_rate_limit` |
+| Malformed or incomplete response (a question unanswered, an unknown choice or level, a probability outside `[0, 1]`) | `NoeticError` `model_parse_error` |
+| Provider rate limit | `NoeticError` `model_rate_limit` |
 | Provider rejects the request (for example, images sent to a text-only model) | `NoeticError` `step_failed` |
 | Context aborted mid-call | `NoeticError` `cancelled` |
 
@@ -311,7 +311,7 @@ Each decide step opens a `decide.call` span with the step id, `gen_ai.request.mo
 
 ## Related
 
-- [step.routeSwitch](/docs/framework/operators/route-switch) -- route to a step by a decision.
+- [routeSwitch](/docs/framework/operators/route-switch) -- route to a step by a decision.
 - [Decisions History](/docs/framework/context-layers/decisions-history) -- keep decisions in context for later steps.
 - [Semantic Conditions](/docs/framework/operators/conditions) -- `aiCondition` is a one-question boolean decide.
-- [step.llm](/docs/framework/steps/llm) -- when you want text or tool calls instead of a value.
+- [callModel](/docs/framework/steps/call-model) -- when you want text or tool calls instead of a value.

@@ -138,7 +138,14 @@ export function trackUsage(ctx: Context, response: LLMResponse): void {
   ctx.tokens.input += response.usage.inputTokens;
   ctx.tokens.output += response.usage.outputTokens;
   ctx.tokens.total += response.usage.inputTokens + response.usage.outputTokens;
-  ctx.tokens.cached = (ctx.tokens.cached ?? 0) + (response.usage.cachedTokens ?? 0);
+  // Only write `cached` when the response actually carried a figure. Defaulting
+  // a missing report to 0 would erase the `RoundUsage` invariant that
+  // `undefined` means "this provider says nothing about caching" — callers that
+  // steer on cache behaviour could no longer tell that from "nothing was
+  // cached". Mirrors the child→parent merge in execute-action.
+  if (response.usage.cachedTokens !== undefined) {
+    ctx.tokens.cached = (ctx.tokens.cached ?? 0) + response.usage.cachedTokens;
+  }
   if (response.cost) {
     ctx.cost = ctx.cost + response.cost;
   }

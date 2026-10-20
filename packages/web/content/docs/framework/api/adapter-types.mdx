@@ -13,7 +13,7 @@ type EmbedFn = (texts: readonly string[]) => Promise<readonly number[][]>;
 
 ## LlmProviderConfig
 
-Configuration for the LLM provider, passed to `AgentHarness` via the `llm` option.
+Configuration for the LLM provider, passed to `AgentHarness` via the `callModelDefaults` option.
 
 ```ts validate=none
 interface LlmProviderConfig {
@@ -49,17 +49,17 @@ const embed = createOpenRouterEmbed(process.env.OPENROUTER_API_KEY);
 ### Usage with Semantic Routing
 
 ```ts
-import { branch, createOpenRouterEmbed, semanticSwitch, step } from '@noetic-tools/core';
+import { callModel, conditional, createOpenRouterEmbed, semanticSwitch } from '@noetic-tools/core';
 
 const embed = createOpenRouterEmbed(process.env.OPENROUTER_API_KEY);
 
-const router = branch({
+const router = conditional({
   id: 'semantic-router',
   route: semanticSwitch({
     embed,
     cases: {
-      'greeting or salutation': step.llm({ id: 'greet', model: 'openai/gpt-4o-mini' }),
-      'technical question': step.llm({ id: 'tech', model: 'openai/gpt-4o' }),
+      'greeting or salutation': callModel({ id: 'greet', model: 'openai/gpt-4o-mini' }),
+      'technical question': callModel({ id: 'tech', model: 'openai/gpt-4o' }),
     },
     threshold: 0.7,
   }),

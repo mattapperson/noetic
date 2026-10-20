@@ -6,7 +6,7 @@ import type {
   StepSubprocessRequest,
   SubprocessAdapter,
 } from '@noetic-tools/types';
-import { DetachedHandleImpl } from '../runtime/detached-handle';
+import { DetachedHandleImpl } from '../util/detached-handle';
 import { executeNoAdapter } from './execute';
 
 //#region Adapter resolution
@@ -15,7 +15,7 @@ import { executeNoAdapter } from './execute';
  * Resolve the subprocess adapter used for a given step dispatch.
  *
  * Precedence: `detachedSpawn-overrides.subprocess ?? step.subprocess ??
- * harness.subprocess`. Only `StepRun` and `StepSpawn` currently carry a
+ * harness.subprocess`. Only `StepRunCode` and `StepSpawn` currently carry a
  * `subprocess` field — other variants always fall through to the harness
  * default.
  *
@@ -29,7 +29,7 @@ export function resolveStepAdapter<TContext, I, O>(
   if (callOverride) {
     return callOverride;
   }
-  if ((step.kind === 'run' || step.kind === 'spawn') && step.subprocess) {
+  if ((step.kind === 'runCode' || step.kind === 'spawn') && step.subprocess) {
     return step.subprocess;
   }
   return fallback;

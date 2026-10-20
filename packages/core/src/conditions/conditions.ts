@@ -139,7 +139,7 @@ function isOtherwise<TContext, I, O>(
  *
  * @public
  * @param clauses - Ordered `WhenClause` and optional trailing `OtherwiseClause`.
- * @returns A route function suitable for `branch({ route })`.
+ * @returns A route function suitable for `conditional({ route })`.
  */
 export function semanticRoute<TContext = ContextData, I = unknown, O = unknown>(
   ...clauses: Clause<TContext, I, O>[]
@@ -186,7 +186,7 @@ interface SemanticSwitchAdvanced<TContext, I, O> {
  *
  * @public
  * @param opts - Simple form with `Record<string, Step>` cases, or advanced form with multi-label cases.
- * @returns A route function suitable for `branch({ route })`.
+ * @returns A route function suitable for `conditional({ route })`.
  */
 export function semanticSwitch<TContext = ContextData, I = unknown, O = unknown>(
   opts: SemanticSwitchSimple<TContext, I, O>,
@@ -405,7 +405,7 @@ export function allCondition<I>(...conditions: Condition<I>[]): Condition<I> {
  * @param opts.prompt - The yes/no question.
  * @param opts.threshold - Probability of yes at or above which the condition holds. Default 0.5.
  * @returns A `Condition` that is true when the model answers yes. A refusal counts as no.
- * @throws `NoeticError` `llm_parse_error` when the response is not a boolean answer.
+ * @throws `NoeticError` `model_parse_error` when the response is not a boolean answer.
  */
 export function aiCondition<I>(opts: {
   model: string;
@@ -442,7 +442,7 @@ export function aiCondition<I>(opts: {
     const parsed = AiConditionAnswerSchema.safeParse(answer);
     if (!parsed.success) {
       throw new NoeticErrorImpl({
-        kind: 'llm_parse_error',
+        kind: 'model_parse_error',
         stepId: 'aiCondition',
         raw: JSON.stringify(answer),
         schema: AiConditionAnswerSchema,
@@ -478,7 +478,7 @@ async function askDecide(
         });
       }
       throw new NoeticErrorImpl({
-        kind: 'llm_parse_error',
+        kind: 'model_parse_error',
         stepId: 'aiCondition',
         raw: e.raw,
         schema: e.schema,

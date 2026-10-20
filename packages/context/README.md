@@ -11,9 +11,8 @@ provides:
 - The **lifecycle, budget, and projection machinery** that converges layer
   outputs into the assembled LLM context (`assembleView`, `allocateBudgets`,
   layer state stores, scoping).
-- The **built-in layers**: working memory, history window, observational
-  context, plan, temporal, steering, file reference, static content, durable
-  task state, and the tool context layer.
+- The **built-in layers**: instructions, history, scratchpad, observations,
+  temporal, filesystem, plan, task state, tool calls, and steering.
 
 It depends only on [`@noetic-tools/types`](https://www.npmjs.com/package/@noetic-tools/types).
 [`@noetic-tools/core`](https://www.npmjs.com/package/@noetic-tools/core) builds

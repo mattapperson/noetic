@@ -19,7 +19,7 @@ describe('AgentHarness memory', () => {
       });
       const harness = new AgentHarness({
         name: 'test',
-        context: [
+        contextLayers: [
           layer,
         ],
         params: {},
@@ -43,7 +43,7 @@ describe('AgentHarness memory', () => {
       });
       const harness = new AgentHarness({
         name: 'test',
-        context: [
+        contextLayers: [
           harnessLayer,
         ],
         params: {},
@@ -53,7 +53,7 @@ describe('AgentHarness memory', () => {
       });
 
       const ctx = harness.createContext({
-        context: [
+        contextLayers: [
           callLayer,
         ],
       });
@@ -132,7 +132,7 @@ describe('AgentHarness memory', () => {
       };
       const harness = new AgentHarness({
         name: 'test',
-        context: [
+        contextLayers: [
           layer,
         ],
         params: {},
@@ -165,7 +165,7 @@ describe('AgentHarness memory', () => {
       expect(second.id).toBe('h1');
     });
 
-    it('includes recall output from init-bearing layers (staticContent shape)', async () => {
+    it('includes recall output from init-bearing layers (instructions shape)', async () => {
       // Regression: preview must run layer `init` on its throwaway context —
       // without it the recall lifecycle treats every init-bearing layer as
       // disabled and the preview silently degenerates to bare history. All
@@ -200,7 +200,7 @@ describe('AgentHarness memory', () => {
       };
       const harness = new AgentHarness({
         name: 'test',
-        memory: [
+        contextLayers: [
           layer,
         ],
         params: {},
@@ -271,7 +271,7 @@ describe('AgentHarness memory', () => {
       };
       const harness = new AgentHarness({
         name: 'test',
-        context: [
+        contextLayers: [
           failingLayer,
         ],
         params: {},
@@ -297,15 +297,15 @@ describe('AgentHarness memory', () => {
 
       const harness = new AgentHarness({
         name: 'test',
-        initialStep: {
-          kind: 'run',
+        agentGraph: {
+          kind: 'runCode',
           id: 'capture',
           execute: async (_input, ctx) => {
             contextLayers = ctx.layers;
             return 'done';
           },
         },
-        context: [
+        contextLayers: [
           layer,
         ],
         params: {},

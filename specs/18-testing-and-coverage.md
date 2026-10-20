@@ -29,22 +29,46 @@ Four tiers with explicit scope constraints:
 
 The functional tier has two distinct sub-concerns that must both be present:
 
-- **Composition tests** — assert that builder outputs produce the expected step tree structure (e.g., `react()` creates a loop step with tool-call branches). Cheaper, catches builder bugs without running the interpreter.
+- **Composition tests** — assert that builder outputs produce the expected step tree structure (e.g., a ReAct composition is a `loop` whose only child is a `callModel` step). Cheaper, catches builder bugs without running the interpreter.
 - **Execution tests** — run the full tree through `AgentHarness` with a scripted model.
 
 AI-generated tests tend to produce only execution tests. Both are required.
 
 ```typescript
-// Composition test example
-const step = react({ model: 'gpt-4o', tools: [searchTool] });
-assert.equal(step.kind, 'loop');
-assert.equal(step.body.kind, 'llm');
+// The composition under test. Patterns live in application code
+// (see `13-patterns`) — core ships no pattern builders.
+const step = loop<ContextData, string, string>({
+  id: 'react-loop',
+  steps: [
+    callModel<ContextData, string, string>({
+      id: 'react-step',
+      model: 'gpt-4o',
+      tools: [searchTool],
+    }),
+  ],
+  until: until.noToolCalls(),
+});
 
-// Execution test example
-const harness = new AgentHarness();
-const ctx = await harness.run(step, input);
-assert.equal(ctx.output, expectedOutput);
+// Composition test example — tree shape only, interpreter never runs
+assert.equal(step.kind, 'loop');
+assert.equal(step.steps[0].kind, 'callModel');
+
+// Execution test example — scripted model through the real interpreter
+const harness = new AgentHarness({
+  name: 'react-functional',
+  agentGraph: step,
+  params: {},
+  _testCallModel: createScriptedCallModel(script),
+});
+const ctx = harness.createContext();
+const output = await harness.run(step, input, ctx);
+assert.equal(output, expectedOutput);
+assert.ok(ctx.itemLog.items.length > 0);
 ```
+
+`run` returns the step's output `O`, not a Context — the Context is created up
+front with `createContext()` and inspected afterwards for side effects
+(`itemLog.items`, `tokens`, `cost`, `lastStepMeta`).
 
 ---
 
@@ -70,7 +94,7 @@ lines: 75
 functions: 75
 ```
 
-> **Invariant**: Branches are set HIGHER than lines/functions for this codebase. The error model (10 kinds × propagation rules), loop control flow (`onError: retry/skip/abort`), and fork modes are where runtime bugs hide. The industry standard of "branch lower than lines" is inverted here intentionally.
+> **Invariant**: Branches are set HIGHER than lines/functions for this codebase. The error model (10 kinds × propagation rules), loop control flow (`onError: retry/skip/abort`), and inParallel modes are where runtime bugs hide. The industry standard of "branch lower than lines" is inverted here intentionally.
 
 ### Coverage Exclusions
 

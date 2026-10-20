@@ -17,8 +17,9 @@ import {
   isNoeticError,
 } from '@noetic-tools/types';
 import { z } from 'zod';
-import { fork } from '../../src/builders/control-flow-builders';
-import { step } from '../../src/builders/step-builders';
+import { inParallel } from '../../src/builders/control-flow-builders';
+import { decide } from '../../src/builders/decide-builders';
+import { runCode } from '../../src/builders/step-builders';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { execute } from '../../src/interpreter/execute';
 import { isMutableContext } from '../../src/interpreter/typeguards';
@@ -82,7 +83,7 @@ function harnessWith(opts: {
   const harness = new AgentHarness({
     name: 'decide-test',
     params: {},
-    context: opts.context,
+    contextLayers: opts.context,
     decisionModel: opts.decisionModel,
     _testCallModel: async () => {
       throw new Error('decide must not call the chat model');
@@ -140,7 +141,7 @@ describe('executeDecide', () => {
   it('returns typed answers and records usage and decision metadata without touching the item log', async () => {
     const { harness } = harnessWith({});
     const ctx = harness.createContext();
-    const triage = step.decide({
+    const triage = decide({
       id: 'triage',
       model: 'typesafe/jev-1.14',
       questions: QUESTIONS,
@@ -167,7 +168,7 @@ describe('executeDecide', () => {
     const { harness, requests } = harnessWith({});
     const ctx = harness.createContext();
     await harness.run(
-      step.decide({
+      decide({
         id: 'triage',
         model: 'typesafe/jev-1.14',
         instructions: 'Ticket triage.',
@@ -203,7 +204,7 @@ describe('executeDecide', () => {
   it('sends a non-string input as JSON state', async () => {
     const { harness, requests } = harnessWith({});
     const ctx = harness.createContext();
-    const decideOnObject = step.decide({
+    const decideOnObject = decide({
       id: 'triage',
       model: 'm/x',
       view: 'none',
@@ -236,7 +237,7 @@ describe('executeDecide', () => {
       const ctx = harness.createContext();
       ctx.itemLog.append(createMessage('my invoice is wrong', 'user'));
       await harness.run(
-        step.decide({
+        decide({
           id: `triage-${view}`,
           model: 'm/x',
           view,
@@ -265,7 +266,7 @@ describe('executeDecide', () => {
       ],
     });
     const ctx = harness.createContext();
-    const decideTwice = step.decide({
+    const decideTwice = decide({
       id: 'triage',
       model: 'm/x',
       view: 'layers',
@@ -296,7 +297,7 @@ describe('executeDecide', () => {
       decisionModel: 'typesafe/jev-latest',
     });
     await harness.run(
-      step.decide({
+      decide({
         id: 'triage',
         questions: QUESTIONS,
       }),
@@ -310,7 +311,7 @@ describe('executeDecide', () => {
     const { harness } = harnessWith({});
     try {
       await harness.run(
-        step.decide({
+        decide({
           id: 'triage',
           questions: QUESTIONS,
         }),
@@ -324,7 +325,7 @@ describe('executeDecide', () => {
     }
   });
 
-  it('throws llm_parse_error when an answer names an unknown choice', async () => {
+  it('throws model_parse_error when an answer names an unknown choice', async () => {
     const { harness } = harnessWith({
       respond: async () => {
         const response = answered();
@@ -346,7 +347,7 @@ describe('executeDecide', () => {
     });
     try {
       await harness.run(
-        step.decide({
+        decide({
           id: 'triage',
           model: 'm/x',
           questions: QUESTIONS,
@@ -357,11 +358,11 @@ describe('executeDecide', () => {
       expect.unreachable();
     } catch (e) {
       assert(isNoeticError(e));
-      expect(e.noeticError.kind).toBe('llm_parse_error');
+      expect(e.noeticError.kind).toBe('model_parse_error');
     }
   });
 
-  it('throws llm_parse_error when a question goes unanswered', async () => {
+  it('throws model_parse_error when a question goes unanswered', async () => {
     const { harness } = harnessWith({
       respond: async () =>
         answered({
@@ -376,7 +377,7 @@ describe('executeDecide', () => {
     });
     try {
       await harness.run(
-        step.decide({
+        decide({
           id: 'triage',
           model: 'm/x',
           questions: QUESTIONS,
@@ -387,11 +388,11 @@ describe('executeDecide', () => {
       expect.unreachable();
     } catch (e) {
       assert(isNoeticError(e));
-      expect(e.noeticError.kind).toBe('llm_parse_error');
+      expect(e.noeticError.kind).toBe('model_parse_error');
     }
   });
 
-  it('maps a provider 429 to llm_rate_limit and other provider errors to step_failed', async () => {
+  it('maps a provider 429 to model_rate_limit and other provider errors to step_failed', async () => {
     const cases: Array<
       [
         Error,
@@ -402,7 +403,7 @@ describe('executeDecide', () => {
         Object.assign(new Error('slow down'), {
           statusCode: 429,
         }),
-        'llm_rate_limit',
+        'model_rate_limit',
       ],
       [
         Object.assign(new Error('text-only model got an image'), {
@@ -419,7 +420,7 @@ describe('executeDecide', () => {
       });
       try {
         await harness.run(
-          step.decide({
+          decide({
             id: 'triage',
             model: 'm/x',
             questions: QUESTIONS,
@@ -452,7 +453,7 @@ describe('executeDecide', () => {
     });
     const ctx = harness.createContext();
     const answers = await harness.run(
-      step.decide({
+      decide({
         id: 'triage',
         model: 'm/x',
         questions: QUESTIONS,
@@ -474,7 +475,7 @@ describe('executeDecide', () => {
     });
     const ctx = harness.createContext();
     await harness.run(
-      step.decide({
+      decide({
         id: 'triage',
         model: 'm/x',
         questions: QUESTIONS,
@@ -483,7 +484,7 @@ describe('executeDecide', () => {
       ctx,
     );
     const read = await harness.run(
-      step.run({
+      runCode({
         id: 'read-history',
         execute: async (_input: string, c) => {
           const history = c.context.decisionsHistory;
@@ -516,7 +517,7 @@ describe('executeDecide — review fixes', () => {
       },
     ] as const;
     await harness.run(
-      step.run({
+      runCode({
         id: 'pretend-llm',
         execute: async (_i: string, c) => {
           assert(isMutableContext(c));
@@ -530,7 +531,7 @@ describe('executeDecide — review fixes', () => {
       ctx,
     );
     await harness.run(
-      step.decide({
+      decide({
         id: 'triage',
         model: 'm/x',
         questions: QUESTIONS,
@@ -575,7 +576,7 @@ describe('executeDecide — review fixes', () => {
     const ctx = harness.createContext();
     try {
       await harness.run(
-        step.decide({
+        decide({
           id: 'triage',
           model: 'openai/gpt-4o-mini',
           questions: QUESTIONS,
@@ -586,7 +587,7 @@ describe('executeDecide — review fixes', () => {
       expect.unreachable();
     } catch (e) {
       assert(isNoeticError(e));
-      expect(e.noeticError.kind).toBe('llm_parse_error');
+      expect(e.noeticError.kind).toBe('model_parse_error');
     }
     expect(ctx.tokens.input).toBe(30);
     expect(ctx.cost).toBeCloseTo(0.002);
@@ -596,7 +597,7 @@ describe('executeDecide — review fixes', () => {
   it('reuses answers for the same input until the conversation grows', async () => {
     const { harness, requests } = harnessWith({});
     const ctx = harness.createContext();
-    const triage = step.decide({
+    const triage = decide({
       id: 'triage',
       model: 'm/x',
       questions: QUESTIONS,
@@ -621,7 +622,7 @@ describe('executeDecide — review fixes', () => {
     });
     const ctx = harness.createContext();
     await harness.run(
-      step.run({
+      runCode({
         id: 'init-layers',
         execute: async (i: string) => i,
       }),
@@ -640,7 +641,7 @@ describe('executeDecide — review fixes', () => {
       guidance: 'be careful',
     });
     await harness.run(
-      step.decide({
+      decide({
         id: 'triage',
         model: 'm/x',
         questions: QUESTIONS,
@@ -664,13 +665,13 @@ describe('executeDecide — review fixes', () => {
     });
     const ctx = harness.createContext();
     const decideIn = (id: string) =>
-      step.decide({
+      decide({
         id,
         model: 'm/x',
         questions: QUESTIONS,
       });
     await harness.run(
-      fork({
+      inParallel({
         id: 'both',
         mode: 'all',
         paths: () => [
@@ -683,7 +684,7 @@ describe('executeDecide — review fixes', () => {
       ctx,
     );
     const ids = await harness.run(
-      step.run({
+      runCode({
         id: 'read',
         execute: async (_i: string, c) =>
           frameworkCast<DecisionRecord[]>(c.context.decisionsHistory?.all ?? [])
@@ -707,7 +708,7 @@ describe('executeDecide — review fixes', () => {
         _broadcaster: broadcaster,
       });
       await execute(
-        step.decide({
+        decide({
           id: 'quiet',
           model: 'm/x',
           emit,

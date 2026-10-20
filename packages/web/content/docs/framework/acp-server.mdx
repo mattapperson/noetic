@@ -1,0 +1,211 @@
+---
+title: Serving an Agent over ACP
+description: Expose a Noetic harness as an Agent Client Protocol agent, so editors like Zed can drive it.
+---
+
+## Quick Example
+
+[ACP Agent Steps](/docs/framework/acp-agents) puts Noetic on the client side of the [Agent Client Protocol](https://agentclientprotocol.com/): a step drives an external coding agent. This page is the same protocol pointed the other way — **your harness is the agent**, and any ACP client (Zed, another editor, even another Noetic harness) drives it.
+
+```ts
+import { AgentHarness } from '@noetic-tools/core';
+import { serveAcp } from '@noetic-tools/acp/server';
+
+declare const harness: AgentHarness<Record<string, never>>;
+
+await serveAcp(harness).closed;
+```
+
+`serveAcp` binds the harness to the current process's stdin/stdout — the inverse of the `./stdio` transport, which spawns a child and binds to *its* stdio. Point Zed at the script and it works:
+
+```json
+{
+  "agent_servers": {
+    "My Noetic Agent": { "command": "bun", "args": ["my-agent.ts"] }
+  }
+}
+```
+
+The returned handle is `{ closed, close() }`: `closed` resolves when the client disconnects, and `close()` cancels every live session first. One harness definition serves chat platforms through [chat-sdk](/docs/framework/chat-sdk), generative UI through [OpenUI](/docs/framework/generative-ui), and ACP editors through this page — without changing the agent itself.
+
+## Sessions
+
+Each `session/new` from the client becomes a harness thread: the minted session id is used verbatim as the `threadId`, so per-session conversation state is ordinary harness session state. A single harness is shared across sessions by default.
+
+Because `cwd` and platform adapters are constructor-level on `AgentHarness`, per-session isolation is a factory — called once per session with the session's context:
+
+```ts
+import { AgentHarness, type Step, type ContextData } from '@noetic-tools/core';
+import { serveAcp } from '@noetic-tools/acp/server';
+
+declare const agentGraph: Step<ContextData, string, string>;
+
+serveAcp((session) =>
+  new AgentHarness({
+    name: 'my-agent',
+    agentGraph,
+    params: {},
+    initialCwd: session.cwd,
+    environment: { fs: session.client.fs, shell: session.client.shell },
+  }),
+);
+```
+
+`session.client.fs` and `session.client.shell` are `FsAdapter`/`ShellAdapter` implementations backed by the **ACP client's own** `fs/*` and `terminal/*` methods. Wire them into `environment` and the harness reads files through the editor — seeing unsaved buffer state, not what happens to be on disk — and runs shell commands in editor-owned terminals the user can watch.
+
+They are honest about their limits: operations the wire cannot express (binary writes, `stat`, `readdir`, `rm`, `rename`, terminal `stdin`) and operations the client did not advertise reject with `AcpCapabilityError`. A factory that needs those falls back to a local adapter for them.
+
+## Presenting tools
+
+ACP clients render each tool call with a kind, a title, and affected file locations. Declare the presentation on the tool itself — the same pattern as [tool UI declarations](/docs/framework/generative-ui):
+
+```ts
+import { tool } from '@noetic-tools/core';
+import { z } from 'zod';
+
+const editFile = tool({
+  name: 'edit_file',
+  description: 'Edit a file',
+  input: z.object({ path: z.string(), content: z.string() }),
+  output: z.object({ ok: z.boolean() }),
+  execute: async () => ({ ok: true }),
+  acp: {
+    kind: 'edit',
+    title: (args) => `Edit ${args.path}`,
+    locations: (args) => [args.path],
+  },
+});
+```
+
+Pass the harness's tools to the server so it can read the declarations — the harness contract doesn't expose its tool set:
+
+```ts
+import { serveAcp } from '@noetic-tools/acp/server';
+import type { AcpPresentableTool, AcpServeHarness } from '@noetic-tools/acp';
+
+declare const harness: AcpServeHarness;
+declare const editFile: AcpPresentableTool;
+
+serveAcp(harness, { tools: [editFile] });
+```
+
+An undeclared tool renders as kind `other` with its name as the title. The declaration is presentation only — it never gates anything.
+
+## Permissions
+
+First-party tool calls can be gated by a declarative policy. Calls the policy marks `ask` are forwarded to the editor's user as `session/request_permission`:
+
+```ts
+import { serveAcp } from '@noetic-tools/acp/server';
+import type { AcpServeHarness } from '@noetic-tools/acp';
+
+declare const harness: AcpServeHarness;
+
+serveAcp(harness, {
+  permissions: {
+    default: 'allow',
+    rules: [
+      { kind: 'execute', decision: 'ask' },
+      { tool: 'deploy', decision: 'deny' },
+    ],
+  },
+});
+```
+
+Rules match on tool name or declared ACP kind, checked `deny` → `ask` → `allow` — an explicit refusal beats a required ask, which beats a broad grant. A kind-based rule needs `tools` in the serve options to resolve kinds; configuring one without them is a config error rather than a rule that silently matches nothing. The gate fails closed: if its hook ever throws or times out, the call is denied, never silently approved. The default is **`allow`**, deliberately the opposite of the client direction's `deny`: there, an unattended external agent must not gain approval by omission; here, you curated every tool on the harness and the editor user is supervising work they initiated.
+
+While an ask is pending, the streamed `tool_call` holds status `pending`; a grant moves it to `in_progress`, a rejection surfaces to the model as a tool error and to the editor as a `failed` update. An unanswered ask denies after `askTimeoutMs` (default 5 minutes) — waiting must not become approval. `session/cancel` unwinds every pending ask and the turn resolves with `stopReason: 'cancelled'`.
+
+A host that embeds the server and owns its own approval surface can answer in-process instead of over the wire:
+
+```ts
+import { serveAcp } from '@noetic-tools/acp/server';
+import type { AcpServeHarness } from '@noetic-tools/acp';
+
+declare const harness: AcpServeHarness;
+
+serveAcp(harness, {
+  permissions: { default: 'ask' },
+  onPermissionRequest: async (prompt) => {
+    const approved = prompt.toolName !== 'deploy';
+    return approved ? { decision: 'allow' } : { decision: 'deny', reason: 'blocked by host' };
+  },
+});
+```
+
+## Slash commands
+
+Commands are advertised to the client and routed before the graph runs. A command's `run` return value — a string or `Item[]` — becomes the turn's input; a command without `run` forwards its text unchanged:
+
+```ts
+import { serveAcp } from '@noetic-tools/acp/server';
+import type { AcpServeHarness } from '@noetic-tools/acp';
+
+declare const harness: AcpServeHarness;
+
+serveAcp(harness, {
+  commands: [
+    {
+      name: 'plan',
+      description: 'Plan the work without making edits',
+      run: (argsText) => `Plan only — do not edit files.\n\n${argsText}`,
+    },
+  ],
+});
+```
+
+## Persistence and `session/load`
+
+Providing a two-method history seam advertises the `loadSession` capability. `session/load` seeds the harness with the stored items and replays the conversation to the client; completed items are appended through `save` as they stream, deduplicated by item id:
+
+```ts
+import type { Item } from '@noetic-tools/core';
+import { serveAcp } from '@noetic-tools/acp/server';
+import type { AcpServeHarness } from '@noetic-tools/acp';
+
+declare const harness: AcpServeHarness;
+declare const db: {
+  read(key: string): Promise<Item[] | null>;
+  append(key: string, item: Item): Promise<void>;
+};
+
+serveAcp(harness, {
+  history: {
+    load: (sessionId) => db.read(sessionId),
+    save: (sessionId, item) => db.append(sessionId, item),
+  },
+});
+```
+
+Without `history`, sessions are process-lifetime and `loadSession` is not advertised.
+
+## In-process serving and testing
+
+`serveAcp` is a thin stdio binding over the runtime-neutral `toAcpAgent`, which returns exactly the factory shape `loopbackTransport()` accepts. That composition gives you three things with no extra code:
+
+```ts
+import { customAcpAgent, loopbackTransport, toAcpAgent } from '@noetic-tools/acp';
+import { type ContextData, step } from '@noetic-tools/core';
+import type { AcpServeHarness } from '@noetic-tools/acp';
+
+declare const researchHarness: AcpServeHarness;
+
+// A Noetic harness as a sub-agent of another Noetic harness — in-process,
+// over the real wire protocol.
+const research = step.acpAgent<ContextData, string, string>({
+  id: 'research',
+  agent: customAcpAgent({
+    agentId: 'researcher',
+    transport: loopbackTransport(toAcpAgent(researchHarness)),
+  }),
+  prompt: 'Survey prior art for the change in this diff',
+});
+```
+
+The same loopback pairing is how the server is tested: Noetic's own ACP client drives the served harness over the real protocol, no process spawned. And a served harness whose graph itself contains `step.acpAgent` is an ACP **proxy** — the editor watches a nested Claude Code's tool calls happen three layers down, forwarded with `sub:`-namespaced tool-call ids so they never collide with the harness's own calls.
+
+## Limits
+
+- The server maps the protocol onto the harness's public surface (`execute`, the streams, `seedSessionHistory`, `abort`) and nothing else — a turn run behind the runtime's back would bypass the item log, usage accounting, and durability.
+- MCP servers passed by the client in `session/new` are surfaced on the session init but not yet mounted as tools.
+- Session modes, model selection, and usage reporting await the protocol's second revision; the `history` and `commands` seams are shaped to absorb them.

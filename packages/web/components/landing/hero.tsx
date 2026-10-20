@@ -9,17 +9,17 @@ import { TuiWindow } from '@/components/tui/tui-window';
 import { highlightCode } from '@/lib/syntax-highlight';
 import { CODE_PRE_STYLE, GITHUB_URL } from '@/lib/tui-theme';
 
-const HERO_CODE = `import { AgentHarness, react } from '@noetic-tools/core';
+const HERO_CODE = `import { AgentHarness, any, callModel, loop, until } from '@noetic-tools/core';
 
-const agent = react({
-  model: 'openai/gpt-4o',
-  tools: [searchTool, calcTool],
-  maxSteps: 10,
+const agent = loop({
+  id: 'react-loop',
+  steps: [callModel({ id: 'think', model: 'openai/gpt-4o', tools: [searchTool, calcTool] })],
+  until: any(until.noToolCalls(), until.maxSteps(10)),
 });
 
 const harness = new AgentHarness({
   name: 'researcher',
-  initialStep: agent,
+  agentGraph: agent,
   params: {},
 });
 

@@ -7,7 +7,7 @@
  * `deps.traceExporter` (feeds the Trace tab) — pass both to the harness or
  * those panels go dark.
  *
- * The note tools write through `toolCtx.memory` into the Working Memory
+ * The note tools write through `toolCtx.context` into the scratchpad
  * layer's state — watch its tab light up when a note is saved, and the
  * Context tab render it into the next turn's window.
  *
@@ -16,32 +16,32 @@
 
 import type {
   ContextData,
+  ScratchpadState,
   StorageAdapter,
   TraceExporter,
-  WorkingMemoryContextState,
 } from '@noetic-tools/core';
 import {
   AgentHarness,
-  historyWindow,
-  observationalContext,
-  planContext,
-  staticContent,
-  step,
-  temporalContext,
+  callModel,
+  history,
+  instructions,
+  observations,
+  plan,
+  scratchpad,
+  temporal,
   tool,
-  workingMemoryContext,
 } from '@noetic-tools/core';
 import { z } from 'zod';
 
 //#region Tools
 
-const WORKING_MEMORY_LAYER_ID = 'working-context';
+const SCRATCHPAD_LAYER_ID = 'scratchpad';
 
 const NotesSchema = z.object({
   notes: z.array(z.string()),
 });
 
-function readNotes(state: WorkingMemoryContextState | undefined): string[] {
+function readNotes(state: ScratchpadState | undefined): string[] {
   const parsed = NotesSchema.safeParse(state);
   return parsed.success
     ? [
@@ -53,7 +53,7 @@ function readNotes(state: WorkingMemoryContextState | undefined): string[] {
 const saveNote = tool({
   name: 'save_note',
   description:
-    "Save a short note into working memory. Saved notes render into the agent's context window on every later turn.",
+    "Save a short note into the scratchpad. Saved notes render into the agent's context window on every later turn.",
   input: z.object({
     text: z.string().describe('The note to save.'),
   }),
@@ -62,9 +62,9 @@ const saveNote = tool({
     count: z.number(),
   }),
   async execute({ text }, toolCtx) {
-    const notes = readNotes(toolCtx.memory.get<WorkingMemoryContextState>(WORKING_MEMORY_LAYER_ID));
+    const notes = readNotes(toolCtx.context.get<ScratchpadState>(SCRATCHPAD_LAYER_ID));
     notes.push(text);
-    toolCtx.memory.set<WorkingMemoryContextState>(WORKING_MEMORY_LAYER_ID, {
+    toolCtx.context.set<ScratchpadState>(SCRATCHPAD_LAYER_ID, {
       notes,
     });
     return {
@@ -76,14 +76,14 @@ const saveNote = tool({
 
 const listNotes = tool({
   name: 'list_notes',
-  description: 'List the notes currently held in working memory.',
+  description: 'List the notes currently held in the scratchpad.',
   input: z.object({}),
   output: z.object({
     notes: z.array(z.string()),
   }),
   async execute(_args, toolCtx) {
     return {
-      notes: readNotes(toolCtx.memory.get<WorkingMemoryContextState>(WORKING_MEMORY_LAYER_ID)),
+      notes: readNotes(toolCtx.context.get<ScratchpadState>(SCRATCHPAD_LAYER_ID)),
     };
   },
 });
@@ -98,7 +98,7 @@ const PERSONA = [
   'and list_notes when they ask what you know so far.',
 ].join('\n');
 
-const chat = step.llm<ContextData, string, string>({
+const chat = callModel<ContextData, string, string>({
   id: 'chat',
   model: 'anthropic/claude-sonnet-4.5',
   instructions: PERSONA,
@@ -113,22 +113,26 @@ export function createAgent(deps: { storage: StorageAdapter; traceExporter: Trac
 } {
   const harness = new AgentHarness({
     name: 'inspector-agent',
-    initialStep: chat,
+    agentGraph: chat,
     params: {},
-    storage: deps.storage,
+    environment: {
+      storage: {
+        adapter: deps.storage,
+      },
+    },
     traceExporter: deps.traceExporter,
-    context: [
-      staticContent({
+    contextLayers: [
+      instructions({
         id: 'persona',
         load: async () => PERSONA,
       }),
-      workingMemoryContext(),
-      planContext(),
-      observationalContext(),
-      temporalContext(),
-      historyWindow(),
+      scratchpad(),
+      plan(),
+      observations(),
+      temporal(),
+      history(),
     ],
-    llm: {
+    callModelDefaults: {
       provider: 'openrouter',
     },
   });

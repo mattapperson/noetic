@@ -86,13 +86,13 @@ export const CONTEXT_SNAPSHOT: ContextSnapshot = {
       "color": "cyan"
     },
     {
-      "label": "durable-task-state",
+      "label": "task-state",
       "tokens": "20",
       "pct": 0,
       "color": "cyan"
     },
     {
-      "label": "file-reference",
+      "label": "filesystem",
       "tokens": "0",
       "pct": 0,
       "color": "cyan"
@@ -104,7 +104,7 @@ export const CONTEXT_SNAPSHOT: ContextSnapshot = {
       "color": "cyan"
     },
     {
-      "label": "skills-memory",
+      "label": "skills-context",
       "tokens": "532",
       "pct": 0.3,
       "color": "cyan"
@@ -118,10 +118,10 @@ export const CONTEXT_SNAPSHOT: ContextSnapshot = {
   ],
   "layerIds": [
     "agent-md",
-    "durable-task-state",
-    "file-reference",
+    "task-state",
+    "filesystem",
     "reminder",
-    "skills-memory"
+    "skills-context"
   ]
 } as const;
 

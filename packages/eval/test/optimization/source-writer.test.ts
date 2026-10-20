@@ -561,9 +561,9 @@ describe('AST discovery -> source writer round-trip', () => {
     await fs.writeFile(
       agentPath,
       [
-        "import { step } from '@noetic-tools/core';",
+        "import { callModel } from '@noetic-tools/core';",
         '',
-        'export const agent = step.llm({',
+        'export const agent = callModel({',
         "  id: 'assistant',",
         "  model: 'openai/gpt-4o-mini',",
         "  instructions: 'You are a helpful assistant.',",

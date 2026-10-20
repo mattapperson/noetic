@@ -69,8 +69,8 @@ const DEFAULT_MAX_RECORDS = 50;
 
 /**
  * A context layer that records every `decide` step's answers. Later steps read
- * them through `ctx.context.decisionsHistory.latest[stepId]`, and later `llm`
- * steps see a one-line-per-decision summary in their view. Fork paths and spawn
+ * them through `ctx.context.decisionsHistory.latest[stepId]`, and later `callModel`
+ * steps see a one-line-per-decision summary in their view. inParallel paths and spawn
  * children start with the parent's records and hand their new ones back.
  *
  * @public

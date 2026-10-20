@@ -5,7 +5,7 @@
  * portable surface is exercised independently.
  */
 
-import { AgentHarness, step } from '@noetic-tools/core';
+import { AgentHarness, callModel } from '@noetic-tools/core';
 
 import type { CoreSmokeResult } from './types.js';
 
@@ -22,9 +22,9 @@ export function asNonEmptyString(value: unknown, label: string): string {
   return value.trim();
 }
 
-/** Run a live OpenRouter `step.llm` through the core `AgentHarness`. */
+/** Run a live OpenRouter `callModel` step through the core `AgentHarness`. */
 export async function runCoreSmoke(apiKey: string, model: string): Promise<CoreSmokeResult> {
-  const llmStep = step.llm({
+  const modelStep = callModel({
     id: 'compat-core-ping',
     model,
     instructions: PING_INSTRUCTIONS,
@@ -33,17 +33,17 @@ export async function runCoreSmoke(apiKey: string, model: string): Promise<CoreS
   const harness = new AgentHarness({
     name: 'compat-core-smoke',
     params: {},
-    llm: {
+    callModelDefaults: {
       provider: 'openrouter',
       apiKey,
     },
   });
 
   const ctx = harness.createContext();
-  const result = await harness.run(llmStep, PING_PROMPT, ctx);
+  const result = await harness.run(modelStep, PING_PROMPT, ctx);
 
   return {
-    reply: asNonEmptyString(result, 'core step.llm'),
+    reply: asNonEmptyString(result, 'core callModel'),
     inputTokens: ctx.tokens.input,
     outputTokens: ctx.tokens.output,
   };

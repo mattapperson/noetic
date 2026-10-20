@@ -1,24 +1,24 @@
 import { describe, expect, it } from 'bun:test';
 import type { ContextData } from '@noetic-tools/context';
-import type { Context, StepBranch } from '@noetic-tools/types';
-import { executeBranch } from '../../src/interpreter/execute-control';
+import type { Context, StepConditional } from '@noetic-tools/types';
+import { executeConditional } from '../../src/interpreter/execute-control';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import { makeMockHarness, simpleExecute } from '../_helpers';
 
-describe('executeBranch', () => {
+describe('executeConditional', () => {
   it('route selects a step and executes it', async () => {
-    const step: StepBranch<ContextData, string, string> = {
-      kind: 'branch',
+    const step: StepConditional<ContextData, string, string> = {
+      kind: 'conditional',
       id: 'test',
       route: (input) =>
         input === 'a'
           ? {
-              kind: 'run',
+              kind: 'runCode',
               id: 'path-a',
               execute: async () => 'chose A',
             }
           : {
-              kind: 'run',
+              kind: 'runCode',
               id: 'path-b',
               execute: async () => 'chose B',
             },
@@ -26,17 +26,17 @@ describe('executeBranch', () => {
     const ctx = new ContextImpl({
       harness: makeMockHarness(),
     });
-    expect(await executeBranch(step, 'a', ctx, simpleExecute)).toBe('chose A');
-    expect(await executeBranch(step, 'b', ctx, simpleExecute)).toBe('chose B');
+    expect(await executeConditional(step, 'a', ctx, simpleExecute)).toBe('chose A');
+    expect(await executeConditional(step, 'b', ctx, simpleExecute)).toBe('chose B');
   });
 
   it('null route is no-op, returns input', async () => {
-    const step: StepBranch<ContextData, string, string> = {
-      kind: 'branch',
+    const step: StepConditional<ContextData, string, string> = {
+      kind: 'conditional',
       id: 'noop',
       route: () => null,
     };
-    const result = await executeBranch(
+    const result = await executeConditional(
       step,
       'passthrough',
       new ContextImpl({
@@ -48,15 +48,15 @@ describe('executeBranch', () => {
   });
 
   it('route function throws — error propagates unwrapped', async () => {
-    const step: StepBranch<ContextData, string, string> = {
-      kind: 'branch',
+    const step: StepConditional<ContextData, string, string> = {
+      kind: 'conditional',
       id: 'throw-test',
       route: () => {
         throw new Error('route exploded');
       },
     };
     await expect(
-      executeBranch(
+      executeConditional(
         step,
         'input',
         new ContextImpl({
@@ -69,13 +69,13 @@ describe('executeBranch', () => {
 
   it('route receives context as second arg', async () => {
     let capturedCtx: Context | undefined;
-    const step: StepBranch<ContextData, string, string> = {
-      kind: 'branch',
+    const step: StepConditional<ContextData, string, string> = {
+      kind: 'conditional',
       id: 'ctx-test',
       route: (_input, ctx) => {
         capturedCtx = ctx;
         return {
-          kind: 'run',
+          kind: 'runCode',
           id: 'inner',
           execute: async () => 'done',
         };
@@ -84,19 +84,19 @@ describe('executeBranch', () => {
     const ctx = new ContextImpl({
       harness: makeMockHarness(),
     });
-    await executeBranch(step, 'test', ctx, simpleExecute);
+    await executeConditional(step, 'test', ctx, simpleExecute);
     expect(capturedCtx).toBe(ctx);
   });
 
   it('async route function is awaited correctly', async () => {
-    const step: StepBranch<ContextData, string, string> = {
-      kind: 'branch',
+    const step: StepConditional<ContextData, string, string> = {
+      kind: 'conditional',
       id: 'async-test',
       route: async (input) => {
         await Promise.resolve();
         return input === 'async'
           ? {
-              kind: 'run',
+              kind: 'runCode',
               id: 'async-path',
               execute: async () => 'async result',
             }
@@ -106,17 +106,17 @@ describe('executeBranch', () => {
     const ctx = new ContextImpl({
       harness: makeMockHarness(),
     });
-    expect(await executeBranch(step, 'async', ctx, simpleExecute)).toBe('async result');
-    expect(await executeBranch(step, 'other', ctx, simpleExecute)).toBe('other');
+    expect(await executeConditional(step, 'async', ctx, simpleExecute)).toBe('async result');
+    expect(await executeConditional(step, 'other', ctx, simpleExecute)).toBe('other');
   });
 
   it('selected step is executed with correct input', async () => {
     let receivedInput = '';
-    const step: StepBranch<ContextData, string, string> = {
-      kind: 'branch',
+    const step: StepConditional<ContextData, string, string> = {
+      kind: 'conditional',
       id: 'input-test',
       route: () => ({
-        kind: 'run',
+        kind: 'runCode',
         id: 'inner',
         execute: async (input: string) => {
           receivedInput = input;
@@ -124,7 +124,7 @@ describe('executeBranch', () => {
         },
       }),
     };
-    await executeBranch(
+    await executeConditional(
       step,
       'my-input',
       new ContextImpl({

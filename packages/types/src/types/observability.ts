@@ -17,7 +17,8 @@ export interface TraceExporter {
 export interface LayerTraceSpan {
   layerId: string;
   hook: 'init' | 'recall' | 'store' | 'onSpawn' | 'onReturn' | 'onComplete' | 'dispose';
-  durationMs: number;
+  /** Duration in milliseconds. */
+  duration: number;
   status: 'ok' | 'error' | 'timeout' | 'skipped';
   budget?: {
     allocated: number;

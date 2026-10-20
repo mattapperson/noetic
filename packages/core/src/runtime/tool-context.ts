@@ -29,8 +29,6 @@ export function buildToolExecutionContext(
     fs: harness.fs,
     shell: harness.shell,
     context: toolContext,
-    // Deprecated alias — same accessor object, not a copy.
-    memory: toolContext,
     assembledView: ctx.itemLog.items,
     lastStepMeta: ctx.lastStepMeta,
     turnContext,

@@ -13,7 +13,7 @@ describe('async delegate demo', () => {
     expect(agent.id).toBe('async-delegate-loop');
     expect(agent.inbox).toBe(agentInbox);
     expect(agent.parkTimeout).toBe(5e3);
-    expect(agent.steps[0].kind).toBe('llm');
+    expect(agent.steps[0].kind).toBe('callModel');
   });
 
   it('agent launches sub-agent, continues, and receives result via inbox', async () => {

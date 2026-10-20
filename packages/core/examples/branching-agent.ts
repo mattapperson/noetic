@@ -1,21 +1,21 @@
 /**
  * Branching Support Ticket Router
  *
- * Demonstrates: branch + step.run + step.llm + loop
+ * Demonstrates: conditional + runCode + callModel + loop
  *
  * Classifies incoming support tickets by keyword and routes them:
- * - Billing keywords → deterministic step.run response
- * - Technical keywords → step.llm for reasoning
- * - Everything else → step.run fallback
+ * - Billing keywords → deterministic runCode response
+ * - Technical keywords → callModel for reasoning
+ * - Everything else → runCode fallback
  *
- * Wrapped in loop({ until: until.maxSteps(1) }) to show branch inside a loop body.
+ * Wrapped in loop({ until: until.maxSteps(1) }) to show conditional inside a loop body.
  */
 
 import type { ContextData } from '@noetic-tools/context';
 import type { StepLoop } from '@noetic-tools/types';
-import { branch } from '../src/builders/control-flow-builders';
+import { conditional } from '../src/builders/control-flow-builders';
 import { loop } from '../src/builders/loop-builder';
-import { step } from '../src/builders/step-builders';
+import { callModel, runCode } from '../src/builders/step-builders';
 import { until } from '../src/until/predicates';
 
 //#region Keyword Sets
@@ -47,7 +47,7 @@ function containsKeyword(input: string, keywords: readonly string[]): boolean {
   return keywords.some((keyword) => lower.includes(keyword));
 }
 
-const billingHandler = step.run<ContextData, string, string>({
+const billingHandler = runCode<ContextData, string, string>({
   id: 'billing-handler',
   execute: async (input) => {
     return [
@@ -61,7 +61,7 @@ const billingHandler = step.run<ContextData, string, string>({
   },
 });
 
-const technicalHandler = step.llm<ContextData, string, string>({
+const technicalHandler = callModel<ContextData, string, string>({
   id: 'technical-handler',
   model: 'openai/gpt-4o',
   instructions: [
@@ -71,7 +71,7 @@ const technicalHandler = step.llm<ContextData, string, string>({
   ].join(' '),
 });
 
-const fallbackHandler = step.run<ContextData, string, string>({
+const fallbackHandler = runCode<ContextData, string, string>({
   id: 'fallback-handler',
   execute: async (input) => {
     return [
@@ -88,9 +88,9 @@ const fallbackHandler = step.run<ContextData, string, string>({
 
 //#region Agent Builder
 
-/** Builds a support ticket router using branch + loop. */
+/** Builds a support ticket router using conditional + loop. */
 export function buildBranchingAgent(): StepLoop<ContextData, string, string> {
-  const router = branch<ContextData, string, string>({
+  const router = conditional<ContextData, string, string>({
     id: 'ticket-router',
     route: (input) => {
       if (containsKeyword(input, BILLING_KEYWORDS)) {

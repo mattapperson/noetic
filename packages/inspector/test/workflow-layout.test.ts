@@ -15,9 +15,9 @@ function doc(root: WorkflowNode): WorkflowDocument {
   };
 }
 
-function llm(id: string): WorkflowNode {
+function callModel(id: string): WorkflowNode {
   return {
-    kind: 'llm',
+    kind: 'callModel',
     id,
     instructions: 'do the thing',
   };
@@ -33,8 +33,8 @@ const CHAIN = doc({
   kind: 'sequence',
   id: 'seq',
   steps: [
-    llm('a'),
-    llm('b'),
+    callModel('a'),
+    callModel('b'),
   ],
 });
 
@@ -59,7 +59,7 @@ describe('layoutFlow', () => {
       doc({
         kind: 'loop',
         id: 'gate',
-        body: llm('work'),
+        body: callModel('work'),
         until: {
           kind: 'noToolCalls',
         },
@@ -103,9 +103,9 @@ describe('layoutFlow', () => {
   it('sizes a node by the content it has to show', () => {
     const bare: GraphNode = {
       id: 'bare',
-      kind: 'llm',
+      kind: 'callModel',
       shape: 'step',
-      title: 'llm',
+      title: 'callModel',
       chips: [],
     };
     const full = {

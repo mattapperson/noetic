@@ -1,7 +1,6 @@
 'use client';
 
 import { motion } from 'motion/react';
-import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { SectionHeader } from '@/components/landing/section-header';
 import { PatternsIsometricSvg } from '@/components/landing/svgs/patterns-isometric';
@@ -22,7 +21,6 @@ interface PatternCard {
   subtitle: string;
   lines: string;
   primitives: PrimitiveName[];
-  href: string;
 }
 
 const PATTERNS: PatternCard[] = [
@@ -32,10 +30,9 @@ const PATTERNS: PatternCard[] = [
     lines: '~15 lines',
     primitives: [
       'loop',
-      'llm',
-      'tool',
+      'callModel',
+      'invokeTool',
     ],
-    href: '/docs/framework/patterns/react',
   },
   {
     name: 'Ralph Wiggum',
@@ -44,54 +41,39 @@ const PATTERNS: PatternCard[] = [
     primitives: [
       'loop',
       'spawn',
-      'llm',
-      'tool',
+      'callModel',
+      'invokeTool',
     ],
-    href: '/docs/framework/patterns/ralph-wiggum',
   },
   {
     name: 'Task Trees',
     subtitle: 'Parallel sub-agent hierarchies',
     lines: '~40 lines',
     primitives: [
-      'fork',
+      'inParallel',
       'spawn',
-      'llm',
+      'callModel',
     ],
-    href: '/docs/framework/patterns/task-trees',
-  },
-  {
-    name: 'Adaptive Plans',
-    subtitle: 'Dynamic plan rewriting mid-run',
-    lines: '~35 lines',
-    primitives: [
-      'loop',
-      'branch',
-      'llm',
-    ],
-    href: '/docs/framework/patterns/adaptive-plans',
   },
   {
     name: 'Thread Weaving',
     subtitle: 'Interleaved parallel workstreams',
     lines: '~25 lines',
     primitives: [
-      'fork',
-      'llm',
-      'run',
+      'inParallel',
+      'callModel',
+      'runCode',
     ],
-    href: '/docs/framework/patterns/thread-weaving',
   },
   {
     name: 'Dual Agent',
     subtitle: 'Critic + generator collaboration',
     lines: '~20 lines',
     primitives: [
-      'fork',
+      'inParallel',
       'channel',
-      'run',
+      'runCode',
     ],
-    href: '/docs/framework/patterns/dual-agent',
   },
 ];
 
@@ -110,7 +92,11 @@ export function PatternsGrid(): ReactNode {
         }}
       >
         <div>
-          <SectionHeader label="ready to use" title="Batteries included" margin="8px 0 12px" />
+          <SectionHeader
+            label="compose it yourself"
+            title="Patterns are just compositions"
+            margin="8px 0 12px"
+          />
           <p
             style={{
               fontSize: '17px',
@@ -119,7 +105,8 @@ export function PatternsGrid(): ReactNode {
               lineHeight: 1.5,
             }}
           >
-            Common agent patterns built-in for convenience.
+            Common agent patterns in a few lines of the same primitives — no pattern library to
+            learn.
           </p>
           <p
             style={{
@@ -147,76 +134,68 @@ export function PatternsGrid(): ReactNode {
 
       <div className="tui-bento patterns-grid">
         {PATTERNS.map((pattern) => (
-          <Link
+          <motion.div
             key={pattern.name}
-            href={pattern.href}
+            whileHover={HOVER_BG}
             style={{
-              textDecoration: 'none',
-              color: 'inherit',
+              background: 'var(--color-tui-surface)',
+              padding: '32px',
+              height: '100%',
+              transition: 'background 0.1s',
             }}
           >
-            <motion.div
-              whileHover={HOVER_BG}
+            <div
               style={{
-                background: 'var(--color-tui-surface)',
-                padding: '32px',
-                height: '100%',
-                transition: 'background 0.1s',
+                display: 'flex',
+                alignItems: 'baseline',
+                gap: '12px',
+                marginBottom: '12px',
               }}
             >
-              <div
+              <span
                 style={{
-                  display: 'flex',
-                  alignItems: 'baseline',
-                  gap: '12px',
-                  marginBottom: '12px',
+                  fontSize: '18px',
+                  fontWeight: 700,
+                  color: 'var(--color-tui-fg)',
+                  letterSpacing: '-0.01em',
                 }}
               >
-                <span
-                  style={{
-                    fontSize: '18px',
-                    fontWeight: 700,
-                    color: 'var(--color-tui-fg)',
-                    letterSpacing: '-0.01em',
-                  }}
-                >
-                  {pattern.name}
-                </span>
-                <span
-                  style={{
-                    fontSize: '12px',
-                    color: 'var(--color-tui-muted)',
-                    fontWeight: 500,
-                  }}
-                >
-                  {pattern.lines}
-                </span>
-              </div>
-              <p
+                {pattern.name}
+              </span>
+              <span
                 style={{
-                  fontSize: '14px',
-                  color: 'var(--color-tui-secondary)',
-                  margin: '0 0 16px',
-                  lineHeight: 1.5,
+                  fontSize: '12px',
+                  color: 'var(--color-tui-muted)',
+                  fontWeight: 500,
                 }}
               >
-                {pattern.subtitle}
-              </p>
-              <div
-                style={{
-                  display: 'flex',
-                  gap: '6px',
-                  flexWrap: 'wrap',
-                }}
-              >
-                {pattern.primitives.map((p) => (
-                  <TuiBadge key={p} color={getBadgeColor(p)}>
-                    {p}
-                  </TuiBadge>
-                ))}
-              </div>
-            </motion.div>
-          </Link>
+                {pattern.lines}
+              </span>
+            </div>
+            <p
+              style={{
+                fontSize: '14px',
+                color: 'var(--color-tui-secondary)',
+                margin: '0 0 16px',
+                lineHeight: 1.5,
+              }}
+            >
+              {pattern.subtitle}
+            </p>
+            <div
+              style={{
+                display: 'flex',
+                gap: '6px',
+                flexWrap: 'wrap',
+              }}
+            >
+              {pattern.primitives.map((p) => (
+                <TuiBadge key={p} color={getBadgeColor(p)}>
+                  {p}
+                </TuiBadge>
+              ))}
+            </div>
+          </motion.div>
         ))}
       </div>
     </section>

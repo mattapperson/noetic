@@ -27,7 +27,7 @@ Every step variant automatically creates OpenTelemetry-compatible trace spans vi
   loop.verdict: { stop: true, reason: "Verification passed" }
 ```
 
-No user instrumentation needed. The trace tree mirrors the execution tree because every step, fork, spawn, and loop creates a child span from the context.
+No user instrumentation needed. The trace tree mirrors the execution tree because every step, inParallel, spawn, and loop creates a child span from the context.
 
 ---
 
@@ -67,7 +67,7 @@ setTraceExporter(new DatadogExporter({ apiKey: process.env.DD_API_KEY }));
 
 ## GenAI Semantic Conventions
 
-LLM step spans follow OpenTelemetry GenAI semantic conventions:
+callModel step spans follow OpenTelemetry GenAI semantic conventions:
 
 | Attribute | Type | Description |
 |-----------|------|-------------|
@@ -81,7 +81,7 @@ LLM step spans follow OpenTelemetry GenAI semantic conventions:
 
 The two cache attributes are **absent, not zero**, when the provider reports no figures — a consumer must be able to tell "nothing was cached" from "this provider does not say", since the runtime steers re-anchoring on that distinction (spec 11).
 
-Tool step spans include:
+invokeTool step spans include:
 
 | Attribute | Type | Description |
 |-----------|------|-------------|
@@ -94,7 +94,7 @@ The harness emits one `llm.call` span per model call (one per tool round) and on
 
 ## Workflow Run Span
 
-`parseAndRunWorkflow` opens a root `workflow.run` span that carries the static workflow graph — the *potential paths* of the DAG, independent of which branches actually execute. Model and tool spans for the run nest under it, so the trace tree mirrors the declared workflow with the executed path overlaid. The span is exported when the run settles.
+`parseAndRunWorkflow` opens a root `workflow.run` span that carries the static workflow graph — the *potential paths* of the DAG, independent of which routes actually execute. Model and tool spans for the run nest under it, so the trace tree mirrors the declared workflow with the executed path overlaid. The span is exported when the run settles.
 
 | Attribute | Type | Description |
 |-----------|------|-------------|
@@ -108,7 +108,7 @@ The harness emits one `llm.call` span per model call (one per tool round) and on
 
 ## Context Anchoring Attributes
 
-Each LLM step stamps how its view was banded onto the step's span, so an expensive run can be traced back to the layer that keeps invalidating the prompt prefix (spec 11, Prompt-Cache Anchoring). Nothing is stamped when anchoring is switched off.
+Each callModel step stamps how its view was banded onto the step's span, so an expensive run can be traced back to the layer that keeps invalidating the prompt prefix (spec 11, Prompt-Cache Anchoring). Nothing is stamped when anchoring is switched off.
 
 | Attribute | Type | Description |
 |-----------|------|-------------|
@@ -136,7 +136,7 @@ interface LayerTraceSpan {
   /** Which hook was invoked. */
   hook: 'init' | 'recall' | 'store' | 'onSpawn' | 'onReturn' | 'onComplete' | 'dispose';
   /** Wall-clock duration in milliseconds. */
-  durationMs: number;
+  duration: number;
   /** Whether the hook succeeded. */
   status: 'ok' | 'error' | 'timeout' | 'skipped';
   /** For recall: tokens allocated vs. tokens used. */

@@ -4,79 +4,79 @@ import type { Step } from '@noetic-tools/types';
 import { isNoeticConfigError } from '@noetic-tools/types';
 import { z } from 'zod';
 import { channel } from '../../src/builders/channel-builder';
-import { every } from '../../src/builders/every';
+import { schedule } from '../../src/builders/every';
 
 const body: Step<unknown, void, void> = {
-  kind: 'run',
+  kind: 'runCode',
   id: 'tick',
   execute: async (): Promise<void> => {},
 };
 
 describe('every builder', () => {
-  it('constructs a StepEvery with discriminator', () => {
-    const s = every({
+  it('constructs a StepSchedule with discriminator', () => {
+    const s = schedule({
       id: 'tick-every',
       step: body,
-      ms: 100,
+      interval: 100,
     });
-    expect(s.kind).toBe('every');
+    expect(s.kind).toBe('schedule');
     expect(s.id).toBe('tick-every');
     expect(s.step).toBe(body);
-    expect(s.ms).toBe(100);
+    expect(s.interval).toBe(100);
   });
 
   it('default onError is continue', () => {
-    const s = every({
+    const s = schedule({
       id: 'tick-default-onerror',
       step: body,
-      ms: 50,
+      interval: 50,
     });
     expect(s.onError).toBe('continue');
   });
 
   it('default jitter is 0', () => {
-    const s = every({
+    const s = schedule({
       id: 'tick-default-jitter',
       step: body,
-      ms: 50,
+      interval: 50,
     });
     expect(s.jitter).toBe(0);
   });
 
   it('forwards optional fields', () => {
-    const wakeOn = channel('wake', {
+    const inbox = channel('wake', {
       schema: z.string(),
       mode: 'queue',
     });
-    const s = every({
+    const s = schedule({
       id: 'tick-full',
       step: body,
-      ms: 200,
-      wakeOn,
+      interval: 200,
+      inbox,
       onError: 'fail',
       jitter: 25,
     });
-    expect(s.wakeOn).toBe(wakeOn);
+    expect(s.inbox).toBe(inbox);
     expect(s.onError).toBe('fail');
     expect(s.jitter).toBe(25);
   });
 
   it('rejects empty id', () => {
     expect(() =>
-      every({
+      schedule({
         id: '',
         step: body,
-        ms: 100,
+        interval: 100,
       }),
     ).toThrow('non-empty id');
   });
 
   it('rejects whitespace-only id', () => {
     expect(() =>
-      every({
+      schedule({
         id: '   ',
         step: body,
-        ms: 100,
+        interval: 100,
       }),
     ).toThrow('non-empty id');
   });
@@ -84,11 +84,11 @@ describe('every builder', () => {
   it('rejects missing body step', () => {
     let caught: unknown;
     try {
-      every({
+      schedule({
         id: 'tick-missing-body',
         // @ts-expect-error — intentionally passing invalid opts to test runtime validation
         step: undefined,
-        ms: 100,
+        interval: 100,
       });
     } catch (e) {
       caught = e;
@@ -100,10 +100,10 @@ describe('every builder', () => {
   it('rejects negative ms', () => {
     let caught: unknown;
     try {
-      every({
+      schedule({
         id: 'tick-neg-ms',
         step: body,
-        ms: -1,
+        interval: -1,
       });
     } catch (e) {
       caught = e;
@@ -115,10 +115,10 @@ describe('every builder', () => {
   it('rejects non-finite ms (NaN)', () => {
     let caught: unknown;
     try {
-      every({
+      schedule({
         id: 'tick-nan-ms',
         step: body,
-        ms: Number.NaN,
+        interval: Number.NaN,
       });
     } catch (e) {
       caught = e;
@@ -128,21 +128,21 @@ describe('every builder', () => {
   });
 
   it('accepts ms of 0', () => {
-    const s = every({
+    const s = schedule({
       id: 'tick-zero-ms',
       step: body,
-      ms: 0,
+      interval: 0,
     });
-    expect(s.ms).toBe(0);
+    expect(s.interval).toBe(0);
   });
 
   it('rejects negative jitter', () => {
     let caught: unknown;
     try {
-      every({
+      schedule({
         id: 'tick-neg-jitter',
         step: body,
-        ms: 100,
+        interval: 100,
         jitter: -5,
       });
     } catch (e) {
@@ -155,10 +155,10 @@ describe('every builder', () => {
   it('rejects non-finite jitter', () => {
     let caught: unknown;
     try {
-      every({
+      schedule({
         id: 'tick-inf-jitter',
         step: body,
-        ms: 100,
+        interval: 100,
         jitter: Number.POSITIVE_INFINITY,
       });
     } catch (e) {

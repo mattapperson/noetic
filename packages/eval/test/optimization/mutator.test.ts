@@ -1,54 +1,38 @@
 import { describe, expect, test } from 'bun:test';
-import type { Step, SubHarness, SubHarnessKind, SubHarnessSession } from '@noetic-tools/core';
+import type { AcpAgent, Step } from '@noetic-tools/core';
 import { spawn, step } from '@noetic-tools/core';
 import { applyCandidate } from '../../src/optimization/mutator';
 
-function mockSubHarness(kind: SubHarnessKind): SubHarness {
+function mockAcpAgent(agentId: string): AcpAgent {
   return {
-    specificationVersion: 'harness-v1',
-    harnessId: kind,
-    async doStart(): Promise<SubHarnessSession> {
-      return {
-        sessionId: 's',
-        isResume: false,
-        async doPromptTurn() {
-          return {
-            items: [],
-            text: '',
-          };
-        },
-        async doStop() {
-          return {
-            harnessId: kind,
-            sessionId: 's',
-            state: null,
-          };
-        },
-      };
+    specificationVersion: 'acp-v1',
+    agentId,
+    async connect() {
+      throw new Error('the optimizer never connects to an agent');
     },
   };
 }
 
-function getLlmInstructions(s: Step): string | undefined {
-  if (s.kind !== 'llm') {
-    throw new Error(`Expected llm step, got ${s.kind}`);
+function getCallModelInstructions(s: Step): string | undefined {
+  if (s.kind !== 'callModel') {
+    throw new Error(`Expected callModel step, got ${s.kind}`);
   }
   const { instructions } = s;
   if (typeof instructions === 'function') {
     throw new Error(
-      'Expected eager string instructions on llm step, got function-form Lazy getter',
+      'Expected eager string instructions on callModel step, got function-form Lazy getter',
     );
   }
   return instructions;
 }
 
-function getLlmModel(s: Step): string {
-  if (s.kind !== 'llm') {
-    throw new Error(`Expected llm step, got ${s.kind}`);
+function getCallModelModel(s: Step): string {
+  if (s.kind !== 'callModel') {
+    throw new Error(`Expected callModel step, got ${s.kind}`);
   }
   const { model } = s;
   if (typeof model === 'function') {
-    throw new Error('Expected eager string model on llm step, got function-form Lazy getter');
+    throw new Error('Expected eager string model on callModel step, got function-form Lazy getter');
   }
   return model;
 }
@@ -61,45 +45,48 @@ function getSpawnChild(s: Step): Step {
 }
 
 describe('applyCandidate', () => {
-  test('replaces instructions in StepLLM', () => {
-    const llmStep = step.llm({
+  test('replaces instructions in StepCallModel', () => {
+    const callModelStep: Step = {
+      kind: 'callModel',
       id: 'my-llm',
       model: 'test-model',
       instructions: 'Original prompt',
-    });
+    };
 
-    const result = applyCandidate(llmStep, {
+    const result = applyCandidate(callModelStep, {
       'my-llm.instructions': 'Optimized prompt',
     });
 
-    expect(result.kind).toBe('llm');
-    expect(getLlmInstructions(result)).toBe('Optimized prompt');
+    expect(result.kind).toBe('callModel');
+    expect(getCallModelInstructions(result)).toBe('Optimized prompt');
   });
 
   test('does not mutate the original step', () => {
-    const llmStep = step.llm({
+    const callModelStep: Step = {
+      kind: 'callModel',
       id: 'my-llm',
       model: 'test-model',
       instructions: 'Original prompt',
-    });
+    };
 
-    applyCandidate(llmStep, {
+    applyCandidate(callModelStep, {
       'my-llm.instructions': 'Optimized prompt',
     });
 
-    expect(llmStep.instructions).toBe('Original prompt');
+    expect(getCallModelInstructions(callModelStep)).toBe('Original prompt');
   });
 
-  test('replaces instructions in nested StepSpawn > StepLLM', () => {
-    const llmStep = step.llm({
+  test('replaces instructions in nested StepSpawn > StepCallModel', () => {
+    const callModelStep: Step = {
+      kind: 'callModel',
       id: 'inner-llm',
       model: 'test-model',
       instructions: 'Inner original',
-    });
+    };
 
     const spawnStep = spawn({
       id: 'outer-spawn',
-      child: llmStep,
+      child: callModelStep,
     });
 
     const result = applyCandidate(spawnStep, {
@@ -108,90 +95,71 @@ describe('applyCandidate', () => {
 
     expect(result.kind).toBe('spawn');
     const child = getSpawnChild(result);
-    expect(getLlmInstructions(child)).toBe('Inner optimized');
+    expect(getCallModelInstructions(child)).toBe('Inner optimized');
   });
 
   test('preserves fields not in the candidate map', () => {
-    const llmStep = step.llm({
+    const callModelStep: Step = {
+      kind: 'callModel',
       id: 'my-llm',
       model: 'test-model',
       instructions: 'Keep this',
-    });
+    };
 
-    const result = applyCandidate(llmStep, {});
+    const result = applyCandidate(callModelStep, {});
 
-    expect(result.kind).toBe('llm');
-    expect(getLlmInstructions(result)).toBe('Keep this');
-    expect(getLlmModel(result)).toBe('test-model');
+    expect(result.kind).toBe('callModel');
+    expect(getCallModelInstructions(result)).toBe('Keep this');
+    expect(getCallModelModel(result)).toBe('test-model');
   });
 
-  test('clones run step without error', () => {
-    const runStep = step.run({
+  test('clones runCode step without error', () => {
+    const runCodeStep: Step = {
+      kind: 'runCode',
       id: 'my-run',
       execute: async (input: unknown) => input,
-    });
+    };
 
-    const result = applyCandidate(runStep, {});
+    const result = applyCandidate(runCodeStep, {});
 
-    expect(result.kind).toBe('run');
+    expect(result.kind).toBe('runCode');
     expect(result.id).toBe('my-run');
-    expect(result).not.toBe(runStep);
+    expect(result).not.toBe(runCodeStep);
   });
 
-  // Regression: when `main` added sub-harness steps (`claude-code`, `codex`,
-  // `opencode`, `pi`) to the `Step` union, `cloneAndReplace` stopped being
-  // exhaustive and tsc failed with TS2366. At runtime the missing cases also
-  // returned `undefined` for any sub-harness step the optimizer touched.
-  // Lock in the pass-through behavior for all four kinds.
-  describe('sub-harness step kinds (regression)', () => {
-    const SUB_HARNESS_BUILDERS = [
-      {
-        kind: 'claude-code' as const,
-        build: () =>
-          step.claudeCode({
-            id: 'cc',
-            harness: mockSubHarness('claude-code'),
-            prompt: 'do a thing',
-          }),
-      },
-      {
-        kind: 'codex' as const,
-        build: () =>
-          step.codex({
-            id: 'cx',
-            harness: mockSubHarness('codex'),
-            prompt: 'do a thing',
-          }),
-      },
-      {
-        kind: 'opencode' as const,
-        build: () =>
-          step.opencode({
-            id: 'oc',
-            harness: mockSubHarness('opencode'),
-            prompt: 'do a thing',
-          }),
-      },
-      {
-        kind: 'pi' as const,
-        build: () =>
-          step.pi({
-            id: 'pi',
-            harness: mockSubHarness('pi'),
-            prompt: 'do a thing',
-          }),
-      },
-    ];
-
-    for (const { kind, build } of SUB_HARNESS_BUILDERS) {
-      test(`clones ${kind} step without throwing or returning undefined`, () => {
-        const original = build();
-        const result: Step | undefined = applyCandidate(original, {});
-
-        expect(result).toBeDefined();
-        expect(result.kind).toBe(kind);
-        expect(result.id).toBe(original.id);
+  // Regression: adding a step kind to the `Step` union once made
+  // `cloneAndReplace` non-exhaustive — tsc failed with TS2366, and at runtime
+  // the missing case returned `undefined` for any such step the optimizer
+  // touched. Lock in the pass-through behaviour for the ACP agent kind.
+  describe('acp-agent step kind (regression)', () => {
+    test('clones an acp-agent step without throwing or returning undefined', () => {
+      const original = step.acpAgent({
+        id: 'cc',
+        agent: mockAcpAgent('claude-code'),
+        prompt: 'do a thing',
       });
-    }
+
+      const result: Step | undefined = applyCandidate(original, {});
+
+      expect(result).toBeDefined();
+      expect(result.kind).toBe('acp-agent');
+      expect(result.id).toBe(original.id);
+    });
+
+    test('an acp-agent step nested in a spawn is cloned through', () => {
+      const original = spawn({
+        id: 'outer',
+        child: step.acpAgent({
+          id: 'inner',
+          agent: mockAcpAgent('codex'),
+          prompt: 'do a thing',
+        }),
+      });
+
+      const result: Step | undefined = applyCandidate(original, {});
+
+      expect(result).toBeDefined();
+      expect(result.kind).toBe('spawn');
+    });
   });
 });

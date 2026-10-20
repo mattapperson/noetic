@@ -1,6 +1,6 @@
 {
   "name": "@noetic-tools/openui",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "type": "module",
   "description": "Generative UI for Noetic agents via the OpenUI standard: the openUi() output codec (streaming OpenUI Lang parser), the openUiSurface() context layer (server-authoritative UI state), the typed fragment() builder for tool-authored UI, and an OpenUI-speaking transport.",
   "license": "Apache-2.0",

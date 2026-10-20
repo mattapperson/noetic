@@ -15,13 +15,19 @@ Evals are organized into suites via `describe()`. Each suite wraps an `AgentHarn
 
 ```typescript
 import { describe, it, scorer } from '@noetic-tools/eval';
-import { react } from '@noetic-tools/core';
+import { any, callModel, loop, until } from '@noetic-tools/core';
 
-const agent = react({
-  model: 'anthropic/claude-sonnet-4-20250514',
-  instructions: 'You are a support agent.',
-  tools: myTools,
-  maxSteps: 10,
+const agent = loop({
+  id: 'support-loop',
+  steps: [
+    callModel({
+      id: 'support',
+      model: 'anthropic/claude-sonnet-4-20250514',
+      instructions: 'You are a support agent.',
+      tools: myTools,
+    }),
+  ],
+  until: any(until.noToolCalls(), until.maxSteps(10)),
 });
 
 describe(
@@ -205,10 +211,10 @@ interface GepaConfig {
 
 ### Annotating Dynamic Steps
 
-`branch` and `fork` steps have dynamic children (functions). Annotate them for the optimizer:
+`conditional` and `inParallel` steps have dynamic children (functions). Annotate them for the optimizer:
 
 ```typescript
-const router = branch({
+const router = conditional({
   id: 'router',
   route: (input, ctx) => { /* dynamic routing */ },
   _optimizable: [billingAgent, techSupportAgent],
@@ -290,9 +296,9 @@ const results = await runAllSuites(getSuites());
 
 ### Common Pitfalls
 
-- **Missing `OPENROUTER_API_KEY`**: Evals using LLM steps will fail without the env var set
-- **`compilePlan` with mixed execution**: Nested plans mixing sequential and parallel require `executeStep` — pure eval context cannot execute `fork` steps inside sequential chains without it
-- **Verify return type**: The `ralphWiggum` verify function must return `{ pass: boolean; feedback?: string }` (note: `pass`, not `passed`)
+- **Missing `OPENROUTER_API_KEY`**: Evals using `callModel` steps will fail without the env var set
+- **Hydrated workflows with mixed execution**: `hydrateWorkflow`'s `HydrationContext` requires an `executeStep` — a pure eval context cannot execute `inParallel` nodes inside sequential chains without it. Pass `harness.run.bind(harness)`, or use `parseAndRunWorkflow`, which wires it for you
+- **Verify return type**: `until.verified` predicate functions must return `{ pass: boolean; feedback?: string }` (note: `pass`, not `passed`)
 
 ## Source Locations
 

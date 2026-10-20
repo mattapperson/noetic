@@ -1,4 +1,4 @@
-import type { ZodType } from 'zod';
+import type { StandardSchemaV1 } from '@standard-schema/spec';
 import type { Channel, ChannelHandle, ExternalChannel } from './channel';
 import type { LLMResponse, ModelParams, ServerToolSpec } from './common';
 import type { Context, CwdState, RestoreContextOptions } from './context';
@@ -10,14 +10,13 @@ import type {
   RecallOptions,
   StorageAdapter,
 } from './context-layer';
-import type { DecideRequest, DecideResponse, DecisionRecord } from './decide';
 import type { DetachedHandle } from './detached';
 import type { FsAdapter } from './fs-adapter';
+import type { HarnessJudgmentContract } from './harness-judgment';
 import type { HarnessResponse, StreamEvent, StreamingItem } from './harness-result';
 import type { ExecuteInput, Item, ItemSchemaExtensions } from './items';
 import type { Span, TraceExporter } from './observability';
 import type { ShellAdapter } from './shell-adapter';
-import type { SteeringDecision } from './steering';
 import type { Step } from './step';
 import type { SubprocessAdapter } from './subprocess-adapter';
 import type { Tool } from './tool';
@@ -28,16 +27,22 @@ export interface AgentHooks {
   afterStep?: (step: Step, result: unknown, ctx: Context) => Promise<void>;
 }
 
+/** @public Item-schema configuration: extension schemas plus validation strictness. */
+export interface ItemSchemaConfig {
+  /** Harness-wide item schema extensions used to validate emitted and returned items. */
+  schemas?: ItemSchemaExtensions;
+  /** Whether unknown extension item types must match a registered schema. Defaults to true. */
+  strict?: boolean;
+}
+
 /** @public Top-level configuration object that defines an agent's model, tools, context, and behavior. */
 export interface AgentConfig<TParams extends Record<string, unknown> = Record<string, unknown>> {
   name: string;
   storage?: StorageAdapter;
   hooks?: AgentHooks;
   params: TParams;
-  /** Harness-wide item schema extensions used to validate emitted and returned items. */
-  itemSchemas?: ItemSchemaExtensions;
-  /** Whether unknown extension item types must match a registered schema. Defaults to true. */
-  strictItemSchemas?: boolean;
+  /** Item schema extensions and validation strictness for emitted and returned items. */
+  itemSchemas?: ItemSchemaConfig;
   /** Default projection policy for all LLM steps. Individual steps override via `step.projection`. */
   projection?: ProjectionPolicy;
   /** When true, every layer is recalled atomically regardless of its `recallMode` (no eventual/cached recall). */
@@ -73,7 +78,12 @@ interface CallModelRequestBase {
   instructions?: string;
   params?: ModelParams;
   /** When provided, the harness sends a JSON Schema constraint to the model so it returns structured JSON. */
-  outputSchema?: ZodType;
+  outputSchema?: StandardSchemaV1;
+  /**
+   * Explicit raw JSON Schema override for the structured-output constraint.
+   * For non-Zod schemas, it takes precedence over StandardJSONSchemaV1 conversion.
+   */
+  outputJsonSchema?: Record<string, unknown>;
   /** Controls framework event emission. Defaults to `true`. Passed through from `StepLLM.emit`. */
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
   /**
@@ -112,12 +122,17 @@ interface CallModelRequestWithTools extends CallModelRequestBase {
   allowedToolNames?: string[];
 }
 
-/** @public Request shape when no tools are provided — ctx is only needed for tool
- *  execution callbacks in convertTools, so it is omitted here. */
+/**
+ * @public Request shape when no tools are provided. `ctx` is still accepted —
+ * it carries the session broadcaster, without which a tool-less call streams
+ * nothing to `getFullStream`/`getTextStream` — it just isn't *required* the
+ * way the tools variant needs it for execution callbacks.
+ */
 interface CallModelRequestWithoutTools extends CallModelRequestBase {
   tools?: undefined;
-  ctx?: undefined;
-  layers?: undefined;
+  ctx?: Context;
+  layers?: ContextLayer[];
+  allowedToolNames?: undefined;
 }
 
 /** @public Request object for `AgentHarnessContract.callModel()`. Encapsulates all parameters needed for an LLM call using only Noetic types. */
@@ -133,9 +148,14 @@ export interface ExecuteOptions {
   resourceId?: string;
   state?: unknown;
   /** Context layers to apply to the execution context. Overrides harness-level layers if provided. */
-  context?: ContextLayer[];
-  /** @deprecated Renamed to `context`. */
-  memory?: ContextLayer[];
+  contextLayers?: ContextLayer[];
+  /**
+   * Additional context layers appended AFTER the effective layer set
+   * (harness-level layers, or `contextLayers` when that override is given).
+   * Use this to inject a per-turn layer — a permission gate, an observer —
+   * without discarding the layers the harness was built with.
+   */
+  extraContextLayers?: ContextLayer[];
   /** Override the harness's default delivery mode for this message only. */
   deliveryMode?: DeliveryMode;
   /**
@@ -169,6 +189,25 @@ export type HarnessStatus =
 
 //#endregion
 
+//#region Session Usage
+
+/** @public Cumulative token usage and cost a session has accumulated across all of its turns. */
+export interface SessionUsage {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  /** Undefined when no turn reported a cache figure, so callers can tell "provider says nothing about caching" from "nothing was cached". */
+  readonly cachedTokens?: number;
+  /**
+   * Undefined when the accumulated cost is zero. Unlike `cachedTokens` this
+   * cannot distinguish "no provider reported a cost" from "the work was free" —
+   * per-turn cost is a plain number that starts at 0, so there is no
+   * "unreported" signal to preserve.
+   */
+  readonly cost?: number;
+}
+
+//#endregion
+
 //#region Session Scope
 
 /** @public Identifies which session the accessor targets. All methods fall back to the harness's default thread when omitted. */
@@ -183,7 +222,7 @@ export interface SessionScope {
 /** @public Type-level contract for the agent runtime. Used for type annotations throughout the interpreter, context layers, and context. Implemented by `AgentHarness`. */
 export interface AgentHarnessContract<
   TParams extends Record<string, unknown> = Record<string, unknown>,
-> {
+> extends HarnessJudgmentContract {
   readonly config: AgentConfig<TParams>;
   /** Filesystem adapter for virtual or real filesystem access. */
   readonly fs: FsAdapter;
@@ -192,10 +231,6 @@ export interface AgentHarnessContract<
   /** Subprocess adapter for virtual, same-process, or host process execution. */
   readonly subprocess: SubprocessAdapter;
   callModel(request: CallModelRequest): Promise<LLMResponse>;
-  /** Answer typed questions with a decision model, or estimate with a chat model. See spec 30. */
-  decide(request: DecideRequest): Promise<DecideResponse>;
-  /** Run every layer's `onDecision` hook, in slot order. */
-  notifyDecision(layers: ContextLayer[], record: DecisionRecord, ctx: Context): Promise<void>;
 
   /**
    * Submit input to the agent. The message is enqueued on the session identified
@@ -237,6 +272,12 @@ export interface AgentHarnessContract<
   getStatus(scope?: SessionScope): HarnessStatus;
   /** Number of messages currently queued on a session. */
   getQueueSize(scope?: SessionScope): number;
+  /**
+   * Cumulative token usage and cost the session has accumulated across all of
+   * its turns, including turns that failed or were aborted after partial model
+   * work. Returns zeros for a session that has not run yet.
+   */
+  getUsage(scope?: SessionScope): SessionUsage;
 
   /**
    * Pre-populate a session's accumulated history with prior items so the next
@@ -280,9 +321,9 @@ export interface AgentHarnessContract<
     state?: unknown;
     threadId?: string;
     resourceId?: string;
-    context?: ContextLayer[];
-    /** @deprecated Renamed to `context`. */
-    memory?: ContextLayer[];
+    contextLayers?: ContextLayer[];
+    /** Additional layers appended AFTER the effective layer set (see `ExecuteOptions.extraContextLayers`). */
+    extraContextLayers?: ContextLayer[];
     /** Override the new context's initial cwd. */
     cwdInit?: string;
   }): Context;
@@ -363,7 +404,7 @@ export interface AgentHarnessContract<
    * (`onComplete` with `outcome: 'aborted'`, then `dispose`) bottom-up.
    *
    * Blocked channel operations reject with `cancelled`, the in-flight model
-   * call and sub-harness turn are cut short, and the next step boundary throws
+   * call and ACP agent turn are cut short, and the next step boundary throws
    * `cancelled`. Idempotent: cancelling an already-cancelled context is a
    * no-op. Use `ctx.abort()` when you want the signal without layer teardown.
    */
@@ -373,17 +414,6 @@ export interface AgentHarnessContract<
   createSpan(name: string, parent: Span | null): Span;
   getLayerState<T>(executionId: string, layerId: string): T | undefined;
   setLayerState<T>(executionId: string, layerId: string, state: T): void;
-  beforeToolCall(
-    layers: ContextLayer[],
-    toolName: string,
-    toolArgs: unknown,
-    ctx: Context,
-  ): Promise<SteeringDecision>;
-  afterModelCall(
-    layers: ContextLayer[],
-    response: LLMResponse,
-    ctx: Context,
-  ): Promise<SteeringDecision>;
   /**
    * Project the history items through every layer's `projectHistory` hook in
    * slot order. Pure read-side projection — `itemLog` is never mutated.

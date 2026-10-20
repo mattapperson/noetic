@@ -1,8 +1,7 @@
 import type { ContextConfig, ContextData, ContextLayer } from '@noetic-tools/context';
-import type { Step, StepProvide } from '@noetic-tools/types';
+import type { Step, StepWithContext } from '@noetic-tools/types';
 import { NoeticConfigError } from '@noetic-tools/types';
 import { getDefaultRegistrar } from '../types/step-registrar';
-import { resolveContextOption } from './context-option';
 
 /**
  * Creates a provide step that attaches context layers to its child without creating an isolated context.
@@ -13,46 +12,39 @@ import { resolveContextOption } from './context-option';
  * @param opts.id - Unique step identifier used in traces and error messages.
  * @param opts.child - Step to execute with the provided layers.
  * @param opts.context - Context layers to provide to descendant steps.
- * @returns A `StepProvide` step.
+ * @returns A `StepWithContext` step.
  * @throws `NoeticConfigError` with code `EMPTY_STEP_ID` if `id` is empty.
  * @throws `NoeticConfigError` with code `MISSING_CHILD_STEP` if `child` is not provided.
  */
-export function provide<TContext = ContextData, I = unknown, O = unknown>(opts: {
+export function withContext<TContext = ContextData, I = unknown, O = unknown>(opts: {
   id: string;
   child: Step<TContext, I, O>;
-  /**
-   * Optional in the type only so the deprecated `memory` spelling remains a
-   * valid way to supply the layers. Exactly one of the two is required — the
-   * runtime enforces it, the same way `id` and `child` are enforced.
-   */
-  context?: ContextConfig | ContextLayer[];
-  /** @deprecated Renamed to `context`. */
-  memory?: ContextConfig | ContextLayer[];
-}): StepProvide<TContext, I, O> {
+  context: ContextConfig | ContextLayer[];
+}): StepWithContext<TContext, I, O> {
   if (!opts.id?.trim()) {
     throw new NoeticConfigError({
       code: 'EMPTY_STEP_ID',
-      message: 'provide() requires a non-empty id.',
-      hint: 'Pass a unique string as the id field, e.g. provide({ id: "my-provider", ... }).',
+      message: 'withContext() requires a non-empty id.',
+      hint: 'Pass a unique string as the id field, e.g. withContext({ id: "my-provider", ... }).',
     });
   }
   if (!opts.child) {
     throw new NoeticConfigError({
       code: 'MISSING_CHILD_STEP',
-      message: 'provide() requires a child step.',
+      message: 'withContext() requires a child step.',
       hint: 'Provide a child step to execute with the provided context layers.',
     });
   }
-  const layers = resolveContextOption(opts);
+  const layers = opts.context;
   if (!layers) {
     throw new NoeticConfigError({
       code: 'MISSING_CONTEXT_LAYERS',
-      message: 'provide() requires context layers.',
-      hint: 'Pass context: [workingMemoryContext()]. The `memory` key is the deprecated spelling of `context`.',
+      message: 'withContext() requires context layers.',
+      hint: 'Pass context: [scratchpad()].',
     });
   }
-  const built: StepProvide<TContext, I, O> = {
-    kind: 'provide',
+  const built: StepWithContext<TContext, I, O> = {
+    kind: 'withContext',
     id: opts.id,
     child: opts.child,
     context: layers,

@@ -15,7 +15,7 @@ export type EmitOption = boolean | ((eventType: string, data: Record<string, unk
  *
  * When `emit` is `undefined` (the default for non-LLM steps where the
  * field does not exist on the Step type), events are always emitted.
- * Only StepLLM exposes `emit` for opt-out or filtering.
+ * Only StepCallModel exposes `emit` for opt-out or filtering.
  *
  * @internal
  */

@@ -4,6 +4,8 @@ import type { Step } from '@noetic-tools/core';
 import { frameworkCast } from '@noetic-tools/core/unstable';
 
 import type { Candidate, OptimizableField, OptimizationResult } from '../types/optimizer';
+import type { EnvLlmCredentials } from '../utils/env-llm';
+import { resolveEnvLlmCredentials } from '../utils/env-llm';
 import { averageNumbers } from '../utils/scores';
 import { applyCandidate } from './mutator';
 
@@ -160,15 +162,15 @@ function averageScore(scores: Record<string, number>): number {
   return averageNumbers(Object.values(scores));
 }
 
-function createAiService(model: string, apiKey: string): ReturnType<typeof ai> {
-  // ax dropped the dedicated 'openrouter' provider; OpenRouter is OpenAI-wire
-  // compatible, so target the OpenAI provider with OpenRouter's base URL. The
-  // model is an arbitrary OpenRouter slug, which ax types as the OpenAI model
-  // enum — cast at this SDK boundary (ax forwards the string unchanged).
+function createAiService(model: string, credentials: EnvLlmCredentials): ReturnType<typeof ai> {
+  // ax dropped the dedicated 'openrouter' provider; both the Noetic platform and
+  // OpenRouter are OpenAI-wire compatible, so target the OpenAI provider with the
+  // resolved base URL. The model is an arbitrary `vendor/slug`, which ax types as
+  // the OpenAI model enum — cast at this SDK boundary (ax forwards it unchanged).
   return ai({
     name: 'openai',
-    apiKey,
-    apiURL: 'https://openrouter.ai/api/v1',
+    apiKey: credentials.apiKey,
+    apiURL: credentials.apiURL,
     config: {
       model: frameworkCast<AxAIOpenAIModel>(model),
     },
@@ -483,15 +485,15 @@ function createTeacherProposer(teacherAI: ReturnType<typeof ai>): ProposeFieldVa
 
 async function runGepaOptimization(
   params: OptimizeParams,
-  apiKey: string,
+  credentials: EnvLlmCredentials,
   initialCandidate: Candidate,
 ): Promise<OptimizationResult> {
   const gepaConfig = params.gepa ?? {};
   const maxMetricCalls = params.maxMetricCalls ?? DEFAULT_MAX_METRIC_CALLS;
   const fieldOrder = params.fields.map((f) => f.path);
 
-  const studentAI = createAiService(gepaConfig.studentModel ?? DEFAULT_STUDENT_MODEL, apiKey);
-  const teacherAI = createAiService(gepaConfig.teacherModel ?? DEFAULT_TEACHER_MODEL, apiKey);
+  const studentAI = createAiService(gepaConfig.studentModel ?? DEFAULT_STUDENT_MODEL, credentials);
+  const teacherAI = createAiService(gepaConfig.teacherModel ?? DEFAULT_TEACHER_MODEL, credentials);
 
   const optimizer = new AxGEPA({
     studentAI,
@@ -575,8 +577,12 @@ export async function optimizeWithGepa(params: OptimizeParams): Promise<Optimiza
     };
   }
 
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey) {
+  // The GEPA student/teacher LMs talk to an OpenAI-wire endpoint through the ax
+  // SDK rather than the harness, so they need a literal key. Either provider
+  // works; with neither configured, fall back to a single offline evaluation of
+  // the initial candidate (no search) instead of failing the whole run.
+  const credentials = resolveEnvLlmCredentials();
+  if (!credentials) {
     const candidateStep = applyCandidate(params.step, initialCandidate);
     const scores = await params.runEval(candidateStep);
     return {
@@ -586,7 +592,7 @@ export async function optimizeWithGepa(params: OptimizeParams): Promise<Optimiza
     };
   }
 
-  return runGepaOptimization(params, apiKey, initialCandidate);
+  return runGepaOptimization(params, credentials, initialCandidate);
 }
 
 //#endregion

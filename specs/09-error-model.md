@@ -10,9 +10,9 @@
 ```typescript
 type NoeticError =
   | { kind: 'step_failed';          stepId: string; cause: Error; retriesExhausted: boolean }
-  | { kind: 'llm_refused';          stepId: string; refusal: string }
-  | { kind: 'llm_parse_error';      stepId: string; raw: string; schema: ZodType; zodError: ZodError }
-  | { kind: 'llm_rate_limit';       stepId: string; retryAfter?: number }
+  | { kind: 'model_refused';          stepId: string; refusal: string }
+  | { kind: 'model_parse_error';      stepId: string; raw: string; schema: StandardSchemaV1; zodError: ZodError }
+  | { kind: 'model_rate_limit';       stepId: string; retryAfter?: number }
   | { kind: 'fork_partial';         stepId: string; succeeded: Array<{ stepId: string; value: unknown }>; failed: Array<{ stepId: string; error: NoeticError }> }
   | { kind: 'spawn_summary_failed'; stepId: string; childOutput: unknown; summaryCause: Error }
   | { kind: 'channel_timeout';      channelName: string; timeout: number }
@@ -28,9 +28,9 @@ type NoeticError =
 
 ### Step Failure
 
-Retry per policy (see `RetryPolicy` in `02-step-variants`). If retries exhausted, throw `step_failed`. The parent (loop, fork, etc.) decides what to do.
+Retry per policy (see `RetryPolicy` in `02-step-variants`). If retries exhausted, throw `step_failed`. The parent (loop, inParallel, etc.) decides what to do.
 
-### Fork (see `03-control-flow`)
+### inParallel (see `03-control-flow`)
 
 - **`mode: 'all'`** — If any path fails, cancel remaining paths and throw `fork_partial` with both succeeded and failed results. The caller decides whether to use partial results or propagate.
 - **`mode: 'settle'`** — Never throws. Failed paths appear as `{ status: 'rejected' }` in the merge function's `SettleResult[]`.
@@ -53,7 +53,9 @@ The child's work succeeded — don't discard it. Throw `spawn_summary_failed` wi
 
 ### LLM Parse Error
 
-The LLM returned text that didn't match the Zod schema. Includes the `raw` text so the caller can attempt recovery (re-prompt, manual parse, etc.).
+The LLM returned text that didn't match the structured-output schema. Includes the `raw` text so the caller can attempt recovery (re-prompt, manual parse, etc.).
+
+`schema` is typed as `StandardSchemaV1` since `callModel`/ACP-agent step outputs accept any Standard Schema v1 validator. `zodError` remains populated for backward compatibility: for Zod schemas it is the real `ZodError`; for non-Zod schemas the vendor's Standard Schema issues are adapted into a synthetic `ZodError` of `custom` issues, so consumers keep a single error surface.
 
 ### Item Schema Mismatch
 
@@ -84,17 +86,17 @@ else should call `runtime.cancel()`.
 Cancellation covers the whole execution tree rooted at the cancelled context:
 
 1. **Down the tree, never up.** Aborting a context cascades synchronously into
-   every live child context — fork paths, spawn children, and their own
+   every live child context — inParallel paths, spawn children, and their own
    descendants — so a nested sub-agent stops when its parent is cancelled. It
    never travels the other way: aborting a child leaves the parent running.
    A child context created *after* its parent was cancelled is aborted at
    construction, so cancellation cannot be outrun by a spawn in flight.
 2. **Blocking operations.** Any pending `recv` or back-pressure `send` on a channel immediately rejects with `{ kind: 'cancelled' }`. The blocked Promise resolves with the error — it does not hang.
-3. **Fork paths.** In `race` mode, non-winning paths are cancelled using the same mechanism. In `all`/`settle` mode, if cancellation arrives mid-fork, all paths are cancelled and the fork throws `cancelled` (not `fork_partial`).
+3. **inParallel paths.** In `race` mode, non-winning paths are cancelled using the same mechanism. In `all`/`settle` mode, if cancellation arrives mid-execution, all paths are cancelled and the `inParallel` throws `cancelled` (not `fork_partial`).
 4. **Loop iterations.** If cancellation arrives during a loop body, the current iteration's step is cancelled. The loop does NOT run another iteration. `onError` is NOT consulted — cancellation is not a retriable error.
-5. **In-flight model calls and sub-harness turns.** The executing context's
-   abort signal is threaded into the model call and into the sub-harness
-   adapter's session/turn, so cancellation cuts the stream and the tool-round
+5. **In-flight model calls and ACP agent turns.** The executing context's
+   abort signal is threaded into the model call and into the ACP session's
+   turn (which issues `session/cancel`), so cancellation cuts the stream and the tool-round
    loop mid-flight rather than waiting for a long generation to finish. Tokens
    and cost already spent are charged to the context; the truncated response is
    not returned as the step's output — the step throws `cancelled`.
@@ -116,7 +118,7 @@ first `abort()` owns `ctx.abortReason` — a later abort does not overwrite it.
 
 `NoeticConfigError` is a separate class from `NoeticError`. The two are never interchangeable:
 
-- **`NoeticError`** — thrown during execution (LLM failures, fork failures, spawn errors, budget exceeded, cancellation). Always has a `kind` discriminant. Caught by callers of `execute()`.
+- **`NoeticError`** — thrown during execution (LLM failures, inParallel failures, spawn errors, budget exceeded, cancellation). Always has a `kind` discriminant. Caught by callers of `execute()`.
 - **`NoeticConfigError`** — thrown during construction and setup (invalid step config, missing env vars, invalid context layer config, runtime misconfiguration). Always has `code`, `hint`, and optional `docsUrl`. Caught before execution begins.
 
 ```typescript

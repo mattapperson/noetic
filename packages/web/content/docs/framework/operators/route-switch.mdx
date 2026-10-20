@@ -6,9 +6,9 @@ description: Route to one of several steps by a decision's answers.
 ## Quick Example
 
 ```ts
-import { step } from '@noetic-tools/core';
+import { callModel, decide, routeSwitch } from '@noetic-tools/core';
 
-const triage = step.decide({
+const triage = decide({
   id: 'triage',
   model: 'typesafe/jev-1.14',
   questions: {
@@ -21,13 +21,13 @@ const triage = step.decide({
 });
 
 const reply = (id: string, instructions: string) =>
-  step.llm({
+  callModel({
     id,
     model: 'openai/gpt-4o-mini',
     instructions,
   });
 
-const handleTicket = step.routeSwitch({
+const handleTicket = routeSwitch({
   id: 'route-ticket',
   decide: triage,
   on: 'destination',
@@ -44,9 +44,9 @@ const handleTicket = step.routeSwitch({
 
 ## What It Does
 
-`step.routeSwitch` runs a [`step.decide`](/docs/framework/steps/decide) step on its input, then runs the case its answers pick. The chosen case receives the **original input**, not the answers, and its output is the switch's output.
+`routeSwitch` runs a [`decide`](/docs/framework/steps/decide) step on its input, then runs the case its answers pick. The chosen case receives the **original input**, not the answers, and its output is the switch's output.
 
-`routeSwitch` is a [`branch`](/docs/framework/operators/branch) built from a decision, not a new step kind. It runs the decide step through the `run` argument every branch route receives, so the decision gets its own span and its `onDecision` notification, just as if it ran on its own. The decide step and every case are listed in `_optimizable`, so tree walks (tool collection, GEPA) see every child. The switch can also rebuild itself around new children, so when GEPA swaps a case or the decide step, the swapped step is the one that runs.
+`routeSwitch` is a [`conditional`](/docs/framework/operators/conditional) built from a decision, not a new step kind. It runs the decide step through the `run` argument every conditional route receives, so the decision gets its own span and its `onDecision` notification, just as if it ran on its own. The decide step and every case are listed in `_optimizable`, so tree walks (tool collection, GEPA) see every child. The switch can also rebuild itself around new children, so when GEPA swaps a case or the decide step, the swapped step is the one that runs.
 
 Two switches over the same decide step, one nested in the other, call the model once: the inner one reuses the outer one's answers (see [Asking again](/docs/framework/steps/decide#asking-again)).
 
@@ -63,9 +63,9 @@ Set `on` to a question id. `cases` must have exactly one step per outcome of tha
 | `score` | each level label (routed by `level`, the most probable level) |
 
 ```ts
-import { step } from '@noetic-tools/core';
+import { decide, routeSwitch, runCode } from '@noetic-tools/core';
 
-const check = step.decide({
+const check = decide({
   id: 'check',
   model: 'typesafe/jev-1.14',
   questions: {
@@ -81,11 +81,11 @@ const check = step.decide({
   },
 });
 
-const page = step.run({ id: 'page', execute: async (input: string) => `paged: ${input}` });
-const queue = step.run({ id: 'queue', execute: async (input: string) => `queued: ${input}` });
-const triageByHand = step.run({ id: 'by-hand', execute: async (input: string) => `needs a human: ${input}` });
+const page = runCode({ id: 'page', execute: async (input: string) => `paged: ${input}` });
+const queue = runCode({ id: 'queue', execute: async (input: string) => `queued: ${input}` });
+const triageByHand = runCode({ id: 'by-hand', execute: async (input: string) => `needs a human: ${input}` });
 
-const byBoolean = step.routeSwitch({
+const byBoolean = routeSwitch({
   id: 'by-boolean',
   decide: check,
   on: 'isUrgent',
@@ -94,7 +94,7 @@ const byBoolean = step.routeSwitch({
   uncertain: triageByHand,
 });
 
-const byLevel = step.routeSwitch({
+const byLevel = routeSwitch({
   id: 'by-level',
   decide: check,
   on: 'urgency',
@@ -121,9 +121,9 @@ Because `uncertain` is required, every outcome runs a typed step. The switch nev
 The switch's output type is the union of every case's output, plus `uncertain` (and `default` in the function form). Cases may return different types:
 
 ```ts
-import { step } from '@noetic-tools/core';
+import { decide, routeSwitch, runCode } from '@noetic-tools/core';
 
-const check = step.decide({
+const check = decide({
   id: 'check',
   model: 'typesafe/jev-1.14',
   questions: {
@@ -134,12 +134,12 @@ const check = step.decide({
   },
 });
 
-const page = step.run({ id: 'page', execute: async (input: string) => ({ paged: input }) });
-const queue = step.run({ id: 'queue', execute: async (input: string) => input.length });
-const triageByHand = step.run({ id: 'by-hand', execute: async (input: string) => `needs a human: ${input}` });
+const page = runCode({ id: 'page', execute: async (input: string) => ({ paged: input }) });
+const queue = runCode({ id: 'queue', execute: async (input: string) => input.length });
+const triageByHand = runCode({ id: 'by-hand', execute: async (input: string) => `needs a human: ${input}` });
 
-// StepBranch<..., string, { paged: string } | number | string>
-const handle = step.routeSwitch({
+// StepConditional<..., string, { paged: string } | number | string>
+const handle = routeSwitch({
   id: 'handle',
   decide: check,
   on: 'isUrgent',
@@ -155,9 +155,9 @@ const handle = step.routeSwitch({
 Pass a function as `on` to combine several answers. It returns a case key; `default` is required and catches any key with no case.
 
 ```ts
-import { step } from '@noetic-tools/core';
+import { decide, routeSwitch, runCode } from '@noetic-tools/core';
 
-const check = step.decide({
+const check = decide({
   id: 'check',
   model: 'typesafe/jev-1.14',
   questions: {
@@ -173,10 +173,10 @@ const check = step.decide({
   },
 });
 
-const pageOnCall = step.run({ id: 'page', execute: async (input: string) => `paged: ${input}` });
-const backlog = step.run({ id: 'backlog', execute: async (input: string) => `queued: ${input}` });
+const pageOnCall = runCode({ id: 'page', execute: async (input: string) => `paged: ${input}` });
+const backlog = runCode({ id: 'backlog', execute: async (input: string) => `queued: ${input}` });
 
-const escalate = step.routeSwitch({
+const escalate = routeSwitch({
   id: 'escalate',
   decide: check,
   on: (a) => (a.isUrgent.value && a.urgency.value >= 1.5 ? 'page' : 'queue'),
@@ -194,7 +194,7 @@ The function never sees a refusal. If any answer is refused, the switch takes `u
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
 | `id` | `string` | Yes | Unique step identifier |
-| `decide` | `DecideStep` | Yes | The decide step to run. Must come from `step.decide()`, which keeps the literal questions |
+| `decide` | `DecideStep` | Yes | The decide step to run. Must come from `decide()`, which keeps the literal questions |
 | `on` | `string` | Yes | Id of the question to route by |
 | `cases` | `Record<CaseKey, Step>` | Yes | Exactly one step per outcome of `on`, and no other keys |
 | `minConfidence` | `number` | No | Below this confidence, take `uncertain`. In `[0, 1]` |
@@ -213,7 +213,7 @@ The function never sees a refusal. If any answer is refused, the switch takes `u
 
 ### Build-time errors
 
-`step.routeSwitch()` throws `NoeticConfigError` when you build it:
+`routeSwitch()` throws `NoeticConfigError` when you build it:
 
 | Code | Condition |
 | --- | --- |
@@ -229,7 +229,7 @@ Each run adds a `route_switch` event to `ctx.span` with `stepId` and `case`: the
 
 ## Related
 
-- [step.decide](/docs/framework/steps/decide) -- the questions and answers a switch routes by.
-- [branch](/docs/framework/operators/branch) -- the general routing primitive.
+- [decide](/docs/framework/steps/decide) -- the questions and answers a switch routes by.
+- [conditional](/docs/framework/operators/conditional) -- the general routing primitive.
 - [Semantic Conditions](/docs/framework/operators/conditions) -- `semanticSwitch` routes by embedding similarity, with no model call.
 - [JSON Runtime](/docs/framework/json-runtime#routeswitch) -- the `routeSwitch` workflow node.

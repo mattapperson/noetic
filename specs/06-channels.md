@@ -51,7 +51,7 @@ const status = channel('status', {
 });
 
 // In a step: write to a channel
-step.run({
+runCode({
   id: 'research',
   execute: async (query, ctx) => {
     const results = await search(query);
@@ -61,7 +61,7 @@ step.run({
 });
 
 // In another step: read from a channel
-step.run({
+runCode({
   id: 'synthesize',
   execute: async (_, ctx) => {
     const allFindings = await ctx.recv(findings);  // typed as string[]
@@ -93,7 +93,7 @@ ctx.tryRecv(channel): T | null
 `tryRecv` is useful for polling patterns — checking whether new data has arrived without suspending the step. This is Go's `select/default` analogue.
 
 ```typescript
-step.run({
+runCode({
   id: 'check-updates',
   execute: async (_, ctx) => {
     const update = ctx.tryRecv(planUpdates);
@@ -151,7 +151,7 @@ const handle = harness.getChannelHandle(userMessages, executionId);
 
 ### Scope Rule
 
-External channels survive `contextIn: 'fresh'` spawn boundaries. They are scoped to the **root execution**, not individual spawn boundaries. This is analogous to `scope: 'resource'` context layers — they represent user-level communication, not execution-level state.
+External channels are unaffected by `spawn` boundaries. A spawned child starts with an empty ItemLog and, when `context` is set, a replaced layer stack (see `04-spawn`) — but it shares its parent's channel store by reference, so channel state is never re-namespaced at a boundary. Handles and subscriptions are scoped to the **root execution** instead: only a root `run()` opens and closes an execution id, so a `spawn` never opens a new channel scope nor closes an existing one. This is analogous to `scope: 'resource'` context layers — they represent user-level communication, not execution-level state.
 
 ### Lifecycle
 
@@ -208,13 +208,13 @@ Node.js is single-threaded, so `AgentHarness` handles are inherently thread-safe
 
 ### Scope
 
-Channels are scoped to an execution tree. A channel created in a parent is accessible to all descendants unless a `spawn` boundary (see `04-spawn`) uses `contextIn: 'fresh'`. Fresh contexts get a new channel namespace — **except** for external channels, which survive fresh boundaries (scoped to root execution). To pass a non-external channel across a fresh boundary, use `contextIn: 'custom'` explicitly — this is the "you opted into this" escape hatch.
+Channels are scoped to the harness, not to a boundary within it. Channel state lives in one store per `AgentHarness` and is keyed by channel **name**, so a channel a parent created is accessible to every descendant. There is no per-boundary channel namespace to opt out of or into: a `spawn` boundary (see `04-spawn`) resets the child's ItemLog, and `context` replaces its layer stack, but neither touches channels.
 
-`fork` and `spawn` child contexts inherit the parent's channel store by default — sibling fork paths can communicate via `send`/`recv`/`tryRecv` on the same channels, and a `spawn` child can interact with channels its parent created.
+`inParallel` paths and `spawn` children therefore receive the parent's channel store by reference — sibling parallel paths can communicate via `send`/`recv`/`tryRecv` on the same channels, and a `spawn` child can interact with channels its parent created. Because keying is by name within the harness, two executions that use the same channel name share one channel; isolate traffic with distinct channel names rather than by relying on execution boundaries.
 
 ### Wake-only subscription
 
-`every({ wakeOn })` (see `05-loop-and-until`) subscribes to a channel for wake notification *without* consuming any value. After a `send`, all wake subscribers fire once and are removed; queue/value-mode messages stay in their channel state for the body's next iteration to drain. This lets a body that uses `tryRecv` to drain a queue still see the wake message that woke it.
+`schedule({ inbox })` (see `05-loop-and-until`) subscribes to a channel for wake notification *without* consuming any value. After a `send`, all wake subscribers fire once and are removed; queue/value-mode messages stay in their channel state for the body's next iteration to drain. This lets a body that uses `tryRecv` to drain a queue still see the wake message that woke it.
 
 ### Lifecycle
 
@@ -314,7 +314,7 @@ function tryRecv<T>(ch: Channel<T>): T | null {
 }
 ```
 
-Within a `fork` (see `03-control-flow`), the agent harness runs paths as concurrent promises (not sequential), so `send` in one path can wake `recv` in another.
+Within a `inParallel` (see `03-control-flow`), the agent harness runs paths as concurrent promises (not sequential), so `send` in one path can wake `recv` in another.
 
 ### Topic Mode is Lossy
 

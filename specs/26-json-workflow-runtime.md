@@ -1,13 +1,13 @@
 # JSON Workflow Runtime
 
-> **Depends On:** `01-step-type` (Step, Until), `02-step-variants` (step.llm, step.tool), `03-control-flow` (branch, fork), `04-spawn` (spawn), `05-loop-and-until` (loop, until), `08-runtime` (AgentHarness), `13-patterns` (patterns namespace)
+> **Depends On:** `01-step-type` (Step, Until), `02-step-variants` (callModel, invokeTool), `03-control-flow` (conditional, inParallel), `04-spawn` (spawn), `05-loop-and-until` (loop, until), `08-runtime` (AgentHarness)
 > **Exports:** `WorkflowDocument`, `WorkflowNode`, `WorkflowDocumentSchema`, `WorkflowNodeSchema`, `UntilPredicateSchema`, `MergeStrategySchema`, `hydrateWorkflow`, `hydrateNode`, `dynamicWorkflow`, `parseAndRunWorkflow`
 
 ---
 
 ## Motivation
 
-Step trees in noetic are built programmatically: TypeScript code calls builders like `step.llm(...)`, `loop(...)`, `fork(...)` and wires them together at compile time. This works when the workflow shape is known ahead of time.
+Step trees in noetic are built programmatically: TypeScript code calls builders like `callModel(...)`, `loop(...)`, `inParallel(...)` and wires them together at compile time. This works when the workflow shape is known ahead of time.
 
 But many agent patterns need the shape to emerge at runtime:
 
@@ -16,7 +16,7 @@ But many agent patterns need the shape to emerge at runtime:
 3. **User-authored workflows** -- End users or low-code tools define agent behavior as JSON configuration without writing TypeScript.
 4. **Replay and inspection** -- A JSON workflow is a complete, inspectable record of what the agent intended to do, independent of execution state.
 
-The JSON Workflow Runtime bridges these worlds: an LLM (or any producer) emits a `WorkflowDocument`, the runtime validates it, hydrates it into a native `Step` tree, and executes it with the same interpreter, memory layers, and observability as hand-written compositions.
+The JSON Workflow Runtime bridges these worlds: an LLM (or any producer) emits a `WorkflowDocument`, the runtime validates it, hydrates it into a native `Step` tree, and executes it with the same interpreter, context layers, and observability as hand-written compositions.
 
 ---
 
@@ -54,7 +54,7 @@ Authoring documents by hand or reviewing LLM-generated ones, reference the schem
 {
   "$schema": "https://noetic.tools/schema/noetic-workflow.schema.json",
   "version": 1,
-  "root": { "kind": "llm", "id": "answer", "instructions": "..." }
+  "root": { "kind": "callModel", "id": "answer", "instructions": "..." }
 }
 ```
 
@@ -62,33 +62,33 @@ Authoring documents by hand or reviewing LLM-generated ones, reference the schem
 
 ## WorkflowNode Union
 
-`WorkflowNode` is a discriminated union on `kind`. Each variant maps to an existing `Step` builder. All nodes share a common `id` field. Sub-harness node kinds (`claude-code`, `codex`, `opencode`, `pi`) are specified in `27-sub-harness-steps`.
+`WorkflowNode` is a discriminated union on `kind`. Each variant maps to an existing `Step` builder. All nodes share a common `id` field. The `acp-agent` node kind is specified in `27-acp-agent-steps`.
 
 ```typescript
 type WorkflowNode =
-  | LlmWorkflowNode
-  | ToolWorkflowNode
-  | RunWorkflowNode
-  | BranchWorkflowNode
+  | CallModelWorkflowNode
+  | InvokeToolWorkflowNode
+  | RunCodeWorkflowNode
+  | ConditionalWorkflowNode
   | DecideWorkflowNode
   | RouteSwitchWorkflowNode
-  | ForkWorkflowNode
+  | InParallelWorkflowNode
   | SpawnWorkflowNode
-  | ProvideWorkflowNode
+  | WithContextWorkflowNode
   | LoopWorkflowNode
   | SequenceWorkflowNode
-  | EveryWorkflowNode
+  | ScheduleWorkflowNode
   | SubflowWorkflowNode
-  | SubHarnessWorkflowNode;
+  | AcpAgentWorkflowNode;
 ```
 
-### `llm`
+### `callModel`
 
 A single LLM call.
 
 ```typescript
-interface LlmWorkflowNode {
-  kind: 'llm';
+interface CallModelWorkflowNode {
+  kind: 'callModel';
   id: string;
   model?: string;
   instructions: string;
@@ -109,13 +109,13 @@ interface LlmWorkflowNode {
 | `tools`        | No       | Tool names resolved from the hydration context registry.  |
 | `params`       | No       | Model-level sampling parameters.                         |
 
-### `tool`
+### `invokeTool`
 
 A single tool execution, independent of an LLM call.
 
 ```typescript
-interface ToolWorkflowNode {
-  kind: 'tool';
+interface InvokeToolWorkflowNode {
+  kind: 'invokeTool';
   id: string;
   toolName: string;
   args?: Record<string, unknown>;
@@ -127,13 +127,13 @@ interface ToolWorkflowNode {
 | `toolName` | Yes      | Name of a tool in the hydration context registry.   |
 | `args`     | No       | Static arguments passed to the tool at execution.   |
 
-### `branch`
+### `conditional`
 
 Conditional routing based on substring matching against the input.
 
 ```typescript
-interface BranchWorkflowNode {
-  kind: 'branch';
+interface ConditionalWorkflowNode {
+  kind: 'conditional';
   id: string;
   routes: Array<{ match: string; target: WorkflowNode }>;
   default?: WorkflowNode;
@@ -150,16 +150,16 @@ Each route's `match` string is tested as a case-insensitive substring against th
 ### `decide` and `routeSwitch`
 
 Typed decisions and routing by them. The node shapes, validation rules, and
-outputs are specified in `30-decide` ("JSON Workflow Nodes"). Unlike `branch`,
+outputs are specified in `32-decide` ("JSON Workflow Nodes"). Unlike `conditional`,
 `routeSwitch` routes on a model's answer rather than a substring of the input.
 
-### `fork`
+### `inParallel`
 
 Parallel execution with merge.
 
 ```typescript
-interface ForkWorkflowNode {
-  kind: 'fork';
+interface InParallelWorkflowNode {
+  kind: 'inParallel';
   id: string;
   mode: 'race' | 'all' | 'settle';
   paths: WorkflowNode[];
@@ -193,15 +193,15 @@ interface SpawnWorkflowNode {
 |-----------|----------|------------------------------------------------------|
 | `child`   | Yes      | The workflow subtree to execute in the child context. |
 | `timeout` | No       | Maximum wall-clock milliseconds for the child.       |
-| `layers`  | No       | Memory layer names resolved from the hydration context registry, same resolution as `provide` (unknown name → `UNKNOWN_LAYER_REFERENCE`). Omit to inherit the parent's layers, which is the default `spawn` behaviour (spec 04); naming layers **replaces** the inherited set for the child. |
+| `layers`  | No       | Context layer names resolved from the hydration context registry, same resolution as `withContext` (unknown name → `UNKNOWN_LAYER_REFERENCE`). Omit to inherit the parent's layers, which is the default `spawn` behaviour (spec 04); naming layers **replaces** the inherited set for the child. |
 
-### `provide`
+### `withContext`
 
-Scoped memory layer injection.
+Scoped context layer injection.
 
 ```typescript
-interface ProvideWorkflowNode {
-  kind: 'provide';
+interface WithContextWorkflowNode {
+  kind: 'withContext';
   id: string;
   child: WorkflowNode;
   layers: string[];
@@ -211,7 +211,7 @@ interface ProvideWorkflowNode {
 | Field    | Required | Description                                                        |
 |----------|----------|--------------------------------------------------------------------|
 | `child`  | Yes      | The workflow subtree that receives the layers.                     |
-| `layers` | Yes      | Memory layer names resolved from the hydration context registry.   |
+| `layers` | Yes      | Context layer names resolved from the hydration context registry.   |
 
 ### `loop`
 
@@ -249,16 +249,16 @@ interface SequenceWorkflowNode {
 |---------|----------|----------------------------------------------|
 | `steps` | Yes      | Ordered array of child nodes to execute.     |
 
-### `every`
+### `schedule`
 
 Periodic execution at a fixed interval.
 
 ```typescript
-interface EveryWorkflowNode {
-  kind: 'every';
+interface ScheduleWorkflowNode {
+  kind: 'schedule';
   id: string;
   step: WorkflowNode;
-  ms: number;
+  interval: number;
   onError?: 'continue' | 'fail';
 }
 ```
@@ -266,7 +266,7 @@ interface EveryWorkflowNode {
 | Field     | Required | Description                                                           |
 |-----------|----------|-----------------------------------------------------------------------|
 | `step`    | Yes      | The step to execute each interval.                                    |
-| `ms`      | Yes      | Interval in milliseconds between executions.                          |
+| `interval` | Yes      | Interval in milliseconds between executions.                          |
 | `onError` | No       | Error handling: `continue` (default) swallows; `fail` propagates.    |
 
 ### `subflow`
@@ -303,7 +303,7 @@ Until predicates are JSON-serialisable termination conditions for `loop` nodes. 
 type UntilPredicate =
   | { kind: 'maxSteps';       n: number }
   | { kind: 'maxCost';        usd: number }
-  | { kind: 'maxDuration';    ms: number }
+  | { kind: 'maxDuration';    duration: number }
   | { kind: 'noToolCalls' }
   | { kind: 'outputContains'; marker: string }
   | { kind: 'outputEquals';   sentinel: string }
@@ -318,7 +318,7 @@ type UntilPredicate =
 |------------------|-----------------|----------------------------------|------------------------------------------------|
 | `maxSteps`       | `n`             | `until.maxSteps(n)`              | Stop after `n` iterations.                     |
 | `maxCost`        | `usd`           | `until.maxCost(usd)`            | Stop when cumulative cost exceeds threshold.   |
-| `maxDuration`    | `ms`            | `until.maxDuration(ms)`         | Stop after wall-clock time exceeds threshold.  |
+| `maxDuration`    | `duration`      | `until.maxDuration(duration)` | Stop after wall-clock time exceeds threshold.  |
 | `noToolCalls`    | --              | `until.noToolCalls()`           | Stop when the LLM produces no tool calls.      |
 | `outputContains` | `marker`        | `until.outputContains(marker)`  | Stop when output contains the marker string.   |
 | `outputEquals`   | `sentinel`      | `until.outputEquals(sentinel)`  | Stop when output exactly equals the sentinel.  |
@@ -333,7 +333,7 @@ const UntilPredicateSchema: z.ZodType<UntilPredicate> = z.lazy(() =>
   z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('maxSteps'),       n: z.number().int().positive() }),
     z.object({ kind: z.literal('maxCost'),        usd: z.number().positive() }),
-    z.object({ kind: z.literal('maxDuration'),    ms: z.number().int().positive() }),
+    z.object({ kind: z.literal('maxDuration'),    duration: z.number().int().positive() }),
     z.object({ kind: z.literal('noToolCalls') }),
     z.object({ kind: z.literal('outputContains'), marker: z.string().min(1) }),
     z.object({ kind: z.literal('outputEquals'),   sentinel: z.string() }),
@@ -348,7 +348,7 @@ const UntilPredicateSchema: z.ZodType<UntilPredicate> = z.lazy(() =>
 
 ## Merge Strategies
 
-Fork nodes use a `MergeStrategy` to combine results from parallel paths. This replaces the closure-based `MergeFn<O>` from the native `fork()` builder with a named enum.
+`inParallel` nodes use a `MergeStrategy` to combine results from parallel paths. This replaces the closure-based `MergeFn<O>` from the native `inParallel()` builder with a named enum.
 
 ```typescript
 type MergeStrategy = 'last' | 'first' | 'concat';
@@ -376,8 +376,8 @@ Hydration converts a `WorkflowDocument` into a live `Step` tree that the interpr
 interface HydrationContext {
   tools: ReadonlyMap<string, Tool>;
   executeStep: ExecuteStepFn;
-  layers?: ReadonlyMap<string, MemoryLayer>;
-  subHarnesses?: ReadonlyMap<SubHarnessKind, SubHarness>;
+  layers?: ReadonlyMap<string, ContextLayer>;
+  acpAgents?: ReadonlyMap<string, AcpAgent>;
   uiLibraries?: ReadonlyMap<string, OutputCodec>;
   resolveSubprocess?: (ref: string) => SubprocessAdapter | undefined;
   workflows?: ReadonlyMap<string, WorkflowDocument>;
@@ -389,10 +389,10 @@ interface HydrationContext {
 |----------------------|----------|--------------------------------------------------------------------------|
 | `tools`              | Yes      | Registry mapping tool names to live `Tool` objects.                      |
 | `executeStep`        | Yes      | The interpreter's `execute` function, threaded for recursive calls.      |
-| `layers`             | No       | Named memory layers for `provide` nodes and `spawn.layers`.              |
-| `subHarnesses`       | No       | SubHarness adapters keyed by harness id (`claude-code`, `codex`, …).     |
-| `uiLibraries`        | No       | Output codecs for `llm` nodes' `output` codec references.                |
-| `resolveSubprocess`  | No       | Resolves a named subprocess adapter ref on a `run` node.                 |
+| `layers`             | No       | Named context layers for `withContext` nodes and `spawn.layers`.              |
+| `acpAgents`          | No       | ACP agent adapters keyed by `agentId` (`claude-code`, `codex`, …). Open set. |
+| `uiLibraries`        | No       | Output codecs for `callModel` nodes' `output` codec references.                |
+| `resolveSubprocess`  | No       | Resolves a named subprocess adapter ref on a `runCode` node.                 |
 | `workflows`          | No       | Named sub-workflow documents that `subflow` nodes resolve via `ref`.     |
 | `subflowAncestry`    | No       | Internal: ancestor ref chain for subflow cycle detection. Never set by callers. |
 
@@ -426,22 +426,22 @@ Each node kind maps to a single existing builder:
 
 | Node Kind   | Builder                   | Notes                                                  |
 |-------------|---------------------------|--------------------------------------------------------|
-| `llm`       | `step.llm({...})`         | Tools resolved by name from `ctx.tools`.               |
-| `tool`      | `step.tool({...})`        | Tool resolved by name; throws `UNKNOWN_TOOL_REFERENCE`.|
-| `branch`    | `branch({route: ...})`    | Route function does substring matching on input.       |
-| `decide`    | `step.decide(...)`        | Questions pass through unchanged; output is the answers object. |
-| `routeSwitch` | `step.routeSwitch(...)` | Key form only; cases and `uncertain` hydrate recursively. |
-| `fork`      | `fork({...})`             | `paths` becomes a static function. Merge via strategy. |
+| `callModel`       | `callModel({...})` | Tools resolved by name from `ctx.tools`.               |
+| `invokeTool`      | `invokeTool({...})` | Tool resolved by name; throws `UNKNOWN_TOOL_REFERENCE`.|
+| `conditional`    | `conditional({route: ...})` | Route function does substring matching on input.       |
+| `decide`    | `decide(...)`        | Questions pass through unchanged; output is the answers object. |
+| `routeSwitch` | `routeSwitch(...)` | Key form only; cases and `uncertain` hydrate recursively. |
+| `inParallel`      | `inParallel({...})` | `paths` becomes a static function. Merge via strategy. |
 | `spawn`     | `spawn({...})`            | Child hydrated recursively.                            |
-| `provide`   | `provide({...})`          | Layer names resolved from hydration context.           |
+| `withContext`   | `withContext({...})` | Layer names resolved from hydration context.           |
 | `loop`      | `loop({...})`             | Until predicate hydrated to runtime `Until` function.  |
-| `sequence`  | `step.run` + chaining     | Steps piped sequentially via composed `execute` calls. |
-| `every`     | `every({...})`            | Maps directly to the `every()` builder.                |
-| `subflow`   | `step.run` wrapper        | Target document resolved lazily at first execution; sub-tree hydrated with suffixed ids. |
+| `sequence`  | `runCode` + chaining | Steps piped sequentially via composed `execute` calls. |
+| `schedule`     | `schedule({...})` | Maps directly to the `schedule()` builder.                |
+| `subflow`   | `runCode` wrapper | Target document resolved lazily at first execution; sub-tree hydrated with suffixed ids. |
 
 ### Tool Resolution
 
-Tool names in `llm.tools` and `tool.toolName` are resolved against `ctx.tools` at hydration time. If a name is not found, hydration throws:
+Tool names in `callModel.tools` and `invokeTool.toolName` are resolved against `ctx.tools` at hydration time. If a name is not found, hydration throws:
 
 ```typescript
 {
@@ -477,7 +477,7 @@ function hydrateUntil(pred: UntilPredicate): Until {
   switch (pred.kind) {
     case 'maxSteps':       return until.maxSteps(pred.n);
     case 'maxCost':        return until.maxCost(pred.usd);
-    case 'maxDuration':    return until.maxDuration(pred.ms);
+    case 'maxDuration':    return until.maxDuration(pred.duration);
     case 'noToolCalls':    return until.noToolCalls();
     case 'outputContains': return until.outputContains(pred.marker);
     case 'outputEquals':   return until.outputEquals(pred.sentinel);
@@ -548,7 +548,7 @@ function parseAndRunWorkflow(opts: {
   tools: Tool[];
   input?: string;
   maxDepth?: number;
-  layers?: ReadonlyMap<string, MemoryLayer>;
+  layers?: ReadonlyMap<string, ContextLayer>;
   workflows?: ReadonlyMap<string, WorkflowDocument>;
 }): Promise<string>
 ```
@@ -571,7 +571,7 @@ const result = await parseAndRunWorkflow({
 
 ### No In-Process Closures
 
-Programmatic `step.run` accepts an `execute` closure, which is not JSON-serialisable. The `run` node instead carries its body as a code STRING dispatched through a subprocess adapter — never eval'd in-process. Arbitrary in-process computation must be expressed through tool calls or LLM steps.
+Programmatic `runCode` accepts an `execute` closure, which is not JSON-serialisable. The `runCode` node instead carries its body as a code STRING dispatched through a subprocess adapter — never eval'd in-process. Arbitrary in-process computation must be expressed through tool calls or LLM steps.
 
 ### Static Lazy Fields Only
 
@@ -589,7 +589,7 @@ Tree depth is enforced at parse time to prevent unbounded recursion in LLM-gener
 
 ## Plan-Memory Integration
 
-The plan memory layer (spec 12, `planMemory()`) authors plans directly in this format: `PlanState.planTree` is a `WorkflowDocument`, and `PlanState.workflows` is a `Record<string, WorkflowDocument>` of named workflows the tree references via `subflow` nodes. The layer validates documents at authoring time (schema, depth, optional node-kind profile, ref slug syntax) and rejects dangling refs and reference cycles before requesting approval.
+The plan layer (spec 12, `plan()`) authors plans directly in this format: `PlanState.planTree` is a `WorkflowDocument`, and `PlanState.workflows` is a `Record<string, WorkflowDocument>` of named workflows the tree references via `subflow` nodes. The layer validates documents at authoring time (schema, depth, optional node-kind profile, ref slug syntax) and rejects dangling refs and reference cycles before requesting approval.
 
 On approval, the host feeds both pieces straight into this runtime:
 
@@ -614,10 +614,10 @@ The JSON Workflow Runtime introduces the following `NoeticConfigError` codes:
 | `WORKFLOW_VALIDATION_FAILED`   | Document fails schema validation or exceeds `maxDepth` at parse time.    |
 | `UNKNOWN_NODE_KIND`            | A node kind has no registered hydrator.                                  |
 | `UNKNOWN_TOOL_REFERENCE`       | A tool name in the document is not in the hydration registry.            |
-| `UNKNOWN_LAYER_REFERENCE`      | A layer name on a `provide`/`spawn` node is not in the layer registry.   |
-| `UNKNOWN_SUB_HARNESS_REFERENCE`| A sub-harness node's adapter is not registered.                          |
-| `UNKNOWN_UI_LIBRARY_REFERENCE` | An `llm` node's `output.library` is not in the codec registry.           |
-| `UNKNOWN_SUBPROCESS_REFERENCE` | A `run` node's `subprocess` ref cannot be resolved.                      |
+| `UNKNOWN_LAYER_REFERENCE`      | A layer name on a `withContext`/`spawn` node is not in the layer registry.   |
+| `UNKNOWN_ACP_AGENT_REFERENCE`  | An `acp-agent` node's adapter is not registered.                         |
+| `UNKNOWN_UI_LIBRARY_REFERENCE` | A `callModel` node's `output.library` is not in the codec registry.           |
+| `UNKNOWN_SUBPROCESS_REFERENCE` | A `runCode` node's `subprocess` ref cannot be resolved.                      |
 | `UNKNOWN_UNTIL_PREDICATE`      | An until predicate kind is unrecognised.                                 |
 | `UNKNOWN_WORKFLOW_REFERENCE`   | A `subflow` ref names no registered workflow (raised at execution time). |
 | `WORKFLOW_CYCLE`               | Named sub-workflow refs form a cycle (raised at execution time).         |
@@ -633,7 +633,7 @@ The complete Zod schema for reference:
 const WorkflowNodeSchema: z.ZodType<WorkflowNode> = z.lazy(() =>
   z.discriminatedUnion('kind', [
     z.object({
-      kind: z.literal('llm'),
+      kind: z.literal('callModel'),
       id: z.string().min(1),
       model: z.string().optional(),
       instructions: z.string(),
@@ -646,13 +646,13 @@ const WorkflowNodeSchema: z.ZodType<WorkflowNode> = z.lazy(() =>
       }).optional(),
     }),
     z.object({
-      kind: z.literal('tool'),
+      kind: z.literal('invokeTool'),
       id: z.string().min(1),
       toolName: z.string().min(1),
       args: z.record(z.unknown()).optional(),
     }),
     z.object({
-      kind: z.literal('branch'),
+      kind: z.literal('conditional'),
       id: z.string().min(1),
       routes: z.array(z.object({
         match: z.string().min(1),
@@ -661,7 +661,7 @@ const WorkflowNodeSchema: z.ZodType<WorkflowNode> = z.lazy(() =>
       default: WorkflowNodeSchema.optional(),
     }),
     z.object({
-      kind: z.literal('fork'),
+      kind: z.literal('inParallel'),
       id: z.string().min(1),
       mode: z.enum(['race', 'all', 'settle']),
       paths: z.array(WorkflowNodeSchema).min(1),
@@ -676,7 +676,7 @@ const WorkflowNodeSchema: z.ZodType<WorkflowNode> = z.lazy(() =>
       layers: z.array(z.string().min(1)).min(1).optional(),
     }),
     z.object({
-      kind: z.literal('provide'),
+      kind: z.literal('withContext'),
       id: z.string().min(1),
       child: WorkflowNodeSchema,
       layers: z.array(z.string().min(1)).min(1),
@@ -694,10 +694,10 @@ const WorkflowNodeSchema: z.ZodType<WorkflowNode> = z.lazy(() =>
       steps: z.array(WorkflowNodeSchema).min(1),
     }),
     z.object({
-      kind: z.literal('every'),
+      kind: z.literal('schedule'),
       id: z.string().min(1),
       step: WorkflowNodeSchema,
-      ms: z.number().int().positive(),
+      interval: z.number().int().positive(),
       onError: z.enum(['continue', 'fail']).optional(),
     }),
     z.object({
@@ -723,16 +723,16 @@ const WorkflowDocumentSchema = z.object({
 ## Cross-References
 
 - `Step<I, O>` discriminated union: `01-step-type`
-- `step.llm`, `step.tool` builders: `02-step-variants`
-- `branch()`, `fork()`, `MergeFn`: `03-control-flow`
+- `callModel`, `invokeTool` builders: `02-step-variants`
+- `conditional()`, `inParallel()`, `MergeFn`: `03-control-flow`
 - `spawn()`: `04-spawn`
-- `loop()`, `every()`, `until.*`, `any()`, `all()`: `05-loop-and-until`
+- `loop()`, `schedule()`, `until.*`, `any()`, `all()`: `05-loop-and-until`
 - `Context`, `Item`, `ItemLog`: `07-context-and-event-log`
 - `AgentHarness`, `Tool`: `08-runtime`
 - `NoeticError` kinds: `09-error-model`
-- `MemoryLayer`: `11-memory-layer-system`
-- `planMemory`, `PlanState`: `12-builtin-memory-layers`
-- `compilePlan`, `adaptivePlan`, `PlanNodeSchema`: `13-patterns`
+- `ContextLayer`: `11-context-layer-system`
+- `plan`, `PlanState`: `12-builtin-context-layers`
+- Hand-written compositions of the same primitives: `13-patterns`
 
 ---
 
@@ -741,6 +741,6 @@ const WorkflowDocumentSchema = z.object({
 - **Custom until predicates via registered names.** A plugin could register a named predicate (e.g., `until.custom('myCheck')`) that the hydrator resolves from a predicate registry, similar to tool name resolution. This would allow domain-specific termination logic without extending the schema.
 - **URI workflow references.** The `subflow` node resolves named refs from an in-memory registry; a URI form could fetch documents from remote workflow libraries, reusing the same cycle detection.
 - **Streaming hydration.** For very large workflows, hydrate nodes lazily as execution reaches them rather than building the entire `Step` tree upfront. This reduces memory pressure and startup latency.
-- **Named memory layer resolution for `provide` nodes.** The current design uses string layer names, but the resolution mechanism is left to the `HydrationContext`. A standardised layer registry (analogous to the tool registry) would make `provide` nodes portable across different harness configurations.
+- **Named context layer resolution for `withContext` nodes.** The current design uses string layer names, but the resolution mechanism is left to the `HydrationContext`. A standardised layer registry (analogous to the tool registry) would make `withContext` nodes portable across different harness configurations.
 - **Workflow versioning and migration.** When `version` increments to `2`, a `migrateV1toV2` function would transform old documents automatically. The version field exists to enable this without breaking existing consumers.
 - **Conditional until predicates.** Predicates that inspect specific fields of structured output (e.g., `outputField('status', 'complete')`) rather than treating output as an opaque string.

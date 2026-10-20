@@ -2,9 +2,9 @@
   "title": "Steps",
   "pages": [
     "index",
-    "run",
-    "llm",
+    "run-code",
+    "call-model",
     "decide",
-    "tool"
+    "invoke-tool"
   ]
 }

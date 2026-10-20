@@ -41,7 +41,7 @@ function requireCallModel(
     throw new NoeticConfigError({
       code: 'MISSING_CALL_MODEL',
       message: `LLM-evaluated steering rule "${ruleId}" requires a callModel but none is available.`,
-      hint: 'Pass `llm: { provider: "openrouter", apiKey: "..." }` to AgentHarness or set OPENROUTER_API_KEY.',
+      hint: 'Pass `callModelDefaults: { apiKey: "..." }` (defaults to the Noetic platform) to AgentHarness or set NOETIC_API_KEY. For direct OpenRouter, use `callModelDefaults: { provider: "openrouter", apiKey: "..." }` or set OPENROUTER_API_KEY.',
     });
   }
 }

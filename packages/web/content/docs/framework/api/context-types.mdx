@@ -72,7 +72,7 @@ interface Context<TContext = ContextData, TState = unknown> {
 | `tryRecv` | `<T>(channel) => T \| null` | Non-blocking receive |
 | `checkpoint` | `() => Promise<void>` | Persist current state |
 | `complete` | `<T>(value) => void` | Signal completion with a value |
-| `abort` | `(reason?) => void` | Signal abort. Cascades to every live `fork` path and `spawn` child of this context (never to the parent); first call wins. Does not run context-layer teardown — see `harness.cancel` |
+| `abort` | `(reason?) => void` | Signal abort. Cascades to every live `inParallel` path and `spawn` child of this context (never to the parent); first call wins. Does not run context-layer teardown — see `harness.cancel` |
 
 ## ItemLog
 

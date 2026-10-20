@@ -4,7 +4,7 @@
  * The frontier records which steps were IN FLIGHT at snapshot time; it says nothing
  * about which ones finished, and a finished step leaves no trace once `leaveStep` pops
  * it. Resume therefore needs a separate record — and it must carry each step's OUTPUT,
- * not merely a "done" flag: steps consume the previous step's value, and an `llm` step
+ * not merely a "done" flag: steps consume the previous step's value, and a `callModel` step
  * re-run to catch up produces a different one than the rest of the run already saw.
  *
  * Entries are stored one key per step so appends are O(1). Folding the whole ledger
@@ -258,7 +258,7 @@ export interface StepLedgerStats {
  * The in-memory ledger a single execution carries: entries recovered from a previous
  * run (available for replay) plus the sequence counter for newly recorded ones.
  *
- * Shared by reference across fork/spawn children so one execution has one ledger —
+ * Shared by reference across inParallel/spawn children so one execution has one ledger —
  * path keys are globally unique across the step tree, so a flat map is correct. That
  * sharing is also why retention lives here rather than in the store: the sequence
  * cursor eviction walks belongs to the execution, not to the harness.
@@ -350,7 +350,7 @@ export class StepLedger {
     if (!this.retainable(entry)) {
       return;
     }
-    /* Reserve the sequence number BEFORE awaiting: concurrent fork legs record through
+    /* Reserve the sequence number BEFORE awaiting: concurrent inParallel legs record through
      * the one shared ledger, and two of them reading the same counter would write the
      * same key, silently overwriting a sibling's entry. A write that then fails leaves a
      * gap, which only makes the window below a slight over-estimate of the live count —

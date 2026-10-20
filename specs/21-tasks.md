@@ -20,10 +20,10 @@ A task has:
 - **State axes.** Independent dimensions: `reviewStatus × lifecycleStatus × archivedAt × paused`. Kanban columns are derived from these axes; the on-disk record never stores the column directly.
 - **Optional hierarchy.** A task gains a `hierarchy/` subdirectory when the user runs `noetic tasks plan <id>` (AI-driven interview), `noetic tasks add-milestone <id>`, or autonomously via the daemon's planner runner (autopilot plan-pass). Tasks without `hierarchy/` are leaves; tasks with `hierarchy/` are "structured." `hasHierarchy` is **derived** (`fs.exists(taskDir(id) + '/hierarchy/')`) — never stored, never persisted.
 - **Optional autopilot.** Toggled with `noetic tasks autopilot <on|off> <id>`. When enabled, the daemon's autopilot tick orchestrates a three-phase pipeline:
-  1. **plan-pass** — for tasks with no hierarchy yet, the daemon calls `harness.detachedSpawn(plannerStep, input, ctx, {subprocess: <localSubprocessAdapter>, cwdInit: taskDir})`. The adapter persists a handle manifest tagged with `{taskRole: 'planner', taskId}`; the planner's child runtime uses an LLM-driven `interview()` to produce a `TaskHierarchyInput` and persists it to `hierarchy/`.
-  2. **implement-pass** — for triaged features whose linked leaf task has no worktree, the daemon provisions a worktree (`wt switch -c <branch>` with `git worktree add` fallback) and calls `harness.detachedSpawn(implementerStep, input, ctx, {subprocess, cwdInit: worktreePath})`. The adapter's manifest is tagged `{taskRole: 'implementer', taskId, featureId}`. The implementer drives a `react()` agent loop and flips the feature's `loopState` from `implementing` to `validating` on success or `blocked` on failure.
+  1. **plan-pass** — for tasks with no hierarchy yet, the daemon calls `harness.detachedSpawn(plannerStep, input, ctx, {subprocess: <localSubprocessAdapter>, cwdInit: taskDir})`. The adapter persists a handle manifest tagged with `{taskRole: 'planner', taskId}`; the planner's child runtime runs an LLM-driven clarifying-question loop (`loop` + `callModel`, bounded by a question cap) to produce a `TaskHierarchyInput` and persists it to `hierarchy/`.
+  2. **implement-pass** — for triaged features whose linked leaf task has no worktree, the daemon provisions a worktree (`wt switch -c <branch>` with `git worktree add` fallback) and calls `harness.detachedSpawn(implementerStep, input, ctx, {subprocess, cwdInit: worktreePath})`. The adapter's manifest is tagged `{taskRole: 'implementer', taskId, featureId}`. The implementer drives a ReAct loop (`loop` + `callModel` + `until.noToolCalls`) and flips the feature's `loopState` from `implementing` to `validating` on success or `blocked` on failure.
   3. **structured-tick** — for active hierarchies, advance slice/milestone state machines, dispatch `validatorRequestChan` events for `validating` features, and fire `mission:statusChanged` when `hierarchyStatus` transitions.
-  The validator flow consumes `validatorRequestChan` and runs the `runValidator` built by `buildAdversarialValidatorStep()` (the default Step-graph validator: `agent-ci` and an LLM-driven adversarial code review forked in parallel — see "Validator runner" below). Each phase is independent; a manual task can be planned without autopilot ever firing the implement-pass, and structured tasks created by hand skip the plan-pass entirely.
+  The validator flow consumes `validatorRequestChan` and runs the `runValidator` built by `buildAdversarialValidatorStep()` (the default Step-graph validator: `agent-ci` and an LLM-driven adversarial code review run in parallel via `inParallel` — see "Validator runner" below). Each phase is independent; a manual task can be planned without autopilot ever firing the implement-pass, and structured tasks created by hand skip the plan-pass entirely.
 
 A task may be both `worktree`-sourced and `structured`. All combinations of (source × hierarchy × autopilot) are valid.
 
@@ -349,7 +349,7 @@ The planner runner produces a task hierarchy autonomously for a manual task that
    });
    ```
    Handle metadata carries `{taskRole: 'planner', taskId}` so subsequent lookups don't need to scan state. The launcher atomically flips `task.json#autopilotState` to `'planning'` and emits a `task:updated{phase: 'spawn'}` event.
-2. **Runner bootstrap** (the adapter's `step-bootstrap` child runtime) imports the step registry entry point, looks up the planner step by id, and runs it. The planner constructs a minimal `AgentHarness` and drives the `interview()` pattern with an LLM-backed `askQuestion` responder so the model interviews itself using only the task title + `description.md` as context. On completion, the runner commits in **audit → state → event** order:
+2. **Runner bootstrap** (the adapter's `step-bootstrap` child runtime) imports the step registry entry point, looks up the planner step by id, and runs it. The planner constructs a minimal `AgentHarness` and runs a clarifying-question loop (`loop` + `callModel`, capped at `maxQuestions` iterations) in which the model both asks and answers, using only the task title + `description.md` as context. On completion, the runner commits in **audit → state → event** order:
    1. Append a `kind='system'` log entry summarising the outcome.
    2. Persist the resulting hierarchy via `persistTaskHierarchy()` and atomically rewrite `task.json` with `hierarchyStatus: 'active'` + `autopilotState: 'watching'`.
    3. Append a `mission:statusChanged` event.
@@ -391,7 +391,7 @@ The implementer runner builds one feature inside its own git worktree. The autop
    });
    ```
    Handle metadata carries `{taskRole: 'implementer', taskId, featureId}`. In **audit → state → event** order the launcher atomically patches the leaf task's `worktreePath` + `branch`, emits `task:updated`, and finally emits `feature:loopStateChanged{phase: 'spawn', loopState: 'implementing'}`.
-2. **Runner bootstrap** constructs a full coding-tools `AgentHarness` rooted at the worktree, loads the parent's hierarchy, builds a prompt from the feature's `acceptanceCriteria` + the parent milestone's assertions, and drives a `react()` agent loop bounded by `DEFAULT_IMPLEMENTATION_RETRY_BUDGET`. On success it commits **audit → state → event**:
+2. **Runner bootstrap** constructs a full coding-tools `AgentHarness` rooted at the worktree, loads the parent's hierarchy, builds a prompt from the feature's `acceptanceCriteria` + the parent milestone's assertions, and drives a ReAct loop (`loop` + `callModel` + `until.noToolCalls`) bounded by `DEFAULT_IMPLEMENTATION_RETRY_BUDGET`. On success it commits **audit → state → event**:
    1. Append a `kind='system'` log entry on the leaf task.
    2. Atomically flip the parent feature's `loopState` from `implementing` to `validating` (or `blocked` on failure / max-steps) via `applyFeatureLoopStateUpdate`.
    3. Append a `feature:loopStateChanged{phase: 'exit'}` event on the parent task.
@@ -439,14 +439,14 @@ const subprocess = createLocalSubprocessAdapter({ storage });
 
 ## Validator runner
 
-The daemon's validator dispatches `validatorRequestChan` items to `runValidator: RunValidatorFn`. The default production binding is `buildAdversarialValidatorStep()` from `adversarial-validator-flow.ts`, run via `harness.run(flow, args, ctx)`. The flow is a Step graph: a single `step.run` resolves the leaf task's worktree, then dispatches a `fork({mode: 'all'})` over two paths that run in parallel:
+The daemon's validator dispatches `validatorRequestChan` items to `runValidator: RunValidatorFn`. The default production binding is `buildAdversarialValidatorStep()` from `adversarial-validator-flow.ts`, run via `harness.run(flow, args, ctx)`. The flow is a Step graph: a single `runCode` resolves the leaf task's worktree, then dispatches a `inParallel({mode: 'all'})` over two paths that run in parallel:
 
 | Path | Step kind | Behaviour |
 |---|---|---|
-| `validator.agent-ci` | `step.run` wrapping a subprocess spawn | Runs `npx @redwoodjs/agent-ci run --quiet` in the worktree. Exit 0 → partial `pass`; non-zero → partial `fail`; missing binary → partial `pass` with `missing: true` (skip-on-missing default). |
-| `validator.adversarial-review` | `step.llm({output: AdversarialIssuesSchema})` | Reads `git diff main...HEAD` and re-emits a structured list of issues against the feature's acceptance criteria + assertions. Empty issue list → partial `pass`; any issues → partial `fail`. |
+| `validator.agent-ci` | `runCode` wrapping a subprocess spawn | Runs `npx @redwoodjs/agent-ci run --quiet` in the worktree. Exit 0 → partial `pass`; non-zero → partial `fail`; missing binary → partial `pass` with `missing: true` (skip-on-missing default). |
+| `validator.adversarial-review` | `callModel({output: AdversarialIssuesSchema})` | Reads `git diff main...HEAD` and re-emits a structured list of issues against the feature's acceptance criteria + assertions. Empty issue list → partial `pass`; any issues → partial `fail`. |
 
-The fork's `merge` reconciles both partials into a single `ValidatorRunOutcome`:
+The `inParallel`'s `merge` reconciles both partials into a single `ValidatorRunOutcome`:
 
 - agent-ci `error` → outcome `error` (adversarial result discarded).
 - agent-ci `fail` OR adversarial issues found → outcome `fail`. The adversarial reviewer's per-assertion findings populate `assertionOutcomes` so the fix-feature flow has structured failure data, not just free text.
@@ -460,7 +460,7 @@ The validator returns `error` immediately when the leaf task has no `worktreePat
 
 Contract:
 
-- **Slot.** `Slot.STEERING` (90), placing it ahead of working memory so steering nudges shape interpretation of every downstream block.
+- **Slot.** `Slot.STEERING` (90), placing it ahead of the scratchpad so steering nudges shape interpretation of every downstream block.
 - **Activation.** Conditional on `process.env.NOETIC_TASK_DIR`. When unset, `recall()` returns `null` and the layer is dormant — non-task agent runs never see steering content.
 - **Missing file.** ENOENT on `steering.md` is treated as "no steering content" (returns `null`), so half-populated task directories degrade gracefully.
 - **Output shape.** When a non-empty `steering.md` exists, `recall()` emits a developer-role block prefixed with `# Task Steering`.
@@ -557,7 +557,7 @@ When `viewMode === 'taskBoard'`, `app.tsx` renders the kanban board instead of t
 ## Cross-references
 
 - `08-runtime` — `FsAdapter`, `AgentHarness` lifecycle.
-- `11-context-layer-system` / `12-builtin-memory-layers` — slot conventions for the steering layer.
+- `11-context-layer-system` / `12-builtin-context-layers` — slot conventions for the steering layer.
 - `09-error-model` — handlers throw plain `Error` (not `NoeticError`); see `handlers/_shared.ts#formatError`.
 
 ## Future Considerations

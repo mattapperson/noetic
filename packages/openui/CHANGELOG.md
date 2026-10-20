@@ -1,3 +1,7 @@
+## @noetic-tools/openui-v2.1.1 (2026-08-12)
+
+* feat!: unify Noetic public API naming (#68) ([38cb18f](https://github.com/mattapperson/noetic/commit/38cb18f)), closes [#68](https://github.com/mattapperson/noetic/issues/68)
+
 ## @noetic-tools/openui-v2.1.0 (2026-08-02)
 
 * feat: rename the memory layer system to context layers ([123810f](https://github.com/mattapperson/noetic/commit/123810f))

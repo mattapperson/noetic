@@ -5,7 +5,7 @@ description: A context layer that records every decide step's answers, so later 
 
 ## Overview
 
-A [`step.decide`](/docs/framework/steps/decide) call never writes to the conversation. `decisionsHistoryLayer` writes decisions back into the context system: it records each decision through the `onDecision` hook, exposes the records as data on `ctx.context.decisionsHistory`, and renders a one-line summary per decision into the view of later `llm` steps.
+A [`decide`](/docs/framework/steps/decide) call never writes to the conversation. `decisionsHistoryLayer` writes decisions back into the context system: it records each decision through the `onDecision` hook, exposes the records as data on `ctx.context.decisionsHistory`, and renders a one-line summary per decision into the view of later `callModel` steps.
 
 - **Slot**: `110` (`Slot.WORKING_MEMORY + 10`)
 - **Default scope**: `'execution'`
@@ -15,15 +15,15 @@ A [`step.decide`](/docs/framework/steps/decide) call never writes to the convers
 ## Usage
 
 ```ts
-import { AgentHarness, decisionsHistoryLayer, step } from '@noetic-tools/core';
+import { AgentHarness, decide, decisionsHistoryLayer, runCode } from '@noetic-tools/core';
 
 const harness = new AgentHarness({
   name: 'support',
   params: {},
-  context: [decisionsHistoryLayer()],
+  contextLayers: [decisionsHistoryLayer()],
 });
 
-const triage = step.decide({
+const triage = decide({
   id: 'triage',
   model: 'typesafe/jev-1.14',
   questions: {
@@ -34,7 +34,7 @@ const triage = step.decide({
   },
 });
 
-const followUp = step.run({
+const followUp = runCode({
   id: 'follow-up',
   execute: async (input: string, ctx) => {
     const record = ctx.context.decisionsHistory?.latest;
@@ -132,4 +132,4 @@ The hook has a 5s default timeout (`timeouts.onDecision`). A hook that throws or
 
 ## Forks and Spawns
 
-A `fork` path or a `spawn` child starts with a copy of the parent's records (`onSpawn`). When it returns, `onReturn` merges back only the records the child added, so concurrent paths keep each other's decisions.
+A `inParallel` path or a `spawn` child starts with a copy of the parent's records (`onSpawn`). When it returns, `onReturn` merges back only the records the child added, so concurrent paths keep each other's decisions.

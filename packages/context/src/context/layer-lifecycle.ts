@@ -143,6 +143,7 @@ interface BeforeToolCallLayersParams {
   layers: ContextLayer[];
   toolName: string;
   toolArgs: unknown;
+  callId?: string;
   ctx: ExecutionContext;
   store: LayerStateStore;
 }
@@ -1070,6 +1071,7 @@ export async function beforeToolCallLayers({
   layers,
   toolName,
   toolArgs,
+  callId,
   ctx,
   store,
 }: BeforeToolCallLayersParams): Promise<SteeringDecision> {
@@ -1099,6 +1101,7 @@ export async function beforeToolCallLayers({
         layer.hooks.beforeToolCall({
           toolName,
           toolArgs,
+          callId,
           ctx,
           state,
         }),
@@ -1116,6 +1119,15 @@ export async function beforeToolCallLayers({
         throw e;
       }
       store.diagnostic(layer.id, 'beforeToolCall', e);
+      // A permission GATE must fail closed: a hook that threw or timed out is
+      // a check that did not run, and for a gating layer that means deny, not
+      // the silent approval an abstention would collapse into.
+      if (layer.onBeforeToolCallError === 'deny') {
+        return {
+          action: SteeringAction.Deny,
+          guidance: `tool call denied: gating layer '${layer.id}' failed (${e instanceof Error ? e.message : String(e)})`,
+        };
+      }
     }
   }
 

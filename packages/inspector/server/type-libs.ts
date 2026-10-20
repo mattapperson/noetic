@@ -17,10 +17,9 @@ import path from 'node:path';
 const WORKSPACE_PACKAGES = [
   'types',
   'context',
-  'memory',
   'core',
   'platform-node',
-  'sub-harness',
+  'acp',
 ] as const;
 
 const EXTERNAL_PACKAGES = [

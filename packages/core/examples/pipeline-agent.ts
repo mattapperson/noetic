@@ -1,27 +1,27 @@
 /**
  * Pipeline Agent
  *
- * Demonstrates: branch (as sequencer) + step.run + step.llm + loop + prepareNext
+ * Demonstrates: conditional (as sequencer) + runCode + callModel + loop + prepareNext
  *
  * A 3-stage text processing pipeline:
- * 1. step.run — normalize and clean raw text
- * 2. step.llm — analyze for sentiment and themes
- * 3. step.run — format into structured report
+ * 1. runCode — normalize and clean raw text
+ * 2. callModel — analyze for sentiment and themes
+ * 3. runCode — format into structured report
  *
- * Uses loop({ until: until.maxSteps(3) }) with branch routing by phase,
+ * Uses loop({ until: until.maxSteps(3) }) with conditional routing by phase,
  * and prepareNext feeding each stage's output as the next stage's input.
  */
 
 import type { ContextData } from '@noetic-tools/context';
 import type { StepLoop } from '@noetic-tools/types';
-import { branch } from '../src/builders/control-flow-builders';
+import { conditional } from '../src/builders/control-flow-builders';
 import { loop } from '../src/builders/loop-builder';
-import { step } from '../src/builders/step-builders';
+import { callModel, runCode } from '../src/builders/step-builders';
 import { until } from '../src/until/predicates';
 
 //#region Stage Handlers
 
-const normalizeStage = step.run<ContextData, string, string>({
+const normalizeStage = runCode<ContextData, string, string>({
   id: 'normalize-text',
   execute: async (input) => {
     return input
@@ -31,7 +31,7 @@ const normalizeStage = step.run<ContextData, string, string>({
   },
 });
 
-const analyzeStage = step.llm<ContextData, string, string>({
+const analyzeStage = callModel<ContextData, string, string>({
   id: 'analyze-text',
   model: 'openai/gpt-4o',
   instructions: [
@@ -43,7 +43,7 @@ const analyzeStage = step.llm<ContextData, string, string>({
   ].join(' '),
 });
 
-const formatStage = step.run<ContextData, string, string>({
+const formatStage = runCode<ContextData, string, string>({
   id: 'format-report',
   execute: async (input) => {
     return [
@@ -60,7 +60,7 @@ const formatStage = step.run<ContextData, string, string>({
 
 //#region Agent Builder
 
-/** Builds a 3-stage text processing pipeline using branch + loop + prepareNext. */
+/** Builds a 3-stage text processing pipeline using conditional + loop + prepareNext. */
 export function buildPipelineAgent(): StepLoop<ContextData, string, string> {
   const stages = [
     normalizeStage,
@@ -69,7 +69,7 @@ export function buildPipelineAgent(): StepLoop<ContextData, string, string> {
   ] as const;
   let phase = 0;
 
-  const router = branch<ContextData, string, string>({
+  const router = conditional<ContextData, string, string>({
     id: 'phase-router',
     route: () => stages[phase] ?? null,
   });

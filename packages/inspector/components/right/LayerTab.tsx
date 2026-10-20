@@ -6,7 +6,7 @@
  * state. Refetches when the layer's change counter bumps (layer_state SSE)
  * while the tab is visible.
  *
- * `history-window` gets a dedicated view: it is projection-only
+ * `history` gets a dedicated view: it is projection-only
  * (`ContextLayer<null>` — conversation history is not a context layer), so
  * instead of printing `null` the tab shows the recent session items the
  * layer will trim into the next window.
@@ -92,10 +92,10 @@ export function LayerTab({ layer }: { layer: LayerInfo }) {
   const version = useInspector((state) => state.layerVersions[layer.id] ?? 0);
   const usage = useInspector((state) => state.usage);
   const [result, setResult] = useState<LayerStateResult | null>(null);
-  const isHistoryWindow = layer.id === 'history-window';
+  const isHistoryLayer = layer.id === 'history';
 
   useEffect(() => {
-    if (isHistoryWindow) {
+    if (isHistoryLayer) {
       return;
     }
     void api
@@ -105,7 +105,7 @@ export function LayerTab({ layer }: { layer: LayerInfo }) {
   }, [
     layer.id,
     version,
-    isHistoryWindow,
+    isHistoryLayer,
   ]);
 
   const layerUsage = usage?.layers.find((entry) => entry.layerId === layer.id);
@@ -119,11 +119,11 @@ export function LayerTab({ layer }: { layer: LayerInfo }) {
         <Badge label={layer.scope} />
         {budget !== null && <Badge label={budget} />}
         {layerUsage !== undefined && <Badge label={`${layerUsage.tokenCount} tok last call`} />}
-        {!isHistoryWindow && result !== null && result.source !== 'live' && (
+        {!isHistoryLayer && result !== null && result.source !== 'live' && (
           <Badge label={result.source} />
         )}
       </div>
-      {isHistoryWindow ? (
+      {isHistoryLayer ? (
         <HistoryWindowView />
       ) : (
         <>

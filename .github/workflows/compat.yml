@@ -17,7 +17,45 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Secretless packaging check: proves the packages build, pack into
+  # publishable tarballs, install as an external npm consumer, and bundle for
+  # every runtime target. No live calls, so it runs on ALL PRs — forks
+  # included — giving fork contributors packaging/resolution signal even
+  # though the live job below cannot run for them.
+  pack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install workspace deps (builds need them)
+        run: bun install
+
+      - name: Build + pack core into tarballs
+        working-directory: compat
+        run: bun run pack:packages
+
+      - name: Install the packed tarballs as an external consumer
+        working-directory: compat
+        run: npm install --no-audit --no-fund
+
+      - name: Build the runtime bundles (no live calls)
+        working-directory: compat
+        run: bun run build:bundles
+
   compat:
+    # Fork PRs never receive repository secrets (OPENROUTER_API_KEY,
+    # CLOUDFLARE_*), so the live smoke cannot run there — skip instead of
+    # failing. Do NOT "fix" this with pull_request_target: that would execute
+    # untrusted fork code with deploy credentials. Gated on the secretless
+    # pack job so a broken build never burns a live Cloudflare deploy.
+    needs: pack
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:

@@ -1,60 +1,60 @@
-# Built-In Memory Layers
+# Built-In Context Layers
 
-> **Module:** `@noetic-tools/memory` (source at `packages/memory/src/memory/layers/**`); re-exported by `@noetic-tools/core`.
-> **Depends On:** `11-memory-layer-system` (MemoryLayer, MemoryHooks, Slot, ScopedStorage, BudgetConfig, all hook param types)
-> **Exports:** `workingMemory()`, `semanticRecall()`, `observationalMemory()`, `temporalMemory()`, `episodicMemory()`, `durableTaskState()`, `steering()`, `planMemory()`, `WorkingMemoryConfig`, `SemanticRecallConfig`, `ObservationalMemoryConfig`, `TemporalMemoryConfig`, `TemporalFact`, `TemporalSearchResult`, `FactExtractor`, `FactSearcher`, `EpisodicMemoryConfig`, `DurableTaskState`, `SteeringConfig`, `SteeringRule`, `PlanMemoryConfig`, `PlanState`, `PlanPhase`, `PlanExecutionEntry`, `VectorStore`, `Embedder`, `EpisodicStore`, `DocumentRetriever`, `Reranker`, `PubSubChannel`
+> **Module:** `@noetic-tools/context` (source at `packages/context/src/context/layers/**`); re-exported by `@noetic-tools/core`.
+> **Depends On:** `11-context-layer-system` (ContextLayer, ContextLayerHooks, Slot, ScopedStorage, BudgetConfig, all hook param types)
+> **Exports:** `instructions()`, `history()`, `scratchpad()`, `observations()`, `temporal()`, `filesystem()`, `plan()`, `taskState()`, `toolCalls()`, `steering()`, `ScratchpadConfig`, `ObservationsConfig`, `TemporalConfig`, `TemporalFact`, `TemporalSearchResult`, `FactExtractor`, `FactSearcher`, `TaskState`, `TaskStateOptions`, `SteeringConfig`, `SteeringRule`, `PlanConfig`, `PlanState`, `PlanPhase`, `PlanExecutionEntry`
 
 ---
 
-These are informative reference implementations. They are NOT special-cased in the runtime — they use the same `MemoryLayer` interface as custom layers.
+These are informative reference implementations. They are NOT special-cased in the runtime — they use the same `ContextLayer` interface as custom layers.
 
 All layers return `Item[]` from `recall` — each block is a `MessageItem` with `role: developer` (framework-injected context, distinct from user-authored `system` instructions).
 
 ---
 
-## `workingMemory()`
+## `scratchpad()`
 
 Always-available structured or freeform state, injected near the top of the View.
 
 ```typescript
-interface WorkingMemoryConfig {
+interface ScratchpadConfig {
   scope?: 'thread' | 'resource';
   schema?: ZodType;
   template?: string;
   readOnly?: boolean;
 }
 
-function workingMemory(config?: WorkingMemoryConfig): MemoryLayer<WorkingMemoryState>
+function scratchpad(config?: ScratchpadConfig): ContextLayer<ScratchpadState>
 ```
 
 | Property | Value |
 |----------|-------|
-| **id** | `'working-memory'` |
-| **slot** | `Slot.WORKING_MEMORY` (100) |
+| **id** | `'scratchpad'` |
+| **slot** | `Slot.SCRATCHPAD` (100) |
 | **scope** | `config.scope ?? 'thread'` |
 | **budget** | `{ min: 200, max: 1500 }` |
 | **hooks** | `init`, `recall`, `store`, `onSpawn` |
 
 **Behavior:**
 - `init`: Loads state from `ScopedStorage`. Defaults to `{}` (schema) or `''` (freeform). Persisted state that fails the configured schema falls back to `{}` (corrupt state must not abort the execution).
-- `recall`: Renders state as `<working_memory>` block in a `MessageItem` with `role: developer`. Returns `null` if empty.
-- `store`: Watches for `FunctionCallItem` with `name: 'updateWorkingMemory'`. Deep-merges structured state (object-valued keys merge recursively; arrays and primitives replace). When a schema is configured, the **merged** state is validated (partial updates stay legal); a violating merge throws — the runtime logs a diagnostic and drops the update, leaving prior state untouched.
+- `recall`: Renders state as `<scratchpad>` block in a `MessageItem` with `role: developer`. Returns `null` if empty.
+- `store`: Watches for `FunctionCallItem` with `name: 'scratchpad/update'`. Deep-merges structured state (object-valued keys merge recursively; arrays and primitives replace). When a schema is configured, the **merged** state is validated (partial updates stay legal); a violating merge throws — the runtime logs a diagnostic and drops the update, leaving prior state untouched.
 - `onSpawn`: Clones state for `scope: 'resource'`. Returns `null` otherwise.
 
 **Provides:**
 
-Working memory exposes two declarations via its `provides` map, making state available to code steps and LLM tool calls:
+The scratchpad exposes two declarations via its `provides` map, making state available to code steps and LLM tool calls:
 
 | Name | Kind | Description |
 |------|------|-------------|
-| `snapshot` | `layerData` | Returns the current working memory state as-is. |
-| `update` | `layerFn` | Merges new key-value pairs into the state. Exposed as `working-memory/update` LLM tool. |
+| `snapshot` | `layerData` | Returns the current scratchpad state as-is. |
+| `update` | `layerFunction` | Merges new key-value pairs into the state. Exposed as `scratchpad/update` LLM tool. |
 
 ```typescript
 provides: {
   snapshot: layerData({ read: (state) => state }),
-  update: layerFn({
-    description: 'Update the agent working memory with new key-value pairs.',
+  update: layerFunction({
+    description: 'Update the agent scratchpad with new key-value pairs.',
     input: z.record(z.string(), z.unknown()),
     output: z.void(),
     // Deep-merges args into state recursively (objects merge, arrays/primitives
@@ -64,65 +64,21 @@ provides: {
 }
 ```
 
-- **`snapshot`** — A data declaration. Code steps access it synchronously via `ctx.memory['working-memory'].snapshot`, which returns the full `WorkingMemoryState`.
-- **`update`** — A function declaration. Code steps call it as `await ctx.memory['working-memory'].update({ key: 'val' })`. The runtime also exposes it as an LLM tool named `working-memory/update`, allowing the model to update working memory through the standard tool-call mechanism. When a `schema` is configured, the merged state is validated; a violating update throws, surfacing as a tool error the model can see, and the state is unchanged.
+- **`snapshot`** — A data declaration. Code steps access it synchronously via `ctx.context['scratchpad'].snapshot`, which returns the full `ScratchpadState`.
+- **`update`** — A function declaration. Code steps call it as `await ctx.context['scratchpad'].update({ key: 'val' })`. The runtime also exposes it as an LLM tool named `scratchpad/update`, allowing the model to update the scratchpad through the standard tool-call mechanism. When a `schema` is configured, the merged state is validated; a violating update throws, surfacing as a tool error the model can see, and the state is unchanged.
 - **Deep merge:** Updates merge recursively — nested object keys are deep-merged rather than overwritten; arrays and primitives replace. When the prior state is a freeform **string** and an object update arrives, the prior string is preserved under a `_previous` key instead of being silently discarded.
 - **Prototype poisoning protection:** The merge strips `__proto__` and `constructor` keys from incoming arguments at every depth.
-- **Backward compatibility:** The `store` hook still detects `findFunctionCall(newItems, 'updateWorkingMemory')` for LLMs that emit the legacy function-call convention. Both paths apply the same prototype-stripping and merge logic.
-- **Type-safe access:** The `workingMemory()` factory returns its result `satisfies MemoryLayer<WorkingMemoryState>`, preserving the literal layer id and provides shape at the type level. Combine `memory([workingMemory()])` with `InferMemory<typeof mem>` to get compile-time typed access to `ctx.memory['working-memory']`.
+- **Function-call path:** The `store` hook also detects `findFunctionCall(newItems, 'scratchpad/update')` for responses that carry the update as a raw function-call item rather than through the tool pipeline. Both paths apply the same prototype-stripping and merge logic.
+- **Type-safe access:** The `scratchpad()` factory returns its result `satisfies ContextLayer<ScratchpadState>`, preserving the literal layer id and provides shape at the type level. Combine `context([scratchpad()])` with `InferContext<typeof mem>` to get compile-time typed access to `ctx.context['scratchpad']`.
 
 ---
 
-## `semanticRecall()`
-
-Vector-search over past items, injected for relevant context.
-
-```typescript
-interface SemanticRecallConfig {
-  vectorStore: VectorStore;
-  embedder: Embedder;
-  topK?: number;
-  contextWindow?: number | { before: number; after: number };
-  minScore?: number;
-  scope?: 'thread' | 'resource' | 'global';
-}
-
-function semanticRecall(config: SemanticRecallConfig): MemoryLayer<void>
-```
-
-| Property | Value |
-|----------|-------|
-| **id** | `'semantic-recall'` |
-| **slot** | `Slot.SEMANTIC_RECALL` (400) |
-| **scope** | `config.scope ?? 'resource'` |
-| **budget** | `{ min: 0, max: 4000 }` |
-| **hooks** | `recall`, `store` |
-
-**Behavior:**
-- `recall`: Embeds query, searches vector store, expands with context window, trims to budget. Returns `<semantic_recall>` block in a `MessageItem` with `role: developer`.
-- `store`: Embeds items where `item.type === 'message'` and upserts to vector store.
-
-### Supporting Types
-
-```typescript
-interface VectorStore {
-  search(embedding: number[], opts: { topK: number; filter: unknown; minScore: number }): Promise<VectorResult[]>;
-  upsert(entry: { id: string; embedding: number[]; metadata: unknown }): Promise<void>;
-}
-
-interface Embedder {
-  embed(text: string): Promise<number[]>;
-}
-```
-
----
-
-## `observationalMemory()`
+## `observations()`
 
 Distills conversation into concise observations using a background LLM call.
 
 ```typescript
-interface ObservationalMemoryConfig {
+interface ObservationsConfig {
   bufferThreshold?: number;    // tokens before observer runs, default 2000
   maxObservations?: number;    // max kept, default 50 (compaction beyond)
   observerModel?: string;      // default: haiku
@@ -130,12 +86,12 @@ interface ObservationalMemoryConfig {
   scope?: 'thread' | 'resource';
 }
 
-function observationalMemory(config?: ObservationalMemoryConfig): MemoryLayer<ObservationalState>
+function observations(config?: ObservationsConfig): ContextLayer<ObservationsState>
 ```
 
 | Property | Value |
 |----------|-------|
-| **id** | `'observational-memory'` |
+| **id** | `'observations'` |
 | **slot** | `Slot.OBSERVATIONS` (200) |
 | **scope** | `config.scope ?? 'resource'` |
 | **budget** | `{ min: 500, max: 2500 }` |
@@ -151,7 +107,7 @@ function observationalMemory(config?: ObservationalMemoryConfig): MemoryLayer<Ob
 
 ---
 
-## `temporalMemory()`
+## `temporal()`
 
 Non-atomic, LLM-backed long-term memory for time-anchored recall. Distills the conversation into a key-value ledger of timestamped facts and answers temporal queries on demand. Addresses the failure class that pure recall cannot fix: relative-date arithmetic and event ordering ("what did I do three weeks ago?").
 
@@ -168,7 +124,7 @@ interface TemporalSearchResult {
 type FactExtractor = (input: { transcript: string; now: string }) => Promise<TemporalFact[]>;
 type FactSearcher = (input: { query: string; facts: TemporalFact[]; now: string }) => Promise<TemporalSearchResult>;
 
-interface TemporalMemoryConfig {
+interface TemporalConfig {
   now?: () => Date;            // injectable clock (tests/replay); default () => new Date()
   scope?: 'thread' | 'resource';
   extract?: FactExtractor;     // store-side distillation; omitted → buffer only, never fabricate
@@ -179,7 +135,7 @@ interface TemporalMemoryConfig {
   injectLedger?: boolean;      // also inject <remembered_facts> on recall, default false
 }
 
-function temporalMemory(config?: TemporalMemoryConfig): MemoryLayer<TemporalState>
+function temporal(config?: TemporalConfig): ContextLayer<TemporalState>
 ```
 
 | Property | Value |
@@ -207,84 +163,37 @@ function temporalMemory(config?: TemporalMemoryConfig): MemoryLayer<TemporalStat
 
 | Name | Kind | Description |
 |------|------|-------------|
-| `searchMemory` | `layerFn` | Given `{ query }`, returns `TemporalSearchResult`. Exposed as the `temporal/searchMemory` LLM tool. Delegates to the injected `search` callback; without one, returns the raw `[ts] fact` ledger so the tool degrades gracefully. |
+| `searchMemory` | `layerFunction` | Given `{ query }`, returns `TemporalSearchResult`. Exposed as the `temporal/searchMemory` LLM tool. Delegates to the injected `search` callback; without one, returns the raw `[ts] fact` ledger so the tool degrades gracefully. |
 
-**Design:** The layer is LLM-agnostic — `extract`/`search` are injected by the host (mirroring `observationalMemory`'s `observer`), so `memory/` stays tree-shakable. The code agent wires structured `step.llm` calls as the callbacks and installs `temporalMemory()` in its default stack.
-
----
-
-## `episodicMemory()`
-
-Records execution summaries and retrieves relevant past experiences.
-
-```typescript
-interface EpisodicMemoryConfig {
-  store: EpisodicStore;
-  embedder: Embedder;
-  retrieval?: 'embedding' | 'recency' | 'both';
-  maxEpisodes?: number;
-  scope?: 'resource' | 'global';
-}
-
-function episodicMemory(config: EpisodicMemoryConfig): MemoryLayer<void>
-```
-
-| Property | Value |
-|----------|-------|
-| **id** | `'episodic-memory'` |
-| **slot** | `Slot.EPISODIC` (300) |
-| **scope** | `config.scope ?? 'resource'` |
-| **budget** | `{ min: 0, max: 2000 }` |
-| **hooks** | `recall`, `onComplete` |
-
-**Behavior:**
-- `recall`: Retrieves by embedding similarity, recency, or both. Deduplicates. Returns `<past_experiences>` block in a `MessageItem` with `role: developer`.
-- `onComplete`: Creates episode summary, embeds it, saves to store.
-
-### Supporting Types
-
-```typescript
-interface EpisodicStore {
-  searchByEmbedding(embedding: number[], opts: unknown): Promise<Episode[]>;
-  getRecent(opts: unknown): Promise<Episode[]>;
-  save(episode: Episode, embedding: number[]): Promise<void>;
-}
-
-interface Episode {
-  id: string;
-  summary: string;
-  timestamp: number;
-  outcome: ExecutionOutcome;
-}
-```
+**Design:** The layer is LLM-agnostic — `extract`/`search` are injected by the host (mirroring `observations()`'s `observer`), so `@noetic-tools/context` stays tree-shakable. The code agent wires structured `callModel` calls as the callbacks and installs `temporal()` in its default stack.
 
 ---
 
-## `durableTaskState()`
+## `taskState()`
 
-Persists task-level artifacts (files modified, progress checkpoints, arbitrary data) across spawn boundaries and across executions within a thread. This replaces a standalone `Persistence` interface — all state that survives across fresh-context iterations is managed uniformly through memory layers.
+Persists task-level artifacts (files modified, progress checkpoints, arbitrary data) across spawn boundaries and across executions within a thread. This replaces a standalone `Persistence` interface — all state that survives across fresh-context iterations is managed uniformly through context layers.
 
 ```typescript
-interface DurableTaskState {
+interface TaskState {
   checkpoints: Array<{ timestamp: number; depth: number }>;
   files: string[];
   data: Record<string, unknown>;
 }
 
-type DurableTaskDataMerge = 'shallow' | 'namespace';
+type TaskStateDataMerge = 'shallow' | 'namespace';
 
-interface DurableTaskStateOptions {
+interface TaskStateOptions {
   /** How `data` merges at a child boundary. Default: `'shallow'`. */
-  mergeData?: DurableTaskDataMerge;
+  mergeData?: TaskStateDataMerge;
 }
 
-function durableTaskState(opts?: DurableTaskStateOptions): MemoryLayer<DurableTaskState>
+function taskState(opts?: TaskStateOptions): ContextLayer<TaskState>
 ```
 
 | Property | Value |
 |----------|-------|
-| **id** | `'durable-task-state'` |
-| **slot** | `Slot.WORKING_MEMORY + 10` (110) |
+| **id** | `'task-state'` |
+| **slot** | `Slot.SCRATCHPAD + 10` (110) |
 | **scope** | `'thread'` |
 | **budget** | `{ min: 100, max: 800 }` |
 | **timeouts** | `{ store: 30_000 }` |
@@ -299,7 +208,7 @@ function durableTaskState(opts?: DurableTaskStateOptions): MemoryLayer<DurableTa
 - `onReturn`: Merges child files/checkpoints/data back into parent (checkpoints capped at 50 after the merge, newest kept). `files` is a set union; `data` follows the configured merge strategy.
 - `onComplete`: Final checkpoint stamped with the completing execution's `ctx.depth`, plus the outcome label under `data.__outcome` (capped).
 
-**Write API (`provides`):** the layer is writable by the model, exposed as the tools `durable-task-state/recordArtifact` and `durable-task-state/setTaskData`.
+**Write API (`provides`):** the layer is writable by the model, exposed as the tools `task-state/recordArtifact` and `task-state/setTaskData`.
 
 | Function | Input | Effect |
 |----------|-------|--------|
@@ -317,7 +226,7 @@ Without these, `files` and `data` would only ever be written by the framework, a
 
 `onReturn` receives the child's `ExecutionContext` as `childCtx` (spec 11), which is what makes namespacing possible.
 
-**Key design:** Scope is `'thread'` so the state persists across executions/iterations within the same thread (an `'execution'` scope would rotate its key every run and defeat durable rehydration). Always crosses spawn boundaries — and fork boundaries, which run the same lifecycle (spec 03). Recalls into the View so the LLM can see progress.
+**Key design:** Scope is `'thread'` so the state persists across executions/iterations within the same thread (an `'execution'` scope would rotate its key every run and defeat durable rehydration). Always crosses spawn boundaries — and inParallel boundaries, which run the same lifecycle (spec 03). Recalls into the View so the LLM can see progress.
 
 ---
 
@@ -348,7 +257,7 @@ interface SteeringConfig {
   maxRetries?: number;
 }
 
-function steering(config: SteeringConfig): MemoryLayer<SteeringState>
+function steering(config: SteeringConfig): ContextLayer<SteeringState>
 ```
 
 | Property | Value |
@@ -400,12 +309,12 @@ steering({
 
 ---
 
-## `historyWindow()`
+## `history()`
 
 Caps the trailing items projected to the LLM on every turn. Slot `275` (after recall-contributing layers), scope `'execution'`. Hooks: `init` (returns `null` state) and `projectHistory`.
 
 ```typescript
-function historyWindow(config?: { maxItems?: number }): MemoryLayer<null>
+function history(config?: { maxItems?: number }): ContextLayer<null>
 ```
 
 **Default**: `maxItems = 40` (validated to an integer in `[2, 10000]`).
@@ -424,10 +333,10 @@ The CLI exposes the cap via `AgentConfig.history.maxItems`. When unset, the laye
 
 ```typescript
 // Direct usage in core
-const memory = [
-  workingMemory(),
-  observationalMemory(),
-  historyWindow({ maxItems: 40 }),
+const layers = [
+  scratchpad(),
+  observations(),
+  history({ maxItems: 40 }),
 ];
 ```
 
@@ -442,7 +351,7 @@ function ragMemory(config: {
   retriever: DocumentRetriever;
   maxChunks: number;
   reranker?: Reranker;
-}): MemoryLayer<void>
+}): ContextLayer<void>
 ```
 
 Slot `Slot.RAG` (350), scope `'global'`, budget `{ min: 0, max: 6000 }`. Recall-only — searches, optionally re-ranks, trims to budget.
@@ -450,7 +359,7 @@ Slot `Slot.RAG` (350), scope `'global'`, budget `{ min: 0, max: 6000 }`. Recall-
 ### Entity Graph
 
 ```typescript
-function entityMemory(config: { extractorModel?: string }): MemoryLayer<EntityGraphState>
+function entityMemory(config: { extractorModel?: string }): ContextLayer<EntityGraphState>
 ```
 
 Slot `Slot.ENTITY` (150), scope `'resource'`. Extracts entities from new items in `store`, renders relevant entities in `recall`.
@@ -458,20 +367,107 @@ Slot `Slot.ENTITY` (150), scope `'resource'`. Extracts entities from new items i
 ### Shared Swarm Memory
 
 ```typescript
-function sharedSwarmMemory(config: { channel: PubSubChannel }): MemoryLayer<SwarmState>
+function sharedSwarmMemory(config: { channel: PubSubChannel }): ContextLayer<SwarmState>
 ```
 
 Slot `380`, scope `'execution'`. Subscribes to peer findings in `init`, drains in `recall`, publishes in `store`, cleans up in `dispose`. Uses `onSpawn`/`onReturn` for parent-child finding merge.
 
+### Semantic Recall (informative recipe)
+
+Vector-search over past items, injected for relevant context. Not a built-in export — a custom layer built from the same hooks:
+
+```typescript
+interface SemanticRecallConfig {
+  vectorStore: VectorStore;
+  embedder: Embedder;
+  topK?: number;
+  contextWindow?: number | { before: number; after: number };
+  minScore?: number;
+  scope?: 'thread' | 'resource' | 'global';
+}
+
+function semanticRecall(config: SemanticRecallConfig): ContextLayer<void>
+```
+
+| Property | Value |
+|----------|-------|
+| **id** | `'semantic-recall'` |
+| **slot** | `Slot.SEMANTIC_RECALL` (400) |
+| **scope** | `config.scope ?? 'resource'` |
+| **budget** | `{ min: 0, max: 4000 }` |
+| **hooks** | `recall`, `store` |
+
+**Behavior:**
+- `recall`: Embeds query, searches vector store, expands with context window, trims to budget. Returns `<semantic_recall>` block in a `MessageItem` with `role: developer`.
+- `store`: Embeds items where `item.type === 'message'` and upserts to vector store.
+
+**Recipe types:**
+
+```typescript
+interface VectorStore {
+  search(embedding: number[], opts: { topK: number; filter: unknown; minScore: number }): Promise<VectorResult[]>;
+  upsert(entry: { id: string; embedding: number[]; metadata: unknown }): Promise<void>;
+}
+
+interface Embedder {
+  embed(text: string): Promise<number[]>;
+}
+```
+
+### Episodic Memory (informative recipe)
+
+Records execution summaries and retrieves relevant past experiences. Not a built-in export — a custom layer built from the same hooks:
+
+```typescript
+interface EpisodicMemoryConfig {
+  store: EpisodicStore;
+  embedder: Embedder;
+  retrieval?: 'embedding' | 'recency' | 'both';
+  maxEpisodes?: number;
+  scope?: 'resource' | 'global';
+}
+
+function episodicMemory(config: EpisodicMemoryConfig): ContextLayer<void>
+```
+
+| Property | Value |
+|----------|-------|
+| **id** | `'episodic-memory'` |
+| **slot** | `Slot.EPISODIC` (300) |
+| **scope** | `config.scope ?? 'resource'` |
+| **budget** | `{ min: 0, max: 2000 }` |
+| **hooks** | `recall`, `onComplete` |
+
+**Behavior:**
+- `recall`: Retrieves by embedding similarity, recency, or both. Deduplicates. Returns `<past_experiences>` block in a `MessageItem` with `role: developer`.
+- `onComplete`: Creates episode summary, embeds it, saves to store.
+
+**Recipe types:**
+
+```typescript
+interface EpisodicStore {
+  searchByEmbedding(embedding: number[], opts: unknown): Promise<Episode[]>;
+  getRecent(opts: unknown): Promise<Episode[]>;
+  save(episode: Episode, embedding: number[]): Promise<void>;
+}
+
+interface Episode {
+  id: string;
+  summary: string;
+  timestamp: number;
+  outcome: ExecutionOutcome;
+}
+```
+
 ---
 
-## `planMemory()`
+## `plan()`
 
 Manages the full plan lifecycle: entering plan mode, authoring a PRD, structuring the plan as a JSON workflow document, and tracking execution outcomes. A plan's tree IS a `WorkflowDocument` (spec 26); plans additionally store NAMED workflows referenced from the tree via `subflow` nodes, keeping the human-reviewed tree small while detailed mechanics live in separately-authored workflows.
 
 ```typescript
-interface PlanMemoryConfig {
-  scope?: MemoryScope;
+interface PlanConfig {
+  scope?: ContextScope;
   additionalAllowedTools?: string[];
   maxPrdLength?: number;                      // default 50000
   maxDepth?: number;                          // workflowDepth cap for tree + each workflow; default 5
@@ -485,7 +481,7 @@ interface PlanMemoryConfig {
   onExit?: PlanExitCallback;                  // (state) => Promise<{ approved: boolean }>
 }
 
-function planMemory(config?: PlanMemoryConfig): MemoryLayer<PlanState>
+function plan(config?: PlanConfig): ContextLayer<PlanState>
 ```
 
 | Property | Value |
@@ -538,13 +534,13 @@ Both styles end a turn the same way: with `AskUserQuestion`, or with `plan/exitP
 | Name | Kind | Description |
 |------|------|-------------|
 | `status` | `layerData` | Read-only projection: `{ phase, hasPrd, hasPlanTree, workflowNames, version }`. |
-| `enterPlanMode` | `layerFn` | Transitions idle → planning. Accepts optional `goal` string to seed the PRD. Resets workflows from any prior plan. |
-| `updatePrd` | `layerFn` | Replaces the PRD content. Only works in planning phase. Validates max length. |
-| `setPlanTree` | `layerFn` | Sets the plan as `{ document: WorkflowDocument }`. Validates schema, depth, `allowedNodeKinds`, and subflow-ref slug syntax. Refs to not-yet-defined workflows are allowed — the success message enumerates them. |
-| `setWorkflow` | `layerFn` | Creates or replaces a named workflow (`{ name, document }`, upsert). Validates name slug, count cap (replacing at the cap is allowed), serialized size cap, depth, and `allowedNodeKinds`. |
-| `removeWorkflow` | `layerFn` | Deletes a named workflow. Warns when the tree or another workflow still references it. |
-| `getWorkflow` | `layerFn` | Returns a stored workflow's pretty-printed JSON. Read-only, works in any phase. |
-| `exitPlanMode` | `layerFn` | Exits plan mode. `action: 'execute'` validates PRD + tree exist, that every subflow ref (in the tree and inside stored workflows) names a stored workflow, and that named workflows form no reference cycle — all **before** invoking `onExit`, so the user is never asked to approve a plan that cannot hydrate. `action: 'cancel'` resets to idle. |
+| `enterPlanMode` | `layerFunction` | Transitions idle → planning. Accepts optional `goal` string to seed the PRD. Resets workflows from any prior plan. |
+| `updatePrd` | `layerFunction` | Replaces the PRD content. Only works in planning phase. Validates max length. |
+| `setPlanTree` | `layerFunction` | Sets the plan as `{ document: WorkflowDocument }`. Validates schema, depth, `allowedNodeKinds`, and subflow-ref slug syntax. Refs to not-yet-defined workflows are allowed — the success message enumerates them. |
+| `setWorkflow` | `layerFunction` | Creates or replaces a named workflow (`{ name, document }`, upsert). Validates name slug, count cap (replacing at the cap is allowed), serialized size cap, depth, and `allowedNodeKinds`. |
+| `removeWorkflow` | `layerFunction` | Deletes a named workflow. Warns when the tree or another workflow still references it. |
+| `getWorkflow` | `layerFunction` | Returns a stored workflow's pretty-printed JSON. Read-only, works in any phase. |
+| `exitPlanMode` | `layerFunction` | Exits plan mode. `action: 'execute'` validates PRD + tree exist, that every subflow ref (in the tree and inside stored workflows) names a stored workflow, and that named workflows form no reference cycle — all **before** invoking `onExit`, so the user is never asked to approve a plan that cannot hydrate. `action: 'cancel'` resets to idle. |
 
 **Executing an approved plan:** `PlanState.planTree` is a `WorkflowDocument` and `PlanState.workflows` maps directly onto the JSON workflow runtime's registry, so a host executes the plan with `parseAndRunWorkflow`:
 
@@ -568,7 +564,7 @@ The default CLI flow instead uses context injection — the plan is recalled int
 
 ## CLI-Specific Layers (`packages/cli`)
 
-The CLI package (`packages/cli/src/memory/`) provides several memory layers built on the `@noetic-tools/memory` interface. These implement prompt engineering patterns adapted from Claude Code's system:
+The CLI package (`packages/cli/src/memory/`) provides several context layers built on the `@noetic-tools/context` interface. These implement prompt engineering patterns adapted from Claude Code's system:
 
 | Layer | Source | Purpose |
 |-------|--------|---------|
@@ -585,9 +581,9 @@ These layers all use `execution` scope and `Slot.PROCEDURAL` (250) or `Slot.OBSE
 
 ## Future Considerations
 
-### durableTaskState: disk fallback, git integration, custom serialization (Not Yet Designed)
+### taskState: disk fallback, git integration, custom serialization (Not Yet Designed)
 
-Potential extensions to `durableTaskState()`: a configurable on-disk fallback (`baseDir`, default `.noetic/tasks`) for crash recovery independent of the `StorageAdapter`, optional git commits of task state (`gitCommit`), a Zod `schema` for state validation, and a custom `serializer`. These would reintroduce a config parameter; the design (dual-persistence consistency, commit cadence, schema-migration interplay) has not been worked out. Not scheduled.
+Potential extensions to `taskState()`: a configurable on-disk fallback (`baseDir`, default `.noetic/tasks`) for crash recovery independent of the `StorageAdapter`, optional git commits of task state (`gitCommit`), a Zod `schema` for state validation, and a custom `serializer`. These would reintroduce a config parameter; the design (dual-persistence consistency, commit cadence, schema-migration interplay) has not been worked out. Not scheduled.
 
 ---
 
@@ -598,12 +594,12 @@ Only layers whose volatility is known up front declare a `placement` (spec 11, P
 | Layer | Placement | Why |
 |---|---|---|
 | `steering()` | `'live'` | `recall` drains its queue as it renders — a pin would lose the feedback |
-| `temporalMemory()` | `'live'` while grounding the clock, else `'auto'` | `<current_datetime>` changes every turn by construction |
-| `staticContent()` | `'anchor'` | Loaded once in `init`, never rewritten |
-| `fileReference()` | `'anchor'` + `renderDelta` | Large payload, changes a file at a time — the case anchoring pays off most on |
+| `temporal()` | `'live'` while grounding the clock, else `'auto'` | `<current_datetime>` changes every turn by construction |
+| `instructions()` | `'anchor'` | Loaded once in `init`, never rewritten |
+| `filesystem()` | `'anchor'` + `renderDelta` | Large payload, changes a file at a time — the case anchoring pays off most on |
 | everything else | `'auto'` | Workload-dependent; let observed churn decide |
 
-`historyWindow()` declares none: it contributes only `projectHistory` and never enters either band.
+`history()` declares none: it contributes only `projectHistory` and never enters either band.
 
 ---
 

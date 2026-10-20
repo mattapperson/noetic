@@ -16,7 +16,7 @@ describe('Error propagation', () => {
         id: 'test-loop',
         steps: [
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'fail',
             execute: async () => {
               throw new Error('body fail');
@@ -37,7 +37,7 @@ describe('Error propagation', () => {
         id: 'retry-loop',
         steps: [
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'flaky',
             execute: async () => {
               attempts++;
@@ -70,7 +70,7 @@ describe('Error propagation', () => {
         id: 'pred-throw',
         steps: [
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'inc',
             execute: async () => {
               bodyCount++;
@@ -91,20 +91,20 @@ describe('Error propagation', () => {
     });
   });
 
-  describe('fork error handling', () => {
+  describe('inParallel error handling', () => {
     it('all mode throws fork_partial on failure', async () => {
       const step: Step<ContextData, string, string> = {
-        kind: 'fork',
-        id: 'fail-fork',
+        kind: 'inParallel',
+        id: 'fail-inParallel',
         mode: 'all',
         paths: () => [
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'ok',
             execute: async () => 'success',
           },
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'fail',
             execute: async () => {
               throw new Error('boom');
@@ -127,17 +127,17 @@ describe('Error propagation', () => {
 
     it('settle mode never throws', async () => {
       const step: Step<ContextData, string, string> = {
-        kind: 'fork',
-        id: 'settle-fork',
+        kind: 'inParallel',
+        id: 'settle-inParallel',
         mode: 'settle',
         paths: () => [
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'ok',
             execute: async () => 'yes',
           },
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'fail',
             execute: async () => {
               throw new Error('no');
@@ -156,19 +156,19 @@ describe('Error propagation', () => {
 
     it('race mode all-fail throws fork_partial', async () => {
       const step: Step<ContextData, string, string> = {
-        kind: 'fork',
+        kind: 'inParallel',
         id: 'race-fail',
         mode: 'race',
         paths: () => [
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'a',
             execute: async () => {
               throw new Error('a');
             },
           },
           {
-            kind: 'run',
+            kind: 'runCode',
             id: 'b',
             execute: async () => {
               throw new Error('b');

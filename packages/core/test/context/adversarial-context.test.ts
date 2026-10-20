@@ -10,23 +10,23 @@ import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import type {
   ContextLayer,
-  DurableTaskState,
   ExecutionContext,
-  ObservationalState,
-  WorkingMemoryContextState,
+  ObservationsState,
+  ScratchpadState,
+  TaskState,
 } from '@noetic-tools/context';
 import {
   allocateBudgets,
   createLayerStateStore,
   disposeLayers,
-  durableTaskState,
   findFunctionCall,
   initLayers,
-  observationalContext,
+  observations,
   recallLayers,
+  scratchpad,
   steering,
   storeLayers,
-  workingMemoryContext,
+  taskState,
 } from '@noetic-tools/context';
 import type { Item, LLMResponse, SteeringState } from '@noetic-tools/types';
 import { frameworkCast, SteeringAction } from '@noetic-tools/types';
@@ -53,7 +53,7 @@ function isCheckpointState(val: unknown): val is {
   return Array.isArray(val.checkpoints);
 }
 
-function isObservationalState(val: unknown): val is {
+function isObservationsState(val: unknown): val is {
   observations: string[];
 } {
   if (!isRecord(val)) {
@@ -555,7 +555,7 @@ describe('Steering: async pendingAsync race condition', () => {
 
 describe('Working Memory: falsy state edge cases', () => {
   it('treats empty string state as empty (returns null from recall)', async () => {
-    const layer = workingMemoryContext();
+    const layer = scratchpad();
     const store = createLayerStateStore();
     const ctx = makeCtx();
     const storage = makeStorage();
@@ -577,7 +577,7 @@ describe('Working Memory: falsy state edge cases', () => {
       log: makeItemLog(),
       query: '',
       ctx,
-      state: frameworkCast<WorkingMemoryContextState>(state),
+      state: frameworkCast<ScratchpadState>(state),
       budget: 1e3,
     });
 
@@ -586,7 +586,7 @@ describe('Working Memory: falsy state edge cases', () => {
   });
 
   it('[BUG] numeric 0 state treated as empty due to !state check', async () => {
-    const layer = workingMemoryContext();
+    const layer = scratchpad();
     const store = createLayerStateStore();
     const ctx = makeCtx();
 
@@ -597,7 +597,7 @@ describe('Working Memory: falsy state edge cases', () => {
       log: makeItemLog(),
       query: '',
       ctx,
-      state: frameworkCast<WorkingMemoryContextState>(0),
+      state: frameworkCast<ScratchpadState>(0),
       budget: 1e3,
     });
 
@@ -606,7 +606,7 @@ describe('Working Memory: falsy state edge cases', () => {
   });
 
   it('[BUG] boolean false state treated as empty due to !state check', async () => {
-    const layer = workingMemoryContext();
+    const layer = scratchpad();
     const store = createLayerStateStore();
     const ctx = makeCtx();
 
@@ -616,7 +616,7 @@ describe('Working Memory: falsy state edge cases', () => {
       log: makeItemLog(),
       query: '',
       ctx,
-      state: frameworkCast<WorkingMemoryContextState>(false),
+      state: frameworkCast<ScratchpadState>(false),
       budget: 1e3,
     });
 
@@ -627,7 +627,7 @@ describe('Working Memory: falsy state edge cases', () => {
 
 describe('Working Memory: prototype pollution', () => {
   it('strips top-level __proto__ from updateWorkingMemory args', async () => {
-    const layer = workingMemoryContext({
+    const layer = scratchpad({
       schema: undefined,
     });
     const store = createLayerStateStore();
@@ -659,7 +659,7 @@ describe('Working Memory: prototype pollution', () => {
       log: makeItemLog(),
       response: makeLLMResponse('test'),
       ctx,
-      state: frameworkCast<WorkingMemoryContextState>(store.get(ctx.executionId, layer.id)),
+      state: frameworkCast<ScratchpadState>(store.get(ctx.executionId, layer.id)),
     });
 
     expect(result).toBeDefined();
@@ -673,7 +673,7 @@ describe('Working Memory: prototype pollution', () => {
   });
 
   it('nested __proto__ in values does not pollute prototype chain', async () => {
-    const layer = workingMemoryContext({
+    const layer = scratchpad({
       schema: undefined,
     });
     const store = createLayerStateStore();
@@ -701,7 +701,7 @@ describe('Working Memory: prototype pollution', () => {
       log: makeItemLog(),
       response: makeLLMResponse('test'),
       ctx,
-      state: frameworkCast<WorkingMemoryContextState>(store.get(ctx.executionId, layer.id)),
+      state: frameworkCast<ScratchpadState>(store.get(ctx.executionId, layer.id)),
     });
 
     assert(result !== undefined);
@@ -716,7 +716,7 @@ describe('Working Memory: prototype pollution', () => {
 
 describe('Working Memory: store with string state', () => {
   it('[BUG] string state replaced entirely by updateWorkingMemory args object', async () => {
-    const layer = workingMemoryContext();
+    const layer = scratchpad();
     const store = createLayerStateStore();
     const ctx = makeCtx();
     const storage = makeStorage();
@@ -746,10 +746,10 @@ describe('Working Memory: store with string state', () => {
       log: makeItemLog(),
       response: makeLLMResponse('test'),
       ctx,
-      state: frameworkCast<WorkingMemoryContextState>(store.get(ctx.executionId, layer.id)),
+      state: frameworkCast<ScratchpadState>(store.get(ctx.executionId, layer.id)),
     });
 
-    // When state is a string, typeof !== 'object', so the else branch runs:
+    // When state is a string, typeof !== 'object', so the else conditional runs:
     // return { state: safeArgs } — the entire string is lost and replaced
     expect(result).toBeDefined();
     assert(result !== undefined);
@@ -767,7 +767,7 @@ describe('Working Memory: store with string state', () => {
 describe('Observational Memory: empty buffer at threshold', () => {
   it('observer called when pre-existing bufferTokens cross threshold', async () => {
     let observerCalledWith: string[] | null = null;
-    const layer = observationalContext({
+    const layer = observations({
       bufferThreshold: 100,
       observer: async (buffer) => {
         observerCalledWith = buffer;
@@ -808,7 +808,7 @@ describe('Observational Memory: empty buffer at threshold', () => {
       log: makeItemLog(),
       response,
       ctx,
-      state: frameworkCast<ObservationalState>(store.get(ctx.executionId, layer.id)),
+      state: frameworkCast<ObservationsState>(store.get(ctx.executionId, layer.id)),
     });
 
     // The observer should have been called since totalBufferTokens >= 100
@@ -818,7 +818,7 @@ describe('Observational Memory: empty buffer at threshold', () => {
   });
 
   it('default observer produces misleading "Processed 0 items" on empty buffer', async () => {
-    const layer = observationalContext({
+    const layer = observations({
       bufferThreshold: 0, // Always trigger compression
     });
 
@@ -860,21 +860,21 @@ describe('Observational Memory: empty buffer at threshold', () => {
       log: makeItemLog(),
       response,
       ctx,
-      state: frameworkCast<ObservationalState>(store.get(ctx.executionId, layer.id)),
+      state: frameworkCast<ObservationsState>(store.get(ctx.executionId, layer.id)),
     });
 
     // bufferTokens is 0, threshold is 0, so 0 >= 0 triggers compression
     // But newBuffer is empty (no message items) → default observer: "Processed 0 items"
     expect(result).toBeDefined();
     assert(result !== undefined);
-    assert(isObservationalState(result.state));
+    assert(isObservationsState(result.state));
     expect(result.state.observations).toContain('Processed 0 items');
   });
 });
 
 describe('Observational Memory: onSpawn ignores scope', () => {
   it('[BUG] thread-scoped layer still propagates state to child via onSpawn', async () => {
-    const layer = observationalContext({
+    const layer = observations({
       scope: 'thread',
     });
 
@@ -904,7 +904,7 @@ describe('Observational Memory: onSpawn ignores scope', () => {
     expect(result).not.toBeNull();
     assert(result !== null);
     expect(result.childState).toBeDefined();
-    assert(isObservationalState(result.childState));
+    assert(isObservationsState(result.childState));
     expect(result.childState.observations).toEqual([
       'parent observation',
     ]);
@@ -917,7 +917,7 @@ describe('Observational Memory: onSpawn ignores scope', () => {
 
 describe('Durable Task State: onComplete checkpoint depth', () => {
   it('onComplete records the completing execution depth', async () => {
-    const layer = durableTaskState();
+    const layer = taskState();
     const store = createLayerStateStore();
     const ctx = makeCtx({
       depth: 5,
@@ -937,7 +937,7 @@ describe('Durable Task State: onComplete checkpoint depth', () => {
     const result = await layer.hooks.onComplete!({
       log: makeItemLog(),
       ctx,
-      state: frameworkCast<DurableTaskState>(state),
+      state: frameworkCast<TaskState>(state),
       outcome: 'success',
     });
 
@@ -952,7 +952,7 @@ describe('Durable Task State: onComplete checkpoint depth', () => {
   });
 
   it('store hook correctly uses ctx.depth from execution context', async () => {
-    const layer = durableTaskState();
+    const layer = taskState();
     const store = createLayerStateStore();
     const ctx = makeCtx({
       depth: 3,
@@ -973,7 +973,7 @@ describe('Durable Task State: onComplete checkpoint depth', () => {
       log: makeItemLog(),
       response: makeLLMResponse('test'),
       ctx,
-      state: frameworkCast<DurableTaskState>(store.get(ctx.executionId, layer.id)),
+      state: frameworkCast<TaskState>(store.get(ctx.executionId, layer.id)),
     });
 
     expect(result).toBeDefined();
@@ -1283,10 +1283,10 @@ describe('Layer lifecycle: disabled layer detection', () => {
 
 describe('Cross-layer full lifecycle', () => {
   it('init->recall->store->recall->dispose with working memory + observational', async () => {
-    const wm = workingMemoryContext({
+    const wm = scratchpad({
       scope: 'resource',
     });
-    const obs = observationalContext({
+    const obs = observations({
       bufferThreshold: 10,
     });
     const layers = [

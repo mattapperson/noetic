@@ -24,12 +24,12 @@ const TAB_FILES: Record<Tab, string> = {
 };
 
 const TAB_CODE: Record<Tab, string> = {
-  'ReAct reasoning loop': `import { any, loop, step, until } from '@noetic-tools/core';
+  'ReAct reasoning loop': `import { any, callModel, loop, until } from '@noetic-tools/core';
 
 const reasonAndAct = loop({
   id: 'react-loop',
   steps: [
-    step.llm({
+    callModel({
       id: 'think',
       model: 'openai/gpt-4o',
       tools: [searchTool, calcTool],
@@ -41,23 +41,23 @@ const reasonAndAct = loop({
 
   '5-layer context in 10 lines': `import {
   AgentHarness,
-  durableTaskState,
-  observationalContext,
-  planContext,
-  temporalContext,
-  workingMemoryContext,
+  observations,
+  plan,
+  scratchpad,
+  taskState,
+  temporal,
 } from '@noetic-tools/core';
 
 const harness = new AgentHarness({
   name: 'agent',
-  initialStep: agent,
+  agentGraph: agent,
   params: {},
-  context: [
-    workingMemoryContext({ scope: 'thread' }),
-    observationalContext({ bufferThreshold: 4_000, observer }),
-    planContext({ maxTreeDepth: 3 }),
-    durableTaskState(),
-    temporalContext(),
+  contextLayers: [
+    scratchpad({ scope: 'thread' }),
+    observations({ bufferThreshold: 4_000, observer }),
+    plan({ maxDepth: 3 }),
+    taskState(),
+    temporal(),
   ],
 });`,
 
@@ -72,15 +72,17 @@ const shell: ShellAdapter = {
 
 const harness = new AgentHarness({
   name: 'sandboxed-agent',
-  initialStep: agent,
+  agentGraph: agent,
   params: {},
-  fs,           // tools, skill discovery, context layers all route here
-  shell,        // every sub-process the agent spawns goes through this
+  environment: {
+    fs,         // tools, skill discovery, context layers all route here
+    shell,      // every sub-process the agent spawns goes through this
+  },
   initialCwd: '/work',
-  llm: { provider: 'openrouter', apiKey: process.env.OPENROUTER_API_KEY },
+  callModelDefaults: { provider: 'openrouter', apiKey: process.env.OPENROUTER_API_KEY },
 });`,
 
-  'Extend any primitive': `import { step } from '@noetic-tools/core';
+  'Extend any primitive': `import { runCode } from '@noetic-tools/core';
 import type { Context } from '@noetic-tools/core';
 
 interface SessionContext {
@@ -88,7 +90,7 @@ interface SessionContext {
   sessionId: string;
 }
 
-const logStep = step.run<SessionContext, string, void>({
+const logStep = runCode<SessionContext, string, void>({
   id: 'audit-log',
   execute: async (input, ctx: Context<SessionContext>) => {
     console.log(\`[\${ctx.context.sessionId}] user=\${ctx.context.userId} msg=\${input}\`);

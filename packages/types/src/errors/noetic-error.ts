@@ -50,12 +50,12 @@ function formatMessage(error: NoeticError): string {
   switch (error.kind) {
     case 'step_failed':
       return `Step '${error.stepId}' failed: ${error.cause.message}`;
-    case 'llm_refused':
-      return `LLM refused at step '${error.stepId}': ${error.refusal}`;
-    case 'llm_parse_error':
-      return `LLM parse error at step '${error.stepId}': failed to parse output`;
-    case 'llm_rate_limit':
-      return `LLM rate limited at step '${error.stepId}'${error.retryAfter ? ` (retry after ${error.retryAfter}ms)` : ''}`;
+    case 'model_refused':
+      return `Model refused at step '${error.stepId}': ${error.refusal}`;
+    case 'model_parse_error':
+      return `Model parse error at step '${error.stepId}': failed to parse output`;
+    case 'model_rate_limit':
+      return `Model rate limited at step '${error.stepId}'${error.retryAfter ? ` (retry after ${error.retryAfter}ms)` : ''}`;
     case 'fork_partial':
       return `Fork '${error.stepId}' partial failure: ${error.succeeded.length} succeeded, ${error.failed.length} failed`;
     case 'channel_timeout':
@@ -73,7 +73,7 @@ function formatMessage(error: NoeticError): string {
         ? `Item type '${error.itemType}' did not match any registered item extension schema.`
         : `Item did not match any registered ${error.category} extension schema.`;
     case 'handle_evicted':
-      return `Subprocess handle '${error.handleId}' evicted (step '${error.stepId}'): adapter returned null for ${error.gracePeriodMs}ms`;
+      return `Subprocess handle '${error.handleId}' evicted (step '${error.stepId}'): adapter returned null for ${error.gracePeriod}ms`;
     default: {
       const _exhaustive: never = error;
       void _exhaustive;

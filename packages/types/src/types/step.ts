@@ -1,4 +1,13 @@
-import type { ZodType } from 'zod';
+import type { StandardSchemaV1 } from '@standard-schema/spec';
+import type {
+  AcpAgent,
+  AcpClientCapabilityConfig,
+  AcpContentBlock,
+  AcpMcpServer,
+  AcpPermissionHandler,
+  AcpPermissionPolicy,
+  AcpSessionPolicy,
+} from './acp';
 import type { Channel } from './channel';
 import type { ModelParams, RetryPolicy, ServerToolSpec, StepMeta } from './common';
 import type { Context } from './context';
@@ -6,12 +15,6 @@ import type { ContextConfig, ContextData, ContextLayer, ProjectionPolicy } from 
 import type { DecideAnswers, DecideQuestions } from './decide';
 import type { NoeticError } from './error';
 import type { OutputCodec } from './output-codec';
-import type {
-  SubHarness,
-  SubHarnessKind,
-  SubHarnessSessionPolicy,
-  SubHarnessSettings,
-} from './sub-harness';
 import type { SubprocessAdapter } from './subprocess-adapter';
 import type { Tool } from './tool';
 
@@ -62,14 +65,15 @@ export type Until = (snapshot: Snapshot) => Verdict | Promise<Verdict>;
 
 /**
  * Field type that accepts either an eager value or a `(ctx) => value` getter.
- * Used by `step.llm` for params that may vary per execution (model, instructions,
- * tool list). The getter runs at step execution time with the live context.
+ * Used by `step.callModel` for params that may vary per execution (model,
+ * instructions, tool list). The getter runs at step execution time with the
+ * live context.
  * @public
  */
 export type Lazy<T, TContext = ContextData> = T | ((ctx: Context<TContext>) => T | Promise<T>);
 
 /**
- * Outcome of a single path in a `settle`-mode fork (mirrors `Promise.allSettled`).
+ * Outcome of a single path in a `settle`-mode inParallel step (mirrors `Promise.allSettled`).
  * @public
  */
 export interface SettleResult<O> {
@@ -85,21 +89,21 @@ export interface SettleResult<O> {
 
 /** @public Discriminated union of all step kinds that can be composed into an execution tree. */
 export type Step<TContext = ContextData, I = unknown, O = unknown> =
-  | StepRun<TContext, I, O>
-  | StepLLM<TContext, I, O>
-  | StepSubHarness<TContext, I, O>
-  | StepTool<TContext, I, O>
+  | StepRunCode<TContext, I, O>
+  | StepCallModel<TContext, I, O>
+  | StepAcpAgent<TContext, I, O>
+  | StepInvokeTool<TContext, I, O>
   | StepDecide<TContext, I, O>
-  | StepBranch<TContext, I, O>
-  | StepFork<TContext, I, O>
+  | StepConditional<TContext, I, O>
+  | StepInParallel<TContext, I, O>
   | StepSpawn<TContext, I, O>
-  | StepProvide<TContext, I, O>
+  | StepWithContext<TContext, I, O>
   | StepLoop<TContext, I, O>
-  | StepEvery<TContext, I, O>;
+  | StepSchedule<TContext, I, O>;
 
 /** @public A step that executes arbitrary async logic via a user-supplied function. */
-export interface StepRun<TContext = ContextData, I = unknown, O = unknown> {
-  kind: 'run';
+export interface StepRunCode<TContext = ContextData, I = unknown, O = unknown> {
+  kind: 'runCode';
   id: string;
   execute: (input: I, ctx: Context<TContext>) => Promise<O>;
   retry?: RetryPolicy;
@@ -113,8 +117,8 @@ export interface StepRun<TContext = ContextData, I = unknown, O = unknown> {
 }
 
 /** @public A step that sends a prompt to a language model and returns its response. */
-export interface StepLLM<TContext = ContextData, _I = unknown, O = unknown> {
-  kind: 'llm';
+export interface StepCallModel<TContext = ContextData, _I = unknown, O = unknown> {
+  kind: 'callModel';
   id: string;
   /** Model id. Accepts either an eager string or a `(ctx) => string` getter. */
   model: Lazy<string, TContext>;
@@ -129,11 +133,17 @@ export interface StepLLM<TContext = ContextData, _I = unknown, O = unknown> {
    */
   tools?: Lazy<(Tool | ServerToolSpec)[] | undefined, TContext>;
   /**
-   * Structured output: a Zod schema (assistant text is JSON-parsed and
+   * Structured output: a Standard Schema (assistant text is JSON-parsed and
    * validated) or a streaming `OutputCodec` (fed each text delta, produces
-   * the typed value at turn end).
+   * the typed value at turn end). Non-Zod schemas can derive the model
+   * constraint through StandardJSONSchemaV1 or provide `outputJsonSchema`.
    */
-  output?: ZodType<O> | OutputCodec<O>;
+  output?: StandardSchemaV1<unknown, O> | OutputCodec<O>;
+  /**
+   * Explicit raw JSON Schema override sent to the model. For non-Zod schemas,
+   * it takes precedence over StandardJSONSchemaV1 conversion.
+   */
+  outputJsonSchema?: Record<string, unknown>;
   params?: ModelParams;
   /** Controls framework event emission for this step. Defaults to `true`. Set `false` to suppress all framework events. A filter function receives `(eventType, data)` and returns `boolean`. */
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
@@ -142,48 +152,62 @@ export interface StepLLM<TContext = ContextData, _I = unknown, O = unknown> {
 }
 
 /**
- * A step that delegates a turn to an external coding-agent harness
- * (Claude Code, Codex, opencode, pi). Each harness kind is a distinct
- * `Step.kind`, but every variant shares this shape and is executed by one
- * interpreter handler.
+ * A step that delegates a turn to an external coding agent over the Agent
+ * Client Protocol. One step kind serves every ACP-speaking agent — the agent
+ * itself is supplied as an adapter, so the set of supported agents is open.
  * @public
  */
-export interface StepSubHarness<TContext = ContextData, _I = unknown, O = unknown> {
-  /** The harness kind, equal to the backing adapter's `harnessId`. */
-  kind: SubHarnessKind;
+export interface StepAcpAgent<TContext = ContextData, _I = unknown, O = unknown> {
+  kind: 'acp-agent';
   id: string;
   /**
-   * The harness adapter that runs the turn. Eager or `(ctx) => SubHarness`.
+   * The ACP agent adapter that runs the turn. Eager or `(ctx) => AcpAgent`.
    * Programmatic builders take it inline; the JSON hydrator resolves it from
-   * the workflow's harness registry and inlines it here.
+   * the workflow's agent registry and inlines it here.
    */
-  harness: Lazy<SubHarness, TContext>;
-  /** Turn prompt. Eager string or `(ctx) => string` getter. */
-  prompt: Lazy<string, TContext>;
-  /** Shared harness settings (model, permission mode, …). */
-  settings?: SubHarnessSettings;
-  /** System instructions applied on the first message of a fresh session. */
-  instructions?: Lazy<string | undefined, TContext>;
-  /** When set, the assistant text is JSON-parsed and validated against this schema. */
-  output?: ZodType<O>;
+  agent: Lazy<AcpAgent, TContext>;
+  /** Turn prompt as plain text. Eager string or `(ctx) => string` getter. */
+  prompt?: Lazy<string, TContext>;
+  /**
+   * Full ACP prompt content — images, audio, resource links, embedded context.
+   * Appended after `prompt` when both are given. Validated against the agent's
+   * advertised `promptCapabilities` before the turn is sent.
+   */
+  content?: Lazy<ReadonlyArray<AcpContentBlock> | undefined, TContext>;
+  /** MCP servers to expose to the agent for this session. */
+  mcpServers?: Lazy<ReadonlyArray<AcpMcpServer> | undefined, TContext>;
+  /** Working directory for the session. Defaults to `ctx.cwdState.cwd`. */
+  cwd?: Lazy<string | undefined, TContext>;
+  /** Session mode to switch to before prompting (e.g. `'plan'`). */
+  mode?: Lazy<string | undefined, TContext>;
+  /** Model to select before prompting, for agents that expose model selection. */
+  model?: Lazy<string | undefined, TContext>;
+  /** Declarative answer to the agent's permission requests. */
+  permissions?: AcpPermissionPolicy;
+  /** Async resolver consulted when policy and steering both abstain. */
+  onPermissionRequest?: AcpPermissionHandler;
+  /** Which client capabilities to advertise to the agent. */
+  clientCapabilities?: AcpClientCapabilityConfig;
+  /** When set, the assistant text is JSON-parsed and validated against this Standard Schema. */
+  output?: StandardSchemaV1<unknown, O>;
   /** Session reuse + teardown policy across steps. */
-  session?: SubHarnessSessionPolicy;
+  session?: AcpSessionPolicy;
   /** Controls framework event emission for this step. Defaults to `true`. */
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }
 
-/** @public A step that invokes a single tool directly, bypassing the LLM. */
-export interface StepTool<_TContext = ContextData, I = unknown, O = unknown> {
-  kind: 'tool';
+/** @public A step that invokes a single tool directly, bypassing the model. */
+export interface StepInvokeTool<_TContext = ContextData, I = unknown, O = unknown> {
+  kind: 'invokeTool';
   id: string;
-  tool: Tool<ZodType<I>, ZodType<O>>;
+  tool: Tool<StandardSchemaV1<unknown, I>, StandardSchemaV1<unknown, O>>;
   args?: Partial<I>;
 }
 
 /**
  * A step that asks a model typed questions about the current context and returns
  * typed answers with probabilities. It reads the conversation but never appends
- * to it, and runs no steering hooks. See spec 30.
+ * to it, and runs no steering hooks. See spec 32.
  * @public
  */
 export interface StepDecide<TContext = ContextData, _I = unknown, O = unknown> {
@@ -229,8 +253,8 @@ export type DecideStep<TContext, I, Q extends DecideQuestions> = StepDecide<
 export type DecideView = 'full' | 'layers' | 'none';
 
 /** @public A step that dynamically selects and executes one of several possible sub-steps. */
-export interface StepBranch<TContext = ContextData, I = unknown, O = unknown> {
-  kind: 'branch';
+export interface StepConditional<TContext = ContextData, I = unknown, O = unknown> {
+  kind: 'conditional';
   id: string;
   /**
    * Picks the step to run. `run` executes a step through the interpreter, for
@@ -243,22 +267,22 @@ export interface StepBranch<TContext = ContextData, I = unknown, O = unknown> {
   ) => Step<TContext, I, O> | null | Promise<Step<TContext, I, O> | null>;
   _optimizable?: Step<TContext>[];
   /**
-   * @internal Rebuild this branch around new `_optimizable` children, for
-   * branches whose route closes over them (`routeSwitch`). The optimizer calls
+   * @internal Rebuild this step around new `_optimizable` children, for
+   * conditionals whose route closes over them (`routeSwitch`). The optimizer calls
    * it so a mutated child is the one that runs.
    */
-  _rebuild?: (children: Step<TContext>[]) => StepBranch<TContext, I, O>;
+  _rebuild?: (children: Step<TContext>[]) => StepConditional<TContext, I, O>;
 }
 
-/** @public Union of fork step variants (`race`, `all`, `settle`) for concurrent path execution. */
-export type StepFork<TContext = ContextData, I = unknown, O = unknown> =
-  | StepForkRace<TContext, I, O>
-  | StepForkAll<TContext, I, O>
-  | StepForkSettle<TContext, I, O>;
+/** @public Union of inParallel step variants (`race`, `all`, `settle`) for concurrent path execution. */
+export type StepInParallel<TContext = ContextData, I = unknown, O = unknown> =
+  | StepInParallelRace<TContext, I, O>
+  | StepInParallelAll<TContext, I, O>
+  | StepInParallelSettle<TContext, I, O>;
 
-/** @public A fork step that returns the result of the first path to complete. */
-export interface StepForkRace<TContext = ContextData, I = unknown, O = unknown> {
-  kind: 'fork';
+/** @public An inParallel step that returns the result of the first path to complete. */
+export interface StepInParallelRace<TContext = ContextData, I = unknown, O = unknown> {
+  kind: 'inParallel';
   id: string;
   mode: 'race';
   paths: (input: I, ctx: Context<TContext>) => Step<TContext, I, O>[];
@@ -266,9 +290,9 @@ export interface StepForkRace<TContext = ContextData, I = unknown, O = unknown> 
   _optimizable?: Step<TContext>[];
 }
 
-/** @public A fork step that runs all paths and merges their results. */
-export interface StepForkAll<TContext = ContextData, I = unknown, O = unknown> {
-  kind: 'fork';
+/** @public An inParallel step that runs all paths and merges their results. */
+export interface StepInParallelAll<TContext = ContextData, I = unknown, O = unknown> {
+  kind: 'inParallel';
   id: string;
   mode: 'all';
   paths: (input: I, ctx: Context<TContext>) => Step<TContext, I, O>[];
@@ -277,9 +301,9 @@ export interface StepForkAll<TContext = ContextData, I = unknown, O = unknown> {
   _optimizable?: Step<TContext>[];
 }
 
-/** @public A fork step that runs all paths and collects fulfilled/rejected outcomes. */
-export interface StepForkSettle<TContext = ContextData, I = unknown, O = unknown> {
-  kind: 'fork';
+/** @public An inParallel step that runs all paths and collects fulfilled/rejected outcomes. */
+export interface StepInParallelSettle<TContext = ContextData, I = unknown, O = unknown> {
+  kind: 'inParallel';
   id: string;
   mode: 'settle';
   paths: (input: I, ctx: Context<TContext>) => Step<TContext, I, O>[];
@@ -294,8 +318,8 @@ export interface StepForkSettle<TContext = ContextData, I = unknown, O = unknown
  * Spawn and detachedSpawn break the inheritance chain.
  * @public
  */
-export interface StepProvide<TContext = ContextData, I = unknown, O = unknown> {
-  kind: 'provide';
+export interface StepWithContext<TContext = ContextData, I = unknown, O = unknown> {
+  kind: 'withContext';
   id: string;
   child: Step<TContext, I, O>;
   context: ContextConfig | ContextLayer[];
@@ -343,34 +367,34 @@ export interface StepLoop<TContext = ContextData, I = unknown, O = unknown> {
 }
 
 /**
- * Error policy for the `every` operator when its body step throws.
+ * Error policy for the `schedule` operator when its body step throws.
  * - `'continue'` (default): emit a span event recording the error and continue parking.
  * - `'fail'`: re-throw, terminating the operator.
  * @public
  */
-export type EveryErrorPolicy = 'continue' | 'fail';
+export type ScheduleErrorPolicy = 'continue' | 'fail';
 
 /**
  * A step that runs a body step on a fixed-interval schedule, optionally woken
- * sooner by a wake channel. Runs forever until the executing context is cancelled.
+ * sooner by an inbox channel. Runs forever until the executing context is cancelled.
  *
- * The operator output is `void` — `every` does not accumulate iteration outputs.
+ * The operator output is `void` — `schedule` does not accumulate iteration outputs.
  * The `O` type parameter exists only to anchor the body step's output type.
  *
  * @public
  */
-export interface StepEvery<TContext = ContextData, I = unknown, O = unknown> {
-  kind: 'every';
+export interface StepSchedule<TContext = ContextData, I = unknown, O = unknown> {
+  kind: 'schedule';
   /** Unique step identifier used in traces and error messages. */
   id: string;
   /** Body step executed on each iteration. */
   step: Step<TContext, I, O>;
   /** Park duration between iterations in milliseconds. Must be >= 0. */
-  ms: number;
+  interval: number;
   /** Optional channel that wakes the parking interval when any value arrives. */
-  wakeOn?: Channel<unknown>;
+  inbox?: Channel<unknown>;
   /** Behavior when `step` throws. Defaults to `'continue'`. */
-  onError?: EveryErrorPolicy;
+  onError?: ScheduleErrorPolicy;
   /** Random jitter applied to the park duration in milliseconds. Must be >= 0. Default 0. */
   jitter?: number;
 }

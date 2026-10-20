@@ -8,7 +8,7 @@ import { AgentHarness } from '../../src/harness/agent-harness';
 import { makeMessage, textOnlyResponse } from '../_helpers';
 
 const echoStep: Step<ContextData, string, string> = {
-  kind: 'llm',
+  kind: 'callModel',
   id: 'echo',
   model: 'test/echo',
   tools: [],
@@ -36,7 +36,7 @@ describe('AgentHarness.seedSessionHistory()', () => {
 
     const harness = new AgentHarness({
       name: 'test',
-      initialStep: echoStep,
+      agentGraph: echoStep,
       params: {},
       _testCallModel: callModel,
     });
@@ -66,7 +66,7 @@ describe('AgentHarness.seedSessionHistory()', () => {
     const captured: Item[][] = [];
     const harness = new AgentHarness({
       name: 'test',
-      initialStep: echoStep,
+      agentGraph: echoStep,
       params: {},
       _testCallModel: async (request) => {
         captured.push([
@@ -98,7 +98,7 @@ describe('AgentHarness.seedSessionHistory()', () => {
     const captured: Item[][] = [];
     const harness = new AgentHarness({
       name: 'test',
-      initialStep: echoStep,
+      agentGraph: echoStep,
       params: {},
       _testCallModel: async (request) => {
         captured.push([

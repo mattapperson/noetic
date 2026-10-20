@@ -1,7 +1,7 @@
 /**
  * Task planning tools — mirrors DeepAgentsJS todoListMiddleware.
  *
- * Tools declare state via ToolContextDeclaration; toolContextLayer() materializes it.
+ * Tools declare state via ToolContextDeclaration; toolCalls() materializes it.
  * Tools read/write state via toolCtx.context.
  */
 

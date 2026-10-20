@@ -1,6 +1,6 @@
 /**
- * The `openUi()` output codec: plugs a component library into `step.llm` as a
- * streaming output dialect. Deltas feed the incremental parser (emitting
+ * The `openUi()` output codec: plugs a component library into `step.callModel`
+ * as a streaming output dialect. Deltas feed the incremental parser (emitting
  * `openui.*` framework events per completed statement); `finish()` reparses
  * the full text fresh so the returned document is deterministic whether or
  * not the turn actually streamed.
@@ -42,7 +42,7 @@ function emitAssignment(assignment: UiAssignment, emit: OutputCodecEventEmitter)
 }
 
 /**
- * Build the streaming output codec for a library. Use as `step.llm`'s
+ * Build the streaming output codec for a library. Use as `step.callModel`'s
  * `output`: the library prompt rides `instructions`, statements stream as
  * `openui.node` / `openui.state` / `openui.query` framework events, and the
  * step returns the materialized `UiDocument`.

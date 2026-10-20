@@ -10,7 +10,7 @@ import type {
   Lazy,
   ProjectionPolicy,
   Step,
-  StepBranch,
+  StepConditional,
 } from '@noetic-tools/types';
 import {
   DecideQuestionsSchema,
@@ -19,11 +19,11 @@ import {
   routeOutcomes,
 } from '@noetic-tools/types';
 import { getDefaultRegistrar } from '../types/step-registrar';
-import { branch } from './control-flow-builders';
+import { conditional } from './control-flow-builders';
 
 //#region Types
 
-/** @public Options for `step.decide()`. */
+/** @public Options for `decide()`. */
 export interface StepDecideOpts<TContext, Q extends DecideQuestions> {
   id: string;
   /** Decision model id. Falls back to `harness.config.decisionModel`. */
@@ -112,7 +112,7 @@ export interface RouteSwitchByFunctionOpts<
 
 /**
  * Creates a step that asks a model typed questions and returns typed answers
- * with probabilities. See spec 30.
+ * with probabilities. See spec 32.
  *
  * The question map comes first among the type parameters so it is always
  * inferred: pass no type arguments, and get a typed `ctx.context` by annotating
@@ -125,11 +125,11 @@ export interface RouteSwitchByFunctionOpts<
 export function decide<const Q extends DecideQuestions, TContext = ContextData, I = unknown>(
   opts: StepDecideOpts<TContext, Q>,
 ): DecideStep<TContext, I, Q> {
-  requireId('step.decide', opts.id);
+  requireId('decide', opts.id);
   if (typeof opts.model === 'string' && opts.model.trim() === '') {
     throw new NoeticConfigError({
       code: 'MISSING_MODEL',
-      message: 'step.decide() was given an empty model.',
+      message: 'decide() was given an empty model.',
       hint: "Pass a model id, e.g. model: 'typesafe/jev-1.14', or omit it to use the harness `decisionModel`.",
     });
   }
@@ -137,7 +137,7 @@ export function decide<const Q extends DecideQuestions, TContext = ContextData, 
   if (!parsed.success) {
     throw new NoeticConfigError({
       code: 'INVALID_DECIDE_QUESTIONS',
-      message: `step.decide(${JSON.stringify(opts.id)}) has invalid questions: ${parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`,
+      message: `decide(${JSON.stringify(opts.id)}) has invalid questions: ${parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`,
       hint: 'Give 1+ questions; booleans need instructions or criteria, choices 1–255 unique values, scores 2–10 unique levels.',
     });
   }
@@ -145,7 +145,7 @@ export function decide<const Q extends DecideQuestions, TContext = ContextData, 
   if (!Number.isInteger(samples) || samples < 1) {
     throw new NoeticConfigError({
       code: 'INVALID_DECIDE_SAMPLES',
-      message: `step.decide(${JSON.stringify(opts.id)}) has samples=${samples}; it must be a positive integer.`,
+      message: `decide(${JSON.stringify(opts.id)}) has samples=${samples}; it must be a positive integer.`,
       hint: 'Omit samples, or pass a whole number of runs to average, e.g. samples: 3.',
     });
   }
@@ -160,9 +160,9 @@ export function decide<const Q extends DecideQuestions, TContext = ContextData, 
 }
 
 /**
- * Creates a branch that runs a decide step and routes the original input to
+ * Creates a conditional step that runs a decide step and routes the original input to
  * the case its answers pick. The output type is the union of every case's
- * output. See spec 30.
+ * output. See spec 32.
  *
  * @public
  * @throws `NoeticConfigError` `EMPTY_STEP_ID`, `UNKNOWN_ROUTE_QUESTION`,
@@ -177,7 +177,7 @@ export function routeSwitch<
   U extends CaseStep = D,
 >(
   opts: RouteSwitchByFunctionOpts<TContext, Q, C, Cases, D, U>,
-): StepBranch<
+): StepConditional<
   TContext,
   StepInput<Cases[keyof Cases] | D | U>,
   StepOutput<Cases[keyof Cases] | D | U>
@@ -192,9 +192,9 @@ export function routeSwitch<
   U extends CaseStep,
 >(
   opts: RouteSwitchByKeyOpts<TContext, Q, K, Cases, U>,
-): StepBranch<TContext, StepInput<Cases[keyof Cases] | U>, StepOutput<Cases[keyof Cases] | U>>;
-export function routeSwitch(opts: SwitchPlan): StepBranch<ContextData, unknown, unknown> {
-  requireId('step.routeSwitch', opts.id);
+): StepConditional<TContext, StepInput<Cases[keyof Cases] | U>, StepOutput<Cases[keyof Cases] | U>>;
+export function routeSwitch(opts: SwitchPlan): StepConditional<ContextData, unknown, unknown> {
+  requireId('routeSwitch', opts.id);
   return buildSwitch({
     id: opts.id,
     decide: opts.decide,
@@ -228,10 +228,10 @@ interface Picked {
 }
 
 /**
- * Builds the branch. Its route closes over the plan, so `_rebuild` rebuilds it
+ * Builds the conditional. Its route closes over the plan, so `_rebuild` rebuilds it
  * around new children for the optimizer, in the same order as `_optimizable`.
  */
-function buildSwitch(plan: SwitchPlan): StepBranch<ContextData, unknown, unknown> {
+function buildSwitch(plan: SwitchPlan): StepConditional<ContextData, unknown, unknown> {
   const keys = Object.keys(plan.cases).filter((k) => plan.cases[k] !== undefined);
   const pick = typeof plan.on === 'function' ? byFunction(plan, plan.on) : byKey(plan, plan.on);
   const children = [
@@ -248,7 +248,7 @@ function buildSwitch(plan: SwitchPlan): StepBranch<ContextData, unknown, unknown
         ]
       : []),
   ];
-  return branch<ContextData, unknown, unknown>({
+  return conditional<ContextData, unknown, unknown>({
     id: plan.id,
     route: async (input, ctx, run) => {
       const answers = frameworkCast<Record<string, DecideAnswer>>(
@@ -287,7 +287,7 @@ function byKey(plan: SwitchPlan, on: string): (answers: Record<string, DecideAns
   if (!question) {
     throw new NoeticConfigError({
       code: 'UNKNOWN_ROUTE_QUESTION',
-      message: `step.routeSwitch(${JSON.stringify(plan.id)}) routes on '${on}', which its decide step does not ask.`,
+      message: `routeSwitch(${JSON.stringify(plan.id)}) routes on '${on}', which its decide step does not ask.`,
       hint: `Set \`on\` to one of: ${Object.keys(questions).join(', ')}.`,
     });
   }
@@ -295,7 +295,7 @@ function byKey(plan: SwitchPlan, on: string): (answers: Record<string, DecideAns
   if (missing.length > 0) {
     throw new NoeticConfigError({
       code: 'INCOMPLETE_ROUTE_CASES',
-      message: `step.routeSwitch(${JSON.stringify(plan.id)}) has no case for: ${missing.join(', ')}.`,
+      message: `routeSwitch(${JSON.stringify(plan.id)}) has no case for: ${missing.join(', ')}.`,
       hint: `Give a case for every outcome of '${on}'.`,
     });
   }
@@ -407,14 +407,14 @@ function requireUncertain(plan: SwitchPlan): Picked {
   if (plan.minConfidence !== undefined && (plan.minConfidence < 0 || plan.minConfidence > 1)) {
     throw new NoeticConfigError({
       code: 'INVALID_MIN_CONFIDENCE',
-      message: `step.routeSwitch(${JSON.stringify(plan.id)}) has minConfidence=${plan.minConfidence}; it must be in [0, 1].`,
+      message: `routeSwitch(${JSON.stringify(plan.id)}) has minConfidence=${plan.minConfidence}; it must be in [0, 1].`,
       hint: 'Pass a confidence between 0 and 1, e.g. minConfidence: 0.6.',
     });
   }
   if (!plan.uncertain) {
     throw new NoeticConfigError({
       code: 'MISSING_UNCERTAIN_STEP',
-      message: `step.routeSwitch(${JSON.stringify(plan.id)}) has no uncertain step.`,
+      message: `routeSwitch(${JSON.stringify(plan.id)}) has no uncertain step.`,
       hint: 'Pass `uncertain`: the step to run when the model refuses or is not confident enough.',
     });
   }

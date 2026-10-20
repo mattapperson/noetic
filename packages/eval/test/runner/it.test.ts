@@ -1,5 +1,5 @@
 import * as bun from 'bun:test';
-import { AgentHarness, step } from '@noetic-tools/core';
+import { AgentHarness, runCode } from '@noetic-tools/core';
 import { describe } from '../../src/runner/describe';
 import type { EvalContext } from '../../src/runner/eval-context';
 import { it } from '../../src/runner/it';
@@ -11,7 +11,7 @@ bun.describe('it.each()', () => {
   test('registers one case per dataset item with inline array', () => {
     clearSuites();
 
-    const testStep = step.run({
+    const testStep = runCode({
       id: 'echo',
       execute: async (input: unknown) => input,
     });
@@ -46,7 +46,7 @@ bun.describe('it.each()', () => {
   test('dataset items are passed correctly to the fn', async () => {
     clearSuites();
 
-    const testStep = step.run({
+    const testStep = runCode({
       id: 'echo',
       execute: async (input: unknown) => input,
     });

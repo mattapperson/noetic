@@ -14,7 +14,7 @@ function makeTool(name: string): Tool {
 
 function llmStep(id: string, tools?: Tool[]): Step {
   return {
-    kind: 'llm',
+    kind: 'callModel',
     id,
     model: 'test/model',
     tools,
@@ -23,7 +23,7 @@ function llmStep(id: string, tools?: Tool[]): Step {
 
 function runStep(id: string): Step {
   return {
-    kind: 'run',
+    kind: 'runCode',
     id,
     execute: async (i: unknown) => i,
   };
@@ -31,7 +31,7 @@ function runStep(id: string): Step {
 
 function toolStep(id: string): Step {
   return {
-    kind: 'tool',
+    kind: 'invokeTool',
     id,
     tool: {
       name: 'direct-tool',
@@ -149,7 +149,7 @@ describe('collectAllTools', () => {
   test('collects from provide step child', () => {
     const t = makeTool('search');
     const provide: Step = {
-      kind: 'provide',
+      kind: 'withContext',
       id: 'p1',
       child: llmStep('s1', [
         t,
@@ -175,11 +175,11 @@ describe('collectAllTools', () => {
     expect(result[0].name).toBe('search');
   });
 
-  test('collects from branch _optimizable', () => {
+  test('collects from conditional _optimizable', () => {
     const t1 = makeTool('search');
     const t2 = makeTool('calc');
-    const branch: Step = {
-      kind: 'branch',
+    const conditional: Step = {
+      kind: 'conditional',
       id: 'b1',
       route: () => null,
       _optimizable: [
@@ -191,23 +191,23 @@ describe('collectAllTools', () => {
         ]),
       ],
     };
-    const result = collectAllTools(branch);
+    const result = collectAllTools(conditional);
     expect(result).toHaveLength(2);
   });
 
-  test('returns empty for branch without _optimizable', () => {
-    const branch: Step = {
-      kind: 'branch',
+  test('returns empty for conditional without _optimizable', () => {
+    const conditional: Step = {
+      kind: 'conditional',
       id: 'b1',
       route: () => null,
     };
-    expect(collectAllTools(branch)).toEqual([]);
+    expect(collectAllTools(conditional)).toEqual([]);
   });
 
-  test('collects from fork _optimizable', () => {
+  test('collects from inParallel _optimizable', () => {
     const t = makeTool('search');
-    const fork: Step = {
-      kind: 'fork',
+    const inParallel: Step = {
+      kind: 'inParallel',
       id: 'f1',
       mode: 'race',
       paths: () => [],
@@ -217,7 +217,7 @@ describe('collectAllTools', () => {
         ]),
       ],
     };
-    const result = collectAllTools(fork);
+    const result = collectAllTools(inParallel);
     expect(result).toHaveLength(1);
   });
 
@@ -247,7 +247,7 @@ describe('collectAllTools', () => {
     expect(result[1]).toBe(t3);
   });
 
-  test('deep nesting: loop > provide > branch > llm', () => {
+  test('deep nesting: loop > provide > conditional > llm', () => {
     const t1 = makeTool('search');
     const t2 = makeTool('calc');
     const t3 = makeTool('write');
@@ -257,10 +257,10 @@ describe('collectAllTools', () => {
       id: 'loop1',
       steps: [
         {
-          kind: 'provide',
+          kind: 'withContext',
           id: 'p1',
           child: {
-            kind: 'branch',
+            kind: 'conditional',
             id: 'b1',
             route: () => null,
             _optimizable: [

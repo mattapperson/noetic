@@ -6,7 +6,8 @@ description: The AgentHarness executes agent steps, manages context, and coordin
 ## Quick Example
 
 ```ts
-import { AgentHarness, react } from '@noetic-tools/core';
+import { AgentHarness, any, callModel, loop, until } from '@noetic-tools/core';
+import type { ContextData } from '@noetic-tools/core';
 import { z } from 'zod';
 
 const searchTool = {
@@ -17,18 +18,22 @@ const searchTool = {
   execute: async (args: { query: string }) => ({ result: `Results for: ${args.query}` }),
 };
 
-const agent = react({
-  model: 'openai/gpt-4o',
-  instructions: 'You are a research assistant.',
-  tools: [searchTool],
-  maxSteps: 10,
+const agent = loop({
+  id: 'researcher-loop',
+  steps: [callModel<ContextData, string, string>({
+    id: 'researcher-llm',
+    model: 'openai/gpt-4o',
+    instructions: 'You are a research assistant.',
+    tools: [searchTool],
+  })],
+  until: any(until.noToolCalls(), until.maxSteps(10)),
 });
 
 const harness = new AgentHarness({
   name: 'researcher',
-  initialStep: agent,
+  agentGraph: agent,
   params: {},
-  llm: { provider: 'openrouter' }, // reads OPENROUTER_API_KEY from the env
+  callModelDefaults: { provider: 'openrouter' }, // reads OPENROUTER_API_KEY from the env
 });
 
 await harness.execute('Find recent AI news');
@@ -47,7 +52,7 @@ import { AgentHarness } from '@noetic-tools/core';
 
 const harness = new AgentHarness({
   name: 'my-agent',
-  initialStep: myStep,
+  agentGraph: myStep,
   params: { model: 'openai/gpt-4o' },
 });
 ```
@@ -55,25 +60,45 @@ const harness = new AgentHarness({
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `name` | `string` | required | Agent name (populates `config.name`). |
-| `initialStep` | `Step<TContext, string, string>` | `undefined` | The agent step to execute when calling `execute()`. `TContext` defaults to `ContextData`. |
+| `agentGraph` | `Step<TContext, string, string>` | `undefined` | Root step tree executed for every turn submitted via `execute()`. `TContext` defaults to `ContextData`. |
 | `params` | `TParams` | required | Arbitrary key-value parameters (populates `config.params`). |
-| `context` | `ContextLayer[]` | `undefined` | Default context layers applied to every context created via `createContext()` / `execute()`. |
-| `storage` | `StorageAdapter` | in-memory | Storage backend for context persistence. |
+| `contextLayers` | `ContextLayer[]` | `undefined` | Default context layers applied to every context created via `createContext()` / `execute()`. |
 | `hooks` | `AgentHooks` | `undefined` | Before/after step hooks. |
+| `tools` | `Tool[]` | `undefined` | Harness-wide tool pool, merged (identity-deduplicated) with tools collected from `agentGraph` to form every context's `unifiedTools`. |
 | `paramsSchema` | `ZodType` | `undefined` | Optional Zod schema to validate `params` at construction time. |
-| `fs` | `FsAdapter` | `createLocalFsAdapter()` | Filesystem adapter exposed as `harness.fs`. Context layers, tools, and skill discovery all route through this adapter. |
-| `shell` | `ShellAdapter` | `createLocalShellAdapter()` | Shell adapter exposed as `harness.shell`. Tools that execute commands route through this adapter. Defaults to raw `sh -c` execution; pass `createLocalShellAdapter({ useRtk: true })` to wrap each command through [`rtk rewrite`](https://github.com/rtk-ai/rtk) for token-efficient output. The `@noetic-tools/cli` package enables this by default (controlled by `shell.useRtk` in `noetic.config.ts`). |
-| `llm` | `LlmProviderConfig` | `undefined` | LLM provider configuration. Currently supports `{ provider: 'openrouter', apiKey?: string }`. The `apiKey` defaults to `process.env.OPENROUTER_API_KEY`. |
-| `itemSchemas` | `ItemSchemaExtensions` | `undefined` | Harness-wide item-schema extensions used to validate emitted/returned items. Global by design; tool-contributed `toolResults` schemas are owner-scoped to each tool's own result items. Mismatches raise `NoeticError` kind `item_schema_mismatch`. |
-| `strictItemSchemas` | `boolean` | `true` | Whether unknown extension item types must match a registered schema. |
+| `environment` | `AgentEnvironmentConfig` | in-memory adapters | Execution environment: storage, filesystem, shell, and subprocess surfaces. See [Environment](#environment) below. |
+| `callModelDefaults` | `LlmProviderConfig` | `undefined` | Default provider configuration for model calls made through this harness. Supports `{ provider: 'noetic' \| 'openrouter', apiKey?, baseUrl? }`. For `'openrouter'`, `apiKey` defaults to `process.env.OPENROUTER_API_KEY`. |
+| `itemSchemas` | `ItemSchemaConfig` | `undefined` | Harness-wide item schema extensions and validation strictness: `{ schemas?: ItemSchemaExtensions, strict?: boolean }`. `schemas` is global by design; tool-contributed `toolResults` schemas are owner-scoped to each tool's own result items. Mismatches raise `NoeticError` kind `item_schema_mismatch`. `strict` (default `true`) controls whether unknown extension item types must match a registered schema. |
 | `traceExporter` | `TraceExporter` | `NoopExporter` | Where to send completed spans. |
-| `layerStateStore` | `LayerStateStore` | In-memory store | Backing store for context layer state. |
 | `defaultDeliveryMode` | `DeliveryMode` | `'next-turn'` | Default delivery mode for messages that don't specify one. |
-| `streamIdleTimeoutMs` | `number` | `120_000` | Abort the in-flight model call if the provider stream emits no events for this many milliseconds. Pass `0` or a negative number to disable. |
 | `initialCwd` | `string` | `process.cwd()` | Initial working directory seeded into every root context this harness creates. |
-| `subprocess` | `SubprocessAdapter` | `createInMemorySubprocessAdapter()` | Adapter used to dispatch every `step.run`, `spawn`, and `detachedSpawn`. In-memory by default; set to `createLocalSubprocessAdapter({storage})` to run children out-of-process with durable handle manifests. See [Durability](/docs/framework/durability). |
-| `checkpointStore` | `CheckpointStore` | `undefined` | Typed wrapper over the harness's `StorageAdapter` used by `checkpoint()` / `restore()`. When absent, checkpoint/restore are no-ops and the harness has no durable-execution guarantees. See [Durability](/docs/framework/durability). |
-| `stepLedgerRetention` | `StepLedgerRetention` | `{ maxEntryBytes: 131072, maxEntries: 1000 }` | Bounds on the step-completion ledger that backs step-level resume. Only meaningful alongside `checkpointStore`. A non-positive cap throws `NoeticConfigError` (`STEP_LEDGER_RETENTION_INVALID`) at construction. See [Durability](/docs/framework/durability#step-level-resume). |
+
+### Environment
+
+The `environment` option groups the surfaces the agent runs against. Every field is optional and defaults to an in-memory adapter, so a zero-config harness is fully sandboxed.
+
+```ts validate=none
+const harness = new AgentHarness({
+  name: 'my-agent',
+  params: {},
+  environment: {
+    storage: { adapter, checkpointStore, layerStateStore, stepLedgerRetention },
+    fs,
+    shell,
+    subprocess,
+  },
+});
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `storage.adapter` | `StorageAdapter` | in-memory | Key-value storage backing context-layer persistence and the step-completion ledger. |
+| `storage.checkpointStore` | `CheckpointStore` | `undefined` | Store used by `checkpoint()` / `restore()`. When absent, checkpoint/restore are no-ops and the harness has no durable-execution guarantees. Construct with `createCheckpointStore`. See [Durability](/docs/framework/durability). |
+| `storage.layerStateStore` | `LayerStateStore` | in-memory store | Backing store for context layer state. |
+| `storage.stepLedgerRetention` | `StepLedgerRetention` | `{ maxEntryBytes: 131072, maxEntries: 1000 }` | Bounds on the step-completion ledger that backs step-level resume. Only meaningful alongside `checkpointStore`. A non-positive cap throws `NoeticConfigError` (`STEP_LEDGER_RETENTION_INVALID`) at construction. See [Durability](/docs/framework/durability#step-level-resume). |
+| `fs` | `FsAdapter` | in-memory | Filesystem adapter exposed as `harness.fs`. Context layers, tools, and skill discovery all route through this adapter. Pass `createLocalFsAdapter()` from `@noetic-tools/platform-node` for real disk access. |
+| `shell` | `ShellAdapter` | in-memory | Shell adapter exposed as `harness.shell`. Tools that execute commands route through this adapter. `createLocalShellAdapter()` runs raw `sh -c`; pass `createLocalShellAdapter({ useRtk: true })` to wrap each command through [`rtk rewrite`](https://github.com/rtk-ai/rtk) for token-efficient output. The `@noetic-tools/cli` package enables this by default (controlled by `shell.useRtk` in `noetic.config.ts`). |
+| `subprocess` | `SubprocessAdapter` | in-memory | Adapter used to dispatch every `runCode`, `spawn`, and `detachedSpawn`. Set to `createLocalSubprocessAdapter({storage})` to run children out-of-process with durable handle manifests. See [Durability](/docs/framework/durability). |
 
 ## execute()
 
@@ -105,9 +130,9 @@ await harness.execute('follow-up', { threadId: 'thread-1' });
 | Parameter | Type | Description |
 |---|---|---|
 | `input` | `string \| Item \| Item[]` | The input to the agent. |
-| `options` | `ExecuteOptions` | Optional `threadId`, `resourceId`, `state`, `context`, `deliveryMode`. |
+| `options` | `ExecuteOptions` | Optional `threadId`, `resourceId`, `state`, `contextLayers`, `deliveryMode`, `messageId`. |
 
-Rejects with `NoeticConfigError` code `NO_STEP_CONFIGURED` if no `initialStep` was provided in the constructor.
+Rejects with `NoeticConfigError` code `NO_STEP_CONFIGURED` if no `agentGraph` was provided in the constructor.
 
 ## Session Accessors
 
@@ -168,16 +193,16 @@ Framework events emitted during execution:
 | `{name}:tool_call_started` | Before each tool call. |
 | `{name}:tool_call_completed` | After each tool call. |
 | `{name}:tool_round_completed` | After all tool calls in a round. |
-| `{name}:llm_call_started` | Before each provider call. Data: `{ round, messageCount, toolCount }`. |
-| `{name}:llm_call_first_event` | First SDK event received (time-to-first-token marker). Only emitted when a broadcaster is attached to the context. Data: `{ round }`. |
-| `{name}:llm_call_completed` | Provider response fully received. Data: `{ round, itemCount }`. |
-| `{name}:llm_call_stalled` | Stream-idle watchdog fired; the round is about to abort. Data: `{ round, idleTimeoutMs }`. |
+| `{name}:model_call_started` | Before each provider call. Data: `{ round, messageCount, toolCount }`. |
+| `{name}:model_call_first_event` | First SDK event received (time-to-first-token marker). Only emitted when a broadcaster is attached to the context. Data: `{ round }`. |
+| `{name}:model_call_completed` | Provider response fully received. Data: `{ round, itemCount }`. |
+| `{name}:model_call_stalled` | Stream-idle watchdog fired; the round is about to abort. Data: `{ round, idleTimeoutMs }`. |
 
-LLM steps support an `emit` option to control step/tool framework event emission — set `false` to suppress or pass a filter function. Turn-level events are emitted by the session runner and are not gated by `step.emit`.
+callModel steps support an `emit` option to control step/tool framework event emission — set `false` to suppress or pass a filter function. Turn-level events are emitted by the session runner and are not gated by `step.emit`.
 
 ### Stream Idle Timeout
 
-Each provider call is guarded by a watchdog that aborts the round if no SSE event arrives for `streamIdleTimeoutMs` (default `120000`; set `0` to disable). On timeout, `{name}:llm_call_stalled` is emitted and the surrounding turn fails with `turn_aborted { reason: "llm stream idle timeout after <N>ms" }`, so upstream providers that quietly drop a connection surface as errors rather than hangs.
+Each provider call is guarded by a watchdog that aborts the round if no SSE event arrives for 120 seconds. The watchdog re-arms on every stream event, so slow-but-alive responses are never cut short. On timeout, `{name}:model_call_stalled` is emitted and the surrounding turn fails with `turn_aborted { reason: "model stream idle timeout after <N>ms" }`, so upstream providers that quietly drop a connection surface as errors rather than hangs.
 
 ## run()
 
@@ -194,7 +219,7 @@ const result = await harness.run(myStep, input, ctx);
 | `input` | `I` | Input value for the step. |
 | `ctx` | `Context` | Execution context. |
 
-When the harness is built with `memory` + `storage`, `run()` runs the layers' `init()` hooks once per context (keyed by `ctx.id`) before executing — so prior layer state rehydrates from storage, recalls into the model context, and updates persist back. The same memory guarantee `execute()` gives, without the session/`seedSessionHistory` ceremony. This also makes `parseAndRunWorkflow` (which dispatches through `run()`) memory-aware. The init is idempotent: nested/repeated `run()` calls never re-init (re-init would clobber accumulated in-memory state).
+When the harness is built with `contextLayers` + a storage adapter (`environment.storage.adapter`), `run()` runs the layers' `init()` hooks once per context (keyed by `ctx.id`) before executing — so prior layer state rehydrates from storage, recalls into the model context, and updates persist back. The same memory guarantee `execute()` gives, without the session/`seedSessionHistory` ceremony. This also makes `parseAndRunWorkflow` (which dispatches through `run()`) memory-aware. The init is idempotent: nested/repeated `run()` calls never re-init (re-init would clobber accumulated in-memory state).
 
 ## createContext Options
 
@@ -205,7 +230,7 @@ When the harness is built with `memory` + `storage`, `run()` runs the layers' `i
 | `state` | `unknown` | Initial mutable state. |
 | `threadId` | `string` | Conversation thread identifier. |
 | `resourceId` | `string` | Optional resource/tenant identifier. |
-| `context` | `ContextLayer[]` | Context layers for this context. Overrides harness-level `context` if provided. |
+| `contextLayers` | `ContextLayer[]` | Context layers for this context. Overrides harness-level `contextLayers` if provided. |
 
 ## Channel Methods
 
@@ -241,15 +266,15 @@ interface RecallLayerOutput {
 
 ## Durability Methods
 
-When the harness is constructed with a `checkpointStore` (and, typically, a durable `subprocess` adapter), `checkpoint` and `restore` become real crash-recovery hooks. When they are absent every call is a no-op — zero-config harnesses preserve in-memory semantics unchanged.
+When the harness is constructed with an `environment.storage.checkpointStore` (and, typically, a durable `environment.subprocess` adapter), `checkpoint` and `restore` become real crash-recovery hooks. When they are absent every call is a no-op — zero-config harnesses preserve in-memory semantics unchanged.
 
 | Method | Description |
 |---|---|
 | `checkpoint(ctx)` | Snapshot execution state (frontier, layer states, cwd, ask-user queue, item log) through the configured `checkpointStore`. Fires automatically after every `execute()`, `detachedSpawn()` settle, ask-user enqueue, and `runAppendPipeline`. Keyed by `ctx.id`; idempotent. |
 | `restore(executionId, opts?)` | Rebuild a `Context` from a previously saved snapshot. Returns `null` when no snapshot exists. Throws `NoeticConfigError` with `code: 'CHECKPOINT_SCHEMA_MISMATCH'` when the persisted `schemaVersion` is unrecognised. `opts` is a `RestoreContextOptions` (`parent` / `state` / `context`) carrying back the host wiring a snapshot cannot serialise — see [Restoring a decorated context](/docs/framework/durability#restoring-a-decorated-context). |
-| `cancel(ctx, reason?)` | Cancel a running execution: abort `ctx` and every live descendant context (fork paths, spawn children), then run context-layer teardown — `onComplete` with `outcome: 'aborted'`, then `dispose` — bottom-up. A no-op on an already-cancelled context. |
+| `cancel(ctx, reason?)` | Cancel a running execution: abort `ctx` and every live descendant context (parallel paths, spawn children), then run context-layer teardown — `onComplete` with `outcome: 'aborted'`, then `dispose` — bottom-up. A no-op on an already-cancelled context. |
 
-Cancellation reaches inside the work in flight: blocked channel `recv`/`send` calls reject with `cancelled`, the current provider stream and sub-harness turn are cut short, and the next step boundary throws `cancelled`. Tokens and cost already spent stay charged to the context. Beyond those points it is cooperative — a `step.run` body that ignores `ctx.aborted` between `await`s runs to its next step boundary.
+Cancellation reaches inside the work in flight: blocked channel `recv`/`send` calls reject with `cancelled`, the current provider stream and ACP agent turn are cut short, and the next step boundary throws `cancelled`. Tokens and cost already spent stay charged to the context. Beyond those points it is cooperative — a `runCode` body that ignores `ctx.aborted` between `await`s runs to its next step boundary.
 
 Use [`ctx.abort(reason)`](/docs/framework/context#abort) for the same signal without layer teardown (it is synchronous and returns `void`); use `cancel` when the harness owns the layer lifecycle. Note that `harness.abort(scope?)` is a different operation: it cancels the current *session turn* by thread, not a specific context tree.
 
@@ -298,7 +323,7 @@ interface AgentHooks {
 ```ts
 const harness = new AgentHarness({
   name: 'researcher',
-  initialStep: agent,
+  agentGraph: agent,
   params: { model: 'openai/gpt-4o' },
   hooks: {
     async beforeStep(step, ctx) {
@@ -328,7 +353,7 @@ The Noetic CLI uses this pattern for per-task agent runners — see the "Per-Tas
 
 ## Subprocess Adapter
 
-The harness always holds a `SubprocessAdapter`. Every `step.run`, every `spawn`, and every `harness.detachedSpawn` routes through `harness.subprocess.spawn(...)` — in-process vs out-of-process is a property of the adapter, not the step.
+The harness always holds a `SubprocessAdapter`. Every `runCode`, every `spawn`, and every `harness.detachedSpawn` routes through `harness.subprocess.spawn(...)` — in-process vs out-of-process is a property of the adapter, not the step.
 
 ```ts validate=none
 import { AgentHarness } from '@noetic-tools/core';
@@ -340,9 +365,9 @@ const subprocess = createLocalSubprocessAdapter({
 
 const harness = new AgentHarness({
   name: 'durable-agent',
-  initialStep: agent,
+  agentGraph: agent,
   params: {},
-  subprocess,                                 // real OS subprocess with durable manifests
+  environment: { subprocess },                // real OS subprocess with durable manifests
 });
 ```
 

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { step } from '@noetic-tools/core';
+import { callModel, runCode } from '@noetic-tools/core';
 
 import { buildWriteBackEntries, optimize } from '../../src/optimization/optimizer';
 import { OptimizeScope } from '../../src/types/eval';
@@ -10,18 +10,26 @@ import type { OptimizableField } from '../../src/types/optimizer';
 import { FieldKind } from '../../src/types/optimizer';
 
 let tmpDir: string;
-let savedApiKey: string | undefined;
+let savedOpenrouterApiKey: string | undefined;
+let savedNoeticApiKey: string | undefined;
 
 beforeEach(async () => {
   tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'optimizer-'));
-  savedApiKey = process.env.OPENROUTER_API_KEY;
-  // Force the offline GEPA fallback (evaluate initial candidate once).
+  savedOpenrouterApiKey = process.env.OPENROUTER_API_KEY;
+  savedNoeticApiKey = process.env.NOETIC_API_KEY;
+  // Force the offline GEPA fallback (evaluate initial candidate once). BOTH keys
+  // must be cleared — `optimizeWithGepa` accepts either provider, so leaving one
+  // set would send these tests to a live endpoint.
   delete process.env.OPENROUTER_API_KEY;
+  delete process.env.NOETIC_API_KEY;
 });
 
 afterEach(async () => {
-  if (savedApiKey !== undefined) {
-    process.env.OPENROUTER_API_KEY = savedApiKey;
+  if (savedOpenrouterApiKey !== undefined) {
+    process.env.OPENROUTER_API_KEY = savedOpenrouterApiKey;
+  }
+  if (savedNoeticApiKey !== undefined) {
+    process.env.NOETIC_API_KEY = savedNoeticApiKey;
   }
   await fs.rm(tmpDir, {
     recursive: true,
@@ -116,7 +124,7 @@ describe('optimize() write-back semantics', () => {
     const source = "export const instructions = 'original instructions';";
     await fs.writeFile(agentFile, source, 'utf-8');
 
-    const testStep = step.llm({
+    const testStep = callModel({
       id: 'agent',
       model: 'openai/gpt-4o-mini',
       instructions: 'original instructions',
@@ -147,7 +155,7 @@ describe('optimize() write-back semantics', () => {
   });
 
   test('no optimizable fields short-circuits with writtenBack false', async () => {
-    const testStep = step.run({
+    const testStep = runCode({
       id: 'noop',
       execute: async (input: unknown) => input,
     });

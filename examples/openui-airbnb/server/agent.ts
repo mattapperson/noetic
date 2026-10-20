@@ -10,7 +10,8 @@
  */
 
 import type { ContextData } from '@noetic-tools/core';
-import { AgentHarness, step, tool } from '@noetic-tools/core';
+import { AgentHarness, callModel, tool } from '@noetic-tools/core';
+import type { UiDocument } from '@noetic-tools/openui';
 import { createLibrary, defineComponent, openUi, openUiSurface } from '@noetic-tools/openui';
 import { z } from 'zod';
 
@@ -498,7 +499,7 @@ const INSTRUCTIONS = [
   '`PriceBreakdown`, and a `Button("Back to stays", Action([@ToAssistant("Show me Annapolis stays")]))`.',
 ].join('\n');
 
-export const stays = step.llm<ContextData, string, unknown>({
+export const stays = callModel<ContextData, string, UiDocument>({
   id: 'stays-ui',
   model: 'anthropic/claude-sonnet-4.5',
   instructions: INSTRUCTIONS,
@@ -518,12 +519,11 @@ export function createStaysHarness(): {
   });
   const harness = new AgentHarness({
     name: 'stays',
-    initialStep: stays,
     params: {},
-    context: [
+    contextLayers: [
       surface,
     ],
-    llm: {
+    callModelDefaults: {
       provider: 'openrouter',
     },
   });

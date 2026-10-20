@@ -1,9 +1,16 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import type { ContextData } from '@noetic-tools/context';
-import type { Context, DecideAnswer, DecideResponse, Step, StepBranch } from '@noetic-tools/types';
+import type {
+  Context,
+  DecideAnswer,
+  DecideResponse,
+  Step,
+  StepConditional,
+} from '@noetic-tools/types';
 import { frameworkCast, isNoeticConfigError } from '@noetic-tools/types';
-import { step } from '../../src/builders/step-builders';
+import { decide, routeSwitch } from '../../src/builders/decide-builders';
+import { runCode } from '../../src/builders/step-builders';
 import { AgentHarness } from '../../src/harness/agent-harness';
 
 //#region Helpers
@@ -101,13 +108,13 @@ function harnessAnswering(answers: Partial<Record<string, DecideAnswer>>): {
 }
 
 function echo(label: string) {
-  return step.run({
+  return runCode({
     id: `case-${label}`,
     execute: async (input: string) => `${label}:${input}`,
   });
 }
 
-const triage = step.decide({
+const triage = decide({
   id: 'triage',
   model: 'm/x',
   questions: QUESTIONS,
@@ -139,7 +146,7 @@ const cases = {
 
 //#endregion
 
-describe('step.decide', () => {
+describe('decide', () => {
   it('defaults view to full and samples to 1', () => {
     expect(triage.kind).toBe('decide');
     expect(triage.view).toBe('full');
@@ -149,7 +156,7 @@ describe('step.decide', () => {
   it('rejects an empty id, an empty model, and bad samples', () => {
     expectConfigError(
       () =>
-        step.decide({
+        decide({
           id: ' ',
           questions: QUESTIONS,
         }),
@@ -157,7 +164,7 @@ describe('step.decide', () => {
     );
     expectConfigError(
       () =>
-        step.decide({
+        decide({
           id: 'd',
           model: '',
           questions: QUESTIONS,
@@ -171,7 +178,7 @@ describe('step.decide', () => {
     ]) {
       expectConfigError(
         () =>
-          step.decide({
+          decide({
             id: 'd',
             questions: QUESTIONS,
             samples,
@@ -222,7 +229,7 @@ describe('step.decide', () => {
     for (const questions of invalid) {
       expectConfigError(
         () =>
-          step.decide({
+          decide({
             id: 'd',
             questions,
           }),
@@ -231,7 +238,7 @@ describe('step.decide', () => {
     }
     expectConfigError(
       () =>
-        step.decide({
+        decide({
           id: 'd',
           // @ts-expect-error an empty question map is a type error
           questions: {},
@@ -254,7 +261,7 @@ describe('step.decide', () => {
   });
 
   it('types numeric record choice keys as their string form', () => {
-    const numeric = step.decide({
+    const numeric = decide({
       id: 'stars',
       questions: {
         stars: {
@@ -266,7 +273,7 @@ describe('step.decide', () => {
         },
       },
     });
-    step.routeSwitch({
+    routeSwitch({
       id: 'route-stars',
       decide: numeric,
       on: 'stars',
@@ -285,7 +292,7 @@ describe('step.decide', () => {
         plan: string;
       };
     }
-    const withContext = step.decide({
+    const withContext = decide({
       id: 'plan-aware',
       context: (ctx: Context<Billing>) => ({
         plan: ctx.context.billing.plan,
@@ -301,9 +308,9 @@ describe('step.decide', () => {
   });
 });
 
-describe('step.routeSwitch — key form', () => {
+describe('routeSwitch — key form', () => {
   it('routes the original input to the chosen case', async () => {
-    const routed = step.routeSwitch({
+    const routed = routeSwitch({
       id: 'route',
       decide: triage,
       on: 'destination',
@@ -314,7 +321,7 @@ describe('step.routeSwitch — key form', () => {
   });
 
   it("routes booleans by 'true' / 'false' and scores by level", async () => {
-    const byBoolean = step.routeSwitch({
+    const byBoolean = routeSwitch({
       id: 'route-bool',
       decide: triage,
       on: 'isUrgent',
@@ -324,7 +331,7 @@ describe('step.routeSwitch — key form', () => {
       },
       uncertain: echo('unsure'),
     });
-    const byLevel = step.routeSwitch({
+    const byLevel = routeSwitch({
       id: 'route-level',
       decide: triage,
       on: 'urgency',
@@ -339,7 +346,7 @@ describe('step.routeSwitch — key form', () => {
   });
 
   it('takes uncertain below minConfidence, and the case at or above it', async () => {
-    const routed = step.routeSwitch({
+    const routed = routeSwitch({
       id: 'route-confident',
       decide: triage,
       on: 'destination',
@@ -368,7 +375,7 @@ describe('step.routeSwitch — key form', () => {
   });
 
   it("measures a boolean's confidence as the probability of the side it picked, so threshold counts", async () => {
-    const strict = step.decide({
+    const strict = decide({
       id: 'strict',
       model: 'm/x',
       questions: {
@@ -379,7 +386,7 @@ describe('step.routeSwitch — key form', () => {
         },
       },
     });
-    const routed = step.routeSwitch({
+    const routed = routeSwitch({
       id: 'route-strict',
       decide: strict,
       on: 'safe',
@@ -409,7 +416,7 @@ describe('step.routeSwitch — key form', () => {
   });
 
   it('takes uncertain on refusal', async () => {
-    const routed = step.routeSwitch({
+    const routed = routeSwitch({
       id: 'route-refused',
       decide: triage,
       on: 'destination',
@@ -429,7 +436,7 @@ describe('step.routeSwitch — key form', () => {
   });
 
   it('routes a choice named like an Object.prototype key', async () => {
-    const odd = step.decide({
+    const odd = decide({
       id: 'odd',
       model: 'm/x',
       questions: {
@@ -442,7 +449,7 @@ describe('step.routeSwitch — key form', () => {
         },
       },
     });
-    const routed = step.routeSwitch({
+    const routed = routeSwitch({
       id: 'route-odd',
       decide: odd,
       on: 'pick',
@@ -471,12 +478,12 @@ describe('step.routeSwitch — key form', () => {
   });
 
   it('types the output as the union of every case output', async () => {
-    const routed = step.routeSwitch({
+    const routed = routeSwitch({
       id: 'route-mixed',
       decide: triage,
       on: 'isUrgent',
       cases: {
-        true: step.run({
+        true: runCode({
           id: 'count',
           execute: async (input: string) => input.length,
         }),
@@ -484,18 +491,18 @@ describe('step.routeSwitch — key form', () => {
       },
       uncertain: echo('unsure'),
     });
-    const typed: StepBranch<ContextData, string, number | string> = routed;
+    const typed: StepConditional<ContextData, string, number | string> = routed;
     expect(await run({}, typed)).toBe('calm:x');
   });
 
   it('rejects a missing or misspelled case, an unknown question, and a missing uncertain — at the type level and at build', () => {
     expectConfigError(
       () =>
-        step.routeSwitch({
+        // @ts-expect-error a case is missing
+        routeSwitch({
           id: 'r',
           decide: triage,
           on: 'destination',
-          // @ts-expect-error a case is missing
           cases: {
             billing: echo('billing'),
           },
@@ -503,21 +510,21 @@ describe('step.routeSwitch — key form', () => {
         }),
       'INCOMPLETE_ROUTE_CASES',
     );
-    step.routeSwitch({
+    // @ts-expect-error `salse` is not an outcome of `destination`
+    routeSwitch({
       id: 'r-extra',
       decide: triage,
       on: 'destination',
       cases: {
         billing: echo('billing'),
         sales: echo('sales'),
-        // @ts-expect-error not an outcome of `destination`
         salse: echo('typo'),
       },
       uncertain: echo('u'),
     });
     expectConfigError(
       () =>
-        step.routeSwitch({
+        routeSwitch({
           id: 'r',
           decide: triage,
           on: frameworkCast<'destination'>('nope'),
@@ -529,7 +536,7 @@ describe('step.routeSwitch — key form', () => {
     expectConfigError(
       () =>
         // @ts-expect-error uncertain is required on the key form
-        step.routeSwitch({
+        routeSwitch({
           id: 'r',
           decide: triage,
           on: 'destination',
@@ -539,7 +546,7 @@ describe('step.routeSwitch — key form', () => {
     );
     expectConfigError(
       () =>
-        step.routeSwitch({
+        routeSwitch({
           id: 'r',
           decide: triage,
           on: 'destination',
@@ -551,7 +558,7 @@ describe('step.routeSwitch — key form', () => {
     );
     expectConfigError(
       () =>
-        step.routeSwitch({
+        routeSwitch({
           id: '',
           decide: triage,
           on: 'destination',
@@ -563,7 +570,7 @@ describe('step.routeSwitch — key form', () => {
   });
 
   it('lists the decide step and every case as optimizable children', () => {
-    const routed = step.routeSwitch({
+    const routed = routeSwitch({
       id: 'route-children',
       decide: triage,
       on: 'destination',
@@ -579,7 +586,7 @@ describe('step.routeSwitch — key form', () => {
   });
 
   it('rebuilds around new children, so the route runs the replacements', async () => {
-    const routed = step.routeSwitch({
+    const routed = routeSwitch({
       id: 'route-rebuild',
       decide: triage,
       on: 'destination',
@@ -603,14 +610,14 @@ describe('step.routeSwitch — key form', () => {
   });
 
   it('asks the model once when two switches route on the same decision', async () => {
-    const inner = step.routeSwitch({
+    const inner = routeSwitch({
       id: 'inner',
       decide: triage,
       on: 'destination',
       cases,
       uncertain: echo('u'),
     });
-    const outer = step.routeSwitch({
+    const outer = routeSwitch({
       id: 'outer',
       decide: triage,
       on: 'isUrgent',
@@ -626,9 +633,9 @@ describe('step.routeSwitch — key form', () => {
   });
 });
 
-describe('step.routeSwitch — function form', () => {
+describe('routeSwitch — function form', () => {
   it('routes by the returned key, falling back to default', async () => {
-    const routed = step.routeSwitch({
+    const routed = routeSwitch({
       id: 'route-fn',
       decide: triage,
       on: (a) => (a.isUrgent.value || a.urgency.value >= 1 ? 'page' : 'queue'),
@@ -641,7 +648,7 @@ describe('step.routeSwitch — function form', () => {
   });
 
   it('takes the named case when the function picks it', async () => {
-    const routed = step.routeSwitch({
+    const routed = routeSwitch({
       id: 'route-fn-page',
       decide: triage,
       on: (a) => (a.isUrgent.value ? 'page' : 'queue'),
@@ -679,12 +686,12 @@ describe('step.routeSwitch — function form', () => {
       },
       default: echo('default'),
     };
-    const withUncertain = step.routeSwitch({
+    const withUncertain = routeSwitch({
       ...base,
       id: 'route-fn-refused',
       uncertain: echo('unsure'),
     });
-    const without = step.routeSwitch({
+    const without = routeSwitch({
       ...base,
       id: 'route-fn-refused-bare',
     });

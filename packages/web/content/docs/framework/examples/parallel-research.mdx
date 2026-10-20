@@ -1,28 +1,28 @@
 ---
 title: Parallel Research
-description: A research agent using fork (all mode) with spawn-wrapped LLM calls to investigate a topic from multiple perspectives in parallel.
+description: A research agent using inParallel (all mode) with spawn-wrapped LLM calls to investigate a topic from multiple perspectives in parallel.
 ---
 
 ## Overview
 
-A research agent that investigates a topic from three perspectives simultaneously -- historical, technical, and societal. Demonstrates how `fork` fans out into parallel `spawn`-wrapped LLM calls and merges the results.
+A research agent that investigates a topic from three perspectives simultaneously -- historical, technical, and societal. Demonstrates how `inParallel` fans out into parallel `spawn`-wrapped LLM calls and merges the results.
 
-**Primitives used**: `fork` (all mode) + `spawn` + `step.llm`
+**Primitives used**: `inParallel` (all mode) + `spawn` + `callModel`
 
 ## How It Works
 
 1. Input arrives as a research topic string
-2. `fork` (mode: `'all'`) creates three parallel paths
-3. Each path is a `spawn`-wrapped `step.llm` with a perspective-specific system prompt
+2. `inParallel` (mode: `'all'`) creates three parallel paths
+3. Each path is a `spawn`-wrapped `callModel` with a perspective-specific system prompt
 4. All three complete, then `merge` combines results into a multi-section summary
 
 ## Code
 
 ```ts
 import type { ContextData } from '@noetic-tools/core';
-import { fork } from '@noetic-tools/core';
+import { inParallel } from '@noetic-tools/core';
 import { spawn } from '@noetic-tools/core';
-import { step } from '@noetic-tools/core';
+import { callModel } from '@noetic-tools/core';
 
 const PERSPECTIVES = [
   {
@@ -43,14 +43,14 @@ const PERSPECTIVES = [
 ] as const;
 
 export function buildParallelResearchAgent() {
-  return fork<ContextData, string, string>({
+  return inParallel<ContextData, string, string>({
     id: 'parallel-research',
     mode: 'all',
     paths: () =>
       PERSPECTIVES.map((perspective) =>
         spawn<ContextData, string, string>({
           id: `research-${perspective.id}`,
-          child: step.llm<ContextData, string, string>({
+          child: callModel<ContextData, string, string>({
             id: `llm-${perspective.id}`,
             model: 'openai/gpt-4o',
             instructions: perspective.instructions,
@@ -69,9 +69,9 @@ export function buildParallelResearchAgent() {
 
 ## Key Concepts
 
-### Fork All Mode
+### inParallel All Mode
 
-`fork` with `mode: 'all'` runs every path to completion and collects all results. The `merge` function then combines them. This is the right choice when you need every perspective -- unlike `'race'` (first wins) or `'settle'` (tolerates failures).
+`inParallel` with `mode: 'all'` runs every path to completion and collects all results. The `merge` function then combines them. This is the right choice when you need every perspective -- unlike `'race'` (first wins) or `'settle'` (tolerates failures).
 
 ### Spawn for Isolation
 

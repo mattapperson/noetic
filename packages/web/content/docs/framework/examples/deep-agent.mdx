@@ -7,19 +7,19 @@ description: A full-featured coding agent with filesystem access, task planning,
 
 This example recreates the core capabilities of [DeepAgentsJS](https://github.com/langchain-ai/deepagentsjs) — a LangGraph-based framework for building AI coding agents — using only Noetic's seven step primitives.
 
-The key insight: **middleware = tools + context layers**. Every piece of DeepAgentsJS middleware decomposes into either a tool (for mutations/actions) or a context layer (for context projection), composed together with `react()` + `context` for isolation.
+The key insight: **middleware = tools + context layers**. Every piece of DeepAgentsJS middleware decomposes into either a tool (for mutations/actions) or a context layer (for context projection), composed together with `spawn` + `loop` + `callModel` for isolation.
 
 ## Architecture Mapping
 
 | DeepAgentsJS Concept | Noetic Equivalent |
 |---|---|
-| `createDeepAgent()` | `react()` with `context` param (wraps in `spawn` automatically) |
-| todoListMiddleware | `tool()` definitions with `ToolContextDeclaration` + `toolContextLayer()` |
+| `createDeepAgent()` | `spawn` wrapping a `loop` + `callModel`, with `context` layers on the spawn boundary |
+| todoListMiddleware | `tool()` definitions with `ToolContextDeclaration` + `toolCalls()` |
 | filesystemMiddleware | `tool()` definitions using Node.js `fs` |
 | subAgentMiddleware | `createConfigurableDelegateTool()` using `toolCtx.harness` |
-| summarizationMiddleware | `observationalContext()` with custom observer |
+| summarizationMiddleware | `observations()` with custom observer |
 | skillsMiddleware | Custom `ContextLayer` with progressive disclosure |
-| memoryMiddleware (upstream) | `staticContent()` built-in layer |
+| memoryMiddleware (upstream) | `instructions()` built-in layer |
 | promptCachingMiddleware | N/A — adapter-level concern |
 | patchToolCallsMiddleware | N/A — Noetic interpreter handles natively |
 | humanInTheLoopMiddleware | `tool({ needsApproval: true })` |
@@ -32,7 +32,7 @@ Three tools mirror the todoListMiddleware pattern:
 - **`update_todo`** — Updates an item's status (pending, in_progress, completed, blocked)
 - **`list_todos`** — Reads current state from `toolCtx.context.get()`
 
-Tools declare a shared `ToolContextDeclaration` with `id: 'todos'` — `toolContextLayer()` materializes this into a single `ContextLayer` that projects the todo state into the LLM context:
+Tools declare a shared `ToolContextDeclaration` with `id: 'todos'` — `toolCalls()` materializes this into a single `ContextLayer` that projects the todo state into the LLM context:
 
 ```ts
 interface TodoState {
@@ -88,12 +88,12 @@ export function createConfigurableDelegateTool(resolver: SubAgentResolver): Tool
 
 ## Context Layers
 
-### Instructions (via `staticContent`)
+### Instructions (via `instructions`)
 
-Uses the built-in `staticContent()` layer to load instruction files from disk:
+Uses the built-in `instructions()` layer to load instruction files from disk:
 
 ```ts validate=none
-staticContent({
+instructions({
   load: async () => {
     const contents = await Promise.all(paths.map(p => Bun.file(p).text()));
     return contents.join('\n\n---\n\n');
@@ -102,20 +102,20 @@ staticContent({
 })
 ```
 
-- **Slot**: `WORKING_MEMORY + 5` (105)
+- **Slot**: `SCRATCHPAD + 5` (105)
 - **Scope**: `resource`
 
-### Todo State (via `toolContextLayer`)
+### Todo State (via `toolCalls`)
 
 Generated automatically from `ToolContextDeclaration` on the tools:
 
 ```ts
 declare const allTools: Tool[];
 
-toolContextLayer(allTools); // produces one layer per unique context.id
+toolCalls(allTools); // produces one layer per unique context.id
 ```
 
-- **Slot**: `WORKING_MEMORY + 10` (110)
+- **Slot**: `SCRATCHPAD + 10` (110)
 - **Scope**: `execution`
 
 ### Skills Layer (Progressive Disclosure)
@@ -128,10 +128,10 @@ Lists all skill names in `recall` (string shorthand). When the LLM calls `activa
 
 ### Summarization
 
-Reuses the built-in `observationalContext` with a custom `observer` function:
+Reuses the built-in `observations` with a custom `observer` function:
 
 ```ts
-observationalContext({
+observations({
   bufferThreshold: 4_000,
   observer: async (buffer) => [
     `Summary: processed ${buffer.length} exchanges...`,
@@ -141,11 +141,11 @@ observationalContext({
 
 ## Main Composition
 
-The `buildDeepAgent` function composes everything using `react()` with `context`:
+The `buildDeepAgent` function composes everything from `spawn`, `loop`, and `callModel`:
 
 ```ts
-import { observationalContext, react, staticContent, toolContextLayer } from '@noetic-tools/core';
-import type { ContextData, ContextLayer, StepLoop, StepSpawn, Tool } from '@noetic-tools/core';
+import { any, callModel, instructions, loop, observations, spawn, toolCalls, until } from '@noetic-tools/core';
+import type { ContextData, ContextLayer, StepSpawn, Tool } from '@noetic-tools/core';
 
 interface DeepAgentConfig {
   model: string;
@@ -161,25 +161,35 @@ declare const observer: (buffer: ReadonlyArray<unknown>) => Promise<string[]>;
 
 export function buildDeepAgent(
   config: DeepAgentConfig,
-): StepLoop<ContextData, string, string> | StepSpawn<ContextData, string, string> {
+): StepSpawn<ContextData, string, string> {
   const allTools = [...fsTools, ...todoTools, delegateTool];
   const layers: ContextLayer[] = [
-    staticContent({ load: loadInstructions, tag: 'instructions' }),
-    ...toolContextLayer(allTools),
+    instructions({ load: loadInstructions, tag: 'instructions' }),
+    ...toolCalls(allTools),
     skillsLayer({}),
-    observationalContext({ bufferThreshold: 4_000, observer }),
+    observations({ bufferThreshold: 4_000, observer }),
   ];
 
-  return react({
-    model: config.model,
-    instructions: config.instructions,
-    tools: allTools,
+  const agentLoop = loop({
+    id: 'deep-agent-loop',
+    steps: [callModel<ContextData, string, string>({
+      id: 'deep-agent-llm',
+      model: config.model,
+      instructions: config.instructions,
+      tools: allTools,
+    })],
+    until: any(until.noToolCalls(), until.maxSteps(50)),
+  });
+
+  return spawn<ContextData, string, string>({
+    id: 'deep-agent',
+    child: agentLoop,
     context: layers,
   });
 }
 ```
 
-When `context` is provided, `react()` automatically wraps the loop in a `spawn` that creates a context boundary with those context layers.
+The `spawn` wrapper creates a context boundary with those context layers, so the loop — and every sub-agent it delegates to — sees them.
 
 ## What's Different from DeepAgentsJS
 

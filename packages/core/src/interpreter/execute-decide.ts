@@ -185,7 +185,7 @@ async function resolveModel<TContext, I, O>(
   if (!model || model.trim() === '') {
     throw new NoeticConfigError({
       code: 'MISSING_MODEL',
-      message: `step.decide(${JSON.stringify(step.id)}) has no model.`,
+      message: `decide(${JSON.stringify(step.id)}) has no model.`,
       hint: "Set `model` on the step, or `decisionModel` on the harness, e.g. 'typesafe/jev-1.14'.",
     });
   }
@@ -219,7 +219,7 @@ async function askHarness<TContext, I, O>(
         });
       }
       throw new NoeticErrorImpl({
-        kind: 'llm_parse_error',
+        kind: 'model_parse_error',
         stepId: step.id,
         raw: e.raw,
         schema: e.schema,
@@ -228,7 +228,7 @@ async function askHarness<TContext, I, O>(
     }
     if (statusOf(e) === 429) {
       throw new NoeticErrorImpl({
-        kind: 'llm_rate_limit',
+        kind: 'model_rate_limit',
         stepId: step.id,
       });
     }
@@ -282,7 +282,7 @@ function contextState(values: Record<string, unknown> | undefined): DecideStateP
 }
 
 /**
- * The same recall + history projection `step.llm` sees, within the decision's
+ * The same recall + history projection `callModel` sees, within the decision's
  * own budget. Recall peeks, so a decision never drains layer state (such as
  * queued steering guidance) meant for the next model call.
  */
@@ -414,7 +414,7 @@ function validateAnswers(
   const result = schema.safeParse(answers);
   if (!result.success) {
     throw new NoeticErrorImpl({
-      kind: 'llm_parse_error',
+      kind: 'model_parse_error',
       stepId,
       raw: JSON.stringify(answers),
       schema,

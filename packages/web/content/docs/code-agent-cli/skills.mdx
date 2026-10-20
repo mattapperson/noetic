@@ -66,7 +66,7 @@ agent-omit-claude-md: false
 | `agent-type` | `string` | Optional. When set, this skill is also a teammate preset. The parent uses `subagent_type: <agent-type>` on the `agent` tool to spawn it. |
 | `agent-model` | `'inherit' \| 'haiku' \| 'sonnet' \| 'opus' \| string` | Override the model for the spawned teammate. `inherit` (default) reuses the parent's model. |
 | `agent-background` | `boolean` | Force background-mode spawning (the parent doesn't block waiting for a result). |
-| `agent-max-steps` | `number` | Cap reasoning steps for tool-bearing teammates (passed through to the `react` pattern). |
+| `agent-max-steps` | `number` | Cap reasoning steps for tool-bearing teammates (enforced via `until.maxSteps` on the agent loop). |
 | `agent-omit-claude-md` | `boolean` | Skip injecting AGENT.md / CLAUDE.md into the teammate's context — saves tokens for read-only research agents. |
 
 The body of `SKILL.md` (everything after the frontmatter) is the **instructions**. When the skill activates, the body is processed (`@import`s resolved, trusted `!command` lines executed) and rendered into context.

@@ -33,7 +33,7 @@ export function deduplicateTools(tools: ReadonlyArray<Tool>): Tool[] {
 
 function walkStep(step: Step, out: Tool[]): void {
   switch (step.kind) {
-    case 'llm':
+    case 'callModel':
       // Skip function-form tools: they're resolved per execution from `ctx`
       // and cannot contribute to the pre-computed unified set. Consumers that
       // need those tools in the pool should register them via
@@ -48,19 +48,16 @@ function walkStep(step: Step, out: Tool[]): void {
       }
       return;
 
-    case 'run':
-    case 'tool':
+    case 'runCode':
+    case 'invokeTool':
     // Decide steps ask questions; they never call tools.
     case 'decide':
-    // SubHarness steps run their own built-in tools inside the external agent;
-    // they contribute nothing to the host unified tool set.
-    case 'claude-code':
-    case 'codex':
-    case 'opencode':
-    case 'pi':
+    // An ACP agent runs its own tools inside the external agent process; it
+    // contributes nothing to the host unified tool set.
+    case 'acp-agent':
       return;
 
-    case 'branch':
+    case 'conditional':
       if (step._optimizable) {
         for (const child of step._optimizable) {
           walkStep(child, out);
@@ -68,7 +65,7 @@ function walkStep(step: Step, out: Tool[]): void {
       }
       return;
 
-    case 'fork':
+    case 'inParallel':
       if (step._optimizable) {
         for (const child of step._optimizable) {
           walkStep(child, out);
@@ -76,7 +73,7 @@ function walkStep(step: Step, out: Tool[]): void {
       }
       return;
 
-    case 'provide':
+    case 'withContext':
       walkStep(step.child, out);
       return;
 
@@ -90,7 +87,7 @@ function walkStep(step: Step, out: Tool[]): void {
       }
       return;
 
-    case 'every':
+    case 'schedule':
       walkStep(step.step, out);
       return;
 

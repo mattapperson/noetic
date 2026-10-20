@@ -24,8 +24,6 @@ function makeToolCtxWithHarness(harness: AgentHarnessContract): ToolExecutionCon
     fs: harness.fs,
     shell: harness.shell,
     context: toolContext,
-    // Deprecated alias — same accessor object.
-    memory: toolContext,
     assembledView: ctx.itemLog.items,
     lastStepMeta: null,
   };

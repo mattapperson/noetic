@@ -142,7 +142,7 @@ const catalog: ContextLayer = {
 
 Return `null` to fall back to a full republish. A hook that throws or hangs falls back too — a supersede is a correctness obligation, so it is never skipped because a hook misbehaved.
 
-Worth implementing only when the payload is large and its changes are small. The built-in `fileReference` layer does it: one changed file out of twelve costs one file, not twelve.
+Worth implementing only when the payload is large and its changes are small. The built-in `filesystem` layer does it: one changed file out of twelve costs one file, not twelve.
 
 ## Re-anchoring
 
@@ -221,7 +221,7 @@ The gap between `autoPromoteChurn` and `autoDemoteChurn` is deliberate. A layer 
 
 ## Limits worth knowing
 
-**History overflow ends the benefit.** Once conversation history exceeds its budget, the projector drops from the front, which moves the anchor/history boundary and loses the history part of the cache on every subsequent turn. The `[system][anchor]` prefix still caches. Pair anchoring with [`historyWindow`](/docs/framework/context-layers) to keep the boundary still.
+**History overflow ends the benefit.** Once conversation history exceeds its budget, the projector drops from the front, which moves the anchor/history boundary and loses the history part of the cache on every subsequent turn. The `[system][anchor]` prefix still caches. Pair anchoring with [`history`](/docs/framework/context-layers) to keep the boundary still.
 
 **A layer whose `recall()` returns state is never pinned.** Returning state means the call changed something, so replaying an older render would discard it. The runtime forces such layers into the live band whatever their declared placement — the built-in `steering` layer is the case that drives this, since it drains its pending queue as it renders.
 

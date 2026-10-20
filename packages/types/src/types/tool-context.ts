@@ -27,13 +27,6 @@ export interface ToolExecutionContext {
   readonly shell: ShellAdapter;
   /** Per-layer state accessor for reading/writing tool-specific state. */
   readonly context: ToolContext;
-  /**
-   * @deprecated Renamed to `context`. Returns the same accessor.
-   *
-   * Required for the same reason as `Context.memory` — pre-rename code calls
-   * `toolCtx.memory.get(...)` directly.
-   */
-  readonly memory: ToolContext;
   /** The fully assembled conversation view at the point of tool invocation. */
   readonly assembledView: ReadonlyArray<Item>;
   /** Metadata from the most recent step execution (token usage, tool calls, etc.). */

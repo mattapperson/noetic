@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'bun:test';
 import { z } from 'zod';
-import { step } from '../../src/builders/step-builders';
+import { callModel, invokeTool, runCode } from '../../src/builders/step-builders';
 import { makeMockContext } from '../_helpers';
 
 describe('step builders', () => {
-  it('step.run() produces correct shape', async () => {
-    const s = step.run({
+  it('runCode() produces correct shape', async () => {
+    const s = runCode({
       id: 'my-run',
       execute: async (input: string) => input.length,
     });
-    expect(s.kind).toBe('run');
+    expect(s.kind).toBe('runCode');
     expect(s.id).toBe('my-run');
     expect(s.execute).toBeFunction();
     expect(s.retry).toBeUndefined();
@@ -17,8 +17,8 @@ describe('step builders', () => {
     expect(result).toBe(5);
   });
 
-  it('step.run() with retry policy', () => {
-    const s = step.run({
+  it('runCode() with retry policy', () => {
+    const s = runCode({
       id: 'retry-run',
       execute: async (input: string) => input,
       retry: {
@@ -34,23 +34,23 @@ describe('step builders', () => {
     });
   });
 
-  it('step.llm() produces correct shape', () => {
-    const s = step.llm({
+  it('callModel() produces correct shape', () => {
+    const s = callModel({
       id: 'my-llm',
       model: 'gpt-4',
       instructions: 'You are helpful',
     });
-    expect(s.kind).toBe('llm');
+    expect(s.kind).toBe('callModel');
     expect(s.id).toBe('my-llm');
     expect(s.model).toBe('gpt-4');
     expect(s.instructions).toBe('You are helpful');
   });
 
-  it('step.llm() with output schema', () => {
+  it('callModel() with output schema', () => {
     const schema = z.object({
       answer: z.string(),
     });
-    const s = step.llm({
+    const s = callModel({
       id: 'structured-llm',
       model: 'gpt-4',
       output: schema,
@@ -58,7 +58,7 @@ describe('step builders', () => {
     expect(s.output).toBe(schema);
   });
 
-  it('step.llm() with tools', () => {
+  it('callModel() with tools', () => {
     const tool = {
       name: 'search',
       description: 'Search the web',
@@ -72,14 +72,14 @@ describe('step builders', () => {
         results: [],
       }),
     };
-    const s = step.llm({
+    const s = callModel({
       id: 'tool-llm',
       model: 'gpt-4',
       tools: [
         tool,
       ],
     });
-    // `tools` is `Lazy<Tool[] | undefined>`; narrow to the eager-array branch
+    // `tools` is `Lazy<Tool[] | undefined>`; narrow to the eager-array conditional
     // before indexing.
     expect(Array.isArray(s.tools)).toBe(true);
     const eagerTools = Array.isArray(s.tools) ? s.tools : [];
@@ -87,7 +87,7 @@ describe('step builders', () => {
     expect(eagerTools[0]).toBe(tool);
   });
 
-  it('step.tool() produces correct shape', () => {
+  it('invokeTool() produces correct shape', () => {
     const myTool = {
       name: 'calculator',
       description: 'Calculate',
@@ -101,33 +101,33 @@ describe('step builders', () => {
         result: 42,
       }),
     };
-    const s = step.tool({
+    const s = invokeTool({
       id: 'my-tool',
       tool: myTool,
     });
-    expect(s.kind).toBe('tool');
+    expect(s.kind).toBe('invokeTool');
     expect(s.id).toBe('my-tool');
     expect(s.tool.name).toBe('calculator');
   });
 
-  it('step.run() throws on empty id', () => {
+  it('runCode() throws on empty id', () => {
     expect(() =>
-      step.run({
+      runCode({
         id: '',
         execute: async () => {},
       }),
     ).toThrow('non-empty id');
     expect(() =>
-      step.run({
+      runCode({
         id: '  ',
         execute: async () => {},
       }),
     ).toThrow('non-empty id');
   });
 
-  it('step.run() throws on missing execute', () => {
+  it('runCode() throws on missing execute', () => {
     expect(() =>
-      step.run({
+      runCode({
         id: 'test',
         // @ts-expect-error — intentionally passing invalid opts to test runtime validation
         execute: undefined,
@@ -135,25 +135,25 @@ describe('step builders', () => {
     ).toThrow('execute function');
   });
 
-  it('step.llm() throws on empty id', () => {
+  it('callModel() throws on empty id', () => {
     expect(() =>
-      step.llm({
+      callModel({
         id: '',
         model: 'gpt-4',
       }),
     ).toThrow('non-empty id');
   });
 
-  it('step.llm() throws on empty model', () => {
+  it('callModel() throws on empty model', () => {
     expect(() =>
-      step.llm({
+      callModel({
         id: 'test',
         model: '',
       }),
     ).toThrow('non-empty model');
   });
 
-  it('step.tool() throws on empty id', () => {
+  it('invokeTool() throws on empty id', () => {
     const myTool = {
       name: 'calc',
       description: 'Calc',
@@ -168,16 +168,16 @@ describe('step builders', () => {
       }),
     };
     expect(() =>
-      step.tool({
+      invokeTool({
         id: '',
         tool: myTool,
       }),
     ).toThrow('non-empty id');
   });
 
-  it('step.tool() throws on missing tool', () => {
+  it('invokeTool() throws on missing tool', () => {
     expect(() =>
-      step.tool({
+      invokeTool({
         id: 'test',
         // @ts-expect-error — intentionally passing invalid opts to test runtime validation
         tool: undefined,
@@ -185,7 +185,7 @@ describe('step builders', () => {
     ).toThrow('requires a tool');
   });
 
-  it('step.tool() with args', () => {
+  it('invokeTool() with args', () => {
     const myTool = {
       name: 'calculator',
       description: 'Calculate',
@@ -199,7 +199,7 @@ describe('step builders', () => {
         result: 42,
       }),
     };
-    const s = step.tool({
+    const s = invokeTool({
       id: 'my-tool',
       tool: myTool,
       args: {

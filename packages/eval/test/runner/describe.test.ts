@@ -1,5 +1,5 @@
 import * as bun from 'bun:test';
-import { step } from '@noetic-tools/core';
+import { runCode } from '@noetic-tools/core';
 import { describe } from '../../src/runner/describe';
 import { it } from '../../src/runner/it';
 import { clearSuites, getSuites } from '../../src/runner/registry';
@@ -10,7 +10,7 @@ bun.describe('describe()', () => {
   test('registers a suite in the registry', () => {
     clearSuites();
 
-    const testStep = step.run({
+    const testStep = runCode({
       id: 'test-step',
       execute: async (input: unknown) => input,
     });
@@ -28,7 +28,7 @@ bun.describe('describe()', () => {
   test('captures it() cases within describe()', () => {
     clearSuites();
 
-    const testStep = step.run({
+    const testStep = runCode({
       id: 'test-step',
       execute: async (input: unknown) => input,
     });
@@ -56,7 +56,7 @@ bun.describe('describe()', () => {
   test('clearSuites() empties the registry', () => {
     clearSuites();
 
-    const testStep = step.run({
+    const testStep = runCode({
       id: 'test-step',
       execute: async (input: unknown) => input,
     });

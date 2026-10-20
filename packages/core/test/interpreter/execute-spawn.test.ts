@@ -22,7 +22,7 @@ function makeSpawnStep<TContext = ContextData, I = unknown, O = unknown>(
     kind: 'spawn',
     id,
     child: {
-      kind: 'run',
+      kind: 'runCode',
       id: `${id}-child`,
       execute,
     },
@@ -389,7 +389,7 @@ describe('executeSpawn', () => {
         kind: 'spawn',
         id: 'channel-spawn',
         child: {
-          kind: 'run',
+          kind: 'runCode',
           id: 'child',
           execute: async (_input, c) => {
             try {

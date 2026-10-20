@@ -6,7 +6,7 @@
  *
  * Mirrors Claude Code's `filterUnresolvedToolUses`. Used by the CLI's
  * session-resume path to drop dangling pairs left by a crash, and by the
- * `historyWindow` context layer to clean orphans at the slice boundary.
+ * `history` context layer to clean orphans at the slice boundary.
  */
 
 import type { Item } from '@noetic-tools/types';
