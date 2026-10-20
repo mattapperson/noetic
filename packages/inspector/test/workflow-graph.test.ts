@@ -179,6 +179,49 @@ describe('toFlow', () => {
     expect(targets(edges, 'gate')).not.toContain('~end');
   });
 
+  it('draws a routeSwitch as its decision feeding a gate with one edge per case', () => {
+    const { nodes, edges } = toFlow(
+      doc({
+        kind: 'routeSwitch',
+        id: 'route',
+        decide: {
+          kind: 'decide',
+          id: 'triage',
+          questions: {
+            urgent: {
+              type: 'boolean',
+              instructions: 'Urgent?',
+            },
+          },
+        },
+        on: 'urgent',
+        cases: {
+          true: llm('page'),
+          false: llm('queue'),
+        },
+        minConfidence: 0.7,
+        uncertain: llm('ask'),
+      }),
+    );
+
+    // The decision runs first, so flow enters it, not the gate.
+    expect(targets(edges, '~start')).toEqual([
+      'triage',
+    ]);
+    expect(targets(edges, 'triage')).toEqual([
+      'route',
+    ]);
+    expect(node(nodes, 'triage').detail).toBe('urgent');
+    expect(node(nodes, 'route').chips).toEqual([
+      'minConfidence 0.7',
+    ]);
+    expect(edges.filter((edge) => edge.from === 'route').map((edge) => edge.label)).toEqual([
+      'true',
+      'false',
+      'uncertain',
+    ]);
+  });
+
   it('draws a loop as a do-while: body first, then the test', () => {
     const { nodes, edges } = toFlow(
       doc({

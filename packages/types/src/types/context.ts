@@ -3,9 +3,16 @@ import type { ItemSchemaRegistry } from '../schemas/item';
 import type { Channel, ChannelHandle, ExternalChannel } from './channel';
 import type { LLMResponse, ModelParams, StepMeta, TokenUsage } from './common';
 import type { ContextCacheConfig, ContextCacheStore } from './context-cache';
-import type { ContextData, ContextLayer, ProjectionPolicy, StorageAdapter } from './context-layer';
+import type {
+  ContextData,
+  ContextLayer,
+  ProjectionPolicy,
+  RecallOptions,
+  StorageAdapter,
+} from './context-layer';
 import type { ItemLog } from './context-parts/item-log';
 import type { LastLayerUsage } from './context-parts/layer-usage';
+import type { DecideRequest, DecideResponse, DecisionRecord } from './decide';
 import type { DetachedHandle } from './detached';
 import type { FsAdapter } from './fs-adapter';
 import type { HarnessResponse, StreamEvent, StreamingItem } from './harness-result';
@@ -134,6 +141,11 @@ export type ContextStep<TContext = ContextData, I = unknown, O = unknown> =
       readonly output?: ZodType<O>;
     }
   | {
+      readonly kind: 'decide';
+      readonly id: string;
+      readonly _answers?: O;
+    }
+  | {
       readonly kind: 'loop';
       readonly id: string;
       readonly steps: ReadonlyArray<ContextStep<TContext, I, O>>;
@@ -153,12 +165,17 @@ export interface ContextHarness {
     readonly projection?: ProjectionPolicy;
     /** Tuning for prompt-cache anchoring. */
     readonly contextCache?: ContextCacheConfig;
+    /** Default model for `decide` steps. */
+    readonly decisionModel?: string;
   };
   readonly fs: FsAdapter;
   readonly shell: ShellAdapter;
   readonly subprocess: SubprocessAdapter;
   readonly rootCwdState: CwdState;
   callModel(request: ContextCallModelRequest): Promise<LLMResponse>;
+  decide(request: DecideRequest): Promise<DecideResponse>;
+  /** Run every layer's `onDecision` hook, in slot order. */
+  notifyDecision(layers: ContextLayer[], record: DecisionRecord, ctx: Context): Promise<void>;
   execute(input: ExecuteInput, options?: unknown): Promise<void>;
   getAgentResponse(scope?: unknown): Promise<HarnessResponse>;
   getItemStream(scope?: unknown): AsyncIterable<StreamingItem>;
@@ -214,12 +231,14 @@ export interface ContextHarness {
     input: string,
     ctx: Context,
     budgets: Map<string, number>,
+    opts?: RecallOptions,
   ): Promise<ContextRecallLayerOutput[]>;
   recallLayersEventual(
     layers: ContextLayer[],
     input: string,
     ctx: Context,
     budgets: Map<string, number>,
+    opts?: RecallOptions,
   ): Promise<ContextRecallLayerOutput[]>;
   projectHistory(
     layers: ContextLayer[],

@@ -24,6 +24,7 @@ export * from './context/layer-api';
 export * from './context/layer-lifecycle';
 export * from './context/layer-provides';
 export * from './context/layer-usage';
+export * from './context/layers/decisions-history';
 export * from './context/layers/durable-task-state';
 export * from './context/layers/file-reference';
 export * from './context/layers/history-window';

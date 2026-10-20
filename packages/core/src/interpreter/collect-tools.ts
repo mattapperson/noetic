@@ -50,6 +50,8 @@ function walkStep(step: Step, out: Tool[]): void {
 
     case 'run':
     case 'tool':
+    // Decide steps ask questions; they never call tools.
+    case 'decide':
     // SubHarness steps run their own built-in tools inside the external agent;
     // they contribute nothing to the host unified tool set.
     case 'claude-code':

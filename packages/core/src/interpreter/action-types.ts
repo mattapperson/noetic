@@ -16,6 +16,7 @@ export type {
   RecallLayerOutput,
   RetryPolicy,
   ServerToolSpec,
+  StepDecide,
   StepLLM,
   StepMeta,
   StepProvide,

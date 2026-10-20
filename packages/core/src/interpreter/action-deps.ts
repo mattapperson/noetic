@@ -8,6 +8,7 @@ export {
   computeLayerUsage,
   contextToExecCtx,
   createContextCacheStore,
+  DECISION_PROJECTION,
   DEFAULT_PROJECTION,
   lineageKey,
   noteCacheOutcome,

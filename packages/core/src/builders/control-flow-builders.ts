@@ -1,6 +1,7 @@
 import type { ContextData } from '@noetic-tools/context';
 import type {
   Context,
+  ExecuteStepFn,
   SettleResult,
   Step,
   StepBranch,
@@ -112,8 +113,9 @@ export function fork<TContext = ContextData, I = unknown, O = unknown>(opts: {
  *
  * @public
  * @param opts.id - Unique step identifier used in traces and error messages.
- * @param opts.route - Routing function `(input, ctx) => Step | null`. Returns the next step
- *   to execute, or `null` to skip (pass input through as output). May be async.
+ * @param opts.route - Routing function `(input, ctx, run) => Step | null`. Returns the next step
+ *   to execute, or `null` to skip (pass input through as output). May be async. `run`
+ *   executes a step through the interpreter, for routes that must run one to choose.
  * @returns A `StepBranch` step.
  * @throws `NoeticConfigError` with code `EMPTY_STEP_ID` if `id` is empty.
  * @throws `NoeticConfigError` with code `MISSING_ROUTE_FUNCTION` if `route` is not provided.
@@ -123,8 +125,10 @@ export function branch<TContext = ContextData, I = unknown, O = unknown>(opts: {
   route: (
     input: I,
     ctx: Context<TContext>,
+    run: ExecuteStepFn,
   ) => Step<TContext, I, O> | null | Promise<Step<TContext, I, O> | null>;
   _optimizable?: Step<TContext>[];
+  _rebuild?: (children: Step<TContext>[]) => StepBranch<TContext, I, O>;
 }): StepBranch<TContext, I, O> {
   if (!opts.id || opts.id.trim() === '') {
     throw new NoeticConfigError({

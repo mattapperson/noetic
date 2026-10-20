@@ -14,6 +14,7 @@ type Step<I, O> =
   | { kind: 'run';     id: string; execute: (input: I, ctx: Context) => Promise<O>; retry?: RetryPolicy; subprocess?: SubprocessAdapter }
   | { kind: 'llm';     id: string; model: string; instructions?: string; tools?: Tool[]; output?: ZodType<O>; params?: ModelParams }
   | { kind: 'tool';    id: string; tool: Tool; args?: unknown }
+  | { kind: 'decide';  id: string; model?: string; questions: DecideQuestions; view: 'full' | 'layers' | 'none'; samples: number }
   | { kind: 'branch';  id: string; route: (input: I, ctx: Context) => Step<I, O> | null }
   | { kind: 'fork';    id: string; mode: 'all' | 'race' | 'settle'; paths: (input: I, ctx: Context) => Step<I, O>[]; merge?: MergeFn<O>; concurrency?: number }
   | { kind: 'spawn';   id: string; child: Step<I, O>; context?: ContextLayer[]; timeout?: number; subprocess?: SubprocessAdapter }
@@ -30,6 +31,7 @@ Each variant is specified in its own feature spec:
 | `run` | `02-step-variants` | Arbitrary async work |
 | `llm` | `02-step-variants` | Single LLM call |
 | `tool` | `02-step-variants` | Single tool execution |
+| `decide` | `30-decide` | Typed questions answered with probabilities |
 | `branch` | `03-control-flow` | Conditional routing |
 | `fork` | `03-control-flow` | Parallel execution |
 | `spawn` | `04-spawn` | Child execution with context boundary |
@@ -46,6 +48,7 @@ async function execute<I, O>(step: Step<I, O>, input: I, ctx: Context): Promise<
     case 'run':     return executeRun(step, input, ctx);
     case 'llm':     return executeLLM(step, input, ctx);
     case 'tool':    return executeTool(step, input, ctx);
+    case 'decide':  return executeDecide(step, input, ctx);
     case 'branch':  return executeBranch(step, input, ctx);
     case 'fork':    return executeFork(step, input, ctx);
     case 'spawn':   return executeSpawn(step, input, ctx);

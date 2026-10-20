@@ -6,6 +6,7 @@
 /** @public */
 /** @public */
 export {
+  decisionsHistoryLayer,
   durableTaskState,
   historyWindow,
   observationalContext,

@@ -13,6 +13,7 @@ export {
   disposeLayers,
   executeRerender,
   initLayers,
+  notifyDecision,
   projectHistoryLayers,
   recallLayers,
   recallLayersAtomic,

@@ -15,6 +15,7 @@ export * from './types/context-layer';
 export * from './types/context-parts/item-log';
 export * from './types/context-parts/layer-usage';
 export * from './types/context-scope';
+export * from './types/decide';
 export * from './types/detached';
 export * from './types/error';
 export * from './types/fs-adapter';

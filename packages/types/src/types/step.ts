@@ -3,6 +3,7 @@ import type { Channel } from './channel';
 import type { ModelParams, RetryPolicy, ServerToolSpec, StepMeta } from './common';
 import type { Context } from './context';
 import type { ContextConfig, ContextData, ContextLayer, ProjectionPolicy } from './context-layer';
+import type { DecideAnswers, DecideQuestions } from './decide';
 import type { NoeticError } from './error';
 import type { OutputCodec } from './output-codec';
 import type {
@@ -88,6 +89,7 @@ export type Step<TContext = ContextData, I = unknown, O = unknown> =
   | StepLLM<TContext, I, O>
   | StepSubHarness<TContext, I, O>
   | StepTool<TContext, I, O>
+  | StepDecide<TContext, I, O>
   | StepBranch<TContext, I, O>
   | StepFork<TContext, I, O>
   | StepSpawn<TContext, I, O>
@@ -178,15 +180,74 @@ export interface StepTool<_TContext = ContextData, I = unknown, O = unknown> {
   args?: Partial<I>;
 }
 
+/**
+ * A step that asks a model typed questions about the current context and returns
+ * typed answers with probabilities. It reads the conversation but never appends
+ * to it, and runs no steering hooks. See spec 30.
+ * @public
+ */
+export interface StepDecide<TContext = ContextData, _I = unknown, O = unknown> {
+  kind: 'decide';
+  /** Phantom field carrying the answers type for inference. Never set at runtime. */
+  readonly _answers?: O;
+  id: string;
+  /** Decision model id. Falls back to `harness.config.decisionModel`. */
+  model?: Lazy<string, TContext>;
+  /** Shared framing for every question. */
+  instructions?: Lazy<string | undefined, TContext>;
+  questions: DecideQuestions;
+  /** Which part of the assembled view the model sees. */
+  view: DecideView;
+  /** Typed state read from context layers, sent as named state entries. */
+  context?: (ctx: Context<TContext>) => Record<string, unknown> | Promise<Record<string, unknown>>;
+  /** Budget for the decision's view. Defaults to `DECISION_PROJECTION`. */
+  projection?: ProjectionPolicy;
+  /** Runs averaged on the estimated path. Ignored on the native path. */
+  samples: number;
+  /** Controls framework event emission for this step. Defaults to `true`. */
+  emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
+}
+
+/**
+ * A decide step that keeps its literal question map, so `routeSwitch` can infer
+ * the questions, choices, and levels it routes by.
+ * @public
+ */
+export type DecideStep<TContext, I, Q extends DecideQuestions> = StepDecide<
+  TContext,
+  I,
+  DecideAnswers<Q>
+> & {
+  readonly questions: Q;
+};
+
+/**
+ * What a decide step sees: `full` = layer recall + history, `layers` = layer
+ * recall only, `none` = only the input, instructions, and context selector.
+ * @public
+ */
+export type DecideView = 'full' | 'layers' | 'none';
+
 /** @public A step that dynamically selects and executes one of several possible sub-steps. */
 export interface StepBranch<TContext = ContextData, I = unknown, O = unknown> {
   kind: 'branch';
   id: string;
+  /**
+   * Picks the step to run. `run` executes a step through the interpreter, for
+   * routes that must run a step (such as a decision) to choose.
+   */
   route: (
     input: I,
     ctx: Context<TContext>,
+    run: ExecuteStepFn,
   ) => Step<TContext, I, O> | null | Promise<Step<TContext, I, O> | null>;
   _optimizable?: Step<TContext>[];
+  /**
+   * @internal Rebuild this branch around new `_optimizable` children, for
+   * branches whose route closes over them (`routeSwitch`). The optimizer calls
+   * it so a mutated child is the one that runs.
+   */
+  _rebuild?: (children: Step<TContext>[]) => StepBranch<TContext, I, O>;
 }
 
 /** @public Union of fork step variants (`race`, `all`, `settle`) for concurrent path execution. */

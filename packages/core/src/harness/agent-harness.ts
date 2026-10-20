@@ -1,11 +1,14 @@
 import { frameworkCast, ItemSchemaRegistry, NoeticConfigError } from '@noetic-tools/types';
 import { SpanImpl } from '../observability/span-impl';
 import { NoopExporter } from '../observability/trace-exporter';
+import type { DecisionsClient } from './decide-call';
+import { callDecide } from './decide-call';
 import {
   createInMemoryFsAdapter,
   createInMemoryShellAdapter,
   createInMemorySubprocessAdapter,
   OpenRouter,
+  OpenRouterSdk,
 } from './deps/adapters';
 import type { LayerStateStore, RecallCache } from './deps/context';
 import {
@@ -22,6 +25,7 @@ import {
   disposeLayers,
   executeRerender,
   initLayers,
+  notifyDecision,
   projectHistoryLayers,
   recallLayers,
   recallLayersAtomic,
@@ -76,6 +80,9 @@ import type {
   ContextData,
   ContextLayer,
   CwdState,
+  DecideRequest,
+  DecideResponse,
+  DecisionRecord,
   DeliveryMode,
   DetachedHandle,
   ExecuteInput,
@@ -91,6 +98,7 @@ import type {
   LlmProviderConfig,
   ProjectionPolicy,
   RecallLayerOutput,
+  RecallOptions,
   SessionScope,
   ShellAdapter,
   Span,
@@ -182,8 +190,12 @@ interface AgentHarnessOpts<TParams extends Record<string, unknown> = Record<stri
    * those produced by spawn/fork. Defaults to `process.cwd()`.
    */
   initialCwd?: string;
+  /** Default model for `decide` steps. */
+  decisionModel?: string;
   /** @internal Test-only escape hatch to inject a mock callModel implementation. */
   _testCallModel?: (request: CallModelRequest) => Promise<LLMResponse>;
+  /** @internal Test-only escape hatch to inject a mock decide implementation. */
+  _testDecide?: (request: DecideRequest) => Promise<DecideResponse>;
 }
 
 interface Session {
@@ -367,6 +379,17 @@ function createClient(
   });
 }
 
+function createDecisionsClient(config?: LlmProviderConfig): DecisionsClient | undefined {
+  const resolved = resolveLlmClient(config, readLlmEnv());
+  if (!resolved) {
+    return undefined;
+  }
+  return new OpenRouterSdk({
+    apiKey: resolved.apiKey,
+    serverURL: resolved.serverURL,
+  });
+}
+
 //#region AgentHarness
 
 /**
@@ -412,6 +435,11 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
    *  without friend-class gymnastics. Do not access from outside core. */
   readonly _contextLayers?: ContextLayer[];
   private readonly client?: OpenRouter;
+  /** SDK 1.x client for the decisions endpoint; the agent's client predates it. */
+  private readonly decisionsClient?: DecisionsClient;
+  private readonly decideOverride?: (request: DecideRequest) => Promise<DecideResponse>;
+  /** Model id → whether it answers natively as a decision model. */
+  private readonly decisionModels = new Map<string, Promise<boolean>>();
   private readonly channelStore: ChannelStore;
   /** Re-entrant `run()` depth per root context id — see `executeClosingChannels`. */
   private readonly rootRunDepth = new Map<string, number>();
@@ -438,6 +466,8 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
    * `ctx.id` (the layer-state store's executionId).
    */
   private readonly initializedExecutions = new Set<string>();
+  /** Executions restored from a checkpoint: their first layer init keeps the restored state. */
+  private readonly restoredExecutions = new Set<string>();
   readonly traceExporter: TraceExporter;
   /**
    * Long-lived shared cwd state. The same reference is seeded into every
@@ -463,6 +493,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       projection: opts.projection,
       forceAtomicRecall: opts.forceAtomicRecall,
       contextCache: opts.contextCache,
+      decisionModel: opts.decisionModel,
     };
     this.fs = opts.fs ?? createInMemoryFsAdapter();
     this.shell = opts.shell ?? createInMemoryShellAdapter();
@@ -479,6 +510,8 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     this._contextLayers = resolveContextOption(opts);
     this.callModelOverride = opts._testCallModel;
     this.client = opts._testCallModel ? undefined : createClient(opts.llm, opts.contextCache);
+    this.decideOverride = opts._testDecide;
+    this.decisionsClient = opts._testCallModel ? undefined : createDecisionsClient(opts.llm);
     this.channelStore = new ChannelStore();
     this.traceExporter = opts.traceExporter ?? new NoopExporter();
     this.layerStateStore =
@@ -717,6 +750,35 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
 
   //#endregion
 
+  //#region decide
+
+  async decide(request: DecideRequest): Promise<DecideResponse> {
+    if (this.decideOverride) {
+      return this.decideOverride(request);
+    }
+    return callDecide(request, {
+      client: this.decisionsClient,
+      callModel: (r) => this.callModel(r),
+      nativeModels: this.decisionModels,
+    });
+  }
+
+  async notifyDecision(
+    layers: ContextLayer[],
+    record: DecisionRecord,
+    ctx: Context,
+  ): Promise<void> {
+    await notifyDecision({
+      layers,
+      record,
+      ctx: this.toExecCtx(ctx),
+      store: this.layerStateStore,
+      recallCache: this.recallCache,
+    });
+  }
+
+  //#endregion
+
   async run<I, O>(s: Step<ContextData, I, O>, input: I, ctx: Context): Promise<O> {
     // Populate the unified tool pool when an embedder drives a step directly on
     // a bare `createContext()` context (the turn pipeline does this per turn).
@@ -795,7 +857,14 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       return;
     }
     this.initializedExecutions.add(ctx.id);
-    await this.initLayers(layers, ctx, storage);
+    const keep = this.restoredExecutions.delete(ctx.id);
+    await initLayers({
+      layers,
+      ctx: this.toExecCtx(ctx),
+      storage,
+      store: this.layerStateStore,
+      keep,
+    });
   }
 
   detachedSpawn<I, O>(
@@ -965,6 +1034,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     input: string,
     ctx: Context,
     budgets: Map<string, number>,
+    opts?: RecallOptions,
   ): Promise<RecallLayerOutput[]> {
     return recallLayersAtomic({
       layers,
@@ -975,6 +1045,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       store: this.layerStateStore,
       itemSchemas: this.itemSchemas,
       forceAtomic: this.config.forceAtomicRecall,
+      peek: opts?.peek,
     });
   }
 
@@ -983,6 +1054,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     input: string,
     ctx: Context,
     budgets: Map<string, number>,
+    opts?: RecallOptions,
   ): Promise<RecallLayerOutput[]> {
     return recallLayersEventual({
       layers,
@@ -994,6 +1066,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       itemSchemas: this.itemSchemas,
       forceAtomic: this.config.forceAtomicRecall,
       cache: this.recallCache,
+      peek: opts?.peek,
     });
   }
 
@@ -1139,7 +1212,11 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
    * whose `id` is already the original `executionId`.
    */
   async restore(executionId: string, opts?: RestoreCheckpointOptions): Promise<Context | null> {
-    return restoreFromCheckpoint(this, executionId, opts);
+    const ctx = await restoreFromCheckpoint(this, executionId, opts);
+    if (ctx) {
+      this.restoredExecutions.add(ctx.id);
+    }
+    return ctx;
   }
 
   /**

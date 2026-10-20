@@ -119,6 +119,16 @@ function walkStep(step: Step, prefix: string, fields: OptimizableField[]): void 
     case 'tool':
       extractToolFields(step, path, fields);
       return;
+    case 'decide':
+      if (typeof step.instructions === 'string') {
+        fields.push({
+          path: `${path}.instructions`,
+          value: step.instructions,
+          stepId: step.id,
+          fieldKind: FieldKind.Instructions,
+        });
+      }
+      return;
     case 'spawn':
       walkStep(step.child, `${path}.`, fields);
       return;

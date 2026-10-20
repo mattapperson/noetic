@@ -145,8 +145,11 @@ interface ContextLayerHooks<TState = unknown> {
   onComplete?:      (params: CompleteParams<TState>)             => Promise<void>;
   dispose?:         (params: DisposeParams<TState>)              => Promise<void>;
   renderDelta?:     (params: RenderDeltaParams<TState>)          => Promise<string | null>;
+  onDecision?:      (params: OnDecisionParams<TState>)           => Promise<{ state: TState } | undefined>;
 }
 ```
+
+`onDecision` runs after every `decide` step (spec 30) completes, sequentially in slot order, with the `DecisionRecord` (step id, model, source, answers). Returning `{ state }` commits new state and marks an eventual layer's recall cache stale. `decisionsHistoryLayer()` is the built-in user.
 
 `renderDelta` is called only for an **anchored** layer whose pinned output has gone stale, to describe the change compactly instead of republishing the whole block. Returning `null` — or throwing, or timing out — falls back to republishing the full new content. It is never called for `'live'` layers, which re-render anyway. See **Prompt-Cache Anchoring** below.
 
@@ -478,6 +481,12 @@ Each layer's `recallMode` controls whether its `recall()` blocks the model call:
 Both modes recall once per LLM step. The harness runs atomic layers (`recallLayersAtomic`) and eventual layers (`recallLayersEventual`) and merges the two result sets in slot order.
 
 A harness configured with `forceAtomicRecall: true` treats **every** layer as atomic regardless of its `recallMode` — the eventual cache is bypassed entirely.
+
+### Peek
+
+Both recall functions accept `RecallOptions` (`{ peek?: boolean }`). A peek renders without leaving a trace: each `recall` receives a deep copy of its state (a hook may mutate state in place), state it returns is not committed, and a cold or stale eventual layer is rendered without writing the cache. A layer whose state cannot be copied is skipped by a peek.
+
+`initLayers` accepts `keep: true` to skip `init` for layers that already hold state for the execution. The harness sets it on the first init after `restore()`, so state restored from a checkpoint is not overwritten by a fresh start. `decide` steps (spec 30) always peek, because recall can consume state — the steering layer drains its queue as it renders — and a decision must not eat what the next model call needs.
 
 ## Re-render
 
@@ -922,6 +931,7 @@ The ItemLog's rendering is handled by the Projector natively. Context layers get
 | `onReturn`        | Error **logged**. Parent state unchanged.                               |
 | `onComplete`      | Error **logged**.                                                       |
 | `dispose`         | Error **logged**. Must not prevent other layer cleanup.                 |
+| `onDecision`      | Error **logged**. Later layers still run.                               |
 | `renderDelta`     | Falls back to republishing the layer's full new content. A supersede is a correctness obligation and is never skipped because a hook misbehaved. |
 
 ### Timeouts
@@ -938,6 +948,7 @@ interface LayerTimeouts {
   onReturn?:        number;  // ms, default 10_000
   onComplete?:      number;  // ms, default 30_000
   dispose?:         number;  // ms, default 5_000
+  onDecision?:      number;  // ms, default 5_000
 }
 ```
 

@@ -20,6 +20,7 @@ import type {
 import { NoeticConfigError } from '@noetic-tools/types';
 import type { ZodType } from 'zod';
 import { getDefaultRegistrar } from '../types/step-registrar';
+import { decide, routeSwitch } from './decide-builders';
 
 //#region Types
 
@@ -300,6 +301,10 @@ export const step = {
   ): StepSubHarness<TContext, I, O> {
     return buildSubHarnessStep('pi', 'step.pi', opts);
   },
+
+  decide,
+
+  routeSwitch,
 };
 
 //#endregion

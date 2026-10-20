@@ -70,6 +70,8 @@ type WorkflowNode =
   | ToolWorkflowNode
   | RunWorkflowNode
   | BranchWorkflowNode
+  | DecideWorkflowNode
+  | RouteSwitchWorkflowNode
   | ForkWorkflowNode
   | SpawnWorkflowNode
   | ProvideWorkflowNode
@@ -144,6 +146,12 @@ interface BranchWorkflowNode {
 | `default` | No       | Fallback node when no route matches. Omitting produces a no-op.   |
 
 Each route's `match` string is tested as a case-insensitive substring against the string representation of the input. This keeps the JSON schema simple and LLM-friendly; closures are not JSON-serialisable.
+
+### `decide` and `routeSwitch`
+
+Typed decisions and routing by them. The node shapes, validation rules, and
+outputs are specified in `30-decide` ("JSON Workflow Nodes"). Unlike `branch`,
+`routeSwitch` routes on a model's answer rather than a substring of the input.
 
 ### `fork`
 
@@ -421,6 +429,8 @@ Each node kind maps to a single existing builder:
 | `llm`       | `step.llm({...})`         | Tools resolved by name from `ctx.tools`.               |
 | `tool`      | `step.tool({...})`        | Tool resolved by name; throws `UNKNOWN_TOOL_REFERENCE`.|
 | `branch`    | `branch({route: ...})`    | Route function does substring matching on input.       |
+| `decide`    | `step.decide(...)`        | Questions pass through unchanged; output is the answers object. |
+| `routeSwitch` | `step.routeSwitch(...)` | Key form only; cases and `uncertain` hydrate recursively. |
 | `fork`      | `fork({...})`             | `paths` becomes a static function. Merge via strategy. |
 | `spawn`     | `spawn({...})`            | Child hydrated recursively.                            |
 | `provide`   | `provide({...})`          | Layer names resolved from hydration context.           |
@@ -444,7 +454,7 @@ This is a hard failure -- partial hydration with missing tools is not supported.
 
 ### Branch Route Hydration
 
-Branch `routes` are hydrated into a `route` function that tests each `match` string as a case-insensitive substring against `String(input)`:
+Branch `routes` are hydrated into a `route` function that tests each `match` string as a case-insensitive substring against the input. An object input — or a string holding a JSON object or array, as a `sequence` passes a `decide` node's answers — is matched against its string values only, joined, never its keys:
 
 ```typescript
 route: (input, ctx) => {

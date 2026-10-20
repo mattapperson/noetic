@@ -27,6 +27,7 @@ import type {
 import { frameworkCast, isServerToolSpec, NoeticConfigError } from '@noetic-tools/types';
 import { DetachedHandleImpl } from '../runtime/detached-handle';
 import type {
+  DecideWorkflowNode,
   LlmWorkflowNode,
   OutputCodecRef,
   SubflowWorkflowNode,
@@ -38,6 +39,7 @@ import { all, any } from '../until/combinators';
 import { until } from '../until/predicates';
 
 import { branch, fork } from './control-flow-builders';
+import { decide, routeSwitch } from './decide-builders';
 import { every } from './every';
 import { loop } from './loop-builder';
 import { provide } from './provide-builder';
@@ -333,7 +335,7 @@ function hydrateBranchNode(
   return branch({
     id: node.id,
     route: (input: string) => {
-      const trimmed = input.trim().toLowerCase();
+      const trimmed = routeText(input).trim().toLowerCase();
       for (const r of hydratedRoutes) {
         if (trimmed.includes(r.match.toLowerCase())) {
           return r.target;
@@ -343,6 +345,51 @@ function hydrateBranchNode(
     },
     _optimizable: frameworkCast(allTargets),
   });
+}
+
+function hydrateDecideNode(
+  node: WorkflowNode,
+  _ctx: HydrationContext,
+): Step<ContextData, string, string> {
+  if (node.kind !== 'decide') {
+    return frameworkCast(undefined);
+  }
+  return frameworkCast(decideFromNode(node));
+}
+
+function decideFromNode(node: DecideWorkflowNode) {
+  return decide({
+    id: node.id,
+    model: node.model,
+    instructions: node.instructions,
+    questions: node.questions,
+    view: node.view,
+    samples: node.samples,
+  });
+}
+
+function hydrateRouteSwitchNode(
+  node: WorkflowNode,
+  ctx: HydrationContext,
+): Step<ContextData, string, string> {
+  if (node.kind !== 'routeSwitch') {
+    return frameworkCast(undefined);
+  }
+  const cases: Record<string, Step<ContextData, string, string>> = {};
+  for (const [key, target] of Object.entries(node.cases)) {
+    cases[key] = hydrateNode(target, ctx);
+  }
+  // A JSON node's outcomes are only known at runtime; the builder checks them.
+  return frameworkCast(
+    routeSwitch({
+      id: node.id,
+      decide: decideFromNode(node.decide),
+      on: node.on,
+      cases: frameworkCast<Record<never, Step<ContextData, string, string>>>(cases),
+      minConfidence: node.minConfidence,
+      uncertain: hydrateNode(node.uncertain, ctx),
+    }),
+  );
 }
 
 function hydrateForkNode(
@@ -680,6 +727,8 @@ const NODE_HYDRATORS: Record<string, NodeHydrator> = {
   tool: hydrateToolNode,
   run: hydrateRunNode,
   branch: hydrateBranchNode,
+  decide: hydrateDecideNode,
+  routeSwitch: hydrateRouteSwitchNode,
   fork: hydrateForkNode,
   spawn: hydrateSpawnNode,
   provide: hydrateProvideNode,
@@ -721,14 +770,57 @@ function resolveTools(
   });
 }
 
+/** Paths may return objects (a `decide` node's answers): `concat` writes them as JSON, `first`/`last` pass them through. */
 function buildMerge(strategy: 'last' | 'first' | 'concat'): (results: string[]) => string {
   if (strategy === 'first') {
     return (r) => r[0] ?? '';
   }
   if (strategy === 'concat') {
-    return (r) => r.join('\n');
+    return (r) => r.map(stringifyResult).join('\n');
   }
   return (r) => r[r.length - 1] ?? '';
+}
+
+/**
+ * The text a branch matches against. An object input — a `decide` node's
+ * answers, or their JSON once a sequence has stringified them — matches on its
+ * string values only: its keys and probability maps name every choice, so
+ * matching the JSON would hit every route.
+ */
+function routeText(input: unknown): string {
+  const value = typeof input === 'string' ? parseJsonObject(input) : input;
+  if (typeof value === 'string') {
+    return value;
+  }
+  const values: string[] = [];
+  const walk = (value: unknown): void => {
+    if (typeof value === 'string') {
+      values.push(value);
+      return;
+    }
+    if (typeof value !== 'object' || value === null) {
+      return;
+    }
+    for (const child of Object.values(value)) {
+      walk(child);
+    }
+  };
+  walk(value);
+  return values.join('\n');
+}
+
+/** The parsed object or array when `text` is one in JSON, else `text` itself. */
+function parseJsonObject(text: string): unknown {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+    return text;
+  }
+  try {
+    const parsed = JSON.parse(trimmed);
+    return typeof parsed === 'object' && parsed !== null ? parsed : text;
+  } catch {
+    return text;
+  }
 }
 
 function stringifyResult(value: unknown): string {

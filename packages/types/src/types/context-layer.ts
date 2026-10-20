@@ -2,6 +2,7 @@ import type { ZodType } from 'zod';
 import type { LLMResponse } from './common';
 import type { ItemLog } from './context-parts/item-log';
 import type { ContextScope, ExecutionContext, ExecutionOutcome } from './context-scope';
+import type { DecisionRecord } from './decide';
 import type { Item, ItemSchemaExtensions } from './items';
 import type {
   AfterModelCallParams,
@@ -32,6 +33,7 @@ export interface LayerTimeouts {
   afterModelCall?: number;
   onItemAppend?: number;
   projectHistory?: number;
+  onDecision?: number;
 }
 
 /** @public A read-only data projection from layer state, accessible via `ctx.context['layerId'].prop`. */
@@ -371,6 +373,23 @@ export interface OnItemAppendResult<TState> {
 
 //#endregion
 
+/** @public Options for a recall pass. */
+export interface RecallOptions {
+  /**
+   * Render without leaving a trace: returned state is not committed and
+   * eventual-layer output is not cached. A `decide` step peeks so that it never
+   * drains state (such as queued steering guidance) meant for the next model call.
+   */
+  peek?: boolean;
+}
+
+/** @public Parameters for the `onDecision` hook. */
+export interface OnDecisionParams<TState> {
+  state: TState;
+  record: DecisionRecord;
+  ctx: ExecutionContext;
+}
+
 /** @public Lifecycle hook implementations for a context layer. Method syntax enables bivariant assignability for typed layers. */
 export interface ContextLayerHooks<TState = unknown> {
   init?(params: InitParams): Promise<InitResult<TState>>;
@@ -416,6 +435,16 @@ export interface ContextLayerHooks<TState = unknown> {
    * a row. Never called for layers in the `'live'` band, which re-render anyway.
    */
   renderDelta?(params: RenderDeltaParams<TState>): Promise<string | null>;
+  /**
+   * Called after every `decide` step completes, in slot order. Return new state
+   * to record the decision.
+   */
+  onDecision?(params: OnDecisionParams<TState>): Promise<
+    | undefined
+    | {
+        state: TState;
+      }
+  >;
 }
 
 /**

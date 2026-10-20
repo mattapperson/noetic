@@ -233,6 +233,7 @@ interface StepMeta {
   usage?: { inputTokens: number; outputTokens: number; cachedTokens?: number };
   cost?: number;  // USD
   responseItems?: ReadonlyArray<Item>;
+  decision?: DecisionMeta;  // set by decide steps: model, native/estimated source, refused question ids (spec 30)
 }
 
 interface TokenUsage {

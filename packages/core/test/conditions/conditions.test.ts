@@ -1,6 +1,8 @@
 import { describe, expect, it, mock } from 'bun:test';
+import assert from 'node:assert';
 import type { ContextData } from '@noetic-tools/context';
 import type { Step } from '@noetic-tools/types';
+import { isNoeticError } from '@noetic-tools/types';
 import {
   aiCondition,
   allCondition,
@@ -71,34 +73,49 @@ describe('semanticRoute', () => {
 });
 
 describe('aiCondition', () => {
-  it('parses true from mock LLM', async () => {
-    const ctx = mockCtxWithLlm('{"answer": true}');
+  it('is true when the estimated probability of yes clears the default threshold', async () => {
+    const ctx = mockCtxWithLlm('{"answer": {"yes": 0.9}}');
     const condition = aiCondition<string>({
       model: 'test-model',
       prompt: 'Is this positive?',
     });
-    const result = await condition('great day', ctx);
-    expect(result).toBe(true);
+    expect(await condition('great day', ctx)).toBe(true);
+    expect(ctx.tokens.total).toBeGreaterThan(0);
   });
 
-  it('parses false from mock LLM', async () => {
-    const ctx = mockCtxWithLlm('{"answer": false}');
+  it('is false when the estimated probability of yes is below the threshold', async () => {
+    const ctx = mockCtxWithLlm('{"answer": {"yes": 0.1}}');
     const condition = aiCondition<string>({
       model: 'test-model',
       prompt: 'Is this positive?',
     });
-    const result = await condition('bad day', ctx);
-    expect(result).toBe(false);
+    expect(await condition('bad day', ctx)).toBe(false);
   });
 
-  it('returns false on invalid JSON', async () => {
+  it('honours a custom threshold at its boundary', async () => {
+    const at = aiCondition<string>({
+      model: 'test-model',
+      prompt: 'Is this positive?',
+      threshold: 0.8,
+    });
+    expect(await at('x', mockCtxWithLlm('{"answer": {"yes": 0.79}}'))).toBe(false);
+    expect(await at('x', mockCtxWithLlm('{"answer": {"yes": 0.8}}'))).toBe(true);
+    expect(await at('x', mockCtxWithLlm('{"answer": {"yes": 0.81}}'))).toBe(true);
+  });
+
+  it('throws llm_parse_error on a malformed response instead of answering no', async () => {
     const ctx = mockCtxWithLlm('not json');
     const condition = aiCondition<string>({
       model: 'test-model',
       prompt: 'Is this positive?',
     });
-    const result = await condition('input', ctx);
-    expect(result).toBe(false);
+    try {
+      await condition('input', ctx);
+      expect.unreachable();
+    } catch (e) {
+      assert(isNoeticError(e));
+      expect(e.noeticError.kind).toBe('llm_parse_error');
+    }
   });
 });
 

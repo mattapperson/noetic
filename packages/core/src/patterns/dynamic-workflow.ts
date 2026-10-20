@@ -55,6 +55,7 @@ A WorkflowNode is one of:
 - { "kind": "loop", "id": "<unique>", "body": <WorkflowNode>, "until": { "kind": "maxSteps", "n": <number> } }
 - { "kind": "branch", "id": "<unique>", "routes": [{ "match": "<substring>", "target": <WorkflowNode> }], "default": <WorkflowNode> }
 - { "kind": "spawn", "id": "<unique>", "child": <WorkflowNode> }
+- { "kind": "routeSwitch", "id": "<unique>", "decide": { "kind": "decide", "id": "<unique>", "questions": { "<question-id>": { "type": "choice", "instructions": "<question>", "choices": ["<option>", ...] } } }, "on": "<question-id>", "cases": { "<option>": <WorkflowNode>, ... }, "uncertain": <WorkflowNode>, "minConfidence": <optional 0-1> } (a model decides, then the input goes to the matching case; a "boolean" question has cases "true" and "false"; a "score" question has "levels": ["<low>", ..., "<high>"] and routes by level; every outcome needs a case)
 - { "kind": "subflow", "id": "<unique>", "document": { "version": 1, "root": <WorkflowNode> } } (an inline sub-workflow run as one step; only emit the inline form — named refs require a registry this planner does not provide)
 - { "kind": "claude-code"|"codex"|"opencode"|"pi", "id": "<unique>", "prompt": "<turn prompt>", "settings": { "model": "<optional>", "permissionMode": "<optional>" } }
 

@@ -54,6 +54,17 @@ function cloneAndReplace(step: Step, candidate: Candidate, prefix: string): Step
         tools,
       };
     }
+    case 'decide': {
+      // Shared instructions only; question text is not yet a candidate surface.
+      const instructions =
+        typeof step.instructions === 'function'
+          ? step.instructions
+          : (candidate[`${path}.instructions`] ?? step.instructions);
+      return {
+        ...step,
+        instructions,
+      };
+    }
     case 'tool': {
       const name = candidate[`${path}.tool.name`] ?? step.tool.name;
       const description = candidate[`${path}.tool.description`] ?? step.tool.description;
@@ -86,11 +97,18 @@ function cloneAndReplace(step: Step, candidate: Candidate, prefix: string): Step
         ...step,
         step: cloneAndReplace(step.step, candidate, `${path}.`),
       };
-    case 'branch':
+    case 'branch': {
+      const children = cloneOptimizableChildren(step._optimizable, candidate, path);
+      // A branch whose route closes over its children (routeSwitch) must be
+      // rebuilt, or the route keeps running the unmutated originals.
+      if (step._rebuild && children) {
+        return step._rebuild(children);
+      }
       return {
         ...step,
-        _optimizable: cloneOptimizableChildren(step._optimizable, candidate, path),
+        _optimizable: children,
       };
+    }
     case 'fork':
       return {
         ...step,

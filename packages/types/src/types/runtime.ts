@@ -3,7 +3,14 @@ import type { Channel, ChannelHandle, ExternalChannel } from './channel';
 import type { LLMResponse, ModelParams, ServerToolSpec } from './common';
 import type { Context, CwdState, RestoreContextOptions } from './context';
 import type { ContextCacheConfig, ContextCacheStore } from './context-cache';
-import type { ContextData, ContextLayer, ProjectionPolicy, StorageAdapter } from './context-layer';
+import type {
+  ContextData,
+  ContextLayer,
+  ProjectionPolicy,
+  RecallOptions,
+  StorageAdapter,
+} from './context-layer';
+import type { DecideRequest, DecideResponse, DecisionRecord } from './decide';
 import type { DetachedHandle } from './detached';
 import type { FsAdapter } from './fs-adapter';
 import type { HarnessResponse, StreamEvent, StreamingItem } from './harness-result';
@@ -37,6 +44,8 @@ export interface AgentConfig<TParams extends Record<string, unknown> = Record<st
   forceAtomicRecall?: boolean;
   /** Tuning for prompt-cache anchoring. See `ContextCacheConfig` for the defaults. */
   contextCache?: ContextCacheConfig;
+  /** Default model for `decide` steps. */
+  decisionModel?: string;
 }
 
 //#region Delivery Mode
@@ -183,6 +192,10 @@ export interface AgentHarnessContract<
   /** Subprocess adapter for virtual, same-process, or host process execution. */
   readonly subprocess: SubprocessAdapter;
   callModel(request: CallModelRequest): Promise<LLMResponse>;
+  /** Answer typed questions with a decision model, or estimate with a chat model. See spec 30. */
+  decide(request: DecideRequest): Promise<DecideResponse>;
+  /** Run every layer's `onDecision` hook, in slot order. */
+  notifyDecision(layers: ContextLayer[], record: DecisionRecord, ctx: Context): Promise<void>;
 
   /**
    * Submit input to the agent. The message is enqueued on the session identified
@@ -319,6 +332,7 @@ export interface AgentHarnessContract<
     input: string,
     ctx: Context,
     budgets: Map<string, number>,
+    opts?: RecallOptions,
   ): Promise<RecallLayerOutput[]>;
   /** Recall eventual layers from cache (non-blocking); returns nothing when the harness forces atomic recall. */
   recallLayersEventual(
@@ -326,6 +340,7 @@ export interface AgentHarnessContract<
     input: string,
     ctx: Context,
     budgets: Map<string, number>,
+    opts?: RecallOptions,
   ): Promise<RecallLayerOutput[]>;
   /**
    * Compute the items that would be sent to the model on the next turn for a

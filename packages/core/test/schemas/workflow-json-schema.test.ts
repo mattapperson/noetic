@@ -16,6 +16,8 @@ const NODE_KINDS = [
   'tool',
   'run',
   'branch',
+  'decide',
+  'routeSwitch',
   'fork',
   'spawn',
   'provide',

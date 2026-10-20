@@ -21,6 +21,7 @@ import {
   executeTool,
 } from './execute-action';
 import { executeBranch, executeEvery, executeFork, executeLoop } from './execute-control';
+import { executeDecide } from './execute-decide';
 import { executeSubHarness } from './execute-sub-harness';
 import { isMutableContext } from './typeguards';
 
@@ -74,14 +75,15 @@ function buildSpawnOpts<TContext>(ctx: Context<TContext>): {
 }
 
 /**
- * Resolve the per-step framework-event emit option. Both `llm` and the harness
- * step kinds carry an `emit` field; every other kind defaults to enabled.
+ * Resolve the per-step framework-event emit option. `llm`, `decide`, and the
+ * harness step kinds carry an `emit` field; every other kind defaults to enabled.
  */
 function resolveStepEmit<TContext, I, O>(
   step: Step<TContext, I, O>,
 ): boolean | ((eventType: string, data: Record<string, unknown>) => boolean) | undefined {
   if (
     step.kind === 'llm' ||
+    step.kind === 'decide' ||
     step.kind === 'claude-code' ||
     step.kind === 'codex' ||
     step.kind === 'opencode' ||
@@ -360,6 +362,9 @@ export async function execute<TContext = ContextData, I = unknown, O = unknown>(
         break;
       case 'tool':
         result = await executeTool(step, input, ctx, baseCtx.harness);
+        break;
+      case 'decide':
+        result = await executeDecide(step, input, ctx, baseCtx.layers);
         break;
       case 'branch':
         result = await executeBranch(step, input, ctx, (s, i, c) => execute(s, i, c));

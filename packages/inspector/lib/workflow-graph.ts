@@ -19,6 +19,7 @@ import type {
   BranchWorkflowNode,
   ForkWorkflowNode,
   LoopWorkflowNode,
+  RouteSwitchWorkflowNode,
   UntilPredicate,
   WorkflowDocument,
   WorkflowNode,
@@ -216,6 +217,10 @@ class FlowBuilder {
         return isArray(node.routes)
           ? projectBranch(this, node)
           : this.broken(node.id, 'branch has no routes');
+      case 'routeSwitch':
+        return isNode(node.decide) && typeof node.cases === 'object' && node.cases !== null
+          ? projectRouteSwitch(this, node)
+          : this.broken(node.id, 'routeSwitch has no decide or cases');
       case 'loop':
         return isNode(node.body)
           ? projectLoop(this, node)
@@ -460,6 +465,42 @@ function projectBranch(builder: FlowBuilder, node: BranchWorkflowNode): Ports {
   };
 }
 
+/** The decision runs, then the gate routes on one of its answers. */
+function projectRouteSwitch(builder: FlowBuilder, node: RouteSwitchWorkflowNode): Ports {
+  const asked = builder.project(node.decide);
+  const gate = builder.add({
+    id: node.id,
+    kind: 'routeSwitch',
+    shape: 'gate',
+    title: 'routeSwitch',
+    detail: `on ${node.on}`,
+    chips:
+      node.minConfidence !== undefined
+        ? [
+            `minConfidence ${node.minConfidence}`,
+          ]
+        : [],
+  });
+  for (const exit of asked.exits) {
+    builder.connect(exit, gate);
+  }
+  const exits: string[] = [];
+  for (const [key, target] of Object.entries(node.cases)) {
+    const ports = builder.project(target);
+    builder.connect(gate, ports.entry, key);
+    exits.push(...ports.exits);
+  }
+  if (node.uncertain) {
+    const ports = builder.project(node.uncertain);
+    builder.connect(gate, ports.entry, 'uncertain');
+    exits.push(...ports.exits);
+  }
+  return {
+    entry: asked.entry,
+    exits,
+  };
+}
+
 /**
  * A do-while: the body runs, THEN the predicate is tested. Flow therefore
  * enters the body, not the gate — drawing the gate first would tell the reader
@@ -593,6 +634,8 @@ function leafDetail(node: WorkflowNode): string | undefined {
       return clip(node.execute);
     case 'subflow':
       return node.ref ? `→ ${node.ref}` : 'inline workflow';
+    case 'decide':
+      return clip(Object.keys(node.questions ?? {}).join(', '));
     case 'claude-code':
     case 'codex':
     case 'opencode':

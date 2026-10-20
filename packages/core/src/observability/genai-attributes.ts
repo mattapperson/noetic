@@ -55,4 +55,10 @@ export const NoeticAttr = {
   CONTEXT_LAYER_PLACEMENTS: 'noetic.context.layer_placements',
   /** JSON array of `{ id, rate, rebillTokens }` per contributing layer. */
   CONTEXT_LAYER_CHURN: 'noetic.context.layer_churn',
+  /** `native` or `estimated` — where a decision's probabilities came from. */
+  DECISION_SOURCE: 'noetic.decision.source',
+  /** Comma-separated ids of questions the model refused. */
+  DECISION_REFUSED: 'noetic.decision.refused',
+  /** Prefix for per-question attributes: `noetic.decision.<id>.value` etc. */
+  DECISION_PREFIX: 'noetic.decision.',
 } as const;

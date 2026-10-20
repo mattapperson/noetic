@@ -117,6 +117,9 @@ export { execute } from './interpreter/execute';
 /** @public */
 /** @public */
 export type {
+  DecisionsHistoryConfig,
+  DecisionsHistoryLayer,
+  DecisionsHistoryState,
   DurableTaskState,
   FactExtractor,
   FactSearcher,
@@ -147,6 +150,8 @@ export type {
 /** @public */
 /** @public */
 export {
+  DECISION_PROJECTION,
+  decisionsHistoryLayer,
   durableTaskState,
   fileReference,
   findFunctionCall,
@@ -248,12 +253,14 @@ export { defaultItemSchemaRegistry, ItemSchema, ItemSchemaRegistry } from '@noet
 export type {
   BranchRoute,
   BranchWorkflowNode,
+  DecideWorkflowNode,
   EveryWorkflowNode,
   ForkWorkflowNode,
   LlmWorkflowNode,
   LoopWorkflowNode,
   MergeStrategy,
   ProvideWorkflowNode,
+  RouteSwitchWorkflowNode,
   SequenceWorkflowNode,
   SpawnWorkflowNode,
   SubflowWorkflowNode,
@@ -532,6 +539,62 @@ export type {
   Until,
   Verdict,
 } from '@noetic-tools/types';
+
+//#endregion
+
+//#region Types — Decide
+
+/** @public */
+export type {
+  AnsweredAll,
+  AnswerFor,
+  BooleanAnswer,
+  BooleanQuestion,
+  CaseKeyOf,
+  ChoiceAnswer,
+  ChoiceQuestion,
+  ChoiceValues,
+  DecideAnswer,
+  DecideAnswers,
+  DecideQuestion,
+  DecideQuestions,
+  DecideRequest,
+  DecideResponse,
+  DecideStatePart,
+  DecideStep,
+  DecideView,
+  DecisionMeta,
+  DecisionRecord,
+  DecisionSource,
+  LevelLabels,
+  OnDecisionParams,
+  RecallOptions,
+  ScoreAnswer,
+  ScoreLevel,
+  ScoreQuestion,
+  StepDecide,
+} from '@noetic-tools/types';
+/** @public */
+export {
+  BooleanQuestionSchema,
+  ChoiceQuestionSchema,
+  choiceValues,
+  DECIDE_LIMITS,
+  DecideOutputError,
+  DecideQuestionSchema,
+  DecideQuestionsSchema,
+  routeOutcomes,
+  ScoreQuestionSchema,
+  scoreLevels,
+} from '@noetic-tools/types';
+/** @public */
+export type {
+  RouteSwitchByFunctionOpts,
+  RouteSwitchByKeyOpts,
+  StepDecideOpts,
+  StepInput,
+  StepOutput,
+} from './builders/decide-builders';
 
 //#endregion
 

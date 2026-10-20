@@ -1,3 +1,4 @@
+import type { DecisionMeta } from './decide';
 import type { FunctionCallItem, Item } from './items';
 
 /**
@@ -97,6 +98,8 @@ export interface StepMeta {
   usage?: RoundUsage;
   cost?: number;
   responseItems?: ReadonlyArray<Item>;
+  /** Set by `decide` steps. */
+  decision?: DecisionMeta;
 }
 
 /** @public Structured response returned by a model adapter after an LLM call. */

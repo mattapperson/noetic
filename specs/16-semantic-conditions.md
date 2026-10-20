@@ -91,9 +91,9 @@ embeddingMatch({
 })
 ```
 
-### `aiCondition({ model, prompt })`
+### `aiCondition({ model, prompt, threshold? })`
 
-Returns `Condition<I>` that asks an LLM a yes/no question, parses boolean response via Zod. Gets the LLM client from `ctx.harness` internally.
+Returns `Condition<I>` that asks a yes/no question about the input: a one-question boolean `decide` (spec 30) through `ctx.harness.decide`, with the serialized input as its only state. Decision models answer natively; chat models answer with an estimated probability. The condition holds when the probability of yes is at or above `threshold` (default 0.5). A refusal counts as no. A malformed response throws `llm_parse_error` rather than answering no.
 
 ### `anyCondition(...conditions)`
 
