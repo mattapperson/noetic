@@ -496,32 +496,33 @@ describe('routeSwitch — key form', () => {
   });
 
   it('rejects a missing or misspelled case, an unknown question, and a missing uncertain — at the type level and at build', () => {
-    expectConfigError(
-      () =>
-        // @ts-expect-error a case is missing
-        routeSwitch({
-          id: 'r',
-          decide: triage,
-          on: 'destination',
-          cases: {
-            billing: echo('billing'),
-          },
-          uncertain: echo('u'),
-        }),
-      'INCOMPLETE_ROUTE_CASES',
-    );
-    // @ts-expect-error `salse` is not an outcome of `destination`
-    routeSwitch({
-      id: 'r-extra',
+    // Each bad call takes its options as one identifier, so the type error lands
+    // on the call line whether TypeScript anchors it at the call or the argument.
+    const byDestination = {
+      id: 'r',
       decide: triage,
       on: 'destination',
+      uncertain: echo('u'),
+    } as const;
+    const missingCase = {
+      ...byDestination,
+      cases: {
+        billing: echo('billing'),
+      },
+    };
+    const misspelledCase = {
+      ...byDestination,
+      id: 'r-extra',
       cases: {
         billing: echo('billing'),
         sales: echo('sales'),
         salse: echo('typo'),
       },
-      uncertain: echo('u'),
-    });
+    };
+    // @ts-expect-error a case is missing
+    expectConfigError(() => routeSwitch(missingCase), 'INCOMPLETE_ROUTE_CASES');
+    // @ts-expect-error `salse` is not an outcome of `destination`
+    routeSwitch(misspelledCase);
     expectConfigError(
       () =>
         routeSwitch({
