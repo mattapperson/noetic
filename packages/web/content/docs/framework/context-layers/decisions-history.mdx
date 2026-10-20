@@ -1,0 +1,135 @@
+---
+title: Decisions History
+description: A context layer that records every decide step's answers, so later steps can read them and later LLM calls can see them.
+---
+
+## Overview
+
+A [`step.decide`](/docs/framework/steps/decide) call never writes to the conversation. `decisionsHistoryLayer` writes decisions back into the context system: it records each decision through the `onDecision` hook, exposes the records as data on `ctx.context.decisionsHistory`, and renders a one-line summary per decision into the view of later `llm` steps.
+
+- **Slot**: `110` (`Slot.WORKING_MEMORY + 10`)
+- **Default scope**: `'execution'`
+- **Default `maxRecords`**: `50` (oldest dropped first)
+- **Hooks**: `init`, `recall`, `onDecision`, `onSpawn`, `onReturn`
+
+## Usage
+
+```ts
+import { AgentHarness, decisionsHistoryLayer, step } from '@noetic-tools/core';
+
+const harness = new AgentHarness({
+  name: 'support',
+  params: {},
+  context: [decisionsHistoryLayer()],
+});
+
+const triage = step.decide({
+  id: 'triage',
+  model: 'typesafe/jev-1.14',
+  questions: {
+    isUrgent: {
+      type: 'boolean',
+      instructions: 'Is the customer reporting downtime?',
+    },
+  },
+});
+
+const followUp = step.run({
+  id: 'follow-up',
+  execute: async (input: string, ctx) => {
+    const record = ctx.context.decisionsHistory?.latest;
+    return { input, record };
+  },
+});
+```
+
+The layer keeps its literal id, even inline in `context([decisionsHistoryLayer()])`, so `ctx.context.decisionsHistory` is typed and a misspelled key is a type error. Pass `id` to use a different key; the literal is kept there too.
+
+## Configuration
+
+```ts validate=none
+interface DecisionsHistoryConfig<Id extends string> {
+  id?: Id;               // default 'decisionsHistory'
+  scope?: ContextScope;  // default 'execution'
+  maxRecords?: number;   // default 50, oldest dropped first
+  recall?: boolean;      // render a summary into the view; default true
+  slot?: number;         // default Slot.WORKING_MEMORY + 10
+}
+```
+
+| Field | Type | Default | Purpose |
+|---|---|---|---|
+| `id` | `string` | `'decisionsHistory'` | Layer id, and so the `ctx.context` key |
+| `scope` | `ContextScope` | `'execution'` | Persistence boundary. With `'thread'` or `'resource'`, history persists across runs |
+| `maxRecords` | `number` | `50` | Records kept; the oldest drop first |
+| `recall` | `boolean` | `true` | Render a summary of the latest decisions into the view. Set `false` to keep records as data only |
+| `slot` | `number` | `Slot.WORKING_MEMORY + 10` | Recall order |
+
+## Records
+
+```ts validate=none
+interface DecisionRecord {
+  stepId: string;
+  at: number;                     // epoch ms
+  modelId: string;
+  source: 'native' | 'estimated';
+  answers: Readonly<Record<string, DecideAnswer>>;
+}
+```
+
+`answers` holds the step's answers as returned, refusals included.
+
+## Provides
+
+| Key | Kind | Value |
+|---|---|---|
+| `latest` | data | `Readonly<Record<string, DecisionRecord>>` — the newest record per step id |
+| `all` | data | `ReadonlyArray<DecisionRecord>` — every kept record, oldest first |
+
+```ts validate=none
+const record = ctx.context.decisionsHistory.latest.triage;
+```
+
+Both entries are data, not functions, so the layer adds no LLM tools.
+
+## Recall Summary
+
+When `recall` is on and at least one decision is recorded, the layer renders one line per step id, newest record only:
+
+```
+Decisions so far:
+- triage: destination=billing (0.81), isUrgent=yes (0.92), urgency=medium (1.3)
+```
+
+Each answer renders as:
+
+| Answer | Format |
+|---|---|
+| boolean | `yes` or `no`, then the probability of yes |
+| choice | the chosen value, then its probability |
+| score | the most probable level, then the weighted `value` |
+| refusal | `refused` |
+
+Numbers are rounded to two places.
+
+## The `onDecision` Hook
+
+The layer records decisions through `onDecision`, an optional hook any layer can implement. The runtime calls it after every `decide` step completes, in slot order, one layer at a time, so a later layer can read what an earlier one recorded. Return `{ state }` to keep new state, or `undefined` to leave it as is.
+
+```ts validate=none
+interface OnDecisionParams<TState> {
+  state: TState;
+  record: DecisionRecord;
+  ctx: ExecutionContext;
+}
+```
+
+The hook has a 5s default timeout (`timeouts.onDecision`). A hook that throws or times out is logged as a diagnostic and does not fail the step. See [Custom Layers](/docs/framework/context-layers/custom-layers#reacting-to-decisions-with-ondecision) to write your own.
+
+## Persistence and Resume
+
+`init` loads the layer's saved state from storage, so with `scope: 'thread'` or `'resource'` a later run starts with the earlier runs' records. When a harness resumes an execution, the layer keeps the restored state rather than starting empty. A decision replayed from the step ledger on resume does not fire `onDecision` again; its record comes back with the checkpoint.
+
+## Forks and Spawns
+
+A `fork` path or a `spawn` child starts with a copy of the parent's records (`onSpawn`). When it returns, `onReturn` merges back only the records the child added, so concurrent paths keep each other's decisions.

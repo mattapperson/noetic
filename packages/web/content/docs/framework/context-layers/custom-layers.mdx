@@ -148,6 +148,25 @@ Beyond `recall`/`store`, two hooks let a layer shape what the model sees without
 - **`onItemAppend`** runs when input items (user messages, tool outputs — never LLM responses) are about to be appended. Layers compose in slot order, each receiving the previous layer's output. Return the items to actually append: pass them through unchanged, transform them, return `[]` to drop them, or include extras to inject. The result may also carry an updated `state` and a `rerender: true` request (with optional `timing` and `scope`) to re-run recall mid-turn.
 - **`projectHistory`** runs once per LLM step to project (cap, summarize, redact) the history portion of the context window. It is read-side only — `itemLog` storage is never mutated. See [History Window](/docs/framework/context-layers/history-window) for a layer built entirely from this hook.
 
+### Reacting to decisions with `onDecision`
+
+A [`step.decide`](/docs/framework/steps/decide) call does not append to the item log and does not run `store()`. To learn about decisions, implement `onDecision`. The runtime calls it after every decide step completes, in slot order, one layer at a time. It receives `{ state, record, ctx }`, where `record` is a `DecisionRecord` (`stepId`, `at`, `modelId`, `source`, `answers`). Return `{ state }` to keep new state, or `undefined` to leave it unchanged.
+
+```ts validate=none
+hooks: {
+  async onDecision({ state, record }) {
+    if (record.stepId !== 'triage') return undefined;
+    return { state: { ...state, lastTriage: record.answers } };
+  },
+},
+```
+
+A hook that throws or times out (5s by default) is logged as a diagnostic; it does not fail the step. [Decisions History](/docs/framework/context-layers/decisions-history) is a built-in layer made from this hook.
+
+### Recall can be a peek
+
+A decide step renders your layer's `recall()` as a **peek** (`RecallOptions.peek`): your hook gets a deep copy of its state, the output is used, any `state` your `recall()` returns is dropped, and an eventual layer's output is not cached. Your hook is not told it is a peek. A layer that drains a queue as it renders, as the steering layer does, may change the copy in place and still has the queue for the next `llm` step. The copy uses `structuredClone`, so a layer whose state holds functions cannot be copied and is left out of a peek. Side effects outside the returned `state` (a write to storage, a network call) still happen, so keep them out of `recall()`.
+
 ## Step 6: Set Timeouts (Optional)
 
 If any hook makes network calls or runs LLM inference, set a timeout to prevent hangs:
@@ -161,7 +180,7 @@ const timeouts: Partial<LayerTimeouts> = {
 };
 ```
 
-Timeouts exist for every hook, including `beforeToolCall`, `afterModelCall`, `onItemAppend`, and `projectHistory`.
+Timeouts exist for every hook, including `beforeToolCall`, `afterModelCall`, `onItemAppend`, `projectHistory`, and `onDecision`.
 
 ### Failure, recall, and placement
 
@@ -303,6 +322,14 @@ State written by **any** path — `store()` hooks, `provides` functions, `onComp
 | `ctx` | `ExecutionContext` |
 | `state` | `TState` |
 | `outcome` | `ExecutionOutcome` |
+
+### OnDecisionParams
+
+| Field | Type |
+|---|---|
+| `state` | `TState` |
+| `record` | `DecisionRecord` |
+| `ctx` | `ExecutionContext` |
 
 ### DisposeParams
 

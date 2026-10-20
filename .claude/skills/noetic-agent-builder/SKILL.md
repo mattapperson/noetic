@@ -5,7 +5,7 @@ description: This skill provides guidance for building AI agents with the Noetic
 
 # Building Agents with Noetic
 
-Noetic is a TypeScript agent framework where all agent patterns decompose into compositions of seven step primitives: `run`, `llm`, `tool`, `branch`, `fork`, `spawn`, and `loop`. Context boundaries are first-class concepts, and the context layer system controls what state flows across them.
+Noetic is a TypeScript agent framework where all agent patterns decompose into compositions of eight step primitives: `run`, `llm`, `decide`, `tool`, `branch`, `fork`, `spawn`, and `loop`. Context boundaries are first-class concepts, and the context layer system controls what state flows across them.
 
 ## Core Concepts
 
@@ -15,6 +15,7 @@ All agent patterns compose through a single `Step<TContext, I, O>` type. Steps a
 
 - **`run`** -- pure async computation
 - **`llm`** -- model call with optional tools and structured output
+- **`decide`** -- typed questions (boolean, choice, score) answered with probabilities; reads the conversation but never joins it. Pass it no type arguments (annotate the `context` selector's `ctx` instead). `step.routeSwitch` builds a `branch` that routes by a decision; its key form needs one case per outcome plus `uncertain`
 - **`tool`** -- direct tool execution with Zod-validated I/O
 - **`branch`** -- conditional routing (returns a step or null)
 - **`fork`** -- parallel execution (race, all, or settle)
@@ -80,6 +81,7 @@ Context layers inject context into the LLM view (via `recall`) and persist state
 - **`durableTaskState()`** -- file checkpoints across fresh context boundaries
 - **`staticContent()`** -- immutable instruction injection from loaded content
 - **`toolContextLayer()`** -- auto-generated layers from tool `context` declarations
+- **`decisionsHistoryLayer()`** -- records `decide` answers (via the `onDecision` hook) for later steps and `llm` views
 - **`openUiSurface()`** (from `@noetic-tools/openui`) -- server-authoritative generative-UI state; see [Generative UI](#generative-ui-openui)
 
 The `@noetic-tools/cli` package provides additional enhanced prompt layers (`promptEngineeringLayer`, `communicationStyleLayer`, `environmentContextLayer`, `toolGuidanceLayer`, `planningModeLayer`) that implement behavioral guidelines, adaptive communication, environment detection, tool preferences, and plan-mode guidance. Progressive skill disclosure is provided separately by `skillsLayer` from `@noetic-tools/code-agent`. See `packages/cli/docs/enhanced-prompt-engineering.md` for full documentation.
@@ -115,6 +117,7 @@ An agent can respond with a *UI* built from components you register, instead of 
 | Parallel perspectives, merged | Parallel Research | `fork(all)` + `spawn` |
 | Background sub-agents | Async Delegation | `detachedSpawn` + inbox channel |
 | Sequential pipeline | Phase Router | `branch` + `loop` + `prepareNext` |
+| Classify input, then route by the answer | Decide and Route | `step.decide` + `step.routeSwitch` + `decisionsHistoryLayer()` |
 | Multi-agent task tree | Plan Execution | `compilePlan()` / `adaptivePlan()` |
 | Run a real coding agent (Claude Code / Codex / opencode / pi) as a step | Sub-Harness Step | `step.claudeCode` / `step.codex` / `step.opencode` / `step.pi` |
 | Agent responds with a UI (not text) | Generative UI | `step.llm({ output: openUi(library) })` + `openUiSurface()` |

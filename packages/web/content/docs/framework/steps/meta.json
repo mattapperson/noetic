@@ -4,6 +4,7 @@
     "index",
     "run",
     "llm",
+    "decide",
     "tool"
   ]
 }

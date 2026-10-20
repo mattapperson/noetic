@@ -11,6 +11,7 @@ The `Step` type is a discriminated union over the `kind` field:
 import type {
   Step,
   StepBranch,
+  StepDecide,
   StepFork,
   StepLLM,
   StepLoop,
@@ -24,6 +25,7 @@ type _AssertShape<TContext, I, O> =
   | StepRun<TContext, I, O>
   | StepLLM<TContext, I, O>
   | StepTool<TContext, I, O>
+  | StepDecide<TContext, I, O>
   | StepBranch<TContext, I, O>
   | StepFork<TContext, I, O>
   | StepSpawn<TContext, I, O>
@@ -35,7 +37,7 @@ type _AssertSubset<TContext, I, O> = _AssertShape<TContext, I, O> extends Step<T
   : false;
 ```
 
-The exported `Step` union additionally includes [`StepEvery`](#stepevery) for fixed-interval scheduling.
+The exported `Step` union additionally includes [`StepEvery`](#stepevery) for fixed-interval scheduling, and the coding-agent `StepSubHarness` kinds documented in [Sub-Harnesses](/docs/framework/sub-harnesses).
 
 ## StepRun
 
@@ -74,6 +76,92 @@ The exported `Step` union additionally includes [`StepEvery`](#stepevery) for fi
 | `tool` | `Tool<ZodType<I>, ZodType<O>>` | yes | Tool definition |
 | `args` | `Partial<I>` | no | Preset arguments |
 
+## StepDecide
+
+`StepDecide<TContext, I, O>`
+
+A step that asks a model typed questions and returns typed answers with probabilities. It reads the conversation but never appends to it, and runs no steering hooks. Built by [`step.decide()`](/docs/framework/steps/decide).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `kind` | `'decide'` | yes | Discriminant |
+| `id` | `string` | yes | Step identifier |
+| `model` | `Lazy<string, TContext>` | no | Decision model id. Falls back to `harness.config.decisionModel` |
+| `instructions` | `Lazy<string \| undefined, TContext>` | no | Shared framing for every question |
+| `questions` | `DecideQuestions` | yes | Question map keyed by question id |
+| `view` | `'full' \| 'layers' \| 'none'` | yes | How much of the assembled view the model sees. `step.decide()` defaults it to `'full'` |
+| `context` | `(ctx: Context<TContext>) => Record<string, unknown> \| Promise<Record<string, unknown>>` | no | Typed state read from context layers, sent as one JSON entry named `context` |
+| `projection` | `ProjectionPolicy` | no | Budget for the decision's view. Defaults to `DECISION_PROJECTION` |
+| `samples` | `number` | yes | Runs averaged on the estimated path. `step.decide()` defaults it to `1` |
+| `emit` | `boolean \| ((eventType, data) => boolean)` | no | Controls framework event emission for this step |
+| `_answers` | `O` | no | Phantom field carrying the answers type for inference. Never set at runtime |
+
+### DecideStep
+
+```ts validate=none
+type DecideStep<TContext, I, Q extends DecideQuestions> =
+  StepDecide<TContext, I, DecideAnswers<Q>> & { readonly questions: Q };
+```
+
+What `step.decide()` returns: a `StepDecide` that keeps its literal question map, so [`step.routeSwitch`](/docs/framework/operators/route-switch) can infer the questions, choices, and levels it routes by. `DecideAnswers<Q>` maps each question id to its answer type or `Refusal`; `AnsweredAll<Q>` is the same with `Refusal` removed.
+
+`step.decide()` infers `Q` from `questions`; pass it no type arguments. To type `ctx.context` in the `context` selector, annotate its parameter (`(ctx: Context<MyContext>) => …`).
+
+### Questions and answers
+
+```ts validate=none
+type DecideQuestions = Readonly<Record<string, DecideQuestion>>;
+type DecideQuestion = BooleanQuestion | ChoiceQuestion | ScoreQuestion;
+
+interface BooleanQuestion {
+  type: 'boolean';
+  instructions?: string;
+  criteria?: { true?: string; false?: string };
+  threshold?: number;
+}
+
+interface ChoiceQuestion<K extends string = string> {
+  type: 'choice';
+  instructions?: string;
+  choices: readonly K[] | Readonly<Record<K, string>>;
+}
+
+interface ScoreQuestion<L extends string = string> {
+  type: 'score';
+  instructions?: string;
+  levels: readonly L[] | ReadonlyArray<{ label: L; description?: string }>;
+}
+
+type DecideAnswer = BooleanAnswer | ChoiceAnswer | ScoreAnswer | Refusal;
+
+interface BooleanAnswer {
+  type: 'boolean';
+  value: boolean;
+  probability: number;
+}
+
+interface ChoiceAnswer<K extends string = string> {
+  type: 'choice';
+  value: K;
+  confidence: number;
+  probabilities: Readonly<Record<K, number>>;
+}
+
+interface ScoreAnswer<L extends string = string> {
+  type: 'score';
+  value: number;
+  level: L;
+  confidence: number;
+  probabilities: Readonly<Record<L, number>>;
+}
+
+interface Refusal {
+  type: 'refusal';
+}
+```
+
+See [step.decide](/docs/framework/steps/decide#answers) for what each field means.
+
 ## StepBranch
 
 `StepBranch<TContext, I, O>`
@@ -82,7 +170,7 @@ The exported `Step` union additionally includes [`StepEvery`](#stepevery) for fi
 |---|---|---|---|
 | `kind` | `'branch'` | yes | Discriminant |
 | `id` | `string` | yes | Step identifier |
-| `route` | `(input: I, ctx: Context<TContext>) => Step<TContext, I, O> \| null` | yes | Routing function (null skips) |
+| `route` | `(input: I, ctx: Context<TContext>, run: ExecuteStepFn) => Step<TContext, I, O> \| null \| Promise<Step<TContext, I, O> \| null>` | yes | Routing function (null skips). `run` executes a step through the interpreter, for routes that must run a step (such as a decision) to choose. See [`ExecuteStepFn`](#executestepfn) |
 
 ## StepFork
 
@@ -235,3 +323,17 @@ declare const executeStepShape: <TContext, I, O>(
   ctx: Context<TContext>,
 ) => Promise<O>;
 ```
+
+### StepInput and StepOutput
+
+```ts
+import { step } from '@noetic-tools/core';
+import type { StepInput, StepOutput } from '@noetic-tools/core';
+
+const count = step.run({ id: 'count', execute: async (input: string) => input.length });
+
+type CountIn = StepInput<typeof count>;   // string
+type CountOut = StepOutput<typeof count>; // number
+```
+
+Pull a step's input or output type out of its type. `step.routeSwitch` uses them to type its output as the union of every case's output.

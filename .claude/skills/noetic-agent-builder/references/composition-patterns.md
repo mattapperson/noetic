@@ -228,6 +228,125 @@ const pipeline = loop({
 });
 ```
 
+## Pattern: Decide and Route
+
+Support-ticket triage. One `decide` call answers three typed questions, `routeSwitch` sends the ticket to a team by the choice answer, and low-confidence or refused answers go to a human (`uncertain` is required on the key form). `decisionsHistoryLayer` records the decision, so the team's `llm` step sees it in its view.
+
+```typescript
+import {
+  AgentHarness,
+  context,
+  decisionsHistoryLayer,
+  type InferContext,
+  step,
+} from '@noetic-tools/core';
+
+// The harness needs the same layer, so bind it once.
+const decisions = decisionsHistoryLayer();
+const layers = context([decisions]);
+type Ctx = InferContext<typeof layers>;
+
+// No type arguments: the questions are inferred, so the answers keep their literal types.
+const triage = step.decide({
+  id: 'triage',
+  model: 'typesafe/jev-1.14',
+  instructions: 'Support ticket triage.',
+  questions: {
+    team: {
+      type: 'choice',
+      instructions: 'Which team should handle this ticket?',
+      choices: {
+        billing: 'Refunds, invoices, plan changes',
+        technical: 'Bugs, outages, errors',
+        spam: 'Unsolicited or irrelevant',
+      },
+    },
+    isUrgent: {
+      type: 'boolean',
+      instructions: 'Is the customer reporting downtime or severe frustration?',
+      threshold: 0.7,
+    },
+    urgency: {
+      type: 'score',
+      instructions: 'How urgent is this ticket?',
+      levels: [
+        { label: 'low', description: 'Can wait days' },
+        { label: 'medium', description: 'Needs an answer today' },
+        { label: 'high', description: 'Drop everything' },
+      ],
+    },
+  },
+});
+
+// The reply step's view includes the layer's summary:
+//   Decisions so far:
+//   - triage: team=billing (0.81), isUrgent=yes (0.92), urgency=medium (1.3)
+const reply = (team: string) =>
+  step.llm<Ctx, string, string>({
+    id: `reply-${team}`,
+    model: 'openai/gpt-4o-mini',
+    instructions: `You are on the ${team} team. Draft a reply. Match its tone to the urgency decided above.`,
+  });
+
+const humanReview = step.run<Ctx, string, string>({
+  id: 'human-review',
+  execute: async (ticket, ctx) => {
+    const record = ctx.context.decisionsHistory.latest.triage;
+    return `Queued for a human (${JSON.stringify(record?.answers)}): ${ticket}`;
+  },
+});
+
+const dropSpam = step.run<Ctx, string, string>({
+  id: 'drop-spam',
+  execute: async () => 'Dropped as spam.',
+});
+
+const routeTicket = step.routeSwitch({
+  id: 'route-ticket',
+  decide: triage,
+  on: 'team',
+  cases: {                  // exactly one step per choice; a missing or extra key is a type error
+    billing: reply('billing'),
+    technical: reply('technical'),
+    spam: dropSpam,
+  },
+  minConfidence: 0.6,       // below this, or on refusal, take `uncertain`
+  uncertain: humanReview,   // required on the key form
+});
+
+const harness = new AgentHarness({
+  name: 'support',
+  params: {},
+  context: [decisions],
+  decisionModel: 'typesafe/jev-1.14', // default for decide steps that omit `model`
+});
+const ctx = harness.createContext();
+// `answer` is typed `string`: the union of every case's output.
+const answer = await harness.run(routeTicket, 'I was charged twice this month.', ctx);
+```
+
+Each case receives the original ticket text, not the answers. To combine answers, use the function form, which needs a `default`:
+
+```typescript
+const escalate = step.routeSwitch({
+  id: 'escalate',
+  decide: triage,
+  on: (a) => (a.isUrgent.value && a.urgency.value >= 1.5 ? 'page' : 'queue'),
+  cases: { page: humanReview, queue: routeTicket },
+  default: routeTicket,     // a refusal also lands here unless `uncertain` is set
+  // routeTicket runs triage again with the same input: it reuses these answers, no second model call
+});
+```
+
+**Which router to pick:**
+
+| Use | When |
+|-----|------|
+| `step.decide` + `step.routeSwitch` | The choice needs judgment about the content or context, and you want probabilities and a fallback for low confidence. Costs one decision-model call. |
+| `semanticSwitch` | Labels alone are enough and volume is high. It matches by embedding similarity: one embedding call, no chat or decision model. |
+| `branch` | The route follows from code: a flag, a field, a counter. No model at all. Its `route` also gets `run`, for routes that must run a step to choose. |
+| `aiCondition` | A single yes/no gate inside a `branch` route. It is a one-question boolean decide. |
+
 ## Pattern: Tool-Owned Memory
 
 Tools declare their own memory via `ToolMemoryDeclaration`. The agent harness materializes layers automatically:
