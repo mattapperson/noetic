@@ -1,3 +1,7 @@
+## @noetic-tools/types-v3.4.1 (2026-10-21)
+
+* ci: release every public workspace on main ([74b0f95](https://github.com/mattapperson/noetic/commit/74b0f95))
+
 ## @noetic-tools/types-v3.4.0 (2026-10-21)
 
 * feat(core): add decide step, routeSwitch, and decisionsHistoryLayer (#108) ([ad0215c](https://github.com/mattapperson/noetic/commit/ad0215c)), closes [#108](https://github.com/mattapperson/noetic/issues/108)
