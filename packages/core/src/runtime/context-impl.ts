@@ -63,6 +63,7 @@ export class ContextImpl implements Context<ContextData> {
   cost = 0;
   state: unknown;
   readonly parent: Context<ContextData> | null;
+  readonly usageParent: Context<ContextData> | null;
   readonly depth: number;
   readonly span: Span;
   readonly threadId: string;
@@ -154,6 +155,8 @@ export class ContextImpl implements Context<ContextData> {
   constructor(opts: {
     harness: AgentHarnessContract;
     parent?: Context;
+    /** Charge this context's usage to `parent` as it is spent. Default `true`. */
+    rollUpUsage?: boolean;
     items?: Item[];
     state?: unknown;
     threadId?: string;
@@ -184,6 +187,7 @@ export class ContextImpl implements Context<ContextData> {
     this.harness = opts.harness;
     this.state = opts.state ?? {};
     this.parent = opts.parent ?? null;
+    this.usageParent = opts.rollUpUsage === false ? null : this.parent;
     this.depth = this.parent ? this.parent.depth + 1 : 0;
     this.span = opts.span ?? new NoopSpan();
     this.threadId = opts.threadId ?? crypto.randomUUID();

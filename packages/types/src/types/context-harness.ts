@@ -152,6 +152,8 @@ export interface ContextHarness {
   ): DetachedHandle<O>;
   createContext(opts?: {
     parent?: Context;
+    /** Charge this context's usage to `parent` as it is spent. Default `true`. */
+    rollUpUsage?: boolean;
     items?: Item[];
     state?: unknown;
     threadId?: string;

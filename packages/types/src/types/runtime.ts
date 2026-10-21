@@ -317,6 +317,12 @@ export interface AgentHarnessContract<
   ): DetachedHandle<O>;
   createContext(opts?: {
     parent?: Context;
+    /**
+     * Charge this context's token/cost usage to `parent` as it is spent, so
+     * the parent's `tokens` / `cost` include it. Default `true`; pass `false`
+     * to keep the child's spend off the parent.
+     */
+    rollUpUsage?: boolean;
     items?: Item[];
     state?: unknown;
     threadId?: string;

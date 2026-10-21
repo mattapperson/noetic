@@ -944,20 +944,6 @@ async function collectSpawnItems({
   return spawnResults.flatMap((r) => r.items);
 }
 
-/** Adds a spawned child's accumulated token/cost usage to its parent. */
-function rollUpSpawnUsage(parent: Context<ContextData>, child: Context<ContextData>): void {
-  if (!isMutableContext(parent)) {
-    return;
-  }
-  parent.tokens.input += child.tokens.input;
-  parent.tokens.output += child.tokens.output;
-  parent.tokens.total += child.tokens.total;
-  if (child.tokens.cached !== undefined) {
-    parent.tokens.cached = (parent.tokens.cached ?? 0) + child.tokens.cached;
-  }
-  parent.cost += child.cost;
-}
-
 export async function executeSpawn<TContext, I, O>(
   step: StepSpawn<TContext, I, O>,
   input: I,
@@ -1036,19 +1022,14 @@ export async function executeSpawn<TContext, I, O>(
   });
 
   try {
-    // Execute the child step
+    // Execute the child step. Its token/cost usage needs no merge here: every
+    // charge recorded on `childCtx` is also charged up its `usageParent`
+    // chain as it is spent, so a child that throws still bills the parent.
     const childOutput = await executeStep<TContext, I, O>(
       step.child,
       input,
       frameworkCast<Context<TContext>>(childCtx),
     );
-
-    // Roll the child's token/cost usage up into the parent. A sub-agent's
-    // spend is the parent's spend; without this it would be stranded on the
-    // child context and invisible to `ctx.tokens` / `ctx.cost` / until.maxCost.
-    // Because every spawn boundary rolls up, nested sub-agents propagate to the
-    // root recursively.
-    rollUpSpawnUsage(baseCtx, childCtx);
 
     // Pipeline result through layer onReturn hooks
     if (!hasLayers || !parentExecutionCtx) {

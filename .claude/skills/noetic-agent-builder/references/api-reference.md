@@ -622,7 +622,7 @@ chat.onSubscribedMessage(noeticAgent({
 
 ```typescript
 until.maxSteps(n)              // Stop after n iterations
-until.maxCost(n)               // Stop when cumulative cost exceeds n
+until.maxCost(n)               // Stop when cumulative cost reaches n (includes spawn / inParallel children, charged live)
 until.maxDuration(duration)    // Stop after duration milliseconds
 until.noToolCalls()            // Stop when LLM doesn't call any tools
 until.verified(fn)             // Stop when verification passes
@@ -1454,6 +1454,10 @@ function retargetCwdForSpawn(ctx: Context, nextCwd: string): () => void;
 `AgentHarness` exposes `rootCwdState` (the shared object seeded into root contexts) and `setRootCwd(nextCwd)` for hosts (e.g. the TUI) to report a user-issued `!cd`.
 
 `AgentHarness` constructor accepts `initialCwd?: string` (default `process.cwd()`), and both `createContext({ cwdInit })` and `detachedSpawn(..., { cwdInit })` accept a per-context override used by worktree isolation.
+
+### Usage roll-up
+
+`ctx.tokens` / `ctx.cost` cover the context **and every descendant**. Each model call is charged to the calling context and then up its `usageParent` chain at spend time (`recordUsage` in `@noetic-tools/types`, called by `trackUsage`) — so spawn children (even ones that throw), `inParallel` paths in every mode (including failed paths and `race` losers whose call lands late), detached spawns, and `createContext({ parent })` / `restore({ parent })` children all bill their parent. There is no settle-time merge, so re-running a child context never double-counts. Opt out per context with `createContext({ parent, rollUpUsage: false })` (`usageParent` becomes `null`; abort cascade and cwd still follow `parent`). Charge non-model spend with `recordUsage(ctx, { inputTokens, outputTokens, cachedTokens?, cost? })`; a direct `ctx.cost` write stays local. Never sum child costs into the parent by hand. Subprocess-adapter detached steps run in their own root context and do not roll up.
 
 The mutation policy's `sessionCwd` is anchored to the launch cwd and does NOT follow agent `cd` — `cd` is a UX convenience, not a sandbox-widening mechanism.
 

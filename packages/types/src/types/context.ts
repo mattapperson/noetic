@@ -44,6 +44,8 @@ export interface CwdState {
 export interface RestoreContextOptions {
   /** Live parent context, when the restored execution hangs under one. */
   parent?: Context;
+  /** Charge the restored context's usage to `parent`, same as `createContext({ rollUpUsage })`. Default `true`. */
+  rollUpUsage?: boolean;
   /** Opaque per-execution state, same as `createContext({ state })`. */
   state?: unknown;
   /** Context layers for the restored context. Defaults to the harness's configured layers. */
@@ -59,6 +61,17 @@ export interface Context<TContext = ContextData, TState = unknown> {
   readonly cost: number;
   state: TState;
   readonly parent: Context<ContextData> | null;
+  /**
+   * Where this context's token/cost usage is also charged. Every charge
+   * recorded here is added to this context and then to each ancestor along
+   * this chain, so `tokens` / `cost` cover this context plus every descendant,
+   * live — whether the descendant succeeds, fails, or is abandoned.
+   *
+   * Equals `parent` unless the context was created with `rollUpUsage: false`,
+   * in which case it is `null` and the context keeps its spend to itself. When
+   * absent (a hand-rolled `Context` implementation), `parent` is used.
+   */
+  readonly usageParent?: Context<ContextData> | null;
   readonly depth: number;
   readonly span: Span;
   readonly threadId: string;

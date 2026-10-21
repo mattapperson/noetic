@@ -13,11 +13,12 @@ Every step runs inside a `Context`. It's the runtime's handle into the execution
 interface Context<TState = unknown> {
   readonly id: string;           // UUIDv7 (time-sortable)
   readonly stepCount: number;    // monotonically increasing
-  readonly tokens: TokenUsage;   // accumulated across all LLM calls
+  readonly tokens: TokenUsage;   // accumulated across all LLM calls in this context and its descendants
   readonly elapsed: number;      // wall-clock ms
-  readonly cost: number;         // USD
+  readonly cost: number;         // USD, same scope as `tokens`
   state: TState;                 // mutable, typed per-execution
   readonly parent: Context | null;  // null at root
+  readonly usageParent?: Context | null;  // where usage is also charged; `parent` unless created with rollUpUsage: false
   readonly depth: number;        // spawn depth (root = 0)
   readonly span: Span;           // OpenTelemetry trace span (see 10-observability)
   readonly harness: AgentHarness;   // reference to the owning agent harness (see 08-runtime)
@@ -267,6 +268,26 @@ interface LLMResponse {
 - **`threadId` / `resourceId`** are used by the runtime to resolve context layer scope keys. A `scope: 'thread'` context layer isolates state per `threadId`; a `scope: 'resource'` layer shares state across threads for the same `resourceId` (see `11-context-layer-system`).
 - **`itemLog`** is the raw record. The View (what the LLM sees) is a projection of it plus context layer outputs.
 - **The `Context` interface is not the context the LLM sees.** The `Context` object is execution infrastructure — metadata, state, and runtime handles. What the LLM actually receives is the View: the result of all context layers converging in slot order. Context is never a layer itself; it is the output of layer convergence, assembled fresh before each LLM call. See `11-context-layer-system`.
+
+## Usage Accounting
+
+Token and cost usage is charged **at the moment of spend**, up the context tree. `recordUsage(ctx, charge)` (which `trackUsage(ctx, response)` calls for every model response, including responses steering later rejects) adds the charge to `ctx` and then to each ancestor along `usageParent`. So a context's `tokens` and `cost` always cover itself plus every descendant — spawn children, `inParallel` paths in every mode, detached spawns, and contexts created with `createContext({ parent })` / `restore({ parent })` — whether the descendant succeeds, fails, is cancelled, or is an abandoned `race` path whose call lands after the race resolved.
+
+```typescript
+interface UsageCharge {
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens?: number;  // omitted = provider reported nothing about caching
+  cost?: number;          // USD
+}
+
+function recordUsage(ctx: Context, charge: UsageCharge): void;
+```
+
+- **`usageParent`** equals `parent` by default. A context created with `rollUpUsage: false` has `usageParent: null` and keeps its spend to itself while still joining the parent's abort cascade and cwd. A hand-rolled `Context` that does not define `usageParent` charges along `parent`.
+- **Each charge is applied once per ancestor**, at spend time. There is no child→parent merge when a child settles, so running the same child context more than once cannot double-count, and an ancestor's `until.maxCost` / `checkBudget` sees descendants' spend while they are still running.
+- **Billed work outside a model call** (a tool calling a paid API) should be charged with `recordUsage`. A direct write to `ctx.cost` stays on that one context.
+- **Unreported spend is not counted.** A model stream cut short by an abort before the provider reports usage contributes nothing, even if the provider bills it.
 
 ## Per-Layer Usage Breakdown
 

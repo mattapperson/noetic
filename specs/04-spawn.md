@@ -85,7 +85,7 @@ This unified approach means there is one system to learn, one set of hooks to im
 
 A child's **unified tool set** is the union of the tools collected from its own step tree, its layer-provided tools, and the **parent's unified tools** (deduplicated by name, with the child's own tools winning on collision). Sub-agents that resolve their tools dynamically from `ctx.unifiedTools` therefore keep the harness toolset across the spawn boundary instead of seeing an empty set; a child that needs a restricted toolset filters explicitly.
 
-A child's token and cost usage **rolls up into its parent** when the child completes: a sub-agent's spend is the parent's spend. Because every spawn boundary rolls up, nested sub-agents propagate their usage to the root recursively, so `ctx.tokens` / `ctx.cost` and `until.maxCost` account for the full sub-agent tree.
+A child's token and cost usage **rolls up into its parent** at the moment it is spent: a sub-agent's spend is the parent's spend. Every model call charges the calling context and then each ancestor on its `usageParent` chain (see `07-context-and-event-log`), so nested sub-agents propagate their usage to the root, and `ctx.tokens` / `ctx.cost` and `until.maxCost` account for the full sub-agent tree. Because the charge happens at spend time rather than when the child settles, a child that **fails** after spending still bills its parent — no spend is lost to an error, a cancellation, or an abandoned `race` path, and an ancestor's budget sees descendants' spend while they are still running. Detached spawns roll up the same way (their child context is created with `parent`); a detached step run out-of-process by a subprocess adapter has its own root context and does not.
 
 ---
 

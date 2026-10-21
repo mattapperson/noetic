@@ -184,7 +184,7 @@ export {
 //#region Message Utilities
 
 /** @public */
-export { createMessage, estimateTokens } from '@noetic-tools/types';
+export { createMessage, estimateTokens, recordUsage } from '@noetic-tools/types';
 
 //#endregion
 
@@ -316,6 +316,7 @@ export type {
   TokenUsage,
   Tool,
   ToolContextDeclaration,
+  UsageCharge,
 } from '@noetic-tools/types';
 /** @public */
 export {

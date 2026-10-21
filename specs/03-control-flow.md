@@ -132,6 +132,10 @@ Layer **state** is per-path, bracketed by the same hooks `spawn` uses (see `11-c
 
 Layers that merge concurrent children should namespace by `childCtx.executionId` rather than merging keys shallowly — see `taskState({ mergeData: 'namespace' })` in `12-builtin-context-layers`.
 
+### Usage Roll-up
+
+Every path's token and cost usage is charged to the parent context as it is spent (see `07-context-and-event-log`, Usage Accounting), in every mode and regardless of outcome: a path that fails, is cancelled by fail-fast, or loses a `race` still bills the parent. A `race` loser whose in-flight model call completes after the race has resolved charges the parent when that call lands. Because charges arrive live, an enclosing loop's `until.maxCost` sees all paths' spend at its next check.
+
 ### Error Behavior
 
 - **`mode: 'all'`** — If any path fails, cancel remaining paths and throw `fork_partial` (see `09-error-model`) with both succeeded and failed results. Cancellation is cooperative: paths still queued behind the `concurrency` limit are skipped, in-flight siblings are aborted and awaited (they stop at their next step boundary or blocked channel operation), and cancelled paths appear in `failed` with `{ kind: 'cancelled' }`. If the parent context itself is aborted mid-execution, the `inParallel` throws `cancelled`, not `fork_partial`.

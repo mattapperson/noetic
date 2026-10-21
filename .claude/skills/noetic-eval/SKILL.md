@@ -102,7 +102,7 @@ it.each('test/fixtures/tickets.jsonl', async (ctx) => {
 | Scorer | Config | Score Source |
 |--------|--------|-------------|
 | `scorer.latency({ target, maxAcceptable })` | ms thresholds (`maxAcceptable < target` throws `RangeError`) | `ctx.elapsed` |
-| `scorer.cost({ budgetPerCall })` | dollar amount | `ctx.cost` |
+| `scorer.cost({ budgetPerCall })` | dollar amount | `ctx.cost` (includes all spawn / `inParallel` children, failed ones too) |
 | `scorer.tokenEfficiency({ maxOutputTokens })` | token count | `ctx.tokens.output` |
 | `scorer.toolCallAccuracy({ expectedTools, strict? })` | tool names | `ctx.lastStepMeta.toolCalls` |
 | `scorer.fileExists({ paths, shouldNotExist?, contentMatches? })` | file paths | filesystem |

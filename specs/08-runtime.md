@@ -312,6 +312,7 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
   // Context management
   createContext(opts?: {
     parent?: Context;
+    rollUpUsage?: boolean;        // charge usage to `parent` as it is spent (default true; see 07 Usage Accounting)
     items?: Item[];
     state?: unknown;
     threadId?: string;

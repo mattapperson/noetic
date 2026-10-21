@@ -26,6 +26,8 @@ You can attach spawn-local context layers via the optional `context` field. Thes
 
 This is the primitive for sub-agents, delegation, and sandboxed execution.
 
+The child's tokens and cost are charged to the parent as they are spent, so the parent's `ctx.tokens` / `ctx.cost` cover the whole sub-agent tree — including spend from a child that throws. See [Usage roll-up](/docs/framework/context#usage-roll-up).
+
 ## API Reference
 
 | Property | Type | Required | Description |

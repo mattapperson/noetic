@@ -21,7 +21,7 @@ const agent = loop({
 });
 ```
 
-The loop executes its `steps` array sequentially on each iteration, piping the output of one step into the next. After each iteration, a `Snapshot` of the current state is passed to the `until` predicate. When the predicate returns `{ stop: true }`, the loop exits and returns the last output.
+The loop executes its `steps` array **sequentially** on each iteration, in array order: each step waits for the previous one and receives its output as input, and the iteration's output is the last step's output. Steps in the array never run concurrently -- use [`inParallel`](/docs/framework/operators/in-parallel) for that. To run a chain of steps exactly once, use `until: until.maxSteps(1)` (see [Running Steps in Order](/docs/framework/steps#running-steps-in-order)). After each iteration, a `Snapshot` of the current state is passed to the `until` predicate. When the predicate returns `{ stop: true }`, the loop exits and returns the last output.
 
 ## Loop API Reference
 

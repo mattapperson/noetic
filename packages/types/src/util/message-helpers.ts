@@ -130,23 +130,62 @@ export function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
 
-/** Accumulate token usage and cost from an LLM response onto a mutable context. */
-export function trackUsage(ctx: Context, response: LLMResponse): void {
-  if (!canTrackUsage(ctx)) {
-    return;
-  }
-  ctx.tokens.input += response.usage.inputTokens;
-  ctx.tokens.output += response.usage.outputTokens;
-  ctx.tokens.total += response.usage.inputTokens + response.usage.outputTokens;
-  // Only write `cached` when the response actually carried a figure. Defaulting
+/** @public One unit of spend to charge to a context: a model call, or any other billed work. */
+export interface UsageCharge {
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens?: number;
+  /** USD. */
+  cost?: number;
+}
+
+function addCharge(ctx: UsageMutableContext, charge: UsageCharge): void {
+  ctx.tokens.input += charge.inputTokens;
+  ctx.tokens.output += charge.outputTokens;
+  ctx.tokens.total += charge.inputTokens + charge.outputTokens;
+  // Only write `cached` when the charge actually carried a figure. Defaulting
   // a missing report to 0 would erase the `RoundUsage` invariant that
   // `undefined` means "this provider says nothing about caching" — callers that
   // steer on cache behaviour could no longer tell that from "nothing was
-  // cached". Mirrors the child→parent merge in execute-action.
-  if (response.usage.cachedTokens !== undefined) {
-    ctx.tokens.cached = (ctx.tokens.cached ?? 0) + response.usage.cachedTokens;
+  // cached".
+  if (charge.cachedTokens !== undefined) {
+    ctx.tokens.cached = (ctx.tokens.cached ?? 0) + charge.cachedTokens;
   }
-  if (response.cost) {
-    ctx.cost = ctx.cost + response.cost;
+  if (charge.cost) {
+    ctx.cost = ctx.cost + charge.cost;
   }
+}
+
+function usageParentOf(ctx: Context): Context | null {
+  return ctx.usageParent !== undefined ? ctx.usageParent : ctx.parent;
+}
+
+/**
+ * @public Charge `charge` to `ctx` and to every ancestor on its `usageParent`
+ * chain. Charging at the moment of spend — rather than merging a child's
+ * totals into its parent when the child settles — is what keeps spend from a
+ * failed spawn, a fork path, or an abandoned `race` loser from being lost, and
+ * lets `until.maxCost` / `checkBudget` on an ancestor see siblings' spend live.
+ * Use this, not direct writes to `ctx.cost`, for any billed work outside a
+ * model call; a direct write stays on that one context.
+ */
+export function recordUsage(ctx: Context, charge: UsageCharge): void {
+  // The chain is acyclic for every ContextImpl (parents are fixed at
+  // construction); the guard only protects against a hand-rolled Context.
+  const seen = new Set<Context>();
+  for (let current: Context | null = ctx; current && !seen.has(current); ) {
+    seen.add(current);
+    if (canTrackUsage(current)) {
+      addCharge(current, charge);
+    }
+    current = usageParentOf(current);
+  }
+}
+
+/** Accumulate token usage and cost from an LLM response onto a context and its usage ancestors. */
+export function trackUsage(ctx: Context, response: LLMResponse): void {
+  recordUsage(ctx, {
+    ...response.usage,
+    cost: response.cost,
+  });
 }

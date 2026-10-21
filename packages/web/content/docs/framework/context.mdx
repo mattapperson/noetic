@@ -39,12 +39,13 @@ The `TContext` generic defaults to `ContextData` (an untyped record). Use `Infer
 |---|---|---|
 | `id` | `string` | Unique identifier for this execution. |
 | `stepCount` | `number` | Number of steps executed so far. |
-| `tokens` | [`TokenUsage`](#tokenusage) | Cumulative token counts (input, output, total). |
+| `tokens` | [`TokenUsage`](#tokenusage) | Cumulative token counts (input, output, total) for this context and every child context beneath it. See [Usage roll-up](#usage-roll-up). |
 | `elapsed` | `number` | Wall-clock milliseconds since context creation. |
-| `cost` | `number` | Cumulative cost estimate for LLM calls. |
+| `cost` | `number` | Cumulative cost estimate (USD) for LLM calls, same scope as `tokens`. |
 | `state` | `TState` | Mutable, generic state object. You can read and write to this freely. |
 | `context` | `TContext` | Layer provides keyed by layer ID. See [Context](#context) below. |
-| `parent` | `Context \| null` | Parent context when running inside a spawn. |
+| `parent` | `Context \| null` | Parent context when running inside a spawn, an `inParallel` path, or a context created with `createContext({ parent })`. |
+| `usageParent` | `Context \| null \| undefined` | Where this context's usage is also charged. Equals `parent` unless the context was created with `rollUpUsage: false`. |
 | `depth` | `number` | Nesting depth (0 for root). |
 | `span` | [`Span`](/docs/framework/observability) | The active tracing span for this execution. |
 | `threadId` | `string` | Conversation thread identifier. |
@@ -91,6 +92,31 @@ interface TokenUsage {
 `cached` accumulates the prompt tokens providers served from their cache across the execution. Per-round counts live on `ctx.lastStepMeta.usage`, which also carries `cacheWriteTokens` — the tokens written *into* the cache — whenever the provider reports it.
 
 Both cache fields are `undefined` — not `0` — when nothing was reported, and the two mean different things: absent is "the provider said nothing", zero is "the provider said nothing was cached". The re-anchor logic reads the distinction, so keep it if you write an adapter. Treat a missing `cacheWriteTokens` as no answer rather than no write: the streaming path used for ordinary calls does not surface writes today, so it is `undefined` there even on a turn that wrote the cache.
+
+### Usage roll-up
+
+Every model call is charged to the context that made it **and to each of its ancestors**, at the moment the call returns. A parent's `tokens` and `cost` therefore include all of its children — spawned sub-agents, `inParallel` paths in every mode, detached spawns, and contexts created with `createContext({ parent })` — whether the child succeeds, fails, or is an abandoned `race` path. An enclosing loop's `until.maxCost` sees that spend at its next check, so a budget holds across fan-outs.
+
+To keep a child's spend off its parent, create it with `rollUpUsage: false`. It still joins the parent's abort cascade and inherits its cwd:
+
+```ts
+import { AgentHarness } from '@noetic-tools/core';
+
+declare const harness: AgentHarness;
+const parent = harness.createContext();
+const scratch = harness.createContext({ parent, rollUpUsage: false });
+```
+
+If a tool bills for work outside a model call, charge it with `recordUsage` so it reaches the ancestors too. Assigning `ctx.cost` directly only changes that one context:
+
+```ts
+import { recordUsage, type Context } from '@noetic-tools/core';
+
+declare const ctx: Context;
+recordUsage(ctx, { inputTokens: 0, outputTokens: 0, cost: 0.002 });
+```
+
+Do not also add a child's `cost` to its parent by hand — the parent already includes it.
 
 ## Item Log
 

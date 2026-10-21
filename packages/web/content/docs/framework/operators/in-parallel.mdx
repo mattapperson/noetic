@@ -28,6 +28,8 @@ const fastest = inParallel({
 
 `inParallel` runs multiple steps concurrently and combines the results. There are three modes that determine how results are collected.
 
+Every path receives the same input. This differs from an array of steps elsewhere in Noetic, such as a `loop`'s `steps`, which runs sequentially and passes each step's output to the next (see [Running Steps in Order](/docs/framework/steps#running-steps-in-order)). `inParallel` is the only operator that runs steps concurrently.
+
 ## Modes
 
 ### race
@@ -170,6 +172,10 @@ Layer *state* is per path:
 - Merges run one at a time even though paths run concurrently, so no path's contribution is lost to a concurrent read-modify-write.
 
 For layers that collect artifacts from many workers, choose a merge strategy that namespaces per child -- see [`taskState({ mergeData: 'namespace' })`](/docs/framework/context-layers/task-state).
+
+## Token and Cost Roll-up
+
+Every path's tokens and cost are charged to the parent context as they are spent, in every mode. A path that fails, is cancelled when a sibling fails, or loses a `race` still bills the parent; a `race` loser whose model call finishes after the race resolved charges the parent when that call lands. A loop wrapped around an `inParallel` therefore stops on `until.maxCost` at the first check after the paths' combined spend crosses the cap. See [Usage roll-up](/docs/framework/context#usage-roll-up).
 
 ## Related
 

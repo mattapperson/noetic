@@ -127,6 +127,30 @@ See [invokeTool deep dive](/docs/framework/steps/invoke-tool).
 | Structured output | You control | Via Zod `output` | Typed answers with probabilities | Via tool `output` schema |
 | Retry policy | Yes | No | No | No |
 
+## Running Steps in Order
+
+Wherever Noetic takes an **array of steps**, it runs them **sequentially, in array order**: each step starts only after the previous one finishes, and its output becomes the next step's input. The array's result is the last step's output. If a step throws, the steps after it do not run.
+
+This is the default for a `loop`'s `steps` and for a JSON workflow's [`sequence`](/docs/framework/json-runtime#sequence) node. To run a chain once rather than repeatedly, use a loop that stops after one iteration:
+
+```ts
+import { callModel, loop, until } from '@noetic-tools/core';
+
+const draft = callModel({ id: 'draft', model: 'openai/gpt-4o-mini', instructions: 'Draft a reply.' });
+const polish = callModel({ id: 'polish', model: 'openai/gpt-4o-mini', instructions: 'Tighten the draft.' });
+
+// draft runs first; polish then runs on draft's output. Once.
+const draftThenPolish = loop({
+  id: 'draft-then-polish',
+  steps: [draft, polish],
+  until: until.maxSteps(1),
+});
+```
+
+<Callout>
+Concurrency is never implicit. Steps run at the same time only inside [`inParallel`](/docs/framework/operators/in-parallel), whose `paths` function also returns an array -- but each of those paths runs concurrently, against the same input.
+</Callout>
+
 ## Next Steps
 
 - [Control Flow](/docs/framework/operators) -- route between steps with `conditional` and `inParallel`.
