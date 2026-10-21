@@ -6,19 +6,6 @@ name: Release packages
 on:
   push:
     branches: [main]
-    paths:
-      - 'packages/types/**'
-      - 'packages/context/**'
-      - 'packages/core/**'
-      - 'packages/openui/**'
-      - 'packages/agent-plugins/**'
-      - 'packages/acp/**'
-      - 'packages/eval/**'
-      - '.github/workflows/release-packages.yml'
-      - 'scripts/publish-missing.sh'
-      # Root build config that can affect the published output.
-      - 'biome.json'
-      - 'bun.lock'
   workflow_dispatch:
 
 concurrency:
@@ -56,14 +43,17 @@ jobs:
       - name: Install dependencies
         run: bun install
 
+      - name: Check release coverage
+        run: bun test scripts/release.test.ts
+
       - name: Lint
         run: bunx biome check packages/types
 
       - name: Typecheck
-        run: bun --cwd=packages/types run typecheck
+        run: bun run --cwd packages/types typecheck
 
       - name: Build
-        run: bun --cwd=packages/types run build
+        run: bun run --cwd packages/types build
 
       # semantic-release runs `npm version`, which builds the full workspace tree
       # and chokes on sibling packages' `workspace:*` deps (EUNSUPPORTEDPROTOCOL).
@@ -114,16 +104,16 @@ jobs:
         run: bunx biome check packages/context
 
       - name: Typecheck
-        run: bun --cwd=packages/context run typecheck
+        run: bun run --cwd packages/context typecheck
 
       # @noetic-tools/context depends on @noetic-tools/types. Build the dependency's
       # dist first so context's own build (run by `prepublishOnly`) and the Node
       # ESM smoke test can resolve `@noetic-tools/types` via node_modules.
       - name: Build dependency (@noetic-tools/types)
-        run: bun --cwd=packages/types run build
+        run: bun run --cwd packages/types build
 
       - name: Build
-        run: bun --cwd=packages/context run build
+        run: bun run --cwd packages/context build
 
       # See the types job. context's own `workspace:*` deps are pinned to concrete
       # versions at publish time by `prepublishOnly` (scripts/pin-workspace-deps.ts).
@@ -173,16 +163,16 @@ jobs:
         run: bunx biome check packages/acp
 
       - name: Typecheck
-        run: bun --cwd=packages/acp run typecheck
+        run: bun run --cwd packages/acp typecheck
 
       # @noetic-tools/acp depends on @noetic-tools/types. Build the dependency's
       # dist first so acp's own build (run by `prepublishOnly`) and the Node ESM
       # smoke test can resolve `@noetic-tools/types` via node_modules.
       - name: Build dependency (@noetic-tools/types)
-        run: bun --cwd=packages/types run build
+        run: bun run --cwd packages/types build
 
       - name: Build
-        run: bun --cwd=packages/acp run build
+        run: bun run --cwd packages/acp build
 
       # See the types job. acp's own `workspace:*` deps are pinned to concrete
       # versions at publish time by `prepublishOnly`
@@ -233,18 +223,18 @@ jobs:
         run: bunx biome check packages/core
 
       - name: Typecheck
-        run: bun --cwd=packages/core run typecheck
+        run: bun run --cwd packages/core typecheck
 
       # @noetic-tools/core depends on @noetic-tools/types and @noetic-tools/context.
       # Build those dists first so core's own build (run by `prepublishOnly`) and
       # the Node ESM smoke test can resolve them via node_modules.
       - name: Build dependencies (@noetic-tools/types, @noetic-tools/context)
         run: |
-          bun --cwd=packages/types run build
-          bun --cwd=packages/context run build
+          bun run --cwd packages/types build
+          bun run --cwd packages/context build
 
       - name: Build
-        run: bun --cwd=packages/core run build
+        run: bun run --cwd packages/core build
 
       # See the types job. core's own `workspace:*` deps (@noetic-tools/types,
       # @noetic-tools/context) are pinned to concrete versions at publish time by
@@ -297,18 +287,18 @@ jobs:
         run: bunx biome check packages/openui
 
       - name: Typecheck
-        run: bun --cwd=packages/openui run typecheck
+        run: bun run --cwd packages/openui typecheck
 
       # @noetic-tools/openui depends on @noetic-tools/types and @noetic-tools/context.
       # Build those dists first so openui's own build (run by `prepublishOnly`) and
       # the Node ESM smoke test can resolve them via node_modules.
       - name: Build dependencies (@noetic-tools/types, @noetic-tools/context)
         run: |
-          bun --cwd=packages/types run build
-          bun --cwd=packages/context run build
+          bun run --cwd packages/types build
+          bun run --cwd packages/context build
 
       - name: Build
-        run: bun --cwd=packages/openui run build
+        run: bun run --cwd packages/openui build
 
       # See the types job. openui's own `workspace:*` deps are pinned to concrete
       # versions at publish time by `prepublishOnly` (scripts/pin-workspace-deps.ts).
@@ -361,18 +351,18 @@ jobs:
         run: bunx biome check packages/agent-plugins
 
       - name: Typecheck
-        run: bun --cwd=packages/agent-plugins run typecheck
+        run: bun run --cwd packages/agent-plugins typecheck
 
       - name: Test
-        run: bun --cwd=packages/agent-plugins run test
+        run: bun run --cwd packages/agent-plugins test
 
       # Only @noetic-tools/types is needed: the package builds on the
       # ContextLayer contract and nothing else in the workspace.
       - name: Build dependency (@noetic-tools/types)
-        run: bun --cwd=packages/types run build
+        run: bun run --cwd packages/types build
 
       - name: Build
-        run: bun --cwd=packages/agent-plugins run build
+        run: bun run --cwd packages/agent-plugins build
 
       # See the types job. `workspace:*` deps are pinned to concrete versions at
       # publish time by `prepublishOnly` (scripts/pin-workspace-deps.ts).
@@ -389,9 +379,6 @@ jobs:
           NPM_CONFIG_PROVENANCE: 'true'
         run: npx --yes -p semantic-release@25 -p semantic-release-monorepo@8 -p @semantic-release/changelog@6 -p @semantic-release/git@10 -p conventional-changelog-conventionalcommits@7 semantic-release --extends semantic-release-monorepo
 
-  # eval depends on core (which depends on context + types), so it releases last:
-  # by then core's new version is on npm and pin-workspace-deps can point at it.
-  # Nothing in the chain imports eval, so the reverse edge doesn't exist.
   eval:
     name: Release @noetic-tools/eval
     runs-on: ubuntu-latest
@@ -424,7 +411,7 @@ jobs:
         run: bunx biome check packages/eval
 
       - name: Typecheck
-        run: bun --cwd=packages/eval run typecheck
+        run: bun run --cwd packages/eval typecheck
 
       # @noetic-tools/eval depends on @noetic-tools/core. Build the core chain's dists
       # first so eval's own build (run by `prepublishOnly`) and the Node ESM smoke
@@ -432,12 +419,12 @@ jobs:
       # `bun` condition, so src/*.ts is not resolvable at build time.
       - name: Build dependencies (@noetic-tools/types, @noetic-tools/context, @noetic-tools/core)
         run: |
-          bun --cwd=packages/types run build
-          bun --cwd=packages/context run build
-          bun --cwd=packages/core run build
+          bun run --cwd packages/types build
+          bun run --cwd packages/context build
+          bun run --cwd packages/core build
 
       - name: Build
-        run: bun --cwd=packages/eval run build
+        run: bun run --cwd packages/eval build
 
       # See the types job. eval's own `workspace:*` dep (@noetic-tools/core) is
       # pinned to a concrete version at publish time by `prepublishOnly`
@@ -452,5 +439,194 @@ jobs:
         working-directory: packages/eval
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_CONFIG_PROVENANCE: 'true'
+        run: npx --yes -p semantic-release@25 -p semantic-release-monorepo@8 -p @semantic-release/changelog@6 -p @semantic-release/git@10 -p conventional-changelog-conventionalcommits@7 semantic-release --extends semantic-release-monorepo
+
+  # npm requires a first token-based publish before these packages can add a
+  # trusted publisher. OIDC takes priority once the trust settings exist.
+  chat-sdk:
+    name: Release @noetic-tools/chat-sdk
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: eval
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install npm with trusted publishing support
+        run: npm install --global npm@11
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Lint
+        run: bunx biome check packages/chat-sdk
+
+      - name: Typecheck
+        run: bun run --cwd packages/chat-sdk typecheck
+
+      - name: Test
+        run: bun run --cwd packages/chat-sdk test
+
+      - name: Build dependencies
+        run: |
+          bun run --cwd packages/types build
+
+      - name: Build
+        run: bun run --cwd packages/chat-sdk build
+
+      - name: Detach package from workspace for npm
+        run: node -e "const fs=require('fs');const p=require('./package.json');delete p.workspaces;fs.writeFileSync('./package.json',JSON.stringify(p,null,2)+'\n')"
+
+      - name: Finish any pending npm publish
+        run: bash scripts/publish-missing.sh packages/chat-sdk
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Release
+        working-directory: packages/chat-sdk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: 'true'
+        run: npx --yes -p semantic-release@25 -p semantic-release-monorepo@8 -p @semantic-release/changelog@6 -p @semantic-release/git@10 -p conventional-changelog-conventionalcommits@7 semantic-release --extends semantic-release-monorepo
+
+  platform-node:
+    name: Release @noetic-tools/platform-node
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: chat-sdk
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install npm with trusted publishing support
+        run: npm install --global npm@11
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Lint
+        run: bunx biome check packages/platform-node
+
+      - name: Typecheck
+        run: bun run --cwd packages/platform-node typecheck
+
+      - name: Test
+        run: bun run --cwd packages/platform-node test
+
+      - name: Build dependencies
+        run: |
+          bun run --cwd packages/types build
+          bun run --cwd packages/context build
+          bun run --cwd packages/core build
+
+      - name: Build
+        run: bun run --cwd packages/platform-node build
+
+      - name: Detach package from workspace for npm
+        run: node -e "const fs=require('fs');const p=require('./package.json');delete p.workspaces;fs.writeFileSync('./package.json',JSON.stringify(p,null,2)+'\n')"
+
+      - name: Finish any pending npm publish
+        run: bash scripts/publish-missing.sh packages/platform-node
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Release
+        working-directory: packages/platform-node
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: 'true'
+        run: npx --yes -p semantic-release@25 -p semantic-release-monorepo@8 -p @semantic-release/changelog@6 -p @semantic-release/git@10 -p conventional-changelog-conventionalcommits@7 semantic-release --extends semantic-release-monorepo
+
+  platform-browser:
+    name: Release @noetic/platform-browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: platform-node
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install npm with trusted publishing support
+        run: npm install --global npm@11
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Lint
+        run: bunx biome check packages/platform-browser
+
+      - name: Typecheck
+        run: bun run --cwd packages/platform-browser typecheck
+
+      - name: Build dependencies
+        run: |
+          bun run --cwd packages/types build
+          bun run --cwd packages/context build
+          bun run --cwd packages/core build
+
+      - name: Build
+        run: bun run --cwd packages/platform-browser build
+
+      - name: Detach package from workspace for npm
+        run: node -e "const fs=require('fs');const p=require('./package.json');delete p.workspaces;fs.writeFileSync('./package.json',JSON.stringify(p,null,2)+'\n')"
+
+      - name: Finish any pending npm publish
+        run: bash scripts/publish-missing.sh packages/platform-browser
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Release
+        working-directory: packages/platform-browser
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: 'true'
         run: npx --yes -p semantic-release@25 -p semantic-release-monorepo@8 -p @semantic-release/changelog@6 -p @semantic-release/git@10 -p conventional-changelog-conventionalcommits@7 semantic-release --extends semantic-release-monorepo

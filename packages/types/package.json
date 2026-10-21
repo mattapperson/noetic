@@ -62,8 +62,8 @@
     "zod": "^4.0.0"
   },
   "scripts": {
-    "build": "bunx tsc -p tsconfig.build.json && bun scripts/add-js-extensions.ts",
-    "verify:esm": "bun scripts/verify-node-esm.ts",
+    "build": "bunx tsc -p tsconfig.build.json && bun ../../scripts/add-js-extensions.ts",
+    "verify:esm": "bun ../../scripts/verify-node-esm.ts",
     "prepublishOnly": "rm -rf dist && bun run build && bun run verify:esm && bun scripts/strip-dev-conditions.ts",
     "test": "bun test",
     "test:coverage": "bun test --coverage --coverage-reporter=text --coverage-reporter=lcov",

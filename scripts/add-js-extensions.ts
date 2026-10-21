@@ -17,9 +17,8 @@
  */
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
-const DIST = fileURLToPath(new URL('../dist', import.meta.url));
+const DIST = resolve('dist');
 
 const SPECIFIER = /(from\s+|import\s+|import\()(['"])(\.\.?\/[^'"]+)(['"])/g;
 const HAS_EXTENSION = /\.(js|mjs|cjs|json|node)$/;

@@ -6,9 +6,10 @@
  * imports that `add-js-extensions.ts` was supposed to fix).
  */
 import { execFileSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
-const distIndex = fileURLToPath(new URL('../dist/index.js', import.meta.url));
+const distIndex = pathToFileURL(resolve('dist/index.js')).href;
 
 const program = [
   `import(${JSON.stringify(distIndex)})`,
