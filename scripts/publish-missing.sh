@@ -27,7 +27,9 @@ fi
 
 # Rebuilding with changed sources or dependency versions would publish
 # different code under an existing tag.
-if ! git diff --quiet "$tag" -- "$dir" ':(glob)packages/*/package.json' bun.lock; then
+# Bun may rewrite lockfile metadata during install; compare its committed form.
+if ! git diff --quiet "$tag" -- "$dir" ':(glob)packages/*/package.json' ||
+  ! git diff --quiet "$tag" HEAD -- bun.lock; then
   echo "Cannot publish $name@$version: check out $tag to rebuild its sources and dependencies." >&2
   exit 1
 fi
