@@ -1,3 +1,7 @@
+## @noetic-tools/core-v5.7.0 (2026-10-21)
+
+* feat(core): roll child-context usage up to every ancestor at spend time ([c5f760f](https://github.com/mattapperson/noetic/commit/c5f760f)), closes [#109](https://github.com/mattapperson/noetic/issues/109)
+
 ## @noetic-tools/core-v5.6.0 (2026-10-21)
 
 * feat(core): add decide step, routeSwitch, and decisionsHistoryLayer (#108) ([ad0215c](https://github.com/mattapperson/noetic/commit/ad0215c)), closes [#108](https://github.com/mattapperson/noetic/issues/108)
