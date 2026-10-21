@@ -1,3 +1,7 @@
+## @noetic-tools/types-v3.5.0 (2026-10-21)
+
+* feat(core): roll child-context usage up to every ancestor at spend time ([c5f760f](https://github.com/mattapperson/noetic/commit/c5f760f)), closes [#109](https://github.com/mattapperson/noetic/issues/109)
+
 ## @noetic-tools/types-v3.4.1 (2026-10-21)
 
 * ci: release every public workspace on main ([74b0f95](https://github.com/mattapperson/noetic/commit/74b0f95))
