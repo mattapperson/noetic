@@ -1,5 +1,6 @@
 import type {
   ContextLayer,
+  DecisionRecord,
   ExecutionContext,
   Item,
   ItemLog,
@@ -65,6 +66,12 @@ interface InitLayersParams {
   ctx: ExecutionContext;
   storage: StorageAdapter;
   store: LayerStateStore;
+  /**
+   * Skip `init` for layers that already hold state for this execution. Set for
+   * an execution restored from a checkpoint, whose snapshot state `init` would
+   * otherwise overwrite with a fresh start.
+   */
+  keep?: boolean;
 }
 
 interface RecallLayersParams {
@@ -75,6 +82,8 @@ interface RecallLayersParams {
   budgets: Map<string, number>;
   store: LayerStateStore;
   itemSchemas?: ItemSchemaRegistry;
+  /** Render without committing returned state. See `RecallOptions.peek`. */
+  peek?: boolean;
 }
 
 interface StoreLayersParams {
@@ -433,10 +442,19 @@ function layerItemSchemas(
 
 //#region Public API
 
-export async function initLayers({ layers, ctx, storage, store }: InitLayersParams): Promise<void> {
+export async function initLayers({
+  layers,
+  ctx,
+  storage,
+  store,
+  keep = false,
+}: InitLayersParams): Promise<void> {
   // Sequential, array order
   for (const layer of layers) {
     if (!layer.hooks.init) {
+      continue;
+    }
+    if (keep && store.has?.(ctx.executionId, layer.id)) {
       continue;
     }
     const scopeKey = resolveScopeKey(layer.scope, ctx);
@@ -517,6 +535,7 @@ export async function recallLayers({
   budgets,
   store,
   itemSchemas = defaultItemSchemaRegistry,
+  peek = false,
 }: RecallLayersParams): Promise<RecallEntry[]> {
   const sorted = [
     ...layers,
@@ -527,16 +546,22 @@ export async function recallLayers({
     if (!layer.hooks.recall) {
       continue;
     }
-    const state = store.get(ctx.executionId, layer.id);
+    const stored = store.get(ctx.executionId, layer.id);
     if (
       isLayerDisabled({
         store,
         executionId: ctx.executionId,
         layer,
-        state,
+        state: stored,
       })
     ) {
       continue; // was disabled
+    }
+    // Skipping the write is not enough for a peek: a hook may mutate the
+    // stored object in place (steering splices its queue), so it gets a copy.
+    const state = peek ? copyForPeek(stored) : stored;
+    if (peek && state === PEEK_UNSAFE) {
+      continue;
     }
 
     const budget = budgets.get(layer.id) ?? 0;
@@ -575,7 +600,7 @@ export async function recallLayers({
         tokenCount: result.tokenCount,
         mutatedState,
       });
-      if (mutatedState) {
+      if (mutatedState && !peek) {
         store.set(ctx.executionId, layer.id, result.state);
       }
     } catch (e) {
@@ -584,6 +609,17 @@ export async function recallLayers({
   }
 
   return results;
+}
+
+const PEEK_UNSAFE = Symbol('peek-unsafe');
+
+/** A deep copy, or `PEEK_UNSAFE` when the state cannot be copied (it holds functions). */
+function copyForPeek(state: unknown): unknown {
+  try {
+    return structuredClone(state);
+  } catch {
+    return PEEK_UNSAFE;
+  }
 }
 
 type RecallEntry = {
@@ -645,6 +681,20 @@ export async function recallLayersEventual({
     const key = recallCacheKey(layer, params.ctx);
     const cached = cache.entries.get(key);
     const isStale = cache.stale.has(key);
+
+    // A peek renders a cold or stale layer but leaves the cache as it found it,
+    // so the next real recall still sees the entry as needing a render.
+    if (params.peek && (!cached || isStale)) {
+      results.push(
+        ...(await recallLayers({
+          ...params,
+          layers: [
+            layer,
+          ],
+        })),
+      );
+      continue;
+    }
 
     if (!cached || isStale) {
       const recalled = await recallLayers({
@@ -741,6 +791,66 @@ export async function storeLayers({
     }),
   );
 
+  await store.flush?.(ctx.executionId);
+}
+
+interface NotifyDecisionParams {
+  layers: ContextLayer[];
+  record: DecisionRecord;
+  ctx: ExecutionContext;
+  store: LayerStateStore;
+  recallCache?: RecallCache;
+}
+
+/**
+ * Run each layer's `onDecision` hook in slot order. Sequential, unlike
+ * `storeLayers`: decisions are small and ordered, and a later layer may read
+ * what an earlier one recorded.
+ */
+export async function notifyDecision({
+  layers,
+  record,
+  ctx,
+  store,
+  recallCache,
+}: NotifyDecisionParams): Promise<void> {
+  const sorted = [
+    ...layers,
+  ].sort((a, b) => a.slot - b.slot);
+  for (const layer of sorted) {
+    if (!layer.hooks.onDecision) {
+      continue;
+    }
+    const state = store.get(ctx.executionId, layer.id);
+    if (
+      isLayerDisabled({
+        store,
+        executionId: ctx.executionId,
+        layer,
+        state,
+      })
+    ) {
+      continue;
+    }
+    try {
+      const result = await withTimeout(
+        layer.hooks.onDecision({
+          state,
+          record,
+          ctx,
+        }),
+        layer.timeouts?.onDecision ?? 5e3,
+      );
+      if (result && 'state' in result) {
+        store.set(ctx.executionId, layer.id, result.state);
+        if (recallCache && layer.recallMode === 'eventual') {
+          recallCache.stale.add(recallCacheKey(layer, ctx));
+        }
+      }
+    } catch (e) {
+      store.diagnostic(layer.id, 'onDecision', e);
+    }
+  }
   await store.flush?.(ctx.executionId);
 }
 

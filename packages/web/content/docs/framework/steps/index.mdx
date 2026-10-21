@@ -1,9 +1,9 @@
 ---
 title: Steps
-description: The three step primitives -- runCode, callModel, and invokeTool -- are the atomic units of work in Noetic.
+description: The four step primitives -- runCode, callModel, decide, and invokeTool -- are the atomic units of work in Noetic.
 ---
 
-Steps are the building blocks of every Noetic agent. Each step takes typed input, does one thing, and returns typed output. There are three kinds.
+Steps are the building blocks of every Noetic agent. Each step takes typed input, does one thing, and returns typed output. There are four kinds.
 
 ## runCode -- Custom Logic
 
@@ -51,6 +51,33 @@ When you provide an `output` Zod schema, the framework requests structured outpu
 
 See [callModel deep dive](/docs/framework/steps/call-model).
 
+## decide -- Typed Decision
+
+Ask a model typed questions about the current context and get typed answers with probabilities. A decision reads the conversation but never adds to it.
+
+```ts
+import { decide } from '@noetic-tools/core';
+
+const triage = decide({
+  id: 'triage',
+  model: 'typesafe/jev-1.14',
+  questions: {
+    intent: {
+      type: 'choice',
+      choices: [
+        'question',
+        'command',
+        'chitchat',
+      ],
+    },
+  },
+});
+```
+
+Use [`routeSwitch`](/docs/framework/operators/route-switch) to route by the answers.
+
+See [decide deep dive](/docs/framework/steps/decide).
+
 ## invokeTool -- Direct Tool Invocation
 
 Invoke a single tool without going through an LLM. Useful when you know exactly which tool to call and with what arguments.
@@ -92,13 +119,13 @@ See [invokeTool deep dive](/docs/framework/steps/invoke-tool).
 
 ## Comparison
 
-| | `runCode` | `callModel` | `invokeTool` |
-| --- | --- | --- | --- |
-| Custom code | Yes | No | No |
-| LLM call | No | Yes | No |
-| Tool execution | No | Via `tools` array | Direct |
-| Structured output | You control | Via Zod `output` | Via tool `output` schema |
-| Retry policy | Yes | No | No |
+| | `runCode` | `callModel` | `decide` | `invokeTool` |
+| --- | --- | --- | --- | --- |
+| Custom code | Yes | No | No | No |
+| LLM call | No | Yes | Yes | No |
+| Tool execution | No | Via `tools` array | No | Direct |
+| Structured output | You control | Via Zod `output` | Typed answers with probabilities | Via tool `output` schema |
+| Retry policy | Yes | No | No | No |
 
 ## Next Steps
 

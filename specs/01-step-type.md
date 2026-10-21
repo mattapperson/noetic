@@ -14,7 +14,8 @@ type Step<I, O> =
   | { kind: 'runCode';     id: string; execute: (input: I, ctx: Context) => Promise<O>; retry?: RetryPolicy; subprocess?: SubprocessAdapter }
   | { kind: 'callModel';     id: string; model: string; instructions?: string; tools?: Tool[]; output?: StandardSchemaV1<unknown, O>; outputJsonSchema?: Record<string, unknown>; params?: ModelParams }
   | { kind: 'invokeTool';    id: string; tool: Tool; args?: unknown }
-  | { kind: 'conditional';  id: string; route: (input: I, ctx: Context) => Step<I, O> | null }
+  | { kind: 'decide';  id: string; model?: string; questions: DecideQuestions; view: 'full' | 'layers' | 'none'; samples: number }
+  | { kind: 'conditional';  id: string; route: (input: I, ctx: Context, run: ExecuteStepFn) => Step<I, O> | null }
   | { kind: 'inParallel';    id: string; mode: 'all' | 'race' | 'settle'; paths: (input: I, ctx: Context) => Step<I, O>[]; merge?: MergeFn<O>; concurrency?: number }
   | { kind: 'spawn';   id: string; child: Step<I, O>; context?: ContextLayer[]; timeout?: number; subprocess?: SubprocessAdapter }
   | { kind: 'withContext'; id: string; child: Step<I, O>; context: ContextConfig | ContextLayer[] }
@@ -32,6 +33,7 @@ Each variant is specified in its own feature spec:
 | `runCode` | `02-step-variants` | Arbitrary async work |
 | `callModel` | `02-step-variants` | Single LLM call |
 | `invokeTool` | `02-step-variants` | Single tool execution |
+| `decide` | `32-decide` | Typed questions answered with probabilities |
 | `conditional` | `03-control-flow` | Conditional routing |
 | `inParallel` | `03-control-flow` | Parallel execution |
 | `spawn` | `04-spawn` | Child execution with context boundary |
@@ -48,6 +50,7 @@ async function execute<I, O>(step: Step<I, O>, input: I, ctx: Context): Promise<
     case 'runCode':     return executeRun(step, input, ctx);
     case 'callModel':   return executeLLM(step, input, ctx);
     case 'invokeTool':  return executeTool(step, input, ctx);
+    case 'decide':      return executeDecide(step, input, ctx);
     case 'conditional': return executeBranch(step, input, ctx);
     case 'inParallel':  return executeFork(step, input, ctx);
     case 'spawn':       return executeSpawn(step, input, ctx);

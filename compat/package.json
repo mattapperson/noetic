@@ -18,7 +18,7 @@
     "@noetic-tools/core": "file:./vendor/noetic-core.tgz",
     "@noetic-tools/context": "file:./vendor/noetic-context.tgz",
     "@noetic-tools/types": "file:./vendor/noetic-types.tgz",
-    "@openrouter/agent": "0.6.0",
+    "@openrouter/agent": "0.11.0",
     "zod": "^4.0.0"
   },
   "devDependencies": {

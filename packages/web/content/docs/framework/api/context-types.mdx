@@ -187,6 +187,7 @@ type ContentPart =
 | `usage` | `RoundUsage` — `{ inputTokens, outputTokens, cachedTokens?, cacheWriteTokens? }` | Token usage for the step. The two cache fields are `undefined` when the provider reports no cache figures, which is not the same as a reported zero (optional) |
 | `cost` | `number` | Step cost in USD (optional) |
 | `responseItems` | `ReadonlyArray<Item>` | Items produced by this step (optional) |
+| `decision` | `DecisionMeta` — `{ modelId, source: 'native' \| 'estimated', refused: readonly string[] }` | Set by `decide` steps: the model that answered, which [model path](/docs/framework/steps/decide#model-paths) it took, and the ids of refused questions (optional) |
 
 ## LayerUsageEntry
 

@@ -12,11 +12,13 @@ Inspects a value and selects which step to execute next. Returns the actual `Ste
 ```typescript
 interface ConditionalOpts<I, O> {
   id: string;
-  route: (input: I, ctx: Context) => Step<I, O> | null | Promise<Step<I, O> | null>;
+  route: (input: I, ctx: Context, run: ExecuteStepFn) => Step<I, O> | null | Promise<Step<I, O> | null>;
 }
 ```
 
 The `route` function may be sync or async. Async routes enable embedding-based semantic routing and AI-driven conditions without blocking the type system.
+
+`run` executes a step through the interpreter — with its span, ledger entry, and layer hooks — for a route that must run a step to choose. `routeSwitch()` (spec 32) uses it to run a `decide` step and route on its answers. Routes that only inspect the input ignore it.
 
 ```typescript
 const routeByLanguage = conditional<CodeFile, AnalysisResult>({

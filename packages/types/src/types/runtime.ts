@@ -3,14 +3,20 @@ import type { Channel, ChannelHandle, ExternalChannel } from './channel';
 import type { LLMResponse, ModelParams, ServerToolSpec } from './common';
 import type { Context, CwdState, RestoreContextOptions } from './context';
 import type { ContextCacheConfig, ContextCacheStore } from './context-cache';
-import type { ContextData, ContextLayer, ProjectionPolicy, StorageAdapter } from './context-layer';
+import type {
+  ContextData,
+  ContextLayer,
+  ProjectionPolicy,
+  RecallOptions,
+  StorageAdapter,
+} from './context-layer';
 import type { DetachedHandle } from './detached';
 import type { FsAdapter } from './fs-adapter';
+import type { HarnessJudgmentContract } from './harness-judgment';
 import type { HarnessResponse, StreamEvent, StreamingItem } from './harness-result';
 import type { ExecuteInput, Item, ItemSchemaExtensions } from './items';
 import type { Span, TraceExporter } from './observability';
 import type { ShellAdapter } from './shell-adapter';
-import type { SteeringDecision } from './steering';
 import type { Step } from './step';
 import type { SubprocessAdapter } from './subprocess-adapter';
 import type { Tool } from './tool';
@@ -43,6 +49,8 @@ export interface AgentConfig<TParams extends Record<string, unknown> = Record<st
   forceAtomicRecall?: boolean;
   /** Tuning for prompt-cache anchoring. See `ContextCacheConfig` for the defaults. */
   contextCache?: ContextCacheConfig;
+  /** Default model for `decide` steps. */
+  decisionModel?: string;
 }
 
 //#region Delivery Mode
@@ -214,7 +222,7 @@ export interface SessionScope {
 /** @public Type-level contract for the agent runtime. Used for type annotations throughout the interpreter, context layers, and context. Implemented by `AgentHarness`. */
 export interface AgentHarnessContract<
   TParams extends Record<string, unknown> = Record<string, unknown>,
-> {
+> extends HarnessJudgmentContract {
   readonly config: AgentConfig<TParams>;
   /** Filesystem adapter for virtual or real filesystem access. */
   readonly fs: FsAdapter;
@@ -365,6 +373,7 @@ export interface AgentHarnessContract<
     input: string,
     ctx: Context,
     budgets: Map<string, number>,
+    opts?: RecallOptions,
   ): Promise<RecallLayerOutput[]>;
   /** Recall eventual layers from cache (non-blocking); returns nothing when the harness forces atomic recall. */
   recallLayersEventual(
@@ -372,6 +381,7 @@ export interface AgentHarnessContract<
     input: string,
     ctx: Context,
     budgets: Map<string, number>,
+    opts?: RecallOptions,
   ): Promise<RecallLayerOutput[]>;
   /**
    * Compute the items that would be sent to the model on the next turn for a
@@ -404,18 +414,6 @@ export interface AgentHarnessContract<
   createSpan(name: string, parent: Span | null): Span;
   getLayerState<T>(executionId: string, layerId: string): T | undefined;
   setLayerState<T>(executionId: string, layerId: string, state: T): void;
-  beforeToolCall(
-    layers: ContextLayer[],
-    toolName: string,
-    toolArgs: unknown,
-    ctx: Context,
-    callId?: string,
-  ): Promise<SteeringDecision>;
-  afterModelCall(
-    layers: ContextLayer[],
-    response: LLMResponse,
-    ctx: Context,
-  ): Promise<SteeringDecision>;
   /**
    * Project the history items through every layer's `projectHistory` hook in
    * slot order. Pure read-side projection — `itemLog` is never mutated.

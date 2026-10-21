@@ -27,6 +27,7 @@ import {
   executeLoop,
   executeSchedule,
 } from './execute-control';
+import { executeDecide } from './execute-decide';
 import { isMutableContext } from './typeguards';
 
 //#region Constants
@@ -79,13 +80,14 @@ function buildSpawnOpts<TContext>(ctx: Context<TContext>): {
 }
 
 /**
- * Resolve the per-step framework-event emit option. Both `callModel` and the harness
- * step kinds carry an `emit` field; every other kind defaults to enabled.
+ * Resolve the per-step framework-event emit option. `callModel`, `decide`, and
+ * the harness step kinds carry an `emit` field; every other kind defaults to
+ * enabled.
  */
 function resolveStepEmit<TContext, I, O>(
   step: Step<TContext, I, O>,
 ): boolean | ((eventType: string, data: Record<string, unknown>) => boolean) | undefined {
-  if (step.kind === 'callModel' || step.kind === 'acp-agent') {
+  if (step.kind === 'callModel' || step.kind === 'decide' || step.kind === 'acp-agent') {
     return step.emit;
   }
   return undefined;
@@ -357,6 +359,9 @@ export async function execute<TContext = ContextData, I = unknown, O = unknown>(
         break;
       case 'invokeTool':
         result = await executeInvokeTool(step, input, ctx, baseCtx.harness);
+        break;
+      case 'decide':
+        result = await executeDecide(step, input, ctx, baseCtx.layers);
         break;
       case 'conditional':
         result = await executeConditional(step, input, ctx, (s, i, c) => execute(s, i, c));

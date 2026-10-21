@@ -13,6 +13,7 @@ import type {
 } from '@noetic-tools/types';
 import { z } from 'zod';
 import { createInMemorySubprocessAdapter } from '../src/adapters/in-memory-subprocess-adapter';
+import { callDecide } from '../src/harness/decide-call';
 
 //#region Test-only Node adapters
 //
@@ -427,6 +428,11 @@ export function makeMockToolContext(ctx?: Context): ToolExecutionContext {
   };
 }
 
+/** A branch-route `run` for tests whose routes never run a step. */
+export const noRun: ExecuteStepFn = async () => {
+  throw new Error('route ran a step in a test that expects it not to');
+};
+
 export function makeMockHarness(): AgentHarnessContract {
   const harness: AgentHarnessContract = {
     config: {
@@ -440,6 +446,13 @@ export function makeMockHarness(): AgentHarnessContract {
     callModel: async () => {
       throw new Error('not impl');
     },
+    // The estimated path over whatever `callModel` the test installs.
+    decide: (request) =>
+      callDecide(request, {
+        callModel: (r) => harness.callModel(r),
+        nativeModels: new Map(),
+      }),
+    notifyDecision: async () => {},
     execute: async () => {
       throw new Error('not impl');
     },

@@ -5,7 +5,7 @@ description: This skill provides guidance for building AI agents with the Noetic
 
 # Building Agents with Noetic
 
-Noetic is a TypeScript agent framework where all agent patterns decompose into compositions of seven step primitives: `runCode`, `callModel`, `invokeTool`, `conditional`, `inParallel`, `spawn`, and `loop`. Context boundaries are first-class concepts, and the context layer system controls what state flows across them.
+Noetic is a TypeScript agent framework where all agent patterns decompose into compositions of eight step primitives: `runCode`, `callModel`, `decide`, `invokeTool`, `conditional`, `inParallel`, `spawn`, and `loop`. Context boundaries are first-class concepts, and the context layer system controls what state flows across them.
 
 ## Core Concepts
 
@@ -15,6 +15,7 @@ All agent patterns compose through a single `Step<TContext, I, O>` type. Steps a
 
 - **`runCode`** -- pure async computation
 - **`callModel`** -- model call with optional tools and structured output
+- **`decide`** -- typed questions (boolean, choice, score) answered with probabilities; reads the conversation but never joins it. Pass it no type arguments (annotate the `context` selector's `ctx` instead). `routeSwitch` builds a `conditional` that routes by a decision; its key form needs one case per outcome plus `uncertain`
 - **`invokeTool`** -- direct tool execution with schema-validated I/O (Zod by default; any Standard Schema v1 validator accepted)
 - **`conditional`** -- conditional routing (returns a step or null)
 - **`inParallel`** -- parallel execution (race, all, or settle)
@@ -80,6 +81,7 @@ Context layers inject context into the LLM view (via `recall`) and persist state
 - **`taskState()`** -- file checkpoints across fresh context boundaries
 - **`instructions()`** -- immutable instruction injection from loaded content
 - **`toolCalls()`** -- auto-generated layers from tool `context` declarations
+- **`decisionsHistoryLayer()`** -- records `decide` answers (via the `onDecision` hook) for later steps and `callModel` views
 - **`openUiSurface()`** (from `@noetic-tools/openui`) -- server-authoritative generative-UI state; see [Generative UI](#generative-ui-openui)
 - **`agentPlugins()`** (from `@noetic-tools/agent-plugins`) -- an [Agent Plugins](https://agent-plugins.org) v1 client: discovers plugin packages and exposes their Agent Skills (`SKILL.md`) and MCP servers (`mcp.json`) with progressive disclosure; see `references/api-reference.md`
 
@@ -116,6 +118,7 @@ An agent can respond with a *UI* built from components you register, instead of 
 | Parallel perspectives, merged | Parallel Research | `inParallel(all)` + `spawn` |
 | Background sub-agents | Async Delegation | `detachedSpawn` + inbox channel |
 | Sequential pipeline | Phase Router | `conditional` + `loop` + `prepareNext` |
+| Classify input, then route by the answer | Decide and Route | `decide` + `routeSwitch` + `decisionsHistoryLayer()` |
 | Multi-agent task tree | Plan Execution | hand-compose `loop` + `inParallel` + `conditional` + `spawn`, or emit a `WorkflowDocument` and run it with `parseAndRunWorkflow` |
 | Run a real coding agent (Claude Code / Codex / Gemini CLI) as a step | ACP Agent Step | `step.acpAgent` |
 | Agent responds with a UI (not text) | Generative UI | `callModel({ output: openUi(library) })` + `openUiSurface()` |

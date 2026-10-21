@@ -25,6 +25,8 @@ export { context } from './builders/context-builder';
 /** @public */
 export { conditional, inParallel } from './builders/control-flow-builders';
 /** @public */
+export { decide, routeSwitch } from './builders/decide-builders';
+/** @public */
 export type { ScheduleOptions } from './builders/every';
 /** @public */
 export { schedule } from './builders/every';
@@ -125,6 +127,9 @@ export { execute } from './interpreter/execute';
 /** @public */
 /** @public */
 export type {
+  DecisionsHistoryConfig,
+  DecisionsHistoryLayer,
+  DecisionsHistoryState,
   FactExtractor,
   FactSearcher,
   HistoryConfig,
@@ -155,6 +160,8 @@ export type {
 /** @public */
 /** @public */
 export {
+  DECISION_PROJECTION,
+  decisionsHistoryLayer,
   filesystem,
   findFunctionCall,
   history,
@@ -251,10 +258,12 @@ export type {
   CallModelWorkflowNode,
   ConditionalRoute,
   ConditionalWorkflowNode,
+  DecideWorkflowNode,
   InParallelWorkflowNode,
   InvokeToolWorkflowNode,
   LoopWorkflowNode,
   MergeStrategy,
+  RouteSwitchWorkflowNode,
   ScheduleWorkflowNode,
   SequenceWorkflowNode,
   SpawnWorkflowNode,
@@ -497,6 +506,7 @@ export type {
   ContextEpoch,
   DeliveryMode,
   ExecuteOptions,
+  HarnessJudgmentContract,
   HarnessStatus,
   ItemSchemaConfig,
   ReanchorReason,
@@ -549,6 +559,62 @@ export type {
   Until,
   Verdict,
 } from '@noetic-tools/types';
+
+//#endregion
+
+//#region Types — Decide
+
+/** @public */
+export type {
+  AnsweredAll,
+  AnswerFor,
+  BooleanAnswer,
+  BooleanQuestion,
+  CaseKeyOf,
+  ChoiceAnswer,
+  ChoiceQuestion,
+  ChoiceValues,
+  DecideAnswer,
+  DecideAnswers,
+  DecideQuestion,
+  DecideQuestions,
+  DecideRequest,
+  DecideResponse,
+  DecideStatePart,
+  DecideStep,
+  DecideView,
+  DecisionMeta,
+  DecisionRecord,
+  DecisionSource,
+  LevelLabels,
+  OnDecisionParams,
+  RecallOptions,
+  ScoreAnswer,
+  ScoreLevel,
+  ScoreQuestion,
+  StepDecide,
+} from '@noetic-tools/types';
+/** @public */
+export {
+  BooleanQuestionSchema,
+  ChoiceQuestionSchema,
+  choiceValues,
+  DECIDE_LIMITS,
+  DecideOutputError,
+  DecideQuestionSchema,
+  DecideQuestionsSchema,
+  routeOutcomes,
+  ScoreQuestionSchema,
+  scoreLevels,
+} from '@noetic-tools/types';
+/** @public */
+export type {
+  RouteSwitchByFunctionOpts,
+  RouteSwitchByKeyOpts,
+  StepDecideOpts,
+  StepInput,
+  StepOutput,
+} from './builders/decide-builders';
 
 //#endregion
 

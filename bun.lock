@@ -5,8 +5,8 @@
     "": {
       "name": "noetic",
       "dependencies": {
-        "@openrouter/agent": "^0.6.0",
-        "@openrouter/sdk": "^0.12.12",
+        "@openrouter/agent": "^0.11.0",
+        "@openrouter/sdk": "1.4.25",
       },
       "devDependencies": {
         "@biomejs/biome": "^2.3.11",
@@ -20,7 +20,7 @@
     },
     "packages/acp": {
       "name": "@noetic-tools/acp",
-      "version": "1.0.0",
+      "version": "1.1.1",
       "dependencies": {
         "@noetic-tools/types": "workspace:*",
         "@zed-industries/agent-client-protocol": "^0.4.5",
@@ -74,7 +74,7 @@
     },
     "packages/context": {
       "name": "@noetic-tools/context",
-      "version": "1.2.2",
+      "version": "1.3.0",
       "dependencies": {
         "@noetic-tools/types": "workspace:*",
         "zod": "^4.0.0",
@@ -88,21 +88,22 @@
     },
     "packages/core": {
       "name": "@noetic-tools/core",
-      "version": "5.4.1",
+      "version": "5.5.0",
       "dependencies": {
         "@noetic-tools/context": "workspace:*",
         "@noetic-tools/types": "workspace:*",
-        "@openrouter/agent": "^0.6.0",
+        "@openrouter/agent": "^0.11.0",
+        "@openrouter/sdk": "1.4.25",
         "zod": "^4.0.0",
       },
       "devDependencies": {
-        "@openrouter/agent": "^0.6.0",
+        "@openrouter/agent": "^0.11.0",
         "@valibot/to-json-schema": "1.7.1",
         "bun-types": "latest",
         "valibot": "1.4.2",
       },
       "peerDependencies": {
-        "@openrouter/agent": "^0.6.0",
+        "@openrouter/agent": "^0.11.0",
         "zod": "^4.0.0",
       },
       "optionalPeers": [
@@ -198,19 +199,19 @@
     },
     "packages/types": {
       "name": "@noetic-tools/types",
-      "version": "3.2.2",
+      "version": "3.3.0",
       "dependencies": {
-        "@openrouter/agent": "^0.6.0",
+        "@openrouter/agent": "^0.11.0",
         "@standard-schema/spec": "1.1.0",
         "@zed-industries/agent-client-protocol": "^0.4.5",
         "zod": "^4.0.0",
       },
       "devDependencies": {
-        "@openrouter/agent": "^0.6.0",
+        "@openrouter/agent": "^0.11.0",
         "bun-types": "latest",
       },
       "peerDependencies": {
-        "@openrouter/agent": "^0.6.0",
+        "@openrouter/agent": "^0.11.0",
         "zod": "^4.0.0",
       },
       "optionalPeers": [
@@ -457,9 +458,9 @@
 
     "@noetic/web": ["@noetic/web@workspace:packages/web"],
 
-    "@openrouter/agent": ["@openrouter/agent@0.6.0", "", { "dependencies": { "@openrouter/sdk": "^0.12.12", "zod": "^4.0.0" } }, "sha512-uJpyHhNn0R15CXYWpUOYYQ85IN755LmJL5dE/hqgbbpBHslQrNbIM+UPeb9JivQYgQh1X37bB7cv2FWvfn94VQ=="],
+    "@openrouter/agent": ["@openrouter/agent@0.11.0", "", { "dependencies": { "@openrouter/sdk": "^0.13.7", "zod": "^4.0.0" }, "peerDependencies": { "@modelcontextprotocol/client": "^2.0.0" }, "optionalPeers": ["@modelcontextprotocol/client"] }, "sha512-8idTYNZ4MjQyNJ2HKMTSmocVgQYajB43xG3rqa7ronK8Xfqx6XnIKvfhtqmAeJTPkhYppVuuQ+DKkMXlVEA+SA=="],
 
-    "@openrouter/sdk": ["@openrouter/sdk@0.12.35", "", { "dependencies": { "zod": "^3.25.0 || ^4.0.0" } }, "sha512-s4QVLLnG1AmfW3TjnnHUqGfsCkzwVK+kboGcZmKbde09m1DPqgzl4RUFt/HJ5v97MX8aEaN0UG3mKv2S+qj2Gw=="],
+    "@openrouter/sdk": ["@openrouter/sdk@1.4.25", "", { "dependencies": { "zod": "^3.25.0 || ^4.0.0" } }, "sha512-H218lYMy9WhU5cMigUvW/k+e1BimCqTTP+9PqssdDXnQ0gFCeEME0HTsFGPbR6UgJgyYh2hTct43/9pMcBem5A=="],
 
     "@opentelemetry/api": ["@opentelemetry/api@1.9.1", "", {}, "sha512-gLyJlPHPZYdAk1JENA9LeHejZe1Ti77/pTeFm/nMXmQH/HFZlcS/O2XJB+L8fkbrNSqhdtlvjBVjxwUYanNH5Q=="],
 
@@ -1309,9 +1310,17 @@
 
     "@ai-sdk/provider-utils/@workflow/serde": ["@workflow/serde@4.1.0", "", {}, "sha512-pav4F2BoirECWR7Nf1TKt+2eETcBj7jj4cBefQ8VXQCA6NPkaKeLfj/zMgi+3zYV5ZIBT4GuUiphsj0/b9hPQQ=="],
 
+    "@noetic-tools/context/bun-types": ["bun-types@1.4.3", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-tinRJNGOmUN+tEAsn2y2e942n9JHRHR42iUYzDH75NmhJqVBokGSQkkfSFdNWwsANIdrK6ACH9t01M452YyTwg=="],
+
+    "@noetic-tools/core/bun-types": ["bun-types@1.4.3", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-tinRJNGOmUN+tEAsn2y2e942n9JHRHR42iUYzDH75NmhJqVBokGSQkkfSFdNWwsANIdrK6ACH9t01M452YyTwg=="],
+
+    "@noetic-tools/types/bun-types": ["bun-types@1.4.3", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-tinRJNGOmUN+tEAsn2y2e942n9JHRHR42iUYzDH75NmhJqVBokGSQkkfSFdNWwsANIdrK6ACH9t01M452YyTwg=="],
+
     "@noetic/inspector/typescript": ["typescript@5.8.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-p1diW6TqL9L07nNxvRMM7hMMw4c5XOo/1ibL4aAIGmSAt9slTE1Xgw5KWuof2uTOvCg9BY7ZRi+GaF+7sfgPeQ=="],
 
     "@noetic/web/typescript": ["typescript@5.8.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-p1diW6TqL9L07nNxvRMM7hMMw4c5XOo/1ibL4aAIGmSAt9slTE1Xgw5KWuof2uTOvCg9BY7ZRi+GaF+7sfgPeQ=="],
+
+    "@openrouter/agent/@openrouter/sdk": ["@openrouter/sdk@0.13.67", "", { "dependencies": { "zod": "^3.25.0 || ^4.0.0" } }, "sha512-kUVaFYA9Xehq67ndTk98i+tRLfYH/F6xSf/WuC8dsukBzcgBvYQydoeKw4Xe+peXG/wOVtDxukWt5SqzhbloKw=="],
 
     "@radix-ui/react-collection/@radix-ui/react-slot": ["@radix-ui/react-slot@1.2.3", "", { "dependencies": { "@radix-ui/react-compose-refs": "1.1.2" }, "peerDependencies": { "@types/react": "*", "react": "^16.8 || ^17.0 || ^18.0 || ^19.0 || ^19.0.0-rc" }, "optionalPeers": ["@types/react"] }, "sha512-aeNmHnBxbi2St0au6VBVC7JXFlhLlOnvIIlePNniyUNAClzmtAUEY8/pBiK3iHjufOlwA+c20/8jngo7xcrg8A=="],
 

@@ -17,6 +17,18 @@ export const DEFAULT_PROJECTION: ProjectionPolicy = {
   overflow: 'sliding_window',
 };
 
+/**
+ * Default view budget for `decide` steps. Decision models degrade on long
+ * state — TypeSafe Jev drops to a slower, less accurate long-context mode above
+ * about 32 KB of text — so a decision sees a tighter window than a chat turn.
+ * @public
+ */
+export const DECISION_PROJECTION: ProjectionPolicy = {
+  tokenBudget: 8e3,
+  responseReserve: 0,
+  overflow: 'truncate',
+};
+
 function extractMin(config: BudgetConfig | undefined): number {
   if (config && typeof config === 'object' && 'min' in config) {
     return config.min;

@@ -1,3 +1,4 @@
+import type { DecisionMeta } from './decide';
 import type { FunctionCallItem, Item } from './items';
 
 /**
@@ -109,6 +110,8 @@ export interface StepMeta {
    * `max_turn_requests`) from a complete one — both return normally.
    */
   acpStopReason?: string;
+  /** Set by `decide` steps. */
+  decision?: DecisionMeta;
 }
 
 /** @public Structured response returned by a model adapter after an LLM call. */

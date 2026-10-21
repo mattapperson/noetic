@@ -38,6 +38,7 @@ They are mandatory, not optional.
 | `29-chat-platform-integration.md` | `packages/chat-sdk/src/`, `packages/core/src/runtime/channel-store.ts` (`getChannelStream`) | `framework/chat-sdk.mdx` |
 | `30-agent-plugins.md` | `packages/agent-plugins/src/` | `framework/context-layers/agent-plugins.mdx` |
 | `31-acp-server.md` | `packages/acp/src/` (serve/`toAcpAgent`, `./server` entry, client-backed adapters), `packages/types/src/types/tool.ts` (`ToolAcpDeclaration`), `packages/types/src/types/steering.ts` (`BeforeToolCallParams.callId`) | `framework/acp-server.mdx` |
+| `32-decide.md` | `packages/types/src/types/decide.ts`, `builders/decide-builders`, `interpreter/execute-decide`, `harness/decide-call`, `packages/context/src/context/layers/decisions-history.ts` | `framework/steps/decide.mdx`, `framework/operators/route-switch.mdx`, `framework/context-layers/decisions-history.mdx` |
 
 **Paths are relative to**: Specs → `specs/`, Source → `packages/core/src/` (except rows that name a full `packages/...` path), Docs → `packages/web/content/docs/`
 

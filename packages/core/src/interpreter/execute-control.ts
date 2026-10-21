@@ -37,7 +37,7 @@ export async function executeConditional<TContext, I, O>(
   ctx: Context<TContext>,
   executeStep: ExecuteStepFn,
 ): Promise<O> {
-  const selected = await step.route(input, ctx);
+  const selected = await step.route(input, ctx, executeStep);
   if (selected === null) {
     // Requires I assignable to O for null route — when no route is selected,
     // the input passes through. Callers must ensure I is compatible with O.

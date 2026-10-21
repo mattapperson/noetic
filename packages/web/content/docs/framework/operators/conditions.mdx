@@ -166,23 +166,30 @@ const isTechSupport = embeddingMatch({
 
 ### `aiCondition`
 
-Uses an LLM as a boolean classifier. The model receives the input and answers a yes/no question with structured JSON output.
+Asks a model a yes/no question about the input. It is a one-question boolean [`decide`](/docs/framework/steps/decide): it calls `ctx.harness.decide` with the serialized input as its only state, and returns the answer's `value`.
 
 ```ts
 import { aiCondition } from '@noetic-tools/core';
 
 const isUrgent = aiCondition({
-  model: 'openai/gpt-4o-mini',
+  model: 'typesafe/jev-1.14',
   prompt: 'Is this message urgent and requiring immediate attention?',
+  threshold: 0.7,
 });
 ```
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
-| `model` | `string` | Yes | Model identifier |
-| `prompt` | `string` | Yes | Yes/no question to classify against |
+| `model` | `string` | Yes | Decision or chat model id |
+| `prompt` | `string` | Yes | The yes/no question |
+| `threshold` | `number` | No | Probability of yes at or above which the condition holds. Default `0.5` |
 
-The model is called with `temperature: 0` and a JSON response schema (`{ answer: boolean }`).
+It works with any model. A decision model such as `typesafe/jev-1.14` answers natively with a calibrated probability; a chat model such as `openai/gpt-4o-mini` answers with an estimated one. See [Model Paths](/docs/framework/steps/decide#model-paths).
+
+- A refusal counts as `false`.
+- A malformed response throws `NoeticError` `model_parse_error`. It does not quietly return `false`.
+- A provider failure throws `step_failed`, and an aborted context throws `cancelled`.
+- Usage and cost roll into `ctx.tokens` and `ctx.cost`.
 
 ## Combinators
 
@@ -266,5 +273,6 @@ Label vectors are cached under deterministic keys (`embed:<encoded-label>`). In-
 ## Related
 
 - [conditional](/docs/framework/operators/conditional) -- the control flow primitive that uses route functions.
+- [routeSwitch](/docs/framework/operators/route-switch) -- route by a multi-question decision, with confidence thresholds.
 - [inParallel](/docs/framework/operators/in-parallel) -- parallel execution.
 - [Adapters](/docs/framework/api/adapter-types) -- `EmbedFn` type and `LlmProviderConfig`.

@@ -13,7 +13,7 @@ import { frameworkCast, isNoeticConfigError, isServerToolSpec } from '@noetic-to
 import type { HydrationContext } from '../../src/builders/workflow-hydrator';
 import { hydrateNode, hydrateWorkflow } from '../../src/builders/workflow-hydrator';
 import type { WorkflowDocument, WorkflowNode } from '../../src/schemas/workflow';
-import { makeMockContext, makeTestTool } from '../_helpers';
+import { makeMockContext, makeTestTool, noRun } from '../_helpers';
 
 /**
  * Mock subprocess adapter for `run` node tests. Records every process request
@@ -270,7 +270,7 @@ describe('hydrateNode — conditional', () => {
     const ctx = makeHydrationContext();
     const result = hydrateNode(node, ctx);
     assert(result.kind === 'conditional');
-    const selected = await result.route('I approve this', makeMockContext());
+    const selected = await result.route('I approve this', makeMockContext(), noRun);
     expect(selected).not.toBeNull();
     expect(selected?.id).toBe('approved');
   });
@@ -298,7 +298,7 @@ describe('hydrateNode — conditional', () => {
     const ctx = makeHydrationContext();
     const result = hydrateNode(node, ctx);
     assert(result.kind === 'conditional');
-    const selected = await result.route('no match here', makeMockContext());
+    const selected = await result.route('no match here', makeMockContext(), noRun);
     expect(selected?.id).toBe('fallback');
   });
 });
@@ -1455,5 +1455,163 @@ describe('hydrateNode — run', () => {
         }),
       ),
     ).rejects.toThrow('subprocess exited non-zero');
+  });
+});
+
+describe('hydrateNode — decide and routeSwitch', () => {
+  const decideNode = {
+    kind: 'decide',
+    id: 'triage',
+    model: 'typesafe/jev-1.14',
+    questions: {
+      destination: {
+        type: 'choice',
+        instructions: 'Which team?',
+        choices: [
+          'billing',
+          'sales',
+        ],
+      },
+    },
+    view: 'none',
+  } satisfies WorkflowNode;
+
+  test('hydrates a decide node with its questions and defaults', () => {
+    const result = hydrateNode(decideNode, makeHydrationContext());
+    assert(result.kind === 'decide');
+    expect(result.view).toBe('none');
+    expect(result.samples).toBe(1);
+    expect(Object.keys(result.questions)).toEqual([
+      'destination',
+    ]);
+  });
+
+  test('hydrates a routeSwitch node whose route runs the decision and picks the case', async () => {
+    const node: WorkflowNode = {
+      kind: 'routeSwitch',
+      id: 'route',
+      decide: decideNode,
+      on: 'destination',
+      cases: {
+        billing: {
+          kind: 'callModel',
+          id: 'billing-step',
+          instructions: 'billing',
+        },
+        sales: {
+          kind: 'callModel',
+          id: 'sales-step',
+          instructions: 'sales',
+        },
+      },
+      uncertain: {
+        kind: 'callModel',
+        id: 'ask-human',
+        instructions: 'ask',
+      },
+    };
+    const result = hydrateNode(node, makeHydrationContext());
+    assert(result.kind === 'conditional');
+    const ran: string[] = [];
+    const selected = await result.route('refund', makeMockContext(), async (s) => {
+      ran.push(s.id);
+      return frameworkCast({
+        destination: {
+          type: 'choice',
+          value: 'sales',
+          confidence: 0.9,
+          probabilities: {
+            sales: 0.9,
+            billing: 0.1,
+          },
+        },
+      });
+    });
+    expect(ran).toEqual([
+      'triage',
+    ]);
+    expect(selected?.id).toBe('sales-step');
+  });
+});
+
+describe('hydrateNode — conditional and inParallel over decide answers', () => {
+  const answersJson = JSON.stringify({
+    destination: {
+      type: 'choice',
+      value: 'sales',
+      confidence: 0.9,
+      probabilities: {
+        billing: 0.1,
+        sales: 0.9,
+      },
+    },
+  });
+
+  test('a conditional matches the answer values, not the probability keys that name every choice', async () => {
+    const node: WorkflowNode = {
+      kind: 'conditional',
+      id: 'after-decide',
+      routes: [
+        {
+          match: 'billing',
+          target: {
+            kind: 'callModel',
+            id: 'billing-step',
+            instructions: 'billing',
+          },
+        },
+        {
+          match: 'sales',
+          target: {
+            kind: 'callModel',
+            id: 'sales-step',
+            instructions: 'sales',
+          },
+        },
+      ],
+    };
+    const result = hydrateNode(node, makeHydrationContext());
+    assert(result.kind === 'conditional');
+    const fromString = await result.route(answersJson, makeMockContext(), noRun);
+    expect(fromString?.id).toBe('sales-step');
+    const fromObject = await result.route(
+      frameworkCast(JSON.parse(answersJson)),
+      makeMockContext(),
+      noRun,
+    );
+    expect(fromObject?.id).toBe('sales-step');
+  });
+
+  test('an inParallel concat merge writes object results as JSON', async () => {
+    const node: WorkflowNode = {
+      kind: 'inParallel',
+      id: 'both',
+      mode: 'all',
+      merge: 'concat',
+      paths: [
+        {
+          kind: 'callModel',
+          id: 'a',
+          instructions: 'a',
+        },
+        {
+          kind: 'callModel',
+          id: 'b',
+          instructions: 'b',
+        },
+      ],
+    };
+    const result = hydrateNode(node, makeHydrationContext());
+    assert(result.kind === 'inParallel' && result.mode === 'all');
+    const merged = result.merge(
+      frameworkCast([
+        {
+          ok: true,
+        },
+        'text',
+      ]),
+      makeMockContext(),
+    );
+    expect(merged).toBe('{"ok":true}\ntext');
   });
 });

@@ -80,10 +80,209 @@ invokeTool<TContext = ContextData, I = unknown, O = unknown>({
 Conditional routing. The `route` function returns a step to execute or `null` to pass through.
 
 ```typescript
-conditional<I, O>({
+conditional<TContext, I, O>({
   id: string;
-  route: (input: I, ctx: Context) => Step<I, O> | null;
-}): StepConditional<I, O>
+  route: (
+    input: I,
+    ctx: Context<TContext>,
+    run: ExecuteStepFn,             // runs a step through the interpreter
+  ) => Step<TContext, I, O> | null | Promise<Step<TContext, I, O> | null>;
+}): StepConditional<TContext, I, O>
+
+type ExecuteStepFn = <TContext, I, O>(step: Step<TContext, I, O>, input: I, ctx: Context<TContext>) => Promise<O>;
+```
+
+Use `run` when the route must run a step to choose, such as a decision. `run` goes through the interpreter, so the step gets its own span and ledger entry. `run` keeps the step's output type, so `await run(triage, input, ctx)` returns typed answers.
+
+### decide
+
+Asks a model typed questions about the current context and returns typed answers with probabilities. Unlike `callModel`, it never appends to the item log, runs no steering hooks, and runs no layer `store()`. Use it to get a small value the program branches on. Spec: `specs/32-decide.md`.
+
+```typescript
+decide<const Q extends DecideQuestions, TContext = ContextData, I = unknown>({
+  id: string;
+  model?: Lazy<string, TContext>;               // falls back to harness `decisionModel`
+  instructions?: Lazy<string | undefined, TContext>; // framing shared by every question; GEPA candidate at `<path>.instructions`
+  questions: Q;                                 // keys are question ids; an empty map is a type error
+  view?: 'full' | 'layers' | 'none';            // default 'full'
+  context?: (ctx: Context<TContext>) => Record<string, unknown> | Promise<Record<string, unknown>>; // sent as one `context` entry
+  projection?: ProjectionPolicy;                // default DECISION_PROJECTION
+  samples?: number;                             // estimated path only; default 1
+  emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
+}): DecideStep<TContext, I, Q>                  // StepDecide<TContext, I, DecideAnswers<Q>> & { questions: Q }
+```
+
+Do not pass type arguments: `Q` is inferred from `questions`, and the answers keep their literal types. To type `ctx.context`, annotate the selector's parameter:
+
+```typescript
+type Billing = { billing: { plan: 'free' | 'pro' } };
+
+const refundCheck = decide({
+  id: 'refund-check',
+  view: 'none',
+  context: (ctx: Context<Billing>) => ({ plan: ctx.context.billing.plan }),
+  questions: {
+    eligible: { type: 'boolean', instructions: 'Does the customer qualify for a refund on their plan?' },
+  },
+});
+```
+
+**Questions:**
+
+```typescript
+interface BooleanQuestion {
+  type: 'boolean';
+  instructions?: string;
+  criteria?: { true?: string; false?: string }; // required when instructions is absent
+  threshold?: number;                           // P(yes) at or above which value is true; default 0.5
+}
+
+interface ChoiceQuestion<K extends string> {
+  type: 'choice';
+  instructions?: string;
+  choices: readonly K[] | Readonly<Record<K, string>>; // 1–255 options; record form adds descriptions
+}
+
+interface ScoreQuestion<L extends string> {
+  type: 'score';
+  instructions?: string;
+  levels: readonly L[] | ReadonlyArray<{ label: L; description?: string }>; // 2–10, lowest first
+}
+```
+
+Score levels are an array because a record cannot carry order: JavaScript sorts integer-like keys first.
+
+**Answers:** `DecideAnswers<Q>` maps each question id to its answer or a `Refusal`. Choice values and level labels keep their literal types.
+
+```typescript
+interface BooleanAnswer { type: 'boolean'; value: boolean; probability: number }  // value = probability >= threshold
+interface ChoiceAnswer<K> { type: 'choice'; value: K; confidence: number; probabilities: Record<K, number> }
+interface ScoreAnswer<L> {
+  type: 'score';
+  value: number;     // probability-weighted level index, 0 = lowest
+  level: L;          // most probable level (not `value` rounded)
+  confidence: number;
+  probabilities: Record<L, number>;
+}
+interface Refusal { type: 'refusal' }   // the model declined this one question
+```
+
+Check `answer.type === 'refusal'` before reading `value`. `confidence` is the provider's own certainty, not the top probability; on the estimated path it is the top probability.
+
+**What the model sees:**
+
+| Source | Controlled by |
+|--------|---------------|
+| Step input | always (strings verbatim, other values as JSON) |
+| Layer recall output | `view: 'full'` or `'layers'` |
+| Projected history | `view: 'full'` |
+| `context` selector | one JSON entry named `context` (its keys cannot clash with `input` or the view) |
+
+Recall runs with `{ peek: true }` (see [RecallOptions.peek](#recalloptionspeek)), so a decision never drains layer state meant for the next `callModel` call. After the call, layers hear about it through [`onDecision`](#ondecision).
+
+**Asking again.** Within one execution, the same decide step id with the same input and the same conversation length returns its earlier answers with no model call. Two nested `routeSwitch`es over one decision pay once and cannot disagree; a loop that asks again after new items land gets a fresh decision.
+
+**Model paths.** A decision model (one whose OpenRouter output modalities include `decisions`, such as `'typesafe/jev-1.14'`) answers in one pass with calibrated probabilities (`source: 'native'`). Any chat model also works: the harness asks for probabilities as structured output and averages `samples` runs (`source: 'estimated'`). Estimated probabilities are not calibrated; use them for routing thresholds only.
+
+- Native: only an explicit provider refusal becomes a `Refusal`; a missing or mistyped answer is `model_parse_error`. `probabilities` always has every outcome (`0` when missing). A one-sided boolean `criteria` joins the instructions (`Yes means: …`). A failed model lookup (other than 404) is not cached; that call goes estimated and the next one asks again.
+- Estimated: samples that fail or do not parse are dropped; the step fails only when none parse, and still counts what the samples spent.
+
+**Metadata.** `ctx.lastStepMeta` is merged, not replaced: it gains `usage`, `cost`, and `decision` (`{ modelId, source: 'native' | 'estimated', refused: string[] }`) and keeps the previous step's `toolCalls`, so `until.noToolCalls()` still works after a decision. Tokens and cost roll into `ctx.tokens` / `ctx.cost`. Each call opens a `decide.call` span.
+
+**Errors:**
+
+| Condition | Error |
+|-----------|-------|
+| Empty `id` | `NoeticConfigError` `EMPTY_STEP_ID` (build time) |
+| Empty eager `model`, or no model on step or harness | `NoeticConfigError` `MISSING_MODEL` |
+| Empty question map, boolean with neither `instructions` nor `criteria`, choice count outside 1–255, level count outside 2–10, duplicate choices or levels, `threshold` outside `[0, 1]` | `NoeticConfigError` `INVALID_DECIDE_QUESTIONS` (build time) |
+| `samples` not a positive integer | `NoeticConfigError` `INVALID_DECIDE_SAMPLES` (build time) |
+| Malformed or incomplete response | `model_parse_error` |
+| Provider rate limit | `model_rate_limit` |
+| Provider rejects the request (e.g. images on a text-only model) | `step_failed` |
+| Context aborted mid-call | `cancelled` |
+
+A refusal is an answer, not an error.
+
+### routeSwitch
+
+Runs a decide step and routes the **original input** (not the answers) to one of several steps. Builds a `StepConditional`; it is not a new step kind. The decide step runs through the conditional's `run` argument, so it gets its own span, ledger entry, and `onDecision` call.
+
+```typescript
+// Key form: route by one question. `cases` has exactly one step per outcome; `uncertain` is required.
+routeSwitch({
+  id: string;
+  decide: DecideStep<TContext, unknown, Q>; // the value decide() returns
+  on: K;                                // question id (keyof Q)
+  cases: Cases;                         // keys: exactly CaseKeyOf<Q[K]>
+  minConfidence?: number;               // [0, 1]
+  uncertain: U;                         // on refusal, or confidence below minConfidence
+}): StepConditional<TContext, StepInput<Cases[keyof Cases] | U>, StepOutput<Cases[keyof Cases] | U>>
+
+// Function form: combine answers. `default` is required.
+routeSwitch({
+  id: string;
+  decide: DecideStep<TContext, unknown, Q>;
+  on: (answers: AnsweredAll<Q>) => C;   // answers with refusals removed
+  cases: Cases;                         // keys: a subset of C
+  default: D;                           // taken when `on` returns a key with no case
+  uncertain?: U;                        // on any refusal; falls back to `default`
+}): StepConditional<TContext, StepInput<Cases[keyof Cases] | D | U>, StepOutput<Cases[keyof Cases] | D | U>>
+```
+
+`CaseKeyOf` is the choice values for a choice question, `'true' | 'false'` for a boolean, and the level labels for a score (routed by `level`). A missing case, a misspelled extra case, or an `on` that names no question is a type error. The output type is the union of every case's output (plus `uncertain` / `default`), so cases may return different types. `StepInput<S>` / `StepOutput<S>` are exported from `@noetic-tools/core`.
+
+Key-form confidence is the provider's `confidence` for choice and score answers. For booleans it is the probability of the side `value` picked (`probability` for yes, `1 − probability` for no), which respects the question's `threshold`. Every key-form outcome runs a typed step; the switch never passes its input through.
+
+`routeSwitch` sets an internal `_rebuild` on the conditional, so GEPA can swap the decide step or a case and the swap is what runs.
+
+```typescript
+const escalate = routeSwitch({
+  id: 'escalate',
+  decide: triage,
+  on: (a) => (a.isUrgent.value && a.urgency.value >= 1.5 ? 'page' : 'queue'),
+  cases: { page: pageOnCall, queue: routeTicket },
+  default: routeTicket,
+});
+```
+
+Each route adds a `route_switch` event to `ctx.span` with `stepId` and `case` (the case taken, `uncertain`, or `default`).
+
+**Build-time errors** (`NoeticConfigError`):
+
+| Code | Condition |
+|------|-----------|
+| `EMPTY_STEP_ID` | empty `id` |
+| `UNKNOWN_ROUTE_QUESTION` | key form: `on` names no question of `decide` |
+| `INCOMPLETE_ROUTE_CASES` | key form: an outcome of `on` has no case |
+| `INVALID_MIN_CONFIDENCE` | `minConfidence` outside `[0, 1]` |
+| `MISSING_UNCERTAIN_STEP` | key form: no `uncertain` |
+
+### aiCondition
+
+A `Condition` that asks a model one yes/no question about the input. It is a one-question boolean decide: it calls `ctx.harness.decide` with the serialized input as its only state. Works with decision models natively and with chat models through estimated probabilities.
+
+```typescript
+aiCondition<I>({
+  model: string;        // decision or chat model id
+  prompt: string;       // the yes/no question
+  threshold?: number;   // P(yes) at or above which the condition holds; default 0.5
+}): Condition<I>        // (input: I, ctx: Context) => Promise<boolean>
+```
+
+A refusal counts as `false`. A malformed response throws `NoeticError` `model_parse_error` (with `stepId: 'aiCondition'`), a provider failure throws `step_failed` (same `stepId`), and an abort throws `cancelled`. Tokens and cost roll into the context.
+
+```typescript
+const wantsRefund = aiCondition<string>({
+  model: 'typesafe/jev-1.14',
+  prompt: 'Does the customer ask for a refund?',
+  threshold: 0.7,
+});
+
+conditional({
+  id: 'refund-gate',
+  route: async (input: string, ctx) => ((await wantsRefund(input, ctx)) ? refundFlow : null),
+});
 ```
 
 ### inParallel
@@ -588,6 +787,12 @@ interface StepCallModel {
   Both layer bands arrive slot-ascending. The budget is claimed in this order: system items (never dropped), anchor output, live output, the tail, then the supersedes — with history taking whatever is left and keeping the most recent turns. Within a layer band each non-fitting item is dropped **individually** (later-slot items that still fit are kept); history is trimmed as a contiguous recent window and orphan tool calls are stripped at the boundary. Supersedes are never dropped — each corrects a pinned block already in the view, so dropping one would leave the model reading content known to be stale. History absorbs the cost instead.
 - `forceAtomicRecall: true` makes every layer atomic regardless of `recallMode`.
 
+`decide` uses its own default, `DECISION_PROJECTION`, because decision models do worse on long state (Jev slows down and loses accuracy above about 32 KB of text). Set `projection` on the decide step to override it.
+
+```typescript
+const DECISION_PROJECTION = { tokenBudget: 8_000, responseReserve: 0, overflow: 'truncate' };
+```
+
 ### Prompt-cache anchoring (`placement`)
 
 A prompt cache matches on a prefix, so the first changed token invalidates everything after it. Putting volatile layer output ahead of a large stable history re-bills the whole window every turn. The bands fix that: stable output sits in the **anchor** band ahead of history where the cache can hold it, volatile output sits in the **live** band after history where re-rendering costs almost nothing.
@@ -771,6 +976,50 @@ Caps the trailing items projected to the LLM each turn. Storage (`itemLog`, sess
 ```typescript
 history({ maxItems?: number })  // default 40
 ```
+
+### decisionsHistoryLayer
+
+Records every `decide` step's answers through the [`onDecision`](#ondecision) hook. Later steps read them from `ctx.context`, and later `callModel` steps see a summary in their view.
+
+```typescript
+decisionsHistoryLayer<const Id extends string = 'decisionsHistory'>({
+  id?: Id;               // layer id and ctx.context key; default 'decisionsHistory'
+  scope?: ContextScope;  // default 'execution'; 'thread'/'resource' persist across runs
+  maxRecords?: number;   // default 50; oldest dropped first
+  recall?: boolean;      // render a summary into the view; default true
+  slot?: number;         // default Slot.WORKING_MEMORY + 10
+}?): DecisionsHistoryLayer<Id>   // keeps the literal id; state: { records: DecisionRecord[] }
+
+interface DecisionRecord {
+  stepId: string;
+  at: number;            // epoch ms
+  modelId: string;
+  source: 'native' | 'estimated';
+  answers: Readonly<Record<string, DecideAnswer>>;
+}
+```
+
+**`provides`** (both data, so the layer adds no LLM tools):
+
+| Key | Value |
+|-----|-------|
+| `latest` | `Readonly<Record<string, DecisionRecord>>` — newest record per step id |
+| `all` | `ReadonlyArray<DecisionRecord>` — oldest first |
+
+```typescript
+const layers = context([decisionsHistoryLayer()]);   // the literal id survives inline
+type Ctx = InferContext<typeof layers>;
+// in a step: ctx.context.decisionsHistory.latest.triage
+```
+
+Recall renders one line per step id, newest record only:
+
+```
+Decisions so far:
+- triage: team=billing (0.81), isUrgent=yes (0.92), urgency=medium (1.3)
+```
+
+`init` loads saved state from storage, so `'thread'` / `'resource'` history carries across runs, and a resumed execution keeps its restored records. `onSpawn` gives each `inParallel` path or `spawn` child the parent's records; `onReturn` merges back only the records the child added, so concurrent paths keep each other's decisions.
 
 ### CLI enhanced-prompt layers (external)
 
@@ -1428,6 +1677,47 @@ const harness = new AgentHarness({
 });
 ```
 
+### Decisions (`harness.decide`)
+
+`AgentHarnessOpts.decisionModel?: string` sets the default model for `decide` steps that omit `model`. It is readable as `ctx.harness.config.decisionModel`.
+
+```typescript
+const harness = new AgentHarness({
+  name: 'support',
+  params: {},
+  decisionModel: 'typesafe/jev-1.14',
+});
+```
+
+`harness.decide(request)` is the call `decide` and `aiCondition` make. Call it directly only when you need a decision outside a step; inside a step tree, prefer `decide`, which adds the view, spans, metadata, and `onDecision`.
+
+```typescript
+harness.decide(request: DecideRequest): Promise<DecideResponse>
+
+interface DecideRequest {
+  model: string;
+  instructions?: string;
+  state: ReadonlyArray<
+    | { type: 'text'; text: string; name?: string }
+    | { type: 'json'; name: string; value: unknown }
+    | { type: 'image'; imageUrl: string }
+  >;
+  questions: DecideQuestions;
+  samples?: number;          // estimated path only; default 1
+  signal?: AbortSignal;
+}
+
+interface DecideResponse {
+  answers: Readonly<Record<string, DecideAnswer>>;
+  source: 'native' | 'estimated';
+  modelId: string;           // model that answered
+  usage: { inputTokens: number; outputTokens: number };
+  cost?: number;
+}
+```
+
+For decision models the OpenRouter adapter calls the native decisions API; for any other model it makes one structured-output `callModel` per sample. Samples that fail or do not parse are dropped; when none parse it throws `DecideOutputError` (from `@noetic-tools/types`), which carries the samples' `usage` and `cost`. `decide` counts that spend and turns it into `model_parse_error`; `aiCondition` turns it into `model_parse_error` too.
+
 ### Session Accessors
 
 | Method | Description |
@@ -2014,6 +2304,38 @@ const keywordWatcher = {
 ### renderDelta
 
 Called for an anchored layer whose pinned output has gone stale, to describe the change compactly instead of re-sending the block. Signature, fallback behaviour, and when it earns its keep: [Prompt-cache anchoring](#prompt-cache-anchoring-placement).
+
+### onDecision
+
+Called after every `decide` step completes, in slot order. Return new state to record the decision; return `undefined` to leave state alone. A `decide` step never runs `store()`, so this is the only way a layer learns about decisions. `decisionsHistoryLayer` is the built-in implementation.
+
+```typescript
+interface ContextLayerHooks<TState> {
+  // ...
+  onDecision?(params: OnDecisionParams<TState>): Promise<{ state: TState } | undefined>;
+}
+
+interface OnDecisionParams<TState> {
+  state: TState;
+  record: DecisionRecord;   // stepId, at, modelId, source, answers
+  ctx: ExecutionContext;
+}
+```
+
+The harness runs these hooks through `harness.notifyDecision(layers, record, ctx)`.
+
+### RecallOptions.peek
+
+```typescript
+interface RecallOptions {
+  peek?: boolean;
+}
+
+harness.recallLayersAtomic(layers, query, ctx, budgets, { peek: true });
+harness.recallLayersEventual(layers, query, ctx, budgets, { peek: true });
+```
+
+A peek renders without leaving a trace: each `recall()` gets a deep copy (`structuredClone`) of its state, state it returns is not committed, and eventual-layer output is not cached. A layer whose state cannot be copied (it holds functions) is skipped. `decide` always peeks. Without it, a decision would drain state meant for the next model call, such as the steering layer's queued guidance.
 
 ## Per-Layer Context Usage (`ctx.lastLayerUsage`)
 

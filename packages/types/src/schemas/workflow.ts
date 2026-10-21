@@ -10,6 +10,9 @@
  */
 
 import { z } from 'zod';
+import type { DecideQuestion } from '../types/decide';
+import { DecideQuestionsSchema, routeOutcomes } from '../types/decide';
+import type { DecideView } from '../types/step';
 
 //#region Until Predicate Types
 
@@ -367,6 +370,29 @@ export interface ConditionalWorkflowNode extends WorkflowNodeBase {
   default?: WorkflowNode;
 }
 
+/** A node that asks typed questions of a decision model. See spec 32. */
+export interface DecideWorkflowNode extends WorkflowNodeBase {
+  kind: 'decide';
+  model?: string;
+  instructions?: string;
+  questions: Record<string, DecideQuestion>;
+  view?: DecideView;
+  samples?: number;
+}
+
+/** A node that routes to a case by one question of a decision. See spec 32. */
+export interface RouteSwitchWorkflowNode extends WorkflowNodeBase {
+  kind: 'routeSwitch';
+  decide: DecideWorkflowNode;
+  /** Question id to route by. */
+  on: string;
+  /** One case per outcome of the `on` question. */
+  cases: Record<string, WorkflowNode>;
+  minConfidence?: number;
+  /** Taken on refusal, or when confidence is below `minConfidence`. */
+  uncertain: WorkflowNode;
+}
+
 export interface InParallelWorkflowNode extends WorkflowNodeBase {
   kind: 'inParallel';
   mode: 'race' | 'all' | 'settle';
@@ -472,6 +498,8 @@ export type WorkflowNode =
   | InvokeToolWorkflowNode
   | RunCodeWorkflowNode
   | ConditionalWorkflowNode
+  | DecideWorkflowNode
+  | RouteSwitchWorkflowNode
   | InParallelWorkflowNode
   | SpawnWorkflowNode
   | WithContextWorkflowNode
@@ -532,6 +560,58 @@ const ConditionalNodeSchema = z.object({
   routes: z.array(ConditionalRouteSchema).min(1),
   default: WorkflowNodeRef.optional(),
 });
+
+const DecideNodeSchema = z.object({
+  kind: z.literal('decide'),
+  ...SHARED_FIELDS,
+  model: z.string().min(1).optional(),
+  instructions: z.string().min(1).optional(),
+  questions: DecideQuestionsSchema,
+  view: z
+    .enum([
+      'full',
+      'layers',
+      'none',
+    ])
+    .optional(),
+  samples: z.number().int().positive().optional(),
+});
+
+const RouteSwitchNodeSchema = z
+  .object({
+    kind: z.literal('routeSwitch'),
+    ...SHARED_FIELDS,
+    decide: DecideNodeSchema,
+    on: z.string().min(1),
+    cases: z.record(z.string().min(1), WorkflowNodeRef),
+    minConfidence: z.number().min(0).max(1).optional(),
+    uncertain: WorkflowNodeRef,
+  })
+  .superRefine((node, issue) => {
+    const question = Object.hasOwn(node.decide.questions, node.on)
+      ? node.decide.questions[node.on]
+      : undefined;
+    if (!question) {
+      issue.addIssue({
+        code: 'custom',
+        path: [
+          'on',
+        ],
+        message: `routeSwitch 'on' names no question of its decide node: '${node.on}'.`,
+      });
+      return;
+    }
+    const missing = routeOutcomes(question).filter((o) => !Object.hasOwn(node.cases, o));
+    if (missing.length > 0) {
+      issue.addIssue({
+        code: 'custom',
+        path: [
+          'cases',
+        ],
+        message: `routeSwitch cases miss outcomes of '${node.on}': ${missing.join(', ')}.`,
+      });
+    }
+  });
 
 const InParallelNodeSchema = z
   .object({
@@ -629,6 +709,8 @@ export const WorkflowNodeSchema: z.ZodType<WorkflowNode> = z
     InvokeToolNodeSchema,
     RunCodeNodeSchema,
     ConditionalNodeSchema,
+    DecideNodeSchema,
+    RouteSwitchNodeSchema,
     InParallelNodeSchema,
     SpawnNodeSchema,
     WithContextNodeSchema,
@@ -701,6 +783,12 @@ function childNodes(node: WorkflowNode): WorkflowNode[] {
       }
       return children;
     }
+    case 'routeSwitch':
+      return [
+        node.decide,
+        ...Object.values(node.cases),
+        node.uncertain,
+      ];
     case 'subflow':
       // A named ref is a static leaf: the target document is only known at
       // hydration time, so walk/graph/depth cannot see through it.

@@ -16,6 +16,8 @@ const NODE_KINDS = [
   'invokeTool',
   'runCode',
   'conditional',
+  'decide',
+  'routeSwitch',
   'inParallel',
   'spawn',
   'withContext',

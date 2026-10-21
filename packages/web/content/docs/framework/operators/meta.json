@@ -1,4 +1,4 @@
 {
   "title": "Operators",
-  "pages": ["conditional", "in-parallel", "conditions", "spawn", "with-context", "loop-and-until", "channels"]
+  "pages": ["conditional", "route-switch", "in-parallel", "conditions", "spawn", "with-context", "loop-and-until", "channels"]
 }

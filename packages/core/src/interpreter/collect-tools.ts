@@ -50,6 +50,8 @@ function walkStep(step: Step, out: Tool[]): void {
 
     case 'runCode':
     case 'invokeTool':
+    // Decide steps ask questions; they never call tools.
+    case 'decide':
     // An ACP agent runs its own tools inside the external agent process; it
     // contributes nothing to the host unified tool set.
     case 'acp-agent':

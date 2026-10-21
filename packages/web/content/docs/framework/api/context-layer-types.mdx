@@ -106,6 +106,7 @@ interface ContextLayerHooks<TState = unknown> {
   onItemAppend?: (params: OnItemAppendParams<TState>) => Promise<OnItemAppendResult<TState>>;
   projectHistory?: (params: ProjectHistoryParams<TState>) => Promise<ProjectHistoryResult>;
   renderDelta?: (params: RenderDeltaParams<TState>) => Promise<string | null>;
+  onDecision?: (params: OnDecisionParams<TState>) => Promise<undefined | { state: TState }>;
 }
 ```
 
@@ -114,6 +115,7 @@ interface ContextLayerHooks<TState = unknown> {
 - **`onItemAppend`** runs when input items (user messages, tool outputs) are about to be appended — layers compose in slot order, each receiving the previous layer's output. It can transform, drop, or inject items, and may request a context re-render. Not called for LLM response items (use `store`).
 - **`projectHistory`** projects (caps, transforms) the history portion of the context window once per callModel step. Read-side only — `itemLog` storage is never mutated.
 - **`renderDelta`** is called for an anchored layer whose pinned output has gone stale, to describe the change compactly instead of re-sending the whole block. Return `null` to fall back to the default, which republishes the full new content. Never called for layers in the `'live'` band.
+- **`onDecision`** is called after every [`decide`](/docs/framework/steps/decide) step completes, in slot order, one layer at a time. Return `{ state }` to record the decision. A decide step runs no `store`, so this is how a layer learns about decisions. A hook that throws or times out is logged as a diagnostic and does not fail the step. A decision replayed from the step ledger on resume does not call it again.
 
 ## Hook Parameter Types
 
@@ -148,6 +150,20 @@ interface ContextLayerHooks<TState = unknown> {
 | `items` | `Item[]` | Items to inject into the prompt |
 | `tokenCount` | `number` | Tokens consumed by the items |
 | `state` | `TState` | Updated state (optional) |
+
+### RecallOptions
+
+Options a caller passes to the harness's `recallLayersAtomic` / `recallLayersEventual`. The layer's `recall` hook does not receive them.
+
+```ts validate=none
+interface RecallOptions {
+  peek?: boolean;
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `peek` | `boolean` | Render without leaving a trace: each `recall` gets a deep copy of its state, state it returns is not kept, and eventual-layer output is not cached. A layer whose state cannot be copied (it holds functions) is skipped. A `decide` step peeks so it never drains state (such as queued steering guidance) meant for the next model call |
 
 ### RenderDeltaParams
 
@@ -224,6 +240,30 @@ Return the text to publish, or `null` to let the runtime republish the full new 
 |---|---|---|
 | `state` | `TState` | Final layer state |
 
+### OnDecisionParams
+
+| Field | Type | Description |
+|---|---|---|
+| `state` | `TState` | Current layer state |
+| `record` | `DecisionRecord` | The completed decision |
+| `ctx` | `ExecutionContext` | Execution context |
+
+### DecisionRecord
+
+```ts validate=none
+interface DecisionRecord {
+  stepId: string;
+  at: number;                     // epoch ms
+  modelId: string;
+  source: 'native' | 'estimated';
+  answers: Readonly<Record<string, DecideAnswer>>;
+}
+```
+
+### DecisionsHistoryLayer
+
+`DecisionsHistoryLayer<Id>` is what [`decisionsHistoryLayer()`](/docs/framework/context-layers/decisions-history) returns: a layer whose `id` is the literal `Id` (default `'decisionsHistory'`), with state `DecisionsHistoryState` (`{ records: DecisionRecord[] }`) and `provides` entries `latest` and `all`. The literal id is what types `ctx.context.decisionsHistory`.
+
 ## ExecutionOutcome
 
 ```ts validate=none
@@ -272,6 +312,7 @@ interface ExecutionContext {
 | `afterModelCall` | `number` | Timeout for afterModelCall steering hook (ms, optional) |
 | `onItemAppend` | `number` | Timeout for onItemAppend hook (ms, optional) |
 | `projectHistory` | `number` | Timeout for projectHistory hook (ms, optional) |
+| `onDecision` | `number` | Timeout for onDecision hook (ms, optional, default 5000) |
 
 `renderDelta` has no entry of its own — it borrows the `recall` timeout, defaulting to 5s.
 

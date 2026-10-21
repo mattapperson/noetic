@@ -81,7 +81,7 @@ Point your editor or validator at the bundled file (resolve it from the package,
 
 ## Node Kinds
 
-Eleven node kinds are available, plus the `acp-agent` kind documented in [ACP Agent Steps](/docs/framework/acp-agents). Leaf nodes (`callModel`, `invokeTool`, `runCode`) perform work; structural nodes (`sequence`, `inParallel`, `conditional`, `loop`, `spawn`, `withContext`, `schedule`, `subflow`) compose them into trees.
+Thirteen node kinds are available, plus the `acp-agent` kind documented in [ACP Agent Steps](/docs/framework/acp-agents). Leaf nodes (`callModel`, `invokeTool`, `runCode`, `decide`) perform work; structural nodes (`sequence`, `inParallel`, `conditional`, `routeSwitch`, `loop`, `spawn`, `withContext`, `schedule`, `subflow`) compose them into trees.
 
 ### callModel
 
@@ -209,7 +209,7 @@ Dynamic fan-out — one child per array item (data-dependent N):
 | `paths` | `WorkflowNode[]` | — | Static child nodes to execute concurrently. Mutually exclusive with `each`. |
 | `each` | `WorkflowNode` | — | Dynamic body template instantiated once per input array item. Each item is injected as that child's input; template node ids are suffixed `-<i>` for uniqueness. Mutually exclusive with `paths`. |
 | `over` | `string` | `undefined` | With `each`: selector key into the input JSON object locating the array. When omitted, the input string is parsed as a JSON array directly. |
-| `merge` | `'last' \| 'first' \| 'concat'` | `'last'` | How to combine results. Ignored in `race` mode. |
+| `merge` | `'last' \| 'first' \| 'concat'` | `'last'` | How to combine results. `concat` writes object results (such as a `decide` node's answers) as JSON. Ignored in `race` mode. |
 | `concurrency` | `number` | `undefined` | Maximum concurrent paths. |
 
 ### conditional
@@ -233,6 +233,78 @@ Route input to one of several targets based on substring matching.
 | `id` | `string` | required | Unique step identifier. |
 | `routes` | `{ match: string, target: WorkflowNode }[]` | required | Ordered matching rules. First match wins (case-insensitive substring). |
 | `default` | `WorkflowNode` | `undefined` | Fallback node when no route matches. |
+
+When the input is an object, or a string holding a JSON object or array (such as a `decide` node's answers passed on by a `sequence`), routes match against its string values only, not its keys. For answers, those are each answer's `type` (so `"refusal"` matches a refusal), a choice's `value`, and a score's `level`. A `decide` node's answers name every choice in their keys and probability maps, so matching the raw JSON would hit every route. Boolean answers have no string value to match; route on those with `routeSwitch`.
+
+### decide
+
+Ask a model typed questions about the context. Hydrates into [`decide`](/docs/framework/steps/decide). Questions are plain JSON, in the same shape as the programmatic API.
+
+```json
+{
+  "kind": "decide",
+  "id": "triage",
+  "model": "typesafe/jev-1.14",
+  "instructions": "Support ticket triage.",
+  "questions": {
+    "destination": {
+      "type": "choice",
+      "instructions": "Which team should handle this ticket?",
+      "choices": { "billing": "Refunds, invoices", "support": "Bugs, outages" }
+    },
+    "isUrgent": { "type": "boolean", "instructions": "Is the customer reporting downtime?" }
+  },
+  "view": "full"
+}
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `id` | `string` | required | Unique step identifier. |
+| `model` | `string` | harness `decisionModel` | Decision or chat model id. |
+| `instructions` | `string` | `undefined` | Shared framing for every question. |
+| `questions` | `Record<string, DecideQuestion>` | required | `boolean`, `choice`, and `score` questions keyed by id. Validated by the same rules as `decide()`. |
+| `view` | `'full' \| 'layers' \| 'none'` | `'full'` | How much of the assembled view the model sees. |
+| `samples` | `number` | `1` | Positive integer. Runs to average on the estimated path. |
+
+A `decide` node outputs the answers object. Inside a `sequence`, the next node receives it as JSON, so a `callModel` node can read it. A `conditional` matches against the answers' string values, and a `inParallel` with `merge: "concat"` writes them as JSON. The `context` selector is a closure and has no JSON form.
+
+### routeSwitch
+
+Run a `decide` node and route the original input to the case its answer picks. Hydrates into the key form of [`routeSwitch`](/docs/framework/operators/route-switch).
+
+```json
+{
+  "kind": "routeSwitch",
+  "id": "route-ticket",
+  "decide": {
+    "kind": "decide",
+    "id": "triage",
+    "model": "typesafe/jev-1.14",
+    "questions": {
+      "destination": { "type": "choice", "choices": ["billing", "support"] }
+    }
+  },
+  "on": "destination",
+  "cases": {
+    "billing": { "kind": "callModel", "id": "billing", "instructions": "Resolve the billing question" },
+    "support": { "kind": "callModel", "id": "support", "instructions": "Debug the reported problem" }
+  },
+  "minConfidence": 0.6,
+  "uncertain": { "kind": "callModel", "id": "ask-human", "instructions": "Ask a human to triage this ticket" }
+}
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `id` | `string` | required | Unique step identifier. |
+| `decide` | `DecideWorkflowNode` | required | The decision to route by. |
+| `on` | `string` | required | Id of the question to route by. |
+| `cases` | `Record<string, WorkflowNode>` | required | One node per outcome of `on`: each choice, `"true"` and `"false"` for a boolean, or each level label for a score. |
+| `minConfidence` | `number` | `undefined` | In `[0, 1]`. Below this confidence, take `uncertain`. |
+| `uncertain` | `WorkflowNode` | required | Taken on refusal or low confidence. |
+
+Schema validation checks that `on` names a question of the `decide` node, that `cases` covers every outcome of that question, and that `uncertain` is present. Only the key form has a JSON node; the function form of `on` is a closure.
 
 ### loop
 
@@ -550,7 +622,7 @@ Throws `NoeticConfigError` with code `UNKNOWN_NODE_KIND` if a node kind is unrec
 - **`runCode` nodes need a subprocess adapter** -- the JSON `runCode` node carries its body as a code string and dispatches it through a subprocess adapter (it is never `eval`'d in-process). A host that uses `runCode` nodes must supply an adapter capable of running the code and capturing its stdout.
 - **Tools resolved by name** -- every tool referenced in the workflow must be passed in the `tools` array. The hydrator looks them up by `tool.name`.
 - **Subflow refs resolve at execution time** -- a `subflow` node's `ref` is looked up on first execution, not during hydration, so an unregistered name surfaces as `UNKNOWN_WORKFLOW_REFERENCE` when the node runs. Depth limits do not see through refs; cycle detection prevents infinite recursion, but acyclic ref fan-out is not bounded — hosts should cap registry size and breadth for untrusted documents.
-- **Conditional routing is substring-based** -- `conditional` node routes use case-insensitive substring matching on the input string. Complex routing logic requires programmatic `conditional()` steps.
+- **Conditional routing is substring-based** -- `conditional` node routes use case-insensitive substring matching on the input string (or on an object input's string values). Complex routing logic requires programmatic `conditional()` steps.
 
 ## Plans as Workflows
 

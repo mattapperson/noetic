@@ -16,6 +16,7 @@ declare interface HarnessApi<TParams extends Record<string, unknown> = Record<st
   readonly rootCwdState: { cwd: string; previousCwd?: string };
 
   callModel(request: CallModelRequest): Promise<LLMResponse>;
+  decide(request: DecideRequest): Promise<DecideResponse>;
   execute(input: ExecuteInput, options?: ExecuteOptions): Promise<void>;
   getAgentResponse(scope?: SessionScope): Promise<HarnessResponse>;
   getItemStream(scope?: SessionScope): AsyncIterable<StreamingItem>;
@@ -58,12 +59,14 @@ declare interface HarnessApi<TParams extends Record<string, unknown> = Record<st
     input: string,
     ctx: Context,
     budgets: Map<string, number>,
+    opts?: RecallOptions,
   ): Promise<RecallLayerOutput[]>;
   recallLayersEventual(
     layers: ContextLayer[],
     input: string,
     ctx: Context,
     budgets: Map<string, number>,
+    opts?: RecallOptions,
   ): Promise<RecallLayerOutput[]>;
   projectHistory(
     layers: ContextLayer[],
@@ -95,6 +98,7 @@ declare interface HarnessApi<TParams extends Record<string, unknown> = Record<st
     ctx: Context,
   ): Promise<unknown>;
   afterModelCall(layers: ContextLayer[], response: LLMResponse, ctx: Context): Promise<unknown>;
+  notifyDecision(layers: ContextLayer[], record: DecisionRecord, ctx: Context): Promise<void>;
 
   checkpoint(ctx: Context): Promise<void>;
   restore(executionId: string): Promise<Context | null>;
@@ -120,6 +124,7 @@ declare interface RerenderRequest {
 | `subprocess` | The `SubprocessAdapter` used by `runCode.subprocess` requests and detached spawns. Defaults to an in-memory adapter. |
 | `rootCwdState` | Long-lived shared cwd state, seeded into every root context the harness creates so successive runs and the TUI observe each other's `cd`s. |
 | `callModel(request)` | Issue a single LLM call, bypassing the session/queue runner. Used by plugins that need one-shot generation. |
+| `decide(request)` | Answer a [`DecideRequest`](#deciderequest). Decision models answer natively; any other model answers through a structured-output call that estimates the probabilities. Used by `decide` steps and `aiCondition`. See [Model Paths](/docs/framework/steps/decide#model-paths). |
 | `execute(input, options?)` | Enqueue a message on the session identified by `options.threadId`. Resolves once the message is accepted into the queue — not when the model responds. |
 | `getAgentResponse(scope?)` | Resolves with the accumulated response once the session drains. |
 | `getItemStream(scope?)` | Yields cumulative Item snapshots across every turn in the session. |
@@ -141,8 +146,8 @@ declare interface RerenderRequest {
 | `getChannelStream(channel, executionId)` | Subscribe to an external channel from outside the execution; ends when the root execution completes. |
 | `initLayers(layers, ctx, storage)` | Initialize context layers. |
 | `recallLayers(layers, input, ctx)` | Run recall on all layers. |
-| `recallLayersAtomic(layers, input, ctx, budgets)` | Run recall on the atomic-mode layers only, blocking until each completes within its budget. |
-| `recallLayersEventual(layers, input, ctx, budgets)` | Serve recall for eventual-mode layers from cache without blocking; the cache refreshes after `store()`. |
+| `recallLayersAtomic(layers, input, ctx, budgets, opts?)` | Run recall on the atomic-mode layers only, blocking until each completes within its budget. Pass `{ peek: true }` to render without keeping returned state (see [`RecallOptions`](/docs/framework/api/context-layer-types#recalloptions)). |
+| `recallLayersEventual(layers, input, ctx, budgets, opts?)` | Serve recall for eventual-mode layers from cache without blocking; the cache refreshes after `store()`. A peek renders a cold or stale layer without updating the cache. |
 | `projectHistory(layers, items, ctx)` | Run each layer's `projectHistory` hook in slot order to project (cap, transform) the history portion of the context window. Read-side only. |
 | `runAppendPipeline(layers, items, ctx)` | Run input items through each layer's `onItemAppend` hook in slot order, returning the transformed items plus any re-render requests. |
 | `executeRerender(requests, layers, ctx, budgets, query?)` | Re-run recall for the layers selected by the given re-render requests and return their fresh outputs. |
@@ -153,6 +158,7 @@ declare interface RerenderRequest {
 | `setLayerState(executionId, layerId, state)` | Overwrite a layer's state for a given execution. |
 | `beforeToolCall(layers, toolName, toolArgs, ctx)` | Invoke each layer's `beforeToolCall` steering hook and aggregate the decision. |
 | `afterModelCall(layers, response, ctx)` | Invoke each layer's `afterModelCall` steering hook. |
+| `notifyDecision(layers, record, ctx)` | Run every layer's `onDecision` hook in slot order, one at a time. Called by `decide` steps after they validate their answers. |
 | `checkpoint(ctx)` | Persist current execution state. |
 | `restore(executionId)` | Restore a previously checkpointed context. |
 | `cancel(ctx, reason?)` | Cancel an execution: abort `ctx` and every live descendant context, then run layer teardown (`onComplete` with `outcome: 'aborted'`, then `dispose`) bottom-up. No-op if already cancelled. |
@@ -250,6 +256,7 @@ declare interface AgentConfigShape<
   projection?: ProjectionPolicy;
   forceAtomicRecall?: boolean;
   contextCache?: unknown;
+  decisionModel?: string;
 }
 ```
 
@@ -263,6 +270,58 @@ declare interface AgentConfigShape<
 | `projection` | `ProjectionPolicy` | no | Default projection policy for all callModel steps. Individual steps override it via `step.projection`. |
 | `forceAtomicRecall` | `boolean` | no | Recall every layer atomically regardless of its `recallMode`, disabling cached/eventual recall. |
 | `contextCache` | [`ContextCacheConfig`](/docs/framework/api/context-layer-types#contextcacheconfig) | no | Tuning for prompt-cache anchoring. On by default; pass `{ enabled: false }` to render every layer before history as it did before bands existed. |
+| `decisionModel` | `string` | no | Default model for `decide` steps that set no `model` of their own, e.g. `'typesafe/jev-1.14'`. |
+
+## DecideRequest
+
+What `harness.decide()` takes. It uses Noetic's vocabulary; the adapter translates it to each provider's wire format.
+
+```ts validate=none
+interface DecideRequest {
+  model: string;
+  instructions?: string;
+  state: ReadonlyArray<DecideStatePart>;
+  questions: DecideQuestions;
+  samples?: number;
+  signal?: AbortSignal;
+}
+
+type DecideStatePart =
+  | { type: 'text'; text: string; name?: string }
+  | { type: 'json'; name: string; value: unknown }
+  | { type: 'image'; imageUrl: string };
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `model` | `string` | Decision or chat model id |
+| `instructions` | `string` | Shared framing for every question (optional) |
+| `state` | `ReadonlyArray<DecideStatePart>` | What the decision is made against: text, named JSON values, and images |
+| `questions` | `DecideQuestions` | Questions keyed by id. See [Step Types](/docs/framework/api/step-types#questions-and-answers) |
+| `samples` | `number` | Runs averaged on the estimated path. Ignored on the native path. Default `1` (optional) |
+| `signal` | `AbortSignal` | Cancels the call (optional) |
+
+## DecideResponse
+
+```ts validate=none
+interface DecideResponse {
+  answers: Readonly<Record<string, DecideAnswer>>;
+  source: 'native' | 'estimated';
+  modelId: string;
+  usage: { inputTokens: number; outputTokens: number };
+  cost?: number;
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `answers` | `Readonly<Record<string, DecideAnswer>>` | One answer or `Refusal` per question id |
+| `source` | `'native' \| 'estimated'` | `'native'`: a decision model's own distribution. `'estimated'`: a chat model's self-reported probabilities, which are not calibrated |
+| `modelId` | `string` | Model that answered, as the provider reports it |
+| `usage` | `{ inputTokens, outputTokens }` | Token usage, summed across samples |
+| `cost` | `number` | Cost in USD (optional) |
+
+`harness.decide()` returns the response as the provider gave it. A `decide` step then checks it (every question answered or refused, every choice and level known, every probability in `[0, 1]`) and throws `model_parse_error` on a mismatch. On the native path, only an explicit provider refusal becomes a `Refusal`; a missing or mistyped answer is left out, so the step's check fails with `model_parse_error`. Every answer's `probabilities` has an entry for each outcome (`0` when the provider sent none). On the estimated path, samples that fail or do not parse are dropped and the rest are averaged; when none parse, `harness.decide()` throws `DecideOutputError`, which carries the samples' `usage` and `cost`. A `decide` step counts that spend and turns the error into `model_parse_error`; `aiCondition` turns it into `model_parse_error` with step id `'aiCondition'`.
 
 ## AgentHooks
 

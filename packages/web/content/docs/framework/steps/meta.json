@@ -4,6 +4,7 @@
     "index",
     "run-code",
     "call-model",
+    "decide",
     "invoke-tool"
   ]
 }

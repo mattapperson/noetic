@@ -1,7 +1,7 @@
 import type { ContextData, StorageAdapter } from '@noetic-tools/context';
 import { storageGetMany } from '@noetic-tools/context';
 import type { Context, Step } from '@noetic-tools/types';
-import { createMessage, extractAssistantText, trackUsage } from '@noetic-tools/types';
+import { DecideOutputError, isNoeticError, NoeticErrorImpl, trackUsage } from '@noetic-tools/types';
 import { z } from 'zod';
 import type { EmbedFn } from '../types/embed';
 import { cosineSimilarity } from './cosine-similarity';
@@ -395,46 +395,109 @@ export function allCondition<I>(...conditions: Condition<I>[]): Condition<I> {
 
 //#region aiCondition
 
-const AiConditionResponseSchema = z.object({
-  answer: z.boolean(),
-});
-
 /**
- * Creates a condition that uses an LLM to classify the input as true or false.
+ * Creates a condition that asks a model a yes/no question about the input — a
+ * one-question `decide`. Works with decision models natively and with chat
+ * models through estimated probabilities.
  *
  * @public
- * @param opts - Configuration with model identifier and classification prompt.
- * @returns A `Condition` that delegates boolean classification to the model.
+ * @param opts.model - Decision or chat model id.
+ * @param opts.prompt - The yes/no question.
+ * @param opts.threshold - Probability of yes at or above which the condition holds. Default 0.5.
+ * @returns A `Condition` that is true when the model answers yes. A refusal counts as no.
+ * @throws `NoeticError` `model_parse_error` when the response is not a boolean answer.
  */
-export function aiCondition<I>(opts: { model: string; prompt: string }): Condition<I> {
+export function aiCondition<I>(opts: {
+  model: string;
+  prompt: string;
+  threshold?: number;
+}): Condition<I> {
   return async (input: I, ctx: Context): Promise<boolean> => {
-    const text = serializeInput(input);
-    const systemPrompt = `You are a boolean classifier. Given the user's input, answer the following question with JSON: {"answer": true} or {"answer": false}.\n\nQuestion: ${opts.prompt}`;
-    const items = [
-      createMessage(systemPrompt, 'developer'),
-      createMessage(text, 'user'),
-    ];
-
-    const response = await ctx.harness.callModel({
+    const response = await askDecide(ctx, {
       model: opts.model,
-      items,
-      params: {
-        temperature: 0,
+      state: [
+        {
+          type: 'text',
+          name: 'input',
+          text: serializeInput(input),
+        },
+      ],
+      questions: {
+        answer: {
+          type: 'boolean',
+          instructions: opts.prompt,
+          threshold: opts.threshold,
+        },
       },
     });
-
-    trackUsage(ctx, response);
-
-    const responseText = extractAssistantText(response.items);
-
-    try {
-      const parsed = JSON.parse(responseText);
-      const validated = AiConditionResponseSchema.parse(parsed);
-      return validated.answer;
-    } catch {
+    trackUsage(ctx, {
+      items: [],
+      usage: response.usage,
+      cost: response.cost,
+    });
+    const answer = response.answers.answer;
+    if (answer?.type === 'refusal') {
       return false;
     }
+    const parsed = AiConditionAnswerSchema.safeParse(answer);
+    if (!parsed.success) {
+      throw new NoeticErrorImpl({
+        kind: 'model_parse_error',
+        stepId: 'aiCondition',
+        raw: JSON.stringify(answer),
+        schema: AiConditionAnswerSchema,
+        zodError: parsed.error,
+      });
+    }
+    return parsed.data.value;
   };
 }
+
+async function askDecide(
+  ctx: Context,
+  request: Parameters<Context['harness']['decide']>[0],
+): ReturnType<Context['harness']['decide']> {
+  try {
+    return await ctx.harness.decide(request);
+  } catch (e) {
+    if (isNoeticError(e)) {
+      throw e;
+    }
+    if (ctx.aborted) {
+      throw new NoeticErrorImpl({
+        kind: 'cancelled',
+        reason: ctx.abortReason ?? 'context aborted',
+      });
+    }
+    if (e instanceof DecideOutputError) {
+      if (e.usage) {
+        trackUsage(ctx, {
+          items: [],
+          usage: e.usage,
+          cost: e.cost,
+        });
+      }
+      throw new NoeticErrorImpl({
+        kind: 'model_parse_error',
+        stepId: 'aiCondition',
+        raw: e.raw,
+        schema: e.schema,
+        zodError: e.zodError,
+      });
+    }
+    throw new NoeticErrorImpl({
+      kind: 'step_failed',
+      stepId: 'aiCondition',
+      cause: e instanceof Error ? e : new Error(String(e)),
+      retriesExhausted: false,
+    });
+  }
+}
+
+const AiConditionAnswerSchema = z.object({
+  type: z.literal('boolean'),
+  value: z.boolean(),
+  probability: z.number().min(0).max(1),
+});
 
 //#endregion

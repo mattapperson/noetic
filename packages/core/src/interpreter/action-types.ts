@@ -19,6 +19,7 @@ export type {
   RetryPolicy,
   ServerToolSpec,
   StepCallModel,
+  StepDecide,
   StepInvokeTool,
   StepMeta,
   StepRunCode,

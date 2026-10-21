@@ -24,6 +24,8 @@ const GLYPHS: Record<GraphNodeKind, string> = {
   inParallel: '⋔',
   join: '⋏',
   conditional: '◇',
+  decide: '?',
+  routeSwitch: '◈',
   loop: '↻',
   schedule: '⏱',
   spawn: '⧉',
