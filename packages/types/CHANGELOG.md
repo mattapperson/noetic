@@ -1,3 +1,7 @@
+## @noetic-tools/types-v3.4.0 (2026-10-21)
+
+* feat(core): add decide step, routeSwitch, and decisionsHistoryLayer (#108) ([ad0215c](https://github.com/mattapperson/noetic/commit/ad0215c)), closes [#108](https://github.com/mattapperson/noetic/issues/108)
+
 ## @noetic-tools/types-v3.3.0 (2026-08-19)
 
 * feat(acp): serve a harness as an ACP agent ([68bdc20](https://github.com/mattapperson/noetic/commit/68bdc20))
