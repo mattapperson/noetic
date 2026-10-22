@@ -14,10 +14,11 @@ import type {
   ToolUiDeclaration,
 } from '@noetic-tools/types';
 import { NoeticConfigError } from '@noetic-tools/types';
+import type { ZodTypeAny } from 'zod';
 
 //#region Types
 
-type ToolConfig<I extends StandardSchemaV1, O extends StandardSchemaV1> = {
+type BaseToolConfig<I extends StandardSchemaV1, O extends StandardSchemaV1> = {
   name: string;
   description: string;
   input: I;
@@ -42,9 +43,36 @@ type ToolConfig<I extends StandardSchemaV1, O extends StandardSchemaV1> = {
   ui?: ToolUiDeclaration<I, O>;
   /** Optional ACP presentation — how the call renders in an ACP client when the harness is served as an agent. */
   acp?: ToolAcpDeclaration<I>;
-} & InputSchemaConfig<I>;
+};
 
-type GeneratorToolConfig<
+/** @public Config accepted by `tool()`. */
+export type ToolConfig<I extends StandardSchemaV1, O extends StandardSchemaV1> = BaseToolConfig<
+  I,
+  O
+> &
+  InputSchemaConfig<I>;
+
+/**
+ * `ToolConfig` with the input bound to Zod, for generic wrapper functions.
+ *
+ * `InputSchemaConfig<I>` is a conditional that stays deferred over an unresolved
+ * type parameter, and TypeScript cannot check assignment to a deferred
+ * conditional — so a wrapper generic in `I extends StandardSchemaV1` cannot
+ * construct a `ToolConfig<I, O>` at all, even though every Zod instantiation
+ * would be valid. Binding the input to Zod resolves the conditional by hand:
+ * Zod derives its own wire schema, so `inputJsonSchema` is plainly optional.
+ * Pair with the matching `tool()` overload.
+ *
+ * @public
+ */
+export type ZodToolConfig<I extends ZodTypeAny, O extends StandardSchemaV1> = BaseToolConfig<
+  I,
+  O
+> & {
+  inputJsonSchema?: Record<string, unknown>;
+};
+
+type BaseGeneratorToolConfig<
   I extends StandardSchemaV1,
   E extends StandardSchemaV1,
   O extends StandardSchemaV1,
@@ -74,7 +102,23 @@ type GeneratorToolConfig<
   ui?: ToolUiDeclaration<I, O, InferSchemaOutput<E>>;
   /** Optional ACP presentation — how the call renders in an ACP client when the harness is served as an agent. */
   acp?: ToolAcpDeclaration<I>;
-} & InputSchemaConfig<I>;
+};
+
+/** @public Config accepted by `toolWithGenerator()`. */
+export type GeneratorToolConfig<
+  I extends StandardSchemaV1,
+  E extends StandardSchemaV1,
+  O extends StandardSchemaV1,
+> = BaseGeneratorToolConfig<I, E, O> & InputSchemaConfig<I>;
+
+/** @public `GeneratorToolConfig` with the input bound to Zod — see `ZodToolConfig`. */
+export type ZodGeneratorToolConfig<
+  I extends ZodTypeAny,
+  E extends StandardSchemaV1,
+  O extends StandardSchemaV1,
+> = BaseGeneratorToolConfig<I, E, O> & {
+  inputJsonSchema?: Record<string, unknown>;
+};
 
 //#endregion
 
@@ -108,8 +152,16 @@ function validateToolConfig(name: string, execute: unknown): void {
  *
  * @public
  */
+export function tool<I extends ZodTypeAny, O extends StandardSchemaV1>(
+  config: ZodToolConfig<I, O>,
+): Tool<I, O>;
 export function tool<I extends StandardSchemaV1, O extends StandardSchemaV1>(
   config: ToolConfig<I, O>,
+): Tool<I, O>;
+export function tool<I extends StandardSchemaV1, O extends StandardSchemaV1>(
+  config: BaseToolConfig<I, O> & {
+    inputJsonSchema?: Record<string, unknown>;
+  },
 ): Tool<I, O> {
   validateToolConfig(config.name, config.execute);
 
@@ -135,10 +187,24 @@ export function tool<I extends StandardSchemaV1, O extends StandardSchemaV1>(
  * @public
  */
 export function toolWithGenerator<
+  I extends ZodTypeAny,
+  E extends StandardSchemaV1,
+  O extends StandardSchemaV1,
+>(config: ZodGeneratorToolConfig<I, E, O>): Tool<I, O>;
+export function toolWithGenerator<
   I extends StandardSchemaV1,
   E extends StandardSchemaV1,
   O extends StandardSchemaV1,
->(config: GeneratorToolConfig<I, E, O>): Tool<I, O> {
+>(config: GeneratorToolConfig<I, E, O>): Tool<I, O>;
+export function toolWithGenerator<
+  I extends StandardSchemaV1,
+  E extends StandardSchemaV1,
+  O extends StandardSchemaV1,
+>(
+  config: BaseGeneratorToolConfig<I, E, O> & {
+    inputJsonSchema?: Record<string, unknown>;
+  },
+): Tool<I, O> {
   validateToolConfig(config.name, config.execute);
 
   return {

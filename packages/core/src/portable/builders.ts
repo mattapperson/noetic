@@ -14,6 +14,12 @@ export { spawn } from '../builders/spawn-builder';
 // restricted runtimes don't pull it in.
 /** @public */
 export { callModel, invokeTool, runCode, step } from '../builders/step-builders';
-
+/** @public */
+export type {
+  GeneratorToolConfig,
+  ToolConfig,
+  ZodGeneratorToolConfig,
+  ZodToolConfig,
+} from '../builders/tool-builder';
 /** @public */
 export { tool, toolWithGenerator } from '../builders/tool-builder';
