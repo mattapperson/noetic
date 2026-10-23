@@ -187,8 +187,8 @@ interface OptimizeOptions {
   scope: 'prompts-only' | 'flow-structure' | 'full';
   runEval: (step: Step) => Promise<Record<string, number>>;
   maxMetricCalls?: number;
-  budget?: number;
   dryRun?: boolean;
+  forceDirty?: boolean;
   codingAgent?: CodingAgent;
   preEnrichedFields?: OptimizableField[];  // AST-enriched fields with source locations
   gepa?: GepaConfig;

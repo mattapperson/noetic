@@ -381,7 +381,6 @@ interface OptimizeParams {
   runEval: (step: Step) => Promise<Record<string, number>>;
   examples?: ReadonlyArray<Record<string, unknown>>;
   maxMetricCalls?: number;
-  budget?: number;
   gepa?: GepaConfig;
 }
 
@@ -641,8 +640,9 @@ invocation from when the CLI and eval framework shared one binary.
 | `--watch` | `boolean` | `false` | Re-run evals when the eval files change (fresh subprocess per run) |
 | `-u` | `boolean` | `false` | Run GEPA optimization after evaluation |
 | `--scope` | `enum` | `prompts-only` | Optimization scope: `prompts-only`, `flow-structure`, or `full` |
-| `--budget` | `number` | (none) | Maximum cost in dollars for the optimization run |
+| `--concurrency` | `number` | `4` | Maximum eval cases running concurrently within each suite |
 | `--dry-run` | `boolean` | `false` | Optimize without writing values back to source |
+| `--force-dirty` | `boolean` | `false` | Allow optimizer write-back into dirty or untracked files (a Git repository is still required) |
 | `--save-baseline` | `boolean` | `false` | Save each suite's results as its regression baseline (`.noetic/baselines/<suite>.json`) |
 | `--check` | `boolean` | `false` | Compare against saved baselines; exit `1` on regression or missing baseline case |
 
@@ -685,7 +685,7 @@ A case "fails" when any scorer returns a value below `0.5` (configurable via `Ev
 ### Optimization via CLI
 
 ```
-noetic-eval -u [--scope prompts-only|flow-structure|full] [--budget 5.00] [files...]
+noetic-eval -u [--scope prompts-only|flow-structure|full] [--force-dirty] [files...]
 ```
 
 Runs the optimization pipeline after evaluation. The `--scope` flag controls the optimization level (L1 `prompts-only`, L2 `flow-structure`, L3 `full`). With `--dry-run`, nothing is written back to source.
