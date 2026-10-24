@@ -72,6 +72,7 @@ import { collectAllTools, deduplicateTools } from './collect-tools';
 import type { BandedView } from './context-assembly';
 import { prepareBandedView, stampAnchoringAttributes } from './context-assembly';
 import { trackUsage } from './message-helpers';
+import { wrapModelError } from './model-error';
 import { parseStructuredOutput } from './structured-output';
 import {
   getContextChannelStore,
@@ -791,7 +792,9 @@ export async function executeCallModel<TContext, I, O>(
       serverToolSpecs,
       assembledItems,
     });
-    const response = await baseCtx.harness.callModel(request);
+    const response = await baseCtx.harness.callModel(request).catch((e: unknown) => {
+      throw wrapModelError(e, step.id, baseCtx);
+    });
 
     // Track tokens/cost for EVERY model call, including responses steering
     // subsequently rejects (Deny throw / Guide retry below) — the spend is
@@ -1043,8 +1046,13 @@ export async function executeSpawn<TContext, I, O>(
 
       return returnLayers({
         layers,
+        stepId: step.id,
         parentCtx: parentExecutionCtx,
-        childCtx: childExecutionCtx,
+        // `childExecutionCtx` predates the spawn span; trace onto that span.
+        childCtx: {
+          ...childExecutionCtx,
+          trace: span,
+        },
         childLog: childCtx.itemLog,
         result: childOutput,
         store: layerStore,

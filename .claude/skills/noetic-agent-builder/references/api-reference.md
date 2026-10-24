@@ -22,7 +22,7 @@ durable?: boolean;                                       // default true
 replayKey?: (input: I, ctx: Context<TContext>) => string;
 ```
 
-On a harness with a `checkpointStore`, a resumed run replays each completed step's recorded output, keyed by execution path. `durable: false` keeps a step out of that ledger (never replayed, never recorded, re-run on every resume; children keep their own setting). `replayKey` keys the entry as `key:<replayKey>` instead of the path, so the step replays wherever it runs; dispatches with the same key share one entry. `schedule` is never recorded. A throwing `replayKey` skips the ledger for that dispatch with a warning — the step still runs. JSON workflow nodes take `durable` (boolean) only. See spec 23a § Identity.
+On a harness with a `checkpointStore`, a resumed run replays each completed step's recorded output, keyed by execution path. `durable: false` keeps a step out of that ledger (never replayed, never recorded, re-run on every resume; children keep their own setting). `replayKey` keys the entry as `key:<replayKey>` instead of the path, so the step replays wherever it runs; dispatches with the same key share one entry. `schedule` is never recorded. A throwing `replayKey` skips the ledger for that dispatch with a warning — the step still runs. Each step runs on its own lane of the context, so concurrent `harness.run` calls on one context keep separate paths; same-id concurrent calls are numbered in dispatch order. JSON workflow nodes take `durable` (boolean) and a declarative `replayKey`: `true` (key on the whole input) or `{ from: ['batchId', ...] }` (key on those top-level properties of the input parsed as JSON, the lookup `over` uses); the hydrator builds `<node id>:<hash>`, so nodes sharing an id share entries and different nodes never do. A `from` key on a non-object input warns (`INVALID_REPLAY_KEY_INPUT`) and runs unreplayed. See spec 23a § Identity and spec 26 § Replay keys.
 
 The optional `subprocess` field makes this specific step run through a different adapter — e.g. `createLocalSubprocessAdapter({storage})` from `@noetic-tools/platform-node` for an out-of-process child, or an in-memory test double for unit tests. Resolution order at dispatch time is `detachedSpawn-overrides.subprocess ?? step.subprocess ?? harness.subprocess`. When omitted, the step uses the harness default.
 
@@ -363,7 +363,7 @@ loop<I, O>({
 }): StepLoop<I, O>
 ```
 
-Each verdict adds a `loop.verdict` event (`NoeticEvent.LOOP_VERDICT`) to the enclosing `ctx.span` (a `spawn` child's or `inParallel` path's own span when nested in one) — loops open no span of their own — with `{ loop, iteration, stop, reason? }`. `feedback` is never recorded.
+Each verdict adds a `loop.verdict` event (`NoeticEvent.LOOP_VERDICT`) to the enclosing `ctx.span` (a `spawn` child's or `inParallel` path's own span when nested in one) — loops open no span of their own — with `{ loop, iteration, stop, reason? }`. `feedback` is never recorded. A failing `onReturn` hook at a spawn or inParallel boundary does not fail the step: the result passes through unchanged and the child's own span (`spawn` or `inParallel.path`) gets a `spawn.summary_failed` event (`NoeticEvent.SPAWN_SUMMARY_FAILED`) with `{ stepId, layerId, message }`.
 
 ### schedule
 
@@ -1910,6 +1910,8 @@ interface RestoreContextOptions {
 
 harness.restore(executionId: string, opts?: RestoreContextOptions): Promise<Context | null>;
 ```
+
+`restore` needs a snapshot *or* step-ledger entries. With only ledger entries (the snapshot write failed) it returns a context with the original `id` and the ledger but an empty item log, no restored layer or channel state, and the default cwd: recorded steps replay, the rest run fresh. It returns `null` only when neither exists. An unknown snapshot version throws `CHECKPOINT_SCHEMA_MISMATCH` even when a ledger exists.
 
 A snapshot recovers data, not the live objects a host attached to the original context (broadcasters, queues, abort registrations). Pass them back through `opts` or the resumed run gets a bare context and the loss is silent. Snapshot-owned fields (`items`, `threadId`, `resourceId`, cwd) are deliberately not accepted — they always come from the persisted record. Decoration applied after construction (`Object.assign`ed fields, abort registration) goes on the returned context, whose `id` is already the original `executionId`.
 

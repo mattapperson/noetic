@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import assert from 'node:assert';
 import { ZodError, z } from 'zod';
 import { isNoeticError, NoeticErrorImpl } from '../src/errors/noetic-error';
 
@@ -97,5 +98,19 @@ describe('model_* error kinds', () => {
     expect(err.noeticError.kind).toBe('model_rate_limit');
     expect(err.message).toContain("Model rate limited at step 's3'");
     expect(err.message).toContain('retry after 250ms');
+  });
+});
+
+describe('spawn_summary_failed', () => {
+  it('carries the child output and names the step and cause in the message', () => {
+    const err = new NoeticErrorImpl({
+      kind: 'spawn_summary_failed',
+      stepId: 'research',
+      childOutput: 'raw findings',
+      summaryCause: new Error('summarizer timed out'),
+    });
+    assert(err.noeticError.kind === 'spawn_summary_failed');
+    expect(err.noeticError.childOutput).toBe('raw findings');
+    expect(err.message).toBe("Spawn 'research' summary failed: summarizer timed out");
   });
 });

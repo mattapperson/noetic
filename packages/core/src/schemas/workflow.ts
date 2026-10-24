@@ -25,6 +25,7 @@ export type {
   WorkflowDocument,
   WorkflowGraph,
   WorkflowNode,
+  WorkflowReplayKey,
 } from '@noetic-tools/types';
 export {
   MergeStrategy,

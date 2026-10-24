@@ -99,7 +99,7 @@ if (restored !== null) {
 }
 ```
 
-Returns `null` when no snapshot is recorded. Throws `NoeticConfigError` with `code: 'CHECKPOINT_SCHEMA_MISMATCH'` when the persisted `schemaVersion` is unknown — callers discard via `harness.clearCheckpoint(executionId)` and start fresh. Schema v1 snapshots (written before the layer-id rename) fall in this bucket: their `layers` record uses ids such as `working-context`, `static-content`, and `history-window`, while current layers use `scratchpad`, `instructions`, and `history`. They are rejected rather than restored with silently missing state. There is no migration path.
+A snapshot is not required. If the snapshot write failed but the step ledger (below) has entries, `restore` returns a context with the original `id` and that ledger — but an empty item log, no restored layer or channel state, and the default cwd. Recorded steps replay and the rest run fresh. Returns `null` only when neither a snapshot nor a ledger entry is recorded. Throws `NoeticConfigError` with `code: 'CHECKPOINT_SCHEMA_MISMATCH'` when the persisted `schemaVersion` is unknown — callers discard via `harness.clearCheckpoint(executionId)` and start fresh. Schema v1 snapshots (written before the layer-id rename) fall in this bucket: their `layers` record uses ids such as `working-context`, `static-content`, and `history-window`, while current layers use `scratchpad`, `instructions`, and `history`. They are rejected rather than restored with silently missing state. There is no migration path.
 
 ## Step-Level Resume
 
@@ -111,7 +111,12 @@ Entries live one key per step under `execution:<id>:ledger:<seq>`, so an append 
 
 ### Replay Identity
 
-By default a step's ledger key is its **execution path** — the stack of step ids plus a per-parent ordinal, like `root/plan#0/review-loop#0/body-llm#2`. Replay identity is therefore positional: a resumed step gets the output recorded at the same position.
+By default a step's ledger key is its **execution path** — its parent's path plus its id and a per-parent ordinal, like `/plan#0/review-loop#0/body-llm#2`. Replay identity is therefore positional: a resumed step gets the output recorded at the same position.
+
+Each step runs on its own *lane* of the context — a view that shares state, history, and usage but carries the step's own path — so steps it dispatches hang under it even when other work runs concurrently on the same context. Two `harness.run` calls racing on one context get stable, separate paths:
+
+- Different step ids under one parent always get distinct paths (`/left#0`, `/right#0`), whichever finishes first.
+- The same step id run concurrently under one parent is numbered in dispatch order (`/worker#0`, `/worker#1`). That survives a resume only if the dispatch order does; when it depends on timing, give the step a `replayKey`.
 
 That breaks when the work a position receives depends on timing. Concurrent workers pulling batches from a shared queue may pick different batches on resume, and positional replay would hand one batch's answer to another. Steps that return nothing and mutate state are worse off: replay skips them, so their state change is lost. Every step accepts two fields for this:
 
@@ -119,6 +124,8 @@ That breaks when the work a position receives depends on timing. Concurrent work
 |---|---|---|
 | `durable` | `true` | `false` keeps the step out of the ledger entirely: never replayed, never recorded, re-run on every resume. Applies to this step only — its children keep their own setting. |
 | `replayKey` | — | `(input, ctx) => string`. Records and replays the step under `key:<replayKey>` instead of its path, so it finds its output wherever it runs. Dispatches with the same key share one entry, so include everything that makes the call distinct. |
+
+JSON workflow nodes take the same two fields; there `replayKey` is declarative — `true` or `{ "from": ["batchId"] }` — and the hydrator builds the function. See [JSON Runtime](/docs/framework/json-runtime#node-kinds).
 
 The usual shape is "replay the expensive leaves, re-run the cheap orchestration":
 

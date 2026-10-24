@@ -22,8 +22,8 @@ export class NoeticConfigError extends Error {
   readonly code: string;
   /** Complete sentence describing what the user should do next. */
   readonly hint: string;
-  /** Link to the relevant docs page, if available. */
-  readonly docsUrl?: string;
+  /** Link to the docs explaining this code; defaults to its section of the error reference. */
+  readonly docsUrl: string;
 
   constructor(opts: {
     code: string;
@@ -35,8 +35,23 @@ export class NoeticConfigError extends Error {
     this.name = 'NoeticConfigError';
     this.code = opts.code;
     this.hint = opts.hint;
-    this.docsUrl = opts.docsUrl;
+    this.docsUrl = opts.docsUrl ?? configErrorDocsUrl(opts.code);
   }
+}
+
+const ERROR_REFERENCE_URL = 'https://noetic.tools/docs/framework/errors';
+
+/**
+ * @public
+ * The error reference section for a config error `code`. Each code has a
+ * heading of its own name on that page, and the docs site slugs headings to
+ * lower case, so the code in lower case is the anchor.
+ *
+ * @param code - A `NoeticConfigError` code, e.g. `'MISSING_API_KEY'`.
+ * @returns The URL of the code's section, e.g. `…/errors#missing_api_key`.
+ */
+export function configErrorDocsUrl(code: string): string {
+  return `${ERROR_REFERENCE_URL}#${code.toLowerCase()}`;
 }
 
 /**

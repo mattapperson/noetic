@@ -35,6 +35,31 @@
             "durable": {
               "type": "boolean"
             },
+            "replayKey": {
+              "anyOf": [
+                {
+                  "type": "boolean",
+                  "const": true
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "from": {
+                      "minItems": 1,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  },
+                  "required": [
+                    "from"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
             "model": {
               "type": "string"
             },
@@ -142,6 +167,31 @@
             "durable": {
               "type": "boolean"
             },
+            "replayKey": {
+              "anyOf": [
+                {
+                  "type": "boolean",
+                  "const": true
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "from": {
+                      "minItems": 1,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  },
+                  "required": [
+                    "from"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
             "toolName": {
               "type": "string",
               "minLength": 1
@@ -174,6 +224,31 @@
             },
             "durable": {
               "type": "boolean"
+            },
+            "replayKey": {
+              "anyOf": [
+                {
+                  "type": "boolean",
+                  "const": true
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "from": {
+                      "minItems": 1,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  },
+                  "required": [
+                    "from"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
             },
             "execute": {
               "type": "string",
@@ -237,6 +312,31 @@
             "durable": {
               "type": "boolean"
             },
+            "replayKey": {
+              "anyOf": [
+                {
+                  "type": "boolean",
+                  "const": true
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "from": {
+                      "minItems": 1,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  },
+                  "required": [
+                    "from"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
             "routes": {
               "minItems": 1,
               "type": "array",
@@ -282,6 +382,31 @@
             },
             "durable": {
               "type": "boolean"
+            },
+            "replayKey": {
+              "anyOf": [
+                {
+                  "type": "boolean",
+                  "const": true
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "from": {
+                      "minItems": 1,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  },
+                  "required": [
+                    "from"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
             },
             "model": {
               "type": "string",
@@ -462,6 +587,31 @@
             "durable": {
               "type": "boolean"
             },
+            "replayKey": {
+              "anyOf": [
+                {
+                  "type": "boolean",
+                  "const": true
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "from": {
+                      "minItems": 1,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  },
+                  "required": [
+                    "from"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
             "decide": {
               "type": "object",
               "properties": {
@@ -475,6 +625,31 @@
                 },
                 "durable": {
                   "type": "boolean"
+                },
+                "replayKey": {
+                  "anyOf": [
+                    {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "from": {
+                          "minItems": 1,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        }
+                      },
+                      "required": [
+                        "from"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
                 },
                 "model": {
                   "type": "string",
@@ -688,6 +863,31 @@
             "durable": {
               "type": "boolean"
             },
+            "replayKey": {
+              "anyOf": [
+                {
+                  "type": "boolean",
+                  "const": true
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "from": {
+                      "minItems": 1,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  },
+                  "required": [
+                    "from"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
             "mode": {
               "type": "string",
               "enum": [
@@ -745,6 +945,31 @@
             "durable": {
               "type": "boolean"
             },
+            "replayKey": {
+              "anyOf": [
+                {
+                  "type": "boolean",
+                  "const": true
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "from": {
+                      "minItems": 1,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  },
+                  "required": [
+                    "from"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
             "child": {
               "$ref": "#/$defs/WorkflowNode"
             },
@@ -782,6 +1007,31 @@
             "durable": {
               "type": "boolean"
             },
+            "replayKey": {
+              "anyOf": [
+                {
+                  "type": "boolean",
+                  "const": true
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "from": {
+                      "minItems": 1,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  },
+                  "required": [
+                    "from"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
             "child": {
               "$ref": "#/$defs/WorkflowNode"
             },
@@ -815,6 +1065,31 @@
             },
             "durable": {
               "type": "boolean"
+            },
+            "replayKey": {
+              "anyOf": [
+                {
+                  "type": "boolean",
+                  "const": true
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "from": {
+                      "minItems": 1,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  },
+                  "required": [
+                    "from"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
             },
             "body": {
               "$ref": "#/$defs/WorkflowNode"
@@ -850,6 +1125,31 @@
             "durable": {
               "type": "boolean"
             },
+            "replayKey": {
+              "anyOf": [
+                {
+                  "type": "boolean",
+                  "const": true
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "from": {
+                      "minItems": 1,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  },
+                  "required": [
+                    "from"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
             "steps": {
               "minItems": 1,
               "type": "array",
@@ -878,6 +1178,31 @@
             },
             "durable": {
               "type": "boolean"
+            },
+            "replayKey": {
+              "anyOf": [
+                {
+                  "type": "boolean",
+                  "const": true
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "from": {
+                      "minItems": 1,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  },
+                  "required": [
+                    "from"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
             },
             "step": {
               "$ref": "#/$defs/WorkflowNode"
@@ -916,6 +1241,31 @@
             "durable": {
               "type": "boolean"
             },
+            "replayKey": {
+              "anyOf": [
+                {
+                  "type": "boolean",
+                  "const": true
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "from": {
+                      "minItems": 1,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  },
+                  "required": [
+                    "from"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
             "document": {
               "$ref": "#"
             },
@@ -946,6 +1296,31 @@
             },
             "durable": {
               "type": "boolean"
+            },
+            "replayKey": {
+              "anyOf": [
+                {
+                  "type": "boolean",
+                  "const": true
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "from": {
+                      "minItems": 1,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  },
+                  "required": [
+                    "from"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
             },
             "agent": {
               "type": "string",

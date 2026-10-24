@@ -33,6 +33,7 @@ Noetic wraps every framework-level failure in a structured `NoeticError` discrim
 | `model_parse_error` | `stepId`, `raw: string`, `schema: StandardSchemaV1`, `zodError: ZodError` | Structured output fails schema validation. `schema` is the Standard Schema v1 validator; `zodError` stays populated for backward compatibility — the real `ZodError` for Zod schemas, a synthetic `custom`-issue `ZodError` adapted from the vendor's Standard Schema issues otherwise. |
 | `model_rate_limit` | `stepId`, `retryAfter?: number` | The LLM provider returns a rate-limit response. |
 | `fork_partial` | `stepId`, `succeeded[]`, `failed[]` | Thrown by `inParallel` mode `'all'` when any path fails, and by `'race'` when every path fails. (Mode `'settle'` never throws this — it reports failures in its `SettleResult` array instead.) |
+| `spawn_summary_failed` | `stepId`, `childOutput: unknown`, `summaryCause: Error` | A spawn's child succeeded but a context layer's `onReturn` hook (such as a summarizer) failed. Never thrown: the spawn returns the child's unsummarized output, and this error is reported as a layer diagnostic and a `spawn.summary_failed` span event. |
 | `channel_timeout` | `channelName`, `timeout: number` | A `recv()` call — or a back-pressured `send()` parked on a full queue — exceeded its timeout. |
 | `channel_closed` | `channelName` | Attempted to send on a closed external channel. |
 | `cancelled` | `reason?: string` | The execution was cancelled via `ctx.abort()` or `harness.cancel()` — including a parent's cancellation cascading into an `inParallel` path or `spawn` child. Pending channel `recv` calls (and parked back-pressure `send` calls) on the aborted context reject with this kind immediately, and an in-flight model call or ACP agent turn is cut short. |
@@ -50,6 +51,7 @@ type NoeticError =
   | { kind: 'model_parse_error'; stepId: string; raw: string; schema: StandardSchemaV1; zodError: ZodError }
   | { kind: 'model_rate_limit'; stepId: string; retryAfter?: number }
   | { kind: 'fork_partial'; stepId: string; succeeded: Array<{ stepId: string; value: unknown }>; failed: Array<{ stepId: string; error: NoeticError }> }
+  | { kind: 'spawn_summary_failed'; stepId: string; childOutput: unknown; summaryCause: Error }
   | { kind: 'channel_timeout'; channelName: string; timeout: number }
   | { kind: 'channel_closed'; channelName: string }
   | { kind: 'cancelled'; reason?: string }
@@ -58,6 +60,10 @@ type NoeticError =
   | { kind: 'handle_evicted'; handleId: string; stepId: string; gracePeriod: number }
   | { kind: 'item_schema_mismatch'; category: 'items' | 'developerMessages' | 'toolCalls' | 'toolResults'; itemType?: string };
 ```
+
+### Model provider failures
+
+A failing provider call in a `callModel` or `decide` step never reaches you as a raw `Error`. A 429 becomes `model_rate_limit`, a failure caused by cancellation becomes `cancelled`, and anything else becomes `step_failed` with the provider's error on `cause`.
 
 ## NoeticErrorImpl Class
 
@@ -145,6 +151,358 @@ if (isNoeticError(e)) {
   }
 }
 ```
+
+## NoeticConfigError
+
+`NoeticConfigError` is a separate class from `NoeticError`. It reports a setup mistake — an invalid builder option, missing credentials, a workflow that references something unregistered — rather than a failure while running. Builders throw it when you construct a step; `AgentHarness.run()` and `execute()` check what they can before the first step runs.
+
+```ts validate=none
+class NoeticConfigError extends Error {
+  readonly code: string;    // SCREAMING_SNAKE_CASE, e.g. 'MISSING_API_KEY'
+  readonly hint: string;    // a sentence saying what to do next
+  readonly docsUrl: string; // this page, at the section for `code`
+}
+
+function isNoeticConfigError(e: unknown): e is NoeticConfigError;
+```
+
+`docsUrl` defaults to `https://noetic.tools/docs/framework/errors#<code in lower case>` — the matching section below. For example, `MISSING_API_KEY` links to `#missing_api_key`.
+
+```ts
+import { isNoeticConfigError, loop, until } from '@noetic-tools/core';
+
+try {
+  loop({ id: '', steps: [], until: until.maxSteps(10) });
+} catch (e) {
+  if (isNoeticConfigError(e)) {
+    console.error(`${e.code}: ${e.message}\n${e.hint}\nSee ${e.docsUrl}`);
+  }
+}
+```
+
+## Configuration Error Codes
+
+Every `code` a `NoeticConfigError` can carry, with its cause and fix.
+
+### Credentials and Harness Setup
+
+#### NO_LLM_PROVIDER
+
+**Cause:** A `callModel` or `decide` step needs a model, but the harness has no LLM credentials. `AgentHarness.run()` and `execute()` raise this before any step runs when the model step is visible in the step tree; a model step chosen at run time raises it when it is reached.
+
+**Fix:** Pass `callModelDefaults: { apiKey: '...' }` to `AgentHarness` (it defaults to the Noetic platform) or set `NOETIC_API_KEY`. For OpenRouter directly, pass `callModelDefaults: { provider: 'openrouter', apiKey: '...' }` or set `OPENROUTER_API_KEY`.
+
+#### MISSING_API_KEY
+
+**Cause:** `createOpenRouterEmbed()` was called without an OpenRouter API key.
+
+**Fix:** Pass the key explicitly, for example `createOpenRouterEmbed(process.env.OPENROUTER_API_KEY)`.
+
+#### MISSING_CALL_MODEL
+
+**Cause:** A `steering()` rule is evaluated by an LLM, but no model call is available to the layer.
+
+**Fix:** Give the harness LLM credentials (see [`NO_LLM_PROVIDER`](#no_llm_provider)), or use a rule that does not need a model.
+
+#### NO_STEP_CONFIGURED
+
+**Cause:** `harness.execute()` (or the session API) was called on a harness built without an `agentGraph`.
+
+**Fix:** Pass `agentGraph` to the `AgentHarness` constructor, or drive steps directly with `harness.run(step, input, ctx)`.
+
+#### MISSING_HARNESS_CONTEXT
+
+**Cause:** A `workflow()` or `dynamicWorkflow()` step ran on a context with no harness attached.
+
+**Fix:** Run the step through `AgentHarness.run()` (or `execute()`), which attaches the harness to the context.
+
+#### STEP_LEDGER_RETENTION_INVALID
+
+**Cause:** `environment.storage.stepLedgerRetention` has a cap that is not a positive number or `Infinity`.
+
+**Fix:** Omit the field to take the default, pass a positive number, or pass `Infinity` to remove the cap.
+
+#### CHECKPOINT_SCHEMA_MISMATCH
+
+**Cause:** `harness.restore()` found a checkpoint written by a runtime version whose snapshot schema this version does not recognize.
+
+**Fix:** Clear the snapshot with `CheckpointStore.clear()` and restart the execution.
+
+### Step Builders
+
+#### EMPTY_STEP_ID
+
+**Cause:** A step builder (`runCode`, `callModel`, `invokeTool`, `loop`, `spawn`, `withContext`, `inParallel`, `conditional`, `schedule`, `decide`, `routeSwitch`, `workflow`, `step.acpAgent`) or `registerStep()` got an empty `id`.
+
+**Fix:** Give every step a unique, non-empty `id`, for example `runCode({ id: 'fetch-data', ... })`.
+
+#### MISSING_EXECUTE_FUNCTION
+
+**Cause:** `runCode()` or `tool()` was called without an `execute` function.
+
+**Fix:** Pass an async `execute` function — `execute: async (input, ctx) => result` for `runCode`, `execute: async (args, toolCtx) => result` for `tool`.
+
+#### EMPTY_TOOL_NAME
+
+**Cause:** `tool()` got an empty `name`.
+
+**Fix:** Pass a unique name, for example `tool({ name: 'greet', ... })`.
+
+#### MISSING_TOOL
+
+**Cause:** `invokeTool()` was called without a `tool`.
+
+**Fix:** Pass a tool built with `tool()`.
+
+#### MISSING_MODEL
+
+**Cause:** `callModel()` got an empty `model`, a lazy `model` getter returned an empty string at run time, or a `decide()` step has neither its own `model` nor a harness `decisionModel`.
+
+**Fix:** Pass a non-empty model id such as `'anthropic/claude-sonnet-4-20250514'`. For `decide`, set `model` on the step or `decisionModel` on the harness.
+
+#### MISSING_JSON_SCHEMA
+
+**Cause:** A tool input schema or a structured-output schema cannot be turned into JSON Schema for the model.
+
+**Fix:** Use a schema that implements `StandardJSONSchemaV1` (Zod does), or pass `inputJsonSchema` on `tool()` / `outputJsonSchema` on the model step.
+
+#### MISSING_LOOP_BODY
+
+**Cause:** `loop()` got an empty `steps` array.
+
+**Fix:** Add at least one step to `steps`.
+
+#### MISSING_UNTIL_PREDICATE
+
+**Cause:** `loop()` was called without an `until` predicate.
+
+**Fix:** Pass one, for example `until: until.maxSteps(10)`. Use `until.never()` for a loop that only an error or cancellation ends.
+
+#### MISSING_CHILD_STEP
+
+**Cause:** `spawn()` or `withContext()` was called without a `child` step.
+
+**Fix:** Pass the step to run inside the child context as `child`.
+
+#### MISSING_CONTEXT_LAYERS
+
+**Cause:** `withContext()` was called without `context` layers.
+
+**Fix:** Pass the layers to provide, for example `context: [scratchpad()]`.
+
+#### MISSING_MERGE_FUNCTION
+
+**Cause:** `inParallel()` in `'all'` or `'settle'` mode was called without `merge`.
+
+**Fix:** Pass a `merge` function that combines the path results into one output.
+
+#### MISSING_ROUTE_FUNCTION
+
+**Cause:** `conditional()` was called without a `route` function.
+
+**Fix:** Pass a `route` function that picks the next step at run time.
+
+#### MISSING_BODY_STEP
+
+**Cause:** `schedule()` was called without a body `step`.
+
+**Fix:** Pass the step to run on each scheduled iteration.
+
+#### INVALID_INTERVAL_MS
+
+**Cause:** `schedule()` got an `interval` that is negative, `NaN`, or infinite.
+
+**Fix:** Pass a non-negative number of milliseconds.
+
+#### INVALID_JITTER
+
+**Cause:** `schedule()` got a `jitter` that is negative, `NaN`, or infinite.
+
+**Fix:** Pass a non-negative number of milliseconds, or omit `jitter`.
+
+### Channels
+
+#### INVALID_CHANNEL_TIMEOUT
+
+**Cause:** A channel `send()` or `recv()` got a negative or `NaN` timeout. The call rejects with this error instead of waiting.
+
+**Fix:** Pass a positive timeout in milliseconds, or `0` to wait with no timeout.
+
+### Decide and routeSwitch
+
+#### INVALID_DECIDE_QUESTIONS
+
+**Cause:** `decide()` got an invalid question map: no questions, a boolean question with neither `instructions` nor `criteria`, a choice question with fewer than 1 or more than 255 values or duplicates, or a score question with fewer than 2 or more than 10 levels or duplicates.
+
+**Fix:** Correct the question named in the error message.
+
+#### INVALID_DECIDE_SAMPLES
+
+**Cause:** `decide()` got a `samples` value that is not a positive integer.
+
+**Fix:** Omit `samples`, or pass a whole number of runs to average, for example `samples: 3`.
+
+#### UNKNOWN_ROUTE_QUESTION
+
+**Cause:** `routeSwitch()` routes `on` a question its decide step does not ask.
+
+**Fix:** Set `on` to one of the decide step's question ids.
+
+#### INCOMPLETE_ROUTE_CASES
+
+**Cause:** `routeSwitch()` has no case for one or more outcomes of the question it routes on.
+
+**Fix:** Give a case for every outcome named in the error message.
+
+#### INVALID_MIN_CONFIDENCE
+
+**Cause:** `routeSwitch()` got a `minConfidence` outside `[0, 1]`.
+
+**Fix:** Pass a confidence between 0 and 1, for example `minConfidence: 0.6`.
+
+#### MISSING_UNCERTAIN_STEP
+
+**Cause:** `routeSwitch()` was called without an `uncertain` step.
+
+**Fix:** Pass `uncertain`: the step to run when the model refuses or is not confident enough.
+
+### Context Layers
+
+#### INVALID_HISTORY_MAX_ITEMS
+
+**Cause:** `history()` got a `maxItems` that is not an integer in the allowed range.
+
+**Fix:** Pass a sensible cap such as `{ maxItems: 40 }`, or leave the layer out to keep history uncapped.
+
+#### INVALID_BUDGET_INPUT
+
+**Cause:** `allocateBudgets()` got `NaN` for a budget input (a layer budget, the total budget, or a reserve).
+
+**Fix:** Pass a real number. `Infinity` is allowed and means uncapped.
+
+### JSON Workflows
+
+#### WORKFLOW_VALIDATION_FAILED
+
+**Cause:** A workflow document does not match `WorkflowDocumentSchema`, or `dynamicWorkflow()`'s planner failed to produce a valid document within its revision budget.
+
+**Fix:** Correct the document against the [published JSON Schema](/docs/framework/json-runtime). For `dynamicWorkflow`, give the planner clearer instructions or a more capable model, or raise `maxRevisions`.
+
+#### INVALID_WORKFLOW_SOURCE
+
+**Cause:** `workflow()` got both or neither of `document` and `ref`.
+
+**Fix:** Pass exactly one: `document: { version: 1, root: ... }` for an inline workflow, or `ref: '<name>'` with a `workflows` registry.
+
+#### UNKNOWN_WORKFLOW_REFERENCE
+
+**Cause:** A `workflow()` step's `ref`, or a `subflow` node, names a workflow that is not registered.
+
+**Fix:** Register the workflow under that name in the `workflows` option (or `HydrationContext.workflows`).
+
+#### WORKFLOW_CYCLE
+
+**Cause:** A named sub-workflow references itself, directly or through other sub-workflows.
+
+**Fix:** Break the cycle, or inline the document.
+
+#### UNKNOWN_NODE_KIND
+
+**Cause:** A workflow node has a `kind` the hydrator does not know.
+
+**Fix:** Use one of the node kinds listed in the error's hint.
+
+#### UNKNOWN_UNTIL_PREDICATE
+
+**Cause:** A workflow loop's `until` predicate has an unknown `kind`.
+
+**Fix:** Use one of `maxSteps`, `maxCost`, `maxDuration`, `noToolCalls`, `never`, `outputContains`, `outputEquals`, `converged`, `any`, or `all`.
+
+#### UNKNOWN_TOOL_REFERENCE
+
+**Cause:** A workflow node names a tool that is not in `HydrationContext.tools`.
+
+**Fix:** Register the tool under that name in `HydrationContext.tools` before hydrating. The hint lists the tools that are registered.
+
+#### UNKNOWN_LAYER_REFERENCE
+
+**Cause:** A workflow node names a context layer that is not in `HydrationContext.layers`.
+
+**Fix:** Register the layer under that name in `HydrationContext.layers`.
+
+#### UNKNOWN_UI_LIBRARY_REFERENCE
+
+**Cause:** A workflow node's output names a UI library that is not in `HydrationContext.uiLibraries`.
+
+**Fix:** Register an output codec under that name, for example `uiLibraries: new Map([['my-lib', openUi(myLibrary)]])` with `openUi` from `@noetic-tools/openui`.
+
+#### UNKNOWN_ACP_AGENT_REFERENCE
+
+**Cause:** An `acp-agent` node names an agent that is not in `HydrationContext.acpAgents`.
+
+**Fix:** Pass agent adapters via `HydrationContext.acpAgents`, for example `createAcpAgentRegistry(claudeCode())` from `@noetic-tools/acp`.
+
+#### UNKNOWN_SUBPROCESS_REFERENCE
+
+**Cause:** A `run` node names a subprocess adapter that `HydrationContext.resolveSubprocess` cannot resolve.
+
+**Fix:** Map the reference in `resolveSubprocess(ref)`, or omit `subprocess` to use the harness default.
+
+#### INVALID_FORK_INPUT
+
+**Cause:** A dynamic `inParallel` node (one with `each`) got input that is not JSON, or JSON that does not hold an array (at the `over` key, when set).
+
+**Fix:** Feed the node a JSON array, or a JSON object with an array at the `over` key.
+
+#### INVALID_REPLAY_KEY_INPUT
+
+**Cause:** A node with `"replayKey": { "from": [...] }` got input that is not a JSON object, so the named properties cannot be read. You see it as a warning, not a thrown error: the node runs without replay or recording.
+
+**Fix:** Feed the node a JSON object holding the `from` properties, or use `"replayKey": true` to key on the whole input.
+
+### ACP Agents
+
+#### MISSING_ACP_AGENT
+
+**Cause:** `step.acpAgent()` or `acpAgentTool()` has no agent adapter, or its lazy `agent` resolved to nothing at run time.
+
+**Fix:** Pass an agent factory result, for example `agent: claudeCode()` from `@noetic-tools/acp`.
+
+#### MISSING_PROMPT
+
+**Cause:** `step.acpAgent()` was built with neither `prompt` nor `content`, or its prompt resolved to an empty string at run time.
+
+**Fix:** Pass a non-empty `prompt` for plain text, `content` for image, audio, or resource blocks, or give the step a string input.
+
+#### ACP_REUSE_WITHOUT_KEEPALIVE
+
+**Cause:** A step sets `session.reuse` but leaves `keepAlive` at `'step'`, so the connection closes before another step can share it.
+
+**Fix:** Add `keepAlive: 'run'` to share the connection for the rest of the run, or `keepAlive: 'harness'` to keep it past the run and close it yourself with `harness.closeAcpSessions()`.
+
+#### ACP_SESSION_AGENT_CONFLICT
+
+**Cause:** A step reuses a session key that another step opened with a different agent.
+
+**Fix:** Give every step that shares a `session.reuse` key the same agent, or use separate keys.
+
+#### ACP_SESSION_CAPABILITY_CONFLICT
+
+**Cause:** A step reuses a session but asks for different `clientCapabilities` than the connection was opened with. ACP negotiates capabilities once per connection.
+
+**Fix:** Give every step that shares a `session.reuse` key the same `clientCapabilities`, or use a separate session.
+
+#### ACP_SESSION_SETTING_CONFLICT
+
+**Cause:** A step reuses a session but asks for a different `cwd` or different MCP servers than the session was created with.
+
+**Fix:** Give every step that shares a `session.reuse` key the same `cwd` and `mcpServers`, or use a separate session.
+
+#### ACP_SERVE_KIND_RULES_WITHOUT_TOOLS
+
+**Cause:** `serveAcp()` got a kind-based permission rule (such as `{ kind: 'execute' }`) but no `tools` to look kinds up from.
+
+**Fix:** Pass the harness's tools in the serve options: `serveAcp(harness, { tools, permissions })`.
 
 ## Related Pages
 

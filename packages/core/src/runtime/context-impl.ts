@@ -127,33 +127,26 @@ export class ContextImpl implements Context<ContextData> {
   private readonly _children = new Set<ContextImpl>();
   private _contextData?: ContextData;
   /**
-   * Stack of steps currently in flight on this context, most-recent last.
-   * Pushed by `enterStep` at the top of `execute()` and popped by
-   * `leaveStep` when the step resolves (success or failure). The harness'
-   * checkpoint writer serialises this stack as the execution frontier so
-   * a restart can identify which step the context was paused inside.
+   * Steps in flight on this context, in dispatch order. `enterStep` adds a frame and
+   * `leaveStep` removes that same frame, so concurrent dispatches can settle in any
+   * order without disturbing each other. The checkpoint writer serialises this set as
+   * the execution frontier.
    * @internal
    */
-  private readonly _frontier: FrontierFrame[] = [];
+  private readonly _inFlight = new Set<FrontierFrame>();
 
   /**
-   * Path segment for each in-flight frame, parallel to `_frontier`. Kept separate so
-   * `serialiseFrontier()` keeps emitting the published `FrontierFrame` shape.
+   * Execution path of the step whose lane this is. On the context itself it is the
+   * prefix its steps hang under: empty on a root context, the parent's path plus a
+   * discriminator on an inParallel/spawn child, so a path stays unique across the whole
+   * step tree. A lane (see `enterStep`) reads its own step's path here instead.
    * @internal
    */
-  private readonly _segments: string[] = [];
-
-  /**
-   * Path this context's steps hang under. Empty on a root context; an inParallel/spawn child
-   * inherits its parent's current path plus a discriminator, so a path key stays unique
-   * across the whole step tree rather than restarting per child context.
-   * @internal
-   */
-  private readonly _pathPrefix: string;
+  private readonly _path: string;
 
   /**
    * Dispatch counts per `<parent path>/<step id>`, so a loop body re-entered on each
-   * iteration gets `#0`, `#1`, … instead of colliding on one key.
+   * iteration gets `#0`, `#1`, … instead of colliding on one key. Shared by every lane.
    * @internal
    */
   private readonly _occurrences = new Map<string, number>();
@@ -207,7 +200,7 @@ export class ContextImpl implements Context<ContextData> {
     this.resourceId = opts.resourceId;
     this.channelStore = opts.channelStore;
     this._checkpointFn = opts.checkpointFn;
-    this._pathPrefix = opts.pathPrefix ?? '';
+    this._path = opts.pathPrefix ?? '';
     this.ledger = opts.ledger;
     this.layers = opts.layers;
     this.unifiedTools = opts.unifiedTools;
@@ -389,49 +382,37 @@ export class ContextImpl implements Context<ContextData> {
 
   /**
    * @internal
-   * Push a frame onto the execution frontier. Called by `execute()` at the
-   * top of every step dispatch so that the frontier reflects exactly the
-   * stack of steps currently in-flight on this context.
+   * Register `frame` as in flight and return the lane its step runs on: a view of
+   * this context that shares everything except its execution path. `execute()` hands
+   * the lane to the step, so steps the step dispatches hang under its path no matter
+   * how other dispatches on this context interleave. The occurrence ordinal is taken
+   * here, at dispatch, never at settle.
    */
-  enterStep(frame: FrontierFrame): void {
-    const parent = this.currentPath();
-    const key = `${parent}/${frame.stepId}`;
+  enterStep(frame: FrontierFrame): ContextImpl {
+    const key = `${this._path}/${frame.stepId}`;
     const occurrence = this._occurrences.get(key) ?? 0;
     this._occurrences.set(key, occurrence + 1);
-    this._segments.push(`/${frame.stepId}#${occurrence}`);
-    this._frontier.push(frame);
+    this._inFlight.add(frame);
+    return laneOf(this, `${key}#${occurrence}`);
   }
 
   /**
    * @internal
-   * The execution path of the step currently on top of the frontier — the ledger key
-   * identifying this exact dispatch. Stable across a replay given the same control
-   * flow, which is what lets a resumed run line recorded outputs up with the steps
-   * that produced them.
+   * The execution path of the step this lane belongs to — the ledger key identifying
+   * this exact dispatch. Stable across a replay given the same control flow, which is
+   * what lets a resumed run line recorded outputs up with the steps that produced them.
    */
   currentPath(): string {
-    return this._pathPrefix + this._segments.join('');
+    return this._path;
   }
 
   /**
    * @internal
-   * Pop the top frame. Called when a step resolves (success or failure)
-   * so that the frontier unwinds cleanly. The value of `expectedStepId`
-   * is used as a consistency check — if it does not match the top frame
-   * the pop is still performed, but a best-effort warning is surfaced to
-   * stderr rather than swallowed silently.
+   * Drop `frame` from the in-flight set. Called when its step resolves, success or
+   * failure.
    */
-  leaveStep(expectedStepId: string): void {
-    const top = this._frontier[this._frontier.length - 1];
-    if (top && top.stepId !== expectedStepId) {
-      // A mismatch indicates bookkeeping drift. We unwind best-effort and
-      // let the caller observe via `serialiseFrontier()` if needed.
-      console.warn(
-        `ContextImpl.leaveStep: expected "${expectedStepId}" on top of frontier but saw "${top.stepId}".`,
-      );
-    }
-    this._frontier.pop();
-    this._segments.pop();
+  leaveStep(frame: FrontierFrame): void {
+    this._inFlight.delete(frame);
   }
 
   /**
@@ -440,10 +421,51 @@ export class ContextImpl implements Context<ContextData> {
    * checkpoint writer — see `AgentHarness.checkpoint`.
    */
   serialiseFrontier(): FrontierFrame[] {
-    return this._frontier.map((frame) => ({
+    return [
+      ...this._inFlight,
+    ].map((frame) => ({
       stepId: frame.stepId,
       input: frame.input,
       state: frame.state,
     }));
   }
 }
+
+//#region Lanes
+
+/** The context each lane views, so `laneOf` never stacks a proxy on a proxy. */
+const laneTargets = new WeakMap<ContextImpl, ContextImpl>();
+
+/**
+ * A view of `ctx` that reads `path` as its execution path and forwards every other
+ * read and write to the context itself, so state, usage, abort, and the in-flight set
+ * stay shared. A Proxy rather than a subclass: steps assign `ctx.state` and friends
+ * directly, and a copy would keep those writes to itself.
+ */
+function laneOf(ctx: ContextImpl, path: string): ContextImpl {
+  const target = laneTargets.get(ctx) ?? ctx;
+  const lane = new Proxy(target, {
+    get(base, prop, receiver) {
+      if (prop === '_path') {
+        return path;
+      }
+      return Reflect.get(base, prop, receiver);
+    },
+    set(base, prop, value) {
+      return Reflect.set(base, prop, value);
+    },
+  });
+  laneTargets.set(lane, target);
+  return lane;
+}
+
+/**
+ * @internal
+ * The context a lane views, or `ctx` itself when it is not a lane. For per-execution
+ * caches keyed by context identity, which every lane of one context must share.
+ */
+export function laneBase(ctx: Context<ContextData>): Context<ContextData> {
+  return ctx instanceof ContextImpl ? (laneTargets.get(ctx) ?? ctx) : ctx;
+}
+
+//#endregion

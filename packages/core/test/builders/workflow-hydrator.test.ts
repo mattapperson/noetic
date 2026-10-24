@@ -9,7 +9,12 @@ import type {
   SubprocessHandle,
   Tool,
 } from '@noetic-tools/types';
-import { frameworkCast, isNoeticConfigError, isServerToolSpec } from '@noetic-tools/types';
+import {
+  frameworkCast,
+  hashString,
+  isNoeticConfigError,
+  isServerToolSpec,
+} from '@noetic-tools/types';
 import type { HydrationContext } from '../../src/builders/workflow-hydrator';
 import { hydrateNode, hydrateWorkflow } from '../../src/builders/workflow-hydrator';
 import type { WorkflowDocument, WorkflowNode } from '../../src/schemas/workflow';
@@ -98,6 +103,97 @@ describe('hydrateNode — durable', () => {
       instructions: 'Say hello',
     };
     expect(hydrateNode(node, makeHydrationContext()).durable).toBeUndefined();
+  });
+});
+
+describe('hydrateNode — replayKey', () => {
+  function keyOf(node: WorkflowNode, input: string): string {
+    const replayKey = hydrateNode(node, makeHydrationContext()).replayKey;
+    assert(replayKey);
+    return replayKey(input, makeMockContext());
+  }
+  const grade = {
+    kind: 'runCode',
+    id: 'grade',
+    execute: 'grade()',
+  } as const;
+
+  test('replayKey: true keys on the node id and a hash of the whole input', () => {
+    const node: WorkflowNode = {
+      ...grade,
+      replayKey: true,
+    };
+    expect(keyOf(node, 'batch-1')).toBe(`grade:${hashString('batch-1')}`);
+    expect(keyOf(node, 'batch-1')).not.toBe(keyOf(node, 'batch-2'));
+    expect(
+      keyOf(
+        {
+          ...node,
+          id: 'summarize',
+        },
+        'batch-1',
+      ),
+    ).not.toBe(keyOf(node, 'batch-1'));
+  });
+
+  test('replayKey.from keys on the named input properties only', () => {
+    const node: WorkflowNode = {
+      ...grade,
+      replayKey: {
+        from: [
+          'batchId',
+          'sample',
+        ],
+      },
+    };
+    const key = keyOf(
+      node,
+      JSON.stringify({
+        batchId: 'b1',
+        sample: 0,
+        note: 'ignored',
+      }),
+    );
+    expect(key).toBe(
+      `grade:${hashString(
+        JSON.stringify([
+          'b1',
+          0,
+        ]),
+      )}`,
+    );
+    expect(
+      keyOf(
+        node,
+        JSON.stringify({
+          sample: 0,
+          batchId: 'b1',
+          note: 'changed',
+        }),
+      ),
+    ).toBe(key);
+  });
+
+  test('replayKey.from throws INVALID_REPLAY_KEY_INPUT on a non-object input', () => {
+    const node: WorkflowNode = {
+      ...grade,
+      replayKey: {
+        from: [
+          'batchId',
+        ],
+      },
+    };
+    try {
+      keyOf(node, 'plain text');
+      expect.unreachable('should have thrown');
+    } catch (e) {
+      assert(isNoeticConfigError(e));
+      expect(e.code).toBe('INVALID_REPLAY_KEY_INPUT');
+    }
+  });
+
+  test('leaves replayKey unset when the node omits it', () => {
+    expect(hydrateNode(grade, makeHydrationContext()).replayKey).toBeUndefined();
   });
 });
 
@@ -215,6 +311,7 @@ describe('hydrateNode — llm', () => {
       assert(isNoeticConfigError(e));
       expect(e.code).toBe('UNKNOWN_UI_LIBRARY_REFERENCE');
       expect(e.message).toContain('missing-lib');
+      expect(e.hint).toEndWith('No UI libraries are registered.');
     }
   });
 
@@ -1055,6 +1152,8 @@ describe('hydrateNode — error cases', () => {
     } catch (e: unknown) {
       assert(isNoeticConfigError(e));
       expect(e.code).toBe('UNKNOWN_TOOL_REFERENCE');
+      expect(e.hint).toStartWith("Register 'nonexistent' in HydrationContext.tools");
+      expect(e.hint).toEndWith('.');
     }
   });
 
@@ -1071,6 +1170,8 @@ describe('hydrateNode — error cases', () => {
     } catch (e: unknown) {
       assert(isNoeticConfigError(e));
       expect(e.code).toBe('UNKNOWN_TOOL_REFERENCE');
+      expect(e.hint).toStartWith("Register 'missing' in HydrationContext.tools");
+      expect(e.hint).toEndWith('.');
     }
   });
 

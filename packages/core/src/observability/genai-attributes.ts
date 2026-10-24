@@ -1,3 +1,5 @@
+import { SPAWN_SUMMARY_FAILED_EVENT } from '@noetic-tools/context';
+
 // GenAI Semantic Convention attributes
 export const GenAI = {
   SYSTEM: 'gen_ai.system',
@@ -80,4 +82,11 @@ export const NoeticEvent = {
   LOOP_VERDICT: 'loop.verdict',
   /** A channel dropped data or is waiting with no timeout: `{ kind, channelName, message, capacity?, operation? }`. */
   CHANNEL_WARNING: 'channel.warning',
+  /**
+   * A layer's `onReturn` hook failed, so a spawn or inParallel path returned
+   * its result unchanged. Added to the child's span: `{ stepId, layerId,
+   * message }`. Defined in `@noetic-tools/context`, whose `returnLayers`
+   * emits it and cannot import core.
+   */
+  SPAWN_SUMMARY_FAILED: SPAWN_SUMMARY_FAILED_EVENT,
 } as const;

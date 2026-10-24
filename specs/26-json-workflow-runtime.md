@@ -62,7 +62,7 @@ Authoring documents by hand or reviewing LLM-generated ones, reference the schem
 
 ## WorkflowNode Union
 
-`WorkflowNode` is a discriminated union on `kind`. Each variant maps to an existing `Step` builder. All nodes share two fields: a required `id`, and an optional boolean `durable` that the hydrator copies onto the built step. `durable: false` keeps the node out of the step ledger, so a resumed run re-runs it instead of replaying its recorded output (`23a-step-level-resume` § Identity). The code-only `replayKey` has no JSON form; see Future Considerations. The `acp-agent` node kind is specified in `27-acp-agent-steps`.
+`WorkflowNode` is a discriminated union on `kind`. Each variant maps to an existing `Step` builder. All nodes share three fields: a required `id`, an optional boolean `durable` that the hydrator copies onto the built step, and an optional declarative `replayKey` (§ Replay keys) that the hydrator turns into the step's `replayKey` function. `durable: false` keeps the node out of the step ledger, so a resumed run re-runs it instead of replaying its recorded output (`23a-step-level-resume` § Identity). The `acp-agent` node kind is specified in `27-acp-agent-steps`.
 
 ```typescript
 type WorkflowNode =
@@ -81,6 +81,40 @@ type WorkflowNode =
   | SubflowWorkflowNode
   | AcpAgentWorkflowNode;
 ```
+
+### Replay keys
+
+A programmatic step's `replayKey` is a function (`23a-step-level-resume` § Identity); a JSON node cannot carry one. It names instead which part of its input identifies the work, and the hydrator builds the function:
+
+```typescript
+type WorkflowReplayKey =
+  | true                    // key on the whole input
+  | { from: string[] };     // key on these top-level properties of the input, parsed as JSON
+```
+
+`from` reads each property the way an `inParallel` node's `over` reads its array: the input is parsed as JSON and the named top-level key is looked up. JSON workflows have no expression or template language; a top-level key lookup is the one selector they use, so replay keys use it too. A missing property keys as `null`.
+
+The built key is `<node id>:<hash>`, where the hash covers the whole input (`true`) or the JSON list of the selected values (`from`), via `hashString`. Prefixing the node id keeps two different nodes that read the same input — a `grade` and a `summarize` of one batch — from sharing a ledger entry and discarding each other's on every resume. Nodes that share an id share entries, which is how one worker leaf written into several `inParallel` paths finds its batch's answer whichever path runs it:
+
+```json
+{
+  "kind": "inParallel", "id": "pool", "mode": "all", "durable": false, "merge": "concat",
+  "paths": [
+    { "kind": "sequence", "id": "worker-a", "durable": false, "steps": [
+      { "kind": "runCode", "id": "worker-a-pick", "durable": false, "execute": "…", "subprocess": "sandbox" },
+      { "kind": "runCode", "id": "grade", "replayKey": true, "execute": "…", "subprocess": "sandbox" }
+    ] },
+    { "kind": "sequence", "id": "worker-b", "durable": false, "steps": [
+      { "kind": "runCode", "id": "worker-b-pick", "durable": false, "execute": "…", "subprocess": "sandbox" },
+      { "kind": "runCode", "id": "grade", "replayKey": true, "execute": "…", "subprocess": "sandbox" }
+    ] }
+  ]
+}
+```
+
+`from` on an input that is not a JSON object makes the key function throw `INVALID_REPLAY_KEY_INPUT`; the interpreter treats a throwing `replayKey` as it does for code (warn, run the step without replay or recording), so the node still runs. `replayKey` is ignored on a node that is also `durable: false`.
+
+Inside a dynamic `inParallel` (`each`), the hydrator suffixes every template node id with the item index, and replay matches `stepId` as well as the key. A keyed node there therefore replays only when its item lands at the same index — content keys do not survive a reordered `each` input.
 
 ### `callModel`
 
@@ -623,6 +657,7 @@ The JSON Workflow Runtime introduces the following `NoeticConfigError` codes:
 | `UNKNOWN_WORKFLOW_REFERENCE`   | A `subflow` ref names no registered workflow (raised at execution time). |
 | `WORKFLOW_CYCLE`               | Named sub-workflow refs form a cycle (raised at execution time).         |
 | `INVALID_FORK_INPUT`           | A dynamic fork's input does not resolve to an array.                     |
+| `INVALID_REPLAY_KEY_INPUT`     | A `replayKey.from` node's input is not a JSON object (raised by the key function at dispatch; the interpreter downgrades it to a warning). |
 
 ---
 
@@ -745,5 +780,4 @@ const WorkflowDocumentSchema = z.object({
 - **Streaming hydration.** For very large workflows, hydrate nodes lazily as execution reaches them rather than building the entire `Step` tree upfront. This reduces memory pressure and startup latency.
 - **Named context layer resolution for `withContext` nodes.** The current design uses string layer names, but the resolution mechanism is left to the `HydrationContext`. A standardised layer registry (analogous to the tool registry) would make `withContext` nodes portable across different harness configurations.
 - **Workflow versioning and migration.** When `version` increments to `2`, a `migrateV1toV2` function would transform old documents automatically. The version field exists to enable this without breaking existing consumers.
-- **Serializable replay keys.** Programmatic steps can set `replayKey` (`23a-step-level-resume` § Identity) to replay by content rather than position; JSON nodes cannot express a function. A declarative form would list the values to hash — `"replayKey": { "from": ["input", "context.batchId"] }` — and the hydrator would build the key function from it.
 - **Conditional until predicates.** Predicates that inspect specific fields of structured output (e.g., `outputField('status', 'complete')`) rather than treating output as an opaque string.

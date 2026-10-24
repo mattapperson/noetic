@@ -15,6 +15,7 @@ import { getDefaultRegistrar } from '../types/step-registrar';
  * @returns A `StepWithContext` step.
  * @throws `NoeticConfigError` with code `EMPTY_STEP_ID` if `id` is empty.
  * @throws `NoeticConfigError` with code `MISSING_CHILD_STEP` if `child` is not provided.
+ * @throws `NoeticConfigError` with code `MISSING_CONTEXT_LAYERS` if `context` is not provided.
  */
 export function withContext<TContext = ContextData, I = unknown, O = unknown>(
   opts: {

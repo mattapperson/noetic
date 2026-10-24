@@ -399,7 +399,9 @@ export interface AgentHarnessContract<
   disposeLayers(layers: ContextLayer[], ctx: Context): Promise<void>;
   checkpoint(ctx: Context): Promise<void>;
   /**
-   * Rebuild a `Context` from a persisted snapshot. `opts` carries the wiring
+   * Rebuild a `Context` from a persisted snapshot, or from the step-completion
+   * ledger alone when no snapshot was saved (recorded steps replay, the rest run
+   * fresh). Resolves `null` when neither is recorded. `opts` carries the wiring
    * the host attached when it created the original context — without it a
    * decorated context is silently replaced by a bare one on resume.
    */

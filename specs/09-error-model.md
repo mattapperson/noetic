@@ -20,7 +20,11 @@ type NoeticError =
   | { kind: 'cancelled';            reason?: string }
   | { kind: 'budget_exceeded';      field: 'cost' | 'steps' | 'duration'; limit: number; actual: number }
   | { kind: 'item_schema_mismatch'; category: 'items' | 'developerMessages' | 'toolCalls' | 'toolResults'; itemType?: string }
+  | { kind: 'steering_denied';      guidance?: string }
+  | { kind: 'handle_evicted';       handleId: string; stepId: string; gracePeriod: number }
 ```
+
+`steering_denied` is raised when a context layer's `beforeToolCall` or `afterModelCall` hook denies the action (see `11-context-layer-system`); `guidance` carries the layer's reason. `handle_evicted` is raised by `DetachedHandle.await()` when the adapter keeps returning `null` for a handle it previously spawned for longer than `gracePeriod` milliseconds — the handle is gone from the adapter's registry, and waiting longer would poll forever.
 
 ---
 
@@ -29,6 +33,14 @@ type NoeticError =
 ### Step Failure
 
 Retry per policy (see `RetryPolicy` in `02-step-variants`). If retries exhausted, throw `step_failed`. The parent (loop, inParallel, etc.) decides what to do.
+
+### Model Provider Failure
+
+A model call (`callModel`, `decide`) never lets a raw provider error reach the caller of `execute()`. Errors that are already a `NoeticError` or `NoeticConfigError` pass through unchanged; otherwise the error is mapped once, at the step that made the call:
+
+- the context was aborted → `cancelled` (the abort is what broke the call);
+- the provider answered HTTP 429 → `model_rate_limit` with the step's `stepId`;
+- anything else → `step_failed` with the provider error as `cause`.
 
 ### inParallel (see `03-control-flow`)
 
@@ -49,7 +61,7 @@ Treat as `{ stop: true, reason: 'Predicate error: ...' }`. The loop stops. A bro
 
 ### Spawn with Summary Failure (see `04-spawn`)
 
-The child's work succeeded — don't discard it. Throw `spawn_summary_failed` with `childOutput` attached so the caller can fall back to using the raw output.
+The child's work succeeded — don't discard it. When a layer's `onReturn` hook (for example a summarizer) throws or times out, the spawn does **not** throw: it returns the result as it stood before that hook (for a single summarizing layer, the child's raw output), and later layers still run. The failure is reported, not swallowed: the runtime builds a `spawn_summary_failed` error (`stepId`, `childOutput`, `summaryCause`), passes it to the layer state store's diagnostic sink (`diagnostic(layerId, 'onReturn', error)`), and adds a `spawn.summary_failed` event (`stepId`, `layerId`, `message`) to the child's span (the `spawn` span, or the `inParallel.path` span for a path). This matches the `onReturn` row of the hook error table in `11-context-layer-system`. The same applies to `inParallel` paths, whose results pass through `onReturn` the same way.
 
 ### LLM Parse Error
 
@@ -100,7 +112,7 @@ Cancellation covers the whole execution tree rooted at the cancelled context:
    loop mid-flight rather than waiting for a long generation to finish. Tokens
    and cost already spent are charged to the context; the truncated response is
    not returned as the step's output — the step throws `cancelled`.
-6. **Context layer cleanup.** `onComplete` runs with `outcome: 'aborted'`, then `dispose` runs. Both always execute, even under cancellation. If a context layer hook is in-progress when cancellation arrives, the hook is allowed to complete (up to its timeout) before `onComplete`/`dispose` run. Cleanup runs bottom-up: a child context's teardown completes before its parent's.
+6. **Context layer cleanup.** `onComplete` runs with `outcome: 'aborted'`, then `dispose` runs. Both always execute, even under cancellation. If a context layer hook (`recall`, `store`, `beforeToolCall`, `afterModelCall`, `onDecision`) is in-progress on a context when cancellation arrives, the runtime waits for it to settle (up to its timeout) before running that context's `onComplete`/`dispose`. Cleanup runs bottom-up: a child context's teardown completes before its parent's.
 7. **In-progress `store()` calls.** Concurrent `store()` calls are allowed to settle (they use `Promise.allSettled`). The runtime does not abort them — they may write partial results, which is acceptable because `store` is idempotent by convention.
 
 Cancellation is cooperative beyond those points: step code that ignores
@@ -119,13 +131,13 @@ first `abort()` owns `ctx.abortReason` — a later abort does not overwrite it.
 `NoeticConfigError` is a separate class from `NoeticError`. The two are never interchangeable:
 
 - **`NoeticError`** — thrown during execution (LLM failures, inParallel failures, spawn errors, budget exceeded, cancellation). Always has a `kind` discriminant. Caught by callers of `execute()`.
-- **`NoeticConfigError`** — thrown during construction and setup (invalid step config, missing env vars, invalid context layer config, runtime misconfiguration). Always has `code`, `hint`, and optional `docsUrl`. Caught before execution begins.
+- **`NoeticConfigError`** — thrown during construction and setup (invalid step config, missing env vars, invalid context layer config, runtime misconfiguration). Always has `code`, `hint`, and optional `docsUrl`. Raised before execution begins wherever the problem is statically detectable: builders validate their own options, and `AgentHarness.run()` / `execute()` walk the step tree before running any step, raising `NO_LLM_PROVIDER` up front when a statically declared `callModel` or `decide` step has no LLM provider to run on. Problems only visible at run time (a dynamically chosen branch, a lazily resolved model) are raised at the step that hits them.
 
 ```typescript
 class NoeticConfigError extends Error {
   readonly code: string;       // SCREAMING_SNAKE_CASE, e.g. 'MISSING_API_KEY'
   readonly hint: string;       // complete sentence: what the user should do next
-  readonly docsUrl?: string;   // link to the relevant docs page
+  readonly docsUrl: string;    // defaults to the code's section of the error reference
 }
 
 function isNoeticConfigError(e: unknown): e is NoeticConfigError;
@@ -135,9 +147,9 @@ function isNoeticConfigError(e: unknown): e is NoeticConfigError;
 
 1. `code` MUST be `SCREAMING_SNAKE_CASE` and uniquely identify the error condition across the entire framework.
 2. `hint` MUST be a complete sentence. It MUST NOT say "an error occurred" or restate the message.
-3. `docsUrl` SHOULD be provided for any error a new user is likely to hit during setup.
+3. `docsUrl` defaults to the code's section of the error reference, `https://noetic.tools/docs/framework/errors#<code in lower case>`. A throw site MAY pass a more specific page.
 4. Error messages MUST NOT expose internal stack details, file paths, or implementation class names.
-5. Every `code` value MUST appear in `docs/errors.mdx` with an explanation and resolution steps.
+5. Every `code` value MUST have its own section in the error reference (`packages/web/content/docs/framework/errors.mdx`, served at `/docs/framework/errors`), headed by the code itself so its anchor is the code in lower case, with the cause and the fix. A drift test fails when a code thrown in source has no section, or a section names a code no longer thrown.
 6. Construction-time functions (builders, factories, context layer factories) that can throw `NoeticConfigError` MUST document the applicable `code` values in a `@throws` TSDoc tag.
 
 ### Example
@@ -146,7 +158,7 @@ function isNoeticConfigError(e: unknown): e is NoeticConfigError;
 NoeticConfigError: Missing required environment variable.
   code: MISSING_API_KEY
   hint: Set OPENROUTER_API_KEY in your environment or pass an llm config to AgentHarness.
-  docsUrl: https://noetic.tools/docs/errors#MISSING_API_KEY
+  docsUrl: https://noetic.tools/docs/framework/errors#missing_api_key
 ```
 
 ### Type Guards

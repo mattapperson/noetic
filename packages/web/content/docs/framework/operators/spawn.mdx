@@ -46,6 +46,7 @@ Spawn-local context layers control what the child sees and how results are trans
 
 - **`onSpawn` hooks** provide items to the child's initial context. Each layer can inject items (e.g., relevant conversation history, cached knowledge, instructions) into the child's empty `ItemLog`.
 - **`onReturn` hooks** transform the child's results before they flow back to the parent. Layers can summarize, filter, or restructure the output.
+  If an `onReturn` hook throws or times out, the spawn still succeeds: it returns the result as it stood before that hook, and the failure is reported as a [`spawn_summary_failed`](/docs/framework/errors) layer diagnostic and a `spawn.summary_failed` span event.
 
 ```ts
 import { callModel, createMessage, spawn } from '@noetic-tools/core';

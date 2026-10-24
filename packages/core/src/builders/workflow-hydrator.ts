@@ -42,6 +42,7 @@ import { loop } from './loop-builder';
 import { withContext } from './provide-builder';
 import { spawn } from './spawn-builder';
 import { callModel, runCode, step } from './step-builders';
+import { workflowReplayKey } from './workflow-replay-key';
 
 //#region Types
 
@@ -184,13 +185,15 @@ function hydrateCallModelNode(
  * runtime still returns the codec's real value. This is the same erasure the
  * rest of the hydrator applies via `frameworkCast`.
  */
-function availableLibraries(ctx: HydrationContext): string {
-  if (!ctx.uiLibraries || ctx.uiLibraries.size === 0) {
-    return '(none)';
+/** A complete sentence naming what is registered, for a hint. */
+function registeredSentence(noun: string, names: Iterable<string>): string {
+  const list = [
+    ...names,
+  ];
+  if (list.length === 0) {
+    return `No ${noun} are registered.`;
   }
-  return [
-    ...ctx.uiLibraries.keys(),
-  ].join(', ');
+  return `Registered ${noun}: ${list.join(', ')}.`;
 }
 
 function resolveOutputCodec(
@@ -208,7 +211,7 @@ function resolveOutputCodec(
   throw new NoeticConfigError({
     code: 'UNKNOWN_UI_LIBRARY_REFERENCE',
     message: `UI library '${ref.library}' referenced in workflow node '${nodeId}' is not registered.`,
-    hint: `Pass output codecs via HydrationContext.uiLibraries, e.g. new Map([['${ref.library}', openUi(myLibrary)]]) from @noetic-tools/openui. Available: ${availableLibraries(ctx)}`,
+    hint: `Pass output codecs via HydrationContext.uiLibraries, e.g. new Map([['${ref.library}', openUi(myLibrary)]]) from @noetic-tools/openui. ${registeredSentence('UI libraries', ctx.uiLibraries?.keys() ?? [])}`,
   });
 }
 
@@ -225,11 +228,7 @@ function hydrateInvokeToolNode(
     throw new NoeticConfigError({
       code: 'UNKNOWN_TOOL_REFERENCE',
       message: `Tool '${node.toolName}' referenced in workflow node '${node.id}' is not registered.`,
-      hint: `Available tools: ${
-        [
-          ...ctx.tools.keys(),
-        ].join(', ') || '(none)'
-      }`,
+      hint: `Register '${node.toolName}' in HydrationContext.tools before hydrating. ${registeredSentence('tools', ctx.tools.keys())}`,
     });
   }
 
@@ -734,11 +733,7 @@ function resolveTools(
       throw new NoeticConfigError({
         code: 'UNKNOWN_TOOL_REFERENCE',
         message: `Tool '${name}' referenced in workflow is not registered.`,
-        hint: `Available tools: ${
-          [
-            ...registry.keys(),
-          ].join(', ') || '(none)'
-        }`,
+        hint: `Register '${name}' in HydrationContext.tools before hydrating. ${registeredSentence('tools', registry.keys())}`,
       });
     }
     return resolved;
@@ -1013,6 +1008,9 @@ export function hydrateNode(
   // Set in place rather than copied: builders register the step object itself.
   if (node.durable !== undefined) {
     hydrated.durable = node.durable;
+  }
+  if (node.replayKey !== undefined) {
+    hydrated.replayKey = workflowReplayKey(node.id, node.replayKey);
   }
   return hydrated;
 }

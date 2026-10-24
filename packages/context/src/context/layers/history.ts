@@ -122,6 +122,7 @@ function findHeadAnchor(items: ReadonlyArray<Item>, windowStart: number): Item |
  * @public
  * @param config - Optional `{ maxItems }`. Defaults to 40.
  * @returns A `ContextLayer` that contributes only a `projectHistory` hook.
+ * @throws `NoeticConfigError` with code `INVALID_HISTORY_MAX_ITEMS` if `maxItems` is not an integer in the allowed range.
  */
 export function history(config?: HistoryConfig): ContextLayer<null> {
   const maxItems = config?.maxItems ?? DEFAULT_MAX_ITEMS;

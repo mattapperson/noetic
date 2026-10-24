@@ -30,7 +30,7 @@ So today a snapshot exists only if the host calls `harness.checkpoint(ctx)` by h
 
 `captureCheckpoint` serialises the frontier (`harness-checkpoints.ts:51`); `restoreFromCheckpoint` never reads it back. Restoring it would not be enough anyway, for two reasons.
 
-**The frontier records what is in flight, not what finished.** `execute()` pushes a frame before dispatch (`execute.ts:240`) and pops it in a `finally` (`:302`). A completed step leaves no trace. For an `inParallel` of 8 workers where 5 finished and 3 were mid-flight at snapshot time, the frontier holds the `inParallel` plus the 3 — the 5 completed ones are invisible.
+**The frontier records what is in flight, not what finished.** `execute()` adds a frame to the in-flight set before dispatch and removes it in a `finally`. A completed step leaves no trace. For an `inParallel` of 8 workers where 5 finished and 3 were mid-flight at snapshot time, the frontier holds the `inParallel` plus the 3 — the 5 completed ones are invisible.
 
 **Skipping is not enough; the output is load-bearing.** Steps consume the previous step's output. A `callModel` step is non-deterministic, so re-running it to "catch up" produces a different value than the one the rest of the run already observed. Resume therefore has to *replay recorded outputs*, not skip work. It is memoization, not fast-forward.
 
@@ -58,15 +58,21 @@ Failures are **not** recorded: a step that threw re-runs. Retry policies and `on
 
 Dynamic `inParallel` fan-outs are already safe by accident: `buildPerItemStep` suffixes both the wrapper id and the template's node ids with the item index (`workflow-hydrator.ts:688`, `:691`), so `fan-item-0` and `fan-item-1` are distinct. Static `inParallel` steps and loops have no such disambiguation.
 
-The key is the frontier stack plus a per-parent occurrence ordinal:
+The key is the parent step's path plus the step's id and a per-parent occurrence ordinal:
 
 ```
-root/plan#0/review-loop#0/body-llm#2
+/plan#0/review-loop#0/body-llm#2
 ```
 
-`#n` is the n-th time that `stepId` has been dispatched under that parent frame. Derivation is nearly free — `execute()` already maintains the stack; the addition is an occurrence counter per `(parent frame, child stepId)` pair, incremented at `enterStep`.
+`#n` is the n-th time that `stepId` has been dispatched under that parent path. `execute()` takes the ordinal at dispatch, from one counter per `(parent path, child stepId)` pair kept on the context.
 
-**Determinism requirement.** The key must be identical on replay given identical control flow. Sequential constructs satisfy this trivially. Concurrent `inParallel` paths do **not** if the ordinal is assigned on completion — completion order varies run to run. Assign the ordinal from the `paths` array index at dispatch (`execute-control.ts:221`), never from settle order.
+**Every dispatch runs on its own lane.** A path is not read off a shared stack. `ContextImpl.enterStep` returns a *lane*: a view of the context that shares everything (state, item log, usage, abort, ledger) except its execution path, which is the path of the step being dispatched. `execute()` hands the lane to the step, so whatever the step dispatches — through the interpreter or by calling `harness.run(child, input, ctx)` on the context it was given — hangs under that step's path. Concurrent dispatches on one context therefore cannot interleave each other's paths: two top-level `execute()` calls racing on one context each build their own subtree, and the in-flight frontier is a set of frames rather than a stack, so frames may settle in any order. `inParallel` and `spawn` children get their own `ContextImpl` (their state and item log are isolated), prefixed with the dispatching lane's path plus `[i]`.
+
+**Determinism requirement.** The key must be identical on replay given identical control flow. Sequential constructs satisfy this trivially. Concurrent work satisfies it through the rule above: a path depends only on the parent's path, the step id, and the dispatch ordinal, never on settle order.
+
+- Concurrent `inParallel` paths take their `[i]` from the `paths` array index at dispatch (`execute-control.ts`), never from settle order.
+- Concurrent calls with **different step ids** under one parent — including concurrent top-level `execute()` calls on one context — always get distinct, stable paths (`/left#0`, `/right#0`), whatever order they start or finish in.
+- Concurrent calls with **the same step id** under one parent are numbered in dispatch order (`/worker#0`, `/worker#1`). That is stable across a resume only when dispatch order is. When it is not — workers started by a timing-dependent loop, or calls that start after awaiting something of variable length — give the step a `replayKey` (below) instead of relying on the ordinal.
 
 **Replay identity is positional.** A path names *where* a step ran, not *what* it ran on. When the work a position receives is timing-dependent — concurrent workers pulling batches from a shared queue — the same path can carry a different batch on resume, and positional replay hands one batch's answer to another. Two per-step fields cover this, both on every step kind (`StepReplay` in `packages/types/src/types/step.ts`):
 
@@ -82,6 +88,8 @@ interface StepReplay<TContext, I> {
 
 `execute()` resolves the key once per dispatch (`resolveLedgerKey`): no key when `durable === false` or the kind is `schedule`; `key:<replayKey>` when a `replayKey` is set; the path otherwise. A `replayKey` that throws costs that dispatch its durability, never its run: the interpreter warns and executes the step without replay or recording.
 
+JSON workflow nodes carry both: `durable` as a boolean, and `replayKey` in a declarative form (`true`, or `{ from: [...] }` naming input properties) that the hydrator builds into the function (`26-json-workflow-runtime` § Replay keys).
+
 The pattern these compose into: mark orchestration `durable: false`, give each expensive leaf a `replayKey`, and resume replays the paid calls while the cheap structure re-runs and reapplies its state.
 
 ### Recording
@@ -90,7 +98,7 @@ Append on successful return, at the point `step_completed` is emitted (`execute.
 
 ### Replay
 
-On `restore`, the ledger is loaded into the context. In `execute()`, before dispatch:
+On `restore`, the ledger is loaded into the context. The ledger alone is enough: an execution with ledger entries but no snapshot restores to a context with its original id and ledger and nothing else (`23-durable-execution` § Restore flow), so its recorded steps replay and the rest run fresh. An execution with neither restores to `null` — a fresh start. In `execute()`, before dispatch:
 
 1. Compute the path key.
 2. If an entry exists at that key **and** its `stepId` and `kind` match the step about to run, return `entry.output` without dispatching.
@@ -218,9 +226,15 @@ Hosts need it in two situations:
 - Concurrent records (inParallel legs through one shared ledger) land on distinct keys.
 - A resumed ledger never reuses a live sequence number, even when retention left a gap.
 - `harness.clearCheckpoint` removes the snapshot and every ledger shard.
+- Ledger entries with no snapshot: `restore` returns a context with the original id and an empty item log; recorded steps replay, unrecorded ones run.
+- No snapshot and no ledger entry: `restore` returns `null`.
+- A snapshot with an unknown schema version throws `CHECKPOINT_SCHEMA_MISMATCH` even when a ledger exists.
 - `durable: false` writes no entry; the step re-runs on resume and its state change is applied again.
 - A durable child under a non-durable parent still replays while the parent re-runs.
 - `replayKey`: two concurrent workers whose batches swap between runs each replay their own batch's output.
+- Two concurrent top-level `execute()` calls on one context: no frontier warnings, the same paths whichever settles first, and a resume replays both.
+- Same-id concurrent calls under one parent are numbered in dispatch order.
+- A step that writes `ctx.state` on its lane changes the context's state.
 - A different `stepId` or `kind` under a recorded `key:` re-runs fresh and discards only that entry.
 - `schedule` resolves no ledger key, whatever its `durable` says.
 - A throwing `replayKey` skips the ledger for that dispatch and does not fail the step.
@@ -256,7 +270,3 @@ without descending. This is right for a true resume and wrong for a *changed* wo
 editing a child under an unchanged parent has no effect on resume. A host that edited the
 workflow must clear the ledger rather than resume onto it. Divergence detection therefore
 catches a changed step at a recorded path, not a changed step beneath one.
-
-## Future Considerations
-
-- **Serializable replay keys for JSON workflows.** `replayKey` is a function, so JSON workflow nodes carry only `durable`. A JSON form would name the inputs to hash instead — for example `replayKey: { from: ["input", "context.batchId"] }` — with the hydrator building the function from that list.

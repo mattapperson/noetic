@@ -232,6 +232,68 @@ describe('executeSpawn', () => {
 
       expect(result).toBe('transformed:raw-output');
     });
+
+    it('returns the raw child output and reports spawn_summary_failed when onReturn throws', async () => {
+      const parentCtx = new ContextImpl({
+        harness: makeMockHarness(),
+      });
+      const diagnostics: Array<{
+        layerId: string;
+        hook: string;
+        error: unknown;
+      }> = [];
+      const layerStore = createLayerStateStore((layerId, hook, error) => {
+        diagnostics.push({
+          layerId,
+          hook,
+          error,
+        });
+      });
+      layerStore.set(parentCtx.id, 'summarizer', {
+        active: true,
+      });
+
+      const layer = makeLayer('summarizer', {
+        slot: Slot.WORKING_MEMORY,
+        hooks: {
+          onSpawn: async ({ parentState }) => ({
+            childState: parentState,
+          }),
+          onReturn: async () => {
+            throw new Error('summarizer unavailable');
+          },
+        },
+      });
+
+      const step = makeSpawnStep<ContextData, string, string>(
+        'summary-fails',
+        async () => 'raw-output',
+        {
+          context: [
+            layer,
+          ],
+        },
+      );
+
+      const result = await executeSpawn(step, '', parentCtx, simpleExecute, {
+        layerStore,
+        parentLayers: [
+          layer,
+        ],
+      });
+
+      expect(result).toBe('raw-output');
+      expect(diagnostics).toHaveLength(1);
+      const [diagnostic] = diagnostics;
+      assert(diagnostic !== undefined);
+      expect(diagnostic.hook).toBe('onReturn');
+      assert(isNoeticError(diagnostic.error));
+      const reported = diagnostic.error.noeticError;
+      assert(reported.kind === 'spawn_summary_failed');
+      expect(reported.stepId).toBe('summary-fails');
+      expect(reported.childOutput).toBe('raw-output');
+      expect(reported.summaryCause.message).toBe('summarizer unavailable');
+    });
   });
 
   describe('spawn-local memory replaces parent layers', () => {

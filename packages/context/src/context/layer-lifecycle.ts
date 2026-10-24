@@ -16,6 +16,7 @@ import {
   estimateTokens,
   frameworkCast,
   NoeticConfigError,
+  NoeticErrorImpl,
   SteeringAction,
 } from '@noetic-tools/types';
 import { createScopedStorage, resolveScopeKey } from './scope';
@@ -118,6 +119,12 @@ interface SpawnLayersParams {
 
 interface ReturnLayersParams<T = unknown> {
   layers: ContextLayer[];
+  /**
+   * Id of the spawn (or inParallel) step whose child is returning. Names the
+   * step in `spawn_summary_failed` diagnostics; defaults to the child's
+   * execution id.
+   */
+  stepId?: string;
   parentCtx: ExecutionContext;
   childCtx: ExecutionContext;
   childLog: ItemLog;
@@ -436,6 +443,41 @@ function layerItemSchemas(
   base = defaultItemSchemaRegistry,
 ): ItemSchemaRegistry {
   return base.extend(layer.itemSchemas);
+}
+
+/** Span event added to the child's span when a layer's `onReturn` hook fails. */
+export const SPAWN_SUMMARY_FAILED_EVENT = 'spawn.summary_failed';
+
+interface SummaryFailure {
+  layerId: string;
+  stepId: string;
+  childOutput: unknown;
+  cause: unknown;
+  childCtx: ExecutionContext;
+  store: LayerStateStore;
+}
+
+function reportSummaryFailure({
+  layerId,
+  stepId,
+  childOutput,
+  cause,
+  childCtx,
+  store,
+}: SummaryFailure): void {
+  const summaryCause = cause instanceof Error ? cause : new Error(String(cause));
+  const error = new NoeticErrorImpl({
+    kind: 'spawn_summary_failed',
+    stepId,
+    childOutput,
+    summaryCause,
+  });
+  childCtx.trace.addEvent(SPAWN_SUMMARY_FAILED_EVENT, {
+    stepId,
+    layerId,
+    message: summaryCause.message,
+  });
+  store.diagnostic(layerId, 'onReturn', error);
 }
 
 //#endregion
@@ -965,8 +1007,16 @@ export async function spawnLayers({
   return results;
 }
 
+/**
+ * Pipes a child's result through each layer's `onReturn` hook in slot order.
+ *
+ * A failing hook never fails the spawn: the child's work already succeeded,
+ * so the result passes on unchanged and the failure is reported as a
+ * `spawn_summary_failed` diagnostic plus a span event on the child's span.
+ */
 export async function returnLayers<T>({
   layers,
+  stepId,
   parentCtx,
   childCtx,
   childLog,
@@ -1009,7 +1059,14 @@ export async function returnLayers<T>({
         currentResult = returnResult.result;
       }
     } catch (e) {
-      store.diagnostic(layer.id, 'onReturn', e);
+      reportSummaryFailure({
+        layerId: layer.id,
+        stepId: stepId ?? childCtx.executionId,
+        childOutput: currentResult,
+        cause: e,
+        childCtx,
+        store,
+      });
     }
   }
 

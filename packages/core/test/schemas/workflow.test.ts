@@ -529,6 +529,80 @@ describe('WorkflowNodeSchema — durable', () => {
   });
 });
 
+describe('WorkflowNodeSchema — replayKey', () => {
+  const grade = {
+    kind: 'runCode',
+    id: 'grade',
+    execute: 'grade()',
+  } as const;
+
+  test('accepts replayKey: true', () => {
+    const result = WorkflowNodeSchema.safeParse({
+      ...grade,
+      replayKey: true,
+    });
+    expect(result.success).toBe(true);
+    expect(result.data?.replayKey).toBe(true);
+  });
+
+  test('accepts replayKey.from with input property names', () => {
+    const result = WorkflowNodeSchema.safeParse({
+      ...grade,
+      replayKey: {
+        from: [
+          'batchId',
+          'sample',
+        ],
+      },
+    });
+    expect(result.success).toBe(true);
+    expect(result.data?.replayKey).toEqual({
+      from: [
+        'batchId',
+        'sample',
+      ],
+    });
+  });
+
+  test.each([
+    [
+      'false',
+      false,
+    ],
+    [
+      'a string',
+      'input',
+    ],
+    [
+      'an empty from list',
+      {
+        from: [],
+      },
+    ],
+    [
+      'an empty property name',
+      {
+        from: [
+          '',
+        ],
+      },
+    ],
+    [
+      'a from that is not a list',
+      {
+        from: 'batchId',
+      },
+    ],
+  ])('rejects %s', (_label, replayKey) => {
+    expect(
+      WorkflowNodeSchema.safeParse({
+        ...grade,
+        replayKey,
+      }).success,
+    ).toBe(false);
+  });
+});
+
 describe('UntilPredicateSchema', () => {
   test('validates maxSteps', () => {
     const pred = {

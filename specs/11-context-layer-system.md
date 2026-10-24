@@ -928,7 +928,7 @@ The ItemLog's rendering is handled by the Projector natively. Context layers get
 | `beforeToolCall`  | Error **logged**. Tool call proceeds as if hook returned `void`.        |
 | `afterModelCall`  | Error **logged**. Turn continues as if hook returned `void`.            |
 | `onSpawn`         | Layer **unavailable** in child. Warning emitted.                        |
-| `onReturn`        | Error **logged**. Parent state unchanged.                               |
+| `onReturn`        | Error **logged** as a `spawn_summary_failed` diagnostic plus a `spawn.summary_failed` span event. Parent state and result unchanged — the spawn returns the result as it stood before the hook. |
 | `onComplete`      | Error **logged**.                                                       |
 | `dispose`         | Error **logged**. Must not prevent other layer cleanup.                 |
 | `onDecision`      | Error **logged**. Later layers still run.                               |

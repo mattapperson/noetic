@@ -101,8 +101,8 @@ A failing `store.save` is logged via `console.warn` and swallowed. **A failing c
 
 `harness.restore(executionId, opts?)` reverses a snapshot:
 
-1. Reads the snapshot via `checkpointStore.load(executionId)`. Returns `null` if no snapshot is recorded.
-2. Validates `schemaVersion` (throws `CHECKPOINT_SCHEMA_MISMATCH` on mismatch).
+1. Reads the snapshot via `checkpointStore.load(executionId)`, and the step ledger (`23a-step-level-resume`). Returns `null` only when neither is recorded; with a ledger but no snapshot it takes the ledger-only path below.
+2. Validates `schemaVersion` (throws `CHECKPOINT_SCHEMA_MISMATCH` on mismatch). A mismatched snapshot is never bypassed in favour of the ledger — the host clears and starts fresh.
 3. Replays `layers` into `harness.layerStateStore` keyed by the original `executionId`, so context projectors and `ctx.context[layerId]` accessors observe continuity across the restart.
    Refills `channels` into the harness's channel store — value-mode values and queued items — for every channel with no live state, and records the execution as a user of each (see `06-channels`, Lifecycle). A snapshot without `channels` restores no channel state.
 4. Re-parses `itemLog.items` through `harness.itemSchemas` to recover typed `Item[]`.
@@ -110,7 +110,9 @@ A failing `store.save` is logged via `console.warn` and swallowed. **A failing c
 6. Overrides the returned context's `.id` to the original `executionId` so downstream adapter-correlation keeps working.
 7. Attaches the recovered step ledger (`23a-step-level-resume`) keyed to that same id.
 
-The returned `Context` is API-compatible with the pre-crash one: layer state is accessible, item log is replayed in order, cwd is restored, identity matches. The caller resumes execution from whatever the frontier requires — for an interactive agent, this is typically re-issuing the most recent user turn; for a long-running runner, it is the runner loop's own resume logic.
+**Ledger-only restore.** A run whose snapshot writes failed (a save failure is swallowed, see above) leaves its step ledger behind. `restore` then builds the context as `createContext(opts)` would — empty item log, no restored layer or channel state, the harness's root cwd, a fresh thread id — overrides its `id` to `executionId`, and attaches the recovered ledger. Recorded steps replay; the rest run fresh. Layer `init` runs normally on the first `run()`, since there is no restored state for it to keep.
+
+The returned `Context` from a snapshot restore is API-compatible with the pre-crash one: layer state is accessible, item log is replayed in order, cwd is restored, identity matches. The caller resumes execution from whatever the frontier requires — for an interactive agent, this is typically re-issuing the most recent user turn; for a long-running runner, it is the runner loop's own resume logic.
 
 ### Host context wiring is the caller's to supply
 

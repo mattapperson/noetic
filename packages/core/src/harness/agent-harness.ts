@@ -43,6 +43,7 @@ import {
   dispatchStepThroughAdapter,
   execute,
   prepareBandedView,
+  someStep,
 } from './deps/interpreter';
 import type {
   ChannelWarning,
@@ -122,7 +123,7 @@ import type {
 } from './deps/types';
 import { SteeringAction } from './deps/types';
 import type { SessionCtxExtension } from './model-call';
-import { AgentHarnessModelCaller } from './model-call';
+import { AgentHarnessModelCaller, noLlmProviderError } from './model-call';
 
 export { createStreamIdleWatchdog } from './model-call';
 
@@ -547,6 +548,12 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   private readonly initializedExecutions = new Set<string>();
   /** Executions restored from a checkpoint: their first layer init keeps the restored state. */
   private readonly restoredExecutions = new Set<string>();
+  /**
+   * Layer hooks still running per context. `cancel()` waits for them before
+   * `onComplete`/`dispose`, so teardown never races a half-finished `store`
+   * or `recall`. Each hook is bounded by its own timeout.
+   */
+  private readonly runningHooks = new WeakMap<Context, Set<Promise<unknown>>>();
   readonly traceExporter: TraceExporter;
   /**
    * Long-lived shared cwd state. The same reference is seeded into every
@@ -641,6 +648,9 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
           hint: 'Pass `agentGraph` in constructor options, or use run() directly.',
         }),
       );
+    }
+    if (this.lacksModelFor(this.agentGraph)) {
+      return Promise.reject(noLlmProviderError());
     }
 
     const threadId = options?.threadId ?? DEFAULT_THREAD_ID;
@@ -866,18 +876,24 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     record: DecisionRecord,
     ctx: Context,
   ): Promise<void> {
-    await notifyDecision({
-      layers,
-      record,
-      ctx: this.toExecCtx(ctx),
-      store: this.layerStateStore,
-      recallCache: this.recallCache,
-    });
+    await this.trackHook(
+      ctx,
+      notifyDecision({
+        layers,
+        record,
+        ctx: this.toExecCtx(ctx),
+        store: this.layerStateStore,
+        recallCache: this.recallCache,
+      }),
+    );
   }
 
   //#endregion
 
   async run<I, O>(s: Step<ContextData, I, O>, input: I, ctx: Context): Promise<O> {
+    if (this.lacksModelFor(s)) {
+      throw noLlmProviderError();
+    }
     // Populate the unified tool pool when an embedder drives a step directly on
     // a bare `createContext()` context (the turn pipeline does this per turn).
     // Without it, steps that resolve tools dynamically from `ctx.unifiedTools`
@@ -893,6 +909,22 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     // `execute()`/`seedSessionHistory`. Idempotent — see `ensureLayersInit`.
     await this.ensureLayersInit(ctx);
     return this.executeClosingChannels(s, input, ctx);
+  }
+
+  /**
+   * Whether `step` calls a model this harness has no credentials for. Checked
+   * before any step runs so a missing provider fails fast instead of after
+   * earlier steps' side effects. Steps the walk cannot see (dynamic branches)
+   * still hit the same error lazily at their model call.
+   */
+  private lacksModelFor<I, O>(step: Step<ContextData, I, O>): boolean {
+    if (this.client || this.callModelOverride) {
+      return false;
+    }
+    return someStep(
+      frameworkCast<Step>(step),
+      (s) => s.kind === 'callModel' || (s.kind === 'decide' && !this.decideOverride),
+    );
   }
 
   /** Run all layer `init` hooks before the first step executes. Per spec 11,
@@ -1115,15 +1147,18 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     input: string,
     ctx: Context,
   ): Promise<RecallLayerOutput[]> {
-    return recallLayers({
-      layers,
-      query: input,
-      ctx: this.toExecCtx(ctx),
-      log: ctx.itemLog,
-      budgets: this.layerBudgets(layers),
-      store: this.layerStateStore,
-      itemSchemas: this.itemSchemas,
-    });
+    return this.trackHook(
+      ctx,
+      recallLayers({
+        layers,
+        query: input,
+        ctx: this.toExecCtx(ctx),
+        log: ctx.itemLog,
+        budgets: this.layerBudgets(layers),
+        store: this.layerStateStore,
+        itemSchemas: this.itemSchemas,
+      }),
+    );
   }
 
   /** Allocate per-layer recall budgets from the harness projection policy. */
@@ -1150,17 +1185,20 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     budgets: Map<string, number>,
     opts?: RecallOptions,
   ): Promise<RecallLayerOutput[]> {
-    return recallLayersAtomic({
-      layers,
-      query: input,
-      ctx: this.toExecCtx(ctx),
-      log: ctx.itemLog,
-      budgets,
-      store: this.layerStateStore,
-      itemSchemas: this.itemSchemas,
-      forceAtomic: this.config.forceAtomicRecall,
-      peek: opts?.peek,
-    });
+    return this.trackHook(
+      ctx,
+      recallLayersAtomic({
+        layers,
+        query: input,
+        ctx: this.toExecCtx(ctx),
+        log: ctx.itemLog,
+        budgets,
+        store: this.layerStateStore,
+        itemSchemas: this.itemSchemas,
+        forceAtomic: this.config.forceAtomicRecall,
+        peek: opts?.peek,
+      }),
+    );
   }
 
   async recallLayersEventual(
@@ -1170,18 +1208,21 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     budgets: Map<string, number>,
     opts?: RecallOptions,
   ): Promise<RecallLayerOutput[]> {
-    return recallLayersEventual({
-      layers,
-      query: input,
-      ctx: this.toExecCtx(ctx),
-      log: ctx.itemLog,
-      budgets,
-      store: this.layerStateStore,
-      itemSchemas: this.itemSchemas,
-      forceAtomic: this.config.forceAtomicRecall,
-      cache: this.recallCache,
-      peek: opts?.peek,
-    });
+    return this.trackHook(
+      ctx,
+      recallLayersEventual({
+        layers,
+        query: input,
+        ctx: this.toExecCtx(ctx),
+        log: ctx.itemLog,
+        budgets,
+        store: this.layerStateStore,
+        itemSchemas: this.itemSchemas,
+        forceAtomic: this.config.forceAtomicRecall,
+        cache: this.recallCache,
+        peek: opts?.peek,
+      }),
+    );
   }
 
   /**
@@ -1259,15 +1300,18 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     if (!storage) {
       return;
     }
-    await storeLayers({
-      layers,
-      response,
-      ctx: this.toExecCtx(ctx),
-      log: ctx.itemLog,
-      store: this.layerStateStore,
-      storage,
-      recallCache: this.recallCache,
-    });
+    await this.trackHook(
+      ctx,
+      storeLayers({
+        layers,
+        response,
+        ctx: this.toExecCtx(ctx),
+        log: ctx.itemLog,
+        store: this.layerStateStore,
+        storage,
+        recallCache: this.recallCache,
+      }),
+    );
   }
 
   async disposeLayers(layers: ContextLayer[], ctx: Context): Promise<void> {
@@ -1307,8 +1351,11 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   }
 
   /**
-   * Rebuild a `Context` from a previously-persisted snapshot. Returns `null`
-   * if no snapshot is recorded for `executionId`. Surface a typed
+   * Rebuild a `Context` from what a previous run of `executionId` recorded: its
+   * checkpoint snapshot, its step-completion ledger, or both. Without a snapshot the
+   * context starts empty (no item log or layer state) but keeps the execution id and
+   * ledger, so recorded steps replay and the rest run fresh. Returns `null` when
+   * neither is recorded — start a fresh execution. Surface a typed
    * `NoeticConfigError(CHECKPOINT_SCHEMA_MISMATCH)` when the snapshot's
    * schema version is unrecognised — the caller is expected to discard the
    * checkpoint via `CheckpointStore.clear()` and start a fresh execution.
@@ -1326,11 +1373,14 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
    * whose `id` is already the original `executionId`.
    */
   async restore(executionId: string, opts?: RestoreCheckpointOptions): Promise<Context | null> {
-    const ctx = await restoreFromCheckpoint(this, executionId, opts);
-    if (ctx) {
-      this.restoredExecutions.add(ctx.id);
+    const restored = await restoreFromCheckpoint(this, executionId, opts);
+    if (!restored) {
+      return null;
     }
-    return ctx;
+    if (restored.fromSnapshot) {
+      this.restoredExecutions.add(executionId);
+    }
+    return restored.ctx;
   }
 
   /**
@@ -1367,7 +1417,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
    * `cancelled`.
    *
    * Cancellation is cooperative: a layer hook already in flight is allowed to
-   * settle, and step code that ignores `ctx.aborted` between `await`s runs to
+   * settle (up to its timeout) before that context's teardown, and step code that ignores `ctx.aborted` between `await`s runs to
    * its next boundary. Calling `cancel()` on an already-cancelled context is a
    * no-op.
    */
@@ -1390,15 +1440,17 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   }
 
   /**
-   * Run the layer lifecycle's abort path for one cancelled context:
-   * `onComplete` with `outcome: 'aborted'`, then `dispose`. Both always run
-   * under cancellation (spec 09, Cancellation item 5).
+   * Run the layer lifecycle's abort path for one cancelled context: wait for
+   * its in-flight layer hooks to settle, then `onComplete` with
+   * `outcome: 'aborted'`, then `dispose`. Both always run under cancellation
+   * (spec 09, Cancellation item 6).
    */
   private async teardownCancelledContext(ctx: Context): Promise<void> {
     const layers = ctx.layers ?? [];
     if (layers.length === 0) {
       return;
     }
+    await Promise.allSettled(this.runningHooks.get(ctx) ?? []);
     await completeLayers({
       layers: [
         ...layers,
@@ -1466,14 +1518,17 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
         action: SteeringAction.Allow,
       };
     }
-    return beforeToolCallLayers({
-      layers,
-      toolName,
-      toolArgs,
-      callId,
-      ctx: this.toExecCtx(ctx),
-      store: this.layerStateStore,
-    });
+    return this.trackHook(
+      ctx,
+      beforeToolCallLayers({
+        layers,
+        toolName,
+        toolArgs,
+        callId,
+        ctx: this.toExecCtx(ctx),
+        store: this.layerStateStore,
+      }),
+    );
   }
 
   async afterModelCall(
@@ -1487,12 +1542,30 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
         action: SteeringAction.Allow,
       };
     }
-    return afterModelCallLayers({
-      layers,
-      response,
-      ctx: this.toExecCtx(ctx),
-      store: this.layerStateStore,
-    });
+    return this.trackHook(
+      ctx,
+      afterModelCallLayers({
+        layers,
+        response,
+        ctx: this.toExecCtx(ctx),
+        store: this.layerStateStore,
+      }),
+    );
+  }
+
+  /** Record `hook` as running on `ctx` until it settles (see `runningHooks`). */
+  private trackHook<T>(ctx: Context, hook: Promise<T>): Promise<T> {
+    let running = this.runningHooks.get(ctx);
+    if (!running) {
+      running = new Set();
+      this.runningHooks.set(ctx, running);
+    }
+    running.add(hook);
+    const forget = (): void => {
+      running.delete(hook);
+    };
+    hook.then(forget, forget);
+    return hook;
   }
 
   async projectHistory(

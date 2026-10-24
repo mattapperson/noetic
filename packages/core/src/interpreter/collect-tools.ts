@@ -1,5 +1,6 @@
 import type { Step, Tool } from '@noetic-tools/types';
 import { frameworkCast, isServerToolSpec } from '@noetic-tools/types';
+import { stepChildren } from './step-walk';
 
 /**
  * Recursively walks a step tree and collects all Tool instances
@@ -32,67 +33,23 @@ export function deduplicateTools(tools: ReadonlyArray<Tool>): Tool[] {
 }
 
 function walkStep(step: Step, out: Tool[]): void {
-  switch (step.kind) {
-    case 'callModel':
-      // Skip function-form tools: they're resolved per execution from `ctx`
-      // and cannot contribute to the pre-computed unified set. Consumers that
-      // need those tools in the pool should register them via
-      // `AgentHarness.tools` instead. Inline server-tool specs (web search/
-      // fetch) are not client `Tool`s — they never enter the unified pool.
-      if (Array.isArray(step.tools)) {
-        for (const entry of step.tools) {
-          if (!isServerToolSpec(entry)) {
-            out.push(entry);
-          }
-        }
-      }
-      return;
-
-    case 'runCode':
-    case 'invokeTool':
-    // Decide steps ask questions; they never call tools.
-    case 'decide':
-    // An ACP agent runs its own tools inside the external agent process; it
-    // contributes nothing to the host unified tool set.
-    case 'acp-agent':
-      return;
-
-    case 'conditional':
-      if (step._optimizable) {
-        for (const child of step._optimizable) {
-          walkStep(child, out);
-        }
-      }
-      return;
-
-    case 'inParallel':
-      if (step._optimizable) {
-        for (const child of step._optimizable) {
-          walkStep(child, out);
-        }
-      }
-      return;
-
-    case 'withContext':
-      walkStep(step.child, out);
-      return;
-
-    case 'spawn':
-      walkStep(step.child, out);
-      return;
-
-    case 'loop':
-      for (const child of step.steps) {
-        walkStep(child, out);
-      }
-      return;
-
-    case 'schedule':
-      walkStep(step.step, out);
-      return;
-
-    default:
-      step satisfies never;
-      return;
+  if (step.kind !== 'callModel') {
+    for (const child of stepChildren(step)) {
+      walkStep(child, out);
+    }
+    return;
+  }
+  // Skip function-form tools: they're resolved per execution from `ctx`
+  // and cannot contribute to the pre-computed unified set. Consumers that
+  // need those tools in the pool should register them via
+  // `AgentHarness.tools` instead. Inline server-tool specs (web search/
+  // fetch) are not client `Tool`s — they never enter the unified pool.
+  if (!Array.isArray(step.tools)) {
+    return;
+  }
+  for (const entry of step.tools) {
+    if (!isServerToolSpec(entry)) {
+      out.push(entry);
+    }
   }
 }

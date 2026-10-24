@@ -152,7 +152,6 @@ function validateAcpAgentOpts<TContext, O, I>(opts: StepAcpAgentOpts<TContext, O
  *   adapter can dispatch it by id.
  * @throws `NoeticConfigError` with code `EMPTY_STEP_ID` if `id` is empty.
  * @throws `NoeticConfigError` with code `MISSING_EXECUTE_FUNCTION` if `execute` is not provided.
- * @throws `NoeticConfigError` with code `DUPLICATE_STEP_ID` if another step with the same id is already registered with a different body.
  */
 export function runCode<TContext = ContextData, I = unknown, O = unknown>(
   opts: RunCodeOpts<TContext, I, O>,
