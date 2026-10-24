@@ -136,7 +136,7 @@ export class ChannelStore {
    *
    * External callers use `ChannelHandle.send` (sync, drop-oldest) instead.
    */
-  send<T>(channel: Channel<T>, value: T, opts?: ChannelSendOpts): Promise<void> {
+  send<T>(channel: Channel<T>, value: NoInfer<T>, opts?: ChannelSendOpts): Promise<void> {
     const state = this.getOrCreate(channel);
     let result: Promise<void> = RESOLVED;
 

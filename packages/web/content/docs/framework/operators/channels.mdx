@@ -135,7 +135,7 @@ Channels are accessed through the [Context](/docs/framework/context) or [AgentHa
 
 | Method | Signature | Description |
 |---|---|---|
-| `ctx.send` | `send<T>(channel: Channel<T>, value: T): Promise<void>` | Send a value. Resolves immediately unless a queue channel is at capacity, in which case it parks until a consumer frees a slot (default 30s timeout → `channel_timeout`; abort → `cancelled`). |
+| `ctx.send` | `send<T>(channel: Channel<T>, value: NoInfer<T>): Promise<void>` | Send a value. Resolves immediately unless a queue channel is at capacity, in which case it parks until a consumer frees a slot (default 30s timeout → `channel_timeout`; abort → `cancelled`). |
 | `ctx.recv` | `recv<T>(channel: Channel<T>, opts?: { timeout?: number }): Promise<T>` | Wait for a value. Throws `channel_timeout` on expiry (default 30s). Rejects with `cancelled` if the context is aborted while waiting — even with `timeout: 0`. |
 | `ctx.tryRecv` | `tryRecv<T>(channel: Channel<T>): T \| null` | Non-blocking read. Returns `null` if nothing is available. |
 

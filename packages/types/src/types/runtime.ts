@@ -343,7 +343,7 @@ export interface AgentHarnessContract<
    * consumer frees a slot (30s default timeout → `channel_timeout`; context
    * abort → `cancelled`).
    */
-  send<T>(channel: Channel<T>, value: T, ctx: Context): Promise<void>;
+  send<T>(channel: Channel<T>, value: NoInfer<T>, ctx: Context): Promise<void>;
   recv<T>(
     channel: Channel<T>,
     ctx: Context,

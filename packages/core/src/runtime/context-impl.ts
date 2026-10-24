@@ -296,7 +296,7 @@ export class ContextImpl implements Context<ContextData> {
     return this.channelStore.recv(ch, opts?.timeout, this._abortController.signal);
   }
 
-  send<T>(ch: Channel<T>, value: T): Promise<void> {
+  send<T>(ch: Channel<T>, value: NoInfer<T>): Promise<void> {
     if (!this.channelStore) {
       return Promise.reject(new Error('No channel store configured'));
     }

@@ -70,7 +70,7 @@ runCode({
 });
 ```
 
-The channel object IS the connection. If you pass the same `Channel<string[]>` to both a writer and a reader, TypeScript guarantees type compatibility at compile time.
+The channel object IS the connection. If you pass the same `Channel<string[]>` to both a writer and a reader, TypeScript guarantees type compatibility at compile time. Every `send` signature takes the value as `NoInfer<T>`, so the channel alone fixes `T`: a wider value (a plain `string` sent to a `Channel<'running' | 'done' | 'error'>`) is a compile error instead of widening `T`.
 
 ---
 

@@ -1023,7 +1023,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     });
   }
 
-  send<T>(channel: Channel<T>, value: T, ctx: Context): Promise<void> {
+  send<T>(channel: Channel<T>, value: NoInfer<T>, ctx: Context): Promise<void> {
     // Internal sender: back-pressured on full queue channels. The calling
     // context's abort signal rejects a parked send with 'cancelled'.
     const signal = ctx instanceof ContextImpl ? ctx.abortSignal : undefined;

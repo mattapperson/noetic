@@ -91,11 +91,13 @@ The `Context` object provides three methods for channel interaction:
 
 ```ts validate=none
 interface Context {
-  send<T>(channel: Channel<T>, value: T): Promise<void>;
+  send<T>(channel: Channel<T>, value: NoInfer<T>): Promise<void>;
   recv<T>(channel: Channel<T>, opts?: { timeout?: number }): Promise<T>;
   tryRecv<T>(channel: Channel<T>): T | null;
 }
 ```
+
+`NoInfer<T>` makes the channel alone fix `T`: sending a plain `string` to a `Channel<'running' | 'done'>` is a compile error rather than widening `T` to `string`.
 
 | Method | Description |
 |---|---|

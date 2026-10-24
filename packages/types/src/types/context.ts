@@ -113,7 +113,7 @@ export interface Context<TContext = ContextData, TState = unknown> {
    * (back-pressure): after the default 30s timeout it rejects with
    * `channel_timeout`, and aborting the context rejects it with `cancelled`.
    */
-  send<T>(channel: Channel<T>, value: T): Promise<void>;
+  send<T>(channel: Channel<T>, value: NoInfer<T>): Promise<void>;
   tryRecv<T>(channel: Channel<T>): T | null;
   checkpoint(): Promise<void>;
   complete<T>(value: T): void;

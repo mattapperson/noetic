@@ -45,7 +45,7 @@ interface Context<TState = unknown> {
 
   // Channel operations (thin wrappers over runtime.send/recv, see 06-channels)
   recv<T>(channel: Channel<T>, opts?: { timeout?: number }): Promise<T>;
-  send<T>(channel: Channel<T>, value: T): void;
+  send<T>(channel: Channel<T>, value: NoInfer<T>): Promise<void>;
 
   // Non-blocking channel read (see 06-channels)
   tryRecv<T>(channel: Channel<T>): T | null;

@@ -326,7 +326,7 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
   setRootCwd(nextCwd: string): void;  // host (e.g. TUI) reports a `! cd`
 
   // Channel operations (the agent harness owns the backing store)
-  send<T>(channel: Channel<T>, value: T, ctx: Context): void;
+  send<T>(channel: Channel<T>, value: NoInfer<T>, ctx: Context): Promise<void>;
   recv<T>(channel: Channel<T>, ctx: Context, opts?: { timeout?: number }): Promise<T>;
   tryRecv<T>(channel: Channel<T>, ctx: Context): T | null;
 
