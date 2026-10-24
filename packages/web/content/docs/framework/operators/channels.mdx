@@ -275,7 +275,7 @@ await ctx.send(scores, 'high'); // Throws ZodError: Expected number, received st
 - A parked send rejects with `channel_timeout` after 30 seconds (the value never enters the queue).
 - Aborting the sending context rejects a parked send with `cancelled`.
 
-External senders are different: `ChannelHandle.send` is synchronous and never blocks. At capacity it drops the **oldest** queued item (with a warning) so external callers like HTTP handlers can't be wedged by a full queue.
+External senders are different: `ChannelHandle.send` is synchronous and never blocks. At capacity it drops the **oldest** queued item so external callers like HTTP handlers can't be wedged by a full queue. The drop is recorded as a `channel.warning` span event (`kind: 'overflow_drop'`) on each live root's span, or printed to the console when nothing is tracing — see [Observability](/docs/framework/observability#channel-warnings).
 
 ## Mode Comparison
 

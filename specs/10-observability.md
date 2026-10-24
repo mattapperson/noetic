@@ -130,6 +130,19 @@ Each callModel step stamps how its view was banded onto the step's span, so an e
 
 ---
 
+## Channel Warnings
+
+Channel conditions that lose data or risk a stall without failing the run (see `06-channels`) are recorded as a `channel.warning` span event (`NoeticEvent.CHANNEL_WARNING`). Channel state is shared by every root execution on a harness, so the event is added to the span of **each live root context** — a root with a `run()` in flight whose span is a harness span (`SpanImpl`) and whose harness has a real `traceExporter`. When no such span exists (no root running, or tracing is off) the warning is printed with `console.warn` instead, so it is never silently lost.
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `kind` | string | `'overflow_drop'` — an external `handle.send()` hit a full queue and dropped the oldest item; `'subscriber_drop'` — an external subscriber's private buffer (1000) filled and dropped its oldest value |
+| `channelName` | string | The channel the warning is about |
+| `capacity` | number | The queue capacity or subscriber buffer size that was hit |
+| `message` | string | Human-readable description, the same text the console fallback prints |
+
+---
+
 ## Context Layer Trace Spans
 
 Every context layer hook invocation produces a trace span (see also `11-context-layer-system`).

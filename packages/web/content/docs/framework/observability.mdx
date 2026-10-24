@@ -284,6 +284,23 @@ if (usage?.epoch) {
 }
 ```
 
+## Channel Warnings
+
+When a channel drops data without failing the run, the harness records a `channel.warning` event (`NoeticEvent.CHANNEL_WARNING`) on the span of each live root context (a root with a `run()` in flight, a `SpanImpl` span, and a real `traceExporter`). With no such span — no root running, or tracing off — it prints the warning with `console.warn` instead.
+
+| Attribute | Type | Description |
+|---|---|---|
+| `kind` | `string` | `'overflow_drop'` (an external `handle.send()` dropped the oldest queued item) or `'subscriber_drop'` (an external subscriber's 1000-value buffer dropped its oldest value) |
+| `channelName` | `string` | The channel the warning is about |
+| `capacity` | `number` | The capacity or buffer size that was hit |
+| `message` | `string` | Human-readable description (the console fallback's text) |
+
+```ts validate=none
+import { NoeticEvent } from '@noetic-tools/core';
+
+const drops = runSpan.events.filter((e) => e.name === NoeticEvent.CHANNEL_WARNING);
+```
+
 ## Related Pages
 
 - [Context & Event Log](/docs/framework/context) -- every context carries a `span`.

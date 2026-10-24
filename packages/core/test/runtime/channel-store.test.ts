@@ -3,6 +3,7 @@ import assert from 'node:assert';
 import { isNoeticError } from '@noetic-tools/types';
 import { z } from 'zod';
 import { channel } from '../../src/builders/channel-builder';
+import type { ChannelWarning } from '../../src/runtime/channel-store';
 import { ChannelStore } from '../../src/runtime/channel-store';
 
 describe('ChannelStore', () => {
@@ -448,6 +449,32 @@ describe('ChannelStore', () => {
         3,
       ]);
       expect(await store.recv(ch, 100)).toBe(3);
+    });
+
+    it('reports an overflow_drop warning to onWarning instead of the console', () => {
+      const warnSpy = spyOn(console, 'warn');
+      const warnings: ChannelWarning[] = [];
+      const store = new ChannelStore({
+        onWarning: (w) => warnings.push(w),
+      });
+      const ch = channel('ext-warn', {
+        schema: z.number(),
+        mode: 'queue',
+        capacity: 1,
+        external: true,
+      });
+      const handle = store.getHandle(ch, 'exec-warn');
+      handle.send(1);
+      handle.send(2);
+      expect(warnSpy).not.toHaveBeenCalled();
+      warnSpy.mockRestore();
+      expect(warnings).toHaveLength(1);
+      const [warning] = warnings;
+      assert(warning);
+      expect(warning.kind).toBe('overflow_drop');
+      expect(warning.channelName).toBe('ext-warn');
+      expect(warning.capacity).toBe(1);
+      expect(store.tryRecv(ch)).toBe(2);
     });
 
     it('external handle still drops oldest at capacity (sync, with warning)', async () => {

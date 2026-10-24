@@ -63,7 +63,7 @@ interface ChannelHandle<T> {
 
 | Field | Type | Description |
 |---|---|---|
-| `send` | `(value: T) => void` | Send a value into the channel. Synchronous — external senders are never back-pressured; at capacity the oldest queued item is dropped (with a warning) |
+| `send` | `(value: T) => void` | Send a value into the channel. Synchronous — external senders are never back-pressured; at capacity the oldest queued item is dropped and a `channel.warning` span event (`overflow_drop`) is recorded |
 | `closed` | `boolean` | Whether the handle is closed (execution completed) |
 | `channel` | `Channel<T>` | Reference to the underlying channel |
 

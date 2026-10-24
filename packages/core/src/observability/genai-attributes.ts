@@ -68,4 +68,6 @@ export const NoeticAttr = {
 export const NoeticEvent = {
   /** One per loop iteration: `{ loop, iteration, stop, reason? }`. */
   LOOP_VERDICT: 'loop.verdict',
+  /** A channel dropped data or is waiting with no timeout: `{ kind, channelName, message, capacity?, operation? }`. */
+  CHANNEL_WARNING: 'channel.warning',
 } as const;

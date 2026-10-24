@@ -178,7 +178,7 @@ Delivery by mode:
 
 | Mode | External subscriber behavior |
 |---|---|
-| `topic` | **Non-lossy tap.** Each subscriber has a private bounded buffer (1000, oldest dropped with a warning). Every send after subscribe is retained until consumed; no replay of pre-subscribe values. Subscribers are persistent and do not count as internal receivers. |
+| `topic` | **Non-lossy tap.** Each subscriber has a private bounded buffer (1000, oldest dropped with a `subscriber_drop` warning). Every send after subscribe is retained until consumed; no replay of pre-subscribe values. Subscribers are persistent and do not count as internal receivers. |
 | `queue` | **Competing consumer.** External `next()` waits in the same FIFO as internal `recv` waiters; consuming an item frees parked internal senders exactly as `recv` does. Multiple subscribers — or a step `recv`ing the same channel — split deliveries first-waiter-wins: subscribe ONCE per harness and point subscriptions at channels only the agent writes. |
 | `value` | **Current value, then updates, conflated.** The first `next()` yields the current value if one exists; a slow consumer sees only the newest update. Non-consuming. |
 
@@ -194,7 +194,7 @@ Lifecycle:
 
 External senders are NOT back-pressured. If a queue channel's buffer is full when an external sender calls `handle.send()`:
 - The **oldest** item in the queue is dropped.
-- A warning is emitted via the agent harness's tracing system.
+- A warning is emitted via the agent harness's tracing system: a `channel.warning` span event with `kind: 'overflow_drop'` (see `10-observability`, Channel Warnings).
 
 This design prevents external callers (e.g., HTTP handlers) from blocking on a full queue, which would cause upstream timeouts. Internal senders (`ctx.send`) are still subject to normal back-pressure semantics.
 

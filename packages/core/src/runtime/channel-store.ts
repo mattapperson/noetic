@@ -13,6 +13,38 @@ function cancelledError(signal: AbortSignal): NoeticErrorImpl {
   });
 }
 
+/**
+ * A channel condition worth surfacing but not worth failing on. `AgentHarness`
+ * records these as `channel.warning` span events (spec 10); a bare store
+ * prints them with `console.warn`.
+ */
+export type ChannelWarning =
+  | {
+      /** An external sender hit a full queue and the oldest item was dropped. */
+      kind: 'overflow_drop';
+      channelName: string;
+      capacity: number;
+      message: string;
+    }
+  | {
+      /** An external subscriber's private buffer filled and its oldest value was dropped. */
+      kind: 'subscriber_drop';
+      channelName: string;
+      capacity: number;
+      message: string;
+    };
+
+/** Options accepted by the `ChannelStore` constructor. */
+export interface ChannelStoreOpts {
+  /** Receives every channel warning. Defaults to `warnToConsole`. */
+  onWarning?: (warning: ChannelWarning) => void;
+}
+
+/** Print a channel warning with the `[noetic]` prefix. */
+export function warnToConsole(warning: ChannelWarning): void {
+  console.warn(`[noetic] ${warning.message}`);
+}
+
 /** Options accepted by internal (back-pressured) `send`. */
 export interface ChannelSendOpts {
   /**
@@ -83,6 +115,11 @@ export class ChannelStore {
    */
   private handleObserved = new Set<string>();
   private subscribersByExecution = new Map<string, Set<ExternalSubscriber<unknown>>>();
+  private readonly warn: (warning: ChannelWarning) => void;
+
+  constructor(opts: ChannelStoreOpts = {}) {
+    this.warn = opts.onWarning ?? warnToConsole;
+  }
 
   private getOrCreate<T>(channel: Channel<T>): ChannelState<T> {
     let state = frameworkCast<ChannelState<T> | undefined>(this.channels.get(channel.name));
@@ -472,9 +509,12 @@ export class ChannelStore {
       state.queueWaiters.length === 0 &&
       state.queue.length >= state.capacity;
     if (isFullQueue) {
-      console.warn(
-        `[noetic] Channel '${channel.name}': queue at capacity (${state.capacity}), dropping oldest message (external sender).`,
-      );
+      this.warn({
+        kind: 'overflow_drop',
+        channelName: channel.name,
+        capacity: state.capacity,
+        message: `Channel '${channel.name}': queue at capacity (${state.capacity}), dropping oldest message (external sender).`,
+      });
       state.queue.shift();
       state.queue.push(value);
       this.fireWakes(state);
@@ -508,6 +548,7 @@ export class ChannelStore {
     const subscriber: ExternalSubscriber<T> = new ExternalSubscriber<T>({
       channelName: channel.name,
       conflate: state.mode === 'value',
+      warn: this.warn,
       takeShared:
         state.mode === 'queue'
           ? () => {
@@ -646,6 +687,8 @@ interface ExternalSubscriberOpts<T> {
   channelName: string;
   /** Value mode: keep only the newest undelivered value. */
   conflate: boolean;
+  /** The owning store's warning sink. */
+  warn: (warning: ChannelWarning) => void;
   /** Queue mode: take an available item from the shared queue state. */
   takeShared?: () => {
     value: T;
@@ -700,9 +743,12 @@ class ExternalSubscriber<T> implements AsyncIterableIterator<T> {
       return;
     }
     if (this.buffer.length >= MAX_EXTERNAL_BUFFER) {
-      console.warn(
-        `[noetic] Channel '${this.opts.channelName}': external subscriber buffer at capacity (${MAX_EXTERNAL_BUFFER}), dropping oldest value.`,
-      );
+      this.opts.warn({
+        kind: 'subscriber_drop',
+        channelName: this.opts.channelName,
+        capacity: MAX_EXTERNAL_BUFFER,
+        message: `Channel '${this.opts.channelName}': external subscriber buffer at capacity (${MAX_EXTERNAL_BUFFER}), dropping oldest value.`,
+      });
       this.buffer.shift();
     }
     this.buffer.push(value);
