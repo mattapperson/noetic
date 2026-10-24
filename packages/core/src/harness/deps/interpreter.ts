@@ -3,4 +3,5 @@ export { prepareBandedView } from '../../interpreter/context-assembly';
 export { execute } from '../../interpreter/execute';
 export type { DetachedSpawnOverrides } from '../../interpreter/step-dispatcher';
 export { dispatchStepThroughAdapter } from '../../interpreter/step-dispatcher';
+export { someStep } from '../../interpreter/step-walk';
 export { isFunctionCall } from '../../interpreter/typeguards';

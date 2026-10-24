@@ -210,6 +210,15 @@ interface StreamIdleWatchdog {
   stop: () => void;
 }
 
+/** @internal The error for a model call on a harness with no LLM credentials. */
+export function noLlmProviderError(): NoeticConfigError {
+  return new NoeticConfigError({
+    code: 'NO_LLM_PROVIDER',
+    message: 'No LLM provider configured on this harness.',
+    hint: 'Pass `callModelDefaults: { apiKey: "..." }` (defaults to the Noetic platform) or set NOETIC_API_KEY. For direct OpenRouter, use `callModelDefaults: { provider: "openrouter", apiKey: "..." }` or set OPENROUTER_API_KEY.',
+  });
+}
+
 /** @internal Create a watchdog that aborts `controller` when no
  *  {@link StreamIdleWatchdog.reset reset} is called within `timeoutMs`. When
  *  `timeoutMs <= 0`, returns an inert no-op so callers can always call `.reset()`
@@ -485,11 +494,7 @@ export class AgentHarnessModelCaller {
     if (this.opts.client) {
       return this.opts.client;
     }
-    throw new NoeticConfigError({
-      code: 'NO_LLM_PROVIDER',
-      message: 'No LLM provider configured on this harness.',
-      hint: 'Pass `callModelDefaults: { apiKey: "..." }` (defaults to the Noetic platform) or set NOETIC_API_KEY. For direct OpenRouter, use `callModelDefaults: { provider: "openrouter", apiKey: "..." }` or set OPENROUTER_API_KEY.',
-    });
+    throw noLlmProviderError();
   }
 
   async callModel(request: CallModelRequest): Promise<LLMResponse> {

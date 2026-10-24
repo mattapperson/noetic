@@ -131,7 +131,7 @@ first `abort()` owns `ctx.abortReason` — a later abort does not overwrite it.
 `NoeticConfigError` is a separate class from `NoeticError`. The two are never interchangeable:
 
 - **`NoeticError`** — thrown during execution (LLM failures, inParallel failures, spawn errors, budget exceeded, cancellation). Always has a `kind` discriminant. Caught by callers of `execute()`.
-- **`NoeticConfigError`** — thrown during construction and setup (invalid step config, missing env vars, invalid context layer config, runtime misconfiguration). Always has `code`, `hint`, and optional `docsUrl`. Caught before execution begins.
+- **`NoeticConfigError`** — thrown during construction and setup (invalid step config, missing env vars, invalid context layer config, runtime misconfiguration). Always has `code`, `hint`, and optional `docsUrl`. Raised before execution begins wherever the problem is statically detectable: builders validate their own options, and `AgentHarness.run()` / `execute()` walk the step tree before running any step, raising `NO_LLM_PROVIDER` up front when a statically declared `callModel` or `decide` step has no LLM provider to run on. Problems only visible at run time (a dynamically chosen branch, a lazily resolved model) are raised at the step that hits them.
 
 ```typescript
 class NoeticConfigError extends Error {

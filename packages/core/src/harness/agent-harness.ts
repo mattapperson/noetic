@@ -43,6 +43,7 @@ import {
   dispatchStepThroughAdapter,
   execute,
   prepareBandedView,
+  someStep,
 } from './deps/interpreter';
 import type {
   ChannelWarning,
@@ -122,7 +123,7 @@ import type {
 } from './deps/types';
 import { SteeringAction } from './deps/types';
 import type { SessionCtxExtension } from './model-call';
-import { AgentHarnessModelCaller } from './model-call';
+import { AgentHarnessModelCaller, noLlmProviderError } from './model-call';
 
 export { createStreamIdleWatchdog } from './model-call';
 
@@ -648,6 +649,9 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
         }),
       );
     }
+    if (this.lacksModelFor(this.agentGraph)) {
+      return Promise.reject(noLlmProviderError());
+    }
 
     const threadId = options?.threadId ?? DEFAULT_THREAD_ID;
     const deliveryMode = options?.deliveryMode ?? this.defaultDeliveryMode;
@@ -887,6 +891,9 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   //#endregion
 
   async run<I, O>(s: Step<ContextData, I, O>, input: I, ctx: Context): Promise<O> {
+    if (this.lacksModelFor(s)) {
+      throw noLlmProviderError();
+    }
     // Populate the unified tool pool when an embedder drives a step directly on
     // a bare `createContext()` context (the turn pipeline does this per turn).
     // Without it, steps that resolve tools dynamically from `ctx.unifiedTools`
@@ -902,6 +909,22 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     // `execute()`/`seedSessionHistory`. Idempotent — see `ensureLayersInit`.
     await this.ensureLayersInit(ctx);
     return this.executeClosingChannels(s, input, ctx);
+  }
+
+  /**
+   * Whether `step` calls a model this harness has no credentials for. Checked
+   * before any step runs so a missing provider fails fast instead of after
+   * earlier steps' side effects. Steps the walk cannot see (dynamic branches)
+   * still hit the same error lazily at their model call.
+   */
+  private lacksModelFor<I, O>(step: Step<ContextData, I, O>): boolean {
+    if (this.client || this.callModelOverride) {
+      return false;
+    }
+    return someStep(
+      frameworkCast<Step>(step),
+      (s) => s.kind === 'callModel' || (s.kind === 'decide' && !this.decideOverride),
+    );
   }
 
   /** Run all layer `init` hooks before the first step executes. Per spec 11,
