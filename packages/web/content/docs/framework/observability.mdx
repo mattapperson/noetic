@@ -209,6 +209,26 @@ const inputTokens = span.attributes.get(GenAI.USAGE_INPUT_TOKENS);
 
 The harness emits one `llm.call` span per model call (one per tool round) and a `tool.call` span per function call, nested under the calling context's span and flushed to the configured exporter when `callModel` settles.
 
+## Loop Verdict Events
+
+A `loop` opens no span of its own. After each verdict its `until` predicate returns — including the stop verdict a throwing predicate produces — it adds a `loop.verdict` event to the span its context carries (for a JSON workflow, `workflow.run`).
+
+| Attribute | Type | Description |
+|---|---|---|
+| `loop` | `string` | The loop's step id |
+| `iteration` | `number` | 1-based attempt count; an attempt retried via `onError` gives no verdict but still counts |
+| `stop` | `boolean` | The verdict's `stop` |
+| `reason` | `string` | The verdict's `reason`; absent when it has none |
+
+The verdict's `feedback` is never recorded: it can be large and may carry sensitive output.
+
+```ts validate=none
+import { NoeticEvent } from '@noetic-tools/core';
+
+const verdicts = runSpan.events.filter((e) => e.name === NoeticEvent.LOOP_VERDICT);
+const last = verdicts.at(-1)?.attributes?.reason; // e.g. 'Reached max steps (20)'
+```
+
 ## Workflow Run Span
 
 `parseAndRunWorkflow` opens a root `workflow.run` span that carries the static workflow graph — the *potential paths* of the DAG, independent of which routes actually run. Model and tool spans nest under it, so the exported trace mirrors the declared workflow with the executed path overlaid.

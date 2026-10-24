@@ -12,22 +12,27 @@ Every step variant automatically creates OpenTelemetry-compatible trace spans vi
 ```
 [ralph-wiggum-loop]                     <- root span
   [ralph-iteration-1]                   <- spawn span (fresh context)
-    [react-loop]                        <- loop span
-      [react-step] model=claude-sonnet  <- step span (LLM call)
-        gen_ai.usage.input_tokens: 1500
-        gen_ai.usage.output_tokens: 340
-        gen_ai.cost: 0.0067
-      [react-step] tool=shell           <- step span (tool call)
-        tool.name: shell
-        tool.args: { command: "npm test" }
-    loop.verdict: { stop: false, reason: "Verification failed" }
+    [react-step] model=claude-sonnet    <- step span (LLM call)
+      gen_ai.usage.input_tokens: 1500
+      gen_ai.usage.output_tokens: 340
+      gen_ai.cost: 0.0067
+    [react-step] tool=shell             <- step span (tool call)
+      tool.name: shell
+      tool.args: { command: "npm test" }
+    loop.verdict: { loop: "react-loop", iteration: 1, stop: true, reason: "No tool calls in last response" }
+  loop.verdict: { loop: "ralph-wiggum-loop", iteration: 1, stop: false, reason: "Verification failed" }
   [ralph-iteration-2]                   <- spawn span (fresh context)
-    [react-loop]
-      ...
-  loop.verdict: { stop: true, reason: "Verification passed" }
+    ...
+  loop.verdict: { loop: "ralph-wiggum-loop", iteration: 2, stop: true, reason: "Verification passed" }
 ```
 
-No user instrumentation needed. The trace tree mirrors the execution tree because every step, inParallel, spawn, and loop creates a child span from the context.
+No user instrumentation needed. The trace tree mirrors the execution tree: steps that open a span nest it under the context's span.
+
+---
+
+## Loop Verdict Events
+
+A loop opens no span of its own. After each verdict it adds a `loop.verdict` event to the enclosing span (`ctx.span`), so the events land on whatever span the loop's context carries (for a JSON workflow, `workflow.run`). Attributes are `loop` (step id), `iteration`, `stop`, and `reason` when the verdict has one; `feedback` is never recorded. See `05-loop-and-until` (Verdict Traces) for the full table.
 
 ---
 

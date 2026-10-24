@@ -62,3 +62,10 @@ export const NoeticAttr = {
   /** Prefix for per-question attributes: `noetic.decision.<id>.value` etc. */
   DECISION_PREFIX: 'noetic.decision.',
 } as const;
+
+// Span event names. Steps that open no span of their own (e.g. `loop`) add
+// these to the enclosing `ctx.span`.
+export const NoeticEvent = {
+  /** One per loop iteration: `{ loop, iteration, stop, reason? }`. */
+  LOOP_VERDICT: 'loop.verdict',
+} as const;

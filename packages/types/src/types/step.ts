@@ -39,7 +39,7 @@ export interface Snapshot {
   lastOutput: unknown;
   /** Stringified text of the most recent iteration output. */
   lastText: string;
-  /** Array of all prior iteration outputs (bounded by `maxHistorySize`). */
+  /** Prior iteration outputs, oldest first; bounded by `maxHistorySize` (default 100, oldest dropped first). */
   history: unknown[];
   /** Nesting depth of the current execution context. */
   depth: number;
@@ -54,7 +54,7 @@ export interface Snapshot {
 export interface Verdict {
   /** When true, the loop terminates after this iteration. */
   stop: boolean;
-  /** Human-readable explanation of why the loop stopped (logged in traces). */
+  /** Why the loop stopped or continued; recorded on the `loop.verdict` span event. */
   reason?: string;
   /** Feedback string injected into the next iteration's context (ignored when `stop` is true). */
   feedback?: string;
@@ -364,7 +364,7 @@ export interface StepLoop<TContext = ContextData, I = unknown, O = unknown> {
   until: Until;
   /** Hard safety cap on iterations (default: 1000). */
   maxIterations?: number;
-  /** Maximum number of entries kept in the snapshot history array. */
+  /** Maximum entries kept in the snapshot history array (default: 100); oldest drop first. */
   maxHistorySize?: number;
   /** Optional channel for injecting messages into the loop mid-execution. */
   inbox?: Channel<string>;

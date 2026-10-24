@@ -341,11 +341,14 @@ loop<I, O>({
   steps: ReadonlyArray<Step<I, O>>;
   until: Until;
   maxIterations?: number;
+  maxHistorySize?: number;   // bounds snapshot.history (default 100, oldest dropped first)
   inbox?: Channel<string>;
   parkTimeout?: number;
   prepareNext?: (output: O, verdict: Verdict, ctx: Context) => I;
 }): StepLoop<I, O>
 ```
+
+Each verdict adds a `loop.verdict` event (`NoeticEvent.LOOP_VERDICT`) to the enclosing `ctx.span` — loops open no span of their own — with `{ loop, iteration, stop, reason? }`. `feedback` is never recorded.
 
 ### schedule
 
@@ -646,6 +649,8 @@ until.outputEquals(sentinel)   // Stop when last output text === `sentinel` (exa
 any(...predicates)       // Stop when ANY predicate fires
 all(...predicates)       // Stop when ALL predicates fire
 ```
+
+Reasons: `Reached max steps (n)`, `Cost $1.02 exceeded budget $1.00` (two decimals), `Verification passed` / `Verification failed`.
 
 ## Patterns
 

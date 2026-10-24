@@ -31,7 +31,7 @@ The loop executes its `steps` array **sequentially** on each iteration, in array
 | `steps` | `ReadonlyArray<Step<TContext, I, O>>` | Yes | -- | Steps to execute sequentially on each iteration |
 | `until` | `Until` | Yes | -- | Predicate that decides when to stop |
 | `maxIterations` | `number` | No | `1000` | Hard ceiling on total iterations (including retries) |
-| `maxHistorySize` | `number` | No | `100` | Max entries kept in the snapshot history array |
+| `maxHistorySize` | `number` | No | `100` | Max entries kept in the snapshot history array; oldest drop first |
 | `prepareNext` | `(output: O, verdict: Verdict, ctx: Context) => I` | No | -- | Transform output into next iteration's input |
 | `onError` | `(error: NoeticError, ctx: Context) => 'retry' \| 'skip' \| 'abort'` | No | -- | Handle errors from the body steps |
 
@@ -47,7 +47,7 @@ Every time the `until` predicate is called, it receives a `Snapshot` of the loop
 | `cost` | `number` | Cumulative cost in USD |
 | `lastOutput` | `unknown` | The most recent step output |
 | `lastText` | `string` | Text representation of the last output |
-| `history` | `unknown[]` | Array of all step outputs (bounded by `maxHistorySize`) |
+| `history` | `unknown[]` | Step outputs, oldest first; bounded by `maxHistorySize` (default 100, oldest dropped first) |
 | `depth` | `number` | Current nesting depth |
 | `lastStepMeta` | `StepMeta \| null` | Metadata from the last step (tool calls, usage, etc.) |
 
@@ -58,8 +58,12 @@ The `until` predicate returns a `Verdict` telling the loop what to do.
 | Field | Type | Description |
 | --- | --- | --- |
 | `stop` | `boolean` | `true` to exit the loop, `false` to continue |
-| `reason` | `string \| undefined` | Human-readable explanation of why the loop stopped |
+| `reason` | `string \| undefined` | Why the loop stopped or continued; recorded in traces (see below) |
 | `feedback` | `string \| undefined` | Feedback injected into the next iteration (used by `until.verified`) |
+
+### Verdicts in traces
+
+A loop opens no span of its own. After each verdict it adds a `loop.verdict` event to the span its context carries, with attributes `loop` (the step id), `iteration`, `stop`, and `reason` when the verdict has one. `feedback` is never recorded, since it can be large or sensitive. A predicate that throws stops the loop with reason `Predicate error: <message>`, and that verdict is traced too. See [Observability](/docs/framework/observability#loop-verdict-events).
 
 ## Built-in Predicates
 
@@ -77,7 +81,7 @@ const predicate = until.noToolCalls();
 
 ### until.maxSteps(n)
 
-Stop after `n` successful step executions.
+Stop after `n` successful step executions. Reason: `Reached max steps (n)`.
 
 ```ts
 const predicate = until.maxSteps(5);
@@ -85,7 +89,7 @@ const predicate = until.maxSteps(5);
 
 ### until.maxCost(usd)
 
-Stop when cumulative cost reaches the threshold.
+Stop when cumulative cost reaches the threshold. Reason: `Cost $0.52 exceeded budget $0.50` (both rounded to cents).
 
 ```ts
 const predicate = until.maxCost(0.50);
@@ -113,7 +117,7 @@ const predicate = until.verified(async (output) => {
 });
 ```
 
-When `pass` is `false`, the `feedback` string is available on the `Verdict` for use in `prepareNext`.
+The reason is `Verification passed` or `Verification failed`. When `pass` is `false`, the `feedback` string is available on the `Verdict` for use in `prepareNext`.
 
 ### until.converged(opts)
 
