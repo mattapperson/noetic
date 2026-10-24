@@ -215,6 +215,7 @@ describe('hydrateNode — llm', () => {
       assert(isNoeticConfigError(e));
       expect(e.code).toBe('UNKNOWN_UI_LIBRARY_REFERENCE');
       expect(e.message).toContain('missing-lib');
+      expect(e.hint).toEndWith('No UI libraries are registered.');
     }
   });
 
@@ -1055,6 +1056,8 @@ describe('hydrateNode — error cases', () => {
     } catch (e: unknown) {
       assert(isNoeticConfigError(e));
       expect(e.code).toBe('UNKNOWN_TOOL_REFERENCE');
+      expect(e.hint).toStartWith("Register 'nonexistent' in HydrationContext.tools");
+      expect(e.hint).toEndWith('.');
     }
   });
 
@@ -1071,6 +1074,8 @@ describe('hydrateNode — error cases', () => {
     } catch (e: unknown) {
       assert(isNoeticConfigError(e));
       expect(e.code).toBe('UNKNOWN_TOOL_REFERENCE');
+      expect(e.hint).toStartWith("Register 'missing' in HydrationContext.tools");
+      expect(e.hint).toEndWith('.');
     }
   });
 
