@@ -386,4 +386,47 @@ describe('returnLayers', () => {
     assert(isNoeticError(error));
     expect(error.noeticError.kind).toBe('spawn_summary_failed');
   });
+
+  it('names the child execution in the diagnostic when no stepId is given', async () => {
+    const errors: unknown[] = [];
+    const store = createLayerStateStore((_layerId, _hook, error) => {
+      errors.push(error);
+    });
+    const layers: ContextLayer[] = [
+      {
+        id: 'summarizer',
+        name: 'Summarizer',
+        slot: 100,
+        scope: 'execution',
+        hooks: {
+          onReturn: async () => {
+            throw new Error('summary timed out');
+          },
+        },
+      },
+    ];
+    store.set('child-default', 'summarizer', {
+      notes: 'child work',
+    });
+
+    const returnResult = await returnLayers({
+      layers,
+      parentCtx: makeCtx({
+        executionId: 'parent-default',
+      }),
+      childCtx: makeCtx({
+        executionId: 'child-default',
+        depth: 1,
+      }),
+      childLog: makeItemLog(),
+      result: 'raw',
+      store,
+    });
+
+    expect(returnResult).toBe('raw');
+    const [error] = errors;
+    assert(isNoeticError(error));
+    assert(error.noeticError.kind === 'spawn_summary_failed');
+    expect(error.noeticError.stepId).toBe('child-default');
+  });
 });

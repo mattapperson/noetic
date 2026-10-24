@@ -119,8 +119,12 @@ interface SpawnLayersParams {
 
 interface ReturnLayersParams<T = unknown> {
   layers: ContextLayer[];
-  /** Id of the spawn (or inParallel) step whose child is returning. */
-  stepId: string;
+  /**
+   * Id of the spawn (or inParallel) step whose child is returning. Names the
+   * step in `spawn_summary_failed` diagnostics; defaults to the child's
+   * execution id.
+   */
+  stepId?: string;
   parentCtx: ExecutionContext;
   childCtx: ExecutionContext;
   childLog: ItemLog;
@@ -1057,7 +1061,7 @@ export async function returnLayers<T>({
     } catch (e) {
       reportSummaryFailure({
         layerId: layer.id,
-        stepId,
+        stepId: stepId ?? childCtx.executionId,
         childOutput: currentResult,
         cause: e,
         childCtx,
