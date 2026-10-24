@@ -320,6 +320,14 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 **Fix:** Pass a non-negative number of milliseconds, or omit `jitter`.
 
+### Channels
+
+#### INVALID_CHANNEL_TIMEOUT
+
+**Cause:** A channel `send()` or `recv()` got a negative or `NaN` timeout. The call rejects with this error instead of waiting.
+
+**Fix:** Pass a positive timeout in milliseconds, or `0` to wait with no timeout.
+
 ### Decide and routeSwitch
 
 #### INVALID_DECIDE_QUESTIONS
