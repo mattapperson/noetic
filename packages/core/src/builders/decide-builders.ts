@@ -11,6 +11,7 @@ import type {
   ProjectionPolicy,
   Step,
   StepConditional,
+  StepReplay,
 } from '@noetic-tools/types';
 import {
   DecideQuestionsSchema,
@@ -24,7 +25,8 @@ import { conditional } from './control-flow-builders';
 //#region Types
 
 /** @public Options for `decide()`. */
-export interface StepDecideOpts<TContext, Q extends DecideQuestions> {
+export interface StepDecideOpts<TContext, Q extends DecideQuestions, I = unknown>
+  extends StepReplay<TContext, I> {
   id: string;
   /** Decision model id. Falls back to `harness.config.decisionModel`. */
   model?: Lazy<string, TContext>;
@@ -76,7 +78,7 @@ export interface RouteSwitchByKeyOpts<
   K extends keyof Q & string,
   Cases extends Record<CaseKeyOf<Q[K]>, CaseStep>,
   U extends CaseStep,
-> {
+> extends StepReplay<TContext> {
   id: string;
   decide: DecideStep<TContext, unknown, Q>;
   on: K;
@@ -95,7 +97,7 @@ export interface RouteSwitchByFunctionOpts<
   Cases extends Partial<Record<C, CaseStep>>,
   D extends CaseStep,
   U extends CaseStep,
-> {
+> extends StepReplay<TContext> {
   id: string;
   decide: DecideStep<TContext, unknown, Q>;
   /** Receives answers with refusals already handled. */
@@ -123,7 +125,7 @@ export interface RouteSwitchByFunctionOpts<
  *   `INVALID_DECIDE_QUESTIONS`, or `INVALID_DECIDE_SAMPLES`.
  */
 export function decide<const Q extends DecideQuestions, TContext = ContextData, I = unknown>(
-  opts: StepDecideOpts<TContext, Q>,
+  opts: StepDecideOpts<TContext, Q, I>,
 ): DecideStep<TContext, I, Q> {
   requireId('decide', opts.id);
   if (typeof opts.model === 'string' && opts.model.trim() === '') {
@@ -203,6 +205,8 @@ export function routeSwitch(opts: SwitchPlan): StepConditional<ContextData, unkn
     minConfidence: 'minConfidence' in opts ? opts.minConfidence : undefined,
     uncertain: opts.uncertain,
     default: 'default' in opts ? opts.default : undefined,
+    durable: opts.durable,
+    replayKey: opts.replayKey,
   });
 }
 
@@ -211,7 +215,7 @@ export function routeSwitch(opts: SwitchPlan): StepConditional<ContextData, unkn
 //#region Routing
 
 /** Both option shapes, loosened to what the runtime needs. */
-interface SwitchPlan {
+interface SwitchPlan extends StepReplay {
   id: string;
   decide: DecideStep<ContextData, unknown, DecideQuestions>;
   on: string | ((answers: AnsweredAll<DecideQuestions>) => string);
@@ -250,6 +254,8 @@ function buildSwitch(plan: SwitchPlan): StepConditional<ContextData, unknown, un
   ];
   return conditional<ContextData, unknown, unknown>({
     id: plan.id,
+    durable: plan.durable,
+    replayKey: plan.replayKey,
     route: async (input, ctx, run) => {
       const answers = frameworkCast<Record<string, DecideAnswer>>(
         await run(plan.decide, input, ctx),

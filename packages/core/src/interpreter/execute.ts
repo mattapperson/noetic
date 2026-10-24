@@ -11,6 +11,7 @@ import { frameworkCast, NoeticErrorImpl } from '@noetic-tools/types';
 import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../runtime/broadcaster-utils';
 import { ContextImpl } from '../runtime/context-impl';
 import type { StepLedger } from '../runtime/durable/step-ledger';
+import { REPLAY_KEY_PREFIX } from '../runtime/durable/step-ledger';
 import type { EventBroadcaster } from '../runtime/event-broadcaster';
 import { DetachedHandleImpl } from '../util/detached-handle';
 import { executeAcpAgent } from './execute-acp-agent';
@@ -178,7 +179,42 @@ export async function executeNoAdapter<TContext, I, O>(
 }
 
 /**
- * Resume path: when a previous run recorded this exact step at `ledgerPath`,
+ * @internal
+ * The ledger key this dispatch records and replays under, or undefined when the
+ * step bypasses the ledger (spec 23a § Identity). A `durable: false` step and a
+ * `schedule` (which never completes) are neither replayed nor recorded; the opt-out
+ * covers this step only, so its children still resolve their own keys. A
+ * `replayKey` replaces the positional path with `key:<key>`. A throwing `replayKey`
+ * costs this dispatch its durability, not its run: the step executes unrecorded.
+ */
+export function resolveLedgerKey<TContext, I, O>(
+  step: Step<TContext, I, O>,
+  input: I,
+  ctx: Context<TContext>,
+): string | undefined {
+  const impl = asContextImpl(frameworkCast<Context>(ctx));
+  if (!impl?.ledger || step.id.length === 0) {
+    return undefined;
+  }
+  if (step.durable === false || step.kind === 'schedule') {
+    return undefined;
+  }
+  if (!step.replayKey) {
+    return impl.currentPath();
+  }
+  try {
+    return `${REPLAY_KEY_PREFIX}${step.replayKey(input, ctx)}`;
+  } catch (error) {
+    console.warn(
+      `execute: replayKey for step "${step.id}" threw; running it without replay or recording:`,
+      error instanceof Error ? error.message : String(error),
+    );
+    return undefined;
+  }
+}
+
+/**
+ * Resume path: when a previous run recorded this exact step at `ledgerKey`,
  * replay its output instead of re-running. Held as a helper (rather than inline
  * in `execute`) so the resume branch stays flat: it pops the frontier itself —
  * the caller returns before the normal `leaveStep` runs — and emits
@@ -187,7 +223,7 @@ export async function executeNoAdapter<TContext, I, O>(
  */
 function replayFromLedger<TContext, I, O>(opts: {
   ledger: StepLedger | undefined;
-  ledgerPath: string | undefined;
+  ledgerKey: string | undefined;
   impl: ContextImpl | null;
   step: Step<TContext, I, O>;
   broadcaster: EventBroadcaster | undefined;
@@ -200,13 +236,13 @@ function replayFromLedger<TContext, I, O>(opts: {
   | {
       hit: false;
     } {
-  const { ledger, ledgerPath, impl, step, broadcaster, agentName } = opts;
-  if (!ledger || ledgerPath === undefined || ledger.isEmpty) {
+  const { ledger, ledgerKey, impl, step, broadcaster, agentName } = opts;
+  if (!ledger || ledgerKey === undefined || ledger.isEmpty) {
     return {
       hit: false,
     };
   }
-  const replayed = ledger.take(ledgerPath, {
+  const replayed = ledger.take(ledgerKey, {
     id: step.id,
     kind: step.kind,
   });
@@ -235,21 +271,21 @@ function replayFromLedger<TContext, I, O>(opts: {
 
 /**
  * Record a completed step's output so a resumed run replays it rather than
- * re-executing. A no-op without a ledger or ledger path. Only successes reach
+ * re-executing. A no-op without a ledger or ledger key. Only successes reach
  * here — a step that threw skips this call in `execute` and runs again on resume.
  */
 async function recordToLedger<TContext, I, O>(opts: {
   ledger: StepLedger | undefined;
-  ledgerPath: string | undefined;
+  ledgerKey: string | undefined;
   step: Step<TContext, I, O>;
   output: O;
 }): Promise<void> {
-  const { ledger, ledgerPath, step, output } = opts;
-  if (!ledger || ledgerPath === undefined) {
+  const { ledger, ledgerKey, step, output } = opts;
+  if (!ledger || ledgerKey === undefined) {
     return;
   }
   await ledger.record({
-    path: ledgerPath,
+    path: ledgerKey,
     stepId: step.id,
     kind: step.kind,
     output,
@@ -328,14 +364,14 @@ export async function execute<TContext = ContextData, I = unknown, O = unknown>(
   }
 
   /* Resume: a previous run that completed this exact step replays its recorded
-   * output instead of re-running it. `ledgerPath`/`ledger` are captured before
+   * output instead of re-running it. `ledgerKey`/`ledger` are captured before
    * dispatch and reused by the record below, because `leaveStep` pops the path
    * on the way out. */
-  const ledgerPath = impl && step.id.length > 0 ? impl.currentPath() : undefined;
+  const ledgerKey = resolveLedgerKey(step, input, ctx);
   const ledger = impl?.ledger;
   const replay = replayFromLedger({
     ledger,
-    ledgerPath,
+    ledgerKey,
     impl,
     step,
     broadcaster,
@@ -424,7 +460,7 @@ export async function execute<TContext = ContextData, I = unknown, O = unknown>(
    * again. */
   await recordToLedger({
     ledger,
-    ledgerPath,
+    ledgerKey,
     step,
     output: result,
   });

@@ -39,6 +39,15 @@ type _AssertSubset<TContext, I, O> = _AssertShape<TContext, I, O> extends Step<T
 
 The exported `Step` union additionally includes [`StepSchedule`](#stepschedule) for fixed-interval scheduling.
 
+### StepReplay
+
+Every step interface extends `StepReplay<TContext, I>`, so these fields apply to every row below. See [Replay Identity](/docs/framework/durability#replay-identity).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `durable` | `boolean` | no | Defaults to `true`. `false` keeps the step out of the step ledger: never replayed or recorded on resume. |
+| `replayKey` | `(input: I, ctx: Context<TContext>) => string` | no | Content key the ledger uses instead of the execution path. |
+
 ## StepRunCode
 
 `StepRunCode<TContext, I, O>`

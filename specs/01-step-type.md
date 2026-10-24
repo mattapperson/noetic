@@ -24,6 +24,17 @@ type Step<I, O> =
   | { kind: 'loop';    id: string; steps: ReadonlyArray<Step<I, O>>; until: Until; maxIterations?: number; maxHistorySize?: number; prepareNext?: (output: O, verdict: Verdict, ctx: Context) => I; onError?: (error: NoeticError, ctx: Context) => 'retry' | 'skip' | 'abort' }
 ```
 
+Every variant also carries the replay controls from `StepReplay`, omitted above for width:
+
+```typescript
+interface StepReplay<I> {
+  durable?: boolean;                               // default true; false = never recorded or replayed
+  replayKey?(input: I, ctx: Context): string;      // ledger key replacing the execution path
+}
+```
+
+They govern step-level resume: a resumed execution replays a recorded step's output instead of running it, keyed by execution path unless `replayKey` names a content key, and skipping the ledger entirely for `durable: false`. See `23a-step-level-resume` § Identity.
+
 The optional `subprocess?: SubprocessAdapter` field on `runCode` and `spawn` variants is a per-step adapter override. When set, the interpreter dispatches that step through the given adapter instead of the harness default. Resolution order at dispatch time is `detachedSpawn-overrides.subprocess ?? step.subprocess ?? harness.subprocess`. See `04-spawn` for adapter routing and `23-durable-execution` for durability guarantees.
 
 Schemas on `llm` output and `Tool` input/output/event accept any [Standard Schema v1](https://standardschema.dev/schema) validator. Model-facing JSON Schema resolves through Zod's native converter, then the [Standard JSON Schema v1](https://standardschema.dev/json-schema) companion trait, then an explicit raw JSON Schema override (`outputJsonSchema`, tool `inputJsonSchema`). Validation scope is limited to these tool/LLM/ACP-agent boundaries — channels, context-layer schemas, item extension schemas, and JSON workflow schemas remain Zod-specific. See `02-step-variants`.

@@ -17,6 +17,7 @@ import type {
   StepAcpAgent,
   StepCallModel,
   StepInvokeTool,
+  StepReplay,
   StepRunCode,
   SubprocessAdapter,
   Tool,
@@ -26,7 +27,7 @@ import { getDefaultRegistrar } from '../types/step-registrar';
 
 //#region Types
 
-export interface RunCodeOpts<TContext, I, O> {
+export interface RunCodeOpts<TContext, I, O> extends StepReplay<TContext, I> {
   id: string;
   execute: (input: I, ctx: Context<TContext>) => Promise<O>;
   retry?: RetryPolicy;
@@ -38,7 +39,7 @@ export interface RunCodeOpts<TContext, I, O> {
   subprocess?: SubprocessAdapter;
 }
 
-export interface CallModelOpts<TContext, O> {
+export interface CallModelOpts<TContext, O, I = unknown> extends StepReplay<TContext, I> {
   id: string;
   /** Model id. Eager string or `(ctx) => string` getter (resolved at step execution). */
   model: Lazy<string, TContext>;
@@ -61,13 +62,13 @@ export interface CallModelOpts<TContext, O> {
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }
 
-export interface InvokeToolOpts<I, O> {
+export interface InvokeToolOpts<I, O, TContext = ContextData> extends StepReplay<TContext, I> {
   id: string;
   tool: Tool<StandardSchemaV1<unknown, I>, StandardSchemaV1<unknown, O>>;
   args?: Partial<I>;
 }
 
-export interface StepAcpAgentOpts<TContext, O> {
+export interface StepAcpAgentOpts<TContext, O, I = unknown> extends StepReplay<TContext, I> {
   id: string;
   /** An ACP agent adapter, e.g. `claudeCode()` from `@noetic-tools/acp`. Eager or `(ctx) => AcpAgent`. */
   agent: Lazy<AcpAgent, TContext>;
@@ -108,7 +109,7 @@ export interface StepAcpAgentOpts<TContext, O> {
  * Validation shared by `step.acpAgent`. Kept separate from the builder so the
  * checks stay readable and the builder stays a one-liner.
  */
-function validateAcpAgentOpts<TContext, O>(opts: StepAcpAgentOpts<TContext, O>): void {
+function validateAcpAgentOpts<TContext, O, I>(opts: StepAcpAgentOpts<TContext, O, I>): void {
   if (!opts.id || opts.id.trim() === '') {
     throw new NoeticConfigError({
       code: 'EMPTY_STEP_ID',
@@ -194,7 +195,7 @@ export function runCode<TContext = ContextData, I = unknown, O = unknown>(
  * @throws `NoeticConfigError` with code `MISSING_MODEL` if an eager `model` string is empty. Function-form models are validated at step execution.
  */
 export function callModel<TContext = ContextData, I = unknown, O = unknown>(
-  opts: CallModelOpts<TContext, O>,
+  opts: CallModelOpts<TContext, O, I>,
 ): StepCallModel<TContext, I, O> {
   if (!opts.id || opts.id.trim() === '') {
     throw new NoeticConfigError({
@@ -234,7 +235,7 @@ export function callModel<TContext = ContextData, I = unknown, O = unknown>(
  * @throws `NoeticConfigError` with code `MISSING_TOOL` if `tool` is not provided.
  */
 export function invokeTool<TContext = ContextData, I = unknown, O = unknown>(
-  opts: InvokeToolOpts<I, O>,
+  opts: InvokeToolOpts<I, O, TContext>,
 ): StepInvokeTool<TContext, I, O> {
   if (!opts.id || opts.id.trim() === '') {
     throw new NoeticConfigError({
@@ -284,7 +285,7 @@ export const step = {
    * @throws `NoeticConfigError` `EMPTY_STEP_ID` / `MISSING_ACP_AGENT` / `MISSING_PROMPT`.
    */
   acpAgent<TContext = ContextData, I = unknown, O = unknown>(
-    opts: StepAcpAgentOpts<TContext, O>,
+    opts: StepAcpAgentOpts<TContext, O, I>,
   ): StepAcpAgent<TContext, I, O> {
     validateAcpAgentOpts(opts);
     const built: StepAcpAgent<TContext, I, O> = {

@@ -301,6 +301,11 @@ const AcpSessionPolicySchema = z.object({
 
 interface WorkflowNodeBase {
   id: string;
+  /**
+   * Whether a resumed run replays this node's recorded output. Defaults to `true`;
+   * `false` makes the node run again on every resume. See spec 23a § Identity.
+   */
+  durable?: boolean;
 }
 
 /**
@@ -517,6 +522,7 @@ const WorkflowNodeRef: z.ZodType<WorkflowNode> = z.lazy(() => WorkflowNodeSchema
 
 const SHARED_FIELDS = {
   id: z.string().min(1),
+  durable: z.boolean().optional(),
 } as const;
 
 const OutputCodecRefSchema = z.object({

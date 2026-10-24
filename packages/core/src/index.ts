@@ -557,6 +557,7 @@ export type {
   StepInParallelSettle,
   StepInvokeTool,
   StepLoop,
+  StepReplay,
   StepRunCode,
   StepSpawn,
   StepWithContext,

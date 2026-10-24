@@ -11,6 +11,12 @@
  * into the single `execution:<id>:snapshot` key would rewrite a growing blob on every
  * step — O(n²) bytes over a run.
  *
+ * An entry's key is one of two forms (spec 23a § Identity). By default it is the step's
+ * execution path (`ContextImpl.currentPath()`): positional, so a resumed run lines up
+ * recorded outputs with steps by where they ran. A step with a `replayKey` is keyed
+ * `key:<replayKey>` instead: content-addressed, so it finds its output wherever it
+ * runs. A `durable: false` step has no key and is never recorded.
+ *
  * Sharding bounds the cost of one append but not the total, so retention is bounded on
  * two axes (`StepLedgerRetention`): an oversized entry is dropped rather than written,
  * and past `maxEntries` the oldest entry is evicted. Both degradations are safe by
@@ -25,9 +31,15 @@ import { z } from 'zod';
 
 //#region Entry
 
-/** @public One completed step, keyed by its execution path. */
+/** Marks a ledger key as a step's `replayKey` rather than its execution path. */
+export const REPLAY_KEY_PREFIX = 'key:';
+
+/** @public One completed step, keyed by its execution path or its `key:` replay key. */
 export const StepLedgerEntrySchema = z.object({
-  /** Execution path key — see `ContextImpl.currentPath()`. Unique per dispatch. */
+  /**
+   * Ledger key: the execution path (`ContextImpl.currentPath()`, unique per dispatch)
+   * or `key:<replayKey>` for a step that sets `replayKey`.
+   */
   path: z.string().min(1),
   stepId: z.string(),
   kind: z.string(),
@@ -309,9 +321,11 @@ export class StepLedger {
 
   /**
    * The recorded output for `path`, when a previous run completed the same step there.
-   * A divergence (different step id or kind at this path) discards the entry and every
-   * entry recorded beneath it, then returns undefined so the step runs fresh — the
-   * subtree's recorded outputs belong to a branch that no longer exists.
+   * A divergence (different step id or kind at this key) returns undefined so the step
+   * runs fresh. At a positional path it also discards every entry recorded beneath it —
+   * the subtree's recorded outputs belong to a branch that no longer exists. A `key:`
+   * entry discards only itself: its children are keyed by their own paths or keys, not
+   * nested under it.
    */
   take(
     path: string,
@@ -325,6 +339,10 @@ export class StepLedger {
       return undefined;
     }
     if (entry.stepId !== step.id || entry.kind !== step.kind) {
+      if (path.startsWith(REPLAY_KEY_PREFIX)) {
+        this.replayable.delete(path);
+        return undefined;
+      }
       this.discardSubtree(path);
       return undefined;
     }
