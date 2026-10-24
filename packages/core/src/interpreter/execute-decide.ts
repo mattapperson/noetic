@@ -16,7 +16,7 @@ import {
 } from '@noetic-tools/types';
 import { z } from 'zod';
 import { GenAI, NoeticAttr } from '../observability/genai-attributes';
-import { allocateBudgets, assembleView, DECISION_PROJECTION } from './action-deps';
+import { allocateBudgets, assembleView, DECISION_PROJECTION, laneBase } from './action-deps';
 import type {
   Context,
   ContextData,
@@ -149,10 +149,12 @@ export async function executeDecide<TContext, I, O>(
 const ANSWERED = new WeakMap<Context<ContextData>, Map<string, Record<string, DecideAnswer>>>();
 
 function answered(ctx: Context<ContextData>): Map<string, Record<string, DecideAnswer>> {
-  let map = ANSWERED.get(ctx);
+  // Every step runs on its own lane of the context; the answers belong to the context.
+  const key = laneBase(ctx);
+  let map = ANSWERED.get(key);
   if (!map) {
     map = new Map();
-    ANSWERED.set(ctx, map);
+    ANSWERED.set(key, map);
   }
   return map;
 }

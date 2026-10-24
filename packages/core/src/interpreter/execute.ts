@@ -215,16 +215,13 @@ export function resolveLedgerKey<TContext, I, O>(
 
 /**
  * Resume path: when a previous run recorded this exact step at `ledgerKey`,
- * replay its output instead of re-running. Held as a helper (rather than inline
- * in `execute`) so the resume branch stays flat: it pops the frontier itself —
- * the caller returns before the normal `leaveStep` runs — and emits
- * `step_replayed`. Returns `{ hit: false }` when there is nothing to replay so
- * the caller dispatches the step normally.
+ * replay its output instead of re-running, and emit `step_replayed`. Returns
+ * `{ hit: false }` when there is nothing to replay so the caller dispatches the
+ * step normally.
  */
 function replayFromLedger<TContext, I, O>(opts: {
   ledger: StepLedger | undefined;
   ledgerKey: string | undefined;
-  impl: ContextImpl | null;
   step: Step<TContext, I, O>;
   broadcaster: EventBroadcaster | undefined;
   agentName: string;
@@ -236,7 +233,7 @@ function replayFromLedger<TContext, I, O>(opts: {
   | {
       hit: false;
     } {
-  const { ledger, ledgerKey, impl, step, broadcaster, agentName } = opts;
+  const { ledger, ledgerKey, step, broadcaster, agentName } = opts;
   if (!ledger || ledgerKey === undefined || ledger.isEmpty) {
     return {
       hit: false,
@@ -250,9 +247,6 @@ function replayFromLedger<TContext, I, O>(opts: {
     return {
       hit: false,
     };
-  }
-  if (impl && step.id.length > 0) {
-    impl.leaveStep(step.id);
   }
   emitFrameworkEvent({
     broadcaster,
@@ -352,32 +346,33 @@ export async function execute<TContext = ContextData, I = unknown, O = unknown>(
     });
   }
 
-  // Push onto the durable frontier so checkpoints can record exactly which
-  // step was in flight when the snapshot fired. Steps with empty ids are
-  // skipped — they are not reattachable by id and would pollute the stack.
+  /* Register the step as in flight, so a checkpoint records it in the frontier, and
+   * run it on its own lane: a view of the context that carries this dispatch's path.
+   * Steps this step dispatches hang under that path, so concurrent dispatches on one
+   * context cannot interleave each other's paths. Steps with empty ids stay on the
+   * caller's lane — they are not reattachable by id and add no path segment. */
   const impl = asContextImpl(baseCtx);
-  if (impl && step.id.length > 0) {
-    impl.enterStep({
-      stepId: step.id,
-      input,
-    });
-  }
+  const frame = {
+    stepId: step.id,
+    input,
+  };
+  const lane = impl && step.id.length > 0 ? impl.enterStep(frame) : null;
+  const stepCtx = lane ? frameworkCast<Context<TContext>>(lane) : ctx;
 
   /* Resume: a previous run that completed this exact step replays its recorded
    * output instead of re-running it. `ledgerKey`/`ledger` are captured before
-   * dispatch and reused by the record below, because `leaveStep` pops the path
-   * on the way out. */
-  const ledgerKey = resolveLedgerKey(step, input, ctx);
+   * dispatch and reused by the record below. */
+  const ledgerKey = resolveLedgerKey(step, input, stepCtx);
   const ledger = impl?.ledger;
   const replay = replayFromLedger({
     ledger,
     ledgerKey,
-    impl,
     step,
     broadcaster,
     agentName,
   });
   if (replay.hit) {
+    lane?.leaveStep(frame);
     return replay.output;
   }
 
@@ -385,25 +380,27 @@ export async function execute<TContext = ContextData, I = unknown, O = unknown>(
   try {
     switch (step.kind) {
       case 'runCode':
-        result = await dispatchViaAdapter(step, input, ctx, () => executeRunCode(step, input, ctx));
+        result = await dispatchViaAdapter(step, input, stepCtx, () =>
+          executeRunCode(step, input, stepCtx),
+        );
         break;
       case 'callModel':
-        result = await executeCallModel(step, input, ctx, baseCtx.layers);
+        result = await executeCallModel(step, input, stepCtx, baseCtx.layers);
         break;
       case 'acp-agent':
-        result = await executeAcpAgent(step, input, ctx, baseCtx.layers);
+        result = await executeAcpAgent(step, input, stepCtx, baseCtx.layers);
         break;
       case 'invokeTool':
-        result = await executeInvokeTool(step, input, ctx, baseCtx.harness);
+        result = await executeInvokeTool(step, input, stepCtx, baseCtx.harness);
         break;
       case 'decide':
-        result = await executeDecide(step, input, ctx, baseCtx.layers);
+        result = await executeDecide(step, input, stepCtx, baseCtx.layers);
         break;
       case 'conditional':
-        result = await executeConditional(step, input, ctx, (s, i, c) => execute(s, i, c));
+        result = await executeConditional(step, input, stepCtx, (s, i, c) => execute(s, i, c));
         break;
       case 'inParallel':
-        result = await executeInParallel(step, input, ctx, (s, i, c) => execute(s, i, c), {
+        result = await executeInParallel(step, input, stepCtx, (s, i, c) => execute(s, i, c), {
           // Fork paths are child executions: the layer store lets their
           // `onSpawn`/`onReturn` boundary run (see `createForkLayerBridge`).
           layerStore: harnessWithLayerStore(baseCtx).layerStateStore,
@@ -411,18 +408,24 @@ export async function execute<TContext = ContextData, I = unknown, O = unknown>(
         });
         break;
       case 'spawn':
-        result = await dispatchViaAdapter(step, input, ctx, () =>
-          executeSpawn(step, input, ctx, (s, i, c) => execute(s, i, c), buildSpawnOpts(ctx)),
+        result = await dispatchViaAdapter(step, input, stepCtx, () =>
+          executeSpawn(
+            step,
+            input,
+            stepCtx,
+            (s, i, c) => execute(s, i, c),
+            buildSpawnOpts(stepCtx),
+          ),
         );
         break;
       case 'withContext':
-        result = await executeWithContext(step, input, ctx, (s, i, c) => execute(s, i, c));
+        result = await executeWithContext(step, input, stepCtx, (s, i, c) => execute(s, i, c));
         break;
       case 'loop':
-        result = await executeLoop(step, input, ctx, (s, i, c) => execute(s, i, c));
+        result = await executeLoop(step, input, stepCtx, (s, i, c) => execute(s, i, c));
         break;
       case 'schedule':
-        result = await executeSchedule(step, input, ctx, (s, i, c) => execute(s, i, c));
+        result = await executeSchedule(step, input, stepCtx, (s, i, c) => execute(s, i, c));
         break;
       default: {
         const _exhaustive: never = step;
@@ -436,9 +439,7 @@ export async function execute<TContext = ContextData, I = unknown, O = unknown>(
       }
     }
   } finally {
-    if (impl && step.id.length > 0) {
-      impl.leaveStep(step.id);
-    }
+    lane?.leaveStep(frame);
   }
 
   // Emit step_completed framework event (respects step.emit option)

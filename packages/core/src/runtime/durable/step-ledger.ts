@@ -2,7 +2,7 @@
  * The step completion ledger: what a resumed execution replays instead of re-running.
  *
  * The frontier records which steps were IN FLIGHT at snapshot time; it says nothing
- * about which ones finished, and a finished step leaves no trace once `leaveStep` pops
+ * about which ones finished, and a finished step leaves no trace once `leaveStep` drops
  * it. Resume therefore needs a separate record — and it must carry each step's OUTPUT,
  * not merely a "done" flag: steps consume the previous step's value, and a `callModel` step
  * re-run to catch up produces a different one than the rest of the run already saw.

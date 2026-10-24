@@ -111,7 +111,12 @@ Entries live one key per step under `execution:<id>:ledger:<seq>`, so an append 
 
 ### Replay Identity
 
-By default a step's ledger key is its **execution path** — the stack of step ids plus a per-parent ordinal, like `root/plan#0/review-loop#0/body-llm#2`. Replay identity is therefore positional: a resumed step gets the output recorded at the same position.
+By default a step's ledger key is its **execution path** — its parent's path plus its id and a per-parent ordinal, like `/plan#0/review-loop#0/body-llm#2`. Replay identity is therefore positional: a resumed step gets the output recorded at the same position.
+
+Each step runs on its own *lane* of the context — a view that shares state, history, and usage but carries the step's own path — so steps it dispatches hang under it even when other work runs concurrently on the same context. Two `harness.run` calls racing on one context get stable, separate paths:
+
+- Different step ids under one parent always get distinct paths (`/left#0`, `/right#0`), whichever finishes first.
+- The same step id run concurrently under one parent is numbered in dispatch order (`/worker#0`, `/worker#1`). That survives a resume only if the dispatch order does; when it depends on timing, give the step a `replayKey`.
 
 That breaks when the work a position receives depends on timing. Concurrent workers pulling batches from a shared queue may pick different batches on resume, and positional replay would hand one batch's answer to another. Steps that return nothing and mutate state are worse off: replay skips them, so their state change is lost. Every step accepts two fields for this:
 
