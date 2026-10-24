@@ -665,6 +665,8 @@ any(...predicates)       // Stop when ANY predicate fires
 all(...predicates)       // Stop when ALL predicates fire
 ```
 
+Combinators run predicates in order and short-circuit: `any()` returns the first stop verdict as is, `all()` the first continue verdict as is. Otherwise the combined verdict joins the deciding predicates' `reason`s with `'; '` and `feedback` with `'\n'` (fields left out when none set them), so `any(until.maxSteps(n), until.verified(fn))` still passes the verifier's feedback to `prepareNext`.
+
 Reasons: `Reached max steps (n)`, `Cost $1.02 exceeded budget $1.00` (two decimals), `Verification passed` / `Verification failed`.
 
 ## Patterns

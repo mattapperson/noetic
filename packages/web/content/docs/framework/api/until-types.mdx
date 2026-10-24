@@ -171,7 +171,7 @@ interface ConvergeConfig {
 
 ### any(...predicates)
 
-Returns an `Until` that stops when **any** predicate returns `{ stop: true }`.
+Returns an `Until` that stops when **any** predicate returns `{ stop: true }`. Predicates run in order; the first stop verdict is returned as is. When none stops, the verdict carries every predicate's `reason` (joined with `'; '`) and `feedback` (joined with `'\n'`), so a failing `until.verified()` still hands its feedback to `prepareNext`.
 
 ```ts
 declare function anySig(...predicates: Until[]): Until;
@@ -179,7 +179,9 @@ declare function anySig(...predicates: Until[]): Until;
 
 ### all(...predicates)
 
-Returns an `Until` that stops when **all** predicates return `{ stop: true }`. Reasons from all predicates are joined with `'; '`.
+Returns an `Until` that stops when **all** predicates return `{ stop: true }`. Predicates run in order; the first continue verdict is returned as is, with its `reason` and `feedback`. When all stop, the verdict carries every predicate's `reason` (joined with `'; '`, or `'All predicates satisfied'` if none gave one) and `feedback` (joined with `'\n'`).
+
+Both combinators follow one rule: the combined verdict carries the reasons and feedback of the predicates that decided it, and leaves a field out when none of them set it.
 
 ```ts
 declare function allSig(...predicates: Until[]): Until;

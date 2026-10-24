@@ -188,9 +188,11 @@ const stopCondition = any(
 );
 ```
 
+If none stops, the verdict carries the `feedback` of every predicate, joined with a newline, so a failing `until.verified()` inside `any()` still reaches `prepareNext`. The first stop verdict is returned as is.
+
 ### all(...predicates)
 
-Stop when **every** predicate says stop. This is a logical AND.
+Stop when **every** predicate says stop. This is a logical AND. The first predicate that says continue decides, and its verdict (with its `feedback`) is returned as is; later predicates do not run. When all stop, reasons are joined with `'; '` and feedback with a newline.
 
 ```ts
 import { all, until } from '@noetic-tools/core';
