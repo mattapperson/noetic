@@ -480,6 +480,7 @@ describe('M10: explicit disabled-layer tracking', () => {
       layers: [
         layer,
       ],
+      stepId: 'spawn',
       parentCtx,
       childCtx,
       childLog: makeItemLog(),
@@ -495,6 +496,7 @@ describe('M10: explicit disabled-layer tracking', () => {
       layers: [
         layer,
       ],
+      stepId: 'spawn',
       parentCtx,
       childCtx,
       childLog: makeItemLog(),

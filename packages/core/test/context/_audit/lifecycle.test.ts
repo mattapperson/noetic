@@ -612,6 +612,7 @@ describe('AUDIT-EXTRA', () => {
       layers: [
         layer,
       ],
+      stepId: 'spawn',
       parentCtx,
       childCtx,
       childLog: makeItemLog(),

@@ -181,10 +181,12 @@ interface ForkLayerBridge {
 }
 
 function createForkLayerBridge({
+  stepId,
   ctx,
   childContexts,
   opts,
 }: {
+  stepId: string;
   ctx: Context<ContextData>;
   childContexts: ContextImpl[];
   opts?: ExecuteForkOpts;
@@ -222,6 +224,7 @@ function createForkLayerBridge({
       return serialize(() =>
         returnLayers({
           layers: layers ?? [],
+          stepId,
           parentCtx: parentExecCtx,
           childCtx: childExecCtxs[index],
           childLog: childContexts[index].itemLog,
@@ -314,6 +317,7 @@ export async function executeInParallel<TContext, I, O>(
       rawExecuteStep,
       childContexts,
       createForkLayerBridge({
+        stepId: step.id,
         ctx: baseCtx,
         childContexts,
         opts,

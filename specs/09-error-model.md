@@ -53,7 +53,7 @@ Treat as `{ stop: true, reason: 'Predicate error: ...' }`. The loop stops. A bro
 
 ### Spawn with Summary Failure (see `04-spawn`)
 
-The child's work succeeded — don't discard it. Throw `spawn_summary_failed` with `childOutput` attached so the caller can fall back to using the raw output.
+The child's work succeeded — don't discard it. When a layer's `onReturn` hook (for example a summarizer) throws or times out, the spawn does **not** throw: it returns the result as it stood before that hook (for a single summarizing layer, the child's raw output), and later layers still run. The failure is reported, not swallowed: the runtime builds a `spawn_summary_failed` error (`stepId`, `childOutput`, `summaryCause`), passes it to the layer state store's diagnostic sink (`diagnostic(layerId, 'onReturn', error)`), and adds a `spawn.summary_failed` event (`stepId`, `layerId`, `message`) to the parent's span. This matches the `onReturn` row of the hook error table in `11-context-layer-system`. The same applies to `inParallel` paths, whose results pass through `onReturn` the same way.
 
 ### LLM Parse Error
 

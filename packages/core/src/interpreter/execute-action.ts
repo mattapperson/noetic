@@ -1043,6 +1043,7 @@ export async function executeSpawn<TContext, I, O>(
 
       return returnLayers({
         layers,
+        stepId: step.id,
         parentCtx: parentExecutionCtx,
         childCtx: childExecutionCtx,
         childLog: childCtx.itemLog,

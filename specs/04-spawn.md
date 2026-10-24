@@ -32,6 +32,7 @@ The child starts with an **empty ItemLog** by default. All context flow across t
 
 - **`onSpawn` hooks** provide items to the child's initial ItemLog and set up child-side layer state.
 - **`onReturn` hooks** transform the child's result before it reaches the parent. Each layer's `onReturn` receives the previous result, forming a transformation pipeline.
+  A hook that throws or times out does not fail the spawn: its step in the pipeline is skipped, the result passes on unchanged, and the failure is reported as a `spawn_summary_failed` diagnostic (see `09-error-model`).
 
 The optional `context` field on `StepSpawn` provides **spawn-local context layers** that replace parent layer propagation. When `context` is set, only the specified layers are active in the child — parent layers do not propagate. This gives full isolation control.
 

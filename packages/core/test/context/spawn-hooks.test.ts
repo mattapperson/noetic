@@ -7,6 +7,7 @@ import {
   returnLayers,
   spawnLayers,
 } from '@noetic-tools/context';
+import { isNoeticError } from '@noetic-tools/types';
 import { makeCtx, makeItemLog, makeStorage } from '../_helpers';
 
 type DataState = {
@@ -141,6 +142,7 @@ describe('returnLayers', () => {
 
     const returnResult = await returnLayers({
       layers,
+      stepId: 'spawn',
       parentCtx,
       childCtx,
       childLog: makeItemLog(),
@@ -304,6 +306,7 @@ describe('returnLayers', () => {
 
     const returnResult = await returnLayers({
       layers,
+      stepId: 'spawn',
       parentCtx,
       childCtx,
       childLog: makeItemLog(),
@@ -313,5 +316,73 @@ describe('returnLayers', () => {
 
     // Each layer appends its tag: seed -> seed+a -> seed+a+b
     expect(returnResult).toBe('seed+a+b');
+  });
+
+  it('a failing onReturn passes the result through and records a span event', async () => {
+    const errors: unknown[] = [];
+    const store = createLayerStateStore((_layerId, _hook, error) => {
+      errors.push(error);
+    });
+    const events: Array<{
+      name: string;
+      attributes?: Record<string, string | number | boolean>;
+    }> = [];
+    const layers: ContextLayer[] = [
+      {
+        id: 'summarizer',
+        name: 'Summarizer',
+        slot: 100,
+        scope: 'execution',
+        hooks: {
+          onReturn: async () => {
+            throw new Error('summary timed out');
+          },
+        },
+      },
+    ];
+    const parentCtx = makeCtx({
+      executionId: 'parent-summary',
+      trace: {
+        setAttribute() {},
+        addEvent(name, attributes) {
+          events.push({
+            name,
+            attributes,
+          });
+        },
+      },
+    });
+    const childCtx = makeCtx({
+      executionId: 'child-summary',
+      depth: 1,
+    });
+    store.set('child-summary', 'summarizer', {
+      notes: 'child work',
+    });
+
+    const returnResult = await returnLayers({
+      layers,
+      stepId: 'research',
+      parentCtx,
+      childCtx,
+      childLog: makeItemLog(),
+      result: 'raw',
+      store,
+    });
+
+    expect(returnResult).toBe('raw');
+    expect(events).toEqual([
+      {
+        name: 'spawn.summary_failed',
+        attributes: {
+          stepId: 'research',
+          layerId: 'summarizer',
+          message: 'summary timed out',
+        },
+      },
+    ]);
+    const [error] = errors;
+    assert(isNoeticError(error));
+    expect(error.noeticError.kind).toBe('spawn_summary_failed');
   });
 });
