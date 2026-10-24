@@ -454,6 +454,12 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 **Fix:** Feed the node a JSON array, or a JSON object with an array at the `over` key.
 
+#### INVALID_REPLAY_KEY_INPUT
+
+**Cause:** A node with `"replayKey": { "from": [...] }` got input that is not a JSON object, so the named properties cannot be read. You see it as a warning, not a thrown error: the node runs without replay or recording.
+
+**Fix:** Feed the node a JSON object holding the `from` properties, or use `"replayKey": true` to key on the whole input.
+
 ### ACP Agents
 
 #### MISSING_ACP_AGENT

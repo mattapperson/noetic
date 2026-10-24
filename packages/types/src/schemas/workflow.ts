@@ -301,6 +301,19 @@ const AcpSessionPolicySchema = z.object({
 
 //#region Workflow Node Types
 
+/**
+ * @public
+ * Which part of a node's input names the work it does, so a resumed run replays the
+ * node by content rather than by position. `true` keys on the whole input. `from`
+ * keys on those top-level properties of the input parsed as a JSON object — the same
+ * lookup an `inParallel` node's `over` does. See spec 26 § Replay keys.
+ */
+export type WorkflowReplayKey =
+  | true
+  | {
+      from: string[];
+    };
+
 interface WorkflowNodeBase {
   id: string;
   /**
@@ -308,6 +321,8 @@ interface WorkflowNodeBase {
    * `false` makes the node run again on every resume. See spec 23a § Identity.
    */
   durable?: boolean;
+  /** Replay this node by its input instead of its position. Ignored when `durable` is `false`. */
+  replayKey?: WorkflowReplayKey;
 }
 
 /**
@@ -522,9 +537,17 @@ export type WorkflowNode =
 
 const WorkflowNodeRef: z.ZodType<WorkflowNode> = z.lazy(() => WorkflowNodeSchema);
 
+const WorkflowReplayKeySchema: z.ZodType<WorkflowReplayKey> = z.union([
+  z.literal(true),
+  z.object({
+    from: z.array(z.string().min(1)).min(1),
+  }),
+]);
+
 const SHARED_FIELDS = {
   id: z.string().min(1),
   durable: z.boolean().optional(),
+  replayKey: WorkflowReplayKeySchema.optional(),
 } as const;
 
 const OutputCodecRefSchema = z.object({

@@ -88,6 +88,8 @@ interface StepReplay<TContext, I> {
 
 `execute()` resolves the key once per dispatch (`resolveLedgerKey`): no key when `durable === false` or the kind is `schedule`; `key:<replayKey>` when a `replayKey` is set; the path otherwise. A `replayKey` that throws costs that dispatch its durability, never its run: the interpreter warns and executes the step without replay or recording.
 
+JSON workflow nodes carry both: `durable` as a boolean, and `replayKey` in a declarative form (`true`, or `{ from: [...] }` naming input properties) that the hydrator builds into the function (`26-json-workflow-runtime` § Replay keys).
+
 The pattern these compose into: mark orchestration `durable: false`, give each expensive leaf a `replayKey`, and resume replays the paid calls while the cheap structure re-runs and reapplies its state.
 
 ### Recording
@@ -268,7 +270,3 @@ without descending. This is right for a true resume and wrong for a *changed* wo
 editing a child under an unchanged parent has no effect on resume. A host that edited the
 workflow must clear the ledger rather than resume onto it. Divergence detection therefore
 catches a changed step at a recorded path, not a changed step beneath one.
-
-## Future Considerations
-
-- **Serializable replay keys for JSON workflows.** `replayKey` is a function, so JSON workflow nodes carry only `durable`. A JSON form would name the inputs to hash instead — for example `replayKey: { from: ["input", "context.batchId"] }` — with the hydrator building the function from that list.

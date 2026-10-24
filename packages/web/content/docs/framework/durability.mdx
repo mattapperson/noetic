@@ -125,6 +125,8 @@ That breaks when the work a position receives depends on timing. Concurrent work
 | `durable` | `true` | `false` keeps the step out of the ledger entirely: never replayed, never recorded, re-run on every resume. Applies to this step only — its children keep their own setting. |
 | `replayKey` | — | `(input, ctx) => string`. Records and replays the step under `key:<replayKey>` instead of its path, so it finds its output wherever it runs. Dispatches with the same key share one entry, so include everything that makes the call distinct. |
 
+JSON workflow nodes take the same two fields; there `replayKey` is declarative — `true` or `{ "from": ["batchId"] }` — and the hydrator builds the function. See [JSON Runtime](/docs/framework/json-runtime#node-kinds).
+
 The usual shape is "replay the expensive leaves, re-run the cheap orchestration":
 
 ```ts

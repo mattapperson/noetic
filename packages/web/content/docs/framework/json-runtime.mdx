@@ -83,7 +83,26 @@ Point your editor or validator at the bundled file (resolve it from the package,
 
 Thirteen node kinds are available, plus the `acp-agent` kind documented in [ACP Agent Steps](/docs/framework/acp-agents). Leaf nodes (`callModel`, `invokeTool`, `runCode`, `decide`) perform work; structural nodes (`sequence`, `inParallel`, `conditional`, `routeSwitch`, `loop`, `spawn`, `withContext`, `schedule`, `subflow`) compose them into trees.
 
-Every node takes an optional boolean `durable`. Set it to `false` on cheap orchestration nodes so a resumed run re-runs them instead of replaying their recorded output — see [Replay Identity](/docs/framework/durability#replay-identity). Content-keyed replay (`replayKey`) is code-only.
+Every node takes two optional replay fields — see [Replay Identity](/docs/framework/durability#replay-identity):
+
+| Field | Type | Effect |
+|---|---|---|
+| `durable` | `boolean` | `false` on cheap orchestration nodes makes a resumed run re-run them instead of replaying their recorded output. |
+| `replayKey` | `true \| { from: string[] }` | Replay the node by its input rather than its position. `true` keys on the whole input; `from` keys on those top-level properties of the input parsed as JSON (the same lookup `over` uses). Ignored when `durable` is `false`. |
+
+The key is the node id plus a hash of the selected input, so two different nodes never share an entry, while nodes that share an id do — write the same leaf id into several worker paths and each worker replays its own batch's answer whichever path picks it up:
+
+```json
+{
+  "kind": "sequence", "id": "worker-a", "durable": false,
+  "steps": [
+    { "kind": "invokeTool", "id": "worker-a-pick", "toolName": "pick-batch", "durable": false },
+    { "kind": "callModel", "id": "grade", "instructions": "Grade this batch.", "replayKey": true }
+  ]
+}
+```
+
+With `from`, a node whose input is not a JSON object logs a warning (`INVALID_REPLAY_KEY_INPUT`) and runs without replay. Inside a dynamic `inParallel` (`each`), node ids get the item index appended, so a keyed node there replays only when its item keeps its index.
 
 ### callModel
 

@@ -42,6 +42,7 @@ import { loop } from './loop-builder';
 import { withContext } from './provide-builder';
 import { spawn } from './spawn-builder';
 import { callModel, runCode, step } from './step-builders';
+import { workflowReplayKey } from './workflow-replay-key';
 
 //#region Types
 
@@ -1007,6 +1008,9 @@ export function hydrateNode(
   // Set in place rather than copied: builders register the step object itself.
   if (node.durable !== undefined) {
     hydrated.durable = node.durable;
+  }
+  if (node.replayKey !== undefined) {
+    hydrated.replayKey = workflowReplayKey(node.id, node.replayKey);
   }
   return hydrated;
 }

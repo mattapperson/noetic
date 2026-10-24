@@ -940,6 +940,7 @@ const pool = inParallel<ContextData, string, string[]>({
 - Mark every orchestration level `durable: false`, including the parent `inParallel`: a recorded parent replays its whole output without descending.
 - `durable: false` does not propagate — the keyed leaf under a non-durable worker still replays.
 - A `replayKey` must encode everything that makes the call distinct (method, exact request, sample index); equal keys share one recorded output across the execution.
+- In a JSON workflow, write the leaf as a node with `"replayKey": true` (or `{ "from": [...] }`) and give it the same `id` in every worker path; mark the pool and workers `"durable": false`.
 - Concurrent `harness.run` calls on one context are safe: each step runs on its own lane, so paths never interleave. Different step ids get distinct paths; the same id run concurrently is numbered in dispatch order (`/worker#0`, `/worker#1`), which only survives a resume when that order is fixed — otherwise key the step with `replayKey`.
 
 ## Durable IPC server (tasks-system pattern)
