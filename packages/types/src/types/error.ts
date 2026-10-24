@@ -40,6 +40,18 @@ export type NoeticError =
       }>;
     }
   | {
+      /**
+       * A spawn's child succeeded but a context layer's `onReturn` hook (for
+       * example a summarizer) failed. The runtime does not throw this: the
+       * spawn returns `childOutput` and reports this error as a layer
+       * diagnostic and a span event, so the child's work is never discarded.
+       */
+      kind: 'spawn_summary_failed';
+      stepId: string;
+      childOutput: unknown;
+      summaryCause: Error;
+    }
+  | {
       kind: 'channel_timeout';
       channelName: string;
       timeout: number;

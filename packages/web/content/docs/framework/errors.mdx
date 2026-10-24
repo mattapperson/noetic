@@ -33,6 +33,7 @@ Noetic wraps every framework-level failure in a structured `NoeticError` discrim
 | `model_parse_error` | `stepId`, `raw: string`, `schema: StandardSchemaV1`, `zodError: ZodError` | Structured output fails schema validation. `schema` is the Standard Schema v1 validator; `zodError` stays populated for backward compatibility — the real `ZodError` for Zod schemas, a synthetic `custom`-issue `ZodError` adapted from the vendor's Standard Schema issues otherwise. |
 | `model_rate_limit` | `stepId`, `retryAfter?: number` | The LLM provider returns a rate-limit response. |
 | `fork_partial` | `stepId`, `succeeded[]`, `failed[]` | Thrown by `inParallel` mode `'all'` when any path fails, and by `'race'` when every path fails. (Mode `'settle'` never throws this — it reports failures in its `SettleResult` array instead.) |
+| `spawn_summary_failed` | `stepId`, `childOutput: unknown`, `summaryCause: Error` | A spawn's child succeeded but a context layer's `onReturn` hook (such as a summarizer) failed. Never thrown: the spawn returns the child's unsummarized output, and this error is reported as a layer diagnostic and a `spawn.summary_failed` span event. |
 | `channel_timeout` | `channelName`, `timeout: number` | A `recv()` call — or a back-pressured `send()` parked on a full queue — exceeded its timeout. |
 | `channel_closed` | `channelName` | Attempted to send on a closed external channel. |
 | `cancelled` | `reason?: string` | The execution was cancelled via `ctx.abort()` or `harness.cancel()` — including a parent's cancellation cascading into an `inParallel` path or `spawn` child. Pending channel `recv` calls (and parked back-pressure `send` calls) on the aborted context reject with this kind immediately, and an in-flight model call or ACP agent turn is cut short. |
@@ -50,6 +51,7 @@ type NoeticError =
   | { kind: 'model_parse_error'; stepId: string; raw: string; schema: StandardSchemaV1; zodError: ZodError }
   | { kind: 'model_rate_limit'; stepId: string; retryAfter?: number }
   | { kind: 'fork_partial'; stepId: string; succeeded: Array<{ stepId: string; value: unknown }>; failed: Array<{ stepId: string; error: NoeticError }> }
+  | { kind: 'spawn_summary_failed'; stepId: string; childOutput: unknown; summaryCause: Error }
   | { kind: 'channel_timeout'; channelName: string; timeout: number }
   | { kind: 'channel_closed'; channelName: string }
   | { kind: 'cancelled'; reason?: string }
