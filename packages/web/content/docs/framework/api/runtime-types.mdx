@@ -46,7 +46,7 @@ declare interface HarnessApi<TParams extends Record<string, unknown> = Record<st
     cwdInit?: string;
   }): Context;
 
-  send<T>(channel: Channel<T>, value: T, ctx: Context): Promise<void>;
+  send<T>(channel: Channel<T>, value: NoInfer<T>, ctx: Context): Promise<void>;
   recv<T>(channel: Channel<T>, ctx: Context, opts?: { timeout?: number }): Promise<T>;
   tryRecv<T>(channel: Channel<T>, ctx: Context): T | null;
   getChannelHandle<T>(channel: ExternalChannel<T>, executionId: string): ChannelHandle<T>;

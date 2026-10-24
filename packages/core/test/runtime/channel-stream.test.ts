@@ -3,6 +3,7 @@ import assert from 'node:assert';
 import { isNoeticError } from '@noetic-tools/types';
 import { z } from 'zod';
 import { channel } from '../../src/builders/channel-builder';
+import type { ChannelWarning } from '../../src/runtime/channel-store';
 import { ChannelStore } from '../../src/runtime/channel-store';
 
 const EXEC = 'exec-1';
@@ -161,6 +162,22 @@ describe('ChannelStore.subscribe', () => {
       const stream = store.subscribe(ch, EXEC)[Symbol.asyncIterator]();
       await store.send(ch, 2);
       expect((await stream.next()).value).toBe(2);
+    });
+
+    it('reports a subscriber_drop warning to onWarning on buffer overflow', async () => {
+      const warnings: ChannelWarning[] = [];
+      const store = new ChannelStore({
+        onWarning: (w) => warnings.push(w),
+      });
+      const ch = topicChannel();
+      const stream = store.subscribe(ch, EXEC)[Symbol.asyncIterator]();
+      for (let i = 0; i < 1_001; i++) {
+        await store.send(ch, i);
+      }
+      expect(warnings.map((w) => w.kind)).toEqual([
+        'subscriber_drop',
+      ]);
+      expect((await stream.next()).value).toBe(1);
     });
 
     it('drops the oldest value and warns when the buffer overflows', async () => {

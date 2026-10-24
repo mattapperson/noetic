@@ -50,7 +50,7 @@ const progress = channel('progress', {
 | `schema` | `ZodType<T>` | Yes | Zod schema that validates every value sent through the channel. |
 | `mode` | `'value' \| 'queue' \| 'topic'` | Yes | Delivery semantics (see below). |
 | `capacity` | `number` | No | Maximum buffer size for queue mode. Defaults to 1000. |
-| `external` | `boolean` | No | When `true`, creates an `ExternalChannel` that outside code can write to. |
+| `external` | `boolean` | No | When `true`, creates an `ExternalChannel` that outside code can write to. A literal `true`/`false` narrows the return type; a run-time `boolean` returns `Channel<T> \| ExternalChannel<T>`. |
 
 ## Channel Modes
 
@@ -135,8 +135,8 @@ Channels are accessed through the [Context](/docs/framework/context) or [AgentHa
 
 | Method | Signature | Description |
 |---|---|---|
-| `ctx.send` | `send<T>(channel: Channel<T>, value: T): Promise<void>` | Send a value. Resolves immediately unless a queue channel is at capacity, in which case it parks until a consumer frees a slot (default 30s timeout → `channel_timeout`; abort → `cancelled`). |
-| `ctx.recv` | `recv<T>(channel: Channel<T>, opts?: { timeout?: number }): Promise<T>` | Wait for a value. Throws `channel_timeout` on expiry (default 30s). Rejects with `cancelled` if the context is aborted while waiting — even with `timeout: 0`. |
+| `ctx.send` | `send<T>(channel: Channel<T>, value: NoInfer<T>): Promise<void>` | Send a value. Resolves immediately unless a queue channel is at capacity, in which case it parks until a consumer frees a slot (default 30s timeout → `channel_timeout`; abort → `cancelled`). |
+| `ctx.recv` | `recv<T>(channel: Channel<T>, opts?: { timeout?: number }): Promise<T>` | Wait for a value. Throws `channel_timeout` on expiry (default 30s). `timeout: 0` waits with no timeout in every mode and records an `unbounded_wait` channel warning; a negative timeout rejects with `NoeticConfigError` code `INVALID_CHANNEL_TIMEOUT`. Rejects with `cancelled` if the context is aborted while waiting — even with `timeout: 0`. |
 | `ctx.tryRecv` | `tryRecv<T>(channel: Channel<T>): T \| null` | Non-blocking read. Returns `null` if nothing is available. |
 
 ### From the AgentHarness
@@ -275,7 +275,7 @@ await ctx.send(scores, 'high'); // Throws ZodError: Expected number, received st
 - A parked send rejects with `channel_timeout` after 30 seconds (the value never enters the queue).
 - Aborting the sending context rejects a parked send with `cancelled`.
 
-External senders are different: `ChannelHandle.send` is synchronous and never blocks. At capacity it drops the **oldest** queued item (with a warning) so external callers like HTTP handlers can't be wedged by a full queue.
+External senders are different: `ChannelHandle.send` is synchronous and never blocks. At capacity it drops the **oldest** queued item so external callers like HTTP handlers can't be wedged by a full queue. The drop is recorded as a `channel.warning` span event (`kind: 'overflow_drop'`) on each live root's span, or printed to the console when nothing is tracing — see [Observability](/docs/framework/observability#channel-warnings).
 
 ## Mode Comparison
 

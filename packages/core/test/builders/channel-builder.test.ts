@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import type { Channel, ExternalChannel } from '@noetic-tools/types';
 import { z } from 'zod';
 import { channel } from '../../src/builders/channel-builder';
 
@@ -62,5 +63,40 @@ describe('channel builder', () => {
       mode: 'value',
     });
     expect(ch.schema).toBe(schema);
+  });
+  it('accepts a boolean external flag decided at run time', () => {
+    const makeChannel = (external: boolean): Channel<string> | ExternalChannel<string> =>
+      channel('dyn', {
+        schema: z.string(),
+        mode: 'queue',
+        external,
+      });
+    const ext = makeChannel(true);
+    const internal = makeChannel(false);
+    expect('external' in ext && ext.external).toBe(true);
+    expect('external' in internal).toBe(false);
+  });
+
+  it('narrows the return type for literal external flags', () => {
+    const ext: ExternalChannel<string> = channel('lit-ext', {
+      schema: z.string(),
+      mode: 'queue',
+      external: true,
+    });
+    const internal: Channel<string> = channel('lit-int', {
+      schema: z.string(),
+      mode: 'queue',
+      external: false,
+    });
+    const flag: boolean = Math.random() > 2;
+    // @ts-expect-error a non-literal flag cannot narrow to ExternalChannel
+    const widened: ExternalChannel<string> = channel('wide', {
+      schema: z.string(),
+      mode: 'queue',
+      external: flag,
+    });
+    expect(ext.external).toBe(true);
+    expect(internal.name).toBe('lit-int');
+    expect(widened.name).toBe('wide');
   });
 });

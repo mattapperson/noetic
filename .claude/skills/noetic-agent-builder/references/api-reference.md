@@ -618,10 +618,14 @@ channel<T>(name: string, {
   mode: 'value' | 'queue' | 'topic';
   capacity?: number;
   external?: boolean;
-}): Channel<T>
+}): Channel<T> | ExternalChannel<T>
 ```
 
-`ctx.send(channel, value)` returns `Promise<void>` (breaking change in core v(next)): it resolves immediately for value/topic channels and queue channels below capacity, and parks when a queue channel is full (back-pressure) — `channel_timeout` after 30s, `cancelled` if the context aborts while parked. Always `await` it. `ctx.recv` rejects with `cancelled` when the context is aborted while waiting. External `ChannelHandle.send` stays synchronous and drops the oldest item at capacity.
+A literal `external: true` narrows the return to `ExternalChannel<T>`; omitted or literal `false` narrows to `Channel<T>`; a run-time `boolean` returns the union.
+
+Every `send` (`ctx.send`, `harness.send`) takes the value as `NoInfer<T>`, so the channel alone fixes the payload type — a plain `string` sent to a `z.enum([...])` channel is a compile error.
+
+`ctx.send(channel, value)` returns `Promise<void>` (breaking change in core v(next)): it resolves immediately for value/topic channels and queue channels below capacity, and parks when a queue channel is full (back-pressure) — `channel_timeout` after 30s, `cancelled` if the context aborts while parked. Always `await` it. `ctx.recv` rejects with `cancelled` when the context is aborted while waiting. `ctx.recv(ch, { timeout: 0 })` waits with no timeout in every mode (topic included — there is no clamp) and records an `unbounded_wait` channel warning; a negative timeout rejects with `NoeticConfigError` code `INVALID_CHANNEL_TIMEOUT`. External `ChannelHandle.send` stays synchronous and drops the oldest item at capacity, recorded as a `channel.warning` span event (`overflow_drop`) on each live traced root span, else `console.warn`.
 
 External channels (`external: true`) are reachable from outside the execution in both directions: `harness.getChannelHandle(ch, executionId)` writes in, `harness.getChannelStream(ch, executionId)` subscribes out as an `AsyncIterable<T>` (queue = competing consumer — subscribe once per harness; topic = per-subscriber buffered tap; value = current-then-conflated-updates). Delivery is CHANNEL-scoped (state keyed by name per harness); `executionId` bounds only the stream's lifetime, and an id no execution runs under gives a harness-lifetime stream ended with `iterator.return()`. The stream ends normally when the root execution completes (queue values at close drain first; later sends stay in the channel). Root completion also flips `ChannelHandle.closed` and makes post-run `handle.send` throw `channel_closed`; a sequential re-run or checkpoint-restore on the same root context reopens its id. The iterable owns a single iterator — subscribe again for a second consumer.
 

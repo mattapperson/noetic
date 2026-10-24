@@ -215,7 +215,7 @@ export interface ContextHarness {
    * consumer frees a slot (back-pressure; default 30s timeout →
    * `channel_timeout`, abort → `cancelled`).
    */
-  send<T>(channel: Channel<T>, value: T, ctx: Context): Promise<void>;
+  send<T>(channel: Channel<T>, value: NoInfer<T>, ctx: Context): Promise<void>;
   recv<T>(
     channel: Channel<T>,
     ctx: Context,
