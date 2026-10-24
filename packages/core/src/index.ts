@@ -323,6 +323,7 @@ export {
   isServerToolSpec,
   isStandardJsonSchema,
   isZodSchema,
+  ServiceTier,
   standardIssuesToZodError,
   validateSchema,
 } from '@noetic-tools/types';

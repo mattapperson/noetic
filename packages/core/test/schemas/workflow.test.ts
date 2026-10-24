@@ -89,6 +89,19 @@ describe('WorkflowNodeSchema — llm', () => {
     expect(result.success).toBe(true);
   });
 
+  test('accepts a known params.serviceTier and rejects an unknown one', () => {
+    const node = (serviceTier: string): unknown => ({
+      kind: 'callModel',
+      id: 'llm-tier',
+      instructions: 'x',
+      params: {
+        serviceTier,
+      },
+    });
+    expect(WorkflowNodeSchema.safeParse(node('ultrafast')).success).toBe(true);
+    expect(WorkflowNodeSchema.safeParse(node('turbo')).success).toBe(false);
+  });
+
   test('parses llm with only required fields', () => {
     const node = {
       kind: 'callModel',

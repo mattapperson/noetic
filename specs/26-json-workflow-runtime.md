@@ -98,6 +98,7 @@ interface CallModelWorkflowNode {
     topP?: number;
     maxTokens?: number;
     stopSequences?: string[];
+    serviceTier?: 'auto' | 'default' | 'fast' | 'flex' | 'priority' | 'scale' | 'ultrafast';
   };
 }
 ```
@@ -643,6 +644,7 @@ const WorkflowNodeSchema: z.ZodType<WorkflowNode> = z.lazy(() =>
         topP: z.number().min(0).max(1).optional(),
         maxTokens: z.number().int().positive().optional(),
         stopSequences: z.array(z.string()).optional(),
+        serviceTier: z.enum(ServiceTier).optional(),
       }).optional(),
     }),
     z.object({

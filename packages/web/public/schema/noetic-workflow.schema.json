@@ -83,6 +83,18 @@
                   "items": {
                     "type": "string"
                   }
+                },
+                "serviceTier": {
+                  "type": "string",
+                  "enum": [
+                    "auto",
+                    "default",
+                    "fast",
+                    "flex",
+                    "priority",
+                    "scale",
+                    "ultrafast"
+                  ]
                 }
               },
               "additionalProperties": false

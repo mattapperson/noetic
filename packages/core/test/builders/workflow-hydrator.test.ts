@@ -94,6 +94,20 @@ describe('hydrateNode — llm', () => {
     expect(result.id).toBe('test-llm');
   });
 
+  test('carries params.serviceTier onto the callModel step', () => {
+    const node: WorkflowNode = {
+      kind: 'callModel',
+      id: 'llm-tier',
+      instructions: 'Say hello',
+      params: {
+        serviceTier: 'ultrafast',
+      },
+    };
+    const result = hydrateNode(node, makeHydrationContext());
+    assert(result.kind === 'callModel');
+    expect(result.params?.serviceTier).toBe('ultrafast');
+  });
+
   test('resolves tool names from registry', () => {
     const testTool = makeTestTool();
     const node: WorkflowNode = {

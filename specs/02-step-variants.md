@@ -73,8 +73,14 @@ interface ModelParams {
   topP?: number;
   maxTokens?: number;
   stopSequences?: string[];
+  serviceTier?: ServiceTier;   // OpenRouter service tier, forwarded unchanged
 }
+
+// ESM literal enum (`ServiceTier.Ultrafast`, ...) plus the matching union type.
+type ServiceTier = 'auto' | 'default' | 'fast' | 'flex' | 'priority' | 'scale' | 'ultrafast';
 ```
+
+`serviceTier` asks OpenRouter for a processing tier: `fast` is an alias for `priority`; `ultrafast` prefers ultrafast endpoints and falls back to `priority`, then default endpoints. The tier the provider actually served lands on `LLMResponse.serviceTier` (taken from the last round) and on `ctx.lastStepMeta.serviceTier`. Both stay `undefined` when the provider reports no tier — they never echo the requested value, so a mismatch with the request means a fallback happened.
 
 ### Lazy Params
 
@@ -177,7 +183,7 @@ const result = await execute(analyze, codeSnippet, ctx);
 // result is { bugs: Bug[], severity: Severity }
 
 // Metadata on ctx.lastStepMeta:
-// { toolCalls: FunctionCallItem[], usage: { inputTokens, outputTokens, cachedTokens }, cost, responseItems: Item[] }
+// { toolCalls: FunctionCallItem[], usage: { inputTokens, outputTokens, cachedTokens }, cost, serviceTier?, responseItems: Item[] }
 ```
 
 ### What the LLM Actually Sees: The View
@@ -198,6 +204,7 @@ interface StepMeta {
   toolCalls?: FunctionCallItem[];
   usage?: { inputTokens: number; outputTokens: number; cachedTokens?: number };
   cost?: number;
+  serviceTier?: string;   // tier the provider served a callModel step on; undefined if unreported
   responseItems?: ReadonlyArray<Item>;
 }
 ```
