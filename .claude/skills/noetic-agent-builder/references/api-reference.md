@@ -42,10 +42,12 @@ callModel<TContext = ContextData, I = unknown, O = unknown>({
   tools?: Lazy<Tool[] | undefined, TContext>;       // allowed tool subset (undefined = all, [] = none)
   output?: StandardSchemaV1<unknown, O> | OutputCodec<O>;  // any Standard Schema v1 (Zod default) OR a streaming codec (see Generative UI)
   outputJsonSchema?: Record<string, unknown>;            // explicit fallback/override after Zod and StandardJSONSchemaV1
-  params?: ModelParams;
+  params?: ModelParams;                             // temperature, topP, maxTokens, stopSequences, serviceTier
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }): StepCallModel<TContext, I, O>
 ```
+
+**Service tier.** `params.serviceTier` (a `ServiceTier` value: `auto`, `default`, `fast`, `flex`, `priority`, `scale`, `ultrafast`) is forwarded to OpenRouter unchanged. The served tier lands on `ctx.lastStepMeta.serviceTier` / `LLMResponse.serviceTier`, `undefined` when the provider reports none (never an echo of the request). JSON workflows accept the same field under a `callModel` node's `params`.
 
 `tools` specifies which tools the model may invoke for this step. Before execution, the harness collects all tools from every `callModel` step in the tree into a unified set. Every LLM call sends the full set (preserving prompt cache), while `tools` narrows the allowed subset via `tool_choice: { type: "allowed_tools" }`. Omit `tools` to allow all; set `tools: []` to disable tools for the step.
 

@@ -98,6 +98,52 @@ describe('executeCallModel', () => {
     expect(ctx.lastStepMeta!.cost).toBe(0.01);
   });
 
+  it('forwards params.serviceTier and records the served tier in lastStepMeta', async () => {
+    const step: StepCallModel<ContextData, string, string> = {
+      kind: 'callModel',
+      id: 'test',
+      model: 'gpt-4',
+      params: {
+        serviceTier: 'ultrafast',
+      },
+    };
+    let capturedRequest: CallModelRequest | undefined;
+    const harness = makeMockHarness();
+    harness.callModel = async (request) => {
+      capturedRequest = request;
+      return makeLLMResponse('ok', {
+        serviceTier: 'priority',
+      });
+    };
+    const ctx = makeMockContext({
+      harness,
+    });
+
+    await executeCallModel(step, 'hi', ctx);
+    assert(capturedRequest !== undefined);
+    expect(capturedRequest.params?.serviceTier).toBe('ultrafast');
+    assert(ctx.lastStepMeta);
+    expect(ctx.lastStepMeta.serviceTier).toBe('priority');
+  });
+
+  it('leaves lastStepMeta.serviceTier unset when the provider reports none', async () => {
+    const step: StepCallModel<ContextData, string, string> = {
+      kind: 'callModel',
+      id: 'test',
+      model: 'gpt-4',
+      params: {
+        serviceTier: 'ultrafast',
+      },
+    };
+    const ctx = makeMockContextWithClient([
+      makeLLMResponse('ok'),
+    ]);
+
+    await executeCallModel(step, 'hi', ctx);
+    assert(ctx.lastStepMeta);
+    expect(ctx.lastStepMeta.serviceTier).toBeUndefined();
+  });
+
   it('accumulates token usage on context', async () => {
     const step: StepCallModel<ContextData, string, string> = {
       kind: 'callModel',

@@ -109,7 +109,7 @@ Call an LLM with instructions and optional tools. Every `tools` entry is a unifo
 | `model` | `string` | `'openai/gpt-4o'` | Model identifier (OpenRouter format). |
 | `instructions` | `string` | required | System/user prompt for the LLM. |
 | `tools` | `{ type: string, parameters?: object }[]` | `undefined` | Uniform tool entries. **Client tool**: `{ "type": "<registered-tool-name>" }` — `type` is resolved against the registry; any `parameters` is ignored (the model supplies call args at runtime). **Server tool**: `{ "type": "openrouter:web_search" \| "openrouter:web_fetch", "parameters"?: {...} }` — run by the provider; `parameters` keys are camelCase (e.g. `maxResults`, `searchContextSize`), unknown keys dropped. Client vs server is decided by the `type` value. |
-| `params` | `object` | `undefined` | Model parameters: `temperature`, `topP`, `maxTokens`, `stopSequences`. |
+| `params` | `object` | `undefined` | Model parameters: `temperature`, `topP`, `maxTokens`, `stopSequences`, `serviceTier` (`auto`, `default`, `fast`, `flex`, `priority`, `scale`, `ultrafast`). |
 
 ### runCode
 

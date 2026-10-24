@@ -53,6 +53,24 @@ export function isServerToolSpec(value: unknown): value is ServerToolSpec {
 }
 
 /**
+ * @public OpenRouter service tiers. `fast` is an alias for `priority`;
+ * `ultrafast` prefers ultrafast endpoints and falls back to `priority`, then
+ * default endpoints.
+ */
+export const ServiceTier = {
+  Auto: 'auto',
+  Default: 'default',
+  Fast: 'fast',
+  Flex: 'flex',
+  Priority: 'priority',
+  Scale: 'scale',
+  Ultrafast: 'ultrafast',
+} as const;
+
+/** @public Union of OpenRouter service tiers. */
+export type ServiceTier = (typeof ServiceTier)[keyof typeof ServiceTier];
+
+/**
  * Optional parameters forwarded to the model provider during an LLM step.
  * @public
  */
@@ -65,6 +83,8 @@ export interface ModelParams {
   maxTokens?: number;
   /** Sequences that cause the model to stop generating. */
   stopSequences?: string[];
+  /** OpenRouter service tier to request. Omit to use the provider default. */
+  serviceTier?: ServiceTier;
 }
 
 /** @public Aggregate token counts for an execution (input, output, total, cached). */
@@ -103,6 +123,8 @@ export interface StepMeta {
   toolCalls?: FunctionCallItem[];
   usage?: RoundUsage;
   cost?: number;
+  /** Tier the provider served an `llm` step on; see `LLMResponse.serviceTier`. */
+  serviceTier?: string;
   responseItems?: ReadonlyArray<Item>;
   /**
    * Why an ACP agent stopped its turn. Set only by `acp-agent` steps, and the
@@ -127,6 +149,12 @@ export interface LLMResponse {
    */
   rounds?: ReadonlyArray<RoundUsage>;
   cost?: number;
+  /**
+   * The tier the provider reports it served, from the last round. Absent when
+   * the provider reports none — it is never an echo of the requested tier, so
+   * a difference from `params.serviceTier` means a fallback happened.
+   */
+  serviceTier?: string;
 }
 
 /** @public Configuration for the LLM provider used by the agent harness. */

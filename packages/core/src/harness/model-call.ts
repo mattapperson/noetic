@@ -522,6 +522,7 @@ export class AgentHarnessModelCaller {
     // the assembled view was cached (see `noteCacheOutcome`).
     const rounds: RoundUsage[] = [];
     let totalCost = 0;
+    let servedTier: string | undefined;
     const conversationInput = itemsToInput(prepared.remaining);
     const textFormat = request.outputSchema
       ? buildTextFormat(request.outputSchema, request.outputJsonSchema)
@@ -585,6 +586,11 @@ export class AgentHarnessModelCaller {
           temperature: request.params?.temperature,
           maxOutputTokens: request.params?.maxTokens,
           topP: request.params?.topP,
+          // The agent's bundled SDK types an older tier list (no `fast` or
+          // `ultrafast`); the field is an open enum, so newer tiers pass through.
+          serviceTier: frameworkCast<OpenRouterAgent.CallModelInput['serviceTier']>(
+            request.params?.serviceTier,
+          ),
           ...(textFormat
             ? {
                 text: textFormat,
@@ -678,6 +684,7 @@ export class AgentHarnessModelCaller {
       totalUsage.outputTokens += roundUsage.outputTokens;
       totalUsage.cachedTokens += roundUsage.cachedTokens ?? 0;
       totalCost += roundCost;
+      servedTier = sdkResponse.serviceTier ?? undefined;
       allItems.push(...roundItems);
 
       const functionCalls = roundItems.filter(isFunctionCall);
@@ -720,6 +727,11 @@ export class AgentHarnessModelCaller {
       },
       rounds,
       cost: totalCost > 0 ? totalCost : undefined,
+      ...(servedTier
+        ? {
+            serviceTier: servedTier,
+          }
+        : {}),
     };
   }
 
