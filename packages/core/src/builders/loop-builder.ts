@@ -17,7 +17,7 @@ export type LoopConfig<TContext = ContextData, I = unknown, O = unknown> = Omit<
  * @param opts.steps - Array of steps to execute sequentially on each iteration.
  * @param opts.until - Termination predicate `(snapshot) => Verdict | Promise<Verdict>` evaluated after each iteration.
  * @param opts.maxIterations - Hard safety cap on iterations (default: 1000).
- * @param opts.maxHistorySize - Maximum entries kept in the snapshot history array.
+ * @param opts.maxHistorySize - Maximum entries kept in the snapshot history array (default: 100); oldest drop first.
  * @param opts.inbox - Optional channel for injecting messages into the loop mid-execution.
  * @param opts.parkTimeout - Ms to wait on inbox before the loop parks itself (default: 0).
  * @param opts.prepareNext - Transforms `(output, verdict, ctx)` into the next iteration's input.

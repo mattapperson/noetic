@@ -43,7 +43,7 @@ describe('until predicates', () => {
         }),
       );
       expect(verdict.stop).toBe(true);
-      expect(verdict.reason).toContain('max steps');
+      expect(verdict.reason).toBe('Reached max steps (3)');
     });
 
     it('stops when step count exceeded', async () => {
@@ -58,17 +58,18 @@ describe('until predicates', () => {
   });
 
   describe('maxCost', () => {
-    it('does not stop below threshold', async () => {
+    it('does not stop one cent below budget', async () => {
       const pred = until.maxCost(1.0);
       const verdict = await pred(
         makeSnap({
-          cost: 0.5,
+          cost: 0.99,
         }),
       );
       expect(verdict.stop).toBe(false);
+      expect(verdict.reason).toBeUndefined();
     });
 
-    it('stops when cost reached', async () => {
+    it('stops at budget', async () => {
       const pred = until.maxCost(1.0);
       const verdict = await pred(
         makeSnap({
@@ -76,17 +77,18 @@ describe('until predicates', () => {
         }),
       );
       expect(verdict.stop).toBe(true);
-      expect(verdict.reason).toContain('max cost');
+      expect(verdict.reason).toBe('Cost $1.00 exceeded budget $1.00');
     });
 
-    it('stops when cost exceeded', async () => {
+    it('stops one cent above budget and reports the actual cost', async () => {
       const pred = until.maxCost(1.0);
       const verdict = await pred(
         makeSnap({
-          cost: 2.0,
+          cost: 1.01,
         }),
       );
       expect(verdict.stop).toBe(true);
+      expect(verdict.reason).toBe('Cost $1.01 exceeded budget $1.00');
     });
   });
 
@@ -185,7 +187,7 @@ describe('until predicates', () => {
       });
       const verdict = await pred(snap);
       expect(verdict.stop).toBe(true);
-      expect(verdict.reason).toContain('Verification passed');
+      expect(verdict.reason).toBe('Verification passed');
     });
 
     it('does not stop when verification fails', async () => {
@@ -201,12 +203,12 @@ describe('until predicates', () => {
       expect(verdict.feedback).toBe('Try again');
     });
 
-    it('does not include reason on failure', async () => {
+    it('reports failure as the reason', async () => {
       const pred = until.verified(async () => ({
         pass: false,
       }));
       const verdict = await pred(makeSnap());
-      expect(verdict.reason).toBeUndefined();
+      expect(verdict.reason).toBe('Verification failed');
     });
   });
 
@@ -638,7 +640,7 @@ describe('combinators', () => {
       const verdict = await pred(snap);
       expect(verdict.stop).toBe(true);
       // Should return cost verdict first since it's listed first
-      expect(verdict.reason).toContain('max cost');
+      expect(verdict.reason).toBe('Cost $2.00 exceeded budget $1.00');
     });
 
     it('works with async predicates', async () => {
@@ -688,8 +690,7 @@ describe('combinators', () => {
           cost: 1.0,
         }),
       );
-      expect(verdict.reason).toContain('max steps');
-      expect(verdict.reason).toContain('max cost');
+      expect(verdict.reason).toBe('Reached max steps (5); Cost $1.00 exceeded budget $1.00');
     });
   });
 });

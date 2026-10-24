@@ -21,6 +21,7 @@ import type {
   Verdict,
 } from '@noetic-tools/types';
 import { createMessage, frameworkCast, isNoeticError, NoeticErrorImpl } from '@noetic-tools/types';
+import { NoeticEvent } from '../observability/genai-attributes';
 import type { ChannelStore } from '../runtime/channel-store';
 import { ContextImpl } from '../runtime/context-impl';
 import { snapshotCwdState } from '../runtime/cwd-helpers';
@@ -570,6 +571,9 @@ async function executeSettle<TContext, I, O>(
 
 //#region loop
 
+/** History entries a loop keeps when `maxHistorySize` is unset; oldest drop first. */
+const DEFAULT_MAX_HISTORY = 100;
+
 type InboxFields = Pick<StepLoop<unknown, unknown, unknown>, 'inbox' | 'parkTimeout'>;
 
 function hasTextField(value: unknown): value is {
@@ -627,7 +631,7 @@ export async function executeLoop<TContext, I, O>(
   const startTime = Date.now();
   let stepCount = 0;
   const maxIterations = step.maxIterations ?? 1e3;
-  const maxHistory = step.maxHistorySize ?? 100;
+  const maxHistory = step.maxHistorySize ?? DEFAULT_MAX_HISTORY;
   let totalIterations = 0;
 
   // Validate maxIterations
@@ -738,6 +742,7 @@ export async function executeLoop<TContext, I, O>(
         reason: `Predicate error: ${predicateError instanceof Error ? predicateError.message : String(predicateError)}`,
       };
     }
+    recordVerdict(ctx, step.id, totalIterations, verdict);
 
     if (verdict.stop) {
       if (lastOutput === undefined) {
@@ -859,6 +864,27 @@ function park<TContext>(parkCtx: ParkContext<TContext>): Promise<void> {
         // Channel timeout / store error — another path settles us.
       });
   });
+}
+
+/**
+ * Adds a `loop.verdict` event to the enclosing span; loops open no span of
+ * their own. Leaves out `feedback`, which can be large or sensitive.
+ */
+function recordVerdict<TContext>(
+  ctx: Context<TContext>,
+  loop: string,
+  iteration: number,
+  verdict: Verdict,
+): void {
+  const attributes: Record<string, string | number | boolean> = {
+    loop,
+    iteration,
+    stop: verdict.stop,
+  };
+  if (verdict.reason !== undefined) {
+    attributes.reason = verdict.reason;
+  }
+  ctx.span.addEvent(NoeticEvent.LOOP_VERDICT, attributes);
 }
 
 function recordIterationError<TContext>(ctx: Context<TContext>, error: unknown): void {
