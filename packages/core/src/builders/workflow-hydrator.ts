@@ -1009,7 +1009,12 @@ export function hydrateNode(
       hint: `Supported kinds: ${Object.keys(NODE_HYDRATORS).join(', ')}.`,
     });
   }
-  return hydrator(node, ctx);
+  const hydrated = hydrator(node, ctx);
+  // Set in place rather than copied: builders register the step object itself.
+  if (node.durable !== undefined) {
+    hydrated.durable = node.durable;
+  }
+  return hydrated;
 }
 
 /**

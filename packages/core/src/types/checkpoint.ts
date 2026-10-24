@@ -89,6 +89,33 @@ export type ItemLogSnapshot = z.infer<typeof ItemLogSnapshotSchema>;
 
 /**
  * @public
+ * Channel state an execution used, captured so a restored execution sees the
+ * same values and queued items. Only stored data is kept — parked receivers,
+ * parked senders, and subscribers are live promises that cannot round-trip.
+ * Topic channels hold no stored data, so they never appear.
+ */
+export const ChannelSnapshotSchema = z.discriminatedUnion('mode', [
+  z.object({
+    name: z.string(),
+    mode: z.literal('value'),
+    /** The last value written. Absent when the channel was never written. */
+    value: z.unknown().optional(),
+    hasValue: z.boolean(),
+  }),
+  z.object({
+    name: z.string(),
+    mode: z.literal('queue'),
+    capacity: z.number(),
+    /** Queued items, oldest first. */
+    queue: z.array(z.unknown()),
+  }),
+]);
+
+/** @public One channel's stored state inside a checkpoint snapshot. */
+export type ChannelSnapshot = z.infer<typeof ChannelSnapshotSchema>;
+
+/**
+ * @public
  * Top-level checkpoint payload persisted through a `CheckpointStore`. Carries
  * a schema version so forward-incompatible changes can be rejected cleanly
  * instead of producing a silently corrupt restored context.
@@ -103,6 +130,12 @@ export const CheckpointSnapshotSchema = z.object({
   cwd: CwdSnapshotSchema.nullable(),
   askUser: z.array(PendingAskUserSnapshotSchema),
   itemLog: ItemLogSnapshotSchema,
+  /**
+   * Stored state of every channel the execution used. Optional so snapshots
+   * written before channels were captured still load (they restore with no
+   * channel state).
+   */
+  channels: z.array(ChannelSnapshotSchema).optional(),
   /** ISO-8601 timestamp of when the snapshot was taken. */
   capturedAt: z.string(),
 });

@@ -1,4 +1,5 @@
 import { frameworkCast, ItemSchemaRegistry, NoeticConfigError } from '@noetic-tools/types';
+import { NoeticEvent } from '../observability/genai-attributes';
 import { SpanImpl } from '../observability/span-impl';
 import { NoopExporter } from '../observability/trace-exporter';
 import { AcpSessionStore } from '../runtime/acp-session-store';
@@ -44,6 +45,7 @@ import {
   prepareBandedView,
 } from './deps/interpreter';
 import type {
+  ChannelWarning,
   CheckpointStore,
   EventBroadcaster,
   QueuedMessage,
@@ -64,9 +66,11 @@ import {
   filterTextStream,
   resolveStepLedgerRetention,
   restoreFromCheckpoint,
+  rootIdOf,
   SessionRunner,
   StepLedger,
   snapshotCwdState,
+  warnToConsole,
 } from './deps/runtime';
 import type {
   AcpLiveSession,
@@ -460,9 +464,19 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   private readonly decideOverride?: (request: DecideRequest) => Promise<DecideResponse>;
   /** Model id → whether it answers natively as a decision model. */
   private readonly decisionModels = new Map<string, Promise<boolean>>();
-  private readonly channelStore: ChannelStore;
-  /** Re-entrant `run()` depth per root context id — see `executeClosingChannels`. */
-  private readonly rootRunDepth = new Map<string, number>();
+  /** @internal Channel state; read by the checkpoint functions. */
+  readonly channelStore: ChannelStore;
+  /**
+   * Root contexts with a `run()` in flight, keyed by id, with their
+   * re-entrant run depth — see `executeClosingChannels`.
+   */
+  private readonly liveRoots = new Map<
+    string,
+    {
+      ctx: Context;
+      depth: number;
+    }
+  >();
   private readonly callModelOverride?: (request: CallModelRequest) => Promise<LLMResponse>;
   private readonly defaultDeliveryMode: DeliveryMode;
   private readonly sessions = new Map<string, Session>();
@@ -582,7 +596,9 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     this.decisionsClient = opts._testCallModel
       ? undefined
       : createDecisionsClient(opts.callModelDefaults);
-    this.channelStore = new ChannelStore();
+    this.channelStore = new ChannelStore({
+      onWarning: (warning) => this.recordChannelWarning(warning),
+    });
     this.traceExporter = opts.traceExporter ?? new NoopExporter();
     this.layerStateStore =
       storageEnv?.layerStateStore ??
@@ -902,21 +918,24 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     if (ctx.parent !== null) {
       return execute(s, input, ctx);
     }
-    const depth = this.rootRunDepth.get(ctx.id) ?? 0;
-    if (depth === 0) {
+    const live = this.liveRoots.get(ctx.id);
+    if (!live) {
       // A restored or sequentially re-run root context reuses its id — clear
       // any closure from a previous completion so its channels work again.
       this.channelStore.openExecution(ctx.id);
     }
-    this.rootRunDepth.set(ctx.id, depth + 1);
+    const entry = live ?? {
+      ctx,
+      depth: 0,
+    };
+    entry.depth += 1;
+    this.liveRoots.set(ctx.id, entry);
     try {
       return await execute(s, input, ctx);
     } finally {
-      const remaining = (this.rootRunDepth.get(ctx.id) ?? 1) - 1;
-      if (remaining > 0) {
-        this.rootRunDepth.set(ctx.id, remaining);
-      } else {
-        this.rootRunDepth.delete(ctx.id);
+      entry.depth -= 1;
+      if (entry.depth <= 0) {
+        this.liveRoots.delete(ctx.id);
         this.channelStore.closeExecution(ctx.id);
         await this.acpSessions.closeOwnedBy(ctx.id);
       }
@@ -1023,10 +1042,11 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     });
   }
 
-  send<T>(channel: Channel<T>, value: T, ctx: Context): Promise<void> {
+  send<T>(channel: Channel<T>, value: NoInfer<T>, ctx: Context): Promise<void> {
     // Internal sender: back-pressured on full queue channels. The calling
     // context's abort signal rejects a parked send with 'cancelled'.
     const signal = ctx instanceof ContextImpl ? ctx.abortSignal : undefined;
+    this.channelStore.claim(channel, rootIdOf(ctx));
     return this.channelStore.send(channel, value, {
       signal,
     });
@@ -1042,10 +1062,12 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     // Wire the calling context's abort signal so ctx.abort() rejects a
     // pending recv with { kind: 'cancelled' } instead of hanging.
     const signal = ctx instanceof ContextImpl ? ctx.abortSignal : undefined;
+    this.channelStore.claim(channel, rootIdOf(ctx));
     return this.channelStore.recv(channel, opts?.timeout, signal);
   }
 
-  tryRecv<T>(channel: Channel<T>, _ctx: Context): T | null {
+  tryRecv<T>(channel: Channel<T>, ctx: Context): T | null {
+    this.channelStore.claim(channel, rootIdOf(ctx));
     return this.channelStore.tryRecv(channel);
   }
 
@@ -1392,6 +1414,31 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       ],
       ctx,
     );
+  }
+
+  /**
+   * Channel state is shared by every root on this harness, so a channel
+   * warning is recorded as a `channel.warning` event on each live root's
+   * span (spec 10). A root span counts only if it will reach the trace
+   * exporter — a harness span (`SpanImpl`) with a real exporter configured.
+   * With no such span the warning goes to the console, so it is never lost.
+   */
+  private recordChannelWarning(warning: ChannelWarning): void {
+    const traced =
+      this.traceExporter instanceof NoopExporter
+        ? []
+        : [
+            ...this.liveRoots.values(),
+          ].filter(({ ctx }) => ctx.span instanceof SpanImpl);
+    if (traced.length === 0) {
+      warnToConsole(warning);
+      return;
+    }
+    for (const { ctx } of traced) {
+      ctx.span.addEvent(NoeticEvent.CHANNEL_WARNING, {
+        ...warning,
+      });
+    }
   }
 
   createSpan(name: string, parent: Span | null): Span {

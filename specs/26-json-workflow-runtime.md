@@ -62,7 +62,7 @@ Authoring documents by hand or reviewing LLM-generated ones, reference the schem
 
 ## WorkflowNode Union
 
-`WorkflowNode` is a discriminated union on `kind`. Each variant maps to an existing `Step` builder. All nodes share a common `id` field. The `acp-agent` node kind is specified in `27-acp-agent-steps`.
+`WorkflowNode` is a discriminated union on `kind`. Each variant maps to an existing `Step` builder. All nodes share two fields: a required `id`, and an optional boolean `durable` that the hydrator copies onto the built step. `durable: false` keeps the node out of the step ledger, so a resumed run re-runs it instead of replaying its recorded output (`23a-step-level-resume` § Identity). The code-only `replayKey` has no JSON form; see Future Considerations. The `acp-agent` node kind is specified in `27-acp-agent-steps`.
 
 ```typescript
 type WorkflowNode =
@@ -98,6 +98,7 @@ interface CallModelWorkflowNode {
     topP?: number;
     maxTokens?: number;
     stopSequences?: string[];
+    serviceTier?: 'auto' | 'default' | 'fast' | 'flex' | 'priority' | 'scale' | 'ultrafast';
   };
 }
 ```
@@ -643,6 +644,7 @@ const WorkflowNodeSchema: z.ZodType<WorkflowNode> = z.lazy(() =>
         topP: z.number().min(0).max(1).optional(),
         maxTokens: z.number().int().positive().optional(),
         stopSequences: z.array(z.string()).optional(),
+        serviceTier: z.enum(ServiceTier).optional(),
       }).optional(),
     }),
     z.object({
@@ -743,4 +745,5 @@ const WorkflowDocumentSchema = z.object({
 - **Streaming hydration.** For very large workflows, hydrate nodes lazily as execution reaches them rather than building the entire `Step` tree upfront. This reduces memory pressure and startup latency.
 - **Named context layer resolution for `withContext` nodes.** The current design uses string layer names, but the resolution mechanism is left to the `HydrationContext`. A standardised layer registry (analogous to the tool registry) would make `withContext` nodes portable across different harness configurations.
 - **Workflow versioning and migration.** When `version` increments to `2`, a `migrateV1toV2` function would transform old documents automatically. The version field exists to enable this without breaking existing consumers.
+- **Serializable replay keys.** Programmatic steps can set `replayKey` (`23a-step-level-resume` § Identity) to replay by content rather than position; JSON nodes cannot express a function. A declarative form would list the values to hash — `"replayKey": { "from": ["input", "context.batchId"] }` — and the hydrator would build the key function from it.
 - **Conditional until predicates.** Predicates that inspect specific fields of structured output (e.g., `outputField('status', 'complete')`) rather than treating output as an opaque string.

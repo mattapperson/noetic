@@ -45,7 +45,7 @@ interface Context<TState = unknown> {
 
   // Channel operations (thin wrappers over runtime.send/recv, see 06-channels)
   recv<T>(channel: Channel<T>, opts?: { timeout?: number }): Promise<T>;
-  send<T>(channel: Channel<T>, value: T): void;
+  send<T>(channel: Channel<T>, value: NoInfer<T>): Promise<void>;
 
   // Non-blocking channel read (see 06-channels)
   tryRecv<T>(channel: Channel<T>): T | null;
@@ -264,7 +264,7 @@ interface LLMResponse {
 
 - **`harness`** gives every step direct access to the `AgentHarness` that owns this context. Steps and tools read harness params via `ctx.harness.config.params` and can call harness methods (e.g., `ctx.harness.run(...)` for sub-agent delegation).
 - **`parent`** enables spawn-tree traversal. The `depth` field enables recursive patterns with depth limits.
-- **`span`** means every step is automatically traced without user instrumentation (see `10-observability`).
+- **`span`** means every step runs under a trace span without user instrumentation; child contexts (`spawn`, `inParallel` paths) carry their own (see `10-observability`).
 - **`threadId` / `resourceId`** are used by the runtime to resolve context layer scope keys. A `scope: 'thread'` context layer isolates state per `threadId`; a `scope: 'resource'` layer shares state across threads for the same `resourceId` (see `11-context-layer-system`).
 - **`itemLog`** is the raw record. The View (what the LLM sees) is a projection of it plus context layer outputs.
 - **The `Context` interface is not the context the LLM sees.** The `Context` object is execution infrastructure — metadata, state, and runtime handles. What the LLM actually receives is the View: the result of all context layers converging in slot order. Context is never a layer itself; it is the output of layer convergence, assembled fresh before each LLM call. See `11-context-layer-system`.

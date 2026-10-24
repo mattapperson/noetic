@@ -13,14 +13,27 @@
 type Step<I, O> =
   | { kind: 'runCode';     id: string; execute: (input: I, ctx: Context) => Promise<O>; retry?: RetryPolicy; subprocess?: SubprocessAdapter }
   | { kind: 'callModel';     id: string; model: string; instructions?: string; tools?: Tool[]; output?: StandardSchemaV1<unknown, O>; outputJsonSchema?: Record<string, unknown>; params?: ModelParams }
-  | { kind: 'invokeTool';    id: string; tool: Tool; args?: unknown }
+  | { kind: 'invokeTool';    id: string; tool: Tool<I, O>; args?: Partial<I> }
   | { kind: 'decide';  id: string; model?: string; questions: DecideQuestions; view: 'full' | 'layers' | 'none'; samples: number }
   | { kind: 'conditional';  id: string; route: (input: I, ctx: Context, run: ExecuteStepFn) => Step<I, O> | null }
-  | { kind: 'inParallel';    id: string; mode: 'all' | 'race' | 'settle'; paths: (input: I, ctx: Context) => Step<I, O>[]; merge?: MergeFn<O>; concurrency?: number }
+  | { kind: 'inParallel';    id: string; mode: 'race';   paths: (input: I, ctx: Context) => Step<I, O>[]; concurrency?: number }
+  | { kind: 'inParallel';    id: string; mode: 'all';    paths: (input: I, ctx: Context) => Step<I, O>[]; merge: MergeFn<O>; concurrency?: number }
+  | { kind: 'inParallel';    id: string; mode: 'settle'; paths: (input: I, ctx: Context) => Step<I, O>[]; merge: MergeFn<O, SettleResult<O>>; concurrency?: number }
   | { kind: 'spawn';   id: string; child: Step<I, O>; context?: ContextLayer[]; timeout?: number; subprocess?: SubprocessAdapter }
   | { kind: 'withContext'; id: string; child: Step<I, O>; context: ContextConfig | ContextLayer[] }
   | { kind: 'loop';    id: string; steps: ReadonlyArray<Step<I, O>>; until: Until; maxIterations?: number; maxHistorySize?: number; prepareNext?: (output: O, verdict: Verdict, ctx: Context) => I; onError?: (error: NoeticError, ctx: Context) => 'retry' | 'skip' | 'abort' }
 ```
+
+Every variant also carries the replay controls from `StepReplay`, omitted above for width:
+
+```typescript
+interface StepReplay<I> {
+  durable?: boolean;                               // default true; false = never recorded or replayed
+  replayKey?(input: I, ctx: Context): string;      // ledger key replacing the execution path
+}
+```
+
+They govern step-level resume: a resumed execution replays a recorded step's output instead of running it, keyed by execution path unless `replayKey` names a content key, and skipping the ledger entirely for `durable: false`. See `23a-step-level-resume` § Identity.
 
 The optional `subprocess?: SubprocessAdapter` field on `runCode` and `spawn` variants is a per-step adapter override. When set, the interpreter dispatches that step through the given adapter instead of the harness default. Resolution order at dispatch time is `detachedSpawn-overrides.subprocess ?? step.subprocess ?? harness.subprocess`. See `04-spawn` for adapter routing and `23-durable-execution` for durability guarantees.
 

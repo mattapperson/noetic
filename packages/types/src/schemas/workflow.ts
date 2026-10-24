@@ -10,6 +10,7 @@
  */
 
 import { z } from 'zod';
+import { ServiceTier } from '../types/common';
 import type { DecideQuestion } from '../types/decide';
 import { DecideQuestionsSchema, routeOutcomes } from '../types/decide';
 import type { DecideView } from '../types/step';
@@ -164,6 +165,7 @@ const ModelParamsSchema = z.object({
   topP: z.number().min(0).max(1).optional(),
   maxTokens: z.number().int().positive().optional(),
   stopSequences: z.array(z.string()).optional(),
+  serviceTier: z.enum(ServiceTier).optional(),
 });
 
 //#endregion
@@ -301,6 +303,11 @@ const AcpSessionPolicySchema = z.object({
 
 interface WorkflowNodeBase {
   id: string;
+  /**
+   * Whether a resumed run replays this node's recorded output. Defaults to `true`;
+   * `false` makes the node run again on every resume. See spec 23a § Identity.
+   */
+  durable?: boolean;
 }
 
 /**
@@ -517,6 +524,7 @@ const WorkflowNodeRef: z.ZodType<WorkflowNode> = z.lazy(() => WorkflowNodeSchema
 
 const SHARED_FIELDS = {
   id: z.string().min(1),
+  durable: z.boolean().optional(),
 } as const;
 
 const OutputCodecRefSchema = z.object({

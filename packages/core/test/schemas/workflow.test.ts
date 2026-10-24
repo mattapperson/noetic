@@ -89,6 +89,19 @@ describe('WorkflowNodeSchema — llm', () => {
     expect(result.success).toBe(true);
   });
 
+  test('accepts a known params.serviceTier and rejects an unknown one', () => {
+    const node = (serviceTier: string): unknown => ({
+      kind: 'callModel',
+      id: 'llm-tier',
+      instructions: 'x',
+      params: {
+        serviceTier,
+      },
+    });
+    expect(WorkflowNodeSchema.safeParse(node('ultrafast')).success).toBe(true);
+    expect(WorkflowNodeSchema.safeParse(node('turbo')).success).toBe(false);
+  });
+
   test('parses llm with only required fields', () => {
     const node = {
       kind: 'callModel',
@@ -489,6 +502,29 @@ describe('WorkflowNodeSchema — unknown kind', () => {
       id: 'bad',
     };
     const result = WorkflowNodeSchema.safeParse(node);
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('WorkflowNodeSchema — durable', () => {
+  test('accepts durable: false on any node kind', () => {
+    const result = WorkflowNodeSchema.safeParse({
+      kind: 'invokeTool',
+      id: 'orchestrate',
+      toolName: 'pick-batch',
+      durable: false,
+    });
+    expect(result.success).toBe(true);
+    expect(result.data?.durable).toBe(false);
+  });
+
+  test('rejects a non-boolean durable', () => {
+    const result = WorkflowNodeSchema.safeParse({
+      kind: 'invokeTool',
+      id: 'orchestrate',
+      toolName: 'pick-batch',
+      durable: 'never',
+    });
     expect(result.success).toBe(false);
   });
 });

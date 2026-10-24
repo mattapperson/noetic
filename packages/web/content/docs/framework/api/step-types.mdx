@@ -39,6 +39,15 @@ type _AssertSubset<TContext, I, O> = _AssertShape<TContext, I, O> extends Step<T
 
 The exported `Step` union additionally includes [`StepSchedule`](#stepschedule) for fixed-interval scheduling.
 
+### StepReplay
+
+Every step interface extends `StepReplay<TContext, I>`, so these fields apply to every row below. See [Replay Identity](/docs/framework/durability#replay-identity).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `durable` | `boolean` | no | Defaults to `true`. `false` keeps the step out of the step ledger: never replayed or recorded on resume. |
+| `replayKey` | `(input: I, ctx: Context<TContext>) => string` | no | Content key the ledger uses instead of the execution path. |
+
 ## StepRunCode
 
 `StepRunCode<TContext, I, O>`
@@ -199,7 +208,7 @@ inParallel has three mode variants, each a separate interface.
 | `id` | `string` | yes | Step identifier |
 | `mode` | `'all'` | yes | Wait for all paths |
 | `paths` | `(input: I, ctx: Context<TContext>) => Step<TContext, I, O>[]` | yes | Path factory |
-| `merge` | `(results: O[], ctx: Context<TContext>) => O` | yes | Merge function |
+| `merge` | `MergeFn<TContext, O>` | yes | Merge function |
 | `concurrency` | `number` | no | Max parallel paths |
 
 ### StepInParallelSettle
@@ -212,7 +221,7 @@ inParallel has three mode variants, each a separate interface.
 | `id` | `string` | yes | Step identifier |
 | `mode` | `'settle'` | yes | Wait for all, include errors |
 | `paths` | `(input: I, ctx: Context<TContext>) => Step<TContext, I, O>[]` | yes | Path factory |
-| `merge` | `(results: SettleResult<O>[], ctx: Context<TContext>) => O` | yes | Merge function |
+| `merge` | `MergeFn<TContext, O, SettleResult<O>>` | yes | Merge function |
 | `concurrency` | `number` | no | Max parallel paths |
 
 ## StepWithContext
@@ -282,6 +291,17 @@ A step that runs a body step on a fixed-interval schedule, optionally woken soon
 | `value` | `O` | Present if fulfilled |
 | `error` | `NoeticError` | Present if rejected |
 
+### MergeFn
+
+`MergeFn<TContext, O, R = O>` combines inParallel path results into one output. `R` is the element type of `results`: `O` in `all` mode, `SettleResult<O>` in `settle` mode.
+
+```ts
+type MergeFn<TContext = ContextData, O = unknown, R = O> = (
+  results: R[],
+  ctx: Context<TContext>,
+) => O;
+```
+
 ### RetryPolicy
 
 | Field | Type | Description |
@@ -299,6 +319,7 @@ A step that runs a body step on a fixed-interval schedule, optionally woken soon
 | `topP` | `number` | Nucleus sampling (optional) |
 | `maxTokens` | `number` | Max response tokens (optional) |
 | `stopSequences` | `string[]` | Stop sequences (optional) |
+| `serviceTier` | `ServiceTier` | OpenRouter service tier (optional); the served tier lands on `StepMeta.serviceTier` |
 
 ### Tool
 

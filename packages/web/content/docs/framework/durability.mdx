@@ -38,7 +38,7 @@ Any `detachedSpawn` through this harness lands a manifest entry. Any `execute()`
 
 Durable execution composes three primitives:
 
-1. **`CheckpointStore`** — saves and loads per-execution snapshots covering the step frontier, context-layer state, cwd, pending ask-user queue, and item log.
+1. **`CheckpointStore`** — saves and loads per-execution snapshots covering the step frontier, context-layer state, cwd, pending ask-user queue, item log, and the state of the channels the execution used.
 2. **`SubprocessAdapter.reattach` / `listLive`** — persists handle manifests for every long-lived child and rebinds them on parent restart.
 3. **Durable IPC (`DurableOutboundQueue` + protocol v2)** — numbers every outbound IPC frame with a monotonic sequence, persists it, and resumes from the client's last ack on reconnect.
 
@@ -72,9 +72,16 @@ interface CheckpointSnapshot {
   cwd: { current: string | null; previous?: string | null } | null;
   askUser: Array<{ id: string; input: unknown; createdAt: number }>;
   itemLog: { items: unknown[] };
+  channels?: ChannelSnapshot[];      // channels the execution used
   capturedAt: string;                // ISO-8601
 }
+
+type ChannelSnapshot =
+  | { name: string; mode: 'value'; value?: unknown; hasValue: boolean }
+  | { name: string; mode: 'queue'; capacity: number; queue: unknown[] }; // oldest first
 ```
+
+`channels` carries each `value` channel's current value and each `queue` channel's queued items. Restore refills them into the harness for any channel that has no live state yet. Parked `recv`/`send` calls and subscriptions are live promises, so they are not saved, and `topic` channels hold nothing to save. Snapshots written before channels were captured have no `channels` field and restore no channel state.
 
 The snapshot is keyed by `executionId` and validated by `CheckpointSnapshotSchema` on load. Successive snapshots overwrite — no append-only log, no journaling. A failing save is logged and swallowed so a checkpoint never aborts an otherwise-successful step.
 
@@ -101,6 +108,59 @@ A restored context knows *what happened* but not *how far it got*: the frontier 
 A resumed run replays those outputs instead of re-running the steps. It is memoization, not fast-forward: a `callModel` step re-run to "catch up" would return something different from what the rest of the run already observed, so the recorded value is what flows downstream. Only successes are recorded — a step that threw runs again — and a step whose identity changed at a recorded path runs fresh, discarding its recorded subtree.
 
 Entries live one key per step under `execution:<id>:ledger:<seq>`, so an append is O(1) regardless of run length. Nothing here is visible on a zero-config harness: without a `checkpointStore` the ledger is never constructed.
+
+### Replay Identity
+
+By default a step's ledger key is its **execution path** — the stack of step ids plus a per-parent ordinal, like `root/plan#0/review-loop#0/body-llm#2`. Replay identity is therefore positional: a resumed step gets the output recorded at the same position.
+
+That breaks when the work a position receives depends on timing. Concurrent workers pulling batches from a shared queue may pick different batches on resume, and positional replay would hand one batch's answer to another. Steps that return nothing and mutate state are worse off: replay skips them, so their state change is lost. Every step accepts two fields for this:
+
+| Field | Default | Effect |
+|---|---|---|
+| `durable` | `true` | `false` keeps the step out of the ledger entirely: never replayed, never recorded, re-run on every resume. Applies to this step only — its children keep their own setting. |
+| `replayKey` | — | `(input, ctx) => string`. Records and replays the step under `key:<replayKey>` instead of its path, so it finds its output wherever it runs. Dispatches with the same key share one entry, so include everything that makes the call distinct. |
+
+The usual shape is "replay the expensive leaves, re-run the cheap orchestration":
+
+```ts
+import type { ContextData } from '@noetic-tools/core';
+import { inParallel, runCode } from '@noetic-tools/core';
+
+const queue: string[] = ['batch-1', 'batch-2', 'batch-3'];
+
+// The paid call: keyed by content, so it replays whichever worker runs it.
+const gradeBatch = runCode<ContextData, string, string>({
+  id: 'grade-batch',
+  replayKey: (batch) => `grade:${batch}`,
+  execute: async (batch) => `graded ${batch}`,
+});
+
+// The orchestration: cheap and timing-dependent, so it always re-runs.
+const worker = (id: string) =>
+  runCode<ContextData, string, string[]>({
+    id,
+    durable: false,
+    execute: async (_input, ctx) => {
+      const results: string[] = [];
+      for (let batch = queue.shift(); batch; batch = queue.shift()) {
+        results.push(String(await ctx.harness.run(gradeBatch, batch, ctx)));
+      }
+      return results;
+    },
+  });
+
+const pool = inParallel<ContextData, string, string[]>({
+  id: 'worker-pool',
+  mode: 'all',
+  durable: false,
+  paths: () => [worker('worker-a'), worker('worker-b')],
+  merge: (results) => results.flat(),
+});
+```
+
+A `durable: false` step's channel sends run again on resume. The checkpoint already restored the queue items it sent before the crash, so each re-run send adds a duplicate. Send to a queue from a durable step when the item must land once.
+
+`schedule` steps are never recorded, whatever `durable` says. A `replayKey` that throws costs that dispatch its durability, not its run: the step executes unrecorded and a warning is logged. If a different step id or kind shows up under a recorded `key:`, it runs fresh and only that entry is discarded.
 
 ### Retention
 

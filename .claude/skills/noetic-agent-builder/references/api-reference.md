@@ -15,6 +15,15 @@ runCode<TContext = ContextData, I = unknown, O = unknown>({
 }): StepRunCode<TContext, I, O>
 ```
 
+**Replay controls (every builder).** Every step builder — `runCode`, `callModel`, `invokeTool`, `step.acpAgent`, `decide`, `routeSwitch`, `conditional`, `inParallel`, `spawn`, `withContext`, `loop`, `schedule` — also accepts the `StepReplay` fields and copies them onto the step:
+
+```typescript
+durable?: boolean;                                       // default true
+replayKey?: (input: I, ctx: Context<TContext>) => string;
+```
+
+On a harness with a `checkpointStore`, a resumed run replays each completed step's recorded output, keyed by execution path. `durable: false` keeps a step out of that ledger (never replayed, never recorded, re-run on every resume; children keep their own setting). `replayKey` keys the entry as `key:<replayKey>` instead of the path, so the step replays wherever it runs; dispatches with the same key share one entry. `schedule` is never recorded. A throwing `replayKey` skips the ledger for that dispatch with a warning — the step still runs. JSON workflow nodes take `durable` (boolean) only. See spec 23a § Identity.
+
 The optional `subprocess` field makes this specific step run through a different adapter — e.g. `createLocalSubprocessAdapter({storage})` from `@noetic-tools/platform-node` for an out-of-process child, or an in-memory test double for unit tests. Resolution order at dispatch time is `detachedSpawn-overrides.subprocess ?? step.subprocess ?? harness.subprocess`. When omitted, the step uses the harness default.
 
 ### callModel
@@ -33,10 +42,12 @@ callModel<TContext = ContextData, I = unknown, O = unknown>({
   tools?: Lazy<Tool[] | undefined, TContext>;       // allowed tool subset (undefined = all, [] = none)
   output?: StandardSchemaV1<unknown, O> | OutputCodec<O>;  // any Standard Schema v1 (Zod default) OR a streaming codec (see Generative UI)
   outputJsonSchema?: Record<string, unknown>;            // explicit fallback/override after Zod and StandardJSONSchemaV1
-  params?: ModelParams;
+  params?: ModelParams;                             // temperature, topP, maxTokens, stopSequences, serviceTier
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }): StepCallModel<TContext, I, O>
 ```
+
+**Service tier.** `params.serviceTier` (a `ServiceTier` value: `auto`, `default`, `fast`, `flex`, `priority`, `scale`, `ultrafast`) is forwarded to OpenRouter unchanged. The served tier lands on `ctx.lastStepMeta.serviceTier` / `LLMResponse.serviceTier`, `undefined` when the provider reports none (never an echo of the request). JSON workflows accept the same field under a `callModel` node's `params`.
 
 `tools` specifies which tools the model may invoke for this step. Before execution, the harness collects all tools from every `callModel` step in the tree into a unified set. Every LLM call sends the full set (preserving prompt cache), while `tools` narrows the allowed subset via `tool_choice: { type: "allowed_tools" }`. Omit `tools` to allow all; set `tools: []` to disable tools for the step.
 
@@ -300,9 +311,22 @@ inParallel<I, O>({ id, mode: 'all', paths: () => Step[], merge: (results) => O }
 inParallel<I, O>({ id, mode: 'settle', paths: () => Step[], merge: (results: SettleResult[]) => O })
 ```
 
+Option types are exported for building options apart from the call:
+
+```typescript
+import type { ConditionalOpts, InParallelOpts, MergeFn, SettleResult } from '@noetic-tools/core';
+
+type MergeFn<TContext = ContextData, O = unknown, R = O> = (results: R[], ctx: Context<TContext>) => O;
+// InParallelOpts<TContext, I, O>: one shape per mode; merge is MergeFn<TContext, O> for 'all',
+// MergeFn<TContext, O, SettleResult<O>> for 'settle', and absent for 'race'.
+// ConditionalOpts<TContext, I, O>: { id, route }
+```
+
 Each parallel path gets a deep clone of parent state. Mutations in one path don't affect siblings.
 
 Each path is also a context child boundary: it inherits the parent's layers and tool pool, `onSpawn` seeds its per-path layer state (items from `onSpawn` are NOT appended — the path already has the parent's item log), and `onReturn` merges a *successful* path back. Merges are serialised across paths, so concurrent workers don't clobber one parent state.
+
+Each path runs under an `inParallel.path` span (child of `ctx.span`) with `NoeticAttr.NODE_ID` (path id), `.PARALLEL_ID`, `.PARALLEL_INDEX`; a failure stamps `error: true` + `NoeticAttr.ERROR_KIND`, a cancellation (or a path that never starts) only `ERROR_KIND: 'cancelled'`.
 
 ### spawn
 
@@ -320,6 +344,8 @@ spawn<TContext = ContextData, I = unknown, O = unknown>({
 
 Per-step `subprocess` mirrors `runCode` — use it to pin a specific spawn to an out-of-process adapter (real OS subprocess with durable handle manifests) or a test double (in-memory adapter that records the request for assertions). Resolution precedence is the same: `detachedSpawn-overrides.subprocess ?? step.subprocess ?? harness.subprocess`.
 
+The child runs under a `spawn` span (child of `ctx.span`, `NoeticAttr.NODE_ID` = spawn id), ended and exported when the child settles; failures stamp it like `inParallel.path`.
+
 ### loop
 
 Iteration with termination predicates.
@@ -330,11 +356,14 @@ loop<I, O>({
   steps: ReadonlyArray<Step<I, O>>;
   until: Until;
   maxIterations?: number;
+  maxHistorySize?: number;   // bounds snapshot.history (default 100, oldest dropped first)
   inbox?: Channel<string>;
   parkTimeout?: number;
   prepareNext?: (output: O, verdict: Verdict, ctx: Context) => I;
 }): StepLoop<I, O>
 ```
+
+Each verdict adds a `loop.verdict` event (`NoeticEvent.LOOP_VERDICT`) to the enclosing `ctx.span` (a `spawn` child's or `inParallel` path's own span when nested in one) — loops open no span of their own — with `{ loop, iteration, stop, reason? }`. `feedback` is never recorded.
 
 ### schedule
 
@@ -593,12 +622,18 @@ channel<T>(name: string, {
   mode: 'value' | 'queue' | 'topic';
   capacity?: number;
   external?: boolean;
-}): Channel<T>
+}): Channel<T> | ExternalChannel<T>
 ```
 
-`ctx.send(channel, value)` returns `Promise<void>` (breaking change in core v(next)): it resolves immediately for value/topic channels and queue channels below capacity, and parks when a queue channel is full (back-pressure) — `channel_timeout` after 30s, `cancelled` if the context aborts while parked. Always `await` it. `ctx.recv` rejects with `cancelled` when the context is aborted while waiting. External `ChannelHandle.send` stays synchronous and drops the oldest item at capacity.
+A literal `external: true` narrows the return to `ExternalChannel<T>`; omitted or literal `false` narrows to `Channel<T>`; a run-time `boolean` returns the union.
+
+Every `send` (`ctx.send`, `harness.send`) takes the value as `NoInfer<T>`, so the channel alone fixes the payload type — a plain `string` sent to a `z.enum([...])` channel is a compile error.
+
+`ctx.send(channel, value)` returns `Promise<void>` (breaking change in core v(next)): it resolves immediately for value/topic channels and queue channels below capacity, and parks when a queue channel is full (back-pressure) — `channel_timeout` after 30s, `cancelled` if the context aborts while parked. Always `await` it. `ctx.recv` rejects with `cancelled` when the context is aborted while waiting. `ctx.recv(ch, { timeout: 0 })` waits with no timeout in every mode (topic included — there is no clamp) and records an `unbounded_wait` channel warning; a negative timeout rejects with `NoeticConfigError` code `INVALID_CHANNEL_TIMEOUT`. External `ChannelHandle.send` stays synchronous and drops the oldest item at capacity, recorded as a `channel.warning` span event (`overflow_drop`) on each live traced root span, else `console.warn`.
 
 External channels (`external: true`) are reachable from outside the execution in both directions: `harness.getChannelHandle(ch, executionId)` writes in, `harness.getChannelStream(ch, executionId)` subscribes out as an `AsyncIterable<T>` (queue = competing consumer — subscribe once per harness; topic = per-subscriber buffered tap; value = current-then-conflated-updates). Delivery is CHANNEL-scoped (state keyed by name per harness); `executionId` bounds only the stream's lifetime, and an id no execution runs under gives a harness-lifetime stream ended with `iterator.return()`. The stream ends normally when the root execution completes (queue values at close drain first; later sends stay in the channel). Root completion also flips `ChannelHandle.closed` and makes post-run `handle.send` throw `channel_closed`; a sequential re-run or checkpoint-restore on the same root context reopens its id. The iterable owns a single iterator — subscribe again for a second consumer.
+
+Channel state lives for the harness lifetime: values and queued items survive across `run()` calls and session turns. With a `CheckpointStore`, every checkpoint saves the value/queue state of the channels the execution used (`CheckpointSnapshot.channels`) and `harness.restore()` refills it. Topics, parked waiters, and subscribers are not saved. A `durable: false` step that sends to a queue duplicates its pre-crash items on resume.
 
 ### @noetic-tools/chat-sdk (chat platform integration)
 
@@ -635,6 +670,10 @@ until.outputEquals(sentinel)   // Stop when last output text === `sentinel` (exa
 any(...predicates)       // Stop when ANY predicate fires
 all(...predicates)       // Stop when ALL predicates fire
 ```
+
+Combinators run predicates in order and short-circuit: `any()` returns the first stop verdict as is, `all()` the first continue verdict as is. Otherwise the combined verdict joins the deciding predicates' `reason`s with `'; '` and `feedback` with `'\n'` (fields left out when none set them), so `any(until.maxSteps(n), until.verified(fn))` still passes the verifier's feedback to `prepareNext`.
+
+Reasons: `Reached max steps (n)`, `Cost $1.02 exceeded budget $1.00` (two decimals), `Verification passed` / `Verification failed`.
 
 ## Patterns
 
@@ -2525,7 +2564,7 @@ const result = await parseAndRunWorkflow({
 });
 ```
 
-Emits a root `workflow.run` trace span carrying the static DAG (`NoeticAttr.WORKFLOW_DOCUMENT`, `.WORKFLOW_NODES`, `.WORKFLOW_EDGES`). Per-call `llm.call` and `tool.call` spans nest under it. All are flushed to the harness `traceExporter` (default `NoopExporter`).
+Emits a root `workflow.run` trace span carrying the static DAG (`NoeticAttr.WORKFLOW_DOCUMENT`, `.WORKFLOW_NODES`, `.WORKFLOW_EDGES`). Per-call `llm.call` and `tool.call` spans, and the `spawn` / `inParallel.path` spans of child contexts, nest under it. All are flushed to the harness `traceExporter` (default `NoopExporter`).
 
 ### UntilPredicateSchema
 

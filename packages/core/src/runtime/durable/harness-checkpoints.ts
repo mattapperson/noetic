@@ -2,7 +2,8 @@ import type { LayerStateStore } from '@noetic-tools/context';
 import type { Context, Item, ItemSchemaRegistry, RestoreContextOptions } from '@noetic-tools/types';
 import type { CheckpointSnapshot, FrontierFrame } from '../../types/checkpoint';
 import { CheckpointSchemaVersion } from '../../types/checkpoint';
-import { ContextImpl } from '../context-impl';
+import type { ChannelStore } from '../channel-store';
+import { ContextImpl, rootIdOf } from '../context-impl';
 import type { EventBroadcaster } from '../event-broadcaster';
 import type { CheckpointStore } from './checkpoint-store';
 import type { StepLedgerRetention, StepLedgerStore } from './step-ledger';
@@ -36,6 +37,7 @@ export interface CheckpointHarnessHandle {
   readonly stepLedgerStore?: StepLedgerStore;
   readonly stepLedgerRetention?: StepLedgerRetention;
   readonly layerStateStore: LayerStateStore;
+  readonly channelStore: Pick<ChannelStore, 'snapshot' | 'restore'>;
   readonly itemSchemas: ItemSchemaRegistry;
   createContext(
     opts?: RestoreCheckpointOptions & {
@@ -95,6 +97,9 @@ export async function captureCheckpoint(h: CheckpointHarnessHandle, ctx: Context
         ...ctx.itemLog.items,
       ],
     },
+    // Channel state belongs to the root execution, so a child checkpoint
+    // carries the channels its root used.
+    channels: h.channelStore.snapshot(rootIdOf(ctx)),
     capturedAt: new Date().toISOString(),
   };
   try {
@@ -116,7 +121,9 @@ export async function captureCheckpoint(h: CheckpointHarnessHandle, ctx: Context
  * `null` if no snapshot is recorded for `executionId`. Layer state is
  * replayed into `layerStateStore` keyed by the original executionId so
  * the restored context observes the pre-crash state through
- * `readLayerState` and the context projectors.
+ * `readLayerState` and the context projectors. Channel values and queued
+ * items are refilled into the channel store, for channels with no live
+ * state.
  *
  * `opts` carries the host's own context wiring (broadcaster, parent, state,
  * layer overrides) into the rebuilt context. A snapshot cannot round-trip live
@@ -148,6 +155,7 @@ export async function restoreFromCheckpoint(
   for (const [layerId, state] of Object.entries(snapshot.layers)) {
     h.layerStateStore.set(executionId, layerId, state);
   }
+  h.channelStore.restore(executionId, snapshot.channels ?? []);
   const items: Item[] = h.itemSchemas.parseMany(snapshot.itemLog.items);
   const cwdInit = snapshot.cwd?.current ?? undefined;
   /* Caller wiring first, snapshot second: a host may legitimately swap the context

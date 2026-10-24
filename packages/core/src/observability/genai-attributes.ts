@@ -29,8 +29,18 @@ export const NoeticAttr = {
   WORKFLOW_NODES: 'noetic.workflow.nodes',
   /** JSON array of `{ from, to }` parent→child edges between declared nodes. */
   WORKFLOW_EDGES: 'noetic.workflow.edges',
-  /** Id of the declared workflow node an `llm.call`/`tool.call` span belongs to. */
+  /**
+   * Id of the step a span belongs to: the declared workflow node of an
+   * `llm.call`/`tool.call`, the `decide` step of a `decide.call`, the `spawn`
+   * step of a `spawn` span, the path step of an `inParallel.path` span.
+   */
   NODE_ID: 'noetic.node.id',
+  /** Id of the `inParallel` step an `inParallel.path` span belongs to. */
+  PARALLEL_ID: 'noetic.parallel.id',
+  /** Zero-based position of the path among its `inParallel` siblings. */
+  PARALLEL_INDEX: 'noetic.parallel.index',
+  /** `NoeticError` kind a `spawn`/`inParallel.path` span failed with. */
+  ERROR_KIND: 'noetic.error.kind',
   /**
    * Conversation/session this run belongs to (the run's `ctx.threadId`). Stamped
    * on the root `workflow.run` span so every turn of a multi-turn session shares
@@ -61,4 +71,13 @@ export const NoeticAttr = {
   DECISION_REFUSED: 'noetic.decision.refused',
   /** Prefix for per-question attributes: `noetic.decision.<id>.value` etc. */
   DECISION_PREFIX: 'noetic.decision.',
+} as const;
+
+// Span event names. Steps that open no span of their own (e.g. `loop`) add
+// these to the enclosing `ctx.span`.
+export const NoeticEvent = {
+  /** One per loop iteration: `{ loop, iteration, stop, reason? }`. */
+  LOOP_VERDICT: 'loop.verdict',
+  /** A channel dropped data or is waiting with no timeout: `{ kind, channelName, message, capacity?, operation? }`. */
+  CHANNEL_WARNING: 'channel.warning',
 } as const;

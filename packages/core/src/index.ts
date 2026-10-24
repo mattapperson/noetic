@@ -23,6 +23,8 @@ export { channel } from './builders/channel-builder';
 /** @public */
 export { context } from './builders/context-builder';
 /** @public */
+export type { ConditionalOpts, InParallelOpts } from './builders/control-flow-builders';
+/** @public */
 export { conditional, inParallel } from './builders/control-flow-builders';
 /** @public */
 export { decide, routeSwitch } from './builders/decide-builders';
@@ -191,7 +193,7 @@ export { createMessage, estimateTokens, recordUsage } from '@noetic-tools/types'
 //#region Observability
 
 /** @public */
-export { GenAI, NoeticAttr, ToolAttr } from './observability/genai-attributes';
+export { GenAI, NoeticAttr, NoeticEvent, ToolAttr } from './observability/genai-attributes';
 /** @public */
 export { InMemoryExporter, NoopExporter } from './observability/trace-exporter';
 /** @public */
@@ -323,6 +325,7 @@ export {
   isServerToolSpec,
   isStandardJsonSchema,
   isZodSchema,
+  ServiceTier,
   standardIssuesToZodError,
   validateSchema,
 } from '@noetic-tools/types';
@@ -369,6 +372,7 @@ export type { EmbedFn } from './types/embed';
 
 /** @public */
 export type {
+  ChannelSnapshot,
   CheckpointSnapshot,
   CwdSnapshot,
   FrontierFrame,
@@ -377,6 +381,7 @@ export type {
 } from './types/checkpoint';
 /** @public */
 export {
+  ChannelSnapshotSchema,
   CheckpointSchemaVersion,
   CheckpointSnapshotSchema,
   CwdSnapshotSchema,
@@ -542,6 +547,7 @@ export { LedgerEntryKind, SteeringAction } from '@noetic-tools/types';
 /** @public */
 export type {
   ExecuteStepFn,
+  MergeFn,
   SettleResult,
   Snapshot,
   Step,
@@ -554,6 +560,7 @@ export type {
   StepInParallelSettle,
   StepInvokeTool,
   StepLoop,
+  StepReplay,
   StepRunCode,
   StepSpawn,
   StepWithContext,

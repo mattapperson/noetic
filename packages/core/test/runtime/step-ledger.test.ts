@@ -6,9 +6,11 @@ import type { StorageAdapter } from '@noetic-tools/context';
 import type { Context, ContextData } from '@noetic-tools/types';
 import { isNoeticConfigError } from '@noetic-tools/types';
 import { inParallel } from '../../src/builders/control-flow-builders';
+import { schedule } from '../../src/builders/every';
 import { loop } from '../../src/builders/loop-builder';
 import { runCode } from '../../src/builders/step-builders';
 import { AgentHarness } from '../../src/harness/agent-harness';
+import { resolveLedgerKey } from '../../src/interpreter/execute';
 import { createCheckpointStore } from '../../src/runtime/durable/checkpoint-store';
 import type { StepLedgerEntry, StepLedgerRetention } from '../../src/runtime/durable/step-ledger';
 import {
@@ -891,5 +893,288 @@ describe('step ledger load', () => {
 
     expect(loaded.entries.size).toBe(2);
     expect(loaded.entries.has('')).toBe(false);
+  });
+});
+
+// Replay identity (spec 23a § Identity): `durable: false` opts a step out of the
+// ledger, and `replayKey` swaps its positional path for a content key.
+describe('step replay controls', () => {
+  it('durable: false writes no entry and re-runs on resume, re-applying its state change', async () => {
+    const storage = createInMemoryStorage();
+    const harness = durableHarness(storage);
+    const state = new Map<string, number>();
+    let runs = 0;
+    const tree = runCode<ContextData, string, void>({
+      id: 'tally-orchestrator',
+      durable: false,
+      execute: async () => {
+        runs += 1;
+        state.set('tally', (state.get('tally') ?? 0) + 1);
+      },
+    });
+
+    const ctx = harness.createContext();
+    await harness.run(tree, 'go', ctx);
+    expect(await ledgerPaths(storage, ctx.id)).toEqual([]);
+
+    state.clear();
+    const resumed = mustRestore(await harness.restore(ctx.id));
+    await harness.run(tree, 'go', resumed);
+    expect(runs).toBe(2);
+    // A replayed `undefined` would have skipped this; the re-run applied it again.
+    expect(state.get('tally')).toBe(1);
+  });
+
+  it('still replays a durable child under a non-durable parent', async () => {
+    const storage = createInMemoryStorage();
+    const harness = durableHarness(storage);
+    const calls: string[] = [];
+    const child = countingStep('expensive-leaf', calls, (i) => `${i}!`);
+    let parentRuns = 0;
+    const parent = runCode<ContextData, string, string>({
+      id: 'cheap-parent',
+      durable: false,
+      execute: async (input: string, execCtx) => {
+        parentRuns += 1;
+        return String(await harness.run(child, input, execCtx));
+      },
+    });
+
+    const ctx = harness.createContext();
+    expect(await harness.run(parent, 'go', ctx)).toBe('go!');
+    const paths = await ledgerPaths(storage, ctx.id);
+    expect(paths.some((p) => p.includes('expensive-leaf'))).toBe(true);
+    expect(paths.some((p) => p.endsWith('cheap-parent#0'))).toBe(false);
+
+    calls.length = 0;
+    const resumed = mustRestore(await harness.restore(ctx.id));
+    expect(await harness.run(parent, 'go', resumed)).toBe('go!');
+    expect(parentRuns).toBe(2);
+    expect(calls).toEqual([]);
+  });
+
+  it('replayKey hands each worker its own batch output when batches swap between runs', async () => {
+    const storage = createInMemoryStorage();
+    const harness = durableHarness(storage);
+    const calls: string[] = [];
+    let queue: string[] = [];
+    const leaf = runCode<ContextData, string, string>({
+      id: 'grade-batch',
+      replayKey: (batch: string) => `grade:${batch}`,
+      execute: async (batch: string) => {
+        calls.push(batch);
+        return `answer-${batch}`;
+      },
+    });
+    const worker = (id: string): RunStep =>
+      runCode<ContextData, string, string>({
+        id,
+        durable: false,
+        execute: async (_input: string, execCtx) => {
+          const batch = queue.shift();
+          if (batch === undefined) {
+            throw new Error('queue drained');
+          }
+          return `${batch}=${String(await harness.run(leaf, batch, execCtx))}`;
+        },
+      });
+    const pool = inParallel<ContextData, string, string>({
+      id: 'worker-pool',
+      mode: 'all',
+      durable: false,
+      paths: () => [
+        worker('worker-a'),
+        worker('worker-b'),
+      ],
+      merge: (results: string[]) => results.join(','),
+    });
+
+    const ctx = harness.createContext();
+    queue = [
+      'b1',
+      'b2',
+    ];
+    expect(await harness.run(pool, 'go', ctx)).toBe('b1=answer-b1,b2=answer-b2');
+    expect(calls.sort()).toEqual([
+      'b1',
+      'b2',
+    ]);
+
+    // Worker A now picks b2 and worker B picks b1: positional replay would swap answers.
+    calls.length = 0;
+    queue = [
+      'b2',
+      'b1',
+    ];
+    const resumed = mustRestore(await harness.restore(ctx.id));
+    expect(await harness.run(pool, 'go', resumed)).toBe('b2=answer-b2,b1=answer-b1');
+    expect(calls).toEqual([]);
+  });
+
+  it('runs fresh when a different step id or kind reuses a replay key', async () => {
+    const storage = createInMemoryStorage();
+    const harness = durableHarness(storage);
+    const calls: string[] = [];
+    const keyed = (id: string, out: string): RunStep =>
+      runCode<ContextData, string, string>({
+        id,
+        replayKey: () => 'shared-key',
+        execute: async () => {
+          calls.push(id);
+          return out;
+        },
+      });
+
+    const ctx = harness.createContext();
+    await harness.run(keyed('keyed-original', 'old'), 'go', ctx);
+    expect(await ledgerPaths(storage, ctx.id)).toContain('key:shared-key');
+
+    calls.length = 0;
+    const resumed = mustRestore(await harness.restore(ctx.id));
+    expect(await harness.run(keyed('keyed-renamed', 'new'), 'go', resumed)).toBe('new');
+    expect(calls).toEqual([
+      'keyed-renamed',
+    ]);
+  });
+
+  it('skips the ledger, without failing the step, when replayKey throws', async () => {
+    const storage = createInMemoryStorage();
+    const harness = durableHarness(storage);
+    const warnings: unknown[][] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]): void => {
+      warnings.push(args);
+    };
+    let runs = 0;
+    const tree = runCode<ContextData, string, string>({
+      id: 'bad-key',
+      replayKey: () => {
+        throw new Error('no key for you');
+      },
+      execute: async () => {
+        runs += 1;
+        return `run-${runs}`;
+      },
+    });
+
+    try {
+      const ctx = harness.createContext();
+      expect(await harness.run(tree, 'go', ctx)).toBe('run-1');
+      expect(await ledgerPaths(storage, ctx.id)).toEqual([]);
+      expect(warnings.some((w) => String(w[0]).includes('bad-key'))).toBe(true);
+
+      const resumed = mustRestore(await harness.restore(ctx.id));
+      expect(await harness.run(tree, 'go', resumed)).toBe('run-2');
+    } finally {
+      console.warn = originalWarn;
+    }
+  });
+
+  it('resolves the ledger key: path by default, key: for replayKey, none for opt-outs', () => {
+    const harness = durableHarness(createInMemoryStorage());
+    const ctx = harness.createContext();
+    const body = countingStep('tick-body', [], (i) => i);
+
+    expect(resolveLedgerKey(body, 'x', ctx)).toBe('');
+    expect(
+      resolveLedgerKey(
+        runCode<ContextData, string, string>({
+          id: 'content-keyed',
+          replayKey: (input: string) => `in:${input}`,
+          execute: async (i: string) => i,
+        }),
+        'x',
+        ctx,
+      ),
+    ).toBe('key:in:x');
+    expect(
+      resolveLedgerKey(
+        runCode<ContextData, string, string>({
+          id: 'opted-out',
+          durable: false,
+          replayKey: () => 'ignored',
+          execute: async (i: string) => i,
+        }),
+        'x',
+        ctx,
+      ),
+    ).toBeUndefined();
+    // A schedule never completes, so it is never recorded — even when asked to be.
+    expect(
+      resolveLedgerKey(
+        schedule<ContextData, string, string>({
+          id: 'ticker',
+          step: body,
+          interval: 1e3,
+          durable: true,
+        }),
+        'x',
+        ctx,
+      ),
+    ).toBeUndefined();
+  });
+
+  it('resolves no key on a harness without a ledger, so replayKey is never called', () => {
+    const harness = new AgentHarness({
+      name: 'no-ledger',
+      params: {},
+    });
+    let called = false;
+    const step = runCode<ContextData, string, string>({
+      id: 'uncalled-key',
+      replayKey: () => {
+        called = true;
+        return 'k';
+      },
+      execute: async (i: string) => i,
+    });
+    expect(resolveLedgerKey(step, 'x', harness.createContext())).toBeUndefined();
+    expect(called).toBe(false);
+  });
+
+  it('discards only a diverging key: entry, not entries that share its prefix', () => {
+    const entry = (path: string, stepId: string): StepLedgerEntry => ({
+      path,
+      stepId,
+      kind: 'runCode',
+      output: stepId,
+      completedAt: '2026-10-24T00:00:00.000Z',
+    });
+    const ledger = new StepLedger({
+      executionId: 'keyed',
+      recovered: {
+        entries: new Map([
+          [
+            'key:batch',
+            entry('key:batch', 'leaf'),
+          ],
+          [
+            'key:batch/1',
+            entry('key:batch/1', 'other'),
+          ],
+        ]),
+        nextSeq: 2,
+        oldestSeq: 0,
+      },
+    });
+
+    expect(
+      ledger.take('key:batch', {
+        id: 'renamed',
+        kind: 'runCode',
+      }),
+    ).toBeUndefined();
+    expect(
+      ledger.take('key:batch', {
+        id: 'leaf',
+        kind: 'runCode',
+      }),
+    ).toBeUndefined();
+    expect(
+      ledger.take('key:batch/1', {
+        id: 'other',
+        kind: 'runCode',
+      })?.output,
+    ).toBe('other');
   });
 });

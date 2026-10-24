@@ -157,4 +157,4 @@ NoeticConfigError: Missing required environment variable.
 
 Budget limits (`maxCost`, `maxSteps`, `maxDuration`) are enforced by `until` predicates, which return `Verdict` objects — they do NOT throw. The `budget_exceeded` error kind exists for cases where budget enforcement happens **outside** a loop's `until` predicate — for example, when the runtime itself detects that an agent-level budget (set on `AgentConfig`) has been exceeded between steps. In that case, the runtime throws `budget_exceeded` directly.
 
-Within a loop, the `until` predicate returns `{ stop: true, reason: 'Cost $X exceeded budget $Y' }` and the loop terminates normally. The `budget_exceeded` error is only thrown when there is no `until` predicate to catch the overage.
+Within a loop, the `until` predicate returns `{ stop: true, reason: 'Cost $5.12 exceeded budget $5.00' }` and the loop terminates normally. The `budget_exceeded` error is only thrown when there is no `until` predicate to catch the overage.

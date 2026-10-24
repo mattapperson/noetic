@@ -39,7 +39,10 @@ export const until = {
   maxCost(usd: number): Until {
     return (snap: Snapshot): Verdict => ({
       stop: snap.cost >= usd,
-      reason: snap.cost >= usd ? `Reached max cost ($${usd})` : undefined,
+      reason:
+        snap.cost >= usd
+          ? `Cost $${snap.cost.toFixed(2)} exceeded budget $${usd.toFixed(2)}`
+          : undefined,
     });
   },
 
@@ -77,7 +80,7 @@ export const until = {
       const result = await fn(snap.lastOutput);
       return {
         stop: result.pass,
-        reason: result.pass ? 'Verification passed' : undefined,
+        reason: result.pass ? 'Verification passed' : 'Verification failed',
         feedback: result.feedback,
       };
     };

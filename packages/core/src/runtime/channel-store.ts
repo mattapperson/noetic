@@ -1,9 +1,24 @@
 import type { Channel, ChannelHandle, ExternalChannel } from '@noetic-tools/types';
-import { frameworkCast, NoeticErrorImpl } from '@noetic-tools/types';
+import { frameworkCast, NoeticConfigError, NoeticErrorImpl } from '@noetic-tools/types';
+import type { ChannelSnapshot } from '../types/checkpoint';
 
-const MAX_TOPIC_TIMEOUT = 300_000; // 5 minutes
 const DEFAULT_SEND_TIMEOUT = 30_000;
 const RESOLVED: Promise<void> = Promise.resolve();
+
+/**
+ * Reject a negative (or NaN) channel timeout. `0` is legal and disables the
+ * timeout; anything below it is a caller bug, not a shorter wait.
+ */
+function invalidTimeout(channelName: string, timeout: number): NoeticConfigError | null {
+  if (timeout >= 0) {
+    return null;
+  }
+  return new NoeticConfigError({
+    code: 'INVALID_CHANNEL_TIMEOUT',
+    message: `Channel '${channelName}': timeout must be a non-negative number of milliseconds, got ${timeout}.`,
+    hint: 'Pass a positive timeout in milliseconds, or 0 to wait with no timeout.',
+  });
+}
 
 /** Build the `cancelled` error a blocked channel operation rejects with on abort. */
 function cancelledError(signal: AbortSignal): NoeticErrorImpl {
@@ -11,6 +26,45 @@ function cancelledError(signal: AbortSignal): NoeticErrorImpl {
     kind: 'cancelled',
     reason: typeof signal.reason === 'string' ? signal.reason : undefined,
   });
+}
+
+/**
+ * A channel condition worth surfacing but not worth failing on. `AgentHarness`
+ * records these as `channel.warning` span events (spec 10); a bare store
+ * prints them with `console.warn`.
+ */
+export type ChannelWarning =
+  | {
+      /** An external sender hit a full queue and the oldest item was dropped. */
+      kind: 'overflow_drop';
+      channelName: string;
+      capacity: number;
+      message: string;
+    }
+  | {
+      /** An external subscriber's private buffer filled and its oldest value was dropped. */
+      kind: 'subscriber_drop';
+      channelName: string;
+      capacity: number;
+      message: string;
+    }
+  | {
+      /** A `recv` or parked `send` is waiting with `timeout: 0`, so nothing will time it out. */
+      kind: 'unbounded_wait';
+      channelName: string;
+      operation: 'recv' | 'send';
+      message: string;
+    };
+
+/** Options accepted by the `ChannelStore` constructor. */
+export interface ChannelStoreOpts {
+  /** Receives every channel warning. Defaults to `warnToConsole`. */
+  onWarning?: (warning: ChannelWarning) => void;
+}
+
+/** Print a channel warning with the `[noetic]` prefix. */
+export function warnToConsole(warning: ChannelWarning): void {
+  console.warn(`[noetic] ${warning.message}`);
 }
 
 /** Options accepted by internal (back-pressured) `send`. */
@@ -22,6 +76,11 @@ export interface ChannelSendOpts {
   timeout?: number;
   /** Abort signal — rejects a parked sender with `cancelled`. */
   signal?: AbortSignal;
+}
+
+interface Waiter<T> {
+  resolve: (v: T) => void;
+  reject: (e: Error) => void;
 }
 
 interface PendingSender<T> {
@@ -37,25 +96,19 @@ interface ChannelState<T> {
   // value mode
   currentValue?: T;
   hasValue: boolean;
-  valueWaiters: Array<{
-    resolve: (v: T) => void;
-    reject: (e: Error) => void;
-  }>;
+  valueWaiters: Array<Waiter<T>>;
   // queue mode
   queue: T[];
   capacity: number;
-  queueWaiters: Array<{
-    resolve: (v: T) => void;
-    reject: (e: Error) => void;
-  }>;
+  queueWaiters: Array<Waiter<T>>;
   /**
    * Internal senders parked because the queue was at capacity (back-pressure),
    * FIFO. A dequeue (`recv`/`tryRecv`) promotes the oldest parked sender's
    * value into the freed slot and resolves its promise.
    */
   pendingSenders: Array<PendingSender<T>>;
-  // topic mode
-  topicSubscribers: Set<(value: T) => void>;
+  /** Topic mode: receivers parked in `recv`. Each send wakes and removes all of them. */
+  topicWaiters: Array<Waiter<T>>;
   /**
    * Non-consuming wake subscribers — fired by every `send()` regardless of mode,
    * after the primary delivery path runs. Used by `schedule({ inbox })` so the body
@@ -64,7 +117,7 @@ interface ChannelState<T> {
   wakeSubscribers: Set<() => void>;
   /**
    * External readers (`getChannelStream`) on topic/value channels. Unlike
-   * `topicSubscribers` these are persistent and buffered — external consumers
+   * `topicWaiters` these are persistent and buffered — external consumers
    * must not lose values between `next()` calls. Queue-mode readers compete
    * through `queueWaiters` instead and never appear here.
    */
@@ -83,25 +136,92 @@ export class ChannelStore {
    */
   private handleObserved = new Set<string>();
   private subscribersByExecution = new Map<string, Set<ExternalSubscriber<unknown>>>();
+  /**
+   * Channel name → ids of the root executions that used it, which decides
+   * the channels an execution's checkpoint carries. Ids stay after their
+   * execution closes: a host may checkpoint a finished run, and channel
+   * state itself lives for the harness lifetime (spec 06, Lifecycle).
+   */
+  private users = new Map<string, Set<string>>();
+  private readonly warn: (warning: ChannelWarning) => void;
+
+  constructor(opts: ChannelStoreOpts = {}) {
+    this.warn = opts.onWarning ?? warnToConsole;
+  }
 
   private getOrCreate<T>(channel: Channel<T>): ChannelState<T> {
-    let state = frameworkCast<ChannelState<T> | undefined>(this.channels.get(channel.name));
-    if (!state) {
-      state = {
-        mode: channel.mode,
-        hasValue: false,
-        valueWaiters: [],
-        queue: [],
-        capacity: channel.capacity ?? 1_000,
-        queueWaiters: [],
-        pendingSenders: [],
-        topicSubscribers: new Set(),
-        wakeSubscribers: new Set(),
-        externalSubscribers: new Set(),
-      };
-      this.channels.set(channel.name, frameworkCast<ChannelState<unknown>>(state));
+    const existing = frameworkCast<ChannelState<T> | undefined>(this.channels.get(channel.name));
+    if (existing) {
+      return existing;
     }
+    const state = emptyState<T>(channel.mode, channel.capacity ?? 1_000);
+    this.channels.set(channel.name, frameworkCast<ChannelState<unknown>>(state));
     return state;
+  }
+
+  /**
+   * Record that `executionId` (a root execution) uses `channel`, so the
+   * channel rides along in its checkpoints.
+   */
+  claim<T>(channel: Channel<T>, executionId: string): void {
+    this.addUser(channel.name, executionId);
+  }
+
+  private addUser(channelName: string, executionId: string): void {
+    let ids = this.users.get(channelName);
+    if (!ids) {
+      ids = new Set();
+      this.users.set(channelName, ids);
+    }
+    ids.add(executionId);
+  }
+
+  /**
+   * Stored state (values, queued items) of every channel `executionId` used.
+   * Parked receivers, parked senders, and subscribers are live promises and
+   * stay out; topic channels store nothing and are skipped.
+   */
+  snapshot(executionId: string): ChannelSnapshot[] {
+    const out: ChannelSnapshot[] = [];
+    for (const [name, ids] of this.users) {
+      const state = this.channels.get(name);
+      if (!state || !ids.has(executionId)) {
+        continue;
+      }
+      if (state.mode === 'value') {
+        out.push({
+          name,
+          mode: 'value',
+          value: state.currentValue,
+          hasValue: state.hasValue,
+        });
+      }
+      if (state.mode === 'queue') {
+        out.push({
+          name,
+          mode: 'queue',
+          capacity: state.capacity,
+          queue: [
+            ...state.queue,
+          ],
+        });
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Refill channel state from a checkpoint and mark `executionId` as a user.
+   * A channel that already has live state keeps it — live state is never
+   * older than a snapshot.
+   */
+  restore(executionId: string, snapshots: readonly ChannelSnapshot[]): void {
+    for (const snap of snapshots) {
+      if (!this.channels.has(snap.name)) {
+        this.channels.set(snap.name, restoredState(snap));
+      }
+      this.addUser(snap.name, executionId);
+    }
   }
 
   /**
@@ -135,8 +255,16 @@ export class ChannelStore {
    * - **topic**: deliver to current subscribers, resolve immediately.
    *
    * External callers use `ChannelHandle.send` (sync, drop-oldest) instead.
+   * `opts.timeout: 0` parks with no timeout and warns `unbounded_wait`.
+   *
+   * @throws `NoeticConfigError` with code `INVALID_CHANNEL_TIMEOUT` (as a
+   * rejection) when `opts.timeout` is negative.
    */
-  send<T>(channel: Channel<T>, value: T, opts?: ChannelSendOpts): Promise<void> {
+  send<T>(channel: Channel<T>, value: NoInfer<T>, opts?: ChannelSendOpts): Promise<void> {
+    const invalid = invalidTimeout(channel.name, opts?.timeout ?? DEFAULT_SEND_TIMEOUT);
+    if (invalid) {
+      return Promise.reject(invalid);
+    }
     const state = this.getOrCreate(channel);
     let result: Promise<void> = RESOLVED;
 
@@ -170,8 +298,8 @@ export class ChannelStore {
         }
         break;
       case 'topic':
-        for (const sub of state.topicSubscribers) {
-          sub(value);
+        for (const waiter of state.topicWaiters.splice(0)) {
+          waiter.resolve(value);
         }
         for (const sub of state.externalSubscribers) {
           sub.push(value);
@@ -228,7 +356,14 @@ export class ChannelStore {
         return true;
       };
 
-      if (timeout > 0) {
+      if (timeout === 0) {
+        this.warn({
+          kind: 'unbounded_wait',
+          channelName,
+          operation: 'send',
+          message: `Channel '${channelName}': send parked on a full queue with timeout 0 — it waits until a consumer frees a slot or the context aborts.`,
+        });
+      } else {
         timer = setTimeout(() => {
           if (removeEntry()) {
             entry.reject(
@@ -289,7 +424,20 @@ export class ChannelStore {
     }
   }
 
+  /**
+   * Receive by mode: value returns the current value, queue dequeues the
+   * head, topic waits for the next send. A receiver that has to wait gets
+   * `channel_timeout` after `timeout` ms; `0` waits with no timeout in every
+   * mode and warns `unbounded_wait`.
+   *
+   * @throws `NoeticConfigError` with code `INVALID_CHANNEL_TIMEOUT` (as a
+   * rejection) when `timeout` is negative.
+   */
   async recv<T>(channel: Channel<T>, timeout = 30_000, signal?: AbortSignal): Promise<T> {
+    const invalid = invalidTimeout(channel.name, timeout);
+    if (invalid) {
+      throw invalid;
+    }
     // An already-aborted context must reject promptly rather than park a
     // waiter that nothing will ever wake (spec 09, Cancellation item 2).
     if (signal?.aborted) {
@@ -319,53 +467,8 @@ export class ChannelStore {
         return this.waitWithTimeout(state.queueWaiters, channel.name, timeout, signal);
       }
 
-      case 'topic': {
-        // Clamp timeout to prevent indefinite subscriber leaks
-        let effectiveTimeout = timeout;
-        if (effectiveTimeout <= 0) {
-          console.warn(
-            `[noetic] Channel '${channel.name}': topic recv with non-positive timeout, clamping to ${MAX_TOPIC_TIMEOUT}ms`,
-          );
-          effectiveTimeout = MAX_TOPIC_TIMEOUT;
-        }
-
-        return new Promise<T>((resolve, reject) => {
-          let removeAbortListener: (() => void) | null = null;
-          const timer = setTimeout(() => {
-            state.topicSubscribers.delete(handler);
-            removeAbortListener?.();
-            reject(
-              new NoeticErrorImpl({
-                kind: 'channel_timeout',
-                channelName: channel.name,
-                timeout: effectiveTimeout,
-              }),
-            );
-          }, effectiveTimeout);
-
-          const handler = (value: T) => {
-            clearTimeout(timer);
-            state.topicSubscribers.delete(handler);
-            removeAbortListener?.();
-            resolve(value);
-          };
-          state.topicSubscribers.add(handler);
-
-          if (signal) {
-            const onAbort = (): void => {
-              clearTimeout(timer);
-              state.topicSubscribers.delete(handler);
-              reject(cancelledError(signal));
-            };
-            signal.addEventListener('abort', onAbort, {
-              once: true,
-            });
-            removeAbortListener = () => {
-              signal.removeEventListener('abort', onAbort);
-            };
-          }
-        });
-      }
+      case 'topic':
+        return this.waitWithTimeout(state.topicWaiters, channel.name, timeout, signal);
     }
   }
 
@@ -387,10 +490,7 @@ export class ChannelStore {
   }
 
   private waitWithTimeout<T>(
-    waiters: Array<{
-      resolve: (v: T) => void;
-      reject: (e: Error) => void;
-    }>,
+    waiters: Array<Waiter<T>>,
     channelName: string,
     timeout: number,
     signal?: AbortSignal,
@@ -430,7 +530,14 @@ export class ChannelStore {
         return true;
       };
 
-      if (timeout > 0) {
+      if (timeout === 0) {
+        this.warn({
+          kind: 'unbounded_wait',
+          channelName,
+          operation: 'recv',
+          message: `Channel '${channelName}': recv waiting with timeout 0 — it waits until a value arrives or the context aborts.`,
+        });
+      } else {
         timer = setTimeout(() => {
           if (removeEntry()) {
             wrappedReject(
@@ -472,9 +579,12 @@ export class ChannelStore {
       state.queueWaiters.length === 0 &&
       state.queue.length >= state.capacity;
     if (isFullQueue) {
-      console.warn(
-        `[noetic] Channel '${channel.name}': queue at capacity (${state.capacity}), dropping oldest message (external sender).`,
-      );
+      this.warn({
+        kind: 'overflow_drop',
+        channelName: channel.name,
+        capacity: state.capacity,
+        message: `Channel '${channel.name}': queue at capacity (${state.capacity}), dropping oldest message (external sender).`,
+      });
       state.queue.shift();
       state.queue.push(value);
       this.fireWakes(state);
@@ -504,10 +614,12 @@ export class ChannelStore {
     if (this.closedExecutions.has(executionId)) {
       return CLOSED_ITERABLE;
     }
+    this.claim(channel, executionId);
     const state = this.getOrCreate(channel);
     const subscriber: ExternalSubscriber<T> = new ExternalSubscriber<T>({
       channelName: channel.name,
       conflate: state.mode === 'value',
+      warn: this.warn,
       takeShared:
         state.mode === 'queue'
           ? () => {
@@ -581,6 +693,7 @@ export class ChannelStore {
 
   getHandle<T>(channel: ExternalChannel<T>, executionId: string): ChannelHandle<T> {
     this.handleObserved.add(executionId);
+    this.claim(channel, executionId);
     const store = this;
     return {
       get closed() {
@@ -628,6 +741,33 @@ export class ChannelStore {
   }
 }
 
+function emptyState<T>(mode: ChannelState<T>['mode'], capacity: number): ChannelState<T> {
+  return {
+    mode,
+    hasValue: false,
+    valueWaiters: [],
+    queue: [],
+    capacity,
+    queueWaiters: [],
+    pendingSenders: [],
+    topicWaiters: [],
+    wakeSubscribers: new Set(),
+    externalSubscribers: new Set(),
+  };
+}
+
+function restoredState(snap: ChannelSnapshot): ChannelState<unknown> {
+  if (snap.mode === 'value') {
+    const state = emptyState<unknown>('value', 1_000);
+    state.currentValue = snap.value;
+    state.hasValue = snap.hasValue;
+    return state;
+  }
+  const state = emptyState<unknown>('queue', snap.capacity);
+  state.queue.push(...snap.queue);
+  return state;
+}
+
 const MAX_EXTERNAL_BUFFER = 1_000;
 
 const CLOSED_ITERABLE: AsyncIterable<never> & AsyncIterator<never> = {
@@ -646,12 +786,14 @@ interface ExternalSubscriberOpts<T> {
   channelName: string;
   /** Value mode: keep only the newest undelivered value. */
   conflate: boolean;
+  /** The owning store's warning sink. */
+  warn: (warning: ChannelWarning) => void;
   /** Queue mode: take an available item from the shared queue state. */
   takeShared?: () => {
     value: T;
   } | null;
   /** Queue mode: park a waiter in the shared FIFO; returns an un-park. */
-  parkShared?: (waiter: { resolve: (v: T) => void; reject: (e: Error) => void }) => () => void;
+  parkShared?: (waiter: Waiter<T>) => () => void;
   /** Unregister this subscriber from the store. */
   onFinish: () => void;
 }
@@ -700,9 +842,12 @@ class ExternalSubscriber<T> implements AsyncIterableIterator<T> {
       return;
     }
     if (this.buffer.length >= MAX_EXTERNAL_BUFFER) {
-      console.warn(
-        `[noetic] Channel '${this.opts.channelName}': external subscriber buffer at capacity (${MAX_EXTERNAL_BUFFER}), dropping oldest value.`,
-      );
+      this.opts.warn({
+        kind: 'subscriber_drop',
+        channelName: this.opts.channelName,
+        capacity: MAX_EXTERNAL_BUFFER,
+        message: `Channel '${this.opts.channelName}': external subscriber buffer at capacity (${MAX_EXTERNAL_BUFFER}), dropping oldest value.`,
+      });
       this.buffer.shift();
     }
     this.buffer.push(value);

@@ -83,6 +83,8 @@ Point your editor or validator at the bundled file (resolve it from the package,
 
 Thirteen node kinds are available, plus the `acp-agent` kind documented in [ACP Agent Steps](/docs/framework/acp-agents). Leaf nodes (`callModel`, `invokeTool`, `runCode`, `decide`) perform work; structural nodes (`sequence`, `inParallel`, `conditional`, `routeSwitch`, `loop`, `spawn`, `withContext`, `schedule`, `subflow`) compose them into trees.
 
+Every node takes an optional boolean `durable`. Set it to `false` on cheap orchestration nodes so a resumed run re-runs them instead of replaying their recorded output — see [Replay Identity](/docs/framework/durability#replay-identity). Content-keyed replay (`replayKey`) is code-only.
+
 ### callModel
 
 Call an LLM with instructions and optional tools. Every `tools` entry is a uniform object `{ type, parameters? }`. The `type` value decides the entry: a **registered tool name** (a client tool resolved from the tool registry) or a reserved **server-tool** type the provider executes itself (web search, web fetch).
@@ -107,7 +109,7 @@ Call an LLM with instructions and optional tools. Every `tools` entry is a unifo
 | `model` | `string` | `'openai/gpt-4o'` | Model identifier (OpenRouter format). |
 | `instructions` | `string` | required | System/user prompt for the LLM. |
 | `tools` | `{ type: string, parameters?: object }[]` | `undefined` | Uniform tool entries. **Client tool**: `{ "type": "<registered-tool-name>" }` — `type` is resolved against the registry; any `parameters` is ignored (the model supplies call args at runtime). **Server tool**: `{ "type": "openrouter:web_search" \| "openrouter:web_fetch", "parameters"?: {...} }` — run by the provider; `parameters` keys are camelCase (e.g. `maxResults`, `searchContextSize`), unknown keys dropped. Client vs server is decided by the `type` value. |
-| `params` | `object` | `undefined` | Model parameters: `temperature`, `topP`, `maxTokens`, `stopSequences`. |
+| `params` | `object` | `undefined` | Model parameters: `temperature`, `topP`, `maxTokens`, `stopSequences`, `serviceTier` (`auto`, `default`, `fast`, `flex`, `priority`, `scale`, `ultrafast`). |
 
 ### runCode
 

@@ -7,8 +7,11 @@ import { z } from 'zod';
 import { channel } from '../../src/builders/channel-builder';
 import { loop } from '../../src/builders/loop-builder';
 import { executeLoop } from '../../src/interpreter/execute-control';
+import { NoeticEvent } from '../../src/observability/genai-attributes';
+import { SpanImpl } from '../../src/observability/span-impl';
 import { ChannelStore } from '../../src/runtime/channel-store';
 import { ContextImpl } from '../../src/runtime/context-impl';
+import { any } from '../../src/until/combinators';
 import { until } from '../../src/until/predicates';
 import { makeMockHarness, simpleExecute } from '../_helpers';
 
@@ -872,5 +875,175 @@ describe('executeLoop inbox channel', () => {
       type: 'input_text',
       text: 'hello from sub-agent',
     });
+  });
+  it('hands the feedback of a verified() inside any() to prepareNext', async () => {
+    const inputs: string[] = [];
+    const loopStep = loop<ContextData, string, string>({
+      id: 'any-feedback-loop',
+      steps: [
+        {
+          kind: 'runCode',
+          id: 'draft',
+          execute: async (input: string) => {
+            inputs.push(input);
+            return `draft-${inputs.length}`;
+          },
+        },
+      ],
+      until: any(
+        until.maxSteps(5),
+        until.verified(async (output) => ({
+          pass: output === 'draft-2',
+          feedback: `rejected ${String(output)}`,
+        })),
+      ),
+      prepareNext: (_output, verdict) => verdict.feedback ?? 'no feedback',
+    });
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
+
+    expect(await executeLoop(loopStep, 'start', ctx, simpleExecute)).toBe('draft-2');
+    expect(inputs).toEqual([
+      'start',
+      'rejected draft-1',
+    ]);
+  });
+
+  describe('verdict traces', () => {
+    it('adds one loop.verdict event per iteration to the enclosing span', async () => {
+      const span = new SpanImpl('loop-test', null);
+      const loopStep = loop<ContextData, number, number>({
+        id: 'traced-loop',
+        steps: [
+          {
+            kind: 'runCode',
+            id: 'inc',
+            execute: async (input: number) => input + 1,
+          },
+        ],
+        until: until.verified(async (output) => ({
+          pass: output === 3,
+          feedback: 'secret feedback',
+        })),
+      });
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+        span,
+      });
+      await executeLoop(loopStep, 0, ctx, simpleExecute);
+
+      const verdicts = span.events.filter((e) => e.name === NoeticEvent.LOOP_VERDICT);
+      expect(verdicts.map((e) => e.attributes)).toEqual([
+        {
+          loop: 'traced-loop',
+          iteration: 1,
+          stop: false,
+          reason: 'Verification failed',
+        },
+        {
+          loop: 'traced-loop',
+          iteration: 2,
+          stop: false,
+          reason: 'Verification failed',
+        },
+        {
+          loop: 'traced-loop',
+          iteration: 3,
+          stop: true,
+          reason: 'Verification passed',
+        },
+      ]);
+    });
+
+    it('omits reason when the verdict has none', async () => {
+      const span = new SpanImpl('loop-test', null);
+      const loopStep = loop<ContextData, number, number>({
+        id: 'bare-loop',
+        steps: [
+          {
+            kind: 'runCode',
+            id: 'inc',
+            execute: async (input: number) => input + 1,
+          },
+        ],
+        until: (snap) => ({
+          stop: snap.stepCount >= 1,
+        }),
+      });
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+        span,
+      });
+      await executeLoop(loopStep, 0, ctx, simpleExecute);
+
+      const verdicts = span.events.filter((e) => e.name === NoeticEvent.LOOP_VERDICT);
+      expect(verdicts.map((e) => e.attributes)).toEqual([
+        {
+          loop: 'bare-loop',
+          iteration: 1,
+          stop: true,
+        },
+      ]);
+    });
+
+    it('records the predicate-error reason', async () => {
+      const span = new SpanImpl('loop-test', null);
+      const loopStep = loop<ContextData, number, number>({
+        id: 'broken-loop',
+        steps: [
+          {
+            kind: 'runCode',
+            id: 'inc',
+            execute: async (input: number) => input + 1,
+          },
+        ],
+        until: () => {
+          throw new Error('bad predicate');
+        },
+      });
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+        span,
+      });
+      await executeLoop(loopStep, 0, ctx, simpleExecute);
+
+      const verdicts = span.events.filter((e) => e.name === NoeticEvent.LOOP_VERDICT);
+      expect(verdicts.map((e) => e.attributes)).toEqual([
+        {
+          loop: 'broken-loop',
+          iteration: 1,
+          stop: true,
+          reason: 'Predicate error: bad predicate',
+        },
+      ]);
+    });
+  });
+
+  it('keeps the newest 100 history entries when maxHistorySize is unset', async () => {
+    let capturedHistory: unknown[] = [];
+    const loopStep = loop<ContextData, number, number>({
+      id: 'default-history-loop',
+      steps: [
+        {
+          kind: 'runCode',
+          id: 'inc',
+          execute: async (input: number) => input + 1,
+        },
+      ],
+      until: (snap) => {
+        capturedHistory = snap.history;
+        return {
+          stop: snap.stepCount >= 150,
+        };
+      },
+    });
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
+    await executeLoop(loopStep, 0, ctx, simpleExecute);
+    expect(capturedHistory).toHaveLength(100);
+    expect(capturedHistory[0]).toBe(51);
+    expect(capturedHistory[99]).toBe(150);
   });
 });

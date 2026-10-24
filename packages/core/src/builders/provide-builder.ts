@@ -1,5 +1,5 @@
 import type { ContextConfig, ContextData, ContextLayer } from '@noetic-tools/context';
-import type { Step, StepWithContext } from '@noetic-tools/types';
+import type { Step, StepReplay, StepWithContext } from '@noetic-tools/types';
 import { NoeticConfigError } from '@noetic-tools/types';
 import { getDefaultRegistrar } from '../types/step-registrar';
 
@@ -16,11 +16,13 @@ import { getDefaultRegistrar } from '../types/step-registrar';
  * @throws `NoeticConfigError` with code `EMPTY_STEP_ID` if `id` is empty.
  * @throws `NoeticConfigError` with code `MISSING_CHILD_STEP` if `child` is not provided.
  */
-export function withContext<TContext = ContextData, I = unknown, O = unknown>(opts: {
-  id: string;
-  child: Step<TContext, I, O>;
-  context: ContextConfig | ContextLayer[];
-}): StepWithContext<TContext, I, O> {
+export function withContext<TContext = ContextData, I = unknown, O = unknown>(
+  opts: {
+    id: string;
+    child: Step<TContext, I, O>;
+    context: ContextConfig | ContextLayer[];
+  } & StepReplay<TContext, I>,
+): StepWithContext<TContext, I, O> {
   if (!opts.id?.trim()) {
     throw new NoeticConfigError({
       code: 'EMPTY_STEP_ID',
@@ -48,6 +50,8 @@ export function withContext<TContext = ContextData, I = unknown, O = unknown>(op
     id: opts.id,
     child: opts.child,
     context: layers,
+    durable: opts.durable,
+    replayKey: opts.replayKey,
   };
   getDefaultRegistrar().register(built);
   return built;

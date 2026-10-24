@@ -55,7 +55,7 @@ function createVerifier(requiredPatterns: string[]): (output: unknown) => Promis
 //#region Converges on First Try
 
 describe(retryWithFeedback({
-  model: 'anthropic/claude-sonnet-4',
+  model: 'anthropic/claude-sonnet-5.5',
   instructions:
     'You are a code writer. Write clean, working TypeScript code. Use the write_file tool.',
   tools: [
@@ -97,7 +97,7 @@ const feedbackCounter = {
 };
 
 describe(retryWithFeedback({
-  model: 'anthropic/claude-sonnet-4',
+  model: 'anthropic/claude-sonnet-5.5',
   instructions:
     'You are a code writer. Follow feedback to improve your code. Use the write_file tool to write files.',
   tools: [
@@ -149,7 +149,7 @@ describe(retryWithFeedback({
 //#region Tool Accuracy
 
 describe(retryWithFeedback({
-  model: 'anthropic/claude-sonnet-4',
+  model: 'anthropic/claude-sonnet-5.5',
   instructions: 'You are a code writer. Always use write_file to produce output.',
   tools: [
     writeFileTool,

@@ -29,6 +29,27 @@ bun run lint:fix              # auto-fix lint issues
 cd packages/core && bun run typecheck   # tsc --noEmit for a package
 ```
 
+## Type-checking against workspace sources
+
+Workspace packages resolve `@noetic-tools/*` imports straight to `src/*.ts` through
+the `bun` export condition, so no build step is needed. A tsconfig that type-checks
+against those sources (a package's own, or one you write outside the repo) needs:
+
+- `"customConditions": ["bun"]` — without it, tsc falls back to the `dist/` types
+  conditions, which don't exist until you build.
+- `"moduleResolution": "bundler"` — `customConditions` only applies under it.
+- `"lib"` of ES2023 or later — the sources use `Array.prototype.findLast` and
+  `findLastIndex`.
+- `"types": ["bun-types"]`.
+
+Run `bun install` first: it installs the pinned `typescript` that `bunx tsc` uses.
+Without it, `bunx` fetches whatever TypeScript is latest. The one-line form, from a
+package directory:
+
+```bash
+bunx tsc --noEmit --strict --skipLibCheck --module esnext --target esnext --moduleResolution bundler --customConditions bun --lib esnext --types bun-types src/index.ts
+```
+
 ## Developer Certificate of Origin (DCO)
 
 We use the [Developer Certificate of Origin](https://developercertificate.org/) to

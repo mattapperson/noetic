@@ -1,8 +1,9 @@
-import { describe, expect, it, spyOn } from 'bun:test';
+import { describe, expect, it, jest, spyOn } from 'bun:test';
 import assert from 'node:assert';
-import { isNoeticError } from '@noetic-tools/types';
+import { isNoeticConfigError, isNoeticError } from '@noetic-tools/types';
 import { z } from 'zod';
 import { channel } from '../../src/builders/channel-builder';
+import type { ChannelWarning } from '../../src/runtime/channel-store';
 import { ChannelStore } from '../../src/runtime/channel-store';
 
 describe('ChannelStore', () => {
@@ -186,22 +187,121 @@ describe('ChannelStore', () => {
     });
   });
 
-  describe('topic mode edge cases', () => {
-    it('non-positive timeout warns and clamps to MAX', async () => {
-      const warnSpy = spyOn(console, 'warn');
-      const store = new ChannelStore();
-      const ch = channel('topic-neg', {
-        schema: z.string(),
-        mode: 'topic',
+  describe('timeout: 0 and negative timeouts', () => {
+    it('topic recv with timeout 0 never times out and warns unbounded_wait', async () => {
+      jest.useFakeTimers();
+      try {
+        const warnings: ChannelWarning[] = [];
+        const store = new ChannelStore({
+          onWarning: (w) => warnings.push(w),
+        });
+        const ch = channel('topic-zero', {
+          schema: z.string(),
+          mode: 'topic',
+        });
+        let settled = false;
+        const p = store.recv(ch, 0).finally(() => {
+          settled = true;
+        });
+        // Far past the old 300s clamp: nothing may time the waiter out.
+        jest.advanceTimersByTime(3_600_000);
+        await Promise.resolve();
+        expect(settled).toBe(false);
+        store.send(ch, 'ok');
+        expect(await p).toBe('ok');
+        expect(warnings).toEqual([
+          expect.objectContaining({
+            kind: 'unbounded_wait',
+            channelName: 'topic-zero',
+            operation: 'recv',
+          }),
+        ]);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it.each([
+      'value',
+      'queue',
+    ] as const)('%s recv with timeout 0 warns unbounded_wait only when it parks', async (mode) => {
+      const warnings: ChannelWarning[] = [];
+      const store = new ChannelStore({
+        onWarning: (w) => warnings.push(w),
       });
-      // We can't wait for MAX_TOPIC_TIMEOUT, so just verify the warning fires
-      // and that a send still resolves the recv
-      const p = store.recv(ch, -1);
-      expect(warnSpy).toHaveBeenCalledTimes(1);
-      expect(warnSpy.mock.calls[0][0]).toContain('non-positive timeout');
-      store.send(ch, 'ok');
-      expect(await p).toBe('ok');
-      warnSpy.mockRestore();
+      const ch = channel(`zero-${mode}`, {
+        schema: z.number(),
+        mode,
+      });
+      const p = store.recv(ch, 0);
+      expect(warnings.map((w) => w.kind)).toEqual([
+        'unbounded_wait',
+      ]);
+      await store.send(ch, 1);
+      expect(await p).toBe(1);
+      await store.send(ch, 2);
+      // A value is available, so this recv returns without parking or warning.
+      expect(await store.recv(ch, 0)).toBe(2);
+      expect(warnings).toHaveLength(1);
+    });
+
+    it('a parked send with timeout 0 warns unbounded_wait', async () => {
+      const warnings: ChannelWarning[] = [];
+      const store = new ChannelStore({
+        onWarning: (w) => warnings.push(w),
+      });
+      const ch = channel('zero-send', {
+        schema: z.number(),
+        mode: 'queue',
+        capacity: 1,
+      });
+      await store.send(ch, 1, {
+        timeout: 0,
+      });
+      expect(warnings).toEqual([]);
+      const parked = store.send(ch, 2, {
+        timeout: 0,
+      });
+      expect(warnings).toEqual([
+        expect.objectContaining({
+          kind: 'unbounded_wait',
+          operation: 'send',
+        }),
+      ]);
+      expect(store.tryRecv(ch)).toBe(1);
+      await parked;
+      expect(store.tryRecv(ch)).toBe(2);
+    });
+
+    it.each([
+      'value',
+      'queue',
+      'topic',
+    ] as const)('%s recv rejects a negative timeout with INVALID_CHANNEL_TIMEOUT', async (mode) => {
+      const store = new ChannelStore();
+      const ch = channel(`neg-${mode}`, {
+        schema: z.string(),
+        mode,
+      });
+      const err = await store.recv(ch, -1).catch((e: unknown) => e);
+      assert(isNoeticConfigError(err));
+      expect(err.code).toBe('INVALID_CHANNEL_TIMEOUT');
+    });
+
+    it('send rejects a negative timeout with INVALID_CHANNEL_TIMEOUT', async () => {
+      const store = new ChannelStore();
+      const ch = channel('neg-send', {
+        schema: z.number(),
+        mode: 'queue',
+      });
+      const err = await store
+        .send(ch, 1, {
+          timeout: -5,
+        })
+        .catch((e: unknown) => e);
+      assert(isNoeticConfigError(err));
+      expect(err.code).toBe('INVALID_CHANNEL_TIMEOUT');
+      expect(store.tryRecv(ch)).toBeNull();
     });
   });
 
@@ -448,6 +548,31 @@ describe('ChannelStore', () => {
         3,
       ]);
       expect(await store.recv(ch, 100)).toBe(3);
+    });
+
+    it('reports an overflow_drop warning to onWarning instead of the console', () => {
+      const warnSpy = spyOn(console, 'warn');
+      const warnings: ChannelWarning[] = [];
+      const store = new ChannelStore({
+        onWarning: (w) => warnings.push(w),
+      });
+      const ch = channel('ext-warn', {
+        schema: z.number(),
+        mode: 'queue',
+        capacity: 1,
+        external: true,
+      });
+      const handle = store.getHandle(ch, 'exec-warn');
+      handle.send(1);
+      handle.send(2);
+      expect(warnSpy).not.toHaveBeenCalled();
+      warnSpy.mockRestore();
+      expect(warnings).toHaveLength(1);
+      const [warning] = warnings;
+      assert(warning?.kind === 'overflow_drop');
+      expect(warning.channelName).toBe('ext-warn');
+      expect(warning.capacity).toBe(1);
+      expect(store.tryRecv(ch)).toBe(2);
     });
 
     it('external handle still drops oldest at capacity (sync, with warning)', async () => {

@@ -43,6 +43,28 @@ export function channel<T>(
   },
 ): Channel<T>;
 
+/**
+ * Creates a typed communication channel whose externality is decided at run
+ * time. Pass a literal `true`/`false` to get the narrowed return type instead.
+ *
+ * @public
+ * @param name - Channel name for identification and debugging.
+ * @param opts.schema - Zod schema used to validate every message sent through the channel.
+ * @param opts.mode - Delivery semantics: `'value'` (last-write-wins), `'queue'` (FIFO), `'topic'` (pub/sub).
+ * @param opts.capacity - Buffer size for queue mode (default: 1000). Ignored for value/topic modes.
+ * @param opts.external - `true` for an externally writable channel; omit or `false` otherwise.
+ * @returns An `ExternalChannel` when `external` is `true`, otherwise a `Channel`.
+ */
+export function channel<T>(
+  name: string,
+  opts: {
+    schema: ZodType<T>;
+    mode: 'value' | 'queue' | 'topic';
+    capacity?: number;
+    external?: boolean;
+  },
+): Channel<T> | ExternalChannel<T>;
+
 export function channel<T>(
   name: string,
   opts: {

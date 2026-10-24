@@ -33,7 +33,7 @@ const escalateTool = tool({
 //#region Routing Agent
 
 const routingAgent = reactAgent({
-  model: 'anthropic/claude-sonnet-4',
+  model: 'anthropic/claude-sonnet-5.5',
   instructions:
     'You are a ticket routing agent. Classify incoming tickets using the classify_ticket tool. Escalate urgent tickets using the escalate tool. Always classify before deciding whether to escalate.',
   tools: [

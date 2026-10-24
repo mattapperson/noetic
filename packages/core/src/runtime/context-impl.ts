@@ -35,6 +35,19 @@ class NoopSpan implements Span {
 
 /**
  * @internal
+ * Id of the root execution `ctx` runs under — the id `run()` opens and
+ * closes channel scopes with (spec 06).
+ */
+export function rootIdOf(ctx: Context): string {
+  let node: Context = ctx;
+  while (node.parent) {
+    node = node.parent;
+  }
+  return node.id;
+}
+
+/**
+ * @internal
  * The cancellation tree rooted at `ctx`, in pre-order (a parent before its
  * children). Reverse it to walk deepest-first. Only framework contexts track
  * children, so a foreign `Context` implementation yields just itself.
@@ -293,16 +306,18 @@ export class ContextImpl implements Context<ContextData> {
     if (!this.channelStore) {
       return Promise.reject(new Error('No channel store configured'));
     }
+    this.channelStore.claim(ch, rootIdOf(this));
     return this.channelStore.recv(ch, opts?.timeout, this._abortController.signal);
   }
 
-  send<T>(ch: Channel<T>, value: T): Promise<void> {
+  send<T>(ch: Channel<T>, value: NoInfer<T>): Promise<void> {
     if (!this.channelStore) {
       return Promise.reject(new Error('No channel store configured'));
     }
     // Internal sender: back-pressured on full queue channels (default 30s →
     // channel_timeout); aborting this context rejects a parked send with
     // 'cancelled' via the shared abort signal.
+    this.channelStore.claim(ch, rootIdOf(this));
     return this.channelStore.send(ch, value, {
       signal: this._abortController.signal,
     });
@@ -312,6 +327,7 @@ export class ContextImpl implements Context<ContextData> {
     if (!this.channelStore) {
       throw new Error('No channel store configured');
     }
+    this.channelStore.claim(ch, rootIdOf(this));
     return this.channelStore.tryRecv(ch);
   }
 

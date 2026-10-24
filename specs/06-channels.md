@@ -32,10 +32,10 @@ function channel<T>(name: string, opts: {
   mode: 'value' | 'queue' | 'topic';
   capacity?: number;     // queue mode only, default 1000
   external?: boolean;    // marks channel as externally writable
-}): Channel<T>;
+}): Channel<T> | ExternalChannel<T>;
 ```
 
-When `external: true` is set, the returned channel is an `ExternalChannel<T>` (see below).
+Overloads narrow the return type: a literal `external: true` returns an `ExternalChannel<T>` (see below), an omitted or literal `false` flag returns a `Channel<T>`, and a flag only known at run time (`boolean`) returns the union.
 
 ## Usage
 
@@ -70,7 +70,7 @@ runCode({
 });
 ```
 
-The channel object IS the connection. If you pass the same `Channel<string[]>` to both a writer and a reader, TypeScript guarantees type compatibility at compile time.
+The channel object IS the connection. If you pass the same `Channel<string[]>` to both a writer and a reader, TypeScript guarantees type compatibility at compile time. Every `send` signature takes the value as `NoInfer<T>`, so the channel alone fixes `T`: a wider value (a plain `string` sent to a `Channel<'running' | 'done' | 'error'>`) is a compile error instead of widening `T`.
 
 ---
 
@@ -167,7 +167,7 @@ The read-side counterpart to `getChannelHandle`: code outside the execution tree
 harness.getChannelStream(channel: ExternalChannel<T>, executionId: string): AsyncIterable<T>
 ```
 
-**Delivery is channel-scoped, not execution-scoped.** Channel state is keyed by channel name within a harness; every subscriber to a name sees that channel's traffic regardless of which execution sent it. The `executionId` bounds only the subscription's *lifetime* — it ends when that root execution completes. Two consequences:
+**Delivery is channel-scoped, not execution-scoped.** Channel state is keyed by channel name within a harness; every subscriber to a name sees that channel's traffic regardless of which execution sent it. The `executionId` bounds only the subscription's *lifetime* — it ends when that root execution completes. The channel's *state* is not bound to it (see Channel Semantics, Lifecycle). Two consequences:
 
 - To receive values from exactly one execution, use a channel that only that execution writes.
 - An id that no execution ever runs under is never closed, so it names a **harness-lifetime scope**: subscribe with it for a stream that spans turns and end it yourself with `iterator.return()`. This is how long-lived observers (e.g. an approval-card poster) attach to a session harness, whose per-turn root ids each close at turn end.
@@ -178,7 +178,7 @@ Delivery by mode:
 
 | Mode | External subscriber behavior |
 |---|---|
-| `topic` | **Non-lossy tap.** Each subscriber has a private bounded buffer (1000, oldest dropped with a warning). Every send after subscribe is retained until consumed; no replay of pre-subscribe values. Subscribers are persistent and do not count as internal receivers. |
+| `topic` | **Non-lossy tap.** Each subscriber has a private bounded buffer (1000, oldest dropped with a `subscriber_drop` warning). Every send after subscribe is retained until consumed; no replay of pre-subscribe values. Subscribers are persistent and do not count as internal receivers. |
 | `queue` | **Competing consumer.** External `next()` waits in the same FIFO as internal `recv` waiters; consuming an item frees parked internal senders exactly as `recv` does. Multiple subscribers — or a step `recv`ing the same channel — split deliveries first-waiter-wins: subscribe ONCE per harness and point subscriptions at channels only the agent writes. |
 | `value` | **Current value, then updates, conflated.** The first `next()` yields the current value if one exists; a slow consumer sees only the newest update. Non-consuming. |
 
@@ -194,13 +194,13 @@ Lifecycle:
 
 External senders are NOT back-pressured. If a queue channel's buffer is full when an external sender calls `handle.send()`:
 - The **oldest** item in the queue is dropped.
-- A warning is emitted via the agent harness's tracing system.
+- A warning is emitted via the agent harness's tracing system: a `channel.warning` span event with `kind: 'overflow_drop'` (see `10-observability`, Channel Warnings).
 
 This design prevents external callers (e.g., HTTP handlers) from blocking on a full queue, which would cause upstream timeouts. Internal senders (`ctx.send`) are still subject to normal back-pressure semantics.
 
 ### Thread Safety
 
-Node.js is single-threaded, so `AgentHarness` handles are inherently thread-safe. `DurableAgentHarness` translates `handle.send()` to durable signals (e.g., Temporal signals, Inngest events).
+Node.js is single-threaded, so `AgentHarness` handles are inherently thread-safe. Durability comes from the same `AgentHarness` constructed with a `CheckpointStore` (see `23-durable-execution`), not from a separate harness class; `handle.send()` stays an in-process call either way.
 
 ---
 
@@ -218,7 +218,13 @@ Channels are scoped to the harness, not to a boundary within it. Channel state l
 
 ### Lifecycle
 
-Channels are created on first reference and garbage-collected when the execution tree completes. Queue channels buffer indefinitely within an execution (bounded by `capacity`, default 1000 items). When the buffer is full, internal senders block (back-pressure); external senders drop oldest (see above). Topic channels are ephemeral — items are delivered to currently-waiting receivers and dropped if no one is listening.
+Channels are created on first reference and live for the lifetime of the harness. Completing a root execution closes its handles and subscriptions (see External Channels, Lifecycle) but never discards channel state: a value written in one `run()` — or one session turn — is still there for the next, on the same root context or another.
+
+Channel state is part of durable execution. Each root execution that sends, receives, takes a handle on, or subscribes to a channel is recorded as a user of it (a `spawn` child or `inParallel` path counts as its root). When the harness has a `CheckpointStore` (see `23-durable-execution`), every checkpoint carries the stored state of each channel the execution used — the current value of a `value` channel and the queued items of a `queue` channel — and `restore()` refills it, so channel state survives a process restart for as long as the execution's checkpoints do. Restore only fills channels that have no live state in the harness; live state is never older than a snapshot. Parked receivers, parked senders, and subscribers are live promises and are not checkpointed; `topic` channels store nothing and are skipped. Without a `CheckpointStore`, channel state lives only in memory and ends with the harness.
+
+A restored queue holds the items sent before the checkpoint. A step marked `durable: false` (see `23a-step-level-resume`, Identity) re-runs on resume, so a send it made before the checkpoint lands again on top of the restored queue and the item is duplicated. Durable steps replay from the ledger and do not send again. Make a non-durable step's sends idempotent for its readers (a value channel, or items a reader can recognise), or keep the send in a durable step.
+
+Queue channels buffer indefinitely within an execution (bounded by `capacity`, default 1000 items). When the buffer is full, internal senders block (back-pressure); external senders drop oldest (see above). Topic channels are ephemeral — items are delivered to currently-waiting receivers and dropped if no one is listening.
 
 ### Default Timeout and Deadlock Prevention
 
@@ -229,7 +235,7 @@ ctx.recv(findings, { timeout: 60_000 }); // 60s
 ctx.recv(status, { timeout: 0 });         // no timeout (use with caution)
 ```
 
-Setting `timeout: 0` disables the timeout — this is an explicit opt-in to potential deadlock. The agent harness SHOULD emit a warning when `timeout: 0` is used.
+Setting `timeout: 0` disables the timeout in every mode (`value`, `queue`, and `topic`) — this is an explicit opt-in to potential deadlock. Whenever a `recv` (or a parked `send`, see below) actually waits with `timeout: 0`, the agent harness records an `unbounded_wait` channel warning (see `10-observability`, Channel Warnings). A negative timeout is a caller bug, not a shorter wait: `recv` and `send` reject with `NoeticConfigError` code `INVALID_CHANNEL_TIMEOUT` (see `09-error-model`).
 
 A pending `recv` never outlives its context: when the context is aborted, the blocked `recv` immediately rejects with `{ kind: 'cancelled' }` — even with `timeout: 0` (see `09-error-model`, Cancellation item 2). Abort only rejects waiters belonging to the aborted context; siblings sharing the channel store keep waiting.
 
@@ -238,7 +244,7 @@ A pending `recv` never outlives its context: when the context is aborted, the bl
 `ctx.send` returns a `Promise<void>`. For value and topic channels, and for queue channels below `capacity`, the promise resolves immediately (delivery is synchronous). When a queue channel's buffer is at `capacity`, the sender is **parked** until space frees up:
 
 - Parked senders form a FIFO queue. When a consumer dequeues an item (`recv` or `tryRecv`), the oldest parked sender's value moves into the freed slot and that sender's promise resolves.
-- Like `recv`, a parked `send` is subject to the default 30-second timeout. If the timeout fires, the promise rejects with `channel_timeout` (the value never enters the queue). This prevents silent deadlocks where a producer and consumer are both blocked.
+- Like `recv`, a parked `send` is subject to the default 30-second timeout. If the timeout fires, the promise rejects with `channel_timeout` (the value never enters the queue). This prevents silent deadlocks where a producer and consumer are both blocked. Internal callers of the channel store can pass `timeout: 0` to park with no timeout, which records an `unbounded_wait` warning.
 - If the sending context is aborted while parked, the promise rejects with `{ kind: 'cancelled' }` (see `09-error-model`, Cancellation item 2).
 
 External senders are never back-pressured — see External Sender Back-Pressure above.
@@ -319,3 +325,9 @@ Within a `inParallel` (see `03-control-flow`), the agent harness runs paths as c
 ### Topic Mode is Lossy
 
 Items are not buffered if no receiver is waiting. This is intentional — topic channels are for real-time coordination, not reliable delivery. Use `queue` mode for reliable delivery. Lossiness applies to *internal* receivers (`recv`); external subscriptions (`getChannelStream`) buffer per subscriber.
+
+---
+
+## Future Considerations
+
+- **Per-run channel pruning.** Channel state lives for the harness lifetime, so a long-lived harness keeps every channel name it ever used (and, per channel, the ids of the executions that used it). A harness without a `CheckpointStore` could drop a channel's state once the last root execution using it completes and nothing is parked on it. This changes semantics — a sequential `run()` on the same root context, or the next session turn, would start with empty channels — so it would need an explicit opt-in.
