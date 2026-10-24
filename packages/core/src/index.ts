@@ -23,6 +23,8 @@ export { channel } from './builders/channel-builder';
 /** @public */
 export { context } from './builders/context-builder';
 /** @public */
+export type { ConditionalOpts, InParallelOpts } from './builders/control-flow-builders';
+/** @public */
 export { conditional, inParallel } from './builders/control-flow-builders';
 /** @public */
 export { decide, routeSwitch } from './builders/decide-builders';
@@ -542,6 +544,7 @@ export { LedgerEntryKind, SteeringAction } from '@noetic-tools/types';
 /** @public */
 export type {
   ExecuteStepFn,
+  MergeFn,
   SettleResult,
   Snapshot,
   Step,

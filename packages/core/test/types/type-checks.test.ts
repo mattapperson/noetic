@@ -1,8 +1,15 @@
 import { describe, expect, it } from 'bun:test';
 import type { ExtendedItem } from '@noetic-tools/types';
 import { z } from 'zod';
-import type { SettleResult, Step, StepSpawn } from '../../src/index';
-import { Slot } from '../../src/index';
+import type {
+  ConditionalOpts,
+  InParallelOpts,
+  MergeFn,
+  SettleResult,
+  Step,
+  StepSpawn,
+} from '../../src/index';
+import { conditional, inParallel, invokeTool, runCode, Slot, tool } from '../../src/index';
 
 describe('Type definitions', () => {
   describe('Memory types', () => {
@@ -58,6 +65,128 @@ describe('Type definitions', () => {
       };
 
       expect(item.payload).toBe(1);
+    });
+  });
+
+  describe('Control-flow option types', () => {
+    const echo = runCode<unknown, string, string>({
+      id: 'echo',
+      execute: async (input) => input,
+    });
+
+    it('builds typed inParallel options for each mode', () => {
+      const race: InParallelOpts<unknown, string, string> = {
+        id: 'race',
+        mode: 'race',
+        paths: () => [
+          echo,
+        ],
+      };
+      const joinAll: MergeFn<unknown, string> = (results) => results.join(',');
+      const all: InParallelOpts<unknown, string, string> = {
+        id: 'all',
+        mode: 'all',
+        paths: () => [
+          echo,
+        ],
+        merge: joinAll,
+      };
+      const joinSettled: MergeFn<unknown, string, SettleResult<string>> = (results) =>
+        results.map((r) => r.value ?? '').join(',');
+      const settle: InParallelOpts<unknown, string, string> = {
+        id: 'settle',
+        mode: 'settle',
+        paths: () => [
+          echo,
+        ],
+        merge: joinSettled,
+      };
+
+      expect(inParallel(race).mode).toBe('race');
+      expect(inParallel(all).mode).toBe('all');
+      expect(inParallel(settle).mode).toBe('settle');
+    });
+
+    it('requires merge for all and settle, typed per mode', () => {
+      // @ts-expect-error merge is required in 'all' mode
+      const all: InParallelOpts<unknown, string, string> = {
+        id: 'all',
+        mode: 'all',
+        paths: () => [
+          echo,
+        ],
+      };
+      // @ts-expect-error merge is required in 'settle' mode
+      const settle: InParallelOpts<unknown, string, string> = {
+        id: 'settle',
+        mode: 'settle',
+        paths: () => [
+          echo,
+        ],
+      };
+      const wrongMerge: InParallelOpts<unknown, string, string> = {
+        id: 'settle-wrong',
+        mode: 'settle',
+        paths: () => [
+          echo,
+        ],
+        // @ts-expect-error settle merge receives SettleResult<O>[], not O[]
+        merge: (results: string[]) => results.join(','),
+      };
+
+      expect(all.mode).toBe('all');
+      expect(settle.mode).toBe('settle');
+      expect(wrongMerge.mode).toBe('settle');
+    });
+
+    it('builds typed conditional options', () => {
+      const opts: ConditionalOpts<unknown, string, string> = {
+        id: 'route',
+        route: (input) => (input === 'skip' ? null : echo),
+      };
+
+      expect(conditional(opts).kind).toBe('conditional');
+    });
+  });
+
+  describe('invokeTool args', () => {
+    const add = tool({
+      name: 'add',
+      description: 'Add two numbers',
+      input: z.object({
+        a: z.number(),
+        b: z.number(),
+      }),
+      output: z.number(),
+      execute: async ({ a, b }) => a + b,
+    });
+
+    it('accepts a partial of the tool input', () => {
+      const s = invokeTool({
+        id: 'add-partial',
+        tool: add,
+        args: {
+          a: 1,
+        },
+      });
+
+      expect(s.args).toEqual({
+        a: 1,
+      });
+    });
+
+    it('rejects keys outside the tool input', () => {
+      const s = invokeTool({
+        id: 'add-extra',
+        tool: add,
+        args: {
+          a: 1,
+          // @ts-expect-error `c` is not a key of the tool input
+          c: 2,
+        },
+      });
+
+      expect(s.kind).toBe('invokeTool');
     });
   });
 

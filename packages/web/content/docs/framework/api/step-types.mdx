@@ -199,7 +199,7 @@ inParallel has three mode variants, each a separate interface.
 | `id` | `string` | yes | Step identifier |
 | `mode` | `'all'` | yes | Wait for all paths |
 | `paths` | `(input: I, ctx: Context<TContext>) => Step<TContext, I, O>[]` | yes | Path factory |
-| `merge` | `(results: O[], ctx: Context<TContext>) => O` | yes | Merge function |
+| `merge` | `MergeFn<TContext, O>` | yes | Merge function |
 | `concurrency` | `number` | no | Max parallel paths |
 
 ### StepInParallelSettle
@@ -212,7 +212,7 @@ inParallel has three mode variants, each a separate interface.
 | `id` | `string` | yes | Step identifier |
 | `mode` | `'settle'` | yes | Wait for all, include errors |
 | `paths` | `(input: I, ctx: Context<TContext>) => Step<TContext, I, O>[]` | yes | Path factory |
-| `merge` | `(results: SettleResult<O>[], ctx: Context<TContext>) => O` | yes | Merge function |
+| `merge` | `MergeFn<TContext, O, SettleResult<O>>` | yes | Merge function |
 | `concurrency` | `number` | no | Max parallel paths |
 
 ## StepWithContext
@@ -281,6 +281,17 @@ A step that runs a body step on a fixed-interval schedule, optionally woken soon
 | `status` | `'fulfilled' \| 'rejected'` | Outcome |
 | `value` | `O` | Present if fulfilled |
 | `error` | `NoeticError` | Present if rejected |
+
+### MergeFn
+
+`MergeFn<TContext, O, R = O>` combines inParallel path results into one output. `R` is the element type of `results`: `O` in `all` mode, `SettleResult<O>` in `settle` mode.
+
+```ts
+type MergeFn<TContext = ContextData, O = unknown, R = O> = (
+  results: R[],
+  ctx: Context<TContext>,
+) => O;
+```
 
 ### RetryPolicy
 

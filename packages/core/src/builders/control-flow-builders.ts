@@ -1,9 +1,5 @@
 import type { ContextData } from '@noetic-tools/context';
 import type {
-  Context,
-  ExecuteStepFn,
-  SettleResult,
-  Step,
   StepConditional,
   StepInParallel,
   StepInParallelAll,
@@ -12,6 +8,30 @@ import type {
 } from '@noetic-tools/types';
 import { frameworkCast, NoeticConfigError } from '@noetic-tools/types';
 import { getDefaultRegistrar } from '../types/step-registrar';
+
+//#region Types
+
+/**
+ * Options for `inParallel()`, one shape per mode. `merge` is required for `all`
+ * and `settle` and absent for `race`.
+ * @public
+ */
+export type InParallelOpts<TContext = ContextData, I = unknown, O = unknown> =
+  | InParallelRaceOpts<TContext, I, O>
+  | InParallelAllOpts<TContext, I, O>
+  | InParallelSettleOpts<TContext, I, O>;
+
+type InParallelRaceOpts<TContext, I, O> = Omit<StepInParallelRace<TContext, I, O>, 'kind'>;
+type InParallelAllOpts<TContext, I, O> = Omit<StepInParallelAll<TContext, I, O>, 'kind'>;
+type InParallelSettleOpts<TContext, I, O> = Omit<StepInParallelSettle<TContext, I, O>, 'kind'>;
+
+/** @public Options for `conditional()`. */
+export type ConditionalOpts<TContext = ContextData, I = unknown, O = unknown> = Omit<
+  StepConditional<TContext, I, O>,
+  'kind'
+>;
+
+//#endregion
 
 /**
  * Creates a parallel execution step that races paths and returns the first result.
@@ -24,13 +44,9 @@ import { getDefaultRegistrar } from '../types/step-registrar';
  * @returns A `StepInParallelRace` step.
  * @throws `NoeticConfigError` with code `EMPTY_STEP_ID` if `id` is empty.
  */
-export function inParallel<TContext = ContextData, I = unknown, O = unknown>(opts: {
-  id: string;
-  mode: 'race';
-  paths: (input: I, ctx: Context<TContext>) => Step<TContext, I, O>[];
-  concurrency?: number;
-  _optimizable?: Step<TContext>[];
-}): StepInParallelRace<TContext, I, O>;
+export function inParallel<TContext = ContextData, I = unknown, O = unknown>(
+  opts: InParallelRaceOpts<TContext, I, O>,
+): StepInParallelRace<TContext, I, O>;
 
 /**
  * Creates a parallel execution step that waits for all paths and merges results.
@@ -45,14 +61,9 @@ export function inParallel<TContext = ContextData, I = unknown, O = unknown>(opt
  * @throws `NoeticConfigError` with code `EMPTY_STEP_ID` if `id` is empty.
  * @throws `NoeticConfigError` with code `MISSING_MERGE_FUNCTION` if `merge` is not provided.
  */
-export function inParallel<TContext = ContextData, I = unknown, O = unknown>(opts: {
-  id: string;
-  mode: 'all';
-  paths: (input: I, ctx: Context<TContext>) => Step<TContext, I, O>[];
-  merge: (results: O[], ctx: Context<TContext>) => O;
-  concurrency?: number;
-  _optimizable?: Step<TContext>[];
-}): StepInParallelAll<TContext, I, O>;
+export function inParallel<TContext = ContextData, I = unknown, O = unknown>(
+  opts: InParallelAllOpts<TContext, I, O>,
+): StepInParallelAll<TContext, I, O>;
 
 /**
  * Creates a parallel execution step that waits for all paths, collecting errors as results.
@@ -67,25 +78,13 @@ export function inParallel<TContext = ContextData, I = unknown, O = unknown>(opt
  * @throws `NoeticConfigError` with code `EMPTY_STEP_ID` if `id` is empty.
  * @throws `NoeticConfigError` with code `MISSING_MERGE_FUNCTION` if `merge` is not provided.
  */
-export function inParallel<TContext = ContextData, I = unknown, O = unknown>(opts: {
-  id: string;
-  mode: 'settle';
-  paths: (input: I, ctx: Context<TContext>) => Step<TContext, I, O>[];
-  merge: (results: SettleResult<O>[], ctx: Context<TContext>) => O;
-  concurrency?: number;
-  _optimizable?: Step<TContext>[];
-}): StepInParallelSettle<TContext, I, O>;
+export function inParallel<TContext = ContextData, I = unknown, O = unknown>(
+  opts: InParallelSettleOpts<TContext, I, O>,
+): StepInParallelSettle<TContext, I, O>;
 
-export function inParallel<TContext = ContextData, I = unknown, O = unknown>(opts: {
-  id: string;
-  mode: 'race' | 'all' | 'settle';
-  paths: (input: I, ctx: Context<TContext>) => Step<TContext, I, O>[];
-  merge?:
-    | ((results: O[], ctx: Context<TContext>) => O)
-    | ((results: SettleResult<O>[], ctx: Context<TContext>) => O);
-  concurrency?: number;
-  _optimizable?: Step<TContext>[];
-}): StepInParallel<TContext, I, O> {
+export function inParallel<TContext = ContextData, I = unknown, O = unknown>(
+  opts: InParallelOpts<TContext, I, O>,
+): StepInParallel<TContext, I, O> {
   if (!opts.id || opts.id.trim() === '') {
     throw new NoeticConfigError({
       code: 'EMPTY_STEP_ID',
@@ -120,16 +119,9 @@ export function inParallel<TContext = ContextData, I = unknown, O = unknown>(opt
  * @throws `NoeticConfigError` with code `EMPTY_STEP_ID` if `id` is empty.
  * @throws `NoeticConfigError` with code `MISSING_ROUTE_FUNCTION` if `route` is not provided.
  */
-export function conditional<TContext = ContextData, I = unknown, O = unknown>(opts: {
-  id: string;
-  route: (
-    input: I,
-    ctx: Context<TContext>,
-    run: ExecuteStepFn,
-  ) => Step<TContext, I, O> | null | Promise<Step<TContext, I, O> | null>;
-  _optimizable?: Step<TContext>[];
-  _rebuild?: (children: Step<TContext>[]) => StepConditional<TContext, I, O>;
-}): StepConditional<TContext, I, O> {
+export function conditional<TContext = ContextData, I = unknown, O = unknown>(
+  opts: ConditionalOpts<TContext, I, O>,
+): StepConditional<TContext, I, O> {
   if (!opts.id || opts.id.trim() === '') {
     throw new NoeticConfigError({
       code: 'EMPTY_STEP_ID',

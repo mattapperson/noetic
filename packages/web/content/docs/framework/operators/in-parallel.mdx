@@ -129,6 +129,12 @@ const settleExample = inParallel({
 
 ## API Reference
 
+`inParallel()` takes an `InParallelOpts<TContext, I, O>`: a union with one shape per mode. `merge` is required for `all` and `settle` and absent for `race`. Import the type to build options apart from the call:
+
+```ts
+import type { InParallelOpts, MergeFn } from '@noetic-tools/core';
+```
+
 ### Common Options (all modes)
 
 | Property | Type | Required | Description |
@@ -142,8 +148,8 @@ const settleExample = inParallel({
 
 | Property | Modes | Type | Description |
 | --- | --- | --- | --- |
-| `merge` | `all` | `(results: O[], ctx: Context<TContext>) => O` | Combine all outputs into one |
-| `merge` | `settle` | `(results: SettleResult<O>[], ctx: Context<TContext>) => O` | Combine settled results into one |
+| `merge` | `all` | `MergeFn<TContext, O>` — `(results: O[], ctx: Context<TContext>) => O` | Combine all outputs into one |
+| `merge` | `settle` | `MergeFn<TContext, O, SettleResult<O>>` — `(results: SettleResult<O>[], ctx: Context<TContext>) => O` | Combine settled results into one |
 
 ## Concurrency Control
 
