@@ -7,8 +7,9 @@ type OpenResponsesNonStreamingResponse = OpenResponsesResult;
 type ResponsesOutputItem = OpenResponsesNonStreamingResponse['output'][number];
 
 import type { Item, ReasoningItem } from '@noetic-tools/types';
-import { frameworkCast } from '@noetic-tools/types';
+import { frameworkCast, isNoeticConfigError } from '@noetic-tools/types';
 import {
+  createOpenRouterEmbed,
   extractOutputItems,
   extractSystemInstruction,
   extractUsage,
@@ -400,5 +401,17 @@ describe('extractUsage', () => {
     const usage = extractUsage(undefined);
     expect(usage.inputTokens).toBe(0);
     expect(usage.outputTokens).toBe(0);
+  });
+});
+
+describe('createOpenRouterEmbed', () => {
+  it('throws MISSING_API_KEY without a key', () => {
+    try {
+      createOpenRouterEmbed(undefined);
+      expect.unreachable('should have thrown');
+    } catch (e) {
+      assert(isNoeticConfigError(e));
+      expect(e.code).toBe('MISSING_API_KEY');
+    }
   });
 });

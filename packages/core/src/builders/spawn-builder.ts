@@ -36,7 +36,6 @@ interface SpawnOpts<TContext, I, O> extends StepReplay<TContext, I> {
  *   can dispatch either by id.
  * @throws `NoeticConfigError` with code `EMPTY_STEP_ID` if `id` is empty.
  * @throws `NoeticConfigError` with code `MISSING_CHILD_STEP` if `child` is not provided.
- * @throws `NoeticConfigError` with code `DUPLICATE_STEP_ID` if another step with the same id is already registered.
  */
 export function spawn<TContext = ContextData, I = unknown, O = unknown>(
   opts: SpawnOpts<TContext, I, O>,

@@ -559,6 +559,7 @@ export async function executeToolCall(params: ExecuteToolCallParams): Promise<{
  * @param apiKey - OpenRouter API key.
  * @param embeddingModel - Model identifier (default: `'openai/text-embedding-3-small'`).
  * @returns An `EmbedFn` that produces embedding vectors for the given texts.
+ * @throws `NoeticConfigError` with code `MISSING_API_KEY` if `apiKey` is empty or omitted.
  */
 export function createOpenRouterEmbed(apiKey?: string, embeddingModel?: string): EmbedFn {
   if (!apiKey) {

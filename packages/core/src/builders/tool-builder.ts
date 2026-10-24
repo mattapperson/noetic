@@ -107,6 +107,8 @@ function validateToolConfig(name: string, execute: unknown): void {
  * Accepts Zod, Valibot, or any Standard Schema v1 implementation.
  *
  * @public
+ * @throws `NoeticConfigError` with code `EMPTY_TOOL_NAME` if `name` is empty.
+ * @throws `NoeticConfigError` with code `MISSING_EXECUTE_FUNCTION` if `execute` is not provided.
  */
 export function tool<I extends StandardSchemaV1, O extends StandardSchemaV1>(
   config: ToolConfig<I, O>,
