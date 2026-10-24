@@ -618,8 +618,10 @@ channel<T>(name: string, {
   mode: 'value' | 'queue' | 'topic';
   capacity?: number;
   external?: boolean;
-}): Channel<T>
+}): Channel<T> | ExternalChannel<T>
 ```
+
+A literal `external: true` narrows the return to `ExternalChannel<T>`; omitted or literal `false` narrows to `Channel<T>`; a run-time `boolean` returns the union.
 
 `ctx.send(channel, value)` returns `Promise<void>` (breaking change in core v(next)): it resolves immediately for value/topic channels and queue channels below capacity, and parks when a queue channel is full (back-pressure) — `channel_timeout` after 30s, `cancelled` if the context aborts while parked. Always `await` it. `ctx.recv` rejects with `cancelled` when the context is aborted while waiting. External `ChannelHandle.send` stays synchronous and drops the oldest item at capacity.
 

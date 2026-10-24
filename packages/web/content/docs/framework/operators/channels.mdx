@@ -50,7 +50,7 @@ const progress = channel('progress', {
 | `schema` | `ZodType<T>` | Yes | Zod schema that validates every value sent through the channel. |
 | `mode` | `'value' \| 'queue' \| 'topic'` | Yes | Delivery semantics (see below). |
 | `capacity` | `number` | No | Maximum buffer size for queue mode. Defaults to 1000. |
-| `external` | `boolean` | No | When `true`, creates an `ExternalChannel` that outside code can write to. |
+| `external` | `boolean` | No | When `true`, creates an `ExternalChannel` that outside code can write to. A literal `true`/`false` narrows the return type; a run-time `boolean` returns `Channel<T> \| ExternalChannel<T>`. |
 
 ## Channel Modes
 

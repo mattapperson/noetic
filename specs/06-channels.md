@@ -32,10 +32,10 @@ function channel<T>(name: string, opts: {
   mode: 'value' | 'queue' | 'topic';
   capacity?: number;     // queue mode only, default 1000
   external?: boolean;    // marks channel as externally writable
-}): Channel<T>;
+}): Channel<T> | ExternalChannel<T>;
 ```
 
-When `external: true` is set, the returned channel is an `ExternalChannel<T>` (see below).
+Overloads narrow the return type: a literal `external: true` returns an `ExternalChannel<T>` (see below), an omitted or literal `false` flag returns a `Channel<T>`, and a flag only known at run time (`boolean`) returns the union.
 
 ## Usage
 
