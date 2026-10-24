@@ -87,6 +87,16 @@ export interface SettleResult<O> {
   error?: NoeticError;
 }
 
+/**
+ * Combines inParallel path results into one output. `R` is the element type of
+ * `results`: `O` in `all` mode, `SettleResult<O>` in `settle` mode.
+ * @public
+ */
+export type MergeFn<TContext = ContextData, O = unknown, R = O> = (
+  results: R[],
+  ctx: Context<TContext>,
+) => O;
+
 /** @public Discriminated union of all step kinds that can be composed into an execution tree. */
 export type Step<TContext = ContextData, I = unknown, O = unknown> =
   | StepRunCode<TContext, I, O>
@@ -296,7 +306,7 @@ export interface StepInParallelAll<TContext = ContextData, I = unknown, O = unkn
   id: string;
   mode: 'all';
   paths: (input: I, ctx: Context<TContext>) => Step<TContext, I, O>[];
-  merge: (results: O[], ctx: Context<TContext>) => O;
+  merge: MergeFn<TContext, O>;
   concurrency?: number;
   _optimizable?: Step<TContext>[];
 }
@@ -307,7 +317,7 @@ export interface StepInParallelSettle<TContext = ContextData, I = unknown, O = u
   id: string;
   mode: 'settle';
   paths: (input: I, ctx: Context<TContext>) => Step<TContext, I, O>[];
-  merge: (results: SettleResult<O>[], ctx: Context<TContext>) => O;
+  merge: MergeFn<TContext, O, SettleResult<O>>;
   concurrency?: number;
   _optimizable?: Step<TContext>[];
 }

@@ -300,6 +300,17 @@ inParallel<I, O>({ id, mode: 'all', paths: () => Step[], merge: (results) => O }
 inParallel<I, O>({ id, mode: 'settle', paths: () => Step[], merge: (results: SettleResult[]) => O })
 ```
 
+Option types are exported for building options apart from the call:
+
+```typescript
+import type { ConditionalOpts, InParallelOpts, MergeFn, SettleResult } from '@noetic-tools/core';
+
+type MergeFn<TContext = ContextData, O = unknown, R = O> = (results: R[], ctx: Context<TContext>) => O;
+// InParallelOpts<TContext, I, O>: one shape per mode; merge is MergeFn<TContext, O> for 'all',
+// MergeFn<TContext, O, SettleResult<O>> for 'settle', and absent for 'race'.
+// ConditionalOpts<TContext, I, O>: { id, route }
+```
+
 Each parallel path gets a deep clone of parent state. Mutations in one path don't affect siblings.
 
 Each path is also a context child boundary: it inherits the parent's layers and tool pool, `onSpawn` seeds its per-path layer state (items from `onSpawn` are NOT appended — the path already has the parent's item log), and `onReturn` merges a *successful* path back. Merges are serialised across paths, so concurrent workers don't clobber one parent state.

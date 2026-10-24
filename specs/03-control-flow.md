@@ -74,10 +74,11 @@ The `merge` function is mandatory for `all` and `settle` modes — this eliminat
 ```typescript
 type InParallelOpts<I, O> =
   | { id: string; mode: 'race';   paths: (input: I, ctx: Context) => Step<I, O>[]; concurrency?: number }
-  | { id: string; mode: 'all';    paths: (input: I, ctx: Context) => Step<I, O>[]; merge: (results: O[], ctx: Context) => O; concurrency?: number }
-  | { id: string; mode: 'settle'; paths: (input: I, ctx: Context) => Step<I, O>[]; merge: (results: SettleResult<O>[], ctx: Context) => O; concurrency?: number }
+  | { id: string; mode: 'all';    paths: (input: I, ctx: Context) => Step<I, O>[]; merge: MergeFn<O>; concurrency?: number }
+  | { id: string; mode: 'settle'; paths: (input: I, ctx: Context) => Step<I, O>[]; merge: MergeFn<O, SettleResult<O>>; concurrency?: number }
 
-type MergeFn<O> = (results: O[], ctx: Context) => O;
+// `R` is the element type of `results`: `O` in `all` mode, `SettleResult<O>` in `settle` mode.
+type MergeFn<O, R = O> = (results: R[], ctx: Context) => O;
 ```
 
 ```typescript
