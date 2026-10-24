@@ -80,6 +80,27 @@ function makeHydrationContext(
   };
 }
 
+describe('hydrateNode — durable', () => {
+  test('carries durable: false onto the hydrated step', () => {
+    const node: WorkflowNode = {
+      kind: 'callModel',
+      id: 'non-durable-llm',
+      instructions: 'Say hello',
+      durable: false,
+    };
+    expect(hydrateNode(node, makeHydrationContext()).durable).toBe(false);
+  });
+
+  test('leaves durable unset when the node omits it', () => {
+    const node: WorkflowNode = {
+      kind: 'callModel',
+      id: 'default-durable-llm',
+      instructions: 'Say hello',
+    };
+    expect(hydrateNode(node, makeHydrationContext()).durable).toBeUndefined();
+  });
+});
+
 describe('hydrateNode — llm', () => {
   test('produces StepCallModel with correct fields', () => {
     const node: WorkflowNode = {

@@ -493,6 +493,29 @@ describe('WorkflowNodeSchema — unknown kind', () => {
   });
 });
 
+describe('WorkflowNodeSchema — durable', () => {
+  test('accepts durable: false on any node kind', () => {
+    const result = WorkflowNodeSchema.safeParse({
+      kind: 'invokeTool',
+      id: 'orchestrate',
+      toolName: 'pick-batch',
+      durable: false,
+    });
+    expect(result.success).toBe(true);
+    expect(result.data?.durable).toBe(false);
+  });
+
+  test('rejects a non-boolean durable', () => {
+    const result = WorkflowNodeSchema.safeParse({
+      kind: 'invokeTool',
+      id: 'orchestrate',
+      toolName: 'pick-batch',
+      durable: 'never',
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
 describe('UntilPredicateSchema', () => {
   test('validates maxSteps', () => {
     const pred = {

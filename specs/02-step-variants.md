@@ -9,8 +9,10 @@
 
 Pure computation. The agent harness can retry freely, cache results, and doesn't need to track token usage.
 
+Every builder below (and every other step builder) also accepts the `StepReplay` fields from `01-step-type` — `durable` and `replayKey` — and copies them onto the step it builds. See `23a-step-level-resume` § Identity.
+
 ```typescript
-interface StepRunCodeOpts<I, O> {
+interface StepRunCodeOpts<I, O> extends StepReplay<I> {
   id: string;
   execute: (input: I, ctx: Context) => Promise<O>;
   retry?: RetryPolicy;

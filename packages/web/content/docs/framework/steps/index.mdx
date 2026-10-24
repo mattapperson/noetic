@@ -151,6 +151,10 @@ const draftThenPolish = loop({
 Concurrency is never implicit. Steps run at the same time only inside [`inParallel`](/docs/framework/operators/in-parallel), whose `paths` function also returns an array -- but each of those paths runs concurrently, against the same input.
 </Callout>
 
+## Replay on Resume
+
+On a harness with a `checkpointStore`, a resumed run replays each completed step's recorded output instead of running it again. Every step builder accepts two fields that change this: `durable: false` makes a step always re-run, and `replayKey: (input, ctx) => string` replays by content rather than by position. See [Replay Identity](/docs/framework/durability#replay-identity).
+
 ## Next Steps
 
 - [Control Flow](/docs/framework/operators) -- route between steps with `conditional` and `inParallel`.

@@ -1,5 +1,11 @@
 import type { ContextData } from '@noetic-tools/context';
-import type { Channel, ScheduleErrorPolicy, Step, StepSchedule } from '@noetic-tools/types';
+import type {
+  Channel,
+  ScheduleErrorPolicy,
+  Step,
+  StepReplay,
+  StepSchedule,
+} from '@noetic-tools/types';
 import { NoeticConfigError } from '@noetic-tools/types';
 import { getDefaultRegistrar } from '../types/step-registrar';
 
@@ -10,7 +16,8 @@ import { getDefaultRegistrar } from '../types/step-registrar';
  *
  * @public
  */
-export interface ScheduleOptions<TContext = ContextData, I = unknown, O = unknown> {
+export interface ScheduleOptions<TContext = ContextData, I = unknown, O = unknown>
+  extends StepReplay<TContext, I> {
   /** Unique step identifier used in traces and error messages. */
   id: string;
   /** Body step executed on each iteration. */
@@ -84,6 +91,8 @@ export function schedule<TContext = ContextData, I = unknown, O = unknown>(
     inbox: opts.inbox,
     onError: opts.onError ?? 'continue',
     jitter: opts.jitter ?? 0,
+    durable: opts.durable,
+    replayKey: opts.replayKey,
   };
   getDefaultRegistrar().register(built);
   return built;

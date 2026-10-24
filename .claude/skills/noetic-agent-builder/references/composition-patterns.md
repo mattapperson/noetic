@@ -896,6 +896,52 @@ for (const live of await harness.subprocess.listLive()) {
 - `checkpoint()` is a no-op when `environment.storage.checkpointStore` is absent; `listLive()` returns the empty set when the adapter has no storage. Durability is opt-in and degrades gracefully.
 - The default in-memory adapter also accepts a `storage` option for tests that want manifest round-trip behaviour without launching real OS children.
 
+## Pattern: Concurrent Workers with Content-Keyed Replay
+
+Replay identity is positional by default: a resumed step gets the output recorded at the same execution path. With work-stealing workers, which batch a worker picks is timing-dependent, so positional replay can hand one batch's answer to another, and orchestration steps that only mutate state get skipped. Replay the expensive leaves by content and let the cheap orchestration re-run:
+
+```typescript
+import { inParallel, runCode, type ContextData } from '@noetic-tools/core';
+
+const queue: string[] = loadBatches();
+
+// Paid leaf call: keyed by content, replays whichever worker runs it.
+const gradeBatch = runCode<ContextData, string, string>({
+  id: 'grade-batch',
+  replayKey: (batch) => `grade:${batch}`,
+  execute: async (batch) => grade(batch),
+});
+
+// Orchestration: timing-dependent and cheap, so never recorded.
+const worker = (id: string) =>
+  runCode<ContextData, string, string[]>({
+    id,
+    durable: false,
+    execute: async (_input, ctx) => {
+      const out: string[] = [];
+      for (let batch = queue.shift(); batch; batch = queue.shift()) {
+        out.push(String(await ctx.harness.run(gradeBatch, batch, ctx)));
+      }
+      return out;
+    },
+  });
+
+const pool = inParallel<ContextData, string, string[]>({
+  id: 'worker-pool',
+  mode: 'all',
+  durable: false, // a recorded pool would replay wholesale and skip the workers
+  paths: () => [worker('worker-a'), worker('worker-b')],
+  merge: (results) => results.flat(),
+});
+```
+
+**Key points**:
+
+- Mark every orchestration level `durable: false`, including the parent `inParallel`: a recorded parent replays its whole output without descending.
+- `durable: false` does not propagate — the keyed leaf under a non-durable worker still replays.
+- A `replayKey` must encode everything that makes the call distinct (method, exact request, sample index); equal keys share one recorded output across the execution.
+- Run each worker on its own `inParallel` path rather than calling `harness.run` concurrently on one context, which shares one frontier.
+
 ## Durable IPC server (tasks-system pattern)
 
 Long-lived task runners (planner, implementer, agent-ci) expose their harness over a unix socket so the TUI can chat with them live. The IPC server composes a `DurableOutboundQueue` so chat survives a parent-process crash without losing or duplicating frames.

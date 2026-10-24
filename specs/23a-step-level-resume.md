@@ -68,6 +68,22 @@ root/plan#0/review-loop#0/body-llm#2
 
 **Determinism requirement.** The key must be identical on replay given identical control flow. Sequential constructs satisfy this trivially. Concurrent `inParallel` paths do **not** if the ordinal is assigned on completion — completion order varies run to run. Assign the ordinal from the `paths` array index at dispatch (`execute-control.ts:221`), never from settle order.
 
+**Replay identity is positional.** A path names *where* a step ran, not *what* it ran on. When the work a position receives is timing-dependent — concurrent workers pulling batches from a shared queue — the same path can carry a different batch on resume, and positional replay hands one batch's answer to another. Two per-step fields cover this, both on every step kind (`StepReplay` in `packages/types/src/types/step.ts`):
+
+```typescript
+interface StepReplay<TContext, I> {
+  durable?: boolean;                                    // default true
+  replayKey?(input: I, ctx: Context<TContext>): string;
+}
+```
+
+- **`replayKey`** replaces the path with a content key. The ledger records and looks the step up under `key:<replayKey(input, ctx)>`, so a leaf call finds its output wherever it runs. Keys are scoped to the execution, not to a parent: two dispatches that compute the same key share one entry, which is the point for an idempotent call (same request, same recorded answer) and a bug for anything else. The key must therefore encode everything that makes the call distinct — method, exact request, sample index.
+- **`durable: false`** removes the step from the ledger: no entry is replayed, none is recorded, and the step runs again on every resume. This is the setting for cheap orchestration — a worker loop, a batch picker, a step whose result lives in state rather than in its return value. The opt-out is per step and does not propagate: children of a non-durable parent resolve their own keys, so a re-run orchestrator still replays its durable leaves.
+
+`execute()` resolves the key once per dispatch (`resolveLedgerKey`): no key when `durable === false` or the kind is `schedule`; `key:<replayKey>` when a `replayKey` is set; the path otherwise. A `replayKey` that throws costs that dispatch its durability, never its run: the interpreter warns and executes the step without replay or recording.
+
+The pattern these compose into: mark orchestration `durable: false`, give each expensive leaf a `replayKey`, and resume replays the paid calls while the cheap structure re-runs and reapplies its state.
+
 ### Recording
 
 Append on successful return, at the point `step_completed` is emitted (`execute.ts:306`) — *not* in the `finally` that pops the frontier, which also runs on failure.
@@ -78,7 +94,7 @@ On `restore`, the ledger is loaded into the context. In `execute()`, before disp
 
 1. Compute the path key.
 2. If an entry exists at that key **and** its `stepId` and `kind` match the step about to run, return `entry.output` without dispatching.
-3. If an entry exists but diverges (different `stepId` or `kind` at that path), discard it and every entry whose path has it as a prefix, then run fresh.
+3. If an entry exists but diverges (different `stepId` or `kind` at that key), discard it and run fresh. A diverging path entry also discards every entry whose path has it as a prefix — the subtree belongs to a branch that no longer exists. A diverging `key:` entry discards only itself: nothing is keyed beneath a content key.
 
 Divergence handling mirrors the platform's tool fence, which found the same problem one layer up: `turn-tool-fencing.ts` matches a recorded call on name **and** args hash and re-executes on any mismatch, because a model that rewrote the call invalidated the prior attempt's record.
 
@@ -88,7 +104,7 @@ Replayed steps should emit a distinct `step_replayed` framework event rather tha
 
 - **`schedule`** — a wall-clock scheduled step; replaying its output would collapse a schedule into a value.
 - **Steps whose value *is* the effect**, where the effect is not durable.
-- An explicit opt-out (`step.durable === false`) for authors who know their step must always run. No such field exists on `Step` today; it would be additive.
+- **Steps marked `durable: false`** — the author's opt-out for a step that must always run. See § Identity.
 
 ## The side-effect boundary
 
@@ -202,6 +218,12 @@ Hosts need it in two situations:
 - Concurrent records (inParallel legs through one shared ledger) land on distinct keys.
 - A resumed ledger never reuses a live sequence number, even when retention left a gap.
 - `harness.clearCheckpoint` removes the snapshot and every ledger shard.
+- `durable: false` writes no entry; the step re-runs on resume and its state change is applied again.
+- A durable child under a non-durable parent still replays while the parent re-runs.
+- `replayKey`: two concurrent workers whose batches swap between runs each replay their own batch's output.
+- A different `stepId` or `kind` under a recorded `key:` re-runs fresh and discards only that entry.
+- `schedule` resolves no ledger key, whatever its `durable` says.
+- A throwing `replayKey` skips the ledger for that dispatch and does not fail the step.
 
 ## Sizing
 
@@ -234,3 +256,7 @@ without descending. This is right for a true resume and wrong for a *changed* wo
 editing a child under an unchanged parent has no effect on resume. A host that edited the
 workflow must clear the ledger rather than resume onto it. Divergence detection therefore
 catches a changed step at a recorded path, not a changed step beneath one.
+
+## Future Considerations
+
+- **Serializable replay keys for JSON workflows.** `replayKey` is a function, so JSON workflow nodes carry only `durable`. A JSON form would name the inputs to hash instead — for example `replayKey: { from: ["input", "context.batchId"] }` — with the hydrator building the function from that list.

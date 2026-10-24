@@ -102,6 +102,57 @@ A resumed run replays those outputs instead of re-running the steps. It is memoi
 
 Entries live one key per step under `execution:<id>:ledger:<seq>`, so an append is O(1) regardless of run length. Nothing here is visible on a zero-config harness: without a `checkpointStore` the ledger is never constructed.
 
+### Replay Identity
+
+By default a step's ledger key is its **execution path** — the stack of step ids plus a per-parent ordinal, like `root/plan#0/review-loop#0/body-llm#2`. Replay identity is therefore positional: a resumed step gets the output recorded at the same position.
+
+That breaks when the work a position receives depends on timing. Concurrent workers pulling batches from a shared queue may pick different batches on resume, and positional replay would hand one batch's answer to another. Steps that return nothing and mutate state are worse off: replay skips them, so their state change is lost. Every step accepts two fields for this:
+
+| Field | Default | Effect |
+|---|---|---|
+| `durable` | `true` | `false` keeps the step out of the ledger entirely: never replayed, never recorded, re-run on every resume. Applies to this step only — its children keep their own setting. |
+| `replayKey` | — | `(input, ctx) => string`. Records and replays the step under `key:<replayKey>` instead of its path, so it finds its output wherever it runs. Dispatches with the same key share one entry, so include everything that makes the call distinct. |
+
+The usual shape is "replay the expensive leaves, re-run the cheap orchestration":
+
+```ts
+import type { ContextData } from '@noetic-tools/core';
+import { inParallel, runCode } from '@noetic-tools/core';
+
+const queue: string[] = ['batch-1', 'batch-2', 'batch-3'];
+
+// The paid call: keyed by content, so it replays whichever worker runs it.
+const gradeBatch = runCode<ContextData, string, string>({
+  id: 'grade-batch',
+  replayKey: (batch) => `grade:${batch}`,
+  execute: async (batch) => `graded ${batch}`,
+});
+
+// The orchestration: cheap and timing-dependent, so it always re-runs.
+const worker = (id: string) =>
+  runCode<ContextData, string, string[]>({
+    id,
+    durable: false,
+    execute: async (_input, ctx) => {
+      const results: string[] = [];
+      for (let batch = queue.shift(); batch; batch = queue.shift()) {
+        results.push(String(await ctx.harness.run(gradeBatch, batch, ctx)));
+      }
+      return results;
+    },
+  });
+
+const pool = inParallel<ContextData, string, string[]>({
+  id: 'worker-pool',
+  mode: 'all',
+  durable: false,
+  paths: () => [worker('worker-a'), worker('worker-b')],
+  merge: (results) => results.flat(),
+});
+```
+
+`schedule` steps are never recorded, whatever `durable` says. A `replayKey` that throws costs that dispatch its durability, not its run: the step executes unrecorded and a warning is logged. If a different step id or kind shows up under a recorded `key:`, it runs fresh and only that entry is discarded.
+
 ### Retention
 
 Sharding bounds the cost of one append, not the total, so retention is bounded on two axes:

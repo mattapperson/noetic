@@ -32,6 +32,9 @@
               "type": "string",
               "minLength": 1
             },
+            "durable": {
+              "type": "boolean"
+            },
             "model": {
               "type": "string"
             },
@@ -124,6 +127,9 @@
               "type": "string",
               "minLength": 1
             },
+            "durable": {
+              "type": "boolean"
+            },
             "toolName": {
               "type": "string",
               "minLength": 1
@@ -153,6 +159,9 @@
             "id": {
               "type": "string",
               "minLength": 1
+            },
+            "durable": {
+              "type": "boolean"
             },
             "execute": {
               "type": "string",
@@ -213,6 +222,9 @@
               "type": "string",
               "minLength": 1
             },
+            "durable": {
+              "type": "boolean"
+            },
             "routes": {
               "minItems": 1,
               "type": "array",
@@ -255,6 +267,9 @@
             "id": {
               "type": "string",
               "minLength": 1
+            },
+            "durable": {
+              "type": "boolean"
             },
             "model": {
               "type": "string",
@@ -432,6 +447,9 @@
               "type": "string",
               "minLength": 1
             },
+            "durable": {
+              "type": "boolean"
+            },
             "decide": {
               "type": "object",
               "properties": {
@@ -442,6 +460,9 @@
                 "id": {
                   "type": "string",
                   "minLength": 1
+                },
+                "durable": {
+                  "type": "boolean"
                 },
                 "model": {
                   "type": "string",
@@ -652,6 +673,9 @@
               "type": "string",
               "minLength": 1
             },
+            "durable": {
+              "type": "boolean"
+            },
             "mode": {
               "type": "string",
               "enum": [
@@ -706,6 +730,9 @@
               "type": "string",
               "minLength": 1
             },
+            "durable": {
+              "type": "boolean"
+            },
             "child": {
               "$ref": "#/$defs/WorkflowNode"
             },
@@ -740,6 +767,9 @@
               "type": "string",
               "minLength": 1
             },
+            "durable": {
+              "type": "boolean"
+            },
             "child": {
               "$ref": "#/$defs/WorkflowNode"
             },
@@ -770,6 +800,9 @@
             "id": {
               "type": "string",
               "minLength": 1
+            },
+            "durable": {
+              "type": "boolean"
             },
             "body": {
               "$ref": "#/$defs/WorkflowNode"
@@ -802,6 +835,9 @@
               "type": "string",
               "minLength": 1
             },
+            "durable": {
+              "type": "boolean"
+            },
             "steps": {
               "minItems": 1,
               "type": "array",
@@ -827,6 +863,9 @@
             "id": {
               "type": "string",
               "minLength": 1
+            },
+            "durable": {
+              "type": "boolean"
             },
             "step": {
               "$ref": "#/$defs/WorkflowNode"
@@ -862,6 +901,9 @@
               "type": "string",
               "minLength": 1
             },
+            "durable": {
+              "type": "boolean"
+            },
             "document": {
               "$ref": "#"
             },
@@ -889,6 +931,9 @@
             "id": {
               "type": "string",
               "minLength": 1
+            },
+            "durable": {
+              "type": "boolean"
             },
             "agent": {
               "type": "string",

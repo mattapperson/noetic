@@ -83,6 +83,8 @@ Point your editor or validator at the bundled file (resolve it from the package,
 
 Thirteen node kinds are available, plus the `acp-agent` kind documented in [ACP Agent Steps](/docs/framework/acp-agents). Leaf nodes (`callModel`, `invokeTool`, `runCode`, `decide`) perform work; structural nodes (`sequence`, `inParallel`, `conditional`, `routeSwitch`, `loop`, `spawn`, `withContext`, `schedule`, `subflow`) compose them into trees.
 
+Every node takes an optional boolean `durable`. Set it to `false` on cheap orchestration nodes so a resumed run re-runs them instead of replaying their recorded output — see [Replay Identity](/docs/framework/durability#replay-identity). Content-keyed replay (`replayKey`) is code-only.
+
 ### callModel
 
 Call an LLM with instructions and optional tools. Every `tools` entry is a uniform object `{ type, parameters? }`. The `type` value decides the entry: a **registered tool name** (a client tool resolved from the tool registry) or a reserved **server-tool** type the provider executes itself (web search, web fetch).

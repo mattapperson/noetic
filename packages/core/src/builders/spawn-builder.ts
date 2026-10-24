@@ -1,11 +1,11 @@
 import type { ContextConfig, ContextData, ContextLayer } from '@noetic-tools/context';
-import type { Step, StepSpawn, SubprocessAdapter } from '@noetic-tools/types';
+import type { Step, StepReplay, StepSpawn, SubprocessAdapter } from '@noetic-tools/types';
 import { NoeticConfigError } from '@noetic-tools/types';
 import { getDefaultRegistrar } from '../types/step-registrar';
 
 //#region Types
 
-interface SpawnOpts<TContext, I, O> {
+interface SpawnOpts<TContext, I, O> extends StepReplay<TContext, I> {
   id: string;
   child: Step<TContext, I, O>;
   context?: ContextConfig | ContextLayer[];
@@ -62,6 +62,8 @@ export function spawn<TContext = ContextData, I = unknown, O = unknown>(
     context: opts.context,
     timeout: opts.timeout,
     subprocess: opts.subprocess,
+    durable: opts.durable,
+    replayKey: opts.replayKey,
   };
   getDefaultRegistrar().register(built);
   // Ensure the child is addressable by id — builders for `runCode`/`callModel`/`invokeTool`
