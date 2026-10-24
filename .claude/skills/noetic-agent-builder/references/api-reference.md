@@ -633,6 +633,8 @@ Every `send` (`ctx.send`, `harness.send`) takes the value as `NoInfer<T>`, so th
 
 External channels (`external: true`) are reachable from outside the execution in both directions: `harness.getChannelHandle(ch, executionId)` writes in, `harness.getChannelStream(ch, executionId)` subscribes out as an `AsyncIterable<T>` (queue = competing consumer — subscribe once per harness; topic = per-subscriber buffered tap; value = current-then-conflated-updates). Delivery is CHANNEL-scoped (state keyed by name per harness); `executionId` bounds only the stream's lifetime, and an id no execution runs under gives a harness-lifetime stream ended with `iterator.return()`. The stream ends normally when the root execution completes (queue values at close drain first; later sends stay in the channel). Root completion also flips `ChannelHandle.closed` and makes post-run `handle.send` throw `channel_closed`; a sequential re-run or checkpoint-restore on the same root context reopens its id. The iterable owns a single iterator — subscribe again for a second consumer.
 
+Channel state lives for the harness lifetime: values and queued items survive across `run()` calls and session turns. With a `CheckpointStore`, every checkpoint saves the value/queue state of the channels the execution used (`CheckpointSnapshot.channels`) and `harness.restore()` refills it. Topics, parked waiters, and subscribers are not saved. A `durable: false` step that sends to a queue duplicates its pre-crash items on resume.
+
 ### @noetic-tools/chat-sdk (chat platform integration)
 
 Binds a harness to chat-sdk.dev (npm `chat`, optional peer) as a multi-platform bot brain. Depends only on `@noetic-tools/types`.

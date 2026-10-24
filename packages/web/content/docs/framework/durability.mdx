@@ -38,7 +38,7 @@ Any `detachedSpawn` through this harness lands a manifest entry. Any `execute()`
 
 Durable execution composes three primitives:
 
-1. **`CheckpointStore`** — saves and loads per-execution snapshots covering the step frontier, context-layer state, cwd, pending ask-user queue, and item log.
+1. **`CheckpointStore`** — saves and loads per-execution snapshots covering the step frontier, context-layer state, cwd, pending ask-user queue, item log, and the state of the channels the execution used.
 2. **`SubprocessAdapter.reattach` / `listLive`** — persists handle manifests for every long-lived child and rebinds them on parent restart.
 3. **Durable IPC (`DurableOutboundQueue` + protocol v2)** — numbers every outbound IPC frame with a monotonic sequence, persists it, and resumes from the client's last ack on reconnect.
 
@@ -72,9 +72,16 @@ interface CheckpointSnapshot {
   cwd: { current: string | null; previous?: string | null } | null;
   askUser: Array<{ id: string; input: unknown; createdAt: number }>;
   itemLog: { items: unknown[] };
+  channels?: ChannelSnapshot[];      // channels the execution used
   capturedAt: string;                // ISO-8601
 }
+
+type ChannelSnapshot =
+  | { name: string; mode: 'value'; value?: unknown; hasValue: boolean }
+  | { name: string; mode: 'queue'; capacity: number; queue: unknown[] }; // oldest first
 ```
+
+`channels` carries each `value` channel's current value and each `queue` channel's queued items. Restore refills them into the harness for any channel that has no live state yet. Parked `recv`/`send` calls and subscriptions are live promises, so they are not saved, and `topic` channels hold nothing to save. Snapshots written before channels were captured have no `channels` field and restore no channel state.
 
 The snapshot is keyed by `executionId` and validated by `CheckpointSnapshotSchema` on load. Successive snapshots overwrite — no append-only log, no journaling. A failing save is logged and swallowed so a checkpoint never aborts an otherwise-successful step.
 
@@ -150,6 +157,8 @@ const pool = inParallel<ContextData, string, string[]>({
   merge: (results) => results.flat(),
 });
 ```
+
+A `durable: false` step's channel sends run again on resume. The checkpoint already restored the queue items it sent before the crash, so each re-run send adds a duplicate. Send to a queue from a durable step when the item must land once.
 
 `schedule` steps are never recorded, whatever `durable` says. A `replayKey` that throws costs that dispatch its durability, not its run: the step executes unrecorded and a warning is logged. If a different step id or kind shows up under a recorded `key:`, it runs fresh and only that entry is discarded.
 

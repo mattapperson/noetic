@@ -31,6 +31,8 @@ interface Channel<T> {
 | `'queue'` | FIFO buffer. Sends enqueue, receives dequeue. |
 | `'topic'` | Pub/sub broadcast. All receivers get every message. |
 
+Channel state is keyed by `name` and lives for the harness lifetime. With a `CheckpointStore`, `value` and `queue` state is checkpointed and restored with each execution that used the channel (`CheckpointSnapshot.channels`, exported with `ChannelSnapshotSchema`).
+
 ## ExternalChannel
 
 An external channel extends `Channel` with an `external` flag, enabling cross-process communication.

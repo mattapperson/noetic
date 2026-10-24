@@ -1,5 +1,6 @@
 import type { Channel, ChannelHandle, ExternalChannel } from '@noetic-tools/types';
 import { frameworkCast, NoeticConfigError, NoeticErrorImpl } from '@noetic-tools/types';
+import type { ChannelSnapshot } from '../types/checkpoint';
 
 const DEFAULT_SEND_TIMEOUT = 30_000;
 const RESOLVED: Promise<void> = Promise.resolve();
@@ -135,6 +136,13 @@ export class ChannelStore {
    */
   private handleObserved = new Set<string>();
   private subscribersByExecution = new Map<string, Set<ExternalSubscriber<unknown>>>();
+  /**
+   * Channel name → ids of the root executions that used it, which decides
+   * the channels an execution's checkpoint carries. Ids stay after their
+   * execution closes: a host may checkpoint a finished run, and channel
+   * state itself lives for the harness lifetime (spec 06, Lifecycle).
+   */
+  private users = new Map<string, Set<string>>();
   private readonly warn: (warning: ChannelWarning) => void;
 
   constructor(opts: ChannelStoreOpts = {}) {
@@ -142,23 +150,78 @@ export class ChannelStore {
   }
 
   private getOrCreate<T>(channel: Channel<T>): ChannelState<T> {
-    let state = frameworkCast<ChannelState<T> | undefined>(this.channels.get(channel.name));
-    if (!state) {
-      state = {
-        mode: channel.mode,
-        hasValue: false,
-        valueWaiters: [],
-        queue: [],
-        capacity: channel.capacity ?? 1_000,
-        queueWaiters: [],
-        pendingSenders: [],
-        topicWaiters: [],
-        wakeSubscribers: new Set(),
-        externalSubscribers: new Set(),
-      };
-      this.channels.set(channel.name, frameworkCast<ChannelState<unknown>>(state));
+    const existing = frameworkCast<ChannelState<T> | undefined>(this.channels.get(channel.name));
+    if (existing) {
+      return existing;
     }
+    const state = emptyState<T>(channel.mode, channel.capacity ?? 1_000);
+    this.channels.set(channel.name, frameworkCast<ChannelState<unknown>>(state));
     return state;
+  }
+
+  /**
+   * Record that `executionId` (a root execution) uses `channel`, so the
+   * channel rides along in its checkpoints.
+   */
+  claim<T>(channel: Channel<T>, executionId: string): void {
+    this.addUser(channel.name, executionId);
+  }
+
+  private addUser(channelName: string, executionId: string): void {
+    let ids = this.users.get(channelName);
+    if (!ids) {
+      ids = new Set();
+      this.users.set(channelName, ids);
+    }
+    ids.add(executionId);
+  }
+
+  /**
+   * Stored state (values, queued items) of every channel `executionId` used.
+   * Parked receivers, parked senders, and subscribers are live promises and
+   * stay out; topic channels store nothing and are skipped.
+   */
+  snapshot(executionId: string): ChannelSnapshot[] {
+    const out: ChannelSnapshot[] = [];
+    for (const [name, ids] of this.users) {
+      const state = this.channels.get(name);
+      if (!state || !ids.has(executionId)) {
+        continue;
+      }
+      if (state.mode === 'value') {
+        out.push({
+          name,
+          mode: 'value',
+          value: state.currentValue,
+          hasValue: state.hasValue,
+        });
+      }
+      if (state.mode === 'queue') {
+        out.push({
+          name,
+          mode: 'queue',
+          capacity: state.capacity,
+          queue: [
+            ...state.queue,
+          ],
+        });
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Refill channel state from a checkpoint and mark `executionId` as a user.
+   * A channel that already has live state keeps it — live state is never
+   * older than a snapshot.
+   */
+  restore(executionId: string, snapshots: readonly ChannelSnapshot[]): void {
+    for (const snap of snapshots) {
+      if (!this.channels.has(snap.name)) {
+        this.channels.set(snap.name, restoredState(snap));
+      }
+      this.addUser(snap.name, executionId);
+    }
   }
 
   /**
@@ -551,6 +614,7 @@ export class ChannelStore {
     if (this.closedExecutions.has(executionId)) {
       return CLOSED_ITERABLE;
     }
+    this.claim(channel, executionId);
     const state = this.getOrCreate(channel);
     const subscriber: ExternalSubscriber<T> = new ExternalSubscriber<T>({
       channelName: channel.name,
@@ -629,6 +693,7 @@ export class ChannelStore {
 
   getHandle<T>(channel: ExternalChannel<T>, executionId: string): ChannelHandle<T> {
     this.handleObserved.add(executionId);
+    this.claim(channel, executionId);
     const store = this;
     return {
       get closed() {
@@ -674,6 +739,33 @@ export class ChannelStore {
   openExecution(executionId: string): void {
     this.closedExecutions.delete(executionId);
   }
+}
+
+function emptyState<T>(mode: ChannelState<T>['mode'], capacity: number): ChannelState<T> {
+  return {
+    mode,
+    hasValue: false,
+    valueWaiters: [],
+    queue: [],
+    capacity,
+    queueWaiters: [],
+    pendingSenders: [],
+    topicWaiters: [],
+    wakeSubscribers: new Set(),
+    externalSubscribers: new Set(),
+  };
+}
+
+function restoredState(snap: ChannelSnapshot): ChannelState<unknown> {
+  if (snap.mode === 'value') {
+    const state = emptyState<unknown>('value', 1_000);
+    state.currentValue = snap.value;
+    state.hasValue = snap.hasValue;
+    return state;
+  }
+  const state = emptyState<unknown>('queue', snap.capacity);
+  state.queue.push(...snap.queue);
+  return state;
 }
 
 const MAX_EXTERNAL_BUFFER = 1_000;

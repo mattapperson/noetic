@@ -167,7 +167,7 @@ The read-side counterpart to `getChannelHandle`: code outside the execution tree
 harness.getChannelStream(channel: ExternalChannel<T>, executionId: string): AsyncIterable<T>
 ```
 
-**Delivery is channel-scoped, not execution-scoped.** Channel state is keyed by channel name within a harness; every subscriber to a name sees that channel's traffic regardless of which execution sent it. The `executionId` bounds only the subscription's *lifetime* — it ends when that root execution completes. Two consequences:
+**Delivery is channel-scoped, not execution-scoped.** Channel state is keyed by channel name within a harness; every subscriber to a name sees that channel's traffic regardless of which execution sent it. The `executionId` bounds only the subscription's *lifetime* — it ends when that root execution completes. The channel's *state* is not bound to it (see Channel Semantics, Lifecycle). Two consequences:
 
 - To receive values from exactly one execution, use a channel that only that execution writes.
 - An id that no execution ever runs under is never closed, so it names a **harness-lifetime scope**: subscribe with it for a stream that spans turns and end it yourself with `iterator.return()`. This is how long-lived observers (e.g. an approval-card poster) attach to a session harness, whose per-turn root ids each close at turn end.
@@ -218,7 +218,13 @@ Channels are scoped to the harness, not to a boundary within it. Channel state l
 
 ### Lifecycle
 
-Channels are created on first reference and garbage-collected when the execution tree completes. Queue channels buffer indefinitely within an execution (bounded by `capacity`, default 1000 items). When the buffer is full, internal senders block (back-pressure); external senders drop oldest (see above). Topic channels are ephemeral — items are delivered to currently-waiting receivers and dropped if no one is listening.
+Channels are created on first reference and live for the lifetime of the harness. Completing a root execution closes its handles and subscriptions (see External Channels, Lifecycle) but never discards channel state: a value written in one `run()` — or one session turn — is still there for the next, on the same root context or another.
+
+Channel state is part of durable execution. Each root execution that sends, receives, takes a handle on, or subscribes to a channel is recorded as a user of it (a `spawn` child or `inParallel` path counts as its root). When the harness has a `CheckpointStore` (see `23-durable-execution`), every checkpoint carries the stored state of each channel the execution used — the current value of a `value` channel and the queued items of a `queue` channel — and `restore()` refills it, so channel state survives a process restart for as long as the execution's checkpoints do. Restore only fills channels that have no live state in the harness; live state is never older than a snapshot. Parked receivers, parked senders, and subscribers are live promises and are not checkpointed; `topic` channels store nothing and are skipped. Without a `CheckpointStore`, channel state lives only in memory and ends with the harness.
+
+A restored queue holds the items sent before the checkpoint. A step marked `durable: false` (see `23a-step-level-resume`, Identity) re-runs on resume, so a send it made before the checkpoint lands again on top of the restored queue and the item is duplicated. Durable steps replay from the ledger and do not send again. Make a non-durable step's sends idempotent for its readers (a value channel, or items a reader can recognise), or keep the send in a durable step.
+
+Queue channels buffer indefinitely within an execution (bounded by `capacity`, default 1000 items). When the buffer is full, internal senders block (back-pressure); external senders drop oldest (see above). Topic channels are ephemeral — items are delivered to currently-waiting receivers and dropped if no one is listening.
 
 ### Default Timeout and Deadlock Prevention
 
@@ -319,3 +325,9 @@ Within a `inParallel` (see `03-control-flow`), the agent harness runs paths as c
 ### Topic Mode is Lossy
 
 Items are not buffered if no receiver is waiting. This is intentional — topic channels are for real-time coordination, not reliable delivery. Use `queue` mode for reliable delivery. Lossiness applies to *internal* receivers (`recv`); external subscriptions (`getChannelStream`) buffer per subscriber.
+
+---
+
+## Future Considerations
+
+- **Per-run channel pruning.** Channel state lives for the harness lifetime, so a long-lived harness keeps every channel name it ever used (and, per channel, the ids of the executions that used it). A harness without a `CheckpointStore` could drop a channel's state once the last root execution using it completes and nothing is parked on it. This changes semantics — a sequential `run()` on the same root context, or the next session turn, would start with empty channels — so it would need an explicit opt-in.

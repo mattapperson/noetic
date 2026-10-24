@@ -372,6 +372,7 @@ export type { EmbedFn } from './types/embed';
 
 /** @public */
 export type {
+  ChannelSnapshot,
   CheckpointSnapshot,
   CwdSnapshot,
   FrontierFrame,
@@ -380,6 +381,7 @@ export type {
 } from './types/checkpoint';
 /** @public */
 export {
+  ChannelSnapshotSchema,
   CheckpointSchemaVersion,
   CheckpointSnapshotSchema,
   CwdSnapshotSchema,

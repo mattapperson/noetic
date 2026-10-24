@@ -66,6 +66,7 @@ import {
   filterTextStream,
   resolveStepLedgerRetention,
   restoreFromCheckpoint,
+  rootIdOf,
   SessionRunner,
   StepLedger,
   snapshotCwdState,
@@ -463,7 +464,8 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   private readonly decideOverride?: (request: DecideRequest) => Promise<DecideResponse>;
   /** Model id → whether it answers natively as a decision model. */
   private readonly decisionModels = new Map<string, Promise<boolean>>();
-  private readonly channelStore: ChannelStore;
+  /** @internal Channel state; read by the checkpoint functions. */
+  readonly channelStore: ChannelStore;
   /**
    * Root contexts with a `run()` in flight, keyed by id, with their
    * re-entrant run depth — see `executeClosingChannels`.
@@ -1044,6 +1046,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     // Internal sender: back-pressured on full queue channels. The calling
     // context's abort signal rejects a parked send with 'cancelled'.
     const signal = ctx instanceof ContextImpl ? ctx.abortSignal : undefined;
+    this.channelStore.claim(channel, rootIdOf(ctx));
     return this.channelStore.send(channel, value, {
       signal,
     });
@@ -1059,10 +1062,12 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     // Wire the calling context's abort signal so ctx.abort() rejects a
     // pending recv with { kind: 'cancelled' } instead of hanging.
     const signal = ctx instanceof ContextImpl ? ctx.abortSignal : undefined;
+    this.channelStore.claim(channel, rootIdOf(ctx));
     return this.channelStore.recv(channel, opts?.timeout, signal);
   }
 
-  tryRecv<T>(channel: Channel<T>, _ctx: Context): T | null {
+  tryRecv<T>(channel: Channel<T>, ctx: Context): T | null {
+    this.channelStore.claim(channel, rootIdOf(ctx));
     return this.channelStore.tryRecv(channel);
   }
 

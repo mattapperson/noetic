@@ -104,7 +104,7 @@ Replayed steps should emit a distinct `step_replayed` framework event rather tha
 
 - **`schedule`** — a wall-clock scheduled step; replaying its output would collapse a schedule into a value.
 - **Steps whose value *is* the effect**, where the effect is not durable.
-- **Steps marked `durable: false`** — the author's opt-out for a step that must always run. See § Identity.
+- **Steps marked `durable: false`** — the author's opt-out for a step that must always run. See § Identity. Its effects re-run with it, including channel sends: the checkpoint already restored the queue items it sent before the crash (see `06-channels`, Lifecycle), so a re-run send duplicates them. Keep sends that must land once in a durable step.
 
 ## The side-effect boundary
 

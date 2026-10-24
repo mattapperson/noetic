@@ -13,7 +13,7 @@ Hosts crash. Tabs close. Users `kill -9` the TUI. The long-running children thos
 
 Three subsystems participate:
 
-1. **Checkpoint store** — `harness.checkpoint(ctx)` serialises the execution's frontier, layer state, cwd, ask-user queue, and item log to a `StorageAdapter`. `harness.restore(executionId, opts?)` reverses it, with `opts` carrying back the host wiring a snapshot cannot serialise.
+1. **Checkpoint store** — `harness.checkpoint(ctx)` serialises the execution's frontier, layer state, cwd, ask-user queue, item log, and the stored state of the channels it used (see `06-channels`, Lifecycle) to a `StorageAdapter`. `harness.restore(executionId, opts?)` reverses it, with `opts` carrying back the host wiring a snapshot cannot serialise.
 2. **Subprocess adapter durability** — `adapter.listLive()` and `adapter.reattach(handleId)` persist and recover the handle manifest for every child the adapter launched.
 3. **Durable IPC** — `DurableOutboundQueue` numbers every outbound IPC frame with a monotonic seq, persists them through a `StorageAdapter`, and resumes from the client's last-acked offset on reconnect. Protocol v2 frames (`durable`, `durableResume`, `durableAck`) carry the wire envelope.
 
@@ -34,8 +34,13 @@ interface CheckpointSnapshot {
   cwd: CwdSnapshot | null;
   askUser: PendingAskUserSnapshot[];
   itemLog: ItemLogSnapshot;
+  channels?: ChannelSnapshot[];           // stored state of channels the execution used; topics skipped
   capturedAt: string;                     // ISO-8601
 }
+
+type ChannelSnapshot =
+  | { name: string; mode: 'value'; value?: unknown; hasValue: boolean }
+  | { name: string; mode: 'queue'; capacity: number; queue: unknown[] }; // oldest first
 
 interface FrontierFrame {
   stepId: string;                         // points at a registry entry
@@ -99,6 +104,7 @@ A failing `store.save` is logged via `console.warn` and swallowed. **A failing c
 1. Reads the snapshot via `checkpointStore.load(executionId)`. Returns `null` if no snapshot is recorded.
 2. Validates `schemaVersion` (throws `CHECKPOINT_SCHEMA_MISMATCH` on mismatch).
 3. Replays `layers` into `harness.layerStateStore` keyed by the original `executionId`, so context projectors and `ctx.context[layerId]` accessors observe continuity across the restart.
+   Refills `channels` into the harness's channel store — value-mode values and queued items — for every channel with no live state, and records the execution as a user of each (see `06-channels`, Lifecycle). A snapshot without `channels` restores no channel state.
 4. Re-parses `itemLog.items` through `harness.itemSchemas` to recover typed `Item[]`.
 5. Calls `harness.createContext({...opts, items, threadId, resourceId, cwdInit: snapshot.cwd?.current, context: opts?.context ?? harness._contextLayers})` to produce a fresh context seeded with the snapshot's item log, identity, and cwd.
 6. Overrides the returned context's `.id` to the original `executionId` so downstream adapter-correlation keeps working.

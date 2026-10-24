@@ -1,6 +1,6 @@
 export type { ChannelWarning } from '../../runtime/channel-store';
 export { ChannelStore, warnToConsole } from '../../runtime/channel-store';
-export { ContextImpl, collectContextTree } from '../../runtime/context-impl';
+export { ContextImpl, collectContextTree, rootIdOf } from '../../runtime/context-impl';
 export { snapshotCwdState } from '../../runtime/cwd-helpers';
 export type { CheckpointStore } from '../../runtime/durable';
 export type { RestoreCheckpointOptions } from '../../runtime/durable/harness-checkpoints';
