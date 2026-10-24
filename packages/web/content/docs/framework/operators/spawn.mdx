@@ -141,6 +141,10 @@ const researchAgent = spawn({
 });
 ```
 
+## Tracing
+
+The child runs under a `spawn` span, a child of the enclosing span, with the spawn step's id in `noetic.node.id`. The child's model calls, tool calls, and loop verdicts land on it. It ends when the child settles: a failure adds `error: true` and `noetic.error.kind`, a cancellation adds only `noetic.error.kind: 'cancelled'`. See [Observability](/docs/framework/observability#child-context-spans).
+
 ## Detached Spawn
 
 For background sub-agents that run concurrently, use `harness.detachedSpawn()`. The parent continues immediately and receives a `DetachedHandle` to track the child.

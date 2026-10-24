@@ -82,7 +82,7 @@ interface Verdict {
 
 ### Verdict Traces
 
-After each verdict — including the stop verdict a throwing predicate produces — the loop adds a `loop.verdict` event to the enclosing span (`ctx.span`). Loops open no span of their own, so the event lands on whatever span wraps the loop.
+After each verdict — including the stop verdict a throwing predicate produces — the loop adds a `loop.verdict` event to the enclosing span (`ctx.span`). Loops open no span of their own, so the event lands on whatever span wraps the loop — inside a `spawn` child or an `inParallel` path, that child's span (see `10-observability`).
 
 | Attribute | Type | Description |
 |-----------|------|-------------|

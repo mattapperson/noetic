@@ -66,6 +66,7 @@ import type {
   Tool,
 } from './action-types';
 import { isServerToolSpec, SteeringAction } from './action-types';
+import { openChildSpan, traceChild } from './child-span';
 import { cloneWithGuard } from './clone-guard';
 import { collectAllTools, deduplicateTools } from './collect-tools';
 import type { BandedView } from './context-assembly';
@@ -1004,9 +1005,11 @@ export async function executeSpawn<TContext, I, O>(
   // `id: childId` keeps the ContextImpl's id in sync with the executionId
   // used by spawnLayers/returnLayers in the layer-state store, so writes via
   // `ctx.context[layerId]` and spawn-boundary hooks read from the same key.
+  const span = openChildSpan(baseCtx, 'spawn', step.id);
   const childCtx = new ContextImpl({
     harness: baseCtx.harness,
     parent: baseCtx,
+    span,
     items: childItems,
     state: cloneWithGuard(baseCtx.state, `Spawn '${step.id}'`),
     threadId: baseCtx.threadId,
@@ -1023,29 +1026,30 @@ export async function executeSpawn<TContext, I, O>(
   });
 
   try {
-    // Execute the child step. Its token/cost usage needs no merge here: every
-    // charge recorded on `childCtx` is also charged up its `usageParent`
-    // chain as it is spent, so a child that throws still bills the parent.
-    const childOutput = await executeStep<TContext, I, O>(
-      step.child,
-      input,
-      frameworkCast<Context<TContext>>(childCtx),
-    );
+    return await traceChild(baseCtx, span, async () => {
+      // Execute the child step. Its token/cost usage needs no merge here: every
+      // charge recorded on `childCtx` is also charged up its `usageParent`
+      // chain as it is spent, so a child that throws still bills the parent.
+      const childOutput = await executeStep<TContext, I, O>(
+        step.child,
+        input,
+        frameworkCast<Context<TContext>>(childCtx),
+      );
 
-    // Pipeline result through layer onReturn hooks
-    if (!hasLayers || !parentExecutionCtx) {
-      return childOutput;
-    }
+      // Pipeline result through layer onReturn hooks
+      if (!hasLayers || !parentExecutionCtx) {
+        return childOutput;
+      }
 
-    const pipelinedResult = await returnLayers({
-      layers,
-      parentCtx: parentExecutionCtx,
-      childCtx: childExecutionCtx,
-      childLog: childCtx.itemLog,
-      result: childOutput,
-      store: layerStore,
+      return returnLayers({
+        layers,
+        parentCtx: parentExecutionCtx,
+        childCtx: childExecutionCtx,
+        childLog: childCtx.itemLog,
+        result: childOutput,
+        store: layerStore,
+      });
     });
-    return pipelinedResult;
   } finally {
     // Clean up child execution state to prevent memory leaks — runs on success and error
     if (hasLayers) {

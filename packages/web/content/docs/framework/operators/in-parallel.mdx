@@ -183,6 +183,10 @@ For layers that collect artifacts from many workers, choose a merge strategy tha
 
 Every path's tokens and cost are charged to the parent context as they are spent, in every mode. A path that fails, is cancelled when a sibling fails, or loses a `race` still bills the parent; a `race` loser whose model call finishes after the race resolved charges the parent when that call lands. A loop wrapped around an `inParallel` therefore stops on `until.maxCost` at the first check after the paths' combined spend crosses the cap. See [Usage roll-up](/docs/framework/context#usage-roll-up).
 
+## Tracing
+
+Each path runs under its own `inParallel.path` span, a child of the enclosing span, stamped with the path id (`noetic.node.id`), the `inParallel` id (`noetic.parallel.id`), and the path index (`noetic.parallel.index`). A path's model calls, tool calls, and loop verdicts land on its span. A failed path gets `error: true` and `noetic.error.kind`; a cancelled or never-started path gets `noetic.error.kind: 'cancelled'` only. See [Observability](/docs/framework/observability#child-context-spans).
+
 ## Related
 
 - [conditional](/docs/framework/operators/conditional) -- conditional routing for single-path decisions.

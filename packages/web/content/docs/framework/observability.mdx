@@ -24,7 +24,18 @@ for (const span of exporter.spans) {
 }
 ```
 
-Noetic includes a built-in tracing system modeled on OpenTelemetry conventions. Every step execution, LLM call, and tool invocation creates a span with timing data, token counts, and custom attributes. You can export these spans to any observability backend.
+Noetic includes a built-in tracing system modeled on OpenTelemetry conventions. Every context carries a span, and the framework opens a child span wherever work leaves the current context — each model call, tool call, decision, `spawn` child, and `inParallel` path — with timing data, token counts, and custom attributes. You can export these spans to any observability backend.
+
+| Span | Opened by | Parent |
+|---|---|---|
+| `workflow.run` | `parseAndRunWorkflow` | none (root) |
+| `spawn` | each `spawn` step, around its child context | the enclosing span |
+| `inParallel.path` | each `inParallel` path, around its child context | the enclosing span |
+| `llm.call` | each model call (one per tool round) | the enclosing span |
+| `tool.call` | each function call of a model call | its `llm.call` |
+| `decide.call` | each `decide` step | the enclosing span |
+
+Steps that stay in their context (`runCode`, `loop`, `conditional`) open no span; they add events and attributes to `ctx.span`.
 
 ## Span Interface
 
@@ -72,7 +83,7 @@ const myStep = runCode({ id: 'annotated', execute: async (input: string, ctx) =>
 
 | Property | Type | Description |
 |---|---|---|
-| `name` | `string` | The span name (typically the step ID). |
+| `name` | `string` | The span name, e.g. `llm.call` or `spawn`. |
 | `startTime` | `number` | `Date.now()` when the span was created. |
 | `endTime` | `number \| undefined` | Set when `end()` is called. |
 | `attributes` | `Map<string, string \| number \| boolean>` | All attributes set via `setAttribute`. |
@@ -211,7 +222,7 @@ The harness emits one `llm.call` span per model call (one per tool round) and a 
 
 ## Loop Verdict Events
 
-A `loop` opens no span of its own. After each verdict its `until` predicate returns — including the stop verdict a throwing predicate produces — it adds a `loop.verdict` event to the span its context carries (for a JSON workflow, `workflow.run`).
+A `loop` opens no span of its own. After each verdict its `until` predicate returns — including the stop verdict a throwing predicate produces — it adds a `loop.verdict` event to the span its context carries: the `spawn` or `inParallel.path` span inside a child context, otherwise the run's span (for a JSON workflow, `workflow.run`).
 
 | Attribute | Type | Description |
 |---|---|---|
@@ -227,6 +238,29 @@ import { NoeticEvent } from '@noetic-tools/core';
 
 const verdicts = runSpan.events.filter((e) => e.name === NoeticEvent.LOOP_VERDICT);
 const last = verdicts.at(-1)?.attributes?.reason; // e.g. 'Reached max steps (20)'
+```
+
+## Child Context Spans
+
+`spawn` and `inParallel` run their children in fresh contexts, and each child context gets its own span: `spawn` for a spawn child, `inParallel.path` for each path. The span is a child of the enclosing span, ends when the child settles (success, error, or cancellation), and is then exported. Everything inside the child — model and tool spans, loop verdicts — nests under it.
+
+| Constant | Value | On | Description |
+|---|---|---|---|
+| `NoeticAttr.NODE_ID` | `'noetic.node.id'` | both | The spawn step's id, or the path step's id. |
+| `NoeticAttr.PARALLEL_ID` | `'noetic.parallel.id'` | `inParallel.path` | Id of the `inParallel` step. |
+| `NoeticAttr.PARALLEL_INDEX` | `'noetic.parallel.index'` | `inParallel.path` | Zero-based position of the path among its siblings. |
+| `NoeticAttr.ERROR_KIND` | `'noetic.error.kind'` | both | `NoeticError` kind the child failed with; absent on success. |
+| — | `'error'` | both | `true` when the child failed for any reason but cancellation. |
+
+A cancelled child (a race loser, a sibling stopped by fail-fast, a parent abort) gets `noetic.error.kind: 'cancelled'` and no `error`. A path that never starts — still queued when fail-fast or a race win ends the `inParallel` — has its span ended as cancelled too.
+
+```ts validate=none
+import { NoeticAttr, NoeticEvent } from '@noetic-tools/core';
+
+for (const path of exporter.getSpansByName('inParallel.path')) {
+  const verdicts = path.events.filter((e) => e.name === NoeticEvent.LOOP_VERDICT);
+  console.log(path.attributes.get(NoeticAttr.NODE_ID), verdicts.length);
+}
 ```
 
 ## Workflow Run Span

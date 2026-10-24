@@ -63,7 +63,7 @@ The `until` predicate returns a `Verdict` telling the loop what to do.
 
 ### Verdicts in traces
 
-A loop opens no span of its own. After each verdict it adds a `loop.verdict` event to the span its context carries, with attributes `loop` (the step id), `iteration`, `stop`, and `reason` when the verdict has one. `feedback` is never recorded, since it can be large or sensitive. A predicate that throws stops the loop with reason `Predicate error: <message>`, and that verdict is traced too. See [Observability](/docs/framework/observability#loop-verdict-events).
+A loop opens no span of its own. After each verdict it adds a `loop.verdict` event to the span its context carries (inside a `spawn` child or an `inParallel` path, that child's span), with attributes `loop` (the step id), `iteration`, `stop`, and `reason` when the verdict has one. `feedback` is never recorded, since it can be large or sensitive. A predicate that throws stops the loop with reason `Predicate error: <message>`, and that verdict is traced too. See [Observability](/docs/framework/observability#loop-verdict-events).
 
 ## Built-in Predicates
 

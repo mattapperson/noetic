@@ -87,6 +87,10 @@ A child's **unified tool set** is the union of the tools collected from its own 
 
 A child's token and cost usage **rolls up into its parent** at the moment it is spent: a sub-agent's spend is the parent's spend. Every model call charges the calling context and then each ancestor on its `usageParent` chain (see `07-context-and-event-log`), so nested sub-agents propagate their usage to the root, and `ctx.tokens` / `ctx.cost` and `until.maxCost` account for the full sub-agent tree. Because the charge happens at spend time rather than when the child settles, a child that **fails** after spending still bills its parent — no spend is lost to an error, a cancellation, or an abandoned `race` path, and an ancestor's budget sees descendants' spend while they are still running. Detached spawns roll up the same way (their child context is created with `parent`); a detached step run out-of-process by a subprocess adapter has its own root context and does not.
 
+## Tracing
+
+The child context carries a `spawn` span, a child of the parent's `ctx.span`. Everything the child traces — model and tool spans, a nested loop's `loop.verdict` events — nests under it. The span ends when the child settles, failed or not (see `10-observability`, Child Context Spans).
+
 ---
 
 ## Detached Spawn
