@@ -137,7 +137,7 @@ first `abort()` owns `ctx.abortReason` — a later abort does not overwrite it.
 class NoeticConfigError extends Error {
   readonly code: string;       // SCREAMING_SNAKE_CASE, e.g. 'MISSING_API_KEY'
   readonly hint: string;       // complete sentence: what the user should do next
-  readonly docsUrl?: string;   // link to the relevant docs page
+  readonly docsUrl: string;    // defaults to the code's section of the error reference
 }
 
 function isNoeticConfigError(e: unknown): e is NoeticConfigError;
@@ -147,9 +147,9 @@ function isNoeticConfigError(e: unknown): e is NoeticConfigError;
 
 1. `code` MUST be `SCREAMING_SNAKE_CASE` and uniquely identify the error condition across the entire framework.
 2. `hint` MUST be a complete sentence. It MUST NOT say "an error occurred" or restate the message.
-3. `docsUrl` SHOULD be provided for any error a new user is likely to hit during setup.
+3. `docsUrl` defaults to the code's section of the error reference, `https://noetic.tools/docs/framework/errors#<code in lower case>`. A throw site MAY pass a more specific page.
 4. Error messages MUST NOT expose internal stack details, file paths, or implementation class names.
-5. Every `code` value MUST appear in `docs/errors.mdx` with an explanation and resolution steps.
+5. Every `code` value MUST have its own section in the error reference (`packages/web/content/docs/framework/errors.mdx`, served at `/docs/framework/errors`), headed by the code itself so its anchor is the code in lower case, with the cause and the fix. A drift test fails when a code thrown in source has no section, or a section names a code no longer thrown.
 6. Construction-time functions (builders, factories, context layer factories) that can throw `NoeticConfigError` MUST document the applicable `code` values in a `@throws` TSDoc tag.
 
 ### Example
@@ -158,7 +158,7 @@ function isNoeticConfigError(e: unknown): e is NoeticConfigError;
 NoeticConfigError: Missing required environment variable.
   code: MISSING_API_KEY
   hint: Set OPENROUTER_API_KEY in your environment or pass an llm config to AgentHarness.
-  docsUrl: https://noetic.tools/docs/errors#MISSING_API_KEY
+  docsUrl: https://noetic.tools/docs/framework/errors#missing_api_key
 ```
 
 ### Type Guards
