@@ -137,6 +137,10 @@ Layers that merge concurrent children should namespace by `childCtx.executionId`
 
 Every path's token and cost usage is charged to the parent context as it is spent (see `07-context-and-event-log`, Usage Accounting), in every mode and regardless of outcome: a path that fails, is cancelled by fail-fast, or loses a `race` still bills the parent. A `race` loser whose in-flight model call completes after the race has resolved charges the parent when that call lands. Because charges arrive live, an enclosing loop's `until.maxCost` sees all paths' spend at its next check.
 
+### Tracing
+
+Each path's context carries an `inParallel.path` span, a child of the parent's `ctx.span`, stamped with the path id, the `inParallel` id, and the path index. A path's model calls, tool calls, and loop verdicts land on its own span, so sibling traces never interleave. Every path span ends when its path settles; a path that never starts ends as cancelled (see `10-observability`, Child Context Spans).
+
 ### Error Behavior
 
 - **`mode: 'all'`** — If any path fails, cancel remaining paths and throw `fork_partial` (see `09-error-model`) with both succeeded and failed results. Cancellation is cooperative: paths still queued behind the `concurrency` limit are skipped, in-flight siblings are aborted and awaited (they stop at their next step boundary or blocked channel operation), and cancelled paths appear in `failed` with `{ kind: 'cancelled' }`. If the parent context itself is aborted mid-execution, the `inParallel` throws `cancelled`, not `fork_partial`.

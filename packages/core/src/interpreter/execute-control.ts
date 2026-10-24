@@ -10,6 +10,7 @@ import type {
   NoeticError,
   SettleResult,
   Snapshot,
+  Span,
   Step,
   StepConditional,
   StepInParallel,
@@ -21,12 +22,13 @@ import type {
   Verdict,
 } from '@noetic-tools/types';
 import { createMessage, frameworkCast, isNoeticError, NoeticErrorImpl } from '@noetic-tools/types';
-import { NoeticEvent } from '../observability/genai-attributes';
+import { NoeticAttr, NoeticEvent } from '../observability/genai-attributes';
 import type { ChannelStore } from '../runtime/channel-store';
 import { ContextImpl } from '../runtime/context-impl';
 import { snapshotCwdState } from '../runtime/cwd-helpers';
 import type { ItemSchemaRegistry, LayerStateStore } from './action-deps';
 import { contextToExecCtx, returnLayers, spawnLayers } from './action-deps';
+import { closeUnstartedSpan, openChildSpan, traceChild } from './child-span';
 import { cloneWithGuard } from './clone-guard';
 import { getContextChannelStore, isContextImpl, isMutableContext } from './typeguards';
 
@@ -51,21 +53,29 @@ export async function executeConditional<TContext, I, O>(
 
 //#region inParallel
 
-function createChildContexts(ctx: Context, count: number, stepId: string): ContextImpl[] {
+function createChildContexts(
+  ctx: Context,
+  paths: ReadonlyArray<{
+    id: string;
+  }>,
+  stepId: string,
+): ContextImpl[] {
   const threadId = isContextImpl(ctx) ? ctx.threadId : crypto.randomUUID();
   const resourceId = isContextImpl(ctx) ? ctx.resourceId : undefined;
   const channelStore = getContextChannelStore(ctx);
   const parentPath = isContextImpl(ctx) ? ctx.currentPath() : '';
   const parentLedger = isContextImpl(ctx) ? ctx.ledger : undefined;
 
-  return Array.from(
-    {
-      length: count,
-    },
-    (_unused, index) =>
+  return paths.map(
+    (path, index) =>
       new ContextImpl({
         harness: ctx.harness,
         parent: ctx,
+        span: openPathSpan(ctx, {
+          stepId,
+          pathId: path.id,
+          index,
+        }),
         /* Ledger paths must stay unique across sibling paths: a child ContextImpl
          * starts with an empty frontier, so without a prefix every path would
          * restart at the root and collide with its siblings. */
@@ -88,6 +98,59 @@ function createChildContexts(ctx: Context, count: number, stepId: string): Conte
         unifiedTools: ctx.unifiedTools,
       }),
   );
+}
+
+function openPathSpan(
+  ctx: Context,
+  {
+    stepId,
+    pathId,
+    index,
+  }: {
+    stepId: string;
+    pathId: string;
+    index: number;
+  },
+): Span {
+  const span = openChildSpan(ctx, 'inParallel.path', pathId);
+  span.setAttribute(NoeticAttr.PARALLEL_ID, stepId);
+  span.setAttribute(NoeticAttr.PARALLEL_INDEX, index);
+  return span;
+}
+
+/**
+ * Ends each path's span when the path settles. A path that never starts (queued
+ * behind a fail-fast abort, or unstarted when a race settles) has no run to
+ * wrap, so `closeUnstarted` ends its span as cancelled.
+ */
+function tracePaths(
+  ctx: Context,
+  executeStep: ExecuteStepFn,
+  childContexts: ContextImpl[],
+): {
+  executeStep: ExecuteStepFn;
+  closeUnstarted(): Promise<void>;
+} {
+  const unstarted = new Set<Context>(childContexts);
+  return {
+    executeStep: <TContext, I, O>(
+      step: Step<TContext, I, O>,
+      input: I,
+      childCtx: Context<TContext>,
+    ): Promise<O> => {
+      const child = frameworkCast<Context>(childCtx);
+      if (!unstarted.delete(child)) {
+        return executeStep<TContext, I, O>(step, input, childCtx);
+      }
+      return traceChild(ctx, child.span, () => executeStep<TContext, I, O>(step, input, childCtx));
+    },
+    async closeUnstarted() {
+      for (const child of unstarted) {
+        await closeUnstartedSpan(ctx, child.span);
+      }
+      unstarted.clear();
+    },
+  };
 }
 
 /**
@@ -243,17 +306,22 @@ export async function executeInParallel<TContext, I, O>(
     });
   }
 
-  const childContexts = createChildContexts(baseCtx, paths.length, step.id);
+  const childContexts = createChildContexts(baseCtx, paths, step.id);
   const concurrency = step.concurrency ?? paths.length;
-  const executeStep = withForkLayers(
-    rawExecuteStep,
-    childContexts,
-    createForkLayerBridge({
-      ctx: baseCtx,
+  const traced = tracePaths(
+    baseCtx,
+    withForkLayers(
+      rawExecuteStep,
       childContexts,
-      opts,
-    }),
+      createForkLayerBridge({
+        ctx: baseCtx,
+        childContexts,
+        opts,
+      }),
+    ),
+    childContexts,
   );
+  const executeStep = traced.executeStep;
 
   try {
     switch (step.mode) {
@@ -287,6 +355,7 @@ export async function executeInParallel<TContext, I, O>(
     for (const child of childContexts) {
       child.detachFromParent();
     }
+    await traced.closeUnstarted();
   }
 }
 

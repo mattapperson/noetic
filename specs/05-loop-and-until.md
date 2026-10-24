@@ -82,7 +82,7 @@ interface Verdict {
 
 ### Verdict Traces
 
-After each verdict — including the stop verdict a throwing predicate produces — the loop adds a `loop.verdict` event to the enclosing span (`ctx.span`). Loops open no span of their own, so the event lands on whatever span wraps the loop.
+After each verdict — including the stop verdict a throwing predicate produces — the loop adds a `loop.verdict` event to the enclosing span (`ctx.span`). Loops open no span of their own, so the event lands on whatever span wraps the loop — inside a `spawn` child or an `inParallel` path, that child's span (see `10-observability`).
 
 | Attribute | Type | Description |
 |-----------|------|-------------|
@@ -116,6 +116,10 @@ const cautious = all(
   until.maxSteps(3),  // need at least 3 iterations AND convergence
 );
 ```
+
+Both combinators run their predicates in order and short-circuit on the first verdict that decides the outcome: `any()` on the first stop, `all()` on the first continue. That verdict is returned as is, `reason` and `feedback` included. When no predicate short-circuits, every predicate decided the outcome together, and the combined verdict carries all of their `reason`s joined with `'; '` and all of their `feedback` joined with `'\n'`, leaving a field out when none of them set it. `all()` falls back to the reason `All predicates satisfied`.
+
+So a continue verdict always carries the feedback of the predicates that asked to continue: `any(until.maxSteps(20), until.verified(fn))` hands the verifier's feedback to `prepareNext` exactly as a bare `until.verified(fn)` would.
 
 ---
 

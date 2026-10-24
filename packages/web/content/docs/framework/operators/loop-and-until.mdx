@@ -63,7 +63,7 @@ The `until` predicate returns a `Verdict` telling the loop what to do.
 
 ### Verdicts in traces
 
-A loop opens no span of its own. After each verdict it adds a `loop.verdict` event to the span its context carries, with attributes `loop` (the step id), `iteration`, `stop`, and `reason` when the verdict has one. `feedback` is never recorded, since it can be large or sensitive. A predicate that throws stops the loop with reason `Predicate error: <message>`, and that verdict is traced too. See [Observability](/docs/framework/observability#loop-verdict-events).
+A loop opens no span of its own. After each verdict it adds a `loop.verdict` event to the span its context carries (inside a `spawn` child or an `inParallel` path, that child's span), with attributes `loop` (the step id), `iteration`, `stop`, and `reason` when the verdict has one. `feedback` is never recorded, since it can be large or sensitive. A predicate that throws stops the loop with reason `Predicate error: <message>`, and that verdict is traced too. See [Observability](/docs/framework/observability#loop-verdict-events).
 
 ## Built-in Predicates
 
@@ -188,9 +188,11 @@ const stopCondition = any(
 );
 ```
 
+If none stops, the verdict carries the `feedback` of every predicate, joined with a newline, so a failing `until.verified()` inside `any()` still reaches `prepareNext`. The first stop verdict is returned as is.
+
 ### all(...predicates)
 
-Stop when **every** predicate says stop. This is a logical AND.
+Stop when **every** predicate says stop. This is a logical AND. The first predicate that says continue decides, and its verdict (with its `feedback`) is returned as is; later predicates do not run. When all stop, reasons are joined with `'; '` and feedback with a newline.
 
 ```ts
 import { all, until } from '@noetic-tools/core';

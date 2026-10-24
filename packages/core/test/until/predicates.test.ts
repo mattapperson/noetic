@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { Snapshot } from '@noetic-tools/types';
+import type { Snapshot, Until } from '@noetic-tools/types';
 import { all, any } from '../../src/until/combinators';
 import { until } from '../../src/until/predicates';
 import { makeStorage, mockEmbed } from '../_helpers';
@@ -691,6 +691,128 @@ describe('combinators', () => {
         }),
       );
       expect(verdict.reason).toBe('Reached max steps (5); Cost $1.00 exceeded budget $1.00');
+    });
+  });
+
+  describe('feedback', () => {
+    const failsWith = (feedback?: string): Until =>
+      until.verified(async () => ({
+        pass: false,
+        feedback,
+      }));
+    const passesWith = (feedback?: string): Until =>
+      until.verified(async () => ({
+        pass: true,
+        feedback,
+      }));
+
+    it('any() carries the feedback of a failing verified()', async () => {
+      const verdict = await any(
+        until.maxSteps(10),
+        failsWith('tests fail'),
+      )(
+        makeSnap({
+          stepCount: 1,
+        }),
+      );
+      expect(verdict).toEqual({
+        stop: false,
+        reason: 'Verification failed',
+        feedback: 'tests fail',
+      });
+    });
+
+    it('any() joins the feedback of every continuing predicate with a newline', async () => {
+      const verdict = await any(failsWith('tests fail'), failsWith('lint fails'))(makeSnap());
+      expect(verdict).toEqual({
+        stop: false,
+        reason: 'Verification failed; Verification failed',
+        feedback: 'tests fail\nlint fails',
+      });
+    });
+
+    it('any() leaves out feedback when no continuing predicate gives one', async () => {
+      const verdict = await any(
+        until.maxSteps(10),
+        failsWith(),
+        failsWith(''),
+      )(
+        makeSnap({
+          stepCount: 1,
+        }),
+      );
+      expect(verdict).toEqual({
+        stop: false,
+        reason: 'Verification failed; Verification failed',
+      });
+      expect('feedback' in verdict).toBe(false);
+    });
+
+    it('any() leaves out reason when no continuing predicate gives one', async () => {
+      const verdict = await any(
+        until.maxSteps(10),
+        until.maxCost(1),
+      )(
+        makeSnap({
+          stepCount: 1,
+        }),
+      );
+      expect(verdict).toEqual({
+        stop: false,
+      });
+      expect('reason' in verdict).toBe(false);
+    });
+
+    it('any() returns the stopping verdict as is, dropping earlier feedback', async () => {
+      const verdict = await any(failsWith('tests fail'), passesWith('all green'))(makeSnap());
+      expect(verdict).toEqual({
+        stop: true,
+        reason: 'Verification passed',
+        feedback: 'all green',
+      });
+    });
+
+    it('all() returns the first continuing verdict with its feedback', async () => {
+      const verdict = await all(
+        passesWith('ok'),
+        failsWith('tests fail'),
+        failsWith('never run'),
+      )(makeSnap());
+      expect(verdict).toEqual({
+        stop: false,
+        reason: 'Verification failed',
+        feedback: 'tests fail',
+      });
+    });
+
+    it('all() joins the feedback of every predicate when it stops', async () => {
+      const verdict = await all(
+        passesWith('tests pass'),
+        until.maxSteps(1),
+        passesWith('lint ok'),
+      )(
+        makeSnap({
+          stepCount: 1,
+        }),
+      );
+      expect(verdict).toEqual({
+        stop: true,
+        reason: 'Verification passed; Reached max steps (1); Verification passed',
+        feedback: 'tests pass\nlint ok',
+      });
+    });
+
+    it('all() leaves out feedback when no predicate gives one', async () => {
+      const verdict = await all(until.maxSteps(1))(
+        makeSnap({
+          stepCount: 1,
+        }),
+      );
+      expect(verdict).toEqual({
+        stop: true,
+        reason: 'Reached max steps (1)',
+      });
+      expect('feedback' in verdict).toBe(false);
     });
   });
 });

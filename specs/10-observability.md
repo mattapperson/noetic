@@ -7,32 +7,55 @@
 
 ## Automatic Trace Spans
 
-Every step variant automatically creates OpenTelemetry-compatible trace spans via the `Context.span` field (see `07-context-and-event-log`).
+Every `Context` carries a span (`Context.span`, see `07-context-and-event-log`). The framework opens spans at the points where work leaves the current context — a model call, a tool call, a decision, a child context — and nests each under the span of the context that started it. Steps that stay in their context (`runCode`, `loop`, `conditional`, …) open none; they add events and attributes to `ctx.span` instead.
+
+| Span | Opened by | Parent |
+|------|-----------|--------|
+| `workflow.run` | `parseAndRunWorkflow` | none (root) |
+| `spawn` | each `spawn` step, around its child context | `ctx.span` |
+| `inParallel.path` | each `inParallel` path, around its child context | `ctx.span` |
+| `llm.call` | each model call (one per tool round) | `ctx.span` |
+| `tool.call` | each function call of a model call | its `llm.call` |
+| `decide.call` | each `decide` step | `ctx.span` |
 
 ```
-[ralph-wiggum-loop]                     <- root span
-  [ralph-iteration-1]                   <- spawn span (fresh context)
-    [react-step] model=claude-sonnet    <- step span (LLM call)
+[workflow.run]                                  <- root span
+  [spawn] noetic.node.id=ralph-iteration        <- iteration 1, fresh context
+    [llm.call] gen_ai.request.model=claude-sonnet
       gen_ai.usage.input_tokens: 1500
       gen_ai.usage.output_tokens: 340
       gen_ai.cost: 0.0067
-    [react-step] tool=shell             <- step span (tool call)
-      tool.name: shell
-      tool.args: { command: "npm test" }
+      [tool.call] tool.name=shell
     loop.verdict: { loop: "react-loop", iteration: 1, stop: true, reason: "No tool calls in last response" }
   loop.verdict: { loop: "ralph-wiggum-loop", iteration: 1, stop: false, reason: "Verification failed" }
-  [ralph-iteration-2]                   <- spawn span (fresh context)
+  [spawn] noetic.node.id=ralph-iteration        <- iteration 2, fresh context
     ...
   loop.verdict: { loop: "ralph-wiggum-loop", iteration: 2, stop: true, reason: "Verification passed" }
 ```
 
-No user instrumentation needed. The trace tree mirrors the execution tree: steps that open a span nest it under the context's span.
+No user instrumentation needed. Because child contexts carry their own spans, events added inside a `spawn` child or an `inParallel` path (such as a nested loop's `loop.verdict`) land on that child's span, not the parent's.
+
+---
+
+## Child Context Spans
+
+`spawn` and `inParallel` run their children in fresh contexts, and each child context gets a span of its own: `spawn` for a spawn child, `inParallel.path` for each path. The span opens with the child context and ends when the child settles — on success, on error, and on cancellation — and is then exported to the harness `traceExporter`. A `spawn` span also covers the layers' `onReturn` merge; an `inParallel.path` span covers the path's `onSpawn` seed and `onReturn` merge.
+
+| Attribute | Type | On | Description |
+|-----------|------|----|-------------|
+| `noetic.node.id` | string | both | `spawn`: the spawn step's id. `inParallel.path`: the path step's id |
+| `noetic.parallel.id` | string | `inParallel.path` | Id of the `inParallel` step |
+| `noetic.parallel.index` | number | `inParallel.path` | Zero-based position of the path among its siblings |
+| `noetic.error.kind` | string | both | `NoeticError` kind the child failed with; absent on success |
+| `error` | boolean | both | `true` when the child failed for any reason but cancellation |
+
+A cancelled child — a race loser, a sibling aborted by fail-fast, a parent abort — gets `noetic.error.kind: "cancelled"` and no `error`, since cancellation is not a fault. An `inParallel` path that never starts (queued behind the concurrency limit when fail-fast aborts it, or still queued when a race settles) has its span ended the same way when the `inParallel` settles.
 
 ---
 
 ## Loop Verdict Events
 
-A loop opens no span of its own. After each verdict it adds a `loop.verdict` event to the enclosing span (`ctx.span`), so the events land on whatever span the loop's context carries (for a JSON workflow, `workflow.run`). Attributes are `loop` (step id), `iteration`, `stop`, and `reason` when the verdict has one; `feedback` is never recorded. See `05-loop-and-until` (Verdict Traces) for the full table.
+A loop opens no span of its own. After each verdict it adds a `loop.verdict` event to the enclosing span (`ctx.span`), so the events land on whatever span the loop's context carries: the `spawn` or `inParallel.path` span inside a child context, otherwise the run's span (for a JSON workflow, `workflow.run`). Attributes are `loop` (step id), `iteration`, `stop`, and `reason` when the verdict has one; `feedback` is never recorded. See `05-loop-and-until` (Verdict Traces) for the full table.
 
 ---
 

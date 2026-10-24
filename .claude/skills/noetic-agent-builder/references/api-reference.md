@@ -326,6 +326,8 @@ Each parallel path gets a deep clone of parent state. Mutations in one path don'
 
 Each path is also a context child boundary: it inherits the parent's layers and tool pool, `onSpawn` seeds its per-path layer state (items from `onSpawn` are NOT appended — the path already has the parent's item log), and `onReturn` merges a *successful* path back. Merges are serialised across paths, so concurrent workers don't clobber one parent state.
 
+Each path runs under an `inParallel.path` span (child of `ctx.span`) with `NoeticAttr.NODE_ID` (path id), `.PARALLEL_ID`, `.PARALLEL_INDEX`; a failure stamps `error: true` + `NoeticAttr.ERROR_KIND`, a cancellation (or a path that never starts) only `ERROR_KIND: 'cancelled'`.
+
 ### spawn
 
 Child execution with context boundary. Context layers control what state crosses the boundary.
@@ -341,6 +343,8 @@ spawn<TContext = ContextData, I = unknown, O = unknown>({
 ```
 
 Per-step `subprocess` mirrors `runCode` — use it to pin a specific spawn to an out-of-process adapter (real OS subprocess with durable handle manifests) or a test double (in-memory adapter that records the request for assertions). Resolution precedence is the same: `detachedSpawn-overrides.subprocess ?? step.subprocess ?? harness.subprocess`.
+
+The child runs under a `spawn` span (child of `ctx.span`, `NoeticAttr.NODE_ID` = spawn id), ended and exported when the child settles; failures stamp it like `inParallel.path`.
 
 ### loop
 
@@ -359,7 +363,7 @@ loop<I, O>({
 }): StepLoop<I, O>
 ```
 
-Each verdict adds a `loop.verdict` event (`NoeticEvent.LOOP_VERDICT`) to the enclosing `ctx.span` — loops open no span of their own — with `{ loop, iteration, stop, reason? }`. `feedback` is never recorded.
+Each verdict adds a `loop.verdict` event (`NoeticEvent.LOOP_VERDICT`) to the enclosing `ctx.span` (a `spawn` child's or `inParallel` path's own span when nested in one) — loops open no span of their own — with `{ loop, iteration, stop, reason? }`. `feedback` is never recorded.
 
 ### schedule
 
@@ -664,6 +668,8 @@ until.outputEquals(sentinel)   // Stop when last output text === `sentinel` (exa
 any(...predicates)       // Stop when ANY predicate fires
 all(...predicates)       // Stop when ALL predicates fire
 ```
+
+Combinators run predicates in order and short-circuit: `any()` returns the first stop verdict as is, `all()` the first continue verdict as is. Otherwise the combined verdict joins the deciding predicates' `reason`s with `'; '` and `feedback` with `'\n'` (fields left out when none set them), so `any(until.maxSteps(n), until.verified(fn))` still passes the verifier's feedback to `prepareNext`.
 
 Reasons: `Reached max steps (n)`, `Cost $1.02 exceeded budget $1.00` (two decimals), `Verification passed` / `Verification failed`.
 
@@ -2556,7 +2562,7 @@ const result = await parseAndRunWorkflow({
 });
 ```
 
-Emits a root `workflow.run` trace span carrying the static DAG (`NoeticAttr.WORKFLOW_DOCUMENT`, `.WORKFLOW_NODES`, `.WORKFLOW_EDGES`). Per-call `llm.call` and `tool.call` spans nest under it. All are flushed to the harness `traceExporter` (default `NoopExporter`).
+Emits a root `workflow.run` trace span carrying the static DAG (`NoeticAttr.WORKFLOW_DOCUMENT`, `.WORKFLOW_NODES`, `.WORKFLOW_EDGES`). Per-call `llm.call` and `tool.call` spans, and the `spawn` / `inParallel.path` spans of child contexts, nest under it. All are flushed to the harness `traceExporter` (default `NoopExporter`).
 
 ### UntilPredicateSchema
 

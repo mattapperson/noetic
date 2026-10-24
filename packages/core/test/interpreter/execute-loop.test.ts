@@ -11,6 +11,7 @@ import { NoeticEvent } from '../../src/observability/genai-attributes';
 import { SpanImpl } from '../../src/observability/span-impl';
 import { ChannelStore } from '../../src/runtime/channel-store';
 import { ContextImpl } from '../../src/runtime/context-impl';
+import { any } from '../../src/until/combinators';
 import { until } from '../../src/until/predicates';
 import { makeMockHarness, simpleExecute } from '../_helpers';
 
@@ -875,6 +876,40 @@ describe('executeLoop inbox channel', () => {
       text: 'hello from sub-agent',
     });
   });
+  it('hands the feedback of a verified() inside any() to prepareNext', async () => {
+    const inputs: string[] = [];
+    const loopStep = loop<ContextData, string, string>({
+      id: 'any-feedback-loop',
+      steps: [
+        {
+          kind: 'runCode',
+          id: 'draft',
+          execute: async (input: string) => {
+            inputs.push(input);
+            return `draft-${inputs.length}`;
+          },
+        },
+      ],
+      until: any(
+        until.maxSteps(5),
+        until.verified(async (output) => ({
+          pass: output === 'draft-2',
+          feedback: `rejected ${String(output)}`,
+        })),
+      ),
+      prepareNext: (_output, verdict) => verdict.feedback ?? 'no feedback',
+    });
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
+
+    expect(await executeLoop(loopStep, 'start', ctx, simpleExecute)).toBe('draft-2');
+    expect(inputs).toEqual([
+      'start',
+      'rejected draft-1',
+    ]);
+  });
+
   describe('verdict traces', () => {
     it('adds one loop.verdict event per iteration to the enclosing span', async () => {
       const span = new SpanImpl('loop-test', null);
