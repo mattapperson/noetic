@@ -38,7 +38,7 @@ const refundTool = tool({
 //#region Support Agent
 
 const supportAgent = reactAgent({
-  model: 'anthropic/claude-sonnet-4',
+  model: 'anthropic/claude-sonnet-5.5',
   instructions:
     'You are a customer support agent. Use the available tools to look up orders and issue refunds when appropriate. Be helpful and concise.',
   tools: [

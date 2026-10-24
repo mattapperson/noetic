@@ -51,7 +51,7 @@ const agent = spawn({
     id: 'planner-loop',
     steps: [callModel({
       id: 'planner-llm',
-      model: 'anthropic/claude-sonnet-4',
+      model: 'anthropic/claude-sonnet-5.5',
       instructions: 'You are a task planner.',
       tools,
     })],
@@ -287,7 +287,7 @@ const agent = spawn({
     id: 'researcher-loop',
     steps: [callModel({
       id: 'researcher-llm',
-      model: 'anthropic/claude-sonnet-4',
+      model: 'anthropic/claude-sonnet-5.5',
       instructions: `You are a research assistant.
 
 When you discover important entities (people, organizations, concepts),
@@ -315,7 +315,7 @@ const agent = spawn({
     id: 'planner-loop',
     steps: [callModel({
       id: 'planner-llm',
-      model: 'anthropic/claude-sonnet-4',
+      model: 'anthropic/claude-sonnet-5.5',
       instructions: 'You are a planner. Use todos to track tasks. Call updateNotes to save observations.',
       tools,
     })],
