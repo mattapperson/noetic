@@ -263,6 +263,10 @@ for (const path of exporter.getSpansByName('inParallel.path')) {
 }
 ```
 
+## Spawn Summary Failure Events
+
+When a context layer's `onReturn` hook fails at a `spawn` or `inParallel` boundary, the step still returns the result unchanged and adds a `spawn.summary_failed` event (`NoeticEvent.SPAWN_SUMMARY_FAILED`) to the child's own span (`spawn` or `inParallel.path`), with attributes `stepId`, `layerId`, and `message` (the hook error's message). The matching `spawn_summary_failed` error goes to the layer diagnostic sink — see [Error Model](/docs/framework/errors).
+
 ## Workflow Run Span
 
 `parseAndRunWorkflow` opens a root `workflow.run` span that carries the static workflow graph — the *potential paths* of the DAG, independent of which routes actually run. Model and tool spans nest under it, so the exported trace mirrors the declared workflow with the executed path overlaid.

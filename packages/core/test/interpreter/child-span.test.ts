@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import type { ContextData } from '@noetic-tools/context';
+import { createLayerStateStore, Slot } from '@noetic-tools/context';
 import type {
   AgentHarnessContract,
   StepInParallelAll,
@@ -18,7 +19,7 @@ import { SpanImpl } from '../../src/observability/span-impl';
 import { InMemoryExporter } from '../../src/observability/trace-exporter';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import { until } from '../../src/until/predicates';
-import { makeMockHarness } from '../_helpers';
+import { makeLayer, makeMockHarness } from '../_helpers';
 
 //#region Helpers
 
@@ -239,6 +240,54 @@ describe('spawn spans', () => {
     expect(verdictLoops(spawn)).toEqual([
       'inner',
     ]);
+  });
+
+  it('adds spawn.summary_failed to the spawn span when an onReturn hook throws', async () => {
+    const { ctx, root, exporter } = tracedContext();
+    const layerStore = createLayerStateStore();
+    layerStore.set(ctx.id, 'summarizer', {
+      active: true,
+    });
+    const layer = makeLayer('summarizer', {
+      slot: Slot.WORKING_MEMORY,
+      hooks: {
+        onSpawn: async ({ parentState }) => ({
+          childState: parentState,
+        }),
+        onReturn: async () => {
+          throw new Error('summarizer down');
+        },
+      },
+    });
+    const step: StepSpawn<ContextData, number, number> = {
+      kind: 'spawn',
+      id: 'summarized',
+      child: countingLoop('inner', 1),
+      context: [
+        layer,
+      ],
+    };
+
+    expect(
+      await executeSpawn(step, 0, ctx, execute, {
+        layerStore,
+        parentLayers: [
+          layer,
+        ],
+      }),
+    ).toBe(1);
+
+    const [span] = exporter.getSpansByName('spawn');
+    assert(span);
+    const failures = span.events.filter((e) => e.name === NoeticEvent.SPAWN_SUMMARY_FAILED);
+    expect(failures.map((e) => e.attributes)).toEqual([
+      {
+        stepId: 'summarized',
+        layerId: 'summarizer',
+        message: 'summarizer down',
+      },
+    ]);
+    expect(root.events.some((e) => e.name === NoeticEvent.SPAWN_SUMMARY_FAILED)).toBe(false);
   });
 
   it('ends and exports the span when the child fails', async () => {

@@ -363,7 +363,7 @@ loop<I, O>({
 }): StepLoop<I, O>
 ```
 
-Each verdict adds a `loop.verdict` event (`NoeticEvent.LOOP_VERDICT`) to the enclosing `ctx.span` (a `spawn` child's or `inParallel` path's own span when nested in one) — loops open no span of their own — with `{ loop, iteration, stop, reason? }`. `feedback` is never recorded.
+Each verdict adds a `loop.verdict` event (`NoeticEvent.LOOP_VERDICT`) to the enclosing `ctx.span` (a `spawn` child's or `inParallel` path's own span when nested in one) — loops open no span of their own — with `{ loop, iteration, stop, reason? }`. `feedback` is never recorded. A failing `onReturn` hook at a spawn or inParallel boundary does not fail the step: the result passes through unchanged and the child's own span (`spawn` or `inParallel.path`) gets a `spawn.summary_failed` event (`NoeticEvent.SPAWN_SUMMARY_FAILED`) with `{ stepId, layerId, message }`.
 
 ### schedule
 

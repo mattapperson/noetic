@@ -59,6 +59,12 @@ A loop opens no span of its own. After each verdict it adds a `loop.verdict` eve
 
 ---
 
+## Spawn Summary Failure Events
+
+When a layer's `onReturn` hook fails at a `spawn` or `inParallel` boundary, the runtime adds a `spawn.summary_failed` event to the child's span (`spawn` or `inParallel.path`) with attributes `stepId`, `layerId`, and `message`, alongside the `spawn_summary_failed` layer diagnostic (see `09-error-model`, Spawn with Summary Failure).
+
+---
+
 ## `Span` Interface
 
 ```typescript

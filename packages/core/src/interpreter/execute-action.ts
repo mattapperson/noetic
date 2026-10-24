@@ -1048,7 +1048,11 @@ export async function executeSpawn<TContext, I, O>(
         layers,
         stepId: step.id,
         parentCtx: parentExecutionCtx,
-        childCtx: childExecutionCtx,
+        // `childExecutionCtx` predates the spawn span; trace onto that span.
+        childCtx: {
+          ...childExecutionCtx,
+          trace: span,
+        },
         childLog: childCtx.itemLog,
         result: childOutput,
         store: layerStore,

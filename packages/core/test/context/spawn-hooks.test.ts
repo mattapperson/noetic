@@ -8,6 +8,7 @@ import {
   spawnLayers,
 } from '@noetic-tools/context';
 import { isNoeticError } from '@noetic-tools/types';
+import { NoeticEvent } from '../../src/observability/genai-attributes';
 import { makeCtx, makeItemLog, makeStorage } from '../_helpers';
 
 type DataState = {
@@ -318,7 +319,7 @@ describe('returnLayers', () => {
     expect(returnResult).toBe('seed+a+b');
   });
 
-  it('a failing onReturn passes the result through and records a span event', async () => {
+  it('a failing onReturn passes the result through and records a span event on the child', async () => {
     const errors: unknown[] = [];
     const store = createLayerStateStore((_layerId, _hook, error) => {
       errors.push(error);
@@ -342,6 +343,10 @@ describe('returnLayers', () => {
     ];
     const parentCtx = makeCtx({
       executionId: 'parent-summary',
+    });
+    const childCtx = makeCtx({
+      executionId: 'child-summary',
+      depth: 1,
       trace: {
         setAttribute() {},
         addEvent(name, attributes) {
@@ -351,10 +356,6 @@ describe('returnLayers', () => {
           });
         },
       },
-    });
-    const childCtx = makeCtx({
-      executionId: 'child-summary',
-      depth: 1,
     });
     store.set('child-summary', 'summarizer', {
       notes: 'child work',
@@ -373,7 +374,7 @@ describe('returnLayers', () => {
     expect(returnResult).toBe('raw');
     expect(events).toEqual([
       {
-        name: 'spawn.summary_failed',
+        name: NoeticEvent.SPAWN_SUMMARY_FAILED,
         attributes: {
           stepId: 'research',
           layerId: 'summarizer',

@@ -441,12 +441,15 @@ function layerItemSchemas(
   return base.extend(layer.itemSchemas);
 }
 
+/** Span event added to the child's span when a layer's `onReturn` hook fails. */
+export const SPAWN_SUMMARY_FAILED_EVENT = 'spawn.summary_failed';
+
 interface SummaryFailure {
   layerId: string;
   stepId: string;
   childOutput: unknown;
   cause: unknown;
-  parentCtx: ExecutionContext;
+  childCtx: ExecutionContext;
   store: LayerStateStore;
 }
 
@@ -455,7 +458,7 @@ function reportSummaryFailure({
   stepId,
   childOutput,
   cause,
-  parentCtx,
+  childCtx,
   store,
 }: SummaryFailure): void {
   const summaryCause = cause instanceof Error ? cause : new Error(String(cause));
@@ -465,7 +468,7 @@ function reportSummaryFailure({
     childOutput,
     summaryCause,
   });
-  parentCtx.trace.addEvent('spawn.summary_failed', {
+  childCtx.trace.addEvent(SPAWN_SUMMARY_FAILED_EVENT, {
     stepId,
     layerId,
     message: summaryCause.message,
@@ -1005,7 +1008,7 @@ export async function spawnLayers({
  *
  * A failing hook never fails the spawn: the child's work already succeeded,
  * so the result passes on unchanged and the failure is reported as a
- * `spawn_summary_failed` diagnostic plus a span event on the parent.
+ * `spawn_summary_failed` diagnostic plus a span event on the child's span.
  */
 export async function returnLayers<T>({
   layers,
@@ -1057,7 +1060,7 @@ export async function returnLayers<T>({
         stepId,
         childOutput: currentResult,
         cause: e,
-        parentCtx,
+        childCtx,
         store,
       });
     }
