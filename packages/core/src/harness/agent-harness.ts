@@ -1351,8 +1351,11 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   }
 
   /**
-   * Rebuild a `Context` from a previously-persisted snapshot. Returns `null`
-   * if no snapshot is recorded for `executionId`. Surface a typed
+   * Rebuild a `Context` from what a previous run of `executionId` recorded: its
+   * checkpoint snapshot, its step-completion ledger, or both. Without a snapshot the
+   * context starts empty (no item log or layer state) but keeps the execution id and
+   * ledger, so recorded steps replay and the rest run fresh. Returns `null` when
+   * neither is recorded — start a fresh execution. Surface a typed
    * `NoeticConfigError(CHECKPOINT_SCHEMA_MISMATCH)` when the snapshot's
    * schema version is unrecognised — the caller is expected to discard the
    * checkpoint via `CheckpointStore.clear()` and start a fresh execution.
@@ -1370,11 +1373,14 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
    * whose `id` is already the original `executionId`.
    */
   async restore(executionId: string, opts?: RestoreCheckpointOptions): Promise<Context | null> {
-    const ctx = await restoreFromCheckpoint(this, executionId, opts);
-    if (ctx) {
-      this.restoredExecutions.add(ctx.id);
+    const restored = await restoreFromCheckpoint(this, executionId, opts);
+    if (!restored) {
+      return null;
     }
-    return ctx;
+    if (restored.fromSnapshot) {
+      this.restoredExecutions.add(executionId);
+    }
+    return restored.ctx;
   }
 
   /**

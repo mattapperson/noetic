@@ -1911,6 +1911,8 @@ interface RestoreContextOptions {
 harness.restore(executionId: string, opts?: RestoreContextOptions): Promise<Context | null>;
 ```
 
+`restore` needs a snapshot *or* step-ledger entries. With only ledger entries (the snapshot write failed) it returns a context with the original `id` and the ledger but an empty item log, no restored layer or channel state, and the default cwd: recorded steps replay, the rest run fresh. It returns `null` only when neither exists. An unknown snapshot version throws `CHECKPOINT_SCHEMA_MISMATCH` even when a ledger exists.
+
 A snapshot recovers data, not the live objects a host attached to the original context (broadcasters, queues, abort registrations). Pass them back through `opts` or the resumed run gets a bare context and the loss is silent. Snapshot-owned fields (`items`, `threadId`, `resourceId`, cwd) are deliberately not accepted — they always come from the persisted record. Decoration applied after construction (`Object.assign`ed fields, abort registration) goes on the returned context, whose `id` is already the original `executionId`.
 
 ### Step-level resume and ledger retention

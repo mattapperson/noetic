@@ -96,7 +96,7 @@ Append on successful return, at the point `step_completed` is emitted (`execute.
 
 ### Replay
 
-On `restore`, the ledger is loaded into the context. In `execute()`, before dispatch:
+On `restore`, the ledger is loaded into the context. The ledger alone is enough: an execution with ledger entries but no snapshot restores to a context with its original id and ledger and nothing else (`23-durable-execution` § Restore flow), so its recorded steps replay and the rest run fresh. An execution with neither restores to `null` — a fresh start. In `execute()`, before dispatch:
 
 1. Compute the path key.
 2. If an entry exists at that key **and** its `stepId` and `kind` match the step about to run, return `entry.output` without dispatching.
@@ -224,6 +224,9 @@ Hosts need it in two situations:
 - Concurrent records (inParallel legs through one shared ledger) land on distinct keys.
 - A resumed ledger never reuses a live sequence number, even when retention left a gap.
 - `harness.clearCheckpoint` removes the snapshot and every ledger shard.
+- Ledger entries with no snapshot: `restore` returns a context with the original id and an empty item log; recorded steps replay, unrecorded ones run.
+- No snapshot and no ledger entry: `restore` returns `null`.
+- A snapshot with an unknown schema version throws `CHECKPOINT_SCHEMA_MISMATCH` even when a ledger exists.
 - `durable: false` writes no entry; the step re-runs on resume and its state change is applied again.
 - A durable child under a non-durable parent still replays while the parent re-runs.
 - `replayKey`: two concurrent workers whose batches swap between runs each replay their own batch's output.

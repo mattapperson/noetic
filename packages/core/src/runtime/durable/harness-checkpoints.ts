@@ -6,7 +6,7 @@ import type { ChannelStore } from '../channel-store';
 import { ContextImpl, rootIdOf } from '../context-impl';
 import type { EventBroadcaster } from '../event-broadcaster';
 import type { CheckpointStore } from './checkpoint-store';
-import type { StepLedgerRetention, StepLedgerStore } from './step-ledger';
+import type { StepLedgerRetention, StepLedgerStore, StepLedgerWindow } from './step-ledger';
 import { StepLedger } from './step-ledger';
 
 //#region Handle interface
@@ -117,25 +117,39 @@ export async function captureCheckpoint(h: CheckpointHarnessHandle, ctx: Context
 //#region restoreFromCheckpoint
 
 /**
- * Rebuild a `Context` from a previously-persisted snapshot. Returns
- * `null` if no snapshot is recorded for `executionId`. Layer state is
- * replayed into `layerStateStore` keyed by the original executionId so
- * the restored context observes the pre-crash state through
- * `readLayerState` and the context projectors. Channel values and queued
- * items are refilled into the channel store, for channels with no live
- * state.
+ * What `restoreFromCheckpoint` rebuilt. `fromSnapshot` is false for a ledger-only
+ * restore, whose layer state was never recovered — the harness must then let layer
+ * `init` hydrate normally instead of keeping restored state.
  *
- * `opts` carries the host's own context wiring (broadcaster, parent, state,
- * layer overrides) into the rebuilt context. A snapshot cannot round-trip live
- * objects, so a host that decorated the original context has to hand the same
- * decoration back here — otherwise the resumed run gets a bare context and
- * whatever depended on that wiring stops working silently. Snapshot-owned
- * fields always win: identity, item log, and cwd come from the persisted
- * record, never from `opts`.
+ * @internal
+ */
+export interface RestoredExecution {
+  ctx: Context;
+  fromSnapshot: boolean;
+}
+
+/**
+ * Rebuild a `Context` for `executionId` from what a previous run recorded: the
+ * checkpoint snapshot and the step-completion ledger. Either is enough. Returns
+ * `null` only when neither exists, so the caller starts a fresh execution.
  *
- * Preserves the original executionId on the returned context via
- * `Object.defineProperty` — adapter correlation across crash/restart
- * requires a stable id.
+ * - With a snapshot, the item log, layer state, channel state, cwd, and thread/resource
+ *   ids come from it. Layer state is replayed into `layerStateStore` under the original
+ *   id; channel values and queued items refill the channel store for channels with no
+ *   live state.
+ * - Without one, the context starts like `createContext(opts)` would — empty item
+ *   log, no layer or channel state, the harness's root cwd, fresh thread id — and only
+ *   its identity and ledger are recovered. Recorded steps replay; the rest run fresh.
+ *
+ * `opts` carries the host's own context wiring (broadcaster, parent, state, layer
+ * overrides). A snapshot cannot round-trip live objects, so a host that decorated
+ * the original context has to hand the same decoration back here. Snapshot-owned
+ * fields always win: identity, item log, and cwd come from the persisted record,
+ * never from `opts`.
+ *
+ * A snapshot whose schema version is unknown throws
+ * `NoeticConfigError(CHECKPOINT_SCHEMA_MISMATCH)` from the store; the ledger is not
+ * used as a fallback, because resuming onto it would drop state the snapshot held.
  *
  * @internal
  */
@@ -143,59 +157,91 @@ export async function restoreFromCheckpoint(
   h: CheckpointHarnessHandle,
   executionId: string,
   opts?: RestoreCheckpointOptions,
-): Promise<Context | null> {
+): Promise<RestoredExecution | null> {
   const store = h.checkpointStore;
   if (!store) {
     return null;
   }
   const snapshot = await store.load(executionId);
-  if (!snapshot) {
+  const recovered = await h.stepLedgerStore?.load(executionId);
+  if (!snapshot && (!recovered || recovered.entries.size === 0)) {
     return null;
   }
-  for (const [layerId, state] of Object.entries(snapshot.layers)) {
-    h.layerStateStore.set(executionId, layerId, state);
+  const ctx = snapshot ? contextFromSnapshot(h, snapshot, opts) : h.createContext(opts);
+  if (ctx instanceof ContextImpl) {
+    adoptExecution({
+      h,
+      ctx,
+      executionId,
+      recovered,
+    });
   }
-  h.channelStore.restore(executionId, snapshot.channels ?? []);
-  const items: Item[] = h.itemSchemas.parseMany(snapshot.itemLog.items);
-  const cwdInit = snapshot.cwd?.current ?? undefined;
+  return {
+    ctx,
+    fromSnapshot: snapshot !== null,
+  };
+}
+
+/** Replay a snapshot's layer and channel state and build the context its item log and cwd describe. */
+function contextFromSnapshot(
+  h: CheckpointHarnessHandle,
+  snapshot: CheckpointSnapshot,
+  opts: RestoreCheckpointOptions | undefined,
+): Context {
+  for (const [layerId, state] of Object.entries(snapshot.layers)) {
+    h.layerStateStore.set(snapshot.executionId, layerId, state);
+  }
+  h.channelStore.restore(snapshot.executionId, snapshot.channels ?? []);
   /* Caller wiring first, snapshot second: a host may legitimately swap the context
    * layers or hang the restored execution under a new parent, but it must never be
    * able to override the identity/history the snapshot is the record of. */
-  const ctx = h.createContext({
+  return h.createContext({
     ...opts,
-    items,
+    items: h.itemSchemas.parseMany(snapshot.itemLog.items),
     threadId: snapshot.threadId,
     resourceId: snapshot.resourceId,
-    cwdInit,
+    cwdInit: snapshot.cwd?.current ?? undefined,
   });
-  if (ctx instanceof ContextImpl) {
-    Object.defineProperty(ctx, 'id', {
-      value: executionId,
-      configurable: false,
-      writable: false,
-      enumerable: true,
-    });
-    /* Attach the recovered completion ledger. `createContext` already built a fresh
-     * one keyed to a throwaway id; the restored context needs the entries recorded
-     * under THIS execution, or `execute()` would replay nothing and re-run the whole
-     * tree. Assigned the same way `id` is, to keep `createContext`'s public options
-     * free of resume-only fields. */
-    if (h.stepLedgerStore) {
-      const recovered = await h.stepLedgerStore.load(executionId);
-      Object.defineProperty(ctx, 'ledger', {
-        value: new StepLedger({
-          executionId,
-          store: h.stepLedgerStore,
-          recovered,
-          retention: h.stepLedgerRetention,
-        }),
-        configurable: false,
-        writable: false,
-        enumerable: true,
-      });
-    }
+}
+
+/**
+ * Give `ctx` the original execution id and the ledger recorded under it.
+ * `createContext` already built a fresh ledger keyed to a throwaway id; without the
+ * recovered one `execute()` would replay nothing and re-run the whole tree. Both are
+ * assigned with `defineProperty` to keep `createContext`'s public options free of
+ * resume-only fields — adapter correlation across a restart needs the stable id.
+ */
+function adoptExecution({
+  h,
+  ctx,
+  executionId,
+  recovered,
+}: {
+  h: CheckpointHarnessHandle;
+  ctx: ContextImpl;
+  executionId: string;
+  recovered: StepLedgerWindow | undefined;
+}): void {
+  Object.defineProperty(ctx, 'id', {
+    value: executionId,
+    configurable: false,
+    writable: false,
+    enumerable: true,
+  });
+  if (!h.stepLedgerStore || !recovered) {
+    return;
   }
-  return ctx;
+  Object.defineProperty(ctx, 'ledger', {
+    value: new StepLedger({
+      executionId,
+      store: h.stepLedgerStore,
+      recovered,
+      retention: h.stepLedgerRetention,
+    }),
+    configurable: false,
+    writable: false,
+    enumerable: true,
+  });
 }
 
 //#endregion
