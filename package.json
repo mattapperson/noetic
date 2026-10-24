@@ -20,6 +20,7 @@
     "@noetic-tools/core": "workspace:*",
     "@noetic-tools/openui": "workspace:*",
     "bun-types": "latest",
+    "typescript": "5.9.3",
     "yaml": "^2.9.0",
     "zod": "^4.0.0"
   },

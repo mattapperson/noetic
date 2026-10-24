@@ -195,7 +195,8 @@ export interface FakeAgentScript {
   onPrompt?: (
     conn: AgentSideConnection,
     params: acp.PromptRequest,
-  ) => Promise<acp.PromptResponse['stopReason'] | undefined>;
+    // biome-ignore lint/suspicious/noConfusingVoidType: an async callback with no `return` infers Promise<void>, which TS 5.x will not assign to `| undefined`.
+  ) => Promise<acp.PromptResponse['stopReason'] | void>;
 }
 
 /** Observable record of what the client asked the agent to do. */
