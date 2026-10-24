@@ -104,7 +104,7 @@ Cancellation covers the whole execution tree rooted at the cancelled context:
    loop mid-flight rather than waiting for a long generation to finish. Tokens
    and cost already spent are charged to the context; the truncated response is
    not returned as the step's output — the step throws `cancelled`.
-6. **Context layer cleanup.** `onComplete` runs with `outcome: 'aborted'`, then `dispose` runs. Both always execute, even under cancellation. If a context layer hook is in-progress when cancellation arrives, the hook is allowed to complete (up to its timeout) before `onComplete`/`dispose` run. Cleanup runs bottom-up: a child context's teardown completes before its parent's.
+6. **Context layer cleanup.** `onComplete` runs with `outcome: 'aborted'`, then `dispose` runs. Both always execute, even under cancellation. If a context layer hook (`recall`, `store`, `beforeToolCall`, `afterModelCall`, `onDecision`) is in-progress on a context when cancellation arrives, the runtime waits for it to settle (up to its timeout) before running that context's `onComplete`/`dispose`. Cleanup runs bottom-up: a child context's teardown completes before its parent's.
 7. **In-progress `store()` calls.** Concurrent `store()` calls are allowed to settle (they use `Promise.allSettled`). The runtime does not abort them — they may write partial results, which is acceptable because `store` is idempotent by convention.
 
 Cancellation is cooperative beyond those points: step code that ignores

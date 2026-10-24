@@ -135,6 +135,48 @@ describe('AgentHarness.cancel', () => {
     expect(trace).toEqual([]);
   });
 
+  it('lets an in-flight store hook finish before onComplete and dispose', async () => {
+    const trace: string[] = [];
+    let releaseStore = (): void => {};
+    const storeGate = new Promise<void>((resolve) => {
+      releaseStore = resolve;
+    });
+    const slowStoreLayer: ContextLayer = {
+      ...makeTracingLayer('slow', trace),
+      hooks: {
+        ...makeTracingLayer('slow', trace).hooks,
+        async store() {
+          trace.push('slow:store:start');
+          await storeGate;
+          trace.push('slow:store:end');
+          return undefined;
+        },
+      },
+    };
+    const harness = makeHarness([
+      slowStoreLayer,
+    ]);
+    const root = harness.createContext();
+    const layers = root.layers ?? [];
+
+    const storing = harness.storeLayers(layers, textOnlyResponse('done'), root);
+    const cancelling = harness.cancel(root, 'stop');
+    // Give teardown a chance to run ahead of the store if it isn't waiting.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    releaseStore();
+    await Promise.all([
+      storing,
+      cancelling,
+    ]);
+
+    expect(trace).toEqual([
+      'slow:store:start',
+      'slow:store:end',
+      'slow:onComplete:aborted',
+      'slow:dispose',
+    ]);
+  });
+
   it('aborts a context with no layers without error', async () => {
     const harness = makeHarness();
     const root = harness.createContext();
