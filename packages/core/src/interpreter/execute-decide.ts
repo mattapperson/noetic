@@ -10,14 +10,12 @@ import {
   DecideOutputError,
   frameworkCast,
   hashString,
-  isNoeticError,
   NoeticConfigError,
   NoeticErrorImpl,
   scoreLevels,
 } from '@noetic-tools/types';
 import { z } from 'zod';
 import { GenAI, NoeticAttr } from '../observability/genai-attributes';
-import { statusOf } from '../util/status-code';
 import { allocateBudgets, assembleView, DECISION_PROJECTION } from './action-deps';
 import type {
   Context,
@@ -29,6 +27,7 @@ import type {
 } from './action-types';
 import { resolveLazy } from './execute-action';
 import { trackUsage } from './message-helpers';
+import { wrapModelError } from './model-error';
 import { isContextImpl, isMutableContext } from './typeguards';
 
 //#region Public API
@@ -201,16 +200,7 @@ async function askHarness<TContext, I, O>(
   try {
     return await ctx.harness.decide(request);
   } catch (e) {
-    if (isNoeticError(e) || e instanceof NoeticConfigError) {
-      throw e;
-    }
-    if (ctx.aborted) {
-      throw new NoeticErrorImpl({
-        kind: 'cancelled',
-        reason: ctx.abortReason ?? 'context aborted',
-      });
-    }
-    if (e instanceof DecideOutputError) {
+    if (e instanceof DecideOutputError && !ctx.aborted) {
       if (e.usage) {
         trackUsage(ctx, {
           items: [],
@@ -226,18 +216,7 @@ async function askHarness<TContext, I, O>(
         zodError: e.zodError,
       });
     }
-    if (statusOf(e) === 429) {
-      throw new NoeticErrorImpl({
-        kind: 'model_rate_limit',
-        stepId: step.id,
-      });
-    }
-    throw new NoeticErrorImpl({
-      kind: 'step_failed',
-      stepId: step.id,
-      cause: e instanceof Error ? e : new Error(String(e)),
-      retriesExhausted: false,
-    });
+    throw wrapModelError(e, step.id, ctx);
   }
 }
 

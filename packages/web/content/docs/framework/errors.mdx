@@ -61,6 +61,10 @@ type NoeticError =
   | { kind: 'item_schema_mismatch'; category: 'items' | 'developerMessages' | 'toolCalls' | 'toolResults'; itemType?: string };
 ```
 
+### Model provider failures
+
+A failing provider call in a `callModel` or `decide` step never reaches you as a raw `Error`. A 429 becomes `model_rate_limit`, a failure caused by cancellation becomes `cancelled`, and anything else becomes `step_failed` with the provider's error on `cause`.
+
 ## NoeticErrorImpl Class
 
 `NoeticErrorImpl` extends the standard `Error` class, so it works with `try/catch` and stack traces. The structured error data lives on the `.noeticError` property:

@@ -34,6 +34,14 @@ type NoeticError =
 
 Retry per policy (see `RetryPolicy` in `02-step-variants`). If retries exhausted, throw `step_failed`. The parent (loop, inParallel, etc.) decides what to do.
 
+### Model Provider Failure
+
+A model call (`callModel`, `decide`) never lets a raw provider error reach the caller of `execute()`. Errors that are already a `NoeticError` or `NoeticConfigError` pass through unchanged; otherwise the error is mapped once, at the step that made the call:
+
+- the context was aborted → `cancelled` (the abort is what broke the call);
+- the provider answered HTTP 429 → `model_rate_limit` with the step's `stepId`;
+- anything else → `step_failed` with the provider error as `cause`.
+
 ### inParallel (see `03-control-flow`)
 
 - **`mode: 'all'`** — If any path fails, cancel remaining paths and throw `fork_partial` with both succeeded and failed results. The caller decides whether to use partial results or propagate.
