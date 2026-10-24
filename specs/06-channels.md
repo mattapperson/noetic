@@ -229,7 +229,7 @@ ctx.recv(findings, { timeout: 60_000 }); // 60s
 ctx.recv(status, { timeout: 0 });         // no timeout (use with caution)
 ```
 
-Setting `timeout: 0` disables the timeout — this is an explicit opt-in to potential deadlock. The agent harness SHOULD emit a warning when `timeout: 0` is used.
+Setting `timeout: 0` disables the timeout in every mode (`value`, `queue`, and `topic`) — this is an explicit opt-in to potential deadlock. Whenever a `recv` (or a parked `send`, see below) actually waits with `timeout: 0`, the agent harness records an `unbounded_wait` channel warning (see `10-observability`, Channel Warnings). A negative timeout is a caller bug, not a shorter wait: `recv` and `send` reject with `NoeticConfigError` code `INVALID_CHANNEL_TIMEOUT` (see `09-error-model`).
 
 A pending `recv` never outlives its context: when the context is aborted, the blocked `recv` immediately rejects with `{ kind: 'cancelled' }` — even with `timeout: 0` (see `09-error-model`, Cancellation item 2). Abort only rejects waiters belonging to the aborted context; siblings sharing the channel store keep waiting.
 
@@ -238,7 +238,7 @@ A pending `recv` never outlives its context: when the context is aborted, the bl
 `ctx.send` returns a `Promise<void>`. For value and topic channels, and for queue channels below `capacity`, the promise resolves immediately (delivery is synchronous). When a queue channel's buffer is at `capacity`, the sender is **parked** until space frees up:
 
 - Parked senders form a FIFO queue. When a consumer dequeues an item (`recv` or `tryRecv`), the oldest parked sender's value moves into the freed slot and that sender's promise resolves.
-- Like `recv`, a parked `send` is subject to the default 30-second timeout. If the timeout fires, the promise rejects with `channel_timeout` (the value never enters the queue). This prevents silent deadlocks where a producer and consumer are both blocked.
+- Like `recv`, a parked `send` is subject to the default 30-second timeout. If the timeout fires, the promise rejects with `channel_timeout` (the value never enters the queue). This prevents silent deadlocks where a producer and consumer are both blocked. Internal callers of the channel store can pass `timeout: 0` to park with no timeout, which records an `unbounded_wait` warning.
 - If the sending context is aborted while parked, the promise rejects with `{ kind: 'cancelled' }` (see `09-error-model`, Cancellation item 2).
 
 External senders are never back-pressured — see External Sender Back-Pressure above.

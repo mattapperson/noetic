@@ -286,13 +286,14 @@ if (usage?.epoch) {
 
 ## Channel Warnings
 
-When a channel drops data without failing the run, the harness records a `channel.warning` event (`NoeticEvent.CHANNEL_WARNING`) on the span of each live root context (a root with a `run()` in flight, a `SpanImpl` span, and a real `traceExporter`). With no such span — no root running, or tracing off — it prints the warning with `console.warn` instead.
+When a channel drops data or waits with no timeout, the harness records a `channel.warning` event (`NoeticEvent.CHANNEL_WARNING`) on the span of each live root context (a root with a `run()` in flight, a `SpanImpl` span, and a real `traceExporter`). With no such span — no root running, or tracing off — it prints the warning with `console.warn` instead.
 
 | Attribute | Type | Description |
 |---|---|---|
-| `kind` | `string` | `'overflow_drop'` (an external `handle.send()` dropped the oldest queued item) or `'subscriber_drop'` (an external subscriber's 1000-value buffer dropped its oldest value) |
+| `kind` | `string` | `'overflow_drop'` (an external `handle.send()` dropped the oldest queued item), `'subscriber_drop'` (an external subscriber's 1000-value buffer dropped its oldest value), or `'unbounded_wait'` (a `recv` or parked `send` is waiting with `timeout: 0`) |
 | `channelName` | `string` | The channel the warning is about |
-| `capacity` | `number` | The capacity or buffer size that was hit |
+| `capacity` | `number` | `overflow_drop` / `subscriber_drop` only: the capacity or buffer size that was hit |
+| `operation` | `string` | `unbounded_wait` only: `'recv'` or `'send'` |
 | `message` | `string` | Human-readable description (the console fallback's text) |
 
 ```ts validate=none

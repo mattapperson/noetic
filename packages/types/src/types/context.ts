@@ -100,6 +100,15 @@ export interface Context<TContext = ContextData, TState = unknown> {
   readonly unifiedTools?: ReadonlyArray<Tool>;
   /** Runtime item schema registry active for this context. */
   readonly itemSchemas?: ItemSchemaRegistry;
+  /**
+   * Receive a value from a channel. Waits up to `opts.timeout` ms (default
+   * 30s) before rejecting with `channel_timeout`; `timeout: 0` waits with no
+   * timeout in every mode and records an `unbounded_wait` channel warning.
+   * Aborting the context rejects the wait with `cancelled`.
+   *
+   * @throws `NoeticConfigError` with code `INVALID_CHANNEL_TIMEOUT` (as a
+   * rejection) when `opts.timeout` is negative.
+   */
   recv<T>(
     channel: Channel<T>,
     opts?: {

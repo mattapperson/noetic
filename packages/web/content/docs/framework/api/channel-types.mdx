@@ -102,5 +102,5 @@ interface Context {
 | Method | Description |
 |---|---|
 | `send(channel, value)` | Send a value to the channel. Resolves immediately unless a queue channel is at capacity, in which case the send parks until a consumer frees a slot (back-pressure): default 30s timeout rejects with `channel_timeout`; aborting the context rejects with `cancelled`. |
-| `recv(channel, opts?)` | Receive a value. Blocks until available or timeout (`channel_timeout`). Rejects with `cancelled` when the context is aborted while waiting. |
+| `recv(channel, opts?)` | Receive a value. Blocks until available or timeout (`channel_timeout`, default 30s). `timeout: 0` disables the timeout in every mode and records an `unbounded_wait` channel warning; a negative timeout rejects with `NoeticConfigError` code `INVALID_CHANNEL_TIMEOUT`. Rejects with `cancelled` when the context is aborted while waiting. |
 | `tryRecv(channel)` | Non-blocking receive. Returns `null` if no value available. |

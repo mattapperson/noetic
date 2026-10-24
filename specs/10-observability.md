@@ -136,9 +136,10 @@ Channel conditions that lose data or risk a stall without failing the run (see `
 
 | Attribute | Type | Description |
 |-----------|------|-------------|
-| `kind` | string | `'overflow_drop'` — an external `handle.send()` hit a full queue and dropped the oldest item; `'subscriber_drop'` — an external subscriber's private buffer (1000) filled and dropped its oldest value |
+| `kind` | string | `'overflow_drop'` — an external `handle.send()` hit a full queue and dropped the oldest item; `'subscriber_drop'` — an external subscriber's private buffer (1000) filled and dropped its oldest value; `'unbounded_wait'` — a `recv` or parked `send` is waiting with `timeout: 0`, so nothing will time it out |
 | `channelName` | string | The channel the warning is about |
-| `capacity` | number | The queue capacity or subscriber buffer size that was hit |
+| `capacity` | number | `overflow_drop` / `subscriber_drop` only: the queue capacity or subscriber buffer size that was hit |
+| `operation` | string | `unbounded_wait` only: `'recv'` or `'send'` |
 | `message` | string | Human-readable description, the same text the console fallback prints |
 
 ---
