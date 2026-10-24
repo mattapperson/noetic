@@ -568,8 +568,8 @@ type DeliveryMode = 'next-turn' | 'between-rounds' | 'interrupt';
 
 ## Key Design Points
 
-- **`send`/`recv`/`tryRecv` on the agent harness** means the agent harness controls channel storage. `AgentHarness` uses a `Map`. `DurableAgentHarness` uses a message broker. The `Context` methods are thin wrappers: `ctx.send(ch, v)` calls `harness.send(ch, v, ctx)`. `ctx.tryRecv(ch)` calls `harness.tryRecv(ch, ctx)`.
-- **`getChannelHandle`** returns a `ChannelHandle<T>` for external code to write into a running execution. The handle is typed, lifecycle-aware, and scoped to the root execution. External handles route to the correct execution via `executionId`. `AgentHarness` uses in-process handles; `DurableAgentHarness` translates to durable signals (e.g., Temporal signals, Inngest events).
+- **`send`/`recv`/`tryRecv` on the agent harness** means the agent harness controls channel storage. `AgentHarness` keeps channel state in an in-process store keyed by channel name. The `Context` methods are thin wrappers: `ctx.send(ch, v)` calls `harness.send(ch, v, ctx)`. `ctx.tryRecv(ch)` calls `harness.tryRecv(ch, ctx)`.
+- **`getChannelHandle`** returns a `ChannelHandle<T>` for external code to write into a running execution. The handle is typed, lifecycle-aware, and scoped to the root execution. External handles route to the correct execution via `executionId`. `AgentHarness` issues in-process handles.
 - **`getChannelStream`** is the read-side counterpart: an `AsyncIterable<T>` over values the agent sends on an external channel. Delivery is channel-scoped; `executionId` bounds only the subscription's lifetime (it ends when that root execution completes, and a never-run id yields a harness-lifetime stream). Per-mode delivery and lifecycle semantics are specified in `06-channels` (External Subscriptions).
 - **Context layer methods** manage the full lifecycle defined in `11-context-layer-system`. `initLayers` runs `init()` sequentially. `recallLayers` runs `recall()` in slot order and returns `Item[]`. `storeLayers` runs `store()` concurrently via `Promise.allSettled` and receives `LLMResponse` (with items + usage). `disposeLayers` runs `dispose()` in reverse order. Error handling follows the per-hook policy.
 - **`previewRequestItems(scope?)`** returns the `Item[]` that would be sent to the model on the next turn for `scope.threadId` (or the default thread): the session's accumulated history with harness-level context-layer recall outputs prepended via `assembleView`. Runs layer `init` on a throwaway preview context first — the same hydration the next real turn would perform, re-loading thread/resource-scoped state from storage — because the recall lifecycle skips init-bearing layers that were never initialized. The preview execution's layer-state entries are flushed and dropped afterwards, so repeated previews neither grow the store nor leak into real turns. Does not allocate a session for unknown thread ids — returns an empty history in that case.
@@ -579,7 +579,7 @@ type DeliveryMode = 'next-turn' | 'between-rounds' | 'interrupt';
 - **`config`** exposes the `AgentConfig<TParams>` that the harness was constructed with. Steps and tools access harness params via `ctx.harness.config.params`.
 - **`contextLayers` on `AgentHarnessOpts`** are default context layers applied to every context created via `createContext()`. When `createContext` is called with its own `contextLayers` option, the per-call layers take precedence (full override, not merge). When neither is specified, the context has no default layers. This provides a convenient way to set up context for the entire agent without passing layers to every call.
 - **`detachedSpawn`** launches a child step concurrently without blocking the caller. Creates a child `Context` with `parent: parentCtx`, starts execution, and returns a `DetachedHandle` immediately. The handle tracks status (`running` / `completed` / `failed`), exposes the result, and supports `await(timeout?)` for blocking on completion. Pairs with the loop inbox channel (see `05-loop-and-until`) for async sub-agent notification patterns. Optional `overrides.threadId` / `overrides.resourceId` decouple the child's session-scoped item log from the parent's — useful for background sub-agents whose accumulated items should NOT replay in the parent's next turn.
-- **`checkpoint`/`restore`** are the first-class durable-execution surface. `AgentHarness` implements them against an injected `CheckpointStore` (which wraps the harness's `StorageAdapter`). When no store is configured both calls are no-ops, preserving zero-config ergonomics. `DurableAgentHarness` uses the same contract with a distributed backend. The full lifecycle (snapshot boundaries, schema versioning, idempotency expectations, restart flow) is specified in `23-durable-execution`.
+- **`checkpoint`/`restore`** are the first-class durable-execution surface. `AgentHarness` implements them against an injected `CheckpointStore` (which wraps the harness's `StorageAdapter`). When no store is configured both calls are no-ops, preserving zero-config ergonomics. A distributed backend plugs in by implementing `CheckpointStore`, not by subclassing the harness. The full lifecycle (snapshot boundaries, schema versioning, idempotency expectations, restart flow) is specified in `23-durable-execution`.
 - **`cancel`** with propagation. The agent harness knows the execution tree (via parent/child context references) and walks it to cancel children. Cancelled executions still run `onComplete` and `dispose` on their context layers.
 - **`createSpan`** lets the agent harness control the tracing backend.
 
@@ -672,8 +672,6 @@ See `23-durable-execution` for the full durable-execution model, including `Subp
 | Backend                    | When to Use                                                     | Durability | Channel Handles |
 |----------------------------|-----------------------------------------------------------------|------------|-----------------|
 | `AgentHarness<TParams>`     | Testing, simple scripts, CLI tools. Auto-resolves LLM provider from `OPENROUTER_API_KEY` or `callModelDefaults` config. | Ephemeral by default; full durable execution when constructed with a durable `StorageAdapter` + `CheckpointStore`. | In-process handles |
-| `DurableAgentHarness`      | Production — backed by Temporal, Inngest, or custom event store | Full durable execution via backing store | Translates to durable signals |
-| `DistributedAgentHarness`  | Multi-node — A2A, worker pools, cloud functions                 | Delegates to the distributed backend | Translates to network messages |
 
 ```typescript
 import { setHarness, AgentHarness } from '@noetic-tools/core';
@@ -752,7 +750,7 @@ export const handler = async (event) => {
 };
 ```
 
-In-memory channel storage and non-durable agent harnesses do not persist across invocations. Use `DurableAgentHarness` if cross-invocation state is required.
+In-memory channel storage and a harness without a `CheckpointStore` do not persist across invocations. Construct `AgentHarness` with a durable `StorageAdapter` and a `CheckpointStore` (`environment: { storage: { adapter, checkpointStore: createCheckpointStore({ storage: adapter }) } }`) if cross-invocation state is required — see `23-durable-execution`.
 
 ---
 

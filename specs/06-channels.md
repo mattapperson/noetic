@@ -200,7 +200,7 @@ This design prevents external callers (e.g., HTTP handlers) from blocking on a f
 
 ### Thread Safety
 
-Node.js is single-threaded, so `AgentHarness` handles are inherently thread-safe. `DurableAgentHarness` translates `handle.send()` to durable signals (e.g., Temporal signals, Inngest events).
+Node.js is single-threaded, so `AgentHarness` handles are inherently thread-safe. Durability comes from the same `AgentHarness` constructed with a `CheckpointStore` (see `23-durable-execution`), not from a separate harness class; `handle.send()` stays an in-process call either way.
 
 ---
 
