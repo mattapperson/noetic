@@ -1041,6 +1041,19 @@ export async function executeSpawn<TContext, I, O>(
     ledger: baseCtx instanceof ContextImpl ? baseCtx.ledger : undefined,
   });
 
+  if (hasLayers && parentExecutionCtx) {
+    layerStore.adopt?.({
+      parentExecutionId: parentExecutionCtx.executionId,
+      ctx: {
+        ...childExecutionCtx,
+        trace: span,
+      },
+      layers,
+      log: childCtx.itemLog,
+      itemSchemas: opts?.itemSchemas,
+    });
+  }
+
   try {
     return await traceChild(baseCtx, span, async () => {
       // Execute the child step. Its token/cost usage needs no merge here: every

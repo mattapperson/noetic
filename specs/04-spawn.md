@@ -1,6 +1,6 @@
 # Spawn: Child Execution with Context Boundary
 
-> **Depends On:** `01-step-type` (Step<I,O>), `07-context-and-event-log` (Context, Item, ItemLog), `11-context-layer-system` (ContextLayer.onSpawn/onReturn)
+> **Depends On:** `01-step-type` (Step<I,O>), `07-context-and-event-log` (Context, Item, ItemLog), `11-context-layer-system` (ContextLayer.onSpawn/onReturn/onParentUpdate)
 > **Exports:** `spawn()`, `SpawnOpts`
 
 ---
@@ -81,6 +81,21 @@ Context layers are the single system for all context flow across spawn boundarie
 - **Isolation via spawn-local layers**: Setting `context` on the spawn step replaces all parent layers with the specified set, giving complete control over what crosses the boundary in both directions.
 
 This unified approach means there is one system to learn, one set of hooks to implement, and full composability between layers.
+
+---
+
+## Parent Updates to Live Children
+
+A child does not run sealed off from its parent. The parent's layers can keep changing while the child runs — a coordinator revises its plan, or an `inParallel` sibling's result is merged into the parent — and a child can react through the opt-in `onParentUpdate` layer hook (see `11-context-layer-system`).
+
+- **Which children.** Every child opened through a layer child boundary: each `spawn` child and each `inParallel` path. A child is live from the moment it starts running (after `onSpawn`) until it returns. `harness.detachedSpawn` opens no layer boundary of its own — it runs no `onSpawn` or `onReturn`, so its context receives no parent updates; a `spawn` inside it is a child of the detached context and hears that context's writes. A step that a subprocess adapter runs in another process receives none either: the agent IPC protocol carries no layer state.
+- **Which writes.** Every write of the parent's state for a layer through the layer state store (`set(parentExecutionId, layerId, state)`): `store()` and every other hook that returns state, provides functions, and the `onReturn` merge of a finished sibling. In-place mutation of a state object, with no write, is not an update. The child hears the update on the same layer id only, and only when its layer defines `onParentUpdate` and is not disabled for the child (an `onSpawn` that returned `null` opts the layer out of updates too).
+- **What the hook gets.** `{ parentState, childState, childCtx }`: the state the parent just wrote, and the child's state for the layer when the hook starts. It returns `{ childState?, items? }` or nothing. `'childState' in result` writes the child's state (so `undefined` clears it); `items` are appended to the child's ItemLog. **The child is never forced to accept an update** — returning nothing ignores it.
+- **Asynchronous.** The parent's write returns at once. Deliveries run in the background and never block or fail the write.
+- **Ordering.** Each child takes its updates one at a time, in write order. Different children take theirs independently. A delivery is not ordered against the child's own hooks: it reads the child's state when it starts and writes it when it finishes, so a child hook running at the same time can overwrite its result, or have its own overwritten. Layers that need both to survive merge instead of replace.
+- **Nesting.** A delivery that writes the child's state is itself a parent write for the child's own live children, so an update flows down the tree.
+- **Timeout and errors.** Each call runs under `timeouts.onParentUpdate` (default 5 s) and records a `layer.hook` event on the child's span. A hook that throws or times out is logged as a diagnostic (`hook: 'onParentUpdate'`) and the update is dropped; the child keeps running.
+- **When the child finishes.** Before `onReturn` runs, the child stops taking updates: queued deliveries are skipped and a running one finishes first, so the merge sees its result. A child that fails is forgotten when its state is cleaned up; the result of a delivery still running then is discarded. No reference to a finished child survives.
 
 ---
 
@@ -232,14 +247,3 @@ On host restart the surviving handle can be rediscovered via `adapter.listLive()
 
 Durable execution means the same step body may be replayed under certain failure paths — for example, a crash that lands between step completion and the following checkpoint write. The framework cannot make arbitrary `runCode` bodies idempotent. Use stable step ids, and write step bodies whose side effects are safe to re-execute or guarded by an external idempotency key.
 
----
-
-## Future Considerations
-
-### Parent Updates to Spawned Children (Not Yet Designed)
-
-A spawned child could react to its parent's layer state changing while the child runs — for example, a detached sub-agent picking up a plan the parent revised. The sketch is an opt-in `onParentUpdate` layer hook: after a parent-side `store()` changes a layer's state, the harness would call the hook on the same layer in each still-running child with both the parent's and the child's current state. The child is never forced to accept an update; returning nothing ignores it.
-
-It would apply to `spawn` and `detachedSpawn` children only. `inParallel` paths are child executions too (each has its own context and deep-cloned state, see `03-control-flow`), but they would not receive parent updates.
-
-Open questions: which writes count as an update (only `store()`, or every state write), how updates are delivered to an out-of-process child, and how they order against the child's own hooks. Not scheduled.

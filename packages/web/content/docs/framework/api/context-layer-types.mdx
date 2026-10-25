@@ -99,6 +99,7 @@ interface ContextLayerHooks<TState = unknown> {
   store?: (params: StoreParams<TState>) => Promise<StoreResult<TState> | undefined>;
   onSpawn?: (params: SpawnParams<TState>) => Promise<SpawnResult<TState> | null>;
   onReturn?: (params: ReturnParams<TState>) => Promise<ReturnResult<TState> | undefined>;
+  onParentUpdate?: (params: ParentUpdateParams<TState>) => Promise<ParentUpdateResult<TState> | undefined>;
   onComplete?: (params: CompleteParams<TState>) => Promise<void | { state: TState }>;
   dispose?: (params: DisposeParams<TState>) => Promise<void>;
   beforeToolCall?: (params: BeforeToolCallParams<TState>) => Promise<BeforeToolCallResult<TState>>;
@@ -229,6 +230,25 @@ Return `null` instead of a `SpawnResult` to disable the layer in the child: none
 | `parentState` | `TState` | Updated parent state |
 | `result` | `unknown` | Transformed result for pipeline (optional) |
 
+### ParentUpdateParams
+
+`onParentUpdate` runs in a live child (a `spawn` child or an `inParallel` path) each time the parent writes this layer's state. It runs in the background: the parent's write never waits for it or fails because of it. Each child takes its updates one at a time, in write order, and stops taking them before its `onReturn` runs. A hook that throws or times out is logged as a diagnostic and the update is dropped. See [Spawn](/docs/framework/operators/spawn#parent-updates-to-live-children).
+
+| Field | Type | Description |
+|---|---|---|
+| `parentState` | `TState` | The state the parent just wrote |
+| `childState` | `TState` | The child's state when the hook starts |
+| `childCtx` | `ExecutionContext` | The child's execution context |
+
+### ParentUpdateResult
+
+Return nothing to ignore the update.
+
+| Field | Type | Description |
+|---|---|---|
+| `childState` | `TState` | New child state (optional; written when the key is present, so `undefined` clears it) |
+| `items` | `Item[]` | Items appended to the child's log (optional) |
+
 ### CompleteParams
 
 | Field | Type | Description |
@@ -310,6 +330,7 @@ interface ExecutionContext {
 | `store` | `number` | Timeout for store hook (ms, optional) |
 | `onSpawn` | `number` | Timeout for onSpawn hook (ms, optional) |
 | `onReturn` | `number` | Timeout for onReturn hook (ms, optional) |
+| `onParentUpdate` | `number` | Timeout for onParentUpdate hook (ms, optional, default 5000) |
 | `onComplete` | `number` | Timeout for onComplete hook (ms, optional) |
 | `dispose` | `number` | Timeout for dispose hook (ms, optional) |
 | `beforeToolCall` | `number` | Timeout for beforeToolCall steering hook (ms, optional) |
@@ -454,7 +475,7 @@ Observability data for a single layer hook execution, recorded as a `layer.hook`
 ```ts validate=none
 interface LayerTraceSpan {
   layerId: string;
-  hook: 'init' | 'recall' | 'store' | 'onSpawn' | 'onReturn' | 'onComplete' | 'dispose';
+  hook: 'init' | 'recall' | 'store' | 'onSpawn' | 'onReturn' | 'onParentUpdate' | 'onComplete' | 'dispose';
   duration: number;
   status: 'ok' | 'error' | 'timeout' | 'skipped';
   budget?: { allocated: number; used: number; yielded: number };

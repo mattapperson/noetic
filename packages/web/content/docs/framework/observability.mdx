@@ -93,12 +93,12 @@ const myStep = runCode({ id: 'annotated', execute: async (input: string, ctx) =>
 
 ## LayerTraceSpan
 
-Every call of a context layer's `init`, `recall`, `store`, `onSpawn`, `onReturn`, `onComplete`, or `dispose` hook adds a `layer.hook` event (`NoeticEvent.LAYER_HOOK`) to the span of the context the hook runs in — `onSpawn` on the parent's span, `onReturn` on the child's. The event's attributes follow `LayerTraceSpan`:
+Every call of a context layer's `init`, `recall`, `store`, `onSpawn`, `onReturn`, `onParentUpdate`, `onComplete`, or `dispose` hook adds a `layer.hook` event (`NoeticEvent.LAYER_HOOK`) to the span of the context the hook runs in — `onSpawn` on the parent's span, `onReturn` and `onParentUpdate` on the child's. The event's attributes follow `LayerTraceSpan`:
 
 ```ts validate=none
 interface LayerTraceSpan {
   layerId: string;
-  hook: 'init' | 'recall' | 'store' | 'onSpawn' | 'onReturn' | 'onComplete' | 'dispose';
+  hook: 'init' | 'recall' | 'store' | 'onSpawn' | 'onReturn' | 'onParentUpdate' | 'onComplete' | 'dispose';
   duration: number;
   status: 'ok' | 'error' | 'timeout' | 'skipped';
   budget?: { allocated: number; used: number; yielded: number };

@@ -350,6 +350,8 @@ Per-step `subprocess` mirrors `runCode` — use it to pin a specific spawn to an
 
 The child runs under a `spawn` span (child of `ctx.span`, `NoeticAttr.NODE_ID` = spawn id), ended and exported when the child settles; failures stamp it like `inParallel.path`.
 
+**Parent updates.** A layer hook `onParentUpdate({ parentState, childState, childCtx })` runs in a live child — every `spawn` child and every running `inParallel` path — each time the parent writes that layer's state through the layer state store (`store()` and other hooks that return state, layer functions, a sibling's `onReturn` merge; in-place mutation is not a write). Return `{ childState?, items? }` (`'childState' in result` writes it; `items` append to the child's log) or nothing to ignore. It runs in the background: the parent's write never waits or fails. Per child, one at a time in write order; not ordered against the child's own hooks. Timeout `timeouts.onParentUpdate` (default 5 s); throw/timeout → diagnostic `hook: 'onParentUpdate'`, update dropped. The child stops taking updates before `onReturn` (a running delivery finishes first) and is forgotten on cleanup. `harness.detachedSpawn` contexts (no `onSpawn`/`onReturn`) and out-of-process steps get no updates.
+
 ### loop
 
 Iteration with termination predicates.
@@ -2261,7 +2263,7 @@ The full set is 23 tools, mirroring the 23 mutating + read CLI verbs (everything
 
 ## Context Layer Hooks
 
-Each call of a traced hook (`init`, `recall`, `store`, `onSpawn`, `onReturn`, `onComplete`, `dispose`) adds a `layer.hook` event (`NoeticEvent.LAYER_HOOK`) to the span of the context it runs in, with `LayerTraceSpan` attributes flattened to scalars: `{ layerId, hook, duration, status, itemCount?, 'budget.allocated'?, 'budget.used'?, 'budget.yielded'?, 'error.message'? }`. `status` is `ok`, `error`, `timeout`, or `skipped` (disabled layer, kept init state, or `onReturn` with no child state). Peek recalls record nothing.
+Each call of a traced hook (`init`, `recall`, `store`, `onSpawn`, `onReturn`, `onParentUpdate`, `onComplete`, `dispose`) adds a `layer.hook` event (`NoeticEvent.LAYER_HOOK`) to the span of the context it runs in, with `LayerTraceSpan` attributes flattened to scalars: `{ layerId, hook, duration, status, itemCount?, 'budget.allocated'?, 'budget.used'?, 'budget.yielded'?, 'error.message'? }`. `status` is `ok`, `error`, `timeout`, or `skipped` (disabled layer, kept init state, or `onReturn` with no child state). Peek recalls record nothing.
 
 ### onItemAppend
 

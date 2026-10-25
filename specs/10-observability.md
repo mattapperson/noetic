@@ -188,14 +188,14 @@ Channel conditions that lose data or risk a stall without failing the run (see `
 
 ## Context Layer Trace Spans
 
-Every call of a context layer's `init`, `recall`, `store`, `onSpawn`, `onReturn`, `onComplete`, or `dispose` hook is recorded as a `layer.hook` event (`NoeticEvent.LAYER_HOOK`) on the span of the context the hook runs in (see also `11-context-layer-system`). Events rather than child spans: the `ExecutionContext` a hook gets can annotate its span (`ctx.trace`) but not open one, and `@noetic-tools/context` cannot import the runtime that can. Each event is shaped as a `LayerTraceSpan`:
+Every call of a context layer's `init`, `recall`, `store`, `onSpawn`, `onReturn`, `onParentUpdate`, `onComplete`, or `dispose` hook is recorded as a `layer.hook` event (`NoeticEvent.LAYER_HOOK`) on the span of the context the hook runs in (see also `11-context-layer-system`). Events rather than child spans: the `ExecutionContext` a hook gets can annotate its span (`ctx.trace`) but not open one, and `@noetic-tools/context` cannot import the runtime that can. Each event is shaped as a `LayerTraceSpan`:
 
 ```typescript
 interface LayerTraceSpan {
   /** Layer that produced this record. */
   layerId: string;
   /** Which hook was invoked. */
-  hook: 'init' | 'recall' | 'store' | 'onSpawn' | 'onReturn' | 'onComplete' | 'dispose';
+  hook: 'init' | 'recall' | 'store' | 'onSpawn' | 'onReturn' | 'onParentUpdate' | 'onComplete' | 'dispose';
   /** Wall-clock duration in milliseconds; 0 when skipped. */
   duration: number;
   /** How the call ended. */

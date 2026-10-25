@@ -458,6 +458,8 @@ export type {
   LayerPlacement,
   LayerProvides,
   LayerTimeouts,
+  ParentUpdateParams,
+  ParentUpdateResult,
   ProjectionPolicy,
   RecallParams,
   RecallResult,
