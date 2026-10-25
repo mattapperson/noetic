@@ -293,7 +293,7 @@ const doc = JSON.parse(String(runSpan.attributes.get(NoeticAttr.WORKFLOW_DOCUMEN
 
 ## Context Anchoring Attributes
 
-`NoeticAttr` also reserves names for the [prompt-cache anchoring](/docs/framework/context-layers#prompt-cache-anchoring) data behind an assembled context window. The runtime does not stamp these itself — use them from a hook or custom exporter so anchoring behaviour lands in your backend under stable keys rather than ad-hoc ones.
+Each `callModel` step stamps how its view was banded for [prompt-cache anchoring](/docs/framework/context-layers#prompt-cache-anchoring) onto its first `llm.call` span — the first tool round of its first attempt. A steering retry re-sends the same view and later tool rounds only extend it, so their spans carry none of these. Nothing is stamped when anchoring is off.
 
 | Constant | Value | Description |
 |---|---|---|
@@ -303,25 +303,17 @@ const doc = JSON.parse(String(runSpan.attributes.get(NoeticAttr.WORKFLOW_DOCUMEN
 | `NoeticAttr.CONTEXT_ANCHOR_TOKENS` | `'noetic.context.anchor_tokens'` | Tokens in the anchor band (the cache-stable prefix). |
 | `NoeticAttr.CONTEXT_LIVE_TOKENS` | `'noetic.context.live_tokens'` | Tokens in the live band, rendered after history. |
 | `NoeticAttr.CONTEXT_DELTA_TOKENS` | `'noetic.context.delta_tokens'` | Tokens spent superseding stale anchors. |
-| `NoeticAttr.CONTEXT_LAYER_PLACEMENTS` | `'noetic.context.layer_placements'` | JSON array of `{ id, placement, served }` per contributing layer. |
+| `NoeticAttr.CONTEXT_LAYER_PLACEMENTS` | `'noetic.context.layer_placements'` | JSON array of `{ id, placement, served, changed }` per contributing layer. |
 | `NoeticAttr.CONTEXT_LAYER_CHURN` | `'noetic.context.layer_churn'` | JSON array of `{ id, rate, rebillTokens }` per contributing layer. |
-
-Every value comes from `ctx.lastLayerUsage` after a model call:
 
 ```ts validate=none
 import { NoeticAttr } from '@noetic-tools/core';
 
-const usage = ctx.lastLayerUsage;
-if (usage?.epoch) {
-  ctx.span.setAttribute(NoeticAttr.CONTEXT_EPOCH_ID, usage.epoch.id);
-  ctx.span.setAttribute(NoeticAttr.CONTEXT_EPOCH_AGE, usage.epoch.age);
-  ctx.span.setAttribute(NoeticAttr.CONTEXT_ANCHOR_TOKENS, usage.epoch.anchorTokens);
-  ctx.span.setAttribute(
-    NoeticAttr.CONTEXT_LAYER_PLACEMENTS,
-    JSON.stringify(
-      usage.layers.map((l) => ({ id: l.layerId, placement: l.placement, served: l.served })),
-    ),
-  );
+for (const span of exporter.getSpansByName('llm.call')) {
+  const reason = span.attributes.get(NoeticAttr.CONTEXT_REANCHOR_REASON);
+  if (reason !== undefined) {
+    console.log(`${span.attributes.get(NoeticAttr.NODE_ID)} re-anchored: ${reason}`);
+  }
 }
 ```
 

@@ -155,7 +155,7 @@ A harness constructed without a `traceExporter` uses a `NoopExporter`, so emissi
 
 ## Context Anchoring Attributes
 
-Each callModel step stamps how its view was banded onto the step's span, so an expensive run can be traced back to the layer that keeps invalidating the prompt prefix (spec 11, Prompt-Cache Anchoring). Nothing is stamped when anchoring is switched off.
+Each callModel step stamps how its view was banded onto its first `llm.call` span — the first tool round of its first attempt — so an expensive run can be traced back to the layer that keeps invalidating the prompt prefix (spec 11, Prompt-Cache Anchoring). The view is assembled once per step: a steering retry re-sends it and later tool rounds only extend it, so their `llm.call` spans carry none of these attributes, and each step's values stay on its own span. Nothing is stamped when anchoring is switched off.
 
 | Attribute | Type | Description |
 |-----------|------|-------------|

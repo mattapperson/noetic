@@ -71,7 +71,7 @@ import { openChildSpan, traceChild } from './child-span';
 import { cloneWithGuard } from './clone-guard';
 import { collectAllTools, deduplicateTools } from './collect-tools';
 import type { BandedView } from './context-assembly';
-import { prepareBandedView, stampAnchoringAttributes } from './context-assembly';
+import { anchoringAttributes, prepareBandedView } from './context-assembly';
 import { trackUsage } from './message-helpers';
 import { wrapModelError } from './model-error';
 import { parseStructuredOutput } from './structured-output';
@@ -577,6 +577,7 @@ interface BuildModelRequestParams<TContext, I, O> {
   outputSchema: StandardSchemaV1<unknown, O> | undefined;
   serverToolSpecs: ServerToolSpec[];
   assembledItems: ReadonlyArray<Item>;
+  spanAttributes: Record<string, string | number | boolean> | undefined;
 }
 
 /**
@@ -609,6 +610,7 @@ function buildModelRequest<TContext, I, O>(
     layers,
     nodeId: step.id,
     parentSpan: ctx.span,
+    spanAttributes: params.spanAttributes,
     signal,
   };
   if (params.resolvedTools) {
@@ -764,7 +766,9 @@ export async function executeCallModel<TContext, I, O>(
     systemPromptItems: [],
     budgets: budgetMap,
   });
-  stampAnchoringAttributes(baseCtx.span, banded);
+  // Stamped once per assembly, like the cache judgement below: a steering
+  // retry re-sends the same view, so only the first attempt carries them.
+  let spanAttributes = anchoringAttributes(banded);
 
   let retries = 0;
   // Guidance from a steering retry rides at the very end of the view, after the
@@ -792,7 +796,9 @@ export async function executeCallModel<TContext, I, O>(
       outputSchema,
       serverToolSpecs,
       assembledItems,
+      spanAttributes,
     });
+    spanAttributes = undefined;
     const response = await baseCtx.harness.callModel(request).catch((e: unknown) => {
       throw wrapModelError(e, step.id, baseCtx);
     });

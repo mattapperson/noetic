@@ -144,6 +144,9 @@ describe('traceExporter wiring (issue #50)', () => {
         countingTool,
       ],
       ctx,
+      spanAttributes: {
+        'noetic.context.epoch.age': 3,
+      },
     });
 
     const modelSpans = exporter.spans.filter((s) => s.attributes.has(GenAI.REQUEST_MODEL));
@@ -152,6 +155,9 @@ describe('traceExporter wiring (issue #50)', () => {
     expect(firstModelSpan?.attributes.get(GenAI.USAGE_INPUT_TOKENS)).toBe(5);
     expect(firstModelSpan?.attributes.get(GenAI.USAGE_OUTPUT_TOKENS)).toBe(2);
     expect(firstModelSpan?.attributes.get(GenAI.COST)).toBe(0.001);
+    // Request span attributes land on the first round's span only.
+    expect(firstModelSpan?.attributes.get('noetic.context.epoch.age')).toBe(3);
+    expect(modelSpans[1]?.attributes.has('noetic.context.epoch.age')).toBe(false);
 
     const toolSpans = exporter.spans.filter((s) => s.attributes.get(ToolAttr.NAME) === 'count');
     expect(toolSpans.length).toBe(1);

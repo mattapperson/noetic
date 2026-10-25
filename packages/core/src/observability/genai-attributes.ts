@@ -32,8 +32,8 @@ export const NoeticAttr = {
   /** JSON array of `{ from, to }` parent→child edges between declared nodes. */
   WORKFLOW_EDGES: 'noetic.workflow.edges',
   /**
-   * Id of the step a span belongs to: the declared workflow node of an
-   * `llm.call`/`tool.call`, the `decide` step of a `decide.call`, the `spawn`
+   * Id of the step a span belongs to: the `callModel` step of an
+   * `llm.call`/`tool.call` (or the `invokeTool` step of its `tool.call`), the `decide` step of a `decide.call`, the `spawn`
    * step of a `spawn` span, the path step of an `inParallel.path` span.
    */
   NODE_ID: 'noetic.node.id',
@@ -63,7 +63,7 @@ export const NoeticAttr = {
   CONTEXT_LIVE_TOKENS: 'noetic.context.live_tokens',
   /** Tokens spent superseding stale anchors. */
   CONTEXT_DELTA_TOKENS: 'noetic.context.delta_tokens',
-  /** JSON array of `{ id, placement, served }` per contributing layer. */
+  /** JSON array of `{ id, placement, served, changed }` per contributing layer. */
   CONTEXT_LAYER_PLACEMENTS: 'noetic.context.layer_placements',
   /** JSON array of `{ id, rate, rebillTokens }` per contributing layer. */
   CONTEXT_LAYER_CHURN: 'noetic.context.layer_churn',

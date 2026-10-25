@@ -384,6 +384,8 @@ class CallSpanCollector {
     private readonly exporter: TraceExporter,
     private readonly parent: Span | null,
     private readonly nodeId: string | undefined,
+    /** Stamped on the first model span only, then dropped. */
+    private firstSpanAttributes: Record<string, string | number | boolean> | undefined,
   ) {}
 
   /** Link a span back to its declared workflow node, when the call carries one. */
@@ -399,6 +401,10 @@ class CallSpanCollector {
     span.setAttribute(GenAI.SYSTEM, 'openrouter');
     span.setAttribute(GenAI.REQUEST_MODEL, model);
     this.stampNode(span);
+    for (const [key, value] of Object.entries(this.firstSpanAttributes ?? {})) {
+      span.setAttribute(key, value);
+    }
+    this.firstSpanAttributes = undefined;
     this.spans.push(span);
     return span;
   }
@@ -447,6 +453,7 @@ export class AgentHarnessModelCaller {
       this.opts.traceExporter,
       request.parentSpan ?? request.ctx?.span ?? null,
       request.nodeId,
+      request.spanAttributes,
     );
   }
 
