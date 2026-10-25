@@ -231,6 +231,7 @@ The runtime applies these invariants uniformly across the lifecycle:
 - **`onReturn` requirements.** Only the *child*'s state is required to merge. A parent that never initialized state can still be seeded from the child; `onReturn` is skipped only when the child produced no state.
 - **Child boundaries.** Both `spawn` (spec 04) and each `inParallel` path (spec 03) are child executions and run the `onSpawn`/`onReturn` pair. inParallel paths merge one at a time even when they execute concurrently, so each merge sees the previous path's contribution.
 - **`onSpawn` for init-less layers.** `onSpawn` runs for layers with no `init` hook (state legitimately `undefined`), consistent with `recall`. Only disabled layers (init present, no state) are skipped.
+- **Opting out of a child.** An `onSpawn` that returns `null` — or throws or times out — sets the same disabled flag for the *child's* execution, so none of the layer's hooks run in that child (init-less layers included). The parent is unaffected. `{ childState: null, items }` is not an opt-out: the items are injected and the child simply has no state for the layer.
 
 ---
 

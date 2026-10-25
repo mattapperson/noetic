@@ -39,8 +39,8 @@ The optional `context` field on `StepSpawn` provides **spawn-local context layer
 When `context` is not set, parent context layers propagate to the child normally, and each layer's `onSpawn` hook determines what state crosses the boundary:
 
 - A layer can return `{ childState }` to provide initial state in the child.
-- A layer can return `null` to disable itself in the child.
-- A layer can inject items into the child's initial ItemLog via `{ childState, items }`.
+- A layer can return `null` to disable itself in the child: none of its hooks run for the child's execution. An `onSpawn` that throws or times out disables the layer the same way.
+- A layer can inject items into the child's initial ItemLog via `{ childState, items }`. `{ childState: null, items }` injects the items without giving the child any state.
 
 ---
 

@@ -62,7 +62,8 @@ export interface LayerStateStore {
   flush?(executionId: string): Promise<void>;
   /**
    * Mark a layer disabled for an execution (its `init` failed with
-   * `onInitError: 'disable'`). Disabled layers are skipped by every later
+   * `onInitError: 'disable'`, or its `onSpawn` returned `null` or failed for
+   * a child execution). Disabled layers are skipped by every later
    * hook. Optional so custom stores keep compiling; without explicit
    * tracking, the lifecycle falls back to the legacy sentinel (init-bearing
    * layer with no state).
@@ -1065,16 +1066,24 @@ export async function spawnLayers({
             childCtx,
           }),
       });
-      if (result && result.childState !== null) {
-        store.set(childCtx.executionId, layer.id, result.childState);
-        results.push({
-          layerId: layer.id,
-          childState: result.childState,
-          items: layerItemSchemas(layer, itemSchemas).parseMany(result.items ?? []),
-        });
+      // A `null` result opts the layer out of this child: every later hook
+      // skips it for the child's execution.
+      if (!result) {
+        store.disable?.(childCtx.executionId, layer.id);
+        continue;
       }
+      // `childState: null` still injects items; the child just gets no state.
+      if (result.childState !== null) {
+        store.set(childCtx.executionId, layer.id, result.childState);
+      }
+      results.push({
+        layerId: layer.id,
+        childState: result.childState,
+        items: layerItemSchemas(layer, itemSchemas).parseMany(result.items ?? []),
+      });
     } catch (e) {
       store.diagnostic(layer.id, 'onSpawn', e);
+      store.disable?.(childCtx.executionId, layer.id);
     }
   }
   return results;

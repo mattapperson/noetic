@@ -4,12 +4,13 @@ import type { ContextLayer } from '@noetic-tools/context';
 import {
   createLayerStateStore,
   initLayers,
+  recallLayers,
   returnLayers,
   spawnLayers,
 } from '@noetic-tools/context';
 import { isNoeticError } from '@noetic-tools/types';
 import { NoeticEvent } from '../../src/observability/genai-attributes';
-import { makeCtx, makeItemLog, makeStorage } from '../_helpers';
+import { makeCtx, makeItemLog, makeMessage, makeStorage } from '../_helpers';
 
 type DataState = {
   data: string;
@@ -234,6 +235,133 @@ describe('returnLayers', () => {
       store,
     });
     expect(results).toHaveLength(0);
+  });
+
+  it('onSpawn returning null disables an init-less layer for the child only', async () => {
+    const store = createLayerStateStore();
+    const recalledFor: string[] = [];
+    const layers: ContextLayer[] = [
+      {
+        id: 'opt-out',
+        name: 'OptOut',
+        slot: 100,
+        scope: 'execution',
+        hooks: {
+          onSpawn: async () => null,
+          recall: async ({ ctx }) => {
+            recalledFor.push(ctx.executionId);
+            return 'hello';
+          },
+        },
+      },
+    ];
+    const parentCtx = makeCtx({
+      executionId: 'parent-optout',
+    });
+    const childCtx = makeCtx({
+      executionId: 'child-optout',
+      depth: 1,
+    });
+    await spawnLayers({
+      layers,
+      parentCtx,
+      childCtx,
+      store,
+    });
+    expect(store.isDisabled?.('child-optout', 'opt-out')).toBe(true);
+    expect(store.isDisabled?.('parent-optout', 'opt-out')).toBe(false);
+
+    for (const ctx of [
+      childCtx,
+      parentCtx,
+    ]) {
+      await recallLayers({
+        layers,
+        query: '',
+        ctx,
+        log: makeItemLog(),
+        budgets: new Map([
+          [
+            'opt-out',
+            1000,
+          ],
+        ]),
+        store,
+      });
+    }
+    expect(recalledFor).toEqual([
+      'parent-optout',
+    ]);
+  });
+
+  it('onSpawn with childState null injects items without setting child state', async () => {
+    const store = createLayerStateStore();
+    const layers: ContextLayer[] = [
+      {
+        id: 'briefing',
+        name: 'Briefing',
+        slot: 100,
+        scope: 'execution',
+        hooks: {
+          onSpawn: async () => ({
+            childState: null,
+            items: [
+              makeMessage('user', 'brief', 'b1'),
+            ],
+          }),
+        },
+      },
+    ];
+    const results = await spawnLayers({
+      layers,
+      parentCtx: makeCtx({
+        executionId: 'parent-brief',
+      }),
+      childCtx: makeCtx({
+        executionId: 'child-brief',
+        depth: 1,
+      }),
+      store,
+    });
+    expect(results.flatMap((r) => r.items)).toHaveLength(1);
+    expect(store.has?.('child-brief', 'briefing')).toBe(false);
+    expect(store.isDisabled?.('child-brief', 'briefing')).toBe(false);
+  });
+
+  it('a failing onSpawn disables the layer for the child and records a diagnostic', async () => {
+    const diagnostics: string[] = [];
+    const store = createLayerStateStore((layerId, hook) => {
+      diagnostics.push(`${layerId}:${hook}`);
+    });
+    const layers: ContextLayer[] = [
+      {
+        id: 'broken',
+        name: 'Broken',
+        slot: 100,
+        scope: 'execution',
+        hooks: {
+          onSpawn: async () => {
+            throw new Error('boom');
+          },
+        },
+      },
+    ];
+    const results = await spawnLayers({
+      layers,
+      parentCtx: makeCtx({
+        executionId: 'parent-broken',
+      }),
+      childCtx: makeCtx({
+        executionId: 'child-broken',
+        depth: 1,
+      }),
+      store,
+    });
+    expect(results).toHaveLength(0);
+    expect(store.isDisabled?.('child-broken', 'broken')).toBe(true);
+    expect(diagnostics).toEqual([
+      'broken:onSpawn',
+    ]);
   });
 
   it('onReturn transforms result through the pipeline', async () => {
