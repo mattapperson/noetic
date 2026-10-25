@@ -128,6 +128,7 @@ Call an LLM with instructions and optional tools. Every `tools` entry is a unifo
 | `model` | `string` | `'openai/gpt-4o'` | Model identifier (OpenRouter format). |
 | `instructions` | `string` | required | System/user prompt for the LLM. |
 | `tools` | `{ type: string, parameters?: object }[]` | `undefined` | Uniform tool entries. **Client tool**: `{ "type": "<registered-tool-name>" }` — `type` is resolved against the registry; any `parameters` is ignored (the model supplies call args at runtime). **Server tool**: `{ "type": "openrouter:web_search" \| "openrouter:web_fetch", "parameters"?: {...} }` — run by the provider; `parameters` keys are camelCase (e.g. `maxResults`, `searchContextSize`), unknown keys dropped. Client vs server is decided by the `type` value. |
+| `toolChoice` | `"auto" \| "required" \| "none" \| { tool: string }` | `"auto"` | How the model may use its tools (see [Tool Choice](/docs/framework/steps/call-model#tool-choice)). `{ "tool": "<registered-tool-name>" }` must name a client tool in `tools`, or hydration throws `UNKNOWN_TOOL_CHOICE`. |
 | `params` | `object` | `undefined` | Model parameters: `temperature`, `topP`, `maxTokens`, `serviceTier` (`auto`, `default`, `fast`, `flex`, `priority`, `scale`, `ultrafast`). `stopSequences` is accepted but deprecated and never sent. |
 
 ### runCode

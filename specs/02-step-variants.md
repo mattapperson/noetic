@@ -66,6 +66,7 @@ interface CallModelOpts<TContext, O, I = unknown> extends StepReplay<TContext, I
   // Allowed tool subset (undefined = all, [] = none). A `ServerToolSpec` is an
   // OpenRouter server tool the provider executes itself (e.g. web search).
   tools?: Lazy<(Tool | ServerToolSpec)[] | undefined, TContext>;
+  toolChoice?: ToolChoice;                         // how the model may use its tools (see Unified Tool Set)
   output?: StandardSchemaV1<unknown, O> | OutputCodec<O>;        // structured output schema or streaming codec (see 28-generative-ui)
   outputJsonSchema?: Record<string, unknown>;     // explicit JSON Schema override for non-Zod `output`
   params?: ModelParams;                            // temperature, topP, etc.
@@ -82,7 +83,13 @@ interface ModelParams {
 
 // ESM literal enum (`ServiceTier.Ultrafast`, ...) plus the matching union type.
 type ServiceTier = 'auto' | 'default' | 'fast' | 'flex' | 'priority' | 'scale' | 'ultrafast';
+
+// ESM literal enum (`ToolChoiceMode.Required`, ...) plus the matching union type.
+type ToolChoiceMode = 'auto' | 'required' | 'none';
+type ToolChoice = ToolChoiceMode | { tool: string };  // { tool } forces one client tool by name
 ```
+
+`toolChoice` sits on the step (and on `CallModelRequest`), not in `ModelParams`: it is read against the step's `tools`, and `ModelParams` holds only sampling knobs forwarded unchanged.
 
 `serviceTier` asks OpenRouter for a processing tier: `fast` is an alias for `priority`; `ultrafast` prefers ultrafast endpoints and falls back to `priority`, then default endpoints. The tier the provider actually served lands on `LLMResponse.serviceTier` (taken from the last round) and on `ctx.lastStepMeta.serviceTier`. Both stay `undefined` when the provider reports no tier — they never echo the requested value, so a mismatch with the request means a fallback happened.
 
@@ -167,18 +174,26 @@ The unified set is the pool every `callModel` step draws from. A step narrows it
 
 Every LLM call that may use a client tool receives the full unified tool set, in the same order, so the tool definitions — part of the provider's prompt-cache prefix — are byte-identical across every step in the tree, whatever each step allows. The restriction travels separately, in two layers:
 
-1. **Request.** The step's allowed subset is sent as the request's tool choice, which the model honours when picking a tool. The mapping from `tools` to `tool_choice`:
+1. **Request.** The step's allowed subset is sent as the request's tool choice, which the model honours when picking a tool. The step's `toolChoice` (default `'auto'`) picks the mode. The mapping from `tools` and `toolChoice` to `tool_choice`:
 
-   | Step `tools` | Tools sent | `tool_choice` |
-   |---|---|---|
-   | omitted | full unified set | not set (provider default, `auto`) |
-   | `[a, b]` | full unified set | `{ type: "allowed_tools", mode: "auto", tools: [{ type: "function", name: "a" }, { type: "function", name: "b" }, ...server tools] }` |
-   | `[]`, or a subset that names no tool in the set | none | not set |
+   | Step `tools` | `toolChoice` | Tools sent | `tool_choice` |
+   |---|---|---|---|
+   | omitted | `'auto'` | full unified set | not set (provider default, `auto`) |
+   | `[a, b]` | `'auto'` | full unified set | `{ type: "allowed_tools", mode: "auto", tools: [{ type: "function", name: "a" }, { type: "function", name: "b" }, ...server tools] }` |
+   | omitted | `'required'` | full unified set | `"required"` |
+   | `[a, b]` | `'required'` | full unified set | `allowed_tools` as above, with `mode: "required"` |
+   | omitted or `[a, b]` | `'none'` | full unified set | `"none"` |
+   | omitted or `[a, b]` | `{ tool: 'a' }` | full unified set | `{ type: "function", name: "a" }` |
+   | `[]`, or a subset that names no tool in the set | any but `{ tool }` | none | not set |
 
-   Function names in `allowed_tools` are the sanitised wire names the model sees. Server tools (`ServerToolSpec` entries, run by the provider) are appended to the tools sent and, when the step restricts, listed in `allowed_tools` as `{ type: "<server tool type>" }`. `mode` is always `auto`: the model may answer without calling a tool.
+   Function names in `tool_choice` are the sanitised wire names the model sees. Server tools (`ServerToolSpec` entries, run by the provider) are appended to the tools sent and, when the step restricts, listed in `allowed_tools` as `{ type: "<server tool type>" }`. A call that sends only server tools gets `"required"` or `"none"` when asked, and no choice otherwise.
+
+   `'required'` and `{ tool }` force a tool call, so they hold only until the model has called a tool: every round after a tool round goes back to `'auto'` (the step's `allowed_tools` restriction, or no choice). Without this each round would force another call until the round cap. `'none'` holds on every round. `'none'` keeps the full tool list rather than dropping it, so the call shares the cache prefix of the steps around it.
+
+   `{ tool }` must name a client tool the call may run. `callModel()` throws `NoeticConfigError` `UNKNOWN_TOOL_CHOICE` at build time when `tools` is an eager array without that tool (server tools cannot be forced); otherwise the harness throws the same error at request time, before anything is sent, when the tool is outside the unified set or the step's restriction.
 2. **Execution.** The harness tool loop (see Tool Call Execution) only runs tools in the allowed subset. A function call naming any other tool — a provider that ignores `allowed_tools`, or a model that names a tool anyway — is answered with an `Error: unknown tool '<name>'` tool result and never runs.
 
-A step with no tools sends none rather than the full set with `tool_choice: "none"`: some models still write tool-call syntax as text when told not to call, so withholding the list is the safer way to say "no tools".
+A step with `tools: []` sends no tools rather than the full set with `tool_choice: "none"`: some models still write tool-call syntax as text when told not to call, so withholding the list is the safer way to say "no tools". `toolChoice: 'none'` is the other trade: it keeps the cache prefix and relies on the provider to honour `"none"`.
 
 ### OpenRouter Integration
 
@@ -187,7 +202,7 @@ The agent harness delegates LLM calls to the `@openrouter/sdk` internally. It:
 1. Merges the step's resolved instructions with any system-role messages extracted from the View, joined by `\n\n` (see What the LLM Actually Sees). If only one source is present, that one is used. If neither is present, `instructions` is `undefined`.
 2. Converts Noetic `Item[]` to OpenResponses input format.
 3. Converts the unified `Tool[]` into SDK tool definitions — name, description and input JSON Schema, with no `execute`, so the SDK never runs a tool itself — and appends any server tools for the provider to run.
-4. Passes the step's restriction as `toolChoice: { type: "allowed_tools", ... }` when the step restricts tools (see Unified Tool Set).
+4. Passes the step's restriction and `toolChoice` as the SDK's `toolChoice` (see Unified Tool Set).
 5. Calls the SDK's `callModel()` once per round of the harness tool loop (see Tool Call Execution).
 6. Converts each round's response back to Noetic `Item[]` and folds the rounds into one `LLMResponse`.
 

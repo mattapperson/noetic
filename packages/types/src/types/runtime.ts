@@ -1,6 +1,6 @@
 import type { StandardSchemaV1 } from '@standard-schema/spec';
 import type { Channel, ChannelHandle, ExternalChannel } from './channel';
-import type { LLMResponse, ModelParams, ServerToolSpec } from './common';
+import type { LLMResponse, ModelParams, ServerToolSpec, ToolChoice } from './common';
 import type { Context, CwdState, RestoreContextOptions } from './context';
 import type { ContextCacheConfig, ContextCacheStore } from './context-cache';
 import type {
@@ -77,6 +77,12 @@ interface CallModelRequestBase {
   items: ReadonlyArray<Item>;
   instructions?: string;
   params?: ModelParams;
+  /**
+   * How the model may use its tools. Defaults to `'auto'`. Combines with
+   * `allowedToolNames` (spec 02, Unified Tool Set). A `{ tool }` naming a tool
+   * the call cannot run throws `NoeticConfigError` `UNKNOWN_TOOL_CHOICE`.
+   */
+  toolChoice?: ToolChoice;
   /** When provided, the harness sends a JSON Schema constraint to the model so it returns structured JSON. */
   outputSchema?: StandardSchemaV1;
   /**

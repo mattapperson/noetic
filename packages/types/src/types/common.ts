@@ -71,6 +71,30 @@ export const ServiceTier = {
 export type ServiceTier = (typeof ServiceTier)[keyof typeof ServiceTier];
 
 /**
+ * @public How a model call may use its tools. `auto` lets the model decide,
+ * `required` makes it call at least one tool, `none` forbids tool calls.
+ */
+export const ToolChoiceMode = {
+  Auto: 'auto',
+  Required: 'required',
+  None: 'none',
+} as const;
+
+/** @public Union of {@link ToolChoiceMode} values. */
+export type ToolChoiceMode = (typeof ToolChoiceMode)[keyof typeof ToolChoiceMode];
+
+/**
+ * @public Tool choice for a model call: a {@link ToolChoiceMode}, or
+ * `{ tool: name }` to force a call to one client tool. It combines with the
+ * step's `tools` restriction (spec 02, Unified Tool Set).
+ */
+export type ToolChoice =
+  | ToolChoiceMode
+  | {
+      tool: string;
+    };
+
+/**
  * Optional parameters forwarded to the model provider during an LLM step.
  * @public
  */

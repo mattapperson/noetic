@@ -42,6 +42,7 @@ callModel<TContext = ContextData, I = unknown, O = unknown>({
   model: Lazy<string, TContext>;                    // eager string or (ctx) => string
   instructions?: Lazy<string | undefined, TContext>;
   tools?: Lazy<Tool[] | undefined, TContext>;       // allowed tool subset (undefined = all, [] = none)
+  toolChoice?: ToolChoice;                          // 'auto' (default) | 'required' | 'none' | { tool: name }
   output?: StandardSchemaV1<unknown, O> | OutputCodec<O>;  // any Standard Schema v1 (Zod default) OR a streaming codec (see Generative UI)
   outputJsonSchema?: Record<string, unknown>;            // explicit fallback/override after Zod and StandardJSONSchemaV1
   params?: ModelParams;                             // temperature, topP, maxTokens, serviceTier (stopSequences: deprecated, ignored)
@@ -52,6 +53,8 @@ callModel<TContext = ContextData, I = unknown, O = unknown>({
 **Service tier.** `params.serviceTier` (a `ServiceTier` value: `auto`, `default`, `fast`, `flex`, `priority`, `scale`, `ultrafast`) is forwarded to OpenRouter unchanged. The served tier lands on `ctx.lastStepMeta.serviceTier` / `LLMResponse.serviceTier`, `undefined` when the provider reports none (never an echo of the request). JSON workflows accept the same field under a `callModel` node's `params`.
 
 `tools` specifies which tools the model may invoke for this step. Before execution, the harness collects all tools from every `callModel` step in the tree into a unified set. Every LLM call sends the full set (keeping the tool prefix prompt-cache stable across steps), while `tools` narrows the allowed subset via `tool_choice: { type: "allowed_tools", mode: "auto" }`; the harness also answers a call to any other tool with an `Error: unknown tool` result instead of running it. Omit `tools` to allow all; set `tools: []` to disable tools for the step.
+
+**Tool choice.** `toolChoice` (a `ToolChoice`: a `ToolChoiceMode` value `'auto' | 'required' | 'none'`, or `{ tool: name }`) works inside the `tools` restriction and always keeps the full tool set on the wire. `'required'` restricted → `allowed_tools` with `mode: "required"`, unrestricted → `"required"`; `'none'` → `"none"`; `{ tool }` → `{ type: "function", name: <wire name> }`. `'required'` and `{ tool }` apply to the first model request only; once the model has called a tool, later rounds revert to `'auto'`. `{ tool }` naming a client tool missing from an eager `tools` array throws `UNKNOWN_TOOL_CHOICE` at build time; with omitted or lazy `tools` it throws at request time if the tool is outside the unified set or restriction. JSON `callModel` nodes take the same `toolChoice` field.
 
 **Lazy params.** `model`, `instructions`, and `tools` each accept either an eager value or a `(ctx) => value` getter resolved at step execution. Getters see the live `Context`, so a step can read `ctx.harness.config.params` or `ctx.unifiedTools` to produce per-run values without baking them in at build time. Function-form `tools` are NOT walked by `collectAllTools`; tools needed in the harness-wide pool should be registered via `AgentHarness.tools`. Eager `model` strings are validated at build time (empty → `MISSING_MODEL`); function-form models are validated after resolution with the same error code.
 

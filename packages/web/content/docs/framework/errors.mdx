@@ -260,6 +260,12 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 **Fix:** Pass a non-empty model id such as `'anthropic/claude-sonnet-4-20250514'`. For `decide`, set `model` on the step or `decisionModel` on the harness.
 
+#### UNKNOWN_TOOL_CHOICE
+
+**Cause:** A `callModel` step's `toolChoice: { tool }` names a tool the step cannot call. `callModel()` (and the JSON hydrator) throws it at build time when `tools` is an eager array without that client tool; the harness throws it at request time, before anything is sent, when the tool is outside the unified tool set or the step's restriction.
+
+**Fix:** Force a client tool the step offers — add it to `tools`, or register it through a context layer — or use `toolChoice: 'required'` to make the model call any allowed tool. Server tools cannot be forced.
+
 #### MISSING_JSON_SCHEMA
 
 **Cause:** A tool input schema or a structured-output schema cannot be turned into JSON Schema for the model.

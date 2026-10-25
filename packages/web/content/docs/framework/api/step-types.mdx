@@ -70,6 +70,7 @@ Every step interface extends `StepReplay<TContext, I>`, so these fields apply to
 | `model` | `string` | yes | Model identifier |
 | `instructions` | `string` | no | System prompt / instructions for the model |
 | `tools` | `Tool[]` | no | Allowed tool subset (`undefined` = all, `[]` = none) |
+| `toolChoice` | `ToolChoice` | no | `'auto'` (default), `'required'`, `'none'`, or `{ tool: name }`; see [Tool Choice](/docs/framework/steps/call-model#tool-choice) |
 | `output` | `StandardSchemaV1<unknown, O> \| OutputCodec<O>` | no | Structured output schema (any Standard Schema v1; Zod is the default) or a streaming codec |
 | `outputJsonSchema` | `Record<string, unknown>` | no | Explicit JSON Schema override/fallback for non-Zod output. Conversion order is Zod → StandardJSONSchemaV1 → this field; validation-only schemas require it |
 | `params` | `ModelParams` | no | Sampling parameters |
@@ -320,6 +321,10 @@ type MergeFn<TContext = ContextData, O = unknown, R = O> = (
 | `maxTokens` | `number` | Max response tokens (optional) |
 | `stopSequences` | `string[]` | Deprecated and ignored (optional) — the OpenRouter Responses API has no stop parameter, so it is never sent |
 | `serviceTier` | `ServiceTier` | OpenRouter service tier (optional); the served tier lands on `StepMeta.serviceTier` |
+
+### ToolChoice
+
+`ToolChoiceMode | { tool: string }`. `ToolChoiceMode` is an ESM literal enum: `Auto` (`'auto'`), `Required` (`'required'`), `None` (`'none'`). `{ tool }` forces one client tool by name.
 
 ### Tool
 

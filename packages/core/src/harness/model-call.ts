@@ -10,9 +10,10 @@ import type {
   Span,
   StandardSchemaV1,
   Tool,
+  ToolChoice,
   TraceExporter,
 } from '@noetic-tools/types';
-import { frameworkCast, NoeticConfigError } from '@noetic-tools/types';
+import { frameworkCast, NoeticConfigError, ToolChoiceMode } from '@noetic-tools/types';
 import type * as OpenRouterAgent from '@openrouter/agent';
 import type { OpenRouter } from '@openrouter/agent';
 import { serverTool } from '@openrouter/agent';
@@ -291,7 +292,15 @@ interface PreparedModelRequest {
   remaining: ReadonlyArray<Item>;
   broadcaster?: EventBroadcaster;
   sdkTools?: ReturnType<typeof convertTools>;
-  toolChoice?: OpenRouterAgent.CallModelInput['toolChoice'];
+  /**
+   * The wire tool choice, by round. A forcing choice (`required`, `{ tool }`)
+   * holds only until the model has called a tool; later rounds fall back to
+   * `auto`, or every round would force another call until the round limit.
+   */
+  toolChoice: {
+    first: WireToolChoice;
+    rest: WireToolChoice;
+  };
   /**
    * The tools this call may run: the request's tools narrowed to
    * `allowedToolNames`. A call to any other tool is answered as unknown, so a
@@ -345,7 +354,12 @@ function prepareModelRequest(request: CallModelRequest, agentName: string): Prep
     remaining,
     broadcaster,
     sdkTools: sdkTools.length > 0 ? sdkTools : undefined,
-    toolChoice: clientSdkTools.length > 0 ? allowedToolsChoice(request, allowedTools) : undefined,
+    toolChoice: roundToolChoices({
+      request,
+      allowedTools,
+      sendsClientTools: clientSdkTools.length > 0,
+      sendsTools: sdkTools.length > 0,
+    }),
     allowedTools,
     emitIfAllowed(eventType, data) {
       if (!shouldEmit(request.emit, eventType, data)) {
@@ -361,21 +375,76 @@ function prepareModelRequest(request: CallModelRequest, agentName: string): Prep
   };
 }
 
+type WireToolChoice = OpenRouterAgent.CallModelInput['toolChoice'];
+
+interface ToolChoiceScope {
+  request: CallModelRequest;
+  allowedTools: ReadonlyArray<Tool>;
+  sendsClientTools: boolean;
+  sendsTools: boolean;
+}
+
+function roundToolChoices(scope: ToolChoiceScope): PreparedModelRequest['toolChoice'] {
+  const choice = scope.request.toolChoice ?? ToolChoiceMode.Auto;
+  return {
+    first: wireToolChoice(scope, choice),
+    rest: wireToolChoice(scope, choice === ToolChoiceMode.None ? choice : ToolChoiceMode.Auto),
+  };
+}
+
 /**
- * Restrict the model to `allowedTools` (plus the step's server tools) with an
- * `allowed_tools` choice. Unrestricted calls send none, leaving the provider
- * default (`auto`).
+ * Map a `toolChoice` onto the wire, inside the step's restriction.
+ * A restricted call narrows with an `allowed_tools` choice (plus the step's
+ * server tools) rather than by trimming `tools`, so the request keeps the
+ * shared cache prefix. `none` keeps the tools too, for the same reason. A call
+ * that sends no tools sends no choice.
+ *
+ * @throws NoeticConfigError `UNKNOWN_TOOL_CHOICE` when `{ tool }` names a tool
+ *   this call cannot run.
  */
+function wireToolChoice(scope: ToolChoiceScope, choice: ToolChoice): WireToolChoice {
+  const { request, allowedTools } = scope;
+  if (typeof choice === 'object') {
+    return forcedToolChoice(choice.tool, allowedTools);
+  }
+  if (!scope.sendsTools) {
+    return undefined;
+  }
+  if (choice === ToolChoiceMode.None) {
+    return 'none';
+  }
+  if (request.allowedToolNames && scope.sendsClientTools) {
+    return allowedToolsChoice(request, allowedTools, choice);
+  }
+  return choice === ToolChoiceMode.Required ? 'required' : undefined;
+}
+
+/** Force one function tool. It must be one the call may run. */
+function forcedToolChoice(name: string, allowedTools: ReadonlyArray<Tool>): WireToolChoice {
+  const tool = allowedTools.find((candidate) => candidate.name === name);
+  if (!tool) {
+    const offered = allowedTools.map((t) => t.name).join(', ') || 'none';
+    throw new NoeticConfigError({
+      code: 'UNKNOWN_TOOL_CHOICE',
+      message: `toolChoice forces tool ${JSON.stringify(name)}, which this model call cannot run.`,
+      hint: `Force a tool the call offers (offered: ${offered}), or give '${name}' to the step or a context layer.`,
+    });
+  }
+  return {
+    type: 'function',
+    name: sanitizeToolNameForWire(tool.name),
+  };
+}
+
+/** Restrict the model to `allowedTools` (plus the step's server tools). */
 function allowedToolsChoice(
   request: CallModelRequest,
   allowedTools: ReadonlyArray<Tool>,
-): OpenRouterAgent.CallModelInput['toolChoice'] {
-  if (!request.allowedToolNames) {
-    return undefined;
-  }
+  mode: typeof ToolChoiceMode.Auto | typeof ToolChoiceMode.Required,
+): WireToolChoice {
   return {
     type: 'allowed_tools',
-    mode: 'auto',
+    mode,
     tools: [
       ...allowedTools.map((tool) => ({
         type: 'function',
@@ -641,7 +710,7 @@ export class AgentHarnessModelCaller {
           input: modelInput,
           instructions: prepared.instructions,
           tools: prepared.sdkTools,
-          toolChoice: prepared.toolChoice,
+          toolChoice: round === 0 ? prepared.toolChoice.first : prepared.toolChoice.rest,
           temperature: request.params?.temperature,
           maxOutputTokens: request.params?.maxTokens,
           topP: request.params?.topP,

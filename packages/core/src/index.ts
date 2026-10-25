@@ -321,6 +321,7 @@ export type {
   StepMeta,
   TokenUsage,
   Tool,
+  ToolChoice,
   ToolContextDeclaration,
   UsageCharge,
 } from '@noetic-tools/types';
@@ -331,6 +332,7 @@ export {
   isZodSchema,
   ServiceTier,
   standardIssuesToZodError,
+  ToolChoiceMode,
   validateSchema,
 } from '@noetic-tools/types';
 

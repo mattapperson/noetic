@@ -606,6 +606,7 @@ function buildModelRequest<TContext, I, O>(
     items: params.assembledItems,
     instructions: params.resolvedInstructions,
     params: step.params,
+    toolChoice: step.toolChoice,
     outputSchema: params.outputSchema,
     outputJsonSchema: params.step.outputJsonSchema,
     emit: step.emit,

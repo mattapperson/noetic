@@ -29,6 +29,7 @@ const chat = callModel({
 | `model` | `Lazy<string>` | Yes | Model identifier (e.g. `'openai/gpt-4o'`, `'claude-sonnet-4-20250514'`), or a `(ctx) => string` getter resolved per execution |
 | `instructions` | `Lazy<string \| undefined>` | No | System prompt, sent as the request's `instructions` field rather than as a conversation item. Any `system` messages in the log are appended to it. Accepts a `(ctx) => string \| undefined` getter |
 | `tools` | `Lazy<Tool[] \| undefined>` | No | Allowed tool subset (`undefined` = all, `[]` = none). Accepts a `(ctx) => Tool[] \| undefined` getter; function-form tools are resolved per execution and do not contribute to the pre-computed `ctx.unifiedTools` |
+| `toolChoice` | `ToolChoice` | No | How the model may use its tools: `'auto'` (default), `'required'`, `'none'`, or `{ tool: name }` to force one client tool. See [Tool Choice](#tool-choice) |
 | `output` | `StandardSchemaV1<unknown, O>` | No | Schema for structured output — any [Standard Schema v1](https://standardschema.dev) validator (Zod is the default) |
 | `outputJsonSchema` | `Record<string, unknown>` | No | Explicit JSON Schema override/fallback for non-Zod output. Zod uses its native converter; other validators can implement StandardJSONSchemaV1. A validation-only schema must provide this field or conversion throws `MISSING_JSON_SCHEMA` |
 | `params` | `ModelParams` | No | Generation parameters |
@@ -127,6 +128,51 @@ Before execution, the harness collects all tools from every callModel step in th
 - **`tools: undefined`** (or omitted) -- the model may call any tool in the unified set.
 - **`tools: [searchTool]`** -- the model may only call `searchTool`.
 - **`tools: []`** -- no tools are available for this step.
+
+### Tool Choice
+
+`toolChoice` says how the model may use the tools the step allows. It works inside the `tools` restriction, and every row still sends the full unified set, so the cache prefix holds:
+
+| `toolChoice` | Effect |
+| --- | --- |
+| `'auto'` (default) | The model decides whether to call a tool. |
+| `'required'` | The model must call at least one of the allowed tools. |
+| `'none'` | The model must not call a tool. The tools are still sent, to keep the cache prefix. |
+| `{ tool: 'search' }` | The model must call `search`. |
+
+`'required'` and `{ tool }` hold for the first model request only. Once the model has called a tool, the next rounds go back to `'auto'`, so the step can finish with an answer instead of calling tools until the round cap.
+
+```ts
+import { z } from 'zod';
+import { callModel, tool, ToolChoiceMode } from '@noetic-tools/core';
+
+const lookup = tool({
+  name: 'lookup',
+  description: 'Look up an order',
+  input: z.object({ orderId: z.string() }),
+  output: z.string(),
+  execute: async ({ orderId }) => `order ${orderId}: shipped`,
+});
+
+// Always start with a lookup.
+const support = callModel({
+  id: 'support',
+  model: 'openai/gpt-4o',
+  instructions: 'Answer questions about orders.',
+  tools: [lookup],
+  toolChoice: { tool: 'lookup' },
+});
+
+// Must use some tool, any allowed one.
+const triage = callModel({
+  id: 'triage',
+  model: 'openai/gpt-4o',
+  tools: [lookup],
+  toolChoice: ToolChoiceMode.Required,
+});
+```
+
+`{ tool }` must name a client tool the step may call. When `tools` is an eager array without it, `callModel()` throws [`UNKNOWN_TOOL_CHOICE`](/docs/framework/errors#unknown_tool_choice). When `tools` is omitted or a getter, the same error is thrown at request time if the tool is not in the unified set (or not in the getter's tools). Server tools cannot be forced.
 
 ### Auto-Injected Layer Tools
 
