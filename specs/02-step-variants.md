@@ -267,11 +267,16 @@ interface Tool<I extends StandardSchemaV1 = StandardSchemaV1, O extends Standard
   output: O;                     // any Standard Schema v1
   inputJsonSchema?: Record<string, unknown>;  // explicit override/fallback for non-Zod input
   event?: StandardSchemaV1;      // validates streaming events yielded during execution
-  execute: (args: InferSchemaOutput<I>, ctx: Context) => Promise<InferSchemaOutput<O>>;
+  execute: (
+    args: InferSchemaOutput<I>,
+    toolCtx: ToolExecutionContext,
+  ) => Promise<InferSchemaOutput<O>> | AsyncGenerator<unknown, InferSchemaOutput<O>>;
   needsApproval?: boolean;  // preventive gating, not reactive throwing
   context?: ToolContextDeclaration;
 }
 ```
+
+`execute` receives a `ToolExecutionContext` (`{ ctx, harness, fs, shell, context, assembledView, lastStepMeta, turnContext? }`), not the bare `Context` — the step's `Context` is `toolCtx.ctx`. See `04-spawn` ("Context in Tools") for how tools that spawn sub-agents use it. The base `Tool` in `@noetic-tools/types` types the second argument as `unknown` to stay a dependency leaf; `tool()` and the `Tool` re-exported from `@noetic-tools/core` type it as `ToolExecutionContext`. An async-generator `execute` (built with `toolWithGenerator`) yields streaming events (typed by `event`) and returns the result.
 
 `toolCalls(tools)` generates one `ContextLayer` per unique `context.id` among the tools. Tools sharing the same id share state.
 
