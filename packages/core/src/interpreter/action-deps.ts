@@ -11,6 +11,7 @@ export {
   DECISION_PROJECTION,
   DEFAULT_PROJECTION,
   disposeLayers,
+  exportSpans,
   initLayers,
   lineageKey,
   noteCacheOutcome,

@@ -12,6 +12,7 @@ export {
   DEFAULT_PROJECTION,
   disposeLayers,
   executeRerender,
+  exportSpans,
   initLayers,
   notifyDecision,
   projectHistoryLayers,

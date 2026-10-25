@@ -106,6 +106,8 @@ const harness = new AgentHarness({
 
 Every span the harness opens — model, tool, decision, child-context, layer-hook, and workflow-run spans — is exported to that harness's `traceExporter`.
 
+Tracing never changes behavior. An exporter that rejects or throws is reported once per failed export with `console.warn` and swallowed: the model call, tool call, decision, child context, layer hook, or workflow run it traced keeps its own result or error. A gating `beforeToolCall` that allowed a call still allows it, and a layer hook that succeeded still commits its state.
+
 ---
 
 ## GenAI Semantic Conventions
@@ -261,7 +263,6 @@ interface ExecutionSpan {
 
 A call is never recorded both ways, so a backend sees each hook call once.
 
-An exporter that rejects fails the hook call it records, the same way a failing exporter fails a child-context span: tracing is part of the call, not a side channel.
 
 ### Where Records Land
 

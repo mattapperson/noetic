@@ -55,7 +55,7 @@ export const LayerHookAttr = {
  * Runs a layer hook under its timeout and records a `layer.hook` span (or
  * event) for it. Rethrows whatever the hook threw (or the timeout), so callers
  * keep their own failure handling. The span opens before the hook runs and ends
- * once it settles; a failing exporter rejects the call like a failing hook.
+ * once it settles.
  */
 export async function callHook<T>({
   ctx,

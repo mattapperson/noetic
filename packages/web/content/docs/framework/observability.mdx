@@ -144,6 +144,8 @@ interface TraceExporter {
 }
 ```
 
+Tracing never changes behavior: if `export` rejects or throws, Noetic logs the error once with `console.warn` and the traced work — model call, tool call, decision, child context, layer hook, or workflow run — keeps its own result.
+
 ### Built-in Exporters
 
 #### NoopExporter

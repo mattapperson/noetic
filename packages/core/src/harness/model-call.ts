@@ -33,6 +33,7 @@ import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../runtime/broad
 import type { EventBroadcaster } from '../runtime/event-broadcaster';
 import type { MessageQueue, QueuedMessage } from '../runtime/message-queue';
 import type { ApprovalOutcome } from '../runtime/tool-approval';
+import { exportSpans } from './deps/context';
 import { buildItemSchemaRegistry, createToolResultItem } from './model-schema.js';
 
 const MAX_TOOL_ROUNDS = 32;
@@ -564,7 +565,7 @@ class CallSpanCollector {
     if (this.spans.length === 0) {
       return;
     }
-    await this.exporter.export(this.spans);
+    await exportSpans(this.exporter, this.spans);
   }
 }
 

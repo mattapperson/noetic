@@ -1,5 +1,6 @@
 import type { Context, ExecutionContext, ExecutionSpan } from '@noetic-tools/types';
 import { estimateTokens } from '@noetic-tools/types';
+import { exportSpans } from './span-export';
 
 /**
  * Optional overrides for `contextToExecCtx`. Used by `executeSpawn` to build
@@ -59,7 +60,7 @@ function openSpan(ctx: Context, name: string): ExecutionSpan {
     addEvent: (event, attributes) => span.addEvent(event, attributes),
     end: async () => {
       span.end();
-      await ctx.harness.traceExporter.export([
+      await exportSpans(ctx.harness.traceExporter, [
         span,
       ]);
     },
