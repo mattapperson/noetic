@@ -222,6 +222,7 @@ The two cache attributes are **absent**, not zero, when the provider reports not
 |---|---|---|
 | `ToolAttr.NAME` | `'tool.name'` | Tool name. |
 | `ToolAttr.NEEDS_APPROVAL` | `'tool.needs_approval'` | Whether the tool requires human approval. |
+| `ToolAttr.APPROVAL` | `'tool.approval'` | How the approval stage settled the call: `'approved'`, `'denied'`, or `'none_configured'` (no harness approver, so the call ran unapproved). Absent when the tool does not need approval or a `beforeToolCall` layer stopped the call first. |
 
 ```ts validate=none
 import { GenAI, ToolAttr } from '@noetic-tools/core';
@@ -234,7 +235,7 @@ const inputTokens = span.attributes.get(GenAI.USAGE_INPUT_TOKENS);
 
 The harness emits one `llm.call` span per model call (one per tool round) and a `tool.call` span per function call, nested under the calling context's span and flushed to the configured exporter when `callModel` settles.
 
-An `invokeTool` step opens its own `tool.call` span under the enclosing span. It covers validation, the steering gate, and execution, carries `tool.name`, `tool.needs_approval`, and `noetic.node.id` (the step's id), and on failure gets `noetic.error.kind` and `error: true`, like a child context span.
+An `invokeTool` step opens its own `tool.call` span under the enclosing span. It covers validation, the steering gate, approval, and execution, carries `tool.name`, `tool.needs_approval`, `tool.approval` (when the call reached the approval stage), and `noetic.node.id` (the step's id), and on failure gets `noetic.error.kind` and `error: true`, like a child context span.
 
 ## Loop Verdict Events
 

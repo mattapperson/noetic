@@ -17,6 +17,7 @@ import type { HarnessResponse, StreamEvent, StreamingItem } from './harness-resu
 import type { ExecuteInput, Item, ItemSchemaExtensions } from './items';
 import type { Span, TraceExporter } from './observability';
 import type { ShellAdapter } from './shell-adapter';
+import type { ToolApprover } from './steering';
 import type { Step } from './step';
 import type { SubprocessAdapter } from './subprocess-adapter';
 import type { Tool } from './tool';
@@ -51,6 +52,8 @@ export interface AgentConfig<TParams extends Record<string, unknown> = Record<st
   contextCache?: ContextCacheConfig;
   /** Default model for `decide` steps. */
   decisionModel?: string;
+  /** Approves or refuses calls to tools that declare `needsApproval`. Without one, those calls run unapproved. */
+  approveToolCall?: ToolApprover;
 }
 
 //#region Delivery Mode

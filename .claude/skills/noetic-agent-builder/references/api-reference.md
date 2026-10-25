@@ -403,7 +403,7 @@ tool<I, O>({
   output: StandardSchemaV1<O>;
   inputJsonSchema?: Record<string, unknown>;  // explicit fallback/override after Zod and StandardJSONSchemaV1
   execute: (args: I, toolCtx: ToolExecutionContext) => Promise<O>;
-  needsApproval?: boolean;                // declaration only; enforce via a beforeToolCall gate
+  needsApproval?: boolean;                // harness approveToolCall decides each call (see Tool approval)
   context?: ToolContextDeclaration;
   ui?: ToolUiDeclaration<I, O>;           // call/progress/result/error render fns (generative UI)
   itemSchemas?: ItemSchemaExtensions;     // { items?, developerMessages?, toolCalls?, toolResults? }
@@ -1728,6 +1728,28 @@ const harness = new AgentHarness({
   params: { model: 'anthropic/claude-sonnet-4-20250514' },
 });
 ```
+
+### Tool approval (`approveToolCall`)
+
+`AgentHarnessOpts.approveToolCall?: ToolApprover` decides calls to tools that declare `needsApproval`. Readable as `ctx.harness.config.approveToolCall`.
+
+```typescript
+type ToolApprover = (params: ApproveToolCallParams) => SteeringDecision | Promise<SteeringDecision>;
+
+interface ApproveToolCallParams {
+  toolName: string;
+  toolArgs: unknown;  // validated args — what execute receives if approved
+  callId?: string;    // model call id, or the invokeTool step id
+  ctx: Context;       // park on a channel via ctx.harness.recv(channel, ctx)
+}
+```
+
+- Order: `beforeToolCall` layers first, then the approver, then `execute`. A layer refusal means the approver is never asked.
+- `allow` runs the call; `deny`/`guide` refuse it. A throwing approver refuses it.
+- Refusal: model-driven call → error tool result (`Tool call denied: <guidance>`); `invokeTool` → `NoeticError` kind `steering_denied`.
+- No approver configured: the call runs unapproved and the harness warns once per tool name.
+- Span: `tool.call` gets `tool.approval` = `approved` | `denied` | `none_configured` (`ToolAttr.APPROVAL`).
+- Self-gating wrappers (chat-sdk `fromAiSdkTool`) do not declare `needsApproval`, so a call is never gated twice.
 
 ### Decisions (`harness.decide`)
 

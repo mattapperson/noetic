@@ -16,6 +16,13 @@ export const GenAI = {
 export const ToolAttr = {
   NAME: 'tool.name',
   NEEDS_APPROVAL: 'tool.needs_approval',
+  /**
+   * How the approver settled a call to a tool that declares `needsApproval`:
+   * `approved`, `denied`, or `none_configured` (the harness has no approver,
+   * so the call ran unapproved). Absent when the call never reached the
+   * approval stage.
+   */
+  APPROVAL: 'tool.approval',
 } as const;
 
 // Noetic-specific span attributes describing the static workflow graph (the

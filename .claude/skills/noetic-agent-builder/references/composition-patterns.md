@@ -145,6 +145,40 @@ const agent = spawn({
 
 The steering layer runs at slot 90 (before all other context layers). `Deny` blocks execution, `Guide` injects feedback for retries, `Allow` proceeds normally.
 
+## Pattern: Human Approval for Risky Tools
+
+Mark the tool `needsApproval: true` and give the harness an approver. The approver runs after the `beforeToolCall` layers allow a call, and may park on a channel until a human answers.
+
+```typescript
+import { AgentHarness, channel, SteeringAction, tool } from '@noetic-tools/core';
+
+const deleteTool = tool({
+  name: 'delete',
+  description: 'Delete a record',
+  input: z.object({ id: z.string() }),
+  output: z.object({ deleted: z.boolean() }),
+  needsApproval: true,
+  execute: async ({ id }) => ({ deleted: await db.delete(id) }),
+});
+
+const requests = channel('approval-requests', { schema: z.unknown(), mode: 'queue' });
+const answers = channel('approval-answers', { schema: z.boolean(), mode: 'queue' });
+
+const harness = new AgentHarness({
+  name: 'ops',
+  params: {},
+  tools: [deleteTool],
+  approveToolCall: async ({ toolName, toolArgs, ctx }) => {
+    await ctx.harness.send(requests, { toolName, toolArgs }, ctx);
+    return (await ctx.harness.recv(answers, ctx))
+      ? { action: SteeringAction.Allow }
+      : { action: SteeringAction.Deny, guidance: 'refused by operator' };
+  },
+});
+```
+
+A refused model-driven call comes back to the model as an error tool result; a refused `invokeTool` throws `steering_denied`. Without `approveToolCall`, gated calls run unapproved and the harness warns once per tool name.
+
 ## Pattern: Sub-Agent Delegation via Tools
 
 Tools access `toolCtx.harness` to spawn sub-agents:

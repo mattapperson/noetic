@@ -32,6 +32,7 @@ import { GenAI, NoeticAttr, ToolAttr } from '../observability/genai-attributes';
 import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../runtime/broadcaster-utils';
 import type { EventBroadcaster } from '../runtime/event-broadcaster';
 import type { MessageQueue, QueuedMessage } from '../runtime/message-queue';
+import type { ApprovalOutcome } from '../runtime/tool-approval';
 import { buildItemSchemaRegistry, createToolResultItem } from './model-schema.js';
 
 const MAX_TOOL_ROUNDS = 32;
@@ -541,10 +542,18 @@ class CallSpanCollector {
   }
 
   /** Open and immediately close a tool-call span under the given model span. */
-  recordToolSpan(parent: Span, toolName: string, needsApproval: boolean): void {
+  recordToolSpan(
+    parent: Span,
+    toolName: string,
+    needsApproval: boolean,
+    approval: ApprovalOutcome | undefined,
+  ): void {
     const span = this.harness.createSpan('tool.call', parent);
     span.setAttribute(ToolAttr.NAME, toolName);
     span.setAttribute(ToolAttr.NEEDS_APPROVAL, needsApproval);
+    if (approval !== undefined) {
+      span.setAttribute(ToolAttr.APPROVAL, approval);
+    }
     this.stampNode(span);
     span.end();
     this.spans.push(span);
@@ -1027,8 +1036,7 @@ export class AgentHarnessModelCaller {
         break;
       }
       const toolForCall = findTool(allowedTools, fc.name);
-      spans.recordToolSpan(modelSpan, fc.name, toolForCall?.needsApproval ?? false);
-      await this.executeFunctionCall({
+      const approval = await this.executeFunctionCall({
         fc,
         request,
         allowedTools,
@@ -1036,6 +1044,7 @@ export class AgentHarnessModelCaller {
         conversationInput,
         emitIfAllowed: params.emitIfAllowed,
       });
+      spans.recordToolSpan(modelSpan, fc.name, toolForCall?.needsApproval ?? false, approval);
     }
     params.emitIfAllowed('tool_round_completed', {
       round: params.round,
@@ -1055,7 +1064,7 @@ export class AgentHarnessModelCaller {
     allItems: Item[];
     conversationInput: ReturnType<typeof itemsToInput>;
     emitIfAllowed: (eventType: string, data: Record<string, unknown>) => void;
-  }): Promise<void> {
+  }): Promise<ApprovalOutcome | undefined> {
     const { fc, request, allowedTools, allItems, conversationInput } = params;
     params.emitIfAllowed('tool_call_started', {
       name: fc.name,
@@ -1073,7 +1082,7 @@ export class AgentHarnessModelCaller {
         conversationInput,
         emitIfAllowed: params.emitIfAllowed,
       });
-      return;
+      return undefined;
     }
     if (!request.tools) {
       throw new Error(
@@ -1116,6 +1125,7 @@ export class AgentHarnessModelCaller {
       error: toolResult.error === true,
       output: toolResult.output,
     });
+    return toolResult.approval;
   }
 
   private recordMalformedToolCall(params: {

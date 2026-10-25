@@ -11,6 +11,7 @@ import type {
   LLMResponse,
   MessageItem,
   StandardSchemaV1,
+  SteeringDecision,
   Tool,
 } from '@noetic-tools/types';
 import {
@@ -25,6 +26,8 @@ import {
 import type * as OpenRouterAgent from '@openrouter/agent';
 import type { ZodTypeAny } from 'zod';
 import { z } from 'zod';
+import type { ApprovalOutcome } from '../runtime/tool-approval';
+import { askApproval } from '../runtime/tool-approval';
 import { buildToolExecutionContext } from '../runtime/tool-context';
 import { emitToolUi } from '../runtime/tool-ui';
 import type { EmbedFn } from '../types/embed';
@@ -428,12 +431,22 @@ function isAsyncGenerator(value: unknown): value is AsyncGenerator<unknown, unkn
   return Symbol.asyncIterator in value;
 }
 
-/** @internal Execute a single tool call with steering checks. */
-export async function executeToolCall(params: ExecuteToolCallParams): Promise<{
+/** @internal What one model-requested tool call produced. */
+export interface ToolCallResult {
   output: string;
   result?: unknown;
   error?: boolean;
-}> {
+  /** Set when the tool declares `needsApproval` and the call reached the approver. */
+  approval?: ApprovalOutcome;
+}
+
+/**
+ * @internal Execute a single tool call. Gates run in order: the
+ * `beforeToolCall` layers, input validation, then — for a tool that declares
+ * `needsApproval` — the harness approver. A refusal at any gate becomes an
+ * error tool result; the tool never runs.
+ */
+export async function executeToolCall(params: ExecuteToolCallParams): Promise<ToolCallResult> {
   // Model sees sanitised tool names (see `sanitizeToolNameForWire`). Match
   // against both the original and sanitised name so internal identity (e.g.
   // `plan/updatePrd` used by steering whitelists, skill docs, and the
@@ -457,17 +470,8 @@ export async function executeToolCall(params: ExecuteToolCallParams): Promise<{
       params.context,
       params.callId,
     );
-    if (decision.action === SteeringAction.Deny) {
-      return {
-        output: `Tool call denied: ${decision.guidance ?? 'steering rule violation'}`,
-        error: true,
-      };
-    }
-    if (decision.action === SteeringAction.Guide) {
-      return {
-        output: `Tool call redirected: ${decision.guidance}`,
-        error: true,
-      };
+    if (decision.action !== SteeringAction.Allow) {
+      return refusedResult(decision);
     }
   }
 
@@ -480,6 +484,46 @@ export async function executeToolCall(params: ExecuteToolCallParams): Promise<{
   }
   const parsedArgs = validated.value;
 
+  const approval = matchedTool.needsApproval
+    ? await askApproval({
+        harness: params.harness,
+        toolName: matchedTool.name,
+        toolArgs: parsedArgs,
+        callId: params.callId,
+        ctx: params.context,
+      })
+    : undefined;
+  if (approval && approval.decision.action !== SteeringAction.Allow) {
+    return {
+      ...refusedResult(approval.decision),
+      approval: approval.outcome,
+    };
+  }
+  const executed = await runMatchedTool(params, matchedTool, parsedArgs);
+  return {
+    ...executed,
+    approval: approval?.outcome,
+  };
+}
+
+function refusedResult(decision: SteeringDecision): ToolCallResult {
+  if (decision.action === SteeringAction.Guide) {
+    return {
+      output: `Tool call redirected: ${decision.guidance}`,
+      error: true,
+    };
+  }
+  return {
+    output: `Tool call denied: ${decision.guidance ?? 'steering rule violation'}`,
+    error: true,
+  };
+}
+
+async function runMatchedTool(
+  params: ExecuteToolCallParams,
+  matchedTool: Tool,
+  parsedArgs: unknown,
+): Promise<ToolCallResult> {
   const toolCtx = buildToolExecutionContext(params.context, params.harness);
   const callId = params.callId;
   const uiBase =

@@ -150,9 +150,10 @@ export interface Tool<
    */
   execute(args: InferSchemaOutput<I>, toolCtx: unknown): ToolExecutionResult<O>;
   /**
-   * Declares that a call needs human approval before it runs. Core records the
-   * flag on `tool.call` spans but does not pause on it: a `beforeToolCall`
-   * gating layer or the tool's own integration must enforce it.
+   * Every call needs approval before it runs. The harness asks its
+   * `approveToolCall` approver after the `beforeToolCall` layers allow the
+   * call. With no approver configured the call runs unapproved and the
+   * harness warns once per tool name.
    */
   needsApproval?: boolean;
   /** Optional context declaration — the runtime generates a ContextLayer from this. */

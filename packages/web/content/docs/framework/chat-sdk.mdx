@@ -75,6 +75,8 @@ resolveApproval({
 
 A rejection or the 5-minute timeout surfaces to the model as a tool error with the reason; each waiting tool filters the decision broadcast by its own `requestId`, so concurrent gated calls never cross wires.
 
+These tools gate themselves, so they do not declare core's `needsApproval` — a harness [`approveToolCall`](/docs/framework/steps/invoke-tool#human-in-the-loop-approval) approver is never asked about them, and a call is never gated twice.
+
 ## Persistence
 
 `createChatHistoryStore(state)` adapts any key-value store — including the same Redis/Postgres backing a Chat SDK state adapter — into a durable history store:

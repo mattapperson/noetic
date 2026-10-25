@@ -599,6 +599,22 @@ Dedupe is **name-based, first-wins**. The merge order is `[...stepCollectedTools
 
 Ordering at resolve time: an eager `step.tools` array still wins for its own call (used as the per-call allowed set); `unifiedTools` (populated from the merge above) is the superset sent to every LLM call.
 
+### Tool approval
+
+`AgentHarnessOpts.approveToolCall?: ToolApprover` is the harness approver for tools that declare `needsApproval`; the harness stores it as `config.approveToolCall`. Both tool-executing paths — the model-driven tool loop and `invokeTool` — ask it after the `beforeToolCall` layers allow a call and before `execute` runs. `allow` runs the call; any other action refuses it, and an approver that throws refuses it too. Without an approver, such calls run unapproved and the harness logs a warning once per tool name. The contract, gate order, and refusal shapes are specified in `02-step-variants` ("Approval").
+
+```typescript
+const harness = new AgentHarness({
+  name: 'ops',
+  params: {},
+  approveToolCall: async ({ toolName, toolArgs, ctx }) => {
+    await ctx.harness.send(approvalRequests, { toolName, toolArgs }, ctx);
+    const approved = await ctx.harness.recv(approvalAnswers, ctx);
+    return approved ? { action: 'allow' } : { action: 'deny', guidance: 'refused by operator' };
+  },
+});
+```
+
 ### Item schema registry (extension-item validation)
 
 The harness validates items at trust boundaries (model output parsing, session restore, tool-result decoration) through an `ItemSchemaRegistry` seeded from harness-level `itemSchemas`. Harness-level schemas are global by design. Tool and context-layer extension schemas are **additive and owner-scoped**:
@@ -782,6 +798,9 @@ interface AgentConfig<TParams extends Record<string, unknown> = Record<string, u
 
   /** Tuning for prompt-cache anchoring. */
   contextCache?: ContextCacheConfig;
+
+  /** Approves or refuses calls to tools that declare `needsApproval`. See "Tool approval". */
+  approveToolCall?: ToolApprover;
 }
 ```
 

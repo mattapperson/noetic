@@ -294,7 +294,7 @@ interface Tool<I extends StandardSchemaV1 = StandardSchemaV1, O extends Standard
     args: InferSchemaOutput<I>,
     toolCtx: ToolExecutionContext,
   ) => Promise<InferSchemaOutput<O>> | AsyncGenerator<unknown, InferSchemaOutput<O>>;
-  needsApproval?: boolean;  // declares the call needs human approval; see below
+  needsApproval?: boolean;  // every call needs the harness approver's go-ahead; see below
   context?: ToolContextDeclaration;
 }
 ```
@@ -305,12 +305,35 @@ interface Tool<I extends StandardSchemaV1 = StandardSchemaV1, O extends Standard
 
 ### Approval
 
-`needsApproval: true` declares that a call must be approved by a human before it runs. It is a declaration, not a gate: core records it as the `tool.needs_approval` attribute on each `tool.call` span (`10-observability`) and does not pause on its own. Approval is enforced before execution — never by throwing after the work is done — by one of:
+`needsApproval: true` declares that every call must be approved before it runs. Core enforces it with the harness approver, `AgentHarness({ approveToolCall })` (`08-runtime`), a `ToolApprover`:
 
-- **A `beforeToolCall` gating layer** (`11-context-layer-system`). Both the model-driven path and `invokeTool` run the gate before `execute`; the layer asks its approver (keyed by `BeforeToolCallParams.callId`) and returns `allow` to run the call or `deny` to refuse it. A refused call never executes: on the model-driven path the model receives the denial as an error tool result; an `invokeTool` step throws `NoeticError` kind `steering_denied`.
-- **The tool's own integration.** A wrapper that owns its approval channel checks inside `execute` before doing any work — `fromAiSdkTool` (`29-chat-platform-integration`) sends an approval request, waits for the decision, and fails the call with a tool error when it is refused or times out.
+```typescript
+interface ApproveToolCallParams {
+  toolName: string;
+  toolArgs: unknown;   // the validated args — exactly what execute receives if approved
+  callId?: string;     // same correlation id as BeforeToolCallParams.callId
+  ctx: Context;        // the calling step's context; an approver may park on a channel via ctx.harness.recv
+}
 
-A tool that sets `needsApproval` with neither in place runs without approval.
+type ToolApprover = (params: ApproveToolCallParams) => SteeringDecision | Promise<SteeringDecision>;
+```
+
+The approver speaks the steering vocabulary: `allow` runs the call; `deny` or `guide` refuses it, with `guidance` as the reason. It may be async and may wait as long as it likes — on a channel a human answers, an ask-user service, or a policy lookup.
+
+**Order.** Approval is the last gate before `execute`, after the `beforeToolCall` layers (`11-context-layer-system`):
+
+- **Model-driven calls:** `beforeToolCall` layers → input validation → approver → `execute`.
+- **`invokeTool`:** input validation → `beforeToolCall` layers → approver → `execute`.
+
+A layer refusal stops the call before the approver is asked, so policy runs before a human is bothered. The approver always sees validated arguments.
+
+**Refusal.** A refused call never executes. On the model-driven path the model receives the refusal as an error tool result, the same shape as a gating-layer refusal (`Tool call denied: <guidance>`, or `Tool call redirected: <guidance>` for `guide`). An `invokeTool` step throws `NoeticError` kind `steering_denied` carrying the guidance. An approver that throws refuses the call, with the error message as the guidance.
+
+**No approver.** A harness without `approveToolCall` runs the call unapproved and logs a warning once per tool name, pointing at the option. The span records the outcome (below), so unapproved runs stay visible in traces.
+
+**Tracing.** Each `tool.call` span carries `tool.needs_approval` and, once the call reaches the approval stage, `tool.approval`: `approved`, `denied`, or `none_configured` (`10-observability`). A call stopped by a layer, or one whose tool does not need approval, has no `tool.approval`.
+
+**Self-gating integrations.** A wrapper that owns its approval channel checks inside `execute` before doing any work and does not declare `needsApproval`, so the call is gated exactly once. `fromAiSdkTool` (`29-chat-platform-integration`) is one: it sends an approval request, waits for the decision, and fails the call with a tool error when it is refused or times out.
 
 Tool `input`/`output`/`event` accept any Standard Schema v1 validator. The runtime validates tool input through `validateSchema` (Zod `safeParse` fast path, otherwise `~standard.validate` with sync/Promise support), and the parsed/transformed input is what `execute` receives. As before, `output` and `event` describe and infer tool values but are not runtime validation boundaries. Tool input JSON Schema uses the same Zod → StandardJSONSchemaV1 → explicit `inputJsonSchema` chain. For non-Zod schemas, `inputJsonSchema` overrides the trait and also serves as the fallback if the trait converter throws; a validation-only schema must provide it.
 
@@ -394,9 +417,3 @@ The agent harness needs to treat them differently:
 - **withContext steps** are structural — they configure the context layer environment for a subtree without altering execution semantics or creating context boundaries.
 
 A single `step()` that inspects its arguments loses type safety and forces runtime introspection. Explicit variants mean the TypeScript compiler knows exactly what you're doing.
-
----
-
-## Future Considerations
-
-- **A built-in approval gate.** Core could read `needsApproval` itself and pause before `execute`, asking a harness-level approver and treating refusal like a `deny` decision. Open questions: the approver contract (a channel pair, the ask-user service, or a callback), what happens when no approver is configured, and how it composes with integrations that already gate inside `execute`.

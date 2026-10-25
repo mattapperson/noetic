@@ -129,6 +129,7 @@ The two cache attributes are **absent, not zero**, when the provider reports no 
 |-----------|------|-------------|
 | `tool.name` | string | Tool name |
 | `tool.needs_approval` | boolean | Whether the tool required approval |
+| `tool.approval` | string | How the approval stage settled the call: `approved`, `denied`, or `none_configured` (no harness approver, so the call ran unapproved). Absent when the tool does not need approval or a `beforeToolCall` layer stopped the call first (`02-step-variants`) |
 | `noetic.node.id` | string | The `callModel` step that made the call, or the `invokeTool` step |
 
 The harness emits one `llm.call` span per model call (one per tool round) and one `tool.call` span per function call, nested under the calling context's span. Both are flushed to the configured `traceExporter` when the `callModel` invocation settles. A function call's `tool.call` span marks that the call happened; it is closed as soon as it opens, and carries no timing.

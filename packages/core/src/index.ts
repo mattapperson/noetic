@@ -537,6 +537,7 @@ export type {
 export type {
   AfterModelCallParams,
   AfterModelCallResult,
+  ApproveToolCallParams,
   BeforeToolCallParams,
   BeforeToolCallResult,
   LedgerEntry,
@@ -544,6 +545,7 @@ export type {
   SteeringDecision,
   SteeringRule,
   SteeringState,
+  ToolApprover,
 } from '@noetic-tools/types';
 /** @public */
 export { LedgerEntryKind, SteeringAction } from '@noetic-tools/types';

@@ -2,7 +2,7 @@
  * Action step handlers: run, llm, spawn, provide, tool.
  */
 
-import type { OutputCodec, StandardSchemaV1 } from '@noetic-tools/types';
+import type { OutputCodec, Span, StandardSchemaV1, SteeringDecision } from '@noetic-tools/types';
 import {
   createMessage,
   estimateTokens,
@@ -16,6 +16,7 @@ import {
 } from '@noetic-tools/types';
 import { ToolAttr } from '../observability/genai-attributes';
 import type { EmitOption } from '../runtime/broadcaster-utils';
+import { askApproval } from '../runtime/tool-approval';
 import { emitToolUi } from '../runtime/tool-ui';
 import type { ItemSchemaRegistry, LayerStateStore } from './action-deps';
 import {
@@ -1280,15 +1281,23 @@ export async function executeInvokeTool<TContext, I, O>(
   const span = openChildSpan(baseCtx, 'tool.call', step.id);
   span.setAttribute(ToolAttr.NAME, step.tool.name);
   span.setAttribute(ToolAttr.NEEDS_APPROVAL, step.tool.needsApproval ?? false);
-  return traceChild(baseCtx, span, () => runInvokeTool(step, input, baseCtx, harness, layers));
+  return traceChild(baseCtx, span, () =>
+    runInvokeTool(step, input, baseCtx, harness, layers, span),
+  );
 }
 
+/**
+ * Gates run in order — input validation, the `beforeToolCall` layers, then the
+ * harness approver for a tool that declares `needsApproval` — and a refusal at
+ * any gate throws `steering_denied` before the tool runs.
+ */
 async function runInvokeTool<TContext, I, O>(
   step: StepInvokeTool<TContext, I, O>,
   input: I,
   baseCtx: Context<ContextData>,
   harness: AgentHarnessContract,
   layers: ContextLayer[] | undefined,
+  span: Span,
 ): Promise<O> {
   const args = step.args ? Object.assign({}, input, step.args) : input;
 
@@ -1331,6 +1340,14 @@ async function runInvokeTool<TContext, I, O>(
     });
   };
 
+  const refuse = (decision: SteeringDecision): never => {
+    emitCompleted(true, `Tool call denied: ${decision.guidance ?? 'steering rule violation'}`);
+    throw new NoeticErrorImpl({
+      kind: 'steering_denied',
+      guidance: decision.guidance,
+    });
+  };
+
   if (layers && layers.length > 0) {
     const decision = await harness.beforeToolCall(
       layers,
@@ -1340,11 +1357,21 @@ async function runInvokeTool<TContext, I, O>(
       step.id,
     );
     if (decision.action !== SteeringAction.Allow) {
-      emitCompleted(true, `Tool call denied: ${decision.guidance ?? 'steering rule violation'}`);
-      throw new NoeticErrorImpl({
-        kind: 'steering_denied',
-        guidance: decision.guidance,
-      });
+      refuse(decision);
+    }
+  }
+
+  if (step.tool.needsApproval) {
+    const approval = await askApproval({
+      harness,
+      toolName: step.tool.name,
+      toolArgs: parsedArgs,
+      callId: step.id,
+      ctx: baseCtx,
+    });
+    span.setAttribute(ToolAttr.APPROVAL, approval.outcome);
+    if (approval.decision.action !== SteeringAction.Allow) {
+      refuse(approval.decision);
     }
   }
 
