@@ -147,20 +147,6 @@ Tools receive a `ToolExecutionContext` as their second argument, which provides 
 
 `harness.run(step, input, ctx)` executes `step` on the context it is given — it does not open a boundary. To run a sub-agent in its own child context, wrap it in a spawn: `harness.run(spawn({ id, child }), input, toolCtx.ctx)` blocks until the child settles, and `harness.detachedSpawn(child, input, toolCtx.ctx)` runs it in the background. Both create the child context from `toolCtx.ctx`, so the tool simply forwards the context it received.
 
----
-
-## Parent Context Updates to Spawned Children
-
-`spawn` creates a child context — not `inParallel`. `inParallel` paths share the parent context entirely and do not trigger `onParentUpdate`. This section applies only to `spawn` boundaries.
-
-A spawned child does not run in complete isolation from its parent. While the child has its own ItemLog and context convergence, the parent's layers may continue to produce state changes during the child's execution. The child can receive these updates and decide how to respond.
-
-This is opt-in per context layer via the `onParentUpdate` hook (see `11-context-layer-system`). The agent harness fires `onParentUpdate` on the child's layer whenever the corresponding parent layer's state changes (after `store()` on the parent side) and the child is still running. The child layer receives both the current parent state and its own current state, and decides what — if anything — to do with the update.
-
-**The child is never forced to accept parent updates.** Returning `void` means the child ignores the update entirely. This preserves the child's autonomy while enabling reactive parent-child relationships where needed.
-
----
-
 ### Integration with Loop Inbox
 
 Detached spawns pair naturally with the loop inbox channel (see `05-loop-and-until`). A common pattern:
@@ -243,3 +229,15 @@ On host restart the surviving handle can be rediscovered via `adapter.listLive()
 ### Idempotency Guidance
 
 Durable execution means the same step body may be replayed under certain failure paths — for example, a crash that lands between step completion and the following checkpoint write. The framework cannot make arbitrary `runCode` bodies idempotent. Use stable step ids, and write step bodies whose side effects are safe to re-execute or guarded by an external idempotency key.
+
+---
+
+## Future Considerations
+
+### Parent Updates to Spawned Children (Not Yet Designed)
+
+A spawned child could react to its parent's layer state changing while the child runs — for example, a detached sub-agent picking up a plan the parent revised. The sketch is an opt-in `onParentUpdate` layer hook: after a parent-side `store()` changes a layer's state, the harness would call the hook on the same layer in each still-running child with both the parent's and the child's current state. The child is never forced to accept an update; returning nothing ignores it.
+
+It would apply to `spawn` and `detachedSpawn` children only. `inParallel` paths are child executions too (each has its own context and deep-cloned state, see `03-control-flow`), but they would not receive parent updates.
+
+Open questions: which writes count as an update (only `store()`, or every state write), how updates are delivered to an out-of-process child, and how they order against the child's own hooks. Not scheduled.

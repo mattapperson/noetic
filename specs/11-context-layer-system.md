@@ -2,7 +2,7 @@
 
 > **Module:** `@noetic-tools/context` (source at `packages/context/src/**`); the `ContextLayer` contract is owned by `@noetic-tools/types` (`packages/types/src/types/context-layer.ts`, also at the `@noetic-tools/types/contract` subpath). Both are re-exported by `@noetic-tools/core`.
 > **Depends On:** `07-context-and-event-log` (ItemLog, Item — type import only), `10-observability` (LayerTraceSpan, trace conventions), `04-spawn` (SpawnOpts — referenced in SpawnParams)
-> **Exports:** `ContextLayer`, `ContextLayerHooks`, `ContextScope`, `BudgetConfig`, `Slot`, `InitParams`, `InitResult`, `RecallParams`, `RecallResult`, `StoreParams`, `StoreResult`, `SpawnParams`, `SpawnResult`, `ReturnParams`, `ReturnResult`, `CompleteParams`, `DisposeParams`, `BeforeToolCallParams`, `BeforeToolCallResult`, `AfterModelCallParams`, `AfterModelCallResult`, `OnItemAppendParams`, `OnItemAppendResult`, `RerenderScope`, `ParentUpdateParams`, `ParentUpdateResult`, `ExecutionOutcome`, `ExecutionContext`, `ScopedStorage`, `StorageAdapter`, `ProjectionPolicy`, `LayerTimeouts`, `LayerProvides`, `LayerDataDecl`, `LayerFunctionDecl`, `ContextConfig`, `InferContext`, `InferContextShape`, `layerData`, `layerFunction`, `context`, `storageGetMany`, `LayerPlacement`, `RenderDeltaParams`, `ContextCacheConfig`, `ContextCacheStore`, `ContextEpoch`, `AnchorPin`, `LayerChurn`, `ReanchorReason`
+> **Exports:** `ContextLayer`, `ContextLayerHooks`, `ContextScope`, `BudgetConfig`, `Slot`, `InitParams`, `InitResult`, `RecallParams`, `RecallResult`, `StoreParams`, `StoreResult`, `SpawnParams`, `SpawnResult`, `ReturnParams`, `ReturnResult`, `CompleteParams`, `DisposeParams`, `BeforeToolCallParams`, `BeforeToolCallResult`, `AfterModelCallParams`, `AfterModelCallResult`, `OnItemAppendParams`, `OnItemAppendResult`, `RerenderScope`, `ExecutionOutcome`, `ExecutionContext`, `ScopedStorage`, `StorageAdapter`, `ProjectionPolicy`, `LayerTimeouts`, `LayerProvides`, `LayerDataDecl`, `LayerFunctionDecl`, `ContextConfig`, `InferContext`, `InferContextShape`, `layerData`, `layerFunction`, `context`, `storageGetMany`, `LayerPlacement`, `RenderDeltaParams`, `ContextCacheConfig`, `ContextCacheStore`, `ContextEpoch`, `AnchorPin`, `LayerChurn`, `ReanchorReason`
 
 ## Module Boundary
 
@@ -141,7 +141,6 @@ interface ContextLayerHooks<TState = unknown> {
   afterModelCall?:  (params: AfterModelCallParams<TState>)       => Promise<AfterModelCallResult<TState> | void>;
   onSpawn?:         (params: SpawnParams<TState>)                => Promise<SpawnResult<TState> | null>;
   onReturn?:        (params: ReturnParams<TState>)               => Promise<ReturnResult<TState> | void>;
-  onParentUpdate?:  (params: ParentUpdateParams<TState>)         => Promise<ParentUpdateResult<TState> | void>;
   onComplete?:      (params: CompleteParams<TState>)             => Promise<void>;
   dispose?:         (params: DisposeParams<TState>)              => Promise<void>;
   renderDelta?:     (params: RenderDeltaParams<TState>)          => Promise<string | null>;
@@ -369,17 +368,6 @@ interface CompleteParams<TState> {
 
 interface DisposeParams<TState> {
   state: TState;
-}
-
-interface ParentUpdateParams<TState> {
-  parentState: TState;        // the parent layer's current state after its latest store()
-  childState: TState;         // the child layer's current state
-  childCtx: ExecutionContext;
-}
-
-interface ParentUpdateResult<TState> {
-  childState?: TState;        // updated child state, if the child wants to act on the update
-  items?: Item[];             // optional items to inject into the child's ItemLog
 }
 
 type ExecutionOutcome = 'success' | 'failure' | 'aborted';
@@ -667,11 +655,15 @@ Layer factories MUST use `satisfies ContextLayer<TState>` (not a return type ann
 
 ## Future Considerations
 
+### Parent Updates to Spawned Children (Not Yet Designed)
+
+An opt-in `onParentUpdate` hook would let a running spawn child react when the parent's copy of the same layer changes. See `04-spawn`, Future Considerations, for the sketch and open questions. It is not part of `ContextLayerHooks`.
+
 ### Narrowed Scope (Not Yet Designed)
 
 A potential optimization: allow a layer to declare interest in a specific subset of a parent scope rather than the whole thing. A specialist layer — one that cares only about user preferences or an active task list — could subscribe only to those keys and avoid receiving or processing unrelated parent context changes.
 
-This would require extending `ContextScope` with a selector variant (e.g. key patterns or glob matching), adding filtering logic to `onParentUpdate` dispatch, and defining access-control semantics for `ScopedStorage`. The tradeoffs (pattern-matching cost per `store()`, complexity of the access model) need evaluation before committing to a design. Not scheduled.
+This would require extending `ContextScope` with a selector variant (e.g. key patterns or glob matching), adding filtering logic to parent-update dispatch (see above), and defining access-control semantics for `ScopedStorage`. The tradeoffs (pattern-matching cost per `store()`, complexity of the access model) need evaluation before committing to a design. Not scheduled.
 
 ---
 
