@@ -134,7 +134,9 @@ function extractError(metadata: Record<string, unknown> | undefined): Serialized
  * @public
  * Thin wrapper over a `SubprocessHandle` that implements the `DetachedHandle`
  * contract. Polls the adapter until the handle reaches a terminal status,
- * then reads the result (or error) off `handle.metadata`.
+ * then reads the result (or error) off `handle.metadata`. Polling starts in
+ * the constructor, so `status`, `result`, and `error` settle whether or not
+ * the caller ever invokes `.await()`.
  *
  * The polling cadence starts at 10ms and ramps to 100ms after the first
  * second — responsive for short-lived in-memory steps without burning cycles
@@ -149,7 +151,7 @@ export class DetachedHandleImpl<O> implements DetachedHandle<O> {
   private _status: DetachedStatus = DetachedStatus.Running;
   private _result: O | undefined;
   private _error: string | undefined;
-  private _settlementPromise: Promise<O> | undefined;
+  private readonly _settlement: Promise<O>;
 
   constructor(opts: DetachedHandleOpts) {
     this.id = opts.id;
@@ -158,12 +160,15 @@ export class DetachedHandleImpl<O> implements DetachedHandle<O> {
     this._spawnPromise = opts.spawnPromise;
     this._startTime = Date.now();
 
-    // Observe spawn failure eagerly so `.error` is populated even if the
-    // caller never invokes `.await()`. We intentionally swallow the
-    // rejection here — `.await()` surfaces it to the caller.
-    this._spawnPromise.catch((err: unknown) => {
-      this._status = DetachedStatus.Failed;
-      this._error = err instanceof Error ? err.message : String(err);
+    // One shared poll for the handle's life, so repeated `.await()` calls
+    // don't start parallel loops. The rejection is swallowed here only to
+    // record it; `.await()` surfaces it to the caller.
+    this._settlement = this.pollUntilSettled();
+    this._settlement.catch((err: unknown) => {
+      if (this._status === DetachedStatus.Running) {
+        this._status = DetachedStatus.Failed;
+        this._error = err instanceof Error ? err.message : String(err);
+      }
     });
   }
 
@@ -186,7 +191,7 @@ export class DetachedHandleImpl<O> implements DetachedHandle<O> {
    * observes the final value.
    */
   async await(timeout?: number): Promise<O> {
-    const settlement = this.getOrStartSettlement();
+    const settlement = this._settlement;
     if (timeout === undefined || timeout <= 0) {
       return settlement;
     }
@@ -213,21 +218,6 @@ export class DetachedHandleImpl<O> implements DetachedHandle<O> {
         clearTimeout(timerId);
       }
     }
-  }
-
-  /**
-   * Start (or return the cached) polling promise that resolves on the first
-   * terminal status the adapter reports for this handle.
-   *
-   * A single settlement promise is shared across all `.await()` callers so
-   * repeated calls don't spawn parallel polling loops.
-   */
-  private getOrStartSettlement(): Promise<O> {
-    if (this._settlementPromise) {
-      return this._settlementPromise;
-    }
-    this._settlementPromise = this.pollUntilSettled();
-    return this._settlementPromise;
   }
 
   private async pollUntilSettled(): Promise<O> {
