@@ -1,12 +1,13 @@
 /**
- * A `callModel` request that narrows its tools with `allowedToolNames` sends
- * only the allowed subset, and the harness-owned tool loop runs only tools
- * from that subset — a call naming any other tool is answered as unknown.
+ * A `callModel` request always sends its full tool list and narrows it with an
+ * `allowed_tools` tool choice, so the tool prefix stays the same across steps.
+ * The harness-owned tool loop still runs only tools from the allowed subset — a
+ * call naming any other tool is answered as unknown.
  */
 
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import type { Tool } from '@noetic-tools/types';
+import type { ServerToolSpec, Tool } from '@noetic-tools/types';
 import { frameworkCast } from '@noetic-tools/types';
 import { z } from 'zod';
 import { tool } from '../../src/builders/tool-builder';
@@ -15,9 +16,13 @@ import { makeMessage } from '../_helpers';
 
 //#region Fakes
 
+/** A converted client tool (`function`) or a `serverTool()` wrapper (`config`). */
 interface WireTool {
-  function: {
+  function?: {
     name: string;
+  };
+  config?: {
+    type: string;
   };
 }
 
@@ -87,10 +92,19 @@ function countingTool(name: string, calls: string[]): Tool {
 }
 
 function wireToolNames(request: Record<string, unknown> | undefined): string[] {
-  return frameworkCast<WireTool[]>(request?.tools ?? []).map((t) => t.function.name);
+  return frameworkCast<WireTool[]>(request?.tools ?? []).map(
+    (t) => t.function?.name ?? t.config?.type ?? '',
+  );
 }
 
-async function runWith(client: ScriptedClient, calls: string[]) {
+async function runWith(
+  client: ScriptedClient,
+  calls: string[],
+  restriction: {
+    allowedToolNames?: string[];
+    serverTools?: ServerToolSpec[];
+  },
+) {
   const harness = new AgentHarness({
     name: 'allowed-tools',
     params: {},
@@ -107,29 +121,44 @@ async function runWith(client: ScriptedClient, calls: string[]) {
       countingTool('a', calls),
       countingTool('b', calls),
     ],
-    allowedToolNames: [
-      'a',
-    ],
+    allowedToolNames: restriction.allowedToolNames,
+    _serverTools: restriction.serverTools,
     ctx: harness.createContext(),
   });
 }
 
+const ONLY_A = {
+  allowedToolNames: [
+    'a',
+  ],
+};
+
 //#endregion
 
-describe('callModel allowedToolNames', () => {
-  it('sends only the allowed tools on every round and runs an allowed call', async () => {
+describe('callModel tool restriction', () => {
+  it('sends the full tool set with an allowed_tools choice on every round', async () => {
     const calls: string[] = [];
     const client = new ScriptedClient('a');
 
-    const response = await runWith(client, calls);
+    const response = await runWith(client, calls, ONLY_A);
 
     expect(client.requests).toHaveLength(2);
-    expect(wireToolNames(client.requests[0])).toEqual([
-      'a',
-    ]);
-    expect(wireToolNames(client.requests[1])).toEqual([
-      'a',
-    ]);
+    for (const request of client.requests) {
+      expect(wireToolNames(request)).toEqual([
+        'a',
+        'b',
+      ]);
+      expect(request.toolChoice).toEqual({
+        type: 'allowed_tools',
+        mode: 'auto',
+        tools: [
+          {
+            type: 'function',
+            name: 'a',
+          },
+        ],
+      });
+    }
     expect(calls).toEqual([
       'a',
     ]);
@@ -138,11 +167,72 @@ describe('callModel allowedToolNames', () => {
     expect(output.output).toBe('a ran');
   });
 
+  it('sends the same tool list and no tool choice when the call is unrestricted', async () => {
+    const calls: string[] = [];
+    const client = new ScriptedClient('b');
+
+    await runWith(client, calls, {});
+
+    expect(wireToolNames(client.requests[0])).toEqual([
+      'a',
+      'b',
+    ]);
+    expect(client.requests[0]?.toolChoice).toBeUndefined();
+    expect(calls).toEqual([
+      'b',
+    ]);
+  });
+
+  it('lists the server tools as allowed alongside the allowed client tools', async () => {
+    const client = new ScriptedClient('a');
+
+    await runWith(client, [], {
+      ...ONLY_A,
+      serverTools: [
+        {
+          type: 'openrouter:web_search',
+        },
+      ],
+    });
+
+    expect(wireToolNames(client.requests[0])).toEqual([
+      'a',
+      'b',
+      'openrouter:web_search',
+    ]);
+    expect(client.requests[0]?.toolChoice).toEqual({
+      type: 'allowed_tools',
+      mode: 'auto',
+      tools: [
+        {
+          type: 'function',
+          name: 'a',
+        },
+        {
+          type: 'openrouter:web_search',
+        },
+      ],
+    });
+  });
+
+  it('sends no client tools when no requested name is allowed', async () => {
+    const client = new ScriptedClient('a');
+
+    await runWith(client, [], {
+      allowedToolNames: [
+        'missing',
+      ],
+    });
+
+    expect(client.requests[0]?.tools).toBeUndefined();
+    expect(client.requests[0]?.toolChoice).toBeUndefined();
+  });
+
   it('answers a call to a tool outside the allowed set as unknown without running it', async () => {
     const calls: string[] = [];
     const client = new ScriptedClient('b');
 
-    const response = await runWith(client, calls);
+    const response = await runWith(client, calls, ONLY_A);
 
     expect(calls).toEqual([]);
     const output = response.items.find((item) => item.type === 'function_call_output');

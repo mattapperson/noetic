@@ -122,7 +122,7 @@ When the model emits tool calls, the harness runs them and calls the model again
 
 ### Unified Tool Set
 
-Before execution, the harness collects all tools from every callModel step in the step tree plus layer-provided tools into a single unified set. `tools` on each step narrows that set to the tools the model may call: only those are sent to the model, and a call naming any other tool comes back as an `unknown tool` error result without running. Omitting `tools` sends the whole set.
+Before execution, the harness collects all tools from every callModel step in the step tree plus layer-provided tools into a single unified set. Every LLM call sends the whole set, so the tool definitions stay identical from step to step and the provider's prompt cache keeps hitting. `tools` on each step narrows which of them the model may call: the harness sends the subset as `tool_choice: { type: "allowed_tools" }`, and a call naming any other tool comes back as an `unknown tool` error result without running. A step with `tools: []` sends no tools at all.
 
 - **`tools: undefined`** (or omitted) -- the model may call any tool in the unified set.
 - **`tools: [searchTool]`** -- the model may only call `searchTool`.

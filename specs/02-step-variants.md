@@ -165,14 +165,20 @@ The unified set is the pool every `callModel` step draws from. A step narrows it
 - `tools: [searchTool, readFileTool]` — model may only call these tools
 - `tools: []` — no tools available for this step
 
-The harness enforces the restriction itself, in two places:
+Every LLM call that may use a client tool receives the full unified tool set, in the same order, so the tool definitions — part of the provider's prompt-cache prefix — are byte-identical across every step in the tree, whatever each step allows. The restriction travels separately, in two layers:
 
-1. **Request.** Only the allowed tools are sent to the provider; no `tool_choice` is set. Provider support for `tool_choice: { type: "allowed_tools" }` is uneven, and a provider that ignores it would let the model call a tool the step never allowed.
-2. **Execution.** The harness tool loop (see Tool Call Execution) only runs tools in the allowed subset. A function call naming any other tool is answered with an `Error: unknown tool '<name>'` tool result and never runs.
+1. **Request.** The step's allowed subset is sent as the request's tool choice, which the model honours when picking a tool. The mapping from `tools` to `tool_choice`:
 
-Server tools (`ServerToolSpec` entries) are sent alongside the allowed client tools; the provider runs them.
+   | Step `tools` | Tools sent | `tool_choice` |
+   |---|---|---|
+   | omitted | full unified set | not set (provider default, `auto`) |
+   | `[a, b]` | full unified set | `{ type: "allowed_tools", mode: "auto", tools: [{ type: "function", name: "a" }, { type: "function", name: "b" }, ...server tools] }` |
+   | `[]`, or a subset that names no tool in the set | none | not set |
 
-Because the tool list is part of the prompt prefix, two steps with different restrictions do not share a provider prompt-cache entry. Rounds within one `callModel` step send the same list and do share it.
+   Function names in `allowed_tools` are the sanitised wire names the model sees. Server tools (`ServerToolSpec` entries, run by the provider) are appended to the tools sent and, when the step restricts, listed in `allowed_tools` as `{ type: "<server tool type>" }`. `mode` is always `auto`: the model may answer without calling a tool.
+2. **Execution.** The harness tool loop (see Tool Call Execution) only runs tools in the allowed subset. A function call naming any other tool — a provider that ignores `allowed_tools`, or a model that names a tool anyway — is answered with an `Error: unknown tool '<name>'` tool result and never runs.
+
+A step with no tools sends none rather than the full set with `tool_choice: "none"`: some models still write tool-call syntax as text when told not to call, so withholding the list is the safer way to say "no tools".
 
 ### OpenRouter Integration
 
@@ -180,8 +186,8 @@ The agent harness delegates LLM calls to the `@openrouter/sdk` internally. It:
 
 1. Merges the step's resolved instructions with any system-role messages extracted from the View, joined by `\n\n` (see What the LLM Actually Sees). If only one source is present, that one is used. If neither is present, `instructions` is `undefined`.
 2. Converts Noetic `Item[]` to OpenResponses input format.
-3. Converts the allowed subset of the unified `Tool[]` (see Unified Tool Set) into SDK tool definitions — name, description and input JSON Schema, with no `execute`, so the SDK never runs a tool itself.
-4. Appends any server tools for the provider to run.
+3. Converts the unified `Tool[]` into SDK tool definitions — name, description and input JSON Schema, with no `execute`, so the SDK never runs a tool itself — and appends any server tools for the provider to run.
+4. Passes the step's restriction as `toolChoice: { type: "allowed_tools", ... }` when the step restricts tools (see Unified Tool Set).
 5. Calls the SDK's `callModel()` once per round of the harness tool loop (see Tool Call Execution).
 6. Converts each round's response back to Noetic `Item[]` and folds the rounds into one `LLMResponse`.
 

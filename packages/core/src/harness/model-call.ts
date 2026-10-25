@@ -291,6 +291,7 @@ interface PreparedModelRequest {
   remaining: ReadonlyArray<Item>;
   broadcaster?: EventBroadcaster;
   sdkTools?: ReturnType<typeof convertTools>;
+  toolChoice?: OpenRouterAgent.CallModelInput['toolChoice'];
   /**
    * The tools this call may run: the request's tools narrowed to
    * `allowedToolNames`. A call to any other tool is answered as unknown, so a
@@ -312,16 +313,19 @@ function prepareModelRequest(request: CallModelRequest, agentName: string): Prep
       .filter(Boolean)
       .join('\n\n') || undefined;
   const broadcaster = getBroadcaster(request.ctx);
-  const filteredTools = filterAllowedTools(request);
+  const allowedTools = filterAllowedTools(request) ?? [];
+  // Every request carries the full tool list, so the prompt-cache prefix is the
+  // same for every step in the tree; `toolChoice` does the narrowing. A call
+  // that may use no client tool sends none.
   // Client (function) tools convert to SDK tool definitions; OpenRouter server
   // tools (web_search/web_fetch) are wrapped via the SDK's `serverTool()` so
   // its convertToolsToAPIFormat accepts them — a raw `{type}` entry crashes it.
   // `parameters` keys stay camelCase: the SDK's outbound zod schema strips
   // unknown keys, so snake_case would be silently dropped.
   const clientSdkTools =
-    filteredTools && filteredTools.length > 0
+    request.tools && allowedTools.length > 0
       ? convertTools({
-          tools: filteredTools,
+          tools: request.tools,
         })
       : [];
   const serverSdkTools = (request._serverTools ?? []).map((s) =>
@@ -341,7 +345,8 @@ function prepareModelRequest(request: CallModelRequest, agentName: string): Prep
     remaining,
     broadcaster,
     sdkTools: sdkTools.length > 0 ? sdkTools : undefined,
-    allowedTools: filteredTools ?? [],
+    toolChoice: clientSdkTools.length > 0 ? allowedToolsChoice(request, allowedTools) : undefined,
+    allowedTools,
     emitIfAllowed(eventType, data) {
       if (!shouldEmit(request.emit, eventType, data)) {
         return;
@@ -353,6 +358,33 @@ function prepareModelRequest(request: CallModelRequest, agentName: string): Prep
         data,
       });
     },
+  };
+}
+
+/**
+ * Restrict the model to `allowedTools` (plus the step's server tools) with an
+ * `allowed_tools` choice. Unrestricted calls send none, leaving the provider
+ * default (`auto`).
+ */
+function allowedToolsChoice(
+  request: CallModelRequest,
+  allowedTools: ReadonlyArray<Tool>,
+): OpenRouterAgent.CallModelInput['toolChoice'] {
+  if (!request.allowedToolNames) {
+    return undefined;
+  }
+  return {
+    type: 'allowed_tools',
+    mode: 'auto',
+    tools: [
+      ...allowedTools.map((tool) => ({
+        type: 'function',
+        name: sanitizeToolNameForWire(tool.name),
+      })),
+      ...(request._serverTools ?? []).map((spec) => ({
+        type: spec.type,
+      })),
+    ],
   };
 }
 
@@ -609,6 +641,7 @@ export class AgentHarnessModelCaller {
           input: modelInput,
           instructions: prepared.instructions,
           tools: prepared.sdkTools,
+          toolChoice: prepared.toolChoice,
           temperature: request.params?.temperature,
           maxOutputTokens: request.params?.maxTokens,
           topP: request.params?.topP,
