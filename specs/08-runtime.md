@@ -1,7 +1,7 @@
 # AgentHarness Interface
 
 > **Depends On:** `01-step-type` (Step), `07-context-and-event-log` (Context, Item, LLMResponse), `06-channels` (Channel, ExternalChannel), `11-context-layer-system` (ContextLayer, StorageAdapter), `10-observability` (Span)
-> **Exports:** `AgentHarness`, `AgentConfig`, `FsAdapter`, `FsStats`, `createLocalFsAdapter`, `ShellAdapter`, `ShellExecOptions`, `ShellExecResult`, `createLocalShellAdapter`, `SubprocessAdapter`, `SubprocessSpec`, `SubprocessHandle`, `SubprocessExitInfo`, `SubprocessCapabilities`, `SubprocessIpcChannel`, `SubprocessServer`, `SubprocessKillSignal`, `createLocalSubprocessAdapter`, `setHarness()`
+> **Exports:** `AgentHarness`, `AgentConfig`, `FsAdapter`, `FsStats`, `createLocalFsAdapter`, `ShellAdapter`, `ShellExecOptions`, `ShellExecResult`, `createLocalShellAdapter`, `SubprocessAdapter`, `SubprocessSpec`, `SubprocessHandle`, `SubprocessExitInfo`, `SubprocessCapabilities`, `SubprocessIpcChannel`, `SubprocessServer`, `SubprocessKillSignal`, `createLocalSubprocessAdapter`
 
 ---
 
@@ -690,79 +690,59 @@ See `23-durable-execution` for the full durable-execution model, including `Subp
 | `AgentHarness<TParams>`     | Testing, simple scripts, CLI tools. Resolves the LLM provider from `callModelDefaults` (default `'noetic'`, keyed by `NOETIC_API_KEY`; `'openrouter'` reads `OPENROUTER_API_KEY`) — see `02-step-variants` § LLM Provider Configuration. | Ephemeral by default; full durable execution when constructed with a durable `StorageAdapter` + `CheckpointStore`. | In-process handles |
 
 ```typescript
-import { setHarness, AgentHarness } from '@noetic-tools/core';
-import { scratchpad, semanticRecall } from '@noetic-tools/core';
+import { AgentHarness, scratchpad } from '@noetic-tools/core';
 
-setHarness(new AgentHarness({
+const harness = new AgentHarness({
   name: 'my-agent',
+  agentGraph: agent,
   params: { model: 'anthropic/claude-sonnet-4-20250514' },
-  contextLayers: [scratchpad(), semanticRecall({ embedder })],
-}));
+  contextLayers: [scratchpad()],
+});
+
+await harness.execute('Summarise the open issues'); // a session turn through `agentGraph`
+const report = await harness.run(reportStep, input, harness.createContext()); // one step tree
 ```
 
 ---
 
-## AgentHarness Registration
+## Harness Ownership
 
-`setHarness()` registers the global singleton agent harness for the current process. There is exactly one active agent harness per process at any time.
+There is no process-wide harness and no registration step. Code constructs an `AgentHarness` and calls its methods — `execute()` for session turns, `run()` for a step tree in a context it created. Everything a run depends on belongs to that instance: the provider defaults, context layers and their state, storage, the checkpoint store, adapters, and the `traceExporter` (see `10-observability`, which likewise takes its exporter per harness rather than from a global).
 
-```typescript
-function setHarness(harness: AgentHarness): void;
-function getHarness(): AgentHarness; // throws NoeticConfigError if none set
-```
-
-### Singleton Semantics
-
-1. Calling `setHarness()` when a harness is already registered is a `NoeticConfigError` with `code: HARNESS_ALREADY_REGISTERED`. The agent harness cannot be replaced or reconfigured after it is set.
-2. Calling `run()` without a prior `setHarness()` throws `NoeticConfigError` with `code: NO_HARNESS_SET` and a hint pointing to the setup docs.
-
-### Module Load Order
-
-`setHarness()` MUST be called at the top of the application entry point, before any module that calls `run()` is imported or evaluated. In ESM environments, dynamic imports may evaluate lazily — do not rely on import order to ensure the agent harness is set before execution begins.
-
-Recommended pattern:
-
-```ts
-// entry.ts — first file evaluated
-import { setHarness, AgentHarness } from '@noetic-tools/core';
-setHarness(new AgentHarness({
-  name: 'my-agent',
-  params: { model: 'anthropic/claude-sonnet-4-20250514' },
-}));
-
-// All other imports come after
-import { runAgent } from './agent';
-await runAgent();
-```
+1. **Several harnesses per process.** Two harnesses in one process are independent: each has its own config, layer state, sessions, and trace backend. Nothing one does is visible to the other.
+2. **Steps reach their harness through the context.** Every `Context` carries the harness that created it (`ctx.harness`, see `07-context-and-event-log`), and child contexts inherit it. Steps, tools, and layers never look a harness up globally, so module load order does not matter.
+3. **No registration errors.** With no global to set, there is nothing to register twice and nothing to forget. A step that needs a harness and runs in a context without one — a `workflow` step outside a harness-created context — fails with `NoeticConfigError` `MISSING_HARNESS_CONTEXT` (see `02-step-variants`).
 
 ### Test Isolation
 
-Bun runs each test file in a fresh module environment. Call `setHarness()` at module scope (top of the test file) — it will execute once per file and will not conflict across files.
+Construct a harness where the test needs it — per test, in `beforeEach`, or once per file. There is no global to reset between tests, and tests that build their own harnesses can run concurrently.
 
 ```ts
-import { setHarness, AgentHarness } from '@noetic-tools/core';
+import { AgentHarness } from '@noetic-tools/core';
 
-setHarness(new AgentHarness({ name: 'test', params: {} }));
+const makeHarness = () => new AgentHarness({ name: 'test', params: {} });
 
-// tests follow...
+it('answers', async () => {
+  const harness = makeHarness();
+  const output = await harness.run(step, 'hi', harness.createContext());
+  // ...
+});
 ```
-
-Do not call `setHarness()` inside `beforeEach` — the agent harness is immutable once registered, and calling it a second time within the same module is an error.
 
 ### Serverless / Stateless Environments
 
-In serverless functions (AWS Lambda, Cloudflare Workers, etc.), the agent harness is re-instantiated per cold start. Call `setHarness()` at module scope so it runs once per instance, not once per invocation:
+In serverless functions (AWS Lambda, Cloudflare Workers, etc.), construct the harness at module scope so it is built once per cold start, not once per invocation:
 
 ```ts
 // Runs once per cold start
-setHarness(new AgentHarness({
+const harness = new AgentHarness({
   name: 'lambda-agent',
   params: {},
   callModelDefaults: { provider: 'openrouter' },
-}));
+});
 
 export const handler = async (event) => {
-  return run(agentStep, event, harness.createContext());
+  return harness.run(agentStep, event, harness.createContext());
 };
 ```
 
