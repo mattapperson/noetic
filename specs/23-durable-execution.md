@@ -187,7 +187,8 @@ interface LocalSubprocessManifest {
   handleId: string;
   stepId: string;
   serializedInput: unknown;
-  executionId: string;
+  executionId: string;                    // context the step runs in
+  parentExecutionId?: string;             // context that created it (see 04-spawn)
   pid: number;
   pidStarttime: string;                   // ps -p <pid> -o lstart= snapshot
   socketPath: string;

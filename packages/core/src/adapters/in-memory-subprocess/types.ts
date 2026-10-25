@@ -101,8 +101,12 @@ export interface InMemoryStepManifest {
   handleId: string;
   stepId: string;
   executionId: string;
+  /** See `StepSubprocessRequest.parentExecutionId`. */
+  parentExecutionId?: string;
   serializedInput: unknown;
   overrides: StepSubprocessRequest['overrides'];
+  /** Caller-supplied `request.metadata` tags, restored onto rehydrated handles. */
+  metadata?: Record<string, unknown>;
   startedAt: string;
   reattachMode: 'replay';
 }

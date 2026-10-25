@@ -332,7 +332,7 @@ When an adapter crosses a process boundary, the child runtime must locate the st
 
 ### Durable Handle Manifests
 
-Adapters configured with a durable `StorageAdapter` persist a manifest per handle: `handleId`, `stepId`, `serializedInput`, `executionId`, and transport-specific identity (pid + `pidStarttime` for OS children; `socketPath` for IPC). On parent restart, `adapter.listLive()` rediscovers the still-running children and `adapter.reattach(handleId)` rebinds each handle. See the [Durability](/docs/framework/durability) page for the full restart flow.
+Adapters configured with a durable `StorageAdapter` persist a manifest per handle: `handleId`, `stepId`, `serializedInput`, `executionId` (the child context), `parentExecutionId` (the context that spawned it — pass it to `harness.restore()`), the request's `metadata` tags, and transport-specific identity (pid + `pidStarttime` for OS children; `socketPath` for IPC). Rehydrated handles carry the tags and both ids on `handle.metadata`. On parent restart, `adapter.listLive()` rediscovers the still-running children and `adapter.reattach(handleId)` rebinds each handle. See the [Durability](/docs/framework/durability) page for the full restart flow.
 
 ## withContext vs spawn
 

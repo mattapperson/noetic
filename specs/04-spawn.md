@@ -190,6 +190,7 @@ interface StepSubprocessRequest {
   stepId: string;                    // registry key
   serializedInput: unknown;          // input passed to the step
   executionId: string;               // stable id (the child context id)
+  parentExecutionId?: string;        // the dispatching context; absent for runCode
   overrides: {                       // applied to the child context
     threadId?: string;
     resourceId?: string;
@@ -220,11 +221,12 @@ Adapters that opt into durability persist a manifest per handle through the harn
 - `handleId` — opaque adapter identifier.
 - `stepId` — the step being executed.
 - `serializedInput` — input argument.
-- `executionId` — parent execution context id, used to correlate with `harness.restore(executionId)`.
+- `executionId` — the request's `executionId`: the context the step runs in (the child context for `spawn` / `detachedSpawn`).
+- `parentExecutionId` — the request's `parentExecutionId`: the context that created the child, used to correlate with `harness.restore(parentExecutionId)`. Absent for `runCode`, where `executionId` already names the dispatching context.
 - Transport-specific identity (pid + `pidStarttime` for OS processes; `socketPath` for unix-socket IPC).
 - Caller-supplied tags on `metadata` (e.g. `taskRole: 'planner'`, `taskId: 'T-...'`, `featureId: 'F-...'`).
 
-On host restart the surviving handle can be rediscovered via `adapter.listLive()` and re-bound via `adapter.reattach(handleId)`. The parent context can be rehydrated by `harness.restore(executionId)` against the matching `CheckpointStore` snapshot. Full model, storage layout, and IPC semantics live in `23-durable-execution`.
+On host restart the surviving handle can be rediscovered via `adapter.listLive()` and re-bound via `adapter.reattach(handleId)`. A rehydrated handle carries the same `handle.metadata` as the live one: the caller's tags, plus `executionId` and `parentExecutionId` (adapter keys win over caller tags of the same name). The parent context can be rehydrated by `harness.restore(parentExecutionId)` against the matching `CheckpointStore` snapshot. Full model, storage layout, and IPC semantics live in `23-durable-execution`.
 
 ### Idempotency Guidance
 

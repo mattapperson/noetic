@@ -35,8 +35,12 @@ export interface LocalStepManifest {
   pidStarttime: string | null;
   stepId: string;
   executionId: string;
+  /** See `StepSubprocessRequest.parentExecutionId`. */
+  parentExecutionId?: string;
   serializedInput: unknown;
   overrides: StepSubprocessRequest['overrides'];
+  /** Caller-supplied `request.metadata` tags, restored onto rehydrated handles. */
+  metadata?: Record<string, unknown>;
   cwdInit?: string;
   startedAt: string;
   socketPath?: string;
@@ -81,7 +85,9 @@ function isLocalStepManifest(value: unknown): value is LocalStepManifest {
     typeof value.stepId === 'string' &&
     typeof value.executionId === 'string' &&
     typeof value.startedAt === 'string' &&
-    isRecordValue(value.overrides)
+    isRecordValue(value.overrides) &&
+    (value.parentExecutionId === undefined || typeof value.parentExecutionId === 'string') &&
+    (value.metadata === undefined || isRecordValue(value.metadata))
   );
 }
 
@@ -174,8 +180,10 @@ export async function persistStepIfDurable(args: PersistStepArgs): Promise<void>
     pidStarttime: args.pidStarttime,
     stepId: args.request.stepId,
     executionId: args.request.executionId,
+    parentExecutionId: args.request.parentExecutionId,
     serializedInput: args.request.serializedInput,
     overrides: args.request.overrides,
+    metadata: args.request.metadata,
     cwdInit: args.request.overrides.cwdInit,
     startedAt: args.handle.startedAt,
   });
@@ -251,10 +259,12 @@ export function hydrateFromManifest(
   const metadata: SubprocessHandleMetadata =
     manifest.kind === 'step'
       ? {
+          ...(manifest.metadata ?? {}),
           ...baseMeta,
           kind: 'step',
           stepId: manifest.stepId,
           executionId: manifest.executionId,
+          parentExecutionId: manifest.parentExecutionId,
         }
       : {
           ...baseMeta,

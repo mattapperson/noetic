@@ -74,6 +74,7 @@ export function buildStepMetadata(request: StepSubprocessRequest): SubprocessHan
     kind: 'step',
     stepId: request.stepId,
     executionId: request.executionId,
+    parentExecutionId: request.parentExecutionId,
   };
 }
 

@@ -9,8 +9,12 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import type { StepSubprocessRequest } from '@noetic-tools/types';
+import assert from 'node:assert';
+import type { ContextData } from '@noetic-tools/context';
+import type { Step, StepSubprocessRequest, SubprocessHandle } from '@noetic-tools/types';
 import { createInMemorySubprocessAdapter } from '../../src/adapters/in-memory-subprocess-adapter';
+import { AgentHarness } from '../../src/harness/agent-harness';
+import { createCheckpointStore } from '../../src/runtime/durable/checkpoint-store';
 import { createInMemoryStorage } from '../../src/runtime/in-memory-storage';
 
 describe('in-memory adapter durability', () => {
@@ -75,6 +79,86 @@ describe('in-memory adapter durability', () => {
     expect(handle?.status).toBe('running');
     expect(handle?.metadata?.reattachMode).toBe('replay');
     expect(handle?.metadata?.stepId).toBe('greet');
+  });
+
+  it('persists caller metadata tags and the parent id, and restores them on reattach', async () => {
+    const storage = createInMemoryStorage();
+    const first = createInMemorySubprocessAdapter({
+      storage,
+      stepRunner: async () => await new Promise(() => {}),
+    });
+    const spawned = await first.spawn({
+      kind: 'step',
+      stepId: 'plan',
+      serializedInput: null,
+      executionId: 'exec-child-1',
+      parentExecutionId: 'exec-parent-1',
+      overrides: {},
+      metadata: {
+        taskRole: 'planner',
+        taskId: 'T-1',
+      },
+    });
+
+    const second = createInMemorySubprocessAdapter({
+      storage,
+    });
+    const handle = await second.reattach(spawned.id);
+    assert(handle !== null);
+    expect(handle.metadata?.taskRole).toBe('planner');
+    expect(handle.metadata?.taskId).toBe('T-1');
+    expect(handle.metadata?.executionId).toBe('exec-child-1');
+    expect(handle.metadata?.parentExecutionId).toBe('exec-parent-1');
+    // Caller tags never shadow the adapter's own keys.
+    expect(handle.metadata?.runtime).toBe('in-memory');
+  });
+
+  it('a detachedSpawn manifest names a parent that harness.restore() can find', async () => {
+    const storage = createInMemoryStorage();
+    const checkpointStore = createCheckpointStore({
+      storage,
+    });
+    const subprocess = createInMemorySubprocessAdapter({
+      storage,
+      stepRunner: async () => await new Promise(() => {}),
+    });
+    const harness = new AgentHarness({
+      name: 'durable-parent',
+      params: {},
+      environment: {
+        subprocess,
+        storage: {
+          adapter: storage,
+          checkpointStore,
+        },
+      },
+    });
+    const parent = harness.createContext();
+    await harness.checkpoint(parent);
+    const step: Step<ContextData, null, string> = {
+      kind: 'runCode',
+      id: 'durable-detached-child',
+      execute: async () => await new Promise<string>(() => {}),
+    };
+    const detached = harness.detachedSpawn(step, null, parent);
+
+    // The manifest is written once the adapter's spawn settles.
+    const reader = createInMemorySubprocessAdapter({
+      storage,
+    });
+    let manifestHandle: SubprocessHandle | undefined;
+    for (let i = 0; i < 50 && manifestHandle === undefined; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      const live = await reader.listLive();
+      manifestHandle = live.find((h) => h.metadata?.stepId === 'durable-detached-child');
+    }
+    assert(manifestHandle !== undefined);
+    expect(manifestHandle.metadata?.executionId).toBe(detached.id);
+    const parentId = manifestHandle.metadata?.parentExecutionId;
+    expect(parentId).toBe(parent.id);
+    assert(typeof parentId === 'string');
+    const restored = await harness.restore(parentId);
+    expect(restored?.id).toBe(parent.id);
   });
 
   it('stop clears the manifest so listLive no longer surfaces the handle', async () => {

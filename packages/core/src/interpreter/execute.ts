@@ -123,7 +123,8 @@ function resolveStepAdapter<TContext, I, O>(
  * `_localExecutor` and run the step in a child runtime.
  *
  * `executionId` names the context the step body runs in: `ctx.id` for a
- * `runCode`, the pre-allocated child id for a `spawn`.
+ * `runCode`, the pre-allocated child id for a `spawn` (whose request then
+ * also names `ctx` as the parent).
  */
 async function dispatchViaAdapter<TContext, I, O>(
   step: StepRunCode<TContext, I, O> | StepSpawn<TContext, I, O>,
@@ -138,6 +139,7 @@ async function dispatchViaAdapter<TContext, I, O>(
     stepId: step.id,
     serializedInput: input,
     executionId,
+    parentExecutionId: executionId === ctx.id ? undefined : ctx.id,
     overrides: {
       threadId: ctx.threadId,
       resourceId: ctx.resourceId,

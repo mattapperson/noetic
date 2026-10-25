@@ -108,6 +108,7 @@ export function dispatchStepThroughAdapter<I, O>(
     stepId: s.id,
     serializedInput: input,
     executionId: childCtx.id,
+    parentExecutionId: parentCtx.id,
     overrides: {
       threadId: overrides?.threadId ?? parentCtx.threadId,
       resourceId: overrides?.resourceId ?? parentCtx.resourceId,
