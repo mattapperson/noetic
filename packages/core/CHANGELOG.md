@@ -1,3 +1,7 @@
+## @noetic-tools/core-v5.10.0 (2026-10-25)
+
+* feat(core): fix spec mismatches in step variants, spawn and observability (#124) ([ab46b6a](https://github.com/mattapperson/noetic/commit/ab46b6a)), closes [#124](https://github.com/mattapperson/noetic/issues/124) [#121](https://github.com/mattapperson/noetic/issues/121) [#122](https://github.com/mattapperson/noetic/issues/122) [#123](https://github.com/mattapperson/noetic/issues/123) [#121](https://github.com/mattapperson/noetic/issues/121) [#122](https://github.com/mattapperson/noetic/issues/122) [#123](https://github.com/mattapperson/noetic/issues/123) [#121](https://github.com/mattapperson/noetic/issues/121) [#122](https://github.com/mattapperson/noetic/issues/122) [#123](https://github.com/mattapperson/noetic/issues/123)
+
 ## @noetic-tools/core-v5.9.0 (2026-10-24)
 
 * feat(core): error model fixes and replay follow-ups for #111 and #115 (#119) ([d85827e](https://github.com/mattapperson/noetic/commit/d85827e)), closes [#111](https://github.com/mattapperson/noetic/issues/111) [#115](https://github.com/mattapperson/noetic/issues/115) [#119](https://github.com/mattapperson/noetic/issues/119) [#117](https://github.com/mattapperson/noetic/issues/117) [#115](https://github.com/mattapperson/noetic/issues/115) [#115](https://github.com/mattapperson/noetic/issues/115) [#111](https://github.com/mattapperson/noetic/issues/111) [#115](https://github.com/mattapperson/noetic/issues/115) [#111](https://github.com/mattapperson/noetic/issues/111) [#101](https://github.com/mattapperson/noetic/issues/101)
