@@ -180,21 +180,28 @@ The agent harness delegates LLM calls to the `@openrouter/sdk` internally. It:
 2. Converts Noetic `Item[]` to OpenResponses input format.
 3. Converts the allowed subset of the unified `Tool[]` (see Unified Tool Set) into SDK tool definitions — name, description and input JSON Schema, with no `execute`, so the SDK never runs a tool itself.
 4. Appends any server tools for the provider to run.
-5. Calls the SDK's `callModel()` — the SDK handles the tool call loop internally.
-6. Converts the SDK response back to Noetic `Item[]` and `LLMResponse`.
+5. Calls the SDK's `callModel()` once per round of the harness tool loop (see Tool Call Execution).
+6. Converts each round's response back to Noetic `Item[]` and folds the rounds into one `LLMResponse`.
 
 ### Tool Call Execution
 
-The `executeLLM` function delegates to the OpenRouter SDK's `callModel` method, which handles the tool call loop internally. When the model response contains tool calls:
+The agent harness owns the tool call loop. The SDK makes one model request per round and never runs a tool: the tool definitions it receives carry no `execute`. Owning the loop lets the harness run steering checks, tool UI and spans around every call, inject queued messages between rounds, and recover from bad rounds. One `callModel` step runs these rounds:
 
-1. The SDK executes each tool call using the `Tool.execute` function.
-2. Tool results are appended to the conversation.
-3. The model is called again with the updated conversation.
-4. This repeats until the model responds without tool calls or a terminal condition is met.
+1. **Request.** Send the conversation so far (the View plus this step's earlier rounds) to the SDK's `callModel()`, streaming its events to the session broadcaster through `getFullResponsesStream()` and reading the finished response from `getResponse()`.
+2. **Stop check.** If the round's output holds no function calls, the step is done.
+3. **Run tools.** Otherwise run each function call in order: look the tool up in the step's allowed subset (see Unified Tool Set), run the layers' `beforeToolCall` steering hooks, validate the arguments against `Tool.input`, and call `Tool.execute`. An unknown tool, malformed JSON arguments, invalid arguments, a steering denial or redirect, or a thrown error becomes an error tool result for the model to read; it does not fail the step.
+4. **Append.** Add the `function_call` and `function_call_output` items to the conversation, then go back to step 1.
 
-The agent harness does NOT implement its own tool call loop — the SDK owns this cycle. The `until.noToolCalls()` predicate (see `05-loop-and-until`) checks whether the *outer loop iteration* produced tool calls, not whether the SDK's internal cycle did. By the time `executeLLM` returns, all tool calls from that LLM invocation have been resolved.
+Limits and recovery:
 
-The SDK returns a `ModelResult` with `getItemsStream()`. The agent harness appends response items to the `ItemLog`. The return type is `O` — the parsed output (or `string` if no `output` schema is specified). Tool calls, token usage, and cost are execution metadata accumulated on the context (see `07-context-and-event-log`):
+- **Round cap.** After 32 tool rounds the harness sends a further round with an ephemeral `continue` user message (never logged), and allows three such rounds before the step throws `LLM exceeded maximum tool rounds (32)`.
+- **Bad rounds.** A provider-reported terminal error, or a completed response with no output items, is retried the same way: an ephemeral `continue` round, up to three in a row, then the step throws.
+- **Between rounds.** On a session turn, queued `between-rounds` inbox messages are appended as user messages before the next round (see `08-runtime`).
+- **Abort and stalls.** The request's abort signal cancels the in-flight round and ends the loop. A per-round stream-idle watchdog aborts a round whose stream goes silent (see `08-runtime`).
+
+`until.noToolCalls()` (see `05-loop-and-until`) works one level up. It reads `ctx.lastStepMeta.toolCalls`, which holds every function call from every round of the step, so an outer `loop` iteration counts as having called tools if any round did. By the time `executeLLM` returns, every tool call from that step has a result.
+
+The agent harness appends the response items from all rounds — the model's messages and function calls and the harness's tool results, in order — to the `ItemLog`. The return type is `O` — the parsed output (or `string` if no `output` schema is specified). Tool calls, token usage, and cost are execution metadata accumulated on the context (see `07-context-and-event-log`):
 
 ```typescript
 const result = await execute(analyze, codeSnippet, ctx);

@@ -118,7 +118,7 @@ const researcher = callModel({
 });
 ```
 
-When the model emits a tool call, the runtime executes the tool and feeds the result back. To loop until the model stops calling tools, wrap the callModel step in a [loop](/docs/framework/operators/loop-and-until) with `until.noToolCalls()`.
+When the model emits tool calls, the harness runs them and calls the model again with the results, round after round, until the model answers without calling a tool. One callModel step therefore makes as many model requests as it needs (up to 32 tool rounds). The step's `ctx.lastStepMeta.toolCalls` lists every call from every round. To run the whole step again until a step makes no tool calls at all, wrap it in a [loop](/docs/framework/operators/loop-and-until) with `until.noToolCalls()`.
 
 ### Unified Tool Set
 
