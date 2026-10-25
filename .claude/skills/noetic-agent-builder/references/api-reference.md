@@ -2,6 +2,8 @@
 
 ## Builder Functions
 
+The option types are exported for wrappers that forward them: `RunCodeOpts`, `CallModelOpts`, `InvokeToolOpts`, `WithContextOpts`.
+
 ### runCode
 
 Pure async computation. The runtime can retry freely and doesn't track token usage.
@@ -42,14 +44,14 @@ callModel<TContext = ContextData, I = unknown, O = unknown>({
   tools?: Lazy<Tool[] | undefined, TContext>;       // allowed tool subset (undefined = all, [] = none)
   output?: StandardSchemaV1<unknown, O> | OutputCodec<O>;  // any Standard Schema v1 (Zod default) OR a streaming codec (see Generative UI)
   outputJsonSchema?: Record<string, unknown>;            // explicit fallback/override after Zod and StandardJSONSchemaV1
-  params?: ModelParams;                             // temperature, topP, maxTokens, stopSequences, serviceTier
+  params?: ModelParams;                             // temperature, topP, maxTokens, serviceTier (stopSequences: deprecated, ignored)
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }): StepCallModel<TContext, I, O>
 ```
 
 **Service tier.** `params.serviceTier` (a `ServiceTier` value: `auto`, `default`, `fast`, `flex`, `priority`, `scale`, `ultrafast`) is forwarded to OpenRouter unchanged. The served tier lands on `ctx.lastStepMeta.serviceTier` / `LLMResponse.serviceTier`, `undefined` when the provider reports none (never an echo of the request). JSON workflows accept the same field under a `callModel` node's `params`.
 
-`tools` specifies which tools the model may invoke for this step. Before execution, the harness collects all tools from every `callModel` step in the tree into a unified set. Every LLM call sends the full set (preserving prompt cache), while `tools` narrows the allowed subset via `tool_choice: { type: "allowed_tools" }`. Omit `tools` to allow all; set `tools: []` to disable tools for the step.
+`tools` specifies which tools the model may invoke for this step. Before execution, the harness collects all tools from every `callModel` step in the tree into a unified set. Every LLM call sends the full set (keeping the tool prefix prompt-cache stable across steps), while `tools` narrows the allowed subset via `tool_choice: { type: "allowed_tools", mode: "auto" }`; the harness also answers a call to any other tool with an `Error: unknown tool` result instead of running it. Omit `tools` to allow all; set `tools: []` to disable tools for the step.
 
 **Lazy params.** `model`, `instructions`, and `tools` each accept either an eager value or a `(ctx) => value` getter resolved at step execution. Getters see the live `Context`, so a step can read `ctx.harness.config.params` or `ctx.unifiedTools` to produce per-run values without baking them in at build time. Function-form `tools` are NOT walked by `collectAllTools`; tools needed in the harness-wide pool should be registered via `AgentHarness.tools`. Eager `model` strings are validated at build time (empty → `MISSING_MODEL`); function-form models are validated after resolution with the same error code.
 
@@ -70,7 +72,7 @@ callModel({
 
 `output` accepts any Standard Schema v1 schema (assistant text is JSON-parsed and validated; Zod runs `safeParse`, other validators run `~standard.validate` with sync/Promise support, and the parsed/transformed value is returned) OR an `OutputCodec<O>`. Model JSON Schema resolves through Zod's native converter, StandardJSONSchemaV1, then `outputJsonSchema`; the explicit field overrides the trait for non-Zod schemas and falls back when conversion throws. The OpenUI codec (`openUi(library)`) makes the model render a UI instead of returning text; see [Generative UI](#generative-ui-openui).
 
-The agent harness assembles the View before calling the model: system message + context layer items + conversation history. The `instructions` field becomes an `InputMessageItem` with `role: system`.
+The agent harness assembles the View before calling the model: context layer items (`role: developer`) banded around the conversation history. The `instructions` field is not a View item — it is sent as the request's separate `instructions` field, followed by the text of any `role: system` messages pulled out of the View.
 
 `AgentHarness.execute` accepts a plain string, one item, or an item array. Use an `InputMessageItem` when the input needs structured content; its `content` array supports `input_text`, `input_image`, and `input_file` parts.
 
@@ -342,6 +344,8 @@ spawn<TContext = ContextData, I = unknown, O = unknown>({
 }): StepSpawn<TContext, I, O>
 ```
 
+The options object is exported as `SpawnOpts<TContext, I, O>` (`import type { SpawnOpts } from '@noetic-tools/core'`).
+
 Per-step `subprocess` mirrors `runCode` — use it to pin a specific spawn to an out-of-process adapter (real OS subprocess with durable handle manifests) or a test double (in-memory adapter that records the request for assertions). Resolution precedence is the same: `detachedSpawn-overrides.subprocess ?? step.subprocess ?? harness.subprocess`.
 
 The child runs under a `spawn` span (child of `ctx.span`, `NoeticAttr.NODE_ID` = spawn id), ended and exported when the child settles; failures stamp it like `inParallel.path`.
@@ -394,7 +398,7 @@ tool<I, O>({
   output: StandardSchemaV1<O>;
   inputJsonSchema?: Record<string, unknown>;  // explicit fallback/override after Zod and StandardJSONSchemaV1
   execute: (args: I, toolCtx: ToolExecutionContext) => Promise<O>;
-  needsApproval?: boolean;
+  needsApproval?: boolean;                // declaration only; enforce via a beforeToolCall gate
   context?: ToolContextDeclaration;
   ui?: ToolUiDeclaration<I, O>;           // call/progress/result/error render fns (generative UI)
   itemSchemas?: ItemSchemaExtensions;     // { items?, developerMessages?, toolCalls?, toolResults? }
@@ -2257,6 +2261,8 @@ The full set is 23 tools, mirroring the 23 mutating + read CLI verbs (everything
 
 ## Context Layer Hooks
 
+Each call of a traced hook (`init`, `recall`, `store`, `onSpawn`, `onReturn`, `onComplete`, `dispose`) adds a `layer.hook` event (`NoeticEvent.LAYER_HOOK`) to the span of the context it runs in, with `LayerTraceSpan` attributes flattened to scalars: `{ layerId, hook, duration, status, itemCount?, 'budget.allocated'?, 'budget.used'?, 'budget.yielded'?, 'error.message'? }`. `status` is `ok`, `error`, `timeout`, or `skipped` (disabled layer, kept init state, or `onReturn` with no child state). Peek recalls record nothing.
+
 ### onItemAppend
 
 Called when input items (user messages, tool outputs) are about to be appended to the ItemLog. Enables middleware-style item transformation and context re-rendering.
@@ -2566,7 +2572,7 @@ const result = await parseAndRunWorkflow({
 });
 ```
 
-Emits a root `workflow.run` trace span carrying the static DAG (`NoeticAttr.WORKFLOW_DOCUMENT`, `.WORKFLOW_NODES`, `.WORKFLOW_EDGES`). Per-call `llm.call` and `tool.call` spans, and the `spawn` / `inParallel.path` spans of child contexts, nest under it. All are flushed to the harness `traceExporter` (default `NoopExporter`).
+Emits a root `workflow.run` trace span carrying the static DAG (`NoeticAttr.WORKFLOW_DOCUMENT`, `.WORKFLOW_NODES`, `.WORKFLOW_EDGES`). Per-call `llm.call` and `tool.call` spans (`invokeTool` steps open a `tool.call` too), and the `spawn` / `inParallel.path` spans of child contexts, nest under it. Each `callModel` step's first `llm.call` span carries its `noetic.context.*` anchoring attributes. All are flushed to the harness `traceExporter` (default `NoopExporter`).
 
 ### UntilPredicateSchema
 

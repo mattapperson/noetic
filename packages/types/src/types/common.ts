@@ -81,7 +81,12 @@ export interface ModelParams {
   topP?: number;
   /** Maximum number of tokens the model may generate. */
   maxTokens?: number;
-  /** Sequences that cause the model to stop generating. */
+  /**
+   * Sequences that would cause the model to stop generating.
+   * @deprecated Not sent to the model: the OpenRouter Responses API that
+   * `callModel` uses has no stop parameter. Accepted so existing steps and
+   * workflow documents still parse; it will be removed in the next major.
+   */
   stopSequences?: string[];
   /** OpenRouter service tier to request. Omit to use the provider default. */
   serviceTier?: ServiceTier;

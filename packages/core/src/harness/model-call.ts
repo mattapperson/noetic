@@ -291,6 +291,13 @@ interface PreparedModelRequest {
   remaining: ReadonlyArray<Item>;
   broadcaster?: EventBroadcaster;
   sdkTools?: ReturnType<typeof convertTools>;
+  toolChoice?: OpenRouterAgent.CallModelInput['toolChoice'];
+  /**
+   * The tools this call may run: the request's tools narrowed to
+   * `allowedToolNames`. A call to any other tool is answered as unknown, so a
+   * model that names a tool it was never offered cannot run it.
+   */
+  allowedTools: Tool[];
   emitIfAllowed: (eventType: string, data: Record<string, unknown>) => void;
 }
 
@@ -306,16 +313,19 @@ function prepareModelRequest(request: CallModelRequest, agentName: string): Prep
       .filter(Boolean)
       .join('\n\n') || undefined;
   const broadcaster = getBroadcaster(request.ctx);
-  const filteredTools = filterAllowedTools(request);
+  const allowedTools = filterAllowedTools(request) ?? [];
+  // Every request carries the full tool list, so the prompt-cache prefix is the
+  // same for every step in the tree; `toolChoice` does the narrowing. A call
+  // that may use no client tool sends none.
   // Client (function) tools convert to SDK tool definitions; OpenRouter server
   // tools (web_search/web_fetch) are wrapped via the SDK's `serverTool()` so
   // its convertToolsToAPIFormat accepts them — a raw `{type}` entry crashes it.
   // `parameters` keys stay camelCase: the SDK's outbound zod schema strips
   // unknown keys, so snake_case would be silently dropped.
   const clientSdkTools =
-    filteredTools && filteredTools.length > 0
+    request.tools && allowedTools.length > 0
       ? convertTools({
-          tools: filteredTools,
+          tools: request.tools,
         })
       : [];
   const serverSdkTools = (request._serverTools ?? []).map((s) =>
@@ -335,6 +345,8 @@ function prepareModelRequest(request: CallModelRequest, agentName: string): Prep
     remaining,
     broadcaster,
     sdkTools: sdkTools.length > 0 ? sdkTools : undefined,
+    toolChoice: clientSdkTools.length > 0 ? allowedToolsChoice(request, allowedTools) : undefined,
+    allowedTools,
     emitIfAllowed(eventType, data) {
       if (!shouldEmit(request.emit, eventType, data)) {
         return;
@@ -347,6 +359,40 @@ function prepareModelRequest(request: CallModelRequest, agentName: string): Prep
       });
     },
   };
+}
+
+/**
+ * Restrict the model to `allowedTools` (plus the step's server tools) with an
+ * `allowed_tools` choice. Unrestricted calls send none, leaving the provider
+ * default (`auto`).
+ */
+function allowedToolsChoice(
+  request: CallModelRequest,
+  allowedTools: ReadonlyArray<Tool>,
+): OpenRouterAgent.CallModelInput['toolChoice'] {
+  if (!request.allowedToolNames) {
+    return undefined;
+  }
+  return {
+    type: 'allowed_tools',
+    mode: 'auto',
+    tools: [
+      ...allowedTools.map((tool) => ({
+        type: 'function',
+        name: sanitizeToolNameForWire(tool.name),
+      })),
+      ...(request._serverTools ?? []).map((spec) => ({
+        type: spec.type,
+      })),
+    ],
+  };
+}
+
+/** Match a wire tool name against both the original and the sanitised name. */
+function findTool(tools: ReadonlyArray<Tool>, wireName: string): Tool | undefined {
+  return tools.find(
+    (tool) => tool.name === wireName || sanitizeToolNameForWire(tool.name) === wireName,
+  );
 }
 
 function filterAllowedTools(request: CallModelRequest): Tool[] | undefined {
@@ -384,6 +430,8 @@ class CallSpanCollector {
     private readonly exporter: TraceExporter,
     private readonly parent: Span | null,
     private readonly nodeId: string | undefined,
+    /** Stamped on the first model span only, then dropped. */
+    private firstSpanAttributes: Record<string, string | number | boolean> | undefined,
   ) {}
 
   /** Link a span back to its declared workflow node, when the call carries one. */
@@ -399,6 +447,10 @@ class CallSpanCollector {
     span.setAttribute(GenAI.SYSTEM, 'openrouter');
     span.setAttribute(GenAI.REQUEST_MODEL, model);
     this.stampNode(span);
+    for (const [key, value] of Object.entries(this.firstSpanAttributes ?? {})) {
+      span.setAttribute(key, value);
+    }
+    this.firstSpanAttributes = undefined;
     this.spans.push(span);
     return span;
   }
@@ -447,6 +499,7 @@ export class AgentHarnessModelCaller {
       this.opts.traceExporter,
       request.parentSpan ?? request.ctx?.span ?? null,
       request.nodeId,
+      request.spanAttributes,
     );
   }
 
@@ -588,6 +641,7 @@ export class AgentHarnessModelCaller {
           input: modelInput,
           instructions: prepared.instructions,
           tools: prepared.sdkTools,
+          toolChoice: prepared.toolChoice,
           temperature: request.params?.temperature,
           maxOutputTokens: request.params?.maxTokens,
           topP: request.params?.topP,
@@ -699,6 +753,7 @@ export class AgentHarnessModelCaller {
       await this.executeToolRound({
         functionCalls,
         request,
+        allowedTools: prepared.allowedTools,
         allItems,
         conversationInput,
         round,
@@ -875,6 +930,7 @@ export class AgentHarnessModelCaller {
       }
     >[];
     request: CallModelRequest;
+    allowedTools: Tool[];
     allItems: Item[];
     conversationInput: ReturnType<typeof itemsToInput>;
     round: number;
@@ -882,7 +938,8 @@ export class AgentHarnessModelCaller {
     spans: CallSpanCollector;
     modelSpan: Span;
   }): Promise<void> {
-    const { functionCalls, request, allItems, conversationInput, spans, modelSpan } = params;
+    const { functionCalls, request, allowedTools, allItems, conversationInput, spans, modelSpan } =
+      params;
     params.emitIfAllowed('tool_round_started', {
       round: params.round,
       toolCount: functionCalls.length,
@@ -900,13 +957,12 @@ export class AgentHarnessModelCaller {
       if (request.signal?.aborted) {
         break;
       }
-      const toolForCall = request.tools?.find(
-        (tool) => tool.name === fc.name || sanitizeToolNameForWire(tool.name) === fc.name,
-      );
+      const toolForCall = findTool(allowedTools, fc.name);
       spans.recordToolSpan(modelSpan, fc.name, toolForCall?.needsApproval ?? false);
       await this.executeFunctionCall({
         fc,
         request,
+        allowedTools,
         allItems,
         conversationInput,
         emitIfAllowed: params.emitIfAllowed,
@@ -926,11 +982,12 @@ export class AgentHarnessModelCaller {
       }
     >;
     request: CallModelRequest;
+    allowedTools: Tool[];
     allItems: Item[];
     conversationInput: ReturnType<typeof itemsToInput>;
     emitIfAllowed: (eventType: string, data: Record<string, unknown>) => void;
   }): Promise<void> {
-    const { fc, request, allItems, conversationInput } = params;
+    const { fc, request, allowedTools, allItems, conversationInput } = params;
     params.emitIfAllowed('tool_call_started', {
       name: fc.name,
       callId: fc.callId,
@@ -942,6 +999,7 @@ export class AgentHarnessModelCaller {
       this.recordMalformedToolCall({
         fc,
         request,
+        allowedTools,
         allItems,
         conversationInput,
         emitIfAllowed: params.emitIfAllowed,
@@ -953,13 +1011,11 @@ export class AgentHarnessModelCaller {
         `executeFunctionCall invoked without tools on CallModelRequest (tool name: ${fc.name}).`,
       );
     }
-    const toolForCall = request.tools.find(
-      (tool) => tool.name === fc.name || sanitizeToolNameForWire(tool.name) === fc.name,
-    );
+    const toolForCall = findTool(allowedTools, fc.name);
     const toolResult = await executeToolCall({
       toolName: fc.name,
       args: parsedArgs,
-      tools: request.tools,
+      tools: allowedTools,
       context: request.ctx,
       harness: this.opts.harness,
       layers: request.layers,
@@ -1001,15 +1057,14 @@ export class AgentHarnessModelCaller {
       }
     >;
     request: CallModelRequest;
+    allowedTools: Tool[];
     allItems: Item[];
     conversationInput: ReturnType<typeof itemsToInput>;
     emitIfAllowed: (eventType: string, data: Record<string, unknown>) => void;
   }): void {
-    const { fc, request, allItems, conversationInput } = params;
+    const { fc, request, allowedTools, allItems, conversationInput } = params;
     const errorOutput = `Error: malformed JSON in tool arguments: ${fc.arguments}`;
-    const toolForCall = request.tools?.find(
-      (tool) => tool.name === fc.name || sanitizeToolNameForWire(tool.name) === fc.name,
-    );
+    const toolForCall = findTool(allowedTools, fc.name);
     // Owner-scoped result validation (see executeFunctionCall).
     const outputItem = createToolResultItem({
       output: errorOutput,

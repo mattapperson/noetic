@@ -27,7 +27,7 @@ const chat = callModel({
 | --- | --- | --- | --- |
 | `id` | `string` | Yes | Unique step identifier |
 | `model` | `Lazy<string>` | Yes | Model identifier (e.g. `'openai/gpt-4o'`, `'claude-sonnet-4-20250514'`), or a `(ctx) => string` getter resolved per execution |
-| `instructions` | `Lazy<string \| undefined>` | No | System prompt prepended to the conversation. Accepts a `(ctx) => string \| undefined` getter |
+| `instructions` | `Lazy<string \| undefined>` | No | System prompt, sent as the request's `instructions` field rather than as a conversation item. Any `system` messages in the log are appended to it. Accepts a `(ctx) => string \| undefined` getter |
 | `tools` | `Lazy<Tool[] \| undefined>` | No | Allowed tool subset (`undefined` = all, `[]` = none). Accepts a `(ctx) => Tool[] \| undefined` getter; function-form tools are resolved per execution and do not contribute to the pre-computed `ctx.unifiedTools` |
 | `output` | `StandardSchemaV1<unknown, O>` | No | Schema for structured output — any [Standard Schema v1](https://standardschema.dev) validator (Zod is the default) |
 | `outputJsonSchema` | `Record<string, unknown>` | No | Explicit JSON Schema override/fallback for non-Zod output. Zod uses its native converter; other validators can implement StandardJSONSchemaV1. A validation-only schema must provide this field or conversion throws `MISSING_JSON_SCHEMA` |
@@ -44,7 +44,7 @@ const chat = callModel({
 | `temperature` | `number` | Sampling temperature |
 | `topP` | `number` | Nucleus sampling threshold |
 | `maxTokens` | `number` | Maximum tokens to generate |
-| `stopSequences` | `string[]` | Stop sequences |
+| `stopSequences` | `string[]` | Deprecated and ignored — the OpenRouter Responses API has no stop parameter, so it is never sent |
 | `serviceTier` | `ServiceTier` | OpenRouter service tier: `auto`, `default`, `fast` (alias for `priority`), `flex`, `priority`, `scale`, or `ultrafast` (prefers ultrafast endpoints, falls back to `priority`, then default) |
 
 The tier the provider served is recorded on `ctx.lastStepMeta.serviceTier` (and `LLMResponse.serviceTier`). It stays `undefined` when the provider reports none rather than echoing the request, so a value that differs from what you asked for means a fallback happened.
@@ -118,11 +118,11 @@ const researcher = callModel({
 });
 ```
 
-When the model emits a tool call, the runtime executes the tool and feeds the result back. To loop until the model stops calling tools, wrap the callModel step in a [loop](/docs/framework/operators/loop-and-until) with `until.noToolCalls()`.
+When the model emits tool calls, the harness runs them and calls the model again with the results, round after round, until the model answers without calling a tool. One callModel step therefore makes as many model requests as it needs (up to 32 tool rounds). The step's `ctx.lastStepMeta.toolCalls` lists every call from every round. To run the whole step again until a step makes no tool calls at all, wrap it in a [loop](/docs/framework/operators/loop-and-until) with `until.noToolCalls()`.
 
 ### Unified Tool Set
 
-Before execution, the harness collects all tools from every callModel step in the step tree plus layer-provided tools into a single unified set. Every LLM call sends the full set (preserving prompt cache), while `tools` on each step narrows which tools the model may actually invoke.
+Before execution, the harness collects all tools from every callModel step in the step tree plus layer-provided tools into a single unified set. Every LLM call sends the whole set, so the tool definitions stay identical from step to step and the provider's prompt cache keeps hitting. `tools` on each step narrows which of them the model may call: the harness sends the subset as `tool_choice: { type: "allowed_tools" }`, and a call naming any other tool comes back as an `unknown tool` error result without running. A step with `tools: []` sends no tools at all.
 
 - **`tools: undefined`** (or omitted) -- the model may call any tool in the unified set.
 - **`tools: [searchTool]`** -- the model may only call `searchTool`.

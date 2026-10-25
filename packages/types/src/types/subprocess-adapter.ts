@@ -88,6 +88,13 @@ export interface StepSubprocessRequest extends SubprocessRequestBase {
   serializedInput: unknown;
   /** Stable id for the execution — used for handle lookup and durable checkpointing. */
   executionId: string;
+  /**
+   * Id of the context that created this child (`spawn`, `detachedSpawn`).
+   * Durable adapters persist it so a host can `harness.restore()` the parent
+   * after a restart. Absent for a `runCode`, which runs on the dispatching
+   * context itself.
+   */
+  parentExecutionId?: string;
   /** Child-context overrides (thread, resource, cwd). */
   overrides: StepSubprocessOverrides;
   /**
@@ -120,6 +127,8 @@ export interface SubprocessHandleMetadata extends Record<string, unknown> {
   error?: SerializedError;
   /** Execution id echoed from the originating `StepSubprocessRequest`. */
   executionId?: string;
+  /** Parent execution id echoed from the originating `StepSubprocessRequest`. */
+  parentExecutionId?: string;
 }
 
 /** @public Handle returned by `SubprocessAdapter.spawn()` — a durable reference to a child. */

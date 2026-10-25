@@ -2,7 +2,7 @@
 
 > **Module:** `@noetic-tools/context` (source at `packages/context/src/**`); the `ContextLayer` contract is owned by `@noetic-tools/types` (`packages/types/src/types/context-layer.ts`, also at the `@noetic-tools/types/contract` subpath). Both are re-exported by `@noetic-tools/core`.
 > **Depends On:** `07-context-and-event-log` (ItemLog, Item — type import only), `10-observability` (LayerTraceSpan, trace conventions), `04-spawn` (SpawnOpts — referenced in SpawnParams)
-> **Exports:** `ContextLayer`, `ContextLayerHooks`, `ContextScope`, `BudgetConfig`, `Slot`, `InitParams`, `InitResult`, `RecallParams`, `RecallResult`, `StoreParams`, `StoreResult`, `SpawnParams`, `SpawnResult`, `ReturnParams`, `ReturnResult`, `CompleteParams`, `DisposeParams`, `BeforeToolCallParams`, `BeforeToolCallResult`, `AfterModelCallParams`, `AfterModelCallResult`, `OnItemAppendParams`, `OnItemAppendResult`, `RerenderScope`, `ParentUpdateParams`, `ParentUpdateResult`, `ExecutionOutcome`, `ExecutionContext`, `ScopedStorage`, `StorageAdapter`, `ProjectionPolicy`, `LayerTimeouts`, `LayerProvides`, `LayerDataDecl`, `LayerFunctionDecl`, `ContextConfig`, `InferContext`, `InferContextShape`, `layerData`, `layerFunction`, `context`, `storageGetMany`, `LayerPlacement`, `RenderDeltaParams`, `ContextCacheConfig`, `ContextCacheStore`, `ContextEpoch`, `AnchorPin`, `LayerChurn`, `ReanchorReason`
+> **Exports:** `ContextLayer`, `ContextLayerHooks`, `ContextScope`, `BudgetConfig`, `Slot`, `InitParams`, `InitResult`, `RecallParams`, `RecallResult`, `StoreParams`, `StoreResult`, `SpawnParams`, `SpawnResult`, `ReturnParams`, `ReturnResult`, `CompleteParams`, `DisposeParams`, `BeforeToolCallParams`, `BeforeToolCallResult`, `AfterModelCallParams`, `AfterModelCallResult`, `OnItemAppendParams`, `OnItemAppendResult`, `RerenderScope`, `ExecutionOutcome`, `ExecutionContext`, `ScopedStorage`, `StorageAdapter`, `ProjectionPolicy`, `LayerTimeouts`, `LayerProvides`, `LayerDataDecl`, `LayerFunctionDecl`, `ContextConfig`, `InferContext`, `InferContextShape`, `layerData`, `layerFunction`, `context`, `storageGetMany`, `LayerPlacement`, `RenderDeltaParams`, `ContextCacheConfig`, `ContextCacheStore`, `ContextEpoch`, `AnchorPin`, `LayerChurn`, `ReanchorReason`
 
 ## Module Boundary
 
@@ -141,7 +141,6 @@ interface ContextLayerHooks<TState = unknown> {
   afterModelCall?:  (params: AfterModelCallParams<TState>)       => Promise<AfterModelCallResult<TState> | void>;
   onSpawn?:         (params: SpawnParams<TState>)                => Promise<SpawnResult<TState> | null>;
   onReturn?:        (params: ReturnParams<TState>)               => Promise<ReturnResult<TState> | void>;
-  onParentUpdate?:  (params: ParentUpdateParams<TState>)         => Promise<ParentUpdateResult<TState> | void>;
   onComplete?:      (params: CompleteParams<TState>)             => Promise<void>;
   dispose?:         (params: DisposeParams<TState>)              => Promise<void>;
   renderDelta?:     (params: RenderDeltaParams<TState>)          => Promise<string | null>;
@@ -204,9 +203,11 @@ LOOP ITERATION ─────────────────────�
 │                      its own state snapshot.
 │
 ├─ (if spawning)
-│   ├─ onSpawn()       Sequential, array order.
+│   ├─ onSpawn()       Sequential, SLOT ORDER. Items enter the child's log
+│   │                  in that order.
 │   │   ...child...
-│   └─ onReturn()      Sequential, array order.
+│   └─ onReturn()      Sequential, SLOT ORDER. Pipeline: each layer receives
+│                      the result of the previous layer's onReturn.
 │
 └─ (loop continues or...)
     │
@@ -231,6 +232,7 @@ The runtime applies these invariants uniformly across the lifecycle:
 - **`onReturn` requirements.** Only the *child*'s state is required to merge. A parent that never initialized state can still be seeded from the child; `onReturn` is skipped only when the child produced no state.
 - **Child boundaries.** Both `spawn` (spec 04) and each `inParallel` path (spec 03) are child executions and run the `onSpawn`/`onReturn` pair. inParallel paths merge one at a time even when they execute concurrently, so each merge sees the previous path's contribution.
 - **`onSpawn` for init-less layers.** `onSpawn` runs for layers with no `init` hook (state legitimately `undefined`), consistent with `recall`. Only disabled layers (init present, no state) are skipped.
+- **Opting out of a child.** An `onSpawn` that returns `null` — or throws or times out — sets the same disabled flag for the *child's* execution, so none of the layer's hooks run in that child (init-less layers included). The parent is unaffected. `{ childState: null, items }` is not an opt-out: the items are injected and the child simply has no state for the layer.
 
 ---
 
@@ -366,17 +368,6 @@ interface CompleteParams<TState> {
 
 interface DisposeParams<TState> {
   state: TState;
-}
-
-interface ParentUpdateParams<TState> {
-  parentState: TState;        // the parent layer's current state after its latest store()
-  childState: TState;         // the child layer's current state
-  childCtx: ExecutionContext;
-}
-
-interface ParentUpdateResult<TState> {
-  childState?: TState;        // updated child state, if the child wants to act on the update
-  items?: Item[];             // optional items to inject into the child's ItemLog
 }
 
 type ExecutionOutcome = 'success' | 'failure' | 'aborted';
@@ -664,11 +655,15 @@ Layer factories MUST use `satisfies ContextLayer<TState>` (not a return type ann
 
 ## Future Considerations
 
+### Parent Updates to Spawned Children (Not Yet Designed)
+
+An opt-in `onParentUpdate` hook would let a running spawn child react when the parent's copy of the same layer changes. See `04-spawn`, Future Considerations, for the sketch and open questions. It is not part of `ContextLayerHooks`.
+
 ### Narrowed Scope (Not Yet Designed)
 
 A potential optimization: allow a layer to declare interest in a specific subset of a parent scope rather than the whole thing. A specialist layer — one that cares only about user preferences or an active task list — could subscribe only to those keys and avoid receiving or processing unrelated parent context changes.
 
-This would require extending `ContextScope` with a selector variant (e.g. key patterns or glob matching), adding filtering logic to `onParentUpdate` dispatch, and defining access-control semantics for `ScopedStorage`. The tradeoffs (pattern-matching cost per `store()`, complexity of the access model) need evaluation before committing to a design. Not scheduled.
+This would require extending `ContextScope` with a selector variant (e.g. key patterns or glob matching), adding filtering logic to parent-update dispatch (see above), and defining access-control semantics for `ScopedStorage`. The tradeoffs (pattern-matching cost per `store()`, complexity of the access model) need evaluation before committing to a design. Not scheduled.
 
 ---
 
@@ -812,6 +807,8 @@ Where they disagree, these are correct.
 ```
 
 Three actions MUST be representable: `replace` (pinned content changed), `retract` (a pinned layer produced nothing this turn — leaving its block standing unmarked would show the model content the runtime knows no longer applies), and `add` (a layer first seen mid-epoch, which cannot be spliced into a frozen prefix).
+
+The one break in append-only is a layer that leaves the layer set for good: when a `withContext` boundary closes (`02-step-variants`), the pins of the layers it provided are removed from the epoch. A pin whose layer is gone is served with no retraction (the layer is not there to describe one), so its content would keep reaching the model until the next re-anchor; removing it costs one cache miss on the next assembly.
 
 Layers never see epochs. `recall()` keeps its contract — return the current full content, every turn — and all cache reasoning stays in the runtime.
 

@@ -9,13 +9,19 @@ import type {
   Item,
   LLMResponse,
   StepCallModel,
+  StepWithContext,
 } from '@noetic-tools/types';
-import { createMessage, SteeringAction } from '@noetic-tools/types';
+import { createMessage, frameworkCast, SteeringAction } from '@noetic-tools/types';
 import type { BandedView } from '../../src/interpreter/context-assembly';
-import { stampAnchoringAttributes } from '../../src/interpreter/context-assembly';
-import { executeCallModel } from '../../src/interpreter/execute-action';
+import { anchoringAttributes } from '../../src/interpreter/context-assembly';
+import { executeCallModel, executeWithContext } from '../../src/interpreter/execute-action';
 import { ContextImpl } from '../../src/runtime/context-impl';
-import { makeFunctionCallOutput, makeLLMResponse, makeMockHarness } from '../_helpers';
+import {
+  makeFunctionCallOutput,
+  makeLLMResponse,
+  makeMockHarness,
+  simpleExecute,
+} from '../_helpers';
 
 //#region Helpers
 
@@ -129,6 +135,50 @@ async function runTurns(
 //#endregion
 
 describe('executeCallModel context anchoring', () => {
+  // A withContext layer must not outlive its boundary: once it closes, its
+  // pinned render may not replay into later calls on the same lineage.
+  it('drops a withContext layer pin when the boundary closes', async () => {
+    const { harness, requests } = withCapture();
+    const keep = textLayer('keep', () => 'KEEP');
+    const ctx = new ContextImpl({
+      harness,
+      threadId: 'thread-1',
+      layers: [
+        keep,
+      ],
+    });
+    const scoped: StepWithContext<ContextData, string, string> = {
+      kind: 'withContext',
+      id: 'scoped',
+      child: {
+        kind: 'runCode',
+        id: 'inside',
+        execute: async (input, c) =>
+          executeCallModel(
+            STEP,
+            input,
+            c,
+            frameworkCast<{
+              layers?: ContextLayer[];
+            }>(c).layers,
+          ),
+      },
+      context: [
+        textLayer('gone', () => 'GONE'),
+      ],
+    };
+
+    await executeWithContext(scoped, 'inside', ctx, simpleExecute);
+    await executeCallModel(STEP, 'after', ctx, [
+      keep,
+    ]);
+
+    expect(textsAt(requests, 0)).toContain('GONE');
+    expect(textsAt(requests, 1)).toContain('KEEP');
+    expect(textsAt(requests, 1).join('\n')).not.toContain('GONE');
+    expect(ctx.itemLog.items.length).toBeGreaterThan(0);
+  });
+
   it('replays pinned bytes for a layer that re-renders every turn', async () => {
     const { harness, requests } = withCapture();
     let tick = 0;
@@ -884,24 +934,7 @@ describe('executeCallModel context anchoring', () => {
   });
 });
 
-describe('stampAnchoringAttributes', () => {
-  function recordingSpan() {
-    const attributes = new Map<string, string | number | boolean>();
-    return {
-      attributes,
-      span: {
-        traceId: 't',
-        spanId: 's',
-        parentSpanId: null,
-        setAttribute(key: string, value: string | number | boolean) {
-          attributes.set(key, value);
-        },
-        addEvent() {},
-        end() {},
-      },
-    };
-  }
-
+describe('anchoringAttributes', () => {
   const view: BandedView = {
     anchorItems: [],
     liveItems: [],
@@ -930,25 +963,23 @@ describe('stampAnchoringAttributes', () => {
   };
 
   it('records the epoch and band sizes', () => {
-    const { attributes, span } = recordingSpan();
+    const attributes = anchoringAttributes(view);
 
-    stampAnchoringAttributes(span, view);
-
-    expect(attributes.get('noetic.context.epoch.id')).toBe('t:thread-1#2');
-    expect(attributes.get('noetic.context.epoch.age')).toBe(4);
-    expect(attributes.get('noetic.context.anchor_tokens')).toBe(900);
-    expect(attributes.get('noetic.context.live_tokens')).toBe(30);
-    expect(attributes.get('noetic.context.delta_tokens')).toBe(12);
-    expect(attributes.get('noetic.context.reanchor_reason')).toBe('cache-miss');
+    assert(attributes);
+    expect(attributes['noetic.context.epoch.id']).toBe('t:thread-1#2');
+    expect(attributes['noetic.context.epoch.age']).toBe(4);
+    expect(attributes['noetic.context.anchor_tokens']).toBe(900);
+    expect(attributes['noetic.context.live_tokens']).toBe(30);
+    expect(attributes['noetic.context.delta_tokens']).toBe(12);
+    expect(attributes['noetic.context.reanchor_reason']).toBe('cache-miss');
   });
 
   it('records per-layer placement and churn as JSON', () => {
-    const { attributes, span } = recordingSpan();
+    const attributes = anchoringAttributes(view);
 
-    stampAnchoringAttributes(span, view);
-
-    const placements = attributes.get('noetic.context.layer_placements');
-    const churn = attributes.get('noetic.context.layer_churn');
+    assert(attributes);
+    const placements = attributes['noetic.context.layer_placements'];
+    const churn = attributes['noetic.context.layer_churn'];
     assert(typeof placements === 'string' && typeof churn === 'string');
     expect(JSON.parse(placements)).toEqual([
       {
@@ -967,14 +998,74 @@ describe('stampAnchoringAttributes', () => {
     ]);
   });
 
-  it('records nothing when caching is off', () => {
-    const { attributes, span } = recordingSpan();
-
-    stampAnchoringAttributes(span, {
+  it('omits the re-anchor reason and layer JSON when there are none', () => {
+    const attributes = anchoringAttributes({
       ...view,
-      epoch: undefined,
+      serveInfo: new Map(),
+      epoch: {
+        id: 't:thread-1#2',
+        age: 1,
+        anchorTokens: 0,
+        liveTokens: 0,
+        deltaTokens: 0,
+      },
     });
 
-    expect(attributes.size).toBe(0);
+    assert(attributes);
+    expect(Object.keys(attributes)).toHaveLength(5);
+  });
+
+  it('records nothing when caching is off', () => {
+    expect(
+      anchoringAttributes({
+        ...view,
+        epoch: undefined,
+      }),
+    ).toBeUndefined();
+  });
+});
+
+describe('executeCallModel anchoring span attributes', () => {
+  it("gives each step's request its own assembly's attributes", async () => {
+    const { harness, requests } = withCapture();
+    const layers = [
+      textLayer('static', () => 'fixed'),
+    ];
+
+    await runTurns(harness, layers, 2);
+
+    expect(requests.map((r) => r.spanAttributes?.['noetic.context.epoch.age'])).toEqual([
+      1,
+      2,
+    ]);
+  });
+
+  it('sends them on the first attempt only when steering retries', async () => {
+    const { harness, requests } = withCapture();
+    let guided = false;
+    harness.afterModelCall = async () => {
+      if (guided) {
+        return {
+          action: SteeringAction.Allow,
+        };
+      }
+      guided = true;
+      return {
+        action: SteeringAction.Guide,
+        guidance: 'again',
+      };
+    };
+    const ctx = new ContextImpl({
+      harness,
+      threadId: 'thread-1',
+    });
+
+    await executeCallModel(STEP, 'hi', ctx, [
+      textLayer('static', () => 'fixed'),
+    ]);
+
+    expect(requests).toHaveLength(2);
+    expect(requests[0]?.spanAttributes?.['noetic.context.epoch.id']).toBeDefined();
+    expect(requests[1]?.spanAttributes).toBeUndefined();
   });
 });

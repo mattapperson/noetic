@@ -69,7 +69,7 @@ External channels are scoped to the **root execution**, not individual spawn bou
 
 ## `developer` role for context layer output vs. `system` for agent instructions
 
-OpenResponses distinguishes `system` (user-authored instructions) from `developer` (framework-injected context). Context layers use `role: developer` because they're framework machinery, not the agent's core instructions. The `system` field on `StepCallModelOpts` renders as a `MessageItem` with `role: system`. This separation lets models treat them differently and makes the View's provenance clear: system items are the agent's identity; developer items are runtime-injected context that may change between calls.
+OpenResponses distinguishes `system` (user-authored instructions) from `developer` (framework-injected context). Context layers use `role: developer` because they're framework machinery, not the agent's core instructions. The `instructions` field on `CallModelOpts` travels as the request's `instructions` field, outside the input items, together with the text of any `role: system` messages in the log (see `02-step-variants` § What the LLM Actually Sees). This separation lets models treat them differently and makes the request's provenance clear: instructions are the agent's identity; developer items are runtime-injected context that may change between calls.
 
 ## Options object for `channel()` factory
 

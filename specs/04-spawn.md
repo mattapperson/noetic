@@ -10,10 +10,10 @@
 `spawn` is the most important variant. It's what makes Ralph Wiggum loops, recursive LLMs, and Slate thread weaving possible. Without it, you can't express "run this work with a different context window."
 
 ```typescript
-interface SpawnOpts<I, O> {
+interface SpawnOpts<TContext, I, O> extends StepReplay<TContext, I> {
   id: string;
-  child: Step<I, O>;
-  context?: ContextLayer[];
+  child: Step<TContext, I, O>;
+  context?: ContextConfig | ContextLayer[];
   timeout?: number;
   /**
    * Per-step subprocess adapter override. Takes precedence over the harness
@@ -39,8 +39,8 @@ The optional `context` field on `StepSpawn` provides **spawn-local context layer
 When `context` is not set, parent context layers propagate to the child normally, and each layer's `onSpawn` hook determines what state crosses the boundary:
 
 - A layer can return `{ childState }` to provide initial state in the child.
-- A layer can return `null` to disable itself in the child.
-- A layer can inject items into the child's initial ItemLog via `{ childState, items }`.
+- A layer can return `null` to disable itself in the child: none of its hooks run for the child's execution. An `onSpawn` that throws or times out disables the layer the same way.
+- A layer can inject items into the child's initial ItemLog via `{ childState, items }`. `{ childState: null, items }` injects the items without giving the child any state.
 
 ---
 
@@ -55,16 +55,18 @@ Parent calls spawn(opts)
 │
 ├─ Child starts with empty ItemLog
 │
-├─ For each active context layer (sequential, array order):
+├─ For each active context layer (sequential, SLOT ORDER; ties by array index):
 │   └─ onSpawn() → returns child state + optional items for ItemLog (or null to disable)
 │
 ├─ Child execution runs with its ItemLog + context layer states
 │
 ├─ Child completes with result
 │
-└─ For each active context layer (sequential, array order):
+└─ For each active context layer (sequential, SLOT ORDER; ties by array index):
     └─ onReturn(result) → transforms result, output feeds into next layer's onReturn
 ```
+
+Both hooks run in slot order, like every other multi-layer pipeline (`recall`, `onItemAppend`, `projectHistory`): the `onReturn` result pipeline composes from the lowest slot to the highest, and `onSpawn` items enter the child's ItemLog in the same order. Only `init`, `onComplete`, and `dispose` use array order.
 
 The result transformation pipeline means layers compose naturally. A logging layer can observe the result without modifying it; a summarization layer can compress it; an extraction layer can parse structured data from it. Each layer receives the output of the previous layer's `onReturn`.
 
@@ -141,21 +143,9 @@ Parent calls harness.detachedSpawn(step, input, ctx)
 
 ### Context in Tools
 
-Tools receive a `ToolExecutionContext` as their second argument, which provides `{ ctx, harness?, context, assembledView, lastStepMeta, turnContext? }`. Note: `harness` is `undefined` when the step is executed via bare `run()` without an AgentHarness wrapper; tools that need the harness (for spawn, channels) should check for its presence. Tools that spawn sub-agents **must use `toolCtx.ctx`** (the parent context) rather than creating a new root context via `harness.createContext()`. Creating a root context breaks depth tracking, `threadId`/`resourceId` inheritance, context layer propagation, and observability tracing. Both `harness.run()` and `harness.detachedSpawn()` create their own child contexts internally, so the tool should simply forward the parent context it receives via `toolCtx.ctx`.
+Tools receive a `ToolExecutionContext` as their second argument, which provides `{ ctx, harness, fs, shell, context, assembledView, lastStepMeta, turnContext? }`. `harness` is always present: every `Context` belongs to a harness, so a tool can reach spawn and channels without checking. Tools that spawn sub-agents **must use `toolCtx.ctx`** (the parent context) rather than creating a new root context via `harness.createContext()`. Creating a root context breaks depth tracking, `threadId`/`resourceId` inheritance, context layer propagation, and observability tracing.
 
----
-
-## Parent Context Updates to Spawned Children
-
-`spawn` creates a child context — not `inParallel`. `inParallel` paths share the parent context entirely and do not trigger `onParentUpdate`. This section applies only to `spawn` boundaries.
-
-A spawned child does not run in complete isolation from its parent. While the child has its own ItemLog and context convergence, the parent's layers may continue to produce state changes during the child's execution. The child can receive these updates and decide how to respond.
-
-This is opt-in per context layer via the `onParentUpdate` hook (see `11-context-layer-system`). The agent harness fires `onParentUpdate` on the child's layer whenever the corresponding parent layer's state changes (after `store()` on the parent side) and the child is still running. The child layer receives both the current parent state and its own current state, and decides what — if anything — to do with the update.
-
-**The child is never forced to accept parent updates.** Returning `void` means the child ignores the update entirely. This preserves the child's autonomy while enabling reactive parent-child relationships where needed.
-
----
+`harness.run(step, input, ctx)` executes `step` on the context it is given — it does not open a boundary. To run a sub-agent in its own child context, wrap it in a spawn: `harness.run(spawn({ id, child }), input, toolCtx.ctx)` blocks until the child settles, and `harness.detachedSpawn(child, input, toolCtx.ctx)` runs it in the background. Both create the child context from `toolCtx.ctx`, so the tool simply forwards the context it received.
 
 ### Integration with Loop Inbox
 
@@ -200,6 +190,7 @@ interface StepSubprocessRequest {
   stepId: string;                    // registry key
   serializedInput: unknown;          // input passed to the step
   executionId: string;               // stable id (the child context id)
+  parentExecutionId?: string;        // the dispatching context; absent for runCode
   overrides: {                       // applied to the child context
     threadId?: string;
     resourceId?: string;
@@ -230,12 +221,25 @@ Adapters that opt into durability persist a manifest per handle through the harn
 - `handleId` — opaque adapter identifier.
 - `stepId` — the step being executed.
 - `serializedInput` — input argument.
-- `executionId` — parent execution context id, used to correlate with `harness.restore(executionId)`.
+- `executionId` — the request's `executionId`: the context the step runs in (the child context for `spawn` / `detachedSpawn`).
+- `parentExecutionId` — the request's `parentExecutionId`: the context that created the child, used to correlate with `harness.restore(parentExecutionId)`. Absent for `runCode`, where `executionId` already names the dispatching context.
 - Transport-specific identity (pid + `pidStarttime` for OS processes; `socketPath` for unix-socket IPC).
 - Caller-supplied tags on `metadata` (e.g. `taskRole: 'planner'`, `taskId: 'T-...'`, `featureId: 'F-...'`).
 
-On host restart the surviving handle can be rediscovered via `adapter.listLive()` and re-bound via `adapter.reattach(handleId)`. The parent context can be rehydrated by `harness.restore(executionId)` against the matching `CheckpointStore` snapshot. Full model, storage layout, and IPC semantics live in `23-durable-execution`.
+On host restart the surviving handle can be rediscovered via `adapter.listLive()` and re-bound via `adapter.reattach(handleId)`. A rehydrated handle carries the same `handle.metadata` as the live one: the caller's tags, plus `executionId` and `parentExecutionId` (adapter keys win over caller tags of the same name). The parent context can be rehydrated by `harness.restore(parentExecutionId)` against the matching `CheckpointStore` snapshot. Full model, storage layout, and IPC semantics live in `23-durable-execution`.
 
 ### Idempotency Guidance
 
 Durable execution means the same step body may be replayed under certain failure paths — for example, a crash that lands between step completion and the following checkpoint write. The framework cannot make arbitrary `runCode` bodies idempotent. Use stable step ids, and write step bodies whose side effects are safe to re-execute or guarded by an external idempotency key.
+
+---
+
+## Future Considerations
+
+### Parent Updates to Spawned Children (Not Yet Designed)
+
+A spawned child could react to its parent's layer state changing while the child runs — for example, a detached sub-agent picking up a plan the parent revised. The sketch is an opt-in `onParentUpdate` layer hook: after a parent-side `store()` changes a layer's state, the harness would call the hook on the same layer in each still-running child with both the parent's and the child's current state. The child is never forced to accept an update; returning nothing ignores it.
+
+It would apply to `spawn` and `detachedSpawn` children only. `inParallel` paths are child executions too (each has its own context and deep-cloned state, see `03-control-flow`), but they would not receive parent updates.
+
+Open questions: which writes count as an update (only `store()`, or every state write), how updates are delivered to an out-of-process child, and how they order against the child's own hooks. Not scheduled.

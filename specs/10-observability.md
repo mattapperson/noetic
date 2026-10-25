@@ -16,6 +16,7 @@ Every `Context` carries a span (`Context.span`, see `07-context-and-event-log`).
 | `inParallel.path` | each `inParallel` path, around its child context | `ctx.span` |
 | `llm.call` | each model call (one per tool round) | `ctx.span` |
 | `tool.call` | each function call of a model call | its `llm.call` |
+| `tool.call` | each `invokeTool` step, around validation, the steering gate, and execution | `ctx.span` |
 | `decide.call` | each `decide` step | `ctx.span` |
 
 ```
@@ -88,14 +89,21 @@ interface TraceExporter {
 }
 ```
 
-Custom exporters plug in:
+Each harness takes its exporter at construction; there is no process-wide exporter, so two harnesses in one process can trace to different backends. A harness built without one uses a `NoopExporter`:
 
 ```typescript
-import { setTraceExporter } from '@noetic-tools/core';
+import { AgentHarness } from '@noetic-tools/core';
 import { DatadogExporter } from '@noetic/datadog';
 
-setTraceExporter(new DatadogExporter({ apiKey: process.env.DD_API_KEY }));
+const harness = new AgentHarness({
+  name: 'traced-agent',
+  agentGraph: agent,
+  params: {},
+  traceExporter: new DatadogExporter({ apiKey: process.env.DD_API_KEY }),
+});
 ```
+
+Every span the harness opens — model, tool, decision, child-context, and workflow-run spans — is exported to that harness's `traceExporter`.
 
 ---
 
@@ -115,14 +123,19 @@ callModel step spans follow OpenTelemetry GenAI semantic conventions:
 
 The two cache attributes are **absent, not zero**, when the provider reports no figures — a consumer must be able to tell "nothing was cached" from "this provider does not say", since the runtime steers re-anchoring on that distinction (spec 11).
 
-invokeTool step spans include:
+`tool.call` spans — a model's function calls and `invokeTool` steps alike — include:
 
 | Attribute | Type | Description |
 |-----------|------|-------------|
 | `tool.name` | string | Tool name |
 | `tool.needs_approval` | boolean | Whether the tool required approval |
+| `noetic.node.id` | string | The `callModel` step that made the call, or the `invokeTool` step |
 
-The harness emits one `llm.call` span per model call (one per tool round) and one `tool.call` span per function call, nested under the calling context's span. Both are flushed to the configured `traceExporter` when the `callModel` invocation settles. A harness constructed without a `traceExporter` uses a `NoopExporter`, so emission is always safe.
+The harness emits one `llm.call` span per model call (one per tool round) and one `tool.call` span per function call, nested under the calling context's span. Both are flushed to the configured `traceExporter` when the `callModel` invocation settles. A function call's `tool.call` span marks that the call happened; it is closed as soon as it opens, and carries no timing.
+
+An `invokeTool` step's `tool.call` span covers the whole step — input validation, the steering gate, and execution — and is exported when the step settles. A failure stamps `noetic.error.kind` and `error: true`, as on child context spans; a steering denial reads `noetic.error.kind: "steering_denied"`.
+
+A harness constructed without a `traceExporter` uses a `NoopExporter`, so emission is always safe.
 
 ---
 
@@ -142,7 +155,7 @@ The harness emits one `llm.call` span per model call (one per tool round) and on
 
 ## Context Anchoring Attributes
 
-Each callModel step stamps how its view was banded onto the step's span, so an expensive run can be traced back to the layer that keeps invalidating the prompt prefix (spec 11, Prompt-Cache Anchoring). Nothing is stamped when anchoring is switched off.
+Each callModel step stamps how its view was banded onto its first `llm.call` span — the first tool round of its first attempt — so an expensive run can be traced back to the layer that keeps invalidating the prompt prefix (spec 11, Prompt-Cache Anchoring). The view is assembled once per step: a steering retry re-sends it and later tool rounds only extend it, so their `llm.call` spans carry none of these attributes, and each step's values stay on its own span. Nothing is stamped when anchoring is switched off.
 
 | Attribute | Type | Description |
 |-----------|------|-------------|
@@ -175,17 +188,17 @@ Channel conditions that lose data or risk a stall without failing the run (see `
 
 ## Context Layer Trace Spans
 
-Every context layer hook invocation produces a trace span (see also `11-context-layer-system`).
+Every call of a context layer's `init`, `recall`, `store`, `onSpawn`, `onReturn`, `onComplete`, or `dispose` hook is recorded as a `layer.hook` event (`NoeticEvent.LAYER_HOOK`) on the span of the context the hook runs in (see also `11-context-layer-system`). Events rather than child spans: the `ExecutionContext` a hook gets can annotate its span (`ctx.trace`) but not open one, and `@noetic-tools/context` cannot import the runtime that can. Each event is shaped as a `LayerTraceSpan`:
 
 ```typescript
 interface LayerTraceSpan {
-  /** Layer that produced this span. */
+  /** Layer that produced this record. */
   layerId: string;
   /** Which hook was invoked. */
   hook: 'init' | 'recall' | 'store' | 'onSpawn' | 'onReturn' | 'onComplete' | 'dispose';
-  /** Wall-clock duration in milliseconds. */
+  /** Wall-clock duration in milliseconds; 0 when skipped. */
   duration: number;
-  /** Whether the hook succeeded. */
+  /** How the call ended. */
   status: 'ok' | 'error' | 'timeout' | 'skipped';
   /** For recall: tokens allocated vs. tokens used. */
   budget?: { allocated: number; used: number; yielded: number };
@@ -195,3 +208,16 @@ interface LayerTraceSpan {
   error?: { message: string; stack?: string };
 }
 ```
+
+Span event attributes hold only scalars, so the nested fields flatten to dotted keys: `budget.allocated`, `budget.used`, `budget.yielded`, `error.message` (the stack is not recorded).
+
+| `status` | When |
+|----------|------|
+| `ok` | The hook resolved |
+| `error` | The hook threw or rejected |
+| `timeout` | The hook outran its `timeouts` entry; `error.message` is `Timeout after <ms>ms` |
+| `skipped` | The layer defines the hook but the lifecycle did not call it: the layer is disabled (its `init` failed under `onInitError: 'disable'`), `init` found state already kept for the execution, or `onReturn` found no child state to merge |
+
+For `recall`, `budget.allocated` is the layer's token budget, `budget.used` is what its output costs (`tokenCount`, or the estimate for a string), and `budget.yielded` is `allocated − used`, floored at 0 — the budget the layer left unspent. A recall that returns nothing reports `itemCount: 0` and `used: 0`.
+
+Where the event lands: `onSpawn` on the parent's span; `onReturn` on the child's span (next to any `spawn.summary_failed`); every other hook on the span of the context it runs for. A peek recall (a render-only preview, such as the inspector's) records nothing, and neither does an eventual layer served from its recall cache, since no hook runs.

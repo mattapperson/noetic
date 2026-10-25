@@ -225,6 +225,8 @@ const agentLoop = {
 
 Give the LLM both a sync and async delegation tool. The LLM decides at runtime which to use based on the task — blocking when it needs the result immediately, or launching in the background when it can continue working.
 
+Forward `toolCtx.ctx` rather than calling `harness.createContext()`, so the child keeps its depth, thread, layers, and trace parent. `harness.run()` runs a step on the context you pass it and opens no boundary of its own, so the sync tool wraps the sub-agent in `spawn(...)` to give it a child context; `detachedSpawn()` creates one itself.
+
 ```ts
 import { callModel, channel, spawn, tool, until } from '@noetic-tools/core';
 import type { ContextData } from '@noetic-tools/core';
@@ -330,7 +332,7 @@ When an adapter crosses a process boundary, the child runtime must locate the st
 
 ### Durable Handle Manifests
 
-Adapters configured with a durable `StorageAdapter` persist a manifest per handle: `handleId`, `stepId`, `serializedInput`, `executionId`, and transport-specific identity (pid + `pidStarttime` for OS children; `socketPath` for IPC). On parent restart, `adapter.listLive()` rediscovers the still-running children and `adapter.reattach(handleId)` rebinds each handle. See the [Durability](/docs/framework/durability) page for the full restart flow.
+Adapters configured with a durable `StorageAdapter` persist a manifest per handle: `handleId`, `stepId`, `serializedInput`, `executionId` (the child context), `parentExecutionId` (the context that spawned it — pass it to `harness.restore()`), the request's `metadata` tags, and transport-specific identity (pid + `pidStarttime` for OS children; `socketPath` for IPC). Rehydrated handles carry the tags and both ids on `handle.metadata`. On parent restart, `adapter.listLive()` rediscovers the still-running children and `adapter.reattach(handleId)` rebinds each handle. See the [Durability](/docs/framework/durability) page for the full restart flow.
 
 ## withContext vs spawn
 

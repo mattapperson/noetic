@@ -25,7 +25,9 @@ export function isStepManifest(value: unknown): value is InMemoryStepManifest {
     typeof value.stepId === 'string' &&
     typeof value.executionId === 'string' &&
     typeof value.startedAt === 'string' &&
-    isRecord(value.overrides)
+    isRecord(value.overrides) &&
+    (value.parentExecutionId === undefined || typeof value.parentExecutionId === 'string') &&
+    (value.metadata === undefined || isRecord(value.metadata))
   );
 }
 
@@ -43,8 +45,10 @@ export async function persistStepManifest(
     handleId: handle.id,
     stepId: request.stepId,
     executionId: request.executionId,
+    parentExecutionId: request.parentExecutionId,
     serializedInput: request.serializedInput,
     overrides: request.overrides,
+    metadata: request.metadata,
     startedAt: handle.startedAt,
     reattachMode: 'replay',
   };

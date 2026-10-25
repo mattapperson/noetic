@@ -111,6 +111,12 @@ interface CallModelRequestBase {
    * each span back to its node in the declared DAG.
    */
   nodeId?: string;
+  /**
+   * @internal Attributes for the first `llm.call` span this request opens. Set
+   * by `callModel` steps to record how the view was banded (the
+   * `noetic.context.*` anchoring attributes).
+   */
+  spanAttributes?: Record<string, string | number | boolean>;
 }
 
 /** @public Request shape when tools are provided — ctx is required for tool execution callbacks. */

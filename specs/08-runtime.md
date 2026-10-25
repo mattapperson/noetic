@@ -1,7 +1,7 @@
 # AgentHarness Interface
 
 > **Depends On:** `01-step-type` (Step), `07-context-and-event-log` (Context, Item, LLMResponse), `06-channels` (Channel, ExternalChannel), `11-context-layer-system` (ContextLayer, StorageAdapter), `10-observability` (Span)
-> **Exports:** `AgentHarness`, `AgentConfig`, `FsAdapter`, `FsStats`, `createLocalFsAdapter`, `ShellAdapter`, `ShellExecOptions`, `ShellExecResult`, `createLocalShellAdapter`, `SubprocessAdapter`, `SubprocessSpec`, `SubprocessHandle`, `SubprocessExitInfo`, `SubprocessCapabilities`, `SubprocessIpcChannel`, `SubprocessServer`, `SubprocessKillSignal`, `createLocalSubprocessAdapter`, `setHarness()`, `setTraceExporter()`
+> **Exports:** `AgentHarness`, `AgentConfig`, `FsAdapter`, `FsStats`, `createLocalFsAdapter`, `ShellAdapter`, `ShellExecOptions`, `ShellExecResult`, `createLocalShellAdapter`, `SubprocessAdapter`, `SubprocessSpec`, `SubprocessHandle`, `SubprocessExitInfo`, `SubprocessCapabilities`, `SubprocessIpcChannel`, `SubprocessServer`, `SubprocessKillSignal`, `createLocalSubprocessAdapter`, `setHarness()`
 
 ---
 
@@ -418,7 +418,7 @@ interface DetachedHandle<O> {
 - a long-lived `EventBroadcaster` that relays SDK and framework events across all turns,
 - an `itemLog` snapshot that carries conversation history from turn to turn.
 
-Before the first turn runs, the harness walks the step tree to collect all tools from callModel steps, merges them with layer-provided tools, and deduplicates by name. This **unified tool set** is stored on the turn's execution context and sent with every LLM call for prompt cache efficiency. Individual steps restrict the model to a subset via the Open Responses `tool_choice: { type: "allowed_tools" }` parameter. `run(step, input, ctx)` does the same lazily: when an embedder drives a step directly on a bare `createContext()` context, `run` populates that context's unified tool set (the step's tools plus the harness tools) if it is not already set, so directly-driven steps — and any sub-agents they spawn — see the harness toolset. `run` also runs the configured context layers' `init()` hooks once per context (keyed by `ctx.id`) before executing, so a harness built with `contextLayers` + a storage adapter rehydrates prior layer state, recalls it, and persists updates on the bare `run()` path — the same guarantee the session/`execute()` path gives. The init is idempotent: nested or repeated `run()` calls and the session turn path never re-init (which would clobber accumulated in-layer state by re-hydrating from storage); a deliberate `disposeLayers(ctx)` clears the guard so a later `run()` re-hydrates.
+Before the first turn runs, the harness walks the step tree to collect all tools from callModel steps, merges them with layer-provided tools, and deduplicates by name. This **unified tool set** is stored on the turn's execution context as the pool every `callModel` step draws from. Every LLM call sends the full set, so the tool prefix stays prompt-cache stable across steps; a step's `tools` narrows the model to an allowed subset with `tool_choice: { type: "allowed_tools" }`, and the harness tool loop refuses calls to any other tool (see `02-step-variants` § Unified Tool Set). `run(step, input, ctx)` does the same lazily: when an embedder drives a step directly on a bare `createContext()` context, `run` populates that context's unified tool set (the step's tools plus the harness tools) if it is not already set, so directly-driven steps — and any sub-agents they spawn — see the harness toolset. `run` also runs the configured context layers' `init()` hooks once per context (keyed by `ctx.id`) before executing, so a harness built with `contextLayers` + a storage adapter rehydrates prior layer state, recalls it, and persists updates on the bare `run()` path — the same guarantee the session/`execute()` path gives. The init is idempotent: nested or repeated `run()` calls and the session turn path never re-init (which would clobber accumulated in-layer state by re-hydrating from storage); a deliberate `disposeLayers(ctx)` clears the guard so a later `run()` re-hydrates.
 
 A session's runner starts turns lazily whenever the queue goes non-empty while the runner is idle. Each turn:
 
@@ -671,7 +671,7 @@ See `23-durable-execution` for the full durable-execution model, including `Subp
 
 | Backend                    | When to Use                                                     | Durability | Channel Handles |
 |----------------------------|-----------------------------------------------------------------|------------|-----------------|
-| `AgentHarness<TParams>`     | Testing, simple scripts, CLI tools. Auto-resolves LLM provider from `OPENROUTER_API_KEY` or `callModelDefaults` config. | Ephemeral by default; full durable execution when constructed with a durable `StorageAdapter` + `CheckpointStore`. | In-process handles |
+| `AgentHarness<TParams>`     | Testing, simple scripts, CLI tools. Resolves the LLM provider from `callModelDefaults` (default `'noetic'`, keyed by `NOETIC_API_KEY`; `'openrouter'` reads `OPENROUTER_API_KEY`) — see `02-step-variants` § LLM Provider Configuration. | Ephemeral by default; full durable execution when constructed with a durable `StorageAdapter` + `CheckpointStore`. | In-process handles |
 
 ```typescript
 import { setHarness, AgentHarness } from '@noetic-tools/core';

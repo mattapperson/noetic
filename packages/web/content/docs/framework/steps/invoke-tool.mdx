@@ -51,7 +51,7 @@ Every tool in Noetic follows the same interface, whether it is passed to `callMo
 | `output` | `StandardSchemaV1<O>` | Yes | Schema defining the tool's output |
 | `inputJsonSchema` | `Record<string, unknown>` | No | Explicit JSON Schema override/fallback for non-Zod tool input. Zod uses its native converter; other validators can implement StandardJSONSchemaV1. A validation-only schema must provide this field or conversion throws `MISSING_JSON_SCHEMA` |
 | `execute` | `(args: I, toolCtx: ToolExecutionContext) => Promise<O>` | Yes | The function that runs the tool. The second argument is a `ToolExecutionContext` — `{ ctx, harness, fs, shell, context, assembledView, lastStepMeta }` — not the step `Context` itself (which is available as `toolCtx.ctx`) |
-| `needsApproval` | `boolean` | No | If `true`, the runtime should ask for human approval before executing |
+| `needsApproval` | `boolean` | No | Declares that a call needs human approval before it runs. Core records it on traces but does not pause on it — see [Human-in-the-Loop Approval](#human-in-the-loop-approval) |
 | `context` | `ToolContextDeclaration` | No | Declares tool-owned state; the runtime generates a context layer from it |
 | `ui` | `ToolUiDeclaration` | No | Render functions (`call` / `progress` / `result` / `error`) so the tool's calls carry their own UI — see [Generative UI](/docs/framework/generative-ui) |
 
@@ -124,7 +124,12 @@ Standard Schema support covers tool input/output/event schemas and `callModel` /
 
 ## Human-in-the-Loop Approval
 
-Set `needsApproval: true` on a tool to signal that the runtime should pause and request human confirmation before executing it.
+Set `needsApproval: true` on a tool to declare that a call must be approved by a human before it runs. The flag is a declaration, not a gate: core records it as `tool.needs_approval` on each `tool.call` span and does **not** pause on its own. Enforce it with one of:
+
+- A [`beforeToolCall` gating layer](/docs/framework/context-layers/custom-layers) that asks your approver and returns `allow` or `deny`. The gate runs before `execute` on both the model-driven path and `invokeTool`. A denied model-driven call returns an error tool result to the model; a denied `invokeTool` step throws `NoeticError` kind `steering_denied`.
+- The tool's own integration, which checks before doing any work — for example [`fromAiSdkTool`](/docs/framework/chat-sdk) waits on its approval channels and fails the call when it is refused or times out.
+
+A tool that sets `needsApproval` with neither in place runs without approval.
 
 ```ts
 import { z } from 'zod';
@@ -142,7 +147,7 @@ const deleteTool = tool({
     deleted: z.boolean(),
   }),
   execute: async (args) => {
-    // Only runs after approval
+    // Runs once your beforeToolCall gate (or integration) approves the call
     await db.delete(args.recordId);
     return {
       deleted: true,

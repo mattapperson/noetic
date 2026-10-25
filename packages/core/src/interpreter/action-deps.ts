@@ -10,6 +10,8 @@ export {
   createContextCacheStore,
   DECISION_PROJECTION,
   DEFAULT_PROJECTION,
+  disposeLayers,
+  initLayers,
   lineageKey,
   noteCacheOutcome,
   openEpoch,
@@ -20,6 +22,7 @@ export {
   resolveLayerTools,
   returnLayers,
   spawnLayers,
+  unpinLayers,
 } from '@noetic-tools/context';
 export type { ItemSchemaRegistry } from '@noetic-tools/types';
 export { defaultItemSchemaRegistry } from '@noetic-tools/types';

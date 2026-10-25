@@ -27,6 +27,14 @@ This is the primitive for scoping context layers to a section of your execution 
 
 `spawn` and `detachedSpawn` break the inheritance chain. If a descendant step spawns a child, the provided layers do not propagate into the spawn boundary.
 
+## Layer Lifetime
+
+Provided layers live only as long as the `withContext` step:
+
+- **On entry**, each provided layer's `init` hook runs, so its state is ready before any descendant `callModel` recalls it.
+- **On exit** — whether the child returns or throws — each provided layer's `dispose` hook runs and its state is dropped. Its pinned prompt-cache output is dropped too, so later `callModel` steps on the same context never see it. The parent's own layers and their state are untouched.
+- A provided layer with the **same id** as a parent layer overrides it for the subtree but shares its state, so it is neither initialized nor disposed by the boundary.
+
 ## API Reference
 
 | Property | Type | Required | Description |

@@ -159,10 +159,12 @@ export function createInMemorySubprocessAdapter(
       startedAt: manifest.startedAt,
       updatedAt: nowIso(),
       metadata: {
+        ...(manifest.metadata ?? {}),
         runtime: 'in-memory',
         kind: 'step',
         stepId: manifest.stepId,
         executionId: manifest.executionId,
+        parentExecutionId: manifest.parentExecutionId,
         reattachMode: manifest.reattachMode,
       },
     };

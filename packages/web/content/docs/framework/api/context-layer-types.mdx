@@ -205,8 +205,12 @@ Return the text to publish, or `null` to let the runtime republish the full new 
 
 | Field | Type | Description |
 |---|---|---|
-| `childState` | `TState \| null` | State for the child (null = don't propagate) |
+| `childState` | `TState \| null` | State for the child (`null` = the child gets no state; `items` still apply) |
 | `items` | `Item[]` | Additional items for the child (optional) |
+
+`onSpawn` and `onReturn` run one layer at a time in slot order (ties by array order), so the `onReturn` result pipeline runs from the lowest slot to the highest.
+
+Return `null` instead of a `SpawnResult` to disable the layer in the child: none of its hooks run for the child's execution. A hook that throws or times out disables the layer the same way and is logged as a diagnostic.
 
 ### ReturnParams
 
@@ -439,13 +443,13 @@ interface LayerStateStore {
 | `has(executionId, layerId)` | Whether any state entry exists — distinguishes "init never ran" (no entry → init-bearing layer skipped) from "state explicitly cleared" (entry present → hooks keep running with `undefined` state) |
 | `registerDurable(executionId, layerId, target)` | Register the durable write-through target for a layer (non-`'execution'` scopes; called by `initLayers`/`spawnLayers`) |
 | `flush(executionId)` | Await all in-flight durable mirror writes |
-| `disable(executionId, layerId)` / `isDisabled(...)` | Explicit disabled tracking for layers whose `init` failed with `onInitError: 'disable'` |
+| `disable(executionId, layerId)` / `isDisabled(...)` | Explicit disabled tracking for layers whose `init` failed with `onInitError: 'disable'`, or whose `onSpawn` returned `null` or failed for a child execution |
 
 Writes are coalesced per key (latest wins, one write in flight) and mirror failures never throw — they surface only through `diagnostic`.
 
 ## LayerTraceSpan
 
-Observability data for a single layer hook execution.
+Observability data for a single layer hook execution, recorded as a `layer.hook` span event (`NoeticEvent.LAYER_HOOK`) on the span of the context the hook runs in. See [Observability](/docs/framework/observability#layertracespan).
 
 ```ts validate=none
 interface LayerTraceSpan {

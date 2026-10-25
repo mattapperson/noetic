@@ -602,6 +602,69 @@ describe('layer-lifecycle', () => {
     expect(store.get('exec-cleanup', 'a')).toBeUndefined();
   });
 
+  it('scoped dispose drops only the disposed layers and keeps the execution', async () => {
+    const store = createLayerStateStore();
+    const disposed: string[] = [];
+    const layer = (id: string): ContextLayer => ({
+      id,
+      name: id,
+      slot: 100,
+      scope: 'thread',
+      hooks: {
+        init: async () => ({
+          state: {
+            id,
+          },
+        }),
+        dispose: async () => {
+          disposed.push(id);
+        },
+      },
+    });
+    const parent = layer('parent');
+    const scoped = layer('scoped');
+    const ctx = makeCtx({
+      executionId: 'exec-scoped',
+    });
+    await initLayers({
+      layers: [
+        parent,
+        scoped,
+      ],
+      ctx,
+      storage: makeStorage(),
+      store,
+    });
+
+    await disposeLayers({
+      layers: [
+        scoped,
+      ],
+      ctx,
+      store,
+      scoped: true,
+    });
+
+    expect(disposed).toEqual([
+      'scoped',
+    ]);
+    expect(store.has?.('exec-scoped', 'scoped')).toBe(false);
+    expect(store.get('exec-scoped', 'parent')).toEqual({
+      id: 'parent',
+    });
+  });
+
+  it('drop clears a disabled mark for one layer only', () => {
+    const store = createLayerStateStore();
+    store.disable?.('exec-drop', 'a');
+    store.disable?.('exec-drop', 'b');
+
+    store.drop?.('exec-drop', 'a');
+
+    expect(store.isDisabled?.('exec-drop', 'a')).toBe(false);
+    expect(store.isDisabled?.('exec-drop', 'b')).toBe(true);
+  });
+
   it('recall string shorthand wraps in developer message', async () => {
     const store = createLayerStateStore();
     const layers: ContextLayer[] = [

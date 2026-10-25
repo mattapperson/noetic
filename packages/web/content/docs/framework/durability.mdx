@@ -277,7 +277,7 @@ interface SubprocessAdapter {
 }
 ```
 
-When the adapter is constructed with a `storage: StorageAdapter`, every `spawn()` writes a manifest entry covering `handleId`, `stepId`, `serializedInput`, `executionId`, the transport identity (pid + `pidStarttime` for the local adapter, socketPath for IPC), and any caller-attached metadata. `listLive()` scans the manifest prefix; `reattach(handleId)` re-queries liveness and rebinds the handle.
+When the adapter is constructed with a `storage: StorageAdapter`, every `spawn()` writes a manifest entry covering `handleId`, `stepId`, `serializedInput`, `executionId` (the child context), `parentExecutionId` (the context that spawned it), the transport identity (pid + `pidStarttime` for the local adapter, socketPath for IPC), and any caller-attached metadata, which rehydrated handles carry on `handle.metadata`. `listLive()` scans the manifest prefix; `reattach(handleId)` re-queries liveness and rebinds the handle.
 
 Without storage, `listLive()` returns an empty set and `reattach()` returns null — every surface degrades gracefully to "fresh start".
 

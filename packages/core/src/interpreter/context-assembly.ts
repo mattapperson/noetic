@@ -10,7 +10,6 @@ import type {
   ProjectionPolicy,
   ReanchorReason,
   RecallLayerOutput,
-  Span,
 } from '@noetic-tools/types';
 import { createMessage, estimateTokens, hashItems, hashString } from '@noetic-tools/types';
 import { NoeticAttr } from '../observability/genai-attributes';
@@ -161,24 +160,29 @@ export async function prepareBandedView(params: PrepareBandedViewParams): Promis
 }
 
 /**
- * Record how the view was banded on the step's span, so a slow or expensive run
- * can be traced back to the layer that keeps invalidating the prefix.
+ * How the view was banded, as span attributes for the step's first `llm.call`
+ * span, so a slow or expensive run can be traced back to the layer that keeps
+ * invalidating the prefix. `undefined` when anchoring is off.
  */
-export function stampAnchoringAttributes(span: Span | undefined, view: BandedView): void {
-  if (!span || !view.epoch) {
-    return;
+export function anchoringAttributes(
+  view: BandedView,
+): Record<string, string | number | boolean> | undefined {
+  if (!view.epoch) {
+    return undefined;
   }
   const { epoch } = view;
-  span.setAttribute(NoeticAttr.CONTEXT_EPOCH_ID, epoch.id);
-  span.setAttribute(NoeticAttr.CONTEXT_EPOCH_AGE, epoch.age);
-  span.setAttribute(NoeticAttr.CONTEXT_ANCHOR_TOKENS, epoch.anchorTokens);
-  span.setAttribute(NoeticAttr.CONTEXT_LIVE_TOKENS, epoch.liveTokens);
-  span.setAttribute(NoeticAttr.CONTEXT_DELTA_TOKENS, epoch.deltaTokens);
+  const attributes: Record<string, string | number | boolean> = {
+    [NoeticAttr.CONTEXT_EPOCH_ID]: epoch.id,
+    [NoeticAttr.CONTEXT_EPOCH_AGE]: epoch.age,
+    [NoeticAttr.CONTEXT_ANCHOR_TOKENS]: epoch.anchorTokens,
+    [NoeticAttr.CONTEXT_LIVE_TOKENS]: epoch.liveTokens,
+    [NoeticAttr.CONTEXT_DELTA_TOKENS]: epoch.deltaTokens,
+  };
   if (epoch.reanchorReason) {
-    span.setAttribute(NoeticAttr.CONTEXT_REANCHOR_REASON, epoch.reanchorReason);
+    attributes[NoeticAttr.CONTEXT_REANCHOR_REASON] = epoch.reanchorReason;
   }
   if (view.serveInfo.size === 0) {
-    return;
+    return attributes;
   }
 
   const placements: unknown[] = [];
@@ -197,8 +201,9 @@ export function stampAnchoringAttributes(span: Span | undefined, view: BandedVie
     });
   }
   // Span attributes hold only scalars, so structured values travel as JSON.
-  span.setAttribute(NoeticAttr.CONTEXT_LAYER_PLACEMENTS, JSON.stringify(placements));
-  span.setAttribute(NoeticAttr.CONTEXT_LAYER_CHURN, JSON.stringify(churn));
+  attributes[NoeticAttr.CONTEXT_LAYER_PLACEMENTS] = JSON.stringify(placements);
+  attributes[NoeticAttr.CONTEXT_LAYER_CHURN] = JSON.stringify(churn);
+  return attributes;
 }
 
 /** Tokens the prompt prefix was expected to have cached — what `noteCacheOutcome` judges against. */

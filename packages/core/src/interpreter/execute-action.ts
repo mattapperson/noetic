@@ -14,6 +14,7 @@ import {
   NoeticErrorImpl,
   validateSchema,
 } from '@noetic-tools/types';
+import { ToolAttr } from '../observability/genai-attributes';
 import type { EmitOption } from '../runtime/broadcaster-utils';
 import { emitToolUi } from '../runtime/tool-ui';
 import type { ItemSchemaRegistry, LayerStateStore } from './action-deps';
@@ -28,8 +29,10 @@ import {
   createContextCacheStore,
   DEFAULT_PROJECTION,
   defaultItemSchemaRegistry,
+  disposeLayers,
   emitFrameworkEvent,
   getBroadcaster,
+  initLayers,
   lineageKey,
   noteCacheOutcome,
   resolveCacheConfig,
@@ -38,6 +41,7 @@ import {
   shouldEmit,
   snapshotCwdState,
   spawnLayers,
+  unpinLayers,
 } from './action-deps';
 import type {
   AgentHarnessContract,
@@ -63,6 +67,7 @@ import type {
   StepRunCode,
   StepSpawn,
   StepWithContext,
+  StorageAdapter,
   Tool,
 } from './action-types';
 import { isServerToolSpec, SteeringAction } from './action-types';
@@ -70,7 +75,7 @@ import { openChildSpan, traceChild } from './child-span';
 import { cloneWithGuard } from './clone-guard';
 import { collectAllTools, deduplicateTools } from './collect-tools';
 import type { BandedView } from './context-assembly';
-import { prepareBandedView, stampAnchoringAttributes } from './context-assembly';
+import { anchoringAttributes, prepareBandedView } from './context-assembly';
 import { trackUsage } from './message-helpers';
 import { wrapModelError } from './model-error';
 import { parseStructuredOutput } from './structured-output';
@@ -576,6 +581,7 @@ interface BuildModelRequestParams<TContext, I, O> {
   outputSchema: StandardSchemaV1<unknown, O> | undefined;
   serverToolSpecs: ServerToolSpec[];
   assembledItems: ReadonlyArray<Item>;
+  spanAttributes: Record<string, string | number | boolean> | undefined;
 }
 
 /**
@@ -608,6 +614,7 @@ function buildModelRequest<TContext, I, O>(
     layers,
     nodeId: step.id,
     parentSpan: ctx.span,
+    spanAttributes: params.spanAttributes,
     signal,
   };
   if (params.resolvedTools) {
@@ -763,7 +770,9 @@ export async function executeCallModel<TContext, I, O>(
     systemPromptItems: [],
     budgets: budgetMap,
   });
-  stampAnchoringAttributes(baseCtx.span, banded);
+  // Stamped once per assembly, like the cache judgement below: a steering
+  // retry re-sends the same view, so only the first attempt carries them.
+  let spanAttributes = anchoringAttributes(banded);
 
   let retries = 0;
   // Guidance from a steering retry rides at the very end of the view, after the
@@ -791,7 +800,9 @@ export async function executeCallModel<TContext, I, O>(
       outputSchema,
       serverToolSpecs,
       assembledItems,
+      spanAttributes,
     });
+    spanAttributes = undefined;
     const response = await baseCtx.harness.callModel(request).catch((e: unknown) => {
       throw wrapModelError(e, step.id, baseCtx);
     });
@@ -902,6 +913,8 @@ export interface ExecuteSpawnOpts {
   layerStore?: LayerStateStore;
   parentLayers?: ContextLayer[];
   itemSchemas?: ItemSchemaRegistry;
+  /** Id for the child context; generated when absent. */
+  childId?: string;
 }
 
 interface CollectSpawnItemsParams {
@@ -958,7 +971,7 @@ export async function executeSpawn<TContext, I, O>(
 ): Promise<O> {
   const baseCtx = frameworkCast<Context<ContextData>>(ctx);
   const layers = resolveLayersForSpawn(step, opts?.parentLayers);
-  const childId = crypto.randomUUID();
+  const childId = opts?.childId ?? crypto.randomUUID();
   const childExecutionCtx = contextToExecCtx(baseCtx, {
     executionId: childId,
     depth: baseCtx.depth + 1,
@@ -1099,18 +1112,33 @@ function mergeLayers(
   ];
 }
 
+export interface ExecuteWithContextOpts {
+  /** Store holding layer state; without it the provided layers are not initialized or disposed. */
+  layerStore?: LayerStateStore;
+  /** Backing storage for layer `init`; without it `init` is skipped, as at the harness root. */
+  storage?: StorageAdapter;
+}
+
 /**
- * Executes a provide step by attaching context layers to the current context
- * without creating an isolated child context.
+ * Executes a withContext step by attaching context layers to the current
+ * context without creating an isolated child context.
  *
- * Unlike spawn, provide does not create a new itemLog or clone state.
+ * Unlike spawn, withContext does not create a new itemLog or clone state.
  * Events flow through to the parent in real-time.
+ *
+ * Layers whose ids the parent does not already have are scoped to the
+ * boundary: their `init` runs on entry, and on exit their `dispose` runs,
+ * their state is dropped, and their prompt-cache pins are removed so their
+ * output does not replay into later model calls. A provided layer that
+ * overrides a parent layer of the same id shares that id's state slot, so it
+ * is neither initialized nor disposed here.
  */
 export async function executeWithContext<TContext, I, O>(
   step: StepWithContext<TContext, I, O>,
   input: I,
   ctx: Context<TContext>,
   executeStep: ExecuteStepFn,
+  opts?: ExecuteWithContextOpts,
 ): Promise<O> {
   const baseCtx = frameworkCast<
     Context<ContextData> & {
@@ -1122,6 +1150,8 @@ export async function executeWithContext<TContext, I, O>(
   const previousUnifiedTools = baseCtx.unifiedTools;
   const newLayers = resolveLayers(step);
   const mergedLayers = mergeLayers(previousLayers, newLayers);
+  const parentIds = new Set((previousLayers ?? []).map((l) => l.id));
+  const scopedLayers = newLayers.filter((l) => !parentIds.has(l.id));
 
   // Attach layers to the current context (no isolation)
   baseCtx.layers = mergedLayers;
@@ -1137,12 +1167,35 @@ export async function executeWithContext<TContext, I, O>(
     }
   }
 
+  const layerStore = opts?.layerStore;
+  const execCtx = contextToExecCtx(baseCtx);
   try {
+    if (layerStore && opts?.storage && scopedLayers.length > 0) {
+      await initLayers({
+        layers: scopedLayers,
+        ctx: execCtx,
+        storage: opts.storage,
+        store: layerStore,
+      });
+    }
     return await executeStep<TContext, I, O>(step.child, input, ctx);
   } finally {
     // Restore previous layers and unified tools so siblings are not affected
     baseCtx.layers = previousLayers;
     baseCtx.unifiedTools = previousUnifiedTools;
+    if (scopedLayers.length > 0) {
+      if (layerStore) {
+        await disposeLayers({
+          layers: scopedLayers,
+          ctx: execCtx,
+          store: layerStore,
+          scoped: true,
+        });
+      }
+      if (baseCtx.harness.contextCache) {
+        unpinLayers(baseCtx.harness.contextCache, lineageKey(execCtx), scopedLayers);
+      }
+    }
   }
 }
 
@@ -1197,6 +1250,11 @@ async function consumeToolGenerator(params: {
   }
 }
 
+/**
+ * Runs an `invokeTool` step inside a `tool.call` span under `ctx.span`. The span
+ * covers validation, the steering gate, and execution, so a denied or failing
+ * call is traced with its error.
+ */
 export async function executeInvokeTool<TContext, I, O>(
   step: StepInvokeTool<TContext, I, O>,
   input: I,
@@ -1205,6 +1263,19 @@ export async function executeInvokeTool<TContext, I, O>(
   layers?: ContextLayer[],
 ): Promise<O> {
   const baseCtx = frameworkCast<Context<ContextData>>(ctx);
+  const span = openChildSpan(baseCtx, 'tool.call', step.id);
+  span.setAttribute(ToolAttr.NAME, step.tool.name);
+  span.setAttribute(ToolAttr.NEEDS_APPROVAL, step.tool.needsApproval ?? false);
+  return traceChild(baseCtx, span, () => runInvokeTool(step, input, baseCtx, harness, layers));
+}
+
+async function runInvokeTool<TContext, I, O>(
+  step: StepInvokeTool<TContext, I, O>,
+  input: I,
+  baseCtx: Context<ContextData>,
+  harness: AgentHarnessContract,
+  layers: ContextLayer[] | undefined,
+): Promise<O> {
   const args = step.args ? Object.assign({}, input, step.args) : input;
 
   const parseResult = await validateSchema(step.tool.input, args);

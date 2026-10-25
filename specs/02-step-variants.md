@@ -1,7 +1,7 @@
 # Step Variants: `runCode`, `callModel`, `invokeTool`, `withContext`
 
 > **Depends On:** `01-step-type` (Step<I,O>, execute), `11-context-layer-system` (ContextLayer, ContextConfig)
-> **Exports:** `runCode()`, `callModel()`, `invokeTool()`, `withContext()`, `StepRunCodeOpts`, `StepCallModelOpts`, `StepInvokeToolOpts`, `StepWithContextOpts`, `Tool`, `RetryPolicy`, `ModelParams`
+> **Exports:** `runCode()`, `callModel()`, `invokeTool()`, `withContext()`, `RunCodeOpts`, `CallModelOpts`, `InvokeToolOpts`, `WithContextOpts`, `Tool`, `RetryPolicy`, `ModelParams`
 
 ---
 
@@ -12,9 +12,9 @@ Pure computation. The agent harness can retry freely, cache results, and doesn't
 Every builder below (and every other step builder) also accepts the `StepReplay` fields from `01-step-type` — `durable` and `replayKey` — and copies them onto the step it builds. See `23a-step-level-resume` § Identity.
 
 ```typescript
-interface StepRunCodeOpts<I, O> extends StepReplay<I> {
+interface RunCodeOpts<TContext, I, O> extends StepReplay<TContext, I> {
   id: string;
-  execute: (input: I, ctx: Context) => Promise<O>;
+  execute: (input: I, ctx: Context<TContext>) => Promise<O>;
   retry?: RetryPolicy;
   /**
    * Per-step subprocess adapter override. When set, the interpreter
@@ -59,12 +59,14 @@ type Lazy<T, TContext = ContextData> =
   | T
   | ((ctx: Context<TContext>) => T | Promise<T>);
 
-interface StepCallModelOpts<TContext, O> {
+interface CallModelOpts<TContext, O, I = unknown> extends StepReplay<TContext, I> {
   id: string;
   model: Lazy<string, TContext>;                    // e.g. 'anthropic/claude-sonnet-4-20250514' — or a (ctx) => string getter
   instructions?: Lazy<string | undefined, TContext>;
-  tools?: Lazy<Tool[] | undefined, TContext>;       // allowed tool subset (undefined = all, [] = none)
-  output?: StandardSchemaV1<unknown, O>;          // structured output schema (any Standard Schema v1)
+  // Allowed tool subset (undefined = all, [] = none). A `ServerToolSpec` is an
+  // OpenRouter server tool the provider executes itself (e.g. web search).
+  tools?: Lazy<(Tool | ServerToolSpec)[] | undefined, TContext>;
+  output?: StandardSchemaV1<unknown, O> | OutputCodec<O>;        // structured output schema or streaming codec (see 28-generative-ui)
   outputJsonSchema?: Record<string, unknown>;     // explicit JSON Schema override for non-Zod `output`
   params?: ModelParams;                            // temperature, topP, etc.
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
@@ -74,7 +76,7 @@ interface ModelParams {
   temperature?: number;
   topP?: number;
   maxTokens?: number;
-  stopSequences?: string[];
+  stopSequences?: string[];    // deprecated: accepted, never sent (see below)
   serviceTier?: ServiceTier;   // OpenRouter service tier, forwarded unchanged
 }
 
@@ -83,6 +85,8 @@ type ServiceTier = 'auto' | 'default' | 'fast' | 'flex' | 'priority' | 'scale' |
 ```
 
 `serviceTier` asks OpenRouter for a processing tier: `fast` is an alias for `priority`; `ultrafast` prefers ultrafast endpoints and falls back to `priority`, then default endpoints. The tier the provider actually served lands on `LLMResponse.serviceTier` (taken from the last round) and on `ctx.lastStepMeta.serviceTier`. Both stay `undefined` when the provider reports no tier — they never echo the requested value, so a mismatch with the request means a fallback happened.
+
+`temperature`, `topP`, `maxTokens` (as `maxOutputTokens`) and `serviceTier` are forwarded on every round. `stopSequences` is not: the OpenRouter Responses API that `callModel` runs on has no stop parameter, so the value is accepted (on steps, `CallModelRequest`, and workflow `params`) and ignored. It is deprecated and leaves the type and the workflow schema in the next major.
 
 ### Lazy Params
 
@@ -129,10 +133,17 @@ The agent harness uses the OpenRouter SDK internally for all LLM calls. The prov
 
 ```typescript
 interface LlmProviderConfig {
-  provider: 'openrouter';
-  apiKey?: string;  // defaults to process.env.OPENROUTER_API_KEY
+  provider?: 'noetic' | 'openrouter';  // default 'noetic'
+  apiKey?: string;                     // default: NOETIC_API_KEY or OPENROUTER_API_KEY, per provider
+  baseUrl?: string;                    // override the API base URL (advanced / self-host)
+  cache?: boolean;                     // send `X-OpenRouter-Cache: true` on every model call
 }
 ```
+
+- **`provider`.** `'noetic'` (the default) targets the Noetic platform (`https://platform.noetic.tools/v1`), which serves managed, metered inference through the same OpenRouter-compatible API. `'openrouter'` calls OpenRouter directly with the caller's own key.
+- **`apiKey`.** Falls back to `NOETIC_API_KEY` for `'noetic'` and `OPENROUTER_API_KEY` for `'openrouter'`. The other provider's variable is never read, so `OPENROUTER_API_KEY` alone does nothing unless `provider: 'openrouter'` is set. With no key at all, the first model call fails with `NoeticConfigError` `NO_LLM_PROVIDER`.
+- **`baseUrl`.** For `'noetic'` it falls back to `NOETIC_BASE_URL`, then the platform URL. For `'openrouter'` it falls back to the SDK's default endpoint.
+- **`cache`.** Asks OpenRouter to serve identical requests from its response cache without billing them again, which suits deterministic re-runs (evals, regression suites). Defaults to `false`.
 
 The agent harness constructs and manages the OpenRouter client internally. There is no user-facing `CallModelFn` — the adapter seam is the `LlmProviderConfig` on the harness.
 
@@ -148,37 +159,57 @@ const harness = new AgentHarness({
 
 Before execution begins, the agent harness walks the entire step tree and collects all `Tool` instances declared on `callModel` steps, plus tools provided by context layers. These are deduplicated by name (first-wins) into a **unified tool set** stored on the execution context.
 
-Every LLM call receives the full unified tool set, preserving prompt cache across calls with different tool restrictions. Individual steps restrict which tools the model may invoke via the `tools` field on `StepCallModelOpts`:
+The unified set is the pool every `callModel` step draws from. A step narrows it with the `tools` field on `CallModelOpts`, which the interpreter turns into `allowedToolNames` on the `CallModelRequest`:
 
-- `tools: undefined` (or omitted) — unrestricted, model may call any tool
+- `tools: undefined` (or omitted) — unrestricted, model may call any tool in the unified set
 - `tools: [searchTool, readFileTool]` — model may only call these tools
 - `tools: []` — no tools available for this step
 
-The restriction is communicated to the provider via `tool_choice: { type: "allowed_tools", tools: [...] }` in the API call.
+Every LLM call that may use a client tool receives the full unified tool set, in the same order, so the tool definitions — part of the provider's prompt-cache prefix — are byte-identical across every step in the tree, whatever each step allows. The restriction travels separately, in two layers:
+
+1. **Request.** The step's allowed subset is sent as the request's tool choice, which the model honours when picking a tool. The mapping from `tools` to `tool_choice`:
+
+   | Step `tools` | Tools sent | `tool_choice` |
+   |---|---|---|
+   | omitted | full unified set | not set (provider default, `auto`) |
+   | `[a, b]` | full unified set | `{ type: "allowed_tools", mode: "auto", tools: [{ type: "function", name: "a" }, { type: "function", name: "b" }, ...server tools] }` |
+   | `[]`, or a subset that names no tool in the set | none | not set |
+
+   Function names in `allowed_tools` are the sanitised wire names the model sees. Server tools (`ServerToolSpec` entries, run by the provider) are appended to the tools sent and, when the step restricts, listed in `allowed_tools` as `{ type: "<server tool type>" }`. `mode` is always `auto`: the model may answer without calling a tool.
+2. **Execution.** The harness tool loop (see Tool Call Execution) only runs tools in the allowed subset. A function call naming any other tool — a provider that ignores `allowed_tools`, or a model that names a tool anyway — is answered with an `Error: unknown tool '<name>'` tool result and never runs.
+
+A step with no tools sends none rather than the full set with `tool_choice: "none"`: some models still write tool-call syntax as text when told not to call, so withholding the list is the safer way to say "no tools".
 
 ### OpenRouter Integration
 
 The agent harness delegates LLM calls to the `@openrouter/sdk` internally. It:
 
-1. Merges `StepCallModel.instructions` (from the step definition) with any system-role messages extracted from `items`, joined by `\n\n`. If only one source is present, that one is used. If neither is present, `instructions` is `undefined`.
+1. Merges the step's resolved instructions with any system-role messages extracted from the View, joined by `\n\n` (see What the LLM Actually Sees). If only one source is present, that one is used. If neither is present, `instructions` is `undefined`.
 2. Converts Noetic `Item[]` to OpenResponses input format.
-3. Wraps the unified `Tool[]` into SDK tool objects, binding `ctx` into each `execute` closure.
-4. Passes `tool_choice` with allowed subset when the step restricts tools.
-5. Calls the SDK's `callModel()` — the SDK handles the tool call loop internally.
-6. Converts the SDK response back to Noetic `Item[]` and `LLMResponse`.
+3. Converts the unified `Tool[]` into SDK tool definitions — name, description and input JSON Schema, with no `execute`, so the SDK never runs a tool itself — and appends any server tools for the provider to run.
+4. Passes the step's restriction as `toolChoice: { type: "allowed_tools", ... }` when the step restricts tools (see Unified Tool Set).
+5. Calls the SDK's `callModel()` once per round of the harness tool loop (see Tool Call Execution).
+6. Converts each round's response back to Noetic `Item[]` and folds the rounds into one `LLMResponse`.
 
 ### Tool Call Execution
 
-The `executeLLM` function delegates to the OpenRouter SDK's `callModel` method, which handles the tool call loop internally. When the model response contains tool calls:
+The agent harness owns the tool call loop. The SDK makes one model request per round and never runs a tool: the tool definitions it receives carry no `execute`. Owning the loop lets the harness run steering checks, tool UI and spans around every call, inject queued messages between rounds, and recover from bad rounds. One `callModel` step runs these rounds:
 
-1. The SDK executes each tool call using the `Tool.execute` function.
-2. Tool results are appended to the conversation.
-3. The model is called again with the updated conversation.
-4. This repeats until the model responds without tool calls or a terminal condition is met.
+1. **Request.** Send the conversation so far (the View plus this step's earlier rounds) to the SDK's `callModel()`, streaming its events to the session broadcaster through `getFullResponsesStream()` and reading the finished response from `getResponse()`.
+2. **Stop check.** If the round's output holds no function calls, the step is done.
+3. **Run tools.** Otherwise run each function call in order: look the tool up in the step's allowed subset (see Unified Tool Set), run the layers' `beforeToolCall` steering hooks, validate the arguments against `Tool.input`, and call `Tool.execute`. An unknown tool, malformed JSON arguments, invalid arguments, a steering denial or redirect, or a thrown error becomes an error tool result for the model to read; it does not fail the step.
+4. **Append.** Add the `function_call` and `function_call_output` items to the conversation, then go back to step 1.
 
-The agent harness does NOT implement its own tool call loop — the SDK owns this cycle. The `until.noToolCalls()` predicate (see `05-loop-and-until`) checks whether the *outer loop iteration* produced tool calls, not whether the SDK's internal cycle did. By the time `executeLLM` returns, all tool calls from that LLM invocation have been resolved.
+Limits and recovery:
 
-The SDK returns a `ModelResult` with `getItemsStream()`. The agent harness appends response items to the `ItemLog`. The return type is `O` — the parsed output (or `string` if no `output` schema is specified). Tool calls, token usage, and cost are execution metadata accumulated on the context (see `07-context-and-event-log`):
+- **Round cap.** After 32 tool rounds the harness sends a further round with an ephemeral `continue` user message (never logged), and allows three such rounds before the step throws `LLM exceeded maximum tool rounds (32)`.
+- **Bad rounds.** A provider-reported terminal error, or a completed response with no output items, is retried the same way: an ephemeral `continue` round, up to three in a row, then the step throws.
+- **Between rounds.** On a session turn, queued `between-rounds` inbox messages are appended as user messages before the next round (see `08-runtime`).
+- **Abort and stalls.** The request's abort signal cancels the in-flight round and ends the loop. A per-round stream-idle watchdog aborts a round whose stream goes silent (see `08-runtime`).
+
+`until.noToolCalls()` (see `05-loop-and-until`) works one level up. It reads `ctx.lastStepMeta.toolCalls`, which holds every function call from every round of the step, so an outer `loop` iteration counts as having called tools if any round did. By the time `executeLLM` returns, every tool call from that step has a result.
+
+The agent harness appends the response items from all rounds — the model's messages and function calls and the harness's tool results, in order — to the `ItemLog`. The return type is `O` — the parsed output (or `string` if no `output` schema is specified). Tool calls, token usage, and cost are execution metadata accumulated on the context (see `07-context-and-event-log`):
 
 ```typescript
 const result = await execute(analyze, codeSnippet, ctx);
@@ -190,14 +221,15 @@ const result = await execute(analyze, codeSnippet, ctx);
 
 ### What the LLM Actually Sees: The View
 
-A `callModel` step does NOT simply send the `system` prompt and the raw input. The agent harness assembles a **View** — the complete `Item[]` array sent to the model — via the context layer system (see `11-context-layer-system`). Before each LLM call, the agent harness:
+A `callModel` step does NOT simply send its instructions and the raw input. Each model request has two parts: the **instructions** string and the **View** — the `Item[]` input assembled by the context layer system (see `11-context-layer-system`). Before each LLM call, the agent harness:
 
 1. Runs `recall()` on each context layer to gather contextual content.
-2. Assembles system prompt item (`role: system`) + context layer output items (`role: developer`) + conversation history items into the View as `Item[]`.
-3. Sends the View to the model. The View is `Item[]` — directly passable to the LLM provider as input.
-4. After the response, runs `store()` on each context layer to persist learnings.
+2. Assembles the View: context layer output items (`role: developer`) in their bands around the conversation history (anchor layers, history, live layers — see `11-context-layer-system` § Prompt-Cache Anchoring).
+3. Builds the instructions: the step's `instructions` (plus an output codec's own instructions, if `output` is one), then the text of any `role: system` messages found in the View, joined by `\n\n`. Those system messages are removed from the input, so a system message in the log reaches the model only through this field.
+4. Sends the instructions as the request's `instructions` field and the View as its input.
+5. After the response, runs `store()` on each context layer to persist learnings.
 
-The `instructions` field on `StepCallModelOpts` becomes the agent's base instructions within the View (rendered as a `MessageItem` with `role: system`). Context layers inject additional context as `MessageItem` entries with `role: developer`.
+The `instructions` field on `CallModelOpts` is therefore never an item in the View. Keeping it out of the input means the View is pure context and history, and the instructions stay a stable request field the provider can cache ahead of every item. Its tokens are still reserved from the projection budget, so instructions plus View fit the policy's `tokenBudget`. Context layers inject additional context as `MessageItem` entries with `role: developer`.
 
 ### `StepMeta`
 
@@ -215,10 +247,10 @@ interface StepMeta {
 
 ## Variant: `invokeTool` — Single Tool Execution
 
-May have side effects, may need human approval before execution (preventive gating), and may need sandboxing.
+May have side effects, may need human approval before execution (preventive gating — see `needsApproval` below), and may need sandboxing.
 
 ```typescript
-interface StepInvokeToolOpts<I, O> {
+interface InvokeToolOpts<I, O, TContext = ContextData> extends StepReplay<TContext, I> {
   id: string;
   tool: Tool<I, O>;
   args?: Partial<I>;  // can override LLM-provided args
@@ -243,13 +275,27 @@ interface Tool<I extends StandardSchemaV1 = StandardSchemaV1, O extends Standard
   output: O;                     // any Standard Schema v1
   inputJsonSchema?: Record<string, unknown>;  // explicit override/fallback for non-Zod input
   event?: StandardSchemaV1;      // validates streaming events yielded during execution
-  execute: (args: InferSchemaOutput<I>, ctx: Context) => Promise<InferSchemaOutput<O>>;
-  needsApproval?: boolean;  // preventive gating, not reactive throwing
+  execute: (
+    args: InferSchemaOutput<I>,
+    toolCtx: ToolExecutionContext,
+  ) => Promise<InferSchemaOutput<O>> | AsyncGenerator<unknown, InferSchemaOutput<O>>;
+  needsApproval?: boolean;  // declares the call needs human approval; see below
   context?: ToolContextDeclaration;
 }
 ```
 
+`execute` receives a `ToolExecutionContext` (`{ ctx, harness, fs, shell, context, assembledView, lastStepMeta, turnContext? }`), not the bare `Context` — the step's `Context` is `toolCtx.ctx`. See `04-spawn` ("Context in Tools") for how tools that spawn sub-agents use it. The base `Tool` in `@noetic-tools/types` types the second argument as `unknown` to stay a dependency leaf; `tool()` and the `Tool` re-exported from `@noetic-tools/core` type it as `ToolExecutionContext`. An async-generator `execute` (built with `toolWithGenerator`) yields streaming events (typed by `event`) and returns the result.
+
 `toolCalls(tools)` generates one `ContextLayer` per unique `context.id` among the tools. Tools sharing the same id share state.
+
+### Approval
+
+`needsApproval: true` declares that a call must be approved by a human before it runs. It is a declaration, not a gate: core records it as the `tool.needs_approval` attribute on each `tool.call` span (`10-observability`) and does not pause on its own. Approval is enforced before execution — never by throwing after the work is done — by one of:
+
+- **A `beforeToolCall` gating layer** (`11-context-layer-system`). Both the model-driven path and `invokeTool` run the gate before `execute`; the layer asks its approver (keyed by `BeforeToolCallParams.callId`) and returns `allow` to run the call or `deny` to refuse it. A refused call never executes: on the model-driven path the model receives the denial as an error tool result; an `invokeTool` step throws `NoeticError` kind `steering_denied`.
+- **The tool's own integration.** A wrapper that owns its approval channel checks inside `execute` before doing any work — `fromAiSdkTool` (`29-chat-platform-integration`) sends an approval request, waits for the decision, and fails the call with a tool error when it is refused or times out.
+
+A tool that sets `needsApproval` with neither in place runs without approval.
 
 Tool `input`/`output`/`event` accept any Standard Schema v1 validator. The runtime validates tool input through `validateSchema` (Zod `safeParse` fast path, otherwise `~standard.validate` with sync/Promise support), and the parsed/transformed input is what `execute` receives. As before, `output` and `event` describe and infer tool values but are not runtime validation boundaries. Tool input JSON Schema uses the same Zod → StandardJSONSchemaV1 → explicit `inputJsonSchema` chain. For non-Zod schemas, `inputJsonSchema` overrides the trait and also serves as the fallback if the trait converter throws; a validation-only schema must provide it.
 
@@ -262,7 +308,7 @@ Zod stays the default everywhere else in the framework — channels, context-lay
 Attaches context layers to a descendant step subtree without creating an isolated context. Analogous to React's `Context.Provider` — the layers are available to all descendant `callModel` steps without the context boundary that `spawn` introduces.
 
 ```typescript
-interface StepWithContextOpts<TContext, I, O> {
+interface WithContextOpts<TContext, I, O> extends StepReplay<TContext, I> {
   id: string;
   child: Step<TContext, I, O>;
   context: ContextConfig | ContextLayer[];
@@ -281,7 +327,7 @@ const withContextLayers = withContext({
 
 1. **No context boundary.** Unlike `spawn`, the child step shares the parent's `Context` and `ItemLog`. There is no `onSpawn`/`onReturn` lifecycle.
 2. **Layer merging.** The provided layers are appended to whatever layers the parent already has. Descendant `callModel` steps see the merged set.
-3. **Scoped lifetime.** Provided layers are initialized when `withContext` begins and disposed when the child completes. They do not outlive the `withContext` boundary.
+3. **Scoped lifetime.** Provided layers are initialized when `withContext` begins and disposed when the child completes — or throws. They do not outlive the `withContext` boundary: on exit their state is dropped while the parent's layers keep theirs, and their prompt-cache pins (`11-context-layer-system`, "Prompt-Cache Anchoring") are removed from the epoch, so their last render never replays into later model calls on the same context. Removing a pin changes the cached prefix, so the next call after a `withContext` boundary that pinned output pays one cache miss. A provided layer whose id the parent already has overrides that layer for the subtree but shares its state slot, so the boundary neither initializes nor disposes it.
 4. **Composable.** `withContext` steps can nest. Inner `withContext` layers merge with outer ones. Duplicate layer IDs follow the same resolution rules as top-level layer deduplication (see `11-context-layer-system`).
 
 ### When to Use `withContext` vs `spawn`
@@ -333,3 +379,9 @@ The agent harness needs to treat them differently:
 - **withContext steps** are structural — they configure the context layer environment for a subtree without altering execution semantics or creating context boundaries.
 
 A single `step()` that inspects its arguments loses type safety and forces runtime introspection. Explicit variants mean the TypeScript compiler knows exactly what you're doing.
+
+---
+
+## Future Considerations
+
+- **A built-in approval gate.** Core could read `needsApproval` itself and pause before `execute`, asking a harness-level approver and treating refusal like a `deny` decision. Open questions: the approver contract (a channel pair, the ask-user service, or a callback), what happens when no approver is configured, and how it composes with integrations that already gate inside `execute`.

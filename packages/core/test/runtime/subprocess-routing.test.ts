@@ -27,6 +27,7 @@ import type {
 } from '@noetic-tools/types';
 import { isNoeticError } from '@noetic-tools/types';
 import { createInMemorySubprocessAdapter } from '../../src/adapters/in-memory-subprocess-adapter';
+import { spawn } from '../../src/builders/spawn-builder';
 import { AgentHarness } from '../../src/harness/agent-harness';
 
 //#region Recording adapter
@@ -111,6 +112,38 @@ describe('Phase A adapter routing', () => {
       expect(ne.stepId).toBe('throws-sync');
       expect(ne.cause.message).toBe('sync boom');
     }
+  });
+
+  it('an interpreter-dispatched spawn sends the child context id as executionId', async () => {
+    const adapter = createRecordingAdapter('spawn');
+    const harness = new AgentHarness({
+      name: 'spawn-execution-id',
+      params: {},
+    });
+    const ctx = harness.createContext();
+    let childId: string | undefined;
+    const spawnStep = spawn<ContextData, null, string>({
+      id: 'spawn-exec-id',
+      child: {
+        kind: 'runCode',
+        id: 'spawn-exec-id-child',
+        execute: async (_input, childCtx) => {
+          childId = childCtx.id;
+          return 'ok';
+        },
+      },
+      subprocess: adapter,
+    });
+
+    await harness.run(spawnStep, null, ctx);
+
+    const spawnRequest = adapter.requests.find(
+      (r): r is StepSubprocessRequest => r.kind === 'step' && r.stepId === 'spawn-exec-id',
+    );
+    assert(spawnRequest !== undefined);
+    assert(childId !== undefined);
+    expect(spawnRequest.executionId).toBe(childId);
+    expect(spawnRequest.executionId).not.toBe(ctx.id);
   });
 
   it('per-step subprocess override: step.subprocess wins over harness default', async () => {

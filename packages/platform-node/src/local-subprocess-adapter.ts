@@ -139,6 +139,7 @@ function buildStepMetadata(
     kind: 'step',
     stepId: request.stepId,
     executionId: request.executionId,
+    parentExecutionId: request.parentExecutionId,
     pid,
     pidStarttime: startTime,
   };

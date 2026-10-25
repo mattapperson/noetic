@@ -182,6 +182,50 @@ describe('AgentHarness.detachedSpawn', () => {
     expect(handle2.status).toBe(DetachedStatus.Completed);
   });
 
+  it('settles status and result without await()', async () => {
+    const harness = new AgentHarness({
+      name: 'test',
+      params: {},
+    });
+    const step: Step<ContextData, null, string> = {
+      kind: 'runCode',
+      id: 'eager-ok',
+      execute: async () => 'out',
+    };
+    const handle = harness.detachedSpawn(step, null, harness.createContext());
+    await waitFor(() => handle.status !== DetachedStatus.Running);
+    expect(handle.status).toBe(DetachedStatus.Completed);
+    expect(handle.result).toBe('out');
+    expect(handle.error).toBeUndefined();
+  });
+
+  it('settles status and error without await() when the child throws', async () => {
+    const harness = new AgentHarness({
+      name: 'test',
+      params: {},
+    });
+    const step: Step<ContextData, null, string> = {
+      kind: 'runCode',
+      id: 'eager-fail',
+      execute: async () => {
+        throw new Error('child broke');
+      },
+    };
+    const handle = harness.detachedSpawn(step, null, harness.createContext());
+    await waitFor(() => handle.status !== DetachedStatus.Running);
+    expect(handle.status).toBe(DetachedStatus.Failed);
+    expect(handle.error).toContain('child broke');
+    expect(handle.result).toBeUndefined();
+    // The recorded failure is still surfaced to a later await().
+    let caught: unknown;
+    try {
+      await handle.await();
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(Error);
+  });
+
   it('creates child context with parent relationship', async () => {
     const harness = new AgentHarness({
       name: 'test',
@@ -203,6 +247,17 @@ describe('AgentHarness.detachedSpawn', () => {
 });
 
 //#region Test adapter
+
+/** Poll a condition on the timer queue, so nothing here drives the handle. */
+async function waitFor(condition: () => boolean, timeoutMs = 2_000): Promise<void> {
+  const start = Date.now();
+  while (!condition()) {
+    if (Date.now() - start > timeoutMs) {
+      throw new Error('condition not met in time');
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
 
 function createNeverSettlingAdapter(): ReturnType<typeof createInMemorySubprocessAdapter> {
   // Build on top of the in-memory adapter but override the step runner to

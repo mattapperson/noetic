@@ -25,6 +25,7 @@ export type {
   StepRunCode,
   StepSpawn,
   StepWithContext,
+  StorageAdapter,
   Tool,
 } from '@noetic-tools/types';
 export { isServerToolSpec, SteeringAction } from '@noetic-tools/types';

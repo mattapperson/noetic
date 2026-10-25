@@ -1,4 +1,4 @@
-import { SPAWN_SUMMARY_FAILED_EVENT } from '@noetic-tools/context';
+import { LAYER_HOOK_EVENT, SPAWN_SUMMARY_FAILED_EVENT } from '@noetic-tools/context';
 
 // GenAI Semantic Convention attributes
 export const GenAI = {
@@ -32,8 +32,8 @@ export const NoeticAttr = {
   /** JSON array of `{ from, to }` parent→child edges between declared nodes. */
   WORKFLOW_EDGES: 'noetic.workflow.edges',
   /**
-   * Id of the step a span belongs to: the declared workflow node of an
-   * `llm.call`/`tool.call`, the `decide` step of a `decide.call`, the `spawn`
+   * Id of the step a span belongs to: the `callModel` step of an
+   * `llm.call`/`tool.call` (or the `invokeTool` step of its `tool.call`), the `decide` step of a `decide.call`, the `spawn`
    * step of a `spawn` span, the path step of an `inParallel.path` span.
    */
   NODE_ID: 'noetic.node.id',
@@ -63,7 +63,7 @@ export const NoeticAttr = {
   CONTEXT_LIVE_TOKENS: 'noetic.context.live_tokens',
   /** Tokens spent superseding stale anchors. */
   CONTEXT_DELTA_TOKENS: 'noetic.context.delta_tokens',
-  /** JSON array of `{ id, placement, served }` per contributing layer. */
+  /** JSON array of `{ id, placement, served, changed }` per contributing layer. */
   CONTEXT_LAYER_PLACEMENTS: 'noetic.context.layer_placements',
   /** JSON array of `{ id, rate, rebillTokens }` per contributing layer. */
   CONTEXT_LAYER_CHURN: 'noetic.context.layer_churn',
@@ -89,4 +89,12 @@ export const NoeticEvent = {
    * emits it and cannot import core.
    */
   SPAWN_SUMMARY_FAILED: SPAWN_SUMMARY_FAILED_EVENT,
+  /**
+   * One per call of a traced layer hook (`init`, `recall`, `store`, `onSpawn`,
+   * `onReturn`, `onComplete`, `dispose`), on the span of the context the hook
+   * runs in: `{ layerId, hook, duration, status, itemCount?, budget.allocated?,
+   * budget.used?, budget.yielded?, error.message? }`. Defined in
+   * `@noetic-tools/context`, whose lifecycle emits it.
+   */
+  LAYER_HOOK: LAYER_HOOK_EVENT,
 } as const;

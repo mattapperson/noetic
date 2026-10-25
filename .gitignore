@@ -19,3 +19,6 @@ examples/skippy/.env
 .worktrees/
 .agents/
 .claude/
+
+# Local agent hook logs
+.abide/
