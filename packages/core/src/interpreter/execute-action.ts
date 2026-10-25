@@ -41,6 +41,7 @@ import {
   shouldEmit,
   snapshotCwdState,
   spawnLayers,
+  unpinLayers,
 } from './action-deps';
 import type {
   AgentHarnessContract,
@@ -1124,8 +1125,9 @@ export interface ExecuteWithContextOpts {
  * Events flow through to the parent in real-time.
  *
  * Layers whose ids the parent does not already have are scoped to the
- * boundary: their `init` runs on entry, and on exit their `dispose` runs and
- * their state is dropped. A provided layer that
+ * boundary: their `init` runs on entry, and on exit their `dispose` runs,
+ * their state is dropped, and their prompt-cache pins are removed so their
+ * output does not replay into later model calls. A provided layer that
  * overrides a parent layer of the same id shares that id's state slot, so it
  * is neither initialized nor disposed here.
  */
@@ -1179,13 +1181,18 @@ export async function executeWithContext<TContext, I, O>(
     // Restore previous layers and unified tools so siblings are not affected
     baseCtx.layers = previousLayers;
     baseCtx.unifiedTools = previousUnifiedTools;
-    if (layerStore && scopedLayers.length > 0) {
-      await disposeLayers({
-        layers: scopedLayers,
-        ctx: execCtx,
-        store: layerStore,
-        scoped: true,
-      });
+    if (scopedLayers.length > 0) {
+      if (layerStore) {
+        await disposeLayers({
+          layers: scopedLayers,
+          ctx: execCtx,
+          store: layerStore,
+          scoped: true,
+        });
+      }
+      if (baseCtx.harness.contextCache) {
+        unpinLayers(baseCtx.harness.contextCache, lineageKey(execCtx), scopedLayers);
+      }
     }
   }
 }

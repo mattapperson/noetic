@@ -13,6 +13,7 @@ import {
   pinKey,
   reanchorReason,
   resolveCacheConfig,
+  unpinLayers,
 } from '@noetic-tools/context';
 import type { LLMResponse } from '@noetic-tools/types';
 import { makeCtx } from '../_helpers';
@@ -746,5 +747,57 @@ describe('dropLineage', () => {
 
     expect(store.epochs.has(key)).toBe(false);
     expect(store.pendingReanchor.has(key)).toBe(false);
+  });
+});
+
+describe('unpinLayers', () => {
+  function pinned(id: string) {
+    return {
+      layerId: id,
+      items: [],
+      tokenCount: 0,
+      contentHash: id,
+      state: undefined,
+      slot: 100,
+    };
+  }
+
+  it('drops only the named layers from the lineage epoch', () => {
+    const store = createContextCacheStore();
+    const key = lineageKey(makeCtx());
+    const keep = makeLayer('keep');
+    const gone = makeLayer('gone');
+    const epoch = openEpoch({
+      store,
+      key,
+      reason: 'cold-start',
+      instructionsHash: 'h',
+      layers: [],
+      config: CONFIG,
+    });
+    pin(epoch, pinKey(keep), pinned('keep'));
+    pin(epoch, pinKey(gone), pinned('gone'));
+    epoch.autoBand.set(pinKey(gone), 'anchor');
+
+    unpinLayers(store, key, [
+      gone,
+    ]);
+
+    expect([
+      ...epoch.pins.keys(),
+    ]).toEqual([
+      'keep',
+    ]);
+    expect(epoch.autoBand.has('gone')).toBe(false);
+  });
+
+  it('is a no-op for a lineage with no epoch', () => {
+    const store = createContextCacheStore();
+
+    unpinLayers(store, 'missing', [
+      makeLayer('gone'),
+    ]);
+
+    expect(store.epochs.size).toBe(0);
   });
 });

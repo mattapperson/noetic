@@ -104,6 +104,23 @@ export function dropLineage(store: ContextCacheStore, key: string): void {
   store.pendingReanchor.delete(key);
 }
 
+/**
+ * Drop the pins of layers that left a lineage's layer set — a closing
+ * `withContext` boundary. A pin outlives its layer by design (dropping it
+ * shortens the cached prefix), so a scoped layer must be unpinned explicitly or
+ * its last render keeps replaying after its scope ends.
+ */
+export function unpinLayers(store: ContextCacheStore, key: string, layers: ContextLayer[]): void {
+  const epoch = store.epochs.get(key);
+  if (!epoch) {
+    return;
+  }
+  for (const layer of layers) {
+    epoch.pins.delete(pinKey(layer));
+    epoch.autoBand.delete(pinKey(layer));
+  }
+}
+
 /** Read a layer's churn record, creating an empty one on first sight. */
 export function churnFor(store: ContextCacheStore, key: string): LayerChurn {
   const found = store.churn.get(key);

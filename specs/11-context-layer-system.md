@@ -813,6 +813,8 @@ Where they disagree, these are correct.
 
 Three actions MUST be representable: `replace` (pinned content changed), `retract` (a pinned layer produced nothing this turn — leaving its block standing unmarked would show the model content the runtime knows no longer applies), and `add` (a layer first seen mid-epoch, which cannot be spliced into a frozen prefix).
 
+The one break in append-only is a layer that leaves the layer set for good: when a `withContext` boundary closes (`02-step-variants`), the pins of the layers it provided are removed from the epoch. A pin whose layer is gone is served with no retraction (the layer is not there to describe one), so its content would keep reaching the model until the next re-anchor; removing it costs one cache miss on the next assembly.
+
 Layers never see epochs. `recall()` keeps its contract — return the current full content, every turn — and all cache reasoning stays in the runtime.
 
 ### Cache Lineage

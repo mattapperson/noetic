@@ -9,13 +9,19 @@ import type {
   Item,
   LLMResponse,
   StepCallModel,
+  StepWithContext,
 } from '@noetic-tools/types';
-import { createMessage, SteeringAction } from '@noetic-tools/types';
+import { createMessage, frameworkCast, SteeringAction } from '@noetic-tools/types';
 import type { BandedView } from '../../src/interpreter/context-assembly';
 import { anchoringAttributes } from '../../src/interpreter/context-assembly';
-import { executeCallModel } from '../../src/interpreter/execute-action';
+import { executeCallModel, executeWithContext } from '../../src/interpreter/execute-action';
 import { ContextImpl } from '../../src/runtime/context-impl';
-import { makeFunctionCallOutput, makeLLMResponse, makeMockHarness } from '../_helpers';
+import {
+  makeFunctionCallOutput,
+  makeLLMResponse,
+  makeMockHarness,
+  simpleExecute,
+} from '../_helpers';
 
 //#region Helpers
 
@@ -129,6 +135,50 @@ async function runTurns(
 //#endregion
 
 describe('executeCallModel context anchoring', () => {
+  // A withContext layer must not outlive its boundary: once it closes, its
+  // pinned render may not replay into later calls on the same lineage.
+  it('drops a withContext layer pin when the boundary closes', async () => {
+    const { harness, requests } = withCapture();
+    const keep = textLayer('keep', () => 'KEEP');
+    const ctx = new ContextImpl({
+      harness,
+      threadId: 'thread-1',
+      layers: [
+        keep,
+      ],
+    });
+    const scoped: StepWithContext<ContextData, string, string> = {
+      kind: 'withContext',
+      id: 'scoped',
+      child: {
+        kind: 'runCode',
+        id: 'inside',
+        execute: async (input, c) =>
+          executeCallModel(
+            STEP,
+            input,
+            c,
+            frameworkCast<{
+              layers?: ContextLayer[];
+            }>(c).layers,
+          ),
+      },
+      context: [
+        textLayer('gone', () => 'GONE'),
+      ],
+    };
+
+    await executeWithContext(scoped, 'inside', ctx, simpleExecute);
+    await executeCallModel(STEP, 'after', ctx, [
+      keep,
+    ]);
+
+    expect(textsAt(requests, 0)).toContain('GONE');
+    expect(textsAt(requests, 1)).toContain('KEEP');
+    expect(textsAt(requests, 1).join('\n')).not.toContain('GONE');
+    expect(ctx.itemLog.items.length).toBeGreaterThan(0);
+  });
+
   it('replays pinned bytes for a layer that re-renders every turn', async () => {
     const { harness, requests } = withCapture();
     let tick = 0;
