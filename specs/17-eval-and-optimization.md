@@ -59,7 +59,7 @@ interface EvalSuiteOptions {
 }
 ```
 
-The eval context has **zero knowledge of LLM provider configuration** — the `AgentHarness` auto-resolves from `OPENROUTER_API_KEY` or its `callModelDefaults` config. Context layers, if needed, should be baked into the step tree (e.g., via `spawn({ child: step, context })`), not passed through eval config.
+The eval context has **zero knowledge of LLM provider configuration** — the `AgentHarness` resolves it from its `callModelDefaults` config and the matching environment key (see `02-step-variants` § LLM Provider Configuration). Context layers, if needed, should be baked into the step tree (e.g., via `spawn({ child: step, context })`), not passed through eval config.
 
 ### Execution Model
 

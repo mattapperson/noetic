@@ -131,10 +131,17 @@ The agent harness uses the OpenRouter SDK internally for all LLM calls. The prov
 
 ```typescript
 interface LlmProviderConfig {
-  provider: 'openrouter';
-  apiKey?: string;  // defaults to process.env.OPENROUTER_API_KEY
+  provider?: 'noetic' | 'openrouter';  // default 'noetic'
+  apiKey?: string;                     // default: NOETIC_API_KEY or OPENROUTER_API_KEY, per provider
+  baseUrl?: string;                    // override the API base URL (advanced / self-host)
+  cache?: boolean;                     // send `X-OpenRouter-Cache: true` on every model call
 }
 ```
+
+- **`provider`.** `'noetic'` (the default) targets the Noetic platform (`https://platform.noetic.tools/v1`), which serves managed, metered inference through the same OpenRouter-compatible API. `'openrouter'` calls OpenRouter directly with the caller's own key.
+- **`apiKey`.** Falls back to `NOETIC_API_KEY` for `'noetic'` and `OPENROUTER_API_KEY` for `'openrouter'`. The other provider's variable is never read, so `OPENROUTER_API_KEY` alone does nothing unless `provider: 'openrouter'` is set. With no key at all, the first model call fails with `NoeticConfigError` `NO_LLM_PROVIDER`.
+- **`baseUrl`.** For `'noetic'` it falls back to `NOETIC_BASE_URL`, then the platform URL. For `'openrouter'` it falls back to the SDK's default endpoint.
+- **`cache`.** Asks OpenRouter to serve identical requests from its response cache without billing them again, which suits deterministic re-runs (evals, regression suites). Defaults to `false`.
 
 The agent harness constructs and manages the OpenRouter client internally. There is no user-facing `CallModelFn` — the adapter seam is the `LlmProviderConfig` on the harness.
 

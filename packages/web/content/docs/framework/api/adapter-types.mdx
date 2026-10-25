@@ -17,15 +17,19 @@ Configuration for the LLM provider, passed to `AgentHarness` via the `callModelD
 
 ```ts validate=none
 interface LlmProviderConfig {
-  provider: 'openrouter';
-  apiKey?: string; // defaults to process.env.OPENROUTER_API_KEY
+  provider?: 'noetic' | 'openrouter'; // default 'noetic'
+  apiKey?: string;
+  baseUrl?: string;
+  cache?: boolean;
 }
 ```
 
 | Property | Type | Required | Description |
 |---|---|---|---|
-| `provider` | `'openrouter'` | Yes | LLM provider identifier |
-| `apiKey` | `string` | No | API key. Defaults to `process.env.OPENROUTER_API_KEY`. |
+| `provider` | `'noetic' \| 'openrouter'` | No | Inference backend. `'noetic'` (default) uses the Noetic platform; `'openrouter'` calls OpenRouter directly with your own key. |
+| `apiKey` | `string` | No | API key. Defaults to `NOETIC_API_KEY` for `'noetic'` and `OPENROUTER_API_KEY` for `'openrouter'`. Only the selected provider's variable is read. |
+| `baseUrl` | `string` | No | Override the API base URL. For `'noetic'` it defaults to `NOETIC_BASE_URL`, then `https://platform.noetic.tools/v1`; for `'openrouter'`, the SDK default. |
+| `cache` | `boolean` | No | Send `X-OpenRouter-Cache: true` on every model call so identical requests come from cache without being billed again. Useful for evals and regression runs. Default `false`. |
 
 ## OpenRouter Adapter
 

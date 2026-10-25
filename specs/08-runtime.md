@@ -671,7 +671,7 @@ See `23-durable-execution` for the full durable-execution model, including `Subp
 
 | Backend                    | When to Use                                                     | Durability | Channel Handles |
 |----------------------------|-----------------------------------------------------------------|------------|-----------------|
-| `AgentHarness<TParams>`     | Testing, simple scripts, CLI tools. Auto-resolves LLM provider from `OPENROUTER_API_KEY` or `callModelDefaults` config. | Ephemeral by default; full durable execution when constructed with a durable `StorageAdapter` + `CheckpointStore`. | In-process handles |
+| `AgentHarness<TParams>`     | Testing, simple scripts, CLI tools. Resolves the LLM provider from `callModelDefaults` (default `'noetic'`, keyed by `NOETIC_API_KEY`; `'openrouter'` reads `OPENROUTER_API_KEY`) — see `02-step-variants` § LLM Provider Configuration. | Ephemeral by default; full durable execution when constructed with a durable `StorageAdapter` + `CheckpointStore`. | In-process handles |
 
 ```typescript
 import { setHarness, AgentHarness } from '@noetic-tools/core';
