@@ -10,6 +10,8 @@ export {
   createContextCacheStore,
   DECISION_PROJECTION,
   DEFAULT_PROJECTION,
+  disposeLayers,
+  initLayers,
   lineageKey,
   noteCacheOutcome,
   openEpoch,

@@ -29,8 +29,10 @@ import {
   createContextCacheStore,
   DEFAULT_PROJECTION,
   defaultItemSchemaRegistry,
+  disposeLayers,
   emitFrameworkEvent,
   getBroadcaster,
+  initLayers,
   lineageKey,
   noteCacheOutcome,
   resolveCacheConfig,
@@ -64,6 +66,7 @@ import type {
   StepRunCode,
   StepSpawn,
   StepWithContext,
+  StorageAdapter,
   Tool,
 } from './action-types';
 import { isServerToolSpec, SteeringAction } from './action-types';
@@ -1106,18 +1109,32 @@ function mergeLayers(
   ];
 }
 
+export interface ExecuteWithContextOpts {
+  /** Store holding layer state; without it the provided layers are not initialized or disposed. */
+  layerStore?: LayerStateStore;
+  /** Backing storage for layer `init`; without it `init` is skipped, as at the harness root. */
+  storage?: StorageAdapter;
+}
+
 /**
- * Executes a provide step by attaching context layers to the current context
- * without creating an isolated child context.
+ * Executes a withContext step by attaching context layers to the current
+ * context without creating an isolated child context.
  *
- * Unlike spawn, provide does not create a new itemLog or clone state.
+ * Unlike spawn, withContext does not create a new itemLog or clone state.
  * Events flow through to the parent in real-time.
+ *
+ * Layers whose ids the parent does not already have are scoped to the
+ * boundary: their `init` runs on entry, and on exit their `dispose` runs and
+ * their state is dropped. A provided layer that
+ * overrides a parent layer of the same id shares that id's state slot, so it
+ * is neither initialized nor disposed here.
  */
 export async function executeWithContext<TContext, I, O>(
   step: StepWithContext<TContext, I, O>,
   input: I,
   ctx: Context<TContext>,
   executeStep: ExecuteStepFn,
+  opts?: ExecuteWithContextOpts,
 ): Promise<O> {
   const baseCtx = frameworkCast<
     Context<ContextData> & {
@@ -1129,6 +1146,8 @@ export async function executeWithContext<TContext, I, O>(
   const previousUnifiedTools = baseCtx.unifiedTools;
   const newLayers = resolveLayers(step);
   const mergedLayers = mergeLayers(previousLayers, newLayers);
+  const parentIds = new Set((previousLayers ?? []).map((l) => l.id));
+  const scopedLayers = newLayers.filter((l) => !parentIds.has(l.id));
 
   // Attach layers to the current context (no isolation)
   baseCtx.layers = mergedLayers;
@@ -1144,12 +1163,30 @@ export async function executeWithContext<TContext, I, O>(
     }
   }
 
+  const layerStore = opts?.layerStore;
+  const execCtx = contextToExecCtx(baseCtx);
   try {
+    if (layerStore && opts?.storage && scopedLayers.length > 0) {
+      await initLayers({
+        layers: scopedLayers,
+        ctx: execCtx,
+        storage: opts.storage,
+        store: layerStore,
+      });
+    }
     return await executeStep<TContext, I, O>(step.child, input, ctx);
   } finally {
     // Restore previous layers and unified tools so siblings are not affected
     baseCtx.layers = previousLayers;
     baseCtx.unifiedTools = previousUnifiedTools;
+    if (layerStore && scopedLayers.length > 0) {
+      await disposeLayers({
+        layers: scopedLayers,
+        ctx: execCtx,
+        store: layerStore,
+        scoped: true,
+      });
+    }
   }
 }
 

@@ -40,6 +40,13 @@ export interface LayerStateStore {
    */
   has?(executionId: string, layerId: string): boolean;
   cleanup(executionId: string): void;
+  /**
+   * Forget one layer's state, durable target, and disabled mark for an
+   * execution, leaving the execution's other layers alone. Optional so custom
+   * stores keep compiling; without it, a scoped dispose leaves the state in
+   * place for the next `init` to overwrite.
+   */
+  drop?(executionId: string, layerId: string): void;
   diagnostic: (layerId: string, hook: string, error: unknown) => void;
   /**
    * Register a durable write-through target for a layer's state under an
@@ -147,6 +154,12 @@ interface DisposeLayersParams {
   layers: ContextLayer[];
   ctx: ExecutionContext;
   store: LayerStateStore;
+  /**
+   * The layers share their execution with layers that stay live (a
+   * `withContext` boundary closing). Drop only these layers' state instead of
+   * cleaning up the whole execution.
+   */
+  scoped?: boolean;
 }
 
 interface BeforeToolCallLayersParams {
@@ -322,6 +335,11 @@ export function createLayerStateStore(
       states.delete(executionId);
       durables.delete(executionId);
       disabled.delete(executionId);
+    },
+    drop(executionId: string, layerId: string): void {
+      states.get(executionId)?.delete(layerId);
+      durables.get(executionId)?.delete(layerId);
+      disabled.get(executionId)?.delete(layerId);
     },
     diagnostic: report,
   };
@@ -930,7 +948,12 @@ export async function notifyDecision({
   await store.flush?.(ctx.executionId);
 }
 
-export async function disposeLayers({ layers, ctx, store }: DisposeLayersParams): Promise<void> {
+export async function disposeLayers({
+  layers,
+  ctx,
+  store,
+  scoped = false,
+}: DisposeLayersParams): Promise<void> {
   // Sequential, REVERSE array order
   const reversed = [
     ...layers,
@@ -971,7 +994,13 @@ export async function disposeLayers({ layers, ctx, store }: DisposeLayersParams)
   }
   // Settle any in-flight durable mirror writes before dropping registrations.
   await store.flush?.(ctx.executionId);
-  store.cleanup(ctx.executionId);
+  if (!scoped) {
+    store.cleanup(ctx.executionId);
+    return;
+  }
+  for (const layer of layers) {
+    store.drop?.(ctx.executionId, layer.id);
+  }
 }
 
 export async function spawnLayers({

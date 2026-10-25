@@ -319,7 +319,7 @@ const withContextLayers = withContext({
 
 1. **No context boundary.** Unlike `spawn`, the child step shares the parent's `Context` and `ItemLog`. There is no `onSpawn`/`onReturn` lifecycle.
 2. **Layer merging.** The provided layers are appended to whatever layers the parent already has. Descendant `callModel` steps see the merged set.
-3. **Scoped lifetime.** Provided layers are initialized when `withContext` begins and disposed when the child completes. They do not outlive the `withContext` boundary.
+3. **Scoped lifetime.** Provided layers are initialized when `withContext` begins and disposed when the child completes — or throws. They do not outlive the `withContext` boundary: on exit their state is dropped while the parent's layers keep theirs. A provided layer whose id the parent already has overrides that layer for the subtree but shares its state slot, so the boundary neither initializes nor disposes it.
 4. **Composable.** `withContext` steps can nest. Inner `withContext` layers merge with outer ones. Duplicate layer IDs follow the same resolution rules as top-level layer deduplication (see `11-context-layer-system`).
 
 ### When to Use `withContext` vs `spawn`

@@ -5,6 +5,7 @@ import type {
   StepRunCode,
   StepSpawn,
   StepSubprocessRequest,
+  StorageAdapter,
   SubprocessAdapter,
 } from '@noetic-tools/types';
 import { frameworkCast, NoeticErrorImpl } from '@noetic-tools/types';
@@ -61,6 +62,9 @@ function asContextImpl(ctx: Context): ContextImpl | null {
  */
 interface HarnessWithLayerStore {
   layerStateStore: LayerStateStore;
+  config?: {
+    storage?: StorageAdapter;
+  };
 }
 
 function harnessWithLayerStore<TContext>(ctx: Context<TContext>): HarnessWithLayerStore {
@@ -419,7 +423,10 @@ export async function execute<TContext = ContextData, I = unknown, O = unknown>(
         );
         break;
       case 'withContext':
-        result = await executeWithContext(step, input, stepCtx, (s, i, c) => execute(s, i, c));
+        result = await executeWithContext(step, input, stepCtx, (s, i, c) => execute(s, i, c), {
+          layerStore: harnessWithLayerStore(baseCtx).layerStateStore,
+          storage: harnessWithLayerStore(baseCtx).config?.storage,
+        });
         break;
       case 'loop':
         result = await executeLoop(step, input, stepCtx, (s, i, c) => execute(s, i, c));
