@@ -913,6 +913,8 @@ export interface ExecuteSpawnOpts {
   layerStore?: LayerStateStore;
   parentLayers?: ContextLayer[];
   itemSchemas?: ItemSchemaRegistry;
+  /** Id for the child context; generated when absent. */
+  childId?: string;
 }
 
 interface CollectSpawnItemsParams {
@@ -969,7 +971,7 @@ export async function executeSpawn<TContext, I, O>(
 ): Promise<O> {
   const baseCtx = frameworkCast<Context<ContextData>>(ctx);
   const layers = resolveLayersForSpawn(step, opts?.parentLayers);
-  const childId = crypto.randomUUID();
+  const childId = opts?.childId ?? crypto.randomUUID();
   const childExecutionCtx = contextToExecCtx(baseCtx, {
     executionId: childId,
     depth: baseCtx.depth + 1,

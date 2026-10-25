@@ -121,11 +121,15 @@ function resolveStepAdapter<TContext, I, O>(
  * dispatch semantics including parent-context inheritance, layer lifecycle,
  * and synchronous error propagation. Out-of-process adapters ignore
  * `_localExecutor` and run the step in a child runtime.
+ *
+ * `executionId` names the context the step body runs in: `ctx.id` for a
+ * `runCode`, the pre-allocated child id for a `spawn`.
  */
 async function dispatchViaAdapter<TContext, I, O>(
   step: StepRunCode<TContext, I, O> | StepSpawn<TContext, I, O>,
   input: I,
   ctx: Context<TContext>,
+  executionId: string,
   executor: () => Promise<O>,
 ): Promise<O> {
   const adapter = resolveStepAdapter(step, ctx);
@@ -133,7 +137,7 @@ async function dispatchViaAdapter<TContext, I, O>(
     kind: 'step',
     stepId: step.id,
     serializedInput: input,
-    executionId: ctx.id,
+    executionId,
     overrides: {
       threadId: ctx.threadId,
       resourceId: ctx.resourceId,
@@ -142,7 +146,7 @@ async function dispatchViaAdapter<TContext, I, O>(
   };
   const spawnPromise = adapter.spawn(request);
   const handle = new DetachedHandleImpl<O>({
-    id: ctx.id,
+    id: executionId,
     stepId: step.id,
     adapter,
     spawnPromise,
@@ -384,7 +388,7 @@ export async function execute<TContext = ContextData, I = unknown, O = unknown>(
   try {
     switch (step.kind) {
       case 'runCode':
-        result = await dispatchViaAdapter(step, input, stepCtx, () =>
+        result = await dispatchViaAdapter(step, input, stepCtx, stepCtx.id, () =>
           executeRunCode(step, input, stepCtx),
         );
         break;
@@ -411,17 +415,17 @@ export async function execute<TContext = ContextData, I = unknown, O = unknown>(
           itemSchemas: baseCtx.itemSchemas,
         });
         break;
-      case 'spawn':
-        result = await dispatchViaAdapter(step, input, stepCtx, () =>
-          executeSpawn(
-            step,
-            input,
-            stepCtx,
-            (s, i, c) => execute(s, i, c),
-            buildSpawnOpts(stepCtx),
-          ),
+      case 'spawn': {
+        // Allocated here so the adapter request names the child it runs.
+        const childId = crypto.randomUUID();
+        result = await dispatchViaAdapter(step, input, stepCtx, childId, () =>
+          executeSpawn(step, input, stepCtx, (s, i, c) => execute(s, i, c), {
+            ...buildSpawnOpts(stepCtx),
+            childId,
+          }),
         );
         break;
+      }
       case 'withContext':
         result = await executeWithContext(step, input, stepCtx, (s, i, c) => execute(s, i, c), {
           layerStore: harnessWithLayerStore(baseCtx).layerStateStore,
