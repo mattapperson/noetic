@@ -157,13 +157,20 @@ const harness = new AgentHarness({
 
 Before execution begins, the agent harness walks the entire step tree and collects all `Tool` instances declared on `callModel` steps, plus tools provided by context layers. These are deduplicated by name (first-wins) into a **unified tool set** stored on the execution context.
 
-Every LLM call receives the full unified tool set, preserving prompt cache across calls with different tool restrictions. Individual steps restrict which tools the model may invoke via the `tools` field on `CallModelOpts`:
+The unified set is the pool every `callModel` step draws from. A step narrows it with the `tools` field on `CallModelOpts`, which the interpreter turns into `allowedToolNames` on the `CallModelRequest`:
 
-- `tools: undefined` (or omitted) — unrestricted, model may call any tool
+- `tools: undefined` (or omitted) — unrestricted, model may call any tool in the unified set
 - `tools: [searchTool, readFileTool]` — model may only call these tools
 - `tools: []` — no tools available for this step
 
-The restriction is communicated to the provider via `tool_choice: { type: "allowed_tools", tools: [...] }` in the API call.
+The harness enforces the restriction itself, in two places:
+
+1. **Request.** Only the allowed tools are sent to the provider; no `tool_choice` is set. Provider support for `tool_choice: { type: "allowed_tools" }` is uneven, and a provider that ignores it would let the model call a tool the step never allowed.
+2. **Execution.** The harness tool loop (see Tool Call Execution) only runs tools in the allowed subset. A function call naming any other tool is answered with an `Error: unknown tool '<name>'` tool result and never runs.
+
+Server tools (`ServerToolSpec` entries) are sent alongside the allowed client tools; the provider runs them.
+
+Because the tool list is part of the prompt prefix, two steps with different restrictions do not share a provider prompt-cache entry. Rounds within one `callModel` step send the same list and do share it.
 
 ### OpenRouter Integration
 
@@ -171,8 +178,8 @@ The agent harness delegates LLM calls to the `@openrouter/sdk` internally. It:
 
 1. Merges `StepCallModel.instructions` (from the step definition) with any system-role messages extracted from `items`, joined by `\n\n`. If only one source is present, that one is used. If neither is present, `instructions` is `undefined`.
 2. Converts Noetic `Item[]` to OpenResponses input format.
-3. Wraps the unified `Tool[]` into SDK tool objects, binding `ctx` into each `execute` closure.
-4. Passes `tool_choice` with allowed subset when the step restricts tools.
+3. Converts the allowed subset of the unified `Tool[]` (see Unified Tool Set) into SDK tool definitions — name, description and input JSON Schema, with no `execute`, so the SDK never runs a tool itself.
+4. Appends any server tools for the provider to run.
 5. Calls the SDK's `callModel()` — the SDK handles the tool call loop internally.
 6. Converts the SDK response back to Noetic `Item[]` and `LLMResponse`.
 
