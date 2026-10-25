@@ -36,6 +36,7 @@ export * from './context/layers/steering';
 export * from './context/layers/task-state';
 export * from './context/layers/temporal';
 export * from './context/layers/tool-calls';
+export type { LiveChild } from './context/parent-updates';
 export * from './context/projector';
 export * from './context/scope';
 export * from './context/storage-batch';

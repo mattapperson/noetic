@@ -22,6 +22,8 @@ import {
   SteeringAction,
 } from '@noetic-tools/types';
 import { callHook, traceSkipped, withTimeout } from './hook-call';
+import type { LiveChild } from './parent-updates';
+import { createLiveChildren } from './parent-updates';
 import { createScopedStorage, resolveScopeKey } from './scope';
 
 //#region Types
@@ -71,6 +73,17 @@ export interface LayerStateStore {
   disable?(executionId: string, layerId: string): void;
   /** Whether a layer was disabled for an execution. */
   isDisabled?(executionId: string, layerId: string): boolean;
+  /**
+   * Register a running child. From now on every `set()` of the parent's state
+   * for a layer is delivered to that layer's `onParentUpdate` in the child, in
+   * the background. `cleanup(childExecutionId)` forgets the child. Optional so
+   * custom stores keep compiling; without it, children get no parent updates.
+   */
+  adopt?(child: LiveChild): void;
+  /** Stop parent updates to a child and wait for deliveries already running. */
+  release?(childExecutionId: string): Promise<void>;
+  /** Number of registered children, for leak checks. */
+  liveChildren?(): number;
 }
 
 interface InitLayersParams {
@@ -271,7 +284,7 @@ export function createLayerStateStore(
     entry.inFlight = null;
   }
 
-  return {
+  const store: LayerStateStore = {
     get<T>(executionId: string, layerId: string): T | undefined {
       return frameworkCast<T | undefined>(states.get(executionId)?.get(layerId));
     },
@@ -282,6 +295,7 @@ export function createLayerStateStore(
         states.set(executionId, execMap);
       }
       execMap.set(layerId, state);
+      children.notify(executionId, layerId, state);
 
       const entry = durables.get(executionId)?.get(layerId);
       if (!entry) {
@@ -333,6 +347,7 @@ export function createLayerStateStore(
       return disabled.get(executionId)?.has(layerId) ?? false;
     },
     cleanup(executionId: string): void {
+      children.drop(executionId);
       states.delete(executionId);
       durables.delete(executionId);
       disabled.delete(executionId);
@@ -342,8 +357,26 @@ export function createLayerStateStore(
       durables.get(executionId)?.delete(layerId);
       disabled.get(executionId)?.delete(layerId);
     },
+    adopt(child: LiveChild): void {
+      children.adopt(child);
+    },
+    release(childExecutionId: string): Promise<void> {
+      return children.release(childExecutionId);
+    },
+    liveChildren(): number {
+      return children.size;
+    },
     diagnostic: report,
   };
+  const children = createLiveChildren(store, (executionId, layer) =>
+    isLayerDisabled({
+      store,
+      executionId,
+      layer,
+      state: store.get(executionId, layer.id),
+    }),
+  );
+  return store;
 }
 
 interface IsLayerDisabledParams {
@@ -1105,6 +1138,9 @@ export async function returnLayers<T>({
   result,
   store,
 }: ReturnLayersParams<T>): Promise<T> {
+  // The child has finished: no more parent updates, and the ones in flight
+  // land before its state is merged.
+  await store.release?.(childCtx.executionId);
   const sorted = [
     ...layers,
   ].sort((a, b) => a.slot - b.slot);
