@@ -88,14 +88,21 @@ interface TraceExporter {
 }
 ```
 
-Custom exporters plug in:
+Each harness takes its exporter at construction; there is no process-wide exporter, so two harnesses in one process can trace to different backends. A harness built without one uses a `NoopExporter`:
 
 ```typescript
-import { setTraceExporter } from '@noetic-tools/core';
+import { AgentHarness } from '@noetic-tools/core';
 import { DatadogExporter } from '@noetic/datadog';
 
-setTraceExporter(new DatadogExporter({ apiKey: process.env.DD_API_KEY }));
+const harness = new AgentHarness({
+  name: 'traced-agent',
+  agentGraph: agent,
+  params: {},
+  traceExporter: new DatadogExporter({ apiKey: process.env.DD_API_KEY }),
+});
 ```
+
+Every span the harness opens — model, tool, decision, child-context, and workflow-run spans — is exported to that harness's `traceExporter`.
 
 ---
 
