@@ -118,6 +118,7 @@ import type {
   StreamingItem,
   SubprocessAdapter,
   Tool,
+  ToolApprover,
   TraceExporter,
   ZodType,
 } from './deps/types';
@@ -217,6 +218,12 @@ interface AgentHarnessOpts<TParams extends Record<string, unknown> = Record<stri
   initialCwd?: string;
   /** Default model for `decide` steps. */
   decisionModel?: string;
+  /**
+   * Approves or refuses calls to tools that declare `needsApproval`, after the
+   * `beforeToolCall` layers allow them. Without one, those calls run
+   * unapproved and the harness warns once per tool name.
+   */
+  approveToolCall?: ToolApprover;
   /** @internal Test-only escape hatch to inject a mock callModel implementation. */
   _testCallModel?: (request: CallModelRequest) => Promise<LLMResponse>;
   /** @internal Test-only escape hatch to inject a mock decide implementation. */
@@ -581,6 +588,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       forceAtomicRecall: opts.forceAtomicRecall,
       contextCache: opts.contextCache,
       decisionModel: opts.decisionModel,
+      approveToolCall: opts.approveToolCall,
     };
     this.fs = environment?.fs ?? createInMemoryFsAdapter();
     this.shell = environment?.shell ?? createInMemoryShellAdapter();

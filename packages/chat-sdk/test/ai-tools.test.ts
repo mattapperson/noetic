@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import assert from 'node:assert';
-import type { ChannelHandle, ExternalChannel } from '@noetic-tools/types';
+import type { ChannelHandle, ExternalChannel, Tool } from '@noetic-tools/types';
 import { z } from 'zod';
 import { chatTools, fromAiSdkTool } from '../src/ai-tools';
 import type { ApprovalDecision, ApprovalRequest } from '../src/approvals';
@@ -76,6 +76,36 @@ async function approveOnceRequested(requests: ApprovalRequest[]): Promise<Approv
   };
 }
 
+/**
+ * Whether the wrapper gates `tool` itself: run it against a harness that
+ * rejects every approval request and report whether a request was sent.
+ */
+async function parksForApproval(tool: Tool): Promise<boolean> {
+  const requests: ApprovalRequest[] = [];
+  const toolCtx = {
+    ctx: {
+      threadId: 'thread-1',
+    },
+    harness: {
+      send: (_channel: unknown, value: unknown) => {
+        requests.push(ApprovalRequestSchema.parse(value));
+        return Promise.resolve();
+      },
+      recv: () =>
+        Promise.resolve({
+          requestId: requests[0]?.requestId,
+          approved: false,
+        }),
+    },
+  };
+  try {
+    await tool.execute({}, toolCtx);
+  } catch {
+    // A rejected or failing call — only whether it asked matters here.
+  }
+  return requests.length > 0;
+}
+
 describe('fromAiSdkTool', () => {
   test('preserves the zod input schema and description, delegates execute', async () => {
     const schema = z.object({
@@ -99,7 +129,7 @@ describe('fromAiSdkTool', () => {
     expect(tool.name).toBe('fetchMessages');
     expect(tool.description).toBe('Fetch messages');
     expect(tool.input).toBe(schema);
-    expect(tool.needsApproval).toBe(false);
+    expect(tool.needsApproval).toBeUndefined();
 
     const result = await tool.execute(
       {
@@ -120,56 +150,76 @@ describe('fromAiSdkTool', () => {
     ]);
   });
 
-  test('inherits the vendor needsApproval default instead of ungating it', () => {
+  test('inherits the vendor needsApproval default instead of ungating it', async () => {
     expect(
-      fromAiSdkTool(
-        'del',
-        aiTool({
-          needsApproval: true,
-        }),
-      ).needsApproval,
+      await parksForApproval(
+        fromAiSdkTool(
+          'del',
+          aiTool({
+            needsApproval: true,
+          }),
+        ),
+      ),
     ).toBe(true);
     // A dynamic vendor predicate counts as gated.
     expect(
-      fromAiSdkTool(
-        'dyn',
-        aiTool({
-          needsApproval: () => true,
-        }),
-      ).needsApproval,
+      await parksForApproval(
+        fromAiSdkTool(
+          'dyn',
+          aiTool({
+            needsApproval: () => true,
+          }),
+        ),
+      ),
     ).toBe(true);
     expect(
-      fromAiSdkTool(
-        'read',
-        aiTool({
-          needsApproval: false,
-        }),
-      ).needsApproval,
+      await parksForApproval(
+        fromAiSdkTool(
+          'read',
+          aiTool({
+            needsApproval: false,
+          }),
+        ),
+      ),
     ).toBe(false);
-    expect(fromAiSdkTool('bare', aiTool({})).needsApproval).toBe(false);
+    expect(await parksForApproval(fromAiSdkTool('bare', aiTool({})))).toBe(false);
     // Explicit override beats the vendor flag in both directions.
     expect(
-      fromAiSdkTool(
-        'del',
-        aiTool({
-          needsApproval: true,
-        }),
-        {
-          needsApproval: false,
-        },
-      ).needsApproval,
+      await parksForApproval(
+        fromAiSdkTool(
+          'del',
+          aiTool({
+            needsApproval: true,
+          }),
+          {
+            needsApproval: false,
+          },
+        ),
+      ),
     ).toBe(false);
     expect(
-      fromAiSdkTool(
-        'read',
-        aiTool({
-          needsApproval: false,
-        }),
-        {
-          needsApproval: true,
-        },
-      ).needsApproval,
+      await parksForApproval(
+        fromAiSdkTool(
+          'read',
+          aiTool({
+            needsApproval: false,
+          }),
+          {
+            needsApproval: true,
+          },
+        ),
+      ),
     ).toBe(true);
+  });
+
+  test('a gated tool does not declare core needsApproval, so the harness approver never asks twice', () => {
+    const tool = fromAiSdkTool(
+      'del',
+      aiTool({
+        needsApproval: true,
+      }),
+    );
+    expect(tool.needsApproval).toBeUndefined();
   });
 
   test('falls back to z.unknown() when the tool has no zod schema', () => {
@@ -335,10 +385,10 @@ describe('chatTools', () => {
     // Vendor default: write tools gated, read tools not.
     const deleteTool = byName.get('deleteMessage');
     assert(deleteTool);
-    expect(deleteTool.needsApproval).toBe(true);
+    expect(await parksForApproval(deleteTool)).toBe(true);
     const readTool = byName.get('fetchMessages');
     assert(readTool);
-    expect(readTool.needsApproval).toBe(false);
+    expect(await parksForApproval(readTool)).toBe(false);
   });
 
   test('requireApproval overrides the vendor default per tool', async () => {
@@ -356,11 +406,11 @@ describe('chatTools', () => {
     );
     const postTool = byName.get('postMessage');
     assert(postTool);
-    expect(postTool.needsApproval).toBe(false);
+    expect(await parksForApproval(postTool)).toBe(false);
     // Unnamed write tools keep the vendor gate.
     const deleteTool = byName.get('deleteMessage');
     assert(deleteTool);
-    expect(deleteTool.needsApproval).toBe(true);
+    expect(await parksForApproval(deleteTool)).toBe(true);
   });
 });
 

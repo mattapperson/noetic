@@ -102,6 +102,36 @@ describe('WorkflowNodeSchema — llm', () => {
     expect(WorkflowNodeSchema.safeParse(node('turbo')).success).toBe(false);
   });
 
+  test('accepts every toolChoice form and rejects others', () => {
+    const node = (toolChoice: unknown): unknown => ({
+      kind: 'callModel',
+      id: 'llm-choice',
+      instructions: 'x',
+      toolChoice,
+    });
+    for (const valid of [
+      'auto',
+      'required',
+      'none',
+      {
+        tool: 'search',
+      },
+    ]) {
+      expect(WorkflowNodeSchema.safeParse(node(valid)).success).toBe(true);
+    }
+    for (const invalid of [
+      'any',
+      {
+        tool: '',
+      },
+      {
+        name: 'search',
+      },
+    ]) {
+      expect(WorkflowNodeSchema.safeParse(node(invalid)).success).toBe(false);
+    }
+  });
+
   test('parses llm with only required fields', () => {
     const node = {
       kind: 'callModel',

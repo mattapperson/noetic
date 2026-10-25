@@ -10,7 +10,8 @@
  */
 
 import { z } from 'zod';
-import { ServiceTier } from '../types/common';
+import type { ToolChoice } from '../types/common';
+import { ServiceTier, ToolChoiceMode } from '../types/common';
 import type { DecideQuestion } from '../types/decide';
 import { DecideQuestionsSchema, routeOutcomes } from '../types/decide';
 import type { DecideView } from '../types/step';
@@ -167,6 +168,13 @@ const ModelParamsSchema = z.object({
   stopSequences: z.array(z.string()).optional(),
   serviceTier: z.enum(ServiceTier).optional(),
 });
+
+const ToolChoiceSchema = z.union([
+  z.enum(ToolChoiceMode),
+  z.object({
+    tool: z.string().min(1),
+  }),
+]);
 
 //#endregion
 
@@ -351,6 +359,12 @@ export interface CallModelWorkflowNode extends WorkflowNodeBase {
    * decided by the `type` value.
    */
   tools?: z.infer<typeof CallModelToolEntrySchema>[];
+  /**
+   * How the model may use its tools: `"auto"` (default), `"required"`,
+   * `"none"`, or `{ "tool": "<registered-tool-name>" }` to force one client
+   * tool from `tools`.
+   */
+  toolChoice?: ToolChoice;
   params?: z.infer<typeof ModelParamsSchema>;
   /** Streaming output-codec reference, resolved from `HydrationContext.uiLibraries`. */
   output?: OutputCodecRef;
@@ -561,6 +575,7 @@ const CallModelNodeSchema = z.object({
   model: z.string().optional(),
   instructions: z.string(),
   tools: z.array(CallModelToolEntrySchema).optional(),
+  toolChoice: ToolChoiceSchema.optional(),
   params: ModelParamsSchema.optional(),
   output: OutputCodecRefSchema.optional(),
 });

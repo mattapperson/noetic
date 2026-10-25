@@ -16,7 +16,20 @@ export interface TraceExporter {
 /** @public Diagnostic span recording a single context layer hook invocation and its outcome. */
 export interface LayerTraceSpan {
   layerId: string;
-  hook: 'init' | 'recall' | 'store' | 'onSpawn' | 'onReturn' | 'onComplete' | 'dispose';
+  hook:
+    | 'init'
+    | 'recall'
+    | 'store'
+    | 'onSpawn'
+    | 'onReturn'
+    | 'onParentUpdate'
+    | 'onComplete'
+    | 'dispose'
+    | 'onDecision'
+    | 'beforeToolCall'
+    | 'afterModelCall'
+    | 'projectHistory'
+    | 'onItemAppend';
   /** Duration in milliseconds. */
   duration: number;
   status: 'ok' | 'error' | 'timeout' | 'skipped';

@@ -4,6 +4,7 @@
  */
 
 import type { ContextData, ContextLayer } from '@noetic-tools/context';
+import { exportSpans } from '@noetic-tools/context';
 import type {
   AgentHarnessContract,
   Context,
@@ -221,7 +222,7 @@ export async function parseAndRunWorkflow(opts: ParseAndRunWorkflowOpts): Promis
     return coerceToString(result);
   } finally {
     runSpan.end();
-    await opts.harness.traceExporter.export([
+    await exportSpans(opts.harness.traceExporter, [
       runSpan,
     ]);
   }

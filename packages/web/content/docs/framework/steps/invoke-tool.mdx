@@ -51,7 +51,7 @@ Every tool in Noetic follows the same interface, whether it is passed to `callMo
 | `output` | `StandardSchemaV1<O>` | Yes | Schema defining the tool's output |
 | `inputJsonSchema` | `Record<string, unknown>` | No | Explicit JSON Schema override/fallback for non-Zod tool input. Zod uses its native converter; other validators can implement StandardJSONSchemaV1. A validation-only schema must provide this field or conversion throws `MISSING_JSON_SCHEMA` |
 | `execute` | `(args: I, toolCtx: ToolExecutionContext) => Promise<O>` | Yes | The function that runs the tool. The second argument is a `ToolExecutionContext` — `{ ctx, harness, fs, shell, context, assembledView, lastStepMeta }` — not the step `Context` itself (which is available as `toolCtx.ctx`) |
-| `needsApproval` | `boolean` | No | Declares that a call needs human approval before it runs. Core records it on traces but does not pause on it — see [Human-in-the-Loop Approval](#human-in-the-loop-approval) |
+| `needsApproval` | `boolean` | No | Every call needs the harness approver's go-ahead before it runs — see [Human-in-the-Loop Approval](#human-in-the-loop-approval) |
 | `context` | `ToolContextDeclaration` | No | Declares tool-owned state; the runtime generates a context layer from it |
 | `ui` | `ToolUiDeclaration` | No | Render functions (`call` / `progress` / `result` / `error`) so the tool's calls carry their own UI — see [Generative UI](/docs/framework/generative-ui) |
 
@@ -124,16 +124,11 @@ Standard Schema support covers tool input/output/event schemas and `callModel` /
 
 ## Human-in-the-Loop Approval
 
-Set `needsApproval: true` on a tool to declare that a call must be approved by a human before it runs. The flag is a declaration, not a gate: core records it as `tool.needs_approval` on each `tool.call` span and does **not** pause on its own. Enforce it with one of:
-
-- A [`beforeToolCall` gating layer](/docs/framework/context-layers/custom-layers) that asks your approver and returns `allow` or `deny`. The gate runs before `execute` on both the model-driven path and `invokeTool`. A denied model-driven call returns an error tool result to the model; a denied `invokeTool` step throws `NoeticError` kind `steering_denied`.
-- The tool's own integration, which checks before doing any work — for example [`fromAiSdkTool`](/docs/framework/chat-sdk) waits on its approval channels and fails the call when it is refused or times out.
-
-A tool that sets `needsApproval` with neither in place runs without approval.
+Set `needsApproval: true` on a tool and give the harness an approver with `approveToolCall`. Before every call to that tool runs, the harness asks the approver, which returns a steering decision: `allow` runs the call; `deny` (or `guide`) refuses it, with `guidance` as the reason. The approver may be async and may wait — for example on a channel a human answers.
 
 ```ts
 import { z } from 'zod';
-import { tool } from '@noetic-tools/core';
+import { AgentHarness, channel, tool } from '@noetic-tools/core';
 
 declare const db: { delete(recordId: string): Promise<void> };
 
@@ -146,16 +141,49 @@ const deleteTool = tool({
   output: z.object({
     deleted: z.boolean(),
   }),
+  needsApproval: true,
   execute: async (args) => {
-    // Runs once your beforeToolCall gate (or integration) approves the call
+    // Runs only once the approver allows the call
     await db.delete(args.recordId);
     return {
       deleted: true,
     };
   },
-  needsApproval: true,
+});
+
+// An operator UI reads requests and writes answers.
+const approvalRequests = channel('approval-requests', {
+  schema: z.object({ toolName: z.string(), toolArgs: z.unknown() }),
+  mode: 'queue',
+});
+const approvalAnswers = channel('approval-answers', {
+  schema: z.boolean(),
+  mode: 'queue',
+});
+
+const harness = new AgentHarness({
+  name: 'ops-agent',
+  params: {},
+  tools: [deleteTool],
+  approveToolCall: async ({ toolName, toolArgs, ctx }) => {
+    await ctx.harness.send(approvalRequests, { toolName, toolArgs }, ctx);
+    const approved = await ctx.harness.recv(approvalAnswers, ctx);
+    return approved
+      ? { action: 'allow' }
+      : { action: 'deny', guidance: 'refused by operator' };
+  },
 });
 ```
+
+The approver receives `{ toolName, toolArgs, callId, ctx }`. `toolArgs` are the validated arguments — exactly what `execute` receives — and `callId` is the same id the `tool_call_started` event carries (the model's call id, or the step id for `invokeTool`).
+
+**Order.** Approval is the last gate before `execute`. [`beforeToolCall` gating layers](/docs/framework/context-layers/custom-layers) run first, so a layer refusal stops the call before the approver is asked.
+
+**Refusal.** A refused call never runs. On the model-driven path the model receives an error tool result (`Tool call denied: <guidance>`), the same shape as a gating-layer refusal. An `invokeTool` step throws `NoeticError` kind `steering_denied` carrying the guidance. An approver that throws refuses the call.
+
+**No approver.** A harness without `approveToolCall` runs the call unapproved and logs a warning once per tool name. Traces show it: each `tool.call` span carries `tool.approval` — `approved`, `denied`, or `none_configured`.
+
+**Self-gating integrations.** A wrapper that gates inside `execute` does not declare `needsApproval`, so its calls are gated once. [`fromAiSdkTool`](/docs/framework/chat-sdk) is one: it waits on its own approval channels and fails the call when it is refused or times out.
 
 ## Related
 

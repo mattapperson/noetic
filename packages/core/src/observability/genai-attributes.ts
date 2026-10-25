@@ -1,4 +1,4 @@
-import { LAYER_HOOK_EVENT, SPAWN_SUMMARY_FAILED_EVENT } from '@noetic-tools/context';
+import { LAYER_HOOK_EVENT, LayerHookAttr, SPAWN_SUMMARY_FAILED_EVENT } from '@noetic-tools/context';
 
 // GenAI Semantic Convention attributes
 export const GenAI = {
@@ -16,6 +16,13 @@ export const GenAI = {
 export const ToolAttr = {
   NAME: 'tool.name',
   NEEDS_APPROVAL: 'tool.needs_approval',
+  /**
+   * How the approver settled a call to a tool that declares `needsApproval`:
+   * `approved`, `denied`, or `none_configured` (the harness has no approver,
+   * so the call ran unapproved). Absent when the call never reached the
+   * approval stage.
+   */
+  APPROVAL: 'tool.approval',
 } as const;
 
 // Noetic-specific span attributes describing the static workflow graph (the
@@ -73,6 +80,20 @@ export const NoeticAttr = {
   DECISION_REFUSED: 'noetic.decision.refused',
   /** Prefix for per-question attributes: `noetic.decision.<id>.value` etc. */
   DECISION_PREFIX: 'noetic.decision.',
+  /** Layer a `layer.hook` span belongs to. */
+  LAYER_ID: LayerHookAttr.LAYER_ID,
+  /** Hook a `layer.hook` span records (`init`, `recall`, `beforeToolCall`, …). */
+  LAYER_HOOK: LayerHookAttr.HOOK,
+  /** How the hook call ended: `ok`, `error`, `timeout`, or `skipped`. */
+  LAYER_STATUS: LayerHookAttr.STATUS,
+  /** `recall` only: items the layer injected. */
+  LAYER_ITEM_COUNT: LayerHookAttr.ITEM_COUNT,
+  /** `recall` only: the layer's token budget. */
+  LAYER_BUDGET_ALLOCATED: LayerHookAttr.BUDGET_ALLOCATED,
+  /** `recall` only: tokens the layer's output costs. */
+  LAYER_BUDGET_USED: LayerHookAttr.BUDGET_USED,
+  /** `recall` only: budget the layer left unspent. */
+  LAYER_BUDGET_YIELDED: LayerHookAttr.BUDGET_YIELDED,
 } as const;
 
 // Span event names. Steps that open no span of their own (e.g. `loop`) add
@@ -90,11 +111,12 @@ export const NoeticEvent = {
    */
   SPAWN_SUMMARY_FAILED: SPAWN_SUMMARY_FAILED_EVENT,
   /**
-   * One per call of a traced layer hook (`init`, `recall`, `store`, `onSpawn`,
-   * `onReturn`, `onComplete`, `dispose`), on the span of the context the hook
-   * runs in: `{ layerId, hook, duration, status, itemCount?, budget.allocated?,
-   * budget.used?, budget.yielded?, error.message? }`. Defined in
-   * `@noetic-tools/context`, whose lifecycle emits it.
+   * One per layer hook call, on the span of the context the hook runs in, when
+   * that context cannot open a `layer.hook` child span (`ExecutionContext.trace`
+   * has no `createSpan`): `{ layerId, hook, duration, status, itemCount?,
+   * budget.allocated?, budget.used?, budget.yielded?, error.message? }`. Also
+   * the name of that span. Defined in `@noetic-tools/context`, whose lifecycle
+   * emits it.
    */
   LAYER_HOOK: LAYER_HOOK_EVENT,
 } as const;

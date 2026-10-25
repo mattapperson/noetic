@@ -24,7 +24,7 @@ for (const span of exporter.spans) {
 }
 ```
 
-Noetic includes a built-in tracing system modeled on OpenTelemetry conventions. Every context carries a span, and the framework opens a child span wherever work leaves the current context — each model call, tool call, decision, `spawn` child, and `inParallel` path — with timing data, token counts, and custom attributes. You can export these spans to any observability backend.
+Noetic includes a built-in tracing system modeled on OpenTelemetry conventions. Every context carries a span, and the framework opens a child span wherever work leaves the current context — each model call, tool call, decision, context layer hook call, `spawn` child, and `inParallel` path — with timing data, token counts, and custom attributes. You can export these spans to any observability backend.
 
 | Span | Opened by | Parent |
 |---|---|---|
@@ -35,6 +35,7 @@ Noetic includes a built-in tracing system modeled on OpenTelemetry conventions. 
 | `tool.call` | each function call of a model call | its `llm.call` |
 | `tool.call` | each `invokeTool` step | the enclosing span |
 | `decide.call` | each `decide` step | the enclosing span |
+| `layer.hook` | each context layer hook call | the span of the context the hook runs in |
 
 Steps that stay in their context (`runCode`, `loop`, `conditional`) open no span; they add events and attributes to `ctx.span`.
 
@@ -93,12 +94,14 @@ const myStep = runCode({ id: 'annotated', execute: async (input: string, ctx) =>
 
 ## LayerTraceSpan
 
-Every call of a context layer's `init`, `recall`, `store`, `onSpawn`, `onReturn`, `onComplete`, or `dispose` hook adds a `layer.hook` event (`NoeticEvent.LAYER_HOOK`) to the span of the context the hook runs in — `onSpawn` on the parent's span, `onReturn` on the child's. The event's attributes follow `LayerTraceSpan`:
+Every call of a context layer hook — `init`, `recall`, `store`, `onSpawn`, `onReturn`, `onParentUpdate`, `onComplete`, `dispose`, `onDecision`, `beforeToolCall`, `afterModelCall`, `projectHistory`, and `onItemAppend` — opens a `layer.hook` span under the span of the context the hook runs in: `onSpawn` under the parent's span, `onReturn` and `onParentUpdate` under the child's. The span opens before the hook runs, ends when it settles (success, error, or timeout), and goes to the harness `traceExporter` like every other span. Its fields follow `LayerTraceSpan`:
 
 ```ts validate=none
 interface LayerTraceSpan {
   layerId: string;
-  hook: 'init' | 'recall' | 'store' | 'onSpawn' | 'onReturn' | 'onComplete' | 'dispose';
+  hook:
+    | 'init' | 'recall' | 'store' | 'onSpawn' | 'onReturn' | 'onParentUpdate' | 'onComplete'
+    | 'dispose' | 'onDecision' | 'beforeToolCall' | 'afterModelCall' | 'projectHistory' | 'onItemAppend';
   duration: number;
   status: 'ok' | 'error' | 'timeout' | 'skipped';
   budget?: { allocated: number; used: number; yielded: number };
@@ -107,28 +110,29 @@ interface LayerTraceSpan {
 }
 ```
 
-| Field | Description |
-|---|---|
-| `layerId` | Which context layer produced this trace. |
-| `hook` | The lifecycle hook that executed. |
-| `duration` | How long the hook took, in milliseconds. |
-| `status` | Outcome: `ok`, `error`, `timeout`, or `skipped`. |
-| `budget` | Recall only: `allocated` is the layer's budget, `used` what its output costs, `yielded` the unspent remainder (`allocated − used`, at least 0). |
-| `itemCount` | Recall only: number of items the layer produced. |
-| `error` | Error details if `status` is `error` or `timeout`. |
+| Field | Span attribute | Description |
+|---|---|---|
+| `layerId` | `noetic.layer.id` | Which context layer produced this trace. |
+| `hook` | `noetic.layer.hook` | The lifecycle hook that executed. |
+| `duration` | (the span's own timing) | How long the hook took, in milliseconds. |
+| `status` | `noetic.layer.status` | Outcome: `ok`, `error`, `timeout`, or `skipped`. |
+| `budget` | `noetic.layer.budget.allocated` / `.used` / `.yielded` | Recall only: `allocated` is the layer's budget, `used` what its output costs, `yielded` the unspent remainder (`allocated − used`, at least 0). |
+| `itemCount` | `noetic.layer.item_count` | Recall only: number of items the layer produced. |
+| `error` | `error: true`, `error.message` | Error details if `status` is `error` or `timeout`. |
 
-`skipped` means the layer defines the hook but the lifecycle did not call it — the layer is disabled after a failed `init` under `onInitError: 'disable'`, `init` found state already kept, or `onReturn` found no child state. Event attributes hold only scalars, so nested fields arrive as dotted keys (`budget.used`, `error.message`). A peek recall records nothing.
+`skipped` means the layer defines the hook but the lifecycle did not call it — the layer is disabled after a failed `init` under `onInitError: 'disable'`, `init` found state already kept, or `onReturn` found no child state. A skipped call gets a zero-length span. A peek recall records nothing. The `NoeticAttr.LAYER_*` constants name the attributes.
 
 ```ts validate=none
-import { NoeticEvent } from '@noetic-tools/core';
+import { NoeticAttr, NoeticEvent } from '@noetic-tools/core';
 
-const slowRecalls = span.events.filter(
-  (e) =>
-    e.name === NoeticEvent.LAYER_HOOK &&
-    e.attributes?.hook === 'recall' &&
-    Number(e.attributes.duration) > 100,
-);
+const slowRecalls = exporter
+  .getSpansByName(NoeticEvent.LAYER_HOOK)
+  .filter(
+    (span) => span.attributes.get(NoeticAttr.LAYER_HOOK) === 'recall' && span.duration > 100,
+  );
 ```
+
+Hook spans come from `ExecutionContext.trace.createSpan`, which every context the runtime builds provides. A hand-built `ExecutionContext` without it (a unit test's, say) gets a `layer.hook` **event** on its span instead, with the fields flattened to scalar keys: `layerId`, `hook`, `duration`, `status`, `itemCount`, `budget.allocated`, `budget.used`, `budget.yielded`, `error.message`. Each call is recorded one way, never both.
 
 ## TraceExporter Interface
 
@@ -139,6 +143,8 @@ interface TraceExporter {
   export(spans: Span[]): Promise<void>;
 }
 ```
+
+Tracing never changes behavior: if `export` rejects or throws, Noetic logs the error once with `console.warn` and the traced work — model call, tool call, decision, child context, layer hook, or workflow run — keeps its own result.
 
 ### Built-in Exporters
 
@@ -222,6 +228,7 @@ The two cache attributes are **absent**, not zero, when the provider reports not
 |---|---|---|
 | `ToolAttr.NAME` | `'tool.name'` | Tool name. |
 | `ToolAttr.NEEDS_APPROVAL` | `'tool.needs_approval'` | Whether the tool requires human approval. |
+| `ToolAttr.APPROVAL` | `'tool.approval'` | How the approval stage settled the call: `'approved'`, `'denied'`, or `'none_configured'` (no harness approver, so the call ran unapproved). Absent when the tool does not need approval or a `beforeToolCall` layer stopped the call first. |
 
 ```ts validate=none
 import { GenAI, ToolAttr } from '@noetic-tools/core';
@@ -234,7 +241,7 @@ const inputTokens = span.attributes.get(GenAI.USAGE_INPUT_TOKENS);
 
 The harness emits one `llm.call` span per model call (one per tool round) and a `tool.call` span per function call, nested under the calling context's span and flushed to the configured exporter when `callModel` settles.
 
-An `invokeTool` step opens its own `tool.call` span under the enclosing span. It covers validation, the steering gate, and execution, carries `tool.name`, `tool.needs_approval`, and `noetic.node.id` (the step's id), and on failure gets `noetic.error.kind` and `error: true`, like a child context span.
+An `invokeTool` step opens its own `tool.call` span under the enclosing span. It covers validation, the steering gate, approval, and execution, carries `tool.name`, `tool.needs_approval`, `tool.approval` (when the call reached the approval stage), and `noetic.node.id` (the step's id), and on failure gets `noetic.error.kind` and `error: true`, like a child context span.
 
 ## Loop Verdict Events
 

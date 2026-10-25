@@ -21,8 +21,9 @@ import type {
   StepRunCode,
   SubprocessAdapter,
   Tool,
+  ToolChoice,
 } from '@noetic-tools/types';
-import { NoeticConfigError } from '@noetic-tools/types';
+import { isServerToolSpec, NoeticConfigError } from '@noetic-tools/types';
 import { getDefaultRegistrar } from '../types/step-registrar';
 
 //#region Types
@@ -51,6 +52,11 @@ export interface CallModelOpts<TContext, O, I = unknown> extends StepReplay<TCon
    * server tool the provider executes, e.g. web search/fetch).
    */
   tools?: Lazy<(Tool | ServerToolSpec)[] | undefined, TContext>;
+  /**
+   * How the model may use its tools: `'auto'` (default), `'required'`,
+   * `'none'`, or `{ tool: name }` to force one client tool from `tools`.
+   */
+  toolChoice?: ToolChoice;
   /** Structured output: a Standard Schema (Zod, Valibot, …) or a streaming `OutputCodec` (e.g. OpenUI Lang). */
   output?: StandardSchemaV1<unknown, O> | OutputCodec<O>;
   /**
@@ -135,6 +141,35 @@ function validateAcpAgentOpts<TContext, O, I>(opts: StepAcpAgentOpts<TContext, O
   }
 }
 
+/**
+ * A forced tool must be one the step offers. Only an eager `tools` array can be
+ * checked here; a getter's tools are checked when the request is built.
+ */
+function validateToolChoice<TContext, O, I>(opts: CallModelOpts<TContext, O, I>): void {
+  const choice = opts.toolChoice;
+  if (typeof choice !== 'object' || !Array.isArray(opts.tools)) {
+    return;
+  }
+  const names = opts.tools.flatMap((entry) =>
+    isServerToolSpec(entry)
+      ? []
+      : [
+          entry.name,
+        ],
+  );
+  if (names.includes(choice.tool)) {
+    return;
+  }
+  throw new NoeticConfigError({
+    code: 'UNKNOWN_TOOL_CHOICE',
+    message: `callModel(${JSON.stringify(opts.id)}) forces tool ${JSON.stringify(choice.tool)}, which is not in its tools.`,
+    hint:
+      names.length > 0
+        ? `Force one of the step's tools (${names.join(', ')}), or add '${choice.tool}' to \`tools\`.`
+        : `Add '${choice.tool}' to \`tools\`, or drop \`toolChoice\`.`,
+  });
+}
+
 //#endregion
 
 //#region Builders
@@ -187,11 +222,13 @@ export function runCode<TContext = ContextData, I = unknown, O = unknown>(
  * @param opts.instructions - Optional system prompt; eager string or `(ctx) => string | undefined` getter.
  * @param opts.tools - Optional tools; eager array or `(ctx) => Tool[] | undefined` getter.
  * @param opts.output - Optional Zod schema enabling structured output parsing.
+ * @param opts.toolChoice - Optional tool choice: `'auto'` (default), `'required'`, `'none'`, or `{ tool: name }`.
  * @param opts.params - Optional model parameters (temperature, topP, maxTokens, serviceTier).
  * @returns A `StepCallModel` that can be composed into larger pipelines. The step
  *   is auto-registered in the shared step registry.
  * @throws `NoeticConfigError` with code `EMPTY_STEP_ID` if `id` is empty.
  * @throws `NoeticConfigError` with code `MISSING_MODEL` if an eager `model` string is empty. Function-form models are validated at step execution.
+ * @throws `NoeticConfigError` with code `UNKNOWN_TOOL_CHOICE` if `toolChoice` forces a tool missing from an eager `tools` array.
  */
 export function callModel<TContext = ContextData, I = unknown, O = unknown>(
   opts: CallModelOpts<TContext, O, I>,
@@ -213,6 +250,7 @@ export function callModel<TContext = ContextData, I = unknown, O = unknown>(
       hint: "Pass a model identifier, e.g. model: 'anthropic/claude-sonnet-4-20250514'.",
     });
   }
+  validateToolChoice(opts);
   const built: StepCallModel<TContext, I, O> = {
     kind: 'callModel',
     ...opts,

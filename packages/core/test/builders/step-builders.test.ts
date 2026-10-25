@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'bun:test';
+import assert from 'node:assert';
+import { isNoeticConfigError } from '@noetic-tools/types';
 import { z } from 'zod';
 import { callModel, invokeTool, runCode } from '../../src/builders/step-builders';
-import { makeMockContext } from '../_helpers';
+import { makeMockContext, makeTestTool } from '../_helpers';
 
 describe('step builders', () => {
   it('runCode() produces correct shape', async () => {
@@ -209,5 +211,95 @@ describe('step builders', () => {
     expect(s.args).toEqual({
       expression: '2+2',
     });
+  });
+});
+
+describe('callModel() toolChoice', () => {
+  const search = makeTestTool();
+
+  function codeOf(build: () => unknown): string | undefined {
+    try {
+      build();
+    } catch (e) {
+      assert(isNoeticConfigError(e));
+      return e.code;
+    }
+    return undefined;
+  }
+
+  it('keeps a forced tool that the eager tools offer', () => {
+    const s = callModel({
+      id: 'forced',
+      model: 'm',
+      tools: [
+        search,
+      ],
+      toolChoice: {
+        tool: 'test-tool',
+      },
+    });
+    expect(s.toolChoice).toEqual({
+      tool: 'test-tool',
+    });
+  });
+
+  it('throws UNKNOWN_TOOL_CHOICE for a forced tool missing from eager tools', () => {
+    expect(
+      codeOf(() =>
+        callModel({
+          id: 'forced-server',
+          model: 'm',
+          tools: [
+            search,
+            {
+              type: 'openrouter:web_search',
+            },
+          ],
+          toolChoice: {
+            tool: 'openrouter:web_search',
+          },
+        }),
+      ),
+    ).toBe('UNKNOWN_TOOL_CHOICE');
+    expect(
+      codeOf(() =>
+        callModel({
+          id: 'forced-empty',
+          model: 'm',
+          tools: [],
+          toolChoice: {
+            tool: 'test-tool',
+          },
+        }),
+      ),
+    ).toBe('UNKNOWN_TOOL_CHOICE');
+  });
+
+  it('defers the check when tools are absent or lazy', () => {
+    expect(
+      codeOf(() =>
+        callModel({
+          id: 'forced-unified',
+          model: 'm',
+          toolChoice: {
+            tool: 'layer-tool',
+          },
+        }),
+      ),
+    ).toBeUndefined();
+    expect(
+      codeOf(() =>
+        callModel({
+          id: 'forced-lazy',
+          model: 'm',
+          tools: () => [
+            search,
+          ],
+          toolChoice: {
+            tool: 'layer-tool',
+          },
+        }),
+      ),
+    ).toBeUndefined();
   });
 });

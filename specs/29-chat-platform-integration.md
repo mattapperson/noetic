@@ -62,7 +62,7 @@ Constraint: a harness `config.name` must not itself end in a `:`-prefixed event 
 
 `chatTools({ chat, preset?, scope?, requireApproval?, approvalTimeout? })` wraps Chat SDK's `createChatTools()` (post, DM, react, edit, delete, subscriptions) into Noetic `Tool`s via the general-purpose `fromAiSdkTool(name, aiTool, options?)`, which preserves the AI SDK tool's zod `inputSchema` and delegates `execute`. **Approval defaults follow the vendor:** Chat SDK ships its write tools gated (`needsApproval: true`), and the wrapper inherits that — `requireApproval` only overrides per tool or wholesale. A dynamic vendor predicate counts as gated.
 
-Approval gating runs on external channels (`06-channels`), not the AI SDK loop:
+Approval gating runs inside the wrapped tool's `execute`, on external channels (`06-channels`), not the AI SDK loop. Because the wrapper gates the call itself, the Noetic `Tool` it returns does not declare core's `needsApproval` — declaring it would ask the harness approver (`02-step-variants`, "Approval") a second time:
 
 1. A gated tool sends `{ requestId, toolName, args, threadId }` on the shared `approvalRequests` queue channel, then waits on the shared `approvalDecisions` topic channel (receiver parked *before* the request is sent, so a decision cannot race past it), filtering broadcasts by its `requestId` under a deadline (default 5 minutes).
 2. The integration subscribes ONCE per harness with the never-closed lifetime scope: `harness.getChannelStream(approvalRequests, APPROVAL_SCOPE)`. Queue delivery is competing-consumer and channel-scoped, so a single subscriber is the correctness requirement — the request's `threadId` tells it which conversation gets the card.

@@ -42,6 +42,7 @@ callModel<TContext = ContextData, I = unknown, O = unknown>({
   model: Lazy<string, TContext>;                    // eager string or (ctx) => string
   instructions?: Lazy<string | undefined, TContext>;
   tools?: Lazy<Tool[] | undefined, TContext>;       // allowed tool subset (undefined = all, [] = none)
+  toolChoice?: ToolChoice;                          // 'auto' (default) | 'required' | 'none' | { tool: name }
   output?: StandardSchemaV1<unknown, O> | OutputCodec<O>;  // any Standard Schema v1 (Zod default) OR a streaming codec (see Generative UI)
   outputJsonSchema?: Record<string, unknown>;            // explicit fallback/override after Zod and StandardJSONSchemaV1
   params?: ModelParams;                             // temperature, topP, maxTokens, serviceTier (stopSequences: deprecated, ignored)
@@ -52,6 +53,8 @@ callModel<TContext = ContextData, I = unknown, O = unknown>({
 **Service tier.** `params.serviceTier` (a `ServiceTier` value: `auto`, `default`, `fast`, `flex`, `priority`, `scale`, `ultrafast`) is forwarded to OpenRouter unchanged. The served tier lands on `ctx.lastStepMeta.serviceTier` / `LLMResponse.serviceTier`, `undefined` when the provider reports none (never an echo of the request). JSON workflows accept the same field under a `callModel` node's `params`.
 
 `tools` specifies which tools the model may invoke for this step. Before execution, the harness collects all tools from every `callModel` step in the tree into a unified set. Every LLM call sends the full set (keeping the tool prefix prompt-cache stable across steps), while `tools` narrows the allowed subset via `tool_choice: { type: "allowed_tools", mode: "auto" }`; the harness also answers a call to any other tool with an `Error: unknown tool` result instead of running it. Omit `tools` to allow all; set `tools: []` to disable tools for the step.
+
+**Tool choice.** `toolChoice` (a `ToolChoice`: a `ToolChoiceMode` value `'auto' | 'required' | 'none'`, or `{ tool: name }`) works inside the `tools` restriction and always keeps the full tool set on the wire. `'required'` restricted → `allowed_tools` with `mode: "required"`, unrestricted → `"required"`; `'none'` → `"none"`; `{ tool }` → `{ type: "function", name: <wire name> }`. `'required'` and `{ tool }` apply to the first model request only; once the model has called a tool, later rounds revert to `'auto'`. `{ tool }` naming a client tool missing from an eager `tools` array throws `UNKNOWN_TOOL_CHOICE` at build time; with omitted or lazy `tools` it throws at request time if the tool is outside the unified set or restriction. JSON `callModel` nodes take the same `toolChoice` field.
 
 **Lazy params.** `model`, `instructions`, and `tools` each accept either an eager value or a `(ctx) => value` getter resolved at step execution. Getters see the live `Context`, so a step can read `ctx.harness.config.params` or `ctx.unifiedTools` to produce per-run values without baking them in at build time. Function-form `tools` are NOT walked by `collectAllTools`; tools needed in the harness-wide pool should be registered via `AgentHarness.tools`. Eager `model` strings are validated at build time (empty → `MISSING_MODEL`); function-form models are validated after resolution with the same error code.
 
@@ -350,6 +353,8 @@ Per-step `subprocess` mirrors `runCode` — use it to pin a specific spawn to an
 
 The child runs under a `spawn` span (child of `ctx.span`, `NoeticAttr.NODE_ID` = spawn id), ended and exported when the child settles; failures stamp it like `inParallel.path`.
 
+**Parent updates.** A layer hook `onParentUpdate({ parentState, childState, childCtx })` runs in a live child — every `spawn` child and every running `inParallel` path — each time the parent writes that layer's state through the layer state store (`store()` and other hooks that return state, layer functions, a sibling's `onReturn` merge; in-place mutation is not a write). Return `{ childState?, items? }` (`'childState' in result` writes it; `items` append to the child's log) or nothing to ignore. It runs in the background: the parent's write never waits or fails. Per child, one at a time in write order; not ordered against the child's own hooks. Timeout `timeouts.onParentUpdate` (default 5 s); throw/timeout → diagnostic `hook: 'onParentUpdate'`, update dropped. The child stops taking updates before `onReturn` (a running delivery finishes first) and is forgotten on cleanup. `harness.detachedSpawn` contexts (no `onSpawn`/`onReturn`) and out-of-process steps get no updates.
+
 ### loop
 
 Iteration with termination predicates.
@@ -398,7 +403,7 @@ tool<I, O>({
   output: StandardSchemaV1<O>;
   inputJsonSchema?: Record<string, unknown>;  // explicit fallback/override after Zod and StandardJSONSchemaV1
   execute: (args: I, toolCtx: ToolExecutionContext) => Promise<O>;
-  needsApproval?: boolean;                // declaration only; enforce via a beforeToolCall gate
+  needsApproval?: boolean;                // harness approveToolCall decides each call (see Tool approval)
   context?: ToolContextDeclaration;
   ui?: ToolUiDeclaration<I, O>;           // call/progress/result/error render fns (generative UI)
   itemSchemas?: ItemSchemaExtensions;     // { items?, developerMessages?, toolCalls?, toolResults? }
@@ -1724,6 +1729,28 @@ const harness = new AgentHarness({
 });
 ```
 
+### Tool approval (`approveToolCall`)
+
+`AgentHarnessOpts.approveToolCall?: ToolApprover` decides calls to tools that declare `needsApproval`. Readable as `ctx.harness.config.approveToolCall`.
+
+```typescript
+type ToolApprover = (params: ApproveToolCallParams) => SteeringDecision | Promise<SteeringDecision>;
+
+interface ApproveToolCallParams {
+  toolName: string;
+  toolArgs: unknown;  // validated args — what execute receives if approved
+  callId?: string;    // model call id, or the invokeTool step id
+  ctx: Context;       // park on a channel via ctx.harness.recv(channel, ctx)
+}
+```
+
+- Order: `beforeToolCall` layers first, then the approver, then `execute`. A layer refusal means the approver is never asked.
+- `allow` runs the call; `deny`/`guide` refuse it. A throwing approver refuses it.
+- Refusal: model-driven call → error tool result (`Tool call denied: <guidance>`); `invokeTool` → `NoeticError` kind `steering_denied`.
+- No approver configured: the call runs unapproved and the harness warns once per tool name.
+- Span: `tool.call` gets `tool.approval` = `approved` | `denied` | `none_configured` (`ToolAttr.APPROVAL`).
+- Self-gating wrappers (chat-sdk `fromAiSdkTool`) do not declare `needsApproval`, so a call is never gated twice.
+
 ### Decisions (`harness.decide`)
 
 `AgentHarnessOpts.decisionModel?: string` sets the default model for `decide` steps that omit `model`. It is readable as `ctx.harness.config.decisionModel`.
@@ -2261,7 +2288,7 @@ The full set is 23 tools, mirroring the 23 mutating + read CLI verbs (everything
 
 ## Context Layer Hooks
 
-Each call of a traced hook (`init`, `recall`, `store`, `onSpawn`, `onReturn`, `onComplete`, `dispose`) adds a `layer.hook` event (`NoeticEvent.LAYER_HOOK`) to the span of the context it runs in, with `LayerTraceSpan` attributes flattened to scalars: `{ layerId, hook, duration, status, itemCount?, 'budget.allocated'?, 'budget.used'?, 'budget.yielded'?, 'error.message'? }`. `status` is `ok`, `error`, `timeout`, or `skipped` (disabled layer, kept init state, or `onReturn` with no child state). Peek recalls record nothing.
+Each hook call (`init`, `recall`, `store`, `onSpawn`, `onReturn`, `onParentUpdate`, `onComplete`, `dispose`, `onDecision`, `beforeToolCall`, `afterModelCall`, `projectHistory`, `onItemAppend`) opens a `layer.hook` child span (`NoeticEvent.LAYER_HOOK`) under the span of the context it runs in, ended when the hook settles and exported to the harness `traceExporter`. Attributes (`NoeticAttr.LAYER_*`): `noetic.layer.id`, `noetic.layer.hook`, `noetic.layer.status`, recall-only `noetic.layer.item_count` and `noetic.layer.budget.{allocated,used,yielded}`, and `error: true` + `error.message` on failure. `status` is `ok`, `error`, `timeout`, or `skipped` (disabled layer, kept init state, or `onReturn` with no child state; a zero-length span). Spans come from the optional `ExecutionContext.trace.createSpan(name)` (returns an `ExecutionSpan` whose `end()` exports it); a hand-built context without it gets a `layer.hook` span event instead, with flattened keys `{ layerId, hook, duration, status, itemCount?, 'budget.allocated'?, 'budget.used'?, 'budget.yielded'?, 'error.message'? }`. Peek recalls record nothing.
 
 ### onItemAppend
 
