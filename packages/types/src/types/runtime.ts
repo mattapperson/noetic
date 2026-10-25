@@ -12,12 +12,11 @@ import type {
 } from './context-layer';
 import type { DetachedHandle } from './detached';
 import type { FsAdapter } from './fs-adapter';
-import type { HarnessJudgmentContract } from './harness-judgment';
+import type { HarnessJudgmentContract, ToolApprover } from './harness-judgment';
 import type { HarnessResponse, StreamEvent, StreamingItem } from './harness-result';
 import type { ExecuteInput, Item, ItemSchemaExtensions } from './items';
 import type { Span, TraceExporter } from './observability';
 import type { ShellAdapter } from './shell-adapter';
-import type { ToolApprover } from './steering';
 import type { Step } from './step';
 import type { SubprocessAdapter } from './subprocess-adapter';
 import type { Tool } from './tool';
