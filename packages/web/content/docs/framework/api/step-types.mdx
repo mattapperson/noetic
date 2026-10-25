@@ -295,7 +295,7 @@ A step that runs a body step on a fixed-interval schedule, optionally woken soon
 
 `MergeFn<TContext, O, R = O>` combines inParallel path results into one output. `R` is the element type of `results`: `O` in `all` mode, `SettleResult<O>` in `settle` mode.
 
-```ts
+```ts validate=none
 type MergeFn<TContext = ContextData, O = unknown, R = O> = (
   results: R[],
   ctx: Context<TContext>,
