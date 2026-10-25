@@ -1,3 +1,7 @@
+## @noetic-tools/types-v3.9.1 (2026-10-25)
+
+* refactor(types): keep the tool approver with the harness judgment calls (#129) ([caef046](https://github.com/mattapperson/noetic/commit/caef046)), closes [#129](https://github.com/mattapperson/noetic/issues/129) [#128](https://github.com/mattapperson/noetic/issues/128)
+
 ## @noetic-tools/types-v3.9.0 (2026-10-25)
 
 * feat(core): toolChoice, needsApproval enforcement, onParentUpdate and layer hook spans (#128) ([f0db6cd](https://github.com/mattapperson/noetic/commit/f0db6cd)), closes [#128](https://github.com/mattapperson/noetic/issues/128) [#124](https://github.com/mattapperson/noetic/issues/124) [#121](https://github.com/mattapperson/noetic/issues/121) [#122](https://github.com/mattapperson/noetic/issues/122) [#123](https://github.com/mattapperson/noetic/issues/123)
