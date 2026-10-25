@@ -5,7 +5,13 @@ import { getDefaultRegistrar } from '../types/step-registrar';
 
 //#region Types
 
-interface SpawnOpts<TContext, I, O> extends StepReplay<TContext, I> {
+/**
+ * Options for {@link spawn}.
+ *
+ * @public
+ */
+export interface SpawnOpts<TContext = ContextData, I = unknown, O = unknown>
+  extends StepReplay<TContext, I> {
   id: string;
   child: Step<TContext, I, O>;
   context?: ContextConfig | ContextLayer[];

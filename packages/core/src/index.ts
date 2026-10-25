@@ -43,6 +43,8 @@ export type { WithContextOpts } from './builders/provide-builder';
 /** @public */
 export { withContext } from './builders/provide-builder';
 /** @public */
+export type { SpawnOpts } from './builders/spawn-builder';
+/** @public */
 export { spawn } from './builders/spawn-builder';
 /** @public */
 export type { CallModelOpts, InvokeToolOpts, RunCodeOpts } from './builders/step-builders';

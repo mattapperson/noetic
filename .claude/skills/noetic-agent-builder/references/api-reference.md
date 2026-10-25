@@ -344,6 +344,8 @@ spawn<TContext = ContextData, I = unknown, O = unknown>({
 }): StepSpawn<TContext, I, O>
 ```
 
+The options object is exported as `SpawnOpts<TContext, I, O>` (`import type { SpawnOpts } from '@noetic-tools/core'`).
+
 Per-step `subprocess` mirrors `runCode` — use it to pin a specific spawn to an out-of-process adapter (real OS subprocess with durable handle manifests) or a test double (in-memory adapter that records the request for assertions). Resolution precedence is the same: `detachedSpawn-overrides.subprocess ?? step.subprocess ?? harness.subprocess`.
 
 The child runs under a `spawn` span (child of `ctx.span`, `NoeticAttr.NODE_ID` = spawn id), ended and exported when the child settles; failures stamp it like `inParallel.path`.

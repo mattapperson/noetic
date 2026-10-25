@@ -10,10 +10,10 @@
 `spawn` is the most important variant. It's what makes Ralph Wiggum loops, recursive LLMs, and Slate thread weaving possible. Without it, you can't express "run this work with a different context window."
 
 ```typescript
-interface SpawnOpts<I, O> {
+interface SpawnOpts<TContext, I, O> extends StepReplay<TContext, I> {
   id: string;
-  child: Step<I, O>;
-  context?: ContextLayer[];
+  child: Step<TContext, I, O>;
+  context?: ContextConfig | ContextLayer[];
   timeout?: number;
   /**
    * Per-step subprocess adapter override. Takes precedence over the harness
