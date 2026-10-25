@@ -445,7 +445,7 @@ Writes are coalesced per key (latest wins, one write in flight) and mirror failu
 
 ## LayerTraceSpan
 
-Observability data for a single layer hook execution.
+Observability data for a single layer hook execution, recorded as a `layer.hook` span event (`NoeticEvent.LAYER_HOOK`) on the span of the context the hook runs in. See [Observability](/docs/framework/observability#layertracespan).
 
 ```ts validate=none
 interface LayerTraceSpan {

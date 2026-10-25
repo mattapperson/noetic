@@ -372,7 +372,11 @@ describe('returnLayers', () => {
     });
 
     expect(returnResult).toBe('raw');
-    expect(events).toEqual([
+    expect(events.map((e) => e.name)).toEqual([
+      NoeticEvent.LAYER_HOOK,
+      NoeticEvent.SPAWN_SUMMARY_FAILED,
+    ]);
+    expect(events.filter((e) => e.name === NoeticEvent.SPAWN_SUMMARY_FAILED)).toEqual([
       {
         name: NoeticEvent.SPAWN_SUMMARY_FAILED,
         attributes: {

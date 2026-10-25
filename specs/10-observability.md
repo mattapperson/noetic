@@ -188,17 +188,17 @@ Channel conditions that lose data or risk a stall without failing the run (see `
 
 ## Context Layer Trace Spans
 
-Every context layer hook invocation produces a trace span (see also `11-context-layer-system`).
+Every call of a context layer's `init`, `recall`, `store`, `onSpawn`, `onReturn`, `onComplete`, or `dispose` hook is recorded as a `layer.hook` event (`NoeticEvent.LAYER_HOOK`) on the span of the context the hook runs in (see also `11-context-layer-system`). Events rather than child spans: the `ExecutionContext` a hook gets can annotate its span (`ctx.trace`) but not open one, and `@noetic-tools/context` cannot import the runtime that can. Each event is shaped as a `LayerTraceSpan`:
 
 ```typescript
 interface LayerTraceSpan {
-  /** Layer that produced this span. */
+  /** Layer that produced this record. */
   layerId: string;
   /** Which hook was invoked. */
   hook: 'init' | 'recall' | 'store' | 'onSpawn' | 'onReturn' | 'onComplete' | 'dispose';
-  /** Wall-clock duration in milliseconds. */
+  /** Wall-clock duration in milliseconds; 0 when skipped. */
   duration: number;
-  /** Whether the hook succeeded. */
+  /** How the call ended. */
   status: 'ok' | 'error' | 'timeout' | 'skipped';
   /** For recall: tokens allocated vs. tokens used. */
   budget?: { allocated: number; used: number; yielded: number };
@@ -208,3 +208,16 @@ interface LayerTraceSpan {
   error?: { message: string; stack?: string };
 }
 ```
+
+Span event attributes hold only scalars, so the nested fields flatten to dotted keys: `budget.allocated`, `budget.used`, `budget.yielded`, `error.message` (the stack is not recorded).
+
+| `status` | When |
+|----------|------|
+| `ok` | The hook resolved |
+| `error` | The hook threw or rejected |
+| `timeout` | The hook outran its `timeouts` entry; `error.message` is `Timeout after <ms>ms` |
+| `skipped` | The layer defines the hook but the lifecycle did not call it: the layer is disabled (its `init` failed under `onInitError: 'disable'`), `init` found state already kept for the execution, or `onReturn` found no child state to merge |
+
+For `recall`, `budget.allocated` is the layer's token budget, `budget.used` is what its output costs (`tokenCount`, or the estimate for a string), and `budget.yielded` is `allocated − used`, floored at 0 — the budget the layer left unspent. A recall that returns nothing reports `itemCount: 0` and `used: 0`.
+
+Where the event lands: `onSpawn` on the parent's span; `onReturn` on the child's span (next to any `spawn.summary_failed`); every other hook on the span of the context it runs for. A peek recall (a render-only preview, such as the inspector's) records nothing, and neither does an eventual layer served from its recall cache, since no hook runs.

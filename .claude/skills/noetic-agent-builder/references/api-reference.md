@@ -2257,6 +2257,8 @@ The full set is 23 tools, mirroring the 23 mutating + read CLI verbs (everything
 
 ## Context Layer Hooks
 
+Each call of a traced hook (`init`, `recall`, `store`, `onSpawn`, `onReturn`, `onComplete`, `dispose`) adds a `layer.hook` event (`NoeticEvent.LAYER_HOOK`) to the span of the context it runs in, with `LayerTraceSpan` attributes flattened to scalars: `{ layerId, hook, duration, status, itemCount?, 'budget.allocated'?, 'budget.used'?, 'budget.yielded'?, 'error.message'? }`. `status` is `ok`, `error`, `timeout`, or `skipped` (disabled layer, kept init state, or `onReturn` with no child state). Peek recalls record nothing.
+
 ### onItemAppend
 
 Called when input items (user messages, tool outputs) are about to be appended to the ItemLog. Enables middleware-style item transformation and context re-rendering.
@@ -2566,7 +2568,7 @@ const result = await parseAndRunWorkflow({
 });
 ```
 
-Emits a root `workflow.run` trace span carrying the static DAG (`NoeticAttr.WORKFLOW_DOCUMENT`, `.WORKFLOW_NODES`, `.WORKFLOW_EDGES`). Per-call `llm.call` and `tool.call` spans, and the `spawn` / `inParallel.path` spans of child contexts, nest under it. All are flushed to the harness `traceExporter` (default `NoopExporter`).
+Emits a root `workflow.run` trace span carrying the static DAG (`NoeticAttr.WORKFLOW_DOCUMENT`, `.WORKFLOW_NODES`, `.WORKFLOW_EDGES`). Per-call `llm.call` and `tool.call` spans (`invokeTool` steps open a `tool.call` too), and the `spawn` / `inParallel.path` spans of child contexts, nest under it. Each `callModel` step's first `llm.call` span carries its `noetic.context.*` anchoring attributes. All are flushed to the harness `traceExporter` (default `NoopExporter`).
 
 ### UntilPredicateSchema
 

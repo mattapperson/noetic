@@ -5,7 +5,9 @@ import type {
   Item,
   ItemLog,
   ItemSchemaRegistry,
+  LayerTraceSpan,
   LLMResponse,
+  RecallResult,
   ScopedStorage,
   SteeringDecision,
   StorageAdapter,
@@ -19,6 +21,7 @@ import {
   NoeticErrorImpl,
   SteeringAction,
 } from '@noetic-tools/types';
+import { callHook, traceSkipped, withTimeout } from './hook-call';
 import { createScopedStorage, resolveScopeKey } from './scope';
 
 //#region Types
@@ -396,19 +399,6 @@ function recallCacheKey(layer: ContextLayer, ctx: ExecutionContext): string {
 
 //#endregion
 
-async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  if (ms <= 0) {
-    return promise;
-  }
-  let timer: ReturnType<typeof setTimeout>;
-  return Promise.race([
-    promise.finally(() => clearTimeout(timer)),
-    new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`Timeout after ${ms}ms`)), ms);
-    }),
-  ]);
-}
-
 export function mostRestrictive(decisions: SteeringDecision[]): SteeringDecision {
   const guidances: string[] = [];
 
@@ -496,21 +486,26 @@ export async function initLayers({
     if (!layer.hooks.init) {
       continue;
     }
+    const init = layer.hooks.init;
     if (keep && store.has?.(ctx.executionId, layer.id)) {
+      traceSkipped(ctx, layer.id, 'init');
       continue;
     }
     const scopeKey = resolveScopeKey(layer.scope, ctx);
     const scopedStorage = createScopedStorage(storage, layer.id, scopeKey);
     try {
-      const timeout = layer.timeouts?.init ?? 1e4;
-      const result = await withTimeout(
-        layer.hooks.init({
-          storage: scopedStorage,
-          scopeKey,
-          ctx,
-        }),
-        timeout,
-      );
+      const result = await callHook({
+        ctx,
+        layerId: layer.id,
+        hook: 'init',
+        timeout: layer.timeouts?.init ?? 1e4,
+        run: () =>
+          init({
+            storage: scopedStorage,
+            scopeKey,
+            ctx,
+          }),
+      });
       store.set(ctx.executionId, layer.id, result.state);
     } catch (e) {
       store.diagnostic(layer.id, 'init', e);
@@ -597,6 +592,9 @@ export async function recallLayers({
         state: stored,
       })
     ) {
+      if (!peek) {
+        traceSkipped(ctx, layer.id, 'recall');
+      }
       continue; // was disabled
     }
     // Skipping the write is not enough for a peek: a hook may mutate the
@@ -607,18 +605,28 @@ export async function recallLayers({
     }
 
     const budget = budgets.get(layer.id) ?? 0;
+    const recall = layer.hooks.recall;
+    const run = () =>
+      recall({
+        log,
+        query,
+        ctx,
+        state,
+        budget,
+      });
+    const timeout = layer.timeouts?.recall ?? 5e3;
     try {
-      const timeout = layer.timeouts?.recall ?? 5e3;
-      const result = await withTimeout(
-        layer.hooks.recall({
-          log,
-          query,
-          ctx,
-          state,
-          budget,
-        }),
-        timeout,
-      );
+      // A peek renders without leaving a trace, so it records no event either.
+      const result = peek
+        ? await withTimeout(run(), timeout)
+        : await callHook({
+            ctx,
+            layerId: layer.id,
+            hook: 'recall',
+            timeout,
+            run,
+            measure: (output) => measureRecall(output, budget),
+          });
       if (!result) {
         continue;
       }
@@ -654,6 +662,28 @@ export async function recallLayers({
 }
 
 const PEEK_UNSAFE = Symbol('peek-unsafe');
+
+/** Budget and item count for a `layer.hook` recall event. */
+function measureRecall(
+  output: RecallResult | string | null | undefined,
+  allocated: number,
+): Pick<LayerTraceSpan, 'budget' | 'itemCount'> {
+  const measured = (used: number, itemCount: number) => ({
+    budget: {
+      allocated,
+      used,
+      yielded: Math.max(0, allocated - used),
+    },
+    itemCount,
+  });
+  if (!output) {
+    return measured(0, 0);
+  }
+  if (typeof output === 'string') {
+    return measured(estimateTokens(output), 1);
+  }
+  return measured(output.tokenCount, output.items.length);
+}
 
 /** A deep copy, or `PEEK_UNSAFE` when the state cannot be copied (it holds functions). */
 function copyForPeek(state: unknown): unknown {
@@ -792,6 +822,7 @@ export async function storeLayers({
         state,
       })
     ) {
+      traceSkipped(ctx, layer.id, 'store');
       continue;
     }
     snapshots.push({
@@ -803,18 +834,21 @@ export async function storeLayers({
 
   await Promise.allSettled(
     snapshots.map(async ({ layer, state, storeFn }) => {
-      const timeout = layer.timeouts?.store ?? 3e4;
       try {
-        const result = await withTimeout(
-          storeFn({
-            newItems: response.items,
-            log,
-            response,
-            ctx,
-            state,
-          }),
-          timeout,
-        );
+        const result = await callHook({
+          ctx,
+          layerId: layer.id,
+          hook: 'store',
+          timeout: layer.timeouts?.store ?? 3e4,
+          run: () =>
+            storeFn({
+              newItems: response.items,
+              log,
+              response,
+              ctx,
+              state,
+            }),
+        });
         // `'state' in result` (not `!== undefined`) so a layer can explicitly
         // clear its state by returning `{ state: undefined }`. The store's
         // durable write-through mirrors the write (clearing deletes the
@@ -916,16 +950,21 @@ export async function disposeLayers({ layers, ctx, store }: DisposeLayersParams)
         state,
       })
     ) {
+      traceSkipped(ctx, layer.id, 'dispose');
       continue;
     }
+    const dispose = layer.hooks.dispose;
     try {
-      const timeout = layer.timeouts?.dispose ?? 5e3;
-      await withTimeout(
-        layer.hooks.dispose({
-          state,
-        }),
-        timeout,
-      );
+      await callHook({
+        ctx,
+        layerId: layer.id,
+        hook: 'dispose',
+        timeout: layer.timeouts?.dispose ?? 5e3,
+        run: () =>
+          dispose({
+            state,
+          }),
+      });
     } catch (e) {
       store.diagnostic(layer.id, 'dispose', e);
     }
@@ -981,17 +1020,22 @@ export async function spawnLayers({
         state: parentState,
       })
     ) {
+      traceSkipped(parentCtx, layer.id, 'onSpawn');
       continue;
     }
+    const onSpawn = layer.hooks.onSpawn;
     try {
-      const timeout = layer.timeouts?.onSpawn ?? 1e4;
-      const result = await withTimeout(
-        layer.hooks.onSpawn({
-          parentState,
-          childCtx,
-        }),
-        timeout,
-      );
+      const result = await callHook({
+        ctx: parentCtx,
+        layerId: layer.id,
+        hook: 'onSpawn',
+        timeout: layer.timeouts?.onSpawn ?? 1e4,
+        run: () =>
+          onSpawn({
+            parentState,
+            childCtx,
+          }),
+      });
       if (result && result.childState !== null) {
         store.set(childCtx.executionId, layer.id, result.childState);
         results.push({
@@ -1038,20 +1082,25 @@ export async function returnLayers<T>({
     // initialized state can still be seeded from the child. Skip only when the
     // child produced nothing.
     if (childState === undefined) {
+      traceSkipped(childCtx, layer.id, 'onReturn');
       continue;
     }
+    const onReturn = layer.hooks.onReturn;
     try {
-      const timeout = layer.timeouts?.onReturn ?? 1e4;
-      const returnResult = await withTimeout(
-        layer.hooks.onReturn({
-          childState,
-          childLog,
-          parentState,
-          result: currentResult,
-          childCtx,
-        }),
-        timeout,
-      );
+      const returnResult = await callHook({
+        ctx: childCtx,
+        layerId: layer.id,
+        hook: 'onReturn',
+        timeout: layer.timeouts?.onReturn ?? 1e4,
+        run: () =>
+          onReturn({
+            childState,
+            childLog,
+            parentState,
+            result: currentResult,
+            childCtx,
+          }),
+      });
       if (returnResult?.parentState !== undefined) {
         store.set(parentCtx.executionId, layer.id, returnResult.parentState);
       }
@@ -1100,19 +1149,24 @@ export async function completeLayers({
         state,
       })
     ) {
+      traceSkipped(ctx, layer.id, 'onComplete');
       continue;
     }
+    const onComplete = layer.hooks.onComplete;
     try {
-      const timeout = layer.timeouts?.onComplete ?? 3e4;
-      const result = await withTimeout(
-        layer.hooks.onComplete({
-          log,
-          ctx,
-          state,
-          outcome,
-        }),
-        timeout,
-      );
+      const result = await callHook({
+        ctx,
+        layerId: layer.id,
+        hook: 'onComplete',
+        timeout: layer.timeouts?.onComplete ?? 3e4,
+        run: () =>
+          onComplete({
+            log,
+            ctx,
+            state,
+            outcome,
+          }),
+      });
       if (result && 'state' in result) {
         store.set(ctx.executionId, layer.id, result.state);
       }

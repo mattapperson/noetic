@@ -93,7 +93,7 @@ const myStep = runCode({ id: 'annotated', execute: async (input: string, ctx) =>
 
 ## LayerTraceSpan
 
-Context layer operations produce their own trace records:
+Every call of a context layer's `init`, `recall`, `store`, `onSpawn`, `onReturn`, `onComplete`, or `dispose` hook adds a `layer.hook` event (`NoeticEvent.LAYER_HOOK`) to the span of the context the hook runs in — `onSpawn` on the parent's span, `onReturn` on the child's. The event's attributes follow `LayerTraceSpan`:
 
 ```ts validate=none
 interface LayerTraceSpan {
@@ -113,9 +113,22 @@ interface LayerTraceSpan {
 | `hook` | The lifecycle hook that executed. |
 | `duration` | How long the hook took, in milliseconds. |
 | `status` | Outcome: `ok`, `error`, `timeout`, or `skipped`. |
-| `budget` | Token budget allocation and usage (when applicable). |
-| `itemCount` | Number of items produced by recall. |
-| `error` | Error details if `status` is `error`. |
+| `budget` | Recall only: `allocated` is the layer's budget, `used` what its output costs, `yielded` the unspent remainder (`allocated − used`, at least 0). |
+| `itemCount` | Recall only: number of items the layer produced. |
+| `error` | Error details if `status` is `error` or `timeout`. |
+
+`skipped` means the layer defines the hook but the lifecycle did not call it — the layer is disabled after a failed `init` under `onInitError: 'disable'`, `init` found state already kept, or `onReturn` found no child state. Event attributes hold only scalars, so nested fields arrive as dotted keys (`budget.used`, `error.message`). A peek recall records nothing.
+
+```ts validate=none
+import { NoeticEvent } from '@noetic-tools/core';
+
+const slowRecalls = span.events.filter(
+  (e) =>
+    e.name === NoeticEvent.LAYER_HOOK &&
+    e.attributes?.hook === 'recall' &&
+    Number(e.attributes.duration) > 100,
+);
+```
 
 ## TraceExporter Interface
 

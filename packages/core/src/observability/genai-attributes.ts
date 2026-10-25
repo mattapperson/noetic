@@ -1,4 +1,4 @@
-import { SPAWN_SUMMARY_FAILED_EVENT } from '@noetic-tools/context';
+import { LAYER_HOOK_EVENT, SPAWN_SUMMARY_FAILED_EVENT } from '@noetic-tools/context';
 
 // GenAI Semantic Convention attributes
 export const GenAI = {
@@ -89,4 +89,12 @@ export const NoeticEvent = {
    * emits it and cannot import core.
    */
   SPAWN_SUMMARY_FAILED: SPAWN_SUMMARY_FAILED_EVENT,
+  /**
+   * One per call of a traced layer hook (`init`, `recall`, `store`, `onSpawn`,
+   * `onReturn`, `onComplete`, `dispose`), on the span of the context the hook
+   * runs in: `{ layerId, hook, duration, status, itemCount?, budget.allocated?,
+   * budget.used?, budget.yielded?, error.message? }`. Defined in
+   * `@noetic-tools/context`, whose lifecycle emits it.
+   */
+  LAYER_HOOK: LAYER_HOOK_EVENT,
 } as const;
