@@ -149,7 +149,11 @@ export interface Tool<
    * the call site to get a typed handle.
    */
   execute(args: InferSchemaOutput<I>, toolCtx: unknown): ToolExecutionResult<O>;
-  /** When true, execution pauses for human approval before running. */
+  /**
+   * Declares that a call needs human approval before it runs. Core records the
+   * flag on `tool.call` spans but does not pause on it: a `beforeToolCall`
+   * gating layer or the tool's own integration must enforce it.
+   */
   needsApproval?: boolean;
   /** Optional context declaration — the runtime generates a ContextLayer from this. */
   context?: ToolContextDeclaration;

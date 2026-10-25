@@ -239,7 +239,7 @@ interface StepMeta {
 
 ## Variant: `invokeTool` — Single Tool Execution
 
-May have side effects, may need human approval before execution (preventive gating), and may need sandboxing.
+May have side effects, may need human approval before execution (preventive gating — see `needsApproval` below), and may need sandboxing.
 
 ```typescript
 interface InvokeToolOpts<I, O, TContext = ContextData> extends StepReplay<TContext, I> {
@@ -271,7 +271,7 @@ interface Tool<I extends StandardSchemaV1 = StandardSchemaV1, O extends Standard
     args: InferSchemaOutput<I>,
     toolCtx: ToolExecutionContext,
   ) => Promise<InferSchemaOutput<O>> | AsyncGenerator<unknown, InferSchemaOutput<O>>;
-  needsApproval?: boolean;  // preventive gating, not reactive throwing
+  needsApproval?: boolean;  // declares the call needs human approval; see below
   context?: ToolContextDeclaration;
 }
 ```
@@ -279,6 +279,15 @@ interface Tool<I extends StandardSchemaV1 = StandardSchemaV1, O extends Standard
 `execute` receives a `ToolExecutionContext` (`{ ctx, harness, fs, shell, context, assembledView, lastStepMeta, turnContext? }`), not the bare `Context` — the step's `Context` is `toolCtx.ctx`. See `04-spawn` ("Context in Tools") for how tools that spawn sub-agents use it. The base `Tool` in `@noetic-tools/types` types the second argument as `unknown` to stay a dependency leaf; `tool()` and the `Tool` re-exported from `@noetic-tools/core` type it as `ToolExecutionContext`. An async-generator `execute` (built with `toolWithGenerator`) yields streaming events (typed by `event`) and returns the result.
 
 `toolCalls(tools)` generates one `ContextLayer` per unique `context.id` among the tools. Tools sharing the same id share state.
+
+### Approval
+
+`needsApproval: true` declares that a call must be approved by a human before it runs. It is a declaration, not a gate: core records it as the `tool.needs_approval` attribute on each `tool.call` span (`10-observability`) and does not pause on its own. Approval is enforced before execution — never by throwing after the work is done — by one of:
+
+- **A `beforeToolCall` gating layer** (`11-context-layer-system`). Both the model-driven path and `invokeTool` run the gate before `execute`; the layer asks its approver (keyed by `BeforeToolCallParams.callId`) and returns `allow` to run the call or `deny` to refuse it. A refused call never executes: on the model-driven path the model receives the denial as an error tool result; an `invokeTool` step throws `NoeticError` kind `steering_denied`.
+- **The tool's own integration.** A wrapper that owns its approval channel checks inside `execute` before doing any work — `fromAiSdkTool` (`29-chat-platform-integration`) sends an approval request, waits for the decision, and fails the call with a tool error when it is refused or times out.
+
+A tool that sets `needsApproval` with neither in place runs without approval.
 
 Tool `input`/`output`/`event` accept any Standard Schema v1 validator. The runtime validates tool input through `validateSchema` (Zod `safeParse` fast path, otherwise `~standard.validate` with sync/Promise support), and the parsed/transformed input is what `execute` receives. As before, `output` and `event` describe and infer tool values but are not runtime validation boundaries. Tool input JSON Schema uses the same Zod → StandardJSONSchemaV1 → explicit `inputJsonSchema` chain. For non-Zod schemas, `inputJsonSchema` overrides the trait and also serves as the fallback if the trait converter throws; a validation-only schema must provide it.
 
@@ -362,3 +371,9 @@ The agent harness needs to treat them differently:
 - **withContext steps** are structural — they configure the context layer environment for a subtree without altering execution semantics or creating context boundaries.
 
 A single `step()` that inspects its arguments loses type safety and forces runtime introspection. Explicit variants mean the TypeScript compiler knows exactly what you're doing.
+
+---
+
+## Future Considerations
+
+- **A built-in approval gate.** Core could read `needsApproval` itself and pause before `execute`, asking a harness-level approver and treating refusal like a `deny` decision. Open questions: the approver contract (a channel pair, the ask-user service, or a callback), what happens when no approver is configured, and how it composes with integrations that already gate inside `execute`.

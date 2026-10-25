@@ -334,7 +334,7 @@ type MergeFn<TContext = ContextData, O = unknown, R = O> = (
 | `itemSchemas` | `ItemSchemaExtensions` | Optional item schemas for tool-call/result extensions contributed by this tool. `toolResults` schemas are owner-scoped: they validate only this tool's own result items and never reject a sibling tool's results. Schemas are pure shape validators (gates, not normalizers) — the original item is returned on match, and Zod transforms/defaults are unsupported. |
 | `decorateResultItem` | `(params) => Item` | Decorate the harness-created tool-result item before it is appended/emitted. The decorated item must satisfy this tool's own `itemSchemas.toolResults` (when declared) — including for error outputs such as malformed-arguments results — or the round fails with `NoeticError` kind `item_schema_mismatch`. |
 | `execute` | `(args: InferSchemaOutput<I>, toolCtx: ToolExecutionContext) => Promise<InferSchemaOutput<O>> \| AsyncGenerator<unknown, InferSchemaOutput<O>>` | Async function (or generator) that performs the tool's work. `InferSchemaOutput` is `z.output` for Zod schemas and `StandardSchemaV1.InferOutput` otherwise. |
-| `needsApproval` | `boolean` | Optional. When `true`, execution pauses for human approval before running. |
+| `needsApproval` | `boolean` | Optional. Declares that a call needs human approval. Core records it on `tool.call` spans but does not pause on it; a `beforeToolCall` gating layer or the tool's integration enforces it. |
 | `context` | `ToolContextDeclaration` | Optional. Declares tool-owned state the runtime materializes into a `ContextLayer`. |
 
 ### ExecuteStepFn

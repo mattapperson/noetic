@@ -396,7 +396,7 @@ tool<I, O>({
   output: StandardSchemaV1<O>;
   inputJsonSchema?: Record<string, unknown>;  // explicit fallback/override after Zod and StandardJSONSchemaV1
   execute: (args: I, toolCtx: ToolExecutionContext) => Promise<O>;
-  needsApproval?: boolean;
+  needsApproval?: boolean;                // declaration only; enforce via a beforeToolCall gate
   context?: ToolContextDeclaration;
   ui?: ToolUiDeclaration<I, O>;           // call/progress/result/error render fns (generative UI)
   itemSchemas?: ItemSchemaExtensions;     // { items?, developerMessages?, toolCalls?, toolResults? }

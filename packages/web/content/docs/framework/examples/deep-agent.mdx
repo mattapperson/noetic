@@ -22,7 +22,7 @@ The key insight: **middleware = tools + context layers**. Every piece of DeepAge
 | memoryMiddleware (upstream) | `instructions()` built-in layer |
 | promptCachingMiddleware | N/A — adapter-level concern |
 | patchToolCallsMiddleware | N/A — Noetic interpreter handles natively |
-| humanInTheLoopMiddleware | `tool({ needsApproval: true })` |
+| humanInTheLoopMiddleware | `tool({ needsApproval: true })` plus a `beforeToolCall` gating layer that asks the approver |
 
 ## Task Planning Tools
 
@@ -199,7 +199,7 @@ The `spawn` wrapper creates a context boundary with those context layers, so the
 
 **Adapter-level concerns (not in scope):**
 - Prompt caching — handled by the model provider adapter
-- Human-in-the-loop — supported via `tool({ needsApproval: true })`
+- Human-in-the-loop — declare it with `tool({ needsApproval: true })` and enforce it with a `beforeToolCall` gating layer
 
 **Extension points:**
 - `StorageAdapter` interface for persistent state across sessions
