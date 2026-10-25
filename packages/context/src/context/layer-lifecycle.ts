@@ -540,7 +540,7 @@ export async function initLayers({
     }
     const init = layer.hooks.init;
     if (keep && store.has?.(ctx.executionId, layer.id)) {
-      traceSkipped(ctx, layer.id, 'init');
+      await traceSkipped(ctx, layer.id, 'init');
       continue;
     }
     const scopeKey = resolveScopeKey(layer.scope, ctx);
@@ -645,7 +645,7 @@ export async function recallLayers({
       })
     ) {
       if (!peek) {
-        traceSkipped(ctx, layer.id, 'recall');
+        await traceSkipped(ctx, layer.id, 'recall');
       }
       continue; // was disabled
     }
@@ -874,7 +874,7 @@ export async function storeLayers({
         state,
       })
     ) {
-      traceSkipped(ctx, layer.id, 'store');
+      await traceSkipped(ctx, layer.id, 'store');
       continue;
     }
     snapshots.push({
@@ -958,17 +958,23 @@ export async function notifyDecision({
         state,
       })
     ) {
+      await traceSkipped(ctx, layer.id, 'onDecision');
       continue;
     }
+    const onDecision = layer.hooks.onDecision;
     try {
-      const result = await withTimeout(
-        layer.hooks.onDecision({
-          state,
-          record,
-          ctx,
-        }),
-        layer.timeouts?.onDecision ?? 5e3,
-      );
+      const result = await callHook({
+        ctx,
+        layerId: layer.id,
+        hook: 'onDecision',
+        timeout: layer.timeouts?.onDecision ?? 5e3,
+        run: () =>
+          onDecision({
+            state,
+            record,
+            ctx,
+          }),
+      });
       if (result && 'state' in result) {
         store.set(ctx.executionId, layer.id, result.state);
         if (recallCache && layer.recallMode === 'eventual') {
@@ -1007,7 +1013,7 @@ export async function disposeLayers({
         state,
       })
     ) {
-      traceSkipped(ctx, layer.id, 'dispose');
+      await traceSkipped(ctx, layer.id, 'dispose');
       continue;
     }
     const dispose = layer.hooks.dispose;
@@ -1083,7 +1089,7 @@ export async function spawnLayers({
         state: parentState,
       })
     ) {
-      traceSkipped(parentCtx, layer.id, 'onSpawn');
+      await traceSkipped(parentCtx, layer.id, 'onSpawn');
       continue;
     }
     const onSpawn = layer.hooks.onSpawn;
@@ -1156,7 +1162,7 @@ export async function returnLayers<T>({
     // initialized state can still be seeded from the child. Skip only when the
     // child produced nothing.
     if (childState === undefined) {
-      traceSkipped(childCtx, layer.id, 'onReturn');
+      await traceSkipped(childCtx, layer.id, 'onReturn');
       continue;
     }
     const onReturn = layer.hooks.onReturn;
@@ -1223,7 +1229,7 @@ export async function completeLayers({
         state,
       })
     ) {
-      traceSkipped(ctx, layer.id, 'onComplete');
+      await traceSkipped(ctx, layer.id, 'onComplete');
       continue;
     }
     const onComplete = layer.hooks.onComplete;
@@ -1278,20 +1284,25 @@ export async function beforeToolCallLayers({
         state,
       })
     ) {
+      await traceSkipped(ctx, layer.id, 'beforeToolCall');
       continue;
     }
+    const beforeToolCall = layer.hooks.beforeToolCall;
     try {
-      const timeout = layer.timeouts?.beforeToolCall ?? 5e3;
-      const result = await withTimeout(
-        layer.hooks.beforeToolCall({
-          toolName,
-          toolArgs,
-          callId,
-          ctx,
-          state,
-        }),
-        timeout,
-      );
+      const result = await callHook({
+        ctx,
+        layerId: layer.id,
+        hook: 'beforeToolCall',
+        timeout: layer.timeouts?.beforeToolCall ?? 5e3,
+        run: () =>
+          beforeToolCall({
+            toolName,
+            toolArgs,
+            callId,
+            ctx,
+            state,
+          }),
+      });
       if (result.state !== undefined) {
         store.set(ctx.executionId, layer.id, result.state);
       }
@@ -1343,18 +1354,23 @@ export async function afterModelCallLayers({
         state,
       })
     ) {
+      await traceSkipped(ctx, layer.id, 'afterModelCall');
       continue;
     }
+    const afterModelCall = layer.hooks.afterModelCall;
     try {
-      const timeout = layer.timeouts?.afterModelCall ?? 1e4;
-      const result = await withTimeout(
-        layer.hooks.afterModelCall({
-          response,
-          ctx,
-          state,
-        }),
-        timeout,
-      );
+      const result = await callHook({
+        ctx,
+        layerId: layer.id,
+        hook: 'afterModelCall',
+        timeout: layer.timeouts?.afterModelCall ?? 1e4,
+        run: () =>
+          afterModelCall({
+            response,
+            ctx,
+            state,
+          }),
+      });
       if (result.state !== undefined) {
         store.set(ctx.executionId, layer.id, result.state);
       }
@@ -1403,18 +1419,23 @@ export async function projectHistoryLayers({
         state,
       })
     ) {
+      await traceSkipped(ctx, layer.id, 'projectHistory');
       continue;
     }
+    const projectHistory = layer.hooks.projectHistory;
     try {
-      const timeout = layer.timeouts?.projectHistory ?? 5e3;
-      const result = await withTimeout(
-        layer.hooks.projectHistory({
-          items: current,
-          ctx,
-          state,
-        }),
-        timeout,
-      );
+      const result = await callHook({
+        ctx,
+        layerId: layer.id,
+        hook: 'projectHistory',
+        timeout: layer.timeouts?.projectHistory ?? 5e3,
+        run: () =>
+          projectHistory({
+            items: current,
+            ctx,
+            state,
+          }),
+      });
       current = result.items;
     } catch (e) {
       store.diagnostic(layer.id, 'projectHistory', e);
@@ -1466,20 +1487,25 @@ export async function runAppendPipeline({
         state,
       })
     ) {
+      await traceSkipped(ctx, layer.id, 'onItemAppend');
       continue;
     }
 
+    const onItemAppend = layer.hooks.onItemAppend;
     try {
-      const timeout = layer.timeouts?.onItemAppend ?? DEFAULT_ON_ITEM_APPEND_TIMEOUT;
-      const result = await withTimeout(
-        layer.hooks.onItemAppend({
-          items: currentItems,
-          log,
-          ctx,
-          state,
-        }),
-        timeout,
-      );
+      const result = await callHook({
+        ctx,
+        layerId: layer.id,
+        hook: 'onItemAppend',
+        timeout: layer.timeouts?.onItemAppend ?? DEFAULT_ON_ITEM_APPEND_TIMEOUT,
+        run: () =>
+          onItemAppend({
+            items: currentItems,
+            log,
+            ctx,
+            state,
+          }),
+      });
 
       // Update items for next layer in pipeline
       currentItems = result.items;

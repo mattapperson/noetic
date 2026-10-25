@@ -314,12 +314,19 @@ interface ExecutionContext {
   trace: {
     setAttribute(key: string, value: string | number | boolean): void;
     addEvent(name: string, attributes?: Record<string, string | number | boolean>): void;
+    createSpan?(name: string): ExecutionSpan;
   };
   readLayerState<T>(layerId: string): T | undefined;
 }
+
+interface ExecutionSpan {
+  setAttribute(key: string, value: string | number | boolean): void;
+  addEvent(name: string, attributes?: Record<string, string | number | boolean>): void;
+  end(): Promise<void>; // ends the span and exports it
+}
 ```
 
-`fs` is the `FsAdapter` from `ctx.harness.fs`, giving context layer hooks access to the same filesystem backend as tools and skill discovery (real, in-memory, or remote). `shell` is the corresponding `ShellAdapter`. `callModel` is the minimal model-call surface (`{ model, items, instructions? }`) — present only when the harness has an LLM provider configured, so LLM-backed layers must handle its absence. `readLayerState` snapshots a sibling layer's state by its `layer.id`.
+`fs` is the `FsAdapter` from `ctx.harness.fs`, giving context layer hooks access to the same filesystem backend as tools and skill discovery (real, in-memory, or remote). `shell` is the corresponding `ShellAdapter`. `callModel` is the minimal model-call surface (`{ model, items, instructions? }`) — present only when the harness has an LLM provider configured, so LLM-backed layers must handle its absence. `readLayerState` snapshots a sibling layer's state by its `layer.id`. `trace` annotates the span of the context the hook runs for; `createSpan` (present on every context the runtime builds) opens a child of that span, exported to the harness `traceExporter` when `end()` resolves.
 
 ## LayerTimeouts
 
@@ -470,12 +477,14 @@ Writes are coalesced per key (latest wins, one write in flight) and mirror failu
 
 ## LayerTraceSpan
 
-Observability data for a single layer hook execution, recorded as a `layer.hook` span event (`NoeticEvent.LAYER_HOOK`) on the span of the context the hook runs in. See [Observability](/docs/framework/observability#layertracespan).
+Observability data for a single layer hook execution, recorded as a `layer.hook` child span of the context's span (or, when the `ExecutionContext` has no `trace.createSpan`, a `layer.hook` span event, `NoeticEvent.LAYER_HOOK`). See [Observability](/docs/framework/observability#layertracespan).
 
 ```ts validate=none
 interface LayerTraceSpan {
   layerId: string;
-  hook: 'init' | 'recall' | 'store' | 'onSpawn' | 'onReturn' | 'onParentUpdate' | 'onComplete' | 'dispose';
+  hook:
+    | 'init' | 'recall' | 'store' | 'onSpawn' | 'onReturn' | 'onParentUpdate' | 'onComplete'
+    | 'dispose' | 'onDecision' | 'beforeToolCall' | 'afterModelCall' | 'projectHistory' | 'onItemAppend';
   duration: number;
   status: 'ok' | 'error' | 'timeout' | 'skipped';
   budget?: { allocated: number; used: number; yielded: number };

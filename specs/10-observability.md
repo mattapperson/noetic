@@ -1,7 +1,7 @@
 # Observability
 
 > **Depends On:** (none — defines its own primitives)
-> **Exports:** `Span`, `TraceExporter`, `LayerTraceSpan`
+> **Exports:** `Span`, `TraceExporter`, `LayerTraceSpan`, `ExecutionSpan`
 
 ---
 
@@ -18,6 +18,7 @@ Every `Context` carries a span (`Context.span`, see `07-context-and-event-log`).
 | `tool.call` | each function call of a model call | its `llm.call` |
 | `tool.call` | each `invokeTool` step, around validation, the steering gate, and execution | `ctx.span` |
 | `decide.call` | each `decide` step | `ctx.span` |
+| `layer.hook` | each context layer hook call (see Context Layer Trace Spans) | the span of the context the hook runs in |
 
 ```
 [workflow.run]                                  <- root span
@@ -103,7 +104,7 @@ const harness = new AgentHarness({
 });
 ```
 
-Every span the harness opens — model, tool, decision, child-context, and workflow-run spans — is exported to that harness's `traceExporter`.
+Every span the harness opens — model, tool, decision, child-context, layer-hook, and workflow-run spans — is exported to that harness's `traceExporter`.
 
 ---
 
@@ -189,14 +190,16 @@ Channel conditions that lose data or risk a stall without failing the run (see `
 
 ## Context Layer Trace Spans
 
-Every call of a context layer's `init`, `recall`, `store`, `onSpawn`, `onReturn`, `onParentUpdate`, `onComplete`, or `dispose` hook is recorded as a `layer.hook` event (`NoeticEvent.LAYER_HOOK`) on the span of the context the hook runs in (see also `11-context-layer-system`). Events rather than child spans: the `ExecutionContext` a hook gets can annotate its span (`ctx.trace`) but not open one, and `@noetic-tools/context` cannot import the runtime that can. Each event is shaped as a `LayerTraceSpan`:
+Every call of a context layer hook — `init`, `recall`, `store`, `onSpawn`, `onReturn`, `onParentUpdate`, `onComplete`, `dispose`, `onDecision`, `beforeToolCall`, `afterModelCall`, `projectHistory`, and `onItemAppend` — is recorded once, as a `layer.hook` record shaped as a `LayerTraceSpan` (see also `11-context-layer-system`):
 
 ```typescript
 interface LayerTraceSpan {
   /** Layer that produced this record. */
   layerId: string;
   /** Which hook was invoked. */
-  hook: 'init' | 'recall' | 'store' | 'onSpawn' | 'onReturn' | 'onParentUpdate' | 'onComplete' | 'dispose';
+  hook:
+    | 'init' | 'recall' | 'store' | 'onSpawn' | 'onReturn' | 'onParentUpdate' | 'onComplete'
+    | 'dispose' | 'onDecision' | 'beforeToolCall' | 'afterModelCall' | 'projectHistory' | 'onItemAppend';
   /** Wall-clock duration in milliseconds; 0 when skipped. */
   duration: number;
   /** How the call ended. */
@@ -210,8 +213,6 @@ interface LayerTraceSpan {
 }
 ```
 
-Span event attributes hold only scalars, so the nested fields flatten to dotted keys: `budget.allocated`, `budget.used`, `budget.yielded`, `error.message` (the stack is not recorded).
-
 | `status` | When |
 |----------|------|
 | `ok` | The hook resolved |
@@ -221,4 +222,51 @@ Span event attributes hold only scalars, so the nested fields flatten to dotted 
 
 For `recall`, `budget.allocated` is the layer's token budget, `budget.used` is what its output costs (`tokenCount`, or the estimate for a string), and `budget.yielded` is `allocated − used`, floored at 0 — the budget the layer left unspent. A recall that returns nothing reports `itemCount: 0` and `used: 0`.
 
-Where the event lands: `onSpawn` on the parent's span; `onReturn` on the child's span (next to any `spawn.summary_failed`); every other hook on the span of the context it runs for. A peek recall (a render-only preview, such as the inspector's) records nothing, and neither does an eventual layer served from its recall cache, since no hook runs.
+### Span or Event
+
+The record's form depends on the `ExecutionContext` the hook runs with. `@noetic-tools/context` runs the hooks but cannot import the runtime that owns the span tree, so the context carries the means to grow it:
+
+```typescript
+interface ExecutionContext {
+  // ...
+  trace: {
+    setAttribute(key: string, value: string | number | boolean): void;
+    addEvent(name: string, attributes?: Record<string, string | number | boolean>): void;
+    /** Opens a span under the context's span. Optional. */
+    createSpan?(name: string): ExecutionSpan;
+  };
+}
+
+interface ExecutionSpan {
+  setAttribute(key: string, value: string | number | boolean): void;
+  addEvent(name: string, attributes?: Record<string, string | number | boolean>): void;
+  /** Ends the span and exports it to the harness `traceExporter`. */
+  end(): Promise<void>;
+}
+```
+
+- **With `createSpan`** (every context the runtime builds): each record is a `layer.hook` child span of the context's span. The span opens before the hook runs and ends when it settles — on success, error, or timeout — and is then exported to the harness `traceExporter`, like a child-context span. A skipped hook gets a zero-length span, so every record lives in one place. A span times itself, so it carries no duration attribute:
+
+  | Attribute | Type | Description |
+  |-----------|------|-------------|
+  | `noetic.layer.id` | string | `layerId` |
+  | `noetic.layer.hook` | string | `hook` |
+  | `noetic.layer.status` | string | `status` |
+  | `noetic.layer.item_count` | number | `itemCount` (recall) |
+  | `noetic.layer.budget.allocated` / `.used` / `.yielded` | number | `budget` (recall) |
+  | `error` | boolean | `true` on `error` and `timeout` |
+  | `error.message` | string | `error.message` (the stack is not recorded) |
+
+- **Without `createSpan`** (a hand-built context, such as a test's): each record is a `layer.hook` event (`NoeticEvent.LAYER_HOOK`) on the context's span instead. Event attributes hold only scalars, so the fields flatten to `layerId`, `hook`, `duration`, `status`, `itemCount`, `budget.allocated`, `budget.used`, `budget.yielded`, and `error.message`.
+
+A call is never recorded both ways, so a backend sees each hook call once.
+
+An exporter that rejects fails the hook call it records, the same way a failing exporter fails a child-context span: tracing is part of the call, not a side channel.
+
+### Where Records Land
+
+`onSpawn` under the parent's span; `onReturn` and `onParentUpdate` under the child's span (`spawn` or `inParallel.path`; `onReturn` next to any `spawn.summary_failed`); every other hook under the span of the context it runs for. A peek recall (a render-only preview, such as the inspector's) records nothing, and neither does an eventual layer served from its recall cache, since no hook runs.
+
+### Cost
+
+Every hook call opens one span, with no sampling. The steering and pipeline hooks run no more often than the runtime's other spans: `beforeToolCall` once per tool call (as `tool.call`), `afterModelCall` once per model round (as `llm.call`), `onDecision` once per decision (as `decide.call`), `projectHistory` once per assembled view, and `onItemAppend` once per appended input. So the overhead per call is one span object and one `export` call per layer that defines the hook — the same order as `recall`, which is already traced per assembly. Exporters that ship spans over the network should batch, as they already must for model and tool spans.

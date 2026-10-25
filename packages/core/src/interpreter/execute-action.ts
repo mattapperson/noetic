@@ -1043,13 +1043,15 @@ export async function executeSpawn<TContext, I, O>(
     ledger: baseCtx instanceof ContextImpl ? baseCtx.ledger : undefined,
   });
 
+  // `childExecutionCtx` predates the spawn span; the child's hooks trace onto that span.
+  const childTracedCtx: ExecutionContext = {
+    ...childExecutionCtx,
+    trace: contextToExecCtx(childCtx).trace,
+  };
   if (hasLayers && parentExecutionCtx) {
     layerStore.adopt?.({
       parentExecutionId: parentExecutionCtx.executionId,
-      ctx: {
-        ...childExecutionCtx,
-        trace: span,
-      },
+      ctx: childTracedCtx,
       layers,
       log: childCtx.itemLog,
       itemSchemas: opts?.itemSchemas,
@@ -1076,11 +1078,7 @@ export async function executeSpawn<TContext, I, O>(
         layers,
         stepId: step.id,
         parentCtx: parentExecutionCtx,
-        // `childExecutionCtx` predates the spawn span; trace onto that span.
-        childCtx: {
-          ...childExecutionCtx,
-          trace: span,
-        },
+        childCtx: childTracedCtx,
         childLog: childCtx.itemLog,
         result: childOutput,
         store: layerStore,

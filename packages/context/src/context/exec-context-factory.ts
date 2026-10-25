@@ -1,4 +1,4 @@
-import type { Context, ExecutionContext } from '@noetic-tools/types';
+import type { Context, ExecutionContext, ExecutionSpan } from '@noetic-tools/types';
 import { estimateTokens } from '@noetic-tools/types';
 
 /**
@@ -44,8 +44,24 @@ export function contextToExecCtx(ctx: Context, overrides?: ExecCtxOverrides): Ex
     trace: {
       setAttribute: (key, value) => ctx.span.setAttribute(key, value),
       addEvent: (name, attributes) => ctx.span.addEvent(name, attributes),
+      createSpan: (name) => openSpan(ctx, name),
     },
     readLayerState: <T>(layerId: string): T | undefined =>
       ctx.harness.getLayerState<T>(readLayerStateId, layerId),
+  };
+}
+
+/** Opens a span under `ctx.span` that exports itself to the harness when it ends. */
+function openSpan(ctx: Context, name: string): ExecutionSpan {
+  const span = ctx.harness.createSpan(name, ctx.span);
+  return {
+    setAttribute: (key, value) => span.setAttribute(key, value),
+    addEvent: (event, attributes) => span.addEvent(event, attributes),
+    end: async () => {
+      span.end();
+      await ctx.harness.traceExporter.export([
+        span,
+      ]);
+    },
   };
 }

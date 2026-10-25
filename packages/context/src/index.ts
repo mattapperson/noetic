@@ -10,6 +10,7 @@ export type {
   ContextScope,
   ExecutionContext,
   ExecutionOutcome,
+  ExecutionSpan,
   LayerCallModelRequest,
 } from '@noetic-tools/types';
 // The ContextLayer contract is foundational (referenced by Context/Step/runtime
@@ -20,7 +21,7 @@ export * from './context/budget';
 export * from './context/cache-anchoring';
 export * from './context/exec-context-factory';
 export * from './context/function-call-utils';
-export { LAYER_HOOK_EVENT } from './context/hook-call';
+export { LAYER_HOOK_EVENT, LayerHookAttr } from './context/hook-call';
 export * from './context/layer-api';
 export * from './context/layer-lifecycle';
 export * from './context/layer-provides';

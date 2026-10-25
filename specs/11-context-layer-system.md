@@ -749,10 +749,13 @@ interface ExecutionContext {
   trace: {
     setAttribute(key: string, value: string | number | boolean): void;
     addEvent(name: string, attributes?: Record<string, string | number | boolean>): void;
+    createSpan?(name: string): ExecutionSpan;
   };
   readLayerState<T>(layerId: string): T | undefined;
 }
 ```
+
+`trace` annotates the span of the context the hook runs for. `createSpan` opens a child of that span, exported to the harness `traceExporter` when its `end()` resolves; every context the runtime builds has it, and the lifecycle uses it to record each hook call as a `layer.hook` span (see `10-observability`, Context Layer Trace Spans). A hand-built context may omit it, and the lifecycle then records `layer.hook` events instead.
 
 `ExecutionContext` includes `readonly fs: FsAdapter` so context layers can perform filesystem operations (e.g., reading config files, persisting state to disk) through the harness's configured adapter.
 
@@ -966,7 +969,7 @@ interface LayerTimeouts {
 
 ### Disabled Layer Behavior
 
-A layer disabled via `onInitError: 'disable'` is marked with an explicit disabled flag on the layer state store and skipped by every hook, **including `dispose()`** — nothing was initialized, so there is nothing to tear down. Recorded in trace as `{ layerId, status: 'disabled', reason }`. The flag is per execution and cleared on store cleanup.
+A layer disabled via `onInitError: 'disable'` is marked with an explicit disabled flag on the layer state store and skipped by every hook, **including `dispose()`** — nothing was initialized, so there is nothing to tear down. Each hook the disabled layer defines is recorded as a `layer.hook` record with `status: 'skipped'` (see `10-observability`). The flag is per execution and cleared on store cleanup.
 
 ---
 

@@ -24,7 +24,12 @@ export interface LayerTraceSpan {
     | 'onReturn'
     | 'onParentUpdate'
     | 'onComplete'
-    | 'dispose';
+    | 'dispose'
+    | 'onDecision'
+    | 'beforeToolCall'
+    | 'afterModelCall'
+    | 'projectHistory'
+    | 'onItemAppend';
   /** Duration in milliseconds. */
   duration: number;
   status: 'ok' | 'error' | 'timeout' | 'skipped';

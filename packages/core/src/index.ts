@@ -482,6 +482,7 @@ export type {
   ContextScope,
   ExecutionContext,
   ExecutionOutcome,
+  ExecutionSpan,
   LayerCallModelRequest,
 } from '@noetic-tools/types';
 

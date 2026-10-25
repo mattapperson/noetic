@@ -94,7 +94,7 @@ A child does not run sealed off from its parent. The parent's layers can keep ch
 - **Asynchronous.** The parent's write returns at once. Deliveries run in the background and never block or fail the write.
 - **Ordering.** Each child takes its updates one at a time, in write order. Different children take theirs independently. A delivery is not ordered against the child's own hooks: it reads the child's state when it starts and writes it when it finishes, so a child hook running at the same time can overwrite its result, or have its own overwritten. Layers that need both to survive merge instead of replace.
 - **Nesting.** A delivery that writes the child's state is itself a parent write for the child's own live children, so an update flows down the tree.
-- **Timeout and errors.** Each call runs under `timeouts.onParentUpdate` (default 5 s) and records a `layer.hook` event on the child's span. A hook that throws or times out is logged as a diagnostic (`hook: 'onParentUpdate'`) and the update is dropped; the child keeps running.
+- **Timeout and errors.** Each call runs under `timeouts.onParentUpdate` (default 5 s) and records a `layer.hook` span under the child's span (see `10-observability`). A hook that throws or times out is logged as a diagnostic (`hook: 'onParentUpdate'`) and the update is dropped; the child keeps running.
 - **When the child finishes.** Before `onReturn` runs, the child stops taking updates: queued deliveries are skipped and a running one finishes first, so the merge sees its result. A child that fails is forgotten when its state is cleaned up; the result of a delivery still running then is discarded. No reference to a finished child survives.
 
 ---
