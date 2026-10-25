@@ -2,6 +2,7 @@ import type { ContextData } from '@noetic-tools/context';
 import type { StepLoop } from '@noetic-tools/types';
 import { NoeticConfigError } from '@noetic-tools/types';
 import { getDefaultRegistrar } from '../types/step-registrar';
+import { toUntil } from '../until/decider';
 
 /** @public Configuration options accepted by the `loop()` builder, excluding the `kind` discriminant. */
 export type LoopConfig<TContext = ContextData, I = unknown, O = unknown> = Omit<
@@ -15,8 +16,9 @@ export type LoopConfig<TContext = ContextData, I = unknown, O = unknown> = Omit<
  * @public
  * @param opts.id - Unique step identifier used in traces and error messages.
  * @param opts.steps - Array of steps to execute sequentially on each iteration.
- * @param opts.until - Termination predicate `(snapshot) => Verdict | Promise<Verdict>` evaluated after each iteration.
- * @param opts.maxIterations - Hard safety cap on iterations (default: 1000).
+ * @param opts.until - Termination predicate `(snapshot) => Verdict | Promise<Verdict>` evaluated after each iteration,
+ *   or a decide step asking one boolean question (yes stops; no or a refusal continues).
+ * @param opts.maxIterations - Hard cap on iterations (default: 1000); `Infinity` removes it.
  * @param opts.maxHistorySize - Maximum entries kept in the snapshot history array (default: 100); oldest drop first.
  * @param opts.inbox - Optional channel for injecting messages into the loop mid-execution.
  * @param opts.parkTimeout - Ms to wait on inbox before the loop parks itself (default: 0).
@@ -26,6 +28,7 @@ export type LoopConfig<TContext = ContextData, I = unknown, O = unknown> = Omit<
  * @throws `NoeticConfigError` with code `EMPTY_STEP_ID` if `id` is empty.
  * @throws `NoeticConfigError` with code `MISSING_LOOP_BODY` if `steps` is empty.
  * @throws `NoeticConfigError` with code `MISSING_UNTIL_PREDICATE` if `until` is not provided.
+ * @throws `NoeticConfigError` with code `INVALID_UNTIL_DECIDER` if `until` is a decide step that does not ask exactly one boolean question.
  */
 export function loop<TContext = ContextData, I = unknown, O = unknown>(
   opts: LoopConfig<TContext, I, O>,
@@ -51,6 +54,8 @@ export function loop<TContext = ContextData, I = unknown, O = unknown>(
       hint: 'Provide an until predicate, e.g. until.maxSteps(10).',
     });
   }
+  // Checks a decide step here, so a bad decider fails at build time, not mid-run.
+  toUntil(opts.until);
   const built: StepLoop<TContext, I, O> = {
     kind: 'loop',
     ...opts,

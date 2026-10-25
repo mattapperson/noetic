@@ -244,6 +244,47 @@ const migrator = loop({
 });
 ```
 
+## Pattern: Work Until a Model Says Done
+
+An uncapped loop whose `until` is a decide step: a decision model reads each iteration's output and answers one boolean question. Yes stops; no or a refusal runs another iteration. Keep a `maxSteps` backstop beside it when an endless run would be costly.
+
+```typescript
+const isDone = decide({
+  id: 'is-done',
+  questions: { stop: { type: 'boolean', instructions: 'Is the migration complete and the suite green?' } },
+});
+
+const worker = loop({
+  id: 'work-until-done',
+  steps: [callModel({ id: 'step', model: 'anthropic/claude-sonnet-4-20250514', instructions: 'Take the next step.', tools })],
+  until: any(until.maxSteps(200), isDone),
+  maxIterations: Number.POSITIVE_INFINITY,
+});
+```
+
+JSON form: `"until": { "kind": "decide", "id": "is-done", "questions": { "stop": { "type": "boolean", "instructions": "..." } } }` with `"maxIterations": "infinity"`.
+
+## Pattern: Recursive Named Workflows
+
+A named workflow may call itself through a `subflow` ref; a `conditional` picks the base case, and the steps before the recursive call compute its input. Depth is bounded by `maxRecursionDepth` (default 100).
+
+```typescript
+await parseAndRunWorkflow({
+  json: { version: 1, root: { kind: 'subflow', id: 'top', ref: 'shrink' } },
+  workflows: new Map([['shrink', {
+    version: 1,
+    root: { kind: 'sequence', id: 'body', steps: [
+      { kind: 'callModel', id: 'step', instructions: 'Shorten the text by one sentence; reply DONE when one sentence is left.' },
+      { kind: 'conditional', id: 'check',
+        routes: [{ match: 'DONE', target: { kind: 'callModel', id: 'final', instructions: 'Return the text.' } }],
+        default: { kind: 'subflow', id: 'again', ref: 'shrink' } },
+    ] },
+  }]]),
+  maxRecursionDepth: 20,
+  harness, ctx, tools: [], input: longText,
+});
+```
+
 ## Pattern: Parallel Research
 
 Multiple agents research in parallel, results merged:

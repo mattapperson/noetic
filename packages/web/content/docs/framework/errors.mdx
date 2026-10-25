@@ -336,6 +336,12 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 **Fix:** Correct the question named in the error message.
 
+#### INVALID_UNTIL_DECIDER
+
+**Cause:** A decide step used as a loop's `until` (directly, or inside `any`/`all`) does not ask exactly one question, or its question is not boolean. Raised where the loop or combinator is built. Also raised if a decider predicate is called outside a loop.
+
+**Fix:** Give the decider one boolean question whose yes means stop, e.g. `questions: { done: { type: 'boolean', instructions: 'Is the task finished?' } }`.
+
 #### INVALID_DECIDE_SAMPLES
 
 **Cause:** `decide()` got a `samples` value that is not a positive integer.
@@ -400,11 +406,17 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 **Fix:** Register the workflow under that name in the `workflows` option (or `HydrationContext.workflows`).
 
-#### WORKFLOW_CYCLE
+#### WORKFLOW_RECURSION_LIMIT
 
-**Cause:** A named sub-workflow references itself, directly or through other sub-workflows.
+**Cause:** Named sub-workflows recursed deeper than `maxRecursionDepth` (default `100`) on one execution path. Raised at execution time, when the ref one level too deep would resolve.
 
-**Fix:** Break the cycle, or inline the document.
+**Fix:** Give the recursion a base case, such as a `conditional` that stops calling the subflow, or raise `maxRecursionDepth` (`Infinity` removes the limit).
+
+#### INVALID_MAX_RECURSION_DEPTH
+
+**Cause:** `maxRecursionDepth` is not a positive integer or `Infinity`. Raised when a named ref first resolves.
+
+**Fix:** Pass a positive integer such as `100`, or `Infinity`.
 
 #### UNKNOWN_NODE_KIND
 
@@ -416,7 +428,7 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 **Cause:** A workflow loop's `until` predicate has an unknown `kind`.
 
-**Fix:** Use one of `maxSteps`, `maxCost`, `maxDuration`, `noToolCalls`, `never`, `outputContains`, `outputEquals`, `converged`, `any`, or `all`.
+**Fix:** Use one of `maxSteps`, `maxCost`, `maxDuration`, `noToolCalls`, `never`, `outputContains`, `outputEquals`, `converged`, `any`, `all`, or `decide`.
 
 #### UNKNOWN_TOOL_REFERENCE
 

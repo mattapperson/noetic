@@ -15,6 +15,7 @@ import type {
   ProcessSubprocessRequest,
   ServerToolSpec,
   Step,
+  StepDecide,
   SubprocessAdapter,
   Tool,
   ToolContext,
@@ -77,10 +78,15 @@ export interface HydrationContext {
    */
   workflows?: ReadonlyMap<string, WorkflowDocument>;
   /**
-   * Ancestor ref chain for cycle detection on named sub-workflow references.
-   * Threaded internally by the subflow hydrator — callers never set it.
+   * Deepest allowed chain of named-ref resolutions on one execution path.
+   * Positive integer or `Infinity`. Default: 100.
    */
-  subflowAncestry?: ReadonlySet<string>;
+  maxRecursionDepth?: number;
+  /**
+   * Named-ref resolutions above the node being hydrated. Threaded internally
+   * by the subflow hydrator — callers never set it.
+   */
+  recursionDepth?: number;
 }
 
 type NodeHydrator = (
@@ -90,9 +96,21 @@ type NodeHydrator = (
 
 //#endregion
 
+//#region Constants
+
+const DEFAULT_MAX_RECURSION_DEPTH = 100;
+
+//#endregion
+
 //#region Until Predicate Hydration
 
-function hydrateUntilPredicate(pred: UntilPredicate): Until {
+/** A `decide` predicate hydrates to the decide step itself; the loop runs it as the decider. */
+function hydrateUntilPredicate(
+  pred: UntilPredicate,
+  ctx: HydrationContext,
+): Until | StepDecide<ContextData> {
+  const hydrate = (p: UntilPredicate): Until | StepDecide<ContextData> =>
+    hydrateUntilPredicate(p, ctx);
   switch (pred.kind) {
     case 'maxSteps':
       return until.maxSteps(pred.n);
@@ -113,14 +131,16 @@ function hydrateUntilPredicate(pred: UntilPredicate): Until {
         threshold: pred.threshold,
       });
     case 'any':
-      return any(...pred.predicates.map(hydrateUntilPredicate));
+      return any(...pred.predicates.map(hydrate));
     case 'all':
-      return all(...pred.predicates.map(hydrateUntilPredicate));
+      return all(...pred.predicates.map(hydrate));
+    case 'decide':
+      return frameworkCast<StepDecide<ContextData>>(hydrateNode(pred, ctx));
     default:
       throw new NoeticConfigError({
         code: 'UNKNOWN_UNTIL_PREDICATE',
         message: `Unknown until predicate kind: '${frameworkCast<UntilPredicate>(pred).kind}'.`,
-        hint: 'Supported kinds: maxSteps, maxCost, maxDuration, noToolCalls, never, outputContains, outputEquals, converged, any, all.',
+        hint: 'Supported kinds: maxSteps, maxCost, maxDuration, noToolCalls, never, outputContains, outputEquals, converged, any, all, decide.',
       });
   }
 }
@@ -537,8 +557,9 @@ function hydrateLoopNode(
     steps: [
       hydrateNode(node.body, ctx),
     ],
-    until: hydrateUntilPredicate(node.until),
-    maxIterations: node.maxIterations,
+    until: hydrateUntilPredicate(node.until, ctx),
+    maxIterations:
+      node.maxIterations === 'infinity' ? Number.POSITIVE_INFINITY : node.maxIterations,
   });
 }
 
@@ -614,9 +635,10 @@ function hydrateAcpAgentNode(
 /**
  * Hydrates a `subflow` node lazily: the target document resolves and hydrates
  * on first execution, memoized. Lazy because `HydrationContext.workflows` may
- * be a live view that gains entries after hydration, and because it keeps
- * cycle detection path-scoped — each ref chain threads its own ancestry set,
- * so diamond reuse of a named workflow is legal while A→B→A throws.
+ * be a live view that gains entries after hydration, and because a recursive
+ * ref must hydrate only the levels execution reaches — eager hydration of
+ * A→A would never end. Each level gets its own tree whose ids carry the
+ * calling node's (already suffixed) id, so levels never share step ids.
  */
 function hydrateSubflowNode(
   node: WorkflowNode,
@@ -652,23 +674,21 @@ function resolveSubflowDocument(
   childCtx: HydrationContext;
 } {
   if (node.document) {
-    // Inline documents are finite JSON trees — they cannot cycle, so they
-    // add nothing to the ancestry chain.
+    // Inline documents are finite JSON trees — they cannot recurse, so they
+    // add nothing to the recursion depth.
     return {
       doc: node.document,
       childCtx: ctx,
     };
   }
   const ref = node.ref ?? '';
-  const ancestry = ctx.subflowAncestry ?? new Set<string>();
-  if (ancestry.has(ref)) {
+  const depth = (ctx.recursionDepth ?? 0) + 1;
+  const limit = maxRecursionDepth(ctx);
+  if (depth > limit) {
     throw new NoeticConfigError({
-      code: 'WORKFLOW_CYCLE',
-      message: `Sub-workflow '${ref}' referenced in subflow node '${node.id}' forms a reference cycle (${[
-        ...ancestry,
-        ref,
-      ].join(' -> ')}).`,
-      hint: 'A named sub-workflow may not reference itself, directly or transitively. Break the cycle or inline the document.',
+      code: 'WORKFLOW_RECURSION_LIMIT',
+      message: `Sub-workflow '${ref}' referenced in subflow node '${node.id}' would resolve at recursion depth ${depth}, past the limit of ${limit}.`,
+      hint: 'Give the recursion a base case (e.g. a conditional that stops calling the subflow), or raise maxRecursionDepth.',
     });
   }
   const doc = ctx.workflows?.get(ref);
@@ -687,10 +707,7 @@ function resolveSubflowDocument(
     doc,
     childCtx: {
       ...ctx,
-      subflowAncestry: new Set([
-        ...ancestry,
-        ref,
-      ]),
+      recursionDepth: depth,
     },
   };
 }
@@ -719,6 +736,19 @@ const NODE_HYDRATORS: Record<string, NodeHydrator> = {
 //#endregion
 
 //#region Helpers
+
+/** The context's recursion limit, defaulted; anything but a positive integer or `Infinity` throws. */
+function maxRecursionDepth(ctx: HydrationContext): number {
+  const limit = ctx.maxRecursionDepth ?? DEFAULT_MAX_RECURSION_DEPTH;
+  if (limit === Number.POSITIVE_INFINITY || (Number.isInteger(limit) && limit >= 1)) {
+    return limit;
+  }
+  throw new NoeticConfigError({
+    code: 'INVALID_MAX_RECURSION_DEPTH',
+    message: `maxRecursionDepth must be a positive integer or Infinity, got ${limit}.`,
+    hint: 'Pass a positive integer such as 100 (the default), or Infinity to let named workflows recurse without a limit.',
+  });
+}
 
 function resolveTools(
   toolNames: string[] | undefined,
@@ -989,8 +1019,10 @@ async function runCodeViaSubprocess(opts: {
  * @throws `NoeticConfigError` with code `UNKNOWN_NODE_KIND` if the node kind is unrecognised.
  * @throws `NoeticConfigError` with code `UNKNOWN_TOOL_REFERENCE` if a tool name cannot be resolved.
  * @throws `NoeticConfigError` with code `UNKNOWN_UNTIL_PREDICATE` if an until predicate kind is unrecognised.
+ * @throws `NoeticConfigError` with code `INVALID_UNTIL_DECIDER` if a decide until predicate does not ask exactly one boolean question.
  * @throws `NoeticConfigError` with code `UNKNOWN_WORKFLOW_REFERENCE` (at execution time) if a subflow ref names no registered workflow.
- * @throws `NoeticConfigError` with code `WORKFLOW_CYCLE` (at execution time) if named sub-workflow refs form a cycle.
+ * @throws `NoeticConfigError` with code `WORKFLOW_RECURSION_LIMIT` (at execution time) if named sub-workflow refs nest deeper than `maxRecursionDepth`.
+ * @throws `NoeticConfigError` with code `INVALID_MAX_RECURSION_DEPTH` (at execution time) when a named ref resolves under a `maxRecursionDepth` that is not a positive integer or `Infinity`.
  */
 export function hydrateNode(
   node: WorkflowNode,

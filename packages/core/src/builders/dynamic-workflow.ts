@@ -53,7 +53,7 @@ A WorkflowNode is one of:
 - { "kind": "runCode", "id": "<unique>", "execute": "<source code>" } (runs the code in a subprocess with the step input on stdin; only emit if the task needs deterministic computation AND a subprocess adapter is available)
 - { "kind": "sequence", "id": "<unique>", "steps": [<WorkflowNode>, ...] } (run children in order, threading each output into the next)
 - { "kind": "inParallel", "id": "<unique>", "mode": "all"|"race"|"settle", "paths": [<WorkflowNode>, ...], "merge": "last"|"first"|"concat" } (fan out; supply exactly one of "paths" or "each": <WorkflowNode> — with "each", add "over": "<key>" to fan out over an array in the input JSON)
-- { "kind": "loop", "id": "<unique>", "body": <WorkflowNode>, "until": <UntilPredicate>, "maxIterations": <optional number> } (repeat the body until the predicate holds)
+- { "kind": "loop", "id": "<unique>", "body": <WorkflowNode>, "until": <UntilPredicate>, "maxIterations": <optional positive int, or "infinity" for no cap> } (repeat the body until the predicate holds)
 - { "kind": "conditional", "id": "<unique>", "routes": [{ "match": "<substring>", "target": <WorkflowNode> }], "default": <WorkflowNode> } (route on a substring of the input)
 - { "kind": "spawn", "id": "<unique>", "child": <WorkflowNode>, "timeout": <optional ms> } (run the child in an isolated sub-context)
 - { "kind": "withContext", "id": "<unique>", "child": <WorkflowNode>, "layers": ["<layer-name>", ...] } (run the child with named context layers; only emit if the task names layers that exist, since this planner provides no layer registry and unknown names resolve to NO layers)
@@ -68,6 +68,7 @@ An acp-agent node delegates a turn to an external coding agent over the Agent Cl
 
 An UntilPredicate (the "until" field of a loop) is one of:
 { "kind": "maxSteps", "n": <positive int> }, { "kind": "maxCost", "usd": <positive number> }, { "kind": "maxDuration", "duration": <ms> }, { "kind": "noToolCalls" }, { "kind": "never" } (never stops — pair with "maxIterations"), { "kind": "outputContains", "marker": "<text>" }, { "kind": "outputEquals", "sentinel": "<text>" }, { "kind": "converged", "threshold": <optional 0-1> }, { "kind": "any", "predicates": [<UntilPredicate>, ...] }, { "kind": "all", "predicates": [<UntilPredicate>, ...] }.
+A loop's "until" (or an entry of "any"/"all") may also be a decide node asking exactly one boolean question: { "kind": "decide", "id": "<unique>", "questions": { "<question-id>": { "type": "boolean", "instructions": "<question whose yes means stop>" } } } — a model reads the iteration's output; yes stops the loop, no or a refusal runs another iteration.
 
 Respond with ONLY the JSON document, no markdown fences or explanation.`;
 
@@ -180,6 +181,12 @@ export interface ParseAndRunWorkflowOpts {
   layers?: ReadonlyMap<string, ContextLayer>;
   /** Named sub-workflows the document's `subflow` nodes may reference via `ref`. */
   workflows?: ReadonlyMap<string, WorkflowDocument>;
+  /**
+   * Deepest allowed chain of named-ref resolutions on one execution path —
+   * named workflows may recurse up to this depth. Positive integer or
+   * `Infinity`. Default: 100.
+   */
+  maxRecursionDepth?: number;
 }
 
 /**
@@ -192,8 +199,10 @@ export interface ParseAndRunWorkflowOpts {
  * @param opts.ctx - Execution context.
  * @param opts.tools - Available tools the workflow may reference.
  * @param opts.maxDepth - Maximum workflow tree depth. Default: 5.
+ * @param opts.maxRecursionDepth - Deepest allowed chain of named-ref resolutions. Default: 100.
  * @returns The string output of the executed workflow.
  * @throws `NoeticConfigError` with code `WORKFLOW_VALIDATION_FAILED` if JSON is invalid.
+ * @throws `NoeticConfigError` with code `WORKFLOW_RECURSION_LIMIT` if named refs nest deeper than `maxRecursionDepth`.
  * @throws `NoeticConfigError` with code `UNKNOWN_TOOL_REFERENCE` if a tool reference cannot be resolved.
  */
 export async function parseAndRunWorkflow(opts: ParseAndRunWorkflowOpts): Promise<string> {
@@ -212,6 +221,7 @@ export async function parseAndRunWorkflow(opts: ParseAndRunWorkflowOpts): Promis
     executeStep,
     layers: opts.layers,
     workflows: opts.workflows,
+    maxRecursionDepth: opts.maxRecursionDepth,
   };
 
   const hydrated = hydrateWorkflow(parseResult.doc, hydrationCtx);

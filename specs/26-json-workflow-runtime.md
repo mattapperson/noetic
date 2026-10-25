@@ -258,15 +258,17 @@ interface LoopWorkflowNode {
   id: string;
   body: WorkflowNode;
   until: UntilPredicate;
-  maxIterations?: number;
+  maxIterations?: number | 'infinity';
 }
 ```
 
-| Field           | Required | Description                                             |
-|-----------------|----------|---------------------------------------------------------|
-| `body`          | Yes      | The step tree executed each iteration.                  |
-| `until`         | Yes      | Termination predicate (see Until Predicates below).     |
-| `maxIterations` | No       | Hard safety cap. Defaults to the runtime's global cap.  |
+| Field           | Required | Description                                                                 |
+|-----------------|----------|-----------------------------------------------------------------------------|
+| `body`          | Yes      | The step tree executed each iteration.                                      |
+| `until`         | Yes      | Termination predicate (see Until Predicates below).                         |
+| `maxIterations` | No       | Hard cap: a positive integer, or `"infinity"` for none. Defaults to `1000`. |
+
+JSON cannot encode `Infinity`, so an uncapped loop spells it as the string literal `"infinity"` — exactly that spelling; any other string fails validation. The hydrator maps `"infinity"` to `Number.POSITIVE_INFINITY`, the same value the programmatic `loop({ maxIterations: Infinity })` takes (spec 05, Iteration Cap). An uncapped loop ends only through its `until` predicate, an error, or an aborted context, so pair it with a predicate that the body's output can actually satisfy (`outputContains`, `outputEquals`, `converged`, a `decide` node, …).
 
 ### `sequence`
 
@@ -326,7 +328,15 @@ interface SubflowWorkflowNode {
 
 Resolution is lazy: the target document resolves and hydrates on the node's first execution, memoized afterwards. A live `workflows` map may therefore gain entries after hydration and still satisfy refs. The hydrated sub-document's node ids are suffixed with `-<node id>` so two subflow nodes referencing the same named workflow trace with distinct step ids.
 
-Ref chains are cycle-checked per execution path: a named workflow may not reference itself, directly or transitively (`WORKFLOW_CYCLE`), while sibling nodes referencing the same workflow (diamond reuse) are legal. Inline documents are finite JSON trees and cannot cycle. `walkWorkflow`/`workflowGraph`/`workflowDepth` treat a `ref` as a leaf — static analysis does not see through named refs.
+#### Recursion
+
+Named refs may recurse: a workflow may reference itself, directly or through other named workflows. Recursion is how a JSON workflow expresses work whose shape depends on runtime data — a subflow node without a literal `input` passes its runtime input on, so the steps before a recursive call compute what that call receives, and a `conditional` (or any other routing node) picks the base case that stops it.
+
+Each level of recursion is its own hydrated tree. The suffix applies to the whole sub-document, including the recursive subflow node itself, so each level's ids carry the id of the subflow node that called it — which already carries every suffix above it. Ids grow one segment per level (`body-top`, `body-rec-top`, `body-rec-rec-top`, …), so every level traces and replays under distinct step ids, and two recursive calls from different nodes (say, both paths of an `inParallel`) never share a tree. Levels hydrate lazily, so only as many exist as execution reaches.
+
+Recursion is bounded by a depth limit, not banned. The **recursion depth** of a subflow call is the number of named-ref resolutions on its execution path, itself included; inline documents are finite JSON trees and add nothing. When a ref would resolve at a depth above `maxRecursionDepth` (default `100`, `Infinity` for none; see Hydration Context), the call throws `WORKFLOW_RECURSION_LIMIT` at execution time. A `maxRecursionDepth` that is neither a positive integer nor `Infinity` throws `INVALID_MAX_RECURSION_DEPTH` when a named ref first resolves. The limit is per path, so sibling nodes referencing the same workflow (diamond reuse) do not add to each other's depth.
+
+`walkWorkflow`/`workflowGraph`/`workflowDepth` treat a `ref` as a leaf — static analysis does not see through named refs, so a recursive registry is still a finite graph to them.
 
 ---
 
@@ -344,7 +354,8 @@ type UntilPredicate =
   | { kind: 'outputEquals';   sentinel: string }
   | { kind: 'converged';      threshold?: number }
   | { kind: 'any';            predicates: UntilPredicate[] }
-  | { kind: 'all';            predicates: UntilPredicate[] };
+  | { kind: 'all';            predicates: UntilPredicate[] }
+  | DecideWorkflowNode;
 ```
 
 ### Predicate Reference
@@ -360,6 +371,15 @@ type UntilPredicate =
 | `converged`      | `threshold?`    | `until.converged({threshold})`  | Stop when consecutive outputs are similar.     |
 | `any`            | `predicates[]`  | `any(...predicates)`            | Stop when any child predicate fires.           |
 | `all`            | `predicates[]`  | `all(...predicates)`            | Stop when all child predicates agree.          |
+| `decide`         | a `decide` node | the `decide()` step itself      | Stop when the model answers yes.               |
+
+### Decide Nodes as Predicates
+
+A plain `decide` node (see `decide` and `routeSwitch`, spec 32) is a valid until predicate, alone or inside `any`/`all`. It carries no extra fields: the node itself is the decider. It must ask exactly one question, and that question must be boolean; the schema rejects any other decide node in predicate position (a refinement on the decide node schema), and the JS builders reject it with `INVALID_UNTIL_DECIDER`.
+
+After each iteration the loop runs the decide step with the iteration's output as its input. A yes stops the loop, a no continues it, and a refusal continues it too. Each verdict's `reason` names the step, the question, the answer, and its probability. The decider asks afresh every iteration (spec 05, Ending a Loop with a Decision), so it never repeats a stale answer. With `"maxIterations": "infinity"`, a model that keeps refusing keeps the loop running until the context is aborted; a host that wants a backstop puts the decider in an `any` beside `maxSteps`.
+
+A decide node in an until predicate is a node of the tree: `walkWorkflow` and `workflowGraph` list it as a child of its loop (after the body), so subflow and dynamic `each` id suffixing reach it, and its id should be unique like any other. It adds no depth: `workflowDepth` counts it as a leaf.
 
 ### Schema
 
@@ -375,6 +395,7 @@ const UntilPredicateSchema: z.ZodType<UntilPredicate> = z.lazy(() =>
     z.object({ kind: z.literal('converged'),      threshold: z.number().min(0).max(1).optional() }),
     z.object({ kind: z.literal('any'),            predicates: z.array(UntilPredicateSchema).min(1) }),
     z.object({ kind: z.literal('all'),            predicates: z.array(UntilPredicateSchema).min(1) }),
+    DecideNodeSchema.refine(oneBooleanQuestion),
   ])
 );
 ```
@@ -416,7 +437,8 @@ interface HydrationContext {
   uiLibraries?: ReadonlyMap<string, OutputCodec>;
   resolveSubprocess?: (ref: string) => SubprocessAdapter | undefined;
   workflows?: ReadonlyMap<string, WorkflowDocument>;
-  subflowAncestry?: ReadonlySet<string>;
+  maxRecursionDepth?: number;
+  recursionDepth?: number;
 }
 ```
 
@@ -429,7 +451,8 @@ interface HydrationContext {
 | `uiLibraries`        | No       | Output codecs for `callModel` nodes' `output` codec references.                |
 | `resolveSubprocess`  | No       | Resolves a named subprocess adapter ref on a `runCode` node.                 |
 | `workflows`          | No       | Named sub-workflow documents that `subflow` nodes resolve via `ref`.     |
-| `subflowAncestry`    | No       | Internal: ancestor ref chain for subflow cycle detection. Never set by callers. |
+| `maxRecursionDepth`  | No       | Deepest allowed chain of named-ref resolutions on one path. Positive integer or `Infinity`; default `100`. |
+| `recursionDepth`     | No       | Internal: named-ref resolutions above the node being hydrated. Threaded by the subflow hydrator; callers never set it. |
 
 ### `hydrateWorkflow`
 
@@ -505,10 +528,10 @@ route: (input, ctx) => {
 
 ### Until Predicate Hydration
 
-Each `UntilPredicate` node maps to a runtime `until.*` call:
+Each `UntilPredicate` node maps to a runtime `until.*` call, except a `decide` node, which hydrates to the decide step itself (through `hydrateNode`, so its `durable` and `replayKey` apply) and serves as the loop's `until` directly:
 
 ```typescript
-function hydrateUntil(pred: UntilPredicate): Until {
+function hydrateUntil(pred: UntilPredicate, ctx: HydrationContext): Until | StepDecide {
   switch (pred.kind) {
     case 'maxSteps':       return until.maxSteps(pred.n);
     case 'maxCost':        return until.maxCost(pred.usd);
@@ -517,15 +540,16 @@ function hydrateUntil(pred: UntilPredicate): Until {
     case 'outputContains': return until.outputContains(pred.marker);
     case 'outputEquals':   return until.outputEquals(pred.sentinel);
     case 'converged':      return until.converged(pred.threshold ? { threshold: pred.threshold } : undefined);
-    case 'any':            return any(...pred.predicates.map(hydrateUntil));
-    case 'all':            return all(...pred.predicates.map(hydrateUntil));
+    case 'any':            return any(...pred.predicates.map((p) => hydrateUntil(p, ctx)));
+    case 'all':            return all(...pred.predicates.map((p) => hydrateUntil(p, ctx)));
+    case 'decide':         return hydrateNode(pred, ctx);
   }
 }
 ```
 
 ### Depth Enforcement
 
-Depth is measured by `workflowDepth` (structural nodes add +1 over their deepest child; leaves are 0) and enforced at parse time: `parseAndRunWorkflow` and `dynamicWorkflow` reject documents deeper than their `maxDepth` option (default `5`) with `WORKFLOW_VALIDATION_FAILED`. Depth does not see through `subflow` refs — a named sub-workflow's own depth is checked wherever that document is itself parsed. Cycle detection prevents infinite recursion through refs, but it does not bound total fan-out: an acyclic chain of workflows that each reference the next several times multiplies execution combinatorially. Hosts that accept untrusted registries should cap the registry size and per-document breadth accordingly.
+Depth is measured by `workflowDepth` (structural nodes add +1 over their deepest child; leaves are 0) and enforced at parse time: `parseAndRunWorkflow` and `dynamicWorkflow` reject documents deeper than their `maxDepth` option (default `5`) with `WORKFLOW_VALIDATION_FAILED`. Depth does not see through `subflow` refs — a named sub-workflow's own depth is checked wherever that document is itself parsed. Recursion through refs is bounded at execution time by `maxRecursionDepth` (`WORKFLOW_RECURSION_LIMIT`), which caps the depth of any one path but not total fan-out: a workflow that references the next one several times multiplies execution combinatorially, up to the depth limit. Hosts that accept untrusted registries should keep `maxRecursionDepth` finite and cap registry size and per-document breadth accordingly.
 
 ---
 
@@ -585,8 +609,11 @@ function parseAndRunWorkflow(opts: {
   maxDepth?: number;
   layers?: ReadonlyMap<string, ContextLayer>;
   workflows?: ReadonlyMap<string, WorkflowDocument>;
+  maxRecursionDepth?: number;
 }): Promise<string>
 ```
+
+`maxRecursionDepth` (default `100`, `Infinity` for none) bounds recursion through the `workflows` registry; see `subflow` → Recursion. `dynamicWorkflow` takes no such option: its planner emits inline subflows only and has no registry to recurse through. The `workflow()` builder (spec 02) takes the same `workflows` + `maxRecursionDepth` pair, and a `workflow({ ref })` step counts its own ref as the first resolution.
 
 This validates the document (schema + depth, throwing `WORKFLOW_VALIDATION_FAILED`), hydrates it, executes it via the harness inside a `workflow.run` trace span, and returns the final output:
 
@@ -618,13 +645,22 @@ Tool references are strings, not `Tool` objects. Resolution happens once during 
 
 ### Maximum Tree Depth
 
-Tree depth is enforced at parse time to prevent unbounded recursion in LLM-generated workflows. The default limit is `5` levels of structural nesting, configurable via the `maxDepth` option on `parseAndRunWorkflow` and `dynamicWorkflow`. Depth does not see through `subflow` refs; cycle detection prevents infinite recursion through them, but acyclic ref fan-out is not bounded by the runtime — hosts cap registry size and breadth.
+Tree depth is enforced at parse time to prevent unbounded recursion in LLM-generated workflows. The default limit is `5` levels of structural nesting, configurable via the `maxDepth` option on `parseAndRunWorkflow` and `dynamicWorkflow`. Depth does not see through `subflow` refs; recursion through them is bounded at execution time by `maxRecursionDepth` instead (see below).
+
+### Unbounded Control Flow Is Opt-In
+
+Two features let a workflow run without a static bound, and both are explicit opt-ins:
+
+- **Uncapped loops.** `loop.maxIterations: "infinity"` removes the iteration cap; the loop ends only through its `until` predicate, an error, or an aborted context.
+- **Recursive subflows.** Named refs may recurse; the path depth is capped by `maxRecursionDepth` (default `100`), which a host may raise to `Infinity`.
+
+A host that runs untrusted documents keeps the defaults it wants enforced: the schema accepts `"infinity"`, so a host that must bound every loop rejects it before hydration, and a host that must bound recursion keeps `maxRecursionDepth` finite.
 
 ---
 
 ## Plan-Memory Integration
 
-The plan layer (spec 12, `plan()`) authors plans directly in this format: `PlanState.planTree` is a `WorkflowDocument`, and `PlanState.workflows` is a `Record<string, WorkflowDocument>` of named workflows the tree references via `subflow` nodes. The layer validates documents at authoring time (schema, depth, optional node-kind profile, ref slug syntax) and rejects dangling refs and reference cycles before requesting approval.
+The plan layer (spec 12, `plan()`) authors plans directly in this format: `PlanState.planTree` is a `WorkflowDocument`, and `PlanState.workflows` is a `Record<string, WorkflowDocument>` of named workflows the tree references via `subflow` nodes. The layer validates documents at authoring time (schema, depth, optional node-kind profile, ref slug syntax) and rejects dangling refs before requesting approval. Recursive refs are legal, matching the runtime; their depth is bounded when the plan executes.
 
 On approval, the host feeds both pieces straight into this runtime:
 
@@ -654,8 +690,10 @@ The JSON Workflow Runtime introduces the following `NoeticConfigError` codes:
 | `UNKNOWN_UI_LIBRARY_REFERENCE` | A `callModel` node's `output.library` is not in the codec registry.           |
 | `UNKNOWN_SUBPROCESS_REFERENCE` | A `runCode` node's `subprocess` ref cannot be resolved.                      |
 | `UNKNOWN_UNTIL_PREDICATE`      | An until predicate kind is unrecognised.                                 |
+| `INVALID_UNTIL_DECIDER`        | A decide until predicate does not ask exactly one boolean question (raised at hydration by `loop`/`any`/`all`). |
 | `UNKNOWN_WORKFLOW_REFERENCE`   | A `subflow` ref names no registered workflow (raised at execution time). |
-| `WORKFLOW_CYCLE`               | Named sub-workflow refs form a cycle (raised at execution time).         |
+| `WORKFLOW_RECURSION_LIMIT`     | A named ref would resolve deeper than `maxRecursionDepth` (raised at execution time). |
+| `INVALID_MAX_RECURSION_DEPTH`  | `maxRecursionDepth` is not a positive integer or `Infinity` (raised when a named ref first resolves). |
 | `INVALID_FORK_INPUT`           | A dynamic fork's input does not resolve to an array.                     |
 | `INVALID_REPLAY_KEY_INPUT`     | A `replayKey.from` node's input is not a JSON object (raised by the key function at dispatch; the interpreter downgrades it to a warning). |
 
@@ -723,7 +761,7 @@ const WorkflowNodeSchema: z.ZodType<WorkflowNode> = z.lazy(() =>
       id: z.string().min(1),
       body: WorkflowNodeSchema,
       until: UntilPredicateSchema,
-      maxIterations: z.number().int().positive().optional(),
+      maxIterations: z.union([z.number().int().positive(), z.literal('infinity')]).optional(),
     }),
     z.object({
       kind: z.literal('sequence'),
@@ -776,7 +814,7 @@ const WorkflowDocumentSchema = z.object({
 ## Future Considerations
 
 - **Custom until predicates via registered names.** A plugin could register a named predicate (e.g., `until.custom('myCheck')`) that the hydrator resolves from a predicate registry, similar to tool name resolution. This would allow domain-specific termination logic without extending the schema.
-- **URI workflow references.** The `subflow` node resolves named refs from an in-memory registry; a URI form could fetch documents from remote workflow libraries, reusing the same cycle detection.
+- **URI workflow references.** The `subflow` node resolves named refs from an in-memory registry; a URI form could fetch documents from remote workflow libraries, bounded by the same recursion limit.
 - **Streaming hydration.** For very large workflows, hydrate nodes lazily as execution reaches them rather than building the entire `Step` tree upfront. This reduces memory pressure and startup latency.
 - **Named context layer resolution for `withContext` nodes.** The current design uses string layer names, but the resolution mechanism is left to the `HydrationContext`. A standardised layer registry (analogous to the tool registry) would make `withContext` nodes portable across different harness configurations.
 - **Workflow versioning and migration.** When `version` increments to `2`, a `migrateV1toV2` function would transform old documents automatically. The version field exists to enable this without breaking existing consumers.

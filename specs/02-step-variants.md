@@ -352,6 +352,7 @@ workflow(opts: {
   tools?: Tool[];
   layers?: ReadonlyMap<string, ContextLayer>;
   workflows?: ReadonlyMap<string, WorkflowDocument>;
+  maxRecursionDepth?: number;    // default 100; Infinity = unbounded
   acpAgents?: ReadonlyMap<string, AcpAgent>;
   uiLibraries?: ReadonlyMap<string, OutputCodec>;
   resolveSubprocess?: (ref: string) => SubprocessAdapter | undefined;
@@ -363,8 +364,8 @@ Semantics:
 
 - **Lazy resolution, memoized.** The document resolves on first execution (a `ref` may target a workflow registered after the step is built); the hydrated tree is reused across executions.
 - **Isolation.** `'inherit'` (default) runs the hydrated tree in the caller's session; `'spawn'` wraps it in `spawn({ id: `${id}-spawn` })` for a fresh context boundary.
-- **Cycle safety.** When built from a `ref`, that name seeds the subflow ancestry chain, so a self-referencing named workflow fails with `WORKFLOW_CYCLE` instead of recursing.
-- **Errors.** `EMPTY_STEP_ID`; `INVALID_WORKFLOW_SOURCE` unless exactly one of `document`/`ref` is set; at execution time `MISSING_HARNESS_CONTEXT` without `ctx.harness` and `UNKNOWN_WORKFLOW_REFERENCE` for an unregistered `ref`.
+- **Bounded recursion.** Named workflows may recurse (spec 26, `subflow` → Recursion). When built from a `ref`, that ref counts as the first named-ref resolution on the path, so `maxRecursionDepth` bounds the whole chain; going deeper throws `WORKFLOW_RECURSION_LIMIT` at execution time.
+- **Errors.** `EMPTY_STEP_ID`; `INVALID_WORKFLOW_SOURCE` unless exactly one of `document`/`ref` is set; at execution time `MISSING_HARNESS_CONTEXT` without `ctx.harness`, `UNKNOWN_WORKFLOW_REFERENCE` for an unregistered `ref`, and `INVALID_MAX_RECURSION_DEPTH` unless `maxRecursionDepth` is a positive integer or `Infinity`.
 - **Portability.** `workflow` is exported from the main entry only; the `/portable` surface omits it, keeping the hydrator out of restricted runtimes.
 
 ---

@@ -569,6 +569,7 @@ export type {
   StepSpawn,
   StepWithContext,
   Until,
+  UntilRun,
   Verdict,
 } from '@noetic-tools/types';
 

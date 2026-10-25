@@ -540,7 +540,7 @@ Both styles end a turn the same way: with `AskUserQuestion`, or with `plan/exitP
 | `setWorkflow` | `layerFunction` | Creates or replaces a named workflow (`{ name, document }`, upsert). Validates name slug, count cap (replacing at the cap is allowed), serialized size cap, depth, and `allowedNodeKinds`. |
 | `removeWorkflow` | `layerFunction` | Deletes a named workflow. Warns when the tree or another workflow still references it. |
 | `getWorkflow` | `layerFunction` | Returns a stored workflow's pretty-printed JSON. Read-only, works in any phase. |
-| `exitPlanMode` | `layerFunction` | Exits plan mode. `action: 'execute'` validates PRD + tree exist, that every subflow ref (in the tree and inside stored workflows) names a stored workflow, and that named workflows form no reference cycle — all **before** invoking `onExit`, so the user is never asked to approve a plan that cannot hydrate. `action: 'cancel'` resets to idle. |
+| `exitPlanMode` | `layerFunction` | Exits plan mode. `action: 'execute'` validates PRD + tree exist, that every subflow ref (in the tree and inside stored workflows) names a stored workflow — all **before** invoking `onExit`, so the user is never asked to approve a plan that cannot hydrate. Named workflows may reference each other recursively (self-reference included); the runtime bounds that recursion with `maxRecursionDepth` when the plan executes (spec 26). `action: 'cancel'` resets to idle. |
 
 **Executing an approved plan:** `PlanState.planTree` is a `WorkflowDocument` and `PlanState.workflows` maps directly onto the JSON workflow runtime's registry, so a host executes the plan with `parseAndRunWorkflow`:
 

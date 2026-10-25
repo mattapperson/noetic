@@ -624,6 +624,7 @@ describe('hydrateNode — loop', () => {
     const ctx = makeHydrationContext();
     const result = hydrateNode(node, ctx);
     assert(result.kind === 'loop');
+    assert(typeof result.until === 'function');
     const verdict = await result.until({
       stepCount: 1,
       tokens: {
@@ -658,6 +659,7 @@ describe('hydrateNode — loop', () => {
     const ctx = makeHydrationContext();
     const result = hydrateNode(node, ctx);
     assert(result.kind === 'loop');
+    assert(typeof result.until === 'function');
     const verdict = await result.until({
       stepCount: 2,
       tokens: {
@@ -692,6 +694,7 @@ describe('hydrateNode — loop', () => {
     const ctx = makeHydrationContext();
     const result = hydrateNode(node, ctx);
     assert(result.kind === 'loop');
+    assert(typeof result.until === 'function');
     const verdict = await result.until({
       stepCount: 3,
       tokens: {
@@ -859,7 +862,7 @@ describe('hydrateNode — subflow', () => {
     }
   });
 
-  test('direct self-reference throws WORKFLOW_CYCLE', async () => {
+  test('self-reference without a base case recurses until WORKFLOW_RECURSION_LIMIT, one id per level', async () => {
     const workflows = new Map<string, WorkflowDocument>([
       [
         'a',
@@ -878,19 +881,28 @@ describe('hydrateNode — subflow', () => {
       id: 'root',
       ref: 'a',
     };
-    const { ctx } = makeExecutingContext(workflows);
-    const wrapper = hydrateNode(node, ctx);
+    const { ctx, executed } = makeExecutingContext(workflows);
+    const wrapper = hydrateNode(node, {
+      ...ctx,
+      maxRecursionDepth: 3,
+    });
     assert(wrapper.kind === 'runCode');
     try {
       await wrapper.execute('in', makeMockContext());
-      expect.unreachable('expected WORKFLOW_CYCLE');
+      expect.unreachable('expected WORKFLOW_RECURSION_LIMIT');
     } catch (e) {
       assert(isNoeticConfigError(e));
-      expect(e.code).toBe('WORKFLOW_CYCLE');
+      expect(e.code).toBe('WORKFLOW_RECURSION_LIMIT');
+      expect(e.message).toContain('depth 4');
     }
+    expect(executed.map((x) => x.id)).toEqual([
+      'again-root',
+      'again-again-root',
+      'again-again-again-root',
+    ]);
   });
 
-  test('transitive cycle a -> b -> a throws WORKFLOW_CYCLE', async () => {
+  test('transitive recursion a -> b -> a stops at the default limit of 100', async () => {
     const workflows = new Map<string, WorkflowDocument>([
       [
         'a',
@@ -920,18 +932,104 @@ describe('hydrateNode — subflow', () => {
       id: 'root',
       ref: 'a',
     };
-    const { ctx } = makeExecutingContext(workflows);
+    const { ctx, executed } = makeExecutingContext(workflows);
     const wrapper = hydrateNode(node, ctx);
     assert(wrapper.kind === 'runCode');
     try {
       await wrapper.execute('in', makeMockContext());
-      expect.unreachable('expected WORKFLOW_CYCLE');
+      expect.unreachable('expected WORKFLOW_RECURSION_LIMIT');
     } catch (e) {
       assert(isNoeticConfigError(e));
-      expect(e.code).toBe('WORKFLOW_CYCLE');
-      expect(e.message).toContain('a -> b -> a');
+      expect(e.code).toBe('WORKFLOW_RECURSION_LIMIT');
+      expect(e.message).toContain('depth 101');
     }
+    expect(executed).toHaveLength(100);
+    expect(new Set(executed.map((x) => x.id)).size).toBe(100);
   });
+
+  test('maxRecursionDepth: Infinity lets recursion run past the default limit', async () => {
+    const workflows = new Map<string, WorkflowDocument>([
+      [
+        'a',
+        {
+          version: 1,
+          root: {
+            kind: 'subflow',
+            id: 'again',
+            ref: 'a',
+          },
+        },
+      ],
+    ]);
+    const { ctx, executed } = makeExecutingContext(workflows);
+    const stop = new Error('enough');
+    const wrapper = hydrateNode(
+      {
+        kind: 'subflow',
+        id: 'root',
+        ref: 'a',
+      },
+      {
+        ...ctx,
+        maxRecursionDepth: Number.POSITIVE_INFINITY,
+        // Nothing in this workflow ends the recursion, so the test does.
+        executeStep: async (step, input, execCtx) => {
+          if (executed.length === 150) {
+            throw stop;
+          }
+          return ctx.executeStep(step, input, execCtx);
+        },
+      },
+    );
+    assert(wrapper.kind === 'runCode');
+    try {
+      await wrapper.execute('in', makeMockContext());
+      expect.unreachable('expected the test to stop the recursion');
+    } catch (e) {
+      expect(e).toBe(stop);
+    }
+    expect(executed).toHaveLength(150);
+  });
+
+  for (const invalid of [
+    0,
+    -1,
+    1.5,
+    Number.NaN,
+  ]) {
+    test(`maxRecursionDepth ${invalid} throws INVALID_MAX_RECURSION_DEPTH when a ref resolves`, async () => {
+      const { ctx } = makeExecutingContext(
+        new Map([
+          [
+            'a',
+            {
+              version: 1,
+              root: innerLlm(),
+            },
+          ],
+        ]),
+      );
+      const wrapper = hydrateNode(
+        {
+          kind: 'subflow',
+          id: 'root',
+          ref: 'a',
+        },
+        {
+          ...ctx,
+          maxRecursionDepth: invalid,
+        },
+      );
+      assert(wrapper.kind === 'runCode');
+      try {
+        await wrapper.execute('in', makeMockContext());
+        expect.unreachable('expected INVALID_MAX_RECURSION_DEPTH');
+      } catch (e) {
+        assert(isNoeticConfigError(e));
+        expect(e.code).toBe('INVALID_MAX_RECURSION_DEPTH');
+      }
+    });
+  }
 
   test('diamond reuse of the same workflow from sibling nodes is legal', async () => {
     const workflows = new Map<string, WorkflowDocument>([
@@ -1218,6 +1316,7 @@ describe('hydrateNode — predicate boundary N+1', () => {
     const ctx = makeHydrationContext();
     const result = hydrateNode(node, ctx);
     assert(result.kind === 'loop');
+    assert(typeof result.until === 'function');
     const verdict = await result.until({
       stepCount: 4,
       tokens: {

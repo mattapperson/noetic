@@ -159,6 +159,17 @@ function answered(ctx: Context<ContextData>): Map<string, Record<string, DecideA
   return map;
 }
 
+/** Drops the answers `stepId` gave in this execution, so its next ask goes to the model. */
+export function forgetAnswers(ctx: Context<ContextData>, stepId: string): void {
+  const map = answered(ctx);
+  const prefix = `${stepId}\u0000`;
+  for (const key of map.keys()) {
+    if (key.startsWith(prefix)) {
+      map.delete(key);
+    }
+  }
+}
+
 /** `undefined` when the input cannot be keyed (it does not survive JSON), so it is never reused. */
 function memoKey(stepId: string, input: unknown, logLength: number): string | undefined {
   try {

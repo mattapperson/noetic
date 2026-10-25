@@ -60,7 +60,8 @@ export type UntilPredicate =
       threshold?: number;
     }
   | UntilAnyPredicate
-  | UntilAllPredicate;
+  | UntilAllPredicate
+  | DecideWorkflowNode;
 
 //#endregion
 
@@ -116,6 +117,9 @@ const AllPredicateSchema = z.object({
   predicates: z.array(UntilPredicateRef).min(1),
 });
 
+// Declared with the node schemas below; lazy so the union can name it here.
+const UntilDeciderRef: z.ZodType<DecideWorkflowNode> = z.lazy(() => UntilDeciderSchema);
+
 /** @public Zod schema validating a named `until` predicate (including `any`/`all` combinators). */
 export const UntilPredicateSchema: z.ZodType<UntilPredicate> = z
   .union([
@@ -129,6 +133,7 @@ export const UntilPredicateSchema: z.ZodType<UntilPredicate> = z
     ConvergedPredicateSchema,
     AnyPredicateSchema,
     AllPredicateSchema,
+    UntilDeciderRef,
   ])
   .meta({
     id: 'UntilPredicate',
@@ -461,7 +466,11 @@ export interface LoopWorkflowNode extends WorkflowNodeBase {
   kind: 'loop';
   body: WorkflowNode;
   until: UntilPredicate;
-  maxIterations?: number;
+  /**
+   * Hard cap on iterations: a positive integer, or `'infinity'` for none
+   * (JSON cannot encode `Infinity`). Default: 1000.
+   */
+  maxIterations?: number | 'infinity';
 }
 
 export interface SequenceWorkflowNode extends WorkflowNodeBase {
@@ -608,6 +617,21 @@ const DecideNodeSchema = z.object({
   samples: z.number().int().positive().optional(),
 });
 
+/** A decide node that ends a loop: exactly one question, and a boolean one. */
+const UntilDeciderSchema = DecideNodeSchema.superRefine((node, issue) => {
+  const questions = Object.values(node.questions);
+  if (questions.length === 1 && questions[0]?.type === 'boolean') {
+    return;
+  }
+  issue.addIssue({
+    code: 'custom',
+    path: [
+      'questions',
+    ],
+    message: 'An until decider asks exactly one question, and it must be boolean.',
+  });
+});
+
 const RouteSwitchNodeSchema = z
   .object({
     kind: z.literal('routeSwitch'),
@@ -683,7 +707,12 @@ const LoopNodeSchema = z.object({
   ...SHARED_FIELDS,
   body: WorkflowNodeRef,
   until: UntilPredicateSchema,
-  maxIterations: z.number().int().positive().optional(),
+  maxIterations: z
+    .union([
+      z.number().int().positive(),
+      z.literal('infinity'),
+    ])
+    .optional(),
 });
 
 const SequenceNodeSchema = z.object({
@@ -802,6 +831,7 @@ function childNodes(node: WorkflowNode): WorkflowNode[] {
     case 'loop':
       return [
         node.body,
+        ...untilDeciders(node.until),
       ];
     case 'schedule':
       return [
@@ -831,6 +861,19 @@ function childNodes(node: WorkflowNode): WorkflowNode[] {
     default:
       return [];
   }
+}
+
+/** Decide nodes inside an until predicate, `any`/`all` included, in order. */
+function untilDeciders(pred: UntilPredicate): DecideWorkflowNode[] {
+  if (pred.kind === 'decide') {
+    return [
+      pred,
+    ];
+  }
+  if (pred.kind === 'any' || pred.kind === 'all') {
+    return pred.predicates.flatMap(untilDeciders);
+  }
+  return [];
 }
 
 /** Validates a candidate workflow document. Throws `ZodError` on invalid input. */

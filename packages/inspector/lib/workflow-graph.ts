@@ -133,6 +133,8 @@ export function describeUntil(until: UntilPredicate): string {
       return until.predicates.map(describeUntil).join(' or ');
     case 'all':
       return until.predicates.map(describeUntil).join(' and ');
+    case 'decide':
+      return `decide "${until.id}" says yes`;
   }
 }
 

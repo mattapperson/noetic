@@ -39,6 +39,8 @@ export interface WorkflowOpts {
   layers?: ReadonlyMap<string, ContextLayer>;
   /** Named sub-workflows for `subflow` nodes — and for resolving `ref` itself. */
   workflows?: ReadonlyMap<string, WorkflowDocument>;
+  /** Deepest allowed chain of named-ref resolutions (`ref` itself included). Positive integer or `Infinity`. Default: 100. */
+  maxRecursionDepth?: number;
   /** ACP agent adapters, keyed by `agentId`, for `acp-agent` nodes. */
   acpAgents?: ReadonlyMap<string, AcpAgent>;
   /** Output codecs for `callModel` nodes' `output` codec references. */
@@ -58,9 +60,9 @@ export interface WorkflowOpts {
  *
  * The document resolves lazily on first execution (so a `ref` may target a
  * workflow registered after the step is built) and the hydrated tree is
- * memoized across executions. When the step itself is built from a `ref`,
- * that name seeds the subflow ancestry chain, so a self-referencing named
- * workflow fails with `WORKFLOW_CYCLE` instead of recursing forever.
+ * memoized across executions. Named workflows may recurse; when the step
+ * itself is built from a `ref`, that ref counts as the first resolution
+ * toward `maxRecursionDepth`.
  *
  * @public
  * @param opts - See `WorkflowOpts`.
@@ -69,6 +71,8 @@ export interface WorkflowOpts {
  * @throws `NoeticConfigError` with code `INVALID_WORKFLOW_SOURCE` unless exactly one of `document`/`ref` is set.
  * @throws `NoeticConfigError` with code `MISSING_HARNESS_CONTEXT` (at execution) without `ctx.harness`.
  * @throws `NoeticConfigError` with code `UNKNOWN_WORKFLOW_REFERENCE` (at execution) if `ref` names no registered workflow.
+ * @throws `NoeticConfigError` with code `WORKFLOW_RECURSION_LIMIT` (at execution) if named refs nest deeper than `maxRecursionDepth`.
+ * @throws `NoeticConfigError` with code `INVALID_MAX_RECURSION_DEPTH` (at execution) if a nested ref resolves under an invalid `maxRecursionDepth`.
  */
 export function workflow(opts: WorkflowOpts): StepRunCode<ContextData, string, string> {
   if (!opts.id || opts.id.trim() === '') {
@@ -153,11 +157,8 @@ function hydrate(
     acpAgents: opts.acpAgents,
     uiLibraries: opts.uiLibraries,
     resolveSubprocess: opts.resolveSubprocess,
-    subflowAncestry: opts.ref
-      ? new Set([
-          opts.ref,
-        ])
-      : undefined,
+    maxRecursionDepth: opts.maxRecursionDepth,
+    recursionDepth: opts.ref ? 1 : undefined,
   };
   const hydrated = hydrateWorkflow(doc, hydrationCtx);
   if (opts.isolation !== 'spawn') {

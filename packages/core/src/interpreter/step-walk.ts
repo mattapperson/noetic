@@ -32,7 +32,14 @@ export function stepChildren(step: Step): ReadonlyArray<Step> {
         step.child,
       ];
     case 'loop':
-      return step.steps;
+      // A decide step used as `until` is a child too; one inside any/all is
+      // hidden in a closure.
+      return typeof step.until === 'function'
+        ? step.steps
+        : [
+            ...step.steps,
+            step.until,
+          ];
     case 'schedule':
       return [
         step.step,

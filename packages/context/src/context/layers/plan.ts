@@ -268,53 +268,6 @@ function findDanglingRefs(state: PlanState): string[] {
   return dangling;
 }
 
-/**
- * Detects a reference cycle among named workflows (self-reference included).
- * Returns the cycle path for the rejection message, or null when acyclic.
- */
-function findWorkflowCycle(workflows: Record<string, WorkflowDocument>): string[] | null {
-  const edges = new Map<string, string[]>();
-  for (const [name, doc] of Object.entries(workflows)) {
-    edges.set(
-      name,
-      collectSubflowRefs(doc).filter((ref) => ref in workflows),
-    );
-  }
-  const visiting = new Set<string>();
-  const done = new Set<string>();
-  const path: string[] = [];
-  const visit = (name: string): string[] | null => {
-    if (done.has(name)) {
-      return null;
-    }
-    if (visiting.has(name)) {
-      return [
-        ...path.slice(path.indexOf(name)),
-        name,
-      ];
-    }
-    visiting.add(name);
-    path.push(name);
-    for (const next of edges.get(name) ?? []) {
-      const cycle = visit(next);
-      if (cycle) {
-        return cycle;
-      }
-    }
-    path.pop();
-    visiting.delete(name);
-    done.add(name);
-    return null;
-  };
-  for (const name of edges.keys()) {
-    const cycle = visit(name);
-    if (cycle) {
-      return cycle;
-    }
-  }
-  return null;
-}
-
 function buildAllowedTools(config?: PlanConfig): Set<string> {
   if (!config?.additionalAllowedTools?.length) {
     return ALLOWED_TOOLS_IN_PLAN_MODE;
@@ -680,15 +633,6 @@ async function executeExitPlanMode(
       result: `Cannot execute: subflow refs have no matching workflow: ${dangling.join(
         '; ',
       )}. Define them with plan/setWorkflow or remove the references.`,
-      state,
-    };
-  }
-  const cycle = findWorkflowCycle(state.workflows);
-  if (cycle) {
-    return {
-      result: `Cannot execute: workflows reference each other in a cycle: ${cycle.join(
-        ' -> ',
-      )}. Break the cycle before exiting.`,
       state,
     };
   }

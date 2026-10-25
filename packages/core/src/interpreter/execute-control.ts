@@ -19,6 +19,8 @@ import type {
   StepInParallelSettle,
   StepLoop,
   StepSchedule,
+  Until,
+  UntilRun,
   Verdict,
 } from '@noetic-tools/types';
 import { createMessage, frameworkCast, isNoeticError, NoeticErrorImpl } from '@noetic-tools/types';
@@ -26,10 +28,12 @@ import { NoeticAttr, NoeticEvent } from '../observability/genai-attributes';
 import type { ChannelStore } from '../runtime/channel-store';
 import { ContextImpl } from '../runtime/context-impl';
 import { snapshotCwdState } from '../runtime/cwd-helpers';
+import { toUntil } from '../until/decider';
 import type { ItemSchemaRegistry, LayerStateStore } from './action-deps';
 import { contextToExecCtx, returnLayers, spawnLayers } from './action-deps';
 import { closeUnstartedSpan, openChildSpan, traceChild } from './child-span';
 import { cloneWithGuard } from './clone-guard';
+import { forgetAnswers } from './execute-decide';
 import { getContextChannelStore, isContextImpl, isMutableContext } from './typeguards';
 
 //#region conditional
@@ -690,6 +694,44 @@ function prepareNextInput<TContext, I, O>(
   return frameworkCast<I>(lastOutput);
 }
 
+/** A loop cap is a positive integer, or `Infinity` for a loop only its `until` predicate (or an error/abort) ends. */
+function isValidIterationCap(cap: number): boolean {
+  return cap === Number.POSITIVE_INFINITY || (Number.isInteger(cap) && cap >= 1);
+}
+
+/**
+ * Runs steps for an until predicate. A decide step forgets its earlier answers
+ * first: each iteration is a new question even when the output and the
+ * conversation length repeat, and decide's reuse within an execution would
+ * otherwise hand back the first iteration's answer forever.
+ */
+function untilRun<TContext>(ctx: Context<TContext>, executeStep: ExecuteStepFn): UntilRun {
+  return {
+    ctx: frameworkCast<Context>(ctx),
+    executeStep: <C, I, O>(s: Step<C, I, O>, input: I, stepCtx: Context<C>): Promise<O> => {
+      if (s.kind === 'decide') {
+        forgetAnswers(frameworkCast<Context<ContextData>>(stepCtx), s.id);
+      }
+      return executeStep(s, input, stepCtx);
+    },
+  };
+}
+
+/** A predicate that throws stops the loop, except on cancellation, which must propagate (spec 09). */
+async function judge(until: Until, snapshot: Snapshot, run: UntilRun): Promise<Verdict> {
+  try {
+    return await until(snapshot, run);
+  } catch (predicateError) {
+    if (isNoeticError(predicateError) && predicateError.noeticError.kind === 'cancelled') {
+      throw predicateError;
+    }
+    return {
+      stop: true,
+      reason: `Predicate error: ${predicateError instanceof Error ? predicateError.message : String(predicateError)}`,
+    };
+  }
+}
+
 export async function executeLoop<TContext, I, O>(
   step: StepLoop<TContext, I, O>,
   input: I,
@@ -707,8 +749,7 @@ export async function executeLoop<TContext, I, O>(
   const maxHistory = step.maxHistorySize ?? DEFAULT_MAX_HISTORY;
   let totalIterations = 0;
 
-  // Validate maxIterations
-  if (!Number.isFinite(maxIterations) || maxIterations < 1) {
+  if (!isValidIterationCap(maxIterations)) {
     throw new NoeticErrorImpl({
       kind: 'step_failed',
       stepId: step.id,
@@ -716,6 +757,8 @@ export async function executeLoop<TContext, I, O>(
       retriesExhausted: false,
     });
   }
+  const until = toUntil(step.until);
+  const run = untilRun(ctx, executeStep);
 
   while (true) {
     // Abort check at top of each iteration
@@ -804,17 +847,7 @@ export async function executeLoop<TContext, I, O>(
       lastStepMeta: isMutableContext(baseCtx) ? baseCtx.lastStepMeta : null,
     };
 
-    // Evaluate until predicate
-    let verdict: Verdict;
-    try {
-      verdict = await step.until(snapshot);
-    } catch (predicateError) {
-      // Per spec: if until predicate throws, treat as stop
-      verdict = {
-        stop: true,
-        reason: `Predicate error: ${predicateError instanceof Error ? predicateError.message : String(predicateError)}`,
-      };
-    }
+    const verdict = await judge(until, snapshot, run);
     recordVerdict(ctx, step.id, totalIterations, verdict);
 
     if (verdict.stop) {
