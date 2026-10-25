@@ -27,7 +27,7 @@ const chat = callModel({
 | --- | --- | --- | --- |
 | `id` | `string` | Yes | Unique step identifier |
 | `model` | `Lazy<string>` | Yes | Model identifier (e.g. `'openai/gpt-4o'`, `'claude-sonnet-4-20250514'`), or a `(ctx) => string` getter resolved per execution |
-| `instructions` | `Lazy<string \| undefined>` | No | System prompt prepended to the conversation. Accepts a `(ctx) => string \| undefined` getter |
+| `instructions` | `Lazy<string \| undefined>` | No | System prompt, sent as the request's `instructions` field rather than as a conversation item. Any `system` messages in the log are appended to it. Accepts a `(ctx) => string \| undefined` getter |
 | `tools` | `Lazy<Tool[] \| undefined>` | No | Allowed tool subset (`undefined` = all, `[]` = none). Accepts a `(ctx) => Tool[] \| undefined` getter; function-form tools are resolved per execution and do not contribute to the pre-computed `ctx.unifiedTools` |
 | `output` | `StandardSchemaV1<unknown, O>` | No | Schema for structured output — any [Standard Schema v1](https://standardschema.dev) validator (Zod is the default) |
 | `outputJsonSchema` | `Record<string, unknown>` | No | Explicit JSON Schema override/fallback for non-Zod output. Zod uses its native converter; other validators can implement StandardJSONSchemaV1. A validation-only schema must provide this field or conversion throws `MISSING_JSON_SCHEMA` |

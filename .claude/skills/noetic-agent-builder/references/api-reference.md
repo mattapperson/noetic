@@ -72,7 +72,7 @@ callModel({
 
 `output` accepts any Standard Schema v1 schema (assistant text is JSON-parsed and validated; Zod runs `safeParse`, other validators run `~standard.validate` with sync/Promise support, and the parsed/transformed value is returned) OR an `OutputCodec<O>`. Model JSON Schema resolves through Zod's native converter, StandardJSONSchemaV1, then `outputJsonSchema`; the explicit field overrides the trait for non-Zod schemas and falls back when conversion throws. The OpenUI codec (`openUi(library)`) makes the model render a UI instead of returning text; see [Generative UI](#generative-ui-openui).
 
-The agent harness assembles the View before calling the model: system message + context layer items + conversation history. The `instructions` field becomes an `InputMessageItem` with `role: system`.
+The agent harness assembles the View before calling the model: context layer items (`role: developer`) banded around the conversation history. The `instructions` field is not a View item — it is sent as the request's separate `instructions` field, followed by the text of any `role: system` messages pulled out of the View.
 
 `AgentHarness.execute` accepts a plain string, one item, or an item array. Use an `InputMessageItem` when the input needs structured content; its `content` array supports `input_text`, `input_image`, and `input_file` parts.
 

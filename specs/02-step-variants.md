@@ -176,7 +176,7 @@ Because the tool list is part of the prompt prefix, two steps with different res
 
 The agent harness delegates LLM calls to the `@openrouter/sdk` internally. It:
 
-1. Merges `StepCallModel.instructions` (from the step definition) with any system-role messages extracted from `items`, joined by `\n\n`. If only one source is present, that one is used. If neither is present, `instructions` is `undefined`.
+1. Merges the step's resolved instructions with any system-role messages extracted from the View, joined by `\n\n` (see What the LLM Actually Sees). If only one source is present, that one is used. If neither is present, `instructions` is `undefined`.
 2. Converts Noetic `Item[]` to OpenResponses input format.
 3. Converts the allowed subset of the unified `Tool[]` (see Unified Tool Set) into SDK tool definitions — name, description and input JSON Schema, with no `execute`, so the SDK never runs a tool itself.
 4. Appends any server tools for the provider to run.
@@ -213,14 +213,15 @@ const result = await execute(analyze, codeSnippet, ctx);
 
 ### What the LLM Actually Sees: The View
 
-A `callModel` step does NOT simply send the `system` prompt and the raw input. The agent harness assembles a **View** — the complete `Item[]` array sent to the model — via the context layer system (see `11-context-layer-system`). Before each LLM call, the agent harness:
+A `callModel` step does NOT simply send its instructions and the raw input. Each model request has two parts: the **instructions** string and the **View** — the `Item[]` input assembled by the context layer system (see `11-context-layer-system`). Before each LLM call, the agent harness:
 
 1. Runs `recall()` on each context layer to gather contextual content.
-2. Assembles system prompt item (`role: system`) + context layer output items (`role: developer`) + conversation history items into the View as `Item[]`.
-3. Sends the View to the model. The View is `Item[]` — directly passable to the LLM provider as input.
-4. After the response, runs `store()` on each context layer to persist learnings.
+2. Assembles the View: context layer output items (`role: developer`) in their bands around the conversation history (anchor layers, history, live layers — see `11-context-layer-system` § Prompt-Cache Anchoring).
+3. Builds the instructions: the step's `instructions` (plus an output codec's own instructions, if `output` is one), then the text of any `role: system` messages found in the View, joined by `\n\n`. Those system messages are removed from the input, so a system message in the log reaches the model only through this field.
+4. Sends the instructions as the request's `instructions` field and the View as its input.
+5. After the response, runs `store()` on each context layer to persist learnings.
 
-The `instructions` field on `CallModelOpts` becomes the agent's base instructions within the View (rendered as a `MessageItem` with `role: system`). Context layers inject additional context as `MessageItem` entries with `role: developer`.
+The `instructions` field on `CallModelOpts` is therefore never an item in the View. Keeping it out of the input means the View is pure context and history, and the instructions stay a stable request field the provider can cache ahead of every item. Its tokens are still reserved from the projection budget, so instructions plus View fit the policy's `tokenBudget`. Context layers inject additional context as `MessageItem` entries with `role: developer`.
 
 ### `StepMeta`
 
