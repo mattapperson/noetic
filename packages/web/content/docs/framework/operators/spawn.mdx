@@ -225,6 +225,8 @@ const agentLoop = {
 
 Give the LLM both a sync and async delegation tool. The LLM decides at runtime which to use based on the task — blocking when it needs the result immediately, or launching in the background when it can continue working.
 
+Forward `toolCtx.ctx` rather than calling `harness.createContext()`, so the child keeps its depth, thread, layers, and trace parent. `harness.run()` runs a step on the context you pass it and opens no boundary of its own, so the sync tool wraps the sub-agent in `spawn(...)` to give it a child context; `detachedSpawn()` creates one itself.
+
 ```ts
 import { callModel, channel, spawn, tool, until } from '@noetic-tools/core';
 import type { ContextData } from '@noetic-tools/core';

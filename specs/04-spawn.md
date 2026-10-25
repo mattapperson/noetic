@@ -143,7 +143,9 @@ Parent calls harness.detachedSpawn(step, input, ctx)
 
 ### Context in Tools
 
-Tools receive a `ToolExecutionContext` as their second argument, which provides `{ ctx, harness?, context, assembledView, lastStepMeta, turnContext? }`. Note: `harness` is `undefined` when the step is executed via bare `run()` without an AgentHarness wrapper; tools that need the harness (for spawn, channels) should check for its presence. Tools that spawn sub-agents **must use `toolCtx.ctx`** (the parent context) rather than creating a new root context via `harness.createContext()`. Creating a root context breaks depth tracking, `threadId`/`resourceId` inheritance, context layer propagation, and observability tracing. Both `harness.run()` and `harness.detachedSpawn()` create their own child contexts internally, so the tool should simply forward the parent context it receives via `toolCtx.ctx`.
+Tools receive a `ToolExecutionContext` as their second argument, which provides `{ ctx, harness, fs, shell, context, assembledView, lastStepMeta, turnContext? }`. `harness` is always present: every `Context` belongs to a harness, so a tool can reach spawn and channels without checking. Tools that spawn sub-agents **must use `toolCtx.ctx`** (the parent context) rather than creating a new root context via `harness.createContext()`. Creating a root context breaks depth tracking, `threadId`/`resourceId` inheritance, context layer propagation, and observability tracing.
+
+`harness.run(step, input, ctx)` executes `step` on the context it is given — it does not open a boundary. To run a sub-agent in its own child context, wrap it in a spawn: `harness.run(spawn({ id, child }), input, toolCtx.ctx)` blocks until the child settles, and `harness.detachedSpawn(child, input, toolCtx.ctx)` runs it in the background. Both create the child context from `toolCtx.ctx`, so the tool simply forwards the context it received.
 
 ---
 
