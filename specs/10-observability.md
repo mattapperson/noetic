@@ -16,6 +16,7 @@ Every `Context` carries a span (`Context.span`, see `07-context-and-event-log`).
 | `inParallel.path` | each `inParallel` path, around its child context | `ctx.span` |
 | `llm.call` | each model call (one per tool round) | `ctx.span` |
 | `tool.call` | each function call of a model call | its `llm.call` |
+| `tool.call` | each `invokeTool` step, around validation, the steering gate, and execution | `ctx.span` |
 | `decide.call` | each `decide` step | `ctx.span` |
 
 ```
@@ -122,14 +123,19 @@ callModel step spans follow OpenTelemetry GenAI semantic conventions:
 
 The two cache attributes are **absent, not zero**, when the provider reports no figures — a consumer must be able to tell "nothing was cached" from "this provider does not say", since the runtime steers re-anchoring on that distinction (spec 11).
 
-invokeTool step spans include:
+`tool.call` spans — a model's function calls and `invokeTool` steps alike — include:
 
 | Attribute | Type | Description |
 |-----------|------|-------------|
 | `tool.name` | string | Tool name |
 | `tool.needs_approval` | boolean | Whether the tool required approval |
+| `noetic.node.id` | string | The `callModel` step that made the call, or the `invokeTool` step |
 
-The harness emits one `llm.call` span per model call (one per tool round) and one `tool.call` span per function call, nested under the calling context's span. Both are flushed to the configured `traceExporter` when the `callModel` invocation settles. A harness constructed without a `traceExporter` uses a `NoopExporter`, so emission is always safe.
+The harness emits one `llm.call` span per model call (one per tool round) and one `tool.call` span per function call, nested under the calling context's span. Both are flushed to the configured `traceExporter` when the `callModel` invocation settles. A function call's `tool.call` span marks that the call happened; it is closed as soon as it opens, and carries no timing.
+
+An `invokeTool` step's `tool.call` span covers the whole step — input validation, the steering gate, and execution — and is exported when the step settles. A failure stamps `noetic.error.kind` and `error: true`, as on child context spans; a steering denial reads `noetic.error.kind: "steering_denied"`.
+
+A harness constructed without a `traceExporter` uses a `NoopExporter`, so emission is always safe.
 
 ---
 

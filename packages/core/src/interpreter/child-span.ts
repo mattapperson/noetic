@@ -1,8 +1,9 @@
 /**
- * Spans for child contexts (`spawn` children and `inParallel` paths). A child
- * context carries its own span, so events its steps add to `ctx.span` (e.g.
- * `loop.verdict`) and the model/tool spans they open nest under the child
- * rather than being lost to a no-op span.
+ * Spans that steps open under `ctx.span`: child contexts (`spawn` children and
+ * `inParallel` paths) and direct `invokeTool` calls. A child context carries
+ * its own span, so events its steps add to `ctx.span` (e.g. `loop.verdict`)
+ * and the model/tool spans they open nest under the child rather than being
+ * lost to a no-op span.
  */
 
 import type { Context, Span } from '@noetic-tools/types';

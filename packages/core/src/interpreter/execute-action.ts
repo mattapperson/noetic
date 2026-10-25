@@ -14,6 +14,7 @@ import {
   NoeticErrorImpl,
   validateSchema,
 } from '@noetic-tools/types';
+import { ToolAttr } from '../observability/genai-attributes';
 import type { EmitOption } from '../runtime/broadcaster-utils';
 import { emitToolUi } from '../runtime/tool-ui';
 import type { ItemSchemaRegistry, LayerStateStore } from './action-deps';
@@ -1197,6 +1198,11 @@ async function consumeToolGenerator(params: {
   }
 }
 
+/**
+ * Runs an `invokeTool` step inside a `tool.call` span under `ctx.span`. The span
+ * covers validation, the steering gate, and execution, so a denied or failing
+ * call is traced with its error.
+ */
 export async function executeInvokeTool<TContext, I, O>(
   step: StepInvokeTool<TContext, I, O>,
   input: I,
@@ -1205,6 +1211,19 @@ export async function executeInvokeTool<TContext, I, O>(
   layers?: ContextLayer[],
 ): Promise<O> {
   const baseCtx = frameworkCast<Context<ContextData>>(ctx);
+  const span = openChildSpan(baseCtx, 'tool.call', step.id);
+  span.setAttribute(ToolAttr.NAME, step.tool.name);
+  span.setAttribute(ToolAttr.NEEDS_APPROVAL, step.tool.needsApproval ?? false);
+  return traceChild(baseCtx, span, () => runInvokeTool(step, input, baseCtx, harness, layers));
+}
+
+async function runInvokeTool<TContext, I, O>(
+  step: StepInvokeTool<TContext, I, O>,
+  input: I,
+  baseCtx: Context<ContextData>,
+  harness: AgentHarnessContract,
+  layers: ContextLayer[] | undefined,
+): Promise<O> {
   const args = step.args ? Object.assign({}, input, step.args) : input;
 
   const parseResult = await validateSchema(step.tool.input, args);

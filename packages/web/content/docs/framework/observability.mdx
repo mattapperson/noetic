@@ -33,6 +33,7 @@ Noetic includes a built-in tracing system modeled on OpenTelemetry conventions. 
 | `inParallel.path` | each `inParallel` path, around its child context | the enclosing span |
 | `llm.call` | each model call (one per tool round) | the enclosing span |
 | `tool.call` | each function call of a model call | its `llm.call` |
+| `tool.call` | each `invokeTool` step | the enclosing span |
 | `decide.call` | each `decide` step | the enclosing span |
 
 Steps that stay in their context (`runCode`, `loop`, `conditional`) open no span; they add events and attributes to `ctx.span`.
@@ -219,6 +220,8 @@ const inputTokens = span.attributes.get(GenAI.USAGE_INPUT_TOKENS);
 ```
 
 The harness emits one `llm.call` span per model call (one per tool round) and a `tool.call` span per function call, nested under the calling context's span and flushed to the configured exporter when `callModel` settles.
+
+An `invokeTool` step opens its own `tool.call` span under the enclosing span. It covers validation, the steering gate, and execution, carries `tool.name`, `tool.needs_approval`, and `noetic.node.id` (the step's id), and on failure gets `noetic.error.kind` and `error: true`, like a child context span.
 
 ## Loop Verdict Events
 
