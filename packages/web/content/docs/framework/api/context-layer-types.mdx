@@ -443,7 +443,7 @@ interface LayerStateStore {
 | `has(executionId, layerId)` | Whether any state entry exists — distinguishes "init never ran" (no entry → init-bearing layer skipped) from "state explicitly cleared" (entry present → hooks keep running with `undefined` state) |
 | `registerDurable(executionId, layerId, target)` | Register the durable write-through target for a layer (non-`'execution'` scopes; called by `initLayers`/`spawnLayers`) |
 | `flush(executionId)` | Await all in-flight durable mirror writes |
-| `disable(executionId, layerId)` / `isDisabled(...)` | Explicit disabled tracking for layers whose `init` failed with `onInitError: 'disable'` |
+| `disable(executionId, layerId)` / `isDisabled(...)` | Explicit disabled tracking for layers whose `init` failed with `onInitError: 'disable'`, or whose `onSpawn` returned `null` or failed for a child execution |
 
 Writes are coalesced per key (latest wins, one write in flight) and mirror failures never throw — they surface only through `diagnostic`.
 

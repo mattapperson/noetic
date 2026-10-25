@@ -891,7 +891,7 @@ for (const live of await harness.subprocess.listLive()) {
 
 **Key points**:
 
-- Recovery is two primitives: `harness.subprocess.listLive()` rediscovers children from the persisted manifest, and `harness.restore(executionId)` rebuilds each context from its checkpoint or, failing that, its step ledger (returning `null` when neither exists). The Noetic CLI ships a `reattachLiveChildren` convenience wrapper over exactly this loop, but it lives in a separate repository — any host can call the two primitives directly.
+- Recovery is two primitives: `harness.subprocess.listLive()` rediscovers children from the persisted manifest, and `harness.restore(executionId)` rebuilds each context from its checkpoint or, failing that, its step ledger (returning `null` when neither exists). A rehydrated handle's `metadata` carries `executionId` (the child), `parentExecutionId` (the context that spawned it — the one to restore to rejoin the parent), and the caller's `metadata` tags from the original request. The Noetic CLI ships a `reattachLiveChildren` convenience wrapper over exactly this loop, but it lives in a separate repository — any host can call the two primitives directly.
 - Subprocess manifests and checkpoint snapshots live at distinct roots (`~/.noetic/subprocess` vs `~/.noetic/checkpoints`). Override both via `NOETIC_HOME=/some/dir` if needed.
 - `checkpoint()` is a no-op when `environment.storage.checkpointStore` is absent; `listLive()` returns the empty set when the adapter has no storage. Durability is opt-in and degrades gracefully.
 - The default in-memory adapter also accepts a `storage` option for tests that want manifest round-trip behaviour without launching real OS children.
