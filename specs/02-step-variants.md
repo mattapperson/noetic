@@ -1,7 +1,7 @@
 # Step Variants: `runCode`, `callModel`, `invokeTool`, `withContext`
 
 > **Depends On:** `01-step-type` (Step<I,O>, execute), `11-context-layer-system` (ContextLayer, ContextConfig)
-> **Exports:** `runCode()`, `callModel()`, `invokeTool()`, `withContext()`, `StepRunCodeOpts`, `StepCallModelOpts`, `StepInvokeToolOpts`, `StepWithContextOpts`, `Tool`, `RetryPolicy`, `ModelParams`
+> **Exports:** `runCode()`, `callModel()`, `invokeTool()`, `withContext()`, `RunCodeOpts`, `CallModelOpts`, `InvokeToolOpts`, `WithContextOpts`, `Tool`, `RetryPolicy`, `ModelParams`
 
 ---
 
@@ -12,9 +12,9 @@ Pure computation. The agent harness can retry freely, cache results, and doesn't
 Every builder below (and every other step builder) also accepts the `StepReplay` fields from `01-step-type` — `durable` and `replayKey` — and copies them onto the step it builds. See `23a-step-level-resume` § Identity.
 
 ```typescript
-interface StepRunCodeOpts<I, O> extends StepReplay<I> {
+interface RunCodeOpts<TContext, I, O> extends StepReplay<TContext, I> {
   id: string;
-  execute: (input: I, ctx: Context) => Promise<O>;
+  execute: (input: I, ctx: Context<TContext>) => Promise<O>;
   retry?: RetryPolicy;
   /**
    * Per-step subprocess adapter override. When set, the interpreter
@@ -59,12 +59,14 @@ type Lazy<T, TContext = ContextData> =
   | T
   | ((ctx: Context<TContext>) => T | Promise<T>);
 
-interface StepCallModelOpts<TContext, O> {
+interface CallModelOpts<TContext, O, I = unknown> extends StepReplay<TContext, I> {
   id: string;
   model: Lazy<string, TContext>;                    // e.g. 'anthropic/claude-sonnet-4-20250514' — or a (ctx) => string getter
   instructions?: Lazy<string | undefined, TContext>;
-  tools?: Lazy<Tool[] | undefined, TContext>;       // allowed tool subset (undefined = all, [] = none)
-  output?: StandardSchemaV1<unknown, O>;          // structured output schema (any Standard Schema v1)
+  // Allowed tool subset (undefined = all, [] = none). A `ServerToolSpec` is an
+  // OpenRouter server tool the provider executes itself (e.g. web search).
+  tools?: Lazy<(Tool | ServerToolSpec)[] | undefined, TContext>;
+  output?: StandardSchemaV1<unknown, O> | OutputCodec<O>;        // structured output schema or streaming codec (see 28-generative-ui)
   outputJsonSchema?: Record<string, unknown>;     // explicit JSON Schema override for non-Zod `output`
   params?: ModelParams;                            // temperature, topP, etc.
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
@@ -148,7 +150,7 @@ const harness = new AgentHarness({
 
 Before execution begins, the agent harness walks the entire step tree and collects all `Tool` instances declared on `callModel` steps, plus tools provided by context layers. These are deduplicated by name (first-wins) into a **unified tool set** stored on the execution context.
 
-Every LLM call receives the full unified tool set, preserving prompt cache across calls with different tool restrictions. Individual steps restrict which tools the model may invoke via the `tools` field on `StepCallModelOpts`:
+Every LLM call receives the full unified tool set, preserving prompt cache across calls with different tool restrictions. Individual steps restrict which tools the model may invoke via the `tools` field on `CallModelOpts`:
 
 - `tools: undefined` (or omitted) — unrestricted, model may call any tool
 - `tools: [searchTool, readFileTool]` — model may only call these tools
@@ -197,7 +199,7 @@ A `callModel` step does NOT simply send the `system` prompt and the raw input. T
 3. Sends the View to the model. The View is `Item[]` — directly passable to the LLM provider as input.
 4. After the response, runs `store()` on each context layer to persist learnings.
 
-The `instructions` field on `StepCallModelOpts` becomes the agent's base instructions within the View (rendered as a `MessageItem` with `role: system`). Context layers inject additional context as `MessageItem` entries with `role: developer`.
+The `instructions` field on `CallModelOpts` becomes the agent's base instructions within the View (rendered as a `MessageItem` with `role: system`). Context layers inject additional context as `MessageItem` entries with `role: developer`.
 
 ### `StepMeta`
 
@@ -218,7 +220,7 @@ interface StepMeta {
 May have side effects, may need human approval before execution (preventive gating), and may need sandboxing.
 
 ```typescript
-interface StepInvokeToolOpts<I, O> {
+interface InvokeToolOpts<I, O, TContext = ContextData> extends StepReplay<TContext, I> {
   id: string;
   tool: Tool<I, O>;
   args?: Partial<I>;  // can override LLM-provided args
@@ -262,7 +264,7 @@ Zod stays the default everywhere else in the framework — channels, context-lay
 Attaches context layers to a descendant step subtree without creating an isolated context. Analogous to React's `Context.Provider` — the layers are available to all descendant `callModel` steps without the context boundary that `spawn` introduces.
 
 ```typescript
-interface StepWithContextOpts<TContext, I, O> {
+interface WithContextOpts<TContext, I, O> extends StepReplay<TContext, I> {
   id: string;
   child: Step<TContext, I, O>;
   context: ContextConfig | ContextLayer[];

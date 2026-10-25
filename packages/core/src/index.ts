@@ -39,6 +39,8 @@ export type { LoopConfig } from './builders/loop-builder';
 /** @public */
 export { loop } from './builders/loop-builder';
 /** @public */
+export type { WithContextOpts } from './builders/provide-builder';
+/** @public */
 export { withContext } from './builders/provide-builder';
 /** @public */
 export { spawn } from './builders/spawn-builder';

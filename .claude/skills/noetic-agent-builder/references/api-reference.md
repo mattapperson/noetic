@@ -2,6 +2,8 @@
 
 ## Builder Functions
 
+The option types are exported for wrappers that forward them: `RunCodeOpts`, `CallModelOpts`, `InvokeToolOpts`, `WithContextOpts`.
+
 ### runCode
 
 Pure async computation. The runtime can retry freely and doesn't track token usage.

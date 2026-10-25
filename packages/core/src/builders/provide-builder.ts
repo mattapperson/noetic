@@ -3,6 +3,12 @@ import type { Step, StepReplay, StepWithContext } from '@noetic-tools/types';
 import { NoeticConfigError } from '@noetic-tools/types';
 import { getDefaultRegistrar } from '../types/step-registrar';
 
+export interface WithContextOpts<TContext, I, O> extends StepReplay<TContext, I> {
+  id: string;
+  child: Step<TContext, I, O>;
+  context: ContextConfig | ContextLayer[];
+}
+
 /**
  * Creates a provide step that attaches context layers to its child without creating an isolated context.
  * Like React's Context.Provider — layers are available to all descendant steps.
@@ -18,11 +24,7 @@ import { getDefaultRegistrar } from '../types/step-registrar';
  * @throws `NoeticConfigError` with code `MISSING_CONTEXT_LAYERS` if `context` is not provided.
  */
 export function withContext<TContext = ContextData, I = unknown, O = unknown>(
-  opts: {
-    id: string;
-    child: Step<TContext, I, O>;
-    context: ContextConfig | ContextLayer[];
-  } & StepReplay<TContext, I>,
+  opts: WithContextOpts<TContext, I, O>,
 ): StepWithContext<TContext, I, O> {
   if (!opts.id?.trim()) {
     throw new NoeticConfigError({
