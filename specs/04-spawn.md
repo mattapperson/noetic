@@ -55,16 +55,18 @@ Parent calls spawn(opts)
 │
 ├─ Child starts with empty ItemLog
 │
-├─ For each active context layer (sequential, array order):
+├─ For each active context layer (sequential, SLOT ORDER; ties by array index):
 │   └─ onSpawn() → returns child state + optional items for ItemLog (or null to disable)
 │
 ├─ Child execution runs with its ItemLog + context layer states
 │
 ├─ Child completes with result
 │
-└─ For each active context layer (sequential, array order):
+└─ For each active context layer (sequential, SLOT ORDER; ties by array index):
     └─ onReturn(result) → transforms result, output feeds into next layer's onReturn
 ```
+
+Both hooks run in slot order, like every other multi-layer pipeline (`recall`, `onItemAppend`, `projectHistory`): the `onReturn` result pipeline composes from the lowest slot to the highest, and `onSpawn` items enter the child's ItemLog in the same order. Only `init`, `onComplete`, and `dispose` use array order.
 
 The result transformation pipeline means layers compose naturally. A logging layer can observe the result without modifying it; a summarization layer can compress it; an extraction layer can parse structured data from it. Each layer receives the output of the previous layer's `onReturn`.
 

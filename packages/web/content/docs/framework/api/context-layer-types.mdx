@@ -208,6 +208,8 @@ Return the text to publish, or `null` to let the runtime republish the full new 
 | `childState` | `TState \| null` | State for the child (`null` = the child gets no state; `items` still apply) |
 | `items` | `Item[]` | Additional items for the child (optional) |
 
+`onSpawn` and `onReturn` run one layer at a time in slot order (ties by array order), so the `onReturn` result pipeline runs from the lowest slot to the highest.
+
 Return `null` instead of a `SpawnResult` to disable the layer in the child: none of its hooks run for the child's execution. A hook that throws or times out disables the layer the same way and is logged as a diagnostic.
 
 ### ReturnParams

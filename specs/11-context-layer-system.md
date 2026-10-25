@@ -204,9 +204,11 @@ LOOP ITERATION ─────────────────────�
 │                      its own state snapshot.
 │
 ├─ (if spawning)
-│   ├─ onSpawn()       Sequential, array order.
+│   ├─ onSpawn()       Sequential, SLOT ORDER. Items enter the child's log
+│   │                  in that order.
 │   │   ...child...
-│   └─ onReturn()      Sequential, array order.
+│   └─ onReturn()      Sequential, SLOT ORDER. Pipeline: each layer receives
+│                      the result of the previous layer's onReturn.
 │
 └─ (loop continues or...)
     │

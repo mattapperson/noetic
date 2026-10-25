@@ -364,6 +364,69 @@ describe('returnLayers', () => {
     ]);
   });
 
+  it('onSpawn and onReturn run in slot order, not array order', async () => {
+    const store = createLayerStateStore();
+    const calls: string[] = [];
+    const makeOrderLayer = (id: string, slot: number): ContextLayer => ({
+      id,
+      name: id,
+      slot,
+      scope: 'execution',
+      hooks: {
+        onSpawn: async () => {
+          calls.push(`spawn:${id}`);
+          return {
+            childState: {
+              id,
+            },
+          };
+        },
+        onReturn: async ({ result }) => {
+          calls.push(`return:${id}`);
+          return {
+            parentState: undefined,
+            result: `${String(result)}>${id}`,
+          };
+        },
+      },
+    });
+    const layers = [
+      makeOrderLayer('first', 300),
+      makeOrderLayer('second', 200),
+      makeOrderLayer('third', 100),
+    ];
+    const parentCtx = makeCtx({
+      executionId: 'parent-order',
+    });
+    const childCtx = makeCtx({
+      executionId: 'child-order',
+      depth: 1,
+    });
+    await spawnLayers({
+      layers,
+      parentCtx,
+      childCtx,
+      store,
+    });
+    const result = await returnLayers({
+      layers,
+      parentCtx,
+      childCtx,
+      childLog: makeItemLog(),
+      result: 'out',
+      store,
+    });
+    expect(result).toBe('out>third>second>first');
+    expect(calls).toEqual([
+      'spawn:third',
+      'spawn:second',
+      'spawn:first',
+      'return:third',
+      'return:second',
+      'return:first',
+    ]);
+  });
+
   it('onReturn transforms result through the pipeline', async () => {
     type TagState = {
       tag: string;
