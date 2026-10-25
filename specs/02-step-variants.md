@@ -76,7 +76,7 @@ interface ModelParams {
   temperature?: number;
   topP?: number;
   maxTokens?: number;
-  stopSequences?: string[];
+  stopSequences?: string[];    // deprecated: accepted, never sent (see below)
   serviceTier?: ServiceTier;   // OpenRouter service tier, forwarded unchanged
 }
 
@@ -85,6 +85,8 @@ type ServiceTier = 'auto' | 'default' | 'fast' | 'flex' | 'priority' | 'scale' |
 ```
 
 `serviceTier` asks OpenRouter for a processing tier: `fast` is an alias for `priority`; `ultrafast` prefers ultrafast endpoints and falls back to `priority`, then default endpoints. The tier the provider actually served lands on `LLMResponse.serviceTier` (taken from the last round) and on `ctx.lastStepMeta.serviceTier`. Both stay `undefined` when the provider reports no tier — they never echo the requested value, so a mismatch with the request means a fallback happened.
+
+`temperature`, `topP`, `maxTokens` (as `maxOutputTokens`) and `serviceTier` are forwarded on every round. `stopSequences` is not: the OpenRouter Responses API that `callModel` runs on has no stop parameter, so the value is accepted (on steps, `CallModelRequest`, and workflow `params`) and ignored. It is deprecated and leaves the type and the workflow schema in the next major.
 
 ### Lazy Params
 

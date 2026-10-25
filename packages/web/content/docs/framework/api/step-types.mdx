@@ -318,7 +318,7 @@ type MergeFn<TContext = ContextData, O = unknown, R = O> = (
 | `temperature` | `number` | Sampling temperature (optional) |
 | `topP` | `number` | Nucleus sampling (optional) |
 | `maxTokens` | `number` | Max response tokens (optional) |
-| `stopSequences` | `string[]` | Stop sequences (optional) |
+| `stopSequences` | `string[]` | Deprecated and ignored (optional) — the OpenRouter Responses API has no stop parameter, so it is never sent |
 | `serviceTier` | `ServiceTier` | OpenRouter service tier (optional); the served tier lands on `StepMeta.serviceTier` |
 
 ### Tool

@@ -187,7 +187,7 @@ export function runCode<TContext = ContextData, I = unknown, O = unknown>(
  * @param opts.instructions - Optional system prompt; eager string or `(ctx) => string | undefined` getter.
  * @param opts.tools - Optional tools; eager array or `(ctx) => Tool[] | undefined` getter.
  * @param opts.output - Optional Zod schema enabling structured output parsing.
- * @param opts.params - Optional model parameters (temperature, topP, maxTokens, stopSequences).
+ * @param opts.params - Optional model parameters (temperature, topP, maxTokens, serviceTier).
  * @returns A `StepCallModel` that can be composed into larger pipelines. The step
  *   is auto-registered in the shared step registry.
  * @throws `NoeticConfigError` with code `EMPTY_STEP_ID` if `id` is empty.

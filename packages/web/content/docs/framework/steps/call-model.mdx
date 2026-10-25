@@ -44,7 +44,7 @@ const chat = callModel({
 | `temperature` | `number` | Sampling temperature |
 | `topP` | `number` | Nucleus sampling threshold |
 | `maxTokens` | `number` | Maximum tokens to generate |
-| `stopSequences` | `string[]` | Stop sequences |
+| `stopSequences` | `string[]` | Deprecated and ignored — the OpenRouter Responses API has no stop parameter, so it is never sent |
 | `serviceTier` | `ServiceTier` | OpenRouter service tier: `auto`, `default`, `fast` (alias for `priority`), `flex`, `priority`, `scale`, or `ultrafast` (prefers ultrafast endpoints, falls back to `priority`, then default) |
 
 The tier the provider served is recorded on `ctx.lastStepMeta.serviceTier` (and `LLMResponse.serviceTier`). It stays `undefined` when the provider reports none rather than echoing the request, so a value that differs from what you asked for means a fallback happened.

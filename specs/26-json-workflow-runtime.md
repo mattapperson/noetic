@@ -131,7 +131,7 @@ interface CallModelWorkflowNode {
     temperature?: number;
     topP?: number;
     maxTokens?: number;
-    stopSequences?: string[];
+    stopSequences?: string[];  // deprecated: accepted, never sent (spec 02)
     serviceTier?: 'auto' | 'default' | 'fast' | 'flex' | 'priority' | 'scale' | 'ultrafast';
   };
 }

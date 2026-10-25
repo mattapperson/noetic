@@ -44,7 +44,7 @@ callModel<TContext = ContextData, I = unknown, O = unknown>({
   tools?: Lazy<Tool[] | undefined, TContext>;       // allowed tool subset (undefined = all, [] = none)
   output?: StandardSchemaV1<unknown, O> | OutputCodec<O>;  // any Standard Schema v1 (Zod default) OR a streaming codec (see Generative UI)
   outputJsonSchema?: Record<string, unknown>;            // explicit fallback/override after Zod and StandardJSONSchemaV1
-  params?: ModelParams;                             // temperature, topP, maxTokens, stopSequences, serviceTier
+  params?: ModelParams;                             // temperature, topP, maxTokens, serviceTier (stopSequences: deprecated, ignored)
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }): StepCallModel<TContext, I, O>
 ```
