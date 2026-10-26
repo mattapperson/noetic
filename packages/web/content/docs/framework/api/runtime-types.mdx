@@ -158,7 +158,7 @@ declare interface RerenderRequest {
 | `setLayerState(executionId, layerId, state)` | Overwrite a layer's state for a given execution. |
 | `beforeToolCall(layers, toolName, toolArgs, ctx)` | Invoke each layer's `beforeToolCall` steering hook and aggregate the decision. |
 | `afterModelCall(layers, response, ctx)` | Invoke each layer's `afterModelCall` steering hook. |
-| `onSteer?(layers, params, ctx)` | Optional. Run a steer through each layer's `onSteer` hook in slot order. Returns a `SteerVerdict` (`{ action, items }`). A harness without it applies each steer at its delivery mode's default point and appends it unchanged. |
+| `onSteer?(layers, params, ctx)` | Run a steer through each layer's `onSteer` hook in slot order. Returns a `SteerVerdict` (`{ action, items }`). A harness without it applies each steer at its delivery mode's default point and appends it unchanged. |
 | `notifyDecision(layers, record, ctx)` | Run every layer's `onDecision` hook in slot order, one at a time. Called by `decide` steps after they validate their answers. |
 | `checkpoint(ctx)` | Persist current execution state. |
 | `restore(executionId)` | Restore a previously checkpointed context. |

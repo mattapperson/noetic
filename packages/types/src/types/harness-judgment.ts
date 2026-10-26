@@ -27,9 +27,8 @@ export interface HarnessJudgmentContract {
     ctx: Context,
   ): Promise<SteeringDecision>;
   /**
-   * Run a steer through every layer's `onSteer` hook, in slot order. Optional:
-   * without it, a steer lands at its delivery mode's default point and is
-   * appended to the conversation unchanged.
+   * Run a steer through every layer's `onSteer` hook, in slot order. A harness
+   * without it lands each steer at its delivery mode's default point, unchanged.
    */
   onSteer?(
     layers: ContextLayer[],
