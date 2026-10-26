@@ -41,8 +41,8 @@ interface FakeSdk {
 
 /**
  * The SDK client's model and generation lookups. A generation not in `bills` answers
- * 404, as the provider does until it has priced the call; `hang` makes native decide
- * calls never answer.
+ * 404, as the provider does until it has priced the call. Native decide calls never
+ * answer.
  */
 function useFakeSdk(
   harness: AgentHarness,
@@ -90,7 +90,16 @@ function useFakeSdk(
     },
     alpha: {
       decisions: {
-        create: () => new Promise(() => {}),
+        // Never answers; a cancel rejects it, as the SDK does.
+        create: (
+          _request: unknown,
+          options: {
+            signal?: AbortSignal;
+          },
+        ) =>
+          new Promise((_resolve, reject) => {
+            options.signal?.addEventListener('abort', () => reject(options.signal?.reason));
+          }),
       },
     },
   };
@@ -193,6 +202,17 @@ function record(over: Partial<DispatchRecord>): DispatchRecord {
 
 /** The ceiling of `record()` under the fake prices: 10 prompt and 2000 completion tokens. */
 const RECORD_CEILING = PROMPT_PRICE * 10 + COMPLETION_PRICE * 2e3;
+
+const triage = decide({
+  id: 'triage',
+  model: 'typesafe/jev',
+  questions: {
+    urgent: {
+      type: 'boolean',
+      instructions: 'Is this urgent?',
+    },
+  },
+});
 
 //#endregion
 
@@ -311,17 +331,7 @@ describe('a host killed mid-call', () => {
       decisionModel: true,
     });
     const ctx = first.createContext();
-    const step = decide({
-      id: 'triage',
-      model: 'typesafe/jev',
-      questions: {
-        urgent: {
-          type: 'boolean',
-          instructions: 'Is this urgent?',
-        },
-      },
-    });
-    void first.run(step, 'help', ctx).catch(() => {});
+    void first.run(triage, 'help', ctx).catch(() => {});
     const [pending] = await waitFor(pendingSeenBy(storage), (list) => list.length === 1);
     expect(pending).toMatchObject({
       kind: 'decide',
@@ -448,6 +458,51 @@ describe('cancel mid-stream', () => {
     expect(await harness.pendingSpend()).toEqual([]);
   });
 
+  it('counts a response that arrived before the cancel', async () => {
+    const storage = createInMemoryStorage();
+    const harness = harnessOver(storage);
+    let responded = false;
+    frameworkCast<{
+      client: unknown;
+    }>(harness).client = {
+      callModel: () => ({
+        // The response is in, but the event stream never finishes.
+        getFullResponsesStream: () => ({
+          [Symbol.asyncIterator]: () => ({
+            next: () => new Promise(() => {}),
+          }),
+        }),
+        getResponse: async () => {
+          responded = true;
+          return {
+            output: [],
+            usage: {
+              inputTokens: 10,
+              outputTokens: 5,
+              cost: ROUND_COST,
+            },
+          };
+        },
+      }),
+    };
+    const ctx = harness.createContext();
+    const run = harness.run(agent, 'go', ctx).catch(() => {});
+    await waitFor(
+      () => responded,
+      (done) => done,
+    );
+    await waitFor(
+      () => createSpendLog(storage).list(),
+      (list) => list.length === 0,
+    );
+
+    await harness.cancel(ctx);
+    await run;
+
+    expect(ctx.cost).toBeCloseTo(ROUND_COST);
+    expect(await createSpendLog(storage).list()).toEqual([]);
+  });
+
   it('keeps polling while the provider has not priced the call yet', async () => {
     const storage = createInMemoryStorage();
     const harness = harnessOver(storage);
@@ -563,6 +618,33 @@ describe('held spend and budgets', () => {
     expect(ctx.cost).toBeCloseTo(0.03);
   });
 
+  it('a restore in the same process takes over the hold of a cancelled call', async () => {
+    const storage = createInMemoryStorage();
+    const harness = harnessOver(storage);
+    useFakeSdk(harness, {
+      decisionModel: true,
+    });
+    const ctx = harness.createContext();
+    const run = harness.run(triage, 'help', ctx).catch(() => {});
+    await waitFor(
+      () => createSpendLog(storage).list(),
+      (list) => list.length === 1,
+    );
+    await harness.cancel(ctx);
+    await run;
+    await waitFor(
+      () => ctx.heldCost,
+      (held) => held > 0,
+    );
+    const held = ctx.heldCost;
+
+    const restored = await harness.restore(ctx.id);
+
+    assert(restored);
+    expect(restored.heldCost).toBeCloseTo(held);
+    expect(ctx.heldCost).toBe(0);
+  });
+
   it('a run with nothing held spends the whole budget', async () => {
     const harness = harnessOver(createInMemoryStorage());
     const ctx = harness.createContext();
@@ -670,6 +752,32 @@ describe('a provider that refuses the call', () => {
     expect(await createSpendLog(storage).list()).toEqual([]);
   });
 
+  it('keeps the record of a decide() call whose 2xx response failed to parse', async () => {
+    const storage = createInMemoryStorage();
+    const harness = harnessOver(storage);
+    useFakeSdk(harness, {
+      decisionModel: true,
+    });
+    frameworkCast<{
+      sdkClient: {
+        alpha: unknown;
+      };
+    }>(harness).sdkClient.alpha = {
+      decisions: {
+        create: () =>
+          Promise.reject(
+            Object.assign(new Error('Response validation failed'), {
+              statusCode: 200,
+            }),
+          ),
+      },
+    };
+
+    await expect(harness.run(triage, 'help', harness.createContext())).rejects.toThrow();
+
+    expect(await createSpendLog(storage).list()).toHaveLength(1);
+  });
+
   it('takes the generation id from the stream when no header carried it', async () => {
     const storage = createInMemoryStorage();
     const harness = harnessOver(storage);
@@ -708,5 +816,71 @@ describe('a provider that refuses the call', () => {
     expect(headers[0]).toEqual({
       'x-noetic-dispatch': pending?.id,
     });
+  });
+});
+
+describe('settling once', () => {
+  it('does not charge a dispatch another harness settled while this one polled', async () => {
+    const storage = createInMemoryStorage();
+    const log = createSpendLog(storage);
+    const harness = harnessOver(storage);
+    const bills: Record<string, Bill> = {};
+    useFakeSdk(harness, {
+      bills,
+    });
+    const settledElsewhere = record({
+      generationId: 'gen-elsewhere',
+    });
+    await log.put(settledElsewhere);
+    setTimeout(() => {
+      void log.remove(settledElsewhere.id);
+      bills['gen-elsewhere'] = {
+        totalCost: 0.5,
+        tokensPrompt: 1,
+        tokensCompletion: 1,
+      };
+    }, 200);
+
+    expect(
+      await harness.reconcileSpend({
+        patienceMs: 5e3,
+      }),
+    ).toEqual([]);
+  });
+
+  it('a reconcile racing a write-off leaves nothing held', async () => {
+    const memory = createInMemoryStorage();
+    const storage: StorageAdapter = Object.assign(Object.create(memory), {
+      delete: async (key: string) => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        return memory.delete(key);
+      },
+    });
+    const harness = harnessOver(storage);
+    useFakeSdk(harness);
+    const unpriced = record({
+      threadId: 't',
+    });
+    await createSpendLog(storage).put(unpriced);
+    await harness.reconcileSpend({
+      patienceMs: 0,
+    });
+
+    const writeOff = harness.writeOffSpend(unpriced.id, {
+      assumedCost: 0.1,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await harness.reconcileSpend({
+      patienceMs: 0,
+    });
+
+    expect(await writeOff).toMatchObject({
+      cost: 0.1,
+    });
+    expect(
+      harness.getUsage({
+        threadId: 't',
+      }).heldCost,
+    ).toBeUndefined();
   });
 });

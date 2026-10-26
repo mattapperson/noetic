@@ -207,10 +207,10 @@ Records live under `spend:<id>`, outside the `execution:<id>:` prefix, so `clear
 
 1. **Before send** — the record is written (awaited). A failed write is logged and the call goes ahead: like a checkpoint, the record is best-effort and never blocks the call.
 2. **Headers arrive** — the OpenRouter client's response hook reads `x-generation-id` and saves it to the record before the body is read. A stream that carries the id only in its `response.created` event saves it from there. A call cut off before any response byte has no id.
-3. **Response complete** — the call's cost reaches the run through `LLMResponse.cost` as before, and the record is deleted. A call the provider refused with an HTTP error status and no id is deleted too, as is one aborted before it was sent: nothing was generated.
+3. **Response complete** — the call's cost reaches the run through `LLMResponse.cost` as before, and the record is deleted. A cancel that lands after the response arrived still counts that response's cost. A 2xx response that fails to parse was billed, so its record stays. A call the provider refused with an HTTP error status (400 or above) and no id is deleted too, as is one aborted before it was sent: nothing was generated.
 4. **Anything else** — cancel, a steer that stops the stream, an idle timeout, a dropped connection — leaves the record. It becomes **pending**: held at its ceiling and reconciled in the background straight away.
 
-A dispatch in flight in this harness is never pending: `pendingSpend` and `reconcileSpend` skip it, so its cost is counted once, by the call itself. Run one harness per storage at a time when reconciling; a second harness cannot see the first's live calls.
+A dispatch in flight in this harness is never pending: `pendingSpend` and `reconcileSpend` skip it, so its cost is counted once, by the call itself. Run one harness per storage at a time when reconciling; a second harness cannot see the first's live calls. A harness that finds a priced dispatch's record already gone from storage does not charge it: another harness settled it.
 
 A crash in the few milliseconds between a response completing and the run recording it leaves no record and no ledger entry: the round is asked again, and the first bill is lost. Every earlier moment is covered.
 
@@ -257,13 +257,13 @@ Reconciliation runs on its own: after `restore()` for the restored execution, an
 2. Otherwise to the thread's stored session, when the dispatch's thread has one: `SessionUsage.cost` and `billedCost` grow.
 3. Otherwise to the root context this harness restored or ran it on, when it has one.
 
-The record is deleted before the charge, so a crash mid-settlement can lose a settlement but never count one twice. Every settlement is returned by `reconcileSpend`, whoever it was charged to.
+The record is deleted before the charge, so a crash mid-settlement can lose a settlement but never count one twice. A settlement whose delete fails charges nothing and leaves the dispatch held, for a later reconcile. Every settlement is returned by `reconcileSpend`, whoever it was charged to.
 
 ### Held spend
 
 Until settled, a pending dispatch is **held** at its ceiling:
 
-- `Context.heldCost` is what the root context's pending dispatches are held at. `restore()` sets it from storage before it returns; a dispatch left pending in this harness adds to it; a settlement takes its ceiling back off.
+- `Context.heldCost` is what the root context's pending dispatches are held at. `restore()` sets it from storage before it returns, taking over holds this harness kept on the execution's earlier context; a dispatch left pending in this harness adds to it; a settlement takes its ceiling back off.
 - `SessionUsage.heldCost` and `HarnessResponse.heldCost` report the same beside `cost` and `billedCost`, for the thread's or turn's pending dispatches this harness knows of.
 - The until `Snapshot` carries `heldCost`, and `until.maxCost` stops at `cost + heldCost`, so a resumed run cannot overspend the budget its cut-off attempt may already have used.
 

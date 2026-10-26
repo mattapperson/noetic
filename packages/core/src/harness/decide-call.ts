@@ -22,7 +22,7 @@ import {
 } from '@noetic-tools/types';
 import type { OpenRouter } from '@openrouter/sdk';
 import { z } from 'zod';
-import { statusOf } from '../util/status-code';
+import { isErrorStatus, statusOf } from '../util/status-code';
 import type { Spend } from './spend';
 
 //#region Types
@@ -190,8 +190,7 @@ async function sendNative({
     await dispatch?.settle();
     return response;
   } catch (e) {
-    // An error status means the provider refused the call: nothing was generated.
-    if (statusOf(e) !== undefined) {
+    if (isErrorStatus(e)) {
       await dispatch?.settle();
     }
     throw e;

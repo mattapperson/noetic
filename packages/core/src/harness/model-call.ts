@@ -38,7 +38,7 @@ import { GenAI, NoeticAttr, ToolAttr } from '../observability/genai-attributes';
 import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../runtime/broadcaster-utils';
 import type { EventBroadcaster } from '../runtime/event-broadcaster';
 import type { ApprovalOutcome } from '../runtime/tool-approval';
-import { statusOf } from '../util/status-code';
+import { isErrorStatus } from '../util/status-code';
 import { exportSpans } from './deps/context';
 import { RoundLedger } from './model-rounds';
 import { buildItemSchemaRegistry, createToolResultItem } from './model-schema.js';
@@ -145,9 +145,9 @@ function noteStreamGeneration(dispatch: Dispatch | undefined, event: unknown): v
   }
 }
 
-/** The provider answered with an error status before generating anything, so nothing was billed. */
+/** The provider refused the call before generating anything, so nothing was billed. */
 function wasRefused(err: unknown, dispatch: Dispatch): boolean {
-  return statusOf(err) !== undefined && dispatch.record.generationId === undefined;
+  return isErrorStatus(err) && dispatch.record.generationId === undefined;
 }
 
 function hasItem(items: ReadonlyArray<Item>, id: string): boolean {
@@ -738,6 +738,13 @@ export class AgentHarnessModelCaller {
         cost,
       });
     };
+    const countRound = (usage: RoundUsage, cost: number): void => {
+      rounds.push(usage);
+      totalUsage.inputTokens += usage.inputTokens;
+      totalUsage.outputTokens += usage.outputTokens;
+      totalUsage.cachedTokens += usage.cachedTokens ?? 0;
+      totalCost += cost;
+    };
     let stoppedForRecall = false;
     const steers = openSteerInbox({
       ctx: request.ctx,
@@ -756,11 +763,7 @@ export class AgentHarnessModelCaller {
         for (const item of replayed.appended) {
           request.ctx?.itemLog.append(item);
         }
-        rounds.push(replayed.usage);
-        totalUsage.inputTokens += replayed.usage.inputTokens;
-        totalUsage.outputTokens += replayed.usage.outputTokens;
-        totalUsage.cachedTokens += replayed.usage.cachedTokens ?? 0;
-        totalCost += replayed.cost;
+        countRound(replayed.usage, replayed.cost);
         replayedCost = (replayedCost ?? 0) + replayed.cost;
         prepared.emitIfAllowed('model_round_replayed', {
           round,
@@ -920,8 +923,8 @@ export class AgentHarnessModelCaller {
       let sdkResponse: Awaited<ReturnType<typeof callResult.getResponse>> | undefined;
       try {
         sdkResponse = await awaitWithAbort(callResult.getResponse(), roundSignal);
-        await dispatch?.settle();
         watchdog.stop();
+        await dispatch?.settle();
         await awaitWithAbort(pipePromise, roundSignal);
       } catch (err: unknown) {
         if (dispatch && wasRefused(err, dispatch)) {
@@ -932,10 +935,7 @@ export class AgentHarnessModelCaller {
             ? roundSignal.reason
             : new Error(`model stream idle timeout after ${this.opts.streamIdleTimeoutMs}ms`);
         }
-        if (request.signal?.aborted) {
-          break;
-        }
-        if (!steered) {
+        if (!steered && !request.signal?.aborted) {
           throw err;
         }
       } finally {
@@ -943,6 +943,10 @@ export class AgentHarnessModelCaller {
         dispatch?.end();
       }
       if (request.signal?.aborted) {
+        // A bill that arrived before the abort is counted here: its record is gone.
+        if (sdkResponse) {
+          countRound(extractUsage(sdkResponse.usage), sdkResponse.usage?.cost ?? 0);
+        }
         break;
       }
       if (!sdkResponse) {
@@ -1021,11 +1025,7 @@ export class AgentHarnessModelCaller {
       const roundUsage = extractUsage(sdkResponse.usage);
       const roundCost = sdkResponse.usage?.cost ?? 0;
       spans.finishModelSpan(modelSpan, roundUsage, roundCost > 0 ? roundCost : undefined);
-      rounds.push(roundUsage);
-      totalUsage.inputTokens += roundUsage.inputTokens;
-      totalUsage.outputTokens += roundUsage.outputTokens;
-      totalUsage.cachedTokens += roundUsage.cachedTokens ?? 0;
-      totalCost += roundCost;
+      countRound(roundUsage, roundCost);
       servedTier = sdkResponse.serviceTier ?? undefined;
       allItems.push(...roundItems);
 

@@ -22,7 +22,7 @@ import { estimateTokens, recordUsage } from '@noetic-tools/types';
 import type { OpenRouter } from '@openrouter/sdk';
 import { emitFrameworkEvent, getBroadcaster } from '../runtime/broadcaster-utils';
 import type { DispatchRecord, SpendLog } from '../runtime/durable/spend-log';
-import { hashStepInput } from '../runtime/durable/step-ledger';
+import { hashText } from '../runtime/durable/step-ledger';
 import { statusOf } from '../util/status-code';
 import type { EventBroadcaster } from './deps/runtime';
 import { ContextImpl, laneBase } from './deps/runtime';
@@ -77,6 +77,8 @@ interface Hold {
   ceiling?: number;
   /** Settles once the ceiling is known and held. */
   ready: Promise<void>;
+  /** A settlement is deleting its record. */
+  settling?: boolean;
 }
 
 interface Bill {
@@ -119,12 +121,13 @@ export class Spend {
   async open(params: DispatchParams): Promise<Dispatch> {
     const root = rootOf(params.ctx);
     const path = pathOf(params.ctx);
+    const json = JSON.stringify(params.body) ?? '';
     const record: DispatchRecord = {
       id: crypto.randomUUID(),
       kind: params.kind,
       model: params.model,
-      requestHash: hashStepInput(params.body) ?? '',
-      inputTokens: estimateTokens(JSON.stringify(params.body) ?? ''),
+      requestHash: hashText(json),
+      inputTokens: estimateTokens(json),
       ...(params.maxOutputTokens !== undefined
         ? {
             maxOutputTokens: params.maxOutputTokens,
@@ -180,7 +183,7 @@ export class Spend {
     await Promise.all(records.map((record) => this.hold(record, root)));
     void this.reconcile({
       executionId: ctx.id,
-    });
+    }).catch((error: unknown) => warn('reconcile', error));
   }
 
   /**
@@ -266,13 +269,16 @@ export class Spend {
   }
 
   /**
-   * Hold `record` at its ceiling, on `ctx` when given. A dispatch already held without
-   * a context gains this one.
+   * Hold `record` at its ceiling, on `ctx` when given. A dispatch already held moves to
+   * `ctx`, so an execution restored in this process takes over its cut-off calls.
    */
   private hold(record: DispatchRecord, ctx?: ContextImpl): Promise<void> {
     const known = this.holds.get(record.id);
     if (known) {
-      if (ctx && !known.ctx) {
+      if (ctx && known.ctx !== ctx) {
+        if (known.ctx && known.ceiling !== undefined) {
+          known.ctx.heldCost = Math.max(0, known.ctx.heldCost - known.ceiling);
+        }
         known.ctx = ctx;
         ctx.heldCost += known.ceiling ?? 0;
       }
@@ -366,7 +372,9 @@ export class Spend {
   /**
    * Settle a held dispatch: drop its record, release its hold, and charge its bill
    * once. The record goes first, so a crash part-way loses a settlement rather than
-   * counting one twice.
+   * counting one twice. A record already gone was settled by another harness over the
+   * same storage, which charged it; one that could not be deleted stays held, to be
+   * settled by a later reconcile.
    */
   private async settle(
     id: string,
@@ -374,14 +382,24 @@ export class Spend {
     writtenOff = false,
   ): Promise<SpendSettlement | undefined> {
     const hold = this.holds.get(id);
-    if (!hold) {
+    if (!hold || hold.settling) {
+      return undefined;
+    }
+    // The hold stays in place until the record is gone, so a reconcile listing storage
+    // meanwhile joins this settlement instead of holding the dispatch again.
+    hold.settling = true;
+    const taken = await this.take(id);
+    if (taken === 'failed') {
+      hold.settling = false;
       return undefined;
     }
     this.holds.delete(id);
     if (hold.ctx && hold.ceiling !== undefined) {
       hold.ctx.heldCost = Math.max(0, hold.ctx.heldCost - hold.ceiling);
     }
-    await quietly('delete', () => this.host.log.remove(id));
+    if (taken === 'gone') {
+      return undefined;
+    }
     await this.charge(hold, bill);
     const { executionId, threadId } = hold.record;
     this.emit(hold, 'spend_settled', {
@@ -437,6 +455,20 @@ export class Spend {
     }
     if (hold.ctx) {
       recordUsage(hold.ctx, charge);
+    }
+  }
+
+  /** Delete a held dispatch's record, unless it is already gone. */
+  private async take(id: string): Promise<'taken' | 'gone' | 'failed'> {
+    try {
+      if (!(await this.host.log.get(id))) {
+        return 'gone';
+      }
+      await this.host.log.remove(id);
+      return 'taken';
+    } catch (error) {
+      warn('delete', error);
+      return 'failed';
     }
   }
 

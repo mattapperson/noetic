@@ -174,14 +174,15 @@ export function hashStepInput(input: unknown): string | undefined {
   } catch {
     return undefined;
   }
-  return cyrb53(json ?? 'undefined');
+  return hashText(json ?? 'undefined');
 }
 
 /**
+ * @internal
  * 53-bit string hash (cyrb53, public domain: https://github.com/bryc/code/blob/master/jshash/experimental/cyrb53.js).
  * Not cryptographic — it tells "same input" from "changed input", nothing more.
  */
-function cyrb53(text: string): string {
+export function hashText(text: string): string {
   let h1 = 0xdeadbeef;
   let h2 = 0x41c6ce57;
   for (let i = 0; i < text.length; i++) {
