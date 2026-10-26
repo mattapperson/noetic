@@ -1,3 +1,7 @@
+## @noetic-tools/types-v3.13.0 (2026-10-26)
+
+* feat(core): steer a running turn with next-item delivery and onSteer layers (#139) ([bb468d8](https://github.com/mattapperson/noetic/commit/bb468d8)), closes [#139](https://github.com/mattapperson/noetic/issues/139)
+
 ## @noetic-tools/types-v3.12.0 (2026-10-26)
 
 * chore(core): keep core on 5.x and types on 3.x ([3b1212f](https://github.com/mattapperson/noetic/commit/3b1212f))
