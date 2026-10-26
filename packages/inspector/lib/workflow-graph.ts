@@ -135,6 +135,8 @@ export function describeUntil(until: UntilPredicate): string {
       return until.predicates.map(describeUntil).join(' and ');
     case 'decide':
       return `decide "${until.id}" says yes`;
+    case 'expr':
+      return until.expr;
   }
 }
 
@@ -646,6 +648,8 @@ function leafDetail(node: WorkflowNode): string | undefined {
       return node.toolName;
     case 'runCode':
       return clip(node.execute);
+    case 'compute':
+      return clip(node.expr);
     case 'subflow':
       return node.ref ? `→ ${node.ref}` : 'inline workflow';
     case 'decide':

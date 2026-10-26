@@ -20,6 +20,7 @@ const GLYPHS: Record<GraphNodeKind, string> = {
   callModel: '✦',
   invokeTool: '⚙',
   runCode: '⌘',
+  compute: 'ƒ',
   sequence: '↓',
   inParallel: '⋔',
   join: '⋏',

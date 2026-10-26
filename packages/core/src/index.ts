@@ -261,11 +261,15 @@ export { getRegistry, lookupStep, registerStep } from './runtime/step-registry';
 //#region Schemas
 
 /** @public */
-export { defaultItemSchemaRegistry, ItemSchema, ItemSchemaRegistry } from '@noetic-tools/types';
-/** @public */
 export type { Expression } from '@noetic-tools/types';
 /** @public */
-export { ExpressionSchema } from '@noetic-tools/types';
+/** @public */
+export {
+  defaultItemSchemaRegistry,
+  ExpressionSchema,
+  ItemSchema,
+  ItemSchemaRegistry,
+} from '@noetic-tools/types';
 /** @public */
 export type {
   AcpAgentWorkflowNode,

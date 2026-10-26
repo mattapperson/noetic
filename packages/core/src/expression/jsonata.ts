@@ -127,7 +127,7 @@ export async function compute(expr: CompiledExpression, input: unknown): Promise
 }
 
 /**
- * Evaluates a `when` test. `true` passes; `false` and JSONata's "no value"
+ * Evaluates an `expr` test. `true` passes; `false` and JSONata's "no value"
  * (`undefined`, e.g. a path that matched nothing) do not; anything else fails.
  *
  * @throws `NoeticConfigError` with code `EXPRESSION_FAILED` or `EXPRESSION_LIMIT_EXCEEDED`.

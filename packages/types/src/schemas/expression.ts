@@ -11,12 +11,9 @@ import { z } from 'zod';
 export type Expression = string;
 
 /** @public Zod schema validating an `Expression`: a non-empty JSONata source string. */
-export const ExpressionSchema: z.ZodType<Expression> = z
-  .string()
-  .min(1)
-  .meta({
-    id: 'Expression',
-    title: 'Expression',
-    description:
-      'A JSONata expression (https://jsonata.org) evaluated against the node input, read as JSON when it parses.',
-  });
+export const ExpressionSchema: z.ZodType<Expression> = z.string().min(1).meta({
+  id: 'Expression',
+  title: 'Expression',
+  description:
+    'A JSONata expression (https://jsonata.org) evaluated against the node input, read as JSON when it parses.',
+});
