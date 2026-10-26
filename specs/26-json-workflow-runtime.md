@@ -721,6 +721,12 @@ Two features let a workflow run without a static bound, and both are explicit op
 
 A host that runs untrusted documents keeps the defaults it wants enforced: the schema accepts `"infinity"`, so a host that must bound every loop rejects it before hydration, and a host that must bound recursion keeps `maxRecursionDepth` finite.
 
+### Turing Completeness
+
+With these opt-ins the document format is Turing complete. A `loop` with `"maxIterations": "infinity"` repeats without a static bound, a `compute` node (spec 33) carries a state object of unbounded integers from one iteration to the next, and an `expr` test — on a `conditional` route or as the loop's `{ "kind": "expr" }` until predicate — branches and halts on that state exactly. Together they simulate a two-counter machine; spec 33 § Worked Examples gives one. Recursive named subflows reach the same power by another road.
+
+So whether a document halts cannot be decided before it runs, and the runtime does not try. Bounds come from the run's budgets instead: an aborted context, `maxCost` and `maxDuration` until predicates, `maxRecursionDepth`, and the per-evaluation expression limits (spec 33 § Limits). A host that runs untrusted documents sets the budgets it needs rather than relying on documents to be finite.
+
 ---
 
 ## Plan-Memory Integration
@@ -889,7 +895,8 @@ const WorkflowDocumentSchema = z.object({
 - `Context`, `Item`, `ItemLog`: `07-context-and-event-log`
 - `AgentHarness`, `Tool`: `08-runtime`
 - `NoeticError` kinds: `09-error-model`
-- `Expression`, `evaluate`: `33-expressions`
+- `Expression`, `ExpressionSchema`, `ExpressionLimits`, the JSONata adapter, and the `compute` / `expr` semantics: `33-expressions`
+- `decide` nodes and `routeSwitch`, including deciders as until predicates: `32-decide`
 - `ContextLayer`: `11-context-layer-system`
 - `plan`, `PlanState`: `12-builtin-context-layers`
 - Hand-written compositions of the same primitives: `13-patterns`

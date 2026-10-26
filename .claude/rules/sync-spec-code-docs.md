@@ -38,8 +38,8 @@ They are mandatory, not optional.
 | `29-chat-platform-integration.md` | `packages/chat-sdk/src/`, `packages/core/src/runtime/channel-store.ts` (`getChannelStream`) | `framework/chat-sdk.mdx` |
 | `30-agent-plugins.md` | `packages/agent-plugins/src/` | `framework/context-layers/agent-plugins.mdx` |
 | `31-acp-server.md` | `packages/acp/src/` (serve/`toAcpAgent`, `./server` entry, client-backed adapters), `packages/types/src/types/tool.ts` (`ToolAcpDeclaration`), `packages/types/src/types/steering.ts` (`BeforeToolCallParams.callId`) | `framework/acp-server.mdx` |
-| `33-expressions.md` | `packages/types/src/schemas/expression.ts`, `expression/`, `builders/workflow-hydrator.ts` (`compute`, `when`) | `framework/expressions.mdx`, `framework/json-runtime.mdx` (+ run `bun run gen:schema`, see Requirement 6) |
 | `32-decide.md` | `packages/types/src/types/decide.ts`, `builders/decide-builders`, `interpreter/execute-decide`, `harness/decide-call`, `packages/context/src/context/layers/decisions-history.ts` | `framework/steps/decide.mdx`, `framework/operators/route-switch.mdx`, `framework/context-layers/decisions-history.mdx` |
+| `33-expressions.md` | `packages/types/src/schemas/expression.ts`, `expression/` (the JSONata adapter and `expressionErrors`), `builders/workflow-hydrator.ts` (`compute`, route and until `expr`), `builders/dynamic-workflow.ts` (syntax validation, `expressionLimits`) | `framework/expressions.mdx`, `framework/json-runtime.mdx`, `framework/errors.mdx` (+ run `bun run gen:schema`, see Requirement 6) |
 
 **Paths are relative to**: Specs → `specs/`, Source → `packages/core/src/` (except rows that name a full `packages/...` path), Docs → `packages/web/content/docs/`
 

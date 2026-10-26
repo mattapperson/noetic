@@ -390,9 +390,9 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 #### WORKFLOW_VALIDATION_FAILED
 
-**Cause:** A workflow document does not match `WorkflowDocumentSchema`, or `dynamicWorkflow()`'s planner failed to produce a valid document within its revision budget.
+**Cause:** A workflow document does not match `WorkflowDocumentSchema`, one of its [expressions](/docs/framework/expressions) does not parse as JSONata, or `dynamicWorkflow()`'s planner failed to produce a valid document within its revision budget.
 
-**Fix:** Correct the document against the [published JSON Schema](/docs/framework/json-runtime). For `dynamicWorkflow`, give the planner clearer instructions or a more capable model, or raise `maxRevisions`.
+**Fix:** Correct the document against the [published JSON Schema](/docs/framework/json-runtime), and fix any expression syntax the message names (it gives the JSONata error code and position). For `dynamicWorkflow`, give the planner clearer instructions or a more capable model, or raise `maxRevisions`.
 
 #### INVALID_WORKFLOW_SOURCE
 
@@ -418,6 +418,18 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 **Fix:** Pass a positive integer such as `100`, or `Infinity`.
 
+#### EXPRESSION_FAILED
+
+**Cause:** An [expression](/docs/framework/expressions) failed at execution time: JSONata raised an error (such as arithmetic on a string), a `compute` expression gave no value or gave a function, or a test gave something other than a boolean. The message names the node and quotes JSONata's error code.
+
+**Fix:** Fix the expression or the input it reads. A path that matches nothing gives no value, so check field names against the node's input.
+
+#### EXPRESSION_LIMIT_EXCEEDED
+
+**Cause:** An [expression](/docs/framework/expressions) ran past one of its limits: its time budget, its nesting depth, or the size of a sequence it built.
+
+**Fix:** Bound the recursion or data size in the expression, or raise the limits through `expressionLimits` on `parseAndRunWorkflow` or `HydrationContext`.
+
 #### UNKNOWN_NODE_KIND
 
 **Cause:** A workflow node has a `kind` the hydrator does not know.
@@ -428,7 +440,7 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 **Cause:** A workflow loop's `until` predicate has an unknown `kind`.
 
-**Fix:** Use one of `maxSteps`, `maxCost`, `maxDuration`, `noToolCalls`, `never`, `outputContains`, `outputEquals`, `converged`, `any`, `all`, or `decide`.
+**Fix:** Use one of `maxSteps`, `maxCost`, `maxDuration`, `noToolCalls`, `never`, `outputContains`, `outputEquals`, `converged`, `expr`, `any`, `all`, or `decide`.
 
 #### UNKNOWN_TOOL_REFERENCE
 
@@ -522,3 +534,4 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 - [Channels](/docs/framework/operators/channels) -- `channel_timeout` and `channel_closed` errors.
 - [Loop & Until](/docs/framework/operators/loop-and-until) -- the `onError` recovery callback.
 - [AgentHarness](/docs/framework/runtime) -- `harness.cancel()` triggers cancellation errors.
+- [Expressions](/docs/framework/expressions) -- the JSONata expressions behind `EXPRESSION_FAILED` and `EXPRESSION_LIMIT_EXCEEDED`.
