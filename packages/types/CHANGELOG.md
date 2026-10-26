@@ -1,3 +1,7 @@
+## @noetic-tools/types-v3.14.0 (2026-10-26)
+
+* feat(core): typed custom items that stream events and a final item ([ce8b253](https://github.com/mattapperson/noetic/commit/ce8b253))
+
 ## @noetic-tools/types-v3.13.0 (2026-10-26)
 
 * feat(core): steer a running turn with next-item delivery and onSteer layers (#139) ([bb468d8](https://github.com/mattapperson/noetic/commit/bb468d8)), closes [#139](https://github.com/mattapperson/noetic/issues/139)
