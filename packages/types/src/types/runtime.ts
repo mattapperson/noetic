@@ -208,9 +208,33 @@ export type HarnessStatus =
       readonly turnId: string;
     }
   | {
+      /** A graceful stop: no new work starts while in-flight model calls finish. */
+      readonly kind: 'draining';
+      readonly turnId: string;
+      /** Epoch ms at which whatever is still in flight is cancelled. */
+      readonly deadline: number;
+    }
+  | {
       readonly kind: 'aborting';
       readonly turnId: string;
     };
+
+//#endregion
+
+//#region Cancel Options
+
+/**
+ * @public How `cancel` and `abort` stop an execution.
+ *
+ * With `drainMs`, the stop is graceful: no new step, model round or tool call
+ * starts, model calls already in flight get up to `drainMs` to finish and be
+ * charged, and then the execution is cancelled as without it. A second stop
+ * during the drain cancels at once.
+ */
+export interface CancelOptions {
+  readonly reason?: string;
+  readonly drainMs?: number;
+}
 
 //#endregion
 
@@ -290,13 +314,10 @@ export interface AgentHarnessContract<
 
   /**
    * Cancel the in-flight turn, if any. Queued messages are preserved — the
-   * runner re-kicks from the queue once abort completes.
+   * runner re-kicks from the queue once abort completes. With `drainMs` the
+   * turn drains first (see `CancelOptions`) and reports `draining` status.
    */
-  abort(
-    scope?: SessionScope & {
-      reason?: string;
-    },
-  ): Promise<void>;
+  abort(scope?: SessionScope & CancelOptions): Promise<void>;
 
   /** Current runtime status of a session. */
   getStatus(scope?: SessionScope): HarnessStatus;
@@ -445,8 +466,11 @@ export interface AgentHarnessContract<
    * call and ACP agent turn are cut short, and the next step boundary throws
    * `cancelled`. Idempotent: cancelling an already-cancelled context is a
    * no-op. Use `ctx.abort()` when you want the signal without layer teardown.
+   *
+   * Pass `{ drainMs }` to drain first (see `CancelOptions`); a string is the
+   * reason alone.
    */
-  cancel(ctx: Context, reason?: string): Promise<void>;
+  cancel(ctx: Context, options?: string | CancelOptions): Promise<void>;
   /** Trace exporter spans are flushed to. Defaults to a no-op exporter. */
   readonly traceExporter: TraceExporter;
   createSpan(name: string, parent: Span | null): Span;
