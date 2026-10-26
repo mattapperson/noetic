@@ -1,6 +1,7 @@
 import type { ContextData, ContextLayer, LayerStateStore } from '@noetic-tools/context';
 import type {
   Context,
+  Item,
   Step,
   StepRunCode,
   StepSpawn,
@@ -224,15 +225,20 @@ export function resolveLedgerKey<TContext, I, O>(
 }
 
 /**
- * Resume path: when a previous run recorded this exact step at `ledgerKey`,
- * replay its output instead of re-running, and emit `step_replayed`. Returns
- * `{ hit: false }` when there is nothing to replay so the caller dispatches the
- * step normally.
+ * Resume path: when a previous run recorded this exact step at `ledgerKey` on the same
+ * input, replay its output instead of re-running, put the items it appended back on
+ * `stepCtx`'s item log, and emit `step_replayed`. Returns `{ hit: false }` when there
+ * is nothing to replay so the caller dispatches the step normally.
+ *
+ * The items go back through `stepCtx` so the lanes above it note them too: a parent
+ * that completes on this resumed run records everything beneath it, replayed or not.
  */
 function replayFromLedger<TContext, I, O>(opts: {
   ledger: StepLedger | undefined;
   ledgerKey: string | undefined;
+  inputHash: string | undefined;
   step: Step<TContext, I, O>;
+  stepCtx: Context<TContext>;
   broadcaster: EventBroadcaster | undefined;
   agentName: string;
 }):
@@ -243,7 +249,7 @@ function replayFromLedger<TContext, I, O>(opts: {
   | {
       hit: false;
     } {
-  const { ledger, ledgerKey, step, broadcaster, agentName } = opts;
+  const { ledger, ledgerKey, inputHash, step, stepCtx, broadcaster, agentName } = opts;
   if (!ledger || ledgerKey === undefined || ledger.isEmpty) {
     return {
       hit: false,
@@ -252,11 +258,21 @@ function replayFromLedger<TContext, I, O>(opts: {
   const replayed = ledger.take(ledgerKey, {
     id: step.id,
     kind: step.kind,
+    inputHash,
   });
   if (!replayed) {
     return {
       hit: false,
     };
+  }
+  const items = parseRecordedItems(stepCtx, replayed.items ?? []);
+  if (!items) {
+    return {
+      hit: false,
+    };
+  }
+  for (const item of items) {
+    stepCtx.itemLog.append(item);
   }
   emitFrameworkEvent({
     broadcaster,
@@ -274,25 +290,51 @@ function replayFromLedger<TContext, I, O>(opts: {
 }
 
 /**
- * Record a completed step's output so a resumed run replays it rather than
- * re-executing. A no-op without a ledger or ledger key. Only successes reach
- * here — a step that threw skips this call in `execute` and runs again on resume.
+ * Recorded items, parsed through the context's item schemas, or null when one no longer
+ * parses — a registry that changed since the run was recorded. The step then runs fresh
+ * rather than half-replaying its history.
+ */
+function parseRecordedItems<TContext>(ctx: Context<TContext>, raw: unknown[]): Item[] | null {
+  if (raw.length === 0) {
+    return [];
+  }
+  try {
+    return frameworkCast<Context>(ctx).itemSchemas?.parseMany(raw) ?? frameworkCast<Item[]>(raw);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Record a completed step's output, input hash, and the items it appended, so a resumed
+ * run replays this step rather than re-executing it. A no-op without a ledger or ledger
+ * key. Only successes reach here — a step that threw skips this call in `execute` and
+ * runs again on resume.
  */
 async function recordToLedger<TContext, I, O>(opts: {
   ledger: StepLedger | undefined;
   ledgerKey: string | undefined;
+  inputHash: string | undefined;
+  lane: ContextImpl | null;
   step: Step<TContext, I, O>;
   output: O;
 }): Promise<void> {
-  const { ledger, ledgerKey, step, output } = opts;
+  const { ledger, ledgerKey, inputHash, lane, step, output } = opts;
   if (!ledger || ledgerKey === undefined) {
     return;
   }
+  const items = lane?.appendedItems() ?? [];
   await ledger.record({
     path: ledgerKey,
     stepId: step.id,
     kind: step.kind,
     output,
+    inputHash,
+    ...(items.length > 0
+      ? {
+          items,
+        }
+      : {}),
     completedAt: new Date().toISOString(),
   });
 }
@@ -373,11 +415,17 @@ export async function execute<TContext = ContextData, I = unknown, O = unknown>(
    * output instead of re-running it. `ledgerKey`/`ledger` are captured before
    * dispatch and reused by the record below. */
   const ledgerKey = resolveLedgerKey(step, input, stepCtx);
+  if (ledgerKey === undefined) {
+    lane?.skipLedger();
+  }
+  const inputHash = ledgerKey === undefined ? undefined : lane?.currentDispatch()?.inputHash;
   const ledger = impl?.ledger;
   const replay = replayFromLedger({
     ledger,
     ledgerKey,
+    inputHash,
     step,
+    stepCtx,
     broadcaster,
     agentName,
   });
@@ -451,6 +499,9 @@ export async function execute<TContext = ContextData, I = unknown, O = unknown>(
         });
       }
     }
+  } catch (error) {
+    lane?.releaseDispatch();
+    throw error;
   } finally {
     lane?.leaveStep(frame);
   }
@@ -475,6 +526,8 @@ export async function execute<TContext = ContextData, I = unknown, O = unknown>(
   await recordToLedger({
     ledger,
     ledgerKey,
+    inputHash,
+    lane,
     step,
     output: result,
   });

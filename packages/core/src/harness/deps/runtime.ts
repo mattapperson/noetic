@@ -3,12 +3,15 @@ export { ChannelStore, warnToConsole } from '../../runtime/channel-store';
 export { ContextImpl, collectContextTree, rootIdOf } from '../../runtime/context-impl';
 export { snapshotCwdState } from '../../runtime/cwd-helpers';
 export type { CheckpointStore } from '../../runtime/durable';
+export { createCheckpointStore } from '../../runtime/durable/checkpoint-store';
 export type { RestoreCheckpointOptions } from '../../runtime/durable/harness-checkpoints';
 export {
   captureCheckpoint,
   clearCheckpoint,
   restoreFromCheckpoint,
 } from '../../runtime/durable/harness-checkpoints';
+export type { SessionStore } from '../../runtime/durable/session-store';
+export { createSessionStore } from '../../runtime/durable/session-store';
 export type {
   StepLedgerEntry,
   StepLedgerRetention,

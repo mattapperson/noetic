@@ -17,11 +17,19 @@
  * `key:<replayKey>` instead: content-addressed, so it finds its output wherever it
  * runs. A `durable: false` step has no key and is never recorded.
  *
+ * An entry also carries what replay must put back: the items the step appended to its
+ * context's item log (a checkpoint holds the log as it stood when the run began, so the
+ * replayed steps rebuild the rest), and a hash of the step's input, so a step whose input
+ * changed since it was recorded runs again instead of replaying an answer to a
+ * different question.
+ *
  * Sharding bounds the cost of one append but not the total, so retention is bounded on
  * two axes (`StepLedgerRetention`): an oversized entry is dropped rather than written,
- * and past `maxEntries` the oldest entry is evicted. Both degradations are safe by
- * construction — a missing entry re-runs its step, which costs work rather than
- * correctness.
+ * and once `maxEntries` are live nothing more is recorded. Entries beneath a parent that
+ * recorded are pruned, since a resumed run replays the parent without descending, so the
+ * live count tracks the open part of the run rather than its length. Both degradations
+ * are safe by construction — a missing entry re-runs its step, which costs work rather
+ * than correctness.
  */
 
 import type { StorageAdapter } from '@noetic-tools/context';
@@ -45,6 +53,13 @@ export const StepLedgerEntrySchema = z.object({
   kind: z.string(),
   /** Replayed verbatim in place of re-running the step. */
   output: z.unknown(),
+  /**
+   * Hash of the step's input when it ran (`hashStepInput`). Replay requires the new
+   * dispatch's input to hash the same. Absent when the input could not be encoded.
+   */
+  inputHash: z.string().optional(),
+  /** Items the step appended to its context's item log, re-appended on replay. */
+  items: z.array(z.unknown()).optional(),
   completedAt: z.string(),
 });
 
@@ -64,8 +79,9 @@ export type StepLedgerEntry = z.infer<typeof StepLedgerEntrySchema>;
  */
 export interface StepLedgerRetention {
   /**
-   * Largest output, in UTF-8 bytes of its JSON encoding, that will be recorded. A step
-   * whose output exceeds this is not recorded at all and re-runs on resume. Keeps one
+   * Largest entry that will be recorded, in UTF-8 bytes of the JSON encoding of the
+   * step's output plus the items it appended. A step whose entry exceeds this is not
+   * recorded at all and re-runs on resume. Keeps one
    * entry inside the per-value limit real storage backends impose (128 KiB on several)
    * instead of failing the write. Pass `Infinity` to record any size.
    *
@@ -73,9 +89,10 @@ export interface StepLedgerRetention {
    */
   maxEntryBytes?: number;
   /**
-   * Most entries retained for one execution. Recording past the cap evicts the oldest
-   * entry, so resume is best-effort over a bounded *suffix* of the run: the tail of the
-   * work is skipped, the head runs again. Pass `Infinity` to retain every entry.
+   * Most live entries for one execution. Once the cap is reached nothing more is
+   * recorded, so resume replays the head of the run and runs the rest again. Entries
+   * beneath a parent that recorded do not count — they are pruned. Pass `Infinity` to
+   * record without limit.
    *
    * Defaults to `DEFAULT_STEP_LEDGER_RETENTION.maxEntries` (1000).
    */
@@ -136,6 +153,44 @@ function fitsByteCap(json: string, cap: number): boolean {
 
 //#endregion
 
+//#region Input hash
+
+/**
+ * @internal
+ * A short, stable hash of a step input's JSON encoding, or undefined when the input
+ * cannot be encoded (a cycle, a `BigInt`). A replayed output becomes the next step's
+ * input after a JSON round trip, and `JSON.stringify` gives the same text for a value
+ * and its round-tripped copy, so a resumed run hashes the same inputs the first run did.
+ */
+export function hashStepInput(input: unknown): string | undefined {
+  let json: string | undefined;
+  try {
+    json = JSON.stringify(input);
+  } catch {
+    return undefined;
+  }
+  return cyrb53(json ?? 'undefined');
+}
+
+/**
+ * 53-bit string hash (cyrb53, public domain: https://github.com/bryc/code/blob/master/jshash/experimental/cyrb53.js).
+ * Not cryptographic — it tells "same input" from "changed input", nothing more.
+ */
+function cyrb53(text: string): string {
+  let h1 = 0xdeadbeef;
+  let h2 = 0x41c6ce57;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+}
+
+//#endregion
+
 //#region Store
 
 /** Storage key prefix owning every ledger entry for one execution. */
@@ -147,16 +202,16 @@ export function stepLedgerPrefix(executionId: string): string {
  * @public
  * Everything one execution's ledger recovered from storage: the entries available for
  * replay plus the sequence bookkeeping a further append needs. `nextSeq` cannot be
- * derived from `entries.size` — retention leaves gaps, and reusing a live sequence
- * number would overwrite an entry the resumed run still has to replay.
+ * derived from `entries.size` — pruning leaves gaps, and reusing a live sequence number
+ * would overwrite an entry the resumed run still has to replay.
  */
 export interface StepLedgerWindow {
   /** Recovered entries, keyed by execution path. Corrupt rows are skipped. */
   entries: Map<string, StepLedgerEntry>;
+  /** Sequence number holding each recovered path, so pruning can delete it. */
+  seqs: Map<string, number>;
   /** Sequence number the next append takes: highest recorded, plus one. */
   nextSeq: number;
-  /** Lowest sequence number still in storage — where eviction resumes. */
-  oldestSeq: number;
 }
 
 /**
@@ -209,20 +264,21 @@ export function createStepLedgerStore(opts: { storage: StorageAdapter }): StepLe
        * moment a network-backed adapter can least afford an N+1. */
       const raws = await storageGetMany<unknown>(storage, keys);
       const entries = new Map<string, StepLedgerEntry>();
-      /* Sequence bounds come from the KEYS, not the parsed rows: a row that fails to
-       * parse still occupies its key, so it must not be handed back out as reusable. */
+      /* The next sequence number comes from the KEYS, not the parsed rows: a row that
+       * fails to parse still occupies its key, so it must not be handed back out. */
       let highestSeq = -1;
-      let oldestSeq = -1;
-      // Walk `keys`, not the map: `seqKey`'s zero-padding makes `list()` order
-      // dispatch order, and a later entry at a path must win over an earlier one.
-      for (const key of keys) {
+      const seqs = new Map<string, number>();
+      // Walk the keys sorted: `seqKey`'s zero-padding makes key order dispatch order,
+      // and a later entry at a path must win over an earlier one.
+      for (const key of [
+        ...keys,
+      ].sort()) {
         const seq = seqFromKey(executionId, key);
         if (seq !== null) {
           highestSeq = Math.max(highestSeq, seq);
-          oldestSeq = oldestSeq === -1 ? seq : Math.min(oldestSeq, seq);
         }
         const raw = raws.get(key);
-        if (raw === undefined) {
+        if (raw === undefined || seq === null) {
           continue;
         }
         const parsed = StepLedgerEntrySchema.safeParse(raw);
@@ -233,11 +289,12 @@ export function createStepLedgerStore(opts: { storage: StorageAdapter }): StepLe
           continue;
         }
         entries.set(parsed.data.path, parsed.data);
+        seqs.set(parsed.data.path, seq);
       }
       return {
         entries,
+        seqs,
         nextSeq: highestSeq + 1,
-        oldestSeq: oldestSeq === -1 ? 0 : oldestSeq,
       };
     },
     clear: async (executionId) => {
@@ -261,8 +318,17 @@ export interface StepLedgerStats {
   droppedOversize: number;
   /** Entries not written because their output does not survive JSON encoding. */
   droppedUnserialisable: number;
-  /** Entries deleted to stay within `maxEntries`. */
-  evicted: number;
+  /** Entries not written because `maxEntries` were already live. */
+  droppedFull: number;
+  /** Entries deleted because a parent above them recorded. */
+  pruned: number;
+}
+
+/** What a recorded step leaves for replay: the step's identity and input hash. */
+export interface StepLedgerMatch {
+  id: string;
+  kind: string;
+  inputHash: string | undefined;
 }
 
 /**
@@ -272,16 +338,16 @@ export interface StepLedgerStats {
  *
  * Shared by reference across inParallel/spawn children so one execution has one ledger —
  * path keys are globally unique across the step tree, so a flat map is correct. That
- * sharing is also why retention lives here rather than in the store: the sequence
- * cursor eviction walks belongs to the execution, not to the harness.
+ * sharing is also why retention lives here rather than in the store: the live set that
+ * the entry cap counts belongs to the execution, not to the harness.
  */
 export class StepLedger {
-  /** Recovered entries, by path. Consumed as replay proceeds. */
+  /** Recovered entries, by path. */
   private readonly replayable: Map<string, StepLedgerEntry>;
+  /** Sequence number holding each live entry, recovered or recorded, by path. */
+  private readonly live: Map<string, number>;
   /** Sequence number the next recorded entry takes. */
   private seq: number;
-  /** Lowest sequence number still in storage — advances as eviction proceeds. */
-  private oldestSeq: number;
   private readonly store?: StepLedgerStore;
   private readonly executionId: string;
   private readonly retention: Required<StepLedgerRetention>;
@@ -289,7 +355,8 @@ export class StepLedger {
     recorded: 0,
     droppedOversize: 0,
     droppedUnserialisable: 0,
-    evicted: 0,
+    droppedFull: 0,
+    pruned: 0,
   };
 
   constructor(opts: {
@@ -303,8 +370,8 @@ export class StepLedger {
     this.store = opts.store;
     this.retention = resolveStepLedgerRetention(opts.retention);
     this.replayable = opts.recovered?.entries ?? new Map();
+    this.live = new Map(opts.recovered?.seqs ?? []);
     this.seq = opts.recovered?.nextSeq ?? 0;
-    this.oldestSeq = opts.recovered?.oldestSeq ?? 0;
   }
 
   /** True when this execution has nothing recovered to replay (the common, fresh case). */
@@ -320,47 +387,41 @@ export class StepLedger {
   }
 
   /**
-   * The recorded output for `path`, when a previous run completed the same step there.
-   * A divergence (different step id or kind at this key) returns undefined so the step
-   * runs fresh. At a positional path it also discards every entry recorded beneath it —
-   * the subtree's recorded outputs belong to a branch that no longer exists. A `key:`
-   * entry discards only itself: its children are keyed by their own paths or keys, not
-   * nested under it.
+   * The recorded entry for `path`, when a previous run completed the same step there on
+   * the same input. A divergence — a different step id, kind, or input — returns
+   * undefined so the step runs fresh. At a positional path it also discards every entry
+   * recorded beneath it: the subtree's outputs belong to a run that no longer exists. A
+   * `key:` entry discards only itself: nothing is nested under a content key.
+   *
+   * An entry recorded without an input hash matches on identity alone.
    */
-  take(
-    path: string,
-    step: {
-      id: string;
-      kind: string;
-    },
-  ): StepLedgerEntry | undefined {
+  take(path: string, step: StepLedgerMatch): StepLedgerEntry | undefined {
     const entry = this.replayable.get(path);
     if (!entry) {
       return undefined;
     }
-    if (entry.stepId !== step.id || entry.kind !== step.kind) {
-      if (path.startsWith(REPLAY_KEY_PREFIX)) {
-        this.replayable.delete(path);
-        return undefined;
-      }
-      this.discardSubtree(path);
+    if (matches(entry, step)) {
+      return entry;
+    }
+    if (path.startsWith(REPLAY_KEY_PREFIX)) {
+      this.replayable.delete(path);
       return undefined;
     }
-    return entry;
-  }
-
-  /** Drop `path` and everything recorded below it. */
-  private discardSubtree(path: string): void {
     for (const key of [
       ...this.replayable.keys(),
     ]) {
-      if (key === path || key.startsWith(`${path}/`)) {
+      if (key === path || isBeneath(key, path)) {
         this.replayable.delete(key);
       }
     }
+    return undefined;
   }
 
-  /** Record a completed step. Best-effort: a failed write costs resumability, not the run. */
+  /**
+   * Record a completed step, then prune what it makes dead: a resumed run replays this
+   * entry without descending, so nothing recorded beneath it will be read again.
+   * Best-effort: a failed write costs resumability, not the run.
+   */
   async record(entry: StepLedgerEntry): Promise<void> {
     if (!this.store) {
       return;
@@ -370,9 +431,7 @@ export class StepLedger {
     }
     /* Reserve the sequence number BEFORE awaiting: concurrent inParallel legs record through
      * the one shared ledger, and two of them reading the same counter would write the
-     * same key, silently overwriting a sibling's entry. A write that then fails leaves a
-     * gap, which only makes the window below a slight over-estimate of the live count —
-     * eviction runs marginally early, never late. */
+     * same key, silently overwriting a sibling's entry. */
     const seq = this.seq;
     this.seq = seq + 1;
     try {
@@ -384,19 +443,76 @@ export class StepLedger {
       );
       return;
     }
+    const replaced = this.live.get(entry.path);
+    this.live.set(entry.path, seq);
     this.counts.recorded += 1;
-    await this.evictOverflow();
+    if (replaced !== undefined) {
+      await this.deleteSeq(replaced);
+    }
+    if (!entry.path.startsWith(REPLAY_KEY_PREFIX)) {
+      await this.prune((path) => isBeneath(path, entry.path));
+    }
   }
 
   /**
-   * Whether this entry is small enough — and encodable at all — to be worth a write.
-   * An output no adapter could serialise is treated exactly like an oversized one:
-   * not recorded, so the step re-runs.
+   * Drop every positional entry. A host calls this once a run has finished and the
+   * checkpoint holds its result: every later resume starts past them, so they are dead.
+   * `key:` entries stay — they are keyed by content, and a later run may ask the same.
+   */
+  async dropPaths(): Promise<void> {
+    await this.prune((path) => !path.startsWith(REPLAY_KEY_PREFIX));
+    for (const path of [
+      ...this.replayable.keys(),
+    ]) {
+      if (!path.startsWith(REPLAY_KEY_PREFIX)) {
+        this.replayable.delete(path);
+      }
+    }
+  }
+
+  private async prune(dead: (path: string) => boolean): Promise<void> {
+    for (const [path, seq] of [
+      ...this.live,
+    ]) {
+      if (!dead(path)) {
+        continue;
+      }
+      this.live.delete(path);
+      this.replayable.delete(path);
+      this.counts.pruned += 1;
+      await this.deleteSeq(seq);
+    }
+  }
+
+  private async deleteSeq(seq: number): Promise<void> {
+    try {
+      await this.store?.delete(this.executionId, seq);
+    } catch (error) {
+      console.warn(
+        `StepLedger: failed to delete entry ${seq} of "${this.executionId}":`,
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+
+  /**
+   * Whether this entry is small enough, encodable, and within the live cap. An entry
+   * that fails any test is not recorded, so its step re-runs on resume.
    */
   private retainable(entry: StepLedgerEntry): boolean {
-    let json: string | undefined;
+    if (!this.live.has(entry.path) && this.liveAfter(entry.path) >= this.retention.maxEntries) {
+      this.counts.droppedFull += 1;
+      this.warnOnFirstDrop(
+        this.counts.droppedFull,
+        `StepLedger: not recording "${entry.path}" — ${this.retention.maxEntries} entries (maxEntries) are already live.`,
+      );
+      return false;
+    }
+    let bytes: string;
     try {
-      json = JSON.stringify(entry.output);
+      // `undefined` stringifies to nothing; there is no size to bound.
+      bytes =
+        (JSON.stringify(entry.output) ?? '') + (entry.items ? JSON.stringify(entry.items) : '');
     } catch {
       this.counts.droppedUnserialisable += 1;
       this.warnOnFirstDrop(
@@ -405,44 +521,29 @@ export class StepLedger {
       );
       return false;
     }
-    // `undefined` stringifies to nothing; there is no size to bound.
-    if (json !== undefined && !fitsByteCap(json, this.retention.maxEntryBytes)) {
+    if (!fitsByteCap(bytes, this.retention.maxEntryBytes)) {
       this.counts.droppedOversize += 1;
       this.warnOnFirstDrop(
         this.counts.droppedOversize,
-        `StepLedger: not recording "${entry.path}" — output exceeds maxEntryBytes (${this.retention.maxEntryBytes}).`,
+        `StepLedger: not recording "${entry.path}" — output and items exceed maxEntryBytes (${this.retention.maxEntryBytes}).`,
       );
       return false;
     }
     return true;
   }
 
-  /**
-   * Delete oldest-first until the execution is back inside `maxEntries`. The bound is on
-   * the sequence *window* rather than an exact row count, which is what keeps this
-   * correct without a `list()` per append.
-   */
-  private async evictOverflow(): Promise<void> {
-    const store = this.store;
-    if (!store) {
-      return;
+  /** Live entries once recording at `path` has pruned what lies beneath it. */
+  private liveAfter(path: string): number {
+    if (this.live.size < this.retention.maxEntries || path.startsWith(REPLAY_KEY_PREFIX)) {
+      return this.live.size;
     }
-    while (this.seq - this.oldestSeq > this.retention.maxEntries) {
-      const victim = this.oldestSeq;
-      try {
-        await store.delete(this.executionId, victim);
-      } catch (error) {
-        /* Leave the cursor where it is and stop: the next append retries this victim
-         * rather than spinning on a store that is currently refusing deletes. */
-        console.warn(
-          `StepLedger: failed to evict entry ${victim} of "${this.executionId}":`,
-          error instanceof Error ? error.message : String(error),
-        );
-        return;
+    let beneath = 0;
+    for (const key of this.live.keys()) {
+      if (isBeneath(key, path)) {
+        beneath += 1;
       }
-      this.oldestSeq = victim + 1;
-      this.counts.evicted += 1;
     }
+    return this.live.size - beneath;
   }
 
   /** One warning per reason per execution — a long run would otherwise flood the log. */
@@ -452,6 +553,18 @@ export class StepLedger {
     }
     console.warn(`${message} The step will re-run on resume; further drops are silent.`);
   }
+}
+
+function matches(entry: StepLedgerEntry, step: StepLedgerMatch): boolean {
+  if (entry.stepId !== step.id || entry.kind !== step.kind) {
+    return false;
+  }
+  return entry.inputHash === undefined || entry.inputHash === step.inputHash;
+}
+
+/** Whether `path` lies in the subtree under `parent` — a lane below it or a child context's prefix. */
+function isBeneath(path: string, parent: string): boolean {
+  return path.startsWith(`${parent}/`) || path.startsWith(`${parent}[`);
 }
 
 //#endregion

@@ -9,6 +9,7 @@ import { AgentHarness } from '../../src/harness/agent-harness';
 import { ChannelStore } from '../../src/runtime/channel-store';
 import { createCheckpointStore } from '../../src/runtime/durable/checkpoint-store';
 import { createInMemoryStorage } from '../../src/runtime/in-memory-storage';
+import { runThenCrash } from '../_helpers';
 
 const status = channel('status', {
   schema: z.string(),
@@ -175,7 +176,7 @@ describe('channel state and checkpoints', () => {
       const opts = durableOpts();
       const first = new AgentHarness(opts);
       const ctx = first.createContext();
-      await first.run(sender(durable), 'go', ctx);
+      await runThenCrash(first, sender(durable), 'go', ctx);
 
       const second = new AgentHarness(opts);
       const resumed = await second.restore(ctx.id);

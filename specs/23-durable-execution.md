@@ -17,15 +17,15 @@ Three subsystems participate:
 2. **Subprocess adapter durability** — `adapter.listLive()` and `adapter.reattach(handleId)` persist and recover the handle manifest for every child the adapter launched.
 3. **Durable IPC** — `DurableOutboundQueue` numbers every outbound IPC frame with a monotonic seq, persists them through a `StorageAdapter`, and resumes from the client's last-acked offset on reconnect. Protocol v2 frames (`durable`, `durableResume`, `durableAck`) carry the wire envelope.
 
-Durability is opt-in and composable. A zero-config harness has no `CheckpointStore` and in-memory adapters with no storage, so every surface is a no-op and all existing behaviour is preserved bit-identically. A CLI configured with `createFileStorage({root: '~/.noetic/checkpoints'})` and `createLocalSubprocessAdapter({storage: fileStorage})` gets full durable execution.
+Durability follows storage. A zero-config harness has no storage adapter, so every surface is a no-op and behaviour is ephemeral. A harness given `environment.storage.adapter` gets a `CheckpointStore` over that adapter by default, so a later harness built over the same storage resumes this one's executions — step-level resume (`23a-step-level-resume`) included — with no further wiring. `checkpointStore: false` keeps an adapter for layer persistence only. A CLI configured with `createFileStorage({root: '~/.noetic/checkpoints'})` and `createLocalSubprocessAdapter({storage: fileStorage})` gets full durable execution.
 
 ## `CheckpointSnapshot` schema
 
 ```typescript
-const CheckpointSchemaVersion = 2;
+const CheckpointSchemaVersion = 3;
 
 interface CheckpointSnapshot {
-  schemaVersion: 2;
+  schemaVersion: 3;
   executionId: string;
   threadId?: string;
   resourceId?: string;
@@ -33,7 +33,10 @@ interface CheckpointSnapshot {
   layers: Record<string, unknown>;        // layerId → serialised state
   cwd: CwdSnapshot | null;
   askUser: PendingAskUserSnapshot[];
-  itemLog: ItemLogSnapshot;
+  itemLog: ItemLogSnapshot;               // the run baseline — see below
+  occurrences: Record<string, number>;    // dispatch counts at the same moment
+  state?: unknown;                        // ctx.state, when it survives JSON encoding
+  usage?: { tokens: TokenUsage; cost: number };
   channels?: ChannelSnapshot[];           // stored state of channels the execution used; topics skipped
   capturedAt: string;                     // ISO-8601
 }
@@ -68,6 +71,7 @@ interface ItemLogSnapshot {
 
 Version history:
 
+- **v2 → v3** — `itemLog` holds the run baseline (the log when the run in flight began) instead of the log at capture time, and `occurrences` records the dispatch counts from that same moment. A resumed run's replayed steps put their items back (`23a-step-level-resume` § The run baseline); a v2 log already holds them, so restoring it would duplicate history. No migration — discard and start fresh.
 - **v1 → v2** — built-in layer ids changed (`working-context` → `scratchpad`, `static-content` → `instructions`, `observational-context` → `observations`, `file-reference` → `filesystem`, `history-window` → `history`, and `durable-task-state` → `task-state`). `layers` is keyed by layer id, so a v1 snapshot carries state under ids no current layer reads; restoring it would silently drop that state. No migration — discard via `CheckpointStore.clear()` and start fresh.
 
 `frontier` is intentionally permissive: frame `state` is `unknown` because each step's state is user-defined. Callers that need specific shape guarantees parse at the call site.
@@ -76,26 +80,30 @@ Version history:
 
 `itemLog.items` is serialised as `unknown[]` and re-parsed on load via `harness.itemSchemas.parseMany(...)` — the same gate production traffic passes through, so extension item shapes are validated identically.
 
+`itemLog` and `occurrences` are the **run baseline**: the item log and dispatch counts as they stood when the outermost `run()` on the context began, or the live values when no run is in flight. `layers`, `channels`, `state`, and `usage` are live. Replay rebuilds the rest of the log from the step ledger, while it redoes none of the live parts — see `23a-step-level-resume` § The run baseline.
+
 ## Checkpoint lifecycle
 
 ### Firing boundaries
 
-`harness.checkpoint(ctx)` is invoked automatically at four well-defined boundaries on the happy path:
+`harness.checkpoint(ctx)` fires automatically:
 
-1. **Post-`execute()`** — after each step completes. This catches the item-log mutations the step produced and the layer-state writes those items triggered.
-2. **Post-`detachedSpawn()`** — after the adapter's handle is returned. Keeps the parent's view of running children consistent with the adapter's manifest.
-3. **Ask-user enqueue** — when a pending prompt is added to the ask-user queue. A restarted host can replay the modal to the TUI without losing state.
-4. **Post-`runAppendPipeline`** — after the append pipeline resolves. Layer state can mutate as items land, and the snapshot must follow that mutation.
+1. **Run start** — when the outermost `run()` on a root context begins, after the context fixes its baseline. A run whose first step dies still leaves a snapshot.
+2. **Post-`execute()`** — after each step completes, anywhere in the tree. `inParallel` paths and `spawn` children checkpoint through their parent to the root, so their usage, state, and layer folds roll into what a resumed root restores.
+3. **Post-`runAppendPipeline`** — after the append pipeline resolves. Layer state can mutate as items land, and the snapshot must follow that mutation.
+4. **Run end** — when the outermost run finishes, capturing the live log and counts as the next run's starting point. A run that fails skips this, so its start stays the resume point.
 
-Any caller may additionally invoke `harness.checkpoint(ctx)` explicitly (e.g. after a long-running tool call settles). Snapshots are cheap: a few kilobytes per execution, one `StorageAdapter.set()` call.
+Ask-user enqueue is the host's boundary: the code-agent host pushes pending prompts through the store. `detachedSpawn()` is not a boundary — a `DetachedHandle`'s settle is only observable through `await()`, which would consume the result the caller holds; the adapter's `listLive()`/`reattach()` manifest covers detached children.
+
+Captures for one execution are serialised: each waits for the one before it, so an older snapshot can never land after a newer one. Any caller may additionally invoke `harness.checkpoint(ctx)` explicitly.
 
 ### Idempotency
 
-Snapshots are keyed by `executionId` under a single storage key (`execution:<id>:snapshot`). Successive snapshots for the same execution overwrite the prior record. There is no journaling, no CRDT merge, and no append-only log of snapshots. Writes are single-key `StorageAdapter.set()` operations, which the file-backed adapter implements via write-temp-then-rename for atomicity on POSIX filesystems.
+Snapshots are keyed by `executionId` under a single storage key (`execution:<id>:snapshot`). Successive snapshots for the same execution overwrite the prior record. There is no journaling and no CRDT merge; what a run did since its start lives in the step ledger, one key per step. Writes are single-key `StorageAdapter.set()` operations, which the file-backed adapter implements via write-temp-then-rename for atomicity on POSIX filesystems.
 
 ### Failure handling
 
-A failing `store.save` is logged via `console.warn` and swallowed. **A failing checkpoint never aborts an otherwise-successful step.** The rationale: durability is a best-effort recovery mechanism, not a correctness invariant of the current turn. If the snapshot write fails, the host simply loses the ability to resume from this exact point; on restart it re-issues the most recent turn and the item log's dedupe catches any duplicate writes.
+A failing `store.save` is logged via `console.warn` and swallowed. **A failing checkpoint never aborts an otherwise-successful step.** Durability is a best-effort recovery mechanism, not a correctness invariant of the current turn. Because history is rebuilt from the step ledger, a stale snapshot costs only the live parts (layer folds, state, usage) since its capture. A run whose end-of-run snapshot fails keeps its ledger, since the stored snapshot still points at that run's start.
 
 ## Restore flow
 
@@ -106,13 +114,16 @@ A failing `store.save` is logged via `console.warn` and swallowed. **A failing c
 3. Replays `layers` into `harness.layerStateStore` keyed by the original `executionId`, so context projectors and `ctx.context[layerId]` accessors observe continuity across the restart.
    Refills `channels` into the harness's channel store — value-mode values and queued items — for every channel with no live state, and records the execution as a user of each (see `06-channels`, Lifecycle). A snapshot without `channels` restores no channel state.
 4. Re-parses `itemLog.items` through `harness.itemSchemas` to recover typed `Item[]`.
-5. Calls `harness.createContext({...opts, items, threadId, resourceId, cwdInit: snapshot.cwd?.current, context: opts?.context ?? harness._contextLayers})` to produce a fresh context seeded with the snapshot's item log, identity, and cwd.
-6. Overrides the returned context's `.id` to the original `executionId` so downstream adapter-correlation keeps working.
-7. Attaches the recovered step ledger (`23a-step-level-resume`) keyed to that same id.
+5. Calls `harness.createContext({...opts, state: opts?.state ?? snapshot.state, items, threadId, resourceId, cwdInit: snapshot.cwd?.current})` to produce a fresh context seeded with the snapshot's item log, state, identity, and cwd.
+6. Seeds the context's dispatch counts from `occurrences` and its tokens and cost from `usage`.
+7. Overrides the returned context's `.id` to the original `executionId` so downstream adapter-correlation keeps working.
+8. Attaches the recovered step ledger (`23a-step-level-resume`) keyed to that same id.
 
 **Ledger-only restore.** A run whose snapshot writes failed (a save failure is swallowed, see above) leaves its step ledger behind. `restore` then builds the context as `createContext(opts)` would — empty item log, no restored layer or channel state, the harness's root cwd, a fresh thread id — overrides its `id` to `executionId`, and attaches the recovered ledger. Recorded steps replay; the rest run fresh. Layer `init` runs normally on the first `run()`, since there is no restored state for it to keep.
 
-The returned `Context` from a snapshot restore is API-compatible with the pre-crash one: layer state is accessible, item log is replayed in order, cwd is restored, identity matches. The caller resumes execution from whatever the frontier requires — for an interactive agent, this is typically re-issuing the most recent user turn; for a long-running runner, it is the runner loop's own resume logic.
+The returned `Context` stands where the interrupted run began: its item log and dispatch counts are that run's baseline, with the live layer state, channels, state, and usage. The caller resumes by running the same step on the same input — every recorded step replays and the run continues live from the first that was not. A context restored after a finished run stands after it, so the next step dispatched — a new user turn — runs fresh.
+
+`harness.execute()` sessions do this themselves: a re-delivered cut-off turn resumes on its recorded execution (`23a-step-level-resume` § Sessions).
 
 ### Host context wiring is the caller's to supply
 
@@ -123,8 +134,9 @@ A snapshot recovers **data**. It cannot recover the **live objects** a host atta
 ```typescript
 interface RestoreContextOptions {
   parent?: Context;
-  state?: unknown;
-  context?: ContextLayer[];
+  rollUpUsage?: boolean;
+  state?: unknown;                        // wins over the snapshot's state when given
+  contextLayers?: ContextLayer[];
 }
 ```
 
@@ -336,15 +348,16 @@ Both root defaults respect `NOETIC_HOME` (if set, the roots become `$NOETIC_HOME
 
 **What durable execution guarantees:**
 
-- Every completed step, every spawned child, and every ask-user prompt survives a host crash when durable storage is configured.
+- Every completed step, every finished model-loop round, every spawned child, and every ask-user prompt survives a host crash when durable storage is configured. A new harness over the same storage resumes the execution, replaying what finished and sending the first unfinished model call exactly the history it had.
 - Restart rediscovers running children and rebuilds the parent context for each.
 - IPC replay is exactly-once at the frame level when the client tracks `durableAck` correctly — no losses, no duplicates.
 - Schema version drift surfaces as a typed error, not silent corruption.
 
 **What durable execution does not guarantee:**
 
-- **LLM mid-stream.** A crash mid-stream forces a turn re-issue on restart. The item log's response-id dedupe guards against double-recording an identical response; a different response wins as a new turn.
-- **Non-idempotent `runCode` bodies.** A crash between step completion and the following checkpoint write can replay a step body whose side effects already landed. The framework cannot make arbitrary user code idempotent; use stable step ids and idempotent bodies where durability matters.
+- **LLM mid-stream.** A round cut off mid-stream is asked again on resume; the rounds before it replay.
+- **Tools interrupted mid-round.** A tool running when the host died runs again on resume. Tools in recorded rounds do not.
+- **Non-idempotent `runCode` bodies.** A crash between a step's side effect and its ledger append re-runs the step body, whose side effects already landed. The framework cannot make arbitrary user code idempotent; use stable step ids and idempotent bodies where durability matters.
 - **Third-party state outside the framework.** If a `runCode` mutates an external database, the database's state is not part of the snapshot. Callers that need cross-system consistency must integrate with their database's own transaction / idempotency primitives.
 - **Adapter-specific identity drift.** The local adapter's `reattach` verifies `pidStarttime` against `ps`, which is a best-effort check; a truly adversarial pid recycle within `<1s` can evade detection. Out-of-the-box this is safe enough for interactive workloads; production-critical usage should run the child under a supervisor that owns pid identity.
 
@@ -400,7 +413,7 @@ The queue is transport-agnostic — any framed byte stream (unix socket, WebSock
 
 ## Future Considerations
 
-- **LLM mid-stream resume.** If providers expose resumable streams in the future, durable execution can be extended to carry an in-flight stream id across the restart boundary. Today re-issuing the turn is honest about the limitation and keeps the implementation simple.
+- **LLM mid-stream resume.** If providers expose resumable streams, durable execution can carry an in-flight stream id across the restart boundary. Today the cut-off round is asked again.
 - **Checkpoint coalescing.** Snapshots after every step boundary may become a bottleneck for very tight turns. A configurable debounce window (e.g. "don't snapshot more than once per 50ms") would reduce I/O without losing recovery guarantees — the next snapshot simply includes both changes.
 - **Adapter-level durability for distributed backends.** `AgentHarness` already takes any `CheckpointStore`, so a distributed backend (Temporal event store, Inngest step state, etc.) plugs in by implementing that surface against its own persistence layer — the schema is portable. No separate harness class is needed.
 - **Handle manifest GC.** Today stale manifests are pruned when `reattach` or `listLive` detects liveness drift. A periodic GC pass that compacts manifests older than the oldest live `lastSeenAt` would bound disk usage on long-running hosts.

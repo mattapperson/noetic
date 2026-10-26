@@ -24,7 +24,7 @@ durable?: boolean;                                       // default true
 replayKey?: (input: I, ctx: Context<TContext>) => string;
 ```
 
-On a harness with a `checkpointStore`, a resumed run replays each completed step's recorded output, keyed by execution path. `durable: false` keeps a step out of that ledger (never replayed, never recorded, re-run on every resume; children keep their own setting). `replayKey` keys the entry as `key:<replayKey>` instead of the path, so the step replays wherever it runs; dispatches with the same key share one entry. `schedule` is never recorded. A throwing `replayKey` skips the ledger for that dispatch with a warning — the step still runs. Each step runs on its own lane of the context, so concurrent `harness.run` calls on one context keep separate paths; same-id concurrent calls are numbered in dispatch order. JSON workflow nodes take `durable` (boolean) and a declarative `replayKey`: `true` (key on the whole input) or `{ from: ['batchId', ...] }` (key on those top-level properties of the input parsed as JSON, the lookup `over` uses); the hydrator builds `<node id>:<hash>`, so nodes sharing an id share entries and different nodes never do. A `from` key on a non-object input warns (`INVALID_REPLAY_KEY_INPUT`) and runs unreplayed. See spec 23a § Identity and spec 26 § Replay keys.
+On a durable harness (a storage adapter, or an explicit `checkpointStore`), a resumed run replays each completed step's recorded output, keyed by execution path and checked against a hash of the step's input. `durable: false` keeps a step out of that ledger (never replayed, never recorded, re-run on every resume; children keep their own setting). `replayKey` keys the entry as `key:<replayKey>` instead of the path, so the step replays wherever it runs; dispatches with the same key share one entry. `schedule` is never recorded. A throwing `replayKey` skips the ledger for that dispatch with a warning — the step still runs. Each step runs on its own lane of the context, so concurrent `harness.run` calls on one context keep separate paths; same-id concurrent calls are numbered in dispatch order. JSON workflow nodes take `durable` (boolean) and a declarative `replayKey`: `true` (key on the whole input) or `{ from: ['batchId', ...] }` (key on those top-level properties of the input parsed as JSON, the lookup `over` uses); the hydrator builds `<node id>:<hash>`, so nodes sharing an id share entries and different nodes never do. A `from` key on a non-object input warns (`INVALID_REPLAY_KEY_INPUT`) and runs unreplayed. See spec 23a § Identity and spec 26 § Replay keys.
 
 The optional `subprocess` field makes this specific step run through a different adapter — e.g. `createLocalSubprocessAdapter({storage})` from `@noetic-tools/platform-node` for an out-of-process child, or an in-memory test double for unit tests. Resolution order at dispatch time is `detachedSpawn-overrides.subprocess ?? step.subprocess ?? harness.subprocess`. When omitted, the step uses the harness default.
 
@@ -1691,7 +1691,7 @@ hooks: {
 
 ## AgentHarness
 
-`AgentHarness` is generic over `TParams`. The `config` property exposes `AgentConfig<TParams>`, and steps/tools access params via `ctx.harness.config.params`. Execution surfaces are configured via the `environment` option (`{ storage?: { adapter?, checkpointStore?, layerStateStore?, stepLedgerRetention? }, fs?, shell?, subprocess? }`); every field defaults to an in-memory adapter. The `fs` property exposes the configured `FsAdapter`, and `shell` the configured `ShellAdapter`. Default context layers come in through `contextLayers`, and the default model-provider configuration through `callModelDefaults` (an `LlmProviderConfig`).
+`AgentHarness` is generic over `TParams`. The `config` property exposes `AgentConfig<TParams>`, and steps/tools access params via `ctx.harness.config.params`. Execution surfaces are configured via the `environment` option (`{ storage?: { adapter?, checkpointStore?, layerStateStore?, stepLedgerRetention? }, fs?, shell?, subprocess? }`); every field defaults to an in-memory adapter, except `checkpointStore`, which defaults to a store over `storage.adapter` when one is given (`false` opts out). The `fs` property exposes the configured `FsAdapter`, and `shell` the configured `ShellAdapter`. Default context layers come in through `contextLayers`, and the default model-provider configuration through `callModelDefaults` (an `LlmProviderConfig`).
 
 ### Sessions and the Message Queue
 
@@ -1935,7 +1935,7 @@ function createLocalSubprocessAdapter(opts?: {
 
 ```typescript
 interface CheckpointSnapshot {
-  schemaVersion: 2;  // `CheckpointSchemaVersion`; v1 snapshots are rejected with CHECKPOINT_SCHEMA_MISMATCH
+  schemaVersion: 3;  // `CheckpointSchemaVersion`; v1/v2 snapshots are rejected with CHECKPOINT_SCHEMA_MISMATCH
   executionId: string;
   threadId?: string;
   resourceId?: string;
@@ -1943,7 +1943,11 @@ interface CheckpointSnapshot {
   layers: Record<string, unknown>;
   cwd: { current: string | null; previous?: string | null } | null;
   askUser: Array<{ id: string; input: unknown; createdAt: number }>;
-  itemLog: { items: unknown[] };
+  itemLog: { items: unknown[] };        // the log when the run in flight began (the run baseline)
+  occurrences: Record<string, number>;  // dispatch counts at that same moment
+  state?: unknown;                      // ctx.state, when JSON-encodable
+  usage?: { tokens: TokenUsage; cost: number };
+  channels?: ChannelSnapshot[];
   capturedAt: string;
 }
 
@@ -1957,32 +1961,37 @@ interface CheckpointStore {
 function createCheckpointStore(opts: { storage: StorageAdapter }): CheckpointStore;
 ```
 
-Pass a checkpoint store to the harness constructor via `environment.storage.checkpointStore` to turn `harness.checkpoint(ctx)` and `harness.restore(executionId)` into real crash-recovery hooks. Snapshots fire automatically after every `execute()`, `detachedSpawn()` settlement, ask-user enqueue, and `runAppendPipeline`. Failures are swallowed with `console.warn` so durability issues never abort a successful step.
+A durable `environment.storage.adapter` is enough to turn `harness.checkpoint(ctx)` and `harness.restore(executionId)` into real crash-recovery hooks: `checkpointStore` defaults to a store over the adapter (`false` opts out; pass your own to keep checkpoints elsewhere). Snapshots fire at run start, after every step anywhere in the tree (parallel paths and spawn children checkpoint their root), after `runAppendPipeline`, and when a run finishes; captures for one execution are serialised. Failures are swallowed with `console.warn` so durability issues never abort a successful step.
+
+The snapshot's item log and `occurrences` are the **run baseline** — where the run in flight began — while layers, channels, state, and usage are live. `restore()` therefore returns a context standing at the interrupted run's start: run the same step on the same input and every recorded step replays (putting its items back on the log) and the run continues live. After a finished run the context stands past it, so a new turn runs fresh.
 
 #### Restoring a decorated context
 
 ```typescript
 interface RestoreContextOptions {
   parent?: Context;
-  state?: unknown;
+  rollUpUsage?: boolean;
+  state?: unknown;            // wins over the snapshot's state when given
   contextLayers?: ContextLayer[];
 }
 
 harness.restore(executionId: string, opts?: RestoreContextOptions): Promise<Context | null>;
 ```
 
-`restore` needs a snapshot *or* step-ledger entries. With only ledger entries (the snapshot write failed) it returns a context with the original `id` and the ledger but an empty item log, no restored layer or channel state, and the default cwd: recorded steps replay, the rest run fresh. It returns `null` only when neither exists. An unknown snapshot version throws `CHECKPOINT_SCHEMA_MISMATCH` even when a ledger exists.
+`restore` needs a snapshot *or* step-ledger entries. With only ledger entries (the snapshot write failed) it returns a context with the original `id` and the ledger but an empty item log, no restored layer or channel state, and the default cwd: recorded steps replay — rebuilding the history they produced — and the rest run fresh. It returns `null` only when neither exists. An unknown snapshot version throws `CHECKPOINT_SCHEMA_MISMATCH` even when a ledger exists.
 
 A snapshot recovers data, not the live objects a host attached to the original context (broadcasters, queues, abort registrations). Pass them back through `opts` or the resumed run gets a bare context and the loss is silent. Snapshot-owned fields (`items`, `threadId`, `resourceId`, cwd) are deliberately not accepted — they always come from the persisted record. Decoration applied after construction (`Object.assign`ed fields, abort registration) goes on the returned context, whose `id` is already the original `executionId`.
 
 ### Step-level resume and ledger retention
 
-A `checkpointStore` also turns on the **step-completion ledger**: one sharded entry per completed step (`execution:<id>:ledger:<seq>`) carrying that step's output, which a restored context replays instead of re-running. Memoization, not skip — the recorded value is what flows downstream. Failures are never recorded, and a step whose identity changed at a recorded path re-runs and drops its recorded subtree.
+Durability also turns on the **step-completion ledger**: one sharded entry per completed step (`execution:<id>:ledger:<seq>`) carrying that step's output, the items it appended to history, and a hash of its input. A restored context replays entries instead of re-running. Memoization, not skip — the recorded value is what flows downstream. Failures are never recorded (a failed dispatch gives its ordinal back, so a retry runs at the same path), and a step whose id, kind, or input changed at a recorded path re-runs and drops its recorded subtree. A finished run drops its positional entries.
+
+A `callModel` step's tool loop records each finished round (`<path>/round#n`): a loop cut off mid-way replays its finished rounds — none of their tools run again — and continues live. `execute()` sessions persist each thread's history and in-flight turn (`session:<threadId>`); re-delivering a cut-off turn's messages with the same `messageId`s resumes it on a new harness.
 
 ```typescript
 interface StepLedgerRetention {
-  maxEntryBytes?: number; // default 128 * 1024 — larger outputs are NOT recorded
-  maxEntries?: number;    // default 1e3 — appending past this evicts the oldest entry
+  maxEntryBytes?: number; // default 128 * 1024 — larger output+items are NOT recorded
+  maxEntries?: number;    // default 1e3 live entries — past this nothing more is recorded
 }
 
 const harness = new AgentHarness({
@@ -1990,7 +1999,7 @@ const harness = new AgentHarness({
   params: {},
   environment: {
     storage: {
-      checkpointStore,
+      adapter,
       stepLedgerRetention: { maxEntries: 5e3 },   // Infinity disables a cap
     },
   },
@@ -2000,11 +2009,11 @@ const harness = new AgentHarness({
 await harness.clearCheckpoint(executionId);
 ```
 
-Both caps degrade resume rather than break it: a step with no entry simply re-runs (costing work and re-doing its effects, never replaying a value that disagrees with the recorded run). A non-positive or `NaN` cap throws `NoeticConfigError` with `code: 'STEP_LEDGER_RETENTION_INVALID'` at construction.
+Entries beneath a step that recorded are pruned (it replays without descending), so the cap bounds the open part of a run rather than its length. Both caps degrade resume rather than break it: a step with no entry simply re-runs (costing work and re-doing its effects, never replaying a value that disagrees with the recorded run). A non-positive or `NaN` cap throws `NoeticConfigError` with `code: 'STEP_LEDGER_RETENTION_INVALID'` at construction.
 
-Call `clearCheckpoint` when the **workflow changed** — replay happens at the coarsest completed granularity, so a finished parent replays wholesale and an edit to one of its children is never noticed — and when an execution is finished or abandoned, since `checkpointStore.clear()` alone strands the ledger's per-step keys.
+Call `clearCheckpoint` when the **workflow changed** — replay happens at the coarsest completed granularity, so a finished parent replays wholesale and an edit to one of its children is never noticed — and when an execution is abandoned, since `checkpointStore.clear()` alone strands the ledger's per-step keys.
 
-The ledger covers control flow and `callModel` steps. It does not make tool execution exactly-once: fence effects at the tool/host boundary.
+The ledger covers control flow, `callModel` steps, and their rounds. A tool interrupted mid-round runs again on resume — it does not make tool execution exactly-once: fence effects at the tool/host boundary.
 
 ### `createFileStorage`
 

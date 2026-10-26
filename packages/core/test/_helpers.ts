@@ -587,6 +587,46 @@ export function makeMockContextWithClient(script: LLMResponse[]): Context {
   });
 }
 
+/**
+ * Do `work` inside a run on `ctx` that never completes, as a host that dies the moment
+ * `work` finishes: every step `work` dispatches records to the ledger, but the
+ * checkpoint still points at the run's start — exactly what a crash leaves behind. The
+ * wrapping step has no id, so what `work` dispatches keeps its top-level paths.
+ */
+export async function crashAfter<T>(
+  harness: AgentHarnessContract,
+  ctx: Context,
+  work: (execCtx: Context) => Promise<T>,
+): Promise<T> {
+  let output: T | undefined;
+  const host = frameworkCast<
+    Step<Readonly<Record<string, Record<string, unknown>>>, string, string>
+  >({
+    kind: 'runCode',
+    id: '',
+    execute: async (_input: string, execCtx: Context) => {
+      output = await work(execCtx);
+      throw new Error('host died');
+    },
+  });
+  await harness.run(host, '', ctx).catch((error: unknown) => {
+    if (!(error instanceof Error) || !error.message.includes('host died')) {
+      throw error;
+    }
+  });
+  return frameworkCast<T>(output);
+}
+
+/** `crashAfter` running one step — see there. Returns the step's output. */
+export function runThenCrash<I, O>(
+  harness: AgentHarnessContract,
+  step: Step<Readonly<Record<string, Record<string, unknown>>>, I, O>,
+  input: I,
+  ctx: Context,
+): Promise<O> {
+  return crashAfter(harness, ctx, (execCtx) => harness.run(step, input, execCtx));
+}
+
 /** Wall-clock sleep for tests that exercise real timers. */
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -795,3 +835,121 @@ export function makeLayer(
     hooks: opts?.hooks ?? {},
   };
 }
+
+//#region Fake OpenRouter
+
+/** One round the fake server answered: what it was sent, and what it replied. */
+export interface FakeOpenRouterRound {
+  input: unknown[];
+}
+
+/**
+ * A stand-in for the OpenRouter Responses API, for tests that drive the harness's real
+ * model client. `reply(input)` answers each round from the conversation it was sent,
+ * as a model would; rounds whose 1-based number is in `dropAt` stream part of a
+ * response and then end, as a lost connection does.
+ */
+export interface FakeOpenRouter {
+  readonly baseUrl: string;
+  readonly rounds: FakeOpenRouterRound[];
+  readonly dropAt: Set<number>;
+  stop(): void;
+}
+
+export function startFakeOpenRouter(reply: (input: unknown[]) => unknown[]): FakeOpenRouter {
+  const rounds: FakeOpenRouterRound[] = [];
+  const dropAt = new Set<number>();
+  const server = Bun.serve({
+    port: 0,
+    async fetch(request) {
+      const body = z
+        .object({
+          model: z.string(),
+          input: z.array(z.unknown()).default([]),
+        })
+        .parse(await request.json());
+      rounds.push({
+        input: body.input,
+      });
+      const stream = fakeResponseStream(rounds.length, body.model, reply(body.input));
+      if (!dropAt.has(rounds.length)) {
+        return new Response(stream, {
+          headers: {
+            'content-type': 'text/event-stream',
+          },
+        });
+      }
+      const cut = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(stream.slice(0, 40)));
+          setTimeout(() => controller.close(), 10);
+        },
+      });
+      return new Response(cut, {
+        headers: {
+          'content-type': 'text/event-stream',
+        },
+      });
+    },
+  });
+  return {
+    baseUrl: `http://localhost:${server.port}/api/v1`,
+    rounds,
+    dropAt,
+    stop: () => server.stop(true),
+  };
+}
+
+function fakeResponseStream(round: number, model: string, output: unknown[]): string {
+  const response = {
+    id: `resp_${round}`,
+    object: 'response',
+    created_at: Math.floor(Date.now() / 1e3),
+    completed_at: Math.floor(Date.now() / 1e3),
+    model,
+    status: 'completed',
+    error: null,
+    frequency_penalty: null,
+    incomplete_details: null,
+    instructions: null,
+    metadata: null,
+    parallel_tool_calls: true,
+    presence_penalty: null,
+    temperature: null,
+    tool_choice: 'auto',
+    tools: [],
+    top_p: null,
+    output,
+    usage: {
+      input_tokens: 10,
+      input_tokens_details: {
+        cached_tokens: 0,
+      },
+      output_tokens: 5,
+      output_tokens_details: {
+        reasoning_tokens: 0,
+      },
+      total_tokens: 15,
+      cost: 0.01,
+    },
+  };
+  const events = [
+    {
+      type: 'response.created',
+      sequence_number: 0,
+      response: {
+        ...response,
+        status: 'in_progress',
+        output: [],
+      },
+    },
+    {
+      type: 'response.completed',
+      sequence_number: 1,
+      response,
+    },
+  ];
+  return `${events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join('')}data: [DONE]\n\n`;
+}
+
+//#endregion

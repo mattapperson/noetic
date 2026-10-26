@@ -51,6 +51,7 @@ import type {
   EventBroadcaster,
   QueuedMessage,
   RestoreCheckpointOptions,
+  SessionStore,
   StepLedgerRetention,
   StepLedgerStore,
 } from './deps/runtime';
@@ -61,7 +62,9 @@ import {
   captureCheckpoint,
   clearCheckpoint,
   collectContextTree,
+  createCheckpointStore,
   createInMemoryStorage,
+  createSessionStore,
   createStepLedgerStore,
   filterReasoningStream,
   filterTextStream,
@@ -125,6 +128,7 @@ import type {
 import { SteeringAction } from './deps/types';
 import type { SessionCtxExtension } from './model-call';
 import { AgentHarnessModelCaller, noLlmProviderError } from './model-call';
+import { ThreadRecord } from './thread-record';
 
 export { createStreamIdleWatchdog } from './model-call';
 
@@ -145,16 +149,18 @@ export interface StorageEnvironmentConfig {
   adapter?: StorageAdapter;
   /**
    * Checkpoint store used by `harness.checkpoint(ctx)` / `harness.restore()`.
-   * When absent, checkpoint/restore are no-ops — a zero-config harness keeps
-   * its current ephemeral semantics. Construct with `createCheckpointStore`
-   * to enable durable execution.
+   * Defaults to a store over `adapter` when one is given, so configuring durable
+   * storage is enough for a later harness on the same storage to resume this one's
+   * executions. Pass `false` to keep an adapter for layer persistence only. With no
+   * adapter and no store, checkpoint/restore are no-ops — a zero-config harness keeps
+   * its ephemeral semantics.
    */
-  checkpointStore?: CheckpointStore;
+  checkpointStore?: CheckpointStore | false;
   /** Layer-state store override. Defaults to an in-memory store. */
   layerStateStore?: LayerStateStore;
   /**
    * Bounds on the step-completion ledger that backs step-level resume. Only meaningful
-   * alongside a `checkpointStore`. Defaults to `DEFAULT_STEP_LEDGER_RETENTION` — 128 KiB
+   * when durability is on (a `checkpointStore`, given or defaulted). Defaults to `DEFAULT_STEP_LEDGER_RETENTION` — 128 KiB
    * per entry, 1000 entries per execution — so an unbounded run cannot grow an unbounded
    * ledger. Exceeding either cap costs resumability for the affected steps (they re-run),
    * never correctness.
@@ -233,6 +239,8 @@ interface AgentHarnessOpts<TParams extends Record<string, unknown> = Record<stri
 interface Session {
   readonly runner: SessionRunner;
   accumulatedItems: Item[];
+  /** The thread's stored session, when durability is on. */
+  readonly record?: ThreadRecord;
 }
 
 //#endregion
@@ -422,6 +430,27 @@ function createDecisionsClient(config?: LlmProviderConfig): DecisionsClient | un
   });
 }
 
+/**
+ * The checkpoint store a harness runs with: the one given, else a store over the
+ * configured storage adapter, so durable storage alone turns resume on. `false`
+ * opts out.
+ */
+function resolveCheckpointStore(
+  storage: StorageEnvironmentConfig | undefined,
+): CheckpointStore | undefined {
+  if (storage?.checkpointStore === false) {
+    return undefined;
+  }
+  if (storage?.checkpointStore) {
+    return storage.checkpointStore;
+  }
+  return storage?.adapter
+    ? createCheckpointStore({
+        storage: storage.adapter,
+      })
+    : undefined;
+}
+
 //#region AgentHarness
 
 /**
@@ -449,7 +478,8 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
   readonly checkpointStore?: CheckpointStore;
   /**
    * Append-only step ledger backing resume. Present exactly when durability is on
-   * (a `CheckpointStore` is configured), so a zero-config harness records nothing.
+   * (a `CheckpointStore` is configured or defaulted), so a zero-config harness records
+   * nothing.
    * @internal
    */
   readonly stepLedgerStore?: StepLedgerStore;
@@ -483,8 +513,14 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     {
       ctx: Context;
       depth: number;
+      /** Whether any run on this root threw, so the run's start stays the resume point. */
+      failed: boolean;
     }
   >();
+  /** Stored sessions for `execute()` threads. Present exactly when durability is on. */
+  private readonly sessionStore?: SessionStore;
+  /** Checkpoint capture in flight per execution id — see `saveCheckpoint`. */
+  private readonly pendingCheckpoints = new Map<string, Promise<boolean>>();
   private readonly callModelOverride?: (request: CallModelRequest) => Promise<LLMResponse>;
   private readonly defaultDeliveryMode: DeliveryMode;
   private readonly sessions = new Map<string, Session>();
@@ -593,13 +629,16 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     this.fs = environment?.fs ?? createInMemoryFsAdapter();
     this.shell = environment?.shell ?? createInMemoryShellAdapter();
     this.subprocess = environment?.subprocess ?? createInMemorySubprocessAdapter();
-    this.checkpointStore = storageEnv?.checkpointStore;
-    this.stepLedgerStore = storageEnv?.checkpointStore
+    this.checkpointStore = resolveCheckpointStore(storageEnv);
+    this.stepLedgerStore = this.checkpointStore
       ? createStepLedgerStore({
           storage: this.config.storage ?? createInMemoryStorage(),
         })
       : undefined;
     this.stepLedgerRetention = resolveStepLedgerRetention(storageEnv?.stepLedgerRetention);
+    this.sessionStore = this.checkpointStore
+      ? createSessionStore(this.config.storage ?? createInMemoryStorage())
+      : undefined;
     this.agentGraph = opts.agentGraph;
     this.harnessTools = opts.tools ?? [];
     this._contextLayers = opts.contextLayers;
@@ -752,6 +791,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
 
   seedSessionHistory(threadId: string, items: ReadonlyArray<Item>): void {
     const session = this.getOrCreateSession(threadId);
+    session.record?.markSeeded();
     session.accumulatedItems = [
       ...items,
     ];
@@ -763,8 +803,20 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       return existing;
     }
 
+    const record = this.sessionStore
+      ? new ThreadRecord(
+          {
+            store: this.sessionStore,
+            restore: (executionId, opts) => this.restore(executionId, opts),
+            clearCheckpoint: (executionId) => this.clearCheckpoint(executionId),
+            parseItems: (raw) => this.itemSchemas.parseMany(raw),
+          },
+          threadId,
+        )
+      : undefined;
     const session: Session = {
       accumulatedItems: [],
+      record,
       runner: new SessionRunner({
         threadId,
         agentName: this.config.name,
@@ -773,21 +825,32 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
         // together (queue flush), later messages' values for these fields
         // are ignored. `deliveryMode` is resolved per-message at enqueue
         // time and doesn't apply here.
-        createContext: (items, _turnId, messages) => {
+        createContext: async (items, _turnId, messages) => {
           const perTurnOptions: ExecuteOptions = messages[0]?.options ?? {};
-          const allItems: Item[] = [
-            ...session.accumulatedItems,
-            ...items,
-          ];
-          const ctx = this.createContext({
-            items: allItems,
-            threadId,
-            resourceId: perTurnOptions.resourceId,
+          const messageIds = messages.map((m) => m.id);
+          if (record) {
+            session.accumulatedItems = await record.history(session.accumulatedItems);
+          }
+          // A re-delivery of a cut-off turn's messages picks that turn up where it died.
+          const resumed = await record?.resume(messageIds, {
             state: perTurnOptions.state,
             contextLayers: perTurnOptions.contextLayers,
-            extraContextLayers: perTurnOptions.extraContextLayers,
             _broadcaster: session.runner.broadcaster,
           });
+          const ctx =
+            resumed ??
+            this.createContext({
+              items: [
+                ...session.accumulatedItems,
+                ...items,
+              ],
+              threadId,
+              resourceId: perTurnOptions.resourceId,
+              state: perTurnOptions.state,
+              contextLayers: perTurnOptions.contextLayers,
+              extraContextLayers: perTurnOptions.extraContextLayers,
+              _broadcaster: session.runner.broadcaster,
+            });
           const ext = frameworkCast<Context & SessionCtxExtension>(ctx);
           ext._sessionQueue = session.runner.queue;
           ext._sessionBetweenRounds = true;
@@ -799,6 +862,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
               ...this.harnessTools,
             ]);
           }
+          await record?.begin(ctx, messageIds, session.accumulatedItems);
           return ctx;
         },
         runTurn: async (ctx, _turn, signal) => {
@@ -828,6 +892,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
           session.accumulatedItems = [
             ...ctx.itemLog.items,
           ];
+          await record?.end(ctx, session.accumulatedItems);
           return result;
         },
       }),
@@ -959,26 +1024,64 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       return execute(s, input, ctx);
     }
     const live = this.liveRoots.get(ctx.id);
+    const entry = live ?? {
+      ctx,
+      depth: 0,
+      failed: false,
+    };
+    entry.depth += 1;
+    this.liveRoots.set(ctx.id, entry);
     if (!live) {
       // A restored or sequentially re-run root context reuses its id — clear
       // any closure from a previous completion so its channels work again.
       this.channelStore.openExecution(ctx.id);
+      this.beginDurableRun(ctx);
     }
-    const entry = live ?? {
-      ctx,
-      depth: 0,
-    };
-    entry.depth += 1;
-    this.liveRoots.set(ctx.id, entry);
     try {
       return await execute(s, input, ctx);
+    } catch (error) {
+      entry.failed = true;
+      throw error;
     } finally {
       entry.depth -= 1;
       if (entry.depth <= 0) {
         this.liveRoots.delete(ctx.id);
         this.channelStore.closeExecution(ctx.id);
         await this.acpSessions.closeOwnedBy(ctx.id);
+        if (!entry.failed) {
+          await this.endDurableRun(ctx);
+        }
       }
+    }
+  }
+
+  /**
+   * Fix the point a resume of this run starts from, and queue it for saving — so even
+   * a run whose first step dies leaves a snapshot to restore. Not awaited: the steps'
+   * own checkpoints queue behind it, and holding the run back would let a concurrent
+   * run on the same context dispatch first.
+   */
+  private beginDurableRun(ctx: Context): void {
+    if (!this.checkpointStore || !(ctx instanceof ContextImpl)) {
+      return;
+    }
+    ctx.beginRun();
+    void this.saveCheckpoint(ctx);
+  }
+
+  /**
+   * A finished run is the next run's starting point: persist the live log and counts,
+   * then drop the run's positional ledger entries, which no later resume can reach.
+   * They are kept when the snapshot failed to land, since that snapshot still points
+   * at this run's start. A failed run skips this entirely — it is what a resume repeats.
+   */
+  private async endDurableRun(ctx: Context): Promise<void> {
+    if (!this.checkpointStore || !(ctx instanceof ContextImpl)) {
+      return;
+    }
+    ctx.endRun();
+    if (await this.saveCheckpoint(ctx)) {
+      await ctx.ledger?.dropPaths();
     }
   }
 
@@ -1355,7 +1458,25 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
    * logic live beside the other durability machinery.
    */
   async checkpoint(ctx: Context): Promise<void> {
-    return captureCheckpoint(this, ctx);
+    await this.saveCheckpoint(ctx);
+  }
+
+  /**
+   * Capture `ctx` behind any capture still in flight for the same execution, and
+   * resolve true when this one landed. Every step in the tree checkpoints its root,
+   * and concurrent paths would otherwise race their writes: on a networked adapter an
+   * older snapshot could land last and win.
+   */
+  private saveCheckpoint(ctx: Context): Promise<boolean> {
+    const prior = this.pendingCheckpoints.get(ctx.id);
+    const next = (prior ?? Promise.resolve(true)).then(() => captureCheckpoint(this, ctx));
+    this.pendingCheckpoints.set(ctx.id, next);
+    void next.finally(() => {
+      if (this.pendingCheckpoints.get(ctx.id) === next) {
+        this.pendingCheckpoints.delete(ctx.id);
+      }
+    });
+    return next;
   }
 
   /**

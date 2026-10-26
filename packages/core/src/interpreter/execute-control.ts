@@ -91,6 +91,9 @@ function createChildContexts(
          * restart at the root and collide with its siblings. */
         pathPrefix: `${parentPath}[${index}]`,
         ledger: parentLedger,
+        // A path's steps checkpoint the root: its usage, state, and layer folds roll
+        // into what a resumed root restores.
+        checkpointFn: () => ctx.checkpoint(),
         items: [
           ...ctx.itemLog.items,
         ],

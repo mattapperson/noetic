@@ -225,7 +225,7 @@ Observability:
 6. **Placement picks the band, slot orders within it** -- anchored layer output renders before history, live output after it; lower slots come first inside a band. Use `Slot` constants, and set `placement: 'live'` on any layer whose `recall()` mutates state
 7. **Parallel paths get cloned state** -- mutations in one `inParallel` path don't affect siblings
 8. **SubprocessAdapter precedence is `detachedSpawn-overrides.subprocess ?? step.subprocess ?? harness.subprocess`** -- reach for a per-step override to run one specific spawn out-of-process while keeping the rest in-process, or a per-call override on `detachedSpawn` to do the same without touching the step definition
-9. **Durability is opt-in and composed of three surfaces** -- `checkpointStore` (parent execution state), `subprocess` adapter durability (live-child manifests), and durable IPC (`DurableOutboundQueue`). Configure the ones you need; absent surfaces are no-ops and the harness degrades gracefully
+9. **Durability follows storage and is composed of three surfaces** -- the checkpoint store + step ledger (parent execution state and finished steps; defaults to a store over `environment.storage.adapter`, `checkpointStore: false` opts out), `subprocess` adapter durability (live-child manifests), and durable IPC (`DurableOutboundQueue`). With a storage adapter, a run cut off on one harness resumes on a new harness over the same storage: `harness.restore(id)` then re-run the same step on the same input, and finished steps and model-loop rounds replay for free. Absent surfaces are no-ops and the harness degrades gracefully
 
 ## API Reference
 

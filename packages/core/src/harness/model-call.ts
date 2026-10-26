@@ -34,6 +34,7 @@ import type { EventBroadcaster } from '../runtime/event-broadcaster';
 import type { MessageQueue, QueuedMessage } from '../runtime/message-queue';
 import type { ApprovalOutcome } from '../runtime/tool-approval';
 import { exportSpans } from './deps/context';
+import { RoundLedger } from './model-rounds';
 import { buildItemSchemaRegistry, createToolResultItem } from './model-schema.js';
 
 const MAX_TOOL_ROUNDS = 32;
@@ -668,8 +669,56 @@ export class AgentHarnessModelCaller {
     let invalidRecoveryContinuations = 0;
     let toolLimitRecoveryContinuations = 0;
     let useEphemeralContinue = false;
+    const roundLedger = RoundLedger.open(request.ctx);
+    const replaySchemas = buildItemSchemaRegistry({
+      base: this.opts.itemSchemas,
+      layers: request.layers,
+      tools: request.tools,
+    });
+    // Where the loop's lists stood when the current round began, for its record.
+    let marks = {
+      round: -1,
+      log: 0,
+      input: 0,
+      items: 0,
+    };
 
     while (!request.signal?.aborted) {
+      const replayed = roundLedger?.take(round, replaySchemas);
+      if (replayed) {
+        allItems.push(...replayed.items);
+        conversationInput.push(...frameworkCast<typeof conversationInput>(replayed.input));
+        for (const item of replayed.appended) {
+          request.ctx?.itemLog.append(item);
+        }
+        rounds.push(replayed.usage);
+        totalUsage.inputTokens += replayed.usage.inputTokens;
+        totalUsage.outputTokens += replayed.usage.outputTokens;
+        totalUsage.cachedTokens += replayed.usage.cachedTokens ?? 0;
+        totalCost += replayed.cost;
+        prepared.emitIfAllowed('model_round_replayed', {
+          round,
+        });
+        round += 1;
+        const replayLimit = this.handleToolRoundLimit({
+          round,
+          toolLimitRecoveryContinuations,
+          emitIfAllowed: prepared.emitIfAllowed,
+        });
+        if (replayLimit.kind === 'continue') {
+          toolLimitRecoveryContinuations = replayLimit.toolLimitRecoveryContinuations;
+          useEphemeralContinue = true;
+        }
+        continue;
+      }
+      if (marks.round !== round) {
+        marks = {
+          round,
+          log: roundLedger?.mark() ?? 0,
+          input: conversationInput.length,
+          items: allItems.length,
+        };
+      }
       const recoveryContinuation = useEphemeralContinue;
       useEphemeralContinue = false;
       if (round > 0 && request.ctx && hasSessionQueue(request.ctx)) {
@@ -756,6 +805,10 @@ export class AgentHarnessModelCaller {
         },
       });
 
+      // A dropped connection rejects the response and the event pipe together; the
+      // response's rejection is the one that propagates. Unobserved, the pipe's would
+      // surface as an unhandled rejection and take the host process down with it.
+      pipePromise.catch(() => {});
       let sdkResponse: Awaited<ReturnType<typeof callResult.getResponse>>;
       try {
         sdkResponse = await awaitWithAbort(callResult.getResponse(), roundSignal);
@@ -840,6 +893,14 @@ export class AgentHarnessModelCaller {
         spans,
         modelSpan,
       });
+      if (!request.signal?.aborted) {
+        await roundLedger?.record(round, marks.log, {
+          items: allItems.slice(marks.items),
+          input: conversationInput.slice(marks.input),
+          usage: roundUsage,
+          cost: roundCost,
+        });
+      }
 
       round += 1;
       const limitRecovery = this.handleToolRoundLimit({

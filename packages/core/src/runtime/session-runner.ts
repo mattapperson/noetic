@@ -36,7 +36,7 @@ export type CreateContextFn = (
   items: ReadonlyArray<Item>,
   turnId: string,
   messages: ReadonlyArray<QueuedMessage>,
-) => Context;
+) => Context | Promise<Context>;
 
 export interface SessionRunnerOpts {
   readonly threadId: string;
@@ -246,7 +246,13 @@ export class SessionRunner {
     // the harness's createContext callback receives Item[] directly and
     // seeds the context without re-converting.
     const items = mergeInputsToItems(messages);
-    const ctx = this.createContext(items, turnId, messages);
+    let ctx: Context;
+    try {
+      ctx = await this.createContext(items, turnId, messages);
+    } catch (err: unknown) {
+      this.failBeforeStart(turnId, err);
+      return;
+    }
     this.currentCtx = ctx;
 
     emitFrameworkEvent({
@@ -330,6 +336,27 @@ export class SessionRunner {
         kind: 'idle',
       };
     }
+  }
+
+  /** A turn whose context could not be built: report it like any other failed turn. */
+  private failBeforeStart(turnId: string, err: unknown): void {
+    const error = err instanceof Error ? err : new Error(String(err));
+    this.lastError = error;
+    emitFrameworkEvent({
+      broadcaster: this.broadcaster,
+      agentName: this.agentName,
+      eventType: 'turn_aborted',
+      data: {
+        turnId,
+        reason: error.message,
+        errorKind: isNoeticError(error) ? error.noeticError.kind : undefined,
+      },
+    });
+    this.rejectWaiters(error);
+    this.currentController = undefined;
+    this.status = {
+      kind: 'idle',
+    };
   }
 
   private resolveWaiters(response: HarnessResponse): void {

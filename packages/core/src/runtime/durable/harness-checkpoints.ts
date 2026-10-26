@@ -58,14 +58,22 @@ export interface CheckpointHarnessHandle {
  * `CheckpointStore` is configured — zero-config harnesses preserve
  * ephemeral semantics. Save failures are logged rather than thrown,
  * because a checkpoint failing must never abort an otherwise-successful
- * step.
+ * step. Resolves true when a snapshot landed.
+ *
+ * The item log and dispatch counts are the run's baseline (see
+ * `ContextImpl.runBaseline`); layer state, channels, `ctx.state`, and usage are
+ * live, because replay does not redo those — a replayed step neither folds into
+ * layers nor writes state nor spends tokens.
  *
  * @internal
  */
-export async function captureCheckpoint(h: CheckpointHarnessHandle, ctx: Context): Promise<void> {
+export async function captureCheckpoint(
+  h: CheckpointHarnessHandle,
+  ctx: Context,
+): Promise<boolean> {
   const store = h.checkpointStore;
   if (!store) {
-    return;
+    return false;
   }
   const impl = ctx instanceof ContextImpl ? ctx : null;
   const frontier: FrontierFrame[] = impl ? impl.serialiseFrontier() : [];
@@ -76,6 +84,13 @@ export async function captureCheckpoint(h: CheckpointHarnessHandle, ctx: Context
       layers[layer.id] = state;
     }
   }
+  const baseline = impl?.runBaseline() ?? {
+    items: [
+      ...ctx.itemLog.items,
+    ],
+    occurrences: {},
+  };
+  const state = jsonCopy(ctx.state);
   const snapshot: CheckpointSnapshot = {
     schemaVersion: CheckpointSchemaVersion,
     executionId: ctx.id,
@@ -93,9 +108,19 @@ export async function captureCheckpoint(h: CheckpointHarnessHandle, ctx: Context
     // means future producers don't bump the schema version.
     askUser: [],
     itemLog: {
-      items: [
-        ...ctx.itemLog.items,
-      ],
+      items: baseline.items,
+    },
+    occurrences: baseline.occurrences,
+    ...(state.ok
+      ? {
+          state: state.value,
+        }
+      : {}),
+    usage: {
+      tokens: {
+        ...ctx.tokens,
+      },
+      cost: ctx.cost,
     },
     // Channel state belongs to the root execution, so a child checkpoint
     // carries the channels its root used.
@@ -104,11 +129,39 @@ export async function captureCheckpoint(h: CheckpointHarnessHandle, ctx: Context
   };
   try {
     await store.save(snapshot);
+    return true;
   } catch (err) {
     console.warn(
       `AgentHarness.checkpoint: failed to persist snapshot for execution "${ctx.id}":`,
       err,
     );
+    return false;
+  }
+}
+
+/** A JSON round-trip copy of `value`, or `ok: false` when it does not survive one. */
+function jsonCopy(value: unknown):
+  | {
+      ok: true;
+      value: unknown;
+    }
+  | {
+      ok: false;
+    } {
+  try {
+    const json = JSON.stringify(value);
+    return json === undefined
+      ? {
+          ok: false,
+        }
+      : {
+          ok: true,
+          value: JSON.parse(json),
+        };
+  } catch {
+    return {
+      ok: false,
+    };
   }
 }
 
@@ -130,7 +183,12 @@ export interface RestoredExecution {
 
 /**
  * Rebuild a `Context` for `executionId` from what a previous run recorded: the
- * checkpoint snapshot and the step-completion ledger. Either is enough. Returns
+ * checkpoint snapshot and the step-completion ledger. Either is enough.
+ *
+ * The restored context stands where the interrupted run began — its item log and
+ * dispatch counts are that run's baseline — with the live layer state, channels,
+ * `ctx.state`, and usage. Re-running the same step on the same input replays every
+ * recorded step and continues live from the first that was not. Returns
  * `null` only when neither exists, so the caller starts a fresh execution.
  *
  * - With a snapshot, the item log, layer state, channel state, cwd, and thread/resource
@@ -195,13 +253,24 @@ function contextFromSnapshot(
   /* Caller wiring first, snapshot second: a host may legitimately swap the context
    * layers or hang the restored execution under a new parent, but it must never be
    * able to override the identity/history the snapshot is the record of. */
-  return h.createContext({
+  const ctx = h.createContext({
     ...opts,
+    state: opts?.state ?? snapshot.state,
     items: h.itemSchemas.parseMany(snapshot.itemLog.items),
     threadId: snapshot.threadId,
     resourceId: snapshot.resourceId,
     cwdInit: snapshot.cwd?.current ?? undefined,
   });
+  if (ctx instanceof ContextImpl) {
+    ctx.restoreOccurrences(snapshot.occurrences);
+    if (snapshot.usage) {
+      ctx.tokens = {
+        ...snapshot.usage.tokens,
+      };
+      ctx.cost = snapshot.usage.cost;
+    }
+  }
+  return ctx;
 }
 
 /**

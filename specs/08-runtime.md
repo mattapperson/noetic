@@ -259,7 +259,8 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
 
   /**
    * Typed wrapper over the harness's StorageAdapter used by checkpoint()
-   * / restore(). When absent, checkpoint/restore are no-ops and the
+   * / restore(). Defaults to a store over `environment.storage.adapter`
+   * when one is given. When absent, checkpoint/restore are no-ops and the
    * harness has no durable-execution guarantees. See 23-durable-execution.
    */
   readonly checkpointStore?: CheckpointStore;
@@ -345,12 +346,11 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
 
   // Durability
   /**
-   * Snapshot the execution state (frontier, layer states, cwd, ask-user queue,
-   * item log) through the checkpointStore. Fires automatically at:
-   *   1. End of every execute() that mutated the item log.
-   *   2. After detachedSpawn() settles (success or failure).
-   *   3. After ask-user enqueue.
-   *   4. After runAppendPipeline().
+   * Snapshot the execution state (frontier, layer states, cwd, channels,
+   * state, usage, and the run's item-log baseline) through the
+   * checkpointStore. Fires automatically at run start, after every step
+   * anywhere in the tree, after runAppendPipeline(), and at the end of a
+   * run that finished. Captures for one execution are serialised.
    * Keyed by ctx.id (the executionId); idempotent — successive snapshots
    * overwrite. No-op when checkpointStore is absent. A failed save is
    * logged via console.warn and swallowed; a failing checkpoint never
@@ -359,15 +359,16 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
   checkpoint(ctx: Context): Promise<void>;
 
   /**
-   * Rebuild a Context from a previously-persisted snapshot. Returns null
-   * when no snapshot exists. Surfaces NoeticConfigError with
+   * Rebuild a Context from a previously-persisted snapshot and step ledger,
+   * standing where the interrupted run began. Returns null when neither
+   * exists. Surfaces NoeticConfigError with
    * code 'CHECKPOINT_SCHEMA_MISMATCH' when the snapshot's schemaVersion
    * is unrecognised — the caller discards via checkpointStore.clear()
    * and restarts with a fresh execution. The restored Context carries
    * the original executionId so downstream readers observe continuity
    * across a host restart.
    */
-  restore(executionId: string): Promise<Context | null>;
+  restore(executionId: string, opts?: RestoreContextOptions): Promise<Context | null>;
 
   // Lifecycle
   cancel(ctx: Context, reason?: string): Promise<void>;
@@ -638,48 +639,43 @@ The harness exposes four surfaces that together enable crash-recovery: `subproce
 
 ### Checkpoint Lifecycle
 
-Snapshots fire automatically at four boundaries:
-
-1. **Post-`execute()`** — after each step completes and any item-log mutations have landed.
-2. **Post-`detachedSpawn()`** — when a child is sent and the adapter's handle is returned.
-3. **Ask-user enqueue** — when a pending prompt is persisted waiting for user input.
-4. **Post-`runAppendPipeline`** — layer state can mutate as items are appended; the snapshot follows.
-
-Any caller may also invoke `harness.checkpoint(ctx)` explicitly. Snapshots are keyed by `ctx.id` (the execution id) under `execution:<id>:snapshot` within the store's key namespace, and are idempotent — successive snapshots for the same execution overwrite prior data.
+Snapshots fire automatically at run start, after every completed step (an `inParallel` path or `spawn` child checkpoints its root), after `runAppendPipeline`, and at the end of a run that finished; captures for one execution are serialised. Any caller may also invoke `harness.checkpoint(ctx)` explicitly. Snapshots are keyed by `ctx.id` under `execution:<id>:snapshot` and overwrite one another.
 
 Snapshot content (Zod-validated by `CheckpointSnapshotSchema`):
 
-- `schemaVersion` — literal `2` today; bumped on backward-incompatible change (v2 rejects pre-rename v1 snapshots whose layer state is keyed by the old `*-memory` layer ids).
+- `schemaVersion` — literal `3`; bumped on backward-incompatible change (v3 rejects v2 snapshots, whose item log is not a run baseline).
 - `executionId`, `threadId`, `resourceId` — identity.
-- `frontier` — stack of `FrontierFrame { stepId, input, state? }` entries (the execution frontier).
+- `frontier` — `FrontierFrame { stepId, input, state? }` entries for the steps in flight.
 - `layers` — `Record<layerId, state>` captured via `layerStateStore.get(executionId, layerId)`.
 - `cwd` — `{ current, previous }`.
 - `askUser` — pending ask-user requests (populated when the code-agent's `AskUserService` integrates with the store).
-- `itemLog` — `{ items: Item[] }`, the full item log.
+- `itemLog`, `occurrences` — the run baseline: the item log and dispatch counts when the run in flight began.
+- `state`, `usage` — `ctx.state` (when JSON-encodable) and tokens/cost at capture.
+- `channels` — stored channel state.
 - `capturedAt` — ISO-8601 timestamp.
 
 ### Restore Contract
 
-`harness.restore(executionId)` reads the snapshot and rebuilds a `Context`:
+`harness.restore(executionId, opts?)` reads the snapshot and the step ledger and rebuilds a `Context` standing where the interrupted run began:
 
-1. Replays layer state into `layerStateStore` under the same executionId so context projectors observe continuity.
+1. Replays layer state into `layerStateStore` and channel state into the channel store under the same executionId.
 2. Re-parses `itemLog.items` via the harness's `ItemSchemaRegistry` (the same gate production traffic passes through).
-3. Seeds a new context with `threadId`, `resourceId`, and `cwdInit` from the snapshot.
-4. Returns a `Context` whose `.id` is overridden to the original `executionId` so downstream readers correlate across the restart.
+3. Seeds a new context with the baseline item log, `threadId`, `resourceId`, `cwdInit`, `state` (unless `opts.state` is given), dispatch counts, and usage.
+4. Returns a `Context` whose `.id` is the original `executionId`, carrying the recovered step ledger. Running the same step on the same input replays every recorded step and continues live (`23a-step-level-resume`).
 
-Returns `null` when no snapshot is recorded. Throws `NoeticConfigError` with `code: 'CHECKPOINT_SCHEMA_MISMATCH'` when the persisted schemaVersion is not the one the running runtime understands — callers discard via `checkpointStore.clear(executionId)` and restart the execution.
+Returns `null` when neither a snapshot nor a ledger entry is recorded. Throws `NoeticConfigError` with `code: 'CHECKPOINT_SCHEMA_MISMATCH'` when the persisted schemaVersion is not the one the running runtime understands — callers discard via `harness.clearCheckpoint(executionId)` and restart the execution.
 
 ### Durability Guarantees
 
-- **With a durable `StorageAdapter` + `CheckpointStore`** (e.g. `createFileStorage({root})` + `createCheckpointStore({storage})`): full snapshot/restore across host restarts.
-- **Without** (the default zero-config harness): `checkpoint()` is a no-op, `restore()` returns null, `listLive()` returns the empty set, `reattach()` returns null. All existing in-memory semantics are preserved bit-identically.
+- **With a durable `StorageAdapter`** (e.g. `createFileStorage({root})`): full snapshot/restore and step-level resume across host restarts and harness instances — the checkpoint store defaults to one over the adapter. `harness.execute()` sessions keep their thread history and resume a re-delivered cut-off turn.
+- **Without** (the default zero-config harness, or `checkpointStore: false`): `checkpoint()` is a no-op, `restore()` returns null, `listLive()` returns the empty set, `reattach()` returns null. All existing in-memory semantics are preserved bit-identically.
 - **Schema versioning**: `CheckpointSnapshot.schemaVersion` is validated on load. Incompatible versions surface a typed error rather than a silently-corrupt restored context.
 - **Checkpoint failures never abort a step.** A failing `store.save` is logged via `console.warn` and swallowed; the step's return value is unaffected.
 
 ### Limitations
 
-- **LLM mid-stream** is re-issued on restart, not resumed. The item log's response-id dedupe guards against double-recording an identical response. See `07-context-and-event-log`.
-- **Non-idempotent `runCode` bodies** may run twice if a crash lands between execution and the following checkpoint. Write bodies that are safe to re-execute, or gate with an external idempotency key.
+- **LLM mid-stream**: a round cut off mid-stream is asked again on resume; finished rounds replay.
+- **Non-idempotent `runCode` bodies** may run twice if a crash lands between the body's side effect and its ledger append. Write bodies that are safe to re-execute, or gate with an external idempotency key.
 
 See `23-durable-execution` for the full durable-execution model, including `SubprocessAdapter.reattach`/`listLive` semantics, the durable IPC outbound queue, protocol v2 frames, and the host-restart recovery flow.
 
@@ -687,7 +683,7 @@ See `23-durable-execution` for the full durable-execution model, including `Subp
 
 | Backend                    | When to Use                                                     | Durability | Channel Handles |
 |----------------------------|-----------------------------------------------------------------|------------|-----------------|
-| `AgentHarness<TParams>`     | Testing, simple scripts, CLI tools. Resolves the LLM provider from `callModelDefaults` (default `'noetic'`, keyed by `NOETIC_API_KEY`; `'openrouter'` reads `OPENROUTER_API_KEY`) — see `02-step-variants` § LLM Provider Configuration. | Ephemeral by default; full durable execution when constructed with a durable `StorageAdapter` + `CheckpointStore`. | In-process handles |
+| `AgentHarness<TParams>`     | Testing, simple scripts, CLI tools. Resolves the LLM provider from `callModelDefaults` (default `'noetic'`, keyed by `NOETIC_API_KEY`; `'openrouter'` reads `OPENROUTER_API_KEY`) — see `02-step-variants` § LLM Provider Configuration. | Ephemeral by default; full durable execution when constructed with a durable `StorageAdapter`. | In-process handles |
 
 ```typescript
 import { AgentHarness, scratchpad } from '@noetic-tools/core';
@@ -746,7 +742,7 @@ export const handler = async (event) => {
 };
 ```
 
-In-memory channel storage and a harness without a `CheckpointStore` do not persist across invocations. Construct `AgentHarness` with a durable `StorageAdapter` and a `CheckpointStore` (`environment: { storage: { adapter, checkpointStore: createCheckpointStore({ storage: adapter }) } }`) if cross-invocation state is required — see `23-durable-execution`.
+In-memory channel storage and a harness without a `CheckpointStore` do not persist across invocations. Construct `AgentHarness` with a durable `StorageAdapter` (`environment: { storage: { adapter } }` — the checkpoint store defaults to one over it) if cross-invocation state is required — see `23-durable-execution`.
 
 ---
 
@@ -792,8 +788,8 @@ interface AgentEnvironmentConfig {
   storage?: {
     /** Key-value adapter backing context-layer persistence and the step ledger. Defaults to in-memory. */
     adapter?: StorageAdapter;
-    /** Checkpoint store used by checkpoint()/restore(). Absent → durability hooks are no-ops. */
-    checkpointStore?: CheckpointStore;
+    /** Checkpoint store used by checkpoint()/restore(). Defaults to one over `adapter`; `false` opts out. With neither, durability hooks are no-ops. */
+    checkpointStore?: CheckpointStore | false;
     /** Layer-state store override. Defaults to an in-memory store. */
     layerStateStore?: LayerStateStore;
     /** Bounds on the step-completion ledger backing step-level resume. */

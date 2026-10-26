@@ -65,18 +65,47 @@ describe('CheckpointSnapshot schema version', () => {
     }
   });
 
-  it('load throws for a v3 snapshot (forward-incompatible)', async () => {
+  it('load throws for a v2 snapshot, whose item log is not a run baseline', async () => {
     const storage = createInMemoryStorage();
-    await storage.set(`${CheckpointKeys.ExecPrefix}exec-3${CheckpointKeys.SnapshotSuffix}`, {
-      schemaVersion: 3,
-      executionId: 'exec-3',
+    await storage.set(`${CheckpointKeys.ExecPrefix}exec-v2${CheckpointKeys.SnapshotSuffix}`, {
+      schemaVersion: 2,
+      executionId: 'exec-v2',
+      frontier: [],
+      layers: {},
+      cwd: null,
+      askUser: [],
+      itemLog: {
+        items: [],
+      },
+      capturedAt: new Date().toISOString(),
     });
     const store = createCheckpointStore({
       storage,
     });
     let thrown: unknown;
     try {
-      await store.load('exec-3');
+      await store.load('exec-v2');
+    } catch (err) {
+      thrown = err;
+    }
+    expect(isNoeticConfigError(thrown)).toBe(true);
+    if (isNoeticConfigError(thrown)) {
+      expect(thrown.code).toBe('CHECKPOINT_SCHEMA_MISMATCH');
+    }
+  });
+
+  it('load throws for a v4 snapshot (forward-incompatible)', async () => {
+    const storage = createInMemoryStorage();
+    await storage.set(`${CheckpointKeys.ExecPrefix}exec-4${CheckpointKeys.SnapshotSuffix}`, {
+      schemaVersion: 4,
+      executionId: 'exec-4',
+    });
+    const store = createCheckpointStore({
+      storage,
+    });
+    let thrown: unknown;
+    try {
+      await store.load('exec-4');
     } catch (err) {
       thrown = err;
     }
@@ -89,7 +118,7 @@ describe('CheckpointSnapshot schema version', () => {
   it('load throws for a malformed snapshot (missing required fields)', async () => {
     const storage = createInMemoryStorage();
     await storage.set(`${CheckpointKeys.ExecPrefix}broken${CheckpointKeys.SnapshotSuffix}`, {
-      schemaVersion: 2,
+      schemaVersion: 3,
       // Missing everything else
     });
     const store = createCheckpointStore({

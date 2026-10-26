@@ -953,7 +953,7 @@ const handle = harness.detachedSpawn(agent, input, ctx, {
 When the host that launched a long-running child can crash, configure durable storage so the child survives independently and the parent context can be rebuilt on restart.
 
 ```typescript
-import { AgentHarness, createCheckpointStore } from '@noetic-tools/core';
+import { AgentHarness } from '@noetic-tools/core';
 import { createFileStorage, createLocalSubprocessAdapter } from '@noetic-tools/platform-node';
 
 // Three roots: subprocess manifests, checkpoint snapshots, per-project task state.
@@ -970,9 +970,8 @@ const harness = new AgentHarness({
   params: {},
   environment: {
     subprocess: createLocalSubprocessAdapter({ storage: subprocessStorage }),
-    storage: {
-      checkpointStore: createCheckpointStore({ storage: checkpointStorage }),
-    },
+    // The checkpoint store defaults to one over this adapter.
+    storage: { adapter: checkpointStorage },
   },
 });
 
@@ -1002,7 +1001,8 @@ for (const live of await harness.subprocess.listLive()) {
 
 - Recovery is two primitives: `harness.subprocess.listLive()` rediscovers children from the persisted manifest, and `harness.restore(executionId)` rebuilds each context from its checkpoint or, failing that, its step ledger (returning `null` when neither exists). A rehydrated handle's `metadata` carries `executionId` (the child), `parentExecutionId` (the context that spawned it — the one to restore to rejoin the parent), and the caller's `metadata` tags from the original request. The Noetic CLI ships a `reattachLiveChildren` convenience wrapper over exactly this loop, but it lives in a separate repository — any host can call the two primitives directly.
 - Subprocess manifests and checkpoint snapshots live at distinct roots (`~/.noetic/subprocess` vs `~/.noetic/checkpoints`). Override both via `NOETIC_HOME=/some/dir` if needed.
-- `checkpoint()` is a no-op when `environment.storage.checkpointStore` is absent; `listLive()` returns the empty set when the adapter has no storage. Durability is opt-in and degrades gracefully.
+- `checkpoint()` is a no-op without storage — with `environment.storage.adapter` set, the checkpoint store defaults to one over it (`checkpointStore: false` opts out); `listLive()` returns the empty set when the subprocess adapter has no storage. Durability follows storage and degrades gracefully.
+- A restored context stands where the interrupted run began. Resume by running the same step on the same input: finished steps (and finished model-loop rounds) replay with their history, and the run continues live. `execute()` sessions resume a cut-off turn when its messages are re-delivered with the same `messageId`s.
 - The default in-memory adapter also accepts a `storage` option for tests that want manifest round-trip behaviour without launching real OS children.
 
 ## Pattern: Concurrent Workers with Content-Keyed Replay

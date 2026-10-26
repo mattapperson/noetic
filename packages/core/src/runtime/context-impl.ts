@@ -20,6 +20,7 @@ import type {
 } from './context-deps';
 import { buildContextData, defaultItemSchemaRegistry } from './context-deps';
 import type { StepLedger } from './durable/step-ledger';
+import { hashStepInput } from './durable/step-ledger';
 import { ItemLogImpl } from './item-log-impl';
 
 const EMPTY_CONTEXT: ContextData = Object.freeze({});
@@ -157,6 +158,23 @@ export class ContextImpl implements Context<ContextData> {
    * @internal
    */
   readonly ledger?: StepLedger;
+
+  /**
+   * The dispatch this view belongs to. Undefined on the context itself; a lane (see
+   * `enterStep`) reads its own here.
+   * @internal
+   */
+  private readonly _lane?: Lane;
+
+  /**
+   * The item log and dispatch counts as they stood when the outermost run on this
+   * context began. A checkpoint persists these rather than the live values, because a
+   * resumed run starts that run over: its recorded steps replay and re-append their
+   * items, so the log must not already hold them. Unset between runs, and kept after a
+   * run that failed — that run is what a resume repeats.
+   * @internal
+   */
+  private _baseline?: RunBaseline;
 
   constructor(opts: {
     harness: AgentHarnessContract;
@@ -383,17 +401,59 @@ export class ContextImpl implements Context<ContextData> {
   /**
    * @internal
    * Register `frame` as in flight and return the lane its step runs on: a view of
-   * this context that shares everything except its execution path. `execute()` hands
-   * the lane to the step, so steps the step dispatches hang under its path no matter
-   * how other dispatches on this context interleave. The occurrence ordinal is taken
-   * here, at dispatch, never at settle.
+   * this context that shares everything except its execution path and the record of
+   * items appended through it. `execute()` hands the lane to the step, so steps the
+   * step dispatches hang under its path no matter how other dispatches on this context
+   * interleave. The occurrence ordinal is taken here, at dispatch, never at settle.
    */
   enterStep(frame: FrontierFrame): ContextImpl {
     const key = `${this._path}/${frame.stepId}`;
     const occurrence = this._occurrences.get(key) ?? 0;
     this._occurrences.set(key, occurrence + 1);
     this._inFlight.add(frame);
-    return laneOf(this, `${key}#${occurrence}`);
+    return laneOf(this, {
+      path: `${key}#${occurrence}`,
+      key,
+      occurrence,
+      stepId: frame.stepId,
+      inputHash: this.ledger ? hashStepInput(frame.input) : undefined,
+      recorded: true,
+      appended: new AppendRecord(this._lane?.appended),
+    });
+  }
+
+  /**
+   * @internal
+   * Mark this lane's step as kept out of the ledger (`durable: false`, `schedule`, a
+   * failed `replayKey`), so nothing running inside it records under its identity.
+   */
+  skipLedger(): void {
+    if (this._lane) {
+      this._lane.recorded = false;
+    }
+  }
+
+  /**
+   * @internal
+   * The dispatch this lane belongs to, or undefined on the context itself and on a
+   * lane kept out of the ledger. Lets code running inside a step (the model loop's
+   * rounds) record under the step's identity.
+   */
+  currentDispatch():
+    | {
+        path: string;
+        stepId: string;
+        inputHash: string | undefined;
+      }
+    | undefined {
+    const lane = this._lane;
+    return lane?.recorded
+      ? {
+          path: lane.path,
+          stepId: lane.stepId,
+          inputHash: lane.inputHash,
+        }
+      : undefined;
   }
 
   /**
@@ -408,11 +468,92 @@ export class ContextImpl implements Context<ContextData> {
 
   /**
    * @internal
+   * Items appended to the item log through this lane, including by steps it
+   * dispatched on the same context. Empty on the context itself.
+   */
+  appendedItems(): Item[] {
+    return [
+      ...(this._lane?.appended.items ?? []),
+    ];
+  }
+
+  /**
+   * @internal
    * Drop `frame` from the in-flight set. Called when its step resolves, success or
    * failure.
    */
   leaveStep(frame: FrontierFrame): void {
     this._inFlight.delete(frame);
+  }
+
+  /**
+   * @internal
+   * Give back this lane's ordinal after its step failed, so a retry runs at the same
+   * path. A resumed run never sees the failed attempt — nothing records a failure — so
+   * without this a retry would take the next ordinal and every later dispatch would sit
+   * one position past where the resume looks for it. Only the latest dispatch of a key
+   * can give its ordinal back; once a later one has taken the next, the ordinal stays.
+   */
+  releaseDispatch(): void {
+    const lane = this._lane;
+    if (!lane || this._occurrences.get(lane.key) !== lane.occurrence + 1) {
+      return;
+    }
+    this._occurrences.set(lane.key, lane.occurrence);
+    for (const key of [
+      ...this._occurrences.keys(),
+    ]) {
+      if (key.startsWith(`${lane.path}/`)) {
+        this._occurrences.delete(key);
+      }
+    }
+  }
+
+  /**
+   * @internal
+   * Mark the start of the outermost run on this context. See `_baseline`.
+   */
+  beginRun(): void {
+    this._baseline = {
+      items: [
+        ...this.itemLog.items,
+      ],
+      occurrences: Object.fromEntries(this._occurrences),
+    };
+  }
+
+  /**
+   * @internal
+   * Mark a run as finished, so checkpoints record the live log and counts again.
+   */
+  endRun(): void {
+    this._baseline = undefined;
+  }
+
+  /**
+   * @internal
+   * What a checkpoint persists for the item log and dispatch counts — see `_baseline`.
+   */
+  runBaseline(): RunBaseline {
+    return (
+      this._baseline ?? {
+        items: [
+          ...this.itemLog.items,
+        ],
+        occurrences: Object.fromEntries(this._occurrences),
+      }
+    );
+  }
+
+  /**
+   * @internal
+   * Seed the dispatch counts a restored run starts from, so a resumed context numbers
+   * its dispatches where the recorded run did rather than from zero.
+   */
+  restoreOccurrences(occurrences: Record<string, number>): void {
+    for (const [key, count] of Object.entries(occurrences)) {
+      this._occurrences.set(key, count);
+    }
   }
 
   /**
@@ -433,21 +574,74 @@ export class ContextImpl implements Context<ContextData> {
 
 //#region Lanes
 
+/** @internal Item log and dispatch counts at the start of a run — see `ContextImpl._baseline`. */
+export interface RunBaseline {
+  items: Item[];
+  occurrences: Record<string, number>;
+}
+
+/** One dispatch's view data. */
+interface Lane {
+  /** Execution path: `<parent path>/<step id>#<ordinal>`. */
+  path: string;
+  /** `<parent path>/<step id>` — the occurrence counter this dispatch took from. */
+  key: string;
+  occurrence: number;
+  stepId: string;
+  /** `hashStepInput` of the step's input, taken only when the context has a ledger. */
+  inputHash: string | undefined;
+  /** False once the interpreter keeps this step out of the ledger — see `skipLedger`. */
+  recorded: boolean;
+  appended: AppendRecord;
+}
+
+/**
+ * Items appended through one lane. Each record also feeds its parent lane's, so a
+ * composite step's record holds everything appended beneath it on the same context.
+ */
+class AppendRecord {
+  readonly items: Item[] = [];
+
+  constructor(private readonly parent?: AppendRecord) {}
+
+  add(item: Item): void {
+    this.items.push(item);
+    this.parent?.add(item);
+  }
+}
+
 /** The context each lane views, so `laneOf` never stacks a proxy on a proxy. */
 const laneTargets = new WeakMap<ContextImpl, ContextImpl>();
 
 /**
- * A view of `ctx` that reads `path` as its execution path and forwards every other
- * read and write to the context itself, so state, usage, abort, and the in-flight set
- * stay shared. A Proxy rather than a subclass: steps assign `ctx.state` and friends
+ * A view of `ctx` that reads `lane` as its dispatch and forwards every other read and
+ * write to the context itself, so state, usage, abort, and the in-flight set stay
+ * shared. Its item log appends to the shared log and notes each item in the lane's
+ * record. A Proxy rather than a subclass: steps assign `ctx.state` and friends
  * directly, and a copy would keep those writes to itself.
  */
-function laneOf(ctx: ContextImpl, path: string): ContextImpl {
+function laneOf(ctx: ContextImpl, lane: Lane): ContextImpl {
   const target = laneTargets.get(ctx) ?? ctx;
-  const lane = new Proxy(target, {
+  const itemLog: ItemLog = {
+    get items() {
+      return target.itemLog.items;
+    },
+    append(item: Item) {
+      target.itemLog.append(item);
+      const items = target.itemLog.items;
+      lane.appended.add(items[items.length - 1]);
+    },
+  };
+  const view = new Proxy(target, {
     get(base, prop, receiver) {
       if (prop === '_path') {
-        return path;
+        return lane.path;
+      }
+      if (prop === '_lane') {
+        return lane;
+      }
+      if (prop === 'itemLog') {
+        return itemLog;
       }
       return Reflect.get(base, prop, receiver);
     },
@@ -455,8 +649,8 @@ function laneOf(ctx: ContextImpl, path: string): ContextImpl {
       return Reflect.set(base, prop, value);
     },
   });
-  laneTargets.set(lane, target);
-  return lane;
+  laneTargets.set(view, target);
+  return view;
 }
 
 /**

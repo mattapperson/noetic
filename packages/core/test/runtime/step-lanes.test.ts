@@ -9,6 +9,7 @@ import { ContextImpl } from '../../src/runtime/context-impl';
 import { createCheckpointStore } from '../../src/runtime/durable/checkpoint-store';
 import { createStepLedgerStore } from '../../src/runtime/durable/step-ledger';
 import { createInMemoryStorage } from '../../src/runtime/in-memory-storage';
+import { crashAfter } from '../_helpers';
 
 type Storage = ReturnType<typeof createInMemoryStorage>;
 type RunStep = ReturnType<typeof runCode<ContextData, string, string>>;
@@ -70,7 +71,11 @@ function mustRestore(ctx: Context | null): Context {
   return ctx;
 }
 
-/** Two workflows run concurrently on one context; `delays` decides which settles first. */
+/**
+ * Two workflows run concurrently on one context; `delays` decides which settles first.
+ * The run dies once both finish, so their entries stay for a resume to find, and the
+ * workflows are not durable, so the leaves' own entries are not pruned away.
+ */
 async function runPair({
   harness,
   ctx,
@@ -82,25 +87,31 @@ async function runPair({
   calls: string[];
   delays: Record<string, number>;
 }): Promise<string[]> {
-  const left = sequenceOf(harness, 'left', [
-    slowLeaf('l1', calls, delays),
-    slowLeaf('l2', calls, delays),
-  ]);
-  const right = sequenceOf(harness, 'right', [
-    slowLeaf('r1', calls, delays),
-    slowLeaf('r2', calls, delays),
-  ]);
-  return Promise.all([
-    harness.run(left, 'L', ctx),
-    harness.run(right, 'R', ctx),
-  ]);
+  const left = {
+    ...sequenceOf(harness, 'left', [
+      slowLeaf('l1', calls, delays),
+      slowLeaf('l2', calls, delays),
+    ]),
+    durable: false,
+  };
+  const right = {
+    ...sequenceOf(harness, 'right', [
+      slowLeaf('r1', calls, delays),
+      slowLeaf('r2', calls, delays),
+    ]),
+    durable: false,
+  };
+  return crashAfter(harness, ctx, (execCtx) =>
+    Promise.all([
+      harness.run(left, 'L', execCtx),
+      harness.run(right, 'R', execCtx),
+    ]),
+  );
 }
 
 const EXPECTED_PATHS = [
-  '/left#0',
   '/left#0/l1#0',
   '/left#0/l2#0',
-  '/right#0',
   '/right#0/r1#0',
   '/right#0/r2#0',
 ];
@@ -138,7 +149,8 @@ describe('step lanes', () => {
     ]);
     expect(await ledgerPaths(storage, ctx.id)).toEqual(EXPECTED_PATHS);
     expect(warn).not.toHaveBeenCalled();
-    expect(ctx.stepCount).toBe(6);
+    // Two workflows, four leaves, and the host step that died.
+    expect(ctx.stepCount).toBe(7);
   });
 
   it('gives the same paths whichever call settles first', async () => {
@@ -213,10 +225,12 @@ describe('step lanes', () => {
       worker: 5,
     });
 
-    await Promise.all([
-      harness.run(leaf, 'a', ctx),
-      harness.run(leaf, 'b', ctx),
-    ]);
+    await crashAfter(harness, ctx, (execCtx) =>
+      Promise.all([
+        harness.run(leaf, 'a', execCtx),
+        harness.run(leaf, 'b', execCtx),
+      ]),
+    );
 
     const { entries } = await createStepLedgerStore({
       storage,

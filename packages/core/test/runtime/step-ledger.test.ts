@@ -22,6 +22,7 @@ import {
 } from '../../src/runtime/durable/step-ledger';
 import { createInMemoryStorage } from '../../src/runtime/in-memory-storage';
 import { until } from '../../src/until/predicates';
+import { runThenCrash } from '../_helpers';
 
 type Storage = ReturnType<typeof createInMemoryStorage>;
 type RunStep = ReturnType<typeof runCode<ContextData, string, string>>;
@@ -113,7 +114,7 @@ describe('step ledger', () => {
     ]);
 
     const ctx = harness.createContext();
-    expect(await harness.run(tree, 'go', ctx)).toBe('ab');
+    expect(await runThenCrash(harness, tree, 'go', ctx)).toBe('ab');
     expect(calls).toEqual([
       'first',
       'second',
@@ -143,7 +144,7 @@ describe('step ledger', () => {
     });
 
     const ctx = harness.createContext();
-    expect(await harness.run(tree, 'go', ctx)).toBe('run-1');
+    expect(await runThenCrash(harness, tree, 'go', ctx)).toBe('run-1');
 
     const resumed = await harness.restore(ctx.id);
     expect(await harness.run(tree, 'go', mustRestore(resumed))).toBe('run-1');
@@ -156,6 +157,8 @@ describe('step ledger', () => {
     const seen: string[] = [];
     const tree = loop<ContextData, string, string>({
       id: 'spin',
+      // A loop that records prunes its body's entries; keep them to inspect.
+      durable: false,
       steps: [
         runCode<ContextData, string, string>({
           id: 'body',
@@ -169,7 +172,7 @@ describe('step ledger', () => {
     });
 
     const ctx = harness.createContext();
-    await harness.run(tree, '', ctx);
+    await runThenCrash(harness, tree, '', ctx);
 
     /* Every dispatch of the SAME step id got its own ledger key. If iterations shared
      * one key the count would collapse to 1 and the second iteration would have
@@ -188,6 +191,8 @@ describe('step ledger', () => {
     const tree = inParallel<ContextData, string, string>({
       id: 'fan',
       mode: 'all',
+      // A fan-out that records prunes its legs' entries; keep them to inspect.
+      durable: false,
       paths: () => [
         runCode<ContextData, string, string>({
           id: 'leg-a',
@@ -202,7 +207,7 @@ describe('step ledger', () => {
     });
 
     const ctx = harness.createContext();
-    await harness.run(tree, 'go', ctx);
+    await runThenCrash(harness, tree, 'go', ctx);
 
     const legPaths = (await ledgerPaths(storage, ctx.id)).filter((p) => p.includes('leg-'));
     expect(new Set(legPaths).size).toBe(2);
@@ -214,7 +219,8 @@ describe('step ledger', () => {
     const calls: string[] = [];
 
     const ctx = harness.createContext();
-    await harness.run(
+    await runThenCrash(
+      harness,
       countingStep('alpha', calls, () => 'a'),
       'go',
       ctx,
@@ -248,7 +254,7 @@ describe('step ledger', () => {
     const original = sequenceOf(harness, 'root', [
       countingStep('alpha', calls, () => 'a'),
     ]);
-    await harness.run(original, 'go', ctx);
+    await runThenCrash(harness, original, 'go', ctx);
 
     const resumed = await harness.restore(ctx.id);
     calls.length = 0;
@@ -260,7 +266,7 @@ describe('step ledger', () => {
     expect(calls).toEqual([]);
   });
 
-  it('records nothing when the harness has no checkpoint store', async () => {
+  it('records nothing when the harness opts out of checkpoints', async () => {
     const storage = createInMemoryStorage();
     const harness = new AgentHarness({
       name: 'ephemeral',
@@ -268,6 +274,7 @@ describe('step ledger', () => {
       environment: {
         storage: {
           adapter: storage,
+          checkpointStore: false,
         },
       },
     });
@@ -514,7 +521,10 @@ describe('step ledger retention config', () => {
     expect(ledger.stats.droppedUnserialisable).toBe(1);
   });
 
-  it('boundary: evicts oldest-first only once the entry cap is exceeded', async () => {
+  it('boundary: stops recording once the entry cap is reached', async () => {
+    /* A resume walks the run from the top, so the head of the ledger is what it reads
+     * first. Keeping the head and dropping what comes after keeps every replayed value
+     * consistent with the ones before it. */
     const storage = createInMemoryStorage();
     const store = createStepLedgerStore({
       storage,
@@ -529,23 +539,49 @@ describe('step ledger retention config', () => {
 
     await ledger.record(entryOfBytes('a', 4));
     await ledger.record(entryOfBytes('b', 4));
-    expect(ledger.stats.evicted).toBe(0);
-
     await ledger.record(entryOfBytes('c', 4));
-    expect(ledger.stats.evicted).toBe(0); // at the cap — nothing to evict yet
+    expect(ledger.stats.droppedFull).toBe(0); // at the cap — nothing dropped yet
 
     await ledger.record(entryOfBytes('d', 4));
-    expect(ledger.stats.evicted).toBe(1); // one over — the oldest goes
+    expect(ledger.stats.droppedFull).toBe(1); // one past — not recorded
 
-    const retained = [
+    expect([
       ...(await store.load('exec')).entries.keys(),
-    ];
-    expect(retained).toEqual([
+    ]).toEqual([
+      'a',
       'b',
       'c',
-      'd',
     ]);
     expect(await ledgerKeys(storage, 'exec')).toHaveLength(3);
+  });
+
+  it('prunes entries beneath a parent once the parent records', async () => {
+    const storage = createInMemoryStorage();
+    const store = createStepLedgerStore({
+      storage,
+    });
+    const ledger = new StepLedger({
+      executionId: 'exec',
+      store,
+      retention: {
+        maxEntries: 2,
+      },
+    });
+
+    await ledger.record(entryOfBytes('/p#0/x#0', 4));
+    await ledger.record(entryOfBytes('/p#0[0]/y#0', 4));
+    await ledger.record(entryOfBytes('/p#0', 4));
+    // Both children are gone, so the parent fits under a cap of two with room to spare.
+    await ledger.record(entryOfBytes('/q#0', 4));
+
+    expect(ledger.stats.pruned).toBe(2);
+    expect(ledger.stats.droppedFull).toBe(0);
+    expect([
+      ...(await store.load('exec')).entries.keys(),
+    ]).toEqual([
+      '/p#0',
+      '/q#0',
+    ]);
   });
 
   it('gives concurrent records distinct keys', async () => {
@@ -573,7 +609,7 @@ describe('step ledger retention config', () => {
 
   it('never reuses a sequence number after a resume, so no live entry is overwritten', async () => {
     /* `nextSeq` has to come from storage: deriving it from the recovered entry COUNT
-     * would restart inside the live window whenever retention left a gap, and the first
+     * would restart inside the live window whenever pruning left a gap, and the first
      * new append would overwrite an entry the resumed run still has to replay. */
     const storage = createInMemoryStorage();
     const store = createStepLedgerStore({
@@ -582,36 +618,31 @@ describe('step ledger retention config', () => {
     const first = new StepLedger({
       executionId: 'exec',
       store,
-      retention: {
-        maxEntries: 2,
-      },
     });
-    await first.record(entryOfBytes('a', 4));
-    await first.record(entryOfBytes('b', 4));
-    await first.record(entryOfBytes('c', 4)); // evicts 'a'
+    await first.record(entryOfBytes('/p#0/x#0', 4));
+    await first.record(entryOfBytes('/p#0', 4)); // prunes seq 0, leaving a gap
+    await first.record(entryOfBytes('/q#0', 4));
 
     const resumed = new StepLedger({
       executionId: 'exec',
       store,
       recovered: await store.load('exec'),
-      retention: {
-        maxEntries: 2,
-      },
     });
-    await resumed.record(entryOfBytes('d', 4));
+    await resumed.record(entryOfBytes('/r#0', 4));
 
-    // 'd' landed on a fresh key and evicted 'b' rather than clobbering it.
+    // '/r#0' landed on a fresh key rather than clobbering '/p#0' or '/q#0'.
     expect([
       ...(await store.load('exec')).entries.keys(),
     ]).toEqual([
-      'c',
-      'd',
+      '/p#0',
+      '/q#0',
+      '/r#0',
     ]);
   });
 });
 
 describe('step ledger retention through the harness', () => {
-  it('resumes over a bounded suffix: evicted steps re-run, retained ones replay', async () => {
+  it('resumes over a bounded head: recorded steps replay, the rest re-run', async () => {
     const storage = createInMemoryStorage();
     const harness = durableHarness(storage, {
       maxEntries: 3,
@@ -624,36 +655,28 @@ describe('step ledger retention through the harness', () => {
       4,
       5,
     ].map((n) => countingStep(`s${n}`, calls, () => `out-${n}`));
+    // Not durable, so no parent entry can replay the whole tree and mask the cap.
+    const tree = {
+      ...sequenceOf(harness, 'root', steps),
+      durable: false,
+    };
 
-    // A host driving steps itself: five top-level dispatches on one context, so no
-    // parent entry can replay the whole tree and mask eviction.
     const ctx = harness.createContext();
-    for (const s of steps) {
-      await harness.run(s, 'go', ctx);
-    }
+    await runThenCrash(harness, tree, 'go', ctx);
     expect(calls).toHaveLength(5);
     expect(await ledgerKeys(storage, ctx.id)).toHaveLength(3);
 
     const resumed = mustRestore(await harness.restore(ctx.id));
     calls.length = 0;
-    const outputs: string[] = [];
-    for (const s of steps) {
-      outputs.push(String(await harness.run(s, 'go', resumed)));
-    }
+    const output = await harness.run(tree, 'go', resumed);
 
-    // The two oldest entries were evicted, so those steps ran again; the retained
-    // suffix replayed. Every output still matches the original run.
+    // The cap held the first three, so only the last two ran again — and the
+    // output still matches the original run.
     expect(calls).toEqual([
-      's1',
-      's2',
+      's4',
+      's5',
     ]);
-    expect(outputs).toEqual([
-      'out-1',
-      'out-2',
-      'out-3',
-      'out-4',
-      'out-5',
-    ]);
+    expect(output).toBe('out-5');
   });
 
   it('re-runs a step whose output was too large to record', async () => {
@@ -664,16 +687,21 @@ describe('step ledger retention through the harness', () => {
     const calls: string[] = [];
     const small = countingStep('small', calls, () => 'ok');
     const big = countingStep('big', calls, () => 'z'.repeat(1e3));
+    const tree = {
+      ...sequenceOf(harness, 'root', [
+        small,
+        big,
+      ]),
+      durable: false,
+    };
 
     const ctx = harness.createContext();
-    await harness.run(small, 'go', ctx);
-    await harness.run(big, 'go', ctx);
+    await runThenCrash(harness, tree, 'go', ctx);
     expect((await ledgerPaths(storage, ctx.id)).some((p) => p.includes('big'))).toBe(false);
 
     const resumed = mustRestore(await harness.restore(ctx.id));
     calls.length = 0;
-    await harness.run(small, 'go', resumed);
-    const replayed = await harness.run(big, 'go', resumed);
+    const replayed = await harness.run(tree, 'go', resumed);
 
     expect(calls).toEqual([
       'big',
@@ -690,7 +718,8 @@ describe('step ledger retention through the harness', () => {
     const calls: string[] = [];
 
     const ctx = harness.createContext();
-    await harness.run(
+    await runThenCrash(
+      harness,
       countingStep('alpha', calls, () => 'a'),
       'go',
       ctx,
@@ -941,7 +970,7 @@ describe('step replay controls', () => {
     });
 
     const ctx = harness.createContext();
-    expect(await harness.run(parent, 'go', ctx)).toBe('go!');
+    expect(await runThenCrash(harness, parent, 'go', ctx)).toBe('go!');
     const paths = await ledgerPaths(storage, ctx.id);
     expect(paths.some((p) => p.includes('expensive-leaf'))).toBe(true);
     expect(paths.some((p) => p.endsWith('cheap-parent#0'))).toBe(false);
@@ -1153,8 +1182,17 @@ describe('step replay controls', () => {
             entry('key:batch/1', 'other'),
           ],
         ]),
+        seqs: new Map([
+          [
+            'key:batch',
+            0,
+          ],
+          [
+            'key:batch/1',
+            1,
+          ],
+        ]),
         nextSeq: 2,
-        oldestSeq: 0,
       },
     });
 
@@ -1162,18 +1200,21 @@ describe('step replay controls', () => {
       ledger.take('key:batch', {
         id: 'renamed',
         kind: 'runCode',
+        inputHash: undefined,
       }),
     ).toBeUndefined();
     expect(
       ledger.take('key:batch', {
         id: 'leaf',
         kind: 'runCode',
+        inputHash: undefined,
       }),
     ).toBeUndefined();
     expect(
       ledger.take('key:batch/1', {
         id: 'other',
         kind: 'runCode',
+        inputHash: undefined,
       })?.output,
     ).toBe('other');
   });

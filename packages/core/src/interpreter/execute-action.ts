@@ -1041,6 +1041,8 @@ export async function executeSpawn<TContext, I, O>(
     // with the ones recorded inside the same spawn rather than at the root.
     pathPrefix: baseCtx instanceof ContextImpl ? baseCtx.currentPath() : '',
     ledger: baseCtx instanceof ContextImpl ? baseCtx.ledger : undefined,
+    // The child's steps checkpoint the root, as an inParallel path's do.
+    checkpointFn: () => baseCtx.checkpoint(),
   });
 
   // `childExecutionCtx` predates the spawn span; the child's hooks trace onto that span.

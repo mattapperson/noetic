@@ -17,8 +17,13 @@ import { z } from 'zod';
  *   layer id, so a v1 snapshot carries state under ids no current layer reads
  *   — restoring it would silently drop that state. There is no migration;
  *   discard via `CheckpointStore.clear()` and start fresh.
+ * - v2 → v3: `itemLog` holds the log as it stood when the run in flight began, not
+ *   at the moment of capture, and `occurrences` records the dispatch counts from that
+ *   same moment. A resumed run replays its recorded steps, which put their items
+ *   back; a v2 log already holds them, so restoring it would duplicate history. No
+ *   migration — discard and start fresh.
  */
-export const CheckpointSchemaVersion = 2;
+export const CheckpointSchemaVersion = 3;
 
 /**
  * @public
@@ -73,8 +78,9 @@ export type PendingAskUserSnapshot = z.infer<typeof PendingAskUserSnapshotSchema
 
 /**
  * @public
- * Item log state captured in a snapshot. We store the ordered list of items
- * directly — the `ItemLogImpl` is append-only so the list is its own cursor.
+ * Item log state captured in a snapshot: the log as it stood when the run in
+ * flight began, or the live log when no run is in flight. The steps a resumed run
+ * replays put the rest back, from the items the step ledger recorded for each.
  *
  * Items are carried as `unknown` here and re-parsed on restore via the
  * harness's `ItemSchemaRegistry`, which is the same gate production traffic
@@ -130,6 +136,30 @@ export const CheckpointSnapshotSchema = z.object({
   cwd: CwdSnapshotSchema.nullable(),
   askUser: z.array(PendingAskUserSnapshotSchema),
   itemLog: ItemLogSnapshotSchema,
+  /**
+   * Dispatch counts per `<parent path>/<step id>`, taken at the same moment as
+   * `itemLog`. A restored context numbers its dispatches from here, so a resumed run
+   * meets its recorded steps at the paths they were recorded under, and a later run
+   * on the same execution does not land on an earlier run's paths.
+   */
+  occurrences: z.record(z.string(), z.number()),
+  /**
+   * The execution's `ctx.state` at capture time. Absent when the state does not survive
+   * JSON encoding, in which case restore keeps whatever state the host passes.
+   */
+  state: z.unknown().optional(),
+  /** Tokens and cost the execution had spent at capture time, so budgets carry over. */
+  usage: z
+    .object({
+      tokens: z.object({
+        input: z.number(),
+        output: z.number(),
+        total: z.number(),
+        cached: z.number().optional(),
+      }),
+      cost: z.number(),
+    })
+    .optional(),
   /**
    * Stored state of every channel the execution used. Optional so snapshots
    * written before channels were captured still load (they restore with no
