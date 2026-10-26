@@ -215,7 +215,7 @@ interface StepSubprocessRequest {
 }
 ```
 
-and calls `adapter.spawn(request)`. The adapter returns a `SubprocessHandle`; for `runCode` the interpreter awaits settlement and unwraps `handle.metadata.result` (or rehydrates `handle.metadata.error`); for `detachedSpawn` the adapter's handle is wrapped in a `DetachedHandle` whose `.await()` polls `adapter.get()` until the status reaches a terminal value.
+and calls `adapter.spawn(request)`. The adapter returns the running `SubprocessHandle` and a `settled` promise that resolves with the final handle the moment the child finishes. For `runCode` the interpreter awaits `settled` and unwraps `handle.metadata.result` (or rehydrates `handle.metadata.error`); for `detachedSpawn` the spawn is wrapped in a `DetachedHandle` whose `.await()` waits on the same promise. Nothing polls, so a step's result reaches its caller on the next microtask, whatever the nesting depth. Once a handle settles the adapter forgets it.
 
 ### Step Registry and Cross-Process Lookup
 

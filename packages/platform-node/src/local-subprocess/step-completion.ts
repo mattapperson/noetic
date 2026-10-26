@@ -7,7 +7,7 @@
  * manifest so `listLive()` doesn't return a phantom entry post-exit.
  */
 
-import type { SerializedError, SubprocessHandle } from '@noetic-tools/core';
+import type { LiveHandles, SerializedError, SubprocessHandle } from '@noetic-tools/core';
 
 //#region Types
 
@@ -22,8 +22,8 @@ export interface HandleStepCompletionArgs {
   exitCode: number | null;
   stdout: string;
   stderr: string;
-  handles: Map<string, SubprocessHandle>;
-  save: (handle: SubprocessHandle) => Promise<SubprocessHandle>;
+  live: LiveHandles;
+  persisted: Promise<void>;
   clearIfDurable: (handleId: string) => Promise<void>;
 }
 
@@ -85,31 +85,40 @@ function nowIso(): string {
 }
 
 /**
- * Resolve a spawned step child into a terminal handle state. Called
+ * Settle a spawned step child into its final handle state. Called
  * from the `child.on('close')` listener in the local adapter's
- * `spawnStepHandle`. Idempotent — a handle that isn't in `running`
- * status is treated as already-finalised and returns early.
+ * `spawnStepHandle`. Idempotent — a handle that already settled (a
+ * stopped child, say) is left alone.
  */
 export async function handleStepCompletion(args: HandleStepCompletionArgs): Promise<void> {
-  const current = args.handles.get(args.handleId);
-  if (!current || current.status !== 'running') {
+  const current = args.live.get(args.handleId);
+  if (!current) {
     return;
   }
-  // The child exited — clear its manifest regardless of terminal state.
+  args.live.settle({
+    ...current,
+    updatedAt: nowIso(),
+    ...outcomeOf(args, current),
+  });
+  // The child exited — clear its manifest regardless of how it ended.
+  await args.persisted;
   await args.clearIfDurable(args.handleId);
+}
+
+function outcomeOf(
+  args: HandleStepCompletionArgs,
+  current: SubprocessHandle,
+): Pick<SubprocessHandle, 'status' | 'metadata'> {
   const outcome = parseStepOutput(args.stdout);
   if (outcome?.kind === 'ok' && args.exitCode === 0) {
-    await args.save({
-      ...current,
+    return {
       status: 'completed',
-      updatedAt: nowIso(),
       metadata: {
         ...(current.metadata ?? {}),
         result: outcome.result,
         exitCode: args.exitCode,
       },
-    });
-    return;
+    };
   }
   const failureMessage =
     outcome?.kind === 'error' && outcome.error
@@ -120,17 +129,15 @@ export async function handleStepCompletion(args: HandleStepCompletionArgs): Prom
               ? args.stderr.trim()
               : `Local step subprocess exited with code ${args.exitCode ?? 'null'}`,
         };
-  await args.save({
-    ...current,
+  return {
     status: 'failed',
-    updatedAt: nowIso(),
     metadata: {
       ...(current.metadata ?? {}),
       error: failureMessage,
       exitCode: args.exitCode,
       stderr: args.stderr.trim() || undefined,
     },
-  });
+  };
 }
 
 //#endregion

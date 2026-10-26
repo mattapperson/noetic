@@ -6,6 +6,7 @@ import type {
   SubprocessHandleMetadata,
   SubprocessRequest,
 } from '@noetic-tools/types';
+import type { LiveHandles } from '../live-handles';
 
 //#region Factory options
 
@@ -62,9 +63,7 @@ export interface CompleteProcessRunParams {
   request: ProcessSubprocessRequest;
   handle: SubprocessHandle;
   run: CreateInMemorySubprocessAdapterOptions['run'];
-  handles: Map<string, SubprocessHandle>;
-  active: Set<string>;
-  save: (handle: SubprocessHandle) => Promise<SubprocessHandle>;
+  live: LiveHandles;
   /** Invoked on terminal transitions so the durable handle manifest
    *  does not linger after the step is done — otherwise `listLive()`
    *  would return phantom handles for every step ever completed
@@ -76,9 +75,7 @@ export interface CompleteStepRunParams {
   request: StepSubprocessRequest;
   handle: SubprocessHandle;
   stepRunner: CreateInMemorySubprocessAdapterOptions['stepRunner'];
-  handles: Map<string, SubprocessHandle>;
-  active: Set<string>;
-  save: (handle: SubprocessHandle) => Promise<SubprocessHandle>;
+  live: LiveHandles;
   /** See `CompleteProcessRunParams.clearIfDurable`. */
   clearIfDurable: (handleId: string) => Promise<void>;
 }

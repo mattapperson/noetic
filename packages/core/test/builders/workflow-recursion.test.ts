@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import type {
+  SpawnedSubprocess,
   SubprocessAdapter,
   SubprocessHandle,
   SubprocessRequest,
@@ -52,32 +53,31 @@ const PROGRAMS: Record<string, Program> = {
  */
 function makeProgramSubprocess(): SubprocessAdapter {
   const inner = createInMemorySubprocessAdapter();
-  const handles = new Map<string, SubprocessHandle>();
+  let count = 0;
   return {
     ...inner,
-    async spawn(request: SubprocessRequest): Promise<SubprocessHandle> {
+    async spawn(request: SubprocessRequest): Promise<SpawnedSubprocess> {
       if (request.kind !== 'process') {
         return inner.spawn(request);
       }
-      const id = `program-${handles.size + 1}`;
+      count += 1;
       const program = PROGRAMS[String(request.metadata?.code ?? '')];
       assert(program, `no program for ${String(request.metadata?.code)}`);
-      handles.set(id, {
-        id,
-        status: 'completed',
-        startedAt: 'now',
-        metadata: {
-          result: program(request.stdin ?? ''),
-        },
-      });
-      return {
-        id,
+      const handle: SubprocessHandle = {
+        id: `program-${count}`,
         status: 'running',
         startedAt: 'now',
       };
-    },
-    async get(id: string): Promise<SubprocessHandle | null> {
-      return handles.get(id) ?? inner.get(id);
+      return {
+        handle,
+        settled: Promise.resolve({
+          ...handle,
+          status: 'completed',
+          metadata: {
+            result: program(request.stdin ?? ''),
+          },
+        }),
+      };
     },
   };
 }

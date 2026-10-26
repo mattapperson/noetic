@@ -1,3 +1,7 @@
+## @noetic-tools/core-v5.13.0 (2026-10-26)
+
+* feat(core): settle subprocess handles the moment they finish ([40f6741](https://github.com/mattapperson/noetic/commit/40f6741))
+
 ## @noetic-tools/core-v5.12.0 (2026-10-26)
 
 * fix: finish the expr rename and show compute and expr in the inspector ([42af900](https://github.com/mattapperson/noetic/commit/42af900))

@@ -147,12 +147,10 @@ async function dispatchViaAdapter<TContext, I, O>(
     },
     _localExecutor: () => executor(),
   };
-  const spawnPromise = adapter.spawn(request);
   const handle = new DetachedHandleImpl<O>({
     id: executionId,
     stepId: step.id,
-    adapter,
-    spawnPromise,
+    spawned: adapter.spawn(request),
   });
   return handle.await();
 }

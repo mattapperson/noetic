@@ -40,7 +40,7 @@ afterEach(() => {
 async function spawnLongLivedBunChild(
   adapter: ReturnType<typeof createLocalSubprocessAdapter>,
 ): Promise<SubprocessHandle> {
-  const handle = await adapter.spawn({
+  const { handle } = await adapter.spawn({
     kind: 'process',
     command: 'bun',
     args: [

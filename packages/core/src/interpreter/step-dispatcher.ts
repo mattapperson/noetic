@@ -77,8 +77,8 @@ export interface DetachedSpawnOverrides {
 
 /**
  * Route a step through the configured subprocess adapter and return a
- * `DetachedHandle` that polls until the adapter reports a terminal
- * status. The adapter's `spawn()` may be async (the default in-memory
+ * `DetachedHandle` that settles when the adapter reports the child
+ * finished. The adapter's `spawn()` may be async (the default in-memory
  * adapter schedules the step body on the microtask queue, and
  * out-of-process adapters may await an OS spawn).
  *
@@ -116,12 +116,10 @@ export function dispatchStepThroughAdapter<I, O>(
     },
     _localExecutor: () => executeNoAdapter(s, input, childCtx),
   };
-  const spawnPromise = adapter.spawn(request);
   return new DetachedHandleImpl<O>({
     id: childCtx.id,
     stepId: s.id,
-    adapter,
-    spawnPromise,
+    spawned: adapter.spawn(request),
   });
 }
 

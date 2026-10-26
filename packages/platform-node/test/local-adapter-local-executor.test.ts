@@ -27,16 +27,13 @@ describe('local adapter in-process step dispatch', () => {
       },
       _localExecutor: async () => 'result-value',
     };
-    const handle = await adapter.spawn(request);
+    const { handle, settled } = await adapter.spawn(request);
     expect(handle.status).toBe('running');
 
-    let settled = await adapter.get(handle.id);
-    for (let i = 0; i < 50 && settled?.status === 'running'; i++) {
-      await new Promise((r) => setTimeout(r, 10));
-      settled = await adapter.get(handle.id);
-    }
-    expect(settled?.status).toBe('completed');
-    expect(settled?.metadata?.result).toBe('result-value');
+    const final = await settled;
+    expect(final.status).toBe('completed');
+    expect(final.metadata?.result).toBe('result-value');
+    expect(await adapter.get(handle.id)).toBeNull();
   });
 
   it('surfaces executor errors as failed handles with serialized error metadata', async () => {
@@ -53,14 +50,9 @@ describe('local adapter in-process step dispatch', () => {
         throw new Error('boom');
       },
     };
-    const handle = await adapter.spawn(request);
-    let settled = await adapter.get(handle.id);
-    for (let i = 0; i < 50 && settled?.status === 'running'; i++) {
-      await new Promise((r) => setTimeout(r, 10));
-      settled = await adapter.get(handle.id);
-    }
-    expect(settled?.status).toBe('failed');
-    const error = settled?.metadata?.error;
+    const final = await (await adapter.spawn(request)).settled;
+    expect(final.status).toBe('failed');
+    const error = final.metadata?.error;
     expect(error).toBeInstanceOf(Object);
     assert(error && typeof error === 'object' && 'message' in error);
     expect(error.message).toBe('boom');

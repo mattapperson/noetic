@@ -31,8 +31,7 @@ describe('DetachedHandleImpl', () => {
     const handle = new DetachedHandleImpl<string>({
       id: 'test-1',
       stepId: 'test-step',
-      adapter,
-      spawnPromise,
+      spawned: spawnPromise,
     });
     // Give the adapter a tick to register the handle but not finish it.
     await spawnPromise;
@@ -49,8 +48,7 @@ describe('DetachedHandleImpl', () => {
     const handle = new DetachedHandleImpl<string>({
       id: 'test-2',
       stepId: 'test-step',
-      adapter,
-      spawnPromise,
+      spawned: spawnPromise,
     });
     const result = await handle.await();
     expect(result).toBe('done');
@@ -69,8 +67,7 @@ describe('DetachedHandleImpl', () => {
     const handle = new DetachedHandleImpl<string>({
       id: 'test-3',
       stepId: 'test-step',
-      adapter,
-      spawnPromise,
+      spawned: spawnPromise,
     });
     try {
       await handle.await();
@@ -91,11 +88,56 @@ describe('DetachedHandleImpl', () => {
     const handle = new DetachedHandleImpl<number>({
       id: 'test-4',
       stepId: 'test-step',
-      adapter,
-      spawnPromise,
+      spawned: spawnPromise,
     });
     const result = await handle.await();
     expect(result).toBe(42);
+  });
+
+  it('settles on the microtask after the child finishes, with no timer', async () => {
+    let finish: (value: string) => void = () => {};
+    const adapter = createInMemorySubprocessAdapter({
+      stepRunner: () =>
+        new Promise<string>((resolve) => {
+          finish = resolve;
+        }),
+    });
+    const spawnPromise = adapter.spawn(makeStepRequest());
+    const handle = new DetachedHandleImpl<string>({
+      id: 'test-prompt',
+      stepId: 'test-step',
+      spawned: spawnPromise,
+    });
+    await spawnPromise;
+    finish('now');
+    // Drain microtasks only: a timer-based wait would leave the handle running.
+    for (let i = 0; i < 10; i++) {
+      await Promise.resolve();
+    }
+    expect(handle.status).toBe(DetachedStatus.Completed);
+    expect(handle.result).toBe('now');
+  });
+
+  it('settles as failed when the adapter stops the child', async () => {
+    const adapter = createInMemorySubprocessAdapter({
+      stepRunner: () => new Promise(() => {}),
+    });
+    const spawnPromise = adapter.spawn(makeStepRequest());
+    const handle = new DetachedHandleImpl<string>({
+      id: 'test-stop',
+      stepId: 'test-step',
+      spawned: spawnPromise,
+    });
+    const { handle: started } = await spawnPromise;
+    await adapter.stop(started.id, 'no longer needed');
+    let caught: unknown;
+    try {
+      await handle.await();
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    expect(handle.status).toBe(DetachedStatus.Failed);
   });
 
   it('await(timeout) throws on timeout if child has not finished', async () => {
@@ -106,8 +148,7 @@ describe('DetachedHandleImpl', () => {
     const handle = new DetachedHandleImpl<string>({
       id: 'test-5',
       stepId: 'test-step',
-      adapter,
-      spawnPromise,
+      spawned: spawnPromise,
     });
     try {
       await handle.await(50);
@@ -128,8 +169,7 @@ describe('DetachedHandleImpl', () => {
     const handle = new DetachedHandleImpl<string>({
       id: 'test-6',
       stepId: 'test-step',
-      adapter: neverSettlingAdapter,
-      spawnPromise,
+      spawned: spawnPromise,
     });
     try {
       await handle.await(20);
@@ -139,9 +179,8 @@ describe('DetachedHandleImpl', () => {
     }
     // Wait a few more ticks — the underlying handle is still running, so
     // the DetachedHandle should stay in its timeout state (the cached
-    // settlement promise is tied to the internal poll loop and hasn't
-    // completed). Specifically: we should NOT have transitioned to
-    // `Completed`.
+    // settlement waits on the adapter's `settled`, which never resolves).
+    // Specifically: we should NOT have transitioned to `Completed`.
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(handle.status).not.toBe(DetachedStatus.Completed);
     expect(handle.result).toBeUndefined();
@@ -261,8 +300,8 @@ async function waitFor(condition: () => boolean, timeoutMs = 2_000): Promise<voi
 
 function createNeverSettlingAdapter(): ReturnType<typeof createInMemorySubprocessAdapter> {
   // Build on top of the in-memory adapter but override the step runner to
-  // hang forever. `spawn()` still returns a handle synchronously (status
-  // `'running'`), but the internal completion never fires.
+  // hang forever. `spawn()` still returns a `'running'` handle, but its
+  // `settled` never resolves.
   return createInMemorySubprocessAdapter({
     stepRunner: () => new Promise(() => {}),
   });

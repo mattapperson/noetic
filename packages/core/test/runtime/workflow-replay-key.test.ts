@@ -5,6 +5,7 @@ import { describe, expect, it } from 'bun:test';
 import type {
   ExecuteStepFn,
   ProcessSubprocessRequest,
+  SpawnedSubprocess,
   SubprocessAdapter,
   SubprocessHandle,
 } from '@noetic-tools/types';
@@ -27,7 +28,7 @@ interface SandboxState {
  * stdin. `graded` records every paid call.
  */
 function sandbox(state: SandboxState): SubprocessAdapter {
-  const handles = new Map<string, SubprocessHandle>();
+  let count = 0;
   const programs: Record<string, (stdin: string) => string> = {
     pick: () => state.queue.shift() ?? 'drained',
     grade: (stdin) => {
@@ -36,25 +37,23 @@ function sandbox(state: SandboxState): SubprocessAdapter {
     },
   };
   return frameworkCast<SubprocessAdapter>({
-    async spawn(request: ProcessSubprocessRequest): Promise<SubprocessHandle> {
-      const id = `sandbox-${handles.size}`;
-      const program = programs[String(request.metadata?.code)];
-      handles.set(id, {
-        id,
-        status: 'completed',
-        startedAt: 'now',
-        metadata: {
-          result: program?.(request.stdin ?? ''),
-        },
-      });
-      return {
-        id,
+    async spawn(request: ProcessSubprocessRequest): Promise<SpawnedSubprocess> {
+      const handle: SubprocessHandle = {
+        id: `sandbox-${count++}`,
         status: 'running',
         startedAt: 'now',
       };
-    },
-    async get(id: string): Promise<SubprocessHandle | null> {
-      return handles.get(id) ?? null;
+      const program = programs[String(request.metadata?.code)];
+      return {
+        handle,
+        settled: Promise.resolve({
+          ...handle,
+          status: 'completed',
+          metadata: {
+            result: program?.(request.stdin ?? ''),
+          },
+        }),
+      };
     },
   });
 }
