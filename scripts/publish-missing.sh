@@ -34,4 +34,6 @@ if ! git diff --quiet "$tag" -- "$dir" ':(glob)packages/*/package.json' ||
   exit 1
 fi
 
-npm publish "./$dir" --access public --provenance --workspaces=false "$@"
+# Name the tag: npm refuses to tag a version `latest` on its own when a higher
+# version is already published, as a withdrawn major can leave behind.
+npm publish "./$dir" --access public --provenance --workspaces=false --tag latest "$@"
