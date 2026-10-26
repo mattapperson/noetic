@@ -131,13 +131,26 @@ export interface SubprocessHandleMetadata extends Record<string, unknown> {
   parentExecutionId?: string;
 }
 
-/** @public Handle returned by `SubprocessAdapter.spawn()` — a durable reference to a child. */
+/** @public A durable reference to a child, as `SubprocessAdapter.spawn()` reports it. */
 export interface SubprocessHandle {
   id: string;
   status: SubprocessStatus;
   startedAt: string;
   updatedAt?: string;
   metadata?: SubprocessHandleMetadata;
+}
+
+/**
+ * @public
+ * What `SubprocessAdapter.spawn()` returns. `settled` resolves with the
+ * handle in its final status (`completed`, `failed`, `stopped`, `stale`) the
+ * moment the child finishes, so callers wait on the child instead of polling
+ * `get()`. The adapter creates `settled` before the child can finish, so a
+ * child that finishes at once still delivers its result.
+ */
+export interface SpawnedSubprocess {
+  handle: SubprocessHandle;
+  settled: Promise<SubprocessHandle>;
 }
 
 //#endregion
@@ -177,13 +190,17 @@ export interface SubprocessStopResult {
  * OS-level child processes and in-process step runs. Implementations own the
  * lifecycle of every handle they return, including persistence when they opt
  * into durable execution via `reattach` / `listLive`.
+ *
+ * An adapter holds a handle only while its child runs. When the child
+ * finishes, the adapter resolves the handle's `settled` promise and forgets
+ * it: `get`, `stop`, `pause`, and `resume` then treat the id as unknown.
  */
 export interface SubprocessAdapter {
-  /** Dispatches a new request and returns its handle. */
-  spawn(request: SubprocessRequest): Promise<SubprocessHandle>;
-  /** Fetches the current handle by id, or `null` when unknown. */
+  /** Dispatches a new request; returns its handle and a promise of its final state. */
+  spawn(request: SubprocessRequest): Promise<SpawnedSubprocess>;
+  /** Fetches a running handle by id, or `null` once it has finished or when unknown. */
   get(handleId: string): Promise<SubprocessHandle | null>;
-  /** Requests cancellation of a running handle. */
+  /** Requests cancellation of a running handle; its `settled` resolves as `stopped`. */
   stop(handleId: string, reason?: string): Promise<SubprocessStopResult>;
   /** Pauses a running handle (when the adapter supports it). */
   pause(handleId: string): Promise<SubprocessControlResult>;

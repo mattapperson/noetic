@@ -3,9 +3,9 @@ import { createInMemorySubprocessAdapter } from '../src/adapters/in-memory-subpr
 import { AgentHarness } from '../src/harness/agent-harness';
 
 describe('createInMemorySubprocessAdapter', () => {
-  it('tracks subprocess handles and supports stop', async () => {
+  it('settles a finished handle and then forgets it', async () => {
     const adapter = createInMemorySubprocessAdapter();
-    const handle = await adapter.spawn({
+    const { handle, settled } = await adapter.spawn({
       command: 'planner',
       cwd: '/repo',
       metadata: {
@@ -14,11 +14,27 @@ describe('createInMemorySubprocessAdapter', () => {
     });
 
     expect(handle.metadata?.runtime).toBe('in-memory');
-    expect((await adapter.get(handle.id))?.status).toBe('completed');
+    expect((await settled).status).toBe('completed');
+    expect(await adapter.get(handle.id)).toBeNull();
+    expect((await adapter.stop(handle.id, 'done')).kind).toBe('not_found');
+  });
+
+  it('stop() settles a running handle as stopped', async () => {
+    const adapter = createInMemorySubprocessAdapter({
+      run: () => new Promise<void>(() => {}),
+    });
+    const { handle, settled } = await adapter.spawn({
+      command: 'planner',
+    });
+    expect((await adapter.get(handle.id))?.status).toBe('running');
 
     const stopped = await adapter.stop(handle.id, 'done');
     expect(stopped.kind).toBe('stopped');
-    expect((await adapter.get(handle.id))?.status).toBe('stopped');
+    const final = await settled;
+    expect(final.status).toBe('stopped');
+    expect(final.metadata?.stopReason).toBe('done');
+    expect(await adapter.get(handle.id)).toBeNull();
+    expect(await adapter.isAlive(handle)).toBe(false);
   });
 
   it('metadataInjector stamps synchronous fields on the returned handle', async () => {
@@ -39,7 +55,7 @@ describe('createInMemorySubprocessAdapter', () => {
       },
     });
 
-    const handle = await adapter.spawn({
+    const { handle } = await adapter.spawn({
       kind: 'process',
       command: 'bun',
       metadata: {
@@ -60,7 +76,7 @@ describe('AgentHarness subprocess adapter', () => {
       name: 'test',
       params: {},
     });
-    const handle = await harness.subprocess.spawn({
+    const { handle } = await harness.subprocess.spawn({
       command: 'noop',
     });
 

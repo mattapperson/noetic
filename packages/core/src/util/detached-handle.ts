@@ -2,9 +2,8 @@ import type {
   DetachedHandle,
   NoeticError,
   SerializedError,
-  SubprocessAdapter,
+  SpawnedSubprocess,
   SubprocessHandle,
-  SubprocessStatus,
 } from '@noetic-tools/types';
 import { DetachedStatus, frameworkCast, NoeticErrorImpl } from '@noetic-tools/types';
 
@@ -17,53 +16,16 @@ interface DetachedHandleOpts {
   /** Step id — used when the adapter surfaces a generic failure and we need
    *  to produce a `NoeticError` with a meaningful `stepId`. */
   stepId: string;
-  /** Adapter that produced the handle. */
-  adapter: SubprocessAdapter;
   /**
-   * Promise that resolves to the adapter-assigned handle. `detachedSpawn`
-   * passes the in-flight `adapter.spawn(request)` promise here so `.await()`
-   * is reachable even before the spawn itself has settled.
+   * The in-flight `adapter.spawn(request)` call, passed unawaited so the
+   * handle exists (and `.await()` works) before the spawn itself resolves.
    */
-  spawnPromise: Promise<SubprocessHandle>;
+  spawned: Promise<SpawnedSubprocess>;
 }
 
 //#endregion
 
 //#region Helpers
-
-const INITIAL_POLL_MS = 10;
-const MAX_POLL_MS = 100;
-const POLL_RAMP_AFTER_MS = 1_000;
-/** Upper bound on microtask yields before falling back to timer-based
- *  polling. Chosen empirically: in-memory step bodies settle within a
- *  handful of microtasks, and 64 gives plenty of headroom for chained
- *  awaits inside complex step trees without busy-spinning. */
-const MAX_MICROTASK_YIELDS = 64;
-/** Grace period before treating persistent null `adapter.get(handleId)`
- *  results as an eviction. Tolerates transient nulls from adapters that
- *  register the handle asynchronously relative to the spawn promise
- *  settling, but bounds the worst case so a corrupt adapter doesn't
- *  produce an infinite poll. */
-const HANDLE_EVICTED_GRACE_MS = 500;
-
-/**
- * Yield control to the timer queue so the adapter has a chance to
- * transition the handle before we issue the next `adapter.get()` call.
- * Using a timer (even 0ms) ensures we don't spin-lock when the adapter
- * schedules its completion on a later microtask.
- */
-function sleep(ms: number): Promise<void> {
-  if (ms <= 0) {
-    return Promise.resolve();
-  }
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function isTerminalStatus(status: SubprocessStatus): boolean {
-  return (
-    status === 'completed' || status === 'failed' || status === 'stopped' || status === 'stale'
-  );
-}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -132,22 +94,15 @@ function extractError(metadata: Record<string, unknown> | undefined): Serialized
 
 /**
  * @public
- * Thin wrapper over a `SubprocessHandle` that implements the `DetachedHandle`
- * contract. Polls the adapter until the handle reaches a terminal status,
- * then reads the result (or error) off `handle.metadata`. Polling starts in
- * the constructor, so `status`, `result`, and `error` settle whether or not
- * the caller ever invokes `.await()`.
- *
- * The polling cadence starts at 10ms and ramps to 100ms after the first
- * second — responsive for short-lived in-memory steps without burning cycles
- * on long-running ones.
+ * Thin wrapper over a spawned subprocess that implements the `DetachedHandle`
+ * contract. It waits on the adapter's `settled` promise and reads the result
+ * (or error) off the final handle's metadata. Waiting starts in the
+ * constructor, so `status`, `result`, and `error` settle whether or not the
+ * caller ever invokes `.await()`.
  */
 export class DetachedHandleImpl<O> implements DetachedHandle<O> {
   readonly id: string;
   private readonly _stepId: string;
-  private readonly _adapter: SubprocessAdapter;
-  private readonly _spawnPromise: Promise<SubprocessHandle>;
-  private readonly _startTime: number;
   private _status: DetachedStatus = DetachedStatus.Running;
   private _result: O | undefined;
   private _error: string | undefined;
@@ -156,14 +111,8 @@ export class DetachedHandleImpl<O> implements DetachedHandle<O> {
   constructor(opts: DetachedHandleOpts) {
     this.id = opts.id;
     this._stepId = opts.stepId;
-    this._adapter = opts.adapter;
-    this._spawnPromise = opts.spawnPromise;
-    this._startTime = Date.now();
-
-    // One shared poll for the handle's life, so repeated `.await()` calls
-    // don't start parallel loops. The rejection is swallowed here only to
-    // record it; `.await()` surfaces it to the caller.
-    this._settlement = this.pollUntilSettled();
+    this._settlement = opts.spawned.then((s) => s.settled).then((h) => this.finalise(h));
+    // Swallowed here only to record the failure; `.await()` surfaces it.
     this._settlement.catch((err: unknown) => {
       if (this._status === DetachedStatus.Running) {
         this._status = DetachedStatus.Failed;
@@ -216,68 +165,6 @@ export class DetachedHandleImpl<O> implements DetachedHandle<O> {
     } finally {
       if (timerId !== undefined) {
         clearTimeout(timerId);
-      }
-    }
-  }
-
-  private async pollUntilSettled(): Promise<O> {
-    // Wait for the spawn itself to succeed before we start polling —
-    // otherwise we'd be polling with an undefined handle id.
-    const initialHandle = await this._spawnPromise;
-    if (isTerminalStatus(initialHandle.status)) {
-      return this.finalise(initialHandle);
-    }
-    // Track when the adapter persistently returns null for this handle.
-    // Transient nulls are tolerated for `HANDLE_EVICTED_GRACE_MS`; after
-    // that we raise `handle_evicted` instead of looping forever. A
-    // non-null observation resets the grace window.
-    let firstNullAt: number | null = null;
-    const observeNull = (): void => {
-      if (firstNullAt === null) {
-        firstNullAt = Date.now();
-        return;
-      }
-      if (Date.now() - firstNullAt >= HANDLE_EVICTED_GRACE_MS) {
-        throw new NoeticErrorImpl({
-          kind: 'handle_evicted',
-          handleId: initialHandle.id,
-          stepId: this._stepId,
-          gracePeriod: HANDLE_EVICTED_GRACE_MS,
-        });
-      }
-    };
-    const observeHandle = (h: SubprocessHandle | null): SubprocessHandle | null => {
-      if (h === null) {
-        observeNull();
-        return null;
-      }
-      firstNullAt = null;
-      return h;
-    };
-
-    // Fast path: yield through the microtask queue first. The in-memory
-    // adapter schedules completion on a microtask, so a handful of yields
-    // typically resolves the handle in sub-millisecond time. This keeps the
-    // interpreter's "route through adapter" overhead negligible.
-    for (let i = 0; i < MAX_MICROTASK_YIELDS; i++) {
-      const handle = observeHandle(await this._adapter.get(initialHandle.id));
-      if (handle && isTerminalStatus(handle.status)) {
-        return this.finalise(handle);
-      }
-      await Promise.resolve();
-    }
-    // Slow path: fall back to timer-based polling for genuinely long-running
-    // handles (out-of-process adapters, async work that doesn't resolve on
-    // the microtask queue).
-    let delay = INITIAL_POLL_MS;
-    for (;;) {
-      const handle = observeHandle(await this._adapter.get(initialHandle.id));
-      if (handle && isTerminalStatus(handle.status)) {
-        return this.finalise(handle);
-      }
-      await sleep(delay);
-      if (Date.now() - this._startTime >= POLL_RAMP_AFTER_MS) {
-        delay = MAX_POLL_MS;
       }
     }
   }

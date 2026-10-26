@@ -176,8 +176,20 @@ interface SubprocessStopResult {
   handle?: SubprocessHandle;
 }
 
+/** `settled` resolves with the handle in its final status the moment the child finishes. */
+interface SpawnedSubprocess {
+  handle: SubprocessHandle;
+  settled: Promise<SubprocessHandle>;
+}
+
+/**
+ * An adapter holds a handle only while its child runs. When the child
+ * finishes, the adapter resolves `settled` and forgets the handle: `get`,
+ * `stop`, `pause`, and `resume` then treat the id as unknown.
+ */
 interface SubprocessAdapter {
-  spawn(request: SubprocessRequest): Promise<SubprocessHandle>;
+  spawn(request: SubprocessRequest): Promise<SpawnedSubprocess>;
+  /** A running handle, or null once it has finished or when unknown. */
   get(handleId: string): Promise<SubprocessHandle | null>;
   stop(handleId: string, reason?: string): Promise<SubprocessStopResult>;
   pause(handleId: string): Promise<SubprocessControlResult>;

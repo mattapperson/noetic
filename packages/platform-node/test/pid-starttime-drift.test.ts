@@ -84,7 +84,7 @@ describe('local adapter pidStarttime drift', () => {
       signaller: buildStubSignaller(state),
       spawnFn: buildStubSpawnFn(4242),
     });
-    const handle = await first.spawn({
+    const { handle } = await first.spawn({
       kind: 'process',
       command: 'fake',
       args: [],
@@ -128,7 +128,7 @@ describe('local adapter pidStarttime drift', () => {
       signaller: buildStubSignaller(state),
       spawnFn: buildStubSpawnFn(9191),
     });
-    const handle = await first.spawn({
+    const { handle } = await first.spawn({
       kind: 'process',
       command: 'fake',
       args: [],
@@ -163,7 +163,7 @@ describe('local adapter pidStarttime drift', () => {
       signaller: buildStubSignaller(state),
       spawnFn: buildStubSpawnFn(1111),
     });
-    const h1 = await adapter1.spawn({
+    const { handle: h1 } = await adapter1.spawn({
       kind: 'process',
       command: 'fake',
       args: [],

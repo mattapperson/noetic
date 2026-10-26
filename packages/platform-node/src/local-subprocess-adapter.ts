@@ -2,6 +2,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import path from 'node:path';
 import type {
   ProcessSubprocessRequest,
+  SpawnedSubprocess,
   StepSubprocessRequest,
   StorageAdapter,
   SubprocessAdapter,
@@ -11,7 +12,7 @@ import type {
   SubprocessRequest,
   SubprocessStopResult,
 } from '@noetic-tools/core';
-import { serializeError } from '@noetic-tools/core';
+import { createLiveHandles, serializeError } from '@noetic-tools/core';
 import {
   clearDurableManifest,
   hydrateFromManifest,
@@ -172,19 +173,8 @@ export function createLocalSubprocessAdapter(
   const signaller = options.signaller ?? defaultProcessSignaller;
   const spawnFn: LocalSpawnFn =
     options.spawnFn ?? ((command, args, opts) => spawn(command, args.slice(), opts));
-  const handles = new Map<string, SubprocessHandle>();
-  const active = new Set<string>();
+  const live = createLiveHandles();
   const storage = options.storage;
-
-  async function save(handle: SubprocessHandle): Promise<SubprocessHandle> {
-    handles.set(handle.id, handle);
-    if (handle.status === 'running' || handle.status === 'starting' || handle.status === 'paused') {
-      active.add(handle.id);
-    } else {
-      active.delete(handle.id);
-    }
-    return handle;
-  }
 
   // Bound durable-manifest helpers — the factory captures `storage` once
   // and exposes thin closures. The heavy lifting (schema, typeguards,
@@ -192,22 +182,21 @@ export function createLocalSubprocessAdapter(
   const clearIfDurable = (handleId: string): Promise<void> =>
     clearDurableManifest(storage, handleId);
 
-  async function patch(
-    handle: SubprocessHandle,
-    status: SubprocessHandle['status'],
-  ): Promise<SubprocessHandle> {
-    return save({
+  function patch(handle: SubprocessHandle, status: SubprocessHandle['status']): SubprocessHandle {
+    const next = {
       ...handle,
       status,
       updatedAt: nowIso(),
-    });
+    };
+    live.update(next);
+    return next;
   }
 
   function pidFor(handle: SubprocessHandle): number | null {
     return typeof handle.metadata?.pid === 'number' ? handle.metadata.pid : null;
   }
 
-  async function spawnProcessHandle(request: ProcessSubprocessRequest): Promise<SubprocessHandle> {
+  async function spawnProcessHandle(request: ProcessSubprocessRequest): Promise<SpawnedSubprocess> {
     let asyncSpawnError: unknown = null;
     const child = spawnFn(request.command, request.args ?? [], {
       cwd: request.cwd,
@@ -236,29 +225,63 @@ export function createLocalSubprocessAdapter(
     const now = nowIso();
     const pid = child.pid;
     const pidStarttime = signaller.startTime(pid);
-    const handle = await save({
+    const spawned = live.add({
       id: `subprocess-${crypto.randomUUID()}`,
       status: 'running',
       startedAt: now,
       updatedAt: now,
       metadata: buildProcessMetadata(request, pid, pidStarttime),
     });
-    await persistProcessIfDurable({
+    const persisted = persistProcessIfDurable({
       storage,
       request,
-      handle,
+      handle: spawned.handle,
       pid,
       pidStarttime,
     });
-    return handle;
+    // Listen before the first await so a child that exits at once still settles.
+    child.on('exit', (code) => {
+      void settleProcessExit(spawned.handle.id, code, persisted);
+    });
+    await persisted;
+    return spawned;
   }
 
-  async function spawnStepHandleInProcess(
+  /** Settles a process handle when its OS process exits: exit code 0 completes it, anything else fails it. */
+  async function settleProcessExit(
+    handleId: string,
+    exitCode: number | null,
+    persisted: Promise<void>,
+  ): Promise<void> {
+    const latest = live.get(handleId);
+    if (!latest) {
+      return;
+    }
+    const metadata: SubprocessHandleMetadata = {
+      ...(latest.metadata ?? {}),
+      exitCode,
+    };
+    if (exitCode !== 0) {
+      metadata.error = {
+        message: `Subprocess exited with code ${exitCode ?? 'null'}`,
+      };
+    }
+    live.settle({
+      ...latest,
+      status: exitCode === 0 ? 'completed' : 'failed',
+      updatedAt: nowIso(),
+      metadata,
+    });
+    await persisted;
+    await clearIfDurable(handleId);
+  }
+
+  function spawnStepHandleInProcess(
     request: StepSubprocessRequest,
     executor: NonNullable<StepSubprocessRequest['_localExecutor']>,
-  ): Promise<SubprocessHandle> {
+  ): SpawnedSubprocess {
     const now = nowIso();
-    const handle = await save({
+    const spawned = live.add({
       id: `subprocess-${crypto.randomUUID()}`,
       status: 'running',
       startedAt: now,
@@ -271,46 +294,45 @@ export function createLocalSubprocessAdapter(
         executionId: request.executionId,
       },
     });
-    void settleStepHandleInProcess(handle, executor);
-    return handle;
+    void settleStepHandleInProcess(spawned.handle, executor);
+    return spawned;
   }
 
   async function settleStepHandleInProcess(
     handle: SubprocessHandle,
     executor: NonNullable<StepSubprocessRequest['_localExecutor']>,
   ): Promise<void> {
+    let metadata: SubprocessHandleMetadata;
+    let status: 'completed' | 'failed';
     try {
       const result = await executor();
-      const latest = handles.get(handle.id);
-      if (!latest || latest.status !== 'running') {
-        return;
-      }
-      active.delete(handle.id);
-      await save({
-        ...latest,
-        status: 'completed',
-        updatedAt: nowIso(),
-        metadata: {
-          ...(latest.metadata ?? {}),
-          result,
-        },
-      });
+      status = 'completed';
+      metadata = {
+        result,
+      };
     } catch (err) {
-      active.delete(handle.id);
-      const latest = handles.get(handle.id) ?? handle;
-      await save({
-        ...latest,
-        status: 'failed',
-        updatedAt: nowIso(),
-        metadata: {
-          ...(latest.metadata ?? {}),
-          error: serializeError(err),
-        },
-      });
+      status = 'failed';
+      metadata = {
+        error: serializeError(err),
+      };
     }
+    // A stopped handle has already settled; its late outcome is dropped.
+    const latest = live.get(handle.id);
+    if (!latest) {
+      return;
+    }
+    live.settle({
+      ...latest,
+      status,
+      updatedAt: nowIso(),
+      metadata: {
+        ...(latest.metadata ?? {}),
+        ...metadata,
+      },
+    });
   }
 
-  async function spawnStepHandle(request: StepSubprocessRequest): Promise<SubprocessHandle> {
+  async function spawnStepHandle(request: StepSubprocessRequest): Promise<SpawnedSubprocess> {
     // In-process fast path. When the caller supplies `_localExecutor`
     // (the interpreter always does for same-process dispatches) and no
     // `registryEntry` is configured for out-of-process bootstrapping,
@@ -342,27 +364,29 @@ export function createLocalSubprocessAdapter(
     });
 
     const now = nowIso();
-    const handle = await save({
+    const started = live.add({
       id: `subprocess-${crypto.randomUUID()}`,
       status: 'running',
       startedAt: now,
       updatedAt: now,
       metadata: buildStepMetadata(request, spawned.pid, spawned.pidStarttime),
     });
-    await persistStepIfDurable({
+    const persisted = persistStepIfDurable({
       storage,
       request,
-      handle,
+      handle: started.handle,
       pid: spawned.pid,
       pidStarttime: spawned.pidStarttime,
     });
+    // Listen before the first await so a child that exits at once still settles.
     spawned.attachCompletionListener({
-      handleId: handle.id,
-      handles,
-      save,
+      handleId: started.handle.id,
+      live,
+      persisted,
       clearIfDurable,
     });
-    return handle;
+    await persisted;
+    return started;
   }
 
   return {
@@ -373,10 +397,10 @@ export function createLocalSubprocessAdapter(
       return spawnProcessHandle(request);
     },
     async get(handleId) {
-      return handles.get(handleId) ?? null;
+      return live.get(handleId) ?? null;
     },
     async stop(handleId, reason): Promise<SubprocessStopResult> {
-      const handle = handles.get(handleId);
+      const handle = live.get(handleId);
       if (!handle) {
         return {
           kind: 'not_found',
@@ -391,17 +415,17 @@ export function createLocalSubprocessAdapter(
           /* process may already be gone */
         }
       }
-      await clearIfDurable(handleId);
-      const next = await patch(
-        {
-          ...handle,
-          metadata: {
-            ...(handle.metadata ?? {}),
-            stopReason: reason,
-          },
+      const next: SubprocessHandle = {
+        ...handle,
+        status: 'stopped',
+        updatedAt: nowIso(),
+        metadata: {
+          ...(handle.metadata ?? {}),
+          stopReason: reason,
         },
-        'stopped',
-      );
+      };
+      live.settle(next);
+      await clearIfDurable(handleId);
       return {
         kind: 'stopped',
         handleId,
@@ -409,7 +433,7 @@ export function createLocalSubprocessAdapter(
       };
     },
     async pause(handleId): Promise<SubprocessControlResult> {
-      const handle = handles.get(handleId);
+      const handle = live.get(handleId);
       if (!handle) {
         return {
           kind: 'not_found',
@@ -427,11 +451,11 @@ export function createLocalSubprocessAdapter(
       signaller.kill(handle.metadata?.detached === true ? -pid : pid, 'SIGSTOP');
       return {
         kind: 'ok',
-        handle: await patch(handle, 'paused'),
+        handle: patch(handle, 'paused'),
       };
     },
     async resume(handleId): Promise<SubprocessControlResult> {
-      const handle = handles.get(handleId);
+      const handle = live.get(handleId);
       if (!handle) {
         return {
           kind: 'not_found',
@@ -449,7 +473,7 @@ export function createLocalSubprocessAdapter(
       signaller.kill(handle.metadata?.detached === true ? -pid : pid, 'SIGCONT');
       return {
         kind: 'ok',
-        handle: await patch(handle, 'running'),
+        handle: patch(handle, 'running'),
       };
     },
     async isAlive(handle) {
@@ -478,23 +502,19 @@ export function createLocalSubprocessAdapter(
         await clearIfDurable(handleId);
         return null;
       }
-      await save(handle);
-      return handle;
+      return live.add(handle).handle;
     },
     async listLive() {
-      // Union the in-memory active set with any persisted manifests that
+      // Union the running handles with any persisted manifests that
       // still correspond to a live process by the same pidStarttime.
-      const live = new Map<string, SubprocessHandle>();
-      for (const id of active) {
-        const handle = handles.get(id);
-        if (handle) {
-          live.set(handle.id, handle);
-        }
+      const found = new Map<string, SubprocessHandle>();
+      for (const handle of live.values()) {
+        found.set(handle.id, handle);
       }
       if (storage) {
         const manifests = await listLocalManifests(storage);
         for (const manifest of manifests) {
-          if (live.has(manifest.handleId)) {
+          if (found.has(manifest.handleId)) {
             continue;
           }
           const hydrated = hydrateFromManifest(manifest, signaller);
@@ -502,11 +522,11 @@ export function createLocalSubprocessAdapter(
             await clearIfDurable(manifest.handleId);
             continue;
           }
-          live.set(hydrated.id, hydrated);
+          found.set(hydrated.id, hydrated);
         }
       }
       return [
-        ...live.values(),
+        ...found.values(),
       ];
     },
   };

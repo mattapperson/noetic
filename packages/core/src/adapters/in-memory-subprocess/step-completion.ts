@@ -1,3 +1,4 @@
+import type { SubprocessHandle } from '@noetic-tools/types';
 import { nowIso, serializeError } from './metadata';
 import type { CompleteProcessRunParams, CompleteStepRunParams } from './types';
 
@@ -7,43 +8,33 @@ export async function completeProcessRun({
   request,
   handle,
   run,
-  handles,
-  active,
-  save,
+  live,
   clearIfDurable,
 }: CompleteProcessRunParams): Promise<void> {
   try {
     await run?.(request, handle);
-    const latest = handles.get(handle.id);
-    if (!latest || latest.status !== 'running') {
-      return;
-    }
-    active.delete(handle.id);
-    await save({
-      ...latest,
-      status: 'completed',
-      updatedAt: nowIso(),
-    });
-    // Clear the durable handle manifest once the run has terminated so
-    // `listLive()` stops returning this handle. Without this call the
-    // manifest would persist until `stop()` was called, making every
-    // completed step look live from the adapter's persistence layer.
-    await clearIfDurable(handle.id);
+    await finish(
+      {
+        live,
+        clearIfDurable,
+      },
+      handle.id,
+      {
+        status: 'completed',
+      },
+    );
   } catch (err) {
-    active.delete(handle.id);
-    const latest = handles.get(handle.id) ?? handle;
-    await save({
-      ...latest,
-      status: 'failed',
-      updatedAt: nowIso(),
-      metadata: {
-        ...(latest.metadata ?? {}),
+    await finish(
+      {
+        live,
+        clearIfDurable,
+      },
+      handle.id,
+      {
+        status: 'failed',
         error: serializeError(err),
       },
-    });
-    // Same rationale as the success path above — clear the durable
-    // manifest so `listLive()` doesn't resurrect this handle on reboot.
-    await clearIfDurable(handle.id);
+    );
   }
 }
 
@@ -51,9 +42,7 @@ export async function completeStepRun({
   request,
   handle,
   stepRunner,
-  handles,
-  active,
-  save,
+  live,
   clearIfDurable,
 }: CompleteStepRunParams): Promise<void> {
   try {
@@ -69,37 +58,72 @@ export async function completeStepRun({
           'Provide a stepRunner option or dispatch via AgentHarness.',
       );
     }
-    const latest = handles.get(handle.id);
-    if (!latest || latest.status !== 'running') {
-      return;
-    }
-    active.delete(handle.id);
-    await save({
-      ...latest,
-      status: 'completed',
-      updatedAt: nowIso(),
-      metadata: {
-        ...(latest.metadata ?? {}),
+    await finish(
+      {
+        live,
+        clearIfDurable,
+      },
+      handle.id,
+      {
+        status: 'completed',
         result,
       },
-    });
-    // Clear the durable step manifest once the run has terminated —
-    // see `completeProcessRun` above for the rationale.
-    await clearIfDurable(handle.id);
+    );
   } catch (err) {
-    active.delete(handle.id);
-    const latest = handles.get(handle.id) ?? handle;
-    await save({
-      ...latest,
-      status: 'failed',
-      updatedAt: nowIso(),
-      metadata: {
-        ...(latest.metadata ?? {}),
+    await finish(
+      {
+        live,
+        clearIfDurable,
+      },
+      handle.id,
+      {
+        status: 'failed',
         error: serializeError(err),
       },
-    });
-    await clearIfDurable(handle.id);
+    );
   }
+}
+
+//#endregion
+
+//#region Helpers
+
+interface Outcome {
+  status: 'completed' | 'failed';
+  result?: unknown;
+  error?: ReturnType<typeof serializeError>;
+}
+
+/**
+ * Settles a run that ended on its own. The caller hears first; the durable
+ * manifest clears after, so a slow storage write never delays the result.
+ * A handle already stopped has settled, so its late outcome is dropped.
+ */
+async function finish(
+  { live, clearIfDurable }: Pick<CompleteStepRunParams, 'live' | 'clearIfDurable'>,
+  handleId: string,
+  outcome: Outcome,
+): Promise<void> {
+  const latest = live.get(handleId);
+  if (!latest) {
+    return;
+  }
+  const metadata: SubprocessHandle['metadata'] = {
+    ...(latest.metadata ?? {}),
+  };
+  if (outcome.result !== undefined) {
+    metadata.result = outcome.result;
+  }
+  if (outcome.error !== undefined) {
+    metadata.error = outcome.error;
+  }
+  live.settle({
+    ...latest,
+    status: outcome.status,
+    updatedAt: nowIso(),
+    metadata,
+  });
+  await clearIfDurable(handleId);
 }
 
 //#endregion

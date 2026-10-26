@@ -21,7 +21,7 @@ describe('in-memory adapter manifest leak (C3 regression)', () => {
       stepRunner: async () => 'ok',
     });
 
-    const handle = await adapter.spawn({
+    const { handle, settled } = await adapter.spawn({
       kind: 'step',
       stepId: 'test-step',
       serializedInput: 'input',
@@ -30,11 +30,10 @@ describe('in-memory adapter manifest leak (C3 regression)', () => {
     });
     expect(handle.status).toBe('running');
 
-    // Yield microtasks so completeStepRun finishes.
+    expect((await settled).status).toBe('completed');
+    // A settled handle leaves the adapter; its manifest clears just after.
+    expect(await adapter.get(handle.id)).toBeNull();
     await new Promise((resolve) => setTimeout(resolve, 10));
-
-    const completed = await adapter.get(handle.id);
-    expect(completed?.status).toBe('completed');
 
     // The critical assertion: after the step completes, listLive must
     // not return its manifest.
@@ -51,7 +50,7 @@ describe('in-memory adapter manifest leak (C3 regression)', () => {
       },
     });
 
-    const handle = await adapter.spawn({
+    const { handle, settled } = await adapter.spawn({
       kind: 'step',
       stepId: 'test-step',
       serializedInput: 'input',
@@ -60,10 +59,9 @@ describe('in-memory adapter manifest leak (C3 regression)', () => {
     });
     expect(handle.status).toBe('running');
 
+    expect((await settled).status).toBe('failed');
+    expect(await adapter.get(handle.id)).toBeNull();
     await new Promise((resolve) => setTimeout(resolve, 10));
-
-    const failed = await adapter.get(handle.id);
-    expect(failed?.status).toBe('failed');
 
     const live = await adapter.listLive();
     expect(live).toHaveLength(0);

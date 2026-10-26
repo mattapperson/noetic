@@ -1878,7 +1878,7 @@ const msg2 = harness.tryRecv(channel, ctx);
 
 Cancellation reaches inside the work in flight: blocked `recv` / parked `send` reject with `cancelled`, the provider stream and tool-round loop stop mid-generation, and an ACP agent (`step.acpAgent`) turn is interrupted via `session/cancel`. Tokens and cost already spent stay charged to the context; the truncated response is not returned — the step throws `cancelled`. Beyond those points it is cooperative: a `runCode` body that ignores `ctx.aborted` between `await`s runs to its next step boundary.
 
-`DetachedHandle` is a thin wrapper over the adapter's `SubprocessHandle`. `.await()` polls `adapter.get()` until the handle reaches a terminal status, then reads the result from `handle.metadata.result` (or rehydrates `handle.metadata.error`). The default adapter (`createInMemorySubprocessAdapter()`) runs the step in-process on the microtask queue, so short-lived detached spawns resolve in sub-millisecond time; out-of-process adapters wait for the OS child to exit.
+`DetachedHandle` is a thin wrapper over what the adapter's `spawn()` returns. `.await()` waits on its `settled` promise, then reads the result from `handle.metadata.result` (or rehydrates `handle.metadata.error`). It settles on the microtask after the child finishes — there is no polling — so an in-process step resolves as soon as its body does, however long it ran; out-of-process adapters settle when the OS child exits. Custom adapters track running handles with `createLiveHandles()` from `@noetic-tools/core`, which pairs each handle with its `settled` promise and forgets it once settled.
 
 ## Subprocess Adapters and Durable Execution
 
@@ -1887,8 +1887,15 @@ The harness always holds a `SubprocessAdapter`. Every `runCode`, `spawn`, and `h
 ### The adapter interface
 
 ```typescript
+interface SpawnedSubprocess {
+  handle: SubprocessHandle;
+  /** Resolves with the final handle the moment the child finishes. */
+  settled: Promise<SubprocessHandle>;
+}
+
 interface SubprocessAdapter {
-  spawn(request: SubprocessRequest): Promise<SubprocessHandle>;
+  spawn(request: SubprocessRequest): Promise<SpawnedSubprocess>;
+  /** A running handle, or null once it has finished (the adapter forgets it then). */
   get(handleId: string): Promise<SubprocessHandle | null>;
   stop(handleId: string, reason?: string): Promise<SubprocessStopResult>;
   pause(handleId: string): Promise<SubprocessControlResult>;

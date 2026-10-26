@@ -1,5 +1,6 @@
 import type {
   ProcessSubprocessRequest,
+  SpawnedSubprocess,
   StepSubprocessRequest,
   SubprocessAdapter,
   SubprocessHandle,
@@ -24,6 +25,7 @@ import type {
   CreateInMemorySubprocessAdapterOptions,
   InMemoryStepManifest,
 } from './in-memory-subprocess/types';
+import { createLiveHandles } from './live-handles';
 
 export type { CreateInMemorySubprocessAdapterOptions } from './in-memory-subprocess/types';
 
@@ -41,14 +43,8 @@ export type { CreateInMemorySubprocessAdapterOptions } from './in-memory-subproc
 export function createInMemorySubprocessAdapter(
   options: CreateInMemorySubprocessAdapterOptions = {},
 ): SubprocessAdapter {
-  const handles = new Map<string, SubprocessHandle>();
-  const active = new Set<string>();
+  const live = createLiveHandles();
   const storage = options.storage;
-
-  async function save(handle: SubprocessHandle): Promise<SubprocessHandle> {
-    handles.set(handle.id, handle);
-    return handle;
-  }
 
   /**
    * Persist a step manifest after spawn so `reattach` and `listLive` can
@@ -100,51 +96,43 @@ export function createInMemorySubprocessAdapter(
     };
   }
 
-  async function spawnStepHandle(request: StepSubprocessRequest): Promise<SubprocessHandle> {
+  async function spawnStepHandle(request: StepSubprocessRequest): Promise<SpawnedSubprocess> {
     const now = nowIso();
-    const handle: SubprocessHandle = {
+    const spawned = live.add({
       id: `subprocess-${crypto.randomUUID()}`,
       status: 'running',
       startedAt: now,
       updatedAt: now,
       metadata: injectMetadata(request, buildStepMetadata(request)),
-    };
-    active.add(handle.id);
-    await save(handle);
-    await persistIfDurable(request, handle);
+    });
+    await persistIfDurable(request, spawned.handle);
     void completeStepRun({
       request,
-      handle,
+      handle: spawned.handle,
       stepRunner: options.stepRunner,
-      handles,
-      active,
-      save,
+      live,
       clearIfDurable,
     });
-    return handle;
+    return spawned;
   }
 
-  async function spawnProcessHandle(request: ProcessSubprocessRequest): Promise<SubprocessHandle> {
+  function spawnProcessHandle(request: ProcessSubprocessRequest): SpawnedSubprocess {
     const now = nowIso();
-    const handle: SubprocessHandle = {
+    const spawned = live.add({
       id: `subprocess-${crypto.randomUUID()}`,
       status: 'running',
       startedAt: now,
       updatedAt: now,
       metadata: injectMetadata(request, buildProcessMetadata(request)),
-    };
-    active.add(handle.id);
-    await save(handle);
+    });
     void completeProcessRun({
       request,
-      handle,
+      handle: spawned.handle,
       run: options.run,
-      handles,
-      active,
-      save,
+      live,
       clearIfDurable,
     });
-    return handle;
+    return spawned;
   }
 
   /**
@@ -181,19 +169,17 @@ export function createInMemorySubprocessAdapter(
       throw new Error('Unsupported subprocess request variant.');
     },
     async get(handleId) {
-      return handles.get(handleId) ?? null;
+      return live.get(handleId) ?? null;
     },
     async stop(handleId, reason) {
-      const handle = handles.get(handleId);
+      const handle = live.get(handleId);
       if (!handle) {
         return {
           kind: 'not_found',
           handleId,
         };
       }
-      active.delete(handleId);
-      await clearIfDurable(handleId);
-      const next = await save({
+      const next: SubprocessHandle = {
         ...handle,
         status: 'stopped',
         updatedAt: nowIso(),
@@ -201,7 +187,9 @@ export function createInMemorySubprocessAdapter(
           ...(handle.metadata ?? {}),
           stopReason: reason,
         },
-      });
+      };
+      live.settle(next);
+      await clearIfDurable(handleId);
       return {
         kind: 'stopped',
         handleId,
@@ -209,7 +197,7 @@ export function createInMemorySubprocessAdapter(
       };
     },
     async pause(handleId) {
-      const handle = handles.get(handleId);
+      const handle = live.get(handleId);
       if (!handle) {
         return {
           kind: 'not_found',
@@ -223,7 +211,7 @@ export function createInMemorySubprocessAdapter(
       };
     },
     async resume(handleId) {
-      const handle = handles.get(handleId);
+      const handle = live.get(handleId);
       if (!handle) {
         return {
           kind: 'not_found',
@@ -237,7 +225,7 @@ export function createInMemorySubprocessAdapter(
       };
     },
     async isAlive(handle) {
-      return active.has(handle.id);
+      return live.get(handle.id) !== undefined;
     },
     /**
      * Idempotent re-run of a persisted step, not a "resume" — for in-memory
@@ -254,29 +242,23 @@ export function createInMemorySubprocessAdapter(
       if (!manifest) {
         return null;
       }
-      const handle = handleFromManifest(manifest);
-      active.add(handle.id);
-      await save(handle);
-      return handle;
+      return live.add(handleFromManifest(manifest)).handle;
     },
     async listLive() {
-      const live = new Map<string, SubprocessHandle>();
-      for (const id of active) {
-        const handle = handles.get(id);
-        if (handle) {
-          live.set(handle.id, handle);
-        }
+      const found = new Map<string, SubprocessHandle>();
+      for (const handle of live.values()) {
+        found.set(handle.id, handle);
       }
       if (storage) {
         const manifests = await listManifests(storage);
         for (const manifest of manifests) {
-          if (!live.has(manifest.handleId)) {
-            live.set(manifest.handleId, handleFromManifest(manifest));
+          if (!found.has(manifest.handleId)) {
+            found.set(manifest.handleId, handleFromManifest(manifest));
           }
         }
       }
       return [
-        ...live.values(),
+        ...found.values(),
       ];
     },
   };

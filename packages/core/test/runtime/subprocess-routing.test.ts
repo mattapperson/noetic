@@ -19,10 +19,10 @@ import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import type { ContextData } from '@noetic-tools/context';
 import type {
+  SpawnedSubprocess,
   Step,
   StepSubprocessRequest,
   SubprocessAdapter,
-  SubprocessHandle,
   SubprocessRequest,
 } from '@noetic-tools/types';
 import { isNoeticError } from '@noetic-tools/types';
@@ -213,34 +213,26 @@ describe('Phase A adapter routing', () => {
   });
 
   it('never-settling adapter: await(timeout) rejects and handle does not transition to completed', async () => {
-    // Build an adapter that registers the handle as `running` and never
-    // transitions it. `.await(50)` should reject with a NoeticError and the
+    // Build an adapter whose handle never settles. `.await(50)` should reject with a NoeticError and the
     // handle must not reach `completed` even after the timeout fires.
     const neverSettling: SubprocessAdapter = {
-      async spawn(): Promise<SubprocessHandle> {
+      async spawn(): Promise<SpawnedSubprocess> {
         const now = new Date().toISOString();
         return {
-          id: `subprocess-${crypto.randomUUID()}`,
-          status: 'running',
-          startedAt: now,
-          updatedAt: now,
-          metadata: {
-            runtime: 'never-settling',
+          handle: {
+            id: `subprocess-${crypto.randomUUID()}`,
+            status: 'running',
+            startedAt: now,
+            updatedAt: now,
+            metadata: {
+              runtime: 'never-settling',
+            },
           },
+          settled: new Promise(() => {}),
         };
       },
-      async get(handleId) {
-        // Always return `running` so the poll loop never observes a
-        // terminal status. We synthesise a fresh handle object with the
-        // requested id to keep the poll loop honest.
-        return {
-          id: handleId,
-          status: 'running',
-          startedAt: new Date().toISOString(),
-          metadata: {
-            runtime: 'never-settling',
-          },
-        };
+      async get() {
+        return null;
       },
       async stop(handleId) {
         return {

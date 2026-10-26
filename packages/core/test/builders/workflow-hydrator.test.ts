@@ -5,6 +5,7 @@ import type {
   AcpAgent,
   OutputCodec,
   ProcessSubprocessRequest,
+  SpawnedSubprocess,
   SubprocessAdapter,
   SubprocessHandle,
   Tool,
@@ -31,35 +32,32 @@ function makeMockSubprocess(opts?: { fail?: boolean }): {
   calls: ProcessSubprocessRequest[];
 } {
   const calls: ProcessSubprocessRequest[] = [];
-  const handles = new Map<string, SubprocessHandle>();
   const adapter = frameworkCast<SubprocessAdapter>({
-    async spawn(request: ProcessSubprocessRequest): Promise<SubprocessHandle> {
+    async spawn(request: ProcessSubprocessRequest): Promise<SpawnedSubprocess> {
       calls.push(request);
-      const id = `mock-${calls.length}`;
-      const code = String(request.metadata?.code ?? '');
-      const stdin = request.stdin ?? '';
-      handles.set(id, {
-        id,
-        status: opts?.fail ? 'failed' : 'completed',
-        startedAt: 'now',
-        metadata: opts?.fail
-          ? {
-              error: {
-                message: 'subprocess exited non-zero',
-              },
-            }
-          : {
-              result: `OUT:${code}|${stdin}`,
-            },
-      });
-      return {
-        id,
+      const handle: SubprocessHandle = {
+        id: `mock-${calls.length}`,
         status: 'running',
         startedAt: 'now',
       };
-    },
-    async get(id: string): Promise<SubprocessHandle | null> {
-      return handles.get(id) ?? null;
+      const code = String(request.metadata?.code ?? '');
+      const stdin = request.stdin ?? '';
+      return {
+        handle,
+        settled: Promise.resolve({
+          ...handle,
+          status: opts?.fail ? 'failed' : 'completed',
+          metadata: opts?.fail
+            ? {
+                error: {
+                  message: 'subprocess exited non-zero',
+                },
+              }
+            : {
+                result: `OUT:${code}|${stdin}`,
+              },
+        }),
+      };
     },
   });
   return {

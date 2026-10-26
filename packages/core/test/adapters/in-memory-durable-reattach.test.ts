@@ -43,7 +43,7 @@ describe('in-memory adapter durability', () => {
       executionId: 'exec-durable-1',
       overrides: {},
     };
-    const spawned = await first.spawn(request);
+    const { handle: spawned } = await first.spawn(request);
     expect(spawned.status).toBe('running');
 
     // Drop `first` and bring up a second adapter sharing the same storage.
@@ -62,7 +62,7 @@ describe('in-memory adapter durability', () => {
       storage,
       stepRunner: async () => await new Promise(() => {}),
     });
-    const spawned = await first.spawn({
+    const { handle: spawned } = await first.spawn({
       kind: 'step',
       stepId: 'greet',
       serializedInput: 'hi',
@@ -87,7 +87,7 @@ describe('in-memory adapter durability', () => {
       storage,
       stepRunner: async () => await new Promise(() => {}),
     });
-    const spawned = await first.spawn({
+    const { handle: spawned } = await first.spawn({
       kind: 'step',
       stepId: 'plan',
       serializedInput: null,
@@ -167,7 +167,7 @@ describe('in-memory adapter durability', () => {
       storage,
       stepRunner: async () => await new Promise(() => {}),
     });
-    const handle = await adapter.spawn({
+    const { handle } = await adapter.spawn({
       kind: 'step',
       stepId: 'x',
       serializedInput: {},

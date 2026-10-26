@@ -5,15 +5,13 @@
  * `spawnFn`, verifying pid + startTime, writing the stdin envelope,
  * wiring stdout/stderr buffers, and attaching the close listener.
  *
- * Returns the spawned handle metadata and a function the factory can
- * call once it has registered the handle in its in-memory map and
- * persisted the durable manifest — this keeps the "ready" moment
- * (on('close') listener attached) inside the factory so the
- * handles/save/clearIfDurable closures can still be captured.
+ * Returns the spawned handle metadata and a function the factory calls
+ * once it has registered the handle in its running-handle table, so the
+ * on('close') listener can settle that handle.
  */
 
 import type { ChildProcess, SpawnOptions } from 'node:child_process';
-import type { StepSubprocessRequest, SubprocessHandle } from '@noetic-tools/core';
+import type { LiveHandles, StepSubprocessRequest } from '@noetic-tools/core';
 import { handleStepCompletion } from './step-completion';
 import type { ProcessSignaller } from './types';
 
@@ -49,15 +47,16 @@ export interface SpawnStepChildArgs {
 export interface SpawnStepChildResult {
   pid: number;
   pidStarttime: string | null;
-  /** Called by the factory once it has the registered handle and a
-   *  capture of the handles map + save/clearIfDurable closures. */
+  /** Called by the factory as soon as the handle is registered, before
+   *  any await, so a child that exits at once still settles. */
   attachCompletionListener(args: AttachCompletionArgs): void;
 }
 
 export interface AttachCompletionArgs {
   handleId: string;
-  handles: Map<string, SubprocessHandle>;
-  save: (handle: SubprocessHandle) => Promise<SubprocessHandle>;
+  live: LiveHandles;
+  /** The manifest write; clearing waits on it so a fast exit leaves no stale manifest. */
+  persisted: Promise<void>;
   clearIfDurable: (handleId: string) => Promise<void>;
 }
 
@@ -70,7 +69,7 @@ export interface AttachCompletionArgs {
  * envelope, and set up the stdout/stderr capture. Returns the pid +
  * start time plus an `attachCompletionListener` the caller invokes
  * once the handle is registered (so the `on('close')` callback can
- * close over the factory's handle map + save/clearIfDurable closures).
+ * settle it in the factory's running-handle table).
  */
 export function spawnStepChild(args: SpawnStepChildArgs): SpawnStepChildResult {
   let asyncSpawnError: unknown = null;
@@ -141,8 +140,8 @@ export function spawnStepChild(args: SpawnStepChildArgs): SpawnStepChildResult {
           exitCode: code,
           stdout: stdoutBuf,
           stderr: stderrBuf,
-          handles: attach.handles,
-          save: attach.save,
+          live: attach.live,
+          persisted: attach.persisted,
           clearIfDurable: attach.clearIfDurable,
         });
       });

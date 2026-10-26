@@ -1061,12 +1061,10 @@ async function runCodeViaSubprocess(opts: {
       input,
     },
   };
-  const spawnPromise = adapter.spawn(request);
   const handle = new DetachedHandleImpl<string>({
     id: `run-${nodeId}`,
     stepId: nodeId,
-    adapter,
-    spawnPromise,
+    spawned: adapter.spawn(request),
   });
   const result = await handle.await();
   return stringifyResult(result);

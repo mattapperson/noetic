@@ -726,6 +726,7 @@ export type {
   ShellAdapter,
   ShellExecOptions,
   ShellExecResult,
+  SpawnedSubprocess,
   StepSubprocessOverrides,
   StepSubprocessRequest,
   SubprocessAdapter,
@@ -740,6 +741,10 @@ export type {
 export { TIMEOUT_ERROR_PREFIX } from '@noetic-tools/types';
 /** @public Reusable error-serialiser used by custom SubprocessAdapter implementations. */
 export { serializeError } from './adapters/in-memory-subprocess/metadata';
+/** @public Running-handle table that custom SubprocessAdapter implementations settle through. */
+export type { LiveHandles } from './adapters/live-handles';
+/** @public */
+export { createLiveHandles } from './adapters/live-handles';
 
 //#endregion
 
