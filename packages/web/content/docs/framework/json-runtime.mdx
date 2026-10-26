@@ -578,6 +578,8 @@ Loop termination conditions are expressed as named predicates. Each predicate is
 | `outputContains` | `marker: string` | Stop when output contains the marker substring. |
 | `outputEquals` | `sentinel: string` | Stop when output exactly equals the sentinel. |
 | `converged` | `threshold?: number` | Stop when output similarity between rounds exceeds `threshold` (0-1, defaults to the builder default). |
+| `never` | -- | Never stop; the loop ends on its `maxIterations` cap, an error, or an aborted context. |
+| `expr` | `expr: string` | Stop when a [JSONata expression](/docs/framework/expressions) over the iteration's output gives `true`. |
 | `decide` | a [decide node](#decide) | A model answers one boolean question about the iteration's output: yes stops, no or a refusal continues. |
 
 ### Decide as a predicate
@@ -601,6 +603,22 @@ A plain [decide node](#decide) can end a loop. It must ask exactly one question,
 ```
 
 A decide node inside `until` is part of the workflow tree: `walkWorkflow` and `workflowGraph` list it as a child of its loop, and subflow and `each` id suffixes apply to it like any other node.
+
+### Expression as a predicate
+
+An `expr` predicate evaluates a [JSONata expression](/docs/framework/expressions) against the loop's last output. An output string that holds JSON is parsed first, so a body that returns a state object can be tested field by field. `true` stops the loop; `false`, or no value (a path that matches nothing), runs another iteration:
+
+```json
+{
+  "kind": "loop",
+  "id": "drain",
+  "body": { "kind": "compute", "id": "step", "expr": "{ \"n\": n - 1 }" },
+  "until": { "kind": "expr", "expr": "n = 0" },
+  "maxIterations": "infinity"
+}
+```
+
+The expression must give a boolean. Any other value, or an expression that fails at run time, fails the loop with `EXPRESSION_FAILED` rather than stopping it, so a mistyped test never passes off the last output as the result. A syntax error fails the whole document with `WORKFLOW_VALIDATION_FAILED` before anything runs, wherever the predicate sits, `any` and `all` included.
 
 ### Combinators
 

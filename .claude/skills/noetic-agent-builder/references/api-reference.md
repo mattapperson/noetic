@@ -367,7 +367,7 @@ loop<I, O>({
 }): StepLoop<I, O>
 ```
 
-**Decide as `until`.** Pass a `decide()` step straight in — `until: isDone` or `any(until.maxSteps(20), isDone)`. It must ask exactly one boolean question (else `INVALID_UNTIL_DECIDER` at build time). Each iteration it runs on the iteration's output: yes stops; no or a refusal continues. Reason: `decide 'is-done' answered 'stop' yes (p=0.91)`. It asks afresh every iteration (decide's within-execution reuse does not apply), writes nothing to the conversation, and merges into `ctx.lastStepMeta`. With `maxIterations: Infinity`, a model that keeps refusing loops until abort — add a `maxSteps` backstop when that matters. A throwing predicate stops the loop, but `cancelled` propagates.
+**Decide as `until`.** Pass a `decide()` step straight in — `until: isDone` or `any(until.maxSteps(20), isDone)`. It must ask exactly one boolean question (else `INVALID_UNTIL_DECIDER` at build time). Each iteration it runs on the iteration's output: yes stops; no or a refusal continues. Reason: `decide 'is-done' answered 'stop' yes (p=0.91)`. It asks afresh every iteration (decide's within-execution reuse does not apply), writes nothing to the conversation, and merges into `ctx.lastStepMeta`. With `maxIterations: Infinity`, a model that keeps refusing loops until abort — add a `maxSteps` backstop when that matters. A throwing predicate stops the loop, but `cancelled` and any `NoeticConfigError` (e.g. `MISSING_MODEL`) propagate and fail it.
 
 ```typescript
 const isDone = decide({ id: 'is-done', questions: { stop: { type: 'boolean', instructions: 'Is the task finished?' } } });
@@ -2617,6 +2617,8 @@ Emits a root `workflow.run` trace span carrying the static DAG (`NoeticAttr.WORK
 ### UntilPredicateSchema
 
 Named predicates for loop termination in JSON: `maxSteps`, `maxCost`, `maxDuration`, `noToolCalls`, `never`, `outputContains`, `outputEquals`, `converged`. Combinators: `any`, `all`. A plain `decide` node with exactly one boolean question is also a predicate (alone or inside `any`/`all`): yes stops, no/refusal continues; walk/graph/id suffixing treat it as a child of its loop.
+
+`{ "kind": "expr", "expr": "n = 0" }` tests the loop's last output with a JSONata expression (a string output is parsed as JSON when it parses): `true` stops (reason `expr gave true: n = 0`); `false` or no value (path matches nothing) continues; any other value, or a run-time failure, fails the loop with `EXPRESSION_FAILED` (or `EXPRESSION_LIMIT_EXCEEDED`) instead of stopping it. A syntax error anywhere in the predicate tree, `any`/`all` included, fails parsing with `WORKFLOW_VALIDATION_FAILED`.
 
 `loop.maxIterations` is a positive integer or exactly `"infinity"` (hydrates to `Number.POSITIVE_INFINITY`; default 1000).
 

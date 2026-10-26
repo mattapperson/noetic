@@ -44,7 +44,7 @@ prepareNext: (output, verdict, ctx) => {
 
 `maxIterations` caps the total number of iterations, retries included. It defaults to `1000` so a predicate that never fires still ends the loop. A loop that should run until its predicate says stop — an agent that works until a goal is met, a state machine driven by its own output — opts out with `maxIterations: Infinity`. An uncapped loop ends only when:
 
-- its `until` predicate returns `{ stop: true }` (a predicate that throws counts as stop),
+- its `until` predicate returns `{ stop: true }` (a predicate that throws counts as stop, unless the error propagates; see Error Behavior),
 - an iteration's error propagates (no `onError`, or `onError` returns `'abort'`), or
 - its context is aborted (`cancelled`).
 
@@ -164,7 +164,7 @@ loop({ id: 'work', steps: [act], until: any(until.maxSteps(20), isDone) });
 - **Verdict.** Yes → `{ stop: true }`, no → `{ stop: false }`, refusal → `{ stop: false }`. The `reason` names the step, question, answer, and probability: `decide 'is-done' answered 'stop' yes (p=0.91)`, or `decide 'is-done' refused 'stop'; continuing`. Because a refusal continues, an uncapped loop whose model refuses every time runs until its context is aborted; give such a loop a backstop (`any(until.maxSteps(n), isDone)`) when that matters.
 - **Decide rules hold.** The decider writes nothing to the conversation and merges its metadata into `ctx.lastStepMeta` (spec 32, No Conversation Side Effects), so a later `until.noToolCalls()` in the same `any()` still sees the body's tool calls.
 - **Fresh every iteration.** Spec 32's reuse within an execution would return the first iteration's answer whenever the output and conversation length repeat (a body that logs nothing and returns the same value). The loop therefore drops the decide step's earlier answers before each ask: every iteration is a new question.
-- **Failure.** A decider whose call fails stops the loop like any throwing predicate (Error Behavior below), except that cancellation propagates.
+- **Failure.** A decider whose call fails stops the loop like any throwing predicate (Error Behavior below), except that cancellation and config errors (such as `MISSING_MODEL`) propagate.
 - **Visibility.** A decide step given directly as `until` is a child of the loop for step walks (`stepChildren`), so harness preflight sees its model. One inside `any()`/`all()` is closed over and not visible to walks.
 
 ---
@@ -324,7 +324,9 @@ Pair with `until.never()` when you need a `loop`-shaped never-stops predicate el
 
 ## Error Behavior
 
-- **`until` predicate throws:** Treat as `{ stop: true, reason: 'Predicate error: ...' }`. The loop stops. A broken predicate should not cause infinite iteration. A `cancelled` error is the exception: it propagates and ends the loop as cancelled (spec 09), since an aborted context must not read as a clean stop.
+- **`until` predicate throws:** Treat as `{ stop: true, reason: 'Predicate error: ...' }`. The loop stops. A broken predicate should not cause infinite iteration. Two errors are exceptions and propagate instead, failing the loop without recording a verdict, since neither may read as a clean stop that hands back the last output as the result:
+  - a `cancelled` `NoeticError` ends the loop as cancelled (spec 09), since the context was aborted;
+  - a `NoeticConfigError` (for example `EXPRESSION_FAILED` from a JSON workflow `expr` predicate, spec 26, or `MISSING_MODEL` from a decider) marks a broken loop definition, which a stop would pass off as done.
 - **Iteration cap reached:** The loop fails with `step_failed` (`Loop exceeded maximum iterations (N)`). An invalid cap fails the same way before the first iteration. A `maxIterations: Infinity` loop never reaches this branch.
 - **Loop body failure with `onError`:** See `09-error-model` for full propagation rules.
 - **`schedule` body failure:** Governed by `schedule`'s own `onError` policy (`'continue'` records a span event; `'fail'` re-throws).

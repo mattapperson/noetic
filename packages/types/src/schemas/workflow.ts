@@ -62,8 +62,8 @@ export type UntilPredicate =
       threshold?: number;
     }
   | {
-      kind: 'when';
-      test: Expression;
+      kind: 'expr';
+      expr: Expression;
     }
   | UntilAnyPredicate
   | UntilAllPredicate
@@ -111,9 +111,9 @@ const ConvergedPredicateSchema = z.object({
   threshold: z.number().min(0).max(1).optional(),
 });
 
-const WhenPredicateSchema = z.object({
-  kind: z.literal('when'),
-  test: ExpressionSchema,
+const ExprPredicateSchema = z.object({
+  kind: z.literal('expr'),
+  expr: ExpressionSchema,
 });
 
 const UntilPredicateRef: z.ZodType<UntilPredicate> = z.lazy(() => UntilPredicateSchema);
@@ -142,7 +142,7 @@ export const UntilPredicateSchema: z.ZodType<UntilPredicate> = z
     OutputContainsPredicateSchema,
     OutputEqualsPredicateSchema,
     ConvergedPredicateSchema,
-    WhenPredicateSchema,
+    ExprPredicateSchema,
     AnyPredicateSchema,
     AllPredicateSchema,
     UntilDeciderRef,

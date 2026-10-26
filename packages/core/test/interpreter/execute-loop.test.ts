@@ -2,7 +2,12 @@ import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import type { ContextData } from '@noetic-tools/context';
 import type { Snapshot } from '@noetic-tools/types';
-import { isNoeticError, NoeticErrorImpl } from '@noetic-tools/types';
+import {
+  isNoeticConfigError,
+  isNoeticError,
+  NoeticConfigError,
+  NoeticErrorImpl,
+} from '@noetic-tools/types';
 import { z } from 'zod';
 import { channel } from '../../src/builders/channel-builder';
 import { loop } from '../../src/builders/loop-builder';
@@ -1102,6 +1107,42 @@ describe('executeLoop inbox channel', () => {
           reason: 'Predicate error: bad predicate',
         },
       ]);
+    });
+
+    it('fails the loop when the predicate throws a NoeticConfigError', async () => {
+      const span = new SpanImpl('loop-test', null);
+      let runs = 0;
+      const loopStep = loop<ContextData, number, number>({
+        id: 'misconfigured-loop',
+        steps: [
+          {
+            kind: 'runCode',
+            id: 'inc',
+            execute: async (input: number) => {
+              runs++;
+              return input + 1;
+            },
+          },
+        ],
+        until: () => {
+          throw new NoeticConfigError({
+            code: 'EXPRESSION_FAILED',
+            message: 'broken test',
+            hint: 'fix it',
+          });
+        },
+      });
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+        span,
+      });
+      const error = await executeLoop(loopStep, 0, ctx, simpleExecute).catch((e: unknown) => e);
+
+      assert(isNoeticConfigError(error));
+      expect(error.code).toBe('EXPRESSION_FAILED');
+      expect(runs).toBe(1);
+      // A failed verdict is no verdict: nothing is recorded.
+      expect(span.events.filter((e) => e.name === NoeticEvent.LOOP_VERDICT)).toEqual([]);
     });
   });
 

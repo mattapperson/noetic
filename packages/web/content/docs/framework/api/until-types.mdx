@@ -17,7 +17,7 @@ interface UntilRun {
 }
 ```
 
-A loop always passes `run`; `any()` and `all()` forward it. Predicates that only read the snapshot ignore it. A loop's `until` (and each argument of `any()`/`all()`) may also be a decide step asking one boolean question — yes stops, no or a refusal continues. See [Ending a loop with a decision](/docs/framework/operators/loop-and-until#ending-a-loop-with-a-decision).
+A loop always passes `run`; `any()` and `all()` forward it. Predicates that only read the snapshot ignore it. A predicate that throws stops the loop with reason `Predicate error: <message>`, except that a `cancelled` error and a `NoeticConfigError` propagate and fail the loop. JSON workflows add an `expr` predicate that tests the last output with a JSONata expression; see [Expression as a predicate](/docs/framework/json-runtime#expression-as-a-predicate). A loop's `until` (and each argument of `any()`/`all()`) may also be a decide step asking one boolean question — yes stops, no or a refusal continues. See [Ending a loop with a decision](/docs/framework/operators/loop-and-until#ending-a-loop-with-a-decision).
 
 ## Snapshot
 

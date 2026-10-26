@@ -111,7 +111,7 @@ const DEFAULT_MAX_RECURSION_DEPTH = 100;
 
 /**
  * A `decide` predicate hydrates to the decide step itself; the loop runs it as
- * the decider. `where` names the loop in errors from its `when` tests.
+ * the decider. `where` names the loop in errors from its `expr` predicates.
  */
 function hydrateUntilPredicate(
   pred: UntilPredicate,
@@ -139,8 +139,8 @@ function hydrateUntilPredicate(
       return until.converged({
         threshold: pred.threshold,
       });
-    case 'when':
-      return untilWhen(pred.test, where, ctx.expressionLimits);
+    case 'expr':
+      return untilExpr(pred.expr, where, ctx.expressionLimits);
     case 'any':
       return any(...pred.predicates.map(hydrate));
     case 'all':
@@ -151,19 +151,23 @@ function hydrateUntilPredicate(
       throw new NoeticConfigError({
         code: 'UNKNOWN_UNTIL_PREDICATE',
         message: `Unknown until predicate kind: '${frameworkCast<UntilPredicate>(pred).kind}'.`,
-        hint: 'Supported kinds: maxSteps, maxCost, maxDuration, noToolCalls, never, outputContains, outputEquals, converged, when, any, all, decide.',
+        hint: 'Supported kinds: maxSteps, maxCost, maxDuration, noToolCalls, never, outputContains, outputEquals, converged, expr, any, all, decide.',
       });
   }
 }
 
-/** Stops when `test` gives `true` against the loop's last output, read as an expression input. */
-function untilWhen(test: string, where: string, limits: ExpressionLimits | undefined): Until {
-  const compiled = compileExpression(test, where, limits);
+/**
+ * Stops when `expr` gives `true` against the loop's last output, read as an
+ * expression input. A failing expression throws `NoeticConfigError`, which
+ * fails the loop instead of stopping it (spec 05, Error Behavior).
+ */
+function untilExpr(expr: string, where: string, limits: ExpressionLimits | undefined): Until {
+  const compiled = compileExpression(expr, where, limits);
   return async (snap) => {
     const stop = await passes(compiled, readInput(snap.lastOutput));
     return {
       stop,
-      reason: stop ? `'when' test passed: ${test}` : undefined,
+      reason: stop ? `expr gave true: ${expr}` : undefined,
     };
   };
 }
