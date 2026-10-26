@@ -773,6 +773,26 @@ const output = await parseAndRunWorkflow({
 The harness supplies `executeStep` internally (`harness.run`), so nested
 `inParallel` inside a sequential chain needs no extra wiring.
 
+**`compute` node** (JSON only, spec 26 / spec 33): `{ kind: 'compute', id, expr }`
+evaluates a JSONata expression against the input (parsed as JSON when it
+parses, else the raw string) with no LLM and no subprocess. A string result
+stays a string; anything else is written as JSON, which the next node reads
+back as data, so a `loop` whose body is a `compute` carries state between
+iterations:
+
+```json
+{
+  "kind": "loop", "id": "count",
+  "body": { "kind": "compute", "id": "step",
+            "expr": "n = 0 ? { 'done': true, 'sum': sum } : { 'n': n - 1, 'sum': sum + n }" },
+  "until": { "kind": "outputContains", "marker": "done" }
+}
+```
+
+A syntax error fails the document with `WORKFLOW_VALIDATION_FAILED`; a result
+with no JSON form (no value, or a function anywhere in it) fails the node with
+`EXPRESSION_FAILED`. It takes `durable` / `replayKey` like any node.
+
 ## Context Layers
 
 ### ContextLayer config fields

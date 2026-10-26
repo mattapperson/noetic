@@ -110,8 +110,8 @@ export function syntaxError(source: string): string | undefined {
 
 /**
  * Evaluates a `compute` expression. JSONata's "no value" (`undefined`) and a
- * function result have no JSON form, so both fail rather than turn silently
- * into empty output.
+ * result holding a function, at any depth, have no JSON form, so both fail
+ * rather than turn silently into empty or garbled output.
  *
  * @throws `NoeticConfigError` with code `EXPRESSION_FAILED` or `EXPRESSION_LIMIT_EXCEEDED`.
  */
@@ -120,7 +120,7 @@ export async function compute(expr: CompiledExpression, input: unknown): Promise
   if (result === undefined) {
     throw failed(expr.where, 'the expression gave no value; check the paths it reads.');
   }
-  if (typeof result === 'function') {
+  if (holdsFunction(result)) {
     throw failed(expr.where, 'the expression gave a function, which has no JSON form.');
   }
   return result;
@@ -195,6 +195,29 @@ function failed(where: string, message: string): NoeticConfigError {
     message: `Expression in ${where} failed: ${message}`,
     hint: 'Fix the expression or the input it reads; see https://docs.jsonata.org for the language.',
   });
+}
+
+/**
+ * True when `value` is or contains a function. JSONata hands back its
+ * functions as plain objects tagged `_jsonata_function` (built-ins) or
+ * `_jsonata_lambda` (user lambdas, whose captured scope can be cyclic), so a
+ * `typeof` check alone misses them.
+ */
+function holdsFunction(value: unknown): boolean {
+  if (typeof value === 'function') {
+    return true;
+  }
+  if (Array.isArray(value)) {
+    // Only items count: a sequence under the length limit carries its own `push` guard.
+    return value.some(holdsFunction);
+  }
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+  if ('_jsonata_function' in value || '_jsonata_lambda' in value) {
+    return true;
+  }
+  return Object.values(value).some(holdsFunction);
 }
 
 function typeName(value: unknown): string {

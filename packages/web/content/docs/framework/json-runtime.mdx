@@ -81,7 +81,7 @@ Point your editor or validator at the bundled file (resolve it from the package,
 
 ## Node Kinds
 
-Thirteen node kinds are available, plus the `acp-agent` kind documented in [ACP Agent Steps](/docs/framework/acp-agents). Leaf nodes (`callModel`, `invokeTool`, `runCode`, `decide`) perform work; structural nodes (`sequence`, `inParallel`, `conditional`, `routeSwitch`, `loop`, `spawn`, `withContext`, `schedule`, `subflow`) compose them into trees.
+Fourteen node kinds are available, plus the `acp-agent` kind documented in [ACP Agent Steps](/docs/framework/acp-agents). Leaf nodes (`callModel`, `invokeTool`, `runCode`, `compute`, `decide`) perform work; structural nodes (`sequence`, `inParallel`, `conditional`, `routeSwitch`, `loop`, `spawn`, `withContext`, `schedule`, `subflow`) compose them into trees.
 
 Every node takes two optional replay fields — see [Replay Identity](/docs/framework/durability#replay-identity):
 
@@ -171,6 +171,42 @@ Invoke a registered tool directly.
 | `id` | `string` | required | Unique step identifier. |
 | `toolName` | `string` | required | Name of a tool in the tool registry. |
 | `args` | `Record<string, unknown>` | `{}` | Arguments passed to the tool's `execute` function. |
+
+### compute
+
+Compute a value from the input with a [JSONata](https://jsonata.org) expression, with no LLM and no subprocess. The input is read as JSON when it parses, else used as the raw string.
+
+```json
+{
+  "kind": "compute",
+  "id": "step",
+  "expr": "{ 'n': n - 1, 'sum': sum + n }"
+}
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `id` | `string` | required | Unique step identifier. |
+| `expr` | `string` | required | A JSONata expression, evaluated against the input. Must parse: a syntax error fails the document with `WORKFLOW_VALIDATION_FAILED` before anything runs. |
+
+A string result stays a string; any other value is written as JSON (`null` as the empty string). The next node reads that JSON back as data, so a chain of `compute` nodes, or a `loop` whose body is one, carries a state object from step to step. This loop sums 1 to `n` and stops once the state says `done`:
+
+```json
+{
+  "kind": "loop",
+  "id": "count",
+  "body": {
+    "kind": "compute",
+    "id": "step",
+    "expr": "n = 0 ? { 'done': true, 'sum': sum } : { 'n': n - 1, 'sum': sum + n }"
+  },
+  "until": { "kind": "outputContains", "marker": "done" }
+}
+```
+
+With input `{"n":5,"sum":0}` it outputs `{"done":true,"sum":15}`.
+
+A string result that is itself valid JSON (`"5"`, `"true"`) reads back as that value at the next node; keep strings inside an object to carry them as strings. A result with no JSON form fails the node with `EXPRESSION_FAILED`: JSONata's "no value" (a path that matched nothing) or a function anywhere in the result.
 
 ### sequence
 

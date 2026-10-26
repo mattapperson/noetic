@@ -967,7 +967,7 @@ export function workflowGraph(root: WorkflowNode): WorkflowGraph {
 
 /**
  * Returns the maximum depth of a workflow tree.
- * Leaf nodes (`callModel`, `invokeTool`) have depth 0. Structural nodes add +1.
+ * Leaf nodes (`callModel`, `invokeTool`, `runCode`, `compute`, `decide`) have depth 0. Structural nodes add +1.
  * A `subflow` ref counts as a leaf — depth does not see through named refs.
  */
 export function workflowDepth(node: WorkflowNode): number {
