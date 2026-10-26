@@ -120,6 +120,10 @@ function replayOutput(
   input.push(...itemsToInput(roundItems.filter((item) => !isFunctionCall(item))));
 }
 
+function hasItem(items: ReadonlyArray<Item>, id: string): boolean {
+  return items.some((item) => 'id' in item && item.id === id);
+}
+
 function hasUsableResponseOutput(response: unknown, items: ReadonlyArray<Item>): boolean {
   if (items.length > 0) {
     return true;
@@ -707,6 +711,8 @@ export class AgentHarnessModelCaller {
       layers: request.layers ?? [],
       harness: this.opts.harness,
       emit: prepared.emitIfAllowed,
+      inConversation: (itemId) =>
+        hasItem(allItems, itemId) || hasItem(request.ctx?.itemLog.items ?? [], itemId),
     });
 
     while (!request.signal?.aborted) {

@@ -264,6 +264,7 @@ Core's ledger therefore covers control flow, `callModel` steps, and their rounds
 - Any harness over the same storage continues a thread with its history, including harnesses taking turns on one thread. `seedSessionHistory` writes to storage too.
 - A turn cut off mid-run resumes when its messages are delivered again with the same `messageId`s — the at-least-once retry most queues already do. Finished steps replay; the turn continues from where it died.
 - Different messages after a cut-off turn abandon it and start fresh.
+- [Steers](/docs/framework/runtime#steering-a-running-turn) sent into a running turn are kept until it ends. A resumed turn applies the ones the cut-off run had not; ones it already applied come back with the replayed work and are not applied twice.
 
 ```ts validate=none
 // First host: the turn dies mid-run.

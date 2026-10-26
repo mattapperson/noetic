@@ -723,6 +723,7 @@ describe('a harness without onSteer', () => {
         runAppendPipeline: harness.runAppendPipeline.bind(harness),
       }),
       emit: () => {},
+      inConversation: () => false,
     });
 
     expect(await inbox.offer(SteerPoint.ItemDone)).toBe(true);
@@ -756,6 +757,7 @@ describe('openSteerInbox', () => {
   const inboxOpts = {
     layers: [],
     emit: () => {},
+    inConversation: () => false,
   };
 
   it('returns nothing outside a session', () => {

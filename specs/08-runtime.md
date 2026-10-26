@@ -498,6 +498,8 @@ A stream stopped by a steer reports no usage for that round; the provider sends 
 
 Steers reach model calls on the session's own context. A spawned child takes them only when spawned with `steers: 'forward'` (see `04-spawn`); `inParallel` paths and other spawns leave them queued until control returns.
 
+With durability on, a steer sent into a running turn is kept in the thread's session record until the turn ends, so a turn resumed on a new harness still applies it (see `23a-step-level-resume` § Sessions).
+
 ### Stream Idle Timeout
 
 The harness runs a per-round watchdog over each provider call's SSE stream. The idle timeout is fixed at 120 seconds — long enough that slow models are never falsely aborted, short enough that a stalled SSE becomes a visible error rather than a silent hang. The watchdog re-arms on every stream event; if no event arrives within the window, the round is aborted, `{name}:model_call_stalled` is emitted, and the surrounding turn fails with `turn_aborted { reason: "model stream idle timeout after <N>ms" }`. This prevents silent hangs when a provider drops the connection without sending a terminal event.
