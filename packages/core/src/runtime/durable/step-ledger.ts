@@ -350,7 +350,7 @@ export class StepLedger {
   /** Recovered entries, by path. */
   private readonly replayable = new Map<string, StepLedgerEntry>();
   /** Sequence number holding each live entry, recovered or recorded, by path. */
-  private readonly live: Map<string, number>;
+  private readonly live = new LiveEntries();
   /** Sequence number the next recorded entry takes. */
   private seq: number;
   private readonly store?: StepLedgerStore;
@@ -374,7 +374,6 @@ export class StepLedger {
     this.executionId = opts.executionId;
     this.store = opts.store;
     this.retention = resolveStepLedgerRetention(opts.retention);
-    this.live = new Map();
     this.seq = 0;
     if (opts.recovered) {
       this.adopt(opts.recovered);
@@ -473,7 +472,7 @@ export class StepLedger {
       await this.deleteSeq(replaced);
     }
     if (!entry.path.startsWith(REPLAY_KEY_PREFIX)) {
-      await this.prune((path) => isBeneath(path, entry.path));
+      await this.prune(this.live.beneath(entry.path));
     }
   }
 
@@ -483,7 +482,7 @@ export class StepLedger {
    * `key:` entries stay — they are keyed by content, and a later run may ask the same.
    */
   async dropPaths(): Promise<void> {
-    await this.prune((path) => !path.startsWith(REPLAY_KEY_PREFIX));
+    await this.prune(this.live.paths().filter((path) => !path.startsWith(REPLAY_KEY_PREFIX)));
     for (const path of [
       ...this.replayable.keys(),
     ]) {
@@ -493,11 +492,10 @@ export class StepLedger {
     }
   }
 
-  private async prune(dead: (path: string) => boolean): Promise<void> {
-    for (const [path, seq] of [
-      ...this.live,
-    ]) {
-      if (!dead(path)) {
+  private async prune(dead: ReadonlyArray<string>): Promise<void> {
+    for (const path of dead) {
+      const seq = this.live.get(path);
+      if (seq === undefined) {
         continue;
       }
       this.live.delete(path);
@@ -560,13 +558,7 @@ export class StepLedger {
     if (this.live.size < this.retention.maxEntries || path.startsWith(REPLAY_KEY_PREFIX)) {
       return this.live.size;
     }
-    let beneath = 0;
-    for (const key of this.live.keys()) {
-      if (isBeneath(key, path)) {
-        beneath += 1;
-      }
-    }
-    return this.live.size - beneath;
+    return this.live.size - this.live.beneath(path).length;
   }
 
   /** One warning per reason per execution — a long run would otherwise flood the log. */
@@ -588,6 +580,88 @@ function matches(entry: StepLedgerEntry, step: StepLedgerMatch): boolean {
 /** Whether `path` lies in the subtree under `parent` — a lane below it or a child context's prefix. */
 function isBeneath(path: string, parent: string): boolean {
   return path.startsWith(`${parent}/`) || path.startsWith(`${parent}[`);
+}
+
+/**
+ * Live entries by path, with the paths also kept sorted. Everything beneath a path
+ * starts with `<path>/` or `<path>[`, so in sorted order each is one contiguous run,
+ * found by binary search. Scanning every live entry instead made each record cost the
+ * whole live set — in deep recursion, where the live set and the paths both grow with
+ * depth, that was cubic.
+ */
+class LiveEntries {
+  private readonly seqs = new Map<string, number>();
+  private readonly sorted: string[] = [];
+
+  get size(): number {
+    return this.seqs.size;
+  }
+
+  get(path: string): number | undefined {
+    return this.seqs.get(path);
+  }
+
+  has(path: string): boolean {
+    return this.seqs.has(path);
+  }
+
+  set(path: string, seq: number): void {
+    if (!this.seqs.has(path)) {
+      this.sorted.splice(lowerBound(this.sorted, path), 0, path);
+    }
+    this.seqs.set(path, seq);
+  }
+
+  delete(path: string): void {
+    if (!this.seqs.delete(path)) {
+      return;
+    }
+    this.sorted.splice(lowerBound(this.sorted, path), 1);
+  }
+
+  clear(): void {
+    this.seqs.clear();
+    this.sorted.length = 0;
+  }
+
+  paths(): string[] {
+    return [
+      ...this.sorted,
+    ];
+  }
+
+  /** Every live path beneath `parent`. */
+  beneath(parent: string): string[] {
+    const found: string[] = [];
+    for (const prefix of [
+      `${parent}/`,
+      `${parent}[`,
+    ]) {
+      for (let i = lowerBound(this.sorted, prefix); i < this.sorted.length; i++) {
+        const path = this.sorted[i];
+        if (!path?.startsWith(prefix)) {
+          break;
+        }
+        found.push(path);
+      }
+    }
+    return found;
+  }
+}
+
+/** Index of the first element of sorted `list` not less than `value`. */
+function lowerBound(list: ReadonlyArray<string>, value: string): number {
+  let low = 0;
+  let high = list.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if ((list[mid] ?? '') < value) {
+      low = mid + 1;
+    } else {
+      high = mid;
+    }
+  }
+  return low;
 }
 
 //#endregion
