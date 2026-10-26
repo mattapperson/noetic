@@ -76,6 +76,7 @@
     "@noetic-tools/types": "workspace:*",
     "@openrouter/agent": "^0.11.0",
     "@openrouter/sdk": "1.4.25",
+    "jsonata": "2.2.2",
     "zod": "^4.0.0"
   },
   "scripts": {

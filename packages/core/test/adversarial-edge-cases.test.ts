@@ -205,8 +205,12 @@ describe('loop edge cases', () => {
     await expectInvalidMaxIterations(-1);
   });
 
-  test('maxIterations validation rejects Infinity', async () => {
-    await expectInvalidMaxIterations(Number.POSITIVE_INFINITY);
+  test('maxIterations validation rejects a fraction', async () => {
+    await expectInvalidMaxIterations(1.5);
+  });
+
+  test('maxIterations validation rejects -Infinity', async () => {
+    await expectInvalidMaxIterations(Number.NEGATIVE_INFINITY);
   });
 });
 

@@ -106,7 +106,7 @@ The layer manages a state machine with five phases:
 
 When `onExit` is configured, the Planning → Executing transition requires approval: if `onExit` returns `{ approved: false }` (e.g. the user rejected the plan in the UI), the layer stays in **planning** and the model is prompted to address the feedback and call `plan/exitPlanMode` again.
 
-Before `onExit` is ever invoked, the layer validates the plan structurally: every `subflow` ref (in the tree and inside stored workflows) must name a stored workflow, and named workflows must not reference each other in a cycle. The user is never asked to approve a plan that cannot hydrate.
+Before `onExit` is ever invoked, the layer validates the plan structurally: every `subflow` ref (in the tree and inside stored workflows) must name a stored workflow. Named workflows may reference each other recursively, a workflow calling itself included; the runtime bounds that recursion with `maxRecursionDepth` when the plan runs. The user is never asked to approve a plan that cannot hydrate.
 
 ## LLM Tools
 
@@ -120,7 +120,7 @@ The layer exposes seven LLM tools and one data projection via its `provides` map
 | `plan/setWorkflow` | Create or replace a named workflow (`{ name, document }`, upsert). Names are lowercase slugs, max 64 chars. |
 | `plan/removeWorkflow` | Delete a named workflow. Warns when the tree or another workflow still references it. |
 | `plan/getWorkflow` | Read back a stored workflow's JSON (recall shows summaries, not bodies). |
-| `plan/exitPlanMode` | Exit plan mode (`execute` or `cancel`). `execute` validates refs and cycles before requesting approval. |
+| `plan/exitPlanMode` | Exit plan mode (`execute` or `cancel`). `execute` validates refs before requesting approval. |
 | `status` (data) | Read-only: `{ phase, hasPrd, hasPlanTree, workflowNames, version }` |
 
 Documents may be passed as objects or JSON strings (a common LLM tool-call shape); validation happens inside the tool with readable error messages, against the published schema at `https://noetic.tools/schema/noetic-workflow.schema.json`.
@@ -154,7 +154,7 @@ The planning-phase instructions steer the model to keep the tree small (~7 top-l
 }
 ```
 
-with `verify-loop` defined separately via `plan/setWorkflow`. Named workflows may reference other named workflows, but cycles are rejected at exit.
+with `verify-loop` defined separately via `plan/setWorkflow`. Named workflows may reference other named workflows, themselves included, as long as a branch ends the recursion.
 
 ## Executing an Approved Plan
 

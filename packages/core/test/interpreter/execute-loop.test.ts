@@ -2,7 +2,12 @@ import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import type { ContextData } from '@noetic-tools/context';
 import type { Snapshot } from '@noetic-tools/types';
-import { isNoeticError, NoeticErrorImpl } from '@noetic-tools/types';
+import {
+  isNoeticConfigError,
+  isNoeticError,
+  NoeticConfigError,
+  NoeticErrorImpl,
+} from '@noetic-tools/types';
 import { z } from 'zod';
 import { channel } from '../../src/builders/channel-builder';
 import { loop } from '../../src/builders/loop-builder';
@@ -493,6 +498,91 @@ describe('executeLoop', () => {
       const oe = e.noeticError;
       assert(oe.kind === 'step_failed');
       expect(oe.cause.message).toContain('Invalid maxIterations');
+    }
+  });
+
+  it('rejects invalid maxIterations (1.5)', async () => {
+    const loopStep = loop<ContextData, number, number>({
+      id: 'fraction-loop',
+      steps: [
+        {
+          kind: 'runCode',
+          id: 'inc',
+          execute: async (input: number) => input + 1,
+        },
+      ],
+      until: until.maxSteps(5),
+      maxIterations: 1.5,
+    });
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
+    try {
+      await executeLoop(loopStep, 0, ctx, simpleExecute);
+      expect.unreachable('should have thrown');
+    } catch (e) {
+      assert(isNoeticError(e));
+      const oe = e.noeticError;
+      assert(oe.kind === 'step_failed');
+      expect(oe.cause.message).toContain('Invalid maxIterations');
+    }
+  });
+
+  it('maxIterations: Infinity runs past the default cap until the predicate stops it', async () => {
+    const target = 2.5e3;
+    const loopStep = loop<ContextData, number, number>({
+      id: 'uncapped-loop',
+      steps: [
+        {
+          kind: 'runCode',
+          id: 'inc',
+          execute: async (input: number) => input + 1,
+        },
+      ],
+      until: (snap) => ({
+        stop: snap.lastOutput === target,
+      }),
+      maxIterations: Number.POSITIVE_INFINITY,
+      maxHistorySize: 2,
+    });
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
+    const result = await executeLoop(loopStep, 0, ctx, simpleExecute);
+    expect(result).toBe(target);
+    expect(ctx.lastStepMeta).toBeNull();
+  });
+
+  it('maxIterations: Infinity still ends on abort', async () => {
+    let count = 0;
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
+    const loopStep = loop<ContextData, number, number>({
+      id: 'uncapped-abort-loop',
+      steps: [
+        {
+          kind: 'runCode',
+          id: 'inc',
+          execute: async (input: number) => {
+            count++;
+            if (count === 1.5e3) {
+              ctx.abort('enough');
+            }
+            return input + 1;
+          },
+        },
+      ],
+      until: until.never(),
+      maxIterations: Number.POSITIVE_INFINITY,
+    });
+    try {
+      await executeLoop(loopStep, 0, ctx, simpleExecute);
+      expect.unreachable('should have thrown');
+    } catch (e) {
+      assert(isNoeticError(e));
+      expect(e.noeticError.kind).toBe('cancelled');
+      expect(count).toBe(1.5e3);
     }
   });
 
@@ -1017,6 +1107,42 @@ describe('executeLoop inbox channel', () => {
           reason: 'Predicate error: bad predicate',
         },
       ]);
+    });
+
+    it('fails the loop when the predicate throws a NoeticConfigError', async () => {
+      const span = new SpanImpl('loop-test', null);
+      let runs = 0;
+      const loopStep = loop<ContextData, number, number>({
+        id: 'misconfigured-loop',
+        steps: [
+          {
+            kind: 'runCode',
+            id: 'inc',
+            execute: async (input: number) => {
+              runs++;
+              return input + 1;
+            },
+          },
+        ],
+        until: () => {
+          throw new NoeticConfigError({
+            code: 'EXPRESSION_FAILED',
+            message: 'broken test',
+            hint: 'fix it',
+          });
+        },
+      });
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+        span,
+      });
+      const error = await executeLoop(loopStep, 0, ctx, simpleExecute).catch((e: unknown) => e);
+
+      assert(isNoeticConfigError(error));
+      expect(error.code).toBe('EXPRESSION_FAILED');
+      expect(runs).toBe(1);
+      // A failed verdict is no verdict: nothing is recorded.
+      expect(span.events.filter((e) => e.name === NoeticEvent.LOOP_VERDICT)).toEqual([]);
     });
   });
 

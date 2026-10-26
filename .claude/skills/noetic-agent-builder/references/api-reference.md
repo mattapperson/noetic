@@ -363,14 +363,23 @@ Iteration with termination predicates.
 loop<I, O>({
   id: string;
   steps: ReadonlyArray<Step<I, O>>;
-  until: Until;
-  maxIterations?: number;
+  until: Until | StepDecide; // a predicate, or a decide step asking ONE boolean question
+  maxIterations?: number;    // default 1000; Infinity = uncapped (ends only via until, error, or abort)
   maxHistorySize?: number;   // bounds snapshot.history (default 100, oldest dropped first)
   inbox?: Channel<string>;
   parkTimeout?: number;
   prepareNext?: (output: O, verdict: Verdict, ctx: Context) => I;
 }): StepLoop<I, O>
 ```
+
+**Decide as `until`.** Pass a `decide()` step straight in — `until: isDone` or `any(until.maxSteps(20), isDone)`. It must ask exactly one boolean question (else `INVALID_UNTIL_DECIDER` at build time). Each iteration it runs on the iteration's output: yes stops; no or a refusal continues. Reason: `decide 'is-done' answered 'stop' yes (p=0.91)`. It asks afresh every iteration (decide's within-execution reuse does not apply), writes nothing to the conversation, and merges into `ctx.lastStepMeta`. With `maxIterations: Infinity`, a model that keeps refusing loops until abort — add a `maxSteps` backstop when that matters. A throwing predicate stops the loop, but `cancelled` and any `NoeticConfigError` (e.g. `MISSING_MODEL`) propagate and fail it.
+
+```typescript
+const isDone = decide({ id: 'is-done', questions: { stop: { type: 'boolean', instructions: 'Is the task finished?' } } });
+loop({ id: 'work', steps: [act], until: isDone, maxIterations: Number.POSITIVE_INFINITY });
+```
+
+Predicates get an optional second argument `run: UntilRun` (`{ ctx, executeStep }`) from the loop; `any`/`all` forward it.
 
 Each verdict adds a `loop.verdict` event (`NoeticEvent.LOOP_VERDICT`) to the enclosing `ctx.span` (a `spawn` child's or `inParallel` path's own span when nested in one) — loops open no span of their own — with `{ loop, iteration, stop, reason? }`. `feedback` is never recorded. A failing `onReturn` hook at a spawn or inParallel boundary does not fail the step: the result passes through unchanged and the child's own span (`spawn` or `inParallel.path`) gets a `spawn.summary_failed` event (`NoeticEvent.SPAWN_SUMMARY_FAILED`) with `{ stepId, layerId, message }`.
 
@@ -676,7 +685,7 @@ until.outputContains(marker)   // Stop when last output text contains `marker` (
 until.outputEquals(sentinel)   // Stop when last output text === `sentinel` (exact match)
 
 // Combinators
-any(...predicates)       // Stop when ANY predicate fires
+any(...predicates)       // Stop when ANY predicate fires (a predicate may be a one-boolean-question decide step)
 all(...predicates)       // Stop when ALL predicates fire
 ```
 
@@ -768,6 +777,26 @@ const output = await parseAndRunWorkflow({
 
 The harness supplies `executeStep` internally (`harness.run`), so nested
 `inParallel` inside a sequential chain needs no extra wiring.
+
+**`compute` node** (JSON only, spec 26 / spec 33): `{ kind: 'compute', id, expr }`
+evaluates a JSONata expression against the input (parsed as JSON when it
+parses, else the raw string) with no LLM and no subprocess. A string result
+stays a string; anything else is written as JSON, which the next node reads
+back as data, so a `loop` whose body is a `compute` carries state between
+iterations:
+
+```json
+{
+  "kind": "loop", "id": "count",
+  "body": { "kind": "compute", "id": "step",
+            "expr": "n = 0 ? { 'done': true, 'sum': sum } : { 'n': n - 1, 'sum': sum + n }" },
+  "until": { "kind": "outputContains", "marker": "done" }
+}
+```
+
+A syntax error fails the document with `WORKFLOW_VALIDATION_FAILED`; a result
+with no JSON form (no value, or a function anywhere in it) fails the node with
+`EXPRESSION_FAILED`. It takes `durable` / `replayKey` like any node.
 
 ## Context Layers
 
@@ -2546,7 +2575,18 @@ const doc = validateWorkflow({
 
 Node kinds: `callModel`, `invokeTool`, `runCode`, `conditional`, `inParallel`, `spawn`, `withContext`, `loop`, `sequence`, `schedule`, `subflow`, plus `acp-agent`.
 
-A `subflow` node runs another workflow document as one step — inline (`document`) or by name (`ref`, resolved lazily from `HydrationContext.workflows` / `parseAndRunWorkflow`'s `workflows` option). Exactly one of `document`/`ref` is required. Unknown refs raise `UNKNOWN_WORKFLOW_REFERENCE` at execution; ref cycles raise `WORKFLOW_CYCLE`. There is also a `workflow({ id, document | ref, tools?, layers?, workflows?, isolation?: 'inherit' | 'spawn' })` builder that runs a document as a composable `StepRunCode` (main entry only, not `/portable`).
+A `conditional` node's `routes` are tried in order; each route has a `target` and exactly one test (the schema rejects both or neither): `match` — a case-insensitive substring of the input's text (an object input, such as a `decide` node's answers, is matched on its string values only) — or `expr` — a JSONata test run against the input parsed as JSON (raw string if it does not parse). An `expr` route is taken on `true`, skipped on `false` or no value (a path that matches nothing); any other result throws `EXPRESSION_FAILED`, and an `expr` that does not parse fails validation with `WORKFLOW_VALIDATION_FAILED`. Both kinds mix in one node; `default` runs when no route passes.
+
+```json
+{ "kind": "conditional", "id": "pick",
+  "routes": [
+    { "expr": "n = 0", "target": { "kind": "compute", "id": "done", "expr": "{ \"total\": total }" } },
+    { "match": "urgent", "target": { "kind": "callModel", "id": "rush", "instructions": "Handle this now." } }
+  ],
+  "default": { "kind": "subflow", "id": "again", "ref": "countdown" } }
+```
+
+A `subflow` node runs another workflow document as one step — inline (`document`) or by name (`ref`, resolved lazily from `HydrationContext.workflows` / `parseAndRunWorkflow`'s `workflows` option). Exactly one of `document`/`ref` is required. Unknown refs raise `UNKNOWN_WORKFLOW_REFERENCE` at execution. Named workflows may recurse (directly or transitively); a `conditional` (or other router) supplies the base case. Each level hydrates lazily with ids suffixed by the calling subflow node's id. `maxRecursionDepth` (default `100`, `Infinity` allowed; on `HydrationContext`, `parseAndRunWorkflow`, and `workflow()`) bounds named-ref resolutions per path — exceeding it throws `WORKFLOW_RECURSION_LIMIT` at execution; an invalid value throws `INVALID_MAX_RECURSION_DEPTH`. There is also a `workflow({ id, document | ref, tools?, layers?, workflows?, maxRecursionDepth?, isolation?: 'inherit' | 'spawn' })` builder (its own `ref` counts as the first resolution) that runs a document as a composable `StepRunCode` (main entry only, not `/portable`). Expressions (`compute.expr`, route `expr`, until `{ kind: 'expr' }`) run under `expressionLimits` — `{ steps: 1e6, depth: 500, length: 1e6, timeout: 1e3 }` by default, each a positive integer or `Infinity`, set on `parseAndRunWorkflow`, `dynamicWorkflow`, `workflow()`, or `HydrationContext`; tripping one throws `EXPRESSION_LIMIT_EXCEEDED`, a bad value `INVALID_EXPRESSION_LIMITS`. Keep `steps` finite on Workers: it is the only bound that holds when the clock is frozen.
 
 ### hydrateWorkflow / hydrateNode
 
@@ -2603,7 +2643,11 @@ Emits a root `workflow.run` trace span carrying the static DAG (`NoeticAttr.WORK
 
 ### UntilPredicateSchema
 
-Named predicates for loop termination in JSON: `maxSteps`, `maxCost`, `maxDuration`, `noToolCalls`, `outputContains`, `outputEquals`, `converged`. Combinators: `any`, `all`.
+Named predicates for loop termination in JSON: `maxSteps`, `maxCost`, `maxDuration`, `noToolCalls`, `never`, `outputContains`, `outputEquals`, `converged`. Combinators: `any`, `all`. A plain `decide` node with exactly one boolean question is also a predicate (alone or inside `any`/`all`): yes stops, no/refusal continues; walk/graph/id suffixing treat it as a child of its loop.
+
+`{ "kind": "expr", "expr": "n = 0" }` tests the loop's last output with a JSONata expression (a string output is parsed as JSON when it parses): `true` stops (reason `expr gave true: n = 0`); `false` or no value (path matches nothing) continues; any other value, or a run-time failure, fails the loop with `EXPRESSION_FAILED` (or `EXPRESSION_LIMIT_EXCEEDED`) instead of stopping it. A syntax error anywhere in the predicate tree, `any`/`all` included, fails parsing with `WORKFLOW_VALIDATION_FAILED`.
+
+`loop.maxIterations` is a positive integer or exactly `"infinity"` (hydrates to `Number.POSITIVE_INFINITY`; default 1000).
 
 ## Generative UI (OpenUI)
 

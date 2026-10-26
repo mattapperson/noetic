@@ -120,6 +120,7 @@ An agent can respond with a *UI* built from components you register, instead of 
 | Sequential pipeline | Phase Router | `conditional` + `loop` + `prepareNext` |
 | Classify input, then route by the answer | Decide and Route | `decide` + `routeSwitch` + `decisionsHistoryLayer()` |
 | Multi-agent task tree | Plan Execution | hand-compose `loop` + `inParallel` + `conditional` + `spawn`, or emit a `WorkflowDocument` and run it with `parseAndRunWorkflow` |
+| Deterministic state machine or counter loop with no LLM calls, as data | JSON Workflow with State | `loop` node (`"maxIterations": "infinity"`) + `compute` body + `{ "kind": "expr" }` until (JSONata, spec 33) |
 | Run a real coding agent (Claude Code / Codex / Gemini CLI) as a step | ACP Agent Step | `step.acpAgent` |
 | Agent responds with a UI (not text) | Generative UI | `callModel({ output: openUi(library) })` + `openUiSurface()` |
 
@@ -239,6 +240,7 @@ For complete builder signatures, context layer APIs, agent harness methods, and 
 | Tool types | `packages/types/src/types/tool.ts` |
 | Context layer types | `packages/types/src/types/context-layer.ts` |
 | JSON workflow runtime | `packages/core/src/builders/dynamic-workflow.ts`, `packages/core/src/builders/workflow-hydrator.ts` |
+| JSON workflow expressions (JSONata) | `packages/core/src/expression/` |
 | Context layers | `packages/context/src/context/layers/` |
 | Prompt-cache anchoring | `packages/context/src/context/cache-anchoring.ts`, `packages/core/src/interpreter/context-assembly.ts` |
 | Generative UI (OpenUI) | `packages/openui/src/` (codec, `openUiSurface`, `fragment`, `/server`) |

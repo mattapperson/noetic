@@ -18,6 +18,7 @@
     "context",
     "runtime",
     "json-runtime",
+    "expressions",
     "durability",
     "errors",
     "observability",

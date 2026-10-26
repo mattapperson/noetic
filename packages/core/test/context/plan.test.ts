@@ -1567,7 +1567,7 @@ describe('plan layer', () => {
       expect(result.result).toContain('workflow "verify"');
     });
 
-    it('rejects execute when named workflows form a cycle', async () => {
+    it('accepts transitively recursive named workflows', async () => {
       const layer = plan();
       const fn = layer.provides!.exitPlanMode;
       assert(fn.kind === 'function');
@@ -1585,10 +1585,11 @@ describe('plan layer', () => {
         }),
         makeCtx(),
       );
-      expect(result.result).toContain('cycle');
+      expect(result.result).toBe('Plan mode exited. Execution phase begun.');
+      expect(planState(result.state).phase).toBe(PlanPhase.Executing);
     });
 
-    it('rejects execute when a workflow references itself', async () => {
+    it('accepts a workflow that references itself', async () => {
       const layer = plan();
       const fn = layer.provides!.exitPlanMode;
       assert(fn.kind === 'function');
@@ -1605,7 +1606,34 @@ describe('plan layer', () => {
         }),
         makeCtx(),
       );
-      expect(result.result).toContain('cycle');
+      expect(result.result).toBe('Plan mode exited. Execution phase begun.');
+      expect(planState(result.state).phase).toBe(PlanPhase.Executing);
+    });
+
+    it('still rejects a recursive workflow whose refs dangle', async () => {
+      const layer = plan();
+      const fn = layer.provides!.exitPlanMode;
+      assert(fn.kind === 'function');
+      const result = await fn.execute(
+        {
+          action: 'execute',
+        },
+        makePlanningState({
+          prd: '# PRD',
+          planTree: makeDoc(makeSubflow('a')),
+          workflows: {
+            a: makeDoc(
+              makeSequence([
+                makeSubflow('a', 'again'),
+                makeSubflow('missing', 'gap'),
+              ]),
+            ),
+          },
+        }),
+        makeCtx(),
+      );
+      expect(result.result).toContain('no matching workflow');
+      expect(result.result).toContain('"missing"');
     });
 
     it('executes when every ref resolves', async () => {

@@ -182,6 +182,7 @@ name = "core-foundations"
 paths = [
   "packages/core/src/types/**",
   "packages/core/src/errors/**",
+  "packages/core/src/expression/**",
   "packages/core/src/schemas/**",
   "packages/core/src/util/**",
 ]

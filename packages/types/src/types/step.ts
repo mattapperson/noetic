@@ -60,8 +60,19 @@ export interface Verdict {
   feedback?: string;
 }
 
+/**
+ * What a loop hands its `until` predicate so the predicate can run steps — a
+ * decide step used as the predicate runs through it. Predicates that only read
+ * the snapshot ignore it.
+ * @public
+ */
+export interface UntilRun {
+  ctx: Context;
+  executeStep: ExecuteStepFn;
+}
+
 /** @public Predicate function evaluated after each loop iteration to decide whether to stop. */
-export type Until = (snapshot: Snapshot) => Verdict | Promise<Verdict>;
+export type Until = (snapshot: Snapshot, run?: UntilRun) => Verdict | Promise<Verdict>;
 
 /**
  * Field type that accepts either an eager value or a `(ctx) => value` getter.
@@ -406,9 +417,17 @@ export interface StepLoop<TContext = ContextData, I = unknown, O = unknown>
   id: string;
   /** Steps to execute sequentially on each iteration. */
   steps: ReadonlyArray<Step<TContext, I, O>>;
-  /** Termination predicate evaluated after each iteration with a cumulative snapshot. */
-  until: Until;
-  /** Hard safety cap on iterations (default: 1000). */
+  /**
+   * Termination predicate evaluated after each iteration with a cumulative
+   * snapshot — or a decide step asking one boolean question, run on the
+   * iteration's output: yes stops the loop, no or a refusal continues it.
+   */
+  until: Until | StepDecide<TContext>;
+  /**
+   * Hard cap on iterations, retries included (default: 1000). Must be a positive
+   * integer or `Infinity`; with `Infinity` only `until`, an error, or an abort
+   * ends the loop.
+   */
   maxIterations?: number;
   /** Maximum entries kept in the snapshot history array (default: 100); oldest drop first. */
   maxHistorySize?: number;

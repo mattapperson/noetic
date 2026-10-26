@@ -15,6 +15,8 @@ import { ServiceTier, ToolChoiceMode } from '../types/common';
 import type { DecideQuestion } from '../types/decide';
 import { DecideQuestionsSchema, routeOutcomes } from '../types/decide';
 import type { DecideView } from '../types/step';
+import type { Expression } from './expression';
+import { ExpressionSchema } from './expression';
 
 //#region Until Predicate Types
 
@@ -60,8 +62,13 @@ export type UntilPredicate =
       kind: 'converged';
       threshold?: number;
     }
+  | {
+      kind: 'expr';
+      expr: Expression;
+    }
   | UntilAnyPredicate
-  | UntilAllPredicate;
+  | UntilAllPredicate
+  | DecideWorkflowNode;
 
 //#endregion
 
@@ -105,6 +112,11 @@ const ConvergedPredicateSchema = z.object({
   threshold: z.number().min(0).max(1).optional(),
 });
 
+const ExprPredicateSchema = z.object({
+  kind: z.literal('expr'),
+  expr: ExpressionSchema,
+});
+
 const UntilPredicateRef: z.ZodType<UntilPredicate> = z.lazy(() => UntilPredicateSchema);
 
 const AnyPredicateSchema = z.object({
@@ -117,6 +129,9 @@ const AllPredicateSchema = z.object({
   predicates: z.array(UntilPredicateRef).min(1),
 });
 
+// Declared with the node schemas below; lazy so the union can name it here.
+const UntilDeciderRef: z.ZodType<DecideWorkflowNode> = z.lazy(() => UntilDeciderSchema);
+
 /** @public Zod schema validating a named `until` predicate (including `any`/`all` combinators). */
 export const UntilPredicateSchema: z.ZodType<UntilPredicate> = z
   .union([
@@ -128,8 +143,10 @@ export const UntilPredicateSchema: z.ZodType<UntilPredicate> = z
     OutputContainsPredicateSchema,
     OutputEqualsPredicateSchema,
     ConvergedPredicateSchema,
+    ExprPredicateSchema,
     AnyPredicateSchema,
     AllPredicateSchema,
+    UntilDeciderRef,
   ])
   .meta({
     id: 'UntilPredicate',
@@ -395,8 +412,20 @@ export interface RunCodeWorkflowNode extends WorkflowNodeBase {
   subprocess?: string;
 }
 
+/** A node that computes a value from its input with an expression (spec 33). */
+export interface ComputeWorkflowNode extends WorkflowNodeBase {
+  kind: 'compute';
+  expr: Expression;
+}
+
+/**
+ * A `conditional` route. Supply exactly one test: `match` (case-insensitive
+ * substring of the input's text) or `expr` (an expression that must give a
+ * boolean; the route is taken on `true`).
+ */
 export interface ConditionalRoute {
-  match: string;
+  match?: string;
+  expr?: Expression;
   target: WorkflowNode;
 }
 
@@ -475,7 +504,11 @@ export interface LoopWorkflowNode extends WorkflowNodeBase {
   kind: 'loop';
   body: WorkflowNode;
   until: UntilPredicate;
-  maxIterations?: number;
+  /**
+   * Hard cap on iterations: a positive integer, or `'infinity'` for none
+   * (JSON cannot encode `Infinity`). Default: 1000.
+   */
+  maxIterations?: number | 'infinity';
 }
 
 export interface SequenceWorkflowNode extends WorkflowNodeBase {
@@ -533,6 +566,7 @@ export type WorkflowNode =
   | CallModelWorkflowNode
   | InvokeToolWorkflowNode
   | RunCodeWorkflowNode
+  | ComputeWorkflowNode
   | ConditionalWorkflowNode
   | DecideWorkflowNode
   | RouteSwitchWorkflowNode
@@ -595,10 +629,22 @@ const RunCodeNodeSchema = z.object({
   subprocess: z.string().min(1).optional(),
 });
 
-const ConditionalRouteSchema = z.object({
-  match: z.string().min(1),
-  target: z.lazy(() => WorkflowNodeSchema),
+const ComputeNodeSchema = z.object({
+  kind: z.literal('compute'),
+  ...SHARED_FIELDS,
+  expr: ExpressionSchema,
 });
+
+const ConditionalRouteSchema = z
+  .object({
+    match: z.string().min(1).optional(),
+    expr: ExpressionSchema.optional(),
+    target: WorkflowNodeRef,
+  })
+  .refine((route) => (route.match === undefined) !== (route.expr === undefined), {
+    message:
+      "conditional route requires exactly one of 'match' (substring) or 'expr' (expression).",
+  });
 
 const ConditionalNodeSchema = z.object({
   kind: z.literal('conditional'),
@@ -621,6 +667,21 @@ const DecideNodeSchema = z.object({
     ])
     .optional(),
   samples: z.number().int().positive().optional(),
+});
+
+/** A decide node that ends a loop: exactly one question, and a boolean one. */
+const UntilDeciderSchema = DecideNodeSchema.superRefine((node, issue) => {
+  const questions = Object.values(node.questions);
+  if (questions.length === 1 && questions[0]?.type === 'boolean') {
+    return;
+  }
+  issue.addIssue({
+    code: 'custom',
+    path: [
+      'questions',
+    ],
+    message: 'An until decider asks exactly one question, and it must be boolean.',
+  });
 });
 
 const RouteSwitchNodeSchema = z
@@ -698,7 +759,12 @@ const LoopNodeSchema = z.object({
   ...SHARED_FIELDS,
   body: WorkflowNodeRef,
   until: UntilPredicateSchema,
-  maxIterations: z.number().int().positive().optional(),
+  maxIterations: z
+    .union([
+      z.number().int().positive(),
+      z.literal('infinity'),
+    ])
+    .optional(),
 });
 
 const SequenceNodeSchema = z.object({
@@ -754,6 +820,7 @@ export const WorkflowNodeSchema: z.ZodType<WorkflowNode> = z
     CallModelNodeSchema,
     InvokeToolNodeSchema,
     RunCodeNodeSchema,
+    ComputeNodeSchema,
     ConditionalNodeSchema,
     DecideNodeSchema,
     RouteSwitchNodeSchema,
@@ -817,6 +884,7 @@ function childNodes(node: WorkflowNode): WorkflowNode[] {
     case 'loop':
       return [
         node.body,
+        ...untilDeciders(node.until),
       ];
     case 'schedule':
       return [
@@ -846,6 +914,19 @@ function childNodes(node: WorkflowNode): WorkflowNode[] {
     default:
       return [];
   }
+}
+
+/** Decide nodes inside an until predicate, `any`/`all` included, in order. */
+function untilDeciders(pred: UntilPredicate): DecideWorkflowNode[] {
+  if (pred.kind === 'decide') {
+    return [
+      pred,
+    ];
+  }
+  if (pred.kind === 'any' || pred.kind === 'all') {
+    return pred.predicates.flatMap(untilDeciders);
+  }
+  return [];
 }
 
 /** Validates a candidate workflow document. Throws `ZodError` on invalid input. */
@@ -902,7 +983,7 @@ export function workflowGraph(root: WorkflowNode): WorkflowGraph {
 
 /**
  * Returns the maximum depth of a workflow tree.
- * Leaf nodes (`callModel`, `invokeTool`) have depth 0. Structural nodes add +1.
+ * Leaf nodes (`callModel`, `invokeTool`, `runCode`, `compute`, `decide`) have depth 0. Structural nodes add +1.
  * A `subflow` ref counts as a leaf — depth does not see through named refs.
  */
 export function workflowDepth(node: WorkflowNode): number {

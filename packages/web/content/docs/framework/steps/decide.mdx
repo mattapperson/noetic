@@ -208,7 +208,11 @@ The step does record its cost: usage and cost roll into `ctx.tokens` and `ctx.co
 
 ### Asking again
 
-Within one execution, a decide step asked the same thing again returns its earlier answers without calling the model. "The same thing" means the same step id, the same input, and the same conversation length. So two nested `routeSwitch`es over one decision pay once and cannot disagree, while a loop that asks again after new items land gets a fresh decision. An input that does not survive `JSON.stringify` is never reused.
+Within one execution, a decide step asked the same thing again returns its earlier answers without calling the model. "The same thing" means the same step id, the same input, and the same conversation length. So two nested `routeSwitch`es over one decision pay once and cannot disagree, while a loop that asks again after new items land gets a fresh decision. An input that does not survive `JSON.stringify` is never reused. A decide step used as a loop's `until` is the exception: it asks afresh every iteration (see below).
+
+### Ending a loop
+
+A decide step that asks exactly one boolean question can be a loop's `until`, alone or inside `any()`/`all()`: yes stops the loop, no or a refusal runs another iteration, and the input is the iteration's output. See [Ending a loop with a decision](/docs/framework/operators/loop-and-until#ending-a-loop-with-a-decision).
 
 ## Model Paths
 

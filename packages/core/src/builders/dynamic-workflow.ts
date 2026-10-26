@@ -14,6 +14,8 @@ import type {
   Tool,
 } from '@noetic-tools/types';
 import { frameworkCast, NoeticConfigError } from '@noetic-tools/types';
+import { expressionErrors } from '../expression/check';
+import type { ExpressionLimits } from '../expression/jsonata';
 import { NoeticAttr } from '../observability/genai-attributes';
 import type { WorkflowDocument } from '../schemas/workflow';
 import { WorkflowDocumentSchema, workflowDepth, workflowGraph } from '../schemas/workflow';
@@ -30,6 +32,8 @@ export interface DynamicWorkflowOpts {
   tools: Tool[];
   maxDepth?: number;
   maxRevisions?: number;
+  /** Bounds on each expression evaluation; unset fields use `DEFAULT_EXPRESSION_LIMITS`. */
+  expressionLimits?: ExpressionLimits;
 }
 
 //#endregion
@@ -52,10 +56,11 @@ A WorkflowNode is one of:
 - { "kind": "callModel", "id": "<unique>", "instructions": "<prompt>", "model": "<optional>", "tools": [{ "type": "<tool-name>" }, ...] } (one LLM call)
 - { "kind": "invokeTool", "id": "<unique>", "toolName": "<name>", "args": { ... } } (call one tool directly, no LLM)
 - { "kind": "runCode", "id": "<unique>", "execute": "<source code>" } (runs the code in a subprocess with the step input on stdin; only emit if the task needs deterministic computation AND a subprocess adapter is available)
+- { "kind": "compute", "id": "<unique>", "expr": "<JSONata expression>" } (computes a value from the input, read as JSON, with no LLM; e.g. "{ 'n': n - 1, 'sum': sum + n }")
 - { "kind": "sequence", "id": "<unique>", "steps": [<WorkflowNode>, ...] } (run children in order, threading each output into the next)
 - { "kind": "inParallel", "id": "<unique>", "mode": "all"|"race"|"settle", "paths": [<WorkflowNode>, ...], "merge": "last"|"first"|"concat" } (fan out; supply exactly one of "paths" or "each": <WorkflowNode> — with "each", add "over": "<key>" to fan out over an array in the input JSON)
-- { "kind": "loop", "id": "<unique>", "body": <WorkflowNode>, "until": <UntilPredicate>, "maxIterations": <optional number> } (repeat the body until the predicate holds)
-- { "kind": "conditional", "id": "<unique>", "routes": [{ "match": "<substring>", "target": <WorkflowNode> }], "default": <WorkflowNode> } (route on a substring of the input)
+- { "kind": "loop", "id": "<unique>", "body": <WorkflowNode>, "until": <UntilPredicate>, "maxIterations": <optional positive int, or "infinity" for no cap> } (repeat the body until the predicate holds)
+- { "kind": "conditional", "id": "<unique>", "routes": [{ "match": "<substring>", "target": <WorkflowNode> }], "default": <WorkflowNode> } (route on a substring of the input; a route may carry "expr": "<JSONata test, e.g. n > 3>" instead of "match", taken if the test gives true)
 - { "kind": "spawn", "id": "<unique>", "child": <WorkflowNode>, "timeout": <optional ms> } (run the child in an isolated sub-context)
 - { "kind": "withContext", "id": "<unique>", "child": <WorkflowNode>, "layers": ["<layer-name>", ...] } (run the child with named context layers; only emit if the task names layers that exist, since this planner provides no layer registry and unknown names resolve to NO layers)
 - { "kind": "schedule", "id": "<unique>", "step": <WorkflowNode>, "interval": <ms>, "onError": "continue"|"fail" } (re-runs the step forever on an interval and never returns — only emit for an explicitly daemon-style task)
@@ -68,7 +73,8 @@ Every entry of a callModel node's "tools" is an OBJECT, never a bare string. Use
 An acp-agent node delegates a turn to an external coding agent over the Agent Client Protocol; only emit one if a matching agent adapter is registered for the workflow.
 
 An UntilPredicate (the "until" field of a loop) is one of:
-{ "kind": "maxSteps", "n": <positive int> }, { "kind": "maxCost", "usd": <positive number> }, { "kind": "maxDuration", "duration": <ms> }, { "kind": "noToolCalls" }, { "kind": "never" } (never stops — pair with "maxIterations"), { "kind": "outputContains", "marker": "<text>" }, { "kind": "outputEquals", "sentinel": "<text>" }, { "kind": "converged", "threshold": <optional 0-1> }, { "kind": "any", "predicates": [<UntilPredicate>, ...] }, { "kind": "all", "predicates": [<UntilPredicate>, ...] }.
+{ "kind": "maxSteps", "n": <positive int> }, { "kind": "maxCost", "usd": <positive number> }, { "kind": "maxDuration", "duration": <ms> }, { "kind": "noToolCalls" }, { "kind": "never" } (never stops — pair with "maxIterations"), { "kind": "outputContains", "marker": "<text>" }, { "kind": "outputEquals", "sentinel": "<text>" }, { "kind": "converged", "threshold": <optional 0-1> }, { "kind": "expr", "expr": "<JSONata test on the last output, true stops, e.g. n = 0>" }, { "kind": "any", "predicates": [<UntilPredicate>, ...] }, { "kind": "all", "predicates": [<UntilPredicate>, ...] }.
+A loop's "until" (or an entry of "any"/"all") may also be a decide node asking exactly one boolean question: { "kind": "decide", "id": "<unique>", "questions": { "<question-id>": { "type": "boolean", "instructions": "<question whose yes means stop>" } } } — a model reads the iteration's output; yes stops the loop, no or a refusal runs another iteration.
 
 Respond with ONLY the JSON document, no markdown fences or explanation.`;
 
@@ -87,7 +93,10 @@ Respond with ONLY the JSON document, no markdown fences or explanation.`;
  * @param opts.tools - Tools the generated workflow may reference by name.
  * @param opts.maxDepth - Maximum workflow tree depth. Default: 5.
  * @param opts.maxRevisions - Retries with error feedback on validation failure. Default: 3.
+ * @param opts.expressionLimits - Bounds on each expression evaluation. Default: `DEFAULT_EXPRESSION_LIMITS`.
  * @returns A `Step` that dynamically plans and executes.
+ * @throws `NoeticConfigError` with code `INVALID_EXPRESSION_LIMITS` (at execution) if `expressionLimits` holds a value that is not a positive integer or `Infinity`.
+ * @throws `NoeticConfigError` with code `EXPRESSION_LIMIT_EXCEEDED` (at execution) if an expression in the generated workflow exceeds its limits.
  */
 export function dynamicWorkflow(opts: DynamicWorkflowOpts): Step<ContextData, string, string> {
   const model = opts.model ?? DEFAULT_MODEL;
@@ -150,6 +159,7 @@ export function dynamicWorkflow(opts: DynamicWorkflowOpts): Step<ContextData, st
         const hydrationCtx: HydrationContext = {
           tools: toolMap,
           executeStep,
+          expressionLimits: opts.expressionLimits,
         };
 
         const hydrated = hydrateWorkflow(parseResult.doc, hydrationCtx);
@@ -181,6 +191,14 @@ export interface ParseAndRunWorkflowOpts {
   layers?: ReadonlyMap<string, ContextLayer>;
   /** Named sub-workflows the document's `subflow` nodes may reference via `ref`. */
   workflows?: ReadonlyMap<string, WorkflowDocument>;
+  /**
+   * Deepest allowed chain of named-ref resolutions on one execution path —
+   * named workflows may recurse up to this depth. Positive integer or
+   * `Infinity`. Default: 100.
+   */
+  maxRecursionDepth?: number;
+  /** Bounds on each expression evaluation; unset fields use `DEFAULT_EXPRESSION_LIMITS`. */
+  expressionLimits?: ExpressionLimits;
 }
 
 /**
@@ -193,9 +211,14 @@ export interface ParseAndRunWorkflowOpts {
  * @param opts.ctx - Execution context.
  * @param opts.tools - Available tools the workflow may reference.
  * @param opts.maxDepth - Maximum workflow tree depth. Default: 5.
+ * @param opts.maxRecursionDepth - Deepest allowed chain of named-ref resolutions. Default: 100.
+ * @param opts.expressionLimits - Bounds on each expression evaluation. Default: `DEFAULT_EXPRESSION_LIMITS`.
  * @returns The string output of the executed workflow.
  * @throws `NoeticConfigError` with code `WORKFLOW_VALIDATION_FAILED` if JSON is invalid.
+ * @throws `NoeticConfigError` with code `WORKFLOW_RECURSION_LIMIT` if named refs nest deeper than `maxRecursionDepth`.
  * @throws `NoeticConfigError` with code `UNKNOWN_TOOL_REFERENCE` if a tool reference cannot be resolved.
+ * @throws `NoeticConfigError` with code `INVALID_EXPRESSION_LIMITS` if `expressionLimits` holds a value that is not a positive integer or `Infinity`.
+ * @throws `NoeticConfigError` with code `EXPRESSION_LIMIT_EXCEEDED` if an expression exceeds its limits.
  */
 export async function parseAndRunWorkflow(opts: ParseAndRunWorkflowOpts): Promise<string> {
   const parseResult = tryParseWorkflow(opts.json, opts.maxDepth ?? DEFAULT_MAX_DEPTH);
@@ -213,6 +236,8 @@ export async function parseAndRunWorkflow(opts: ParseAndRunWorkflowOpts): Promis
     executeStep,
     layers: opts.layers,
     workflows: opts.workflows,
+    maxRecursionDepth: opts.maxRecursionDepth,
+    expressionLimits: opts.expressionLimits,
   };
 
   const hydrated = hydrateWorkflow(parseResult.doc, hydrationCtx);
@@ -318,6 +343,14 @@ function tryParseWorkflow(raw: unknown, maxDepth: number): ParseResult {
     return {
       ok: false,
       error: `Workflow tree depth ${depth} exceeds maximum ${maxDepth}.`,
+    };
+  }
+
+  const errors = expressionErrors(result.data.root);
+  if (errors.length > 0) {
+    return {
+      ok: false,
+      error: errors.join(' '),
     };
   }
 

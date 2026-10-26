@@ -29,8 +29,8 @@ The loop executes its `steps` array **sequentially** on each iteration, in array
 | --- | --- | --- | --- | --- |
 | `id` | `string` | Yes | -- | Unique step identifier |
 | `steps` | `ReadonlyArray<Step<TContext, I, O>>` | Yes | -- | Steps to execute sequentially on each iteration |
-| `until` | `Until` | Yes | -- | Predicate that decides when to stop |
-| `maxIterations` | `number` | No | `1000` | Hard ceiling on total iterations (including retries) |
+| `until` | `Until \| StepDecide` | Yes | -- | Predicate that decides when to stop, or a decide step asking one boolean question (see [Ending a loop with a decision](#ending-a-loop-with-a-decision)) |
+| `maxIterations` | `number` | No | `1000` | Hard ceiling on total iterations (including retries). A positive integer, or `Infinity` for none (see [Uncapped loops](#uncapped-loops)) |
 | `maxHistorySize` | `number` | No | `100` | Max entries kept in the snapshot history array; oldest drop first |
 | `prepareNext` | `(output: O, verdict: Verdict, ctx: Context) => I` | No | -- | Transform output into next iteration's input |
 | `onError` | `(error: NoeticError, ctx: Context) => 'retry' \| 'skip' \| 'abort'` | No | -- | Handle errors from the body steps |
@@ -63,7 +63,7 @@ The `until` predicate returns a `Verdict` telling the loop what to do.
 
 ### Verdicts in traces
 
-A loop opens no span of its own. After each verdict it adds a `loop.verdict` event to the span its context carries (inside a `spawn` child or an `inParallel` path, that child's span), with attributes `loop` (the step id), `iteration`, `stop`, and `reason` when the verdict has one. `feedback` is never recorded, since it can be large or sensitive. A predicate that throws stops the loop with reason `Predicate error: <message>`, and that verdict is traced too. See [Observability](/docs/framework/observability#loop-verdict-events).
+A loop opens no span of its own. After each verdict it adds a `loop.verdict` event to the span its context carries (inside a `spawn` child or an `inParallel` path, that child's span), with attributes `loop` (the step id), `iteration`, `stop`, and `reason` when the verdict has one. `feedback` is never recorded, since it can be large or sensitive. A predicate that throws stops the loop with reason `Predicate error: <message>`, and that verdict is traced too. Two errors are exceptions and fail the loop instead, with no verdict: a predicate that fails because the context was aborted ends the loop with the `cancelled` error, and a `NoeticConfigError` (a broken loop definition, such as a JSON workflow [`expr` predicate](/docs/framework/json-runtime#expression-as-a-predicate) that gives a non-boolean) propagates as is. See [Observability](/docs/framework/observability#loop-verdict-events).
 
 ## Built-in Predicates
 
@@ -204,6 +204,71 @@ const stopCondition = all(
   })),
 );
 ```
+
+## Ending a loop with a decision
+
+A [decide](/docs/framework/steps/decide) step can serve as `until` directly. It must ask exactly one question, and that question must be boolean; `loop()`, `any()`, and `all()` throw `INVALID_UNTIL_DECIDER` otherwise. After each iteration the loop runs the decide step on the iteration's output:
+
+- **yes** stops the loop,
+- **no** runs another iteration,
+- a **refusal** runs another iteration too.
+
+The verdict's `reason` names the step, question, answer, and probability, e.g. `decide 'finished' answered 'done' yes (p=0.91)`.
+
+```ts
+import { callModel, decide, loop } from '@noetic-tools/core';
+
+const finished = decide({
+  id: 'finished',
+  questions: {
+    done: { type: 'boolean', instructions: 'Is the task finished?' },
+  },
+});
+
+const agent = loop({
+  id: 'work',
+  steps: [callModel({ id: 'step', model: 'openai/gpt-4o', instructions: 'Take the next step.' })],
+  until: finished,
+});
+```
+
+The decider follows the decide rules: it reads the context view without writing to the conversation, and merges its metadata into `ctx.lastStepMeta`. It asks the model afresh every iteration, even when the output and conversation repeat. A decider whose call fails stops the loop like any throwing predicate, unless the failure is a cancellation or a config error such as `MISSING_MODEL`, which fail the loop.
+
+Mix a decider with other predicates in `any()` or `all()`. A backstop is wise, since a model that keeps answering no (or refusing) keeps the loop going:
+
+```ts
+import { any, decide, until } from '@noetic-tools/core';
+
+const stopCondition = any(
+  until.maxSteps(20),
+  decide({
+    id: 'good-enough',
+    questions: {
+      ship: { type: 'boolean', instructions: 'Is the draft ready to ship?' },
+    },
+  }),
+);
+```
+
+## Uncapped loops
+
+`maxIterations` defaults to `1000`, so a predicate that never fires still ends the loop with a `step_failed` error. A loop that should run until its predicate says stop opts out with `maxIterations: Infinity`. It then ends only when `until` says stop, an iteration's error propagates, or the context is aborted. Any other non-integer or value below `1` (`NaN`, `0`, `1.5`) fails the loop before its first iteration.
+
+```ts
+import { callModel, decide, loop } from '@noetic-tools/core';
+
+const agent = loop({
+  id: 'until-done',
+  steps: [callModel({ id: 'step', model: 'openai/gpt-4o', instructions: 'Take the next step.' })],
+  until: decide({
+    id: 'finished',
+    questions: { done: { type: 'boolean', instructions: 'Is the task finished?' } },
+  }),
+  maxIterations: Number.POSITIVE_INFINITY,
+});
+```
+
+With a decider and no cap, a model that refuses every time runs the loop until the context is aborted.
 
 ## Preparing the Next Iteration
 

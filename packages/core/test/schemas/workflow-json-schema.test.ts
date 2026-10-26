@@ -13,6 +13,7 @@ import { validateWorkflow } from '../../src/schemas/workflow';
 /** Every JSON-serialisable node kind the runtime accepts. */
 const NODE_KINDS = [
   'callModel',
+  'compute',
   'invokeTool',
   'runCode',
   'conditional',
@@ -37,9 +38,11 @@ const UNTIL_KINDS = [
   'never',
   'outputContains',
   'outputEquals',
+  'expr',
   'converged',
   'any',
   'all',
+  'decide',
 ] as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {

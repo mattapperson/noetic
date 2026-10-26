@@ -1,0 +1,215 @@
+---
+title: Expressions
+description: Compute values, route, and stop loops in JSON workflows with JSONata expressions.
+---
+
+## Quick Example
+
+A loop that sums the numbers from `n` down to `1`, with no model calls:
+
+```ts
+import { AgentHarness, parseAndRunWorkflow } from '@noetic-tools/core';
+
+const workflow = {
+  version: 1,
+  root: {
+    kind: 'loop',
+    id: 'count',
+    maxIterations: 'infinity',
+    body: { kind: 'compute', id: 'step', expr: "{ 'n': n - 1, 'sum': sum + n }" },
+    until: { kind: 'expr', expr: 'n = 0' },
+  },
+};
+
+const harness = new AgentHarness({ name: 'runner', params: {} });
+const result = await parseAndRunWorkflow({
+  json: workflow,
+  harness,
+  ctx: harness.createContext(),
+  tools: [],
+  input: JSON.stringify({ n: 4, sum: 0 }),
+});
+// result: '{"n":0,"sum":10}'
+```
+
+[JSON workflows](/docs/framework/json-runtime) pass text from node to node. Expressions let a workflow read that text as structured data, compute new values from it, and branch on it exactly. Noetic uses [JSONata](https://docs.jsonata.org) for its expressions, the same language AWS Step Functions uses in its JSON state machines. This page covers how Noetic runs expressions; for the language itself, see the [JSONata documentation](https://docs.jsonata.org).
+
+## Where Expressions Appear
+
+| Place | Shape | What it does |
+|---|---|---|
+| `compute` node | `{ "kind": "compute", "id": "...", "expr": "<JSONata>" }` | Computes the node's output from its input. |
+| `conditional` route | `{ "expr": "<JSONata>", "target": <WorkflowNode> }` | Takes the route when the expression gives `true`. |
+| `loop` until predicate | `{ "kind": "expr", "expr": "<JSONata>" }` | Stops the loop when the expression gives `true`. |
+
+A conditional route carries exactly one of `match` (a substring of the input) or `expr`. Routes of both kinds may mix in one node. The `expr` until predicate works inside `any` and `all` like any other predicate.
+
+## What an Expression Reads
+
+Every expression runs against one value, its input:
+
+- A string that parses as JSON is read as that JSON value: `'{"n":1}'` is an object, `'42'` is a number.
+- Any other string is read as the string itself.
+- A value that is not a string, such as a `decide` node's answers, is read as is.
+
+For a `compute` node or a route, that is the node's input. For an until predicate, it is the output of the loop's last iteration. A bare path such as `n` reads the input's `n` field, and `$` is the whole input.
+
+## What an Expression Gives
+
+### `compute` output
+
+| Result | Output |
+|---|---|
+| string | The string itself. |
+| `null` | The empty string. |
+| number, boolean, object, array | Its JSON text. |
+| no value (a path that matched nothing) | Fails with `EXPRESSION_FAILED`. |
+| function | Fails with `EXPRESSION_FAILED`. |
+
+The next node reads JSON text back as structured data, so a chain of `compute` nodes, or a loop whose body is one, carries a state object from step to step. A string result that is itself valid JSON (`"5"`, `"true"`) reads back as that value at the next node, so keep strings inside an object to carry them as strings.
+
+### Tests
+
+A route `expr` and an until `expr` are tests. A test passes on `true` and fails on `false` or on no value, so `done` on an input without a `done` field reads as false. Any other result fails with `EXPRESSION_FAILED`. JSONata's looser truthiness does not apply here; write the comparison out:
+
+```json
+{ "expr": "count > 0", "target": { "kind": "callModel", "id": "summarize", "instructions": "Summarize the results." } }
+```
+
+## Routing on State
+
+A `conditional` with `expr` routes picks a branch by an exact test on structured input:
+
+```json
+{
+  "kind": "conditional",
+  "id": "triage",
+  "routes": [
+    { "expr": "severity = 'high' and $count(errors) > 0", "target": { "kind": "callModel", "id": "escalate", "instructions": "Write an incident report." } },
+    { "expr": "$count(errors) > 0", "target": { "kind": "callModel", "id": "fix", "instructions": "Propose fixes for the errors." } }
+  ],
+  "default": { "kind": "compute", "id": "ok", "expr": "{ 'status': 'ok' }" }
+}
+```
+
+## Recursion
+
+Named workflows may call themselves through a `subflow` node. This one computes the same sum as the quick example by recursion:
+
+```ts
+import { AgentHarness, parseAndRunWorkflow, WorkflowDocumentSchema } from '@noetic-tools/core';
+
+const sum = WorkflowDocumentSchema.parse({
+  version: 1,
+  root: {
+    kind: 'conditional',
+    id: 'base',
+    routes: [{ expr: 'n = 0', target: { kind: 'compute', id: 'done', expr: 'sum' } }],
+    default: {
+      kind: 'sequence',
+      id: 'recurse',
+      steps: [
+        { kind: 'compute', id: 'step', expr: "{ 'n': n - 1, 'sum': sum + n }" },
+        { kind: 'subflow', id: 'again', ref: 'sum' },
+      ],
+    },
+  },
+});
+
+const harness = new AgentHarness({ name: 'runner', params: {} });
+const result = await parseAndRunWorkflow({
+  json: sum,
+  harness,
+  ctx: harness.createContext(),
+  tools: [],
+  workflows: new Map([['sum', sum]]),
+  input: JSON.stringify({ n: 4, sum: 0 }),
+});
+// result: '10'
+```
+
+Recursion depth is capped by `maxRecursionDepth` (default `100`); a deeper call fails with `WORKFLOW_RECURSION_LIMIT`.
+
+## Turing Completeness
+
+An uncapped loop (`"maxIterations": "infinity"`), a `compute` body that carries state, and an `expr` test that halts on it make JSON workflows Turing complete: they can run any two-counter machine. One `compute` expression can run a whole machine whose program is data:
+
+```jsonata
+(
+  $i := prog[$$.pc];
+  $i.op = "inc"
+    ? $merge([$$, { "pc": $i.next, $i.reg: $lookup($$, $i.reg) + 1 }])
+    : $lookup($$, $i.reg) = 0
+      ? $merge([$$, { "pc": $i.zero }])
+      : $merge([$$, { "pc": $i.next, $i.reg: $lookup($$, $i.reg) - 1 }])
+)
+```
+
+Use it as the loop body with `{ "kind": "expr", "expr": "pc < 0" }` as the predicate, and give the loop a state such as `{ "pc": 0, "a": 3, "b": 2, "prog": [...] }`.
+
+Since whether such a workflow halts cannot be known in advance, bound the run instead: abort the context, add `maxCost` or `maxDuration` beside the `expr` predicate in an `any`, keep `maxRecursionDepth` finite, and rely on the expression limits below.
+
+```json
+{
+  "kind": "any",
+  "predicates": [
+    { "kind": "expr", "expr": "pc < 0" },
+    { "kind": "maxDuration", "duration": 60000 }
+  ]
+}
+```
+
+## Limits
+
+Each evaluation runs under four limits:
+
+| Limit | Bounds | Default |
+|---|---|---|
+| `steps` | Sub-expressions evaluated, counting every repeat. Doesn't use the clock. | `1000000` |
+| `depth` | How deep evaluation nests. Tail calls don't nest. | `500` |
+| `length` | Items in one sequence, including a range. | `1000000` |
+| `timeout` | Wall-clock milliseconds for one evaluation. | `1000` |
+
+JSONata also caps a range (`[1..n]`) at 10,000,000 items. Going past any limit fails with `EXPRESSION_LIMIT_EXCEEDED`. Each value is a positive integer or `Infinity`, which lifts that bound; anything else fails with `INVALID_EXPRESSION_LIMITS`.
+
+`steps` is the limit that holds on Cloudflare Workers: Workers freeze the clock during pure CPU work, so `timeout` can't stop an endless tail-recursive expression there. Keep `steps` finite on Workers.
+
+Override the limits per run with `expressionLimits` on `parseAndRunWorkflow`, `dynamicWorkflow`, or `workflow()`; unset fields keep their defaults, which `DEFAULT_EXPRESSION_LIMITS` holds:
+
+```ts
+import { AgentHarness, DEFAULT_EXPRESSION_LIMITS, parseAndRunWorkflow } from '@noetic-tools/core';
+
+declare const workflow: unknown;
+
+const harness = new AgentHarness({ name: 'runner', params: {} });
+await parseAndRunWorkflow({
+  json: workflow,
+  harness,
+  ctx: harness.createContext(),
+  tools: [],
+  expressionLimits: { timeout: DEFAULT_EXPRESSION_LIMITS.timeout * 5, depth: 1000 },
+});
+```
+
+The limits bound one evaluation, not the whole run.
+
+## Errors
+
+| Code | When |
+|---|---|
+| [`WORKFLOW_VALIDATION_FAILED`](/docs/framework/errors#workflow_validation_failed) | An expression does not parse. Syntax is checked when the document is validated, before anything runs, so a `dynamicWorkflow` planner gets the error back in its revision loop. |
+| [`EXPRESSION_FAILED`](/docs/framework/errors#expression_failed) | JSONata raised an error, a `compute` gave no value or a function, or a test gave something other than a boolean. |
+| [`EXPRESSION_LIMIT_EXCEEDED`](/docs/framework/errors#expression_limit_exceeded) | An evaluation went past a limit. |
+| [`INVALID_EXPRESSION_LIMITS`](/docs/framework/errors#invalid_expression_limits) | An `expressionLimits` value isn't a positive integer or `Infinity`. |
+
+Each message names where the expression sits, such as `compute node 'step'` or `route 0 of conditional node 'triage'`, and quotes JSONata's error code and position.
+
+## Runtimes
+
+Expressions are parsed and interpreted, never turned into code with `eval` or `new Function`, so they run wherever core runs, Cloudflare Workers included. Core pins JSONata to an exact version (`2.2.2`), so a stored document means the same thing until a core release says otherwise. JSONata's `$now()`, `$millis()`, and `$random()` read the clock and a random source; avoid them where a run must repeat exactly.
+
+## Related Pages
+
+- [JSON Workflow Runtime](/docs/framework/json-runtime) -- node kinds, until predicates, and recursion.
+- [Errors](/docs/framework/errors) -- every configuration error code.
+- [JSONata documentation](https://docs.jsonata.org) -- the expression language.

@@ -234,6 +234,22 @@ without calling the model. Two nested `routeSwitch`es over one decision pay
 once and cannot disagree. A loop that asks again after new items land gets a
 fresh decision. Inputs that do not survive JSON are never reused.
 
+A decide step used as a loop's `until` (below) is the exception: the loop
+drops its earlier answers before each ask, so every iteration gets a fresh
+decision even when the output and conversation length repeat.
+
+### Ending a Loop
+
+A decide step asking exactly one boolean question can be a loop's `until`,
+alone or inside `any()`/`all()`, in code and in JSON (`05-loop-and-until`,
+Ending a Loop with a Decision; `26-json-workflow-runtime`, Decide Nodes as
+Predicates). There is no wrapper: the step `decide()` returns, or the plain
+`decide` workflow node, is the decider. It runs on the iteration's output; yes
+stops the loop, and no or a refusal continues it. A decider with more than one
+question, or a non-boolean one, fails with `INVALID_UNTIL_DECIDER`. All the
+rules above hold: no conversation side effects, a merged `ctx.lastStepMeta`,
+and a `decide.call` span per ask.
+
 ---
 
 ## `routeSwitch()`
@@ -602,6 +618,9 @@ interface RouteSwitchWorkflowNode {
 The `context` selector and the function form of `on` are closures and have no
 JSON form. Schema validation checks that `on` names a question, that `cases`
 covers every outcome, and that `uncertain` is present.
+
+A `decide` node is also a valid until predicate on a `loop` node when it asks
+exactly one boolean question (see Ending a Loop).
 
 A `decide` node outputs the answers object. The JSON runtime handles it: a
 `sequence` passes it to the next node as JSON (so a `callModel` node reads it), a

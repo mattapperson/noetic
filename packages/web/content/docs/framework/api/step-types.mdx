@@ -257,8 +257,8 @@ inParallel has three mode variants, each a separate interface.
 | `kind` | `'loop'` | yes | Discriminant |
 | `id` | `string` | yes | Step identifier |
 | `steps` | `ReadonlyArray<Step<TContext, I, O>>` | yes | Loop body steps |
-| `until` | `Until` | yes | Termination predicate |
-| `maxIterations` | `number` | no | Safety limit on iterations |
+| `until` | `Until \| StepDecide<TContext>` | yes | Termination predicate, or a decide step asking one boolean question (yes stops) |
+| `maxIterations` | `number` | no | Hard cap on iterations, retries included (default `1000`). A positive integer or `Infinity` |
 | `maxHistorySize` | `number` | no | Max history items to retain |
 | `inbox` | `Channel<string>` | no | Channel for external messages that prevent loop from stopping |
 | `parkTimeout` | `number` | no | Milliseconds to wait on inbox before stopping (0 = non-blocking) |

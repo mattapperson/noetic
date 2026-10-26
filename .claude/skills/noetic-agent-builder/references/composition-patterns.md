@@ -278,6 +278,81 @@ const migrator = loop({
 });
 ```
 
+## Pattern: Work Until a Model Says Done
+
+An uncapped loop whose `until` is a decide step: a decision model reads each iteration's output and answers one boolean question. Yes stops; no or a refusal runs another iteration. Keep a `maxSteps` backstop beside it when an endless run would be costly.
+
+```typescript
+const isDone = decide({
+  id: 'is-done',
+  questions: { stop: { type: 'boolean', instructions: 'Is the migration complete and the suite green?' } },
+});
+
+const worker = loop({
+  id: 'work-until-done',
+  steps: [callModel({ id: 'step', model: 'anthropic/claude-sonnet-4-20250514', instructions: 'Take the next step.', tools })],
+  until: any(until.maxSteps(200), isDone),
+  maxIterations: Number.POSITIVE_INFINITY,
+});
+```
+
+JSON form: `"until": { "kind": "decide", "id": "is-done", "questions": { "stop": { "type": "boolean", "instructions": "..." } } }` with `"maxIterations": "infinity"`.
+
+## Pattern: Recursive Named Workflows
+
+A named workflow may call itself through a `subflow` ref; a `conditional` picks the base case, and the steps before the recursive call compute its input. Depth is bounded by `maxRecursionDepth` (default 100).
+
+```typescript
+await parseAndRunWorkflow({
+  json: { version: 1, root: { kind: 'subflow', id: 'top', ref: 'shrink' } },
+  workflows: new Map([['shrink', {
+    version: 1,
+    root: { kind: 'sequence', id: 'body', steps: [
+      { kind: 'callModel', id: 'step', instructions: 'Shorten the text by one sentence; reply DONE when one sentence is left.' },
+      { kind: 'conditional', id: 'check',
+        routes: [{ match: 'DONE', target: { kind: 'callModel', id: 'final', instructions: 'Return the text.' } }],
+        default: { kind: 'subflow', id: 'again', ref: 'shrink' } },
+    ] },
+  }]]),
+  maxRecursionDepth: 20,
+  harness, ctx, tools: [], input: longText,
+});
+```
+
+## Pattern: JSON Workflow with State
+
+A JSON workflow can hold state and run until the state says to stop, with no model calls. A `compute` node turns its input into a new value with a [JSONata](https://docs.jsonata.org) expression; as a loop body, its output becomes the next iteration's input, so it carries a state object. An `{ "kind": "expr" }` until predicate tests that state exactly, and `"maxIterations": "infinity"` lifts the cap. Together they make the format Turing complete, so bound the run with budgets instead: put `maxDuration` or `maxCost` beside the test in an `any`, and abort the context if needed.
+
+```typescript
+const result = await parseAndRunWorkflow({
+  json: {
+    version: 1,
+    root: {
+      kind: 'loop',
+      id: 'count',
+      maxIterations: 'infinity',
+      body: { kind: 'compute', id: 'step', expr: "{ 'n': n - 1, 'sum': sum + n }" },
+      until: { kind: 'any', predicates: [
+        { kind: 'expr', expr: 'n = 0' },
+        { kind: 'maxDuration', duration: 60_000 },
+      ] },
+    },
+  },
+  harness, ctx, tools: [],
+  input: JSON.stringify({ n: 4, sum: 0 }),
+});
+// '{"n":0,"sum":10}'
+```
+
+Rules worth knowing:
+
+- Input is read as JSON when it parses, so `n` reads the previous output's `n` field.
+- A `compute` result is written as JSON text (strings as-is, `null` as empty). A path that matches nothing fails with `EXPRESSION_FAILED` rather than giving empty output.
+- Tests (route `expr`, until `expr`) must give a boolean: `true` passes; `false` or no value fails; anything else is `EXPRESSION_FAILED`. Write comparisons out (`count > 0`).
+- Route on state with `{ "expr": "<JSONata>", "target": ... }` in place of `match` on a `conditional` route.
+- Each evaluation runs under `timeout`/`depth`/`length` limits (`DEFAULT_EXPRESSION_LIMITS`; override with `expressionLimits`); past them is `EXPRESSION_LIMIT_EXCEEDED`. Syntax errors fail validation (`WORKFLOW_VALIDATION_FAILED`) before the run.
+- Combine with recursive named workflows (above) for state that branches into sub-problems.
+
 ## Pattern: Parallel Research
 
 Multiple agents research in parallel, results merged:

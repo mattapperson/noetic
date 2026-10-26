@@ -1,4 +1,6 @@
-import type { Snapshot, Until, Verdict } from '@noetic-tools/types';
+import type { ContextData } from '@noetic-tools/context';
+import type { Snapshot, StepDecide, Until, UntilRun, Verdict } from '@noetic-tools/types';
+import { toUntil } from './decider';
 
 /**
  * Combines predicates with OR semantics; stops the loop when any predicate says stop.
@@ -8,15 +10,21 @@ import type { Snapshot, Until, Verdict } from '@noetic-tools/types';
  * predicate's `reason` (joined with `'; '`) and `feedback` (joined with `'\n'`),
  * so a failing `until.verified()` still hands its feedback to `prepareNext`.
  *
+ * A predicate may be a decide step asking one boolean question (see `loop`).
+ *
  * @public
- * @param predicates - Until predicates to evaluate.
+ * @param predicates - Until predicates or decide steps to evaluate.
  * @returns A combined `Until` that short-circuits on the first stop verdict.
+ * @throws `NoeticConfigError` `INVALID_UNTIL_DECIDER` if a decide step does not ask exactly one boolean question.
  */
-export function any(...predicates: Until[]): Until {
-  return async (snapshot: Snapshot): Promise<Verdict> => {
+export function any<TContext = ContextData>(
+  ...predicates: Array<Until | StepDecide<TContext>>
+): Until {
+  const untils = predicates.map(toUntil);
+  return async (snapshot: Snapshot, run?: UntilRun): Promise<Verdict> => {
     const verdicts: Verdict[] = [];
-    for (const pred of predicates) {
-      const verdict = await pred(snapshot);
+    for (const pred of untils) {
+      const verdict = await pred(snapshot, run);
       if (verdict.stop) {
         return verdict;
       }
@@ -34,15 +42,21 @@ export function any(...predicates: Until[]): Until {
  * predicate's `reason` (joined with `'; '`, default `'All predicates
  * satisfied'`) and `feedback` (joined with `'\n'`).
  *
+ * A predicate may be a decide step asking one boolean question (see `loop`).
+ *
  * @public
- * @param predicates - Until predicates to evaluate.
+ * @param predicates - Until predicates or decide steps to evaluate.
  * @returns A combined `Until` that requires all predicates to be satisfied.
+ * @throws `NoeticConfigError` `INVALID_UNTIL_DECIDER` if a decide step does not ask exactly one boolean question.
  */
-export function all(...predicates: Until[]): Until {
-  return async (snapshot: Snapshot): Promise<Verdict> => {
+export function all<TContext = ContextData>(
+  ...predicates: Array<Until | StepDecide<TContext>>
+): Until {
+  const untils = predicates.map(toUntil);
+  return async (snapshot: Snapshot, run?: UntilRun): Promise<Verdict> => {
     const verdicts: Verdict[] = [];
-    for (const pred of predicates) {
-      const verdict = await pred(snapshot);
+    for (const pred of untils) {
+      const verdict = await pred(snapshot, run);
       if (!verdict.stop) {
         return verdict;
       }

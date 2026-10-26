@@ -21,7 +21,7 @@ type Step<I, O> =
   | { kind: 'inParallel';    id: string; mode: 'settle'; paths: (input: I, ctx: Context) => Step<I, O>[]; merge: MergeFn<O, SettleResult<O>>; concurrency?: number }
   | { kind: 'spawn';   id: string; child: Step<I, O>; context?: ContextLayer[]; timeout?: number; subprocess?: SubprocessAdapter }
   | { kind: 'withContext'; id: string; child: Step<I, O>; context: ContextConfig | ContextLayer[] }
-  | { kind: 'loop';    id: string; steps: ReadonlyArray<Step<I, O>>; until: Until; maxIterations?: number; maxHistorySize?: number; prepareNext?: (output: O, verdict: Verdict, ctx: Context) => I; onError?: (error: NoeticError, ctx: Context) => 'retry' | 'skip' | 'abort' }
+  | { kind: 'loop';    id: string; steps: ReadonlyArray<Step<I, O>>; until: Until | StepDecide; maxIterations?: number; maxHistorySize?: number; prepareNext?: (output: O, verdict: Verdict, ctx: Context) => I; onError?: (error: NoeticError, ctx: Context) => 'retry' | 'skip' | 'abort' }
 ```
 
 Every variant also carries the replay controls from `StepReplay`, omitted above for width:

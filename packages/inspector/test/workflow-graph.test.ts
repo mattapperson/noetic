@@ -510,6 +510,18 @@ describe('describeUntil', () => {
         threshold: 0.9,
       }),
     ).toBe('converged ≥ 0.9');
+    expect(
+      describeUntil({
+        kind: 'decide',
+        id: 'is-done',
+        questions: {
+          stop: {
+            type: 'boolean',
+            instructions: 'Done?',
+          },
+        },
+      }),
+    ).toBe('decide "is-done" says yes');
   });
 
   it('joins combinators with their own conjunction', () => {

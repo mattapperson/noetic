@@ -7,6 +7,7 @@
 export type {
   AcpAgentWorkflowNode,
   CallModelWorkflowNode,
+  ComputeWorkflowNode,
   ConditionalRoute,
   ConditionalWorkflowNode,
   DecideWorkflowNode,

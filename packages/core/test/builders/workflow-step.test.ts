@@ -168,7 +168,7 @@ describe('workflow — execution', () => {
     }
   });
 
-  test('a self-referencing named workflow throws WORKFLOW_CYCLE via the seeded ancestry', async () => {
+  test('a step built from a ref counts that ref toward maxRecursionDepth', async () => {
     const selfRef: WorkflowDocument = {
       version: 1,
       root: {
@@ -178,7 +178,7 @@ describe('workflow — execution', () => {
       },
     };
     const built = workflow({
-      id: 'wf-cycle',
+      id: 'wf-recursive',
       ref: 'a',
       workflows: new Map([
         [
@@ -186,15 +186,21 @@ describe('workflow — execution', () => {
           selfRef,
         ],
       ]),
+      maxRecursionDepth: 2,
     });
-    const { ctx } = makeRecordingContext();
+    const { ctx, executed } = makeRecordingContext();
     try {
       await built.execute('in', ctx);
-      expect.unreachable('expected WORKFLOW_CYCLE');
+      expect.unreachable('expected WORKFLOW_RECURSION_LIMIT');
     } catch (e) {
       assert(isNoeticConfigError(e));
-      expect(e.code).toBe('WORKFLOW_CYCLE');
+      expect(e.code).toBe('WORKFLOW_RECURSION_LIMIT');
+      expect(e.message).toContain('depth 3');
     }
+    expect(executed.map((x) => x.id)).toEqual([
+      'again',
+      'again-again',
+    ]);
   });
 
   test("isolation: 'spawn' wraps the hydrated tree in a spawn step", async () => {
