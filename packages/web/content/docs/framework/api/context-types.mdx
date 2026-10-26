@@ -15,6 +15,7 @@ interface Context<TContext = ContextData, TState = unknown> {
   readonly elapsed: number;
   readonly cost: number;
   readonly billedCost: number;
+  readonly heldCost: number;
   readonly context: TContext;
   state: TState;
   readonly parent: Context | null;
@@ -48,6 +49,7 @@ interface Context<TContext = ContextData, TState = unknown> {
 | `elapsed` | `number` | Elapsed time in milliseconds |
 | `cost` | `number` | Accumulated cost in USD of the work run on this context, including spend restored from a checkpoint |
 | `billedCost` | `number` | USD this context's calls actually paid during this attempt. Replayed steps and rounds add nothing and a restored context starts at `0`, so `cost - billedCost` is what replay saved |
+| `heldCost` | `number` | USD held for this execution's paid calls that were cut off and have no settled bill yet, each at its ceiling until reconciled. A bound, never part of `cost` or `billedCost`; nonzero only on a root context. See [Paid Calls](/docs/framework/durability#paid-calls) |
 | `context` | `TContext` | Typed context object. Access layer data via `ctx.context['layerId'].prop`. Defaults to `ContextData` when no `ContextConfig` is provided. |
 | `state` | `TState` | Mutable user state |
 | `parent` | `Context \| null` | Parent context (for spawned agents) |

@@ -212,6 +212,7 @@ interface HarnessResponse {
   readonly usage: { inputTokens: number; outputTokens: number; cachedTokens?: number };
   readonly cost?: number;       // USD the turn's work cost, replayed work included
   readonly billedCost?: number; // USD the turn actually paid — 0 for replayed work
+  readonly heldCost?: number;   // USD held for cut-off paid calls with no settled bill yet
   readonly text: string;
   readonly lastLayerUsage?: LastLayerUsage;
 }

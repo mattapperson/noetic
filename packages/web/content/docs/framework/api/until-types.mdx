@@ -33,6 +33,7 @@ interface Snapshot {
   };
   elapsed: number;
   cost: number;
+  heldCost?: number;
   lastOutput: unknown;
   lastText: string;
   history: unknown[];
@@ -49,6 +50,7 @@ interface Snapshot {
 | `tokens.total` | `number` | Total tokens (input + output) |
 | `elapsed` | `number` | Elapsed time in milliseconds |
 | `cost` | `number` | Accumulated cost in USD |
+| `heldCost` | `number` | USD held for cut-off paid calls with no settled bill — see [Paid Calls](/docs/framework/durability#paid-calls) (optional) |
 | `lastOutput` | `unknown` | Raw output from the last iteration |
 | `lastText` | `string` | Text output from the last iteration |
 | `history` | `unknown[]` | Previous outputs, oldest first; bounded by `maxHistorySize` (default 100, oldest dropped first) |
@@ -87,7 +89,7 @@ const stop: Until = until.maxSteps(10);
 
 ### until.maxCost(usd)
 
-Stops when accumulated cost reaches the USD limit, with reason `Cost $<cost> exceeded budget $<usd>` (both to two decimals, e.g. `Cost $1.02 exceeded budget $1.00`).
+Stops when accumulated cost plus `heldCost` reaches the USD limit, with reason `Cost $<cost> exceeded budget $<usd>` (both to two decimals, e.g. `Cost $1.02 exceeded budget $1.00`). Counting the hold keeps a resumed run from spending what its cut-off attempt may already have spent.
 
 ```ts
 const stop: Until = until.maxCost(1.0);

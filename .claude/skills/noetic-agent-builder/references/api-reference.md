@@ -1730,7 +1730,7 @@ hooks: {
 
 ## AgentHarness
 
-`AgentHarness` is generic over `TParams`. The `config` property exposes `AgentConfig<TParams>`, and steps/tools access params via `ctx.harness.config.params`. Execution surfaces are configured via the `environment` option (`{ storage?: { adapter?, checkpointStore?, layerStateStore?, stepLedgerRetention? }, fs?, shell?, subprocess? }`); every field defaults to an in-memory adapter, except `checkpointStore`, which defaults to a store over `storage.adapter` when one is given. The top-level `durability?: boolean` option (default on whenever storage is given) turns every durability surface off when `false`. Usage carries both `cost` (what the work cost, replayed work included) and `billedCost` (what was paid now — `0` for replayed work) on `LLMResponse`, `StepMeta`, `Context`, `HarnessResponse`, and `SessionUsage`. The `fs` property exposes the configured `FsAdapter`, and `shell` the configured `ShellAdapter`. Default context layers come in through `contextLayers`, and the default model-provider configuration through `callModelDefaults` (an `LlmProviderConfig`).
+`AgentHarness` is generic over `TParams`. The `config` property exposes `AgentConfig<TParams>`, and steps/tools access params via `ctx.harness.config.params`. Execution surfaces are configured via the `environment` option (`{ storage?: { adapter?, checkpointStore?, layerStateStore?, stepLedgerRetention? }, fs?, shell?, subprocess? }`); every field defaults to an in-memory adapter, except `checkpointStore`, which defaults to a store over `storage.adapter` when one is given. The top-level `durability?: boolean` option (default on whenever storage is given) turns every durability surface off when `false`. Usage carries both `cost` (what the work cost, replayed work included) and `billedCost` (what was paid now — `0` for replayed work) on `LLMResponse`, `StepMeta`, `Context`, `HarnessResponse`, and `SessionUsage`. `Context`, `HarnessResponse`, and `SessionUsage` also carry `heldCost`: spend held at its ceiling for cut-off paid calls with no settled bill yet (see Paid dispatches). The `fs` property exposes the configured `FsAdapter`, and `shell` the configured `ShellAdapter`. Default context layers come in through `contextLayers`, and the default model-provider configuration through `callModelDefaults` (an `LlmProviderConfig`).
 
 ### Sessions and the Message Queue
 
@@ -2063,6 +2063,18 @@ Entries beneath a step that recorded are pruned (it replays without descending),
 Call `clearCheckpoint` when the **workflow changed** — replay happens at the coarsest completed granularity, so a finished parent replays wholesale and an edit to one of its children is never noticed — and when an execution is abandoned, since `checkpointStore.clear()` alone strands the ledger's per-step keys.
 
 The ledger covers control flow, `callModel` steps, and their rounds. A tool interrupted mid-round runs again on resume — it does not make tool execution exactly-once: fence effects at the tool/host boundary.
+
+### Paid dispatches
+
+Durability also records every paid provider call — each `callModel` round and each native `decide()` — under `spend:<id>` **before** it is sent, with the request hash, model, a prompt-token estimate, and the output cap. The OpenRouter client saves the generation id from the response headers before the body is read. A call whose bill reaches the run drops its record; one cut off by a crash, `cancel()`, a steer, or a dropped connection stays **pending**, held at its ceiling (published prices × prompt estimate + output cap — set `params.maxTokens` to keep it finite) until reconciled.
+
+```typescript
+harness.pendingSpend(executionId?: string): Promise<PendingSpend[]>;
+harness.reconcileSpend(opts?: { executionId?: string; patienceMs?: number }): Promise<SpendSettlement[]>;
+harness.writeOffSpend(id: string, opts: { assumedCost: number }): Promise<SpendSettlement | undefined>;
+```
+
+Reconciliation prices calls with a generation id via the provider's generation lookup, polling up to `patienceMs` (default 60s — providers price a call 7–32s after it ends). It runs on its own after `restore()` and whenever a call is cut off. A settled bill is charged once: to the run in flight on the execution, else the thread's stored session, else the restored context — so it lands in `cost` and `billedCost`. Until then `heldCost` on `Context`, `HarnessResponse`, and `SessionUsage` reports the hold, and `until.maxCost` stops at `cost + heldCost`. Calls cut off before any response byte, and native `decide()` calls cut off mid-request, have no id: they stay held until written off. `clearCheckpoint` and abandoned turns never delete spend records. Events: `{name}:spend_pending`, `{name}:spend_settled`.
 
 ### `createFileStorage`
 

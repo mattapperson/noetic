@@ -89,7 +89,7 @@ const predicate = until.maxSteps(5);
 
 ### until.maxCost(usd)
 
-Stop when cumulative cost reaches the threshold. Reason: `Cost $0.52 exceeded budget $0.50` (both rounded to cents).
+Stop when cumulative cost reaches the threshold. Reason: `Cost $0.52 exceeded budget $0.50` (both rounded to cents). Spend held for paid calls a crash or cancel cut off counts too, so a resumed run cannot overspend — see [Paid Calls](/docs/framework/durability#paid-calls).
 
 ```ts
 const predicate = until.maxCost(0.50);

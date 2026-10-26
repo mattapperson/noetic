@@ -140,7 +140,7 @@ Replayed work keeps its usage figures but costs nothing now, so usage reports bo
 | `tokens`, `usage`, `cost` | What the work cost. Budgets such as `until.maxCost` count it, so a resumed run stops where an uninterrupted one would. | The recorded figures |
 | `billedCost` | What was actually paid now. | `0` |
 
-`billedCost` sits next to `cost` on `LLMResponse`, `StepMeta`, `Context`, `HarnessResponse`, and `SessionUsage`. A context's `billedCost` counts this attempt's live calls — a restored context starts at `0` — so after a resume, `ctx.cost - ctx.billedCost` is what replay saved. A session's `billedCost` sums what storage knows its turns paid; spend a host lost to a hard kill before the turn's usage was written is not in it.
+`billedCost` sits next to `cost` on `LLMResponse`, `StepMeta`, `Context`, `HarnessResponse`, and `SessionUsage`. A context's `billedCost` counts this attempt's live calls — a restored context starts at `0` — so after a resume, `ctx.cost - ctx.billedCost` is what replay saved. A session's `billedCost` sums what storage knows its turns paid, plus the bills of cut-off calls once they are settled (see [Paid Calls](#paid-calls)).
 
 ### Model Rounds
 
@@ -255,7 +255,7 @@ Call it in two situations:
 
 Replaying an output replays a step's **value**, not its **effect**. A `runCode` step that wrote a file, or an `invokeTool` step that opened a PR, returns its recorded output on replay while the effect is not redone — correct only if that effect was durable when it happened.
 
-Core's ledger therefore covers control flow, `callModel` steps, and their rounds — a recorded round's tools never run again. It does **not** claim exactly-once execution for a tool interrupted mid-round: it has no durable pre-dispatch record and no way to know whether a given tool is idempotent. Fence effects whose duplication matters at the tool/host boundary.
+Core's ledger therefore covers control flow, `callModel` steps, and their rounds — a recorded round's tools never run again. It does **not** claim exactly-once execution for a tool interrupted mid-round: it has no durable pre-dispatch record of a tool call and no way to know whether a given tool is idempotent. (Paid model calls do get one — see [Paid Calls](#paid-calls).) Fence effects whose duplication matters at the tool/host boundary.
 
 ### Sessions
 
@@ -276,6 +276,38 @@ const response = await harness.getAgentResponse({ threadId });
 ```
 
 A turn that finished is not replayed when re-delivered — it runs again as a new turn — so acknowledge messages once their turn completes.
+
+### Paid Calls
+
+A model call cut off with its host — or by `cancel(ctx)`, a steer, or a dropped connection — finished nothing, so the ledger has no entry for it. The provider billed it anyway: a cut-off stream is billed for every token generated, even after the client went away. So every paid call leaves a **dispatch record** in storage before it is sent — each `callModel` round and each native `decide()` call:
+
+- **Before send**, the record holds the model, a hash of the request, an estimate of the prompt's tokens, and the request's output cap.
+- **When the response headers arrive**, the provider's generation id is saved to it — before the body is read.
+- **When the bill arrives** with the response, the record is deleted; the cost reaches usage as usual.
+- **Otherwise** the record stays, and the call is **pending**: held at its ceiling until its bill is known.
+
+```ts validate=none
+// Unsettled calls, all of them or one execution's, each with its ceiling.
+const pending = await harness.pendingSpend(executionId);
+
+// Price them through the provider's generation lookup and settle them into usage.
+const settled = await harness.reconcileSpend({ executionId, patienceMs: 60_000 });
+
+// A call that can never be priced: settle it at an amount you assert.
+await harness.writeOffSpend(pending[0].id, { assumedCost: 0.05 });
+```
+
+Reconciliation runs on its own after `restore()` and the moment a call is cut off; call `reconcileSpend()` again whenever you like — at boot, for instance, to settle every execution's leftovers. The provider prices a call some seconds after it ends (7–32 s observed), so a lookup keeps asking, backing off from 1 s to 10 s, for up to `patienceMs` (default 60 s). Its timers never keep your process alive.
+
+A settled bill is charged once: to the run in flight on that execution, else to the thread's stored session, else to the context `restore()` returned — so it lands in `cost` and `billedCost` like any other spend. `{name}:spend_pending` and `{name}:spend_settled` events report both ends.
+
+**Held spend stays bounded.** Until it is settled, a pending call is held at its **ceiling**: the model's published prices applied to the prompt estimate and the output cap (`params.maxTokens`, else the model's published maximum). `heldCost` reports the hold beside `cost` and `billedCost` on `Context`, `HarnessResponse`, and `SessionUsage`, and `until.maxCost` counts it, so a resumed run cannot spend what its cut-off attempt may already have spent. A model with no published price, or no output cap anywhere, has no ceiling: `spend_pending` flags it `unbounded` and it adds nothing to `heldCost`. Set `params.maxTokens` on paid steps to keep every ceiling finite.
+
+**Some calls can only be bounded.** A call cut off before any response byte has no generation id. Neither does a native `decide()` cut off mid-request — the provider sends its id only with the body. These stay held until you write them off.
+
+**Evidence is never discarded.** Records live under `spend:<id>`, apart from checkpoints, so `clearCheckpoint` and an abandoned turn leave them alone. A record leaves storage only when it is settled or written off.
+
+Run one harness per storage when reconciling: a harness skips the calls it has in flight, but cannot see another harness's.
 
 ### Implement `getMany` on a networked adapter
 
@@ -323,7 +355,7 @@ Two rules:
 
 A step whose side effect landed but whose ledger entry did not runs again on resume. The framework cannot make arbitrary `runCode` bodies idempotent — write bodies that are safe to re-execute where durability matters, or gate with an external idempotency key.
 
-A model stream is not resumed mid-response. A round cut off while the model was generating is asked again on resume; the rounds before it replay.
+A model stream is not resumed mid-response. A round cut off while the model was generating is asked again on resume; the rounds before it replay. The cut-off round's bill is not lost — see [Paid Calls](#paid-calls).
 
 A `durable: false` step re-runs on resume, and so do its effects: its channel sends land again and its `ctx.state` writes apply again on top of the restored state.
 
@@ -485,6 +517,7 @@ With the full durable stack configured:
 - Restart rediscovers running children and rebuilds their parent contexts.
 - IPC replay is exactly-once at the frame level when the client acks correctly.
 - Schema version drift surfaces as a typed error rather than silent corruption.
+- Every paid model call is recorded before it is sent. One cut off after its response headers arrived settles at the provider's exact cost; one cut off earlier is held at its ceiling. Neither is lost to a discard.
 
 Without the full stack, the surfaces that depend on it are no-ops and the harness behaves as though durability were never requested.
 
