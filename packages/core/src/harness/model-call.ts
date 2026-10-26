@@ -120,6 +120,10 @@ function replayOutput(
   input.push(...itemsToInput(roundItems.filter((item) => !isFunctionCall(item))));
 }
 
+function hasItem(items: ReadonlyArray<Item>, id: string): boolean {
+  return items.some((item) => 'id' in item && item.id === id);
+}
+
 function hasUsableResponseOutput(response: unknown, items: ReadonlyArray<Item>): boolean {
   if (items.length > 0) {
     return true;
@@ -702,11 +706,14 @@ export class AgentHarnessModelCaller {
         cost,
       });
     };
+    let stoppedForRecall = false;
     const steers = openSteerInbox({
       ctx: request.ctx,
       layers: request.layers ?? [],
       harness: this.opts.harness,
       emit: prepared.emitIfAllowed,
+      inConversation: (itemId) =>
+        hasItem(allItems, itemId) || hasItem(request.ctx?.itemLog.items ?? [], itemId),
     });
 
     while (!request.signal?.aborted) {
@@ -749,7 +756,7 @@ export class AgentHarnessModelCaller {
       const recoveryContinuation = useEphemeralContinue;
       useEphemeralContinue = false;
       if (steers) {
-        await this.applySteers({
+        const recall = await this.applySteers({
           steers,
           ctx: request.ctx,
           conversationInput,
@@ -757,6 +764,10 @@ export class AgentHarnessModelCaller {
           round,
           emitIfAllowed: prepared.emitIfAllowed,
         });
+        if (recall) {
+          stoppedForRecall = true;
+          break;
+        }
       }
 
       const roundController = new AbortController();
@@ -1003,6 +1014,11 @@ export class AgentHarnessModelCaller {
       },
       rounds,
       cost: totalCost > 0 ? totalCost : undefined,
+      ...(stoppedForRecall
+        ? {
+            recall: true,
+          }
+        : {}),
       ...(replayedCost !== undefined
         ? {
             billedCost: totalCost - replayedCost,
@@ -1019,7 +1035,8 @@ export class AgentHarnessModelCaller {
   /**
    * Offer queued steers before a model call and add the applied ones to the
    * conversation. They join `allItems` rather than the log so the log keeps
-   * them in the order the model saw them.
+   * them in the order the model saw them. Returns whether a layer asked for
+   * recall to run again before the call goes on.
    */
   private async applySteers(params: {
     steers: SteerInbox;
@@ -1028,12 +1045,12 @@ export class AgentHarnessModelCaller {
     allItems: Item[];
     round: number;
     emitIfAllowed: (eventType: string, data: Record<string, unknown>) => void;
-  }): Promise<void> {
+  }): Promise<boolean> {
     const { steers, ctx, conversationInput, allItems } = params;
     await steers.offer(SteerPoint.BeforeRound);
-    const { messageIds, items } = steers.takeStaged();
+    const { messageIds, items, recall } = steers.takeStaged();
     if (messageIds.length === 0) {
-      return;
+      return false;
     }
     conversationInput.push(...itemsToInput(items));
     for (const item of items) {
@@ -1045,6 +1062,7 @@ export class AgentHarnessModelCaller {
       count: messageIds.length,
       messageIds,
     });
+    return recall;
   }
 
   private parseRoundItems(request: CallModelRequest, items: Item[]): Item[] {

@@ -137,7 +137,7 @@ interface Rig {
 }
 
 /** A harness on a scripted client, and a context wired to a session queue. */
-function makeRig(rounds: ScriptedRound[]): Rig {
+function makeRig(rounds: ScriptedRound[], contextLayers?: ContextLayer[]): Rig {
   const harness = new AgentHarness({
     name: 'steer',
     params: {},
@@ -148,14 +148,19 @@ function makeRig(rounds: ScriptedRound[]): Rig {
   }>(harness).client = client;
   const queue = new MessageQueue();
   const events: EmittedEvent[] = [];
-  const ctx = Object.assign(harness.createContext(), {
-    _sessionQueue: queue,
-    _broadcaster: {
-      emit: (event: EmittedEvent) => {
-        events.push(event);
+  const ctx = Object.assign(
+    harness.createContext({
+      contextLayers,
+    }),
+    {
+      _sessionQueue: queue,
+      _broadcaster: {
+        emit: (event: EmittedEvent) => {
+          events.push(event);
+        },
       },
-    },
-  } satisfies SessionCtxExtension & Record<string, unknown>);
+    } satisfies SessionCtxExtension & Record<string, unknown>,
+  );
   return {
     harness,
     client,
@@ -701,6 +706,151 @@ describe('onSteer layers', () => {
   });
 });
 
+describe('steers that ask for recall', () => {
+  interface RecallLog {
+    queries: string[];
+  }
+
+  /** Renders `recall #<n>` and asks for recall on every steer. */
+  function recallingLayer(log: RecallLog, slot = 0, asks = true): ContextLayer {
+    return frameworkCast<ContextLayer>({
+      id: `recalling-${slot}`,
+      slot,
+      scope: 'execution',
+      hooks: {
+        recall: async ({ query }: { query: string }) => {
+          log.queries.push(query);
+          return `recall #${log.queries.length}`;
+        },
+        onSteer: async () =>
+          asks
+            ? {
+                recall: true,
+              }
+            : {},
+      },
+    });
+  }
+
+  const lookupStep = (rig: Rig): Step<ContextData, string, string> => ({
+    kind: 'callModel',
+    id: 'agent',
+    model: 'test/model',
+    tools: [
+      noopTool('lookup', () => rig.queue.enqueue(queued('the data is stale', 'between-rounds'))),
+    ],
+  });
+
+  it('ends the call at the round boundary, recalls for the steer, and goes on', async () => {
+    const log: RecallLog = {
+      queries: [],
+    };
+    const rig = makeRig(
+      [
+        {
+          output: [
+            functionCall('call-1', 'lookup'),
+          ],
+        },
+        {
+          output: [
+            assistant('fresh answer'),
+          ],
+        },
+      ],
+      [
+        recallingLayer(log),
+      ],
+    );
+
+    const result = await rig.harness.run(lookupStep(rig), 'go', rig.ctx);
+
+    expect(result).toBe('fresh answer');
+    // Two model requests: the steer stopped the call before a second one was sent.
+    expect(rig.client.inputs).toHaveLength(2);
+    expect(log.queries).toEqual([
+      'go',
+      'the data is stale',
+    ]);
+    // Anchoring keeps the first render pinned for the prompt cache; the new one
+    // arrives after the steer as an update that supersedes it.
+    const continued = JSON.stringify(rig.client.inputs[1]);
+    expect(continued).toContain('call-1');
+    expect(continued.indexOf('recall #2')).toBeGreaterThan(continued.indexOf('the data is stale'));
+    // The log keeps the call's work and the steer in the order they happened.
+    expect(ids(rig.ctx.itemLog.items).slice(-4)).toEqual([
+      'fc-call-1',
+      expect.any(String),
+      'steer-steer-1',
+      'msg-fresh answer',
+    ]);
+  });
+
+  it('recalls when any layer asks', async () => {
+    const log: RecallLog = {
+      queries: [],
+    };
+    const rig = makeRig(
+      [
+        {
+          output: [
+            functionCall('call-1', 'lookup'),
+          ],
+        },
+        {
+          output: [
+            assistant('done'),
+          ],
+        },
+      ],
+      [
+        recallingLayer(log, 1),
+        recallingLayer(
+          {
+            queries: [],
+          },
+          2,
+          false,
+        ),
+      ],
+    );
+
+    await rig.harness.run(lookupStep(rig), 'go', rig.ctx);
+
+    expect(log.queries).toHaveLength(2);
+  });
+
+  it('runs recall once when no layer asks', async () => {
+    const log: RecallLog = {
+      queries: [],
+    };
+    const rig = makeRig(
+      [
+        {
+          output: [
+            functionCall('call-1', 'lookup'),
+          ],
+        },
+        {
+          output: [
+            assistant('done'),
+          ],
+        },
+      ],
+      [
+        recallingLayer(log, 0, false),
+      ],
+    );
+
+    await rig.harness.run(lookupStep(rig), 'go', rig.ctx);
+
+    expect(log.queries).toEqual([
+      'go',
+    ]);
+    expect(rig.client.inputs).toHaveLength(2);
+  });
+});
+
 describe('a harness without onSteer', () => {
   it('applies steers at their default point and appends them unchanged', async () => {
     const queue = new MessageQueue();
@@ -723,6 +873,7 @@ describe('a harness without onSteer', () => {
         runAppendPipeline: harness.runAppendPipeline.bind(harness),
       }),
       emit: () => {},
+      inConversation: () => false,
     });
 
     expect(await inbox.offer(SteerPoint.ItemDone)).toBe(true);
@@ -756,6 +907,7 @@ describe('openSteerInbox', () => {
   const inboxOpts = {
     layers: [],
     emit: () => {},
+    inConversation: () => false,
   };
 
   it('returns nothing outside a session', () => {

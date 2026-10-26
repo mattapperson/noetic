@@ -190,6 +190,8 @@ hooks: {
 },
 ```
 
+Return `recall: true` when a steer changes what your layer should show: say the user names a different database, and your schema layer needs to render that one. The call ends before its next model request, recall runs again with the steer's text as the query, and the call continues on the new view. Any layer asking is enough.
+
 A deferred steer is offered again at the next point. `SteerAction.Drop` discards it and emits `steer_dropped`. Applied items still pass through `onItemAppend`. A hook that throws or times out (5s by default) leaves the steer unchanged.
 
 ### Recall can be a peek

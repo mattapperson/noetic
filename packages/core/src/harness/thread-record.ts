@@ -8,9 +8,14 @@
  * a harness built a moment ago behave the same.
  */
 
-import type { Context, Item, SessionUsage } from '@noetic-tools/types';
+import type { Context, ExecuteInput, Item, SessionUsage } from '@noetic-tools/types';
 import type { SessionRecord } from '../runtime/durable/session-store';
-import type { RestoreCheckpointOptions, SessionStore, TurnUsage } from './deps/runtime';
+import type {
+  QueuedMessage,
+  RestoreCheckpointOptions,
+  SessionStore,
+  TurnUsage,
+} from './deps/runtime';
 
 //#region Types
 
@@ -35,7 +40,8 @@ const EMPTY_USAGE: SessionUsage = {
  * @internal
  * One thread's stored session. Turns call `history` → `resume` → `begin` → `end`; a
  * turn that throws never reaches `end`, so its record stays for a re-delivery of the
- * same messages to resume. Operations run one at a time, in call order, so a read
+ * same messages to resume. Steers sent into a running turn are kept with `keepSteer`
+ * until `end`. Operations run one at a time, in call order, so a read
  * never overtakes a write issued before it.
  */
 export class ThreadRecord {
@@ -84,10 +90,49 @@ export class ThreadRecord {
     });
   }
 
-  /** Record the turn about to run on `ctx`, before any of it runs. */
+  /** Keep a steer sent into the running turn, so a resumed turn still applies it. */
+  keepSteer(message: QueuedMessage): Promise<void> {
+    if (message.deliveryMode !== 'between-rounds' && message.deliveryMode !== 'next-item') {
+      return Promise.resolve();
+    }
+    const steer = {
+      id: message.id,
+      input: message.input,
+      deliveryMode: message.deliveryMode,
+      enqueuedAt: message.enqueuedAt,
+    };
+    return this.update((record) => ({
+      ...record,
+      steers: [
+        ...(record.steers ?? []).filter((kept) => kept.id !== steer.id),
+        steer,
+      ],
+    }));
+  }
+
+  /** The steers kept for the turn in flight, as queue messages. */
+  steers(): Promise<QueuedMessage[]> {
+    return this.run(async () =>
+      ((await this.load())?.steers ?? []).map((steer) => ({
+        id: steer.id,
+        input: this.parseInput(steer.input),
+        deliveryMode: steer.deliveryMode,
+        // Options carry live objects (layers, state) that storage cannot hold; a
+        // steer applied mid-turn never reads them.
+        options: {},
+        enqueuedAt: steer.enqueuedAt,
+      })),
+    );
+  }
+
+  /**
+   * Record the turn about to run on `ctx`, before any of it runs. Kept steers it
+   * delivers as input stop being steers: re-delivering the turn re-sends them.
+   */
   begin(ctx: Context, messageIds: ReadonlyArray<string>): Promise<void> {
     return this.update((record) => ({
       ...record,
+      steers: record.steers?.filter((steer) => !messageIds.includes(steer.id)),
       turn: {
         executionId: ctx.id,
         messageIds: [
@@ -97,10 +142,18 @@ export class ThreadRecord {
     }));
   }
 
-  /** The turn on `ctx` finished: store the history it left and drop its checkpoint. */
-  async end(ctx: Context, history: ReadonlyArray<Item>): Promise<void> {
+  /**
+   * The turn on `ctx` finished: store the history it left and drop its checkpoint.
+   * Only steers still queued are kept; the rest were applied or dropped.
+   */
+  async end(
+    ctx: Context,
+    history: ReadonlyArray<Item>,
+    queuedIds: ReadonlyArray<string>,
+  ): Promise<void> {
     await this.update((record) => ({
       ...withoutTurn(record),
+      steers: record.steers?.filter((steer) => queuedIds.includes(steer.id)),
       items: [
         ...history,
       ],
@@ -145,6 +198,19 @@ export class ThreadRecord {
         error instanceof Error ? error.message : String(error),
       );
     }
+  }
+
+  private parseInput(input: unknown): ExecuteInput {
+    if (typeof input === 'string') {
+      return input;
+    }
+    return this.host.parseItems(
+      Array.isArray(input)
+        ? input
+        : [
+            input,
+          ],
+    );
   }
 
   private load(): Promise<SessionRecord | undefined> {

@@ -192,6 +192,12 @@ export interface LLMResponse {
    * a difference from `params.serviceTier` means a fallback happened.
    */
   serviceTier?: string;
+  /**
+   * The call stopped early after applying a steer whose `onSteer` layers asked to
+   * recall. The caller runs recall again over the conversation the steer joined
+   * and continues the call.
+   */
+  recall?: boolean;
 }
 
 /** @public Configuration for the LLM provider used by the agent harness. */

@@ -732,7 +732,6 @@ export async function executeCallModel<TContext, I, O>(
   layers?: ContextLayer[],
 ): Promise<O> {
   const baseCtx = frameworkCast<Context<ContextData>>(ctx);
-  const hasLayers = layers !== undefined && layers.length > 0;
 
   // Resolve lazy step fields up-front. Function-form getters run once per
   // step execution with the live context, so `ctx.harness.config.params`,
@@ -784,7 +783,74 @@ export async function executeCallModel<TContext, I, O>(
     systemPromptTokens,
   });
 
-  const recallQuery = typeof input === 'string' ? input : '';
+  const scope = {
+    step,
+    ctx: baseCtx,
+    layers,
+    resolvedModel,
+    resolvedInstructions,
+    resolvedTools,
+    allowedToolNames,
+    outputSchema,
+    serverToolSpecs,
+    viewPolicy,
+    budgetMap,
+    systemPromptTokens,
+  };
+  let recallQuery = typeof input === 'string' ? input : '';
+  let rerender = rerenderRequests;
+  // A steer whose layers asked for recall ends the call early. Recall runs again over
+  // the conversation the steer joined, and the call goes on from there.
+  for (;;) {
+    const response = await callOnFreshView(scope, recallQuery, rerender);
+    if (!response.recall) {
+      return finalizeStepOutput({
+        stepId: step.id,
+        emit: step.emit,
+        outputCodec,
+        outputSchema,
+        lastText: extractAssistantText(response.items),
+        ctx: baseCtx,
+      });
+    }
+    recallQuery = lastInputText(response.items) ?? recallQuery;
+    rerender = [];
+  }
+}
+
+type ViewCallScope<TContext, I, O> = Omit<
+  BuildModelRequestParams<TContext, I, O>,
+  'assembledItems' | 'spanAttributes'
+> & {
+  viewPolicy: ProjectionPolicy;
+  budgetMap: Map<string, number>;
+  systemPromptTokens: number;
+};
+
+/**
+ * Recall, build the view, and call the model on it, retrying on steering guidance.
+ * Returns the response once it is recorded on the context and stored by the layers.
+ */
+async function callOnFreshView<TContext, I, O>(
+  scope: ViewCallScope<TContext, I, O>,
+  recallQuery: string,
+  rerenderRequests: ContextRerenderRequest[],
+): Promise<LLMResponse> {
+  const {
+    step,
+    ctx: baseCtx,
+    layers,
+    resolvedModel,
+    resolvedInstructions,
+    resolvedTools,
+    allowedToolNames,
+    outputSchema,
+    serverToolSpecs,
+    viewPolicy,
+    budgetMap,
+    systemPromptTokens,
+  } = scope;
+  const hasLayers = layers !== undefined && layers.length > 0;
   const slotOf = new Map(
     (layers ?? []).map((l) => [
       l.id,
@@ -936,15 +1002,7 @@ export async function executeCallModel<TContext, I, O>(
       await baseCtx.harness.storeLayers(layers, response, baseCtx);
     }
 
-    const lastText = extractAssistantText(response.items);
-    return finalizeStepOutput({
-      stepId: step.id,
-      emit: step.emit,
-      outputCodec,
-      outputSchema,
-      lastText,
-      ctx: baseCtx,
-    });
+    return response;
   }
 
   // Safety net: the loop above always returns or throws within the body.
@@ -956,6 +1014,25 @@ export async function executeCallModel<TContext, I, O>(
     cause: new Error('Steering retries exhausted'),
     retriesExhausted: true,
   });
+}
+
+/** The text of the last input message — the steer that asked for recall. */
+function lastInputText(items: ReadonlyArray<Item>): string | undefined {
+  for (const item of [
+    ...items,
+  ].reverse()) {
+    if (item.type !== 'message' || item.role === 'assistant') {
+      continue;
+    }
+    const text = item.content
+      .map((part) => ('text' in part && typeof part.text === 'string' ? part.text : ''))
+      .join('\n')
+      .trim();
+    if (text.length > 0) {
+      return text;
+    }
+  }
+  return undefined;
 }
 
 //#endregion

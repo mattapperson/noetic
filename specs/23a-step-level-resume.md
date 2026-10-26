@@ -157,6 +157,8 @@ Session totals add each turn's increase in usage rather than its context's total
 - When a turn finishes, the record stores the new history, clears the turn, and the turn's checkpoint and ledger are discarded.
 - When a turn is cut off, its record stays. If the same message ids arrive again — a host with at-least-once delivery re-sends what it never saw answered — the turn resumes on its recorded execution: finished steps replay and the turn continues. Different messages abandon the cut-off turn: its checkpoint is cleared and they start a fresh turn.
 
+- A steer (`08-runtime` § Steers) sent while a turn runs is kept in the record until the turn ends. The next turn to start — a resumed one included — puts kept steers back in the queue. A steer whose items are already in the conversation, because a replayed round or step applied it, is taken off the queue without being applied again; a text steer's item id is `steer-<messageId>` for this check. When a turn ends, the record keeps only the steers still queued, and a turn that takes a kept steer as its input drops it from the record. A steer rewritten by an `onSteer` or `onItemAppend` layer has new item ids, so after a crash it can be applied twice.
+
 Resuming a turn therefore requires the host to pass stable `messageId`s to `execute()`. A turn that finished is not replayed when re-delivered; it runs again as a new turn.
 
 ## The side-effect boundary

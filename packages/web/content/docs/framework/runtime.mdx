@@ -178,7 +178,7 @@ A model call offers queued steers at three points: when the stream finishes an o
 
 To change when a steer lands, give a context layer an `onSteer` hook. It can apply a steer sooner (before a tool call, skipping the rest of the round), hold it longer, rewrite it, or drop it. See [Custom Layers](/docs/framework/context-layers/custom-layers#steering-a-running-turn-with-onsteer).
 
-Steers reach model calls on the session's own context. A `spawn` child takes them only with `steers: 'forward'`.
+Steers reach model calls on the session's own context. A `spawn` child takes them only with `steers: 'forward'`. With durability on, a turn resumed on a new harness still applies the steers it had been sent; see [Durability](/docs/framework/durability#sessions).
 
 ### HarnessResponse
 

@@ -147,6 +147,12 @@ export interface OnSteerResult<TState = unknown> {
   action?: SteerAction;
   /** Replace what the model sees for this steer. */
   items?: Item[];
+  /**
+   * Run recall again once the steer is applied, so layers render context for the
+   * conversation it changed. The model call ends at the next round boundary and
+   * continues on the new view. Any layer asking is enough.
+   */
+  recall?: boolean;
   state?: TState;
 }
 
@@ -154,6 +160,7 @@ export interface OnSteerResult<TState = unknown> {
 export interface SteerVerdict {
   action: SteerAction;
   items: Item[];
+  recall?: boolean;
 }
 
 /** @public A named rule evaluated by the steering layer before tool calls or after model responses. */

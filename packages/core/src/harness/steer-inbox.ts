@@ -4,6 +4,7 @@ import type {
   ContextLayer,
   DeliveryMode,
   FunctionCallItem,
+  InputMessageItem,
   Item,
   SteerVerdict,
 } from '@noetic-tools/types';
@@ -17,6 +18,8 @@ import { inputToItems, isSteer } from '../runtime/message-queue';
 export interface StagedSteers {
   messageIds: string[];
   items: Item[];
+  /** A layer asked for recall to run again once these are applied. */
+  recall: boolean;
 }
 
 interface SteerInboxOpts {
@@ -25,6 +28,8 @@ interface SteerInboxOpts {
   layers: ContextLayer[];
   harness: AgentHarnessContract;
   emit: (eventType: string, data: Record<string, unknown>) => void;
+  /** Whether an item with this id is already in the conversation. */
+  inConversation: (itemId: string) => boolean;
 }
 
 //#endregion
@@ -66,6 +71,7 @@ export class SteerInbox {
   private staged: StagedSteers = {
     messageIds: [],
     items: [],
+    recall: false,
   };
   /** Steers already reported as waiting on tool calls, so each is reported once. */
   private readonly reportedPending = new Set<string>();
@@ -90,7 +96,14 @@ export class SteerInbox {
   ): Promise<boolean> {
     let stagedAny = false;
     for (const message of this.opts.queue.peekAll().filter(isSteer)) {
-      const verdict = await this.judge(message, point, pendingCalls);
+      const items = steerItems(message);
+      // A resumed turn re-queues the steers its last run kept; the ones that run
+      // already applied come back with the replayed rounds and steps.
+      if (this.alreadyApplied(items)) {
+        this.opts.queue.take((queued) => queued === message);
+        continue;
+      }
+      const verdict = await this.judge(message, items, point, pendingCalls);
       if (verdict.action === SteerAction.Defer) {
         this.reportPending(message, point, pendingCalls);
         continue;
@@ -106,7 +119,7 @@ export class SteerInbox {
         });
         continue;
       }
-      await this.stage(message.id, verdict.items);
+      await this.stage(message.id, verdict.items, verdict.recall === true);
       stagedAny = true;
     }
     return stagedAny;
@@ -118,17 +131,27 @@ export class SteerInbox {
     this.staged = {
       messageIds: [],
       items: [],
+      recall: false,
     };
     return staged;
   }
 
+  private alreadyApplied(items: ReadonlyArray<Item>): boolean {
+    return (
+      items.length > 0 &&
+      items.every(
+        (item) => 'id' in item && item.id !== undefined && this.opts.inConversation(item.id),
+      )
+    );
+  }
+
   private async judge(
     message: QueuedMessage,
+    items: Item[],
     point: SteerPoint,
     pendingCalls: ReadonlyArray<FunctionCallItem>,
   ): Promise<SteerVerdict> {
     const action = defaultAction(point, message.deliveryMode);
-    const items = inputToItems(message.input);
     const { harness, layers } = this.opts;
     if (!harness.onSteer || !layers.some((layer) => layer.hooks.onSteer)) {
       return {
@@ -153,13 +176,14 @@ export class SteerInbox {
 
   /** Steers are user input, so they pass through `onItemAppend` like any other.
    *  Re-render requests are ignored: recall does not run again mid-call. */
-  private async stage(messageId: string, items: Item[]): Promise<void> {
+  private async stage(messageId: string, items: Item[], recall: boolean): Promise<void> {
     const piped =
       this.opts.layers.length > 0
         ? (await this.opts.harness.runAppendPipeline(this.opts.layers, items, this.opts.ctx)).items
         : items;
     this.staged.messageIds.push(messageId);
     this.staged.items.push(...piped);
+    this.staged.recall ||= recall;
   }
 
   private reportPending(
@@ -181,6 +205,34 @@ export class SteerInbox {
 //#endregion
 
 //#region Helpers
+
+/**
+ * A steer's items. Text gets an id from the message id rather than a random one,
+ * so a resumed turn can tell the steer is already in the conversation.
+ */
+function steerItems(message: QueuedMessage): Item[] {
+  if (typeof message.input !== 'string') {
+    return inputToItems(message.input);
+  }
+  if (message.input.length === 0) {
+    return [];
+  }
+  const item: InputMessageItem = {
+    id: `steer-${message.id}`,
+    type: 'message',
+    role: 'user',
+    status: 'completed',
+    content: [
+      {
+        type: 'input_text',
+        text: message.input,
+      },
+    ],
+  };
+  return [
+    item,
+  ];
+}
 
 function findSessionQueue(ctx: Context): MessageQueue | undefined {
   for (let current: Context | null = ctx; current; current = current.parent) {

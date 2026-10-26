@@ -1401,7 +1401,8 @@ export async function afterModelCallLayers({
 /**
  * Run a steer through every layer's `onSteer` hook in slot order. Each layer
  * sees the action and items the previous layer left, so the last layer to
- * speak wins. A hook that throws or times out leaves both unchanged.
+ * speak wins. Any layer asking to recall is enough. A hook that throws or
+ * times out leaves the verdict unchanged.
  */
 export async function onSteerLayers({
   layers,
@@ -1463,6 +1464,7 @@ export async function onSteerLayers({
       verdict = {
         action: result.action ?? current.action,
         items: result.items ?? current.items,
+        recall: current.recall || result.recall,
       };
     } catch (e) {
       if (e instanceof NoeticConfigError) {

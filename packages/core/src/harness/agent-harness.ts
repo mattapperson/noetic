@@ -73,6 +73,7 @@ import {
   filterReasoningStream,
   filterTextStream,
   INTERRUPT_REASON,
+  isSteer,
   resolveStepLedgerRetention,
   restoreFromCheckpoint,
   rootIdOf,
@@ -766,7 +767,11 @@ export class AgentHarness<
       return Promise.resolve();
     }
 
+    const steersRunningTurn = session.runner.getStatus().kind === 'generating' && isSteer(message);
     session.runner.enqueue(message);
+    if (steersRunningTurn) {
+      void session.record?.keepSteer(message);
+    }
     return Promise.resolve();
   }
 
@@ -871,7 +876,11 @@ export class AgentHarness<
     // Save a turn's items as the thread's history for the next turn.
     const keepHistory = async (ctx: Context): Promise<void> => {
       if (record) {
-        await record.end(ctx, ctx.itemLog.items);
+        await record.end(
+          ctx,
+          ctx.itemLog.items,
+          session.runner.queue.peekAll().map((message) => message.id),
+        );
         return;
       }
       session.accumulatedItems = [
@@ -920,6 +929,14 @@ export class AgentHarness<
               ...stepTools,
               ...this.harnessTools,
             ]);
+          }
+          // Steers the last harness accepted but never applied go back in the queue;
+          // ones already in the conversation are skipped when offered.
+          for (const steer of (await record?.steers()) ?? []) {
+            const queued = session.runner.queue.peekAll().some((m) => m.id === steer.id);
+            if (!queued && !messageIds.includes(steer.id)) {
+              session.runner.queue.enqueue(steer);
+            }
           }
           await record?.begin(ctx, messageIds);
           return ctx;

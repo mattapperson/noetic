@@ -7,6 +7,9 @@
  * arrive again — a host with at-least-once delivery re-sends what it never saw
  * answered — the turn resumes on its recorded execution: finished steps replay and
  * the turn continues from the step that was cut off.
+ *
+ * Steers sent into a running turn are kept too, until the turn ends, so a turn that
+ * resumes on a new harness still applies the steers it had not applied yet.
  */
 
 import type { StorageAdapter } from '@noetic-tools/context';
@@ -34,6 +37,21 @@ const SessionRecordSchema = z.object({
       /** The ids of the messages the turn delivers, in order. */
       messageIds: z.array(z.string()),
     })
+    .optional(),
+  /** Steers sent into the turn in flight, in arrival order. */
+  steers: z
+    .array(
+      z.object({
+        id: z.string(),
+        /** The `execute()` input: a string, an item, or items. */
+        input: z.unknown(),
+        deliveryMode: z.enum([
+          'between-rounds',
+          'next-item',
+        ]),
+        enqueuedAt: z.number(),
+      }),
+    )
     .optional(),
 });
 
