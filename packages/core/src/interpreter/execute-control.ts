@@ -23,7 +23,13 @@ import type {
   UntilRun,
   Verdict,
 } from '@noetic-tools/types';
-import { createMessage, frameworkCast, isNoeticError, NoeticErrorImpl } from '@noetic-tools/types';
+import {
+  createMessage,
+  frameworkCast,
+  isNoeticConfigError,
+  isNoeticError,
+  NoeticErrorImpl,
+} from '@noetic-tools/types';
 import { NoeticAttr, NoeticEvent } from '../observability/genai-attributes';
 import type { ChannelStore } from '../runtime/channel-store';
 import { ContextImpl } from '../runtime/context-impl';
@@ -717,11 +723,18 @@ function untilRun<TContext>(ctx: Context<TContext>, executeStep: ExecuteStepFn):
   };
 }
 
-/** A predicate that throws stops the loop, except on cancellation, which must propagate (spec 09). */
+/**
+ * A predicate that throws stops the loop, with two exceptions that propagate:
+ * cancellation (spec 09), and a `NoeticConfigError`, which marks a broken
+ * loop definition that a stop would pass off as done.
+ */
 async function judge(until: Until, snapshot: Snapshot, run: UntilRun): Promise<Verdict> {
   try {
     return await until(snapshot, run);
   } catch (predicateError) {
+    if (isNoeticConfigError(predicateError)) {
+      throw predicateError;
+    }
     if (isNoeticError(predicateError) && predicateError.noeticError.kind === 'cancelled') {
       throw predicateError;
     }

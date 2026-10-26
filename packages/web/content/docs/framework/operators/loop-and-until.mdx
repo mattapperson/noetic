@@ -63,7 +63,7 @@ The `until` predicate returns a `Verdict` telling the loop what to do.
 
 ### Verdicts in traces
 
-A loop opens no span of its own. After each verdict it adds a `loop.verdict` event to the span its context carries (inside a `spawn` child or an `inParallel` path, that child's span), with attributes `loop` (the step id), `iteration`, `stop`, and `reason` when the verdict has one. `feedback` is never recorded, since it can be large or sensitive. A predicate that throws stops the loop with reason `Predicate error: <message>`, and that verdict is traced too. Cancellation is the exception: a predicate that fails because the context was aborted ends the loop with the `cancelled` error. See [Observability](/docs/framework/observability#loop-verdict-events).
+A loop opens no span of its own. After each verdict it adds a `loop.verdict` event to the span its context carries (inside a `spawn` child or an `inParallel` path, that child's span), with attributes `loop` (the step id), `iteration`, `stop`, and `reason` when the verdict has one. `feedback` is never recorded, since it can be large or sensitive. A predicate that throws stops the loop with reason `Predicate error: <message>`, and that verdict is traced too. Two errors are exceptions and fail the loop instead, with no verdict: a predicate that fails because the context was aborted ends the loop with the `cancelled` error, and a `NoeticConfigError` (a broken loop definition, such as a JSON workflow [`expr` predicate](/docs/framework/json-runtime#expression-as-a-predicate) that gives a non-boolean) propagates as is. See [Observability](/docs/framework/observability#loop-verdict-events).
 
 ## Built-in Predicates
 
@@ -232,7 +232,7 @@ const agent = loop({
 });
 ```
 
-The decider follows the decide rules: it reads the context view without writing to the conversation, and merges its metadata into `ctx.lastStepMeta`. It asks the model afresh every iteration, even when the output and conversation repeat. A decider whose call fails stops the loop like any throwing predicate.
+The decider follows the decide rules: it reads the context view without writing to the conversation, and merges its metadata into `ctx.lastStepMeta`. It asks the model afresh every iteration, even when the output and conversation repeat. A decider whose call fails stops the loop like any throwing predicate, unless the failure is a cancellation or a config error such as `MISSING_MODEL`, which fail the loop.
 
 Mix a decider with other predicates in `any()` or `all()`. A backstop is wise, since a model that keeps answering no (or refusing) keeps the loop going:
 

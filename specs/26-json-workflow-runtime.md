@@ -389,14 +389,15 @@ Until predicates are JSON-serialisable termination conditions for `loop` nodes. 
 
 ```typescript
 type UntilPredicate =
-  | { kind: 'when';           test: Expression }
   | { kind: 'maxSteps';       n: number }
   | { kind: 'maxCost';        usd: number }
   | { kind: 'maxDuration';    duration: number }
   | { kind: 'noToolCalls' }
   | { kind: 'outputContains'; marker: string }
   | { kind: 'outputEquals';   sentinel: string }
+  | { kind: 'never' }
   | { kind: 'converged';      threshold?: number }
+  | { kind: 'expr';           expr: Expression }
   | { kind: 'any';            predicates: UntilPredicate[] }
   | { kind: 'all';            predicates: UntilPredicate[] }
   | DecideWorkflowNode;
@@ -410,10 +411,11 @@ type UntilPredicate =
 | `maxCost`        | `usd`           | `until.maxCost(usd)`            | Stop when cumulative cost exceeds threshold.   |
 | `maxDuration`    | `duration`      | `until.maxDuration(duration)` | Stop after wall-clock time exceeds threshold.  |
 | `noToolCalls`    | --              | `until.noToolCalls()`           | Stop when the LLM produces no tool calls.      |
+| `never`          | --              | `until.never()`                 | Never stop; the loop ends on its cap, an error, or abort. |
 | `outputContains` | `marker`        | `until.outputContains(marker)`  | Stop when output contains the marker string.   |
 | `outputEquals`   | `sentinel`      | `until.outputEquals(sentinel)`  | Stop when output exactly equals the sentinel.  |
 | `converged`      | `threshold?`    | `until.converged({threshold})`  | Stop when consecutive outputs are similar.     |
-| `when`           | `test`          | --                              | Stop when `test` (spec 33) evaluates to `true` against the last output. |
+| `expr`           | `expr`          | --                              | Stop when `expr` (spec 33) gives `true` against the last output. |
 | `any`            | `predicates[]`  | `any(...predicates)`            | Stop when any child predicate fires.           |
 | `all`            | `predicates[]`  | `all(...predicates)`            | Stop when all child predicates agree.          |
 | `decide`         | a `decide` node | the `decide()` step itself      | Stop when the model answers yes.               |
@@ -426,21 +428,23 @@ After each iteration the loop runs the decide step with the iteration's output a
 
 A decide node in an until predicate is a node of the tree: `walkWorkflow` and `workflowGraph` list it as a child of its loop (after the body), so subflow and dynamic `each` id suffixing reach it, and its id should be unique like any other. It adds no depth: `workflowDepth` counts it as a leaf.
 
-### `when`
+### `expr`
 
-`when` reads the loop's last output by the expression input rule (spec 33 § The Input) — a string is parsed as JSON when it parses — and evaluates `test` against it. `true` stops the loop, `false` runs another iteration. A loop whose body computes a state object stops exactly when the state says so:
+`expr` reads the loop's last output by the expression input rule (spec 33 § The Input) — a string is parsed as JSON when it parses — and evaluates the expression against it. `true` stops the loop; `false`, or no value (a path that matches nothing), runs another iteration. The stop verdict's `reason` is `expr gave true: <expr>`. A loop whose body computes a state object stops exactly when the state says so:
 
 ```json
 {
   "kind": "loop",
   "id": "drain",
-  "maxIterations": 100,
-  "body": { "kind": "compute", "id": "step", "expr": { "...": "..." } },
-  "until": { "kind": "when", "test": { "==": [{ "get": "counter" }, 0] } }
+  "maxIterations": "infinity",
+  "body": { "kind": "compute", "id": "step", "expr": "{ \"n\": n - 1 }" },
+  "until": { "kind": "expr", "expr": "n = 0" }
 }
 ```
 
-A `test` that fails, or gives a value other than a boolean, raises `EXPRESSION_FAILED`; a loop treats a throwing predicate as a stop (spec 05), so the loop ends and the error message becomes the recorded verdict's reason. `maxIterations` still bounds the loop.
+An `expr` predicate is a predicate like any other: it nests inside `any` and `all` beside `maxSteps`, a `decide` node, or another `expr`, and validation compiles it wherever it sits, so a syntax error anywhere in the predicate tree fails the document with `WORKFLOW_VALIDATION_FAILED`.
+
+An expression that fails at run time, or gives a value other than a boolean, raises `EXPRESSION_FAILED` (or `EXPRESSION_LIMIT_EXCEEDED`), and the loop fails with that error. It does not stop: a loop stops on a throwing predicate only when the error is not a `NoeticConfigError` (spec 05, Error Behavior), since a stop would hand back the last output as if the loop had finished.
 
 ### Schema
 
@@ -451,10 +455,11 @@ const UntilPredicateSchema: z.ZodType<UntilPredicate> = z.lazy(() =>
     z.object({ kind: z.literal('maxCost'),        usd: z.number().positive() }),
     z.object({ kind: z.literal('maxDuration'),    duration: z.number().int().positive() }),
     z.object({ kind: z.literal('noToolCalls') }),
+    z.object({ kind: z.literal('never') }),
     z.object({ kind: z.literal('outputContains'), marker: z.string().min(1) }),
     z.object({ kind: z.literal('outputEquals'),   sentinel: z.string() }),
     z.object({ kind: z.literal('converged'),      threshold: z.number().min(0).max(1).optional() }),
-    z.object({ kind: z.literal('when'),           test: ExpressionSchema }),
+    z.object({ kind: z.literal('expr'),           expr: ExpressionSchema }),
     z.object({ kind: z.literal('any'),            predicates: z.array(UntilPredicateSchema).min(1) }),
     z.object({ kind: z.literal('all'),            predicates: z.array(UntilPredicateSchema).min(1) }),
     DecideNodeSchema.refine(oneBooleanQuestion),
@@ -601,10 +606,11 @@ function hydrateUntil(pred: UntilPredicate, ctx: HydrationContext): Until | Step
     case 'maxCost':        return until.maxCost(pred.usd);
     case 'maxDuration':    return until.maxDuration(pred.duration);
     case 'noToolCalls':    return until.noToolCalls();
+    case 'never':          return until.never();
     case 'outputContains': return until.outputContains(pred.marker);
     case 'outputEquals':   return until.outputEquals(pred.sentinel);
     case 'converged':      return until.converged(pred.threshold ? { threshold: pred.threshold } : undefined);
-    case 'when':           return (snap) => ({ stop: test(pred.test, snap.lastOutput) });  // test: evaluate, require a boolean
+    case 'expr':           return (snap) => ({ stop: passes(pred.expr, readInput(snap.lastOutput)) });  // require a boolean
     case 'any':            return any(...pred.predicates.map((p) => hydrateUntil(p, ctx)));
     case 'all':            return all(...pred.predicates.map((p) => hydrateUntil(p, ctx)));
     case 'decide':         return hydrateNode(pred, ctx);
@@ -761,7 +767,7 @@ The JSON Workflow Runtime introduces the following `NoeticConfigError` codes:
 | `INVALID_MAX_RECURSION_DEPTH`  | `maxRecursionDepth` is not a positive integer or `Infinity` (raised when a named ref first resolves). |
 | `INVALID_FORK_INPUT`           | A dynamic fork's input does not resolve to an array.                     |
 | `INVALID_REPLAY_KEY_INPUT`     | A `replayKey.from` node's input is not a JSON object (raised by the key function at dispatch; the interpreter downgrades it to a warning). |
-| `EXPRESSION_FAILED`            | A `compute` expression, a route's `when`, or a `when` until predicate fails to evaluate or gives a non-boolean where a boolean is required (raised at execution time; spec 33). |
+| `EXPRESSION_FAILED`            | A `compute` expression, a route's `when`, or an `expr` until predicate fails to evaluate or gives a non-boolean where a boolean is required (raised at execution time; spec 33). |
 
 ### Expression Failures
 
@@ -771,7 +777,7 @@ The hydrator prefixes an `EXPRESSION_FAILED` message with the node id. Where it 
 |----------------------------|------------------------------------------------------------------------------|
 | `compute`                  | A `step_failed` `NoeticError` from the node, whose `cause` is the `NoeticConfigError` (the node runs as a `runCode` step). |
 | `conditional` route `when` | The `NoeticConfigError` itself, thrown from the route function.               |
-| `loop` until `when`        | A stop: the loop ends and the message becomes the verdict's reason (spec 05). |
+| `loop` until `expr`        | The `NoeticConfigError` itself, thrown from the loop: a config error from a predicate fails the loop instead of stopping it (spec 05). |
 
 ---
 

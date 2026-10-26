@@ -1808,15 +1808,15 @@
           "properties": {
             "kind": {
               "type": "string",
-              "const": "when"
+              "const": "expr"
             },
-            "test": {
+            "expr": {
               "$ref": "#/$defs/Expression"
             }
           },
           "required": [
             "kind",
-            "test"
+            "expr"
           ],
           "additionalProperties": false
         },

@@ -57,7 +57,7 @@ Default: propagate (loop dies). If `onError` is specified:
 
 ### `until` Predicate Throws
 
-Treat as `{ stop: true, reason: 'Predicate error: ...' }`. The loop stops. A broken predicate should not cause infinite iteration.
+Treat as `{ stop: true, reason: 'Predicate error: ...' }`. The loop stops. A broken predicate should not cause infinite iteration. A `cancelled` `NoeticError` and a `NoeticConfigError` propagate instead and fail the loop (spec 05, Error Behavior).
 
 ### Spawn with Summary Failure (see `04-spawn`)
 

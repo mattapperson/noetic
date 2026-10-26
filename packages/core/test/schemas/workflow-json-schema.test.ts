@@ -38,7 +38,7 @@ const UNTIL_KINDS = [
   'never',
   'outputContains',
   'outputEquals',
-  'when',
+  'expr',
   'converged',
   'any',
   'all',

@@ -69,11 +69,11 @@ function expressionsOf(node: WorkflowNode): Found[] {
 }
 
 function untilTests(pred: UntilPredicate, where: string): Found[] {
-  if (pred.kind === 'when') {
+  if (pred.kind === 'expr') {
     return [
       {
         where,
-        source: pred.test,
+        source: pred.expr,
       },
     ];
   }
