@@ -1,3 +1,21 @@
+## @noetic-tools/types-v3.12.0 (2026-10-26)
+
+* chore(core): keep core on 5.x and types on 3.x ([3b1212f](https://github.com/mattapperson/noetic/commit/3b1212f))
+* chore(types): release 4.0.0 [skip ci] ([19ab20b](https://github.com/mattapperson/noetic/commit/19ab20b))
+* chore(types): release 4.1.0 [skip ci] ([ef4c26c](https://github.com/mattapperson/noetic/commit/ef4c26c))
+* feat(core): let any step emit items before a workflow ends ([28352e5](https://github.com/mattapperson/noetic/commit/28352e5))
+* feat(core): read durability from storage only, add durability: false and billedCost ([12e081f](https://github.com/mattapperson/noetic/commit/12e081f))
+
+### BREAKING CHANGE
+
+* `environment.storage.checkpointStore: false` is replaced by
+the top-level harness option `durability: false`. Context gains a required
+`billedCost` field. While durability is on, sessions keep no in-memory
+history.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Matt <me@mattapperson.com>
+
 ## @noetic-tools/types-v3.11.0 (2026-10-26)
 
 * feat(core): settle subprocess handles the moment they finish ([40f6741](https://github.com/mattapperson/noetic/commit/40f6741))
