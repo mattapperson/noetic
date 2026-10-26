@@ -16,6 +16,7 @@ import {
 } from '@noetic-tools/types';
 import { z } from 'zod';
 import { GenAI, NoeticAttr } from '../observability/genai-attributes';
+import { drainsOf } from '../runtime/drain';
 import {
   allocateBudgets,
   assembleView,
@@ -216,6 +217,10 @@ async function askHarness<TContext, I, O>(
   ctx: Context<ContextData>,
   request: Parameters<Context['harness']['decide']>[0],
 ): Promise<DecideResponse> {
+  const finished = drainsOf(ctx)?.track(ctx, {
+    kind: 'decide',
+    model: request.model,
+  });
   try {
     return await ctx.harness.decide(request);
   } catch (e) {
@@ -236,6 +241,8 @@ async function askHarness<TContext, I, O>(
       });
     }
     throw wrapModelError(e, step.id, ctx);
+  } finally {
+    finished?.();
   }
 }
 

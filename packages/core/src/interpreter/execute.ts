@@ -12,6 +12,7 @@ import type {
 import { frameworkCast, NoeticErrorImpl } from '@noetic-tools/types';
 import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../runtime/broadcaster-utils';
 import { ContextImpl } from '../runtime/context-impl';
+import { drainsOf } from '../runtime/drain';
 import type { StepLedger } from '../runtime/durable/step-ledger';
 import { REPLAY_KEY_PREFIX } from '../runtime/durable/step-ledger';
 import type { EventBroadcaster } from '../runtime/event-broadcaster';
@@ -355,6 +356,23 @@ async function recordToLedger<TContext, I, O>(opts: {
  * @throws `NoeticError` with kind `cancelled` if the context is aborted.
  */
 export async function execute<TContext = ContextData, I = unknown, O = unknown>(
+  step: Step<TContext, I, O>,
+  input: I,
+  ctx: Context<TContext>,
+): Promise<O> {
+  // Under a graceful stop no new step starts: it waits here until the tree is
+  // cancelled. When a step ends, its finished model calls stop counting as in flight.
+  const baseCtx = frameworkCast<Context>(ctx);
+  const drains = drainsOf(baseCtx);
+  await drains?.hold(baseCtx);
+  try {
+    return await runStep(step, input, ctx);
+  } finally {
+    drains?.release(baseCtx);
+  }
+}
+
+async function runStep<TContext, I, O>(
   step: Step<TContext, I, O>,
   input: I,
   ctx: Context<TContext>,

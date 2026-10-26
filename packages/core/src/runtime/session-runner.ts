@@ -76,7 +76,7 @@ function mergeInputsToItems(messages: ReadonlyArray<QueuedMessage>): Item[] {
 /**
  * @internal
  *
- * Per-thread runner. Drains the MessageQueue and drives turns on the shared
+ * Per-thread runner. Works through the MessageQueue and drives turns on the shared
  * session broadcaster. Emits `turn_started` / `turn_completed` /
  * `inbox_injected` framework events so consumers can correlate queued
  * messages with the turn that delivered them.
@@ -134,6 +134,11 @@ export class SessionRunner {
 
   getStatus(): HarnessStatus {
     return this.status;
+  }
+
+  /** The running turn's context, if a turn is running. */
+  get context(): Context | undefined {
+    return this.currentCtx;
   }
 
   /** Queue a message. A steer that arrives mid-turn is announced first, so
@@ -218,7 +223,7 @@ export class SessionRunner {
     });
   }
 
-  /** Start the drain loop if not already running. Safe to call many times. */
+  /** Start the queue loop if not already running. Safe to call many times. */
   kick(): void {
     if (this.loopPromise) {
       return;
@@ -226,7 +231,7 @@ export class SessionRunner {
     if (this.queue.size === 0) {
       return;
     }
-    this.loopPromise = this.drain().finally(() => {
+    this.loopPromise = this.runQueue().finally(() => {
       this.loopPromise = undefined;
       // If messages arrived during finally, run again.
       if (this.queue.size > 0) {
@@ -235,7 +240,7 @@ export class SessionRunner {
     });
   }
 
-  private async drain(): Promise<void> {
+  private async runQueue(): Promise<void> {
     while (this.queue.size > 0) {
       const messages = this.queue.drainAll();
       if (messages.length === 0) {

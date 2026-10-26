@@ -30,6 +30,7 @@ import {
 import { isFunctionCall } from '../interpreter/typeguards';
 import { GenAI, NoeticAttr, ToolAttr } from '../observability/genai-attributes';
 import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../runtime/broadcaster-utils';
+import { drainsOf } from '../runtime/drain';
 import type { EventBroadcaster } from '../runtime/event-broadcaster';
 import type { ApprovalOutcome } from '../runtime/tool-approval';
 import { exportSpans } from './deps/context';
@@ -616,6 +617,11 @@ export class AgentHarnessModelCaller {
     }
     const spans = this.newSpanCollector(request);
     const modelSpan = spans.startModelSpan(request.model);
+    const finished = drainsOf(request.ctx)?.track(request.ctx, {
+      kind: 'model_round',
+      model: request.model,
+      round: 0,
+    });
     try {
       const response = await this.opts.callModelOverride(request);
       const itemSchemas = buildItemSchemaRegistry({
@@ -629,6 +635,7 @@ export class AgentHarnessModelCaller {
         items: itemSchemas.parseMany(response.items),
       };
     } finally {
+      finished?.();
       await spans.flush();
     }
   }
@@ -682,6 +689,7 @@ export class AgentHarnessModelCaller {
     let toolLimitRecoveryContinuations = 0;
     let useEphemeralContinue = false;
     const roundLedger = RoundLedger.open(request.ctx);
+    const drains = drainsOf(request.ctx);
     const replaySchemas = buildItemSchemaRegistry({
       base: this.opts.itemSchemas,
       layers: request.layers,
@@ -753,6 +761,11 @@ export class AgentHarnessModelCaller {
           items: allItems.length,
         };
       }
+      // A graceful stop starts no new round: wait here until it cancels the call.
+      await drains?.hold(request.ctx);
+      if (request.signal?.aborted) {
+        break;
+      }
       const recoveryContinuation = useEphemeralContinue;
       useEphemeralContinue = false;
       if (steers) {
@@ -803,6 +816,11 @@ export class AgentHarnessModelCaller {
 
       const modelSpan = spans.startModelSpan(request.model);
 
+      const roundFinished = drains?.track(request.ctx, {
+        kind: 'model_round',
+        model: request.model,
+        round,
+      });
       const callResult = client.callModel(
         {
           model: request.model,
@@ -880,6 +898,7 @@ export class AgentHarnessModelCaller {
         }
       } finally {
         watchdog.stop();
+        roundFinished?.();
       }
       if (request.signal?.aborted) {
         break;
@@ -1229,6 +1248,7 @@ export class AgentHarnessModelCaller {
       });
     }
     for (const [index, fc] of functionCalls.entries()) {
+      await drainsOf(request.ctx)?.hold(request.ctx);
       if (request.signal?.aborted) {
         break;
       }

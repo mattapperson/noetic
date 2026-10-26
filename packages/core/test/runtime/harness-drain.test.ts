@@ -1,0 +1,503 @@
+// Graceful stop: `cancel(ctx, { drainMs })` and `abort({ drainMs })` hold back new
+// steps, rounds and tool calls, let model calls in flight finish, then cancel.
+
+import { describe, expect, it } from 'bun:test';
+import assert from 'node:assert';
+import type {
+  Context,
+  ContextData,
+  DecideRequest,
+  DecideResponse,
+  Item,
+  Step,
+  StreamEvent,
+} from '@noetic-tools/types';
+import { frameworkCast, isNoeticError } from '@noetic-tools/types';
+import { z } from 'zod';
+import { inParallel } from '../../src/builders/control-flow-builders';
+import { decide } from '../../src/builders/decide-builders';
+import { callModel, runCode } from '../../src/builders/step-builders';
+import { tool } from '../../src/builders/tool-builder';
+import { AgentHarness } from '../../src/harness/agent-harness';
+import { createCheckpointStore } from '../../src/runtime/durable/checkpoint-store';
+import { createStepLedgerStore } from '../../src/runtime/durable/step-ledger';
+import { createInMemoryStorage } from '../../src/runtime/in-memory-storage';
+import { makeMessage, sleep } from '../_helpers';
+
+//#region Fakes
+
+interface EmittedEvent {
+  source: string;
+  type: string;
+  data: Record<string, unknown>;
+}
+
+/**
+ * A provider that answers a round for model `m` after `latencyMs[m]`, replies
+ * with a function call for `tools/model` and a message otherwise, charges 10
+ * input / 5 output tokens and $0.01 a round, and stops when its signal aborts.
+ */
+class SlowClient {
+  started = 0;
+  aborted = 0;
+
+  constructor(private readonly latencyMs: Record<string, number>) {}
+
+  callModel(
+    params: {
+      model: string;
+    },
+    options: {
+      signal: AbortSignal;
+    },
+  ): {
+    getFullResponsesStream: () => AsyncIterable<unknown>;
+    getResponse: () => Promise<unknown>;
+  } {
+    this.started += 1;
+    const output =
+      params.model === 'tools/model'
+        ? [
+            lookupCall(),
+          ]
+        : [
+            makeMessage('assistant', 'done'),
+          ];
+    let answered = false;
+    const response = new Promise<unknown>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        answered = true;
+        resolve({
+          id: `resp-${crypto.randomUUID()}`,
+          status: 'completed',
+          output,
+          usage: {
+            inputTokens: 10,
+            outputTokens: 5,
+            cost: 0.01,
+          },
+        });
+      }, this.latencyMs[params.model] ?? 0);
+      options.signal.addEventListener(
+        'abort',
+        () => {
+          if (answered) {
+            return;
+          }
+          this.aborted += 1;
+          clearTimeout(timer);
+          reject(new Error('aborted'));
+        },
+        {
+          once: true,
+        },
+      );
+    });
+    response.catch(() => {});
+    return {
+      async *getFullResponsesStream() {
+        await response.catch(() => {});
+      },
+      getResponse: () => response,
+    };
+  }
+}
+
+function lookupCall(): Item {
+  return frameworkCast<Item>({
+    id: `fc-${crypto.randomUUID()}`,
+    type: 'function_call',
+    status: 'completed',
+    callId: `call-${crypto.randomUUID()}`,
+    name: 'lookup',
+    arguments: '{}',
+  });
+}
+
+type Storage = ReturnType<typeof createInMemoryStorage>;
+
+function makeHarness(client: SlowClient, storage?: Storage): AgentHarness {
+  const harness = new AgentHarness({
+    name: 'drain',
+    params: {},
+    ...(storage
+      ? {
+          environment: {
+            storage: {
+              adapter: storage,
+              checkpointStore: createCheckpointStore({
+                storage,
+              }),
+            },
+          },
+        }
+      : {}),
+  });
+  frameworkCast<{
+    client: unknown;
+  }>(harness).client = client;
+  return harness;
+}
+
+/** A root context whose framework events land in `events`. */
+function watchedContext(harness: AgentHarness, events: EmittedEvent[]): Context {
+  return Object.assign(harness.createContext(), {
+    _broadcaster: {
+      emit: (event: EmittedEvent) => {
+        events.push(event);
+      },
+    },
+  });
+}
+
+function ask(id: string, model: string): Step<ContextData, unknown, unknown> {
+  return callModel({
+    id,
+    model,
+    instructions: 'answer',
+  });
+}
+
+/** Run `steps` one after another, the way the workflow hydrator composes them. */
+function inTurn(harness: AgentHarness, id: string, steps: Step<ContextData, unknown, unknown>[]) {
+  return runCode({
+    id,
+    execute: async (input: unknown, ctx: Context) => {
+      let output = input;
+      for (const next of steps) {
+        output = await harness.run(next, output, ctx);
+      }
+      return output;
+    },
+  });
+}
+
+function sideBySide(paths: Step<ContextData, unknown, unknown>[]) {
+  return inParallel({
+    id: 'both',
+    mode: 'all',
+    paths: () => paths,
+    merge: (results: unknown[]) => results,
+  });
+}
+
+async function collect(stream: AsyncIterable<StreamEvent>, into: StreamEvent[]): Promise<void> {
+  for await (const event of stream) {
+    into.push(event);
+  }
+}
+
+async function waitFor(check: () => boolean): Promise<void> {
+  for (let i = 0; i < 200 && !check(); i++) {
+    await sleep(5);
+  }
+  assert(check(), 'condition never held');
+}
+
+function eventData(events: EmittedEvent[], name: string): Record<string, unknown> {
+  const event = events.find((e) => e.type === `drain:${name}`);
+  assert(event, `no ${name} event`);
+  return event.data;
+}
+
+function callsIn(data: Record<string, unknown>, key: string): unknown[] {
+  const calls = data[key];
+  assert(Array.isArray(calls));
+  return calls;
+}
+
+async function cancelledError(run: Promise<unknown>): Promise<string | undefined> {
+  try {
+    await run;
+  } catch (e) {
+    return isNoeticError(e) ? e.noeticError.kind : String(e);
+  }
+  return undefined;
+}
+
+//#endregion
+
+describe('cancel with drainMs', () => {
+  it('lets both rounds in flight finish, charges and records them, and starts nothing new', async () => {
+    const storage = createInMemoryStorage();
+    const client = new SlowClient({
+      fast: 30,
+      slow: 150,
+    });
+    const harness = makeHarness(client, storage);
+    const events: EmittedEvent[] = [];
+    const ctx = watchedContext(harness, events);
+    // `left-2` would start while `right` is still in flight; the drain holds it.
+    const graph = inTurn(harness, 'flow', [
+      sideBySide([
+        inTurn(harness, 'left-path', [
+          ask('left', 'fast'),
+          ask('left-2', 'fast'),
+        ]),
+        ask('right', 'slow'),
+      ]),
+      ask('after', 'fast'),
+    ]);
+    const run = harness.run(graph, 'go', ctx);
+    await waitFor(() => client.started === 2);
+
+    await harness.cancel(ctx, {
+      reason: 'SIGTERM',
+      drainMs: 2e3,
+    });
+
+    expect(await cancelledError(run)).toBe('cancelled');
+    expect(client.started).toBe(2);
+    expect(client.aborted).toBe(0);
+    expect(ctx.cost).toBeCloseTo(0.02);
+    expect(ctx.tokens.output).toBe(10);
+    expect(ctx.abortReason).toBe('SIGTERM');
+    const recorded = [
+      ...(
+        await createStepLedgerStore({
+          storage,
+        }).load(ctx.id)
+      ).entries.values(),
+    ].map((entry) => entry.stepId);
+    expect(recorded).toEqual(
+      expect.arrayContaining([
+        'left',
+        'right',
+      ]),
+    );
+    expect(recorded).not.toContain('left-2');
+    expect(recorded).not.toContain('after');
+    expect(callsIn(eventData(events, 'drain_started'), 'inFlight')).toHaveLength(2);
+    const finished = eventData(events, 'drain_finished');
+    expect(finished.reason).toBe('settled');
+    expect(callsIn(finished, 'finished')).toHaveLength(2);
+    expect(callsIn(finished, 'cutOff')).toHaveLength(0);
+  });
+
+  it('cancels the rounds still in flight at the deadline and reports them cut off', async () => {
+    const client = new SlowClient({
+      slow: 5e3,
+    });
+    const harness = makeHarness(client);
+    const events: EmittedEvent[] = [];
+    const ctx = watchedContext(harness, events);
+    const run = harness.run(
+      sideBySide([
+        ask('left', 'slow'),
+        ask('right', 'slow'),
+      ]),
+      'go',
+      ctx,
+    );
+    await waitFor(() => client.started === 2);
+    const startedAt = Date.now();
+
+    await harness.cancel(ctx, {
+      drainMs: 40,
+    });
+
+    expect(Date.now() - startedAt).toBeLessThan(2e3);
+    expect(await cancelledError(run)).toBe('cancelled');
+    expect(client.started).toBe(2);
+    expect(client.aborted).toBe(2);
+    expect(ctx.cost).toBe(0);
+    const finished = eventData(events, 'drain_finished');
+    expect(finished.reason).toBe('deadline');
+    expect(callsIn(finished, 'finished')).toHaveLength(0);
+    expect(callsIn(finished, 'cutOff')).toEqual(
+      expect.arrayContaining([
+        {
+          kind: 'model_round',
+          model: 'slow',
+          executionId: expect.any(String),
+          round: 0,
+        },
+      ]),
+    );
+    expect(callsIn(finished, 'cutOff')).toHaveLength(2);
+  });
+
+  it('cancels at once on a second cancel during the drain', async () => {
+    const client = new SlowClient({
+      slow: 5e3,
+    });
+    const harness = makeHarness(client);
+    const events: EmittedEvent[] = [];
+    const ctx = watchedContext(harness, events);
+    const run = harness.run(
+      sideBySide([
+        ask('left', 'slow'),
+        ask('right', 'slow'),
+      ]),
+      'go',
+      ctx,
+    );
+    await waitFor(() => client.started === 2);
+
+    const first = harness.cancel(ctx, {
+      drainMs: 60e3,
+    });
+    const startedAt = Date.now();
+    await harness.cancel(ctx, 'now');
+    await first;
+
+    expect(Date.now() - startedAt).toBeLessThan(2e3);
+    expect(await cancelledError(run)).toBe('cancelled');
+    expect(client.aborted).toBe(2);
+    const finished = eventData(events, 'drain_finished');
+    expect(finished.reason).toBe('stopped');
+    expect(callsIn(finished, 'cutOff')).toHaveLength(2);
+  });
+
+  it('holds back the tool calls of a round that finished while another is in flight', async () => {
+    let toolRan = false;
+    const lookup = tool({
+      name: 'lookup',
+      description: 'lookup',
+      input: z.object({}),
+      output: z.object({}),
+      execute: async () => {
+        toolRan = true;
+        return {};
+      },
+    });
+    const client = new SlowClient({
+      'tools/model': 30,
+      slow: 150,
+    });
+    const harness = makeHarness(client);
+    const ctx = harness.createContext();
+    const agent = callModel({
+      id: 'agent',
+      model: 'tools/model',
+      instructions: 'use tools',
+      tools: [
+        lookup,
+      ],
+    });
+    const run = harness.run(
+      sideBySide([
+        agent,
+        ask('right', 'slow'),
+      ]),
+      'go',
+      ctx,
+    );
+    await waitFor(() => client.started === 2);
+
+    await harness.cancel(ctx, {
+      drainMs: 2e3,
+    });
+
+    expect(await cancelledError(run)).toBe('cancelled');
+    expect(toolRan).toBe(false);
+    expect(client.started).toBe(2);
+    expect(client.aborted).toBe(0);
+    expect(ctx.cost).toBeCloseTo(0.02);
+  });
+
+  it('settles at once when nothing is in flight', async () => {
+    const client = new SlowClient({});
+    const harness = makeHarness(client);
+    const events: EmittedEvent[] = [];
+    const ctx = watchedContext(harness, events);
+
+    await harness.cancel(ctx, {
+      drainMs: 60e3,
+    });
+
+    expect(ctx.aborted).toBe(true);
+    expect(eventData(events, 'drain_finished').reason).toBe('settled');
+  });
+
+  it('counts a decide call as in flight and cuts it off at the deadline', async () => {
+    let decideAborted = false;
+    const harness = new AgentHarness({
+      name: 'drain',
+      params: {},
+      _testDecide: (request: DecideRequest) =>
+        new Promise<DecideResponse>((_resolve, reject) => {
+          request.signal?.addEventListener('abort', () => {
+            decideAborted = true;
+            reject(new Error('aborted'));
+          });
+        }),
+    });
+    const events: EmittedEvent[] = [];
+    const ctx = watchedContext(harness, events);
+    const run = harness.run(
+      decide({
+        id: 'triage',
+        model: 'typesafe/jev-1.14',
+        questions: {
+          urgent: {
+            type: 'boolean',
+            instructions: 'Is it urgent?',
+          },
+        },
+      }),
+      'help',
+      ctx,
+    );
+    await waitFor(() => events.length > 0);
+    await sleep(5);
+
+    await harness.cancel(ctx, {
+      drainMs: 20,
+    });
+
+    expect(await cancelledError(run)).toBe('cancelled');
+    expect(decideAborted).toBe(true);
+    expect(callsIn(eventData(events, 'drain_finished'), 'cutOff')).toEqual([
+      {
+        kind: 'decide',
+        model: 'typesafe/jev-1.14',
+        executionId: expect.any(String),
+      },
+    ]);
+  });
+});
+
+describe('abort with drainMs', () => {
+  it("reports 'draining' while the turn's round finishes, then aborts the turn", async () => {
+    const client = new SlowClient({
+      fast: 80,
+    });
+    const harness = new AgentHarness({
+      name: 'drain',
+      params: {},
+      agentGraph: runCode<ContextData, string, string>({
+        id: 'turn',
+        execute: async (input, ctx) => {
+          await ctx.harness.run(ask('first', 'fast'), input, ctx);
+          return String(await ctx.harness.run(ask('second', 'fast'), input, ctx));
+        },
+      }),
+    });
+    frameworkCast<{
+      client: unknown;
+    }>(harness).client = client;
+    const events: StreamEvent[] = [];
+    const stream = harness.getFullStream();
+    void collect(stream, events);
+    await harness.execute('hi');
+    await waitFor(() => client.started === 1);
+
+    const stopping = harness.abort({
+      drainMs: 2e3,
+    });
+    const status = harness.getStatus();
+
+    assert(status.kind === 'draining');
+    expect(status.deadline).toBeGreaterThan(Date.now());
+    await stopping;
+    expect(harness.getStatus().kind).toBe('idle');
+    expect(client.started).toBe(1);
+    expect(client.aborted).toBe(0);
+    expect(harness.getUsage().cost).toBeCloseTo(0.01);
+    const types = events.map((e) => e.type);
+    expect(types).toContain('drain:drain_started');
+    expect(types).toContain('drain:drain_finished');
+    expect(types).toContain('drain:turn_aborted');
+  });
+});

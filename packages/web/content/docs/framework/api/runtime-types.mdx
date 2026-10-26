@@ -23,7 +23,7 @@ declare interface HarnessApi<TParams extends Record<string, unknown> = Record<st
   getTextStream(scope?: SessionScope): AsyncIterable<string>;
   getReasoningStream(scope?: SessionScope): AsyncIterable<string>;
   getFullStream(scope?: SessionScope): AsyncIterable<StreamEvent>;
-  abort(scope?: SessionScope & { reason?: string }): Promise<void>;
+  abort(scope?: SessionScope & CancelOptions): Promise<void>;
   getStatus(scope?: SessionScope): HarnessStatus;
   getQueueSize(scope?: SessionScope): number;
   seedSessionHistory(threadId: string, items: ReadonlyArray<Item>): void;
@@ -102,7 +102,7 @@ declare interface HarnessApi<TParams extends Record<string, unknown> = Record<st
 
   checkpoint(ctx: Context): Promise<void>;
   restore(executionId: string): Promise<Context | null>;
-  cancel(ctx: Context, reason?: string): Promise<void>;
+  cancel(ctx: Context, options?: string | CancelOptions): Promise<void>;
   createSpan(name: string, parent: Span | null): Span;
 }
 
@@ -131,7 +131,7 @@ declare interface RerenderRequest {
 | `getTextStream(scope?)` | Yields text deltas across every turn. |
 | `getReasoningStream(scope?)` | Yields reasoning-token deltas. |
 | `getFullStream(scope?)` | Yields all raw SDK + framework events. |
-| `abort(scope?)` | Cancel the in-flight turn. Queued messages are preserved. |
+| `abort(scope?)` | Cancel the in-flight turn. Queued messages are preserved. With `drainMs`, in-flight model calls get that long to finish first ([graceful stop](/docs/framework/runtime#graceful-stop)). |
 | `getStatus(scope?)` | Session status snapshot. |
 | `getQueueSize(scope?)` | Messages currently queued on the session. |
 | `seedSessionHistory(threadId, items)` | Pre-populate a session's accumulated history with prior items. Used by resume flows. |
@@ -162,7 +162,7 @@ declare interface RerenderRequest {
 | `notifyDecision(layers, record, ctx)` | Run every layer's `onDecision` hook in slot order, one at a time. Called by `decide` steps after they validate their answers. |
 | `checkpoint(ctx)` | Persist current execution state. |
 | `restore(executionId)` | Restore a previously checkpointed context. |
-| `cancel(ctx, reason?)` | Cancel an execution: abort `ctx` and every live descendant context, then run layer teardown (`onComplete` with `outcome: 'aborted'`, then `dispose`) bottom-up. No-op if already cancelled. |
+| `cancel(ctx, options?)` | Cancel an execution: abort `ctx` and every live descendant context, then run layer teardown (`onComplete` with `outcome: 'aborted'`, then `dispose`) bottom-up. No-op if already cancelled. `options` is a reason string or a `CancelOptions`; with `drainMs` it is a [graceful stop](/docs/framework/runtime#graceful-stop). |
 | `createSpan(name, parent)` | Create an observability span. |
 
 ## DeliveryMode
@@ -201,7 +201,20 @@ interface SessionScope {
 type HarnessStatus =
   | { readonly kind: 'idle' }
   | { readonly kind: 'generating'; readonly startedAt: number; readonly turnId: string }
+  | { readonly kind: 'draining'; readonly turnId: string; readonly deadline: number }
   | { readonly kind: 'aborting'; readonly turnId: string };
+```
+
+`draining` is a [graceful stop](/docs/framework/runtime#graceful-stop) in progress; `deadline` is when it cuts off whatever is still in flight (epoch ms).
+
+## CancelOptions
+
+```ts validate=none
+interface CancelOptions {
+  readonly reason?: string;
+  /** Let in-flight model calls finish for up to this many ms before cancelling. */
+  readonly drainMs?: number;
+}
 ```
 
 ## HarnessResponse

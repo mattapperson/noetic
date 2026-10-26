@@ -70,6 +70,7 @@ import {
   createSessionStore,
   createStepLedgerStore,
   customItemGates,
+  Drains,
   filterReasoningStream,
   filterTextStream,
   INTERRUPT_REASON,
@@ -89,6 +90,7 @@ import type {
   AgentHarnessContract,
   AgentHooks,
   CallModelRequest,
+  CancelOptions,
   Channel,
   ChannelHandle,
   Context,
@@ -571,6 +573,8 @@ export class AgentHarness<
    * {@link cancelAcpSession}, and {@link closeAcpSessions} from outside core.
    */
   readonly acpSessions = new AcpSessionStore();
+  /** @internal Graceful stops in progress; the interpreter and model loop hold on them. */
+  readonly drains = new Drains();
 
   /**
    * Snapshot of every live ACP sub-agent, for a UI that wants to show what is
@@ -812,17 +816,33 @@ export class AgentHarness<
     return session.runner.broadcaster;
   }
 
-  async abort(
-    scope?: SessionScope & {
-      reason?: string;
-    },
-  ): Promise<void> {
+  async abort(scope?: SessionScope & CancelOptions): Promise<void> {
     const threadId = scope?.threadId ?? DEFAULT_THREAD_ID;
     const session = this.sessions.get(threadId);
     if (!session) {
       return;
     }
-    await session.runner.abort(scope?.reason);
+    const { runner } = session;
+    const ctx = runner.context;
+    if (!ctx) {
+      await runner.abort(scope?.reason);
+      return;
+    }
+    const draining = this.drains.stop(ctx);
+    if (draining) {
+      return draining;
+    }
+    if (!scope?.drainMs) {
+      await runner.abort(scope?.reason);
+      return;
+    }
+    // The drained turn may end on its own; then the runner has moved on and
+    // there is nothing left to abort.
+    return this.drains.run(ctx, scope.drainMs, async () => {
+      if (runner.context === ctx) {
+        await runner.abort(scope.reason);
+      }
+    });
   }
 
   getStatus(scope?: SessionScope): HarnessStatus {
@@ -833,7 +853,17 @@ export class AgentHarness<
         kind: 'idle',
       };
     }
-    return session.runner.getStatus();
+    const status = session.runner.getStatus();
+    const ctx = session.runner.context;
+    const drain = ctx && this.drains.covering(ctx);
+    if (status.kind !== 'generating' || !drain) {
+      return status;
+    }
+    return {
+      kind: 'draining',
+      turnId: status.turnId,
+      deadline: drain.deadline,
+    };
   }
 
   getQueueSize(scope?: SessionScope): number {
@@ -1688,8 +1718,34 @@ export class AgentHarness<
    * settle (up to its timeout) before that context's teardown, and step code that ignores `ctx.aborted` between `await`s runs to
    * its next boundary. Calling `cancel()` on an already-cancelled context is a
    * no-op.
+   *
+   * With `{ drainMs }` the cancel is graceful: nothing new starts beneath
+   * `ctx`, model calls in flight get up to `drainMs` to finish and be charged,
+   * and `{name}:drain_started` / `{name}:drain_finished` report which finished
+   * and which were cut off. A second `cancel` during the drain cancels at once.
    */
-  async cancel(ctx: Context, reason?: string): Promise<void> {
+  async cancel(ctx: Context, options?: string | CancelOptions): Promise<void> {
+    const { reason, drainMs }: CancelOptions =
+      typeof options === 'string'
+        ? {
+            reason: options,
+          }
+        : (options ?? {});
+    const draining = this.drains.stop(ctx);
+    if (draining) {
+      return draining;
+    }
+    if (ctx.aborted) {
+      return;
+    }
+    if (drainMs) {
+      return this.drains.run(ctx, drainMs, () => this.cancelNow(ctx, reason));
+    }
+    await this.cancelNow(ctx, reason);
+  }
+
+  /** Abort `ctx`'s tree and tear its layers down. The abort happens before the first `await`. */
+  private async cancelNow(ctx: Context, reason: string | undefined): Promise<void> {
     if (ctx.aborted) {
       return;
     }
