@@ -146,6 +146,8 @@ Memory holds only what the current dispatch is doing, and copies of stored value
 
 Replayed work keeps its figures and costs nothing now, so usage reports both. `tokens`, `usage`, and `cost` are what the work cost — replayed steps contribute their restored or recorded spend, so budgets such as `until.maxCost` stop a resumed run where an uninterrupted one would. `billedCost` is what was actually paid now: an `LLMResponse` reports `cost` less what its replayed rounds supplied, a `Context` counts only this attempt's live calls (a restored context starts at 0), and `HarnessResponse` and `SessionUsage` carry the same split. A charge recorded with `recordUsage` is billed at its `cost` unless it gives a `billedCost`.
 
+A model call cut off with the run is not in the ledger, but its bill is not lost: its dispatch record is held as `heldCost` until reconciliation settles it into `cost` and `billedCost` (`23-durable-execution` § Paid dispatches).
+
 Session totals add each turn's increase in usage rather than its context's totals, because a resumed turn's context starts with the spend its cut-off attempt left in the snapshot.
 
 ## Sessions

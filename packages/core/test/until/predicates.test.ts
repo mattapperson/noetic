@@ -90,6 +90,36 @@ describe('until predicates', () => {
       expect(verdict.stop).toBe(true);
       expect(verdict.reason).toBe('Cost $1.01 exceeded budget $1.00');
     });
+    it('counts held spend: one cent below budget does not stop', async () => {
+      const verdict = await until.maxCost(1.0)(
+        makeSnap({
+          cost: 0.59,
+          heldCost: 0.4,
+        }),
+      );
+      expect(verdict.stop).toBe(false);
+    });
+
+    it('counts held spend: reaching budget with the hold stops', async () => {
+      const verdict = await until.maxCost(1.0)(
+        makeSnap({
+          cost: 0.6,
+          heldCost: 0.4,
+        }),
+      );
+      expect(verdict.stop).toBe(true);
+      expect(verdict.reason).toBe('Cost $1.00 exceeded budget $1.00');
+    });
+
+    it('counts held spend: one cent over budget with the hold stops', async () => {
+      const verdict = await until.maxCost(1.0)(
+        makeSnap({
+          cost: 0.61,
+          heldCost: 0.4,
+        }),
+      );
+      expect(verdict.stop).toBe(true);
+    });
   });
 
   describe('maxDuration', () => {

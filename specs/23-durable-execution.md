@@ -1,8 +1,8 @@
 # Durable Execution
 
 > **Depends On:** `07-context-and-event-log` (Context, ItemLog), `08-runtime` (AgentHarness, SubprocessAdapter, StorageAdapter), `21-tasks` (planner/implementer subprocess pattern), `22-cli-architecture` (CLI subprocess wiring)
-> **Exports:** `CheckpointSnapshot`, `CheckpointSnapshotSchema`, `CheckpointSchemaVersion`, `CheckpointStore`, `createCheckpointStore`, `FrontierFrame`, `CwdSnapshot`, `ItemLogSnapshot`, `PendingAskUserSnapshot`, `RestoreContextOptions`, `createFileStorage`, `DurableOutboundQueue`, `createDurableOutboundQueue`, `reattachLiveChildren`
-> **Source of truth:** `packages/core/src/runtime/checkpoint-store.ts`, `packages/core/src/runtime/durable/harness-checkpoints.ts`, `packages/core/src/runtime/file-storage.ts`, `packages/core/src/types/checkpoint.ts`, `packages/core/src/adapters/node/durable-outbound-queue.ts`, `packages/core/src/adapters/node/agent-ipc-{client,server,protocol}.ts`, `packages/cli/src/cli/reattach-live-children.ts`
+> **Exports:** `CheckpointSnapshot`, `CheckpointSnapshotSchema`, `CheckpointSchemaVersion`, `CheckpointStore`, `createCheckpointStore`, `FrontierFrame`, `CwdSnapshot`, `ItemLogSnapshot`, `PendingAskUserSnapshot`, `RestoreContextOptions`, `createFileStorage`, `DurableOutboundQueue`, `createDurableOutboundQueue`, `reattachLiveChildren`, `PendingSpend`, `SpendSettlement`, `SpendKind`, `ReconcileSpendOptions`, `WriteOffSpendOptions`
+> **Source of truth:** `packages/core/src/runtime/checkpoint-store.ts`, `packages/core/src/runtime/durable/harness-checkpoints.ts`, `packages/core/src/runtime/file-storage.ts`, `packages/core/src/types/checkpoint.ts`, `packages/core/src/runtime/durable/spend-log.ts`, `packages/core/src/harness/spend.ts`, `packages/core/src/harness/model-price.ts`, `packages/types/src/types/spend.ts`, `packages/core/src/adapters/node/durable-outbound-queue.ts`, `packages/core/src/adapters/node/agent-ipc-{client,server,protocol}.ts`, `packages/cli/src/cli/reattach-live-children.ts`
 > **Docs:** `packages/web/content/docs/framework/durability.mdx`
 
 ---
@@ -11,11 +11,12 @@
 
 Hosts crash. Tabs close. Users `kill -9` the TUI. The long-running children those hosts launched — planner subprocesses, implementer worktree agents, custom out-of-process sub-agents — keep running. Durable execution is the contract that lets a restarted host rediscover those children, rebuild the parent context they belong to, and resume as if nothing happened.
 
-Three subsystems participate:
+Four subsystems participate:
 
 1. **Checkpoint store** — `harness.checkpoint(ctx)` serialises the execution's frontier, layer state, cwd, ask-user queue, item log, and the stored state of the channels it used (see `06-channels`, Lifecycle) to a `StorageAdapter`. `harness.restore(executionId, opts?)` reverses it, with `opts` carrying back the host wiring a snapshot cannot serialise.
 2. **Subprocess adapter durability** — `adapter.listLive()` and `adapter.reattach(handleId)` persist and recover the handle manifest for every child the adapter launched.
 3. **Durable IPC** — `DurableOutboundQueue` numbers every outbound IPC frame with a monotonic seq, persists them through a `StorageAdapter`, and resumes from the client's last-acked offset on reconnect. Protocol v2 frames (`durable`, `durableResume`, `durableAck`) carry the wire envelope.
+4. **Spend log** — a record of every paid provider call, written before it is sent, so a call cut off by a crash or a cancel is settled at its real cost later, or held at a bound until it is (see § Paid dispatches).
 
 Durability follows storage. A zero-config harness has no storage adapter, so every surface is a no-op and behaviour is ephemeral. A harness given `environment.storage.adapter` gets a `CheckpointStore` over that adapter by default, so a later harness built over the same storage resumes this one's executions — step-level resume (`23a-step-level-resume`) included — with no further wiring. The harness option `durability: false` turns every durability surface off, keeping the adapter for layer persistence only. Durability never leans on in-memory state: a run retried in place and a session turn read what storage holds (`23a-step-level-resume` § Storage is the only record). A CLI configured with `createFileStorage({root: '~/.noetic/checkpoints'})` and `createLocalSubprocessAdapter({storage: fileStorage})` gets full durable execution.
 
@@ -119,6 +120,7 @@ A failing `store.save` is logged via `console.warn` and swallowed. **A failing c
 6. Seeds the context's dispatch counts from `occurrences` and its tokens and cost from `usage`.
 7. Overrides the returned context's `.id` to the original `executionId` so downstream adapter-correlation keeps working.
 8. Attaches the recovered step ledger (`23a-step-level-resume`) keyed to that same id.
+9. Holds the execution's pending paid calls on the context — `heldCost` is set before `restore` returns — and starts reconciling them in the background (§ Paid dispatches).
 
 **Ledger-only restore.** A run whose snapshot writes failed (a save failure is swallowed, see above) leaves its step ledger behind. `restore` then builds the context as `createContext(opts)` would — empty item log, no restored layer or channel state, the harness's root cwd, a fresh thread id — overrides its `id` to `executionId`, and attaches the recovered ledger. Recorded steps replay; the rest run fresh. Layer `init` runs normally on the first `run()`, since there is no restored state for it to keep.
 
@@ -173,6 +175,113 @@ function createCheckpointStore(opts: { storage: StorageAdapter }): CheckpointSto
 `list()` scans the storage for the execution prefix so hosts can inventory every known execution on boot. It returns only execution ids; callers that need the full snapshot pair it with `load`.
 
 `clear(executionId)` deletes the snapshot. Used by `restore()` callers who catch `CHECKPOINT_SCHEMA_MISMATCH` and want to start fresh.
+
+## Paid dispatches
+
+The step ledger records work that finished. A model call in flight when the host dies, or when `cancel(ctx)` cuts it off, finished nothing, yet the provider may have billed it — a cut-off stream is billed for every token generated, including tokens generated after the client went away. Without a record written before the call, a restarted host cannot tell whether the call was billed or for how much, so a host with a spending limit must either hold its whole remaining budget as unknown or block on a person.
+
+Every paid provider call therefore leaves a **dispatch record** in the harness's storage before it is sent: each `callModel` round on the OpenRouter client, and each native `decide()` call (an estimated `decide()` is `callModel` rounds, recorded as such). A harness with no checkpoint store records nothing.
+
+### The record
+
+```typescript
+interface PendingSpend {
+  id: string;                  // dispatch id
+  kind: 'model' | 'decide';
+  model: string;
+  requestHash: string;         // hash of the request body sent
+  inputTokens: number;         // estimate of the prompt, chars / 4
+  maxOutputTokens?: number;    // the request's output cap, when it set one
+  executionId?: string;        // the root context's id
+  threadId?: string;
+  path?: string;               // ledger key: `<step path>/round#<n>`, or the decide step's path
+  generationId?: string;       // the provider's id, saved as soon as headers arrive
+  sentAt: string;              // ISO-8601
+  ceiling?: number;            // USD the call can have cost at most — see below
+}
+```
+
+Records live under `spend:<id>`, outside the `execution:<id>:` prefix, so `clearCheckpoint`, an abandoned session turn, and every other discard leave them alone. A record leaves storage only when it is settled or written off. Evidence of spend is never discarded with the run that made it.
+
+**Lifecycle of one dispatch:**
+
+1. **Before send** — the record is written (awaited). A failed write is logged and the call goes ahead: like a checkpoint, the record is best-effort and never blocks the call.
+2. **Headers arrive** — the OpenRouter client's response hook reads `x-generation-id` and saves it to the record before the body is read. A stream that carries the id only in its `response.created` event saves it from there. A call cut off before any response byte has no id.
+3. **Response complete** — the call's cost reaches the run through `LLMResponse.cost` as before, and the record is deleted. A call the provider refused with an HTTP error status and no id is deleted too, as is one aborted before it was sent: nothing was generated.
+4. **Anything else** — cancel, a steer that stops the stream, an idle timeout, a dropped connection — leaves the record. It becomes **pending**: held at its ceiling and reconciled in the background straight away.
+
+A dispatch in flight in this harness is never pending: `pendingSpend` and `reconcileSpend` skip it, so its cost is counted once, by the call itself. Run one harness per storage at a time when reconciling; a second harness cannot see the first's live calls.
+
+A crash in the few milliseconds between a response completing and the run recording it leaves no record and no ledger entry: the round is asked again, and the first bill is lost. Every earlier moment is covered.
+
+### Ceilings
+
+A pending dispatch's ceiling is its model's published price applied to its token bound:
+
+```
+ceiling = prompt price × inputTokens + completion price × output cap + request price
+output cap = maxOutputTokens ?? the model's published max completion tokens ?? context length − inputTokens
+```
+
+Prices come from the provider's model metadata (`GET /models/{author}/{slug}`), looked up once per model per harness and only when something is held, so a healthy call makes no extra request. A record with no output cap anywhere, or a model with no published price, has no ceiling: it is flagged `unbounded: true` on `spend_pending`, listed by `pendingSpend`, and adds nothing to `heldCost`. Set `params.maxTokens` on paid steps to keep every ceiling finite.
+
+### Reconciliation
+
+```typescript
+interface AgentHarness {
+  pendingSpend(executionId?: string): Promise<PendingSpend[]>;
+  reconcileSpend(opts?: { executionId?: string; patienceMs?: number }): Promise<SpendSettlement[]>;
+  writeOffSpend(id: string, opts: { assumedCost: number }): Promise<SpendSettlement | undefined>;
+}
+
+interface SpendSettlement {
+  id: string;
+  executionId?: string;
+  threadId?: string;
+  cost: number;                // USD the provider billed, or the written-off amount
+  inputTokens: number;
+  outputTokens: number;
+  writtenOff?: true;
+}
+```
+
+- `pendingSpend` lists unsettled dispatches, all of them or one execution's, each with its ceiling.
+- `reconcileSpend` prices each pending dispatch that has a generation id through the provider's generation lookup (`GET /generation?id=`). The lookup answers 404 until the provider has priced the call — 7 to 32 seconds in practice — so it polls, backing off from 1 s to 10 s, for up to `patienceMs` (default 60 s). A priced call, cancelled or not, settles at the provider's `total_cost`. A dispatch with no id cannot be priced: it stays held until written off. A call already being looked up is joined, not looked up twice. The poll timers do not keep a host process alive.
+- `writeOffSpend` settles one pending dispatch at an amount the host asserts, for a call that can never be priced.
+
+Reconciliation runs on its own: after `restore()` for the restored execution, and for each dispatch the moment it is left pending — which covers `cancel(ctx)`, steers, and errors. A host can call `reconcileSpend()` again at any time, for example at boot for every execution.
+
+**Where a settlement goes.** A settlement is charged once:
+
+1. To the dispatch's root context while a run is in flight on it — through `recordUsage`, so `cost`, `billedCost`, `tokens`, and a session turn's usage pick it up.
+2. Otherwise to the thread's stored session, when the dispatch's thread has one: `SessionUsage.cost` and `billedCost` grow.
+3. Otherwise to the root context this harness restored or ran it on, when it has one.
+
+The record is deleted before the charge, so a crash mid-settlement can lose a settlement but never count one twice. Every settlement is returned by `reconcileSpend`, whoever it was charged to.
+
+### Held spend
+
+Until settled, a pending dispatch is **held** at its ceiling:
+
+- `Context.heldCost` is what the root context's pending dispatches are held at. `restore()` sets it from storage before it returns; a dispatch left pending in this harness adds to it; a settlement takes its ceiling back off.
+- `SessionUsage.heldCost` and `HarnessResponse.heldCost` report the same beside `cost` and `billedCost`, for the thread's or turn's pending dispatches this harness knows of.
+- The until `Snapshot` carries `heldCost`, and `until.maxCost` stops at `cost + heldCost`, so a resumed run cannot overspend the budget its cut-off attempt may already have used.
+
+`heldCost` is a bound, not a bill: it never enters `cost` or `billedCost`.
+
+### Events
+
+| Event | When | Data |
+|---|---|---|
+| `{name}:spend_pending` | A dispatch is left pending, or `restore()` finds one | `{ id, kind, model, generationId?, ceiling?, unbounded? }` |
+| `{name}:spend_settled` | A pending dispatch is settled or written off | `{ id, cost, writtenOff? }` |
+
+Both go to the broadcaster of the dispatch's root context, else its thread's session.
+
+### What stays bounded, not priced
+
+- A call cut off before any response byte has no generation id, and is held at its ceiling.
+- A native `decide()` call gets its id only with its body, so a `decide()` cut off mid-request is always held at its ceiling.
 
 ## Subprocess adapter durability contract
 
@@ -353,10 +462,12 @@ Both root defaults respect `NOETIC_HOME` (if set, the roots become `$NOETIC_HOME
 - Restart rediscovers running children and rebuilds the parent context for each.
 - IPC replay is exactly-once at the frame level when the client tracks `durableAck` correctly — no losses, no duplicates.
 - Schema version drift surfaces as a typed error, not silent corruption.
+- Every paid model call is recorded before it is sent. A call cut off after its response headers arrived is settled at the provider's exact cost once the provider has priced it; one cut off earlier is held at its ceiling. Neither is dropped by a discard (§ Paid dispatches).
 
 **What durable execution does not guarantee:**
 
-- **LLM mid-stream.** A round cut off mid-stream is asked again on resume; the rounds before it replay.
+- **LLM mid-stream.** A round cut off mid-stream is asked again on resume; the rounds before it replay. Its first bill is settled from its dispatch record, not lost.
+- **Prices for every cut-off call.** A call cut off before any response byte, and a native `decide()` cut off mid-request, can only be bounded, never priced: they stay held until written off.
 - **Tools interrupted mid-round.** A tool running when the host died runs again on resume. Tools in recorded rounds do not.
 - **Non-idempotent `runCode` bodies.** A crash between a step's side effect and its ledger append re-runs the step body, whose side effects already landed. The framework cannot make arbitrary user code idempotent; use stable step ids and idempotent bodies where durability matters.
 - **Third-party state outside the framework.** If a `runCode` mutates an external database, the database's state is not part of the snapshot. Callers that need cross-system consistency must integrate with their database's own transaction / idempotency primitives.

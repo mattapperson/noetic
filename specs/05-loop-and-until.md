@@ -82,6 +82,7 @@ interface Snapshot {
   tokens: { input: number; output: number; total: number };
   elapsed: number;        // wall-clock ms
   cost: number;           // USD
+  heldCost?: number;      // USD held for cut-off paid calls with no settled bill (spec 23)
   lastOutput: unknown;
   lastText: string;       // lastOutput as string
   history: unknown[];     // outputs from this loop, oldest first; bounded by maxHistorySize (default 100, oldest dropped first)
@@ -202,12 +203,17 @@ const maxSteps = (n: number): Until => (snap) => ({
   reason: snap.stepCount >= n ? `Reached max steps (${n})` : undefined,
 });
 
-const maxCost = (usd: number): Until => (snap) => ({
-  stop: snap.cost >= usd,
-  reason: snap.cost >= usd
-    ? `Cost $${snap.cost.toFixed(2)} exceeded budget $${usd.toFixed(2)}`
-    : undefined,
-});
+// Held spend counts too: a resumed run whose cut-off attempt left calls with no
+// settled bill cannot spend what those calls may already have cost (spec 23).
+const maxCost = (usd: number): Until => (snap) => {
+  const spent = snap.cost + (snap.heldCost ?? 0);
+  return {
+    stop: spent >= usd,
+    reason: spent >= usd
+      ? `Cost $${spent.toFixed(2)} exceeded budget $${usd.toFixed(2)}`
+      : undefined,
+  };
+};
 
 const verified = (fn: VerifyFn): Until => async (snap) => {
   const result = await fn(snap.lastOutput);

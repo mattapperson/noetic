@@ -42,12 +42,15 @@ export type {
   LLMResponse,
   LlmProviderConfig,
   OnSteerParams,
+  PendingSpend,
   RecallLayerOutput,
   RecallOptions,
+  ReconcileSpendOptions,
   SessionScope,
   SessionUsage,
   ShellAdapter,
   Span,
+  SpendSettlement,
   SteeringDecision,
   SteerVerdict,
   Step,
@@ -57,6 +60,8 @@ export type {
   Tool,
   ToolApprover,
   TraceExporter,
+  UsageCharge,
+  WriteOffSpendOptions,
 } from '@noetic-tools/types';
 export { SteeringAction } from '@noetic-tools/types';
 export type { ZodType } from 'zod';

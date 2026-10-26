@@ -30,6 +30,7 @@ export * from './types/output-codec';
 export * from './types/runtime';
 export * from './types/schema';
 export * from './types/shell-adapter';
+export * from './types/spend';
 export * from './types/steering';
 export * from './types/step';
 export * from './types/subprocess-adapter';

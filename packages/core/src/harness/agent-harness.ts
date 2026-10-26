@@ -3,12 +3,12 @@ import { NoeticEvent } from '../observability/genai-attributes';
 import { SpanImpl } from '../observability/span-impl';
 import { NoopExporter } from '../observability/trace-exporter';
 import { AcpSessionStore } from '../runtime/acp-session-store';
-import type { DecisionsClient } from './decide-call';
 import { callDecide } from './decide-call';
 import {
   createInMemoryFsAdapter,
   createInMemoryShellAdapter,
   createInMemorySubprocessAdapter,
+  HTTPClient,
   OpenRouter,
   OpenRouterSdk,
 } from './deps/adapters';
@@ -68,6 +68,7 @@ import {
   createCheckpointStore,
   createInMemoryStorage,
   createSessionStore,
+  createSpendLog,
   createStepLedgerStore,
   customItemGates,
   filterReasoningStream,
@@ -120,13 +121,16 @@ import type {
   LLMResponse,
   LlmProviderConfig,
   OnSteerParams,
+  PendingSpend,
   ProjectionPolicy,
   RecallLayerOutput,
   RecallOptions,
+  ReconcileSpendOptions,
   SessionScope,
   SessionUsage,
   ShellAdapter,
   Span,
+  SpendSettlement,
   SteeringDecision,
   SteerVerdict,
   Step,
@@ -137,10 +141,14 @@ import type {
   Tool,
   ToolApprover,
   TraceExporter,
+  UsageCharge,
+  WriteOffSpendOptions,
   ZodType,
 } from './deps/types';
 import { SteeringAction } from './deps/types';
 import { AgentHarnessModelCaller, noLlmProviderError } from './model-call';
+import type { SpendClient } from './spend';
+import { DISPATCH_HEADER, GENERATION_HEADER, Spend } from './spend';
 import { ThreadRecord } from './thread-record';
 
 export { createStreamIdleWatchdog } from './model-call';
@@ -419,6 +427,7 @@ async function addCacheBreakpoint(request: Request): Promise<Request> {
 function createClient(
   config?: LlmProviderConfig,
   contextCache?: ContextCacheConfig,
+  spend?: Spend,
 ): OpenRouter | undefined {
   const resolved = resolveLlmClient(config, readLlmEnv());
   if (!resolved) {
@@ -427,11 +436,15 @@ function createClient(
   const options: {
     apiKey: string;
     serverURL?: string;
+    httpClient?: ClientOptions['httpClient'];
   } = {
     apiKey: resolved.apiKey,
   };
   if (resolved.serverURL) {
     options.serverURL = resolved.serverURL;
+  }
+  if (spend) {
+    options.httpClient = generationHook(spend);
   }
 
   // A cache write costs more than a plain read, so the breakpoint only pays off
@@ -455,7 +468,29 @@ function createClient(
   });
 }
 
-function createDecisionsClient(config?: LlmProviderConfig): DecisionsClient | undefined {
+type ClientOptions = NonNullable<ConstructorParameters<typeof OpenRouter>[0]>;
+
+/**
+ * An HTTP client that saves a paid call's generation id the moment its headers
+ * arrive. The SDK awaits the hook before it reads the body, so a stream cut off
+ * after its headers can still be priced.
+ *
+ * The agent bundles an older SDK whose `HTTPClient` class is nominally different;
+ * the agent calls only `request()` on it, which both versions share.
+ */
+function generationHook(spend: Spend): ClientOptions['httpClient'] {
+  const http = new HTTPClient().addHook('response', async (res, req) => {
+    const dispatchId = req.headers.get(DISPATCH_HEADER);
+    const generationId = res.headers.get(GENERATION_HEADER);
+    // An error response is retried or refused; only a success carries the call's id.
+    if (res.ok && dispatchId && generationId) {
+      await spend.noteGeneration(dispatchId, generationId);
+    }
+  });
+  return frameworkCast<ClientOptions['httpClient']>(http);
+}
+
+function createSdkClient(config?: LlmProviderConfig): OpenRouterSdk | undefined {
   const resolved = resolveLlmClient(config, readLlmEnv());
   if (!resolved) {
     return undefined;
@@ -536,8 +571,16 @@ export class AgentHarness<
    *  without friend-class gymnastics. Do not access from outside core. */
   readonly _contextLayers?: ContextLayer[];
   private readonly client?: OpenRouter;
-  /** SDK 1.x client for the decisions endpoint; the agent's client predates it. */
-  private readonly decisionsClient?: DecisionsClient;
+  /**
+   * SDK 1.x client for the endpoints the agent's client predates: decisions, model
+   * prices, and generation lookups.
+   */
+  private readonly sdkClient?: OpenRouterSdk;
+  /**
+   * Paid dispatch records, present exactly when durability is on.
+   * @internal
+   */
+  readonly spend?: Spend;
   private readonly decideOverride?: (request: DecideRequest) => Promise<DecideResponse>;
   /** Model id → whether it answers natively as a decision model. */
   private readonly decisionModels = new Map<string, Promise<boolean>>();
@@ -681,17 +724,18 @@ export class AgentHarness<
     this.sessionStore = this.checkpointStore
       ? createSessionStore(this.config.storage ?? createInMemoryStorage())
       : undefined;
+    this.spend = this.checkpointStore
+      ? this.createSpend(this.config.storage ?? createInMemoryStorage())
+      : undefined;
     this.agentGraph = opts.agentGraph;
     this.harnessTools = opts.tools ?? [];
     this._contextLayers = opts.contextLayers;
     this.callModelOverride = opts._testCallModel;
     this.client = opts._testCallModel
       ? undefined
-      : createClient(opts.callModelDefaults, opts.contextCache);
+      : createClient(opts.callModelDefaults, opts.contextCache, this.spend);
     this.decideOverride = opts._testDecide;
-    this.decisionsClient = opts._testCallModel
-      ? undefined
-      : createDecisionsClient(opts.callModelDefaults);
+    this.sdkClient = opts._testCallModel ? undefined : createSdkClient(opts.callModelDefaults);
     this.channelStore = new ChannelStore({
       onWarning: (warning) => this.recordChannelWarning(warning),
     });
@@ -844,14 +888,17 @@ export class AgentHarness<
 
   getUsage(scope?: SessionScope): SessionUsage {
     const threadId = scope?.threadId ?? DEFAULT_THREAD_ID;
-    const session = this.sessions.get(threadId);
-    if (!session) {
-      return {
-        inputTokens: 0,
-        outputTokens: 0,
-      };
-    }
-    return session.runner.getUsage();
+    const usage = this.sessions.get(threadId)?.runner.getUsage() ?? {
+      inputTokens: 0,
+      outputTokens: 0,
+    };
+    const heldCost = this.spend?.heldFor(threadId) ?? 0;
+    return heldCost > 0
+      ? {
+          ...usage,
+          heldCost,
+        }
+      : usage;
   }
 
   seedSessionHistory(threadId: string, items: ReadonlyArray<Item>): void {
@@ -1032,6 +1079,7 @@ export class AgentHarness<
       streamIdleTimeoutMs: DEFAULT_STREAM_IDLE_TIMEOUT_MS,
       harness: this,
       traceExporter: this.traceExporter,
+      spend: this.spend,
     }).callModel(request);
   }
 
@@ -1044,9 +1092,10 @@ export class AgentHarness<
       return this.decideOverride(request);
     }
     return callDecide(request, {
-      client: this.decisionsClient,
+      client: this.sdkClient,
       callModel: (r) => this.callModel(r),
       nativeModels: this.decisionModels,
+      spend: this.spend,
     });
   }
 
@@ -1639,6 +1688,9 @@ export class AgentHarness<
    * Decoration applied *after* construction (`Object.assign`ed fields, abort
    * registration) stays the host's job: apply it to the context this returns,
    * whose `id` is already the original `executionId`.
+   *
+   * Paid calls the interrupted run left with no settled bill are held on the
+   * returned context (`heldCost`) and reconciled in the background.
    */
   async restore(executionId: string, opts?: RestoreCheckpointOptions): Promise<Context | null> {
     const restored = await restoreFromCheckpoint(this, executionId, opts);
@@ -1648,6 +1700,7 @@ export class AgentHarness<
     if (restored.fromSnapshot) {
       this.restoredExecutions.add(executionId);
     }
+    await this.spend?.adopt(restored.ctx);
     return restored.ctx;
   }
 
@@ -1666,6 +1719,76 @@ export class AgentHarness<
    */
   async clearCheckpoint(executionId: string): Promise<void> {
     return clearCheckpoint(this, executionId);
+  }
+
+  //#endregion
+
+  //#region Spend
+
+  /**
+   * Paid provider calls with no settled bill — cut off by a crash, a cancel, a steer,
+   * or a dropped connection — all of them or one execution's, each with its ceiling.
+   * A call still in flight in this harness is not listed. Empty without durable
+   * storage. See spec 23 § Paid dispatches.
+   * @public
+   */
+  async pendingSpend(executionId?: string): Promise<PendingSpend[]> {
+    return (await this.spend?.pending(executionId)) ?? [];
+  }
+
+  /**
+   * Price pending dispatches through the provider's generation lookup and settle
+   * them into usage. The provider prices a call some seconds after it ends, so this
+   * keeps asking for up to `patienceMs`. A dispatch with no generation id stays held.
+   * Runs on its own after `restore()` and whenever a call is cut off; call it again
+   * at any time, for example at boot.
+   * @public
+   */
+  async reconcileSpend(opts?: ReconcileSpendOptions): Promise<SpendSettlement[]> {
+    return (await this.spend?.reconcile(opts)) ?? [];
+  }
+
+  /**
+   * Settle one pending dispatch at `assumedCost`, for a call that can never be priced.
+   * Resolves `undefined` when no pending dispatch has that id.
+   * @public
+   */
+  async writeOffSpend(
+    id: string,
+    opts: WriteOffSpendOptions,
+  ): Promise<SpendSettlement | undefined> {
+    return this.spend?.writeOff(id, opts);
+  }
+
+  private createSpend(storage: StorageAdapter): Spend {
+    return new Spend({
+      agentName: this.config.name,
+      log: createSpendLog(storage),
+      client: (): SpendClient | undefined => this.sdkClient,
+      liveRoot: (executionId) => this.liveRoots.get(executionId)?.ctx,
+      chargeSession: (threadId, charge) => this.chargeSession(threadId, charge),
+      sessionBroadcaster: (threadId) => this.sessions.get(threadId)?.runner.broadcaster,
+    });
+  }
+
+  /** Add a settled bill to a thread's stored session. False when the thread has none. */
+  private async chargeSession(threadId: string, charge: UsageCharge): Promise<boolean> {
+    if (!(await this.sessionStore?.load(threadId))) {
+      return false;
+    }
+    // The live session's own record, when there is one, so the two writes queue in order.
+    const record = this.sessions.get(threadId)?.record ?? this.threadRecord(threadId);
+    if (!record) {
+      return false;
+    }
+    const usage = await record.addUsage({
+      inputTokens: charge.inputTokens,
+      outputTokens: charge.outputTokens,
+      cost: charge.cost ?? 0,
+      billedCost: charge.billedCost ?? charge.cost ?? 0,
+    });
+    this.sessions.get(threadId)?.runner.seedUsage(usage);
+    return true;
   }
 
   //#endregion

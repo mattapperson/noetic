@@ -80,6 +80,7 @@ export async function executeDecide<TContext, I, O>(
       samples: step.samples,
       signal: isContextImpl(baseCtx) ? baseCtx.abortSignal : undefined,
       parentSpan: span,
+      _billTo: baseCtx,
     });
     trackUsage(baseCtx, {
       items: [],

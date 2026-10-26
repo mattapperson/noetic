@@ -862,6 +862,7 @@ export async function executeLoop<TContext, I, O>(
       },
       elapsed: Date.now() - startTime,
       cost: ctx.cost,
+      heldCost: ctx.heldCost,
       lastOutput: output,
       lastText,
       history: [

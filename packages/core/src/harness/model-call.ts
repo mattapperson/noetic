@@ -13,7 +13,13 @@ import type {
   ToolChoice,
   TraceExporter,
 } from '@noetic-tools/types';
-import { frameworkCast, NoeticConfigError, SteerPoint, ToolChoiceMode } from '@noetic-tools/types';
+import {
+  frameworkCast,
+  NoeticConfigError,
+  SpendKind,
+  SteerPoint,
+  ToolChoiceMode,
+} from '@noetic-tools/types';
 import type * as OpenRouterAgent from '@openrouter/agent';
 import type { OpenRouter } from '@openrouter/agent';
 import { serverTool } from '@openrouter/agent';
@@ -32,9 +38,11 @@ import { GenAI, NoeticAttr, ToolAttr } from '../observability/genai-attributes';
 import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../runtime/broadcaster-utils';
 import type { EventBroadcaster } from '../runtime/event-broadcaster';
 import type { ApprovalOutcome } from '../runtime/tool-approval';
+import { statusOf } from '../util/status-code';
 import { exportSpans } from './deps/context';
 import { RoundLedger } from './model-rounds';
 import { buildItemSchemaRegistry, createToolResultItem } from './model-schema.js';
+import type { Dispatch, Spend } from './spend';
 import type { SteerInbox } from './steer-inbox';
 import { openSteerInbox } from './steer-inbox';
 
@@ -120,6 +128,28 @@ function replayOutput(
   input.push(...itemsToInput(roundItems.filter((item) => !isFunctionCall(item))));
 }
 
+/**
+ * Save the generation id a stream's `response.created` event carries, for a response
+ * whose headers did not. OpenRouter's ids start `gen-`; other ids price nothing.
+ */
+function noteStreamGeneration(dispatch: Dispatch | undefined, event: unknown): void {
+  if (!dispatch || !isStreamRecord(event) || event.type !== 'response.created') {
+    return;
+  }
+  const response = event.response;
+  if (!isStreamRecord(response) || typeof response.id !== 'string') {
+    return;
+  }
+  if (response.id.startsWith('gen-')) {
+    void dispatch.noteGeneration(response.id);
+  }
+}
+
+/** The provider answered with an error status before generating anything, so nothing was billed. */
+function wasRefused(err: unknown, dispatch: Dispatch): boolean {
+  return statusOf(err) !== undefined && dispatch.record.generationId === undefined;
+}
+
 function hasItem(items: ReadonlyArray<Item>, id: string): boolean {
   return items.some((item) => 'id' in item && item.id === id);
 }
@@ -188,7 +218,7 @@ interface PipeStreamOpts {
   signal?: AbortSignal;
   /** Invoked once per SDK event received — used by the idle watchdog to bump
    *  its deadline so a still-streaming response isn't aborted. */
-  onEvent?: () => void;
+  onEvent?: (event: unknown) => void;
   /** Awaited with each finished output item before the next event is read. */
   onItemDone?: (item: unknown) => Promise<void>;
 }
@@ -200,7 +230,7 @@ async function pipeStreamEventsToBroadcaster(opts: PipeStreamOpts): Promise<void
       if (signal?.aborted) {
         return;
       }
-      onEvent?.();
+      onEvent?.(event);
       if (!isStreamRecord(event)) {
         continue;
       }
@@ -496,6 +526,8 @@ interface AgentHarnessModelCallerOpts {
   streamIdleTimeoutMs: number;
   harness: AgentHarnessContract;
   traceExporter: TraceExporter;
+  /** Records each paid round before it is sent. Absent without durable storage. */
+  spend?: Spend;
 }
 
 /**
@@ -802,6 +834,24 @@ export class AgentHarnessModelCaller {
       });
 
       const modelSpan = spans.startModelSpan(request.model);
+      const dispatch = await this.opts.spend?.open({
+        ctx: request.ctx ?? request._billTo,
+        kind: SpendKind.Model,
+        model: request.model,
+        body: {
+          model: request.model,
+          instructions: prepared.instructions,
+          input: modelInput,
+        },
+        maxOutputTokens: request.params?.maxTokens,
+        round,
+      });
+      if (request.signal?.aborted) {
+        // Aborted while the record was written: the call was never sent.
+        await dispatch?.settle();
+        modelSpan.end();
+        break;
+      }
 
       const callResult = client.callModel(
         {
@@ -826,6 +876,11 @@ export class AgentHarnessModelCaller {
         },
         {
           signal: roundSignal,
+          ...(dispatch
+            ? {
+                headers: dispatch.headers,
+              }
+            : {}),
         },
       );
 
@@ -838,8 +893,9 @@ export class AgentHarnessModelCaller {
         broadcaster: prepared.broadcaster,
         agentName: this.opts.agentName,
         signal: roundSignal,
-        onEvent: () => {
+        onEvent: (event) => {
           watchdog.reset();
+          noteStreamGeneration(dispatch, event);
           if (!firstEventSeen) {
             firstEventSeen = true;
             prepared.emitIfAllowed('model_call_first_event', {
@@ -864,9 +920,13 @@ export class AgentHarnessModelCaller {
       let sdkResponse: Awaited<ReturnType<typeof callResult.getResponse>> | undefined;
       try {
         sdkResponse = await awaitWithAbort(callResult.getResponse(), roundSignal);
+        await dispatch?.settle();
         watchdog.stop();
         await awaitWithAbort(pipePromise, roundSignal);
       } catch (err: unknown) {
+        if (dispatch && wasRefused(err, dispatch)) {
+          await dispatch.settle();
+        }
         if (idleStalled) {
           throw roundSignal.reason instanceof Error
             ? roundSignal.reason
@@ -880,6 +940,7 @@ export class AgentHarnessModelCaller {
         }
       } finally {
         watchdog.stop();
+        dispatch?.end();
       }
       if (request.signal?.aborted) {
         break;

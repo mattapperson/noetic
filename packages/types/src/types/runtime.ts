@@ -115,6 +115,12 @@ interface CallModelRequestBase {
    * field: public callers declare server tools as `tools` entries, never here.
    */
   _serverTools?: ServerToolSpec[];
+  /**
+   * @internal
+   * The context the call's spend belongs to when it runs without `ctx` — a
+   * `decide()` estimate, which must not stream into or record against the step.
+   */
+  _billTo?: Context;
   /** Optional signal for cancelling the in-flight call (used by session abort). */
   signal?: AbortSignal;
   /**
@@ -234,6 +240,11 @@ export interface SessionUsage {
    * adds nothing. Undefined when zero, like `cost`.
    */
   readonly billedCost?: number;
+  /**
+   * USD held for the thread's paid calls that have no settled bill yet, as far as this
+   * harness knows. Undefined when zero.
+   */
+  readonly heldCost?: number;
 }
 
 //#endregion

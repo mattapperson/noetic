@@ -429,6 +429,7 @@ export function aiCondition<I>(opts: {
           threshold: opts.threshold,
         },
       },
+      _billTo: ctx,
     });
     trackUsage(ctx, {
       items: [],

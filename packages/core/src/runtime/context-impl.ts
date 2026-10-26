@@ -77,6 +77,7 @@ export class ContextImpl implements Context<ContextData> {
   };
   cost = 0;
   billedCost = 0;
+  heldCost = 0;
   state: unknown;
   readonly parent: Context<ContextData> | null;
   readonly usageParent: Context<ContextData> | null;

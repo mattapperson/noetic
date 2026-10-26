@@ -17,11 +17,13 @@ import {
   DecideOutputError,
   extractAssistantText,
   frameworkCast,
+  SpendKind,
   scoreLevels,
 } from '@noetic-tools/types';
 import type { OpenRouter } from '@openrouter/sdk';
 import { z } from 'zod';
 import { statusOf } from '../util/status-code';
+import type { Spend } from './spend';
 
 //#region Types
 
@@ -34,6 +36,8 @@ export interface DecideCallerDeps {
   callModel: (request: CallModelRequest) => Promise<LLMResponse>;
   /** Per-harness cache: model id → whether it is a decision model (`undefined` while unknown). */
   nativeModels: Map<string, Promise<boolean | undefined>>;
+  /** Records each native call before it is sent. Absent without durable storage. */
+  spend?: Spend;
 }
 
 type NativeQuestion = Parameters<
@@ -60,7 +64,7 @@ export async function callDecide(
   deps: DecideCallerDeps,
 ): Promise<DecideResponse> {
   if (deps.client && (await isDecisionModel(request.model, deps))) {
-    return callNative(request, deps.client);
+    return callNative(request, deps.client, deps.spend);
   }
   return callEstimated(request, deps);
 }
@@ -114,23 +118,23 @@ async function lookupDecisionModel(
 async function callNative(
   request: DecideRequest,
   client: DecisionsClient,
+  spend: Spend | undefined,
 ): Promise<DecideResponse> {
   const questions: Record<string, NativeQuestion> = {};
   for (const [id, question] of Object.entries(request.questions)) {
     questions[id] = toNativeQuestion(question);
   }
-  const response = await client.alpha.decisions.create(
-    {
-      decisionsRequest: {
-        model: request.model,
-        state: toNativeState(request.instructions, request.state),
-        questions,
-      },
-    },
-    {
-      signal: request.signal,
-    },
-  );
+  const decisionsRequest = {
+    model: request.model,
+    state: toNativeState(request.instructions, request.state),
+    questions,
+  };
+  const response = await sendNative({
+    client,
+    decisionsRequest,
+    request,
+    spend,
+  });
 
   const answers: Record<string, DecideAnswer> = {};
   for (const [id, question] of Object.entries(request.questions)) {
@@ -149,6 +153,51 @@ async function callNative(
     },
     cost: response.usage.cost,
   };
+}
+
+/**
+ * Send one native call under a dispatch record. The provider sends the generation id
+ * only with the body, so a call cut off mid-request stays held at its ceiling.
+ */
+async function sendNative({
+  client,
+  decisionsRequest,
+  request,
+  spend,
+}: {
+  client: DecisionsClient;
+  decisionsRequest: Parameters<
+    DecisionsClient['alpha']['decisions']['create']
+  >[0]['decisionsRequest'];
+  request: DecideRequest;
+  spend: Spend | undefined;
+}): Promise<NativeResponse> {
+  const dispatch = await spend?.open({
+    ctx: request._billTo,
+    kind: SpendKind.Decide,
+    model: request.model,
+    body: decisionsRequest,
+  });
+  try {
+    const response = await client.alpha.decisions.create(
+      {
+        decisionsRequest,
+      },
+      {
+        signal: request.signal,
+      },
+    );
+    await dispatch?.settle();
+    return response;
+  } catch (e) {
+    // An error status means the provider refused the call: nothing was generated.
+    if (statusOf(e) !== undefined) {
+      await dispatch?.settle();
+    }
+    throw e;
+  } finally {
+    dispatch?.end();
+  }
 }
 
 /**
@@ -346,6 +395,7 @@ async function callEstimated(
           outputSchema: schema,
           signal: request.signal,
           parentSpan: request.parentSpan,
+          _billTo: request._billTo,
         }),
     ),
   );

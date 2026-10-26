@@ -555,6 +555,20 @@ export type {
 
 //#endregion
 
+//#region Types — Spend
+
+/** @public */
+export type {
+  PendingSpend,
+  ReconcileSpendOptions,
+  SpendSettlement,
+  WriteOffSpendOptions,
+} from '@noetic-tools/types';
+/** @public */
+export { SpendKind } from '@noetic-tools/types';
+
+//#endregion
+
 //#region Types — Steering
 
 /** @public */

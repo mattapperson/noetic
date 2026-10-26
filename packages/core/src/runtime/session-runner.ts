@@ -442,6 +442,7 @@ function buildResponse(text: string, ctx: Context): HarnessResponse {
     },
     cost: ctx.cost > 0 ? ctx.cost : undefined,
     billedCost: ctx.billedCost > 0 ? ctx.billedCost : undefined,
+    heldCost: ctx.heldCost > 0 ? ctx.heldCost : undefined,
     text,
     lastLayerUsage: ctx.lastLayerUsage,
   };

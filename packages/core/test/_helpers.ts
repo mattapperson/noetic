@@ -282,6 +282,7 @@ export function makeMockContext(overrides?: Partial<Context>): Context {
     elapsed: 0,
     cost: 0,
     billedCost: 0,
+    heldCost: 0,
     state: {},
     parent: null,
     depth: 0,
@@ -849,21 +850,31 @@ export interface FakeOpenRouterRound {
  * A stand-in for the OpenRouter Responses API, for tests that drive the harness's real
  * model client. `reply(input)` answers each round from the conversation it was sent,
  * as a model would; rounds whose 1-based number is in `dropAt` stream part of a
- * response and then end, as a lost connection does.
+ * response and then end, as a lost connection does, and rounds in `hangAt` send their
+ * headers and first event and then nothing, as a host killed mid-stream sees. Every
+ * response carries the generation id `gen-<round>` in its `x-generation-id` header.
  */
 export interface FakeOpenRouter {
   readonly baseUrl: string;
   readonly rounds: FakeOpenRouterRound[];
   readonly dropAt: Set<number>;
+  readonly hangAt: Set<number>;
   stop(): void;
 }
 
 export function startFakeOpenRouter(reply: (input: unknown[]) => unknown[]): FakeOpenRouter {
   const rounds: FakeOpenRouterRound[] = [];
   const dropAt = new Set<number>();
+  const hangAt = new Set<number>();
   const server = Bun.serve({
     port: 0,
     async fetch(request) {
+      // Only model rounds are served; model and generation lookups find nothing.
+      if (request.method !== 'POST') {
+        return new Response('{}', {
+          status: 404,
+        });
+      }
       const body = z
         .object({
           model: z.string(),
@@ -873,12 +884,28 @@ export function startFakeOpenRouter(reply: (input: unknown[]) => unknown[]): Fak
       rounds.push({
         input: body.input,
       });
-      const stream = fakeResponseStream(rounds.length, body.model, reply(body.input));
-      if (!dropAt.has(rounds.length)) {
-        return new Response(stream, {
-          headers: {
-            'content-type': 'text/event-stream',
+      const round = rounds.length;
+      const stream = fakeResponseStream(round, body.model, reply(body.input));
+      const headers = {
+        'content-type': 'text/event-stream',
+        'x-generation-id': `gen-${round}`,
+      };
+      if (hangAt.has(round)) {
+        const firstEvent = stream.slice(0, stream.indexOf('\n\n') + 2);
+        return new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode(firstEvent));
+            },
+          }),
+          {
+            headers,
           },
+        );
+      }
+      if (!dropAt.has(round)) {
+        return new Response(stream, {
+          headers,
         });
       }
       const cut = new ReadableStream({
@@ -888,9 +915,7 @@ export function startFakeOpenRouter(reply: (input: unknown[]) => unknown[]): Fak
         },
       });
       return new Response(cut, {
-        headers: {
-          'content-type': 'text/event-stream',
-        },
+        headers,
       });
     },
   });
@@ -898,6 +923,7 @@ export function startFakeOpenRouter(reply: (input: unknown[]) => unknown[]): Fak
     baseUrl: `http://localhost:${server.port}/api/v1`,
     rounds,
     dropAt,
+    hangAt,
     stop: () => server.stop(true),
   };
 }

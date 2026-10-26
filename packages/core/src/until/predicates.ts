@@ -35,15 +35,20 @@ export const until = {
     });
   },
 
-  /** Stops the loop when accumulated cost reaches `usd`. @public */
+  /**
+   * Stops the loop when accumulated cost, plus spend held for cut-off calls with no
+   * settled bill, reaches `usd`. Counting the hold keeps a resumed run from spending
+   * what its cut-off attempt may already have spent. @public
+   */
   maxCost(usd: number): Until {
-    return (snap: Snapshot): Verdict => ({
-      stop: snap.cost >= usd,
-      reason:
-        snap.cost >= usd
-          ? `Cost $${snap.cost.toFixed(2)} exceeded budget $${usd.toFixed(2)}`
-          : undefined,
-    });
+    return (snap: Snapshot): Verdict => {
+      const spent = snap.cost + (snap.heldCost ?? 0);
+      return {
+        stop: spent >= usd,
+        reason:
+          spent >= usd ? `Cost $${spent.toFixed(2)} exceeded budget $${usd.toFixed(2)}` : undefined,
+      };
+    };
   },
 
   /** Stops the loop when elapsed time reaches `ms` milliseconds. @public */

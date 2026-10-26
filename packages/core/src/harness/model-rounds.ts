@@ -139,8 +139,13 @@ export class RoundLedger {
   }
 
   private key(round: number): string {
-    return `${this.dispatch.path}/round#${round}`;
+    return roundPath(this.dispatch.path, round);
   }
+}
+
+/** @internal The ledger key of round `round` of the model loop at step path `path`. */
+export function roundPath(path: string, round: number): string {
+  return `${path}/round#${round}`;
 }
 
 //#endregion

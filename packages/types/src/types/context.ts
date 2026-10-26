@@ -66,6 +66,12 @@ export interface Context<TContext = ContextData, TState = unknown> {
    * what replay saved.
    */
   readonly billedCost: number;
+  /**
+   * USD held for paid calls of this execution that were cut off and have no settled
+   * bill yet: each at its ceiling until reconciled. A bound, never part of `cost` or
+   * `billedCost`. Nonzero only on a root context.
+   */
+  readonly heldCost: number;
   state: TState;
   readonly parent: Context<ContextData> | null;
   /**

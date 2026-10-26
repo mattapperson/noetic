@@ -459,7 +459,11 @@ translated inside the adapter and never leak into step code.
 
 **Native.** For decision models, the OpenRouter adapter calls
 `client.alpha.decisions.create` from `@openrouter/sdk` (1.x). The response
-distributions map directly onto answers.
+distributions map directly onto answers. On a durable harness the call leaves a
+dispatch record before it is sent (`23-durable-execution` § Paid dispatches). The
+provider sends a decision's generation id only with its body, so a native call
+cut off mid-request cannot be priced later: it is held at its ceiling until
+written off. Estimated calls are `callModel` rounds and are recorded as such.
 
 **Estimated.** For any other model, the adapter makes one structured-output
 `callModel` per sample, asking for a probability per boolean, choice, and level,

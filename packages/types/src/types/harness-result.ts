@@ -53,6 +53,8 @@ export interface HarnessResponse<TItem = Item> {
   readonly cost?: number;
   /** USD the turn actually paid — `cost` less what replay supplied. See `Context.billedCost`. */
   readonly billedCost?: number;
+  /** USD held for the turn's paid calls that have no settled bill yet. See `Context.heldCost`. */
+  readonly heldCost?: number;
   readonly text: string;
   /** Per-context-layer context window breakdown captured at the last callModel of this execution. */
   readonly lastLayerUsage?: LastLayerUsage;

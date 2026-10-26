@@ -386,6 +386,17 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
    */
   restore(executionId: string, opts?: RestoreContextOptions): Promise<Context | null>;
 
+  // Paid dispatches (see 23-durable-execution § Paid dispatches). Every paid
+  // provider call is recorded before it is sent; one cut off by a crash, cancel,
+  // or steer stays pending until its bill is known. Empty without durable storage.
+  pendingSpend(executionId?: string): Promise<PendingSpend[]>;
+  // Price pending calls through the provider's generation lookup, polling up to
+  // patienceMs (default 60s). Runs on its own after restore() and whenever a call
+  // is cut off.
+  reconcileSpend(opts?: { executionId?: string; patienceMs?: number }): Promise<SpendSettlement[]>;
+  // Settle a call that can never be priced at an amount the host asserts.
+  writeOffSpend(id: string, opts: { assumedCost: number }): Promise<SpendSettlement | undefined>;
+
   // Lifecycle
   cancel(ctx: Context, reason?: string): Promise<void>;
 
@@ -557,6 +568,8 @@ interface FrameworkStreamEvent {
 | `{name}:model_call_completed` | Emitted after the provider's response is fully received. Data: `{ round, itemCount }` |
 | `{name}:model_call_stalled` | Emitted when the stream-idle watchdog fires (fixed 120s idle window). The turn then aborts. Data: `{ round, idleTimeoutMs }` |
 | `{name}:stream_pipe_error` | Emitted when SDK stream piping fails. Data: `{ error }` |
+| `{name}:spend_pending` | Emitted when a paid call is left with no settled bill, or `restore()` finds one (`23-durable-execution` § Paid dispatches). Data: `{ id, kind, model, generationId?, ceiling?, unbounded? }` |
+| `{name}:spend_settled` | Emitted when a pending paid call is settled or written off. Data: `{ id, cost, writtenOff? }` |
 
 ### Streaming Scope
 
@@ -705,7 +718,8 @@ Snapshot content (Zod-validated by `CheckpointSnapshotSchema`):
 1. Replays layer state into `layerStateStore` and channel state into the channel store under the same executionId.
 2. Re-parses `itemLog.items` via the harness's `ItemSchemaRegistry` (the same gate production traffic passes through).
 3. Seeds a new context with the baseline item log, `threadId`, `resourceId`, `cwdInit`, `state` (unless `opts.state` is given), dispatch counts, and usage.
-4. Returns a `Context` whose `.id` is the original `executionId`, carrying the recovered step ledger. Running the same step on the same input replays every recorded step and continues live (`23a-step-level-resume`).
+4. Holds the execution's pending paid calls on the context (`heldCost`) and starts reconciling them in the background (`23-durable-execution` § Paid dispatches).
+5. Returns a `Context` whose `.id` is the original `executionId`, carrying the recovered step ledger. Running the same step on the same input replays every recorded step and continues live (`23a-step-level-resume`).
 
 Returns `null` when neither a snapshot nor a ledger entry is recorded. Throws `NoeticConfigError` with `code: 'CHECKPOINT_SCHEMA_MISMATCH'` when the persisted schemaVersion is not the one the running runtime understands — callers discard via `harness.clearCheckpoint(executionId)` and restart the execution.
 
@@ -718,7 +732,7 @@ Returns `null` when neither a snapshot nor a ledger entry is recorded. Throws `N
 
 ### Limitations
 
-- **LLM mid-stream**: a round cut off mid-stream is asked again on resume; finished rounds replay.
+- **LLM mid-stream**: a round cut off mid-stream is asked again on resume; finished rounds replay. Its bill is settled from its dispatch record, or held at its ceiling when it has no generation id.
 - **Non-idempotent `runCode` bodies** may run twice if a crash lands between the body's side effect and its ledger append. Write bodies that are safe to re-execute, or gate with an external idempotency key.
 
 See `23-durable-execution` for the full durable-execution model, including `SubprocessAdapter.reattach`/`listLive` semantics, the durable IPC outbound queue, protocol v2 frames, and the host-restart recovery flow.

@@ -37,6 +37,8 @@ export interface Snapshot {
   elapsed: number;
   /** Cumulative cost across all iterations. */
   cost: number;
+  /** USD held for cut-off paid calls with no settled bill — see `Context.heldCost`. */
+  heldCost?: number;
   /** Raw output of the most recent iteration. */
   lastOutput: unknown;
   /** Stringified text of the most recent iteration output. */
