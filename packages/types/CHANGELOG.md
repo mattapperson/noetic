@@ -1,3 +1,12 @@
+## @noetic-tools/types-v3.10.0 (2026-10-26)
+
+* fix: finish the expr rename and show compute and expr in the inspector ([42af900](https://github.com/mattapperson/noetic/commit/42af900))
+* feat(core): add infinite loops, recursive subflows, and decide-driven loop exits to JSON workflows ([c9c201a](https://github.com/mattapperson/noetic/commit/c9c201a))
+* feat(core): add the expr until predicate to JSON workflows ([da9a553](https://github.com/mattapperson/noetic/commit/da9a553))
+* feat(core): finish the JSON workflow compute node ([df5f857](https://github.com/mattapperson/noetic/commit/df5f857))
+* feat(core): route conditional nodes on JSONata expr tests ([d2afcee](https://github.com/mattapperson/noetic/commit/d2afcee))
+* wip(core): merge partial JSONata expression work onto loop/recursion/decide branch ([7c4a718](https://github.com/mattapperson/noetic/commit/7c4a718))
+
 ## @noetic-tools/types-v3.9.1 (2026-10-25)
 
 * refactor(types): keep the tool approver with the harness judgment calls (#129) ([caef046](https://github.com/mattapperson/noetic/commit/caef046)), closes [#129](https://github.com/mattapperson/noetic/issues/129) [#128](https://github.com/mattapperson/noetic/issues/128)
