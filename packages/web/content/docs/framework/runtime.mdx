@@ -147,8 +147,8 @@ Stream accessors are keyed by `threadId` (via `SessionScope`), are safe to call 
 | `getReasoningStream(scope?)` | `AsyncIterable<string>` | Reasoning token deltas (reasoning models). |
 | `getItemStream(scope?)` | `AsyncIterable<StreamingItem>` | Cumulative item snapshots with `isComplete` flag. Carries the full session log — framework-authored items (turn inputs, tool results, items a step [emits](/docs/framework/steps#emitting-items-early)) included. A [custom item](/docs/framework/custom-items) streams each event in progress, then its final item, under one `id`, typed by the graph's declarations. |
 | `getFullStream(scope?)` | `AsyncIterable<StreamEvent>` | All raw events (SDK + framework) for the session, each custom item event (`custom_item_event`) included. Narrow one with `isCustomItemEvent(event, item)`. |
-| `abort(scope?)` | `Promise<void>` | Cancel the in-flight turn. Queued messages are preserved and trigger a fresh turn once abort completes. |
-| `getStatus(scope?)` | `HarnessStatus` | Snapshot: `{ kind: 'idle' \| 'generating' \| 'aborting' }`. |
+| `abort(scope?)` | `Promise<void>` | Cancel the in-flight turn. Queued messages are preserved and trigger a fresh turn once abort completes. Pass `drainMs` to [stop gracefully](#graceful-stop). |
+| `getStatus(scope?)` | `HarnessStatus` | Snapshot: `{ kind: 'idle' \| 'generating' \| 'draining' \| 'aborting' }`. `draining` carries the `deadline` (epoch ms) of a [graceful stop](#graceful-stop). |
 | `getQueueSize(scope?)` | `number` | Count of messages queued on the session. |
 
 ### Delivery Modes
@@ -224,6 +224,8 @@ Framework events emitted during execution:
 | `{name}:model_call_stalled` | Stream-idle watchdog fired; the round is about to abort. Data: `{ round, idleTimeoutMs }`. |
 | `{name}:spend_pending` | A paid call was left with no settled bill, or `restore()` found one. Data: `{ id, kind, model, generationId?, ceiling?, unbounded? }`. See [Paid Calls](/docs/framework/durability#paid-calls). |
 | `{name}:spend_settled` | A pending paid call was settled or written off. Data: `{ id, cost, writtenOff? }`. |
+| `{name}:drain_started` | A [graceful stop](#graceful-stop) began. Data: `{ executionId, deadline, inFlight }`. |
+| `{name}:drain_finished` | A graceful stop ended, just before the cancel. Data: `{ executionId, reason, durationMs, finished, cutOff }`. |
 
 callModel steps support an `emit` option to control step/tool framework event emission — set `false` to suppress or pass a filter function. Turn-level events are emitted by the session runner and are not gated by `step.emit`.
 
@@ -299,11 +301,27 @@ When the harness is constructed with a durable `environment.storage.adapter` (an
 |---|---|
 | `checkpoint(ctx)` | Snapshot execution state (frontier, layer states, cwd, channels, state, usage, and the run's item-log baseline) through the checkpoint store. Fires automatically at run start, after every step, after `runAppendPipeline`, and when a run finishes. Keyed by `ctx.id`; idempotent. |
 | `restore(executionId, opts?)` | Rebuild a `Context` from a previously saved snapshot and step ledger, standing where the interrupted run began; run the same step on the same input to resume. Returns `null` when neither exists. Throws `NoeticConfigError` with `code: 'CHECKPOINT_SCHEMA_MISMATCH'` when the persisted `schemaVersion` is unrecognised. `opts` is a `RestoreContextOptions` (`parent` / `rollUpUsage` / `state` / `contextLayers`) carrying back the host wiring a snapshot cannot serialise — see [Restoring a decorated context](/docs/framework/durability#restoring-a-decorated-context). |
-| `cancel(ctx, reason?)` | Cancel a running execution: abort `ctx` and every live descendant context (parallel paths, spawn children), then run context-layer teardown — `onComplete` with `outcome: 'aborted'`, then `dispose` — bottom-up. Layer hooks already running on a context (`recall`, `store`, `beforeToolCall`, `afterModelCall`, `onDecision`) finish, up to their timeouts, before that context's teardown starts. A no-op on an already-cancelled context. |
+| `cancel(ctx, options?)` | Cancel a running execution: abort `ctx` and every live descendant context (parallel paths, spawn children), then run context-layer teardown — `onComplete` with `outcome: 'aborted'`, then `dispose` — bottom-up. Layer hooks already running on a context (`recall`, `store`, `beforeToolCall`, `afterModelCall`, `onDecision`) finish, up to their timeouts, before that context's teardown starts. A no-op on an already-cancelled context. `options` is the reason as a string, or `{ reason?, drainMs? }`; `drainMs` makes it a [graceful stop](#graceful-stop). |
 
 Cancellation reaches inside the work in flight: blocked channel `recv`/`send` calls reject with `cancelled`, the current provider stream and ACP agent turn are cut short, and the next step boundary throws `cancelled`. Tokens and cost already spent stay charged to the context. Beyond those points it is cooperative — a `runCode` body that ignores `ctx.aborted` between `await`s runs to its next step boundary.
 
 Use [`ctx.abort(reason)`](/docs/framework/context#abort) for the same signal without layer teardown (it is synchronous and returns `void`); use `cancel` when the harness owns the layer lifecycle. Note that `harness.abort(scope?)` is a different operation: it cancels the current *session turn* by thread, not a specific context tree.
+
+### Graceful stop
+
+A plain cancel cuts the provider stream at once, and the provider still bills the cut-off round. A host that is shutting down can instead give in-flight model calls time to finish:
+
+```ts validate=none
+process.on('SIGTERM', () => {
+  void harness.cancel(ctx, { reason: 'SIGTERM', drainMs: 10e3 });
+});
+```
+
+With `drainMs`, nothing new starts beneath `ctx`: steps, model rounds and tool calls wait instead. `callModel` rounds and `decide` calls already in flight get up to `drainMs` to finish, be charged to the context, and let their step record. Then the cancel runs as without `drainMs`, and the waiting work throws `cancelled`. Calls still running at the deadline are cut off the same way a plain cancel cuts them.
+
+For a session turn, `harness.abort({ threadId, drainMs })` does the same, and `getStatus()` reports `{ kind: 'draining', turnId, deadline }` while it waits. A second `cancel` or `abort` during the drain cancels at once.
+
+`{name}:drain_started` lists the calls in flight; `{name}:drain_finished` gives the `reason` (`settled` when nothing was left, `deadline`, or `stopped`) and splits the calls into `finished` and `cutOff`. Each call is `{ kind: 'model_round' | 'decide', model, executionId, round? }`.
 
 The `subprocess` adapter is the companion surface: it persists handle manifests for every long-lived child so a restarted host can call `harness.subprocess.listLive()` + `harness.restore(executionId)` per live child to rejoin the execution. Full durable-execution model, storage layout, and IPC protocol live on the [Durability](/docs/framework/durability) page.
 

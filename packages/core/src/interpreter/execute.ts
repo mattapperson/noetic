@@ -12,6 +12,7 @@ import type {
 import { frameworkCast, NoeticErrorImpl } from '@noetic-tools/types';
 import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../runtime/broadcaster-utils';
 import { ContextImpl } from '../runtime/context-impl';
+import { drainsOf } from '../runtime/drain';
 import type { StepLedger } from '../runtime/durable/step-ledger';
 import { REPLAY_KEY_PREFIX } from '../runtime/durable/step-ledger';
 import type { EventBroadcaster } from '../runtime/event-broadcaster';
@@ -360,6 +361,9 @@ export async function execute<TContext = ContextData, I = unknown, O = unknown>(
   ctx: Context<TContext>,
 ): Promise<O> {
   const baseCtx = frameworkCast<Context>(ctx);
+  // Under a graceful stop no new step starts: it waits here until the tree is cancelled.
+  const drains = drainsOf(baseCtx);
+  await drains?.hold(baseCtx);
   // Depth guard — classified as step_failed (not budget_exceeded) because depth
   // is a structural safety limit, not a user-configurable budget field.
   if (ctx.depth >= MAX_DEPTH) {
@@ -510,6 +514,7 @@ export async function execute<TContext = ContextData, I = unknown, O = unknown>(
     await emitStepItems(step, result, stepCtx);
   } catch (error) {
     lane?.releaseDispatch();
+    drains?.release(frameworkCast<Context>(stepCtx));
     throw error;
   } finally {
     lane?.leaveStep(frame);
@@ -547,5 +552,9 @@ export async function execute<TContext = ContextData, I = unknown, O = unknown>(
    * save is logged rather than thrown — durability must never fail a good step. */
   await baseCtx.checkpoint();
 
+  // The model calls the step made stop counting as in flight only now, once
+  // they are charged and the step recorded. A call a failed record leaves
+  // behind is released when an enclosing step ends.
+  drains?.release(frameworkCast<Context>(stepCtx));
   return result;
 }

@@ -539,6 +539,7 @@ export type {
   AgentHarnessContract,
   AgentHooks,
   CallModelRequest,
+  CancelOptions,
   ContextCacheConfig,
   ContextCacheStore,
   ContextEpoch,

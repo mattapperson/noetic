@@ -118,6 +118,15 @@ Cancellation is cooperative beyond those points: step code that ignores
 `ctx.aborted` between `await`s runs until its next step boundary, which is where
 the interpreter throws `cancelled`.
 
+#### Graceful Cancellation
+
+`runtime.cancel(ctx, { drainMs })` holds every new step, model round and tool
+call beneath `ctx`, lets the model calls already in flight finish and be
+charged for up to `drainMs`, and then cancels exactly as above. The held work
+throws `cancelled`; calls still running at the deadline are cut off by the same
+abort signal as item 5. A second `cancel` during the drain cancels at once. See
+`08-runtime` § Graceful Stop.
+
 #### Cancellation is Idempotent
 
 Calling `runtime.cancel()` on an already-cancelled context is a no-op, and the

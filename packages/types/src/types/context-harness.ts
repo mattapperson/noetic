@@ -16,6 +16,7 @@ import type { FsAdapter } from './fs-adapter';
 import type { HarnessResponse, StreamEvent, StreamingItem } from './harness-result';
 import type { ExecuteInput, Item } from './items';
 import type { Span, TraceExporter } from './observability';
+import type { CancelOptions } from './runtime';
 import type { ShellAdapter } from './shell-adapter';
 import type { OnSteerParams, SteeringDecision, SteerVerdict } from './steering';
 import type { SubprocessAdapter } from './subprocess-adapter';
@@ -29,6 +30,11 @@ export type ContextHarnessStatus =
       readonly kind: 'generating';
       readonly startedAt: number;
       readonly turnId: string;
+    }
+  | {
+      readonly kind: 'draining';
+      readonly turnId: string;
+      readonly deadline: number;
     }
   | {
       readonly kind: 'aborting';
@@ -242,9 +248,10 @@ export interface ContextHarness {
   /**
    * Cancel an execution: abort `ctx` and every live descendant context, then
    * run context-layer teardown (`onComplete` with `outcome: 'aborted'`, then
-   * `dispose`) bottom-up. A no-op on an already-cancelled context.
+   * `dispose`) bottom-up. A no-op on an already-cancelled context. With
+   * `{ drainMs }`, in-flight model calls get that long to finish first.
    */
-  cancel(ctx: Context, reason?: string): Promise<void>;
+  cancel(ctx: Context, options?: string | CancelOptions): Promise<void>;
   /** Trace exporter spans are flushed to. Defaults to a no-op exporter. */
   readonly traceExporter: TraceExporter;
   createSpan(name: string, parent: Span | null): Span;

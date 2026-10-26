@@ -15,6 +15,7 @@ export type {
   AgentHarnessContract,
   AgentHooks,
   CallModelRequest,
+  CancelOptions,
   Channel,
   ChannelHandle,
   Context,

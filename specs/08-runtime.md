@@ -296,8 +296,9 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
   getReasoningStream(scope?: SessionScope): AsyncIterable<string>;
   getFullStream(scope?: SessionScope): AsyncIterable<StreamEvent>;
 
-  // Cancel the in-flight turn. Queued messages are preserved.
-  abort(scope?: SessionScope & { reason?: string }): Promise<void>;
+  // Cancel the in-flight turn. Queued messages are preserved. With `drainMs`
+  // the turn drains first (see Graceful Stop).
+  abort(scope?: SessionScope & CancelOptions): Promise<void>;
 
   // Session observability.
   getStatus(scope?: SessionScope): HarnessStatus;
@@ -397,8 +398,8 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
   // Settle a call that can never be priced at an amount the host asserts.
   writeOffSpend(id: string, opts: { assumedCost: number }): Promise<SpendSettlement | undefined>;
 
-  // Lifecycle
-  cancel(ctx: Context, reason?: string): Promise<void>;
+  // Lifecycle. A string is the reason alone; `{ drainMs }` drains first (see Graceful Stop).
+  cancel(ctx: Context, options?: string | CancelOptions): Promise<void>;
 
   // Observability (see 10-observability)
   createSpan(name: string, parent: Span | null): Span;
@@ -517,6 +518,23 @@ Steers reach model calls on the session's own context. A spawned child takes the
 
 With durability on, a steer sent into a running turn is kept in the thread's session record until the turn ends, so a turn resumed on a new harness still applies it (see `23a-step-level-resume` § Sessions).
 
+### Graceful Stop
+
+`cancel(ctx, { drainMs })` and `abort({ drainMs })` stop an execution gently, for a host that is shutting down:
+
+1. **Nothing new starts.** Beneath the drained context, every step boundary, model round and tool call waits instead of starting. Calls already in flight carry on.
+2. **In-flight model calls finish, up to `drainMs`.** A `callModel` round or `decide` call counts as in flight from dispatch until its caller next reaches a step boundary, round or tool call, or its step ends. So a finished call is charged to the context and, when it was a step's last, the step is recorded in the ledger before anything is cancelled.
+3. **Then it cancels as without `drainMs`.** The drain ends as soon as nothing is in flight (`settled`), at the deadline (`deadline`), or when the tree is stopped another way (`stopped`). Held steps then throw `cancelled`. Calls still running are cut off through the same abort path a plain cancel uses, so anything that settles an aborted call's cost later applies to them too.
+
+A second `cancel` or `abort` on the drained context during the drain stops it at once. The drained session reports `{ kind: 'draining', turnId, deadline }` from `getStatus()` until the cancel begins.
+
+Two framework events report the drain on the context's broadcaster. Each call in them is `{ kind: 'model_round' | 'decide', model, executionId, round? }`, where `executionId` is the id of the context that made it.
+
+| Event | Data |
+|-------|------|
+| `{name}:drain_started` | `{ executionId, deadline, inFlight }` |
+| `{name}:drain_finished` | `{ executionId, reason: 'settled' \| 'deadline' \| 'stopped', durationMs, finished, cutOff }` |
+
 ### Stream Idle Timeout
 
 The harness runs a per-round watchdog over each provider call's SSE stream. The idle timeout is fixed at 120 seconds — long enough that slow models are never falsely aborted, short enough that a stalled SSE becomes a visible error rather than a silent hang. The watchdog re-arms on every stream event; if no event arrives within the window, the round is aborted, `{name}:model_call_stalled` is emitted, and the surrounding turn fails with `turn_aborted { reason: "model stream idle timeout after <N>ms" }`. This prevents silent hangs when a provider drops the connection without sending a terminal event.
@@ -570,6 +588,8 @@ interface FrameworkStreamEvent {
 | `{name}:stream_pipe_error` | Emitted when SDK stream piping fails. Data: `{ error }` |
 | `{name}:spend_pending` | Emitted when a paid call is left with no settled bill, or `restore()` finds one (`23-durable-execution` § Paid dispatches). Data: `{ id, kind, model, generationId?, ceiling?, unbounded? }` |
 | `{name}:spend_settled` | Emitted when a pending paid call is settled or written off. Data: `{ id, cost, writtenOff? }` |
+| `{name}:drain_started` | Emitted when a graceful stop begins (see Graceful Stop). Data: `{ executionId, deadline, inFlight }` |
+| `{name}:drain_finished` | Emitted when a graceful stop ends, just before the cancel. Data: `{ executionId, reason, durationMs, finished, cutOff }` |
 
 ### Streaming Scope
 
@@ -617,7 +637,14 @@ interface SessionScope {
 type HarnessStatus =
   | { readonly kind: 'idle' }
   | { readonly kind: 'generating'; readonly startedAt: number; readonly turnId: string }
+  | { readonly kind: 'draining'; readonly turnId: string; readonly deadline: number }
   | { readonly kind: 'aborting'; readonly turnId: string };
+
+interface CancelOptions {
+  readonly reason?: string;
+  /** Drain for up to this many ms before cancelling (see Graceful Stop). */
+  readonly drainMs?: number;
+}
 
 type DeliveryMode = 'next-turn' | 'between-rounds' | 'next-item' | 'interrupt';
 ```

@@ -89,7 +89,8 @@ async function refetchAgentData(): Promise<void> {
     store.setUsage(usage.value);
   }
   if (status.status === 'fulfilled') {
-    store.setGenerating(status.value.kind === 'generating');
+    // A draining turn is still running: it stops only once its drain ends.
+    store.setGenerating(status.value.kind === 'generating' || status.value.kind === 'draining');
   }
   // A gap may span a whole turn (or a reset) — recompute the preview too.
   store.invalidatePreview();

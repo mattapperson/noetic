@@ -2,6 +2,7 @@ export type { ChannelWarning } from '../../runtime/channel-store';
 export { ChannelStore, warnToConsole } from '../../runtime/channel-store';
 export { ContextImpl, collectContextTree, laneBase, rootIdOf } from '../../runtime/context-impl';
 export { snapshotCwdState } from '../../runtime/cwd-helpers';
+export { Drains } from '../../runtime/drain';
 export type { CheckpointStore } from '../../runtime/durable';
 export { createCheckpointStore } from '../../runtime/durable/checkpoint-store';
 export type { RestoreCheckpointOptions } from '../../runtime/durable/harness-checkpoints';

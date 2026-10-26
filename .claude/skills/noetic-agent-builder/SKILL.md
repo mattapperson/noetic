@@ -230,9 +230,9 @@ const harness = new AgentHarness({ ..., defaultDeliveryMode: 'between-rounds' })
 
 Observability:
 
-- `harness.getStatus()` — `{ kind: 'idle' | 'generating' | 'aborting' }`
+- `harness.getStatus()` — `{ kind: 'idle' | 'generating' | 'draining' | 'aborting' }`
 - `harness.getQueueSize()` — number of pending messages
-- `harness.abort()` — cancel the in-flight turn; queued messages drive the next turn
+- `harness.abort()` — cancel the in-flight turn; queued messages drive the next turn. `abort({ drainMs })` (or `cancel(ctx, { drainMs })`) stops gracefully: nothing new starts, in-flight model calls get `drainMs` to finish and be charged, then it cancels
 - Framework events `{name}:turn_started`, `{name}:turn_completed`, `{name}:inbox_injected` expose queue delivery for UI integration
 
 ## Key Rules
