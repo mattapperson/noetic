@@ -196,12 +196,19 @@ export function createLocalSubprocessAdapter(
     return typeof handle.metadata?.pid === 'number' ? handle.metadata.pid : null;
   }
 
+  /**
+   * Starts an OS process. A request that carries `stdin` is a run-to-result call (a
+   * JSON workflow `runCode` node): its stdio is piped, `stdin` is written and closed,
+   * and stdout becomes the handle's `result` when the process exits 0. Without
+   * `stdin` the child runs detached from the adapter's I/O, for long-lived processes.
+   */
   async function spawnProcessHandle(request: ProcessSubprocessRequest): Promise<SpawnedSubprocess> {
     let asyncSpawnError: unknown = null;
+    const captures = request.stdin !== undefined;
     const child = spawnFn(request.command, request.args ?? [], {
       cwd: request.cwd,
       detached: request.detached ?? false,
-      stdio: 'ignore',
+      stdio: captures ? 'pipe' : 'ignore',
       env: request.env
         ? {
             ...process.env,
@@ -212,6 +219,7 @@ export function createLocalSubprocessAdapter(
     child.on('error', (err) => {
       asyncSpawnError = err;
     });
+    const output = captures ? captureOutput(child, request.stdin ?? '') : undefined;
     child.unref();
 
     if (child.pid === undefined || !signaller.isAlive(child.pid)) {
@@ -239,20 +247,41 @@ export function createLocalSubprocessAdapter(
       pid,
       pidStarttime,
     });
-    // Listen before the first await so a child that exits at once still settles.
-    child.on('exit', (code) => {
-      void settleProcessExit(spawned.handle.id, code, persisted);
-    });
+    // Listen before the first await so a child that exits at once still settles. A
+    // captured run waits for `close`, which fires only after stdout has drained.
+    const settle = (code: number | null): void => {
+      void settleProcessExit({
+        handleId: spawned.handle.id,
+        exitCode: code,
+        persisted,
+        output,
+      });
+    };
+    if (output) {
+      child.on('close', settle);
+    } else {
+      child.on('exit', settle);
+    }
     await persisted;
     return spawned;
   }
 
-  /** Settles a process handle when its OS process exits: exit code 0 completes it, anything else fails it. */
-  async function settleProcessExit(
-    handleId: string,
-    exitCode: number | null,
-    persisted: Promise<void>,
-  ): Promise<void> {
+  /**
+   * Settles a process handle when its OS process exits: exit code 0 completes it,
+   * anything else fails it. A captured run's stdout becomes the result; a failed one's
+   * error carries the end of its stderr.
+   */
+  async function settleProcessExit({
+    handleId,
+    exitCode,
+    persisted,
+    output,
+  }: {
+    handleId: string;
+    exitCode: number | null;
+    persisted: Promise<void>;
+    output: CapturedOutput | undefined;
+  }): Promise<void> {
     const latest = live.get(handleId);
     if (!latest) {
       return;
@@ -261,9 +290,12 @@ export function createLocalSubprocessAdapter(
       ...(latest.metadata ?? {}),
       exitCode,
     };
+    if (exitCode === 0 && output) {
+      metadata.result = output.stdout;
+    }
     if (exitCode !== 0) {
       metadata.error = {
-        message: `Subprocess exited with code ${exitCode ?? 'null'}`,
+        message: failureMessage(exitCode, output?.stderr),
       };
     }
     live.settle({
@@ -530,6 +562,45 @@ export function createLocalSubprocessAdapter(
       ];
     },
   };
+}
+
+//#endregion
+
+//#region Captured Output
+
+/** What a run-to-result child wrote, collected as it streams. */
+interface CapturedOutput {
+  stdout: string;
+  stderr: string;
+}
+
+/** The most stderr a failure message quotes, from its end, where the error usually is. */
+const STDERR_TAIL_CHARS = 2e3;
+
+/** Writes `stdin` to a piped child and collects its stdout and stderr. */
+function captureOutput(child: ReturnType<LocalSpawnFn>, stdin: string): CapturedOutput {
+  const output: CapturedOutput = {
+    stdout: '',
+    stderr: '',
+  };
+  child.stdout?.setEncoding('utf8');
+  child.stdout?.on('data', (chunk: string) => {
+    output.stdout += chunk;
+  });
+  child.stderr?.setEncoding('utf8');
+  child.stderr?.on('data', (chunk: string) => {
+    output.stderr += chunk;
+  });
+  // A child that exits without reading its input closes the pipe; that is its business.
+  child.stdin?.on('error', () => {});
+  child.stdin?.end(stdin);
+  return output;
+}
+
+function failureMessage(exitCode: number | null, stderr: string | undefined): string {
+  const base = `Subprocess exited with code ${exitCode ?? 'null'}`;
+  const tail = stderr?.trim().slice(-STDERR_TAIL_CHARS);
+  return tail ? `${base}: ${tail}` : base;
 }
 
 //#endregion

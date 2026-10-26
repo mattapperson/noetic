@@ -198,7 +198,7 @@ Run a serialised code body. Unlike the programmatic `runCode` (which carries a c
 | `retry` | `object` | `undefined` | Retry policy: `{ maxAttempts, backoff: 'fixed' \| 'linear' \| 'exponential', initialDelay, maxDelay? }`. |
 | `subprocess` | `string` | `undefined` | Named subprocess adapter ref, resolved via `HydrationContext.resolveSubprocess`. When omitted, the harness default (`ctx.subprocess`) is used. |
 
-> **Execution requires a subprocess adapter.** The `runCode` node does not execute code in the worker process. The host must supply a subprocess adapter capable of running the code body and capturing its stdout. A non-zero exit (or failed handle) surfaces as a thrown error.
+> **Execution requires a subprocess adapter.** The `runCode` node does not execute code in the worker process. The host must supply a subprocess adapter capable of running the code body and capturing its stdout. On Node, `createLocalSubprocessAdapter()` from `@noetic-tools/platform-node` does: it runs the body with `node -e`, writes the step input to stdin, and returns stdout. A non-zero exit (or failed handle) surfaces as a thrown error carrying the end of the process's stderr.
 
 ### invokeTool
 

@@ -225,7 +225,9 @@ The adapter is threaded through the harness: `AgentHarness.subprocess` → `Cont
 
 ### Request Dispatch
 
-`adapter.spawn(request)` is the single entry point. `request.kind === 'process'` launches an OS child; `request.kind === 'step'` dispatches a registered Noetic step. The in-memory adapter always runs step requests in-process; the local adapter spawns `bun run <step-bootstrap>` with `NOETIC_REGISTRY_ENTRY` pointing at the user's entry module, passes the serialised input over stdin, and captures the result from stdout. The bootstrap's contract lives at `packages/core/src/adapters/node/step-bootstrap.ts`.
+`adapter.spawn(request)` is the single entry point. `request.kind === 'process'` launches an OS child; `request.kind === 'step'` dispatches a registered Noetic step.
+
+A process request that carries `stdin` is a **run-to-result** call, the shape a JSON workflow `runCode` node sends (`26-json-workflow-runtime`). The local adapter pipes the child's stdio, writes `stdin` and closes it, and settles on `close` (after stdout has drained, so output larger than a pipe buffer arrives whole). Exit code 0 completes the handle with stdout as `metadata.result`. Any other code fails it, with the end of stderr (up to 2,000 characters) in `metadata.error.message`. A child that exits without reading its input is not an error. A process request without `stdin` runs with its stdio ignored and settles on `exit`, for long-lived children whose output nobody collects. The pipes belong to the adapter's process, so a run-to-result child does not outlive its host: reattaching to one after a restart finds it gone. The in-memory adapter always runs step requests in-process; the local adapter spawns `bun run <step-bootstrap>` with `NOETIC_REGISTRY_ENTRY` pointing at the user's entry module, passes the serialised input over stdin, and captures the result from stdout. The bootstrap's contract lives at `packages/core/src/adapters/node/step-bootstrap.ts`.
 
 ### Handle Metadata Contract
 
