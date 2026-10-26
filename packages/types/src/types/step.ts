@@ -14,6 +14,7 @@ import type { Context } from './context';
 import type { ContextConfig, ContextData, ContextLayer, ProjectionPolicy } from './context-layer';
 import type { DecideAnswers, DecideQuestions } from './decide';
 import type { NoeticError } from './error';
+import type { Item } from './items';
 import type { OutputCodec } from './output-codec';
 import type { SubprocessAdapter } from './subprocess-adapter';
 import type { Tool } from './tool';
@@ -136,6 +137,44 @@ export interface StepReplay<TContext = ContextData, I = unknown> {
   replayKey?(input: I, ctx: Context<TContext>): string;
 }
 
+/**
+ * What an `emitItems` function gives: text, emitted as an assistant message; one item
+ * or a list of items, appended as they are (any `Item`, including a custom extension
+ * item the harness's item schemas accept); or `undefined` or `''` to emit nothing.
+ * @public
+ */
+export type StepEmitItemsResult = string | Item | ReadonlyArray<Item> | undefined;
+
+/**
+ * Picks what a finished step emits from its output. Indexed out of a method so its
+ * parameter stays bivariant, keeping a typed step assignable to the erased `Step` form.
+ * @public
+ */
+export type StepEmitItemsFn<TContext = ContextData, O = unknown> = {
+  bivariant(output: O, ctx: Context<TContext>): StepEmitItemsResult | Promise<StepEmitItemsResult>;
+}['bivariant'];
+
+/** @public What a step emits when it finishes. See `StepEmitItems`. */
+export type StepEmitItemsOption<TContext = ContextData, O = unknown> =
+  | boolean
+  | StepEmitItemsFn<TContext, O>;
+
+/**
+ * Lets any step add items to the conversation as soon as it finishes, rather than
+ * only through the workflow's final output.
+ * @public
+ */
+export interface StepEmitItems<TContext = ContextData, O = unknown> {
+  /**
+   * Emits items when this step finishes: they are appended to the item log and
+   * streamed at once (`item_appended`), so a step inside a loop emits on every
+   * iteration, before the loop ends. `true` emits the output as an assistant message
+   * (non-string output as JSON); a function picks text or items. A replayed step
+   * emits again only under the harness's `emitItemsOnReplay`.
+   */
+  emitItems?: StepEmitItemsOption<TContext, O>;
+}
+
 /** @public Discriminated union of all step kinds that can be composed into an execution tree. */
 export type Step<TContext = ContextData, I = unknown, O = unknown> =
   | StepRunCode<TContext, I, O>
@@ -152,7 +191,8 @@ export type Step<TContext = ContextData, I = unknown, O = unknown> =
 
 /** @public A step that executes arbitrary async logic via a user-supplied function. */
 export interface StepRunCode<TContext = ContextData, I = unknown, O = unknown>
-  extends StepReplay<TContext, I> {
+  extends StepReplay<TContext, I>,
+    StepEmitItems<TContext, O> {
   kind: 'runCode';
   id: string;
   execute: (input: I, ctx: Context<TContext>) => Promise<O>;
@@ -168,7 +208,8 @@ export interface StepRunCode<TContext = ContextData, I = unknown, O = unknown>
 
 /** @public A step that sends a prompt to a language model and returns its response. */
 export interface StepCallModel<TContext = ContextData, I = unknown, O = unknown>
-  extends StepReplay<TContext, I> {
+  extends StepReplay<TContext, I>,
+    StepEmitItems<TContext, O> {
   kind: 'callModel';
   id: string;
   /** Model id. Accepts either an eager string or a `(ctx) => string` getter. */
@@ -215,7 +256,8 @@ export interface StepCallModel<TContext = ContextData, I = unknown, O = unknown>
  * @public
  */
 export interface StepAcpAgent<TContext = ContextData, I = unknown, O = unknown>
-  extends StepReplay<TContext, I> {
+  extends StepReplay<TContext, I>,
+    StepEmitItems<TContext, O> {
   kind: 'acp-agent';
   id: string;
   /**
@@ -256,7 +298,8 @@ export interface StepAcpAgent<TContext = ContextData, I = unknown, O = unknown>
 
 /** @public A step that invokes a single tool directly, bypassing the model. */
 export interface StepInvokeTool<TContext = ContextData, I = unknown, O = unknown>
-  extends StepReplay<TContext, I> {
+  extends StepReplay<TContext, I>,
+    StepEmitItems<TContext, O> {
   kind: 'invokeTool';
   id: string;
   tool: Tool<StandardSchemaV1<unknown, I>, StandardSchemaV1<unknown, O>>;
@@ -270,7 +313,8 @@ export interface StepInvokeTool<TContext = ContextData, I = unknown, O = unknown
  * @public
  */
 export interface StepDecide<TContext = ContextData, I = unknown, O = unknown>
-  extends StepReplay<TContext, I> {
+  extends StepReplay<TContext, I>,
+    StepEmitItems<TContext, O> {
   kind: 'decide';
   /** Phantom field carrying the answers type for inference. Never set at runtime. */
   readonly _answers?: O;
@@ -314,7 +358,8 @@ export type DecideView = 'full' | 'layers' | 'none';
 
 /** @public A step that dynamically selects and executes one of several possible sub-steps. */
 export interface StepConditional<TContext = ContextData, I = unknown, O = unknown>
-  extends StepReplay<TContext, I> {
+  extends StepReplay<TContext, I>,
+    StepEmitItems<TContext, O> {
   kind: 'conditional';
   id: string;
   /**
@@ -343,7 +388,8 @@ export type StepInParallel<TContext = ContextData, I = unknown, O = unknown> =
 
 /** @public An inParallel step that returns the result of the first path to complete. */
 export interface StepInParallelRace<TContext = ContextData, I = unknown, O = unknown>
-  extends StepReplay<TContext, I> {
+  extends StepReplay<TContext, I>,
+    StepEmitItems<TContext, O> {
   kind: 'inParallel';
   id: string;
   mode: 'race';
@@ -354,7 +400,8 @@ export interface StepInParallelRace<TContext = ContextData, I = unknown, O = unk
 
 /** @public An inParallel step that runs all paths and merges their results. */
 export interface StepInParallelAll<TContext = ContextData, I = unknown, O = unknown>
-  extends StepReplay<TContext, I> {
+  extends StepReplay<TContext, I>,
+    StepEmitItems<TContext, O> {
   kind: 'inParallel';
   id: string;
   mode: 'all';
@@ -366,7 +413,8 @@ export interface StepInParallelAll<TContext = ContextData, I = unknown, O = unkn
 
 /** @public An inParallel step that runs all paths and collects fulfilled/rejected outcomes. */
 export interface StepInParallelSettle<TContext = ContextData, I = unknown, O = unknown>
-  extends StepReplay<TContext, I> {
+  extends StepReplay<TContext, I>,
+    StepEmitItems<TContext, O> {
   kind: 'inParallel';
   id: string;
   mode: 'settle';
@@ -383,7 +431,8 @@ export interface StepInParallelSettle<TContext = ContextData, I = unknown, O = u
  * @public
  */
 export interface StepWithContext<TContext = ContextData, I = unknown, O = unknown>
-  extends StepReplay<TContext, I> {
+  extends StepReplay<TContext, I>,
+    StepEmitItems<TContext, O> {
   kind: 'withContext';
   id: string;
   child: Step<TContext, I, O>;
@@ -392,7 +441,8 @@ export interface StepWithContext<TContext = ContextData, I = unknown, O = unknow
 
 /** @public A step that launches a child execution with its own context scope. */
 export interface StepSpawn<TContext = ContextData, I = unknown, O = unknown>
-  extends StepReplay<TContext, I> {
+  extends StepReplay<TContext, I>,
+    StepEmitItems<TContext, O> {
   kind: 'spawn';
   id: string;
   child: Step<TContext, I, O>;
@@ -411,7 +461,8 @@ export interface StepSpawn<TContext = ContextData, I = unknown, O = unknown>
  * @public
  */
 export interface StepLoop<TContext = ContextData, I = unknown, O = unknown>
-  extends StepReplay<TContext, I> {
+  extends StepReplay<TContext, I>,
+    StepEmitItems<TContext, O> {
   kind: 'loop';
   /** Unique step identifier used in traces and error messages. */
   id: string;
@@ -459,7 +510,8 @@ export type ScheduleErrorPolicy = 'continue' | 'fail';
  * @public
  */
 export interface StepSchedule<TContext = ContextData, I = unknown, O = unknown>
-  extends StepReplay<TContext, I> {
+  extends StepReplay<TContext, I>,
+    StepEmitItems<TContext, O> {
   kind: 'schedule';
   /** Unique step identifier used in traces and error messages. */
   id: string;

@@ -24,6 +24,7 @@ export type {
   UntilPredicate,
   WithContextWorkflowNode,
   WorkflowDocument,
+  WorkflowEmitItems,
   WorkflowGraph,
   WorkflowNode,
   WorkflowReplayKey,

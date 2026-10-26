@@ -11,20 +11,27 @@ import type {
   AcpAgent,
   Context,
   ExecuteStepFn,
+  Item,
   OutputCodec,
   ProcessSubprocessRequest,
   ServerToolSpec,
   Step,
   StepDecide,
+  StepEmitItemsOption,
   SubprocessAdapter,
   Tool,
   ToolContext,
   ToolExecutionContext,
   Until,
 } from '@noetic-tools/types';
-import { frameworkCast, isServerToolSpec, NoeticConfigError } from '@noetic-tools/types';
+import {
+  frameworkCast,
+  ItemSchema,
+  isServerToolSpec,
+  NoeticConfigError,
+} from '@noetic-tools/types';
 import type { ExpressionLimits } from '../expression/jsonata';
-import { compileExpression, compute, passes, readInput } from '../expression/jsonata';
+import { compileExpression, compute, computeMaybe, passes, readInput } from '../expression/jsonata';
 import type {
   CallModelWorkflowNode,
   ConditionalRoute,
@@ -33,6 +40,7 @@ import type {
   SubflowWorkflowNode,
   UntilPredicate,
   WorkflowDocument,
+  WorkflowEmitItems,
   WorkflowNode,
 } from '../schemas/workflow';
 import { all, any } from '../until/combinators';
@@ -890,6 +898,60 @@ function parseJsonObject(text: string): unknown {
   }
 }
 
+/**
+ * The object form of a node's `emitItems` builds an emit function: the value is the
+ * `expr` result, or the output itself read as JSON, and no value emits nothing, so one
+ * node can emit on some iterations of a loop and stay quiet on others.
+ */
+function workflowEmitItems(
+  nodeId: string,
+  option: WorkflowEmitItems,
+  ctx: HydrationContext,
+): StepEmitItemsOption {
+  if (typeof option === 'boolean') {
+    return option;
+  }
+  const where = `emitItems of node '${nodeId}'`;
+  const expr =
+    option.expr === undefined
+      ? undefined
+      : compileExpression(option.expr, where, ctx.expressionLimits);
+  const asItems = option.as === 'items';
+  if (!expr && !asItems) {
+    return true;
+  }
+  return async (output) => {
+    const value = expr ? await computeMaybe(expr, readInput(output)) : readInput(output);
+    if (value === undefined) {
+      return undefined;
+    }
+    return asItems ? itemList(value, where) : stringifyResult(value);
+  };
+}
+
+/**
+ * Reads a value as items: one object or a list of them, each with a string `type`.
+ * Whether a type is allowed is the item log's call, against the harness's item schemas.
+ *
+ * @throws `NoeticConfigError` with code `INVALID_EMIT_ITEMS` when the value is not an
+ * item or a list of items.
+ */
+function itemList(value: unknown, where: string): Item[] {
+  const list = Array.isArray(value)
+    ? value
+    : [
+        value,
+      ];
+  if (!list.every((entry) => ItemSchema.safeParse(entry).success)) {
+    throw new NoeticConfigError({
+      code: 'INVALID_EMIT_ITEMS',
+      message: `The ${where} gave ${JSON.stringify(value)}, which is not an item or a list of items.`,
+      hint: 'With "as": "items", give an object with a string "type" (e.g. { "type": "message", "role": "assistant", ... } or a registered custom type like "myapp:progress"), or a list of them.',
+    });
+  }
+  return frameworkCast<Item[]>(list);
+}
+
 function stringifyResult(value: unknown): string {
   if (typeof value === 'string') {
     return value;
@@ -1088,7 +1150,7 @@ async function runCodeViaSubprocess(opts: {
  * @throws `NoeticConfigError` with code `UNKNOWN_WORKFLOW_REFERENCE` (at execution time) if a subflow ref names no registered workflow.
  * @throws `NoeticConfigError` with code `WORKFLOW_RECURSION_LIMIT` (at execution time) if named sub-workflow refs nest deeper than `maxRecursionDepth`.
  * @throws `NoeticConfigError` with code `INVALID_MAX_RECURSION_DEPTH` (at execution time) when a named ref resolves under a `maxRecursionDepth` that is not a positive integer or `Infinity`.
- * @throws `NoeticConfigError` with code `WORKFLOW_VALIDATION_FAILED` if a `compute` expression, a conditional route's `expr`, or an `expr` until predicate does not parse.
+ * @throws `NoeticConfigError` with code `WORKFLOW_VALIDATION_FAILED` if a `compute` expression, a conditional route's `expr`, an `expr` until predicate, or an `emitItems` expression does not parse.
  * @throws `NoeticConfigError` with code `INVALID_EXPRESSION_LIMITS` if an expression compiles under `expressionLimits` holding a value that is not a positive integer or `Infinity`.
  * @throws `NoeticConfigError` with code `EXPRESSION_FAILED` or `EXPRESSION_LIMIT_EXCEEDED` (at execution time) if an expression fails or exceeds its limits.
  */
@@ -1111,6 +1173,9 @@ export function hydrateNode(
   }
   if (node.replayKey !== undefined) {
     hydrated.replayKey = workflowReplayKey(node.id, node.replayKey);
+  }
+  if (node.emitItems !== undefined) {
+    hydrated.emitItems = workflowEmitItems(node.id, node.emitItems, ctx);
   }
   return hydrated;
 }

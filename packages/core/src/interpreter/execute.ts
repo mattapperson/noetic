@@ -16,6 +16,7 @@ import type { StepLedger } from '../runtime/durable/step-ledger';
 import { REPLAY_KEY_PREFIX } from '../runtime/durable/step-ledger';
 import type { EventBroadcaster } from '../runtime/event-broadcaster';
 import { DetachedHandleImpl } from '../util/detached-handle';
+import { appendReplayed, emitStepItems } from './emit-items';
 import { executeAcpAgent } from './execute-acp-agent';
 import {
   executeCallModel,
@@ -269,9 +270,7 @@ function replayFromLedger<TContext, I, O>(opts: {
       hit: false,
     };
   }
-  for (const item of items) {
-    stepCtx.itemLog.append(item);
-  }
+  appendReplayed(stepCtx, items, replayed.streamed ?? []);
   emitFrameworkEvent({
     broadcaster,
     agentName,
@@ -322,6 +321,7 @@ async function recordToLedger<TContext, I, O>(opts: {
     return;
   }
   const items = lane?.appendedItems() ?? [];
+  const streamed = lane?.emittedIndices() ?? [];
   await ledger.record({
     path: ledgerKey,
     stepId: step.id,
@@ -331,6 +331,11 @@ async function recordToLedger<TContext, I, O>(opts: {
     ...(items.length > 0
       ? {
           items,
+        }
+      : {}),
+    ...(streamed.length > 0
+      ? {
+          streamed,
         }
       : {}),
     completedAt: new Date().toISOString(),
@@ -497,6 +502,9 @@ export async function execute<TContext = ContextData, I = unknown, O = unknown>(
         });
       }
     }
+    // Inside the try, so an item the schemas refuse fails the dispatch like any other
+    // error; before the ledger record, so the entry holds the items and replays them.
+    await emitStepItems(step, result, stepCtx);
   } catch (error) {
     lane?.releaseDispatch();
     throw error;

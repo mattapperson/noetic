@@ -62,7 +62,7 @@ Authoring documents by hand or reviewing LLM-generated ones, reference the schem
 
 ## WorkflowNode Union
 
-`WorkflowNode` is a discriminated union on `kind`. Each variant maps to an existing `Step` builder. All nodes share three fields: a required `id`, an optional boolean `durable` that the hydrator copies onto the built step, and an optional declarative `replayKey` (§ Replay keys) that the hydrator turns into the step's `replayKey` function. `durable: false` keeps the node out of the step ledger, so a resumed run re-runs it instead of replaying its recorded output (`23a-step-level-resume` § Identity). The `acp-agent` node kind is specified in `27-acp-agent-steps`.
+`WorkflowNode` is a discriminated union on `kind`. Each variant maps to an existing `Step` builder. All nodes share four fields: a required `id`, an optional boolean `durable` that the hydrator copies onto the built step, an optional declarative `replayKey` (§ Replay keys) that the hydrator turns into the step's `replayKey` function, and an optional `emitItems` (§ Emitting items) that the hydrator turns into the step's `emitItems` (`true`, or a function that evaluates the expression). `durable: false` keeps the node out of the step ledger, so a resumed run re-runs it instead of replaying its recorded output (`23a-step-level-resume` § Identity). The `acp-agent` node kind is specified in `27-acp-agent-steps`.
 
 ```typescript
 type WorkflowNode =
@@ -116,6 +116,45 @@ The built key is `<node id>:<hash>`, where the hash covers the whole input (`tru
 `from` on an input that is not a JSON object makes the key function throw `INVALID_REPLAY_KEY_INPUT`; the interpreter treats a throwing `replayKey` as it does for code (warn, run the step without replay or recording), so the node still runs. `replayKey` is ignored on a node that is also `durable: false`.
 
 Inside a dynamic `inParallel` (`each`), the hydrator suffixes every template node id with the item index, and replay matches `stepId` as well as the key. A keyed node there therefore replays only when its item lands at the same index — content keys do not survive a reordered `each` input.
+
+### Emitting items
+
+A workflow's output normally reaches the user only when its last step finishes. `emitItems` makes any node add items to the conversation as soon as the node finishes (`01-step-type` § Emitting items). The items are appended to the item log and streamed through `getItemStream` at once, so a node inside a loop emits on every iteration, before the loop's `until` stops it and before any later node runs:
+
+```typescript
+type WorkflowEmitItems =
+  | boolean                       // true: emit the output as an assistant message
+  | {
+      expr?: Expression;          // compute the value from the output; default: the output itself
+      as?: 'text' | 'items';      // read the value as message text (default) or as items
+    };
+```
+
+`true` emits the node's output as an assistant message, written as in § `compute`: a string as is, anything else as JSON text. In the object form, the **value** is the result of `expr` (spec 33), evaluated against the output read by the expression input rule. Without `expr`, the value is the output itself, read the same way. No value (a path that matches nothing) emits nothing, so a node can emit on some iterations and stay quiet on others. A result holding a function fails the node with `EXPRESSION_FAILED`. Validation compiles an `emitItems` expression like any other, so a syntax error fails the document with `WORKFLOW_VALIDATION_FAILED`. The object is strict: an unknown key fails validation.
+
+`as` picks how the value is read:
+
+- `"text"` (default): the value becomes the text of one assistant message, written the way a `compute` node writes output.
+- `"items"`: the value is one item (an object with a non-empty string `type`) or a list of them, appended as given. A custom item uses an Open Responses-style `prefix:name` type, and the harness must register a schema for it in its `itemSchemas`, or the node fails with `item_schema_mismatch`. A value that is not an item or a list of items fails with `INVALID_EMIT_ITEMS`. A `runCode` node that prints items as JSON can emit them with `"emitItems": { "as": "items" }`.
+
+```json
+{
+  "kind": "loop",
+  "id": "drain",
+  "maxIterations": "infinity",
+  "body": {
+    "kind": "compute",
+    "id": "step",
+    "expr": "{ 'n': n - 1 }",
+    "emitItems": { "expr": "{ 'type': 'myapp:progress', 'left': n }", "as": "items" }
+  },
+  "until": { "kind": "expr", "expr": "n = 0" }
+}
+```
+
+A resumed run that replays a node, or replays any node above it, puts its emitted items back on the log quietly. The harness option `emitItemsOnReplay` also streams them again (`01-step-type` § On resume). A document has no per-node setting for this.
+
+A `decide` node emits its answers object: `true` emits its JSON, and an `expr` reads it (`"stop.value ? 'done' : 'again'"`). Used as a loop's `until`, it emits after every iteration's verdict. A structural node (`sequence`, `loop`, `subflow`, …) emits its own output once it finishes, after its children have emitted. A `callModel` node's model output is already in the conversation, so `emitItems` on one adds a second message.
 
 ### `callModel`
 

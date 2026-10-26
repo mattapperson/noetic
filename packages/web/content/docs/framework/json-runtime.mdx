@@ -85,7 +85,7 @@ Point your editor or validator at the bundled file (resolve it from the package,
 
 Fourteen node kinds are available, plus the `acp-agent` kind documented in [ACP Agent Steps](/docs/framework/acp-agents). Leaf nodes (`callModel`, `invokeTool`, `runCode`, `compute`, `decide`) perform work; structural nodes (`sequence`, `inParallel`, `conditional`, `routeSwitch`, `loop`, `spawn`, `withContext`, `schedule`, `subflow`) compose them into trees.
 
-Every node takes two optional replay fields — see [Replay Identity](/docs/framework/durability#replay-identity):
+Every node takes two optional replay fields (see [Replay Identity](/docs/framework/durability#replay-identity)) and an optional `emitItems` field (see [Emitting items](#emitting-items)):
 
 | Field | Type | Effect |
 |---|---|---|
@@ -105,6 +105,73 @@ The key is the node id plus a hash of the selected input, so two different nodes
 ```
 
 With `from`, a node whose input is not a JSON object logs a warning (`INVALID_REPLAY_KEY_INPUT`) and runs without replay. Inside a dynamic `inParallel` (`each`), node ids get the item index appended, so a keyed node there replays only when its item keeps its index.
+
+### Emitting items
+
+By default the user sees a workflow's output only when its last node finishes. Any node can emit items sooner with `emitItems`. When the node finishes, its items are added to the conversation and streamed through `getItemStream` at once, so a node inside a loop emits on every iteration, before the loop's `until` stops it:
+
+| Form | Emits |
+|---|---|
+| `"emitItems": true` | The node's output as an assistant message: a string as is, anything else as JSON. |
+| `"emitItems": { "expr": "<JSONata>" }` | The text a [JSONata expression](/docs/framework/expressions) computes from the output. No value emits nothing. |
+| `"emitItems": { "as": "items" }` | The output itself, read as JSON, as one item or a list of items. |
+| `"emitItems": { "expr": "<JSONata>", "as": "items" }` | The item or items the expression builds. |
+
+```json
+{
+  "kind": "loop",
+  "id": "drain",
+  "maxIterations": "infinity",
+  "body": {
+    "kind": "compute",
+    "id": "step",
+    "expr": "{ 'n': n - 1 }",
+    "emitItems": { "expr": "'Left: ' & $string(n)" }
+  },
+  "until": { "kind": "expr", "expr": "n = 0" }
+}
+```
+
+Starting from `{"n":3}`, this emits `Left: 2`, `Left: 1` and `Left: 0` as each iteration ends, then the loop returns `{"n":0}`.
+
+#### Items, including custom ones
+
+A node isn't limited to assistant messages. With `"as": "items"`, it can emit any [item](/docs/framework/context), including a custom one. Following the Open Responses convention for extension items, give a custom item a `prefix:name` type and register a schema for it on the harness:
+
+```ts
+import { AgentHarness } from '@noetic-tools/core';
+import { z } from 'zod';
+
+const harness = new AgentHarness({
+  name: 'worker',
+  params: {},
+  itemSchemas: {
+    schemas: {
+      items: [z.object({ type: z.literal('myapp:progress'), left: z.number() })],
+    },
+  },
+});
+```
+
+```json
+{ "kind": "compute", "id": "step", "expr": "{ 'n': n - 1 }",
+  "emitItems": { "expr": "{ 'type': 'myapp:progress', 'left': n }", "as": "items" } }
+```
+
+A value that isn't an item or a list of items fails with [`INVALID_EMIT_ITEMS`](/docs/framework/errors#invalid_emit_items). An item whose type no schema accepts fails with `item_schema_mismatch`. A `runCode` node can print items as JSON and emit them with `"emitItems": { "as": "items" }`.
+
+#### On resume
+
+A resumed run replays finished nodes from the ledger instead of running them, and puts the items they emitted back on the log without streaming them. To stream them again, for example so a client that reconnects mid-run sees the progress it missed, set `emitItemsOnReplay: true` on the [harness](/docs/framework/runtime). It also covers nodes inside a parent that replays as a whole, such as the iterations of a finished loop.
+
+#### Notes
+
+- A `runCode` node emits its stdout.
+- A `decide` node emits its answers object, and its `emitItems` expression can read it (`"stop.value ? 'Done' : 'Trying again'"`). When the node is a loop's `until`, it emits after every verdict.
+- A structural node (`sequence`, `loop`, `subflow`, …) emits its own output once it finishes, after its children.
+- A `callModel` node's reply is already in the conversation, so `emitItems` on one adds a second copy.
+- Emitted items are normal conversation items: later `callModel` nodes see them, and `HarnessResponse.items` includes them.
+- A failed node emits nothing.
 
 ### callModel
 
@@ -213,7 +280,7 @@ A string result that is itself valid JSON (`"5"`, `"true"`) reads back as that v
 
 ### sequence
 
-Run steps sequentially, threading each output as the next step's input.
+Run steps one at a time, in array order: each child starts only after the one before it finishes, and takes that child's output as its input. The node's output is the last child's output, and a child that throws stops the rest. This is how every array of steps runs (see [Running Steps in Order](/docs/framework/steps#running-steps-in-order)); only `inParallel` runs its children concurrently.
 
 ```json
 {
@@ -233,7 +300,7 @@ Run steps sequentially, threading each output as the next step's input.
 
 ### inParallel
 
-Run multiple paths concurrently with configurable merge strategy. A fork is either **static** (a fixed `paths` array) or **dynamic** (`each`: one child per item of a runtime-produced array). Supply exactly one of `paths` or `each`.
+Run multiple paths concurrently with configurable merge strategy. Unlike `sequence`, and every other array of steps (see [Running Steps in Order](/docs/framework/steps#running-steps-in-order)), the paths all start together and each gets the same input. Nodes inside one path still run in order. A fork is either **static** (a fixed `paths` array) or **dynamic** (`each`: one child per item of a runtime-produced array). Supply exactly one of `paths` or `each`.
 
 ```json
 {

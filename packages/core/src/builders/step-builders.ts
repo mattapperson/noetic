@@ -16,6 +16,7 @@ import type {
   StandardSchemaV1,
   StepAcpAgent,
   StepCallModel,
+  StepEmitItems,
   StepInvokeTool,
   StepReplay,
   StepRunCode,
@@ -28,7 +29,9 @@ import { getDefaultRegistrar } from '../types/step-registrar';
 
 //#region Types
 
-export interface RunCodeOpts<TContext, I, O> extends StepReplay<TContext, I> {
+export interface RunCodeOpts<TContext, I, O>
+  extends StepReplay<TContext, I>,
+    StepEmitItems<TContext, O> {
   id: string;
   execute: (input: I, ctx: Context<TContext>) => Promise<O>;
   retry?: RetryPolicy;
@@ -40,7 +43,9 @@ export interface RunCodeOpts<TContext, I, O> extends StepReplay<TContext, I> {
   subprocess?: SubprocessAdapter;
 }
 
-export interface CallModelOpts<TContext, O, I = unknown> extends StepReplay<TContext, I> {
+export interface CallModelOpts<TContext, O, I = unknown>
+  extends StepReplay<TContext, I>,
+    StepEmitItems<TContext, O> {
   id: string;
   /** Model id. Eager string or `(ctx) => string` getter (resolved at step execution). */
   model: Lazy<string, TContext>;
@@ -68,13 +73,17 @@ export interface CallModelOpts<TContext, O, I = unknown> extends StepReplay<TCon
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }
 
-export interface InvokeToolOpts<I, O, TContext = ContextData> extends StepReplay<TContext, I> {
+export interface InvokeToolOpts<I, O, TContext = ContextData>
+  extends StepReplay<TContext, I>,
+    StepEmitItems<TContext, O> {
   id: string;
   tool: Tool<StandardSchemaV1<unknown, I>, StandardSchemaV1<unknown, O>>;
   args?: Partial<I>;
 }
 
-export interface StepAcpAgentOpts<TContext, O, I = unknown> extends StepReplay<TContext, I> {
+export interface StepAcpAgentOpts<TContext, O, I = unknown>
+  extends StepReplay<TContext, I>,
+    StepEmitItems<TContext, O> {
   id: string;
   /** An ACP agent adapter, e.g. `claudeCode()` from `@noetic-tools/acp`. Eager or `(ctx) => AcpAgent`. */
   agent: Lazy<AcpAgent, TContext>;

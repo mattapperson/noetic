@@ -48,6 +48,20 @@ Every step interface extends `StepReplay<TContext, I>`, so these fields apply to
 | `durable` | `boolean` | no | Defaults to `true`. `false` keeps the step out of the step ledger: never replayed or recorded on resume. |
 | `replayKey` | `(input: I, ctx: Context<TContext>) => string` | no | Content key the ledger uses instead of the execution path. |
 
+### StepEmitItems
+
+Every step interface also extends `StepEmitItems<TContext, O>`. See [Emitting Items Early](/docs/framework/steps#emitting-items-early).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `emitItems` | `StepEmitItemsOption<TContext, O>` | no | What to add to the conversation when the step finishes. The items are appended to the item log and streamed as `item_appended` at once. A step that throws emits nothing. A replay streams them again only under the harness's `emitItemsOnReplay`. |
+
+| Type | Definition |
+|---|---|
+| `StepEmitItemsOption<TContext, O>` | `boolean \| StepEmitItemsFn<TContext, O>`. `true` emits the output as an assistant message (non-strings as JSON). |
+| `StepEmitItemsFn<TContext, O>` | `(output: O, ctx: Context<TContext>) => StepEmitItemsResult \| Promise<StepEmitItemsResult>` |
+| `StepEmitItemsResult` | `string \| Item \| ReadonlyArray<Item> \| undefined`. A string becomes an assistant message; items are appended as given and must pass the context's item schemas; `undefined` or `''` emits nothing. |
+
 ## StepRunCode
 
 `StepRunCode<TContext, I, O>`

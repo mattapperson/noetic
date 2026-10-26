@@ -144,10 +144,21 @@ export function syntaxError(source: string): string | undefined {
  * @throws `NoeticConfigError` with code `EXPRESSION_FAILED` or `EXPRESSION_LIMIT_EXCEEDED`.
  */
 export async function compute(expr: CompiledExpression, input: unknown): Promise<unknown> {
-  const result = await expr.run(input);
+  const result = await computeMaybe(expr, input);
   if (result === undefined) {
     throw failed(expr.where, 'the expression gave no value; check the paths it reads.');
   }
+  return result;
+}
+
+/**
+ * Evaluates like `compute`, except that "no value" resolves to `undefined`
+ * instead of failing, for callers where nothing is a valid answer.
+ *
+ * @throws `NoeticConfigError` with code `EXPRESSION_FAILED` or `EXPRESSION_LIMIT_EXCEEDED`.
+ */
+export async function computeMaybe(expr: CompiledExpression, input: unknown): Promise<unknown> {
+  const result = await expr.run(input);
   if (holdsFunction(result)) {
     throw failed(expr.where, 'the expression gave a function, which has no JSON form.');
   }

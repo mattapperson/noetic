@@ -51,6 +51,13 @@ export interface AgentConfig<TParams extends Record<string, unknown> = Record<st
   contextCache?: ContextCacheConfig;
   /** Default model for `decide` steps. */
   decisionModel?: string;
+  /**
+   * Whether a resumed run streams again the items its replayed steps emitted
+   * (`step.emitItems`), as `item_appended`. Defaults to `false`: a replay rebuilds the
+   * log quietly. Set it when a client that reconnects to a resumed run should see
+   * the progress it missed.
+   */
+  emitItemsOnReplay?: boolean;
   /** Approves or refuses calls to tools that declare `needsApproval`. Without one, those calls run unapproved. */
   approveToolCall?: ToolApprover;
 }

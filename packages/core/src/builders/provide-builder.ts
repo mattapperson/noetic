@@ -1,9 +1,11 @@
 import type { ContextConfig, ContextData, ContextLayer } from '@noetic-tools/context';
-import type { Step, StepReplay, StepWithContext } from '@noetic-tools/types';
+import type { Step, StepEmitItems, StepReplay, StepWithContext } from '@noetic-tools/types';
 import { NoeticConfigError } from '@noetic-tools/types';
 import { getDefaultRegistrar } from '../types/step-registrar';
 
-export interface WithContextOpts<TContext, I, O> extends StepReplay<TContext, I> {
+export interface WithContextOpts<TContext, I, O>
+  extends StepReplay<TContext, I>,
+    StepEmitItems<TContext, O> {
   id: string;
   child: Step<TContext, I, O>;
   context: ContextConfig | ContextLayer[];

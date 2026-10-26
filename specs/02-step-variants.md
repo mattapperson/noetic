@@ -9,7 +9,7 @@
 
 Pure computation. The agent harness can retry freely, cache results, and doesn't need to track token usage.
 
-Every builder below (and every other step builder) also accepts the `StepReplay` fields from `01-step-type` — `durable` and `replayKey` — and copies them onto the step it builds. See `23a-step-level-resume` § Identity.
+Every builder below (and every other step builder) also accepts the `StepReplay` fields from `01-step-type` — `durable` and `replayKey` — and copies them onto the step it builds. See `23a-step-level-resume` § Identity. Each also accepts `emitItems` (`01-step-type` § Emitting items), which adds items to the conversation when the step finishes: by default an assistant message holding its output.
 
 ```typescript
 interface RunCodeOpts<TContext, I, O> extends StepReplay<TContext, I> {

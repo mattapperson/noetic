@@ -35,6 +35,35 @@ interface StepReplay<I> {
 
 They govern step-level resume: a resumed execution replays a recorded step's output instead of running it, keyed by execution path unless `replayKey` names a content key, and skipping the ledger entirely for `durable: false`. See `23a-step-level-resume` § Identity.
 
+Every variant also carries `emitItems` from `StepEmitItems`:
+
+```typescript
+type StepEmitItemsResult = string | Item | ReadonlyArray<Item> | undefined;
+type StepEmitItemsFn<O> = (output: O, ctx: Context) => StepEmitItemsResult | Promise<StepEmitItemsResult>;
+
+interface StepEmitItems<O> {
+  emitItems?: boolean | StepEmitItemsFn<O>;
+}
+```
+
+### Emitting items
+
+A step's output normally reaches the user only when it is the workflow's final output, or when the step is a `callModel` whose model writes a message. `emitItems` lets any step add items to the conversation as soon as it finishes. Once the step completes, the interpreter appends the items to `ctx.itemLog` and emits `item_appended` for each one (`08-runtime`), so `getItemStream` carries them while the rest of the tree is still running. A step inside a loop body, or a `decide` step used as the loop's `until`, emits on every iteration, before the loop's exit test ends it.
+
+What a step emits is one or more `Item`s (`07-context-and-event-log`), not only messages:
+
+- `true` emits the output as an assistant `message` item: a string as is, anything else as its JSON text (`null`/`undefined` emit nothing).
+- A function picks from the output. Text becomes an assistant message; an `Item`, or a list of them, is appended as given. That includes any custom item type the context's item schemas accept: a harness-wide `itemSchemas` extension, named `prefix:name` after the Open Responses convention for extension items. An item no schema accepts fails the step with `item_schema_mismatch`. `undefined` or an empty string emits nothing, so one step can emit on some runs and stay quiet on others.
+- Only a step that completes emits. A step that throws emits nothing, and a `schedule` never completes, so it never emits. Emitting runs inside the dispatch: an item the schemas refuse fails the step, which then gives its dispatch ordinal back like any other failure.
+- `emitItems` is separate from the framework-event filter `emit` on `callModel`, `decide`, and `acp-agent`, and that filter does not gate it: like the SDK item events, emitted items always stream.
+- Emitted items are conversation items like any other: later `callModel` steps see them in their history, and `HarnessResponse.items` includes them.
+
+#### On resume
+
+Emitted items are appended through the step's lane, so the step's ledger entry records them with its other `items`. Its `streamed` indices mark which items it emitted (`23a-step-level-resume` § The ledger). The marks travel up with the items: an enclosing step's entry holds its children's items and their marks, so a parent that replays as a whole still knows what its children emitted.
+
+A replay re-appends a recorded entry's `items` to the log, quietly by default. The harness option `emitItemsOnReplay` (`08-runtime`) makes it also stream the marked items again as `item_appended`, so a client that reconnects to a resumed run sees the progress it missed. It is one setting for the whole harness rather than a per-step choice, because whether to re-stream depends on the client watching, not on the step. Items the step appended any other way go back on the log but never stream.
+
 The optional `subprocess?: SubprocessAdapter` field on `runCode` and `spawn` variants is a per-step adapter override. When set, the interpreter dispatches that step through the given adapter instead of the harness default. Resolution order at dispatch time is `detachedSpawn-overrides.subprocess ?? step.subprocess ?? harness.subprocess`. See `04-spawn` for adapter routing and `23-durable-execution` for durability guarantees.
 
 Schemas on `llm` output and `Tool` input/output/event accept any [Standard Schema v1](https://standardschema.dev/schema) validator. Model-facing JSON Schema resolves through Zod's native converter, then the [Standard JSON Schema v1](https://standardschema.dev/json-schema) companion trait, then an explicit raw JSON Schema override (`outputJsonSchema`, tool `inputJsonSchema`). Validation scope is limited to these tool/LLM/ACP-agent boundaries — channels, context-layer schemas, item extension schemas, and JSON workflow schemas remain Zod-specific. See `02-step-variants`.

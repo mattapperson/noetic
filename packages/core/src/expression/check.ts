@@ -42,6 +42,22 @@ export function expressionErrors(root: WorkflowNode): string[] {
 //#region Helpers
 
 function expressionsOf(node: WorkflowNode): Found[] {
+  const emitted =
+    typeof node.emitItems === 'object' && node.emitItems.expr !== undefined
+      ? [
+          {
+            where: `emitItems of node '${node.id}'`,
+            source: node.emitItems.expr,
+          },
+        ]
+      : [];
+  return [
+    ...emitted,
+    ...kindExpressionsOf(node),
+  ];
+}
+
+function kindExpressionsOf(node: WorkflowNode): Found[] {
   if (node.kind === 'compute') {
     return [
       {

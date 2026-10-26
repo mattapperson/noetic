@@ -107,6 +107,14 @@ An agent can respond with a *UI* built from components you register, instead of 
 
 `serveOpenUi(harness, { surface })` exposes it to OpenUI's React client. In a JSON workflow, a `callModel` node references a codec via `output: { codec: 'openui', library }` resolved from `HydrationContext.uiLibraries`. Full API: `references/api-reference.md` → Generative UI (OpenUI).
 
+### An Array of Steps Runs in Order
+
+Wherever Noetic takes an **array of steps** -- `loop({ steps: [...] })`, a JSON `sequence` node's `steps` -- it runs them **one at a time, in array order**. Each step starts only after the previous one finishes, and gets that step's output as its input. The array's result is the last step's output, and a step that throws stops the rest. Nothing runs concurrently unless you ask: **`inParallel` is the only exception**. Its `paths` (and a JSON `inParallel`'s `paths` or `each`) all run at the same time, each on the same input, and `merge` combines their results. Inside each path, steps still run in order.
+
+### Emitting Items Early
+
+A workflow's output reaches the user only when it ends, unless a step **emits items** first. Every step and JSON node takes `emitItems`. When the step finishes, its items go into the conversation and stream through `getItemStream` at once, so a step inside a loop emits on every iteration. Give it `true` for an assistant message holding the output, or a function returning text, an `Item`, or a list of items (including custom `prefix:name` items the harness's `itemSchemas` accept). It is unrelated to the `emit` event filter on `callModel`/`decide`/`acpAgent`. On resume, replayed steps put their items back quietly; set `emitItemsOnReplay: true` on the harness to stream them again. See `references/api-reference.md`.
+
 ## How to Build an Agent
 
 ### Step 1: Identify the Pattern
@@ -225,7 +233,8 @@ Observability:
 6. **Placement picks the band, slot orders within it** -- anchored layer output renders before history, live output after it; lower slots come first inside a band. Use `Slot` constants, and set `placement: 'live'` on any layer whose `recall()` mutates state
 7. **Parallel paths get cloned state** -- mutations in one `inParallel` path don't affect siblings
 8. **SubprocessAdapter precedence is `detachedSpawn-overrides.subprocess ?? step.subprocess ?? harness.subprocess`** -- reach for a per-step override to run one specific spawn out-of-process while keeping the rest in-process, or a per-call override on `detachedSpawn` to do the same without touching the step definition
-9. **Durability follows storage and is composed of three surfaces** -- the checkpoint store + step ledger (parent execution state and finished steps; defaults to a store over `environment.storage.adapter`; the harness option `durability: false` turns it off), `subprocess` adapter durability (live-child manifests), and durable IPC (`DurableOutboundQueue`). With a storage adapter, a run cut off on one harness resumes on a new harness over the same storage: `harness.restore(id)` then re-run the same step on the same input, and finished steps and model-loop rounds replay for free. Storage is the only record: a failed run retried on the same context rebuilds from storage, and sessions read their history from storage every turn. Replayed work keeps its `cost` but reports `billedCost: 0`. Absent surfaces are no-ops and the harness degrades gracefully
+9. **An array of steps runs in order; only `inParallel` paths run concurrently** -- `loop` steps and JSON `sequence` steps each wait for the one before and take its output. `inParallel` paths all start together on the same input
+10. **Durability follows storage and is composed of three surfaces** -- the checkpoint store + step ledger (parent execution state and finished steps; defaults to a store over `environment.storage.adapter`; the harness option `durability: false` turns it off), `subprocess` adapter durability (live-child manifests), and durable IPC (`DurableOutboundQueue`). With a storage adapter, a run cut off on one harness resumes on a new harness over the same storage: `harness.restore(id)` then re-run the same step on the same input, and finished steps and model-loop rounds replay for free. Storage is the only record: a failed run retried on the same context rebuilds from storage, and sessions read their history from storage every turn. Replayed work keeps its `cost` but reports `billedCost: 0`. Absent surfaces are no-ops and the harness degrades gracefully
 
 ## API Reference
 

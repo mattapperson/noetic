@@ -1,5 +1,11 @@
 import type { ContextConfig, ContextData, ContextLayer } from '@noetic-tools/context';
-import type { Step, StepReplay, StepSpawn, SubprocessAdapter } from '@noetic-tools/types';
+import type {
+  Step,
+  StepEmitItems,
+  StepReplay,
+  StepSpawn,
+  SubprocessAdapter,
+} from '@noetic-tools/types';
 import { NoeticConfigError } from '@noetic-tools/types';
 import { getDefaultRegistrar } from '../types/step-registrar';
 
@@ -11,7 +17,8 @@ import { getDefaultRegistrar } from '../types/step-registrar';
  * @public
  */
 export interface SpawnOpts<TContext = ContextData, I = unknown, O = unknown>
-  extends StepReplay<TContext, I> {
+  extends StepReplay<TContext, I>,
+    StepEmitItems<TContext, O> {
   id: string;
   child: Step<TContext, I, O>;
   context?: ContextConfig | ContextLayer[];

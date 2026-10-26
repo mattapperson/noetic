@@ -462,7 +462,7 @@ type StreamingItem = Item & { readonly isComplete: boolean };
 | `getAgentResponse(scope?)` | `Promise<HarnessResponse>` | Resolves once the session drains its queue and returns to idle. |
 | `getTextStream(scope?)` | `AsyncIterable<string>` | Text deltas from the model, across all turns in the session. |
 | `getReasoningStream(scope?)` | `AsyncIterable<string>` | Reasoning token deltas (reasoning models). |
-| `getItemStream(scope?)` | `AsyncIterable<StreamingItem>` | Cumulative item snapshots. Replace, do not append. Carries the full session log: model output streams progressively from SDK events; framework-authored items (turn inputs, inbox injections, tool results) arrive already complete via `item_appended`. |
+| `getItemStream(scope?)` | `AsyncIterable<StreamingItem>` | Cumulative item snapshots. Replace, do not append. Carries the full session log: model output streams progressively from SDK events; framework-authored items (turn inputs, inbox injections, tool results, items a step emits) arrive already complete via `item_appended`. |
 | `getFullStream(scope?)` | `AsyncIterable<StreamEvent>` | All raw events (SDK + framework) for the session. |
 
 Stream accessors MAY be subscribed before any `execute()` call; the underlying `EventBroadcaster` replays buffered events so late subscribers observe turn history within the buffer window.
@@ -510,7 +510,7 @@ interface FrameworkStreamEvent {
 | Event | Description |
 |-------|-------------|
 | `{name}:turn_started` | Emitted when the session runner starts a turn. Data: `{ turnId, messageIds }` |
-| `{name}:item_appended` | Emitted whenever a framework-authored item enters the session log — turn input messages (after `turn_started`), between-rounds inbox injections, and tool result items. Data: `{ item }`. Backs `getItemStream` for everything the SDK stream cannot carry, so it is emitted unconditionally — never filtered by `step.emit`. |
+| `{name}:item_appended` | Emitted whenever a framework-authored item enters the session log — turn input messages (after `turn_started`), between-rounds inbox injections, tool result items, and the items a step with `emitItems` adds when it finishes, or streams again on replay under `emitItemsOnReplay` (`01-step-type` § Emitting items). Data: `{ item }`. Backs `getItemStream` for everything the SDK stream cannot carry, so it is emitted unconditionally — never filtered by `step.emit`. |
 | `{name}:turn_completed` | Emitted when a turn completes. Data: `{ turnId, durationMs }` |
 | `{name}:turn_aborted` | Emitted when a turn is aborted or errors. Data: `{ turnId, reason }` |
 | `{name}:inbox_injected` | Emitted between tool rounds when queued `between-rounds` messages are injected into the prompt. Data: `{ round, count, messageIds }` |
@@ -786,6 +786,13 @@ interface AgentConfig<TParams extends Record<string, unknown> = Record<string, u
 
   /** Tuning for prompt-cache anchoring. */
   contextCache?: ContextCacheConfig;
+
+  /**
+   * Whether a resumed run streams again, as `item_appended`, the items its replayed
+   * steps emitted through `emitItems`. Default `false`: replay rebuilds the log quietly.
+   * See `01-step-type` § Emitting items.
+   */
+  emitItemsOnReplay?: boolean;
 
   /** Approves or refuses calls to tools that declare `needsApproval`. See "Tool approval". */
   approveToolCall?: ToolApprover;

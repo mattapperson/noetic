@@ -129,6 +129,8 @@ export interface ContextHarness {
     readonly contextCache?: ContextCacheConfig;
     /** Default model for `decide` steps. */
     readonly decisionModel?: string;
+    /** Whether a resumed run streams again the items its replayed steps emitted. */
+    readonly emitItemsOnReplay?: boolean;
   };
   readonly fs: FsAdapter;
   readonly shell: ShellAdapter;

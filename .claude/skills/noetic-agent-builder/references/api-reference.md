@@ -26,6 +26,26 @@ replayKey?: (input: I, ctx: Context<TContext>) => string;
 
 On a durable harness (a storage adapter, or an explicit `checkpointStore`), a resumed run replays each completed step's recorded output, keyed by execution path and checked against a hash of the step's input. `durable: false` keeps a step out of that ledger (never replayed, never recorded, re-run on every resume; children keep their own setting). `replayKey` keys the entry as `key:<replayKey>` instead of the path, so the step replays wherever it runs; dispatches with the same key share one entry. `schedule` is never recorded. A throwing `replayKey` skips the ledger for that dispatch with a warning — the step still runs. Each step runs on its own lane of the context, so concurrent `harness.run` calls on one context keep separate paths; same-id concurrent calls are numbered in dispatch order. JSON workflow nodes take `durable` (boolean) and a declarative `replayKey`: `true` (key on the whole input) or `{ from: ['batchId', ...] }` (key on those top-level properties of the input parsed as JSON, the lookup `over` uses); the hydrator builds `<node id>:<hash>`, so nodes sharing an id share entries and different nodes never do. A `from` key on a non-object input warns (`INVALID_REPLAY_KEY_INPUT`) and runs unreplayed. See spec 23a § Identity and spec 26 § Replay keys.
 
+**Emitting items early (every builder).** Every step builder accepts `emitItems` (`StepEmitItems`), and so does every JSON workflow node. It is separate from the framework-event filter `emit` on `callModel`/`decide`/`step.acpAgent`:
+
+```typescript
+type StepEmitItemsResult = string | Item | ReadonlyArray<Item> | undefined;
+emitItems?: boolean | ((output: O, ctx: Context<TContext>) => StepEmitItemsResult | Promise<StepEmitItemsResult>);
+```
+
+When the step finishes, the interpreter appends the items to `ctx.itemLog` and emits `item_appended` for each, so they stream through `getItemStream` before the workflow ends. A step in a loop emits on every iteration, and so does a `decide` used as the loop's `until`.
+- **What:** `true` emits the output as an assistant message (non-strings as JSON). A function returns text (an assistant message), an `Item`, or a list of items, including custom `prefix:name` items (Open Responses extension convention) registered through the harness's `itemSchemas: { schemas: { items: [zodSchema] } }`. An unregistered type throws `item_schema_mismatch`. `undefined`/`''` emits nothing.
+- **Failure:** a step that throws emits nothing. An item the schemas refuse fails the step.
+- **Resume:** emitted items land in the step's ledger entry with its other `items`, marked by `streamed` indices that travel up to enclosing entries. A replay puts them back on the log quietly. `emitItemsOnReplay: true` on the `AgentHarness` streams the marked ones again, even when a whole parent replays without its children running. Items appended any other way never re-stream.
+- **JSON:** `"emitItems": true`, or `"emitItems": { "expr"?: "<JSONata on the output>", "as"?: "text" | "items" }`.
+  - No `expr` means the output itself.
+  - No value emits nothing.
+  - With `as: "items"` the value must be an item or a list of items, else `INVALID_EMIT_ITEMS`.
+  - A function result fails with `EXPRESSION_FAILED`.
+  - Syntax is validated with the document, and unknown keys fail validation.
+
+See spec 01 § Emitting items and spec 26 § Emitting items.
+
 The optional `subprocess` field makes this specific step run through a different adapter — e.g. `createLocalSubprocessAdapter({storage})` from `@noetic-tools/platform-node` for an out-of-process child, or an in-memory test double for unit tests. Resolution order at dispatch time is `detachedSpawn-overrides.subprocess ?? step.subprocess ?? harness.subprocess`. When omitted, the step uses the harness default.
 
 ### callModel
@@ -327,6 +347,8 @@ type MergeFn<TContext = ContextData, O = unknown, R = O> = (results: R[], ctx: C
 // ConditionalOpts<TContext, I, O>: { id, route }
 ```
 
+**Paths run concurrently -- the one exception to array order.** Every other array of steps in Noetic (`loop`'s `steps`, a JSON `sequence`) runs one step at a time, in order, each on the previous step's output. `inParallel` starts all its paths together (up to `concurrency`), and every path gets the same input. Steps *inside* one path still run in order.
+
 Each parallel path gets a deep clone of parent state. Mutations in one path don't affect siblings.
 
 Each path is also a context child boundary: it inherits the parent's layers and tool pool, `onSpawn` seeds its per-path layer state (items from `onSpawn` are NOT appended — the path already has the parent's item log), and `onReturn` merges a *successful* path back. Merges are serialised across paths, so concurrent workers don't clobber one parent state.
@@ -372,7 +394,9 @@ loop<I, O>({
 }): StepLoop<I, O>
 ```
 
-**Decide as `until`.** Pass a `decide()` step straight in — `until: isDone` or `any(until.maxSteps(20), isDone)`. It must ask exactly one boolean question (else `INVALID_UNTIL_DECIDER` at build time). Each iteration it runs on the iteration's output: yes stops; no or a refusal continues. Reason: `decide 'is-done' answered 'stop' yes (p=0.91)`. It asks afresh every iteration (decide's within-execution reuse does not apply), writes nothing to the conversation, and merges into `ctx.lastStepMeta`. With `maxIterations: Infinity`, a model that keeps refusing loops until abort — add a `maxSteps` backstop when that matters. A throwing predicate stops the loop, but `cancelled` and any `NoeticConfigError` (e.g. `MISSING_MODEL`) propagate and fail it.
+**`steps` run in order, every iteration.** Each step starts after the one before finishes and takes its output as input; the last step's output is the iteration's output, which `until` judges. A step that throws ends the iteration (see `onError`). For concurrent work, put an `inParallel` in `steps`.
+
+**Decide as `until`.** Pass a `decide()` step straight in — `until: isDone` or `any(until.maxSteps(20), isDone)`. It must ask exactly one boolean question (else `INVALID_UNTIL_DECIDER` at build time). Each iteration it runs on the iteration's output: yes stops; no or a refusal continues. Reason: `decide 'is-done' answered 'stop' yes (p=0.91)`. It asks afresh every iteration (decide's within-execution reuse does not apply), writes nothing to the conversation unless it has `emitItems`, and merges into `ctx.lastStepMeta`. With `maxIterations: Infinity`, a model that keeps refusing loops until abort — add a `maxSteps` backstop when that matters. A throwing predicate stops the loop, but `cancelled` and any `NoeticConfigError` (e.g. `MISSING_MODEL`) propagate and fail it.
 
 ```typescript
 const isDone = decide({ id: 'is-done', questions: { stop: { type: 'boolean', instructions: 'Is the task finished?' } } });

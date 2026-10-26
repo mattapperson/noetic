@@ -70,6 +70,8 @@ A WorkflowNode is one of:
 
 Every entry of a callModel node's "tools" is an OBJECT, never a bare string. Use { "type": "<tool-name>" } to let the model call one of the tools listed below. Two provider-executed tools are also available without being listed: { "type": "openrouter:web_search" } and { "type": "openrouter:web_fetch" }, each accepting an optional "parameters" object.
 
+Any node may carry "emitItems": true to show its output to the user as an assistant message the moment it finishes, or "emitItems": { "expr": "<JSONata expression on the output, e.g. 'Done ' & n & ' items'>" } to show computed text (no value shows nothing). Add "as": "items" to emit conversation items instead (the expression, or the output itself, must give an object with a string "type", or a list of them; only use custom "prefix:name" types the task says are registered). Use it for progress inside loops: only the workflow's final output is shown otherwise.
+
 An acp-agent node delegates a turn to an external coding agent over the Agent Client Protocol; only emit one if a matching agent adapter is registered for the workflow.
 
 An UntilPredicate (the "until" field of a loop) is one of:

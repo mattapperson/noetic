@@ -494,6 +494,12 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 **Fix:** Feed the node a JSON object holding the `from` properties, or use `"replayKey": true` to key on the whole input.
 
+#### INVALID_EMIT_ITEMS
+
+**Cause:** A node's `emitItems` uses `"as": "items"`, but the value it read (the `expr` result, or the node's output parsed as JSON) is not an item or a list of items. Each item must be an object with a non-empty string `type`.
+
+**Fix:** Make the expression give an object such as `{ "type": "myapp:progress", "done": 3 }`, or a list of them. A custom type also needs a matching schema in the harness's `itemSchemas`, or appending it fails with `item_schema_mismatch`.
+
 ### ACP Agents
 
 #### MISSING_ACP_AGENT

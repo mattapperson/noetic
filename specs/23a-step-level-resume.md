@@ -33,8 +33,11 @@ interface StepLedgerEntry {
   inputHash?: string;    // hash of the step's input when it ran
   items?: Item[];        // items the step appended to its context's item log
   completedAt: string;   // ISO-8601
+  streamed?: number[];   // indices into `items` that `step.emitItems` emitted — streamed again on replay under `emitItemsOnReplay`
 }
 ```
+
+`streamed` marks which of `items` a step emitted through `emitItems` (`01-step-type` § Emitting items) rather than appended any other way. A replay always re-appends `items` quietly. When the harness sets `emitItemsOnReplay`, it also streams the `streamed` ones as `item_appended`. Indices travel with the items: an enclosing step's record takes its children's emitted items along with their marks, so an outer entry that replays wholesale still streams what its inner steps emitted.
 
 Failures are not recorded: a step that threw runs again. Retry policies and `onError` handling are unchanged.
 

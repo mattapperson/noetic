@@ -1262,6 +1262,17 @@ Key points:
 
 A complete runnable example — an Opus planner generating a "mixture-of-agents" workflow (four models in parallel → an Opus judge that synthesises the answer) and executing it — lives at `packages/core/examples/dynamic-judge-workflow.ts`, with the canonical document committed at `packages/core/examples/multi-model-judge.workflow.json`.
 
+To show progress before a workflow ends, put `emitItems` on a node. It emits as soon as the node finishes, on every iteration inside a loop. With `"as": "items"` it can emit custom items (register their schema in the harness's `itemSchemas`). To stream them again when a crashed run resumes, set `emitItemsOnReplay: true` on the harness:
+
+```json
+{
+  "kind": "loop", "id": "drain", "maxIterations": "infinity",
+  "body": { "kind": "compute", "id": "step", "expr": "{ 'n': n - 1 }",
+            "emitItems": { "expr": "{ 'type': 'myapp:progress', 'left': n }", "as": "items" } },
+  "until": { "kind": "expr", "expr": "n = 0" }
+}
+```
+
 For running pre-built JSON workflows without an LLM planner step:
 
 ```typescript

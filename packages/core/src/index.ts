@@ -290,6 +290,7 @@ export type {
   UntilPredicate,
   WithContextWorkflowNode,
   WorkflowDocument,
+  WorkflowEmitItems,
   WorkflowNode,
 } from './schemas/workflow';
 /** @public */
@@ -578,6 +579,10 @@ export type {
   StepAcpAgent,
   StepCallModel,
   StepConditional,
+  StepEmitItems,
+  StepEmitItemsFn,
+  StepEmitItemsOption,
+  StepEmitItemsResult,
   StepInParallel,
   StepInParallelAll,
   StepInParallelRace,

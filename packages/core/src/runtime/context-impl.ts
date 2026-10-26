@@ -483,6 +483,37 @@ export class ContextImpl implements Context<ContextData> {
 
   /**
    * @internal
+   * Indices into `appendedItems()` of the items appended through `appendEmitted`, which
+   * a replay streams again under the harness's `emitItemsOnReplay`.
+   */
+  emittedIndices(): number[] {
+    const record = this._lane?.appended;
+    if (!record) {
+      return [];
+    }
+    return record.items.flatMap((item, i) =>
+      record.emitted.has(item)
+        ? [
+            i,
+          ]
+        : [],
+    );
+  }
+
+  /**
+   * @internal
+   * Append an item a step emitted (`step.emitItems`), marking it in this lane's record
+   * and every record above it, so the ledger entry that holds it knows to stream it
+   * again on replay.
+   */
+  appendEmitted(item: Item): void {
+    this.itemLog.append(item);
+    const items = this.itemLog.items;
+    this._lane?.appended.markEmitted(items[items.length - 1]);
+  }
+
+  /**
+   * @internal
    * Drop `frame` from the in-flight set. Called when its step resolves, success or
    * failure.
    */
@@ -626,12 +657,19 @@ interface Lane {
  */
 class AppendRecord {
   readonly items: Item[] = [];
+  /** The items among `items` a step emitted through `emitItems`. */
+  readonly emitted = new Set<Item>();
 
   constructor(private readonly parent?: AppendRecord) {}
 
   add(item: Item): void {
     this.items.push(item);
     this.parent?.add(item);
+  }
+
+  markEmitted(item: Item): void {
+    this.emitted.add(item);
+    this.parent?.markEmitted(item);
   }
 }
 

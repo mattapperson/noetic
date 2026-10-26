@@ -233,6 +233,13 @@ interface AgentHarnessOpts<TParams extends Record<string, unknown> = Record<stri
   /** Default model for `decide` steps. */
   decisionModel?: string;
   /**
+   * Whether a resumed run streams again the items its replayed steps emitted
+   * (`step.emitItems`), as `item_appended`. Defaults to `false`: a replay rebuilds the
+   * log quietly. Set it when a client that reconnects to a resumed run should see
+   * the progress it missed.
+   */
+  emitItemsOnReplay?: boolean;
+  /**
    * Approves or refuses calls to tools that declare `needsApproval`, after the
    * `beforeToolCall` layers allow them. Without one, those calls run
    * unapproved and the harness warns once per tool name.
@@ -636,6 +643,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       forceAtomicRecall: opts.forceAtomicRecall,
       contextCache: opts.contextCache,
       decisionModel: opts.decisionModel,
+      emitItemsOnReplay: opts.emitItemsOnReplay,
       approveToolCall: opts.approveToolCall,
     };
     this.fs = environment?.fs ?? createInMemoryFsAdapter();

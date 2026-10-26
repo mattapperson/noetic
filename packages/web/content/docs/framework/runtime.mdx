@@ -73,6 +73,7 @@ const harness = new AgentHarness({
 | `traceExporter` | `TraceExporter` | `NoopExporter` | Where to send completed spans. |
 | `defaultDeliveryMode` | `DeliveryMode` | `'next-turn'` | Default delivery mode for messages that don't specify one. |
 | `initialCwd` | `string` | `process.cwd()` | Initial working directory seeded into every root context this harness creates. |
+| `emitItemsOnReplay` | `boolean` | `false` | When a resumed run replays a finished step, also stream the items that step emitted (`emitItems`) again as `item_appended`, so a client that reconnects mid-run sees the progress it missed. Without it, replay puts them back on the log quietly. See [Emitting Items Early](/docs/framework/steps#emitting-items-early). |
 
 ### Environment
 
@@ -144,7 +145,7 @@ Stream accessors are keyed by `threadId` (via `SessionScope`), are safe to call 
 | `getAgentResponse(scope?)` | `Promise<HarnessResponse>` | Resolves once the session drains its queue and returns to idle. |
 | `getTextStream(scope?)` | `AsyncIterable<string>` | Text deltas from the model, across all turns. |
 | `getReasoningStream(scope?)` | `AsyncIterable<string>` | Reasoning token deltas (reasoning models). |
-| `getItemStream(scope?)` | `AsyncIterable<StreamingItem>` | Cumulative item snapshots with `isComplete` flag. Carries the full session log — framework-authored items (turn inputs, tool results) included. |
+| `getItemStream(scope?)` | `AsyncIterable<StreamingItem>` | Cumulative item snapshots with `isComplete` flag. Carries the full session log — framework-authored items (turn inputs, tool results, items a step [emits](/docs/framework/steps#emitting-items-early)) included. |
 | `getFullStream(scope?)` | `AsyncIterable<StreamEvent>` | All raw events (SDK + framework) for the session. |
 | `abort(scope?)` | `Promise<void>` | Cancel the in-flight turn. Queued messages are preserved and trigger a fresh turn once abort completes. |
 | `getStatus(scope?)` | `HarnessStatus` | Snapshot: `{ kind: 'idle' \| 'generating' \| 'aborting' }`. |

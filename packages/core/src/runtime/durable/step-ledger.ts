@@ -60,6 +60,11 @@ export const StepLedgerEntrySchema = z.object({
   inputHash: z.string().optional(),
   /** Items the step appended to its context's item log, re-appended on replay. */
   items: z.array(z.unknown()).optional(),
+  /**
+   * Indices into `items` of those `step.emitItems` emitted (spec 01 § Emitting items),
+   * streamed again on replay when the harness sets `emitItemsOnReplay`.
+   */
+  streamed: z.array(z.number().int().nonnegative()).optional(),
   completedAt: z.string(),
 });
 

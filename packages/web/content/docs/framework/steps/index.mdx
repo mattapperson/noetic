@@ -155,6 +155,33 @@ Concurrency is never implicit. Steps run at the same time only inside [`inParall
 
 On a harness with a `checkpointStore`, a resumed run replays each completed step's recorded output instead of running it again. Every step builder accepts two fields that change this: `durable: false` makes a step always re-run, and `replayKey: (input, ctx) => string` replays by content rather than by position. See [Replay Identity](/docs/framework/durability#replay-identity).
 
+## Emitting Items Early
+
+A step's output reaches the user only when it is the final output, unless the step emits it. Every step builder accepts `emitItems`. When the step finishes, its items are added to the conversation and stream through `getItemStream` while the rest of the tree runs. A step inside a loop emits on every iteration.
+
+- `emitItems: true` emits the output as an assistant message.
+- A function picks what to emit: text (an assistant message), an `Item`, or a list of items. Custom items work too, if the harness's `itemSchemas` accept their type. Returning `undefined` emits nothing.
+
+```ts
+import { loop, runCode, until } from '@noetic-tools/core';
+
+const crawl = loop({
+  id: 'crawl',
+  steps: [
+    runCode({
+      id: 'fetch-page',
+      execute: async (page: number) => page + 1,
+      emitItems: (page) => `Fetched page ${page}`,
+    }),
+  ],
+  until: until.maxSteps(5),
+});
+```
+
+`emitItems` is separate from the `emit` field on `callModel`, `decide`, and `step.acpAgent`, which filters framework events.
+
+A resumed run replays finished steps and puts their items back on the log without streaming them. Set `emitItemsOnReplay: true` on the [harness](/docs/framework/runtime) to stream emitted items again on replay, even when a whole parent replays without its children running.
+
 ## Next Steps
 
 - [Control Flow](/docs/framework/operators) -- route between steps with `conditional` and `inParallel`.

@@ -339,6 +339,21 @@ export type WorkflowReplayKey =
       from: string[];
     };
 
+/**
+ * @public
+ * What a node emits when it finishes. `true` emits its output as an assistant message.
+ * The object form picks what and how: `expr` (spec 33) computes the value from the
+ * output, and no value emits nothing; `as` reads that value as message text (`"text"`,
+ * the default) or as one item or a list of items (`"items"`), including custom items
+ * the harness's item schemas accept. See spec 26 § Emitting items.
+ */
+export type WorkflowEmitItems =
+  | boolean
+  | {
+      expr?: Expression;
+      as?: 'text' | 'items';
+    };
+
 interface WorkflowNodeBase {
   id: string;
   /**
@@ -348,6 +363,8 @@ interface WorkflowNodeBase {
   durable?: boolean;
   /** Replay this node by its input instead of its position. Ignored when `durable` is `false`. */
   replayKey?: WorkflowReplayKey;
+  /** Emit items when this node finishes. See spec 26 § Emitting items. */
+  emitItems?: WorkflowEmitItems;
 }
 
 /**
@@ -592,10 +609,26 @@ const WorkflowReplayKeySchema: z.ZodType<WorkflowReplayKey> = z.union([
   }),
 ]);
 
+const WorkflowEmitItemsSchema: z.ZodType<WorkflowEmitItems> = z.union([
+  z.boolean(),
+  z
+    .object({
+      expr: ExpressionSchema.optional(),
+      as: z
+        .enum([
+          'text',
+          'items',
+        ])
+        .optional(),
+    })
+    .strict(),
+]);
+
 const SHARED_FIELDS = {
   id: z.string().min(1),
   durable: z.boolean().optional(),
   replayKey: WorkflowReplayKeySchema.optional(),
+  emitItems: WorkflowEmitItemsSchema.optional(),
 } as const;
 
 const OutputCodecRefSchema = z.object({
