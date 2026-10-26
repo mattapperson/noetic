@@ -28,6 +28,7 @@ import {
   executeRerender,
   initLayers,
   notifyDecision,
+  onSteerLayers,
   projectHistoryLayers,
   recallLayers,
   recallLayersAtomic,
@@ -51,6 +52,7 @@ import type {
   EventBroadcaster,
   QueuedMessage,
   RestoreCheckpointOptions,
+  SessionCtxExtension,
   SessionStore,
   StepLedgerRetention,
   StepLedgerStore,
@@ -68,6 +70,7 @@ import {
   createStepLedgerStore,
   filterReasoningStream,
   filterTextStream,
+  INTERRUPT_REASON,
   resolveStepLedgerRetention,
   restoreFromCheckpoint,
   rootIdOf,
@@ -107,6 +110,7 @@ import type {
   ItemSchemaConfig,
   LLMResponse,
   LlmProviderConfig,
+  OnSteerParams,
   ProjectionPolicy,
   RecallLayerOutput,
   RecallOptions,
@@ -115,6 +119,7 @@ import type {
   ShellAdapter,
   Span,
   SteeringDecision,
+  SteerVerdict,
   Step,
   StorageAdapter,
   StreamEvent,
@@ -126,7 +131,6 @@ import type {
   ZodType,
 } from './deps/types';
 import { SteeringAction } from './deps/types';
-import type { SessionCtxExtension } from './model-call';
 import { AgentHarnessModelCaller, noLlmProviderError } from './model-call';
 import { ThreadRecord } from './thread-record';
 
@@ -734,11 +738,11 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     if (deliveryMode === 'interrupt' && session.runner.getStatus().kind === 'generating') {
       session.runner.queue.prepend(message);
       // Abort kicks the runner via queue subscription after the in-flight turn settles.
-      void session.runner.abort('interrupt');
+      void session.runner.abort(INTERRUPT_REASON);
       return Promise.resolve();
     }
 
-    session.runner.queue.enqueue(message);
+    session.runner.enqueue(message);
     return Promise.resolve();
   }
 
@@ -828,6 +832,16 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     }
 
     const record = this.threadRecord(threadId);
+    // Save a turn's items as the thread's history for the next turn.
+    const keepHistory = async (ctx: Context): Promise<void> => {
+      if (record) {
+        await record.end(ctx, ctx.itemLog.items);
+        return;
+      }
+      session.accumulatedItems = [
+        ...ctx.itemLog.items,
+      ];
+    };
     const session: Session = {
       accumulatedItems: [],
       record,
@@ -863,10 +877,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
               extraContextLayers: perTurnOptions.extraContextLayers,
               _broadcaster: session.runner.broadcaster,
             });
-          const ext = frameworkCast<Context & SessionCtxExtension>(ctx);
-          ext._sessionQueue = session.runner.queue;
-          ext._sessionBetweenRounds = true;
-          ext._sessionRunnerAgentName = this.config.name;
+          frameworkCast<Context & SessionCtxExtension>(ctx)._sessionQueue = session.runner.queue;
           if (this.agentGraph || this.harnessTools.length > 0) {
             const stepTools = this.agentGraph ? collectAllTools(this.agentGraph) : [];
             this.setUnifiedTools(ctx, [
@@ -899,15 +910,17 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
               },
             );
           }
-          const result = await this.initAndRun(this.agentGraph, '', ctx);
-          if (record) {
-            await record.end(ctx, ctx.itemLog.items);
-            return result;
-          }
-          // Snapshot final items into session history for the next turn.
-          session.accumulatedItems = [
-            ...ctx.itemLog.items,
-          ];
+          const result = await this.initAndRun(this.agentGraph, '', ctx).catch(
+            async (error: unknown) => {
+              // An interrupted turn restarts from what it finished, so the
+              // interrupting message lands after the work it interrupted.
+              if (ctx.abortReason === INTERRUPT_REASON) {
+                await keepHistory(ctx);
+              }
+              throw error;
+            },
+          );
+          await keepHistory(ctx);
           return result;
         },
         // Stored totals are the session's usage; the runner only mirrors them.
@@ -1747,6 +1760,22 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
       afterModelCallLayers({
         layers,
         response,
+        ctx: this.toExecCtx(ctx),
+        store: this.layerStateStore,
+      }),
+    );
+  }
+
+  async onSteer(
+    layers: ContextLayer[],
+    params: Pick<OnSteerParams, 'steer' | 'point' | 'action' | 'pendingCalls'>,
+    ctx: Context,
+  ): Promise<SteerVerdict> {
+    return this.trackHook(
+      ctx,
+      onSteerLayers({
+        layers,
+        ...params,
         ctx: this.toExecCtx(ctx),
         store: this.layerStateStore,
       }),

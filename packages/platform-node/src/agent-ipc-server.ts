@@ -28,6 +28,7 @@ import { dirname } from 'node:path';
 import type {
   AgentHarnessContract,
   AskUserOutput,
+  DeliveryMode,
   FsAdapter,
   HarnessStatus,
   Item,
@@ -55,6 +56,7 @@ export interface IpcHarness {
     options?: {
       threadId?: string;
       messageId?: string;
+      deliveryMode?: DeliveryMode;
     },
   ): Promise<void>;
   getItemStream(scope?: { threadId?: string }): AsyncIterable<StreamingItem>;
@@ -339,6 +341,7 @@ async function handleSend(frame: ClientFrame, ctx: FrameContext): Promise<void> 
   await ctx.server.harness.execute(frame.text, {
     threadId: ctx.server.threadId,
     messageId: frame.messageId,
+    deliveryMode: frame.deliveryMode,
   });
   writeFrame(ctx.client.socket, {
     type: 'ack',

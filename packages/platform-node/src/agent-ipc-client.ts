@@ -22,7 +22,7 @@
 
 import type { Socket } from 'node:net';
 import { createConnection } from 'node:net';
-import type { AskUserOutput } from '@noetic-tools/core';
+import type { AskUserOutput, DeliveryMode } from '@noetic-tools/core';
 import { z } from 'zod';
 import type { AskUserPendingFrame, ServerFrame } from './agent-ipc-protocol';
 import { encodeFrame, parseServerFrame } from './agent-ipc-protocol';
@@ -306,9 +306,10 @@ export class AgentIpcClient {
   /**
    * Send a user message; resolves when the server has acked it. The
    * message goes through the runner's `harness.execute(text, …)` exactly
-   * the same way the main TUI's chat input does.
+   * the same way the main TUI's chat input does. Pass `deliveryMode` to
+   * steer a running turn instead of queueing the next one.
    */
-  send(args: { messageId: string; text: string }): Promise<void> {
+  send(args: { messageId: string; text: string; deliveryMode?: DeliveryMode }): Promise<void> {
     this.requireConnected();
     if (this.pendingAcks.has(args.messageId)) {
       return Promise.reject(new Error(`messageId already in flight: ${args.messageId}`));
@@ -322,6 +323,7 @@ export class AgentIpcClient {
         type: 'send',
         messageId: args.messageId,
         text: args.text,
+        deliveryMode: args.deliveryMode,
       });
     });
   }

@@ -33,6 +33,7 @@ const ChatRequestSchema = z.object({
     .enum([
       'next-turn',
       'between-rounds',
+      'next-item',
       'interrupt',
     ])
     .optional(),

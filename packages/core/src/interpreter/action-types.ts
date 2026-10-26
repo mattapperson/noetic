@@ -11,6 +11,7 @@ export type {
   ContextRerenderRequest,
   ExecuteStepFn,
   FunctionCallItem,
+  FunctionCallOutputItem,
   InputMessageItem,
   Item,
   LLMResponse,

@@ -61,6 +61,15 @@ const SendFrameSchema = z.object({
   type: z.literal('send'),
   messageId: z.string().min(1),
   text: z.string().min(1),
+  /** How the message lands if a turn is running; see `DeliveryMode`. */
+  deliveryMode: z
+    .enum([
+      'next-turn',
+      'between-rounds',
+      'next-item',
+      'interrupt',
+    ])
+    .optional(),
 });
 
 const GetStatusFrameSchema = z.object({

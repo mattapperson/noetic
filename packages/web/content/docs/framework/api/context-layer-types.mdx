@@ -104,6 +104,7 @@ interface ContextLayerHooks<TState = unknown> {
   dispose?: (params: DisposeParams<TState>) => Promise<void>;
   beforeToolCall?: (params: BeforeToolCallParams<TState>) => Promise<BeforeToolCallResult<TState>>;
   afterModelCall?: (params: AfterModelCallParams<TState>) => Promise<AfterModelCallResult<TState>>;
+  onSteer?: (params: OnSteerParams<TState>) => Promise<OnSteerResult<TState>>;
   onItemAppend?: (params: OnItemAppendParams<TState>) => Promise<OnItemAppendResult<TState>>;
   projectHistory?: (params: ProjectHistoryParams<TState>) => Promise<ProjectHistoryResult>;
   renderDelta?: (params: RenderDeltaParams<TState>) => Promise<string | null>;
@@ -113,6 +114,7 @@ interface ContextLayerHooks<TState = unknown> {
 
 - **`recall`** may also return a bare `string` shorthand — the runtime wraps it in a developer message and estimates its token count — or `null` to contribute nothing this turn.
 - **`beforeToolCall` / `afterModelCall`** are the steering hooks: they return a `SteeringDecision` (allow / deny / guide) plus updated state. A deny surfaces as a `NoeticError` kind `steering_denied`.
+- **`onSteer`** decides what happens to a steer (a message sent into the running turn) at each steer point: `apply`, `defer`, or `drop`, with optional replacement items. Layers run in slot order, each seeing the previous layer's action and items. See [Steering a running turn](/docs/framework/runtime#steering-a-running-turn).
 - **`onItemAppend`** runs when input items (user messages, tool outputs) are about to be appended — layers compose in slot order, each receiving the previous layer's output. It can transform, drop, or inject items, and may request a context re-render. Not called for LLM response items (use `store`).
 - **`projectHistory`** projects (caps, transforms) the history portion of the context window once per callModel step. Read-side only — `itemLog` storage is never mutated.
 - **`renderDelta`** is called for an anchored layer whose pinned output has gone stale, to describe the change compactly instead of re-sending the whole block. Return `null` to fall back to the default, which republishes the full new content. Never called for layers in the `'live'` band.
@@ -345,6 +347,7 @@ interface ExecutionSpan {
 | `onItemAppend` | `number` | Timeout for onItemAppend hook (ms, optional) |
 | `projectHistory` | `number` | Timeout for projectHistory hook (ms, optional) |
 | `onDecision` | `number` | Timeout for onDecision hook (ms, optional, default 5000) |
+| `onSteer` | `number` | Timeout for onSteer hook (ms, optional, default 5000) |
 
 `renderDelta` has no entry of its own — it borrows the `recall` timeout, defaulting to 5s.
 
@@ -484,7 +487,8 @@ interface LayerTraceSpan {
   layerId: string;
   hook:
     | 'init' | 'recall' | 'store' | 'onSpawn' | 'onReturn' | 'onParentUpdate' | 'onComplete'
-    | 'dispose' | 'onDecision' | 'beforeToolCall' | 'afterModelCall' | 'projectHistory' | 'onItemAppend';
+    | 'dispose' | 'onDecision' | 'beforeToolCall' | 'afterModelCall' | 'projectHistory' | 'onItemAppend'
+    | 'onSteer';
   duration: number;
   status: 'ok' | 'error' | 'timeout' | 'skipped';
   budget?: { allocated: number; used: number; yielded: number };

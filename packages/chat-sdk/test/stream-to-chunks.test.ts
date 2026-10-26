@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import type { StreamEvent } from '@noetic-tools/types';
 import { streamToChatChunks } from '../src/stream-to-chunks';
 import { collect, fwEvent, sdkEvent } from './_helpers';
 
@@ -351,6 +352,22 @@ describe('streamToChatChunks', () => {
     expect(chunks).toEqual([
       'joined late',
     ]);
+  });
+
+  test('a dropped steer ends without output, though the stream stays open', async () => {
+    async function* openStream(): AsyncIterable<StreamEvent> {
+      yield fwEvent('steer_dropped', {
+        messageId: MESSAGE_ID,
+        point: 'before_round',
+      });
+      await new Promise(() => {});
+    }
+    const chunks = await collect(
+      streamToChatChunks(openStream(), {
+        messageId: MESSAGE_ID,
+      }),
+    );
+    expect(chunks).toEqual([]);
   });
 
   test('matches framework events regardless of harness name prefix', async () => {

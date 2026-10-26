@@ -8,7 +8,7 @@
  *
  * Each finished round is recorded under `<step path>/round#<n>`, carrying what it
  * added to the loop: the model's output and tool results, the conversation input
- * those became, the items appended to the item log (messages injected between rounds),
+ * those became, the items appended to the item log,
  * and the round's usage. A resumed loop replays rounds in order and stops at the first
  * one it does not find; every round after that runs live, because a recorded round
  * belongs to the conversation the earlier recorded rounds built. When the step

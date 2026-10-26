@@ -205,8 +205,11 @@ The session runner accepts new messages while a turn is in flight. Use `Delivery
 await harness.execute('hello');
 await harness.execute('follow-up'); // runs after 'hello' finishes
 
-// Inject mid-turn between tool rounds (like Claude Code's inbox attachments)
+// Steer the running turn before its next model call (like Claude Code's inbox attachments)
 await harness.execute('urgent note', { deliveryMode: 'between-rounds' });
+
+// Steer as soon as the model finishes the item it is writing (like Responses `response.steer`)
+await harness.execute('use staging, not prod', { deliveryMode: 'next-item' });
 
 // Interrupt: cancel in-flight turn and restart with the new message at head
 await harness.execute('stop, do this instead', { deliveryMode: 'interrupt' });

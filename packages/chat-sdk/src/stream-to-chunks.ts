@@ -8,7 +8,8 @@ export interface StreamToChatChunksOptions {
    * so replayed events from earlier turns and concurrent turns are skipped.
    * When several queued messages coalesce into one turn, only the FIRST id in
    * the batch claims it — the other handlers' translators end without
-   * emitting, so the shared reply is posted exactly once.
+   * emitting, so the shared reply is posted exactly once. A `steer_dropped`
+   * for this id also ends the translator without emitting.
    */
   messageId: string;
   /** Renders a task-card title for a tool call. Default: the tool name. */
@@ -30,6 +31,9 @@ type TurnClaim =
     }
   | {
       kind: 'foreign';
+    }
+  | {
+      kind: 'dropped';
     }
   | {
       kind: 'none';
@@ -59,7 +63,7 @@ export async function* streamToChatChunks(
   for await (const event of events) {
     if (!claimed) {
       const claim = matchClaim(event, options.messageId);
-      if (claim.kind === 'foreign') {
+      if (claim.kind === 'foreign' || claim.kind === 'dropped') {
         return;
       }
       if (claim.kind === 'ours') {
@@ -123,11 +127,17 @@ function matchClaim(event: StreamEvent, messageId: string): TurnClaim {
   if (hasEventName(event, 'turn_started')) {
     return claimFromIds(event.data.messageIds, messageId, readTurnId(event));
   }
-  // A 'between-rounds' delivery lands mid-turn and never appears in a
-  // turn_started; the injection event is its claim, and the running turn's
-  // boundary (whatever its id) is its end.
+  // A steer ('between-rounds' or 'next-item') lands mid-turn and never
+  // appears in a turn_started; the injection event is its claim, and the
+  // running turn's boundary (whatever its id) is its end.
   if (hasEventName(event, 'inbox_injected')) {
     return claimFromIds(event.data.messageIds, messageId, null);
+  }
+  // A layer can drop a steer; no turn will ever answer it.
+  if (hasEventName(event, 'steer_dropped') && event.data.messageId === messageId) {
+    return {
+      kind: 'dropped',
+    };
   }
   return {
     kind: 'none',

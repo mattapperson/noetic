@@ -219,7 +219,7 @@ Limits and recovery:
 
 - **Round cap.** After 32 tool rounds the harness sends a further round with an ephemeral `continue` user message (never logged), and allows three such rounds before the step throws `LLM exceeded maximum tool rounds (32)`.
 - **Bad rounds.** A provider-reported terminal error, or a completed response with no output items, is retried the same way: an ephemeral `continue` round, up to three in a row, then the step throws.
-- **Between rounds.** On a session turn, queued `between-rounds` inbox messages are appended as user messages before the next round (see `08-runtime`).
+- **Steers.** On a session turn, queued steers (`between-rounds` and `next-item` messages) are added before each round, including the first; a `next-item` steer can also end a round early at an item boundary (see `08-runtime` § Steers).
 - **Abort and stalls.** The request's abort signal cancels the in-flight round and ends the loop. A per-round stream-idle watchdog aborts a round whose stream goes silent (see `08-runtime`).
 
 `until.noToolCalls()` (see `05-loop-and-until`) works one level up. It reads `ctx.lastStepMeta.toolCalls`, which holds every function call from every round of the step, so an outer `loop` iteration counts as having called tools if any round did. By the time `executeLLM` returns, every tool call from that step has a result.

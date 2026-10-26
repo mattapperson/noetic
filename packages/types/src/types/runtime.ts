@@ -68,13 +68,17 @@ export interface AgentConfig<TParams extends Record<string, unknown> = Record<st
  *
  *  - `next-turn` (default): queue the message; it becomes a new user turn after
  *    the current turn completes.
- *  - `between-rounds`: inject the message as an additional user item before the
- *    next tool-round LLM call within the same turn. The model sees it partway
- *    through. Mirrors Claude Code's inbox-attachment behaviour.
- *  - `interrupt`: cancel the in-flight LLM stream, append the message, and
- *    restart the turn from the merged history.
+ *  - `between-rounds`: a steer applied before the next model call within the
+ *    same turn. The model sees it partway through.
+ *  - `next-item`: a steer applied as soon as the model finishes the output item
+ *    it is writing. The stream stops there, the finished items are kept, any
+ *    finished tool calls run, and the next round sees the message.
+ *  - `interrupt`: cancel the in-flight LLM stream, keep the items the turn
+ *    finished, append the message, and restart the turn from the merged history.
+ *
+ *  Context layers can change when a steer lands with the `onSteer` hook.
  */
-export type DeliveryMode = 'next-turn' | 'between-rounds' | 'interrupt';
+export type DeliveryMode = 'next-turn' | 'between-rounds' | 'next-item' | 'interrupt';
 
 //#endregion
 

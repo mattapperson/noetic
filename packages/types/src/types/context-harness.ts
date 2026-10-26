@@ -17,7 +17,7 @@ import type { HarnessResponse, StreamEvent, StreamingItem } from './harness-resu
 import type { ExecuteInput, Item } from './items';
 import type { Span, TraceExporter } from './observability';
 import type { ShellAdapter } from './shell-adapter';
-import type { SteeringDecision } from './steering';
+import type { OnSteerParams, SteeringDecision, SteerVerdict } from './steering';
 import type { SubprocessAdapter } from './subprocess-adapter';
 import type { Tool } from './tool';
 
@@ -179,6 +179,11 @@ export interface ContextHarness {
     response: LLMResponse,
     ctx: Context,
   ): Promise<SteeringDecision>;
+  onSteer(
+    layers: ContextLayer[],
+    params: Pick<OnSteerParams, 'steer' | 'point' | 'action' | 'pendingCalls'>,
+    ctx: Context,
+  ): Promise<SteerVerdict>;
   runAppendPipeline(
     layers: ContextLayer[],
     items: Item[],

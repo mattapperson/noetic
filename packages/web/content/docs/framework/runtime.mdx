@@ -158,8 +158,27 @@ Each message carries a `DeliveryMode`. Override per-call via `options.deliveryMo
 | Mode | Behaviour |
 |---|---|
 | `next-turn` (default) | Queue until the current turn completes, then run as a new turn. |
-| `between-rounds` | Inject as a user item before the next tool-round LLM call within the active turn. Matches Claude Code's inbox-attachment pattern. |
-| `interrupt` | Abort the in-flight turn, place at head of queue, restart. |
+| `between-rounds` | Steer the running turn: add the message before its next model call. Matches Claude Code's inbox-attachment pattern. |
+| `next-item` | Steer the running turn as soon as the model finishes the item it is writing. The stream stops there, finished tool calls run, and the next round sees the message. Matches the Responses API's `response.steer`. |
+| `interrupt` | Abort the in-flight turn, keep the items it finished, place the message at the head of the queue, and restart. |
+
+### Steering a running turn
+
+A `between-rounds` or `next-item` message is a **steer**: it joins the turn that is running instead of waiting for the next one. When no turn is running, it starts one like `next-turn`.
+
+```ts validate=none
+await harness.execute('Fix the failing test.');
+// While the agent works:
+await harness.execute('Use the staging database, not production.', {
+  deliveryMode: 'next-item',
+});
+```
+
+A model call offers queued steers at three points: when the stream finishes an output item (`item_done`), before each tool call (`before_tool_call`), and before each round (`before_round`). By default a `next-item` steer applies at `item_done`, and a `between-rounds` steer at `before_round`. Applied steers keep their content parts and role, and land in the history in the order the model saw them.
+
+To change when a steer lands, give a context layer an `onSteer` hook. It can apply a steer sooner (before a tool call, skipping the rest of the round), hold it longer, rewrite it, or drop it. See [Custom Layers](/docs/framework/context-layers/custom-layers#steering-a-running-turn-with-onsteer).
+
+Steers reach model calls on the session's own context. A `spawn` child takes them only with `steers: 'forward'`.
 
 ### HarnessResponse
 
@@ -188,7 +207,11 @@ Framework events emitted during execution:
 | `{name}:turn_started` | A session turn began. Data: `{ turnId, messageIds }`. |
 | `{name}:turn_completed` | A session turn completed. Data: `{ turnId, durationMs }`. |
 | `{name}:turn_aborted` | A session turn was aborted or errored. Data: `{ turnId, reason }`. |
-| `{name}:inbox_injected` | Between-rounds messages were injected. Data: `{ round, count, messageIds }`. |
+| `{name}:steer_accepted` | A steer was queued while a turn runs. Data: `{ messageId, turnId, deliveryMode }`. |
+| `{name}:steer_pending` | A steer is waiting for the round's tool calls to finish. Emitted once per steer. Data: `{ messageId, waitingOn }`. |
+| `{name}:steer_dropped` | A layer dropped a steer; no turn will answer it. Data: `{ messageId, point }`. |
+| `{name}:inbox_injected` | Steers were added before a model call. Data: `{ round, count, messageIds }`. |
+| `{name}:model_call_steered` | A steer stopped the round's stream at an item boundary. Data: `{ round, itemCount }`. |
 | `{name}:step_started` | Before each step executes. |
 | `{name}:step_completed` | After each step completes. |
 | `{name}:tool_round_started` | Before a tool execution round. |

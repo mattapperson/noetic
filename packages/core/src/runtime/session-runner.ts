@@ -1,9 +1,7 @@
 import type {
   Context,
-  ExecuteInput,
   HarnessResponse,
   HarnessStatus,
-  InputMessageItem,
   Item,
   SessionUsage,
 } from '@noetic-tools/types';
@@ -11,7 +9,7 @@ import { isNoeticError } from '@noetic-tools/types';
 import { emitFrameworkEvent } from './broadcaster-utils';
 import { EventBroadcaster } from './event-broadcaster';
 import type { QueuedMessage } from './message-queue';
-import { MessageQueue } from './message-queue';
+import { inputToItems, isSteer, MessageQueue } from './message-queue';
 
 //#region Types
 
@@ -62,35 +60,6 @@ export interface SessionRunnerOpts {
 //#endregion
 
 //#region Helpers
-
-function inputToItems(input: ExecuteInput): Item[] {
-  if (typeof input === 'string') {
-    if (input.length === 0) {
-      return [];
-    }
-    const item: InputMessageItem = {
-      id: `user-${crypto.randomUUID()}`,
-      type: 'message',
-      role: 'user',
-      status: 'completed',
-      content: [
-        {
-          type: 'input_text',
-          text: input,
-        },
-      ],
-    };
-    return [
-      item,
-    ];
-  }
-  if (Array.isArray(input)) {
-    return input;
-  }
-  return [
-    input,
-  ];
-}
 
 function mergeInputsToItems(messages: ReadonlyArray<QueuedMessage>): Item[] {
   const items: Item[] = [];
@@ -165,6 +134,24 @@ export class SessionRunner {
 
   getStatus(): HarnessStatus {
     return this.status;
+  }
+
+  /** Queue a message. A steer that arrives mid-turn is announced first, so
+   *  `steer_accepted` always precedes the `inbox_injected` that applies it. */
+  enqueue(message: QueuedMessage): void {
+    if (this.status.kind === 'generating' && isSteer(message)) {
+      emitFrameworkEvent({
+        broadcaster: this.broadcaster,
+        agentName: this.agentName,
+        eventType: 'steer_accepted',
+        data: {
+          messageId: message.id,
+          turnId: this.status.turnId,
+          deliveryMode: message.deliveryMode,
+        },
+      });
+    }
+    this.queue.enqueue(message);
   }
 
   /** Cumulative token usage and cost across all turns this session has run. */

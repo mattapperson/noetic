@@ -509,6 +509,8 @@ export interface SpawnWorkflowNode extends WorkflowNodeBase {
    * the inherited set for the child, so list every layer the child needs.
    */
   layers?: string[];
+  /** `'forward'` lets the child apply steers sent while it runs; default `'hold'`. */
+  steers?: 'forward' | 'hold';
 }
 
 export interface WithContextWorkflowNode extends WorkflowNodeBase {
@@ -778,6 +780,12 @@ const SpawnNodeSchema = z.object({
   child: WorkflowNodeRef,
   timeout: z.number().positive().optional(),
   layers: z.array(z.string().min(1)).min(1).optional(),
+  steers: z
+    .enum([
+      'forward',
+      'hold',
+    ])
+    .optional(),
 });
 
 const WithContextNodeSchema = z.object({

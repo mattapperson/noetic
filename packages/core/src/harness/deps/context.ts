@@ -15,6 +15,7 @@ export {
   exportSpans,
   initLayers,
   notifyDecision,
+  onSteerLayers,
   projectHistoryLayers,
   recallLayers,
   recallLayersAtomic,

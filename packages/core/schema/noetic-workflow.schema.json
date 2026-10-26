@@ -1291,6 +1291,13 @@
                 "type": "string",
                 "minLength": 1
               }
+            },
+            "steers": {
+              "type": "string",
+              "enum": [
+                "forward",
+                "hold"
+              ]
             }
           },
           "required": [

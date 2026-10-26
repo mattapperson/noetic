@@ -24,6 +24,12 @@ export interface SpawnOpts<TContext = ContextData, I = unknown, O = unknown>
   context?: ContextConfig | ContextLayer[];
   timeout?: number;
   /**
+   * Whether the child takes steers sent to the session while it runs.
+   * `'hold'` (default) keeps them queued until control returns to the parent;
+   * `'forward'` lets the child's model calls apply them.
+   */
+  steers?: 'forward' | 'hold';
+  /**
    * Optional per-step subprocess adapter override. The interpreter routes
    * this spawn through the given adapter instead of the harness default.
    * See spec 04 for the `overrides ?? step ?? harness` precedence rule.
@@ -43,6 +49,7 @@ export interface SpawnOpts<TContext = ContextData, I = unknown, O = unknown>
  * @param opts.child - Step to execute in the isolated child context.
  * @param opts.context - Optional context config or layers for the child context (replaces parent layers entirely).
  * @param opts.timeout - Optional execution timeout in ms; the child is aborted if it exceeds this.
+ * @param opts.steers - `'forward'` lets the child apply steers sent while it runs; default `'hold'`.
  * @param opts.subprocess - Optional per-step subprocess adapter override.
  * @returns A `StepSpawn` step. The spawn step and its `child` step are both
  *   auto-registered in the shared step registry so the subprocess adapter
@@ -73,6 +80,7 @@ export function spawn<TContext = ContextData, I = unknown, O = unknown>(
     child: opts.child,
     context: opts.context,
     timeout: opts.timeout,
+    steers: opts.steers,
     subprocess: opts.subprocess,
     durable: opts.durable,
     replayKey: opts.replayKey,
