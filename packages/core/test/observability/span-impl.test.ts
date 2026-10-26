@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { SpanImpl } from '../../src/observability/span-impl';
+import { MAX_SPAN_EVENTS, SpanImpl } from '../../src/observability/span-impl';
 
 describe('SpanImpl', () => {
   it('creates with IDs', () => {
@@ -60,5 +60,46 @@ describe('SpanImpl', () => {
     const span = new SpanImpl('test', null);
     expect(span.duration).toBeGreaterThanOrEqual(0);
     expect(span.endTime).toBeUndefined();
+  });
+
+  describe('event limit', () => {
+    it('keeps every event up to MAX_SPAN_EVENTS', () => {
+      const span = new SpanImpl('test', null);
+      for (let i = 0; i < MAX_SPAN_EVENTS; i++) {
+        span.addEvent('tick', {
+          i,
+        });
+      }
+      expect(span.events).toHaveLength(MAX_SPAN_EVENTS);
+      expect(span.droppedEvents).toBe(0);
+    });
+
+    it('drops the oldest event once full and counts it', () => {
+      const span = new SpanImpl('test', null);
+      for (let i = 0; i < MAX_SPAN_EVENTS + 1; i++) {
+        span.addEvent('tick', {
+          i,
+        });
+      }
+      expect(span.events).toHaveLength(MAX_SPAN_EVENTS);
+      expect(span.droppedEvents).toBe(1);
+      expect(span.events[0]?.attributes?.i).toBe(1);
+      expect(span.events.at(-1)?.attributes?.i).toBe(MAX_SPAN_EVENTS);
+    });
+
+    it('stays bounded under an uncapped loop of verdicts', () => {
+      const span = new SpanImpl('loop', null);
+      const total = MAX_SPAN_EVENTS * 10;
+      for (let i = 0; i < total; i++) {
+        span.addEvent('loop.verdict', {
+          iteration: i,
+          stop: i === total - 1,
+        });
+      }
+      expect(span.events).toHaveLength(MAX_SPAN_EVENTS);
+      expect(span.droppedEvents).toBe(total - MAX_SPAN_EVENTS);
+      // The latest verdict — the one that stopped the loop — is kept.
+      expect(span.events.at(-1)?.attributes?.stop).toBe(true);
+    });
   });
 });

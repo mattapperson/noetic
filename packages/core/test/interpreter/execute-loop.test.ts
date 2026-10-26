@@ -13,7 +13,7 @@ import { channel } from '../../src/builders/channel-builder';
 import { loop } from '../../src/builders/loop-builder';
 import { executeLoop } from '../../src/interpreter/execute-control';
 import { NoeticEvent } from '../../src/observability/genai-attributes';
-import { SpanImpl } from '../../src/observability/span-impl';
+import { MAX_SPAN_EVENTS, SpanImpl } from '../../src/observability/span-impl';
 import { ChannelStore } from '../../src/runtime/channel-store';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import { any } from '../../src/until/combinators';
@@ -1001,6 +1001,36 @@ describe('executeLoop inbox channel', () => {
   });
 
   describe('verdict traces', () => {
+    it('keeps the enclosing span bounded however long an uncapped loop runs', async () => {
+      const span = new SpanImpl('loop-test', null);
+      const iterations = MAX_SPAN_EVENTS * 4;
+      const loopStep = loop<ContextData, number, number>({
+        id: 'long-loop',
+        steps: [
+          {
+            kind: 'runCode',
+            id: 'inc',
+            execute: async (input: number) => input + 1,
+          },
+        ],
+        until: until.maxSteps(iterations),
+        maxIterations: Number.POSITIVE_INFINITY,
+      });
+      const ctx = new ContextImpl({
+        harness: makeMockHarness(),
+        span,
+      });
+      expect(await executeLoop(loopStep, 0, ctx, simpleExecute)).toBe(iterations);
+
+      expect(span.events).toHaveLength(MAX_SPAN_EVENTS);
+      expect(span.droppedEvents).toBe(iterations - MAX_SPAN_EVENTS);
+      expect(span.events.at(-1)?.attributes).toMatchObject({
+        loop: 'long-loop',
+        iteration: iterations,
+        stop: true,
+      });
+    });
+
     it('adds one loop.verdict event per iteration to the enclosing span', async () => {
       const span = new SpanImpl('loop-test', null);
       const loopStep = loop<ContextData, number, number>({

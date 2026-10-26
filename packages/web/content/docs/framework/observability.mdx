@@ -247,6 +247,8 @@ An `invokeTool` step opens its own `tool.call` span under the enclosing span. It
 
 A `loop` opens no span of its own. After each verdict its `until` predicate returns — including the stop verdict a throwing predicate produces — it adds a `loop.verdict` event to the span its context carries: the `spawn` or `inParallel.path` span inside a child context, otherwise the run's span (for a JSON workflow, `workflow.run`).
 
+A span keeps at most 128 events — the most recent — and counts the rest in `droppedEvents`, so a loop that runs for a long time (or forever, with `maxIterations: Infinity`) keeps a bounded trace. The latest verdicts, including the stop verdict, are always kept.
+
 | Attribute | Type | Description |
 |---|---|---|
 | `loop` | `string` | The loop's step id |

@@ -57,7 +57,7 @@ A cancelled child — a race loser, a sibling aborted by fail-fast, a parent abo
 
 ## Loop Verdict Events
 
-A loop opens no span of its own. After each verdict it adds a `loop.verdict` event to the enclosing span (`ctx.span`), so the events land on whatever span the loop's context carries: the `spawn` or `inParallel.path` span inside a child context, otherwise the run's span (for a JSON workflow, `workflow.run`). Attributes are `loop` (step id), `iteration`, `stop`, and `reason` when the verdict has one; `feedback` is never recorded. See `05-loop-and-until` (Verdict Traces) for the full table.
+A loop opens no span of its own. After each verdict it adds a `loop.verdict` event to the enclosing span (`ctx.span`), so the events land on whatever span the loop's context carries: the `spawn` or `inParallel.path` span inside a child context, otherwise the run's span (for a JSON workflow, `workflow.run`). Attributes are `loop` (step id), `iteration`, `stop`, and `reason` when the verdict has one; `feedback` is never recorded. See `05-loop-and-until` (Verdict Traces) for the full table. A span keeps at most 128 events — the most recent — and counts the ones it drops in `droppedEvents`, so an uncapped loop (or a `schedule` whose iterations keep failing) holds a bounded trace however long it runs; the latest verdicts, including the one that stopped the loop, are always kept.
 
 ---
 
