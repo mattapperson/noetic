@@ -1,3 +1,7 @@
+## @noetic-tools/core-v5.17.0 (2026-10-26)
+
+* feat(core): durable steers and steer-triggered recall (#141) ([0c7b185](https://github.com/mattapperson/noetic/commit/0c7b185)), closes [#141](https://github.com/mattapperson/noetic/issues/141)
+
 ## @noetic-tools/core-v5.16.1 (2026-10-26)
 
 * fix(core): restore custom items from steps outside agentGraph ([6cf867e](https://github.com/mattapperson/noetic/commit/6cf867e))
