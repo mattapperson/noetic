@@ -13,6 +13,8 @@ The Steering layer evaluates rules at the two enforcement points the runtime exp
 - **[Placement](/docs/framework/context-layers#prompt-cache-anchoring)**: `'live'` — `recall` drains the feedback queue as it renders, so the call cannot be replayed from a pin
 - **Hook timeouts**: `beforeToolCall` `5000` ms, `afterModelCall` `10000` ms
 
+This layer steers the model's own actions. To steer a running turn with a message from the user, send it with `deliveryMode: 'between-rounds'` or `'next-item'`; a layer's `onSteer` hook decides when it lands. See [Steering a running turn](/docs/framework/runtime#steering-a-running-turn).
+
 ## Usage
 
 ```ts

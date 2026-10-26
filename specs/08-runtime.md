@@ -474,10 +474,29 @@ Each queued message carries a `DeliveryMode`:
 | Mode | Behaviour |
 |------|-----------|
 | `next-turn` (default) | Message runs as a new turn once the current turn completes. Safe and predictable. |
-| `between-rounds` | Message is injected as an additional user item before the next tool-round LLM call within the currently generating turn. If no turn is active, behaves like `next-turn`. Mirrors Claude Code's inbox-attachment pattern. |
-| `interrupt` | Cancels the in-flight turn (if any), places the message at the head of the queue, and restarts. |
+| `between-rounds` | A steer. Added to the conversation before the next model call of the running turn, including the first. If no turn is active, behaves like `next-turn`. Mirrors Claude Code's inbox-attachment pattern. |
+| `next-item` | A steer. Applied as soon as the model finishes the output item it is writing: the stream stops at that item boundary, the finished items are kept, finished tool calls run, and the next round sees the message. Mirrors the Responses API's `response.steer`. If no turn is active, behaves like `next-turn`. |
+| `interrupt` | Cancels the in-flight turn (if any), keeps the items the turn finished, places the message at the head of the queue, and restarts from the merged history. |
 
 `AgentConfig.defaultDeliveryMode` (default `next-turn`) applies to messages that don't specify a mode. Callers may override per-call via `ExecuteOptions.deliveryMode`.
+
+An `interrupt` keeps every item from rounds that completed before the cut. A tool call left without an output is answered with `"Cancelled before it ran."` so the restarted turn's history stays valid input. The half-streamed item is lost. A plain `abort()` keeps nothing from the turn.
+
+### Steers
+
+A **steer** is a `between-rounds` or `next-item` message: one meant for the turn that is running. It is offered to the context layers at three **steer points** inside a model call:
+
+| Point | When | `between-rounds` default | `next-item` default | Applying here |
+|-------|------|------|------|------|
+| `item_done` | The stream finished an output item | `defer` | `apply` | Stops the stream; the round ends with the finished items |
+| `before_tool_call` | A client tool call is about to run | `defer` | `defer` | Skips this call and the rest of the round; each skipped call is answered `"Skipped: a new message arrived before this tool call ran."` |
+| `before_round` | A model call is about to start | `apply` | `apply` | Adds the steer to this call's input |
+
+Layers change the outcome with the `onSteer` hook (see `11-context-layer-system`): `apply`, `defer` (offer again at the next point), or `drop`. A steer applied at any point is held until the next model call, then added to the conversation in the order the model sees it, after passing through the `onItemAppend` pipeline. Applied steers are part of the call's response items, so they reach the item log with the rest of the round.
+
+A stream stopped by a steer reports no usage for that round; the provider sends usage only with a finished response. When a steer is staged while the model writes its final answer, the call runs one more round so the model answers the steer itself. A `between-rounds` steer that arrives during the final answer stays queued and runs as the next turn.
+
+Steers reach model calls on the session's own context. A spawned child takes them only when spawned with `steers: 'forward'` (see `04-spawn`); `inParallel` paths and other spawns leave them queued until control returns.
 
 ### Stream Idle Timeout
 
@@ -513,7 +532,11 @@ interface FrameworkStreamEvent {
 | `{name}:item_appended` | Emitted whenever a framework-authored item enters the session log — turn input messages (after `turn_started`), between-rounds inbox injections, tool result items, and the items a step with `emitItems` adds when it finishes, or streams again on replay under `emitItemsOnReplay` (`01-step-type` § Emitting items). Data: `{ item }`. Backs `getItemStream` for everything the SDK stream cannot carry, so it is emitted unconditionally — never filtered by `step.emit`. |
 | `{name}:turn_completed` | Emitted when a turn completes. Data: `{ turnId, durationMs }` |
 | `{name}:turn_aborted` | Emitted when a turn is aborted or errors. Data: `{ turnId, reason }` |
-| `{name}:inbox_injected` | Emitted between tool rounds when queued `between-rounds` messages are injected into the prompt. Data: `{ round, count, messageIds }` |
+| `{name}:steer_accepted` | Emitted when a steer is queued while a turn runs. Always precedes the `inbox_injected` that applies it. Data: `{ messageId, turnId, deliveryMode }` |
+| `{name}:steer_pending` | Emitted once per steer when it is deferred at `before_tool_call`, waiting for tool calls to finish. Data: `{ messageId, waitingOn: callId[] }` |
+| `{name}:steer_dropped` | Emitted when a layer drops a steer. No turn will answer it. Data: `{ messageId, point }` |
+| `{name}:inbox_injected` | Emitted when applied steers are added before a model call. Data: `{ round, count, messageIds }` |
+| `{name}:model_call_steered` | Emitted when a steer stops a round's stream at an item boundary. Data: `{ round, itemCount }` |
 | `{name}:step_started` | Emitted before each step executes. Data: `{ stepId, kind }` |
 | `{name}:step_completed` | Emitted after each step completes. Data: `{ stepId, kind }` |
 | `{name}:tool_round_started` | Emitted before a tool execution round. Data: `{ round, toolCount }` |
@@ -574,7 +597,7 @@ type HarnessStatus =
   | { readonly kind: 'generating'; readonly startedAt: number; readonly turnId: string }
   | { readonly kind: 'aborting'; readonly turnId: string };
 
-type DeliveryMode = 'next-turn' | 'between-rounds' | 'interrupt';
+type DeliveryMode = 'next-turn' | 'between-rounds' | 'next-item' | 'interrupt';
 ```
 
 ---

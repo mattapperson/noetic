@@ -597,6 +597,7 @@ function hydrateSpawnNode(
     child: hydrateNode(node.child, ctx),
     timeout: node.timeout,
     context: resolvedLayers,
+    steers: node.steers,
   });
 }
 

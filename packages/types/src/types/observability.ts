@@ -29,7 +29,8 @@ export interface LayerTraceSpan {
     | 'beforeToolCall'
     | 'afterModelCall'
     | 'projectHistory'
-    | 'onItemAppend';
+    | 'onItemAppend'
+    | 'onSteer';
   /** Duration in milliseconds. */
   duration: number;
   status: 'ok' | 'error' | 'timeout' | 'skipped';

@@ -535,6 +535,7 @@ Run a child node in an isolated child context.
 | `child` | `WorkflowNode` | required | The node to execute in a child context. |
 | `timeout` | `number` | `undefined` | Timeout in milliseconds. |
 | `layers` | `string[]` | `undefined` | Context layer names for the child, resolved from the hydration context registry (same resolution as `withContext`). Omit to inherit the parent's layers; naming layers **replaces** them for the child. |
+| `steers` | `'forward' \| 'hold'` | `'hold'` | `'forward'` lets the child apply [steers](/docs/framework/runtime#steering-a-running-turn) sent to the session while it runs. `'hold'` keeps them queued until the child returns. |
 
 ```json
 {

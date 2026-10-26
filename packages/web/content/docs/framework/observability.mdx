@@ -101,7 +101,8 @@ interface LayerTraceSpan {
   layerId: string;
   hook:
     | 'init' | 'recall' | 'store' | 'onSpawn' | 'onReturn' | 'onParentUpdate' | 'onComplete'
-    | 'dispose' | 'onDecision' | 'beforeToolCall' | 'afterModelCall' | 'projectHistory' | 'onItemAppend';
+    | 'dispose' | 'onDecision' | 'beforeToolCall' | 'afterModelCall' | 'projectHistory' | 'onItemAppend'
+    | 'onSteer';
   duration: number;
   status: 'ok' | 'error' | 'timeout' | 'skipped';
   budget?: { allocated: number; used: number; yielded: number };

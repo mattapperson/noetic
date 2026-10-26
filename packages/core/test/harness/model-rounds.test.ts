@@ -12,6 +12,8 @@ import { tool } from '../../src/builders/tool-builder';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { createStepLedgerStore } from '../../src/runtime/durable/step-ledger';
 import { createInMemoryStorage } from '../../src/runtime/in-memory-storage';
+import type { SessionCtxExtension } from '../../src/runtime/message-queue';
+import { MessageQueue } from '../../src/runtime/message-queue';
 import type { FakeOpenRouter } from '../_helpers';
 import { startFakeOpenRouter } from '../_helpers';
 
@@ -60,7 +62,7 @@ function chargingModel(input: unknown[]): unknown[] {
   ];
 }
 
-function setup(): {
+function setup(onCharge?: (n: number) => void): {
   server: FakeOpenRouter;
   charges: number[];
   harness: (storage: StorageAdapter) => AgentHarness;
@@ -80,6 +82,7 @@ function setup(): {
     }),
     execute: async ({ n }) => {
       charges.push(n);
+      onCharge?.(n);
       return {
         ok: true,
       };
@@ -157,6 +160,41 @@ describe('durable model rounds', () => {
     ]);
     // Replayed rounds still count toward the step's usage — they were paid for once.
     expect(resumed.tokens.total).toBe(6 * 15);
+  });
+
+  it('replays a steer applied before the cut, so the resumed loop still sees it', async () => {
+    const queue = new MessageQueue();
+    const { server, harness, agent } = setup((n) => {
+      if (n === 2) {
+        queue.enqueue({
+          id: 'steer-1',
+          input: 'use the backup card',
+          deliveryMode: 'between-rounds',
+          options: {},
+          enqueuedAt: Date.now(),
+        });
+      }
+    });
+    server.dropAt.add(5);
+    const storage = createInMemoryStorage();
+    const first = harness(storage);
+    const ctx = Object.assign(first.createContext(), {
+      _sessionQueue: queue,
+    } satisfies SessionCtxExtension);
+    await expect(first.run(agent(), 'go', ctx)).rejects.toThrow();
+
+    const next = harness(storage);
+    const resumed = await next.restore(ctx.id);
+    assert(resumed);
+    expect(await next.run(agent(), 'go', resumed)).toBe('charged 5');
+
+    const mentionsSteer = (round: number): boolean =>
+      JSON.stringify(server.rounds[round]?.input).includes('use the backup card');
+    expect(mentionsSteer(1)).toBe(false);
+    expect(mentionsSteer(2)).toBe(true);
+    // The resumed round is asked on the replayed conversation, steer included.
+    expect(mentionsSteer(5)).toBe(true);
+    expect(server.rounds[5]?.input).toEqual(server.rounds[4]?.input);
   });
 
   it('records no rounds for a step kept out of the ledger', async () => {

@@ -1,4 +1,10 @@
-import type { DeliveryMode, ExecuteInput, ExecuteOptions } from '@noetic-tools/types';
+import type {
+  DeliveryMode,
+  ExecuteInput,
+  ExecuteOptions,
+  InputMessageItem,
+  Item,
+} from '@noetic-tools/types';
 
 //#region Types
 
@@ -13,8 +19,57 @@ export interface QueuedMessage {
   readonly enqueuedAt: number;
 }
 
+/** @internal Context fields that let a model call find its session's steers. */
+export interface SessionCtxExtension {
+  _sessionQueue?: MessageQueue;
+  /** Set on a spawned child that takes its parent's steers. */
+  _forwardSteers?: boolean;
+}
+
 /** @internal Subscription callback fired after any mutation. */
 export type QueueChangeListener = (size: number) => void;
+
+//#endregion
+
+//#region Input conversion
+
+/** @internal Convert `execute()` input to log items. An empty string is no input. */
+export function inputToItems(input: ExecuteInput): Item[] {
+  if (typeof input === 'string') {
+    if (input.length === 0) {
+      return [];
+    }
+    const item: InputMessageItem = {
+      id: `user-${crypto.randomUUID()}`,
+      type: 'message',
+      role: 'user',
+      status: 'completed',
+      content: [
+        {
+          type: 'input_text',
+          text: input,
+        },
+      ],
+    };
+    return [
+      item,
+    ];
+  }
+  if (Array.isArray(input)) {
+    return input;
+  }
+  return [
+    input,
+  ];
+}
+
+/** @internal The abort reason a `deliveryMode: 'interrupt'` message cancels its turn with. */
+export const INTERRUPT_REASON = 'interrupt';
+
+/** @internal Whether a queued message is a steer: one meant for the running turn. */
+export function isSteer(message: QueuedMessage): boolean {
+  return message.deliveryMode === 'between-rounds' || message.deliveryMode === 'next-item';
+}
 
 //#endregion
 
@@ -46,6 +101,24 @@ export class MessageQueue {
     const drained = this.items.splice(0, this.items.length);
     this.notify();
     return drained;
+  }
+
+  /** Remove and return the messages `match` accepts, keeping the rest in order. */
+  take(match: (message: QueuedMessage) => boolean): QueuedMessage[] {
+    const taken: QueuedMessage[] = [];
+    for (let i = 0; i < this.items.length; ) {
+      const message = this.items[i];
+      if (message && match(message)) {
+        taken.push(message);
+        this.items.splice(i, 1);
+        continue;
+      }
+      i++;
+    }
+    if (taken.length > 0) {
+      this.notify();
+    }
+    return taken;
   }
 
   peekAll(): ReadonlyArray<QueuedMessage> {

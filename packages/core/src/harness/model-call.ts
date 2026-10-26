@@ -2,7 +2,7 @@ import type {
   AgentHarnessContract,
   CallModelRequest,
   Context,
-  InputMessageItem,
+  FunctionCallItem,
   Item,
   ItemSchemaRegistry,
   LLMResponse,
@@ -13,7 +13,7 @@ import type {
   ToolChoice,
   TraceExporter,
 } from '@noetic-tools/types';
-import { frameworkCast, NoeticConfigError, ToolChoiceMode } from '@noetic-tools/types';
+import { frameworkCast, NoeticConfigError, SteerPoint, ToolChoiceMode } from '@noetic-tools/types';
 import type * as OpenRouterAgent from '@openrouter/agent';
 import type { OpenRouter } from '@openrouter/agent';
 import { serverTool } from '@openrouter/agent';
@@ -31,15 +31,17 @@ import { isFunctionCall } from '../interpreter/typeguards';
 import { GenAI, NoeticAttr, ToolAttr } from '../observability/genai-attributes';
 import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../runtime/broadcaster-utils';
 import type { EventBroadcaster } from '../runtime/event-broadcaster';
-import type { MessageQueue, QueuedMessage } from '../runtime/message-queue';
 import type { ApprovalOutcome } from '../runtime/tool-approval';
 import { exportSpans } from './deps/context';
 import { RoundLedger } from './model-rounds';
 import { buildItemSchemaRegistry, createToolResultItem } from './model-schema.js';
+import type { SteerInbox } from './steer-inbox';
+import { openSteerInbox } from './steer-inbox';
 
 const MAX_TOOL_ROUNDS = 32;
 const MAX_RECOVERY_CONTINUATIONS = 3;
 const EPHEMERAL_CONTINUE_INPUT = 'continue';
+const SKIPPED_FOR_STEER_OUTPUT = 'Skipped: a new message arrived before this tool call ran.';
 
 function buildTextFormat(
   schema: StandardSchemaV1,
@@ -104,6 +106,18 @@ function providerTerminalError(response: unknown): ProviderTerminalError | null 
     status,
     message: `LLM response ended with status '${status}'`,
   };
+}
+
+/**
+ * Tool rounds replay only their function calls. A round a steer follows must
+ * also replay what the model said, or the next round starts without it.
+ * Function calls are left to the tool round, which adds each with its output.
+ */
+function replayOutput(
+  input: ReturnType<typeof itemsToInput>,
+  roundItems: ReadonlyArray<Item>,
+): void {
+  input.push(...itemsToInput(roundItems.filter((item) => !isFunctionCall(item))));
 }
 
 function hasUsableResponseOutput(response: unknown, items: ReadonlyArray<Item>): boolean {
@@ -171,10 +185,12 @@ interface PipeStreamOpts {
   /** Invoked once per SDK event received — used by the idle watchdog to bump
    *  its deadline so a still-streaming response isn't aborted. */
   onEvent?: () => void;
+  /** Awaited with each finished output item before the next event is read. */
+  onItemDone?: (item: unknown) => Promise<void>;
 }
 
 async function pipeStreamEventsToBroadcaster(opts: PipeStreamOpts): Promise<void> {
-  const { stream, broadcaster, agentName, signal, onEvent } = opts;
+  const { stream, broadcaster, agentName, signal, onEvent, onItemDone } = opts;
   try {
     for await (const event of stream) {
       if (signal?.aborted) {
@@ -191,8 +207,15 @@ async function pipeStreamEventsToBroadcaster(opts: PipeStreamOpts): Promise<void
         outputIndex: typeof event.outputIndex === 'number' ? event.outputIndex : undefined,
         contentIndex: typeof event.contentIndex === 'number' ? event.contentIndex : undefined,
       });
+      if (event.type === 'response.output_item.done' && onItemDone) {
+        await onItemDone(event.item);
+      }
     }
   } catch (err: unknown) {
+    // The stream ends badly when the round is aborted; that is not a pipe fault.
+    if (signal?.aborted) {
+      return;
+    }
     if (broadcaster) {
       emitFrameworkEvent({
         broadcaster,
@@ -269,23 +292,6 @@ export function createStreamIdleWatchdog(
       }
     },
   };
-}
-
-/** @internal Context carries the session queue reference so callModel can
- *  inject between-rounds messages into the current tool-round loop. */
-export interface SessionCtxExtension {
-  _sessionQueue?: MessageQueue;
-  _sessionBetweenRounds?: boolean;
-  _sessionRunnerAgentName?: string;
-}
-
-function hasSessionQueue(ctx: Context): ctx is Context & Required<SessionCtxExtension> {
-  const maybe = frameworkCast<Context & SessionCtxExtension>(ctx);
-  return (
-    maybe._sessionBetweenRounds === true &&
-    maybe._sessionQueue !== undefined &&
-    typeof maybe._sessionRunnerAgentName === 'string'
-  );
 }
 
 //#endregion
@@ -684,6 +690,24 @@ export class AgentHarnessModelCaller {
       input: 0,
       items: 0,
     };
+    // Record a round the loop goes on from, so a resumed loop can replay it.
+    const recordRound = async (usage: RoundUsage, cost: number): Promise<void> => {
+      if (request.signal?.aborted) {
+        return;
+      }
+      await roundLedger?.record(round, marks.log, {
+        items: allItems.slice(marks.items),
+        input: conversationInput.slice(marks.input),
+        usage,
+        cost,
+      });
+    };
+    const steers = openSteerInbox({
+      ctx: request.ctx,
+      layers: request.layers ?? [],
+      harness: this.opts.harness,
+      emit: prepared.emitIfAllowed,
+    });
 
     while (!request.signal?.aborted) {
       const replayed = roundLedger?.take(round, replaySchemas);
@@ -724,13 +748,15 @@ export class AgentHarnessModelCaller {
       }
       const recoveryContinuation = useEphemeralContinue;
       useEphemeralContinue = false;
-      if (round > 0 && request.ctx && hasSessionQueue(request.ctx)) {
-        this.injectBetweenRoundMessages(
-          request.ctx,
+      if (steers) {
+        await this.applySteers({
+          steers,
+          ctx: request.ctx,
           conversationInput,
+          allItems,
           round,
-          prepared.emitIfAllowed,
-        );
+          emitIfAllowed: prepared.emitIfAllowed,
+        });
       }
 
       const roundController = new AbortController();
@@ -792,6 +818,10 @@ export class AgentHarnessModelCaller {
         },
       );
 
+      // Output items the stream has finished, kept so a steer can stop the
+      // round early without losing them.
+      const finishedItems: unknown[] = [];
+      let steered = false;
       const pipePromise = pipeStreamEventsToBroadcaster({
         stream: callResult.getFullResponsesStream(),
         broadcaster: prepared.broadcaster,
@@ -806,13 +836,21 @@ export class AgentHarnessModelCaller {
             });
           }
         },
+        onItemDone: async (item) => {
+          finishedItems.push(item);
+          if (!steers?.hasQueued() || !(await steers.offer(SteerPoint.ItemDone))) {
+            return;
+          }
+          steered = true;
+          roundController.abort(new Error('steered'));
+        },
       });
 
       // A dropped connection rejects the response and the event pipe together; the
       // response's rejection is the one that propagates. Unobserved, the pipe's would
       // surface as an unhandled rejection and take the host process down with it.
       pipePromise.catch(() => {});
-      let sdkResponse: Awaited<ReturnType<typeof callResult.getResponse>>;
+      let sdkResponse: Awaited<ReturnType<typeof callResult.getResponse>> | undefined;
       try {
         sdkResponse = await awaitWithAbort(callResult.getResponse(), roundSignal);
         watchdog.stop();
@@ -826,12 +864,55 @@ export class AgentHarnessModelCaller {
         if (request.signal?.aborted) {
           break;
         }
-        throw err;
+        if (!steered) {
+          throw err;
+        }
       } finally {
         watchdog.stop();
       }
       if (request.signal?.aborted) {
         break;
+      }
+      if (!sdkResponse) {
+        // A steer stopped the stream before the response finished. The provider
+        // never reports usage for a cut response, so this round adds none.
+        modelSpan.end();
+        const roundItems = this.parseRoundItems(request, frameworkCast<Item[]>(finishedItems));
+        prepared.emitIfAllowed('model_call_steered', {
+          round,
+          itemCount: roundItems.length,
+        });
+        allItems.push(...roundItems);
+        replayOutput(conversationInput, roundItems);
+        await this.runToolRound({
+          roundItems,
+          request,
+          prepared,
+          allItems,
+          conversationInput,
+          round,
+          spans,
+          modelSpan,
+          steers,
+        });
+        await recordRound(
+          {
+            inputTokens: 0,
+            outputTokens: 0,
+          },
+          0,
+        );
+        round += 1;
+        const cutLimitRecovery = this.handleToolRoundLimit({
+          round,
+          toolLimitRecoveryContinuations,
+          emitIfAllowed: prepared.emitIfAllowed,
+        });
+        if (cutLimitRecovery.kind === 'continue') {
+          toolLimitRecoveryContinuations = cutLimitRecovery.toolLimitRecoveryContinuations;
+          useEphemeralContinue = true;
+        }
+        continue;
       }
       const recovery = this.handleModelRecovery({
         sdkResponse,
@@ -846,12 +927,7 @@ export class AgentHarnessModelCaller {
         continue;
       }
 
-      const roundItemSchemas = buildItemSchemaRegistry({
-        base: this.opts.itemSchemas,
-        layers: request.layers,
-        tools: request.tools,
-      });
-      const roundItems = roundItemSchemas.parseMany(extractOutputItems(sdkResponse));
+      const roundItems = this.parseRoundItems(request, extractOutputItems(sdkResponse));
       const outputRecovery = this.handleEmptyOutputRecovery({
         sdkResponse,
         roundItems,
@@ -881,29 +957,26 @@ export class AgentHarnessModelCaller {
       servedTier = sdkResponse.serviceTier ?? undefined;
       allItems.push(...roundItems);
 
-      const functionCalls = roundItems.filter(isFunctionCall);
-      if (functionCalls.length === 0 || !request.tools) {
-        break;
-      }
-      await this.executeToolRound({
-        functionCalls,
+      const ranTools = await this.runToolRound({
+        roundItems,
         request,
-        allowedTools: prepared.allowedTools,
+        prepared,
         allItems,
         conversationInput,
         round,
-        emitIfAllowed: prepared.emitIfAllowed,
         spans,
         modelSpan,
+        steers,
       });
-      if (!request.signal?.aborted) {
-        await roundLedger?.record(round, marks.log, {
-          items: allItems.slice(marks.items),
-          input: conversationInput.slice(marks.input),
-          usage: roundUsage,
-          cost: roundCost,
-        });
+      // A steer staged while the final answer streamed gets its own round, so
+      // the model answers it inside this call rather than in the next turn.
+      if (!ranTools && !steers?.hasStaged()) {
+        break;
       }
+      if (!ranTools) {
+        replayOutput(conversationInput, roundItems);
+      }
+      await recordRound(roundUsage, roundCost);
 
       round += 1;
       const limitRecovery = this.handleToolRoundLimit({
@@ -943,48 +1016,75 @@ export class AgentHarnessModelCaller {
     };
   }
 
-  private injectBetweenRoundMessages(
-    ctx: Context & Required<SessionCtxExtension>,
-    conversationInput: ReturnType<typeof itemsToInput>,
-    round: number,
-    emitIfAllowed: (eventType: string, data: Record<string, unknown>) => void,
-  ): void {
-    const injected = this.drainBetweenRoundsMessages(ctx._sessionQueue);
-    if (injected.length === 0) {
+  /**
+   * Offer queued steers before a model call and add the applied ones to the
+   * conversation. They join `allItems` rather than the log so the log keeps
+   * them in the order the model saw them.
+   */
+  private async applySteers(params: {
+    steers: SteerInbox;
+    ctx: Context | undefined;
+    conversationInput: ReturnType<typeof itemsToInput>;
+    allItems: Item[];
+    round: number;
+    emitIfAllowed: (eventType: string, data: Record<string, unknown>) => void;
+  }): Promise<void> {
+    const { steers, ctx, conversationInput, allItems } = params;
+    await steers.offer(SteerPoint.BeforeRound);
+    const { messageIds, items } = steers.takeStaged();
+    if (messageIds.length === 0) {
       return;
     }
-    for (const msg of injected) {
-      const text = itemToText(msg);
-      const userItem: InputMessageItem = {
-        id: `user-${crypto.randomUUID()}`,
-        type: 'message',
-        role: 'user',
-        status: 'completed',
-        content: [
-          {
-            type: 'input_text',
-            text,
-          },
-        ],
-      };
-      conversationInput.push({
-        type: 'message',
-        role: 'user',
-        content: [
-          {
-            type: 'input_text',
-            text,
-          },
-        ],
-      });
-      ctx.itemLog.append(userItem);
-      this.emitItemAppended(ctx, userItem);
+    conversationInput.push(...itemsToInput(items));
+    for (const item of items) {
+      allItems.push(item);
+      this.emitItemAppended(ctx, item);
     }
-    emitIfAllowed('inbox_injected', {
-      round,
-      count: injected.length,
-      messageIds: injected.map((i) => i.id),
+    params.emitIfAllowed('inbox_injected', {
+      round: params.round,
+      count: messageIds.length,
+      messageIds,
     });
+  }
+
+  private parseRoundItems(request: CallModelRequest, items: Item[]): Item[] {
+    const roundItemSchemas = buildItemSchemaRegistry({
+      base: this.opts.itemSchemas,
+      layers: request.layers,
+      tools: request.tools,
+    });
+    return roundItemSchemas.parseMany(items);
+  }
+
+  /** Run the round's function calls. Returns `false` when there were none to run. */
+  private async runToolRound(params: {
+    roundItems: Item[];
+    request: CallModelRequest;
+    prepared: PreparedModelRequest;
+    allItems: Item[];
+    conversationInput: ReturnType<typeof itemsToInput>;
+    round: number;
+    spans: CallSpanCollector;
+    modelSpan: Span;
+    steers: SteerInbox | undefined;
+  }): Promise<boolean> {
+    const functionCalls = params.roundItems.filter(isFunctionCall);
+    if (functionCalls.length === 0 || !params.request.tools) {
+      return false;
+    }
+    await this.executeToolRound({
+      functionCalls,
+      request: params.request,
+      allowedTools: params.prepared.allowedTools,
+      allItems: params.allItems,
+      conversationInput: params.conversationInput,
+      round: params.round,
+      emitIfAllowed: params.prepared.emitIfAllowed,
+      spans: params.spans,
+      modelSpan: params.modelSpan,
+      steers: params.steers,
+    });
+    return true;
   }
 
   private handleModelRecovery(params: {
@@ -1085,9 +1185,18 @@ export class AgentHarnessModelCaller {
     emitIfAllowed: (eventType: string, data: Record<string, unknown>) => void;
     spans: CallSpanCollector;
     modelSpan: Span;
+    steers: SteerInbox | undefined;
   }): Promise<void> {
-    const { functionCalls, request, allowedTools, allItems, conversationInput, spans, modelSpan } =
-      params;
+    const {
+      functionCalls,
+      request,
+      allowedTools,
+      allItems,
+      conversationInput,
+      spans,
+      modelSpan,
+      steers,
+    } = params;
     params.emitIfAllowed('tool_round_started', {
       round: params.round,
       toolCount: functionCalls.length,
@@ -1101,8 +1210,22 @@ export class AgentHarnessModelCaller {
         arguments: fc.arguments,
       });
     }
-    for (const fc of functionCalls) {
+    for (const [index, fc] of functionCalls.entries()) {
       if (request.signal?.aborted) {
+        break;
+      }
+      const remaining = functionCalls.slice(index);
+      if (steers?.hasQueued() && (await steers.offer(SteerPoint.BeforeToolCall, remaining))) {
+        for (const skipped of remaining) {
+          this.recordSkippedToolCall({
+            fc: skipped,
+            request,
+            allowedTools,
+            allItems,
+            conversationInput,
+            emitIfAllowed: params.emitIfAllowed,
+          });
+        }
         break;
       }
       const toolForCall = findTool(allowedTools, fc.name);
@@ -1144,8 +1267,9 @@ export class AgentHarnessModelCaller {
     try {
       parsedArgs = JSON.parse(fc.arguments);
     } catch {
-      this.recordMalformedToolCall({
+      this.recordUnrunToolCall({
         fc,
+        output: `Error: malformed JSON in tool arguments: ${fc.arguments}`,
         request,
         allowedTools,
         allItems,
@@ -1198,13 +1322,28 @@ export class AgentHarnessModelCaller {
     return toolResult.approval;
   }
 
-  private recordMalformedToolCall(params: {
-    fc: Extract<
-      Item,
-      {
-        type: 'function_call';
-      }
-    >;
+  private recordSkippedToolCall(params: {
+    fc: FunctionCallItem;
+    request: CallModelRequest;
+    allowedTools: Tool[];
+    allItems: Item[];
+    conversationInput: ReturnType<typeof itemsToInput>;
+    emitIfAllowed: (eventType: string, data: Record<string, unknown>) => void;
+  }): void {
+    params.emitIfAllowed('tool_call_started', {
+      name: params.fc.name,
+      callId: params.fc.callId,
+    });
+    this.recordUnrunToolCall({
+      ...params,
+      output: SKIPPED_FOR_STEER_OUTPUT,
+    });
+  }
+
+  /** Answer a call that never ran, so every call in the history has an output. */
+  private recordUnrunToolCall(params: {
+    fc: FunctionCallItem;
+    output: string;
     request: CallModelRequest;
     allowedTools: Tool[];
     allItems: Item[];
@@ -1212,11 +1351,10 @@ export class AgentHarnessModelCaller {
     emitIfAllowed: (eventType: string, data: Record<string, unknown>) => void;
   }): void {
     const { fc, request, allowedTools, allItems, conversationInput } = params;
-    const errorOutput = `Error: malformed JSON in tool arguments: ${fc.arguments}`;
     const toolForCall = findTool(allowedTools, fc.name);
     // Owner-scoped result validation (see executeFunctionCall).
     const outputItem = createToolResultItem({
-      output: errorOutput,
+      output: params.output,
       callId: fc.callId,
       roundItemSchemas: this.opts.itemSchemas.extend(toolForCall?.itemSchemas),
       tool: toolForCall,
@@ -1227,14 +1365,14 @@ export class AgentHarnessModelCaller {
     conversationInput.push({
       type: 'function_call_output',
       callId: fc.callId,
-      output: errorOutput,
+      output: params.output,
     });
     this.emitItemAppended(request.ctx, outputItem);
     params.emitIfAllowed('tool_call_completed', {
       name: fc.name,
       callId: fc.callId,
       error: true,
-      output: errorOutput,
+      output: params.output,
     });
   }
 
@@ -1268,49 +1406,4 @@ export class AgentHarnessModelCaller {
       toolLimitRecoveryContinuations: params.toolLimitRecoveryContinuations + 1,
     };
   }
-
-  /** @internal Drain only messages tagged `between-rounds` from the queue. */
-  private drainBetweenRoundsMessages(queue: MessageQueue): QueuedMessage[] {
-    const pending = queue.peekAll();
-    const toInject: QueuedMessage[] = [];
-    const keep: QueuedMessage[] = [];
-    for (const msg of pending) {
-      if (msg.deliveryMode === 'between-rounds') {
-        toInject.push(msg);
-        continue;
-      }
-      keep.push(msg);
-    }
-    if (toInject.length === 0) {
-      return [];
-    }
-    queue.drainAll();
-    for (const msg of keep) {
-      queue.enqueue(msg);
-    }
-    return toInject;
-  }
-}
-
-function itemToText(msg: QueuedMessage): string {
-  if (typeof msg.input === 'string') {
-    return msg.input;
-  }
-  const items = Array.isArray(msg.input)
-    ? msg.input
-    : [
-        msg.input,
-      ];
-  const texts: string[] = [];
-  for (const item of items) {
-    if (item.type !== 'message') {
-      continue;
-    }
-    for (const part of item.content) {
-      if (part.type === 'input_text' || part.type === 'output_text') {
-        texts.push(part.text);
-      }
-    }
-  }
-  return texts.join('\n');
 }

@@ -36,6 +36,7 @@ The child's tokens and cost are charged to the parent as they are spent, so the 
 | `child` | `Step<TContext, I, O>` | Yes | The step to execute in isolation |
 | `context` | `ContextConfig \| ContextLayer[]` | No | Spawn-local context layers (use the `context()` builder for typed access) |
 | `timeout` | `number` | No | Timeout in milliseconds |
+| `steers` | `'forward' \| 'hold'` | No | `'forward'` lets the child apply steers sent to the session while it runs. Default `'hold'`; see [Steers](#steers). |
 | `subprocess` | `SubprocessAdapter` | No | Per-step adapter override; see [SubprocessAdapter Routing](#subprocessadapter-routing) below. |
 
 ## Context Layers
@@ -130,6 +131,20 @@ const spawned = spawn({
   timeout: 3e4, // 30 seconds
 });
 ```
+
+## Steers
+
+A [steer](/docs/framework/runtime#steering-a-running-turn) sent to the session while the child runs stays queued by default and reaches the parent's next model call after the child returns. The child is isolated, and in a fan-out no single child is the obvious target. Set `steers: 'forward'` to let the child's model calls take steers as the parent's would:
+
+```ts validate=none
+const worker = spawn({
+  id: 'worker',
+  child: longTask,
+  steers: 'forward',
+});
+```
+
+A nested spawn forwards further only if it also sets `'forward'`.
 
 ## Real-World Example: Research Delegation with Context Layers
 

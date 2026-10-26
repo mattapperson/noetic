@@ -2,7 +2,7 @@ import type { LLMResponse } from './common';
 import type { Context } from './context';
 import type { ContextLayer } from './context-layer';
 import type { DecideRequest, DecideResponse, DecisionRecord } from './decide';
-import type { SteeringDecision } from './steering';
+import type { OnSteerParams, SteeringDecision, SteerVerdict } from './steering';
 
 /**
  * @public The judgment calls an agent harness makes for a step: the steering
@@ -26,6 +26,15 @@ export interface HarnessJudgmentContract {
     response: LLMResponse,
     ctx: Context,
   ): Promise<SteeringDecision>;
+  /**
+   * Run a steer through every layer's `onSteer` hook, in slot order. A harness
+   * without it lands each steer at its delivery mode's default point, unchanged.
+   */
+  onSteer?(
+    layers: ContextLayer[],
+    params: Pick<OnSteerParams, 'steer' | 'point' | 'action' | 'pendingCalls'>,
+    ctx: Context,
+  ): Promise<SteerVerdict>;
 }
 
 /**

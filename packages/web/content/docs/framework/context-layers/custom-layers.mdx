@@ -163,6 +163,35 @@ hooks: {
 
 A hook that throws or times out (5s by default) is logged as a diagnostic; it does not fail the step. [Decisions History](/docs/framework/context-layers/decisions-history) is a built-in layer made from this hook.
 
+### Steering a running turn with `onSteer`
+
+A message sent with `deliveryMode: 'between-rounds'` or `'next-item'` is a steer: it joins the turn that is running (see [Runtime](/docs/framework/runtime#steering-a-running-turn)). While a steer is queued, the model call offers it to `onSteer` at each steer point:
+
+- `item_done`: the stream just finished an output item. Applying here stops the stream.
+- `before_tool_call`: a tool call is about to run. Applying here skips this call and the rest of the round.
+- `before_round`: the next model call is about to start.
+
+The hook receives `{ steer, point, action, pendingCalls, ctx, state }`. `action` starts at the delivery mode's default for that point and carries any change from layers in earlier slots. Return `{ action?, items?, state? }`; omitted fields keep their current value. This layer holds steers while a deploy runs, and stops a call early when the user says "stop":
+
+```ts validate=none
+import { SteerAction, SteerPoint } from '@noetic-tools/core';
+
+hooks: {
+  async onSteer({ steer, point, pendingCalls }) {
+    if (pendingCalls.some((call) => call.name === 'deploy')) {
+      return { action: SteerAction.Defer };
+    }
+    const text = JSON.stringify(steer.items).toLowerCase();
+    if (point === SteerPoint.BeforeToolCall && text.includes('stop')) {
+      return { action: SteerAction.Apply };
+    }
+    return {};
+  },
+},
+```
+
+A deferred steer is offered again at the next point. `SteerAction.Drop` discards it and emits `steer_dropped`. Applied items still pass through `onItemAppend`. A hook that throws or times out (5s by default) leaves the steer unchanged.
+
 ### Recall can be a peek
 
 A decide step renders your layer's `recall()` as a **peek** (`RecallOptions.peek`): your hook gets a deep copy of its state, the output is used, any `state` your `recall()` returns is dropped, and an eventual layer's output is not cached. Your hook is not told it is a peek. A layer that drains a queue as it renders, as the steering layer does, may change the copy in place and still has the queue for the next `callModel` step. The copy uses `structuredClone`, so a layer whose state holds functions cannot be copied and is left out of a peek. Side effects outside the returned `state` (a write to storage, a network call) still happen, so keep them out of `recall()`.
@@ -180,7 +209,7 @@ const timeouts: Partial<LayerTimeouts> = {
 };
 ```
 
-Timeouts exist for every hook, including `beforeToolCall`, `afterModelCall`, `onItemAppend`, `projectHistory`, and `onDecision`.
+Timeouts exist for every hook, including `beforeToolCall`, `afterModelCall`, `onSteer`, `onItemAppend`, `projectHistory`, and `onDecision`.
 
 ### Failure, recall, and placement
 

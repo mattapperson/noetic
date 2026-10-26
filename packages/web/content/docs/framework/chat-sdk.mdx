@@ -29,7 +29,7 @@ noeticAgent({
   harness,                       // ChatHarness — any AgentHarness satisfies it
   historyLimit: 20,              // messages fetched to seed a thread; 0 disables
   history: store,                // durable history store (see Persistence)
-  deliveryMode: "between-rounds", // how mid-generation messages land
+  deliveryMode: "between-rounds", // how mid-generation messages land; "next-item" steers sooner
   threadId: (t) => `slack:${t.id}`,
   seed: { formatMessage, isAssistant }, // conversion overrides
   taskTitle: (tool) => `Running ${tool}`,

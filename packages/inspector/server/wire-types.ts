@@ -110,7 +110,7 @@ export interface HostEvent {
 export interface ChatRequest {
   text: string;
   messageId?: string;
-  deliveryMode?: 'next-turn' | 'between-rounds' | 'interrupt';
+  deliveryMode?: 'next-turn' | 'between-rounds' | 'next-item' | 'interrupt';
 }
 
 export interface CodeResponse {

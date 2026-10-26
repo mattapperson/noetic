@@ -24,7 +24,8 @@ export {
 } from '../../runtime/durable/step-ledger';
 export type { EventBroadcaster } from '../../runtime/event-broadcaster';
 export { createInMemoryStorage } from '../../runtime/in-memory-storage';
-export type { QueuedMessage } from '../../runtime/message-queue';
+export type { QueuedMessage, SessionCtxExtension } from '../../runtime/message-queue';
+export { INTERRUPT_REASON } from '../../runtime/message-queue';
 export type { TurnUsage } from '../../runtime/session-runner';
 export { SessionRunner } from '../../runtime/session-runner';
 export {

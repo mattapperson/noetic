@@ -449,6 +449,12 @@ export interface StepSpawn<TContext = ContextData, I = unknown, O = unknown>
   context?: ContextConfig | ContextLayer[];
   timeout?: number;
   /**
+   * Whether the child takes steers sent to the session while it runs.
+   * `'hold'` (default) keeps them queued until control returns to the parent;
+   * `'forward'` lets the child's model calls apply them.
+   */
+  steers?: 'forward' | 'hold';
+  /**
    * Per-step subprocess adapter override applied when the interpreter
    * dispatches this spawn. Resolution order is
    * `detachedSpawn-overrides.subprocess ?? step.subprocess ?? harness.subprocess`.

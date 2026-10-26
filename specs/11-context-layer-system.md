@@ -139,6 +139,7 @@ interface ContextLayerHooks<TState = unknown> {
   projectHistory?:  (params: ProjectHistoryParams<TState>)       => Promise<ProjectHistoryResult>;
   beforeToolCall?:  (params: BeforeToolCallParams<TState>)       => Promise<BeforeToolCallResult | void>;
   afterModelCall?:  (params: AfterModelCallParams<TState>)       => Promise<AfterModelCallResult<TState> | void>;
+  onSteer?:         (params: OnSteerParams<TState>)              => Promise<OnSteerResult<TState>>;
   onSpawn?:         (params: SpawnParams<TState>)                => Promise<SpawnResult<TState> | null>;
   onReturn?:        (params: ReturnParams<TState>)               => Promise<ReturnResult<TState> | void>;
   onParentUpdate?:  (params: ParentUpdateParams<TState>)         => Promise<ParentUpdateResult<TState> | void>;
@@ -152,6 +153,8 @@ interface ContextLayerHooks<TState = unknown> {
 `onDecision` runs after every `decide` step (spec 32) completes, sequentially in slot order, with the `DecisionRecord` (step id, model, source, answers). Returning `{ state }` commits new state and marks an eventual layer's recall cache stale. `decisionsHistoryLayer()` is the built-in user.
 
 `renderDelta` is called only for an **anchored** layer whose pinned output has gone stale, to describe the change compactly instead of republishing the whole block. Returning `null` — or throwing, or timing out — falls back to republishing the full new content. It is never called for `'live'` layers, which re-render anyway. See **Prompt-Cache Anchoring** below.
+
+`onSteer` decides what happens to a steer — a message sent into the running turn (see `08-runtime` § Steers) — at each steer point (`item_done`, `before_tool_call`, `before_round`). It receives the steer (`{ id, items }`), the point, the action so far, and the round's tool calls that have not run. It returns `{ action?, items?, state? }`: `apply`, `defer` (offer again at the next point), or `drop`, and optionally replacement items. Layers run in slot order as a pipeline: each sees the action and items the previous layer left, so the last layer to speak wins. A hook that throws or times out (default 5s) leaves both unchanged. The action starts at the delivery mode's default for that point. Applied items then pass through `onItemAppend`; their re-render requests are ignored, since recall does not run again inside a model call.
 
 `projectHistory` is a read-side hook: it receives the full historical items from `itemLog` and returns a (possibly narrower) projection used as `historyItems` in the next `assembleView` call. Layers compose in slot order, each receiving the output of the previous layer. Storage (`itemLog`, `accumulatedItems`) is never mutated by this hook — see `history` in spec 12 for the canonical use case.
 
@@ -191,7 +194,10 @@ LOOP ITERATION ─────────────────────�
 │
 ├─ [VIEW ASSEMBLY]     Projector assembles system prompt item + layer output items + (projected) history items.
 │
-├─ [LLM CALL]
+├─ [LLM CALL]          Steer points inside the call (see 08-runtime § Steers):
+│   └─ onSteer()       Sequential, SLOT ORDER, pipeline. Runs only when a
+│                      steer is queued: before each round, after each streamed
+│                      output item, and before each tool call.
 │
 ├─ afterModelCall()    Sequential, SLOT ORDER. Receives LLM response. MAY abort
 │                      the turn (e.g., policy violation) or update layer state.

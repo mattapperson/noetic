@@ -556,14 +556,18 @@ export type {
   BeforeToolCallParams,
   BeforeToolCallResult,
   LedgerEntry,
+  OnSteerParams,
+  OnSteerResult,
+  Steer,
   SteeringConfig,
   SteeringDecision,
   SteeringRule,
   SteeringState,
+  SteerVerdict,
   ToolApprover,
 } from '@noetic-tools/types';
 /** @public */
-export { LedgerEntryKind, SteeringAction } from '@noetic-tools/types';
+export { LedgerEntryKind, SteerAction, SteeringAction, SteerPoint } from '@noetic-tools/types';
 
 //#endregion
 

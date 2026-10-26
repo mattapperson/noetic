@@ -316,6 +316,7 @@ interface SpawnWorkflowNode {
   child: WorkflowNode;
   timeout?: number;
   layers?: string[];
+  steers?: 'forward' | 'hold';
 }
 ```
 
@@ -324,6 +325,7 @@ interface SpawnWorkflowNode {
 | `child`   | Yes      | The workflow subtree to execute in the child context. |
 | `timeout` | No       | Maximum wall-clock milliseconds for the child.       |
 | `layers`  | No       | Context layer names resolved from the hydration context registry, same resolution as `withContext` (unknown name → `UNKNOWN_LAYER_REFERENCE`). Omit to inherit the parent's layers, which is the default `spawn` behaviour (spec 04); naming layers **replaces** the inherited set for the child. |
+| `steers`  | No       | `'forward'` lets the child apply steers sent to the session while it runs; default `'hold'` keeps them queued until the child returns (spec 04). |
 
 ### `withContext`
 
@@ -934,6 +936,7 @@ const WorkflowNodeSchema: z.ZodType<WorkflowNode> = z.lazy(() =>
       child: WorkflowNodeSchema,
       timeout: z.number().int().positive().optional(),
       layers: z.array(z.string().min(1)).min(1).optional(),
+      steers: z.enum(['forward', 'hold']).optional(),
     }),
     z.object({
       kind: z.literal('withContext'),

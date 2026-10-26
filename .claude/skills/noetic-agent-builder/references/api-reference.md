@@ -365,6 +365,7 @@ spawn<TContext = ContextData, I = unknown, O = unknown>({
   child: Step<TContext, I, O>;
   context?: ContextConfig | ContextLayer[];
   timeout?: number;
+  steers?: 'forward' | 'hold';    // 'forward' lets the child apply session steers; default 'hold'
   subprocess?: SubprocessAdapter; // per-step adapter override
 }): StepSpawn<TContext, I, O>
 ```
@@ -1762,8 +1763,11 @@ const items = await harness.previewRequestItems({ threadId: 'thread-1' });
 | Mode | Behaviour |
 |------|-----------|
 | `next-turn` (default) | Queue and run after the current turn completes. |
-| `between-rounds` | Inject as a user item before the next tool-round LLM call within the active turn. |
-| `interrupt` | Abort the in-flight turn, place message at head of queue, restart. |
+| `between-rounds` | Steer: add the message before the next model call within the active turn (including the first). |
+| `next-item` | Steer: apply once the model finishes its current output item; the stream stops there, finished tool calls run, the next round sees it. |
+| `interrupt` | Abort the in-flight turn, keep the items it finished, place message at head of queue, restart. |
+
+Steers are offered at three points — `item_done`, `before_tool_call`, `before_round` — to each layer's [`onSteer`](#onsteer) hook. Events: `steer_accepted`, `steer_pending` (waiting on tool calls), `steer_dropped`, `inbox_injected` (applied), `model_call_steered` (stream stopped at an item boundary). A `spawn` child takes steers only with `steers: 'forward'`.
 
 ### Stream Idle Timeout
 
@@ -2357,7 +2361,7 @@ The full set is 23 tools, mirroring the 23 mutating + read CLI verbs (everything
 
 ## Context Layer Hooks
 
-Each hook call (`init`, `recall`, `store`, `onSpawn`, `onReturn`, `onParentUpdate`, `onComplete`, `dispose`, `onDecision`, `beforeToolCall`, `afterModelCall`, `projectHistory`, `onItemAppend`) opens a `layer.hook` child span (`NoeticEvent.LAYER_HOOK`) under the span of the context it runs in, ended when the hook settles and exported to the harness `traceExporter`. Attributes (`NoeticAttr.LAYER_*`): `noetic.layer.id`, `noetic.layer.hook`, `noetic.layer.status`, recall-only `noetic.layer.item_count` and `noetic.layer.budget.{allocated,used,yielded}`, and `error: true` + `error.message` on failure. `status` is `ok`, `error`, `timeout`, or `skipped` (disabled layer, kept init state, or `onReturn` with no child state; a zero-length span). Spans come from the optional `ExecutionContext.trace.createSpan(name)` (returns an `ExecutionSpan` whose `end()` exports it); a hand-built context without it gets a `layer.hook` span event instead, with flattened keys `{ layerId, hook, duration, status, itemCount?, 'budget.allocated'?, 'budget.used'?, 'budget.yielded'?, 'error.message'? }`. Peek recalls record nothing.
+Each hook call (`init`, `recall`, `store`, `onSpawn`, `onReturn`, `onParentUpdate`, `onComplete`, `dispose`, `onDecision`, `beforeToolCall`, `afterModelCall`, `onSteer`, `projectHistory`, `onItemAppend`) opens a `layer.hook` child span (`NoeticEvent.LAYER_HOOK`) under the span of the context it runs in, ended when the hook settles and exported to the harness `traceExporter`. Attributes (`NoeticAttr.LAYER_*`): `noetic.layer.id`, `noetic.layer.hook`, `noetic.layer.status`, recall-only `noetic.layer.item_count` and `noetic.layer.budget.{allocated,used,yielded}`, and `error: true` + `error.message` on failure. `status` is `ok`, `error`, `timeout`, or `skipped` (disabled layer, kept init state, or `onReturn` with no child state; a zero-length span). Spans come from the optional `ExecutionContext.trace.createSpan(name)` (returns an `ExecutionSpan` whose `end()` exports it); a hand-built context without it gets a `layer.hook` span event instead, with flattened keys `{ layerId, hook, duration, status, itemCount?, 'budget.allocated'?, 'budget.used'?, 'budget.yielded'?, 'error.message'? }`. Peek recalls record nothing.
 
 ### onItemAppend
 
@@ -2470,6 +2474,36 @@ interface OnDecisionParams<TState> {
 ```
 
 The harness runs these hooks through `harness.notifyDecision(layers, record, ctx)`.
+
+### onSteer
+
+Called while a steer (a `between-rounds` or `next-item` message) is queued, at each steer point of a running model call: `item_done` (applying stops the stream), `before_tool_call` (applying skips the rest of the round), `before_round`. Layers run in slot order as a pipeline; each sees the action and items the previous layer left. Omitted fields keep their value. Throw/timeout (default 5 s) leaves the steer unchanged. Applied items then pass through `onItemAppend`.
+
+```typescript
+import { SteerAction, SteerPoint } from '@noetic-tools/core';
+
+interface ContextLayerHooks<TState> {
+  // ...
+  onSteer?(params: OnSteerParams<TState>): Promise<OnSteerResult<TState>>;
+}
+
+interface OnSteerParams<TState> {
+  steer: { id: string; items: Item[] };   // id = the messageId
+  point: SteerPoint;                       // 'item_done' | 'before_tool_call' | 'before_round'
+  action: SteerAction;                     // 'apply' | 'defer' | 'drop' — mode default, as changed so far
+  pendingCalls: ReadonlyArray<FunctionCallItem>;
+  ctx: ExecutionContext;
+  state: TState;
+}
+
+interface OnSteerResult<TState> {
+  action?: SteerAction;
+  items?: Item[];   // replace what the model sees
+  state?: TState;
+}
+```
+
+The harness runs these hooks through `harness.onSteer(layers, params, ctx)`. A harness without it applies each steer at its delivery mode's default point and appends it unchanged.
 
 ### RecallOptions.peek
 

@@ -18,7 +18,7 @@ import { ToolAttr } from '../observability/genai-attributes';
 import type { EmitOption } from '../runtime/broadcaster-utils';
 import { askApproval } from '../runtime/tool-approval';
 import { emitToolUi } from '../runtime/tool-ui';
-import type { ItemSchemaRegistry, LayerStateStore } from './action-deps';
+import type { ItemSchemaRegistry, LayerStateStore, SessionCtxExtension } from './action-deps';
 import {
   allocateBudgets,
   assembleView,
@@ -33,6 +33,7 @@ import {
   disposeLayers,
   emitFrameworkEvent,
   getBroadcaster,
+  INTERRUPT_REASON,
   initLayers,
   lineageKey,
   noteCacheOutcome,
@@ -55,6 +56,7 @@ import type {
   ExecuteStepFn,
   ExecutionContext,
   FunctionCallItem,
+  FunctionCallOutputItem,
   InputMessageItem,
   Item,
   LLMResponse,
@@ -630,6 +632,46 @@ function buildModelRequest<TContext, I, O>(
 }
 
 /**
+ * Keep what an interrupted call finished, so the restarted turn knows what
+ * already ran. A call cut off mid-round leaves tool calls with no output,
+ * which no provider accepts in history, so each gets one.
+ */
+function keepFinishedItems(ctx: Context<ContextData>, items: ReadonlyArray<Item>): void {
+  const answered = new Set(
+    items
+      .filter((item): item is FunctionCallOutputItem => item.type === 'function_call_output')
+      .map((item) => item.callId),
+  );
+  for (const item of items) {
+    ctx.itemLog.append(item);
+  }
+  for (const call of items.filter(isFunctionCall)) {
+    if (answered.has(call.callId)) {
+      continue;
+    }
+    ctx.itemLog.append({
+      id: `cancelled-${call.callId}`,
+      type: 'function_call_output',
+      status: 'incomplete',
+      callId: call.callId,
+      output: 'Cancelled before it ran.',
+    } satisfies FunctionCallOutputItem);
+  }
+}
+
+/**
+ * A guardrail retry throws the response away, but steers in it came from the
+ * user, not the model. Log them so the retry still sees them.
+ */
+function keepSteers(ctx: Context<ContextData>, items: ReadonlyArray<Item>): void {
+  for (const item of items) {
+    if (item.type === 'message' && item.role !== 'assistant') {
+      ctx.itemLog.append(item);
+    }
+  }
+}
+
+/**
  * Records a finished model response on the context: appends response items to
  * the log, publishes `lastStepMeta`, and commits the per-layer usage breakdown
  * (what the model was actually shown, pinned replays included — raw recall
@@ -838,6 +880,9 @@ export async function executeCallModel<TContext, I, O>(
     // the signal fired. The spend is charged above, but a truncated generation
     // is not this step's output — surface cancellation instead.
     if (baseCtx.aborted) {
+      if (baseCtx.abortReason === INTERRUPT_REASON) {
+        keepFinishedItems(baseCtx, response.items);
+      }
       throw new NoeticErrorImpl({
         kind: 'cancelled',
         reason: baseCtx.abortReason ?? 'context aborted',
@@ -863,6 +908,7 @@ export async function executeCallModel<TContext, I, O>(
         // so the retry's view ends on the correction rather than burying it
         // ahead of the live band. Assembly drops it from history to avoid
         // showing it twice.
+        keepSteers(baseCtx, response.items);
         baseCtx.itemLog.append(guidance);
         steeringTail = [
           ...steeringTail,
@@ -1045,6 +1091,10 @@ export async function executeSpawn<TContext, I, O>(
     // The child's steps checkpoint the root, as an inParallel path's do.
     checkpointFn: () => baseCtx.checkpoint(),
   });
+
+  if (step.steers === 'forward') {
+    frameworkCast<SessionCtxExtension>(childCtx)._forwardSteers = true;
+  }
 
   // `childExecutionCtx` predates the spawn span; the child's hooks trace onto that span.
   const childTracedCtx: ExecutionContext = {

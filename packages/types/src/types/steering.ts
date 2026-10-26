@@ -1,5 +1,6 @@
 import type { LLMResponse } from './common';
 import type { ContextScope, ExecutionContext } from './context-scope';
+import type { FunctionCallItem, Item } from './items';
 
 //#region Enums
 
@@ -20,6 +21,38 @@ export const LedgerEntryKind = {
 } satisfies Record<string, string>;
 
 export type LedgerEntryKind = (typeof LedgerEntryKind)[keyof typeof LedgerEntryKind];
+
+/**
+ * @public Where a running model call offers a steer to the context layers.
+ *
+ * - `item_done`: an output item just finished streaming. Applying here stops
+ *   the stream, keeps the finished items, and starts the next round.
+ * - `before_tool_call`: a tool call is about to run. Applying here skips this
+ *   call and the rest of the round.
+ * - `before_round`: the next model call is about to start, including the first.
+ */
+export const SteerPoint = {
+  ItemDone: 'item_done',
+  BeforeToolCall: 'before_tool_call',
+  BeforeRound: 'before_round',
+} satisfies Record<string, string>;
+
+export type SteerPoint = (typeof SteerPoint)[keyof typeof SteerPoint];
+
+/**
+ * @public What happens to a steer at a steer point.
+ *
+ * - `apply`: add it to the conversation before the next model call.
+ * - `defer`: leave it queued; it is offered again at the next point.
+ * - `drop`: discard it. The harness emits `steer_dropped`.
+ */
+export const SteerAction = {
+  Apply: 'apply',
+  Defer: 'defer',
+  Drop: 'drop',
+} satisfies Record<string, string>;
+
+export type SteerAction = (typeof SteerAction)[keyof typeof SteerAction];
 
 //#endregion
 
@@ -85,6 +118,42 @@ export interface AfterModelCallParams<TState = unknown> {
 export interface AfterModelCallResult<TState = unknown> {
   decision: SteeringDecision;
   state?: TState;
+}
+
+/** @public A message sent into a running turn. */
+export interface Steer {
+  /** The `messageId` it was submitted with. */
+  id: string;
+  items: Item[];
+}
+
+/** @public Parameters passed to a layer's `onSteer` hook. */
+export interface OnSteerParams<TState = unknown> {
+  steer: Steer;
+  point: SteerPoint;
+  /**
+   * The action so far: the delivery mode's default, as changed by layers in
+   * earlier slots.
+   */
+  action: SteerAction;
+  /** Tool calls from the current round that have not run yet. */
+  pendingCalls: ReadonlyArray<FunctionCallItem>;
+  ctx: ExecutionContext;
+  state: TState;
+}
+
+/** @public Value returned by an `onSteer` hook. Omitted fields keep their current value. */
+export interface OnSteerResult<TState = unknown> {
+  action?: SteerAction;
+  /** Replace what the model sees for this steer. */
+  items?: Item[];
+  state?: TState;
+}
+
+/** @public The outcome of running a steer through every layer's `onSteer` hook. */
+export interface SteerVerdict {
+  action: SteerAction;
+  items: Item[];
 }
 
 /** @public A named rule evaluated by the steering layer before tool calls or after model responses. */

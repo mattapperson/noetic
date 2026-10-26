@@ -9,6 +9,8 @@ import type {
   AfterModelCallResult,
   BeforeToolCallParams,
   BeforeToolCallResult,
+  OnSteerParams,
+  OnSteerResult,
 } from './steering';
 
 /** @public Isolation scope controlling how a context layer's state is keyed and shared. */
@@ -35,6 +37,7 @@ export interface LayerTimeouts {
   onItemAppend?: number;
   projectHistory?: number;
   onDecision?: number;
+  onSteer?: number;
 }
 
 /** @public A read-only data projection from layer state, accessible via `ctx.context['layerId'].prop`. */
@@ -432,6 +435,13 @@ export interface ContextLayerHooks<TState = unknown> {
   dispose?(params: DisposeParams<TState>): Promise<void>;
   beforeToolCall?(params: BeforeToolCallParams<TState>): Promise<BeforeToolCallResult<TState>>;
   afterModelCall?(params: AfterModelCallParams<TState>): Promise<AfterModelCallResult<TState>>;
+  /**
+   * Called when a running model call reaches a steer point with a steer
+   * queued. Layers run in slot order; each sees the action and items left by
+   * the layer before it, and may change either. Use it to hold steers while a
+   * risky tool runs, cut the stream sooner, rewrite the message, or drop it.
+   */
+  onSteer?(params: OnSteerParams<TState>): Promise<OnSteerResult<TState>>;
   /**
    * Called when input items (user messages, tool outputs) are about to be appended.
    * Returns items to append — enables filtering, transformation, and injection.

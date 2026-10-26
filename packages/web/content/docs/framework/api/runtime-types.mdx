@@ -158,6 +158,7 @@ declare interface RerenderRequest {
 | `setLayerState(executionId, layerId, state)` | Overwrite a layer's state for a given execution. |
 | `beforeToolCall(layers, toolName, toolArgs, ctx)` | Invoke each layer's `beforeToolCall` steering hook and aggregate the decision. |
 | `afterModelCall(layers, response, ctx)` | Invoke each layer's `afterModelCall` steering hook. |
+| `onSteer?(layers, params, ctx)` | Run a steer through each layer's `onSteer` hook in slot order. Returns a `SteerVerdict` (`{ action, items }`). A harness without it applies each steer at its delivery mode's default point and appends it unchanged. |
 | `notifyDecision(layers, record, ctx)` | Run every layer's `onDecision` hook in slot order, one at a time. Called by `decide` steps after they validate their answers. |
 | `checkpoint(ctx)` | Persist current execution state. |
 | `restore(executionId)` | Restore a previously checkpointed context. |
@@ -167,14 +168,15 @@ declare interface RerenderRequest {
 ## DeliveryMode
 
 ```ts validate=none
-type DeliveryMode = 'next-turn' | 'between-rounds' | 'interrupt';
+type DeliveryMode = 'next-turn' | 'between-rounds' | 'next-item' | 'interrupt';
 ```
 
 | Mode | Behaviour |
 |---|---|
 | `next-turn` (default) | Queue and run after the current turn completes. |
-| `between-rounds` | Inject as a user item before the next tool-round LLM call within the active turn. |
-| `interrupt` | Abort the in-flight turn, place at head of queue, restart. |
+| `between-rounds` | Steer: add the message before the next model call within the active turn. |
+| `next-item` | Steer: apply once the model finishes its current output item, stopping the stream there. |
+| `interrupt` | Abort the in-flight turn, keep the items it finished, place at head of queue, restart. |
 
 ## ExecuteOptions
 

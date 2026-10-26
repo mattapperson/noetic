@@ -201,7 +201,8 @@ interface LayerTraceSpan {
   /** Which hook was invoked. */
   hook:
     | 'init' | 'recall' | 'store' | 'onSpawn' | 'onReturn' | 'onParentUpdate' | 'onComplete'
-    | 'dispose' | 'onDecision' | 'beforeToolCall' | 'afterModelCall' | 'projectHistory' | 'onItemAppend';
+    | 'dispose' | 'onDecision' | 'beforeToolCall' | 'afterModelCall' | 'projectHistory' | 'onItemAppend'
+    | 'onSteer';
   /** Wall-clock duration in milliseconds; 0 when skipped. */
   duration: number;
   /** How the call ended. */

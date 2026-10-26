@@ -7,9 +7,11 @@ import type {
   ItemSchemaRegistry,
   LayerTraceSpan,
   LLMResponse,
+  OnSteerParams,
   RecallResult,
   ScopedStorage,
   SteeringDecision,
+  SteerVerdict,
   StorageAdapter,
 } from '@noetic-tools/types';
 import {
@@ -188,6 +190,13 @@ interface BeforeToolCallLayersParams {
 interface AfterModelCallLayersParams {
   layers: ContextLayer[];
   response: LLMResponse;
+  ctx: ExecutionContext;
+  store: LayerStateStore;
+}
+
+interface OnSteerLayersParams
+  extends Pick<OnSteerParams, 'steer' | 'point' | 'action' | 'pendingCalls'> {
+  layers: ContextLayer[];
   ctx: ExecutionContext;
   store: LayerStateStore;
 }
@@ -1387,6 +1396,83 @@ export async function afterModelCallLayers({
   }
 
   return mostRestrictive(decisions);
+}
+
+/**
+ * Run a steer through every layer's `onSteer` hook in slot order. Each layer
+ * sees the action and items the previous layer left, so the last layer to
+ * speak wins. A hook that throws or times out leaves both unchanged.
+ */
+export async function onSteerLayers({
+  layers,
+  steer,
+  point,
+  action,
+  pendingCalls,
+  ctx,
+  store,
+}: OnSteerLayersParams): Promise<SteerVerdict> {
+  const sorted = [
+    ...layers,
+  ].sort((a, b) => a.slot - b.slot);
+  let verdict: SteerVerdict = {
+    action,
+    items: steer.items,
+  };
+
+  for (const layer of sorted) {
+    if (!layer.hooks.onSteer) {
+      continue;
+    }
+    const state = store.get(ctx.executionId, layer.id);
+    if (
+      isLayerDisabled({
+        store,
+        executionId: ctx.executionId,
+        layer,
+        state,
+      })
+    ) {
+      await traceSkipped(ctx, layer.id, 'onSteer');
+      continue;
+    }
+    const onSteer = layer.hooks.onSteer;
+    const current = verdict;
+    try {
+      const result = await callHook({
+        ctx,
+        layerId: layer.id,
+        hook: 'onSteer',
+        timeout: layer.timeouts?.onSteer ?? 5e3,
+        run: () =>
+          onSteer({
+            steer: {
+              id: steer.id,
+              items: current.items,
+            },
+            point,
+            action: current.action,
+            pendingCalls,
+            ctx,
+            state,
+          }),
+      });
+      if (result.state !== undefined) {
+        store.set(ctx.executionId, layer.id, result.state);
+      }
+      verdict = {
+        action: result.action ?? current.action,
+        items: result.items ?? current.items,
+      };
+    } catch (e) {
+      if (e instanceof NoeticConfigError) {
+        throw e;
+      }
+      store.diagnostic(layer.id, 'onSteer', e);
+    }
+  }
+
+  return verdict;
 }
 
 /**
