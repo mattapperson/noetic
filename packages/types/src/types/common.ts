@@ -152,6 +152,8 @@ export interface StepMeta {
   toolCalls?: FunctionCallItem[];
   usage?: RoundUsage;
   cost?: number;
+  /** USD the step's call actually paid; see `LLMResponse.billedCost`. */
+  billedCost?: number;
   /** Tier the provider served an `llm` step on; see `LLMResponse.serviceTier`. */
   serviceTier?: string;
   responseItems?: ReadonlyArray<Item>;
@@ -177,7 +179,13 @@ export interface LLMResponse {
    * "was my prefix cached?".
    */
   rounds?: ReadonlyArray<RoundUsage>;
+  /** USD the work behind this response cost, including rounds replayed from a recorded run. */
   cost?: number;
+  /**
+   * USD this call actually paid: `cost` less what came from replayed rounds, so 0
+   * when every round replayed. Absent means the whole `cost` was paid now.
+   */
+  billedCost?: number;
   /**
    * The tier the provider reports it served, from the last round. Absent when
    * the provider reports none — it is never an echo of the requested tier, so

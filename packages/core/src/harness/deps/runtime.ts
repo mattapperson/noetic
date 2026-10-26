@@ -25,6 +25,7 @@ export {
 export type { EventBroadcaster } from '../../runtime/event-broadcaster';
 export { createInMemoryStorage } from '../../runtime/in-memory-storage';
 export type { QueuedMessage } from '../../runtime/message-queue';
+export type { TurnUsage } from '../../runtime/session-runner';
 export { SessionRunner } from '../../runtime/session-runner';
 export {
   buildItemStream,

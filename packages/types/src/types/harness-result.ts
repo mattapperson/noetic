@@ -48,7 +48,10 @@ export interface HarnessResponse {
      */
     readonly cachedTokens?: number;
   };
+  /** USD the turn's work cost, including steps and rounds replayed from a recorded run. */
   readonly cost?: number;
+  /** USD the turn actually paid — `cost` less what replay supplied. See `Context.billedCost`. */
+  readonly billedCost?: number;
   readonly text: string;
   /** Per-context-layer context window breakdown captured at the last callModel of this execution. */
   readonly lastLayerUsage?: LastLayerUsage;

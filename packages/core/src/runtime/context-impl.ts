@@ -75,6 +75,7 @@ export class ContextImpl implements Context<ContextData> {
     total: 0,
   };
   cost = 0;
+  billedCost = 0;
   state: unknown;
   readonly parent: Context<ContextData> | null;
   readonly usageParent: Context<ContextData> | null;
@@ -83,6 +84,8 @@ export class ContextImpl implements Context<ContextData> {
   readonly threadId: string;
   readonly resourceId?: string;
   readonly itemLog: ItemLog;
+  /** The same log, typed for `rebase`. */
+  private readonly log: ItemLogImpl;
   lastStepMeta: StepMeta | null = null;
   lastLayerUsage: LastLayerUsage | undefined = undefined;
   readonly harness: AgentHarnessContract;
@@ -235,6 +238,7 @@ export class ContextImpl implements Context<ContextData> {
       }
     }
     this.itemLog = log;
+    this.log = log;
 
     // Join the parent's abort cascade last, so the child is fully constructed
     // before an already-aborted parent aborts it.
@@ -543,6 +547,27 @@ export class ContextImpl implements Context<ContextData> {
         occurrences: Object.fromEntries(this._occurrences),
       }
     );
+  }
+
+  /**
+   * @internal
+   * Whether a run on this context began and never finished — it failed, or is in
+   * flight. A run starting now repeats it.
+   */
+  hasUnfinishedRun(): boolean {
+    return this._baseline !== undefined;
+  }
+
+  /**
+   * @internal
+   * Stand the context back at a stored run baseline: the item log and dispatch counts
+   * a checkpoint recorded. For a run retried in place, which must see what a resume on
+   * a new harness would — not the items and counts its failed attempt left in memory.
+   */
+  rebase(baseline: RunBaseline): void {
+    this.log.replace(baseline.items);
+    this._occurrences.clear();
+    this.restoreOccurrences(baseline.occurrences);
   }
 
   /**

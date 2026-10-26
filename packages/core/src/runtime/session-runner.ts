@@ -38,11 +38,25 @@ export type CreateContextFn = (
   messages: ReadonlyArray<QueuedMessage>,
 ) => Context | Promise<Context>;
 
+/** @internal What one turn spent: its context's usage at the end, less at the start. */
+export interface TurnUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens?: number;
+  cost: number;
+  billedCost: number;
+}
+
 export interface SessionRunnerOpts {
   readonly threadId: string;
   readonly agentName: string;
   readonly runTurn: RunTurnFn;
   readonly createContext: CreateContextFn;
+  /**
+   * Called once per turn, success or not, with what the turn spent. A durable host
+   * writes it to storage and hands the stored totals back through `seedUsage`.
+   */
+  readonly onTurnUsage?: (usage: TurnUsage) => Promise<void>;
 }
 
 //#endregion
@@ -125,6 +139,8 @@ export class SessionRunner {
    *  that reports nothing about caching at all (see `SessionUsage`). */
   private totalCachedTokens: number | undefined;
   private totalCost = 0;
+  private totalBilledCost = 0;
+  private readonly onTurnUsage?: (usage: TurnUsage) => Promise<void>;
   private currentController?: AbortController;
   private currentCtx?: Context;
   private loopPromise?: Promise<void>;
@@ -140,6 +156,7 @@ export class SessionRunner {
     this.agentName = opts.agentName;
     this.runTurn = opts.runTurn;
     this.createContext = opts.createContext;
+    this.onTurnUsage = opts.onTurnUsage;
 
     this.queue.subscribe(() => {
       this.kick();
@@ -157,7 +174,17 @@ export class SessionRunner {
       outputTokens: this.totalOutputTokens,
       cachedTokens: this.totalCachedTokens,
       cost: this.totalCost > 0 ? this.totalCost : undefined,
+      billedCost: this.totalBilledCost > 0 ? this.totalBilledCost : undefined,
     };
+  }
+
+  /** Replace the totals with ones a durable host read back from storage. */
+  seedUsage(usage: SessionUsage): void {
+    this.totalInputTokens = usage.inputTokens;
+    this.totalOutputTokens = usage.outputTokens;
+    this.totalCachedTokens = usage.cachedTokens;
+    this.totalCost = usage.cost ?? 0;
+    this.totalBilledCost = usage.billedCost ?? 0;
   }
 
   /** Resolves once the queue has been drained and the runner is idle with a
@@ -254,6 +281,9 @@ export class SessionRunner {
       return;
     }
     this.currentCtx = ctx;
+    // A resumed turn's context already carries what the cut-off attempt spent; only
+    // the increase belongs to this turn.
+    const start = usageOf(ctx);
 
     emitFrameworkEvent({
       broadcaster: this.broadcaster,
@@ -284,6 +314,7 @@ export class SessionRunner {
 
     try {
       const text = await this.runTurn(ctx, turn, controller.signal);
+      await this.settleUsage(start, ctx);
       const response = buildResponse(text, ctx);
       this.lastResponse = response;
       this.lastError = undefined;
@@ -304,6 +335,8 @@ export class SessionRunner {
         this.resolveWaiters(response);
       }
     } catch (err: unknown) {
+      // An aborted turn still consumed whatever the model billed before the cut.
+      await this.settleUsage(start, ctx);
       const error = err instanceof Error ? err : new Error(String(err));
       this.lastError = error;
       emitFrameworkEvent({
@@ -320,22 +353,30 @@ export class SessionRunner {
       });
       this.rejectWaiters(error);
     } finally {
-      // Accumulate the turn's token accounting whatever the outcome — an
-      // aborted turn still consumed whatever the model billed before the cut.
-      this.totalInputTokens += ctx.tokens.input;
-      this.totalOutputTokens += ctx.tokens.output;
-      // Only ever leave `undefined` behind when NO turn reported a figure —
-      // a turn that reported 0 must surface as 0, not "unreported".
-      if (ctx.tokens.cached !== undefined) {
-        this.totalCachedTokens = (this.totalCachedTokens ?? 0) + ctx.tokens.cached;
-      }
-      this.totalCost += ctx.cost;
       this.currentCtx = undefined;
       this.currentController = undefined;
       this.status = {
         kind: 'idle',
       };
     }
+  }
+
+  /**
+   * Add what the turn spent to the session's totals, before anyone waiting on the turn
+   * hears it settled — so `getUsage()` after `getAgentResponse()` includes it.
+   */
+  private async settleUsage(start: TurnUsage, ctx: Context): Promise<void> {
+    const spent = usageSince(start, ctx);
+    this.totalInputTokens += spent.inputTokens;
+    this.totalOutputTokens += spent.outputTokens;
+    // Only ever leave `undefined` behind when NO turn reported a figure —
+    // a turn that reported 0 must surface as 0, not "unreported".
+    if (spent.cachedTokens !== undefined) {
+      this.totalCachedTokens = (this.totalCachedTokens ?? 0) + spent.cachedTokens;
+    }
+    this.totalCost += spent.cost;
+    this.totalBilledCost += spent.billedCost;
+    await this.onTurnUsage?.(spent);
   }
 
   /** A turn whose context could not be built: report it like any other failed turn. */
@@ -378,6 +419,28 @@ export class SessionRunner {
 
 //#region buildResponse
 
+function usageOf(ctx: Context): TurnUsage {
+  return {
+    inputTokens: ctx.tokens.input,
+    outputTokens: ctx.tokens.output,
+    cachedTokens: ctx.tokens.cached,
+    cost: ctx.cost,
+    billedCost: ctx.billedCost,
+  };
+}
+
+function usageSince(start: TurnUsage, ctx: Context): TurnUsage {
+  const now = usageOf(ctx);
+  return {
+    inputTokens: now.inputTokens - start.inputTokens,
+    outputTokens: now.outputTokens - start.outputTokens,
+    cachedTokens:
+      now.cachedTokens === undefined ? undefined : now.cachedTokens - (start.cachedTokens ?? 0),
+    cost: now.cost - start.cost,
+    billedCost: now.billedCost - start.billedCost,
+  };
+}
+
 function buildResponse(text: string, ctx: Context): HarnessResponse {
   return {
     items: ctx.itemLog.items,
@@ -391,6 +454,7 @@ function buildResponse(text: string, ctx: Context): HarnessResponse {
       cachedTokens: ctx.tokens.cached,
     },
     cost: ctx.cost > 0 ? ctx.cost : undefined,
+    billedCost: ctx.billedCost > 0 ? ctx.billedCost : undefined,
     text,
     lastLayerUsage: ctx.lastLayerUsage,
   };

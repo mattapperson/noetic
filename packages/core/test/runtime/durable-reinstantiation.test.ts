@@ -16,10 +16,11 @@ import { inParallel } from '../../src/builders/control-flow-builders';
 import { loop } from '../../src/builders/loop-builder';
 import { callModel, runCode } from '../../src/builders/step-builders';
 import { AgentHarness } from '../../src/harness/agent-harness';
+import { createCheckpointStore } from '../../src/runtime/durable/checkpoint-store';
 import { createStepLedgerStore } from '../../src/runtime/durable/step-ledger';
 import { createInMemoryStorage } from '../../src/runtime/in-memory-storage';
 import { until } from '../../src/until/predicates';
-import { assistantMessage } from '../_helpers';
+import { assistantMessage, makeMessage } from '../_helpers';
 
 //#region Fixtures
 
@@ -418,6 +419,45 @@ describe('durable execution across harness instances', () => {
     });
   });
 
+  it('retrying a failed run on the same context replays from storage, like a new harness', async () => {
+    const storage = createInMemoryStorage();
+    const first = model(
+      'first',
+      [
+        4,
+      ],
+    );
+    const harness = harnessOver(storage, first);
+    const ctx = harness.createContext();
+    await expect(harness.run(agentLoop(6), 'go', ctx)).rejects.toThrow('ECONNRESET');
+
+    // Same harness, same context object: the retry repeats the run from what storage holds.
+    expect(await harness.run(agentLoop(6), 'go', ctx)).toBe('first-7');
+    expect(first.calls).toBe(7);
+    expect(first.seen[4]).toEqual(first.seen[3]);
+    expect(transcript(ctx.itemLog.items).filter((t) => t.startsWith('assistant'))).toHaveLength(6);
+  });
+
+  it('reports what replay saved: cost is the work, billedCost what was paid now', async () => {
+    const storage = createInMemoryStorage();
+    const first = model(
+      'first',
+      [
+        4,
+      ],
+    );
+    const ctx = harnessOver(storage, first).createContext();
+    await expect(harnessOver(storage, first).run(agentLoop(5), 'go', ctx)).rejects.toThrow();
+
+    const next = harnessOver(storage, model('second'));
+    const resumed = await mustRestore(next, ctx.id);
+    await next.run(agentLoop(5), 'go', resumed);
+
+    // Five turns of work at $0.01; three replayed, two paid for now.
+    expect(resumed.cost).toBeCloseTo(0.05);
+    expect(resumed.billedCost).toBeCloseTo(0.02);
+  });
+
   it('a finished run leaves no positional ledger entries behind', async () => {
     const storage = createInMemoryStorage();
     const harness = harnessOver(storage, model('only'));
@@ -430,28 +470,40 @@ describe('durable execution across harness instances', () => {
     expect(entries.size).toBe(0);
   });
 
-  it('stays ephemeral when the host opts out with checkpointStore: false', async () => {
+  it('durability: false turns every surface off, even with an adapter and a store', async () => {
     const storage = createInMemoryStorage();
+    const only = model(
+      'only',
+      [
+        1,
+      ],
+    );
     const harness = new AgentHarness({
       name: 'ephemeral',
       params: {},
+      durability: false,
+      agentGraph: turn('chat'),
       environment: {
         storage: {
           adapter: storage,
-          checkpointStore: false,
+          checkpointStore: createCheckpointStore({
+            storage,
+          }),
         },
       },
-      _testCallModel: (request) =>
-        model(
-          'only',
-          [
-            1,
-          ],
-        ).call(request),
+      _testCallModel: (request) => only.call(request),
     });
     const ctx = harness.createContext();
     await expect(harness.run(turn('only'), 'go', ctx)).rejects.toThrow();
+    await harness.execute('hello', {
+      threadId: 't',
+    });
+    await harness.getAgentResponse({
+      threadId: 't',
+    });
+
     expect(await harness.restore(ctx.id)).toBeNull();
+    expect(await storage.list('')).toEqual([]);
   });
 });
 
@@ -527,6 +579,69 @@ describe('durable sessions across harness instances', () => {
       'assistant:first-1',
       'user:first-1',
       'assistant:second-1',
+    ]);
+  });
+
+  it('two harnesses taking turns on a thread both read it from storage', async () => {
+    const storage = createInMemoryStorage();
+    const m = model('m');
+    const left = harnessOver(storage, m, chat);
+    const right = harnessOver(storage, m, chat);
+    for (const [harness, text] of [
+      [
+        left,
+        'one',
+      ],
+      [
+        right,
+        'two',
+      ],
+      [
+        left,
+        'three',
+      ],
+    ] as const) {
+      await harness.execute(text, {
+        threadId: 't',
+      });
+      await harness.getAgentResponse({
+        threadId: 't',
+      });
+    }
+
+    // The third turn, back on the first harness, saw the turn the second one served.
+    expect(m.seen[2]).toEqual([
+      'user:one',
+      'assistant:m-1',
+      'user:two',
+      'assistant:m-2',
+      'user:three',
+    ]);
+    expect(
+      left.getUsage({
+        threadId: 't',
+      }).cost,
+    ).toBeCloseTo(0.03);
+  });
+
+  it('a seeded history is stored, so a new harness sees it too', async () => {
+    const storage = createInMemoryStorage();
+    const m = model('m');
+    harnessOver(storage, m, chat).seedSessionHistory('t', [
+      makeMessage('user', 'earlier'),
+    ]);
+    // Let the queued write land before the next harness reads.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const next = harnessOver(storage, m, chat);
+    await next.execute('now', {
+      threadId: 't',
+    });
+    await next.getAgentResponse({
+      threadId: 't',
+    });
+    expect(m.seen[0]).toEqual([
+      'user:earlier',
+      'user:now',
     ]);
   });
 

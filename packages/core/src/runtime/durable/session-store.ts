@@ -1,6 +1,6 @@
 /**
  * What a session (`harness.execute()`) keeps in storage so a new harness can pick a
- * thread up: the thread's history, and the turn in flight.
+ * thread up: the thread's history, what its turns spent, and the turn in flight.
  *
  * A turn's record is written before the turn runs and cleared when it finishes. A
  * harness that finds one still set knows the turn was cut off. If the same messages
@@ -17,6 +17,16 @@ import { z } from 'zod';
 const SessionRecordSchema = z.object({
   /** The thread's history after its last finished turn. */
   items: z.array(z.unknown()),
+  /** What the thread's turns have spent, summed as each turn settles. */
+  usage: z
+    .object({
+      inputTokens: z.number(),
+      outputTokens: z.number(),
+      cachedTokens: z.number().optional(),
+      cost: z.number().optional(),
+      billedCost: z.number().optional(),
+    })
+    .optional(),
   /** The turn in flight, if one was cut off. */
   turn: z
     .object({

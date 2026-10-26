@@ -680,7 +680,7 @@ Returns `null` when neither a snapshot nor a ledger entry is recorded. Throws `N
 ### Durability Guarantees
 
 - **With a durable `StorageAdapter`** (e.g. `createFileStorage({root})`): full snapshot/restore and step-level resume across host restarts and harness instances — the checkpoint store defaults to one over the adapter. `harness.execute()` sessions keep their thread history and resume a re-delivered cut-off turn.
-- **Without** (the default zero-config harness, or `checkpointStore: false`): `checkpoint()` is a no-op, `restore()` returns null, `listLive()` returns the empty set, `reattach()` returns null. All existing in-memory semantics are preserved bit-identically.
+- **Without** (the default zero-config harness, or `durability: false`): `checkpoint()` is a no-op, `restore()` returns null, `listLive()` returns the empty set, `reattach()` returns null. All existing in-memory semantics are preserved bit-identically.
 - **Schema versioning**: `CheckpointSnapshot.schemaVersion` is validated on load. Incompatible versions surface a typed error rather than a silently-corrupt restored context.
 - **Checkpoint failures never abort a step.** A failing `store.save` is logged via `console.warn` and swallowed; the step's return value is unaffected.
 
@@ -800,8 +800,8 @@ interface AgentEnvironmentConfig {
   storage?: {
     /** Key-value adapter backing context-layer persistence and the step ledger. Defaults to in-memory. */
     adapter?: StorageAdapter;
-    /** Checkpoint store used by checkpoint()/restore(). Defaults to one over `adapter`; `false` opts out. With neither, durability hooks are no-ops. */
-    checkpointStore?: CheckpointStore | false;
+    /** Checkpoint store used by checkpoint()/restore(). Defaults to one over `adapter`. With neither, durability hooks are no-ops. */
+    checkpointStore?: CheckpointStore;
     /** Layer-state store override. Defaults to an in-memory store. */
     layerStateStore?: LayerStateStore;
     /** Bounds on the step-completion ledger backing step-level resume. */

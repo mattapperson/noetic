@@ -5,6 +5,7 @@ import type { InputMessageItem, Item, MessageItem } from '../types/items';
 interface UsageMutableContext extends Context {
   tokens: TokenUsage;
   cost: number;
+  billedCost: number;
 }
 
 function canTrackUsage(ctx: Context): ctx is UsageMutableContext {
@@ -135,8 +136,10 @@ export interface UsageCharge {
   inputTokens: number;
   outputTokens: number;
   cachedTokens?: number;
-  /** USD. */
+  /** USD the work cost. */
   cost?: number;
+  /** USD actually paid now. Defaults to `cost`; 0 for work replayed from a recorded run. */
+  billedCost?: number;
 }
 
 function addCharge(ctx: UsageMutableContext, charge: UsageCharge): void {
@@ -153,6 +156,10 @@ function addCharge(ctx: UsageMutableContext, charge: UsageCharge): void {
   }
   if (charge.cost) {
     ctx.cost = ctx.cost + charge.cost;
+  }
+  const billed = charge.billedCost ?? charge.cost;
+  if (billed) {
+    ctx.billedCost = ctx.billedCost + billed;
   }
 }
 
@@ -187,5 +194,6 @@ export function trackUsage(ctx: Context, response: LLMResponse): void {
   recordUsage(ctx, {
     ...response.usage,
     cost: response.cost,
+    billedCost: response.billedCost,
   });
 }

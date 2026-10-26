@@ -43,7 +43,14 @@ if (ctx) {
 
 `execute()` sessions resume on their own: re-deliver the cut-off turn's message with the same `messageId` and it picks up where it died (see [Sessions](#sessions)). Any `detachedSpawn` lands a manifest entry, and `reattachLiveChildren(harness)` brings every still-running child back with its parent context rebuilt.
 
-Pass `checkpointStore: false` to keep an adapter for context-layer persistence only, or pass your own `createCheckpointStore({ storage })` to keep checkpoints on separate storage.
+Set `durability: false` on the harness to turn every durability surface off — the adapter then backs context-layer persistence only. Pass your own `createCheckpointStore({ storage })` to keep checkpoints on separate storage.
+
+Storage is the only record. Nothing that decides how a run resumes lives only in a harness's memory, so a harness that just served a run and one built a moment ago behave the same. A failed run retried on the same context rebuilds from what storage holds — the stored baseline and ledger — exactly as a new harness restoring it would:
+
+```ts validate=none
+await harness.run(agent, input, ctx).catch(() => {}); // network drops mid-run
+await harness.run(agent, input, ctx); // replays what finished, continues live
+```
 
 ## The Three Surfaces
 
@@ -123,6 +130,17 @@ A restored context knows *what happened* but not *how far it got*: the frontier 
 A resumed run replays those outputs instead of re-running the steps. It is memoization, not fast-forward: a `callModel` step re-run to "catch up" would return something different from what the rest of the run already observed, so the recorded value is what flows downstream. Each entry also carries the items the step added to history, which replay puts back, and a hash of the step's input. Only successes are recorded — a step that threw runs again — and a step whose id, kind, or input changed at a recorded position runs fresh, discarding its recorded subtree. That last rule is what keeps a restored chat from answering a new question with an old answer.
 
 When a run finishes, its positional entries are dropped: the next run on the context starts past them. Entries live one key per step under `execution:<id>:ledger:<seq>`, so an append is O(1) regardless of run length. Nothing here is visible on a zero-config harness: without a checkpoint store the ledger is never constructed.
+
+### Usage on Replay
+
+Replayed work keeps its usage figures but costs nothing now, so usage reports both:
+
+| Field | Meaning | On replay |
+|---|---|---|
+| `tokens`, `usage`, `cost` | What the work cost. Budgets such as `until.maxCost` count it, so a resumed run stops where an uninterrupted one would. | The recorded figures |
+| `billedCost` | What was actually paid now. | `0` |
+
+`billedCost` sits next to `cost` on `LLMResponse`, `StepMeta`, `Context`, `HarnessResponse`, and `SessionUsage`. A context's `billedCost` counts this attempt's live calls — a restored context starts at `0` — so after a resume, `ctx.cost - ctx.billedCost` is what replay saved. A session's `billedCost` sums what storage knows its turns paid; spend a host lost to a hard kill before the turn's usage was written is not in it.
 
 ### Model Rounds
 
@@ -241,9 +259,9 @@ Core's ledger therefore covers control flow, `callModel` steps, and their rounds
 
 ### Sessions
 
-`harness.execute()` sessions are durable too. With a storage adapter, each thread keeps its history and the turn in flight under `session:<threadId>`:
+`harness.execute()` sessions are durable too. With a storage adapter, each thread keeps its history, what its turns spent, and the turn in flight under `session:<threadId>` — and every turn reads them from storage rather than from the harness's memory:
 
-- A new harness continues a thread with its history — no `seedSessionHistory` needed (a seed still wins when given).
+- Any harness over the same storage continues a thread with its history, including harnesses taking turns on one thread. `seedSessionHistory` writes to storage too.
 - A turn cut off mid-run resumes when its messages are delivered again with the same `messageId`s — the at-least-once retry most queues already do. Finished steps replay; the turn continues from where it died.
 - Different messages after a cut-off turn abandon it and start fresh.
 

@@ -20,6 +20,19 @@ export class ItemLogImpl implements ItemLog {
     return frozenItems;
   }
 
+  /**
+   * @internal
+   * Swap the whole log for `items`. Only for a context rebuilding itself from storage
+   * before a run starts; nothing reads a log while it is replaced.
+   */
+  replace(items: ReadonlyArray<Item>): void {
+    this._items.length = 0;
+    for (const item of items) {
+      this._items.push(this.itemSchemas.parse(item));
+    }
+    this._frozenCache = null;
+  }
+
   append(item: Item): void {
     this._items.push(this.itemSchemas.parse(item));
     this._frozenCache = null;

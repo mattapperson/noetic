@@ -58,7 +58,14 @@ export interface Context<TContext = ContextData, TState = unknown> {
   readonly stepCount: number;
   readonly tokens: TokenUsage;
   readonly elapsed: number;
+  /** USD the work run on this context cost, including spend restored from a checkpoint. */
   readonly cost: number;
+  /**
+   * USD this context's calls actually paid during this attempt. Replayed steps and
+   * rounds add nothing, and a restored context starts at 0, so `cost - billedCost` is
+   * what replay saved.
+   */
+  readonly billedCost: number;
   state: TState;
   readonly parent: Context<ContextData> | null;
   /**

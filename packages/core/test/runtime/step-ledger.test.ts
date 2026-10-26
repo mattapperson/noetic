@@ -271,10 +271,10 @@ describe('step ledger', () => {
     const harness = new AgentHarness({
       name: 'ephemeral',
       params: {},
+      durability: false,
       environment: {
         storage: {
           adapter: storage,
-          checkpointStore: false,
         },
       },
     });

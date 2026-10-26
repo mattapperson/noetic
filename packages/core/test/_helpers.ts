@@ -280,6 +280,7 @@ export function makeMockContext(overrides?: Partial<Context>): Context {
     },
     elapsed: 0,
     cost: 0,
+    billedCost: 0,
     state: {},
     parent: null,
     depth: 0,

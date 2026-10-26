@@ -218,6 +218,11 @@ export interface SessionUsage {
    * "unreported" signal to preserve.
    */
   readonly cost?: number;
+  /**
+   * USD the session's turns actually paid, as far as storage knows: replayed work
+   * adds nothing. Undefined when zero, like `cost`.
+   */
+  readonly billedCost?: number;
 }
 
 //#endregion

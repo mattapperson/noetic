@@ -660,6 +660,8 @@ export class AgentHarnessModelCaller {
     // the assembled view was cached (see `noteCacheOutcome`).
     const rounds: RoundUsage[] = [];
     let totalCost = 0;
+    // What replayed rounds supplied, so the response can report what was paid now.
+    let replayedCost: number | undefined;
     let servedTier: string | undefined;
     const conversationInput = itemsToInput(prepared.remaining);
     const textFormat = request.outputSchema
@@ -696,6 +698,7 @@ export class AgentHarnessModelCaller {
         totalUsage.outputTokens += replayed.usage.outputTokens;
         totalUsage.cachedTokens += replayed.usage.cachedTokens ?? 0;
         totalCost += replayed.cost;
+        replayedCost = (replayedCost ?? 0) + replayed.cost;
         prepared.emitIfAllowed('model_round_replayed', {
           round,
         });
@@ -927,6 +930,11 @@ export class AgentHarnessModelCaller {
       },
       rounds,
       cost: totalCost > 0 ? totalCost : undefined,
+      ...(replayedCost !== undefined
+        ? {
+            billedCost: totalCost - replayedCost,
+          }
+        : {}),
       ...(servedTier
         ? {
             serviceTier: servedTier,

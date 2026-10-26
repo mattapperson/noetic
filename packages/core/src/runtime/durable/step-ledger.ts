@@ -343,7 +343,7 @@ export interface StepLedgerMatch {
  */
 export class StepLedger {
   /** Recovered entries, by path. */
-  private readonly replayable: Map<string, StepLedgerEntry>;
+  private readonly replayable = new Map<string, StepLedgerEntry>();
   /** Sequence number holding each live entry, recovered or recorded, by path. */
   private readonly live: Map<string, number>;
   /** Sequence number the next recorded entry takes. */
@@ -369,9 +369,27 @@ export class StepLedger {
     this.executionId = opts.executionId;
     this.store = opts.store;
     this.retention = resolveStepLedgerRetention(opts.retention);
-    this.replayable = opts.recovered?.entries ?? new Map();
-    this.live = new Map(opts.recovered?.seqs ?? []);
-    this.seq = opts.recovered?.nextSeq ?? 0;
+    this.live = new Map();
+    this.seq = 0;
+    if (opts.recovered) {
+      this.adopt(opts.recovered);
+    }
+  }
+
+  /**
+   * Take what storage now holds for this execution in place of what this ledger has
+   * in memory — for a run retried in place, which replays what was stored.
+   */
+  adopt(recovered: StepLedgerWindow): void {
+    this.replayable.clear();
+    for (const [path, entry] of recovered.entries) {
+      this.replayable.set(path, entry);
+    }
+    this.live.clear();
+    for (const [path, seq] of recovered.seqs) {
+      this.live.set(path, seq);
+    }
+    this.seq = Math.max(this.seq, recovered.nextSeq);
   }
 
   /** True when this execution has nothing recovered to replay (the common, fresh case). */

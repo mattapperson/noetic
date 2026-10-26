@@ -14,6 +14,7 @@ interface Context<TContext = ContextData, TState = unknown> {
   readonly tokens: TokenUsage;
   readonly elapsed: number;
   readonly cost: number;
+  readonly billedCost: number;
   readonly context: TContext;
   state: TState;
   readonly parent: Context | null;
@@ -45,7 +46,8 @@ interface Context<TContext = ContextData, TState = unknown> {
 | `stepCount` | `number` | Number of steps executed so far |
 | `tokens` | `TokenUsage` | Accumulated token usage |
 | `elapsed` | `number` | Elapsed time in milliseconds |
-| `cost` | `number` | Accumulated cost in USD |
+| `cost` | `number` | Accumulated cost in USD of the work run on this context, including spend restored from a checkpoint |
+| `billedCost` | `number` | USD this context's calls actually paid during this attempt. Replayed steps and rounds add nothing and a restored context starts at `0`, so `cost - billedCost` is what replay saved |
 | `context` | `TContext` | Typed context object. Access layer data via `ctx.context['layerId'].prop`. Defaults to `ContextData` when no `ContextConfig` is provided. |
 | `state` | `TState` | Mutable user state |
 | `parent` | `Context \| null` | Parent context (for spawned agents) |
@@ -186,6 +188,7 @@ type ContentPart =
 | `toolCalls` | `FunctionCallItem[]` | Tool calls made in this step (optional) |
 | `usage` | `RoundUsage` — `{ inputTokens, outputTokens, cachedTokens?, cacheWriteTokens? }` | Token usage for the step. The two cache fields are `undefined` when the provider reports no cache figures, which is not the same as a reported zero (optional) |
 | `cost` | `number` | Step cost in USD (optional) |
+| `billedCost` | `number` | USD the step's call actually paid — see `LLMResponse.billedCost` (optional) |
 | `responseItems` | `ReadonlyArray<Item>` | Items produced by this step (optional) |
 | `decision` | `DecisionMeta` — `{ modelId, source: 'native' \| 'estimated', refused: readonly string[] }` | Set by `decide` steps: the model that answered, which [model path](/docs/framework/steps/decide#model-paths) it took, and the ids of refused questions (optional) |
 

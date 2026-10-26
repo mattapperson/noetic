@@ -208,7 +208,8 @@ type HarnessStatus =
 interface HarnessResponse {
   readonly items: ReadonlyArray<Item>;
   readonly usage: { inputTokens: number; outputTokens: number; cachedTokens?: number };
-  readonly cost?: number;
+  readonly cost?: number;       // USD the turn's work cost, replayed work included
+  readonly billedCost?: number; // USD the turn actually paid — 0 for replayed work
   readonly text: string;
   readonly lastLayerUsage?: LastLayerUsage;
 }
@@ -415,6 +416,7 @@ interface LLMResponse {
   usage: RoundUsage;
   rounds?: ReadonlyArray<RoundUsage>;
   cost?: number;
+  billedCost?: number;
 }
 ```
 
@@ -426,4 +428,5 @@ interface LLMResponse {
 | `usage.inputTokens` | `number` | Input tokens consumed |
 | `usage.outputTokens` | `number` | Output tokens generated |
 | `usage.cachedTokens` | `number` | Cached tokens used (optional) |
-| `cost` | `number` | Cost in USD (optional) |
+| `cost` | `number` | USD the work behind the response cost, including rounds replayed from a recorded run (optional) |
+| `billedCost` | `number` | USD this call actually paid: `cost` less what replayed rounds supplied, so `0` when every round replayed. Absent means the whole `cost` was paid now (optional) |

@@ -656,6 +656,7 @@ function recordTurnOutcome(params: {
     toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
     usage: response.usage,
     cost: response.cost,
+    billedCost: response.billedCost,
     serviceTier: response.serviceTier,
     responseItems: response.items,
   };

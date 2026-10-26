@@ -128,11 +128,26 @@ A resumed loop replays rounds in order and stops at the first one it does not fi
 
 An abort that lands mid-call is not a round: the step surfaces cancellation, and the round is not recorded.
 
+## Storage is the only record
+
+Durability never leans on what a harness holds in memory. Everything that decides how a run or a session resumes is read from storage at the moment it is needed, so a harness that served the last run and a harness built a moment ago behave the same:
+
+- **A run retried in place.** When a run starts on a context whose last run never finished, the context rebuilds from storage before the run begins: its item log and dispatch counts from the stored snapshot's baseline, its replayable entries from the stored ledger. A retry on the same context object therefore replays exactly what a new harness's `restore` would. Without a stored snapshot (its save failed), the baseline the context fixed when the failed run began stands in.
+- **Sessions.** Every turn reads the thread's history and in-flight turn from its stored record; seeding history and settling a turn's usage are read-modify-writes of that record. A harness keeps no thread history of its own while durability is on.
+
+Memory holds only what the current dispatch is doing, and copies of stored values that sync reads need (`getUsage()`), refreshed whenever the record is read or written.
+
+## Usage on replay
+
+Replayed work keeps its figures and costs nothing now, so usage reports both. `tokens`, `usage`, and `cost` are what the work cost — replayed steps contribute their restored or recorded spend, so budgets such as `until.maxCost` stop a resumed run where an uninterrupted one would. `billedCost` is what was actually paid now: an `LLMResponse` reports `cost` less what its replayed rounds supplied, a `Context` counts only this attempt's live calls (a restored context starts at 0), and `HarnessResponse` and `SessionUsage` carry the same split. A charge recorded with `recordUsage` is billed at its `cost` unless it gives a `billedCost`.
+
+Session totals add each turn's increase in usage rather than its context's totals, because a resumed turn's context starts with the spend its cut-off attempt left in the snapshot.
+
 ## Sessions
 
-`harness.execute()` runs each turn of a thread on a fresh execution. With durability on, each thread keeps a stored record under `session:<threadId>` (`runtime/durable/session-store.ts`): the history after the thread's last finished turn, and the turn in flight.
+`harness.execute()` runs each turn of a thread on a fresh execution. With durability on, each thread keeps a stored record under `session:<threadId>` (`runtime/durable/session-store.ts`): the history after the thread's last finished turn, what its turns have spent, and the turn in flight.
 
-- A harness that first touches a thread loads its history from the record, unless the host seeded its own with `seedSessionHistory`.
+- Every turn reads the thread's history from the record. `seedSessionHistory` writes to it.
 - Before a turn runs, the record names the turn's execution and the ids of the messages it delivers.
 - When a turn finishes, the record stores the new history, clears the turn, and the turn's checkpoint and ledger are discarded.
 - When a turn is cut off, its record stays. If the same message ids arrive again — a host with at-least-once delivery re-sends what it never saw answered — the turn resumes on its recorded execution: finished steps replay and the turn continues. Different messages abandon the cut-off turn: its checkpoint is cleared and they start a fresh turn.
@@ -190,7 +205,10 @@ The ledger lives under its own keys, outside `CheckpointSnapshot`. The baseline 
 - Snapshot writes failing mid-run: the resumed call still sees the full history.
 - A retried transient failure inside a loop leaves the run where a resume expects it.
 - A cost budget and `ctx.state` carry over a resume.
-- A finished run leaves no positional entries; `checkpointStore: false` restores nothing.
+- A finished run leaves no positional entries; `durability: false` writes nothing to storage and restores nothing, even with an adapter and a store.
+- A failed run retried on the same context rebuilds from storage and replays like a new harness.
+- Usage on replay: `cost` keeps the work's cost; `billedCost` counts only what was paid now.
+- Two harnesses taking turns on one thread both read its history from storage; a seeded history is stored.
 - Model loop: a tool loop cut off mid-round resumes on a new harness with every finished round replayed, every tool run exactly once, and replayed usage counted; a `durable: false` step records no rounds.
 - Sessions: a new harness continues a thread with its history; a re-delivered cut-off turn resumes on its execution; a different message after a cut-off turn starts fresh.
 - Static inParallel: 5 paths, crash with 3 complete; resume replays 3, dispatches 2.

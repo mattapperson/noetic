@@ -63,6 +63,7 @@ const harness = new AgentHarness({
 | `agentGraph` | `Step<TContext, string, string>` | `undefined` | Root step tree executed for every turn submitted via `execute()`. `TContext` defaults to `ContextData`. |
 | `params` | `TParams` | required | Arbitrary key-value parameters (populates `config.params`). |
 | `contextLayers` | `ContextLayer[]` | `undefined` | Default context layers applied to every context created via `createContext()` / `execute()`. |
+| `durability` | `boolean` | `true` when `environment.storage` gives an adapter or store | Whether runs and sessions are checkpointed, recorded to the step ledger, and resumable on a later harness over the same storage. `false` turns every durability surface off; the adapter still backs context-layer persistence. See [Durability](/docs/framework/durability). |
 | `hooks` | `AgentHooks` | `undefined` | Before/after step hooks. |
 | `tools` | `Tool[]` | `undefined` | Harness-wide tool pool, merged (identity-deduplicated) with tools collected from `agentGraph` to form every context's `unifiedTools`. |
 | `paramsSchema` | `ZodType` | `undefined` | Optional Zod schema to validate `params` at construction time. |
@@ -93,7 +94,7 @@ const harness = new AgentHarness({
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `storage.adapter` | `StorageAdapter` | in-memory | Key-value storage backing context-layer persistence and the step-completion ledger. |
-| `storage.checkpointStore` | `CheckpointStore \| false` | a store over `storage.adapter` | Store used by `checkpoint()` / `restore()`. Defaults to one over `storage.adapter` when an adapter is given, so durable storage alone makes runs resumable on a new harness. `false` opts out; with no adapter and no store, checkpoint/restore are no-ops. See [Durability](/docs/framework/durability). |
+| `storage.checkpointStore` | `CheckpointStore` | a store over `storage.adapter` | Store used by `checkpoint()` / `restore()`. Defaults to one over `storage.adapter` when an adapter is given, so durable storage alone makes runs resumable on a new harness. The harness `durability: false` option turns it off; with no adapter and no store, checkpoint/restore are no-ops. See [Durability](/docs/framework/durability). |
 | `storage.layerStateStore` | `LayerStateStore` | in-memory store | Backing store for context layer state. |
 | `storage.stepLedgerRetention` | `StepLedgerRetention` | `{ maxEntryBytes: 131072, maxEntries: 1000 }` | Bounds on the step-completion ledger that backs step-level resume. Only meaningful when durability is on. A non-positive cap throws `NoeticConfigError` (`STEP_LEDGER_RETENTION_INVALID`) at construction. See [Durability](/docs/framework/durability#step-level-resume). |
 | `fs` | `FsAdapter` | in-memory | Filesystem adapter exposed as `harness.fs`. Context layers, tools, and skill discovery all route through this adapter. Pass `createLocalFsAdapter()` from `@noetic-tools/platform-node` for real disk access. |
