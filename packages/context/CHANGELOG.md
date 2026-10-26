@@ -1,3 +1,7 @@
+## @noetic-tools/context-v1.11.0 (2026-10-26)
+
+* feat(core): durable steers and steer-triggered recall (#141) ([0c7b185](https://github.com/mattapperson/noetic/commit/0c7b185)), closes [#141](https://github.com/mattapperson/noetic/issues/141)
+
 ## @noetic-tools/context-v1.10.0 (2026-10-26)
 
 * feat(core): steer a running turn with next-item delivery and onSteer layers (#139) ([bb468d8](https://github.com/mattapperson/noetic/commit/bb468d8)), closes [#139](https://github.com/mattapperson/noetic/issues/139)
