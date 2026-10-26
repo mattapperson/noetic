@@ -317,11 +317,11 @@ process.on('SIGTERM', () => {
 });
 ```
 
-With `drainMs`, nothing new starts beneath `ctx`: steps, model rounds and tool calls wait instead. `callModel` rounds and `decide` calls already in flight get up to `drainMs` to finish, be charged to the context, and let their step record. Then the cancel runs as without `drainMs`, and the waiting work throws `cancelled`. Calls still running at the deadline are cut off the same way a plain cancel cuts them.
+With `drainMs`, nothing new starts beneath `ctx`: steps, model rounds and tool calls wait instead. `callModel` rounds and `decide` calls already in flight get up to `drainMs` to finish, be charged to the context, and let their step record. Then the cancel runs as without `drainMs`, and the waiting work throws `cancelled`. Calls still running at the deadline are cut off the same way a plain cancel cuts them: with durable storage their records stay pending and are priced once the provider has billed them (see [Paid Calls](/docs/framework/durability#paid-calls)).
 
 For a session turn, `harness.abort({ threadId, drainMs })` does the same, and `getStatus()` reports `{ kind: 'draining', turnId, deadline }` while it waits. A second `cancel` or `abort` during the drain cancels at once.
 
-`{name}:drain_started` lists the calls in flight; `{name}:drain_finished` gives the `reason` (`settled` when nothing was left, `deadline`, or `stopped`) and splits the calls into `finished` and `cutOff`. Each call is `{ kind: 'model_round' | 'decide', model, executionId, round? }`.
+`{name}:drain_started` lists the calls in flight; `{name}:drain_finished` gives the `reason` (`settled` when nothing was left, `deadline`, or `stopped`) and splits the calls into `finished` and `cutOff`. Each call is `{ kind: 'model_round' | 'decide', model, executionId, round?, dispatchId?, generationId? }`. A model round carries `dispatchId` when the harness keeps [paid-call records](/docs/framework/durability#paid-calls), and `generationId` once its response headers arrived, so each `cutOff` call can be matched to its entry in `pendingSpend()`.
 
 The `subprocess` adapter is the companion surface: it persists handle manifests for every long-lived child so a restarted host can call `harness.subprocess.listLive()` + `harness.restore(executionId)` per live child to rejoin the execution. Full durable-execution model, storage layout, and IPC protocol live on the [Durability](/docs/framework/durability) page.
 

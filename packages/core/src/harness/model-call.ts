@@ -869,11 +869,15 @@ export class AgentHarnessModelCaller {
         break;
       }
 
-      const roundFinished = drains?.track(request.ctx, {
-        kind: 'model_round',
-        model: request.model,
-        round,
-      });
+      const roundFinished = drains?.track(
+        request.ctx,
+        {
+          kind: 'model_round',
+          model: request.model,
+          round,
+        },
+        dispatch?.record,
+      );
       const callResult = client.callModel(
         {
           model: request.model,

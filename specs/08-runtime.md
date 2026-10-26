@@ -524,11 +524,11 @@ With durability on, a steer sent into a running turn is kept in the thread's ses
 
 1. **Nothing new starts.** Beneath the drained context, every step boundary, model round and tool call waits instead of starting. Calls already in flight carry on.
 2. **In-flight model calls finish, up to `drainMs`.** A `callModel` round or `decide` call counts as in flight from dispatch until its caller next reaches a step boundary, round or tool call, or its step ends. So a finished call is charged to the context and, when it was a step's last, the step is recorded in the ledger before anything is cancelled.
-3. **Then it cancels as without `drainMs`.** The drain ends as soon as nothing is in flight (`settled`), at the deadline (`deadline`), or when the tree is stopped another way (`stopped`). Held steps then throw `cancelled`. Calls still running are cut off through the same abort path a plain cancel uses, so anything that settles an aborted call's cost later applies to them too.
+3. **Then it cancels as without `drainMs`.** The drain ends as soon as nothing is in flight (`settled`), at the deadline (`deadline`), or when the tree is stopped another way (`stopped`). Held steps then throw `cancelled`. Calls still running are cut off through the same abort path a plain cancel uses: with durable storage, each keeps its dispatch record pending, with its generation id when its response headers arrived, and is priced in the background like any other cut-off call (`23-durable-execution` § Paid dispatches).
 
 A second `cancel` or `abort` on the drained context during the drain stops it at once. The drained session reports `{ kind: 'draining', turnId, deadline }` from `getStatus()` until the cancel begins.
 
-Two framework events report the drain on the context's broadcaster. Each call in them is `{ kind: 'model_round' | 'decide', model, executionId, round? }`, where `executionId` is the id of the context that made it.
+Two framework events report the drain on the context's broadcaster. Each call in them is `{ kind: 'model_round' | 'decide', model, executionId, round?, dispatchId?, generationId? }`, where `executionId` is the id of the context that made it. A model round carries `dispatchId`, its dispatch record's id, when the harness keeps records, and `generationId` once its response headers arrived, so a host can match each `cutOff` call to its entry in `pendingSpend()`.
 
 | Event | Data |
 |-------|------|

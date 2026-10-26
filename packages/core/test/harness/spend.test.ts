@@ -8,6 +8,7 @@ import assert from 'node:assert';
 import type { StorageAdapter } from '@noetic-tools/context';
 import type { Context, ContextData, PendingSpend, StreamEvent } from '@noetic-tools/types';
 import { frameworkCast, recordUsage } from '@noetic-tools/types';
+import { inParallel } from '../../src/builders/control-flow-builders';
 import { decide } from '../../src/builders/decide-builders';
 import { loop } from '../../src/builders/loop-builder';
 import { callModel, runCode } from '../../src/builders/step-builders';
@@ -549,6 +550,80 @@ describe('cancel mid-stream', () => {
       }),
     ).toEqual([]);
     expect(await harness.pendingSpend()).toHaveLength(1);
+  });
+});
+
+describe('a graceful stop past its deadline', () => {
+  it('keeps the rounds it cut off pending with their generation ids and reports them', async () => {
+    const server = startServer();
+    server.hangAt.add(1);
+    server.hangAt.add(2);
+    const storage = createInMemoryStorage();
+    const harness = harnessOver(storage, server);
+    useFakeSdk(harness);
+    const events: StreamEvent[] = [];
+    const ctx = Object.assign(harness.createContext(), {
+      _broadcaster: {
+        emit: (event: StreamEvent) => events.push(event),
+      },
+    });
+    const both = inParallel({
+      id: 'both',
+      mode: 'all',
+      paths: () => [
+        agent,
+        callModel<ContextData, string, string>({
+          id: 'other',
+          model: 'test/model',
+        }),
+      ],
+      merge: (results: unknown[]) => results,
+    });
+    const run = harness.run(both, 'go', ctx).catch(() => {});
+    await waitFor(
+      () => server.rounds.length,
+      (count) => count === 2,
+    );
+
+    await harness.cancel(ctx, {
+      drainMs: 50,
+    });
+    await run;
+    const pending = await waitFor(
+      () => harness.pendingSpend(ctx.id),
+      (list) => list.length === 2,
+    );
+
+    expect(pending.map((p) => p.generationId).sort()).toEqual([
+      'gen-1',
+      'gen-2',
+    ]);
+    const finished = events.find((event) => event.type === 'spend:drain_finished');
+    assert(finished && 'data' in finished);
+    const data = frameworkCast<{
+      reason: string;
+      finished: unknown[];
+      cutOff: {
+        dispatchId?: string;
+        generationId?: string;
+      }[];
+    }>(finished.data);
+    expect(data.reason).toBe('deadline');
+    expect(data.finished).toEqual([]);
+    expect(
+      data.cutOff.map((call) => [
+        call.dispatchId,
+        call.generationId,
+      ]),
+    ).toEqual(
+      expect.arrayContaining(
+        pending.map((p) => [
+          p.id,
+          p.generationId,
+        ]),
+      ),
+    );
+    expect(data.cutOff).toHaveLength(2);
   });
 });
 

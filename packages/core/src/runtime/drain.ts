@@ -12,14 +12,30 @@ export interface DrainCall {
   readonly executionId: string;
   /** The round within its `callModel`, for model rounds. */
   readonly round?: number;
+  /** Id of the call's dispatch record, when the harness keeps them (spec 23). */
+  readonly dispatchId?: string;
+  /** The provider's id for the call, once its response headers arrived. */
+  readonly generationId?: string;
 }
+
+/**
+ * @internal The dispatch record of a tracked call. Read when a drain reports, so a
+ * generation id saved after dispatch still shows.
+ */
+export interface DrainRecord {
+  readonly id: string;
+  readonly generationId?: string;
+}
+
+type DrainCallInfo = Omit<DrainCall, 'executionId' | 'dispatchId' | 'generationId'>;
 
 /** @internal Why a drain ended. */
 export type DrainEnd = 'settled' | 'deadline' | 'stopped';
 
 interface Call {
-  readonly info: DrainCall;
+  readonly info: DrainCallInfo;
   readonly ctx: Context;
+  readonly record?: DrainRecord;
   done: boolean;
 }
 
@@ -60,19 +76,17 @@ export class Drains {
   private readonly active = new Set<Drain>();
 
   /**
-   * Note a provider call about to be dispatched on `ctx`. Call the returned
-   * function once its response is in (or it failed).
+   * Note a provider call about to be dispatched on `ctx` under `record`. Call the
+   * returned function once its response is in (or it failed).
    */
-  track(ctx: Context | undefined, info: Omit<DrainCall, 'executionId'>): () => void {
+  track(ctx: Context | undefined, info: DrainCallInfo, record?: DrainRecord): () => void {
     if (!ctx) {
       return () => {};
     }
     const call: Call = {
-      info: {
-        ...info,
-        executionId: ctx.id,
-      },
+      info,
       ctx,
+      record,
       done: false,
     };
     this.calls.add(call);
@@ -179,7 +193,7 @@ export class Drains {
       deadline: drain.deadline,
       inFlight: [
         ...drain.calls,
-      ].map((call) => call.info),
+      ].map(report),
     });
     this.settleIfIdle(drain);
     const reason = await drain.ended;
@@ -198,8 +212,8 @@ export class Drains {
       executionId: drain.root.id,
       reason,
       durationMs: Date.now() - drain.startedAt,
-      finished: calls.filter((call) => call.done).map((call) => call.info),
-      cutOff: calls.filter((call) => !call.done).map((call) => call.info),
+      finished: calls.filter((call) => call.done).map(report),
+      cutOff: calls.filter((call) => !call.done).map(report),
     });
     const stopping = stop();
     drain.wake();
@@ -262,6 +276,24 @@ function openDrain(root: Context, ms: number): Drain {
     ended,
     over,
     wake,
+  };
+}
+
+function report(call: Call): DrainCall {
+  const { record } = call;
+  return {
+    ...call.info,
+    executionId: call.ctx.id,
+    ...(record
+      ? {
+          dispatchId: record.id,
+        }
+      : {}),
+    ...(record?.generationId
+      ? {
+          generationId: record.generationId,
+        }
+      : {}),
   };
 }
 

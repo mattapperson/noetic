@@ -249,7 +249,7 @@ interface SpendSettlement {
 - `reconcileSpend` prices each pending dispatch that has a generation id through the provider's generation lookup (`GET /generation?id=`). The lookup answers 404 until the provider has priced the call — 7 to 32 seconds in practice — so it polls, backing off from 1 s to 10 s, for up to `patienceMs` (default 60 s). A priced call, cancelled or not, settles at the provider's `total_cost`. A dispatch with no id cannot be priced: it stays held until written off. A call already being looked up is joined, not looked up twice. The poll timers do not keep a host process alive.
 - `writeOffSpend` settles one pending dispatch at an amount the host asserts, for a call that can never be priced.
 
-Reconciliation runs on its own: after `restore()` for the restored execution, and for each dispatch the moment it is left pending — which covers `cancel(ctx)`, steers, and errors. A host can call `reconcileSpend()` again at any time, for example at boot for every execution.
+Reconciliation runs on its own: after `restore()` for the restored execution, and for each dispatch the moment it is left pending — which covers `cancel(ctx)`, rounds a graceful stop cuts off at its deadline (`08-runtime` § Graceful Stop; `drain_finished.cutOff` names each by `dispatchId` and `generationId`), steers, and errors. A host can call `reconcileSpend()` again at any time, for example at boot for every execution.
 
 **Where a settlement goes.** A settlement is charged once:
 
