@@ -1,3 +1,7 @@
+## @noetic-tools/core-v5.16.0 (2026-10-26)
+
+* feat(core): typed custom items that stream events and a final item ([ce8b253](https://github.com/mattapperson/noetic/commit/ce8b253))
+
 ## @noetic-tools/core-v5.15.1 (2026-10-26)
 
 * perf(core): find a ledger entry's subtree by binary search ([b2e7ade](https://github.com/mattapperson/noetic/commit/b2e7ade))
