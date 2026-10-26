@@ -712,7 +712,6 @@ describe('a harness without onSteer', () => {
     const inbox = new SteerInbox({
       queue,
       ctx: harness.createContext(),
-      // A layer with a hook proves the harness method, not the layer, is what's missing.
       layers: [
         steerLayer(async () => ({
           action: SteerAction.Drop,
