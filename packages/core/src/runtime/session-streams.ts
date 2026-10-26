@@ -213,6 +213,14 @@ export async function* buildItemStream(
 
   for await (const event of broadcaster) {
     if (event.source === 'framework') {
+      // A custom item's event streams in progress under the id its final item takes.
+      if (event.type.endsWith(':custom_item_event')) {
+        yield frameworkCast<StreamingItem>({
+          ...event.data,
+          isComplete: false,
+        });
+        continue;
+      }
       if (
         event.type.endsWith(':item_appended') &&
         typeof event.data.item === 'object' &&

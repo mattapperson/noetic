@@ -85,7 +85,7 @@ Point your editor or validator at the bundled file (resolve it from the package,
 
 Fourteen node kinds are available, plus the `acp-agent` kind documented in [ACP Agent Steps](/docs/framework/acp-agents). Leaf nodes (`callModel`, `invokeTool`, `runCode`, `compute`, `decide`) perform work; structural nodes (`sequence`, `inParallel`, `conditional`, `routeSwitch`, `loop`, `spawn`, `withContext`, `schedule`, `subflow`) compose them into trees.
 
-Every node takes two optional replay fields (see [Replay Identity](/docs/framework/durability#replay-identity)) and an optional `emitItems` field (see [Emitting items](#emitting-items)):
+Every node takes two optional replay fields (see [Replay Identity](/docs/framework/durability#replay-identity)) plus optional `emitItems` and `customItems` fields (see [Emitting items](#emitting-items)):
 
 | Field | Type | Effect |
 |---|---|---|
@@ -108,14 +108,13 @@ With `from`, a node whose input is not a JSON object logs a warning (`INVALID_RE
 
 ### Emitting items
 
-By default the user sees a workflow's output only when its last node finishes. Any node can emit items sooner with `emitItems`. When the node finishes, its items are added to the conversation and streamed through `getItemStream` at once, so a node inside a loop emits on every iteration, before the loop's `until` stops it:
+By default the user sees a workflow's output only when its last node finishes. Any node can emit items sooner with `emitItems`. Its items are added to the conversation and streamed through `getItemStream` at once, so a node inside a loop emits on every iteration, before the loop's `until` stops it:
 
 | Form | Emits |
 |---|---|
-| `"emitItems": true` | The node's output as an assistant message: a string as is, anything else as JSON. |
-| `"emitItems": { "expr": "<JSONata>" }` | The text a [JSONata expression](/docs/framework/expressions) computes from the output. No value emits nothing. |
-| `"emitItems": { "as": "items" }` | The output itself, read as JSON, as one item or a list of items. |
-| `"emitItems": { "expr": "<JSONata>", "as": "items" }` | The item or items the expression builds. |
+| `"emitItems": true` | The output as a final item. JSON text of an object whose `type` names a [custom item](/docs/framework/custom-items) in scope becomes that item; anything else becomes an assistant message. |
+| `"emitItems": { "onDone": "<JSONata>" }` | The text a [JSONata expression](/docs/framework/expressions) computes from the output, as an assistant message. No value emits nothing. |
+| `"emitItems": { "item": "progress", "onStart": "…", "onDone": "…" }` | A declared custom item: `onStart`, read against the input, gives one event; `onDone`, read against the output, gives the final fields. |
 
 ```json
 {
@@ -126,7 +125,7 @@ By default the user sees a workflow's output only when its last node finishes. A
     "kind": "compute",
     "id": "step",
     "expr": "{ 'n': n - 1 }",
-    "emitItems": { "expr": "'Left: ' & $string(n)" }
+    "emitItems": { "onDone": "'Left: ' & $string(n)" }
   },
   "until": { "kind": "expr", "expr": "n = 0" }
 }
@@ -134,31 +133,9 @@ By default the user sees a workflow's output only when its last node finishes. A
 
 Starting from `{"n":3}`, this emits `Left: 2`, `Left: 1` and `Left: 0` as each iteration ends, then the loop returns `{"n":0}`.
 
-#### Items, including custom ones
+#### Custom items
 
-A node isn't limited to assistant messages. With `"as": "items"`, it can emit any [item](/docs/framework/context), including a custom one. Following the Open Responses convention for extension items, give a custom item a `prefix:name` type and register a schema for it on the harness:
-
-```ts
-import { AgentHarness } from '@noetic-tools/core';
-import { z } from 'zod';
-
-const harness = new AgentHarness({
-  name: 'worker',
-  params: {},
-  itemSchemas: {
-    schemas: {
-      items: [z.object({ type: z.literal('myapp:progress'), left: z.number() })],
-    },
-  },
-});
-```
-
-```json
-{ "kind": "compute", "id": "step", "expr": "{ 'n': n - 1 }",
-  "emitItems": { "expr": "{ 'type': 'myapp:progress', 'left': n }", "as": "items" } }
-```
-
-A value that isn't an item or a list of items fails with [`INVALID_EMIT_ITEMS`](/docs/framework/errors#invalid_emit_items). An item whose type no schema accepts fails with `item_schema_mismatch`. A `runCode` node can print items as JSON and emit them with `"emitItems": { "as": "items" }`.
+Declare custom items in JSON Schema, in the document's root `customItems` (any node may emit them) or in a node's own `customItems` (only that node may). Each streams events and one final item under one id, like a model reply, and types the harness's results. See [Custom Items](/docs/framework/custom-items).
 
 #### On resume
 
@@ -167,7 +144,7 @@ A resumed run replays finished nodes from the ledger instead of running them, an
 #### Notes
 
 - A `runCode` node emits its stdout.
-- A `decide` node emits its answers object, and its `emitItems` expression can read it (`"stop.value ? 'Done' : 'Trying again'"`). When the node is a loop's `until`, it emits after every verdict.
+- A `decide` node emits its answers object, and its `onDone` can read it (`"stop.value ? 'Done' : 'Trying again'"`). When the node is a loop's `until`, it emits after every verdict.
 - A structural node (`sequence`, `loop`, `subflow`, …) emits its own output once it finishes, after its children.
 - A `callModel` node's reply is already in the conversation, so `emitItems` on one adds a second copy.
 - Emitted items are normal conversation items: later `callModel` nodes see them, and `HarnessResponse.items` includes them.

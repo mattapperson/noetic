@@ -13,12 +13,7 @@ import type {
   StreamingItem,
   WorkflowDocument,
 } from '@noetic-tools/types';
-import {
-  frameworkCast,
-  isAssistantMessage,
-  isNoeticConfigError,
-  isNoeticError,
-} from '@noetic-tools/types';
+import { frameworkCast, isAssistantMessage, isNoeticConfigError } from '@noetic-tools/types';
 import { z } from 'zod';
 import { parseAndRunWorkflow } from '../../src/builders/dynamic-workflow';
 import { loop } from '../../src/builders/loop-builder';
@@ -67,12 +62,11 @@ function emitted(items: ReadonlyArray<Item>): string[] {
 async function runJson(
   root: WorkflowNode,
   input: string,
-  itemSchemas?: ConstructorParameters<typeof AgentHarness>[0]['itemSchemas'],
+  customItems?: WorkflowDocument['customItems'],
 ) {
   const harness = new AgentHarness({
     name: 'json-emit',
     params: {},
-    itemSchemas,
     _testDecide: async (): Promise<DecideResponse> => ({
       answers: {
         stop: {
@@ -93,6 +87,7 @@ async function runJson(
   const output = await parseAndRunWorkflow({
     json: {
       version: 1,
+      customItems,
       root,
     },
     harness,
@@ -182,21 +177,55 @@ async function expectConfigError(promise: Promise<unknown>, code: string): Promi
 
 //#region Tests
 
+/** A JSON-declared custom item: progress with a count event and a done/of final. */
+const PROGRESS_JSON = {
+  progress: {
+    type: 'myapp:progress',
+    event: {
+      type: 'object',
+      properties: {
+        done: {
+          type: 'number',
+        },
+      },
+      required: [
+        'done',
+      ],
+    },
+    output: {
+      type: 'object',
+      properties: {
+        done: {
+          type: 'number',
+        },
+        of: {
+          type: 'number',
+        },
+      },
+      required: [
+        'done',
+        'of',
+      ],
+    },
+  },
+} satisfies WorkflowDocument['customItems'];
+
 describe('emitItems in the workflow schema', () => {
-  it('accepts a boolean or an expression on any node', () => {
+  it('accepts a boolean or the hook form on any node', () => {
     for (const emitItems of [
       true,
       false,
       {
-        expr: "'n is ' & n",
+        onDone: "'n is ' & n",
       },
       {},
       {
-        as: 'items',
+        item: 'progress',
       },
       {
-        expr: "{ 'type': 'myapp:progress', 'done': n }",
-        as: 'items',
+        item: 'progress',
+        onStart: "{ 'done': 0 }",
+        onDone: "{ 'done': n, 'of': n }",
       },
     ]) {
       expect(
@@ -208,36 +237,22 @@ describe('emitItems in the workflow schema', () => {
         }).success,
       ).toBe(true);
     }
-    expect(
-      WorkflowNodeSchema.safeParse({
-        kind: 'sequence',
-        id: 's',
-        steps: [
-          {
-            kind: 'compute',
-            id: 'c',
-            expr: 'n',
-          },
-        ],
-        emitItems: true,
-      }).success,
-    ).toBe(true);
   });
 
-  it('rejects any other shape', () => {
+  it('rejects any other shape, and onStart without an item', () => {
     for (const emitItems of [
       'yes',
       {
-        expr: 5,
+        onDone: 5,
       },
       {
-        as: 'item',
+        onStart: 'n',
+      },
+      {
+        expr: 'n',
       },
       {
         replay: true,
-      },
-      {
-        epxr: 'n',
       },
     ]) {
       expect(
@@ -251,6 +266,27 @@ describe('emitItems in the workflow schema', () => {
     }
   });
 
+  it('accepts customItems at the root and on a node, and rejects a type without a prefix', () => {
+    const node = {
+      kind: 'compute',
+      id: 'c',
+      expr: 'n',
+      customItems: PROGRESS_JSON,
+    };
+    expect(WorkflowNodeSchema.safeParse(node).success).toBe(true);
+    expect(
+      WorkflowNodeSchema.safeParse({
+        ...node,
+        customItems: {
+          bad: {
+            ...PROGRESS_JSON.progress,
+            type: 'progress',
+          },
+        },
+      }).success,
+    ).toBe(false);
+  });
+
   it('fails validation when an emitItems expression does not parse', async () => {
     await expectConfigError(
       runJson(
@@ -259,7 +295,7 @@ describe('emitItems in the workflow schema', () => {
           id: 'c',
           expr: 'n',
           emitItems: {
-            expr: "'unclosed",
+            onDone: "'unclosed",
           },
         },
         '{"n":1}',
@@ -305,7 +341,7 @@ describe('emitItems in JSON workflows', () => {
     expect(messages).toEqual([]);
   });
 
-  it('an emitItems expression computes the text and emits nothing when it gives no value', async () => {
+  it('onDone without an item emits text, and nothing when it gives no value', async () => {
     const { emitted: messages } = await runJson(
       {
         ...COUNTDOWN,
@@ -314,7 +350,7 @@ describe('emitItems in JSON workflows', () => {
           id: 'tick',
           expr: "{ 'n': n - 1 }",
           emitItems: {
-            expr: "n % 2 = 0 ? 'even: ' & $string(n)",
+            onDone: "n % 2 = 0 ? 'even: ' & $string(n)",
           },
         },
       },
@@ -327,14 +363,14 @@ describe('emitItems in JSON workflows', () => {
     ]);
   });
 
-  it('an emitItems expression that gives a structured value emits its JSON', async () => {
+  it('onDone without an item writes a structured value as JSON', async () => {
     const { emitted: messages } = await runJson(
       {
         kind: 'compute',
         id: 'c',
         expr: "{ 'n': n }",
         emitItems: {
-          expr: "{ 'left': n }",
+          onDone: "{ 'left': n }",
         },
       },
       '{"n":2}',
@@ -352,7 +388,7 @@ describe('emitItems in JSON workflows', () => {
           id: 'c',
           expr: 'n',
           emitItems: {
-            expr: '$uppercase',
+            onDone: '$uppercase',
           },
         },
         '{"n":1}',
@@ -382,7 +418,7 @@ describe('emitItems in JSON workflows', () => {
             },
           },
           emitItems: {
-            expr: "stop.value ? 'finished' : 'again'",
+            onDone: "stop.value ? 'finished' : 'again'",
           },
         },
       },
@@ -391,111 +427,6 @@ describe('emitItems in JSON workflows', () => {
     expect(messages).toEqual([
       'finished',
     ]);
-  });
-
-  it('as items emits a custom item the harness item schemas accept', async () => {
-    const { items, emitted: messages } = await runJson(
-      {
-        ...COUNTDOWN,
-        body: {
-          kind: 'compute',
-          id: 'tick',
-          expr: "{ 'n': n - 1 }",
-          emitItems: {
-            expr: "{ 'type': 'myapp:progress', 'done': 3 - n }",
-            as: 'items',
-          },
-        },
-      },
-      '{"n":3}',
-      PROGRESS_SCHEMAS,
-    );
-    expect(messages).toEqual([]);
-    expect(progress(items)).toEqual([
-      {
-        type: 'myapp:progress',
-        done: 1,
-      },
-      {
-        type: 'myapp:progress',
-        done: 2,
-      },
-      {
-        type: 'myapp:progress',
-        done: 3,
-      },
-    ]);
-  });
-
-  it('as items without an expression reads the output itself as items', async () => {
-    const { items } = await runJson(
-      {
-        kind: 'compute',
-        id: 'emit',
-        expr: "[{ 'type': 'myapp:progress', 'done': n }, { 'type': 'myapp:progress', 'done': n + 1 }]",
-        emitItems: {
-          as: 'items',
-        },
-      },
-      '{"n":1}',
-      PROGRESS_SCHEMAS,
-    );
-    expect(progress(items)).toEqual([
-      {
-        type: 'myapp:progress',
-        done: 1,
-      },
-      {
-        type: 'myapp:progress',
-        done: 2,
-      },
-    ]);
-  });
-
-  it('fails with INVALID_EMIT_ITEMS when the value is not an item', async () => {
-    for (const expr of [
-      '5',
-      "{ 'done': 1 }",
-      "[{ 'type': 'myapp:progress', 'done': 1 }, 'x']",
-    ]) {
-      await expectConfigError(
-        runJson(
-          {
-            kind: 'compute',
-            id: 'c',
-            expr: 'n',
-            emitItems: {
-              expr,
-              as: 'items',
-            },
-          },
-          '{"n":1}',
-          PROGRESS_SCHEMAS,
-        ),
-        'INVALID_EMIT_ITEMS',
-      );
-    }
-  });
-
-  it('fails with item_schema_mismatch for an unregistered custom item type', async () => {
-    try {
-      await runJson(
-        {
-          kind: 'compute',
-          id: 'c',
-          expr: 'n',
-          emitItems: {
-            expr: "{ 'type': 'myapp:unknown' }",
-            as: 'items',
-          },
-        },
-        '{"n":1}',
-      );
-      expect.unreachable('expected item_schema_mismatch');
-    } catch (e) {
-      assert(isNoeticError(e));
-      expect(e.noeticError.kind).toBe('item_schema_mismatch');
-    }
   });
 
   it('a container node emits its own output once it finishes', async () => {

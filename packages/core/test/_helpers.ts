@@ -98,6 +98,7 @@ import type {
   ToolExecutionContext,
 } from '@noetic-tools/types';
 import { frameworkCast, SteeringAction } from '@noetic-tools/types';
+import { runToReturn } from '../src/interpreter/emit-items';
 import type { EmbedFn } from '../src/types/embed';
 
 // ── Storage ──────────────────────────────────────────────────────────
@@ -667,7 +668,7 @@ export const simpleExecute: ExecuteStepFn = async <TContext, I, O>(
   ctx: Context<TContext>,
 ): Promise<O> => {
   if (step.kind === 'runCode') {
-    return step.execute(input, ctx);
+    return frameworkCast<O>(await runToReturn(step.execute(input, ctx), async () => {}));
   }
   throw new Error(`Unsupported step kind: ${step.kind}`);
 };

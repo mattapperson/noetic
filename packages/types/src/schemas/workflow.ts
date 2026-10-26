@@ -341,18 +341,31 @@ export type WorkflowReplayKey =
 
 /**
  * @public
- * What a node emits when it finishes. `true` emits its output as an assistant message.
- * The object form picks what and how: `expr` (spec 33) computes the value from the
- * output, and no value emits nothing; `as` reads that value as message text (`"text"`,
- * the default) or as one item or a list of items (`"items"`), including custom items
- * the harness's item schemas accept. See spec 26 § Emitting items.
+ * What a node emits (spec 34 § JSON nodes). `true` emits its output as a final item:
+ * a string as an assistant message, an object whose `type` names a custom item in
+ * scope as that item. The hook form names a declared `item`: `onStart`, evaluated
+ * against the input, gives one event; `onDone`, evaluated against the output, gives
+ * the final item's fields. Without `item`, `onDone` gives message text.
  */
 export type WorkflowEmitItems =
   | boolean
   | {
-      expr?: Expression;
-      as?: 'text' | 'items';
+      item?: string;
+      onStart?: Expression;
+      onDone?: Expression;
     };
+
+/**
+ * @public
+ * A custom item a document declares (spec 34), in JSON Schema. `type` is
+ * `prefix:name`; `event` describes what streams, `output` the final item's fields.
+ */
+export interface WorkflowCustomItem {
+  type: string;
+  description?: string;
+  event?: Record<string, unknown>;
+  output: Record<string, unknown>;
+}
 
 interface WorkflowNodeBase {
   id: string;
@@ -365,6 +378,8 @@ interface WorkflowNodeBase {
   replayKey?: WorkflowReplayKey;
   /** Emit items when this node finishes. See spec 26 § Emitting items. */
   emitItems?: WorkflowEmitItems;
+  /** Custom items only this node may emit. See spec 34 § On a step. */
+  customItems?: Record<string, WorkflowCustomItem>;
 }
 
 /**
@@ -615,22 +630,35 @@ const WorkflowEmitItemsSchema: z.ZodType<WorkflowEmitItems> = z.union([
   z.boolean(),
   z
     .object({
-      expr: ExpressionSchema.optional(),
-      as: z
-        .enum([
-          'text',
-          'items',
-        ])
-        .optional(),
+      item: z.string().min(1).optional(),
+      onStart: ExpressionSchema.optional(),
+      onDone: ExpressionSchema.optional(),
     })
-    .strict(),
+    .strict()
+    .refine((config) => config.onStart === undefined || config.item !== undefined, {
+      message: "emitItems 'onStart' gives an event, so it needs an 'item' to emit.",
+    }),
 ]);
+
+const JsonSchemaObjectSchema = z.record(z.string(), z.unknown());
+
+const WorkflowCustomItemSchema: z.ZodType<WorkflowCustomItem> = z
+  .object({
+    type: z.string().regex(/^[^:]+:.+$/, "A custom item type is 'prefix:name'."),
+    description: z.string().optional(),
+    event: JsonSchemaObjectSchema.optional(),
+    output: JsonSchemaObjectSchema,
+  })
+  .strict();
+
+const CustomItemsSchema = z.record(z.string().min(1), WorkflowCustomItemSchema);
 
 const SHARED_FIELDS = {
   id: z.string().min(1),
   durable: z.boolean().optional(),
   replayKey: WorkflowReplayKeySchema.optional(),
   emitItems: WorkflowEmitItemsSchema.optional(),
+  customItems: CustomItemsSchema.optional(),
 } as const;
 
 const OutputCodecRefSchema = z.object({
@@ -886,6 +914,8 @@ export const WorkflowNodeSchema: z.ZodType<WorkflowNode> = z
 /** @public Top-level envelope for a JSON workflow definition. */
 export interface WorkflowDocument {
   version: 1;
+  /** Custom items any node in this document may emit. See spec 34 § Workflow root. */
+  customItems?: Record<string, WorkflowCustomItem>;
   root: WorkflowNode;
 }
 
@@ -893,6 +923,7 @@ export interface WorkflowDocument {
 export const WorkflowDocumentSchema: z.ZodType<WorkflowDocument> = z
   .object({
     version: z.literal(1),
+    customItems: CustomItemsSchema.optional(),
     root: WorkflowNodeSchema,
   })
   .meta({

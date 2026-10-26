@@ -250,7 +250,9 @@ Callers may attach arbitrary additional keys via `request.metadata`; the adapter
 The agent harness is the engine. It's behind an interface with methods covering execution, session-scoped stream accessors, context management, channels, durability, context layer lifecycle, cancellation, and tracing.
 
 ```typescript
-interface AgentHarness<TParams extends Record<string, unknown> = Record<string, unknown>> {
+// TItem: the custom items `agentGraph` declares (its `'~customItems'` brand, spec 34);
+// `never` when it declares none, which leaves every result type as it is without them.
+interface AgentHarness<TParams extends Record<string, unknown> = Record<string, unknown>, TItem extends CustomItem = never> {
   // Agent configuration
   readonly config: AgentConfig<TParams>;
 
@@ -459,11 +461,11 @@ type StreamingItem = Item & { readonly isComplete: boolean };
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `getAgentResponse(scope?)` | `Promise<HarnessResponse>` | Resolves once the session drains its queue and returns to idle. |
+| `getAgentResponse(scope?)` | `Promise<HarnessResponse<Item \| CustomItemOf<TItem>>>` | Resolves once the session drains its queue and returns to idle. `items` holds final items: standard ones plus the graph's declared custom items (`34-custom-items`). |
 | `getTextStream(scope?)` | `AsyncIterable<string>` | Text deltas from the model, across all turns in the session. |
 | `getReasoningStream(scope?)` | `AsyncIterable<string>` | Reasoning token deltas (reasoning models). |
-| `getItemStream(scope?)` | `AsyncIterable<StreamingItem>` | Cumulative item snapshots. Replace, do not append. Carries the full session log: model output streams progressively from SDK events; framework-authored items (turn inputs, inbox injections, tool results, items a step emits) arrive already complete via `item_appended`. |
-| `getFullStream(scope?)` | `AsyncIterable<StreamEvent>` | All raw events (SDK + framework) for the session. |
+| `getItemStream(scope?)` | `AsyncIterable<StreamingItem>` | Cumulative item snapshots. Replace, do not append. Carries the full session log: model output streams progressively from SDK events; framework-authored items (turn inputs, inbox injections, tool results, items a step emits) arrive already complete via `item_appended`. A declared custom item streams like a model reply: each `custom_item_event` as an in-progress entry (`isComplete: false`), then its final item, under one `id`. Typed `StreamingItem \| CustomStreamingItem<TItem>`. |
+| `getFullStream(scope?)` | `AsyncIterable<StreamEvent \| CustomItemStreamEvent<TItem>>` | All raw events (SDK + framework) for the session, custom item events included. |
 
 Stream accessors MAY be subscribed before any `execute()` call; the underlying `EventBroadcaster` replays buffered events so late subscribers observe turn history within the buffer window.
 
@@ -530,6 +532,7 @@ interface FrameworkStreamEvent {
 |-------|-------------|
 | `{name}:turn_started` | Emitted when the session runner starts a turn. Data: `{ turnId, messageIds }` |
 | `{name}:item_appended` | Emitted whenever a framework-authored item enters the session log — turn input messages (after `turn_started`), between-rounds inbox injections, tool result items, and the items a step with `emitItems` adds when it finishes, or streams again on replay under `emitItemsOnReplay` (`01-step-type` § Emitting items). Data: `{ item }`. Backs `getItemStream` for everything the SDK stream cannot carry, so it is emitted unconditionally — never filtered by `step.emit`. |
+| `{name}:custom_item_event` | One event of a declared custom item, as a step yields it (`34-custom-items`). Data: `{ id, type, event }`; `id` is the one its final item takes. Emitted unconditionally, like `item_appended`. |
 | `{name}:turn_completed` | Emitted when a turn completes. Data: `{ turnId, durationMs }` |
 | `{name}:turn_aborted` | Emitted when a turn is aborted or errors. Data: `{ turnId, reason }` |
 | `{name}:steer_accepted` | Emitted when a steer is queued while a turn runs. Always precedes the `inbox_injected` that applies it. Data: `{ messageId, turnId, deliveryMode }` |

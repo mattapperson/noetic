@@ -42,15 +42,20 @@ export function expressionErrors(root: WorkflowNode): string[] {
 //#region Helpers
 
 function expressionsOf(node: WorkflowNode): Found[] {
-  const emitted =
-    typeof node.emitItems === 'object' && node.emitItems.expr !== undefined
-      ? [
+  const option = typeof node.emitItems === 'object' ? node.emitItems : {};
+  const emitted = [
+    option.onStart,
+    option.onDone,
+  ].flatMap((source) =>
+    source === undefined
+      ? []
+      : [
           {
             where: `emitItems of node '${node.id}'`,
-            source: node.emitItems.expr,
+            source,
           },
-        ]
-      : [];
+        ],
+  );
   return [
     ...emitted,
     ...kindExpressionsOf(node),

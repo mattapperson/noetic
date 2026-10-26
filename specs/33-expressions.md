@@ -69,7 +69,7 @@ stays free of the library. Core checks syntax (§ Validation).
 | `compute` node       | `expr`                                  | Computes the node's output from its input.               |
 | `conditional` route  | `{ "expr": "<JSONata>", "target": … }`  | Takes the route when the expression gives `true`.        |
 | `loop` until         | `{ "kind": "expr", "expr": "<JSONata>" }` | Stops the loop when the expression gives `true`.       |
-| any node's `emitItems` | `{ "expr": "<JSONata>", "as"?: … }`   | Computes what the node emits when it finishes.           |
+| any node's `emitItems` | `{ "onStart"?: …, "onDone"?: … }`       | Computes an event or the final item the node emits.      |
 
 A conditional route carries exactly one of `match` (substring) or `expr`. The
 `expr` until predicate may appear inside `any` and `all` like any other
@@ -80,8 +80,8 @@ predicate. Node shapes and their hydration are specified in spec 26.
 ## The Input
 
 Every expression is evaluated against one value, its **input**, read from the
-node's input (for an until predicate, the loop's last output; for an `emitItems`, the
-node's output) by one rule,
+node's input (for an until predicate, the loop's last output; for an `emitItems` hook,
+the node's input or output) by one rule,
 `readInput`:
 
 - A string is parsed as JSON when it parses; otherwise the raw string is the
@@ -122,13 +122,14 @@ an object to carry them as strings.
 
 ### `emitItems`
 
-An `emitItems` expression's result is the value the node emits, read by its `as`
-(spec 26 § Emitting items). With `as: "text"` (the default) it becomes the
-message text, written the way `compute` writes output. With `as: "items"` it
-must be an item or a list of items. In both, no value emits nothing instead of
-failing: emitting is optional, so an `emitItems` that reads `n % 2 = 0 ? 'even'`
-emits on even iterations and stays quiet on odd ones. A function still fails
-with `EXPRESSION_FAILED`.
+An `emitItems` hook's result is what the node emits (spec 26 § Emitting items).
+`onStart` gives one event of the node's custom item and `onDone` its final
+fields; without an item, `onDone` gives message text, written the way `compute`
+writes output. Both read their value by the input rule: `onStart` the node's
+input, `onDone` its output. In both, no value emits nothing instead of failing:
+emitting is optional, so an `onDone` that reads `n % 2 = 0 ? 'even'` emits on
+even iterations and stays quiet on odd ones. A function still fails with
+`EXPRESSION_FAILED`.
 
 ### Tests
 
@@ -192,7 +193,7 @@ but the workflow around it can (§ Turing Completeness).
 Syntax is checked when a document is validated, not when an expression first
 runs. After the schema accepts a document, core's `expressionErrors(root)`
 walks the tree, compiles every `compute.expr`, route `expr`, until `expr`
-(including those nested in `any` and `all`), and `emitItems` `expr`, and lists one message per
+(including those nested in `any` and `all`), and `emitItems` `onStart`/`onDone`, and lists one message per
 expression that does not parse. `parseAndRunWorkflow` and `dynamicWorkflow`
 treat a non-empty list as a validation failure, so a planner gets syntax errors
 back in the same revision loop as schema errors.

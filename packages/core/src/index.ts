@@ -15,6 +15,8 @@ export { createOpenRouterEmbed } from './adapters/openrouter';
 //#region Builders
 
 /** @public */
+export { isCustomItem, isCustomItemEvent } from '@noetic-tools/types';
+/** @public */
 export type { AcpAgentToolOptions } from './builders/acp-agent-tool';
 /** @public */
 export { acpAgentTool } from './builders/acp-agent-tool';
@@ -26,6 +28,8 @@ export { context } from './builders/context-builder';
 export type { ConditionalOpts, InParallelOpts } from './builders/control-flow-builders';
 /** @public */
 export { conditional, inParallel } from './builders/control-flow-builders';
+/** @public */
+export { customItem } from './builders/custom-item';
 /** @public */
 export { decide, routeSwitch } from './builders/decide-builders';
 /** @public */
@@ -57,7 +61,11 @@ export type { HydrationContext } from './builders/workflow-hydrator';
 /** @public */
 export { hydrateNode, hydrateWorkflow } from './builders/workflow-hydrator';
 /** @public */
-export type { WorkflowOpts } from './builders/workflow-step';
+export type {
+  TypedWorkflowStep,
+  WorkflowDocumentInput,
+  WorkflowOpts,
+} from './builders/workflow-step';
 /** @public */
 export { workflow } from './builders/workflow-step';
 
@@ -289,6 +297,7 @@ export type {
   SubflowWorkflowNode,
   UntilPredicate,
   WithContextWorkflowNode,
+  WorkflowCustomItem,
   WorkflowDocument,
   WorkflowEmitItems,
   WorkflowNode,
@@ -575,8 +584,27 @@ export { LedgerEntryKind, SteerAction, SteeringAction, SteerPoint } from '@noeti
 
 /** @public */
 export type {
+  CustomItem,
+  CustomItemEventOf,
+  CustomItemMap,
+  CustomItemOf,
+  CustomItemStreamEvent,
+  CustomItemsBrand,
+  CustomItemType,
+  CustomStreamingItem,
+  DeclaredItems,
+  DeepReadonly,
+  DocumentCustomItems,
+  EmitHook,
+  EmitHookResult,
   ExecuteStepFn,
+  FromJsonSchema,
+  InferShape,
+  ItemShape,
+  JsonSchema,
   MergeFn,
+  PlainEmitHook,
+  RunCodeExecute,
   SettleResult,
   Snapshot,
   Step,
@@ -584,6 +612,7 @@ export type {
   StepCallModel,
   StepConditional,
   StepEmitItems,
+  StepEmitItemsConfig,
   StepEmitItemsFn,
   StepEmitItemsOption,
   StepEmitItemsResult,

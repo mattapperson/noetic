@@ -9,6 +9,8 @@
 
 Pure computation. The agent harness can retry freely, cache results, and doesn't need to track token usage.
 
+Like a tool's `execute`, a `runCode` body may be an async generator (or a generator). Its yields are events of the custom item the step's `emitItems` names, streamed as `custom_item_event`; its return value is the step's output. A generator body whose step names no item with an `event` schema throws `CUSTOM_ITEM_HAS_NO_EVENTS` when built. See `34-custom-items` § Generator `runCode`.
+
 Every builder below (and every other step builder) also accepts the `StepReplay` fields from `01-step-type` — `durable` and `replayKey` — and copies them onto the step it builds. See `23a-step-level-resume` § Identity. Each also accepts `emitItems` (`01-step-type` § Emitting items), which adds items to the conversation when the step finishes: by default an assistant message holding its output.
 
 ```typescript

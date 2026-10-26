@@ -50,17 +50,20 @@ Every step interface extends `StepReplay<TContext, I>`, so these fields apply to
 
 ### StepEmitItems
 
-Every step interface also extends `StepEmitItems<TContext, O>`. See [Emitting Items Early](/docs/framework/steps#emitting-items-early).
+Every step interface also extends `StepEmitItems<TContext, I, O, M>`. See [Emitting Items Early](/docs/framework/steps#emitting-items-early) and [Custom Items](/docs/framework/custom-items).
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `emitItems` | `StepEmitItemsOption<TContext, O>` | no | What to add to the conversation when the step finishes. The items are appended to the item log and streamed as `item_appended` at once. A step that throws emits nothing. A replay streams them again only under the harness's `emitItemsOnReplay`. |
+| `emitItems` | `StepEmitItemsOption<TContext, I, O, M>` | no | What to add to the conversation as the step runs. Items are appended to the item log and streamed as `item_appended`; a custom item's events stream as `custom_item_event`. A step that throws emits nothing. A replay streams them again only under the harness's `emitItemsOnReplay`. |
+| `customItems` | `M extends CustomItemMap` | no | Custom items only this step may emit, by name. |
 
 | Type | Definition |
 |---|---|
-| `StepEmitItemsOption<TContext, O>` | `boolean \| StepEmitItemsFn<TContext, O>`. `true` emits the output as an assistant message (non-strings as JSON). |
+| `StepEmitItemsOption<TContext, I, O, M>` | `boolean \| StepEmitItemsFn<TContext, O> \| StepEmitItemsConfig<TContext, I, O, M>`. `true` emits the output as a final item. |
 | `StepEmitItemsFn<TContext, O>` | `(output: O, ctx: Context<TContext>) => StepEmitItemsResult \| Promise<StepEmitItemsResult>` |
 | `StepEmitItemsResult` | `string \| Item \| ReadonlyArray<Item> \| undefined`. A string becomes an assistant message; items are appended as given and must pass the context's item schemas; `undefined` or `''` emits nothing. |
+| `StepEmitItemsConfig<TContext, I, O, M>` | `{ item: N; onStart?: EmitHook; onDone?: EmitHook }` for each item name `N` in `M`, with hooks typed by that item, or `{ onStart?, onDone? }` without an item, giving text or standard items. |
+| `EmitHook<TContext, V, E, F>` | `(value: V, ctx) => F \| undefined \| Promise<…> \| Generator<E, F \| undefined> \| AsyncGenerator<E, F \| undefined>`: yields are events `E`, the return value the final fields `F`. |
 
 ## StepRunCode
 

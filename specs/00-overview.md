@@ -88,6 +88,7 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 | `31-acp-server` | `toAcpAgent()`, `serveAcp()`, `ToolAcpDeclaration` | Harness as an ACP agent (server direction) |
 | `32-decide` | `decide()`, `routeSwitch()`, `decisionsHistoryLayer()`, `harness.decide()` | Typed decisions and routing |
 | `33-expressions` | `Expression`, `ExpressionSchema`, `ExpressionLimits`, `DEFAULT_EXPRESSION_LIMITS` | JSONata expressions in JSON workflows (`compute`, route and until `expr`) |
+| `34-custom-items` | `customItem()`, `CustomItem`, `CustomItemOf`, `CustomStreamingItem`, `FromJsonSchema`, `StepEmitItemsConfig` | Declared custom items: typed events and final items a workflow streams, typed through the harness |
 
 ## Dependency Graph
 

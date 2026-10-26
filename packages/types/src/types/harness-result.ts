@@ -35,8 +35,9 @@ export type StreamEvent = SdkStreamEvent | FrameworkStreamEvent;
  *  burst (e.g. queued inbox messages), the response covers the span from the
  *  last-idle point through the point at which idle is reached again.
  */
-export interface HarnessResponse {
-  readonly items: ReadonlyArray<Item>;
+export interface HarnessResponse<TItem = Item> {
+  /** Final items only: standard items plus each declared custom item's final form (spec 34). */
+  readonly items: ReadonlyArray<TItem>;
   readonly usage: {
     readonly inputTokens: number;
     readonly outputTokens: number;

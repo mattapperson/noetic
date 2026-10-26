@@ -27,12 +27,38 @@ The `execute` function receives two arguments:
 
 The return value becomes the output of the step, passed to whatever comes next.
 
+Like a tool's `execute`, it may also be an async generator. Its yields stream as events of the [custom item](/docs/framework/custom-items) the step's `emitItems` names, and its return value is still the output:
+
+```ts
+import { customItem, runCode } from '@noetic-tools/core';
+import { z } from 'zod';
+
+const page = customItem({
+  type: 'myapp:page',
+  event: z.object({ url: z.string() }),
+  output: z.object({ count: z.number() }),
+});
+
+const fetchAll = runCode({
+  id: 'fetch-all',
+  customItems: { page },
+  emitItems: { item: 'page', onDone: (count: number) => ({ count }) },
+  async *execute(urls: string[]) {
+    for (const url of urls) {
+      yield { url };
+    }
+    return urls.length;
+  },
+});
+```
+
 ## Type Signature
 
 ```ts
 type RunCodeStepOptions<TContext, I, O> = {
   id: string;
-  execute: (input: I, ctx: Context<TContext>) => Promise<O>;
+  execute: (input: I, ctx: Context<TContext>) =>
+    Promise<O> | AsyncGenerator<unknown, O> | Generator<unknown, O>;
   retry?: RetryPolicy;
 };
 
@@ -50,7 +76,9 @@ declare const stepRunCode: <TContext, I, O>(
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
 | `id` | `string` | Yes | Unique step identifier |
-| `execute` | `(input: I, ctx: Context<TContext>) => Promise<O>` | Yes | The async function to run |
+| `execute` | `RunCodeExecute<TContext, I, O>` | Yes | The async function (or generator) to run. A generator's yields are events of the item `emitItems` names; building one whose step names no item with an `event` schema throws `CUSTOM_ITEM_HAS_NO_EVENTS` |
+| `customItems` | `CustomItemMap` | No | [Custom items](/docs/framework/custom-items) only this step may emit |
+| `emitItems` | `StepEmitItemsOption` | No | What the step emits as it runs. See [Emitting Items Early](/docs/framework/steps#emitting-items-early) |
 | `retry` | `RetryPolicy` | No | Retry configuration on failure |
 | `subprocess` | `SubprocessAdapter` | No | Per-step subprocess adapter override. When set, the interpreter dispatches this step through the given adapter instead of the harness default (resolution order: `detachedSpawn` overrides → `step.subprocess` → `harness.subprocess`) |
 

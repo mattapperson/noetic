@@ -79,6 +79,7 @@ import { cloneWithGuard } from './clone-guard';
 import { collectAllTools, deduplicateTools } from './collect-tools';
 import type { BandedView } from './context-assembly';
 import { anchoringAttributes, prepareBandedView } from './context-assembly';
+import { emitStepEvent, runToReturn } from './emit-items';
 import { trackUsage } from './message-helpers';
 import { wrapModelError } from './model-error';
 import { parseStructuredOutput } from './structured-output';
@@ -111,7 +112,10 @@ export async function executeRunCode<TContext, I, O>(
       });
     }
     try {
-      return await step.execute(input, ctx);
+      // A generator body yields events of the item the step's emitItems names.
+      return frameworkCast<O>(
+        await runToReturn(step.execute(input, ctx), (event) => emitStepEvent(step.id, event, ctx)),
+      );
     } catch (e) {
       // Rethrow cancellation immediately — retrying it would re-run side
       // effects after abort and bury the 'cancelled' kind under step_failed.

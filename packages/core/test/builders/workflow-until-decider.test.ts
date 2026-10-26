@@ -9,6 +9,7 @@ import { parseAndRunWorkflow } from '../../src/builders/dynamic-workflow';
 import type { HydrationContext } from '../../src/builders/workflow-hydrator';
 import { hydrateNode } from '../../src/builders/workflow-hydrator';
 import { AgentHarness } from '../../src/harness/agent-harness';
+import { runToReturn } from '../../src/interpreter/emit-items';
 import type { UntilPredicate, WorkflowNode } from '../../src/schemas/workflow';
 import {
   WorkflowNodeSchema,
@@ -61,7 +62,7 @@ function recordingContext(): {
     executeStep: async (step, input, execCtx) => {
       ran.push(frameworkCast<Step>(step));
       if (step.kind === 'runCode') {
-        return step.execute(input, execCtx);
+        return frameworkCast(await runToReturn(step.execute(input, execCtx), async () => {}));
       }
       return frameworkCast(input);
     },

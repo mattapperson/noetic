@@ -16,7 +16,7 @@ import type { StepLedger } from '../runtime/durable/step-ledger';
 import { REPLAY_KEY_PREFIX } from '../runtime/durable/step-ledger';
 import type { EventBroadcaster } from '../runtime/event-broadcaster';
 import { DetachedHandleImpl } from '../util/detached-handle';
-import { appendReplayed, emitStepItems } from './emit-items';
+import { allowCustomItems, appendReplayed, beginEmitItems, emitStepItems } from './emit-items';
 import { executeAcpAgent } from './execute-acp-agent';
 import {
   executeCallModel,
@@ -417,6 +417,8 @@ export async function execute<TContext = ContextData, I = unknown, O = unknown>(
   /* Resume: a previous run that completed this exact step replays its recorded
    * output instead of re-running it. `ledgerKey`/`ledger` are captured before
    * dispatch and reused by the record below. */
+  // Before replay: a recorded entry may hold this step's custom items.
+  allowCustomItems(step, stepCtx);
   const ledgerKey = resolveLedgerKey(step, input, stepCtx);
   if (ledgerKey === undefined) {
     lane?.skipLedger();
@@ -439,6 +441,7 @@ export async function execute<TContext = ContextData, I = unknown, O = unknown>(
 
   let result: O;
   try {
+    await beginEmitItems(step, input, stepCtx);
     switch (step.kind) {
       case 'runCode':
         result = await dispatchViaAdapter(step, input, stepCtx, stepCtx.id, () =>

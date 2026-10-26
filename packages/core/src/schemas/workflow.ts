@@ -23,6 +23,7 @@ export type {
   SubflowWorkflowNode,
   UntilPredicate,
   WithContextWorkflowNode,
+  WorkflowCustomItem,
   WorkflowDocument,
   WorkflowEmitItems,
   WorkflowGraph,

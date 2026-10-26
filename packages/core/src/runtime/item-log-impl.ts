@@ -5,7 +5,16 @@ export class ItemLogImpl implements ItemLog {
   private readonly _items: Item[] = [];
   private _frozenCache: ReadonlyArray<Item> | null = null;
 
-  constructor(private readonly itemSchemas: ItemSchemaRegistry = defaultItemSchemaRegistry) {}
+  constructor(private itemSchemas: ItemSchemaRegistry = defaultItemSchemaRegistry) {}
+
+  /**
+   * @internal
+   * Validate later appends against `registry`, a superset of the current one: a
+   * context that learns of new item types (a step's custom items) widens its log.
+   */
+  useSchemas(registry: ItemSchemaRegistry): void {
+    this.itemSchemas = registry;
+  }
 
   get items(): ReadonlyArray<Item> {
     if (!this._frozenCache) {

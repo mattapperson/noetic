@@ -41,7 +41,7 @@ const result = await parseAndRunWorkflow({
 | `compute` node | `{ "kind": "compute", "id": "...", "expr": "<JSONata>" }` | Computes the node's output from its input. |
 | `conditional` route | `{ "expr": "<JSONata>", "target": <WorkflowNode> }` | Takes the route when the expression gives `true`. |
 | `loop` until predicate | `{ "kind": "expr", "expr": "<JSONata>" }` | Stops the loop when the expression gives `true`. |
-| any node's `emitItems` | `{ "emitItems": { "expr": "<JSONata>" } }` | Computes what the node emits when it finishes: message text, or items with `"as": "items"`. See [Emitting items](/docs/framework/json-runtime#emitting-items). |
+| any node's `emitItems` | `{ "emitItems": { "onStart": "<JSONata>", "onDone": "<JSONata>" } }` | Computes what the node emits: an event and the final fields of a [custom item](/docs/framework/custom-items), or message text. See [Emitting items](/docs/framework/json-runtime#emitting-items). |
 
 A conditional route carries exactly one of `match` (a substring of the input) or `expr`. Routes of both kinds may mix in one node. The `expr` until predicate works inside `any` and `all` like any other predicate.
 
@@ -69,9 +69,9 @@ For a `compute` node or a route, that is the node's input. For an until predicat
 
 The next node reads JSON text back as structured data, so a chain of `compute` nodes, or a loop whose body is one, carries a state object from step to step. A string result that is itself valid JSON (`"5"`, `"true"`) reads back as that value at the next node, so keep strings inside an object to carry them as strings.
 
-### `emitItems` value
+### `emitItems` hooks
 
-An `emitItems` expression reads the node's output and gives what the node emits. By default that's message text, written the same way as `compute` output. With `"as": "items"`, it must be an item or a list of items. Either way, no value emits nothing instead of failing. `"n % 2 = 0 ? 'even: ' & $string(n)"` emits on even iterations and stays quiet on odd ones.
+An `emitItems` hook reads the node's input (`onStart`) or output (`onDone`) and gives what the node emits. With an `item`, `onStart` gives one event of it and `onDone` its final fields. Without one, `onDone` gives message text, written the same way as `compute` output. Either way, no value emits nothing instead of failing: `"n % 2 = 0 ? 'even: ' & $string(n)"` emits on even iterations and stays quiet on odd ones.
 
 ### Tests
 
@@ -203,7 +203,7 @@ The limits bound one evaluation, not the whole run.
 | Code | When |
 |---|---|
 | [`WORKFLOW_VALIDATION_FAILED`](/docs/framework/errors#workflow_validation_failed) | An expression does not parse. Syntax is checked when the document is validated, before anything runs, so a `dynamicWorkflow` planner gets the error back in its revision loop. |
-| [`EXPRESSION_FAILED`](/docs/framework/errors#expression_failed) | JSONata raised an error, a `compute` gave no value or a function, an `emitItems` expression gave a function, or a test gave something other than a boolean. |
+| [`EXPRESSION_FAILED`](/docs/framework/errors#expression_failed) | JSONata raised an error, a `compute` gave no value or a function, an `emitItems` hook gave a function, or a test gave something other than a boolean. |
 | [`EXPRESSION_LIMIT_EXCEEDED`](/docs/framework/errors#expression_limit_exceeded) | An evaluation went past a limit. |
 | [`INVALID_EXPRESSION_LIMITS`](/docs/framework/errors#invalid_expression_limits) | An `expressionLimits` value isn't a positive integer or `Infinity`. |
 

@@ -1,3 +1,4 @@
+import type { ZodTypeAny } from 'zod';
 import type {
   AgentHarnessContract,
   Channel,
@@ -91,7 +92,7 @@ export class ContextImpl implements Context<ContextData> {
   readonly harness: AgentHarnessContract;
   readonly layers?: ContextLayer[];
   unifiedTools?: ReadonlyArray<Tool>;
-  readonly itemSchemas?: ItemSchemaRegistry;
+  itemSchemas?: ItemSchemaRegistry;
   readonly cwdState: CwdState;
 
   /** @internal Event broadcaster for streaming — not part of public Context interface. */
@@ -518,6 +519,20 @@ export class ContextImpl implements Context<ContextData> {
           ]
         : [],
     );
+  }
+
+  /**
+   * @internal
+   * Accept items matching `schemas` in this context's log from now on, as a step's
+   * custom items need. Contexts created from this one afterwards inherit the wider
+   * registry; a lane widens the context it views.
+   */
+  allowItems(schemas: ReadonlyArray<ZodTypeAny>): void {
+    const registry = (this.itemSchemas ?? defaultItemSchemaRegistry).extend({
+      items: schemas,
+    });
+    this.itemSchemas = registry;
+    this.log.useSchemas(registry);
   }
 
   /**

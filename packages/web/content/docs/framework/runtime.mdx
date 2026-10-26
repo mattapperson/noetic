@@ -142,11 +142,11 @@ Stream accessors are keyed by `threadId` (via `SessionScope`), are safe to call 
 
 | Method | Returns | Description |
 |---|---|---|
-| `getAgentResponse(scope?)` | `Promise<HarnessResponse>` | Resolves once the session drains its queue and returns to idle. |
+| `getAgentResponse(scope?)` | `Promise<HarnessResponse>` | Resolves once the session drains its queue and returns to idle. `items` holds final items, the graph's declared [custom items](/docs/framework/custom-items) included and typed. |
 | `getTextStream(scope?)` | `AsyncIterable<string>` | Text deltas from the model, across all turns. |
 | `getReasoningStream(scope?)` | `AsyncIterable<string>` | Reasoning token deltas (reasoning models). |
-| `getItemStream(scope?)` | `AsyncIterable<StreamingItem>` | Cumulative item snapshots with `isComplete` flag. Carries the full session log — framework-authored items (turn inputs, tool results, items a step [emits](/docs/framework/steps#emitting-items-early)) included. |
-| `getFullStream(scope?)` | `AsyncIterable<StreamEvent>` | All raw events (SDK + framework) for the session. |
+| `getItemStream(scope?)` | `AsyncIterable<StreamingItem>` | Cumulative item snapshots with `isComplete` flag. Carries the full session log — framework-authored items (turn inputs, tool results, items a step [emits](/docs/framework/steps#emitting-items-early)) included. A [custom item](/docs/framework/custom-items) streams each event in progress, then its final item, under one `id`, typed by the graph's declarations. |
+| `getFullStream(scope?)` | `AsyncIterable<StreamEvent>` | All raw events (SDK + framework) for the session, each custom item event (`custom_item_event`) included. Narrow one with `isCustomItemEvent(event, item)`. |
 | `abort(scope?)` | `Promise<void>` | Cancel the in-flight turn. Queued messages are preserved and trigger a fresh turn once abort completes. |
 | `getStatus(scope?)` | `HarnessStatus` | Snapshot: `{ kind: 'idle' \| 'generating' \| 'aborting' }`. |
 | `getQueueSize(scope?)` | `number` | Count of messages queued on the session. |

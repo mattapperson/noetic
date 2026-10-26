@@ -18,7 +18,7 @@ import { getDefaultRegistrar } from '../types/step-registrar';
  */
 export interface SpawnOpts<TContext = ContextData, I = unknown, O = unknown>
   extends StepReplay<TContext, I>,
-    StepEmitItems<TContext, O> {
+    StepEmitItems<TContext, I, O> {
   id: string;
   child: Step<TContext, I, O>;
   context?: ContextConfig | ContextLayer[];

@@ -35,14 +35,15 @@ interface StepReplay<I> {
 
 They govern step-level resume: a resumed execution replays a recorded step's output instead of running it, keyed by execution path unless `replayKey` names a content key, and skipping the ledger entirely for `durable: false`. See `23a-step-level-resume` § Identity.
 
-Every variant also carries `emitItems` from `StepEmitItems`:
+Every variant also carries `emitItems` and `customItems` from `StepEmitItems`:
 
 ```typescript
 type StepEmitItemsResult = string | Item | ReadonlyArray<Item> | undefined;
 type StepEmitItemsFn<O> = (output: O, ctx: Context) => StepEmitItemsResult | Promise<StepEmitItemsResult>;
 
-interface StepEmitItems<O> {
-  emitItems?: boolean | StepEmitItemsFn<O>;
+interface StepEmitItems<I, O, M extends CustomItemMap> {
+  emitItems?: boolean | StepEmitItemsFn<O> | StepEmitItemsConfig<I, O, M>;  // hook form: spec 34
+  customItems?: M;                                                          // items only this step may emit
 }
 ```
 
@@ -52,7 +53,8 @@ A step's output normally reaches the user only when it is the workflow's final o
 
 What a step emits is one or more `Item`s (`07-context-and-event-log`), not only messages:
 
-- `true` emits the output as an assistant `message` item: a string as is, anything else as its JSON text (`null`/`undefined` emit nothing).
+- `true` emits the output as a final item. An object (or, for a JSON node, JSON text) whose `type` names a custom item in the step's scope becomes that item (`34-custom-items`). Another `Item` is appended as given. A string becomes an assistant `message`; anything else, its JSON text (`null`/`undefined` emit nothing).
+- The hook form `{ item, onStart, onDone }` runs `onStart` with the input as the step starts and `onDone` with the output as it finishes. Naming a declared custom `item`, the hooks stream its events and give its final item (`34-custom-items` § Emitting).
 - A function picks from the output. Text becomes an assistant message; an `Item`, or a list of them, is appended as given. That includes any custom item type the context's item schemas accept: a harness-wide `itemSchemas` extension, named `prefix:name` after the Open Responses convention for extension items. An item no schema accepts fails the step with `item_schema_mismatch`. `undefined` or an empty string emits nothing, so one step can emit on some runs and stay quiet on others.
 - Only a step that completes emits. A step that throws emits nothing, and a `schedule` never completes, so it never emits. Emitting runs inside the dispatch: an item the schemas refuse fails the step, which then gives its dispatch ordinal back like any other failure.
 - `emitItems` is separate from the framework-event filter `emit` on `callModel`, `decide`, and `acp-agent`, and that filter does not gate it: like the SDK item events, emitted items always stream.

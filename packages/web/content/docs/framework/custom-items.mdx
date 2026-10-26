@@ -1,0 +1,149 @@
+---
+title: Custom Items
+description: Declare the items a workflow streams, the way a tool declares its events and output, and get fully typed harness results.
+---
+
+A workflow often has something to show that is neither a model reply nor its final output: a progress bar, a search hit, a draft that fills in as a loop runs. A **custom item** is a declared shape for that. Like a model reply, it streams **events** while a step works on it, then lands as one **final** item. Its events and its final item share one `id`.
+
+The declaration validates every emit, and it types the harness: `getItemStream()`, `getFullStream()`, and `getAgentResponse()` carry exactly the items you declared, narrowed by `type`.
+
+## Declaring an Item
+
+`customItem()` is shaped like `tool()`: an optional `event` schema for what streams, and an `output` schema for the final item's fields.
+
+```ts
+import { customItem } from '@noetic-tools/core';
+import { z } from 'zod';
+
+const progress = customItem({
+  type: 'myapp:progress',
+  description: 'How far a batch job has got.',
+  event: z.object({ done: z.number() }),
+  output: z.object({ done: z.number(), of: z.number() }),
+});
+```
+
+- `type` is `prefix:name`, after the Open Responses convention for extension items. A type without a colon throws [`INVALID_CUSTOM_ITEM_TYPE`](/docs/framework/errors#invalid_custom_item_type).
+- `event` and `output` each take any Standard Schema (Zod, Valibot, …) or a plain JSON Schema object. A JSON Schema validates through `z.fromJSONSchema`, so no code is generated and it runs on Workers. Write it `as const` to get its static type.
+- `output` describes the item's own fields: it must be an object, and must not declare `id` or `type`, which the runtime adds.
+- Without `event`, the item has no events: it arrives only as a final item.
+
+A final item is `{ id, type, ...output }`. Each event is the payload `event` describes.
+
+## Emitting from a Step
+
+Any step builder takes `customItems` (the items only that step may emit) and `emitItems`. The hook form names the item and runs `onStart` with the step's input and `onDone` with its output. A hook is shaped like a tool's `execute`: a plain, async, generator, or async generator function. What it **yields** are events; what it **returns** is the final item's fields.
+
+```ts
+import { customItem, runCode } from '@noetic-tools/core';
+import { z } from 'zod';
+
+const progress = customItem({
+  type: 'myapp:progress',
+  event: z.object({ done: z.number() }),
+  output: z.object({ done: z.number(), of: z.number() }),
+});
+
+const crawl = runCode({
+  id: 'crawl',
+  customItems: { progress },
+  emitItems: {
+    item: 'progress',
+    onDone: (pages: number) => ({ done: pages, of: pages }),
+  },
+  // A generator body's yields are events of the item emitItems names.
+  async *execute(urls: string[]) {
+    for (let i = 0; i < urls.length; i++) {
+      yield { done: i + 1 };
+    }
+    return urls.length;
+  },
+});
+```
+
+- One dispatch owns one id: `onStart`'s events, the body's yields, `onDone`'s events, and the final item all share it.
+- Each event is checked against `event`, and the final item against `output`. A mismatch fails the step with [`INVALID_CUSTOM_ITEM`](/docs/framework/errors#invalid_custom_item).
+- A dispatch gets at most one final item. A dispatch that yields but never returns one stays stream-only: it appears in the streams, never in the log.
+- `emitItems: true` emits the output itself. An object whose `type` names a custom item in scope becomes that item; a string becomes an assistant message.
+
+## In a JSON Workflow
+
+A document declares items in JSON Schema, either at its root (any node may emit them) or on a node (only that node may). A node's hooks are [expressions](/docs/framework/expressions): `onStart`, read against the input, gives one event; `onDone`, read against the output, gives the final fields.
+
+```json
+{
+  "version": 1,
+  "customItems": {
+    "progress": {
+      "type": "myapp:progress",
+      "event": { "type": "object", "properties": { "left": { "type": "number" } }, "required": ["left"] },
+      "output": { "type": "object", "properties": { "left": { "type": "number" } }, "required": ["left"] }
+    }
+  },
+  "root": {
+    "kind": "loop",
+    "id": "drain",
+    "maxIterations": "infinity",
+    "body": {
+      "kind": "compute",
+      "id": "step",
+      "expr": "{ 'n': n - 1 }",
+      "emitItems": { "item": "progress", "onStart": "{ 'left': n }", "onDone": "{ 'left': n }" }
+    },
+    "until": { "kind": "expr", "expr": "n = 0" }
+  }
+}
+```
+
+Each loop iteration is its own dispatch, so each one streams its own event and final item. A node resolves an item name against its own `customItems`, then the root; an unknown name fails with [`UNKNOWN_CUSTOM_ITEM`](/docs/framework/errors#unknown_custom_item). A `subflow` sees its own root's items and the enclosing workflow's, its own winning on a shared name.
+
+### TypeScript and JSON Schema together
+
+`workflow()` takes `customItems` in TypeScript alongside the document. Where both name an item, they must agree on its `type` (else [`CUSTOM_ITEM_MISMATCH`](/docs/framework/errors#custom_item_mismatch)), and the TypeScript schema validates and types it. The document's JSON Schema covers everything else, so a document loaded at run time still validates its items.
+
+## Typed Results
+
+`workflow()` returns a step branded with the items it can emit: its TypeScript `customItems`, plus every item an `as const` document declares. `AgentHarness` reads the brand off `agentGraph`:
+
+```ts
+import { AgentHarness, customItem, isCustomItem, workflow } from '@noetic-tools/core';
+import { z } from 'zod';
+
+const progress = customItem({
+  type: 'myapp:progress',
+  event: z.object({ done: z.number() }),
+  output: z.object({ done: z.number(), of: z.number() }),
+});
+
+const flow = workflow({
+  id: 'flow',
+  document: { version: 1, root: { kind: 'compute', id: 'c', expr: '1' } },
+  customItems: { progress },
+});
+
+const harness = new AgentHarness({ name: 'jobs', params: {}, agentGraph: flow });
+
+for await (const item of harness.getItemStream()) {
+  if (isCustomItem(item, progress)) {
+    if (item.isComplete) {
+      console.log(`finished ${item.done} of ${item.of}`);
+    } else {
+      console.log(`working: ${item.event.done}`);
+    }
+  }
+}
+```
+
+| Method | What it carries |
+|---|---|
+| `getItemStream()` | Every event in progress (`{ id, type, event, isComplete: false }`), then the final item (`isComplete: true`), under one `id`. |
+| `getFullStream()` | Each event raw, as the `custom_item_event` framework event (`data: { id, type, event }`), and the final item as `item_appended`. |
+| `getAgentResponse()` | Final items only, in `items`, beside the standard ones. |
+
+Narrow with `isCustomItem(item, progress)`, which keys on the declaration itself, and `isCustomItemEvent(event, progress)` for `getFullStream()`. Comparing `item.type` alone does not narrow, because standard server-tool items (`openrouter:web_search`, …) share the `prefix:name` type space.
+
+A harness whose graph declares no items keeps exactly the types it had before.
+
+## On Resume
+
+A final item is recorded in the step ledger like any other item. A resumed run puts it back on the log quietly; set `emitItemsOnReplay: true` on the harness to stream it again. Events describe work in progress, so they are not recorded or replayed.

@@ -19,6 +19,7 @@
     "runtime",
     "json-runtime",
     "expressions",
+    "custom-items",
     "durability",
     "errors",
     "observability",

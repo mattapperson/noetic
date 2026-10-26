@@ -113,7 +113,17 @@ Wherever Noetic takes an **array of steps** -- `loop({ steps: [...] })`, a JSON 
 
 ### Emitting Items Early
 
-A workflow's output reaches the user only when it ends, unless a step **emits items** first. Every step and JSON node takes `emitItems`. When the step finishes, its items go into the conversation and stream through `getItemStream` at once, so a step inside a loop emits on every iteration. Give it `true` for an assistant message holding the output, or a function returning text, an `Item`, or a list of items (including custom `prefix:name` items the harness's `itemSchemas` accept). It is unrelated to the `emit` event filter on `callModel`/`decide`/`acpAgent`. On resume, replayed steps put their items back quietly; set `emitItemsOnReplay: true` on the harness to stream them again. See `references/api-reference.md`.
+A workflow's output reaches the user only when it ends, unless a step **emits items** first. Every step and JSON node takes `emitItems`; the items go into the conversation and stream through `getItemStream` at once, so a step inside a loop emits on every iteration. `true` emits the output as a final item, and a function returns text or standard items. The hook form `{ item, onStart, onDone }` emits a declared **custom item**.
+
+### Custom Items
+
+`customItem({ type: 'myapp:progress', event, output })` declares an item shape the way `tool()` declares a tool: `event` (optional) is what streams, `output` the final item's fields, each a Standard Schema or JSON Schema.
+- **Where:** declare items on a step (`customItems`, only that step may emit them), on a `workflow()` (`customItems`), or in a JSON document's root or node `customItems` (JSON Schema).
+- **How they stream:** an item streams like a model reply. Hook yields, and a generator `runCode`'s yields, are events (`custom_item_event`); a hook's return value is the final item, under the same `id`.
+- **Typed results:** `new AgentHarness({ agentGraph: flow })` reads the graph's `'~customItems'` brand, typing `getItemStream`, `getFullStream` and `getAgentResponse`. Narrow a result with `isCustomItem(item, progress)` / `isCustomItemEvent(event, progress)`; comparing `item.type` alone cannot narrow.
+- **Resume:** replayed steps put their items back quietly; `emitItemsOnReplay: true` on the harness streams them again.
+
+It is all separate from the `emit` event filter on `callModel`/`decide`/`acpAgent`. See `references/api-reference.md`.
 
 ## How to Build an Agent
 

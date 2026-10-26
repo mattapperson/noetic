@@ -26,25 +26,39 @@ replayKey?: (input: I, ctx: Context<TContext>) => string;
 
 On a durable harness (a storage adapter, or an explicit `checkpointStore`), a resumed run replays each completed step's recorded output, keyed by execution path and checked against a hash of the step's input. `durable: false` keeps a step out of that ledger (never replayed, never recorded, re-run on every resume; children keep their own setting). `replayKey` keys the entry as `key:<replayKey>` instead of the path, so the step replays wherever it runs; dispatches with the same key share one entry. `schedule` is never recorded. A throwing `replayKey` skips the ledger for that dispatch with a warning — the step still runs. Each step runs on its own lane of the context, so concurrent `harness.run` calls on one context keep separate paths; same-id concurrent calls are numbered in dispatch order. JSON workflow nodes take `durable` (boolean) and a declarative `replayKey`: `true` (key on the whole input) or `{ from: ['batchId', ...] }` (key on those top-level properties of the input parsed as JSON, the lookup `over` uses); the hydrator builds `<node id>:<hash>`, so nodes sharing an id share entries and different nodes never do. A `from` key on a non-object input warns (`INVALID_REPLAY_KEY_INPUT`) and runs unreplayed. See spec 23a § Identity and spec 26 § Replay keys.
 
-**Emitting items early (every builder).** Every step builder accepts `emitItems` (`StepEmitItems`), and so does every JSON workflow node. It is separate from the framework-event filter `emit` on `callModel`/`decide`/`step.acpAgent`:
+**Emitting items early (every builder).** Every step builder accepts `emitItems` and `customItems` (`StepEmitItems`), and so does every JSON workflow node. `emitItems` is separate from the framework-event filter `emit` on `callModel`/`decide`/`step.acpAgent`:
 
 ```typescript
-type StepEmitItemsResult = string | Item | ReadonlyArray<Item> | undefined;
-emitItems?: boolean | ((output: O, ctx: Context<TContext>) => StepEmitItemsResult | Promise<StepEmitItemsResult>);
+emitItems?: boolean
+  | ((output: O, ctx) => string | Item | Item[] | undefined | Promise<…>)
+  | { item: N; onStart?: EmitHook<I, Event<N>, Fields<N>>; onDone?: EmitHook<O, Event<N>, Fields<N>> }  // N: a declared item
+  | { onStart?: (input, ctx) => text | items; onDone?: (output, ctx) => text | items };
+customItems?: { [name: string]: CustomItem };   // items only this step may emit
 ```
 
-When the step finishes, the interpreter appends the items to `ctx.itemLog` and emits `item_appended` for each, so they stream through `getItemStream` before the workflow ends. A step in a loop emits on every iteration, and so does a `decide` used as the loop's `until`.
-- **What:** `true` emits the output as an assistant message (non-strings as JSON). A function returns text (an assistant message), an `Item`, or a list of items, including custom `prefix:name` items (Open Responses extension convention) registered through the harness's `itemSchemas: { schemas: { items: [zodSchema] } }`. An unregistered type throws `item_schema_mismatch`. `undefined`/`''` emits nothing.
-- **Failure:** a step that throws emits nothing. An item the schemas refuse fails the step.
-- **Resume:** emitted items land in the step's ledger entry with its other `items`, marked by `streamed` indices that travel up to enclosing entries. A replay puts them back on the log quietly. `emitItemsOnReplay: true` on the `AgentHarness` streams the marked ones again, even when a whole parent replays without its children running. Items appended any other way never re-stream.
-- **JSON:** `"emitItems": true`, or `"emitItems": { "expr"?: "<JSONata on the output>", "as"?: "text" | "items" }`.
-  - No `expr` means the output itself.
-  - No value emits nothing.
-  - With `as: "items"` the value must be an item or a list of items, else `INVALID_EMIT_ITEMS`.
-  - A function result fails with `EXPRESSION_FAILED`.
-  - Syntax is validated with the document, and unknown keys fail validation.
+- **When:** items are appended to `ctx.itemLog` and streamed (`item_appended`) as the step runs, so a step in a loop, or a `decide` used as the loop's `until`, emits on every iteration.
+- **`true`:** emits the output as a final item. An object (for JSON nodes, JSON text) whose `type` names a custom item in scope becomes that item; a string becomes an assistant message.
+- **Hooks:** like a tool's `execute`, an `EmitHook` may be plain, async, a generator or an async generator. Yields are events of `item` (validated against its `event` schema, streamed as `custom_item_event` with `{ id, type, event }`). The return value is its final fields (validated against `output`; the runtime adds `id` and `type`).
+- **One id per dispatch:** onStart events, a generator `runCode`'s yields, onDone events, and the final item all share it.
+- **Limits:** at most one final item per dispatch (`CUSTOM_ITEM_ALREADY_FINAL`); a dispatch with events but no final stays stream-only.
+- **Errors:** `UNKNOWN_CUSTOM_ITEM`, `CUSTOM_ITEM_HAS_NO_EVENTS`, `INVALID_CUSTOM_ITEM`. An unregistered standard item type throws `item_schema_mismatch`. A step that throws emits nothing.
+- **Resume:** emitted items land in the step's ledger entry, marked by `streamed` indices that travel up to enclosing entries. A replay puts them back quietly; `emitItemsOnReplay: true` on the `AgentHarness` streams the marked ones again, even when a whole parent replays.
+- **JSON:** `"emitItems": true | { "item"?, "onStart"?: "<JSONata on the input>", "onDone"?: "<JSONata on the output>" }`. `onStart` needs `item` and gives one event; `onDone` gives the final fields, or message text without `item`; no value emits nothing.
 
-See spec 01 § Emitting items and spec 26 § Emitting items.
+**`customItem({ type, description?, event?, output })`** declares a custom item, shaped like `tool()`.
+- `type` is `prefix:name`, else `INVALID_CUSTOM_ITEM_TYPE`.
+- `event` and `output` take any Standard Schema or a JSON Schema object (validated via `z.fromJSONSchema`, typed via `FromJsonSchema` when written `as const`).
+- `output` must be an object without `id`/`type`, else `INVALID_CUSTOM_ITEM_SHAPE`.
+- JSON documents declare items in a root or node `customItems` map: `{ "<name>": { "type", "event"?, "output" } }`, in JSON Schema.
+- `workflow({ document, customItems })` adds TypeScript declarations. A name in both must share its `type` (`CUSTOM_ITEM_MISMATCH`), and the TypeScript schema wins.
+- `workflow()` returns a `TypedWorkflowStep` branded with every item it can emit (`'~customItems'`, including an `as const` document's), and `AgentHarness` infers `TItem` from `agentGraph`:
+  - `getItemStream()`: `StreamingItem | CustomStreamingItem<TItem>`, where events have `isComplete: false` and the final has `isComplete: true`, same `id`;
+  - `getFullStream()`: adds `CustomItemStreamEvent<TItem>`;
+  - `getAgentResponse()`: `HarnessResponse<Item | CustomItemOf<TItem>>`.
+- Narrow with `isCustomItem(value, item)` / `isCustomItemEvent(event, item)`.
+- See spec 34.
+
+**Generator `runCode`.** `execute` may be an async generator, like a tool's. Yields are events of the item `emitItems` names; the return value is the output. A generator body whose step names no item with an `event` schema throws `CUSTOM_ITEM_HAS_NO_EVENTS` when built.
 
 The optional `subprocess` field makes this specific step run through a different adapter — e.g. `createLocalSubprocessAdapter({storage})` from `@noetic-tools/platform-node` for an out-of-process child, or an in-memory test double for unit tests. Resolution order at dispatch time is `detachedSpawn-overrides.subprocess ?? step.subprocess ?? harness.subprocess`. When omitted, the step uses the harness default.
 

@@ -10,28 +10,22 @@ import type { ContextData, ContextLayer } from '@noetic-tools/context';
 import type {
   AcpAgent,
   Context,
+  CustomItemMap,
   ExecuteStepFn,
-  Item,
   OutputCodec,
   ProcessSubprocessRequest,
   ServerToolSpec,
   Step,
   StepDecide,
-  StepEmitItemsOption,
   SubprocessAdapter,
   Tool,
   ToolContext,
   ToolExecutionContext,
   Until,
 } from '@noetic-tools/types';
-import {
-  frameworkCast,
-  ItemSchema,
-  isServerToolSpec,
-  NoeticConfigError,
-} from '@noetic-tools/types';
+import { frameworkCast, isServerToolSpec, NoeticConfigError } from '@noetic-tools/types';
 import type { ExpressionLimits } from '../expression/jsonata';
-import { compileExpression, compute, computeMaybe, passes, readInput } from '../expression/jsonata';
+import { compileExpression, compute, passes, readInput } from '../expression/jsonata';
 import type {
   CallModelWorkflowNode,
   ConditionalRoute,
@@ -40,7 +34,6 @@ import type {
   SubflowWorkflowNode,
   UntilPredicate,
   WorkflowDocument,
-  WorkflowEmitItems,
   WorkflowNode,
 } from '../schemas/workflow';
 import { all, any } from '../until/combinators';
@@ -51,9 +44,16 @@ import { conditional, inParallel } from './control-flow-builders';
 import { decide, routeSwitch } from './decide-builders';
 import { schedule } from './every';
 import { loop } from './loop-builder';
+import { outputText } from './output-text';
 import { withContext } from './provide-builder';
 import { spawn } from './spawn-builder';
 import { callModel, runCode, step } from './step-builders';
+import {
+  documentScope,
+  everyDocumentItem,
+  hydrateEmitItems,
+  nodeScope,
+} from './workflow-custom-items';
 import { workflowReplayKey } from './workflow-replay-key';
 
 //#region Types
@@ -100,6 +100,11 @@ export interface HydrationContext {
   recursionDepth?: number;
   /** Bounds on each expression evaluation; unset fields use `DEFAULT_EXPRESSION_LIMITS`. */
   expressionLimits?: ExpressionLimits;
+  /**
+   * Custom items the nodes being hydrated may emit (spec 34): the enclosing document's
+   * root scope. Threaded by `hydrateWorkflow` and the subflow hydrator.
+   */
+  customItems?: CustomItemMap;
 }
 
 type NodeHydrator = (
@@ -317,7 +322,7 @@ function hydrateInvokeToolNode(
           lastStepMeta: execCtx.lastStepMeta,
         };
         const result = await resolved.execute(args, toolCtx);
-        return stringifyResult(result);
+        return outputText(result);
       },
     }),
   );
@@ -347,7 +352,7 @@ function hydrateRunCodeNode(
           adapter,
           nodeId: node.id,
           code,
-          input: stringifyResult(input),
+          input: outputText(input),
         });
       },
     }),
@@ -365,7 +370,7 @@ function hydrateComputeNode(
   return frameworkCast(
     runCode({
       id: node.id,
-      execute: async (input: string) => stringifyResult(await compute(expr, readInput(input))),
+      execute: async (input: string) => outputText(await compute(expr, readInput(input))),
     }),
   );
 }
@@ -654,10 +659,10 @@ function hydrateSequenceNode(
       execute: async (input: string, execCtx: Context) => {
         let current: unknown = input;
         for (const child of children) {
-          const childInput = stringifyResult(current);
+          const childInput = outputText(current);
           current = await ctx.executeStep(child, childInput, execCtx);
         }
-        return stringifyResult(current);
+        return outputText(current);
       },
     }),
   );
@@ -726,7 +731,10 @@ function hydrateSubflowNode(
   const resolve = (): Step<ContextData, string, string> => {
     if (!cached) {
       const { doc, childCtx } = resolveSubflowDocument(node, ctx);
-      cached = hydrateNode(suffixNodeIds(doc.root, `-${node.id}`), childCtx);
+      cached = hydrateNode(suffixNodeIds(doc.root, `-${node.id}`), {
+        ...childCtx,
+        customItems: documentScope(doc, ctx.customItems),
+      });
     }
     return cached;
   };
@@ -735,7 +743,7 @@ function hydrateSubflowNode(
       id: node.id,
       execute: async (input: string, execCtx: Context) => {
         const child = resolve();
-        return stringifyResult(await ctx.executeStep(child, node.input ?? input, execCtx));
+        return outputText(await ctx.executeStep(child, node.input ?? input, execCtx));
       },
     }),
   );
@@ -852,7 +860,7 @@ function buildMerge(strategy: 'last' | 'first' | 'concat'): (results: string[]) 
     return (r) => r[0] ?? '';
   }
   if (strategy === 'concat') {
-    return (r) => r.map(stringifyResult).join('\n');
+    return (r) => r.map(outputText).join('\n');
   }
   return (r) => r[r.length - 1] ?? '';
 }
@@ -897,70 +905,6 @@ function parseJsonObject(text: string): unknown {
   } catch {
     return text;
   }
-}
-
-/**
- * The object form of a node's `emitItems` builds an emit function: the value is the
- * `expr` result, or the output itself read as JSON, and no value emits nothing, so one
- * node can emit on some iterations of a loop and stay quiet on others.
- */
-function workflowEmitItems(
-  nodeId: string,
-  option: WorkflowEmitItems,
-  ctx: HydrationContext,
-): StepEmitItemsOption {
-  if (typeof option === 'boolean') {
-    return option;
-  }
-  const where = `emitItems of node '${nodeId}'`;
-  const expr =
-    option.expr === undefined
-      ? undefined
-      : compileExpression(option.expr, where, ctx.expressionLimits);
-  const asItems = option.as === 'items';
-  if (!expr && !asItems) {
-    return true;
-  }
-  return async (output) => {
-    const value = expr ? await computeMaybe(expr, readInput(output)) : readInput(output);
-    if (value === undefined) {
-      return undefined;
-    }
-    return asItems ? itemList(value, where) : stringifyResult(value);
-  };
-}
-
-/**
- * Reads a value as items: one object or a list of them, each with a string `type`.
- * Whether a type is allowed is the item log's call, against the harness's item schemas.
- *
- * @throws `NoeticConfigError` with code `INVALID_EMIT_ITEMS` when the value is not an
- * item or a list of items.
- */
-function itemList(value: unknown, where: string): Item[] {
-  const list = Array.isArray(value)
-    ? value
-    : [
-        value,
-      ];
-  if (!list.every((entry) => ItemSchema.safeParse(entry).success)) {
-    throw new NoeticConfigError({
-      code: 'INVALID_EMIT_ITEMS',
-      message: `The ${where} gave ${JSON.stringify(value)}, which is not an item or a list of items.`,
-      hint: 'With "as": "items", give an object with a string "type" (e.g. { "type": "message", "role": "assistant", ... } or a registered custom type like "myapp:progress"), or a list of them.',
-    });
-  }
-  return frameworkCast<Item[]>(list);
-}
-
-function stringifyResult(value: unknown): string {
-  if (typeof value === 'string') {
-    return value;
-  }
-  if (value === null || value === undefined) {
-    return '';
-  }
-  return JSON.stringify(value);
 }
 
 //#endregion
@@ -1019,7 +963,7 @@ function buildPerItemStep(opts: {
       id: `${forkId}-item-${index}`,
       execute: async (_input: string, execCtx: Context) => {
         const itemInput = JSON.stringify(item);
-        return stringifyResult(await ctx.executeStep(hydratedEach, itemInput, execCtx));
+        return outputText(await ctx.executeStep(hydratedEach, itemInput, execCtx));
       },
     }),
   );
@@ -1130,7 +1074,7 @@ async function runCodeViaSubprocess(opts: {
     spawned: adapter.spawn(request),
   });
   const result = await handle.await();
-  return stringifyResult(result);
+  return outputText(result);
 }
 
 //#endregion
@@ -1175,8 +1119,17 @@ export function hydrateNode(
   if (node.replayKey !== undefined) {
     hydrated.replayKey = workflowReplayKey(node.id, node.replayKey);
   }
+  const scope = nodeScope(node, ctx.customItems);
+  if (Object.keys(scope).length > 0) {
+    hydrated.customItems = scope;
+  }
   if (node.emitItems !== undefined) {
-    hydrated.emitItems = workflowEmitItems(node.id, node.emitItems, ctx);
+    hydrated.emitItems = hydrateEmitItems({
+      nodeId: node.id,
+      option: node.emitItems,
+      scope,
+      limits: ctx.expressionLimits,
+    });
   }
   return hydrated;
 }
@@ -1187,13 +1140,26 @@ export function hydrateNode(
  * @public
  * @param doc - Validated workflow document (version 1).
  * @param ctx - Hydration context with tool registry and step executor.
+ * @param customItems - TypeScript declarations of the document's root custom items (spec 34).
  * @returns The root `Step` of the hydrated workflow.
+ * @throws `NoeticConfigError` with code `CUSTOM_ITEM_MISMATCH` when `customItems` and the document give one name different types.
  */
 export function hydrateWorkflow(
   doc: WorkflowDocument,
   ctx: HydrationContext,
+  customItems?: CustomItemMap,
 ): Step<ContextData, string, string> {
-  return hydrateNode(doc.root, ctx);
+  const root = hydrateNode(doc.root, {
+    ...ctx,
+    customItems: documentScope(doc, ctx.customItems, customItems),
+  });
+  // The root's dispatch accepts every item the document declares before anything
+  // runs or replays; keyed by type, they cannot shadow the root's own names.
+  root.customItems = {
+    ...everyDocumentItem(doc),
+    ...root.customItems,
+  };
+  return root;
 }
 
 //#endregion

@@ -29,7 +29,7 @@ import { conditional } from './control-flow-builders';
 /** @public Options for `decide()`. */
 export interface StepDecideOpts<TContext, Q extends DecideQuestions, I = unknown>
   extends StepReplay<TContext, I>,
-    StepEmitItems<TContext, DecideAnswers<Q>> {
+    StepEmitItems<TContext, I, DecideAnswers<Q>> {
   id: string;
   /** Decision model id. Falls back to `harness.config.decisionModel`. */
   model?: Lazy<string, TContext>;

@@ -40,6 +40,8 @@ import {
 import type { DetachedSpawnOverrides } from './deps/interpreter';
 import {
   collectAllTools,
+  collectCustomItems,
+  customItemGates,
   deduplicateTools,
   dispatchStepThroughAdapter,
   execute,
@@ -93,10 +95,16 @@ import type {
   ContextCacheStore,
   ContextData,
   ContextLayer,
+  CustomItem,
+  CustomItemOf,
+  CustomItemStreamEvent,
+  CustomItemsBrand,
+  CustomStreamingItem,
   CwdState,
   DecideRequest,
   DecideResponse,
   DecisionRecord,
+  DeclaredItems,
   DeliveryMode,
   DetachedHandle,
   ExecuteInput,
@@ -189,10 +197,17 @@ export interface AgentEnvironmentConfig {
   subprocess?: SubprocessAdapter;
 }
 
-interface AgentHarnessOpts<TParams extends Record<string, unknown> = Record<string, unknown>> {
+interface AgentHarnessOpts<
+  TParams extends Record<string, unknown> = Record<string, unknown>,
+  TItem extends CustomItem = CustomItem,
+> {
   name: string;
-  /** Root step tree executed for every turn submitted via `execute()`. */
-  agentGraph?: Step<ContextData, string, string>;
+  /**
+   * Root step tree executed for every turn submitted via `execute()`. The custom items
+   * it declares (a `workflow()` step's brand) type `getItemStream`, `getFullStream`,
+   * and `getAgentResponse` (spec 34).
+   */
+  agentGraph?: Step<ContextData, string, string> & CustomItemsBrand<TItem>;
   /** Default context layers applied to every context created via `createContext()` / `execute()`. */
   contextLayers?: ContextLayer[];
   /**
@@ -484,8 +499,10 @@ function resolveCheckpointStore(
  *
  * @public
  */
-export class AgentHarness<TParams extends Record<string, unknown> = Record<string, unknown>>
-  implements AgentHarnessContract<TParams>
+export class AgentHarness<
+  TParams extends Record<string, unknown> = Record<string, unknown>,
+  TItem extends CustomItem = never,
+> implements AgentHarnessContract<TParams>
 {
   readonly config: AgentConfig<TParams>;
   readonly fs: FsAdapter;
@@ -632,7 +649,7 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
    *  access from outside core. */
   readonly itemSchemas: ItemSchemaRegistry;
 
-  constructor(opts: AgentHarnessOpts<TParams>) {
+  constructor(opts: AgentHarnessOpts<TParams, TItem>) {
     const validatedParams = opts.paramsSchema ? opts.paramsSchema.parse(opts.params) : opts.params;
     const environment = opts.environment;
     const storageEnv = environment?.storage;
@@ -686,8 +703,13 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     this.recallCache = createRecallCache();
     this.contextCache = createContextCacheStore();
     this.defaultDeliveryMode = opts.defaultDeliveryMode ?? 'next-turn';
+    // The graph's custom items join before any log is restored or rebuilt (spec 34).
     this.itemSchemas = new ItemSchemaRegistry(opts.itemSchemas?.schemas, {
       strictUnknownExtensions: opts.itemSchemas?.strict ?? true,
+    }).extend({
+      items: opts.agentGraph
+        ? customItemGates(collectCustomItems(frameworkCast<Step>(opts.agentGraph)))
+        : [],
     });
     this.rootCwdState = {
       cwd: opts.initialCwd ?? '/',
@@ -746,14 +768,23 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     return Promise.resolve();
   }
 
-  getAgentResponse(scope?: SessionScope): Promise<HarnessResponse> {
+  /** The turn's response. `items` holds final items: standard ones and the graph's declared custom items. */
+  getAgentResponse(
+    scope?: SessionScope,
+  ): Promise<HarnessResponse<Item | CustomItemOf<DeclaredItems<TItem>>>> {
     const session = this.requireSession(scope);
-    return session.runner.getAgentResponse();
+    return frameworkCast(session.runner.getAgentResponse());
   }
 
-  getItemStream(scope?: SessionScope): AsyncIterable<StreamingItem> {
+  /**
+   * Item snapshots as they stream. A declared custom item streams like a model reply:
+   * each event in progress (`isComplete: false`), then its final item, under one `id`.
+   */
+  getItemStream(
+    scope?: SessionScope,
+  ): AsyncIterable<StreamingItem | CustomStreamingItem<DeclaredItems<TItem>>> {
     const session = this.requireSession(scope);
-    return buildItemStream(session.runner.broadcaster, this.itemSchemas);
+    return frameworkCast(buildItemStream(session.runner.broadcaster, this.itemSchemas));
   }
 
   getTextStream(scope?: SessionScope): AsyncIterable<string> {
@@ -766,7 +797,10 @@ export class AgentHarness<TParams extends Record<string, unknown> = Record<strin
     return filterReasoningStream(session.runner.broadcaster);
   }
 
-  getFullStream(scope?: SessionScope): AsyncIterable<StreamEvent> {
+  /** Every event raw, including each declared custom item's `custom_item_event`. */
+  getFullStream(
+    scope?: SessionScope,
+  ): AsyncIterable<StreamEvent | CustomItemStreamEvent<DeclaredItems<TItem>>> {
     const session = this.requireSession(scope);
     return session.runner.broadcaster;
   }

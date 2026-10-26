@@ -7,6 +7,44 @@
       "type": "number",
       "const": 1
     },
+    "customItems": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1
+      },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "pattern": "^[^:]+:.+$"
+          },
+          "description": {
+            "type": "string"
+          },
+          "event": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "output": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "type",
+          "output"
+        ],
+        "additionalProperties": false
+      }
+    },
     "root": {
       "$ref": "#/$defs/WorkflowNode"
     }
@@ -68,20 +106,58 @@
                 {
                   "type": "object",
                   "properties": {
-                    "expr": {
+                    "item": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "onStart": {
                       "$ref": "#/$defs/Expression"
                     },
-                    "as": {
-                      "type": "string",
-                      "enum": [
-                        "text",
-                        "items"
-                      ]
+                    "onDone": {
+                      "$ref": "#/$defs/Expression"
                     }
                   },
                   "additionalProperties": false
                 }
               ]
+            },
+            "customItems": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "minLength": 1
+              },
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "pattern": "^[^:]+:.+$"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "event": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  },
+                  "output": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "type",
+                  "output"
+                ],
+                "additionalProperties": false
+              }
             },
             "model": {
               "type": "string"
@@ -248,20 +324,58 @@
                 {
                   "type": "object",
                   "properties": {
-                    "expr": {
+                    "item": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "onStart": {
                       "$ref": "#/$defs/Expression"
                     },
-                    "as": {
-                      "type": "string",
-                      "enum": [
-                        "text",
-                        "items"
-                      ]
+                    "onDone": {
+                      "$ref": "#/$defs/Expression"
                     }
                   },
                   "additionalProperties": false
                 }
               ]
+            },
+            "customItems": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "minLength": 1
+              },
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "pattern": "^[^:]+:.+$"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "event": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  },
+                  "output": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "type",
+                  "output"
+                ],
+                "additionalProperties": false
+              }
             },
             "toolName": {
               "type": "string",
@@ -329,20 +443,58 @@
                 {
                   "type": "object",
                   "properties": {
-                    "expr": {
+                    "item": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "onStart": {
                       "$ref": "#/$defs/Expression"
                     },
-                    "as": {
-                      "type": "string",
-                      "enum": [
-                        "text",
-                        "items"
-                      ]
+                    "onDone": {
+                      "$ref": "#/$defs/Expression"
                     }
                   },
                   "additionalProperties": false
                 }
               ]
+            },
+            "customItems": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "minLength": 1
+              },
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "pattern": "^[^:]+:.+$"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "event": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  },
+                  "output": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "type",
+                  "output"
+                ],
+                "additionalProperties": false
+              }
             },
             "execute": {
               "type": "string",
@@ -439,20 +591,58 @@
                 {
                   "type": "object",
                   "properties": {
-                    "expr": {
+                    "item": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "onStart": {
                       "$ref": "#/$defs/Expression"
                     },
-                    "as": {
-                      "type": "string",
-                      "enum": [
-                        "text",
-                        "items"
-                      ]
+                    "onDone": {
+                      "$ref": "#/$defs/Expression"
                     }
                   },
                   "additionalProperties": false
                 }
               ]
+            },
+            "customItems": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "minLength": 1
+              },
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "pattern": "^[^:]+:.+$"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "event": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  },
+                  "output": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "type",
+                  "output"
+                ],
+                "additionalProperties": false
+              }
             },
             "expr": {
               "$ref": "#/$defs/Expression"
@@ -512,20 +702,58 @@
                 {
                   "type": "object",
                   "properties": {
-                    "expr": {
+                    "item": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "onStart": {
                       "$ref": "#/$defs/Expression"
                     },
-                    "as": {
-                      "type": "string",
-                      "enum": [
-                        "text",
-                        "items"
-                      ]
+                    "onDone": {
+                      "$ref": "#/$defs/Expression"
                     }
                   },
                   "additionalProperties": false
                 }
               ]
+            },
+            "customItems": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "minLength": 1
+              },
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "pattern": "^[^:]+:.+$"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "event": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  },
+                  "output": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "type",
+                  "output"
+                ],
+                "additionalProperties": false
+              }
             },
             "routes": {
               "minItems": 1,
@@ -608,20 +836,58 @@
                 {
                   "type": "object",
                   "properties": {
-                    "expr": {
+                    "item": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "onStart": {
                       "$ref": "#/$defs/Expression"
                     },
-                    "as": {
-                      "type": "string",
-                      "enum": [
-                        "text",
-                        "items"
-                      ]
+                    "onDone": {
+                      "$ref": "#/$defs/Expression"
                     }
                   },
                   "additionalProperties": false
                 }
               ]
+            },
+            "customItems": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "minLength": 1
+              },
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "pattern": "^[^:]+:.+$"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "event": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  },
+                  "output": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "type",
+                  "output"
+                ],
+                "additionalProperties": false
+              }
             },
             "model": {
               "type": "string",
@@ -835,20 +1101,58 @@
                 {
                   "type": "object",
                   "properties": {
-                    "expr": {
+                    "item": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "onStart": {
                       "$ref": "#/$defs/Expression"
                     },
-                    "as": {
-                      "type": "string",
-                      "enum": [
-                        "text",
-                        "items"
-                      ]
+                    "onDone": {
+                      "$ref": "#/$defs/Expression"
                     }
                   },
                   "additionalProperties": false
                 }
               ]
+            },
+            "customItems": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "minLength": 1
+              },
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "pattern": "^[^:]+:.+$"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "event": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  },
+                  "output": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "type",
+                  "output"
+                ],
+                "additionalProperties": false
+              }
             },
             "decide": {
               "type": "object",
@@ -897,20 +1201,58 @@
                     {
                       "type": "object",
                       "properties": {
-                        "expr": {
+                        "item": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "onStart": {
                           "$ref": "#/$defs/Expression"
                         },
-                        "as": {
-                          "type": "string",
-                          "enum": [
-                            "text",
-                            "items"
-                          ]
+                        "onDone": {
+                          "$ref": "#/$defs/Expression"
                         }
                       },
                       "additionalProperties": false
                     }
                   ]
+                },
+                "customItems": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "pattern": "^[^:]+:.+$"
+                      },
+                      "description": {
+                        "type": "string"
+                      },
+                      "event": {
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string"
+                        },
+                        "additionalProperties": {}
+                      },
+                      "output": {
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string"
+                        },
+                        "additionalProperties": {}
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "output"
+                    ],
+                    "additionalProperties": false
+                  }
                 },
                 "model": {
                   "type": "string",
@@ -1157,20 +1499,58 @@
                 {
                   "type": "object",
                   "properties": {
-                    "expr": {
+                    "item": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "onStart": {
                       "$ref": "#/$defs/Expression"
                     },
-                    "as": {
-                      "type": "string",
-                      "enum": [
-                        "text",
-                        "items"
-                      ]
+                    "onDone": {
+                      "$ref": "#/$defs/Expression"
                     }
                   },
                   "additionalProperties": false
                 }
               ]
+            },
+            "customItems": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "minLength": 1
+              },
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "pattern": "^[^:]+:.+$"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "event": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  },
+                  "output": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "type",
+                  "output"
+                ],
+                "additionalProperties": false
+              }
             },
             "mode": {
               "type": "string",
@@ -1262,20 +1642,58 @@
                 {
                   "type": "object",
                   "properties": {
-                    "expr": {
+                    "item": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "onStart": {
                       "$ref": "#/$defs/Expression"
                     },
-                    "as": {
-                      "type": "string",
-                      "enum": [
-                        "text",
-                        "items"
-                      ]
+                    "onDone": {
+                      "$ref": "#/$defs/Expression"
                     }
                   },
                   "additionalProperties": false
                 }
               ]
+            },
+            "customItems": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "minLength": 1
+              },
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "pattern": "^[^:]+:.+$"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "event": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  },
+                  "output": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "type",
+                  "output"
+                ],
+                "additionalProperties": false
+              }
             },
             "child": {
               "$ref": "#/$defs/WorkflowNode"
@@ -1354,20 +1772,58 @@
                 {
                   "type": "object",
                   "properties": {
-                    "expr": {
+                    "item": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "onStart": {
                       "$ref": "#/$defs/Expression"
                     },
-                    "as": {
-                      "type": "string",
-                      "enum": [
-                        "text",
-                        "items"
-                      ]
+                    "onDone": {
+                      "$ref": "#/$defs/Expression"
                     }
                   },
                   "additionalProperties": false
                 }
               ]
+            },
+            "customItems": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "minLength": 1
+              },
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "pattern": "^[^:]+:.+$"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "event": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  },
+                  "output": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "type",
+                  "output"
+                ],
+                "additionalProperties": false
+              }
             },
             "child": {
               "$ref": "#/$defs/WorkflowNode"
@@ -1436,20 +1892,58 @@
                 {
                   "type": "object",
                   "properties": {
-                    "expr": {
+                    "item": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "onStart": {
                       "$ref": "#/$defs/Expression"
                     },
-                    "as": {
-                      "type": "string",
-                      "enum": [
-                        "text",
-                        "items"
-                      ]
+                    "onDone": {
+                      "$ref": "#/$defs/Expression"
                     }
                   },
                   "additionalProperties": false
                 }
               ]
+            },
+            "customItems": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "minLength": 1
+              },
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "pattern": "^[^:]+:.+$"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "event": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  },
+                  "output": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "type",
+                  "output"
+                ],
+                "additionalProperties": false
+              }
             },
             "body": {
               "$ref": "#/$defs/WorkflowNode"
@@ -1526,20 +2020,58 @@
                 {
                   "type": "object",
                   "properties": {
-                    "expr": {
+                    "item": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "onStart": {
                       "$ref": "#/$defs/Expression"
                     },
-                    "as": {
-                      "type": "string",
-                      "enum": [
-                        "text",
-                        "items"
-                      ]
+                    "onDone": {
+                      "$ref": "#/$defs/Expression"
                     }
                   },
                   "additionalProperties": false
                 }
               ]
+            },
+            "customItems": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "minLength": 1
+              },
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "pattern": "^[^:]+:.+$"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "event": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  },
+                  "output": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "type",
+                  "output"
+                ],
+                "additionalProperties": false
+              }
             },
             "steps": {
               "minItems": 1,
@@ -1603,20 +2135,58 @@
                 {
                   "type": "object",
                   "properties": {
-                    "expr": {
+                    "item": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "onStart": {
                       "$ref": "#/$defs/Expression"
                     },
-                    "as": {
-                      "type": "string",
-                      "enum": [
-                        "text",
-                        "items"
-                      ]
+                    "onDone": {
+                      "$ref": "#/$defs/Expression"
                     }
                   },
                   "additionalProperties": false
                 }
               ]
+            },
+            "customItems": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "minLength": 1
+              },
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "pattern": "^[^:]+:.+$"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "event": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  },
+                  "output": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "type",
+                  "output"
+                ],
+                "additionalProperties": false
+              }
             },
             "step": {
               "$ref": "#/$defs/WorkflowNode"
@@ -1688,20 +2258,58 @@
                 {
                   "type": "object",
                   "properties": {
-                    "expr": {
+                    "item": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "onStart": {
                       "$ref": "#/$defs/Expression"
                     },
-                    "as": {
-                      "type": "string",
-                      "enum": [
-                        "text",
-                        "items"
-                      ]
+                    "onDone": {
+                      "$ref": "#/$defs/Expression"
                     }
                   },
                   "additionalProperties": false
                 }
               ]
+            },
+            "customItems": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "minLength": 1
+              },
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "pattern": "^[^:]+:.+$"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "event": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  },
+                  "output": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "type",
+                  "output"
+                ],
+                "additionalProperties": false
+              }
             },
             "document": {
               "$ref": "#"
@@ -1767,20 +2375,58 @@
                 {
                   "type": "object",
                   "properties": {
-                    "expr": {
+                    "item": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "onStart": {
                       "$ref": "#/$defs/Expression"
                     },
-                    "as": {
-                      "type": "string",
-                      "enum": [
-                        "text",
-                        "items"
-                      ]
+                    "onDone": {
+                      "$ref": "#/$defs/Expression"
                     }
                   },
                   "additionalProperties": false
                 }
               ]
+            },
+            "customItems": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "minLength": 1
+              },
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "pattern": "^[^:]+:.+$"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "event": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  },
+                  "output": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "type",
+                  "output"
+                ],
+                "additionalProperties": false
+              }
             },
             "agent": {
               "type": "string",
@@ -2309,20 +2955,58 @@
                 {
                   "type": "object",
                   "properties": {
-                    "expr": {
+                    "item": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "onStart": {
                       "$ref": "#/$defs/Expression"
                     },
-                    "as": {
-                      "type": "string",
-                      "enum": [
-                        "text",
-                        "items"
-                      ]
+                    "onDone": {
+                      "$ref": "#/$defs/Expression"
                     }
                   },
                   "additionalProperties": false
                 }
               ]
+            },
+            "customItems": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "minLength": 1
+              },
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "pattern": "^[^:]+:.+$"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "event": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  },
+                  "output": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "type",
+                  "output"
+                ],
+                "additionalProperties": false
+              }
             },
             "model": {
               "type": "string",

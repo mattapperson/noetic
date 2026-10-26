@@ -39,7 +39,7 @@ function provideExecute(): ExecuteStepFn {
     s: {
       kind: string;
       id: string;
-      execute?: (input: I, ctx: Context<TContext>) => Promise<O>;
+      execute?: (input: I, ctx: Context<TContext>) => unknown;
     },
     input: I,
     c: Context<TContext>,
@@ -48,7 +48,7 @@ function provideExecute(): ExecuteStepFn {
       return executeWithContext(frameworkCast<StepWithContext<TContext, I, O>>(s), input, c, fn);
     }
     if (s.kind === 'runCode' && s.execute) {
-      return s.execute(input, c);
+      return frameworkCast<O>(await s.execute(input, c));
     }
     throw new Error(`Unsupported: ${s.kind}`);
   };
@@ -87,7 +87,7 @@ function lifecycleExecute(opts: ExecuteWithContextOpts): ExecuteStepFn {
     s: {
       kind: string;
       id: string;
-      execute?: (input: I, ctx: Context<TContext>) => Promise<O>;
+      execute?: (input: I, ctx: Context<TContext>) => unknown;
     },
     input: I,
     c: Context<TContext>,
@@ -102,7 +102,7 @@ function lifecycleExecute(opts: ExecuteWithContextOpts): ExecuteStepFn {
       );
     }
     if (s.kind === 'runCode' && s.execute) {
-      return s.execute(input, c);
+      return frameworkCast<O>(await s.execute(input, c));
     }
     throw new Error(`Unsupported: ${s.kind}`);
   };

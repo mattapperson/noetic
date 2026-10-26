@@ -7,11 +7,13 @@ import type {
   AcpPermissionHandler,
   AcpPermissionPolicy,
   AcpSessionPolicy,
-  Context,
+  CustomItemMap,
+  CustomItemsBrand,
   Lazy,
   ModelParams,
   OutputCodec,
   RetryPolicy,
+  RunCodeExecute,
   ServerToolSpec,
   StandardSchemaV1,
   StepAcpAgent,
@@ -26,14 +28,16 @@ import type {
 } from '@noetic-tools/types';
 import { isServerToolSpec, NoeticConfigError } from '@noetic-tools/types';
 import { getDefaultRegistrar } from '../types/step-registrar';
+import { checkEmitItems, isGeneratorFunction } from './custom-item';
 
 //#region Types
 
-export interface RunCodeOpts<TContext, I, O>
+export interface RunCodeOpts<TContext, I, O, M extends CustomItemMap = CustomItemMap>
   extends StepReplay<TContext, I>,
-    StepEmitItems<TContext, O> {
+    StepEmitItems<TContext, I, O, M> {
   id: string;
-  execute: (input: I, ctx: Context<TContext>) => Promise<O>;
+  /** Async, or a generator whose yields are events of the item `emitItems` names. */
+  execute: RunCodeExecute<TContext, I, O>;
   retry?: RetryPolicy;
   /**
    * Optional subprocess adapter override. When set, `execute()` is routed
@@ -45,7 +49,7 @@ export interface RunCodeOpts<TContext, I, O>
 
 export interface CallModelOpts<TContext, O, I = unknown>
   extends StepReplay<TContext, I>,
-    StepEmitItems<TContext, O> {
+    StepEmitItems<TContext, I, O> {
   id: string;
   /** Model id. Eager string or `(ctx) => string` getter (resolved at step execution). */
   model: Lazy<string, TContext>;
@@ -75,7 +79,7 @@ export interface CallModelOpts<TContext, O, I = unknown>
 
 export interface InvokeToolOpts<I, O, TContext = ContextData>
   extends StepReplay<TContext, I>,
-    StepEmitItems<TContext, O> {
+    StepEmitItems<TContext, I, O> {
   id: string;
   tool: Tool<StandardSchemaV1<unknown, I>, StandardSchemaV1<unknown, O>>;
   args?: Partial<I>;
@@ -83,7 +87,7 @@ export interface InvokeToolOpts<I, O, TContext = ContextData>
 
 export interface StepAcpAgentOpts<TContext, O, I = unknown>
   extends StepReplay<TContext, I>,
-    StepEmitItems<TContext, O> {
+    StepEmitItems<TContext, I, O> {
   id: string;
   /** An ACP agent adapter, e.g. `claudeCode()` from `@noetic-tools/acp`. Eager or `(ctx) => AcpAgent`. */
   agent: Lazy<AcpAgent, TContext>;
@@ -197,9 +201,14 @@ function validateToolChoice<TContext, O, I>(opts: CallModelOpts<TContext, O, I>)
  * @throws `NoeticConfigError` with code `EMPTY_STEP_ID` if `id` is empty.
  * @throws `NoeticConfigError` with code `MISSING_EXECUTE_FUNCTION` if `execute` is not provided.
  */
-export function runCode<TContext = ContextData, I = unknown, O = unknown>(
-  opts: RunCodeOpts<TContext, I, O>,
-): StepRunCode<TContext, I, O> {
+export function runCode<
+  TContext = ContextData,
+  I = unknown,
+  O = unknown,
+  M extends CustomItemMap = CustomItemMap,
+>(
+  opts: RunCodeOpts<TContext, I, O, M>,
+): StepRunCode<TContext, I, O> & CustomItemsBrand<M[keyof M]> {
   if (!opts.id || opts.id.trim() === '') {
     throw new NoeticConfigError({
       code: 'EMPTY_STEP_ID',
@@ -214,6 +223,7 @@ export function runCode<TContext = ContextData, I = unknown, O = unknown>(
       hint: 'Provide an async execute function, e.g. execute: async (input, ctx) => result.',
     });
   }
+  checkEmitItems(opts.id, opts, isGeneratorFunction(opts.execute));
   const built: StepRunCode<TContext, I, O> = {
     kind: 'runCode',
     ...opts,

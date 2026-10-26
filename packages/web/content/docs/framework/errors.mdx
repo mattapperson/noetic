@@ -494,11 +494,47 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 **Fix:** Feed the node a JSON object holding the `from` properties, or use `"replayKey": true` to key on the whole input.
 
-#### INVALID_EMIT_ITEMS
+#### INVALID_CUSTOM_ITEM_TYPE
 
-**Cause:** A node's `emitItems` uses `"as": "items"`, but the value it read (the `expr` result, or the node's output parsed as JSON) is not an item or a list of items. Each item must be an object with a non-empty string `type`.
+**Cause:** A [custom item](/docs/framework/custom-items) was declared with a `type` that has no `prefix:` part.
 
-**Fix:** Make the expression give an object such as `{ "type": "myapp:progress", "done": 3 }`, or a list of them. A custom type also needs a matching schema in the harness's `itemSchemas`, or appending it fails with `item_schema_mismatch`.
+**Fix:** Name it `prefix:name` after the Open Responses convention for extension items, e.g. `myapp:progress`.
+
+#### INVALID_CUSTOM_ITEM_SHAPE
+
+**Cause:** A custom item's JSON Schema does not load, or its `output` does not describe an object, or declares `id` or `type`.
+
+**Fix:** Give an object schema for `output` and leave out `id` and `type`: the runtime adds both to every final item.
+
+#### CUSTOM_ITEM_MISMATCH
+
+**Cause:** `workflow({ customItems })` and its document declare one item name with different `type`s.
+
+**Fix:** Give both declarations the same `type`, or rename one of them.
+
+#### UNKNOWN_CUSTOM_ITEM
+
+**Cause:** A step's `emitItems.item` names a custom item that is not in its scope: not on the step and, for a JSON node, not at its document's root.
+
+**Fix:** Declare the item on the step (`customItems`) or at the workflow root.
+
+#### CUSTOM_ITEM_HAS_NO_EVENTS
+
+**Cause:** A hook or a generator `runCode` yielded an event, but the step's `emitItems` names no item, or names one declared without an `event` schema.
+
+**Fix:** Name an item with an `event` schema in `emitItems: { item }`, or return the value instead of yielding it.
+
+#### CUSTOM_ITEM_ALREADY_FINAL
+
+**Cause:** One step dispatch gave a custom item a second final item, for example both `onStart` and `onDone` returned one.
+
+**Fix:** Return the final fields from one hook only.
+
+#### INVALID_CUSTOM_ITEM
+
+**Cause:** An event or a final item does not match the schema its custom item declares. The message names the item `type`, the part (`event` or `output`), and the schema's issues.
+
+**Fix:** Make the value match the declared `event` or `output` schema.
 
 ### ACP Agents
 

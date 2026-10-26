@@ -157,10 +157,11 @@ On a harness with a `checkpointStore`, a resumed run replays each completed step
 
 ## Emitting Items Early
 
-A step's output reaches the user only when it is the final output, unless the step emits it. Every step builder accepts `emitItems`. When the step finishes, its items are added to the conversation and stream through `getItemStream` while the rest of the tree runs. A step inside a loop emits on every iteration.
+A step's output reaches the user only when it is the final output, unless the step emits it. Every step builder accepts `emitItems`. Its items are added to the conversation and stream through `getItemStream` while the rest of the tree runs, so a step inside a loop emits on every iteration.
 
-- `emitItems: true` emits the output as an assistant message.
-- A function picks what to emit: text (an assistant message), an `Item`, or a list of items. Custom items work too, if the harness's `itemSchemas` accept their type. Returning `undefined` emits nothing.
+- `emitItems: true` emits the output as a final item: a string as an assistant message, an object whose `type` names a custom item in scope as that item.
+- A function picks what to emit: text (an assistant message), an `Item`, or a list of items. Returning `undefined` emits nothing.
+- The hook form `{ item, onStart, onDone }` runs `onStart` with the input and `onDone` with the output. Naming a declared [custom item](/docs/framework/custom-items), the hooks (plain, async, or generator functions, like a tool's `execute`) yield its events and return its final fields.
 
 ```ts
 import { loop, runCode, until } from '@noetic-tools/core';
