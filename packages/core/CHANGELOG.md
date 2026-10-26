@@ -1,3 +1,11 @@
+## @noetic-tools/core-v5.18.0 (2026-10-26)
+
+* feat(core): graceful stop with cancel(ctx, { drainMs }) ([8fed546](https://github.com/mattapperson/noetic/commit/8fed546)), closes [#145](https://github.com/mattapperson/noetic/issues/145)
+* feat(core): record paid model dispatches and settle cut-off bills ([b64bf61](https://github.com/mattapperson/noetic/commit/b64bf61)), closes [#144](https://github.com/mattapperson/noetic/issues/144)
+* feat(core): report cut-off drain calls by dispatch and generation id ([caa45f7](https://github.com/mattapperson/noetic/commit/caa45f7))
+* fix(core): settle each cut-off bill exactly once and keep billed calls recorded ([f0fb58b](https://github.com/mattapperson/noetic/commit/f0fb58b))
+* fix(core): tighten graceful-stop drains ([da087ca](https://github.com/mattapperson/noetic/commit/da087ca))
+
 ## @noetic-tools/core-v5.17.0 (2026-10-26)
 
 * feat(core): durable steers and steer-triggered recall (#141) ([0c7b185](https://github.com/mattapperson/noetic/commit/0c7b185)), closes [#141](https://github.com/mattapperson/noetic/issues/141)
