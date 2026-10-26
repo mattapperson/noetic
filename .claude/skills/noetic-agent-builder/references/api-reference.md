@@ -2528,6 +2528,17 @@ const doc = validateWorkflow({
 
 Node kinds: `callModel`, `invokeTool`, `runCode`, `conditional`, `inParallel`, `spawn`, `withContext`, `loop`, `sequence`, `schedule`, `subflow`, plus `acp-agent`.
 
+A `conditional` node's `routes` are tried in order; each route has a `target` and exactly one test (the schema rejects both or neither): `match` — a case-insensitive substring of the input's text (an object input, such as a `decide` node's answers, is matched on its string values only) — or `expr` — a JSONata test run against the input parsed as JSON (raw string if it does not parse). An `expr` route is taken on `true`, skipped on `false` or no value (a path that matches nothing); any other result throws `EXPRESSION_FAILED`, and an `expr` that does not parse fails validation with `WORKFLOW_VALIDATION_FAILED`. Both kinds mix in one node; `default` runs when no route passes.
+
+```json
+{ "kind": "conditional", "id": "pick",
+  "routes": [
+    { "expr": "n = 0", "target": { "kind": "compute", "id": "done", "expr": "{ \"total\": total }" } },
+    { "match": "urgent", "target": { "kind": "callModel", "id": "rush", "instructions": "Handle this now." } }
+  ],
+  "default": { "kind": "subflow", "id": "again", "ref": "countdown" } }
+```
+
 A `subflow` node runs another workflow document as one step — inline (`document`) or by name (`ref`, resolved lazily from `HydrationContext.workflows` / `parseAndRunWorkflow`'s `workflows` option). Exactly one of `document`/`ref` is required. Unknown refs raise `UNKNOWN_WORKFLOW_REFERENCE` at execution. Named workflows may recurse (directly or transitively); a `conditional` (or other router) supplies the base case. Each level hydrates lazily with ids suffixed by the calling subflow node's id. `maxRecursionDepth` (default `100`, `Infinity` allowed; on `HydrationContext`, `parseAndRunWorkflow`, and `workflow()`) bounds named-ref resolutions per path — exceeding it throws `WORKFLOW_RECURSION_LIMIT` at execution; an invalid value throws `INVALID_MAX_RECURSION_DEPTH`. There is also a `workflow({ id, document | ref, tools?, layers?, workflows?, maxRecursionDepth?, isolation?: 'inherit' | 'spawn' })` builder (its own `ref` counts as the first resolution) that runs a document as a composable `StepRunCode` (main entry only, not `/portable`).
 
 ### hydrateWorkflow / hydrateNode

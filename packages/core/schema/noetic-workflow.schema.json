@@ -397,7 +397,7 @@
                     "type": "string",
                     "minLength": 1
                   },
-                  "when": {
+                  "expr": {
                     "$ref": "#/$defs/Expression"
                   },
                   "target": {

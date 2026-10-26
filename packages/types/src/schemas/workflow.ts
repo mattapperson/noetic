@@ -406,12 +406,12 @@ export interface ComputeWorkflowNode extends WorkflowNodeBase {
 
 /**
  * A `conditional` route. Supply exactly one test: `match` (case-insensitive
- * substring of the input's text) or `when` (an expression that must give a
+ * substring of the input's text) or `expr` (an expression that must give a
  * boolean; the route is taken on `true`).
  */
 export interface ConditionalRoute {
   match?: string;
-  when?: Expression;
+  expr?: Expression;
   target: WorkflowNode;
 }
 
@@ -623,11 +623,12 @@ const ComputeNodeSchema = z.object({
 const ConditionalRouteSchema = z
   .object({
     match: z.string().min(1).optional(),
-    when: ExpressionSchema.optional(),
+    expr: ExpressionSchema.optional(),
     target: WorkflowNodeRef,
   })
-  .refine((route) => (route.match === undefined) !== (route.when === undefined), {
-    message: "conditional route requires exactly one of 'match' (substring) or 'when' (expression).",
+  .refine((route) => (route.match === undefined) !== (route.expr === undefined), {
+    message:
+      "conditional route requires exactly one of 'match' (substring) or 'expr' (expression).",
   });
 
 const ConditionalNodeSchema = z.object({

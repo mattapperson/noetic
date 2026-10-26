@@ -52,12 +52,12 @@ function expressionsOf(node: WorkflowNode): Found[] {
   }
   if (node.kind === 'conditional') {
     return node.routes.flatMap((route, i) =>
-      route.when === undefined
+      route.expr === undefined
         ? []
         : [
             {
               where: `route ${i} of conditional node '${node.id}'`,
-              source: route.when,
+              source: route.expr,
             },
           ],
     );
