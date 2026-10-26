@@ -2,7 +2,7 @@
 
 > **Module:** `@noetic-tools/context` (source at `packages/context/src/**`); the `ContextLayer` contract is owned by `@noetic-tools/types` (`packages/types/src/types/context-layer.ts`, also at the `@noetic-tools/types/contract` subpath). Both are re-exported by `@noetic-tools/core`.
 > **Depends On:** `07-context-and-event-log` (ItemLog, Item — type import only), `10-observability` (LayerTraceSpan, trace conventions), `04-spawn` (SpawnOpts — referenced in SpawnParams)
-> **Exports:** `ContextLayer`, `ContextLayerHooks`, `ContextScope`, `BudgetConfig`, `Slot`, `InitParams`, `InitResult`, `RecallParams`, `RecallResult`, `StoreParams`, `StoreResult`, `SpawnParams`, `SpawnResult`, `ReturnParams`, `ReturnResult`, `CompleteParams`, `DisposeParams`, `BeforeToolCallParams`, `BeforeToolCallResult`, `AfterModelCallParams`, `AfterModelCallResult`, `OnItemAppendParams`, `OnItemAppendResult`, `RerenderScope`, `ExecutionOutcome`, `ExecutionContext`, `ScopedStorage`, `StorageAdapter`, `ProjectionPolicy`, `LayerTimeouts`, `LayerProvides`, `LayerDataDecl`, `LayerFunctionDecl`, `ContextConfig`, `InferContext`, `InferContextShape`, `layerData`, `layerFunction`, `context`, `storageGetMany`, `LayerPlacement`, `RenderDeltaParams`, `ContextCacheConfig`, `ContextCacheStore`, `ContextEpoch`, `AnchorPin`, `LayerChurn`, `ReanchorReason`
+> **Exports:** `ContextLayer`, `ContextLayerHooks`, `ContextScope`, `BudgetConfig`, `Slot`, `InitParams`, `InitResult`, `RecallParams`, `RecallResult`, `StoreParams`, `StoreResult`, `SpawnParams`, `SpawnResult`, `ReturnParams`, `ReturnResult`, `ParentUpdateParams`, `ParentUpdateResult`, `CompleteParams`, `DisposeParams`, `BeforeToolCallParams`, `BeforeToolCallResult`, `AfterModelCallParams`, `AfterModelCallResult`, `OnItemAppendParams`, `OnItemAppendResult`, `RerenderScope`, `ExecutionOutcome`, `ExecutionContext`, `ScopedStorage`, `StorageAdapter`, `ProjectionPolicy`, `LayerTimeouts`, `LayerProvides`, `LayerDataDecl`, `LayerFunctionDecl`, `ContextConfig`, `InferContext`, `InferContextShape`, `layerData`, `layerFunction`, `context`, `storageGetMany`, `LayerPlacement`, `RenderDeltaParams`, `ContextCacheConfig`, `ContextCacheStore`, `ContextEpoch`, `AnchorPin`, `LayerChurn`, `ReanchorReason`
 
 ## Module Boundary
 
@@ -141,6 +141,7 @@ interface ContextLayerHooks<TState = unknown> {
   afterModelCall?:  (params: AfterModelCallParams<TState>)       => Promise<AfterModelCallResult<TState> | void>;
   onSpawn?:         (params: SpawnParams<TState>)                => Promise<SpawnResult<TState> | null>;
   onReturn?:        (params: ReturnParams<TState>)               => Promise<ReturnResult<TState> | void>;
+  onParentUpdate?:  (params: ParentUpdateParams<TState>)         => Promise<ParentUpdateResult<TState> | void>;
   onComplete?:      (params: CompleteParams<TState>)             => Promise<void>;
   dispose?:         (params: DisposeParams<TState>)              => Promise<void>;
   renderDelta?:     (params: RenderDeltaParams<TState>)          => Promise<string | null>;
@@ -206,6 +207,10 @@ LOOP ITERATION ─────────────────────�
 │   ├─ onSpawn()       Sequential, SLOT ORDER. Items enter the child's log
 │   │                  in that order.
 │   │   ...child...
+│   │   └─ onParentUpdate()  In the child, in the background, after each
+│   │                        parent write of the layer's state. One at a
+│   │                        time per child, in write order. Stops before
+│   │                        onReturn.
 │   └─ onReturn()      Sequential, SLOT ORDER. Pipeline: each layer receives
 │                      the result of the previous layer's onReturn.
 │
@@ -232,6 +237,7 @@ The runtime applies these invariants uniformly across the lifecycle:
 - **`onReturn` requirements.** Only the *child*'s state is required to merge. A parent that never initialized state can still be seeded from the child; `onReturn` is skipped only when the child produced no state.
 - **Child boundaries.** Both `spawn` (spec 04) and each `inParallel` path (spec 03) are child executions and run the `onSpawn`/`onReturn` pair. inParallel paths merge one at a time even when they execute concurrently, so each merge sees the previous path's contribution.
 - **`onSpawn` for init-less layers.** `onSpawn` runs for layers with no `init` hook (state legitimately `undefined`), consistent with `recall`. Only disabled layers (init present, no state) are skipped.
+- **Parent updates.** While a child runs, every write of the parent's state for a layer through the layer state store calls that layer's `onParentUpdate` in the child, in the background; the parent's write never waits for it or fails because of it. Only live `spawn` children and `inParallel` paths take updates, and a layer disabled for the child (including by a `null` `onSpawn`) takes none. Delivery, ordering, and cleanup are specified in `04-spawn` § Parent Updates to Live Children. The layer state store owns the registry of live children (`adopt`, `release`, and `cleanup`).
 - **Opting out of a child.** An `onSpawn` that returns `null` — or throws or times out — sets the same disabled flag for the *child's* execution, so none of the layer's hooks run in that child (init-less layers included). The parent is unaffected. `{ childState: null, items }` is not an opt-out: the items are injected and the child simply has no state for the layer.
 
 ---
@@ -357,6 +363,17 @@ interface ReturnParams<TState> {
 
 interface ReturnResult<TState> {
   parentState: TState;
+}
+
+interface ParentUpdateParams<TState> {
+  parentState: TState;        // the state the parent just wrote
+  childState: TState;         // the child's state when the hook starts
+  childCtx: ExecutionContext;
+}
+
+interface ParentUpdateResult<TState> {
+  childState?: TState;        // written when present ('childState' in result)
+  items?: Item[];             // appended to the child's ItemLog
 }
 
 interface CompleteParams<TState> {
@@ -655,15 +672,11 @@ Layer factories MUST use `satisfies ContextLayer<TState>` (not a return type ann
 
 ## Future Considerations
 
-### Parent Updates to Spawned Children (Not Yet Designed)
-
-An opt-in `onParentUpdate` hook would let a running spawn child react when the parent's copy of the same layer changes. See `04-spawn`, Future Considerations, for the sketch and open questions. It is not part of `ContextLayerHooks`.
-
 ### Narrowed Scope (Not Yet Designed)
 
 A potential optimization: allow a layer to declare interest in a specific subset of a parent scope rather than the whole thing. A specialist layer — one that cares only about user preferences or an active task list — could subscribe only to those keys and avoid receiving or processing unrelated parent context changes.
 
-This would require extending `ContextScope` with a selector variant (e.g. key patterns or glob matching), adding filtering logic to parent-update dispatch (see above), and defining access-control semantics for `ScopedStorage`. The tradeoffs (pattern-matching cost per `store()`, complexity of the access model) need evaluation before committing to a design. Not scheduled.
+This would require extending `ContextScope` with a selector variant (e.g. key patterns or glob matching), adding filtering logic to `onParentUpdate` dispatch, and defining access-control semantics for `ScopedStorage`. The tradeoffs (pattern-matching cost per `store()`, complexity of the access model) need evaluation before committing to a design. Not scheduled.
 
 ---
 
@@ -736,10 +749,13 @@ interface ExecutionContext {
   trace: {
     setAttribute(key: string, value: string | number | boolean): void;
     addEvent(name: string, attributes?: Record<string, string | number | boolean>): void;
+    createSpan?(name: string): ExecutionSpan;
   };
   readLayerState<T>(layerId: string): T | undefined;
 }
 ```
+
+`trace` annotates the span of the context the hook runs for. `createSpan` opens a child of that span, exported to the harness `traceExporter` when its `end()` resolves; every context the runtime builds has it, and the lifecycle uses it to record each hook call as a `layer.hook` span (see `10-observability`, Context Layer Trace Spans). A hand-built context may omit it, and the lifecycle then records `layer.hook` events instead.
 
 `ExecutionContext` includes `readonly fs: FsAdapter` so context layers can perform filesystem operations (e.g., reading config files, persisting state to disk) through the harness's configured adapter.
 
@@ -925,6 +941,7 @@ The ItemLog's rendering is handled by the Projector natively. Context layers get
 | `beforeToolCall`  | Error **logged**. Tool call proceeds as if hook returned `void`.        |
 | `afterModelCall`  | Error **logged**. Turn continues as if hook returned `void`.            |
 | `onSpawn`         | Layer **unavailable** in child. Warning emitted.                        |
+| `onParentUpdate`  | Error **logged**. The update is dropped; the child keeps running and the parent's write stands. |
 | `onReturn`        | Error **logged** as a `spawn_summary_failed` diagnostic plus a `spawn.summary_failed` span event. Parent state and result unchanged — the spawn returns the result as it stood before the hook. |
 | `onComplete`      | Error **logged**.                                                       |
 | `dispose`         | Error **logged**. Must not prevent other layer cleanup.                 |
@@ -943,6 +960,7 @@ interface LayerTimeouts {
   afterModelCall?:  number;  // ms, default 5_000
   onSpawn?:         number;  // ms, default 10_000
   onReturn?:        number;  // ms, default 10_000
+  onParentUpdate?:  number;  // ms, default 5_000
   onComplete?:      number;  // ms, default 30_000
   dispose?:         number;  // ms, default 5_000
   onDecision?:      number;  // ms, default 5_000
@@ -951,7 +969,7 @@ interface LayerTimeouts {
 
 ### Disabled Layer Behavior
 
-A layer disabled via `onInitError: 'disable'` is marked with an explicit disabled flag on the layer state store and skipped by every hook, **including `dispose()`** — nothing was initialized, so there is nothing to tear down. Recorded in trace as `{ layerId, status: 'disabled', reason }`. The flag is per execution and cleared on store cleanup.
+A layer disabled via `onInitError: 'disable'` is marked with an explicit disabled flag on the layer state store and skipped by every hook, **including `dispose()`** — nothing was initialized, so there is nothing to tear down. Each hook the disabled layer defines is recorded as a `layer.hook` record with `status: 'skipped'` (see `10-observability`). The flag is per execution and cleared on store cleanup.
 
 ---
 
@@ -964,7 +982,7 @@ A layer disabled via `onInitError: 'disable'` is marked with an explicit disable
 | `resource`  | Shared via storage regardless of thread. `onSpawn` controls in-layer state.         |
 | `global`    | Shared via storage. `onSpawn` controls in-layer state.                              |
 
-Child state is a **deep clone**. Mutations in child do NOT affect parent. State crosses the boundary only via `onReturn`.
+Child state is a **deep clone**. Mutations in child do NOT affect parent. State crosses the boundary from child to parent only via `onReturn`, and from parent to a running child only via `onParentUpdate`.
 
 ---
 

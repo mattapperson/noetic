@@ -1,11 +1,12 @@
 /**
- * Timed, traced calls into context layer hooks. Each call of a traced hook adds
- * one `layer.hook` event to the span of the context it runs in (`ctx.trace`),
- * shaped as a `LayerTraceSpan`. Events rather than child spans: an
- * `ExecutionContext` can annotate its span but not open one.
+ * Timed, traced calls into context layer hooks. Each call of a traced hook is
+ * recorded as one `layer.hook` record shaped as a `LayerTraceSpan`: a child
+ * span of the context's span when the context can open one
+ * (`ctx.trace.createSpan`), otherwise an event on the context's span. Never
+ * both, so a backend sees each call once.
  */
 
-import type { ExecutionContext, LayerTraceSpan } from '@noetic-tools/types';
+import type { ExecutionContext, ExecutionSpan, LayerTraceSpan } from '@noetic-tools/types';
 
 //#region Types
 
@@ -22,17 +23,39 @@ interface HookCall<T> {
   measure?: (result: T) => Pick<LayerTraceSpan, 'budget' | 'itemCount'>;
 }
 
+type Outcome<T> =
+  | {
+      ok: true;
+      value: T;
+    }
+  | {
+      ok: false;
+      error: unknown;
+    };
+
 //#endregion
 
 //#region Public API
 
-/** Span event recording one layer hook call. Attributes follow `LayerTraceSpan`. */
+/** Name of the span (or span event) recording one layer hook call. */
 export const LAYER_HOOK_EVENT = 'layer.hook';
 
+/** Attributes of a `layer.hook` span. A span times itself, so it carries no duration. */
+export const LayerHookAttr = {
+  LAYER_ID: 'noetic.layer.id',
+  HOOK: 'noetic.layer.hook',
+  STATUS: 'noetic.layer.status',
+  ITEM_COUNT: 'noetic.layer.item_count',
+  BUDGET_ALLOCATED: 'noetic.layer.budget.allocated',
+  BUDGET_USED: 'noetic.layer.budget.used',
+  BUDGET_YIELDED: 'noetic.layer.budget.yielded',
+} as const;
+
 /**
- * Runs a layer hook under its timeout and records a `layer.hook` event for it.
- * Rethrows whatever the hook threw (or the timeout), so callers keep their own
- * failure handling.
+ * Runs a layer hook under its timeout and records a `layer.hook` span (or
+ * event) for it. Rethrows whatever the hook threw (or the timeout), so callers
+ * keep their own failure handling. The span opens before the hook runs and ends
+ * once it settles.
  */
 export async function callHook<T>({
   ctx,
@@ -42,34 +65,39 @@ export async function callHook<T>({
   run,
   measure,
 }: HookCall<T>): Promise<T> {
+  const span = ctx.trace.createSpan?.(LAYER_HOOK_EVENT);
   const started = performance.now();
-  try {
-    const result = await withTimeout(run(), timeout);
-    traceHook(ctx, {
+  const outcome = await settle(withTimeout(run(), timeout));
+  const duration = performance.now() - started;
+  if (outcome.ok) {
+    await traceHook(ctx, span, {
       layerId,
       hook,
-      duration: performance.now() - started,
+      duration,
       status: 'ok',
-      ...measure?.(result),
+      ...measure?.(outcome.value),
     });
-    return result;
-  } catch (e) {
-    traceHook(ctx, {
-      layerId,
-      hook,
-      duration: performance.now() - started,
-      status: e instanceof HookTimeout ? 'timeout' : 'error',
-      error: {
-        message: e instanceof Error ? e.message : String(e),
-      },
-    });
-    throw e;
+    return outcome.value;
   }
+  await traceHook(ctx, span, {
+    layerId,
+    hook,
+    duration,
+    status: outcome.error instanceof HookTimeout ? 'timeout' : 'error',
+    error: {
+      message: outcome.error instanceof Error ? outcome.error.message : String(outcome.error),
+    },
+  });
+  throw outcome.error;
 }
 
 /** Records a hook the layer defines but the lifecycle did not call. */
-export function traceSkipped(ctx: ExecutionContext, layerId: string, hook: TracedHook): void {
-  traceHook(ctx, {
+export async function traceSkipped(
+  ctx: ExecutionContext,
+  layerId: string,
+  hook: TracedHook,
+): Promise<void> {
+  await traceHook(ctx, ctx.trace.createSpan?.(LAYER_HOOK_EVENT), {
     layerId,
     hook,
     duration: 0,
@@ -77,7 +105,7 @@ export function traceSkipped(ctx: ExecutionContext, layerId: string, hook: Trace
   });
 }
 
-/** Runs a hook under a timeout without tracing it, for hooks outside `LayerTraceSpan`. */
+/** Runs a hook under a timeout without tracing it, for calls that must leave no trace (a peek recall). */
 export async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   if (ms <= 0) {
     return promise;
@@ -101,26 +129,78 @@ class HookTimeout extends Error {
   }
 }
 
-/** Span event attributes hold only scalars, so nested fields flatten to dotted keys. */
-function traceHook(ctx: ExecutionContext, span: LayerTraceSpan): void {
-  const attributes: Record<string, string | number | boolean> = {
-    layerId: span.layerId,
-    hook: span.hook,
-    duration: span.duration,
-    status: span.status,
+async function settle<T>(promise: Promise<T>): Promise<Outcome<T>> {
+  try {
+    return {
+      ok: true,
+      value: await promise,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error,
+    };
+  }
+}
+
+async function traceHook(
+  ctx: ExecutionContext,
+  span: ExecutionSpan | undefined,
+  record: LayerTraceSpan,
+): Promise<void> {
+  if (!span) {
+    ctx.trace.addEvent(LAYER_HOOK_EVENT, eventAttributes(record));
+    return;
+  }
+  for (const [key, value] of Object.entries(spanAttributes(record))) {
+    span.setAttribute(key, value);
+  }
+  await span.end();
+}
+
+type Attributes = Record<string, string | number | boolean>;
+
+function spanAttributes(record: LayerTraceSpan): Attributes {
+  const attributes: Attributes = {
+    [LayerHookAttr.LAYER_ID]: record.layerId,
+    [LayerHookAttr.HOOK]: record.hook,
+    [LayerHookAttr.STATUS]: record.status,
   };
-  if (span.itemCount !== undefined) {
-    attributes.itemCount = span.itemCount;
+  if (record.itemCount !== undefined) {
+    attributes[LayerHookAttr.ITEM_COUNT] = record.itemCount;
   }
-  if (span.budget) {
-    attributes['budget.allocated'] = span.budget.allocated;
-    attributes['budget.used'] = span.budget.used;
-    attributes['budget.yielded'] = span.budget.yielded;
+  if (record.budget) {
+    attributes[LayerHookAttr.BUDGET_ALLOCATED] = record.budget.allocated;
+    attributes[LayerHookAttr.BUDGET_USED] = record.budget.used;
+    attributes[LayerHookAttr.BUDGET_YIELDED] = record.budget.yielded;
   }
-  if (span.error) {
-    attributes['error.message'] = span.error.message;
+  if (record.error) {
+    attributes.error = true;
+    attributes['error.message'] = record.error.message;
   }
-  ctx.trace.addEvent(LAYER_HOOK_EVENT, attributes);
+  return attributes;
+}
+
+/** Span event attributes hold only scalars, so nested fields flatten to dotted keys. */
+function eventAttributes(record: LayerTraceSpan): Attributes {
+  const attributes: Attributes = {
+    layerId: record.layerId,
+    hook: record.hook,
+    duration: record.duration,
+    status: record.status,
+  };
+  if (record.itemCount !== undefined) {
+    attributes.itemCount = record.itemCount;
+  }
+  if (record.budget) {
+    attributes['budget.allocated'] = record.budget.allocated;
+    attributes['budget.used'] = record.budget.used;
+    attributes['budget.yielded'] = record.budget.yielded;
+  }
+  if (record.error) {
+    attributes['error.message'] = record.error.message;
+  }
+  return attributes;
 }
 
 //#endregion

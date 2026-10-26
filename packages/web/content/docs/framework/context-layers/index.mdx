@@ -135,6 +135,7 @@ init → recall → [LLM call] → store → ... (loop) → onComplete → dispo
 | `store` | After each LLM response | Extract and persist new knowledge |
 | `onSpawn` | Child agent spawned | Decide what state the child inherits |
 | `onReturn` | Child agent completes | Merge child results back into parent state |
+| `onParentUpdate` | Parent writes the layer's state while a child runs | Let the child react to the parent's change (runs in the child, in the background) |
 | `onDecision` | After each `decide` step | Record a decision's answers. See [Decisions History](/docs/framework/context-layers/decisions-history) |
 | `onComplete` | Agent finishes | Final persistence with outcome metadata |
 | `dispose` | Cleanup | Release resources |
@@ -153,6 +154,7 @@ interface ContextLayerHooks<TState = unknown> {
   store?: (params: StoreParams<TState>) => Promise<StoreResult<TState> | undefined>;
   onSpawn?: (params: SpawnParams<TState>) => Promise<SpawnResult<TState> | null>;
   onReturn?: (params: ReturnParams<TState>) => Promise<ReturnResult<TState> | undefined>;
+  onParentUpdate?: (params: ParentUpdateParams<TState>) => Promise<ParentUpdateResult<TState> | undefined>;
   onDecision?: (params: OnDecisionParams<TState>) => Promise<undefined | { state: TState }>;
   onComplete?: (params: CompleteParams<TState>) => Promise<void | { state: TState }>;
   dispose?: (params: DisposeParams<TState>) => Promise<void>;
@@ -320,6 +322,7 @@ interface LayerTimeouts {
   store?: number;
   onSpawn?: number;
   onReturn?: number;
+  onParentUpdate?: number;
   onComplete?: number;
   dispose?: number;
   beforeToolCall?: number;

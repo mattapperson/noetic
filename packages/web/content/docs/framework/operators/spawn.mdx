@@ -84,6 +84,41 @@ const withContextLayers = spawn({
 });
 ```
 
+## Parent Updates to Live Children
+
+A child can react when its parent changes a layer's state while the child runs: a coordinator revises its plan, or a finished sibling's result is merged into the parent. Give the layer an `onParentUpdate` hook. It runs in the child each time the parent writes that layer's state, with the state the parent wrote and the child's own state. Return `{ childState }` to adopt the change, `{ items }` to tell the child's model about it, or nothing to ignore it.
+
+```ts
+import { createMessage } from '@noetic-tools/core';
+import type { ContextLayer } from '@noetic-tools/core';
+
+interface PlanState {
+  steps: string[];
+}
+
+const sharedPlan: ContextLayer<PlanState> = {
+  id: 'shared-plan',
+  name: 'Shared Plan',
+  slot: 100,
+  scope: 'execution',
+  hooks: {
+    onSpawn: async ({ parentState }) => ({
+      childState: structuredClone(parentState),
+    }),
+    onParentUpdate: async ({ parentState }) => ({
+      childState: structuredClone(parentState),
+      items: [createMessage(`The plan changed: ${parentState.steps.join(', ')}`, 'developer')],
+    }),
+  },
+};
+```
+
+- **Who hears it.** Every live `spawn` child and every running [`inParallel`](/docs/framework/operators/in-parallel) path, from the moment it starts until it returns. `harness.detachedSpawn` runs no `onSpawn`/`onReturn`, so its context hears nothing; a step run in another process by a subprocess adapter hears nothing either.
+- **What counts as a write.** Any write of the parent's state for that layer: `store()` and other hooks that return state, layer functions, and an `onReturn` merge. Mutating a state object in place is not a write.
+- **Background.** The parent's write returns at once and never fails because of a child. Each child takes its updates one at a time, in write order; a delivery is not ordered against the child's own hooks.
+- **Errors.** A hook that throws or exceeds `timeouts.onParentUpdate` (default 5 s) is logged as a diagnostic and the update is dropped. Each call opens a `layer.hook` span under the child's span.
+- **When the child finishes.** It stops taking updates before `onReturn` runs; a delivery already running finishes first, so the merge sees its result.
+
 ## Timeout
 
 Set a maximum execution time for the child. If the timeout is exceeded, the spawn throws an error.

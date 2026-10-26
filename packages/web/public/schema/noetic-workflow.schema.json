@@ -89,6 +89,31 @@
                 "additionalProperties": false
               }
             },
+            "toolChoice": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "auto",
+                    "required",
+                    "none"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "tool": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "tool"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
             "params": {
               "type": "object",
               "properties": {

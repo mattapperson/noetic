@@ -229,6 +229,13 @@ function createForkLayerBridge({
         store: layerStore,
         itemSchemas: opts?.itemSchemas,
       });
+      layerStore.adopt?.({
+        parentExecutionId: parentExecCtx.executionId,
+        ctx: childExecCtxs[index],
+        layers: layers ?? [],
+        log: childContexts[index].itemLog,
+        itemSchemas: opts?.itemSchemas,
+      });
     },
     settle(index, result) {
       return serialize(() =>

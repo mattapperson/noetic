@@ -582,6 +582,10 @@ describe('executeCallModel', () => {
         items,
         ctx: frameworkCast<ExecutionContext>({
           executionId: ctx.id,
+          trace: {
+            setAttribute: () => {},
+            addEvent: () => {},
+          },
         }),
         store: {
           get: <T>() => frameworkCast<T>(null),

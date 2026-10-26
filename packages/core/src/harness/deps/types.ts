@@ -47,6 +47,7 @@ export type {
   StreamingItem,
   SubprocessAdapter,
   Tool,
+  ToolApprover,
   TraceExporter,
 } from '@noetic-tools/types';
 export { SteeringAction } from '@noetic-tools/types';

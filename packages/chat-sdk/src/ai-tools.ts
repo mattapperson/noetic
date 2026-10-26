@@ -33,9 +33,11 @@ export interface FromAiSdkToolOptions {
  * Wrap an AI SDK tool as a Noetic `Tool`. A gated tool first sends an
  * `ApprovalRequest` on the `approvalRequests` channel and waits for its
  * decision on `approvalDecisions`; a rejection or timeout surfaces to the
- * model as a tool error. Vendor tools are invoked with a synthetic
- * `toolCallId` and are not cancelled mid-flight on turn abort (the harness
- * exposes no abort signal to tool executors).
+ * model as a tool error. The wrapper gates the call itself, so the returned
+ * tool does not declare core's `needsApproval` — declaring it would ask the
+ * harness approver (`approveToolCall`) a second time. Vendor tools are
+ * invoked with a synthetic `toolCallId` and are not cancelled mid-flight on
+ * turn abort (the harness exposes no abort signal to tool executors).
  */
 export function fromAiSdkTool(
   name: string,
@@ -57,7 +59,6 @@ export function fromAiSdkTool(
     description: aiTool.description ?? name,
     input,
     output: z.unknown(),
-    needsApproval,
     execute: async (args: unknown, toolCtxRaw: unknown): Promise<unknown> => {
       if (needsApproval) {
         const toolCtx = frameworkCast<ToolExecutionContext>(toolCtxRaw);

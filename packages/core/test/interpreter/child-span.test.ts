@@ -4,6 +4,7 @@ import type { ContextData } from '@noetic-tools/context';
 import { createLayerStateStore, Slot } from '@noetic-tools/context';
 import type {
   AgentHarnessContract,
+  Context,
   StepInParallelAll,
   StepInParallelRace,
   StepLoop,
@@ -19,7 +20,7 @@ import { SpanImpl } from '../../src/observability/span-impl';
 import { InMemoryExporter } from '../../src/observability/trace-exporter';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import { until } from '../../src/until/predicates';
-import { makeLayer, makeMockHarness } from '../_helpers';
+import { makeLayer, makeMockHarness, sleep } from '../_helpers';
 
 //#region Helpers
 
@@ -288,6 +289,85 @@ describe('spawn spans', () => {
       },
     ]);
     expect(root.events.some((e) => e.name === NoeticEvent.SPAWN_SUMMARY_FAILED)).toBe(false);
+
+    // onSpawn runs for the parent, onReturn for the child's spawn span.
+    const hookParents = exporter.getSpansByName(NoeticEvent.LAYER_HOOK).map((s) => [
+      s.attributes.get(NoeticAttr.LAYER_HOOK),
+      s.parentSpanId,
+      s.attributes.get(NoeticAttr.LAYER_STATUS),
+    ]);
+    expect(hookParents).toEqual([
+      [
+        'onSpawn',
+        root.spanId,
+        'ok',
+      ],
+      [
+        'onReturn',
+        span.spanId,
+        'error',
+      ],
+    ]);
+  });
+
+  it('opens onParentUpdate spans under the spawn span', async () => {
+    const { ctx, exporter } = tracedContext();
+    const layerStore = createLayerStateStore();
+    layerStore.set(ctx.id, 'plan', 'v1');
+    const { promise: heard, resolve } = Promise.withResolvers<void>();
+    const layer = makeLayer('plan', {
+      hooks: {
+        onSpawn: async ({ parentState }) => ({
+          childState: parentState,
+        }),
+        onParentUpdate: async ({ parentState }) => {
+          resolve();
+          return {
+            childState: parentState,
+          };
+        },
+      },
+    });
+    const step: StepSpawn<ContextData, string, string> = {
+      kind: 'spawn',
+      id: 'worker',
+      child: {
+        kind: 'runCode',
+        id: 'work',
+        execute: async (_input: string, child: Context<ContextData>): Promise<string> => {
+          layerStore.set(ctx.id, 'plan', 'v2');
+          await heard;
+          await sleep(0);
+          return String(layerStore.get(child.id, 'plan'));
+        },
+      },
+    };
+
+    expect(
+      await executeSpawn(step, '', ctx, execute, {
+        layerStore,
+        parentLayers: [
+          layer,
+        ],
+      }),
+    ).toBe('v2');
+
+    const [spawn] = exporter.getSpansByName('spawn');
+    assert(spawn);
+    const updates = exporter
+      .getSpansByName(NoeticEvent.LAYER_HOOK)
+      .filter((s) => s.attributes.get(NoeticAttr.LAYER_HOOK) === 'onParentUpdate');
+    expect(
+      updates.map((s) => [
+        s.parentSpanId,
+        s.attributes.get(NoeticAttr.LAYER_STATUS),
+      ]),
+    ).toEqual([
+      [
+        spawn.spanId,
+        'ok',
+      ],
+    ]);
   });
 
   it('ends and exports the span when the child fails', async () => {

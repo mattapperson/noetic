@@ -218,7 +218,7 @@ Observability:
 
 1. **`Step<I, O>` is invariant** -- `Step<string, string>` is NOT assignable to `Step<unknown, unknown>`. When a framework API expects `Step` (defaulting to `Step<unknown, unknown>`), use `frameworkCast<Step>(myStep)` from `@noetic-tools/core/unstable` at the boundary. To accept any step in a custom API, use a structural type like `{ kind: Step['kind']; id: string }` instead of `Step` directly
 2. **Tools receive the harness via `toolCtx.harness`** -- never pass the harness as a closure parameter to tool factories
-2. **`spawn` creates context boundaries** -- context layers decide what state crosses via `onSpawn`/`onReturn` hooks
+2. **`spawn` creates context boundaries** -- context layers decide what state crosses via `onSpawn`/`onReturn` hooks; `onParentUpdate` lets a running child react to the parent's later writes
 3. **Detached spawns use `toolCtx.ctx`** -- always use the parent context, never `harness.createContext()`, to preserve depth tracking and thread/resource IDs
 4. **Token/cost metadata lives on `ctx.lastStepMeta`** -- return values are pure business data
 5. **`until.noToolCalls()` checks the outer loop** -- the inner tool call loop is handled by `callModel`

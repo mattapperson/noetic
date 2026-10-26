@@ -66,6 +66,7 @@ interface CallModelOpts<TContext, O, I = unknown> extends StepReplay<TContext, I
   // Allowed tool subset (undefined = all, [] = none). A `ServerToolSpec` is an
   // OpenRouter server tool the provider executes itself (e.g. web search).
   tools?: Lazy<(Tool | ServerToolSpec)[] | undefined, TContext>;
+  toolChoice?: ToolChoice;                         // how the model may use its tools (see Unified Tool Set)
   output?: StandardSchemaV1<unknown, O> | OutputCodec<O>;        // structured output schema or streaming codec (see 28-generative-ui)
   outputJsonSchema?: Record<string, unknown>;     // explicit JSON Schema override for non-Zod `output`
   params?: ModelParams;                            // temperature, topP, etc.
@@ -82,7 +83,13 @@ interface ModelParams {
 
 // ESM literal enum (`ServiceTier.Ultrafast`, ...) plus the matching union type.
 type ServiceTier = 'auto' | 'default' | 'fast' | 'flex' | 'priority' | 'scale' | 'ultrafast';
+
+// ESM literal enum (`ToolChoiceMode.Required`, ...) plus the matching union type.
+type ToolChoiceMode = 'auto' | 'required' | 'none';
+type ToolChoice = ToolChoiceMode | { tool: string };  // { tool } forces one client tool by name
 ```
+
+`toolChoice` sits on the step (and on `CallModelRequest`), not in `ModelParams`: it is read against the step's `tools`, and `ModelParams` holds only sampling knobs forwarded unchanged.
 
 `serviceTier` asks OpenRouter for a processing tier: `fast` is an alias for `priority`; `ultrafast` prefers ultrafast endpoints and falls back to `priority`, then default endpoints. The tier the provider actually served lands on `LLMResponse.serviceTier` (taken from the last round) and on `ctx.lastStepMeta.serviceTier`. Both stay `undefined` when the provider reports no tier — they never echo the requested value, so a mismatch with the request means a fallback happened.
 
@@ -167,18 +174,26 @@ The unified set is the pool every `callModel` step draws from. A step narrows it
 
 Every LLM call that may use a client tool receives the full unified tool set, in the same order, so the tool definitions — part of the provider's prompt-cache prefix — are byte-identical across every step in the tree, whatever each step allows. The restriction travels separately, in two layers:
 
-1. **Request.** The step's allowed subset is sent as the request's tool choice, which the model honours when picking a tool. The mapping from `tools` to `tool_choice`:
+1. **Request.** The step's allowed subset is sent as the request's tool choice, which the model honours when picking a tool. The step's `toolChoice` (default `'auto'`) picks the mode. The mapping from `tools` and `toolChoice` to `tool_choice`:
 
-   | Step `tools` | Tools sent | `tool_choice` |
-   |---|---|---|
-   | omitted | full unified set | not set (provider default, `auto`) |
-   | `[a, b]` | full unified set | `{ type: "allowed_tools", mode: "auto", tools: [{ type: "function", name: "a" }, { type: "function", name: "b" }, ...server tools] }` |
-   | `[]`, or a subset that names no tool in the set | none | not set |
+   | Step `tools` | `toolChoice` | Tools sent | `tool_choice` |
+   |---|---|---|---|
+   | omitted | `'auto'` | full unified set | not set (provider default, `auto`) |
+   | `[a, b]` | `'auto'` | full unified set | `{ type: "allowed_tools", mode: "auto", tools: [{ type: "function", name: "a" }, { type: "function", name: "b" }, ...server tools] }` |
+   | omitted | `'required'` | full unified set | `"required"` |
+   | `[a, b]` | `'required'` | full unified set | `allowed_tools` as above, with `mode: "required"` |
+   | omitted or `[a, b]` | `'none'` | full unified set | `"none"` |
+   | omitted or `[a, b]` | `{ tool: 'a' }` | full unified set | `{ type: "function", name: "a" }` |
+   | `[]`, or a subset that names no tool in the set | any but `{ tool }` | none | not set |
 
-   Function names in `allowed_tools` are the sanitised wire names the model sees. Server tools (`ServerToolSpec` entries, run by the provider) are appended to the tools sent and, when the step restricts, listed in `allowed_tools` as `{ type: "<server tool type>" }`. `mode` is always `auto`: the model may answer without calling a tool.
+   Function names in `tool_choice` are the sanitised wire names the model sees. Server tools (`ServerToolSpec` entries, run by the provider) are appended to the tools sent and, when the step restricts, listed in `allowed_tools` as `{ type: "<server tool type>" }`. A call that sends only server tools gets `"required"` or `"none"` when asked, and no choice otherwise.
+
+   `'required'` and `{ tool }` force a tool call, so they hold only until the model has called a tool: every round after a tool round goes back to `'auto'` (the step's `allowed_tools` restriction, or no choice). Without this each round would force another call until the round cap. `'none'` holds on every round. `'none'` keeps the full tool list rather than dropping it, so the call shares the cache prefix of the steps around it.
+
+   `{ tool }` must name a client tool the call may run. `callModel()` throws `NoeticConfigError` `UNKNOWN_TOOL_CHOICE` at build time when `tools` is an eager array without that tool (server tools cannot be forced); otherwise the harness throws the same error at request time, before anything is sent, when the tool is outside the unified set or the step's restriction.
 2. **Execution.** The harness tool loop (see Tool Call Execution) only runs tools in the allowed subset. A function call naming any other tool — a provider that ignores `allowed_tools`, or a model that names a tool anyway — is answered with an `Error: unknown tool '<name>'` tool result and never runs.
 
-A step with no tools sends none rather than the full set with `tool_choice: "none"`: some models still write tool-call syntax as text when told not to call, so withholding the list is the safer way to say "no tools".
+A step with `tools: []` sends no tools rather than the full set with `tool_choice: "none"`: some models still write tool-call syntax as text when told not to call, so withholding the list is the safer way to say "no tools". `toolChoice: 'none'` is the other trade: it keeps the cache prefix and relies on the provider to honour `"none"`.
 
 ### OpenRouter Integration
 
@@ -187,7 +202,7 @@ The agent harness delegates LLM calls to the `@openrouter/sdk` internally. It:
 1. Merges the step's resolved instructions with any system-role messages extracted from the View, joined by `\n\n` (see What the LLM Actually Sees). If only one source is present, that one is used. If neither is present, `instructions` is `undefined`.
 2. Converts Noetic `Item[]` to OpenResponses input format.
 3. Converts the unified `Tool[]` into SDK tool definitions — name, description and input JSON Schema, with no `execute`, so the SDK never runs a tool itself — and appends any server tools for the provider to run.
-4. Passes the step's restriction as `toolChoice: { type: "allowed_tools", ... }` when the step restricts tools (see Unified Tool Set).
+4. Passes the step's restriction and `toolChoice` as the SDK's `toolChoice` (see Unified Tool Set).
 5. Calls the SDK's `callModel()` once per round of the harness tool loop (see Tool Call Execution).
 6. Converts each round's response back to Noetic `Item[]` and folds the rounds into one `LLMResponse`.
 
@@ -279,7 +294,7 @@ interface Tool<I extends StandardSchemaV1 = StandardSchemaV1, O extends Standard
     args: InferSchemaOutput<I>,
     toolCtx: ToolExecutionContext,
   ) => Promise<InferSchemaOutput<O>> | AsyncGenerator<unknown, InferSchemaOutput<O>>;
-  needsApproval?: boolean;  // declares the call needs human approval; see below
+  needsApproval?: boolean;  // every call needs the harness approver's go-ahead; see below
   context?: ToolContextDeclaration;
 }
 ```
@@ -290,12 +305,35 @@ interface Tool<I extends StandardSchemaV1 = StandardSchemaV1, O extends Standard
 
 ### Approval
 
-`needsApproval: true` declares that a call must be approved by a human before it runs. It is a declaration, not a gate: core records it as the `tool.needs_approval` attribute on each `tool.call` span (`10-observability`) and does not pause on its own. Approval is enforced before execution — never by throwing after the work is done — by one of:
+`needsApproval: true` declares that every call must be approved before it runs. Core enforces it with the harness approver, `AgentHarness({ approveToolCall })` (`08-runtime`), a `ToolApprover`:
 
-- **A `beforeToolCall` gating layer** (`11-context-layer-system`). Both the model-driven path and `invokeTool` run the gate before `execute`; the layer asks its approver (keyed by `BeforeToolCallParams.callId`) and returns `allow` to run the call or `deny` to refuse it. A refused call never executes: on the model-driven path the model receives the denial as an error tool result; an `invokeTool` step throws `NoeticError` kind `steering_denied`.
-- **The tool's own integration.** A wrapper that owns its approval channel checks inside `execute` before doing any work — `fromAiSdkTool` (`29-chat-platform-integration`) sends an approval request, waits for the decision, and fails the call with a tool error when it is refused or times out.
+```typescript
+interface ApproveToolCallParams {
+  toolName: string;
+  toolArgs: unknown;   // the validated args — exactly what execute receives if approved
+  callId?: string;     // same correlation id as BeforeToolCallParams.callId
+  ctx: Context;        // the calling step's context; an approver may park on a channel via ctx.harness.recv
+}
 
-A tool that sets `needsApproval` with neither in place runs without approval.
+type ToolApprover = (params: ApproveToolCallParams) => SteeringDecision | Promise<SteeringDecision>;
+```
+
+The approver speaks the steering vocabulary: `allow` runs the call; `deny` or `guide` refuses it, with `guidance` as the reason. It may be async and may wait as long as it likes — on a channel a human answers, an ask-user service, or a policy lookup.
+
+**Order.** Approval is the last gate before `execute`, after the `beforeToolCall` layers (`11-context-layer-system`):
+
+- **Model-driven calls:** `beforeToolCall` layers → input validation → approver → `execute`.
+- **`invokeTool`:** input validation → `beforeToolCall` layers → approver → `execute`.
+
+A layer refusal stops the call before the approver is asked, so policy runs before a human is bothered. The approver always sees validated arguments.
+
+**Refusal.** A refused call never executes. On the model-driven path the model receives the refusal as an error tool result, the same shape as a gating-layer refusal (`Tool call denied: <guidance>`, or `Tool call redirected: <guidance>` for `guide`). An `invokeTool` step throws `NoeticError` kind `steering_denied` carrying the guidance. An approver that throws refuses the call, with the error message as the guidance.
+
+**No approver.** A harness without `approveToolCall` runs the call unapproved and logs a warning once per tool name, pointing at the option. The span records the outcome (below), so unapproved runs stay visible in traces.
+
+**Tracing.** Each `tool.call` span carries `tool.needs_approval` and, once the call reaches the approval stage, `tool.approval`: `approved`, `denied`, or `none_configured` (`10-observability`). A call stopped by a layer, or one whose tool does not need approval, has no `tool.approval`.
+
+**Self-gating integrations.** A wrapper that owns its approval channel checks inside `execute` before doing any work and does not declare `needsApproval`, so the call is gated exactly once. `fromAiSdkTool` (`29-chat-platform-integration`) is one: it sends an approval request, waits for the decision, and fails the call with a tool error when it is refused or times out.
 
 Tool `input`/`output`/`event` accept any Standard Schema v1 validator. The runtime validates tool input through `validateSchema` (Zod `safeParse` fast path, otherwise `~standard.validate` with sync/Promise support), and the parsed/transformed input is what `execute` receives. As before, `output` and `event` describe and infer tool values but are not runtime validation boundaries. Tool input JSON Schema uses the same Zod → StandardJSONSchemaV1 → explicit `inputJsonSchema` chain. For non-Zod schemas, `inputJsonSchema` overrides the trait and also serves as the fallback if the trait converter throws; a validation-only schema must provide it.
 
@@ -380,9 +418,3 @@ The agent harness needs to treat them differently:
 - **withContext steps** are structural — they configure the context layer environment for a subtree without altering execution semantics or creating context boundaries.
 
 A single `step()` that inspects its arguments loses type safety and forces runtime introspection. Explicit variants mean the TypeScript compiler knows exactly what you're doing.
-
----
-
-## Future Considerations
-
-- **A built-in approval gate.** Core could read `needsApproval` itself and pause before `execute`, asking a harness-level approver and treating refusal like a `deny` decision. Open questions: the approver contract (a channel pair, the ask-user service, or a callback), what happens when no approver is configured, and how it composes with integrations that already gate inside `execute`.

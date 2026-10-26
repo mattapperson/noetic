@@ -24,7 +24,7 @@ type NoeticError =
   | { kind: 'handle_evicted';       handleId: string; stepId: string; gracePeriod: number }
 ```
 
-`steering_denied` is raised when a context layer's `beforeToolCall` or `afterModelCall` hook denies the action (see `11-context-layer-system`); `guidance` carries the layer's reason. `handle_evicted` is raised by `DetachedHandle.await()` when the adapter keeps returning `null` for a handle it previously spawned for longer than `gracePeriod` milliseconds — the handle is gone from the adapter's registry, and waiting longer would poll forever.
+`steering_denied` is raised when a context layer's `beforeToolCall` or `afterModelCall` hook denies the action (see `11-context-layer-system`), or when the harness approver refuses an `invokeTool` call to a tool that declares `needsApproval` (see `02-step-variants`, "Approval"); `guidance` carries the reason. `handle_evicted` is raised by `DetachedHandle.await()` when the adapter keeps returning `null` for a handle it previously spawned for longer than `gracePeriod` milliseconds — the handle is gone from the adapter's registry, and waiting longer would poll forever.
 
 ---
 

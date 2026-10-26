@@ -27,3 +27,31 @@ export interface HarnessJudgmentContract {
     ctx: Context,
   ): Promise<SteeringDecision>;
 }
+
+/**
+ * @public Parameters passed to the harness approver for a call to a tool that
+ * declares `needsApproval`.
+ */
+export interface ApproveToolCallParams {
+  toolName: string;
+  /** The validated arguments — exactly what `execute` receives if the call is approved. */
+  toolArgs: unknown;
+  /** Correlation id of the pending call; see `BeforeToolCallParams.callId`. */
+  callId?: string;
+  /**
+   * The calling step's context. An approver that waits on a human passes it
+   * to `ctx.harness.send` / `ctx.harness.recv` to park on a channel.
+   */
+  ctx: Context;
+}
+
+/**
+ * @public Decides whether a call to a tool that declares `needsApproval` may
+ * run. Configured once per harness (`AgentHarness({ approveToolCall })`) and
+ * consulted after every `beforeToolCall` layer has allowed the call. `allow`
+ * runs the call; any other action refuses it, with `guidance` as the reason.
+ * May be async and may wait — e.g. on a channel a human answers.
+ */
+export type ToolApprover = (
+  params: ApproveToolCallParams,
+) => SteeringDecision | Promise<SteeringDecision>;

@@ -334,6 +334,7 @@ export type {
   StepMeta,
   TokenUsage,
   Tool,
+  ToolChoice,
   ToolContextDeclaration,
   UsageCharge,
 } from '@noetic-tools/types';
@@ -344,6 +345,7 @@ export {
   isZodSchema,
   ServiceTier,
   standardIssuesToZodError,
+  ToolChoiceMode,
   validateSchema,
 } from '@noetic-tools/types';
 
@@ -471,6 +473,8 @@ export type {
   LayerPlacement,
   LayerProvides,
   LayerTimeouts,
+  ParentUpdateParams,
+  ParentUpdateResult,
   ProjectionPolicy,
   RecallParams,
   RecallResult,
@@ -491,6 +495,7 @@ export type {
   ContextScope,
   ExecutionContext,
   ExecutionOutcome,
+  ExecutionSpan,
   LayerCallModelRequest,
 } from '@noetic-tools/types';
 
@@ -546,6 +551,7 @@ export type {
 export type {
   AfterModelCallParams,
   AfterModelCallResult,
+  ApproveToolCallParams,
   BeforeToolCallParams,
   BeforeToolCallResult,
   LedgerEntry,
@@ -553,6 +559,7 @@ export type {
   SteeringDecision,
   SteeringRule,
   SteeringState,
+  ToolApprover,
 } from '@noetic-tools/types';
 /** @public */
 export { LedgerEntryKind, SteeringAction } from '@noetic-tools/types';

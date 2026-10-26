@@ -9,7 +9,7 @@ import type {
   AcpSessionPolicy,
 } from './acp';
 import type { Channel } from './channel';
-import type { ModelParams, RetryPolicy, ServerToolSpec, StepMeta } from './common';
+import type { ModelParams, RetryPolicy, ServerToolSpec, StepMeta, ToolChoice } from './common';
 import type { Context } from './context';
 import type { ContextConfig, ContextData, ContextLayer, ProjectionPolicy } from './context-layer';
 import type { DecideAnswers, DecideQuestions } from './decide';
@@ -183,6 +183,12 @@ export interface StepCallModel<TContext = ContextData, I = unknown, O = unknown>
    * they are resolved per execution.
    */
   tools?: Lazy<(Tool | ServerToolSpec)[] | undefined, TContext>;
+  /**
+   * How the model may use its tools: `'auto'` (default), `'required'`,
+   * `'none'`, or `{ tool: name }` to force one client tool. Applies within the
+   * `tools` restriction; see spec 02, Unified Tool Set.
+   */
+  toolChoice?: ToolChoice;
   /**
    * Structured output: a Standard Schema (assistant text is JSON-parsed and
    * validated) or a streaming `OutputCodec` (fed each text delta, produces

@@ -1,4 +1,4 @@
 {
-  "installCommand": "bun install",
+  "installCommand": "bun install --frozen-lockfile",
   "framework": "nextjs"
 }

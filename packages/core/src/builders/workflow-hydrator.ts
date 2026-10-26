@@ -219,6 +219,7 @@ function hydrateCallModelNode(
     model: node.model ?? 'openai/gpt-4o',
     instructions: node.instructions,
     tools: combined.length > 0 ? combined : undefined,
+    toolChoice: node.toolChoice,
     params: node.params,
     output: resolveOutputCodec(node.output, node.id, ctx),
   });

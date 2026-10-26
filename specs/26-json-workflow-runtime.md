@@ -128,6 +128,7 @@ interface CallModelWorkflowNode {
   model?: string;
   instructions: string;
   tools?: string[];
+  toolChoice?: 'auto' | 'required' | 'none' | { tool: string };
   params?: {
     temperature?: number;
     topP?: number;
@@ -143,6 +144,7 @@ interface CallModelWorkflowNode {
 | `model`        | No       | Model identifier. Falls back to the harness default.     |
 | `instructions` | Yes      | System instructions for this LLM call.                   |
 | `tools`        | No       | Tool names resolved from the hydration context registry.  |
+| `toolChoice`   | No       | How the model may use its tools (spec 02, Unified Tool Set). Defaults to `"auto"`. `{ "tool": name }` must name a client tool in `tools`, or hydration throws `UNKNOWN_TOOL_CHOICE`; without `tools` it is checked against the unified set at request time. |
 | `params`       | No       | Model-level sampling parameters.                         |
 
 ### `invokeTool`
@@ -844,6 +846,10 @@ const WorkflowNodeSchema: z.ZodType<WorkflowNode> = z.lazy(() =>
       model: z.string().optional(),
       instructions: z.string(),
       tools: z.array(z.string()).optional(),
+      toolChoice: z.union([
+        z.enum(ToolChoiceMode),
+        z.object({ tool: z.string().min(1) }),
+      ]).optional(),
       params: z.object({
         temperature: z.number().min(0).max(2).optional(),
         topP: z.number().min(0).max(1).optional(),

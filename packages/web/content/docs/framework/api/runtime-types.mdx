@@ -257,6 +257,7 @@ declare interface AgentConfigShape<
   forceAtomicRecall?: boolean;
   contextCache?: unknown;
   decisionModel?: string;
+  approveToolCall?: ToolApprover;
 }
 ```
 
@@ -271,6 +272,7 @@ declare interface AgentConfigShape<
 | `forceAtomicRecall` | `boolean` | no | Recall every layer atomically regardless of its `recallMode`, disabling cached/eventual recall. |
 | `contextCache` | [`ContextCacheConfig`](/docs/framework/api/context-layer-types#contextcacheconfig) | no | Tuning for prompt-cache anchoring. On by default; pass `{ enabled: false }` to render every layer before history as it did before bands existed. |
 | `decisionModel` | `string` | no | Default model for `decide` steps that set no `model` of their own, e.g. `'typesafe/jev-1.14'`. |
+| `approveToolCall` | `ToolApprover` | no | `(params: { toolName, toolArgs, callId?, ctx }) => SteeringDecision \| Promise<SteeringDecision>`. Asked before every call to a tool that declares `needsApproval`, after the `beforeToolCall` layers allow it; `allow` runs the call, anything else refuses it. Without one, those calls run unapproved and the harness warns once per tool name. See [Human-in-the-Loop Approval](/docs/framework/steps/invoke-tool#human-in-the-loop-approval). |
 
 ## DecideRequest
 

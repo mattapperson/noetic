@@ -401,7 +401,7 @@ export async function execute<TContext = ContextData, I = unknown, O = unknown>(
         result = await executeAcpAgent(step, input, stepCtx, baseCtx.layers);
         break;
       case 'invokeTool':
-        result = await executeInvokeTool(step, input, stepCtx, baseCtx.harness);
+        result = await executeInvokeTool(step, input, stepCtx, baseCtx.harness, baseCtx.layers);
         break;
       case 'decide':
         result = await executeDecide(step, input, stepCtx, baseCtx.layers);

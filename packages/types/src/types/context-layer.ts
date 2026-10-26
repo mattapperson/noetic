@@ -27,6 +27,7 @@ export interface LayerTimeouts {
   store?: number;
   onSpawn?: number;
   onReturn?: number;
+  onParentUpdate?: number;
   onComplete?: number;
   dispose?: number;
   beforeToolCall?: number;
@@ -302,6 +303,23 @@ export interface ReturnResult<TState> {
   result?: unknown;
 }
 
+/** @public Parameters passed to a context layer's `onParentUpdate` hook when the parent writes the layer's state while a child runs. */
+export interface ParentUpdateParams<TState> {
+  /** The state the parent just wrote. */
+  parentState: TState;
+  /** The child's state for the layer when the hook starts. */
+  childState: TState;
+  childCtx: ExecutionContext;
+}
+
+/** @public Value returned by a context layer's `onParentUpdate` hook. */
+export interface ParentUpdateResult<TState> {
+  /** New child state. Detected with `'childState' in result`, so `undefined` clears it. */
+  childState?: TState;
+  /** Items appended to the child's ItemLog. */
+  items?: Item[];
+}
+
 /** @public Parameters passed to a context layer's `onComplete` hook at execution end. */
 export interface CompleteParams<TState> {
   log: ItemLog;
@@ -397,6 +415,14 @@ export interface ContextLayerHooks<TState = unknown> {
   store?(params: StoreParams<TState>): Promise<StoreResult<TState> | undefined>;
   onSpawn?(params: SpawnParams<TState>): Promise<SpawnResult<TState> | null>;
   onReturn?(params: ReturnParams<TState>): Promise<ReturnResult<TState> | undefined>;
+  /**
+   * Called in a live child when its parent writes this layer's state. Runs in
+   * the background: the parent's write never waits for it or fails because of
+   * it. Return nothing to ignore the update.
+   */
+  onParentUpdate?(
+    params: ParentUpdateParams<TState>,
+  ): Promise<ParentUpdateResult<TState> | undefined>;
   onComplete?(params: CompleteParams<TState>): Promise<
     | undefined
     | {

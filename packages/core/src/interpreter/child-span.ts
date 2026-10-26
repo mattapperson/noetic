@@ -6,6 +6,7 @@
  * lost to a no-op span.
  */
 
+import { exportSpans } from '@noetic-tools/context';
 import type { Context, Span } from '@noetic-tools/types';
 import { isNoeticError } from '@noetic-tools/types';
 import { NoeticAttr } from '../observability/genai-attributes';
@@ -55,7 +56,7 @@ function markFailed(span: Span, error: unknown): void {
 
 async function closeChildSpan(parent: Context, span: Span): Promise<void> {
   span.end();
-  await parent.harness.traceExporter.export([
+  await exportSpans(parent.harness.traceExporter, [
     span,
   ]);
 }

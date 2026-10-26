@@ -225,6 +225,60 @@ describe('hydrateNode — llm', () => {
     expect(result.params?.serviceTier).toBe('ultrafast');
   });
 
+  test('carries toolChoice onto the callModel step', () => {
+    const node: WorkflowNode = {
+      kind: 'callModel',
+      id: 'llm-choice',
+      instructions: 'Use tools',
+      tools: [
+        {
+          type: 'test-tool',
+        },
+      ],
+      toolChoice: {
+        tool: 'test-tool',
+      },
+    };
+    const result = hydrateNode(
+      node,
+      makeHydrationContext([
+        makeTestTool(),
+      ]),
+    );
+    assert(result.kind === 'callModel');
+    expect(result.toolChoice).toEqual({
+      tool: 'test-tool',
+    });
+  });
+
+  test('throws UNKNOWN_TOOL_CHOICE when toolChoice forces a tool the node lacks', () => {
+    const node: WorkflowNode = {
+      kind: 'callModel',
+      id: 'llm-bad-choice',
+      instructions: 'Use tools',
+      tools: [
+        {
+          type: 'test-tool',
+        },
+      ],
+      toolChoice: {
+        tool: 'other-tool',
+      },
+    };
+    try {
+      hydrateNode(
+        node,
+        makeHydrationContext([
+          makeTestTool(),
+        ]),
+      );
+      expect.unreachable('should have thrown');
+    } catch (e) {
+      assert(isNoeticConfigError(e));
+      expect(e.code).toBe('UNKNOWN_TOOL_CHOICE');
+    }
+  });
+
   test('resolves tool names from registry', () => {
     const testTool = makeTestTool();
     const node: WorkflowNode = {

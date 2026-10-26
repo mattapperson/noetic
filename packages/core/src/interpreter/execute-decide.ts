@@ -16,7 +16,13 @@ import {
 } from '@noetic-tools/types';
 import { z } from 'zod';
 import { GenAI, NoeticAttr } from '../observability/genai-attributes';
-import { allocateBudgets, assembleView, DECISION_PROJECTION, laneBase } from './action-deps';
+import {
+  allocateBudgets,
+  assembleView,
+  DECISION_PROJECTION,
+  exportSpans,
+  laneBase,
+} from './action-deps';
 import type {
   Context,
   ContextData,
@@ -91,7 +97,7 @@ export async function executeDecide<TContext, I, O>(
     throw e;
   } finally {
     span.end();
-    await baseCtx.harness.traceExporter.export([
+    await exportSpans(baseCtx.harness.traceExporter, [
       span,
     ]);
   }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import type { AgentHarnessContract, StepInvokeTool } from '@noetic-tools/types';
+import { SteeringAction } from '@noetic-tools/types';
 import { z } from 'zod';
 import { execute } from '../../src/interpreter/execute';
 import { NoeticAttr, ToolAttr } from '../../src/observability/genai-attributes';
@@ -15,8 +16,15 @@ function tracedContext(): {
   exporter: InMemoryExporter;
 } {
   const exporter = new InMemoryExporter();
+  const base = makeMockHarness();
   const harness: AgentHarnessContract = {
-    ...makeMockHarness(),
+    ...base,
+    config: {
+      ...base.config,
+      approveToolCall: () => ({
+        action: SteeringAction.Allow,
+      }),
+    },
     traceExporter: exporter,
     createSpan: (name, parent) => new SpanImpl(name, parent),
   };
@@ -76,6 +84,7 @@ describe('invokeTool spans', () => {
     expect(span.endTime).toBeDefined();
     expect(span.attributes.get(ToolAttr.NAME)).toBe('echo');
     expect(span.attributes.get(ToolAttr.NEEDS_APPROVAL)).toBe(true);
+    expect(span.attributes.get(ToolAttr.APPROVAL)).toBe('approved');
     expect(span.attributes.get(NoeticAttr.NODE_ID)).toBe('echo-step');
     expect(span.attributes.has('error')).toBe(false);
   });
@@ -98,6 +107,7 @@ describe('invokeTool spans', () => {
     const [span] = exporter.getSpansByName('tool.call');
     assert(span);
     expect(span.attributes.get(ToolAttr.NEEDS_APPROVAL)).toBe(false);
+    expect(span.attributes.has(ToolAttr.APPROVAL)).toBe(false);
     expect(span.attributes.get(NoeticAttr.ERROR_KIND)).toBe('step_failed');
     expect(span.attributes.get('error')).toBe(true);
   });
