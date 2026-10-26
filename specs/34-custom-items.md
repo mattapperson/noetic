@@ -201,7 +201,7 @@ class AgentHarness<TParams, TItems extends CustomItemMap = {}> {
 
 A programmatic step built with `customItems` (`runCode`) carries the brand of its own items. Composite builders do not union their children's brands, so the items a harness types are those of its `agentGraph` step itself. Make the graph a `workflow()`, or declare the items on the step at its root.
 
-At run time, the harness accepts every custom item declared anywhere in its graph's static tree (and every item a `workflow()` document declares) into its item schemas when it is constructed, so a log that holds them restores and rebuilds before any step runs. Each step also widens its context to its own items when it dispatches, before any replay.
+At run time, the harness accepts every custom item declared anywhere in its graph's static tree (and every item a `workflow()` document declares) into its item schemas when it is constructed, so a log that holds them restores and rebuilds before any step runs. Each step also widens its context to its own items when it dispatches, before any replay. A checkpoint records the custom item types its context accepted (`customItemTypes`, spec 23), so a restore, or a retried run rebuilding from storage, accepts items from a step outside `agentGraph` (one run through `harness.run(step, …)`) before that step runs again.
 
 ---
 

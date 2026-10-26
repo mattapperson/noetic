@@ -35,6 +35,7 @@ interface CheckpointSnapshot {
   askUser: PendingAskUserSnapshot[];
   itemLog: ItemLogSnapshot;               // the run baseline — see below
   occurrences: Record<string, number>;    // dispatch counts at the same moment
+  customItemTypes?: string[];             // custom item types the context accepted (spec 34)
   state?: unknown;                        // ctx.state, when it survives JSON encoding
   usage?: { tokens: TokenUsage; cost: number };
   channels?: ChannelSnapshot[];           // stored state of channels the execution used; topics skipped
@@ -113,8 +114,8 @@ A failing `store.save` is logged via `console.warn` and swallowed. **A failing c
 2. Validates `schemaVersion` (throws `CHECKPOINT_SCHEMA_MISMATCH` on mismatch). A mismatched snapshot is never bypassed in favour of the ledger — the host clears and starts fresh.
 3. Replays `layers` into `harness.layerStateStore` keyed by the original `executionId`, so context projectors and `ctx.context[layerId]` accessors observe continuity across the restart.
    Refills `channels` into the harness's channel store — value-mode values and queued items — for every channel with no live state, and records the execution as a user of each (see `06-channels`, Lifecycle). A snapshot without `channels` restores no channel state.
-4. Re-parses `itemLog.items` through `harness.itemSchemas` to recover typed `Item[]`.
-5. Calls `harness.createContext({...opts, state: opts?.state ?? snapshot.state, items, threadId, resourceId, cwdInit: snapshot.cwd?.current})` to produce a fresh context seeded with the snapshot's item log, state, identity, and cwd.
+4. Re-parses `itemLog.items` through `harness.itemSchemas`, widened to accept `customItemTypes`, to recover typed `Item[]`. A custom item declared on a step outside the harness's `agentGraph` is accepted this way: the step that declares it has not run again yet.
+5. Calls `harness.createContext({...opts, state: opts?.state ?? snapshot.state, threadId, resourceId, cwdInit: snapshot.cwd?.current})`, makes the context accept `customItemTypes`, then appends the parsed items, producing a fresh context seeded with the snapshot's item log, state, identity, and cwd. A run that rebuilds a context from storage before a retry accepts `customItemTypes` the same way.
 6. Seeds the context's dispatch counts from `occurrences` and its tokens and cost from `usage`.
 7. Overrides the returned context's `.id` to the original `executionId` so downstream adapter-correlation keeps working.
 8. Attaches the recovered step ledger (`23a-step-level-resume`) keyed to that same id.

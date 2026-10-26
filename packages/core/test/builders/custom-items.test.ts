@@ -739,6 +739,66 @@ describe('custom items on resume', () => {
   });
 });
 
+describe('custom items from a step outside agentGraph', () => {
+  const noteStep = runCode<ContextData, string, unknown>({
+    id: 'note',
+    customItems: {
+      note,
+    },
+    emitItems: true,
+    execute: async () => ({
+      type: 'myapp:note',
+      text: 'kept',
+    }),
+  });
+
+  function durable(storage: ReturnType<typeof createInMemoryStorage>) {
+    return new AgentHarness({
+      name: 'outside-graph',
+      params: {},
+      environment: {
+        storage: {
+          adapter: storage,
+          checkpointStore: createCheckpointStore({
+            storage,
+          }),
+        },
+      },
+    });
+  }
+
+  it('a new harness restores a log that holds them, before the step runs again', async () => {
+    const storage = createInMemoryStorage();
+    const first = durable(storage);
+    const ctx = first.createContext();
+    await first.run(frameworkCast<Step>(noteStep), 'go', ctx);
+    const restored = await durable(storage).restore(ctx.id);
+    assert(restored);
+    expect(ofType(restored.itemLog.items, 'myapp:note')).toHaveLength(1);
+  });
+
+  it('a retried run rebuilds its log from storage with them in it', async () => {
+    const storage = createInMemoryStorage();
+    const harness = durable(storage);
+    const ctx = harness.createContext();
+    await harness.run(frameworkCast<Step>(noteStep), 'go', ctx);
+    let fail = true;
+    const flaky = runCode<ContextData, string, string>({
+      id: 'flaky',
+      execute: async () => {
+        if (fail) {
+          throw new Error('flaky');
+        }
+        return 'ok';
+      },
+    });
+    await expect(harness.run(flaky, 'go', ctx)).rejects.toThrow('flaky');
+    fail = false;
+    expect(await harness.run(flaky, 'go', ctx)).toBe('ok');
+    expect(ofType(ctx.itemLog.items, 'myapp:note')).toHaveLength(1);
+  });
+});
+
 describe('typed results', () => {
   it('narrows harness results to the declared items', () => {
     const flow = workflow({

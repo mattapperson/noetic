@@ -8,8 +8,6 @@ import type {
   StepEmitItemsResult,
 } from '@noetic-tools/types';
 import { frameworkCast, NoeticConfigError, validateSchema } from '@noetic-tools/types';
-import type { ZodTypeAny } from 'zod';
-import { z } from 'zod';
 import { emitFrameworkEvent, getBroadcaster } from '../runtime/broadcaster-utils';
 import { ContextImpl } from '../runtime/context-impl';
 import { stepChildren } from './step-walk';
@@ -146,7 +144,7 @@ export function allowCustomItems<TContext, I, O>(
   if (items.length === 0 || !(ctx instanceof ContextImpl)) {
     return;
   }
-  ctx.allowItems(customItemGates(items));
+  ctx.allowItemTypes(items.map((item) => item.type));
 }
 
 /**
@@ -158,21 +156,6 @@ export function collectCustomItems(step: Step): CustomItem[] {
     ...Object.values(step.customItems ?? {}),
     ...stepChildren(step).flatMap(collectCustomItems),
   ];
-}
-
-/**
- * Schemas that let a context's item log accept these items' final forms. They gate on
- * `type` and `id` only: the emitter has already checked the fields against `output`.
- */
-export function customItemGates(items: ReadonlyArray<CustomItem>): ZodTypeAny[] {
-  return [
-    ...new Set(items.map((item) => item.type)),
-  ].map((type) =>
-    z.looseObject({
-      type: z.literal(type),
-      id: z.string(),
-    }),
-  );
 }
 
 /**

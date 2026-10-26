@@ -41,7 +41,6 @@ import type { DetachedSpawnOverrides } from './deps/interpreter';
 import {
   collectAllTools,
   collectCustomItems,
-  customItemGates,
   deduplicateTools,
   dispatchStepThroughAdapter,
   execute,
@@ -70,6 +69,7 @@ import {
   createInMemoryStorage,
   createSessionStore,
   createStepLedgerStore,
+  customItemGates,
   filterReasoningStream,
   filterTextStream,
   INTERRUPT_REASON,
@@ -708,7 +708,9 @@ export class AgentHarness<
       strictUnknownExtensions: opts.itemSchemas?.strict ?? true,
     }).extend({
       items: opts.agentGraph
-        ? customItemGates(collectCustomItems(frameworkCast<Step>(opts.agentGraph)))
+        ? customItemGates(
+            collectCustomItems(frameworkCast<Step>(opts.agentGraph)).map((item) => item.type),
+          )
         : [],
     });
     this.rootCwdState = {
@@ -1172,10 +1174,12 @@ export class AgentHarness<
   private async rebuildFromStorage(ctx: ContextImpl): Promise<void> {
     await this.pendingCheckpoints.get(ctx.id);
     const snapshot = await this.checkpointStore?.load(ctx.id).catch(() => null);
+    ctx.allowItemTypes(snapshot?.customItemTypes ?? []);
+    const itemSchemas = ctx.itemSchemas ?? this.itemSchemas;
     ctx.rebase(
       snapshot
         ? {
-            items: this.itemSchemas.parseMany(snapshot.itemLog.items),
+            items: itemSchemas.parseMany(snapshot.itemLog.items),
             occurrences: snapshot.occurrences,
           }
         : ctx.runBaseline(),

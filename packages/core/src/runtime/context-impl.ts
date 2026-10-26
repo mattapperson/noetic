@@ -1,4 +1,3 @@
-import type { ZodTypeAny } from 'zod';
 import type {
   AgentHarnessContract,
   Channel,
@@ -22,6 +21,7 @@ import type {
 import { buildContextData, defaultItemSchemaRegistry } from './context-deps';
 import type { StepLedger } from './durable/step-ledger';
 import { hashStepInput } from './durable/step-ledger';
+import { customItemGates } from './item-gates';
 import { ItemLogImpl } from './item-log-impl';
 
 const EMPTY_CONTEXT: ContextData = Object.freeze({});
@@ -87,6 +87,8 @@ export class ContextImpl implements Context<ContextData> {
   readonly itemLog: ItemLog;
   /** The same log, typed for `rebase`. */
   private readonly log: ItemLogImpl;
+  /** Custom item types `allowItemTypes` has accepted. Shared by every lane. */
+  private readonly _customItemTypes = new Set<string>();
   lastStepMeta: StepMeta | null = null;
   lastLayerUsage: LastLayerUsage | undefined = undefined;
   readonly harness: AgentHarnessContract;
@@ -523,16 +525,31 @@ export class ContextImpl implements Context<ContextData> {
 
   /**
    * @internal
-   * Accept items matching `schemas` in this context's log from now on, as a step's
-   * custom items need. Contexts created from this one afterwards inherit the wider
-   * registry; a lane widens the context it views.
+   * Accept the final items of these custom item types in this context's log from now
+   * on (spec 34). Contexts created from this one afterwards inherit the wider registry,
+   * and a lane widens the context it views. A checkpoint records the types, so a
+   * restore can accept a stored log that holds them before any step runs.
    */
-  allowItems(schemas: ReadonlyArray<ZodTypeAny>): void {
+  allowItemTypes(types: ReadonlyArray<string>): void {
+    const added = types.filter((type) => !this._customItemTypes.has(type));
+    if (added.length === 0) {
+      return;
+    }
+    for (const type of added) {
+      this._customItemTypes.add(type);
+    }
     const registry = (this.itemSchemas ?? defaultItemSchemaRegistry).extend({
-      items: schemas,
+      items: customItemGates(added),
     });
     this.itemSchemas = registry;
     this.log.useSchemas(registry);
+  }
+
+  /** @internal The custom item types this context accepts, for a checkpoint to record. */
+  customItemTypes(): string[] {
+    return [
+      ...this._customItemTypes,
+    ];
   }
 
   /**

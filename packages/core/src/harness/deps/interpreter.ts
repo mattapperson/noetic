@@ -1,6 +1,6 @@
 export { collectAllTools, deduplicateTools } from '../../interpreter/collect-tools';
 export { prepareBandedView } from '../../interpreter/context-assembly';
-export { collectCustomItems, customItemGates } from '../../interpreter/emit-items';
+export { collectCustomItems } from '../../interpreter/emit-items';
 export { execute } from '../../interpreter/execute';
 export type { DetachedSpawnOverrides } from '../../interpreter/step-dispatcher';
 export { dispatchStepThroughAdapter } from '../../interpreter/step-dispatcher';

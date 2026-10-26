@@ -144,6 +144,11 @@ export const CheckpointSnapshotSchema = z.object({
    */
   occurrences: z.record(z.string(), z.number()),
   /**
+   * Custom item types the context accepted (spec 34), so a restore can parse an
+   * `itemLog` that holds them before the steps that declare them run again.
+   */
+  customItemTypes: z.array(z.string()).optional(),
+  /**
    * The execution's `ctx.state` at capture time. Absent when the state does not survive
    * JSON encoding, in which case restore keeps whatever state the host passes.
    */

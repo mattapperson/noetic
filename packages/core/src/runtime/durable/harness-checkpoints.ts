@@ -5,6 +5,7 @@ import { CheckpointSchemaVersion } from '../../types/checkpoint';
 import type { ChannelStore } from '../channel-store';
 import { ContextImpl, rootIdOf } from '../context-impl';
 import type { EventBroadcaster } from '../event-broadcaster';
+import { customItemGates } from '../item-gates';
 import type { CheckpointStore } from './checkpoint-store';
 import type { StepLedgerRetention, StepLedgerStore, StepLedgerWindow } from './step-ledger';
 import { StepLedger } from './step-ledger';
@@ -111,6 +112,11 @@ export async function captureCheckpoint(
       items: baseline.items,
     },
     occurrences: baseline.occurrences,
+    ...(impl && impl.customItemTypes().length > 0
+      ? {
+          customItemTypes: impl.customItemTypes(),
+        }
+      : {}),
     ...(state.ok
       ? {
           state: state.value,
@@ -253,14 +259,28 @@ function contextFromSnapshot(
   /* Caller wiring first, snapshot second: a host may legitimately swap the context
    * layers or hang the restored execution under a new parent, but it must never be
    * able to override the identity/history the snapshot is the record of. */
+  const customItemTypes = snapshot.customItemTypes ?? [];
+  const items = h.itemSchemas
+    .extend({
+      items: customItemGates(customItemTypes),
+    })
+    .parseMany(snapshot.itemLog.items);
   const ctx = h.createContext({
     ...opts,
     state: opts?.state ?? snapshot.state,
-    items: h.itemSchemas.parseMany(snapshot.itemLog.items),
+    items: [],
     threadId: snapshot.threadId,
     resourceId: snapshot.resourceId,
     cwdInit: snapshot.cwd?.current ?? undefined,
   });
+  /* The log goes in after the context accepts the recorded custom item types:
+   * seeded at creation, it would be checked against the harness's schemas alone. */
+  if (ctx instanceof ContextImpl) {
+    ctx.allowItemTypes(customItemTypes);
+  }
+  for (const item of items) {
+    ctx.itemLog.append(item);
+  }
   if (ctx instanceof ContextImpl) {
     ctx.restoreOccurrences(snapshot.occurrences);
     if (snapshot.usage) {
