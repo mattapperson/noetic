@@ -140,20 +140,30 @@ export class ContextImpl implements Context<ContextData> {
   private readonly _inFlight = new Set<FrontierFrame>();
 
   /**
-   * Execution path of the step whose lane this is. On the context itself it is the
-   * prefix its steps hang under: empty on a root context, the parent's path plus a
-   * discriminator on an inParallel/spawn child, so a path stays unique across the whole
-   * step tree. A lane (see `enterStep`) reads its own step's path here instead.
+   * Execution path node of the step whose lane this is. On the context itself it is
+   * the prefix its steps hang under: empty on a root context, the parent's path plus
+   * a discriminator on an inParallel/spawn child, so a path stays unique across the
+   * whole step tree. A lane (see `enterStep`) reads its own step's node here instead.
+   * Each node counts the dispatches beneath it, so a loop body re-entered on each
+   * iteration gets `#0`, `#1`, … instead of colliding on one path.
    * @internal
    */
-  private readonly _path: string;
+  private readonly _node: PathNode;
 
   /**
-   * Dispatch counts per `<parent path>/<step id>`, so a loop body re-entered on each
-   * iteration gets `#0`, `#1`, … instead of colliding on one key. Shared by every lane.
+   * Nodes on this context holding dispatch counts, so a run baseline can list every
+   * live count. Shared by every lane.
    * @internal
    */
-  private readonly _occurrences = new Map<string, number>();
+  private readonly _counted = new Set<PathNode>();
+
+  /**
+   * Dispatch counts restored from a checkpoint, keyed `<parent path>/<step id>`, not
+   * yet taken by a dispatch. A dispatch moves its count into its parent node; until
+   * this empties, each dispatch builds its parent's path to look its count up.
+   * @internal
+   */
+  private readonly _restored = new Map<string, number>();
 
   /**
    * Completion ledger for the execution this context belongs to. Shared by reference
@@ -191,8 +201,8 @@ export class ContextImpl implements Context<ContextData> {
     span?: Span;
     channelStore?: ChannelStore;
     checkpointFn?: (ctx: Context) => Promise<void>;
-    /** Path this context's steps hang under (inParallel/spawn children inherit one). */
-    pathPrefix?: string;
+    /** Path node this context's steps hang under (inParallel/spawn children inherit one; see `branchPath`). */
+    path?: PathNode;
     /** The execution's completion ledger, shared with children by reference. */
     ledger?: StepLedger;
     layers?: ContextLayer[];
@@ -221,7 +231,7 @@ export class ContextImpl implements Context<ContextData> {
     this.resourceId = opts.resourceId;
     this.channelStore = opts.channelStore;
     this._checkpointFn = opts.checkpointFn;
-    this._path = opts.pathPrefix ?? '';
+    this._node = opts.path ?? new PathNode(undefined, '');
     this.ledger = opts.ledger;
     this.layers = opts.layers;
     this.unifiedTools = opts.unifiedTools;
@@ -411,13 +421,14 @@ export class ContextImpl implements Context<ContextData> {
    * interleave. The occurrence ordinal is taken here, at dispatch, never at settle.
    */
   enterStep(frame: FrontierFrame): ContextImpl {
-    const key = `${this._path}/${frame.stepId}`;
-    const occurrence = this._occurrences.get(key) ?? 0;
-    this._occurrences.set(key, occurrence + 1);
+    const parent = this._node;
+    const occurrence = parent.counts.get(frame.stepId) ?? this.takeRestored(parent, frame.stepId);
+    parent.counts.set(frame.stepId, occurrence + 1);
+    this._counted.add(parent);
     this._inFlight.add(frame);
     return laneOf(this, {
-      path: `${key}#${occurrence}`,
-      key,
+      node: new PathNode(parent, `/${frame.stepId}#${occurrence}`),
+      parent,
       occurrence,
       stepId: frame.stepId,
       inputHash: this.ledger ? hashStepInput(frame.input) : undefined,
@@ -453,7 +464,7 @@ export class ContextImpl implements Context<ContextData> {
     const lane = this._lane;
     return lane?.recorded
       ? {
-          path: lane.path,
+          path: lane.node.path,
           stepId: lane.stepId,
           inputHash: lane.inputHash,
         }
@@ -467,7 +478,16 @@ export class ContextImpl implements Context<ContextData> {
    * what lets a resumed run line recorded outputs up with the steps that produced them.
    */
   currentPath(): string {
-    return this._path;
+    return this._node.path;
+  }
+
+  /**
+   * @internal
+   * A path node under this lane's path, for an inParallel/spawn child context to hang
+   * its steps under. The child's path string is built only if something reads it.
+   */
+  branchPath(segment: string): PathNode {
+    return new PathNode(this._node, segment);
   }
 
   /**
@@ -519,6 +539,14 @@ export class ContextImpl implements Context<ContextData> {
    */
   leaveStep(frame: FrontierFrame): void {
     this._inFlight.delete(frame);
+    // Nothing dispatches under a finished step's path again, so the counts beneath it
+    // are dead weight. Its own count lives in its parent node and stays: the next
+    // dispatch of the same step id needs it.
+    const lane = this._lane;
+    if (lane) {
+      lane.node.counts.clear();
+      this._counted.delete(lane.node);
+    }
   }
 
   /**
@@ -531,15 +559,21 @@ export class ContextImpl implements Context<ContextData> {
    */
   releaseDispatch(): void {
     const lane = this._lane;
-    if (!lane || this._occurrences.get(lane.key) !== lane.occurrence + 1) {
+    if (!lane || lane.parent.counts.get(lane.stepId) !== lane.occurrence + 1) {
       return;
     }
-    this._occurrences.set(lane.key, lane.occurrence);
+    lane.parent.counts.set(lane.stepId, lane.occurrence);
+    lane.node.counts.clear();
+    this._counted.delete(lane.node);
+    if (this._restored.size === 0) {
+      return;
+    }
+    const beneath = `${lane.node.path}/`;
     for (const key of [
-      ...this._occurrences.keys(),
+      ...this._restored.keys(),
     ]) {
-      if (key.startsWith(`${lane.path}/`)) {
-        this._occurrences.delete(key);
+      if (key.startsWith(beneath)) {
+        this._restored.delete(key);
       }
     }
   }
@@ -553,7 +587,7 @@ export class ContextImpl implements Context<ContextData> {
       items: [
         ...this.itemLog.items,
       ],
-      occurrences: Object.fromEntries(this._occurrences),
+      occurrences: this.liveCounts(),
     };
   }
 
@@ -575,7 +609,7 @@ export class ContextImpl implements Context<ContextData> {
         items: [
           ...this.itemLog.items,
         ],
-        occurrences: Object.fromEntries(this._occurrences),
+        occurrences: this.liveCounts(),
       }
     );
   }
@@ -597,7 +631,11 @@ export class ContextImpl implements Context<ContextData> {
    */
   rebase(baseline: RunBaseline): void {
     this.log.replace(baseline.items);
-    this._occurrences.clear();
+    for (const node of this._counted) {
+      node.counts.clear();
+    }
+    this._counted.clear();
+    this._restored.clear();
     this.restoreOccurrences(baseline.occurrences);
   }
 
@@ -608,8 +646,36 @@ export class ContextImpl implements Context<ContextData> {
    */
   restoreOccurrences(occurrences: Record<string, number>): void {
     for (const [key, count] of Object.entries(occurrences)) {
-      this._occurrences.set(key, count);
+      this._restored.set(key, count);
     }
+  }
+
+  /**
+   * Every live dispatch count, keyed `<parent path>/<step id>` — the form checkpoints
+   * persist and `restoreOccurrences` reads back.
+   */
+  private liveCounts(): Record<string, number> {
+    const counts: Record<string, number> = Object.fromEntries(this._restored);
+    for (const node of this._counted) {
+      for (const [stepId, count] of node.counts) {
+        counts[`${node.path}/${stepId}`] = count;
+      }
+    }
+    return counts;
+  }
+
+  /** The restored count for `stepId` under `parent`, consumed on first use; 0 when none. */
+  private takeRestored(parent: PathNode, stepId: string): number {
+    if (this._restored.size === 0) {
+      return 0;
+    }
+    const key = `${parent.path}/${stepId}`;
+    const count = this._restored.get(key);
+    if (count === undefined) {
+      return 0;
+    }
+    this._restored.delete(key);
+    return count;
   }
 
   /**
@@ -636,12 +702,39 @@ export interface RunBaseline {
   occurrences: Record<string, number>;
 }
 
+/**
+ * @internal
+ * One point in the execution path tree: a context's root, or one dispatch. It
+ * holds the dispatch counts for steps directly beneath it, keyed by step id, and
+ * builds its path string only when something reads it. Deep recursion makes
+ * paths long — each level adds a segment and its ids grow — so building every
+ * dispatch's path eagerly cost time cubic in depth even when no ledger read it.
+ */
+export class PathNode {
+  /** Dispatches beneath this path, by step id; the count is the next ordinal. */
+  readonly counts = new Map<string, number>();
+  private text?: string;
+
+  constructor(
+    private readonly parent: PathNode | undefined,
+    private readonly segment: string,
+  ) {}
+
+  /** The full path: the parent's path plus this node's segment. Built once, on first read. */
+  get path(): string {
+    if (this.text === undefined) {
+      this.text = (this.parent?.path ?? '') + this.segment;
+    }
+    return this.text;
+  }
+}
+
 /** One dispatch's view data. */
 interface Lane {
-  /** Execution path: `<parent path>/<step id>#<ordinal>`. */
-  path: string;
-  /** `<parent path>/<step id>` — the occurrence counter this dispatch took from. */
-  key: string;
+  /** Execution path node: `<parent path>/<step id>#<ordinal>`. */
+  node: PathNode;
+  /** The node whose count this dispatch took its ordinal from. */
+  parent: PathNode;
   occurrence: number;
   stepId: string;
   /** `hashStepInput` of the step's input, taken only when the context has a ledger. */
@@ -697,8 +790,8 @@ function laneOf(ctx: ContextImpl, lane: Lane): ContextImpl {
   };
   const view = new Proxy(target, {
     get(base, prop, receiver) {
-      if (prop === '_path') {
-        return lane.path;
+      if (prop === '_node') {
+        return lane.node;
       }
       if (prop === '_lane') {
         return lane;

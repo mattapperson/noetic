@@ -57,6 +57,8 @@ Sequence numbers are reserved synchronously, before the append's `await`. Concur
 
 `#n` is the n-th time that `stepId` has been dispatched under that parent path. `execute()` takes the ordinal at dispatch, from one counter per `(parent path, step id)` kept on the context.
 
+Paths form a tree: each lane holds the counters for the steps dispatched beneath it and builds its path string only when something reads it — a ledger key, a checkpoint baseline, a child context's prefix. A run without a ledger never builds one, so deep recursion stays linear in depth. When a step settles, the counters beneath it are dropped, since nothing dispatches under a finished path again; its own counter, held by its parent, stays for the next dispatch of the same step id. A baseline lists every counter live when it is taken, in the flat `<parent path>/<step id>` form.
+
 **Every dispatch runs on its own lane.** `ContextImpl.enterStep` returns a *lane*: a view of the context that shares everything (state, item log, usage, abort, ledger) except its execution path and the record of items appended through it. `execute()` hands the lane to the step, so whatever the step dispatches — through the interpreter or by calling `harness.run(child, input, ctx)` on the context it was given — hangs under that step's path. Concurrent dispatches on one context therefore cannot interleave each other's paths, and the in-flight frontier is a set of frames, so frames may settle in any order. `inParallel` and `spawn` children get their own `ContextImpl`, prefixed with the dispatching lane's path plus `[i]`.
 
 **Determinism.** A path depends only on the parent's path, the step id, and the dispatch ordinal, never on settle order:

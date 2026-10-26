@@ -1040,7 +1040,7 @@ export async function executeSpawn<TContext, I, O>(
     id: childId,
     // The spawn's own path prefixes the child's, so a resumed run lines its steps up
     // with the ones recorded inside the same spawn rather than at the root.
-    pathPrefix: baseCtx instanceof ContextImpl ? baseCtx.currentPath() : '',
+    path: baseCtx instanceof ContextImpl ? baseCtx.branchPath('') : undefined,
     ledger: baseCtx instanceof ContextImpl ? baseCtx.ledger : undefined,
     // The child's steps checkpoint the root, as an inParallel path's do.
     checkpointFn: () => baseCtx.checkpoint(),

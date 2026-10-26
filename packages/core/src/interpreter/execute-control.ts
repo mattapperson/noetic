@@ -32,7 +32,7 @@ import {
 } from '@noetic-tools/types';
 import { NoeticAttr, NoeticEvent } from '../observability/genai-attributes';
 import type { ChannelStore } from '../runtime/channel-store';
-import { ContextImpl } from '../runtime/context-impl';
+import { ContextImpl, PathNode } from '../runtime/context-impl';
 import { snapshotCwdState } from '../runtime/cwd-helpers';
 import { toUntil } from '../until/decider';
 import type { ItemSchemaRegistry, LayerStateStore } from './action-deps';
@@ -73,7 +73,6 @@ function createChildContexts(
   const threadId = isContextImpl(ctx) ? ctx.threadId : crypto.randomUUID();
   const resourceId = isContextImpl(ctx) ? ctx.resourceId : undefined;
   const channelStore = getContextChannelStore(ctx);
-  const parentPath = isContextImpl(ctx) ? ctx.currentPath() : '';
   const parentLedger = isContextImpl(ctx) ? ctx.ledger : undefined;
 
   return paths.map(
@@ -89,7 +88,9 @@ function createChildContexts(
         /* Ledger paths must stay unique across sibling paths: a child ContextImpl
          * starts with an empty frontier, so without a prefix every path would
          * restart at the root and collide with its siblings. */
-        pathPrefix: `${parentPath}[${index}]`,
+        path: isContextImpl(ctx)
+          ? ctx.branchPath(`[${index}]`)
+          : new PathNode(undefined, `[${index}]`),
         ledger: parentLedger,
         // A path's steps checkpoint the root: its usage, state, and layer folds roll
         // into what a resumed root restores.
