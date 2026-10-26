@@ -5,19 +5,28 @@
  * the library or its error shapes.
  */
 
-import { NoeticConfigError } from '@noetic-tools/types';
+import { frameworkCast, NoeticConfigError } from '@noetic-tools/types';
 import jsonata from 'jsonata';
 
 //#region Types
 
-/** @public Bounds on one expression evaluation. Each field falls back to `DEFAULT_EXPRESSION_LIMITS`. */
+/**
+ * @public Bounds on one expression evaluation. Each field is a positive
+ * integer or `Infinity` (no bound) and falls back to `DEFAULT_EXPRESSION_LIMITS`.
+ */
 export interface ExpressionLimits {
-  /** Milliseconds one evaluation may run. */
+  /**
+   * Wall-clock milliseconds one evaluation may run. Checked only as each
+   * sub-expression starts, so one long built-in call runs to its end. Workers
+   * freeze `Date.now()` during pure CPU work, so there `steps` is the bound that holds.
+   */
   timeout?: number;
-  /** How deep evaluation may nest, counting each function call and sub-expression. */
+  /** How deep evaluation may nest, counting each sub-expression and function call. Tail calls do not nest. */
   depth?: number;
-  /** The most items one sequence (JSONata's result list) may hold. */
+  /** The most items one sequence (JSONata's result list) or range may hold. */
   length?: number;
+  /** How many sub-expressions one evaluation may evaluate, counting each repeat. Independent of the clock. */
+  steps?: number;
 }
 
 /** A compiled expression, ready to run against node input. */
@@ -35,32 +44,53 @@ interface JsonataFailure {
   position?: number;
 }
 
+/** The part of JSONata's evaluation frame the step hook reads: the per-evaluation root frame. */
+interface Frame {
+  base: object;
+}
+
 //#endregion
 
 //#region Constants
+
+/** The code the step hook throws; not one of JSONata's. */
+const STEPS_CODE = 'NOETIC_STEPS';
 
 /** @public The limits an expression runs under unless the host sets its own. */
 export const DEFAULT_EXPRESSION_LIMITS: Readonly<Required<ExpressionLimits>> = {
   timeout: 1e3,
   depth: 500,
   length: 1e6,
+  steps: 1e6,
 };
 
-/** JSONata codes for a guard tripping: stack depth, timeout, range size, sequence size. */
-const LIMIT_CODES = new Set([
-  'D1011',
-  'D1012',
-  'D2014',
-  'D2015',
-]);
+/** The codes thrown when a guard trips, mapped to the limit each enforces. */
+const LIMIT_CODES: Readonly<Record<string, keyof ExpressionLimits>> = {
+  D1011: 'depth',
+  D1012: 'timeout',
+  D2015: 'length',
+  [STEPS_CODE]: 'steps',
+};
+
+/** JSONata's code for its fixed cap of 1e7 items on a range, which holds whatever `length` is. */
+const RANGE_CAP_CODE = 'D2014';
+
+/**
+ * JSONata calls the function bound to this symbol as each sub-expression
+ * starts. The hook is undocumented (JSONata's own test suite builds its
+ * timebox on it), which is one reason the library's version is pinned.
+ */
+const EVALUATE_ENTRY = Symbol.for('jsonata.__evaluate_entry');
 
 //#endregion
 
 //#region Public API
 
 /**
- * Compiles `source` under `limits`.
+ * Compiles `source` under `limits`. Every `run` gets fresh budgets: the clock,
+ * depth, and step count start over per evaluation.
  *
+ * @throws `NoeticConfigError` with code `INVALID_EXPRESSION_LIMITS` when a limit is not a positive integer or `Infinity`.
  * @throws `NoeticConfigError` with code `WORKFLOW_VALIDATION_FAILED` when `source` does not parse.
  */
 export function compileExpression(
@@ -68,10 +98,7 @@ export function compileExpression(
   where: string,
   limits?: ExpressionLimits,
 ): CompiledExpression {
-  const bounds = {
-    ...DEFAULT_EXPRESSION_LIMITS,
-    ...limits,
-  };
+  const bounds = checkLimits(limits);
   let compiled: jsonata.Expression;
   try {
     compiled = jsonata(source, {
@@ -86,13 +113,14 @@ export function compileExpression(
       hint: 'Fix the JSONata syntax; see https://docs.jsonata.org for the language.',
     });
   }
+  countSteps(compiled, bounds.steps);
   return {
     where,
     run: async (input) => {
       try {
         return await compiled.evaluate(input);
       } catch (e) {
-        throw translate(e, where);
+        throw translate(e, where, bounds);
       }
     },
   };
@@ -162,6 +190,52 @@ export function readInput(value: unknown): unknown {
 
 //#region Helpers
 
+/** `limits` over the defaults (an unset field takes its default); anything but a positive integer or `Infinity` throws. */
+function checkLimits(limits: ExpressionLimits | undefined): Required<ExpressionLimits> {
+  const bounds = {
+    timeout: limits?.timeout ?? DEFAULT_EXPRESSION_LIMITS.timeout,
+    depth: limits?.depth ?? DEFAULT_EXPRESSION_LIMITS.depth,
+    length: limits?.length ?? DEFAULT_EXPRESSION_LIMITS.length,
+    steps: limits?.steps ?? DEFAULT_EXPRESSION_LIMITS.steps,
+  };
+  for (const [name, value] of Object.entries(bounds)) {
+    if (value !== Number.POSITIVE_INFINITY && !(Number.isInteger(value) && value >= 1)) {
+      throw new NoeticConfigError({
+        code: 'INVALID_EXPRESSION_LIMITS',
+        message: `Expression limit '${name}' must be a positive integer or Infinity, got ${value}.`,
+        hint: 'Pass positive integers (see DEFAULT_EXPRESSION_LIMITS for the defaults), or Infinity to lift one bound.',
+      });
+    }
+  }
+  return bounds;
+}
+
+/**
+ * Bounds each evaluation of `compiled` to `max` sub-expressions. JSONata's
+ * depth guard misses tail calls, which it runs in a loop, and its timeout
+ * reads a clock that Workers freeze during CPU work, so this count is the
+ * one bound on every runtime. JSONata gives each evaluation a fresh root
+ * frame (`base`), so counts keyed on it never mix between concurrent runs.
+ */
+function countSteps(compiled: jsonata.Expression, max: number): void {
+  if (max === Number.POSITIVE_INFINITY) {
+    return;
+  }
+  const used = new WeakMap<object, number>();
+  const hook = (_expr: unknown, _input: unknown, frame: Frame): void => {
+    const n = (used.get(frame.base) ?? 0) + 1;
+    if (n > max) {
+      throw {
+        code: STEPS_CODE,
+      } satisfies JsonataFailure;
+    }
+    used.set(frame.base, n);
+  };
+  // JSONata's types name bindings by string, but its frames take symbols too.
+  compiled.assign(frameworkCast<string>(EVALUATE_ENTRY), hook);
+}
+
+/** JSONata gives a lambda or a bound built-in as a tagged object, a native function as itself. */
 function isJsonataFailure(e: unknown): e is JsonataFailure {
   return typeof e === 'object' && e !== null && 'code' in e && typeof e.code === 'string';
 }
@@ -174,19 +248,41 @@ function describe(e: unknown): string {
   return `${e.message ?? 'JSONata error'} (${e.code}${at})`;
 }
 
-/** JSONata's own failures become Noetic errors; anything else is a defect and passes through. */
-function translate(e: unknown, where: string): unknown {
+/**
+ * Turns what an evaluation threw into a Noetic error. JSONata's failures and
+ * the JS errors its built-ins throw on bad input (a `TypeError` from
+ * `$base64encode` where no `Buffer` exists, say) are the expression's fault,
+ * so both become `NoeticConfigError`s. A native stack overflow is a limit:
+ * evaluation itself never grows the JS stack (each sub-expression awaits),
+ * but a built-in that walks deeply nested input (`$string`, `**`) recurses
+ * natively, outside the `depth` count. Anything else is a defect and passes through.
+ */
+function translate(e: unknown, where: string, bounds: Required<ExpressionLimits>): unknown {
+  if (e instanceof RangeError && e.message.includes('call stack')) {
+    return exceeded(where, 'the JavaScript call stack; the data it walks nests too deeply');
+  }
+  if (e instanceof Error) {
+    return failed(where, `${e.name}: ${e.message}`);
+  }
   if (!isJsonataFailure(e)) {
     return e;
   }
-  if (LIMIT_CODES.has(e.code)) {
-    return new NoeticConfigError({
-      code: 'EXPRESSION_LIMIT_EXCEEDED',
-      message: `Expression in ${where} exceeded a limit: ${describe(e)}`,
-      hint: 'Bound the recursion or data size in the expression, or raise the limits via HydrationContext.expressionLimits.',
-    });
+  if (e.code === RANGE_CAP_CODE) {
+    return exceeded(where, "JSONata's fixed cap of 1e7 items on a range");
+  }
+  const limit = LIMIT_CODES[e.code];
+  if (limit !== undefined) {
+    return exceeded(where, `its ${limit} limit of ${bounds[limit]}`);
   }
   return failed(where, describe(e));
+}
+
+function exceeded(where: string, what: string): NoeticConfigError {
+  return new NoeticConfigError({
+    code: 'EXPRESSION_LIMIT_EXCEEDED',
+    message: `Expression in ${where} exceeded ${what}.`,
+    hint: 'Bound the recursion or data size in the expression, or raise expressionLimits (Infinity lifts one bound).',
+  });
 }
 
 function failed(where: string, message: string): NoeticConfigError {

@@ -517,6 +517,7 @@ interface HydrationContext {
   workflows?: ReadonlyMap<string, WorkflowDocument>;
   maxRecursionDepth?: number;
   recursionDepth?: number;
+  expressionLimits?: ExpressionLimits;
 }
 ```
 
@@ -531,6 +532,7 @@ interface HydrationContext {
 | `workflows`          | No       | Named sub-workflow documents that `subflow` nodes resolve via `ref`.     |
 | `maxRecursionDepth`  | No       | Deepest allowed chain of named-ref resolutions on one path. Positive integer or `Infinity`; default `100`. |
 | `recursionDepth`     | No       | Internal: named-ref resolutions above the node being hydrated. Threaded by the subflow hydrator; callers never set it. |
+| `expressionLimits`   | No       | Bounds on each expression evaluation; see Constraints § Expression Limits. Unset fields use `DEFAULT_EXPRESSION_LIMITS`. |
 
 ### `hydrateWorkflow`
 
@@ -744,6 +746,35 @@ With these opt-ins the document format is Turing complete. A `loop` with `"maxIt
 
 So whether a document halts cannot be decided before it runs, and the runtime does not try. Bounds come from the run's budgets instead: an aborted context, `maxCost` and `maxDuration` until predicates, `maxRecursionDepth`, and the per-evaluation expression limits (spec 33 § Limits). A host that runs untrusted documents sets the budgets it needs rather than relying on documents to be finite.
 
+### Expression Limits
+
+Every evaluation of a `compute` expression, a route's `expr`, or an `expr` until predicate runs under four bounds. A host sets them with `expressionLimits` on `parseAndRunWorkflow`, `dynamicWorkflow`, `workflow()`, or the `HydrationContext`; named and inline subflows inherit them.
+
+```typescript
+interface ExpressionLimits {
+  timeout?: number; // default 1e3
+  depth?: number;   // default 500
+  length?: number;  // default 1e6
+  steps?: number;   // default 1e6
+}
+```
+
+| Limit     | Default | Bounds                                                                                       |
+|-----------|---------|----------------------------------------------------------------------------------------------|
+| `steps`   | `1e6`   | Sub-expressions evaluated, counting each repeat (each item of a path map, each function body run). Independent of the clock. |
+| `depth`   | `500`   | How deep evaluation nests, counting each sub-expression and function call. A tail call does not nest: JSONata runs it in a loop. |
+| `length`  | `1e6`   | Items in one sequence (JSONata's result list), including a range `[a..b]` and a sequence grown by `$append` or path mapping. |
+| `timeout` | `1e3`   | Wall-clock milliseconds for one evaluation.                                                   |
+
+- **Per evaluation.** Each run starts with a fresh clock, depth, and step count, so a loop that evaluates the same `expr` many times gets the full budget each time, and overlapping runs never share a count.
+- **Each value is a positive integer or `Infinity`.** `Infinity` lifts that one bound; an unset field takes its default. Anything else — `0`, a negative number, a fraction, `NaN` — throws `INVALID_EXPRESSION_LIMITS` when the expression compiles at hydration.
+- **Tripping a limit** throws `EXPRESSION_LIMIT_EXCEEDED` naming the limit and its value. It surfaces like `EXPRESSION_FAILED` (see Expression Failures).
+- **Ranges have a fixed cap.** JSONata refuses a range of more than `1e7` items whatever `length` is, so `[1..1e8]` throws `EXPRESSION_LIMIT_EXCEEDED` even with every limit set to `Infinity`.
+- **Checks run as each sub-expression starts.** `steps`, `depth`, and `timeout` are checked only there, so a single built-in call (a `$sort` of a large array, a costly regular expression) runs to its end before the next check.
+- **`steps` is the bound that holds everywhere.** Endless tail recursion, such as `( $f := function($n){ $f($n + 1) }; $f(0) )`, never deepens, so only `steps` or `timeout` stops it. The timeout reads `Date.now()`, which Cloudflare Workers freeze during pure CPU work, so on Workers only `steps` stops it. A host that lifts `steps` on Workers leaves such an expression unbounded.
+- **Deep input.** Evaluation never grows the JavaScript stack, but a built-in that walks deeply nested input (`$string`, the `**` descendant operator) recurses natively, outside the `depth` count. Overflowing the stack throws `EXPRESSION_LIMIT_EXCEEDED` rather than crashing.
+- **Errors from built-ins.** A JavaScript error thrown inside a JSONata built-in during evaluation — such as the `TypeError` from `$base64encode` on a runtime without `Buffer` — is the expression's failure and throws `EXPRESSION_FAILED`.
+
 ---
 
 ## Plan-Memory Integration
@@ -785,6 +816,8 @@ The JSON Workflow Runtime introduces the following `NoeticConfigError` codes:
 | `INVALID_FORK_INPUT`           | A dynamic fork's input does not resolve to an array.                     |
 | `INVALID_REPLAY_KEY_INPUT`     | A `replayKey.from` node's input is not a JSON object (raised by the key function at dispatch; the interpreter downgrades it to a warning). |
 | `EXPRESSION_FAILED`            | A `compute` expression, a route's `expr`, or an `expr` until predicate fails to evaluate or gives a non-boolean where a boolean is required (raised at execution time; spec 33). |
+| `EXPRESSION_LIMIT_EXCEEDED`    | An expression evaluation exceeds one of its limits (raised at execution time; see Constraints § Expression Limits). |
+| `INVALID_EXPRESSION_LIMITS`    | An `expressionLimits` value is not a positive integer or `Infinity` (raised when an expression compiles at hydration). |
 
 ### Expression Failures
 

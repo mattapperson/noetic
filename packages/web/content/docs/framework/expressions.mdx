@@ -161,15 +161,20 @@ Since whether such a workflow halts cannot be known in advance, bound the run in
 
 ## Limits
 
-Each evaluation runs under three limits:
+Each evaluation runs under four limits:
 
-| Limit | Meaning | Default |
+| Limit | Bounds | Default |
 |---|---|---|
-| `timeout` | Milliseconds one evaluation may run. | `1000` |
-| `depth` | How deep evaluation may nest, counting each function call and sub-expression. | `500` |
-| `length` | The most items one sequence may hold. | `1000000` |
+| `steps` | Sub-expressions evaluated, counting every repeat. Doesn't use the clock. | `1000000` |
+| `depth` | How deep evaluation nests. Tail calls don't nest. | `500` |
+| `length` | Items in one sequence, including a range. | `1000000` |
+| `timeout` | Wall-clock milliseconds for one evaluation. | `1000` |
 
-JSONata also caps a range (`[1..n]`) at 10,000,000 items. Going past any limit fails with `EXPRESSION_LIMIT_EXCEEDED`. Override the limits per run; unset fields keep their defaults, which `DEFAULT_EXPRESSION_LIMITS` holds:
+JSONata also caps a range (`[1..n]`) at 10,000,000 items. Going past any limit fails with `EXPRESSION_LIMIT_EXCEEDED`. Each value is a positive integer or `Infinity`, which lifts that bound; anything else fails with `INVALID_EXPRESSION_LIMITS`.
+
+`steps` is the limit that holds on Cloudflare Workers: Workers freeze the clock during pure CPU work, so `timeout` can't stop an endless tail-recursive expression there. Keep `steps` finite on Workers.
+
+Override the limits per run with `expressionLimits` on `parseAndRunWorkflow`, `dynamicWorkflow`, or `workflow()`; unset fields keep their defaults, which `DEFAULT_EXPRESSION_LIMITS` holds:
 
 ```ts
 import { AgentHarness, DEFAULT_EXPRESSION_LIMITS, parseAndRunWorkflow } from '@noetic-tools/core';
@@ -195,6 +200,7 @@ The limits bound one evaluation, not the whole run.
 | [`WORKFLOW_VALIDATION_FAILED`](/docs/framework/errors#workflow_validation_failed) | An expression does not parse. Syntax is checked when the document is validated, before anything runs, so a `dynamicWorkflow` planner gets the error back in its revision loop. |
 | [`EXPRESSION_FAILED`](/docs/framework/errors#expression_failed) | JSONata raised an error, a `compute` gave no value or a function, or a test gave something other than a boolean. |
 | [`EXPRESSION_LIMIT_EXCEEDED`](/docs/framework/errors#expression_limit_exceeded) | An evaluation went past a limit. |
+| [`INVALID_EXPRESSION_LIMITS`](/docs/framework/errors#invalid_expression_limits) | An `expressionLimits` value isn't a positive integer or `Infinity`. |
 
 Each message names where the expression sits, such as `compute node 'step'` or `route 0 of conditional node 'triage'`, and quotes JSONata's error code and position.
 

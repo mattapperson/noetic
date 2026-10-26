@@ -426,9 +426,15 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 #### EXPRESSION_LIMIT_EXCEEDED
 
-**Cause:** An [expression](/docs/framework/expressions) ran past one of its limits: its time budget, its nesting depth, or the size of a sequence it built.
+**Cause:** An [expression](/docs/framework/expressions) ran past one of its limits: its step budget, its time budget, its nesting depth, or the size of a sequence it built.
 
-**Fix:** Bound the recursion or data size in the expression, or raise the limits through `expressionLimits` on `parseAndRunWorkflow` or `HydrationContext`.
+**Fix:** Bound the recursion or data size in the expression, or raise the limits through `expressionLimits` on `parseAndRunWorkflow`, `dynamicWorkflow`, `workflow()`, or `HydrationContext`.
+
+#### INVALID_EXPRESSION_LIMITS
+
+**Cause:** An `expressionLimits` value is not a positive integer or `Infinity`.
+
+**Fix:** Pass a positive integer for each limit you set, `Infinity` to lift one, or leave it unset to keep its default.
 
 #### UNKNOWN_NODE_KIND
 

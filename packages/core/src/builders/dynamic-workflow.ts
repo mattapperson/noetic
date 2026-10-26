@@ -31,6 +31,8 @@ export interface DynamicWorkflowOpts {
   tools: Tool[];
   maxDepth?: number;
   maxRevisions?: number;
+  /** Bounds on each expression evaluation; unset fields use `DEFAULT_EXPRESSION_LIMITS`. */
+  expressionLimits?: ExpressionLimits;
 }
 
 //#endregion
@@ -90,7 +92,10 @@ Respond with ONLY the JSON document, no markdown fences or explanation.`;
  * @param opts.tools - Tools the generated workflow may reference by name.
  * @param opts.maxDepth - Maximum workflow tree depth. Default: 5.
  * @param opts.maxRevisions - Retries with error feedback on validation failure. Default: 3.
+ * @param opts.expressionLimits - Bounds on each expression evaluation. Default: `DEFAULT_EXPRESSION_LIMITS`.
  * @returns A `Step` that dynamically plans and executes.
+ * @throws `NoeticConfigError` with code `INVALID_EXPRESSION_LIMITS` (at execution) if `expressionLimits` holds a value that is not a positive integer or `Infinity`.
+ * @throws `NoeticConfigError` with code `EXPRESSION_LIMIT_EXCEEDED` (at execution) if an expression in the generated workflow exceeds its limits.
  */
 export function dynamicWorkflow(opts: DynamicWorkflowOpts): Step<ContextData, string, string> {
   const model = opts.model ?? DEFAULT_MODEL;
@@ -153,6 +158,7 @@ export function dynamicWorkflow(opts: DynamicWorkflowOpts): Step<ContextData, st
         const hydrationCtx: HydrationContext = {
           tools: toolMap,
           executeStep,
+          expressionLimits: opts.expressionLimits,
         };
 
         const hydrated = hydrateWorkflow(parseResult.doc, hydrationCtx);
@@ -205,10 +211,13 @@ export interface ParseAndRunWorkflowOpts {
  * @param opts.tools - Available tools the workflow may reference.
  * @param opts.maxDepth - Maximum workflow tree depth. Default: 5.
  * @param opts.maxRecursionDepth - Deepest allowed chain of named-ref resolutions. Default: 100.
+ * @param opts.expressionLimits - Bounds on each expression evaluation. Default: `DEFAULT_EXPRESSION_LIMITS`.
  * @returns The string output of the executed workflow.
  * @throws `NoeticConfigError` with code `WORKFLOW_VALIDATION_FAILED` if JSON is invalid.
  * @throws `NoeticConfigError` with code `WORKFLOW_RECURSION_LIMIT` if named refs nest deeper than `maxRecursionDepth`.
  * @throws `NoeticConfigError` with code `UNKNOWN_TOOL_REFERENCE` if a tool reference cannot be resolved.
+ * @throws `NoeticConfigError` with code `INVALID_EXPRESSION_LIMITS` if `expressionLimits` holds a value that is not a positive integer or `Infinity`.
+ * @throws `NoeticConfigError` with code `EXPRESSION_LIMIT_EXCEEDED` if an expression exceeds its limits.
  */
 export async function parseAndRunWorkflow(opts: ParseAndRunWorkflowOpts): Promise<string> {
   const parseResult = tryParseWorkflow(opts.json, opts.maxDepth ?? DEFAULT_MAX_DEPTH);

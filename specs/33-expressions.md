@@ -132,28 +132,43 @@ Write the comparison out (`count > 0`, `$exists(error)`).
 
 ## Limits
 
-Every evaluation runs under three limits, enforced by JSONata itself:
+Every evaluation runs under four limits:
 
-| Limit     | Meaning                                                            | Default     |
-|-----------|--------------------------------------------------------------------|-------------|
-| `timeout` | Milliseconds one evaluation may run.                               | `1000`      |
-| `depth`   | How deep evaluation may nest, counting each function call and sub-expression. | `500` |
-| `length`  | The most items one sequence (JSONata's result list) may hold.     | `1000000`   |
+| Limit     | Bounds                                                                                     | Default     |
+|-----------|--------------------------------------------------------------------------------------------|-------------|
+| `steps`   | Sub-expressions evaluated, counting every repeat. Independent of the clock.                | `1000000`   |
+| `depth`   | How deep evaluation nests. A tail call does not nest: JSONata runs it in a loop.           | `500`       |
+| `length`  | Items in one sequence (JSONata's result list), including a range.                          | `1000000`   |
+| `timeout` | Wall-clock milliseconds for one evaluation.                                                | `1000`      |
 
 `DEFAULT_EXPRESSION_LIMITS` holds the defaults. A host overrides any of them
-through `expressionLimits` on `parseAndRunWorkflow` or `HydrationContext`;
-unset fields keep their defaults:
+through `expressionLimits` on `parseAndRunWorkflow`, `dynamicWorkflow`,
+`workflow()`, or `HydrationContext`; subflows inherit them, and unset fields
+keep their defaults:
 
 ```typescript
 interface ExpressionLimits {
   timeout?: number;
   depth?: number;
   length?: number;
+  steps?: number;
 }
 ```
 
-JSONata also caps a range (`[1..n]`) at 10,000,000 items on its own. Tripping
-any of these fails the evaluation with `EXPRESSION_LIMIT_EXCEEDED`.
+- Each value is a positive integer or `Infinity`, which lifts that one bound.
+  Anything else throws `INVALID_EXPRESSION_LIMITS` when the expression
+  compiles at hydration.
+- Each evaluation starts with a fresh clock, depth, and step count.
+- Tripping a limit fails the evaluation with `EXPRESSION_LIMIT_EXCEEDED`,
+  naming the limit and its value. JSONata also refuses a range (`[1..n]`) of
+  more than 10,000,000 items whatever `length` is.
+- `steps`, `depth`, and `timeout` are checked as each sub-expression starts,
+  so one built-in call (a large `$sort`) runs to its end before the next check.
+- `steps` is the bound that holds everywhere. Endless tail recursion never
+  deepens, and Workers freeze `Date.now()` during pure CPU work, so on Workers
+  only `steps` stops `( $f := function($n){ $f($n + 1) }; $f(0) )`.
+- A built-in that walks deeply nested input recurses natively; overflowing the
+  JavaScript stack throws `EXPRESSION_LIMIT_EXCEEDED` rather than crashing.
 
 The limits bound one evaluation, not a run. An expression cannot loop forever,
 but the workflow around it can (§ Turing Completeness).
@@ -178,7 +193,7 @@ every later evaluation reuses the compiled form.
 
 ## Errors
 
-All three are `NoeticConfigError`s (spec 09): a mistake in the document,
+All four are `NoeticConfigError`s (spec 09): a mistake in the document,
 carrying a code, a message, and a hint. The message names where the
 expression sits (`compute node 'step'`, `route 0 of conditional node 'pick'`,
 `until of loop node 'count'`) and quotes JSONata's own error code and
@@ -188,10 +203,13 @@ position.
 |------------------------------|-----------------------------------------------------------------------|
 | `WORKFLOW_VALIDATION_FAILED` | An expression does not parse (validation time, or hydration of an unvalidated document). |
 | `EXPRESSION_FAILED`          | JSONata raises an error at evaluation; a `compute` gives no value or a function; a test gives a non-boolean. |
-| `EXPRESSION_LIMIT_EXCEEDED`  | An evaluation trips its timeout, depth, or sequence length, or JSONata's range cap. |
+| `EXPRESSION_LIMIT_EXCEEDED`  | An evaluation trips one of its limits or JSONata's range cap, or overflows the JavaScript stack. |
+| `INVALID_EXPRESSION_LIMITS`  | An `expressionLimits` value is not a positive integer or `Infinity` (hydration time). |
 
-An exception that is not a JSONata error is a defect, not a document mistake;
-the adapter rethrows it unchanged. Where an evaluation error surfaces — a
+A JavaScript `Error` thrown inside a JSONata built-in while an expression
+evaluates is that expression's failure and becomes `EXPRESSION_FAILED`. A
+thrown value that is neither a JSONata error nor an `Error` is a defect, not a
+document mistake; the adapter rethrows it unchanged. Where an evaluation error surfaces — a
 failed step, a thrown route, a loop verdict — depends on the node and is
 specified in spec 26 § Expression Failures.
 
@@ -202,11 +220,18 @@ specified in spec 26 § Expression Failures.
 Expressions must run on every runtime core supports, Cloudflare Workers
 included. Workers forbid generating code from strings at run time, so neither
 the adapter nor the library it embeds may call `eval`, `new Function`, or any
-other code-from-string path while compiling or evaluating an expression. An
-expression is parsed into a tree and interpreted, and it does no I/O.
-JSONata's `$now()`, `$millis()`, and `$random()` read the clock and a random
-source; an expression that avoids them gives the same result for the same
-input.
+other code-from-string path while compiling or evaluating an expression.
+JSONata parses an expression into a tree and interprets it; its own `$eval`
+parses JSONata, not JavaScript. A guard test scans the JSONata build core
+resolves for code-from-string calls, so a version bump that adds one fails CI.
+
+Two runtime notes:
+
+- `$base64encode` and `$base64decode` fall back to Node's `Buffer` and need
+  the Workers `nodejs_compat` flag. Without it they throw, and the evaluation
+  fails with `EXPRESSION_FAILED`.
+- `$now()`, `$millis()`, and `$random()` read the clock and a random source;
+  an expression that avoids them gives the same result for the same input.
 
 ---
 

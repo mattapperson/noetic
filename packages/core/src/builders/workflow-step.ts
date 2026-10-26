@@ -19,6 +19,7 @@ import type {
   WorkflowDocument,
 } from '@noetic-tools/types';
 import { frameworkCast, NoeticConfigError } from '@noetic-tools/types';
+import type { ExpressionLimits } from '../expression/jsonata';
 import { spawn } from './spawn-builder';
 import { runCode } from './step-builders';
 import type { HydrationContext } from './workflow-hydrator';
@@ -41,6 +42,8 @@ export interface WorkflowOpts {
   workflows?: ReadonlyMap<string, WorkflowDocument>;
   /** Deepest allowed chain of named-ref resolutions (`ref` itself included). Positive integer or `Infinity`. Default: 100. */
   maxRecursionDepth?: number;
+  /** Bounds on each expression evaluation; unset fields use `DEFAULT_EXPRESSION_LIMITS`. */
+  expressionLimits?: ExpressionLimits;
   /** ACP agent adapters, keyed by `agentId`, for `acp-agent` nodes. */
   acpAgents?: ReadonlyMap<string, AcpAgent>;
   /** Output codecs for `callModel` nodes' `output` codec references. */
@@ -158,6 +161,7 @@ function hydrate(
     uiLibraries: opts.uiLibraries,
     resolveSubprocess: opts.resolveSubprocess,
     maxRecursionDepth: opts.maxRecursionDepth,
+    expressionLimits: opts.expressionLimits,
     recursionDepth: opts.ref ? 1 : undefined,
   };
   const hydrated = hydrateWorkflow(doc, hydrationCtx);

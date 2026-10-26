@@ -718,6 +718,7 @@ const result = await parseAndRunWorkflow({
 | `layers` | `ReadonlyMap<string, ContextLayer>` | `undefined` | Named context layers that `withContext`/`spawn` nodes may reference. |
 | `workflows` | `ReadonlyMap<string, WorkflowDocument>` | `undefined` | Named sub-workflows that `subflow` nodes may reference via `ref`. |
 | `maxRecursionDepth` | `number` | `100` | Deepest chain of named-ref resolutions on one path. A positive integer or `Infinity`. |
+| `expressionLimits` | `ExpressionLimits` | `DEFAULT_EXPRESSION_LIMITS` | Bounds on each expression evaluation (`steps`, `depth`, `length`, `timeout`). See [Expressions](/docs/framework/expressions#limits). |
 
 Returns `Promise<string>` -- the string output of the executed workflow.
 
@@ -801,6 +802,7 @@ const result = await harness.run(rootStep, 'input text', ctx);
 | `resolveSubprocess` | `(ref: string) => SubprocessAdapter \| undefined` | Optional. Resolves a `runCode` node's named `subprocess` ref to an adapter. When a `runCode` node omits the ref, the harness default (`ctx.subprocess`) is used at execution time. |
 | `workflows` | `ReadonlyMap<string, WorkflowDocument>` | Optional. Named sub-workflow documents that `subflow` nodes resolve via `ref` — lazily, so a live map may gain entries after hydration. |
 | `maxRecursionDepth` | `number` | Optional. Deepest chain of named-ref resolutions on one path; default `100`, `Infinity` for none. |
+| `expressionLimits` | `ExpressionLimits` | Optional. Bounds on each expression evaluation; unset fields use `DEFAULT_EXPRESSION_LIMITS`. |
 
 `hydrateWorkflow(doc, ctx)` converts a validated `WorkflowDocument` into its root `Step`. `hydrateNode(node, ctx)` converts a single `WorkflowNode`. Both return `Step<ContextData, string, string>` -- indistinguishable from programmatically built steps.
 
