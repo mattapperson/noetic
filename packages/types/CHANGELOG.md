@@ -1,3 +1,8 @@
+## @noetic-tools/types-v3.16.0 (2026-10-26)
+
+* feat(core): record paid model dispatches and settle cut-off bills ([b64bf61](https://github.com/mattapperson/noetic/commit/b64bf61)), closes [#144](https://github.com/mattapperson/noetic/issues/144)
+* feat(types): add CancelOptions and a draining harness status ([e96ea1d](https://github.com/mattapperson/noetic/commit/e96ea1d)), closes [#145](https://github.com/mattapperson/noetic/issues/145)
+
 ## @noetic-tools/types-v3.15.0 (2026-10-26)
 
 * feat(core): durable steers and steer-triggered recall (#141) ([0c7b185](https://github.com/mattapperson/noetic/commit/0c7b185)), closes [#141](https://github.com/mattapperson/noetic/issues/141)
