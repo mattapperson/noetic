@@ -134,7 +134,7 @@ Recursion depth is capped by `maxRecursionDepth` (default `100`); a deeper call 
 
 An uncapped loop (`"maxIterations": "infinity"`), a `compute` body that carries state, and an `expr` test that halts on it make JSON workflows Turing complete: they can run any two-counter machine. One `compute` expression can run a whole machine whose program is data:
 
-```jsonata
+```text
 (
   $i := prog[$$.pc];
   $i.op = "inc"
