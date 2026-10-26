@@ -285,6 +285,40 @@ await parseAndRunWorkflow({
 });
 ```
 
+## Pattern: JSON Workflow with State
+
+A JSON workflow can hold state and run until the state says to stop, with no model calls. A `compute` node turns its input into a new value with a [JSONata](https://docs.jsonata.org) expression; as a loop body, its output becomes the next iteration's input, so it carries a state object. An `{ "kind": "expr" }` until predicate tests that state exactly, and `"maxIterations": "infinity"` lifts the cap. Together they make the format Turing complete, so bound the run with budgets instead: put `maxDuration` or `maxCost` beside the test in an `any`, and abort the context if needed.
+
+```typescript
+const result = await parseAndRunWorkflow({
+  json: {
+    version: 1,
+    root: {
+      kind: 'loop',
+      id: 'count',
+      maxIterations: 'infinity',
+      body: { kind: 'compute', id: 'step', expr: "{ 'n': n - 1, 'sum': sum + n }" },
+      until: { kind: 'any', predicates: [
+        { kind: 'expr', expr: 'n = 0' },
+        { kind: 'maxDuration', duration: 60_000 },
+      ] },
+    },
+  },
+  harness, ctx, tools: [],
+  input: JSON.stringify({ n: 4, sum: 0 }),
+});
+// '{"n":0,"sum":10}'
+```
+
+Rules worth knowing:
+
+- Input is read as JSON when it parses, so `n` reads the previous output's `n` field.
+- A `compute` result is written as JSON text (strings as-is, `null` as empty). A path that matches nothing fails with `EXPRESSION_FAILED` rather than giving empty output.
+- Tests (route `expr`, until `expr`) must give a boolean: `true` passes; `false` or no value fails; anything else is `EXPRESSION_FAILED`. Write comparisons out (`count > 0`).
+- Route on state with `{ "expr": "<JSONata>", "target": ... }` in place of `match` on a `conditional` route.
+- Each evaluation runs under `timeout`/`depth`/`length` limits (`DEFAULT_EXPRESSION_LIMITS`; override with `expressionLimits`); past them is `EXPRESSION_LIMIT_EXCEEDED`. Syntax errors fail validation (`WORKFLOW_VALIDATION_FAILED`) before the run.
+- Combine with recursive named workflows (above) for state that branches into sub-problems.
+
 ## Pattern: Parallel Research
 
 Multiple agents research in parallel, results merged:

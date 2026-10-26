@@ -1,39 +1,86 @@
 # Expressions
 
 > **Depends On:** `05-loop-and-until` (Until, Verdict), `09-error-model` (NoeticConfigError), `26-json-workflow-runtime` (WorkflowNode, hydration)
-> **Exports:** `Expression`, `ExpressionSchema`, `evaluate`
+> **Exports:** `Expression`, `ExpressionSchema`, `ExpressionLimits`, `DEFAULT_EXPRESSION_LIMITS`
 
 ---
 
 ## Purpose
 
-A JSON workflow moves data between nodes as strings. Substring routes and
-text appends alone describe only a finite-state machine. Expressions read and
-build structured values, so a workflow can hold state and branch on it
-exactly:
+A JSON workflow moves data between nodes as text. Substring routes and text
+appends alone describe only a finite-state machine. Expressions read and build
+structured values, so a workflow can hold state and branch on it exactly.
 
-- the `compute` node (spec 26) turns its input into a new value,
-- a `conditional` route's `when` (spec 26) picks a branch by an exact test,
-- the `when` until predicate (spec 26) stops a loop by an exact test.
+Noetic does not define its own expression language. It embeds
+[JSONata](https://docs.jsonata.org), a query and transformation language for
+JSON, and this spec covers only how Noetic embeds it: where expressions
+appear, what they read, how their results become node output, the limits they
+run under, and the errors they raise. The language itself is documented at
+https://docs.jsonata.org and is not restated here.
 
-An expression is plain JSON. It is never `eval`'d, does no I/O, reads no clock
-or randomness, and always gives the same result for the same input, so it runs
-anywhere the runtime runs, Cloudflare Workers included. The op set is closed:
-adding an op is a schema change.
+---
 
-The language is small on purpose. It can read and write paths in a value, do
-arithmetic, compare, branch, and build lists, strings, and objects. That is
-enough to simulate a two-counter (Minsky) machine — a state object holding a
-program counter and two integer counters, a `conditional` that routes on the
-counter with `when`, `compute` nodes that increment, decrement, and zero-test,
-and a `loop` that runs until the program counter reaches a halt state — and so
-enough for any computation the loop's iteration cap allows.
+## Why JSONata
+
+- **Precedent.** AWS Step Functions uses JSONata as the expression language of
+  its JSON state machines (Amazon States Language). Noetic workflows are JSON
+  state machines of the same kind, so the same choice carries over, along
+  with its body of examples and tooling.
+- **Model familiarity.** JSONata is old, stable, and widely written, so models
+  write it well without a grammar in the prompt. A planner that emits a
+  workflow document can emit its expressions too.
+- **Fit.** An expression is one string. It reads paths, does arithmetic,
+  compares, branches, and builds objects and arrays — what a workflow needs
+  to carry state — and it does no I/O.
+- **Runtime-neutral.** The library is plain JavaScript with no native or
+  platform dependencies, so it runs wherever core runs.
+
+---
+
+## Version Pinning
+
+`@noetic-tools/core` depends on `jsonata` at an exact version (`2.2.2`), not a
+range. The meaning of a stored document must not change under it because a
+transitive install picked up a newer release. Moving to a new JSONata version
+is a deliberate core change, called out in its release notes.
+
+All use of the library goes through one adapter,
+`packages/core/src/expression/jsonata.ts`. No other module imports JSONata or
+inspects its error objects.
+
+---
+
+## The Expression Type
+
+```typescript
+type Expression = string;
+```
+
+`ExpressionSchema` (in `@noetic-tools/types`) accepts any non-empty string.
+The types package checks shape only and does not depend on JSONata, so it
+stays free of the library. Core checks syntax (§ Validation).
+
+---
+
+## Where Expressions Appear
+
+| Place                | Field                                   | Role                                                     |
+|----------------------|-----------------------------------------|----------------------------------------------------------|
+| `compute` node       | `expr`                                  | Computes the node's output from its input.               |
+| `conditional` route  | `{ "expr": "<JSONata>", "target": … }`  | Takes the route when the expression gives `true`.        |
+| `loop` until         | `{ "kind": "expr", "expr": "<JSONata>" }` | Stops the loop when the expression gives `true`.       |
+
+A conditional route carries exactly one of `match` (substring) or `expr`. The
+`expr` until predicate may appear inside `any` and `all` like any other
+predicate. Node shapes and their hydration are specified in spec 26.
 
 ---
 
 ## The Input
 
-An expression is evaluated against one value, its **input**:
+Every expression is evaluated against one value, its **input**, read from the
+node's input (for an until predicate, the loop's last output) by one rule,
+`readInput`:
 
 - A string is parsed as JSON when it parses; otherwise the raw string is the
   input. `'{"n":1}'` is the object `{ "n": 1 }`, `'42'` is the number `42`,
@@ -41,272 +88,257 @@ An expression is evaluated against one value, its **input**:
 - Any other value (for example a `decide` node's answers object) is the input
   as is.
 
-The hydrator applies this rule before every evaluation, so nodes that pass JSON
-text to one another read it as structured data.
+Nodes pass JSON text to one another, so this rule lets each expression read
+the previous node's output as structured data. In JSONata terms the input is
+the context value: a bare path such as `n` reads its `n` field, and `$` is the
+whole input.
 
 ---
 
-## Encoding
+## Results
 
-Every expression is one of:
+### `compute`
 
-| Form            | Meaning                                                                   |
-|-----------------|---------------------------------------------------------------------------|
-| string, number, boolean, `null` | A literal: evaluates to itself.                          |
-| array           | A list: each element is an expression, evaluated in order.                |
-| object          | An op: exactly one key, the op name. Its value holds the op's arguments.  |
+The result becomes the node's output, written the way every node writes its
+output:
 
-Op arguments are written one of three ways:
+| Result                       | Output                                        |
+|------------------------------|-----------------------------------------------|
+| string                       | The string itself.                            |
+| `null`                       | The empty string.                             |
+| number, boolean, object, array | Its JSON text.                              |
+| no value (`undefined`)       | Fails with `EXPRESSION_FAILED`.               |
+| function                     | Fails with `EXPRESSION_FAILED`.               |
 
-| Op       | Value                                     | Example                                    |
-|----------|-------------------------------------------|--------------------------------------------|
-| `get`    | One expression, evaluated to a path.      | `{ "get": "counter.a" }`                   |
-| `quote`  | Any JSON, returned as is, never evaluated.| `{ "quote": { "get": "not an op" } }`      |
-| `object` | A record of key → expression.             | `{ "object": { "n": { "get": "n" } } }`    |
-| any other | An array of argument expressions.        | `{ "+": [{ "get": "n" }, 1] }`             |
+JSONata gives no value when a path matches nothing. A `compute` node treats
+that as a mistake rather than turning it into empty output, since it most
+often means a misspelled field. A function has no JSON form.
 
-Because an object is always an op, a literal object is written with `quote`
-(fixed) or `object` (built from expressions). A literal list needs neither:
-`[1, 2]` is the list `[1, 2]`, and `{ "quote": [1, 2] }` is the same list.
+Because output is text, a string result that is itself valid JSON (`"5"`,
+`"true"`) reads back as that JSON value at the next node. Keep strings inside
+an object to carry them as strings.
 
-The schema enforces one key per op object and each op's argument count, so a
-malformed expression fails `WORKFLOW_VALIDATION_FAILED` at parse time rather
-than at execution.
+### Tests
 
-### Paths
-
-`get` and `set` take a path — a value naming a place inside another value:
-
-- A **string** is split on `.`: `"counter.a"` is `["counter", "a"]`. The empty
-  string is the empty path.
-- A **list** of segments, each a string or an integer: `["counter", "a"]`,
-  `["items", 0]`. Use the list form when a key holds a `.`.
-
-The empty path names the whole value. A segment indexes a list when the value
-at that point is a list; it must then be an integer, or a string of digits.
-Otherwise it names an object key, which must be a string.
+A route `expr` and an until `expr` are **tests**. A test passes on `true` and
+fails on `false` or no value, so a path that matches nothing (`done` on an
+object without a `done` field) reads as false. Any other result — a number,
+string, object, array, or `null` — fails with `EXPRESSION_FAILED`. Noetic does
+not apply JSONata's truthiness to tests: a branch must be exact, and coercion
+(`0` as false, `"false"` as true) makes a misread field look like an answer.
+Write the comparison out (`count > 0`, `$exists(error)`).
 
 ---
 
-## Ops
+## Limits
 
-All ops are pure: an op that "changes" a value returns a new value and leaves
-its arguments untouched.
+Every evaluation runs under three limits, enforced by JSONata itself:
 
-### Reading and building
+| Limit     | Meaning                                                            | Default     |
+|-----------|--------------------------------------------------------------------|-------------|
+| `timeout` | Milliseconds one evaluation may run.                               | `1000`      |
+| `depth`   | How deep evaluation may nest, counting each function call and sub-expression. | `500` |
+| `length`  | The most items one sequence (JSONata's result list) may hold.     | `1000000`   |
 
-| Op       | Arguments                    | Result                                                                 |
-|----------|------------------------------|------------------------------------------------------------------------|
-| `get`    | path                         | The value at the path in the input. A missing key or index fails.      |
-| `quote`  | any JSON                     | That JSON, unevaluated.                                                 |
-| `object` | record of expressions        | An object with each key's evaluated value.                              |
-| `set`    | `[target, path, value]`      | A copy of `target` with `value` at the path. Missing object keys along the path are created as `{}`. A list index may be any existing index, or the list length to append. The empty path returns `value`. |
-| `at`     | `[container, key]`           | A list's element or a string's character at an integer index (negative counts from the end), or an object's value at a string key. Out of range or missing fails. |
-| `has`    | `[container, key]`           | `true` when `at` would succeed on that list or object, else `false`.    |
-| `len`    | `[value]`                    | A string's length, a list's length, or an object's key count.          |
+`DEFAULT_EXPRESSION_LIMITS` holds the defaults. A host overrides any of them
+through `expressionLimits` on `parseAndRunWorkflow` or `HydrationContext`;
+unset fields keep their defaults:
 
-### Lists and strings
+```typescript
+interface ExpressionLimits {
+  timeout?: number;
+  depth?: number;
+  length?: number;
+}
+```
 
-| Op       | Arguments                    | Result                                                                 |
-|----------|------------------------------|------------------------------------------------------------------------|
-| `push`   | `[list, value]`              | A new list with `value` appended.                                       |
-| `slice`  | `[list or string, start, end?]` | The part from `start` up to (not including) `end`, with JavaScript `slice` rules: negative indexes count from the end, out-of-range indexes clamp. `{ "slice": [xs, 0, -1] }` drops the last element (a pop). |
-| `concat` | `[a, b, ...]` (one or more)  | All strings joined, or all lists joined end to end. Mixing fails.      |
+JSONata also caps a range (`[1..n]`) at 10,000,000 items on its own. Tripping
+any of these fails the evaluation with `EXPRESSION_LIMIT_EXCEEDED`.
 
-### Arithmetic
+The limits bound one evaluation, not a run. An expression cannot loop forever,
+but the workflow around it can (§ Turing Completeness).
 
-All arguments must be numbers, and every result must be finite.
+---
 
-| Op  | Arguments          | Result                                    |
-|-----|--------------------|-------------------------------------------|
-| `+` | one or more        | The sum.                                  |
-| `-` | one or two         | The negation of one; the difference of two.|
-| `*` | one or more        | The product.                              |
-| `/` | two                | The quotient. Dividing by zero fails.     |
-| `%` | two                | The JavaScript remainder (sign of the dividend). By zero fails. |
+## Validation
 
-There is one number type (JSON's). Integers stay exact up to 2^53.
+Syntax is checked when a document is validated, not when an expression first
+runs. After the schema accepts a document, core's `expressionErrors(root)`
+walks the tree, compiles every `compute.expr`, route `expr`, and until `expr`
+(including those nested in `any` and `all`), and lists one message per
+expression that does not parse. `parseAndRunWorkflow` and `dynamicWorkflow`
+treat a non-empty list as a validation failure, so a planner gets syntax errors
+back in the same revision loop as schema errors.
 
-### Comparison
-
-| Op                    | Arguments | Result                                                                |
-|-----------------------|-----------|-----------------------------------------------------------------------|
-| `==`, `!=`            | two       | Deep equality on any values: same type, same scalars, lists equal element by element, objects with the same keys and equal values. No coercion: `1` does not equal `"1"`. |
-| `<`, `<=`, `>`, `>=`  | two       | Order on two numbers, or two strings (by UTF-16 code unit). Any other pair fails. |
-
-### Logic
-
-| Op    | Arguments              | Result                                                              |
-|-------|------------------------|---------------------------------------------------------------------|
-| `and` | one or more booleans   | `true` when all are `true`. Stops at the first `false`.              |
-| `or`  | one or more booleans   | `true` when any is `true`. Stops at the first `true`.                |
-| `not` | one boolean            | Its negation.                                                        |
-| `if`  | `[cond, then, else]`   | `then` when `cond` is `true`, `else` when it is `false`. Only the taken branch is evaluated. |
-
-### Truth
-
-Only the boolean `true` is true and only `false` is false. A condition — an
-`if` test, an `and`/`or`/`not` argument, a route's `when`, an until `when` —
-that evaluates to anything else fails. There is no truthiness: `0`, `""`,
-`null`, and `[]` are errors in a condition, not `false`.
+Named `subflow` refs are not followed; their expressions compile when the
+referenced document hydrates. Hydration compiles each expression once, and
+every later evaluation reuses the compiled form.
 
 ---
 
 ## Errors
 
-Every failure at evaluation throws a `NoeticConfigError` with code
-`EXPRESSION_FAILED`. The message names the op, where the failing expression
-sits as a JSON Pointer into the expression (`/` is the root; an op's argument
-`i` is `<op location>/<op>/<i>`, an `object` entry `<op location>/object/<key>`),
-and what was wrong:
+All three are `NoeticConfigError`s (spec 09): a mistake in the document,
+carrying a code, a message, and a hint. The message names where the
+expression sits (`compute node 'step'`, `route 0 of conditional node 'pick'`,
+`until of loop node 'count'`) and quotes JSONata's own error code and
+position.
 
-```
-Expression failed at /if/0/==/0 ('+'): argument 1 must be a number, got string.
-Expression failed at / ('get'): no key 'b' at path 'a.b'.
-```
+| Code                         | When                                                                  |
+|------------------------------|-----------------------------------------------------------------------|
+| `WORKFLOW_VALIDATION_FAILED` | An expression does not parse (validation time, or hydration of an unvalidated document). |
+| `EXPRESSION_FAILED`          | JSONata raises an error at evaluation; a `compute` gives no value or a function; a test gives a non-boolean. |
+| `EXPRESSION_LIMIT_EXCEEDED`  | An evaluation trips its timeout, depth, or sequence length, or JSONata's range cap. |
 
-A failure is raised for:
-
-- an argument of the wrong type (`+` on a string, `len` on a number, …),
-- a condition that is not a boolean,
-- a missing key or out-of-range index in `get` or `at`, or a bad path,
-- a non-finite arithmetic result, or a divisor of zero,
-- a limit (below) being exceeded.
-
-The hydrator prefixes the message with the workflow node id. Where the error
-surfaces depends on the node (spec 26 § Expression Failures).
-
-### Limits
-
-Evaluation work is linear in the expression's size: there is no recursion,
-looping, or user-defined function. Two limits bound it further:
-
-| Limit               | Value  | Applies to                                                      |
-|---------------------|--------|-----------------------------------------------------------------|
-| Nesting depth       | 64     | Ops and lists nested inside one another.                        |
-| Result length       | 10^6   | The length of a `concat` or `push` result (characters or elements), so doubling a value in each op cannot grow it without bound. |
+An exception that is not a JSONata error is a defect, not a document mistake;
+the adapter rethrows it unchanged. Where an evaluation error surfaces — a
+failed step, a thrown route, a loop verdict — depends on the node and is
+specified in spec 26 § Expression Failures.
 
 ---
 
-## Schema
+## Workers Safety
 
-`ExpressionSchema` lives in `@noetic-tools/types` beside the workflow schema.
-It is recursive and is emitted in the published JSON Schema as a named `$defs`
-entry, `Expression`. Each op is a strict object (one key, no others), so the
-JSON Schema rejects extra keys too.
-
-```typescript
-type Expression =
-  | string | number | boolean | null
-  | Expression[]
-  | { get: Expression }
-  | { quote: JsonValue }
-  | { object: Record<string, Expression> }
-  | { set: [Expression, Expression, Expression] }
-  | { at: [Expression, Expression] }
-  | { has: [Expression, Expression] }
-  | { len: [Expression] }
-  | { push: [Expression, Expression] }
-  | { slice: [Expression, Expression] | [Expression, Expression, Expression] }
-  | { concat: Expression[] }                       // one or more
-  | { '+': Expression[] }                          // one or more
-  | { '-': [Expression] | [Expression, Expression] }
-  | { '*': Expression[] }                          // one or more
-  | { '/': [Expression, Expression] }
-  | { '%': [Expression, Expression] }
-  | { '==': [Expression, Expression] }
-  | { '!=': [Expression, Expression] }
-  | { '<': [Expression, Expression] }
-  | { '<=': [Expression, Expression] }
-  | { '>': [Expression, Expression] }
-  | { '>=': [Expression, Expression] }
-  | { and: Expression[] }                          // one or more
-  | { or: Expression[] }                           // one or more
-  | { not: [Expression] }
-  | { if: [Expression, Expression, Expression] };
-```
+Expressions must run on every runtime core supports, Cloudflare Workers
+included. Workers forbid generating code from strings at run time, so neither
+the adapter nor the library it embeds may call `eval`, `new Function`, or any
+other code-from-string path while compiling or evaluating an expression. An
+expression is parsed into a tree and interpreted, and it does no I/O.
+JSONata's `$now()`, `$millis()`, and `$random()` read the clock and a random
+source; an expression that avoids them gives the same result for the same
+input.
 
 ---
 
-## Evaluator
+## Turing Completeness
 
-```typescript
-function evaluate(expr: Expression, input: unknown): unknown
-```
+Expressions make JSON workflows Turing complete. A `loop` with
+`"maxIterations": "infinity"` repeats without a static bound, a `compute` body
+carries a state object of unbounded integers from one iteration to the next,
+and an `expr` until predicate halts on that state exactly. That is enough to
+run a two-counter (Minsky) machine, which can compute anything computable.
+Recursive named subflows (spec 26 § Recursion) reach the same power.
 
-A plain, synchronous function in `@noetic-tools/core` (`expression/`). It
-takes an already-read input (§ The Input) and returns the result, or throws
-`EXPRESSION_FAILED`. Ops dispatch through a registry keyed by op name. Results
-are JSON values; `evaluate` never mutates `expr` or `input`.
+Since halting cannot be decided ahead of time, bounds come from the run, not
+the document: an aborted context, `maxCost` and `maxDuration` predicates,
+`maxRecursionDepth`, and the expression limits above.
 
----
+### Worked Examples
 
-## Example
-
-A loop body that moves one unit from `counter` to `sum` each turn:
+**A two-counter loop.** Sum the numbers from `n` down to `1`. The state holds
+two counters, `n` and `sum`; each iteration moves one step, and the loop stops
+when `n` reaches zero:
 
 ```json
 {
-  "object": {
-    "counter": { "-": [{ "get": "counter" }, 1] },
-    "sum": { "+": [{ "get": "sum" }, { "get": "counter" }] }
+  "version": 1,
+  "root": {
+    "kind": "loop",
+    "id": "count",
+    "maxIterations": "infinity",
+    "body": { "kind": "compute", "id": "step", "expr": "{ 'n': n - 1, 'sum': sum + n }" },
+    "until": { "kind": "expr", "expr": "n = 0" }
   }
 }
 ```
 
-The same with `set`, keeping every other field of the input:
+Run with input `{"n":4,"sum":0}`, the loop passes through `{"n":3,"sum":4}`,
+`{"n":2,"sum":7}`, and `{"n":1,"sum":9}`, and ends with `{"n":0,"sum":10}`.
+
+**Any two-counter machine.** The same shape runs a whole machine whose program
+is data. The state holds a program counter `pc`, the registers, and a program;
+an `inc` instruction adds one to a register, a `dec` instruction jumps to
+`zero` when its register is zero and otherwise subtracts one. One `compute`
+expression runs one instruction:
+
+```jsonata
+(
+  $i := prog[$$.pc];
+  $i.op = "inc"
+    ? $merge([$$, { "pc": $i.next, $i.reg: $lookup($$, $i.reg) + 1 }])
+    : $lookup($$, $i.reg) = 0
+      ? $merge([$$, { "pc": $i.zero }])
+      : $merge([$$, { "pc": $i.next, $i.reg: $lookup($$, $i.reg) - 1 }])
+)
+```
+
+With that expression as the loop body and `{ "kind": "expr", "expr": "pc < 0" }`
+as the predicate, the input below adds `a` into `b` and halts with `pc` at
+`-1`, `a` at `0`, and `b` at `5`:
 
 ```json
 {
-  "set": [
-    { "set": [{ "get": "" }, "sum", { "+": [{ "get": "sum" }, { "get": "counter" }] }] },
-    "counter",
-    { "-": [{ "get": "counter" }, 1] }
+  "pc": 0, "a": 3, "b": 2,
+  "prog": [
+    { "op": "dec", "reg": "a", "next": 1, "zero": -1 },
+    { "op": "inc", "reg": "b", "next": 0 }
   ]
 }
 ```
 
-A test that the counter is zero: `{ "==": [{ "get": "counter" }, 0] }`.
+**A recursive subflow.** The same sum, by recursion. A named workflow `sum`
+returns its total at the base case and otherwise steps once and calls itself:
+
+```json
+{
+  "version": 1,
+  "root": {
+    "kind": "conditional",
+    "id": "base",
+    "routes": [
+      { "expr": "n = 0", "target": { "kind": "compute", "id": "done", "expr": "sum" } }
+    ],
+    "default": {
+      "kind": "sequence",
+      "id": "recurse",
+      "steps": [
+        { "kind": "compute", "id": "step", "expr": "{ 'n': n - 1, 'sum': sum + n }" },
+        { "kind": "subflow", "id": "again", "ref": "sum" }
+      ]
+    }
+  }
+}
+```
+
+Registered under `sum` in `workflows` and run with `{"n":4,"sum":0}`, it
+recurses four levels and outputs `10`. A larger `n` than `maxRecursionDepth`
+allows fails with `WORKFLOW_RECURSION_LIMIT`.
 
 ---
 
 ## Design Notes
 
-**Single-key op objects.** An op is `{ "<op>": args }`, as in JSON Logic,
-rather than `{ "op": "add", "args": [...] }`. It is shorter for people and for
-models to write, the op name reads first, and each op is its own strict schema
-variant, so editors and validators check arity per op. The cost is that a
-literal object cannot be written bare; `quote` and `object` cover that, and
-workflow state built from expressions uses `object` or `set` anyway.
+**Embed, don't invent.** A custom language would need its own grammar,
+documentation, and examples, and models would know none of it. JSONata brings
+all three, and a precedent in AWS Step Functions.
 
-**Paths are values.** `get`'s argument is an expression like any other, so
-`{ "get": "counter.a" }` is a literal path while
-`{ "get": { "concat": ["regs.", { "get": "which" }] } }` picks the path at run
-time. `at` gives one dynamic step into any value, not just the input.
+**Strings, not trees.** An expression is a JSONata source string, not a JSON
+encoding of an expression tree. It is shorter to write and to read in a
+document, and it is the form models already produce. The cost is that the
+JSON Schema cannot check syntax; core's validation pass does.
 
-**Strict types, no truthiness.** A workflow branch must be exact. Coercion
-(`"1" == 1`, `0` as false) makes a misread field look like a valid answer;
-failing instead surfaces the mistake at the node that made it.
+**Strict tests.** JSONata's own truthiness is loose. Tests require a boolean
+so that a misread field fails at the node that made the mistake instead of
+silently picking a branch.
 
-**Errors as `NoeticConfigError`.** An expression failure is a mistake in the
-document, like `INVALID_FORK_INPUT`, found at execution because only then is
-the input known. It carries a code, a message, and a hint, the same as every
-other document mistake.
+**Limits per evaluation.** An expression is one step of a workflow, so its
+limits are small and fixed, and the workflow's own budgets bound the run.
 
 ---
 
 ## Cross-References
 
-- `compute` node, `conditional` `when` routes, `when` until predicate: `26-json-workflow-runtime`
-- Loop termination and predicate errors: `05-loop-and-until`
+- `compute` node, `conditional` `expr` routes, `expr` until predicate, Expression Failures: `26-json-workflow-runtime`
+- Recursive named subflows and `maxRecursionDepth`: `26-json-workflow-runtime`
+- Loop termination, verdicts, and the iteration cap: `05-loop-and-until`
 - `NoeticConfigError`: `09-error-model`
+- JSONata language reference: https://docs.jsonata.org
 
 ---
 
 ## Future Considerations
 
-- **More ops.** Object key listing, string search and split, and number
-  formatting would help text-heavy workflows. Each is a schema change and an
-  entry in the op registry.
-- **Bindings.** A `let` form naming a sub-result would avoid evaluating the
-  same sub-expression twice in large expressions.
+- **Host functions.** A host could register named, pure functions (for example
+  a domain lookup) that expressions call as `$name(...)`, bound through
+  JSONata's environment. Each would need the same Workers-safety and
+  determinism rules as the language itself.
