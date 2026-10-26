@@ -1,3 +1,7 @@
+## @noetic-tools/core-v5.15.1 (2026-10-26)
+
+* perf(core): find a ledger entry's subtree by binary search ([b2e7ade](https://github.com/mattapperson/noetic/commit/b2e7ade))
+
 ## @noetic-tools/core-v5.15.0 (2026-10-26)
 
 * feat(core): steer a running turn with next-item delivery and onSteer layers (#139) ([bb468d8](https://github.com/mattapperson/noetic/commit/bb468d8)), closes [#139](https://github.com/mattapperson/noetic/issues/139)
