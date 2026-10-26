@@ -129,14 +129,15 @@ export class SteerInbox {
   ): Promise<SteerVerdict> {
     const action = defaultAction(point, message.deliveryMode);
     const items = inputToItems(message.input);
-    if (!this.opts.layers.some((layer) => layer.hooks.onSteer)) {
+    const { harness, layers } = this.opts;
+    if (!harness.onSteer || !layers.some((layer) => layer.hooks.onSteer)) {
       return {
         action,
         items,
       };
     }
-    return this.opts.harness.onSteer(
-      this.opts.layers,
+    return harness.onSteer(
+      layers,
       {
         steer: {
           id: message.id,

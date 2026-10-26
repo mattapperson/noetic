@@ -26,8 +26,12 @@ export interface HarnessJudgmentContract {
     response: LLMResponse,
     ctx: Context,
   ): Promise<SteeringDecision>;
-  /** Run a steer through every layer's `onSteer` hook, in slot order. */
-  onSteer(
+  /**
+   * Run a steer through every layer's `onSteer` hook, in slot order. Optional:
+   * without it, a steer lands at its delivery mode's default point and is
+   * appended to the conversation unchanged.
+   */
+  onSteer?(
     layers: ContextLayer[],
     params: Pick<OnSteerParams, 'steer' | 'point' | 'action' | 'pendingCalls'>,
     ctx: Context,

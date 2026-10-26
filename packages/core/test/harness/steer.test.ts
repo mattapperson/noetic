@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import type {
+  AgentHarnessContract,
   CallModelRequest,
   Context,
   ContextData,
@@ -25,7 +26,7 @@ import { frameworkCast, SteerAction, SteerPoint } from '@noetic-tools/types';
 import { z } from 'zod';
 import { tool } from '../../src/builders/tool-builder';
 import { AgentHarness } from '../../src/harness/agent-harness';
-import { openSteerInbox } from '../../src/harness/steer-inbox';
+import { openSteerInbox, SteerInbox } from '../../src/harness/steer-inbox';
 import { createInMemoryStorage } from '../../src/runtime/in-memory-storage';
 import type { QueuedMessage, SessionCtxExtension } from '../../src/runtime/message-queue';
 import { MessageQueue } from '../../src/runtime/message-queue';
@@ -697,6 +698,41 @@ describe('onSteer layers', () => {
       'message:user',
       'message:user',
     ]);
+  });
+});
+
+describe('a harness without onSteer', () => {
+  it('applies steers at their default point and appends them unchanged', async () => {
+    const queue = new MessageQueue();
+    queue.enqueue(queued('use staging', 'next-item'));
+    const harness = new AgentHarness({
+      name: 'steer',
+      params: {},
+    });
+    const inbox = new SteerInbox({
+      queue,
+      ctx: harness.createContext(),
+      // A layer with a hook proves the harness method, not the layer, is what's missing.
+      layers: [
+        steerLayer(async () => ({
+          action: SteerAction.Drop,
+        })),
+      ],
+      harness: frameworkCast<AgentHarnessContract>({
+        ...harness,
+        onSteer: undefined,
+        runAppendPipeline: harness.runAppendPipeline.bind(harness),
+      }),
+      emit: () => {},
+    });
+
+    expect(await inbox.offer(SteerPoint.ItemDone)).toBe(true);
+    const staged = inbox.takeStaged();
+    expect(staged.messageIds).toEqual([
+      'steer-1',
+    ]);
+    expect(staged.items).toHaveLength(1);
+    expect(queue.size).toBe(0);
   });
 });
 

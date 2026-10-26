@@ -2503,7 +2503,7 @@ interface OnSteerResult<TState> {
 }
 ```
 
-The harness runs these hooks through `harness.onSteer(layers, params, ctx)`.
+The harness runs these hooks through `harness.onSteer(layers, params, ctx)`. The method is optional on the harness contracts: without it, each steer applies at its delivery mode's default point and is appended unchanged.
 
 ### RecallOptions.peek
 

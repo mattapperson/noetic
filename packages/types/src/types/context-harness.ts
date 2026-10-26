@@ -179,7 +179,7 @@ export interface ContextHarness {
     response: LLMResponse,
     ctx: Context,
   ): Promise<SteeringDecision>;
-  onSteer(
+  onSteer?(
     layers: ContextLayer[],
     params: Pick<OnSteerParams, 'steer' | 'point' | 'action' | 'pendingCalls'>,
     ctx: Context,
