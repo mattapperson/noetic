@@ -360,24 +360,10 @@ export async function execute<TContext = ContextData, I = unknown, O = unknown>(
   input: I,
   ctx: Context<TContext>,
 ): Promise<O> {
-  // Under a graceful stop no new step starts: it waits here until the tree is
-  // cancelled. When a step ends, its finished model calls stop counting as in flight.
   const baseCtx = frameworkCast<Context>(ctx);
+  // Under a graceful stop no new step starts: it waits here until the tree is cancelled.
   const drains = drainsOf(baseCtx);
   await drains?.hold(baseCtx);
-  try {
-    return await runStep(step, input, ctx);
-  } finally {
-    drains?.release(baseCtx);
-  }
-}
-
-async function runStep<TContext, I, O>(
-  step: Step<TContext, I, O>,
-  input: I,
-  ctx: Context<TContext>,
-): Promise<O> {
-  const baseCtx = frameworkCast<Context>(ctx);
   // Depth guard — classified as step_failed (not budget_exceeded) because depth
   // is a structural safety limit, not a user-configurable budget field.
   if (ctx.depth >= MAX_DEPTH) {
@@ -528,6 +514,7 @@ async function runStep<TContext, I, O>(
     await emitStepItems(step, result, stepCtx);
   } catch (error) {
     lane?.releaseDispatch();
+    drains?.release(frameworkCast<Context>(stepCtx));
     throw error;
   } finally {
     lane?.leaveStep(frame);
@@ -565,5 +552,9 @@ async function runStep<TContext, I, O>(
    * save is logged rather than thrown — durability must never fail a good step. */
   await baseCtx.checkpoint();
 
+  // The model calls the step made stop counting as in flight only now, once
+  // they are charged and the step recorded. A call a failed record leaves
+  // behind is released when an enclosing step ends.
+  drains?.release(frameworkCast<Context>(stepCtx));
   return result;
 }

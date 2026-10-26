@@ -93,26 +93,34 @@ export class Drains {
 
   /**
    * The dispatch gate. Under a drain, release `ctx`'s finished calls and wait
-   * until the drain stops the tree; the caller then sees `ctx.aborted`.
+   * until a drain over it stops the tree; the caller then sees `ctx.aborted`.
    */
   async hold(ctx: Context | undefined): Promise<void> {
-    if (!ctx || this.active.size === 0) {
+    if (!ctx || this.active.size === 0 || ctx.aborted) {
       return;
     }
     this.release(ctx);
-    const drain = this.find(ctx);
-    if (drain) {
-      await drain.over;
+    const over = [
+      ...this.active,
+    ]
+      .filter((drain) => within(ctx, drain.root))
+      .map((drain) => drain.over);
+    if (over.length > 0) {
+      await Promise.race(over);
     }
   }
 
-  /** A step on `ctx` ended: its finished calls are charged and recorded. */
+  /**
+   * The step running on `ctx` ended, or reached a hold: the finished calls it
+   * made are charged and recorded. Calls a concurrent dispatch on the same
+   * context made stay in flight until that dispatch ends.
+   */
   release(ctx: Context): void {
     if (this.active.size === 0) {
       return;
     }
     for (const call of this.calls) {
-      if (call.done && within(call.ctx, ctx)) {
+      if (call.done && inside(call.ctx, ctx)) {
         this.calls.delete(call);
       }
     }
@@ -127,10 +135,6 @@ export class Drains {
         readonly deadline: number;
       }
     | undefined {
-    return this.find(ctx);
-  }
-
-  private find(ctx: Context): Drain | undefined {
     for (const drain of this.active) {
       if (within(ctx, drain.root)) {
         return drain;
@@ -225,6 +229,9 @@ export function drainsOf(ctx: Context | undefined): Drains | undefined {
 
 //#region Helpers
 
+/** Timers round longer delays down to 1 ms; the longest a timer can wait. */
+const MAX_TIMEOUT_MS = 2 ** 31 - 1;
+
 function openDrain(root: Context, ms: number): Drain {
   const startedAt = Date.now();
   let end: (reason: DrainEnd) => void = () => {};
@@ -235,7 +242,7 @@ function openDrain(root: Context, ms: number): Drain {
   const over = new Promise<void>((resolve) => {
     wake = resolve;
   });
-  const timer = setTimeout(() => end('deadline'), ms);
+  const timer = setTimeout(() => end('deadline'), Math.min(ms, MAX_TIMEOUT_MS));
   // Someone else aborting the tree ends the wait: there is nothing left to drain into.
   const signal = root instanceof ContextImpl ? root.abortSignal : undefined;
   const onAbort = (): void => end('stopped');
@@ -268,6 +275,33 @@ function within(ctx: Context, root: Context): boolean {
     node = node.parent;
   }
   return false;
+}
+
+/**
+ * Whether `ctx` runs within the dispatch `step` is the lane of: beneath its
+ * context, or on that context under its execution path. Lanes of one context
+ * share its id, so the path is what tells concurrent dispatches apart.
+ */
+function inside(ctx: Context, step: Context): boolean {
+  for (let node: Context | null = ctx; node; node = node.parent) {
+    if (node.id === step.id) {
+      return under(pathOf(node), pathOf(step));
+    }
+  }
+  return false;
+}
+
+function pathOf(ctx: Context): string {
+  return ctx instanceof ContextImpl ? ctx.currentPath() : '';
+}
+
+/** Whether `path` is `base` or a path beneath it (`/step#n` or `[i]` segments). */
+function under(path: string, base: string): boolean {
+  if (!path.startsWith(base)) {
+    return false;
+  }
+  const next = path[base.length];
+  return next === undefined || next === '/' || next === '[';
 }
 
 function emit(ctx: Context, eventType: string, data: Record<string, unknown>): void {

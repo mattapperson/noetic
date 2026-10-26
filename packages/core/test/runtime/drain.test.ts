@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import { Drains, drainsOf } from '../../src/runtime/drain';
-import { makeMockContext } from '../_helpers';
+import { makeMockContext, sleep } from '../_helpers';
 
 function makeHarness(): AgentHarness {
   return new AgentHarness({
@@ -80,6 +80,89 @@ describe('Drains', () => {
 
     await draining;
     expect(harness.drains.covering(root)).toBeUndefined();
+  });
+
+  it('lets a step whose context is already aborted through at once', async () => {
+    const harness = makeHarness();
+    const drains = harness.drains;
+    const root = harness.createContext();
+    const child = new ContextImpl({
+      harness,
+      parent: root,
+    });
+    drains.track(root, {
+      kind: 'decide',
+      model: 'm',
+    });
+    const draining = drains.run(root, 60e3, async () => {
+      root.abort('drained');
+    });
+    child.abort('elsewhere');
+
+    expect(
+      await Promise.race([
+        drains.hold(child).then(() => 'through'),
+        sleep(100),
+      ]),
+    ).toBe('through');
+    drains.stop(root);
+    await draining;
+  });
+
+  it('wakes a step when the nearest of two nested drains stops', async () => {
+    const harness = makeHarness();
+    const drains = harness.drains;
+    const root = harness.createContext();
+    const child = new ContextImpl({
+      harness,
+      parent: root,
+    });
+    for (const ctx of [
+      root,
+      child,
+    ]) {
+      drains.track(ctx, {
+        kind: 'decide',
+        model: 'm',
+      });
+    }
+    const outer = drains.run(root, 60e3, async () => {
+      root.abort('outer');
+    });
+    const inner = drains.run(child, 20, async () => {
+      child.abort('inner');
+    });
+
+    expect(
+      await Promise.race([
+        drains.hold(child).then(() => 'woke'),
+        sleep(500),
+      ]),
+    ).toBe('woke');
+    expect(child.abortReason).toBe('inner');
+    await inner;
+    drains.stop(root);
+    await outer;
+  });
+
+  it('waits out a drainMs longer than a timer can hold', async () => {
+    const harness = makeHarness();
+    const root = harness.createContext();
+    harness.drains.track(root, {
+      kind: 'decide',
+      model: 'm',
+    });
+    let stopped = false;
+    const draining = harness.drains.run(root, Number.POSITIVE_INFINITY, async () => {
+      stopped = true;
+      root.abort('drained');
+    });
+
+    await sleep(20);
+    expect(stopped).toBe(false);
+    harness.drains.stop(root);
+    await draining;
+    expect(stopped).toBe(true);
   });
 
   it('ignores calls with no context and stops nothing it is not draining', async () => {

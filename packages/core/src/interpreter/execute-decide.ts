@@ -217,7 +217,16 @@ async function askHarness<TContext, I, O>(
   ctx: Context<ContextData>,
   request: Parameters<Context['harness']['decide']>[0],
 ): Promise<DecideResponse> {
-  const finished = drainsOf(ctx)?.track(ctx, {
+  const drains = drainsOf(ctx);
+  // A graceful stop that began while the step prepared its request sends nothing.
+  await drains?.hold(ctx);
+  if (ctx.aborted) {
+    throw new NoeticErrorImpl({
+      kind: 'cancelled',
+      reason: ctx.abortReason ?? 'context aborted',
+    });
+  }
+  const finished = drains?.track(ctx, {
     kind: 'decide',
     model: request.model,
   });

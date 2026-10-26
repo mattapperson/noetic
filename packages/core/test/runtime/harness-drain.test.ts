@@ -396,6 +396,157 @@ describe('cancel with drainMs', () => {
     expect(ctx.cost).toBeCloseTo(0.02);
   });
 
+  it('keeps a call in flight until its own step ends, not a sibling step on the same context', async () => {
+    const storage = createInMemoryStorage();
+    const client = new SlowClient({
+      fast: 30,
+    });
+    const harness = makeHarness(client, storage);
+    const events: EmittedEvent[] = [];
+    const ctx = watchedContext(harness, events);
+    let open: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    let answered = false;
+    const answer = runCode({
+      id: 'answer',
+      execute: async (_input: unknown, stepCtx: Context) => {
+        await stepCtx.harness.callModel({
+          model: 'fast',
+          items: [],
+          ctx: stepCtx,
+        });
+        answered = true;
+        await gate;
+        return 'answered';
+      },
+    });
+    const watch = runCode({
+      id: 'watch',
+      execute: async () => {
+        await waitFor(() => answered);
+        return 'watched';
+      },
+    });
+    // Two dispatches on one context, side by side, as a host fanning out by hand.
+    const graph = runCode({
+      id: 'flow',
+      execute: (input: unknown, flowCtx: Context) =>
+        Promise.all([
+          harness.run(watch, input, flowCtx),
+          harness.run(answer, input, flowCtx),
+        ]),
+    });
+    const run = harness.run(graph, 'go', ctx);
+    await waitFor(() => client.started === 1);
+
+    const stopping = harness.cancel(ctx, {
+      drainMs: 2e3,
+    });
+    await waitFor(() => answered);
+    await sleep(30);
+    const endedEarly = events.some((e) => e.type === 'drain:drain_finished');
+    open();
+    await stopping;
+
+    // Nothing new was due to start, so the run ends on its own, the answer kept.
+    expect(endedEarly).toBe(false);
+    expect(await run).toEqual([
+      'watched',
+      'answered',
+    ]);
+    expect(eventData(events, 'drain_finished').reason).toBe('settled');
+  });
+
+  it('starts no new round once a tool that was running when the drain began returns', async () => {
+    let toolRan = false;
+    const lookup = tool({
+      name: 'lookup',
+      description: 'lookup',
+      input: z.object({}),
+      output: z.object({}),
+      execute: async () => {
+        await sleep(80);
+        toolRan = true;
+        return {};
+      },
+    });
+    const client = new SlowClient({
+      'tools/model': 10,
+      slow: 300,
+    });
+    const harness = makeHarness(client);
+    const ctx = harness.createContext();
+    const agent = callModel({
+      id: 'agent',
+      model: 'tools/model',
+      instructions: 'use tools',
+      tools: [
+        lookup,
+      ],
+    });
+    const run = harness.run(
+      sideBySide([
+        agent,
+        ask('right', 'slow'),
+      ]),
+      'go',
+      ctx,
+    );
+    await waitFor(() => client.started === 2);
+    await sleep(30);
+
+    await harness.cancel(ctx, {
+      drainMs: 2e3,
+    });
+
+    expect(await cancelledError(run)).toBe('cancelled');
+    expect(toolRan).toBe(true);
+    expect(client.started).toBe(2);
+    expect(client.aborted).toBe(0);
+  });
+
+  it('sends no decide call whose step was still preparing when the drain began', async () => {
+    let decided = 0;
+    let resolving = false;
+    const harness = new AgentHarness({
+      name: 'drain',
+      params: {},
+      _testDecide: async (): Promise<DecideResponse> => {
+        decided += 1;
+        throw new Error('sent during a drain');
+      },
+    });
+    const ctx = harness.createContext();
+    const run = harness.run(
+      decide({
+        id: 'triage',
+        model: async () => {
+          resolving = true;
+          await sleep(40);
+          return 'typesafe/jev-1.14';
+        },
+        questions: {
+          urgent: {
+            type: 'boolean',
+            instructions: 'Is it urgent?',
+          },
+        },
+      }),
+      'help',
+      ctx,
+    );
+    await waitFor(() => resolving);
+
+    await harness.cancel(ctx, {
+      drainMs: 2e3,
+    });
+
+    expect(await cancelledError(run)).toBe('cancelled');
+    expect(decided).toBe(0);
+  });
+
   it('settles at once when nothing is in flight', async () => {
     const client = new SlowClient({});
     const harness = makeHarness(client);
