@@ -14,6 +14,8 @@ import { ServiceTier } from '../types/common';
 import type { DecideQuestion } from '../types/decide';
 import { DecideQuestionsSchema, routeOutcomes } from '../types/decide';
 import type { DecideView } from '../types/step';
+import type { Expression } from './expression';
+import { ExpressionSchema } from './expression';
 
 //#region Until Predicate Types
 
@@ -58,6 +60,10 @@ export type UntilPredicate =
   | {
       kind: 'converged';
       threshold?: number;
+    }
+  | {
+      kind: 'when';
+      test: Expression;
     }
   | UntilAnyPredicate
   | UntilAllPredicate
@@ -105,6 +111,11 @@ const ConvergedPredicateSchema = z.object({
   threshold: z.number().min(0).max(1).optional(),
 });
 
+const WhenPredicateSchema = z.object({
+  kind: z.literal('when'),
+  test: ExpressionSchema,
+});
+
 const UntilPredicateRef: z.ZodType<UntilPredicate> = z.lazy(() => UntilPredicateSchema);
 
 const AnyPredicateSchema = z.object({
@@ -131,6 +142,7 @@ export const UntilPredicateSchema: z.ZodType<UntilPredicate> = z
     OutputContainsPredicateSchema,
     OutputEqualsPredicateSchema,
     ConvergedPredicateSchema,
+    WhenPredicateSchema,
     AnyPredicateSchema,
     AllPredicateSchema,
     UntilDeciderRef,
@@ -386,8 +398,20 @@ export interface RunCodeWorkflowNode extends WorkflowNodeBase {
   subprocess?: string;
 }
 
+/** A node that computes a value from its input with an expression (spec 33). */
+export interface ComputeWorkflowNode extends WorkflowNodeBase {
+  kind: 'compute';
+  expr: Expression;
+}
+
+/**
+ * A `conditional` route. Supply exactly one test: `match` (case-insensitive
+ * substring of the input's text) or `when` (an expression that must give a
+ * boolean; the route is taken on `true`).
+ */
 export interface ConditionalRoute {
-  match: string;
+  match?: string;
+  when?: Expression;
   target: WorkflowNode;
 }
 
@@ -528,6 +552,7 @@ export type WorkflowNode =
   | CallModelWorkflowNode
   | InvokeToolWorkflowNode
   | RunCodeWorkflowNode
+  | ComputeWorkflowNode
   | ConditionalWorkflowNode
   | DecideWorkflowNode
   | RouteSwitchWorkflowNode
@@ -589,10 +614,21 @@ const RunCodeNodeSchema = z.object({
   subprocess: z.string().min(1).optional(),
 });
 
-const ConditionalRouteSchema = z.object({
-  match: z.string().min(1),
-  target: z.lazy(() => WorkflowNodeSchema),
+const ComputeNodeSchema = z.object({
+  kind: z.literal('compute'),
+  ...SHARED_FIELDS,
+  expr: ExpressionSchema,
 });
+
+const ConditionalRouteSchema = z
+  .object({
+    match: z.string().min(1).optional(),
+    when: ExpressionSchema.optional(),
+    target: WorkflowNodeRef,
+  })
+  .refine((route) => (route.match === undefined) !== (route.when === undefined), {
+    message: "conditional route requires exactly one of 'match' (substring) or 'when' (expression).",
+  });
 
 const ConditionalNodeSchema = z.object({
   kind: z.literal('conditional'),
@@ -768,6 +804,7 @@ export const WorkflowNodeSchema: z.ZodType<WorkflowNode> = z
     CallModelNodeSchema,
     InvokeToolNodeSchema,
     RunCodeNodeSchema,
+    ComputeNodeSchema,
     ConditionalNodeSchema,
     DecideNodeSchema,
     RouteSwitchNodeSchema,

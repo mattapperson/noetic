@@ -13,6 +13,8 @@ import type {
   Tool,
 } from '@noetic-tools/types';
 import { frameworkCast, NoeticConfigError } from '@noetic-tools/types';
+import { expressionErrors } from '../expression/check';
+import type { ExpressionLimits } from '../expression/jsonata';
 import { NoeticAttr } from '../observability/genai-attributes';
 import type { WorkflowDocument } from '../schemas/workflow';
 import { WorkflowDocumentSchema, workflowDepth, workflowGraph } from '../schemas/workflow';
@@ -51,10 +53,11 @@ A WorkflowNode is one of:
 - { "kind": "callModel", "id": "<unique>", "instructions": "<prompt>", "model": "<optional>", "tools": [{ "type": "<tool-name>" }, ...] } (one LLM call)
 - { "kind": "invokeTool", "id": "<unique>", "toolName": "<name>", "args": { ... } } (call one tool directly, no LLM)
 - { "kind": "runCode", "id": "<unique>", "execute": "<source code>" } (runs the code in a subprocess with the step input on stdin; only emit if the task needs deterministic computation AND a subprocess adapter is available)
+- { "kind": "compute", "id": "<unique>", "expr": "<JSONata expression>" } (computes a value from the input, read as JSON, with no LLM; e.g. "{ 'n': n - 1, 'sum': sum + n }")
 - { "kind": "sequence", "id": "<unique>", "steps": [<WorkflowNode>, ...] } (run children in order, threading each output into the next)
 - { "kind": "inParallel", "id": "<unique>", "mode": "all"|"race"|"settle", "paths": [<WorkflowNode>, ...], "merge": "last"|"first"|"concat" } (fan out; supply exactly one of "paths" or "each": <WorkflowNode> — with "each", add "over": "<key>" to fan out over an array in the input JSON)
 - { "kind": "loop", "id": "<unique>", "body": <WorkflowNode>, "until": <UntilPredicate>, "maxIterations": <optional positive int, or "infinity" for no cap> } (repeat the body until the predicate holds)
-- { "kind": "conditional", "id": "<unique>", "routes": [{ "match": "<substring>", "target": <WorkflowNode> }], "default": <WorkflowNode> } (route on a substring of the input)
+- { "kind": "conditional", "id": "<unique>", "routes": [{ "match": "<substring>", "target": <WorkflowNode> }], "default": <WorkflowNode> } (route on a substring of the input; a route may carry "when": "<JSONata test>" instead of "match", taken when the test gives true)
 - { "kind": "spawn", "id": "<unique>", "child": <WorkflowNode>, "timeout": <optional ms> } (run the child in an isolated sub-context)
 - { "kind": "withContext", "id": "<unique>", "child": <WorkflowNode>, "layers": ["<layer-name>", ...] } (run the child with named context layers; only emit if the task names layers that exist, since this planner provides no layer registry and unknown names resolve to NO layers)
 - { "kind": "schedule", "id": "<unique>", "step": <WorkflowNode>, "interval": <ms>, "onError": "continue"|"fail" } (re-runs the step forever on an interval and never returns — only emit for an explicitly daemon-style task)
@@ -67,7 +70,7 @@ Every entry of a callModel node's "tools" is an OBJECT, never a bare string. Use
 An acp-agent node delegates a turn to an external coding agent over the Agent Client Protocol; only emit one if a matching agent adapter is registered for the workflow.
 
 An UntilPredicate (the "until" field of a loop) is one of:
-{ "kind": "maxSteps", "n": <positive int> }, { "kind": "maxCost", "usd": <positive number> }, { "kind": "maxDuration", "duration": <ms> }, { "kind": "noToolCalls" }, { "kind": "never" } (never stops — pair with "maxIterations"), { "kind": "outputContains", "marker": "<text>" }, { "kind": "outputEquals", "sentinel": "<text>" }, { "kind": "converged", "threshold": <optional 0-1> }, { "kind": "any", "predicates": [<UntilPredicate>, ...] }, { "kind": "all", "predicates": [<UntilPredicate>, ...] }.
+{ "kind": "maxSteps", "n": <positive int> }, { "kind": "maxCost", "usd": <positive number> }, { "kind": "maxDuration", "duration": <ms> }, { "kind": "noToolCalls" }, { "kind": "never" } (never stops — pair with "maxIterations"), { "kind": "outputContains", "marker": "<text>" }, { "kind": "outputEquals", "sentinel": "<text>" }, { "kind": "converged", "threshold": <optional 0-1> }, { "kind": "when", "test": "<JSONata test on the last output, e.g. n = 0>" }, { "kind": "any", "predicates": [<UntilPredicate>, ...] }, { "kind": "all", "predicates": [<UntilPredicate>, ...] }.
 A loop's "until" (or an entry of "any"/"all") may also be a decide node asking exactly one boolean question: { "kind": "decide", "id": "<unique>", "questions": { "<question-id>": { "type": "boolean", "instructions": "<question whose yes means stop>" } } } — a model reads the iteration's output; yes stops the loop, no or a refusal runs another iteration.
 
 Respond with ONLY the JSON document, no markdown fences or explanation.`;
@@ -187,6 +190,8 @@ export interface ParseAndRunWorkflowOpts {
    * `Infinity`. Default: 100.
    */
   maxRecursionDepth?: number;
+  /** Bounds on each expression evaluation; unset fields use `DEFAULT_EXPRESSION_LIMITS`. */
+  expressionLimits?: ExpressionLimits;
 }
 
 /**
@@ -222,6 +227,7 @@ export async function parseAndRunWorkflow(opts: ParseAndRunWorkflowOpts): Promis
     layers: opts.layers,
     workflows: opts.workflows,
     maxRecursionDepth: opts.maxRecursionDepth,
+    expressionLimits: opts.expressionLimits,
   };
 
   const hydrated = hydrateWorkflow(parseResult.doc, hydrationCtx);
@@ -327,6 +333,14 @@ function tryParseWorkflow(raw: unknown, maxDepth: number): ParseResult {
     return {
       ok: false,
       error: `Workflow tree depth ${depth} exceeds maximum ${maxDepth}.`,
+    };
+  }
+
+  const errors = expressionErrors(result.data.root);
+  if (errors.length > 0) {
+    return {
+      ok: false,
+      error: errors.join(' '),
     };
   }
 

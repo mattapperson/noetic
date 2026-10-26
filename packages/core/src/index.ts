@@ -211,6 +211,10 @@ export { createInMemoryStorage } from './runtime/in-memory-storage';
 export type { DynamicWorkflowOpts, ParseAndRunWorkflowOpts } from './builders/dynamic-workflow';
 /** @public */
 export { dynamicWorkflow, parseAndRunWorkflow } from './builders/dynamic-workflow';
+/** @public */
+export type { ExpressionLimits } from './expression/jsonata';
+/** @public */
+export { DEFAULT_EXPRESSION_LIMITS } from './expression/jsonata';
 
 //#endregion
 
@@ -259,9 +263,14 @@ export { getRegistry, lookupStep, registerStep } from './runtime/step-registry';
 /** @public */
 export { defaultItemSchemaRegistry, ItemSchema, ItemSchemaRegistry } from '@noetic-tools/types';
 /** @public */
+export type { Expression } from '@noetic-tools/types';
+/** @public */
+export { ExpressionSchema } from '@noetic-tools/types';
+/** @public */
 export type {
   AcpAgentWorkflowNode,
   CallModelWorkflowNode,
+  ComputeWorkflowNode,
   ConditionalRoute,
   ConditionalWorkflowNode,
   DecideWorkflowNode,

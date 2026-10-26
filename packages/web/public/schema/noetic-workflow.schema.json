@@ -303,6 +303,56 @@
           "properties": {
             "kind": {
               "type": "string",
+              "const": "compute"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "durable": {
+              "type": "boolean"
+            },
+            "replayKey": {
+              "anyOf": [
+                {
+                  "type": "boolean",
+                  "const": true
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "from": {
+                      "minItems": 1,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  },
+                  "required": [
+                    "from"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "expr": {
+              "$ref": "#/$defs/Expression"
+            }
+          },
+          "required": [
+            "kind",
+            "id",
+            "expr"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
               "const": "conditional"
             },
             "id": {
@@ -347,12 +397,14 @@
                     "type": "string",
                     "minLength": 1
                   },
+                  "when": {
+                    "$ref": "#/$defs/Expression"
+                  },
                   "target": {
                     "$ref": "#/$defs/WorkflowNode"
                   }
                 },
                 "required": [
-                  "match",
                   "target"
                 ],
                 "additionalProperties": false
@@ -1608,6 +1660,12 @@
       ],
       "title": "WorkflowNode"
     },
+    "Expression": {
+      "type": "string",
+      "minLength": 1,
+      "title": "Expression",
+      "description": "A JSONata expression (https://jsonata.org) evaluated against the node input, read as JSON when it parses."
+    },
     "UntilPredicate": {
       "anyOf": [
         {
@@ -1742,6 +1800,23 @@
           },
           "required": [
             "kind"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "when"
+            },
+            "test": {
+              "$ref": "#/$defs/Expression"
+            }
+          },
+          "required": [
+            "kind",
+            "test"
           ],
           "additionalProperties": false
         },

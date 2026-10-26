@@ -87,6 +87,7 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 | `30-agent-plugins` | `plugin.json` / `mcp.json` validation, skill discovery, `agentPlugins()` layer | Agent Plugins v1 client |
 | `31-acp-server` | `toAcpAgent()`, `serveAcp()`, `ToolAcpDeclaration` | Harness as an ACP agent (server direction) |
 | `32-decide` | `decide()`, `routeSwitch()`, `decisionsHistoryLayer()`, `harness.decide()` | Typed decisions and routing |
+| `33-expressions` | `Expression`, `ExpressionSchema`, `evaluate()` | Exact, structured computation in JSON workflows |
 
 ## Dependency Graph
 

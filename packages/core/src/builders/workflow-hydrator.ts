@@ -23,8 +23,11 @@ import type {
   Until,
 } from '@noetic-tools/types';
 import { frameworkCast, isServerToolSpec, NoeticConfigError } from '@noetic-tools/types';
+import type { ExpressionLimits } from '../expression/jsonata';
+import { compileExpression, compute, passes, readInput } from '../expression/jsonata';
 import type {
   CallModelWorkflowNode,
+  ConditionalRoute,
   DecideWorkflowNode,
   OutputCodecRef,
   SubflowWorkflowNode,
@@ -87,6 +90,8 @@ export interface HydrationContext {
    * by the subflow hydrator — callers never set it.
    */
   recursionDepth?: number;
+  /** Bounds on each expression evaluation; unset fields use `DEFAULT_EXPRESSION_LIMITS`. */
+  expressionLimits?: ExpressionLimits;
 }
 
 type NodeHydrator = (
@@ -104,13 +109,17 @@ const DEFAULT_MAX_RECURSION_DEPTH = 100;
 
 //#region Until Predicate Hydration
 
-/** A `decide` predicate hydrates to the decide step itself; the loop runs it as the decider. */
+/**
+ * A `decide` predicate hydrates to the decide step itself; the loop runs it as
+ * the decider. `where` names the loop in errors from its `when` tests.
+ */
 function hydrateUntilPredicate(
   pred: UntilPredicate,
   ctx: HydrationContext,
+  where: string,
 ): Until | StepDecide<ContextData> {
   const hydrate = (p: UntilPredicate): Until | StepDecide<ContextData> =>
-    hydrateUntilPredicate(p, ctx);
+    hydrateUntilPredicate(p, ctx, where);
   switch (pred.kind) {
     case 'maxSteps':
       return until.maxSteps(pred.n);
@@ -130,6 +139,8 @@ function hydrateUntilPredicate(
       return until.converged({
         threshold: pred.threshold,
       });
+    case 'when':
+      return untilWhen(pred.test, where, ctx.expressionLimits);
     case 'any':
       return any(...pred.predicates.map(hydrate));
     case 'all':
@@ -140,9 +151,21 @@ function hydrateUntilPredicate(
       throw new NoeticConfigError({
         code: 'UNKNOWN_UNTIL_PREDICATE',
         message: `Unknown until predicate kind: '${frameworkCast<UntilPredicate>(pred).kind}'.`,
-        hint: 'Supported kinds: maxSteps, maxCost, maxDuration, noToolCalls, never, outputContains, outputEquals, converged, any, all, decide.',
+        hint: 'Supported kinds: maxSteps, maxCost, maxDuration, noToolCalls, never, outputContains, outputEquals, converged, when, any, all, decide.',
       });
   }
+}
+
+/** Stops when `test` gives `true` against the loop's last output, read as an expression input. */
+function untilWhen(test: string, where: string, limits: ExpressionLimits | undefined): Until {
+  const compiled = compileExpression(test, where, limits);
+  return async (snap) => {
+    const stop = await passes(compiled, readInput(snap.lastOutput));
+    return {
+      stop,
+      reason: stop ? `'when' test passed: ${test}` : undefined,
+    };
+  };
 }
 
 //#endregion
@@ -318,6 +341,22 @@ function hydrateRunCodeNode(
   );
 }
 
+function hydrateComputeNode(
+  node: WorkflowNode,
+  ctx: HydrationContext,
+): Step<ContextData, string, string> {
+  if (node.kind !== 'compute') {
+    return frameworkCast(undefined);
+  }
+  const expr = compileExpression(node.expr, `compute node '${node.id}'`, ctx.expressionLimits);
+  return frameworkCast(
+    runCode({
+      id: node.id,
+      execute: async (input: string) => stringifyResult(await compute(expr, readInput(input))),
+    }),
+  );
+}
+
 function hydrateConditionalNode(
   node: WorkflowNode,
   ctx: HydrationContext,
@@ -326,8 +365,8 @@ function hydrateConditionalNode(
     return frameworkCast(undefined);
   }
 
-  const hydratedRoutes = node.routes.map((r) => ({
-    match: r.match,
+  const hydratedRoutes = node.routes.map((r, i) => ({
+    passes: routeTest(r, `route ${i} of conditional node '${node.id}'`, ctx.expressionLimits),
     target: hydrateNode(r.target, ctx),
   }));
   const defaultTarget = node.default ? hydrateNode(node.default, ctx) : null;
@@ -339,10 +378,13 @@ function hydrateConditionalNode(
 
   return conditional({
     id: node.id,
-    route: (input: string) => {
-      const trimmed = routeText(input).trim().toLowerCase();
+    route: async (input: string) => {
+      const view: RouteInput = {
+        text: routeText(input).trim().toLowerCase(),
+        value: readInput(input),
+      };
       for (const r of hydratedRoutes) {
-        if (trimmed.includes(r.match.toLowerCase())) {
+        if (await r.passes(view)) {
           return r.target;
         }
       }
@@ -350,6 +392,25 @@ function hydrateConditionalNode(
     },
     _optimizable: frameworkCast(allTargets),
   });
+}
+
+/** A conditional's input as its routes read it: lower-cased text for `match`, the read value for `when`. */
+interface RouteInput {
+  text: string;
+  value: unknown;
+}
+
+function routeTest(
+  route: ConditionalRoute,
+  where: string,
+  limits: ExpressionLimits | undefined,
+): (input: RouteInput) => boolean | Promise<boolean> {
+  if (route.when !== undefined) {
+    const compiled = compileExpression(route.when, where, limits);
+    return (input) => passes(compiled, input.value);
+  }
+  const needle = (route.match ?? '').toLowerCase();
+  return (input) => input.text.includes(needle);
 }
 
 function hydrateDecideNode(
@@ -557,7 +618,7 @@ function hydrateLoopNode(
     steps: [
       hydrateNode(node.body, ctx),
     ],
-    until: hydrateUntilPredicate(node.until, ctx),
+    until: hydrateUntilPredicate(node.until, ctx, `until of loop node '${node.id}'`),
     maxIterations:
       node.maxIterations === 'infinity' ? Number.POSITIVE_INFINITY : node.maxIterations,
   });
@@ -720,6 +781,7 @@ const NODE_HYDRATORS: Record<string, NodeHydrator> = {
   callModel: hydrateCallModelNode,
   invokeTool: hydrateInvokeToolNode,
   runCode: hydrateRunCodeNode,
+  compute: hydrateComputeNode,
   conditional: hydrateConditionalNode,
   decide: hydrateDecideNode,
   routeSwitch: hydrateRouteSwitchNode,
@@ -1023,6 +1085,8 @@ async function runCodeViaSubprocess(opts: {
  * @throws `NoeticConfigError` with code `UNKNOWN_WORKFLOW_REFERENCE` (at execution time) if a subflow ref names no registered workflow.
  * @throws `NoeticConfigError` with code `WORKFLOW_RECURSION_LIMIT` (at execution time) if named sub-workflow refs nest deeper than `maxRecursionDepth`.
  * @throws `NoeticConfigError` with code `INVALID_MAX_RECURSION_DEPTH` (at execution time) when a named ref resolves under a `maxRecursionDepth` that is not a positive integer or `Infinity`.
+ * @throws `NoeticConfigError` with code `WORKFLOW_VALIDATION_FAILED` if a `compute` expression or a `when` test does not parse.
+ * @throws `NoeticConfigError` with code `EXPRESSION_FAILED` or `EXPRESSION_LIMIT_EXCEEDED` (at execution time) if an expression fails or exceeds its limits.
  */
 export function hydrateNode(
   node: WorkflowNode,
