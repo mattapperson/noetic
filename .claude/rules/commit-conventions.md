@@ -11,14 +11,14 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org/) with
 ## Types and Version Impact
 
 **Default policy: every core change publishes at least a patch.** A breaking
-change is a major, a `feat` is a minor, and *everything else* — `fix`, `perf`,
+change or a `feat` is a minor, and *everything else* — `fix`, `perf`,
 `refactor`, `build`, `chore`, `docs`, `test`, **and untyped/unrecognized
 commits** (e.g. a squash-merge that dropped the prefix) — is a **patch**. A core
 change never silently skips a release.
 
 | Type | Version Bump |
 |------|-------------|
-| breaking (`!` / `BREAKING CHANGE:` footer) | **major** |
+| breaking (`!` / `BREAKING CHANGE:` footer) | **minor** |
 | `feat` | **minor** |
 | everything else (incl. untyped) | **patch** |
 
@@ -27,8 +27,13 @@ change never silently skips a release.
 > a release entirely, either don't touch the release-triggering paths or add
 > `[skip ci]` to the commit (which skips the workflow).
 
-> Use a `BREAKING CHANGE:` footer for breaking changes — the `!` shorthand alone
-> is not reliably detected by the analyzer and would only cut a patch.
+> `@noetic-tools/core` and `@noetic-tools/types` stay on their current major
+> (core 5.x, types 3.x): their `.releaserc.json` maps breaking commits to a
+> minor. Do not change that rule — npm never reuses a version number, and core
+> 6.0.0/6.1.0 and types 4.0.0/4.1.0 were published and withdrawn.
+
+> Use a `BREAKING CHANGE:` footer for breaking changes — the changelog flags them,
+> and the `!` shorthand alone is not reliably detected by the analyzer.
 
 ## Scopes
 
@@ -44,7 +49,7 @@ Omit scope for cross-cutting changes: `refactor: split Node adapters`
 
 ## Breaking Changes
 
-Append `!` after the scope for breaking changes (triggers major bump):
+Mark breaking changes with a `BREAKING CHANGE:` footer (core and types still cut a minor — see above):
 
 ```
 feat(core)!: rename Step.execute to Step.run
@@ -71,8 +76,8 @@ npm yet. Each job:
 1. Runs lint, typecheck, build (plus dependency dists for memory/core)
 2. Scans commits since the last `<pkg>-v*` tag (scoped to its package by
    `semantic-release-monorepo`)
-3. Determines the version bump from commit types — **major** for breaking,
-   **minor** for `feat`, **patch** for everything else (including untyped /
+3. Determines the version bump from commit types — **minor** for breaking and
+   `feat`, **patch** for everything else (including untyped /
    squash-stripped commits)
 4. Publishes to npm with provenance
 5. Creates a GitHub release and git tag (`<pkg>-v<version>`)
@@ -90,6 +95,6 @@ fix(core): handle null in branch route matching        → patch (0.2.0 → 0.2.
 refactor(core): simplify hydrator switch               → patch (0.2.1 → 0.2.2)
 chore(core): update dev dependencies                   → patch (now releases)
 "Combining the three commits into one message"         → patch (untyped → patch)
-feat(core): drop FlowSchema\n\nBREAKING CHANGE: ...     → major (0.2.2 → 1.0.0)
+feat(core): drop FlowSchema\n\nBREAKING CHANGE: ...     → minor (5.14.0 → 5.15.0)
 feat(cli): add --resume flag                           → no core release (not packages/core)
 ```
