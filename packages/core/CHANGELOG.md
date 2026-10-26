@@ -1,3 +1,14 @@
+## @noetic-tools/core-v5.12.0 (2026-10-26)
+
+* fix: finish the expr rename and show compute and expr in the inspector ([42af900](https://github.com/mattapperson/noetic/commit/42af900))
+* feat(core): add infinite loops, recursive subflows, and decide-driven loop exits to JSON workflows ([c9c201a](https://github.com/mattapperson/noetic/commit/c9c201a))
+* feat(core): add the expr until predicate to JSON workflows ([da9a553](https://github.com/mattapperson/noetic/commit/da9a553))
+* feat(core): bound expression evaluation by steps, depth, length, and time ([4aa8bc5](https://github.com/mattapperson/noetic/commit/4aa8bc5))
+* feat(core): finish the JSON workflow compute node ([df5f857](https://github.com/mattapperson/noetic/commit/df5f857))
+* feat(core): route conditional nodes on JSONata expr tests ([d2afcee](https://github.com/mattapperson/noetic/commit/d2afcee))
+* test(core): guard jsonata against code generation for Workers ([1a5f4a3](https://github.com/mattapperson/noetic/commit/1a5f4a3))
+* wip(core): merge partial JSONata expression work onto loop/recursion/decide branch ([7c4a718](https://github.com/mattapperson/noetic/commit/7c4a718))
+
 ## @noetic-tools/core-v5.11.0 (2026-10-25)
 
 * feat(core): toolChoice, needsApproval enforcement, onParentUpdate and layer hook spans (#128) ([f0db6cd](https://github.com/mattapperson/noetic/commit/f0db6cd)), closes [#128](https://github.com/mattapperson/noetic/issues/128) [#124](https://github.com/mattapperson/noetic/issues/124) [#121](https://github.com/mattapperson/noetic/issues/121) [#122](https://github.com/mattapperson/noetic/issues/122) [#123](https://github.com/mattapperson/noetic/issues/123)
