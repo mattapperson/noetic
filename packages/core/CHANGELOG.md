@@ -1,3 +1,7 @@
+## @noetic-tools/core-v6.1.0 (2026-10-26)
+
+* feat(core): let any step emit items before a workflow ends ([28352e5](https://github.com/mattapperson/noetic/commit/28352e5))
+
 ## @noetic-tools/core-v6.0.0 (2026-10-26)
 
 * feat(core): read durability from storage only, add durability: false and billedCost ([12e081f](https://github.com/mattapperson/noetic/commit/12e081f))
