@@ -421,6 +421,7 @@ interface LLMResponse {
   rounds?: ReadonlyArray<RoundUsage>;
   cost?: number;
   billedCost?: number;
+  recall?: boolean;
 }
 ```
 
@@ -434,3 +435,4 @@ interface LLMResponse {
 | `usage.cachedTokens` | `number` | Cached tokens used (optional) |
 | `cost` | `number` | USD the work behind the response cost, including rounds replayed from a recorded run (optional) |
 | `billedCost` | `number` | USD this call actually paid: `cost` less what replayed rounds supplied, so `0` when every round replayed. Absent means the whole `cost` was paid now (optional) |
+| `recall` | `boolean` | The call ended early after applying a steer whose `onSteer` layers asked for recall. The `callModel` step runs recall again and continues the call (optional) |

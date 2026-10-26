@@ -494,6 +494,8 @@ A **steer** is a `between-rounds` or `next-item` message: one meant for the turn
 
 Layers change the outcome with the `onSteer` hook (see `11-context-layer-system`): `apply`, `defer` (offer again at the next point), or `drop`. A steer applied at any point is held until the next model call, then added to the conversation in the order the model sees it, after passing through the `onItemAppend` pipeline. Applied steers are part of the call's response items, so they reach the item log with the rest of the round.
 
+When an applied steer's layers ask for `recall`, the model call ends at the round boundary where the steer is applied, before the next model request. Its response carries `recall: true`. The `callModel` step records it, runs recall again with the steer's text as the query, assembles a new view, and continues the call on it. Anchored layer output stays pinned, so the new render arrives as a supersede update after the steer.
+
 A stream stopped by a steer reports no usage for that round; the provider sends usage only with a finished response. When a steer is staged while the model writes its final answer, the call runs one more round so the model answers the steer itself. A `between-rounds` steer that arrives during the final answer stays queued and runs as the next turn.
 
 Steers reach model calls on the session's own context. A spawned child takes them only when spawned with `steers: 'forward'` (see `04-spawn`); `inParallel` paths and other spawns leave them queued until control returns.

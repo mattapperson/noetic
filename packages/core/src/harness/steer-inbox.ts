@@ -18,6 +18,8 @@ import { inputToItems, isSteer } from '../runtime/message-queue';
 export interface StagedSteers {
   messageIds: string[];
   items: Item[];
+  /** A layer asked for recall to run again once these are applied. */
+  recall: boolean;
 }
 
 interface SteerInboxOpts {
@@ -69,6 +71,7 @@ export class SteerInbox {
   private staged: StagedSteers = {
     messageIds: [],
     items: [],
+    recall: false,
   };
   /** Steers already reported as waiting on tool calls, so each is reported once. */
   private readonly reportedPending = new Set<string>();
@@ -116,7 +119,7 @@ export class SteerInbox {
         });
         continue;
       }
-      await this.stage(message.id, verdict.items);
+      await this.stage(message.id, verdict.items, verdict.recall === true);
       stagedAny = true;
     }
     return stagedAny;
@@ -128,6 +131,7 @@ export class SteerInbox {
     this.staged = {
       messageIds: [],
       items: [],
+      recall: false,
     };
     return staged;
   }
@@ -172,13 +176,14 @@ export class SteerInbox {
 
   /** Steers are user input, so they pass through `onItemAppend` like any other.
    *  Re-render requests are ignored: recall does not run again mid-call. */
-  private async stage(messageId: string, items: Item[]): Promise<void> {
+  private async stage(messageId: string, items: Item[], recall: boolean): Promise<void> {
     const piped =
       this.opts.layers.length > 0
         ? (await this.opts.harness.runAppendPipeline(this.opts.layers, items, this.opts.ctx)).items
         : items;
     this.staged.messageIds.push(messageId);
     this.staged.items.push(...piped);
+    this.staged.recall ||= recall;
   }
 
   private reportPending(

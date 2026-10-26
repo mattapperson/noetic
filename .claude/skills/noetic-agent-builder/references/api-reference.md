@@ -2499,6 +2499,7 @@ interface OnSteerParams<TState> {
 interface OnSteerResult<TState> {
   action?: SteerAction;
   items?: Item[];   // replace what the model sees
+  recall?: boolean; // re-run recall once applied (any layer asking is enough)
   state?: TState;
 }
 ```
