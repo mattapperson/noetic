@@ -1,3 +1,8 @@
+## @noetic-tools/core-v5.14.1 (2026-10-26)
+
+* fix(core): cap span events so a long-running loop's trace stays bounded ([bae67fd](https://github.com/mattapperson/noetic/commit/bae67fd))
+* perf(core): build execution paths lazily and drop counts under finished steps ([0abcb42](https://github.com/mattapperson/noetic/commit/0abcb42))
+
 ## @noetic-tools/core-v5.14.0 (2026-10-26)
 
 * chore(core): keep core on 5.x and types on 3.x ([3b1212f](https://github.com/mattapperson/noetic/commit/3b1212f))
