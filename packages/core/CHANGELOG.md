@@ -1,3 +1,7 @@
+## @noetic-tools/core-v5.15.0 (2026-10-26)
+
+* feat(core): steer a running turn with next-item delivery and onSteer layers (#139) ([bb468d8](https://github.com/mattapperson/noetic/commit/bb468d8)), closes [#139](https://github.com/mattapperson/noetic/issues/139)
+
 ## @noetic-tools/core-v5.14.1 (2026-10-26)
 
 * fix(core): cap span events so a long-running loop's trace stays bounded ([bae67fd](https://github.com/mattapperson/noetic/commit/bae67fd))
