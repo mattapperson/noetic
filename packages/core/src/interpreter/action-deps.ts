@@ -30,4 +30,6 @@ export { defaultItemSchemaRegistry } from '@noetic-tools/types';
 export { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../runtime/broadcaster-utils';
 export { ContextImpl, laneBase } from '../runtime/context-impl';
 export { snapshotCwdState } from '../runtime/cwd-helpers';
+export type { SessionCtxExtension } from '../runtime/message-queue';
+export { INTERRUPT_REASON } from '../runtime/message-queue';
 export { buildToolExecutionContext } from '../runtime/tool-context';

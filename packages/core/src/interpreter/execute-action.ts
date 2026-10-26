@@ -16,11 +16,9 @@ import {
 } from '@noetic-tools/types';
 import { ToolAttr } from '../observability/genai-attributes';
 import type { EmitOption } from '../runtime/broadcaster-utils';
-import type { SessionCtxExtension } from '../runtime/message-queue';
-import { INTERRUPT_REASON } from '../runtime/message-queue';
 import { askApproval } from '../runtime/tool-approval';
 import { emitToolUi } from '../runtime/tool-ui';
-import type { ItemSchemaRegistry, LayerStateStore } from './action-deps';
+import type { ItemSchemaRegistry, LayerStateStore, SessionCtxExtension } from './action-deps';
 import {
   allocateBudgets,
   assembleView,
@@ -35,6 +33,7 @@ import {
   disposeLayers,
   emitFrameworkEvent,
   getBroadcaster,
+  INTERRUPT_REASON,
   initLayers,
   lineageKey,
   noteCacheOutcome,
