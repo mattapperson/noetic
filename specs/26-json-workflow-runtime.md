@@ -200,7 +200,7 @@ Conditional routing: each route tests the input, and the first route whose test 
 ```typescript
 type ConditionalRoute =
   | { match: string; target: WorkflowNode }
-  | { when: Expression; target: WorkflowNode };
+  | { expr: Expression; target: WorkflowNode };
 
 interface ConditionalWorkflowNode {
   kind: 'conditional';
@@ -218,9 +218,23 @@ interface ConditionalWorkflowNode {
 Each route carries exactly one test; the schema rejects a route with both or neither:
 
 - `match` — a case-insensitive substring of the input's text (§ Branch Route Hydration). Simple and model-friendly, for routing on prose.
-- `when` — an expression (spec 33) evaluated against the input. The route is taken when it evaluates to `true`, skipped when `false`; any other result fails with `EXPRESSION_FAILED`. Exact, for routing on structured state.
+- `expr` — an expression (spec 33) evaluated against the input. The route is taken if it gives `true` and skipped if it gives `false` or no value (a path that matches nothing); any other result fails with `EXPRESSION_FAILED`. Exact, for routing on structured state such as a counter or a `decide` node's answers.
 
 Routes of both kinds may mix in one node; they are tried in order.
+
+```json
+{
+  "kind": "conditional",
+  "id": "pick",
+  "routes": [
+    { "expr": "n = 0", "target": { "kind": "callModel", "id": "done", "instructions": "Report the result." } },
+    { "match": "urgent", "target": { "kind": "callModel", "id": "escalate", "instructions": "Escalate." } }
+  ],
+  "default": { "kind": "subflow", "id": "again", "ref": "countdown" }
+}
+```
+
+An `expr` route is the natural base case for a recursive named workflow (§ Recursion): the route that stops the recursion tests the state the previous steps computed.
 
 ### `decide` and `routeSwitch`
 
@@ -546,7 +560,7 @@ Each node kind maps to a single existing builder:
 | `callModel`       | `callModel({...})` | Tools resolved by name from `ctx.tools`.               |
 | `invokeTool`      | `invokeTool({...})` | Tool resolved by name; throws `UNKNOWN_TOOL_REFERENCE`.|
 | `compute`   | `runCode` wrapper | Evaluates `expr` against the read input; output written as text. |
-| `conditional`    | `conditional({route: ...})` | Route function tests each route's `match` substring or `when` expression. |
+| `conditional`    | `conditional({route: ...})` | Route function tests each route's `match` substring or `expr` expression. |
 | `decide`    | `decide(...)`        | Questions pass through unchanged; output is the answers object. |
 | `routeSwitch` | `routeSwitch(...)` | Key form only; cases and `uncertain` hydrate recursively. |
 | `inParallel`      | `inParallel({...})` | `paths` becomes a static function. Merge via strategy. |
@@ -572,12 +586,12 @@ This is a hard failure -- partial hydration with missing tools is not supported.
 
 ### Branch Route Hydration
 
-Branch `routes` are hydrated into a `route` function that tries each route in order. A `match` route tests its string as a case-insensitive substring against the input. An object input — or a string holding a JSON object or array, as a `sequence` passes a `decide` node's answers — is matched against its string values only, joined, never its keys. A `when` route evaluates its expression against the input read by the expression input rule (spec 33):
+Branch `routes` are hydrated into a `route` function that tries each route in order. A `match` route tests its string as a case-insensitive substring against the input. An object input — or a string holding a JSON object or array, as a `sequence` passes a `decide` node's answers — is matched against its string values only, joined, never its keys. An `expr` route evaluates its expression against the input read by the expression input rule (spec 33) — a string is parsed as JSON when it parses — so it sees structured values, not text:
 
 ```typescript
 route: (input, ctx) => {
   for (const route of routes) {
-    if (passes(route, input)) {   // match: substring of routeText(input); when: evaluate(...) === true
+    if (passes(route, input)) {   // match: substring of routeText(input); expr: evaluate(...) === true
       return route.target;
     }
   }
@@ -585,7 +599,7 @@ route: (input, ctx) => {
 }
 ```
 
-The input is read once per route call, not once per route, and a `when` that gives a non-boolean fails with `EXPRESSION_FAILED` rather than skipping the route.
+The input is read once per route call, not once per route. An `expr` that gives no value skips the route; one that gives a non-boolean fails with `EXPRESSION_FAILED` rather than skipping it. An `expr` that does not parse fails validation (`WORKFLOW_VALIDATION_FAILED`) before the workflow runs.
 
 ### Until Predicate Hydration
 
@@ -764,7 +778,7 @@ The JSON Workflow Runtime introduces the following `NoeticConfigError` codes:
 | `INVALID_MAX_RECURSION_DEPTH`  | `maxRecursionDepth` is not a positive integer or `Infinity` (raised when a named ref first resolves). |
 | `INVALID_FORK_INPUT`           | A dynamic fork's input does not resolve to an array.                     |
 | `INVALID_REPLAY_KEY_INPUT`     | A `replayKey.from` node's input is not a JSON object (raised by the key function at dispatch; the interpreter downgrades it to a warning). |
-| `EXPRESSION_FAILED`            | A `compute` expression, a route's `when`, or a `when` until predicate fails to evaluate or gives a non-boolean where a boolean is required (raised at execution time; spec 33). |
+| `EXPRESSION_FAILED`            | A `compute` expression, a route's `expr`, or a `when` until predicate fails to evaluate or gives a non-boolean where a boolean is required (raised at execution time; spec 33). |
 
 ### Expression Failures
 
@@ -773,7 +787,7 @@ The hydrator prefixes an `EXPRESSION_FAILED` message with the node id. Where it 
 | Node                       | Surfaces as                                                                  |
 |----------------------------|------------------------------------------------------------------------------|
 | `compute`                  | A `step_failed` `NoeticError` from the node, whose `cause` is the `NoeticConfigError` (the node runs as a `runCode` step). |
-| `conditional` route `when` | The `NoeticConfigError` itself, thrown from the route function.               |
+| `conditional` route `expr` | The `NoeticConfigError` itself, thrown from the route function.               |
 | `loop` until `when`        | A stop: the loop ends and the message becomes the verdict's reason (spec 05). |
 
 ---
@@ -815,10 +829,10 @@ const WorkflowNodeSchema: z.ZodType<WorkflowNode> = z.lazy(() =>
       id: z.string().min(1),
       routes: z.array(z.object({
         match: z.string().min(1).optional(),
-        when: ExpressionSchema.optional(),
+        expr: ExpressionSchema.optional(),
         target: WorkflowNodeSchema,
-      }).refine((r) => (r.match === undefined) !== (r.when === undefined), {
-        message: "conditional route requires exactly one of 'match' or 'when'.",
+      }).refine((r) => (r.match === undefined) !== (r.expr === undefined), {
+        message: "conditional route requires exactly one of 'match' (substring) or 'expr' (expression).",
       })).min(1),
       default: WorkflowNodeSchema.optional(),
     }),

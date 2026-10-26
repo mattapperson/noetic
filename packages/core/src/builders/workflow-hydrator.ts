@@ -394,7 +394,7 @@ function hydrateConditionalNode(
   });
 }
 
-/** A conditional's input as its routes read it: lower-cased text for `match`, the read value for `when`. */
+/** A conditional's input as its routes read it: lower-cased text for `match`, the read value for `expr`. */
 interface RouteInput {
   text: string;
   value: unknown;
@@ -405,8 +405,8 @@ function routeTest(
   where: string,
   limits: ExpressionLimits | undefined,
 ): (input: RouteInput) => boolean | Promise<boolean> {
-  if (route.when !== undefined) {
-    const compiled = compileExpression(route.when, where, limits);
+  if (route.expr !== undefined) {
+    const compiled = compileExpression(route.expr, where, limits);
     return (input) => passes(compiled, input.value);
   }
   const needle = (route.match ?? '').toLowerCase();
@@ -1085,7 +1085,7 @@ async function runCodeViaSubprocess(opts: {
  * @throws `NoeticConfigError` with code `UNKNOWN_WORKFLOW_REFERENCE` (at execution time) if a subflow ref names no registered workflow.
  * @throws `NoeticConfigError` with code `WORKFLOW_RECURSION_LIMIT` (at execution time) if named sub-workflow refs nest deeper than `maxRecursionDepth`.
  * @throws `NoeticConfigError` with code `INVALID_MAX_RECURSION_DEPTH` (at execution time) when a named ref resolves under a `maxRecursionDepth` that is not a positive integer or `Infinity`.
- * @throws `NoeticConfigError` with code `WORKFLOW_VALIDATION_FAILED` if a `compute` expression or a `when` test does not parse.
+ * @throws `NoeticConfigError` with code `WORKFLOW_VALIDATION_FAILED` if a `compute` expression, a conditional route's `expr`, or a `when` test does not parse.
  * @throws `NoeticConfigError` with code `EXPRESSION_FAILED` or `EXPRESSION_LIMIT_EXCEEDED` (at execution time) if an expression fails or exceeds its limits.
  */
 export function hydrateNode(

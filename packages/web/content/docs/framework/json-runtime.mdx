@@ -273,7 +273,7 @@ Dynamic fan-out — one child per array item (data-dependent N):
 
 ### conditional
 
-Route input to one of several targets based on substring matching.
+Route input to one of several targets. Each route tests the input with either a substring (`match`) or an [expression](/docs/framework/expressions) (`expr`).
 
 ```json
 {
@@ -290,10 +290,54 @@ Route input to one of several targets based on substring matching.
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `id` | `string` | required | Unique step identifier. |
-| `routes` | `{ match: string, target: WorkflowNode }[]` | required | Ordered matching rules. First match wins (case-insensitive substring). |
+| `routes` | `({ match: string } \| { expr: string })` plus `target: WorkflowNode`, as an array | required | Ordered routes, each with exactly one test. The first route whose test passes wins. |
 | `default` | `WorkflowNode` | `undefined` | Fallback node when no route matches. |
 
 When the input is an object, or a string holding a JSON object or array (such as a `decide` node's answers passed on by a `sequence`), routes match against its string values only, not its keys. For answers, those are each answer's `type` (so `"refusal"` matches a refusal), a choice's `value`, and a score's `level`. A `decide` node's answers name every choice in their keys and probability maps, so matching the raw JSON would hit every route. Boolean answers have no string value to match; route on those with `routeSwitch`.
+
+#### Expression routes
+
+`match` suits prose. For structured state, give a route an `expr` instead: a JSONata test run against the input, parsed as JSON when it parses (else the raw string). The route is taken if the test gives `true` and skipped if it gives `false` or no value, such as a path that matches nothing. Any other result, like a number or a string, fails the run with `EXPRESSION_FAILED`; an `expr` that does not parse fails validation with `WORKFLOW_VALIDATION_FAILED` before anything runs. A route with both `match` and `expr`, or neither, fails schema validation.
+
+```json
+{
+  "kind": "conditional",
+  "id": "size",
+  "routes": [
+    { "expr": "n = 0", "target": { "kind": "callModel", "id": "empty", "instructions": "Say there is nothing to do." } },
+    { "match": "urgent", "target": { "kind": "callModel", "id": "rush", "instructions": "Handle this now." } },
+    { "expr": "n > 3", "target": { "kind": "callModel", "id": "batch", "instructions": "Split the work into batches." } }
+  ],
+  "default": { "kind": "callModel", "id": "small", "instructions": "Do the work." }
+}
+```
+
+Both kinds mix in one node and run in order. An `expr` can also read a `decide` node's answers, including boolean ones: after a `decide` asking `refund` in a `sequence`, `"expr": "refund.value"` takes the route on a yes.
+
+An `expr` route makes a clean base case for a recursive named workflow. This `countdown` adds `n` to `total` and calls itself until `n` is 0:
+
+```json
+{
+  "version": 1,
+  "root": {
+    "kind": "conditional",
+    "id": "check",
+    "routes": [
+      { "expr": "n = 0", "target": { "kind": "compute", "id": "done", "expr": "{ \"total\": total }" } }
+    ],
+    "default": {
+      "kind": "sequence",
+      "id": "step",
+      "steps": [
+        { "kind": "compute", "id": "next", "expr": "{ \"n\": n - 1, \"total\": total + n }" },
+        { "kind": "subflow", "id": "again", "ref": "countdown" }
+      ]
+    }
+  }
+}
+```
+
+Run with input `{"n":4,"total":0}`, it outputs `{"total":10}`.
 
 ### decide
 
@@ -750,7 +794,7 @@ Throws `NoeticConfigError` with code `UNKNOWN_NODE_KIND` if a node kind is unrec
 - **Tools resolved by name** -- every tool referenced in the workflow must be passed in the `tools` array. The hydrator looks them up by `tool.name`.
 - **Subflow refs resolve at execution time** -- a `subflow` node's `ref` is looked up on first execution, not during hydration, so an unregistered name surfaces as `UNKNOWN_WORKFLOW_REFERENCE` when the node runs. Depth limits do not see through refs; `maxRecursionDepth` bounds the depth of any one recursive path, but not total fan-out — hosts should keep it finite and cap registry size and breadth for untrusted documents.
 - **Unbounded control flow is opt-in** -- `"maxIterations": "infinity"` and `maxRecursionDepth: Infinity` remove the runtime's bounds. A host that runs untrusted documents and must bound every loop should reject `"infinity"` before hydrating.
-- **Conditional routing is substring-based** -- `conditional` node routes use case-insensitive substring matching on the input string (or on an object input's string values). Complex routing logic requires programmatic `conditional()` steps.
+- **Conditional routes test, they do not compute** -- a `conditional` route is a substring `match` or a JSONata `expr` test. Routing that needs to run a step or call a function requires a programmatic `conditional()` step.
 
 ## Plans as Workflows
 
