@@ -1,3 +1,7 @@
+## @noetic-tools/context-v1.10.0 (2026-10-26)
+
+* feat(core): steer a running turn with next-item delivery and onSteer layers (#139) ([bb468d8](https://github.com/mattapperson/noetic/commit/bb468d8)), closes [#139](https://github.com/mattapperson/noetic/issues/139)
+
 ## @noetic-tools/context-v1.9.0 (2026-10-26)
 
 * feat(core): add infinite loops, recursive subflows, and decide-driven loop exits to JSON workflows ([c9c201a](https://github.com/mattapperson/noetic/commit/c9c201a))
