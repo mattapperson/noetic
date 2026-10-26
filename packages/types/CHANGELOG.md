@@ -1,3 +1,7 @@
+## @noetic-tools/types-v3.15.0 (2026-10-26)
+
+* feat(core): durable steers and steer-triggered recall (#141) ([0c7b185](https://github.com/mattapperson/noetic/commit/0c7b185)), closes [#141](https://github.com/mattapperson/noetic/issues/141)
+
 ## @noetic-tools/types-v3.14.0 (2026-10-26)
 
 * feat(core): typed custom items that stream events and a final item ([ce8b253](https://github.com/mattapperson/noetic/commit/ce8b253))
