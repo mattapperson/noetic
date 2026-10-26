@@ -177,7 +177,7 @@ interface ComputeWorkflowNode {
 
 | Field  | Required | Description                                                         |
 |--------|----------|---------------------------------------------------------------------|
-| `expr` | Yes      | The expression, evaluated against the node's input (spec 33 § The Input). |
+| `expr` | Yes      | A JSONata expression, evaluated against the node's input (spec 33 § The Input). |
 
 The output is the evaluated value written the way every node writes its output: a string stays a string, `null` becomes the empty string, and any other value becomes its JSON text. The next node reads that text back as structured data, so a chain of `compute` nodes — or a `loop` whose body is one — carries a state object from step to step:
 
@@ -185,16 +185,13 @@ The output is the evaluated value written the way every node writes its output: 
 {
   "kind": "compute",
   "id": "step",
-  "expr": {
-    "object": {
-      "counter": { "-": [{ "get": "counter" }, 1] },
-      "sum": { "+": [{ "get": "sum" }, { "get": "counter" }] }
-    }
-  }
+  "expr": "{ 'n': n - 1, 'sum': sum + n }"
 }
 ```
 
 Because output is text, a string result that is itself valid JSON (`"5"`, `"true"`) reads back as that JSON value at the next node. Keep strings inside an object to carry them as strings.
+
+A result with no JSON form fails the node with `EXPRESSION_FAILED`: JSONata's "no value" (a path that matched nothing), or a function anywhere in the result. A `compute` node takes the shared `durable` and `replayKey` fields like any other node, runs once per item inside a dynamic `inParallel` `each`, and has its id suffixed like any other node inside a named `subflow`.
 
 ### `conditional`
 
