@@ -890,13 +890,21 @@ describe('an unreadable dispatch record', () => {
     await harness.reconcileSpend({
       patienceMs: 0,
     });
-    expect(harness.getUsage({ threadId: 't' }).heldCost ?? 0).toBe(0);
+    expect(
+      harness.getUsage({
+        threadId: 't',
+      }).heldCost ?? 0,
+    ).toBe(0);
     torn = false;
     await harness.reconcileSpend({
       patienceMs: 0,
     });
 
-    expect(harness.getUsage({ threadId: 't' }).heldCost).toBeCloseTo(RECORD_CEILING);
+    expect(
+      harness.getUsage({
+        threadId: 't',
+      }).heldCost,
+    ).toBeCloseTo(RECORD_CEILING);
     const settlement = await harness.writeOffSpend('x', {
       assumedCost: 0.2,
     });
