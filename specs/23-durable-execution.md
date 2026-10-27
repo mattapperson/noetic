@@ -201,13 +201,13 @@ interface PendingSpend {
 }
 ```
 
-A `spend:<id>` value that does not read as a record — torn by a crash mid-write, corrupted, or hand-edited — is still evidence that a paid call was sent, so it is never skipped. It is listed as an **unreadable dispatch**:
+A `spend:<id>` value that does not read as a record — torn by a crash mid-write, corrupted, or hand-edited, including one a store reads as nothing while its key still lists (`createFileStorage` reads an unparsable file that way) — is still evidence that a paid call was sent, so it is never skipped. It is listed as an **unreadable dispatch**:
 
 ```typescript
 interface UnreadableDispatch {
   id: string;                  // from the key
   unreadable: true;
-  executionId?: string;        // kept when the damaged value still names one as a string
+  executionId?: string;        // kept when the damaged value still names one as a non-empty string
   threadId?: string;           // likewise
 }
 

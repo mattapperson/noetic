@@ -68,51 +68,78 @@ export function createSpendLog(storage: StorageAdapter): SpendLog {
     put: async (record) => {
       await storage.set(keyOf(record.id), record);
     },
-    get: async (id) => parse(id, await storage.get<unknown>(keyOf(id))),
+    get: async (id) => {
+      const key = keyOf(id);
+      const raw = await storage.get<unknown>(key);
+      if (!isNothing(raw)) {
+        return parse(id, raw);
+      }
+      return (await storage.list(key)).includes(key) ? unreadable(id) : undefined;
+    },
     remove: async (id) => {
       await storage.delete(keyOf(id));
     },
     list: async () => {
       const keys = await storage.list(SPEND_PREFIX);
       const raws = await storageGetMany<unknown>(storage, keys);
-      const unreadable: UnreadableDispatch[] = [];
+      const damaged: UnreadableDispatch[] = [];
       const records: DispatchRecord[] = [];
       for (const [key, raw] of raws) {
-        const record = parse(key.slice(SPEND_PREFIX.length), raw);
-        if (!record) {
+        if (isNothing(raw)) {
           continue;
         }
+        const record = parse(key.slice(SPEND_PREFIX.length), raw);
         if (isUnreadable(record)) {
-          unreadable.push(record);
+          damaged.push(record);
         } else {
           records.push(record);
         }
       }
+      for (const key of await stillListed(keys.filter((key) => isNothing(raws.get(key))))) {
+        damaged.push(unreadable(key.slice(SPEND_PREFIX.length)));
+      }
       return [
-        ...unreadable,
+        ...damaged,
         ...records.sort((a, b) => a.sentAt.localeCompare(b.sentAt)),
       ];
     },
   };
+
+  /**
+   * Of keys that listed but read as nothing, the ones that still list. A store may
+   * read a value it cannot parse as nothing (`createFileStorage` does), and that value
+   * is damaged, not gone; a key settled since it was listed no longer lists.
+   */
+  async function stillListed(missing: string[]): Promise<string[]> {
+    if (missing.length === 0) {
+      return [];
+    }
+    const listed = new Set(await storage.list(SPEND_PREFIX));
+    return missing.filter((key) => listed.has(key));
+  }
 }
 
 function keyOf(id: string): string {
   return `${SPEND_PREFIX}${id}`;
 }
 
-/** Undefined only when the key holds nothing. */
-function parse(id: string, raw: unknown): SpendRecord | undefined {
-  if (raw === null || raw === undefined) {
-    return undefined;
-  }
+function isNothing(raw: unknown): raw is null | undefined {
+  return raw === null || raw === undefined;
+}
+
+function parse(id: string, raw: unknown): SpendRecord {
   const parsed = DispatchRecordSchema.safeParse(raw);
-  if (parsed.success) {
-    return parsed.data;
-  }
+  return parsed.success ? parsed.data : unreadable(id, owner(raw));
+}
+
+function unreadable(
+  id: string,
+  named: Pick<UnreadableDispatch, 'executionId' | 'threadId'> = {},
+): UnreadableDispatch {
   return {
     id,
     unreadable: true,
-    ...owner(raw),
+    ...named,
   };
 }
 
@@ -141,8 +168,8 @@ function owner(raw: unknown): Pick<UnreadableDispatch, 'executionId' | 'threadId
 }
 
 const OwnerSchema = z.object({
-  executionId: z.string().optional().catch(undefined),
-  threadId: z.string().optional().catch(undefined),
+  executionId: z.string().min(1).optional().catch(undefined),
+  threadId: z.string().min(1).optional().catch(undefined),
 });
 
 //#endregion

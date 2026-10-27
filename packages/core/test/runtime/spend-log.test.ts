@@ -75,3 +75,61 @@ describe('spend log', () => {
     expect(await log.get('missing')).toBeUndefined();
   });
 });
+
+describe('a store that reads a damaged value as nothing', () => {
+  /** Like `createFileStorage`: a key that does not parse still lists, but reads as null. */
+  function damaging(damaged: string) {
+    const storage = createInMemoryStorage();
+    return {
+      storage: {
+        ...storage,
+        get: async <T>(key: string) => (key === damaged ? null : storage.get<T>(key)),
+        getMany: undefined,
+      },
+      inner: storage,
+    };
+  }
+
+  it('still keeps the record while its key lists', async () => {
+    const { storage, inner } = damaging('spend:torn');
+    await inner.set('spend:torn', '{"id":"to');
+    const log = createSpendLog(storage);
+
+    expect(await log.list()).toEqual([
+      {
+        id: 'torn',
+        unreadable: true,
+      },
+    ]);
+    expect(await log.get('torn')).toEqual({
+      id: 'torn',
+      unreadable: true,
+    });
+    await log.remove('torn');
+    expect(await log.list()).toEqual([]);
+    expect(await log.get('torn')).toBeUndefined();
+  });
+
+  it('does not take a key deleted mid-read for a damaged one', async () => {
+    const inner = createInMemoryStorage();
+    const log = createSpendLog({
+      ...inner,
+      getMany: undefined,
+      get: async <T>(key: string) => {
+        await inner.delete(key);
+        return inner.get<T>(key);
+      },
+    });
+    await log.put(record('a', '2026-01-01T00:00:00.000Z'));
+
+    expect(await log.list()).toEqual([]);
+  });
+
+  it('does not take a key that shares the prefix for the one asked', async () => {
+    const { storage, inner } = damaging('spend:a');
+    await inner.set('spend:ab', record('ab', '2026-01-01T00:00:00.000Z'));
+    const log = createSpendLog(storage);
+
+    expect(await log.get('a')).toBeUndefined();
+  });
+});
