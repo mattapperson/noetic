@@ -156,8 +156,9 @@ async function callNative(
 }
 
 /**
- * Send one native call under a dispatch record. The provider sends the generation id
- * only with the body, so a call cut off mid-request stays held at its ceiling.
+ * Send one native call under a dispatch record. The dispatch header lets the client's
+ * response hook save the generation id when the headers arrive, so a call cut off
+ * before its body finishes can still be priced.
  */
 async function sendNative({
   client,
@@ -185,6 +186,11 @@ async function sendNative({
       },
       {
         signal: request.signal,
+        ...(dispatch
+          ? {
+              headers: dispatch.headers,
+            }
+          : {}),
       },
     );
     await dispatch?.settle();

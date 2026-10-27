@@ -429,7 +429,7 @@ async function addCacheBreakpoint(request: Request): Promise<Request> {
 function createClient(
   config?: LlmProviderConfig,
   contextCache?: ContextCacheConfig,
-  spend?: Spend,
+  http?: HTTPClient,
 ): OpenRouter | undefined {
   const resolved = resolveLlmClient(config, readLlmEnv());
   if (!resolved) {
@@ -445,8 +445,10 @@ function createClient(
   if (resolved.serverURL) {
     options.serverURL = resolved.serverURL;
   }
-  if (spend) {
-    options.httpClient = generationHook(spend);
+  if (http) {
+    // The agent bundles an older SDK whose `HTTPClient` class is nominally different;
+    // the agent calls only `request()` on it, which both versions share.
+    options.httpClient = frameworkCast<ClientOptions['httpClient']>(http);
   }
 
   // A cache write costs more than a plain read, so the breakpoint only pays off
@@ -474,14 +476,12 @@ type ClientOptions = NonNullable<ConstructorParameters<typeof OpenRouter>[0]>;
 
 /**
  * An HTTP client that saves a paid call's generation id the moment its headers
- * arrive. The SDK awaits the hook before it reads the body, so a stream cut off
- * after its headers can still be priced.
- *
- * The agent bundles an older SDK whose `HTTPClient` class is nominally different;
- * the agent calls only `request()` on it, which both versions share.
+ * arrive. The SDK awaits the hook before it reads the body, so a call cut off after
+ * its headers can still be priced. Both the model client and the decisions client
+ * send through it; requests without a dispatch header pass untouched.
  */
-function generationHook(spend: Spend): ClientOptions['httpClient'] {
-  const http = new HTTPClient().addHook('response', async (res, req) => {
+function generationHook(spend: Spend): HTTPClient {
+  return new HTTPClient().addHook('response', async (res, req) => {
     const dispatchId = req.headers.get(DISPATCH_HEADER);
     const generationId = res.headers.get(GENERATION_HEADER);
     // An error response is retried or refused; only a success carries the call's id.
@@ -489,10 +489,9 @@ function generationHook(spend: Spend): ClientOptions['httpClient'] {
       await spend.noteGeneration(dispatchId, generationId);
     }
   });
-  return frameworkCast<ClientOptions['httpClient']>(http);
 }
 
-function createSdkClient(config?: LlmProviderConfig): OpenRouterSdk | undefined {
+function createSdkClient(config?: LlmProviderConfig, http?: HTTPClient): OpenRouterSdk | undefined {
   const resolved = resolveLlmClient(config, readLlmEnv());
   if (!resolved) {
     return undefined;
@@ -500,6 +499,11 @@ function createSdkClient(config?: LlmProviderConfig): OpenRouterSdk | undefined 
   return new OpenRouterSdk({
     apiKey: resolved.apiKey,
     serverURL: resolved.serverURL,
+    ...(http
+      ? {
+          httpClient: http,
+        }
+      : {}),
   });
 }
 
@@ -735,11 +739,14 @@ export class AgentHarness<
     this.harnessTools = opts.tools ?? [];
     this._contextLayers = opts.contextLayers;
     this.callModelOverride = opts._testCallModel;
+    const http = this.spend ? generationHook(this.spend) : undefined;
     this.client = opts._testCallModel
       ? undefined
-      : createClient(opts.callModelDefaults, opts.contextCache, this.spend);
+      : createClient(opts.callModelDefaults, opts.contextCache, http);
     this.decideOverride = opts._testDecide;
-    this.sdkClient = opts._testCallModel ? undefined : createSdkClient(opts.callModelDefaults);
+    this.sdkClient = opts._testCallModel
+      ? undefined
+      : createSdkClient(opts.callModelDefaults, http);
     this.channelStore = new ChannelStore({
       onWarning: (warning) => this.recordChannelWarning(warning),
     });

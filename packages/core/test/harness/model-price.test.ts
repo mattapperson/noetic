@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { frameworkCast } from '@noetic-tools/types';
 import type { PriceClient } from '../../src/harness/model-price';
-import { ceilingOf, createPriceBook } from '../../src/harness/model-price';
+import { ceilingOf, createPriceBook, measureRequest } from '../../src/harness/model-price';
 
 const PRICE = {
   input: 1e-6,
@@ -40,7 +40,7 @@ describe('ceilingOf', () => {
     ).toBeCloseTo(1e-4 + 1e-2);
   });
 
-  it('then to what the context leaves after the prompt, plus the request price', () => {
+  it('then to the context, all of which a short prompt leaves to output, plus the request price', () => {
     expect(
       ceilingOf(
         {
@@ -52,7 +52,38 @@ describe('ceilingOf', () => {
           contextLength: 1100,
         },
       ),
-    ).toBeCloseTo(1e-4 + 1e-2 + 1e-3);
+    ).toBeCloseTo(1.1e-2 + 1e-3);
+  });
+
+  it('prices the longest prompt when prompt tokens cost more than output', () => {
+    expect(
+      ceilingOf(
+        {
+          inputTokens: 100,
+        },
+        {
+          input: 1e-5,
+          output: 1e-6,
+          request: 0,
+          contextLength: 1100,
+        },
+      ),
+    ).toBeCloseTo(1e-3 + 1e-3);
+  });
+
+  it('never prices more prompt than the context holds', () => {
+    expect(
+      ceilingOf(
+        {
+          inputTokens: 1e4,
+          maxOutputTokens: 0,
+        },
+        {
+          ...PRICE,
+          contextLength: 8e3,
+        },
+      ),
+    ).toBeCloseTo(8e-3);
   });
 
   it('is undefined when no output cap is known', () => {
@@ -64,6 +95,45 @@ describe('ceilingOf', () => {
         PRICE,
       ),
     ).toBeUndefined();
+  });
+});
+
+describe('measureRequest', () => {
+  const bytes = (text: string): number => new TextEncoder().encode(text).length;
+
+  it('bounds the prompt by its UTF-8 bytes, which no common tokenizer exceeds', () => {
+    // Text a byte-level tokenizer may split into one token per byte.
+    const body = {
+      input: '日本語のテキスト 🧪🧪 ünïcödé '.repeat(20),
+    };
+    const { json, inputTokens } = measureRequest(body);
+    expect(json).toBe(JSON.stringify(body));
+    expect(inputTokens).toBeGreaterThanOrEqual(bytes(json));
+    expect(inputTokens).toBeGreaterThan(bytes(body.input));
+  });
+
+  it('allows each media part more than its URL', () => {
+    const text = measureRequest({
+      input: [
+        {
+          type: 'input_text',
+          text: 'look',
+        },
+      ],
+    });
+    const image = measureRequest({
+      input: [
+        {
+          type: 'input_text',
+          text: 'look',
+        },
+        {
+          type: 'input_image',
+          imageUrl: 'https://example.com/a.png',
+        },
+      ],
+    });
+    expect(image.inputTokens - text.inputTokens).toBeGreaterThan(2e3);
   });
 });
 

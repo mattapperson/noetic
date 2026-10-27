@@ -2074,7 +2074,7 @@ The ledger covers control flow, `callModel` steps, and their rounds. A tool inte
 
 ### Paid dispatches
 
-Durability also records every paid provider call — each `callModel` round and each native `decide()` — under `spend:<id>` **before** it is sent, with the request hash, model, a prompt-token estimate, and the output cap. The OpenRouter client saves the generation id from the response headers before the body is read. A call whose bill reaches the run drops its record; one cut off by a crash, `cancel()`, a steer, or a dropped connection stays **pending**, held at its ceiling (published prices × prompt estimate + output cap — set `params.maxTokens` to keep it finite) until reconciled.
+Durability also records every paid provider call — each `callModel` round and each native `decide()` — under `spend:<id>` **before** it is sent, with the request hash, model, a prompt-token bound, and the output cap. The OpenRouter clients save the generation id from the response headers before the body is read, for native `decide()` calls as for `callModel` rounds. A call whose bill reaches the run drops its record; one cut off by a crash, `cancel()`, a steer, or a dropped connection stays **pending**, held at its ceiling, an upper bound on the bill (published prices × prompt bound + output cap; the prompt bound is the request's UTF-8 bytes + 1,024 framing tokens + 4,096 per media part — set `params.maxTokens` to keep it finite) until reconciled.
 
 ```typescript
 harness.pendingSpend(executionId?: string): Promise<PendingSpend[]>;
@@ -2082,7 +2082,7 @@ harness.reconcileSpend(opts?: { executionId?: string; patienceMs?: number }): Pr
 harness.writeOffSpend(id: string, opts: { assumedCost: number }): Promise<SpendSettlement | undefined>;
 ```
 
-Reconciliation prices calls with a generation id via the provider's generation lookup, polling up to `patienceMs` (default 60s — providers price a call 7–32s after it ends). It runs on its own after `restore()` and whenever a call is cut off. A settled bill is charged once: to the run in flight on the execution, else the thread's stored session, else the restored context — so it lands in `cost` and `billedCost`. Until then `heldCost` on `Context`, `HarnessResponse`, and `SessionUsage` reports the hold, and `until.maxCost` stops at `cost + heldCost`. Calls cut off before any response byte, and native `decide()` calls cut off mid-request, have no id: they stay held until written off. `clearCheckpoint` and abandoned turns never delete spend records. Events: `{name}:spend_pending`, `{name}:spend_settled`.
+Reconciliation prices calls with a generation id via the provider's generation lookup, polling up to `patienceMs` (default 60s — providers price a call 7–32s after it ends). It runs on its own after `restore()` and whenever a call is cut off. A settled bill is charged once: to the run in flight on the execution, else the thread's stored session, else the restored context — so it lands in `cost` and `billedCost`. Until then `heldCost` on `Context`, `HarnessResponse`, and `SessionUsage` reports the hold, and `until.maxCost` stops at `cost + heldCost`. Calls cut off before any response byte have no id: they stay held until written off. `clearCheckpoint` and abandoned turns never delete spend records. Events: `{name}:spend_pending`, `{name}:spend_settled`.
 
 ### `createFileStorage`
 

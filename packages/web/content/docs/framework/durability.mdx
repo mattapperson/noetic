@@ -281,8 +281,8 @@ A turn that finished is not replayed when re-delivered — it runs again as a ne
 
 A model call cut off with its host — or by `cancel(ctx)`, a steer, or a dropped connection — finished nothing, so the ledger has no entry for it. The provider billed it anyway: a cut-off stream is billed for every token generated, even after the client went away. So every paid call leaves a **dispatch record** in storage before it is sent — each `callModel` round and each native `decide()` call:
 
-- **Before send**, the record holds the model, a hash of the request, an estimate of the prompt's tokens, and the request's output cap.
-- **When the response headers arrive**, the provider's generation id is saved to it — before the body is read.
+- **Before send**, the record holds the model, a hash of the request, a bound on the prompt's tokens, and the request's output cap.
+- **When the response headers arrive**, the provider's generation id is saved to it — before the body is read, for `decide()` calls as for `callModel` rounds.
 - **When the bill arrives** with the response, the record is deleted; the cost reaches usage as usual.
 - **Otherwise** the record stays, and the call is **pending**: held at its ceiling until its bill is known.
 
@@ -301,9 +301,9 @@ Reconciliation runs on its own after `restore()` and the moment a call is cut of
 
 A settled bill is charged once: to the run in flight on that execution, else to the thread's stored session, else to the context `restore()` returned — so it lands in `cost` and `billedCost` like any other spend. `{name}:spend_pending` and `{name}:spend_settled` events report both ends.
 
-**Held spend stays bounded.** Until it is settled, a pending call is held at its **ceiling**: the model's published prices applied to the prompt estimate and the output cap (`params.maxTokens`, else the model's published maximum). `heldCost` reports the hold beside `cost` and `billedCost` on `Context`, `HarnessResponse`, and `SessionUsage`, and `until.maxCost` counts it, so a resumed run cannot spend what its cut-off attempt may already have spent. A model with no published price, or no output cap anywhere, has no ceiling: `spend_pending` flags it `unbounded` and it adds nothing to `heldCost`. Set `params.maxTokens` on paid steps to keep every ceiling finite.
+**Held spend stays bounded.** Until it is settled, a pending call is held at its **ceiling**, an upper bound on its bill: the model's published prices applied to the prompt bound and the output cap (`params.maxTokens`, else the model's published maximum, else the model's context). The prompt bound is the request's size in UTF-8 bytes, since no common tokenizer spends more than one token per byte of text, plus 1,024 tokens for the provider's own framing and 4,096 for each image, file, or audio part. A long PDF or audio file sent by URL can cost more than its allowance, and its call then more than its ceiling. `heldCost` reports the hold beside `cost` and `billedCost` on `Context`, `HarnessResponse`, and `SessionUsage`, and `until.maxCost` counts it, so a resumed run cannot spend what its cut-off attempt may already have spent. A model with no published price, or no output cap anywhere, has no ceiling: `spend_pending` flags it `unbounded` and it adds nothing to `heldCost`. Set `params.maxTokens` on paid steps to keep every ceiling finite.
 
-**Some calls can only be bounded.** A call cut off before any response byte has no generation id. Neither does a native `decide()` cut off mid-request — the provider sends its id only with the body. These stay held until you write them off.
+**Some calls can only be bounded.** A call cut off before any response byte has no generation id. It stays held until you write it off.
 
 **Evidence is never discarded.** Records live under `spend:<id>`, apart from checkpoints, so `clearCheckpoint` and an abandoned turn leave them alone. A record leaves storage only when it is settled or written off.
 

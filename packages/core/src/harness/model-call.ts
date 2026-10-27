@@ -858,6 +858,8 @@ export class AgentHarnessModelCaller {
           model: request.model,
           instructions: prepared.instructions,
           input: modelInput,
+          tools: prepared.sdkTools,
+          text: textFormat,
         },
         maxOutputTokens: request.params?.maxTokens,
         round,
