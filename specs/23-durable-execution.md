@@ -1,7 +1,7 @@
 # Durable Execution
 
 > **Depends On:** `07-context-and-event-log` (Context, ItemLog), `08-runtime` (AgentHarness, SubprocessAdapter, StorageAdapter), `21-tasks` (planner/implementer subprocess pattern), `22-cli-architecture` (CLI subprocess wiring)
-> **Exports:** `CheckpointSnapshot`, `CheckpointSnapshotSchema`, `CheckpointSchemaVersion`, `CheckpointStore`, `createCheckpointStore`, `FrontierFrame`, `CwdSnapshot`, `ItemLogSnapshot`, `PendingAskUserSnapshot`, `RestoreContextOptions`, `createFileStorage`, `DurableOutboundQueue`, `createDurableOutboundQueue`, `reattachLiveChildren`, `PendingSpend`, `SpendSettlement`, `SpendKind`, `ReconcileSpendOptions`, `WriteOffSpendOptions`
+> **Exports:** `CheckpointSnapshot`, `CheckpointSnapshotSchema`, `CheckpointSchemaVersion`, `CheckpointStore`, `createCheckpointStore`, `FrontierFrame`, `CwdSnapshot`, `ItemLogSnapshot`, `PendingAskUserSnapshot`, `RestoreContextOptions`, `createFileStorage`, `DurableOutboundQueue`, `createDurableOutboundQueue`, `reattachLiveChildren`, `PendingSpend`, `PendingDispatch`, `UnreadableDispatch`, `SpendSettlement`, `SpendKind`, `ReconcileSpendOptions`, `WriteOffSpendOptions`
 > **Source of truth:** `packages/core/src/runtime/checkpoint-store.ts`, `packages/core/src/runtime/durable/harness-checkpoints.ts`, `packages/core/src/runtime/file-storage.ts`, `packages/core/src/types/checkpoint.ts`, `packages/core/src/runtime/durable/spend-log.ts`, `packages/core/src/harness/spend.ts`, `packages/core/src/harness/model-price.ts`, `packages/types/src/types/spend.ts`, `packages/core/src/adapters/node/durable-outbound-queue.ts`, `packages/core/src/adapters/node/agent-ipc-{client,server,protocol}.ts`, `packages/cli/src/cli/reattach-live-children.ts`
 > **Docs:** `packages/web/content/docs/framework/durability.mdx`
 
@@ -185,7 +185,7 @@ Every paid provider call therefore leaves a **dispatch record** in the harness's
 ### The record
 
 ```typescript
-interface PendingSpend {
+interface PendingDispatch {
   id: string;                  // dispatch id
   kind: 'model' | 'decide';
   model: string;
@@ -211,7 +211,7 @@ interface UnreadableDispatch {
   threadId?: string;           // likewise
 }
 
-type PendingSpend = PendingDispatch | UnreadableDispatch;  // PendingDispatch is the record above
+type PendingSpend = PendingDispatch | UnreadableDispatch;
 ```
 
 Nothing else in the value is trusted. An unreadable dispatch has no ceiling and no generation id, so it is treated as an unbounded hold that can never be priced (§ Ceilings, § Reconciliation): `pendingSpend` lists it, `restore()` holds it and `spend_pending` flags it `{ id, unreadable: true, unbounded: true }`, it adds nothing to `heldCost` or `until.maxCost`, and reconciliation leaves it held. It leaves storage only through `writeOffSpend`, which deletes it and charges the assumed cost like any write-off. One that names no execution may be any execution's: it is listed, held, and flagged with every execution, and a write-off charges the context it was last held on.
@@ -288,7 +288,7 @@ Until settled, a pending dispatch is **held** at its ceiling:
 
 | Event | When | Data |
 |---|---|---|
-| `{name}:spend_pending` | A dispatch is left pending, or `restore()` finds one | `{ id, kind, model, generationId?, ceiling?, unbounded? }` |
+| `{name}:spend_pending` | A dispatch is left pending, or `restore()` finds one | `{ id, kind, model, generationId?, ceiling?, unbounded? }`, or `{ id, unreadable: true, unbounded: true }` for an unreadable dispatch |
 | `{name}:spend_settled` | A pending dispatch is settled or written off | `{ id, cost, writtenOff? }` |
 
 Both go to the broadcaster of the dispatch's root context, else its thread's session.
