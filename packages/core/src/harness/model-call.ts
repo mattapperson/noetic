@@ -32,6 +32,7 @@ import {
   itemsToInput,
   resolveWireJsonSchema,
   sanitizeToolNameForWire,
+  toolsOnWire,
 } from '../adapters/openrouter';
 import { isFunctionCall } from '../interpreter/typeguards';
 import { GenAI, NoeticAttr, ToolAttr } from '../observability/genai-attributes';
@@ -859,6 +860,8 @@ export class AgentHarnessModelCaller {
           model: request.model,
           instructions: prepared.instructions,
           input: modelInput,
+          tools: prepared.sdkTools && toolsOnWire(prepared.sdkTools),
+          text: textFormat,
         },
         maxOutputTokens: request.params?.maxTokens,
         round,

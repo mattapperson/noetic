@@ -853,9 +853,13 @@ export interface FakeOpenRouterRound {
  * response and then end, as a lost connection does, and rounds in `hangAt` send their
  * headers and first event and then nothing, as a host killed mid-stream sees. Every
  * response carries the generation id `gen-<round>` in its `x-generation-id` header.
+ *
+ * A native decide call (`POST /api/alpha/decisions`, under `origin`) gets its headers,
+ * with the id `gen-dec-<n>`, and then never its body.
  */
 export interface FakeOpenRouter {
   readonly baseUrl: string;
+  readonly origin: string;
   readonly rounds: FakeOpenRouterRound[];
   readonly dropAt: Set<number>;
   readonly hangAt: Set<number>;
@@ -866,6 +870,7 @@ export function startFakeOpenRouter(reply: (input: unknown[]) => unknown[]): Fak
   const rounds: FakeOpenRouterRound[] = [];
   const dropAt = new Set<number>();
   const hangAt = new Set<number>();
+  let decisions = 0;
   const server = Bun.serve({
     port: 0,
     async fetch(request) {
@@ -874,6 +879,22 @@ export function startFakeOpenRouter(reply: (input: unknown[]) => unknown[]): Fak
         return new Response('{}', {
           status: 404,
         });
+      }
+      if (new URL(request.url).pathname === '/api/alpha/decisions') {
+        decisions += 1;
+        return new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode('{"answers":'));
+            },
+          }),
+          {
+            headers: {
+              'content-type': 'application/json',
+              'x-generation-id': `gen-dec-${decisions}`,
+            },
+          },
+        );
       }
       const body = z
         .object({
@@ -921,6 +942,7 @@ export function startFakeOpenRouter(reply: (input: unknown[]) => unknown[]): Fak
   });
   return {
     baseUrl: `http://localhost:${server.port}/api/v1`,
+    origin: `http://localhost:${server.port}`,
     rounds,
     dropAt,
     hangAt,

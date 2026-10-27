@@ -18,7 +18,7 @@ import type {
   UsageCharge,
   WriteOffSpendOptions,
 } from '@noetic-tools/types';
-import { estimateTokens, recordUsage } from '@noetic-tools/types';
+import { recordUsage } from '@noetic-tools/types';
 import type { OpenRouter } from '@openrouter/sdk';
 import { emitFrameworkEvent, getBroadcaster } from '../runtime/broadcaster-utils';
 import type { DispatchRecord, SpendLog } from '../runtime/durable/spend-log';
@@ -27,7 +27,7 @@ import { statusOf } from '../util/status-code';
 import type { EventBroadcaster } from './deps/runtime';
 import { ContextImpl, laneBase } from './deps/runtime';
 import type { ModelPrice } from './model-price';
-import { ceilingOf, createPriceBook, LOOKUP_TIMEOUT_MS } from './model-price';
+import { ceilingOf, createPriceBook, LOOKUP_TIMEOUT_MS, measureRequest } from './model-price';
 import { roundPath } from './model-rounds';
 
 //#region Types
@@ -62,7 +62,7 @@ export interface DispatchParams {
   ctx?: Context;
   kind: SpendKind;
   model: string;
-  /** The request body, hashed and sized for the record. */
+  /** The request body as sent, tools included: hashed, and sized to bound its prompt. */
   body: unknown;
   maxOutputTokens?: number;
   /** The model-loop round, for a `callModel` round's ledger key. */
@@ -121,13 +121,13 @@ export class Spend {
   async open(params: DispatchParams): Promise<Dispatch> {
     const root = rootOf(params.ctx);
     const path = pathOf(params.ctx);
-    const json = JSON.stringify(params.body) ?? '';
+    const { json, inputTokens } = measureRequest(params.body);
     const record: DispatchRecord = {
       id: crypto.randomUUID(),
       kind: params.kind,
       model: params.model,
       requestHash: hashText(json),
-      inputTokens: estimateTokens(json),
+      inputTokens,
       ...(params.maxOutputTokens !== undefined
         ? {
             maxOutputTokens: params.maxOutputTokens,

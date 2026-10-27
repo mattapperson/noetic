@@ -23,7 +23,10 @@ export interface PendingSpend {
   readonly model: string;
   /** Hash of the request body sent. */
   readonly requestHash: string;
-  /** Estimate of the prompt's tokens. */
+  /**
+   * The most prompt tokens the call can cost: the request body's UTF-8 bytes, plus
+   * allowances for the provider's framing and each media part.
+   */
   readonly inputTokens: number;
   /** The request's output cap, when it set one. */
   readonly maxOutputTokens?: number;

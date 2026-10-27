@@ -7,11 +7,13 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import type { StorageAdapter } from '@noetic-tools/context';
 import type { Context, ContextData, PendingSpend, StreamEvent } from '@noetic-tools/types';
-import { frameworkCast, recordUsage } from '@noetic-tools/types';
+import { estimateTokens, frameworkCast, recordUsage } from '@noetic-tools/types';
+import { z } from 'zod';
 import { inParallel } from '../../src/builders/control-flow-builders';
 import { decide } from '../../src/builders/decide-builders';
 import { loop } from '../../src/builders/loop-builder';
 import { callModel, runCode } from '../../src/builders/step-builders';
+import { tool } from '../../src/builders/tool-builder';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import type { DispatchRecord } from '../../src/runtime/durable/spend-log';
 import { createSpendLog } from '../../src/runtime/durable/spend-log';
@@ -38,24 +40,32 @@ interface Bill {
 
 interface FakeSdk {
   lookups: string[];
+  /** Each native decide request sent. */
+  decisions: unknown[];
 }
 
 /**
  * The SDK client's model and generation lookups. A generation not in `bills` answers
  * 404, as the provider does until it has priced the call. Native decide calls never
- * answer.
+ * answer, unless `realDecisions` sends them through the harness's own client.
  */
 function useFakeSdk(
   harness: AgentHarness,
   opts: {
     bills?: Record<string, Bill>;
     decisionModel?: boolean;
+    realDecisions?: boolean;
   } = {},
 ): FakeSdk {
   const lookups: string[] = [];
-  frameworkCast<{
+  const decisions: unknown[] = [];
+  const host = frameworkCast<{
     sdkClient: unknown;
-  }>(harness).sdkClient = {
+  }>(harness);
+  const real = frameworkCast<{
+    alpha: unknown;
+  }>(host.sdkClient);
+  host.sdkClient = {
     models: {
       get: async () => ({
         data: {
@@ -89,24 +99,43 @@ function useFakeSdk(
         };
       },
     },
-    alpha: {
-      decisions: {
-        // Never answers; a cancel rejects it, as the SDK does.
-        create: (
-          _request: unknown,
-          options: {
-            signal?: AbortSignal;
+    alpha: opts.realDecisions
+      ? real.alpha
+      : {
+          decisions: {
+            // Never answers; a cancel rejects it, as the SDK does.
+            create: (
+              request: {
+                decisionsRequest: unknown;
+              },
+              options: {
+                signal?: AbortSignal;
+              },
+            ) => {
+              decisions.push(request.decisionsRequest);
+              return new Promise((_resolve, reject) => {
+                options.signal?.addEventListener('abort', () => reject(options.signal?.reason));
+              });
+            },
           },
-        ) =>
-          new Promise((_resolve, reject) => {
-            options.signal?.addEventListener('abort', () => reject(options.signal?.reason));
-          }),
-      },
-    },
+        },
   };
   return {
     lookups,
+    decisions,
   };
+}
+
+const realFetch = globalThis.fetch;
+
+/** Send the SDK's native decide calls, which always go to openrouter.ai, to `server`. */
+function routeDecisions(server: FakeOpenRouter): void {
+  globalThis.fetch = Object.assign((input: Request | string | URL, init?: RequestInit) => {
+    if (input instanceof Request && input.url === 'https://openrouter.ai/api/alpha/decisions') {
+      return realFetch(new Request(`${server.origin}/api/alpha/decisions`, input), init);
+    }
+    return realFetch(input, init);
+  }, realFetch);
 }
 
 function answer(): unknown[] {
@@ -129,6 +158,7 @@ function answer(): unknown[] {
 
 const servers: FakeOpenRouter[] = [];
 afterEach(() => {
+  globalThis.fetch = realFetch;
   for (const server of servers.splice(0)) {
     server.stop();
   }
@@ -254,6 +284,44 @@ describe('paid dispatch records', () => {
     expect(atSend?.[0]?.inputTokens).toBeGreaterThan(0);
     expect(await log.list()).toEqual([]);
     expect(ctx.cost).toBeCloseTo(ROUND_COST);
+  });
+
+  it("bounds a round's prompt by its tools' JSON Schemas, which the wire carries", async () => {
+    const server = startServer();
+    const storage = createInMemoryStorage();
+    const log = createSpendLog(storage);
+    const harness = harnessOver(storage, server);
+    const guide = 'Search the archive by its exact catalogue code. '.repeat(200);
+    const search = tool({
+      name: 'search',
+      description: 'Search',
+      input: z.object({
+        code: z.string().describe(guide),
+      }),
+      output: z.string(),
+      execute: async () => 'none',
+    });
+    const seen: Promise<DispatchRecord[]>[] = [];
+    const original = server.rounds.push.bind(server.rounds);
+    server.rounds.push = (...items) => {
+      seen.push(log.list());
+      return original(...items);
+    };
+
+    await harness.run(
+      callModel<ContextData, string, string>({
+        id: 'agent',
+        model: 'test/model',
+        tools: [
+          search,
+        ],
+      }),
+      'go',
+      harness.createContext(),
+    );
+
+    const [atSend] = await Promise.all(seen);
+    expect(atSend?.[0]?.inputTokens).toBeGreaterThan(new TextEncoder().encode(guide).length);
   });
 
   it('records nothing without durable storage', async () => {
@@ -386,6 +454,53 @@ describe('a host killed mid-call', () => {
         assumedCost: 0.02,
       }),
     ).toBeUndefined();
+  });
+
+  it("saves a decide() call's generation id from its headers, before its body", async () => {
+    const server = startServer();
+    routeDecisions(server);
+    const storage = createInMemoryStorage();
+    const first = harnessOver(storage, server);
+    useFakeSdk(first, {
+      decisionModel: true,
+      realDecisions: true,
+    });
+    const ctx = first.createContext();
+    void first.run(triage, 'help', ctx).catch(() => {});
+
+    // The body never finishes, as a host killed mid-response sees.
+    const [pending] = await waitFor(pendingSeenBy(storage), (list) =>
+      Boolean(list[0]?.generationId),
+    );
+    expect(pending).toMatchObject({
+      kind: 'decide',
+      generationId: 'gen-dec-1',
+      executionId: ctx.id,
+      path: '/triage#0',
+    });
+  });
+
+  it("holds a decide() call above a tokenizer that counts 1.4× Noetic's estimate", async () => {
+    const storage = createInMemoryStorage();
+    const first = harnessOver(storage);
+    const sdk = useFakeSdk(first, {
+      decisionModel: true,
+    });
+    const ctx = first.createContext();
+    void first
+      .run(triage, 'The deploy failed on the payments service. '.repeat(80), ctx)
+      .catch(() => {});
+    await waitFor(pendingSeenBy(storage), (list) => list.length === 1);
+
+    const second = harnessOver(storage);
+    useFakeSdk(second);
+    const [held] = await second.pendingSpend(ctx.id);
+    assert(held?.ceiling !== undefined);
+    // A paid run billed 1213 prompt tokens for a decide() call Noetic estimated at
+    // 881 (chars / 4).
+    const estimate = estimateTokens(JSON.stringify(sdk.decisions[0]));
+    const bill = PROMPT_PRICE * Math.ceil(1.4 * estimate) + COMPLETION_PRICE * MAX_COMPLETION;
+    expect(held.ceiling).toBeGreaterThanOrEqual(bill);
   });
 
   it('settles a cut-off session turn into the session usage once', async () => {
