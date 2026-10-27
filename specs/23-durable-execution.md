@@ -227,15 +227,17 @@ output cap  = maxOutputTokens ?? the model's published max completion tokens
 
 With neither output cap, the prompt and output share the context, so the ceiling is the dearer end of that trade: `max(prompt price × prompt + completion price × (context length − prompt), completion price × context length) + request price`.
 
-The request body is what was sent: for a `callModel` round, its instructions, input, tools, and output format; for a native `decide()`, its state and questions. `inputTokens` bounds the prompt on three assumptions:
+The request body is what was sent: for a `callModel` round, its instructions, input, tools (each input schema as the JSON Schema the wire carries), and output format; for a native `decide()`, its state and questions. `inputTokens` bounds the prompt on three assumptions:
 
 - **At most one token per UTF-8 byte of text.** Byte-level BPE tokenizers (GPT, Claude, Llama 3) and SentencePiece with byte fallback (Gemini, Mistral) never emit more tokens than the text has bytes, and the JSON body holds every byte of the prompt's text. A character-count estimate is not a bound: a provider's native tokenizer can count far more tokens than chars / 4.
 - **At most 1,024 tokens of the provider's own framing per request**: chat template, role markers, the preamble a provider adds for tool use.
 - **At most 4,096 tokens per media part** (`image_url`, `input_image`, `file`, `input_file`, `input_audio`, `input_video`, `video_url`). An image sent by URL is a few bytes of body that cost hundreds of tokens. A long PDF or audio file sent by URL can exceed this allowance, and its call then exceeds its ceiling.
 
-A prompt longer than the context is refused or trimmed by the provider, so the context length caps it.
+A prompt longer than the context is refused or trimmed by the provider, so the context length caps it. The context length is the widest the model publishes, its own or its top provider's, since OpenRouter may route to any provider.
 
-Prices come from the provider's model metadata (`GET /models/{author}/{slug}`), looked up once per model per harness and only when something is held, so a healthy call makes no extra request. A record with no output cap anywhere, or a model with no published price, has no ceiling: it is flagged `unbounded: true` on `spend_pending`, listed by `pendingSpend`, and adds nothing to `heldCost`. Set `params.maxTokens` on paid steps to keep every ceiling finite.
+Prices come from the provider's model metadata (`GET /models/{author}/{slug}`), looked up once per model per harness and only when something is held, so a healthy call makes no extra request. Each price is the dearest the model publishes under any condition: the prompt price is the highest of the prompt and cache-write prices, the completion price the highest of the completion and reasoning prices, each across the base pricing and every override (long-context and time-of-day tiers).
+
+The ceiling does not cover fees outside these prices: per-image prices above the media allowance, server-tool fees (web search, and the fetched content a server tool adds to the prompt), or a fallback provider that charges more than the model's published price or allows more output than its top provider. A record with no output cap anywhere, or a model with no published price, has no ceiling: it is flagged `unbounded: true` on `spend_pending`, listed by `pendingSpend`, and adds nothing to `heldCost`. Set `params.maxTokens` on paid steps to keep every ceiling finite.
 
 ### Reconciliation
 

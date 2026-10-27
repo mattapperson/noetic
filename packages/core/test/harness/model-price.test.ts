@@ -194,6 +194,59 @@ describe('createPriceBook', () => {
     ]);
   });
 
+  it('takes the dearest price any condition charges: long prompts, cache writes, reasoning', async () => {
+    const fake = client([
+      () =>
+        Promise.resolve({
+          data: {
+            pricing: {
+              prompt: '0.000001',
+              completion: '0.00001',
+              inputCacheWrite: '0.00000125',
+              inputCacheWrite1h: '0.000002',
+              internalReasoning: '0.00002',
+              overrides: [
+                {
+                  minPromptTokens: 2e5,
+                  prompt: '0.000003',
+                  completion: '0.00003',
+                },
+              ],
+            },
+            topProvider: {},
+            contextLength: null,
+          },
+        }),
+    ]);
+
+    expect(await createPriceBook(() => fake.client)('acme/model')).toMatchObject({
+      input: 3e-6,
+      output: 3e-5,
+    });
+  });
+
+  it("caps the prompt at the widest context any provider serves, not only the top one's", async () => {
+    const fake = client([
+      () =>
+        Promise.resolve({
+          data: {
+            pricing: {
+              prompt: '0.000001',
+              completion: '0.00001',
+            },
+            topProvider: {
+              contextLength: 2e5,
+            },
+            contextLength: 1e6,
+          },
+        }),
+    ]);
+
+    expect(await createPriceBook(() => fake.client)('acme/model')).toMatchObject({
+      contextLength: 1e6,
+    });
+  });
+
   it('does not keep a failed lookup, so the next caller asks again', async () => {
     const fake = client([
       () => Promise.reject(new Error('offline')),

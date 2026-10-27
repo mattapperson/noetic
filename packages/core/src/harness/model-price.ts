@@ -12,7 +12,7 @@ export const LOOKUP_TIMEOUT_MS = 10e3;
 /** @internal The slice of the SDK client a price lookup uses. */
 export type PriceClient = Pick<OpenRouter, 'models'>;
 
-/** @internal USD per token, and the output cap the model publishes. */
+/** @internal The most USD per token the model charges under any condition, and its caps. */
 export interface ModelPrice {
   input: number;
   output: number;
@@ -160,23 +160,54 @@ async function lookupPrice(
         timeoutMs: LOOKUP_TIMEOUT_MS,
       },
     );
-    const input = Number(data.pricing.prompt);
-    const output = Number(data.pricing.completion);
-    if (!Number.isFinite(input) || !Number.isFinite(output) || input < 0 || output < 0) {
+    const { pricing } = data;
+    const base = Number(pricing.prompt);
+    const completion = Number(pricing.completion);
+    if (!Number.isFinite(base) || !Number.isFinite(completion) || base < 0 || completion < 0) {
       return undefined;
     }
-    const request = Number(data.pricing.request ?? 0);
+    // Long prompts, cache writes, and reasoning can each bill above the base price,
+    // so a bound takes the dearest of every condition the model publishes.
+    const tiers = [
+      pricing,
+      ...(pricing.overrides ?? []),
+    ];
+    const context = Math.max(data.topProvider.contextLength ?? 0, data.contextLength ?? 0);
     return {
-      input,
-      output,
-      request: Number.isFinite(request) && request > 0 ? request : 0,
+      input: dearest(
+        tiers.flatMap((tier) => [
+          tier.prompt,
+          tier.inputCacheWrite,
+          tier.inputCacheWrite1h,
+        ]),
+      ),
+      output: dearest([
+        ...tiers.map((tier) => tier.completion),
+        pricing.internalReasoning,
+      ]),
+      request: dearest([
+        pricing.request,
+      ]),
       maxOutput: data.topProvider.maxCompletionTokens ?? undefined,
-      contextLength: data.topProvider.contextLength ?? data.contextLength ?? undefined,
+      // OpenRouter may route to any provider, so the widest context bounds the prompt.
+      contextLength: context > 0 ? context : undefined,
     };
   } catch {
     // An unknown price leaves the hold unbounded, which `spend_pending` flags.
     return undefined;
   }
+}
+
+/** The highest of some published USD prices; an absent or malformed one counts as free. */
+function dearest(prices: ReadonlyArray<string | undefined>): number {
+  let most = 0;
+  for (const price of prices) {
+    const value = Number(price);
+    if (Number.isFinite(value) && value > most) {
+      most = value;
+    }
+  }
+  return most;
 }
 
 //#endregion

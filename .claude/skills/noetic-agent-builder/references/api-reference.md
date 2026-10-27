@@ -2074,7 +2074,7 @@ The ledger covers control flow, `callModel` steps, and their rounds. A tool inte
 
 ### Paid dispatches
 
-Durability also records every paid provider call — each `callModel` round and each native `decide()` — under `spend:<id>` **before** it is sent, with the request hash, model, a prompt-token bound, and the output cap. The OpenRouter clients save the generation id from the response headers before the body is read, for native `decide()` calls as for `callModel` rounds. A call whose bill reaches the run drops its record; one cut off by a crash, `cancel()`, a steer, or a dropped connection stays **pending**, held at its ceiling, an upper bound on the bill (published prices × prompt bound + output cap; the prompt bound is the request's UTF-8 bytes + 1,024 framing tokens + 4,096 per media part — set `params.maxTokens` to keep it finite) until reconciled.
+Durability also records every paid provider call — each `callModel` round and each native `decide()` — under `spend:<id>` **before** it is sent, with the request hash, model, a prompt-token bound, and the output cap. The OpenRouter clients save the generation id from the response headers before the body is read, for native `decide()` calls as for `callModel` rounds. A call whose bill reaches the run drops its record; one cut off by a crash, `cancel()`, a steer, or a dropped connection stays **pending**, held at its ceiling, an upper bound on the bill (dearest published prices × prompt bound + output cap; the prompt bound is the request's UTF-8 bytes + 1,024 framing tokens + 4,096 per media part — set `params.maxTokens` to keep it finite) until reconciled.
 
 ```typescript
 harness.pendingSpend(executionId?: string): Promise<PendingSpend[]>;
