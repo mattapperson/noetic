@@ -20,8 +20,8 @@ describe('markSpent / chargeSpent', () => {
     const ctx = context();
     const error = markSpent(new Error('boom'), charge);
 
-    chargeSpent(ctx, error);
-    chargeSpent(ctx, error);
+    expect(chargeSpent(ctx, error)).toEqual(charge);
+    expect(chargeSpent(ctx, error)).toBeUndefined();
 
     expect(ctx.cost).toBeCloseTo(0.03);
     expect(ctx.tokens.total).toBe(15);
@@ -39,8 +39,8 @@ describe('markSpent / chargeSpent', () => {
   it('charges nothing for an unmarked error or a non-object', () => {
     const ctx = context();
 
-    chargeSpent(ctx, new Error('boom'));
-    chargeSpent(ctx, 'boom');
+    expect(chargeSpent(ctx, new Error('boom'))).toBeUndefined();
+    expect(chargeSpent(ctx, 'boom')).toBeUndefined();
 
     expect(ctx.cost).toBe(0);
     expect(ctx.tokens.total).toBe(0);

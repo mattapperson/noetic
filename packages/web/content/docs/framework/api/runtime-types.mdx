@@ -257,7 +257,7 @@ interface DrainCall {
 }
 ```
 
-What `cancel` and `abort` resolve with after a [graceful stop](/docs/framework/runtime#graceful-stop), and the data of `{name}:drain_finished`. A `finished` call that returned a bill carries `cost` (USD) and `usage` as charged to its context; a `cutOff` call never does.
+What `cancel` and `abort` resolve with after a [graceful stop](/docs/framework/runtime#graceful-stop), and the data of `{name}:drain_finished`. A `finished` call the provider billed carries `cost` (USD) and `usage` exactly as charged to its context, a round rejected and asked again included; a `cutOff` call never does.
 
 ## HarnessResponse
 

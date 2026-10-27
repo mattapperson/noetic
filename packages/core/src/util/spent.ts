@@ -38,20 +38,22 @@ export function markSpent(error: unknown, charge: UsageCharge, onCharge?: () => 
 }
 
 /**
- * Charge `ctx` with what the call behind `error` spent. The mark is dropped once
- * charged, so an error rethrown through an outer call is charged only by that call.
+ * Charge `ctx` with what the call behind `error` spent, and return that charge. The
+ * mark is dropped once charged, so an error rethrown through an outer call is charged
+ * only by that call.
  */
-export function chargeSpent(ctx: Context, error: unknown): void {
+export function chargeSpent(ctx: Context, error: unknown): UsageCharge | undefined {
   if (typeof error !== 'object' || error === null) {
-    return;
+    return undefined;
   }
   const spent = spends.get(error);
   if (!spent) {
-    return;
+    return undefined;
   }
   spends.delete(error);
   recordUsage(ctx, spent.charge);
   spent.onCharge?.();
+  return spent.charge;
 }
 
 function isEmpty(charge: UsageCharge): boolean {

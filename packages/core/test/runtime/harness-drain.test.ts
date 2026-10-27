@@ -22,6 +22,7 @@ import { AgentHarness } from '../../src/harness/agent-harness';
 import { createCheckpointStore } from '../../src/runtime/durable/checkpoint-store';
 import { createStepLedgerStore } from '../../src/runtime/durable/step-ledger';
 import { createInMemoryStorage } from '../../src/runtime/in-memory-storage';
+import { markSpent } from '../../src/util/spent';
 import { makeMessage, sleep } from '../_helpers';
 
 //#region Fakes
@@ -34,8 +35,10 @@ interface EmittedEvent {
 
 /**
  * A provider that answers a round for model `m` after `latencyMs[m]`, replies
- * with a function call for `tools/model` and a message otherwise, charges 10
- * input / 5 output tokens and $0.01 a round, and stops when its signal aborts.
+ * with a function call for `tools/model`, nothing for `empty/model`, and a message
+ * otherwise, charges 10 input / 5 output tokens and $0.01 a round, and stops when
+ * its signal aborts. For `stall/model` the event stream stays open after the
+ * response until the signal aborts.
  */
 class SlowClient {
   started = 0;
@@ -55,14 +58,7 @@ class SlowClient {
     getResponse: () => Promise<unknown>;
   } {
     this.started += 1;
-    const output =
-      params.model === 'tools/model'
-        ? [
-            lookupCall(),
-          ]
-        : [
-            makeMessage('assistant', 'done'),
-          ];
+    const output = outputFor(params.model);
     let answered = false;
     const response = new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -94,13 +90,39 @@ class SlowClient {
       );
     });
     response.catch(() => {});
+    const stalls = params.model === 'stall/model';
     return {
       async *getFullResponsesStream() {
         await response.catch(() => {});
+        if (stalls) {
+          await untilAborted(options.signal);
+        }
       },
       getResponse: () => response,
     };
   }
+}
+
+function outputFor(model: string): Item[] {
+  if (model === 'tools/model') {
+    return [
+      lookupCall(),
+    ];
+  }
+  if (model === 'empty/model') {
+    return [];
+  }
+  return [
+    makeMessage('assistant', 'done'),
+  ];
+}
+
+function untilAborted(signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    signal.addEventListener('abort', () => resolve(), {
+      once: true,
+    });
+  });
 }
 
 function lookupCall(): Item {
@@ -419,6 +441,128 @@ describe('cancel with drainMs', () => {
     expect(eventData(events, 'drain_finished')).toEqual({
       ...report,
     });
+  });
+
+  it('reports a round rejected for empty output with the cost charged for it', async () => {
+    const client = new SlowClient({
+      'empty/model': 60,
+    });
+    const harness = makeHarness(client);
+    const ctx = harness.createContext();
+    // The empty round is rejected and asked again; the drain holds the retry back.
+    const run = harness.run(ask('agent', 'empty/model'), 'go', ctx);
+    await waitFor(() => client.started === 1);
+
+    const report = await harness.cancel(ctx, {
+      drainMs: 2e3,
+    });
+
+    await cancelledError(run);
+    assert(report);
+    expect(client.started).toBe(1);
+    expect(report.cutOff).toEqual([]);
+    expect(report.finished).toEqual([
+      {
+        kind: 'model_round',
+        model: 'empty/model',
+        executionId: ctx.id,
+        round: 0,
+        cost: 0.01,
+        usage: {
+          inputTokens: 10,
+          outputTokens: 5,
+        },
+      },
+    ]);
+    expect(ctx.cost).toBe(0.01);
+  });
+
+  it('reports a round finished once its bill is in, though its event stream is still open', async () => {
+    const client = new SlowClient({
+      'stall/model': 60,
+    });
+    const harness = makeHarness(client);
+    const ctx = harness.createContext();
+    const run = harness.run(ask('agent', 'stall/model'), 'go', ctx);
+    await waitFor(() => client.started === 1);
+
+    // The response arrives in the drain and is charged; its stream is still open when
+    // the deadline lands. The round is billed, so it is listed finished, not cut off.
+    const report = await harness.cancel(ctx, {
+      drainMs: 300,
+    });
+
+    expect(await cancelledError(run)).toBe('cancelled');
+    assert(report);
+    expect(report.reason).toBe('deadline');
+    expect(report.cutOff).toEqual([]);
+    expect(report.finished).toEqual([
+      {
+        kind: 'model_round',
+        model: 'stall/model',
+        executionId: ctx.id,
+        round: 0,
+        cost: 0.01,
+        usage: {
+          inputTokens: 10,
+          outputTokens: 5,
+        },
+      },
+    ]);
+    expect(ctx.cost).toBe(0.01);
+  });
+
+  it('reports what a decide call that failed charged', async () => {
+    const harness = new AgentHarness({
+      name: 'drain',
+      params: {},
+      _testDecide: async (): Promise<DecideResponse> => {
+        await sleep(40);
+        throw markSpent(new Error('provider failed mid-estimate'), {
+          inputTokens: 7,
+          outputTokens: 1,
+          cost: 0.002,
+        });
+      },
+    });
+    const events: EmittedEvent[] = [];
+    const ctx = watchedContext(harness, events);
+    const run = harness.run(
+      decide({
+        id: 'triage',
+        model: 'typesafe/jev-1.14',
+        questions: {
+          urgent: {
+            type: 'boolean',
+            instructions: 'Is it urgent?',
+          },
+        },
+      }),
+      'help',
+      ctx,
+    );
+    await waitFor(() => events.length > 0);
+    await sleep(5);
+
+    const report = await harness.cancel(ctx, {
+      drainMs: 2e3,
+    });
+
+    await cancelledError(run);
+    assert(report);
+    expect(report.finished).toEqual([
+      {
+        kind: 'decide',
+        model: 'typesafe/jev-1.14',
+        executionId: ctx.id,
+        cost: 0.002,
+        usage: {
+          inputTokens: 7,
+          outputTokens: 1,
+        },
+      },
+    ]);
+    expect(ctx.cost).toBe(0.002);
   });
 
   it('reports what a decide call that finished in the drain cost', async () => {

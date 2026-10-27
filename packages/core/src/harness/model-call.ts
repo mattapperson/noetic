@@ -957,10 +957,16 @@ export class AgentHarnessModelCaller {
         sdkResponse = await awaitWithAbort(callResult.getResponse(), roundSignal);
         watchdog.stop();
         // Counted before its record goes and before the recovery checks: a round
-        // rejected below and asked again was billed all the same.
+        // rejected below and asked again was billed all the same. Once counted, the
+        // call charges its context with this bill however it ends, so a drain that
+        // reports from here on lists the round finished with it.
         const roundUsage = extractUsage(sdkResponse.usage);
         const roundCost = sdkResponse.usage?.cost ?? 0;
         spend.count(roundUsage, roundCost);
+        roundFinished?.({
+          cost: roundCost,
+          usage: roundUsage,
+        });
         spans.finishModelSpan(modelSpan, roundUsage, roundCost > 0 ? roundCost : undefined);
         await dispatch?.settle();
         await awaitWithAbort(pipePromise, roundSignal);
@@ -979,12 +985,9 @@ export class AgentHarnessModelCaller {
       } finally {
         watchdog.stop();
         dispatch?.end();
-        roundFinished?.(
-          sdkResponse && {
-            cost: sdkResponse.usage?.cost ?? 0,
-            usage: extractUsage(sdkResponse.usage),
-          },
-        );
+        if (!sdkResponse) {
+          roundFinished?.();
+        }
       }
       if (request.signal?.aborted) {
         break;

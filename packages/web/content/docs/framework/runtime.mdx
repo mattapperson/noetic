@@ -332,7 +332,7 @@ for (const call of report?.finished ?? []) {
 
 The report is `{ executionId, reason, durationMs, finished, cutOff }`, the same data `{name}:drain_finished` carries. `reason` is `settled` when nothing was left, `deadline`, or `stopped`. A second stop during the drain resolves with the same report; a stop with no drain resolves `undefined`. Each call is `{ kind: 'model_round' | 'decide', model, executionId, round?, dispatchId?, generationId?, cost?, usage? }`:
 
-- A `finished` call carries `cost` and `usage` as charged to its context, even when its step ended `cancelled` and left no `lastStepMeta`. A call that failed, or whose stream a steer cut, has neither.
+- A `finished` call the provider billed carries `cost` and `usage` exactly as charged to its context, even when its step ended `cancelled` and left no `lastStepMeta`. That includes a round rejected and asked again (listed under the same `round` as its retry) and a call that failed after it was billed. A round is finished once its response is in, even if its stream is still open at the deadline. A call the provider refused, or whose stream a steer cut before its response, has neither.
 - A model round carries `dispatchId` when the harness keeps [paid-call records](/docs/framework/durability#paid-calls), and `generationId` once its response headers arrived, so each `cutOff` call can be matched to its entry in `pendingSpend()`.
 
 `{name}:drain_started` lists the calls in flight when the drain begins.

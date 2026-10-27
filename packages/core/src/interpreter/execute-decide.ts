@@ -242,7 +242,19 @@ async function askHarness<TContext, I, O>(
     };
     return response;
   } catch (e) {
-    chargeSpent(ctx, e);
+    // A drain lists the call with what it charged here: an estimate's rounds that
+    // failed, or the tokens a failed parse still cost.
+    const spent = chargeSpent(ctx, e);
+    if (spent) {
+      bill = {
+        cost: spent.cost ?? 0,
+        usage: {
+          inputTokens: spent.inputTokens,
+          outputTokens: spent.outputTokens,
+          cachedTokens: spent.cachedTokens,
+        },
+      };
+    }
     if (e instanceof DecideOutputError && !ctx.aborted) {
       if (e.usage) {
         bill = {

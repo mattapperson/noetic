@@ -725,6 +725,13 @@ describe('a graceful stop past its deadline', () => {
       'gen-1',
       'gen-2',
     ]);
+    // Each cut-off round is held at its request's ceiling until it is priced.
+    let held = 0;
+    for (const p of pending) {
+      assert(p.ceiling !== undefined && p.ceiling > 0);
+      held += p.ceiling;
+    }
+    expect(ctx.heldCost).toBeCloseTo(held);
     const finished = events.find((event) => event.type === 'spend:drain_finished');
     assert(finished && 'data' in finished);
     const data = frameworkCast<{

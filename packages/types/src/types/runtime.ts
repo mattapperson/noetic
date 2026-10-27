@@ -277,8 +277,9 @@ export interface DrainCall {
   /** The provider's id for the call, once its response headers arrived. */
   readonly generationId?: string;
   /**
-   * USD the call cost, as charged to its context. Set on finished calls that
-   * returned a bill; absent when the call failed or a steer cut its stream.
+   * USD the call cost, exactly as charged to its context. Set on finished calls
+   * the provider billed, a round rejected and asked again included; absent when the
+   * call was refused or a steer cut its stream before its response.
    */
   readonly cost?: number;
   /** Tokens the call used, as charged to its context. Set exactly when `cost` is. */
