@@ -1,3 +1,19 @@
+## @noetic-tools/core-v5.19.0 (2026-10-27)
+
+* fix(core): bound held spend by request bytes and save decide() generation ids from headers ([976a075](https://github.com/mattapperson/noetic/commit/976a075)), closes [#149](https://github.com/mattapperson/noetic/issues/149)
+* fix(core): charge a failed model call's recorded rounds and keep rounds[0] honest ([b8eca4c](https://github.com/mattapperson/noetic/commit/b8eca4c))
+* fix(core): count the bill of model rounds rejected by recovery ([e0f2270](https://github.com/mattapperson/noetic/commit/e0f2270)), closes [#146](https://github.com/mattapperson/noetic/issues/146)
+* fix(core): hold a spend record at its ceiling once it reads again ([18c7290](https://github.com/mattapperson/noetic/commit/18c7290))
+* fix(core): keep a spend record the store reads as nothing while its key lists ([a20c0b0](https://github.com/mattapperson/noetic/commit/a20c0b0))
+* fix(core): keep harness mirrors and docs in step with the drain report ([3fd203f](https://github.com/mattapperson/noetic/commit/3fd203f))
+* fix(core): keep unreadable spend records pending instead of skipping them ([fc1931f](https://github.com/mattapperson/noetic/commit/fc1931f)), closes [#147](https://github.com/mattapperson/noetic/issues/147)
+* fix(core): price a ceiling at the dearest rate the model publishes ([1f9540e](https://github.com/mattapperson/noetic/commit/1f9540e))
+* fix(core): report a drained call's cost exactly as it was charged ([8daf8df](https://github.com/mattapperson/noetic/commit/8daf8df))
+* fix(core): size a round's tools by the JSON Schema the wire carries ([0e0a710](https://github.com/mattapperson/noetic/commit/0e0a710))
+* fix(types): list unreadable spend records in PendingSpend's own shape ([d340956](https://github.com/mattapperson/noetic/commit/d340956))
+* test(core): format the torn-read spend test ([9300060](https://github.com/mattapperson/noetic/commit/9300060))
+* feat(core): resolve graceful stops with a drain report that carries each call's cost ([1250357](https://github.com/mattapperson/noetic/commit/1250357)), closes [#148](https://github.com/mattapperson/noetic/issues/148)
+
 ## @noetic-tools/core-v5.18.0 (2026-10-26)
 
 * feat(core): graceful stop with cancel(ctx, { drainMs }) ([8fed546](https://github.com/mattapperson/noetic/commit/8fed546)), closes [#145](https://github.com/mattapperson/noetic/issues/145)
