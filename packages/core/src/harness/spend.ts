@@ -284,6 +284,12 @@ export class Spend {
    */
   private hold(record: SpendRecord, ctx?: ContextImpl): Promise<void> {
     const known = this.holds.get(record.id);
+    // A record read mid-write by a store whose writes are not atomic reads whole later:
+    // hold it again, now at its ceiling. An unreadable hold holds nothing to release.
+    if (known && isUnreadable(known.record) && !isUnreadable(record) && !known.settling) {
+      this.holds.delete(record.id);
+      return this.hold(record, ctx ?? known.ctx);
+    }
     if (known) {
       if (ctx && known.ctx !== ctx) {
         if (known.ctx && known.ceiling !== undefined) {

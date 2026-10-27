@@ -868,6 +868,40 @@ describe('an unreadable dispatch record', () => {
     expect(ctx.billedCost).toBeCloseTo(0.3);
     expect(await harness.pendingSpend()).toEqual([]);
   });
+  it('is held at its ceiling once it reads again', async () => {
+    const storage = createInMemoryStorage();
+    let torn = true;
+    // A store whose writes are not atomic: a read mid-write sees half a record.
+    const tearing: StorageAdapter = {
+      ...storage,
+      getMany: undefined,
+      get: async <T>(key: string) =>
+        key === 'spend:x' && torn ? frameworkCast<T>('{"id":"x"') : storage.get<T>(key),
+    };
+    await createSpendLog(storage).put(
+      record({
+        id: 'x',
+        threadId: 't',
+      }),
+    );
+    const harness = harnessOver(tearing);
+    useFakeSdk(harness);
+
+    await harness.reconcileSpend({
+      patienceMs: 0,
+    });
+    expect(harness.getUsage({ threadId: 't' }).heldCost ?? 0).toBe(0);
+    torn = false;
+    await harness.reconcileSpend({
+      patienceMs: 0,
+    });
+
+    expect(harness.getUsage({ threadId: 't' }).heldCost).toBeCloseTo(RECORD_CEILING);
+    const settlement = await harness.writeOffSpend('x', {
+      assumedCost: 0.2,
+    });
+    expect(settlement?.threadId).toBe('t');
+  });
 });
 
 describe('discards', () => {
