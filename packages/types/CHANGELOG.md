@@ -1,3 +1,14 @@
+## @noetic-tools/types-v3.17.0 (2026-10-27)
+
+* fix(core): bound held spend by request bytes and save decide() generation ids from headers ([976a075](https://github.com/mattapperson/noetic/commit/976a075)), closes [#149](https://github.com/mattapperson/noetic/issues/149)
+* fix(core): charge a failed model call's recorded rounds and keep rounds[0] honest ([b8eca4c](https://github.com/mattapperson/noetic/commit/b8eca4c))
+* fix(core): count the bill of model rounds rejected by recovery ([e0f2270](https://github.com/mattapperson/noetic/commit/e0f2270)), closes [#146](https://github.com/mattapperson/noetic/issues/146)
+* fix(core): keep harness mirrors and docs in step with the drain report ([3fd203f](https://github.com/mattapperson/noetic/commit/3fd203f))
+* fix(core): keep unreadable spend records pending instead of skipping them ([fc1931f](https://github.com/mattapperson/noetic/commit/fc1931f)), closes [#147](https://github.com/mattapperson/noetic/issues/147)
+* fix(core): report a drained call's cost exactly as it was charged ([8daf8df](https://github.com/mattapperson/noetic/commit/8daf8df))
+* fix(types): list unreadable spend records in PendingSpend's own shape ([d340956](https://github.com/mattapperson/noetic/commit/d340956))
+* feat(core): resolve graceful stops with a drain report that carries each call's cost ([1250357](https://github.com/mattapperson/noetic/commit/1250357)), closes [#148](https://github.com/mattapperson/noetic/issues/148)
+
 ## @noetic-tools/types-v3.16.0 (2026-10-26)
 
 * feat(core): record paid model dispatches and settle cut-off bills ([b64bf61](https://github.com/mattapperson/noetic/commit/b64bf61)), closes [#144](https://github.com/mattapperson/noetic/issues/144)
