@@ -14,11 +14,19 @@ export type SpendKind = (typeof SpendKind)[keyof typeof SpendKind];
 /**
  * @public
  * A paid provider call recorded before it was sent that has no settled bill: it was
- * cut off by a crash, a cancel, a steer, or a dropped connection. Until settled it is
- * held at `ceiling`.
+ * cut off by a crash, a cancel, a steer, or a dropped connection. A record that no
+ * longer reads is listed too, as an `UnreadableDispatch`, so its bill is never lost.
  */
-export interface PendingSpend {
+export type PendingSpend = PendingDispatch | UnreadableDispatch;
+
+/**
+ * @public
+ * A pending paid call whose record reads. Until settled it is held at `ceiling`.
+ */
+export interface PendingDispatch {
   readonly id: string;
+  /** Never set: narrows `PendingSpend` against `UnreadableDispatch`. */
+  readonly unreadable?: never;
   readonly kind: SpendKind;
   readonly model: string;
   /** Hash of the request body sent. */
@@ -42,6 +50,26 @@ export interface PendingSpend {
    * no output cap is known.
    */
   readonly ceiling?: number;
+}
+
+/**
+ * @public
+ * A dispatch record that no longer reads — torn by a crash mid-write, or corrupted. A
+ * paid call was sent, but neither its model nor its size is known, so it has no
+ * ceiling and is never priced: like a dispatch with no ceiling, it adds nothing to
+ * `heldCost`, and `spend_pending` flags it `unreadable` and `unbounded`. It stays
+ * pending until written off with `harness.writeOffSpend()`.
+ */
+export interface UnreadableDispatch {
+  readonly id: string;
+  readonly unreadable: true;
+  /**
+   * The execution the record still names. Absent when unreadable too, in which case
+   * the dispatch is listed with every execution, since it may belong to any of them.
+   */
+  readonly executionId?: string;
+  /** The thread the record still names. */
+  readonly threadId?: string;
 }
 
 /** @public A pending dispatch whose bill is now known, or was written off. */

@@ -301,7 +301,19 @@ Reconciliation runs on its own after `restore()` and the moment a call is cut of
 
 A settled bill is charged once: to the run in flight on that execution, else to the thread's stored session, else to the context `restore()` returned — so it lands in `cost` and `billedCost` like any other spend. `{name}:spend_pending` and `{name}:spend_settled` events report both ends.
 
-**Held spend stays bounded.** Until it is settled, a pending call is held at its **ceiling**: the model's published prices applied to the prompt estimate and the output cap (`params.maxTokens`, else the model's published maximum). `heldCost` reports the hold beside `cost` and `billedCost` on `Context`, `HarnessResponse`, and `SessionUsage`, and `until.maxCost` counts it, so a resumed run cannot spend what its cut-off attempt may already have spent. A model with no published price, or no output cap anywhere, has no ceiling: `spend_pending` flags it `unbounded` and it adds nothing to `heldCost`. Set `params.maxTokens` on paid steps to keep every ceiling finite.
+**Held spend stays bounded.** Until it is settled, a pending call is held at its **ceiling**: the model's published prices applied to the prompt estimate and the output cap (`params.maxTokens`, else the model's published maximum). `heldCost` reports the hold beside `cost` and `billedCost` on `Context`, `HarnessResponse`, and `SessionUsage`, and `until.maxCost` counts it, so a resumed run cannot spend what its cut-off attempt may already have spent. A model with no published price, or no output cap anywhere, has no ceiling: `spend_pending` flags it `unbounded` and it adds nothing to `heldCost`, so `until.maxCost` cannot see it — hold the rest of your budget yourself when you see one. Set `params.maxTokens` on paid steps to keep every ceiling finite.
+
+**A damaged record is never dropped.** A `spend:<id>` value that no longer reads as a record — torn by a crash mid-write, or corrupted — still means a paid call was sent. `pendingSpend()` lists it as `{ id, unreadable: true, executionId?, threadId? }` (the owner fields only when the damaged value still names them), and `spend_pending` flags it `unreadable` and `unbounded`. Like an unbounded call it has no ceiling, adds nothing to `heldCost`, and is never priced, so hold the rest of your budget yourself or write it off:
+
+```ts validate=none
+for (const p of await harness.pendingSpend()) {
+  if (p.unreadable) {
+    await harness.writeOffSpend(p.id, { assumedCost: 0.5 });
+  }
+}
+```
+
+One that names no execution may be any execution's, so it is listed with each of them.
 
 **Some calls can only be bounded.** A call cut off before any response byte has no generation id. Neither does a native `decide()` cut off mid-request — the provider sends its id only with the body. These stay held until you write them off.
 

@@ -201,6 +201,21 @@ interface PendingSpend {
 }
 ```
 
+A `spend:<id>` value that does not read as a record — torn by a crash mid-write, corrupted, or hand-edited — is still evidence that a paid call was sent, so it is never skipped. It is listed as an **unreadable dispatch**:
+
+```typescript
+interface UnreadableDispatch {
+  id: string;                  // from the key
+  unreadable: true;
+  executionId?: string;        // kept when the damaged value still names one as a string
+  threadId?: string;           // likewise
+}
+
+type PendingSpend = PendingDispatch | UnreadableDispatch;  // PendingDispatch is the record above
+```
+
+Nothing else in the value is trusted. An unreadable dispatch has no ceiling and no generation id, so it is treated as an unbounded hold that can never be priced (§ Ceilings, § Reconciliation): `pendingSpend` lists it, `restore()` holds it and `spend_pending` flags it `{ id, unreadable: true, unbounded: true }`, it adds nothing to `heldCost` or `until.maxCost`, and reconciliation leaves it held. It leaves storage only through `writeOffSpend`, which deletes it and charges the assumed cost like any write-off. One that names no execution may be any execution's: it is listed, held, and flagged with every execution, and a write-off charges the context it was last held on.
+
 Records live under `spend:<id>`, outside the `execution:<id>:` prefix, so `clearCheckpoint`, an abandoned session turn, and every other discard leave them alone. A record leaves storage only when it is settled or written off. Evidence of spend is never discarded with the run that made it.
 
 **Lifecycle of one dispatch:**
@@ -223,7 +238,7 @@ ceiling = prompt price × inputTokens + completion price × output cap + request
 output cap = maxOutputTokens ?? the model's published max completion tokens ?? context length − inputTokens
 ```
 
-Prices come from the provider's model metadata (`GET /models/{author}/{slug}`), looked up once per model per harness and only when something is held, so a healthy call makes no extra request. A record with no output cap anywhere, or a model with no published price, has no ceiling: it is flagged `unbounded: true` on `spend_pending`, listed by `pendingSpend`, and adds nothing to `heldCost`. Set `params.maxTokens` on paid steps to keep every ceiling finite.
+Prices come from the provider's model metadata (`GET /models/{author}/{slug}`), looked up once per model per harness and only when something is held, so a healthy call makes no extra request. A record with no output cap anywhere, or a model with no published price, has no ceiling: it is flagged `unbounded: true` on `spend_pending`, listed by `pendingSpend`, and adds nothing to `heldCost`, so `until.maxCost` cannot see it either. A host with a budget that sees an unbounded or unreadable dispatch holds the rest of its allowance itself, or writes the dispatch off at an amount it asserts. Set `params.maxTokens` on paid steps to keep every ceiling finite.
 
 ### Reconciliation
 
@@ -245,9 +260,9 @@ interface SpendSettlement {
 }
 ```
 
-- `pendingSpend` lists unsettled dispatches, all of them or one execution's, each with its ceiling.
+- `pendingSpend` lists unsettled dispatches, all of them or one execution's, each with its ceiling, and every unreadable dispatch (§ The record).
 - `reconcileSpend` prices each pending dispatch that has a generation id through the provider's generation lookup (`GET /generation?id=`). The lookup answers 404 until the provider has priced the call — 7 to 32 seconds in practice — so it polls, backing off from 1 s to 10 s, for up to `patienceMs` (default 60 s). A priced call, cancelled or not, settles at the provider's `total_cost`. A dispatch with no id cannot be priced: it stays held until written off. A call already being looked up is joined, not looked up twice. The poll timers do not keep a host process alive.
-- `writeOffSpend` settles one pending dispatch at an amount the host asserts, for a call that can never be priced.
+- `writeOffSpend` settles one pending dispatch at an amount the host asserts, for a call that can never be priced. It is the only way an unreadable dispatch is settled.
 
 Reconciliation runs on its own: after `restore()` for the restored execution, and for each dispatch the moment it is left pending — which covers `cancel(ctx)`, rounds a graceful stop cuts off at its deadline (`08-runtime` § Graceful Stop; `drain_finished.cutOff` names each by `dispatchId` and `generationId`), steers, and errors. A host can call `reconcileSpend()` again at any time, for example at boot for every execution.
 

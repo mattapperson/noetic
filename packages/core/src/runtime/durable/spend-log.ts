@@ -8,6 +8,7 @@
 
 import type { StorageAdapter } from '@noetic-tools/context';
 import { storageGetMany } from '@noetic-tools/context';
+import type { UnreadableDispatch } from '@noetic-tools/types';
 import { z } from 'zod';
 
 //#region Schema
@@ -35,6 +36,19 @@ export const DispatchRecordSchema = z.object({
 /** @internal */
 export type DispatchRecord = z.infer<typeof DispatchRecordSchema>;
 
+/**
+ * @internal
+ * What a `spend:<id>` key holds: a record, or a value that does not read as one. An
+ * unreadable value is still evidence that a paid call was sent, so it is kept and
+ * reported rather than skipped.
+ */
+export type SpendRecord = DispatchRecord | UnreadableDispatch;
+
+/** @internal */
+export function isUnreadable(record: SpendRecord): record is UnreadableDispatch {
+  return 'unreadable' in record;
+}
+
 //#endregion
 
 //#region Store
@@ -42,10 +56,10 @@ export type DispatchRecord = z.infer<typeof DispatchRecordSchema>;
 /** @internal */
 export interface SpendLog {
   put(record: DispatchRecord): Promise<void>;
-  get(id: string): Promise<DispatchRecord | undefined>;
+  get(id: string): Promise<SpendRecord | undefined>;
   remove(id: string): Promise<void>;
-  /** Every record, oldest first. Unreadable rows are skipped. */
-  list(): Promise<DispatchRecord[]>;
+  /** Every record: unreadable ones first, since their age is unknown, then oldest first. */
+  list(): Promise<SpendRecord[]>;
 }
 
 /** @internal */
@@ -54,23 +68,30 @@ export function createSpendLog(storage: StorageAdapter): SpendLog {
     put: async (record) => {
       await storage.set(keyOf(record.id), record);
     },
-    get: async (id) => parse(await storage.get<unknown>(keyOf(id))),
+    get: async (id) => parse(id, await storage.get<unknown>(keyOf(id))),
     remove: async (id) => {
       await storage.delete(keyOf(id));
     },
     list: async () => {
       const keys = await storage.list(SPEND_PREFIX);
       const raws = await storageGetMany<unknown>(storage, keys);
+      const unreadable: UnreadableDispatch[] = [];
       const records: DispatchRecord[] = [];
       for (const [key, raw] of raws) {
-        const record = parse(raw);
+        const record = parse(key.slice(SPEND_PREFIX.length), raw);
         if (!record) {
-          console.warn(`SpendLog: skipping unreadable dispatch record "${key}"`);
           continue;
         }
-        records.push(record);
+        if (isUnreadable(record)) {
+          unreadable.push(record);
+        } else {
+          records.push(record);
+        }
       }
-      return records.sort((a, b) => a.sentAt.localeCompare(b.sentAt));
+      return [
+        ...unreadable,
+        ...records.sort((a, b) => a.sentAt.localeCompare(b.sentAt)),
+      ];
     },
   };
 }
@@ -79,12 +100,49 @@ function keyOf(id: string): string {
   return `${SPEND_PREFIX}${id}`;
 }
 
-function parse(raw: unknown): DispatchRecord | undefined {
+/** Undefined only when the key holds nothing. */
+function parse(id: string, raw: unknown): SpendRecord | undefined {
   if (raw === null || raw === undefined) {
     return undefined;
   }
   const parsed = DispatchRecordSchema.safeParse(raw);
-  return parsed.success ? parsed.data : undefined;
+  if (parsed.success) {
+    return parsed.data;
+  }
+  return {
+    id,
+    unreadable: true,
+    ...owner(raw),
+  };
 }
+
+/**
+ * The execution and thread a damaged record still names, so its write-off is charged
+ * where its call ran. Any other field is not trusted.
+ */
+function owner(raw: unknown): Pick<UnreadableDispatch, 'executionId' | 'threadId'> {
+  const parsed = OwnerSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {};
+  }
+  const { executionId, threadId } = parsed.data;
+  return {
+    ...(executionId !== undefined
+      ? {
+          executionId,
+        }
+      : {}),
+    ...(threadId !== undefined
+      ? {
+          threadId,
+        }
+      : {}),
+  };
+}
+
+const OwnerSchema = z.object({
+  executionId: z.string().optional().catch(undefined),
+  threadId: z.string().optional().catch(undefined),
+});
 
 //#endregion

@@ -32,23 +32,46 @@ describe('spend log', () => {
     const log = createSpendLog(createInMemoryStorage());
     await log.put(record('a', '2026-01-01T00:00:00.000Z'));
 
-    expect((await log.get('a'))?.model).toBe('acme/model');
+    expect(await log.get('a')).toMatchObject({
+      model: 'acme/model',
+    });
     await log.remove('a');
     expect(await log.get('a')).toBeUndefined();
     expect(await log.list()).toEqual([]);
   });
 
-  it('skips a record it cannot read', async () => {
+  it('keeps a record it cannot read, listed first with the owner it still names', async () => {
     const storage = createInMemoryStorage();
     const log = createSpendLog(storage);
-    await storage.set('spend:broken', {
-      id: 'broken',
-    });
     await log.put(record('a', '2026-01-01T00:00:00.000Z'));
+    await storage.set('spend:torn', {
+      id: 'torn',
+      executionId: 'exec-1',
+      threadId: 42,
+    });
+    await storage.set('spend:garbage', 'not a record');
 
-    expect((await log.list()).map((r) => r.id)).toEqual([
-      'a',
+    const listed = await log.list();
+
+    expect(
+      listed
+        .slice(0, 2)
+        .map((r) => r.id)
+        .sort(),
+    ).toEqual([
+      'garbage',
+      'torn',
     ]);
-    expect(await log.get('broken')).toBeUndefined();
+    expect(listed[2]?.id).toBe('a');
+    expect(await log.get('torn')).toEqual({
+      id: 'torn',
+      unreadable: true,
+      executionId: 'exec-1',
+    });
+    expect(await log.get('garbage')).toEqual({
+      id: 'garbage',
+      unreadable: true,
+    });
+    expect(await log.get('missing')).toBeUndefined();
   });
 });

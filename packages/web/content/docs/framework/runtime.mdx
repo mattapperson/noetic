@@ -222,7 +222,7 @@ Framework events emitted during execution:
 | `{name}:model_call_first_event` | First SDK event received (time-to-first-token marker). Only emitted when a broadcaster is attached to the context. Data: `{ round }`. |
 | `{name}:model_call_completed` | Provider response fully received. Data: `{ round, itemCount }`. |
 | `{name}:model_call_stalled` | Stream-idle watchdog fired; the round is about to abort. Data: `{ round, idleTimeoutMs }`. |
-| `{name}:spend_pending` | A paid call was left with no settled bill, or `restore()` found one. Data: `{ id, kind, model, generationId?, ceiling?, unbounded? }`. See [Paid Calls](/docs/framework/durability#paid-calls). |
+| `{name}:spend_pending` | A paid call was left with no settled bill, or `restore()` found one. Data: `{ id, kind, model, generationId?, ceiling?, unbounded? }`, or `{ id, unreadable: true, unbounded: true }` for a record that no longer reads. See [Paid Calls](/docs/framework/durability#paid-calls). |
 | `{name}:spend_settled` | A pending paid call was settled or written off. Data: `{ id, cost, writtenOff? }`. |
 | `{name}:drain_started` | A [graceful stop](#graceful-stop) began. Data: `{ executionId, deadline, inFlight }`. |
 | `{name}:drain_finished` | A graceful stop ended, just before the cancel. Data: `{ executionId, reason, durationMs, finished, cutOff }`. |

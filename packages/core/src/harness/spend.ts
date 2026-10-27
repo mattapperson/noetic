@@ -21,7 +21,8 @@ import type {
 import { estimateTokens, recordUsage } from '@noetic-tools/types';
 import type { OpenRouter } from '@openrouter/sdk';
 import { emitFrameworkEvent, getBroadcaster } from '../runtime/broadcaster-utils';
-import type { DispatchRecord, SpendLog } from '../runtime/durable/spend-log';
+import type { DispatchRecord, SpendLog, SpendRecord } from '../runtime/durable/spend-log';
+import { isUnreadable } from '../runtime/durable/spend-log';
 import { hashText } from '../runtime/durable/step-ledger';
 import { statusOf } from '../util/status-code';
 import type { EventBroadcaster } from './deps/runtime';
@@ -71,7 +72,7 @@ export interface DispatchParams {
 
 /** A pending dispatch this harness holds. */
 interface Hold {
-  record: DispatchRecord;
+  record: SpendRecord;
   /** The root context its ceiling is held on. */
   ctx?: ContextImpl;
   ceiling?: number;
@@ -157,11 +158,14 @@ export class Spend {
     return this.live.get(dispatchId)?.noteGeneration(generationId) ?? Promise.resolve();
   }
 
-  /** Unsettled dispatches, each with its ceiling. */
+  /** Unsettled dispatches, each with its ceiling. Unreadable ones have none. */
   async pending(executionId?: string): Promise<PendingSpend[]> {
     const records = await this.unsettled(executionId);
     return Promise.all(
       records.map(async (record) => {
+        if (isUnreadable(record)) {
+          return record;
+        }
         const ceiling = await this.ceilingOf(record);
         return ceiling === undefined
           ? record
@@ -259,12 +263,18 @@ export class Spend {
       .catch((error: unknown) => warn('reconcile', error));
   }
 
-  private async unsettled(executionId: string | undefined): Promise<DispatchRecord[]> {
+  /**
+   * Stored dispatches not in flight here, all or one execution's. An unreadable record
+   * that names no execution may be any execution's, so it is listed with each of them.
+   */
+  private async unsettled(executionId: string | undefined): Promise<SpendRecord[]> {
     const records = await this.host.log.list();
     return records.filter(
       (record) =>
         !this.live.has(record.id) &&
-        (executionId === undefined || record.executionId === executionId),
+        (executionId === undefined ||
+          record.executionId === executionId ||
+          (isUnreadable(record) && record.executionId === undefined)),
     );
   }
 
@@ -272,7 +282,7 @@ export class Spend {
    * Hold `record` at its ceiling, on `ctx` when given. A dispatch already held moves to
    * `ctx`, so an execution restored in this process takes over its cut-off calls.
    */
-  private hold(record: DispatchRecord, ctx?: ContextImpl): Promise<void> {
+  private hold(record: SpendRecord, ctx?: ContextImpl): Promise<void> {
     const known = this.holds.get(record.id);
     if (known) {
       if (ctx && known.ctx !== ctx) {
@@ -298,29 +308,43 @@ export class Spend {
       if (hold.ctx && ceiling !== undefined) {
         hold.ctx.heldCost += ceiling;
       }
-      this.emit(hold, 'spend_pending', {
-        id: record.id,
-        kind: record.kind,
-        model: record.model,
-        generationId: record.generationId,
-        ceiling,
-        ...(ceiling === undefined
+      this.emit(
+        hold,
+        'spend_pending',
+        isUnreadable(record)
           ? {
+              id: record.id,
+              unreadable: true,
               unbounded: true,
             }
-          : {}),
-      });
+          : {
+              id: record.id,
+              kind: record.kind,
+              model: record.model,
+              generationId: record.generationId,
+              ceiling,
+              ...(ceiling === undefined
+                ? {
+                    unbounded: true,
+                  }
+                : {}),
+            },
+      );
     });
     return hold.ready;
   }
 
-  private async ceilingOf(record: DispatchRecord): Promise<number | undefined> {
+  private async ceilingOf(record: SpendRecord): Promise<number | undefined> {
+    if (isUnreadable(record)) {
+      return undefined;
+    }
     const price = await this.price(record.model);
     return price ? ceilingOf(record, price) : undefined;
   }
 
-  private lookup(record: DispatchRecord, patienceMs: number): Promise<SpendSettlement | undefined> {
-    const generationId = record.generationId;
+  /** Unreadable records carry no generation id, so they are never priced. */
+  private lookup(record: SpendRecord, patienceMs: number): Promise<SpendSettlement | undefined> {
+    const generationId = isUnreadable(record) ? undefined : record.generationId;
     if (!generationId) {
       return Promise.resolve(undefined);
     }
