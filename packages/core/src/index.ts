@@ -564,11 +564,9 @@ export type {
 
 /** @public */
 export type {
-  PendingDispatch,
   PendingSpend,
   ReconcileSpendOptions,
   SpendSettlement,
-  UnreadableDispatch,
   WriteOffSpendOptions,
 } from '@noetic-tools/types';
 /** @public */

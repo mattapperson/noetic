@@ -8,7 +8,6 @@
 
 import type { StorageAdapter } from '@noetic-tools/context';
 import { storageGetMany } from '@noetic-tools/context';
-import type { UnreadableDispatch } from '@noetic-tools/types';
 import { z } from 'zod';
 
 //#region Schema
@@ -38,14 +37,26 @@ export type DispatchRecord = z.infer<typeof DispatchRecordSchema>;
 
 /**
  * @internal
+ * A `spend:<id>` value that does not read as a record. Only the owner fields the
+ * damaged value still names are kept; nothing else in it is trusted.
+ */
+export interface UnreadableRecord {
+  readonly id: string;
+  readonly unreadable: true;
+  readonly executionId?: string;
+  readonly threadId?: string;
+}
+
+/**
+ * @internal
  * What a `spend:<id>` key holds: a record, or a value that does not read as one. An
  * unreadable value is still evidence that a paid call was sent, so it is kept and
  * reported rather than skipped.
  */
-export type SpendRecord = DispatchRecord | UnreadableDispatch;
+export type SpendRecord = DispatchRecord | UnreadableRecord;
 
 /** @internal */
-export function isUnreadable(record: SpendRecord): record is UnreadableDispatch {
+export function isUnreadable(record: SpendRecord): record is UnreadableRecord {
   return 'unreadable' in record;
 }
 
@@ -82,7 +93,7 @@ export function createSpendLog(storage: StorageAdapter): SpendLog {
     list: async () => {
       const keys = await storage.list(SPEND_PREFIX);
       const raws = await storageGetMany<unknown>(storage, keys);
-      const damaged: UnreadableDispatch[] = [];
+      const damaged: UnreadableRecord[] = [];
       const records: DispatchRecord[] = [];
       for (const [key, raw] of raws) {
         if (isNothing(raw)) {
@@ -134,8 +145,8 @@ function parse(id: string, raw: unknown): SpendRecord {
 
 function unreadable(
   id: string,
-  named: Pick<UnreadableDispatch, 'executionId' | 'threadId'> = {},
-): UnreadableDispatch {
+  named: Pick<UnreadableRecord, 'executionId' | 'threadId'> = {},
+): UnreadableRecord {
   return {
     id,
     unreadable: true,
@@ -147,7 +158,7 @@ function unreadable(
  * The execution and thread a damaged record still names, so its write-off is charged
  * where its call ran. Any other field is not trusted.
  */
-function owner(raw: unknown): Pick<UnreadableDispatch, 'executionId' | 'threadId'> {
+function owner(raw: unknown): Pick<UnreadableRecord, 'executionId' | 'threadId'> {
   const parsed = OwnerSchema.safeParse(raw);
   if (!parsed.success) {
     return {};

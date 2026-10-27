@@ -6,13 +6,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import type { StorageAdapter } from '@noetic-tools/context';
-import type {
-  Context,
-  ContextData,
-  PendingDispatch,
-  PendingSpend,
-  StreamEvent,
-} from '@noetic-tools/types';
+import type { Context, ContextData, PendingSpend, StreamEvent } from '@noetic-tools/types';
 import { estimateTokens, frameworkCast, recordUsage } from '@noetic-tools/types';
 import { z } from 'zod';
 import { inParallel } from '../../src/builders/control-flow-builders';
@@ -219,17 +213,17 @@ async function waitFor<T>(read: () => T | Promise<T>, done: (value: T) => boolea
 }
 
 /** A harness that sees another harness's records as pending: it knows none are live. */
-function pendingSeenBy(storage: StorageAdapter): () => Promise<PendingDispatch[]> {
+function pendingSeenBy(storage: StorageAdapter): () => Promise<PendingSpend[]> {
   const observer = harnessOver(storage);
   return async () => readable(await observer.pendingSpend());
 }
 
 /** Pending dispatches, failing the test if any record is unreadable. */
-function readable(pending: PendingSpend[]): PendingDispatch[] {
-  return pending.map((p) => {
+function readable(pending: PendingSpend[]): PendingSpend[] {
+  for (const p of pending) {
     assert(!p.unreadable, `dispatch ${p.id} is unreadable`);
-    return p;
-  });
+  }
+  return pending;
 }
 
 function record(over: Partial<DispatchRecord>): DispatchRecord {
@@ -900,6 +894,15 @@ describe('held spend and budgets', () => {
 });
 
 describe('an unreadable dispatch record', () => {
+  /** What `PendingSpend` documents for the fields an unreadable record lost. */
+  const placeholders = {
+    kind: 'model',
+    model: 'unknown',
+    requestHash: '',
+    inputTokens: 0,
+    sentAt: '1970-01-01T00:00:00.000Z',
+  } satisfies Partial<PendingSpend>;
+
   it('stays pending, unpriced, until written off at the assumed cost', async () => {
     const storage = createInMemoryStorage();
     const harness = harnessOver(storage);
@@ -910,6 +913,7 @@ describe('an unreadable dispatch record', () => {
       {
         id: 'x',
         unreadable: true,
+        ...placeholders,
       },
     ]);
     // It names no execution, so it may be any execution's.
@@ -966,6 +970,7 @@ describe('an unreadable dispatch record', () => {
         id: 'torn',
         unreadable: true,
         executionId: original.id,
+        ...placeholders,
       },
     ]);
     expect(await harness.pendingSpend('another')).toEqual([]);

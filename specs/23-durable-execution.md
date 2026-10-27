@@ -1,7 +1,7 @@
 # Durable Execution
 
 > **Depends On:** `07-context-and-event-log` (Context, ItemLog), `08-runtime` (AgentHarness, SubprocessAdapter, StorageAdapter), `21-tasks` (planner/implementer subprocess pattern), `22-cli-architecture` (CLI subprocess wiring)
-> **Exports:** `CheckpointSnapshot`, `CheckpointSnapshotSchema`, `CheckpointSchemaVersion`, `CheckpointStore`, `createCheckpointStore`, `FrontierFrame`, `CwdSnapshot`, `ItemLogSnapshot`, `PendingAskUserSnapshot`, `RestoreContextOptions`, `createFileStorage`, `DurableOutboundQueue`, `createDurableOutboundQueue`, `reattachLiveChildren`, `PendingSpend`, `PendingDispatch`, `UnreadableDispatch`, `SpendSettlement`, `SpendKind`, `ReconcileSpendOptions`, `WriteOffSpendOptions`
+> **Exports:** `CheckpointSnapshot`, `CheckpointSnapshotSchema`, `CheckpointSchemaVersion`, `CheckpointStore`, `createCheckpointStore`, `FrontierFrame`, `CwdSnapshot`, `ItemLogSnapshot`, `PendingAskUserSnapshot`, `RestoreContextOptions`, `createFileStorage`, `DurableOutboundQueue`, `createDurableOutboundQueue`, `reattachLiveChildren`, `PendingSpend`, `SpendSettlement`, `SpendKind`, `ReconcileSpendOptions`, `WriteOffSpendOptions`
 > **Source of truth:** `packages/core/src/runtime/checkpoint-store.ts`, `packages/core/src/runtime/durable/harness-checkpoints.ts`, `packages/core/src/runtime/file-storage.ts`, `packages/core/src/types/checkpoint.ts`, `packages/core/src/runtime/durable/spend-log.ts`, `packages/core/src/harness/spend.ts`, `packages/core/src/harness/model-price.ts`, `packages/types/src/types/spend.ts`, `packages/core/src/adapters/node/durable-outbound-queue.ts`, `packages/core/src/adapters/node/agent-ipc-{client,server,protocol}.ts`, `packages/cli/src/cli/reattach-live-children.ts`
 > **Docs:** `packages/web/content/docs/framework/durability.mdx`
 
@@ -185,8 +185,9 @@ Every paid provider call therefore leaves a **dispatch record** in the harness's
 ### The record
 
 ```typescript
-interface PendingDispatch {
+interface PendingSpend {
   id: string;                  // dispatch id
+  unreadable?: true;           // the stored value no longer reads — see below
   kind: 'model' | 'decide';
   model: string;
   requestHash: string;         // hash of the request body sent
@@ -204,17 +205,18 @@ interface PendingDispatch {
 A `spend:<id>` value that does not read as a record — torn by a crash mid-write, corrupted, or hand-edited, including one a store reads as nothing while its key still lists (`createFileStorage` reads an unparsable file that way) — is still evidence that a paid call was sent, so it is never skipped. It is listed as an **unreadable dispatch**:
 
 ```typescript
-interface UnreadableDispatch {
+{
   id: string;                  // from the key
   unreadable: true;
   executionId?: string;        // kept when the damaged value still names one as a non-empty string
   threadId?: string;           // likewise
+  // Placeholders for the fields the record lost:
+  kind: 'model'; model: 'unknown'; requestHash: ''; inputTokens: 0;
+  sentAt: '1970-01-01T00:00:00.000Z';
 }
-
-type PendingSpend = PendingDispatch | UnreadableDispatch;
 ```
 
-Nothing else in the value is trusted. An unreadable dispatch has no ceiling and no generation id, so it is treated as an unbounded hold that can never be priced (§ Ceilings, § Reconciliation): `pendingSpend` lists it, `restore()` holds it and `spend_pending` flags it `{ id, unreadable: true, unbounded: true }`, it adds nothing to `heldCost` or `until.maxCost`, and reconciliation leaves it held. It leaves storage only through `writeOffSpend`, which deletes it and charges the assumed cost like any write-off. One that names no execution may be any execution's: it is listed, held, and flagged with every execution, and a write-off charges the context it was last held on.
+Nothing else in the damaged value is trusted. The placeholders keep `PendingSpend` one shape, so host code that reads `kind`, `model`, or `ceiling` compiles unchanged; code that trusts those fields checks `unreadable` first. An unreadable dispatch has no ceiling and no generation id, so it is treated as an unbounded hold that can never be priced (§ Ceilings, § Reconciliation): `pendingSpend` lists it, `restore()` holds it and `spend_pending` flags it `{ id, unreadable: true, unbounded: true }`, it adds nothing to `heldCost` or `until.maxCost`, and reconciliation leaves it held. It leaves storage only through `writeOffSpend`, which deletes it and charges the assumed cost like any write-off. One that names no execution may be any execution's: it is listed, held, and flagged with every execution, and a write-off charges the context it was last held on.
 
 Records live under `spend:<id>`, outside the `execution:<id>:` prefix, so `clearCheckpoint`, an abandoned session turn, and every other discard leave them alone. A record leaves storage only when it is settled or written off. Evidence of spend is never discarded with the run that made it.
 

@@ -5,6 +5,7 @@ import type {
   ConditionalOpts,
   InParallelOpts,
   MergeFn,
+  PendingSpend,
   SettleResult,
   Step,
   StepSpawn,
@@ -203,6 +204,31 @@ describe('Type definitions', () => {
       }
       // Use the predicate so the import is not elided as type-only.
       expect(typeof isSpawn).toBe('function');
+    });
+  });
+
+  // Host code written against `PendingSpend` before unreadable records were listed
+  // must still compile: every field it read stays on the type, with the same type.
+  describe('PendingSpend', () => {
+    it('keeps the fields hosts read, with an optional unreadable flag', () => {
+      function describeHold(p: PendingSpend): string {
+        const kind: 'model' | 'decide' = p.kind;
+        const model: string = p.model;
+        const ceiling: number | undefined = p.ceiling;
+        const sent: number = Date.parse(p.sentAt);
+        return `${kind} ${model} ${ceiling ?? 'unbounded'} ${sent} ${p.inputTokens}`;
+      }
+      const damaged: PendingSpend = {
+        id: 'x',
+        unreadable: true,
+        kind: 'model',
+        model: 'unknown',
+        requestHash: '',
+        inputTokens: 0,
+        sentAt: new Date(0).toISOString(),
+      };
+
+      expect(describeHold(damaged)).toBe('model unknown unbounded 0 0');
     });
   });
 });

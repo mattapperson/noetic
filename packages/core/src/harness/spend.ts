@@ -13,15 +13,19 @@ import type {
   Context,
   PendingSpend,
   ReconcileSpendOptions,
-  SpendKind,
   SpendSettlement,
   UsageCharge,
   WriteOffSpendOptions,
 } from '@noetic-tools/types';
-import { recordUsage } from '@noetic-tools/types';
+import { recordUsage, SpendKind } from '@noetic-tools/types';
 import type { OpenRouter } from '@openrouter/sdk';
 import { emitFrameworkEvent, getBroadcaster } from '../runtime/broadcaster-utils';
-import type { DispatchRecord, SpendLog, SpendRecord } from '../runtime/durable/spend-log';
+import type {
+  DispatchRecord,
+  SpendLog,
+  SpendRecord,
+  UnreadableRecord,
+} from '../runtime/durable/spend-log';
 import { isUnreadable } from '../runtime/durable/spend-log';
 import { hashText } from '../runtime/durable/step-ledger';
 import { statusOf } from '../util/status-code';
@@ -164,7 +168,7 @@ export class Spend {
     return Promise.all(
       records.map(async (record) => {
         if (isUnreadable(record)) {
-          return record;
+          return unreadablePending(record);
         }
         const ceiling = await this.ceilingOf(record);
         return ceiling === undefined
@@ -579,6 +583,21 @@ export class Dispatch {
 //#endregion
 
 //#region Helpers
+
+/**
+ * An unreadable record as `PendingSpend` lists it: `PendingSpend` requires the fields
+ * the record lost, so they hold the placeholders its doc names.
+ */
+function unreadablePending(record: UnreadableRecord): PendingSpend {
+  return {
+    ...record,
+    kind: SpendKind.Model,
+    model: 'unknown',
+    requestHash: '',
+    inputTokens: 0,
+    sentAt: new Date(0).toISOString(),
+  };
+}
 
 function rootOf(ctx: Context | undefined): ContextImpl | undefined {
   let node = ctx;
