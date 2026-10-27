@@ -8,10 +8,12 @@ import assert from 'node:assert';
 import type { StorageAdapter } from '@noetic-tools/context';
 import type { Context, ContextData, PendingSpend, StreamEvent } from '@noetic-tools/types';
 import { estimateTokens, frameworkCast, recordUsage } from '@noetic-tools/types';
+import { z } from 'zod';
 import { inParallel } from '../../src/builders/control-flow-builders';
 import { decide } from '../../src/builders/decide-builders';
 import { loop } from '../../src/builders/loop-builder';
 import { callModel, runCode } from '../../src/builders/step-builders';
+import { tool } from '../../src/builders/tool-builder';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import type { DispatchRecord } from '../../src/runtime/durable/spend-log';
 import { createSpendLog } from '../../src/runtime/durable/spend-log';
@@ -282,6 +284,44 @@ describe('paid dispatch records', () => {
     expect(atSend?.[0]?.inputTokens).toBeGreaterThan(0);
     expect(await log.list()).toEqual([]);
     expect(ctx.cost).toBeCloseTo(ROUND_COST);
+  });
+
+  it("bounds a round's prompt by its tools' JSON Schemas, which the wire carries", async () => {
+    const server = startServer();
+    const storage = createInMemoryStorage();
+    const log = createSpendLog(storage);
+    const harness = harnessOver(storage, server);
+    const guide = 'Search the archive by its exact catalogue code. '.repeat(200);
+    const search = tool({
+      name: 'search',
+      description: 'Search',
+      input: z.object({
+        code: z.string().describe(guide),
+      }),
+      output: z.string(),
+      execute: async () => 'none',
+    });
+    const seen: Promise<DispatchRecord[]>[] = [];
+    const original = server.rounds.push.bind(server.rounds);
+    server.rounds.push = (...items) => {
+      seen.push(log.list());
+      return original(...items);
+    };
+
+    await harness.run(
+      callModel<ContextData, string, string>({
+        id: 'agent',
+        model: 'test/model',
+        tools: [
+          search,
+        ],
+      }),
+      'go',
+      harness.createContext(),
+    );
+
+    const [atSend] = await Promise.all(seen);
+    expect(atSend?.[0]?.inputTokens).toBeGreaterThan(new TextEncoder().encode(guide).length);
   });
 
   it('records nothing without durable storage', async () => {

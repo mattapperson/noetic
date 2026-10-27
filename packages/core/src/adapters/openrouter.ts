@@ -412,6 +412,30 @@ export function convertTools({ tools }: ConvertToolsParams): SdkTool[] {
   );
 }
 
+/**
+ * @internal
+ * Tools as the wire carries them, for sizing a request. The agent turns each live
+ * Zod input schema into JSON Schema only when it sends, so serializing `convertTools`
+ * output would drop every description and constraint the provider bills for.
+ */
+export function toolsOnWire(tools: ReadonlyArray<SdkTool>): unknown[] {
+  return tools.map((tool) => {
+    if (!('function' in tool) || !isZodSchema(tool.function.inputSchema)) {
+      return tool;
+    }
+    return {
+      ...tool,
+      function: {
+        ...tool.function,
+        inputSchema: z.toJSONSchema(tool.function.inputSchema, {
+          target: 'draft-07',
+          unrepresentable: 'any',
+        }),
+      },
+    };
+  });
+}
+
 /** @internal */
 export interface ExecuteToolCallParams {
   toolName: string;

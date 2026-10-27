@@ -17,7 +17,12 @@ import {
 import { toStandardJsonSchema } from '@valibot/to-json-schema';
 import * as v from 'valibot';
 import { ZodError, z } from 'zod';
-import { convertTools, executeToolCall, resolveWireJsonSchema } from '../src/adapters/openrouter';
+import {
+  convertTools,
+  executeToolCall,
+  resolveWireJsonSchema,
+  toolsOnWire,
+} from '../src/adapters/openrouter';
 import { callModel, invokeTool } from '../src/builders/step-builders';
 import { tool } from '../src/builders/tool-builder';
 import { AgentHarness } from '../src/harness/agent-harness';
@@ -618,6 +623,39 @@ describe('JSON Schema wire boundaries', () => {
     }>(sdkTool).function;
     expect(fn.inputSchema).toBe(input);
     expect(z.toJSONSchema(fn.inputSchema)).toEqual(z.toJSONSchema(input));
+  });
+
+  it('sizes tools by the JSON Schema the wire carries, not the live schema object', () => {
+    const raw = {
+      type: 'object',
+      description: 'A catalogue code from the archive index.',
+    };
+    const tools = convertTools({
+      tools: [
+        tool({
+          name: 'search',
+          description: 'Search',
+          input: z.object({
+            q: z.string().describe('The exact phrase to find.'),
+          }),
+          output: z.string(),
+          execute: async () => 'ok',
+        }),
+        tool({
+          name: 'lookup',
+          description: 'Look up',
+          input: v.object({
+            code: v.string(),
+          }),
+          inputJsonSchema: raw,
+          output: v.string(),
+          execute: async () => 'ok',
+        }),
+      ],
+    });
+    const wire = JSON.stringify(toolsOnWire(tools));
+    expect(wire).toContain('The exact phrase to find.');
+    expect(wire).toContain(raw.description);
   });
 
   it('throws MISSING_JSON_SCHEMA for a non-Zod tool input without inputJsonSchema', () => {
