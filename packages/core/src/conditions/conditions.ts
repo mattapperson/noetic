@@ -4,6 +4,7 @@ import type { Context, Step } from '@noetic-tools/types';
 import { DecideOutputError, isNoeticError, NoeticErrorImpl, trackUsage } from '@noetic-tools/types';
 import { z } from 'zod';
 import type { EmbedFn } from '../types/embed';
+import { chargeSpent } from '../util/spent';
 import { cosineSimilarity } from './cosine-similarity';
 
 //#region Types
@@ -461,6 +462,7 @@ async function askDecide(
   try {
     return await ctx.harness.decide(request);
   } catch (e) {
+    chargeSpent(ctx, e);
     if (isNoeticError(e)) {
       throw e;
     }

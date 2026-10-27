@@ -17,6 +17,7 @@ import {
 import { z } from 'zod';
 import { GenAI, NoeticAttr } from '../observability/genai-attributes';
 import { drainsOf } from '../runtime/drain';
+import { chargeSpent } from '../util/spent';
 import {
   allocateBudgets,
   assembleView,
@@ -234,6 +235,7 @@ async function askHarness<TContext, I, O>(
   try {
     return await ctx.harness.decide(request);
   } catch (e) {
+    chargeSpent(ctx, e);
     if (e instanceof DecideOutputError && !ctx.aborted) {
       if (e.usage) {
         trackUsage(ctx, {

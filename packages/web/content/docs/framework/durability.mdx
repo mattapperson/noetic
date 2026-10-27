@@ -283,7 +283,7 @@ A model call cut off with its host — or by `cancel(ctx)`, a steer, or a droppe
 
 - **Before send**, the record holds the model, a hash of the request, an estimate of the prompt's tokens, and the request's output cap.
 - **When the response headers arrive**, the provider's generation id is saved to it — before the body is read.
-- **When the bill arrives** with the response, the record is deleted; the cost reaches usage as usual.
+- **When the bill arrives** with the response, the cost is counted and the record is deleted. A response the harness rejects and asks again still counts, and a step that fails still charges its context with what its rounds spent.
 - **Otherwise** the record stays, and the call is **pending**: held at its ceiling until its bill is known.
 
 ```ts validate=none

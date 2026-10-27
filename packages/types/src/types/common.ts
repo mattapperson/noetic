@@ -170,13 +170,14 @@ export interface StepMeta {
 /** @public Structured response returned by a model adapter after an LLM call. */
 export interface LLMResponse {
   items: Item[];
-  /** Totals across every round of the call. */
+  /** Totals across every round of the call, including rounds rejected and asked again. */
   usage: RoundUsage;
   /**
    * Per-round breakdown, oldest first. Rounds after the first replay the same
    * assembled view plus appended tool traffic, so they hit the prompt cache
    * regardless of whether the first round did — only `rounds[0]` answers
-   * "was my prefix cached?".
+   * "was my prefix cached?". A round rejected and asked again adds its usage to
+   * the round after it.
    */
   rounds?: ReadonlyArray<RoundUsage>;
   /** USD the work behind this response cost, including rounds replayed from a recorded run. */
