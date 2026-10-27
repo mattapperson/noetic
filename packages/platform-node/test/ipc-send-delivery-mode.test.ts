@@ -6,7 +6,13 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { rmSync } from 'node:fs';
 import path from 'node:path';
-import type { DeliveryMode, HarnessStatus, StreamEvent, StreamingItem } from '@noetic-tools/core';
+import type {
+  AgentHarness,
+  DeliveryMode,
+  HarnessStatus,
+  StreamEvent,
+  StreamingItem,
+} from '@noetic-tools/core';
 import { AgentIpcClient } from '../src/agent-ipc-client';
 import type { IpcHarness } from '../src/agent-ipc-server';
 import { AgentIpcServer } from '../src/agent-ipc-server';
@@ -21,6 +27,11 @@ interface ExecuteCall {
 }
 
 async function* emptyStream<T>(): AsyncIterable<T> {}
+
+/** Compile-time pin: the real harness can be served. Never called. */
+export function harnessSatisfiesIpcHarness(harness: AgentHarness): IpcHarness {
+  return harness;
+}
 
 function makeRecordingHarness(calls: ExecuteCall[]): IpcHarness {
   const status: HarnessStatus = {

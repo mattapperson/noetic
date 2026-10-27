@@ -525,6 +525,11 @@ describe('cancel with drainMs', () => {
     );
     await waitFor(() => client.started === 1);
     expect(harness.getStatus(scope).kind).toBe('generating');
+    // Step code reads the same status through its context, typed without a turn.
+    const viaContext = ctx.harness.getStatus(scope);
+    expect(viaContext).toEqual(harness.getStatus(scope));
+    // @ts-expect-error an execution's status carries no turnId
+    expect(viaContext.turnId).toBeUndefined();
 
     const stopping = harness.cancel(ctx, {
       drainMs: 2e3,

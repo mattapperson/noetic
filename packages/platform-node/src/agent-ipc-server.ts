@@ -62,7 +62,8 @@ export interface IpcHarness {
   getItemStream(scope?: { threadId?: string }): AsyncIterable<StreamingItem>;
   getFullStream(scope?: { threadId?: string }): AsyncIterable<StreamEvent>;
   getStatus(scope?: { threadId?: string }): HarnessStatus;
-  abort(scope?: { threadId?: string; reason?: string }): Promise<void>;
+  /** Resolves with the harness's drain report, which the server ignores. */
+  abort(scope?: { threadId?: string; reason?: string }): Promise<unknown>;
 }
 
 // `AgentHarness<{model: string}>` from core satisfies `IpcHarness`

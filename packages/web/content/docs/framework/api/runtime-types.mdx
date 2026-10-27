@@ -23,7 +23,8 @@ declare interface HarnessApi<TParams extends Record<string, unknown> = Record<st
   getTextStream(scope?: SessionScope): AsyncIterable<string>;
   getReasoningStream(scope?: SessionScope): AsyncIterable<string>;
   getFullStream(scope?: SessionScope): AsyncIterable<StreamEvent>;
-  abort(scope?: SessionScope & CancelOptions): Promise<void>;
+  abort(scope?: SessionScope & CancelOptions): Promise<DrainReport | undefined>;
+  getStatus(scope: ExecutionScope): ExecutionStatus;
   getStatus(scope?: SessionScope): HarnessStatus;
   getQueueSize(scope?: SessionScope): number;
   seedSessionHistory(threadId: string, items: ReadonlyArray<Item>): void;
@@ -102,7 +103,7 @@ declare interface HarnessApi<TParams extends Record<string, unknown> = Record<st
 
   checkpoint(ctx: Context): Promise<void>;
   restore(executionId: string): Promise<Context | null>;
-  cancel(ctx: Context, options?: string | CancelOptions): Promise<void>;
+  cancel(ctx: Context, options?: string | CancelOptions): Promise<DrainReport | undefined>;
   createSpan(name: string, parent: Span | null): Span;
 }
 

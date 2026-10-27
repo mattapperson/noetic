@@ -1922,8 +1922,10 @@ const msg2 = harness.tryRecv(channel, ctx);
 
 ```typescript
 process.on('SIGTERM', async () => {
-  const report = await harness.cancel(ctx, { reason: 'SIGTERM', drainMs: 10e3 });
-  const drained = (report?.finished ?? []).reduce((sum, call) => sum + (call.cost ?? 0), 0);
+  const report = await harness.abort({ reason: 'SIGTERM', drainMs: 10e3 });
+  for (const call of report?.finished ?? []) {
+    budget.charge(call.cost ?? 0);
+  }
 });
 ```
 

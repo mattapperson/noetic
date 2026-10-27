@@ -16,7 +16,7 @@ import type { FsAdapter } from './fs-adapter';
 import type { HarnessResponse, StreamEvent, StreamingItem } from './harness-result';
 import type { ExecuteInput, Item } from './items';
 import type { Span, TraceExporter } from './observability';
-import type { CancelOptions, DrainReport } from './runtime';
+import type { CancelOptions, DrainReport, ExecutionScope, ExecutionStatus } from './runtime';
 import type { ShellAdapter } from './shell-adapter';
 import type { OnSteerParams, SteeringDecision, SteerVerdict } from './steering';
 import type { SubprocessAdapter } from './subprocess-adapter';
@@ -256,6 +256,8 @@ export interface ContextHarness {
   readonly traceExporter: TraceExporter;
   createSpan(name: string, parent: Span | null): Span;
   abort(scope?: unknown): Promise<DrainReport | undefined>;
+  /** A `run()` execution's state, by its root context's id. */
+  getStatus(scope: ExecutionScope): ExecutionStatus;
   getStatus(scope?: unknown): ContextHarnessStatus;
   getQueueSize(scope?: unknown): number;
   /** Cumulative token usage and cost a session has accumulated across its turns. */

@@ -27,9 +27,10 @@ export interface ChatHarness {
   getChannelStream<T>(channel: ExternalChannel<T>, executionId: string): AsyncIterable<T>;
   getStatus(scope?: SessionScope): HarnessStatus;
   getQueueSize(scope?: SessionScope): number;
+  /** Resolves with the harness's drain report, which the adapter ignores. */
   abort(
     scope?: SessionScope & {
       reason?: string;
     },
-  ): Promise<void>;
+  ): Promise<unknown>;
 }
