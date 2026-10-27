@@ -39,7 +39,9 @@ import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../runtime/broad
 import { drainsOf } from '../runtime/drain';
 import type { EventBroadcaster } from '../runtime/event-broadcaster';
 import type { ApprovalOutcome } from '../runtime/tool-approval';
+import { markSpent } from '../util/spent';
 import { isErrorStatus } from '../util/status-code';
+import { CallSpend } from './call-spend';
 import { exportSpans } from './deps/context';
 import { RoundLedger } from './model-rounds';
 import { buildItemSchemaRegistry, createToolResultItem } from './model-schema.js';
@@ -685,8 +687,11 @@ export class AgentHarnessModelCaller {
     }
     const client = this.requireModelClient();
     const spans = this.newSpanCollector(request);
+    const spend = new CallSpend();
     try {
-      return await this.runModelLoop(request, client, spans);
+      return await this.runModelLoop(request, client, spans, spend);
+    } catch (error: unknown) {
+      throw markSpent(error, spend.charge());
     } finally {
       await spans.flush();
     }
@@ -696,21 +701,10 @@ export class AgentHarnessModelCaller {
     request: CallModelRequest,
     client: OpenRouter,
     spans: CallSpanCollector,
+    spend: CallSpend,
   ): Promise<LLMResponse> {
     const prepared = prepareModelRequest(request, this.opts.agentName);
     const allItems: Item[] = [];
-    const totalUsage = {
-      inputTokens: 0,
-      outputTokens: 0,
-      cachedTokens: 0,
-    };
-    // Rounds after the first replay the same prefix and so hit the prompt cache
-    // whatever the first round did. Keep them apart: only round 0 says whether
-    // the assembled view was cached (see `noteCacheOutcome`).
-    const rounds: RoundUsage[] = [];
-    let totalCost = 0;
-    // What replayed rounds supplied, so the response can report what was paid now.
-    let replayedCost: number | undefined;
     let servedTier: string | undefined;
     const conversationInput = itemsToInput(prepared.remaining);
     const textFormat = request.outputSchema
@@ -735,23 +729,15 @@ export class AgentHarnessModelCaller {
       items: 0,
     };
     // Record a round the loop goes on from, so a resumed loop can replay it.
-    const recordRound = async (usage: RoundUsage, cost: number): Promise<void> => {
-      if (request.signal?.aborted) {
+    const recordRound = async (): Promise<void> => {
+      if (!roundLedger || request.signal?.aborted) {
         return;
       }
-      await roundLedger?.record(round, marks.log, {
+      await roundLedger.record(round, marks.log, {
         items: allItems.slice(marks.items),
         input: conversationInput.slice(marks.input),
-        usage,
-        cost,
+        ...spend.takeUnrecorded(),
       });
-    };
-    const countRound = (usage: RoundUsage, cost: number): void => {
-      rounds.push(usage);
-      totalUsage.inputTokens += usage.inputTokens;
-      totalUsage.outputTokens += usage.outputTokens;
-      totalUsage.cachedTokens += usage.cachedTokens ?? 0;
-      totalCost += cost;
     };
     let stoppedForRecall = false;
     const steers = openSteerInbox({
@@ -771,8 +757,7 @@ export class AgentHarnessModelCaller {
         for (const item of replayed.appended) {
           request.ctx?.itemLog.append(item);
         }
-        countRound(replayed.usage, replayed.cost);
-        replayedCost = (replayedCost ?? 0) + replayed.cost;
+        spend.replay(replayed.usage, replayed.cost);
         prepared.emitIfAllowed('model_round_replayed', {
           round,
         });
@@ -946,6 +931,12 @@ export class AgentHarnessModelCaller {
       try {
         sdkResponse = await awaitWithAbort(callResult.getResponse(), roundSignal);
         watchdog.stop();
+        // Counted before its record goes and before the recovery checks: a round
+        // rejected below and asked again was billed all the same.
+        const roundUsage = extractUsage(sdkResponse.usage);
+        const roundCost = sdkResponse.usage?.cost ?? 0;
+        spend.count(roundUsage, roundCost);
+        spans.finishModelSpan(modelSpan, roundUsage, roundCost > 0 ? roundCost : undefined);
         await dispatch?.settle();
         await awaitWithAbort(pipePromise, roundSignal);
       } catch (err: unknown) {
@@ -966,10 +957,6 @@ export class AgentHarnessModelCaller {
         roundFinished?.();
       }
       if (request.signal?.aborted) {
-        // A bill that arrived before the abort is counted here: its record is gone.
-        if (sdkResponse) {
-          countRound(extractUsage(sdkResponse.usage), sdkResponse.usage?.cost ?? 0);
-        }
         break;
       }
       if (!sdkResponse) {
@@ -994,13 +981,7 @@ export class AgentHarnessModelCaller {
           modelSpan,
           steers,
         });
-        await recordRound(
-          {
-            inputTokens: 0,
-            outputTokens: 0,
-          },
-          0,
-        );
+        await recordRound();
         round += 1;
         const cutLimitRecovery = this.handleToolRoundLimit({
           round,
@@ -1020,7 +1001,6 @@ export class AgentHarnessModelCaller {
         emitIfAllowed: prepared.emitIfAllowed,
       });
       if (recovery.kind === 'continue') {
-        modelSpan.end();
         invalidRecoveryContinuations = recovery.invalidRecoveryContinuations;
         useEphemeralContinue = true;
         continue;
@@ -1035,7 +1015,6 @@ export class AgentHarnessModelCaller {
         emitIfAllowed: prepared.emitIfAllowed,
       });
       if (outputRecovery.kind === 'continue') {
-        modelSpan.end();
         invalidRecoveryContinuations = outputRecovery.invalidRecoveryContinuations;
         useEphemeralContinue = true;
         continue;
@@ -1045,10 +1024,6 @@ export class AgentHarnessModelCaller {
         round,
         itemCount: sdkResponse.output?.length ?? 0,
       });
-      const roundUsage = extractUsage(sdkResponse.usage);
-      const roundCost = sdkResponse.usage?.cost ?? 0;
-      spans.finishModelSpan(modelSpan, roundUsage, roundCost > 0 ? roundCost : undefined);
-      countRound(roundUsage, roundCost);
       servedTier = sdkResponse.serviceTier ?? undefined;
       allItems.push(...roundItems);
 
@@ -1071,7 +1046,7 @@ export class AgentHarnessModelCaller {
       if (!ranTools) {
         replayOutput(conversationInput, roundItems);
       }
-      await recordRound(roundUsage, roundCost);
+      await recordRound();
 
       round += 1;
       const limitRecovery = this.handleToolRoundLimit({
@@ -1087,25 +1062,10 @@ export class AgentHarnessModelCaller {
 
     return {
       items: allItems,
-      usage: {
-        inputTokens: totalUsage.inputTokens,
-        outputTokens: totalUsage.outputTokens,
-        // Stay `undefined` when no round reported a figure, so callers can tell
-        // "this provider says nothing about caching" from "nothing was cached".
-        cachedTokens: rounds.some((r) => r.cachedTokens !== undefined)
-          ? totalUsage.cachedTokens
-          : undefined,
-      },
-      rounds,
-      cost: totalCost > 0 ? totalCost : undefined,
+      ...spend.totals(),
       ...(stoppedForRecall
         ? {
             recall: true,
-          }
-        : {}),
-      ...(replayedCost !== undefined
-        ? {
-            billedCost: totalCost - replayedCost,
           }
         : {}),
       ...(servedTier

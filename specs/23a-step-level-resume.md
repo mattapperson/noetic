@@ -131,6 +131,8 @@ One `callModel` step can run many rounds — the model asks for tools, the harne
 
 A resumed loop replays rounds in order and stops at the first one it does not find; every round after that runs live, because a recorded round belongs to the conversation the earlier recorded rounds built. A replayed round runs none of its tools and adds its recorded usage to the step's response — it was paid for once. When the step finishes and records, its rounds are pruned with the rest of its subtree. A `durable: false` step's rounds are not recorded.
 
+A round the loop rejects and asks again (`02-step-variants` § Limits and recovery) is not recorded on its own, yet the provider billed it. Its usage and cost ride in the record of the next round the loop goes on from, so a resume that replays that record still counts them. A step that throws charges its context with the billed rounds no record holds, and leaves recorded rounds to be charged when a retry or resume replays them, so no round is counted twice.
+
 An abort that lands mid-call is not a round: the step surfaces cancellation, and the round is not recorded.
 
 ## Storage is the only record
@@ -219,6 +221,7 @@ The ledger lives under its own keys, outside `CheckpointSnapshot`. The baseline 
 - Usage on replay: `cost` keeps the work's cost; `billedCost` counts only what was paid now.
 - Two harnesses taking turns on one thread both read its history from storage; a seeded history is stored.
 - Model loop: a tool loop cut off mid-round resumes on a new harness with every finished round replayed, every tool run exactly once, and replayed usage counted; a `durable: false` step records no rounds.
+- Model loop: a round rejected and asked again counts in the response; its bill survives a resume in the next round's record; a failed step charges only the rounds no record holds, so a retry in place counts each recorded round once.
 - Sessions: a new harness continues a thread with its history; a re-delivered cut-off turn resumes on its execution; a different message after a cut-off turn starts fresh.
 - Static inParallel: 5 paths, crash with 3 complete; resume replays 3, dispatches 2.
 - Divergence: an entry at a path whose `stepId` changed is discarded with its subtree.

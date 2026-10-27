@@ -170,7 +170,7 @@ export interface StepMeta {
 /** @public Structured response returned by a model adapter after an LLM call. */
 export interface LLMResponse {
   items: Item[];
-  /** Totals across every round of the call. */
+  /** Totals across every round of the call, including rounds rejected and asked again. */
   usage: RoundUsage;
   /**
    * Per-round breakdown, oldest first. Rounds after the first replay the same

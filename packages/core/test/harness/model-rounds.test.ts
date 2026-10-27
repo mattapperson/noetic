@@ -162,6 +162,21 @@ describe('durable model rounds', () => {
     expect(resumed.tokens.total).toBe(6 * 15);
   });
 
+  it('counts each recorded round once when a failed run is retried in place', async () => {
+    const { server, harness, agent } = setup();
+    server.dropAt.add(5);
+    const storage = createInMemoryStorage();
+    const host = harness(storage);
+    const ctx = host.createContext();
+    await expect(host.run(agent(), 'go', ctx)).rejects.toThrow();
+    // The recorded rounds are charged when the retry replays them, not by the failure.
+    expect(ctx.tokens.total).toBe(0);
+
+    expect(await host.run(agent(), 'go', ctx)).toBe('charged 5');
+    expect(server.rounds).toHaveLength(7);
+    expect(ctx.tokens.total).toBe(6 * 15);
+  });
+
   it('replays a steer applied before the cut, so the resumed loop still sees it', async () => {
     const queue = new MessageQueue();
     const { server, harness, agent } = setup((n) => {

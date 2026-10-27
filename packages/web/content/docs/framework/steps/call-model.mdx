@@ -119,7 +119,7 @@ const researcher = callModel({
 });
 ```
 
-When the model emits tool calls, the harness runs them and calls the model again with the results, round after round, until the model answers without calling a tool. One callModel step therefore makes as many model requests as it needs (up to 32 tool rounds). The step's `ctx.lastStepMeta.toolCalls` lists every call from every round. To run the whole step again until a step makes no tool calls at all, wrap it in a [loop](/docs/framework/operators/loop-and-until) with `until.noToolCalls()`.
+When the model emits tool calls, the harness runs them and calls the model again with the results, round after round, until the model answers without calling a tool. One callModel step therefore makes as many model requests as it needs (up to 32 tool rounds). A round that comes back with a provider error status or no output is asked again, up to three times in a row; its tokens and cost still count toward the step's usage, since the provider billed it. The step's `ctx.lastStepMeta.toolCalls` lists every call from every round. To run the whole step again until a step makes no tool calls at all, wrap it in a [loop](/docs/framework/operators/loop-and-until) with `until.noToolCalls()`.
 
 ### Unified Tool Set
 

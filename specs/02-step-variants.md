@@ -220,7 +220,7 @@ The agent harness owns the tool call loop. The SDK makes one model request per r
 Limits and recovery:
 
 - **Round cap.** After 32 tool rounds the harness sends a further round with an ephemeral `continue` user message (never logged), and allows three such rounds before the step throws `LLM exceeded maximum tool rounds (32)`.
-- **Bad rounds.** A provider-reported terminal error, or a completed response with no output items, is retried the same way: an ephemeral `continue` round, up to three in a row, then the step throws.
+- **Bad rounds.** A provider-reported terminal error, or a completed response with no output items, is retried the same way: an ephemeral `continue` round, up to three in a row, then the step throws. The provider billed the bad round, so its usage and cost count like any other round's: they reach `LLMResponse.usage`, `rounds`, and `cost`, and so the context. A step that throws still charges its context with every billed round no round record holds (see `23a-step-level-resume` § Model-loop rounds).
 - **Steers.** On a session turn, queued steers (`between-rounds` and `next-item` messages) are added before each round, including the first; a `next-item` steer can also end a round early at an item boundary (see `08-runtime` § Steers).
 - **Abort and stalls.** The request's abort signal cancels the in-flight round and ends the loop. A per-round stream-idle watchdog aborts a round whose stream goes silent (see `08-runtime`).
 

@@ -18,6 +18,7 @@ import { ToolAttr } from '../observability/genai-attributes';
 import type { EmitOption } from '../runtime/broadcaster-utils';
 import { askApproval } from '../runtime/tool-approval';
 import { emitToolUi } from '../runtime/tool-ui';
+import { chargeSpent } from '../util/spent';
 import type { ItemSchemaRegistry, LayerStateStore, SessionCtxExtension } from './action-deps';
 import {
   allocateBudgets,
@@ -919,6 +920,7 @@ async function callOnFreshView<TContext, I, O>(
     });
     spanAttributes = undefined;
     const response = await baseCtx.harness.callModel(request).catch((e: unknown) => {
+      chargeSpent(baseCtx, e);
       throw wrapModelError(e, step.id, baseCtx);
     });
 
