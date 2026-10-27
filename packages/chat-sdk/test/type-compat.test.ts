@@ -1,6 +1,8 @@
 import { expect, test } from 'bun:test';
+import type { AgentHarnessContract } from '@noetic-tools/types';
 import type { Message, StreamChunk, Thread } from 'chat';
 import type { ChatMessageLike, ChatStreamChunk, ChatThreadLike } from '../src/chat-types';
+import type { ChatHarness } from '../src/harness-contract';
 
 /**
  * Compile-time pins between our structural mirrors and the real `chat`
@@ -24,3 +26,8 @@ export function realShapesSatisfyMirrors(
 test('mirrors compile against the real chat package', () => {
   expect(typeof realShapesSatisfyMirrors).toBe('function');
 });
+
+/** Compile-time pin: any full harness can drive `noeticAgent`. Never called. */
+export function contractSatisfiesChatHarness(harness: AgentHarnessContract): ChatHarness {
+  return harness;
+}

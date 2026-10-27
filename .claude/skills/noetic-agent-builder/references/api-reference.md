@@ -1871,8 +1871,8 @@ For decision models the OpenRouter adapter calls the native decisions API; for a
 | `getItemStream(scope?)` | Cumulative item snapshots across every turn. |
 | `getTextStream(scope?)` / `getReasoningStream(scope?)` | Text / reasoning deltas. |
 | `getFullStream(scope?)` | Raw SDK + framework events. |
-| `abort(scope?)` | Cancel in-flight turn; queued messages preserved. `{ drainMs }` drains first (see Cancellation). |
-| `getStatus(scope?)` | `{ kind: 'idle' \| 'generating' \| 'draining' \| 'aborting' }`; `draining` carries `deadline`. |
+| `abort(scope?)` | Cancel in-flight turn; queued messages preserved. `{ drainMs }` drains first and resolves with the `DrainReport` (see Cancellation). |
+| `getStatus(scope?)` | `{ kind: 'idle' \| 'generating' \| 'draining' \| 'aborting' }`; `draining` carries `deadline`. `getStatus({ executionId })` gives a `run()` execution's `ExecutionStatus` (same kinds, no `turnId`). |
 | `getQueueSize(scope?)` | Count of queued messages. |
 
 Subscribe to streams before the first `execute()` if you want to observe the very first turn — the session broadcaster replays buffered events to late subscribers within its buffer window.
@@ -1915,14 +1915,17 @@ const msg2 = harness.tryRecv(channel, ctx);
 | Call | Description |
 |------|-------------|
 | `ctx.abort(reason?)` | Synchronous, no layer teardown. Cascades **down** the execution tree — every live `inParallel` path and `spawn` child (and their descendants) is aborted too; never up, so aborting one path leaves the parent and siblings running. First call wins, so `ctx.abortReason` is stable. |
-| `await harness.cancel(ctx, reason \| { reason?, drainMs? })` | Same abort, plus context-layer teardown per context — `onComplete` with `outcome: 'aborted'`, then `dispose` — run bottom-up (children before parents). No-op on an already-cancelled context. |
+| `await harness.cancel(ctx, reason \| { reason?, drainMs? })` | Same abort, plus context-layer teardown per context — `onComplete` with `outcome: 'aborted'`, then `dispose` — run bottom-up (children before parents). No-op on an already-cancelled context. Resolves with the `DrainReport` when a drain ran, `undefined` otherwise. |
 | `await harness.abort(scope?)` | Session-level: cancels the in-flight *turn* for a thread (queued messages preserved), which aborts that turn's context tree. |
 
-**Graceful stop.** `harness.cancel(ctx, { drainMs })` and `harness.abort({ threadId, drainMs })` first hold every new step, model round and tool call, let `callModel` rounds and `decide` calls already in flight finish and be charged for up to `drainMs`, then cancel as usual. A second cancel during the drain cancels at once. `{name}:drain_started` (`{ executionId, deadline, inFlight }`) and `{name}:drain_finished` (`{ executionId, reason: 'settled' | 'deadline' | 'stopped', durationMs, finished, cutOff }`) report it; each call there is `{ kind, model, executionId, round?, dispatchId?, generationId? }`. Rounds cut off at the deadline keep their dispatch records pending (with the generation id, when headers arrived) and are priced like any other cut-off call — match `cutOff` to `pendingSpend()` by `dispatchId`. The session's `getStatus()` is `{ kind: 'draining', turnId, deadline }` meanwhile.
+**Graceful stop.** `harness.cancel(ctx, { drainMs })` and `harness.abort({ threadId, drainMs })` first hold every new step, model round and tool call, let `callModel` rounds and `decide` calls already in flight finish and be charged for up to `drainMs`, then cancel as usual. A second cancel during the drain cancels at once. `{name}:drain_started` (`{ executionId, deadline, inFlight }`) and `{name}:drain_finished` (`{ executionId, reason: 'settled' | 'deadline' | 'stopped', durationMs, finished, cutOff }`) report it. Both stops resolve with that same report (`DrainReport`) once the cancel is done; a second stop resolves with it too. Each call there is `{ kind, model, executionId, round?, dispatchId?, generationId?, cost?, usage? }`: a `finished` call that returned a bill carries `cost` and `usage` as charged to its context, even when its step ended `cancelled` without `lastStepMeta`. Rounds cut off at the deadline keep their dispatch records pending (with the generation id, when headers arrived) and are priced like any other cut-off call — match `cutOff` to `pendingSpend()` by `dispatchId`. The session's `getStatus()` is `{ kind: 'draining', turnId, deadline }` meanwhile; a `run()` execution's `getStatus({ executionId: ctx.id })` is `{ kind: 'draining', deadline }`.
 
 ```typescript
-process.on('SIGTERM', () => {
-  void harness.abort({ reason: 'SIGTERM', drainMs: 10e3 });
+process.on('SIGTERM', async () => {
+  const report = await harness.abort({ reason: 'SIGTERM', drainMs: 10e3 });
+  for (const call of report?.finished ?? []) {
+    budget.charge(call.cost ?? 0);
+  }
 });
 ```
 

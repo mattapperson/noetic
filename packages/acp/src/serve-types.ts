@@ -33,11 +33,12 @@ export interface AcpServeHarness {
   getFullStream(scope?: SessionScope): AsyncIterable<StreamEvent>;
   getItemStream(scope?: SessionScope): AsyncIterable<StreamingItem>;
   seedSessionHistory(threadId: string, items: ReadonlyArray<Item>): void;
+  /** Resolves with the harness's drain report, which the server ignores. */
   abort(
     scope?: SessionScope & {
       reason?: string;
     },
-  ): Promise<void>;
+  ): Promise<unknown>;
 }
 
 /**

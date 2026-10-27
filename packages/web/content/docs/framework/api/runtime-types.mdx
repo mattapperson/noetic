@@ -23,7 +23,8 @@ declare interface HarnessApi<TParams extends Record<string, unknown> = Record<st
   getTextStream(scope?: SessionScope): AsyncIterable<string>;
   getReasoningStream(scope?: SessionScope): AsyncIterable<string>;
   getFullStream(scope?: SessionScope): AsyncIterable<StreamEvent>;
-  abort(scope?: SessionScope & CancelOptions): Promise<void>;
+  abort(scope?: SessionScope & CancelOptions): Promise<DrainReport | undefined>;
+  getStatus(scope: ExecutionScope): ExecutionStatus;
   getStatus(scope?: SessionScope): HarnessStatus;
   getQueueSize(scope?: SessionScope): number;
   seedSessionHistory(threadId: string, items: ReadonlyArray<Item>): void;
@@ -102,7 +103,7 @@ declare interface HarnessApi<TParams extends Record<string, unknown> = Record<st
 
   checkpoint(ctx: Context): Promise<void>;
   restore(executionId: string): Promise<Context | null>;
-  cancel(ctx: Context, options?: string | CancelOptions): Promise<void>;
+  cancel(ctx: Context, options?: string | CancelOptions): Promise<DrainReport | undefined>;
   createSpan(name: string, parent: Span | null): Span;
 }
 
@@ -131,8 +132,8 @@ declare interface RerenderRequest {
 | `getTextStream(scope?)` | Yields text deltas across every turn. |
 | `getReasoningStream(scope?)` | Yields reasoning-token deltas. |
 | `getFullStream(scope?)` | Yields all raw SDK + framework events. |
-| `abort(scope?)` | Cancel the in-flight turn. Queued messages are preserved. With `drainMs`, in-flight model calls get that long to finish first ([graceful stop](/docs/framework/runtime#graceful-stop)). |
-| `getStatus(scope?)` | Session status snapshot. |
+| `abort(scope?)` | Cancel the in-flight turn. Queued messages are preserved. With `drainMs`, in-flight model calls get that long to finish first ([graceful stop](/docs/framework/runtime#graceful-stop)), and it resolves with the [`DrainReport`](#drainreport). |
+| `getStatus(scope?)` | Session status snapshot ([`HarnessStatus`](#harnessstatus)). Pass `{ executionId }` for a `run()` execution's [`ExecutionStatus`](#executionstatus). |
 | `getQueueSize(scope?)` | Messages currently queued on the session. |
 | `seedSessionHistory(threadId, items)` | Pre-populate a session's accumulated history with prior items. Used by resume flows. |
 | `setRootCwd(nextCwd)` | Update the harness root cwd (e.g., from a TUI `! cd`). |
@@ -162,7 +163,7 @@ declare interface RerenderRequest {
 | `notifyDecision(layers, record, ctx)` | Run every layer's `onDecision` hook in slot order, one at a time. Called by `decide` steps after they validate their answers. |
 | `checkpoint(ctx)` | Persist current execution state. |
 | `restore(executionId)` | Restore a previously checkpointed context. |
-| `cancel(ctx, options?)` | Cancel an execution: abort `ctx` and every live descendant context, then run layer teardown (`onComplete` with `outcome: 'aborted'`, then `dispose`) bottom-up. No-op if already cancelled. `options` is a reason string or a `CancelOptions`; with `drainMs` it is a [graceful stop](/docs/framework/runtime#graceful-stop). |
+| `cancel(ctx, options?)` | Cancel an execution: abort `ctx` and every live descendant context, then run layer teardown (`onComplete` with `outcome: 'aborted'`, then `dispose`) bottom-up. No-op if already cancelled. `options` is a reason string or a `CancelOptions`; with `drainMs` it is a [graceful stop](/docs/framework/runtime#graceful-stop). Resolves with the [`DrainReport`](#drainreport) when a drain ran, `undefined` otherwise. |
 | `createSpan(name, parent)` | Create an observability span. |
 
 ## DeliveryMode
@@ -207,6 +208,22 @@ type HarnessStatus =
 
 `draining` is a [graceful stop](/docs/framework/runtime#graceful-stop) in progress; `deadline` is when it cuts off whatever is still in flight (epoch ms).
 
+## ExecutionStatus
+
+```ts validate=none
+interface ExecutionScope {
+  executionId: string; // a root context's id
+}
+
+type ExecutionStatus =
+  | { readonly kind: 'idle' }
+  | { readonly kind: 'generating'; readonly startedAt: number }
+  | { readonly kind: 'draining'; readonly deadline: number }
+  | { readonly kind: 'aborting' };
+```
+
+What `getStatus({ executionId })` returns for a `run()` execution: `generating` while a run is in flight on the root context, `draining` during a graceful stop, `aborting` from the cancel until the run returns, and `idle` otherwise.
+
 ## CancelOptions
 
 ```ts validate=none
@@ -216,6 +233,31 @@ interface CancelOptions {
   readonly drainMs?: number;
 }
 ```
+
+## DrainReport
+
+```ts validate=none
+interface DrainReport {
+  readonly executionId: string;
+  readonly reason: 'settled' | 'deadline' | 'stopped';
+  readonly durationMs: number;
+  readonly finished: ReadonlyArray<DrainCall>;
+  readonly cutOff: ReadonlyArray<DrainCall>;
+}
+
+interface DrainCall {
+  readonly kind: 'model_round' | 'decide';
+  readonly model: string;
+  readonly executionId: string; // the context that made the call
+  readonly round?: number;
+  readonly dispatchId?: string;
+  readonly generationId?: string;
+  readonly cost?: number;
+  readonly usage?: RoundUsage;
+}
+```
+
+What `cancel` and `abort` resolve with after a [graceful stop](/docs/framework/runtime#graceful-stop), and the data of `{name}:drain_finished`. A `finished` call that returned a bill carries `cost` (USD) and `usage` as charged to its context; a `cutOff` call never does.
 
 ## HarnessResponse
 

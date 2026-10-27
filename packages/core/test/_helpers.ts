@@ -502,7 +502,7 @@ export function makeMockHarness(): AgentHarnessContract {
         };
       },
     }),
-    abort: async () => {},
+    abort: async () => undefined,
     getStatus: () => ({
       kind: 'idle',
     }),
@@ -548,7 +548,7 @@ export function makeMockHarness(): AgentHarnessContract {
     disposeLayers: async () => {},
     checkpoint: async () => {},
     restore: async () => null,
-    cancel: async () => {},
+    cancel: async () => undefined,
     traceExporter: {
       export: async () => {},
     },
