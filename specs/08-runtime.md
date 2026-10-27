@@ -586,7 +586,7 @@ interface FrameworkStreamEvent {
 | `{name}:model_call_completed` | Emitted after the provider's response is fully received. Data: `{ round, itemCount }` |
 | `{name}:model_call_stalled` | Emitted when the stream-idle watchdog fires (fixed 120s idle window). The turn then aborts. Data: `{ round, idleTimeoutMs }` |
 | `{name}:stream_pipe_error` | Emitted when SDK stream piping fails. Data: `{ error }` |
-| `{name}:spend_pending` | Emitted when a paid call is left with no settled bill, or `restore()` finds one (`23-durable-execution` § Paid dispatches). Data: `{ id, kind, model, generationId?, ceiling?, unbounded? }` |
+| `{name}:spend_pending` | Emitted when a paid call is left with no settled bill, or `restore()` finds one (`23-durable-execution` § Paid dispatches). Data: `{ id, kind, model, generationId?, ceiling?, unbounded? }`, or `{ id, unreadable: true, unbounded: true }` for a record that no longer reads |
 | `{name}:spend_settled` | Emitted when a pending paid call is settled or written off. Data: `{ id, cost, writtenOff? }` |
 | `{name}:drain_started` | Emitted when a graceful stop begins (see Graceful Stop). Data: `{ executionId, deadline, inFlight }` |
 | `{name}:drain_finished` | Emitted when a graceful stop ends, just before the cancel. Data: `{ executionId, reason, durationMs, finished, cutOff }` |

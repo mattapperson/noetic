@@ -1,7 +1,7 @@
 # Durable Execution
 
 > **Depends On:** `07-context-and-event-log` (Context, ItemLog), `08-runtime` (AgentHarness, SubprocessAdapter, StorageAdapter), `21-tasks` (planner/implementer subprocess pattern), `22-cli-architecture` (CLI subprocess wiring)
-> **Exports:** `CheckpointSnapshot`, `CheckpointSnapshotSchema`, `CheckpointSchemaVersion`, `CheckpointStore`, `createCheckpointStore`, `FrontierFrame`, `CwdSnapshot`, `ItemLogSnapshot`, `PendingAskUserSnapshot`, `RestoreContextOptions`, `createFileStorage`, `DurableOutboundQueue`, `createDurableOutboundQueue`, `reattachLiveChildren`, `PendingSpend`, `SpendSettlement`, `SpendKind`, `ReconcileSpendOptions`, `WriteOffSpendOptions`
+> **Exports:** `CheckpointSnapshot`, `CheckpointSnapshotSchema`, `CheckpointSchemaVersion`, `CheckpointStore`, `createCheckpointStore`, `FrontierFrame`, `CwdSnapshot`, `ItemLogSnapshot`, `PendingAskUserSnapshot`, `RestoreContextOptions`, `createFileStorage`, `DurableOutboundQueue`, `createDurableOutboundQueue`, `reattachLiveChildren`, `PendingSpend`, `PendingDispatch`, `UnreadableDispatch`, `SpendSettlement`, `SpendKind`, `ReconcileSpendOptions`, `WriteOffSpendOptions`
 > **Source of truth:** `packages/core/src/runtime/checkpoint-store.ts`, `packages/core/src/runtime/durable/harness-checkpoints.ts`, `packages/core/src/runtime/file-storage.ts`, `packages/core/src/types/checkpoint.ts`, `packages/core/src/runtime/durable/spend-log.ts`, `packages/core/src/harness/spend.ts`, `packages/core/src/harness/model-price.ts`, `packages/types/src/types/spend.ts`, `packages/core/src/adapters/node/durable-outbound-queue.ts`, `packages/core/src/adapters/node/agent-ipc-{client,server,protocol}.ts`, `packages/cli/src/cli/reattach-live-children.ts`
 > **Docs:** `packages/web/content/docs/framework/durability.mdx`
 
@@ -185,7 +185,7 @@ Every paid provider call therefore leaves a **dispatch record** in the harness's
 ### The record
 
 ```typescript
-interface PendingSpend {
+interface PendingDispatch {
   id: string;                  // dispatch id
   kind: 'model' | 'decide';
   model: string;
@@ -200,6 +200,21 @@ interface PendingSpend {
   ceiling?: number;            // USD the call can have cost at most — see below
 }
 ```
+
+A `spend:<id>` value that does not read as a record — torn by a crash mid-write, corrupted, or hand-edited, including one a store reads as nothing while its key still lists (`createFileStorage` reads an unparsable file that way) — is still evidence that a paid call was sent, so it is never skipped. It is listed as an **unreadable dispatch**:
+
+```typescript
+interface UnreadableDispatch {
+  id: string;                  // from the key
+  unreadable: true;
+  executionId?: string;        // kept when the damaged value still names one as a non-empty string
+  threadId?: string;           // likewise
+}
+
+type PendingSpend = PendingDispatch | UnreadableDispatch;
+```
+
+Nothing else in the value is trusted. An unreadable dispatch has no ceiling and no generation id, so it is treated as an unbounded hold that can never be priced (§ Ceilings, § Reconciliation): `pendingSpend` lists it, `restore()` holds it and `spend_pending` flags it `{ id, unreadable: true, unbounded: true }`, it adds nothing to `heldCost` or `until.maxCost`, and reconciliation leaves it held. It leaves storage only through `writeOffSpend`, which deletes it and charges the assumed cost like any write-off. One that names no execution may be any execution's: it is listed, held, and flagged with every execution, and a write-off charges the context it was last held on.
 
 Records live under `spend:<id>`, outside the `execution:<id>:` prefix, so `clearCheckpoint`, an abandoned session turn, and every other discard leave them alone. A record leaves storage only when it is settled or written off. Evidence of spend is never discarded with the run that made it.
 
@@ -237,7 +252,7 @@ A prompt longer than the context is refused or trimmed by the provider, so the c
 
 Prices come from the provider's model metadata (`GET /models/{author}/{slug}`), looked up once per model per harness and only when something is held, so a healthy call makes no extra request. Each price is the dearest the model publishes under any condition: the prompt price is the highest of the prompt and cache-write prices, the completion price the highest of the completion and reasoning prices, each across the base pricing and every override (long-context and time-of-day tiers).
 
-The ceiling does not cover fees outside these prices: per-image prices above the media allowance, server-tool fees (web search, and the fetched content a server tool adds to the prompt), or a fallback provider that charges more than the model's published price or allows more output than its top provider. A record with no output cap anywhere, or a model with no published price, has no ceiling: it is flagged `unbounded: true` on `spend_pending`, listed by `pendingSpend`, and adds nothing to `heldCost`. Set `params.maxTokens` on paid steps to keep every ceiling finite.
+The ceiling does not cover fees outside these prices: per-image prices above the media allowance, server-tool fees (web search, and the fetched content a server tool adds to the prompt), or a fallback provider that charges more than the model's published price or allows more output than its top provider. A record with no output cap anywhere, or a model with no published price, has no ceiling: it is flagged `unbounded: true` on `spend_pending`, listed by `pendingSpend`, and adds nothing to `heldCost`, so `until.maxCost` cannot see it either. A host with a budget that sees an unbounded or unreadable dispatch holds the rest of its allowance itself, or writes the dispatch off at an amount it asserts. Set `params.maxTokens` on paid steps to keep every ceiling finite.
 
 ### Reconciliation
 
@@ -259,9 +274,9 @@ interface SpendSettlement {
 }
 ```
 
-- `pendingSpend` lists unsettled dispatches, all of them or one execution's, each with its ceiling.
+- `pendingSpend` lists unsettled dispatches, all of them or one execution's, each with its ceiling, and every unreadable dispatch (§ The record).
 - `reconcileSpend` prices each pending dispatch that has a generation id through the provider's generation lookup (`GET /generation?id=`). The lookup answers 404 until the provider has priced the call — 7 to 32 seconds in practice — so it polls, backing off from 1 s to 10 s, for up to `patienceMs` (default 60 s). A priced call, cancelled or not, settles at the provider's `total_cost`. A dispatch with no id cannot be priced: it stays held until written off. A call already being looked up is joined, not looked up twice. The poll timers do not keep a host process alive.
-- `writeOffSpend` settles one pending dispatch at an amount the host asserts, for a call that can never be priced.
+- `writeOffSpend` settles one pending dispatch at an amount the host asserts, for a call that can never be priced. It is the only way an unreadable dispatch is settled.
 
 Reconciliation runs on its own: after `restore()` for the restored execution, and for each dispatch the moment it is left pending — which covers `cancel(ctx)`, rounds a graceful stop cuts off at its deadline (`08-runtime` § Graceful Stop; `drain_finished.cutOff` names each by `dispatchId` and `generationId`), steers, and errors. A host can call `reconcileSpend()` again at any time, for example at boot for every execution.
 
@@ -287,7 +302,7 @@ Until settled, a pending dispatch is **held** at its ceiling:
 
 | Event | When | Data |
 |---|---|---|
-| `{name}:spend_pending` | A dispatch is left pending, or `restore()` finds one | `{ id, kind, model, generationId?, ceiling?, unbounded? }` |
+| `{name}:spend_pending` | A dispatch is left pending, or `restore()` finds one | `{ id, kind, model, generationId?, ceiling?, unbounded? }`, or `{ id, unreadable: true, unbounded: true }` for an unreadable dispatch |
 | `{name}:spend_settled` | A pending dispatch is settled or written off | `{ id, cost, writtenOff? }` |
 
 Both go to the broadcaster of the dispatch's root context, else its thread's session.
@@ -480,7 +495,7 @@ Both root defaults respect `NOETIC_HOME` (if set, the roots become `$NOETIC_HOME
 **What durable execution does not guarantee:**
 
 - **LLM mid-stream.** A round cut off mid-stream is asked again on resume; the rounds before it replay. Its first bill is settled from its dispatch record, not lost.
-- **Prices for every cut-off call.** A call cut off before any response byte, and a native `decide()` cut off mid-request, can only be bounded, never priced: they stay held until written off.
+- **Prices for every cut-off call.** A call cut off before any response byte has no generation id, so it can only be bounded, never priced: it stays held until written off.
 - **Tools interrupted mid-round.** A tool running when the host died runs again on resume. Tools in recorded rounds do not.
 - **Non-idempotent `runCode` bodies.** A crash between a step's side effect and its ledger append re-runs the step body, whose side effects already landed. The framework cannot make arbitrary user code idempotent; use stable step ids and idempotent bodies where durability matters.
 - **Third-party state outside the framework.** If a `runCode` mutates an external database, the database's state is not part of the snapshot. Callers that need cross-system consistency must integrate with their database's own transaction / idempotency primitives.

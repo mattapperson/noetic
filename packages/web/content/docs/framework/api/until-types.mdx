@@ -89,7 +89,7 @@ const stop: Until = until.maxSteps(10);
 
 ### until.maxCost(usd)
 
-Stops when accumulated cost plus `heldCost` reaches the USD limit, with reason `Cost $<cost> exceeded budget $<usd>` (both to two decimals, e.g. `Cost $1.02 exceeded budget $1.00`). Counting the hold keeps a resumed run from spending what its cut-off attempt may already have spent.
+Stops when accumulated cost plus `heldCost` reaches the USD limit, with reason `Cost $<cost> exceeded budget $<usd>` (both to two decimals, e.g. `Cost $1.02 exceeded budget $1.00`). Counting the hold keeps a resumed run from spending what its cut-off attempt may already have spent. A cut-off call with no ceiling — an unbounded or unreadable dispatch — adds nothing to `heldCost`, so this predicate cannot see it.
 
 ```ts
 const stop: Until = until.maxCost(1.0);

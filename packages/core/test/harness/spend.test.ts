@@ -6,7 +6,13 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import type { StorageAdapter } from '@noetic-tools/context';
-import type { Context, ContextData, PendingSpend, StreamEvent } from '@noetic-tools/types';
+import type {
+  Context,
+  ContextData,
+  PendingDispatch,
+  PendingSpend,
+  StreamEvent,
+} from '@noetic-tools/types';
 import { estimateTokens, frameworkCast, recordUsage } from '@noetic-tools/types';
 import { z } from 'zod';
 import { inParallel } from '../../src/builders/control-flow-builders';
@@ -15,8 +21,8 @@ import { loop } from '../../src/builders/loop-builder';
 import { callModel, runCode } from '../../src/builders/step-builders';
 import { tool } from '../../src/builders/tool-builder';
 import { AgentHarness } from '../../src/harness/agent-harness';
-import type { DispatchRecord } from '../../src/runtime/durable/spend-log';
-import { createSpendLog } from '../../src/runtime/durable/spend-log';
+import type { DispatchRecord, SpendRecord } from '../../src/runtime/durable/spend-log';
+import { createSpendLog, isUnreadable } from '../../src/runtime/durable/spend-log';
 import { createInMemoryStorage } from '../../src/runtime/in-memory-storage';
 import { until } from '../../src/until/predicates';
 import type { FakeOpenRouter } from '../_helpers';
@@ -213,9 +219,17 @@ async function waitFor<T>(read: () => T | Promise<T>, done: (value: T) => boolea
 }
 
 /** A harness that sees another harness's records as pending: it knows none are live. */
-function pendingSeenBy(storage: StorageAdapter): () => Promise<PendingSpend[]> {
+function pendingSeenBy(storage: StorageAdapter): () => Promise<PendingDispatch[]> {
   const observer = harnessOver(storage);
-  return () => observer.pendingSpend();
+  return async () => readable(await observer.pendingSpend());
+}
+
+/** Pending dispatches, failing the test if any record is unreadable. */
+function readable(pending: PendingSpend[]): PendingDispatch[] {
+  return pending.map((p) => {
+    assert(!p.unreadable, `dispatch ${p.id} is unreadable`);
+    return p;
+  });
 }
 
 function record(over: Partial<DispatchRecord>): DispatchRecord {
@@ -252,7 +266,7 @@ describe('paid dispatch records', () => {
     const server = startServer();
     const storage = createInMemoryStorage();
     const log = createSpendLog(storage);
-    const seen: Promise<DispatchRecord[]>[] = [];
+    const seen: Promise<SpendRecord[]>[] = [];
     const harness = harnessOver(storage, server);
     const ctx = harness.createContext();
     const wrapped = callModel<ContextData, string, string>({
@@ -280,8 +294,10 @@ describe('paid dispatch records', () => {
       path: '/agent#0/round#0',
       maxOutputTokens: 300,
     });
-    expect(atSend?.[0]?.requestHash).not.toBe('');
-    expect(atSend?.[0]?.inputTokens).toBeGreaterThan(0);
+    const sent = atSend?.[0];
+    assert(sent && !isUnreadable(sent));
+    expect(sent.requestHash).not.toBe('');
+    expect(sent.inputTokens).toBeGreaterThan(0);
     expect(await log.list()).toEqual([]);
     expect(ctx.cost).toBeCloseTo(ROUND_COST);
   });
@@ -301,7 +317,7 @@ describe('paid dispatch records', () => {
       output: z.string(),
       execute: async () => 'none',
     });
-    const seen: Promise<DispatchRecord[]>[] = [];
+    const seen: Promise<SpendRecord[]>[] = [];
     const original = server.rounds.push.bind(server.rounds);
     server.rounds.push = (...items) => {
       seen.push(log.list());
@@ -321,7 +337,9 @@ describe('paid dispatch records', () => {
     );
 
     const [atSend] = await Promise.all(seen);
-    expect(atSend?.[0]?.inputTokens).toBeGreaterThan(new TextEncoder().encode(guide).length);
+    const sent = atSend?.[0];
+    assert(sent && !isUnreadable(sent));
+    expect(sent.inputTokens).toBeGreaterThan(new TextEncoder().encode(guide).length);
   });
 
   it('records nothing without durable storage', async () => {
@@ -423,7 +441,7 @@ describe('a host killed mid-call', () => {
       }),
     );
     assert(restored);
-    const [held] = await second.pendingSpend(ctx.id);
+    const [held] = readable(await second.pendingSpend(ctx.id));
     assert(held?.ceiling !== undefined);
     expect(held.ceiling).toBeCloseTo(
       PROMPT_PRICE * held.inputTokens + COMPLETION_PRICE * MAX_COMPLETION,
@@ -494,7 +512,7 @@ describe('a host killed mid-call', () => {
 
     const second = harnessOver(storage);
     useFakeSdk(second);
-    const [held] = await second.pendingSpend(ctx.id);
+    const [held] = readable(await second.pendingSpend(ctx.id));
     assert(held?.ceiling !== undefined);
     // A paid run billed 1213 prompt tokens for a decide() call Noetic estimated at
     // 881 (chars / 4).
@@ -705,7 +723,7 @@ describe('a graceful stop past its deadline', () => {
     });
     await run;
     const pending = await waitFor(
-      () => harness.pendingSpend(ctx.id),
+      async () => readable(await harness.pendingSpend(ctx.id)),
       (list) => list.length === 2,
     );
 
@@ -875,9 +893,139 @@ describe('held spend and budgets', () => {
     const harness = harnessOver(storage);
     await createSpendLog(storage).put(record({}));
 
-    const [pending] = await harness.pendingSpend();
+    const [pending] = readable(await harness.pendingSpend());
 
     expect(pending?.ceiling).toBeUndefined();
+  });
+});
+
+describe('an unreadable dispatch record', () => {
+  it('stays pending, unpriced, until written off at the assumed cost', async () => {
+    const storage = createInMemoryStorage();
+    const harness = harnessOver(storage);
+    useFakeSdk(harness);
+    await storage.set('spend:x', 'garbage');
+
+    expect(await harness.pendingSpend()).toEqual([
+      {
+        id: 'x',
+        unreadable: true,
+      },
+    ]);
+    // It names no execution, so it may be any execution's.
+    expect(await harness.pendingSpend('exec-1')).toHaveLength(1);
+    expect(
+      await harness.reconcileSpend({
+        patienceMs: 0,
+      }),
+    ).toEqual([]);
+    expect(await harness.pendingSpend()).toHaveLength(1);
+
+    const settlement = await harness.writeOffSpend('x', {
+      assumedCost: 0.25,
+    });
+
+    expect(settlement).toEqual({
+      id: 'x',
+      cost: 0.25,
+      inputTokens: 0,
+      outputTokens: 0,
+      writtenOff: true,
+    });
+    expect(await storage.list('spend:')).toEqual([]);
+    expect(await harness.pendingSpend()).toEqual([]);
+  });
+
+  it('is flagged on restore, holds nothing, and charges its write-off to the run', async () => {
+    const storage = createInMemoryStorage();
+    const first = harnessOver(storage);
+    const original = first.createContext();
+    await first.checkpoint(original);
+    // Torn mid-write: the owner survived, the model and size did not.
+    await storage.set('spend:torn', {
+      id: 'torn',
+      executionId: original.id,
+      kind: 'model',
+    });
+    const harness = harnessOver(storage);
+    useFakeSdk(harness);
+    const events: StreamEvent[] = [];
+
+    const ctx = await harness.restore(
+      original.id,
+      frameworkCast({
+        _broadcaster: {
+          emit: (event: StreamEvent) => events.push(event),
+        },
+      }),
+    );
+
+    assert(ctx);
+    expect(await harness.pendingSpend(original.id)).toEqual([
+      {
+        id: 'torn',
+        unreadable: true,
+        executionId: original.id,
+      },
+    ]);
+    expect(await harness.pendingSpend('another')).toEqual([]);
+    // No ceiling, as for an unbounded dispatch: the host decides how much to hold.
+    expect(ctx.heldCost).toBe(0);
+    expect(events.find((event) => event.type === 'spend:spend_pending')?.data).toEqual({
+      id: 'torn',
+      unreadable: true,
+      unbounded: true,
+    });
+
+    await harness.writeOffSpend('torn', {
+      assumedCost: 0.3,
+    });
+
+    expect(ctx.cost).toBeCloseTo(0.3);
+    expect(ctx.billedCost).toBeCloseTo(0.3);
+    expect(await harness.pendingSpend()).toEqual([]);
+  });
+  it('is held at its ceiling once it reads again', async () => {
+    const storage = createInMemoryStorage();
+    let torn = true;
+    // A store whose writes are not atomic: a read mid-write sees half a record.
+    const tearing: StorageAdapter = {
+      ...storage,
+      getMany: undefined,
+      get: async <T>(key: string) =>
+        key === 'spend:x' && torn ? frameworkCast<T>('{"id":"x"') : storage.get<T>(key),
+    };
+    await createSpendLog(storage).put(
+      record({
+        id: 'x',
+        threadId: 't',
+      }),
+    );
+    const harness = harnessOver(tearing);
+    useFakeSdk(harness);
+
+    await harness.reconcileSpend({
+      patienceMs: 0,
+    });
+    expect(
+      harness.getUsage({
+        threadId: 't',
+      }).heldCost ?? 0,
+    ).toBe(0);
+    torn = false;
+    await harness.reconcileSpend({
+      patienceMs: 0,
+    });
+
+    expect(
+      harness.getUsage({
+        threadId: 't',
+      }).heldCost,
+    ).toBeCloseTo(RECORD_CEILING);
+    const settlement = await harness.writeOffSpend('x', {
+      assumedCost: 0.2,
+    });
+    expect(settlement?.threadId).toBe('t');
   });
 });
 
@@ -1001,7 +1149,7 @@ describe('a provider that refuses the call', () => {
     await harness.cancel(ctx);
     await run;
 
-    const [pending] = await harness.pendingSpend();
+    const [pending] = readable(await harness.pendingSpend());
     expect(pending?.generationId).toBe('gen-stream');
     expect(headers[0]).toEqual({
       'x-noetic-dispatch': pending?.id,

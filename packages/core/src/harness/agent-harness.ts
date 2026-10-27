@@ -1765,8 +1765,9 @@ export class AgentHarness<
   /**
    * Paid provider calls with no settled bill — cut off by a crash, a cancel, a steer,
    * or a dropped connection — all of them or one execution's, each with its ceiling.
-   * A call still in flight in this harness is not listed. Empty without durable
-   * storage. See spec 23 § Paid dispatches.
+   * A record that no longer reads is listed as `unreadable`, with no ceiling, until
+   * written off. A call still in flight in this harness is not listed. Empty without
+   * durable storage. See spec 23 § Paid dispatches.
    * @public
    */
   async pendingSpend(executionId?: string): Promise<PendingSpend[]> {
@@ -1786,8 +1787,8 @@ export class AgentHarness<
   }
 
   /**
-   * Settle one pending dispatch at `assumedCost`, for a call that can never be priced.
-   * Resolves `undefined` when no pending dispatch has that id.
+   * Settle one pending dispatch at `assumedCost`, for a call that can never be priced,
+   * unreadable ones included. Resolves `undefined` when no pending dispatch has that id.
    * @public
    */
   async writeOffSpend(

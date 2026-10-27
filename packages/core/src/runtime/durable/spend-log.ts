@@ -8,6 +8,7 @@
 
 import type { StorageAdapter } from '@noetic-tools/context';
 import { storageGetMany } from '@noetic-tools/context';
+import type { UnreadableDispatch } from '@noetic-tools/types';
 import { z } from 'zod';
 
 //#region Schema
@@ -35,6 +36,19 @@ export const DispatchRecordSchema = z.object({
 /** @internal */
 export type DispatchRecord = z.infer<typeof DispatchRecordSchema>;
 
+/**
+ * @internal
+ * What a `spend:<id>` key holds: a record, or a value that does not read as one. An
+ * unreadable value is still evidence that a paid call was sent, so it is kept and
+ * reported rather than skipped.
+ */
+export type SpendRecord = DispatchRecord | UnreadableDispatch;
+
+/** @internal */
+export function isUnreadable(record: SpendRecord): record is UnreadableDispatch {
+  return 'unreadable' in record;
+}
+
 //#endregion
 
 //#region Store
@@ -42,10 +56,10 @@ export type DispatchRecord = z.infer<typeof DispatchRecordSchema>;
 /** @internal */
 export interface SpendLog {
   put(record: DispatchRecord): Promise<void>;
-  get(id: string): Promise<DispatchRecord | undefined>;
+  get(id: string): Promise<SpendRecord | undefined>;
   remove(id: string): Promise<void>;
-  /** Every record, oldest first. Unreadable rows are skipped. */
-  list(): Promise<DispatchRecord[]>;
+  /** Every record: unreadable ones first, since their age is unknown, then oldest first. */
+  list(): Promise<SpendRecord[]>;
 }
 
 /** @internal */
@@ -54,37 +68,108 @@ export function createSpendLog(storage: StorageAdapter): SpendLog {
     put: async (record) => {
       await storage.set(keyOf(record.id), record);
     },
-    get: async (id) => parse(await storage.get<unknown>(keyOf(id))),
+    get: async (id) => {
+      const key = keyOf(id);
+      const raw = await storage.get<unknown>(key);
+      if (!isNothing(raw)) {
+        return parse(id, raw);
+      }
+      return (await storage.list(key)).includes(key) ? unreadable(id) : undefined;
+    },
     remove: async (id) => {
       await storage.delete(keyOf(id));
     },
     list: async () => {
       const keys = await storage.list(SPEND_PREFIX);
       const raws = await storageGetMany<unknown>(storage, keys);
+      const damaged: UnreadableDispatch[] = [];
       const records: DispatchRecord[] = [];
       for (const [key, raw] of raws) {
-        const record = parse(raw);
-        if (!record) {
-          console.warn(`SpendLog: skipping unreadable dispatch record "${key}"`);
+        if (isNothing(raw)) {
           continue;
         }
-        records.push(record);
+        const record = parse(key.slice(SPEND_PREFIX.length), raw);
+        if (isUnreadable(record)) {
+          damaged.push(record);
+        } else {
+          records.push(record);
+        }
       }
-      return records.sort((a, b) => a.sentAt.localeCompare(b.sentAt));
+      for (const key of await stillListed(keys.filter((key) => isNothing(raws.get(key))))) {
+        damaged.push(unreadable(key.slice(SPEND_PREFIX.length)));
+      }
+      return [
+        ...damaged,
+        ...records.sort((a, b) => a.sentAt.localeCompare(b.sentAt)),
+      ];
     },
   };
+
+  /**
+   * Of keys that listed but read as nothing, the ones that still list. A store may
+   * read a value it cannot parse as nothing (`createFileStorage` does), and that value
+   * is damaged, not gone; a key settled since it was listed no longer lists.
+   */
+  async function stillListed(missing: string[]): Promise<string[]> {
+    if (missing.length === 0) {
+      return [];
+    }
+    const listed = new Set(await storage.list(SPEND_PREFIX));
+    return missing.filter((key) => listed.has(key));
+  }
 }
 
 function keyOf(id: string): string {
   return `${SPEND_PREFIX}${id}`;
 }
 
-function parse(raw: unknown): DispatchRecord | undefined {
-  if (raw === null || raw === undefined) {
-    return undefined;
-  }
-  const parsed = DispatchRecordSchema.safeParse(raw);
-  return parsed.success ? parsed.data : undefined;
+function isNothing(raw: unknown): raw is null | undefined {
+  return raw === null || raw === undefined;
 }
+
+function parse(id: string, raw: unknown): SpendRecord {
+  const parsed = DispatchRecordSchema.safeParse(raw);
+  return parsed.success ? parsed.data : unreadable(id, owner(raw));
+}
+
+function unreadable(
+  id: string,
+  named: Pick<UnreadableDispatch, 'executionId' | 'threadId'> = {},
+): UnreadableDispatch {
+  return {
+    id,
+    unreadable: true,
+    ...named,
+  };
+}
+
+/**
+ * The execution and thread a damaged record still names, so its write-off is charged
+ * where its call ran. Any other field is not trusted.
+ */
+function owner(raw: unknown): Pick<UnreadableDispatch, 'executionId' | 'threadId'> {
+  const parsed = OwnerSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {};
+  }
+  const { executionId, threadId } = parsed.data;
+  return {
+    ...(executionId !== undefined
+      ? {
+          executionId,
+        }
+      : {}),
+    ...(threadId !== undefined
+      ? {
+          threadId,
+        }
+      : {}),
+  };
+}
+
+const OwnerSchema = z.object({
+  executionId: z.string().min(1).optional().catch(undefined),
+  threadId: z.string().min(1).optional().catch(undefined),
+});
 
 //#endregion
