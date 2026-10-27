@@ -111,9 +111,12 @@ import type {
   DeclaredItems,
   DeliveryMode,
   DetachedHandle,
+  DrainReport,
   ExecuteInput,
   ExecuteOptions,
   ExecutionContext,
+  ExecutionScope,
+  ExecutionStatus,
   ExternalChannel,
   FsAdapter,
   HarnessResponse,
@@ -597,6 +600,8 @@ export class AgentHarness<
     {
       ctx: Context;
       depth: number;
+      /** Epoch ms the outermost run began. */
+      startedAt: number;
       /** Whether any run on this root threw, so the run's start stays the resume point. */
       failed: boolean;
       /** Settles once the outermost run has rebuilt the context and fixed its start. */
@@ -860,17 +865,17 @@ export class AgentHarness<
     return session.runner.broadcaster;
   }
 
-  async abort(scope?: SessionScope & CancelOptions): Promise<void> {
+  async abort(scope?: SessionScope & CancelOptions): Promise<DrainReport | undefined> {
     const threadId = scope?.threadId ?? DEFAULT_THREAD_ID;
     const session = this.sessions.get(threadId);
     if (!session) {
-      return;
+      return undefined;
     }
     const { runner } = session;
     const ctx = runner.context;
     if (!ctx) {
       await runner.abort(scope?.reason);
-      return;
+      return undefined;
     }
     const draining = this.drains.stop(ctx);
     if (draining) {
@@ -878,7 +883,7 @@ export class AgentHarness<
     }
     if (!scope?.drainMs) {
       await runner.abort(scope?.reason);
-      return;
+      return undefined;
     }
     // The drained turn may end on its own; then the runner has moved on and
     // there is nothing left to abort.
@@ -889,7 +894,12 @@ export class AgentHarness<
     });
   }
 
-  getStatus(scope?: SessionScope): HarnessStatus {
+  getStatus(scope: ExecutionScope): ExecutionStatus;
+  getStatus(scope?: SessionScope): HarnessStatus;
+  getStatus(scope?: SessionScope | ExecutionScope): HarnessStatus | ExecutionStatus {
+    if (scope && 'executionId' in scope) {
+      return this.executionStatus(scope.executionId);
+    }
     const threadId = scope?.threadId ?? DEFAULT_THREAD_ID;
     const session = this.sessions.get(threadId);
     if (!session) {
@@ -907,6 +917,35 @@ export class AgentHarness<
       kind: 'draining',
       turnId: status.turnId,
       deadline: drain.deadline,
+    };
+  }
+
+  /**
+   * A `run()` execution's state, read from its live root context. Only a root
+   * context's outermost run registers, so a context nothing runs on reads idle.
+   */
+  private executionStatus(executionId: string): ExecutionStatus {
+    const live = this.liveRoots.get(executionId);
+    if (!live) {
+      return {
+        kind: 'idle',
+      };
+    }
+    if (live.ctx.aborted) {
+      return {
+        kind: 'aborting',
+      };
+    }
+    const drain = this.drains.covering(live.ctx);
+    if (drain) {
+      return {
+        kind: 'draining',
+        deadline: drain.deadline,
+      };
+    }
+    return {
+      kind: 'generating',
+      startedAt: live.startedAt,
     };
   }
 
@@ -1212,6 +1251,7 @@ export class AgentHarness<
     const entry = live ?? {
       ctx,
       depth: 0,
+      startedAt: Date.now(),
       failed: false,
       ready: Promise.resolve(),
     };
@@ -1846,8 +1886,10 @@ export class AgentHarness<
    * `ctx`, model calls in flight get up to `drainMs` to finish and be charged,
    * and `{name}:drain_started` / `{name}:drain_finished` report which finished
    * and which were cut off. A second `cancel` during the drain cancels at once.
+   * Either call resolves with the drain's report, the same data as
+   * `drain_finished`; a cancel with no drain resolves `undefined`.
    */
-  async cancel(ctx: Context, options?: string | CancelOptions): Promise<void> {
+  async cancel(ctx: Context, options?: string | CancelOptions): Promise<DrainReport | undefined> {
     const { reason, drainMs }: CancelOptions =
       typeof options === 'string'
         ? {
@@ -1859,12 +1901,13 @@ export class AgentHarness<
       return draining;
     }
     if (ctx.aborted) {
-      return;
+      return undefined;
     }
     if (drainMs) {
       return this.drains.run(ctx, drainMs, () => this.cancelNow(ctx, reason));
     }
     await this.cancelNow(ctx, reason);
+    return undefined;
   }
 
   /** Abort `ctx`'s tree and tear its layers down. The abort happens before the first `await`. */

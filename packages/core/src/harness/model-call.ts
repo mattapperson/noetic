@@ -654,8 +654,9 @@ export class AgentHarnessModelCaller {
       model: request.model,
       round: 0,
     });
+    let response: LLMResponse | undefined;
     try {
-      const response = await this.opts.callModelOverride(request);
+      response = await this.opts.callModelOverride(request);
       const itemSchemas = buildItemSchemaRegistry({
         base: this.opts.itemSchemas,
         layers: request.layers,
@@ -667,7 +668,12 @@ export class AgentHarnessModelCaller {
         items: itemSchemas.parseMany(response.items),
       };
     } finally {
-      finished?.();
+      finished?.(
+        response && {
+          cost: response.cost ?? 0,
+          usage: response.usage,
+        },
+      );
       await spans.flush();
     }
   }
@@ -963,7 +969,12 @@ export class AgentHarnessModelCaller {
       } finally {
         watchdog.stop();
         dispatch?.end();
-        roundFinished?.();
+        roundFinished?.(
+          sdkResponse && {
+            cost: sdkResponse.usage?.cost ?? 0,
+            usage: extractUsage(sdkResponse.usage),
+          },
+        );
       }
       if (request.signal?.aborted) {
         // A bill that arrived before the abort is counted here: its record is gone.

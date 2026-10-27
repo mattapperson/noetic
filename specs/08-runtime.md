@@ -297,10 +297,11 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
   getFullStream(scope?: SessionScope): AsyncIterable<StreamEvent>;
 
   // Cancel the in-flight turn. Queued messages are preserved. With `drainMs`
-  // the turn drains first (see Graceful Stop).
-  abort(scope?: SessionScope & CancelOptions): Promise<void>;
+  // the turn drains first and resolves with the drain's report (see Graceful Stop).
+  abort(scope?: SessionScope & CancelOptions): Promise<DrainReport | undefined>;
 
-  // Session observability.
+  // Observability: a `run()` execution by its root context's id, or a session.
+  getStatus(scope: ExecutionScope): ExecutionStatus;
   getStatus(scope?: SessionScope): HarnessStatus;
   getQueueSize(scope?: SessionScope): number;
 
@@ -398,8 +399,9 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
   // Settle a call that can never be priced at an amount the host asserts.
   writeOffSpend(id: string, opts: { assumedCost: number }): Promise<SpendSettlement | undefined>;
 
-  // Lifecycle. A string is the reason alone; `{ drainMs }` drains first (see Graceful Stop).
-  cancel(ctx: Context, options?: string | CancelOptions): Promise<void>;
+  // Lifecycle. A string is the reason alone; `{ drainMs }` drains first and
+  // resolves with the drain's report (see Graceful Stop).
+  cancel(ctx: Context, options?: string | CancelOptions): Promise<DrainReport | undefined>;
 
   // Observability (see 10-observability)
   createSpan(name: string, parent: Span | null): Span;
@@ -526,9 +528,13 @@ With durability on, a steer sent into a running turn is kept in the thread's ses
 2. **In-flight model calls finish, up to `drainMs`.** A `callModel` round or `decide` call counts as in flight from dispatch until its caller next reaches a step boundary, round or tool call, or its step ends. So a finished call is charged to the context and, when it was a step's last, the step is recorded in the ledger before anything is cancelled.
 3. **Then it cancels as without `drainMs`.** The drain ends as soon as nothing is in flight (`settled`), at the deadline (`deadline`), or when the tree is stopped another way (`stopped`). Held steps then throw `cancelled`. Calls still running are cut off through the same abort path a plain cancel uses: with durable storage, each keeps its dispatch record pending, with its generation id when its response headers arrived, and is priced in the background like any other cut-off call (`23-durable-execution` § Paid dispatches).
 
-A second `cancel` or `abort` on the drained context during the drain stops it at once. The drained session reports `{ kind: 'draining', turnId, deadline }` from `getStatus()` until the cancel begins.
+A second `cancel` or `abort` on the drained context during the drain stops it at once. The drained session reports `{ kind: 'draining', turnId, deadline }` from `getStatus()` until the cancel begins. A drained `run()` execution reports `{ kind: 'draining', deadline }` from `getStatus({ executionId })`, then `aborting` until its run returns; between runs it reads `idle`, and while a run is in flight, `generating`. Only a root context's outermost `run()` counts as an execution: a child context has no status of its own.
 
-Two framework events report the drain on the context's broadcaster. Each call in them is `{ kind: 'model_round' | 'decide', model, executionId, round?, dispatchId?, generationId? }`, where `executionId` is the id of the context that made it. A model round carries `dispatchId`, its dispatch record's id, when the harness keeps records, and `generationId` once its response headers arrived, so a host can match each `cutOff` call to its entry in `pendingSpend()`.
+Both stops resolve with the drain's **report**, once the cancel that follows it is done: `{ executionId, reason, durationMs, finished, cutOff }`, the data of `drain_finished`. A second stop that cuts the drain short resolves with the same report. A stop with no drain, whether plain or on a context already cancelled, resolves `undefined`.
+
+Each call in a report is a `DrainCall`: `{ kind: 'model_round' | 'decide', model, executionId, round?, dispatchId?, generationId?, cost?, usage? }`, where `executionId` is the id of the context that made it. A model round carries `dispatchId`, its dispatch record's id, when the harness keeps records, and `generationId` once its response headers arrived, so a host can match each `cutOff` call to its entry in `pendingSpend()`. A `finished` call that returned a bill carries its `cost` (USD) and `usage` (`RoundUsage`), as charged to its context, so a host can account a drained call the way it accounts a returned one, even when the drained step ended `cancelled` and never published `lastStepMeta`. A call that failed, or whose stream a steer cut, has neither.
+
+Two framework events report the drain on the context's broadcaster:
 
 | Event | Data |
 |-------|------|
@@ -640,10 +646,39 @@ type HarnessStatus =
   | { readonly kind: 'draining'; readonly turnId: string; readonly deadline: number }
   | { readonly kind: 'aborting'; readonly turnId: string };
 
+interface ExecutionScope {
+  executionId: string;   // a root context's id
+}
+
+type ExecutionStatus =
+  | { readonly kind: 'idle' }
+  | { readonly kind: 'generating'; readonly startedAt: number }
+  | { readonly kind: 'draining'; readonly deadline: number }
+  | { readonly kind: 'aborting' };
+
 interface CancelOptions {
   readonly reason?: string;
   /** Drain for up to this many ms before cancelling (see Graceful Stop). */
   readonly drainMs?: number;
+}
+
+interface DrainCall {
+  readonly kind: 'model_round' | 'decide';
+  readonly model: string;
+  readonly executionId: string;
+  readonly round?: number;
+  readonly dispatchId?: string;
+  readonly generationId?: string;
+  readonly cost?: number;       // finished calls with a bill, as charged
+  readonly usage?: RoundUsage;  // set exactly when `cost` is
+}
+
+interface DrainReport {
+  readonly executionId: string;
+  readonly reason: 'settled' | 'deadline' | 'stopped';
+  readonly durationMs: number;
+  readonly finished: ReadonlyArray<DrainCall>;
+  readonly cutOff: ReadonlyArray<DrainCall>;
 }
 
 type DeliveryMode = 'next-turn' | 'between-rounds' | 'next-item' | 'interrupt';

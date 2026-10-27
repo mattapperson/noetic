@@ -1,22 +1,8 @@
-import type { Context } from '@noetic-tools/types';
+import type { Context, DrainCall, DrainReport, RoundUsage } from '@noetic-tools/types';
 import { emitFrameworkEvent, getBroadcaster } from './broadcaster-utils';
 import { ContextImpl } from './context-impl';
 
 //#region Types
-
-/** @internal A provider call as a drain reports it in `drain_started` / `drain_finished`. */
-export interface DrainCall {
-  readonly kind: 'model_round' | 'decide';
-  readonly model: string;
-  /** Id of the context that made the call. */
-  readonly executionId: string;
-  /** The round within its `callModel`, for model rounds. */
-  readonly round?: number;
-  /** Id of the call's dispatch record, when the harness keeps them (spec 23). */
-  readonly dispatchId?: string;
-  /** The provider's id for the call, once its response headers arrived. */
-  readonly generationId?: string;
-}
 
 /**
  * @internal The dispatch record of a tracked call. Read when a drain reports, so a
@@ -27,16 +13,22 @@ export interface DrainRecord {
   readonly generationId?: string;
 }
 
-type DrainCallInfo = Omit<DrainCall, 'executionId' | 'dispatchId' | 'generationId'>;
+/** @internal What a finished call cost, as charged to its context. */
+export interface DrainBill {
+  readonly cost: number;
+  readonly usage: RoundUsage;
+}
 
-/** @internal Why a drain ended. */
-export type DrainEnd = 'settled' | 'deadline' | 'stopped';
+type DrainCallInfo = Pick<DrainCall, 'kind' | 'model' | 'round'>;
+
+type DrainEnd = DrainReport['reason'];
 
 interface Call {
   readonly info: DrainCallInfo;
   readonly ctx: Context;
   readonly record?: DrainRecord;
   done: boolean;
+  bill?: DrainBill;
 }
 
 interface Drain {
@@ -51,7 +43,7 @@ interface Drain {
   readonly over: Promise<void>;
   wake(): void;
   /** The whole drain, stop included; a second cancel waits on it. */
-  done?: Promise<void>;
+  done?: Promise<DrainReport>;
 }
 
 //#endregion
@@ -77,9 +69,13 @@ export class Drains {
 
   /**
    * Note a provider call about to be dispatched on `ctx` under `record`. Call the
-   * returned function once its response is in (or it failed).
+   * returned function once its response is in, with its bill, or once it failed.
    */
-  track(ctx: Context | undefined, info: DrainCallInfo, record?: DrainRecord): () => void {
+  track(
+    ctx: Context | undefined,
+    info: DrainCallInfo,
+    record?: DrainRecord,
+  ): (bill?: DrainBill) => void {
     if (!ctx) {
       return () => {};
     }
@@ -95,8 +91,9 @@ export class Drains {
         drain.calls.add(call);
       }
     }
-    return () => {
+    return (bill) => {
       call.done = true;
+      call.bill = bill;
       // Kept until a hold or step end releases it only while a drain may be
       // waiting on it; otherwise nothing will ever release it.
       if (this.active.size === 0) {
@@ -160,8 +157,9 @@ export class Drains {
   /**
    * Drain `ctx` for up to `ms`, then run `stop`, which must abort the tree
    * before its first `await`: held steps wake as soon as it is called.
+   * Resolves with the drain's report once the stop is done.
    */
-  run(ctx: Context, ms: number, stop: () => Promise<void>): Promise<void> {
+  run(ctx: Context, ms: number, stop: () => Promise<void>): Promise<DrainReport> {
     const drain = openDrain(ctx, ms);
     for (const call of this.calls) {
       if (within(call.ctx, ctx)) {
@@ -175,9 +173,9 @@ export class Drains {
 
   /**
    * Cut short the drain on `ctx`, if one is running, and return the promise
-   * of its stop. A second cancel cancels at once.
+   * of its report. A second cancel cancels at once.
    */
-  stop(ctx: Context): Promise<void> | undefined {
+  stop(ctx: Context): Promise<DrainReport> | undefined {
     for (const drain of this.active) {
       if (drain.root.id === ctx.id) {
         drain.end('stopped');
@@ -187,7 +185,7 @@ export class Drains {
     return undefined;
   }
 
-  private async finish(drain: Drain, stop: () => Promise<void>): Promise<void> {
+  private async finish(drain: Drain, stop: () => Promise<void>): Promise<DrainReport> {
     emit(drain.root, 'drain_started', {
       executionId: drain.root.id,
       deadline: drain.deadline,
@@ -208,16 +206,20 @@ export class Drains {
     const calls = [
       ...drain.calls,
     ];
-    emit(drain.root, 'drain_finished', {
+    const drained: DrainReport = {
       executionId: drain.root.id,
       reason,
       durationMs: Date.now() - drain.startedAt,
       finished: calls.filter((call) => call.done).map(report),
       cutOff: calls.filter((call) => !call.done).map(report),
+    };
+    emit(drain.root, 'drain_finished', {
+      ...drained,
     });
     const stopping = stop();
     drain.wake();
     await stopping;
+    return drained;
   }
 
   private settleIfIdle(drain: Drain): void {
@@ -280,7 +282,7 @@ function openDrain(root: Context, ms: number): Drain {
 }
 
 function report(call: Call): DrainCall {
-  const { record } = call;
+  const { record, bill } = call;
   return {
     ...call.info,
     executionId: call.ctx.id,
@@ -292,6 +294,12 @@ function report(call: Call): DrainCall {
     ...(record?.generationId
       ? {
           generationId: record.generationId,
+        }
+      : {}),
+    ...(bill
+      ? {
+          cost: bill.cost,
+          usage: bill.usage,
         }
       : {}),
   };

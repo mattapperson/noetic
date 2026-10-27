@@ -292,7 +292,7 @@ describe('cancel with drainMs', () => {
     await waitFor(() => client.started === 2);
     const startedAt = Date.now();
 
-    await harness.cancel(ctx, {
+    const report = await harness.cancel(ctx, {
       drainMs: 40,
     });
 
@@ -315,6 +315,9 @@ describe('cancel with drainMs', () => {
       ]),
     );
     expect(callsIn(finished, 'cutOff')).toHaveLength(2);
+    expect(finished).toEqual({
+      ...report,
+    });
   });
 
   it('cancels at once on a second cancel during the drain', async () => {
@@ -338,8 +341,8 @@ describe('cancel with drainMs', () => {
       drainMs: 60e3,
     });
     const startedAt = Date.now();
-    await harness.cancel(ctx, 'now');
-    await first;
+    const second = await harness.cancel(ctx, 'now');
+    const report = await first;
 
     expect(Date.now() - startedAt).toBeLessThan(2e3);
     expect(await cancelledError(run)).toBe('cancelled');
@@ -347,6 +350,197 @@ describe('cancel with drainMs', () => {
     const finished = eventData(events, 'drain_finished');
     expect(finished.reason).toBe('stopped');
     expect(callsIn(finished, 'cutOff')).toHaveLength(2);
+    expect(finished).toEqual({
+      ...second,
+    });
+    expect(report).toBe(second);
+  });
+
+  it('resolves with a report whose finished round carries the cost it was charged', async () => {
+    let toolRan = false;
+    const lookup = tool({
+      name: 'lookup',
+      description: 'lookup',
+      input: z.object({}),
+      output: z.object({}),
+      execute: async () => {
+        toolRan = true;
+        return {};
+      },
+    });
+    const client = new SlowClient({
+      'tools/model': 60,
+    });
+    const harness = makeHarness(client);
+    const events: EmittedEvent[] = [];
+    const ctx = watchedContext(harness, events);
+    // A tool loop: once its round returns, the drain holds it at its tool call,
+    // so the step ends cancelled and never publishes `lastStepMeta`.
+    const run = harness.run(
+      callModel({
+        id: 'agent',
+        model: 'tools/model',
+        instructions: 'use tools',
+        tools: [
+          lookup,
+        ],
+      }),
+      'go',
+      ctx,
+    );
+    await waitFor(() => client.started === 1);
+
+    const report = await harness.cancel(ctx, {
+      drainMs: 2e3,
+    });
+
+    expect(await cancelledError(run)).toBe('cancelled');
+    expect(toolRan).toBe(false);
+    expect(ctx.lastStepMeta).toBeNull();
+    assert(report);
+    expect(report.reason).toBe('settled');
+    expect(report.executionId).toBe(ctx.id);
+    expect(report.cutOff).toEqual([]);
+    expect(report.finished).toEqual([
+      {
+        kind: 'model_round',
+        model: 'tools/model',
+        executionId: ctx.id,
+        round: 0,
+        cost: 0.01,
+        usage: {
+          inputTokens: 10,
+          outputTokens: 5,
+        },
+      },
+    ]);
+    expect(report.finished[0]?.cost).toBe(ctx.cost);
+    expect(ctx.tokens.output).toBe(5);
+    expect(eventData(events, 'drain_finished')).toEqual({
+      ...report,
+    });
+  });
+
+  it('reports what a decide call that finished in the drain cost', async () => {
+    const harness = new AgentHarness({
+      name: 'drain',
+      params: {},
+      _testDecide: async (): Promise<DecideResponse> => {
+        await sleep(40);
+        return {
+          answers: {
+            urgent: {
+              type: 'boolean',
+              value: true,
+              probability: 0.9,
+            },
+          },
+          source: 'native',
+          modelId: 'typesafe/jev-1.14',
+          usage: {
+            inputTokens: 20,
+            outputTokens: 2,
+          },
+          cost: 0.003,
+        };
+      },
+    });
+    const events: EmittedEvent[] = [];
+    const ctx = watchedContext(harness, events);
+    const run = harness.run(
+      inTurn(harness, 'flow', [
+        decide({
+          id: 'triage',
+          model: 'typesafe/jev-1.14',
+          questions: {
+            urgent: {
+              type: 'boolean',
+              instructions: 'Is it urgent?',
+            },
+          },
+        }),
+        runCode({
+          id: 'after',
+          execute: async () => 'after',
+        }),
+      ]),
+      'help',
+      ctx,
+    );
+    await waitFor(() => events.length > 0);
+    await sleep(5);
+
+    const report = await harness.cancel(ctx, {
+      drainMs: 2e3,
+    });
+
+    expect(await cancelledError(run)).toBe('cancelled');
+    assert(report);
+    expect(report.finished).toEqual([
+      {
+        kind: 'decide',
+        model: 'typesafe/jev-1.14',
+        executionId: ctx.id,
+        cost: 0.003,
+        usage: {
+          inputTokens: 20,
+          outputTokens: 2,
+        },
+      },
+    ]);
+    expect(ctx.cost).toBeCloseTo(0.003);
+  });
+
+  it('resolves undefined when no drain ran', async () => {
+    const harness = makeHarness(new SlowClient({}));
+    const ctx = harness.createContext();
+
+    expect(await harness.cancel(ctx, 'now')).toBeUndefined();
+    expect(
+      await harness.cancel(ctx, {
+        drainMs: 1e3,
+      }),
+    ).toBeUndefined();
+  });
+
+  it("reports a run() execution's status while it runs, drains and stops", async () => {
+    const client = new SlowClient({
+      fast: 80,
+    });
+    const harness = makeHarness(client);
+    const ctx = harness.createContext();
+    const scope = {
+      executionId: ctx.id,
+    };
+    expect(harness.getStatus(scope)).toEqual({
+      kind: 'idle',
+    });
+    const run = harness.run(
+      inTurn(harness, 'flow', [
+        ask('first', 'fast'),
+        ask('second', 'fast'),
+      ]),
+      'go',
+      ctx,
+    );
+    await waitFor(() => client.started === 1);
+    expect(harness.getStatus(scope).kind).toBe('generating');
+
+    const stopping = harness.cancel(ctx, {
+      drainMs: 2e3,
+    });
+    const draining = harness.getStatus(scope);
+    assert(draining.kind === 'draining');
+    expect(draining.deadline).toBeGreaterThan(Date.now());
+    await stopping;
+    expect(harness.getStatus(scope).kind).toBe('aborting');
+
+    expect(await cancelledError(run)).toBe('cancelled');
+    expect(harness.getStatus(scope)).toEqual({
+      kind: 'idle',
+    });
+    // The session's default thread is a different scope and stays idle.
+    expect(harness.getStatus().kind).toBe('idle');
   });
 
   it('holds back the tool calls of a round that finished while another is in flight', async () => {
@@ -641,7 +835,16 @@ describe('abort with drainMs', () => {
 
     assert(status.kind === 'draining');
     expect(status.deadline).toBeGreaterThan(Date.now());
-    await stopping;
+    const report = await stopping;
+    assert(report);
+    expect(report.reason).toBe('settled');
+    expect(report.finished).toEqual([
+      expect.objectContaining({
+        kind: 'model_round',
+        model: 'fast',
+        cost: 0.01,
+      }),
+    ]);
     expect(harness.getStatus().kind).toBe('idle');
     expect(client.started).toBe(1);
     expect(client.aborted).toBe(0);

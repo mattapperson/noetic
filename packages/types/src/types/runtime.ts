@@ -1,6 +1,6 @@
 import type { StandardSchemaV1 } from '@standard-schema/spec';
 import type { Channel, ChannelHandle, ExternalChannel } from './channel';
-import type { LLMResponse, ModelParams, ServerToolSpec, ToolChoice } from './common';
+import type { LLMResponse, ModelParams, RoundUsage, ServerToolSpec, ToolChoice } from './common';
 import type { Context, CwdState, RestoreContextOptions } from './context';
 import type { ContextCacheConfig, ContextCacheStore } from './context-cache';
 import type {
@@ -225,6 +225,28 @@ export type HarnessStatus =
       readonly turnId: string;
     };
 
+/**
+ * @public Snapshot of a `run()` execution's state: `generating` while a run is
+ * in flight on its root context, `draining` during a graceful stop, `aborting`
+ * from the cancel until the run returns.
+ */
+export type ExecutionStatus =
+  | {
+      readonly kind: 'idle';
+    }
+  | {
+      readonly kind: 'generating';
+      readonly startedAt: number;
+    }
+  | {
+      readonly kind: 'draining';
+      /** Epoch ms at which whatever is still in flight is cancelled. */
+      readonly deadline: number;
+    }
+  | {
+      readonly kind: 'aborting';
+    };
+
 //#endregion
 
 //#region Cancel Options
@@ -240,6 +262,46 @@ export type HarnessStatus =
 export interface CancelOptions {
   readonly reason?: string;
   readonly drainMs?: number;
+}
+
+/** @public A provider call a graceful stop waited on. */
+export interface DrainCall {
+  readonly kind: 'model_round' | 'decide';
+  readonly model: string;
+  /** Id of the context that made the call. */
+  readonly executionId: string;
+  /** The round within its `callModel`, for model rounds. */
+  readonly round?: number;
+  /** Id of the call's dispatch record, when the harness keeps them, to match `pendingSpend()`. */
+  readonly dispatchId?: string;
+  /** The provider's id for the call, once its response headers arrived. */
+  readonly generationId?: string;
+  /**
+   * USD the call cost, as charged to its context. Set on finished calls that
+   * returned a bill; absent when the call failed or a steer cut its stream.
+   */
+  readonly cost?: number;
+  /** Tokens the call used, as charged to its context. Set exactly when `cost` is. */
+  readonly usage?: RoundUsage;
+}
+
+/**
+ * @public How a graceful stop went: what `cancel` and `abort` resolve with
+ * after a drain, and the data of `{name}:drain_finished`.
+ */
+export interface DrainReport {
+  /** Id of the drained context. */
+  readonly executionId: string;
+  /**
+   * `settled`: nothing was left in flight. `deadline`: `drainMs` ran out.
+   * `stopped`: a second stop, or an abort from elsewhere, cut it short.
+   */
+  readonly reason: 'settled' | 'deadline' | 'stopped';
+  readonly durationMs: number;
+  /** Calls that finished, each charged to its context. */
+  readonly finished: ReadonlyArray<DrainCall>;
+  /** Calls still running when the drain ended, cancelled with the tree. */
+  readonly cutOff: ReadonlyArray<DrainCall>;
 }
 
 //#endregion
@@ -278,6 +340,11 @@ export interface SessionUsage {
 /** @public Identifies which session the accessor targets. All methods fall back to the harness's default thread when omitted. */
 export interface SessionScope {
   threadId?: string;
+}
+
+/** @public Names a `run()` execution by the id of its root context. */
+export interface ExecutionScope {
+  executionId: string;
 }
 
 //#endregion
@@ -326,10 +393,13 @@ export interface AgentHarnessContract<
   /**
    * Cancel the in-flight turn, if any. Queued messages are preserved — the
    * runner re-kicks from the queue once abort completes. With `drainMs` the
-   * turn drains first (see `CancelOptions`) and reports `draining` status.
+   * turn drains first (see `CancelOptions`), reports `draining` status, and
+   * resolves with the drain's report. Resolves `undefined` when no drain ran.
    */
-  abort(scope?: SessionScope & CancelOptions): Promise<void>;
+  abort(scope?: SessionScope & CancelOptions): Promise<DrainReport | undefined>;
 
+  /** Current runtime state of a `run()` execution, by its root context's id. */
+  getStatus(scope: ExecutionScope): ExecutionStatus;
   /** Current runtime status of a session. */
   getStatus(scope?: SessionScope): HarnessStatus;
   /** Number of messages currently queued on a session. */
@@ -479,9 +549,10 @@ export interface AgentHarnessContract<
    * no-op. Use `ctx.abort()` when you want the signal without layer teardown.
    *
    * Pass `{ drainMs }` to drain first (see `CancelOptions`); a string is the
-   * reason alone.
+   * reason alone. Resolves with the drain's report when a drain ran on `ctx`,
+   * whether this call started it or cut it short; `undefined` otherwise.
    */
-  cancel(ctx: Context, options?: string | CancelOptions): Promise<void>;
+  cancel(ctx: Context, options?: string | CancelOptions): Promise<DrainReport | undefined>;
   /** Trace exporter spans are flushed to. Defaults to a no-op exporter. */
   readonly traceExporter: TraceExporter;
   createSpan(name: string, parent: Span | null): Span;
