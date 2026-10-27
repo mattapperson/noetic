@@ -1,86 +1,123 @@
 import type { LLMResponse, RoundUsage, UsageCharge } from '@noetic-tools/types';
 
-interface Bill {
+/** What one round used and cost. */
+export interface Bill {
   usage: RoundUsage;
   cost: number;
+}
+
+interface Round extends Bill {
+  /** Replayed from the round ledger: paid for by an earlier attempt. */
+  replayed: boolean;
 }
 
 /**
  * What one model call's rounds used and cost. Every round the provider answered
  * counts, including one the loop rejected and asked again: the provider billed it.
+ * A rejected round's bill is held and folded into the round the loop goes on from,
+ * so `rounds` lists the rounds the conversation kept, and `rounds[0]` still reports
+ * on the first view the model answered.
  */
 export class CallSpend {
-  private readonly bills: Bill[] = [];
-  /** What replayed rounds supplied, so the response can report what was paid now. */
-  private replayed: number | undefined;
-  /** The first bill the round ledger has not recorded. */
-  private recorded = 0;
+  private readonly rounds: Round[] = [];
+  /** Bills counted since the last round the loop went on from. */
+  private held: Bill | undefined;
 
+  /** Count a round the provider answered, whether or not the loop keeps it. */
   count(usage: RoundUsage, cost: number): void {
-    this.bills.push({
+    this.held = addBills(this.held, {
       usage,
       cost,
     });
   }
 
-  /** Count a round replayed from the round ledger; its record already holds it. */
-  replay(usage: RoundUsage, cost: number): void {
-    this.count(usage, cost);
-    this.replayed = (this.replayed ?? 0) + cost;
-    this.recorded = this.bills.length;
-  }
-
   /**
-   * The usage and cost to record for the round the loop goes on from: it plus any
-   * rejected rounds before it, so a resumed loop that replays the record still
-   * counts their bills.
+   * The loop goes on from the round just counted, or from a steered round that has
+   * no bill of its own. Returns its bill, held rejected rounds included, for the
+   * round ledger to record.
    */
-  takeUnrecorded(): Bill {
-    const bill = this.unrecorded();
-    this.recorded = this.bills.length;
+  keep(): Bill {
+    const bill = this.held ?? {
+      usage: {
+        inputTokens: 0,
+        outputTokens: 0,
+      },
+      cost: 0,
+    };
+    if (this.held) {
+      this.rounds.push({
+        ...this.held,
+        replayed: false,
+      });
+      this.held = undefined;
+    }
     return bill;
   }
 
+  /** Count a round replayed from the round ledger. */
+  replay({ usage, cost }: Bill): void {
+    this.rounds.push({
+      usage,
+      cost,
+      replayed: true,
+    });
+  }
+
   totals(): Pick<LLMResponse, 'usage' | 'rounds' | 'cost' | 'billedCost'> {
-    const rounds = this.bills.map((bill) => bill.usage);
-    const usage = sumUsage(rounds);
-    const cost = sum(this.bills.map((bill) => bill.cost));
+    const bills: Bill[] = this.held
+      ? [
+          ...this.rounds,
+          this.held,
+        ]
+      : this.rounds;
+    const usage = sumUsage(bills.map((bill) => bill.usage));
+    const cost = sum(bills.map((bill) => bill.cost));
+    const replayed = this.rounds.filter((round) => round.replayed);
     return {
       usage: {
         inputTokens: usage.inputTokens,
         outputTokens: usage.outputTokens,
         cachedTokens: usage.cachedTokens,
       },
-      rounds,
+      rounds: bills.map((bill) => bill.usage),
       cost: cost > 0 ? cost : undefined,
-      ...(this.replayed !== undefined
+      ...(replayed.length > 0
         ? {
-            billedCost: cost - this.replayed,
+            billedCost: cost - sum(replayed.map((round) => round.cost)),
           }
         : {}),
     };
   }
 
   /**
-   * What a call that throws must charge: the bills no round record holds. A recorded
-   * round is charged when a retry or resume replays it, so charging it here too
-   * would count it twice.
+   * What a call that throws must charge: every round paid for now. A replayed round
+   * was charged by the attempt that paid for it.
    */
   charge(): UsageCharge {
-    const { usage, cost } = this.unrecorded();
+    const paid = this.rounds.filter((round) => !round.replayed);
+    const bill = addBills(this.held, ...paid) ?? {
+      usage: {
+        inputTokens: 0,
+        outputTokens: 0,
+      },
+      cost: 0,
+    };
     return {
-      ...usage,
-      cost,
+      ...bill.usage,
+      cost: bill.cost,
     };
   }
+}
 
-  private unrecorded(): Bill {
-    const bills = this.bills.slice(this.recorded);
-    return {
-      usage: sumUsage(bills.map((bill) => bill.usage)),
-      cost: sum(bills.map((bill) => bill.cost)),
-    };
+function addBills(...bills: Array<Bill | undefined>): Bill | undefined {
+  const present = bills.filter((bill): bill is Bill => bill !== undefined);
+  if (present.length === 0) {
+    return undefined;
   }
+  return {
+    usage: sumUsage(present.map((bill) => bill.usage)),
+    cost: sum(present.map((bill) => bill.cost)),
+  };
 }
 
 function sum(values: number[]): number {

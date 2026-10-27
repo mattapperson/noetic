@@ -12,6 +12,7 @@ import { z } from 'zod';
 import { callModel } from '../../src/builders/step-builders';
 import { tool } from '../../src/builders/tool-builder';
 import { AgentHarness } from '../../src/harness/agent-harness';
+import type { StepLedgerRetention } from '../../src/runtime/durable/step-ledger';
 import { createInMemoryStorage } from '../../src/runtime/in-memory-storage';
 import { makeMessage } from '../_helpers';
 
@@ -81,6 +82,31 @@ const toolCall = (): unknown =>
     TOOL_COST,
   );
 
+/** A terminal error that reports no usage at all, as an upstream failure may. */
+const failedBare = (): unknown => ({
+  id: 'resp-bare',
+  status: 'failed',
+  error: {
+    message: 'upstream overloaded',
+  },
+  output: [],
+});
+
+const cachedGood = (): unknown => {
+  const answer = frameworkCast<{
+    usage: Record<string, unknown>;
+  }>(good());
+  return {
+    ...answer,
+    usage: {
+      ...answer.usage,
+      inputTokensDetails: {
+        cachedTokens: 8,
+      },
+    },
+  };
+};
+
 /** The provider refused the round outright, so it billed nothing. */
 const refused = (): Error =>
   Object.assign(new Error('upstream down'), {
@@ -114,6 +140,7 @@ class ScriptedClient {
 function harnessWith(
   client: ScriptedClient,
   storage?: StorageAdapter,
+  stepLedgerRetention?: StepLedgerRetention,
 ): AgentHarness<Record<string, never>> {
   const harness = new AgentHarness({
     name: 'recovery-spend',
@@ -123,6 +150,7 @@ function harnessWith(
           environment: {
             storage: {
               adapter: storage,
+              stepLedgerRetention,
             },
           },
         }
@@ -176,7 +204,12 @@ describe('callModel recovery spend', () => {
 
     expect(client.sent).toBe(3);
     expect(response.cost).toBeCloseTo(FAILED_COST + EMPTY_COST + GOOD_COST);
-    expect(response.rounds).toHaveLength(3);
+    // The rejected rounds fold into the round the loop kept.
+    expect(response.rounds).toHaveLength(1);
+    expect(response.rounds?.[0]).toMatchObject({
+      inputTokens: 30,
+      outputTokens: 15,
+    });
     expect(response.usage).toMatchObject({
       inputTokens: 30,
       outputTokens: 15,
@@ -243,5 +276,65 @@ describe('callModel recovery spend', () => {
     expect(resumed.cost).toBeCloseTo(FAILED_COST + TOOL_COST + GOOD_COST);
     // The replayed rounds were paid for by the first attempt.
     expect(resumed.billedCost).toBeCloseTo(GOOD_COST);
+  });
+
+  it('folds a rejected round into the round after it, so rounds[0] still reports the cache', async () => {
+    const harness = harnessWith(
+      new ScriptedClient([
+        failedBare(),
+        cachedGood(),
+      ]),
+    );
+
+    const response = await harness.callModel({
+      model: 'test/model',
+      items: [
+        makeMessage('user', 'hi'),
+      ],
+      ctx: harness.createContext(),
+    });
+
+    expect(response.rounds).toHaveLength(1);
+    expect(response.rounds?.[0]?.cachedTokens).toBe(8);
+    expect(response.cost).toBeCloseTo(GOOD_COST);
+  });
+
+  it('charges a failed run with its recorded rounds, and a retry in place does not charge them again', async () => {
+    const client = new ScriptedClient([
+      failed(),
+      toolCall(),
+      refused(),
+      good(),
+    ]);
+    const harness = harnessWith(client, createInMemoryStorage());
+    const ctx = harness.createContext();
+
+    await expect(harness.run(agent, 'go', ctx)).rejects.toThrow('upstream down');
+    expect(ctx.cost).toBeCloseTo(FAILED_COST + TOOL_COST);
+    expect(ctx.billedCost).toBeCloseTo(FAILED_COST + TOOL_COST);
+    expect(ctx.tokens.total).toBe(30);
+
+    expect(await harness.run(agent, 'go', ctx)).toBe('ok');
+    expect(client.sent).toBe(4);
+    expect(ctx.cost).toBeCloseTo(FAILED_COST + TOOL_COST + GOOD_COST);
+    expect(ctx.billedCost).toBeCloseTo(FAILED_COST + TOOL_COST + GOOD_COST);
+    expect(ctx.tokens.total).toBe(45);
+  });
+
+  it('charges a round whose record did not land when the step throws', async () => {
+    const harness = harnessWith(
+      new ScriptedClient([
+        toolCall(),
+        refused(),
+      ]),
+      createInMemoryStorage(),
+      {
+        maxEntryBytes: 1,
+      },
+    );
+    const ctx = harness.createContext();
+
+    await expect(harness.run(agent, 'go', ctx)).rejects.toThrow('upstream down');
+    expect(ctx.cost).toBeCloseTo(TOOL_COST);
   });
 });

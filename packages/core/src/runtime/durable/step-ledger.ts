@@ -443,14 +443,15 @@ export class StepLedger {
   /**
    * Record a completed step, then prune what it makes dead: a resumed run replays this
    * entry without descending, so nothing recorded beneath it will be read again.
-   * Best-effort: a failed write costs resumability, not the run.
+   * Best-effort: a failed write costs resumability, not the run. Resolves whether
+   * the entry was stored.
    */
-  async record(entry: StepLedgerEntry): Promise<void> {
+  async record(entry: StepLedgerEntry): Promise<boolean> {
     if (!this.store) {
-      return;
+      return false;
     }
     if (!this.retainable(entry)) {
-      return;
+      return false;
     }
     /* Reserve the sequence number BEFORE awaiting: concurrent inParallel legs record through
      * the one shared ledger, and two of them reading the same counter would write the
@@ -464,7 +465,7 @@ export class StepLedger {
         `StepLedger: failed to record "${entry.path}":`,
         error instanceof Error ? error.message : String(error),
       );
-      return;
+      return false;
     }
     const replaced = this.live.get(entry.path);
     this.live.set(entry.path, seq);
@@ -475,6 +476,7 @@ export class StepLedger {
     if (!entry.path.startsWith(REPLAY_KEY_PREFIX)) {
       await this.prune(this.live.beneath(entry.path));
     }
+    return true;
   }
 
   /**

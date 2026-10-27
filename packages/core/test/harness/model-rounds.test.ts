@@ -169,8 +169,9 @@ describe('durable model rounds', () => {
     const host = harness(storage);
     const ctx = host.createContext();
     await expect(host.run(agent(), 'go', ctx)).rejects.toThrow();
-    // The recorded rounds are charged when the retry replays them, not by the failure.
-    expect(ctx.tokens.total).toBe(0);
+    // The failed run is charged with the rounds it recorded; the retry replays them
+    // without charging them again.
+    expect(ctx.tokens.total).toBe(4 * 15);
 
     expect(await host.run(agent(), 'go', ctx)).toBe('charged 5');
     expect(server.rounds).toHaveLength(7);

@@ -41,6 +41,7 @@ import type { EventBroadcaster } from '../runtime/event-broadcaster';
 import type { ApprovalOutcome } from '../runtime/tool-approval';
 import { markSpent } from '../util/spent';
 import { isErrorStatus } from '../util/status-code';
+import type { Bill } from './call-spend';
 import { CallSpend } from './call-spend';
 import { exportSpans } from './deps/context';
 import { RoundLedger } from './model-rounds';
@@ -688,21 +689,35 @@ export class AgentHarnessModelCaller {
     const client = this.requireModelClient();
     const spans = this.newSpanCollector(request);
     const spend = new CallSpend();
+    const roundLedger = RoundLedger.open(request.ctx);
     try {
-      return await this.runModelLoop(request, client, spans, spend);
+      return await this.runModelLoop({
+        request,
+        client,
+        spans,
+        spend,
+        roundLedger,
+      });
     } catch (error: unknown) {
-      throw markSpent(error, spend.charge());
+      throw markSpent(error, spend.charge(), () => roundLedger?.charged());
     } finally {
       await spans.flush();
     }
   }
 
-  private async runModelLoop(
-    request: CallModelRequest,
-    client: OpenRouter,
-    spans: CallSpanCollector,
-    spend: CallSpend,
-  ): Promise<LLMResponse> {
+  private async runModelLoop({
+    request,
+    client,
+    spans,
+    spend,
+    roundLedger,
+  }: {
+    request: CallModelRequest;
+    client: OpenRouter;
+    spans: CallSpanCollector;
+    spend: CallSpend;
+    roundLedger: RoundLedger | undefined;
+  }): Promise<LLMResponse> {
     const prepared = prepareModelRequest(request, this.opts.agentName);
     const allItems: Item[] = [];
     let servedTier: string | undefined;
@@ -714,7 +729,6 @@ export class AgentHarnessModelCaller {
     let invalidRecoveryContinuations = 0;
     let toolLimitRecoveryContinuations = 0;
     let useEphemeralContinue = false;
-    const roundLedger = RoundLedger.open(request.ctx);
     const drains = drainsOf(request.ctx);
     const replaySchemas = buildItemSchemaRegistry({
       base: this.opts.itemSchemas,
@@ -729,14 +743,14 @@ export class AgentHarnessModelCaller {
       items: 0,
     };
     // Record a round the loop goes on from, so a resumed loop can replay it.
-    const recordRound = async (): Promise<void> => {
+    const recordRound = async (bill: Bill): Promise<void> => {
       if (!roundLedger || request.signal?.aborted) {
         return;
       }
       await roundLedger.record(round, marks.log, {
         items: allItems.slice(marks.items),
         input: conversationInput.slice(marks.input),
-        ...spend.takeUnrecorded(),
+        ...bill,
       });
     };
     let stoppedForRecall = false;
@@ -757,7 +771,9 @@ export class AgentHarnessModelCaller {
         for (const item of replayed.appended) {
           request.ctx?.itemLog.append(item);
         }
-        spend.replay(replayed.usage, replayed.cost);
+        if (!replayed.charged) {
+          spend.replay(replayed);
+        }
         prepared.emitIfAllowed('model_round_replayed', {
           round,
         });
@@ -963,6 +979,7 @@ export class AgentHarnessModelCaller {
         // A steer stopped the stream before the response finished. The provider
         // never reports usage for a cut response, so this round adds none.
         modelSpan.end();
+        const bill = spend.keep();
         const roundItems = this.parseRoundItems(request, frameworkCast<Item[]>(finishedItems));
         prepared.emitIfAllowed('model_call_steered', {
           round,
@@ -981,7 +998,7 @@ export class AgentHarnessModelCaller {
           modelSpan,
           steers,
         });
-        await recordRound();
+        await recordRound(bill);
         round += 1;
         const cutLimitRecovery = this.handleToolRoundLimit({
           round,
@@ -1020,6 +1037,7 @@ export class AgentHarnessModelCaller {
         continue;
       }
       invalidRecoveryContinuations = 0;
+      const bill = spend.keep();
       prepared.emitIfAllowed('model_call_completed', {
         round,
         itemCount: sdkResponse.output?.length ?? 0,
@@ -1046,7 +1064,7 @@ export class AgentHarnessModelCaller {
       if (!ranTools) {
         replayOutput(conversationInput, roundItems);
       }
-      await recordRound();
+      await recordRound(bill);
 
       round += 1;
       const limitRecovery = this.handleToolRoundLimit({

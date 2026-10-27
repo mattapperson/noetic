@@ -439,7 +439,7 @@ interface LLMResponse {
 }
 ```
 
-`usage` totals every round of the call, including a round the harness rejected and asked again (a provider error status in a 2xx body, or no output): the provider billed it. `rounds` breaks it down oldest first: rounds after the first replay the same assembled view plus appended tool traffic, so they hit the prompt cache regardless of whether the first round did — only `rounds[0]` answers "was my prefix cached?". `cachedTokens` and `cacheWriteTokens` are `undefined`, not `0`, when the provider reports no cache figures at all.
+`usage` totals every round of the call, including a round the harness rejected and asked again (a provider error status in a 2xx body, or no output): the provider billed it. `rounds` breaks it down oldest first, adding a rejected round's usage to the round after it: rounds after the first replay the same assembled view plus appended tool traffic, so they hit the prompt cache regardless of whether the first round did — only `rounds[0]` answers "was my prefix cached?". `cachedTokens` and `cacheWriteTokens` are `undefined`, not `0`, when the provider reports no cache figures at all.
 
 | Field | Type | Description |
 |---|---|---|

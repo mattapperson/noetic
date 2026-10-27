@@ -45,4 +45,23 @@ describe('markSpent / chargeSpent', () => {
     expect(ctx.cost).toBe(0);
     expect(ctx.tokens.total).toBe(0);
   });
+
+  it('leaves a thrown value alone when the call spent nothing', () => {
+    expect(
+      markSpent('boom', {
+        inputTokens: 0,
+        outputTokens: 0,
+      }),
+    ).toBe('boom');
+  });
+
+  it('adds to a charge the error already carries rather than replacing it', () => {
+    const ctx = context();
+    const error = markSpent(markSpent(new Error('boom'), charge), charge);
+
+    chargeSpent(ctx, error);
+
+    expect(ctx.cost).toBeCloseTo(0.06);
+    expect(ctx.tokens.total).toBe(30);
+  });
 });
