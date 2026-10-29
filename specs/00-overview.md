@@ -30,11 +30,13 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 @noetic-tools/mcp  →  @noetic-tools/types  ←  @noetic-tools/profile-*
         ↑
 @noetic-tools/agent-plugins, @noetic-tools/profile-conformance
+
+@noetic-tools/verify  →  @noetic-tools/types  (+ open-verification)
 ```
 
 `@noetic-tools/core` depends only on the `AcpAgent` *type* in `@noetic-tools/types`; it never imports `@noetic-tools/acp` (the dependency edge above runs client → contract, never core → client).
 
-- **`@noetic-tools/types`** — The dependency-free foundation. Owns the conversation `Item` data model, LLM config (`LlmProviderConfig`, `ModelParams`, `LLMResponse`, `TokenUsage`), execution context + steering contracts, the platform adapter interfaces (`FsAdapter`, `ShellAdapter`, `SubprocessAdapter`), the error model (`NoeticErrorImpl`), the `Item` schema, and the `ContextLayer` contract (`types/context-layer.ts`, also exposed at the `@noetic-tools/types/contract` subpath). Depends on nothing in the workspace.
+- **`@noetic-tools/types`** — The dependency-free foundation. Owns the conversation `Item` data model, LLM config (`LlmProviderConfig`, `ModelParams`, `LLMResponse`, `TokenUsage`), execution context + steering contracts, the platform adapter interfaces (`FsAdapter`, `ShellAdapter`, `SubprocessAdapter`, `ArtifactStore`), the error model (`NoeticErrorImpl`), the `Item` schema, and the `ContextLayer` contract (`types/context-layer.ts`, also exposed at the `@noetic-tools/types/contract` subpath). Depends on nothing in the workspace.
 
 - **`@noetic-tools/context`** — The context layer system: lifecycle, budget allocation, projector/view assembly (`assembleView`, `allocateBudgets`), scope/storage helpers, and the built-in layer factories. Depends only on `@noetic-tools/types`; re-exports the `ContextLayer` contract so it is the one-stop import for context-layer authoring.
 
@@ -50,7 +52,9 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 
 - **`@noetic-tools/mcp`** — The MCP bridge: `mcpConnection()` turns an MCP server into a `ConnectionProvider` (`35-connections`), with the MCP client, transports, profile negotiation, Tasks, Events and webhook verification. The only package permitted to depend on the MCP SDK. Depends only on `@noetic-tools/types`; `@noetic-tools/core` never imports it.
 
-- **`@noetic-tools/profile-screen`**, **`profile-browser`**, **`profile-device`**, **`profile-chat`** — One connection profile each: schemas, types and conformance scenarios (`36-connection-profiles`). Depend only on `@noetic-tools/types` and the profile they extend.
+- **`@noetic-tools/profile-ui`**, **`profile-screen`**, **`profile-browser`**, **`profile-app`**, **`profile-device`**, **`profile-chat`** — One connection profile each: schemas, types and conformance scenarios (`36-connection-profiles`). Depend only on `@noetic-tools/types` and the profile they extend.
+
+- **`@noetic-tools/verify`** — Verification over connections, implementing the Open Verification Protocol through its `open-verification` package: claims, windows, coverage, adjudication and verification runs behind `step.verify` (`37-verification`). Depends on `@noetic-tools/types` and `open-verification`; `@noetic-tools/core` never imports it.
 
 - **`@noetic-tools/profile-conformance`** — Runs a profile's conformance scenarios against an MCP server. Depends on `@noetic-tools/mcp` and `@noetic-tools/types`.
 
@@ -99,8 +103,9 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 | `32-decide` | `decide()`, `routeSwitch()`, `decisionsHistoryLayer()`, `harness.decide()` | Typed decisions and routing |
 | `33-expressions` | `Expression`, `ExpressionSchema`, `ExpressionLimits`, `DEFAULT_EXPRESSION_LIMITS` | JSONata expressions in JSON workflows (`compute`, route and until `expr`) |
 | `34-custom-items` | `customItem()`, `CustomItem`, `CustomItemOf`, `CustomStreamingItem`, `FromJsonSchema`, `StepEmitItemsConfig` | Declared custom items: typed events and final items a workflow streams, typed through the harness |
-| `35-connections` | `Connection`, `ConnectionProvider`, `connection()`, `defineTrigger()`, `step.connectionCall`/`subscribeEvents`/`awaitEvent`/`awaitTask`, `mcpConnection()` | Named MCP-backed surfaces (devices, browsers, chat) and triggers as tools, steps, events and JSON nodes |
-| `36-connection-profiles` | `defineProfile`, `defineExtension`, `screen`/`browser`/`device`/`chat` profiles, `checkConformance` | Normalized MCP vocabularies with vendor extensions |
+| `35-connections` | `Connection`, `ConnectionProvider`, `connection()`, `defineTrigger()`, `step.connectionCall`/`acquireConnection`/`subscribeEvents`/`awaitEvent`/`awaitTask`, `mcpConnection()` | Named and pooled MCP-backed surfaces (devices, browsers, apps, chat) and triggers as tools, steps, events and JSON nodes |
+| `36-connection-profiles` | `defineProfile`, `defineExtension`, `ui`/`screen`/`browser`/`app`/`device`/`chat` profiles, `checkConformance` | Normalized MCP vocabularies with vendor extensions |
+| `37-verification` | `step.verify`, `claim()`, `witness()`, `verifier()` | Evidence-backed verdicts over connections, aligned with the Open Verification Protocol |
 
 ## Dependency Graph
 

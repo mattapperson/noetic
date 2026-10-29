@@ -37,7 +37,7 @@ interface WorkflowDocument {
 `connections` is the document's dependency manifest: each slot names the
 profile and extensions it needs, each with a semver range, and every
 connection operation, tool selection and event wait in the document must come
-from a declared slot, and what any slot may reach is bounded by the host's
+from a declared slot (pooled slots carry a `lease`), and what any slot may reach is bounded by the host's
 `connections` allowlist on `parseAndRunWorkflow` and `dynamicWorkflow`.
 `subscriptions` declares which connection events start or join a turn; it is
 standing harness configuration, applied only when the document is the harness's
@@ -1020,7 +1020,8 @@ const WorkflowDocumentSchema = z.object({
 - `Context`, `Item`, `ItemLog`: `07-context-and-event-log`
 - `AgentHarness`, `Tool`: `08-runtime`
 - `NoeticError` kinds: `09-error-model`
-- `connectionCall`, `subscribeEvents`, `awaitEvent`, `awaitTask` nodes, the `connections` manifest and `subscriptions`: `35-connections`
+- `connectionCall`, `acquireConnection`, `releaseConnection`, `subscribeEvents`, `awaitEvent`, `awaitTask` nodes, the `connections` manifest, `subscriptions`, and `$secret` / `$blob` values: `35-connections`
+- The `verify` node: `37-verification`
 - Profiles and extensions the manifest names: `36-connection-profiles`
 - `Expression`, `ExpressionSchema`, `ExpressionLimits`, the JSONata adapter, and the `compute` / `expr` semantics: `33-expressions`
 - `decide` nodes and `routeSwitch`, including deciders as until predicates: `32-decide`

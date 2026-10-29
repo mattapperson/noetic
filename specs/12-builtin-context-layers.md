@@ -581,7 +581,7 @@ These layers all use `execution` scope and `Slot.PROCEDURAL` (250) or `Slot.OBSE
 
 ## `connectionObservations`
 
-`connectionObservations(name)` renders the observed resources of one connection instance (a device's screen, a browser page, a chat thread) with its own budget, reading them in `recall`. The harness adds one per exposed instance; the resources it includes default to those its profile marks `observe` (`35-connections` § Observations, `36-connection-profiles`).
+`connectionObservations(name)` renders the observed resources of one connection instance (a device's screen, a browser page, a chat thread) with its own budget, reading them in `recall` according to a per-resource observation policy (`every-turn`, `on-change`, `after-effect`, `on-demand`; summary or full detail; an image cap) and rendering repeated reads as diffs. Blob references render as image content within the cap. The harness adds one per exposed instance; the policy defaults to what its profile declares (`35-connections` § Observations, `36-connection-profiles`).
 
 ## Future Considerations
 

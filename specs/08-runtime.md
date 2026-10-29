@@ -247,6 +247,67 @@ Callers may attach arbitrary additional keys via `request.metadata`; the adapter
 
 ---
 
+## Artifact Store
+
+Binary content the runtime must keep — screenshots, recordings, traces, files
+an agent downloads or produces, verification runs — goes to the fifth platform
+adapter, `environment.artifacts`, never inline into step outputs, the ledger,
+checkpoints or traces. Those carry a `BlobReference` instead
+(`35-connections` § Binary content), which keeps ledger entries under the
+`23a` size cap and lets a resumed run see the same bytes it saw before.
+
+```typescript
+interface ArtifactStore {
+  /** Stores bytes; content-addressed, so identical content is stored once. */
+  put(content: Uint8Array | ReadableStream<Uint8Array>, meta: ArtifactMeta): Promise<BlobReference>;
+  get(uri: string): Promise<ReadableStream<Uint8Array> | null>;
+  head(uri: string): Promise<BlobReference['$blob'] | null>;
+  /** Associates a stored blob with a run; retention counts per run. */
+  attach(uri: string, link: { executionId: string; stepPath?: string; source?: string }): Promise<void>;
+  listRun(executionId: string): Promise<ReadonlyArray<ArtifactRecord>>;
+  /** Drops a run's links; content no run links to is removed. */
+  clearRun(executionId: string): Promise<void>;
+}
+
+interface ArtifactMeta {
+  mimeType: string;
+  /** Hints for retention and display; never part of the content address. */
+  name?: string;
+  sensitive?: boolean;
+}
+
+interface ArtifactRetention {
+  maxBytesPerRun: number;     // default 512 MiB
+  maxCountPerRun: number;     // default 1e3
+  ttlMs?: number;             // unset: kept until deleted
+}
+```
+
+- **Content addressing.** `uri` is derived from the SHA-256 of the content
+  (`artifact://sha256/<hex>`), so storing the same screenshot twice costs
+  nothing and a reference proves which bytes it means.
+- **Retention.** A store enforces `ArtifactRetention` per run. When a run
+  exceeds a cap, the oldest unpinned blobs attached to it are dropped and the
+  drop is recorded in the run's artifact manifest, so a missing blob is
+  reported, never silently absent; verification reports it as a
+  `buffer-truncated` blind spot (`37-verification`). A blob referenced by a
+  ledger completion entry or a verification run is pinned until its run is
+  cleared; when pinned blobs alone exceed a cap, new blobs are still stored and
+  the overage is reported on the run's manifest rather than evicting evidence.
+- **Shared content.** Because content is shared across runs, there is no
+  global delete: `clearRun` removes one run's links, and content is removed
+  only when no run links to it.
+- **Defaults.** Core ships `createInMemoryArtifactStore()`, used when
+  `environment.artifacts` is unset; `@noetic-tools/platform-node` adds
+  `createFileArtifactStore({ dir, retention })` (`25-platform-packages`).
+  Hosted stores (object storage) implement the same contract.
+- **Access.** `harness.getRunArtifacts(executionId)` lists a run's manifest;
+  context layers and tool results resolve references to content through
+  `ctx.artifacts` when they render.
+- `sensitive` blobs (a stored session, a captured form) are never rendered to
+  the model and never attached to traces; they are reachable only by the steps
+  that hold their reference.
+
 ## The `AgentHarness` Interface
 
 The agent harness is the engine. It's behind an interface with methods covering execution, session-scoped stream accessors, context management, channels, durability, context layer lifecycle, cancellation, and tracing.
@@ -443,10 +504,13 @@ interface DetachedHandle<O> {
 
 ## Connections, Subscriptions and Triggers
 
-Alongside the four platform adapters, `environment.connections` holds the
+Alongside the platform adapters, `environment.connections` holds the
 harness's named connections — MCP-backed surfaces such as devices, browsers and
-chat workspaces, and in-process triggers — and `environment.webhooks` the
-receiver their events may arrive through. `subscriptions` declares which
+chat workspaces, and in-process triggers — `environment.pools` the providers it
+provisions instances from on demand, `environment.secrets` the resolver for
+`$secret` argument values, and `environment.webhooks` the receiver events may
+arrive through. `verification` registers the verifier `step.verify` dispatches
+to (`37-verification`). `subscriptions` declares which
 connection events start or join a turn, and `harness.emit(name, event)` pushes
 an event into a trigger from host code. Providers connect in
 `harness.start()`, which the first `execute()` or `run()` calls implicitly;

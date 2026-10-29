@@ -275,4 +275,4 @@ Every hook call opens one span, with no sampling. The steering and pipeline hook
 
 ## Connection Spans
 
-Connections emit `connection.connect`, `connection.call`, `connection.task` and `connection.event` spans, and the framework events `connection_state_changed`, `connection_event_received`, `connection_task_updated`, `event_gap` and `subscription_terminated` (`35-connections` § Observability).
+Connections emit `connection.connect`, `connection.provision`, `connection.call`, `connection.task` and `connection.event` spans, with sensitive fields redacted and binary content as blob references, and the framework events `connection_state_changed`, `identity_changed`, `lease_acquired`, `lease_released`, `connection_event_received`, `connection_task_updated`, `event_gap` and `subscription_terminated`. Verification runs (`37-verification`) are attached to the run's trace as artifacts (`35-connections` § Observability).

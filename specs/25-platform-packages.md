@@ -196,6 +196,16 @@ Mechanical migration:
 - Importing `@noetic/platform-browser` similarly produces no `node:*` references.
 - Importing `@noetic-tools/platform-node` may reference `node:*`; bundling for a browser target surfaces the mismatch as a build-time error, which is the desired behaviour.
 
+## File Artifact Store
+
+`@noetic-tools/platform-node` provides `createFileArtifactStore({ dir,
+retention })`, the Node implementation of the `ArtifactStore` contract
+(`08-runtime` § Artifact Store). Blobs are written once under
+`<dir>/sha256/<aa>/<hex>` with a sidecar metadata file, and each run's manifest
+under `<dir>/runs/<executionId>.json`. `@noetic/platform-browser` re-exports
+core's in-memory store; a browser host may implement the contract over
+IndexedDB or a remote store.
+
 ## Webhook Receiver
 
 `@noetic-tools/platform-node` provides `createWebhookReceiver({ port, publicUrl })`, the Node implementation of the `WebhookReceiver` contract through which connection events arrive by webhook (`35-connections` § Webhook receiver). `@noetic/platform-browser` provides none; a serverless host implements the contract over its own routing.
