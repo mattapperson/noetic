@@ -63,6 +63,8 @@ Every workflow document is an envelope with a `version` field and a `root` node:
 |---|---|---|
 | `version` | `1` | Schema version. Currently only `1` is supported. |
 | `root` | `WorkflowNode` | The top-level node of the workflow tree. |
+| `connections` | `Record<string, WorkflowConnectionRequirement>` | Optional. The [connections](/docs/framework/connections) the document needs, by name. See [Connections](#connections). |
+| `customItems` | `Record<string, …>` | Optional. [Custom items](/docs/framework/custom-items) any node may emit. |
 
 The `root` node and all descendant nodes are `WorkflowNode` objects, each identified by a `kind` discriminant and a unique `id` string. The document is validated at runtime by `WorkflowDocumentSchema` (a Zod schema exported from `@noetic-tools/core`).
 
@@ -83,7 +85,7 @@ Point your editor or validator at the bundled file (resolve it from the package,
 
 ## Node Kinds
 
-Fourteen node kinds are available, plus the `acp-agent` kind documented in [ACP Agent Steps](/docs/framework/acp-agents). Leaf nodes (`callModel`, `invokeTool`, `runCode`, `compute`, `decide`) perform work; structural nodes (`sequence`, `inParallel`, `conditional`, `routeSwitch`, `loop`, `spawn`, `withContext`, `schedule`, `subflow`) compose them into trees.
+Seventeen node kinds are available, plus the `acp-agent` kind documented in [ACP Agent Steps](/docs/framework/acp-agents). Leaf nodes (`callModel`, `invokeTool`, `runCode`, `compute`, `decide`) perform work; connection nodes (`call`, `wait`, `verify`) act on and check the document's [connections](#connections); structural nodes (`sequence`, `inParallel`, `conditional`, `routeSwitch`, `loop`, `spawn`, `withContext`, `schedule`, `subflow`) compose them into trees.
 
 Every node takes two optional replay fields (see [Replay Identity](/docs/framework/durability#replay-identity)) plus optional `emitItems` and `customItems` fields (see [Emitting items](#emitting-items)):
 
@@ -273,7 +275,7 @@ Run steps one at a time, in array order: each child starts only after the one be
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `id` | `string` | required | Unique step identifier. |
-| `steps` | `WorkflowNode[]` | required | Ordered list of child nodes (min 1). |
+| `steps` | `(WorkflowNode \| { "<op>": args })[]` | required | Ordered list of child nodes (min 1). An entry may also be an [operation written by name](#operations-written-by-name). |
 
 ### inParallel
 
@@ -312,7 +314,7 @@ Dynamic fan-out — one child per array item (data-dependent N):
 | `mode` | `'all' \| 'race' \| 'settle'` | required | `all` waits for every path; `race` returns the first; `settle` waits for all but tolerates failures. |
 | `paths` | `WorkflowNode[]` | — | Static child nodes to execute concurrently. Mutually exclusive with `each`. |
 | `each` | `WorkflowNode` | — | Dynamic body template instantiated once per input array item. Each item is injected as that child's input; template node ids are suffixed `-<i>` for uniqueness. Mutually exclusive with `paths`. |
-| `over` | `string` | `undefined` | With `each`: selector key into the input JSON object locating the array. When omitted, the input string is parsed as a JSON array directly. |
+| `over` | `string \| string[]` | `undefined` | With `each`: selector key into the input JSON object locating the array. When omitted, the input string is parsed as a JSON array directly. A list of connection names instead fans `each` out over those connections, binding each name to `$item` (see [Fan-out over connections](#fan-out-over-connections)). |
 | `merge` | `'last' \| 'first' \| 'concat'` | `'last'` | How to combine results. `concat` writes object results (such as a `decide` node's answers) as JSON. Ignored in `race` mode. |
 | `concurrency` | `number` | `undefined` | Maximum concurrent paths. |
 
@@ -609,6 +611,127 @@ Named workflows may call themselves, directly or through other named workflows. 
 
 Each recursion level hydrates lazily into its own tree, with ids suffixed by the calling subflow node's id (`body-top`, `body-recurse-top`, …), so every level traces and replays under distinct step ids. Depth is bounded at execution time: when a ref would resolve more than `maxRecursionDepth` levels deep on one path (default `100`; `Infinity` for no limit), the call throws `WORKFLOW_RECURSION_LIMIT`.
 
+## Connections
+
+A document that drives [connections](/docs/framework/connections) lists the ones it needs under `connections`, each with a version range, and acts on them with `call`, `wait`, and `verify` nodes:
+
+```json
+{
+  "version": 1,
+  "connections": {
+    "app":     { "profile": "browser@^1.2", "from": "browsers", "fresh": "path", "setup": { "url": "http://localhost:5173/login" } },
+    "phone":   { "profile": "device@^1", "extensions": { "com.acme.ios-permissions": "^1.0" } },
+    "deploys": { "events": ["deploy.failed"] }
+  },
+  "root": { "kind": "sequence", "id": "main", "steps": [
+    { "kind": "call", "id": "email", "connection": "app", "op": "ui.fill",
+      "args": { "element": "textbox \"Email\"", "text": "qa@example.com" } },
+    { "kind": "call", "id": "password", "connection": "app", "op": "ui.fill",
+      "args": { "element": "textbox \"Password\"", "text": { "$secret": "app.password" } } },
+    { "kind": "call", "id": "sign-in", "connection": "app", "op": "ui.tap",
+      "args": { "element": "button \"Sign in\"" } }
+  ] }
+}
+```
+
+| Manifest field | Type | Description |
+|---|---|---|
+| `profile` | `string` | `<profile>@<range>`, e.g. `browser@^1.2`. Requiring a profile requires its parents. |
+| `extensions` | `Record<string, string>` | Extension id → semver range. |
+| `events` | `string[]` | For a source: the event types it must offer. |
+| `from` | `string` | The harness connection or pool to bind to; defaults to the entry's name. |
+| `fresh` | `'run' \| 'path'` | Get a fresh connection from a pool, one per run or per parallel path. |
+| `setup` | `object` | Passed to the pool's provider; validated against the profile's setup schema. Fields the profile reserves to the host are refused with `CONNECTION_NOT_ALLOWED`. |
+
+Every operation and event a node uses must come from what its entry declares; anything else fails validation. The optional operations a document uses are worked out from its nodes, so they are never listed twice. Requirements are negotiated against the harness's connections before the root runs; a connection that does not offer what is required fails with `CONNECTION_UNSATISFIED`, and a name the harness does not have with `CONNECTION_UNKNOWN`.
+
+### Values
+
+A connection node's `args` are JSON, plus four wrappers. Object keys starting with `$` are reserved for them; wrap such data in `$literal`.
+
+| Value | Meaning |
+|---|---|
+| `{ "$expr": "…" }` | An [expression](/docs/framework/expressions), evaluated against the node's input with `$steps` holding the outputs of earlier nodes by id. `args` may also be one `$expr` computing every argument. |
+| `{ "$literal": … }` | Passes a value through untouched. |
+| `{ "$secret": "name" }` | A secret, resolved through `environment.secrets` only when the call is sent. Allowed only in fields the operation marks `sensitive`. |
+| `{ "$ref": … }` / `{ "$blob": … }` | A ref or blob as an earlier node returned it. Read a ref's id with `$refId(x)` in an expression. |
+
+```json
+{ "kind": "call", "id": "reply", "connection": "team", "op": "chat.reply",
+  "args": { "thread": { "$expr": "$steps.post.thread" }, "text": "Deployed." } }
+```
+
+### Operations written by name
+
+Inside `around`, `act`, or any array of steps, an operation can be written by name: `{ "ui.tap": { "element": "button \"Pay\"" } }` is a `call` on the enclosing connection — the `verify` subject, or the document's only connection.
+
+### Fan-out over connections
+
+`inParallel` with `over` a list of connection names and `"connection": { "$expr": "$item" }` on its nodes runs the same steps on each, every name checked against the manifest:
+
+```json
+{
+  "kind": "inParallel", "id": "both-phones", "mode": "all",
+  "over": ["ios", "android"],
+  "each": { "kind": "call", "id": "open", "connection": { "$expr": "$item" }, "op": "device.openUrl",
+            "args": { "url": "myapp://settings" } }
+}
+```
+
+### call
+
+Runs one connection operation and returns its result. Operations that run long upstream are waited for.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `id` | `string` | required | Unique step identifier. |
+| `connection` | `string \| { "$expr" }` | enclosing connection | A manifest name, or an expression (`$item` in a fan-out). |
+| `op` | `string` | required | The operation, e.g. `ui.tap`. |
+| `args` | `object \| { "$expr" }` | `{}` | The operation's arguments (see [Values](#values)). |
+
+### wait
+
+Waits for a connection event. With `around`, it starts listening, runs `around`, then waits, so the event an action causes cannot slip past. Its output is `{ event, around }`.
+
+```json
+{ "kind": "wait", "id": "approval", "connection": "team", "event": "chat.message.created",
+  "filter": "$refId(event.payload.thread) = $refId(input.thread) and $contains($lowercase(event.payload.text), 'approve')",
+  "around": { "chat.reply": { "thread": { "$expr": "thread" }, "text": "Approve?" } },
+  "timeoutMs": 1800000 }
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `id` | `string` | required | Unique step identifier. |
+| `connection` | `string \| { "$expr" }` | enclosing connection | The connection to listen on. |
+| `event` | `string` | required | The event type. |
+| `filter` | `string` | `undefined` | An expression evaluated against `{ "event": …, "input": … }`; the event matches when it gives `true`. Without one, every event of the type matches. |
+| `around` | node, op, or array | `undefined` | Steps run once listening has started. |
+| `timeoutMs` | `number` | required | How long to wait, from when listening starts. |
+
+### verify
+
+Checks claims about what a connection shows. See [Verification](/docs/framework/verification).
+
+```json
+{ "kind": "verify", "id": "checkout", "subject": "app",
+  "expect": [ { "net": "POST /api/orders 201", "count": 1 }, { "ui": "heading \"Order confirmed\"" } ],
+  "never":  [ { "net": "5xx" } ],
+  "act": [ { "ui.tap": { "element": "button \"Pay\"" } } ] }
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `id` | `string` | required | Unique step identifier. |
+| `subject` | `string \| string[] \| { "$expr" }` | required | The connection checked, or a list (one verify per connection, ids `<id>.<name>`, the worst outcome). |
+| `expect` | `Matcher[]` | XOR | What must become true. A matcher names one sense (`ui`, `net`, `log`, `route`, `state`, `signal`, `storage`, `time`, `visual`, `x-…`) or `event`, plus optional `count`, `atLeast`, `atMost`, `equals`, `tolerance`. Supply exactly one of `expect` / `claims`. |
+| `never` | `Matcher[]` | `undefined` | What must not happen while the action runs. |
+| `claims` / `constraints` | OVP documents | — | The full OVP form, instead of `expect` / `never`. |
+| `act` | node, op, or array | required | The action. Steps run on the subject unless they name another connection. |
+| `witnesses` | `string[]` | `undefined` | Connections that confirm from outside the subject. |
+| `close` | `{ until?, event?, quietMs?, timeoutMs? }` | quiet 500 ms, at most 15 s | When the window closes. `event` is required with `until: 'event'`, and only then. |
+| `intent` | `string` | `undefined` | Why, kept in the run record. |
+
 ## Until Predicates
 
 Loop termination conditions are expressed as named predicates. Each predicate is a JSON object with a `kind` discriminant. See [Loop & Until](/docs/framework/operators/loop-and-until) for the programmatic equivalents.
@@ -726,8 +849,9 @@ const response = await harness.getAgentResponse();
 | `tools` | `Tool[]` | required | Tools the generated workflow may reference by name. |
 | `maxDepth` | `number` | `5` | Maximum allowed tree depth for generated workflows. |
 | `maxRevisions` | `number` | `3` | Retries with error feedback on validation failure. |
+| `connections` | `ConnectionAllowlist` | `undefined` | What a generated document may use of the harness's connections. Required for the planner to use connections at all; the planner is shown only these. See [What a document may use](/docs/framework/connections#what-a-document-may-use). |
 
-Throws `NoeticConfigError` with code `WORKFLOW_VALIDATION_FAILED` if the planner cannot produce a valid workflow within the revision limit.
+Throws `NoeticConfigError` with code `WORKFLOW_VALIDATION_FAILED` if the planner cannot produce a valid workflow within the revision limit, `CONNECTION_UNKNOWN` if the allowlist names a connection the harness does not have, and `CONNECTION_NOT_ALLOWED` if the last revision still asks for more than the allowlist grants.
 
 ## parseAndRunWorkflow()
 
@@ -765,10 +889,11 @@ const result = await parseAndRunWorkflow({
 | `workflows` | `ReadonlyMap<string, WorkflowDocument>` | `undefined` | Named sub-workflows that `subflow` nodes may reference via `ref`. |
 | `maxRecursionDepth` | `number` | `100` | Deepest chain of named-ref resolutions on one path. A positive integer or `Infinity`. |
 | `expressionLimits` | `ExpressionLimits` | `DEFAULT_EXPRESSION_LIMITS` | Bounds on each expression evaluation (`steps`, `depth`, `length`, `timeout`). See [Expressions](/docs/framework/expressions#limits). |
+| `connections` | `ConnectionAllowlist` | `undefined` | What the document may use of the harness's connections: operation and event globs, `setup` value patterns, and secrets bound to one `op.field` each. A manifest asking for more fails with `CONNECTION_NOT_ALLOWED`. See [What a document may use](/docs/framework/connections#what-a-document-may-use). |
 
 Returns `Promise<string>` -- the string output of the executed workflow.
 
-Throws `NoeticConfigError` with code `WORKFLOW_VALIDATION_FAILED` if the JSON does not match `WorkflowDocumentSchema`. Throws `NoeticConfigError` with code `UNKNOWN_TOOL_REFERENCE` if a tool name cannot be resolved.
+Throws `NoeticConfigError` with code `WORKFLOW_VALIDATION_FAILED` if the JSON does not match `WorkflowDocumentSchema`. Throws `NoeticConfigError` with code `UNKNOWN_TOOL_REFERENCE` if a tool name cannot be resolved. Throws `CONNECTION_UNKNOWN` if a node uses a connection the document does not declare (or the allowlist names one the harness does not have), and `CONNECTION_NOT_ALLOWED` if the document asks for more than `connections` grants.
 
 ## Worked example: a model panel with an Opus judge
 
@@ -887,3 +1012,5 @@ const verify = workflow({
 - [Loop & Until](/docs/framework/operators/loop-and-until) -- programmatic equivalents of JSON until predicates.
 - [In Parallel](/docs/framework/operators/in-parallel) -- the parallel operator that `inParallel` nodes hydrate into.
 - [Spawn](/docs/framework/operators/spawn) -- isolated child execution for `spawn` nodes.
+- [Connections](/docs/framework/connections) -- the live things `call`, `wait`, and `verify` nodes act on.
+- [Verification](/docs/framework/verification) -- what a `verify` node answers.

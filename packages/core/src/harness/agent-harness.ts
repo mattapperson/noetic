@@ -1,8 +1,26 @@
-import { frameworkCast, ItemSchemaRegistry, NoeticConfigError } from '@noetic-tools/types';
+import type {
+  ArtifactRecord,
+  ArtifactStore,
+  ConnectionStatus,
+  ConnectionsConfig,
+  ConnectionTrigger,
+  SecretResolver,
+} from '@noetic-tools/types';
+import {
+  CONNECTION_EVENT_ITEM_TYPE,
+  frameworkCast,
+  ItemSchemaRegistry,
+  NoeticConfigError,
+} from '@noetic-tools/types';
+import type { Verifier } from '@noetic-tools/types/verify';
+import type { HarnessConnections } from '../connections/harness-wiring';
+import { createHarnessConnections } from '../connections/harness-wiring';
+import type { ConnectionRuntime } from '../connections/registry';
 import { NoeticEvent } from '../observability/genai-attributes';
 import { SpanImpl } from '../observability/span-impl';
 import { NoopExporter } from '../observability/trace-exporter';
 import { AcpSessionStore } from '../runtime/acp-session-store';
+import { createInMemoryArtifactStore } from '../runtime/in-memory-artifact-store';
 import { callDecide } from './decide-call';
 import {
   createInMemoryFsAdapter,
@@ -39,12 +57,15 @@ import {
 } from './deps/context';
 import type { DetachedSpawnOverrides } from './deps/interpreter';
 import {
+  clearPendingEntries,
   collectAllTools,
   collectCustomItems,
   deduplicateTools,
   dispatchStepThroughAdapter,
   execute,
+  graphConnectionNeeds,
   prepareBandedView,
+  reconcileResumedConnections,
   someStep,
 } from './deps/interpreter';
 import type {
@@ -209,6 +230,10 @@ export interface AgentEnvironmentConfig {
   shell?: ShellAdapter;
   /** Subprocess adapter. Defaults to an in-memory, same-process adapter. */
   subprocess?: SubprocessAdapter;
+  /** Resolves `secret()` names immediately before a connection call is sent (spec 35 § Secrets). */
+  secrets?: SecretResolver;
+  /** Where binary content is stored (spec 08 § Artifact Store). Defaults to an in-memory store. */
+  artifacts?: ArtifactStore;
 }
 
 interface AgentHarnessOpts<
@@ -278,6 +303,15 @@ interface AgentHarnessOpts<
    * unapproved and the harness warns once per tool name.
    */
   approveToolCall?: ToolApprover;
+  /**
+   * The live things the agent works with — browsers, devices, apps, chat workspaces,
+   * sources — by name (spec 35). Providers connect in `start()`.
+   */
+  connections?: ConnectionsConfig;
+  /** Connection events that start or join a turn (spec 35 § Triggers). */
+  triggers?: ReadonlyArray<ConnectionTrigger>;
+  /** The verifier `step.verify` uses (spec 37). */
+  verification?: Verifier;
   /** @internal Test-only escape hatch to inject a mock callModel implementation. */
   _testCallModel?: (request: CallModelRequest) => Promise<LLMResponse>;
   /** @internal Test-only escape hatch to inject a mock decide implementation. */
@@ -534,6 +568,32 @@ function resolveCheckpointStore(
 
 //#region AgentHarness
 
+/** Whether `run` was given an array of steps rather than one step. */
+function isStepArray(value: unknown): value is ReadonlyArray<Step<ContextData, never, unknown>> {
+  return Array.isArray(value);
+}
+
+/**
+ * An array of steps as one step: each runs in turn on the same context, its
+ * output the next one's input. Every child is dispatched by the harness, so it
+ * gets its own ledger path, events and gates.
+ */
+function stepSequence<I, O>(
+  steps: ReadonlyArray<Step<ContextData, unknown, unknown>>,
+): Step<ContextData, I, O> {
+  return frameworkCast<Step<ContextData, I, O>>({
+    kind: 'runCode',
+    id: 'sequence',
+    execute: async (input: unknown, ctx: Context): Promise<unknown> => {
+      let current = input;
+      for (const child of steps) {
+        current = await ctx.harness.run(child, current, ctx);
+      }
+      return current;
+    },
+  } satisfies Step<ContextData, unknown, unknown>);
+}
+
 /**
  * Default agent harness for executing agent steps with built-in channel, context, and trace support.
  * Provides channel store, context layer lifecycle, and trace export with no external dependencies.
@@ -627,6 +687,15 @@ export class AgentHarness<
   readonly acpSessions = new AcpSessionStore();
   /** @internal Graceful stops in progress; the interpreter and model loop hold on them. */
   readonly drains = new Drains();
+  /** Where binary content is stored: `environment.artifacts`, else an in-memory store. */
+  readonly artifacts: ArtifactStore;
+  /** The verifier `step.verify` uses, when one is configured. */
+  readonly verifier?: Verifier;
+  /** @internal The connection registry steps and tools resolve connections through. */
+  readonly connectionRegistry?: ConnectionRuntime;
+  /** @internal Secret resolver for connection calls. */
+  readonly secrets?: SecretResolver;
+  private readonly connections?: HarnessConnections;
 
   /**
    * Snapshot of every live ACP sub-agent, for a UI that wants to show what is
@@ -768,15 +837,111 @@ export class AgentHarness<
     this.itemSchemas = new ItemSchemaRegistry(opts.itemSchemas?.schemas, {
       strictUnknownExtensions: opts.itemSchemas?.strict ?? true,
     }).extend({
-      items: opts.agentGraph
-        ? customItemGates(
-            collectCustomItems(frameworkCast<Step>(opts.agentGraph)).map((item) => item.type),
-          )
-        : [],
+      items: customItemGates([
+        ...(opts.agentGraph
+          ? collectCustomItems(frameworkCast<Step>(opts.agentGraph)).map((item) => item.type)
+          : []),
+        ...(opts.triggers && opts.triggers.length > 0
+          ? [
+              CONNECTION_EVENT_ITEM_TYPE,
+            ]
+          : []),
+      ]),
     });
     this.rootCwdState = {
       cwd: opts.initialCwd ?? '/',
     };
+    this.artifacts = environment?.artifacts ?? createInMemoryArtifactStore();
+    this.verifier = opts.verification;
+    this.secrets = environment?.secrets;
+    if (opts.connections || (opts.triggers && opts.triggers.length > 0)) {
+      this.connections = createHarnessConnections({
+        harness: this,
+        connections: opts.connections,
+        triggers: opts.triggers,
+        storage: this.config.storage ?? createInMemoryStorage(),
+        artifacts: this.artifacts,
+        secrets: this.secrets,
+        broadcasters: () =>
+          [
+            ...this.sessions.values(),
+          ].map((session) => session.runner.broadcaster),
+      });
+      this.connectionRegistry = this.connections.registry;
+      this.registerGraphNeeds(this.connections.registry);
+    }
+  }
+
+  /**
+   * Registers what the agent graph's handles need: their profiles (ref kinds) and
+   * requirements, negotiated at start and again on every manifest change
+   * (spec 35 § Connection registry). Names the harness lacks are left to fail
+   * with `CONNECTION_UNKNOWN` when the step runs.
+   */
+  private registerGraphNeeds(registry: ConnectionRuntime): void {
+    if (!this.agentGraph) {
+      return;
+    }
+    const known = new Set(registry.names());
+    for (const need of graphConnectionNeeds(frameworkCast<Step>(this.agentGraph))) {
+      if (need.profile) {
+        registry.registerProfile(need.profile);
+      }
+      if (known.has(need.name)) {
+        registry.require(need.name, need.requirement);
+      }
+    }
+  }
+
+  /**
+   * Connects every connection provider and starts triggers. The first `execute()`
+   * or `run()` calls it; call it yourself for a harness that only reacts to
+   * triggers. Idempotent.
+   * @public
+   */
+  async start(): Promise<void> {
+    await this.connections?.start();
+  }
+
+  /**
+   * Each connection's state, identity and pool usage; one entry for `name`, or all.
+   * @public
+   */
+  getConnectionStatus(name?: string): ReadonlyArray<ConnectionStatus> {
+    return this.connectionRegistry?.status(name) ?? [];
+  }
+
+  /**
+   * A run's artifact manifest (spec 08 § Artifact Store).
+   * @public
+   */
+  getRunArtifacts(executionId: string): Promise<ReadonlyArray<ArtifactRecord>> {
+    return this.artifacts.listRun(executionId);
+  }
+
+  /**
+   * Restores an execution like `restore()`, letting it drive the connections in
+   * `rerun` again live even though they were replaced (spec 35 § Durability).
+   * @public
+   */
+  async resume(
+    executionId: string,
+    options: {
+      readonly rerun?: ReadonlyArray<string>;
+    } & RestoreCheckpointOptions = {},
+  ): Promise<Context | null> {
+    const { rerun, ...restoreOptions } = options;
+    this.connectionRegistry?.allowRerun(executionId, rerun ?? []);
+    await this.start();
+    return this.restore(executionId, restoreOptions);
+  }
+
+  /**
+   * Stops triggers and releases every connection and pool lease. Idempotent.
+   * @public
+   */
+  async closeConnections(): Promise<void> {
+    await this.connections?.close();
   }
 
   /**
@@ -1046,11 +1211,14 @@ export class AgentHarness<
               _broadcaster: session.runner.broadcaster,
             });
           frameworkCast<Context & SessionCtxExtension>(ctx)._sessionQueue = session.runner.queue;
-          if (this.agentGraph || this.harnessTools.length > 0) {
+          await this.start();
+          const connectionTools = this.connections?.tools() ?? [];
+          if (this.agentGraph || this.harnessTools.length > 0 || connectionTools.length > 0) {
             const stepTools = this.agentGraph ? collectAllTools(this.agentGraph) : [];
             this.setUnifiedTools(ctx, [
               ...stepTools,
               ...this.harnessTools,
+              ...connectionTools,
             ]);
           }
           // Steers the last harness accepted but never applied go back in the queue;
@@ -1194,25 +1362,42 @@ export class AgentHarness<
 
   //#endregion
 
-  async run<I, O>(s: Step<ContextData, I, O>, input: I, ctx: Context): Promise<O> {
-    if (this.lacksModelFor(s)) {
+  /**
+   * Runs a step — or an array of steps in sequence, each output the next one's
+   * input (an array runs its steps in sequence everywhere in Noetic).
+   */
+  async run<I, O>(
+    s: Step<ContextData, I, O> | ReadonlyArray<Step<ContextData, never, unknown>>,
+    input: I,
+    ctx: Context,
+  ): Promise<O> {
+    // Each step of an array takes whatever the one before it gave.
+    const steps: ReadonlyArray<Step<ContextData, unknown, unknown>> = isStepArray(s)
+      ? frameworkCast<ReadonlyArray<Step<ContextData, unknown, unknown>>>(s)
+      : [
+          frameworkCast<Step<ContextData, unknown, unknown>>(s),
+        ];
+    if (steps.some((child) => this.lacksModelFor(child))) {
       throw noLlmProviderError();
     }
     // Populate the unified tool pool when an embedder drives a step directly on
     // a bare `createContext()` context (the turn pipeline does this per turn).
     // Without it, steps that resolve tools dynamically from `ctx.unifiedTools`
     // — and any sub-agents spawned from them — would see no tools.
-    if (!ctx.unifiedTools && (s !== undefined || this.harnessTools.length > 0)) {
+    await this.start();
+    if (!ctx.unifiedTools) {
       this.setUnifiedTools(ctx, [
-        ...collectAllTools(s),
+        ...steps.flatMap((child) => collectAllTools(child)),
         ...this.harnessTools,
+        ...(this.connections?.tools() ?? []),
       ]);
     }
     // Hydrate/recall/persist context on the bare `run()` path too (issue #48):
     // configuring `context` + `storage` must "just work" without going through
     // `execute()`/`seedSessionHistory`. Idempotent — see `ensureLayersInit`.
     await this.ensureLayersInit(ctx);
-    return this.executeClosingChannels(s, input, ctx);
+    const root = isStepArray(s) ? stepSequence<I, O>(steps) : s;
+    return this.executeClosingChannels(root, input, ctx);
   }
 
   /**
@@ -1268,7 +1453,7 @@ export class AgentHarness<
       // A restored or sequentially re-run root context reuses its id — clear
       // any closure from a previous completion so its channels work again.
       this.channelStore.openExecution(ctx.id);
-      entry.ready = this.beginDurableRun(ctx);
+      entry.ready = this.beginDurableRun(ctx).then(() => this.reconcileConnections(ctx));
     }
     try {
       await entry.ready;
@@ -1282,7 +1467,13 @@ export class AgentHarness<
         this.liveRoots.delete(ctx.id);
         this.channelStore.closeExecution(ctx.id);
         await this.acpSessions.closeOwnedBy(ctx.id);
-        if (!entry.failed) {
+        if (entry.failed) {
+          // A failed run keeps its pool leases, unrenewed, so a resume within the
+          // reclaim window gets the same connections back and an abandoned one
+          // frees them (spec 35 § Pools and leases).
+          this.connectionRegistry?.orphanRun?.(ctx.id);
+        } else {
+          await this.connectionRegistry?.releaseRun(ctx.id);
           await this.endDurableRun(ctx);
         }
       }
@@ -1307,6 +1498,26 @@ export class AgentHarness<
     }
     ctx.beginRun();
     void this.saveCheckpoint(ctx);
+  }
+
+  /**
+   * Before a resumed run replays anything, checks the connections its ledger and
+   * pending entries were recorded against, discarding the ledger from the first
+   * entry whose connection was replaced (spec 35 § Durability).
+   *
+   * @throws NoeticErrorImpl `connection_resume_refused` when a replaced connection is unsafe to drive again.
+   */
+  private async reconcileConnections(ctx: Context): Promise<void> {
+    const registry = this.connectionRegistry;
+    if (!registry || !(ctx instanceof ContextImpl) || !ctx.ledger) {
+      return;
+    }
+    await reconcileResumedConnections({
+      ctx,
+      registry,
+      storage: this.config.storage,
+      signal: ctx.abortSignal,
+    });
   }
 
   /**
@@ -1346,6 +1557,9 @@ export class AgentHarness<
     ctx.endRun();
     if (await this.saveCheckpoint(ctx)) {
       await ctx.ledger?.dropPaths();
+    }
+    if (this.config.storage) {
+      await clearPendingEntries(this.config.storage, ctx.id);
     }
   }
 
@@ -1412,7 +1626,15 @@ export class AgentHarness<
     // `ContextImpl` takes the layers as `layers`, so the option spelling is
     // dropped from `rest` rather than spread through under the wrong name.
     const { contextLayers, extraContextLayers, cwdInit, ...rest } = resolved;
-    const baseLayers = contextLayers ?? this._contextLayers;
+    const configuredLayers = contextLayers ?? this._contextLayers;
+    const views = this.connections?.views ?? [];
+    const baseLayers =
+      views.length > 0
+        ? [
+            ...(configuredLayers ?? []),
+            ...views,
+          ]
+        : configuredLayers;
     const effectiveLayers =
       extraContextLayers && extraContextLayers.length > 0
         ? [

@@ -7,28 +7,40 @@ import type {
   AcpPermissionHandler,
   AcpPermissionPolicy,
   AcpSessionPolicy,
+  AnyProfile,
+  ConnectionEvent,
+  ConnectionHandle,
+  Context,
   CustomItemMap,
   CustomItemsBrand,
   Lazy,
   ModelParams,
+  OperationInput,
+  OperationName,
+  OperationOutput,
   OutputCodec,
   RetryPolicy,
   RunCodeExecute,
   ServerToolSpec,
   StandardSchemaV1,
+  Step,
   StepAcpAgent,
+  StepCall,
   StepCallModel,
   StepEmitItems,
   StepInvokeTool,
   StepReplay,
   StepRunCode,
+  StepWait,
+  StepWaitOutput,
   SubprocessAdapter,
   Tool,
   ToolChoice,
 } from '@noetic-tools/types';
-import { isServerToolSpec, NoeticConfigError } from '@noetic-tools/types';
+import { frameworkCast, isServerToolSpec, NoeticConfigError } from '@noetic-tools/types';
 import { getDefaultRegistrar } from '../types/step-registrar';
 import { checkEmitItems, isGeneratorFunction } from './custom-item';
+import { verify } from './verify-builder';
 
 //#region Types
 
@@ -118,6 +130,123 @@ export interface StepAcpAgentOpts<TContext, O, I = unknown>
   /** Session reuse + teardown policy across steps. */
   session?: AcpSessionPolicy;
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
+}
+
+/** The operation names a call on `P`'s handle may use: its profile's, or any for a handle without one. */
+export type CallOpName<P> = [
+  P,
+] extends [
+  AnyProfile,
+]
+  ? OperationName<P>
+  : string;
+
+/** A call's argument type: the profile operation's input, or `unknown` without a profile. */
+export type CallInput<P, Op extends string> = [
+  P,
+] extends [
+  AnyProfile,
+]
+  ? Op extends OperationName<P>
+    ? OperationInput<P, Op>
+    : never
+  : Readonly<Record<string, unknown>>;
+
+/** A call's output type: the profile operation's output, or `unknown` without a profile. */
+export type CallOutput<P, Op extends string> = [
+  P,
+] extends [
+  AnyProfile,
+]
+  ? Op extends OperationName<P>
+    ? OperationOutput<P, Op>
+    : unknown
+  : unknown;
+
+/** `step.call`'s options. With a profiled handle, `op`, `args` and the output are typed by the profile. */
+export interface CallOpts<TContext, I, P extends AnyProfile | undefined, Op extends string>
+  extends StepReplay<TContext, I>,
+    StepEmitItems<TContext, I, CallOutput<P, Op>> {
+  id: string;
+  /** A handle from `connection()`, or a harness connection name. */
+  connection: ConnectionHandle<P> | string;
+  op: Op;
+  /** A value, or a function of the step's input. Secrets (`secret('name')`) go in `sensitive` fields. */
+  args?:
+    | CallInput<P, Op>
+    | ((input: I, ctx: Context<TContext>) => CallInput<P, Op> | Promise<CallInput<P, Op>>);
+}
+
+/** `step.wait`'s options. */
+export interface WaitOpts<TContext, I, A = unknown>
+  extends StepReplay<TContext, I>,
+    StepEmitItems<TContext, I, StepWaitOutput<unknown, A>> {
+  id: string;
+  connection: ConnectionHandle | string;
+  /** The event type, e.g. `chat.message.created`. */
+  event: string;
+  /** Picks the event that ends the wait; every event of the type matches without one. */
+  filter?: (event: ConnectionEvent, input: I, ctx: Context<TContext>) => boolean | Promise<boolean>;
+  /** A step, or an array of steps run in sequence, run once listening has started. */
+  around?: Step<TContext, I, A> | ReadonlyArray<Step<TContext, I, unknown>>;
+  /** How long to wait, in ms, from when listening starts. Must be positive. */
+  timeoutMs: number;
+}
+
+//#endregion
+
+//#region Connection step validation
+
+function requireStepId(builder: string, id: string | undefined): void {
+  if (id && id.trim() !== '') {
+    return;
+  }
+  throw new NoeticConfigError({
+    code: 'EMPTY_STEP_ID',
+    message: `${builder}() requires a non-empty id.`,
+    hint: `Pass a unique string as the id field, e.g. ${builder}({ id: "my-step", ... }).`,
+  });
+}
+
+function requireConnection(builder: string, id: string, connection: unknown): void {
+  const named = typeof connection === 'string' && connection.length > 0;
+  const handle =
+    typeof connection === 'object' &&
+    connection !== null &&
+    'kind' in connection &&
+    connection.kind === 'connection-handle';
+  if (named || handle) {
+    return;
+  }
+  throw new NoeticConfigError({
+    code: 'CONNECTION_INVALID',
+    message: `${builder}(${JSON.stringify(id)}) names no connection.`,
+    hint: "Pass a handle from connection('name', profile), or a harness connection name.",
+  });
+}
+
+const OP_NAME_RE = /^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)+$/;
+
+function requireOpName(id: string, op: string): void {
+  if (OP_NAME_RE.test(op)) {
+    return;
+  }
+  throw new NoeticConfigError({
+    code: 'CONNECTION_INVALID',
+    message: `step.call(${JSON.stringify(id)}) has operation ${JSON.stringify(op)}, which is not an operation name.`,
+    hint: "An operation name has at least one dot, e.g. 'ui.tap' or 'chat.reply'.",
+  });
+}
+
+function requireTimeout(id: string, timeoutMs: number): void {
+  if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+    return;
+  }
+  throw new NoeticConfigError({
+    code: 'CONNECTION_INVALID',
+    message: `step.wait(${JSON.stringify(id)}) has timeoutMs ${timeoutMs}; it must be a positive number.`,
+    hint: 'Give the longest the wait may take, in ms, e.g. timeoutMs: 18e5 for 30 minutes.',
+  });
 }
 
 //#endregion
@@ -351,6 +480,81 @@ export const step = {
     getDefaultRegistrar().register(built);
     return built;
   },
+
+  /**
+   * Creates a step that runs one connection operation and returns its result
+   * (spec 35). With a handle from `connection(name, profile)`, `op`, `args` and
+   * the output are typed by the profile. Long upstream operations are waited for.
+   *
+   * @public
+   * @param opts.id - Unique step identifier.
+   * @param opts.connection - A handle from `connection()`, or a harness connection name.
+   * @param opts.op - The operation, e.g. `ui.tap`.
+   * @param opts.args - A value, or a function of the step's input.
+   * @returns A `StepCall`, auto-registered in the step registry.
+   * @throws `NoeticConfigError` `EMPTY_STEP_ID`, or `CONNECTION_INVALID` for a missing connection or an operation name without a dot.
+   */
+  call<
+    TContext = ContextData,
+    I = unknown,
+    P extends AnyProfile | undefined = undefined,
+    const Op extends CallOpName<P> = CallOpName<P>,
+  >(opts: CallOpts<TContext, I, P, Op>): StepCall<TContext, I, CallOutput<P, Op>> {
+    requireStepId('step.call', opts.id);
+    requireConnection('step.call', opts.id, opts.connection);
+    requireOpName(opts.id, opts.op);
+    const built: StepCall<TContext, I, CallOutput<P, Op>> = {
+      kind: 'call',
+      ...frameworkCast<Omit<StepCall<TContext, I, CallOutput<P, Op>>, 'kind'>>(opts),
+    };
+    getDefaultRegistrar().register(built);
+    return built;
+  },
+
+  /**
+   * Creates a step that waits for a connection event (spec 35). With `around`,
+   * it starts listening, runs `around`, then waits, so the event an action
+   * causes cannot slip past. Its output is `{ event, around }`.
+   *
+   * @public
+   * @param opts.id - Unique step identifier.
+   * @param opts.connection - A handle from `connection()`, or a harness connection name.
+   * @param opts.event - The event type to wait for.
+   * @param opts.filter - Picks the matching event: `(event, input, ctx) => boolean`.
+   * @param opts.around - A step or an array of steps to run once listening has started.
+   * @param opts.timeoutMs - How long to wait, in ms.
+   * @returns A `StepWait`, auto-registered in the step registry.
+   * @throws `NoeticConfigError` `EMPTY_STEP_ID`, or `CONNECTION_INVALID` for a missing connection, an empty event or a timeout that is not positive.
+   */
+  wait<TContext = ContextData, I = unknown, A = unknown>(
+    opts: WaitOpts<TContext, I, A>,
+  ): StepWait<TContext, I, StepWaitOutput<unknown, A>> {
+    requireStepId('step.wait', opts.id);
+    requireConnection('step.wait', opts.id, opts.connection);
+    if (!opts.event) {
+      throw new NoeticConfigError({
+        code: 'CONNECTION_INVALID',
+        message: `step.wait(${JSON.stringify(opts.id)}) names no event.`,
+        hint: "Pass the event type to wait for, e.g. event: 'chat.message.created'.",
+      });
+    }
+    requireTimeout(opts.id, opts.timeoutMs);
+    const built: StepWait<TContext, I, StepWaitOutput<unknown, A>> = {
+      kind: 'wait',
+      ...frameworkCast<Omit<StepWait<TContext, I, StepWaitOutput<unknown, A>>, 'kind'>>(opts),
+    };
+    getDefaultRegistrar().register(built);
+    return built;
+  },
+
+  /**
+   * Creates a step that checks claims about what a connection shows (spec 37):
+   * it declares what should become true, runs `act`, watches the connection's
+   * senses, and answers with the evidence. See `verify` in `./verify-builder`.
+   *
+   * @public
+   */
+  verify,
 };
 
 //#endregion

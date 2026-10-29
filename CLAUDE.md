@@ -38,20 +38,28 @@ inspector ──→ platform-node ──→ core ──→ context ──→ typ
                                    openui ───┘──────────┤
                                         chat-sdk ───────┤
                                              acp ───────┤
-                                   agent-plugins ───────┘
+                   agent-plugins ──→ mcp ───────────────┤
+                                          verify ───────┤
+                       profile-{browser,app,device} ──→ profile-ui ──┤
+                                profile-{ui,screen,chat} ────────────┘
 
 web (standalone — no workspace deps)
 ```
 
 Every edge above is the complete set: `types` depends on nothing; `context`,
-`chat-sdk`, `acp`, and `agent-plugins` depend only on `types`; `openui` and `core` on `context` +
-`types`; `eval`, `platform-node`, and `platform-browser` on `core`; `inspector`
-on `core` + `platform-node`; `web` on nothing.
+`chat-sdk`, `acp`, `mcp`, `verify`, `profile-ui`, `profile-screen` and
+`profile-chat` depend only on `types`; `profile-browser`, `profile-app` and
+`profile-device` on `types` + `profile-ui`; `agent-plugins` on `types` + `mcp`;
+`openui` and `core` on `context` + `types`; `eval`, `platform-node`, and
+`platform-browser` on `core`; `inspector` on `core` + `platform-node`; `web` on
+nothing.
 
-The 11 packages under `packages/`: `acp`, `chat-sdk`, `context`, `core`, `eval`,
-`inspector`, `openui`, `platform-browser`, `platform-node`, `types`, `web`. Most
-publish under the `@noetic-tools/` scope; `inspector`, `platform-browser`, and
-`web` use `@noetic/`.
+The 20 packages under `packages/`: `acp`, `agent-plugins`, `chat-sdk`,
+`context`, `core`, `eval`, `inspector`, `mcp`, `openui`, `platform-browser`,
+`platform-node`, `profile-app`, `profile-browser`, `profile-chat`,
+`profile-device`, `profile-screen`, `profile-ui`, `types`, `verify`, `web`.
+Most publish under the `@noetic-tools/` scope; `inspector`, `platform-browser`,
+and `web` use `@noetic/`.
 
 The Noetic CLI (`@noetic-tools/cli`), its code-agent tooling
 (`@noetic-tools/code-agent`), and the `@noetic/plugin-*` packages are **not in
@@ -64,7 +72,10 @@ this repo under `packages/web/content/docs/code-agent-cli/`.
 - **`@noetic-tools/context`** — the context layer system: lifecycle, budget/projection machinery (`assembleView`, `allocateBudgets`, layer state stores, scoping), and the built-in layers (instructions/history/scratchpad/observations/temporal/steering/filesystem/plan/task-state/tool-calls). Depends only on `@noetic-tools/types`; re-exports the `ContextLayer` contract so it is the one-stop import for context-layer authoring. Must stay free of imports from `core` (acyclic + tree-shakable).
 - **`@noetic-tools/core`** — step primitives (`Step<I,O>` discriminated union), interpreter, runtime, error model, observability. Re-exports the public surface of `@noetic-tools/context` and `@noetic-tools/types`, so its `.`, `/portable`, `/unstable`, and `/internal/test` entry points are unchanged for consumers. Internal order (foundational → consumer): `types/schemas/util` → `observability` → `builders/conditions/until` → `runtime` → `interpreter` → `adapters` → `harness`.
 - **`@noetic-tools/acp`** — an [Agent Client Protocol](https://agentclientprotocol.com/) client: runs any ACP-speaking coding agent (Claude Code, Codex, Gemini CLI, …) as a step via `step.acpAgent(...)` or an `acp-agent` JSON workflow node. Owns the protocol library, capability negotiation, session/turn drivers, the client-side `fs/*` + `terminal/*` + permission handlers (backed by Noetic's own `FsAdapter`/`ShellAdapter`, with `fs/*` paths confined to the session cwd by default — note that a `permissions` policy does NOT gate `fs/*` or `terminal/*`, which are client methods the agent calls directly rather than tool calls it asks about), the transports, and the agent presets. The `.` entry is runtime-neutral; the Node stdio transport lives at `./stdio`. Depends only on `@noetic-tools/types`. **`@noetic-tools/core` must never import this package** — it resolves agents from the types contract + a runtime registry, so no protocol code is loaded at runtime by core (enforced by `.sentrux/rules.toml`). Note the npm graph is a different question: `@noetic-tools/types` takes the protocol package as a real dependency for its type re-exports, so installing core installs it — the import graph is clean, the dependency tree is not. See `specs/27-acp-agent-steps.md`.
-- **`@noetic-tools/agent-plugins`** — a conformant [Agent Plugins](https://agent-plugins.org) v1 client. Discovers plugin packages (a closed `plugin.json` manifest plus the two portable component types: Agent Skills in `skills/`, MCP servers in `mcp.json`) and exposes them through the `agentPlugins()` context layer using the spec's progressive disclosure model. Depends only on `@noetic-tools/types`; it is the **only** package permitted to depend on `@modelcontextprotocol/sdk`, and it launches plugin subprocesses. **`@noetic-tools/core` must never import it** — the same rule that keeps the ACP client out of core, so no protocol library, vendor SDK, or subprocess launcher enters core's graph (enforced by `.sentrux/rules.toml`). See `specs/30-agent-plugins.md`.
+- **`@noetic-tools/agent-plugins`** — a conformant [Agent Plugins](https://agent-plugins.org) v1 client. Discovers plugin packages (a closed `plugin.json` manifest plus the two portable component types: Agent Skills in `skills/`, MCP servers in `mcp.json`) and exposes them through the `agentPlugins()` context layer using the spec's progressive disclosure model. Depends on `@noetic-tools/types` and `@noetic-tools/mcp`, through which it connects plugin MCP servers (it never imports `@modelcontextprotocol/sdk` itself), and it launches plugin subprocesses. **`@noetic-tools/core` must never import it** — the same rule that keeps the ACP client out of core, so no protocol library, vendor SDK, or subprocess launcher enters core's graph (enforced by `.sentrux/rules.toml`). See `specs/30-agent-plugins.md`.
+- **`@noetic-tools/mcp`** — the MCP bridge: `mcp(...)` is a `ConnectionProvider` that connects an MCP server (stdio, streamable HTTP), reads its `tools.noetic/profiles` declaration and checks it against profile definitions, and maps tools, resources and events onto a connection manifest. It is the **only** package that imports `@modelcontextprotocol/sdk`; conformance checking lives at `./conformance`. Depends only on `types`; core never imports it. See `specs/35-connections.md`, `specs/36-connection-profiles.md`.
+- **`@noetic-tools/verify`** — the `verifier()` implementing core's `Verifier` contract with `open-verification` (OVP): matchers, windows, judging, run records. The only package that imports `open-verification`. Depends only on `types` (`@noetic-tools/types/verify`); core never imports it. See `specs/37-verification.md`.
+- **`@noetic-tools/profile-*`** — the v1 profile catalog (`ui`, `screen`, `browser`, `app`, `device`, `chat`), each a `defineProfile(...)` from `types`; `browser`, `app` and `device` extend `ui`. Core never imports them. See `specs/36-connection-profiles.md`.
 - **`@noetic-tools/openui`** — generative UI via the OpenUI standard: the `openUi()` output codec (streaming OpenUI Lang parser), the `openUiSurface()` context layer, the typed `fragment()` builder for tool-authored UI, and an OpenUI-speaking transport at `./server`. Depends on `context` + `types` only; **core never imports it**. See `specs/28-generative-ui.md`.
 - **`@noetic-tools/chat-sdk`** — chat-sdk.dev integration: run a harness as the brain of a multi-platform chat bot via `chat.onSubscribedMessage(noeticAgent(...))`. Depends only on `types`. See `specs/29-chat-platform-integration.md`.
 - **`@noetic-tools/platform-node`** / **`@noetic/platform-browser`** — the platform adapter implementations. Core ships only contracts + in-memory adapters; `platform-node` adds the local fs/shell/subprocess adapters, file storage, the durable outbound queue, and the agent IPC client/server/protocol, while `platform-browser` re-exports core's runtime-neutral in-memory adapters with no `node:*` imports. Both depend on `core`. See `specs/25-platform-packages.md`.

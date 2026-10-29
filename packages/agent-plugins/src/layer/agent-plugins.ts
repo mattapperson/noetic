@@ -93,6 +93,18 @@ export interface AgentPluginsConfig {
   budget?: ContextLayer['budget'];
 }
 
+/** The calling run's abort signal, read from a tool execution context, when it has one. */
+function runSignalOf(toolCtx: unknown): AbortSignal | undefined {
+  if (typeof toolCtx !== 'object' || toolCtx === null || !('ctx' in toolCtx)) {
+    return undefined;
+  }
+  const ctx = toolCtx.ctx;
+  if (typeof ctx !== 'object' || ctx === null || !('abortSignal' in ctx)) {
+    return undefined;
+  }
+  return ctx.abortSignal instanceof AbortSignal ? ctx.abortSignal : undefined;
+}
+
 /** @public The layer id, and the key `ctx.context[…]` exposes its handle under. */
 export const AGENT_PLUGINS_LAYER_ID = 'agent-plugins';
 
@@ -962,7 +974,7 @@ export function agentPlugins(config: AgentPluginsConfig): AgentPluginsLayer {
                 'Invoke a tool on a connected MCP server. Server keys and tool names are listed in <agent_plugins>.',
               input: CallMcpToolInput,
               output: CallMcpToolOutput,
-              async execute(args: z.infer<typeof CallMcpToolInput>) {
+              async execute(args: z.infer<typeof CallMcpToolInput>, toolCtx?: unknown) {
                 const loaded = await load();
                 const session = loaded.sessions.find((entry) => entry.key === args.server);
                 if (session === undefined) {
@@ -973,10 +985,16 @@ export function agentPlugins(config: AgentPluginsConfig): AgentPluginsLayer {
                     },
                   };
                 }
+                const signal = runSignalOf(toolCtx);
                 const outcome = await callMcpTool({
                   session,
                   tool: args.tool,
                   args: args.arguments ?? {},
+                  ...(signal
+                    ? {
+                        signal,
+                      }
+                    : {}),
                 });
                 return {
                   result: {

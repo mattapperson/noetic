@@ -1,6 +1,6 @@
 ---
 name: noetic-agent-builder
-description: This skill provides guidance for building AI agents with the Noetic framework. It should be used when creating, modifying, or composing agent patterns using Noetic's step primitives, context layers, tools, ACP coding-agent steps, generative UI (OpenUI), chat platform integration (chat-sdk.dev), and agent harness. Triggers include mentions of "agent", "react pattern", "context layer", "spawn", "tool", "loop", "acp", "agent client protocol", "step.acpAgent", "Claude Code / Codex / Gemini CLI as a step", "generative UI", "OpenUI", "openUi codec", "openUiSurface", "tool ui / render fragment", "chat-sdk", "noeticAgent", "Slack bot / Discord bot / Teams bot with Noetic", "getChannelStream", "agent plugins", "agent-plugins.org", "SKILL.md", "Agent Skills", "mcp.json", "MCP server", "agentPlugins", "loadSkill", or any Noetic-specific API usage in the packages/core directory.
+description: This skill provides guidance for building AI agents with the Noetic framework. It should be used when creating, modifying, or composing agent patterns using Noetic's step primitives, context layers, tools, ACP coding-agent steps, generative UI (OpenUI), chat platform integration (chat-sdk.dev), and agent harness. Triggers include mentions of "agent", "react pattern", "context layer", "spawn", "tool", "loop", "acp", "agent client protocol", "step.acpAgent", "Claude Code / Codex / Gemini CLI as a step", "generative UI", "OpenUI", "openUi codec", "openUiSurface", "tool ui / render fragment", "chat-sdk", "noeticAgent", "Slack bot / Discord bot / Teams bot with Noetic", "getChannelStream", "agent plugins", "agent-plugins.org", "SKILL.md", "Agent Skills", "mcp.json", "MCP server", "agentPlugins", "loadSkill", "connection", "connections", "step.call", "step.wait", "step.verify", "verify", "verification", "OVP", "Open Verification Protocol", "profile", "defineProfile", "browser / simulator / desktop app / Slack as a connection", "trigger", "defineSource", "cron", "@noetic-tools/mcp", or any Noetic-specific API usage in the packages/core directory.
 ---
 
 # Building Agents with Noetic
@@ -107,6 +107,17 @@ An agent can respond with a *UI* built from components you register, instead of 
 
 `serveOpenUi(harness, { surface })` exposes it to OpenUI's React client. In a JSON workflow, a `callModel` node references a codec via `output: { codec: 'openui', library }` resolved from `HydrationContext.uiLibraries`. Full API: `references/api-reference.md` → Generative UI (OpenUI).
 
+### Connections, Profiles, and Verification
+
+A **connection** is a named, live thing the agent works with -- a browser, a simulator, a desktop app, a Slack workspace, a queue -- configured as `new AgentHarness({ connections: { browser: mcp('npx @playwright/mcp@latest') } })` (`mcp()` from `@noetic-tools/mcp`; core never imports it). Its operations reach the model as tools, gated like any tool (`policy` globs, `guarded` approval, `beforeToolCall`).
+
+- **Profiles** (`@noetic-tools/profile-{ui,screen,browser,app,device,chat}`) are shared, versioned vocabularies. `connection('app', browser)` returns a typed handle; `step.call({ id, connection: app, op: 'ui.tap', args })` runs one operation, `step.wait({ id, connection, event, filter?, around?, timeoutMs })` waits for an event (with `around` it listens first, so the event an action causes cannot slip past).
+- **Verification**: `step.verify({ id, subject, expect: [net('POST /api/orders 201').once()], never: [net('5xx')], act })` (matchers from `@noetic-tools/verify`; register `verification: verifier()` on the harness) declares claims, checks before, listens, runs `act`, and answers `pass`/`fail`/`partial`/`unknown` through OVP's `adjudicate()` -- with evidence and gaps. It never throws for `no` or `unknown`.
+- **Triggers** start turns from connection events (`triggers: [{ id, connection, event, input }]`); `defineSource()` and `cron()` are in-process event sources.
+- **JSON**: a document's `connections` manifest plus `call` / `wait` / `verify` nodes; `{ "$expr" }`, `{ "$secret" }`, `{ "$literal" }` values; `dynamicWorkflow({ connections })` needs an allowlist.
+
+Full API: `references/api-reference.md` → Connections, Profiles, and Verification.
+
 ### An Array of Steps Runs in Order
 
 Wherever Noetic takes an **array of steps** -- `loop({ steps: [...] })`, a JSON `sequence` node's `steps` -- it runs them **one at a time, in array order**. Each step starts only after the previous one finishes, and gets that step's output as its input. The array's result is the last step's output, and a step that throws stops the rest. Nothing runs concurrently unless you ask: **`inParallel` is the only exception**. Its `paths` (and a JSON `inParallel`'s `paths` or `each`) all run at the same time, each on the same input, and `merge` combines their results. Inside each path, steps still run in order.
@@ -141,6 +152,10 @@ It is all separate from the `emit` event filter on `callModel`/`decide`/`acpAgen
 | Deterministic state machine or counter loop with no LLM calls, as data | JSON Workflow with State | `loop` node (`"maxIterations": "infinity"`) + `compute` body + `{ "kind": "expr" }` until (JSONata, spec 33) |
 | Run a real coding agent (Claude Code / Codex / Gemini CLI) as a step | ACP Agent Step | `step.acpAgent` |
 | Agent responds with a UI (not text) | Generative UI | `callModel({ output: openUi(library) })` + `openUiSurface()` |
+| Drive a browser / simulator / app / chat workspace | Connections | `connections: { name: mcp(...) }` + `step.call` / model tools |
+| Prove an action worked, with evidence | Verify | `step.verify({ subject, expect, never, act })` + `verifier()` |
+| Ask a person and wait for the answer | Wait Around | `step.wait({ event, filter, around: step.call(...) })` |
+| React to external events (mentions, deploys, schedules) | Triggers | `triggers: [...]` + `defineSource()` / `cron()` |
 
 For pattern-specific code examples, read `references/composition-patterns.md`.
 
@@ -266,8 +281,13 @@ For complete builder signatures, context layer APIs, agent harness methods, and 
 | Context layers | `packages/context/src/context/layers/` |
 | Prompt-cache anchoring | `packages/context/src/context/cache-anchoring.ts`, `packages/core/src/interpreter/context-assembly.ts` |
 | Generative UI (OpenUI) | `packages/openui/src/` (codec, `openUiSurface`, `fragment`, `/server`) |
+| Connections (registry, gates, pools, triggers, sources) | `packages/core/src/connections/`, `packages/types/src/types/connection.ts` |
+| Connection steps | `packages/core/src/interpreter/execute-call.ts`, `execute-wait.ts`, `execute-verify.ts`, `packages/core/src/builders/verify-builder.ts` |
+| MCP bridge | `packages/mcp/src/` (`mcp()`, `./conformance`) |
+| Profiles | `packages/types/src/types/profile.ts` (`defineProfile`, `defineExtension`), `packages/profile-*/src/` |
+| Verification (OVP) | `packages/types/src/verify/`, `packages/verify/src/` |
 | AgentHarness | `packages/core/src/harness/agent-harness.ts` |
 | Interpreter | `packages/core/src/interpreter/` |
-| Specs | `specs/` (numbered 00-29) |
+| Specs | `specs/` (numbered 00-37; connections 35, profiles 36, verification 37) |
 | Examples | `packages/core/examples/` |
 | Docs | `packages/web/content/docs/` |

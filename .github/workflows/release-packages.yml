@@ -321,11 +321,71 @@ jobs:
   # release right after types. It is sequenced here instead because every job in
   # this workflow pushes a `chore: release` commit to main, and running them in
   # one chain is what keeps a sibling from being stranded behind a moved ref.
+  mcp:
+    name: Release @noetic-tools/mcp
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: openui
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install npm with trusted publishing support
+        run: npm install --global npm@11
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Lint
+        run: bunx biome check packages/mcp
+
+      - name: Typecheck
+        run: bun run --cwd packages/mcp typecheck
+
+      - name: Test
+        run: bun run --cwd packages/mcp test
+
+      # Only @noetic-tools/types is needed; the MCP SDK comes from npm.
+      - name: Build dependencies
+        run: |
+          bun run --cwd packages/types build
+
+      - name: Build
+        run: bun run --cwd packages/mcp build
+
+      # See the types job. `workspace:*` deps are pinned to concrete versions at
+      # publish time by `prepublishOnly` (scripts/pin-workspace-deps.ts).
+      - name: Detach package from workspace for npm
+        run: node -e "const fs=require('fs');const p=require('./package.json');delete p.workspaces;fs.writeFileSync('./package.json',JSON.stringify(p,null,2)+'\n')"
+
+      - name: Finish any pending npm publish
+        run: bash scripts/publish-missing.sh packages/mcp
+
+      - name: Release
+        working-directory: packages/mcp
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_CONFIG_PROVENANCE: 'true'
+        run: npx --yes -p semantic-release@25 -p semantic-release-monorepo@8 -p @semantic-release/changelog@6 -p @semantic-release/git@10 -p conventional-changelog-conventionalcommits@7 semantic-release --extends semantic-release-monorepo
+
   agent-plugins:
     name: Release @noetic-tools/agent-plugins
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: openui
+    needs: mcp
     permissions:
       contents: write
       issues: write
@@ -358,10 +418,12 @@ jobs:
       - name: Test
         run: bun run --cwd packages/agent-plugins test
 
-      # Only @noetic-tools/types is needed: the package builds on the
-      # ContextLayer contract and nothing else in the workspace.
-      - name: Build dependency (@noetic-tools/types)
-        run: bun run --cwd packages/types build
+      # The package builds on the ContextLayer contract in @noetic-tools/types
+      # and registers plugin MCP servers through @noetic-tools/mcp.
+      - name: Build dependencies
+        run: |
+          bun run --cwd packages/types build
+          bun run --cwd packages/mcp build
 
       - name: Build
         run: bun run --cwd packages/agent-plugins build
@@ -630,5 +692,428 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: 'true'
+        run: npx --yes -p semantic-release@25 -p semantic-release-monorepo@8 -p @semantic-release/changelog@6 -p @semantic-release/git@10 -p conventional-changelog-conventionalcommits@7 semantic-release --extends semantic-release-monorepo
+
+  profile-ui:
+    name: Release @noetic-tools/profile-ui
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: platform-browser
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install npm with trusted publishing support
+        run: npm install --global npm@11
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Lint
+        run: bunx biome check packages/profile-ui
+
+      - name: Typecheck
+        run: bun run --cwd packages/profile-ui typecheck
+
+      - name: Test
+        run: bun run --cwd packages/profile-ui test
+
+      # Profiles build only on the @noetic-tools/types contract.
+      - name: Build dependencies
+        run: |
+          bun run --cwd packages/types build
+
+      - name: Build
+        run: bun run --cwd packages/profile-ui build
+
+      # See the types job. `workspace:*` deps are pinned to concrete versions at
+      # publish time by `prepublishOnly` (scripts/pin-workspace-deps.ts).
+      - name: Detach package from workspace for npm
+        run: node -e "const fs=require('fs');const p=require('./package.json');delete p.workspaces;fs.writeFileSync('./package.json',JSON.stringify(p,null,2)+'\n')"
+
+      - name: Finish any pending npm publish
+        run: bash scripts/publish-missing.sh packages/profile-ui
+
+      - name: Release
+        working-directory: packages/profile-ui
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_CONFIG_PROVENANCE: 'true'
+        run: npx --yes -p semantic-release@25 -p semantic-release-monorepo@8 -p @semantic-release/changelog@6 -p @semantic-release/git@10 -p conventional-changelog-conventionalcommits@7 semantic-release --extends semantic-release-monorepo
+
+  profile-screen:
+    name: Release @noetic-tools/profile-screen
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: profile-ui
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install npm with trusted publishing support
+        run: npm install --global npm@11
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Lint
+        run: bunx biome check packages/profile-screen
+
+      - name: Typecheck
+        run: bun run --cwd packages/profile-screen typecheck
+
+      - name: Test
+        run: bun run --cwd packages/profile-screen test
+
+      # Profiles build only on the @noetic-tools/types contract.
+      - name: Build dependencies
+        run: |
+          bun run --cwd packages/types build
+
+      - name: Build
+        run: bun run --cwd packages/profile-screen build
+
+      # See the types job. `workspace:*` deps are pinned to concrete versions at
+      # publish time by `prepublishOnly` (scripts/pin-workspace-deps.ts).
+      - name: Detach package from workspace for npm
+        run: node -e "const fs=require('fs');const p=require('./package.json');delete p.workspaces;fs.writeFileSync('./package.json',JSON.stringify(p,null,2)+'\n')"
+
+      - name: Finish any pending npm publish
+        run: bash scripts/publish-missing.sh packages/profile-screen
+
+      - name: Release
+        working-directory: packages/profile-screen
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_CONFIG_PROVENANCE: 'true'
+        run: npx --yes -p semantic-release@25 -p semantic-release-monorepo@8 -p @semantic-release/changelog@6 -p @semantic-release/git@10 -p conventional-changelog-conventionalcommits@7 semantic-release --extends semantic-release-monorepo
+
+  profile-browser:
+    name: Release @noetic-tools/profile-browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: profile-screen
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install npm with trusted publishing support
+        run: npm install --global npm@11
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Lint
+        run: bunx biome check packages/profile-browser
+
+      - name: Typecheck
+        run: bun run --cwd packages/profile-browser typecheck
+
+      - name: Test
+        run: bun run --cwd packages/profile-browser test
+
+      # browser@1 extends ui@1, so profile-ui is built too.
+      - name: Build dependencies
+        run: |
+          bun run --cwd packages/types build
+          bun run --cwd packages/profile-ui build
+
+      - name: Build
+        run: bun run --cwd packages/profile-browser build
+
+      # See the types job. `workspace:*` deps are pinned to concrete versions at
+      # publish time by `prepublishOnly` (scripts/pin-workspace-deps.ts).
+      - name: Detach package from workspace for npm
+        run: node -e "const fs=require('fs');const p=require('./package.json');delete p.workspaces;fs.writeFileSync('./package.json',JSON.stringify(p,null,2)+'\n')"
+
+      - name: Finish any pending npm publish
+        run: bash scripts/publish-missing.sh packages/profile-browser
+
+      - name: Release
+        working-directory: packages/profile-browser
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_CONFIG_PROVENANCE: 'true'
+        run: npx --yes -p semantic-release@25 -p semantic-release-monorepo@8 -p @semantic-release/changelog@6 -p @semantic-release/git@10 -p conventional-changelog-conventionalcommits@7 semantic-release --extends semantic-release-monorepo
+
+  profile-app:
+    name: Release @noetic-tools/profile-app
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: profile-browser
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install npm with trusted publishing support
+        run: npm install --global npm@11
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Lint
+        run: bunx biome check packages/profile-app
+
+      - name: Typecheck
+        run: bun run --cwd packages/profile-app typecheck
+
+      - name: Test
+        run: bun run --cwd packages/profile-app test
+
+      # app@1 extends ui@1, so profile-ui is built too.
+      - name: Build dependencies
+        run: |
+          bun run --cwd packages/types build
+          bun run --cwd packages/profile-ui build
+
+      - name: Build
+        run: bun run --cwd packages/profile-app build
+
+      # See the types job. `workspace:*` deps are pinned to concrete versions at
+      # publish time by `prepublishOnly` (scripts/pin-workspace-deps.ts).
+      - name: Detach package from workspace for npm
+        run: node -e "const fs=require('fs');const p=require('./package.json');delete p.workspaces;fs.writeFileSync('./package.json',JSON.stringify(p,null,2)+'\n')"
+
+      - name: Finish any pending npm publish
+        run: bash scripts/publish-missing.sh packages/profile-app
+
+      - name: Release
+        working-directory: packages/profile-app
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_CONFIG_PROVENANCE: 'true'
+        run: npx --yes -p semantic-release@25 -p semantic-release-monorepo@8 -p @semantic-release/changelog@6 -p @semantic-release/git@10 -p conventional-changelog-conventionalcommits@7 semantic-release --extends semantic-release-monorepo
+
+  profile-device:
+    name: Release @noetic-tools/profile-device
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: profile-app
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install npm with trusted publishing support
+        run: npm install --global npm@11
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Lint
+        run: bunx biome check packages/profile-device
+
+      - name: Typecheck
+        run: bun run --cwd packages/profile-device typecheck
+
+      - name: Test
+        run: bun run --cwd packages/profile-device test
+
+      # device@1 extends ui@1, so profile-ui is built too.
+      - name: Build dependencies
+        run: |
+          bun run --cwd packages/types build
+          bun run --cwd packages/profile-ui build
+
+      - name: Build
+        run: bun run --cwd packages/profile-device build
+
+      # See the types job. `workspace:*` deps are pinned to concrete versions at
+      # publish time by `prepublishOnly` (scripts/pin-workspace-deps.ts).
+      - name: Detach package from workspace for npm
+        run: node -e "const fs=require('fs');const p=require('./package.json');delete p.workspaces;fs.writeFileSync('./package.json',JSON.stringify(p,null,2)+'\n')"
+
+      - name: Finish any pending npm publish
+        run: bash scripts/publish-missing.sh packages/profile-device
+
+      - name: Release
+        working-directory: packages/profile-device
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_CONFIG_PROVENANCE: 'true'
+        run: npx --yes -p semantic-release@25 -p semantic-release-monorepo@8 -p @semantic-release/changelog@6 -p @semantic-release/git@10 -p conventional-changelog-conventionalcommits@7 semantic-release --extends semantic-release-monorepo
+
+  profile-chat:
+    name: Release @noetic-tools/profile-chat
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: profile-device
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install npm with trusted publishing support
+        run: npm install --global npm@11
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Lint
+        run: bunx biome check packages/profile-chat
+
+      - name: Typecheck
+        run: bun run --cwd packages/profile-chat typecheck
+
+      - name: Test
+        run: bun run --cwd packages/profile-chat test
+
+      # Profiles build only on the @noetic-tools/types contract.
+      - name: Build dependencies
+        run: |
+          bun run --cwd packages/types build
+
+      - name: Build
+        run: bun run --cwd packages/profile-chat build
+
+      # See the types job. `workspace:*` deps are pinned to concrete versions at
+      # publish time by `prepublishOnly` (scripts/pin-workspace-deps.ts).
+      - name: Detach package from workspace for npm
+        run: node -e "const fs=require('fs');const p=require('./package.json');delete p.workspaces;fs.writeFileSync('./package.json',JSON.stringify(p,null,2)+'\n')"
+
+      - name: Finish any pending npm publish
+        run: bash scripts/publish-missing.sh packages/profile-chat
+
+      - name: Release
+        working-directory: packages/profile-chat
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_CONFIG_PROVENANCE: 'true'
+        run: npx --yes -p semantic-release@25 -p semantic-release-monorepo@8 -p @semantic-release/changelog@6 -p @semantic-release/git@10 -p conventional-changelog-conventionalcommits@7 semantic-release --extends semantic-release-monorepo
+
+  verify:
+    name: Release @noetic-tools/verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: profile-chat
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install npm with trusted publishing support
+        run: npm install --global npm@11
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Lint
+        run: bunx biome check packages/verify
+
+      - name: Typecheck
+        run: bun run --cwd packages/verify typecheck
+
+      - name: Test
+        run: bun run --cwd packages/verify test
+
+      # Only @noetic-tools/types is needed; open-verification comes from npm.
+      - name: Build dependencies
+        run: |
+          bun run --cwd packages/types build
+
+      - name: Build
+        run: bun run --cwd packages/verify build
+
+      # See the types job. `workspace:*` deps are pinned to concrete versions at
+      # publish time by `prepublishOnly` (scripts/pin-workspace-deps.ts).
+      - name: Detach package from workspace for npm
+        run: node -e "const fs=require('fs');const p=require('./package.json');delete p.workspaces;fs.writeFileSync('./package.json',JSON.stringify(p,null,2)+'\n')"
+
+      - name: Finish any pending npm publish
+        run: bash scripts/publish-missing.sh packages/verify
+
+      - name: Release
+        working-directory: packages/verify
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_CONFIG_PROVENANCE: 'true'
         run: npx --yes -p semantic-release@25 -p semantic-release-monorepo@8 -p @semantic-release/changelog@6 -p @semantic-release/git@10 -p conventional-changelog-conventionalcommits@7 semantic-release --extends semantic-release-monorepo

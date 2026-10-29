@@ -40,6 +40,25 @@ describe('extractSystemInstruction', () => {
 });
 
 describe('itemsToInput', () => {
+  it("never sends a framework-owned noetic:* item (a trigger turn's connection event) to the provider", () => {
+    const input = itemsToInput([
+      makeMessage('user', 'deploy failed'),
+      frameworkCast<Item>({
+        type: 'noetic:connection_event',
+        id: 'connection-event-1',
+        event: {
+          type: 'deploy.failed',
+        },
+      }),
+    ]);
+    expect(input).toHaveLength(1);
+    expect(
+      frameworkCast<{
+        role: string;
+      }>(input[0]).role,
+    ).toBe('user');
+  });
+
   it('converts user messages to SDK input format', () => {
     const items = [
       makeMessage('user', 'Hello'),

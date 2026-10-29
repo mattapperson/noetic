@@ -12,7 +12,10 @@
         "@biomejs/biome": "^2.3.11",
         "@noetic-tools/acp": "workspace:*",
         "@noetic-tools/core": "workspace:*",
+        "@noetic-tools/mcp": "workspace:*",
         "@noetic-tools/openui": "workspace:*",
+        "@noetic-tools/platform-node": "workspace:*",
+        "@noetic-tools/verify": "workspace:*",
         "bun-types": "latest",
         "typescript": "5.9.3",
         "yaml": "^2.9.0",
@@ -21,7 +24,7 @@
     },
     "packages/acp": {
       "name": "@noetic-tools/acp",
-      "version": "1.2.0",
+      "version": "1.3.1-next.1",
       "dependencies": {
         "@noetic-tools/types": "workspace:*",
         "@zed-industries/agent-client-protocol": "^0.4.5",
@@ -38,9 +41,9 @@
     },
     "packages/agent-plugins": {
       "name": "@noetic-tools/agent-plugins",
-      "version": "0.2.0",
+      "version": "0.2.1-next.1",
       "dependencies": {
-        "@modelcontextprotocol/sdk": "^1.30.0",
+        "@noetic-tools/mcp": "workspace:*",
         "@noetic-tools/types": "workspace:*",
         "yaml": "^2.9.0",
         "zod": "^4.0.0",
@@ -75,7 +78,7 @@
     },
     "packages/context": {
       "name": "@noetic-tools/context",
-      "version": "1.7.0",
+      "version": "1.11.1-next.1",
       "dependencies": {
         "@noetic-tools/types": "workspace:*",
         "zod": "^4.0.0",
@@ -89,7 +92,7 @@
     },
     "packages/core": {
       "name": "@noetic-tools/core",
-      "version": "5.10.0",
+      "version": "5.19.1-next.1",
       "dependencies": {
         "@noetic-tools/context": "workspace:*",
         "@noetic-tools/types": "workspace:*",
@@ -114,7 +117,7 @@
     },
     "packages/eval": {
       "name": "@noetic-tools/eval",
-      "version": "1.2.0",
+      "version": "1.2.1-next.1",
       "bin": {
         "noetic-eval": "./dist/cli/cli.js",
       },
@@ -148,7 +151,7 @@
         "next": "16.1.6",
         "react": "19.1.0",
         "react-dom": "19.1.0",
-        "zod": "4.3.6",
+        "zod": "4.6.7",
         "zustand": "5.0.14",
       },
       "devDependencies": {
@@ -162,9 +165,24 @@
         "typescript": "5.8.3",
       },
     },
+    "packages/mcp": {
+      "name": "@noetic-tools/mcp",
+      "version": "0.1.0",
+      "dependencies": {
+        "@modelcontextprotocol/sdk": "1.30.0",
+        "@noetic-tools/types": "workspace:*",
+        "zod": "^4.0.0",
+      },
+      "devDependencies": {
+        "bun-types": "latest",
+      },
+      "peerDependencies": {
+        "zod": "^4.0.0",
+      },
+    },
     "packages/openui": {
       "name": "@noetic-tools/openui",
-      "version": "2.2.0",
+      "version": "2.2.1-next.1",
       "dependencies": {
         "@noetic-tools/context": "workspace:*",
         "@noetic-tools/types": "workspace:*",
@@ -199,9 +217,96 @@
         "bun-types": "latest",
       },
     },
+    "packages/profile-app": {
+      "name": "@noetic-tools/profile-app",
+      "version": "0.1.0",
+      "dependencies": {
+        "@noetic-tools/profile-ui": "workspace:*",
+        "@noetic-tools/types": "workspace:*",
+        "zod": "^4.0.0",
+      },
+      "devDependencies": {
+        "bun-types": "latest",
+      },
+      "peerDependencies": {
+        "zod": "^4.0.0",
+      },
+    },
+    "packages/profile-browser": {
+      "name": "@noetic-tools/profile-browser",
+      "version": "0.1.0",
+      "dependencies": {
+        "@noetic-tools/profile-ui": "workspace:*",
+        "@noetic-tools/types": "workspace:*",
+        "zod": "^4.0.0",
+      },
+      "devDependencies": {
+        "bun-types": "latest",
+      },
+      "peerDependencies": {
+        "zod": "^4.0.0",
+      },
+    },
+    "packages/profile-chat": {
+      "name": "@noetic-tools/profile-chat",
+      "version": "0.1.0",
+      "dependencies": {
+        "@noetic-tools/types": "workspace:*",
+        "zod": "^4.0.0",
+      },
+      "devDependencies": {
+        "bun-types": "latest",
+      },
+      "peerDependencies": {
+        "zod": "^4.0.0",
+      },
+    },
+    "packages/profile-device": {
+      "name": "@noetic-tools/profile-device",
+      "version": "0.1.0",
+      "dependencies": {
+        "@noetic-tools/profile-ui": "workspace:*",
+        "@noetic-tools/types": "workspace:*",
+        "zod": "^4.0.0",
+      },
+      "devDependencies": {
+        "bun-types": "latest",
+      },
+      "peerDependencies": {
+        "zod": "^4.0.0",
+      },
+    },
+    "packages/profile-screen": {
+      "name": "@noetic-tools/profile-screen",
+      "version": "0.1.0",
+      "dependencies": {
+        "@noetic-tools/types": "workspace:*",
+        "zod": "^4.0.0",
+      },
+      "devDependencies": {
+        "bun-types": "latest",
+      },
+      "peerDependencies": {
+        "zod": "^4.0.0",
+      },
+    },
+    "packages/profile-ui": {
+      "name": "@noetic-tools/profile-ui",
+      "version": "0.1.0",
+      "dependencies": {
+        "@noetic-tools/types": "workspace:*",
+        "zod": "^4.0.0",
+      },
+      "devDependencies": {
+        "bun-types": "latest",
+      },
+      "peerDependencies": {
+        "zod": "^4.0.0",
+      },
+    },
     "packages/types": {
       "name": "@noetic-tools/types",
-      "version": "3.8.0",
+      "version": "3.17.1-next.1",
       "dependencies": {
         "@openrouter/agent": "^0.11.0",
         "@standard-schema/spec": "1.1.0",
@@ -219,6 +324,21 @@
       "optionalPeers": [
         "@openrouter/agent",
       ],
+    },
+    "packages/verify": {
+      "name": "@noetic-tools/verify",
+      "version": "0.1.0",
+      "dependencies": {
+        "@noetic-tools/types": "workspace:*",
+        "open-verification": "1.1.0",
+        "zod": "^4.0.0",
+      },
+      "devDependencies": {
+        "bun-types": "latest",
+      },
+      "peerDependencies": {
+        "zod": "^4.0.0",
+      },
     },
     "packages/web": {
       "name": "@noetic/web",
@@ -245,7 +365,7 @@
         "tailwindcss": "4.1.8",
         "typescript": "5.8.3",
         "valibot": "1.4.2",
-        "zod": "4.3.6",
+        "zod": "4.6.7",
       },
     },
   },
@@ -448,11 +568,27 @@
 
     "@noetic-tools/eval": ["@noetic-tools/eval@workspace:packages/eval"],
 
+    "@noetic-tools/mcp": ["@noetic-tools/mcp@workspace:packages/mcp"],
+
     "@noetic-tools/openui": ["@noetic-tools/openui@workspace:packages/openui"],
 
     "@noetic-tools/platform-node": ["@noetic-tools/platform-node@workspace:packages/platform-node"],
 
+    "@noetic-tools/profile-app": ["@noetic-tools/profile-app@workspace:packages/profile-app"],
+
+    "@noetic-tools/profile-browser": ["@noetic-tools/profile-browser@workspace:packages/profile-browser"],
+
+    "@noetic-tools/profile-chat": ["@noetic-tools/profile-chat@workspace:packages/profile-chat"],
+
+    "@noetic-tools/profile-device": ["@noetic-tools/profile-device@workspace:packages/profile-device"],
+
+    "@noetic-tools/profile-screen": ["@noetic-tools/profile-screen@workspace:packages/profile-screen"],
+
+    "@noetic-tools/profile-ui": ["@noetic-tools/profile-ui@workspace:packages/profile-ui"],
+
     "@noetic-tools/types": ["@noetic-tools/types@workspace:packages/types"],
+
+    "@noetic-tools/verify": ["@noetic-tools/verify@workspace:packages/verify"],
 
     "@noetic/inspector": ["@noetic/inspector@workspace:packages/inspector"],
 
@@ -1104,6 +1240,8 @@
 
     "oniguruma-to-es": ["oniguruma-to-es@4.3.6", "", { "dependencies": { "oniguruma-parser": "^0.12.2", "regex": "^6.1.0", "regex-recursion": "^6.0.2" } }, "sha512-csuQ9x3Yr0cEIs/Zgx/OEt9iBw9vqIunAPQkx19R/fiMq2oGVTgcMqO/V3Ybqefr1TBvosI6jU539ksaBULJyA=="],
 
+    "open-verification": ["open-verification@1.1.0", "", { "dependencies": { "zod": "^4.6.6" } }, "sha512-HX6H+HQmqyE4T+dfAV355vs6kNeutNrz4mA8H5MmkB2mTebjY9khsd5CFN90Y0yM8C/TJo+o3vtiqD9VjcPzug=="],
+
     "parse-entities": ["parse-entities@4.0.2", "", { "dependencies": { "@types/unist": "^2.0.0", "character-entities-legacy": "^3.0.0", "character-reference-invalid": "^2.0.0", "decode-named-character-reference": "^1.0.0", "is-alphanumerical": "^2.0.0", "is-decimal": "^2.0.0", "is-hexadecimal": "^2.0.0" } }, "sha512-GG2AQYWoLgL877gQIKeRPGO1xF9+eG1ujIb5soS5gPvLQ1y2o8FL90w2QWNdf9I361Mpp7726c+lj3U0qK1uGw=="],
 
     "parse5": ["parse5@7.3.0", "", { "dependencies": { "entities": "^6.0.0" } }, "sha512-IInvU7fabl34qmi9gY8XOVxhYyMyuH2xUNpb2q8/Y+7552KlejkRvqvD19nMoUW/uQGGbqNpA6Tufu5FL5BZgw=="],
@@ -1304,7 +1442,7 @@
 
     "yaml": ["yaml@2.9.0", "", { "bin": { "yaml": "bin.mjs" } }, "sha512-2AvhNX3mb8zd6Zy7INTtSpl1F15HW6Wnqj0srWlkKLcpYl/gMIMJiyuGq2KeI2YFxUPjdlB+3Lc10seMLtL4cA=="],
 
-    "zod": ["zod@4.3.6", "", {}, "sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg=="],
+    "zod": ["zod@4.6.7", "", {}, "sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg=="],
 
     "zod-to-json-schema": ["zod-to-json-schema@3.25.2", "", { "peerDependencies": { "zod": "^3.25.28 || ^4" } }, "sha512-O/PgfnpT1xKSDeQYSCfRI5Gy3hPf91mKVDuYLUHZJMiDFptvP41MSnWofm8dnCm0256ZNfZIM7DSzuSMAFnjHA=="],
 
@@ -1314,13 +1452,37 @@
 
     "@ai-sdk/provider-utils/@workflow/serde": ["@workflow/serde@4.1.0", "", {}, "sha512-pav4F2BoirECWR7Nf1TKt+2eETcBj7jj4cBefQ8VXQCA6NPkaKeLfj/zMgi+3zYV5ZIBT4GuUiphsj0/b9hPQQ=="],
 
+    "@noetic-tools/agent-plugins/bun-types": ["bun-types@1.4.4", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-yjrJh5oGX7mMPKGd19YXyIjmEuj4G4zNC30bs7PM9Az7NQ3ndF3j6hbeRdvJTRQEhJ/FYQwW0a2moweEi2hMxQ=="],
+
     "@noetic-tools/context/bun-types": ["bun-types@1.4.4", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-yjrJh5oGX7mMPKGd19YXyIjmEuj4G4zNC30bs7PM9Az7NQ3ndF3j6hbeRdvJTRQEhJ/FYQwW0a2moweEi2hMxQ=="],
 
     "@noetic-tools/core/bun-types": ["bun-types@1.4.4", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-yjrJh5oGX7mMPKGd19YXyIjmEuj4G4zNC30bs7PM9Az7NQ3ndF3j6hbeRdvJTRQEhJ/FYQwW0a2moweEi2hMxQ=="],
 
+    "@noetic-tools/mcp/bun-types": ["bun-types@1.4.4", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-yjrJh5oGX7mMPKGd19YXyIjmEuj4G4zNC30bs7PM9Az7NQ3ndF3j6hbeRdvJTRQEhJ/FYQwW0a2moweEi2hMxQ=="],
+
+    "@noetic-tools/platform-node/bun-types": ["bun-types@1.4.4", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-yjrJh5oGX7mMPKGd19YXyIjmEuj4G4zNC30bs7PM9Az7NQ3ndF3j6hbeRdvJTRQEhJ/FYQwW0a2moweEi2hMxQ=="],
+
+    "@noetic-tools/profile-app/bun-types": ["bun-types@1.4.4", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-yjrJh5oGX7mMPKGd19YXyIjmEuj4G4zNC30bs7PM9Az7NQ3ndF3j6hbeRdvJTRQEhJ/FYQwW0a2moweEi2hMxQ=="],
+
+    "@noetic-tools/profile-browser/bun-types": ["bun-types@1.4.4", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-yjrJh5oGX7mMPKGd19YXyIjmEuj4G4zNC30bs7PM9Az7NQ3ndF3j6hbeRdvJTRQEhJ/FYQwW0a2moweEi2hMxQ=="],
+
+    "@noetic-tools/profile-chat/bun-types": ["bun-types@1.4.4", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-yjrJh5oGX7mMPKGd19YXyIjmEuj4G4zNC30bs7PM9Az7NQ3ndF3j6hbeRdvJTRQEhJ/FYQwW0a2moweEi2hMxQ=="],
+
+    "@noetic-tools/profile-device/bun-types": ["bun-types@1.4.4", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-yjrJh5oGX7mMPKGd19YXyIjmEuj4G4zNC30bs7PM9Az7NQ3ndF3j6hbeRdvJTRQEhJ/FYQwW0a2moweEi2hMxQ=="],
+
+    "@noetic-tools/profile-screen/bun-types": ["bun-types@1.4.4", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-yjrJh5oGX7mMPKGd19YXyIjmEuj4G4zNC30bs7PM9Az7NQ3ndF3j6hbeRdvJTRQEhJ/FYQwW0a2moweEi2hMxQ=="],
+
+    "@noetic-tools/profile-ui/bun-types": ["bun-types@1.4.4", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-yjrJh5oGX7mMPKGd19YXyIjmEuj4G4zNC30bs7PM9Az7NQ3ndF3j6hbeRdvJTRQEhJ/FYQwW0a2moweEi2hMxQ=="],
+
     "@noetic-tools/types/bun-types": ["bun-types@1.4.4", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-yjrJh5oGX7mMPKGd19YXyIjmEuj4G4zNC30bs7PM9Az7NQ3ndF3j6hbeRdvJTRQEhJ/FYQwW0a2moweEi2hMxQ=="],
 
+    "@noetic-tools/verify/bun-types": ["bun-types@1.4.4", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-yjrJh5oGX7mMPKGd19YXyIjmEuj4G4zNC30bs7PM9Az7NQ3ndF3j6hbeRdvJTRQEhJ/FYQwW0a2moweEi2hMxQ=="],
+
+    "@noetic/inspector/bun-types": ["bun-types@1.4.4", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-yjrJh5oGX7mMPKGd19YXyIjmEuj4G4zNC30bs7PM9Az7NQ3ndF3j6hbeRdvJTRQEhJ/FYQwW0a2moweEi2hMxQ=="],
+
     "@noetic/inspector/typescript": ["typescript@5.8.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-p1diW6TqL9L07nNxvRMM7hMMw4c5XOo/1ibL4aAIGmSAt9slTE1Xgw5KWuof2uTOvCg9BY7ZRi+GaF+7sfgPeQ=="],
+
+    "@noetic/web/bun-types": ["bun-types@1.4.4", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-yjrJh5oGX7mMPKGd19YXyIjmEuj4G4zNC30bs7PM9Az7NQ3ndF3j6hbeRdvJTRQEhJ/FYQwW0a2moweEi2hMxQ=="],
 
     "@noetic/web/typescript": ["typescript@5.8.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-p1diW6TqL9L07nNxvRMM7hMMw4c5XOo/1ibL4aAIGmSAt9slTE1Xgw5KWuof2uTOvCg9BY7ZRi+GaF+7sfgPeQ=="],
 

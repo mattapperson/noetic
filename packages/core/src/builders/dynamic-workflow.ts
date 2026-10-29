@@ -7,19 +7,26 @@ import type { ContextData, ContextLayer } from '@noetic-tools/context';
 import { exportSpans } from '@noetic-tools/context';
 import type {
   AgentHarnessContract,
+  ConnectionAllowlist,
   Context,
   ExecuteStepFn,
   Span,
   Step,
   Tool,
 } from '@noetic-tools/types';
-import { frameworkCast, NoeticConfigError } from '@noetic-tools/types';
+import { frameworkCast, isNoeticConfigError, NoeticConfigError } from '@noetic-tools/types';
 import { expressionErrors } from '../expression/check';
 import type { ExpressionLimits } from '../expression/jsonata';
 import { NoeticAttr } from '../observability/genai-attributes';
 import type { WorkflowDocument } from '../schemas/workflow';
 import { WorkflowDocumentSchema, workflowDepth, workflowGraph } from '../schemas/workflow';
+import { outputText } from './output-text';
 import { callModel, runCode } from './step-builders';
+import {
+  checkConnectionAllowlist,
+  checkDocumentConnections,
+  globMatches,
+} from './workflow-connections';
 import type { HydrationContext } from './workflow-hydrator';
 import { hydrateWorkflow } from './workflow-hydrator';
 
@@ -34,6 +41,13 @@ export interface DynamicWorkflowOpts {
   maxRevisions?: number;
   /** Bounds on each expression evaluation; unset fields use `DEFAULT_EXPRESSION_LIMITS`. */
   expressionLimits?: ExpressionLimits;
+  /**
+   * What a generated document may use of the harness's connections (spec 35 §
+   * What a document may use). Required for the planner to use connections at
+   * all: a document asking for a connection without it fails validation with
+   * `CONNECTION_NOT_ALLOWED`. The planner is shown only these connections.
+   */
+  connections?: ConnectionAllowlist;
 }
 
 //#endregion
@@ -118,11 +132,13 @@ export function dynamicWorkflow(opts: DynamicWorkflowOpts): Step<ContextData, st
         });
       }
 
+      checkAllowlistNames(opts.connections, ctx);
       const toolList = opts.tools.map((t) => `- ${t.name}: ${t.description}`).join('\n');
       const basePrompt = [
         opts.instructions,
         PLANNER_INSTRUCTIONS,
         `\nAvailable tools:\n${toolList}`,
+        connectionsPrompt(opts.connections, plannerConnections(opts.connections, ctx)),
         `\nTask: ${input}`,
       ]
         .filter(Boolean)
@@ -135,19 +151,28 @@ export function dynamicWorkflow(opts: DynamicWorkflowOpts): Step<ContextData, st
           ? `${basePrompt}\n\nPrevious attempt failed with error: ${lastError}\nPlease fix the workflow and try again.`
           : basePrompt;
 
+        // The planner only writes the document: it never sees the harness's tools or
+        // connections, so it cannot drive a connection around the allowlist.
         const plannerStep = callModel({
           id: `dynamic-workflow-planner-${revision}`,
           model,
           instructions: prompt,
+          tools: [],
         });
 
         const executeStep: ExecuteStepFn = frameworkCast(harness.run.bind(harness));
         const rawOutput = await executeStep(plannerStep, input, ctx);
         const text = coerceToString(rawOutput);
 
-        const parseResult = tryParseWorkflow(text, maxDepth);
+        const parseResult = tryParseWorkflow(text, maxDepth, {
+          allowlist: opts.connections ?? {},
+          ranges: profileVersions(ctx),
+        });
         if (!parseResult.ok) {
           lastError = parseResult.error;
+          if (revision === maxRevisions - 1 && parseResult.configError) {
+            throw parseResult.configError;
+          }
           if (revision === maxRevisions - 1) {
             throw new NoeticConfigError({
               code: 'WORKFLOW_VALIDATION_FAILED',
@@ -201,6 +226,12 @@ export interface ParseAndRunWorkflowOpts {
   maxRecursionDepth?: number;
   /** Bounds on each expression evaluation; unset fields use `DEFAULT_EXPRESSION_LIMITS`. */
   expressionLimits?: ExpressionLimits;
+  /**
+   * What the document may use of the harness's connections (spec 35 § What a
+   * document may use). When given, a manifest asking for more fails with
+   * `CONNECTION_NOT_ALLOWED`.
+   */
+  connections?: ConnectionAllowlist;
 }
 
 /**
@@ -221,9 +252,17 @@ export interface ParseAndRunWorkflowOpts {
  * @throws `NoeticConfigError` with code `UNKNOWN_TOOL_REFERENCE` if a tool reference cannot be resolved.
  * @throws `NoeticConfigError` with code `INVALID_EXPRESSION_LIMITS` if `expressionLimits` holds a value that is not a positive integer or `Infinity`.
  * @throws `NoeticConfigError` with code `EXPRESSION_LIMIT_EXCEEDED` if an expression exceeds its limits.
+ * @throws `NoeticConfigError` with code `CONNECTION_UNKNOWN` if a node uses a connection the document does not declare, or the allowlist names one the harness does not have.
+ * @throws `NoeticConfigError` with code `CONNECTION_NOT_ALLOWED` if the document asks for more than `connections` grants.
  */
 export async function parseAndRunWorkflow(opts: ParseAndRunWorkflowOpts): Promise<string> {
-  const parseResult = tryParseWorkflow(opts.json, opts.maxDepth ?? DEFAULT_MAX_DEPTH);
+  checkAllowlistNames(opts.connections, opts.ctx);
+  const parseResult = tryParseWorkflow(opts.json, opts.maxDepth ?? DEFAULT_MAX_DEPTH, {
+    allowlist: opts.connections,
+  });
+  if (!parseResult.ok && parseResult.configError) {
+    throw parseResult.configError;
+  }
   if (!parseResult.ok) {
     throw new NoeticConfigError({
       code: 'WORKFLOW_VALIDATION_FAILED',
@@ -303,6 +342,51 @@ interface ParseOk {
 interface ParseFail {
   ok: false;
   error: string;
+  /** A connection error (spec 35) that callers surface as is rather than as `WORKFLOW_VALIDATION_FAILED`. */
+  configError?: NoeticConfigError;
+}
+
+/** How a document's connections are checked. `allowlist` undefined means no host allowlist applies. */
+interface ConnectionCheck {
+  allowlist?: ConnectionAllowlist;
+  /**
+   * Harness connection → profile → installed version. When given, a manifest
+   * entry naming a profile without a range gets `^<major>` of the version the
+   * connection serves (dynamicWorkflow fills the ranges in itself).
+   */
+  ranges?: ProfileVersions;
+}
+
+/** Harness connection → profile → the version it serves. */
+type ProfileVersions = ReadonlyMap<string, Readonly<Record<string, string>>>;
+
+/** What the planner is shown of one allowed connection: the profiles it serves and its allowed operations. */
+interface PlannerConnection {
+  readonly profiles: Readonly<Record<string, string>>;
+  readonly operations: ReadonlyArray<{
+    readonly name: string;
+    readonly inputSchema: unknown;
+  }>;
+}
+
+/** The registry surface the planner reads. Structural: builders sit below the registry and must not import it. */
+interface PlannerRegistry {
+  names(): ReadonlyArray<string>;
+  current?(name: string):
+    | {
+        readonly manifest: {
+          readonly profiles: Readonly<Record<string, string>>;
+          readonly operations: Readonly<
+            Record<
+              string,
+              {
+                readonly inputSchema: unknown;
+              }
+            >
+          >;
+        };
+      }
+    | undefined;
 }
 
 type ParseResult = ParseOk | ParseFail;
@@ -316,27 +400,38 @@ function buildToolMap(tools: Tool[]): Map<string, Tool> {
   );
 }
 
+/** A workflow's output as text, written the way every node writes its output (objects as JSON). */
 function coerceToString(value: unknown): string {
-  if (typeof value === 'string') {
-    return value;
-  }
-  return String(value ?? '');
+  return outputText(value);
 }
 
-function tryParseWorkflow(raw: unknown, maxDepth: number): ParseResult {
-  const parsed = typeof raw === 'string' ? safeParse(raw) : raw;
-  if (parsed === null) {
+function tryParseWorkflow(
+  raw: unknown,
+  maxDepth: number,
+  check: ConnectionCheck = {},
+): ParseResult {
+  const json = typeof raw === 'string' ? safeParse(raw) : raw;
+  if (json === null) {
     return {
       ok: false,
       error: 'Input is not valid JSON.',
     };
   }
+  const parsed = check.ranges ? withProfileRanges(json, check.ranges) : json;
 
   const result = WorkflowDocumentSchema.safeParse(parsed);
   if (!result.success) {
+    const manifestError = manifestErrorOf(result.error.issues);
     return {
       ok: false,
-      error: result.error.message,
+      error: manifestError
+        ? `${manifestError.code}: ${manifestError.message} ${manifestError.hint}`
+        : result.error.message,
+      ...(manifestError
+        ? {
+            configError: manifestError,
+          }
+        : {}),
     };
   }
 
@@ -356,10 +451,233 @@ function tryParseWorkflow(raw: unknown, maxDepth: number): ParseResult {
     };
   }
 
+  const connectionError = connectionErrorOf(result.data, check);
+  if (connectionError) {
+    return {
+      ok: false,
+      error: `${connectionError.code}: ${connectionError.message} ${connectionError.hint}`,
+      configError: connectionError,
+    };
+  }
+
   return {
     ok: true,
     doc: result.data,
   };
+}
+
+/** The connection error a document has, checked against its manifest and (when given) the host allowlist. */
+function connectionErrorOf(
+  doc: WorkflowDocument,
+  check: ConnectionCheck,
+): NoeticConfigError | undefined {
+  try {
+    if (check.allowlist === undefined) {
+      checkDocumentConnections(doc);
+    } else {
+      checkConnectionAllowlist(doc, check.allowlist);
+    }
+    return undefined;
+  } catch (error) {
+    if (isNoeticConfigError(error)) {
+      return error;
+    }
+    throw error;
+  }
+}
+
+/**
+ * Checks an allowlist names only connections the harness has, when the harness
+ * has a connection registry to ask.
+ *
+ * @throws `NoeticConfigError` `CONNECTION_UNKNOWN` for a name the harness does not have.
+ */
+function checkAllowlistNames(allowlist: ConnectionAllowlist | undefined, ctx: Context): void {
+  // Structural: builders sit below the connection registry and must not import it.
+  const registry = frameworkCast<{
+    connectionRegistry?: {
+      names(): ReadonlyArray<string>;
+    };
+  }>(ctx.harness).connectionRegistry;
+  if (!allowlist || !registry) {
+    return;
+  }
+  const known = new Set(registry.names());
+  for (const name of Object.keys(allowlist)) {
+    if (known.has(name)) {
+      continue;
+    }
+    throw new NoeticConfigError({
+      code: 'CONNECTION_UNKNOWN',
+      message: `The connection allowlist names '${name}', which the harness does not have.`,
+      hint: `Harness connections: ${
+        [
+          ...known,
+        ].join(', ') || '(none)'
+      }.`,
+    });
+  }
+}
+
+/**
+ * A malformed manifest entry (spec 35 § Errors) is `CONNECTION_INVALID`, not a
+ * generic validation failure: the issues under the root `connections` map.
+ */
+function manifestErrorOf(
+  issues: ReadonlyArray<{
+    readonly path: ReadonlyArray<PropertyKey>;
+    readonly message: string;
+  }>,
+): NoeticConfigError | undefined {
+  const manifest = issues.filter((issue) => issue.path[0] === 'connections');
+  if (manifest.length === 0) {
+    return undefined;
+  }
+  const detail = manifest
+    .map((issue) => `${issue.path.map(String).join('.')}: ${issue.message}`)
+    .join('; ');
+  return new NoeticConfigError({
+    code: 'CONNECTION_INVALID',
+    message: `The document's connections map is malformed: ${detail}`,
+    hint: 'Each entry is { "profile": "<profile>@<range>", "extensions"?, "from"?, "fresh"?, "setup"? } or { "events": [...] }.',
+  });
+}
+
+function registryOf(ctx: Context): PlannerRegistry | undefined {
+  return frameworkCast<{
+    connectionRegistry?: PlannerRegistry;
+  }>(ctx.harness).connectionRegistry;
+}
+
+/** The profile versions each harness connection serves right now. */
+function profileVersions(ctx: Context): ProfileVersions {
+  const registry = registryOf(ctx);
+  const versions = new Map<string, Readonly<Record<string, string>>>();
+  for (const name of registry?.names() ?? []) {
+    const profiles = registry?.current?.(name)?.manifest.profiles;
+    if (profiles) {
+      versions.set(name, profiles);
+    }
+  }
+  return versions;
+}
+
+/** `^<major>` of `version`, or undefined when it is not a version. */
+function caretRange(version: string | undefined): string | undefined {
+  const major = version?.split('.')[0];
+  return major && /^\d+$/.test(major) ? `^${major}` : undefined;
+}
+
+/** `json` with each manifest entry's bare `"profile": "<name>"` given the range its connection serves. */
+function withProfileRanges(json: unknown, ranges: ProfileVersions): unknown {
+  if (!isRecord(json) || !isRecord(json.connections)) {
+    return json;
+  }
+  const connections: Record<string, unknown> = {};
+  for (const [name, entry] of Object.entries(json.connections)) {
+    connections[name] = withProfileRange(name, entry, ranges);
+  }
+  return {
+    ...json,
+    connections,
+  };
+}
+
+function withProfileRange(name: string, entry: unknown, ranges: ProfileVersions): unknown {
+  if (!isRecord(entry) || typeof entry.profile !== 'string' || entry.profile.includes('@')) {
+    return entry;
+  }
+  const target = typeof entry.from === 'string' ? entry.from : name;
+  const range = caretRange(ranges.get(target)?.[entry.profile]);
+  return range
+    ? {
+        ...entry,
+        profile: `${entry.profile}@${range}`,
+      }
+    : entry;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** What the planner may see of each allowed connection: its profiles and allowed operations with their schemas. */
+function plannerConnections(
+  allowlist: ConnectionAllowlist | undefined,
+  ctx: Context,
+): ReadonlyMap<string, PlannerConnection> {
+  const registry = registryOf(ctx);
+  const out = new Map<string, PlannerConnection>();
+  for (const [name, entry] of Object.entries(allowlist ?? {})) {
+    const manifest = registry?.current?.(name)?.manifest;
+    if (!manifest) {
+      continue;
+    }
+    const operations = Object.entries(manifest.operations)
+      .filter(([op]) => (entry.ops ?? []).some((pattern) => globMatches(pattern, op)))
+      .map(([op, info]) => ({
+        name: op,
+        inputSchema: info.inputSchema,
+      }));
+    out.set(name, {
+      profiles: manifest.profiles,
+      operations,
+    });
+  }
+  return out;
+}
+
+function connectionLine(
+  name: string,
+  entry: ConnectionAllowlist[string],
+  known: PlannerConnection | undefined,
+): string {
+  const profiles = Object.keys(known?.profiles ?? {});
+  const parts = [
+    ...(profiles.length > 0
+      ? [
+          `profiles: ${profiles.join(', ')}`,
+        ]
+      : []),
+    `ops: ${(entry.ops ?? []).join(', ') || '(none)'}`,
+    `events: ${(entry.events ?? []).join(', ') || '(none)'}`,
+  ];
+  if (entry.setup) {
+    parts.push(`setup fields: ${Object.keys(entry.setup).join(', ')}`);
+  }
+  if (entry.secrets) {
+    parts.push(
+      `secrets: ${Object.entries(entry.secrets)
+        .map(([secret, field]) => `${secret} (only in ${field})`)
+        .join(', ')}`,
+    );
+  }
+  const schemas = (known?.operations ?? []).map(
+    (op) => `    - ${op.name} args: ${JSON.stringify(op.inputSchema)}`,
+  );
+  return [
+    `- ${name}: ${parts.join('; ')}`,
+    ...schemas,
+  ].join('\n');
+}
+
+/** The planner's view of the connections it may use: only the allowed ones, with their operations and argument schemas. */
+function connectionsPrompt(
+  allowlist: ConnectionAllowlist | undefined,
+  known: ReadonlyMap<string, PlannerConnection>,
+): string {
+  const entries = Object.entries(allowlist ?? {});
+  if (entries.length === 0) {
+    return '\nNo connections are available: do not emit call, wait or verify nodes or a "connections" map.';
+  }
+  const lines = entries.map(([name, entry]) => connectionLine(name, entry, known.get(name)));
+  return `\nConnections you may use (a document lists the ones it needs in a root "connections" map, e.g. "connections": { "app": { "profile": "<profile>", "from": "<connection>" } } — the version range is filled in for you — or { "events": [...] } for an event source):
+${lines.join('\n')}
+Connection nodes:
+- { "kind": "call", "id": "<unique>", "connection": "<name>", "op": "<operation>", "args": { ... } } (run one operation; values may be { "$expr": "<JSONata on the input; $steps.<id> reads an earlier node's output>" }, { "$literal": ... }, or { "$secret": "<name>" })
+- { "kind": "wait", "id": "<unique>", "connection": "<name>", "event": "<event>", "filter": "<JSONata test on { event, input }>", "around": [<steps>], "timeoutMs": <ms> } (listen, run around, then wait for the event)
+- { "kind": "verify", "id": "<unique>", "subject": "<name>", "expect": [{ "<sense>": "<pattern>" }, ...], "never": [<matchers>], "act": [<steps>], "witnesses": ["<name>"], "close": { "until": "quiet"|"event"|"done"|"exit" } } (run act on the subject and check what was expected happened; act names operations by name)
+Inside "around", "act" or a sequence's "steps", { "<operation>": { ...args } } is a call on the enclosing connection.`;
 }
 
 function safeParse(text: string): unknown {

@@ -42,6 +42,8 @@ const result = await parseAndRunWorkflow({
 | `conditional` route | `{ "expr": "<JSONata>", "target": <WorkflowNode> }` | Takes the route when the expression gives `true`. |
 | `loop` until predicate | `{ "kind": "expr", "expr": "<JSONata>" }` | Stops the loop when the expression gives `true`. |
 | any node's `emitItems` | `{ "emitItems": { "onStart": "<JSONata>", "onDone": "<JSONata>" } }` | Computes what the node emits: an event and the final fields of a [custom item](/docs/framework/custom-items), or message text. See [Emitting items](/docs/framework/json-runtime#emitting-items). |
+| connection node values | `{ "$expr": "<JSONata>" }` in `args`, `connection`, or `subject` | Computes an argument of a `call`, the connection a node runs on (`$item` in a fan-out), or a `verify` subject. See [Connections](/docs/framework/json-runtime#connections). |
+| `wait` filter | `{ "kind": "wait", "filter": "<JSONata>" }` | Picks the event that ends the wait. |
 
 A conditional route carries exactly one of `match` (a substring of the input) or `expr`. Routes of both kinds may mix in one node. The `expr` until predicate works inside `any` and `all` like any other predicate.
 
@@ -53,7 +55,23 @@ Every expression runs against one value, its input:
 - Any other string is read as the string itself.
 - A value that is not a string, such as a `decide` node's answers, is read as is.
 
-For a `compute` node or a route, that is the node's input. For an until predicate, it is the output of the loop's last iteration. A bare path such as `n` reads the input's `n` field, and `$` is the whole input.
+For a `compute` node, a route, or a connection node's `$expr` value, that is the node's input. For an until predicate, it is the output of the loop's last iteration. A bare path such as `n` reads the input's `n` field, and `$` is the whole input.
+
+A `wait` node's filter is the one exception: it reads `{ "event": <the event>, "input": <the node's input> }`.
+
+### Bindings
+
+Two bindings are available in every expression:
+
+- **`$steps`** -- the outputs of nodes that have already completed in the enclosing workflow, by node id, each read the same way as the input. `$steps.watch` is the output of the node with id `watch`, so a node can use any earlier result, not only the one just before it. Before anything has run, `$steps` is an empty object.
+- **`$refId(x)`** -- the id inside a [connection ref](/docs/framework/connections#values), since JSONata paths cannot step into `$`-prefixed keys. It gives no value for anything that is not a ref.
+
+Inside a [fan-out over connections](/docs/framework/json-runtime#fan-out-over-connections), **`$item`** is the name of the connection the path runs on.
+
+```json
+{ "kind": "call", "id": "reply", "connection": "team", "op": "chat.reply",
+  "args": { "thread": { "$expr": "$steps.post.thread" }, "text": { "$expr": "'Deployed ' & $refId($steps.post.message)" } } }
+```
 
 ## What an Expression Gives
 

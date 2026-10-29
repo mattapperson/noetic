@@ -1,21 +1,44 @@
 import { describe, expect, it } from 'bun:test';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { configErrorDocsUrl, NoeticConfigError } from '@noetic-tools/types';
+import {
+  ConnectionConfigErrorCode,
+  configErrorDocsUrl,
+  NoeticConfigError,
+} from '@noetic-tools/types';
+import { VerifyConfigErrorCode } from '@noetic-tools/types/verify';
 
 //#region Helper Functions
 
 const REPO_ROOT = resolve(import.meta.dir, '../../../..');
 const ERRORS_DOC = join(REPO_ROOT, 'packages/web/content/docs/framework/errors.mdx');
 
-/** Every `code: 'X'` literal in the source of every workspace package. */
+/** The config-error code maps source may throw through (`code: VerifyConfigErrorCode.Invalid`). */
+const CODE_MAPS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  ConnectionConfigErrorCode,
+  VerifyConfigErrorCode,
+};
+
+/** The code `Map.Member` names; an unknown map or member is reported as unresolved so it cannot slip by. */
+function mappedCode(map: string, member: string): string {
+  return CODE_MAPS[map]?.[member] ?? `UNRESOLVED:${map}.${member}`;
+}
+
+/**
+ * Every `code: 'X'` literal, and every `code: XConfigErrorCode.Member` constant,
+ * in the source of every workspace package.
+ */
 function sourceCodes(): Set<string> {
   const codes = new Set<string>();
   const packagesDir = join(REPO_ROOT, 'packages');
   for (const pkg of readdirSync(packagesDir)) {
     for (const file of sourceFiles(join(packagesDir, pkg, 'src'))) {
-      for (const match of readFileSync(file, 'utf8').matchAll(/code: '([A-Z0-9_]+)'/g)) {
+      const text = readFileSync(file, 'utf8');
+      for (const match of text.matchAll(/code: '([A-Z0-9_]+)'/g)) {
         codes.add(match[1] ?? '');
+      }
+      for (const match of text.matchAll(/code: ([A-Za-z]+ConfigErrorCode)\.([A-Za-z]+)/g)) {
+        codes.add(mappedCode(match[1] ?? '', match[2] ?? ''));
       }
     }
   }

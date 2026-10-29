@@ -150,8 +150,9 @@ const login = [
   Its output is `{ event, around }`.
 - **`step.verify`** checks claims about what a connection shows (spec 37).
 - `args` may be a value or a function of the step's input; `around` and
-  `act` (spec 37) take a step or an array of steps. As everywhere in Noetic,
-  an array runs its steps in sequence, so there is no `step.sequence`.
+  `act` (spec 37) take a step or an array of steps. As everywhere in Noetic —
+  `harness.run(login, …)` included — an array runs its steps in sequence, each
+  output the next one's input, so there is no `step.sequence`.
 
 ### Fresh connections
 
@@ -170,7 +171,7 @@ full queues the request until a connection is free or `waitMs` passes.
 
 ```ts
 const app = connection('app', browser, { from: 'browsers', fresh: 'path', setup: { url: previewUrl } });
-inParallel({ id: 'suite', mode: 'all', paths: [checkoutFlow(app), signupFlow(app)] });  // two fresh browsers
+inParallel({ id: 'suite', mode: 'all', paths: () => [checkoutFlow(app), signupFlow(app)], merge: (results) => results });  // two fresh browsers
 ```
 
 ### Values

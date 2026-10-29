@@ -47,7 +47,7 @@
     "zod": "^4.0.0"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@noetic-tools/mcp": "workspace:*",
     "@noetic-tools/types": "workspace:*",
     "yaml": "^2.9.0",
     "zod": "^4.0.0"

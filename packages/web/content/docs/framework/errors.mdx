@@ -40,6 +40,13 @@ Noetic wraps every framework-level failure in a structured `NoeticError` discrim
 | `budget_exceeded` | `field: 'cost' \| 'steps' \| 'duration'`, `limit`, `actual` | A budget guard detected the run exceeded its limits. |
 | `steering_denied` | `guidance?: string` | A context layer's steering hook (`beforeToolCall` / `afterModelCall`) returned a deny decision and the runtime blocked the action, or the harness `approveToolCall` approver refused an `invokeTool` call to a tool with `needsApproval`. `guidance` carries the corrective feedback, if any. |
 | `item_schema_mismatch` | `category: 'items' \| 'developerMessages' \| 'toolCalls' \| 'toolResults'`, `itemType?: string` | An item failed extension-schema validation in the `ItemSchemaRegistry`: a category item (e.g. a tool result) matched none of the schemas registered for its category, or an unknown item type matched no registered schema under strict mode. `itemType` is set for the unknown-type case. |
+| `connection_unavailable` | `connection`, `reason` | A connection is disconnected, its pool stayed full past `waitMs`, or an event stream a step was waiting on ended. |
+| `connection_failed` | `connection`, `op`, `error` | The server refused or failed the operation. `error.code` is one of the codes connection profiles define, such as `malformed`, `guarded` or `ambiguous`. |
+| `connection_ref_invalid` | `connection`, `reason` | A ref was not issued by this harness, belongs to a different connection than the call's target, was used from another thread, or is stale. |
+| `connection_secret_refused` | `connection`, `op` | A `secret()` was used outside a field the operation marks `sensitive`, or by the model. |
+| `connection_input_required` | `connection`, `request` | A long-running operation asked a question nobody could answer. |
+| `connection_resume_refused` | `connection`, `reason` | A resumed run's connection was replaced and cannot safely be driven again. |
+| `verify_act_failed` | `stepId`, `cause: Error`, `run?: BlobRef` | A `step.verify`'s `act` threw. The verification run is recorded first, with the failure as evidence, and `run` points at it. |
 
 ### Full Type Definition
 
@@ -56,7 +63,14 @@ type NoeticError =
   | { kind: 'cancelled'; reason?: string }
   | { kind: 'budget_exceeded'; field: 'cost' | 'steps' | 'duration'; limit: number; actual: number }
   | { kind: 'steering_denied'; guidance?: string }
-  | { kind: 'item_schema_mismatch'; category: 'items' | 'developerMessages' | 'toolCalls' | 'toolResults'; itemType?: string };
+  | { kind: 'item_schema_mismatch'; category: 'items' | 'developerMessages' | 'toolCalls' | 'toolResults'; itemType?: string }
+  | { kind: 'connection_unavailable'; connection: string; reason: string }
+  | { kind: 'connection_failed'; connection: string; op: string; error: { code: ConnectionErrorCode; message: string; details?: Record<string, unknown> } }
+  | { kind: 'connection_ref_invalid'; connection: string; reason: string }
+  | { kind: 'connection_secret_refused'; connection: string; op: string }
+  | { kind: 'connection_input_required'; connection: string; request: { id: string; message: string; schema?: JsonSchema } }
+  | { kind: 'connection_resume_refused'; connection: string; reason: string }
+  | { kind: 'verify_act_failed'; stepId: string; cause: Error; run?: BlobRef };
 ```
 
 ### Model provider failures
@@ -580,6 +594,53 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 **Fix:** Pass the harness's tools in the serve options: `serveAcp(harness, { tools, permissions })`.
 
+
+### Connections
+
+#### CONNECTION_UNKNOWN
+
+**Cause:** A handle, workflow node, trigger or allowlist names a connection the harness does not have.
+
+**Fix:** Add the connection under that name in `new AgentHarness({ connections })`, or correct the name. The hint lists the connections the harness has.
+
+#### CONNECTION_UNSATISFIED
+
+**Cause:** A connection does not offer what is required of it. The error's `missing` field says which: a profile or extension version, an operation, an event, or a sense a `verify` step needs.
+
+**Fix:** Point the handle or manifest entry at a connection whose server offers what is missing, or relax the requirement (a wider version range, fewer operations).
+
+#### CONNECTION_NOT_ALLOWED
+
+**Cause:** A JSON workflow asks for more than its `connections` allowlist grants, or sets a setup field the profile reserves to the host (such as the command or path of an app).
+
+**Fix:** Widen the allowlist passed to `parseAndRunWorkflow` or `dynamicWorkflow`, or move the host-only field into the pool's own `setup` in the harness configuration.
+
+#### CONNECTION_INVALID
+
+**Cause:** A connection manifest entry, handle or provider configuration is malformed: for example a bad version range, a `fresh` handle without a pool, or a `secret()` used with no `environment.secrets` resolver.
+
+**Fix:** Correct the entry the message names. The hint says which field is wrong.
+
+#### CONNECTION_TOOL_COLLISION
+
+**Cause:** Two connection operations would reach the model under the same tool name.
+
+**Fix:** Rename one of the connections, or expose fewer operations to the model through `connectionTools()`.
+
+### Verification
+
+#### VERIFY_NOT_CONFIGURED
+
+**Cause:** A `step.verify` (or a `verify` workflow node) ran, but the harness has no verifier.
+
+**Fix:** Register one: `new AgentHarness({ verification: verifier() })`, with `verifier` from `@noetic-tools/verify`.
+
+#### VERIFY_INVALID
+
+**Cause:** A verify step is malformed: its `act` contains nothing that acts, a matcher cannot be parsed by its sense's grammar, or a witness is asked to run an operation with effects.
+
+**Fix:** Give `act` at least one call with effects on the subject, fix the matcher text the message quotes, and let witnesses only run operations without effects.
+
 ## Related Pages
 
 - [Context & Event Log](/docs/framework/context) -- `ctx.abort()` produces a `cancelled` error.
@@ -587,3 +648,6 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 - [Loop & Until](/docs/framework/operators/loop-and-until) -- the `onError` recovery callback.
 - [AgentHarness](/docs/framework/runtime) -- `harness.cancel()` triggers cancellation errors.
 - [Expressions](/docs/framework/expressions) -- the JSONata expressions behind `EXPRESSION_FAILED` and `EXPRESSION_LIMIT_EXCEEDED`.
+- [Connections](/docs/framework/connections) -- the `CONNECTION_*` codes and `connection_*` kinds.
+- [Connection Profiles](/docs/framework/connection-profiles#errors) -- the server error codes `connection_failed` carries.
+- [Verification](/docs/framework/verification) -- `VERIFY_*` codes and `verify_act_failed`.

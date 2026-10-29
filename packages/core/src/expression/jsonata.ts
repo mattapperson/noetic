@@ -5,7 +5,7 @@
  * the library or its error shapes.
  */
 
-import { frameworkCast, NoeticConfigError } from '@noetic-tools/types';
+import { frameworkCast, isRef, NoeticConfigError, refId } from '@noetic-tools/types';
 import jsonata from 'jsonata';
 
 //#region Types
@@ -29,12 +29,23 @@ export interface ExpressionLimits {
   steps?: number;
 }
 
+/**
+ * Per-evaluation bindings (spec 33 § The Input). `$refId` is bound on every
+ * compiled expression; these change with each evaluation.
+ */
+export interface ExpressionBindings {
+  /** `$steps`: outputs of nodes already completed in the enclosing workflow, by node id, each read by `readInput`. */
+  steps?: Readonly<Record<string, unknown>>;
+  /** `$item`: the connection name a fan-out path runs on (spec 35 § Fan-out). */
+  item?: unknown;
+}
+
 /** A compiled expression, ready to run against node input. */
 export interface CompiledExpression {
   /** Names the expression's owner in error messages, e.g. `compute node 'step'`. */
   where: string;
   /** Evaluates against `input`, already read by `readInput`. Resolves to JSONata's raw result. */
-  run(input: unknown): Promise<unknown>;
+  run(input: unknown, bindings?: ExpressionBindings): Promise<unknown>;
 }
 
 /** JSONata throws plain objects, not `Error`s. */
@@ -114,11 +125,12 @@ export function compileExpression(
     });
   }
   countSteps(compiled, bounds.steps);
+  compiled.assign('refId', refIdBinding);
   return {
     where,
-    run: async (input) => {
+    run: async (input, bindings) => {
       try {
-        return await compiled.evaluate(input);
+        return await compiled.evaluate(input, jsonataBindings(bindings));
       } catch (e) {
         throw translate(e, where, bounds);
       }
@@ -143,8 +155,12 @@ export function syntaxError(source: string): string | undefined {
  *
  * @throws `NoeticConfigError` with code `EXPRESSION_FAILED` or `EXPRESSION_LIMIT_EXCEEDED`.
  */
-export async function compute(expr: CompiledExpression, input: unknown): Promise<unknown> {
-  const result = await computeMaybe(expr, input);
+export async function compute(
+  expr: CompiledExpression,
+  input: unknown,
+  bindings?: ExpressionBindings,
+): Promise<unknown> {
+  const result = await computeMaybe(expr, input, bindings);
   if (result === undefined) {
     throw failed(expr.where, 'the expression gave no value; check the paths it reads.');
   }
@@ -157,8 +173,12 @@ export async function compute(expr: CompiledExpression, input: unknown): Promise
  *
  * @throws `NoeticConfigError` with code `EXPRESSION_FAILED` or `EXPRESSION_LIMIT_EXCEEDED`.
  */
-export async function computeMaybe(expr: CompiledExpression, input: unknown): Promise<unknown> {
-  const result = await expr.run(input);
+export async function computeMaybe(
+  expr: CompiledExpression,
+  input: unknown,
+  bindings?: ExpressionBindings,
+): Promise<unknown> {
+  const result = await expr.run(input, bindings);
   if (holdsFunction(result)) {
     throw failed(expr.where, 'the expression gave a function, which has no JSON form.');
   }
@@ -171,8 +191,12 @@ export async function computeMaybe(expr: CompiledExpression, input: unknown): Pr
  *
  * @throws `NoeticConfigError` with code `EXPRESSION_FAILED` or `EXPRESSION_LIMIT_EXCEEDED`.
  */
-export async function passes(expr: CompiledExpression, input: unknown): Promise<boolean> {
-  const result = await expr.run(input);
+export async function passes(
+  expr: CompiledExpression,
+  input: unknown,
+  bindings?: ExpressionBindings,
+): Promise<boolean> {
+  const result = await expr.run(input, bindings);
   if (result === undefined) {
     return false;
   }
@@ -200,6 +224,25 @@ export function readInput(value: unknown): unknown {
 //#endregion
 
 //#region Helpers
+
+/**
+ * `$refId(x)`: the id inside a connection ref, since JSONata paths cannot step
+ * into `$`-prefixed keys. No value for anything that is not a ref.
+ */
+function refIdBinding(value: unknown): string | undefined {
+  return isRef(value) ? refId(value) : undefined;
+}
+
+/** The JSONata bindings for one evaluation: `$steps` always (empty when nothing ran), `$item` when set. */
+function jsonataBindings(bindings: ExpressionBindings | undefined): Record<string, unknown> {
+  const out: Record<string, unknown> = {
+    steps: bindings?.steps ?? {},
+  };
+  if (bindings?.item !== undefined) {
+    out.item = bindings.item;
+  }
+  return out;
+}
 
 /** `limits` over the defaults (an unset field takes its default); anything but a positive integer or `Infinity` throws. */
 function checkLimits(limits: ExpressionLimits | undefined): Required<ExpressionLimits> {

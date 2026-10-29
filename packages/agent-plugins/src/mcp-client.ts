@@ -2,9 +2,13 @@
  * Connecting the MCP servers a plugin declares.
  *
  * Agent Plugins defines the *configuration* format; the Model Context Protocol
- * defines the wire behavior. This module is the seam: it takes the resolved
- * entries produced by `mcp-config.ts`, applies the §9.1 subprocess
- * environment, and hands them to the official MCP SDK.
+ * defines the wire behavior. The MCP client, its transports and capability
+ * negotiation live in `@noetic-tools/mcp` (spec 35): this module takes the
+ * resolved entries produced by `mcp-config.ts`, applies the §9.1 subprocess
+ * environment, and registers each server through `mcp()` as a connection with
+ * no profile — so a plugin's tools share one naming rule and one set of gates
+ * with every other MCP server the harness uses, and a plugin server that
+ * declares a profile gets its typed operations too.
  *
  * §7.2.2 rule 5 is the rule that shapes the error handling here — a server
  * that fails to start, connect, authenticate, or handshake must not stop the
@@ -13,11 +17,10 @@
  */
 
 import { mkdir } from 'node:fs/promises';
-import { Client } from '@modelcontextprotocol/sdk/client';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import type { FetchLike, Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
-import { createSseTransport } from './mcp/sse';
+import type { McpConnection, McpProvider } from '@noetic-tools/mcp';
+import { createMemoryArtifactStore, mcp } from '@noetic-tools/mcp';
+import type { ArtifactStore } from '@noetic-tools/types';
+import { isNoeticError } from '@noetic-tools/types';
 import type { ResolvedMcpServer, ResolvedStdioServer } from './mcp-config';
 import { McpTransport } from './mcp-config';
 
@@ -40,7 +43,10 @@ export interface McpToolInfo {
 export interface McpSession {
   /** `<plugin>/<server>`. */
   key: string;
-  client: Client;
+  /** The connection `mcp()` opened; a plugin server has no profile unless it declares one. */
+  connection: McpConnection;
+  /** The provider behind it, for a host that registers plugin servers as harness connections. */
+  provider: McpProvider;
   tools: McpToolInfo[];
   close(): Promise<void>;
 }
@@ -127,134 +133,6 @@ const INHERITED_ENV = [
 
 //#endregion
 
-//#region Transport construction
-
-/** Redirect hops to follow before giving up, matching the fetch default. */
-const MAX_REDIRECTS = 20;
-
-/**
- * A `fetch` that drops plugin-configured headers when a redirect crosses an
- * origin.
- *
- * §7.2.1: "A client MUST NOT forward configured headers to a different origin
- * through a redirect … without explicit user authorization." Plain `fetch`
- * follows redirects itself and re-sends custom headers to the new origin —
- * verified on the wire, an `X-Tenant` carrying a tenant token reached a
- * different-origin target through a 307. (`Authorization` is stripped by fetch
- * itself; custom headers, which are exactly the ones §7.2.1 contemplates, are
- * not.)
- *
- * So redirects are followed manually: same origin keeps the configured
- * headers, a different origin re-issues without them.
- */
-function originAwareFetch(configured: Record<string, string>): FetchLike {
-  const configuredNames = Object.keys(configured).map((name) => name.toLowerCase());
-
-  return async (input: string | URL, init?: RequestInit): Promise<Response> => {
-    let url = new URL(input);
-    const origin = url.origin;
-    let headers = new Headers(init?.headers);
-    // The per-hop init. A 303 — or a 301/302 on a POST — rewrites it to a
-    // bodyless GET, so it has to be a local rather than the parameter.
-    const request: RequestInit = {
-      ...init,
-    };
-    let response: Response;
-
-    for (let hop = 0; ; hop++) {
-      response = await fetch(url, {
-        ...request,
-        headers,
-        // Manual, so the decision about what to re-send is ours.
-        redirect: 'manual',
-      });
-
-      const location = response.headers.get('location');
-      if (location === null || response.status < 300 || response.status >= 400) {
-        return response;
-      }
-      if (hop >= MAX_REDIRECTS) {
-        return response;
-      }
-
-      url = new URL(location, url);
-      if (url.origin !== origin) {
-        // Crossed an origin: strip everything the plugin configured before
-        // following. Anything the SDK added (content-type, session id) stays.
-        const stripped = new Headers(headers);
-        for (const name of configuredNames) {
-          stripped.delete(name);
-        }
-        headers = stripped;
-      }
-      // A 303, or a 301/302 on a POST, becomes a GET without a body. Mutating
-      // `request` is what makes this take effect — the fetch above spreads
-      // `request`, so rewriting the `init` parameter would change nothing.
-      if (
-        response.status === 303 ||
-        ((response.status === 301 || response.status === 302) && request.method === 'POST')
-      ) {
-        request.method = 'GET';
-        request.body = undefined;
-      }
-    }
-  };
-}
-
-async function createTransport(params: {
-  server: ResolvedMcpServer;
-  pluginRoot: string;
-  pluginData: string;
-  baseEnv?: Record<string, string | undefined>;
-}): Promise<Transport> {
-  const { server } = params;
-
-  if (server.type === McpTransport.Stdio) {
-    return new StdioClientTransport({
-      command: server.command,
-      args: server.args,
-      env: buildSubprocessEnv({
-        server,
-        pluginRoot: params.pluginRoot,
-        pluginData: params.pluginData,
-        ...(params.baseEnv === undefined
-          ? {}
-          : {
-              baseEnv: params.baseEnv,
-            }),
-      }),
-      cwd: server.cwd,
-    });
-  }
-
-  const url = new URL(server.url);
-  // Already stripped during resolution — `server.headers` is by definition what
-  // may be sent, so there is nothing to filter here.
-  const safeHeaders = server.headers;
-  const requestInit =
-    Object.keys(safeHeaders).length === 0
-      ? undefined
-      : {
-          headers: safeHeaders,
-        };
-
-  const guardedFetch = originAwareFetch(safeHeaders);
-
-  if (server.type === McpTransport.StreamableHttp) {
-    return new StreamableHTTPClientTransport(url, {
-      fetch: guardedFetch,
-      ...(requestInit === undefined
-        ? {}
-        : {
-            requestInit,
-          }),
-    });
-  }
-  return createSseTransport(url, requestInit, guardedFetch);
-}
-
-//#endregion
-
 //#region Connection
 
 /**
@@ -270,55 +148,73 @@ async function createTransport(params: {
  */
 export const DEFAULT_CONNECT_TIMEOUT_MS = 1e4;
 
-/**
- * Race `work` against a deadline. On expiry the caller must close whatever
- * `work` was waiting on — the losing promise keeps running otherwise, which is
- * precisely how the subprocesses leaked.
- */
-async function withDeadline<T>(
-  work: Promise<T>,
-  ms: number,
-): Promise<
-  | {
-      timedOut: false;
-      value: T;
-    }
-  | {
-      timedOut: true;
-    }
-> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const deadline = new Promise<{
-    timedOut: true;
-  }>((settle) => {
-    timer = setTimeout(
-      () =>
-        settle({
-          timedOut: true,
-        }),
-      ms,
-    );
-  });
-  try {
-    return await Promise.race([
-      work.then((value) => ({
-        timedOut: false as const,
-        value,
-      })),
-      deadline,
-    ]);
-  } finally {
-    if (timer !== undefined) {
-      clearTimeout(timer);
-    }
-  }
-}
+/** @public How long a tool call without a caller's signal may run, long operations included. */
+export const DEFAULT_TOOL_CALL_TIMEOUT_MS = 6e5;
 
 /** Identifies this client to servers during the MCP handshake. */
 const CLIENT_INFO = {
   name: 'noetic-agent-plugins',
   version: '1.0.0',
 };
+
+/**
+ * The `mcp()` provider for one resolved plugin server: the §9.1 environment
+ * for a stdio server, the already-filtered headers for a remote one (which
+ * `@noetic-tools/mcp` never forwards across an origin-changing redirect,
+ * §7.2.1).
+ *
+ * A stdio server's `PLUGIN_DATA` directory must exist before launch; call
+ * {@link connectMcpServer}, or create it, before connecting.
+ *
+ * @public
+ */
+export function pluginMcpProvider(params: {
+  server: ResolvedMcpServer;
+  pluginRoot: string;
+  pluginData: string;
+  baseEnv?: Record<string, string | undefined>;
+  /** Per-server budget for start + connect + handshake + tools/list. */
+  timeoutMs?: number;
+}): McpProvider {
+  const { server } = params;
+  const options = {
+    timeoutMs: params.timeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS,
+    clientInfo: CLIENT_INFO,
+  };
+  if (server.type === McpTransport.Stdio) {
+    return mcp({
+      ...options,
+      command: server.command,
+      args: server.args,
+      env: buildSubprocessEnv({
+        server,
+        pluginRoot: params.pluginRoot,
+        pluginData: params.pluginData,
+        ...(params.baseEnv === undefined
+          ? {}
+          : {
+              baseEnv: params.baseEnv,
+            }),
+      }),
+      cwd: server.cwd,
+    });
+  }
+  return mcp({
+    ...options,
+    url: server.url,
+    // Already stripped during resolution — `server.headers` is by definition
+    // what may be sent.
+    headers: server.headers,
+    protocol: server.type === McpTransport.Sse ? 'sse' : 'streamable-http',
+  });
+}
+
+function describeFailure(error: unknown): string {
+  if (isNoeticError(error) && error.noeticError.kind === 'connection_unavailable') {
+    return error.noeticError.reason;
+  }
+  return error instanceof Error ? error.message : String(error);
+}
 
 /**
  * Connect one resolved server and enumerate its tools.
@@ -335,9 +231,10 @@ export async function connectMcpServer(params: {
   baseEnv?: Record<string, string | undefined>;
   /** Per-server budget for start + connect + handshake + tools/list. */
   timeoutMs?: number;
+  /** Where binary tool output is stored; defaults to an in-memory store. */
+  artifacts?: ArtifactStore;
 }): Promise<McpConnectResult> {
   const { server } = params;
-  const timeoutMs = params.timeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
 
   if (server.type === McpTransport.Stdio) {
     // §9.1: PLUGIN_DATA must exist and be writable before the subprocess
@@ -355,80 +252,60 @@ export async function connectMcpServer(params: {
     }
   }
 
-  const client = new Client(CLIENT_INFO);
-
-  /** Close the client, swallowing the failure — teardown must not mask the cause. */
-  const abandon = async (): Promise<void> => {
-    await client.close().catch(() => {});
-  };
-
+  const provider = pluginMcpProvider(params);
+  let connection: McpConnection | undefined;
   try {
-    const connected = await withDeadline(
-      createTransport(params).then((transport) => client.connect(transport)),
-      timeoutMs,
-    );
-    if (connected.timedOut) {
-      // Close it, or the subprocess outlives us with nobody holding a handle.
-      await abandon();
-      return {
-        ok: false,
-        detail: `§7.2.2: server did not complete the MCP handshake within ${timeoutMs}ms`,
-      };
-    }
+    [connection] = await provider.connect({
+      name: server.key,
+      signal: new AbortController().signal,
+      artifacts: params.artifacts ?? createMemoryArtifactStore(),
+    });
   } catch (error) {
-    await abandon();
     return {
       ok: false,
-      detail: `§7.2.2: connection failed: ${error instanceof Error ? error.message : String(error)}`,
+      detail: `§7.2.2: connection failed: ${describeFailure(error)}`,
     };
   }
-
-  let tools: McpToolInfo[];
-  try {
-    const listed = await withDeadline(client.listTools(), timeoutMs);
-    if (listed.timedOut) {
-      await abandon();
-      return {
-        ok: false,
-        detail: `§7.2.2: server did not answer tools/list within ${timeoutMs}ms`,
-      };
-    }
-    tools = listed.value.tools.map((tool) => ({
-      qualifiedName: `${server.key}/${tool.name}`,
-      name: tool.name,
-      server: server.key,
-      ...(tool.description === undefined
-        ? {}
-        : {
-            description: tool.description,
-          }),
-      inputSchema: tool.inputSchema,
-    }));
-  } catch (error) {
-    // The handshake succeeded but the server will not describe itself — it is
-    // unusable, so close it rather than leave a session with no tools.
-    await abandon();
+  if (connection === undefined) {
     return {
       ok: false,
-      detail: `§7.2.2: tools/list failed: ${error instanceof Error ? error.message : String(error)}`,
+      detail: '§7.2.2: the server offered no connection',
     };
   }
+  const live = connection;
+  const tools = Object.values(live.manifest.operations).map((op) => ({
+    qualifiedName: `${server.key}/${op.name}`,
+    name: op.name,
+    server: server.key,
+    ...(op.description === undefined
+      ? {}
+      : {
+          description: op.description,
+        }),
+    inputSchema: op.inputSchema,
+  }));
 
   return {
     ok: true,
     session: {
       key: server.key,
-      client,
+      connection: live,
+      provider,
       tools,
-      close: async () => {
-        await client.close();
-      },
+      close: () => live.release(),
     },
   };
 }
 
+function hasContent(value: unknown): value is {
+  content: unknown;
+} {
+  return typeof value === 'object' && value !== null && 'content' in value;
+}
+
 /**
- * Invoke a tool on a connected session.
+ * Invoke a tool on a connected session. A tool that runs as a long operation
+ * is waited for.
  *
  * @public
  * @returns The tool result content, or a description of the failure. A failing
@@ -439,18 +316,38 @@ export async function callMcpTool(params: {
   session: McpSession;
   tool: string;
   args: Record<string, unknown>;
+  /**
+   * Cancels the call and any long operation it waits on — the calling run's
+   * abort signal. Without one the call gives up after
+   * {@link DEFAULT_TOOL_CALL_TIMEOUT_MS}, so a task that never ends cannot hang the turn.
+   */
+  signal?: AbortSignal;
 }): Promise<{
   ok: boolean;
   content: unknown;
 }> {
+  const { connection } = params.session;
+  const signal = params.signal ?? AbortSignal.timeout(DEFAULT_TOOL_CALL_TIMEOUT_MS);
   try {
-    const result = await params.session.client.callTool({
-      name: params.tool,
-      arguments: params.args,
+    const first = await connection.call(params.tool, params.args, {
+      signal,
+      idempotencyKey: `agent-plugins:${crypto.randomUUID()}`,
     });
+    const outcome =
+      first.status === 'task'
+        ? await connection.tasks.result(first.taskId, {
+            signal,
+          })
+        : first;
+    if (outcome.status === 'error') {
+      return {
+        ok: false,
+        content: outcome.error.details?.content ?? outcome.error.message,
+      };
+    }
     return {
-      ok: result.isError !== true,
-      content: result.content,
+      ok: true,
+      content: hasContent(outcome.output) ? outcome.output.content : outcome.output,
     };
   } catch (error) {
     return {

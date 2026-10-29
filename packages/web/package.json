@@ -38,6 +38,6 @@
     "tailwindcss": "4.1.8",
     "typescript": "5.8.3",
     "valibot": "1.4.2",
-    "zod": "4.3.6"
+    "zod": "4.6.7"
   }
 }

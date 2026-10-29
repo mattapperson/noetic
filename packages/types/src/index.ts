@@ -2,14 +2,17 @@
  * @noetic-tools/types — foundational type contracts and primitives shared
  * across the Noetic framework.
  */
+export * from './errors/connection-errors';
 export * from './errors/noetic-config-error';
 export * from './errors/noetic-error';
 export * from './schemas/expression';
 export * from './schemas/item';
 export * from './schemas/workflow';
 export * from './types/acp';
+export * from './types/artifact-store';
 export * from './types/channel';
 export * from './types/common';
+export * from './types/connection';
 export * from './types/context';
 export * from './types/context-cache';
 export * from './types/context-harness';
@@ -27,6 +30,7 @@ export * from './types/harness-result';
 export * from './types/items';
 export * from './types/observability';
 export * from './types/output-codec';
+export * from './types/profile';
 export * from './types/runtime';
 export * from './types/schema';
 export * from './types/shell-adapter';
@@ -39,3 +43,4 @@ export * from './types/tool-context';
 export * from './util/content-hash';
 export * from './util/framework-cast';
 export * from './util/message-helpers';
+export * from './util/semver';

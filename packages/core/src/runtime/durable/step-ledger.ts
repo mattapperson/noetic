@@ -65,11 +65,35 @@ export const StepLedgerEntrySchema = z.object({
    * streamed again on replay when the harness sets `emitItemsOnReplay`.
    */
   streamed: z.array(z.number().int().nonnegative()).optional(),
+  /**
+   * The connections the step (or anything beneath it) used, each with the identity
+   * it had (spec 35 § Durability). A resumed run discards the ledger from the first
+   * entry whose connection was replaced since.
+   */
+  connections: z
+    .array(
+      z.object({
+        name: z.string(),
+        surface: z.string(),
+        instance: z.string(),
+      }),
+    )
+    .optional(),
   completedAt: z.string(),
 });
 
 /** @public A completed step recorded for replay. */
 export type StepLedgerEntry = z.infer<typeof StepLedgerEntrySchema>;
+
+/** @public A connection a ledger entry used, with the identity it had then. */
+export type StepLedgerConnectionUse = NonNullable<StepLedgerEntry['connections']>[number];
+
+/** @public A replayable entry's connection uses, in recording order. */
+export interface StepLedgerConnectionUses {
+  readonly seq: number;
+  readonly path: string;
+  readonly uses: ReadonlyArray<StepLedgerConnectionUse>;
+}
 
 //#endregion
 
@@ -352,6 +376,8 @@ export class StepLedger {
   private readonly replayable = new Map<string, StepLedgerEntry>();
   /** Sequence number holding each live entry, recovered or recorded, by path. */
   private readonly live = new LiveEntries();
+  /** Connections used at each path this run, attached to the entry recorded there or above. */
+  private readonly connectionNotes = new Map<string, StepLedgerConnectionUse[]>();
   /** Sequence number the next recorded entry takes. */
   private seq: number;
   private readonly store?: StepLedgerStore;
@@ -424,6 +450,9 @@ export class StepLedger {
       return undefined;
     }
     if (matches(entry, step)) {
+      for (const use of entry.connections ?? []) {
+        this.noteConnection(path, use);
+      }
       return entry;
     }
     if (path.startsWith(REPLAY_KEY_PREFIX)) {
@@ -446,10 +475,11 @@ export class StepLedger {
    * Best-effort: a failed write costs resumability, not the run. Resolves whether
    * the entry was stored.
    */
-  async record(entry: StepLedgerEntry): Promise<boolean> {
+  async record(recorded: StepLedgerEntry): Promise<boolean> {
     if (!this.store) {
       return false;
     }
+    const entry = this.withConnections(recorded);
     if (!this.retainable(entry)) {
       return false;
     }
@@ -480,6 +510,51 @@ export class StepLedger {
   }
 
   /**
+   * Notes that the step at `path` used a connection with the given identity; the
+   * entry recorded at `path` (or at any path above it) carries it.
+   */
+  noteConnection(path: string, use: StepLedgerConnectionUse): void {
+    const notes = this.connectionNotes.get(path) ?? [];
+    if (!notes.some((n) => sameUse(n, use))) {
+      notes.push(use);
+    }
+    this.connectionNotes.set(path, notes);
+  }
+
+  /** Every replayable entry that used a connection, in recording order. */
+  connectionUses(): StepLedgerConnectionUses[] {
+    const found: StepLedgerConnectionUses[] = [];
+    for (const [path, entry] of this.replayable) {
+      const seq = this.live.get(path);
+      if (seq === undefined || !entry.connections || entry.connections.length === 0) {
+        continue;
+      }
+      found.push({
+        seq,
+        path,
+        uses: entry.connections,
+      });
+    }
+    return found.sort((a, b) => a.seq - b.seq);
+  }
+
+  /**
+   * Discards every replayable entry recorded at or after sequence `seq`: the
+   * connection a step there used was replaced, so it and everything after it run
+   * live (spec 35 § Durability). Resolves the number discarded.
+   */
+  async discardFrom(seq: number): Promise<number> {
+    const dead = [
+      ...this.replayable.keys(),
+    ].filter((path) => (this.live.get(path) ?? -1) >= seq);
+    await this.prune(dead);
+    for (const path of dead) {
+      this.replayable.delete(path);
+    }
+    return dead.length;
+  }
+
+  /**
    * Drop every positional entry. A host calls this once a run has finished and the
    * checkpoint holds its result: every later resume starts past them, so they are dead.
    * `key:` entries stay — they are keyed by content, and a later run may ask the same.
@@ -493,6 +568,30 @@ export class StepLedger {
         this.replayable.delete(path);
       }
     }
+  }
+
+  /** `entry` carrying every connection noted at its path or beneath it. */
+  private withConnections(entry: StepLedgerEntry): StepLedgerEntry {
+    const uses: StepLedgerConnectionUse[] = [
+      ...(entry.connections ?? []),
+    ];
+    for (const [path, notes] of this.connectionNotes) {
+      if (path !== entry.path && !isBeneath(path, entry.path)) {
+        continue;
+      }
+      for (const use of notes) {
+        if (!uses.some((u) => sameUse(u, use))) {
+          uses.push(use);
+        }
+      }
+    }
+    if (uses.length === 0) {
+      return entry;
+    }
+    return {
+      ...entry,
+      connections: uses,
+    };
   }
 
   private async prune(dead: ReadonlyArray<string>): Promise<void> {
@@ -571,6 +670,10 @@ export class StepLedger {
     }
     console.warn(`${message} The step will re-run on resume; further drops are silent.`);
   }
+}
+
+function sameUse(a: StepLedgerConnectionUse, b: StepLedgerConnectionUse): boolean {
+  return a.name === b.name && a.surface === b.surface && a.instance === b.instance;
 }
 
 function matches(entry: StepLedgerEntry, step: StepLedgerMatch): boolean {

@@ -44,7 +44,7 @@ verification run is an OVP `VerificationRun` any OVP tool can read and check.
 | `subject` | The connection being checked — or a list (`[ios, android]`), which runs one verify per connection in parallel, with ids `<id>.<name>` and the worst outcome. |
 | `expect` | What must become true. Each entry is a sense and a matcher (spec 36 § Senses), optionally a count. |
 | `never` | What must not happen at any point while the action runs. |
-| `act` | The action: a step, or an array of steps run in sequence. Must contain at least one operation with effects, or a model call. |
+| `act` | The action: a step, or an array of steps run in sequence. Must contain at least one operation with effects, or a model call. With a list subject, `act` is a function of each subject's name — `(subject) => step.call({ connection: subject, … })` — so each verify acts on its own subject; a fixed `act` that names one of the subjects is `VERIFY_INVALID`. |
 | `witnesses` | Connections that can confirm from outside the subject — a database, a payment API (§ Witnesses). |
 | `close` | When to stop watching. Defaults to the subject profile's default: quiet for 500 ms, at most 15 s. |
 | `intent` | A sentence saying why, kept in the run record. |
@@ -185,7 +185,10 @@ cannot confirm what the subject claims, and from the harness when evidence
 belongs to a replaced subject or predates its latest edit. The harness detects
 nothing else; knowing what a request or a render means is the server's job. A
 disagreement decides a claim only when one of its senses is independent
-(OVP-CHAN-2), which `adjudicate()` checks.
+(OVP-CHAN-2), which `adjudicate()` checks. `witnessDisagreement` compares
+senses within one claim, so corroboration needs a claim that reads both the
+subject and a witness: the full OVP form, one claim with an assertion on each.
+Each `expect` entry is its own one-sense claim, judged on its own.
 
 ## Witnesses
 
@@ -220,9 +223,11 @@ new AgentHarness({ verification: verifier(), /* … */ });
 
 Core owns the `verify` step and node and gives the verifier what it needs —
 running `act`, listening, reading, evaluating expressions — without importing
-`@noetic-tools/verify` or `open-verification`. `bun run gen:schema` inlines
-OVP's published JSON Schemas from the package into the workflow schema, so the
-published schema never points at another host. Senses are translated to OVP
+`@noetic-tools/verify` or `open-verification`. The OVP `Claim` and
+`Constraint` shapes a `verify` node carries are Zod mirrors in
+`@noetic-tools/types/verify`, kept equal to OVP's own schemas by a test in
+`@noetic-tools/verify`; `bun run gen:schema` inlines them into the workflow
+schema, so the published schema never points at another host. Senses are translated to OVP
 channel ids at this boundary.
 
 | OVP | Noetic |

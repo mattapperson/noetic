@@ -27,6 +27,9 @@ const NODE_KINDS = [
   'schedule',
   'subflow',
   'acp-agent',
+  'call',
+  'wait',
+  'verify',
 ] as const;
 
 /** Every named until predicate kind the runtime accepts. */

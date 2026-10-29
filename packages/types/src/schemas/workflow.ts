@@ -12,9 +12,16 @@
 import { z } from 'zod';
 import type { ToolChoice } from '../types/common';
 import { ServiceTier, ToolChoiceMode } from '../types/common';
+import type { BlobRef, Ref } from '../types/connection';
+import { BlobRefSchema, RefSchema } from '../types/connection';
 import type { DecideQuestion } from '../types/decide';
 import { DecideQuestionsSchema, routeOutcomes } from '../types/decide';
+import { isSenseId, parseProfileRequirement } from '../types/profile';
 import type { DecideView } from '../types/step';
+import { isValidRange } from '../util/semver';
+import type { Claim, Constraint } from '../verify/ovp';
+import { OvpClaimSchema, OvpConstraintSchema } from '../verify/schemas';
+import type { VerifyMatcher } from '../verify/verifier';
 import type { Expression } from './expression';
 import { ExpressionSchema } from './expression';
 
@@ -506,9 +513,11 @@ export interface InParallelWorkflowNode extends WorkflowNodeBase {
   /**
    * Selector key into the inParallel input (parsed as JSON) locating the array
    * to fan out over. When omitted, the input string itself is parsed as a JSON
-   * array. Only meaningful with `each`.
+   * array. Only meaningful with `each`. A list of connection names instead fans
+   * `each` out over those connections, each name checked against the manifest
+   * and bound to `$item` (spec 35 § JSON workflows).
    */
-  over?: string;
+  over?: string | string[];
   merge?: MergeStrategy;
   concurrency?: number;
 }
@@ -547,7 +556,8 @@ export interface LoopWorkflowNode extends WorkflowNodeBase {
 
 export interface SequenceWorkflowNode extends WorkflowNodeBase {
   kind: 'sequence';
-  steps: WorkflowNode[];
+  /** Nodes, or operations written by name (`{ "ui.tap": { … } }`), run in order. */
+  steps: WorkflowStepEntry[];
 }
 
 export interface ScheduleWorkflowNode extends WorkflowNodeBase {
@@ -595,6 +605,151 @@ export interface SubflowWorkflowNode extends WorkflowNodeBase {
   input?: string;
 }
 
+//#region Connection Node Types
+
+/** @public `{ "$expr": "…" }`: an expression evaluated against the node's input (spec 33). */
+export interface WorkflowExprValue {
+  $expr: Expression;
+}
+
+/** @public `{ "$literal": … }`: passes a value through untouched. */
+export interface WorkflowLiteralValue {
+  $literal: unknown;
+}
+
+/** @public `{ "$secret": "name" }`: a secret, resolved only when the call is sent. */
+export interface WorkflowSecretValue {
+  $secret: string;
+}
+
+/**
+ * @public
+ * A value in a connection node's arguments: JSON, an expression, a literal, a
+ * secret, or a ref or blob as it was returned. Object keys starting with `$`
+ * are reserved for these wrappers; wrap such data in `$literal`.
+ */
+export type WorkflowValue =
+  | null
+  | boolean
+  | number
+  | string
+  | WorkflowValue[]
+  | WorkflowExprValue
+  | WorkflowLiteralValue
+  | WorkflowSecretValue
+  | Ref
+  | BlobRef
+  | {
+      [key: string]: WorkflowValue;
+    };
+
+/** @public A node's arguments: an object of values, or one expression computing them all. */
+export type WorkflowArgs =
+  | {
+      [field: string]: WorkflowValue;
+    }
+  | WorkflowExprValue;
+
+/** @public A connection by manifest name, or an expression (`{ "$expr": "$item" }` in a fan-out). */
+export type WorkflowConnectionRef = string | WorkflowExprValue;
+
+/**
+ * @public
+ * An operation written by name inside an array of steps: `{ "ui.tap": { "element": "button \"Pay\"" } }`
+ * is a `call` on the enclosing connection (the `verify` subject, or the
+ * document's only connection).
+ */
+export type WorkflowOpShorthand = {
+  [op: string]: WorkflowArgs;
+};
+
+/** @public One entry of an array of steps: a node, or an operation written by name. */
+export type WorkflowStepEntry = WorkflowNode | WorkflowOpShorthand;
+
+/** @public What `around` and `act` take: a step, or an array of steps run in sequence. */
+export type WorkflowStepList = WorkflowStepEntry | WorkflowStepEntry[];
+
+/** @public Runs one connection operation and returns its result (spec 35). */
+export interface CallWorkflowNode extends WorkflowNodeBase {
+  kind: 'call';
+  /** Defaults to the enclosing connection (a `verify` subject, or the document's only connection). */
+  connection?: WorkflowConnectionRef;
+  op: string;
+  args?: WorkflowArgs;
+}
+
+/** @public Waits for a connection event; with `around`, listens first, runs `around`, then waits. Output `{ event, around }`. */
+export interface WaitWorkflowNode extends WorkflowNodeBase {
+  kind: 'wait';
+  connection?: WorkflowConnectionRef;
+  event: string;
+  /** Evaluated against `{ "event": <the event>, "input": <the node's input> }`; the event matches on `true`. */
+  filter?: Expression;
+  around?: WorkflowStepList;
+  timeoutMs: number;
+}
+
+/**
+ * @public
+ * A verify matcher in JSON: exactly one sense key (`ui`, `net`, `log`, `route`,
+ * `state`, `signal`, `storage`, `time`, `visual`, `x-…`) or `event`, with its
+ * matcher text, plus optional bounds: `{ "net": "POST /api/orders 201", "count": 1 }`.
+ */
+export type WorkflowVerifyMatcher = {
+  count?: number;
+  atLeast?: number;
+  atMost?: number;
+  equals?: number | string | boolean;
+  tolerance?: number;
+  [sense: string]: string | number | boolean | undefined;
+};
+
+/** @public When a verify's window closes. */
+export interface WorkflowVerifyClose {
+  until?: 'quiet' | 'event' | 'done' | 'exit';
+  event?: string;
+  quietMs?: number;
+  timeoutMs?: number;
+}
+
+/** @public Checks claims about what a connection shows (spec 37). */
+export interface VerifyWorkflowNode extends WorkflowNodeBase {
+  kind: 'verify';
+  /** The connection checked, or a list (one verify per connection, ids `<id>.<name>`). */
+  subject: string | string[] | WorkflowExprValue;
+  expect?: WorkflowVerifyMatcher[];
+  never?: WorkflowVerifyMatcher[];
+  /** OVP claims given directly, instead of `expect`. */
+  claims?: Claim[];
+  /** OVP constraints given directly, instead of `never`. */
+  constraints?: Constraint[];
+  /** Steps run on the subject unless they name another connection. */
+  act: WorkflowStepList;
+  witnesses?: string[];
+  close?: WorkflowVerifyClose;
+  intent?: string;
+}
+
+/**
+ * @public
+ * A connection a document needs: a `profile` with a range, `extensions` with
+ * ranges, or for a source the `events` it needs; plus `from`, `fresh` and
+ * `setup` for pooled connections (spec 35 § JSON workflows).
+ */
+export interface WorkflowConnectionRequirement {
+  /** `<profile>@<range>`, e.g. `browser@^1.2`. */
+  profile?: string;
+  /** Extension id → range. */
+  extensions?: Record<string, string>;
+  /** Event types a source must offer. */
+  events?: string[];
+  from?: string;
+  fresh?: 'run' | 'path';
+  setup?: Record<string, unknown>;
+}
+
+//#endregion
+
 /** @public Discriminated union of all JSON-serialisable workflow node kinds. */
 export type WorkflowNode =
   | CallModelWorkflowNode
@@ -611,7 +766,10 @@ export type WorkflowNode =
   | SequenceWorkflowNode
   | ScheduleWorkflowNode
   | SubflowWorkflowNode
-  | AcpAgentWorkflowNode;
+  | AcpAgentWorkflowNode
+  | CallWorkflowNode
+  | WaitWorkflowNode
+  | VerifyWorkflowNode;
 
 //#endregion
 
@@ -794,7 +952,12 @@ const InParallelNodeSchema = z
     ]),
     paths: z.array(WorkflowNodeRef).min(1).optional(),
     each: WorkflowNodeRef.optional(),
-    over: z.string().min(1).optional(),
+    over: z
+      .union([
+        z.string().min(1),
+        z.array(z.string().min(1)).min(1),
+      ])
+      .optional(),
     merge: MergeStrategySchema.optional(),
     concurrency: z.number().int().positive().optional(),
   })
@@ -836,10 +999,17 @@ const LoopNodeSchema = z.object({
     .optional(),
 });
 
+const SequenceStepEntryRef: z.ZodType<WorkflowStepEntry> = z.lazy(() =>
+  z.union([
+    WorkflowNodeRef,
+    WorkflowOpShorthandSchema,
+  ]),
+);
+
 const SequenceNodeSchema = z.object({
   kind: z.literal('sequence'),
   ...SHARED_FIELDS,
-  steps: z.array(WorkflowNodeRef).min(1),
+  steps: z.array(SequenceStepEntryRef).min(1),
 });
 
 const ScheduleNodeSchema = z.object({
@@ -883,6 +1053,272 @@ const AcpAgentNodeSchema = z.object({
   session: AcpSessionPolicySchema.optional(),
 });
 
+//#region Connection Value and Node Schemas
+
+const OP_NAME_RE = /^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)+$/;
+const CONNECTION_NAME_RE = /^[A-Za-z][A-Za-z0-9_-]*$/;
+const EVENT_NAME_RE = /^[A-Za-z0-9_.-]+$/;
+const SENSE_KEY_RE = /^(ui|net|log|route|state|signal|storage|time|visual|x-[a-z0-9-]+|event)$/;
+const EXTENSION_ID_RE = /^[a-z0-9-]+(\.[a-z0-9-]+){2,}$/;
+const MATCHER_BOUND_KEYS = new Set([
+  'count',
+  'atLeast',
+  'atMost',
+  'equals',
+  'tolerance',
+]);
+
+const ExprValueSchema: z.ZodType<WorkflowExprValue> = z
+  .object({
+    $expr: ExpressionSchema,
+  })
+  .strict();
+
+const LiteralValueSchema: z.ZodType<WorkflowLiteralValue> = z
+  .object({
+    $literal: z.unknown(),
+  })
+  .strict()
+  .refine((v) => Object.hasOwn(v, '$literal'), {
+    message: "A '$literal' wrapper needs a value.",
+  });
+
+const SecretValueSchema: z.ZodType<WorkflowSecretValue> = z
+  .object({
+    $secret: z.string().min(1),
+  })
+  .strict();
+
+const PlainKeySchema = z
+  .string()
+  .regex(/^(?!\$)/, "Keys starting with '$' are reserved; wrap such data in '$literal'.");
+
+/** @public Zod schema validating a `WorkflowValue`. */
+export const WorkflowValueSchema: z.ZodType<WorkflowValue> = z
+  .lazy(() => WorkflowValueUnionSchema)
+  .meta({
+    id: 'WorkflowValue',
+    title: 'WorkflowValue',
+    description:
+      "A connection argument: JSON, { $expr }, { $literal }, { $secret }, or a { $ref } / { $blob } as it was returned. Keys starting with '$' are reserved.",
+  });
+
+const PlainObjectValueSchema = z.record(PlainKeySchema, WorkflowValueSchema).meta({
+  id: 'WorkflowValueObject',
+  title: 'WorkflowValueObject',
+  description: "An object of connection argument values. Keys starting with '$' are reserved.",
+});
+
+const WorkflowValueUnionSchema: z.ZodType<WorkflowValue> = z.union([
+  z.null(),
+  z.boolean(),
+  z.number(),
+  z.string(),
+  z.array(WorkflowValueSchema),
+  ExprValueSchema,
+  SecretValueSchema,
+  RefSchema,
+  BlobRefSchema,
+  PlainObjectValueSchema,
+  LiteralValueSchema,
+]);
+
+/** @public Zod schema validating `WorkflowArgs`. */
+export const WorkflowArgsSchema: z.ZodType<WorkflowArgs> = z.union([
+  ExprValueSchema,
+  PlainObjectValueSchema,
+]);
+
+const ConnectionRefSchema: z.ZodType<WorkflowConnectionRef> = z.union([
+  z.string().min(1),
+  ExprValueSchema,
+]);
+
+/** @public Zod schema validating an operation written by name: exactly one `op.name` key. */
+export const WorkflowOpShorthandSchema: z.ZodType<WorkflowOpShorthand> = z
+  .record(
+    z.string().regex(OP_NAME_RE, 'An operation name has at least one dot: ui.tap.'),
+    WorkflowArgsSchema,
+  )
+  .refine((entry) => Object.keys(entry).length === 1, {
+    message: 'An operation written by name has exactly one key: the operation.',
+  });
+
+const WorkflowStepEntrySchema: z.ZodType<WorkflowStepEntry> = z.union([
+  WorkflowNodeRef,
+  WorkflowOpShorthandSchema,
+]);
+
+const WorkflowStepListSchema: z.ZodType<WorkflowStepList> = z.union([
+  WorkflowStepEntrySchema,
+  z.array(WorkflowStepEntrySchema).min(1),
+]);
+
+const CallNodeSchema = z.object({
+  kind: z.literal('call'),
+  ...SHARED_FIELDS,
+  connection: ConnectionRefSchema.optional(),
+  op: z.string().regex(OP_NAME_RE),
+  args: WorkflowArgsSchema.optional(),
+});
+
+const WaitNodeSchema = z.object({
+  kind: z.literal('wait'),
+  ...SHARED_FIELDS,
+  connection: ConnectionRefSchema.optional(),
+  event: z.string().regex(EVENT_NAME_RE),
+  filter: ExpressionSchema.optional(),
+  around: WorkflowStepListSchema.optional(),
+  timeoutMs: z.number().positive(),
+});
+
+/** @public Zod schema validating a JSON verify matcher. */
+export const WorkflowVerifyMatcherSchema: z.ZodType<WorkflowVerifyMatcher> = z
+  .object({
+    count: z.number().int().nonnegative().optional(),
+    atLeast: z.number().int().nonnegative().optional(),
+    atMost: z.number().int().nonnegative().optional(),
+    equals: z
+      .union([
+        z.number(),
+        z.string(),
+        z.boolean(),
+      ])
+      .optional(),
+    tolerance: z.number().nonnegative().optional(),
+  })
+  .catchall(z.string().min(1))
+  .superRefine((matcher, issue) => {
+    const keys = Object.keys(matcher).filter((k) => !MATCHER_BOUND_KEYS.has(k));
+    const bad = keys.filter((k) => !SENSE_KEY_RE.test(k));
+    if (bad.length > 0) {
+      issue.addIssue({
+        code: 'custom',
+        message: `Unknown matcher key(s): ${bad.join(', ')}. Use a sense (ui, net, log, route, state, signal, storage, time, visual, x-…) or 'event'.`,
+      });
+      return;
+    }
+    if (keys.length !== 1) {
+      issue.addIssue({
+        code: 'custom',
+        message: "A matcher names exactly one sense or 'event'.",
+      });
+      return;
+    }
+    if (
+      matcher.count !== undefined &&
+      (matcher.atLeast !== undefined || matcher.atMost !== undefined)
+    ) {
+      issue.addIssue({
+        code: 'custom',
+        message: "A matcher's 'count' is exact; it cannot be combined with 'atLeast' or 'atMost'.",
+      });
+    }
+  });
+
+const VerifyCloseSchema: z.ZodType<WorkflowVerifyClose> = z
+  .object({
+    until: z
+      .enum([
+        'quiet',
+        'event',
+        'done',
+        'exit',
+      ])
+      .optional(),
+    event: z.string().min(1).optional(),
+    quietMs: z.number().nonnegative().optional(),
+    timeoutMs: z.number().positive().optional(),
+  })
+  .strict()
+  .refine((close) => (close.until === 'event') === (close.event !== undefined), {
+    message: "close.event is required with until: 'event', and only then.",
+  });
+
+const VerifyNodeSchema = z
+  .object({
+    kind: z.literal('verify'),
+    ...SHARED_FIELDS,
+    subject: z.union([
+      z.string().min(1),
+      z.array(z.string().min(1)).min(1),
+      ExprValueSchema,
+    ]),
+    expect: z.array(WorkflowVerifyMatcherSchema).min(1).optional(),
+    never: z.array(WorkflowVerifyMatcherSchema).optional(),
+    claims: z.array(OvpClaimSchema).min(1).optional(),
+    constraints: z.array(OvpConstraintSchema).optional(),
+    act: WorkflowStepListSchema,
+    witnesses: z.array(z.string().min(1)).optional(),
+    close: VerifyCloseSchema.optional(),
+    intent: z.string().optional(),
+  })
+  .superRefine((node, issue) => {
+    if ((node.expect === undefined) === (node.claims === undefined)) {
+      issue.addIssue({
+        code: 'custom',
+        message:
+          "verify node requires exactly one of 'expect' (matchers) or 'claims' (OVP claims).",
+      });
+    }
+    if (node.never !== undefined && node.constraints !== undefined) {
+      issue.addIssue({
+        code: 'custom',
+        message:
+          "verify node takes 'never' (matchers) or 'constraints' (OVP constraints), not both.",
+      });
+    }
+  });
+
+/** @public Zod schema validating a `WorkflowConnectionRequirement`. */
+export const WorkflowConnectionRequirementSchema: z.ZodType<WorkflowConnectionRequirement> = z
+  .object({
+    profile: z
+      .string()
+      .refine((p) => parseProfileRequirement(p) !== undefined, {
+        message: "A profile requirement is '<profile>@<range>', e.g. 'browser@^1.2'.",
+      })
+      .optional(),
+    extensions: z
+      .record(
+        z.string().regex(EXTENSION_ID_RE, 'An extension id is a reverse domain plus a name.'),
+        z.string().refine(isValidRange, {
+          message: 'Expected a semver range.',
+        }),
+      )
+      .optional(),
+    events: z.array(z.string().min(1)).min(1).optional(),
+    from: z.string().regex(CONNECTION_NAME_RE).optional(),
+    fresh: z
+      .enum([
+        'run',
+        'path',
+      ])
+      .optional(),
+    setup: z.record(z.string(), z.unknown()).optional(),
+  })
+  .strict()
+  .refine(
+    (entry) =>
+      entry.profile !== undefined || entry.extensions !== undefined || entry.events !== undefined,
+    {
+      message:
+        "A connection entry names a 'profile', 'extensions', or the 'events' a source must offer.",
+    },
+  );
+
+const ConnectionsManifestSchema = z.record(
+  z
+    .string()
+    .regex(
+      CONNECTION_NAME_RE,
+      'A connection name is a letter followed by letters, digits, _ or -.',
+    ),
+  WorkflowConnectionRequirementSchema,
+);
+
+//#endregion
+
 /** @public Zod schema validating a single `WorkflowNode` (any JSON-safe kind). */
 export const WorkflowNodeSchema: z.ZodType<WorkflowNode> = z
   .discriminatedUnion('kind', [
@@ -901,6 +1337,9 @@ export const WorkflowNodeSchema: z.ZodType<WorkflowNode> = z
     ScheduleNodeSchema,
     SubflowNodeSchema,
     AcpAgentNodeSchema,
+    CallNodeSchema,
+    WaitNodeSchema,
+    VerifyNodeSchema,
   ])
   .meta({
     id: 'WorkflowNode',
@@ -916,6 +1355,8 @@ export interface WorkflowDocument {
   version: 1;
   /** Custom items any node in this document may emit. See spec 34 § Workflow root. */
   customItems?: Record<string, WorkflowCustomItem>;
+  /** The connections this document needs, by the names its nodes use. See spec 35 § JSON workflows. */
+  connections?: Record<string, WorkflowConnectionRequirement>;
   root: WorkflowNode;
 }
 
@@ -924,6 +1365,7 @@ export const WorkflowDocumentSchema: z.ZodType<WorkflowDocument> = z
   .object({
     version: z.literal(1),
     customItems: CustomItemsSchema.optional(),
+    connections: ConnectionsManifestSchema.optional(),
     root: WorkflowNodeSchema,
   })
   .meta({
@@ -940,7 +1382,11 @@ export const WorkflowDocumentSchema: z.ZodType<WorkflowDocument> = z
 function childNodes(node: WorkflowNode): WorkflowNode[] {
   switch (node.kind) {
     case 'sequence':
-      return node.steps;
+      return nodesOf(node.steps);
+    case 'wait':
+      return node.around === undefined ? [] : nodesOf(node.around);
+    case 'verify':
+      return nodesOf(node.act);
     case 'inParallel':
       if (node.each) {
         return [
@@ -986,6 +1432,117 @@ function childNodes(node: WorkflowNode): WorkflowNode[] {
     default:
       return [];
   }
+}
+
+/** The nodes among a step list's entries; operations written by name are not nodes. */
+function nodesOf(list: WorkflowStepList): WorkflowNode[] {
+  return stepListEntries(list).filter(
+    (entry): entry is WorkflowNode => !isWorkflowOpShorthand(entry),
+  );
+}
+
+/** @public Whether a step entry is an operation written by name rather than a node. */
+export function isWorkflowOpShorthand(entry: WorkflowStepEntry): entry is WorkflowOpShorthand {
+  return !('kind' in entry && typeof entry.kind === 'string');
+}
+
+/** @public A step list's entries as an array (`around`/`act` take one entry or an array). */
+export function stepListEntries(list: WorkflowStepList): WorkflowStepEntry[] {
+  return Array.isArray(list)
+    ? list
+    : [
+        list,
+      ];
+}
+
+/**
+ * @public
+ * A step entry as a node: a node is returned as is; an operation written by
+ * name becomes a `call` node with id `id` and no `connection`, so it runs on
+ * the enclosing connection.
+ */
+export function stepEntryToNode(entry: WorkflowStepEntry, id: string): WorkflowNode {
+  if (!isWorkflowOpShorthand(entry)) {
+    return entry;
+  }
+  const [op, args] = Object.entries(entry)[0] ?? [
+    '',
+    undefined,
+  ];
+  const call: CallWorkflowNode = {
+    kind: 'call',
+    id,
+    op,
+  };
+  if (args !== undefined) {
+    call.args = args;
+  }
+  return call;
+}
+
+/**
+ * @public
+ * The id an operation written by name gets: its position under its parent,
+ * `<parentId>[<index>]`.
+ */
+export function shorthandStepId(parentId: string, index: number): string {
+  return `${parentId}[${index}]`;
+}
+
+/**
+ * @public
+ * A JSON verify matcher in its TypeScript form.
+ * @returns The matcher, or `undefined` when it names no sense or event.
+ */
+export function verifyMatcherFromJson(json: WorkflowVerifyMatcher): VerifyMatcher | undefined {
+  const key = Object.keys(json).find((k) => !MATCHER_BOUND_KEYS.has(k) && SENSE_KEY_RE.test(k));
+  const value = key === undefined ? undefined : json[key];
+  if (key === undefined || typeof value !== 'string') {
+    return undefined;
+  }
+  const bounds = {
+    ...(json.count === undefined
+      ? {}
+      : {
+          count: json.count,
+        }),
+    ...(json.atLeast === undefined
+      ? {}
+      : {
+          atLeast: json.atLeast,
+        }),
+    ...(json.atMost === undefined
+      ? {}
+      : {
+          atMost: json.atMost,
+        }),
+  };
+  if (key === 'event') {
+    return {
+      kind: 'event',
+      event: value,
+      ...bounds,
+    };
+  }
+  if (!isSenseId(key)) {
+    return undefined;
+  }
+  return {
+    kind: 'sense',
+    sense: key,
+    match: value,
+    ...bounds,
+    ...(json.equals === undefined
+      ? {}
+      : {
+          equals: json.equals,
+        }),
+    ...(json.tolerance === undefined
+      ? {}
+      : {
+          tolerance: json.tolerance,
+        }),
+  };
 }
 
 /** Decide nodes inside an until predicate, `any`/`all` included, in order. */

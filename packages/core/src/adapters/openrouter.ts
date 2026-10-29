@@ -172,7 +172,13 @@ export function extractSystemInstruction(items: ReadonlyArray<Item>): {
   };
 }
 
+/** Framework-owned extension items (`noetic:*`, e.g. a trigger's `noetic:connection_event`) are never sent to a provider. */
+const FRAMEWORK_ITEM_PREFIX = 'noetic:';
+
 function itemToInputItem(item: Item): OpenRouterInputItem | null {
+  if (typeof item.type === 'string' && item.type.startsWith(FRAMEWORK_ITEM_PREFIX)) {
+    return null;
+  }
   if (item.type === 'message' && 'content' in item && 'role' in item) {
     // All message types (input and output) are converted to EasyInputMessage
     // because the SDK's input union does not accept ResponsesOutputMessage directly.

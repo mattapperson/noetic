@@ -32,6 +32,11 @@
       "types": "./dist/types/context-layer.d.ts",
       "default": "./dist/types/context-layer.js"
     },
+    "./verify": {
+      "bun": "./src/verify/index.ts",
+      "types": "./dist/verify/index.d.ts",
+      "default": "./dist/verify/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

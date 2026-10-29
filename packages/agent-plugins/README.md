@@ -48,8 +48,12 @@ rather than rewriting the cached prompt prefix.
 
 ## MCP
 
-Declared servers are validated, resolved, and connected through the official
-MCP SDK, and their tools are exposed to the model via `callMcpTool`. Set
+Declared servers are validated and resolved here, then connected through
+[`@noetic-tools/mcp`](../mcp) as connections with no profile, so a plugin's
+tools share one naming rule and one set of gates with every other MCP server
+a harness uses. Their tools are exposed to the model via `callMcpTool`;
+`pluginMcpProvider()` returns the provider for a host that registers a plugin
+server under its harness `connections`. Set
 `connectMcp: false` for a skills-only client, which the specification
 explicitly permits.
 

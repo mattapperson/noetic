@@ -1883,6 +1883,8 @@ Subscribe to streams before the first `execute()` if you want to observe the ver
 // Manual context creation + run() (bypasses the session queue)
 const ctx = harness.createContext({ threadId: 'thread-1' });
 const runResult = await harness.run(step, input, ctx);
+// An array of steps runs in sequence, each output the next one's input
+const lastOutput = await harness.run([stepA, stepB], input, ctx);
 
 // Background execution (inherits parent's threadId by default)
 const handle = harness.detachedSpawn(step, input, ctx);
@@ -2685,7 +2687,7 @@ const doc = validateWorkflow({
 });
 ```
 
-Node kinds: `callModel`, `invokeTool`, `runCode`, `conditional`, `inParallel`, `spawn`, `withContext`, `loop`, `sequence`, `schedule`, `subflow`, plus `acp-agent`.
+Node kinds: `callModel`, `invokeTool`, `runCode`, `compute`, `decide`, `conditional`, `routeSwitch`, `inParallel`, `spawn`, `withContext`, `loop`, `sequence`, `schedule`, `subflow`, the connection nodes `call`, `wait`, `verify` (see [Connections, Profiles, and Verification](#connections-profiles-and-verification)), plus `acp-agent`.
 
 A `conditional` node's `routes` are tried in order; each route has a `target` and exactly one test (the schema rejects both or neither): `match` — a case-insensitive substring of the input's text (an object input, such as a `decide` node's answers, is matched on its string values only) — or `expr` — a JSONata test run against the input parsed as JSON (raw string if it does not parse). An `expr` route is taken on `true`, skipped on `false` or no value (a path that matches nothing); any other result throws `EXPRESSION_FAILED`, and an `expr` that does not parse fails validation with `WORKFLOW_VALIDATION_FAILED`. Both kinds mix in one node; `default` runs when no route passes.
 
@@ -2735,6 +2737,8 @@ const agent = dynamicWorkflow({
   maxRevisions: 3,
 });
 ```
+
+`connections` (a `ConnectionAllowlist`) is required for the planner to use connections at all; it is shown only the allowed connections and operations. `parseAndRunWorkflow` takes the same option. A manifest asking for more fails with `CONNECTION_NOT_ALLOWED`.
 
 ### parseAndRunWorkflow
 
@@ -2841,3 +2845,149 @@ const quoteShipping = tool({
 ### JSON workflow
 
 A `callModel` node references a codec: `"output": { "codec": "openui", "library": "<ref>" }`, resolved from `HydrationContext.uiLibraries` (see [hydrateWorkflow](#hydrateworkflow--hydratenode)).
+
+## Connections, Profiles, and Verification
+
+Specs 35–37. Docs: `framework/connections.mdx`, `framework/connection-profiles.mdx`, `framework/verification.mdx`. Core receives providers, profiles, and a verifier from the caller and never imports `@noetic-tools/mcp`, the MCP SDK, a profile package, or `@noetic-tools/verify`.
+
+### Harness options
+
+```typescript
+import { AgentHarness, cron } from '@noetic-tools/core';
+import { mcp } from '@noetic-tools/mcp';
+import { browser } from '@noetic-tools/profile-browser';
+import { verifier } from '@noetic-tools/verify';
+import { createFileArtifactStore } from '@noetic-tools/platform-node';
+
+const harness = new AgentHarness({
+  name: 'qa',
+  params: {},
+  connections: {
+    browser: mcp('npx @playwright/mcp@latest'),                        // bare provider = { provider }
+    slack: { provider: mcp({ url: SLACK_MCP }), policy: { approve: ['chat.post'], deny: ['com.slack.admin.*'] } },
+    browsers: { provider: mcp('npx playwright-noetic-mcp', { profiles: [browser] }), pool: { max: 8, warm: 1, waitMs: 3e4 } },
+    morning: cron('0 8 * * *', { timezone: 'America/New_York' }),
+  },
+  triggers: [{ id: 'daily', connection: 'morning', event: 'tick', input: () => 'Write the daily summary' }],
+  verification: verifier(),
+  environment: {
+    secrets: { resolve: async (name) => process.env[name.toUpperCase().replace('.', '_')] ?? '' },
+    artifacts: createFileArtifactStore({ dir: '.noetic/artifacts' }),
+  },
+});
+```
+
+| Entry field | Meaning |
+|---|---|
+| `provider` | `mcp(…)`, a source, or any `ConnectionProvider` |
+| `pool` | `{ max, warm?, waitMs? }` — fresh connections on demand (provider must implement `provision`) |
+| `policy` | `allow` / `deny` / `approve` globs over operation names |
+| `expose` | `'eager'` (default: profile-eager ops + `<name>_ops` / `<name>_call`), `'all'`, `'none'` |
+| `look` | read name → `'turn'` \| `'effect'` \| `'ask'` |
+
+`mcp(config, options?)`: `config` is a command line string, `{ command, args?, env?, cwd? }`, `{ url, headers?, protocol? }`, or `{ transport }`; options `webhooks: { receiver }`, `profiles`, `extensions`, `timeoutMs` (1e4), `requestTimeoutMs`, `pollIntervalMs`.
+
+Harness methods: `start()` (connects providers, starts triggers; implicit on first `execute`/`run`), `getConnectionStatus(name?)`, `getRunArtifacts(executionId)`, `resume(executionId, { rerun?: ['app'] })`, `closeConnections()`.
+
+### Handles and steps
+
+```typescript
+import { connection, connectionTools, secret, step, refId } from '@noetic-tools/core';
+import { browser } from '@noetic-tools/profile-browser';
+import { chat, ChatMessageSchema } from '@noetic-tools/profile-chat';
+
+const app = connection('app', browser, { from: 'browsers', fresh: 'path', setup: { url: 'http://localhost:5173' } });
+const team = connection('team', chat);                 // default range ^<installed version>; chat.range('^1.1') overrides
+
+const fill = step.call({ id: 'password', connection: app, op: 'ui.fill',
+  args: { element: 'textbox "Password"', text: secret('app.password') } });   // op/args/output typed by the profile
+
+const approval = step.wait({
+  id: 'approval', connection: team, event: 'chat.message.created',
+  filter: (e) => /approve/i.test(ChatMessageSchema.parse(e.payload).text),
+  around: step.call({ id: 'ask', connection: team, op: 'chat.reply', args: { thread, text: 'Approve?' } }),
+  timeoutMs: 18e5,
+});                                                     // output { event, around }
+
+callModel({ id: 'turn', model, instructions, tools: connectionTools(app, { ops: ['ui.*'] }) });
+```
+
+- `connection(name, profile?, { from?, fresh?: 'run' | 'path', setup?, extensions? })`. `setup` without `fresh` throws `CONNECTION_INVALID`.
+- `step.call({ id, connection, op, args? })` — `connection` is a handle or a harness connection name; `op` must contain a dot (`CONNECTION_INVALID` otherwise). `args` is a value or `(input, ctx) => value`. Long upstream operations (SEP-2663 tasks) are awaited.
+- `step.wait({ id, connection, event, filter?, around?, timeoutMs })` — `timeoutMs` must be positive. `around` is a step or an array of steps (runs in sequence — there is no `step.sequence`).
+- Values: locators (`'button "Pay"'`, resolved to exactly one element or refused `ambiguous`), refs (`Ref` with `connection`/`kind`/`id`, sealed; `refId(ref)`), blobs (`{ $blob: { uri, mimeType, bytes, sha256 } }` in the artifact store), secrets (`secret(name)`, only in `sensitive` fields; resolved by `environment.secrets`; redacted everywhere as `"<redacted>"`).
+- Gates, in order: operation declared → args match schema → refs issued to this thread → `policy` / `guarded` approval → `beforeToolCall` + approver → secrets filled, sent. A refusal fails a step with `steering_denied`.
+
+### Triggers and sources
+
+```typescript
+const deploys = defineSource({
+  events: { 'deploy.failed': DeployFailedSchema },
+  async start({ emit, cursor, signal }) { /* consume from cursor, await emit({ type, id, payload, cursor }) */ },
+});
+await deploys.emit({ type: 'deploy.failed', id: run.id, payload });   // push from host code
+
+triggers: [{ id: 'mentions', connection: 'slack', event: 'chat.message.created',
+  arguments: { mentionsAgent: true }, filter: (e) => …, input: (e) => …, thread?: (e) => … }]
+```
+
+Each event starts or joins a turn (message id `<connection>:<trigger>:<event id>`), delivered once via a durable inbox; the event is attached as a `noetic:connection_event` item. `cron(schedule, { timezone })` is a source with one `tick` event (`{ scheduledFor }`).
+
+### Profiles (`@noetic-tools/types`)
+
+```typescript
+import { defineProfile, defineExtension, ref, target, sensitive, blob, receipt } from '@noetic-tools/types';
+
+const chat = defineProfile({
+  name: 'chat', version: '1.0.0',
+  extends: { /* ui: ui.range('^1') inherits; ui: '^1' only declares */ },
+  operations: { 'chat.reply': { description, input, output: z.object({ message: ref('chat.message'), receipt: receipt() }), eager: true, effects: true, once: true } },
+  reads: { 'chat.thread.recent': { schema, sense: 'state', look: 'effect' } },
+  events: { 'chat.message.created': { payload, arguments, sense: 'state', replay: 'durable', thread: 'thread' } },
+  setup: { schema, hostOnly: [] }, determinism: { reset: 'none', replayPrefix: 'unsafe', time: 'wall', observation: 'exact', actions: 'irreversible' },
+});
+```
+
+Flags: `eager`, `effects` (returns a receipt `{ actionId, cursor }`), `once` (idempotency keys honored), `guarded` (needs approval), `sense`, `required: false`. Senses: `ui`, `net`, `log`, `route`, `state`, `signal`, `storage`, `time`, `visual`, `x-…`. Catalog v1: `ui@1`, `screen@1`, `browser@1`, `app@1`, `device@1` (the last three extend `ui@^1`), `chat@1`. Extensions: `defineExtension({ id: 'com.vendor.name', version, requires, operations, extend })` — additions live under `ext["<id>"]`. Server error codes (`connection_failed.error.code`): `undeclared`, `unsupported`, `unresolved`, `ambiguous`, `unavailable`, `guarded`, `malformed`, `stale_reference`, `not_found`, `permission_denied`, `rate_limited`, `busy`, `conflict`. `checkConformance({ server, profile, extensions?, driver })` from `@noetic-tools/mcp/conformance`.
+
+### step.verify (`@noetic-tools/verify` matchers)
+
+```typescript
+import { net, ui, state, event, sense, verifier } from '@noetic-tools/verify';
+
+const checkout = step.verify({
+  id: 'checkout', subject: app,                       // or [ios, android] → { outcome, subjects }, ids <id>.<name>
+  intent: 'Paying places an order',
+  expect: [net('POST /api/orders 201').once(), ui('heading "Order confirmed"'), state('cart.total').equals(0)],
+  never: [net('5xx')],
+  witnesses: ['orders'],                              // look-only connections; x- senses: sense('x-orders-db', 'orders.count').count(1)
+  act: [step.call({ id: 'pay', connection: app, op: 'ui.tap', args: { element: 'button "Pay"' } })],
+  close: { until: 'quiet', quietMs: 500, timeoutMs: 15e3 },   // until: 'quiet' | 'event' (+ event) | 'done' | 'exit'
+});
+// output: { outcome: 'pass'|'fail'|'partial'|'unknown', verdicts, violations, gaps, repairs, run: BlobRef }
+```
+
+With a list subject, write `act: (subject) => step.call({ id: 'open-' + subject, connection: subject, … })` so each verify acts on its own subject (a fixed `act` naming one of them is `VERIFY_INVALID`). A witness is refused any effects call during `act`, however its connection is named. Exactly one of `expect` / `claims` (OVP), at most one of `never` / `constraints`. Runs Declare → Check before → Listen → Act → Close → Judge (OVP `adjudicate()` per claim, on its own senses only) → Record (blob + `noetic:verification_run` item). A claim already true before `act` is `unknown`. Never throws for `no`/`unknown`; `act` throwing → `verify_act_failed` (run still recorded).
+
+### JSON
+
+```json
+{ "version": 1,
+  "connections": { "app": { "profile": "browser@^1.2", "from": "browsers", "fresh": "path", "setup": { "url": "http://localhost:5173" } },
+                   "deploys": { "events": ["deploy.failed"] } },
+  "root": { "kind": "sequence", "id": "main", "steps": [
+    { "kind": "call", "id": "pw", "connection": "app", "op": "ui.fill", "args": { "element": "textbox \"Password\"", "text": { "$secret": "app.password" } } },
+    { "kind": "verify", "id": "checkout", "subject": "app",
+      "expect": [{ "net": "POST /api/orders 201", "count": 1 }], "never": [{ "net": "5xx" }],
+      "act": [{ "ui.tap": { "element": "button \"Pay\"" } }] } ] } }
+```
+
+Values: `{ "$expr" }` (with `$steps.<id>`, `$refId(x)`, `$item`), `{ "$literal" }`, `{ "$secret" }`, refs/blobs as returned; `$`-prefixed keys are reserved. An op written by name (`{ "ui.tap": {…} }`) in any step array is a `call` on the enclosing connection. `wait` filter expressions read `{ event, input }`. Fan-out: `inParallel` with `over: ["ios","android"]` and `"connection": { "$expr": "$item" }`.
+
+### Errors
+
+Config (`NoeticConfigError`): `CONNECTION_UNKNOWN`, `CONNECTION_UNSATISFIED` (`missing`: profile/extension/operation/event/sense), `CONNECTION_NOT_ALLOWED`, `CONNECTION_INVALID`, `CONNECTION_TOOL_COLLISION`, `VERIFY_NOT_CONFIGURED`, `VERIFY_INVALID`. Run time (`NoeticError` kinds): `connection_unavailable`, `connection_failed`, `connection_ref_invalid`, `connection_secret_refused`, `connection_input_required`, `connection_resume_refused`, `verify_act_failed`. Framework events: `connection_changed`, `connection_event`, `connection_task`, `stream_changed`.
+
+### Testing
+
+`createInMemoryConnection({ surface, senses, operations: { 'ui.tap': { effects: true, run: (args, call) => { call.connection.emit('browser.request', {...}); return {...}; } } }, events, resources, provision? })` implements the whole provider contract; the returned provider exposes `.connection` (`calls`, `emit`, `gap`, `terminate`, `replace`, `bumpEpoch`), `.provisioned`, `.connects`. Throw `inMemoryRefusal(code, message)` to refuse. See `examples/verify-e2e.ts`.

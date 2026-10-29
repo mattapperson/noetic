@@ -10,6 +10,7 @@ import type {
   SubprocessAdapter,
 } from '@noetic-tools/types';
 import { frameworkCast, NoeticErrorImpl } from '@noetic-tools/types';
+import { recordedScopeOf, recordStepOutput } from '../expression/step-outputs';
 import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../runtime/broadcaster-utils';
 import { ContextImpl } from '../runtime/context-impl';
 import { drainsOf } from '../runtime/drain';
@@ -26,6 +27,7 @@ import {
   executeSpawn,
   executeWithContext,
 } from './execute-action';
+import { executeCall } from './execute-call';
 import {
   executeConditional,
   executeInParallel,
@@ -33,6 +35,8 @@ import {
   executeSchedule,
 } from './execute-control';
 import { executeDecide } from './execute-decide';
+import { executeVerify } from './execute-verify';
+import { executeWait } from './execute-wait';
 import { isMutableContext } from './typeguards';
 
 //#region Constants
@@ -440,6 +444,17 @@ export async function execute<TContext = ContextData, I = unknown, O = unknown>(
   });
   if (replay.hit) {
     lane?.leaveStep(frame);
+    const replayScope = recordedScopeOf(step);
+    if (replayScope) {
+      recordStepOutput(
+        baseCtx,
+        {
+          scope: replayScope,
+          id: step.id,
+        },
+        replay.output,
+      );
+    }
     return replay.output;
   }
 
@@ -498,6 +513,19 @@ export async function execute<TContext = ContextData, I = unknown, O = unknown>(
       case 'schedule':
         result = await executeSchedule(step, input, stepCtx, (s, i, c) => execute(s, i, c));
         break;
+      case 'call':
+        result = await executeCall(step, input, stepCtx, {
+          ledgerKey,
+        });
+        break;
+      case 'wait':
+        result = await executeWait(step, input, stepCtx, (s, i, c) => execute(s, i, c), {
+          ledgerKey,
+        });
+        break;
+      case 'verify':
+        result = await executeVerify(step, input, stepCtx, (s, i, c) => execute(s, i, c));
+        break;
       default: {
         const _exhaustive: never = step;
         void _exhaustive;
@@ -512,6 +540,18 @@ export async function execute<TContext = ContextData, I = unknown, O = unknown>(
     // Inside the try, so an item the schemas refuse fails the dispatch like any other
     // error; before the ledger record, so the entry holds the items and replays them.
     await emitStepItems(step, result, stepCtx);
+    // A JSON workflow node's output is readable as `$steps.<id>` from here on (spec 33).
+    const outputScope = recordedScopeOf(step);
+    if (outputScope) {
+      recordStepOutput(
+        baseCtx,
+        {
+          scope: outputScope,
+          id: step.id,
+        },
+        result,
+      );
+    }
   } catch (error) {
     lane?.releaseDispatch();
     drains?.release(frameworkCast<Context>(stepCtx));

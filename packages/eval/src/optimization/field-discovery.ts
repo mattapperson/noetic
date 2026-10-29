@@ -156,6 +156,21 @@ function walkStep(step: Step, prefix: string, fields: OptimizableField[]): void 
     // surface, so surfacing fields here would produce candidates no mutator can
     // apply. Contribute nothing, matching `applyCandidate`'s pass-through.
     case 'acp-agent':
+    case 'call':
+      return;
+    case 'wait':
+      for (const s of aroundSteps(step.around)) {
+        walkStep(s, `${path}.`, fields);
+      }
+      return;
+    case 'verify':
+      // An act built per subject (a function) is not statically known.
+      if (typeof step.act === 'function') {
+        return;
+      }
+      for (const s of aroundSteps(step.act)) {
+        walkStep(s, `${path}.`, fields);
+      }
       return;
     default: {
       // A new composite Step kind must add a recursion case above, or GEPA
@@ -165,6 +180,23 @@ function walkStep(step: Step, prefix: string, fields: OptimizableField[]): void 
       return;
     }
   }
+}
+
+/** A wait's `around` as a list; `Array.isArray` does not narrow readonly arrays. */
+function aroundSteps(around: Step | ReadonlyArray<Step> | undefined): ReadonlyArray<Step> {
+  if (around === undefined) {
+    return [];
+  }
+  if (isStepList(around)) {
+    return around;
+  }
+  return [
+    around,
+  ];
+}
+
+function isStepList(value: Step | ReadonlyArray<Step>): value is ReadonlyArray<Step> {
+  return Array.isArray(value);
 }
 
 function filterByScope(fields: OptimizableField[], scope: ScopeValue): OptimizableField[] {

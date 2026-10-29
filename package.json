@@ -18,7 +18,10 @@
     "@biomejs/biome": "^2.3.11",
     "@noetic-tools/acp": "workspace:*",
     "@noetic-tools/core": "workspace:*",
+    "@noetic-tools/mcp": "workspace:*",
     "@noetic-tools/openui": "workspace:*",
+    "@noetic-tools/platform-node": "workspace:*",
+    "@noetic-tools/verify": "workspace:*",
     "bun-types": "latest",
     "typescript": "5.9.3",
     "yaml": "^2.9.0",
@@ -26,9 +29,9 @@
   },
   "scripts": {
     "postinstall": "node scripts/patch-sdk.js",
-    "test": "bun --cwd=packages/types run test && bun --cwd=packages/context run test && bun --cwd=packages/openui run test && bun --cwd=packages/agent-plugins run test && bun --cwd=packages/acp run test && bun --cwd=packages/chat-sdk run test && bun --cwd=packages/core run test && bun --cwd=packages/eval run test && bun --cwd=packages/inspector run test",
-    "test:coverage": "bun --cwd=packages/types run test:coverage && bun --cwd=packages/context run test:coverage && bun --cwd=packages/openui run test:coverage && bun --cwd=packages/agent-plugins run test:coverage && bun --cwd=packages/acp run test:coverage && bun --cwd=packages/chat-sdk run test:coverage && bun --cwd=packages/core run test:coverage && bun --cwd=packages/eval run test:coverage && bun --cwd=packages/inspector run test:coverage",
-    "test:ci": "bun --cwd=packages/types run test:ci && bun --cwd=packages/context run test:ci && bun --cwd=packages/openui run test:ci && bun --cwd=packages/agent-plugins run test:ci && bun --cwd=packages/acp run test:ci && bun --cwd=packages/chat-sdk run test:ci && bun --cwd=packages/core run test:ci && bun --cwd=packages/eval run test:ci && bun --cwd=packages/inspector run test:ci",
+    "test": "bun --cwd=packages/types run test && bun --cwd=packages/context run test && bun --cwd=packages/openui run test && bun --cwd=packages/mcp run test && bun --cwd=packages/agent-plugins run test && bun --cwd=packages/acp run test && bun --cwd=packages/chat-sdk run test && bun --cwd=packages/profile-ui run test && bun --cwd=packages/profile-screen run test && bun --cwd=packages/profile-browser run test && bun --cwd=packages/profile-app run test && bun --cwd=packages/profile-device run test && bun --cwd=packages/profile-chat run test && bun --cwd=packages/verify run test && bun --cwd=packages/core run test && bun --cwd=packages/eval run test && bun --cwd=packages/inspector run test",
+    "test:coverage": "bun --cwd=packages/types run test:coverage && bun --cwd=packages/context run test:coverage && bun --cwd=packages/openui run test:coverage && bun --cwd=packages/mcp run test:coverage && bun --cwd=packages/agent-plugins run test:coverage && bun --cwd=packages/acp run test:coverage && bun --cwd=packages/chat-sdk run test:coverage && bun --cwd=packages/profile-ui run test:coverage && bun --cwd=packages/profile-screen run test:coverage && bun --cwd=packages/profile-browser run test:coverage && bun --cwd=packages/profile-app run test:coverage && bun --cwd=packages/profile-device run test:coverage && bun --cwd=packages/profile-chat run test:coverage && bun --cwd=packages/verify run test:coverage && bun --cwd=packages/core run test:coverage && bun --cwd=packages/eval run test:coverage && bun --cwd=packages/inspector run test:coverage",
+    "test:ci": "bun --cwd=packages/types run test:ci && bun --cwd=packages/context run test:ci && bun --cwd=packages/openui run test:ci && bun --cwd=packages/mcp run test:ci && bun --cwd=packages/agent-plugins run test:ci && bun --cwd=packages/acp run test:ci && bun --cwd=packages/chat-sdk run test:ci && bun --cwd=packages/profile-ui run test:ci && bun --cwd=packages/profile-screen run test:ci && bun --cwd=packages/profile-browser run test:ci && bun --cwd=packages/profile-app run test:ci && bun --cwd=packages/profile-device run test:ci && bun --cwd=packages/profile-chat run test:ci && bun --cwd=packages/verify run test:ci && bun --cwd=packages/core run test:ci && bun --cwd=packages/eval run test:ci && bun --cwd=packages/inspector run test:ci",
     "lint": "bunx biome check .",
     "lint:fix": "bunx biome check --fix .",
     "format": "bunx biome format --write .",
@@ -36,6 +39,8 @@
     "check:exports": "bun scripts/check-export-tags.ts",
     "typecheck:examples": "bunx tsc --noEmit -p examples",
     "example:acp": "bun examples/acp-e2e.ts",
+    "example:verify": "bun examples/verify-e2e.ts",
+    "example:webhook": "bun examples/webhook-e2e.ts",
     "inspect": "bun packages/inspector/server/host.ts"
   },
   "dependencies": {

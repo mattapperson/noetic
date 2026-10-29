@@ -16,7 +16,10 @@ import type {
   ProcessSubprocessRequest,
   ServerToolSpec,
   Step,
+  StepCall,
+  StepConnectionTarget,
   StepDecide,
+  StepWait,
   SubprocessAdapter,
   Tool,
   ToolContext,
@@ -24,8 +27,13 @@ import type {
   Until,
 } from '@noetic-tools/types';
 import { frameworkCast, isServerToolSpec, NoeticConfigError } from '@noetic-tools/types';
-import type { ExpressionLimits } from '../expression/jsonata';
+import type {
+  CompiledExpression,
+  ExpressionBindings,
+  ExpressionLimits,
+} from '../expression/jsonata';
 import { compileExpression, compute, passes, readInput } from '../expression/jsonata';
+import { markRecorded, stepOutputsOf } from '../expression/step-outputs';
 import type {
   CallModelWorkflowNode,
   ConditionalRoute,
@@ -33,9 +41,13 @@ import type {
   OutputCodecRef,
   SubflowWorkflowNode,
   UntilPredicate,
+  WorkflowConnectionRef,
   WorkflowDocument,
   WorkflowNode,
+  WorkflowStepList,
 } from '../schemas/workflow';
+import { shorthandStepId, stepEntryToNode, stepListEntries } from '../schemas/workflow';
+import { getDefaultRegistrar } from '../types/step-registrar';
 import { all, any } from '../until/combinators';
 import { until } from '../until/predicates';
 import { DetachedHandleImpl } from '../util/detached-handle';
@@ -48,6 +60,13 @@ import { outputText } from './output-text';
 import { withContext } from './provide-builder';
 import { spawn } from './spawn-builder';
 import { callModel, runCode, step } from './step-builders';
+import type { ConnectionManifestEntries, ConnectionUses } from './workflow-connections';
+import {
+  checkDocumentConnections,
+  compileArgs,
+  documentHandle,
+  documentSecretsOf,
+} from './workflow-connections';
 import {
   documentScope,
   everyDocumentItem,
@@ -55,6 +74,7 @@ import {
   nodeScope,
 } from './workflow-custom-items';
 import { workflowReplayKey } from './workflow-replay-key';
+import { hydrateVerifyNode } from './workflow-verify';
 
 //#region Types
 
@@ -101,10 +121,32 @@ export interface HydrationContext {
   /** Bounds on each expression evaluation; unset fields use `DEFAULT_EXPRESSION_LIMITS`. */
   expressionLimits?: ExpressionLimits;
   /**
+   * The hydrated document's identity for `$steps`: each `hydrateWorkflow` call
+   * makes a new one, so two documents in one run never read each other's node
+   * outputs. Set internally — callers never set it.
+   */
+  documentScope?: object;
+  /**
    * Custom items the nodes being hydrated may emit (spec 34): the enclosing document's
    * root scope. Threaded by `hydrateWorkflow` and the subflow hydrator.
    */
   customItems?: CustomItemMap;
+  /**
+   * The connections the enclosing document declares (spec 35 § JSON workflows).
+   * Threaded by `hydrateWorkflow`; a node naming a connection outside it fails
+   * with `CONNECTION_UNKNOWN`. Without a manifest, names pass to the registry as they are.
+   */
+  connections?: ConnectionManifestEntries;
+  /** What the document uses of each connection, for negotiation and gate 1. Threaded by `hydrateWorkflow`. */
+  connectionUses?: ConnectionUses;
+  /**
+   * The connection an operation written by name, or a node without
+   * `connection`, runs on: a `verify` subject or a `wait`'s connection. Without
+   * one, the document's only connection.
+   */
+  enclosingConnection?: WorkflowConnectionRef;
+  /** The connection name `$item` holds on a fan-out path (an `inParallel` whose `over` lists connections). */
+  fanOutItem?: string;
 }
 
 type NodeHydrator = (
@@ -153,7 +195,7 @@ function hydrateUntilPredicate(
         threshold: pred.threshold,
       });
     case 'expr':
-      return untilExpr(pred.expr, where, ctx.expressionLimits);
+      return untilExpr(pred.expr, where, ctx);
     case 'any':
       return any(...pred.predicates.map(hydrate));
     case 'all':
@@ -174,10 +216,13 @@ function hydrateUntilPredicate(
  * expression input. A failing expression throws `NoeticConfigError`, which
  * fails the loop instead of stopping it (spec 05, Error Behavior).
  */
-function untilExpr(expr: string, where: string, limits: ExpressionLimits | undefined): Until {
-  const compiled = compileExpression(expr, where, limits);
-  return async (snap) => {
-    const stop = await passes(compiled, readInput(snap.lastOutput));
+function untilExpr(expr: string, where: string, ctx: HydrationContext): Until {
+  const compiled = compileExpression(expr, where, ctx.expressionLimits);
+  const scope = documentScopeOf(ctx);
+  return async (snap, run) => {
+    const stop = await passes(compiled, readInput(snap.lastOutput), {
+      steps: run ? stepOutputsOf(frameworkCast<Context>(run.ctx), scope) : {},
+    });
     return {
       stop,
       reason: stop ? `expr gave true: ${expr}` : undefined,
@@ -370,7 +415,8 @@ function hydrateComputeNode(
   return frameworkCast(
     runCode({
       id: node.id,
-      execute: async (input: string) => outputText(await compute(expr, readInput(input))),
+      execute: async (input: string, execCtx: Context) =>
+        outputText(await compute(expr, readInput(input), bindingsFor(execCtx, ctx))),
     }),
   );
 }
@@ -396,10 +442,11 @@ function hydrateConditionalNode(
 
   return conditional({
     id: node.id,
-    route: async (input: string) => {
+    route: async (input: string, execCtx: Context) => {
       const view: RouteInput = {
         text: routeText(input).trim().toLowerCase(),
         value: readInput(input),
+        bindings: bindingsFor(execCtx, ctx),
       };
       for (const r of hydratedRoutes) {
         if (await r.passes(view)) {
@@ -416,6 +463,7 @@ function hydrateConditionalNode(
 interface RouteInput {
   text: string;
   value: unknown;
+  bindings: ExpressionBindings;
 }
 
 function routeTest(
@@ -425,7 +473,7 @@ function routeTest(
 ): (input: RouteInput) => boolean | Promise<boolean> {
   if (route.expr !== undefined) {
     const compiled = compileExpression(route.expr, where, limits);
-    return (input) => passes(compiled, input.value);
+    return (input) => passes(compiled, input.value, input.bindings);
   }
   const needle = (route.match ?? '').toLowerCase();
   return (input) => input.text.includes(needle);
@@ -489,11 +537,27 @@ function hydrateInParallelNode(
   // child per array item, so they cannot be pre-computed or optimized.
   const dynamic = node.each !== undefined;
   const eachTemplate = node.each;
+  if (Array.isArray(node.over)) {
+    for (const name of node.over) {
+      checkManifestName(name, `over of inParallel node '${node.id}'`, ctx);
+    }
+  }
   const staticPaths = dynamic ? [] : (node.paths ?? []).map((p) => hydrateNode(p, ctx));
 
   const pathsFactory = (input: string): Step<ContextData, string, string>[] => {
     if (!dynamic || !eachTemplate) {
       return staticPaths;
+    }
+    if (Array.isArray(node.over)) {
+      return node.over.map((name, i) =>
+        buildConnectionPathStep({
+          forkId: node.id,
+          eachTemplate,
+          name,
+          index: i,
+          ctx,
+        }),
+      );
     }
     const items = selectArray(input, node.over, node.id);
     return items.map((item, i) =>
@@ -651,7 +715,9 @@ function hydrateSequenceNode(
     return frameworkCast(undefined);
   }
 
-  const children = node.steps.map((s) => hydrateNode(s, ctx));
+  const children = node.steps.map((s, i) =>
+    hydrateNode(stepEntryToNode(s, shorthandStepId(node.id, i)), ctx),
+  );
 
   return frameworkCast(
     runCode({
@@ -795,6 +861,252 @@ function resolveSubflowDocument(
   };
 }
 
+/** Nodes hydrated outside any `hydrateWorkflow` (a bare `hydrateNode`) share one scope. */
+const BARE_DOCUMENT_SCOPE: object = {};
+
+/** The `$steps` scope of the document `ctx` is hydrating. */
+export function documentScopeOf(ctx: HydrationContext): object {
+  return ctx.documentScope ?? BARE_DOCUMENT_SCOPE;
+}
+
+//#region Connection Node Hydrators
+
+/** The bindings an expression evaluated in `execCtx` sees: `$steps`, and `$item` on a fan-out path. */
+function bindingsFor(execCtx: Context, ctx: HydrationContext): ExpressionBindings {
+  return {
+    steps: stepOutputsOf(execCtx, documentScopeOf(ctx)),
+    ...(ctx.fanOutItem === undefined
+      ? {}
+      : {
+          item: ctx.fanOutItem,
+        }),
+  };
+}
+
+/**
+ * Checks a connection name against the document's manifest, when there is one.
+ *
+ * @throws `NoeticConfigError` `CONNECTION_UNKNOWN` for a name the manifest does not declare.
+ */
+function checkManifestName(name: string, where: string, ctx: HydrationContext): void {
+  if (!ctx.connections || Object.hasOwn(ctx.connections, name)) {
+    return;
+  }
+  const declared = Object.keys(ctx.connections);
+  throw new NoeticConfigError({
+    code: 'CONNECTION_UNKNOWN',
+    message: `${where} uses connection '${name}', which the document's connections do not declare.`,
+    hint: `Use one of ${declared.join(', ') || '(none)'}, or add '${name}' to the document's "connections".`,
+  });
+}
+
+/** The connection a document name binds to: a handle carrying its manifest entry, or the bare name without a manifest. */
+function documentTarget(
+  name: string,
+  where: string,
+  ctx: HydrationContext,
+): StepConnectionTarget<ContextData, string> {
+  checkManifestName(name, where, ctx);
+  const entry = ctx.connections?.[name];
+  return entry ? documentHandle(name, entry, ctx.connectionUses?.get(name)) : name;
+}
+
+/**
+ * The connection a `call` or `wait` node runs on: its own, else the enclosing
+ * one, else the document's only connection. An expression is evaluated per run.
+ *
+ * @throws `NoeticConfigError` `CONNECTION_UNKNOWN` for an undeclared name, `CONNECTION_INVALID` when none is named or implied (or an expression gives no name).
+ */
+function connectionTargetFor(
+  ref: WorkflowConnectionRef | undefined,
+  where: string,
+  ctx: HydrationContext,
+): StepConnectionTarget<ContextData, string> {
+  const effective = ref ?? ctx.enclosingConnection ?? onlyConnection(ctx);
+  if (effective === undefined) {
+    throw new NoeticConfigError({
+      code: 'CONNECTION_INVALID',
+      message: `${where} names no connection, and none is implied.`,
+      hint: 'Give the node a "connection", or run it inside a verify whose subject is the connection.',
+    });
+  }
+  if (typeof effective === 'string') {
+    return documentTarget(effective, where, ctx);
+  }
+  const compiled = compileExpression(
+    effective.$expr,
+    `connection of ${where}`,
+    ctx.expressionLimits,
+  );
+  return async (input: string, execCtx: Context) => {
+    const name = await compute(compiled, readInput(input), bindingsFor(execCtx, ctx));
+    if (typeof name !== 'string' || name.length === 0) {
+      throw new NoeticConfigError({
+        code: 'CONNECTION_INVALID',
+        message: `The connection expression of ${where} gave ${JSON.stringify(name)}, not a connection name.`,
+        hint: 'Write an expression that gives a declared connection name, e.g. { "$expr": "$item" } inside a fan-out.',
+      });
+    }
+    const target = documentTarget(name, where, ctx);
+    return typeof target === 'function' ? name : target;
+  };
+}
+
+/** The document's only connection, which a node without one runs on. */
+function onlyConnection(ctx: HydrationContext): string | undefined {
+  const names = Object.keys(ctx.connections ?? {});
+  return names.length === 1 ? names[0] : undefined;
+}
+
+/** The operations the document uses on a node's connection (gate 1), when the name is static. */
+function declaredOpsFor(
+  ref: WorkflowConnectionRef | undefined,
+  op: string,
+  ctx: HydrationContext,
+): string[] {
+  const name = typeof ref === 'string' ? ref : undefined;
+  const used = name === undefined ? undefined : ctx.connectionUses?.get(name)?.ops;
+  if (used && used.size > 0) {
+    return [
+      ...used,
+    ];
+  }
+  const all = new Set<string>([
+    op,
+  ]);
+  for (const use of ctx.connectionUses?.values() ?? []) {
+    for (const usedOp of use.ops) {
+      all.add(usedOp);
+    }
+  }
+  return [
+    ...all,
+  ];
+}
+
+/**
+ * Hydrates a step list (`around`, `act`, a sequence's steps): each entry a node,
+ * or an operation written by name that becomes a `call` with id `<parentId>[i]`
+ * on `enclosing` (when given).
+ *
+ * @public
+ */
+export function hydrateStepList(opts: {
+  list: WorkflowStepList;
+  parentId: string;
+  ctx: HydrationContext;
+  enclosing?: WorkflowConnectionRef;
+}): Step<ContextData, string, unknown>[] {
+  const { list, parentId, ctx, enclosing } = opts;
+  const childCtx: HydrationContext =
+    enclosing === undefined
+      ? ctx
+      : {
+          ...ctx,
+          enclosingConnection: enclosing,
+        };
+  return stepListEntries(list).map((entry, i) =>
+    frameworkCast<Step<ContextData, string, unknown>>(
+      hydrateNode(stepEntryToNode(entry, shorthandStepId(parentId, i)), childCtx),
+    ),
+  );
+}
+
+/** Registers a step built here as an object literal, like the builders do. */
+function registered<S extends Step<ContextData, string, string>>(built: S): S {
+  getDefaultRegistrar().register(frameworkCast<Step>(built));
+  return built;
+}
+
+function hydrateCallNode(
+  node: WorkflowNode,
+  ctx: HydrationContext,
+): Step<ContextData, string, string> {
+  if (node.kind !== 'call') {
+    return frameworkCast(undefined);
+  }
+  const where = `call node '${node.id}'`;
+  const connection = connectionTargetFor(node.connection, where, ctx);
+  const args = compileArgs(node.args, `args of ${where}`, ctx.expressionLimits);
+  const built: StepCall<ContextData, string, string> & {
+    _caller: 'document';
+    _declaredOps: string[];
+    _documentSecrets: Array<{
+      name: string;
+      field: string;
+    }>;
+  } = {
+    kind: 'call',
+    id: node.id,
+    connection,
+    op: node.op,
+    args: (input: string, execCtx: Context) => args(readInput(input), bindingsFor(execCtx, ctx)),
+    _caller: 'document',
+    _declaredOps: declaredOpsFor(node.connection ?? ctx.enclosingConnection, node.op, ctx),
+    _documentSecrets: documentSecretsOf(node.args),
+  };
+  return registered(built);
+}
+
+/** A wait filter expression: a test against `{ event, input }`. */
+function waitFilter(
+  compiled: CompiledExpression,
+  ctx: HydrationContext,
+): NonNullable<StepWait<ContextData, string, string>['filter']> {
+  return (event, input, execCtx) =>
+    passes(
+      compiled,
+      {
+        event,
+        input: readInput(input),
+      },
+      bindingsFor(execCtx, ctx),
+    );
+}
+
+function hydrateWaitNode(
+  node: WorkflowNode,
+  ctx: HydrationContext,
+): Step<ContextData, string, string> {
+  if (node.kind !== 'wait') {
+    return frameworkCast(undefined);
+  }
+  const where = `wait node '${node.id}'`;
+  const connectionRef = node.connection ?? ctx.enclosingConnection ?? onlyConnection(ctx);
+  const connection = connectionTargetFor(node.connection, where, ctx);
+  const filter =
+    node.filter === undefined
+      ? undefined
+      : waitFilter(compileExpression(node.filter, `filter of ${where}`, ctx.expressionLimits), ctx);
+  const around =
+    node.around === undefined
+      ? undefined
+      : hydrateStepList({
+          list: node.around,
+          parentId: node.id,
+          ctx,
+          enclosing: connectionRef,
+        });
+  const built: StepWait<ContextData, string, string> = {
+    kind: 'wait',
+    id: node.id,
+    connection,
+    event: node.event,
+    timeoutMs: node.timeoutMs,
+    ...(filter
+      ? {
+          filter,
+        }
+      : {}),
+    ...(around
+      ? {
+          around,
+        }
+      : {}),
+  };
+  return registered(built);
+}
+
 //#endregion
 
 //#region Handler Registry
@@ -815,6 +1127,10 @@ const NODE_HYDRATORS: Record<string, NodeHydrator> = {
   schedule: hydrateScheduleNode,
   subflow: hydrateSubflowNode,
   'acp-agent': hydrateAcpAgentNode,
+  call: hydrateCallNode,
+  wait: hydrateWaitNode,
+  // Owned by the verification slice (spec 37); it hydrates `act` through `hydrateStepList`.
+  verify: hydrateVerifyNode,
 };
 
 //#endregion
@@ -969,6 +1285,32 @@ function buildPerItemStep(opts: {
   );
 }
 
+/**
+ * Builds one path of a connection fan-out (`over` a list of connection names):
+ * the template hydrates with `$item` bound to the name, ids suffixed `-<i>`, and
+ * runs on the fork's own input.
+ */
+function buildConnectionPathStep(opts: {
+  forkId: string;
+  eachTemplate: WorkflowNode;
+  name: string;
+  index: number;
+  ctx: HydrationContext;
+}): Step<ContextData, string, string> {
+  const { forkId, eachTemplate, name, index, ctx } = opts;
+  const hydratedEach = hydrateNode(suffixNodeIds(eachTemplate, `-${index}`), {
+    ...ctx,
+    fanOutItem: name,
+  });
+  return frameworkCast(
+    runCode({
+      id: `${forkId}-item-${index}`,
+      execute: async (input: string, execCtx: Context) =>
+        outputText(await ctx.executeStep(hydratedEach, input, execCtx)),
+    }),
+  );
+}
+
 /** Keys whose values are opaque data bags, never child workflow nodes. */
 const NON_NODE_KEYS = new Set([
   'args',
@@ -1112,6 +1454,8 @@ export function hydrateNode(
     });
   }
   const hydrated = hydrator(node, ctx);
+  // Its output becomes `$steps.<id>` for later expressions of its document once it completes.
+  markRecorded(hydrated, documentScopeOf(ctx));
   // Set in place rather than copied: builders register the step object itself.
   if (node.durable !== undefined) {
     hydrated.durable = node.durable;
@@ -1143,15 +1487,20 @@ export function hydrateNode(
  * @param customItems - TypeScript declarations of the document's root custom items (spec 34).
  * @returns The root `Step` of the hydrated workflow.
  * @throws `NoeticConfigError` with code `CUSTOM_ITEM_MISMATCH` when `customItems` and the document give one name different types.
+ * @throws `NoeticConfigError` with code `CONNECTION_UNKNOWN` when a node uses a connection the document's `connections` do not declare, or `CONNECTION_INVALID` when a node's connection is neither named nor implied, or a source entry is used beyond its events.
  */
 export function hydrateWorkflow(
   doc: WorkflowDocument,
   ctx: HydrationContext,
   customItems?: CustomItemMap,
 ): Step<ContextData, string, string> {
+  const connectionUses = checkDocumentConnections(doc);
   const root = hydrateNode(doc.root, {
     ...ctx,
+    documentScope: {},
     customItems: documentScope(doc, ctx.customItems, customItems),
+    connections: doc.connections ?? {},
+    connectionUses,
   });
   // The root's dispatch accepts every item the document declares before anything
   // runs or replays; keyed by type, they cannot shadow the root's own names.

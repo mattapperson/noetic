@@ -39,6 +39,7 @@ import type { ItemSchemaRegistry, LayerStateStore } from './action-deps';
 import { contextToExecCtx, returnLayers, spawnLayers } from './action-deps';
 import { closeUnstartedSpan, openChildSpan, traceChild } from './child-span';
 import { cloneWithGuard } from './clone-guard';
+import { releasePathLeases } from './connection-steps';
 import { forgetAnswers } from './execute-decide';
 import { getContextChannelStore, isContextImpl, isMutableContext } from './typeguards';
 
@@ -381,6 +382,8 @@ export async function executeInParallel<TContext, I, O>(
       child.detachFromParent();
     }
     await traced.closeUnstarted();
+    // Each path's `fresh: 'path'` connections go back to their pools as the path's scope ends.
+    await releasePathLeases(childContexts);
   }
 }
 

@@ -1,4 +1,6 @@
 import type { StandardSchemaV1 } from '@standard-schema/spec';
+import type { Claim, Constraint } from '../verify/ovp';
+import type { VerifyClose, VerifyMatcher } from '../verify/verifier';
 import type {
   AcpAgent,
   AcpClientCapabilityConfig,
@@ -10,6 +12,7 @@ import type {
 } from './acp';
 import type { Channel } from './channel';
 import type { ModelParams, RetryPolicy, ServerToolSpec, StepMeta, ToolChoice } from './common';
+import type { ConnectionEvent, ConnectionHandle } from './connection';
 import type { Context } from './context';
 import type { ContextConfig, ContextData, ContextLayer, ProjectionPolicy } from './context-layer';
 import type { CustomItem, CustomItemMap, CustomItemType } from './custom-item';
@@ -260,7 +263,10 @@ export type Step<TContext = ContextData, I = unknown, O = unknown> =
   | StepSpawn<TContext, I, O>
   | StepWithContext<TContext, I, O>
   | StepLoop<TContext, I, O>
-  | StepSchedule<TContext, I, O>;
+  | StepSchedule<TContext, I, O>
+  | StepCall<TContext, I, O>
+  | StepWait<TContext, I, O>
+  | StepVerify<TContext, I, O>;
 
 /** @public A `runCode` body: async, or a generator that yields item events before returning. */
 export type RunCodeExecute<TContext = ContextData, I = unknown, O = unknown> = (
@@ -623,3 +629,151 @@ export type ExecuteStepFn = <TContext, I, O>(
   input: I,
   ctx: Context<TContext>,
 ) => Promise<O>;
+
+//#region Connection steps
+
+/**
+ * The connection a `call` or `wait` step runs on: a handle from `connection()`,
+ * a harness connection name, or a function of the step's input choosing one
+ * (a JSON fan-out's `{ "$expr": "$item" }`). See spec 35.
+ * @public
+ */
+export type StepConnectionTarget<TContext = ContextData, I = unknown> =
+  | ConnectionHandle
+  | string
+  | ((
+      input: I,
+      ctx: Context<TContext>,
+    ) => ConnectionHandle | string | Promise<ConnectionHandle | string>);
+
+/**
+ * A connection operation's arguments: a value, or a function of the step's input.
+ * @public
+ */
+export type StepCallArgs<TContext = ContextData, I = unknown> =
+  | Readonly<Record<string, unknown>>
+  | ((input: I, ctx: Context<TContext>) => unknown);
+
+/**
+ * A step that runs one connection operation and returns its result (spec 35).
+ * Operations that run long upstream are waited for automatically.
+ * @public
+ */
+export interface StepCall<TContext = ContextData, I = unknown, O = unknown>
+  extends StepReplay<TContext, I>,
+    StepEmitItems<TContext, I, O> {
+  kind: 'call';
+  id: string;
+  connection: StepConnectionTarget<TContext, I>;
+  /** The operation, e.g. `ui.tap`. */
+  op: string;
+  args?: StepCallArgs<TContext, I>;
+  /** Phantom field carrying the output type for inference. Never set at runtime. */
+  readonly _output?: O;
+}
+
+/**
+ * What a `wait` step returns: the event that matched, and the output of
+ * `around` when it ran.
+ * @public
+ */
+export interface StepWaitOutput<P = unknown, A = unknown> {
+  event: ConnectionEvent<P>;
+  around?: A;
+}
+
+/**
+ * Decides whether an event ends a `wait`. Indexed out of a method so its parameters
+ * stay bivariant, keeping a typed step assignable to the erased `Step` form.
+ * @public
+ */
+export type StepWaitFilter<TContext = ContextData, I = unknown, P = unknown> = {
+  bivariant(
+    event: ConnectionEvent<P>,
+    input: I,
+    ctx: Context<TContext>,
+  ): boolean | Promise<boolean>;
+}['bivariant'];
+
+/**
+ * A step that waits for a connection event (spec 35). With `around`, it starts
+ * listening, runs `around`, then waits, so the event an action causes cannot slip
+ * past. Its output is `{ event, around }`.
+ * @public
+ */
+export interface StepWait<TContext = ContextData, I = unknown, O = unknown>
+  extends StepReplay<TContext, I>,
+    StepEmitItems<TContext, I, O> {
+  kind: 'wait';
+  id: string;
+  connection: StepConnectionTarget<TContext, I>;
+  /** The event type, e.g. `chat.message.created`. */
+  event: string;
+  /** Picks the event that ends the wait; every event of the type matches without one. */
+  filter?: StepWaitFilter<TContext, I>;
+  /** A step, or an array of steps run in sequence, run once listening has started. */
+  around?: Step<TContext, I, unknown> | ReadonlyArray<Step<TContext, I, unknown>>;
+  /** How long to wait, in ms, from when listening starts. */
+  timeoutMs: number;
+  /** Phantom field carrying the output type for inference. Never set at runtime. */
+  readonly _output?: O;
+}
+
+/**
+ * The connection a `verify` checks — or a list, which runs one verify per
+ * connection in parallel with ids `<id>.<name>` and the worst outcome (spec 37).
+ * @public
+ */
+export type StepVerifySubject<TContext = ContextData, I = unknown> =
+  | StepConnectionTarget<TContext, I>
+  | ReadonlyArray<ConnectionHandle | string>;
+
+/**
+ * @public
+ * A verify's action: a step, an array of steps run in sequence, or a function
+ * of the subject's connection name giving them — the way to act on each
+ * subject of a list subject (spec 37 § Writing a verify).
+ */
+export type StepVerifyAct<TContext = ContextData, I = unknown> =
+  | Step<TContext, I, unknown>
+  | ReadonlyArray<Step<TContext, I, unknown>>
+  | ((subject: string) => Step<TContext, I, unknown> | ReadonlyArray<Step<TContext, I, unknown>>);
+
+/**
+ * A step that checks claims about what a connection shows (spec 37): it
+ * declares what should become true, runs `act`, watches the connection's
+ * senses, and answers with OVP verdicts and the gaps it could not see. Its
+ * output's `outcome` is `pass`, `fail`, `partial` or `unknown`. Built by
+ * `step.verify`; judged by the harness's registered verifier.
+ * @public
+ */
+export interface StepVerify<TContext = ContextData, I = unknown, O = unknown>
+  extends StepReplay<TContext, I>,
+    StepEmitItems<TContext, I, O> {
+  kind: 'verify';
+  id: string;
+  subject: StepVerifySubject<TContext, I>;
+  /** What must become true; each entry lowers to an OVP claim. Exactly one of `expect` or `claims`. */
+  expect?: ReadonlyArray<VerifyMatcher>;
+  /** What must not happen while `act` runs; each entry lowers to a blocking OVP constraint. */
+  never?: ReadonlyArray<VerifyMatcher>;
+  /** OVP claims given directly, instead of `expect`. */
+  claims?: ReadonlyArray<Claim>;
+  /** OVP constraints given directly, instead of `never`. */
+  constraints?: ReadonlyArray<Constraint>;
+  /**
+   * The action: a step, or an array of steps run in sequence — or, for a list
+   * subject, a function of each subject's connection name giving its action.
+   */
+  act: StepVerifyAct<TContext, I>;
+  /** Connections that can look and cannot touch, confirming from outside the subject. */
+  witnesses?: ReadonlyArray<ConnectionHandle | string>;
+  /** When to stop watching. Default: quiet for 500 ms, at most 15 s. */
+  close?: VerifyClose;
+  /** A sentence saying why, kept in the run record. */
+  intent?: string;
+  /** Phantom field carrying the output type for inference. Never set at runtime. */
+  readonly _output?: O;
+}
+
+//#endregion

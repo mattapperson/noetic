@@ -3,8 +3,13 @@
  * JSONata syntax errors fail validation instead of surfacing mid-run.
  */
 
-import type { UntilPredicate, WorkflowNode } from '@noetic-tools/types';
-import { walkWorkflow } from '@noetic-tools/types';
+import type {
+  UntilPredicate,
+  WorkflowConnectionRef,
+  WorkflowNode,
+  WorkflowStepList,
+} from '@noetic-tools/types';
+import { isWorkflowOpShorthand, stepListEntries, walkWorkflow } from '@noetic-tools/types';
 import { syntaxError } from './jsonata';
 
 //#region Types
@@ -63,6 +68,10 @@ function expressionsOf(node: WorkflowNode): Found[] {
 }
 
 function kindExpressionsOf(node: WorkflowNode): Found[] {
+  const connection = connectionExpressionsOf(node);
+  if (connection !== undefined) {
+    return connection;
+  }
   if (node.kind === 'compute') {
     return [
       {
@@ -87,6 +96,89 @@ function kindExpressionsOf(node: WorkflowNode): Found[] {
     return untilTests(node.until, `until of loop node '${node.id}'`);
   }
   return [];
+}
+
+/** Expressions in connection nodes (spec 35): `$expr` values, connection refs, wait filters, verify subjects, and shorthand args. */
+function connectionExpressionsOf(node: WorkflowNode): Found[] | undefined {
+  switch (node.kind) {
+    case 'call':
+      return [
+        ...refExpressions(node.connection, `connection of call node '${node.id}'`),
+        ...valueExpressions(node.args, `args of call node '${node.id}'`),
+      ];
+    case 'wait':
+      return [
+        ...refExpressions(node.connection, `connection of wait node '${node.id}'`),
+        ...(node.filter === undefined
+          ? []
+          : [
+              {
+                where: `filter of wait node '${node.id}'`,
+                source: node.filter,
+              },
+            ]),
+        ...shorthandExpressions(node.around, node.id),
+      ];
+    case 'verify':
+      return [
+        ...(Array.isArray(node.subject) || typeof node.subject === 'string'
+          ? []
+          : refExpressions(node.subject, `subject of verify node '${node.id}'`)),
+        ...shorthandExpressions(node.act, node.id),
+      ];
+    case 'sequence':
+      return shorthandExpressions(node.steps, node.id);
+    default:
+      return undefined;
+  }
+}
+
+function refExpressions(ref: WorkflowConnectionRef | undefined, where: string): Found[] {
+  if (ref === undefined || typeof ref === 'string') {
+    return [];
+  }
+  return [
+    {
+      where,
+      source: ref.$expr,
+    },
+  ];
+}
+
+/** Every `{ "$expr" }` in a value; `$literal` contents are data, not expressions. */
+function valueExpressions(value: unknown, where: string): Found[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((v) => valueExpressions(v, where));
+  }
+  if (typeof value !== 'object' || value === null) {
+    return [];
+  }
+  if ('$literal' in value) {
+    return [];
+  }
+  if ('$expr' in value && typeof value.$expr === 'string') {
+    return [
+      {
+        where,
+        source: value.$expr,
+      },
+    ];
+  }
+  return Object.values(value).flatMap((v) => valueExpressions(v, where));
+}
+
+/** Expressions in the args of operations written by name in a step list. */
+function shorthandExpressions(list: WorkflowStepList | undefined, parentId: string): Found[] {
+  if (list === undefined) {
+    return [];
+  }
+  return stepListEntries(list).flatMap((entry) =>
+    isWorkflowOpShorthand(entry)
+      ? Object.entries(entry).flatMap(([op, args]) =>
+          valueExpressions(args, `args of operation '${op}' in node '${parentId}'`),
+        )
+      : [],
+  );
 }
 
 function untilTests(pred: UntilPredicate, where: string): Found[] {

@@ -210,6 +210,8 @@ IndexedDB or a remote store.
 
 `@noetic-tools/platform-node` provides `createWebhookReceiver({ port, publicUrl })`, an HTTP receiver passed to `mcp({ webhooks })` for servers that deliver events by webhook (`35-connections` § Events). `@noetic/platform-browser` provides none; a serverless host implements the contract over its own routing.
 
+The contract `mcp()` consumes is transport only: `register(handler)` opens an endpoint and returns `{ url, close() }`; each POST reaches `handler` as `{ headers, body }` (lowercase header names, raw body text) and is answered with the `{ status }` the handler returns. `mcp()` verifies deliveries itself with the secret it sent in `events/subscribe`. The Node receiver also accepts `register({ onDelivery, secret?, signal? })`, for which it verifies each delivery (Standard Webhooks signature, five-minute timestamp window, duplicate ids) before calling `onDelivery`. Either way it refuses methods other than POST (405), bodies over `maxBodyBytes` (413) and unknown or closed endpoints (404).
+
 ## Future Considerations
 
 - **`@noetic/platform-deno` / `@noetic/platform-bun`**: if divergence between runtimes grows large enough, per-runtime packages with their own adapter implementations may land. The current `createLocalFsAdapter` works under Bun via Node API compatibility, so this is not yet needed.

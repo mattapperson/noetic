@@ -65,7 +65,7 @@ the JSON Schema, checks servers and drives verification.
 | Part | Fields |
 |---|---|
 | `name`, `version` | One lowercase label; semver. The major is part of its identity: `chat@1`. |
-| `extends` | Parent profiles with ranges: `{ ui: '^1' }`. Their parts are inherited unchanged, and requiring the child requires them. |
+| `extends` | Parent profiles with ranges: `{ ui: ui.range('^1') }`. Their parts are inherited unchanged, and requiring the child requires them. A bare range (`{ ui: '^1' }`) requires the parent without inheriting its parts — the parent's definition is not in hand. |
 | `operations` | `{ description, input, output, required?, eager?, effects?, once?, guarded?, sense? }` |
 | `reads` | State worth reading: `{ schema, sense, look? }` |
 | `events` | `{ payload, arguments?, sense, replay, thread?, required? }` |
@@ -92,7 +92,7 @@ Field helpers:
 | `ref(kind, { volatile?, public? })` | An id this connection hands out. `volatile` refs (elements, windows) die with the screen or the connection's current life; `public` refs (a channel id) can be typed by a person. |
 | `target(kind)` | A ref of that kind or a locator string (`'button "Pay"'`), resolved by the server to exactly one thing. |
 | `sensitive(schema)` | A field a secret may fill; redacted wherever it is stored or reported. |
-| `blob(mimeTypes)` | Binary content, carried as a blob reference. |
+| `blob(mimeTypes, { sensitive? })` | Binary content, carried as a blob reference. A `sensitive` blob (a stored session) is stored marked sensitive and never rendered to the model. |
 | `receipt()` | The receipt every `effects` operation returns. |
 
 ## Senses
@@ -222,7 +222,7 @@ Reads: `browser.page.summary` (url, title, route; `'turn'`), `browser.page`
 `browser.page.loaded` (sense `route`), `browser.dialog.opened` (sense `ui`),
 and ○ `browser.request` (`net`), `browser.console.message` (`log`),
 `browser.signal` (`signal`), `browser.download` (`x-artifact`, carries a
-blob). Setup: `{ url?, session?: blob, viewport?, locale?, timezone? }`.
+blob). Setup: `{ url?, session?: blob (sensitive), viewport?, locale?, timezone? }`.
 
 A browser server reaches OVP's `effect` level with `net` and `log`,
 `in-realm` adding `state` and `signal`, and `surface` adding `ui`.

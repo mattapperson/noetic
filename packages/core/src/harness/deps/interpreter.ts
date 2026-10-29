@@ -1,4 +1,9 @@
 export { collectAllTools, deduplicateTools } from '../../interpreter/collect-tools';
+export {
+  clearPendingEntries,
+  graphConnectionNeeds,
+  reconcileResumedConnections,
+} from '../../interpreter/connection-steps';
 export { prepareBandedView } from '../../interpreter/context-assembly';
 export { collectCustomItems } from '../../interpreter/emit-items';
 export { execute } from '../../interpreter/execute';
