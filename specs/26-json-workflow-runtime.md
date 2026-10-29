@@ -27,9 +27,21 @@ A workflow document is a versioned envelope around a single root node:
 ```typescript
 interface WorkflowDocument {
   version: 1;
+  customItems?: Record<string, WorkflowCustomItem>;
+  connections?: Record<string, WorkflowConnectionRequirement>;
+  subscriptions?: WorkflowSubscription[];
   root: WorkflowNode;
 }
 ```
+
+`connections` is the document's dependency manifest: each slot names the
+profile and extensions it needs, each with a semver range, and every
+connection operation, tool selection and event wait in the document must come
+from a declared slot, and what any slot may reach is bounded by the host's
+`connections` allowlist on `parseAndRunWorkflow` and `dynamicWorkflow`.
+`subscriptions` declares which connection events start or join a turn; it is
+standing harness configuration, applied only when the document is the harness's
+graph. Both are specified in `35-connections` § JSON workflows.
 
 The `version` field enables forward-compatible parsing. Consumers reject documents with an unrecognised version rather than silently misinterpreting them.
 
@@ -567,6 +579,7 @@ interface HydrationContext {
   executeStep: ExecuteStepFn;
   layers?: ReadonlyMap<string, ContextLayer>;
   acpAgents?: ReadonlyMap<string, AcpAgent>;
+  bindings?: Readonly<Record<string, string | ReadonlyArray<string>>>;
   uiLibraries?: ReadonlyMap<string, OutputCodec>;
   resolveSubprocess?: (ref: string) => SubprocessAdapter | undefined;
   workflows?: ReadonlyMap<string, WorkflowDocument>;
@@ -582,6 +595,7 @@ interface HydrationContext {
 | `executeStep`        | Yes      | The interpreter's `execute` function, threaded for recursive calls.      |
 | `layers`             | No       | Named context layers for `withContext` nodes and `spawn.layers`.              |
 | `acpAgents`          | No       | ACP agent adapters keyed by `agentId` (`claude-code`, `codex`, …). Open set. |
+| `bindings`           | No       | Slot → instance name(s) for connection slots (spec 35). Unbound single-instance slots bind to the same-name instance; connection nodes resolve instances through the harness connection registry when they execute. |
 | `uiLibraries`        | No       | Output codecs for `callModel` nodes' `output` codec references.                |
 | `resolveSubprocess`  | No       | Resolves a named subprocess adapter ref on a `runCode` node.                 |
 | `workflows`          | No       | Named sub-workflow documents that `subflow` nodes resolve via `ref`.     |
@@ -863,6 +877,7 @@ The JSON Workflow Runtime introduces the following `NoeticConfigError` codes:
 | `UNKNOWN_ACP_AGENT_REFERENCE`  | An `acp-agent` node's adapter is not registered.                         |
 | `UNKNOWN_UI_LIBRARY_REFERENCE` | A `callModel` node's `output.library` is not in the codec registry.           |
 | `UNKNOWN_SUBPROCESS_REFERENCE` | A `runCode` node's `subprocess` ref cannot be resolved.                      |
+| `UNKNOWN_CONNECTION_SLOT`      | A connection node or `connection:<slot>` tool entry names a slot the manifest does not declare. Other connection codes are listed in `35-connections` § Errors. |
 | `UNKNOWN_UNTIL_PREDICATE`      | An until predicate kind is unrecognised.                                 |
 | `INVALID_UNTIL_DECIDER`        | A decide until predicate does not ask exactly one boolean question (raised at hydration by `loop`/`any`/`all`). |
 | `UNKNOWN_WORKFLOW_REFERENCE`   | A `subflow` ref names no registered workflow (raised at execution time). |
@@ -1005,6 +1020,8 @@ const WorkflowDocumentSchema = z.object({
 - `Context`, `Item`, `ItemLog`: `07-context-and-event-log`
 - `AgentHarness`, `Tool`: `08-runtime`
 - `NoeticError` kinds: `09-error-model`
+- `connectionCall`, `subscribeEvents`, `awaitEvent`, `awaitTask` nodes, the `connections` manifest and `subscriptions`: `35-connections`
+- Profiles and extensions the manifest names: `36-connection-profiles`
 - `Expression`, `ExpressionSchema`, `ExpressionLimits`, the JSONata adapter, and the `compute` / `expr` semantics: `33-expressions`
 - `decide` nodes and `routeSwitch`, including deciders as until predicates: `32-decide`
 - `ContextLayer`: `11-context-layer-system`

@@ -196,6 +196,10 @@ Mechanical migration:
 - Importing `@noetic/platform-browser` similarly produces no `node:*` references.
 - Importing `@noetic-tools/platform-node` may reference `node:*`; bundling for a browser target surfaces the mismatch as a build-time error, which is the desired behaviour.
 
+## Webhook Receiver
+
+`@noetic-tools/platform-node` provides `createWebhookReceiver({ port, publicUrl })`, the Node implementation of the `WebhookReceiver` contract through which connection events arrive by webhook (`35-connections` § Webhook receiver). `@noetic/platform-browser` provides none; a serverless host implements the contract over its own routing.
+
 ## Future Considerations
 
 - **`@noetic/platform-deno` / `@noetic/platform-bun`**: if divergence between runtimes grows large enough, per-runtime packages with their own adapter implementations may land. The current `createLocalFsAdapter` works under Bun via Node API compatibility, so this is not yet needed.

@@ -117,6 +117,12 @@ the block or forge the index.
 
 ## MCP servers
 
+The MCP client, its transports and capability negotiation live in
+`@noetic-tools/mcp` (`35-connections`); this package resolves and validates
+`mcp.json` entries and hands the resolved servers to it. A plugin server that
+declares connection profiles (`36-connection-profiles`) is therefore usable
+both as plugin tools here and as a connection instance.
+
 `mcp.json` is a closed union over three transports. Validation and resolution
 are separate concerns: validation is pure, while resolution touches the
 filesystem to enforce containment on `command` and `cwd`.

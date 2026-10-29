@@ -178,3 +178,7 @@ NoeticConfigError: Missing required environment variable.
 Budget limits (`maxCost`, `maxSteps`, `maxDuration`) are enforced by `until` predicates, which return `Verdict` objects — they do NOT throw. The `budget_exceeded` error kind exists for cases where budget enforcement happens **outside** a loop's `until` predicate — for example, when the runtime itself detects that an agent-level budget (set on `AgentConfig`) has been exceeded between steps. In that case, the runtime throws `budget_exceeded` directly.
 
 Within a loop, the `until` predicate returns `{ stop: true, reason: 'Cost $5.12 exceeded budget $5.00' }` and the loop terminates normally. The `budget_exceeded` error is only thrown when there is no `until` predicate to catch the overage.
+
+## Connection Errors
+
+Connections (`35-connections`) add `NoeticConfigError` codes for setup and validation — `CONNECTION_TOOL_COLLISION`, `CONNECTION_VERSION_UNSATISFIED`, `CONNECTION_EXTENSION_MISSING`, `CONNECTION_OPERATION_UNSUPPORTED`, `CONNECTION_OPERATION_UNDECLARED`, `CONNECTION_PROFILE_MISMATCH`, `CONNECTION_ALLOWLIST_EXCEEDED`, `UNKNOWN_CONNECTION_SLOT`, `UNKNOWN_CONNECTION_INSTANCE`, `INVALID_CONNECTION_REQUIREMENT` — and `NoeticError` kinds for run-time failures — `connection_unavailable`, `connection_operation_failed`, `connection_reference_mismatch`, `connection_reference_rejected`, `connection_input_required`, `connection_binding_changed`, `connection_subscription_terminated`, `task_lost`, `event_gap`. Conditions and payloads are in `35-connections` § Errors.

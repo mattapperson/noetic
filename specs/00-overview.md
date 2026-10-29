@@ -26,6 +26,10 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
       ↑
       ├── @noetic-tools/platform-node
       └── @noetic/platform-browser
+
+@noetic-tools/mcp  →  @noetic-tools/types  ←  @noetic-tools/profile-*
+        ↑
+@noetic-tools/agent-plugins, @noetic-tools/profile-conformance
 ```
 
 `@noetic-tools/core` depends only on the `AcpAgent` *type* in `@noetic-tools/types`; it never imports `@noetic-tools/acp` (the dependency edge above runs client → contract, never core → client).
@@ -42,7 +46,13 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 
 - **`@noetic-tools/acp`** — Both directions of the Agent Client Protocol. The client side lets any ACP-speaking coding agent (Claude Code, Codex, Gemini CLI, …) run as a Noetic step: the protocol library, capability negotiation, the session/turn drivers, the client-side `fs/*` + `terminal/*` + permission handlers backed by Noetic's own adapters, the transports (stdio, loopback), and the agent presets (`27-acp-agent-steps`). The server side (`toAcpAgent()`, `serveAcp()` at `./server`) exposes an `AgentHarness` *as* an ACP agent so editors like Zed can drive it (`30-acp-server`). Depends only on `@noetic-tools/types` — never on `@noetic-tools/core`.
 
-- **`@noetic-tools/agent-plugins`** — An [Agent Plugins](https://agent-plugins.org) v1 client: discovers plugin packages (a closed `plugin.json` manifest plus the two portable component types, Agent Skills and MCP servers) and exposes them through the `agentPlugins()` context layer using the spec's progressive disclosure model. The only package permitted to depend on the MCP SDK. Depends on `@noetic-tools/types` — never on `@noetic-tools/core` or `@noetic-tools/context`. See `30-agent-plugins`.
+- **`@noetic-tools/agent-plugins`** — An [Agent Plugins](https://agent-plugins.org) v1 client: discovers plugin packages (a closed `plugin.json` manifest plus the two portable component types, Agent Skills and MCP servers) and exposes them through the `agentPlugins()` context layer using the spec's progressive disclosure model. Reaches MCP servers through `@noetic-tools/mcp`. Depends on `@noetic-tools/mcp` and `@noetic-tools/types` — never on `@noetic-tools/core` or `@noetic-tools/context`. See `30-agent-plugins`.
+
+- **`@noetic-tools/mcp`** — The MCP bridge: `mcpConnection()` turns an MCP server into a `ConnectionProvider` (`35-connections`), with the MCP client, transports, profile negotiation, Tasks, Events and webhook verification. The only package permitted to depend on the MCP SDK. Depends only on `@noetic-tools/types`; `@noetic-tools/core` never imports it.
+
+- **`@noetic-tools/profile-screen`**, **`profile-browser`**, **`profile-device`**, **`profile-chat`** — One connection profile each: schemas, types and conformance scenarios (`36-connection-profiles`). Depend only on `@noetic-tools/types` and the profile they extend.
+
+- **`@noetic-tools/profile-conformance`** — Runs a profile's conformance scenarios against an MCP server. Depends on `@noetic-tools/mcp` and `@noetic-tools/types`.
 
 - **`@noetic-tools/openui`** — Generative UI via the OpenUI standard: the `openUi()` output codec (streaming OpenUI Lang parser), the `openUiSurface()` context layer (server-authoritative UI state), the typed `fragment()` builder for tool-authored UI, and the `./server` transport for OpenUI's client stack. Depends on `@noetic-tools/context` + `@noetic-tools/types` — never on `@noetic-tools/core` (core sees only the dialect-agnostic `OutputCodec` / `UiFragment` contracts in `types`). See `28-generative-ui`.
 
@@ -89,6 +99,8 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 | `32-decide` | `decide()`, `routeSwitch()`, `decisionsHistoryLayer()`, `harness.decide()` | Typed decisions and routing |
 | `33-expressions` | `Expression`, `ExpressionSchema`, `ExpressionLimits`, `DEFAULT_EXPRESSION_LIMITS` | JSONata expressions in JSON workflows (`compute`, route and until `expr`) |
 | `34-custom-items` | `customItem()`, `CustomItem`, `CustomItemOf`, `CustomStreamingItem`, `FromJsonSchema`, `StepEmitItemsConfig` | Declared custom items: typed events and final items a workflow streams, typed through the harness |
+| `35-connections` | `Connection`, `ConnectionProvider`, `connection()`, `defineTrigger()`, `step.connectionCall`/`subscribeEvents`/`awaitEvent`/`awaitTask`, `mcpConnection()` | Named MCP-backed surfaces (devices, browsers, chat) and triggers as tools, steps, events and JSON nodes |
+| `36-connection-profiles` | `defineProfile`, `defineExtension`, `screen`/`browser`/`device`/`chat` profiles, `checkConformance` | Normalized MCP vocabularies with vendor extensions |
 
 ## Dependency Graph
 

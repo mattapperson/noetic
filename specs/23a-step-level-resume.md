@@ -232,6 +232,10 @@ The ledger lives under its own keys, outside `CheckpointSnapshot`. The baseline 
 - `harness.clearCheckpoint` removes the snapshot and every shard.
 - Ledger entries with no snapshot restore a context with the original id; no snapshot and no ledger restores `null`; an unknown snapshot version throws `CHECKPOINT_SCHEMA_MISMATCH` even with a ledger.
 
+## Connection Steps
+
+`connectionCall`, `subscribeEvents`, `awaitEvent` and `awaitTask` steps add a **pre-dispatch entry**: written under the step's ledger key before the step reaches a server, it holds the call's idempotency key and, as they become known, the task reference, the subscription with its start cursor, and the deadline. A step with a pre-dispatch entry and no completion entry reattaches on resume — it re-sends the call with the same key, which a conforming server answers with the original task or result, and waits again from the recorded cursor until the recorded deadline. Completion records the result as for any step. A run whose recorded connection binding no longer holds fails with `connection_binding_changed` (`35-connections` § Durability, § JSON workflows). The pre-dispatch entry is specific to connection steps; other tools keep the at-least-once behavior described in § The side-effect boundary.
+
 ## Future Considerations
 
 - **Mid-stream resume.** A model stream cut off mid-response re-issues that round. Providers that expose resumable streams would let a round resume where its stream stopped.

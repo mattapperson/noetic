@@ -441,6 +441,20 @@ interface DetachedHandle<O> {
 
 ---
 
+## Connections, Subscriptions and Triggers
+
+Alongside the four platform adapters, `environment.connections` holds the
+harness's named connections — MCP-backed surfaces such as devices, browsers and
+chat workspaces, and in-process triggers — and `environment.webhooks` the
+receiver their events may arrive through. `subscriptions` declares which
+connection events start or join a turn, and `harness.emit(name, event)` pushes
+an event into a trigger from host code. Providers connect in
+`harness.start()`, which the first `execute()` or `run()` calls implicitly;
+construction stays synchronous. `harness.getConnectionStatus(name?)` reports
+each instance's state. Connections differ from adapters in one way that
+decides where a surface belongs: the runtime never calls a connection, only the
+model, steps and workflows do. See `35-connections`.
+
 ## Sessions and the Message Queue
 
 `execute()` enqueues a message on a **session** keyed by `options.threadId` (or a default thread when omitted). Each session owns:
