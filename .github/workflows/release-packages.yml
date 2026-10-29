@@ -1,11 +1,13 @@
 name: Release packages
 
 # Each release pushes a version commit, so jobs run in dependency order
-# and check out the latest main.
+# and check out the latest commit of the branch that was pushed. `main`
+# publishes to the `latest` dist-tag; `next` publishes prereleases
+# (`x.y.z-next.N`) to the `next` dist-tag.
 
 on:
   push:
-    branches: [main]
+    branches: [main, next]
   workflow_dispatch:
 
 concurrency:
@@ -28,7 +30,7 @@ jobs:
       # refuses to run from a stale checkout.
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.ref_name }}
           fetch-depth: 0
 
       - uses: oven-sh/setup-bun@v2
@@ -85,7 +87,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.ref_name }}
           fetch-depth: 0
 
       - uses: oven-sh/setup-bun@v2
@@ -144,7 +146,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.ref_name }}
           fetch-depth: 0
 
       - uses: oven-sh/setup-bun@v2
@@ -204,7 +206,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.ref_name }}
           fetch-depth: 0
 
       - uses: oven-sh/setup-bun@v2
@@ -268,7 +270,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.ref_name }}
           fetch-depth: 0
 
       - uses: oven-sh/setup-bun@v2
@@ -332,7 +334,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.ref_name }}
           fetch-depth: 0
 
       - uses: oven-sh/setup-bun@v2
@@ -392,7 +394,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.ref_name }}
           fetch-depth: 0
 
       - uses: oven-sh/setup-bun@v2
@@ -457,7 +459,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.ref_name }}
           fetch-depth: 0
 
       - uses: oven-sh/setup-bun@v2
@@ -519,7 +521,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.ref_name }}
           fetch-depth: 0
 
       - uses: oven-sh/setup-bun@v2
@@ -583,7 +585,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.ref_name }}
           fetch-depth: 0
 
       - uses: oven-sh/setup-bun@v2

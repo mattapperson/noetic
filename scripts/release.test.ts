@@ -63,9 +63,10 @@ const packages = readdirSync(new URL('packages/', root), {
   .filter((pkg) => !pkg.private);
 const jobs = Object.entries(workflow.jobs);
 
-test('every merge to main can start a release', () => {
+test('every merge to main or next can start a release', () => {
   expect(workflow.on.push.branches).toEqual([
     'main',
+    'next',
   ]);
   expect(workflow.on).toHaveProperty('workflow_dispatch');
 });
@@ -103,13 +104,21 @@ test('every package has a public build and uses this workflow for trusted publis
     expect(pkg.publishConfig?.access).toBe('public');
     expect(value.permissions['id-token']).toBe('write');
     const checkout = value.steps.find((step) => step.uses?.startsWith('actions/checkout@'))!;
-    expect(checkout.with?.ref).toBe('main');
+    expect(checkout.with?.ref).toMatch(/^\$\{\{ github\.ref_name \}\}$/);
     expect(checkout.with?.['fetch-depth']).toBe(0);
     expect(
       value.steps.some((step) => step.run === `bash scripts/publish-missing.sh ${pkg.dir}`),
     ).toBe(true);
     const config = JSON.parse(readFileSync(new URL(`${pkg.dir}/.releaserc.json`, root), 'utf8'));
     expect(config.tagFormat).toBe(`${id}-v\${version}`);
+    expect(config.branches).toEqual([
+      'main',
+      {
+        name: 'next',
+        prerelease: true,
+        channel: 'next',
+      },
+    ]);
   }
 });
 
