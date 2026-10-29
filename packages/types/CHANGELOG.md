@@ -1,3 +1,7 @@
+## @noetic-tools/types-v3.17.1-next.1 (2026-10-29)
+
+* ci: publish prereleases from next to the next dist-tag ([5c9f714](https://github.com/mattapperson/noetic/commit/5c9f714))
+
 ## @noetic-tools/types-v3.17.0 (2026-10-27)
 
 * fix(core): bound held spend by request bytes and save decide() generation ids from headers ([976a075](https://github.com/mattapperson/noetic/commit/976a075)), closes [#149](https://github.com/mattapperson/noetic/issues/149)
