@@ -150,7 +150,8 @@ const login = [
   Its output is `{ event, around }`.
 - **`step.verify`** checks claims about what a connection shows (spec 37).
 - `args` may be a value or a function of the step's input; `around` and
-  `act` (spec 37) take a step or an array of steps, run in order.
+  `act` (spec 37) take a step or an array of steps. As everywhere in Noetic,
+  an array runs its steps in sequence, so there is no `step.sequence`.
 
 ### Fresh connections
 

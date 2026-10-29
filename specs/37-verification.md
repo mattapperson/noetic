@@ -44,7 +44,7 @@ verification run is an OVP `VerificationRun` any OVP tool can read and check.
 | `subject` | The connection being checked — or a list (`[ios, android]`), which runs one verify per connection in parallel, with ids `<id>.<name>` and the worst outcome. |
 | `expect` | What must become true. Each entry is a sense and a matcher (spec 36 § Senses), optionally a count. |
 | `never` | What must not happen at any point while the action runs. |
-| `act` | The action: a step or an array of steps. Must contain at least one operation with effects, or a model call. |
+| `act` | The action: a step, or an array of steps run in sequence. Must contain at least one operation with effects, or a model call. |
 | `witnesses` | Connections that can confirm from outside the subject — a database, a payment API (§ Witnesses). |
 | `close` | When to stop watching. Defaults to the subject profile's default: quiet for 500 ms, at most 15 s. |
 | `intent` | A sentence saying why, kept in the run record. |
