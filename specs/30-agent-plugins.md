@@ -119,9 +119,10 @@ the block or forge the index.
 
 The MCP client, its transports and capability negotiation live in
 `@noetic-tools/mcp` (`35-connections`); this package resolves and validates
-`mcp.json` entries and hands the resolved servers to it. A plugin server that
-declares connection profiles (`36-connection-profiles`) is therefore usable
-both as plugin tools here and as a connection instance.
+`mcp.json` entries and registers each resolved server as a connection with no
+profile. A plugin's tools therefore share one registry, one naming rule and one
+set of gates with every other MCP server the harness uses; a plugin server that
+declares a profile (`36-connection-profiles`) gets its typed operations too.
 
 `mcp.json` is a closed union over three transports. Validation and resolution
 are separate concerns: validation is pure, while resolution touches the

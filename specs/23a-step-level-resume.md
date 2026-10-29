@@ -234,7 +234,19 @@ The ledger lives under its own keys, outside `CheckpointSnapshot`. The baseline 
 
 ## Connection Steps
 
-Connection steps (`connectionCall`, `acquireConnection`, `subscribeEvents`, `awaitEvent`, `awaitTask`) add a **pre-dispatch entry**: written under the step's ledger key before the step reaches a server, it holds the call's idempotency key, the instance and its identity, and, as they become known, the task reference, the lease, the subscription with its start cursor, and the deadline. Against an instance with the same identity, a step with a pre-dispatch entry and no completion reattaches on resume — it re-sends the call with the same key, waits on the recorded task, or resubscribes from the recorded cursor. Against a replaced instance, recorded results describe a world that no longer exists, so the instance's determinism profile decides through OVP's resume strategy: discard the ledger from the first step that used the instance and run live from there (after a reset, when the strategy calls for one), or refuse with `connection_instance_replaced` (`35-connections` § Durability). Everything after that step runs live too, model rounds included, because its inputs came from the old instance. Binary outputs are stored in the artifact store and ledger entries carry blob references (`08-runtime` § Artifact Store), so screenshots and recordings do not hit the entry size cap. The pre-dispatch entry is specific to connection steps; other tools keep the at-least-once behavior described in § The side-effect boundary.
+`call` and `wait` steps (`35-connections`) write a **pending entry** before
+they reach a server: the call's idempotency key, the connection's identity,
+and once known the task, the lease, the start cursor and the deadline. Against
+the same identity, a step with a pending entry and no result picks up where it
+was on resume. Against a replaced connection, recorded results describe a
+world that is gone, so the connection's determinism decides: discard the
+ledger from the first step that used it and run live from there (after a reset
+when called for), or stop with `connection_resume_refused`
+(`35-connections` § Durability). Everything after that point runs live too,
+model rounds included. Binary outputs are blobs in the artifact store
+(`08-runtime`), so screenshots do not hit the entry size cap. Pending entries
+are specific to connection steps; other tools keep the at-least-once behavior
+in § The side-effect boundary.
 
 ## Future Considerations
 

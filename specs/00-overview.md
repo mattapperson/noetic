@@ -29,7 +29,7 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 
 @noetic-tools/mcp  →  @noetic-tools/types  ←  @noetic-tools/profile-*
         ↑
-@noetic-tools/agent-plugins, @noetic-tools/profile-conformance
+@noetic-tools/agent-plugins
 
 @noetic-tools/verify  →  @noetic-tools/types  (+ open-verification)
 ```
@@ -50,13 +50,13 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 
 - **`@noetic-tools/agent-plugins`** — An [Agent Plugins](https://agent-plugins.org) v1 client: discovers plugin packages (a closed `plugin.json` manifest plus the two portable component types, Agent Skills and MCP servers) and exposes them through the `agentPlugins()` context layer using the spec's progressive disclosure model. Reaches MCP servers through `@noetic-tools/mcp`. Depends on `@noetic-tools/mcp` and `@noetic-tools/types` — never on `@noetic-tools/core` or `@noetic-tools/context`. See `30-agent-plugins`.
 
-- **`@noetic-tools/mcp`** — The MCP bridge: `mcpConnection()` turns an MCP server into a `ConnectionProvider` (`35-connections`), with the MCP client, transports, profile negotiation, Tasks, Events and webhook verification. The only package permitted to depend on the MCP SDK. Depends only on `@noetic-tools/types`; `@noetic-tools/core` never imports it.
+- **`@noetic-tools/mcp`** — The MCP bridge: `mcp()` turns any MCP server into a connection (`ConnectionProvider`) (`35-connections`), with the MCP client, transports, profile negotiation, Tasks, Events and webhook verification. The only package permitted to depend on the MCP SDK. Depends only on `@noetic-tools/types`; `@noetic-tools/core` never imports it.
 
 - **`@noetic-tools/profile-ui`**, **`profile-screen`**, **`profile-browser`**, **`profile-app`**, **`profile-device`**, **`profile-chat`** — One connection profile each: schemas, types and conformance scenarios (`36-connection-profiles`). Depend only on `@noetic-tools/types` and the profile they extend.
 
 - **`@noetic-tools/verify`** — Verification over connections, implementing the Open Verification Protocol through its `open-verification` package: claims, windows, coverage, adjudication and verification runs behind `step.verify` (`37-verification`). Depends on `@noetic-tools/types` and `open-verification`; `@noetic-tools/core` never imports it.
 
-- **`@noetic-tools/profile-conformance`** — Runs a profile's conformance scenarios against an MCP server. Depends on `@noetic-tools/mcp` and `@noetic-tools/types`.
+- **Conformance** — `@noetic-tools/mcp/conformance` runs a profile's conformance scenarios against an MCP server (`36-connection-profiles`).
 
 - **`@noetic-tools/openui`** — Generative UI via the OpenUI standard: the `openUi()` output codec (streaming OpenUI Lang parser), the `openUiSurface()` context layer (server-authoritative UI state), the typed `fragment()` builder for tool-authored UI, and the `./server` transport for OpenUI's client stack. Depends on `@noetic-tools/context` + `@noetic-tools/types` — never on `@noetic-tools/core` (core sees only the dialect-agnostic `OutputCodec` / `UiFragment` contracts in `types`). See `28-generative-ui`.
 
@@ -103,9 +103,9 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 | `32-decide` | `decide()`, `routeSwitch()`, `decisionsHistoryLayer()`, `harness.decide()` | Typed decisions and routing |
 | `33-expressions` | `Expression`, `ExpressionSchema`, `ExpressionLimits`, `DEFAULT_EXPRESSION_LIMITS` | JSONata expressions in JSON workflows (`compute`, route and until `expr`) |
 | `34-custom-items` | `customItem()`, `CustomItem`, `CustomItemOf`, `CustomStreamingItem`, `FromJsonSchema`, `StepEmitItemsConfig` | Declared custom items: typed events and final items a workflow streams, typed through the harness |
-| `35-connections` | `Connection`, `ConnectionProvider`, `connection()`, `defineTrigger()`, `step.connectionCall`/`acquireConnection`/`subscribeEvents`/`awaitEvent`/`awaitTask`, `mcpConnection()` | Named and pooled MCP-backed surfaces (devices, browsers, apps, chat) and triggers as tools, steps, events and JSON nodes |
-| `36-connection-profiles` | `defineProfile`, `defineExtension`, `ui`/`screen`/`browser`/`app`/`device`/`chat` profiles, `checkConformance` | Normalized MCP vocabularies with vendor extensions |
-| `37-verification` | `step.verify`, `claim()`, `witness()`, `verifier()` | Evidence-backed verdicts over connections, aligned with the Open Verification Protocol |
+| `35-connections` | `connection()`, `step.call`, `step.wait`, `secret()`, `defineSource()`, `cron()`, `mcp()` | Named MCP-backed connections (browsers, devices, apps, chat, sources) as tools, steps, triggers and JSON nodes |
+| `36-connection-profiles` | `defineProfile`, `defineExtension`, `ui`/`screen`/`browser`/`app`/`device`/`chat` profiles | Shared, versioned vocabularies with vendor extensions |
+| `37-verification` | `step.verify`, `verifier()`, matchers (`net`, `ui`, …) | Evidence-backed verdicts over connections, implementing the Open Verification Protocol |
 
 ## Dependency Graph
 

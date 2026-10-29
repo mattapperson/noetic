@@ -70,6 +70,7 @@ stays free of the library. Core checks syntax (§ Validation).
 | `conditional` route  | `{ "expr": "<JSONata>", "target": … }`  | Takes the route when the expression gives `true`.        |
 | `loop` until         | `{ "kind": "expr", "expr": "<JSONata>" }` | Stops the loop when the expression gives `true`.       |
 | any node's `emitItems` | `{ "onStart"?: …, "onDone"?: … }`       | Computes an event or the final item the node emits.      |
+| a value position      | `{ "$expr": "<JSONata>" }`              | Computes one argument of a connection node (`35-connections`); `{ "$literal": … }` passes an object through untouched. |
 
 A conditional route carries exactly one of `match` (substring) or `expr`. The
 `expr` until predicate may appear inside `any` and `all` like any other
@@ -94,6 +95,19 @@ Nodes pass JSON text to one another, so this rule lets each expression read
 the previous node's output as structured data. In JSONata terms the input is
 the context value: a bare path such as `n` reads its `n` field, and `$` is the
 whole input.
+
+Two bindings are available in every expression:
+
+- **`$steps`** — the outputs of nodes that have already completed in the
+  enclosing workflow, by node id, each read by `readInput`. `$steps.watch` is
+  the output of the node with id `watch`. A node can therefore use any earlier
+  result, not only the one just before it.
+- **`$refId(x)`** — the id inside a connection ref (`35-connections`),
+  since JSONata paths cannot step into `$`-prefixed keys.
+
+A connection node's `wait` filter is evaluated against
+`{ "event": <the event>, "input": <the node's input> }`, and a trigger's
+expressions against the event; these are the only other inputs.
 
 ---
 

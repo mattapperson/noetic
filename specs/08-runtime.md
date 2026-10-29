@@ -253,7 +253,7 @@ Binary content the runtime must keep — screenshots, recordings, traces, files
 an agent downloads or produces, verification runs — goes to the fifth platform
 adapter, `environment.artifacts`, never inline into step outputs, the ledger,
 checkpoints or traces. Those carry a `BlobReference` instead
-(`35-connections` § Binary content), which keeps ledger entries under the
+(`35-connections` § Refs and blobs), which keeps ledger entries under the
 `23a` size cap and lets a resumed run see the same bytes it saw before.
 
 ```typescript
@@ -502,22 +502,19 @@ interface DetachedHandle<O> {
 
 ---
 
-## Connections, Subscriptions and Triggers
+## Connections and Triggers
 
-Alongside the platform adapters, `environment.connections` holds the
-harness's named connections — MCP-backed surfaces such as devices, browsers and
-chat workspaces, and in-process triggers — `environment.pools` the providers it
-provisions instances from on demand, `environment.secrets` the resolver for
-`$secret` argument values, and `environment.webhooks` the receiver events may
-arrive through. `verification` registers the verifier `step.verify` dispatches
-to (`37-verification`). `subscriptions` declares which
-connection events start or join a turn, and `harness.emit(name, event)` pushes
-an event into a trigger from host code. Providers connect in
-`harness.start()`, which the first `execute()` or `run()` calls implicitly;
-construction stays synchronous. `harness.getConnectionStatus(name?)` reports
-each instance's state. Connections differ from adapters in one way that
-decides where a surface belongs: the runtime never calls a connection, only the
-model, steps and workflows do. See `35-connections`.
+`connections` maps names to the live things an agent works with — browsers,
+devices, desktop apps, chat workspaces, in-process event sources — each backed
+by an MCP server through `mcp()` or any `ConnectionProvider`, optionally as a
+pool of fresh connections. `triggers` declares which connection events start
+or join a turn. `environment.secrets` resolves `secret()` values and
+`environment.artifacts` stores binary content; `verification` registers the
+verifier `step.verify` uses (`37-verification`). Providers connect in
+`harness.start()`, which the first `execute()` or `run()` calls; construction
+stays synchronous. `harness.getConnectionStatus(name?)` reports each
+connection's state. Connections are not adapters: the runtime never calls one,
+only the model, steps and workflows do. See `35-connections`.
 
 ## Sessions and the Message Queue
 

@@ -208,7 +208,7 @@ IndexedDB or a remote store.
 
 ## Webhook Receiver
 
-`@noetic-tools/platform-node` provides `createWebhookReceiver({ port, publicUrl })`, the Node implementation of the `WebhookReceiver` contract through which connection events arrive by webhook (`35-connections` § Webhook receiver). `@noetic/platform-browser` provides none; a serverless host implements the contract over its own routing.
+`@noetic-tools/platform-node` provides `createWebhookReceiver({ port, publicUrl })`, an HTTP receiver passed to `mcp({ webhooks })` for servers that deliver events by webhook (`35-connections` § Events). `@noetic/platform-browser` provides none; a serverless host implements the contract over its own routing.
 
 ## Future Considerations
 
