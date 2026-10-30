@@ -1,3 +1,7 @@
+## @noetic-tools/core-v5.19.1 (2026-10-30)
+
+* fix(core): resume a cut-off model round from the items it finished ([c6c46b6](https://github.com/mattapperson/noetic/commit/c6c46b6)), closes [#153](https://github.com/mattapperson/noetic/issues/153)
+
 ## @noetic-tools/core-v5.19.0 (2026-10-27)
 
 * fix(core): bound held spend by request bytes and save decide() generation ids from headers ([976a075](https://github.com/mattapperson/noetic/commit/976a075)), closes [#149](https://github.com/mattapperson/noetic/issues/149)
