@@ -60,14 +60,17 @@ export class CallSpanCollector {
     span.end();
   }
 
-  /** Open and immediately close a tool-call span under the given model span. */
+  /**
+   * Open and immediately close a tool-call span under the given model span, or under
+   * the call's parent when the round's model call ran in an earlier attempt.
+   */
   recordToolSpan(
-    parent: Span,
+    parent: Span | null,
     toolName: string,
     needsApproval: boolean,
     approval: ApprovalOutcome | undefined,
   ): void {
-    const span = this.harness.createSpan('tool.call', parent);
+    const span = this.harness.createSpan('tool.call', parent ?? this.parent);
     span.setAttribute(ToolAttr.NAME, toolName);
     span.setAttribute(ToolAttr.NEEDS_APPROVAL, needsApproval);
     if (approval !== undefined) {

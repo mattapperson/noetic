@@ -14,6 +14,11 @@
  * belongs to the conversation the earlier recorded rounds built. When the step
  * finishes and records, the ledger prunes its rounds.
  *
+ * While a round streams, each output item it finishes is recorded at the same key as
+ * a `cut` round, so a host killed mid-stream resumes from those items rather than
+ * making them again. The round's own record replaces it. A cut round with neither a
+ * function call nor an answer has nothing to go on from, so replay stops there.
+ *
  * A call that fails charges its context with the rounds it recorded, so a failed run
  * reports what it paid. A retry in place replays those rounds on the same context,
  * so the ledger remembers which rounds were charged and the replay counts them no
@@ -21,8 +26,9 @@
  */
 
 import type { Item, ItemSchemaRegistry, RoundUsage } from '@noetic-tools/types';
-import { frameworkCast } from '@noetic-tools/types';
+import { frameworkCast, isAssistantMessage } from '@noetic-tools/types';
 import { z } from 'zod';
+import { isFunctionCall } from '../interpreter/typeguards';
 import type { StepLedger } from '../runtime/durable/step-ledger';
 import { ContextImpl } from './deps/runtime';
 
@@ -38,6 +44,8 @@ export interface RoundRecord {
   input: unknown[];
   usage: RoundUsage;
   cost: number;
+  /** The stream had not finished: `items` holds the output items it had, tools not yet run. */
+  cut?: boolean;
 }
 
 const RoundOutputSchema = z.object({
@@ -50,6 +58,7 @@ const RoundOutputSchema = z.object({
     cacheWriteTokens: z.number().optional(),
   }),
   cost: z.number(),
+  cut: z.boolean().optional(),
 });
 
 /** A replayed round: its record plus the items it appended to the item log. */
@@ -77,7 +86,7 @@ const chargedRounds = new WeakMap<StepLedger, Set<string>>();
 export class RoundLedger {
   private replaying = true;
   /** Rounds this loop recorded. */
-  private readonly recorded: number[] = [];
+  private readonly recorded = new Set<number>();
 
   private constructor(
     private readonly ctx: ContextImpl,
@@ -117,12 +126,14 @@ export class RoundLedger {
       this.replaying = false;
       return undefined;
     }
+    let replayed: ReplayedRound;
     try {
-      return {
+      replayed = {
         items: schemas.parseMany(parsed.data.items),
         input: parsed.data.input,
         usage: parsed.data.usage,
         cost: parsed.data.cost,
+        cut: parsed.data.cut,
         appended: schemas.parseMany(entry.items ?? []),
         charged: chargedRounds.get(ledger)?.has(this.key(round)) ?? false,
       };
@@ -130,6 +141,11 @@ export class RoundLedger {
       this.replaying = false;
       return undefined;
     }
+    if (replayed.cut && !replayed.items.some(goesOn)) {
+      this.replaying = false;
+      return undefined;
+    }
+    return replayed;
   }
 
   /** Mark where the log stood when a round began, so its appends can be recorded. */
@@ -137,12 +153,19 @@ export class RoundLedger {
     return this.ctx.appendedItems().length;
   }
 
-  /** Record a finished round. `logMark` is what `mark()` returned when it began. */
-  async record(round: number, logMark: number, record: RoundRecord): Promise<void> {
+  /**
+   * Record a round, finished or `cut`. `logMark` is what `mark()` returned when it
+   * began. Resolves whether the record was stored.
+   *
+   * Also drops the record of the round after it, left by an earlier attempt of the
+   * same step (a steering retry calls the model again at the same path). Replay
+   * stops at the first missing round, so the stale rounds past it are never read.
+   */
+  async record(round: number, logMark: number, record: RoundRecord): Promise<boolean> {
     this.replaying = false;
     const ledger = this.ctx.ledger;
     if (!ledger) {
-      return;
+      return false;
     }
     const appended = this.ctx.appendedItems().slice(logMark);
     const stored = await ledger.record({
@@ -159,17 +182,24 @@ export class RoundLedger {
       completedAt: new Date().toISOString(),
     });
     if (!stored) {
-      return;
+      return false;
     }
-    this.recorded.push(round);
+    this.recorded.add(round);
     // A new record holds a bill no context has been charged with yet.
     chargedRounds.get(ledger)?.delete(this.key(round));
+    await ledger.drop(this.key(round + 1));
+    return true;
+  }
+
+  /** Drop the record of round `round`: the loop threw that round away. */
+  async drop(round: number): Promise<void> {
+    await this.ctx.ledger?.drop(this.key(round));
   }
 
   /** Note that the rounds this loop recorded were charged to its context. */
   charged(): void {
     const ledger = this.ctx.ledger;
-    if (!ledger || this.recorded.length === 0) {
+    if (!ledger || this.recorded.size === 0) {
       return;
     }
     const keys = chargedRounds.get(ledger) ?? new Set<string>();
@@ -182,6 +212,11 @@ export class RoundLedger {
   private key(round: number): string {
     return roundPath(this.dispatch.path, round);
   }
+}
+
+/** A cut round holding a function call or an answer has something to go on from. */
+function goesOn(item: Item): boolean {
+  return isFunctionCall(item) || isAssistantMessage(item);
 }
 
 /** @internal The ledger key of round `round` of the model loop at step path `path`. */

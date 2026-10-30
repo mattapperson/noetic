@@ -1,3 +1,7 @@
+## @noetic-tools/core-v5.19.1 (2026-10-30)
+
+* fix(core): resume a cut-off model round from the items it finished ([c6c46b6](https://github.com/mattapperson/noetic/commit/c6c46b6)), closes [#153](https://github.com/mattapperson/noetic/issues/153)
+
 ## @noetic-tools/core-v5.19.1-next.1 (2026-10-29)
 
 * ci: publish prereleases from next to the next dist-tag ([5c9f714](https://github.com/mattapperson/noetic/commit/5c9f714))

@@ -584,6 +584,48 @@ describe('step ledger retention config', () => {
     ]);
   });
 
+  it('counts a path once when a later record replaces its entry', async () => {
+    const storage = createInMemoryStorage();
+    const store = createStepLedgerStore({
+      storage,
+    });
+    const ledger = new StepLedger({
+      executionId: 'exec',
+      store,
+    });
+
+    await ledger.record(entryOfBytes('/p#0', 4));
+    await ledger.record(entryOfBytes('/p#0', 8));
+    await ledger.record(entryOfBytes('/q#0', 4));
+
+    expect(ledger.stats.recorded).toBe(2);
+    expect(await ledgerKeys(storage, 'exec')).toHaveLength(2);
+  });
+
+  it('drops the entry at one path and leaves the rest', async () => {
+    const storage = createInMemoryStorage();
+    const store = createStepLedgerStore({
+      storage,
+    });
+    const ledger = new StepLedger({
+      executionId: 'exec',
+      store,
+    });
+
+    await ledger.record(entryOfBytes('/p#0', 4));
+    await ledger.record(entryOfBytes('/q#0', 4));
+    await ledger.drop('/p#0');
+    // A path with no entry is a no-op.
+    await ledger.drop('/r#0');
+
+    expect(ledger.stats.pruned).toBe(1);
+    expect([
+      ...(await store.load('exec')).entries.keys(),
+    ]).toEqual([
+      '/q#0',
+    ]);
+  });
+
   it('gives concurrent records distinct keys', async () => {
     /* Fork legs record through the one shared ledger while in flight together. If the
      * sequence number were read after an await they would land on the same key and one

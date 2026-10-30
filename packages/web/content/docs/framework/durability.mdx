@@ -146,6 +146,16 @@ Replayed work keeps its usage figures but costs nothing now, so usage reports bo
 
 An agent step — one `callModel` with tools — runs many rounds inside one step. Each finished round is recorded too: the model's output, the tool results, and the round's usage. A tool loop cut off on round five resumes with rounds one to four replayed: none of their tools run again, and only round five onward goes to the model. Rounds replay in order and stop at the first one that was not recorded. A tool that was running when the host died runs again.
 
+A round also records while it streams: each output item the stream finishes is saved as it lands. A host killed mid-stream resumes from those items instead of asking the model for them again, and they keep their ids:
+
+- Finished function calls run, and the model is asked again with their results, just as if the round had finished.
+- A finished answer with no function calls ends the step. If the stream was cut between a message and the tool calls after it, that message becomes the answer.
+- With nothing usable, such as reasoning alone, the round is asked again.
+
+A round the loop rejects (an incomplete or failed response) does not keep its streamed items, and neither does the round that ends the loop once the step records, so a retry after a failed step asks the model again.
+
+To know which streamed items are safe, watch `{name}:model_round_recorded`. It fires each time a round's record lands, with `{ round, itemIds, done }`: a resume will not make any item in `itemIds` again. `done` is false while the round still streams. Don't use `model_call_completed` for this, since it fires before the round is recorded. A tool that was running when the host died, before its round recorded, still runs again.
+
 ### Replay Identity
 
 By default a step's ledger key is its **execution path** — its parent's path plus its id and a per-parent ordinal, like `/plan#0/review-loop#0/body-llm#2`. Replay identity is therefore positional: a resumed step gets the output recorded at the same position.
@@ -367,7 +377,7 @@ Two rules:
 
 A step whose side effect landed but whose ledger entry did not runs again on resume. The framework cannot make arbitrary `runCode` bodies idempotent — write bodies that are safe to re-execute where durability matters, or gate with an external idempotency key.
 
-A model stream is not resumed mid-response. A round cut off while the model was generating is asked again on resume; the rounds before it replay. The cut-off round's bill is not lost — see [Paid Calls](#paid-calls).
+A model stream is not resumed mid-item. A round cut off while the model was generating resumes from the last item its stream finished; an item cut off part way is made again. The cut-off round's bill is not lost — see [Paid Calls](#paid-calls).
 
 A `durable: false` step re-runs on resume, and so do its effects: its channel sends land again and its `ctx.state` writes apply again on top of the restored state.
 

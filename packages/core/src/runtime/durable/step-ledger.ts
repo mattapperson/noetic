@@ -342,7 +342,7 @@ export function createStepLedgerStore(opts: { storage: StorageAdapter }): StepLe
 
 /** @public What retention did to one execution's ledger. Observable for host logging. */
 export interface StepLedgerStats {
-  /** Entries written. */
+  /** Paths recorded. A record that replaces the entry at its path counts no more. */
   recorded: number;
   /** Entries not written because their output exceeded `maxEntryBytes`. */
   droppedOversize: number;
@@ -499,14 +499,22 @@ export class StepLedger {
     }
     const replaced = this.live.get(entry.path);
     this.live.set(entry.path, seq);
-    this.counts.recorded += 1;
-    if (replaced !== undefined) {
+    if (replaced === undefined) {
+      this.counts.recorded += 1;
+    } else {
       await this.deleteSeq(replaced);
     }
     if (!entry.path.startsWith(REPLAY_KEY_PREFIX)) {
       await this.prune(this.live.beneath(entry.path));
     }
     return true;
+  }
+
+  /** Drop the entry recorded at `path`, when there is one. */
+  async drop(path: string): Promise<void> {
+    await this.prune([
+      path,
+    ]);
   }
 
   /**

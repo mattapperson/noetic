@@ -406,6 +406,13 @@ Everything after the discarded point runs live too, model rounds included, becau
 Each ledger entry records the identity of every connection its step used, so the harness checks them before a resumed run replays anything:
 
 ```ts
+import type { AgentHarness, ContextData, Step } from '@noetic-tools/core';
+
+declare const harness: AgentHarness;
+declare const graph: Step<ContextData, string, string>;
+declare const executionId: string;
+declare const input: string;
+
 const ctx = await harness.restore(executionId, { rerun: ['app'] });
 if (ctx) await harness.run(graph, input, ctx);
 ```

@@ -53,6 +53,11 @@ export function replayOutput(
   input.push(...itemsToInput(roundItems.filter((item) => !isFunctionCall(item))));
 }
 
+/** Whether a round asked for any tool calls. */
+export function hasFunctionCalls(roundItems: ReadonlyArray<Item>): boolean {
+  return roundItems.some(isFunctionCall);
+}
+
 /** Run the round's function calls. Returns `false` when there were none to run. */
 export async function runToolRound(
   scope: ToolRoundScope,
@@ -64,7 +69,7 @@ export async function runToolRound(
     conversationInput: ReturnType<typeof itemsToInput>;
     round: number;
     spans: CallSpanCollector;
-    modelSpan: Span;
+    modelSpan: Span | null;
     steers: SteerInbox | undefined;
   },
 ): Promise<boolean> {
@@ -103,7 +108,7 @@ async function executeToolRound(
     round: number;
     emitIfAllowed: (eventType: string, data: Record<string, unknown>) => void;
     spans: CallSpanCollector;
-    modelSpan: Span;
+    modelSpan: Span | null;
     steers: SteerInbox | undefined;
   },
 ): Promise<void> {
