@@ -850,8 +850,11 @@ export interface FakeOpenRouterRound {
  * A stand-in for the OpenRouter Responses API, for tests that drive the harness's real
  * model client. `reply(input)` answers each round from the conversation it was sent,
  * as a model would; rounds whose 1-based number is in `dropAt` stream part of a
- * response and then end, as a lost connection does, and rounds in `hangAt` send their
- * headers and first event and then nothing, as a host killed mid-stream sees. Every
+ * response and then end, as a lost connection does, rounds in `cutAt` stream the given
+ * number of output items and then end before the response completes, rounds in
+ * `incompleteAt` end `incomplete` as a response cut at its token limit does, and
+ * rounds in `hangAt` send their headers and first event and then nothing, as a host
+ * killed mid-stream sees. Every
  * response carries the generation id `gen-<round>` in its `x-generation-id` header.
  *
  * A native decide call (`POST /api/alpha/decisions`, under `origin`) gets its headers,
@@ -862,6 +865,8 @@ export interface FakeOpenRouter {
   readonly origin: string;
   readonly rounds: FakeOpenRouterRound[];
   readonly dropAt: Set<number>;
+  readonly cutAt: Map<number, number>;
+  readonly incompleteAt: Set<number>;
   readonly hangAt: Set<number>;
   stop(): void;
 }
@@ -869,6 +874,8 @@ export interface FakeOpenRouter {
 export function startFakeOpenRouter(reply: (input: unknown[]) => unknown[]): FakeOpenRouter {
   const rounds: FakeOpenRouterRound[] = [];
   const dropAt = new Set<number>();
+  const cutAt = new Map<number, number>();
+  const incompleteAt = new Set<number>();
   const hangAt = new Set<number>();
   let decisions = 0;
   const server = Bun.serve({
@@ -906,7 +913,12 @@ export function startFakeOpenRouter(reply: (input: unknown[]) => unknown[]): Fak
         input: body.input,
       });
       const round = rounds.length;
-      const stream = fakeResponseStream(round, body.model, reply(body.input));
+      const stream = fakeResponseStream({
+        round,
+        model: body.model,
+        output: reply(body.input),
+        status: incompleteAt.has(round) ? 'incomplete' : 'completed',
+      });
       const headers = {
         'content-type': 'text/event-stream',
         'x-generation-id': `gen-${round}`,
@@ -924,14 +936,15 @@ export function startFakeOpenRouter(reply: (input: unknown[]) => unknown[]): Fak
           },
         );
       }
-      if (!dropAt.has(round)) {
+      if (!dropAt.has(round) && !cutAt.has(round)) {
         return new Response(stream, {
           headers,
         });
       }
+      const sent = dropAt.has(round) ? stream.slice(0, 40) : itemsOf(stream, cutAt.get(round));
       const cut = new ReadableStream({
         start(controller) {
-          controller.enqueue(new TextEncoder().encode(stream.slice(0, 40)));
+          controller.enqueue(new TextEncoder().encode(sent));
           setTimeout(() => controller.close(), 10);
         },
       });
@@ -945,19 +958,48 @@ export function startFakeOpenRouter(reply: (input: unknown[]) => unknown[]): Fak
     origin: `http://localhost:${server.port}`,
     rounds,
     dropAt,
+    cutAt,
+    incompleteAt,
     hangAt,
     stop: () => server.stop(true),
   };
 }
 
-function fakeResponseStream(round: number, model: string, output: unknown[]): string {
+/** The stream's events up to and including its `count`th finished output item. */
+function itemsOf(stream: string, count = 0): string {
+  const events = stream.split('\n\n');
+  const kept: string[] = [];
+  let done = 0;
+  for (const event of events) {
+    if (done >= count && !event.includes('"response.created"')) {
+      break;
+    }
+    kept.push(event);
+    if (event.includes('"response.output_item.done"')) {
+      done += 1;
+    }
+  }
+  return kept.map((event) => `${event}\n\n`).join('');
+}
+
+function fakeResponseStream({
+  round,
+  model,
+  output,
+  status,
+}: {
+  round: number;
+  model: string;
+  output: unknown[];
+  status: 'completed' | 'incomplete';
+}): string {
   const response = {
     id: `resp_${round}`,
     object: 'response',
     created_at: Math.floor(Date.now() / 1e3),
     completed_at: Math.floor(Date.now() / 1e3),
     model,
-    status: 'completed',
+    status,
     error: null,
     frequency_penalty: null,
     incomplete_details: null,
@@ -993,9 +1035,15 @@ function fakeResponseStream(round: number, model: string, output: unknown[]): st
         output: [],
       },
     },
+    ...output.map((item, index) => ({
+      type: 'response.output_item.done',
+      sequence_number: index + 1,
+      output_index: index,
+      item,
+    })),
     {
       type: 'response.completed',
-      sequence_number: 1,
+      sequence_number: output.length + 1,
       response,
     },
   ];

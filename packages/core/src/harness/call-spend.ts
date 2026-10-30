@@ -6,6 +6,15 @@ export interface Bill {
   cost: number;
 }
 
+/** The bill of a round the provider never reported on. */
+export const noBill: Bill = {
+  usage: {
+    inputTokens: 0,
+    outputTokens: 0,
+  },
+  cost: 0,
+};
+
 interface Round extends Bill {
   /** Replayed from the round ledger: paid for by an earlier attempt. */
   replayed: boolean;
@@ -37,13 +46,7 @@ export class CallSpend {
    * round ledger to record.
    */
   keep(): Bill {
-    const bill = this.held ?? {
-      usage: {
-        inputTokens: 0,
-        outputTokens: 0,
-      },
-      cost: 0,
-    };
+    const bill = this.held ?? noBill;
     if (this.held) {
       this.rounds.push({
         ...this.held,
@@ -95,13 +98,7 @@ export class CallSpend {
    */
   charge(): UsageCharge {
     const paid = this.rounds.filter((round) => !round.replayed);
-    const bill = addBills(this.held, ...paid) ?? {
-      usage: {
-        inputTokens: 0,
-        outputTokens: 0,
-      },
-      cost: 0,
-    };
+    const bill = addBills(this.held, ...paid) ?? noBill;
     return {
       ...bill.usage,
       cost: bill.cost,

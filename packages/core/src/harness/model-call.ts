@@ -43,8 +43,9 @@ import type { ApprovalOutcome } from '../runtime/tool-approval';
 import { markSpent } from '../util/spent';
 import { isErrorStatus } from '../util/status-code';
 import type { Bill } from './call-spend';
-import { CallSpend } from './call-spend';
+import { CallSpend, noBill } from './call-spend';
 import { exportSpans } from './deps/context';
+import type { RoundRecord } from './model-rounds';
 import { RoundLedger } from './model-rounds';
 import { buildItemSchemaRegistry, createToolResultItem } from './model-schema.js';
 import type { Dispatch, Spend } from './spend';
@@ -153,6 +154,16 @@ function noteStreamGeneration(dispatch: Dispatch | undefined, event: unknown): v
 /** The provider refused the call before generating anything, so nothing was billed. */
 function wasRefused(err: unknown, dispatch: Dispatch): boolean {
   return isErrorStatus(err) && dispatch.record.generationId === undefined;
+}
+
+function itemIds(items: ReadonlyArray<Item>): string[] {
+  return items.flatMap((item) =>
+    'id' in item && typeof item.id === 'string'
+      ? [
+          item.id,
+        ]
+      : [],
+  );
 }
 
 function hasItem(items: ReadonlyArray<Item>, id: string): boolean {
@@ -590,14 +601,17 @@ class CallSpanCollector {
     span.end();
   }
 
-  /** Open and immediately close a tool-call span under the given model span. */
+  /**
+   * Open and immediately close a tool-call span under the given model span, or under
+   * the call's parent when the round's model call ran in an earlier attempt.
+   */
   recordToolSpan(
-    parent: Span,
+    parent: Span | null,
     toolName: string,
     needsApproval: boolean,
     approval: ApprovalOutcome | undefined,
   ): void {
-    const span = this.harness.createSpan('tool.call', parent);
+    const span = this.harness.createSpan('tool.call', parent ?? this.parent);
     span.setAttribute(ToolAttr.NAME, toolName);
     span.setAttribute(ToolAttr.NEEDS_APPROVAL, needsApproval);
     if (approval !== undefined) {
@@ -749,16 +763,83 @@ export class AgentHarnessModelCaller {
       input: 0,
       items: 0,
     };
-    // Record a round the loop goes on from, so a resumed loop can replay it.
-    const recordRound = async (bill: Bill): Promise<void> => {
+    const markRound = (): void => {
+      marks = {
+        round,
+        log: roundLedger?.mark() ?? 0,
+        input: conversationInput.length,
+        items: allItems.length,
+      };
+    };
+    // The current round's checkpoint writes, in order. Its own record waits for
+    // them, so a late checkpoint never replaces it.
+    let checkpoints: Promise<void> = Promise.resolve();
+    const writeRound = async (record: RoundRecord): Promise<void> => {
       if (!roundLedger || request.signal?.aborted) {
         return;
       }
-      await roundLedger.record(round, marks.log, {
+      if (!(await roundLedger.record(round, marks.log, record))) {
+        return;
+      }
+      prepared.emitIfAllowed('model_round_recorded', {
+        round,
+        itemIds: itemIds(record.items),
+        done: !record.cut,
+      });
+    };
+    // A rejected round is asked again on the conversation it was asked on, or fails
+    // the call, so a resume must not go on from the items it streamed. The same goes
+    // for the round that ends the loop.
+    const dropCheckpoints = async (): Promise<void> => {
+      await checkpoints;
+      await roundLedger?.drop(round);
+    };
+    const rejectRound = async <
+      T extends {
+        kind: 'continue' | 'ok';
+      },
+    >(
+      check: () => T,
+    ): Promise<T> => {
+      let result: T;
+      try {
+        result = check();
+      } catch (error: unknown) {
+        await dropCheckpoints();
+        throw error;
+      }
+      if (result.kind === 'continue') {
+        await dropCheckpoints();
+      }
+      return result;
+    };
+    // Record a round the loop goes on from, so a resumed loop can replay it.
+    const recordRound = async (bill: Bill): Promise<void> => {
+      await checkpoints;
+      await writeRound({
         items: allItems.slice(marks.items),
         input: conversationInput.slice(marks.input),
         ...bill,
       });
+    };
+    // Record the output items a round has finished while it still streams, so a
+    // resume goes on from them rather than making them again. The input holds only
+    // what the round began with: the tool round adds each function call with its
+    // output, as it does for a round that finishes.
+    const checkpoint = (finished: Item[]): void => {
+      if (!roundLedger) {
+        return;
+      }
+      const record: RoundRecord = {
+        items: [
+          ...allItems.slice(marks.items),
+          ...finished,
+        ],
+        input: conversationInput.slice(marks.input),
+        ...noBill,
+        cut: true,
+      };
+      checkpoints = checkpoints.then(() => writeRound(record));
     };
     let stoppedForRecall = false;
     const steers = openSteerInbox({
@@ -773,17 +854,39 @@ export class AgentHarnessModelCaller {
     while (!request.signal?.aborted) {
       const replayed = roundLedger?.take(round, replaySchemas);
       if (replayed) {
+        markRound();
         allItems.push(...replayed.items);
         conversationInput.push(...frameworkCast<typeof conversationInput>(replayed.input));
         for (const item of replayed.appended) {
           request.ctx?.itemLog.append(item);
         }
-        if (!replayed.charged) {
+        // A cut round never reported usage, so it has no bill to count.
+        if (!replayed.charged && !replayed.cut) {
           spend.replay(replayed);
         }
         prepared.emitIfAllowed('model_round_replayed', {
           round,
         });
+        if (replayed.cut && !replayed.items.some(isFunctionCall)) {
+          // The stream was cut after the answer finished: it ends the loop.
+          break;
+        }
+        if (replayed.cut) {
+          // Go on from the function calls the stream finished: run them, then ask
+          // the model again with their results in the conversation.
+          await this.runToolRound({
+            roundItems: replayed.items,
+            request,
+            prepared,
+            allItems,
+            conversationInput,
+            round,
+            spans,
+            modelSpan: null,
+            steers,
+          });
+          await recordRound(spend.keep());
+        }
         round += 1;
         const replayLimit = this.handleToolRoundLimit({
           round,
@@ -797,12 +900,7 @@ export class AgentHarnessModelCaller {
         continue;
       }
       if (marks.round !== round) {
-        marks = {
-          round,
-          log: roundLedger?.mark() ?? 0,
-          input: conversationInput.length,
-          items: allItems.length,
-        };
+        markRound();
       }
       // A graceful stop starts no new round: wait here until it cancels the call.
       await drains?.hold(request.ctx);
@@ -922,6 +1020,10 @@ export class AgentHarnessModelCaller {
       // Output items the stream has finished, kept so a steer can stop the
       // round early without losing them.
       const finishedItems: unknown[] = [];
+      // Parsed for the round ledger; none once the stream has failed, since a call
+      // that has thrown must write nothing more.
+      const parsedItems: Item[] = [];
+      let streaming = true;
       let steered = false;
       const pipePromise = pipeStreamEventsToBroadcaster({
         stream: callResult.getFullResponsesStream(),
@@ -940,6 +1042,22 @@ export class AgentHarnessModelCaller {
         },
         onItemDone: async (item) => {
           finishedItems.push(item);
+          if (streaming && roundLedger) {
+            try {
+              parsedItems.push(
+                ...replaySchemas.parseMany(
+                  frameworkCast<Item[]>([
+                    item,
+                  ]),
+                ),
+              );
+              checkpoint(parsedItems);
+            } catch {
+              // The round fails on this item when it ends; nothing after it can be
+              // gone on from.
+              streaming = false;
+            }
+          }
           if (!steers?.hasQueued() || !(await steers.offer(SteerPoint.ItemDone))) {
             return;
           }
@@ -971,6 +1089,8 @@ export class AgentHarnessModelCaller {
         await dispatch?.settle();
         await awaitWithAbort(pipePromise, roundSignal);
       } catch (err: unknown) {
+        streaming = false;
+        await checkpoints;
         if (dispatch && wasRefused(err, dispatch)) {
           await dispatch.settle();
         }
@@ -1028,12 +1148,14 @@ export class AgentHarnessModelCaller {
         }
         continue;
       }
-      const recovery = this.handleModelRecovery({
-        sdkResponse,
-        round,
-        invalidRecoveryContinuations,
-        emitIfAllowed: prepared.emitIfAllowed,
-      });
+      const recovery = await rejectRound(() =>
+        this.handleModelRecovery({
+          sdkResponse,
+          round,
+          invalidRecoveryContinuations,
+          emitIfAllowed: prepared.emitIfAllowed,
+        }),
+      );
       if (recovery.kind === 'continue') {
         invalidRecoveryContinuations = recovery.invalidRecoveryContinuations;
         useEphemeralContinue = true;
@@ -1041,13 +1163,15 @@ export class AgentHarnessModelCaller {
       }
 
       const roundItems = this.parseRoundItems(request, extractOutputItems(sdkResponse));
-      const outputRecovery = this.handleEmptyOutputRecovery({
-        sdkResponse,
-        roundItems,
-        round,
-        invalidRecoveryContinuations,
-        emitIfAllowed: prepared.emitIfAllowed,
-      });
+      const outputRecovery = await rejectRound(() =>
+        this.handleEmptyOutputRecovery({
+          sdkResponse,
+          roundItems,
+          round,
+          invalidRecoveryContinuations,
+          emitIfAllowed: prepared.emitIfAllowed,
+        }),
+      );
       if (outputRecovery.kind === 'continue') {
         invalidRecoveryContinuations = outputRecovery.invalidRecoveryContinuations;
         useEphemeralContinue = true;
@@ -1076,6 +1200,9 @@ export class AgentHarnessModelCaller {
       // A steer staged while the final answer streamed gets its own round, so
       // the model answers it inside this call rather than in the next turn.
       if (!ranTools && !steers?.hasStaged()) {
+        // The step's own record covers the round that ends the loop. A cut record
+        // left behind would hand a retry this answer after the step rejected it.
+        await dropCheckpoints();
         break;
       }
       if (!ranTools) {
@@ -1162,7 +1289,7 @@ export class AgentHarnessModelCaller {
     conversationInput: ReturnType<typeof itemsToInput>;
     round: number;
     spans: CallSpanCollector;
-    modelSpan: Span;
+    modelSpan: Span | null;
     steers: SteerInbox | undefined;
   }): Promise<boolean> {
     const functionCalls = params.roundItems.filter(isFunctionCall);
@@ -1281,7 +1408,7 @@ export class AgentHarnessModelCaller {
     round: number;
     emitIfAllowed: (eventType: string, data: Record<string, unknown>) => void;
     spans: CallSpanCollector;
-    modelSpan: Span;
+    modelSpan: Span | null;
     steers: SteerInbox | undefined;
   }): Promise<void> {
     const {

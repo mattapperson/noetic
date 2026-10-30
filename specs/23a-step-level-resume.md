@@ -131,9 +131,21 @@ One `callModel` step can run many rounds — the model asks for tools, the harne
 
 A resumed loop replays rounds in order and stops at the first one it does not find; every round after that runs live, because a recorded round belongs to the conversation the earlier recorded rounds built. A replayed round runs none of its tools and adds its recorded usage to the step's response — it was paid for once. When the step finishes and records, its rounds are pruned with the rest of its subtree. A `durable: false` step's rounds are not recorded.
 
+A round records while it streams, too. Each time the stream finishes an output item (`response.output_item.done`), the loop records the round as `cut` at the same key: the items the round has so far, the conversation input the round began with, and no usage, since the provider reports none until the response ends. The round's own record replaces it. A cut record is dropped when the loop rejects the round, whether it asks again or gives up, and when the round ends the loop, which the step's own record covers; otherwise a retry would get back an answer the step went on to reject. Once a stream fails, the call writes no more cut records.
+
+A resume that finds a cut round goes on from its items:
+
+- With function calls among them, it runs those calls, records the round, and asks the model again. The tool round adds each call with its output to the conversation, as it does for a round that finished, so the model is asked what an uninterrupted run would ask.
+- With an assistant message and no function calls, the message is the answer and the loop ends. A stream cut between a message and the function calls after it ends the loop on that message.
+- With neither, such as a lone reasoning item, there is nothing to go on from: replay stops and the round is asked again.
+
+The items a resume goes on from are not made again, and they keep their ids. A tool that ran before the host died, but whose round had not recorded, runs again (§ The side-effect boundary). When a round records, the record of the round after it is dropped: it can only be left from an earlier attempt of the same step, such as a steering retry, and replay stops at the first missing round.
+
+Each record that lands emits `{name}:model_round_recorded` with `{ round, itemIds, done }` (`08-runtime` § Framework Events): `itemIds` are the ids of the items the record holds, and `done` is false for a cut round's record. A resume will not make an item listed in a landed record again, unless that record is later dropped as above. `model_call_completed` and `model_call_steered` fire before the round records, so they are not that signal.
+
 A round the loop rejects and asks again (`02-step-variants` § Limits and recovery) is not recorded on its own, yet the provider billed it. Its usage and cost ride in the record of the next round the loop goes on from, so a resume that replays that record still counts them. A step that throws charges its context with every round it paid for, recorded or not, so a failed run reports its whole bill. A retry in place replays the recorded rounds on that same context, so the harness remembers, in memory, which recorded rounds a failure charged, and their replay counts nothing. A new harness resuming from storage starts from the restored context, which never saw that charge, so its replay counts them as usual.
 
-An abort that lands mid-call is not a round: the step surfaces cancellation, and the round is not recorded.
+An abort that lands mid-call is not a round: the step surfaces cancellation, and the round is not recorded. Items it finished before the abort keep their cut record, so a later resume goes on from them.
 
 ## Storage is the only record
 
@@ -221,6 +233,7 @@ The ledger lives under its own keys, outside `CheckpointSnapshot`. The baseline 
 - Usage on replay: `cost` keeps the work's cost; `billedCost` counts only what was paid now.
 - Two harnesses taking turns on one thread both read its history from storage; a seeded history is stored.
 - Model loop: a tool loop cut off mid-round resumes on a new harness with every finished round replayed, every tool run exactly once, and replayed usage counted; a `durable: false` step records no rounds.
+- Model loop: a round cut mid-stream resumes from the function calls it finished without asking that round again, and sends the model the input an uninterrupted run would; a cut answer ends the loop; a cut with nothing to go on from is asked again; a rejected round, retried or given up on, leaves no cut record; a retry after the step fails past the loop asks the final round again; each round the loop goes on from emits `model_round_recorded` once its record lands.
 - Model loop: a round rejected and asked again counts in the response; its bill survives a resume in the next round's record; a failed step charges every round it paid for, a round whose record did not land included, and a retry in place counts each recorded round once.
 - Sessions: a new harness continues a thread with its history; a re-delivered cut-off turn resumes on its execution; a different message after a cut-off turn starts fresh.
 - Static inParallel: 5 paths, crash with 3 complete; resume replays 3, dispatches 2.
@@ -234,6 +247,6 @@ The ledger lives under its own keys, outside `CheckpointSnapshot`. The baseline 
 
 ## Future Considerations
 
-- **Mid-stream resume.** A model stream cut off mid-response re-issues that round. Providers that expose resumable streams would let a round resume where its stream stopped.
+- **Mid-item resume.** A resume goes on from the last item the stream finished; an item cut off part way is made again. Providers that expose resumable streams would let a round resume where its stream stopped.
 - **Pre-dispatch tool records.** Recording a tool call before it runs would turn a tool interrupted mid-round into a loud "unknown outcome" instead of a silent re-run.
 - **Re-delivered finished turns.** Remembering recently finished message ids per thread would let a session answer a re-delivery of a finished turn with its recorded response instead of running it again.

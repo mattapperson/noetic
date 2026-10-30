@@ -590,6 +590,8 @@ interface FrameworkStreamEvent {
 | `{name}:model_call_started` | Emitted before each provider call in the tool-round loop. Data: `{ round, messageCount, toolCount }` |
 | `{name}:model_call_first_event` | Emitted when the first SDK event for the call arrives. Useful for measuring time-to-first-token. Only emitted when a broadcaster is attached to the context. Data: `{ round }` |
 | `{name}:model_call_completed` | Emitted after the provider's response is fully received. Data: `{ round, itemCount }` |
+| `{name}:model_round_recorded` | Emitted when a round's record lands in the step ledger: once per finished output item while the round streams (`done: false`), then once for a round the loop goes on from (`done: true`). A resume will not make an item listed here again unless the record is later dropped (`23a-step-level-resume` § Model-loop rounds). Data: `{ round, itemIds, done }` |
+| `{name}:model_round_replayed` | Emitted when a resumed loop replays a recorded round instead of asking the model. Data: `{ round }` |
 | `{name}:model_call_stalled` | Emitted when the stream-idle watchdog fires (fixed 120s idle window). The turn then aborts. Data: `{ round, idleTimeoutMs }` |
 | `{name}:stream_pipe_error` | Emitted when SDK stream piping fails. Data: `{ error }` |
 | `{name}:spend_pending` | Emitted when a paid call is left with no settled bill, or `restore()` finds one (`23-durable-execution` § Paid dispatches). Data: `{ id, kind, model, generationId?, ceiling?, unbounded? }`, or `{ id, unreadable: true, unbounded: true }` for a record that no longer reads |

@@ -221,6 +221,8 @@ Framework events emitted during execution:
 | `{name}:model_call_started` | Before each provider call. Data: `{ round, messageCount, toolCount }`. |
 | `{name}:model_call_first_event` | First SDK event received (time-to-first-token marker). Only emitted when a broadcaster is attached to the context. Data: `{ round }`. |
 | `{name}:model_call_completed` | Provider response fully received. Data: `{ round, itemCount }`. |
+| `{name}:model_round_recorded` | A round's record landed in the step ledger: once per finished output item while it streams (`done: false`), then for each round the loop goes on from (`done: true`). A resume will not make the items in `itemIds` again. Data: `{ round, itemIds, done }`. See [Durability](/docs/framework/durability#model-rounds). |
+| `{name}:model_round_replayed` | A resumed loop replayed a recorded round instead of asking the model. Data: `{ round }`. |
 | `{name}:model_call_stalled` | Stream-idle watchdog fired; the round is about to abort. Data: `{ round, idleTimeoutMs }`. |
 | `{name}:spend_pending` | A paid call was left with no settled bill, or `restore()` found one. Data: `{ id, kind, model, generationId?, ceiling?, unbounded? }`, or `{ id, unreadable: true, unbounded: true }` for a record that no longer reads. See [Paid Calls](/docs/framework/durability#paid-calls). |
 | `{name}:spend_settled` | A pending paid call was settled or written off. Data: `{ id, cost, writtenOff? }`. |
