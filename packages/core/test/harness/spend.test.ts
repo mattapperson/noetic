@@ -60,8 +60,10 @@ function useFakeSdk(
   const lookups: string[] = [];
   const decisions: unknown[] = [];
   const host = frameworkCast<{
-    sdkClient: unknown;
-  }>(harness);
+    llm: {
+      sdkClient: unknown;
+    };
+  }>(harness).llm;
   const real = frameworkCast<{
     alpha: unknown;
   }>(host.sdkClient);
@@ -591,8 +593,10 @@ describe('cancel mid-stream', () => {
     const harness = harnessOver(storage);
     let responded = false;
     frameworkCast<{
-      client: unknown;
-    }>(harness).client = {
+      llm: {
+        client: unknown;
+      };
+    }>(harness).llm.client = {
       callModel: () => ({
         // The response is in, but the event stream never finishes.
         getFullResponsesStream: () => ({
@@ -1083,8 +1087,10 @@ describe('a provider that refuses the call', () => {
     const storage = createInMemoryStorage();
     const harness = harnessOver(storage);
     frameworkCast<{
-      client: unknown;
-    }>(harness).client = {
+      llm: {
+        client: unknown;
+      };
+    }>(harness).llm.client = {
       callModel: () => ({
         async *getFullResponsesStream() {},
         getResponse: () =>
@@ -1109,10 +1115,12 @@ describe('a provider that refuses the call', () => {
       decisionModel: true,
     });
     frameworkCast<{
-      sdkClient: {
-        alpha: unknown;
+      llm: {
+        sdkClient: {
+          alpha: unknown;
+        };
       };
-    }>(harness).sdkClient.alpha = {
+    }>(harness).llm.sdkClient.alpha = {
       decisions: {
         create: () =>
           Promise.reject(
@@ -1133,8 +1141,10 @@ describe('a provider that refuses the call', () => {
     const harness = harnessOver(storage);
     const headers: unknown[] = [];
     frameworkCast<{
-      client: unknown;
-    }>(harness).client = {
+      llm: {
+        client: unknown;
+      };
+    }>(harness).llm.client = {
       callModel: (
         _request: unknown,
         options: {

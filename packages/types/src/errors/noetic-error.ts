@@ -74,6 +74,20 @@ function formatMessage(error: NoeticError): string {
       return error.itemType
         ? `Item type '${error.itemType}' did not match any registered item extension schema.`
         : `Item did not match any registered ${error.category} extension schema.`;
+    case 'connection_unavailable':
+      return `Connection '${error.connection}' is unavailable: ${error.reason}`;
+    case 'connection_failed':
+      return `Connection '${error.connection}' failed '${error.op}' (${error.error.code}): ${error.error.message}`;
+    case 'connection_ref_invalid':
+      return `Connection '${error.connection}' refused a ref: ${error.reason}`;
+    case 'connection_secret_refused':
+      return `Connection '${error.connection}' refused a secret in '${error.op}': secrets fill only sensitive fields, never from the model`;
+    case 'connection_input_required':
+      return `Connection '${error.connection}' needs input nobody could give: ${error.request.message}`;
+    case 'connection_resume_refused':
+      return `Connection '${error.connection}' cannot be resumed: ${error.reason}`;
+    case 'verify_act_failed':
+      return `Verify '${error.stepId}' act failed: ${error.cause.message}`;
     default: {
       const _exhaustive: never = error;
       void _exhaustive;

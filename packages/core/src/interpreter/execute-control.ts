@@ -19,6 +19,7 @@ import type {
   StepInParallelSettle,
   StepLoop,
   StepSchedule,
+  StepSequence,
   Until,
   UntilRun,
   Verdict,
@@ -39,6 +40,7 @@ import type { ItemSchemaRegistry, LayerStateStore } from './action-deps';
 import { contextToExecCtx, returnLayers, spawnLayers } from './action-deps';
 import { closeUnstartedSpan, openChildSpan, traceChild } from './child-span';
 import { cloneWithGuard } from './clone-guard';
+import { releasePathLeases } from './connection-steps';
 import { forgetAnswers } from './execute-decide';
 import { getContextChannelStore, isContextImpl, isMutableContext } from './typeguards';
 
@@ -381,6 +383,8 @@ export async function executeInParallel<TContext, I, O>(
       child.detachFromParent();
     }
     await traced.closeUnstarted();
+    // Each path's `fresh: 'path'` connections go back to their pools as the path's scope ends.
+    await releasePathLeases(childContexts);
   }
 }
 
@@ -1032,6 +1036,27 @@ function throwCancelled(reason: string | undefined): never {
     kind: 'cancelled',
     reason: reason ?? 'context aborted',
   });
+}
+
+/**
+ * Runs a `sequence` step: each child through the interpreter, in order, each
+ * output the next child's input. The last child's output is the step's output.
+ */
+export async function executeSequence<TContext, I, O>(
+  step: StepSequence<TContext, I, O>,
+  input: I,
+  ctx: Context<TContext>,
+  executeStep: ExecuteStepFn,
+): Promise<O> {
+  let current: unknown = input;
+  for (const child of step.steps) {
+    current = await executeStep(
+      frameworkCast<Step<TContext, unknown, unknown>>(child),
+      current,
+      ctx,
+    );
+  }
+  return frameworkCast<O>(current);
 }
 
 /**

@@ -513,8 +513,10 @@ describe('AgentHarness session accessors', () => {
     });
     const fakeClient = new DecoratingToolClient('noop', '{}');
     frameworkCast<{
-      client: DecoratingToolClient;
-    }>(harness).client = fakeClient;
+      llm: {
+        client: DecoratingToolClient;
+      };
+    }>(harness).llm.client = fakeClient;
 
     const collected: StreamingItem[] = [];
     async function pumpItems(): Promise<void> {
@@ -553,8 +555,10 @@ describe('AgentHarness session accessors', () => {
       params: {},
     });
     frameworkCast<{
-      client: ToolLimitRecoveryClient;
-    }>(harness).client = fakeClient;
+      llm: {
+        client: ToolLimitRecoveryClient;
+      };
+    }>(harness).llm.client = fakeClient;
     const ctx = harness.createContext();
 
     const response = await harness.callModel({
@@ -611,8 +615,10 @@ describe('AgentHarness session accessors', () => {
       params: {},
     });
     frameworkCast<{
-      client: InvalidStateRecoveryClient;
-    }>(harness).client = fakeClient;
+      llm: {
+        client: InvalidStateRecoveryClient;
+      };
+    }>(harness).llm.client = fakeClient;
     const ctx = harness.createContext();
 
     const response = await harness.callModel({
@@ -656,8 +662,10 @@ describe('AgentHarness session accessors', () => {
       params: {},
     });
     frameworkCast<{
-      client: InvalidStateRecoveryClient;
-    }>(harness).client = fakeClient;
+      llm: {
+        client: InvalidStateRecoveryClient;
+      };
+    }>(harness).llm.client = fakeClient;
 
     const response = await harness.callModel({
       model: 'test/model',
@@ -1191,8 +1199,10 @@ describe('AgentHarness — item schema extensions', () => {
     });
     const fakeClient = new DecoratingToolClient();
     frameworkCast<{
-      client: DecoratingToolClient;
-    }>(harness).client = fakeClient;
+      llm: {
+        client: DecoratingToolClient;
+      };
+    }>(harness).llm.client = fakeClient;
     const ctx = harness.createContext();
 
     const response = await harness.callModel({
@@ -1305,8 +1315,10 @@ describe('AgentHarness — item schema extensions', () => {
     });
     const fakeClient = new DecoratingToolClient();
     frameworkCast<{
-      client: DecoratingToolClient;
-    }>(harness).client = fakeClient;
+      llm: {
+        client: DecoratingToolClient;
+      };
+    }>(harness).llm.client = fakeClient;
     const ctx = harness.createContext();
 
     let caught: unknown;
@@ -1383,8 +1395,10 @@ describe('AgentHarness — item schema extensions', () => {
     // Model calls ONLY the plain tool; the schema-bearing sibling is merely registered.
     const fakeClient = new DecoratingToolClient('ping', '{}');
     frameworkCast<{
-      client: DecoratingToolClient;
-    }>(harness).client = fakeClient;
+      llm: {
+        client: DecoratingToolClient;
+      };
+    }>(harness).llm.client = fakeClient;
     const ctx = harness.createContext();
 
     const response = await harness.callModel({
@@ -1447,8 +1461,10 @@ describe('AgentHarness — item schema extensions', () => {
     });
     const fakeClient = new DecoratingToolClient();
     frameworkCast<{
-      client: DecoratingToolClient;
-    }>(harness).client = fakeClient;
+      llm: {
+        client: DecoratingToolClient;
+      };
+    }>(harness).llm.client = fakeClient;
     const ctx = harness.createContext();
 
     const response = await harness.callModel({

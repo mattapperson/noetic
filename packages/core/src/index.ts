@@ -51,15 +51,33 @@ export type { SpawnOpts } from './builders/spawn-builder';
 /** @public */
 export { spawn } from './builders/spawn-builder';
 /** @public */
-export type { CallModelOpts, InvokeToolOpts, RunCodeOpts } from './builders/step-builders';
+export type {
+  CallInput,
+  CallModelOpts,
+  CallOpName,
+  CallOpts,
+  CallOutput,
+  InvokeToolOpts,
+  RunCodeOpts,
+  WaitOpts,
+} from './builders/step-builders';
 /** @public */
 export { callModel, invokeTool, runCode, step } from './builders/step-builders';
 /** @public */
 export { tool, toolWithGenerator } from './builders/tool-builder';
 /** @public */
+export type {
+  VerifyConnectionRef,
+  VerifyEachOutput,
+  VerifyMatcherLike,
+  VerifyOpts,
+} from './builders/verify-builder';
+/** @public */
+export { verify } from './builders/verify-builder';
+/** @public */
 export type { HydrationContext } from './builders/workflow-hydrator';
 /** @public */
-export { hydrateNode, hydrateWorkflow } from './builders/workflow-hydrator';
+export { hydrateNode, hydrateStepList, hydrateWorkflow } from './builders/workflow-hydrator';
 /** @public */
 export type {
   TypedWorkflowStep,
@@ -220,7 +238,7 @@ export type { DynamicWorkflowOpts, ParseAndRunWorkflowOpts } from './builders/dy
 /** @public */
 export { dynamicWorkflow, parseAndRunWorkflow } from './builders/dynamic-workflow';
 /** @public */
-export type { ExpressionLimits } from './expression/jsonata';
+export type { ExpressionBindings, ExpressionLimits } from './expression/jsonata';
 /** @public */
 export { DEFAULT_EXPRESSION_LIMITS } from './expression/jsonata';
 
@@ -229,12 +247,12 @@ export { DEFAULT_EXPRESSION_LIMITS } from './expression/jsonata';
 //#region Runtime
 
 /** @public */
+export { AgentHarness } from './harness/agent-harness';
+/** @public */
 export type {
   AgentEnvironmentConfig,
   StorageEnvironmentConfig,
-} from './harness/agent-harness';
-/** @public */
-export { AgentHarness } from './harness/agent-harness';
+} from './harness/harness-options';
 /** @public */
 export type {
   AfterFirstTurnContext,
@@ -618,6 +636,7 @@ export type {
   EmitHookResult,
   ExecuteStepFn,
   FromJsonSchema,
+  HomogeneousSteps,
   InferShape,
   ItemShape,
   JsonSchema,
@@ -628,25 +647,48 @@ export type {
   Snapshot,
   Step,
   StepAcpAgent,
+  StepArray,
+  StepArrayInput,
+  StepArrayOutput,
+  StepCall,
+  StepCallArgs,
   StepCallModel,
+  StepChain,
+  StepChainMismatch,
   StepConditional,
+  StepConnectionTarget,
   StepEmitItems,
   StepEmitItemsConfig,
   StepEmitItemsFn,
   StepEmitItemsOption,
   StepEmitItemsResult,
+  StepGiving,
   StepInParallel,
   StepInParallelAll,
   StepInParallelRace,
   StepInParallelSettle,
   StepInvokeTool,
+  StepLike,
   StepLoop,
   StepReplay,
   StepRunCode,
+  StepSequence,
   StepSpawn,
+  Steps,
+  StepsInput,
+  StepsOutput,
+  StepTaking,
+  StepTypes,
+  StepVerify,
+  StepVerifyAct,
+  StepVerifySubject,
+  StepWait,
+  StepWaitFilter,
+  StepWaitOutput,
   StepWithContext,
   Until,
   UntilRun,
+  ValidStepChain,
   Verdict,
 } from '@noetic-tools/types';
 
@@ -809,6 +851,117 @@ export { createLiveHandles } from './adapters/live-handles';
 
 /** @public */
 export type { ToolContext, ToolExecutionContext } from '@noetic-tools/types';
+
+//#endregion
+
+//#region Connections
+
+/** @public */
+export type {
+  ArtifactLink,
+  ArtifactMeta,
+  ArtifactRecord,
+  ArtifactRetention,
+  ArtifactStore,
+  BlobRef,
+  BlobRefBody,
+  BlobReference,
+  CallOptions,
+  CallOutcome,
+  CallResult,
+  Connection,
+  ConnectionAllowlist,
+  ConnectionAllowlistEntry,
+  ConnectionConfig,
+  ConnectionEntry,
+  ConnectionEvent,
+  ConnectionEventInfo,
+  ConnectionEventInit,
+  ConnectionExpose,
+  ConnectionHandle,
+  ConnectionHandleOptions,
+  ConnectionIdentity,
+  ConnectionLease,
+  ConnectionLook,
+  ConnectionManifest,
+  ConnectionMissing,
+  ConnectionOperationInfo,
+  ConnectionPolicy,
+  ConnectionPoolConfig,
+  ConnectionProvider,
+  ConnectionRequirement,
+  ConnectionResourceInfo,
+  ConnectionSource,
+  ConnectionState,
+  ConnectionStatus,
+  ConnectionsConfig,
+  ConnectionTaskStatus,
+  ConnectionTasks,
+  ConnectionTrigger,
+  ConnectOptions,
+  CronOptions,
+  CronTick,
+  Determinism,
+  EventStream,
+  EventStreamMessage,
+  FreshScope,
+  ListenRequest,
+  Locator,
+  Receipt,
+  Ref,
+  RefBody,
+  Secret,
+  SecretResolver,
+  SourceDefinition,
+  SourceEmitEvent,
+  Target,
+} from '@noetic-tools/types';
+/** @public */
+/** @public */
+export {
+  ARTIFACT_URI_PREFIX,
+  artifactDigest,
+  artifactUri,
+  ConnectionUnsatisfiedError,
+  DEFAULT_ARTIFACT_MAX_BYTES_PER_RUN,
+  DEFAULT_ARTIFACT_MAX_COUNT_PER_RUN,
+  isBlobRef,
+  isConnectionUnsatisfiedError,
+  isRef,
+  isSecret,
+  refId,
+  secret,
+} from '@noetic-tools/types';
+/** @public */
+export { connection, isConnectionHandle } from './connections/handle';
+/** @public */
+export type {
+  InMemoryCallContext,
+  InMemoryCallRecord,
+  InMemoryConnection,
+  InMemoryConnectionOptions,
+  InMemoryConnectionProvider,
+  InMemoryEventType,
+  InMemoryOperation,
+  InMemoryResource,
+  InMemoryTaskStep,
+} from './connections/in-memory-connection';
+/** @public */
+export {
+  createInMemoryConnection,
+  InMemoryRefusal,
+  inMemoryRefusal,
+} from './connections/in-memory-connection';
+/** @public */
+export type { ConnectionToolsOptions } from './connections/model-tools';
+/** @public */
+export { connectionTools } from './connections/model-tools';
+/** @public */
+export { cron, defineSource } from './connections/sources';
+/** @public */
+export type { InMemoryArtifactStoreOptions } from './runtime/in-memory-artifact-store';
+/** @public */
+export { createInMemoryArtifactStore } from './runtime/in-memory-artifact-store';
 
 //#endregion
 

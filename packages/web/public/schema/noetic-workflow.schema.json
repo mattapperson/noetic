@@ -1,62 +1,117 @@
 {
   "$id": "https://noetic.tools/schema/noetic-workflow.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
-  "properties": {
-    "version": {
-      "type": "number",
-      "const": 1
-    },
-    "customItems": {
+  "$ref": "#/$defs/WorkflowDocument",
+  "$defs": {
+    "WorkflowDocument": {
       "type": "object",
-      "propertyNames": {
-        "type": "string",
-        "minLength": 1
-      },
-      "additionalProperties": {
-        "type": "object",
-        "properties": {
-          "type": {
+      "properties": {
+        "version": {
+          "type": "number",
+          "const": 1
+        },
+        "customItems": {
+          "type": "object",
+          "propertyNames": {
             "type": "string",
-            "pattern": "^[^:]+:.+$"
+            "minLength": 1
           },
-          "description": {
-            "type": "string"
-          },
-          "event": {
+          "additionalProperties": {
             "type": "object",
-            "propertyNames": {
-              "type": "string"
+            "properties": {
+              "type": {
+                "type": "string",
+                "pattern": "^[^:]+:.+$"
+              },
+              "description": {
+                "type": "string"
+              },
+              "event": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              },
+              "output": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              }
             },
-            "additionalProperties": {}
-          },
-          "output": {
-            "type": "object",
-            "propertyNames": {
-              "type": "string"
-            },
-            "additionalProperties": {}
+            "required": [
+              "type",
+              "output"
+            ],
+            "additionalProperties": false
           }
         },
-        "required": [
-          "type",
-          "output"
-        ],
-        "additionalProperties": false
-      }
+        "connections": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "profile": {
+                "type": "string"
+              },
+              "extensions": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9-]+(\\.[a-z0-9-]+){2,}$"
+                },
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "events": {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "from": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
+              },
+              "fresh": {
+                "type": "string",
+                "enum": [
+                  "run",
+                  "path"
+                ]
+              },
+              "setup": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "root": {
+          "$ref": "#/$defs/WorkflowNode"
+        }
+      },
+      "required": [
+        "version",
+        "root"
+      ],
+      "additionalProperties": false,
+      "title": "WorkflowDocument",
+      "description": "A portable, JSON-safe representation of a Noetic step tree."
     },
-    "root": {
-      "$ref": "#/$defs/WorkflowNode"
-    }
-  },
-  "required": [
-    "version",
-    "root"
-  ],
-  "additionalProperties": false,
-  "title": "WorkflowDocument",
-  "description": "A portable, JSON-safe representation of a Noetic step tree.",
-  "$defs": {
     "WorkflowNode": {
       "oneOf": [
         {
@@ -1571,8 +1626,20 @@
               "$ref": "#/$defs/WorkflowNode"
             },
             "over": {
-              "type": "string",
-              "minLength": 1
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              ]
             },
             "merge": {
               "type": "string",
@@ -2077,7 +2144,37 @@
               "minItems": 1,
               "type": "array",
               "items": {
-                "$ref": "#/$defs/WorkflowNode"
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/WorkflowNode"
+                  },
+                  {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+)+$"
+                    },
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "$expr": {
+                              "$ref": "#/$defs/Expression"
+                            }
+                          },
+                          "required": [
+                            "$expr"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "$ref": "#/$defs/WorkflowValueObject"
+                        }
+                      ]
+                    }
+                  }
+                ]
               }
             }
           },
@@ -2312,7 +2409,7 @@
               }
             },
             "document": {
-              "$ref": "#"
+              "$ref": "#/$defs/WorkflowDocument"
             },
             "ref": {
               "type": "string",
@@ -2700,6 +2797,838 @@
             "id",
             "agent",
             "prompt"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "call"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "durable": {
+              "type": "boolean"
+            },
+            "replayKey": {
+              "anyOf": [
+                {
+                  "type": "boolean",
+                  "const": true
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "from": {
+                      "minItems": 1,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  },
+                  "required": [
+                    "from"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "emitItems": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "item": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "onStart": {
+                      "$ref": "#/$defs/Expression"
+                    },
+                    "onDone": {
+                      "$ref": "#/$defs/Expression"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "customItems": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "minLength": 1
+              },
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "pattern": "^[^:]+:.+$"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "event": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  },
+                  "output": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "type",
+                  "output"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "connection": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "$expr": {
+                      "$ref": "#/$defs/Expression"
+                    }
+                  },
+                  "required": [
+                    "$expr"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "op": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+)+$"
+            },
+            "args": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "$expr": {
+                      "$ref": "#/$defs/Expression"
+                    }
+                  },
+                  "required": [
+                    "$expr"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "$ref": "#/$defs/WorkflowValueObject"
+                }
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "id",
+            "op"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "wait"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "durable": {
+              "type": "boolean"
+            },
+            "replayKey": {
+              "anyOf": [
+                {
+                  "type": "boolean",
+                  "const": true
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "from": {
+                      "minItems": 1,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  },
+                  "required": [
+                    "from"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "emitItems": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "item": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "onStart": {
+                      "$ref": "#/$defs/Expression"
+                    },
+                    "onDone": {
+                      "$ref": "#/$defs/Expression"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "customItems": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "minLength": 1
+              },
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "pattern": "^[^:]+:.+$"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "event": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  },
+                  "output": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "type",
+                  "output"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "connection": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "$expr": {
+                      "$ref": "#/$defs/Expression"
+                    }
+                  },
+                  "required": [
+                    "$expr"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "event": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.-]+$"
+            },
+            "filter": {
+              "$ref": "#/$defs/Expression"
+            },
+            "around": {
+              "anyOf": [
+                {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/WorkflowNode"
+                    },
+                    {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+)+$"
+                      },
+                      "additionalProperties": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "$expr": {
+                                "$ref": "#/$defs/Expression"
+                              }
+                            },
+                            "required": [
+                              "$expr"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "$ref": "#/$defs/WorkflowValueObject"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                },
+                {
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/WorkflowNode"
+                      },
+                      {
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+)+$"
+                        },
+                        "additionalProperties": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "$expr": {
+                                  "$ref": "#/$defs/Expression"
+                                }
+                              },
+                              "required": [
+                                "$expr"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "$ref": "#/$defs/WorkflowValueObject"
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "timeoutMs": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          },
+          "required": [
+            "kind",
+            "id",
+            "event",
+            "timeoutMs"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "verify"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "durable": {
+              "type": "boolean"
+            },
+            "replayKey": {
+              "anyOf": [
+                {
+                  "type": "boolean",
+                  "const": true
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "from": {
+                      "minItems": 1,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  },
+                  "required": [
+                    "from"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "emitItems": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "item": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "onStart": {
+                      "$ref": "#/$defs/Expression"
+                    },
+                    "onDone": {
+                      "$ref": "#/$defs/Expression"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "customItems": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "minLength": 1
+              },
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "pattern": "^[^:]+:.+$"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "event": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  },
+                  "output": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "type",
+                  "output"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "subject": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "$expr": {
+                      "$ref": "#/$defs/Expression"
+                    }
+                  },
+                  "required": [
+                    "$expr"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "expect": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "count": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "atLeast": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "atMost": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "equals": {
+                    "type": [
+                      "number",
+                      "string",
+                      "boolean"
+                    ]
+                  },
+                  "tolerance": {
+                    "type": "number",
+                    "minimum": 0
+                  }
+                },
+                "additionalProperties": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "never": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "count": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "atLeast": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "atMost": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "equals": {
+                    "type": [
+                      "number",
+                      "string",
+                      "boolean"
+                    ]
+                  },
+                  "tolerance": {
+                    "type": "number",
+                    "minimum": 0
+                  }
+                },
+                "additionalProperties": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "claims": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "intent": {
+                    "type": "string"
+                  },
+                  "statement": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "declaredAt": {
+                    "type": "string",
+                    "enum": [
+                      "before-action",
+                      "after-action"
+                    ]
+                  },
+                  "assertions": {
+                    "default": [],
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "predicate": {},
+                        "reads": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "channels": {
+                          "minItems": 1,
+                          "type": "array",
+                          "items": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "ui",
+                                  "net",
+                                  "state",
+                                  "signal",
+                                  "log",
+                                  "route",
+                                  "storage",
+                                  "time",
+                                  "visual"
+                                ]
+                              },
+                              {
+                                "type": "string",
+                                "pattern": "^x-[a-z0-9-]+$"
+                              }
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "reads",
+                        "channels"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "id",
+                  "statement",
+                  "declaredAt",
+                  "assertions"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "constraints": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "statement": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "predicate": {},
+                  "channels": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "ui",
+                            "net",
+                            "state",
+                            "signal",
+                            "log",
+                            "route",
+                            "storage",
+                            "time",
+                            "visual"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "pattern": "^x-[a-z0-9-]+$"
+                        }
+                      ]
+                    }
+                  },
+                  "severity": {
+                    "default": "blocking",
+                    "type": "string",
+                    "enum": [
+                      "blocking",
+                      "advisory"
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "statement",
+                  "channels",
+                  "severity"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "act": {
+              "anyOf": [
+                {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/WorkflowNode"
+                    },
+                    {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+)+$"
+                      },
+                      "additionalProperties": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "$expr": {
+                                "$ref": "#/$defs/Expression"
+                              }
+                            },
+                            "required": [
+                              "$expr"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "$ref": "#/$defs/WorkflowValueObject"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                },
+                {
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/WorkflowNode"
+                      },
+                      {
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+)+$"
+                        },
+                        "additionalProperties": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "$expr": {
+                                  "$ref": "#/$defs/Expression"
+                                }
+                              },
+                              "required": [
+                                "$expr"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "$ref": "#/$defs/WorkflowValueObject"
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "witnesses": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "close": {
+              "type": "object",
+              "properties": {
+                "until": {
+                  "type": "string",
+                  "enum": [
+                    "quiet",
+                    "event",
+                    "done",
+                    "exit"
+                  ]
+                },
+                "event": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "quietMs": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "timeoutMs": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                }
+              },
+              "additionalProperties": false
+            },
+            "intent": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "id",
+            "subject",
+            "act"
           ],
           "additionalProperties": false
         }
@@ -3175,6 +4104,155 @@
         }
       ],
       "title": "UntilPredicate"
+    },
+    "WorkflowValueObject": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^(?!\\$)"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/WorkflowValue"
+      },
+      "title": "WorkflowValueObject",
+      "description": "An object of connection argument values. Keys starting with '$' are reserved."
+    },
+    "WorkflowValue": {
+      "title": "WorkflowValue",
+      "description": "A connection argument: JSON, { $expr }, { $literal }, { $secret }, or a { $ref } / { $blob } as it was returned. Keys starting with '$' are reserved.",
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WorkflowValue"
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "$expr": {
+              "$ref": "#/$defs/Expression"
+            }
+          },
+          "required": [
+            "$expr"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "$secret": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "$secret"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "$ref": {
+              "type": "object",
+              "properties": {
+                "connection": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "seal": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "kind": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "connection",
+                "id",
+                "seal",
+                "kind"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "$ref"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "$blob": {
+              "type": "object",
+              "properties": {
+                "uri": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "mimeType": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "bytes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              },
+              "required": [
+                "uri",
+                "mimeType",
+                "bytes",
+                "sha256"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "$blob"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "$ref": "#/$defs/WorkflowValueObject"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "$literal": {}
+          },
+          "required": [
+            "$literal"
+          ],
+          "additionalProperties": false
+        }
+      ]
     }
   }
 }

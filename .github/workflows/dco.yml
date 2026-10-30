@@ -7,7 +7,7 @@ name: DCO
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, next]
 
 permissions:
   contents: read
@@ -52,6 +52,16 @@ jobs:
             parents=$(git show -s --format='%P' "${sha}")
             if [ "$(echo "${parents}" | wc -w)" -gt 1 ]; then
               echo "skip  ${sha:0:8} (merge commit) — ${subject}"
+              continue
+            fi
+
+            # semantic-release's own release commits carry no sign-off, and
+            # rewriting them would move the tags the release jobs look up.
+            committer_email=$(git show -s --format='%ce' "${sha}")
+            if [ "${author_email}" = "semantic-release-bot@martynus.net" ] &&
+              [ "${committer_email}" = "semantic-release-bot@martynus.net" ] &&
+              echo "${subject}" | grep -qE '^chore\([a-z-]+\): release [^ ]+ \[skip ci\]$'; then
+              echo "skip  ${sha:0:8} (release bot) — ${subject}"
               continue
             fi
 

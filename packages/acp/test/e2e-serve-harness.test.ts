@@ -107,8 +107,10 @@ class ToolCallThenDoneClient {
 
 function installClient(harness: AgentHarness<Record<string, never>>, client: unknown): void {
   frameworkCast<{
-    client: unknown;
-  }>(harness).client = client;
+    llm: {
+      client: unknown;
+    };
+  }>(harness).llm.client = client;
 }
 
 //#endregion

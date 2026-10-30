@@ -4,7 +4,8 @@
  * Consumers on Node.js ≥ 20 (or any runtime that provides
  * `node:fs/promises`, `node:child_process`, `node:net`, and
  * `Bun.spawn`) import from here to get the local filesystem, shell,
- * subprocess, durable-storage, and per-task IPC implementations.
+ * subprocess, durable-storage, artifact-store, webhook-receiver, and
+ * per-task IPC implementations.
  *
  * `@noetic-tools/core` ships only contracts and in-memory adapters; the
  * Node-specific implementations live here so portable-runtime
@@ -47,6 +48,10 @@ export {
   type DurableOutboundQueue,
 } from './durable-outbound-queue';
 export {
+  type CreateFileArtifactStoreOptions,
+  createFileArtifactStore,
+} from './file-artifact-store';
+export {
   type CreateFileStorageOptions,
   createFileStorage,
 } from './file-storage';
@@ -63,3 +68,23 @@ export {
   type ProcessSignaller,
   type SubprocessSignal,
 } from './local-subprocess-adapter';
+export {
+  type CreateWebhookReceiverOptions,
+  createWebhookReceiver,
+  generateWebhookSecret,
+  type RawWebhookHandler,
+  type RawWebhookRequest,
+  type SignWebhookInput,
+  signStandardWebhook,
+  type VerifyWebhookInput,
+  verifyStandardWebhook,
+  WEBHOOK_MAX_BODY_BYTES,
+  WEBHOOK_TOLERANCE_MS,
+  type WebhookDelivery,
+  type WebhookEndpoint,
+  type WebhookHandler,
+  type WebhookReceiver,
+  type WebhookRegistration,
+  type WebhookRejection,
+  type WebhookVerification,
+} from './webhook-receiver';

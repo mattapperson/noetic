@@ -35,5 +35,11 @@ if ! git diff --quiet "$tag" -- "$dir" ':(glob)packages/*/package.json' ||
 fi
 
 # Name the tag: npm refuses to tag a version `latest` on its own when a higher
-# version is already published, as a withdrawn major can leave behind.
-npm publish "./$dir" --access public --provenance --workspaces=false --tag latest "$@"
+# version is already published, as a withdrawn major can leave behind. A
+# prerelease (`1.2.3-next.4`) goes to its channel (`next`), never `latest`.
+dist_tag=latest
+if [[ $version == *-* ]]; then
+  prerelease=${version#*-}
+  dist_tag=${prerelease%%.*}
+fi
+npm publish "./$dir" --access public --provenance --workspaces=false --tag "$dist_tag" "$@"

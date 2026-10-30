@@ -4,7 +4,7 @@ import type { ContextData } from '@noetic-tools/context';
 import type { StepInvokeTool, ToolExecutionContext } from '@noetic-tools/types';
 import { frameworkCast, isNoeticError } from '@noetic-tools/types';
 import { z } from 'zod';
-import { executeInvokeTool } from '../../src/interpreter/execute-action';
+import { executeInvokeTool } from '../../src/interpreter/execute-invoke-tool';
 import { makeMockContext, makeMockHarness } from '../_helpers';
 
 const mockCtx = makeMockContext();

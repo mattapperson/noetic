@@ -57,11 +57,9 @@ type NonEmpty<Q> = keyof Q extends never
     }
   : unknown;
 
-/** @public The input a step takes. */
-export type StepInput<S> = S extends Step<infer _C, infer I, infer _O> ? I : never;
+import type { StepInput, StepOutput } from '@noetic-tools/types';
 
-/** @public The output a step produces. */
-export type StepOutput<S> = S extends Step<infer _C, infer _I, infer O> ? O : never;
+export type { StepInput, StepOutput };
 
 /** A step of any kind, as far as a case needs to be one. */
 type CaseStep = Pick<Step, 'kind' | 'id'>;

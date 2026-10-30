@@ -37,7 +37,7 @@ type _AssertSubset<TContext, I, O> = _AssertShape<TContext, I, O> extends Step<T
   : false;
 ```
 
-The exported `Step` union additionally includes [`StepSchedule`](#stepschedule) for fixed-interval scheduling.
+The exported `Step` union additionally includes [`StepSchedule`](#stepschedule) for fixed-interval scheduling and [`StepSequence`](#stepsequence), what an array of steps becomes.
 
 ### StepReplay
 
@@ -281,6 +281,38 @@ inParallel has three mode variants, each a separate interface.
 | `parkTimeout` | `number` | no | Milliseconds to wait on inbox before stopping (0 = non-blocking) |
 | `prepareNext` | `(output: O, verdict: Verdict, ctx: Context<TContext>) => I` | no | Transform output to next input |
 | `onError` | `(error: NoeticError, ctx: Context<TContext>) => 'retry' \| 'skip' \| 'abort'` | no | Error handler |
+
+## StepSequence
+
+`StepSequence<TContext, I, O>`
+
+What an array of steps becomes. An array of steps runs in sequence, each step's output the next one's input, wherever these take a step: `harness.run` and `ctx.harness.run`, `harness.detachedSpawn` and `ctx.harness.detachedSpawn`, `agentGraph`, `spawn` and `withContext` children, `schedule` bodies, `inParallel` paths, a `conditional` route's pick, and `when`/`otherwise` clauses. There is no `step.sequence`; write the array.
+
+A `loop`'s `steps`, a wait's `around` and a verify's `act` take a list of single steps and run it in sequence themselves, without a `sequence` step. `decide`/`routeSwitch` cases (and `uncertain`/`default`) and a loop's `until` decide step take a single step only.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `kind` | `'sequence'` | yes | Discriminant |
+| `id` | `string` | yes | The children's ids joined with ` > ` |
+| `steps` | `ReadonlyArray<Step<TContext, I, O>>` | yes | The steps, in order; at least two |
+
+An empty array throws [`EMPTY_STEP_ARRAY`](/docs/framework/errors#empty_step_array); a one-element array is its element. An element that is not a step (a nested array, `null`, an object without a step `kind` and string `id`) throws [`INVALID_STEP_IN_ARRAY`](/docs/framework/errors#invalid_step_in_array): nested arrays are rejected, not flattened. The sequence keeps a frozen copy of the array, so changing the array after building changes nothing.
+
+### StepArray, StepArrayInput and StepArrayOutput
+
+```ts
+import { AgentHarness, runCode } from '@noetic-tools/core';
+
+const trim = runCode({ id: 'trim', execute: async (input: string) => input.trim() });
+const count = runCode({ id: 'count', execute: async (input: string) => input.length });
+
+const harness = new AgentHarness({ name: 'arrays', params: {} });
+const length: number = await harness.run([trim, count], '  hi  ', harness.createContext());
+```
+
+Each element is a `StepLike`: an object with a step kind and that kind's required fields, so a bare `{ kind, id }` lookalike is not a step. Every step carries a type-only marker, `'~types'?: StepTypes<I, O>` (never set at runtime), from which an element's input and output are read. `run` and `detachedSpawn` infer the array as a tuple and check every link (`ValidStepChain<T>`): each step must take the previous step's output, unless that output is typed `unknown` (as a `call` step's is). The input is the first step's (`StepsInput<T>`, `StepArrayInput<T>`) and the output the last step's (`StepsOutput<T>`, `StepArrayOutput<T>`). They also accept a `Step<C, T, T>[]` variable and a `Steps<C, I, O>` value passed through generic code.
+
+`Steps<TContext, I, O>` is what the builders and `agentGraph` accept: a step, a `StepChain<I, O>` (a non-empty tuple whose first step takes `I` and last step outputs `O`), or `HomogeneousSteps<TContext, I, O>` (an array of `Step<TContext, T, T>` when `I` and `O` are both `T`). A builder checks an array's ends against its `I` and `O`; only `run` and `detachedSpawn` check the links between.
 
 ## StepSchedule
 

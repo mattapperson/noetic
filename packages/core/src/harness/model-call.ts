@@ -2,159 +2,46 @@ import type {
   AgentHarnessContract,
   CallModelRequest,
   Context,
-  FunctionCallItem,
   Item,
   ItemSchemaRegistry,
   LLMResponse,
-  RoundUsage,
-  Span,
-  StandardSchemaV1,
-  Tool,
-  ToolChoice,
   TraceExporter,
 } from '@noetic-tools/types';
-import {
-  frameworkCast,
-  NoeticConfigError,
-  SpendKind,
-  SteerPoint,
-  ToolChoiceMode,
-} from '@noetic-tools/types';
+import { frameworkCast, NoeticConfigError, SpendKind, SteerPoint } from '@noetic-tools/types';
 import type * as OpenRouterAgent from '@openrouter/agent';
 import type { OpenRouter } from '@openrouter/agent';
-import { serverTool } from '@openrouter/agent';
 import {
-  convertTools,
-  executeToolCall,
   extractOutputItems,
-  extractSystemInstruction,
   extractUsage,
   itemsToInput,
-  resolveWireJsonSchema,
-  sanitizeToolNameForWire,
   toolsOnWire,
 } from '../adapters/openrouter';
-import { isFunctionCall } from '../interpreter/typeguards';
-import { GenAI, NoeticAttr, ToolAttr } from '../observability/genai-attributes';
-import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../runtime/broadcaster-utils';
+import { emitFrameworkEvent, getBroadcaster } from '../runtime/broadcaster-utils';
 import { drainsOf } from '../runtime/drain';
-import type { EventBroadcaster } from '../runtime/event-broadcaster';
-import type { ApprovalOutcome } from '../runtime/tool-approval';
 import { markSpent } from '../util/spent';
-import { isErrorStatus } from '../util/status-code';
+import { CallSpanCollector } from './call-span-collector';
 import type { Bill } from './call-spend';
 import { CallSpend, noBill } from './call-spend';
-import { exportSpans } from './deps/context';
+import { buildTextFormat, prepareModelRequest } from './model-request';
 import type { RoundRecord } from './model-rounds';
 import { RoundLedger } from './model-rounds';
-import { buildItemSchemaRegistry, createToolResultItem } from './model-schema.js';
-import type { Dispatch, Spend } from './spend';
+import { buildItemSchemaRegistry } from './model-schema.js';
+import {
+  awaitWithAbort,
+  hasUsableResponseOutput,
+  noteStreamGeneration,
+  pipeStreamEventsToBroadcaster,
+  providerTerminalError,
+} from './model-stream';
+import type { ToolRoundScope } from './model-tool-round';
+import { hasFunctionCalls, replayOutput, runToolRound } from './model-tool-round';
+import type { Spend } from './spend';
 import type { SteerInbox } from './steer-inbox';
 import { openSteerInbox } from './steer-inbox';
 
 const MAX_TOOL_ROUNDS = 32;
 const MAX_RECOVERY_CONTINUATIONS = 3;
 const EPHEMERAL_CONTINUE_INPUT = 'continue';
-const SKIPPED_FOR_STEER_OUTPUT = 'Skipped: a new message arrived before this tool call ran.';
-
-function buildTextFormat(
-  schema: StandardSchemaV1,
-  explicitJsonSchema?: Record<string, unknown>,
-): {
-  format: {
-    type: 'json_schema';
-    name: string;
-    schema: Record<string, unknown>;
-  };
-} {
-  const jsonSchema = resolveWireJsonSchema({
-    schema,
-    explicitJsonSchema,
-    what: 'structured output schema',
-  });
-  return {
-    format: {
-      type: 'json_schema',
-      name: 'output',
-      schema: jsonSchema,
-    },
-  };
-}
-
-function isStreamRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
-interface ProviderTerminalError {
-  status: string;
-  message: string;
-}
-
-function providerTerminalError(response: unknown): ProviderTerminalError | null {
-  if (!isStreamRecord(response) || response.status === undefined) {
-    return null;
-  }
-  const status = String(response.status);
-  if (status === 'completed') {
-    return null;
-  }
-  if (status === 'incomplete') {
-    const details = response.incompleteDetails;
-    const reason =
-      isStreamRecord(details) && typeof details.reason === 'string' ? `: ${details.reason}` : '';
-    return {
-      status,
-      message: `LLM response incomplete${reason}`,
-    };
-  }
-  if (status === 'failed') {
-    const error = response.error;
-    const message =
-      isStreamRecord(error) && typeof error.message === 'string' ? `: ${error.message}` : '';
-    return {
-      status,
-      message: `LLM response failed${message}`,
-    };
-  }
-  return {
-    status,
-    message: `LLM response ended with status '${status}'`,
-  };
-}
-
-/**
- * Tool rounds replay only their function calls. A round a steer follows must
- * also replay what the model said, or the next round starts without it.
- * Function calls are left to the tool round, which adds each with its output.
- */
-function replayOutput(
-  input: ReturnType<typeof itemsToInput>,
-  roundItems: ReadonlyArray<Item>,
-): void {
-  input.push(...itemsToInput(roundItems.filter((item) => !isFunctionCall(item))));
-}
-
-/**
- * Save the generation id a stream's `response.created` event carries, for a response
- * whose headers did not. OpenRouter's ids start `gen-`; other ids price nothing.
- */
-function noteStreamGeneration(dispatch: Dispatch | undefined, event: unknown): void {
-  if (!dispatch || !isStreamRecord(event) || event.type !== 'response.created') {
-    return;
-  }
-  const response = event.response;
-  if (!isStreamRecord(response) || typeof response.id !== 'string') {
-    return;
-  }
-  if (response.id.startsWith('gen-')) {
-    void dispatch.noteGeneration(response.id);
-  }
-}
-
-/** The provider refused the call before generating anything, so nothing was billed. */
-function wasRefused(err: unknown, dispatch: Dispatch): boolean {
-  return isErrorStatus(err) && dispatch.record.generationId === undefined;
-}
 
 function itemIds(items: ReadonlyArray<Item>): string[] {
   return items.flatMap((item) =>
@@ -170,17 +57,6 @@ function hasItem(items: ReadonlyArray<Item>, id: string): boolean {
   return items.some((item) => 'id' in item && item.id === id);
 }
 
-function hasUsableResponseOutput(response: unknown, items: ReadonlyArray<Item>): boolean {
-  if (items.length > 0) {
-    return true;
-  }
-  return (
-    isStreamRecord(response) &&
-    typeof response.outputText === 'string' &&
-    response.outputText.length > 0
-  );
-}
-
 function withEphemeralContinueInput(
   input: ReturnType<typeof itemsToInput>,
 ): OpenRouterAgent.Item[] {
@@ -192,92 +68,6 @@ function withEphemeralContinueInput(
       content: EPHEMERAL_CONTINUE_INPUT,
     }),
   ];
-}
-
-/** Race a promise against an AbortSignal so callers (e.g. `SessionRunner.abort`)
- *  can break out of a long `await` without waiting for the underlying call to
- *  settle. When the signal fires, the returned promise rejects with
- *  `signal.reason` (an `Error`) or a generic `Error('aborted')` fallback. */
-function awaitWithAbort<T>(p: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
-  if (!signal) {
-    return p;
-  }
-  if (signal.aborted) {
-    return Promise.reject(signal.reason instanceof Error ? signal.reason : new Error('aborted'));
-  }
-  return new Promise<T>((resolve, reject) => {
-    const onAbort = (): void => {
-      reject(signal.reason instanceof Error ? signal.reason : new Error('aborted'));
-    };
-    signal.addEventListener('abort', onAbort, {
-      once: true,
-    });
-    p.then(
-      (v) => {
-        signal.removeEventListener('abort', onAbort);
-        resolve(v);
-      },
-      (e) => {
-        signal.removeEventListener('abort', onAbort);
-        reject(e);
-      },
-    );
-  });
-}
-
-interface PipeStreamOpts {
-  stream: AsyncIterable<unknown>;
-  /** Optional: when provided, each SDK event is emitted into it. Absent in
-   *  headless/test harness runs that still need the idle watchdog to reset. */
-  broadcaster?: EventBroadcaster;
-  agentName: string;
-  signal?: AbortSignal;
-  /** Invoked once per SDK event received — used by the idle watchdog to bump
-   *  its deadline so a still-streaming response isn't aborted. */
-  onEvent?: (event: unknown) => void;
-  /** Awaited with each finished output item before the next event is read. */
-  onItemDone?: (item: unknown) => Promise<void>;
-}
-
-async function pipeStreamEventsToBroadcaster(opts: PipeStreamOpts): Promise<void> {
-  const { stream, broadcaster, agentName, signal, onEvent, onItemDone } = opts;
-  try {
-    for await (const event of stream) {
-      if (signal?.aborted) {
-        return;
-      }
-      onEvent?.(event);
-      if (!isStreamRecord(event)) {
-        continue;
-      }
-      broadcaster?.emit({
-        source: 'sdk',
-        type: typeof event.type === 'string' ? event.type : 'unknown',
-        data: event,
-        outputIndex: typeof event.outputIndex === 'number' ? event.outputIndex : undefined,
-        contentIndex: typeof event.contentIndex === 'number' ? event.contentIndex : undefined,
-      });
-      if (event.type === 'response.output_item.done' && onItemDone) {
-        await onItemDone(event.item);
-      }
-    }
-  } catch (err: unknown) {
-    // The stream ends badly when the round is aborted; that is not a pipe fault.
-    if (signal?.aborted) {
-      return;
-    }
-    if (broadcaster) {
-      emitFrameworkEvent({
-        broadcaster,
-        agentName,
-        eventType: 'stream_pipe_error',
-        data: {
-          error: err instanceof Error ? err.message : String(err),
-        },
-      });
-    }
-    throw err;
-  }
 }
 
 interface StreamIdleWatchdog {
@@ -344,196 +134,6 @@ export function createStreamIdleWatchdog(
   };
 }
 
-//#endregion
-
-interface PreparedModelRequest {
-  instructions?: string;
-  remaining: ReadonlyArray<Item>;
-  broadcaster?: EventBroadcaster;
-  sdkTools?: ReturnType<typeof convertTools>;
-  /**
-   * The wire tool choice, by round. A forcing choice (`required`, `{ tool }`)
-   * holds only until the model has called a tool; later rounds fall back to
-   * `auto`, or every round would force another call until the round limit.
-   */
-  toolChoice: {
-    first: WireToolChoice;
-    rest: WireToolChoice;
-  };
-  /**
-   * The tools this call may run: the request's tools narrowed to
-   * `allowedToolNames`. A call to any other tool is answered as unknown, so a
-   * model that names a tool it was never offered cannot run it.
-   */
-  allowedTools: Tool[];
-  emitIfAllowed: (eventType: string, data: Record<string, unknown>) => void;
-}
-
-function prepareModelRequest(request: CallModelRequest, agentName: string): PreparedModelRequest {
-  const { instructions: extractedInstructions, remaining } = extractSystemInstruction(
-    request.items,
-  );
-  const instructions =
-    [
-      request.instructions,
-      extractedInstructions,
-    ]
-      .filter(Boolean)
-      .join('\n\n') || undefined;
-  const broadcaster = getBroadcaster(request.ctx);
-  const allowedTools = filterAllowedTools(request) ?? [];
-  // Every request carries the full tool list, so the prompt-cache prefix is the
-  // same for every step in the tree; `toolChoice` does the narrowing. A call
-  // that may use no client tool sends none.
-  // Client (function) tools convert to SDK tool definitions; OpenRouter server
-  // tools (web_search/web_fetch) are wrapped via the SDK's `serverTool()` so
-  // its convertToolsToAPIFormat accepts them — a raw `{type}` entry crashes it.
-  // `parameters` keys stay camelCase: the SDK's outbound zod schema strips
-  // unknown keys, so snake_case would be silently dropped.
-  const clientSdkTools =
-    request.tools && allowedTools.length > 0
-      ? convertTools({
-          tools: request.tools,
-        })
-      : [];
-  const serverSdkTools = (request._serverTools ?? []).map((s) =>
-    serverTool(
-      frameworkCast<Parameters<typeof serverTool>[0]>({
-        type: s.type,
-        parameters: s.parameters,
-      }),
-    ),
-  );
-  const sdkTools = [
-    ...clientSdkTools,
-    ...frameworkCast<typeof clientSdkTools>(serverSdkTools),
-  ];
-  return {
-    instructions,
-    remaining,
-    broadcaster,
-    sdkTools: sdkTools.length > 0 ? sdkTools : undefined,
-    toolChoice: roundToolChoices({
-      request,
-      allowedTools,
-      sendsClientTools: clientSdkTools.length > 0,
-      sendsTools: sdkTools.length > 0,
-    }),
-    allowedTools,
-    emitIfAllowed(eventType, data) {
-      if (!shouldEmit(request.emit, eventType, data)) {
-        return;
-      }
-      emitFrameworkEvent({
-        broadcaster,
-        agentName,
-        eventType,
-        data,
-      });
-    },
-  };
-}
-
-type WireToolChoice = OpenRouterAgent.CallModelInput['toolChoice'];
-
-interface ToolChoiceScope {
-  request: CallModelRequest;
-  allowedTools: ReadonlyArray<Tool>;
-  sendsClientTools: boolean;
-  sendsTools: boolean;
-}
-
-function roundToolChoices(scope: ToolChoiceScope): PreparedModelRequest['toolChoice'] {
-  const choice = scope.request.toolChoice ?? ToolChoiceMode.Auto;
-  return {
-    first: wireToolChoice(scope, choice),
-    rest: wireToolChoice(scope, choice === ToolChoiceMode.None ? choice : ToolChoiceMode.Auto),
-  };
-}
-
-/**
- * Map a `toolChoice` onto the wire, inside the step's restriction.
- * A restricted call narrows with an `allowed_tools` choice (plus the step's
- * server tools) rather than by trimming `tools`, so the request keeps the
- * shared cache prefix. `none` keeps the tools too, for the same reason. A call
- * that sends no tools sends no choice.
- *
- * @throws NoeticConfigError `UNKNOWN_TOOL_CHOICE` when `{ tool }` names a tool
- *   this call cannot run.
- */
-function wireToolChoice(scope: ToolChoiceScope, choice: ToolChoice): WireToolChoice {
-  const { request, allowedTools } = scope;
-  if (typeof choice === 'object') {
-    return forcedToolChoice(choice.tool, allowedTools);
-  }
-  if (!scope.sendsTools) {
-    return undefined;
-  }
-  if (choice === ToolChoiceMode.None) {
-    return 'none';
-  }
-  if (request.allowedToolNames && scope.sendsClientTools) {
-    return allowedToolsChoice(request, allowedTools, choice);
-  }
-  return choice === ToolChoiceMode.Required ? 'required' : undefined;
-}
-
-/** Force one function tool. It must be one the call may run. */
-function forcedToolChoice(name: string, allowedTools: ReadonlyArray<Tool>): WireToolChoice {
-  const tool = allowedTools.find((candidate) => candidate.name === name);
-  if (!tool) {
-    const offered = allowedTools.map((t) => t.name).join(', ') || 'none';
-    throw new NoeticConfigError({
-      code: 'UNKNOWN_TOOL_CHOICE',
-      message: `toolChoice forces tool ${JSON.stringify(name)}, which this model call cannot run.`,
-      hint: `Force a tool the call offers (offered: ${offered}), or give '${name}' to the step or a context layer.`,
-    });
-  }
-  return {
-    type: 'function',
-    name: sanitizeToolNameForWire(tool.name),
-  };
-}
-
-/** Restrict the model to `allowedTools` (plus the step's server tools). */
-function allowedToolsChoice(
-  request: CallModelRequest,
-  allowedTools: ReadonlyArray<Tool>,
-  mode: typeof ToolChoiceMode.Auto | typeof ToolChoiceMode.Required,
-): WireToolChoice {
-  return {
-    type: 'allowed_tools',
-    mode,
-    tools: [
-      ...allowedTools.map((tool) => ({
-        type: 'function',
-        name: sanitizeToolNameForWire(tool.name),
-      })),
-      ...(request._serverTools ?? []).map((spec) => ({
-        type: spec.type,
-      })),
-    ],
-  };
-}
-
-/** Match a wire tool name against both the original and the sanitised name. */
-function findTool(tools: ReadonlyArray<Tool>, wireName: string): Tool | undefined {
-  return tools.find(
-    (tool) => tool.name === wireName || sanitizeToolNameForWire(tool.name) === wireName,
-  );
-}
-
-function filterAllowedTools(request: CallModelRequest): Tool[] | undefined {
-  if (!request.tools) {
-    return undefined;
-  }
-  if (!('allowedToolNames' in request) || !request.allowedToolNames) {
-    return request.tools;
-  }
-  const allowedNames = new Set(request.allowedToolNames);
-  return request.tools.filter((tool) => allowedNames.has(tool.name));
-}
-
 interface AgentHarnessModelCallerOpts {
   agentName: string;
   itemSchemas: ItemSchemaRegistry;
@@ -544,91 +144,6 @@ interface AgentHarnessModelCallerOpts {
   traceExporter: TraceExporter;
   /** Records each paid round before it is sent. Absent without durable storage. */
   spend?: Spend;
-}
-
-/**
- * Per-`callModel` span accumulator. Spans are created lazily from the calling
- * context's span (so the trace tree mirrors the execution tree) and flushed to
- * the harness `traceExporter` once the call settles — see issue #50, where the
- * exporter was stored but never invoked.
- */
-class CallSpanCollector {
-  private readonly spans: Span[] = [];
-
-  constructor(
-    private readonly harness: AgentHarnessContract,
-    private readonly exporter: TraceExporter,
-    private readonly parent: Span | null,
-    private readonly nodeId: string | undefined,
-    /** Stamped on the first model span only, then dropped. */
-    private firstSpanAttributes: Record<string, string | number | boolean> | undefined,
-  ) {}
-
-  /** Link a span back to its declared workflow node, when the call carries one. */
-  private stampNode(span: Span): void {
-    if (this.nodeId !== undefined) {
-      span.setAttribute(NoeticAttr.NODE_ID, this.nodeId);
-    }
-  }
-
-  /** Open a model-call span stamped with GenAI semantic-convention attributes. */
-  startModelSpan(model: string): Span {
-    const span = this.harness.createSpan('llm.call', this.parent);
-    span.setAttribute(GenAI.SYSTEM, 'openrouter');
-    span.setAttribute(GenAI.REQUEST_MODEL, model);
-    this.stampNode(span);
-    for (const [key, value] of Object.entries(this.firstSpanAttributes ?? {})) {
-      span.setAttribute(key, value);
-    }
-    this.firstSpanAttributes = undefined;
-    this.spans.push(span);
-    return span;
-  }
-
-  /** Record usage + cost on a model-call span. */
-  finishModelSpan(span: Span, usage: RoundUsage, cost: number | undefined): void {
-    span.setAttribute(GenAI.USAGE_INPUT_TOKENS, usage.inputTokens);
-    span.setAttribute(GenAI.USAGE_OUTPUT_TOKENS, usage.outputTokens);
-    if (usage.cachedTokens !== undefined) {
-      span.setAttribute(GenAI.USAGE_CACHED_INPUT_TOKENS, usage.cachedTokens);
-    }
-    if (usage.cacheWriteTokens !== undefined) {
-      span.setAttribute(GenAI.USAGE_CACHE_WRITE_TOKENS, usage.cacheWriteTokens);
-    }
-    if (cost !== undefined) {
-      span.setAttribute(GenAI.COST, cost);
-    }
-    span.end();
-  }
-
-  /**
-   * Open and immediately close a tool-call span under the given model span, or under
-   * the call's parent when the round's model call ran in an earlier attempt.
-   */
-  recordToolSpan(
-    parent: Span | null,
-    toolName: string,
-    needsApproval: boolean,
-    approval: ApprovalOutcome | undefined,
-  ): void {
-    const span = this.harness.createSpan('tool.call', parent ?? this.parent);
-    span.setAttribute(ToolAttr.NAME, toolName);
-    span.setAttribute(ToolAttr.NEEDS_APPROVAL, needsApproval);
-    if (approval !== undefined) {
-      span.setAttribute(ToolAttr.APPROVAL, approval);
-    }
-    this.stampNode(span);
-    span.end();
-    this.spans.push(span);
-  }
-
-  /** Flush all accumulated spans to the exporter. */
-  async flush(): Promise<void> {
-    if (this.spans.length === 0) {
-      return;
-    }
-    await exportSpans(this.exporter, this.spans);
-  }
 }
 
 export class AgentHarnessModelCaller {
@@ -659,6 +174,15 @@ export class AgentHarnessModelCaller {
         item,
       },
     });
+  }
+
+  /** What the tool-round functions need from this caller. */
+  private toolRoundScope(): ToolRoundScope {
+    return {
+      harness: this.opts.harness,
+      itemSchemas: this.opts.itemSchemas,
+      emitItemAppended: (ctx, item) => this.emitItemAppended(ctx, item),
+    };
   }
 
   private async callOverriddenModel(request: CallModelRequest): Promise<LLMResponse> {
@@ -867,14 +391,14 @@ export class AgentHarnessModelCaller {
         prepared.emitIfAllowed('model_round_replayed', {
           round,
         });
-        if (replayed.cut && !replayed.items.some(isFunctionCall)) {
+        if (replayed.cut && !hasFunctionCalls(replayed.items)) {
           // The stream was cut after the answer finished: it ends the loop.
           break;
         }
         if (replayed.cut) {
           // Go on from the function calls the stream finished: run them, then ask
           // the model again with their results in the conversation.
-          await this.runToolRound({
+          await runToolRound(this.toolRoundScope(), {
             roundItems: replayed.items,
             request,
             prepared,
@@ -1091,7 +615,7 @@ export class AgentHarnessModelCaller {
       } catch (err: unknown) {
         streaming = false;
         await checkpoints;
-        if (dispatch && wasRefused(err, dispatch)) {
+        if (dispatch?.wasRefused(err)) {
           await dispatch.settle();
         }
         if (idleStalled) {
@@ -1124,7 +648,7 @@ export class AgentHarnessModelCaller {
         });
         allItems.push(...roundItems);
         replayOutput(conversationInput, roundItems);
-        await this.runToolRound({
+        await runToolRound(this.toolRoundScope(), {
           roundItems,
           request,
           prepared,
@@ -1186,7 +710,7 @@ export class AgentHarnessModelCaller {
       servedTier = sdkResponse.serviceTier ?? undefined;
       allItems.push(...roundItems);
 
-      const ranTools = await this.runToolRound({
+      const ranTools = await runToolRound(this.toolRoundScope(), {
         roundItems,
         request,
         prepared,
@@ -1280,37 +804,6 @@ export class AgentHarnessModelCaller {
     return roundItemSchemas.parseMany(items);
   }
 
-  /** Run the round's function calls. Returns `false` when there were none to run. */
-  private async runToolRound(params: {
-    roundItems: Item[];
-    request: CallModelRequest;
-    prepared: PreparedModelRequest;
-    allItems: Item[];
-    conversationInput: ReturnType<typeof itemsToInput>;
-    round: number;
-    spans: CallSpanCollector;
-    modelSpan: Span | null;
-    steers: SteerInbox | undefined;
-  }): Promise<boolean> {
-    const functionCalls = params.roundItems.filter(isFunctionCall);
-    if (functionCalls.length === 0 || !params.request.tools) {
-      return false;
-    }
-    await this.executeToolRound({
-      functionCalls,
-      request: params.request,
-      allowedTools: params.prepared.allowedTools,
-      allItems: params.allItems,
-      conversationInput: params.conversationInput,
-      round: params.round,
-      emitIfAllowed: params.prepared.emitIfAllowed,
-      spans: params.spans,
-      modelSpan: params.modelSpan,
-      steers: params.steers,
-    });
-    return true;
-  }
-
   private handleModelRecovery(params: {
     sdkResponse: unknown;
     round: number;
@@ -1392,213 +885,6 @@ export class AgentHarnessModelCaller {
       kind: 'continue',
       invalidRecoveryContinuations: next,
     };
-  }
-
-  private async executeToolRound(params: {
-    functionCalls: Extract<
-      Item,
-      {
-        type: 'function_call';
-      }
-    >[];
-    request: CallModelRequest;
-    allowedTools: Tool[];
-    allItems: Item[];
-    conversationInput: ReturnType<typeof itemsToInput>;
-    round: number;
-    emitIfAllowed: (eventType: string, data: Record<string, unknown>) => void;
-    spans: CallSpanCollector;
-    modelSpan: Span | null;
-    steers: SteerInbox | undefined;
-  }): Promise<void> {
-    const {
-      functionCalls,
-      request,
-      allowedTools,
-      allItems,
-      conversationInput,
-      spans,
-      modelSpan,
-      steers,
-    } = params;
-    params.emitIfAllowed('tool_round_started', {
-      round: params.round,
-      toolCount: functionCalls.length,
-    });
-    for (const fc of functionCalls) {
-      conversationInput.push({
-        type: 'function_call',
-        callId: fc.callId,
-        id: fc.id ?? crypto.randomUUID(),
-        name: fc.name,
-        arguments: fc.arguments,
-      });
-    }
-    for (const [index, fc] of functionCalls.entries()) {
-      await drainsOf(request.ctx)?.hold(request.ctx);
-      if (request.signal?.aborted) {
-        break;
-      }
-      const remaining = functionCalls.slice(index);
-      if (steers?.hasQueued() && (await steers.offer(SteerPoint.BeforeToolCall, remaining))) {
-        for (const skipped of remaining) {
-          this.recordSkippedToolCall({
-            fc: skipped,
-            request,
-            allowedTools,
-            allItems,
-            conversationInput,
-            emitIfAllowed: params.emitIfAllowed,
-          });
-        }
-        break;
-      }
-      const toolForCall = findTool(allowedTools, fc.name);
-      const approval = await this.executeFunctionCall({
-        fc,
-        request,
-        allowedTools,
-        allItems,
-        conversationInput,
-        emitIfAllowed: params.emitIfAllowed,
-      });
-      spans.recordToolSpan(modelSpan, fc.name, toolForCall?.needsApproval ?? false, approval);
-    }
-    params.emitIfAllowed('tool_round_completed', {
-      round: params.round,
-      toolCount: functionCalls.length,
-    });
-  }
-
-  private async executeFunctionCall(params: {
-    fc: Extract<
-      Item,
-      {
-        type: 'function_call';
-      }
-    >;
-    request: CallModelRequest;
-    allowedTools: Tool[];
-    allItems: Item[];
-    conversationInput: ReturnType<typeof itemsToInput>;
-    emitIfAllowed: (eventType: string, data: Record<string, unknown>) => void;
-  }): Promise<ApprovalOutcome | undefined> {
-    const { fc, request, allowedTools, allItems, conversationInput } = params;
-    params.emitIfAllowed('tool_call_started', {
-      name: fc.name,
-      callId: fc.callId,
-    });
-    let parsedArgs: unknown;
-    try {
-      parsedArgs = JSON.parse(fc.arguments);
-    } catch {
-      this.recordUnrunToolCall({
-        fc,
-        output: `Error: malformed JSON in tool arguments: ${fc.arguments}`,
-        request,
-        allowedTools,
-        allItems,
-        conversationInput,
-        emitIfAllowed: params.emitIfAllowed,
-      });
-      return undefined;
-    }
-    if (!request.tools) {
-      throw new Error(
-        `executeFunctionCall invoked without tools on CallModelRequest (tool name: ${fc.name}).`,
-      );
-    }
-    const toolForCall = findTool(allowedTools, fc.name);
-    const toolResult = await executeToolCall({
-      toolName: fc.name,
-      args: parsedArgs,
-      tools: allowedTools,
-      context: request.ctx,
-      harness: this.opts.harness,
-      layers: request.layers,
-      callId: fc.callId,
-    });
-    // Owner-scoped result validation: a tool's `toolResults` schemas apply
-    // only to that tool's own result items. Harness-level `opts.itemSchemas`
-    // stay global by design; sibling tools' schemas never reject this item.
-    const outputItem = createToolResultItem({
-      output: toolResult.output,
-      callId: fc.callId,
-      roundItemSchemas: this.opts.itemSchemas.extend(toolForCall?.itemSchemas),
-      tool: toolForCall,
-      callItem: fc,
-      args: parsedArgs,
-      result: toolResult.result,
-      error: toolResult.error,
-    });
-    allItems.push(outputItem);
-    conversationInput.push({
-      type: 'function_call_output',
-      callId: fc.callId,
-      output: toolResult.output,
-    });
-    this.emitItemAppended(request.ctx, outputItem);
-    params.emitIfAllowed('tool_call_completed', {
-      name: fc.name,
-      callId: fc.callId,
-      error: toolResult.error === true,
-      output: toolResult.output,
-    });
-    return toolResult.approval;
-  }
-
-  private recordSkippedToolCall(params: {
-    fc: FunctionCallItem;
-    request: CallModelRequest;
-    allowedTools: Tool[];
-    allItems: Item[];
-    conversationInput: ReturnType<typeof itemsToInput>;
-    emitIfAllowed: (eventType: string, data: Record<string, unknown>) => void;
-  }): void {
-    params.emitIfAllowed('tool_call_started', {
-      name: params.fc.name,
-      callId: params.fc.callId,
-    });
-    this.recordUnrunToolCall({
-      ...params,
-      output: SKIPPED_FOR_STEER_OUTPUT,
-    });
-  }
-
-  /** Answer a call that never ran, so every call in the history has an output. */
-  private recordUnrunToolCall(params: {
-    fc: FunctionCallItem;
-    output: string;
-    request: CallModelRequest;
-    allowedTools: Tool[];
-    allItems: Item[];
-    conversationInput: ReturnType<typeof itemsToInput>;
-    emitIfAllowed: (eventType: string, data: Record<string, unknown>) => void;
-  }): void {
-    const { fc, request, allowedTools, allItems, conversationInput } = params;
-    const toolForCall = findTool(allowedTools, fc.name);
-    // Owner-scoped result validation (see executeFunctionCall).
-    const outputItem = createToolResultItem({
-      output: params.output,
-      callId: fc.callId,
-      roundItemSchemas: this.opts.itemSchemas.extend(toolForCall?.itemSchemas),
-      tool: toolForCall,
-      callItem: fc,
-      error: true,
-    });
-    allItems.push(outputItem);
-    conversationInput.push({
-      type: 'function_call_output',
-      callId: fc.callId,
-      output: params.output,
-    });
-    this.emitItemAppended(request.ctx, outputItem);
-    params.emitIfAllowed('tool_call_completed', {
-      name: fc.name,
-      callId: fc.callId,
-      error: true,
-      output: params.output,
-    });
   }
 
   private handleToolRoundLimit(params: {

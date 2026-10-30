@@ -1,6 +1,18 @@
+## @noetic-tools/core-v5.20.0-next.1 (2026-10-30)
+
+* fix: close the harness review gaps and pass the structural gate ([a8d710b](https://github.com/mattapperson/noetic/commit/a8d710b))
+* feat: implement connections, profiles and verification ([7237309](https://github.com/mattapperson/noetic/commit/7237309))
+* feat(core): tighten the harness API for connections and step arrays ([a417a35](https://github.com/mattapperson/noetic/commit/a417a35))
+* chore(core): release 5.19.1-next.1 [skip ci] ([4a087e2](https://github.com/mattapperson/noetic/commit/4a087e2))
+* ci: publish prereleases from next to the next dist-tag ([5c9f714](https://github.com/mattapperson/noetic/commit/5c9f714))
+
 ## @noetic-tools/core-v5.19.1 (2026-10-30)
 
 * fix(core): resume a cut-off model round from the items it finished ([c6c46b6](https://github.com/mattapperson/noetic/commit/c6c46b6)), closes [#153](https://github.com/mattapperson/noetic/issues/153)
+
+## @noetic-tools/core-v5.19.1-next.1 (2026-10-29)
+
+* ci: publish prereleases from next to the next dist-tag ([5c9f714](https://github.com/mattapperson/noetic/commit/5c9f714))
 
 ## @noetic-tools/core-v5.19.0 (2026-10-27)
 

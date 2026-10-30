@@ -117,8 +117,10 @@ describe('traceExporter wiring (issue #50)', () => {
     });
     const fakeClient = new ToolCallThenDoneClient();
     frameworkCast<{
-      client: ToolCallThenDoneClient;
-    }>(harness).client = fakeClient;
+      llm: {
+        client: ToolCallThenDoneClient;
+      };
+    }>(harness).llm.client = fakeClient;
     const ctx = harness.createContext();
 
     const countingTool = tool({

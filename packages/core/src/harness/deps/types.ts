@@ -58,6 +58,10 @@ export type {
   SteeringDecision,
   SteerVerdict,
   Step,
+  StepLike,
+  Steps,
+  StepsInput,
+  StepsOutput,
   StreamEvent,
   StreamingItem,
   SubprocessAdapter,
@@ -65,6 +69,7 @@ export type {
   ToolApprover,
   TraceExporter,
   UsageCharge,
+  ValidStepChain,
   WriteOffSpendOptions,
 } from '@noetic-tools/types';
 export { SteeringAction } from '@noetic-tools/types';

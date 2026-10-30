@@ -2,12 +2,13 @@ import type { ContextData } from '@noetic-tools/context';
 import type {
   Channel,
   ScheduleErrorPolicy,
-  Step,
   StepReplay,
   StepSchedule,
+  Steps,
 } from '@noetic-tools/types';
 import { NoeticConfigError } from '@noetic-tools/types';
 import { getDefaultRegistrar } from '../types/step-registrar';
+import { toStep } from './sequence';
 
 /**
  * Configuration options accepted by the `schedule()` builder, excluding the `kind`
@@ -20,8 +21,8 @@ export interface ScheduleOptions<TContext = ContextData, I = unknown, O = unknow
   extends StepReplay<TContext, I> {
   /** Unique step identifier used in traces and error messages. */
   id: string;
-  /** Body step executed on each iteration. */
-  step: Step<TContext, I, O>;
+  /** Body executed on each iteration: a step, or an array of steps run in sequence. */
+  step: Steps<TContext, I, O>;
   /** Park duration between iterations in milliseconds. Must be >= 0. */
   interval: number;
   /** Optional channel that wakes the parking interval when any value arrives. */
@@ -86,7 +87,7 @@ export function schedule<TContext = ContextData, I = unknown, O = unknown>(
   const built: StepSchedule<TContext, I, O> = {
     kind: 'schedule',
     id: opts.id,
-    step: opts.step,
+    step: toStep(opts.step),
     interval: opts.interval,
     inbox: opts.inbox,
     onError: opts.onError ?? 'continue',

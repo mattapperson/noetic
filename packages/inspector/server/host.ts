@@ -24,7 +24,7 @@ import { existsSync, mkdirSync, rmSync, watch } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { Subprocess } from 'bun';
-import { CORS_HEADERS, createSseHub, jsonResponse } from './sse';
+import { CORS_HEADERS, createSseHub, jsonResponse } from './sse-hub';
 import { collectTypeLibs } from './type-libs';
 import type { ChildState, ConsoleLine, HostEvent, HostFrame } from './wire-types';
 

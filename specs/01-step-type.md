@@ -22,7 +22,59 @@ type Step<I, O> =
   | { kind: 'spawn';   id: string; child: Step<I, O>; context?: ContextLayer[]; timeout?: number; subprocess?: SubprocessAdapter }
   | { kind: 'withContext'; id: string; child: Step<I, O>; context: ContextConfig | ContextLayer[] }
   | { kind: 'loop';    id: string; steps: ReadonlyArray<Step<I, O>>; until: Until | StepDecide; maxIterations?: number; maxHistorySize?: number; prepareNext?: (output: O, verdict: Verdict, ctx: Context) => I; onError?: (error: NoeticError, ctx: Context) => 'retry' | 'skip' | 'abort' }
+  | { kind: 'sequence'; id: string; steps: ReadonlyArray<Step<I, O>> }
 ```
+
+### Arrays of steps
+
+An array of steps runs in sequence, each step's output the next one's input.
+These take a step or an array, and turn an array into a step with `toStep`:
+`harness.run` and `ctx.harness.run`, `harness.detachedSpawn` and
+`ctx.harness.detachedSpawn`, a harness's `agentGraph`, `spawn` and
+`withContext` children, `schedule` bodies, each `inParallel` path, a
+`conditional` route's pick, and the `when`/`otherwise` clauses of
+`semanticRoute`. There is no `step.sequence` builder. `toStep` turns an array
+of two or more steps into a `sequence` step (one step is itself; an empty
+array is `EMPTY_STEP_ARRAY`), whose id joins its children's ids with ` > ` and
+whose `steps` is a frozen copy of the array, so changing the array afterwards
+changes nothing. Every element must be a step — an object with a known step
+`kind` and a string `id` — or the array is `INVALID_STEP_IN_ARRAY`; a nested
+array is rejected, not flattened (spread it into its parent instead). The
+interpreter runs each child as its own step, with its own ledger path, events
+and gates. Tree walks (tool collection, custom items, connection needs, the
+optimizer) see through it: the optimizer gives a sequence's children the
+paths they would have as siblings.
+
+Three places take a list of single steps and run it in sequence themselves,
+without a `sequence` step: a `loop`'s `steps` (each iteration), a wait's
+`around` and a verify's `act`. Their elements are single steps. A
+`decide`/`routeSwitch` case, `uncertain` and `default`, and a loop's `until`
+decide step take a single step only.
+
+`Step` is invariant in `I` and `O`, so an array is typed by its elements
+rather than by one `Step<I, O>`. Every step carries a type-only marker,
+`'~types'?: StepTypes<I, O>`, that nothing sets at runtime; it lets an
+element's input and output be read without `Step`'s invariance. An element is
+a `StepLike`: an object with a step kind and that kind's required fields, so a
+bare `{ kind, id }` lookalike is not one. `run` and `detachedSpawn` infer the
+array as a tuple and check every link with `ValidStepChain<T>`: each step must
+take the previous step's output (a previous output typed `unknown`, as a
+`call` gives, is not checked), and an empty tuple is rejected. Their input is
+the first step's (`StepsInput<T>`, `StepArrayInput<T>`) and their output the
+last step's (`StepsOutput<T>`, `StepArrayOutput<T>`), so
+`harness.run([parse, count], text, ctx)` takes what `parse` takes and gives
+what `count` gives. They also take an array of unknown length — a
+`Step<C, T, T>[]` variable — and a `Steps<C, I, O>` value passed through
+generic code.
+
+Where a type has no parameter per element, `Steps<TContext, I, O>` is what a
+builder takes: a `Step<TContext, I, O>`, a `StepChain<I, O>` (a non-empty
+tuple whose first step takes `I` and last step outputs `O`; the links between
+are not checked) or `HomogeneousSteps<TContext, I, O>` (an array of
+`Step<TContext, T, T>` when `I` and `O` are both `T`). So
+`spawn<C, string, string>({ child: [toNumber, toText] })` and
+`agentGraph: [toNumber]` are checked at their ends, and only `run` and
+`detachedSpawn` check the middle links.
 
 Every variant also carries the replay controls from `StepReplay`, omitted above for width:
 

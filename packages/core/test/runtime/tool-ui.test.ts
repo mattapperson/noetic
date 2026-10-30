@@ -3,7 +3,7 @@ import type { ContextData } from '@noetic-tools/context';
 import type { Context, StepInvokeTool, StreamEvent, Tool } from '@noetic-tools/types';
 import { frameworkCast } from '@noetic-tools/types';
 import { z } from 'zod';
-import { executeInvokeTool } from '../../src/interpreter/execute-action';
+import { executeInvokeTool } from '../../src/interpreter/execute-invoke-tool';
 import { emitToolUi } from '../../src/runtime/tool-ui';
 import { makeMockContext, makeMockHarness } from '../_helpers';
 

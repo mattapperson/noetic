@@ -28,7 +28,7 @@ import type {
 } from '../runtime/durable/spend-log';
 import { isUnreadable } from '../runtime/durable/spend-log';
 import { hashText } from '../runtime/durable/step-ledger';
-import { statusOf } from '../util/status-code';
+import { isErrorStatus, statusOf } from '../util/status-code';
 import type { EventBroadcaster } from './deps/runtime';
 import { ContextImpl, laneBase } from './deps/runtime';
 import type { ModelPrice } from './model-price';
@@ -552,6 +552,11 @@ export class Dispatch {
     }
     this.record.generationId = generationId;
     return this.queue('write', () => this.log.put(this.record));
+  }
+
+  /** The provider refused the call before generating anything, so nothing was billed. */
+  wasRefused(err: unknown): boolean {
+    return isErrorStatus(err) && this.record.generationId === undefined;
   }
 
   /** The call's bill reached the run, or the provider refused it: drop the record. */

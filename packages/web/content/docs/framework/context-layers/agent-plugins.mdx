@@ -18,7 +18,7 @@ description: A conformant Agent Plugins v1 client — discovers plugin packages 
 - **[Placement](/docs/framework/context-layers#prompt-cache-anchoring)**: `'anchor'` — the skill index is identical every turn, so it belongs in the cache-stable prefix
 
 <Callout type="info">
-This layer ships in its own package, `@noetic-tools/agent-plugins`, not in `@noetic-tools/core`. It depends on the MCP SDK and spawns subprocesses, and neither belongs in core's dependency graph.
+This layer ships in its own package, `@noetic-tools/agent-plugins`, not in `@noetic-tools/core`. It connects MCP servers through [`@noetic-tools/mcp`](/docs/framework/connections) and spawns subprocesses, and neither belongs in core's dependency graph.
 </Callout>
 
 ## Installation
@@ -208,6 +208,22 @@ The layer enforces the specification's containment rules, which matter because a
 - A plugin's configured `Authorization`, `mcp-session-id`, and other client-owned headers are dropped rather than sent, per the specification's precedence rule — otherwise a plugin could replace the agent's own credentials. Each drop is reported as a diagnostic.
 - Plugin-controlled text (descriptions, skill bodies) cannot forge this layer's own context tags, so a plugin cannot close the block and append text the model would read as a system instruction.
 - Configured `env` values and MCP headers are visible package data. The specification is explicit that they are not a secret mechanism; do not put credentials in either.
+
+## Plugin servers as connections
+
+Plugin MCP servers are connected through [`@noetic-tools/mcp`](/docs/framework/connections), the same bridge a harness uses for its own [connections](/docs/framework/connections). Each one is a connection with no [profile](/docs/framework/connection-profiles): its tools pass through as they are, and it has no reads, events, or verification. So a plugin's tools and a configured server's tools share one naming rule and one set of [gates](/docs/framework/connections#gates), and binary tool output is stored in an artifact store as a blob reference rather than inlined.
+
+A host that wants a plugin server under its harness `connections` — to give it a `policy`, or to drive it from `step.call` — gets its provider from `pluginMcpProvider()`. It applies the same environment allowlist and header filtering as the layer, and never forwards headers across an origin-changing redirect:
+
+```ts validate=none
+import { pluginMcpProvider } from '@noetic-tools/agent-plugins';
+
+const provider = pluginMcpProvider({ server, pluginRoot, pluginData });
+
+new AgentHarness({ name: 'agent', params: {}, connections: { search: { provider, policy: { deny: ['*_delete'] } } } });
+```
+
+A stdio server's `PLUGIN_DATA` directory must exist before it launches; `connectMcpServer()` creates it, or create it yourself before the harness starts.
 
 ## Client extensions
 

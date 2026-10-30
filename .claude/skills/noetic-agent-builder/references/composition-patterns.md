@@ -1499,3 +1499,132 @@ chat.onSubscribedMessage(noeticAgent({
 - **Streaming is turn-scoped.** Each incoming message becomes one harness turn; the translated stream terminates at `turn_completed`, which is what resolves `thread.post()`. Tool calls render as `task_update` cards on Slack/Linear and degrade elsewhere.
 - **History survives restarts** with a store: threads seed from persisted items instead of refetching the platform, and completed model items pump from `getItemStream` into the store.
 - **Approvals flow through external channels.** A gated tool parks; ONE integration observer per harness watches `harness.getChannelStream(approvalRequests, APPROVAL_SCOPE)` (a never-closed lifetime scope — no execution id needed), routes the card by `request.threadId`, and the click calls `resolveApproval({harness, decision})`. Rejections surface to the model as tool errors; Chat SDK's write tools stay gated by default.
+
+## Pattern: Browser Agent over MCP
+
+Give the model a live browser. Any MCP server is a connection; its tools reach the model as `<name>_<tool>` and pass the same gates as every other tool.
+
+```typescript
+import { AgentHarness, callModel, loop, until } from '@noetic-tools/core';
+import { mcp } from '@noetic-tools/mcp';
+
+const harness = new AgentHarness({
+  name: 'browser-agent',
+  params: {},
+  connections: { browser: mcp('npx @playwright/mcp@latest') },
+  agentGraph: loop({
+    id: 'agent',
+    steps: [callModel({ id: 'turn', model: 'anthropic/claude-sonnet-4.5', instructions: 'Use the browser.' })],
+    until: until.noToolCalls(),
+  }),
+});
+
+await harness.execute('Open example.com and follow the "More information" link');
+```
+
+- A server that declares a profile (`browser@1`) gets eager tools plus `browser_ops` / `browser_call`, a per-turn view of its state (`look`), events, and verification. Pass `mcp(server, { profiles: [browser] })` so the bridge can check the declaration.
+- Destructive operations (profile `guarded`) need approval unless `policy.allow` covers them.
+
+## Pattern: Verified Action (step.verify)
+
+Don't trust "it works" — check it from outside. Declare what must become true, perform the action, and read the answer with its evidence.
+
+```typescript
+import { AgentHarness, conditional, connection, step } from '@noetic-tools/core';
+import { browser } from '@noetic-tools/profile-browser';
+import { net, ui, verifier } from '@noetic-tools/verify';
+
+const app = connection('app', browser, { from: 'browsers', fresh: 'run', setup: { url: previewUrl } });
+
+const login = [
+  step.call({ id: 'email', connection: app, op: 'ui.fill', args: { element: 'textbox "Email"', text: 'qa@example.com' } }),
+  step.call({ id: 'password', connection: app, op: 'ui.fill', args: { element: 'textbox "Password"', text: secret('app.password') } }),
+  step.call({ id: 'sign-in', connection: app, op: 'ui.tap', args: { element: 'button "Sign in"' } }),
+];
+
+const checkout = step.verify({
+  id: 'checkout',
+  subject: app,
+  intent: 'Paying places exactly one order',
+  expect: [net('POST /api/orders 201').once(), ui('heading "Order confirmed"')],
+  never: [net('5xx')],
+  act: step.call({ id: 'pay', connection: app, op: 'ui.tap', args: { element: 'button "Pay"' } }),
+});
+
+const flow = [...login, checkout];  // an array runs in sequence
+// new AgentHarness({ connections: { browsers: { provider, pool: { max: 4 } } }, verification: verifier(), environment: { secrets } })
+```
+
+- `outcome` is `pass` / `fail` / `partial` / `unknown`; branch on it (`conditional`, or `$steps.checkout.outcome` in JSON). It never throws for a `no`.
+- `gaps` explain an `unknown` (overflowed listener, dropped stream, redacted value, still-in-flight work). A claim already true before `act` is `unknown` — reset state first.
+- For a write that must land in a database, add a look-only witness (`witnesses: ['orders']`) and an `x-` sense matcher.
+- Run the same check on two platforms with `subject: [ios, android]` — output `{ outcome, subjects }`.
+
+## Pattern: Ask a Person, Wait for the Answer
+
+`step.wait` with `around` starts listening before the question is posted, so a fast reply cannot be missed.
+
+```typescript
+import { connection, refId, step, type ContextData, type Ref } from '@noetic-tools/core';
+import { chat, ChatMessageSchema } from '@noetic-tools/profile-chat';
+
+const team = connection('team', chat);
+
+const ask = step.call({ id: 'post', connection: team, op: 'chat.post', args: { channel, text: 'Deploy api@1.4?' } });
+const approval = step.wait<ContextData, { thread: Ref<'chat.thread'> }>({
+  id: 'approval', connection: team, event: 'chat.message.created',
+  filter: (e, posted) => {
+    const m = ChatMessageSchema.parse(e.payload);
+    return refId(m.thread) === refId(posted.thread) && /approve/i.test(m.text);
+  },
+  timeoutMs: 18e5,
+});
+const gate = [ask, approval];   // runs in sequence; the wait's input is the post's output
+```
+
+If no matching event arrives within `timeoutMs` the wait fails with `step_failed`; an event stream that ends fails it with `connection_unavailable`. Here the wait starts listening only after the post, which is fine for a human reply; wrap the post in `around` when the event can follow the action immediately. A bot that answers every message belongs on `@noetic-tools/chat-sdk`; chat connections are for agents that start conversations or wait on people.
+
+## Pattern: Event-Driven Agent (Triggers + Sources)
+
+```typescript
+import { AgentHarness, cron, defineSource } from '@noetic-tools/core';
+
+const deploys = defineSource({ events: { 'deploy.failed': DeployFailedSchema } });
+
+const harness = new AgentHarness({
+  name: 'on-call',
+  params: {},
+  agentGraph: triageLoop,
+  connections: { deploys, morning: cron('0 8 * * 1-5', { timezone: 'Europe/London' }) },
+  triggers: [
+    { id: 'failures', connection: 'deploys', event: 'deploy.failed',
+      input: (e) => `Deploy failed: ${JSON.stringify(e.payload)}`, thread: (e) => `deploy-${e.id}` },
+    { id: 'standup', connection: 'morning', event: 'tick', input: () => 'Summarize overnight incidents' },
+  ],
+});
+
+await harness.start();                       // a trigger-only harness must start itself
+await deploys.emit({ type: 'deploy.failed', id: 'run-42', payload: { service: 'api' } });  // push from host code
+```
+
+Each event is delivered once (durable inbox + cursor), as a turn whose message id is `<connection>:<trigger>:<event id>`; the event is on the turn as a `noetic:connection_event` item.
+
+## Pattern: Connection Workflow as JSON
+
+```json
+{
+  "version": 1,
+  "connections": { "app": { "profile": "browser@^1", "from": "browsers", "fresh": "path", "setup": { "url": "http://localhost:5173" } } },
+  "root": { "kind": "sequence", "id": "main", "steps": [
+    { "browser.navigate": { "url": "http://localhost:5173/cart" } },
+    { "kind": "verify", "id": "checkout", "subject": "app",
+      "expect": [{ "net": "POST /api/orders 201", "count": 1 }],
+      "act": [{ "ui.tap": { "element": "button \"Pay\"" } }] },
+    { "kind": "conditional", "id": "report",
+      "routes": [{ "expr": "$steps.checkout.outcome = 'pass'", "target": { "kind": "compute", "id": "ok", "expr": "'checkout ok'" } }],
+      "default": { "kind": "callModel", "id": "explain", "instructions": "Explain the failed checkout from the verification gaps." } }
+  ] }
+}
+```
+
+Run it with `parseAndRunWorkflow({ json, harness, ctx, tools, connections: { browsers: { ops: ['ui.*', 'browser.*'], setup: { url: ['http://localhost:*'] } } } })`. A model-written document (`dynamicWorkflow({ connections })`) is only ever shown — and only ever allowed — the allowlisted connections and operations.

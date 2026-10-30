@@ -1,38 +1,15 @@
-import type { ContextData, ContextLayer, LayerStateStore } from '@noetic-tools/context';
-import type {
-  Context,
-  Item,
-  Step,
-  StepRunCode,
-  StepSpawn,
-  StepSubprocessRequest,
-  StorageAdapter,
-  SubprocessAdapter,
-} from '@noetic-tools/types';
+import type { ContextData } from '@noetic-tools/context';
+import type { Context, Item, Step } from '@noetic-tools/types';
 import { frameworkCast, NoeticErrorImpl } from '@noetic-tools/types';
+import { recordedScopeOf, recordStepOutput } from '../expression/step-outputs';
 import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../runtime/broadcaster-utils';
 import { ContextImpl } from '../runtime/context-impl';
 import { drainsOf } from '../runtime/drain';
 import type { StepLedger } from '../runtime/durable/step-ledger';
 import { REPLAY_KEY_PREFIX } from '../runtime/durable/step-ledger';
 import type { EventBroadcaster } from '../runtime/event-broadcaster';
-import { DetachedHandleImpl } from '../util/detached-handle';
 import { allowCustomItems, appendReplayed, beginEmitItems, emitStepItems } from './emit-items';
-import { executeAcpAgent } from './execute-acp-agent';
-import {
-  executeCallModel,
-  executeInvokeTool,
-  executeRunCode,
-  executeSpawn,
-  executeWithContext,
-} from './execute-action';
-import {
-  executeConditional,
-  executeInParallel,
-  executeLoop,
-  executeSchedule,
-} from './execute-control';
-import { executeDecide } from './execute-decide';
+import { dispatchStepKind, executeLocally } from './step-kind-dispatch';
 import { isMutableContext } from './typeguards';
 
 //#region Constants
@@ -54,40 +31,6 @@ function asContextImpl(ctx: Context): ContextImpl | null {
 }
 
 /**
- * Extract the parent's context layers and layer-state store so `executeSpawn`
- * can propagate them to the child context per `specs/04-spawn.md`: when a
- * spawn step has no explicit `context` config, parent layers inherit and their
- * `onSpawn`/`onReturn` hooks run across the boundary.
- *
- * `ctx.harness.layerStateStore` is not on the public `AgentHarnessContract`
- * (it's an internal runtime surface). Accessing it via `frameworkCast`
- * matches the internal-only pattern used elsewhere in the interpreter.
- */
-interface HarnessWithLayerStore {
-  layerStateStore: LayerStateStore;
-  config?: {
-    storage?: StorageAdapter;
-  };
-}
-
-function harnessWithLayerStore<TContext>(ctx: Context<TContext>): HarnessWithLayerStore {
-  return frameworkCast<HarnessWithLayerStore>(ctx.harness);
-}
-
-function buildSpawnOpts<TContext>(ctx: Context<TContext>): {
-  itemSchemas: Context['itemSchemas'];
-  parentLayers: ContextLayer[] | undefined;
-  layerStore: LayerStateStore;
-} {
-  const baseCtx = frameworkCast<Context>(ctx);
-  return {
-    itemSchemas: baseCtx.itemSchemas,
-    parentLayers: baseCtx.layers,
-    layerStore: harnessWithLayerStore(baseCtx).layerStateStore,
-  };
-}
-
-/**
  * Resolve the per-step framework-event emit option. `callModel`, `decide`, and
  * the harness step kinds carry an `emit` field; every other kind defaults to
  * enabled.
@@ -99,62 +42,6 @@ function resolveStepEmit<TContext, I, O>(
     return step.emit;
   }
   return undefined;
-}
-
-/**
- * Resolve the subprocess adapter that should handle dispatch for this step.
- * Precedence is `step.subprocess ?? ctx.harness.subprocess`. Per-call
- * `detachedSpawn` overrides layer above this in the harness itself.
- */
-function resolveStepAdapter<TContext, I, O>(
-  step: Step<TContext, I, O>,
-  ctx: Context<TContext>,
-): SubprocessAdapter {
-  if ((step.kind === 'runCode' || step.kind === 'spawn') && step.subprocess) {
-    return step.subprocess;
-  }
-  return ctx.harness.subprocess;
-}
-
-/**
- * Dispatch a run/spawn step through the resolved subprocess adapter.
- *
- * The `_localExecutor` closure carries the in-process fallback path — the
- * in-memory adapter invokes it directly, preserving the pre-refactor
- * dispatch semantics including parent-context inheritance, layer lifecycle,
- * and synchronous error propagation. Out-of-process adapters ignore
- * `_localExecutor` and run the step in a child runtime.
- *
- * `executionId` names the context the step body runs in: `ctx.id` for a
- * `runCode`, the pre-allocated child id for a `spawn` (whose request then
- * also names `ctx` as the parent).
- */
-async function dispatchViaAdapter<TContext, I, O>(
-  step: StepRunCode<TContext, I, O> | StepSpawn<TContext, I, O>,
-  input: I,
-  ctx: Context<TContext>,
-  executionId: string,
-  executor: () => Promise<O>,
-): Promise<O> {
-  const adapter = resolveStepAdapter(step, ctx);
-  const request: StepSubprocessRequest = {
-    kind: 'step',
-    stepId: step.id,
-    serializedInput: input,
-    executionId,
-    parentExecutionId: executionId === ctx.id ? undefined : ctx.id,
-    overrides: {
-      threadId: ctx.threadId,
-      resourceId: ctx.resourceId,
-    },
-    _localExecutor: () => executor(),
-  };
-  const handle = new DetachedHandleImpl<O>({
-    id: executionId,
-    stepId: step.id,
-    spawned: adapter.spawn(request),
-  });
-  return handle.await();
 }
 
 /**
@@ -174,19 +61,7 @@ export async function executeNoAdapter<TContext, I, O>(
   input: I,
   ctx: Context<TContext>,
 ): Promise<O> {
-  switch (step.kind) {
-    case 'runCode':
-      return executeRunCode(step, input, ctx);
-    case 'spawn':
-      return executeSpawn(step, input, ctx, (s, i, c) => execute(s, i, c), buildSpawnOpts(ctx));
-    default:
-      // Kinds that don't currently route through the adapter (callModel,
-      // invokeTool, conditional, inParallel, withContext, loop, schedule).
-      // Delegate back to `execute()`
-      // so they exercise the normal dispatch table, framework-event emits,
-      // abort checks, and depth guard.
-      return execute(step, input, ctx);
-  }
+  return executeLocally(step, input, ctx, (s, i, c) => execute(s, i, c));
 }
 
 /**
@@ -440,78 +315,44 @@ export async function execute<TContext = ContextData, I = unknown, O = unknown>(
   });
   if (replay.hit) {
     lane?.leaveStep(frame);
+    const replayScope = recordedScopeOf(step);
+    if (replayScope) {
+      recordStepOutput(
+        baseCtx,
+        {
+          scope: replayScope,
+          id: step.id,
+        },
+        replay.output,
+      );
+    }
     return replay.output;
   }
 
   let result: O;
   try {
     await beginEmitItems(step, input, stepCtx);
-    switch (step.kind) {
-      case 'runCode':
-        result = await dispatchViaAdapter(step, input, stepCtx, stepCtx.id, () =>
-          executeRunCode(step, input, stepCtx),
-        );
-        break;
-      case 'callModel':
-        result = await executeCallModel(step, input, stepCtx, baseCtx.layers);
-        break;
-      case 'acp-agent':
-        result = await executeAcpAgent(step, input, stepCtx, baseCtx.layers);
-        break;
-      case 'invokeTool':
-        result = await executeInvokeTool(step, input, stepCtx, baseCtx.harness, baseCtx.layers);
-        break;
-      case 'decide':
-        result = await executeDecide(step, input, stepCtx, baseCtx.layers);
-        break;
-      case 'conditional':
-        result = await executeConditional(step, input, stepCtx, (s, i, c) => execute(s, i, c));
-        break;
-      case 'inParallel':
-        result = await executeInParallel(step, input, stepCtx, (s, i, c) => execute(s, i, c), {
-          // Fork paths are child executions: the layer store lets their
-          // `onSpawn`/`onReturn` boundary run (see `createForkLayerBridge`).
-          layerStore: harnessWithLayerStore(baseCtx).layerStateStore,
-          itemSchemas: baseCtx.itemSchemas,
-        });
-        break;
-      case 'spawn': {
-        // Allocated here so the adapter request names the child it runs.
-        const childId = crypto.randomUUID();
-        result = await dispatchViaAdapter(step, input, stepCtx, childId, () =>
-          executeSpawn(step, input, stepCtx, (s, i, c) => execute(s, i, c), {
-            ...buildSpawnOpts(stepCtx),
-            childId,
-          }),
-        );
-        break;
-      }
-      case 'withContext':
-        result = await executeWithContext(step, input, stepCtx, (s, i, c) => execute(s, i, c), {
-          layerStore: harnessWithLayerStore(baseCtx).layerStateStore,
-          storage: harnessWithLayerStore(baseCtx).config?.storage,
-        });
-        break;
-      case 'loop':
-        result = await executeLoop(step, input, stepCtx, (s, i, c) => execute(s, i, c));
-        break;
-      case 'schedule':
-        result = await executeSchedule(step, input, stepCtx, (s, i, c) => execute(s, i, c));
-        break;
-      default: {
-        const _exhaustive: never = step;
-        void _exhaustive;
-        throw new NoeticErrorImpl({
-          kind: 'step_failed',
-          stepId: 'unknown',
-          cause: new Error('Unknown step kind'),
-          retriesExhausted: false,
-        });
-      }
-    }
+    result = await dispatchStepKind(step, input, {
+      stepCtx,
+      baseCtx,
+      ledgerKey,
+      executeStep: (s, i, c) => execute(s, i, c),
+    });
     // Inside the try, so an item the schemas refuse fails the dispatch like any other
     // error; before the ledger record, so the entry holds the items and replays them.
     await emitStepItems(step, result, stepCtx);
+    // A JSON workflow node's output is readable as `$steps.<id>` from here on (spec 33).
+    const outputScope = recordedScopeOf(step);
+    if (outputScope) {
+      recordStepOutput(
+        baseCtx,
+        {
+          scope: outputScope,
+          id: step.id,
+        },
+        result,
+      );
+    }
   } catch (error) {
     lane?.releaseDispatch();
     drains?.release(frameworkCast<Context>(stepCtx));

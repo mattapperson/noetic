@@ -27,9 +27,16 @@ A workflow document is a versioned envelope around a single root node:
 ```typescript
 interface WorkflowDocument {
   version: 1;
+  customItems?: Record<string, WorkflowCustomItem>;
+  connections?: Record<string, WorkflowConnectionRequirement>;
   root: WorkflowNode;
 }
 ```
+
+`connections` lists the connections the document needs, each with a semver
+range for its profile and extensions (or the events a source must offer);
+every operation and event a node uses must come from it, and a host allowlist
+bounds what a document may ask for. See `35-connections` § JSON workflows.
 
 The `version` field enables forward-compatible parsing. Consumers reject documents with an unrecognised version rather than silently misinterpreting them.
 
@@ -567,6 +574,7 @@ interface HydrationContext {
   executeStep: ExecuteStepFn;
   layers?: ReadonlyMap<string, ContextLayer>;
   acpAgents?: ReadonlyMap<string, AcpAgent>;
+  bindings?: Readonly<Record<string, string | ReadonlyArray<string>>>;
   uiLibraries?: ReadonlyMap<string, OutputCodec>;
   resolveSubprocess?: (ref: string) => SubprocessAdapter | undefined;
   workflows?: ReadonlyMap<string, WorkflowDocument>;
@@ -582,6 +590,7 @@ interface HydrationContext {
 | `executeStep`        | Yes      | The interpreter's `execute` function, threaded for recursive calls.      |
 | `layers`             | No       | Named context layers for `withContext` nodes and `spawn.layers`.              |
 | `acpAgents`          | No       | ACP agent adapters keyed by `agentId` (`claude-code`, `codex`, …). Open set. |
+| `bindings`           | No       | Document connection name → harness connection name, when they differ (spec 35). Connection nodes resolve connections through the harness registry when they run. |
 | `uiLibraries`        | No       | Output codecs for `callModel` nodes' `output` codec references.                |
 | `resolveSubprocess`  | No       | Resolves a named subprocess adapter ref on a `runCode` node.                 |
 | `workflows`          | No       | Named sub-workflow documents that `subflow` nodes resolve via `ref`.     |
@@ -863,6 +872,7 @@ The JSON Workflow Runtime introduces the following `NoeticConfigError` codes:
 | `UNKNOWN_ACP_AGENT_REFERENCE`  | An `acp-agent` node's adapter is not registered.                         |
 | `UNKNOWN_UI_LIBRARY_REFERENCE` | A `callModel` node's `output.library` is not in the codec registry.           |
 | `UNKNOWN_SUBPROCESS_REFERENCE` | A `runCode` node's `subprocess` ref cannot be resolved.                      |
+| `CONNECTION_UNKNOWN`           | A node names a connection the manifest or harness does not have. Other connection codes are in `35-connections` § Errors. |
 | `UNKNOWN_UNTIL_PREDICATE`      | An until predicate kind is unrecognised.                                 |
 | `INVALID_UNTIL_DECIDER`        | A decide until predicate does not ask exactly one boolean question (raised at hydration by `loop`/`any`/`all`). |
 | `UNKNOWN_WORKFLOW_REFERENCE`   | A `subflow` ref names no registered workflow (raised at execution time). |
@@ -1005,6 +1015,9 @@ const WorkflowDocumentSchema = z.object({
 - `Context`, `Item`, `ItemLog`: `07-context-and-event-log`
 - `AgentHarness`, `Tool`: `08-runtime`
 - `NoeticError` kinds: `09-error-model`
+- `call` and `wait` nodes, operation shorthand, the `connections` manifest, and `$secret` / `$blob` / `$ref` values: `35-connections`
+- The `verify` node: `37-verification`
+- Profiles and extensions the manifest names: `36-connection-profiles`
 - `Expression`, `ExpressionSchema`, `ExpressionLimits`, the JSONata adapter, and the `compute` / `expr` semantics: `33-expressions`
 - `decide` nodes and `routeSwitch`, including deciders as until predicates: `32-decide`
 - `ContextLayer`: `11-context-layer-system`

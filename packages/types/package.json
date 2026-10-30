@@ -1,6 +1,6 @@
 {
   "name": "@noetic-tools/types",
-  "version": "3.17.0",
+  "version": "3.18.0-next.1",
   "type": "module",
   "description": "Foundational type contracts and primitives shared across the Noetic framework (items, LLM config, adapters, steering, errors).",
   "license": "Apache-2.0",
@@ -31,6 +31,11 @@
       "bun": "./src/types/context-layer.ts",
       "types": "./dist/types/context-layer.d.ts",
       "default": "./dist/types/context-layer.js"
+    },
+    "./verify": {
+      "bun": "./src/verify/index.ts",
+      "types": "./dist/verify/index.d.ts",
+      "default": "./dist/verify/index.js"
     },
     "./package.json": "./package.json"
   },

@@ -1,8 +1,9 @@
 import type { StandardSchemaV1 } from '@standard-schema/spec';
 import type { Channel, ChannelHandle, ExternalChannel } from './channel';
 import type { LLMResponse, ModelParams, RoundUsage, ServerToolSpec, ToolChoice } from './common';
-import type { Context, CwdState, RestoreContextOptions } from './context';
+import type { Context, RestoreContextOptions } from './context';
 import type { ContextCacheConfig, ContextCacheStore } from './context-cache';
+import type { ContextDetachedSpawnOverrides } from './context-harness';
 import type {
   ContextData,
   ContextLayer,
@@ -11,14 +12,12 @@ import type {
   StorageAdapter,
 } from './context-layer';
 import type { DetachedHandle } from './detached';
-import type { FsAdapter } from './fs-adapter';
 import type { HarnessJudgmentContract, ToolApprover } from './harness-judgment';
+import type { HarnessPlatform } from './harness-platform';
 import type { HarnessResponse, StreamEvent, StreamingItem } from './harness-result';
 import type { ExecuteInput, Item, ItemSchemaExtensions } from './items';
 import type { Span, TraceExporter } from './observability';
-import type { ShellAdapter } from './shell-adapter';
-import type { Step } from './step';
-import type { SubprocessAdapter } from './subprocess-adapter';
+import type { Step, StepLike, StepsInput, StepsOutput, ValidStepChain } from './step';
 import type { Tool } from './tool';
 
 /** @public Optional lifecycle hooks invoked before and after each step execution. */
@@ -355,14 +354,9 @@ export interface ExecutionScope {
 /** @public Type-level contract for the agent runtime. Used for type annotations throughout the interpreter, context layers, and context. Implemented by `AgentHarness`. */
 export interface AgentHarnessContract<
   TParams extends Record<string, unknown> = Record<string, unknown>,
-> extends HarnessJudgmentContract {
+> extends HarnessJudgmentContract,
+    HarnessPlatform {
   readonly config: AgentConfig<TParams>;
-  /** Filesystem adapter for virtual or real filesystem access. */
-  readonly fs: FsAdapter;
-  /** Shell adapter for virtual or real shell command execution. */
-  readonly shell: ShellAdapter;
-  /** Subprocess adapter for virtual, same-process, or host process execution. */
-  readonly subprocess: SubprocessAdapter;
   callModel(request: CallModelRequest): Promise<LLMResponse>;
 
   /**
@@ -421,7 +415,13 @@ export interface AgentHarnessContract<
    */
   seedSessionHistory(threadId: string, items: ReadonlyArray<Item>): void;
 
+  /** Runs a step, or an array of steps in sequence (each output the next one's input). */
   run<I, O>(step: Step<ContextData, I, O>, input: I, ctx: Context): Promise<O>;
+  run<const T extends StepLike | ReadonlyArray<StepLike>>(
+    steps: T & ValidStepChain<T>,
+    input: StepsInput<T>,
+    ctx: Context,
+  ): Promise<StepsOutput<T>>;
   /**
    * Launch `step` as a fire-and-forget background execution.
    *
@@ -441,13 +441,15 @@ export interface AgentHarnessContract<
     step: Step<ContextData, I, O>,
     input: I,
     parentCtx: Context,
-    overrides?: {
-      threadId?: string;
-      resourceId?: string;
-      /** Override the child's initial cwd. Used by worktree isolation to root the child at the worktree path. */
-      cwdInit?: string;
-    },
+    overrides?: ContextDetachedSpawnOverrides,
   ): DetachedHandle<O>;
+  /** An array of steps, launched as one background execution that runs them in sequence. */
+  detachedSpawn<const T extends StepLike | ReadonlyArray<StepLike>>(
+    steps: T & ValidStepChain<T>,
+    input: StepsInput<T>,
+    parentCtx: Context,
+    overrides?: ContextDetachedSpawnOverrides,
+  ): DetachedHandle<StepsOutput<T>>;
   createContext(opts?: {
     parent?: Context;
     /**
@@ -466,10 +468,6 @@ export interface AgentHarnessContract<
     /** Override the new context's initial cwd. */
     cwdInit?: string;
   }): Context;
-  /** Long-lived shared cwd state seeded into root contexts created by this harness. */
-  readonly rootCwdState: CwdState;
-  /** Update the harness root cwd. Used by the TUI when the user issues a `! cd`. */
-  setRootCwd(nextCwd: string): void;
   /**
    * Internal-sender channel write (back-pressured): resolves immediately
    * unless the queue channel is at capacity, in which case it parks until a

@@ -196,6 +196,22 @@ Mechanical migration:
 - Importing `@noetic/platform-browser` similarly produces no `node:*` references.
 - Importing `@noetic-tools/platform-node` may reference `node:*`; bundling for a browser target surfaces the mismatch as a build-time error, which is the desired behaviour.
 
+## File Artifact Store
+
+`@noetic-tools/platform-node` provides `createFileArtifactStore({ dir,
+retention })`, the Node implementation of the `ArtifactStore` contract
+(`08-runtime` § Artifact Store). Blobs are written once under
+`<dir>/sha256/<aa>/<hex>` with a sidecar metadata file, and each run's manifest
+under `<dir>/runs/<executionId>.json`. `@noetic/platform-browser` re-exports
+core's in-memory store; a browser host may implement the contract over
+IndexedDB or a remote store.
+
+## Webhook Receiver
+
+`@noetic-tools/platform-node` provides `createWebhookReceiver({ port, publicUrl })`, an HTTP receiver passed to `mcp({ webhooks })` for servers that deliver events by webhook (`35-connections` § Events). `@noetic/platform-browser` provides none; a serverless host implements the contract over its own routing.
+
+The contract `mcp()` consumes is transport only: `register(handler)` opens an endpoint and returns `{ url, close() }`; each POST reaches `handler` as `{ headers, body }` (lowercase header names, raw body text) and is answered with the `{ status }` the handler returns. `mcp()` verifies deliveries itself with the secret it sent in `events/subscribe`. The Node receiver also accepts `register({ onDelivery, secret?, signal? })`, for which it verifies each delivery (Standard Webhooks signature, five-minute timestamp window, duplicate ids) before calling `onDelivery`. Either way it refuses methods other than POST (405), bodies over `maxBodyBytes` (413) and unknown or closed endpoints (404).
+
 ## Future Considerations
 
 - **`@noetic/platform-deno` / `@noetic/platform-bun`**: if divergence between runtimes grows large enough, per-runtime packages with their own adapter implementations may land. The current `createLocalFsAdapter` works under Bun via Node API compatibility, so this is not yet needed.

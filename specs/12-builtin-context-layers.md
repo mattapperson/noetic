@@ -579,6 +579,14 @@ These layers all use `execution` scope and `Slot.PROCEDURAL` (250) or `Slot.OBSE
 
 ---
 
+## Connection views
+
+Every connection whose profile names state worth reading gets a context layer,
+added automatically, that renders it within its own budget: each read on its
+`look` mode (`'turn'`, `'effect'` or `'ask'`), repeated reads as diffs, and
+blob references as image content (`35-connections` § Looking). It reads in
+`recall` and is not constructed by hand.
+
 ## Future Considerations
 
 ### taskState: disk fallback, git integration, custom serialization (Not Yet Designed)

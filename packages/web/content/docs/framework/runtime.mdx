@@ -73,6 +73,9 @@ const harness = new AgentHarness({
 | `traceExporter` | `TraceExporter` | `NoopExporter` | Where to send completed spans. |
 | `defaultDeliveryMode` | `DeliveryMode` | `'next-turn'` | Default delivery mode for messages that don't specify one. |
 | `initialCwd` | `string` | `process.cwd()` | Initial working directory seeded into every root context this harness creates. |
+| `connections` | `ConnectionsConfig` | `undefined` | The live things the agent works with — browsers, devices, apps, chat workspaces, sources — by name. Providers connect on the first `execute()`/`run()` or `start()`. See [Connections](/docs/framework/connections). |
+| `triggers` | `ConnectionTrigger[]` | `undefined` | Connection events that start or join a turn. See [Triggers](/docs/framework/connections#triggers). |
+| `verification` | `Verifier` | `undefined` | The verifier `step.verify` uses — `verifier()` from `@noetic-tools/verify`. See [Verification](/docs/framework/verification). |
 | `emitItemsOnReplay` | `boolean` | `false` | When a resumed run replays a finished step, also stream the items that step emitted (`emitItems`) again as `item_appended`, so a client that reconnects mid-run sees the progress it missed. Without it, replay puts them back on the log quietly. See [Emitting Items Early](/docs/framework/steps#emitting-items-early). |
 
 ### Environment
@@ -101,6 +104,8 @@ const harness = new AgentHarness({
 | `fs` | `FsAdapter` | in-memory | Filesystem adapter exposed as `harness.fs`. Context layers, tools, and skill discovery all route through this adapter. Pass `createLocalFsAdapter()` from `@noetic-tools/platform-node` for real disk access. |
 | `shell` | `ShellAdapter` | in-memory | Shell adapter exposed as `harness.shell`. Tools that execute commands route through this adapter. `createLocalShellAdapter()` runs raw `sh -c`; pass `createLocalShellAdapter({ useRtk: true })` to wrap each command through [`rtk rewrite`](https://github.com/rtk-ai/rtk) for token-efficient output. The `@noetic-tools/cli` package enables this by default (controlled by `shell.useRtk` in `noetic.config.ts`). |
 | `subprocess` | `SubprocessAdapter` | in-memory | Adapter used to dispatch every `runCode`, `spawn`, and `detachedSpawn`. Set to `createLocalSubprocessAdapter({storage})` to run children out-of-process with durable handle manifests. See [Durability](/docs/framework/durability). |
+| `secrets` | `SecretResolver` | `undefined` | Resolves `secret('name')` values immediately before a connection call is sent. See [Connections](/docs/framework/connections#values). |
+| `artifacts` | `ArtifactStore` | in-memory | Where binary content — screenshots, recordings, verification runs — is stored. Pass `createFileArtifactStore({ dir })` from [`@noetic-tools/platform-node`](/docs/framework/platform-packages#file-artifact-store) for disk. |
 
 ## execute()
 
@@ -246,9 +251,11 @@ const result = await harness.run(myStep, input, ctx);
 
 | Parameter | Type | Description |
 |---|---|---|
-| `step` | `Step<TContext, I, O>` | The step to execute. |
+| `step` | `Step<TContext, I, O>` or an array of steps | The step to execute. An array runs in sequence, each output the next one's input; its input is the first step's and its output the last step's. |
 | `input` | `I` | Input value for the step. |
 | `ctx` | `Context` | Execution context. |
+
+Before the first run of a root, `run()` checks what the root's connection handles need against each connection, so a root that needs an operation a connection lacks fails with `CONNECTION_UNSATISFIED` before anything executes.
 
 When the harness is built with `contextLayers` + a storage adapter (`environment.storage.adapter`), `run()` runs the layers' `init()` hooks once per context (keyed by `ctx.id`) before executing — so prior layer state rehydrates from storage, recalls into the model context, and updates persist back. The same memory guarantee `execute()` gives, without the session/`seedSessionHistory` ceremony. This also makes `parseAndRunWorkflow` (which dispatches through `run()`) memory-aware. The init is idempotent: nested/repeated `run()` calls never re-init (re-init would clobber accumulated in-memory state).
 
@@ -294,6 +301,16 @@ interface RecallLayerOutput {
   tokenCount: number;
 }
 ```
+
+## Connection Methods
+
+| Method | Description |
+|---|---|
+| `start()` | Connects every connection provider and starts triggers. The first `execute()` or `run()` calls it; call it yourself for a harness that only reacts to triggers. Idempotent. |
+| `getConnectionStatus(name?)` | Each connection's state (`connecting`, `ready`, `unavailable`, `closed`), identity, and pool usage; one entry for `name`, or all. |
+| `artifacts` | The artifact store (`environment.artifacts`, else in memory); `artifacts.listRun(executionId)` is a run's manifest. |
+| `restore(executionId, { rerun? })` | `rerun` names connections the restored run may drive again live although they were replaced. It belongs to the returned context and ends when that context's run does. See [Durability](/docs/framework/connections#durability). |
+| `close()` | Shuts down everything the harness holds open: stops triggers, releases every connection and pool lease, and closes every ACP session. Closes everything even when one part throws, then rethrows the first failure. Idempotent. |
 
 ## Durability Methods
 

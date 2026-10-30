@@ -53,6 +53,8 @@ export {
   closeSessions,
   connectMcpServer,
   DEFAULT_CONNECT_TIMEOUT_MS,
+  DEFAULT_TOOL_CALL_TIMEOUT_MS,
+  pluginMcpProvider,
 } from './mcp-client';
 export type {
   DroppedHeader,

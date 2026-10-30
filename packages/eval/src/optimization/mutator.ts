@@ -97,6 +97,12 @@ function cloneAndReplace(step: Step, candidate: Candidate, prefix: string): Step
         ...step,
         step: cloneAndReplace(step.step, candidate, `${path}.`),
       };
+    // Transparent, as in field discovery: children keep their sibling paths.
+    case 'sequence':
+      return {
+        ...step,
+        steps: step.steps.map((s) => cloneAndReplace(s, candidate, prefix)),
+      };
     case 'conditional': {
       const children = cloneOptimizableChildren(step._optimizable, candidate, path);
       // A conditional whose route closes over its children (routeSwitch) must be
@@ -123,10 +129,47 @@ function cloneAndReplace(step: Step, candidate: Candidate, prefix: string): Step
     // model that surface. Pass through unchanged so the optimizer stays a
     // no-op for this kind.
     case 'acp-agent':
+    case 'call':
       return {
         ...step,
       };
+    // A wait's `around` steps may hold model calls; rewrite them in place.
+    case 'wait':
+      return {
+        ...step,
+        around: aroundOf(step.around).map((s) => cloneAndReplace(s, candidate, `${path}.`)),
+      };
+    // A verify's `act` steps may hold model calls; rewrite them in place. An
+    // act built per subject (a function) is not statically known: pass it through.
+    case 'verify':
+      return typeof step.act === 'function'
+        ? {
+            ...step,
+          }
+        : {
+            ...step,
+            act: aroundOf(step.act).map((s) => cloneAndReplace(s, candidate, `${path}.`)),
+          };
   }
+}
+
+/** Whether a step-or-steps field is an array; `Array.isArray` does not narrow readonly arrays. */
+function isStepList(value: Step | ReadonlyArray<Step>): value is ReadonlyArray<Step> {
+  return Array.isArray(value);
+}
+
+/** A wait's `around` as a list: one step or an array of steps. */
+function aroundOf(around: Step | ReadonlyArray<Step> | undefined): Step[] {
+  if (around === undefined) {
+    return [];
+  }
+  return isStepList(around)
+    ? [
+        ...around,
+      ]
+    : [
+        around,
+      ];
 }
 
 //#endregion

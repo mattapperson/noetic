@@ -1,4 +1,6 @@
 import type { StandardSchemaV1 } from '@standard-schema/spec';
+import type { Claim, Constraint } from '../verify/ovp';
+import type { VerifyClose, VerifyMatcher } from '../verify/verifier';
 import type {
   AcpAgent,
   AcpClientCapabilityConfig,
@@ -10,6 +12,7 @@ import type {
 } from './acp';
 import type { Channel } from './channel';
 import type { ModelParams, RetryPolicy, ServerToolSpec, StepMeta, ToolChoice } from './common';
+import type { ConnectionEvent, ConnectionHandle } from './connection';
 import type { Context } from './context';
 import type { ContextConfig, ContextData, ContextLayer, ProjectionPolicy } from './context-layer';
 import type { CustomItem, CustomItemMap, CustomItemType } from './custom-item';
@@ -246,6 +249,11 @@ export interface StepEmitItems<
   emitItems?: StepEmitItemsOption<TContext, I, O, M>;
   /** Custom items only this step may emit (spec 34). */
   customItems?: M;
+  /**
+   * Type-only: the step's input and output types (`StepTypes`). Never set; it
+   * lets arrays of steps be type-checked link by link.
+   */
+  readonly '~types'?: StepTypes<I, O>;
 }
 
 /** @public Discriminated union of all step kinds that can be composed into an execution tree. */
@@ -260,7 +268,234 @@ export type Step<TContext = ContextData, I = unknown, O = unknown> =
   | StepSpawn<TContext, I, O>
   | StepWithContext<TContext, I, O>
   | StepLoop<TContext, I, O>
-  | StepSchedule<TContext, I, O>;
+  | StepSchedule<TContext, I, O>
+  | StepCall<TContext, I, O>
+  | StepWait<TContext, I, O>
+  | StepVerify<TContext, I, O>
+  | StepSequence<TContext, I, O>;
+
+/**
+ * A step's input and output types, as a type-only marker every step carries
+ * (`'~types'`). Nothing sets it at runtime. It lets an array of steps be
+ * checked against the input it is given and the output it must produce, which
+ * `Step` itself cannot do: `Step` is invariant in both, so no single
+ * `Step<…>` accepts steps of different types.
+ * @public
+ */
+export interface StepTypes<I = unknown, O = unknown> {
+  /** Indexed out of a method so it stays bivariant: the phantom adds no variance beyond what the step's own `execute` has. */
+  readonly input: {
+    bivariant(input: I): void;
+  }['bivariant'];
+  readonly output: O;
+}
+
+type RequiredKeys<T> = {
+  [K in keyof T]-?: Record<never, never> extends Pick<T, K> ? never : K;
+}[keyof T];
+
+/** One step kind's required fields, each of any type: enough to tell a step from a lookalike. */
+type StepShape<S> = S extends {
+  kind: infer K;
+}
+  ? {
+      readonly kind: K;
+    } & { readonly [P in Exclude<RequiredKeys<S>, 'kind'>]: unknown }
+  : never;
+
+/**
+ * Any step, whatever its input and output types: an object with a step kind
+ * and that kind's required fields. What an array of steps holds; an array's
+ * types are inferred from its elements (`StepArrayInput`, `StepArrayOutput`).
+ * @public
+ */
+export type StepLike = StepShape<Step>;
+
+/**
+ * An array of steps run in sequence, each step's output the next one's input.
+ * Arrays of steps go where a step goes (see `Steps`), so there is no
+ * `step.sequence`.
+ * @public
+ */
+export type StepArray = readonly [
+  StepLike,
+  ...ReadonlyArray<StepLike>,
+];
+
+/** @public A step's input type. */
+export type StepInput<S> = S extends Step<infer _C, infer I, infer _O> ? I : never;
+
+/** @public A step's output type. */
+export type StepOutput<S> = S extends Step<infer _C, infer _I, infer O> ? O : never;
+
+/** A step's input type, read from its `'~types'` marker (`unknown` for an unmarked step literal). */
+type MarkedInput<S> = S extends {
+  readonly '~types'?: {
+    readonly input: (input: infer I) => void;
+  };
+}
+  ? I
+  : unknown;
+
+/** A step's output type, read from its `'~types'` marker (`unknown` for an unmarked step literal). */
+type MarkedOutput<S> = S extends {
+  readonly '~types'?: {
+    readonly output: infer O;
+  };
+}
+  ? O
+  : unknown;
+
+/** @public An array of steps' input: its first step's. */
+export type StepArrayInput<T extends ReadonlyArray<StepLike>> = MarkedInput<T[0]>;
+
+/** @public An array of steps' output: its last step's (any element's, for an array of unknown length). */
+export type StepArrayOutput<T extends ReadonlyArray<StepLike>> =
+  T extends StepChain<infer _I, infer O> ? O : MarkedOutput<T[number]>;
+
+/**
+ * What a step in a chain gets in place of itself when the step before it
+ * outputs something it does not take: the array no longer type-checks, and
+ * the error names both types.
+ * @public
+ */
+export interface StepChainMismatch<Expected, Received> {
+  readonly '~stepChainError': {
+    readonly message: "This step does not take the previous step's output.";
+    readonly expects: Expected;
+    readonly receives: Received;
+  };
+}
+
+type CheckLink<S, Previous, IsFirst extends boolean> = IsFirst extends true
+  ? S
+  : unknown extends Previous
+    ? S
+    : [
+          Previous,
+        ] extends [
+          MarkedInput<S>,
+        ]
+      ? S
+      : S & StepChainMismatch<MarkedInput<S>, Previous>;
+
+type CheckLinks<
+  T extends ReadonlyArray<unknown>,
+  Previous,
+  IsFirst extends boolean,
+> = T extends readonly [
+  infer Head,
+  ...infer Rest,
+]
+  ? readonly [
+      CheckLink<Head, Previous, IsFirst>,
+      ...CheckLinks<Rest, MarkedOutput<Head>, false>,
+    ]
+  : readonly [];
+
+/**
+ * An array of steps checked link by link: each step must take the previous
+ * step's output. A previous step typed to output `unknown` (a `call`, an
+ * untyped step literal) is not checked against the next step's input. A tuple
+ * (a literal array or an `as const` one) maps to itself when every link holds,
+ * and a step whose link breaks maps to itself plus a `StepChainMismatch`, so
+ * intersecting the array with this fails to compile there; an empty tuple maps
+ * to `StepArray`, which it cannot be. An array of unknown length
+ * (`Step<C, T, T>[]`, `StepChain`)
+ * has no positions to check and maps to `unknown`.
+ * @public
+ */
+export type ValidStepChain<T> =
+  T extends ReadonlyArray<unknown>
+    ? number extends T['length']
+      ? unknown
+      : T extends readonly []
+        ? StepArray
+        : CheckLinks<T, unknown, true>
+    : unknown;
+
+/** @public The input of a step or of an array of steps (its first step's). */
+export type StepsInput<T> = T extends ReadonlyArray<StepLike> ? StepArrayInput<T> : MarkedInput<T>;
+
+/** @public The output of a step or of an array of steps (its last step's). */
+export type StepsOutput<T> =
+  T extends ReadonlyArray<StepLike> ? StepArrayOutput<T> : MarkedOutput<T>;
+
+/** @public A step that takes `I` (its `'~types'` marker says so). */
+export interface StepTaking<I> {
+  readonly '~types'?: Pick<StepTypes<I>, 'input'>;
+}
+
+/** @public A step that outputs `O` (its `'~types'` marker says so). */
+export interface StepGiving<O> {
+  readonly '~types'?: Pick<StepTypes<unknown, O>, 'output'>;
+}
+
+/**
+ * An array of steps that takes `I` and outputs `O`: its first step takes
+ * `I` and its last outputs `O`. The links between are not checked here,
+ * since a type without a type parameter per element cannot name them;
+ * `harness.run` and `ctx.harness.run` check every link (`ValidStepChain`).
+ * @public
+ */
+export type StepChain<I = unknown, O = unknown> = readonly [
+  StepLike & StepTaking<I>,
+  ...ReadonlyArray<StepLike>,
+] &
+  readonly [
+    ...ReadonlyArray<StepLike>,
+    StepLike & StepGiving<O>,
+  ];
+
+/**
+ * An array of steps that all take and output the same type, of any length:
+ * what a `Step<C, T, T>[]` variable is. Only a step whose input and output
+ * types are the same can repeat, so for any other `I` and `O` this is `never`.
+ * @public
+ */
+export type HomogeneousSteps<TContext = ContextData, I = unknown, O = unknown> = [
+  I,
+] extends [
+  O,
+]
+  ? [
+      O,
+    ] extends [
+      I,
+    ]
+    ? ReadonlyArray<Step<TContext, I, O>>
+    : never
+  : never;
+
+/**
+ * @public A step, or an array of steps run in sequence that takes `I` and
+ * outputs `O`: a tuple whose first step takes `I` and last outputs `O`
+ * (`StepChain`), or an array of `Step<C, T, T>` when `I` and `O` are both `T`
+ * (`HomogeneousSteps`).
+ */
+export type Steps<TContext = ContextData, I = unknown, O = unknown> =
+  | Step<TContext, I, O>
+  | StepChain<I, O>
+  | HomogeneousSteps<TContext, I, O>;
+
+/**
+ * Steps run in sequence: what an array of steps becomes where a `Steps` is
+ * taken (`toStep`; spec 01 § Arrays of steps lists the places). Each child runs through the interpreter with its own ledger path, events
+ * and gates; each output is the next child's input.
+ * @public
+ */
+export interface StepSequence<TContext = ContextData, I = unknown, O = unknown>
+  extends StepReplay<TContext, I>,
+    StepEmitItems<TContext, I, O> {
+  kind: 'sequence';
+  id: string;
+  /**
+   * The steps, in order; at least two. Typed like a loop's steps: each child's
+   * own input and output types are checked where the array is written
+   * (`StepArray`), not here.
+   */
+  steps: ReadonlyArray<Step<TContext, I, O>>;
+}
 
 /** @public A `runCode` body: async, or a generator that yields item events before returning. */
 export type RunCodeExecute<TContext = ContextData, I = unknown, O = unknown> = (
@@ -623,3 +858,151 @@ export type ExecuteStepFn = <TContext, I, O>(
   input: I,
   ctx: Context<TContext>,
 ) => Promise<O>;
+
+//#region Connection steps
+
+/**
+ * The connection a `call` or `wait` step runs on: a handle from `connection()`,
+ * a harness connection name, or a function of the step's input choosing one
+ * (a JSON fan-out's `{ "$expr": "$item" }`). See spec 35.
+ * @public
+ */
+export type StepConnectionTarget<TContext = ContextData, I = unknown> =
+  | ConnectionHandle
+  | string
+  | ((
+      input: I,
+      ctx: Context<TContext>,
+    ) => ConnectionHandle | string | Promise<ConnectionHandle | string>);
+
+/**
+ * A connection operation's arguments: a value, or a function of the step's input.
+ * @public
+ */
+export type StepCallArgs<TContext = ContextData, I = unknown> =
+  | Readonly<Record<string, unknown>>
+  | ((input: I, ctx: Context<TContext>) => unknown);
+
+/**
+ * A step that runs one connection operation and returns its result (spec 35).
+ * Operations that run long upstream are waited for automatically.
+ * @public
+ */
+export interface StepCall<TContext = ContextData, I = unknown, O = unknown>
+  extends StepReplay<TContext, I>,
+    StepEmitItems<TContext, I, O> {
+  kind: 'call';
+  id: string;
+  connection: StepConnectionTarget<TContext, I>;
+  /** The operation, e.g. `ui.tap`. */
+  op: string;
+  args?: StepCallArgs<TContext, I>;
+  /** Phantom field carrying the output type for inference. Never set at runtime. */
+  readonly _output?: O;
+}
+
+/**
+ * What a `wait` step returns: the event that matched, and the output of
+ * `around` when it ran.
+ * @public
+ */
+export interface StepWaitOutput<P = unknown, A = unknown> {
+  event: ConnectionEvent<P>;
+  around?: A;
+}
+
+/**
+ * Decides whether an event ends a `wait`. Indexed out of a method so its parameters
+ * stay bivariant, keeping a typed step assignable to the erased `Step` form.
+ * @public
+ */
+export type StepWaitFilter<TContext = ContextData, I = unknown, P = unknown> = {
+  bivariant(
+    event: ConnectionEvent<P>,
+    input: I,
+    ctx: Context<TContext>,
+  ): boolean | Promise<boolean>;
+}['bivariant'];
+
+/**
+ * A step that waits for a connection event (spec 35). With `around`, it starts
+ * listening, runs `around`, then waits, so the event an action causes cannot slip
+ * past. Its output is `{ event, around }`.
+ * @public
+ */
+export interface StepWait<TContext = ContextData, I = unknown, O = unknown>
+  extends StepReplay<TContext, I>,
+    StepEmitItems<TContext, I, O> {
+  kind: 'wait';
+  id: string;
+  connection: StepConnectionTarget<TContext, I>;
+  /** The event type, e.g. `chat.message.created`. */
+  event: string;
+  /** Picks the event that ends the wait; every event of the type matches without one. */
+  filter?: StepWaitFilter<TContext, I>;
+  /** A step, or an array of steps run in sequence, run once listening has started. */
+  around?: Step<TContext, I, unknown> | ReadonlyArray<Step<TContext, I, unknown>>;
+  /** How long to wait, in ms, from when listening starts. */
+  timeoutMs: number;
+  /** Phantom field carrying the output type for inference. Never set at runtime. */
+  readonly _output?: O;
+}
+
+/**
+ * The connection a `verify` checks — or a list, which runs one verify per
+ * connection in parallel with ids `<id>.<name>` and the worst outcome (spec 37).
+ * @public
+ */
+export type StepVerifySubject<TContext = ContextData, I = unknown> =
+  | StepConnectionTarget<TContext, I>
+  | ReadonlyArray<ConnectionHandle | string>;
+
+/**
+ * @public
+ * A verify's action: a step, an array of steps run in sequence, or a function
+ * of the subject's connection name giving them — the way to act on each
+ * subject of a list subject (spec 37 § Writing a verify).
+ */
+export type StepVerifyAct<TContext = ContextData, I = unknown> =
+  | Step<TContext, I, unknown>
+  | ReadonlyArray<Step<TContext, I, unknown>>
+  | ((subject: string) => Step<TContext, I, unknown> | ReadonlyArray<Step<TContext, I, unknown>>);
+
+/**
+ * A step that checks claims about what a connection shows (spec 37): it
+ * declares what should become true, runs `act`, watches the connection's
+ * senses, and answers with OVP verdicts and the gaps it could not see. Its
+ * output's `outcome` is `pass`, `fail`, `partial` or `unknown`. Built by
+ * `step.verify`; judged by the harness's registered verifier.
+ * @public
+ */
+export interface StepVerify<TContext = ContextData, I = unknown, O = unknown>
+  extends StepReplay<TContext, I>,
+    StepEmitItems<TContext, I, O> {
+  kind: 'verify';
+  id: string;
+  subject: StepVerifySubject<TContext, I>;
+  /** What must become true; each entry lowers to an OVP claim. Exactly one of `expect` or `claims`. */
+  expect?: ReadonlyArray<VerifyMatcher>;
+  /** What must not happen while `act` runs; each entry lowers to a blocking OVP constraint. */
+  never?: ReadonlyArray<VerifyMatcher>;
+  /** OVP claims given directly, instead of `expect`. */
+  claims?: ReadonlyArray<Claim>;
+  /** OVP constraints given directly, instead of `never`. */
+  constraints?: ReadonlyArray<Constraint>;
+  /**
+   * The action: a step, or an array of steps run in sequence — or, for a list
+   * subject, a function of each subject's connection name giving its action.
+   */
+  act: StepVerifyAct<TContext, I>;
+  /** Connections that can look and cannot touch, confirming from outside the subject. */
+  witnesses?: ReadonlyArray<ConnectionHandle | string>;
+  /** When to stop watching. Default: quiet for 500 ms, at most 15 s. */
+  close?: VerifyClose;
+  /** A sentence saying why, kept in the run record. */
+  intent?: string;
+  /** Phantom field carrying the output type for inference. Never set at runtime. */
+  readonly _output?: O;
+}
+
+//#endregion

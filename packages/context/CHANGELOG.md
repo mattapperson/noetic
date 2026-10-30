@@ -1,3 +1,7 @@
+## @noetic-tools/context-v1.11.1-next.1 (2026-10-29)
+
+* ci: publish prereleases from next to the next dist-tag ([5c9f714](https://github.com/mattapperson/noetic/commit/5c9f714))
+
 ## @noetic-tools/context-v1.11.0 (2026-10-26)
 
 * feat(core): durable steers and steer-triggered recall (#141) ([0c7b185](https://github.com/mattapperson/noetic/commit/0c7b185)), closes [#141](https://github.com/mattapperson/noetic/issues/141)

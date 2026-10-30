@@ -116,8 +116,8 @@ const stop: Until = until.noToolCalls();
 Stops when the verify function returns `{ pass: true }`. The reason is `Verification passed` or `Verification failed`; feedback from failed verification is available in the verdict.
 
 ```ts
-declare const verify: VerifyFn;
-const stop: Until = until.verified(verify);
+declare const checkOutput: VerifyFn;
+const stop: Until = until.verified(checkOutput);
 ```
 
 ### until.converged(opts)

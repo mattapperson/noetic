@@ -245,6 +245,22 @@ The ledger lives under its own keys, outside `CheckpointSnapshot`. The baseline 
 - `harness.clearCheckpoint` removes the snapshot and every shard.
 - Ledger entries with no snapshot restore a context with the original id; no snapshot and no ledger restores `null`; an unknown snapshot version throws `CHECKPOINT_SCHEMA_MISMATCH` even with a ledger.
 
+## Connection Steps
+
+`call` and `wait` steps (`35-connections`) write a **pending entry** before
+they reach a server: the call's idempotency key, the connection's identity,
+and once known the task, the lease, the start cursor and the deadline. Against
+the same identity, a step with a pending entry and no result picks up where it
+was on resume. Against a replaced connection, recorded results describe a
+world that is gone, so the connection's determinism decides: discard the
+ledger from the first step that used it and run live from there (after a reset
+when called for), or stop with `connection_resume_refused`
+(`35-connections` § Durability). Everything after that point runs live too,
+model rounds included. Binary outputs are blobs in the artifact store
+(`08-runtime`), so screenshots do not hit the entry size cap. Pending entries
+are specific to connection steps; other tools keep the at-least-once behavior
+in § The side-effect boundary.
+
 ## Future Considerations
 
 - **Mid-item resume.** A resume goes on from the last item the stream finished; an item cut off part way is made again. Providers that expose resumable streams would let a round resume where its stream stopped.

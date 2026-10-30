@@ -1,3 +1,11 @@
+## @noetic-tools/acp-v1.3.1-next.2 (2026-10-30)
+
+* fix: close the harness review gaps and pass the structural gate ([a8d710b](https://github.com/mattapperson/noetic/commit/a8d710b))
+
+## @noetic-tools/acp-v1.3.1-next.1 (2026-10-29)
+
+* ci: publish prereleases from next to the next dist-tag ([5c9f714](https://github.com/mattapperson/noetic/commit/5c9f714))
+
 ## @noetic-tools/acp-v1.3.0 (2026-10-27)
 
 * feat(core): resolve graceful stops with a drain report that carries each call's cost ([1250357](https://github.com/mattapperson/noetic/commit/1250357)), closes [#148](https://github.com/mattapperson/noetic/issues/148)

@@ -16,38 +16,43 @@ import type {
   ProcessSubprocessRequest,
   ServerToolSpec,
   Step,
-  StepDecide,
   SubprocessAdapter,
   Tool,
   ToolContext,
   ToolExecutionContext,
-  Until,
 } from '@noetic-tools/types';
 import { frameworkCast, isServerToolSpec, NoeticConfigError } from '@noetic-tools/types';
-import type { ExpressionLimits } from '../expression/jsonata';
-import { compileExpression, compute, passes, readInput } from '../expression/jsonata';
+import type { ExpressionBindings, ExpressionLimits } from '../expression/jsonata';
+import { compileExpression, compute, readInput } from '../expression/jsonata';
+import { markRecorded, stepOutputsOf } from '../expression/step-outputs';
 import type {
   CallModelWorkflowNode,
-  ConditionalRoute,
-  DecideWorkflowNode,
   OutputCodecRef,
-  SubflowWorkflowNode,
-  UntilPredicate,
+  WorkflowConnectionRef,
   WorkflowDocument,
   WorkflowNode,
+  WorkflowStepList,
 } from '../schemas/workflow';
-import { all, any } from '../until/combinators';
-import { until } from '../until/predicates';
+import { shorthandStepId, stepEntryToNode, stepListEntries } from '../schemas/workflow';
 import { DetachedHandleImpl } from '../util/detached-handle';
-
-import { conditional, inParallel } from './control-flow-builders';
-import { decide, routeSwitch } from './decide-builders';
-import { schedule } from './every';
-import { loop } from './loop-builder';
 import { outputText } from './output-text';
-import { withContext } from './provide-builder';
-import { spawn } from './spawn-builder';
 import { callModel, runCode, step } from './step-builders';
+import {
+  hydrateInParallelNode,
+  hydrateSpawnNode,
+  hydrateSubflowNode,
+  hydrateWithContextNode,
+} from './workflow-child-nodes';
+import { hydrateCallNode, hydrateWaitNode } from './workflow-connection-nodes';
+import type { ConnectionManifestEntries, ConnectionUses } from './workflow-connections';
+import { checkDocumentConnections } from './workflow-connections';
+import {
+  hydrateConditionalNode,
+  hydrateDecideNode,
+  hydrateLoopNode,
+  hydrateRouteSwitchNode,
+  hydrateScheduleNode,
+} from './workflow-control-nodes';
 import {
   documentScope,
   everyDocumentItem,
@@ -55,6 +60,7 @@ import {
   nodeScope,
 } from './workflow-custom-items';
 import { workflowReplayKey } from './workflow-replay-key';
+import { hydrateVerifyNode } from './workflow-verify';
 
 //#region Types
 
@@ -101,89 +107,38 @@ export interface HydrationContext {
   /** Bounds on each expression evaluation; unset fields use `DEFAULT_EXPRESSION_LIMITS`. */
   expressionLimits?: ExpressionLimits;
   /**
+   * The hydrated document's identity for `$steps`: each `hydrateWorkflow` call
+   * makes a new one, so two documents in one run never read each other's node
+   * outputs. Set internally — callers never set it.
+   */
+  documentScope?: object;
+  /**
    * Custom items the nodes being hydrated may emit (spec 34): the enclosing document's
    * root scope. Threaded by `hydrateWorkflow` and the subflow hydrator.
    */
   customItems?: CustomItemMap;
+  /**
+   * The connections the enclosing document declares (spec 35 § JSON workflows).
+   * Threaded by `hydrateWorkflow`; a node naming a connection outside it fails
+   * with `CONNECTION_UNKNOWN`. Without a manifest, names pass to the registry as they are.
+   */
+  connections?: ConnectionManifestEntries;
+  /** What the document uses of each connection, for negotiation and gate 1. Threaded by `hydrateWorkflow`. */
+  connectionUses?: ConnectionUses;
+  /**
+   * The connection an operation written by name, or a node without
+   * `connection`, runs on: a `verify` subject or a `wait`'s connection. Without
+   * one, the document's only connection.
+   */
+  enclosingConnection?: WorkflowConnectionRef;
+  /** The connection name `$item` holds on a fan-out path (an `inParallel` whose `over` lists connections). */
+  fanOutItem?: string;
 }
 
 type NodeHydrator = (
   node: WorkflowNode,
   ctx: HydrationContext,
 ) => Step<ContextData, string, string>;
-
-//#endregion
-
-//#region Constants
-
-const DEFAULT_MAX_RECURSION_DEPTH = 100;
-
-//#endregion
-
-//#region Until Predicate Hydration
-
-/**
- * A `decide` predicate hydrates to the decide step itself; the loop runs it as
- * the decider. `where` names the loop in errors from its `expr` predicates.
- */
-function hydrateUntilPredicate(
-  pred: UntilPredicate,
-  ctx: HydrationContext,
-  where: string,
-): Until | StepDecide<ContextData> {
-  const hydrate = (p: UntilPredicate): Until | StepDecide<ContextData> =>
-    hydrateUntilPredicate(p, ctx, where);
-  switch (pred.kind) {
-    case 'maxSteps':
-      return until.maxSteps(pred.n);
-    case 'maxCost':
-      return until.maxCost(pred.usd);
-    case 'maxDuration':
-      return until.maxDuration(pred.duration);
-    case 'noToolCalls':
-      return until.noToolCalls();
-    case 'never':
-      return until.never();
-    case 'outputContains':
-      return until.outputContains(pred.marker);
-    case 'outputEquals':
-      return until.outputEquals(pred.sentinel);
-    case 'converged':
-      return until.converged({
-        threshold: pred.threshold,
-      });
-    case 'expr':
-      return untilExpr(pred.expr, where, ctx.expressionLimits);
-    case 'any':
-      return any(...pred.predicates.map(hydrate));
-    case 'all':
-      return all(...pred.predicates.map(hydrate));
-    case 'decide':
-      return frameworkCast<StepDecide<ContextData>>(hydrateNode(pred, ctx));
-    default:
-      throw new NoeticConfigError({
-        code: 'UNKNOWN_UNTIL_PREDICATE',
-        message: `Unknown until predicate kind: '${frameworkCast<UntilPredicate>(pred).kind}'.`,
-        hint: 'Supported kinds: maxSteps, maxCost, maxDuration, noToolCalls, never, outputContains, outputEquals, converged, expr, any, all, decide.',
-      });
-  }
-}
-
-/**
- * Stops when `expr` gives `true` against the loop's last output, read as an
- * expression input. A failing expression throws `NoeticConfigError`, which
- * fails the loop instead of stopping it (spec 05, Error Behavior).
- */
-function untilExpr(expr: string, where: string, limits: ExpressionLimits | undefined): Until {
-  const compiled = compileExpression(expr, where, limits);
-  return async (snap) => {
-    const stop = await passes(compiled, readInput(snap.lastOutput));
-    return {
-      stop,
-      reason: stop ? `expr gave true: ${expr}` : undefined,
-    };
-  };
-}
 
 //#endregion
 
@@ -370,277 +325,10 @@ function hydrateComputeNode(
   return frameworkCast(
     runCode({
       id: node.id,
-      execute: async (input: string) => outputText(await compute(expr, readInput(input))),
+      execute: async (input: string, execCtx: Context) =>
+        outputText(await compute(expr, readInput(input), bindingsFor(execCtx, ctx))),
     }),
   );
-}
-
-function hydrateConditionalNode(
-  node: WorkflowNode,
-  ctx: HydrationContext,
-): Step<ContextData, string, string> {
-  if (node.kind !== 'conditional') {
-    return frameworkCast(undefined);
-  }
-
-  const hydratedRoutes = node.routes.map((r, i) => ({
-    passes: routeTest(r, `route ${i} of conditional node '${node.id}'`, ctx.expressionLimits),
-    target: hydrateNode(r.target, ctx),
-  }));
-  const defaultTarget = node.default ? hydrateNode(node.default, ctx) : null;
-
-  const allTargets = hydratedRoutes.map((r) => r.target);
-  if (defaultTarget) {
-    allTargets.push(defaultTarget);
-  }
-
-  return conditional({
-    id: node.id,
-    route: async (input: string) => {
-      const view: RouteInput = {
-        text: routeText(input).trim().toLowerCase(),
-        value: readInput(input),
-      };
-      for (const r of hydratedRoutes) {
-        if (await r.passes(view)) {
-          return r.target;
-        }
-      }
-      return defaultTarget;
-    },
-    _optimizable: frameworkCast(allTargets),
-  });
-}
-
-/** A conditional's input as its routes read it: lower-cased text for `match`, the read value for `expr`. */
-interface RouteInput {
-  text: string;
-  value: unknown;
-}
-
-function routeTest(
-  route: ConditionalRoute,
-  where: string,
-  limits: ExpressionLimits | undefined,
-): (input: RouteInput) => boolean | Promise<boolean> {
-  if (route.expr !== undefined) {
-    const compiled = compileExpression(route.expr, where, limits);
-    return (input) => passes(compiled, input.value);
-  }
-  const needle = (route.match ?? '').toLowerCase();
-  return (input) => input.text.includes(needle);
-}
-
-function hydrateDecideNode(
-  node: WorkflowNode,
-  _ctx: HydrationContext,
-): Step<ContextData, string, string> {
-  if (node.kind !== 'decide') {
-    return frameworkCast(undefined);
-  }
-  return frameworkCast(decideFromNode(node));
-}
-
-function decideFromNode(node: DecideWorkflowNode) {
-  return decide({
-    id: node.id,
-    model: node.model,
-    instructions: node.instructions,
-    questions: node.questions,
-    view: node.view,
-    samples: node.samples,
-  });
-}
-
-function hydrateRouteSwitchNode(
-  node: WorkflowNode,
-  ctx: HydrationContext,
-): Step<ContextData, string, string> {
-  if (node.kind !== 'routeSwitch') {
-    return frameworkCast(undefined);
-  }
-  const cases: Record<string, Step<ContextData, string, string>> = {};
-  for (const [key, target] of Object.entries(node.cases)) {
-    cases[key] = hydrateNode(target, ctx);
-  }
-  // A JSON node's outcomes are only known at runtime; the builder checks them.
-  return frameworkCast(
-    routeSwitch({
-      id: node.id,
-      decide: decideFromNode(node.decide),
-      on: node.on,
-      cases: frameworkCast<Record<never, Step<ContextData, string, string>>>(cases),
-      minConfidence: node.minConfidence,
-      uncertain: hydrateNode(node.uncertain, ctx),
-    }),
-  );
-}
-
-function hydrateInParallelNode(
-  node: WorkflowNode,
-  ctx: HydrationContext,
-): Step<ContextData, string, string> {
-  if (node.kind !== 'inParallel') {
-    return frameworkCast(undefined);
-  }
-
-  // Static inParallel: paths are known at hydration time and feed the optimizer.
-  // Dynamic inParallel (`each`): paths are produced per inParallel-input at runtime, one
-  // child per array item, so they cannot be pre-computed or optimized.
-  const dynamic = node.each !== undefined;
-  const eachTemplate = node.each;
-  const staticPaths = dynamic ? [] : (node.paths ?? []).map((p) => hydrateNode(p, ctx));
-
-  const pathsFactory = (input: string): Step<ContextData, string, string>[] => {
-    if (!dynamic || !eachTemplate) {
-      return staticPaths;
-    }
-    const items = selectArray(input, node.over, node.id);
-    return items.map((item, i) =>
-      buildPerItemStep({
-        forkId: node.id,
-        eachTemplate,
-        item,
-        index: i,
-        ctx,
-      }),
-    );
-  };
-  const optimizable = dynamic ? undefined : frameworkCast<Step<ContextData>[]>(staticPaths);
-
-  if (node.mode === 'race') {
-    return inParallel({
-      id: node.id,
-      mode: 'race',
-      paths: pathsFactory,
-      concurrency: node.concurrency,
-      _optimizable: optimizable,
-    });
-  }
-
-  const mergeFn = buildMerge(node.merge ?? 'last');
-
-  if (node.mode === 'settle') {
-    return inParallel({
-      id: node.id,
-      mode: 'settle',
-      paths: pathsFactory,
-      merge: (results) => {
-        const values = results.filter((r) => r.status === 'fulfilled').map((r) => r.value ?? '');
-        return mergeFn(values);
-      },
-      concurrency: node.concurrency,
-      _optimizable: optimizable,
-    });
-  }
-
-  return inParallel({
-    id: node.id,
-    mode: 'all',
-    paths: pathsFactory,
-    merge: mergeFn,
-    concurrency: node.concurrency,
-    _optimizable: optimizable,
-  });
-}
-
-/**
- * Resolves layer names declared on a `withContext` / `spawn` node against the
- * registry on `HydrationContext.layers`. Returns `[]` when no registry was
- * supplied — the host runs with its harness-default layers in that case.
- */
-function resolveNamedLayers({
-  names,
-  nodeKind,
-  nodeId,
-  ctx,
-}: {
-  names: ReadonlyArray<string>;
-  nodeKind: string;
-  nodeId: string;
-  ctx: HydrationContext;
-}): ContextLayer[] {
-  if (!ctx.layers) {
-    return [];
-  }
-  return names.map((name) => {
-    const layer = ctx.layers?.get(name);
-    if (!layer) {
-      throw new NoeticConfigError({
-        code: 'UNKNOWN_LAYER_REFERENCE',
-        message: `Context layer '${name}' referenced in ${nodeKind} node '${nodeId}' is not registered.`,
-        hint: `Available layers: ${
-          [
-            ...(ctx.layers?.keys() ?? []),
-          ].join(', ') || '(none)'
-        }. Pass named layers via HydrationContext.layers.`,
-      });
-    }
-    return layer;
-  });
-}
-
-function hydrateSpawnNode(
-  node: WorkflowNode,
-  ctx: HydrationContext,
-): Step<ContextData, string, string> {
-  if (node.kind !== 'spawn') {
-    return frameworkCast(undefined);
-  }
-  // `context` is left undefined when the node names no layers so the child
-  // inherits the parent's layers (spec 04). An explicit list replaces them.
-  const resolvedLayers = node.layers
-    ? resolveNamedLayers({
-        names: node.layers,
-        nodeKind: 'spawn',
-        nodeId: node.id,
-        ctx,
-      })
-    : undefined;
-  return spawn({
-    id: node.id,
-    child: hydrateNode(node.child, ctx),
-    timeout: node.timeout,
-    context: resolvedLayers,
-    steers: node.steers,
-  });
-}
-
-function hydrateWithContextNode(
-  node: WorkflowNode,
-  ctx: HydrationContext,
-): Step<ContextData, string, string> {
-  if (node.kind !== 'withContext') {
-    return frameworkCast(undefined);
-  }
-  return withContext({
-    id: node.id,
-    child: hydrateNode(node.child, ctx),
-    context: resolveNamedLayers({
-      names: node.layers,
-      nodeKind: 'withContext',
-      nodeId: node.id,
-      ctx,
-    }),
-  });
-}
-
-function hydrateLoopNode(
-  node: WorkflowNode,
-  ctx: HydrationContext,
-): Step<ContextData, string, string> {
-  if (node.kind !== 'loop') {
-    return frameworkCast(undefined);
-  }
-  return loop({
-    id: node.id,
-    steps: [
-      hydrateNode(node.body, ctx),
-    ],
-    until: hydrateUntilPredicate(node.until, ctx, `until of loop node '${node.id}'`),
-    maxIterations:
-      node.maxIterations === 'infinity' ? Number.POSITIVE_INFINITY : node.maxIterations,
-  });
 }
 
 function hydrateSequenceNode(
@@ -651,7 +339,9 @@ function hydrateSequenceNode(
     return frameworkCast(undefined);
   }
 
-  const children = node.steps.map((s) => hydrateNode(s, ctx));
+  const children = node.steps.map((s, i) =>
+    hydrateNode(stepEntryToNode(s, shorthandStepId(node.id, i)), ctx),
+  );
 
   return frameworkCast(
     runCode({
@@ -666,21 +356,6 @@ function hydrateSequenceNode(
       },
     }),
   );
-}
-
-function hydrateScheduleNode(
-  node: WorkflowNode,
-  ctx: HydrationContext,
-): Step<ContextData, string, string> {
-  if (node.kind !== 'schedule') {
-    return frameworkCast(undefined);
-  }
-  return schedule({
-    id: node.id,
-    step: hydrateNode(node.step, ctx),
-    interval: node.interval,
-    onError: node.onError,
-  });
 }
 
 function hydrateAcpAgentNode(
@@ -712,87 +387,56 @@ function hydrateAcpAgentNode(
   });
 }
 
-/**
- * Hydrates a `subflow` node lazily: the target document resolves and hydrates
- * on first execution, memoized. Lazy because `HydrationContext.workflows` may
- * be a live view that gains entries after hydration, and because a recursive
- * ref must hydrate only the levels execution reaches — eager hydration of
- * A→A would never end. Each level gets its own tree whose ids carry the
- * calling node's (already suffixed) id, so levels never share step ids.
- */
-function hydrateSubflowNode(
-  node: WorkflowNode,
-  ctx: HydrationContext,
-): Step<ContextData, string, string> {
-  if (node.kind !== 'subflow') {
-    return frameworkCast(undefined);
-  }
-  let cached: Step<ContextData, string, string> | undefined;
-  const resolve = (): Step<ContextData, string, string> => {
-    if (!cached) {
-      const { doc, childCtx } = resolveSubflowDocument(node, ctx);
-      cached = hydrateNode(suffixNodeIds(doc.root, `-${node.id}`), {
-        ...childCtx,
-        customItems: documentScope(doc, ctx.customItems),
-      });
-    }
-    return cached;
-  };
-  return frameworkCast(
-    runCode({
-      id: node.id,
-      execute: async (input: string, execCtx: Context) => {
-        const child = resolve();
-        return outputText(await ctx.executeStep(child, node.input ?? input, execCtx));
-      },
-    }),
-  );
+//#endregion
+
+//#region Document Scope
+
+/** Nodes hydrated outside any `hydrateWorkflow` (a bare `hydrateNode`) share one scope. */
+const BARE_DOCUMENT_SCOPE: object = {};
+
+/** The `$steps` scope of the document `ctx` is hydrating. */
+export function documentScopeOf(ctx: HydrationContext): object {
+  return ctx.documentScope ?? BARE_DOCUMENT_SCOPE;
 }
 
-function resolveSubflowDocument(
-  node: SubflowWorkflowNode,
-  ctx: HydrationContext,
-): {
-  doc: WorkflowDocument;
-  childCtx: HydrationContext;
-} {
-  if (node.document) {
-    // Inline documents are finite JSON trees — they cannot recurse, so they
-    // add nothing to the recursion depth.
-    return {
-      doc: node.document,
-      childCtx: ctx,
-    };
-  }
-  const ref = node.ref ?? '';
-  const depth = (ctx.recursionDepth ?? 0) + 1;
-  const limit = maxRecursionDepth(ctx);
-  if (depth > limit) {
-    throw new NoeticConfigError({
-      code: 'WORKFLOW_RECURSION_LIMIT',
-      message: `Sub-workflow '${ref}' referenced in subflow node '${node.id}' would resolve at recursion depth ${depth}, past the limit of ${limit}.`,
-      hint: 'Give the recursion a base case (e.g. a conditional that stops calling the subflow), or raise maxRecursionDepth.',
-    });
-  }
-  const doc = ctx.workflows?.get(ref);
-  if (!doc) {
-    throw new NoeticConfigError({
-      code: 'UNKNOWN_WORKFLOW_REFERENCE',
-      message: `Sub-workflow '${ref}' referenced in subflow node '${node.id}' is not registered.`,
-      hint: `Pass named workflows via HydrationContext.workflows. Available: ${
-        [
-          ...(ctx.workflows?.keys() ?? []),
-        ].join(', ') || '(none)'
-      }.`,
-    });
-  }
+/** The bindings an expression evaluated in `execCtx` sees: `$steps`, and `$item` on a fan-out path. */
+export function bindingsFor(execCtx: Context, ctx: HydrationContext): ExpressionBindings {
   return {
-    doc,
-    childCtx: {
-      ...ctx,
-      recursionDepth: depth,
-    },
+    steps: stepOutputsOf(execCtx, documentScopeOf(ctx)),
+    ...(ctx.fanOutItem === undefined
+      ? {}
+      : {
+          item: ctx.fanOutItem,
+        }),
   };
+}
+
+/**
+ * Hydrates a step list (`around`, `act`, a sequence's steps): each entry a node,
+ * or an operation written by name that becomes a `call` with id `<parentId>[i]`
+ * on `enclosing` (when given).
+ *
+ * @public
+ */
+export function hydrateStepList(opts: {
+  list: WorkflowStepList;
+  parentId: string;
+  ctx: HydrationContext;
+  enclosing?: WorkflowConnectionRef;
+}): Step<ContextData, string, unknown>[] {
+  const { list, parentId, ctx, enclosing } = opts;
+  const childCtx: HydrationContext =
+    enclosing === undefined
+      ? ctx
+      : {
+          ...ctx,
+          enclosingConnection: enclosing,
+        };
+  return stepListEntries(list).map((entry, i) =>
+    frameworkCast<Step<ContextData, string, unknown>>(
+      hydrateNode(stepEntryToNode(entry, shorthandStepId(parentId, i)), childCtx),
+    ),
+  );
 }
 
 //#endregion
@@ -815,24 +459,15 @@ const NODE_HYDRATORS: Record<string, NodeHydrator> = {
   schedule: hydrateScheduleNode,
   subflow: hydrateSubflowNode,
   'acp-agent': hydrateAcpAgentNode,
+  call: hydrateCallNode,
+  wait: hydrateWaitNode,
+  // Owned by the verification slice (spec 37); it hydrates `act` through `hydrateStepList`.
+  verify: hydrateVerifyNode,
 };
 
 //#endregion
 
 //#region Helpers
-
-/** The context's recursion limit, defaulted; anything but a positive integer or `Infinity` throws. */
-function maxRecursionDepth(ctx: HydrationContext): number {
-  const limit = ctx.maxRecursionDepth ?? DEFAULT_MAX_RECURSION_DEPTH;
-  if (limit === Number.POSITIVE_INFINITY || (Number.isInteger(limit) && limit >= 1)) {
-    return limit;
-  }
-  throw new NoeticConfigError({
-    code: 'INVALID_MAX_RECURSION_DEPTH',
-    message: `maxRecursionDepth must be a positive integer or Infinity, got ${limit}.`,
-    hint: 'Pass a positive integer such as 100 (the default), or Infinity to let named workflows recurse without a limit.',
-  });
-}
 
 function resolveTools(
   toolNames: string[] | undefined,
@@ -852,159 +487,6 @@ function resolveTools(
     }
     return resolved;
   });
-}
-
-/** Paths may return objects (a `decide` node's answers): `concat` writes them as JSON, `first`/`last` pass them through. */
-function buildMerge(strategy: 'last' | 'first' | 'concat'): (results: string[]) => string {
-  if (strategy === 'first') {
-    return (r) => r[0] ?? '';
-  }
-  if (strategy === 'concat') {
-    return (r) => r.map(outputText).join('\n');
-  }
-  return (r) => r[r.length - 1] ?? '';
-}
-
-/**
- * The text a branch matches against. An object input — a `decide` node's
- * answers, or their JSON once a sequence has stringified them — matches on its
- * string values only: its keys and probability maps name every choice, so
- * matching the JSON would hit every route.
- */
-function routeText(input: unknown): string {
-  const value = typeof input === 'string' ? parseJsonObject(input) : input;
-  if (typeof value === 'string') {
-    return value;
-  }
-  const values: string[] = [];
-  const walk = (value: unknown): void => {
-    if (typeof value === 'string') {
-      values.push(value);
-      return;
-    }
-    if (typeof value !== 'object' || value === null) {
-      return;
-    }
-    for (const child of Object.values(value)) {
-      walk(child);
-    }
-  };
-  walk(value);
-  return values.join('\n');
-}
-
-/** The parsed object or array when `text` is one in JSON, else `text` itself. */
-function parseJsonObject(text: string): unknown {
-  const trimmed = text.trim();
-  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
-    return text;
-  }
-  try {
-    const parsed = JSON.parse(trimmed);
-    return typeof parsed === 'object' && parsed !== null ? parsed : text;
-  } catch {
-    return text;
-  }
-}
-
-//#endregion
-
-//#region Dynamic Fork Helpers
-
-/**
- * Parses the inParallel input (a JSON string) and locates the array to fan out over.
- * When `over` is set, reads that property off the parsed object; otherwise the
- * parsed value itself must be an array.
- */
-function selectArray(input: string, over: string | undefined, nodeId: string): unknown[] {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(input);
-  } catch {
-    throw new NoeticConfigError({
-      code: 'INVALID_FORK_INPUT',
-      message: `Dynamic inParallel '${nodeId}' could not parse its input as JSON.`,
-      hint: 'A dynamic inParallel (with `each`) expects its input to be a JSON array (or a JSON object when `over` is set).',
-    });
-  }
-  const candidate =
-    over === undefined ? parsed : frameworkCast<Record<string, unknown> | null>(parsed)?.[over];
-  if (!Array.isArray(candidate)) {
-    throw new NoeticConfigError({
-      code: 'INVALID_FORK_INPUT',
-      message: `Dynamic inParallel '${nodeId}' did not resolve an array${
-        over ? ` at key '${over}'` : ''
-      }.`,
-      hint: over
-        ? `Ensure the input JSON object has an array at '${over}'.`
-        : 'Ensure the input is a JSON array, or set `over` to select an array property.',
-    });
-  }
-  return candidate;
-}
-
-/**
- * Builds one inParallel path for a single dynamic fan-out item. The item is injected as
- * the body's input (inParallel steps pass the same input to every path), and the
- * template's node ids are suffixed with `-${i}` so each instantiation has
- * unique ids for tracing and step-registry uniqueness.
- */
-function buildPerItemStep(opts: {
-  forkId: string;
-  eachTemplate: WorkflowNode;
-  item: unknown;
-  index: number;
-  ctx: HydrationContext;
-}): Step<ContextData, string, string> {
-  const { forkId, eachTemplate, item, index, ctx } = opts;
-  const hydratedEach = hydrateNode(suffixNodeIds(eachTemplate, `-${index}`), ctx);
-  return frameworkCast(
-    runCode({
-      id: `${forkId}-item-${index}`,
-      execute: async (_input: string, execCtx: Context) => {
-        const itemInput = JSON.stringify(item);
-        return outputText(await ctx.executeStep(hydratedEach, itemInput, execCtx));
-      },
-    }),
-  );
-}
-
-/** Keys whose values are opaque data bags, never child workflow nodes. */
-const NON_NODE_KEYS = new Set([
-  'args',
-  'params',
-  'parameters',
-]);
-
-/**
- * Deep-clones a workflow node template, appending `suffix` to the `id` of every
- * nested node so a per-item instantiation has globally-unique step ids.
- */
-function suffixNodeIds(node: WorkflowNode, suffix: string): WorkflowNode {
-  const clone = structuredClone(node);
-  const walk = (value: unknown): void => {
-    if (!value || typeof value !== 'object') {
-      return;
-    }
-    if (Array.isArray(value)) {
-      for (const entry of value) {
-        walk(entry);
-      }
-      return;
-    }
-    const record = frameworkCast<Record<string, unknown>>(value);
-    if (typeof record.kind === 'string' && typeof record.id === 'string') {
-      record.id = `${record.id}${suffix}`;
-    }
-    for (const [key, child] of Object.entries(record)) {
-      if (NON_NODE_KEYS.has(key)) {
-        continue;
-      }
-      walk(child);
-    }
-  };
-  walk(clone);
-  return clone;
 }
 
 //#endregion
@@ -1112,6 +594,8 @@ export function hydrateNode(
     });
   }
   const hydrated = hydrator(node, ctx);
+  // Its output becomes `$steps.<id>` for later expressions of its document once it completes.
+  markRecorded(hydrated, documentScopeOf(ctx));
   // Set in place rather than copied: builders register the step object itself.
   if (node.durable !== undefined) {
     hydrated.durable = node.durable;
@@ -1143,15 +627,20 @@ export function hydrateNode(
  * @param customItems - TypeScript declarations of the document's root custom items (spec 34).
  * @returns The root `Step` of the hydrated workflow.
  * @throws `NoeticConfigError` with code `CUSTOM_ITEM_MISMATCH` when `customItems` and the document give one name different types.
+ * @throws `NoeticConfigError` with code `CONNECTION_UNKNOWN` when a node uses a connection the document's `connections` do not declare, or `CONNECTION_INVALID` when a node's connection is neither named nor implied, or a source entry is used beyond its events.
  */
 export function hydrateWorkflow(
   doc: WorkflowDocument,
   ctx: HydrationContext,
   customItems?: CustomItemMap,
 ): Step<ContextData, string, string> {
+  const connectionUses = checkDocumentConnections(doc);
   const root = hydrateNode(doc.root, {
     ...ctx,
+    documentScope: {},
     customItems: documentScope(doc, ctx.customItems, customItems),
+    connections: doc.connections ?? {},
+    connectionUses,
   });
   // The root's dispatch accepts every item the document declares before anything
   // runs or replays; keyed by type, they cannot shadow the root's own names.

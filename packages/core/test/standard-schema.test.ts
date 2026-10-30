@@ -26,7 +26,8 @@ import {
 import { callModel, invokeTool } from '../src/builders/step-builders';
 import { tool } from '../src/builders/tool-builder';
 import { AgentHarness } from '../src/harness/agent-harness';
-import { executeCallModel, executeInvokeTool } from '../src/interpreter/execute-action';
+import { executeCallModel } from '../src/interpreter/execute-action';
+import { executeInvokeTool } from '../src/interpreter/execute-invoke-tool';
 import {
   makeLLMResponse,
   makeMockContext,
@@ -754,8 +755,10 @@ describe('JSON Schema wire boundaries', () => {
       params: {},
     });
     frameworkCast<{
-      client: typeof client;
-    }>(harness).client = client;
+      llm: {
+        client: typeof client;
+      };
+    }>(harness).llm.client = client;
     await harness.callModel({
       model: 'test/model',
       items: [],

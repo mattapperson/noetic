@@ -1,13 +1,17 @@
 import type { ContextData } from '@noetic-tools/context';
 import type {
+  Context,
+  ExecuteStepFn,
   StepConditional,
   StepInParallel,
   StepInParallelAll,
   StepInParallelRace,
   StepInParallelSettle,
+  Steps,
 } from '@noetic-tools/types';
 import { frameworkCast, NoeticConfigError } from '@noetic-tools/types';
 import { getDefaultRegistrar } from '../types/step-registrar';
+import { toStep } from './sequence';
 
 //#region Types
 
@@ -21,15 +25,38 @@ export type InParallelOpts<TContext = ContextData, I = unknown, O = unknown> =
   | InParallelAllOpts<TContext, I, O>
   | InParallelSettleOpts<TContext, I, O>;
 
-type InParallelRaceOpts<TContext, I, O> = Omit<StepInParallelRace<TContext, I, O>, 'kind'>;
-type InParallelAllOpts<TContext, I, O> = Omit<StepInParallelAll<TContext, I, O>, 'kind'>;
-type InParallelSettleOpts<TContext, I, O> = Omit<StepInParallelSettle<TContext, I, O>, 'kind'>;
+/** Each parallel path is a step, or an array of steps run in sequence. */
+interface PathsOpt<TContext, I, O> {
+  paths: (input: I, ctx: Context<TContext>) => Array<Steps<TContext, I, O>>;
+}
 
-/** @public Options for `conditional()`. */
+type InParallelRaceOpts<TContext, I, O> = Omit<
+  StepInParallelRace<TContext, I, O>,
+  'kind' | 'paths'
+> &
+  PathsOpt<TContext, I, O>;
+type InParallelAllOpts<TContext, I, O> = Omit<StepInParallelAll<TContext, I, O>, 'kind' | 'paths'> &
+  PathsOpt<TContext, I, O>;
+type InParallelSettleOpts<TContext, I, O> = Omit<
+  StepInParallelSettle<TContext, I, O>,
+  'kind' | 'paths'
+> &
+  PathsOpt<TContext, I, O>;
+
+/**
+ * @public Options for `conditional()`. `route` may pick a step or an array of
+ * steps run in sequence.
+ */
 export type ConditionalOpts<TContext = ContextData, I = unknown, O = unknown> = Omit<
   StepConditional<TContext, I, O>,
-  'kind'
->;
+  'kind' | 'route'
+> & {
+  route: (
+    input: I,
+    ctx: Context<TContext>,
+    run: ExecuteStepFn,
+  ) => Steps<TContext, I, O> | null | Promise<Steps<TContext, I, O> | null>;
+};
 
 //#endregion
 
@@ -99,9 +126,11 @@ export function inParallel<TContext = ContextData, I = unknown, O = unknown>(
       hint: 'Provide a merge function that combines path results into a single output.',
     });
   }
+  const paths = opts.paths;
   const built = frameworkCast<StepInParallel<TContext, I, O>>({
     kind: 'inParallel',
     ...opts,
+    paths: (input: I, ctx: Context<TContext>) => paths(input, ctx).map((path) => toStep(path)),
   });
   getDefaultRegistrar().register(built);
   return built;
@@ -136,9 +165,14 @@ export function conditional<TContext = ContextData, I = unknown, O = unknown>(
       hint: 'Provide a route function that selects the next step at runtime.',
     });
   }
+  const route = opts.route;
   const built: StepConditional<TContext, I, O> = {
     kind: 'conditional',
     ...opts,
+    route: async (input, ctx, run) => {
+      const picked = await route(input, ctx, run);
+      return picked === null ? null : toStep(picked);
+    },
   };
   getDefaultRegistrar().register(built);
   return built;

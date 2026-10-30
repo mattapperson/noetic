@@ -1,13 +1,14 @@
 import type { ContextConfig, ContextData, ContextLayer } from '@noetic-tools/context';
 import type {
-  Step,
   StepEmitItems,
   StepReplay,
   StepSpawn,
+  Steps,
   SubprocessAdapter,
 } from '@noetic-tools/types';
 import { NoeticConfigError } from '@noetic-tools/types';
 import { getDefaultRegistrar } from '../types/step-registrar';
+import { toStep } from './sequence';
 
 //#region Types
 
@@ -20,7 +21,8 @@ export interface SpawnOpts<TContext = ContextData, I = unknown, O = unknown>
   extends StepReplay<TContext, I>,
     StepEmitItems<TContext, I, O> {
   id: string;
-  child: Step<TContext, I, O>;
+  /** The child step, or an array of steps run in sequence. */
+  child: Steps<TContext, I, O>;
   context?: ContextConfig | ContextLayer[];
   timeout?: number;
   /**
@@ -77,7 +79,7 @@ export function spawn<TContext = ContextData, I = unknown, O = unknown>(
   const built: StepSpawn<TContext, I, O> = {
     kind: 'spawn',
     id: opts.id,
-    child: opts.child,
+    child: toStep(opts.child),
     context: opts.context,
     timeout: opts.timeout,
     steers: opts.steers,
@@ -89,7 +91,7 @@ export function spawn<TContext = ContextData, I = unknown, O = unknown>(
   // Ensure the child is addressable by id — builders for `runCode`/`callModel`/`invokeTool`
   // self-register, but a caller can construct a step literal and pass it as
   // `child` without going through a builder.
-  getDefaultRegistrar().register(opts.child);
+  getDefaultRegistrar().register(built.child);
   return built;
 }
 

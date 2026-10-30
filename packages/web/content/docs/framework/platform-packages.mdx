@@ -1,0 +1,105 @@
+---
+title: Platform Packages
+description: The runtime-specific adapters — local filesystem, shell, subprocess, durable storage, artifact store, webhook receiver — that keep core runtime-agnostic.
+---
+
+`@noetic-tools/core` is runtime-agnostic. It defines the adapter contracts (`FsAdapter`, `ShellAdapter`, `SubprocessAdapter`, `StorageAdapter`, `ArtifactStore`) and ships **in-memory implementations only**. Every backend that needs a specific runtime lives in a platform package:
+
+| Package | Runtime | Provides |
+|---|---|---|
+| `@noetic-tools/platform-node` | Node.js ≥ 20 (and Bun) | Local filesystem, shell, and subprocess adapters; file-backed storage; the durable outbound queue; agent IPC; the file artifact store; the webhook receiver. |
+| `@noetic/platform-browser` | Browsers, Cloudflare Workers, Vercel Edge | Core's runtime-neutral in-memory adapters, with no `node:*` imports. |
+
+Neither package depends on the other, and core depends on neither, so a bundle carries only what its runtime needs. Importing `@noetic-tools/core` or `@noetic/platform-browser` into a browser bundle produces no `node:*` references.
+
+## `@noetic-tools/platform-node`
+
+```ts
+import { AgentHarness } from '@noetic-tools/core';
+import {
+  createFileArtifactStore,
+  createFileStorage,
+  createLocalFsAdapter,
+  createLocalShellAdapter,
+  createLocalSubprocessAdapter,
+} from '@noetic-tools/platform-node';
+
+const harness = new AgentHarness({
+  name: 'local-agent',
+  params: {},
+  environment: {
+    fs: createLocalFsAdapter(),
+    shell: createLocalShellAdapter(),
+    subprocess: createLocalSubprocessAdapter(),
+    storage: { adapter: createFileStorage() },
+    artifacts: createFileArtifactStore({ dir: '.noetic/artifacts' }),
+  },
+});
+```
+
+| Export | What it is |
+|---|---|
+| `createLocalFsAdapter()` | An `FsAdapter` over `node:fs/promises`. |
+| `createLocalShellAdapter()` | A `ShellAdapter` over the local shell. |
+| `createLocalSubprocessAdapter()` | A `SubprocessAdapter` with OS child-process lifecycle, POSIX signals, and unix-socket IPC. |
+| `createFileStorage()` | A file-backed `StorageAdapter`, for [durable execution](/docs/framework/durability). |
+| `createDurableOutboundQueue()` | The durable outbound frame queue for out-of-process runs. |
+| `AgentIpcServer` / `AgentIpcClient` | Per-task IPC for live chat with a running agent. |
+| `createFileArtifactStore({ dir, retention? })` | The file-backed [artifact store](#file-artifact-store). |
+| `createWebhookReceiver(options?)` | An HTTP [webhook receiver](#webhook-receiver) for `mcp({ webhooks })`. |
+
+Runtime imports are Node built-ins only; there are no third-party runtime dependencies.
+
+### File Artifact Store
+
+`createFileArtifactStore({ dir, retention })` is the Node implementation of the `ArtifactStore` contract — where [connection](/docs/framework/connections) blobs such as screenshots, recordings, downloads, and [verification runs](/docs/framework/verification) are stored. Blobs are written once, content-addressed under `<dir>/sha256/<aa>/<hex>` with a sidecar metadata file, and each run's manifest under `<dir>/runs/<executionId>.json`.
+
+`retention` caps each run (by default 512 MiB and 1e3 blobs, with no TTL). A blob dropped by retention shows up in a verification as a `buffer-truncated` gap rather than as missing evidence. `harness.artifacts.listRun(executionId)` lists a run's artifacts.
+
+Without a store, a harness uses core's in-memory one (`createInMemoryArtifactStore()`). A browser host may implement the contract over IndexedDB or a remote store.
+
+### Webhook Receiver
+
+`createWebhookReceiver({ port, publicUrl })` is an HTTP receiver for MCP servers that deliver events by webhook. Pass it to `mcp()`:
+
+```ts
+import { mcp } from '@noetic-tools/mcp';
+import { createWebhookReceiver } from '@noetic-tools/platform-node';
+
+const receiver = createWebhookReceiver({ port: 8787, publicUrl: 'https://hooks.example.com' });
+
+const slack = mcp({ url: 'https://slack-mcp.example.com/mcp' }, { webhooks: { receiver } });
+```
+
+| Option | Default | Meaning |
+|---|---|---|
+| `port` | `0` (a free port) | Port to listen on. |
+| `publicUrl` | the local address | The externally reachable base URL, behind a tunnel or proxy. |
+| `hostname` | `127.0.0.1` | Interface to bind. Use `0.0.0.0` to accept remote senders directly. |
+| `path` | `/webhooks` | Path prefix endpoints live under. |
+| `maxBodyBytes` | 1 MiB | Larger bodies are refused with 413. |
+| `toleranceMs` | five minutes | The accepted timestamp window. |
+
+The contract `mcp()` consumes is transport only: `register(handler)` opens an endpoint and returns `{ url, close() }`; each POST reaches the handler as `{ headers, body }` (lowercase header names, raw body text) and is answered with the `{ status }` the handler returns. `mcp()` verifies deliveries itself with the secret it sent when subscribing.
+
+The receiver also accepts `register({ onDelivery, secret?, signal? })` for your own webhooks, in which case it verifies each delivery — [Standard Webhooks](https://www.standardwebhooks.com) signature, five-minute timestamp window, duplicate ids — before calling `onDelivery`. Either way it refuses methods other than POST (405), oversized bodies (413), and unknown or closed endpoints (404). `signStandardWebhook()` and `verifyStandardWebhook()` are exported for senders and tests.
+
+`@noetic/platform-browser` provides no receiver; a serverless host implements the contract over its own routing.
+
+## `@noetic/platform-browser`
+
+```ts
+import {
+  createInMemoryFsAdapter,
+  createInMemoryShellAdapter,
+  createInMemorySubprocessAdapter,
+} from '@noetic/platform-browser';
+```
+
+It re-exports core's runtime-neutral in-memory adapters for ergonomic imports, and uses web platform APIs only.
+
+## Related Pages
+
+- [AgentHarness](/docs/framework/runtime) -- the `environment` options these adapters fill.
+- [Durability](/docs/framework/durability) -- file storage and step-level resume.
+- [Connections](/docs/framework/connections) -- what the artifact store and webhook receiver serve.

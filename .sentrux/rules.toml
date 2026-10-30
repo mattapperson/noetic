@@ -151,11 +151,21 @@ order = 79
 [[layers]]
 name = "core-adapters"
 paths = ["packages/core/src/adapters/**"]
-order = 81
+order = 80
 
 [[layers]]
 name = "core-interpreter"
 paths = ["packages/core/src/interpreter/**"]
+order = 81
+
+# The connection registry (spec 35 § Connection registry): wraps provider
+# connections with gates, refs, blobs, secrets and pool leases. The
+# interpreter's call/wait/verify steps and the harness's model tools resolve
+# connections through it, so it sits below them; it builds on runtime,
+# primitives and observability, so it sits above those.
+[[layers]]
+name = "core-connections"
+paths = ["packages/core/src/connections/**"]
 order = 82
 
 [[layers]]
@@ -431,9 +441,9 @@ reason = "chat-sdk must not depend on cli"
 # ─────────────────────────────────────────────────────────────────────────────
 # @noetic-tools/agent-plugins — the Agent Plugins v1 client (agent-plugins.org).
 # It ships the agentPlugins() context layer and, like the ACP client and openui,
-# is a consumer package sitting above types and below every core layer. It is
-# the only package allowed to depend on the MCP SDK, and it launches plugin
-# subprocesses; core must never import it, for the same reason it must never
+# is a consumer package sitting above types and below every core layer. It
+# connects plugin MCP servers through @noetic-tools/mcp (the only package that
+# imports the MCP SDK), and it launches plugin subprocesses; core must never import it, for the same reason it must never
 # import the ACP client — no protocol library, vendor SDK, or subprocess
 # launcher enters core's dependency graph. See specs/30-agent-plugins.md.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -456,9 +466,126 @@ reason = "@noetic-tools/agent-plugins builds on the @noetic-tools/types ContextL
 [[boundaries]]
 from = "packages/agent-plugins/src/**"
 to = "packages/context/src/**"
-reason = "@noetic-tools/agent-plugins depends only on @noetic-tools/types; keeping it off @noetic-tools/context means composing the layer never drags the other built-in layers in"
+reason = "@noetic-tools/agent-plugins depends only on @noetic-tools/types and @noetic-tools/mcp; keeping it off @noetic-tools/context means composing the layer never drags the other built-in layers in"
 
 [[boundaries]]
 from = "packages/context/src/**"
 to = "packages/agent-plugins/src/**"
+reason = "@noetic-tools/context is the foundational layer package; it must not reach up into a consumer package that carries the MCP SDK"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Connections (specs 35, 36, 37). @noetic-tools/mcp is the MCP bridge and the
+# only package that imports the MCP SDK; @noetic-tools/agent-plugins registers
+# its plugin servers through it. @noetic-tools/verify implements the Verifier
+# contract with open-verification. The @noetic-tools/profile-* packages are
+# profile data (schemas, types, conformance scenarios) on @noetic-tools/types
+# and the profile each extends. Like the ACP client, all of them sit above
+# types and below every core layer: core receives providers, profiles and a
+# verifier from the caller and never imports any of them.
+#
+# The MCP SDK and open-verification are npm packages, not repo files, so
+# sentrux cannot see edges to them; the rule that only @noetic-tools/mcp
+# imports the MCP SDK and only @noetic-tools/verify imports open-verification
+# is held by the package.json dependency lists (core, types and the profile
+# packages do not depend on either).
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[layers]]
+name = "mcp"
+paths = ["packages/mcp/src/**"]
+order = 87
+
+[[layers]]
+name = "verify"
+paths = ["packages/verify/src/**"]
+order = 87
+
+[[layers]]
+name = "profiles"
+paths = ["packages/profile-*/src/**"]
+order = 87
+
+[[boundaries]]
+from = "packages/core/src/**"
+to = "packages/mcp/src/**"
+reason = "core receives connection providers from the caller; it must never import @noetic-tools/mcp, so neither the MCP SDK nor its stdio subprocess launcher enters core's dependency graph"
+
+[[boundaries]]
+from = "packages/core/src/**"
+to = "packages/profile-*/src/**"
+reason = "core receives profiles from the caller through the @noetic-tools/types contract; importing a profile package would pin core to one vocabulary and break tree-shaking"
+
+[[boundaries]]
+from = "packages/core/src/**"
+to = "packages/verify/src/**"
+reason = "core owns the verify step but receives the Verifier from the caller; it must never import @noetic-tools/verify, so open-verification stays out of core's dependency graph"
+
+[[boundaries]]
+from = "packages/mcp/src/**"
+to = "packages/core/src/**"
+reason = "@noetic-tools/mcp implements the ConnectionProvider contract from @noetic-tools/types; it must never import core (acyclic)"
+
+[[boundaries]]
+from = "packages/mcp/src/**"
+to = "packages/agent-plugins/src/**"
+reason = "@noetic-tools/agent-plugins builds on @noetic-tools/mcp, not the reverse (acyclic)"
+
+[[boundaries]]
+from = "packages/mcp/src/**"
+to = "packages/verify/src/**"
+reason = "the MCP bridge feeds evidence to any verifier through the types contract; it must not depend on the verify implementation"
+
+[[boundaries]]
+from = "packages/mcp/src/**"
+to = "packages/context/src/**"
+reason = "@noetic-tools/mcp depends only on @noetic-tools/types"
+
+[[boundaries]]
+from = "packages/verify/src/**"
+to = "packages/core/src/**"
+reason = "@noetic-tools/verify implements the Verifier contract from @noetic-tools/types/verify; it must never import core (acyclic)"
+
+[[boundaries]]
+from = "packages/verify/src/**"
+to = "packages/mcp/src/**"
+reason = "the verifier reaches connections only through the VerifyHost core hands it, never through the MCP bridge"
+
+[[boundaries]]
+from = "packages/verify/src/**"
+to = "packages/context/src/**"
+reason = "@noetic-tools/verify depends only on @noetic-tools/types and open-verification"
+
+[[boundaries]]
+from = "packages/profile-*/src/**"
+to = "packages/core/src/**"
+reason = "profile packages are data on @noetic-tools/types and the profile they extend; they must never import core"
+
+[[boundaries]]
+from = "packages/profile-*/src/**"
+to = "packages/mcp/src/**"
+reason = "profiles are protocol-neutral vocabularies; the MCP bridge reads them, not the reverse"
+
+[[boundaries]]
+from = "packages/profile-*/src/**"
+to = "packages/verify/src/**"
+reason = "profiles declare senses for any verifier; they must not depend on the verify implementation"
+
+[[boundaries]]
+from = "packages/profile-*/src/**"
+to = "packages/context/src/**"
+reason = "profile packages depend only on @noetic-tools/types and the profile they extend"
+
+[[boundaries]]
+from = "packages/types/src/**"
+to = "packages/verify/src/**"
+reason = "@noetic-tools/types defines the Verifier contract and OVP document types without importing @noetic-tools/verify or open-verification"
+
+[[boundaries]]
+from = "packages/types/src/**"
+to = "packages/mcp/src/**"
+reason = "@noetic-tools/types defines the ConnectionProvider contract; the MCP bridge implements it, not the reverse"
+
+[[boundaries]]
+from = "packages/context/src/**"
+to = "packages/mcp/src/**"
 reason = "@noetic-tools/context is the foundational layer package; it must not reach up into a consumer package that carries the MCP SDK"

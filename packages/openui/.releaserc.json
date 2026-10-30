@@ -1,5 +1,5 @@
 {
-  "branches": ["main"],
+  "branches": ["main", { "name": "next", "prerelease": true, "channel": "next" }],
   "tagFormat": "openui-v${version}",
   "plugins": [
     [

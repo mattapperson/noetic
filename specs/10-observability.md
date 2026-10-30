@@ -272,3 +272,7 @@ A call is never recorded both ways, so a backend sees each hook call once.
 ### Cost
 
 Every hook call opens one span, with no sampling. The steering and pipeline hooks run no more often than the runtime's other spans: `beforeToolCall` once per tool call (as `tool.call`), `afterModelCall` once per model round (as `llm.call`), `onDecision` once per decision (as `decide.call`), `projectHistory` once per assembled view, and `onItemAppend` once per appended input. So the overhead per call is one span object and one `export` call per layer that defines the hook — the same order as `recall`, which is already traced per assembly. Exporters that ship spans over the network should batch, as they already must for model and tool spans.
+
+## Connection Spans
+
+Connections emit `connection.connect`, `connection.provision`, `connection.call`, `connection.task` and `connection.event` spans, with sensitive fields redacted and binary content as blob references, and the framework events `connection_changed`, `connection_event`, `connection_task` and `stream_changed`. Verification runs (`37-verification`) are attached to the run's trace as blobs (`35-connections` § Errors).

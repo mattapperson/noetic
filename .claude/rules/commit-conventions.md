@@ -66,7 +66,7 @@ to skip the workflow entirely.
 
 ## What Triggers an npm Release
 
-The `release-packages.yml` workflow runs on push to `main` when
+The `release-packages.yml` workflow runs on push to `main` or `next` when
 `packages/types/**`, `packages/memory/**`, `packages/core/**`, `biome.json`,
 or `bun.lock` changes. It releases the three packages as **sequential jobs in
 dependency order (types → memory → core)** — never in parallel, so the
@@ -81,6 +81,17 @@ npm yet. Each job:
    squash-stripped commits)
 4. Publishes to npm with provenance
 5. Creates a GitHub release and git tag (`<pkg>-v<version>`)
+
+### The `next` prerelease channel
+
+The workflow also runs on push to `next`, the branch for work that is not
+ready for `main`. Every package's `.releaserc.json` lists `next` as a
+prerelease branch, so a release from `next` follows the same bump rules but
+publishes a prerelease version (`5.20.0-next.1`, `5.20.0-next.2`, …) to the
+npm `next` dist-tag — `npm install @noetic-tools/core@next` — and never moves
+`latest`. Its tags (`core-v5.20.0-next.1`) and `chore: release` commits land
+on `next`. Merging `next` into `main` releases the stable version to
+`latest` as usual.
 
 > Note: because of `semantic-release-monorepo` scoping, a release is cut only
 > when the analyzed commits touched `packages/core/**`. A change to *only*

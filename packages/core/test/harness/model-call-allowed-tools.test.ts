@@ -113,8 +113,10 @@ async function runWith(
     params: {},
   });
   frameworkCast<{
-    client: unknown;
-  }>(harness).client = client;
+    llm: {
+      client: unknown;
+    };
+  }>(harness).llm.client = client;
   return harness.callModel({
     model: 'test/model',
     items: [
