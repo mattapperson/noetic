@@ -26,6 +26,7 @@ import type {
   ConnectionResourceInfo,
   ConnectionTaskState,
   ConnectionTaskStatus,
+  ConnectionTasks,
   ConnectOptions,
   Determinism,
   EventStream,
@@ -173,6 +174,7 @@ export interface Listener {
 }
 
 interface TaskRecord {
+  readonly taskId: string;
   readonly op: string;
   readonly args: unknown;
   readonly steps: ReadonlyArray<InMemoryTaskStep>;
@@ -378,15 +380,44 @@ export function createListenerStream(
 
 //#endregion
 
-//#region Connection
+//#region Connection state
 
-function createConnection(
-  options: InMemoryConnectionOptions,
-  setupGiven?: Readonly<Record<string, unknown>>,
-): InMemoryConnection {
-  let operations: Readonly<Record<string, InMemoryOperation>> = options.operations ?? {};
-  let manifest = buildManifest(options);
-  let identity: ConnectionIdentity = {
+type ChangeKind = 'manifest' | 'identity';
+type TaskResultOptions = Parameters<ConnectionTasks['result']>[1];
+type EmitOptions = Parameters<InMemoryConnection['emit']>[2];
+type ManifestPatch = Parameters<InMemoryConnection['updateManifest']>[0];
+type RunContext = InMemoryCallContext & {
+  readonly answers: ReadonlyMap<string, unknown>;
+};
+
+/** Everything a scripted connection mutates, shared by its module-level handlers. */
+interface ConnectionState {
+  readonly options: InMemoryConnectionOptions;
+  operations: Readonly<Record<string, InMemoryOperation>>;
+  manifest: ConnectionManifest;
+  identity: ConnectionIdentity;
+  readonly calls: InMemoryCallRecord[];
+  readonly listeners: Set<Listener>;
+  readonly changeListeners: Set<(change: ChangeKind) => void>;
+  readonly history: ConnectionEventInit[];
+  readonly onceResults: Map<
+    string,
+    {
+      readonly args: string;
+      readonly result: CallResult;
+    }
+  >;
+  readonly tasks: Map<string, TaskRecord>;
+  sequence: number;
+  released: boolean;
+  readonly closed: Promise<{
+    reason: string;
+  }>;
+  readonly resolveClosed: (value: { reason: string }) => void;
+}
+
+function initialIdentity(options: InMemoryConnectionOptions): ConnectionIdentity {
+  return {
     surface: options.surface ?? 'x-memory',
     instance: options.instance ?? crypto.randomUUID(),
     ...(options.epoch !== undefined
@@ -395,350 +426,428 @@ function createConnection(
         }
       : {}),
   };
-  const calls: InMemoryCallRecord[] = [];
-  const listeners = new Set<Listener>();
-  const changeListeners = new Set<(change: 'manifest' | 'identity') => void>();
-  const history: ConnectionEventInit[] = [];
-  const onceResults = new Map<
-    string,
-    {
-      readonly args: string;
-      readonly result: CallResult;
-    }
-  >();
-  const tasks = new Map<string, TaskRecord>();
-  let sequence = 0;
-  let released = false;
+}
+
+function createConnectionState(options: InMemoryConnectionOptions): ConnectionState {
   let resolveClosed: (value: { reason: string }) => void = () => undefined;
   const closed = new Promise<{
     reason: string;
   }>((resolve) => {
     resolveClosed = resolve;
   });
-
-  const notify = (change: 'manifest' | 'identity'): void => {
-    for (const listener of [
-      ...changeListeners,
-    ]) {
-      listener(change);
-    }
+  return {
+    options,
+    operations: options.operations ?? {},
+    manifest: buildManifest(options),
+    identity: initialIdentity(options),
+    calls: [],
+    listeners: new Set(),
+    changeListeners: new Set(),
+    history: [],
+    onceResults: new Map(),
+    tasks: new Map(),
+    sequence: 0,
+    released: false,
+    closed,
+    resolveClosed,
   };
+}
 
-  const runOperation = async (
-    op: InMemoryOperation,
-    args: unknown,
-    context: InMemoryCallContext & {
-      readonly answers: ReadonlyMap<string, unknown>;
-    },
-  ): Promise<CallOutcome> => {
-    try {
-      const output = await op.run?.(args, context);
+function notifyChange(state: ConnectionState, change: ChangeKind): void {
+  for (const listener of [
+    ...state.changeListeners,
+  ]) {
+    listener(change);
+  }
+}
+
+function setIdentity(state: ConnectionState, identity: ConnectionIdentity): ConnectionIdentity {
+  state.identity = identity;
+  notifyChange(state, 'identity');
+  return identity;
+}
+
+function applyManifestPatch(state: ConnectionState, patch: ManifestPatch): void {
+  if (patch.operations) {
+    state.operations = patch.operations;
+  }
+  state.manifest = {
+    ...state.manifest,
+    ...patch,
+    operations: operationInfos(state.operations),
+  };
+  notifyChange(state, 'manifest');
+}
+
+//#endregion
+
+//#region Calls
+
+async function runOperation(
+  op: InMemoryOperation,
+  args: unknown,
+  context: RunContext,
+): Promise<CallOutcome> {
+  try {
+    const output = await op.run?.(args, context);
+    return {
+      status: 'ok',
+      output: output ?? null,
+    };
+  } catch (e) {
+    if (e instanceof InMemoryRefusal) {
       return {
-        status: 'ok',
-        output: output ?? null,
+        status: 'error',
+        error: e.payload,
       };
-    } catch (e) {
-      if (e instanceof InMemoryRefusal) {
-        return {
-          status: 'error',
-          error: e.payload,
-        };
-      }
-      throw e;
     }
-  };
+    throw e;
+  }
+}
 
+function startTask(
+  state: ConnectionState,
+  task: Pick<TaskRecord, 'op' | 'args' | 'steps' | 'context'>,
+): CallResult {
+  const taskId = `task-${crypto.randomUUID().slice(0, 8)}`;
+  state.tasks.set(taskId, {
+    ...task,
+    taskId,
+    answers: new Map(),
+    cancelled: false,
+    waiting: new Map(),
+  });
+  return {
+    status: 'task',
+    taskId,
+  };
+}
+
+async function callOperation(
+  state: ConnectionState,
+  connection: InMemoryConnection,
+  record: InMemoryCallRecord,
+): Promise<CallResult> {
+  state.calls.push(record);
+  const { op: opName, args, options: callOptions } = record;
+  const op = state.operations[opName];
+  if (!op) {
+    return errorResult('undeclared', `'${opName}' is not an operation of this connection`);
+  }
+  if (op.guarded && !callOptions.confirmed) {
+    return errorResult('guarded', `'${opName}' needs confirmation`);
+  }
+  const argsKey = JSON.stringify(args);
+  const previous = op.once ? state.onceResults.get(callOptions.idempotencyKey) : undefined;
+  if (previous) {
+    return previous.args === argsKey
+      ? previous.result
+      : errorResult('conflict', 'idempotency key reused with different arguments');
+  }
+  const context: InMemoryCallContext = {
+    idempotencyKey: callOptions.idempotencyKey,
+    confirmed: callOptions.confirmed === true,
+    signal: callOptions.signal,
+    connection,
+  };
+  if (op.task) {
+    return startTask(state, {
+      op: opName,
+      args,
+      steps: op.task,
+      context,
+    });
+  }
+  const result = await runOperation(op, args, {
+    ...context,
+    answers: new Map(),
+  });
+  if (op.once) {
+    state.onceResults.set(callOptions.idempotencyKey, {
+      args: argsKey,
+      result,
+    });
+  }
+  return result;
+}
+
+async function readResource(state: ConnectionState, resource: string): Promise<unknown> {
+  const found = state.options.resources?.[resource];
+  if (!found) {
+    throw inMemoryRefusal('not_found', `no resource '${resource}'`);
+  }
+  return found.read();
+}
+
+//#endregion
+
+//#region Tasks
+
+async function reportTaskStep(
+  task: TaskRecord,
+  step: InMemoryTaskStep,
+  resultOptions: TaskResultOptions,
+): Promise<void> {
+  if (resultOptions.signal.aborted || task.cancelled) {
+    throw new Error('task wait aborted');
+  }
+  resultOptions.onProgress?.({
+    taskId: task.taskId,
+    ...step,
+  });
+  const question = step.request;
+  if (step.state !== 'input_required' || !question) {
+    return;
+  }
+  await new Promise<void>((resolve, reject) => {
+    task.waiting.set(question.id, resolve);
+    resultOptions.signal.addEventListener('abort', () => reject(new Error('task wait aborted')), {
+      once: true,
+    });
+  });
+}
+
+async function awaitTaskResult(
+  state: ConnectionState,
+  taskId: string,
+  resultOptions: TaskResultOptions,
+): Promise<CallOutcome> {
+  const task = state.tasks.get(taskId);
+  if (!task) {
+    return errorResult('not_found', `no task '${taskId}'`);
+  }
+  for (const step of task.steps) {
+    await reportTaskStep(task, step, resultOptions);
+  }
+  const op = state.operations[task.op];
+  if (!op) {
+    return errorResult('undeclared', `'${task.op}' is gone`);
+  }
+  const outcome = await runOperation(op, task.args, {
+    ...task.context,
+    answers: task.answers,
+  });
+  resultOptions.onProgress?.({
+    taskId,
+    state: outcome.status === 'ok' ? 'completed' : 'failed',
+  });
+  return outcome;
+}
+
+function createTaskApi(state: ConnectionState): ConnectionTasks {
+  return {
+    async get(taskId): Promise<ConnectionTaskStatus> {
+      return {
+        taskId,
+        state: state.tasks.get(taskId)?.cancelled ? 'cancelled' : 'working',
+      };
+    },
+    result: (taskId, resultOptions) => awaitTaskResult(state, taskId, resultOptions),
+    async cancel(taskId): Promise<void> {
+      const task = state.tasks.get(taskId);
+      if (task) {
+        task.cancelled = true;
+      }
+    },
+    async respond(taskId, requestId, answer): Promise<void> {
+      const task = state.tasks.get(taskId);
+      if (!task) {
+        return;
+      }
+      task.answers.set(requestId, answer);
+      task.waiting.get(requestId)?.();
+    },
+  };
+}
+
+//#endregion
+
+//#region Events
+
+function replayHistory(
+  history: ReadonlyArray<ConnectionEventInit>,
+  request: ListenRequest,
+  listener: Listener,
+): void {
+  if (request.cursor === undefined || request.cursor === null) {
+    return;
+  }
+  const after = Number(request.cursor);
+  for (const event of history) {
+    if (event.type !== request.event || Number(event.cursor) <= after) {
+      continue;
+    }
+    listener.push({
+      type: 'event',
+      event,
+    });
+  }
+}
+
+function listenOn(state: ConnectionState, request: ListenRequest): EventStream {
+  const latest = state.history[state.history.length - 1]?.cursor ?? null;
+  const { stream, listener } = createListenerStream(state.listeners, request, {
+    cursor: latest,
+  });
+  replayHistory(state.history, request, listener);
+  state.listeners.add(listener);
+  return stream;
+}
+
+function emitEvent(
+  state: ConnectionState,
+  emitted: {
+    readonly type: string;
+    readonly payload: unknown;
+    readonly options: EmitOptions;
+  },
+): ConnectionEventInit {
+  const { type, payload, options: emitOptions } = emitted;
+  state.sequence += 1;
+  const event: ConnectionEventInit = {
+    id: emitOptions?.id ?? `evt-${state.sequence}`,
+    type,
+    time: new Date().toISOString(),
+    payload,
+    cursor: String(state.sequence),
+    ...(emitOptions?.actionId
+      ? {
+          actionId: emitOptions.actionId,
+        }
+      : {}),
+  };
+  state.history.push(event);
+  const matches = state.options.events?.[type]?.matches;
+  for (const listener of [
+    ...state.listeners,
+  ]) {
+    if (listener.event !== type) {
+      continue;
+    }
+    if (matches && !matches(listener.args, payload)) {
+      continue;
+    }
+    listener.push({
+      type: 'event',
+      event,
+    });
+  }
+  return event;
+}
+
+function broadcastGap(listeners: Set<Listener>, reason: string, type: string | undefined): void {
+  for (const listener of [
+    ...listeners,
+  ]) {
+    if (type === undefined || listener.event === type) {
+      listener.push({
+        type: 'gap',
+        reason,
+      });
+    }
+  }
+}
+
+function terminateListeners(listeners: Set<Listener>, reason: string): void {
+  for (const listener of [
+    ...listeners,
+  ]) {
+    listener.push({
+      type: 'terminated',
+      reason,
+    });
+    listener.end();
+  }
+}
+
+function endListeners(listeners: Set<Listener>): void {
+  for (const listener of [
+    ...listeners,
+  ]) {
+    listener.end();
+  }
+}
+
+//#endregion
+
+//#region Connection
+
+function resetMethod(options: InMemoryConnectionOptions): Pick<Connection, 'reset'> {
+  const reset = options.reset;
+  if (!reset) {
+    return {};
+  }
+  return {
+    async reset(): Promise<void> {
+      reset();
+    },
+  };
+}
+
+function createConnection(
+  options: InMemoryConnectionOptions,
+  setupGiven?: Readonly<Record<string, unknown>>,
+): InMemoryConnection {
+  const state = createConnectionState(options);
   const connection: InMemoryConnection = {
     id: options.id ?? 'memory',
     get manifest(): ConnectionManifest {
-      return manifest;
+      return state.manifest;
     },
     get identity(): ConnectionIdentity {
-      return identity;
+      return state.identity;
     },
-    calls,
+    calls: state.calls,
     get released(): boolean {
-      return released;
+      return state.released;
     },
     setupGiven,
-
-    async call(opName, args, callOptions): Promise<CallResult> {
-      calls.push({
-        op: opName,
+    call: (op, args, callOptions) =>
+      callOperation(state, connection, {
+        op,
         args,
         options: callOptions,
-      });
-      const op = operations[opName];
-      if (!op) {
-        return errorResult('undeclared', `'${opName}' is not an operation of this connection`);
-      }
-      if (op.guarded && !callOptions.confirmed) {
-        return errorResult('guarded', `'${opName}' needs confirmation`);
-      }
-      const argsKey = JSON.stringify(args);
-      const previous = op.once ? onceResults.get(callOptions.idempotencyKey) : undefined;
-      if (previous) {
-        return previous.args === argsKey
-          ? previous.result
-          : errorResult('conflict', 'idempotency key reused with different arguments');
-      }
-      const context: InMemoryCallContext = {
-        idempotencyKey: callOptions.idempotencyKey,
-        confirmed: callOptions.confirmed === true,
-        signal: callOptions.signal,
-        connection,
-      };
-      if (op.task) {
-        const taskId = `task-${crypto.randomUUID().slice(0, 8)}`;
-        tasks.set(taskId, {
-          op: opName,
-          args,
-          steps: op.task,
-          context,
-          answers: new Map(),
-          cancelled: false,
-          waiting: new Map(),
-        });
-        return {
-          status: 'task',
-          taskId,
-        };
-      }
-      const result = await runOperation(op, args, {
-        ...context,
-        answers: new Map(),
-      });
-      if (op.once) {
-        onceResults.set(callOptions.idempotencyKey, {
-          args: argsKey,
-          result,
-        });
-      }
-      return result;
-    },
-
-    async read(resource): Promise<unknown> {
-      const found = options.resources?.[resource];
-      if (!found) {
-        throw inMemoryRefusal('not_found', `no resource '${resource}'`);
-      }
-      return found.read();
-    },
-
-    listen(request): EventStream {
-      const latest = history[history.length - 1]?.cursor ?? null;
-      const { stream, listener } = createListenerStream(listeners, request, {
-        cursor: latest,
-      });
-      if (request.cursor !== undefined && request.cursor !== null) {
-        const after = Number(request.cursor);
-        for (const event of history) {
-          if (event.type === request.event && Number(event.cursor) > after) {
-            listener.push({
-              type: 'event',
-              event,
-            });
-          }
-        }
-      }
-      listeners.add(listener);
-      return stream;
-    },
-
-    tasks: {
-      async get(taskId): Promise<ConnectionTaskStatus> {
-        const task = tasks.get(taskId);
-        return {
-          taskId,
-          state: task?.cancelled ? 'cancelled' : 'working',
-        };
-      },
-      async result(taskId, resultOptions): Promise<CallOutcome> {
-        const task = tasks.get(taskId);
-        if (!task) {
-          return errorResult('not_found', `no task '${taskId}'`);
-        }
-        for (const step of task.steps) {
-          if (resultOptions.signal.aborted || task.cancelled) {
-            throw new Error('task wait aborted');
-          }
-          resultOptions.onProgress?.({
-            taskId,
-            ...step,
-          });
-          const question = step.request;
-          if (step.state !== 'input_required' || !question) {
-            continue;
-          }
-          await new Promise<void>((resolve, reject) => {
-            task.waiting.set(question.id, resolve);
-            resultOptions.signal.addEventListener(
-              'abort',
-              () => reject(new Error('task wait aborted')),
-              {
-                once: true,
-              },
-            );
-          });
-        }
-        const op = operations[task.op];
-        if (!op) {
-          return errorResult('undeclared', `'${task.op}' is gone`);
-        }
-        const outcome = await runOperation(op, task.args, {
-          ...task.context,
-          answers: task.answers,
-        });
-        resultOptions.onProgress?.({
-          taskId,
-          state: outcome.status === 'ok' ? 'completed' : 'failed',
-        });
-        return outcome;
-      },
-      async cancel(taskId): Promise<void> {
-        const task = tasks.get(taskId);
-        if (task) {
-          task.cancelled = true;
-        }
-      },
-      async respond(taskId, requestId, answer): Promise<void> {
-        const task = tasks.get(taskId);
-        if (!task) {
-          return;
-        }
-        task.answers.set(requestId, answer);
-        task.waiting.get(requestId)?.();
-      },
-    },
-
-    ...(options.reset
-      ? {
-          async reset(): Promise<void> {
-            options.reset?.();
-          },
-        }
-      : {}),
-
+      }),
+    read: (resource) => readResource(state, resource),
+    listen: (request) => listenOn(state, request),
+    tasks: createTaskApi(state),
+    ...resetMethod(options),
     onChange(listener): () => void {
-      changeListeners.add(listener);
+      state.changeListeners.add(listener);
       return () => {
-        changeListeners.delete(listener);
+        state.changeListeners.delete(listener);
       };
     },
-
-    closed,
-
+    closed: state.closed,
     async release(): Promise<void> {
-      released = true;
-      for (const listener of [
-        ...listeners,
-      ]) {
-        listener.end();
-      }
-      resolveClosed({
+      state.released = true;
+      endListeners(state.listeners);
+      state.resolveClosed({
         reason: 'released',
       });
     },
-
-    emit(type, payload, emitOptions): ConnectionEventInit {
-      sequence += 1;
-      const event: ConnectionEventInit = {
-        id: emitOptions?.id ?? `evt-${sequence}`,
+    emit: (type, payload, emitOptions) =>
+      emitEvent(state, {
         type,
-        time: new Date().toISOString(),
         payload,
-        cursor: String(sequence),
-        ...(emitOptions?.actionId
-          ? {
-              actionId: emitOptions.actionId,
-            }
-          : {}),
-      };
-      history.push(event);
-      const matches = options.events?.[type]?.matches;
-      for (const listener of [
-        ...listeners,
-      ]) {
-        if (listener.event !== type) {
-          continue;
-        }
-        if (matches && !matches(listener.args, payload)) {
-          continue;
-        }
-        listener.push({
-          type: 'event',
-          event,
-        });
-      }
-      return event;
-    },
-
-    gap(reason, type): void {
-      for (const listener of [
-        ...listeners,
-      ]) {
-        if (type === undefined || listener.event === type) {
-          listener.push({
-            type: 'gap',
-            reason,
-          });
-        }
-      }
-    },
-
-    terminate(reason): void {
-      for (const listener of [
-        ...listeners,
-      ]) {
-        listener.push({
-          type: 'terminated',
-          reason,
-        });
-        listener.end();
-      }
-    },
-
-    replace(): ConnectionIdentity {
-      identity = {
-        ...identity,
+        options: emitOptions,
+      }),
+    gap: (reason, type) => broadcastGap(state.listeners, reason, type),
+    terminate: (reason) => terminateListeners(state.listeners, reason),
+    replace: () =>
+      setIdentity(state, {
+        ...state.identity,
         instance: crypto.randomUUID(),
-      };
-      notify('identity');
-      return identity;
-    },
-
-    bumpEpoch(): ConnectionIdentity {
-      identity = {
-        ...identity,
-        epoch: (identity.epoch ?? 0) + 1,
-      };
-      notify('identity');
-      return identity;
-    },
-
-    updateManifest(patch): void {
-      if (patch.operations) {
-        operations = patch.operations;
-      }
-      manifest = {
-        ...manifest,
-        ...patch,
-        operations: operationInfos(operations),
-      };
-      notify('manifest');
-    },
-
+      }),
+    bumpEpoch: () =>
+      setIdentity(state, {
+        ...state.identity,
+        epoch: (state.identity.epoch ?? 0) + 1,
+      }),
+    updateManifest: (patch) => applyManifestPatch(state, patch),
     drop(reason): void {
-      for (const listener of [
-        ...listeners,
-      ]) {
-        listener.push({
-          type: 'terminated',
-          reason,
-        });
-        listener.end();
-      }
-      resolveClosed({
+      terminateListeners(state.listeners, reason);
+      state.resolveClosed({
         reason,
       });
     },

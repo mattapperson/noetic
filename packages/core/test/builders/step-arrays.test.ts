@@ -1,13 +1,16 @@
 import { describe, expect, it } from 'bun:test';
-import type { Context, ContextData, Step, StepArray } from '@noetic-tools/types';
+import type { Context, ContextData, DetachedHandle, Step, Steps } from '@noetic-tools/types';
 import { frameworkCast, NoeticConfigError } from '@noetic-tools/types';
 import {
   AgentHarness,
   callModel,
   conditional,
   inParallel,
+  otherwise,
   runCode,
+  semanticRoute,
   spawn,
+  when,
   withContext,
 } from '../../src';
 import { toStep } from '../../src/builders/sequence';
@@ -29,6 +32,28 @@ function length(id: string): Step<ContextData, string, number> {
     id,
     execute: async (input) => input.length,
   });
+}
+
+function toText(id: string): Step<ContextData, number, string> {
+  return runCode<ContextData, number, string>({
+    id,
+    execute: async (input) => `${input}`,
+  });
+}
+
+/** The `NoeticConfigError` code `build` throws, or `undefined`. */
+function configErrorCode(build: () => unknown): string | undefined {
+  try {
+    build();
+  } catch (error) {
+    return error instanceof NoeticConfigError ? error.code : undefined;
+  }
+  return undefined;
+}
+
+/** Passes a step or array through a generic signature, as library code would. */
+function runSteps<I, O>(h: AgentHarness, steps: Steps<ContextData, I, O>, input: I): Promise<O> {
+  return h.run(steps, input, h.createContext());
 }
 
 function harness(): AgentHarness {
@@ -72,15 +97,15 @@ describe('toStep', () => {
     ]);
     expect(built.kind).toBe('sequence');
     expect(built.id).toBe('a > b');
-    expect(stepChildren(built).map((child) => child.id)).toEqual([
+    expect(stepChildren(frameworkCast<Step>(built)).map((child) => child.id)).toEqual([
       'a',
       'b',
     ]);
   });
 
   it('refuses an empty array with EMPTY_STEP_ARRAY', () => {
-    // The StepArray type already refuses `[]`; the runtime guard covers untyped callers.
-    const empty = frameworkCast<StepArray>([]);
+    // The Steps type already refuses `[]`; the runtime guard covers untyped callers.
+    const empty = frameworkCast<Steps<ContextData, string, string>>([]);
     let caught: unknown;
     try {
       toStep(empty);
@@ -240,5 +265,339 @@ describe('arrays of steps', () => {
       ],
     });
     expect(await runOn(routed, 'x')).toBe('x12');
+  });
+});
+
+describe('array type checks', () => {
+  // These run no step: each call sits in a function that is never invoked, so
+  // only the compiler sees it.
+  it('rejects a lookalike {kind, id} element (run, ctx.harness.run, spawn, withContext, agentGraph)', () => {
+    const h = harness();
+    const ctx = h.createContext();
+    const bogus = (): unknown => {
+      // @ts-expect-error a {kind, id} object is not a step
+      void h.run(
+        [
+          length('n'),
+          {
+            kind: 'runCode',
+            id: 'bogus',
+          },
+        ],
+        'hi',
+        ctx,
+      );
+      void runCode<ContextData, string, unknown>({
+        id: 'inner',
+        execute: async (input: string, c: Context) =>
+          // @ts-expect-error a {kind, id} object is not a step
+          c.harness.run(
+            [
+              append('a', ''),
+              {
+                kind: 'runCode',
+                id: 'bogus',
+              },
+            ],
+            input,
+            c,
+          ),
+      });
+      void spawn<ContextData, string, string>({
+        id: 's',
+        child: [
+          append('a', ''),
+          // @ts-expect-error a {kind, id} object is not a step
+          {
+            kind: 'runCode',
+            id: 'bogus',
+          },
+        ],
+      });
+      void withContext<ContextData, string, string>({
+        id: 'w',
+        context: [],
+        child: [
+          append('a', ''),
+          // @ts-expect-error a {kind, id} object is not a step
+          {
+            kind: 'runCode',
+            id: 'bogus',
+          },
+        ],
+      });
+      return new AgentHarness({
+        name: 'g',
+        params: {},
+        agentGraph: [
+          append('a', ''),
+          // @ts-expect-error a {kind, id} object is not a step
+          {
+            kind: 'runCode',
+            id: 'bogus',
+          },
+        ],
+      });
+    };
+    expect(typeof bogus).toBe('function');
+  });
+
+  it('rejects an array whose adjacent steps do not link', () => {
+    const h = harness();
+    const ctx = h.createContext();
+    const mismatched = (): unknown => {
+      // @ts-expect-error length outputs a number; append takes a string
+      void h.run(
+        [
+          length('n'),
+          append('a', ''),
+        ],
+        'hi',
+        ctx,
+      );
+      const chain = [
+        length('n'),
+        append('a', ''),
+      ] as const;
+      // @ts-expect-error the same check holds for an `as const` tuple
+      void h.run(chain, 'hi', ctx);
+      const inner = runCode<ContextData, string, string>({
+        id: 'inner',
+        execute: async (input: string, c: Context) =>
+          // @ts-expect-error length outputs a number; append takes a string
+          c.harness.run(
+            [
+              length('n'),
+              append('a', ''),
+            ],
+            input,
+            c,
+          ),
+      });
+      void inner;
+      return new AgentHarness({
+        name: 'g',
+        params: {},
+        // @ts-expect-error an agentGraph must output a string; length outputs a number
+        agentGraph: [
+          append('a', ''),
+          length('n'),
+        ],
+      });
+    };
+    expect(typeof mismatched).toBe('function');
+  });
+
+  it('checks a builder array against its explicit input and output types', () => {
+    const wrong = (): unknown => {
+      void spawn<ContextData, string, string>({
+        id: 's',
+        // @ts-expect-error the last step outputs a number, not a string
+        child: [
+          append('a', ''),
+          length('n'),
+        ],
+      });
+      return withContext<ContextData, number, string>({
+        id: 'w',
+        context: [],
+        child: [
+          // @ts-expect-error the first step takes a string, not a number
+          append('a', ''),
+          append('b', ''),
+        ],
+      });
+    };
+    expect(typeof wrong).toBe('function');
+  });
+
+  it('detachedSpawn takes an array: rejects a broken one and runs a good one in sequence', async () => {
+    const h = harness();
+    const ctx = h.createContext();
+    const broken = (): unknown => {
+      // @ts-expect-error a {kind, id} object is not a step
+      void h.detachedSpawn(
+        [
+          append('a', ''),
+          {
+            kind: 'runCode',
+            id: 'bogus',
+          },
+        ],
+        'x',
+        ctx,
+      );
+      // @ts-expect-error length outputs a number; append takes a string
+      return h.detachedSpawn(
+        [
+          length('n'),
+          append('a', ''),
+        ],
+        'x',
+        ctx,
+      );
+    };
+    expect(typeof broken).toBe('function');
+    const handle: DetachedHandle<number> = h.detachedSpawn(
+      [
+        append('d1', '-1'),
+        length('d2'),
+      ],
+      'x',
+      ctx,
+    );
+    expect(await handle.await()).toBe('x-1'.length);
+  });
+
+  it('ctx.harness.detachedSpawn takes an array too', async () => {
+    const outer = runCode<ContextData, string, string>({
+      id: 'outer',
+      execute: async (input: string, ctx: Context) => {
+        const handle = ctx.harness.detachedSpawn(
+          [
+            append('c1', 'A'),
+            append('c2', 'B'),
+          ],
+          input,
+          ctx,
+        );
+        return handle.await();
+      },
+    });
+    expect(await runOn(outer, '>')).toBe('>AB');
+  });
+
+  it('accepts a homogeneous array variable and a Steps value passed through a generic', async () => {
+    const h = harness();
+    const list: Step<ContextData, string, string>[] = [
+      append('h1', '1'),
+      append('h2', '2'),
+    ];
+    const out: string = await h.run(list, 'x', h.createContext());
+    expect(out).toBe('x12');
+    const viaGeneric: number = await runSteps(
+      h,
+      [
+        append('g1', '!'),
+        length('g2'),
+      ],
+      'ab',
+    );
+    expect(viaGeneric).toBe(3);
+    const viaSpawn = spawn<ContextData, string, string>({
+      id: 'from-list',
+      child: list,
+    });
+    expect(await runOn(viaSpawn, 'y')).toBe('y12');
+    const mixed: number = await h.run(
+      [
+        append('m1', ''),
+        length('m2'),
+        toText('m3'),
+        length('m4'),
+      ],
+      'abc',
+      h.createContext(),
+    );
+    expect(mixed).toBe(1);
+  });
+});
+
+describe('toStep copies and checks the array', () => {
+  it('keeps a frozen copy, so changing the array after building changes nothing', async () => {
+    const list: Step<ContextData, string, string>[] = [
+      append('c1', '1'),
+      append('c2', '2'),
+    ];
+    const built = toStep(list);
+    list.push(append('c3', '3'));
+    list[0] = append('swapped', '?');
+    expect(built.id).toBe('c1 > c2');
+    expect(stepChildren(frameworkCast<Step>(built)).map((child) => child.id)).toEqual([
+      'c1',
+      'c2',
+    ]);
+    expect(Object.isFrozen(stepChildren(frameworkCast<Step>(built)))).toBe(true);
+    expect(await runOn(built, 'x')).toBe('x12');
+  });
+
+  it('rejects a nested array with INVALID_STEP_IN_ARRAY (arrays are not flattened)', () => {
+    const nested = frameworkCast<Steps<ContextData, string, string>>([
+      append('a', ''),
+      [
+        append('b', ''),
+        append('c', ''),
+      ],
+    ]);
+    expect(configErrorCode(() => toStep(nested))).toBe('INVALID_STEP_IN_ARRAY');
+  });
+
+  it('rejects null, a non-object, an unknown kind and a missing id with INVALID_STEP_IN_ARRAY', () => {
+    const bad: ReadonlyArray<unknown> = [
+      null,
+      'step',
+      {
+        kind: 'notAKind',
+        id: 'x',
+      },
+      {
+        kind: 'runCode',
+      },
+    ];
+    for (const element of bad) {
+      const list = frameworkCast<Steps<ContextData, string, string>>([
+        append('ok', ''),
+        element,
+      ]);
+      expect(configErrorCode(() => toStep(list))).toBe('INVALID_STEP_IN_ARRAY');
+    }
+  });
+
+  it('builders and harness.run surface INVALID_STEP_IN_ARRAY at build time', async () => {
+    const nested = frameworkCast<Steps<ContextData, string, string>>([
+      append('a', ''),
+      [
+        append('b', ''),
+      ],
+    ]);
+    expect(
+      configErrorCode(() =>
+        spawn<ContextData, string, string>({
+          id: 's',
+          child: nested,
+        }),
+      ),
+    ).toBe('INVALID_STEP_IN_ARRAY');
+    const h = harness();
+    let caught: unknown;
+    try {
+      await runSteps(h, nested, 'x');
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught instanceof NoeticConfigError ? caught.code : undefined).toBe(
+      'INVALID_STEP_IN_ARRAY',
+    );
+  });
+});
+
+describe('condition clauses take arrays', () => {
+  it('when and otherwise run an array in sequence', async () => {
+    const isShort = async (input: string): Promise<boolean> => input.length < 3;
+    const routed = conditional<ContextData, string, string>({
+      id: 'clauses',
+      route: semanticRoute<ContextData, string, string>(
+        when(isShort, [
+          append('w1', '+'),
+          append('w2', '+'),
+        ]),
+        otherwise([
+          append('o1', '-'),
+          append('o2', '-'),
+        ]),
+      ),
+    });
+    expect(await runOn(routed, 'ab')).toBe('ab++');
+    expect(await runOn(routed, 'abcd')).toBe('abcd--');
   });
 });

@@ -15,6 +15,7 @@
 import type {
   Connection,
   ConnectionLease,
+  ConnectionManifest,
   ConnectionPoolConfig,
   ConnectionProvider,
   ConnectOptions,
@@ -24,6 +25,7 @@ import type {
 import { LEASE_RECLAIM_MS, LEASE_RENEW_MS } from '@noetic-tools/types';
 import { z } from 'zod';
 import { invalidConnectionError, unavailableError } from './errors';
+import { runEvery } from './settle';
 
 //#region Types
 
@@ -98,6 +100,8 @@ export class ConnectionPool {
   private readonly waiters = new Set<() => void>();
   private timer: ReturnType<typeof setInterval> | undefined;
   private closed = false;
+  /** The manifest of the last connection provisioned with no setup, kept after it is released. */
+  private baseManifest: ConnectionManifest | undefined;
   private readonly now: () => number;
   private readonly renewMs: number;
   private readonly reclaimMs: number;
@@ -208,6 +212,16 @@ export class ConnectionPool {
     ];
   }
 
+  /**
+   * The manifest a connection provisioned with no setup offers: undefined until
+   * the pool has provisioned one. A provider may answer a setup with a
+   * different manifest, so only this one stands for the pool when a need that
+   * passes no setup is negotiated (spec 35 § Negotiation).
+   */
+  manifest(): ConnectionManifest | undefined {
+    return this.baseManifest;
+  }
+
   status(): {
     max: number;
     leased: number;
@@ -228,15 +242,18 @@ export class ConnectionPool {
       clearInterval(this.timer);
       this.timer = undefined;
     }
-    for (const scopeKey of [
-      ...this.held.keys(),
-    ]) {
-      await this.release(scopeKey);
+    try {
+      await runEvery([
+        ...[
+          ...this.held.keys(),
+        ].map((scopeKey) => () => this.release(scopeKey)),
+        ...this.idle
+          .splice(0)
+          .map((connection) => () => connection.release().catch(() => undefined)),
+      ]);
+    } finally {
+      this.wake();
     }
-    for (const connection of this.idle.splice(0)) {
-      await connection.release().catch(() => undefined);
-    }
-    this.wake();
   }
 
   private async acquireNew(request: AcquireRequest): Promise<HeldConnection> {
@@ -303,13 +320,17 @@ export class ConnectionPool {
     }
     this.provisioning += 1;
     try {
-      return await provision.call(
+      const connection = await provision.call(
         this.deps.provider,
         {
           ...setup,
         },
         this.deps.connectOptions(this.controller.signal),
       );
+      if (Object.keys(setup).length === 0) {
+        this.baseManifest = connection.manifest;
+      }
+      return connection;
     } catch (e) {
       this.wake();
       const reason = e instanceof Error ? e.message : String(e);

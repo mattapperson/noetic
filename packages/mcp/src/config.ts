@@ -155,6 +155,63 @@ function invalid(message: string, hint: string): NoeticConfigError {
   });
 }
 
+interface SplitState {
+  readonly line: string;
+  readonly words: string[];
+  current: string;
+  quote: '"' | "'" | undefined;
+  inWord: boolean;
+}
+
+function endWord(state: SplitState): void {
+  if (state.inWord) {
+    state.words.push(state.current);
+  }
+  state.current = '';
+  state.inWord = false;
+}
+
+/** Appends the character after a backslash at `i`; returns the index consumed. */
+function appendEscaped(state: SplitState, i: number): number {
+  state.current += state.line.charAt(i + 1);
+  return i + 1;
+}
+
+/** Consumes the character at `i` inside a quote; returns the last index consumed. */
+function stepQuoted(state: SplitState, i: number): number {
+  const ch = state.line.charAt(i);
+  if (ch === state.quote) {
+    state.quote = undefined;
+    return i;
+  }
+  if (ch === '\\' && state.quote === '"' && i + 1 < state.line.length) {
+    return appendEscaped(state, i);
+  }
+  state.current += ch;
+  return i;
+}
+
+/** Consumes the character at `i` outside quotes; returns the last index consumed. */
+function stepUnquoted(state: SplitState, i: number): number {
+  const ch = state.line.charAt(i);
+  if (ch === '"' || ch === "'") {
+    state.quote = ch;
+    state.inWord = true;
+    return i;
+  }
+  if (ch === '\\' && i + 1 < state.line.length) {
+    state.inWord = true;
+    return appendEscaped(state, i);
+  }
+  if (/\s/.test(ch)) {
+    endWord(state);
+    return i;
+  }
+  state.current += ch;
+  state.inWord = true;
+  return i;
+}
+
 /**
  * @public
  * Splits a command line into words, honoring single quotes, double quotes and
@@ -163,60 +220,27 @@ function invalid(message: string, hint: string): NoeticConfigError {
  * @throws NoeticConfigError `CONNECTION_INVALID` for an empty line or an unclosed quote.
  */
 export function splitCommandLine(line: string): string[] {
-  const words: string[] = [];
-  let current = '';
-  let quote: '"' | "'" | undefined;
-  let inWord = false;
+  const state: SplitState = {
+    line,
+    words: [],
+    current: '',
+    quote: undefined,
+    inWord: false,
+  };
   for (let i = 0; i < line.length; i++) {
-    const ch = line.charAt(i);
-    if (quote !== undefined) {
-      if (ch === quote) {
-        quote = undefined;
-        continue;
-      }
-      if (ch === '\\' && quote === '"' && i + 1 < line.length) {
-        i++;
-        current += line.charAt(i);
-        continue;
-      }
-      current += ch;
-      continue;
-    }
-    if (ch === '"' || ch === "'") {
-      quote = ch;
-      inWord = true;
-      continue;
-    }
-    if (ch === '\\' && i + 1 < line.length) {
-      i++;
-      current += line.charAt(i);
-      inWord = true;
-      continue;
-    }
-    if (/\s/.test(ch)) {
-      if (inWord) {
-        words.push(current);
-      }
-      current = '';
-      inWord = false;
-      continue;
-    }
-    current += ch;
-    inWord = true;
+    i = state.quote === undefined ? stepUnquoted(state, i) : stepQuoted(state, i);
   }
-  if (quote !== undefined) {
-    throw invalid(`mcp() command line has an unclosed ${quote} quote.`, 'Close the quote.');
+  if (state.quote !== undefined) {
+    throw invalid(`mcp() command line has an unclosed ${state.quote} quote.`, 'Close the quote.');
   }
-  if (inWord) {
-    words.push(current);
-  }
-  if (words.length === 0) {
+  endWord(state);
+  if (state.words.length === 0) {
     throw invalid(
       'mcp() needs a command line, a server object or a URL.',
       "Pass e.g. mcp('npx @playwright/mcp@latest').",
     );
   }
-  return words;
+  return state.words;
 }
 
 function pickOptions(input: McpOptions): McpOptions {

@@ -1,36 +1,14 @@
-import type {
-  ArtifactStore,
-  ConnectionStatus,
-  ConnectionsConfig,
-  ConnectionTrigger,
-  SecretResolver,
-} from '@noetic-tools/types';
+import type { ArtifactStore, ConnectionStatus } from '@noetic-tools/types';
 import {
   CONNECTION_EVENT_ITEM_TYPE,
   frameworkCast,
   ItemSchemaRegistry,
   NoeticConfigError,
 } from '@noetic-tools/types';
-import type { Verifier } from '@noetic-tools/types/verify';
 import { toStep } from '../builders/sequence';
-import type { HarnessConnections } from '../connections/harness-wiring';
-import { createHarnessConnections } from '../connections/harness-wiring';
-import type { ConnectionRuntime } from '../connections/registry';
-import { NoeticEvent } from '../observability/genai-attributes';
-import { SpanImpl } from '../observability/span-impl';
-import { NoopExporter } from '../observability/trace-exporter';
+import { runEvery } from '../connections/settle';
 import { AcpSessionStore } from '../runtime/acp-session-store';
-import { createInMemoryArtifactStore } from '../runtime/in-memory-artifact-store';
-import { setHarnessInternals } from '../util/harness-internals';
-import { callDecide } from './decide-call';
-import {
-  createInMemoryFsAdapter,
-  createInMemoryShellAdapter,
-  createInMemorySubprocessAdapter,
-  HTTPClient,
-  OpenRouter,
-  OpenRouterSdk,
-} from './deps/adapters';
+import { ConnectionGate } from './connection-gate';
 import type { LayerStateStore, RecallCache } from './deps/context';
 import {
   afterModelCallLayers,
@@ -64,10 +42,7 @@ import {
   deduplicateTools,
   dispatchStepThroughAdapter,
   execute,
-  graphConnectionNeeds,
   prepareBandedView,
-  reconcileResumedConnections,
-  someStep,
 } from './deps/interpreter';
 import type {
   ChannelWarning,
@@ -87,7 +62,6 @@ import {
   captureCheckpoint,
   clearCheckpoint,
   collectContextTree,
-  createCheckpointStore,
   createInMemoryStorage,
   createSessionStore,
   createSpendLog,
@@ -104,27 +78,23 @@ import {
   SessionRunner,
   StepLedger,
   snapshotCwdState,
-  warnToConsole,
 } from './deps/runtime';
 import type {
   AcpLiveSession,
   AcpSessionInfo,
   AgentConfig,
   AgentHarnessContract,
-  AgentHooks,
   CallModelRequest,
   CancelOptions,
   Channel,
   ChannelHandle,
   Context,
-  ContextCacheConfig,
   ContextCacheStore,
   ContextData,
   ContextLayer,
   CustomItem,
   CustomItemOf,
   CustomItemStreamEvent,
-  CustomItemsBrand,
   CustomStreamingItem,
   CwdState,
   DecideRequest,
@@ -144,12 +114,9 @@ import type {
   HarnessResponse,
   HarnessStatus,
   Item,
-  ItemSchemaConfig,
   LLMResponse,
-  LlmProviderConfig,
   OnSteerParams,
   PendingSpend,
-  ProjectionPolicy,
   RecallLayerOutput,
   RecallOptions,
   ReconcileSpendOptions,
@@ -161,167 +128,31 @@ import type {
   SteeringDecision,
   SteerVerdict,
   Step,
-  StepArray,
-  StepArrayInput,
-  StepArrayOutput,
+  StepLike,
   Steps,
+  StepsInput,
+  StepsOutput,
   StorageAdapter,
   StreamEvent,
   StreamingItem,
   SubprocessAdapter,
   Tool,
-  ToolApprover,
   TraceExporter,
   UsageCharge,
+  ValidStepChain,
   WriteOffSpendOptions,
-  ZodType,
 } from './deps/types';
 import { SteeringAction } from './deps/types';
-import { AgentHarnessModelCaller, noLlmProviderError } from './model-call';
+import type { AgentHarnessOpts } from './harness-options';
+import { resolveCheckpointStore, resolveEnvironmentAdapters } from './harness-options';
+import { createHarnessSpan, recordChannelWarning, resolveTraceExporter } from './harness-tracing';
+import { LlmGateway } from './llm-client';
+import { buildItemSchemaRegistry } from './model-schema';
 import type { SpendClient } from './spend';
-import { DISPATCH_HEADER, GENERATION_HEADER, Spend } from './spend';
+import { Spend } from './spend';
 import { ThreadRecord } from './thread-record';
 
-export { createStreamIdleWatchdog } from './model-call';
-
-import { buildItemSchemaRegistry } from './model-schema';
-
 //#region Types
-
-/**
- * Storage-scoped environment configuration for `AgentHarness`.
- *
- * @public
- */
-export interface StorageEnvironmentConfig {
-  /**
-   * Key-value storage adapter backing context-layer persistence and the
-   * step-completion ledger. Defaults to an in-memory adapter.
-   */
-  adapter?: StorageAdapter;
-  /**
-   * Checkpoint store used by `harness.checkpoint(ctx)` / `harness.restore()`.
-   * Defaults to a store over `adapter` when one is given, so configuring durable
-   * storage is enough for a later harness on the same storage to resume this one's
-   * executions (see the harness `durability` option to turn that off). With no
-   * adapter and no store, checkpoint/restore are no-ops — a zero-config harness keeps
-   * its ephemeral semantics.
-   */
-  checkpointStore?: CheckpointStore;
-  /** Layer-state store override. Defaults to an in-memory store. */
-  layerStateStore?: LayerStateStore;
-  /**
-   * Bounds on the step-completion ledger that backs step-level resume. Only meaningful
-   * when durability is on (a `checkpointStore`, given or defaulted). Defaults to `DEFAULT_STEP_LEDGER_RETENTION` — 128 KiB
-   * per entry, 1000 entries per execution — so an unbounded run cannot grow an unbounded
-   * ledger. Exceeding either cap costs resumability for the affected steps (they re-run),
-   * never correctness.
-   */
-  stepLedgerRetention?: StepLedgerRetention;
-}
-
-/**
- * Execution-environment configuration for `AgentHarness`: the storage,
- * filesystem, shell, and subprocess surfaces the agent runs against.
- *
- * @public
- */
-export interface AgentEnvironmentConfig {
-  /** Storage configuration: adapter, durability stores, ledger retention. */
-  storage?: StorageEnvironmentConfig;
-  /** Filesystem adapter. Defaults to an in-memory adapter. */
-  fs?: FsAdapter;
-  /** Shell adapter. Defaults to an in-memory adapter. */
-  shell?: ShellAdapter;
-  /** Subprocess adapter. Defaults to an in-memory, same-process adapter. */
-  subprocess?: SubprocessAdapter;
-  /** Resolves `secret()` names immediately before a connection call is sent (spec 35 § Secrets). */
-  secrets?: SecretResolver;
-  /** Where binary content is stored (spec 08 § Artifact Store). Defaults to an in-memory store. */
-  artifacts?: ArtifactStore;
-}
-
-interface AgentHarnessOpts<
-  TParams extends Record<string, unknown> = Record<string, unknown>,
-  TItem extends CustomItem = CustomItem,
-> {
-  name: string;
-  /**
-   * Root step tree executed for every turn submitted via `execute()`. The custom items
-   * it declares (a `workflow()` step's brand) type `getItemStream`, `getFullStream`,
-   * and `getAgentResponse` (spec 34).
-   */
-  agentGraph?: Steps<ContextData, string, string> & CustomItemsBrand<TItem>;
-  /** Default context layers applied to every context created via `createContext()` / `execute()`. */
-  contextLayers?: ContextLayer[];
-  /**
-   * Whether runs and sessions are durable: checkpointed, recorded to the step ledger,
-   * and resumable on a later harness over the same storage. Defaults to true whenever
-   * `environment.storage` gives an adapter or a checkpoint store. `false` turns every
-   * durability surface off even then — the adapter still backs context-layer
-   * persistence.
-   */
-  durability?: boolean;
-  hooks?: AgentHooks;
-  /**
-   * Harness-wide tool pool. Merged (identity-deduplicated) with tools
-   * collected from `agentGraph` to form every context's `unifiedTools`.
-   * Use this when the workflow step tree is static and tools are supplied
-   * per harness instance rather than baked into individual `step.callModel` calls.
-   */
-  tools?: Tool[];
-  params: TParams;
-  paramsSchema?: ZodType<TParams>;
-  /** Execution environment: storage, filesystem, shell, subprocess. */
-  environment?: AgentEnvironmentConfig;
-  /** Default provider configuration for model calls made through this harness. */
-  callModelDefaults?: LlmProviderConfig;
-  /** Harness-wide item schema extensions and validation strictness. */
-  itemSchemas?: ItemSchemaConfig;
-  /** Default projection policy for all LLM steps. Individual steps override via `step.projection`. */
-  projection?: ProjectionPolicy;
-  /** When true, every layer is recalled atomically regardless of its `recallMode`. */
-  forceAtomicRecall?: boolean;
-  /** Tuning for prompt-cache anchoring. See `ContextCacheConfig` for the defaults. */
-  contextCache?: ContextCacheConfig;
-  traceExporter?: TraceExporter;
-  /** Default delivery mode for messages that don't specify one. Defaults to `next-turn`. */
-  defaultDeliveryMode?: DeliveryMode;
-  /**
-   * Initial working directory for the harness. Used as the seed value for the
-   * shared `cwdState.cwd` on every Context this harness creates, including
-   * those produced by spawn/fork. Defaults to `process.cwd()`.
-   */
-  initialCwd?: string;
-  /** Default model for `decide` steps. */
-  decisionModel?: string;
-  /**
-   * Whether a resumed run streams again the items its replayed steps emitted
-   * (`step.emitItems`), as `item_appended`. Defaults to `false`: a replay rebuilds the
-   * log quietly. Set it when a client that reconnects to a resumed run should see
-   * the progress it missed.
-   */
-  emitItemsOnReplay?: boolean;
-  /**
-   * Approves or refuses calls to tools that declare `needsApproval`, after the
-   * `beforeToolCall` layers allow them. Without one, those calls run
-   * unapproved and the harness warns once per tool name.
-   */
-  approveToolCall?: ToolApprover;
-  /**
-   * The live things the agent works with — browsers, devices, apps, chat workspaces,
-   * sources — by name (spec 35). Providers connect in `start()`.
-   */
-  connections?: ConnectionsConfig;
-  /** Connection events that start or join a turn (spec 35 § Triggers). */
-  triggers?: ReadonlyArray<ConnectionTrigger>;
-  /** The verifier `step.verify` uses (spec 37). */
-  verification?: Verifier;
-  /** @internal Test-only escape hatch to inject a mock callModel implementation. */
-  _testCallModel?: (request: CallModelRequest) => Promise<LLMResponse>;
-  /** @internal Test-only escape hatch to inject a mock decide implementation. */
-  _testDecide?: (request: DecideRequest) => Promise<DecideResponse>;
-}
 
 interface Session {
   readonly runner: SessionRunner;
@@ -364,211 +195,6 @@ function resolveContextCwdState(
     return snapshotCwdState(parent);
   }
   return rootCwdState;
-}
-
-/** The Noetic platform's OpenAI-Responses-compatible inference base URL. */
-const NOETIC_DEFAULT_BASE_URL = 'https://platform.noetic.tools/v1';
-
-/** Env vars consulted when resolving the LLM client (read defensively so the
- *  harness also works in runtimes without a `process` global, e.g. the browser). */
-interface LlmEnv {
-  noeticApiKey?: string;
-  noeticBaseUrl?: string;
-  openrouterApiKey?: string;
-}
-
-function readLlmEnv(): LlmEnv {
-  const processValue = 'process' in globalThis ? globalThis.process : undefined;
-  const env =
-    typeof processValue === 'object' && processValue !== null && 'env' in processValue
-      ? processValue.env
-      : undefined;
-  if (typeof env !== 'object' || env === null) {
-    return {};
-  }
-  const str = (value: unknown): string | undefined =>
-    typeof value === 'string' ? value : undefined;
-  return {
-    noeticApiKey: 'NOETIC_API_KEY' in env ? str(env.NOETIC_API_KEY) : undefined,
-    noeticBaseUrl: 'NOETIC_BASE_URL' in env ? str(env.NOETIC_BASE_URL) : undefined,
-    openrouterApiKey: 'OPENROUTER_API_KEY' in env ? str(env.OPENROUTER_API_KEY) : undefined,
-  };
-}
-
-/** @public Effective client options resolved from config + environment. */
-export interface ResolvedLlmClient {
-  apiKey: string;
-  /** Undefined means "use the SDK's default OpenRouter base URL". */
-  serverURL?: string;
-  cache: boolean;
-}
-
-/**
- * Resolve the effective LLM client options from the provider config + environment.
- * Defaults to the Noetic platform (`provider: 'noetic'`): the `'noetic'` provider
- * authenticates with `NOETIC_API_KEY` and targets the Noetic platform base URL,
- * while `'openrouter'` authenticates with `OPENROUTER_API_KEY` and uses the SDK's
- * default OpenRouter endpoint. Returns undefined when no API key is available.
- * Exported for testing.
- */
-export function resolveLlmClient(
-  config: LlmProviderConfig | undefined,
-  env: LlmEnv,
-): ResolvedLlmClient | undefined {
-  const provider = config?.provider ?? 'noetic';
-  const apiKey =
-    config?.apiKey ?? (provider === 'noetic' ? env.noeticApiKey : env.openrouterApiKey);
-  if (!apiKey) {
-    return undefined;
-  }
-  const serverURL =
-    provider === 'noetic'
-      ? (config?.baseUrl ?? env.noeticBaseUrl ?? NOETIC_DEFAULT_BASE_URL)
-      : config?.baseUrl;
-  return {
-    apiKey,
-    serverURL,
-    cache: config?.cache ?? false,
-  };
-}
-
-/**
- * Ask the provider to cache the prompt prefix.
- *
- * Anthropic caching is opt-in — without a breakpoint it caches nothing however
- * stable the prefix is, measured against live models. OpenRouter accepts a
- * `cache_control` directive on the request and places the breakpoints itself;
- * providers that cache on their own (OpenAI, Gemini) ignore it.
- *
- * It has to be injected here rather than passed with the other request fields:
- * the SDK validates the request against a generated schema that drops keys it
- * does not know, and `cache_control` is one of them.
- */
-async function addCacheBreakpoint(request: Request): Promise<Request> {
-  const body = await request.clone().text();
-  if (!body) {
-    return request;
-  }
-  let payload: unknown;
-  try {
-    payload = JSON.parse(body);
-  } catch {
-    return request;
-  }
-  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
-    return request;
-  }
-  return new Request(request, {
-    body: JSON.stringify({
-      ...payload,
-      cache_control: {
-        type: 'ephemeral',
-      },
-    }),
-  });
-}
-
-function createClient(
-  config?: LlmProviderConfig,
-  contextCache?: ContextCacheConfig,
-  http?: HTTPClient,
-): OpenRouter | undefined {
-  const resolved = resolveLlmClient(config, readLlmEnv());
-  if (!resolved) {
-    return undefined;
-  }
-  const options: {
-    apiKey: string;
-    serverURL?: string;
-    httpClient?: ClientOptions['httpClient'];
-  } = {
-    apiKey: resolved.apiKey,
-  };
-  if (resolved.serverURL) {
-    options.serverURL = resolved.serverURL;
-  }
-  if (http) {
-    // The agent bundles an older SDK whose `HTTPClient` class is nominally different;
-    // the agent calls only `request()` on it, which both versions share.
-    options.httpClient = frameworkCast<ClientOptions['httpClient']>(http);
-  }
-
-  // A cache write costs more than a plain read, so the breakpoint only pays off
-  // when something is holding the prefix still — which is what anchoring does.
-  const wantsBreakpoint = contextCache?.enabled !== false;
-  if (!resolved.cache && !wantsBreakpoint) {
-    return new OpenRouter(options);
-  }
-  return new OpenRouter({
-    ...options,
-    hooks: {
-      beforeRequest: async (_ctx, request) => {
-        if (resolved.cache) {
-          // Serve identical model calls from OpenRouter's own response cache
-          // without re-billing (deterministic re-runs).
-          request.headers.set('X-OpenRouter-Cache', 'true');
-        }
-        return wantsBreakpoint ? addCacheBreakpoint(request) : request;
-      },
-    },
-  });
-}
-
-type ClientOptions = NonNullable<ConstructorParameters<typeof OpenRouter>[0]>;
-
-/**
- * An HTTP client that saves a paid call's generation id the moment its headers
- * arrive. The SDK awaits the hook before it reads the body, so a call cut off after
- * its headers can still be priced. Both the model client and the decisions client
- * send through it; requests without a dispatch header pass untouched.
- */
-function generationHook(spend: Spend): HTTPClient {
-  return new HTTPClient().addHook('response', async (res, req) => {
-    const dispatchId = req.headers.get(DISPATCH_HEADER);
-    const generationId = res.headers.get(GENERATION_HEADER);
-    // An error response is retried or refused; only a success carries the call's id.
-    if (res.ok && dispatchId && generationId) {
-      await spend.noteGeneration(dispatchId, generationId);
-    }
-  });
-}
-
-function createSdkClient(config?: LlmProviderConfig, http?: HTTPClient): OpenRouterSdk | undefined {
-  const resolved = resolveLlmClient(config, readLlmEnv());
-  if (!resolved) {
-    return undefined;
-  }
-  return new OpenRouterSdk({
-    apiKey: resolved.apiKey,
-    serverURL: resolved.serverURL,
-    ...(http
-      ? {
-          httpClient: http,
-        }
-      : {}),
-  });
-}
-
-/**
- * The checkpoint store a harness runs with: the one given, else a store over the
- * configured storage adapter, so durable storage alone turns resume on. None when
- * the harness sets `durability: false`.
- */
-function resolveCheckpointStore(
-  storage: StorageEnvironmentConfig | undefined,
-  durability: boolean | undefined,
-): CheckpointStore | undefined {
-  if (durability === false) {
-    return undefined;
-  }
-  if (storage?.checkpointStore) {
-    return storage.checkpointStore;
-  }
-  return storage?.adapter
-    ? createCheckpointStore({
-        storage: storage.adapter,
-      })
-    : undefined;
 }
 
 //#region AgentHarness
@@ -618,20 +244,13 @@ export class AgentHarness<
    *  so free functions in `runtime/durable/` (checkpoint/restore) can read it
    *  without friend-class gymnastics. Do not access from outside core. */
   readonly _contextLayers?: ContextLayer[];
-  private readonly client?: OpenRouter;
-  /**
-   * SDK 1.x client for the endpoints the agent's client predates: decisions, model
-   * prices, and generation lookups.
-   */
-  private readonly sdkClient?: OpenRouterSdk;
+  /** Provider clients and the model / decision calls made through them. */
+  private readonly llm: LlmGateway;
   /**
    * Paid dispatch records, present exactly when durability is on.
    * @internal
    */
   readonly spend?: Spend;
-  private readonly decideOverride?: (request: DecideRequest) => Promise<DecideResponse>;
-  /** Model id → whether it answers natively as a decision model. */
-  private readonly decisionModels = new Map<string, Promise<boolean>>();
   /** @internal Channel state; read by the checkpoint functions. */
   readonly channelStore: ChannelStore;
   /**
@@ -655,7 +274,6 @@ export class AgentHarness<
   private readonly sessionStore?: SessionStore;
   /** Checkpoint capture in flight per execution id — see `saveCheckpoint`. */
   private readonly pendingCheckpoints = new Map<string, Promise<boolean>>();
-  private readonly callModelOverride?: (request: CallModelRequest) => Promise<LLMResponse>;
   private readonly defaultDeliveryMode: DeliveryMode;
   private readonly sessions = new Map<string, Session>();
   /**
@@ -668,12 +286,10 @@ export class AgentHarness<
   readonly drains = new Drains();
   /** Where binary content is stored: `environment.artifacts`, else an in-memory store. */
   readonly artifacts: ArtifactStore;
-  // Connection state lives in true private fields: anything holding `ctx.harness`
+  // Connection state lives in a true private field: anything holding `ctx.harness`
   // must not reach the registry or the secret resolver (spec 35 § Gates, § Secrets).
   // Core modules read the registry and verifier through `harnessInternal`.
-  readonly #connections?: HarnessConnections;
-  /** Roots whose connection needs are already registered or checked. */
-  readonly #negotiatedRoots = new WeakSet<object>();
+  readonly #connections: ConnectionGate;
 
   /**
    * Snapshot of every live ACP sub-agent, for a UI that wants to show what is
@@ -771,9 +387,10 @@ export class AgentHarness<
       emitItemsOnReplay: opts.emitItemsOnReplay,
       approveToolCall: opts.approveToolCall,
     };
-    this.fs = environment?.fs ?? createInMemoryFsAdapter();
-    this.shell = environment?.shell ?? createInMemoryShellAdapter();
-    this.subprocess = environment?.subprocess ?? createInMemorySubprocessAdapter();
+    const adapters = resolveEnvironmentAdapters(environment);
+    this.fs = adapters.fs;
+    this.shell = adapters.shell;
+    this.subprocess = adapters.subprocess;
     this.checkpointStore = resolveCheckpointStore(storageEnv, opts.durability);
     this.stepLedgerStore = this.checkpointStore
       ? createStepLedgerStore({
@@ -790,19 +407,19 @@ export class AgentHarness<
     this.agentGraph = opts.agentGraph ? toStep(opts.agentGraph) : undefined;
     this.harnessTools = opts.tools ?? [];
     this._contextLayers = opts.contextLayers;
-    this.callModelOverride = opts._testCallModel;
-    const http = this.spend ? generationHook(this.spend) : undefined;
-    this.client = opts._testCallModel
-      ? undefined
-      : createClient(opts.callModelDefaults, opts.contextCache, http);
-    this.decideOverride = opts._testDecide;
-    this.sdkClient = opts._testCallModel
-      ? undefined
-      : createSdkClient(opts.callModelDefaults, http);
+    this.llm = new LlmGateway({
+      agentName: opts.name,
+      providerConfig: opts.callModelDefaults,
+      contextCache: opts.contextCache,
+      spend: this.spend,
+      callModelOverride: opts._testCallModel,
+      decideOverride: opts._testDecide,
+      streamIdleTimeoutMs: DEFAULT_STREAM_IDLE_TIMEOUT_MS,
+    });
     this.channelStore = new ChannelStore({
       onWarning: (warning) => this.recordChannelWarning(warning),
     });
-    this.traceExporter = opts.traceExporter ?? new NoopExporter();
+    this.traceExporter = resolveTraceExporter(opts.traceExporter);
     this.layerStateStore =
       storageEnv?.layerStateStore ??
       createLayerStateStore((layerId, hook, error) => {
@@ -829,76 +446,23 @@ export class AgentHarness<
     this.rootCwdState = {
       cwd: opts.initialCwd ?? '/',
     };
-    this.artifacts = environment?.artifacts ?? createInMemoryArtifactStore();
-    if (opts.connections || (opts.triggers && opts.triggers.length > 0)) {
-      this.#connections = createHarnessConnections({
-        harness: this,
-        connections: opts.connections,
-        triggers: opts.triggers,
-        storage: this.config.storage ?? createInMemoryStorage(),
-        artifacts: this.artifacts,
-        secrets: environment?.secrets,
-        broadcasters: () =>
-          [
-            ...this.sessions.values(),
-          ].map((session) => session.runner.broadcaster),
-      });
-    }
-    setHarnessInternals(this, {
-      connectionRegistry: this.#connections?.registry,
+    this.artifacts = adapters.artifacts;
+    this.#connections = new ConnectionGate({
+      harness: this,
+      connections: opts.connections,
+      triggers: opts.triggers,
+      storage: this.config.storage ?? createInMemoryStorage(),
+      artifacts: this.artifacts,
+      secrets: environment?.secrets,
       verifier: opts.verification,
+      broadcasters: () =>
+        [
+          ...this.sessions.values(),
+        ].map((session) => session.runner.broadcaster),
     });
-    if (this.#connections) {
-      this.registerGraphNeeds(this.#connections.registry);
-    }
-  }
-
-  /**
-   * Registers what the agent graph's handles need: their profiles (ref kinds) and
-   * requirements, negotiated at start and again on every manifest change
-   * (spec 35 § Connection registry). Names the harness lacks are left to fail
-   * with `CONNECTION_UNKNOWN` when the step runs.
-   */
-  private registerGraphNeeds(registry: ConnectionRuntime): void {
-    if (!this.agentGraph) {
-      return;
-    }
-    this.#negotiatedRoots.add(this.agentGraph);
-    const known = new Set(registry.names());
-    for (const need of graphConnectionNeeds(frameworkCast<Step>(this.agentGraph))) {
-      if (need.profile) {
-        registry.registerProfile(need.profile);
-      }
-      if (known.has(need.name)) {
-        registry.require(need.name, need.requirement);
-      }
-    }
-  }
-
-  /**
-   * Negotiates a `run()` root that is not the agent graph, once per root, after
-   * the providers have connected: registers its handles' profiles and checks its
-   * requirements against each connection's manifest, so a root that needs more
-   * than a connection offers fails before it executes, as a document does
-   * (spec 35 § Negotiation).
-   *
-   * @throws `NoeticConfigError` `CONNECTION_UNSATISFIED` when a connection falls short.
-   */
-  private negotiateRoot(root: Step): void {
-    const registry = this.#connections?.registry;
-    if (!registry || this.#negotiatedRoots.has(root)) {
-      return;
-    }
-    const known = new Set(registry.names());
-    for (const need of graphConnectionNeeds(root)) {
-      if (need.profile) {
-        registry.registerProfile(need.profile);
-      }
-      if (known.has(need.name)) {
-        registry.check(need.name, need.requirement);
-      }
-    }
-    this.#negotiatedRoots.add(root);
+    this.#connections.registerGraphNeeds(
+      this.agentGraph ? frameworkCast<Step>(this.agentGraph) : undefined,
+    );
   }
 
   /**
@@ -908,7 +472,7 @@ export class AgentHarness<
    * @public
    */
   async start(): Promise<void> {
-    await this.#connections?.start();
+    await this.#connections.start();
   }
 
   /**
@@ -916,19 +480,22 @@ export class AgentHarness<
    * @public
    */
   getConnectionStatus(name?: string): ReadonlyArray<ConnectionStatus> {
-    return this.#connections?.registry.status(name) ?? [];
+    return this.#connections.status(name);
   }
 
   /**
    * Shuts down everything the harness holds open: stops triggers, releases
    * every connection and pool lease, and closes every ACP session. Call it when
    * the host is done with the harness; anything left open can keep the process
-   * alive. Idempotent.
+   * alive. Everything is closed even when one part throws; the first failure is
+   * then rethrown. Idempotent.
    * @public
    */
   async close(): Promise<void> {
-    await this.#connections?.close();
-    await this.closeAcpSessions();
+    await runEvery([
+      () => this.#connections.close(),
+      () => this.closeAcpSessions(),
+    ]);
   }
 
   /**
@@ -957,8 +524,9 @@ export class AgentHarness<
         }),
       );
     }
-    if (this.lacksModelFor(this.agentGraph)) {
-      return Promise.reject(noLlmProviderError());
+    const missingModel = this.llm.missingModelFor(this.agentGraph);
+    if (missingModel) {
+      return Promise.reject(missingModel);
     }
 
     const threadId = options?.threadId ?? DEFAULT_THREAD_ID;
@@ -1199,7 +767,7 @@ export class AgentHarness<
             });
           frameworkCast<Context & SessionCtxExtension>(ctx)._sessionQueue = session.runner.queue;
           await this.start();
-          const connectionTools = this.#connections?.tools() ?? [];
+          const connectionTools = this.#connections.tools();
           if (this.agentGraph || this.harnessTools.length > 0 || connectionTools.length > 0) {
             const stepTools = this.agentGraph ? collectAllTools(this.agentGraph) : [];
             this.setUnifiedTools(ctx, [
@@ -1302,16 +870,11 @@ export class AgentHarness<
   //#region callModel
 
   async callModel(request: CallModelRequest): Promise<LLMResponse> {
-    return new AgentHarnessModelCaller({
-      agentName: this.config.name,
+    return this.llm.callModel(request, {
       itemSchemas: this.itemSchemas,
-      client: this.client,
-      callModelOverride: this.callModelOverride,
-      streamIdleTimeoutMs: DEFAULT_STREAM_IDLE_TIMEOUT_MS,
       harness: this,
       traceExporter: this.traceExporter,
-      spend: this.spend,
-    }).callModel(request);
+    });
   }
 
   //#endregion
@@ -1319,15 +882,7 @@ export class AgentHarness<
   //#region decide
 
   async decide(request: DecideRequest): Promise<DecideResponse> {
-    if (this.decideOverride) {
-      return this.decideOverride(request);
-    }
-    return callDecide(request, {
-      client: this.sdkClient,
-      callModel: (r) => this.callModel(r),
-      nativeModels: this.decisionModels,
-      spend: this.spend,
-    });
+    return this.llm.decide(request, (r) => this.callModel(r));
   }
 
   async notifyDecision(
@@ -1351,59 +906,67 @@ export class AgentHarness<
 
   /**
    * Runs a step — or an array of steps in sequence, each output the next one's
-   * input (an array runs its steps in sequence everywhere in Noetic).
+   * input. Every link of an array is type-checked (`ValidStepChain`).
    */
   run<I, O>(step: Step<ContextData, I, O>, input: I, ctx: Context): Promise<O>;
-  run<const T extends StepArray>(
-    steps: T,
-    input: StepArrayInput<T>,
+  run<const T extends StepLike | ReadonlyArray<StepLike>>(
+    steps: T & ValidStepChain<T>,
+    input: StepsInput<T>,
     ctx: Context,
-  ): Promise<StepArrayOutput<T>>;
+  ): Promise<StepsOutput<T>>;
   async run<I, O>(s: Steps<ContextData, I, O>, input: I, ctx: Context): Promise<O> {
     const root = toStep<ContextData, I, O>(s);
-    if (this.lacksModelFor(root)) {
-      throw noLlmProviderError();
+    await this.dropRerunsOnFailure(ctx, () => this.prepareRun(root, ctx));
+    return this.executeClosingChannels(root, input, ctx);
+  }
+
+  /**
+   * Everything `run()` does before the root executes: fail fast on a missing
+   * model provider, connect, negotiate the root, wire the tool pool and run the
+   * layers' `init` hooks.
+   */
+  private async prepareRun<I, O>(root: Step<ContextData, I, O>, ctx: Context): Promise<void> {
+    const missingModel = this.llm.missingModelFor(root);
+    if (missingModel) {
+      throw missingModel;
     }
     // Populate the unified tool pool when an embedder drives a step directly on
     // a bare `createContext()` context (the turn pipeline does this per turn).
     // Without it, steps that resolve tools dynamically from `ctx.unifiedTools`
     // — and any sub-agents spawned from them — would see no tools.
     await this.start();
-    this.negotiateRoot(frameworkCast<Step>(root));
+    this.#connections.negotiateRoot(frameworkCast<Step>(root));
     if (!ctx.unifiedTools) {
       this.setUnifiedTools(ctx, [
         ...collectAllTools(root),
         ...this.harnessTools,
-        ...(this.#connections?.tools() ?? []),
+        ...this.#connections.tools(),
       ]);
     }
     // Hydrate/recall/persist context on the bare `run()` path too (issue #48):
     // configuring `context` + `storage` must "just work" without going through
     // `execute()`/`seedSessionHistory`. Idempotent — see `ensureLayersInit`.
     await this.ensureLayersInit(ctx);
-    return this.executeClosingChannels(root, input, ctx);
   }
 
   /**
-   * Whether `step` calls a model this harness has no credentials for. Checked
-   * before any step runs so a missing provider fails fast instead of after
-   * earlier steps' side effects. Steps the walk cannot see (dynamic branches)
-   * still hit the same error lazily at their model call.
+   * Runs `prepare`, ending any rerun allowance `ctx` carries from its restore
+   * when it throws: a run that fails before executing still ends the restore's
+   * allowance, as one that executes does.
    */
-  private lacksModelFor<I, O>(step: Step<ContextData, I, O>): boolean {
-    if (this.client || this.callModelOverride) {
-      return false;
+  private async dropRerunsOnFailure(ctx: Context, prepare: () => Promise<void>): Promise<void> {
+    try {
+      await prepare();
+    } catch (error) {
+      this.#connections.dropReruns(ctx);
+      throw error;
     }
-    return someStep(
-      frameworkCast<Step>(step),
-      (s) => s.kind === 'callModel' || (s.kind === 'decide' && !this.decideOverride),
-    );
   }
 
   /** Run all layer `init` hooks before the first step executes. Per spec 11,
    *  init MUST complete before any recall fires so layer state is populated. */
   private async initAndRun<I, O>(s: Step<ContextData, I, O>, input: I, ctx: Context): Promise<O> {
-    await this.ensureLayersInit(ctx);
+    await this.dropRerunsOnFailure(ctx, () => this.ensureLayersInit(ctx));
     return this.executeClosingChannels(s, input, ctx);
   }
 
@@ -1437,6 +1000,7 @@ export class AgentHarness<
       // A restored or sequentially re-run root context reuses its id — clear
       // any closure from a previous completion so its channels work again.
       this.channelStore.openExecution(ctx.id);
+      this.#connections.grantReruns(ctx);
       entry.ready = this.beginDurableRun(ctx).then(() => this.reconcileConnections(ctx));
     }
     try {
@@ -1455,9 +1019,9 @@ export class AgentHarness<
           // A failed run keeps its pool leases, unrenewed, so a resume within the
           // reclaim window gets the same connections back and an abandoned one
           // frees them (spec 35 § Pools and leases).
-          this.#connections?.registry.orphanRun?.(ctx.id);
+          this.#connections.orphanRun(ctx.id);
         } else {
-          await this.#connections?.registry.releaseRun(ctx.id);
+          await this.#connections.releaseRun(ctx.id);
           await this.endDurableRun(ctx);
         }
       }
@@ -1492,16 +1056,7 @@ export class AgentHarness<
    * @throws NoeticErrorImpl `connection_resume_refused` when a replaced connection is unsafe to drive again.
    */
   private async reconcileConnections(ctx: Context): Promise<void> {
-    const registry = this.#connections?.registry;
-    if (!registry || !(ctx instanceof ContextImpl) || !ctx.ledger) {
-      return;
-    }
-    await reconcileResumedConnections({
-      ctx,
-      registry,
-      storage: this.config.storage,
-      signal: ctx.abortSignal,
-    });
+    await this.#connections.reconcile(ctx, this.config.storage);
   }
 
   /**
@@ -1574,8 +1129,24 @@ export class AgentHarness<
     });
   }
 
+  /**
+   * Launches a step — or an array of steps, run in sequence as one background
+   * execution — in a fresh child context.
+   */
   detachedSpawn<I, O>(
-    s: Step<ContextData, I, O>,
+    step: Step<ContextData, I, O>,
+    input: I,
+    parentCtx: Context,
+    overrides?: DetachedSpawnOverrides,
+  ): DetachedHandle<O>;
+  detachedSpawn<const T extends StepLike | ReadonlyArray<StepLike>>(
+    steps: T & ValidStepChain<T>,
+    input: StepsInput<T>,
+    parentCtx: Context,
+    overrides?: DetachedSpawnOverrides,
+  ): DetachedHandle<StepsOutput<T>>;
+  detachedSpawn<I, O>(
+    s: Steps<ContextData, I, O>,
     input: I,
     parentCtx: Context,
     overrides?: DetachedSpawnOverrides,
@@ -1584,7 +1155,13 @@ export class AgentHarness<
      * settle is only observable via `await()`, and calling it internally would consume
      * the result the caller is holding. The handle manifest is the adapter's own
      * durability surface (`listLive`/`reattach`), so nothing is lost. */
-    return dispatchStepThroughAdapter(this, s, input, parentCtx, overrides);
+    return dispatchStepThroughAdapter(
+      this,
+      toStep<ContextData, I, O>(s),
+      input,
+      parentCtx,
+      overrides,
+    );
   }
 
   createContext(opts?: {
@@ -1611,7 +1188,7 @@ export class AgentHarness<
     // dropped from `rest` rather than spread through under the wrong name.
     const { contextLayers, extraContextLayers, cwdInit, ...rest } = resolved;
     const configuredLayers = contextLayers ?? this._contextLayers;
-    const views = this.#connections?.views ?? [];
+    const views = this.#connections.views;
     const baseLayers =
       views.length > 0
         ? [
@@ -1988,9 +1565,6 @@ export class AgentHarness<
     },
   ): Promise<Context | null> {
     const { rerun, ...restoreOptions } = opts ?? {};
-    if (rerun && rerun.length > 0) {
-      this.#connections?.registry.allowRerun(executionId, rerun);
-    }
     const restored = await restoreFromCheckpoint(this, executionId, restoreOptions);
     if (!restored) {
       return null;
@@ -1999,6 +1573,11 @@ export class AgentHarness<
       this.restoredExecutions.add(executionId);
     }
     await this.spend?.adopt(restored.ctx);
+    // Granted only to the context this restore returns: a restore that fails, or a
+    // later plain restore of the same id, never inherits it (spec 35 § Durability).
+    if (rerun && rerun.length > 0) {
+      this.#connections.holdReruns(restored.ctx, rerun);
+    }
     return restored.ctx;
   }
 
@@ -2063,7 +1642,7 @@ export class AgentHarness<
     return new Spend({
       agentName: this.config.name,
       log: createSpendLog(storage),
-      client: (): SpendClient | undefined => this.sdkClient,
+      client: (): SpendClient | undefined => this.llm?.sdkClient,
       liveRoot: (executionId) => this.liveRoots.get(executionId)?.ctx,
       chargeSession: (threadId, charge) => this.chargeSession(threadId, charge),
       sessionBroadcaster: (threadId) => this.sessions.get(threadId)?.runner.broadcaster,
@@ -2187,33 +1766,13 @@ export class AgentHarness<
     );
   }
 
-  /**
-   * Channel state is shared by every root on this harness, so a channel
-   * warning is recorded as a `channel.warning` event on each live root's
-   * span (spec 10). A root span counts only if it will reach the trace
-   * exporter — a harness span (`SpanImpl`) with a real exporter configured.
-   * With no such span the warning goes to the console, so it is never lost.
-   */
+  /** Records a channel warning on every live root's span (see `recordChannelWarning`). */
   private recordChannelWarning(warning: ChannelWarning): void {
-    const traced =
-      this.traceExporter instanceof NoopExporter
-        ? []
-        : [
-            ...this.liveRoots.values(),
-          ].filter(({ ctx }) => ctx.span instanceof SpanImpl);
-    if (traced.length === 0) {
-      warnToConsole(warning);
-      return;
-    }
-    for (const { ctx } of traced) {
-      ctx.span.addEvent(NoeticEvent.CHANNEL_WARNING, {
-        ...warning,
-      });
-    }
+    recordChannelWarning(warning, this.traceExporter, this.liveRoots.values());
   }
 
   createSpan(name: string, parent: Span | null): Span {
-    return new SpanImpl(name, parent);
+    return createHarnessSpan(name, parent);
   }
 
   getLayerState<T>(executionId: string, layerId: string): T | undefined {

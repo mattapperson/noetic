@@ -249,6 +249,11 @@ export interface StepEmitItems<
   emitItems?: StepEmitItemsOption<TContext, I, O, M>;
   /** Custom items only this step may emit (spec 34). */
   customItems?: M;
+  /**
+   * Type-only: the step's input and output types (`StepTypes`). Never set; it
+   * lets arrays of steps be type-checked link by link.
+   */
+  readonly '~types'?: StepTypes<I, O>;
 }
 
 /** @public Discriminated union of all step kinds that can be composed into an execution tree. */
@@ -270,20 +275,45 @@ export type Step<TContext = ContextData, I = unknown, O = unknown> =
   | StepSequence<TContext, I, O>;
 
 /**
- * Any step, whatever its input and output types: what an array of steps holds.
- * `Step` is invariant in both, so no single `Step<…>` accepts steps of
- * different types; an array's types are inferred from its elements instead
- * (`StepArrayInput`, `StepArrayOutput`).
+ * A step's input and output types, as a type-only marker every step carries
+ * (`'~types'`). Nothing sets it at runtime. It lets an array of steps be
+ * checked against the input it is given and the output it must produce, which
+ * `Step` itself cannot do: `Step` is invariant in both, so no single
+ * `Step<…>` accepts steps of different types.
  * @public
  */
-export interface StepLike {
-  readonly kind: Step['kind'];
-  readonly id: string;
+export interface StepTypes<I = unknown, O = unknown> {
+  /** Indexed out of a method so it stays bivariant: the phantom adds no variance beyond what the step's own `execute` has. */
+  readonly input: {
+    bivariant(input: I): void;
+  }['bivariant'];
+  readonly output: O;
 }
+
+type RequiredKeys<T> = {
+  [K in keyof T]-?: Record<never, never> extends Pick<T, K> ? never : K;
+}[keyof T];
+
+/** One step kind's required fields, each of any type: enough to tell a step from a lookalike. */
+type StepShape<S> = S extends {
+  kind: infer K;
+}
+  ? {
+      readonly kind: K;
+    } & { readonly [P in Exclude<RequiredKeys<S>, 'kind'>]: unknown }
+  : never;
+
+/**
+ * Any step, whatever its input and output types: an object with a step kind
+ * and that kind's required fields. What an array of steps holds; an array's
+ * types are inferred from its elements (`StepArrayInput`, `StepArrayOutput`).
+ * @public
+ */
+export type StepLike = StepShape<Step>;
 
 /**
  * An array of steps run in sequence, each step's output the next one's input.
- * An array runs in sequence everywhere Noetic takes a step, so there is no
+ * Arrays of steps go where a step goes (see `Steps`), so there is no
  * `step.sequence`.
  * @public
  */
@@ -298,28 +328,159 @@ export type StepInput<S> = S extends Step<infer _C, infer I, infer _O> ? I : nev
 /** @public A step's output type. */
 export type StepOutput<S> = S extends Step<infer _C, infer _I, infer O> ? O : never;
 
-/** @public An array of steps' input: its first step's. */
-export type StepArrayInput<T extends StepArray> = StepInput<T[0]>;
+/** A step's input type, read from its `'~types'` marker (`unknown` for an unmarked step literal). */
+type MarkedInput<S> = S extends {
+  readonly '~types'?: {
+    readonly input: (input: infer I) => void;
+  };
+}
+  ? I
+  : unknown;
 
-/** @public An array of steps' output: its last step's. */
-export type StepArrayOutput<T extends StepArray> = T extends readonly [
-  ...ReadonlyArray<StepLike>,
-  infer Last,
+/** A step's output type, read from its `'~types'` marker (`unknown` for an unmarked step literal). */
+type MarkedOutput<S> = S extends {
+  readonly '~types'?: {
+    readonly output: infer O;
+  };
+}
+  ? O
+  : unknown;
+
+/** @public An array of steps' input: its first step's. */
+export type StepArrayInput<T extends ReadonlyArray<StepLike>> = MarkedInput<T[0]>;
+
+/** @public An array of steps' output: its last step's (any element's, for an array of unknown length). */
+export type StepArrayOutput<T extends ReadonlyArray<StepLike>> =
+  T extends StepChain<infer _I, infer O> ? O : MarkedOutput<T[number]>;
+
+/**
+ * What a step in a chain gets in place of itself when the step before it
+ * outputs something it does not take: the array no longer type-checks, and
+ * the error names both types.
+ * @public
+ */
+export interface StepChainMismatch<Expected, Received> {
+  readonly '~stepChainError': {
+    readonly message: "This step does not take the previous step's output.";
+    readonly expects: Expected;
+    readonly receives: Received;
+  };
+}
+
+type CheckLink<S, Previous, IsFirst extends boolean> = IsFirst extends true
+  ? S
+  : unknown extends Previous
+    ? S
+    : [
+          Previous,
+        ] extends [
+          MarkedInput<S>,
+        ]
+      ? S
+      : S & StepChainMismatch<MarkedInput<S>, Previous>;
+
+type CheckLinks<
+  T extends ReadonlyArray<unknown>,
+  Previous,
+  IsFirst extends boolean,
+> = T extends readonly [
+  infer Head,
+  ...infer Rest,
 ]
-  ? StepOutput<Last>
+  ? readonly [
+      CheckLink<Head, Previous, IsFirst>,
+      ...CheckLinks<Rest, MarkedOutput<Head>, false>,
+    ]
+  : readonly [];
+
+/**
+ * An array of steps checked link by link: each step must take the previous
+ * step's output. A previous step typed to output `unknown` (a `call`, an
+ * untyped step literal) is not checked against the next step's input. A tuple
+ * (a literal array or an `as const` one) maps to itself when every link holds,
+ * and a step whose link breaks maps to itself plus a `StepChainMismatch`, so
+ * intersecting the array with this fails to compile there; an empty tuple maps
+ * to `StepArray`, which it cannot be. An array of unknown length
+ * (`Step<C, T, T>[]`, `StepChain`)
+ * has no positions to check and maps to `unknown`.
+ * @public
+ */
+export type ValidStepChain<T> =
+  T extends ReadonlyArray<unknown>
+    ? number extends T['length']
+      ? unknown
+      : T extends readonly []
+        ? StepArray
+        : CheckLinks<T, unknown, true>
+    : unknown;
+
+/** @public The input of a step or of an array of steps (its first step's). */
+export type StepsInput<T> = T extends ReadonlyArray<StepLike> ? StepArrayInput<T> : MarkedInput<T>;
+
+/** @public The output of a step or of an array of steps (its last step's). */
+export type StepsOutput<T> =
+  T extends ReadonlyArray<StepLike> ? StepArrayOutput<T> : MarkedOutput<T>;
+
+/** @public A step that takes `I` (its `'~types'` marker says so). */
+export interface StepTaking<I> {
+  readonly '~types'?: Pick<StepTypes<I>, 'input'>;
+}
+
+/** @public A step that outputs `O` (its `'~types'` marker says so). */
+export interface StepGiving<O> {
+  readonly '~types'?: Pick<StepTypes<unknown, O>, 'output'>;
+}
+
+/**
+ * An array of steps that takes `I` and outputs `O`: its first step takes
+ * `I` and its last outputs `O`. The links between are not checked here,
+ * since a type without a type parameter per element cannot name them;
+ * `harness.run` and `ctx.harness.run` check every link (`ValidStepChain`).
+ * @public
+ */
+export type StepChain<I = unknown, O = unknown> = readonly [
+  StepLike & StepTaking<I>,
+  ...ReadonlyArray<StepLike>,
+] &
+  readonly [
+    ...ReadonlyArray<StepLike>,
+    StepLike & StepGiving<O>,
+  ];
+
+/**
+ * An array of steps that all take and output the same type, of any length:
+ * what a `Step<C, T, T>[]` variable is. Only a step whose input and output
+ * types are the same can repeat, so for any other `I` and `O` this is `never`.
+ * @public
+ */
+export type HomogeneousSteps<TContext = ContextData, I = unknown, O = unknown> = [
+  I,
+] extends [
+  O,
+]
+  ? [
+      O,
+    ] extends [
+      I,
+    ]
+    ? ReadonlyArray<Step<TContext, I, O>>
+    : never
   : never;
 
 /**
- * @public A step, or an array of steps run in sequence. Where a builder's own
- * type parameters fix `I` and `O`, an array's steps are not checked against them.
+ * @public A step, or an array of steps run in sequence that takes `I` and
+ * outputs `O`: a tuple whose first step takes `I` and last outputs `O`
+ * (`StepChain`), or an array of `Step<C, T, T>` when `I` and `O` are both `T`
+ * (`HomogeneousSteps`).
  */
 export type Steps<TContext = ContextData, I = unknown, O = unknown> =
   | Step<TContext, I, O>
-  | StepArray;
+  | StepChain<I, O>
+  | HomogeneousSteps<TContext, I, O>;
 
 /**
- * Steps run in sequence: what an array of steps becomes wherever Noetic takes a
- * step. Each child runs through the interpreter with its own ledger path, events
+ * Steps run in sequence: what an array of steps becomes where a `Steps` is
+ * taken (`toStep`; spec 01 § Arrays of steps lists the places). Each child runs through the interpreter with its own ledger path, events
  * and gates; each output is the next child's input.
  * @public
  */

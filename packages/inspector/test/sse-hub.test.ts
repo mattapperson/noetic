@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { toJson } from '../server/sse';
+import { toJson } from '../server/sse-hub';
 
 describe('toJson', () => {
   it('encodes Map values (the filesystem layer state shape)', () => {

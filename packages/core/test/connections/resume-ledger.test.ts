@@ -7,9 +7,10 @@
 import { describe, expect, test } from 'bun:test';
 import assert from 'node:assert';
 import type { Determinism, Step } from '@noetic-tools/types';
-import { isNoeticError } from '@noetic-tools/types';
+import { isNoeticConfigError, isNoeticError } from '@noetic-tools/types';
 import { loop } from '../../src/builders/loop-builder';
-import { step } from '../../src/builders/step-builders';
+import { runCode, step } from '../../src/builders/step-builders';
+import { connection } from '../../src/connections/handle';
 import type { InMemoryConnectionProvider } from '../../src/connections/in-memory-connection';
 import { createInMemoryConnection } from '../../src/connections/in-memory-connection';
 import type { ConnectionRuntime } from '../../src/connections/registry';
@@ -249,6 +250,120 @@ describe('resuming against connections', () => {
       'two:ui.fill',
       'two:ui.tap',
     ]);
+    await harness.close();
+  });
+});
+
+describe('rerun allowances are scoped to the restored run', () => {
+  test('a restore with rerun that never runs does not let a later plain restore drive the connection live', async () => {
+    const rig = newRig();
+    const storage = createInMemoryStorage();
+    const id = await interrupted(storage, rig, app(rig, 'one', 'unsafe'));
+    const harness = harnessFor(storage, app(rig, 'two', 'unsafe'));
+    const unused = await harness.restore(id, {
+      rerun: [
+        'app',
+      ],
+    });
+    assert(unused);
+    expect(registryOf(harness)?.rerunAllowed(id, 'app')).toBe(false);
+    const plain = await harness.restore(id);
+    assert(plain);
+    rig.calls.length = 0;
+    expect(rootKind(await rejected(harness.run(sequence(), '', plain)))).toBe(
+      'connection_resume_refused',
+    );
+    expect(rig.calls).toEqual([]);
+    await harness.close();
+  });
+
+  test('a restore that finds nothing grants nothing', async () => {
+    const rig = newRig();
+    const storage = createInMemoryStorage();
+    const harness = harnessFor(storage, app(rig, 'two', 'unsafe'));
+    expect(
+      await harness.restore('never-ran', {
+        rerun: [
+          'app',
+        ],
+      }),
+    ).toBeNull();
+    expect(registryOf(harness)?.rerunAllowed('never-ran', 'app')).toBe(false);
+    await harness.close();
+  });
+
+  test('a run that fails before executing ends the allowance its restore granted', async () => {
+    const rig = newRig();
+    const storage = createInMemoryStorage();
+    const id = await interrupted(storage, rig, app(rig, 'one', 'unsafe'));
+    const harness = harnessFor(storage, app(rig, 'two', 'unsafe'));
+    const ctx = await harness.restore(id, {
+      rerun: [
+        'app',
+      ],
+    });
+    assert(ctx);
+    // A root needing an operation the connection lacks fails negotiation before it executes.
+    const unsatisfied = step.call({
+      id: 'missing',
+      connection: connection('app'),
+      op: 'ui.missing',
+    });
+    const e = await rejected(harness.run(unsatisfied, '', ctx));
+    assert(isNoeticConfigError(e));
+    expect(e.code).toBe('CONNECTION_UNSATISFIED');
+    rig.calls.length = 0;
+    expect(rootKind(await rejected(harness.run(sequence(), '', ctx)))).toBe(
+      'connection_resume_refused',
+    );
+    expect(rig.calls).toEqual([]);
+    expect(registryOf(harness)?.rerunAllowed(id, 'app')).toBe(false);
+    await harness.close();
+  });
+
+  test('the allowance holds while its run executes and ends with it', async () => {
+    const rig = newRig();
+    const storage = createInMemoryStorage();
+    const id = await interrupted(storage, rig, app(rig, 'one', 'unsafe'));
+    const harness = harnessFor(storage, app(rig, 'two', 'unsafe'));
+    const ctx = await harness.restore(id, {
+      rerun: [
+        'app',
+      ],
+    });
+    assert(ctx);
+    let allowedDuring: boolean | undefined;
+    const probed = loop({
+      id: 'flow',
+      steps: [
+        step.call({
+          id: 'fill',
+          connection: 'app',
+          op: 'ui.fill',
+        }),
+        step.call({
+          id: 'tap',
+          connection: 'app',
+          op: 'ui.tap',
+        }),
+        runCode({
+          id: 'probe',
+          execute: async (input: unknown) => {
+            allowedDuring = registryOf(harness)?.rerunAllowed(id, 'app');
+            return input;
+          },
+        }),
+      ],
+      until: until.maxSteps(1),
+    });
+    rig.calls.length = 0;
+    await harness.run(probed, '', ctx);
+    expect(rig.calls).toEqual([
+      'two:ui.fill',
+      'two:ui.tap',
+    ]);
+    expect(allowedDuring).toBe(true);
+    expect(registryOf(harness)?.rerunAllowed(id, 'app')).toBe(false);
     await harness.close();
   });
 });

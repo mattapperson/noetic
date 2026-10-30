@@ -36,6 +36,7 @@ import type { GateHooks, GateRequest } from './gates';
 import { buildConnectionTools } from './model-tools';
 import type { ConnectionFrameworkEventRecord, ConnectionRuntime } from './registry';
 import { createConnectionRuntime } from './registry';
+import { runEvery } from './settle';
 import type { TriggerDelivery } from './triggers';
 import { TriggerRunner, validateTriggers } from './triggers';
 import { connectionViewLayers } from './views';
@@ -224,8 +225,10 @@ export function createHarnessConnections(options: HarnessConnectionsOptions): Ha
       return starting;
     },
     async close(): Promise<void> {
-      await runner?.close();
-      await registry.close();
+      await runEvery([
+        () => runner?.close(),
+        () => registry.close(),
+      ]);
     },
     tools: () => buildConnectionTools(registry),
   };

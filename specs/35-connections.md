@@ -71,7 +71,8 @@ unavailable: its tools and steps report it, and every other connection keeps
 working while it reconnects. `harness.getConnectionStatus(name?)` reports each
 one's state. `await harness.close()` stops triggers and releases every
 connection and pool lease (and closes the harness's ACP sessions) when the
-host is done.
+host is done; it closes everything even when one part throws, then rethrows
+the first failure.
 
 The harness keeps its registry, secret resolver and verifier private: nothing
 holding `ctx.harness` — a tool, a step, a context layer — can reach a
@@ -156,9 +157,10 @@ const login = [
   Its output is `{ event, around }`.
 - **`step.verify`** checks claims about what a connection shows (spec 37).
 - `args` may be a value or a function of the step's input; `around` and
-  `act` (spec 37) take a step or an array of steps. As everywhere in Noetic —
-  `harness.run(login, …)` included — an array runs its steps in sequence, each
-  output the next one's input, so there is no `step.sequence`.
+  `act` (spec 37) take a step or an array of steps. As in the other places that
+  accept an array of steps (spec 01, Arrays of steps — `harness.run(login, …)`
+  among them), an array runs its steps in sequence, each output the next one's
+  input, so there is no `step.sequence`.
 
 ### Fresh connections
 
@@ -429,10 +431,16 @@ the new connection, and nothing can reach a server around the harness.
 A handle's or manifest entry's requirements are semver ranges for a profile
 (which imply its parents' ranges, spec 36) and its extensions, plus the
 optional operations, events and senses derived from use. They are checked when
-the harness starts for its own graph, before a root executes for documents and
-for any other step `run()` is given (once per root, after the providers
-connect), and for pools against the pool's declaration before anything is
-provisioned. When a connection's manifest changes (a server upgrade), it is
+the harness starts for its own graph, and before a root executes for documents
+and for any other step `run()` is given (after the providers connect). A root
+counts as negotiated only once every connection it needs was checked: one
+whose connection was down, or whose pool has provisioned nothing yet, is
+checked again on its next run, and meanwhile fails at the step that uses it. A
+pool is checked against the manifest of a connection it provisioned with no
+setup — a `warm` one, or any provisioned on demand without one. A provider may
+answer a setup with a different manifest, so a need whose handle passes a
+`setup` is checked only when its lease is acquired. Every lease is checked again
+when it is acquired. When a connection's manifest changes (a server upgrade), it is
 renegotiated; tools change at the next turn, never mid-turn, and a connection
 that no longer satisfies what uses it becomes unavailable.
 
@@ -526,6 +534,11 @@ decides, following OVP's resume strategy:
 | `replayPrefix: 'free'` | Discard the ledger from the first step that used the connection and run live from there. |
 | `replayPrefix: 'costly'`, with `reset` | Reset the connection, then the same. |
 | `replayPrefix: 'unsafe'` | Stop with `connection_resume_refused` until `harness.restore(id, { rerun: ['app'] })`. |
+
+`rerun` belongs to the context that restore returns: it holds for that
+context's run and ends when the run does, including a run that fails before it
+executes. A restore that finds nothing grants nothing, and another restore of
+the same execution without `rerun` is refused again.
 
 Everything after the discarded point runs live too, model rounds included,
 because its inputs came from the old connection. Calls marked `once` still

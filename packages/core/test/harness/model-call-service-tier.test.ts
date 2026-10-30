@@ -56,8 +56,10 @@ function harnessWith(client: RecordingClient): AgentHarness<Record<string, never
     params: {},
   });
   frameworkCast<{
-    client: unknown;
-  }>(harness).client = client;
+    llm: {
+      client: unknown;
+    };
+  }>(harness).llm.client = client;
   return harness;
 }
 

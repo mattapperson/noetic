@@ -156,8 +156,10 @@ function makeHarness(client: SlowClient, storage?: Storage): AgentHarness {
       : {}),
   });
   frameworkCast<{
-    client: unknown;
-  }>(harness).client = client;
+    llm: {
+      client: unknown;
+    };
+  }>(harness).llm.client = client;
   return harness;
 }
 
@@ -969,8 +971,10 @@ describe('abort with drainMs', () => {
       }),
     });
     frameworkCast<{
-      client: unknown;
-    }>(harness).client = client;
+      llm: {
+        client: unknown;
+      };
+    }>(harness).llm.client = client;
     const events: StreamEvent[] = [];
     const stream = harness.getFullStream();
     void collect(stream, events);

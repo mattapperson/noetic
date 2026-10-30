@@ -250,9 +250,15 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 #### EMPTY_STEP_ARRAY
 
-**Cause:** An empty array was given where a step goes (`harness.run`, `agentGraph`, a `spawn` or `withContext` child, a `schedule` body, an `inParallel` path or a `conditional` route's pick). An array of steps runs in sequence and needs at least one step.
+**Cause:** An empty array was given where a step goes (`harness.run`, `harness.detachedSpawn`, `agentGraph`, a `spawn` or `withContext` child, a `schedule` body, an `inParallel` path, a `conditional` route's pick, or a `when`/`otherwise` clause). An array of steps runs in sequence and needs at least one step.
 
 **Fix:** Pass the steps to run, or a single step.
+
+#### INVALID_STEP_IN_ARRAY
+
+**Cause:** An element of an array of steps is not a step: a nested array, `null` or another non-object, or an object without a known step `kind` and a string `id`. The array is checked where it becomes a step (the builder, `when`/`otherwise`, `harness.run`, `detachedSpawn`, the harness constructor for `agentGraph`, or when an `inParallel` path or a `conditional` route's pick is resolved), so it fails there instead of as a `TypeError` mid-run. Nested arrays are rejected, not flattened. TypeScript rejects these arrays at compile time; the check covers untyped callers.
+
+**Fix:** Put only steps in the array. Spread a nested array into its parent (`[a, ...rest]`) rather than nesting it.
 
 #### MISSING_EXECUTE_FUNCTION
 

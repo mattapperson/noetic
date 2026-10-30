@@ -26,6 +26,7 @@ export * from './types/detached';
 export * from './types/error';
 export * from './types/fs-adapter';
 export * from './types/harness-judgment';
+export * from './types/harness-platform';
 export * from './types/harness-result';
 export * from './types/items';
 export * from './types/observability';

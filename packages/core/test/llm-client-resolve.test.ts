@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { resolveLlmClient } from '../src/harness/agent-harness';
+import { resolveLlmClient } from '../src/harness/llm-client';
 
 const NOETIC_BASE = 'https://platform.noetic.tools/v1';
 

@@ -157,8 +157,10 @@ function harnessWith(
       : {}),
   });
   frameworkCast<{
-    client: unknown;
-  }>(harness).client = client;
+    llm: {
+      client: unknown;
+    };
+  }>(harness).llm.client = client;
   return harness;
 }
 

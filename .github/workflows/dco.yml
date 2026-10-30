@@ -55,6 +55,16 @@ jobs:
               continue
             fi
 
+            # semantic-release's own release commits carry no sign-off, and
+            # rewriting them would move the tags the release jobs look up.
+            committer_email=$(git show -s --format='%ce' "${sha}")
+            if [ "${author_email}" = "semantic-release-bot@martynus.net" ] &&
+              [ "${committer_email}" = "semantic-release-bot@martynus.net" ] &&
+              echo "${subject}" | grep -qE '^chore\([a-z-]+\): release [^ ]+ \[skip ci\]$'; then
+              echo "skip  ${sha:0:8} (release bot) — ${subject}"
+              continue
+            fi
+
             expected="Signed-off-by: ${author_name} <${author_email}>"
             if echo "${body}" | grep -qxF "${expected}"; then
               echo "ok    ${sha:0:8} — ${subject}"

@@ -1,8 +1,9 @@
 import type { ContextData, StorageAdapter } from '@noetic-tools/context';
 import { storageGetMany } from '@noetic-tools/context';
-import type { Context, Step } from '@noetic-tools/types';
+import type { Context, Step, Steps } from '@noetic-tools/types';
 import { DecideOutputError, isNoeticError, NoeticErrorImpl, trackUsage } from '@noetic-tools/types';
 import { z } from 'zod';
+import { toStep } from '../builders/sequence';
 import type { EmbedFn } from '../types/embed';
 import { chargeSpent } from '../util/spent';
 import { cosineSimilarity } from './cosine-similarity';
@@ -94,17 +95,18 @@ async function getLabelVectors(
  *
  * @public
  * @param condition - Async predicate evaluated against the input and context.
- * @param step - Step to execute when the condition matches.
+ * @param step - Step to execute when the condition matches, or an array of steps run in sequence.
  * @returns A `WhenClause` for use in `semanticRoute`.
+ * @throws `NoeticConfigError` `EMPTY_STEP_ARRAY` or `INVALID_STEP_IN_ARRAY` for a bad array.
  */
 export function when<TContext = ContextData, I = unknown, O = unknown>(
   condition: Condition<I>,
-  step: Step<TContext, I, O>,
+  step: Steps<TContext, I, O>,
 ): WhenClause<TContext, I, O> {
   return {
     kind: 'when',
     condition,
-    step,
+    step: toStep(step),
   };
 }
 
@@ -112,15 +114,16 @@ export function when<TContext = ContextData, I = unknown, O = unknown>(
  * Creates a fallback clause that always matches, used as the last clause in `semanticRoute`.
  *
  * @public
- * @param step - Step to execute when no prior `when` clause matches.
+ * @param step - Step to execute when no prior `when` clause matches, or an array of steps run in sequence.
  * @returns An `OtherwiseClause` for use in `semanticRoute`.
+ * @throws `NoeticConfigError` `EMPTY_STEP_ARRAY` or `INVALID_STEP_IN_ARRAY` for a bad array.
  */
 export function otherwise<TContext = ContextData, I = unknown, O = unknown>(
-  step: Step<TContext, I, O>,
+  step: Steps<TContext, I, O>,
 ): OtherwiseClause<TContext, I, O> {
   return {
     kind: 'otherwise',
-    step,
+    step: toStep(step),
   };
 }
 

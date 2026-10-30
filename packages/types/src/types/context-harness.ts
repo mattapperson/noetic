@@ -1,7 +1,7 @@
 import type { StandardSchemaV1 } from '@standard-schema/spec';
 import type { Channel, ChannelHandle, ExternalChannel } from './channel';
 import type { LLMResponse, ModelParams, ToolChoice } from './common';
-import type { Context, CwdState, RestoreContextOptions } from './context';
+import type { Context, RestoreContextOptions } from './context';
 import type { ContextCacheConfig, ContextCacheStore } from './context-cache';
 import type {
   ContextData,
@@ -12,15 +12,13 @@ import type {
 } from './context-layer';
 import type { DecideRequest, DecideResponse, DecisionRecord } from './decide';
 import type { DetachedHandle } from './detached';
-import type { FsAdapter } from './fs-adapter';
+import type { HarnessPlatform } from './harness-platform';
 import type { HarnessResponse, StreamEvent, StreamingItem } from './harness-result';
 import type { ExecuteInput, Item } from './items';
 import type { Span, TraceExporter } from './observability';
 import type { CancelOptions, DrainReport, ExecutionScope, ExecutionStatus } from './runtime';
-import type { ShellAdapter } from './shell-adapter';
 import type { OnSteerParams, SteeringDecision, SteerVerdict } from './steering';
-import type { StepArray, StepArrayInput, StepArrayOutput } from './step';
-import type { SubprocessAdapter } from './subprocess-adapter';
+import type { StepLike, StepsInput, StepsOutput, ValidStepChain } from './step';
 import type { Tool } from './tool';
 
 export type ContextHarnessStatus =
@@ -126,7 +124,7 @@ export type ContextStep<TContext = ContextData, I = unknown, O = unknown> =
     };
 
 /** @public Runtime surface exposed on Context without coupling Context's definition to the runtime type module. */
-export interface ContextHarness {
+export interface ContextHarness extends HarnessPlatform {
   readonly config: {
     readonly name: string;
     readonly params: Record<string, unknown>;
@@ -139,10 +137,6 @@ export interface ContextHarness {
     /** Whether a resumed run streams again the items its replayed steps emitted. */
     readonly emitItemsOnReplay?: boolean;
   };
-  readonly fs: FsAdapter;
-  readonly shell: ShellAdapter;
-  readonly subprocess: SubprocessAdapter;
-  readonly rootCwdState: CwdState;
   callModel(request: ContextCallModelRequest): Promise<LLMResponse>;
   decide(request: DecideRequest): Promise<DecideResponse>;
   /** Run every layer's `onDecision` hook, in slot order. */
@@ -155,17 +149,24 @@ export interface ContextHarness {
   getFullStream(scope?: unknown): AsyncIterable<StreamEvent>;
   /** Runs a step, or an array of steps in sequence (each output the next one's input). */
   run<I, O>(step: ContextStep<ContextData, I, O>, input: I, ctx: Context): Promise<O>;
-  run<const T extends StepArray>(
-    steps: T,
-    input: StepArrayInput<T>,
+  run<const T extends StepLike | ReadonlyArray<StepLike>>(
+    steps: T & ValidStepChain<T>,
+    input: StepsInput<T>,
     ctx: Context,
-  ): Promise<StepArrayOutput<T>>;
+  ): Promise<StepsOutput<T>>;
+  /** Launches a step, or an array of steps run in sequence, in the background. */
   detachedSpawn<I, O>(
-    step: unknown,
+    step: ContextStep<ContextData, I, O>,
     input: I,
     parentCtx: Context,
     overrides?: ContextDetachedSpawnOverrides,
   ): DetachedHandle<O>;
+  detachedSpawn<const T extends StepLike | ReadonlyArray<StepLike>>(
+    steps: T & ValidStepChain<T>,
+    input: StepsInput<T>,
+    parentCtx: Context,
+    overrides?: ContextDetachedSpawnOverrides,
+  ): DetachedHandle<StepsOutput<T>>;
   createContext(opts?: {
     parent?: Context;
     /** Charge this context's usage to `parent` as it is spent. Default `true`. */
@@ -177,7 +178,6 @@ export interface ContextHarness {
     contextLayers?: ContextLayer[];
     cwdInit?: string;
   }): Context;
-  setRootCwd(nextCwd: string): void;
   getLayerState<T>(executionId: string, layerId: string): T | undefined;
   setLayerState<T>(executionId: string, layerId: string, state: T): void;
   beforeToolCall(

@@ -19,7 +19,7 @@ import type { ExecutionTracker } from './layer-events';
 import { decorateLayerStateStore } from './layer-events';
 import type { SessionStore } from './session-store';
 import { createJsonlSessionStore } from './session-store';
-import type { SseHub } from './sse';
+import type { SseHub } from './sse-hub';
 import type { LayerInfo } from './wire-types';
 
 //#region Types

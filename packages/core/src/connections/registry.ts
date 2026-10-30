@@ -66,6 +66,7 @@ import type {
   ResolveRequest,
 } from './registry-types';
 import { SecretScrubber } from './secrets';
+import { runEvery } from './settle';
 
 //#region Types
 
@@ -100,6 +101,15 @@ export interface ConnectionRuntimeOptions {
 export type RuntimeResolveRequest = ResolveRequest;
 
 /** The registry the harness holds: the `ConnectionRegistry` contract plus lifecycle. */
+/** How a graph uses a connection, as far as negotiation cares. */
+export interface NeedOptions {
+  /**
+   * The handle passes a setup. A pool's provider may answer each setup with a
+   * different manifest, so a pool checks such a need on the lease instead.
+   */
+  readonly setup?: boolean;
+}
+
 export interface ConnectionRuntime extends ConnectionRegistry {
   resolve(request: RuntimeResolveRequest): Promise<ResolvedConnection>;
   /** Connects every provider and starts every pool. Idempotent. */
@@ -120,16 +130,21 @@ export interface ConnectionRuntime extends ConnectionRegistry {
   /** Bumped every time an operation with effects runs on the connection. */
   effectCount(name: string): number;
   /** Records what the harness graph requires of a connection; renegotiated on manifest changes. */
-  require(name: string, requirement: ConnectionRequirement): void;
+  require(name: string, requirement: ConnectionRequirement, options?: NeedOptions): void;
   /**
    * Checks a requirement against the connection's current manifest without
    * recording it: how a `run()` root that is not the harness's `agentGraph` is
-   * negotiated before it executes. A connection with no manifest yet is left to
-   * fail when it is used.
+   * negotiated before it executes. A pool is checked against the manifest its
+   * connections offer. Returns false when there is no manifest to check yet (the
+   * connection is down, or the pool has provisioned nothing), leaving the
+   * requirement to fail when the connection is used.
+   *
+   * A need that passes a pool a setup has nothing to check before the lease, so
+   * it returns true and the lease checks it.
    *
    * @throws `NoeticConfigError` `CONNECTION_UNSATISFIED` when the manifest falls short.
    */
-  check(name: string, requirement: ConnectionRequirement): void;
+  check(name: string, requirement: ConnectionRequirement, options?: NeedOptions): boolean;
   /** Registers a profile's ref kinds. */
   registerProfile(profile: AnyProfile): void;
   /** Lets `harness.restore(id, { rerun })` drive replaced connections again. */
@@ -409,13 +424,25 @@ class Runtime implements ConnectionRuntime {
 
   async close(): Promise<void> {
     this.controller.abort();
-    for (const entry of this.entries.values()) {
-      if (entry.reconnectTimer) {
-        clearTimeout(entry.reconnectTimer);
-      }
-      entry.unsubscribe?.();
-      await entry.pool?.close();
-      const connection = entry.connection;
+    // Every entry is closed even when one throws; the first failure is rethrown.
+    await runEvery(
+      [
+        ...this.entries.values(),
+      ].map((entry) => () => this.closeEntry(entry)),
+    );
+  }
+
+  private async closeEntry(entry: Entry): Promise<void> {
+    if (entry.reconnectTimer) {
+      clearTimeout(entry.reconnectTimer);
+    }
+    const connection = entry.connection;
+    try {
+      await runEvery([
+        () => entry.unsubscribe?.(),
+        () => entry.pool?.close(),
+      ]);
+    } finally {
       entry.connection = undefined;
       this.setState(entry, 'closed', 'the harness closed');
       await connection?.release().catch(() => undefined);
@@ -435,20 +462,36 @@ class Runtime implements ConnectionRuntime {
     return this.entries.get(name)?.effects ?? 0;
   }
 
-  require(name: string, requirement: ConnectionRequirement): void {
+  require(name: string, requirement: ConnectionRequirement, options?: NeedOptions): void {
     const entry = this.entries.get(name);
     if (!entry) {
       throw unknownConnectionError(name, this.names());
     }
+    if (entry.pool && options?.setup) {
+      return;
+    }
     entry.requirements.push(requirement);
   }
 
-  check(name: string, requirement: ConnectionRequirement): void {
-    const connection = this.entries.get(name)?.connection;
-    if (!connection) {
-      return;
+  check(name: string, requirement: ConnectionRequirement, options?: NeedOptions): boolean {
+    const entry = this.entries.get(name);
+    if (entry?.pool && options?.setup) {
+      return true;
     }
-    checkRequirement(name, connection.manifest, requirement);
+    const manifest = entry ? this.manifestOf(entry) : undefined;
+    if (!manifest) {
+      return false;
+    }
+    checkRequirement(name, manifest, requirement);
+    return true;
+  }
+
+  /** The manifest an entry offers now: its connection's, or for a pool its members'. */
+  private manifestOf(entry: Entry): ConnectionManifest | undefined {
+    if (entry.pool) {
+      return entry.pool.manifest();
+    }
+    return entry.connection?.manifest;
   }
 
   registerProfile(profile: AnyProfile): void {
@@ -496,7 +539,7 @@ class Runtime implements ConnectionRuntime {
     if (decision === 'refuse') {
       throw resumeRefusedError(
         params.name,
-        `connection '${params.name}' was replaced (instance ${params.recorded.instance} → ${connection?.identity.instance ?? 'a new lease'}) and is not safe to drive again; resume with { rerun: ['${params.name}'] } to run it live`,
+        `connection '${params.name}' was replaced (instance ${params.recorded.instance} → ${connection?.identity.instance ?? 'a new lease'}) and is not safe to drive again; restore with { rerun: ['${params.name}'] } to run it live`,
       );
     }
     if (decision === 'reset') {
@@ -608,8 +651,32 @@ class Runtime implements ConnectionRuntime {
     for (const entry of [
       ...this.entries.values(),
     ]) {
+      if (entry.pool) {
+        this.renegotiatePool(entry, entry.pool);
+        continue;
+      }
       if (entry.connection) {
         this.renegotiate(entry, entry.connection);
+      }
+    }
+  }
+
+  /**
+   * Checks what the harness graph requires of a pool against the manifest its
+   * connections offer, once it has provisioned one; a pool that falls short is
+   * unavailable, as a single connection would be.
+   */
+  private renegotiatePool(entry: Entry, pool: ConnectionPool): void {
+    const manifest = pool.manifest();
+    if (!manifest || entry.state !== 'ready') {
+      return;
+    }
+    for (const requirement of entry.requirements) {
+      try {
+        checkRequirement(entry.name, manifest, requirement);
+      } catch (e) {
+        this.setState(entry, 'unavailable', errorReason(e));
+        return;
       }
     }
   }

@@ -307,8 +307,8 @@ interface RecallLayerOutput {
 | `start()` | Connects every connection provider and starts triggers. The first `execute()` or `run()` calls it; call it yourself for a harness that only reacts to triggers. Idempotent. |
 | `getConnectionStatus(name?)` | Each connection's state (`connecting`, `ready`, `unavailable`, `closed`), identity, and pool usage; one entry for `name`, or all. |
 | `artifacts` | The artifact store (`environment.artifacts`, else in memory); `artifacts.listRun(executionId)` is a run's manifest. |
-| `restore(executionId, { rerun? })` | `rerun` names connections the restored run may drive again live although they were replaced. See [Durability](/docs/framework/connections#durability). |
-| `close()` | Shuts down everything the harness holds open: stops triggers, releases every connection and pool lease, and closes every ACP session. Idempotent. |
+| `restore(executionId, { rerun? })` | `rerun` names connections the restored run may drive again live although they were replaced. It belongs to the returned context and ends when that context's run does. See [Durability](/docs/framework/connections#durability). |
+| `close()` | Shuts down everything the harness holds open: stops triggers, releases every connection and pool lease, and closes every ACP session. Closes everything even when one part throws, then rethrows the first failure. Idempotent. |
 
 ## Durability Methods
 

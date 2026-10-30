@@ -5,7 +5,7 @@
  * and referenced everywhere else by a `BlobRef`.
  */
 
-import type { BlobRef, BlobRefBody } from './connection';
+import type { BlobRef, BlobRefBody } from './connection-values';
 
 //#region Constants
 

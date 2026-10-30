@@ -1883,17 +1883,23 @@ Subscribe to streams before the first `execute()` if you want to observe the ver
 // Manual context creation + run() (bypasses the session queue)
 const ctx = harness.createContext({ threadId: 'thread-1' });
 const runResult = await harness.run(step, input, ctx);
-// An array of steps runs in sequence, each output the next one's input,
-// everywhere a step goes (agentGraph, spawn/withContext child, schedule body,
-// inParallel paths, conditional picks, around/act). There is no step.sequence.
-// The output is typed from the last step, the input from the first.
+// An array of steps runs in sequence, each output the next one's input, in
+// run/detachedSpawn (harness and ctx.harness), agentGraph, spawn/withContext
+// children, schedule bodies, inParallel paths, conditional picks and
+// when/otherwise clauses. There is no step.sequence. loop `steps`, wait
+// `around` and verify `act` run their own list of single steps; decide /
+// routeSwitch cases take one step. The output is typed from the last step, the
+// input from the first; run/detachedSpawn check every link at compile time
+// (builders and agentGraph check only the ends). A non-step element or nested
+// array throws INVALID_STEP_IN_ARRAY (no flattening); [] is EMPTY_STEP_ARRAY.
 const lastOutput = await harness.run([stepA, stepB], input, ctx);
 
 // When the host is done: stops triggers, releases connections and pool leases,
 // closes ACP sessions.
 await harness.close();
 
-// Background execution (inherits parent's threadId by default)
+// Background execution (inherits parent's threadId by default); takes an
+// array of steps too, run in sequence as one background execution
 const handle = harness.detachedSpawn(step, input, ctx);
 await handle.await();
 

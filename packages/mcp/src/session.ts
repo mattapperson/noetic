@@ -4,7 +4,7 @@
  * dispatcher for the extension notifications the SDK does not know.
  */
 
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { Client } from '@modelcontextprotocol/sdk/client';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import type { Notification, Request, Result } from '@modelcontextprotocol/sdk/types.js';
 import type { z } from 'zod';

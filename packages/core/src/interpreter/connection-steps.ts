@@ -291,6 +291,11 @@ export interface GraphConnectionNeed {
   readonly name: string;
   readonly profile?: AnyProfile;
   readonly requirement: ConnectionRequirement;
+  /**
+   * Whether the handle passes a pool a setup. A pool's provider may offer a
+   * different manifest per setup, so such a need is checked on the lease.
+   */
+  readonly setup: boolean;
 }
 
 /**
@@ -331,6 +336,7 @@ export function graphConnectionNeeds(graph: Step): GraphConnectionNeed[] {
         },
         use,
       ),
+      setup: Object.keys(target.options.setup ?? {}).length > 0,
     });
     return false;
   });

@@ -436,6 +436,190 @@ describe('harness ↔ connection steps', () => {
   });
 });
 
+describe('negotiating run() roots', () => {
+  function counted(counter: { ran: number }): Step {
+    return runCode({
+      id: 'first',
+      execute: async () => {
+        counter.ran += 1;
+        return undefined;
+      },
+    });
+  }
+
+  test('a root needing an operation a warm pool lacks fails before its earlier steps run', async () => {
+    const provider = createInMemoryConnection({
+      operations: {
+        'browser.ping': {
+          run: () => 'pong',
+        },
+      },
+      provision: () => undefined,
+    });
+    const harness = new AgentHarness({
+      name: 'agent',
+      params: {},
+      connections: {
+        browsers: {
+          provider,
+          pool: {
+            max: 1,
+            warm: 1,
+          },
+        },
+      },
+    });
+    const counter = {
+      ran: 0,
+    };
+    const root = loop({
+      id: 'flow',
+      steps: [
+        counted(counter),
+        step.call({
+          id: 'missing',
+          connection: connection('browsers', undefined, {
+            fresh: 'run',
+          }),
+          op: 'browser.missing',
+        }),
+      ],
+      until: until.maxSteps(1),
+    });
+    const e = await rejected(harness.run(root, undefined, harness.createContext()));
+    assert(isNoeticConfigError(e));
+    expect(e.code).toBe('CONNECTION_UNSATISFIED');
+    expect(counter.ran).toBe(0);
+    await harness.close();
+  });
+
+  test('a pool need that passes a setup is checked on its lease, not against another setup', async () => {
+    const basicOps = {
+      'basic.op': {
+        run: () => 'basic',
+      },
+    };
+    const provider = createInMemoryConnection({
+      operations: basicOps,
+      provision: (setup) =>
+        setup.mode === 'rich'
+          ? {
+              operations: {
+                ...basicOps,
+                'rich.op': {
+                  run: () => 'rich',
+                },
+              },
+            }
+          : {
+              operations: basicOps,
+            },
+    });
+    const harness = new AgentHarness({
+      name: 'agent',
+      params: {},
+      connections: {
+        pool: {
+          provider,
+          pool: {
+            max: 4,
+          },
+        },
+      },
+    });
+    const callOn = (mode: string, op: string): Step =>
+      step.call({
+        id: `${mode}-call`,
+        connection: connection('pool', undefined, {
+          fresh: 'run',
+          setup: {
+            mode,
+          },
+        }),
+        op,
+      });
+    expect(await harness.run(callOn('basic', 'basic.op'), undefined, harness.createContext())).toBe(
+      'basic',
+    );
+    expect(await harness.run(callOn('rich', 'rich.op'), undefined, harness.createContext())).toBe(
+      'rich',
+    );
+    await harness.close();
+  });
+
+  test('a root negotiated while its connection was down is negotiated again once it is back', async () => {
+    const provider = phone();
+    const harness = new AgentHarness({
+      name: 'agent',
+      params: {},
+      connections: {
+        phone: provider,
+      },
+    });
+    await harness.start();
+    provider.connection.drop('server crashed');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const counter = {
+      ran: 0,
+    };
+    const root = loop({
+      id: 'flow',
+      steps: [
+        counted(counter),
+        step.call({
+          id: 'missing',
+          connection: connection('phone'),
+          op: 'phone.vibrate',
+        }),
+      ],
+      until: until.maxSteps(1),
+    });
+    // Down at negotiation: nothing to check, so the step itself fails, after `first` ran.
+    await rejected(harness.run(root, undefined, harness.createContext()));
+    expect(counter.ran).toBe(1);
+    expect(harness.getConnectionStatus('phone')[0]?.state).toBe('ready');
+    // Back up: the same root is now negotiated before it executes.
+    const e = await rejected(harness.run(root, undefined, harness.createContext()));
+    assert(isNoeticConfigError(e));
+    expect(e.code).toBe('CONNECTION_UNSATISFIED');
+    expect(counter.ran).toBe(1);
+    await harness.close();
+  });
+});
+
+describe('closing the harness', () => {
+  test('close() still closes ACP sessions when closing connections throws, then rethrows', async () => {
+    const provider = phone();
+    const harness = new AgentHarness({
+      name: 'agent',
+      params: {},
+      connections: {
+        phone: provider,
+      },
+      triggers: [],
+    });
+    await harness.start();
+    const registry = harnessInternal<{
+      close(): Promise<void>;
+    }>(harness, 'connectionRegistry');
+    assert(registry);
+    const closeRegistry = registry.close.bind(registry);
+    registry.close = async () => {
+      await closeRegistry();
+      throw new Error('registry close failed');
+    };
+    let acpClosed = false;
+    harness.closeAcpSessions = async () => {
+      acpClosed = true;
+    };
+    const e = await rejected(harness.close());
+    assert(e instanceof Error);
+    expect(e.message).toBe('registry close failed');
+    expect(acpClosed).toBe(true);
+    expect(provider.connection.released).toBe(true);
+  });
+});
+
 describe('graph requirements', () => {
   test("the agent graph's handle requirements are negotiated at start", async () => {
     const harness = new AgentHarness({

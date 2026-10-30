@@ -13,8 +13,8 @@ import type { LastLayerUsage } from '@noetic-tools/core';
 import { z } from 'zod';
 import type { AgentBoot } from './child-runtime';
 import { bootAgent } from './child-runtime';
-import type { SseHub } from './sse';
-import { CORS_HEADERS, createSseHub, jsonResponse } from './sse';
+import type { SseHub } from './sse-hub';
+import { CORS_HEADERS, createSseHub, jsonResponse } from './sse-hub';
 import type { LayerStateResult, WireSpan } from './wire-types';
 
 //#region Config

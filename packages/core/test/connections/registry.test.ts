@@ -1108,7 +1108,10 @@ describe('resume', () => {
         signal,
       }),
     );
-    expect(noeticErrorOf(e).kind).toBe('connection_resume_refused');
+    const refusal = noeticErrorOf(e);
+    assert(refusal.kind === 'connection_resume_refused');
+    // The way past it is harness.restore(id, { rerun }), not a 'resume' call.
+    expect(refusal.reason).toContain("restore with { rerun: ['app'] }");
     runtime.allowRerun('run-1', [
       'app',
     ]);
@@ -1494,5 +1497,144 @@ describe('pools', () => {
     );
     expect(isConnectionUnsatisfiedError(e)).toBe(true);
     expect(runtime.status('browsers')[0]?.pool?.leased).toBe(0);
+  });
+});
+
+describe('negotiating pools', () => {
+  function warmPoolRig(warm: number): Rig {
+    return rig({
+      connections: {
+        browsers: {
+          provider: createInMemoryConnection(
+            appOptions({
+              provision: () => undefined,
+            }),
+          ),
+          pool: {
+            max: 1,
+            warm,
+          },
+        },
+      },
+    });
+  }
+
+  test('check() reads a pool against the manifest its connections offer', async () => {
+    const { runtime } = warmPoolRig(1);
+    await runtime.start();
+    expect(
+      runtime.check('browsers', {
+        operations: [
+          'ui.tap',
+        ],
+      }),
+    ).toBe(true);
+    let caught: unknown;
+    try {
+      runtime.check('browsers', {
+        operations: [
+          'browser.missing',
+        ],
+      });
+    } catch (error) {
+      caught = error;
+    }
+    assert(isNoeticConfigError(caught));
+    expect(caught.code).toBe('CONNECTION_UNSATISFIED');
+    await runtime.close();
+  });
+
+  test('check() reports a pool that has provisioned nothing, or a down connection, as unchecked', async () => {
+    const { runtime } = warmPoolRig(0);
+    await runtime.start();
+    expect(
+      runtime.check('browsers', {
+        operations: [
+          'browser.missing',
+        ],
+      }),
+    ).toBe(false);
+    expect(runtime.check('unknown-name', {})).toBe(false);
+    await runtime.close();
+  });
+
+  test('a down connection is unchecked; once reconnected it is checked again', async () => {
+    const { runtime, app } = rig();
+    await runtime.start();
+    app.connection.drop('server crashed');
+    await sleep(0);
+    expect(runtime.check('app', {})).toBe(false);
+    await sleep(30);
+    expect(runtime.check('app', {})).toBe(true);
+    await runtime.close();
+  });
+
+  test("start() renegotiates a warm pool against the graph's requirements", async () => {
+    const { runtime } = warmPoolRig(1);
+    runtime.require('browsers', {
+      operations: [
+        'browser.missing',
+      ],
+    });
+    await runtime.start();
+    const status = runtime.status('browsers')[0];
+    expect(status?.state).toBe('unavailable');
+    expect(status?.reason).toContain('browser.missing');
+    await runtime.close();
+  });
+});
+
+describe('closing', () => {
+  /** A provider whose connection throws when the registry unsubscribes from it. */
+  function throwingOnUnsubscribe(): ReturnType<typeof createInMemoryConnection> {
+    const inner = createInMemoryConnection(appOptions());
+    return new Proxy(inner, {
+      get(target, property, receiver) {
+        if (property !== 'connect') {
+          return Reflect.get(target, property, receiver);
+        }
+        return async (...args: Parameters<typeof target.connect>) => {
+          const connections = await target.connect(...args);
+          return connections.map(
+            (connection) =>
+              new Proxy(connection, {
+                get(conn, key) {
+                  if (key === 'onChange') {
+                    return () => () => {
+                      throw new Error('unsubscribe failed');
+                    };
+                  }
+                  const value = Reflect.get(conn, key, conn);
+                  return typeof value === 'function' ? value.bind(conn) : value;
+                },
+              }),
+          );
+        };
+      },
+    });
+  }
+
+  test('close() closes every entry when one throws, then rethrows the first failure', async () => {
+    const good = createInMemoryConnection(appOptions());
+    const { runtime } = rig({
+      connections: {
+        bad: throwingOnUnsubscribe(),
+        good,
+      },
+    });
+    await runtime.start();
+    let caught: unknown;
+    try {
+      await runtime.close();
+    } catch (error) {
+      caught = error;
+    }
+    assert(caught instanceof Error);
+    expect(caught.message).toBe('unsubscribe failed');
+    expect(good.connection.released).toBe(true);
+    expect(runtime.status().map((s) => s.state)).toEqual([
+      'closed',
+      'closed',
+    ]);
   });
 });

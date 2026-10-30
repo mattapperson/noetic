@@ -144,8 +144,10 @@ function makeRig(rounds: ScriptedRound[], contextLayers?: ContextLayer[]): Rig {
   });
   const client = new ScriptedClient(rounds);
   frameworkCast<{
-    client: unknown;
-  }>(harness).client = client;
+    llm: {
+      client: unknown;
+    };
+  }>(harness).llm.client = client;
   const queue = new MessageQueue();
   const events: EmittedEvent[] = [];
   const ctx = Object.assign(

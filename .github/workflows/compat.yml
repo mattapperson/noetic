@@ -17,13 +17,15 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Both jobs pin ubuntu-24.04: Playwright 1.50 cannot install Chromium on
+  # ubuntu-latest's 26.04 image.
   # Secretless packaging check: proves the packages build, pack into
   # publishable tarballs, install as an external npm consumer, and bundle for
   # every runtime target. No live calls, so it runs on ALL PRs — forks
   # included — giving fork contributors packaging/resolution signal even
   # though the live job below cannot run for them.
   pack:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -56,7 +58,7 @@ jobs:
     # pack job so a broken build never burns a live Cloudflare deploy.
     needs: pack
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}

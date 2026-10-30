@@ -12,8 +12,8 @@
 import { z } from 'zod';
 import { NoeticConfigError } from '../errors/noetic-config-error';
 import { isValidRange, parseSemVer } from '../util/semver';
-import type { BlobRef, Receipt, Ref, Secret } from './connection';
-import { BlobRefSchema, refSchemaOf, SecretSchema } from './connection';
+import type { BlobRef, Receipt, Ref, Secret } from './connection-values';
+import { BlobRefSchema, refSchemaOf, SecretSchema } from './connection-values';
 
 //#region Senses
 

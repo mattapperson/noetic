@@ -247,12 +247,12 @@ export { DEFAULT_EXPRESSION_LIMITS } from './expression/jsonata';
 //#region Runtime
 
 /** @public */
+export { AgentHarness } from './harness/agent-harness';
+/** @public */
 export type {
   AgentEnvironmentConfig,
   StorageEnvironmentConfig,
-} from './harness/agent-harness';
-/** @public */
-export { AgentHarness } from './harness/agent-harness';
+} from './harness/harness-options';
 /** @public */
 export type {
   AfterFirstTurnContext,
@@ -636,6 +636,7 @@ export type {
   EmitHookResult,
   ExecuteStepFn,
   FromJsonSchema,
+  HomogeneousSteps,
   InferShape,
   ItemShape,
   JsonSchema,
@@ -652,6 +653,8 @@ export type {
   StepCall,
   StepCallArgs,
   StepCallModel,
+  StepChain,
+  StepChainMismatch,
   StepConditional,
   StepConnectionTarget,
   StepEmitItems,
@@ -659,6 +662,7 @@ export type {
   StepEmitItemsFn,
   StepEmitItemsOption,
   StepEmitItemsResult,
+  StepGiving,
   StepInParallel,
   StepInParallelAll,
   StepInParallelRace,
@@ -671,6 +675,10 @@ export type {
   StepSequence,
   StepSpawn,
   Steps,
+  StepsInput,
+  StepsOutput,
+  StepTaking,
+  StepTypes,
   StepVerify,
   StepVerifyAct,
   StepVerifySubject,
@@ -680,6 +688,7 @@ export type {
   StepWithContext,
   Until,
   UntilRun,
+  ValidStepChain,
   Verdict,
 } from '@noetic-tools/types';
 

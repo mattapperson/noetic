@@ -22,7 +22,7 @@ import { channel } from '../../src/builders/channel-builder';
 import { invokeTool } from '../../src/builders/step-builders';
 import { tool } from '../../src/builders/tool-builder';
 import { AgentHarness } from '../../src/harness/agent-harness';
-import { executeInvokeTool } from '../../src/interpreter/execute-action';
+import { executeInvokeTool } from '../../src/interpreter/execute-invoke-tool';
 import { ToolAttr } from '../../src/observability/genai-attributes';
 import { InMemoryExporter } from '../../src/observability/trace-exporter';
 import { makeMessage } from '../_helpers';
@@ -126,8 +126,10 @@ function fixture(approver?: (params: ApproveToolCallParams) => ReturnType<ToolAp
       : undefined,
   });
   frameworkCast<{
-    client: unknown;
-  }>(harness).client = new AddThenDoneClient();
+    llm: {
+      client: unknown;
+    };
+  }>(harness).llm.client = new AddThenDoneClient();
   return {
     harness,
     exporter,
@@ -334,8 +336,10 @@ describe('model-requested calls', () => {
 
     expect(await modelCall(f, true)).toContain('5');
     frameworkCast<{
-      client: unknown;
-    }>(f.harness).client = new AddThenDoneClient();
+      llm: {
+        client: unknown;
+      };
+    }>(f.harness).llm.client = new AddThenDoneClient();
     expect(await modelCall(f, true)).toContain('5');
 
     expect(f.runs).toHaveLength(2);
