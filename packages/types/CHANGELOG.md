@@ -1,3 +1,7 @@
+## @noetic-tools/types-v3.17.1 (2026-10-30)
+
+* ci: publish prereleases from next to the next dist-tag (#152) ([0b247bc](https://github.com/mattapperson/noetic/commit/0b247bc)), closes [#152](https://github.com/mattapperson/noetic/issues/152)
+
 ## @noetic-tools/types-v3.18.0-next.1 (2026-10-30)
 
 * fix: close the harness review gaps and pass the structural gate ([a8d710b](https://github.com/mattapperson/noetic/commit/a8d710b))
