@@ -21,6 +21,7 @@ import {
 } from '../../src/interpreter/connection-steps';
 import { createCheckpointStore } from '../../src/runtime/durable/checkpoint-store';
 import { createInMemoryStorage } from '../../src/runtime/in-memory-storage';
+import { setHarnessInternals } from '../../src/util/harness-internals';
 import type { FakeConnectionConfig } from './_helpers';
 import { FakeRegistry } from './_helpers';
 
@@ -96,7 +97,7 @@ function durableHarness(storage: Storage, registry: FakeRegistry): AgentHarness 
       },
     },
   });
-  Object.assign(harness, {
+  setHarnessInternals(harness, {
     connectionRegistry: registry,
   });
   return harness;

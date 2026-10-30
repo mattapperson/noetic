@@ -22,6 +22,7 @@ import { createConnectionRuntime } from '../../src/connections/registry';
 import type { ConnectionViewState } from '../../src/connections/views';
 import { connectionViewLayer, connectionViewLayers, lineDiff } from '../../src/connections/views';
 import { createInMemoryArtifactStore } from '../../src/runtime/in-memory-artifact-store';
+import { setHarnessInternals } from '../../src/util/harness-internals';
 import {
   makeCtx,
   makeItemLog,
@@ -106,12 +107,15 @@ async function runtimeWith(connections: ConnectionsConfig): Promise<ConnectionRu
 
 function toolCtxFor(runtime: ConnectionRuntime | undefined): ToolExecutionContext {
   const base = makeMockToolContext(makeMockContext());
+  const harness = frameworkCast<ToolExecutionContext['harness']>({
+    ...base.harness,
+  });
+  setHarnessInternals(harness, {
+    connectionRegistry: runtime,
+  });
   return {
     ...base,
-    harness: frameworkCast<ToolExecutionContext['harness']>({
-      ...base.harness,
-      connectionRegistry: runtime,
-    }),
+    harness,
   };
 }
 

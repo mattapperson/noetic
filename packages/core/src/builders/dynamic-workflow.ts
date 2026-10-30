@@ -20,6 +20,7 @@ import type { ExpressionLimits } from '../expression/jsonata';
 import { NoeticAttr } from '../observability/genai-attributes';
 import type { WorkflowDocument } from '../schemas/workflow';
 import { WorkflowDocumentSchema, workflowDepth, workflowGraph } from '../schemas/workflow';
+import { harnessInternal } from '../util/harness-internals';
 import { outputText } from './output-text';
 import { callModel, runCode } from './step-builders';
 import {
@@ -494,11 +495,9 @@ function connectionErrorOf(
  */
 function checkAllowlistNames(allowlist: ConnectionAllowlist | undefined, ctx: Context): void {
   // Structural: builders sit below the connection registry and must not import it.
-  const registry = frameworkCast<{
-    connectionRegistry?: {
-      names(): ReadonlyArray<string>;
-    };
-  }>(ctx.harness).connectionRegistry;
+  const registry = harnessInternal<{
+    names(): ReadonlyArray<string>;
+  }>(ctx.harness, 'connectionRegistry');
   if (!allowlist || !registry) {
     return;
   }
@@ -544,9 +543,7 @@ function manifestErrorOf(
 }
 
 function registryOf(ctx: Context): PlannerRegistry | undefined {
-  return frameworkCast<{
-    connectionRegistry?: PlannerRegistry;
-  }>(ctx.harness).connectionRegistry;
+  return harnessInternal<PlannerRegistry>(ctx.harness, 'connectionRegistry');
 }
 
 /** The profile versions each harness connection serves right now. */

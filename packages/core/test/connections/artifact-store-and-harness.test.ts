@@ -4,10 +4,16 @@ import { CONNECTION_EVENT_ITEM_TYPE, isNoeticConfigError } from '@noetic-tools/t
 import { z } from 'zod';
 import { WITHHELD_BLOB_TEXT, withholdSensitiveBlobs } from '../../src/connections/blobs';
 import { createInMemoryConnection } from '../../src/connections/in-memory-connection';
+import type { ConnectionRuntime } from '../../src/connections/registry';
 import { defineSource } from '../../src/connections/sources';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { createInMemoryArtifactStore } from '../../src/runtime/in-memory-artifact-store';
+import { harnessInternal } from '../../src/util/harness-internals';
 import { sleep } from '../_helpers';
+
+function registryOf(harness: object): ConnectionRuntime | undefined {
+  return harnessInternal<ConnectionRuntime>(harness, 'connectionRegistry');
+}
 
 //#region Helpers
 
@@ -257,11 +263,11 @@ describe('AgentHarness connections', () => {
     await artifacts.attach(blob.$blob.uri, {
       executionId: 'run-1',
     });
-    expect(await harness.getRunArtifacts('run-1')).toHaveLength(1);
-    expect(harness.connectionRegistry?.names()).toEqual([
+    expect(await harness.artifacts.listRun('run-1')).toHaveLength(1);
+    expect(registryOf(harness)?.names()).toEqual([
       'phone',
     ]);
-    await harness.closeConnections();
+    await harness.close();
     expect(harness.getConnectionStatus('phone')[0]?.state).toBe('closed');
   });
 
@@ -272,9 +278,9 @@ describe('AgentHarness connections', () => {
     });
     await harness.start();
     expect(harness.getConnectionStatus()).toEqual([]);
-    expect(harness.connectionRegistry).toBeUndefined();
-    expect(await harness.getRunArtifacts('x')).toEqual([]);
-    expect(await harness.resume('missing')).toBeNull();
+    expect(registryOf(harness)).toBeUndefined();
+    expect(await harness.artifacts.listRun('x')).toEqual([]);
+    expect(await harness.restore('missing')).toBeNull();
   });
 
   test('run() starts connections and offers their tools to the step', async () => {
@@ -304,7 +310,7 @@ describe('AgentHarness connections', () => {
     );
     expect(names).toContain('phone_ping');
     expect(ctx.layers?.some((l) => l.id === 'noetic/connection-view/phone')).toBe(true);
-    await harness.closeConnections();
+    await harness.close();
   });
 
   test('a trigger turns a source event into a turn carrying the event item', async () => {
@@ -354,7 +360,7 @@ describe('AgentHarness connections', () => {
     const items = seen[0] ?? [];
     expect(items.some((i) => i.type === CONNECTION_EVENT_ITEM_TYPE)).toBe(true);
     expect(JSON.stringify(items)).toContain('failed: {\\"service\\":\\"api\\"}');
-    await harness.closeConnections();
+    await harness.close();
   });
 });
 

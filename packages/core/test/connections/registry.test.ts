@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import assert from 'node:assert';
 import type {
   ConnectionEvent,
   ConnectionsConfig,
@@ -1119,6 +1120,43 @@ describe('resume', () => {
         signal,
       }),
     ).toBe('discard');
+  });
+
+  test('a rerun allowance ends with its run, released or orphaned', async () => {
+    const { runtime } = rig();
+    await runtime.start();
+    runtime.allowRerun('run-1', [
+      'app',
+    ]);
+    runtime.allowRerun('run-2', [
+      'app',
+    ]);
+    expect(runtime.rerunAllowed('run-1', 'app')).toBe(true);
+    await runtime.releaseRun('run-1');
+    expect(runtime.rerunAllowed('run-1', 'app')).toBe(false);
+    runtime.orphanRun('run-2');
+    expect(runtime.rerunAllowed('run-2', 'app')).toBe(false);
+    await runtime.close();
+  });
+
+  test('check() refuses a requirement the manifest falls short of, and records nothing', async () => {
+    const { runtime } = rig();
+    await runtime.start();
+    let caught: unknown;
+    try {
+      runtime.check('app', {
+        operations: [
+          'app.missing',
+        ],
+      });
+    } catch (error) {
+      caught = error;
+    }
+    assert(isNoeticConfigError(caught));
+    expect(caught.code).toBe('CONNECTION_UNSATISFIED');
+    expect(runtime.status('app')[0]?.state).toBe('ready');
+    runtime.check('unconnected-name-is-left-alone', {});
+    await runtime.close();
   });
 
   test('a costly connection with reset is reset', async () => {

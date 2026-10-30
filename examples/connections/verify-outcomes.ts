@@ -11,8 +11,10 @@
 import { join } from 'node:path';
 import type {
   Context,
+  ContextData,
   InMemoryConnectionProvider,
   InMemoryOperation,
+  Step,
   VerifyOpts,
 } from '@noetic-tools/core';
 import {
@@ -27,6 +29,7 @@ import * as verify from '@noetic-tools/verify';
 import { event, net, verifier } from '@noetic-tools/verify';
 import { z } from 'zod';
 import { ui } from '../../packages/profile-ui/src/index';
+import type { VerifyOutput } from '../../packages/types/src/verify/index';
 import {
   outcomeOf,
   VerificationRunSchema,
@@ -155,7 +158,10 @@ const OutputSchema = z.looseObject({
 
 type VerifyOut = z.infer<typeof OutputSchema>;
 
-function checkout(id: string, extra: Partial<VerifyOpts> = {}): Parameters<AgentHarness['run']>[0] {
+function checkout(
+  id: string,
+  extra: Partial<VerifyOpts> = {},
+): Step<ContextData, unknown, VerifyOutput> {
   return step.verify({
     id,
     subject: 'app',
@@ -184,7 +190,7 @@ function checkout(id: string, extra: Partial<VerifyOpts> = {}): Parameters<Agent
 
 async function runVerify(
   harness: AgentHarness,
-  verifyStep: Parameters<AgentHarness['run']>[0],
+  verifyStep: Step<ContextData, unknown, VerifyOutput>,
 ): Promise<{
   settled: Settled;
   out?: VerifyOut;
@@ -256,7 +262,7 @@ async function checkRecord({ harness, label, out, ctx }: RecordCheck): Promise<v
   );
   const item = ctx.itemLog.items.find((i) => i.type === 'noetic:verification_run');
   check(`${label}: a noetic:verification_run item is emitted`, item !== undefined);
-  const artifacts = await harness.getRunArtifacts(ctx.id);
+  const artifacts = await harness.artifacts.listRun(ctx.id);
   check(
     `${label}: the run is attached to the execution's artifacts`,
     artifacts.some((a) => JSON.stringify(a).includes(out.run.$blob.uri)),
@@ -284,7 +290,7 @@ await section('pass: the action produces the expected request', async () => {
       });
     }
   } finally {
-    await harness.closeConnections();
+    await harness.close();
   }
 });
 
@@ -306,7 +312,7 @@ await section('fail: a never is broken even though the claim holds', async () =>
       });
     }
   } finally {
-    await harness.closeConnections();
+    await harness.close();
   }
 });
 
@@ -321,7 +327,7 @@ await section('fail: nothing happens at all', async () => {
       `      outcome ${out?.outcome}, verdict ${out?.verdicts[0]?.verdict} (${out?.verdicts[0]?.ground})`,
     );
   } finally {
-    await harness.closeConnections();
+    await harness.close();
   }
 });
 
@@ -347,7 +353,7 @@ await section('unknown: a gap on the claimed sense', async () => {
       });
     }
   } finally {
-    await harness.closeConnections();
+    await harness.close();
   }
 });
 
@@ -365,7 +371,7 @@ await section('unknown: the claim already held before the action', async () => {
       `      verdict ${out?.verdicts[0]?.verdict} (${out?.verdicts[0]?.ground}): ${out?.verdicts[0]?.reasons.join('; ')}`,
     );
   } finally {
-    await harness.closeConnections();
+    await harness.close();
   }
 });
 
@@ -438,7 +444,7 @@ await section(
         value.slice(0, 400),
       );
     } finally {
-      await harness.closeConnections();
+      await harness.close();
     }
   },
 );
@@ -463,7 +469,7 @@ await section('act throws: verify_act_failed, run still recorded', async () => {
     const item = ctx.itemLog.items.find((i) => i.type === 'noetic:verification_run');
     check('a noetic:verification_run item is still emitted', item !== undefined);
   } finally {
-    await harness.closeConnections();
+    await harness.close();
   }
 });
 
@@ -550,7 +556,7 @@ await section('event matcher and validation errors', async () => {
       show(bad),
     );
   } finally {
-    await harness.closeConnections();
+    await harness.close();
   }
   const bare = new AgentHarness({
     name: 'qa-verify-none',
@@ -567,7 +573,7 @@ await section('event matcher and validation errors', async () => {
       show(none.settled),
     );
   } finally {
-    await bare.closeConnections();
+    await bare.close();
   }
 });
 
@@ -622,7 +628,7 @@ await section('over MCP: verify against the stdio ui@1 server', async () => {
     check('verify over a real MCP connection answers', settled.ok, show(settled));
     console.log(`      ${show(settled)}`);
   } finally {
-    await harness.closeConnections();
+    await harness.close();
   }
 });
 

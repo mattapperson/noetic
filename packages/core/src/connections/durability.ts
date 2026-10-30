@@ -11,7 +11,7 @@
  * |---|---|
  * | `'free'` | Discard the ledger from the first step that used it; run live. |
  * | `'costly'`, with `reset` | Reset the connection, then the same. |
- * | `'unsafe'` | Refuse until `harness.resume(id, { rerun: [name] })`. |
+ * | `'unsafe'` | Refuse until `harness.restore(id, { rerun: [name] })`. |
  *
  * An epoch change alone (a hot reload) keeps refs and results. A connection
  * that declares no determinism is treated as `'unsafe'`.
@@ -77,7 +77,7 @@ export function resumeDecision(params: {
   readonly recorded: ConnectionIdentity;
   readonly current: ConnectionIdentity;
   readonly determinism: Determinism | undefined;
-  /** `harness.resume(id, { rerun })` named this connection. */
+  /** `harness.restore(id, { rerun })` named this connection. */
   readonly rerunAllowed: boolean;
   /** The connection can be reset. */
   readonly canReset: boolean;

@@ -26,6 +26,7 @@ import {
 import { createInMemoryConnection } from '../../src/connections/in-memory-connection';
 import { expressionErrors } from '../../src/expression/check';
 import { AgentHarness } from '../../src/harness/agent-harness';
+import { setHarnessInternals } from '../../src/util/harness-internals';
 import { createDynamicCallModel, makeLLMResponse } from '../_helpers';
 import { FakeRegistry, harnessWith } from './_helpers';
 
@@ -916,7 +917,7 @@ describe('dynamicWorkflow with connections', () => {
       params: {},
       _testCallModel: createDynamicCallModel(() => makeLLMResponse(JSON.stringify(document))),
     });
-    Object.assign(harness, {
+    setHarnessInternals(harness, {
       connectionRegistry: registry,
     });
     return harness;
@@ -1000,7 +1001,7 @@ describe('dynamicWorkflow with connections', () => {
     expect(prompt).toContain('ui.find args:');
     expect(prompt).toContain('profiles: ui');
     expect(prompt).not.toContain('ui.tap args:');
-    await harness.closeConnections();
+    await harness.close();
   });
 
   it('a malformed manifest entry is CONNECTION_INVALID', async () => {

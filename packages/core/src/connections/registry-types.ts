@@ -158,7 +158,7 @@ export interface ConnectionRegistry {
   orphanRun?(rootId: string): void;
   /** `harness.getConnectionStatus(name?)`. */
   status(name?: string): ReadonlyArray<ConnectionStatus>;
-  /** Whether `harness.resume(executionId, { rerun })` named connection `name`. */
+  /** Whether `harness.restore(executionId, { rerun })` named connection `name`. */
   rerunAllowed?(executionId: string, name: string): boolean;
 }
 

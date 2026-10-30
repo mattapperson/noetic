@@ -301,7 +301,7 @@ interface ArtifactRetention {
   `environment.artifacts` is unset; `@noetic-tools/platform-node` adds
   `createFileArtifactStore({ dir, retention })` (`25-platform-packages`).
   Hosted stores (object storage) implement the same contract.
-- **Access.** `harness.getRunArtifacts(executionId)` lists a run's manifest;
+- **Access.** `harness.artifacts.listRun(executionId)` lists a run's manifest;
   context layers and tool results resolve references to content through
   `ctx.artifacts` when they render.
 - `sensitive` blobs (a stored session, a captured form) are never rendered to
@@ -513,7 +513,11 @@ or join a turn. `environment.secrets` resolves `secret()` values and
 verifier `step.verify` uses (`37-verification`). Providers connect in
 `harness.start()`, which the first `execute()` or `run()` calls; construction
 stays synchronous. `harness.getConnectionStatus(name?)` reports each
-connection's state. Connections are not adapters: the runtime never calls one,
+connection's state, `harness.artifacts` is the artifact store, and
+`harness.restore(id, { rerun })` names connections a restored run may drive
+again although they were replaced. `harness.close()` shuts down everything
+the harness holds open — triggers, connections, pool leases and ACP sessions.
+The registry, secret resolver and verifier are private to the harness. Connections are not adapters: the runtime never calls one,
 only the model, steps and workflows do. See `35-connections`.
 
 ## Sessions and the Message Queue
@@ -524,7 +528,7 @@ only the model, steps and workflows do. See `35-connections`.
 - a long-lived `EventBroadcaster` that relays SDK and framework events across all turns,
 - an `itemLog` snapshot that carries conversation history from turn to turn.
 
-Before the first turn runs, the harness walks the step tree to collect all tools from callModel steps, merges them with layer-provided tools, and deduplicates by name. This **unified tool set** is stored on the turn's execution context as the pool every `callModel` step draws from. Every LLM call sends the full set, so the tool prefix stays prompt-cache stable across steps; a step's `tools` narrows the model to an allowed subset with `tool_choice: { type: "allowed_tools" }`, and the harness tool loop refuses calls to any other tool (see `02-step-variants` § Unified Tool Set). `run(step, input, ctx)` does the same lazily: when an embedder drives a step directly on a bare `createContext()` context, `run` populates that context's unified tool set (the step's tools plus the harness tools) if it is not already set, so directly-driven steps — and any sub-agents they spawn — see the harness toolset. `run` also runs the configured context layers' `init()` hooks once per context (keyed by `ctx.id`) before executing, so a harness built with `contextLayers` + a storage adapter rehydrates prior layer state, recalls it, and persists updates on the bare `run()` path — the same guarantee the session/`execute()` path gives. The init is idempotent: nested or repeated `run()` calls and the session turn path never re-init (which would clobber accumulated in-layer state by re-hydrating from storage); a deliberate `disposeLayers(ctx)` clears the guard so a later `run()` re-hydrates.
+Before the first turn runs, the harness walks the step tree to collect all tools from callModel steps, merges them with layer-provided tools, and deduplicates by name. This **unified tool set** is stored on the turn's execution context as the pool every `callModel` step draws from. Every LLM call sends the full set, so the tool prefix stays prompt-cache stable across steps; a step's `tools` narrows the model to an allowed subset with `tool_choice: { type: "allowed_tools" }`, and the harness tool loop refuses calls to any other tool (see `02-step-variants` § Unified Tool Set). `run(step, input, ctx)` — `step` may be an array of steps, run in sequence (`01-step-type` § Arrays of steps) — does the same lazily: when an embedder drives a step directly on a bare `createContext()` context, `run` populates that context's unified tool set (the step's tools plus the harness tools) if it is not already set, so directly-driven steps — and any sub-agents they spawn — see the harness toolset. `run` also runs the configured context layers' `init()` hooks once per context (keyed by `ctx.id`) before executing, so a harness built with `contextLayers` + a storage adapter rehydrates prior layer state, recalls it, and persists updates on the bare `run()` path — the same guarantee the session/`execute()` path gives. The init is idempotent: nested or repeated `run()` calls and the session turn path never re-init (which would clobber accumulated in-layer state by re-hydrating from storage); a deliberate `disposeLayers(ctx)` clears the guard so a later `run()` re-hydrates.
 
 A session's runner starts turns lazily whenever the queue goes non-empty while the runner is idle. Each turn:
 

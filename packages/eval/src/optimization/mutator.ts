@@ -97,6 +97,12 @@ function cloneAndReplace(step: Step, candidate: Candidate, prefix: string): Step
         ...step,
         step: cloneAndReplace(step.step, candidate, `${path}.`),
       };
+    // Transparent, as in field discovery: children keep their sibling paths.
+    case 'sequence':
+      return {
+        ...step,
+        steps: step.steps.map((s) => cloneAndReplace(s, candidate, prefix)),
+      };
     case 'conditional': {
       const children = cloneOptimizableChildren(step._optimizable, candidate, path);
       // A conditional whose route closes over its children (routeSwitch) must be

@@ -17,7 +17,7 @@ import type { HarnessResponse, StreamEvent, StreamingItem } from './harness-resu
 import type { ExecuteInput, Item, ItemSchemaExtensions } from './items';
 import type { Span, TraceExporter } from './observability';
 import type { ShellAdapter } from './shell-adapter';
-import type { Step } from './step';
+import type { Step, StepArray, StepArrayInput, StepArrayOutput } from './step';
 import type { SubprocessAdapter } from './subprocess-adapter';
 import type { Tool } from './tool';
 
@@ -421,7 +421,13 @@ export interface AgentHarnessContract<
    */
   seedSessionHistory(threadId: string, items: ReadonlyArray<Item>): void;
 
+  /** Runs a step, or an array of steps in sequence (each output the next one's input). */
   run<I, O>(step: Step<ContextData, I, O>, input: I, ctx: Context): Promise<O>;
+  run<const T extends StepArray>(
+    steps: T,
+    input: StepArrayInput<T>,
+    ctx: Context,
+  ): Promise<StepArrayOutput<T>>;
   /**
    * Launch `step` as a fire-and-forget background execution.
    *

@@ -248,6 +248,12 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 **Fix:** Give every step a unique, non-empty `id`, for example `runCode({ id: 'fetch-data', ... })`.
 
+#### EMPTY_STEP_ARRAY
+
+**Cause:** An empty array was given where a step goes (`harness.run`, `agentGraph`, a `spawn` or `withContext` child, a `schedule` body, an `inParallel` path or a `conditional` route's pick). An array of steps runs in sequence and needs at least one step.
+
+**Fix:** Pass the steps to run, or a single step.
+
 #### MISSING_EXECUTE_FUNCTION
 
 **Cause:** `runCode()` or `tool()` was called without an `execute` function.

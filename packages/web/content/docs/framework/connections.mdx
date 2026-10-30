@@ -83,7 +83,7 @@ const harness = new AgentHarness({
 
 `mcp()` takes a command line (`'npx @playwright/mcp@latest'`), `{ command, args, env }`, or `{ url, headers }`. Its options add `webhooks` when the server delivers events by webhook, and `profiles` / `extensions` — the definitions the bridge checks a declaring server against.
 
-Providers connect when the harness starts: on the first `execute()` or `run()`, or on an explicit `await harness.start()` for a harness that only reacts to triggers. Construction stays synchronous. A connection that drops is marked unavailable: its tools and steps report it, and every other connection keeps working while it reconnects. `harness.getConnectionStatus(name?)` reports each one's state, identity, and pool usage, and `harness.closeConnections()` stops triggers and releases every connection and lease.
+Providers connect when the harness starts: on the first `execute()` or `run()`, or on an explicit `await harness.start()` for a harness that only reacts to triggers. Construction stays synchronous. A connection that drops is marked unavailable: its tools and steps report it, and every other connection keeps working while it reconnects. `harness.getConnectionStatus(name?)` reports each one's state, identity, and pool usage, and `harness.close()` stops triggers and releases every connection and lease.
 
 ### Harness environment
 
@@ -92,7 +92,7 @@ Two `environment` entries serve connections:
 | Field | Meaning |
 |---|---|
 | `environment.secrets` | A `SecretResolver` that turns a `secret('name')` into its value immediately before a call is sent. |
-| `environment.artifacts` | The `ArtifactStore` blobs (screenshots, recordings, verification runs) are stored in. Defaults to an in-memory store; use `createFileArtifactStore()` from [`@noetic-tools/platform-node`](/docs/framework/platform-packages) for disk. `harness.getRunArtifacts(executionId)` lists a run's artifacts. |
+| `environment.artifacts` | The `ArtifactStore` blobs (screenshots, recordings, verification runs) are stored in. Defaults to an in-memory store; use `createFileArtifactStore()` from [`@noetic-tools/platform-node`](/docs/framework/platform-packages) for disk. `harness.artifacts.listRun(executionId)` lists a run's artifacts. |
 
 ## Model Tools
 
@@ -399,14 +399,14 @@ Connections emit framework events on `getFullStream()`:
 |---|---|
 | `replayPrefix: 'free'` | Discard the ledger from the first step that used the connection and run live from there. |
 | `replayPrefix: 'costly'`, with `reset` | Reset the connection, then the same. |
-| `replayPrefix: 'unsafe'` | Stop with `connection_resume_refused` until `harness.resume(id, { rerun: ['app'] })`. |
+| `replayPrefix: 'unsafe'` | Stop with `connection_resume_refused` until `harness.restore(id, { rerun: ['app'] })`. |
 
 Everything after the discarded point runs live too, model rounds included, because its inputs came from the old connection. Calls marked `once` still carry their original keys. An epoch change alone (a hot reload) keeps refs and results. A connection that declares no determinism is treated as `'unsafe'`, and so is a `'costly'` one that cannot reset.
 
 Each ledger entry records the identity of every connection its step used, so the harness checks them before a resumed run replays anything:
 
 ```ts
-const ctx = await harness.resume(executionId, { rerun: ['app'] });
+const ctx = await harness.restore(executionId, { rerun: ['app'] });
 if (ctx) await harness.run(graph, input, ctx);
 ```
 

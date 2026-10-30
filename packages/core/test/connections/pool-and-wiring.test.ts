@@ -4,9 +4,15 @@ import { isNoeticConfigError, isNoeticError } from '@noetic-tools/types';
 import { createInMemoryConnection } from '../../src/connections/in-memory-connection';
 import type { LeaseChange } from '../../src/connections/pool';
 import { ConnectionPool } from '../../src/connections/pool';
+import type { ConnectionRuntime } from '../../src/connections/registry';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { createInMemoryArtifactStore } from '../../src/runtime/in-memory-artifact-store';
+import { harnessInternal } from '../../src/util/harness-internals';
 import { makeLayer, makeStorage, sleep } from '../_helpers';
+
+function registryOf(harness: object): ConnectionRuntime | undefined {
+  return harnessInternal<ConnectionRuntime>(harness, 'connectionRegistry');
+}
 
 //#region Helpers
 
@@ -257,7 +263,7 @@ describe('harness gate wiring', () => {
       },
     });
     const ctx = harness.createContext();
-    const registry = harness.connectionRegistry;
+    const registry = registryOf(harness);
     if (!registry) {
       throw new Error('no registry');
     }
@@ -297,7 +303,7 @@ describe('harness gate wiring', () => {
       ),
     );
     expect(isNoeticError(noCtx) && noCtx.noeticError.kind).toBe('steering_denied');
-    await harness.closeConnections();
+    await harness.close();
   });
 
   test('beforeToolCall layers gate step calls; an approver that throws denies', async () => {
@@ -340,7 +346,7 @@ describe('harness gate wiring', () => {
       ],
     });
     const ctx = harness.createContext();
-    const resolved = await harness.connectionRegistry?.resolve({
+    const resolved = await registryOf(harness)?.resolve({
       name: 'phone',
       scope: {
         executionId: ctx.id,
@@ -366,7 +372,7 @@ describe('harness gate wiring', () => {
     const wipe = await rejected(resolved.call('wipe', {}, opts));
     const error = isNoeticError(wipe) ? wipe.noeticError : undefined;
     expect(error?.kind === 'steering_denied' && error.guidance).toContain('approver down');
-    await harness.closeConnections();
+    await harness.close();
   });
 
   test('without approveToolCall a guarded operation is refused', async () => {
@@ -385,7 +391,7 @@ describe('harness gate wiring', () => {
       },
     });
     const ctx = harness.createContext();
-    const resolved = await harness.connectionRegistry?.resolve({
+    const resolved = await registryOf(harness)?.resolve({
       name: 'phone',
       scope: {
         executionId: ctx.id,

@@ -54,7 +54,7 @@ Runtime imports are Node built-ins only; there are no third-party runtime depend
 
 `createFileArtifactStore({ dir, retention })` is the Node implementation of the `ArtifactStore` contract — where [connection](/docs/framework/connections) blobs such as screenshots, recordings, downloads, and [verification runs](/docs/framework/verification) are stored. Blobs are written once, content-addressed under `<dir>/sha256/<aa>/<hex>` with a sidecar metadata file, and each run's manifest under `<dir>/runs/<executionId>.json`.
 
-`retention` caps each run (by default 512 MiB and 1e3 blobs, with no TTL). A blob dropped by retention shows up in a verification as a `buffer-truncated` gap rather than as missing evidence. `harness.getRunArtifacts(executionId)` lists a run's artifacts.
+`retention` caps each run (by default 512 MiB and 1e3 blobs, with no TTL). A blob dropped by retention shows up in a verification as a `buffer-truncated` gap rather than as missing evidence. `harness.artifacts.listRun(executionId)` lists a run's artifacts.
 
 Without a store, a harness uses core's in-memory one (`createInMemoryArtifactStore()`). A browser host may implement the contract over IndexedDB or a remote store.
 

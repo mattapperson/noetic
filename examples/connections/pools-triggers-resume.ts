@@ -14,6 +14,7 @@ import type {
   InMemoryConnectionProvider,
   SecretResolver,
   Span,
+  Step,
   TraceExporter,
 } from '@noetic-tools/core';
 import {
@@ -43,7 +44,7 @@ type Storage = ReturnType<typeof createInMemoryStorage>;
 /** `Determinism` is not re-exported from `@noetic-tools/core`; derive it. */
 type Determinism = NonNullable<InMemoryConnectionOptions['determinism']>;
 
-type AnyStep = Exclude<Parameters<AgentHarness['run']>[0], ReadonlyArray<unknown>>;
+type AnyStep = Step<ContextData, unknown, unknown>;
 
 interface CallLog {
   readonly connection: string;
@@ -221,7 +222,7 @@ await section('pools: fresh per parallel path', async () => {
     const status = harness.getConnectionStatus('browsers');
     console.log(`      status: ${JSON.stringify(status)}`);
   } finally {
-    await harness.closeConnections();
+    await harness.close();
   }
 });
 
@@ -292,7 +293,7 @@ await section('pools: fresh per run, and a full pool past waitMs', async () => {
       show(full),
     );
   } finally {
-    await harness.closeConnections();
+    await harness.close();
   }
 });
 
@@ -398,7 +399,7 @@ await section('triggers: defineSource', async () => {
     );
     check('an event that does not match its schema is refused by emit', !bad.ok, show(bad));
   } finally {
-    await harness.closeConnections();
+    await harness.close();
   }
 
   const unknown = await settle(
@@ -482,7 +483,7 @@ await section('triggers: a trigger turn reaching a model agent', async () => {
     );
   } finally {
     model.stop();
-    await harness.closeConnections();
+    await harness.close();
   }
 });
 
@@ -545,7 +546,7 @@ await section('triggers: cron delivers the ticks it missed while down', async ()
       show(bad),
     );
   } finally {
-    await harness.closeConnections();
+    await harness.close();
   }
 });
 
@@ -673,7 +674,7 @@ await section('secret scrubbing in outputs, events and traces', async () => {
       !JSON.stringify(ctx.itemLog.items).includes(PASSWORD),
     );
   } finally {
-    await harness.closeConnections();
+    await harness.close();
   }
 });
 
@@ -860,12 +861,12 @@ async function resumeCase(replay: Replay, replaced: boolean): Promise<void> {
         show(out),
       );
       check(`${label}: nothing was sent to the replaced connection`, after.length === 0, after);
-      const again = await harness.resume(executionId, {
+      const again = await harness.restore(executionId, {
         rerun: [
           'app',
         ],
       });
-      check(`${label}: harness.resume(id, { rerun: ['app'] }) restores it`, again !== null);
+      check(`${label}: harness.restore(id, { rerun: ['app'] }) restores it`, again !== null);
       if (again === null) {
         return;
       }
@@ -898,11 +899,11 @@ async function resumeCase(replay: Replay, replaced: boolean): Promise<void> {
       check(`${label}: no reset for a free replay`, rig.resets.length === 0, rig.resets);
     }
   } finally {
-    await harness.closeConnections();
+    await harness.close();
   }
 }
 
-/** `harness.resume(id, { rerun })` on a fresh harness, with no refused attempt first. */
+/** `harness.restore(id, { rerun })` on a fresh harness, with no refused attempt first. */
 async function unsafeRerunDirect(): Promise<void> {
   const rig: ResumeRig = {
     calls: [],
@@ -913,25 +914,25 @@ async function unsafeRerunDirect(): Promise<void> {
   const executionId = await interrupt(storage, rig, resumable(rig, 'unsafe', 'first'));
   const harness = durable(storage, resumable(rig, 'unsafe', 'second'));
   try {
-    const ctx = await harness.resume(executionId, {
+    const ctx = await harness.restore(executionId, {
       rerun: [
         'app',
       ],
     });
-    check('unsafe, replaced, resume(rerun) first: restores', ctx !== null);
+    check('unsafe, replaced, restore(rerun) first: restores', ctx !== null);
     if (ctx === null) {
       return;
     }
     const before = rig.calls.length;
     const out = await settle(harness.run(graph(), 'go', ctx));
-    check('unsafe, replaced, resume(rerun) first: the run completes live', out.ok, show(out));
+    check('unsafe, replaced, restore(rerun) first: the run completes live', out.ok, show(out));
     check(
-      'unsafe, replaced, resume(rerun) first: everything after the discarded point runs live (ui.fill too)',
+      'unsafe, replaced, restore(rerun) first: everything after the discarded point runs live (ui.fill too)',
       rig.calls.slice(before).some((c) => c.op === 'ui.fill'),
       rig.calls.slice(before),
     );
   } finally {
-    await harness.closeConnections();
+    await harness.close();
   }
 }
 

@@ -19,6 +19,7 @@ import type { Span, TraceExporter } from './observability';
 import type { CancelOptions, DrainReport, ExecutionScope, ExecutionStatus } from './runtime';
 import type { ShellAdapter } from './shell-adapter';
 import type { OnSteerParams, SteeringDecision, SteerVerdict } from './steering';
+import type { StepArray, StepArrayInput, StepArrayOutput } from './step';
 import type { SubprocessAdapter } from './subprocess-adapter';
 import type { Tool } from './tool';
 
@@ -152,7 +153,13 @@ export interface ContextHarness {
   getTextStream(scope?: unknown): AsyncIterable<string>;
   getReasoningStream(scope?: unknown): AsyncIterable<string>;
   getFullStream(scope?: unknown): AsyncIterable<StreamEvent>;
+  /** Runs a step, or an array of steps in sequence (each output the next one's input). */
   run<I, O>(step: ContextStep<ContextData, I, O>, input: I, ctx: Context): Promise<O>;
+  run<const T extends StepArray>(
+    steps: T,
+    input: StepArrayInput<T>,
+    ctx: Context,
+  ): Promise<StepArrayOutput<T>>;
   detachedSpawn<I, O>(
     step: unknown,
     input: I,

@@ -37,7 +37,7 @@ type _AssertSubset<TContext, I, O> = _AssertShape<TContext, I, O> extends Step<T
   : false;
 ```
 
-The exported `Step` union additionally includes [`StepSchedule`](#stepschedule) for fixed-interval scheduling.
+The exported `Step` union additionally includes [`StepSchedule`](#stepschedule) for fixed-interval scheduling and [`StepSequence`](#stepsequence), what an array of steps becomes.
 
 ### StepReplay
 
@@ -281,6 +281,34 @@ inParallel has three mode variants, each a separate interface.
 | `parkTimeout` | `number` | no | Milliseconds to wait on inbox before stopping (0 = non-blocking) |
 | `prepareNext` | `(output: O, verdict: Verdict, ctx: Context<TContext>) => I` | no | Transform output to next input |
 | `onError` | `(error: NoeticError, ctx: Context<TContext>) => 'retry' \| 'skip' \| 'abort'` | no | Error handler |
+
+## StepSequence
+
+`StepSequence<TContext, I, O>`
+
+What an array of steps becomes. An array of steps runs in sequence, each step's output the next one's input, everywhere a step goes: `harness.run`, `agentGraph`, `spawn` and `withContext` children, `schedule` bodies, `inParallel` paths, a `conditional` route's pick, `around` and `act`. There is no `step.sequence`; write the array.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `kind` | `'sequence'` | yes | Discriminant |
+| `id` | `string` | yes | The children's ids joined with ` > ` |
+| `steps` | `ReadonlyArray<Step<TContext, I, O>>` | yes | The steps, in order; at least two |
+
+An empty array throws [`EMPTY_STEP_ARRAY`](/docs/framework/errors#empty_step_array); a one-element array is its element.
+
+### StepArray, StepArrayInput and StepArrayOutput
+
+```ts
+import { AgentHarness, runCode } from '@noetic-tools/core';
+
+const trim = runCode({ id: 'trim', execute: async (input: string) => input.trim() });
+const count = runCode({ id: 'count', execute: async (input: string) => input.length });
+
+const harness = new AgentHarness({ name: 'arrays', params: {} });
+const length: number = await harness.run([trim, count], '  hi  ', harness.createContext());
+```
+
+`StepArray` is a non-empty tuple of steps of any types (`StepLike`). `run` infers the array's input from its first step (`StepArrayInput<T>`) and its output from its last (`StepArrayOutput<T>`). `Steps<TContext, I, O>` is a step or a `StepArray`: what the builders accept.
 
 ## StepSchedule
 

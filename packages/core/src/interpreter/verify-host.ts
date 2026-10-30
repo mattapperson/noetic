@@ -27,6 +27,7 @@ import { AnomalyKind, OvpChannelIdSchema, VerifyConfigErrorCode } from '@noetic-
 import { z } from 'zod';
 import type { ResolvedConnection } from '../connections/registry-types';
 import { createInMemoryArtifactStore } from '../runtime/in-memory-artifact-store';
+import { harnessInternal } from '../util/harness-internals';
 import { idempotencyKeyFor, runRootOf, stepPathOf } from './connection-steps';
 
 //#region Constants
@@ -93,8 +94,6 @@ const FALLBACK_STORES = new WeakMap<object, ArtifactStore>();
 
 /** The harness surface verification reads. */
 interface HarnessWithVerification {
-  /** `AgentHarness.verifier`, set from `new AgentHarness({ verification })`. */
-  verifier?: unknown;
   /** `AgentHarness.artifacts`: `environment.artifacts`, else the harness's in-memory store. */
   artifacts?: ArtifactStore;
 }
@@ -171,7 +170,7 @@ function refuseWitnessEffects(
 
 /** The verifier the harness registered (`new AgentHarness({ verification })`), if any. */
 export function verificationOf(ctx: Context): unknown {
-  return harnessOf(ctx).verifier;
+  return harnessInternal<unknown>(ctx.harness, 'verifier');
 }
 
 /** The harness artifact store (`environment.artifacts`), or an in-memory one per harness. */

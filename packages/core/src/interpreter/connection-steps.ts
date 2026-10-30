@@ -29,6 +29,7 @@ import type {
 } from '../connections/registry-types';
 import { emitFrameworkEvent, getBroadcaster } from '../runtime/broadcaster-utils';
 import { ContextImpl } from '../runtime/context-impl';
+import { harnessInternal } from '../util/harness-internals';
 import { someStep } from './step-walk';
 
 //#region Types
@@ -94,7 +95,10 @@ interface HarnessWithConnections {
 }
 
 function harnessOf(ctx: Context): HarnessWithConnections {
-  return frameworkCast<HarnessWithConnections>(ctx.harness);
+  return {
+    connectionRegistry: harnessInternal<ConnectionRegistry>(ctx.harness, 'connectionRegistry'),
+    config: frameworkCast<Pick<HarnessWithConnections, 'config'>>(ctx.harness).config,
+  };
 }
 
 /**
@@ -540,7 +544,7 @@ function pendingEntriesFor(
  * left (spec 35 § Durability), through the one resume policy in
  * `connections/durability.ts`. Against the same identity instance it returns the
  * entry so the step picks up where it was. Against a replaced connection:
- * `harness.resume(id, { rerun })` naming it, or `replayPrefix: 'free'`, runs
+ * `harness.restore(id, { rerun })` naming it, or `replayPrefix: 'free'`, runs
  * live; `'costly'` with a reset resets first; anything else — including a
  * connection that declares no determinism — refuses.
  *
@@ -572,7 +576,7 @@ export async function reconcilePending(
     throw new NoeticErrorImpl({
       kind: 'connection_resume_refused',
       connection: connection.resolved.name,
-      reason: `its identity changed from '${entry.identity.instance}' to '${current.instance}' and it cannot be driven again; resume with rerun: ['${connection.resolved.name}'] to run it live.`,
+      reason: `its identity changed from '${entry.identity.instance}' to '${current.instance}' and it cannot be driven again; restore with { rerun: ['${connection.resolved.name}'] } to run it live.`,
     });
   }
   if (decision === 'reset') {

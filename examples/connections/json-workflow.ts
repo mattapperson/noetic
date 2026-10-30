@@ -249,7 +249,7 @@ await section(
       );
       check('the output never contains the secret', !text.includes(PASSWORD));
     } finally {
-      await harness.closeConnections();
+      await harness.close();
     }
   },
 );
@@ -287,7 +287,7 @@ await section(
         show(out),
       );
     } finally {
-      await harness.closeConnections();
+      await harness.close();
     }
   },
 );
@@ -328,7 +328,7 @@ await section('wait node with an around written by name and a filter expression'
       text,
     );
   } finally {
-    await harness.closeConnections();
+    await harness.close();
   }
 });
 
@@ -413,7 +413,7 @@ await section('fan-out: inParallel over connection names', async () => {
       'WORKFLOW_VALIDATION_FAILED',
     ]);
   } finally {
-    await harness.closeConnections();
+    await harness.close();
   }
 });
 
@@ -824,8 +824,8 @@ await section('invalid documents', async () => {
       ],
     );
   } finally {
-    await harness.closeConnections();
-    await noVerifier.closeConnections();
+    await harness.close();
+    await noVerifier.close();
   }
 });
 
@@ -927,7 +927,7 @@ await section('dynamicWorkflow: a model writes the document', async () => {
     );
   } finally {
     model.stop();
-    await harness.closeConnections();
+    await harness.close();
   }
 });
 
@@ -1005,7 +1005,7 @@ await section('dynamicWorkflow: can the planner model drive a connection directl
     );
   } finally {
     model.stop();
-    await harness.closeConnections();
+    await harness.close();
   }
 });
 

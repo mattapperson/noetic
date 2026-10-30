@@ -143,6 +143,13 @@ function walkStep(step: Step, prefix: string, fields: OptimizableField[]): void 
     case 'schedule':
       walkStep(step.step, `${path}.`, fields);
       return;
+    // An array of steps is transparent: its children keep the paths they would
+    // have as siblings, so wrapping steps in an array never renames a field.
+    case 'sequence':
+      for (const s of step.steps) {
+        walkStep(s, prefix, fields);
+      }
+      return;
     case 'conditional':
       walkOptimizableChildren(step._optimizable, path, fields);
       return;

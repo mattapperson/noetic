@@ -16,7 +16,7 @@ import type {
   EventStreamMessage,
   SenseDescriptor,
 } from '@noetic-tools/types';
-import { frameworkCast, NoeticConfigError } from '@noetic-tools/types';
+import { NoeticConfigError } from '@noetic-tools/types';
 import type {
   PreparedVerify,
   VerificationRun,
@@ -33,6 +33,7 @@ import type {
   ResolveRequest,
 } from '../../src/connections/registry-types';
 import { AgentHarness } from '../../src/harness/agent-harness';
+import { setHarnessInternals } from '../../src/util/harness-internals';
 
 //#region Registry
 
@@ -282,9 +283,9 @@ export function verifyHarness(opts: {
       : undefined,
   });
   if (opts.registry) {
-    frameworkCast<{
-      connectionRegistry?: ConnectionRegistry;
-    }>(harness).connectionRegistry = opts.registry;
+    setHarnessInternals(harness, {
+      connectionRegistry: opts.registry,
+    });
   }
   return harness;
 }

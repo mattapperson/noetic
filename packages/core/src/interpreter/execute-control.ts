@@ -19,6 +19,7 @@ import type {
   StepInParallelSettle,
   StepLoop,
   StepSchedule,
+  StepSequence,
   Until,
   UntilRun,
   Verdict,
@@ -1035,6 +1036,27 @@ function throwCancelled(reason: string | undefined): never {
     kind: 'cancelled',
     reason: reason ?? 'context aborted',
   });
+}
+
+/**
+ * Runs a `sequence` step: each child through the interpreter, in order, each
+ * output the next child's input. The last child's output is the step's output.
+ */
+export async function executeSequence<TContext, I, O>(
+  step: StepSequence<TContext, I, O>,
+  input: I,
+  ctx: Context<TContext>,
+  executeStep: ExecuteStepFn,
+): Promise<O> {
+  let current: unknown = input;
+  for (const child of step.steps) {
+    current = await executeStep(
+      frameworkCast<Step<TContext, unknown, unknown>>(child),
+      current,
+      ctx,
+    );
+  }
+  return frameworkCast<O>(current);
 }
 
 /**

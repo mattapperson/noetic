@@ -1,4 +1,5 @@
 import type { Step } from '@noetic-tools/types';
+import { frameworkCast } from '@noetic-tools/types';
 
 /**
  * Whether `step` or any step nested in it satisfies `test`.
@@ -67,6 +68,8 @@ export function stepChildren(step: Step): ReadonlyArray<Step> {
       return [
         step.step,
       ];
+    case 'sequence':
+      return frameworkCast<ReadonlyArray<Step>>(step.steps);
     default:
       step satisfies never;
       return [];

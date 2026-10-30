@@ -10,11 +10,12 @@ import type { Step } from '@noetic-tools/types';
 import { frameworkCast, isNoeticConfigError, isNoeticError } from '@noetic-tools/types';
 import { inParallel } from '../../src/builders/control-flow-builders';
 import { loop } from '../../src/builders/loop-builder';
-import { step } from '../../src/builders/step-builders';
+import { runCode, step } from '../../src/builders/step-builders';
 import { connection } from '../../src/connections/handle';
 import { createInMemoryConnection } from '../../src/connections/in-memory-connection';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { until } from '../../src/until/predicates';
+import { harnessInternal } from '../../src/util/harness-internals';
 import { makeLayer } from '../_helpers';
 
 //#region Helpers
@@ -45,6 +46,43 @@ async function rejected(promise: Promise<unknown>): Promise<unknown> {
 //#endregion
 
 describe('harness ↔ connection steps', () => {
+  test('a run() root is negotiated before it executes: a missing operation is CONNECTION_UNSATISFIED', async () => {
+    const harness = new AgentHarness({
+      name: 'agent',
+      params: {},
+      connections: {
+        phone: phone(),
+      },
+    });
+    let ranFirst = false;
+    const first = runCode({
+      id: 'first',
+      execute: async () => {
+        ranFirst = true;
+        return undefined;
+      },
+    });
+    const missing = step.call({
+      id: 'missing',
+      connection: connection('phone'),
+      op: 'phone.vibrate',
+    });
+    const e = await rejected(
+      harness.run(
+        [
+          first,
+          missing,
+        ],
+        undefined,
+        harness.createContext(),
+      ),
+    );
+    assert(isNoeticConfigError(e));
+    expect(e.code).toBe('CONNECTION_UNSATISFIED');
+    expect(ranFirst).toBe(false);
+    await harness.close();
+  });
+
   test('step.call reaches a harness connection by handle and by name', async () => {
     const harness = new AgentHarness({
       name: 'agent',
@@ -77,7 +115,7 @@ describe('harness ↔ connection steps', () => {
       pong: 7,
     });
     expect(ctx.lastStepMeta).toBeDefined();
-    await harness.closeConnections();
+    await harness.close();
   });
 
   test('harness.run(array) runs the steps in sequence, each output the next input', async () => {
@@ -113,7 +151,7 @@ describe('harness ↔ connection steps', () => {
     expect(output).toEqual({
       pong: 2,
     });
-    await harness.closeConnections();
+    await harness.close();
   });
 
   test('step.call on a connection the harness lacks is CONNECTION_UNKNOWN', async () => {
@@ -137,7 +175,7 @@ describe('harness ↔ connection steps', () => {
     );
     assert(isNoeticConfigError(e));
     expect(e.code).toBe('CONNECTION_UNKNOWN');
-    await harness.closeConnections();
+    await harness.close();
   });
 
   test('step.wait receives an event emitted by the connection during `around`', async () => {
@@ -174,7 +212,7 @@ describe('harness ↔ connection steps', () => {
     expect(output.event.payload).toEqual({
       service: 'api',
     });
-    await harness.closeConnections();
+    await harness.close();
   });
 
   test('step.call runs gate 5: the approver is asked for approve-policy ops, and steering layers refuse', async () => {
@@ -252,7 +290,7 @@ describe('harness ↔ connection steps', () => {
       kind: 'steering_denied',
       guidance: 'no wiping',
     });
-    await harness.closeConnections();
+    await harness.close();
   });
 
   test('step.call reports long-operation progress once, with its step id', async () => {
@@ -305,7 +343,7 @@ describe('harness ↔ connection steps', () => {
       'completed',
     ]);
     expect(tasks.every((e) => e.data.stepId === 'build')).toBe(true);
-    await harness.closeConnections();
+    await harness.close();
   });
 
   test('step.wait: each received event and gap reaches the run once, from the registry', async () => {
@@ -355,7 +393,7 @@ describe('harness ↔ connection steps', () => {
     const gaps = events.filter((e) => e.type === 'agent:stream_changed');
     expect(gaps).toHaveLength(1);
     expect(gaps[0]?.data.change).toBe('gap');
-    await harness.closeConnections();
+    await harness.close();
   });
 
   test("a run's fresh pool lease is returned when the run completes", async () => {
@@ -394,7 +432,7 @@ describe('harness ↔ connection steps', () => {
     // One slot: the second run gets a connection only because the first returned its lease.
     expect(await harness.run(graph, undefined, harness.createContext())).toBe('pong');
     expect(harness.getConnectionStatus('browsers')[0]?.pool?.leased).toBe(0);
-    await harness.closeConnections();
+    await harness.close();
   });
 });
 
@@ -420,7 +458,7 @@ describe('graph requirements', () => {
     const status = harness.getConnectionStatus('phone')[0];
     expect(status?.state).toBe('unavailable');
     expect(status?.reason).toContain('phone.missing');
-    await harness.closeConnections();
+    await harness.close();
   });
 });
 
@@ -477,7 +515,7 @@ describe('fresh path leases', () => {
     expect(provider.provisioned).toHaveLength(6);
     expect(provider.provisioned.every((c) => c.released)).toBe(true);
     expect(harness.getConnectionStatus('browsers')[0]?.pool?.leased).toBe(0);
-    await harness.closeConnections();
+    await harness.close();
   });
 });
 
@@ -490,7 +528,7 @@ describe('harness ↔ verify step', () => {
         phone: phone(),
       },
     });
-    expect(harness.verifier).toBeUndefined();
+    expect(harnessInternal(harness, 'verifier')).toBeUndefined();
     const e = await rejected(
       harness.run(
         step.verify({
@@ -515,6 +553,6 @@ describe('harness ↔ verify step', () => {
     );
     assert(isNoeticConfigError(e));
     expect(e.code).toBe('VERIFY_NOT_CONFIGURED');
-    await harness.closeConnections();
+    await harness.close();
   });
 });

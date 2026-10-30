@@ -33,6 +33,7 @@ import {
   executeInParallel,
   executeLoop,
   executeSchedule,
+  executeSequence,
 } from './execute-control';
 import { executeDecide } from './execute-decide';
 import { executeVerify } from './execute-verify';
@@ -525,6 +526,9 @@ export async function execute<TContext = ContextData, I = unknown, O = unknown>(
         break;
       case 'verify':
         result = await executeVerify(step, input, stepCtx, (s, i, c) => execute(s, i, c));
+        break;
+      case 'sequence':
+        result = await executeSequence(step, input, stepCtx, (s, i, c) => execute(s, i, c));
         break;
       default: {
         const _exhaustive: never = step;

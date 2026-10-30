@@ -109,6 +109,8 @@ export interface ConnectionRuntime extends ConnectionRegistry {
    * reclaim window unless a resume takes it back first.
    */
   orphanRun(rootId: string): void;
+  /** Whether `harness.restore(executionId, { rerun })` named connection `name` for this run. */
+  rerunAllowed(executionId: string, name: string): boolean;
   /** Releases every connection and lease. */
   close(): Promise<void>;
   /** The harness configuration of a connection. */
@@ -119,9 +121,18 @@ export interface ConnectionRuntime extends ConnectionRegistry {
   effectCount(name: string): number;
   /** Records what the harness graph requires of a connection; renegotiated on manifest changes. */
   require(name: string, requirement: ConnectionRequirement): void;
+  /**
+   * Checks a requirement against the connection's current manifest without
+   * recording it: how a `run()` root that is not the harness's `agentGraph` is
+   * negotiated before it executes. A connection with no manifest yet is left to
+   * fail when it is used.
+   *
+   * @throws `NoeticConfigError` `CONNECTION_UNSATISFIED` when the manifest falls short.
+   */
+  check(name: string, requirement: ConnectionRequirement): void;
   /** Registers a profile's ref kinds. */
   registerProfile(profile: AnyProfile): void;
-  /** Lets `harness.resume(id, { rerun })` drive replaced connections again. */
+  /** Lets `harness.restore(id, { rerun })` drive replaced connections again. */
   allowRerun(executionId: string, names: ReadonlyArray<string>): void;
   /**
    * Decides what a resumed run does about a connection recorded against `recorded`,
@@ -329,12 +340,15 @@ class Runtime implements ConnectionRuntime {
   }
 
   async releaseRun(rootId: string): Promise<void> {
+    // A rerun allowance covers one restore of the run; it ends with the run.
+    this.reruns.delete(rootId);
     for (const [pool, holder] of this.runHolders(rootId)) {
       await pool.release(holder);
     }
   }
 
   orphanRun(rootId: string): void {
+    this.reruns.delete(rootId);
     for (const [pool, holder] of this.runHolders(rootId)) {
       pool.orphan(holder);
     }
@@ -427,6 +441,14 @@ class Runtime implements ConnectionRuntime {
       throw unknownConnectionError(name, this.names());
     }
     entry.requirements.push(requirement);
+  }
+
+  check(name: string, requirement: ConnectionRequirement): void {
+    const connection = this.entries.get(name)?.connection;
+    if (!connection) {
+      return;
+    }
+    checkRequirement(name, connection.manifest, requirement);
   }
 
   registerProfile(profile: AnyProfile): void {

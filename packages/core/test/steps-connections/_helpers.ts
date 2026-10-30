@@ -23,6 +23,7 @@ import type {
   ResolveRequest,
 } from '../../src/connections/registry-types';
 import { AgentHarness } from '../../src/harness/agent-harness';
+import { setHarnessInternals } from '../../src/util/harness-internals';
 
 //#region Types
 
@@ -173,7 +174,7 @@ export class FakeRegistry implements ConnectionRegistry {
   async releaseScope(): Promise<void> {}
   async releaseRun(): Promise<void> {}
 
-  /** Names `harness.resume(id, { rerun })` let run live again. */
+  /** Names `harness.restore(id, { rerun })` let run live again. */
   readonly reruns = new Set<string>();
 
   rerunAllowed(_executionId: string, name: string): boolean {
@@ -316,9 +317,9 @@ export function harnessWith(
     params: {},
   });
   if (registry) {
-    frameworkCast<{
-      connectionRegistry?: ConnectionRegistry;
-    }>(harness).connectionRegistry = registry;
+    setHarnessInternals(harness, {
+      connectionRegistry: registry,
+    });
   }
   return harness;
 }

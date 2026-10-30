@@ -1883,8 +1883,15 @@ Subscribe to streams before the first `execute()` if you want to observe the ver
 // Manual context creation + run() (bypasses the session queue)
 const ctx = harness.createContext({ threadId: 'thread-1' });
 const runResult = await harness.run(step, input, ctx);
-// An array of steps runs in sequence, each output the next one's input
+// An array of steps runs in sequence, each output the next one's input,
+// everywhere a step goes (agentGraph, spawn/withContext child, schedule body,
+// inParallel paths, conditional picks, around/act). There is no step.sequence.
+// The output is typed from the last step, the input from the first.
 const lastOutput = await harness.run([stepA, stepB], input, ctx);
+
+// When the host is done: stops triggers, releases connections and pool leases,
+// closes ACP sessions.
+await harness.close();
 
 // Background execution (inherits parent's threadId by default)
 const handle = harness.detachedSpawn(step, input, ctx);
@@ -2887,7 +2894,7 @@ const harness = new AgentHarness({
 
 `mcp(config, options?)`: `config` is a command line string, `{ command, args?, env?, cwd? }`, `{ url, headers?, protocol? }`, or `{ transport }`; options `webhooks: { receiver }`, `profiles`, `extensions`, `timeoutMs` (1e4), `requestTimeoutMs`, `pollIntervalMs`.
 
-Harness methods: `start()` (connects providers, starts triggers; implicit on first `execute`/`run`), `getConnectionStatus(name?)`, `getRunArtifacts(executionId)`, `resume(executionId, { rerun?: ['app'] })`, `closeConnections()`.
+Harness methods: `start()` (connects providers, starts triggers; implicit on first `execute`/`run`), `getConnectionStatus(name?)`, `artifacts.listRun(executionId)`, `restore(executionId, { rerun?: ['app'] })`, `close()` (also closes ACP sessions).
 
 ### Handles and steps
 

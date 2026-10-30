@@ -1,6 +1,6 @@
 // Resuming a run against connections (spec 35 § Durability), end to end through
 // the real AgentHarness, registry and durable ledger: a replaced connection
-// discards the ledger from the first step that used it, `harness.resume(id,
+// discards the ledger from the first step that used it, `harness.restore(id,
 // { rerun })` lets an unsafe one run live, an undeclared determinism is unsafe,
 // and a call whose long operation already started waits on that task.
 
@@ -12,10 +12,16 @@ import { loop } from '../../src/builders/loop-builder';
 import { step } from '../../src/builders/step-builders';
 import type { InMemoryConnectionProvider } from '../../src/connections/in-memory-connection';
 import { createInMemoryConnection } from '../../src/connections/in-memory-connection';
+import type { ConnectionRuntime } from '../../src/connections/registry';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { createCheckpointStore } from '../../src/runtime/durable/checkpoint-store';
 import { createInMemoryStorage } from '../../src/runtime/in-memory-storage';
 import { until } from '../../src/until/predicates';
+import { harnessInternal } from '../../src/util/harness-internals';
+
+function registryOf(harness: object): ConnectionRuntime | undefined {
+  return harnessInternal<ConnectionRuntime>(harness, 'connectionRegistry');
+}
 
 //#region Helpers
 
@@ -123,7 +129,7 @@ async function interrupted(
   const harness = harnessFor(storage, provider);
   const ctx = harness.createContext();
   await harness.run(sequence(), '', ctx).catch(() => undefined);
-  await harness.closeConnections();
+  await harness.close();
   rig.failTap = false;
   return ctx.id;
 }
@@ -168,7 +174,7 @@ describe('resuming against connections', () => {
     expect(rig.calls).toEqual([
       'one:ui.tap',
     ]);
-    await harness.closeConnections();
+    await harness.close();
   });
 
   test("a replaced 'free' connection discards the ledger from its first use: ui.fill runs live again", async () => {
@@ -185,7 +191,7 @@ describe('resuming against connections', () => {
       'two:ui.tap',
     ]);
     expect(rig.resets).toEqual([]);
-    await harness.closeConnections();
+    await harness.close();
   });
 
   test("a replaced 'costly' connection is reset once before running live", async () => {
@@ -204,7 +210,7 @@ describe('resuming against connections', () => {
       'two:ui.fill',
       'two:ui.tap',
     ]);
-    await harness.closeConnections();
+    await harness.close();
   });
 
   test('a replaced connection that declares no determinism is unsafe: refused, nothing sent', async () => {
@@ -218,10 +224,10 @@ describe('resuming against connections', () => {
     const e = await rejected(harness.run(sequence(), '', ctx));
     expect(rootKind(e)).toBe('connection_resume_refused');
     expect(rig.calls).toEqual([]);
-    await harness.closeConnections();
+    await harness.close();
   });
 
-  test("harness.resume(id, { rerun }) lets a replaced 'unsafe' connection run live from the discarded point", async () => {
+  test("harness.restore(id, { rerun }) lets a replaced 'unsafe' connection run live from the discarded point", async () => {
     const rig = newRig();
     const storage = createInMemoryStorage();
     const id = await interrupted(storage, rig, app(rig, 'one', 'unsafe'));
@@ -231,7 +237,7 @@ describe('resuming against connections', () => {
     expect(rootKind(await rejected(harness.run(sequence(), '', refused)))).toBe(
       'connection_resume_refused',
     );
-    const ctx = await harness.resume(id, {
+    const ctx = await harness.restore(id, {
       rerun: [
         'app',
       ],
@@ -243,7 +249,7 @@ describe('resuming against connections', () => {
       'two:ui.fill',
       'two:ui.tap',
     ]);
-    await harness.closeConnections();
+    await harness.close();
   });
 });
 
@@ -268,7 +274,7 @@ describe('resuming a long operation', () => {
     });
     const storage = createInMemoryStorage();
     const harness = harnessFor(storage, provider);
-    const resolved = await harness.connectionRegistry?.resolve({
+    const resolved = await registryOf(harness)?.resolve({
       name: 'app',
       scope: {
         executionId: 'exec',
@@ -295,6 +301,6 @@ describe('resuming a long operation', () => {
     expect(output).toBe('installed');
     expect(provider.connection.calls).toHaveLength(1);
     expect(sent).toBe(1);
-    await harness.closeConnections();
+    await harness.close();
   });
 });

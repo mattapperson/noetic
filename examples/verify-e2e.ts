@@ -89,11 +89,11 @@ async function checkout(orders: boolean): Promise<string> {
     );
     const runItem = ctx.itemLog.items.find((item) => item.type === 'noetic:verification_run');
     assert(runItem, 'the verify step emits a noetic:verification_run item');
-    const artifacts = await harness.getRunArtifacts(ctx.id);
+    const artifacts = await harness.artifacts.listRun(ctx.id);
     assert(artifacts.length > 0, 'the verification run is stored as a run artifact');
     return output.outcome;
   } finally {
-    await harness.closeConnections();
+    await harness.close();
   }
 }
 

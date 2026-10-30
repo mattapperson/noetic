@@ -7,7 +7,7 @@
  */
 
 import { join } from 'node:path';
-import type { SecretResolver } from '@noetic-tools/core';
+import type { ContextData, SecretResolver, Step } from '@noetic-tools/core';
 import { AgentHarness, callModel, connection, secret, step } from '@noetic-tools/core';
 import { mcp } from '@noetic-tools/mcp';
 import { z } from 'zod';
@@ -73,7 +73,7 @@ function serverLog(path: string): ServerCall[] {
   return readServerLog(path);
 }
 
-type AnyStep = Exclude<Parameters<AgentHarness['run']>[0], ReadonlyArray<unknown>>;
+type AnyStep = Step<ContextData, unknown, unknown>;
 
 /** The spec's `const login = [...]` handed to `harness.run`, which the types refuse. */
 function frameworkArray(steps: ReadonlyArray<unknown>): AnyStep {
@@ -348,7 +348,7 @@ await section('steps against a stdio ui@1 server', async () => {
       show(unknownConn),
     );
   } finally {
-    await harness.closeConnections();
+    await harness.close();
   }
 });
 
@@ -411,7 +411,7 @@ await section('secrets through a server that publishes text as sensitive itself'
         !JSON.stringify(ctx.itemLog.items).includes(b64),
     );
   } finally {
-    await harness.closeConnections();
+    await harness.close();
   }
 });
 
@@ -449,7 +449,7 @@ await section('the same server without a profile catalog (spec 35 quick start)',
     );
     check('step.call works without the catalog', out.ok, show(out));
   } finally {
-    await harness.closeConnections();
+    await harness.close();
   }
 });
 
@@ -567,7 +567,7 @@ await section('model-exposed tools with a scripted model', async () => {
     );
   } finally {
     model.stop();
-    await harness.closeConnections();
+    await harness.close();
   }
 });
 
@@ -606,7 +606,7 @@ await section('two connections offering ui@1 share one tool with a target argume
     check('the merged tool has a target argument', raw.includes('"target"'), '');
   } finally {
     model.stop();
-    await harness.closeConnections();
+    await harness.close();
   }
 });
 
@@ -656,7 +656,7 @@ await section('a server that contradicts its declaration is unavailable', async 
       show(call),
     );
   } finally {
-    await harness.closeConnections();
+    await harness.close();
   }
 });
 
@@ -770,7 +770,7 @@ await section('policy gates and secrets sent by the model', async () => {
     );
   } finally {
     model.stop();
-    await harness.closeConnections();
+    await harness.close();
   }
 });
 

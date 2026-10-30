@@ -30,6 +30,7 @@ import type {
 } from '@noetic-tools/types';
 import { frameworkCast } from '@noetic-tools/types';
 import { z } from 'zod';
+import { harnessInternal } from '../util/harness-internals';
 import { toolIdempotencyKey } from './durability';
 import { deniedError, toolCollisionError } from './errors';
 import { matchesAnyGlob } from './glob';
@@ -85,9 +86,6 @@ const ANY_OBJECT_INPUT: ToolInput = {
 
 const ANY_OUTPUT = z.unknown();
 
-/** The internal property the harness exposes its registry on. */
-const RUNTIME_PROPERTY = 'connectionRegistry';
-
 function sanitize(name: string): string {
   return name.replace(/[^A-Za-z0-9_-]/g, '_');
 }
@@ -103,12 +101,7 @@ function toolContext(toolCtx: unknown): ToolExecutionContext {
 
 /** The registry a harness exposes, if it has one. */
 export function runtimeOf(harness: unknown): ConnectionRuntime | undefined {
-  if (typeof harness !== 'object' || harness === null || !(RUNTIME_PROPERTY in harness)) {
-    return undefined;
-  }
-  return frameworkCast<{
-    connectionRegistry?: ConnectionRuntime;
-  }>(harness).connectionRegistry;
+  return harnessInternal<ConnectionRuntime>(harness, 'connectionRegistry');
 }
 
 /** FNV-1a over `text`, as 8 hex digits: a short, stable digest. */

@@ -22,7 +22,31 @@ type Step<I, O> =
   | { kind: 'spawn';   id: string; child: Step<I, O>; context?: ContextLayer[]; timeout?: number; subprocess?: SubprocessAdapter }
   | { kind: 'withContext'; id: string; child: Step<I, O>; context: ContextConfig | ContextLayer[] }
   | { kind: 'loop';    id: string; steps: ReadonlyArray<Step<I, O>>; until: Until | StepDecide; maxIterations?: number; maxHistorySize?: number; prepareNext?: (output: O, verdict: Verdict, ctx: Context) => I; onError?: (error: NoeticError, ctx: Context) => 'retry' | 'skip' | 'abort' }
+  | { kind: 'sequence'; id: string; steps: ReadonlyArray<Step<I, O>> }
 ```
+
+### Arrays of steps
+
+An array of steps runs in sequence, each step's output the next one's input,
+everywhere Noetic takes a step: `harness.run` and `ctx.harness.run`, a
+harness's `agentGraph`, `spawn` and `withContext` children, `schedule` bodies,
+each `inParallel` path, a `conditional` route's pick, a wait's `around` and a
+verify's `act`. There is no `step.sequence` builder. The builders turn an
+array of two or more steps into a `sequence` step (one step is itself; an
+empty array is `EMPTY_STEP_ARRAY`), whose id joins its children's ids with
+` > `. The interpreter runs each child as its own step, with its own ledger
+path, events and gates. Tree walks (tool collection, custom items, connection
+needs, the optimizer) see through it: the optimizer gives a sequence's
+children the paths they would have as siblings.
+
+`Step` is invariant in `I` and `O`, so an array is typed by its elements
+rather than by one `Step<I, O>`: `StepArray` is a non-empty tuple of
+`StepLike`, `StepArrayInput<T>` is the first step's input and
+`StepArrayOutput<T>` the last step's output. `run` infers both, so
+`harness.run([parse, count], text, ctx)` takes what `parse` takes and gives
+what `count` gives. Where a builder's own type parameters fix `I` and `O`
+(`spawn<C, I, O>({ child: [...] })`), the array's steps are not checked
+against them.
 
 Every variant also carries the replay controls from `StepReplay`, omitted above for width:
 

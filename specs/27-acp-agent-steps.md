@@ -273,7 +273,7 @@ names the scope, and it defaults to closing with the step:
 |---|---|
 | `'step'` (default) | closed when the step finishes |
 | `'run'` | kept for the rest of the root run, then closed by the harness |
-| `'harness'` | kept until the caller runs `harness.closeAcpSessions()` — nothing closes it for you |
+| `'harness'` | kept until the caller runs `harness.closeAcpSessions()` or `harness.close()` — nothing closes it for you |
 
 `session.reuse` shares a kept connection under an id, so later steps take their
 turns against the same agent. It requires `keepAlive: 'run'` or `'harness'`: a

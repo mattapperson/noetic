@@ -1,5 +1,4 @@
 import type {
-  ArtifactRecord,
   ArtifactStore,
   ConnectionStatus,
   ConnectionsConfig,
@@ -13,6 +12,7 @@ import {
   NoeticConfigError,
 } from '@noetic-tools/types';
 import type { Verifier } from '@noetic-tools/types/verify';
+import { toStep } from '../builders/sequence';
 import type { HarnessConnections } from '../connections/harness-wiring';
 import { createHarnessConnections } from '../connections/harness-wiring';
 import type { ConnectionRuntime } from '../connections/registry';
@@ -21,6 +21,7 @@ import { SpanImpl } from '../observability/span-impl';
 import { NoopExporter } from '../observability/trace-exporter';
 import { AcpSessionStore } from '../runtime/acp-session-store';
 import { createInMemoryArtifactStore } from '../runtime/in-memory-artifact-store';
+import { setHarnessInternals } from '../util/harness-internals';
 import { callDecide } from './decide-call';
 import {
   createInMemoryFsAdapter,
@@ -160,6 +161,10 @@ import type {
   SteeringDecision,
   SteerVerdict,
   Step,
+  StepArray,
+  StepArrayInput,
+  StepArrayOutput,
+  Steps,
   StorageAdapter,
   StreamEvent,
   StreamingItem,
@@ -246,7 +251,7 @@ interface AgentHarnessOpts<
    * it declares (a `workflow()` step's brand) type `getItemStream`, `getFullStream`,
    * and `getAgentResponse` (spec 34).
    */
-  agentGraph?: Step<ContextData, string, string> & CustomItemsBrand<TItem>;
+  agentGraph?: Steps<ContextData, string, string> & CustomItemsBrand<TItem>;
   /** Default context layers applied to every context created via `createContext()` / `execute()`. */
   contextLayers?: ContextLayer[];
   /**
@@ -568,32 +573,6 @@ function resolveCheckpointStore(
 
 //#region AgentHarness
 
-/** Whether `run` was given an array of steps rather than one step. */
-function isStepArray(value: unknown): value is ReadonlyArray<Step<ContextData, never, unknown>> {
-  return Array.isArray(value);
-}
-
-/**
- * An array of steps as one step: each runs in turn on the same context, its
- * output the next one's input. Every child is dispatched by the harness, so it
- * gets its own ledger path, events and gates.
- */
-function stepSequence<I, O>(
-  steps: ReadonlyArray<Step<ContextData, unknown, unknown>>,
-): Step<ContextData, I, O> {
-  return frameworkCast<Step<ContextData, I, O>>({
-    kind: 'runCode',
-    id: 'sequence',
-    execute: async (input: unknown, ctx: Context): Promise<unknown> => {
-      let current = input;
-      for (const child of steps) {
-        current = await ctx.harness.run(child, current, ctx);
-      }
-      return current;
-    },
-  } satisfies Step<ContextData, unknown, unknown>);
-}
-
 /**
  * Default agent harness for executing agent steps with built-in channel, context, and trace support.
  * Provides channel store, context layer lifecycle, and trace export with no external dependencies.
@@ -689,13 +668,12 @@ export class AgentHarness<
   readonly drains = new Drains();
   /** Where binary content is stored: `environment.artifacts`, else an in-memory store. */
   readonly artifacts: ArtifactStore;
-  /** The verifier `step.verify` uses, when one is configured. */
-  readonly verifier?: Verifier;
-  /** @internal The connection registry steps and tools resolve connections through. */
-  readonly connectionRegistry?: ConnectionRuntime;
-  /** @internal Secret resolver for connection calls. */
-  readonly secrets?: SecretResolver;
-  private readonly connections?: HarnessConnections;
+  // Connection state lives in true private fields: anything holding `ctx.harness`
+  // must not reach the registry or the secret resolver (spec 35 § Gates, § Secrets).
+  // Core modules read the registry and verifier through `harnessInternal`.
+  readonly #connections?: HarnessConnections;
+  /** Roots whose connection needs are already registered or checked. */
+  readonly #negotiatedRoots = new WeakSet<object>();
 
   /**
    * Snapshot of every live ACP sub-agent, for a UI that wants to show what is
@@ -809,7 +787,7 @@ export class AgentHarness<
     this.spend = this.checkpointStore
       ? this.createSpend(this.config.storage ?? createInMemoryStorage())
       : undefined;
-    this.agentGraph = opts.agentGraph;
+    this.agentGraph = opts.agentGraph ? toStep(opts.agentGraph) : undefined;
     this.harnessTools = opts.tools ?? [];
     this._contextLayers = opts.contextLayers;
     this.callModelOverride = opts._testCallModel;
@@ -838,8 +816,8 @@ export class AgentHarness<
       strictUnknownExtensions: opts.itemSchemas?.strict ?? true,
     }).extend({
       items: customItemGates([
-        ...(opts.agentGraph
-          ? collectCustomItems(frameworkCast<Step>(opts.agentGraph)).map((item) => item.type)
+        ...(this.agentGraph
+          ? collectCustomItems(frameworkCast<Step>(this.agentGraph)).map((item) => item.type)
           : []),
         ...(opts.triggers && opts.triggers.length > 0
           ? [
@@ -852,23 +830,26 @@ export class AgentHarness<
       cwd: opts.initialCwd ?? '/',
     };
     this.artifacts = environment?.artifacts ?? createInMemoryArtifactStore();
-    this.verifier = opts.verification;
-    this.secrets = environment?.secrets;
     if (opts.connections || (opts.triggers && opts.triggers.length > 0)) {
-      this.connections = createHarnessConnections({
+      this.#connections = createHarnessConnections({
         harness: this,
         connections: opts.connections,
         triggers: opts.triggers,
         storage: this.config.storage ?? createInMemoryStorage(),
         artifacts: this.artifacts,
-        secrets: this.secrets,
+        secrets: environment?.secrets,
         broadcasters: () =>
           [
             ...this.sessions.values(),
           ].map((session) => session.runner.broadcaster),
       });
-      this.connectionRegistry = this.connections.registry;
-      this.registerGraphNeeds(this.connections.registry);
+    }
+    setHarnessInternals(this, {
+      connectionRegistry: this.#connections?.registry,
+      verifier: opts.verification,
+    });
+    if (this.#connections) {
+      this.registerGraphNeeds(this.#connections.registry);
     }
   }
 
@@ -882,6 +863,7 @@ export class AgentHarness<
     if (!this.agentGraph) {
       return;
     }
+    this.#negotiatedRoots.add(this.agentGraph);
     const known = new Set(registry.names());
     for (const need of graphConnectionNeeds(frameworkCast<Step>(this.agentGraph))) {
       if (need.profile) {
@@ -894,13 +876,39 @@ export class AgentHarness<
   }
 
   /**
+   * Negotiates a `run()` root that is not the agent graph, once per root, after
+   * the providers have connected: registers its handles' profiles and checks its
+   * requirements against each connection's manifest, so a root that needs more
+   * than a connection offers fails before it executes, as a document does
+   * (spec 35 § Negotiation).
+   *
+   * @throws `NoeticConfigError` `CONNECTION_UNSATISFIED` when a connection falls short.
+   */
+  private negotiateRoot(root: Step): void {
+    const registry = this.#connections?.registry;
+    if (!registry || this.#negotiatedRoots.has(root)) {
+      return;
+    }
+    const known = new Set(registry.names());
+    for (const need of graphConnectionNeeds(root)) {
+      if (need.profile) {
+        registry.registerProfile(need.profile);
+      }
+      if (known.has(need.name)) {
+        registry.check(need.name, need.requirement);
+      }
+    }
+    this.#negotiatedRoots.add(root);
+  }
+
+  /**
    * Connects every connection provider and starts triggers. The first `execute()`
    * or `run()` calls it; call it yourself for a harness that only reacts to
    * triggers. Idempotent.
    * @public
    */
   async start(): Promise<void> {
-    await this.connections?.start();
+    await this.#connections?.start();
   }
 
   /**
@@ -908,40 +916,19 @@ export class AgentHarness<
    * @public
    */
   getConnectionStatus(name?: string): ReadonlyArray<ConnectionStatus> {
-    return this.connectionRegistry?.status(name) ?? [];
+    return this.#connections?.registry.status(name) ?? [];
   }
 
   /**
-   * A run's artifact manifest (spec 08 § Artifact Store).
+   * Shuts down everything the harness holds open: stops triggers, releases
+   * every connection and pool lease, and closes every ACP session. Call it when
+   * the host is done with the harness; anything left open can keep the process
+   * alive. Idempotent.
    * @public
    */
-  getRunArtifacts(executionId: string): Promise<ReadonlyArray<ArtifactRecord>> {
-    return this.artifacts.listRun(executionId);
-  }
-
-  /**
-   * Restores an execution like `restore()`, letting it drive the connections in
-   * `rerun` again live even though they were replaced (spec 35 § Durability).
-   * @public
-   */
-  async resume(
-    executionId: string,
-    options: {
-      readonly rerun?: ReadonlyArray<string>;
-    } & RestoreCheckpointOptions = {},
-  ): Promise<Context | null> {
-    const { rerun, ...restoreOptions } = options;
-    this.connectionRegistry?.allowRerun(executionId, rerun ?? []);
-    await this.start();
-    return this.restore(executionId, restoreOptions);
-  }
-
-  /**
-   * Stops triggers and releases every connection and pool lease. Idempotent.
-   * @public
-   */
-  async closeConnections(): Promise<void> {
-    await this.connections?.close();
+  async close(): Promise<void> {
+    await this.#connections?.close();
+    await this.closeAcpSessions();
   }
 
   /**
@@ -1212,7 +1199,7 @@ export class AgentHarness<
             });
           frameworkCast<Context & SessionCtxExtension>(ctx)._sessionQueue = session.runner.queue;
           await this.start();
-          const connectionTools = this.connections?.tools() ?? [];
+          const connectionTools = this.#connections?.tools() ?? [];
           if (this.agentGraph || this.harnessTools.length > 0 || connectionTools.length > 0) {
             const stepTools = this.agentGraph ? collectAllTools(this.agentGraph) : [];
             this.setUnifiedTools(ctx, [
@@ -1366,18 +1353,15 @@ export class AgentHarness<
    * Runs a step — or an array of steps in sequence, each output the next one's
    * input (an array runs its steps in sequence everywhere in Noetic).
    */
-  async run<I, O>(
-    s: Step<ContextData, I, O> | ReadonlyArray<Step<ContextData, never, unknown>>,
-    input: I,
+  run<I, O>(step: Step<ContextData, I, O>, input: I, ctx: Context): Promise<O>;
+  run<const T extends StepArray>(
+    steps: T,
+    input: StepArrayInput<T>,
     ctx: Context,
-  ): Promise<O> {
-    // Each step of an array takes whatever the one before it gave.
-    const steps: ReadonlyArray<Step<ContextData, unknown, unknown>> = isStepArray(s)
-      ? frameworkCast<ReadonlyArray<Step<ContextData, unknown, unknown>>>(s)
-      : [
-          frameworkCast<Step<ContextData, unknown, unknown>>(s),
-        ];
-    if (steps.some((child) => this.lacksModelFor(child))) {
+  ): Promise<StepArrayOutput<T>>;
+  async run<I, O>(s: Steps<ContextData, I, O>, input: I, ctx: Context): Promise<O> {
+    const root = toStep<ContextData, I, O>(s);
+    if (this.lacksModelFor(root)) {
       throw noLlmProviderError();
     }
     // Populate the unified tool pool when an embedder drives a step directly on
@@ -1385,18 +1369,18 @@ export class AgentHarness<
     // Without it, steps that resolve tools dynamically from `ctx.unifiedTools`
     // — and any sub-agents spawned from them — would see no tools.
     await this.start();
+    this.negotiateRoot(frameworkCast<Step>(root));
     if (!ctx.unifiedTools) {
       this.setUnifiedTools(ctx, [
-        ...steps.flatMap((child) => collectAllTools(child)),
+        ...collectAllTools(root),
         ...this.harnessTools,
-        ...(this.connections?.tools() ?? []),
+        ...(this.#connections?.tools() ?? []),
       ]);
     }
     // Hydrate/recall/persist context on the bare `run()` path too (issue #48):
     // configuring `context` + `storage` must "just work" without going through
     // `execute()`/`seedSessionHistory`. Idempotent — see `ensureLayersInit`.
     await this.ensureLayersInit(ctx);
-    const root = isStepArray(s) ? stepSequence<I, O>(steps) : s;
     return this.executeClosingChannels(root, input, ctx);
   }
 
@@ -1471,9 +1455,9 @@ export class AgentHarness<
           // A failed run keeps its pool leases, unrenewed, so a resume within the
           // reclaim window gets the same connections back and an abandoned one
           // frees them (spec 35 § Pools and leases).
-          this.connectionRegistry?.orphanRun?.(ctx.id);
+          this.#connections?.registry.orphanRun?.(ctx.id);
         } else {
-          await this.connectionRegistry?.releaseRun(ctx.id);
+          await this.#connections?.registry.releaseRun(ctx.id);
           await this.endDurableRun(ctx);
         }
       }
@@ -1508,7 +1492,7 @@ export class AgentHarness<
    * @throws NoeticErrorImpl `connection_resume_refused` when a replaced connection is unsafe to drive again.
    */
   private async reconcileConnections(ctx: Context): Promise<void> {
-    const registry = this.connectionRegistry;
+    const registry = this.#connections?.registry;
     if (!registry || !(ctx instanceof ContextImpl) || !ctx.ledger) {
       return;
     }
@@ -1627,7 +1611,7 @@ export class AgentHarness<
     // dropped from `rest` rather than spread through under the wrong name.
     const { contextLayers, extraContextLayers, cwdInit, ...rest } = resolved;
     const configuredLayers = contextLayers ?? this._contextLayers;
-    const views = this.connections?.views ?? [];
+    const views = this.#connections?.views ?? [];
     const baseLayers =
       views.length > 0
         ? [
@@ -1991,8 +1975,23 @@ export class AgentHarness<
    * Paid calls the interrupted run left with no settled bill are held on the
    * returned context (`heldCost`) and reconciled in the background.
    */
-  async restore(executionId: string, opts?: RestoreCheckpointOptions): Promise<Context | null> {
-    const restored = await restoreFromCheckpoint(this, executionId, opts);
+  async restore(
+    executionId: string,
+    opts?: RestoreCheckpointOptions & {
+      /**
+       * Connections the restored run may drive again live although they were
+       * replaced since it stopped — the way past `connection_resume_refused` for
+       * a connection whose determinism is `unsafe` (spec 35 § Durability).
+       * Applies to this restore only; it ends when the run does.
+       */
+      readonly rerun?: ReadonlyArray<string>;
+    },
+  ): Promise<Context | null> {
+    const { rerun, ...restoreOptions } = opts ?? {};
+    if (rerun && rerun.length > 0) {
+      this.#connections?.registry.allowRerun(executionId, rerun);
+    }
+    const restored = await restoreFromCheckpoint(this, executionId, restoreOptions);
     if (!restored) {
       return null;
     }

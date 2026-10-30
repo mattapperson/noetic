@@ -266,7 +266,75 @@ export type Step<TContext = ContextData, I = unknown, O = unknown> =
   | StepSchedule<TContext, I, O>
   | StepCall<TContext, I, O>
   | StepWait<TContext, I, O>
-  | StepVerify<TContext, I, O>;
+  | StepVerify<TContext, I, O>
+  | StepSequence<TContext, I, O>;
+
+/**
+ * Any step, whatever its input and output types: what an array of steps holds.
+ * `Step` is invariant in both, so no single `Step<…>` accepts steps of
+ * different types; an array's types are inferred from its elements instead
+ * (`StepArrayInput`, `StepArrayOutput`).
+ * @public
+ */
+export interface StepLike {
+  readonly kind: Step['kind'];
+  readonly id: string;
+}
+
+/**
+ * An array of steps run in sequence, each step's output the next one's input.
+ * An array runs in sequence everywhere Noetic takes a step, so there is no
+ * `step.sequence`.
+ * @public
+ */
+export type StepArray = readonly [
+  StepLike,
+  ...ReadonlyArray<StepLike>,
+];
+
+/** @public A step's input type. */
+export type StepInput<S> = S extends Step<infer _C, infer I, infer _O> ? I : never;
+
+/** @public A step's output type. */
+export type StepOutput<S> = S extends Step<infer _C, infer _I, infer O> ? O : never;
+
+/** @public An array of steps' input: its first step's. */
+export type StepArrayInput<T extends StepArray> = StepInput<T[0]>;
+
+/** @public An array of steps' output: its last step's. */
+export type StepArrayOutput<T extends StepArray> = T extends readonly [
+  ...ReadonlyArray<StepLike>,
+  infer Last,
+]
+  ? StepOutput<Last>
+  : never;
+
+/**
+ * @public A step, or an array of steps run in sequence. Where a builder's own
+ * type parameters fix `I` and `O`, an array's steps are not checked against them.
+ */
+export type Steps<TContext = ContextData, I = unknown, O = unknown> =
+  | Step<TContext, I, O>
+  | StepArray;
+
+/**
+ * Steps run in sequence: what an array of steps becomes wherever Noetic takes a
+ * step. Each child runs through the interpreter with its own ledger path, events
+ * and gates; each output is the next child's input.
+ * @public
+ */
+export interface StepSequence<TContext = ContextData, I = unknown, O = unknown>
+  extends StepReplay<TContext, I>,
+    StepEmitItems<TContext, I, O> {
+  kind: 'sequence';
+  id: string;
+  /**
+   * The steps, in order; at least two. Typed like a loop's steps: each child's
+   * own input and output types are checked where the array is written
+   * (`StepArray`), not here.
+   */
+  steps: ReadonlyArray<Step<TContext, I, O>>;
+}
 
 /** @public A `runCode` body: async, or a generator that yields item events before returning. */
 export type RunCodeExecute<TContext = ContextData, I = unknown, O = unknown> = (

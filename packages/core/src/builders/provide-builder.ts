@@ -1,13 +1,15 @@
 import type { ContextConfig, ContextData, ContextLayer } from '@noetic-tools/context';
-import type { Step, StepEmitItems, StepReplay, StepWithContext } from '@noetic-tools/types';
+import type { StepEmitItems, StepReplay, Steps, StepWithContext } from '@noetic-tools/types';
 import { NoeticConfigError } from '@noetic-tools/types';
 import { getDefaultRegistrar } from '../types/step-registrar';
+import { toStep } from './sequence';
 
 export interface WithContextOpts<TContext, I, O>
   extends StepReplay<TContext, I>,
     StepEmitItems<TContext, I, O> {
   id: string;
-  child: Step<TContext, I, O>;
+  /** The child step, or an array of steps run in sequence. */
+  child: Steps<TContext, I, O>;
   context: ContextConfig | ContextLayer[];
 }
 
@@ -53,7 +55,7 @@ export function withContext<TContext = ContextData, I = unknown, O = unknown>(
   const built: StepWithContext<TContext, I, O> = {
     kind: 'withContext',
     id: opts.id,
-    child: opts.child,
+    child: toStep(opts.child),
     context: layers,
     durable: opts.durable,
     replayKey: opts.replayKey,
