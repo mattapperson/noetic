@@ -1,3 +1,7 @@
+## @noetic-tools/openui-v2.2.1 (2026-10-30)
+
+* ci: publish prereleases from next to the next dist-tag (#152) ([0b247bc](https://github.com/mattapperson/noetic/commit/0b247bc)), closes [#152](https://github.com/mattapperson/noetic/issues/152)
+
 ## @noetic-tools/openui-v2.2.1-next.1 (2026-10-29)
 
 * ci: publish prereleases from next to the next dist-tag ([5c9f714](https://github.com/mattapperson/noetic/commit/5c9f714))
