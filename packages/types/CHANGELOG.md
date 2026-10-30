@@ -1,3 +1,9 @@
+## @noetic-tools/types-v3.18.0-next.1 (2026-10-30)
+
+* fix: close the harness review gaps and pass the structural gate ([a8d710b](https://github.com/mattapperson/noetic/commit/a8d710b))
+* feat: implement connections, profiles and verification ([7237309](https://github.com/mattapperson/noetic/commit/7237309))
+* feat(core): tighten the harness API for connections and step arrays ([a417a35](https://github.com/mattapperson/noetic/commit/a417a35))
+
 ## @noetic-tools/types-v3.17.1-next.1 (2026-10-29)
 
 * ci: publish prereleases from next to the next dist-tag ([5c9f714](https://github.com/mattapperson/noetic/commit/5c9f714))
