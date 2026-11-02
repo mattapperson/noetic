@@ -6,9 +6,8 @@
  * does. Nothing here knows how a Noetic tool executes.
  */
 
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import type { CallToolResult, Tool } from '@modelcontextprotocol/sdk/types.js';
-import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import type { CallToolResult, Tool } from '@modelcontextprotocol/server';
+import { Server } from '@modelcontextprotocol/server';
 import type { AcpTool, AcpToolHost } from '@noetic-tools/types';
 
 //#region Agent hints
@@ -55,7 +54,7 @@ function toMcpTool(tool: AcpTool): Tool {
   };
 }
 
-/** @public The agent's id for a call, read from the MCP request `_meta`. */
+/** The agent's id for a call, read from the MCP request `_meta`. */
 export function agentCallIdOf(meta: Record<string, unknown> | undefined): string | undefined {
   if (!meta) {
     return undefined;
@@ -88,7 +87,6 @@ function textResult(output: string, isError: boolean): CallToolResult {
 /**
  * Build an MCP server over the tool host. `getHost` is read on every request,
  * so a host rebound between turns takes effect without reconnecting.
- * @public
  */
 export function createToolServer(getHost: () => AcpToolHost | undefined): Server {
   const server = new Server(
@@ -103,11 +101,11 @@ export function createToolServer(getHost: () => AcpToolHost | undefined): Server
     },
   );
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+  server.setRequestHandler('tools/list', async () => ({
     tools: (getHost()?.tools ?? []).map(toMcpTool),
   }));
 
-  server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
+  server.setRequestHandler('tools/call', async (request, ctx) => {
     const host = getHost();
     if (!host) {
       return textResult(`Error: unknown tool '${request.params.name}'`, true);
@@ -116,7 +114,7 @@ export function createToolServer(getHost: () => AcpToolHost | undefined): Server
       name: request.params.name,
       args: request.params.arguments ?? {},
       agentCallId: agentCallIdOf(request.params._meta),
-      signal: extra.signal,
+      signal: ctx.mcpReq.signal,
     });
     return textResult(result.output, result.isError);
   });

@@ -19,9 +19,8 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 ## Packages
 
 ```
-@noetic-tools/context  →  @noetic-tools/types  ←  @noetic-tools/acp  →  @noetic-tools/mcp
-        ↑                        ↑     ↖── @noetic-tools/agent-plugins     │
-        ↑                        ↑ ←─────────────────────────────────────────┘
+@noetic-tools/context  →  @noetic-tools/types  ←  @noetic-tools/acp
+        ↑                        ↑     ↖── @noetic-tools/agent-plugins
         ↑                        ↑
 @noetic-tools/core  ←  @noetic-tools/eval
       ↑
@@ -42,8 +41,6 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 - **`@noetic/platform-browser`** — Browser / edge-runtime glue: runtime-neutral adapter re-exports. Contains no `node:*` imports. See `25-platform-packages`.
 
 - **`@noetic-tools/acp`** — Both directions of the Agent Client Protocol. The client side lets any ACP-speaking coding agent (Claude Code, Codex, Gemini CLI, …) run as a Noetic step: the protocol library, capability negotiation, the session/turn drivers, the client-side `fs/*` + `terminal/*` + permission handlers backed by Noetic's own adapters, the transports (stdio, loopback), and the agent presets (`27-acp-agent-steps`). The server side (`toAcpAgent()`, `serveAcp()` at `./server`) exposes an `AgentHarness` *as* an ACP agent so editors like Zed can drive it (`30-acp-server`). Depends only on `@noetic-tools/types` — never on `@noetic-tools/core`.
-
-- **`@noetic-tools/mcp`** — Serves Noetic tools over the Model Context Protocol so an ACP agent can call a step's tools: the MCP server over an `AcpToolHost`, and the loopback streamable-HTTP transport at `./node`. Depends only on `@noetic-tools/types`; `@noetic-tools/acp` imports it, and core never does. With `@noetic-tools/agent-plugins`, the only packages that depend on the MCP SDK. See `36-acp-tools`.
 
 - **`@noetic-tools/agent-plugins`** — An [Agent Plugins](https://agent-plugins.org) v1 client: discovers plugin packages (a closed `plugin.json` manifest plus the two portable component types, Agent Skills and MCP servers) and exposes them through the `agentPlugins()` context layer using the spec's progressive disclosure model. The only package permitted to depend on the MCP SDK. Depends on `@noetic-tools/types` — never on `@noetic-tools/core` or `@noetic-tools/context`. See `30-agent-plugins`.
 

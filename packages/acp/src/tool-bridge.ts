@@ -74,7 +74,7 @@ export async function startToolBridge(opts: {
   mcpServers: ReadonlyArray<AcpMcpServer>;
   env?: Record<string, string | undefined>;
 }): Promise<ToolBridge> {
-  const { serveToolsOverHttp } = await import('@noetic-tools/mcp/node');
+  const { serveToolsOverHttp } = await import('./mcp/node');
   const http = await serveToolsOverHttp(opts.getHost);
   const bridge: ToolBridgeAddress = {
     serverName: opts.serverName,

@@ -51,7 +51,7 @@
     "access": "public"
   },
   "devDependencies": {
-    "@modelcontextprotocol/sdk": "1.30.0",
+    "@modelcontextprotocol/client": "2.4.0",
     "@noetic-tools/context": "workspace:*",
     "@noetic-tools/core": "workspace:*",
     "bun-types": "latest"
@@ -60,7 +60,8 @@
     "zod": "^4.0.0"
   },
   "dependencies": {
-    "@noetic-tools/mcp": "workspace:*",
+    "@modelcontextprotocol/node": "2.1.2",
+    "@modelcontextprotocol/server": "2.4.0",
     "@noetic-tools/types": "workspace:*",
     "@zed-industries/agent-client-protocol": "^0.4.5",
     "zod": "^4.0.0"

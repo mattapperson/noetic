@@ -433,7 +433,8 @@ reason = "chat-sdk must not depend on cli"
 # It ships the agentPlugins() context layer and, like the ACP client and openui,
 # is a consumer package sitting above types and below every core layer. It is
 # one of the two packages allowed to depend on the MCP SDK (with
-# @noetic-tools/mcp), and it launches plugin subprocesses; core must never
+# @noetic-tools/acp, which serves a step's tools over MCP), and it launches
+# plugin subprocesses; core must never
 # import it, for the same reason it must never import the ACP client — no
 # protocol library, vendor SDK, or subprocess launcher enters core's dependency
 # graph. See specs/30-agent-plugins.md.
@@ -463,37 +464,3 @@ reason = "@noetic-tools/agent-plugins depends only on @noetic-tools/types; keepi
 from = "packages/context/src/**"
 to = "packages/agent-plugins/src/**"
 reason = "@noetic-tools/context is the foundational layer package; it must not reach up into a consumer package that carries the MCP SDK"
-
-# ─────────────────────────────────────────────────────────────────────────────
-# @noetic-tools/mcp — serves Noetic tools over the Model Context Protocol, so an
-# ACP agent can call a step's tools. It depends only on @noetic-tools/types and
-# owns the MCP SDK's server side; @noetic-tools/acp imports it to start the tool
-# bridge. It sits below acp (order 89, between context and types) so acp may
-# import it but never the reverse. core must never import it, for the same
-# reason it never imports acp. See specs/36-acp-tools.md.
-# ─────────────────────────────────────────────────────────────────────────────
-
-[[layers]]
-name = "mcp"
-paths = ["packages/mcp/src/**"]
-order = 89
-
-[[boundaries]]
-from = "packages/core/src/**"
-to = "packages/mcp/src/**"
-reason = "core reaches the tool bridge only through the @noetic-tools/types AcpToolHost contract; it must never import @noetic-tools/mcp or pull the MCP SDK and node:http server into its dependency graph"
-
-[[boundaries]]
-from = "packages/context/src/**"
-to = "packages/mcp/src/**"
-reason = "@noetic-tools/context is the foundational layer package; it must not reach up into a package that carries the MCP SDK"
-
-[[boundaries]]
-from = "packages/mcp/src/**"
-to = "packages/acp/src/**"
-reason = "@noetic-tools/acp depends on @noetic-tools/mcp to serve tools; mcp must never import back into acp (acyclic)"
-
-[[boundaries]]
-from = "packages/mcp/src/**"
-to = "packages/core/src/**"
-reason = "@noetic-tools/mcp depends only on @noetic-tools/types; it only translates MCP requests to the AcpToolHost contract and must never import core"

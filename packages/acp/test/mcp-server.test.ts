@@ -1,11 +1,10 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import type { AcpToolCall, AcpToolHost } from '@noetic-tools/types';
-import type { HttpToolServer } from '../src/node';
-import { serveToolsOverHttp } from '../src/node';
-import { agentCallIdOf } from '../src/server';
+import type { HttpToolServer } from '../src/mcp/node';
+import { serveToolsOverHttp } from '../src/mcp/node';
+import { agentCallIdOf } from '../src/mcp/server';
 
 const servers: HttpToolServer[] = [];
 const clients: Client[] = [];

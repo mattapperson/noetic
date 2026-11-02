@@ -1,8 +1,8 @@
 /**
  * Serves a tool host over MCP streamable HTTP on the loopback interface.
  *
- * Lives behind the `@noetic-tools/mcp/node` subpath because it needs
- * `node:http`; the package's main entry stays runtime-neutral.
+ * Needs `node:http`, so the tool bridge loads it on first use and the
+ * package's main entry stays runtime-neutral.
  *
  * Any local process can reach a loopback port, so every request must carry
  * the server's bearer token, name it by its own host, and come from no web
@@ -12,13 +12,13 @@
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createServer } from 'node:http';
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { NodeStreamableHTTPServerTransport } from '@modelcontextprotocol/node';
 import type { AcpToolHost } from '@noetic-tools/types';
 import { createToolServer } from './server';
 
 //#region Types
 
-/** @public Where an agent reaches a running tool server. */
+/** Where an agent reaches a running tool server. */
 export interface HttpToolServer {
   /** Full endpoint URL, path included. */
   readonly url: string;
@@ -79,17 +79,16 @@ function refusal(
 /**
  * Start a tool server on `127.0.0.1` at a random port and path. Each MCP
  * session the agent opens gets its own protocol server over the same host.
- * @public
  */
 export async function serveToolsOverHttp(
   getHost: () => AcpToolHost | undefined,
 ): Promise<HttpToolServer> {
   const token = randomUUID();
   const path = `/mcp/${randomUUID()}`;
-  const sessions = new Map<string, StreamableHTTPServerTransport>();
+  const sessions = new Map<string, NodeStreamableHTTPServerTransport>();
 
-  const open = async (): Promise<StreamableHTTPServerTransport> => {
-    const transport = new StreamableHTTPServerTransport({
+  const open = async (): Promise<NodeStreamableHTTPServerTransport> => {
+    const transport = new NodeStreamableHTTPServerTransport({
       sessionIdGenerator: randomUUID,
       onsessioninitialized: (id) => {
         sessions.set(id, transport);

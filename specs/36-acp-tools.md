@@ -1,7 +1,7 @@
 # 36 — Noetic Tools in ACP Agents
 
 > **Depends On:** `02-step-variants` (Lazy, callModel tools), `08-runtime` (events, drains, steering, approval), `10-observability` (spans), `26-json-workflow-runtime` (the `acp-agent` node), `27-acp-agent-steps` (ACP steps, sessions, permissions), `34-custom-items` (`decorateResultItem`, item schemas)
-> **Exports:** `AcpTool`, `bridgedToolTitles`, `AcpToolCall`, `AcpToolResult`, `AcpToolHost`, `AcpClientHost.tools`, `AcpAgent.servesTools`, `StepAcpAgent.tools` (types); `step.acpAgent({ tools })`, `acpAgentTool({ tools })` (core); `AcpToolWiring`, `ToolBridgeAddress`, `ToolBridgeLaunch`, `claudeToolWiring`, `codexToolWiring`, `opencodeToolWiring`, `sessionToolWiring`, `AcpPresetOptions.tools`, `DefineAcpAgentOptions.tools` (acp); `createToolServer`, `agentCallIdOf` (`@noetic-tools/mcp`), `serveToolsOverHttp`, `HttpToolServer` (`@noetic-tools/mcp/node`)
+> **Exports:** `AcpTool`, `bridgedToolTitles`, `AcpToolCall`, `AcpToolResult`, `AcpToolHost`, `AcpClientHost.tools`, `AcpAgent.servesTools`, `StepAcpAgent.tools` (types); `step.acpAgent({ tools })`, `acpAgentTool({ tools })` (core); `AcpToolWiring`, `ToolBridgeAddress`, `ToolBridgeLaunch`, `claudeToolWiring`, `codexToolWiring`, `opencodeToolWiring`, `sessionToolWiring`, `AcpPresetOptions.tools`, `DefineAcpAgentOptions.tools` (acp)
 
 ---
 
@@ -26,9 +26,9 @@ records the same items, events, spans, approvals, and layer-state writes.
 |---|---|---|
 | Tool call pipeline | `core` (`runtime/tool-call.ts`) | `executeToolCall` — steering on raw args, validation, `needsApproval`, execution, stringify — and `createToolResultItem`. Shared by the `callModel` tool loop and the ACP tool runner. |
 | Tool runner | `core` (`interpreter/acp-tools.ts`) | Builds the tool listing and implements `AcpToolHost.call` with the step's `ctx`, layers, and event bridge. |
-| Contract | `types` | `AcpToolHost` on `AcpClientHost.tools`; `AcpAgent.servesTools`. Core never imports `acp` or `mcp`. |
+| Contract | `types` | `AcpToolHost` on `AcpClientHost.tools`; `AcpAgent.servesTools`. Core never imports `acp`. |
 | Tool bridge | `acp` (`tool-bridge.ts`, `tool-wiring.ts`, `tool-permissions.ts`) | Starts the server for a connection, applies the agent's settings, answers the agent's permission requests for bridged tools. |
-| MCP server | `@noetic-tools/mcp` | `tools/list` and `tools/call` over the host; loopback streamable HTTP at `./node`. The only server-side user of the MCP SDK. |
+| MCP server | `acp` (`mcp/server.ts`, `mcp/node.ts`) | `tools/list` and `tools/call` over the host, on `@modelcontextprotocol/server`; loopback streamable HTTP on `@modelcontextprotocol/node` (hono, no express). `node.ts` needs `node:http`, so the bridge loads it on first use and the `.` entry stays runtime-neutral. |
 
 ## Tool listing
 

@@ -7,8 +7,7 @@
 
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import type { ContextData } from '@noetic-tools/context';
 import { AgentHarness, execute, step, tool, toolWithGenerator } from '@noetic-tools/core';
 import type {
