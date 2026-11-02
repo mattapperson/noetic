@@ -13,11 +13,13 @@
  */
 
 import { mkdir } from 'node:fs/promises';
-import { Client } from '@modelcontextprotocol/sdk/client';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import type { FetchLike, Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
-import { createSseTransport } from './mcp/sse';
+import type { FetchLike, Transport } from '@modelcontextprotocol/client';
+import {
+  Client,
+  SSEClientTransport,
+  StreamableHTTPClientTransport,
+} from '@modelcontextprotocol/client';
+import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import type { ResolvedMcpServer, ResolvedStdioServer } from './mcp-config';
 import { McpTransport } from './mcp-config';
 
@@ -240,17 +242,18 @@ async function createTransport(params: {
 
   const guardedFetch = originAwareFetch(safeHeaders);
 
+  const options = {
+    fetch: guardedFetch,
+    ...(requestInit === undefined
+      ? {}
+      : {
+          requestInit,
+        }),
+  };
   if (server.type === McpTransport.StreamableHttp) {
-    return new StreamableHTTPClientTransport(url, {
-      fetch: guardedFetch,
-      ...(requestInit === undefined
-        ? {}
-        : {
-            requestInit,
-          }),
-    });
+    return new StreamableHTTPClientTransport(url, options);
   }
-  return createSseTransport(url, requestInit, guardedFetch);
+  return new SSEClientTransport(url, options);
 }
 
 //#endregion

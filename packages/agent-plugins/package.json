@@ -2,7 +2,7 @@
   "name": "@noetic-tools/agent-plugins",
   "version": "0.2.0",
   "type": "module",
-  "description": "Agent Plugins v1 client for Noetic — discovers agent-plugins.org packages (Agent Skills + MCP servers) and exposes them to an agent through the agentPlugins() context layer.",
+  "description": "Agent Plugins v1 client for Noetic \u2014 discovers agent-plugins.org packages (Agent Skills + MCP servers) and exposes them to an agent through the agentPlugins() context layer.",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -41,13 +41,15 @@
     "access": "public"
   },
   "devDependencies": {
+    "@modelcontextprotocol/node": "2.1.2",
+    "@modelcontextprotocol/server": "2.4.0",
     "bun-types": "latest"
   },
   "peerDependencies": {
     "zod": "^4.0.0"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/client": "2.4.0",
     "@noetic-tools/types": "workspace:*",
     "yaml": "^2.9.0",
     "zod": "^4.0.0"
