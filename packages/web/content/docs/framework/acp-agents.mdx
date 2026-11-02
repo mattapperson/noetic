@@ -47,8 +47,8 @@ It also brings capabilities a hand-rolled adapter has no way to express: permiss
 ```ts
 import { claudeCode, codex, gemini, opencode, pi, customAcpAgent } from '@noetic-tools/acp';
 
-claudeCode();                       // npx @zed-industries/claude-code-acp
-codex();                            // npx @zed-industries/codex-acp
+claudeCode();                       // npx @agentclientprotocol/claude-agent-acp
+codex();                            // npx @agentclientprotocol/codex-acp
 gemini();                           // gemini --experimental-acp
 opencode();                         // opencode acp  (native ACP)
 pi();                               // npx pi-acp    (community adapter)
@@ -218,6 +218,39 @@ step.acpAgent({
 ```
 
 Each is checked against what the agent advertised. Asking for a mode from an agent that reports none, or an HTTP MCP server from an agent without `mcpCapabilities.http`, throws `AcpCapabilityError` rather than failing opaquely mid-turn.
+
+## Giving the agent your tools
+
+Pass the same `tool()` definitions a `callModel` step takes. The agent calls them over MCP, and each call runs the same path a model's tool call does: the `beforeToolCall` layers, input validation, `needsApproval` and the harness approver, execution, the result item, its `tool_call_started` / `tool_call_completed` events, and its `tool.call` span. The agent gets the exact string a model would.
+
+```ts
+import { callModel, step, tool } from '@noetic-tools/core';
+import { claudeCode } from '@noetic-tools/acp';
+import { z } from 'zod';
+
+const lookup = tool({
+  name: 'orders/lookup',
+  description: 'Find an order by id.',
+  input: z.object({ id: z.string() }),
+  output: z.object({ status: z.string() }),
+  execute: async ({ id }) => ({ status: id.startsWith('A') ? 'shipped' : 'pending' }),
+});
+
+callModel({ id: 'answer', model: 'openai/gpt-5', tools: [lookup] });
+step.acpAgent({ id: 'fix', agent: claudeCode(), prompt: 'Fix the stuck order', tools: [lookup] });
+```
+
+What the step does for you:
+
+- **Serves the tools.** The connection starts a loopback MCP server (`127.0.0.1`, random port and path, a bearer token per connection) and hands it to the agent as the MCP server `noetic`. The server closes with the connection.
+- **Sets up each agent to match `callModel`.** Out of the box, agents hide MCP tools behind a search step, cut large results, or run their own approval review. Each preset turns those off: Claude Code reads per-tool hints from the tool list, Codex and opencode get launch settings (`CODEX_CONFIG`, `OPENCODE_CONFIG_CONTENT`) merged into any you already set.
+- **Asks permission once.** Your tools are gated by steering and `needsApproval`, as in `callModel`. The agent's own permission request for one of them is answered `allow` without consulting the step's `permissions` policy, which governs only the agent's built-in tools.
+- **Records one call per call.** The agent's `tool_call` report is replaced in the item log by the bridge's `function_call` / `function_call_output` pair. Events, the approver, and the items all carry the agent's own call id.
+- **Runs calls one at a time**, like the `callModel` tool loop, even when the agent sends them together.
+
+Tool names reach the agent reduced to letters, digits, `_`, and `-` (`orders/lookup` becomes `orders_lookup`). Two tools that reduce to the same name, a server tool such as `openrouter:web_search`, or an MCP server of your own named `noetic` or `noetic_…` are configuration errors. A schema whose root is not an object (or a union of objects) is wrapped as `{ value }`, since MCP requires one; the tool still receives the unwrapped value. A pipeline error that would fail a `callModel` step — a result item that fails its schema, say — fails the ACP step too.
+
+`pi()` cannot take tools (its adapter ignores MCP servers), and neither can a preset given a custom `transport`, since the agent may not reach this machine's loopback interface; pass `tools: true` to the preset when it does. Without it, the step fails with `ACP_TOOLS_UNSUPPORTED` before anything spawns. `acpAgentTool()` and the `acp-agent` JSON node take `tools` too.
 
 ## Conversation history
 
@@ -541,16 +574,19 @@ Everything `@noetic-tools/acp` exports. Internal helpers — the item builders, 
 
 | Export | What it is |
 |---|---|
-| `claudeCode(opts?)` | Preset for `@zed-industries/claude-code-acp`. |
-| `codex(opts?)` | Preset for `@zed-industries/codex-acp`. |
+| `claudeCode(opts?)` | Preset for `@agentclientprotocol/claude-agent-acp`. |
+| `codex(opts?)` | Preset for `@agentclientprotocol/codex-acp`. |
 | `gemini(opts?)` | Preset for Gemini CLI's native ACP mode. |
 | `opencode(opts?)` | Preset for opencode's native `opencode acp` command. |
 | `pi(opts?)` | Preset for pi, via the community `pi-acp` adapter. |
 | `customAcpAgent(opts)` | Any other ACP-speaking binary. Needs a `command` or a `transport`. |
-| `AcpPresetOptions` | `command` / `args` / `env` / `transport` overrides accepted by every preset. |
+| `AcpPresetOptions` | `command` / `args` / `env` / `transport` / `tools` overrides accepted by every preset. |
 | `AcpProcessSpec` | How to launch an agent as a local child process. |
 | `defineAcpAgent(opts)` | Build an `AcpAgent` from a transport factory — the constructor behind every preset. |
-| `DefineAcpAgentOptions` | `agentId`, `transport`, `env`. |
+| `DefineAcpAgentOptions` | `agentId`, `transport`, `env`, `tools`. |
+| `AcpToolWiring` | How an agent takes Noetic tools: where the bridge is declared (`'session'` or `'launch'`) and the launch settings that make the agent match `callModel`. |
+| `claudeToolWiring`, `codexToolWiring`, `opencodeToolWiring`, `sessionToolWiring` | The wiring each preset uses, for building your own agent with `defineAcpAgent`. |
+| `ToolBridgeAddress`, `ToolBridgeLaunch` | What `AcpToolWiring.launchEnv` receives. |
 | `createAcpAgentRegistry(...agents)` | Build the `Map<string, AcpAgent>` a JSON workflow hydrates against. |
 | `AcpAgentRegistry` | That map's type. |
 

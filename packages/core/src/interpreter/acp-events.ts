@@ -20,6 +20,7 @@ import type {
   AcpTurnResult,
   Context,
   ContextData,
+  Item,
   StepAcpAgent,
 } from '@noetic-tools/types';
 import type { EmitOption } from '../runtime/broadcaster-utils';
@@ -88,6 +89,41 @@ export class AcpEventBridge {
   forwardActivity(activity: AcpClientActivity): void {
     this.framework('acp_client_activity', {
       ...activity,
+    });
+  }
+
+  /**
+   * Emit a bridged tool call's lifecycle event with the same payload the
+   * `callModel` tool loop emits, filtered by the step's `emit` option.
+   */
+  toolEvent(eventType: string, data: Record<string, unknown>): void {
+    if (!this.broadcaster || !shouldEmit(this.emitOption, eventType, data)) {
+      return;
+    }
+    emitFrameworkEvent({
+      broadcaster: this.broadcaster,
+      agentName: this.agentName,
+      eventType,
+      data,
+    });
+  }
+
+  /**
+   * Broadcast a bridged tool's result item so `getItemStream` carries it.
+   * Unfiltered, like the `callModel` path: item streaming is not subject to
+   * `step.emit`.
+   */
+  itemAppended(item: Item): void {
+    if (!this.broadcaster) {
+      return;
+    }
+    emitFrameworkEvent({
+      broadcaster: this.broadcaster,
+      agentName: this.agentName,
+      eventType: 'item_appended',
+      data: {
+        item,
+      },
     });
   }
 

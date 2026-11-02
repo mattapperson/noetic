@@ -575,6 +575,12 @@ export interface AcpAgentWorkflowNode extends WorkflowNodeBase {
   /** Model to select before prompting. */
   model?: string;
   mcpServers?: z.infer<typeof AcpMcpServerSchema>[];
+  /**
+   * Tools to give the agent, as the same `{ type: "<registered-tool-name>" }`
+   * entries a `callModel` node takes. Server tools are rejected: only a model
+   * provider can run them.
+   */
+  tools?: z.infer<typeof CallModelToolEntrySchema>[];
   permissions?: z.infer<typeof AcpPermissionPolicySchema>;
   clientCapabilities?: z.infer<typeof AcpClientCapabilityConfigSchema>;
   session?: z.infer<typeof AcpSessionPolicySchema>;
@@ -878,6 +884,7 @@ const AcpAgentNodeSchema = z.object({
   mode: z.string().min(1).optional(),
   model: z.string().min(1).optional(),
   mcpServers: z.array(AcpMcpServerSchema).optional(),
+  tools: z.array(CallModelToolEntrySchema).optional(),
   permissions: AcpPermissionPolicySchema.optional(),
   clientCapabilities: AcpClientCapabilityConfigSchema.optional(),
   session: AcpSessionPolicySchema.optional(),

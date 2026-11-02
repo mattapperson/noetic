@@ -30,6 +30,15 @@ export { defineAcpAgent } from './define';
 export type { AcpAgentRegistry } from './registry';
 /** @public */
 export { createAcpAgentRegistry } from './registry';
+/** @public */
+export type { AcpToolWiring, ToolBridgeAddress, ToolBridgeLaunch } from './tool-bridge';
+/** @public */
+export {
+  claudeToolWiring,
+  codexToolWiring,
+  opencodeToolWiring,
+  sessionToolWiring,
+} from './tool-wiring';
 
 //#endregion
 

@@ -38,9 +38,11 @@ import {
   NoeticErrorImpl,
   SteeringAction,
 } from '@noetic-tools/types';
+import { assertAgentTakesTools, assertNoReservedServerName } from '../builders/acp-agent-checks';
 import type { AcpSessionStore } from '../runtime/acp-session-store';
 import { AcpEventBridge } from './acp-events';
 import { withHistoryPrompt } from './acp-history';
+import { AcpToolRunner, mergeBridgedItems, resolveAcpTools } from './acp-tools';
 import { resolveLazy } from './execute-action';
 import { trackUsage } from './message-helpers';
 import { parseStructuredOutput } from './structured-output';
@@ -172,6 +174,20 @@ function assertTurnSucceeded(
   }
 }
 
+/**
+ * Tools reach the agent over a loopback MCP server, which only an agent built
+ * to take one can use. Failing here, before anything spawns, beats an agent
+ * that runs and never sees its tools.
+ */
+function assertAgentServesTools<TContext, I, O>(
+  step: StepAcpAgent<TContext, I, O>,
+  agent: AcpAgent,
+  servers: ReadonlyArray<AcpMcpServer> | undefined,
+): void {
+  assertAgentTakesTools(step.id, agent);
+  assertNoReservedServerName(step.id, servers);
+}
+
 //#endregion
 
 //#region Client host
@@ -219,6 +235,11 @@ interface HostBindingOptions<TContext, I, O> {
   onActivity: NonNullable<AcpClientHost['onClientActivity']>;
   layers?: ContextLayer[];
   onUpdate: AcpClientHost['onSessionUpdate'];
+  /** The step's tools, served to the agent; `undefined` when it gave none. */
+  tools?: AcpToolRunner;
+  events: AcpEventBridge;
+  /** Fail the turn when the tool pipeline itself throws. */
+  failTurn: (error: unknown) => void;
 }
 
 /**
@@ -248,6 +269,24 @@ function bindHostToStep<TContext, I, O>(
     : undefined;
   host.onSessionUpdate = opts.onUpdate;
   host.onClientActivity = opts.onActivity;
+  // A step that gives no tools gets none, even on a session another step
+  // opened with tools. The session's runner stays listed, so the agent's
+  // permission requests are still recognized, but its calls answer as unknown
+  // tools.
+  if (!opts.tools) {
+    if (host.tools instanceof AcpToolRunner) {
+      host.tools.unbind();
+    }
+    return;
+  }
+  host.tools = opts.tools;
+  opts.tools.bind({
+    stepId: opts.step.id,
+    ctx: opts.ctx,
+    layers: opts.layers,
+    events: opts.events,
+    fail: opts.failTurn,
+  });
 }
 
 function buildHost<TContext, I, O>(
@@ -301,6 +340,7 @@ function assertSessionScopedSettingsMatch<TContext, I, O>(
   live: AcpLiveSession,
   cwd: string,
   servers: ReadonlyArray<AcpMcpServer> | undefined,
+  tools: AcpToolRunner | undefined,
 ): void {
   const conflict = (setting: string, hint: string): NoeticConfigError =>
     new NoeticConfigError({
@@ -321,6 +361,12 @@ function assertSessionScopedSettingsMatch<TContext, I, O>(
     throw conflict(
       'set of MCP servers',
       'MCP servers are attached when the session is created. Give every step sharing a `session.reuse` key the same `mcpServers`, or use a separate session.',
+    );
+  }
+  if (tools && JSON.stringify(tools.tools) !== JSON.stringify(live.tools ?? [])) {
+    throw conflict(
+      'set of tools',
+      'The agent reads its tool list once, when the session is created. Give every step sharing a `session.reuse` key the same `tools`, or use a separate session.',
     );
   }
 }
@@ -395,6 +441,7 @@ async function openSession<TContext, I, O>(opts: {
   binding: HostBindingOptions<TContext, I, O>;
   /** MCP servers for the session, already resolved from the step. */
   servers?: Parameters<AcpAgentConnection['newSession']>[0]['mcpServers'];
+  tools?: AcpToolRunner;
 }): Promise<SessionResolution> {
   const store = sessionStore(opts.baseCtx);
   const keepAlive = keepAliveOf(opts.step.session);
@@ -412,6 +459,7 @@ async function openSession<TContext, I, O>(opts: {
     const connection = await opts.agent.connect({
       host: opts.host,
       signal: abortSignalOf(opts.baseCtx),
+      mcpServers: opts.servers,
     });
 
     // From here on the connection owns a live agent (usually a child process).
@@ -438,6 +486,7 @@ async function openSession<TContext, I, O>(opts: {
         keepAlive,
         cwd: opts.cwd,
         mcpServers: opts.servers,
+        tools: opts.tools?.tools,
       };
     } catch (e) {
       await connection.close().catch(() => undefined);
@@ -446,7 +495,7 @@ async function openSession<TContext, I, O>(opts: {
   });
 
   if (!fresh) {
-    assertSessionScopedSettingsMatch(opts.step, live, opts.cwd, opts.servers);
+    assertSessionScopedSettingsMatch(opts.step, live, opts.cwd, opts.servers, opts.tools);
     if (live.agentId !== opts.agent.agentId) {
       throw new NoeticConfigError({
         code: 'ACP_SESSION_AGENT_CONFLICT',
@@ -584,6 +633,10 @@ export async function executeAcpAgent<TContext, I, O>(
 
   const cwd = (await resolveLazy(step.cwd, ctx)) ?? baseCtx.cwdState.cwd;
   const servers = await resolveLazy(step.mcpServers, ctx);
+  const tools = await resolveAcpTools(step, ctx, layers);
+  if (tools) {
+    assertAgentServesTools(step, agent, servers);
+  }
 
   // Capture the conversation so far BEFORE appending this turn's prompt, so a
   // fresh session can be seeded with it and the agent is not left guessing at
@@ -596,16 +649,33 @@ export async function executeAcpAgent<TContext, I, O>(
   }
 
   const bridge = new AcpEventBridge(step, agent.agentId, baseCtx);
+  // A tool pipeline error fails the step, as it does in `callModel`: it is
+  // kept, the agent's turn is cancelled, and the error is thrown once the
+  // turn has unwound.
+  const turnError: {
+    error?: unknown;
+    cancel?: () => Promise<void>;
+  } = {};
   const binding = {
     step,
     ctx: baseCtx,
     agentId: agent.agentId,
     layers,
     onUpdate: (notification: Parameters<AcpClientHost['onSessionUpdate']>[0]) => {
+      tools?.observe(notification.update);
       bridge.forward(notification);
     },
     onActivity: (activity: AcpClientActivity) => {
       bridge.forwardActivity(activity);
+    },
+    tools,
+    events: bridge,
+    failTurn: (error: unknown) => {
+      if (turnError.error !== undefined) {
+        return;
+      }
+      turnError.error = error;
+      void turnError.cancel?.().catch(() => undefined);
     },
   };
   const host = buildHost({
@@ -625,9 +695,11 @@ export async function executeAcpAgent<TContext, I, O>(
           ...servers,
         ]
       : undefined,
+    tools,
   });
 
   await applySessionSelection(step, ctx, resolution, baseCtx);
+  turnError.cancel = () => resolution.live.session.cancel();
 
   bridge.begin();
 
@@ -650,14 +722,27 @@ export async function executeAcpAgent<TContext, I, O>(
       signal: abortSignalOf(baseCtx),
     });
   } catch (e) {
+    tools?.unbind();
     // Close the turn on the event surface before rethrowing. A consumer driving
     // a UI off `getFullStream()` saw `response.created` and would otherwise
     // wait forever for a completion that never comes — the stream just stops.
     bridge.abort(e);
     await discardIfFresh(resolution, baseCtx);
-    throw turnFailure(step, e, baseCtx);
+    throw turnFailure(step, turnError.error ?? e, baseCtx);
   }
 
+  tools?.unbind();
+  if (turnError.error !== undefined) {
+    bridge.abort(turnError.error);
+    await discardIfFresh(resolution, baseCtx);
+    throw turnFailure(step, turnError.error, baseCtx);
+  }
+  if (tools) {
+    result = {
+      ...result,
+      items: mergeBridgedItems(result.items, tools.takeFinished()),
+    };
+  }
   bridge.finalize(result);
   applyTurnResult(baseCtx, result);
   await finalizeSession(resolution, baseCtx);

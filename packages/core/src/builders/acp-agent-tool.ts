@@ -50,6 +50,8 @@ export interface AcpAgentToolOptions {
   model?: string;
   /** MCP servers to expose to the agent. */
   mcpServers?: ReadonlyArray<AcpMcpServer>;
+  /** Noetic tools to give the agent, served to it over MCP. */
+  tools?: ReadonlyArray<Tool>;
   /** Declarative answer to the agent's permission requests. Defaults to denying. */
   permissions?: AcpPermissionPolicy;
   /** Async resolver consulted when policy and steering both abstain. */
@@ -127,6 +129,11 @@ export function acpAgentTool(
     mode: opts.mode,
     model: opts.model,
     mcpServers: opts.mcpServers,
+    tools: opts.tools
+      ? [
+          ...opts.tools,
+        ]
+      : undefined,
     permissions: opts.permissions,
     onPermissionRequest: opts.onPermissionRequest,
     clientCapabilities: opts.clientCapabilities,

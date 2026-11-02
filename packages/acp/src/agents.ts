@@ -16,6 +16,13 @@
 
 import type { AcpAgent, AcpTransport, AcpTransportFactory } from '@noetic-tools/types';
 import { defineAcpAgent } from './define';
+import type { AcpToolWiring } from './tool-bridge';
+import {
+  claudeToolWiring,
+  codexToolWiring,
+  opencodeToolWiring,
+  sessionToolWiring,
+} from './tool-wiring';
 
 //#region Lazy stdio
 
@@ -56,9 +63,26 @@ export interface AcpPresetOptions {
   env?: Record<string, string | undefined>;
   /** Supply a non-stdio transport (remote agent, test loopback, sandbox bridge). */
   transport?: AcpTransportFactory;
+  /**
+   * Whether the agent can take Noetic tools. Tools are served on this
+   * machine's loopback interface, which an agent behind a custom `transport`
+   * (a sandbox, a remote host) may not reach — so with a `transport` this
+   * defaults to `false`; set `true` when the agent runs on this machine.
+   */
+  tools?: boolean;
 }
 
-function preset(agentId: string, base: AcpProcessSpec, opts: AcpPresetOptions = {}): AcpAgent {
+function preset({
+  agentId,
+  base,
+  opts = {},
+  wiring,
+}: {
+  agentId: string;
+  base: AcpProcessSpec;
+  opts?: AcpPresetOptions;
+  wiring?: AcpToolWiring;
+}): AcpAgent {
   const spec: AcpProcessSpec = {
     command: opts.command ?? base.command,
     args: [
@@ -70,10 +94,12 @@ function preset(agentId: string, base: AcpProcessSpec, opts: AcpPresetOptions = 
       ...opts.env,
     },
   };
+  const servesTools = opts.tools ?? opts.transport === undefined;
   return defineAcpAgent({
     agentId,
     transport: opts.transport ?? lazyStdioTransport(agentId, spec),
     env: spec.env,
+    tools: servesTools ? wiring : undefined,
   });
 }
 
@@ -82,40 +108,42 @@ function preset(agentId: string, base: AcpProcessSpec, opts: AcpPresetOptions = 
 //#region Presets
 
 /**
- * Claude Code via `@zed-industries/claude-code-acp`, the ACP bridge over the
- * Claude Code SDK.
+ * Claude Code via `@agentclientprotocol/claude-agent-acp`, the ACP bridge over
+ * the Claude Agent SDK.
  * @public
  */
 export function claudeCode(opts: AcpPresetOptions = {}): AcpAgent {
-  return preset(
-    'claude-code',
-    {
+  return preset({
+    agentId: 'claude-code',
+    base: {
       command: 'npx',
       args: [
         '-y',
-        '@zed-industries/claude-code-acp',
+        '@agentclientprotocol/claude-agent-acp',
       ],
     },
     opts,
-  );
+    wiring: claudeToolWiring,
+  });
 }
 
 /**
- * OpenAI Codex via `@zed-industries/codex-acp`.
+ * OpenAI Codex via `@agentclientprotocol/codex-acp`.
  * @public
  */
 export function codex(opts: AcpPresetOptions = {}): AcpAgent {
-  return preset(
-    'codex',
-    {
+  return preset({
+    agentId: 'codex',
+    base: {
       command: 'npx',
       args: [
         '-y',
-        '@zed-industries/codex-acp',
+        '@agentclientprotocol/codex-acp',
       ],
     },
     opts,
-  );
+    wiring: codexToolWiring,
+  });
 }
 
 /**
@@ -123,16 +151,17 @@ export function codex(opts: AcpPresetOptions = {}): AcpAgent {
  * @public
  */
 export function gemini(opts: AcpPresetOptions = {}): AcpAgent {
-  return preset(
-    'gemini',
-    {
+  return preset({
+    agentId: 'gemini',
+    base: {
       command: 'gemini',
       args: [
         '--experimental-acp',
       ],
     },
     opts,
-  );
+    wiring: sessionToolWiring,
+  });
 }
 
 /**
@@ -140,29 +169,31 @@ export function gemini(opts: AcpPresetOptions = {}): AcpAgent {
  * @public
  */
 export function opencode(opts: AcpPresetOptions = {}): AcpAgent {
-  return preset(
-    'opencode',
-    {
+  return preset({
+    agentId: 'opencode',
+    base: {
       command: 'opencode',
       args: [
         'acp',
       ],
     },
     opts,
-  );
+    wiring: opencodeToolWiring,
+  });
 }
 
 /**
  * The pi coding agent, reached through the community `pi-acp` adapter — the
  * same adapter Zed's agent registry points at. pi itself has no native ACP
  * mode yet, so this preset depends on a third-party bridge; if it misbehaves,
- * the issue belongs there rather than in pi or here.
+ * the issue belongs there rather than in pi or here. `pi-acp` ignores the MCP
+ * servers it is given, so this agent cannot take Noetic tools.
  * @public
  */
 export function pi(opts: AcpPresetOptions = {}): AcpAgent {
-  return preset(
-    'pi',
-    {
+  return preset({
+    agentId: 'pi',
+    base: {
       command: 'npx',
       args: [
         '-y',
@@ -170,7 +201,7 @@ export function pi(opts: AcpPresetOptions = {}): AcpAgent {
       ],
     },
     opts,
-  );
+  });
 }
 
 /**
@@ -184,23 +215,27 @@ export function customAcpAgent(opts: {
   args?: ReadonlyArray<string>;
   env?: Record<string, string | undefined>;
   transport?: AcpTransportFactory;
+  /** See {@link AcpPresetOptions.tools}. The bridge joins `session/new` with no agent-specific settings. */
+  tools?: boolean;
 }): AcpAgent {
   if (!opts.transport && !opts.command) {
     throw new TypeError(
       `customAcpAgent(${JSON.stringify(opts.agentId)}) requires either a 'command' to spawn or a 'transport'.`,
     );
   }
-  return preset(
-    opts.agentId,
-    {
+  return preset({
+    agentId: opts.agentId,
+    base: {
       command: opts.command ?? '',
       args: opts.args,
       env: opts.env,
     },
-    {
+    opts: {
       transport: opts.transport,
+      tools: opts.tools,
     },
-  );
+    wiring: sessionToolWiring,
+  });
 }
 
 //#endregion

@@ -29,6 +29,8 @@ different matter, and the honest limit is stated below.
 It also brings capabilities that have no representation in a hand-rolled
 adapter: permission requests, plans, session modes, slash commands, MCP server
 passthrough, multimodal prompts, typed stop reasons, and cancellation semantics.
+A step's own Noetic tools reach the agent over MCP too, through the same
+pipeline as a `callModel` tool call (see `36-acp-tools`).
 
 ## Packages
 
@@ -230,7 +232,8 @@ item, opens (or reuses) a connection and session, applies `mode`/`model`, drives
 one `session/prompt`, forwards each notification to the event bridge, appends
 the turn's items to the item log, charges `ctx.tokens`/`ctx.cost`, records
 `ctx.lastStepMeta`, tears the connection down per policy, and returns the
-assistant text (or the parsed `output`).
+agent's final message — the text after its last tool call, as `callModel`
+returns its final message — or the parsed `output`.
 
 ### Prompt content
 
@@ -337,7 +340,10 @@ of it.
 Items follow the same rule: assistant text becomes a `MessageItem`, a `tool_call`
 becomes a `FunctionCallItem`, and a completed `tool_call_update` becomes a
 `FunctionCallOutputItem` whose output renders the ACP content structurally —
-diffs and terminal references included, never dropped.
+diffs and terminal references included, never dropped. Items keep the order the
+agent produced them in: each run of text between tool calls is its own
+`MessageItem`, so a turn reads message, call, result, message, as a `callModel`
+round does.
 
 ## Driving an agent from a model, and from a human
 

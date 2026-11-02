@@ -706,6 +706,7 @@ function hydrateAcpAgentNode(
     mode: node.mode,
     model: node.model,
     mcpServers: node.mcpServers,
+    tools: node.tools ? resolveCallModelTools(node.tools, ctx.tools) : undefined,
     permissions: node.permissions,
     clientCapabilities: node.clientCapabilities,
     session: node.session,

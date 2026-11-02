@@ -28,7 +28,9 @@ to run stdio servers. Neither belongs anywhere lower in the stack:
 
 So the package sits alongside `@noetic-tools/acp` and `@noetic-tools/openui`: a
 consumer package built on the `ContextLayer` contract in `@noetic-tools/types`,
-composed in by a host rather than imported by core.
+composed in by a host rather than imported by core. It and `@noetic-tools/mcp`
+(the server side, `36-acp-tools`) are the only packages that depend on the MCP
+SDK.
 `.sentrux/rules.toml` enforces both directions.
 
 Because the package is Node-targeted by definition, it reads the filesystem

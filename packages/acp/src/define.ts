@@ -13,7 +13,10 @@ import type {
   AcpConnectOptions,
   AcpTransportFactory,
 } from '@noetic-tools/types';
+import { AcpCapabilityError } from '@noetic-tools/types';
 import { openAcpConnection } from './connection';
+import type { AcpToolWiring, ToolBridge } from './tool-bridge';
+import { startToolBridge } from './tool-bridge';
 
 /** @public Options for {@link defineAcpAgent}. */
 export interface DefineAcpAgentOptions {
@@ -26,6 +29,11 @@ export interface DefineAcpAgentOptions {
   transport: AcpTransportFactory;
   /** Environment layered onto every connection this agent opens. */
   env?: Record<string, string | undefined>;
+  /**
+   * How this agent takes Noetic tools over MCP. Omit for an agent that cannot
+   * reach a loopback server, or ignores the MCP servers it is given.
+   */
+  tools?: AcpToolWiring;
 }
 
 /** @public Build an {@link AcpAgent} from a transport factory. */
@@ -33,18 +41,56 @@ export function defineAcpAgent(def: DefineAcpAgentOptions): AcpAgent {
   return {
     specificationVersion: 'acp-v1',
     agentId: def.agentId,
+    servesTools: def.tools !== undefined,
     async connect(opts: AcpConnectOptions): Promise<AcpAgentConnection> {
-      const transport = await def.transport({
-        cwd: opts.host.cwd,
-        env: def.env,
-        signal: opts.signal ?? opts.host.signal,
-      });
-      return await openAcpConnection({
-        agentId: def.agentId,
-        transport,
-        host: opts.host,
-        signal: opts.signal ?? opts.host.signal,
-      });
+      const signal = opts.signal ?? opts.host.signal;
+      const bridge = await openBridge(def, opts);
+      try {
+        const transport = await def.transport({
+          cwd: opts.host.cwd,
+          env: {
+            ...def.env,
+            ...bridge?.env,
+          },
+          signal,
+        });
+        return await openAcpConnection({
+          agentId: def.agentId,
+          transport,
+          host: opts.host,
+          signal,
+          tools: bridge,
+        });
+      } catch (e) {
+        await bridge?.close();
+        throw e;
+      }
     },
   };
+}
+
+/** Start the tool bridge when the step gave tools, before the agent spawns. */
+async function openBridge(
+  def: DefineAcpAgentOptions,
+  opts: AcpConnectOptions,
+): Promise<ToolBridge | undefined> {
+  const host = opts.host.tools;
+  if (!host) {
+    return undefined;
+  }
+  if (!def.tools) {
+    throw new AcpCapabilityError({
+      agentId: def.agentId,
+      capability: 'tools',
+      message: `ACP agent '${def.agentId}' cannot take Noetic tools: it does not use the MCP servers it is given, or cannot reach one on this machine.`,
+    });
+  }
+  return await startToolBridge({
+    wiring: def.tools,
+    getHost: () => opts.host.tools,
+    serverName: host.serverName,
+    tools: host.tools,
+    mcpServers: opts.mcpServers ?? [],
+    env: def.env,
+  });
 }

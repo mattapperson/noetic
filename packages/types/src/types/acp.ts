@@ -309,6 +309,82 @@ export interface AcpClientHost {
    * to the step that actually caused it.
    */
   onClientActivity?: (activity: AcpClientActivity) => void;
+  /**
+   * Noetic tools to serve to the agent over MCP. Set before `connect`: agents
+   * that read their MCP settings at launch need the bridge to exist first.
+   */
+  tools?: AcpToolHost;
+}
+
+//#endregion
+
+//#region Bridged tools
+
+/**
+ * A Noetic tool as an ACP agent sees it: one entry in the `tools/list` answer
+ * of the MCP server the bridge serves to the agent.
+ * @public
+ */
+export interface AcpTool {
+  /** Wire name, already reduced to `[A-Za-z0-9_-]` so every agent keeps it as-is. */
+  readonly name: string;
+  readonly description: string;
+  /** JSON Schema of the arguments. Always `type: "object"` at the root, as MCP requires. */
+  readonly inputSchema: Record<string, unknown>;
+  /** Display title, from the tool's `acp.title` when it is a plain string. */
+  readonly title?: string;
+}
+
+/** @public One `tools/call` the agent made, as the bridge hands it to the host. */
+export interface AcpToolCall {
+  /** Wire name the agent called. */
+  readonly name: string;
+  readonly args: unknown;
+  /**
+   * The agent's own id for the call, when it sends one in the MCP request
+   * `_meta`. It equals the `toolCallId` of the ACP `tool_call` update for the
+   * same call, which is how the two records are joined.
+   */
+  readonly agentCallId?: string;
+  /** Aborted when the agent cancels the call. */
+  readonly signal: AbortSignal;
+}
+
+/** @public What a bridged tool call returns to the agent. */
+export interface AcpToolResult {
+  /** The exact string a model would receive for the same call. */
+  readonly output: string;
+  readonly isError: boolean;
+}
+
+/**
+ * The Noetic tools a connection serves to its agent over MCP.
+ *
+ * `tools` is fixed for the life of a connection: agents fetch the list once.
+ * `call` is per-turn and mutable, like the permission fields on
+ * {@link AcpClientHost}: a session reused by several steps runs each call in
+ * the context of the step whose turn is in flight.
+ * @public
+ */
+export interface AcpToolHost {
+  /** MCP server name the agent sees, and the prefix it puts on tool names. */
+  readonly serverName: string;
+  readonly tools: ReadonlyArray<AcpTool>;
+  call: (call: AcpToolCall) => Promise<AcpToolResult>;
+}
+
+/**
+ * The exact titles agents give a call to `wireName` on the MCP server
+ * `serverName`: Claude Code's `mcp__<server>__<tool>`, Codex's
+ * `mcp.<server>.<tool>`, and opencode's `<server>_<tool>`.
+ * @public
+ */
+export function bridgedToolTitles(serverName: string, wireName: string): ReadonlyArray<string> {
+  return [
+    `mcp__${serverName}__${wireName}`,
+    `mcp.${serverName}.${wireName}`,
+    `${serverName}_${wireName}`,
+  ];
 }
 
 //#endregion
@@ -345,7 +421,7 @@ export interface AcpTurnResult {
   stopReason: AcpStopReason;
   /** Noetic Items produced this turn (assistant message, tool calls, tool results). */
   items: Item[];
-  /** Concatenated assistant text of the turn. */
+  /** The agent's final message: its text after the last tool call of the turn. */
   text: string;
   usage?: TokenUsage;
   cost?: number;
@@ -442,6 +518,8 @@ export interface AcpLiveSession {
   cwd: string;
   /** MCP servers attached at creation — also fixed for its lifetime. */
   mcpServers?: ReadonlyArray<acp.McpServer>;
+  /** Noetic tools served to the agent at creation — also fixed for its lifetime. */
+  tools?: ReadonlyArray<AcpTool>;
 }
 
 /** @public Options handed to {@link AcpAgent.connect}. */
@@ -449,6 +527,12 @@ export interface AcpConnectOptions {
   /** The runtime surface backing client-side ACP methods. */
   host: AcpClientHost;
   signal?: AbortSignal;
+  /**
+   * The MCP servers the step will attach. Agents that must declare servers at
+   * launch (to give the tool bridge its settings) read them here; every other
+   * agent receives them in `session/new` as usual.
+   */
+  mcpServers?: ReadonlyArray<acp.McpServer>;
 }
 
 /**
@@ -467,6 +551,11 @@ export interface AcpAgent {
   readonly agentId: string;
   /** Open a transport, run `initialize`, and return the negotiated connection. */
   connect(opts: AcpConnectOptions): Promise<AcpAgentConnection>;
+  /**
+   * True when `connect` serves {@link AcpClientHost.tools} to the agent. A step
+   * that passes `tools` to an agent without it fails before anything spawns.
+   */
+  readonly servesTools?: boolean;
 }
 
 //#endregion

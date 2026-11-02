@@ -25,13 +25,10 @@ import type { OpenRouter } from '@openrouter/agent';
 import { serverTool } from '@openrouter/agent';
 import {
   convertTools,
-  executeToolCall,
   extractOutputItems,
   extractSystemInstruction,
   extractUsage,
   itemsToInput,
-  resolveWireJsonSchema,
-  sanitizeToolNameForWire,
   toolsOnWire,
 } from '../adapters/openrouter';
 import { isFunctionCall } from '../interpreter/typeguards';
@@ -40,14 +37,16 @@ import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../runtime/broad
 import { drainsOf } from '../runtime/drain';
 import type { EventBroadcaster } from '../runtime/event-broadcaster';
 import type { ApprovalOutcome } from '../runtime/tool-approval';
+import { createToolResultItem, executeToolCall, resolveWireJsonSchema } from '../runtime/tool-call';
 import { markSpent } from '../util/spent';
 import { isErrorStatus } from '../util/status-code';
+import { sanitizeToolNameForWire } from '../util/tool-name';
 import type { Bill } from './call-spend';
 import { CallSpend, noBill } from './call-spend';
 import { exportSpans } from './deps/context';
 import type { RoundRecord } from './model-rounds';
 import { RoundLedger } from './model-rounds';
-import { buildItemSchemaRegistry, createToolResultItem } from './model-schema.js';
+import { buildItemSchemaRegistry } from './model-schema.js';
 import type { Dispatch, Spend } from './spend';
 import type { SteerInbox } from './steer-inbox';
 import { openSteerInbox } from './steer-inbox';

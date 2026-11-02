@@ -360,6 +360,12 @@ export interface StepAcpAgent<TContext = ContextData, I = unknown, O = unknown>
   content?: Lazy<ReadonlyArray<AcpContentBlock> | undefined, TContext>;
   /** MCP servers to expose to the agent for this session. */
   mcpServers?: Lazy<ReadonlyArray<AcpMcpServer> | undefined, TContext>;
+  /**
+   * Noetic tools to give the agent, served to it over MCP. Each call runs
+   * through the same steering, validation, approval, and execution path as a
+   * `callModel` tool call. Server tools cannot run locally and are rejected.
+   */
+  tools?: Lazy<(Tool | ServerToolSpec)[] | undefined, TContext>;
   /** Working directory for the session. Defaults to `ctx.cwdState.cwd`. */
   cwd?: Lazy<string | undefined, TContext>;
   /** Session mode to switch to before prompting (e.g. `'plan'`). */

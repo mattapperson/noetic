@@ -28,6 +28,11 @@ import type {
 } from '@noetic-tools/types';
 import { isServerToolSpec, NoeticConfigError } from '@noetic-tools/types';
 import { getDefaultRegistrar } from '../types/step-registrar';
+import {
+  assertAgentTakesTools,
+  assertNoReservedServerName,
+  checkedAcpTools,
+} from './acp-agent-checks';
 import { checkEmitItems, isGeneratorFunction } from './custom-item';
 
 //#region Types
@@ -101,6 +106,13 @@ export interface StepAcpAgentOpts<TContext, O, I = unknown>
   content?: Lazy<ReadonlyArray<AcpContentBlock> | undefined, TContext>;
   /** MCP servers to expose to the agent for this session. */
   mcpServers?: Lazy<ReadonlyArray<AcpMcpServer> | undefined, TContext>;
+  /**
+   * Noetic tools to give the agent — the same `tool()` definitions a
+   * `callModel` step takes. Served to the agent over MCP; every call runs the
+   * same steering, validation, approval, and execution path. The agent's own
+   * permission request for one of these is allowed, since that path gates it.
+   */
+  tools?: Lazy<(Tool | ServerToolSpec)[] | undefined, TContext>;
   /** Working directory for the session. Defaults to `ctx.cwdState.cwd`. */
   cwd?: Lazy<string | undefined, TContext>;
   /** Session mode to switch to before prompting (e.g. `'plan'`). */
@@ -152,6 +164,28 @@ function validateAcpAgentOpts<TContext, O, I>(opts: StepAcpAgentOpts<TContext, O
       hint: 'Pass `prompt` for plain text, or `content` for image/audio/resource blocks.',
     });
   }
+  validateAcpAgentTools(opts);
+}
+
+/**
+ * Reject tools the agent cannot take while the step is built. Only an eager
+ * `tools` array and an eager agent can be checked here; getters are checked
+ * when the step runs.
+ */
+function validateAcpAgentTools<TContext, O, I>(opts: StepAcpAgentOpts<TContext, O, I>): void {
+  const tools = opts.tools;
+  if (!Array.isArray(tools) || tools.length === 0) {
+    return;
+  }
+  if (typeof opts.agent === 'object') {
+    assertAgentTakesTools(opts.id, opts.agent);
+  }
+  if (Array.isArray(opts.mcpServers)) {
+    assertNoReservedServerName(opts.id, opts.mcpServers);
+  }
+  checkedAcpTools(opts.id, [
+    ...new Set(tools),
+  ]);
 }
 
 /**

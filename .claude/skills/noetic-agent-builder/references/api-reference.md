@@ -481,6 +481,7 @@ step.acpAgent<TContext = ContextData, I = unknown, O = unknown>({
   prompt?: Lazy<string, TContext>;                     // plain-text turn input ('' → use step input)
   content?: Lazy<ReadonlyArray<AcpContentBlock> | undefined, TContext>;  // image/audio/resource blocks
   mcpServers?: Lazy<ReadonlyArray<AcpMcpServer> | undefined, TContext>;
+  tools?: Lazy<(Tool | ServerToolSpec)[] | undefined, TContext>;  // same tool()s as callModel, served over MCP
   cwd?: Lazy<string | undefined, TContext>;            // defaults to ctx.cwdState.cwd
   mode?: Lazy<string | undefined, TContext>;           // session/set_mode before the turn
   model?: Lazy<string | undefined, TContext>;          // session/set_model before the turn
@@ -493,6 +494,8 @@ step.acpAgent<TContext = ContextData, I = unknown, O = unknown>({
 }): StepAcpAgent<TContext, I, O>
 ```
 
+**Tools.** `tools` takes the same `tool()` definitions as `callModel`. The agent calls them over a loopback MCP server, and each call runs the `callModel` tool pipeline (steering, validation, `needsApproval`, execution, result item, events, span), so the agent gets the exact string a model would. The agent's own permission request for one of these is allowed, since that pipeline gates it; `permissions` governs only the agent's built-in tools. Calls run one at a time. `pi()` and presets given a custom `transport` (unless `tools: true`) cannot take tools: `ACP_TOOLS_UNSUPPORTED`. Server tools are `ACP_SERVER_TOOL`; names that collide on the wire are `ACP_TOOL_NAME_COLLISION`; an MCP server of your own named `noetic` is `ACP_TOOL_SERVER_NAME_CONFLICT`. See `specs/36-acp-tools.md`.
+
 Agents come from `@noetic-tools/acp`. A preset is only a launch recipe — there is no vendor SDK:
 
 ```typescript
@@ -500,7 +503,7 @@ import { claudeCode, codex, gemini, customAcpAgent } from '@noetic-tools/acp';
 
 const review = step.acpAgent({
   id: 'review',
-  agent: claudeCode(),                                  // npx @zed-industries/claude-code-acp
+  agent: claudeCode(),                                  // npx @agentclientprotocol/claude-agent-acp
   prompt: 'Review the staged diff and summarize the riskiest change.',
   mode: 'plan',
   permissions: { default: 'deny', allow: [{ kind: 'read' }] },
@@ -592,7 +595,7 @@ acpAgentTool({
   agent: AcpAgent;                       // e.g. claudeCode()
   name?: string;                         // default `delegate_to_<agentId>`
   description?: string;                  // steer WHEN the model delegates
-  cwd?, mode?, model?, mcpServers?, permissions?, onPermissionRequest?, clientCapabilities?,
+  cwd?, mode?, model?, mcpServers?, tools?, permissions?, onPermissionRequest?, clientCapabilities?,
   session?: AcpSessionPolicy;            // reuse + keepAlive → a conversation across calls
 }): Tool  // input { prompt }, output { text }
 ```

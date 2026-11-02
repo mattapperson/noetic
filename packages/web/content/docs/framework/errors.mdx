@@ -570,9 +570,33 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 #### ACP_SESSION_SETTING_CONFLICT
 
-**Cause:** A step reuses a session but asks for a different `cwd` or different MCP servers than the session was created with.
+**Cause:** A step reuses a session but asks for a different `cwd`, different MCP servers, or different `tools` than the session was created with.
 
-**Fix:** Give every step that shares a `session.reuse` key the same `cwd` and `mcpServers`, or use a separate session.
+**Fix:** Give every step that shares a `session.reuse` key the same `cwd`, `mcpServers`, and `tools`, or use a separate session.
+
+#### ACP_TOOLS_UNSUPPORTED
+
+**Cause:** `step.acpAgent()` gives `tools` to an agent that cannot take them: `pi()` (its adapter ignores MCP servers), a preset given a custom `transport` without `tools: true`, or an agent built without tool wiring.
+
+**Fix:** Use `claudeCode()`, `codex()`, `opencode()`, or `gemini()`; pass `tools: true` to a preset whose custom transport still runs the agent on this machine; or use `customAcpAgent({ tools: true })` for an agent that accepts MCP servers in `session/new`.
+
+#### ACP_SERVER_TOOL
+
+**Cause:** `step.acpAgent()` was given a server tool such as `openrouter:web_search`. Only a model provider can run server tools.
+
+**Fix:** Pass only client tools built with `tool()`.
+
+#### ACP_TOOL_NAME_COLLISION
+
+**Cause:** Two of a step's tools reduce to the same wire name (names keep only letters, digits, `_`, and `-`), so the agent could not tell them apart.
+
+**Fix:** Rename one of the tools.
+
+#### ACP_TOOL_SERVER_NAME_CONFLICT
+
+**Cause:** A step with `tools` also names one of its `mcpServers` `noetic` or `noetic_…`. Its tools are served under `noetic`, and titles from such a server could be taken for theirs.
+
+**Fix:** Rename that MCP server.
 
 #### ACP_SERVE_KIND_RULES_WITHOUT_TOOLS
 
