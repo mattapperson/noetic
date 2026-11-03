@@ -55,7 +55,7 @@ export function assertAgentTakesTools(stepId: string, agent: AcpAgent): void {
   throw new NoeticConfigError({
     code: 'ACP_TOOLS_UNSUPPORTED',
     message: `step.acpAgent(${JSON.stringify(stepId)}) gives tools to the '${agent.agentId}' agent, which cannot take them.`,
-    hint: 'A preset given a custom `transport` serves tools only with `tools: true`, for an agent that runs on this machine. Otherwise use claudeCode(), codex(), or opencode(), or `customAcpAgent({ tools: true })` for an agent that accepts MCP servers in session/new. pi() and gemini() cannot take tools.',
+    hint: 'A preset given a custom `transport` serves tools only with `tools: true`, for an agent that runs on this machine. Otherwise use claudeCode(), codex(), gemini(), or opencode(), or `customAcpAgent({ tools: true })` for an agent that accepts MCP servers in session/new. pi() cannot take tools.',
   });
 }
 

@@ -18,7 +18,7 @@ import type {
   AcpRequestPermissionRequest,
   AcpToolHost,
 } from '@noetic-tools/types';
-import { bridgedToolTitles } from '@noetic-tools/types';
+import { bridgedToolTitles, geminiToolNameMatches } from '@noetic-tools/types';
 
 //#region Types
 
@@ -92,6 +92,16 @@ export const codexBridgedPermission: BridgedPermissionCheck = (request, host, an
     titlesOf(host, CODEX_FORM).has(title)
   );
 };
+
+/**
+ * Gemini CLI titles a call with display text, but builds its id from the
+ * registered tool name: `mcp_<server>_<tool>__call_<n>`.
+ * @public
+ */
+export const geminiBridgedPermission: BridgedPermissionCheck = (request, host) =>
+  host.tools.some((tool) =>
+    geminiToolNameMatches(host.serverName, tool.name, request.toolCall.toolCallId),
+  );
 
 /** The option that allows the call once, falling back to any allow option. */
 export function allowOnceOption(

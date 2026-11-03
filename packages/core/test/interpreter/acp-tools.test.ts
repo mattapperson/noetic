@@ -534,6 +534,46 @@ describe('ACP bridged tools, edge cases', () => {
     ]);
   });
 
+  it('takes the id Gemini CLI announced a call under, whatever its title', async () => {
+    const run = newRun();
+    const seen: Array<string | undefined> = [];
+    const ctx = harnessCtx({
+      approveToolCall: ({ callId }) => {
+        seen.push(callId);
+        return {
+          action: 'allow',
+        };
+      },
+    });
+    await execute(
+      step.acpAgent({
+        id: 'gemini-shaped',
+        agent: toolCallingAgent(
+          [
+            {
+              name: 'gated',
+              args: {},
+              announce: {
+                toolCallId: 'mcp_noetic_gated__call_7',
+                title: 'gated()',
+              },
+            },
+          ],
+          run,
+        ),
+        prompt: 'go',
+        tools: [
+          gated,
+        ],
+      }),
+      undefined,
+      ctx,
+    );
+    expect(seen).toEqual([
+      'mcp_noetic_gated__call_7',
+    ]);
+  });
+
   it('fails the step when the tool pipeline itself throws', async () => {
     const broken = tool({
       name: 'broken',

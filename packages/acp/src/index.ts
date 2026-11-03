@@ -35,11 +35,16 @@ export type { AcpToolWiring, ToolBridgeAddress, ToolBridgeLaunch } from './tool-
 /** @public */
 export type { BridgedPermissionCheck } from './tool-permissions';
 /** @public */
-export { claudeBridgedPermission, codexBridgedPermission } from './tool-permissions';
+export {
+  claudeBridgedPermission,
+  codexBridgedPermission,
+  geminiBridgedPermission,
+} from './tool-permissions';
 /** @public */
 export {
   claudeToolWiring,
   codexToolWiring,
+  geminiToolWiring,
   opencodeToolWiring,
   sessionToolWiring,
 } from './tool-wiring';

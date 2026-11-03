@@ -387,6 +387,56 @@ export function bridgedToolTitles(serverName: string, wireName: string): Readonl
   ];
 }
 
+/**
+ * True when an agent's tool call is a call to `wireName` on the MCP server
+ * `serverName`, by what the agent itself puts in the call: one of
+ * {@link bridgedToolTitles}, or Gemini CLI's id `mcp_<server>_<tool>__call_<n>`.
+ * Gemini shortens a long `mcp_<server>_<tool>` with `...` in the middle; the
+ * shortened form matches when the tool name starts and ends as it does.
+ * @public
+ */
+export function namesBridgedToolCall(
+  serverName: string,
+  wireName: string,
+  call: {
+    toolCallId: string;
+    title?: string | null;
+  },
+): boolean {
+  if (call.title && bridgedToolTitles(serverName, wireName).includes(call.title)) {
+    return true;
+  }
+  return geminiToolNameMatches(serverName, wireName, call.toolCallId);
+}
+
+/** Whether a Gemini CLI tool call id names `wireName` on `serverName`. */
+export function geminiToolNameMatches(
+  serverName: string,
+  wireName: string,
+  toolCallId: string,
+): boolean {
+  const prefix = `mcp_${serverName}_`;
+  const end = toolCallId.lastIndexOf('__call_');
+  if (!toolCallId.startsWith(prefix) || end < prefix.length) {
+    return false;
+  }
+  const registered = toolCallId.slice(prefix.length, end);
+  if (registered === wireName) {
+    return true;
+  }
+  const gap = registered.indexOf('...');
+  if (gap < 0) {
+    return false;
+  }
+  const head = registered.slice(0, gap);
+  const tail = registered.slice(gap + 3);
+  return (
+    wireName.length > head.length + tail.length &&
+    wireName.startsWith(head) &&
+    wireName.endsWith(tail)
+  );
+}
+
 //#endregion
 
 //#region Turn IO

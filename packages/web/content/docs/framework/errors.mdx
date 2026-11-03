@@ -576,9 +576,9 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 #### ACP_TOOLS_UNSUPPORTED
 
-**Cause:** `step.acpAgent()` gives `tools` to an agent that cannot take them: `pi()` (its adapter ignores MCP servers), `gemini()`, a preset given a custom `transport` without `tools: true`, or an agent built without tool wiring. With `tools` left out, such an agent simply gets none.
+**Cause:** `step.acpAgent()` gives `tools` to an agent that cannot take them: `pi()` (its adapter ignores MCP servers), a preset given a custom `transport` without `tools: true`, or an agent built without tool wiring. With `tools` left out, such an agent simply gets none.
 
-**Fix:** Use `claudeCode()`, `codex()`, or `opencode()`; pass `tools: true` to a preset whose custom transport still runs the agent on this machine; or use `customAcpAgent({ tools: true })` for an agent that accepts MCP servers in `session/new`.
+**Fix:** Use `claudeCode()`, `codex()`, `gemini()`, or `opencode()`; pass `tools: true` to a preset whose custom transport still runs the agent on this machine; or use `customAcpAgent({ tools: true })` for an agent that accepts MCP servers in `session/new`.
 
 #### ACP_SERVER_TOOL
 

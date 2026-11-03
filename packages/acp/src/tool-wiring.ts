@@ -7,7 +7,11 @@
 import type { AcpMcpServer } from '@noetic-tools/types';
 import { z } from 'zod';
 import type { AcpToolWiring, ToolBridgeLaunch } from './tool-bridge';
-import { claudeBridgedPermission, codexBridgedPermission } from './tool-permissions';
+import {
+  claudeBridgedPermission,
+  codexBridgedPermission,
+  geminiBridgedPermission,
+} from './tool-permissions';
 
 const JsonObjectSchema = z.record(z.string(), z.unknown());
 
@@ -180,6 +184,22 @@ export const opencodeToolWiring: AcpToolWiring = {
           max_bytes: UNBOUNDED,
         },
       }),
+    };
+  },
+};
+
+/**
+ * Gemini CLI starts no MCP server in a folder it does not trust, so the
+ * workspace is trusted for this process — unless the host already says
+ * otherwise. Tools are listed up front and output arrives whole as is.
+ */
+export const geminiToolWiring: AcpToolWiring = {
+  declare: 'session',
+  permits: geminiBridgedPermission,
+  launchEnv(launch) {
+    return {
+      GEMINI_CLI_TRUST_WORKSPACE:
+        launch.env.GEMINI_CLI_TRUST_WORKSPACE ?? hostEnv('GEMINI_CLI_TRUST_WORKSPACE') ?? 'true',
     };
   },
 };

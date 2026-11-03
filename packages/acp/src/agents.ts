@@ -20,6 +20,7 @@ import type { AcpToolWiring } from './tool-bridge';
 import {
   claudeToolWiring,
   codexToolWiring,
+  geminiToolWiring,
   opencodeToolWiring,
   sessionToolWiring,
 } from './tool-wiring';
@@ -147,9 +148,9 @@ export function codex(opts: AcpPresetOptions = {}): AcpAgent {
 }
 
 /**
- * Gemini CLI, which speaks ACP natively behind its experimental flag. It
- * cannot take Noetic tools yet: its permission requests for MCP tools carry
- * no field the bridge can recognize them by.
+ * Gemini CLI, which speaks ACP natively behind its experimental flag. To
+ * take Noetic tools it runs with its workspace trusted, as Gemini starts no
+ * MCP server in an untrusted folder.
  * @public
  */
 export function gemini(opts: AcpPresetOptions = {}): AcpAgent {
@@ -162,6 +163,7 @@ export function gemini(opts: AcpPresetOptions = {}): AcpAgent {
       ],
     },
     opts,
+    wiring: geminiToolWiring,
   });
 }
 

@@ -29,8 +29,14 @@ import {
   allowOnceOption,
   claudeBridgedPermission,
   codexBridgedPermission,
+  geminiBridgedPermission,
 } from '../src/tool-permissions';
-import { claudeToolWiring, codexToolWiring, opencodeToolWiring } from '../src/tool-wiring';
+import {
+  claudeToolWiring,
+  codexToolWiring,
+  geminiToolWiring,
+  opencodeToolWiring,
+} from '../src/tool-wiring';
 import { loopbackTransport } from '../src/transport-loopback';
 
 //#region Tools under test
@@ -721,6 +727,32 @@ describe('bridged permission checks', () => {
     ).toBe(false);
   });
 
+  it('recognizes Gemini CLI by the call id it builds, never its display title', () => {
+    expect(
+      geminiBridgedPermission(
+        request({
+          toolCallId: 'mcp_noetic_echo__call_61997',
+          title: 'echo(text: hi)',
+          kind: 'other',
+        }),
+        host,
+        undefined,
+      ),
+    ).toBe(true);
+    for (const toolCall of [
+      {
+        toolCallId: 'run_shell_command__call_1',
+        title: 'mcp_noetic_echo__call_1',
+        kind: 'execute' as const,
+      },
+      {
+        toolCallId: 'mcp_noetic_other__call_2',
+      },
+    ]) {
+      expect(geminiBridgedPermission(request(toolCall), host, undefined)).toBe(false);
+    }
+  });
+
   it('prefers allow_once, then allow_always', () => {
     expect(
       allowOnceOption([
@@ -863,6 +895,26 @@ describe('agent tool wiring', () => {
           output_token_limit: 1e9,
         },
       },
+    });
+  });
+
+  it('trusts the Gemini workspace unless the host already decided', () => {
+    const launch = (env: Record<string, string>) =>
+      geminiToolWiring.launchEnv?.({
+        bridge,
+        tools: [],
+        mcpServers: [],
+        env,
+      });
+    expect(launch({})).toEqual({
+      GEMINI_CLI_TRUST_WORKSPACE: 'true',
+    });
+    expect(
+      launch({
+        GEMINI_CLI_TRUST_WORKSPACE: 'false',
+      }),
+    ).toEqual({
+      GEMINI_CLI_TRUST_WORKSPACE: 'false',
     });
   });
 

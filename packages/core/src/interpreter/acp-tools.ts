@@ -23,7 +23,12 @@ import type {
   StepAcpAgent,
   Tool,
 } from '@noetic-tools/types';
-import { bridgedToolTitles, defaultItemSchemaRegistry, frameworkCast } from '@noetic-tools/types';
+import {
+  bridgedToolTitles,
+  defaultItemSchemaRegistry,
+  frameworkCast,
+  namesBridgedToolCall,
+} from '@noetic-tools/types';
 import {
   ACP_TOOL_SERVER_NAME,
   acpDelegateStepOf,
@@ -161,9 +166,12 @@ function isOutputFor(item: Item, callId: string): boolean {
   return item.type === 'function_call_output' && item.callId === callId;
 }
 
-/** The agent's own record of a call it made through the bridge, by exact title. */
+/** The agent's own record of a call it made through the bridge, by its title or id. */
 function namesBridgedCall(item: FunctionCallItem, wireName: string): boolean {
-  return bridgedToolTitles(ACP_TOOL_SERVER_NAME, wireName).includes(item.name);
+  return namesBridgedToolCall(ACP_TOOL_SERVER_NAME, wireName, {
+    toolCallId: item.callId,
+    title: item.name,
+  });
 }
 
 /**
@@ -406,9 +414,14 @@ export class AcpToolRunner implements AcpToolHost {
   }
 
   private announcedId(wireName: string): string | undefined {
-    const titles = bridgedToolTitles(this.serverName, wireName);
     for (const [id, title] of this.announced) {
-      if (!this.claimed.has(id) && titles.includes(title)) {
+      if (
+        !this.claimed.has(id) &&
+        namesBridgedToolCall(this.serverName, wireName, {
+          toolCallId: id,
+          title,
+        })
+      ) {
         return id;
       }
     }

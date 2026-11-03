@@ -1,7 +1,7 @@
 # 36 — Noetic Tools in ACP Agents
 
 > **Depends On:** `02-step-variants` (Lazy, callModel tools), `08-runtime` (events, drains, steering, approval), `11-context-layer-system` (recall, store, after-call hooks), `10-observability` (spans), `26-json-workflow-runtime` (the `acp-agent` node), `27-acp-agent-steps` (ACP steps, sessions, permissions), `34-custom-items` (`decorateResultItem`, item schemas)
-> **Exports:** `AcpTool`, `bridgedToolTitles`, `AcpToolCall`, `AcpToolResult`, `AcpToolHost`, `AcpClientHost.tools`, `AcpAgent.servesTools`, `StepAcpAgent.tools` (types); `step.acpAgent({ tools })`, `acpAgentTool({ tools })` (core); `AcpToolWiring`, `ToolBridgeAddress`, `ToolBridgeLaunch`, `claudeToolWiring`, `codexToolWiring`, `opencodeToolWiring`, `sessionToolWiring`, `BridgedPermissionCheck`, `claudeBridgedPermission`, `codexBridgedPermission`, `AcpPresetOptions.tools`, `DefineAcpAgentOptions.tools` (acp)
+> **Exports:** `AcpTool`, `bridgedToolTitles`, `namesBridgedToolCall`, `geminiToolNameMatches`, `AcpToolCall`, `AcpToolResult`, `AcpToolHost`, `AcpClientHost.tools`, `AcpAgent.servesTools`, `StepAcpAgent.tools` (types); `step.acpAgent({ tools })`, `acpAgentTool({ tools })` (core); `AcpToolWiring`, `ToolBridgeAddress`, `ToolBridgeLaunch`, `claudeToolWiring`, `codexToolWiring`, `opencodeToolWiring`, `sessionToolWiring`, `BridgedPermissionCheck`, `claudeBridgedPermission`, `codexBridgedPermission`, `geminiBridgedPermission`, `geminiToolWiring`, `AcpPresetOptions.tools`, `DefineAcpAgentOptions.tools` (acp)
 
 ---
 
@@ -103,8 +103,9 @@ and the items carry the id the agent's own records use:
 1. from the MCP request `_meta` when the agent sends one
    (`_meta["claudecode/toolUseId"]` from Claude Code, `_meta.callId` from
    Codex); it equals the `toolCallId` of the agent's ACP `tool_call`;
-2. otherwise from the first unclaimed `tool_call` the agent announced with an
-   exact bridged title for the tool (opencode). The call arrives over MCP and
+2. otherwise from the first unclaimed `tool_call` the agent announced for the
+   tool — by exact bridged title (opencode) or by Gemini CLI's id
+   `mcp_<server>_<tool>__call_<n>` (`namesBridgedToolCall`). The call arrives over MCP and
    its announcement over ACP, so a call that beats its announcement waits
    50 ms for it;
 3. otherwise a fresh id.
@@ -158,6 +159,7 @@ bridged tool's name. Each wiring carries its agent's check
 |---|---|
 | Claude Code | `_meta.claudeCode.mcpServer.name` is the server and `_meta.claudeCode.toolName` is `mcp__<server>__<tool>` for a listed tool |
 | Codex | the request's `_meta.is_mcp_tool_approval`, and the `tool_call` announced under the same id carrying `_meta.is_mcp_tool_call` and the title `mcp.<server>.<tool>` for a listed tool |
+| Gemini CLI | its `toolCallId`, `mcp_<server>_<tool>__call_<n>`, which Gemini builds from the registered tool name (its title is display text); a long name it shortens with `...` matches by its start and end |
 | opencode, `customAcpAgent` | nothing: requests go to the step's policy (opencode asks none by default) |
 
 Codex sends only the `toolCallId`, so the client keeps each announced
@@ -216,7 +218,7 @@ remove the agent's own differences from `callModel`:
 | Claude Code | `session` | listing `_meta` (above); `MCP_TOOL_TIMEOUT` raised to the timer maximum and `MAX_MCP_OUTPUT_TOKENS` lifted, unless already set |
 | Codex | `launch` | `CODEX_CONFIG.mcp_servers` declares the bridge with `omit_tools_from: ["code_mode", "deferred"]`, `default_tools_approval_mode: "approve"`, no call timeout, and an unbounded `output_token_limit` per tool, plus the user's own MCP servers; `session/new` carries none. `shell_environment_policy.exclude` gains `CODEX_CONFIG`, so the token and server env never reach commands Codex runs |
 | opencode | `session` | `OPENCODE_CONFIG_CONTENT.tool_output` limits lifted |
-| Gemini CLI | — | cannot take tools yet: its permission requests carry nothing the bridge can recognize them by |
+| Gemini CLI | `session` | `GEMINI_CLI_TRUST_WORKSPACE=true` unless the host already set it: Gemini starts no MCP server in an untrusted folder. Tools are listed up front and output arrives whole as is |
 | pi | — | cannot take tools: `pi-acp` ignores MCP servers |
 
 Codex is `launch` because codex-acp replaces `CODEX_CONFIG.mcp_servers` with the
@@ -253,7 +255,6 @@ entries a `callModel` node takes, resolved from `HydrationContext.tools`.
   `@agentclientprotocol/sdk`.
 - **Replay.** A replayed ACP step re-runs its tool calls; recording each
   bridged call in the step ledger would serve the recorded result instead.
-- **Gemini CLI**, once its MCP permission requests and titles are measured.
 - **Steers.** A `callModel` step offers queued steers before each tool call and
   can skip the rest of a round. ACP steps take no steers yet, so bridged calls
   have no steer point.
