@@ -30,6 +30,23 @@ export function assertNoReservedServerName(
   });
 }
 
+/**
+ * Tools that run an ACP step, by the step they run (`acpAgentTool`). A step
+ * never serves its own delegate: the agent calling it would wait on its own
+ * session for ever.
+ */
+const delegates = new WeakMap<Tool, string>();
+
+/** Record that `tool` runs the ACP step `stepId`. */
+export function markAcpDelegate(tool: Tool, stepId: string): void {
+  delegates.set(tool, stepId);
+}
+
+/** The ACP step `tool` runs, when it is an `acpAgentTool`. */
+export function acpDelegateStepOf(tool: Tool): string | undefined {
+  return delegates.get(tool);
+}
+
 /** The agent can take tools only if its connection serves them. */
 export function assertAgentTakesTools(stepId: string, agent: AcpAgent): void {
   if (agent.servesTools === true) {
@@ -38,20 +55,23 @@ export function assertAgentTakesTools(stepId: string, agent: AcpAgent): void {
   throw new NoeticConfigError({
     code: 'ACP_TOOLS_UNSUPPORTED',
     message: `step.acpAgent(${JSON.stringify(stepId)}) gives tools to the '${agent.agentId}' agent, which cannot take them.`,
-    hint: 'Use a preset that serves tools (claudeCode, codex, opencode, gemini), or `customAcpAgent({ tools: true })` for an agent on this machine that accepts MCP servers in session/new.',
+    hint: 'A preset given a custom `transport` serves tools only with `tools: true`, for an agent that runs on this machine. Otherwise use claudeCode(), codex(), or opencode(), or `customAcpAgent({ tools: true })` for an agent that accepts MCP servers in session/new. pi() and gemini() cannot take tools.',
   });
 }
 
 /**
- * Narrow to client tools, rejecting server tools (only a model provider can
- * run them) and names that reach the agent as the same wire name.
+ * Narrow to client tools, as the agent will see them: the first tool of each
+ * name wins, as in the `callModel` tool set. Server tools (only a model
+ * provider can run them) and two names that reach the agent as the same wire
+ * name are configuration errors.
  */
 export function checkedAcpTools(
   stepId: string,
   entries: ReadonlyArray<Tool | ServerToolSpec>,
 ): Tool[] {
   const owners = new Map<string, string>();
-  return entries.map((entry) => {
+  const tools: Tool[] = [];
+  for (const entry of entries) {
     if (isServerToolSpec(entry)) {
       throw new NoeticConfigError({
         code: 'ACP_SERVER_TOOL',
@@ -61,6 +81,9 @@ export function checkedAcpTools(
     }
     const wire = sanitizeToolNameForWire(entry.name);
     const owner = owners.get(wire);
+    if (owner === entry.name) {
+      continue;
+    }
     if (owner !== undefined) {
       throw new NoeticConfigError({
         code: 'ACP_TOOL_NAME_COLLISION',
@@ -69,6 +92,7 @@ export function checkedAcpTools(
       });
     }
     owners.set(wire, entry.name);
-    return entry;
-  });
+    tools.push(entry);
+  }
+  return tools;
 }

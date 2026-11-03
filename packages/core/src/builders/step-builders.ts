@@ -65,7 +65,7 @@ export interface CallModelOpts<TContext, O, I = unknown>
    * entry is either a client `Tool` or an inline `ServerToolSpec` (an OpenRouter
    * server tool the provider executes, e.g. web search/fetch).
    */
-  tools?: Lazy<(Tool | ServerToolSpec)[] | undefined, TContext>;
+  tools?: Lazy<ReadonlyArray<Tool | ServerToolSpec> | undefined, TContext>;
   /**
    * How the model may use its tools: `'auto'` (default), `'required'`,
    * `'none'`, or `{ tool: name }` to force one client tool from `tools`.
@@ -112,7 +112,7 @@ export interface StepAcpAgentOpts<TContext, O, I = unknown>
    * same steering, validation, approval, and execution path. The agent's own
    * permission request for one of these is allowed, since that path gates it.
    */
-  tools?: Lazy<(Tool | ServerToolSpec)[] | undefined, TContext>;
+  tools?: Lazy<ReadonlyArray<Tool | ServerToolSpec> | undefined, TContext>;
   /** Working directory for the session. Defaults to `ctx.cwdState.cwd`. */
   cwd?: Lazy<string | undefined, TContext>;
   /** Session mode to switch to before prompting (e.g. `'plan'`). */
@@ -183,9 +183,7 @@ function validateAcpAgentTools<TContext, O, I>(opts: StepAcpAgentOpts<TContext, 
   if (Array.isArray(opts.mcpServers)) {
     assertNoReservedServerName(opts.id, opts.mcpServers);
   }
-  checkedAcpTools(opts.id, [
-    ...new Set(tools),
-  ]);
+  checkedAcpTools(opts.id, tools);
 }
 
 /**

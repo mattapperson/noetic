@@ -6,10 +6,11 @@
  * permission request is a second gate `callModel` never has, so it is
  * answered `allow` without consulting the step's ACP permission policy.
  *
- * Because that skips the policy, a match must be exact: the title is one an
- * agent gives a call to one of the listed tools (see `bridgedToolTitles`).
- * Codex sends no title on the request, so its earlier `tool_call` with the
- * same id stands in. Fields the model chooses, like `rawInput`, never count.
+ * Because that skips the policy, each agent is recognized only by fields its
+ * own adapter sets, never by a title alone: some agents title a call with
+ * text the model wrote (a subagent's description), which could spell a
+ * bridged tool's name. An agent with no such field gets no automatic answer;
+ * its requests go to the step's policy like any other.
  */
 
 import type {
@@ -23,47 +24,74 @@ import { bridgedToolTitles } from '@noetic-tools/types';
 
 type ToolCallUpdate = AcpRequestPermissionRequest['toolCall'];
 
+/**
+ * True when a permission request is for one of the host's tools. `announced`
+ * is the agent's earlier `tool_call` update for the same id.
+ * @public
+ */
+export type BridgedPermissionCheck = (
+  request: AcpRequestPermissionRequest,
+  host: AcpToolHost,
+  announced: ToolCallUpdate | undefined,
+) => boolean;
+
 //#endregion
 
 //#region Helpers
 
-/** opencode's `<server>_<tool>` title could also be a shell command's; a command is never ours. */
-function isShellCommand(call: ToolCallUpdate, title: string, serverName: string): boolean {
-  return call.kind === 'execute' && title.startsWith(`${serverName}_`);
+function recordOf(value: unknown): Record<string, unknown> | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  return Object.fromEntries(Object.entries(value));
 }
 
-function titledAsBridged(
-  call: ToolCallUpdate | undefined,
-  host: AcpToolHost,
-  titles: ReadonlySet<string>,
-): boolean {
-  const title = call?.title;
-  if (!call || !title || !titles.has(title)) {
-    return false;
-  }
-  return !isShellCommand(call, title, host.serverName);
+/** The exact titles `form` gives the host's tools. */
+function titlesOf(host: AcpToolHost, form: number): ReadonlySet<string> {
+  return new Set(
+    host.tools.flatMap((tool) => bridgedToolTitles(host.serverName, tool.name)[form] ?? []),
+  );
 }
+
+const CLAUDE_FORM = 0;
+const CODEX_FORM = 1;
 
 //#endregion
 
 //#region Public API
 
 /**
- * True when the request is for one of the host's tools. `announced` is the
- * agent's earlier `tool_call` update for the same id.
+ * Claude Code names the tool it runs in `_meta.claudeCode.toolName`, and the
+ * MCP server in `_meta.claudeCode.mcpServer.name` — both set by its adapter,
+ * not the model.
+ * @public
  */
-export function isBridgedToolCall(
-  request: AcpRequestPermissionRequest,
-  host: AcpToolHost,
-  announced: ToolCallUpdate | undefined,
-): boolean {
-  const titles = new Set(
-    host.tools.flatMap((tool) => bridgedToolTitles(host.serverName, tool.name)),
-  );
+export const claudeBridgedPermission: BridgedPermissionCheck = (request, host) => {
+  const claudeCode = recordOf(recordOf(request.toolCall._meta)?.claudeCode);
+  const toolName = claudeCode?.toolName;
   return (
-    titledAsBridged(request.toolCall, host, titles) || titledAsBridged(announced, host, titles)
+    recordOf(claudeCode?.mcpServer)?.name === host.serverName &&
+    typeof toolName === 'string' &&
+    titlesOf(host, CLAUDE_FORM).has(toolName)
   );
-}
+};
+
+/**
+ * Codex marks an MCP approval with `_meta.is_mcp_tool_approval` and sends no
+ * title; the `tool_call` it announced for the same id carries
+ * `_meta.is_mcp_tool_call` and the title `mcp.<server>.<tool>`, which Codex
+ * builds from the server and tool it is calling.
+ * @public
+ */
+export const codexBridgedPermission: BridgedPermissionCheck = (request, host, announced) => {
+  const title = announced?.title;
+  return (
+    recordOf(request._meta)?.is_mcp_tool_approval === true &&
+    recordOf(announced?._meta)?.is_mcp_tool_call === true &&
+    typeof title === 'string' &&
+    titlesOf(host, CODEX_FORM).has(title)
+  );
+};
 
 /** The option that allows the call once, falling back to any allow option. */
 export function allowOnceOption(

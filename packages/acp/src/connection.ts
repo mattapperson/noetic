@@ -403,6 +403,7 @@ export async function openAcpConnection(
 
   const client = new NoeticAcpClient({
     host,
+    permitsBridged: opts.tools?.permits,
     onNotify: (notification) => {
       sink?.(notification);
       host.onSessionUpdate(notification);

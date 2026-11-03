@@ -244,6 +244,10 @@ async function createTransport(params: {
 
   const options = {
     fetch: guardedFetch,
+    // The guarded fetch follows redirects itself, as §7.2.1 requires; the
+    // transport's own same-origin policy would refuse the cross-origin hop
+    // it handles instead.
+    redirectPolicy: 'follow' as const,
     ...(requestInit === undefined
       ? {}
       : {

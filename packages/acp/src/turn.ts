@@ -83,7 +83,6 @@ export function renderToolCallContent(
 
 /** @public Folds a turn's session updates into a result. */
 export class AcpTurnAccumulator {
-  private text = '';
   private reasoning = '';
   private readonly toolCalls = new Map<string, TrackedToolCall>();
   /**
@@ -105,11 +104,6 @@ export class AcpTurnAccumulator {
   /** Feed one `session/update` notification. */
   push(notification: AcpSessionNotification): void {
     this.apply(notification.update);
-  }
-
-  /** Assistant text accumulated so far. */
-  get textContent(): string {
-    return this.text;
   }
 
   /** Reasoning text accumulated so far. */
@@ -179,7 +173,6 @@ export class AcpTurnAccumulator {
   }
 
   private appendText(chunk: string): void {
-    this.text += chunk;
     const last = this.order[this.order.length - 1];
     if (last && 'text' in last) {
       last.text += chunk;

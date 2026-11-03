@@ -24,15 +24,18 @@ import type {
   Tool,
 } from '@noetic-tools/types';
 import { bridgedToolTitles, defaultItemSchemaRegistry, frameworkCast } from '@noetic-tools/types';
-import { ACP_TOOL_SERVER_NAME, checkedAcpTools } from '../builders/acp-agent-checks';
+import {
+  ACP_TOOL_SERVER_NAME,
+  acpDelegateStepOf,
+  checkedAcpTools,
+} from '../builders/acp-agent-checks';
 import { ToolAttr } from '../observability/genai-attributes';
 import { drainsOf } from '../runtime/drain';
 import { createToolResultItem, executeToolCall, resolveWireJsonSchema } from '../runtime/tool-call';
 import { sanitizeToolNameForWire } from '../util/tool-name';
 import type { AcpEventBridge } from './acp-events';
-import { resolveLayerTools } from './action-deps';
 import { openChildSpan, traceChild } from './child-span';
-import { resolveLazy } from './execute-action';
+import { resolveLazy, resolveToolsAndRestrictions } from './execute-action';
 import { isFunctionCall } from './typeguards';
 
 //#region Types
@@ -79,25 +82,47 @@ const CANCELLED_OUTPUT = 'Error: the step was cancelled before this tool call ra
 
 //#region Listing
 
-function isObjectBranch(branch: unknown): boolean {
-  return typeof branch === 'object' && branch !== null && Reflect.get(branch, 'type') === 'object';
+/**
+ * An object root, which MCP and the providers behind agents accept as is.
+ * A root union is not one: Anthropic rejects `oneOf`/`anyOf`/`allOf` at the
+ * top of a tool schema, so a union is wrapped like any other root.
+ */
+function isObjectSchema(schema: Record<string, unknown>): boolean {
+  return (
+    schema.type === 'object' &&
+    schema.oneOf === undefined &&
+    schema.anyOf === undefined &&
+    schema.allOf === undefined
+  );
 }
 
-/** An object root, or a union whose every branch is an object. */
-function isObjectSchema(schema: Record<string, unknown>): boolean {
-  if (schema.type === 'object') {
-    return true;
+/** A `$ref` into the old root, pointed at where the schema now sits. */
+function rehomeRef(ref: string): string {
+  if (!ref.startsWith('#') || ref.startsWith('#/definitions') || ref.startsWith('#/$defs')) {
+    return ref;
   }
-  if (schema.type !== undefined) {
-    return false;
+  return `#/properties/${WRAPPED_ARG}${ref.slice(1)}`;
+}
+
+function rehomeRefs(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(rehomeRefs);
   }
-  const branches = schema.oneOf ?? schema.anyOf;
-  return Array.isArray(branches) && branches.length > 0 && branches.every(isObjectBranch);
+  if (typeof value !== 'object' || value === null) {
+    return value;
+  }
+  return Object.fromEntries(
+    Object.entries(value).map(([key, nested]) => [
+      key,
+      key === '$ref' && typeof nested === 'string' ? rehomeRef(nested) : rehomeRefs(nested),
+    ]),
+  );
 }
 
 /**
  * A schema with a non-object root, carried as the one property `value`. Its
- * definitions move to the new root so `#/definitions/...` refs still resolve.
+ * definitions move to the new root and refs into the old root follow it, so
+ * every `$ref` still resolves.
  */
 function wrapSchema(schema: Record<string, unknown>): Record<string, unknown> {
   const { $schema: _dialect, definitions, $defs, ...inner } = schema;
@@ -114,7 +139,7 @@ function wrapSchema(schema: Record<string, unknown>): Record<string, unknown> {
       : {}),
     type: 'object',
     properties: {
-      [WRAPPED_ARG]: inner,
+      [WRAPPED_ARG]: rehomeRefs(inner),
     },
     required: [
       WRAPPED_ARG,
@@ -151,7 +176,12 @@ function namesBridgedCall(item: FunctionCallItem, wireName: string): boolean {
 export function mergeBridgedItems(
   items: ReadonlyArray<Item>,
   calls: ReadonlyArray<BridgedCall>,
-): Item[] {
+): {
+  items: Item[];
+  /** Bridge `callId`s now standing where an agent record with another id was. */
+  adopted: string[];
+} {
+  const adopted: string[] = [];
   const merged = [
     ...items,
   ];
@@ -167,6 +197,9 @@ export function mergeBridgedItems(
       continue;
     }
     claimed.add(found.callId);
+    if (found.callId !== call.callItem.callId) {
+      adopted.push(call.callItem.callId);
+    }
     const outputIndex = merged.findIndex((item) => isOutputFor(item, found.callId));
     merged[index] = call.callItem;
     if (outputIndex >= 0) {
@@ -175,7 +208,10 @@ export function mergeBridgedItems(
       merged.splice(index + 1, 0, call.outputItem);
     }
   }
-  return merged;
+  return {
+    items: merged,
+    adopted,
+  };
 }
 
 //#endregion
@@ -196,6 +232,8 @@ export class AcpToolRunner implements AcpToolHost {
   private queue: Promise<unknown> = Promise.resolve();
   private finished: BridgedCall[] = [];
   private round = 0;
+  /** Set when a call's pipeline threw: the turn is failing, so no further call runs. */
+  private failed = false;
   /** The agent's announced tool calls, by id, with their titles. */
   private readonly announced = new Map<string, string>();
   /** Ids already given to a call. */
@@ -233,11 +271,33 @@ export class AcpToolRunner implements AcpToolHost {
   bind(binding: AcpToolBinding): void {
     this.binding = binding;
     this.round = 0;
+    this.failed = false;
   }
 
   /** Stop running calls: the turn they belonged to has ended. */
   unbind(): void {
     this.binding = undefined;
+    this.announced.clear();
+    this.claimed.clear();
+  }
+
+  /**
+   * Settles once no call is queued or running. An agent may end its turn
+   * while a call it gave up on still runs; that call still belongs to the
+   * turn, as an in-flight `callModel` call belongs to its aborted round.
+   */
+  async idle(): Promise<void> {
+    let settled: Promise<unknown>;
+    do {
+      settled = this.queue;
+      await settled;
+    } while (settled !== this.queue);
+  }
+
+  /** The tool's wire name when `title` is how an agent titles a call to it. */
+  wireNameOf(title: string): string | undefined {
+    return this.tools.find((tool) => bridgedToolTitles(this.serverName, tool.name).includes(title))
+      ?.name;
   }
 
   /** Note an agent `tool_call`, so a call without an id in `_meta` can take its id. */
@@ -270,19 +330,22 @@ export class AcpToolRunner implements AcpToolHost {
       };
     }
     await drainsOf(binding.ctx)?.hold(binding.ctx);
-    // Like the `callModel` loop, which stops before the next call once its
-    // step is aborted: a call that has not started is never run.
-    if (binding.ctx.aborted || call.signal.aborted) {
+    const callId = await this.callIdFor(call);
+    // Like the `callModel` loop, which starts no call once its step is aborted
+    // or a call's pipeline has thrown. Checked after every wait.
+    if (this.failed || binding.ctx.aborted || call.signal.aborted) {
       return {
         output: CANCELLED_OUTPUT,
         isError: true,
       };
     }
-    const callId = await this.callIdFor(call);
     try {
       return await this.runInRound(binding, call, callId);
     } catch (e) {
-      binding.fail(e);
+      this.failed = true;
+      if (this.binding === binding) {
+        binding.fail(e);
+      }
       return {
         output: `Error: ${e instanceof Error ? e.message : String(e)}`,
         isError: true,
@@ -433,11 +496,12 @@ function harnessItemSchemas(ctx: Context<ContextData>): ItemSchemaRegistry {
 //#region Public API
 
 /**
- * Resolve the step's tools into a runner, or `undefined` when it has none.
- * The set matches what a `callModel` step's model can call: the step's own
- * tools, plus the context layers' tools when the run has no unified tool set.
- * The same tool given twice is one tool; server tools and colliding wire
- * names are configuration errors.
+ * Resolve the step's tools into a runner, or `undefined` when it serves none.
+ * The set is what a `callModel` step's model may call: `tools: []` is none;
+ * `tools` given are those tools, plus the context layers' tools when the run
+ * has no unified tool set; no `tools` is every tool the run offers. A tool
+ * that runs this very step is left out, the same tool listed twice counts
+ * once, and server tools and colliding wire names are configuration errors.
  */
 export async function resolveAcpTools<TContext, I, O>(
   step: StepAcpAgent<TContext, I, O>,
@@ -445,22 +509,21 @@ export async function resolveAcpTools<TContext, I, O>(
   layers: ContextLayer[] | undefined,
 ): Promise<AcpToolRunner | undefined> {
   const entries = await resolveLazy(step.tools, ctx);
-  if (!entries || entries.length === 0) {
+  if (entries && entries.length === 0) {
     return undefined;
   }
   const baseCtx = frameworkCast<Context<ContextData>>(ctx);
+  const given = entries ? checkedAcpTools(step.id, entries) : undefined;
   const unified = baseCtx.unifiedTools;
-  const layerTools =
-    (!unified || unified.length === 0) && layers && layers.length > 0
-      ? resolveLayerTools(layers, baseCtx.harness, baseCtx)
-      : [];
-  const tools = checkedAcpTools(step.id, [
-    ...new Set([
-      ...entries,
-      ...layerTools,
-    ]),
-  ]);
-  return new AcpToolRunner(tools);
+  const offered =
+    given && unified && unified.length > 0
+      ? given
+      : (resolveToolsAndRestrictions(given, layers, baseCtx).tools ?? []);
+  const tools = checkedAcpTools(
+    step.id,
+    offered.filter((tool) => acpDelegateStepOf(tool) !== step.id),
+  );
+  return tools.length > 0 ? new AcpToolRunner(tools) : undefined;
 }
 
 //#endregion

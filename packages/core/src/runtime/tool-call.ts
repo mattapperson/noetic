@@ -258,7 +258,7 @@ async function runMatchedTool(
       });
     }
     return {
-      output: typeof result === 'string' ? result : JSON.stringify(result),
+      output: toolOutputText(result),
       result,
     };
   } catch (e) {
@@ -274,6 +274,18 @@ async function runMatchedTool(
       error: true,
     };
   }
+}
+
+/**
+ * The string a tool result reaches the model as. A tool with no result
+ * (`undefined`, e.g. `output: z.void()`) reaches it as an empty string — a
+ * result every provider and every MCP client accepts — rather than no output.
+ */
+function toolOutputText(result: unknown): string {
+  if (typeof result === 'string') {
+    return result;
+  }
+  return JSON.stringify(result) ?? '';
 }
 
 //#endregion

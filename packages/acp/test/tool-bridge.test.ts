@@ -23,10 +23,14 @@ import type {
 import { frameworkCast } from '@noetic-tools/types';
 import type * as acp from '@zed-industries/agent-client-protocol';
 import { z } from 'zod';
-import { customAcpAgent } from '../src/agents';
+import { defineAcpAgent } from '../src/define';
 import { startToolBridge } from '../src/tool-bridge';
-import { allowOnceOption, isBridgedToolCall } from '../src/tool-permissions';
-import { codexToolWiring, opencodeToolWiring } from '../src/tool-wiring';
+import {
+  allowOnceOption,
+  claudeBridgedPermission,
+  codexBridgedPermission,
+} from '../src/tool-permissions';
+import { claudeToolWiring, codexToolWiring, opencodeToolWiring } from '../src/tool-wiring';
 import { loopbackTransport } from '../src/transport-loopback';
 
 //#region Tools under test
@@ -420,6 +424,7 @@ function claudeShapedAgent(log: AgentLog): (conn: acp.AgentSideConnection) => ac
               title,
               _meta: {
                 claudeCode: {
+                  toolName: title,
                   mcpServer: {
                     name: 'noetic',
                   },
@@ -499,10 +504,10 @@ async function runAcpPath(gateLog: GateLog, agentLog: AgentLog): Promise<Item[]>
   const ctx = harness.createContext();
   const acpStep = step.acpAgent({
     id: 'delegate',
-    agent: customAcpAgent({
+    agent: defineAcpAgent({
       agentId: 'claude-shaped',
       transport: loopbackTransport(claudeShapedAgent(agentLog)),
-      tools: true,
+      tools: claudeToolWiring,
     }),
     prompt: 'go',
     tools: TOOLS,
@@ -584,7 +589,7 @@ describe('Noetic tools in an ACP agent', () => {
   }, 3e4);
 });
 
-describe('isBridgedToolCall', () => {
+describe('bridged permission checks', () => {
   const host: AcpToolHost = {
     serverName: 'noetic',
     tools: [
@@ -603,90 +608,117 @@ describe('isBridgedToolCall', () => {
   };
   const request = (
     toolCall: AcpRequestPermissionRequest['toolCall'],
+    meta?: Record<string, unknown>,
   ): AcpRequestPermissionRequest => ({
     sessionId: 's',
     toolCall,
     options: [],
+    ...(meta
+      ? {
+          _meta: meta,
+        }
+      : {}),
+  });
+  const claudeMeta = (toolName: string, server = 'noetic') => ({
+    claudeCode: {
+      toolName,
+      mcpServer: {
+        name: server,
+      },
+    },
   });
 
-  it('recognizes each agent by the exact title it gives a listed tool', () => {
-    for (const title of [
-      'mcp__noetic__echo',
-      'noetic_echo',
-    ]) {
-      expect(
-        isBridgedToolCall(
-          request({
-            toolCallId: 't',
-            title,
-            kind: 'other',
-          }),
-          host,
-          undefined,
-        ),
-      ).toBe(true);
-    }
-  });
-
-  it('recognizes Codex through its announced tool call', () => {
+  it('recognizes Claude Code by the tool and server its adapter names', () => {
     expect(
-      isBridgedToolCall(
+      claudeBridgedPermission(
         request({
-          toolCallId: 'exec-1',
+          toolCallId: 't',
+          title: 'mcp__noetic__echo',
+          _meta: claudeMeta('mcp__noetic__echo'),
         }),
         host,
-        {
-          toolCallId: 'exec-1',
-          title: 'mcp.noetic.echo',
-          kind: 'execute',
-        },
+        undefined,
       ),
     ).toBe(true);
   });
 
-  it('refuses anything that is not exactly a listed tool', () => {
-    const refused: Array<AcpRequestPermissionRequest['toolCall']> = [
+  it('does not trust a title alone, which the model may have written', () => {
+    for (const toolCall of [
       {
-        toolCallId: 'shell',
-        title: 'noetic_cleanup.sh && rm -rf ~',
-        kind: 'execute',
+        toolCallId: 'task',
+        title: 'mcp__noetic__echo',
+        kind: 'think' as const,
+        _meta: claudeMeta('Task', ''),
       },
       {
-        toolCallId: 'shell-exact',
-        title: 'noetic_echo',
-        kind: 'execute',
+        toolCallId: 'bare',
+        title: 'mcp__noetic__echo',
       },
       {
-        toolCallId: 'args',
-        title: 'deploy',
-        rawInput: {
-          server: 'noetic',
-          tool: 'echo',
-        },
-      },
-      {
-        toolCallId: 'nested',
-        title: 'mcp__noetic__x__deploy',
+        toolCallId: 'other-server',
+        title: 'mcp__noetic__echo',
+        _meta: claudeMeta('mcp__noetic__echo', 'github'),
       },
       {
         toolCallId: 'unlisted',
         title: 'mcp__noetic__other',
+        _meta: claudeMeta('mcp__noetic__other'),
       },
-      {
-        toolCallId: 'meta-only',
-        title: 'Bash',
-        _meta: {
-          claudeCode: {
-            mcpServer: {
-              name: 'noetic',
-            },
-          },
-        },
-      },
-    ];
-    for (const call of refused) {
-      expect(isBridgedToolCall(request(call), host, undefined)).toBe(false);
+    ]) {
+      expect(claudeBridgedPermission(request(toolCall), host, undefined)).toBe(false);
     }
+  });
+
+  it('recognizes Codex only by its MCP approval flag and its announced MCP call', () => {
+    const announced = {
+      toolCallId: 'exec-1',
+      title: 'mcp.noetic.echo',
+      kind: 'execute' as const,
+      _meta: {
+        is_mcp_tool_call: true,
+      },
+    };
+    expect(
+      codexBridgedPermission(
+        request(
+          {
+            toolCallId: 'exec-1',
+          },
+          {
+            is_mcp_tool_approval: true,
+          },
+        ),
+        host,
+        announced,
+      ),
+    ).toBe(true);
+    expect(
+      codexBridgedPermission(
+        request({
+          toolCallId: 'exec-1',
+        }),
+        host,
+        announced,
+      ),
+    ).toBe(false);
+    expect(
+      codexBridgedPermission(
+        request(
+          {
+            toolCallId: 'shell',
+          },
+          {
+            is_mcp_tool_approval: true,
+          },
+        ),
+        host,
+        {
+          toolCallId: 'shell',
+          title: 'mcp.noetic.echo',
+          kind: 'execute',
+        },
+      ),
+    ).toBe(false);
   });
 
   it('prefers allow_once, then allow_always', () => {

@@ -44,6 +44,7 @@ import {
   deduplicateTools,
   dispatchStepThroughAdapter,
   execute,
+  isRootRunning,
   prepareBandedView,
   someStep,
 } from './deps/interpreter';
@@ -1197,6 +1198,13 @@ export class AgentHarness<
   async run<I, O>(s: Step<ContextData, I, O>, input: I, ctx: Context): Promise<O> {
     if (this.lacksModelFor(s)) {
       throw noLlmProviderError();
+    }
+    // Called from inside a step that a bare `execute()` is running on this
+    // root (a tool running a step on `toolCtx.ctx`): join that run. Treating
+    // the context as a fresh root would initialize its layers mid-run and, on
+    // return, close its channels and ACP sessions under the outer step.
+    if (ctx.parent === null && !this.liveRoots.has(ctx.id) && isRootRunning(ctx)) {
+      return execute(s, input, ctx);
     }
     // Populate the unified tool pool when an embedder drives a step directly on
     // a bare `createContext()` context (the turn pipeline does this per turn).

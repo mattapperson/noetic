@@ -64,6 +64,8 @@ export class AcpEventBridge {
   private sawText = false;
   /** Tool call ids already announced, so a `tool_call_update` never re-opens one. */
   private readonly announcedToolCalls = new Set<string>();
+  /** Maps an agent's title for a bridged tool call to the tool's wire name. */
+  private toolNameOf: (title: string) => string | undefined = () => undefined;
 
   constructor(step: Pick<StepAcpAgent, 'id' | 'emit'>, agentId: string, ctx: Context<ContextData>) {
     this.broadcaster = getBroadcaster(ctx);
@@ -90,6 +92,25 @@ export class AcpEventBridge {
     this.framework('acp_client_activity', {
       ...activity,
     });
+  }
+
+  /**
+   * Name bridged tool calls by their wire name on the stream, as the
+   * `callModel` stream names calls, rather than by the agent's display title.
+   */
+  nameToolCalls(nameOf: (title: string) => string | undefined): void {
+    this.toolNameOf = nameOf;
+  }
+
+  /**
+   * Treat these call ids as announced: each is a bridged call standing in the
+   * turn's items where the agent's own record was, already on the stream
+   * under the agent's id.
+   */
+  adoptToolCalls(callIds: ReadonlyArray<string>): void {
+    for (const callId of callIds) {
+      this.announcedToolCalls.add(callId);
+    }
   }
 
   /**
@@ -339,7 +360,11 @@ export class AcpEventBridge {
     }
     if (update.sessionUpdate === 'tool_call') {
       this.closeMessage();
-      this.emitToolCall(update.toolCallId, update.title, update.rawInput);
+      this.emitToolCall(
+        update.toolCallId,
+        this.toolNameOf(update.title) ?? update.title,
+        update.rawInput,
+      );
       return;
     }
     // `user_message_chunk` (replayed history), `tool_call_update`, `plan`,

@@ -307,7 +307,7 @@ export interface StepCallModel<TContext = ContextData, I = unknown, O = unknown>
    * Function-form tools do not contribute to the pre-computed `ctx.unifiedTools`;
    * they are resolved per execution.
    */
-  tools?: Lazy<(Tool | ServerToolSpec)[] | undefined, TContext>;
+  tools?: Lazy<ReadonlyArray<Tool | ServerToolSpec> | undefined, TContext>;
   /**
    * How the model may use its tools: `'auto'` (default), `'required'`,
    * `'none'`, or `{ tool: name }` to force one client tool. Applies within the
@@ -365,7 +365,7 @@ export interface StepAcpAgent<TContext = ContextData, I = unknown, O = unknown>
    * through the same steering, validation, approval, and execution path as a
    * `callModel` tool call. Server tools cannot run locally and are rejected.
    */
-  tools?: Lazy<(Tool | ServerToolSpec)[] | undefined, TContext>;
+  tools?: Lazy<ReadonlyArray<Tool | ServerToolSpec> | undefined, TContext>;
   /** Working directory for the session. Defaults to `ctx.cwdState.cwd`. */
   cwd?: Lazy<string | undefined, TContext>;
   /** Session mode to switch to before prompting (e.g. `'plan'`). */

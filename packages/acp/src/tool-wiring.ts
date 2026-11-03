@@ -7,6 +7,7 @@
 import type { AcpMcpServer } from '@noetic-tools/types';
 import { z } from 'zod';
 import type { AcpToolWiring, ToolBridgeLaunch } from './tool-bridge';
+import { claudeBridgedPermission, codexBridgedPermission } from './tool-permissions';
 
 const JsonObjectSchema = z.record(z.string(), z.unknown());
 
@@ -95,6 +96,7 @@ function codexServer(server: AcpMcpServer): Record<string, unknown> | undefined 
  */
 export const codexToolWiring: AcpToolWiring = {
   declare: 'launch',
+  permits: codexBridgedPermission,
   launchEnv(launch) {
     const config = baseJsonConfig(launch, 'CODEX_CONFIG');
     const servers = recordAt(config, 'mcp_servers');
@@ -148,13 +150,19 @@ export const codexToolWiring: AcpToolWiring = {
 
 //#region Others
 
-/** Claude Code reads its per-tool hints from the tool listing; only the call timeout is set here. */
+/**
+ * Claude Code reads its per-tool hints from the tool listing; the call
+ * timeout and its MCP output token cap are set here.
+ */
 export const claudeToolWiring: AcpToolWiring = {
   declare: 'session',
+  permits: claudeBridgedPermission,
   launchEnv(launch) {
+    const setting = (name: string, value: number): string =>
+      launch.env[name] ?? hostEnv(name) ?? String(value);
     return {
-      MCP_TOOL_TIMEOUT:
-        launch.env.MCP_TOOL_TIMEOUT ?? hostEnv('MCP_TOOL_TIMEOUT') ?? String(NO_TIMEOUT_MS),
+      MCP_TOOL_TIMEOUT: setting('MCP_TOOL_TIMEOUT', NO_TIMEOUT_MS),
+      MAX_MCP_OUTPUT_TOKENS: setting('MAX_MCP_OUTPUT_TOKENS', UNBOUNDED),
     };
   },
 };
@@ -176,7 +184,11 @@ export const opencodeToolWiring: AcpToolWiring = {
   },
 };
 
-/** Any agent that takes MCP servers in `session/new` and needs no settings. */
+/**
+ * Any agent that takes MCP servers in `session/new` and needs no settings.
+ * It has no way to recognize the agent's permission requests for bridged
+ * tools, so those go to the step's policy.
+ */
 export const sessionToolWiring: AcpToolWiring = {
   declare: 'session',
 };

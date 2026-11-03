@@ -147,7 +147,9 @@ export function codex(opts: AcpPresetOptions = {}): AcpAgent {
 }
 
 /**
- * Gemini CLI, which speaks ACP natively behind its experimental flag.
+ * Gemini CLI, which speaks ACP natively behind its experimental flag. It
+ * cannot take Noetic tools yet: its permission requests for MCP tools carry
+ * no field the bridge can recognize them by.
  * @public
  */
 export function gemini(opts: AcpPresetOptions = {}): AcpAgent {
@@ -160,7 +162,6 @@ export function gemini(opts: AcpPresetOptions = {}): AcpAgent {
       ],
     },
     opts,
-    wiring: sessionToolWiring,
   });
 }
 

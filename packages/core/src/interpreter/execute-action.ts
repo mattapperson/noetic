@@ -160,7 +160,7 @@ function computeDelay(retry: RetryPolicy, attempt: number): number {
 
 //#region llm
 
-const MAX_STEERING_RETRIES = 3;
+export const MAX_STEERING_RETRIES = 3;
 const emptyRecall: ReadonlyArray<RecallLayerOutput> = [];
 
 /**
@@ -233,7 +233,7 @@ export async function resolveLazy<T, TContext>(
  * Fallback: when no unified set exists (e.g. harness.run() called directly),
  * merge step tools with layer tools as before.
  */
-function resolveToolsAndRestrictions(
+export function resolveToolsAndRestrictions(
   stepTools: Tool[] | undefined,
   layers: ContextLayer[] | undefined,
   ctx: Context,
@@ -412,7 +412,7 @@ interface PartitionedStepTools {
  * partitioned so the `[] = opt-out` semantics of step.tools stay intact.
  */
 function partitionStepTools(
-  resolvedStepTools: (Tool | ServerToolSpec)[] | undefined,
+  resolvedStepTools: ReadonlyArray<Tool | ServerToolSpec> | undefined,
 ): PartitionedStepTools {
   if (resolvedStepTools === undefined) {
     return {
@@ -440,7 +440,7 @@ function partitionStepTools(
  * The append pipeline may request a context re-render (e.g. a layer that
  * expanded an input reference into new content); applied after recall.
  */
-async function appendUserInput<I>(params: {
+export async function appendUserInput<I>(params: {
   ctx: Context<ContextData>;
   layers: ContextLayer[] | undefined;
   input: I;
@@ -464,7 +464,7 @@ async function appendUserInput<I>(params: {
  * Splits the context budget across layers via `allocateBudgets`. An empty map
  * when the step runs without layers.
  */
-function computeBudgetMap(params: {
+export function computeBudgetMap(params: {
   layers: ContextLayer[] | undefined;
   policy: ProjectionPolicy;
   systemPromptTokens: number;
@@ -494,7 +494,7 @@ function computeBudgetMap(params: {
  * steering retry loop because retries replay the same context. Re-render
  * requests collected from the input-append pipeline are applied on top.
  */
-async function gatherRecallResults(params: {
+export async function gatherRecallResults(params: {
   ctx: Context<ContextData>;
   layers: ContextLayer[] | undefined;
   recallQuery: string;

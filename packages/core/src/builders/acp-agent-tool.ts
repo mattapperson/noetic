@@ -22,6 +22,8 @@ import type {
 } from '@noetic-tools/types';
 import { NoeticConfigError } from '@noetic-tools/types';
 import { z } from 'zod';
+import { markAcpDelegate } from './acp-agent-checks';
+import type { StepAcpAgentOpts } from './step-builders';
 import { step } from './step-builders';
 import { tool } from './tool-builder';
 
@@ -50,8 +52,8 @@ export interface AcpAgentToolOptions {
   model?: string;
   /** MCP servers to expose to the agent. */
   mcpServers?: ReadonlyArray<AcpMcpServer>;
-  /** Noetic tools to give the agent, served to it over MCP. */
-  tools?: ReadonlyArray<Tool>;
+  /** Noetic tools to give the agent, served to it over MCP — as `step.acpAgent` takes them. */
+  tools?: StepAcpAgentOpts<ContextData, string, string>['tools'];
   /** Declarative answer to the agent's permission requests. Defaults to denying. */
   permissions?: AcpPermissionPolicy;
   /** Async resolver consulted when policy and steering both abstain. */
@@ -129,18 +131,14 @@ export function acpAgentTool(
     mode: opts.mode,
     model: opts.model,
     mcpServers: opts.mcpServers,
-    tools: opts.tools
-      ? [
-          ...opts.tools,
-        ]
-      : undefined,
+    tools: opts.tools,
     permissions: opts.permissions,
     onPermissionRequest: opts.onPermissionRequest,
     clientCapabilities: opts.clientCapabilities,
     session: opts.session,
   });
 
-  return tool({
+  const delegate = tool({
     name,
     description: opts.description ?? defaultDescription(opts.agent.agentId),
     input: AcpAgentToolInputSchema,
@@ -155,6 +153,8 @@ export function acpAgentTool(
       };
     },
   });
+  markAcpDelegate(delegate, delegated.id);
+  return delegate;
 }
 
 //#endregion

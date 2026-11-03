@@ -1,7 +1,7 @@
 # 36 — Noetic Tools in ACP Agents
 
-> **Depends On:** `02-step-variants` (Lazy, callModel tools), `08-runtime` (events, drains, steering, approval), `10-observability` (spans), `26-json-workflow-runtime` (the `acp-agent` node), `27-acp-agent-steps` (ACP steps, sessions, permissions), `34-custom-items` (`decorateResultItem`, item schemas)
-> **Exports:** `AcpTool`, `bridgedToolTitles`, `AcpToolCall`, `AcpToolResult`, `AcpToolHost`, `AcpClientHost.tools`, `AcpAgent.servesTools`, `StepAcpAgent.tools` (types); `step.acpAgent({ tools })`, `acpAgentTool({ tools })` (core); `AcpToolWiring`, `ToolBridgeAddress`, `ToolBridgeLaunch`, `claudeToolWiring`, `codexToolWiring`, `opencodeToolWiring`, `sessionToolWiring`, `AcpPresetOptions.tools`, `DefineAcpAgentOptions.tools` (acp)
+> **Depends On:** `02-step-variants` (Lazy, callModel tools), `08-runtime` (events, drains, steering, approval), `11-context-layer-system` (recall, store, after-call hooks), `10-observability` (spans), `26-json-workflow-runtime` (the `acp-agent` node), `27-acp-agent-steps` (ACP steps, sessions, permissions), `34-custom-items` (`decorateResultItem`, item schemas)
+> **Exports:** `AcpTool`, `bridgedToolTitles`, `AcpToolCall`, `AcpToolResult`, `AcpToolHost`, `AcpClientHost.tools`, `AcpAgent.servesTools`, `StepAcpAgent.tools` (types); `step.acpAgent({ tools })`, `acpAgentTool({ tools })` (core); `AcpToolWiring`, `ToolBridgeAddress`, `ToolBridgeLaunch`, `claudeToolWiring`, `codexToolWiring`, `opencodeToolWiring`, `sessionToolWiring`, `BridgedPermissionCheck`, `claudeBridgedPermission`, `codexBridgedPermission`, `AcpPresetOptions.tools`, `DefineAcpAgentOptions.tools` (acp)
 
 ---
 
@@ -18,7 +18,9 @@ step.acpAgent({ id: 'b', agent: claudeCode(), prompt, tools: [search] });
 The agent reaches the tools over MCP. Every call runs the `callModel`
 tool-call pipeline, so for the same tool, arguments, layers, and approver, the
 agent's model receives the exact string a `callModel` model would, and the host
-records the same items, events, spans, approvals, and layer-state writes.
+records the same items, events, spans, approvals, and layer-state writes. The
+step's context layers run around each agent turn as they run around each model
+call (see Layers).
 
 ## Pieces
 
@@ -46,11 +48,24 @@ Each tool becomes one MCP tool:
   `anthropic/maxResultSizeChars`, so Claude Code lists the tool up front and
   hands the model its whole result.
 
-The listed set is what a `callModel` step's model may call: the step's tools,
-plus the context layers' tools when the run has no unified tool set. The same
-tool object given twice is one tool. A root that is an object, or a union whose
-every branch is an object, is listed as is; any other root is wrapped, with its
-`definitions`/`$defs` lifted to the wrapper so refs still resolve.
+The listed set is what a `callModel` step's model may call, with the same
+`tools` semantics:
+
+- `tools: []` — none;
+- `tools` given — those tools, plus the context layers' tools when the run has
+  no unified tool set;
+- no `tools` — every tool the run offers (the unified tool set, or the layers'
+  tools when there is none).
+
+The first tool of each name wins, as in the `callModel` set. An `acpAgentTool`
+never reaches the step it runs: the agent calling it would wait on its own
+session. With no `tools`, an agent that cannot take tools (`servesTools` unset)
+gets none rather than failing.
+
+An object root is listed as is. Any other root — a scalar, an array, a
+nullable, or a union (Anthropic rejects `oneOf`/`anyOf`/`allOf` at the top of
+a tool schema) — is wrapped, with its `definitions`/`$defs` lifted to the
+wrapper and `$ref`s into the old root moved with it, so every ref resolves.
 
 Server tools (`ServerToolSpec`) are `ACP_SERVER_TOOL`: only a model provider can
 run them. Eager `tools` and `mcpServers` are checked when the step is built,
@@ -61,11 +76,12 @@ getters when it runs.
 `AcpToolRunner.call` queues calls and runs one at a time, in arrival order, as
 the `callModel` loop does. For each call:
 
-1. Hold for a drain (`drainsOf(ctx).hold`).
-2. If the step is aborted, or the agent cancelled the call before it started,
-   answer `Error: the step was cancelled before this tool call ran.` and run
-   nothing — the `callModel` loop likewise starts no call once aborted.
-3. Resolve the `callId` (below), emit `tool_round_started { round, toolCount: 1 }`.
+1. Hold for a drain (`drainsOf(ctx).hold`), and resolve the `callId` (below).
+2. If the step is aborted, an earlier call's pipeline has thrown, or the agent
+   cancelled the call before it started, answer `Error: the step was cancelled
+   before this tool call ran.` and run nothing — the `callModel` loop likewise
+   starts no call once aborted or failed.
+3. Emit `tool_round_started { round, toolCount: 1 }`.
    ACP exposes no model rounds, so each call is its own round, numbered from 0
    per turn.
 4. Open a `tool.call` span under the step span (`tool.name`,
@@ -78,6 +94,8 @@ the `callModel` loop does. For each call:
 8. Emit `item_appended` (unfiltered), `tool_call_completed { name, callId, error,
    output }`, and `tool_round_completed`.
 9. Answer the agent: one `text` part holding the output, `isError` from `error`.
+   A tool with no result (`undefined`) reaches the agent, like a model, as an
+   empty string.
 
 `callId` is the agent's own id for the call, so events, the approver, the span,
 and the items carry the id the agent's own records use:
@@ -91,9 +109,10 @@ and the items carry the id the agent's own records use:
    50 ms for it;
 3. otherwise a fresh id.
 
-A call the agent cancels while it runs runs to completion and is recorded, as an
-in-flight `callModel` call is when its round is aborted; tools take no abort
-signal.
+A call the agent cancels while it runs, or one still running when the agent
+ends its turn, runs to completion and is recorded: the turn ends only once the
+runner is idle, as an in-flight `callModel` call belongs to its aborted round.
+Tools take no abort signal.
 
 If the pipeline itself throws — a result item that fails its schema, a layer
 hook configured to throw — rather than the tool, the agent gets an
@@ -101,7 +120,7 @@ hook configured to throw — rather than the tool, the agent gets an
 error once the turn unwinds, as a `callModel` step fails on it.
 
 When the turn ends the runner is unbound: a late call answers
-`Error: unknown tool '<name>'`.
+`Error: unknown tool '<name>'`, and a late pipeline error affects no later turn.
 
 ## Items
 
@@ -116,6 +135,10 @@ turns into a `function_call` named by the agent's display title. After the turn,
    `mcp.noetic.<name>`, `noetic_<name>`;
 3. a call the agent never reported is appended.
 
+On the event stream, a bridged `tool_call` is named by its wire name, as the
+`callModel` stream names calls, and a bridge pair that took the place of an
+agent record with another id is not announced twice.
+
 ## Permissions
 
 A bridged call is gated by steering and `needsApproval` when it reaches the
@@ -125,13 +148,47 @@ for it is a gate `callModel` never has, so the ACP client answers it with the
 `permissions`, steerer, or handler. `permissions` governs only the agent's own
 tools.
 
-Because the answer skips the policy, the match is exact. A request is for a
-bridged tool when its title, or the title of the agent's earlier `tool_call` with
-the same `toolCallId`, is one of `bridgedToolTitles(server, name)` for a listed
-tool — and a `<server>_<name>` title is never an `execute`-kind call, since
-opencode titles a shell command by its command line. Fields the model chooses,
-like `rawInput`, never count. Codex sends only the `toolCallId`, so the client
-keeps each announced `tool_call` by id until it settles.
+Because the answer skips the policy, an agent's requests are recognized only
+by fields its own adapter sets, never by a title alone — some agents title a
+call with text the model wrote (a subagent's description), which could spell a
+bridged tool's name. Each wiring carries its agent's check
+(`AcpToolWiring.permits`):
+
+| Agent | Recognized by |
+|---|---|
+| Claude Code | `_meta.claudeCode.mcpServer.name` is the server and `_meta.claudeCode.toolName` is `mcp__<server>__<tool>` for a listed tool |
+| Codex | the request's `_meta.is_mcp_tool_approval`, and the `tool_call` announced under the same id carrying `_meta.is_mcp_tool_call` and the title `mcp.<server>.<tool>` for a listed tool |
+| opencode, `customAcpAgent` | nothing: requests go to the step's policy (opencode asks none by default) |
+
+Codex sends only the `toolCallId`, so the client keeps each announced
+`tool_call` by id until it settles (at most 1,000).
+
+## Layers
+
+A model receives the step's context layers in its request; an agent takes only
+a prompt. So around each turn the step does what `callModel` does around each
+model call:
+
+1. The prompt joins the item log through the layers' append pipeline.
+2. Before each turn, recall runs (budgeted as for `callModel`) and its output
+   leads the prompt as a `<context>…</context>` block.
+3. After the turn, the `afterModelCall` hooks see the turn's result. `deny`
+   fails the step with `steering_denied`; `guide` sends one more turn carrying
+   the guidance (up to the `callModel` retry limit), with the guidance logged as
+   a developer message — the agent keeps its earlier answer in its own history,
+   so it stays in the log too.
+4. The `store` hooks see the final turn's result.
+
+A tool's own `context` layer is one of these, so its recall reaches the agent
+as it reaches a model.
+
+## Nested runs
+
+A tool may run a step on its own context (`toolCtx.harness.run(step, x,
+toolCtx.ctx)`; `acpAgentTool` does). When the outer step was started by a bare
+`execute()`, that run joins it: the context's layers are not re-initialized,
+and nothing the outer run still uses — channels, ACP sessions — is closed when
+the nested run returns.
 
 ## Transport and lifetime
 
@@ -156,10 +213,10 @@ remove the agent's own differences from `callModel`:
 
 | Agent | `declare` | Settings |
 |---|---|---|
-| Claude Code | `session` | listing `_meta` (above); `MCP_TOOL_TIMEOUT` raised to the timer maximum |
+| Claude Code | `session` | listing `_meta` (above); `MCP_TOOL_TIMEOUT` raised to the timer maximum and `MAX_MCP_OUTPUT_TOKENS` lifted, unless already set |
 | Codex | `launch` | `CODEX_CONFIG.mcp_servers` declares the bridge with `omit_tools_from: ["code_mode", "deferred"]`, `default_tools_approval_mode: "approve"`, no call timeout, and an unbounded `output_token_limit` per tool, plus the user's own MCP servers; `session/new` carries none. `shell_environment_policy.exclude` gains `CODEX_CONFIG`, so the token and server env never reach commands Codex runs |
 | opencode | `session` | `OPENCODE_CONFIG_CONTENT.tool_output` limits lifted |
-| Gemini CLI | `session` | none |
+| Gemini CLI | — | cannot take tools yet: its permission requests carry nothing the bridge can recognize them by |
 | pi | — | cannot take tools: `pi-acp` ignores MCP servers |
 
 Codex is `launch` because codex-acp replaces `CODEX_CONFIG.mcp_servers` with the
@@ -175,11 +232,13 @@ eager agent.
 
 ## Sessions
 
-The agent reads its tool list once, so `tools` are fixed when the session is
-created (`AcpLiveSession.tools`). A step reusing a session with a different
-listing is `ACP_SESSION_SETTING_CONFLICT`. A step that gives no `tools` gets
-none, even on a session another step opened with tools: the host's `tools` is
-unbound and calls answer as unknown tools.
+The agent reads its tool list once, so the session's list is fixed when it is
+created (`AcpLiveSession.tools`). A step reusing the session may serve any part
+of that list — a call to a listed tool outside its part answers as an unknown
+tool, as on `callModel` — but a tool the list lacks, or lists differently, is
+`ACP_SESSION_SETTING_CONFLICT`, naming the tools. A step that serves no tools
+on a session opened with tools leaves the list in place and answers every call
+as an unknown tool.
 
 ## Workflow JSON
 
@@ -192,11 +251,9 @@ entries a `callModel` node takes, resolved from `HydrationContext.tools`.
   MCP requests over the ACP connection itself, removing the loopback server.
   Prefer it once agents advertise it; it needs the ACP library moved to
   `@agentclientprotocol/sdk`.
-- **Tool-owned context layers.** A tool's `context` layer renders into a
-  `callModel` prompt; ACP prompts carry no layer rendering yet.
 - **Replay.** A replayed ACP step re-runs its tool calls; recording each
   bridged call in the step ledger would serve the recorded result instead.
-- **Gemini CLI settings**, once its MCP behaviour is measured.
+- **Gemini CLI**, once its MCP permission requests and titles are measured.
 - **Steers.** A `callModel` step offers queued steers before each tool call and
   can skip the rest of a round. ACP steps take no steers yet, so bridged calls
   have no steer point.

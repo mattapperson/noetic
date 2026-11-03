@@ -240,17 +240,22 @@ callModel({ id: 'answer', model: 'openai/gpt-5', tools: [lookup] });
 step.acpAgent({ id: 'fix', agent: claudeCode(), prompt: 'Fix the stuck order', tools: [lookup] });
 ```
 
+Leave `tools` out and the agent gets every tool the run offers, as a `callModel` step's model does; `tools: []` gives it none. An `acpAgentTool` is never served to the step it runs.
+
 What the step does for you:
 
 - **Serves the tools.** The connection starts a loopback MCP server (`127.0.0.1`, random port and path, a bearer token per connection) and hands it to the agent as the MCP server `noetic`. The server closes with the connection.
 - **Sets up each agent to match `callModel`.** Out of the box, agents hide MCP tools behind a search step, cut large results, or run their own approval review. Each preset turns those off: Claude Code reads per-tool hints from the tool list, Codex and opencode get launch settings (`CODEX_CONFIG`, `OPENCODE_CONFIG_CONTENT`) merged into any you already set.
-- **Asks permission once.** Your tools are gated by steering and `needsApproval`, as in `callModel`. The agent's own permission request for one of them is answered `allow` without consulting the step's `permissions` policy, which governs only the agent's built-in tools.
-- **Records one call per call.** The agent's `tool_call` report is replaced in the item log by the bridge's `function_call` / `function_call_output` pair. Events, the approver, and the items all carry the agent's own call id.
-- **Runs calls one at a time**, like the `callModel` tool loop, even when the agent sends them together.
+- **Asks permission once.** Your tools are gated by steering and `needsApproval`, as in `callModel`. Claude Code's and Codex's own permission request for one of them is answered `allow` without consulting the step's `permissions` policy, which governs only the agent's built-in tools. The request is recognized by fields the agent's adapter sets, never by a title the model could have written. Other agents' requests go to the policy; opencode asks none by default.
+- **Shows the agent your context layers.** Before each turn the layers' recall runs, as before a model call, and leads the prompt as a `<context>` block — a tool's own `context` layer included. After the turn the `afterModelCall` hooks run (a `guide` sends one more turn with the guidance) and the `store` hooks see the result.
+- **Records every call.** The agent's `tool_call` report is replaced in the item log by the bridge's `function_call` / `function_call_output` pair, and a call still running when the agent ends its turn is waited for and recorded. Events, the approver, and the items all carry the agent's own call id, and the stream names calls by tool name.
+- **Runs calls one at a time**, like the `callModel` tool loop, even when the agent sends them together. Once a call's pipeline fails, no further call runs and the step fails.
 
-Tool names reach the agent reduced to letters, digits, `_`, and `-` (`orders/lookup` becomes `orders_lookup`). Two tools that reduce to the same name, a server tool such as `openrouter:web_search`, or an MCP server of your own named `noetic` or `noetic_…` are configuration errors. A schema whose root is not an object (or a union of objects) is wrapped as `{ value }`, since MCP requires one; the tool still receives the unwrapped value. A pipeline error that would fail a `callModel` step — a result item that fails its schema, say — fails the ACP step too.
+Tool names reach the agent reduced to letters, digits, `_`, and `-` (`orders/lookup` becomes `orders_lookup`). Two tools that reduce to the same name, a server tool such as `openrouter:web_search`, or an MCP server of your own named `noetic` or `noetic_…` are configuration errors. A schema whose root is not a plain object (a scalar, nullable, or union) is wrapped as `{ value }`, since MCP and Anthropic require one; the tool still receives the unwrapped value. A tool that returns nothing reaches the agent, like a model, as an empty string. A tool that runs a step on `toolCtx.ctx` — `acpAgentTool` does — works under a bare `execute()` as under `harness.run`.
 
-`pi()` cannot take tools (its adapter ignores MCP servers), and neither can a preset given a custom `transport`, since the agent may not reach this machine's loopback interface; pass `tools: true` to the preset when it does. Without it, the step fails with `ACP_TOOLS_UNSUPPORTED` before anything spawns. `acpAgentTool()` and the `acp-agent` JSON node take `tools` too.
+ACP has no `toolChoice`: an agent decides for itself when to call a tool, so say so in the prompt.
+
+`pi()` and `gemini()` cannot take tools yet, and neither can a preset given a custom `transport`, since the agent may not reach this machine's loopback interface; pass `tools: true` to the preset when it does. Given `tools` explicitly, such an agent fails with `ACP_TOOLS_UNSUPPORTED` before anything spawns; with `tools` left out it simply gets none. `acpAgentTool()` and the `acp-agent` JSON node take `tools` too.
 
 ## Conversation history
 
@@ -586,6 +591,7 @@ Everything `@noetic-tools/acp` exports. Internal helpers — the item builders, 
 | `DefineAcpAgentOptions` | `agentId`, `transport`, `env`, `tools`. |
 | `AcpToolWiring` | How an agent takes Noetic tools: where the bridge is declared (`'session'` or `'launch'`) and the launch settings that make the agent match `callModel`. |
 | `claudeToolWiring`, `codexToolWiring`, `opencodeToolWiring`, `sessionToolWiring` | The wiring each preset uses, for building your own agent with `defineAcpAgent`. |
+| `BridgedPermissionCheck`, `claudeBridgedPermission`, `codexBridgedPermission` | How a wiring recognizes its agent's permission requests for bridged tools (`AcpToolWiring.permits`). |
 | `ToolBridgeAddress`, `ToolBridgeLaunch` | What `AcpToolWiring.launchEnv` receives. |
 | `createAcpAgentRegistry(...agents)` | Build the `Map<string, AcpAgent>` a JSON workflow hydrates against. |
 | `AcpAgentRegistry` | That map's type. |

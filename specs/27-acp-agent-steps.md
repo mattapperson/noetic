@@ -30,7 +30,8 @@ It also brings capabilities that have no representation in a hand-rolled
 adapter: permission requests, plans, session modes, slash commands, MCP server
 passthrough, multimodal prompts, typed stop reasons, and cancellation semantics.
 A step's own Noetic tools reach the agent over MCP too, through the same
-pipeline as a `callModel` tool call (see `36-acp-tools`).
+pipeline as a `callModel` tool call, and its context layers run around each
+turn as around a model call (see `36-acp-tools`).
 
 ## Packages
 

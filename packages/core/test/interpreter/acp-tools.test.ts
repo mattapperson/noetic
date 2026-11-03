@@ -688,7 +688,7 @@ describe('ACP bridged tools, edge cases', () => {
     ]);
   });
 
-  it('lists a union of objects unwrapped and a nullable object wrapped', async () => {
+  it('wraps union and nullable roots, which providers reject at the top of a tool schema', async () => {
     const union = tool({
       name: 'pick',
       description: 'Takes one of two shapes.',
@@ -723,7 +723,9 @@ describe('ACP bridged tools, edge cases', () => {
             {
               name: 'pick',
               args: {
-                kind: 'b',
+                value: {
+                  kind: 'b',
+                },
               },
             },
             {
@@ -746,7 +748,10 @@ describe('ACP bridged tools, edge cases', () => {
     );
     const [pickListing, maybeListing] = run.host?.tools?.tools ?? [];
     assert(pickListing && maybeListing);
-    expect(pickListing.inputSchema.properties).toBeUndefined();
+    expect(Object.keys(pickListing.inputSchema.properties ?? {})).toEqual([
+      'value',
+    ]);
+    expect(pickListing.inputSchema.anyOf ?? pickListing.inputSchema.oneOf).toBeUndefined();
     expect(Object.keys(maybeListing.inputSchema.properties ?? {})).toEqual([
       'value',
     ]);
@@ -947,7 +952,7 @@ describe('mergeBridgedItems', () => {
     );
 
   it('replaces the agent pair in place by exact title, keeping the bridge id', () => {
-    const merged = mergeBridgedItems(
+    const { items: merged } = mergeBridgedItems(
       [
         callItem('oc-1', 'noetic_echo'),
         outputItem('oc-1', 'agent text'),
@@ -968,7 +973,7 @@ describe('mergeBridgedItems', () => {
   });
 
   it('never pairs a tool with another whose name merely ends the same way', () => {
-    const merged = mergeBridgedItems(
+    const { items: merged } = mergeBridgedItems(
       [
         callItem('a1', 'mcp__noetic__cache_get'),
         outputItem('a1', 'agent cache'),
@@ -991,7 +996,7 @@ describe('mergeBridgedItems', () => {
   });
 
   it('ignores a title on another server that contains the bridge name', () => {
-    const merged = mergeBridgedItems(
+    const { items: merged } = mergeBridgedItems(
       [
         callItem('x', 'mcp__noetic-docs__echo'),
       ],

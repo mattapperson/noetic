@@ -9,6 +9,7 @@
  */
 
 import type { AcpMcpServer, AcpTool, AcpToolHost } from '@noetic-tools/types';
+import type { BridgedPermissionCheck } from './tool-permissions';
 
 //#region Types
 
@@ -46,6 +47,11 @@ export interface AcpToolWiring {
   readonly declare: 'session' | 'launch';
   /** Environment for the agent process that switches its tool handling to match `callModel`. */
   launchEnv?(launch: ToolBridgeLaunch): Record<string, string>;
+  /**
+   * Recognizes this agent's permission requests for bridged tools, which are
+   * then allowed. Without one, every request goes to the step's policy.
+   */
+  readonly permits?: BridgedPermissionCheck;
 }
 
 /** A running bridge, owned by one connection. */
@@ -54,6 +60,7 @@ export interface ToolBridge {
   /** The MCP server entry for `session/new`. */
   readonly server: AcpMcpServer;
   readonly env: Record<string, string>;
+  readonly permits?: BridgedPermissionCheck;
   close(): Promise<void>;
 }
 
@@ -110,6 +117,7 @@ export async function startToolBridge(opts: {
       ],
     },
     env,
+    permits: opts.wiring.permits,
     close: () => http.close(),
   };
 }
