@@ -91,6 +91,8 @@ interface AgentRecord {
   capabilities: Array<AcpClientCapabilityConfig | undefined>;
   permissions: Array<AcpPermissionPolicy | undefined>;
   loads: string[];
+  cwds: string[];
+  modes: string[];
 }
 
 /** An agent that records what each connect and turn was handed. */
@@ -118,8 +120,8 @@ function recordingAgent(): AgentRecord {
           async cancel() {
             // Nothing in flight.
           },
-          async setMode() {
-            // No modes.
+          async setMode(mode: string) {
+            record.modes.push(mode);
           },
           async setModel() {
             // No models.
@@ -134,7 +136,8 @@ function recordingAgent(): AgentRecord {
           async authenticate() {
             // No auth in the fake.
           },
-          async newSession() {
+          async newSession(opts) {
+            record.cwds.push(opts.cwd);
             return session;
           },
           async loadSession(load) {
@@ -151,6 +154,8 @@ function recordingAgent(): AgentRecord {
     capabilities: [],
     permissions: [],
     loads: [],
+    cwds: [],
+    modes: [],
   };
   return record;
 }
@@ -320,6 +325,82 @@ describe('checkAcpAgents — permissions', () => {
   });
 });
 
+describe('checkAcpAgents — mode and model', () => {
+  it("refuses any mode by default, since a mode can lift the agent's prompts", () => {
+    for (const mode of [
+      'bypassPermissions',
+      'acceptEdits',
+      'default',
+    ]) {
+      expect(
+        expectRefused({
+          mode,
+        }),
+      ).toContain(`mode "${mode}"`);
+    }
+  });
+
+  it('accepts only the granted modes', () => {
+    const grants: AcpAllowlist = {
+      fake: {
+        modes: [
+          'default',
+          'plan',
+        ],
+      },
+    };
+    expectAccepted(
+      {
+        mode: 'plan',
+      },
+      grants,
+    );
+    expectRefused(
+      {
+        mode: 'bypassPermissions',
+      },
+      grants,
+    );
+  });
+
+  it('accepts any model until the grant lists some, then only those', () => {
+    expectAccepted({
+      model: 'opus',
+    });
+    const grants: AcpAllowlist = {
+      fake: {
+        models: [
+          'sonnet',
+        ],
+      },
+    };
+    expectAccepted(
+      {
+        model: 'sonnet',
+      },
+      grants,
+    );
+    expect(
+      expectRefused(
+        {
+          model: 'opus',
+        },
+        grants,
+      ),
+    ).toContain('model "opus"');
+    expectRefused(
+      {
+        model: 'opus',
+      },
+      {
+        fake: {
+          models: [],
+        },
+      },
+    );
+  });
+});
+
 describe('checkAcpAgents — cwd', () => {
   it('accepts the harness cwd and directories under it by default', () => {
     expectAccepted({});
@@ -451,21 +532,6 @@ describe('checkAcpAgents — sessions', () => {
         keepAlive: 'harness',
       },
     });
-    expectAccepted(
-      {
-        session: {
-          reuse: 'main',
-          keepAlive: 'harness',
-        },
-      },
-      {
-        fake: {
-          session: {
-            keepAlive: 'harness',
-          },
-        },
-      },
-    );
     expectRefused(
       {
         session: {
@@ -481,6 +547,21 @@ describe('checkAcpAgents — sessions', () => {
         },
       },
     );
+  });
+
+  it('refuses "harness" even from an untyped grant, since the run namespace dies with the run', () => {
+    const untyped: AcpAllowlist = JSON.parse('{"fake":{"session":{"keepAlive":"harness"}}}');
+    const message = expectRefused(
+      {
+        session: {
+          reuse: 'main',
+          keepAlive: 'harness',
+        },
+      },
+      untyped,
+    );
+    expect(message).toContain('session.keepAlive "harness"');
+    expect(acpPrompt(agents(recordingAgent()), untyped, CWD)).toContain('keepAlive up to "run"');
   });
 
   it('refuses session.load unless the grant allows it', () => {
@@ -533,7 +614,7 @@ describe('checkAcpAgents — sessions', () => {
 
 describe('boundedAcpSettings', () => {
   it('fills omitted capabilities from the grant and moves the reuse key into the run namespace', () => {
-    const bounds = acpBounds(undefined);
+    const bounds = acpBounds(undefined, CWD);
     const settings = boundedAcpSettings(
       agentNode({
         clientCapabilities: {
@@ -555,7 +636,28 @@ describe('boundedAcpSettings', () => {
       reuse: `${bounds.sessionScope}/main`,
       keepAlive: 'run',
     });
-    expect(acpBounds(undefined).sessionScope).not.toBe(bounds.sessionScope);
+    expect(acpBounds(undefined, CWD).sessionScope).not.toBe(bounds.sessionScope);
+  });
+
+  it('resolves an omitted cwd to the grant, else the harness cwd it was given', () => {
+    const bounds = acpBounds(
+      {
+        fake: {
+          cwd: '/sandbox',
+        },
+      },
+      CWD,
+    );
+    expect(boundedAcpSettings(agentNode(), bounds).cwd).toBe('/sandbox');
+    expect(
+      boundedAcpSettings(
+        agentNode({
+          cwd: '/sandbox/x',
+        }),
+        bounds,
+      ).cwd,
+    ).toBe('/sandbox/x');
+    expect(boundedAcpSettings(agentNode(), acpBounds(undefined, CWD)).cwd).toBe(CWD);
   });
 });
 
@@ -577,9 +679,15 @@ describe('acpPrompt', () => {
             terminal: true,
           },
           session: {
-            keepAlive: 'harness',
+            keepAlive: 'run',
             load: true,
           },
+          modes: [
+            'default',
+          ],
+          models: [
+            'opus',
+          ],
         },
       },
       CWD,
@@ -589,13 +697,17 @@ describe('acpPrompt', () => {
     expect(prompt).toContain('[{"kind":"read"}]');
     expect(prompt).toContain('cwd "/work"');
     expect(prompt).toContain('clientCapabilities terminal');
-    expect(prompt).toContain('keepAlive up to "harness", "load" allowed');
+    expect(prompt).toContain('keepAlive up to "run", "load" allowed');
+    expect(prompt).toContain('mode one of ["default"]');
+    expect(prompt).toContain('model one of ["opus"]');
   });
 
   it('shows the narrowest defaults without a grant, and no agents without a registry', () => {
     const prompt = acpPrompt(agents(recordingAgent()), undefined, CWD);
     expect(prompt).toContain('clientCapabilities readTextFile');
     expect(prompt).toContain('keepAlive up to "run", no "load"');
+    expect(prompt).toContain('no mode;');
+    expect(prompt).toContain('any model;');
     expect(acpPrompt(undefined, undefined, CWD)).toContain('do not emit acp-agent nodes');
   });
 });
@@ -656,6 +768,82 @@ describe('parseAndRunWorkflow — ACP agent grants', () => {
     }
   });
 
+  it('refuses an ungranted mode before the agent starts, and sets a granted one', async () => {
+    const node = agentNode({
+      mode: 'bypassPermissions',
+    });
+    const refused = recordingAgent();
+    await expectConfig(
+      run(docOf(node), {
+        record: refused,
+      }),
+      'CONNECTION_NOT_ALLOWED',
+    );
+    expect(refused.connects).toBe(0);
+    const { record } = await run(docOf(node), {
+      acp: {
+        fake: {
+          modes: [
+            'bypassPermissions',
+          ],
+        },
+      },
+    });
+    expect(record.modes).toEqual([
+      'bypassPermissions',
+    ]);
+  });
+
+  it('runs a node without cwd in the granted cwd, not the harness cwd', async () => {
+    const { record } = await run(docOf(agentNode()), {
+      acp: {
+        fake: {
+          cwd: '/sandbox',
+        },
+      },
+    });
+    expect(record.cwds).toEqual([
+      '/sandbox',
+    ]);
+  });
+
+  it('runs a node without cwd in the harness cwd read at parse, even if it moves before the step runs', async () => {
+    const record = recordingAgent();
+    const harness = harnessAt(CWD);
+    const ctx = harness.createContext();
+    await parseAndRunWorkflow({
+      json: docOf(
+        agentNode({
+          id: 'first',
+        }),
+        agentNode({
+          id: 'second',
+        }),
+      ),
+      harness,
+      ctx,
+      tools: [],
+      acpAgents: new Map([
+        [
+          'fake',
+          {
+            ...record.agent,
+            async connect(opts) {
+              // The first agent turn moves the harness cwd out of bounds.
+              ctx.cwdState.cwd = '/';
+              return record.agent.connect(opts);
+            },
+          },
+        ],
+      ]),
+    });
+    expect(ctx.cwdState.cwd).toBe('/');
+    expect(record.cwds).toEqual([
+      CWD,
+      CWD,
+    ]);
+  });
+
   it('opens the agent with only the granted capabilities when the node names none', async () => {
     const { output, record } = await run(docOf(agentNode()));
     expect(output).toBe('agent done');
@@ -699,7 +887,7 @@ describe('parseAndRunWorkflow — ACP agent grants', () => {
     ]);
   });
 
-  it('never joins a host session, even under the same reuse key with keepAlive "harness" granted', async () => {
+  it('never joins a host session, even under the same reuse key', async () => {
     const record = recordingAgent();
     const harness = harnessAt(CWD);
     await harness.run(
@@ -743,20 +931,27 @@ describe('parseAndRunWorkflow — ACP agent grants', () => {
       'CONNECTION_NOT_ALLOWED',
     );
     expect(record.connects).toBe(1);
-    await run(docOf(sessionNode), {
-      record,
-      harness,
-      acp: {
-        fake: {
+    await run(
+      docOf(
+        agentNode({
+          id: 'doc',
           session: {
-            keepAlive: 'harness',
+            reuse: 'main',
+            keepAlive: 'run',
           },
-        },
+        }),
+      ),
+      {
+        record,
+        harness,
       },
-    });
-    // The document opened its own connection rather than taking the host's.
+    );
+    // The document opened its own connection rather than taking the host's,
+    // and its session ended with its run.
     expect(record.connects).toBe(2);
-    expect(harness.listAcpSessions().map((s) => s.reuseKey)).toContain('main');
+    expect(harness.listAcpSessions().map((s) => s.reuseKey)).toEqual([
+      'main',
+    ]);
     await harness.closeAcpSessions();
   });
 

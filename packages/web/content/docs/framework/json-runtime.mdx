@@ -851,7 +851,7 @@ const response = await harness.getAgentResponse();
 | `maxRevisions` | `number` | `3` | Retries with error feedback on validation failure. |
 | `connections` | `ConnectionAllowlist` | `undefined` | What a generated document may use of the harness's connections. Required for the planner to use connections at all; the planner is shown only these. See [What a document may use](/docs/framework/connections#what-a-document-may-use). |
 | `acpAgents` | `ReadonlyMap<string, AcpAgent>` | `undefined` | ACP agents a generated `acp-agent` node may run, keyed by agent id. The planner is shown these ids. See [ACP agents](/docs/framework/acp-agents#json-workflows). |
-| `acp` | `AcpAllowlist` | `undefined` | Per agent id, the most a generated `acp-agent` node may ask in `permissions`, `cwd`, `clientCapabilities` and `session`. An agent without an entry gets the narrowest defaults; the planner is shown each agent's limits. See [What a document may ask of an agent](#what-a-document-may-ask-of-an-agent). |
+| `acp` | `AcpAllowlist` | `undefined` | Per agent id, the most a generated `acp-agent` node may ask in `permissions`, `mode`, `model`, `cwd`, `clientCapabilities` and `session`. An agent without an entry gets the narrowest defaults; the planner is shown each agent's limits. See [What a document may ask of an agent](#what-a-document-may-ask-of-an-agent). |
 | `mcp` | `McpAllowlist` | `undefined` | The MCP servers a generated `acp-agent` node may hand its agent. Without it, every server is refused; the planner is shown only these. See [MCP servers](#mcp-servers). |
 
 Throws `NoeticConfigError` with code `WORKFLOW_VALIDATION_FAILED` if the planner cannot produce a valid workflow within the revision limit, `CONNECTION_UNKNOWN` if the allowlist names a connection the harness does not have, and `CONNECTION_NOT_ALLOWED` if the last revision still asks for more than `connections`, `acp` or `mcp` grants.
@@ -889,12 +889,12 @@ const result = await parseAndRunWorkflow({
 | `tools` | `Tool[]` | required | Available tools the workflow may reference by name. |
 | `maxDepth` | `number` | `5` | Maximum allowed workflow tree depth. |
 | `layers` | `ReadonlyMap<string, ContextLayer>` | `undefined` | Named context layers that `withContext`/`spawn` nodes may reference. |
-| `workflows` | `ReadonlyMap<string, WorkflowDocument>` | `undefined` | Named sub-workflows that `subflow` nodes may reference via `ref`. |
+| `workflows` | `ReadonlyMap<string, WorkflowDocument>` | `undefined` | Named sub-workflows that `subflow` nodes may reference via `ref`. Any document you run can invoke any of them, and a named workflow runs as you wrote it — its own `acp-agent` settings, not held to `connections`, `acp` or `mcp`. Register only workflows you would let an untrusted document run. |
 | `maxRecursionDepth` | `number` | `100` | Deepest chain of named-ref resolutions on one path. A positive integer or `Infinity`. |
 | `expressionLimits` | `ExpressionLimits` | `DEFAULT_EXPRESSION_LIMITS` | Bounds on each expression evaluation (`steps`, `depth`, `length`, `timeout`). See [Expressions](/docs/framework/expressions#limits). |
 | `connections` | `ConnectionAllowlist` | `undefined` | What the document may use of the harness's connections: operation and event globs, `setup` value patterns, and secrets bound to one `op.field` each. A manifest asking for more fails with `CONNECTION_NOT_ALLOWED`. See [What a document may use](/docs/framework/connections#what-a-document-may-use). |
 | `acpAgents` | `ReadonlyMap<string, AcpAgent>` | `undefined` | ACP agents the document's `acp-agent` nodes may run, keyed by agent id. |
-| `acp` | `AcpAllowlist` | `undefined` | Per agent id, the most the document's `acp-agent` nodes may ask in `permissions`, `cwd`, `clientCapabilities` and `session`. An agent without an entry gets the narrowest defaults. See [What a document may ask of an agent](#what-a-document-may-ask-of-an-agent). |
+| `acp` | `AcpAllowlist` | `undefined` | Per agent id, the most the document's `acp-agent` nodes may ask in `permissions`, `mode`, `model`, `cwd`, `clientCapabilities` and `session`. An agent without an entry gets the narrowest defaults. See [What a document may ask of an agent](#what-a-document-may-ask-of-an-agent). |
 | `mcp` | `McpAllowlist` | `undefined` | The MCP servers the document's `acp-agent` nodes may hand their agent. Unlike `connections`, absence refuses every server. See [MCP servers](#mcp-servers). |
 
 Returns `Promise<string>` -- the string output of the executed workflow.
@@ -905,10 +905,10 @@ Throws `NoeticConfigError` with code `WORKFLOW_VALIDATION_FAILED` if the JSON do
 
 `parseAndRunWorkflow` and `dynamicWorkflow` run documents you did not write, so an `acp-agent` node gets only what you grant. Two allowlists cover it, and both are checked before anything runs, inline subflows included:
 
-- `acp` — per agent id, the most a node may ask in `permissions`, `cwd`, `clientCapabilities` and `session`.
+- `acp` — per agent id, the most a node may ask in `permissions`, `mode`, `model`, `cwd`, `clientCapabilities` and `session`.
 - `mcp` — the MCP servers a node may list in `mcpServers`, and the secrets their headers and environment may carry ([MCP servers](#mcp-servers)).
 
-`acpAgents` is the set of agents a node may name. Nothing else on a node is limited: `prompt`, `mode` and `model` pass as written. Named subflow refs come from your own `workflows` registry and are neither checked nor held to the grants.
+`acpAgents` is the set of agents a node may name. Nothing else on a node is limited: `prompt` passes as written. Named subflow refs come from your own `workflows` registry and are neither checked nor held to the grants, so every workflow you register is one any document may invoke, with the settings you gave it.
 
 ```ts
 import { parseAndRunWorkflow, AgentHarness } from '@noetic-tools/core';
@@ -931,7 +931,9 @@ await parseAndRunWorkflow({
       // Any directory under /srv/checkouts.
       cwd: '/srv/checkouts',
       clientCapabilities: { readTextFile: true, writeTextFile: true },
-      session: { keepAlive: 'harness' },
+      // The only session mode a node may set; any model goes.
+      modes: ['default'],
+      session: { keepAlive: 'run' },
     },
   },
 });
@@ -942,9 +944,11 @@ await parseAndRunWorkflow({
 | `permissions.default` | set `default: "allow"` only when this is `'allow'` | deny or cancel only |
 | `permissions.allow` | write an `allow` rule only when a granted rule covers it: the same `kind` when the grant sets one, and a `title` containing the grant's title when the grant sets one. `deny` rules are always fine. | no `allow` rules |
 | `permissions.persist` | set `persist` | no |
-| `cwd` | name a plain absolute directory that is this one or under it | the harness's working directory |
+| `modes` | set `mode` to one of these. A mode such as `bypassPermissions` or `acceptEdits` lifts the agent's own prompts, so none is allowed by default. | no `mode` |
+| `models` | set `model` to one of these | any model |
+| `cwd` | name a plain absolute directory that is this one or under it. A node without `cwd` runs here. | the harness's working directory when the document was checked |
 | `clientCapabilities` | turn on only these. A capability the node leaves out takes the grant's value, not the agent client's default of on. | `{ readTextFile: true }` |
-| `session.keepAlive` | keep a session no longer than this (`step` < `run` < `harness`) | `'run'` |
+| `session.keepAlive` | keep a session no longer than this: `'step'` or `'run'`. A document's sessions live in a namespace that ends with its run, so a `'harness'` session would only leak its agent process. | `'run'` |
 | `session.load` | resume an agent session by id | no |
 
 A document's sessions never join yours. Each run of a document moves its `session.reuse` keys into a namespace of its own, so two nodes of one document still share a session, but a node cannot take over a session your code or another document opened — along with the servers, cwd and capabilities it was opened with.
@@ -1001,10 +1005,10 @@ A document then names a granted server, with any header or environment value wri
 }
 ```
 
-- A URL pattern is `<scheme>://<host>[:<port>]<path>`, matched part by part, so a `*` never crosses into another part: `https://*.example.com/*` does not match `https://evil.com/.example.com/`. The host matches case-insensitively and may start with `*.` for any subdomain; `*` anywhere else in the host makes the pattern invalid (`CONNECTION_INVALID`). The port is a number or `*`, and when left out is the scheme's default. In the path, which defaults to `/`, `*` matches any run of characters. The query is not matched.
+- A URL pattern is `<scheme>://<host>[:<port>]<path>`, matched part by part, so a `*` never crosses into another part: `https://*.example.com/*` does not match `https://evil.com/.example.com/`. The host matches case-insensitively and may start with `*.` for any subdomain — one or more non-empty labels, so `https://*.example.com/` does not match `https://.example.com/`. After `*.` come at least two labels: `*.com` is invalid, as is `*` anywhere else in the host (`CONNECTION_INVALID`). The port is a number or `*`, and when left out is the scheme's default. In the path, which defaults to `/`, `*` matches any run of characters. The query is not matched.
 - A server's URL must be `http:` or `https:`, carry no user or password, and be written exactly as `new URL(url).href` reads it back — lowercase host, no default port, a path. The agent gets the URL as written, so a URL that reads differently (a backslash, a tab, `https://mcp.example.com` without the `/`) is refused, with the form to write instead.
 - A stdio server must have the same `command` and the same `args`, in order, as a grant.
-- A header or environment value must be `{ "$secret": "<name>" }`, and a grant matching the server must bind that name to that header (case-insensitive) or variable (exact). When several grants match, one that binds every value is enough. Literal values are refused. The secret is resolved through `environment.secrets` when the session starts; a document using one on a harness without `environment.secrets` fails with `CONNECTION_INVALID` before anything runs.
+- A server may name each header (case-insensitive) or environment variable once. Each value must be `{ "$secret": "<name>" }`, and a grant matching the server must bind that name to that header (case-insensitive) or variable (exact). When several grants match, one that binds every value is enough. Literal values are refused. The secret is resolved through `environment.secrets` when the session starts; a document using one on a harness without `environment.secrets` fails with `CONNECTION_INVALID` before anything runs.
 - Without `mcp`, every server is refused, on both functions. A document you wrote yourself can run through `workflow()` or [`hydrateWorkflow`](#hydration-api), which do not check servers.
 
 Anything else fails with `CONNECTION_NOT_ALLOWED` before the agent starts. `dynamicWorkflow` feeds the refusal back to the planner, and shows it only the granted servers.

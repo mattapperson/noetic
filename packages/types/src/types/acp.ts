@@ -589,6 +589,14 @@ export interface AcpAgentGrant {
   readonly clientCapabilities?: AcpCapabilityGrant;
   /** How a node may keep and resume sessions. Default: `keepAlive` up to `'run'`, no `load`. */
   readonly session?: AcpSessionGrant;
+  /**
+   * The session modes a node may set. A mode can lift the agent's own
+   * permission prompts (`bypassPermissions`, `acceptEdits`), so the default is
+   * none: a node may not set `mode`.
+   */
+  readonly modes?: ReadonlyArray<string>;
+  /** The models a node may select. Default: any, since a model changes no permission. */
+  readonly models?: ReadonlyArray<string>;
 }
 
 /** @public The widest permission policy a node may set. */
@@ -619,11 +627,13 @@ export interface AcpCapabilityGrant {
  * @public
  * How a node may keep and resume sessions. A document's sessions never join
  * the host's: their `reuse` keys live in a namespace of their own, one per run
- * of the document.
+ * of the document. That namespace dies with the run, so a node may keep a
+ * session no longer than `'run'`: a `'harness'` session would only leak its
+ * agent process.
  */
 export interface AcpSessionGrant {
   /** The longest `keepAlive` a node may set. Default: `'run'`. */
-  readonly keepAlive?: AcpKeepAlive;
+  readonly keepAlive?: Exclude<AcpKeepAlive, 'harness'>;
   /** Lets a node resume an agent session by id with `session.load`. */
   readonly load?: boolean;
 }

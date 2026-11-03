@@ -49,7 +49,7 @@ type NamedValue = UrlServer['headers'][number];
  * host's allowlist. No allowlist grants nothing. Inline subflows count; named
  * refs resolve from the host's own registry and are not checked.
  *
- * @throws `NoeticConfigError` `CONNECTION_NOT_ALLOWED` for a server, header or environment value the allowlist does not grant.
+ * @throws `NoeticConfigError` `CONNECTION_NOT_ALLOWED` for a server, header or environment value the allowlist does not grant, or a header or environment variable named twice.
  * @throws `NoeticConfigError` `CONNECTION_INVALID` for a value that is a `$secret` when the harness has no `secrets` resolver, or an allowlist URL pattern that does not parse.
  */
 export function checkMcpServers(
@@ -154,13 +154,24 @@ function checkStdioServer(
 /**
  * Every header or environment value must be a `$secret` that one grant matching
  * the server binds to that name — the same grant for all of them, so a looser
- * grant listed first cannot hide a tighter one that allows the values.
+ * grant listed first cannot hide a tighter one that allows the values. Each
+ * name appears once: which of two `Authorization` headers the agent sends is
+ * up to the agent.
  */
 function checkValues(
   values: ReadonlyArray<NamedValue>,
   grants: ReadonlyArray<McpUrlGrant | McpCommandGrant>,
   where: ValueSite,
 ): void {
+  const twice = values.find((entry, i) =>
+    values.slice(0, i).some((earlier) => sameName(earlier.name, entry.name, where.what)),
+  );
+  if (twice) {
+    throw notAllowed(
+      `Node '${where.nodeId}' sets ${where.what} '${twice.name}' on MCP server '${where.server}' more than once.`,
+      `Name each ${where.what} once.`,
+    );
+  }
   if (grants.some((g) => values.every((entry) => binds(g, entry, where.what)))) {
     return;
   }

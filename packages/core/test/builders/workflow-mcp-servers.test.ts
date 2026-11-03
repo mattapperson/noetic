@@ -562,6 +562,8 @@ describe('checkMcpServers — URL patterns', () => {
       'https://evil.com/#.example.com/x',
       'https://example.com/x',
       'https://evilexample.com/x',
+      'https://.example.com/x',
+      'https://a..example.com/x',
     ]) {
       expectNotAllowed(
         agentDoc([
@@ -581,12 +583,15 @@ describe('checkMcpServers — URL patterns', () => {
     );
   });
 
-  it('refuses a pattern with `*` anywhere in the host but a leading label', () => {
+  it('refuses a pattern with `*` anywhere in the host but a leading label, or before fewer than two labels', () => {
     for (const pattern of [
       'https://mcp.example.com*',
       'https://*',
       'https://mcp.*.com/*',
       '*',
+      'https://*.com/*',
+      'https://*.localhost/*',
+      'https://*.[::1]/*',
     ]) {
       try {
         checkMcpServers(
@@ -703,6 +708,54 @@ describe('checkMcpServers — headers and grants', () => {
       ]),
       grant,
     );
+  });
+
+  it('refuses a header or environment variable named twice', () => {
+    const grant: McpAllowlist = {
+      urls: [
+        {
+          url: 'https://mcp.example.com/*',
+          secrets: {
+            'mcp.token': 'Authorization',
+          },
+        },
+      ],
+      commands: [
+        {
+          ...DOCS_GRANT.commands?.[0],
+          command: 'npx',
+          secrets: {
+            'docs.key': 'API_KEY',
+          },
+        },
+      ],
+    };
+    const key = {
+      name: 'API_KEY',
+      value: {
+        $secret: 'docs.key',
+      },
+    };
+    for (const server of [
+      http('https://mcp.example.com/', [
+        token('authorization'),
+        token('AUTHORIZATION'),
+      ]),
+      {
+        ...DOCS_SERVER,
+        env: [
+          key,
+          key,
+        ],
+      },
+    ]) {
+      expectNotAllowed(
+        agentDoc([
+          server,
+        ]),
+        grant,
+      );
+    }
   });
 
   it('accepts when any matching grant allows the values, whatever the grant order', () => {

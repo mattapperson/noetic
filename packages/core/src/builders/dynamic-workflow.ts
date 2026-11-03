@@ -102,7 +102,7 @@ A WorkflowNode is one of:
 - { "kind": "schedule", "id": "<unique>", "step": <WorkflowNode>, "interval": <ms>, "onError": "continue"|"fail" } (re-runs the step forever on an interval and never returns — only emit for an explicitly daemon-style task)
 - { "kind": "routeSwitch", "id": "<unique>", "decide": { "kind": "decide", "id": "<unique>", "questions": { "<question-id>": { "type": "choice", "instructions": "<question>", "choices": ["<option>", ...] } } }, "on": "<question-id>", "cases": { "<option>": <WorkflowNode>, ... }, "uncertain": <WorkflowNode>, "minConfidence": <optional 0-1> } (a model decides, then the input goes to the matching case; a "boolean" question has cases "true" and "false"; a "score" question has "levels": ["<low>", ..., "<high>"] and routes by level; every outcome needs a case)
 - { "kind": "subflow", "id": "<unique>", "document": { "version": 1, "root": <WorkflowNode> } } (an inline sub-workflow run as one step; only emit the inline form — named refs require a registry this planner does not provide)
-- { "kind": "acp-agent", "id": "<unique>", "agent": "<an agent id listed below>", "prompt": "<turn prompt>", "mode": "<optional session mode>", "model": "<optional>", "mcpServers": [<optional; only servers listed below>], "cwd": "<optional absolute dir>", "permissions": { "default": "deny", "allow": [{ "kind": "<tool kind>", "title": "<substring>" }] }, "clientCapabilities": { "readTextFile": <bool>, "writeTextFile": <bool>, "terminal": <bool> }, "session": { "reuse": "<key>", "keepAlive": "step"|"run"|"harness" } } (every field after "model" is optional and only within the agent's limits listed below)
+- { "kind": "acp-agent", "id": "<unique>", "agent": "<an agent id listed below>", "prompt": "<turn prompt>", "mode": "<optional session mode>", "model": "<optional>", "mcpServers": [<optional; only servers listed below>], "cwd": "<optional absolute dir>", "permissions": { "default": "deny", "allow": [{ "kind": "<tool kind>", "title": "<substring>" }] }, "clientCapabilities": { "readTextFile": <bool>, "writeTextFile": <bool>, "terminal": <bool> }, "session": { "reuse": "<key>", "keepAlive": "step"|"run" } } (every field after "model" is optional and only within the agent's limits listed below)
 
 Every entry of a callModel node's "tools" is an OBJECT, never a bare string. Use { "type": "<tool-name>" } to let the model call one of the tools listed below. Two provider-executed tools are also available without being listed: { "type": "openrouter:web_search" } and { "type": "openrouter:web_fetch" }, each accepting an optional "parameters" object.
 
@@ -156,13 +156,16 @@ export function dynamicWorkflow(opts: DynamicWorkflowOpts): Step<ContextData, st
       }
 
       checkAllowlistNames(opts.connections, ctx);
+      // Read once: the planner is shown, the document checked against, and its
+      // acp-agent nodes run in this cwd, even if the harness's moves meanwhile.
+      const cwd = ctx.cwdState.cwd;
       const toolList = opts.tools.map((t) => `- ${t.name}: ${t.description}`).join('\n');
       const basePrompt = [
         opts.instructions,
         PLANNER_INSTRUCTIONS,
         `\nAvailable tools:\n${toolList}`,
         connectionsPrompt(opts.connections, plannerConnections(opts.connections, ctx)),
-        acpPrompt(opts.acpAgents, opts.acp, ctx.cwdState.cwd),
+        acpPrompt(opts.acpAgents, opts.acp, cwd),
         mcpPrompt(opts.mcp),
         `\nTask: ${input}`,
       ]
@@ -193,7 +196,7 @@ export function dynamicWorkflow(opts: DynamicWorkflowOpts): Step<ContextData, st
           allowlist: opts.connections ?? {},
           ranges: profileVersions(ctx),
           acp: opts.acp,
-          cwd: ctx.cwdState.cwd,
+          cwd,
           mcp: opts.mcp,
           secrets: harnessInternal<SecretResolver>(harness, 'secrets'),
         });
@@ -216,7 +219,7 @@ export function dynamicWorkflow(opts: DynamicWorkflowOpts): Step<ContextData, st
           tools: toolMap,
           executeStep,
           acpAgents: opts.acpAgents,
-          acpBounds: acpBounds(opts.acp),
+          acpBounds: acpBounds(opts.acp, cwd),
           expressionLimits: opts.expressionLimits,
         };
 
@@ -247,7 +250,12 @@ export interface ParseAndRunWorkflowOpts {
    * host that runs layer-bearing workflows must pass its layers here.
    */
   layers?: ReadonlyMap<string, ContextLayer>;
-  /** Named sub-workflows the document's `subflow` nodes may reference via `ref`. */
+  /**
+   * Named sub-workflows the document's `subflow` nodes may reference via `ref`.
+   * A named workflow runs as the host wrote it, not held to `connections`,
+   * `acp` or `mcp`: register only workflows you would let any document run
+   * with their own settings.
+   */
   workflows?: ReadonlyMap<string, WorkflowDocument>;
   /**
    * Deepest allowed chain of named-ref resolutions on one execution path —
@@ -304,10 +312,11 @@ export interface ParseAndRunWorkflowOpts {
  */
 export async function parseAndRunWorkflow(opts: ParseAndRunWorkflowOpts): Promise<string> {
   checkAllowlistNames(opts.connections, opts.ctx);
+  const cwd = opts.ctx.cwdState.cwd;
   const parseResult = tryParseWorkflow(opts.json, opts.maxDepth ?? DEFAULT_MAX_DEPTH, {
     allowlist: opts.connections,
     acp: opts.acp,
-    cwd: opts.ctx.cwdState.cwd,
+    cwd,
     mcp: opts.mcp,
     secrets: harnessInternal<SecretResolver>(opts.harness, 'secrets'),
   });
@@ -329,7 +338,7 @@ export async function parseAndRunWorkflow(opts: ParseAndRunWorkflowOpts): Promis
     layers: opts.layers,
     workflows: opts.workflows,
     acpAgents: opts.acpAgents,
-    acpBounds: acpBounds(opts.acp),
+    acpBounds: acpBounds(opts.acp, cwd),
     maxRecursionDepth: opts.maxRecursionDepth,
     expressionLimits: opts.expressionLimits,
   };

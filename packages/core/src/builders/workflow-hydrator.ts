@@ -116,6 +116,8 @@ export interface HydrationContext {
     readonly grants: AcpAllowlist;
     /** Prefixes every `session.reuse` key, so the document's sessions never meet the host's. */
     readonly sessionScope: string;
+    /** The harness's working directory when the document was checked: a node's `cwd` when neither it nor its grant sets one. */
+    readonly cwd: string;
   };
   /**
    * The hydrated document's identity for `$steps`: each `hydrateWorkflow` call

@@ -1,7 +1,8 @@
 /**
  * What a document's `acp-agent` nodes may ask of an agent. A node's
- * `permissions`, `cwd`, `clientCapabilities` and `session` decide what the
- * agent can do on the host — `terminal` alone hands it a shell — so a document
+ * `permissions`, `mode`, `cwd`, `clientCapabilities` and `session` decide what
+ * the agent can do on the host — `terminal` alone hands it a shell, and a mode
+ * such as `bypassPermissions` lifts its prompts — so a document
  * a host did not write may ask only for what the host's `acp` allowlist grants
  * that agent (spec 26 § ACP agents).
  */
@@ -44,7 +45,7 @@ type AcpBounds = NonNullable<HydrationContext['acpBounds']>;
  * subflows count; named refs resolve from the host's own registry and are not
  * checked.
  *
- * @throws `NoeticConfigError` `CONNECTION_NOT_ALLOWED` for a permission, `cwd`, client capability or session setting the grant does not allow.
+ * @throws `NoeticConfigError` `CONNECTION_NOT_ALLOWED` for a permission, mode, model, `cwd`, client capability or session setting the grant does not allow.
  */
 export function checkAcpAgents(
   doc: WorkflowDocument,
@@ -57,37 +58,48 @@ export function checkAcpAgents(
     }
     const grant = grantFor(grants, node.agent);
     checkPermissions(node, grant.permissions);
+    checkChoice(node, 'mode', grant.modes ?? []);
+    checkChoice(node, 'model', grant.models);
     checkCwd(node, grant.cwd ?? harnessCwd);
     checkCapabilities(node, capabilityCeiling(grant));
     checkSession(node, grant);
   }
 }
 
-/** A new namespace for one run of a document's sessions. */
-export function acpBounds(grants: AcpAllowlist | undefined): AcpBounds {
+/**
+ * A new namespace for one run of a document's sessions, with the harness's
+ * working directory as it was when the document was checked.
+ */
+export function acpBounds(grants: AcpAllowlist | undefined, harnessCwd: string): AcpBounds {
   return {
     grants: grants ?? {},
     sessionScope: `document-${crypto.randomUUID()}`,
+    cwd: harnessCwd,
   };
 }
 
 /**
- * The node's settings as its step runs them. An omitted capability takes the
- * grant's value rather than the protocol client's default of on, and a
- * `session.reuse` key moves into the document's namespace.
+ * The node's settings as its step runs them. An omitted `cwd` takes the
+ * grant's, else the harness's as it was when the document was checked — never
+ * the harness's at run time, which may since have left the grant. An omitted
+ * capability takes the grant's value rather than the protocol client's default
+ * of on, and a `session.reuse` key moves into the document's namespace.
  */
 export function boundedAcpSettings(
   node: AcpAgentNode,
   bounds: AcpBounds,
 ): {
+  cwd: string;
   clientCapabilities: Required<AcpCapabilityGrant>;
   session: AcpSessionPolicy | undefined;
 } {
-  const ceiling = capabilityCeiling(grantFor(bounds.grants, node.agent));
+  const grant = grantFor(bounds.grants, node.agent);
+  const ceiling = capabilityCeiling(grant);
   const capability = (name: Capability): boolean =>
     node.clientCapabilities?.[name] ?? ceiling[name] === true;
   const reuse = node.session?.reuse;
   return {
+    cwd: node.cwd ?? grant.cwd ?? bounds.cwd,
     clientCapabilities: {
       readTextFile: capability('readTextFile'),
       writeTextFile: capability('writeTextFile'),
@@ -141,6 +153,9 @@ const KEEP_ALIVE_ORDER: Readonly<Record<AcpKeepAlive, number>> = {
   harness: 2,
 };
 
+/** A document's session namespace dies with its run, so no session outlives the run. */
+const LONGEST_KEEP_ALIVE: AcpKeepAlive = 'run';
+
 function grantFor(grants: AcpAllowlist | undefined, agent: string): AcpAgentGrant {
   return grants && Object.hasOwn(grants, agent) ? (grants[agent] ?? NO_GRANT) : NO_GRANT;
 }
@@ -186,6 +201,25 @@ function covers(ceiling: PermissionRule, rule: PermissionRule): boolean {
   return rule.title?.toLowerCase().includes(ceiling.title.toLowerCase()) === true;
 }
 
+/** Refuses a node's `field` not in `granted`. Undefined `granted` allows any value; an empty one, none. */
+function checkChoice(
+  node: AcpAgentNode,
+  field: 'mode' | 'model',
+  granted: ReadonlyArray<string> | undefined,
+): void {
+  const value = node[field];
+  if (value === undefined || granted === undefined || granted.includes(value)) {
+    return;
+  }
+  throw notAllowed(
+    node,
+    `${field} ${JSON.stringify(value)}`,
+    granted.length > 0
+      ? `Set \`${field}\` to one of ${JSON.stringify(granted)}, or leave it out.`
+      : `Leave \`${field}\` out.`,
+  );
+}
+
 function checkCwd(node: AcpAgentNode, root: string): void {
   if (node.cwd === undefined || isUnder(node.cwd, root)) {
     return;
@@ -226,7 +260,7 @@ function checkCapabilities(node: AcpAgentNode, ceiling: AcpCapabilityGrant): voi
 }
 
 function checkSession(node: AcpAgentNode, grant: AcpAgentGrant): void {
-  const longest = grant.session?.keepAlive ?? 'run';
+  const longest = longestKeepAlive(grant);
   const keepAlive = node.session?.keepAlive ?? 'step';
   if (KEEP_ALIVE_ORDER[keepAlive] > KEEP_ALIVE_ORDER[longest]) {
     throw notAllowed(
@@ -238,6 +272,14 @@ function checkSession(node: AcpAgentNode, grant: AcpAgentGrant): void {
   if (node.session?.load !== undefined && !grant.session?.load) {
     throw notAllowed(node, 'session.load', 'Leave `load` out to start a new session.');
   }
+}
+
+/** The grant's `keepAlive`, capped at `'run'` for a grant from untyped code that says `'harness'`. */
+function longestKeepAlive(grant: AcpAgentGrant): AcpKeepAlive {
+  const granted = grant.session?.keepAlive ?? LONGEST_KEEP_ALIVE;
+  return KEEP_ALIVE_ORDER[granted] > KEEP_ALIVE_ORDER[LONGEST_KEEP_ALIVE]
+    ? LONGEST_KEEP_ALIVE
+    : granted;
 }
 
 function notAllowed(node: AcpAgentNode, what: string, hint: string): NoeticConfigError {
@@ -261,10 +303,19 @@ function agentLine(id: string, grant: AcpAgentGrant, harnessCwd: string): string
     `permissions default ${permissions?.default === 'allow' ? '"allow" or "deny"' : '"deny" only'},`,
     `"allow" rules only within ${JSON.stringify(permissions?.allow ?? [])},`,
     `${permissions?.persist ? '' : 'no '}"persist";`,
+    `${choiceLine('mode', grant.modes ?? [])};`,
+    `${choiceLine('model', grant.models)};`,
     `cwd ${JSON.stringify(grant.cwd ?? harnessCwd)} or a directory under it;`,
     `clientCapabilities ${on.length > 0 ? on.join(', ') : 'none'} (any other off);`,
-    `session keepAlive up to ${JSON.stringify(grant.session?.keepAlive ?? 'run')}, ${grant.session?.load ? '"load" allowed' : 'no "load"'}`,
+    `session keepAlive up to ${JSON.stringify(longestKeepAlive(grant))}, ${grant.session?.load ? '"load" allowed' : 'no "load"'}`,
   ].join(' ');
+}
+
+function choiceLine(field: 'mode' | 'model', granted: ReadonlyArray<string> | undefined): string {
+  if (granted === undefined) {
+    return `any ${field}`;
+  }
+  return granted.length > 0 ? `${field} one of ${JSON.stringify(granted)}` : `no ${field}`;
 }
 
 //#endregion

@@ -222,8 +222,8 @@ export function hydrateWaitNode(
 
 /**
  * Hydrates an `acp-agent` node into `step.acpAgent`. Under `ctx.acpBounds` the
- * node's client capabilities and session key are held to its agent's grant
- * (see `boundedAcpSettings`).
+ * node's cwd, client capabilities and session key are held to its agent's
+ * grant (see `boundedAcpSettings`).
  *
  * @throws `NoeticConfigError` `UNKNOWN_ACP_AGENT_REFERENCE` when `ctx.acpAgents` has no adapter for the node's agent.
  */
@@ -247,7 +247,7 @@ export function hydrateAcpAgentNode(
     id: node.id,
     agent,
     prompt: node.prompt,
-    cwd: node.cwd,
+    cwd: bounded.cwd,
     mode: node.mode,
     model: node.model,
     mcpServers: stepMcpServers(node.mcpServers),
