@@ -1,3 +1,7 @@
+## @noetic-tools/core-v5.19.3 (2026-11-03)
+
+* fix(core): hold a document's acp-agent nodes and MCP servers to host grants (#155) ([89ed3e6](https://github.com/mattapperson/noetic/commit/89ed3e6)), closes [#155](https://github.com/mattapperson/noetic/issues/155)
+
 ## @noetic-tools/core-v5.19.2 (2026-10-30)
 
 * ci: publish prereleases from next to the next dist-tag (#152) ([0b247bc](https://github.com/mattapperson/noetic/commit/0b247bc)), closes [#152](https://github.com/mattapperson/noetic/issues/152)
