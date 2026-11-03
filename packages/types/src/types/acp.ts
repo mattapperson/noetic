@@ -562,6 +562,74 @@ export interface AcpSessionDisposer {
 
 //#endregion
 
+//#region Document grants
+
+/**
+ * @public
+ * The most a document's `acp-agent` nodes may ask of each agent, keyed by
+ * agent id (`dynamicWorkflow({ acp })`, `parseAndRunWorkflow({ acp })`). An
+ * agent without an entry gets the defaults each field names. A node asking for
+ * more fails validation with `CONNECTION_NOT_ALLOWED`.
+ */
+export type AcpAllowlist = Readonly<Record<string, AcpAgentGrant>>;
+
+/** @public The most a document's `acp-agent` nodes may ask of one agent. */
+export interface AcpAgentGrant {
+  /** The widest `permissions` policy a node may set. Default: a node may only deny. */
+  readonly permissions?: AcpPermissionGrant;
+  /**
+   * The absolute directory a node's `cwd` must be or sit under. Default: the
+   * harness's working directory.
+   */
+  readonly cwd?: string;
+  /**
+   * The client capabilities a node may turn on. A capability the node leaves
+   * out takes the grant's value. Default: `{ readTextFile: true }`.
+   */
+  readonly clientCapabilities?: AcpCapabilityGrant;
+  /** How a node may keep and resume sessions. Default: `keepAlive` up to `'run'`, no `load`. */
+  readonly session?: AcpSessionGrant;
+}
+
+/** @public The widest permission policy a node may set. */
+export interface AcpPermissionGrant {
+  /** `'allow'` lets a node set `default: 'allow'`; anything else lets it deny or cancel only. */
+  readonly default?: AcpPermissionDecision;
+  /**
+   * Each of a node's `allow` rules must fall within one of these: the same
+   * `kind` when this sets one, and a `title` containing this one when this
+   * sets one. Default: none, so a node may set no `allow` rules.
+   */
+  readonly allow?: ReadonlyArray<{
+    readonly kind?: acp.ToolKind;
+    readonly title?: string;
+  }>;
+  /** Lets a node set `persist`. */
+  readonly persist?: boolean;
+}
+
+/** @public The client capabilities a node may turn on. Each defaults to off. */
+export interface AcpCapabilityGrant {
+  readonly readTextFile?: boolean;
+  readonly writeTextFile?: boolean;
+  readonly terminal?: boolean;
+}
+
+/**
+ * @public
+ * How a node may keep and resume sessions. A document's sessions never join
+ * the host's: their `reuse` keys live in a namespace of their own, one per run
+ * of the document.
+ */
+export interface AcpSessionGrant {
+  /** The longest `keepAlive` a node may set. Default: `'run'`. */
+  readonly keepAlive?: AcpKeepAlive;
+  /** Lets a node resume an agent session by id with `session.load`. */
+  readonly load?: boolean;
+}
+
+//#endregion
+
 //#region Errors
 
 /**

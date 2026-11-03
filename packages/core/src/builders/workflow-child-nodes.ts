@@ -397,6 +397,7 @@ function resolveSubflowDocument(
     childCtx: {
       ...ctx,
       recursionDepth: depth,
+      acpBounds: undefined,
     },
   };
 }

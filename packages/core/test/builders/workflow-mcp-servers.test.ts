@@ -10,6 +10,7 @@ import type {
   CallModelRequest,
   Context,
   McpAllowlist,
+  SecretResolver,
   WorkflowDocument,
   WorkflowMcpServer,
 } from '@noetic-tools/types';
@@ -217,7 +218,7 @@ async function expectConfig(promise: Promise<unknown>, code: string): Promise<st
 
 function expectNotAllowed(document: WorkflowDocument, allowlist: McpAllowlist | undefined): void {
   try {
-    checkMcpServers(document, allowlist);
+    checkMcpServers(document, allowlist, SECRETS);
   } catch (e) {
     assert(isNoeticConfigError(e));
     expect(e.code).toBe('CONNECTION_NOT_ALLOWED');
@@ -225,6 +226,12 @@ function expectNotAllowed(document: WorkflowDocument, allowlist: McpAllowlist | 
   }
   expect.unreachable('expected CONNECTION_NOT_ALLOWED');
 }
+
+const SECRETS: SecretResolver = {
+  async resolve(name) {
+    return `resolved-${name}`;
+  },
+};
 
 const DOCS_GRANT: McpAllowlist = {
   commands: [
@@ -266,6 +273,7 @@ describe('checkMcpServers — stdio', () => {
           DOCS_SERVER,
         ]),
         DOCS_GRANT,
+        SECRETS,
       ),
     ).not.toThrow();
   });
@@ -358,6 +366,7 @@ describe('checkMcpServers — stdio', () => {
           },
         ]),
         grant,
+        SECRETS,
       ),
     ).not.toThrow();
   });
@@ -398,6 +407,7 @@ describe('checkMcpServers — HTTP and SSE', () => {
           http('https://mcp.example.com/v1/mcp'),
         ]),
         grant,
+        SECRETS,
       ),
     ).not.toThrow();
   });
@@ -442,7 +452,7 @@ describe('checkMcpServers — HTTP and SSE', () => {
     const any: McpAllowlist = {
       urls: [
         {
-          url: '*',
+          url: 'https://*.example/*',
         },
       ],
     };
@@ -511,12 +521,321 @@ describe('checkMcpServers — HTTP and SSE', () => {
           ]),
         ]),
         grant,
+        SECRETS,
       ),
     ).not.toThrow();
   });
 
   it('accepts a document with no MCP servers without an allowlist', () => {
-    expect(() => checkMcpServers(agentDoc([]), undefined)).not.toThrow();
+    expect(() => checkMcpServers(agentDoc([]), undefined, SECRETS)).not.toThrow();
+  });
+});
+
+describe('checkMcpServers — URL patterns', () => {
+  function urls(...patterns: string[]): McpAllowlist {
+    return {
+      urls: patterns.map((url) => ({
+        url,
+      })),
+    };
+  }
+
+  function accepts(url: string, allowlist: McpAllowlist): void {
+    expect(() =>
+      checkMcpServers(
+        agentDoc([
+          http(url),
+        ]),
+        allowlist,
+        SECRETS,
+      ),
+    ).not.toThrow();
+  }
+
+  it('keeps a wildcard host label from crossing into the path, query, fragment or user', () => {
+    const sub = urls('https://*.example.com/*');
+    accepts('https://mcp.example.com/x', sub);
+    accepts('https://a.b.example.com/x', sub);
+    for (const url of [
+      'https://evil.com/.example.com/x',
+      'https://evil.com/?.example.com/x',
+      'https://evil.com/#.example.com/x',
+      'https://example.com/x',
+      'https://evilexample.com/x',
+    ]) {
+      expectNotAllowed(
+        agentDoc([
+          http(url),
+        ]),
+        sub,
+      );
+    }
+  });
+
+  it('matches the host exactly, so a suffix host does not match', () => {
+    expectNotAllowed(
+      agentDoc([
+        http('https://mcp.example.com.evil.com/'),
+      ]),
+      urls('https://mcp.example.com/*'),
+    );
+  });
+
+  it('refuses a pattern with `*` anywhere in the host but a leading label', () => {
+    for (const pattern of [
+      'https://mcp.example.com*',
+      'https://*',
+      'https://mcp.*.com/*',
+      '*',
+    ]) {
+      try {
+        checkMcpServers(
+          agentDoc([
+            http('https://mcp.example.com/'),
+          ]),
+          urls(pattern),
+          SECRETS,
+        );
+        expect.unreachable(`expected CONNECTION_INVALID for ${pattern}`);
+      } catch (e) {
+        assert(isNoeticConfigError(e));
+        expect(e.code).toBe('CONNECTION_INVALID');
+      }
+    }
+  });
+
+  it('applies the path glob to the path only', () => {
+    const v1 = urls('https://mcp.example.com/v1/*');
+    accepts('https://mcp.example.com/v1/tools?x=1', v1);
+    expectNotAllowed(
+      agentDoc([
+        http('https://mcp.example.com/v2/tools'),
+      ]),
+      v1,
+    );
+  });
+
+  it('reads pattern hosts and ports the way URLs are read: case and default ports', () => {
+    accepts('https://mcp.example.com/x', urls('https://MCP.Example.COM/*'));
+    accepts('https://mcp.example.com/x', urls('https://mcp.example.com:443/*'));
+    accepts('http://localhost:8080/', urls('http://localhost:*/'));
+    expectNotAllowed(
+      agentDoc([
+        http('https://mcp.example.com:8443/x'),
+      ]),
+      urls('https://mcp.example.com/*'),
+    );
+  });
+
+  it('refuses a URL written differently from how it reads, since the agent gets it as written', () => {
+    const grant = urls('https://mcp.example.com/*');
+    for (const url of [
+      'https://mcp.example.com\\@evil.com/',
+      'https://mcp.example.com\t/x',
+      'HTTPS://MCP.EXAMPLE.COM/x',
+      'https://mcp%2Eexample.com/x',
+      'https://mcp.example.com:443/x',
+      'https://mcp.example.com',
+      'https://mcp.example.com/a/../x',
+    ]) {
+      expectNotAllowed(
+        agentDoc([
+          http(url),
+        ]),
+        grant,
+      );
+    }
+  });
+});
+
+describe('checkMcpServers — headers and grants', () => {
+  const token = (name: string): AcpMcpServerHeader => ({
+    name,
+    value: {
+      $secret: 'mcp.token',
+    },
+  });
+
+  it('matches header names case-insensitively, and environment names exactly', () => {
+    const grant: McpAllowlist = {
+      urls: [
+        {
+          url: 'https://mcp.example.com/*',
+          secrets: {
+            'mcp.token': 'Authorization',
+          },
+        },
+      ],
+      commands: [
+        {
+          ...DOCS_GRANT.commands?.[0],
+          command: 'npx',
+          secrets: {
+            'docs.key': 'API_KEY',
+          },
+        },
+      ],
+    };
+    expect(() =>
+      checkMcpServers(
+        agentDoc([
+          http('https://mcp.example.com/', [
+            token('authorization'),
+          ]),
+        ]),
+        grant,
+        SECRETS,
+      ),
+    ).not.toThrow();
+    expectNotAllowed(
+      agentDoc([
+        {
+          ...DOCS_SERVER,
+          env: [
+            {
+              name: 'api_key',
+              value: {
+                $secret: 'docs.key',
+              },
+            },
+          ],
+        },
+      ]),
+      grant,
+    );
+  });
+
+  it('accepts when any matching grant allows the values, whatever the grant order', () => {
+    const loose = {
+      url: 'https://*.example.com/*',
+    };
+    const tight = {
+      url: 'https://mcp.example.com/*',
+      secrets: {
+        'mcp.token': 'Authorization',
+      },
+    };
+    const server = http('https://mcp.example.com/', [
+      token('Authorization'),
+    ]);
+    for (const order of [
+      [
+        loose,
+        tight,
+      ],
+      [
+        tight,
+        loose,
+      ],
+    ]) {
+      expect(() =>
+        checkMcpServers(
+          agentDoc([
+            server,
+          ]),
+          {
+            urls: order,
+          },
+          SECRETS,
+        ),
+      ).not.toThrow();
+    }
+    // The secret is still bound to the tight grant's URL only.
+    expectNotAllowed(
+      agentDoc([
+        http('https://other.example.com/', [
+          token('Authorization'),
+        ]),
+      ]),
+      {
+        urls: [
+          tight,
+          loose,
+        ],
+      },
+    );
+  });
+
+  it('refuses values that only two grants together would allow', () => {
+    expectNotAllowed(
+      agentDoc([
+        http('https://mcp.example.com/', [
+          token('Authorization'),
+          {
+            name: 'X-Team',
+            value: {
+              $secret: 'team',
+            },
+          },
+        ]),
+      ]),
+      {
+        urls: [
+          {
+            url: 'https://mcp.example.com/*',
+            secrets: {
+              'mcp.token': 'Authorization',
+            },
+          },
+          {
+            url: 'https://mcp.example.com/*',
+            secrets: {
+              team: 'X-Team',
+            },
+          },
+        ],
+      },
+    );
+  });
+
+  it('does not read a secret name off the grant object prototype', () => {
+    expectNotAllowed(
+      agentDoc([
+        http('https://mcp.example.com/', [
+          {
+            name: 'Authorization',
+            value: {
+              $secret: 'constructor',
+            },
+          },
+        ]),
+      ]),
+      {
+        urls: [
+          {
+            url: 'https://mcp.example.com/*',
+            secrets: {},
+          },
+        ],
+      },
+    );
+  });
+
+  it('refuses a $secret at validation when the harness has no secret resolver', () => {
+    try {
+      checkMcpServers(
+        agentDoc([
+          http('https://mcp.example.com/', [
+            token('Authorization'),
+          ]),
+        ]),
+        {
+          urls: [
+            {
+              url: 'https://mcp.example.com/*',
+              secrets: {
+                'mcp.token': 'Authorization',
+              },
+            },
+          ],
+        },
+        undefined,
+      );
+      expect.unreachable('expected CONNECTION_INVALID');
+    } catch (e) {
+      assert(isNoeticConfigError(e));
+      expect(e.code).toBe('CONNECTION_INVALID');
+    }
   });
 });
 
@@ -645,6 +964,48 @@ describe('parseAndRunWorkflow — MCP servers', () => {
       ],
     ]);
     expect(ctx.itemLog.items.length).toBeGreaterThan(0);
+  });
+});
+
+describe('parseAndRunWorkflow — MCP server secrets', () => {
+  it('refuses a $secret before the agent starts when the harness has no secret resolver', async () => {
+    const record = recordingAgent();
+    const harness = harnessWithSecrets();
+    await expectConfig(
+      parseAndRunWorkflow({
+        json: agentDoc([
+          http('https://mcp.example.com/', [
+            {
+              name: 'Authorization',
+              value: {
+                $secret: 'mcp.token',
+              },
+            },
+          ]),
+        ]),
+        harness,
+        ctx: harness.createContext(),
+        tools: [],
+        acpAgents: new Map([
+          [
+            'fake',
+            record.agent,
+          ],
+        ]),
+        mcp: {
+          urls: [
+            {
+              url: 'https://mcp.example.com/*',
+              secrets: {
+                'mcp.token': 'Authorization',
+              },
+            },
+          ],
+        },
+      }),
+      'CONNECTION_INVALID',
+    );
+    expect(record.connects).toBe(0);
   });
 });
 

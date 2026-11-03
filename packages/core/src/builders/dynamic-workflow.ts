@@ -7,11 +7,13 @@ import type { ContextData, ContextLayer } from '@noetic-tools/context';
 import { exportSpans } from '@noetic-tools/context';
 import type {
   AcpAgent,
+  AcpAllowlist,
   AgentHarnessContract,
   ConnectionAllowlist,
   Context,
   ExecuteStepFn,
   McpAllowlist,
+  SecretResolver,
   Span,
   Step,
   Tool,
@@ -25,6 +27,7 @@ import { WorkflowDocumentSchema, workflowDepth, workflowGraph } from '../schemas
 import { harnessInternal } from '../util/harness-internals';
 import { outputText } from './output-text';
 import { callModel, runCode } from './step-builders';
+import { acpBounds, acpPrompt, checkAcpAgents } from './workflow-acp-grants';
 import {
   checkConnectionAllowlist,
   checkDocumentConnections,
@@ -54,6 +57,13 @@ export interface DynamicWorkflowOpts {
   connections?: ConnectionAllowlist;
   /** ACP agent adapters, keyed by `agentId`, that the document's `acp-agent` nodes may run. Default: none. */
   acpAgents?: ReadonlyMap<string, AcpAgent>;
+  /**
+   * The most a generated `acp-agent` node may ask of each agent: permissions,
+   * `cwd`, client capabilities and sessions (spec 26 § ACP agents). An agent
+   * without an entry gets the narrowest defaults; a node asking for more fails
+   * validation with `CONNECTION_NOT_ALLOWED`. The planner is shown these limits.
+   */
+  acp?: AcpAllowlist;
   /**
    * The MCP servers a generated `acp-agent` node may hand its agent (spec 26 §
    * MCP servers). Without it, a node naming any server fails validation with
@@ -92,7 +102,7 @@ A WorkflowNode is one of:
 - { "kind": "schedule", "id": "<unique>", "step": <WorkflowNode>, "interval": <ms>, "onError": "continue"|"fail" } (re-runs the step forever on an interval and never returns — only emit for an explicitly daemon-style task)
 - { "kind": "routeSwitch", "id": "<unique>", "decide": { "kind": "decide", "id": "<unique>", "questions": { "<question-id>": { "type": "choice", "instructions": "<question>", "choices": ["<option>", ...] } } }, "on": "<question-id>", "cases": { "<option>": <WorkflowNode>, ... }, "uncertain": <WorkflowNode>, "minConfidence": <optional 0-1> } (a model decides, then the input goes to the matching case; a "boolean" question has cases "true" and "false"; a "score" question has "levels": ["<low>", ..., "<high>"] and routes by level; every outcome needs a case)
 - { "kind": "subflow", "id": "<unique>", "document": { "version": 1, "root": <WorkflowNode> } } (an inline sub-workflow run as one step; only emit the inline form — named refs require a registry this planner does not provide)
-- { "kind": "acp-agent", "id": "<unique>", "agent": "<registered agent id, e.g. claude-code>", "prompt": "<turn prompt>", "mode": "<optional session mode>", "model": "<optional>", "mcpServers": [<optional; only servers listed below>] }
+- { "kind": "acp-agent", "id": "<unique>", "agent": "<an agent id listed below>", "prompt": "<turn prompt>", "mode": "<optional session mode>", "model": "<optional>", "mcpServers": [<optional; only servers listed below>], "cwd": "<optional absolute dir>", "permissions": { "default": "deny", "allow": [{ "kind": "<tool kind>", "title": "<substring>" }] }, "clientCapabilities": { "readTextFile": <bool>, "writeTextFile": <bool>, "terminal": <bool> }, "session": { "reuse": "<key>", "keepAlive": "step"|"run"|"harness" } } (every field after "model" is optional and only within the agent's limits listed below)
 
 Every entry of a callModel node's "tools" is an OBJECT, never a bare string. Use { "type": "<tool-name>" } to let the model call one of the tools listed below. Two provider-executed tools are also available without being listed: { "type": "openrouter:web_search" } and { "type": "openrouter:web_fetch" }, each accepting an optional "parameters" object.
 
@@ -125,7 +135,7 @@ Respond with ONLY the JSON document, no markdown fences or explanation.`;
  * @returns A `Step` that dynamically plans and executes.
  * @throws `NoeticConfigError` with code `INVALID_EXPRESSION_LIMITS` (at execution) if `expressionLimits` holds a value that is not a positive integer or `Infinity`.
  * @throws `NoeticConfigError` with code `EXPRESSION_LIMIT_EXCEEDED` (at execution) if an expression in the generated workflow exceeds its limits.
- * @throws `NoeticConfigError` with code `CONNECTION_NOT_ALLOWED` (at execution) if, on the last revision, the document asks for more than `connections` or `mcp` grants.
+ * @throws `NoeticConfigError` with code `CONNECTION_NOT_ALLOWED` (at execution) if, on the last revision, the document asks for more than `connections`, `acp` or `mcp` grants.
  */
 export function dynamicWorkflow(opts: DynamicWorkflowOpts): Step<ContextData, string, string> {
   const model = opts.model ?? DEFAULT_MODEL;
@@ -152,6 +162,7 @@ export function dynamicWorkflow(opts: DynamicWorkflowOpts): Step<ContextData, st
         PLANNER_INSTRUCTIONS,
         `\nAvailable tools:\n${toolList}`,
         connectionsPrompt(opts.connections, plannerConnections(opts.connections, ctx)),
+        acpPrompt(opts.acpAgents, opts.acp, ctx.cwdState.cwd),
         mcpPrompt(opts.mcp),
         `\nTask: ${input}`,
       ]
@@ -181,7 +192,10 @@ export function dynamicWorkflow(opts: DynamicWorkflowOpts): Step<ContextData, st
         const parseResult = tryParseWorkflow(text, maxDepth, {
           allowlist: opts.connections ?? {},
           ranges: profileVersions(ctx),
+          acp: opts.acp,
+          cwd: ctx.cwdState.cwd,
           mcp: opts.mcp,
+          secrets: harnessInternal<SecretResolver>(harness, 'secrets'),
         });
         if (!parseResult.ok) {
           lastError = parseResult.error;
@@ -202,6 +216,7 @@ export function dynamicWorkflow(opts: DynamicWorkflowOpts): Step<ContextData, st
           tools: toolMap,
           executeStep,
           acpAgents: opts.acpAgents,
+          acpBounds: acpBounds(opts.acp),
           expressionLimits: opts.expressionLimits,
         };
 
@@ -251,6 +266,13 @@ export interface ParseAndRunWorkflowOpts {
   /** ACP agent adapters, keyed by `agentId`, that the document's `acp-agent` nodes may run. Default: none. */
   acpAgents?: ReadonlyMap<string, AcpAgent>;
   /**
+   * The most the document's `acp-agent` nodes may ask of each agent:
+   * permissions, `cwd`, client capabilities and sessions (spec 26 § ACP
+   * agents). An agent without an entry gets the narrowest defaults; a node
+   * asking for more fails validation with `CONNECTION_NOT_ALLOWED`.
+   */
+  acp?: AcpAllowlist;
+  /**
    * The MCP servers the document's `acp-agent` nodes may hand their agent
    * (spec 26 § MCP servers). Unlike `connections`, absence grants nothing: a
    * node naming any server fails validation with `CONNECTION_NOT_ALLOWED`.
@@ -277,13 +299,17 @@ export interface ParseAndRunWorkflowOpts {
  * @throws `NoeticConfigError` with code `INVALID_EXPRESSION_LIMITS` if `expressionLimits` holds a value that is not a positive integer or `Infinity`.
  * @throws `NoeticConfigError` with code `EXPRESSION_LIMIT_EXCEEDED` if an expression exceeds its limits.
  * @throws `NoeticConfigError` with code `CONNECTION_UNKNOWN` if a node uses a connection the document does not declare, or the allowlist names one the harness does not have.
- * @throws `NoeticConfigError` with code `CONNECTION_NOT_ALLOWED` if the document asks for more than `connections` grants, or an `acp-agent` node names an MCP server `mcp` does not grant.
+ * @throws `NoeticConfigError` with code `CONNECTION_NOT_ALLOWED` if the document asks for more than `connections` grants, or an `acp-agent` node asks for more than `acp` or `mcp` grants.
+ * @throws `NoeticConfigError` with code `CONNECTION_INVALID` if an MCP server uses a `$secret` and the harness has no `environment.secrets`.
  */
 export async function parseAndRunWorkflow(opts: ParseAndRunWorkflowOpts): Promise<string> {
   checkAllowlistNames(opts.connections, opts.ctx);
   const parseResult = tryParseWorkflow(opts.json, opts.maxDepth ?? DEFAULT_MAX_DEPTH, {
     allowlist: opts.connections,
+    acp: opts.acp,
+    cwd: opts.ctx.cwdState.cwd,
     mcp: opts.mcp,
+    secrets: harnessInternal<SecretResolver>(opts.harness, 'secrets'),
   });
   if (!parseResult.ok && parseResult.configError) {
     throw parseResult.configError;
@@ -303,6 +329,7 @@ export async function parseAndRunWorkflow(opts: ParseAndRunWorkflowOpts): Promis
     layers: opts.layers,
     workflows: opts.workflows,
     acpAgents: opts.acpAgents,
+    acpBounds: acpBounds(opts.acp),
     maxRecursionDepth: opts.maxRecursionDepth,
     expressionLimits: opts.expressionLimits,
   };
@@ -372,8 +399,12 @@ interface ParseFail {
   configError?: NoeticConfigError;
 }
 
-/** How a document's connections are checked. `allowlist` undefined means no host allowlist applies. */
-interface ConnectionCheck {
+/**
+ * What the host lets a document use. `allowlist` undefined means no host
+ * connection allowlist applies; `acp` and `mcp` undefined grant their narrowest
+ * defaults.
+ */
+interface DocumentCheck {
   allowlist?: ConnectionAllowlist;
   /**
    * Harness connection → profile → installed version. When given, a manifest
@@ -381,8 +412,14 @@ interface ConnectionCheck {
    * connection serves (dynamicWorkflow fills the ranges in itself).
    */
   ranges?: ProfileVersions;
+  /** The most `acp-agent` nodes may ask of each agent. */
+  acp?: AcpAllowlist;
+  /** The harness's working directory: an `acp-agent` node's `cwd` without an `acp` grant. */
+  cwd: string;
   /** The MCP servers `acp-agent` nodes may name; undefined grants none. */
   mcp?: McpAllowlist;
+  /** The harness's secret resolver, which a `$secret` in an MCP server needs. */
+  secrets?: SecretResolver;
 }
 
 /** Harness connection → profile → the version it serves. */
@@ -433,11 +470,7 @@ function coerceToString(value: unknown): string {
   return outputText(value);
 }
 
-function tryParseWorkflow(
-  raw: unknown,
-  maxDepth: number,
-  check: ConnectionCheck = {},
-): ParseResult {
+function tryParseWorkflow(raw: unknown, maxDepth: number, check: DocumentCheck): ParseResult {
   const json = typeof raw === 'string' ? safeParse(raw) : raw;
   if (json === null) {
     return {
@@ -494,10 +527,10 @@ function tryParseWorkflow(
   };
 }
 
-/** The connection error a document has, checked against its manifest, (when given) the host allowlist, and the MCP servers it may name. */
+/** The error a document has, checked against its manifest, (when given) the host connection allowlist, and what its `acp-agent` nodes may ask. */
 function connectionErrorOf(
   doc: WorkflowDocument,
-  check: ConnectionCheck,
+  check: DocumentCheck,
 ): NoeticConfigError | undefined {
   try {
     if (check.allowlist === undefined) {
@@ -505,7 +538,8 @@ function connectionErrorOf(
     } else {
       checkConnectionAllowlist(doc, check.allowlist);
     }
-    checkMcpServers(doc, check.mcp);
+    checkAcpAgents(doc, check.acp, check.cwd);
+    checkMcpServers(doc, check.mcp, check.secrets);
     return undefined;
   } catch (error) {
     if (isNoeticConfigError(error)) {

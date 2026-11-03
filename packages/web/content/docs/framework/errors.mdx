@@ -623,13 +623,13 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 #### CONNECTION_NOT_ALLOWED
 
-**Cause:** A JSON workflow asks for more than its `connections` allowlist grants, or sets a setup field the profile reserves to the host (such as the command or path of an app).
+**Cause:** A JSON workflow asks for more than its `connections` allowlist grants, or sets a setup field the profile reserves to the host (such as the command or path of an app). Or an `acp-agent` node asks for more than the `acp` allowlist grants its agent (`permissions`, `cwd`, `clientCapabilities`, `session`), or names an MCP server, header or environment value the `mcp` allowlist does not grant.
 
-**Fix:** Widen the allowlist passed to `parseAndRunWorkflow` or `dynamicWorkflow`, or move the host-only field into the pool's own `setup` in the harness configuration.
+**Fix:** Widen the allowlist passed to `parseAndRunWorkflow` or `dynamicWorkflow`, or move the host-only field into the pool's own `setup` in the harness configuration. For an MCP server URL, write it as the message shows.
 
 #### CONNECTION_INVALID
 
-**Cause:** A connection manifest entry, handle or provider configuration is malformed: for example a bad version range, a `fresh` handle without a pool, or a `secret()` used with no `environment.secrets` resolver.
+**Cause:** A connection manifest entry, handle or provider configuration is malformed: for example a bad version range, a `fresh` handle without a pool, a `secret()` or an MCP server `$secret` used with no `environment.secrets` resolver, or an `mcp` allowlist URL pattern with `*` in the host other than a leading `*.`.
 
 **Fix:** Correct the entry the message names. The hint says which field is wrong.
 

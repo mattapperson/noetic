@@ -719,6 +719,7 @@ function dynamicWorkflow(opts: {
   maxDepth?: number;
   connections?: ConnectionAllowlist;
   acpAgents?: ReadonlyMap<string, AcpAgent>;
+  acp?: AcpAllowlist;
   mcp?: McpAllowlist;
 }): Step<string, string>
 ```
@@ -763,6 +764,7 @@ function parseAndRunWorkflow(opts: {
   maxRecursionDepth?: number;
   connections?: ConnectionAllowlist;
   acpAgents?: ReadonlyMap<string, AcpAgent>;
+  acp?: AcpAllowlist;
   mcp?: McpAllowlist;
 }): Promise<string>
 ```
@@ -781,9 +783,49 @@ const result = await parseAndRunWorkflow({
 });
 ```
 
-### MCP servers
+### What a document may ask of an agent
 
-An `acp-agent` node's `mcpServers` are handed to the agent, which connects to them itself: a stdio server is a command the agent launches, and header and environment values reach the agent process. So `parseAndRunWorkflow` and `dynamicWorkflow` accept a server only when the host's `mcp` allowlist grants it, and check every server (inline subflows included) at parse time, before anything runs:
+`parseAndRunWorkflow` and `dynamicWorkflow` run documents the host did not write, so an `acp-agent` node gets only what the host grants. Two allowlists cover it, and both are checked at parse time (inline subflows included), before anything runs:
+
+- **`acp`** (`AcpAllowlist`) — per agent id, the most a node may ask in `permissions`, `cwd`, `clientCapabilities` and `session` (§ ACP agents).
+- **`mcp`** (`McpAllowlist`) — the MCP servers a node may list in `mcpServers`, and the secrets their headers and environment may carry (§ MCP servers).
+
+`acpAgents` is the registry of agents a node may name, not an allowlist: a node naming an agent outside it fails with `UNKNOWN_ACP_AGENT_REFERENCE`. Nothing else on the node is limited — `prompt`, `mode` and `model` pass as written. Named subflow refs come from the host's own registry and are neither checked nor held to the grants. A host that wrote the document itself runs it with `workflow()` (spec 02) or `hydrateWorkflow`, which check none of this.
+
+#### ACP agents
+
+```ts
+parseAndRunWorkflow({
+  json, harness, ctx, tools,
+  acpAgents: createAcpAgentRegistry(claudeCode()),
+  acp: {
+    'claude-code': {
+      permissions: { allow: [{ kind: 'read' }, { kind: 'edit', title: 'docs/' }] },
+      cwd: '/srv/checkouts',
+      clientCapabilities: { readTextFile: true, writeTextFile: true },
+      session: { keepAlive: 'harness' },
+    },
+  },
+});
+```
+
+Each field of an `AcpAgentGrant` is a ceiling; an agent with no entry gets the narrowest default:
+
+| Field | A node may | Default |
+|-------|-----------|---------|
+| `permissions.default` | set `default: "allow"` only when this is `'allow'`; `deny` and `cancel` always | deny only |
+| `permissions.allow` | write an `allow` rule only when one of these covers it: the same `kind` when the grant sets one, and a `title` containing the grant's title (case-insensitive) when the grant sets one. `deny` rules are always accepted. | no `allow` rules |
+| `permissions.persist` | set `persist` | no |
+| `cwd` | name an absolute, plain directory (no `.`, `..`, repeated or trailing `/`) that is this one or under it | the harness's working directory |
+| `clientCapabilities` | turn on only the capabilities this turns on. A capability the node leaves out takes the grant's value, not the protocol client's default of on. | `{ readTextFile: true }` |
+| `session.keepAlive` | set a `keepAlive` no longer than this (`step` < `run` < `harness`) | `'run'` |
+| `session.load` | resume an agent session by id with `session.load` | no |
+
+A document's sessions never join the host's. Each run of `parseAndRunWorkflow`, and each run of a `dynamicWorkflow` step, moves its nodes' `session.reuse` keys into a namespace of its own, so two nodes of one document still share a session, but no node can take over a session the host or another document opened — and the servers, cwd and capabilities it was opened with.
+
+#### MCP servers
+
+An `acp-agent` node's `mcpServers` are handed to the agent, which connects to them itself: a stdio server is a command the agent launches, and header and environment values reach the agent process.
 
 ```ts
 parseAndRunWorkflow({
@@ -796,12 +838,13 @@ parseAndRunWorkflow({
 });
 ```
 
-- **HTTP and SSE** servers are granted by `url`, a `*` glob over the whole URL. The URL must be `http:` or `https:` and carry no user or password (`http://localhost:1@evil.example/` would otherwise match `http://localhost:*`).
+- **HTTP and SSE** servers are granted by a `url` pattern, `<scheme>://<host>[:<port>]<path>`, matched part by part so a `*` cannot stand for the `/`, `?`, `#` or `@` that would move a URL to another host. The scheme is `http` or `https`. The host matches case-insensitively and may start with `*.`, for any subdomain of the rest (not the rest itself); `*` anywhere else in the host is an invalid pattern (`CONNECTION_INVALID`). The port is a number or `*`, and when left out is the scheme's default. The path defaults to `/`, and in it `*` matches any run of characters. The query is not matched. Patterns are read through `URL` like the URLs they match, so `https://MCP.example.com:443/*` and `https://mcp.example.com/*` are the same pattern.
+- **A server's URL** must be `http:` or `https:`, carry no user or password (`http://localhost:1@evil.example/` would otherwise match `http://localhost:*`), and be written exactly as `new URL(url).href` reads it back. The agent gets the URL as written, so one that reads differently — a backslash, a tab, an uppercase host, a default port, a missing path — is refused rather than checked in one form and used in another.
 - **Stdio** servers are granted by their exact command line: the same `command` and the same `args` in the same order (`args` defaults to none).
-- **Header and environment values** come only from host secrets. Each must be `{ "$secret": "<name>" }` with the grant's `secrets` binding that name to that header or variable; a literal value is refused. The secret is resolved through `environment.secrets` when the session starts (no resolver is `CONNECTION_INVALID`), and the resolved value goes to the agent.
-- **No allowlist grants nothing.** Unlike `connections`, whose absence on `parseAndRunWorkflow` means no host allowlist applies, an absent `mcp` refuses every server on both functions: there is no trusted mode for a document's commands. A host that wrote the document itself runs it with `workflow()` (spec 02) or `hydrateWorkflow`, which do not check servers.
+- **Header and environment values** come only from host secrets. Each must be `{ "$secret": "<name>" }` with a grant's `secrets` binding that name to that header (names compared case-insensitively) or variable (compared exactly); a literal value is refused. A server is accepted when any one grant matching it binds all its values, whatever the grant order. The secret is resolved through `environment.secrets` when the session starts, and the resolved value goes to the agent; a document using a secret on a harness with no resolver fails at parse time with `CONNECTION_INVALID`.
+- **No allowlist grants nothing.** Unlike `connections`, whose absence on `parseAndRunWorkflow` means no host allowlist applies, an absent `mcp` refuses every server on both functions: there is no trusted mode for a document's commands.
 
-A server the allowlist does not grant fails validation with `CONNECTION_NOT_ALLOWED`, naming the node and server. `dynamicWorkflow` feeds the refusal back to the planner like any validation error, and shows the planner only the granted servers. `acpAgents` names the agents a document may run; without it an `acp-agent` node fails with `UNKNOWN_ACP_AGENT_REFERENCE`.
+A node asking for more than `acp` or `mcp` grants fails validation with `CONNECTION_NOT_ALLOWED`, naming the node and what it asked for. `dynamicWorkflow` feeds the refusal back to the planner like any validation error, and shows the planner the registered agent ids, each agent's limits, and only the granted servers.
 
 ---
 
@@ -901,7 +944,7 @@ The JSON Workflow Runtime introduces the following `NoeticConfigError` codes:
 | `UNKNOWN_UI_LIBRARY_REFERENCE` | A `callModel` node's `output.library` is not in the codec registry.           |
 | `UNKNOWN_SUBPROCESS_REFERENCE` | A `runCode` node's `subprocess` ref cannot be resolved.                      |
 | `CONNECTION_UNKNOWN`           | A node names a connection the manifest or harness does not have. Other connection codes are in `35-connections` § Errors. |
-| `CONNECTION_NOT_ALLOWED`       | A document asks for more than `connections` grants, or an `acp-agent` node names an MCP server, header or environment value `mcp` does not grant (§ MCP servers). |
+| `CONNECTION_NOT_ALLOWED`       | A document asks for more than `connections` grants, or an `acp-agent` node asks for more than `acp` or `mcp` grants (§ What a document may ask of an agent). |
 | `UNKNOWN_UNTIL_PREDICATE`      | An until predicate kind is unrecognised.                                 |
 | `INVALID_UNTIL_DECIDER`        | A decide until predicate does not ask exactly one boolean question (raised at hydration by `loop`/`any`/`all`). |
 | `UNKNOWN_WORKFLOW_REFERENCE`   | A `subflow` ref names no registered workflow (raised at execution time). |

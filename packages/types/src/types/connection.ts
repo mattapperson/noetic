@@ -649,9 +649,16 @@ export interface McpAllowlist {
 
 /** @public An HTTP or SSE server a document may name. */
 export interface McpUrlGrant {
-  /** `*` glob over the whole URL (`https://mcp.example.com/*`). */
+  /**
+   * `<scheme>://<host>[:<port>]<path>`, matched part by part
+   * (`https://*.example.com/mcp/*`). The scheme is `http` or `https`; the host
+   * matches case-insensitively and may start with `*.` for any subdomain; the
+   * port is a number or `*`, and when left out is the scheme's default; in the
+   * path, which defaults to `/`, `*` matches any run of characters. The query
+   * is not matched.
+   */
   readonly url: string;
-  /** Secret name → the one header it may fill. Headers take no other values. */
+  /** Secret name → the one header it may fill (names match case-insensitively). Headers take no other values. */
   readonly secrets?: Readonly<Record<string, string>>;
 }
 

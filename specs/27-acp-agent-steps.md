@@ -454,12 +454,16 @@ published JSON Schema is regenerated from the Zod source (`bun run gen:schema`).
 
 A node's `mcpServers` take the ACP shapes, except that a header or environment
 value may be `{ "$secret": "<name>" }`, resolved through `environment.secrets`
-when the session starts. Because the agent launches stdio servers and receives
-every value, `parseAndRunWorkflow` and `dynamicWorkflow` accept a server only
-when the host's `mcp` allowlist grants it — HTTP/SSE by URL pattern, stdio by
-exact command and args, values only from bound secrets — and refuse anything
-else with `CONNECTION_NOT_ALLOWED` before the agent starts
-(`26-json-workflow-runtime` § MCP servers).
+when the session starts. Because a node decides what the agent can reach on
+the host — `terminal` alone hands it a shell — `parseAndRunWorkflow` and
+`dynamicWorkflow` hold a document they run to two host allowlists: `acp`, the
+most a node may ask of each agent in `permissions`, `cwd`, `clientCapabilities`
+and `session` (narrowest by default: deny-only permissions, the harness's cwd,
+`readTextFile` only, `keepAlive` up to `run`, no `load`), and `mcp`, the servers
+it may name. Anything more is `CONNECTION_NOT_ALLOWED` before the agent starts.
+A document's `session.reuse` keys live in a namespace of their own per run, so
+its nodes never join a session the host opened
+(`26-json-workflow-runtime` § What a document may ask of an agent).
 
 ## Core decoupling invariant
 

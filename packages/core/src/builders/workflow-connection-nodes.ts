@@ -12,6 +12,7 @@ import { compileExpression, compute, passes, readInput } from '../expression/jso
 import type { WorkflowConnectionRef, WorkflowNode } from '../schemas/workflow';
 import { getDefaultRegistrar } from '../types/step-registrar';
 import { step } from './step-builders';
+import { boundedAcpSettings } from './workflow-acp-grants';
 import { compileArgs, documentHandle, documentSecretsOf } from './workflow-connections';
 import type { HydrationContext } from './workflow-hydrator';
 import { bindingsFor, hydrateStepList } from './workflow-hydrator';
@@ -217,6 +218,15 @@ export function hydrateWaitNode(
 
 //#endregion
 
+//#region ACP Agent Node Hydrator
+
+/**
+ * Hydrates an `acp-agent` node into `step.acpAgent`. Under `ctx.acpBounds` the
+ * node's client capabilities and session key are held to its agent's grant
+ * (see `boundedAcpSettings`).
+ *
+ * @throws `NoeticConfigError` `UNKNOWN_ACP_AGENT_REFERENCE` when `ctx.acpAgents` has no adapter for the node's agent.
+ */
 export function hydrateAcpAgentNode(
   node: WorkflowNode,
   ctx: HydrationContext,
@@ -232,6 +242,7 @@ export function hydrateAcpAgentNode(
       hint: 'Pass agent adapters via HydrationContext.acpAgents, e.g. createAcpAgentRegistry(claudeCode()) from @noetic-tools/acp.',
     });
   }
+  const bounded = ctx.acpBounds ? boundedAcpSettings(node, ctx.acpBounds) : node;
   return step.acpAgent({
     id: node.id,
     agent,
@@ -241,7 +252,9 @@ export function hydrateAcpAgentNode(
     model: node.model,
     mcpServers: stepMcpServers(node.mcpServers),
     permissions: node.permissions,
-    clientCapabilities: node.clientCapabilities,
-    session: node.session,
+    clientCapabilities: bounded.clientCapabilities,
+    session: bounded.session,
   });
 }
+
+//#endregion

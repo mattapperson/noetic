@@ -9,6 +9,7 @@
 import type { ContextData, ContextLayer } from '@noetic-tools/context';
 import type {
   AcpAgent,
+  AcpAllowlist,
   Context,
   CustomItemMap,
   ExecuteStepFn,
@@ -106,6 +107,16 @@ export interface HydrationContext {
   recursionDepth?: number;
   /** Bounds on each expression evaluation; unset fields use `DEFAULT_EXPRESSION_LIMITS`. */
   expressionLimits?: ExpressionLimits;
+  /**
+   * What `acp-agent` nodes are held to when the host did not write the
+   * document: set by `parseAndRunWorkflow` and `dynamicWorkflow`, dropped for
+   * named subflow refs, which the host wrote. Callers never set it.
+   */
+  acpBounds?: {
+    readonly grants: AcpAllowlist;
+    /** Prefixes every `session.reuse` key, so the document's sessions never meet the host's. */
+    readonly sessionScope: string;
+  };
   /**
    * The hydrated document's identity for `$steps`: each `hydrateWorkflow` call
    * makes a new one, so two documents in one run never read each other's node

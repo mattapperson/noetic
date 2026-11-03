@@ -19,7 +19,7 @@ import type {
 } from '@noetic-tools/types';
 import { NoeticConfigError, walkWorkflow } from '@noetic-tools/types';
 import { harnessInternal } from '../util/harness-internals';
-import { globMatches } from './workflow-connections';
+import { urlPatternMatches } from './mcp-url-pattern';
 
 //#region Types
 
@@ -50,11 +50,19 @@ type NamedValue = UrlServer['headers'][number];
  * refs resolve from the host's own registry and are not checked.
  *
  * @throws `NoeticConfigError` `CONNECTION_NOT_ALLOWED` for a server, header or environment value the allowlist does not grant.
+ * @throws `NoeticConfigError` `CONNECTION_INVALID` for a value that is a `$secret` when the harness has no `secrets` resolver, or an allowlist URL pattern that does not parse.
  */
-export function checkMcpServers(doc: WorkflowDocument, allowlist: McpAllowlist | undefined): void {
+export function checkMcpServers(
+  doc: WorkflowDocument,
+  allowlist: McpAllowlist | undefined,
+  secrets: SecretResolver | undefined,
+): void {
   for (const node of walkWorkflow(doc.root)) {
     for (const server of serversOf(node)) {
       checkServer(node.id, server, allowlist ?? {});
+      if (!secrets && !isLiteral(server)) {
+        throw noResolver();
+      }
     }
   }
 }
@@ -82,7 +90,7 @@ export function mcpPrompt(allowlist: McpAllowlist | undefined): string {
   if (lines.length === 0) {
     return '\nNo MCP servers are available: do not give acp-agent nodes "mcpServers".';
   }
-  return `\nMCP servers an acp-agent node may list in "mcpServers" (no others; header and env values only as the { "$secret": "<name>" } shown):
+  return `\nMCP servers an acp-agent node may list in "mcpServers" (no others; header and env values only as the { "$secret": "<name>" } shown; write each URL as \`new URL(url).href\` gives it back, e.g. "https://host/" with a lowercase host and a path):
 ${lines.join('\n')}`;
 }
 
@@ -107,15 +115,15 @@ function checkUrlServer(
   server: UrlServer,
   grants: ReadonlyArray<McpUrlGrant>,
 ): void {
-  const href = plainUrl(server.url);
-  const grant = href === undefined ? undefined : grants.find((g) => globMatches(g.url, href));
-  if (!grant) {
+  const url = plainUrl(nodeId, server);
+  const matching = grants.filter((g) => urlPatternMatches(g.url, url));
+  if (matching.length === 0) {
     throw notAllowed(
       `Node '${nodeId}' gives the agent MCP server '${server.name}' at ${server.url}, which the host does not allow.`,
       `Allowed MCP server URLs: ${grants.map((g) => g.url).join(', ') || '(none)'}.`,
     );
   }
-  checkValues(server.headers, grant.secrets, {
+  checkValues(server.headers, matching, {
     nodeId,
     server: server.name,
     what: 'header',
@@ -127,66 +135,110 @@ function checkStdioServer(
   server: StdioServer,
   grants: ReadonlyArray<McpCommandGrant>,
 ): void {
-  const grant = grants.find(
+  const matching = grants.filter(
     (g) => g.command === server.command && sameArgs(g.args ?? [], server.args),
   );
-  if (!grant) {
+  if (matching.length === 0) {
     throw notAllowed(
       `Node '${nodeId}' gives the agent stdio MCP server '${server.name}' (${commandText(server.command, server.args)}), which the host does not allow.`,
       `Allowed MCP server commands: ${grants.map((g) => commandText(g.command, g.args ?? [])).join('; ') || '(none)'}.`,
     );
   }
-  checkValues(server.env, grant.secrets, {
+  checkValues(server.env, matching, {
     nodeId,
     server: server.name,
     what: 'environment variable',
   });
 }
 
-/** Every header or environment value must be a `$secret` the grant binds to that name. */
+/**
+ * Every header or environment value must be a `$secret` that one grant matching
+ * the server binds to that name — the same grant for all of them, so a looser
+ * grant listed first cannot hide a tighter one that allows the values.
+ */
 function checkValues(
   values: ReadonlyArray<NamedValue>,
-  secrets: Readonly<Record<string, string>> | undefined,
-  where: {
-    readonly nodeId: string;
-    readonly server: string;
-    readonly what: 'header' | 'environment variable';
-  },
+  grants: ReadonlyArray<McpUrlGrant | McpCommandGrant>,
+  where: ValueSite,
 ): void {
+  if (grants.some((g) => values.every((entry) => binds(g, entry, where.what)))) {
+    return;
+  }
   const { nodeId, server, what } = where;
-  for (const entry of values) {
-    if (isSecret(entry.value) && secrets?.[entry.value.$secret] === entry.name) {
-      continue;
-    }
-    const granted = Object.entries(secrets ?? {})
-      .filter(([, name]) => name === entry.name)
-      .map(([secret]) => `{ "$secret": "${secret}" }`);
+  const entry = values.find((e) => !grants.some((g) => binds(g, e, what)));
+  if (!entry) {
     throw notAllowed(
-      `Node '${nodeId}' sets ${what} '${entry.name}' on MCP server '${server}' to a value the host does not allow.`,
-      granted.length > 0
-        ? `'${entry.name}' takes only ${granted.join(' or ')}.`
-        : `The host binds no secret to ${what} '${entry.name}'.`,
+      `Node '${nodeId}' sets ${what}s ${values.map((e) => `'${e.name}'`).join(', ')} on MCP server '${server}', which no one grant allows together.`,
+      `Name only the ${what}s one grant binds.`,
     );
   }
+  const granted = grants.flatMap((g) =>
+    Object.entries(g.secrets ?? {})
+      .filter(([, name]) => sameName(name, entry.name, what))
+      .map(([secret]) => `{ "$secret": "${secret}" }`),
+  );
+  throw notAllowed(
+    `Node '${nodeId}' sets ${what} '${entry.name}' on MCP server '${server}' to a value the host does not allow.`,
+    granted.length > 0
+      ? `'${entry.name}' takes only ${granted.join(' or ')}.`
+      : `The host binds no secret to ${what} '${entry.name}'.`,
+  );
+}
+
+interface ValueSite {
+  readonly nodeId: string;
+  readonly server: string;
+  readonly what: 'header' | 'environment variable';
+}
+
+function binds(
+  grant: McpUrlGrant | McpCommandGrant,
+  entry: NamedValue,
+  what: ValueSite['what'],
+): boolean {
+  if (
+    !isSecret(entry.value) ||
+    !grant.secrets ||
+    !Object.hasOwn(grant.secrets, entry.value.$secret)
+  ) {
+    return false;
+  }
+  return sameName(grant.secrets[entry.value.$secret] ?? '', entry.name, what);
+}
+
+/** HTTP header names are case-insensitive; environment variable names are not. */
+function sameName(granted: string, written: string, what: ValueSite['what']): boolean {
+  return what === 'header' ? granted.toLowerCase() === written.toLowerCase() : granted === written;
 }
 
 /**
- * The URL as patterns see it, or undefined when it is not http(s) or carries a
- * user or password (`http://localhost:1@evil.example/` would otherwise match
- * `http://localhost:*`).
+ * The server's URL, when it is http(s), carries no user or password
+ * (`http://localhost:1@evil.example/` would otherwise match
+ * `http://localhost:*`), and is written exactly as `URL` reads it back. The
+ * agent gets the URL as written, so a URL whose reading differs — a backslash,
+ * a tab, an uppercase host — is refused rather than checked in one form and
+ * used in another.
  */
-function plainUrl(url: string): string | undefined {
-  if (!URL.canParse(url)) {
-    return undefined;
+function plainUrl(nodeId: string, server: UrlServer): URL {
+  const parsed = URL.canParse(server.url) ? new URL(server.url) : undefined;
+  if (
+    !parsed ||
+    (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') ||
+    parsed.username !== '' ||
+    parsed.password !== ''
+  ) {
+    throw notAllowed(
+      `Node '${nodeId}' gives the agent MCP server '${server.name}' at ${JSON.stringify(server.url)}, which is not an http: or https: URL without a user or password.`,
+      'Give an http: or https: URL with no user or password.',
+    );
   }
-  const parsed = new URL(url);
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    return undefined;
+  if (parsed.href !== server.url) {
+    throw notAllowed(
+      `Node '${nodeId}' gives the agent MCP server '${server.name}' at ${JSON.stringify(server.url)}, which reads as ${parsed.href}.`,
+      `Write the URL as ${parsed.href}.`,
+    );
   }
-  if (parsed.username !== '' || parsed.password !== '') {
-    return undefined;
-  }
-  return parsed.href;
+  return parsed;
 }
 
 function sameArgs(a: ReadonlyArray<string>, b: ReadonlyArray<string>): boolean {
@@ -208,6 +260,14 @@ function notAllowed(message: string, hint: string): NoeticConfigError {
   });
 }
 
+function noResolver(): NoeticConfigError {
+  return new NoeticConfigError({
+    code: 'CONNECTION_INVALID',
+    message: 'An MCP server uses a $secret but the harness has no secret resolver.',
+    hint: 'Set `environment.secrets` on the AgentHarness to resolve secret names.',
+  });
+}
+
 //#endregion
 
 //#region Secrets
@@ -218,11 +278,7 @@ async function resolveServers(
 ): Promise<ReadonlyArray<AcpMcpServer>> {
   const resolver = harnessInternal<SecretResolver>(ctx.harness, 'secrets');
   if (!resolver) {
-    throw new NoeticConfigError({
-      code: 'CONNECTION_INVALID',
-      message: 'An MCP server uses a $secret but the harness has no secret resolver.',
-      hint: 'Set `environment.secrets` on the AgentHarness to resolve secret names.',
-    });
+    throw noResolver();
   }
   const signal = ctx.aborted ? AbortSignal.abort(ctx.abortReason) : new AbortController().signal;
   const resolve = async (entry: NamedValue) => ({
