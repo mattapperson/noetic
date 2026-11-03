@@ -1420,7 +1420,7 @@ Key points:
 
 - An `acp-agent` node carries `agent`, `prompt`, and optional `cwd` / `mode` / `model` / `mcpServers` / `permissions` / `clientCapabilities` / `session` — the JSON mirror of the `step.acpAgent` options.
 - `createAcpAgentRegistry(claudeCode(), codex(), …)` builds the `Map<string, AcpAgent>` the hydrator resolves nodes against. The keys are the adapters' `agentId`s, an **open** set — supporting a new agent needs another entry, not a schema change. An unregistered `agent` fails hydration with `UNKNOWN_ACP_AGENT_REFERENCE`.
-- `parseAndRunWorkflow` does **not** take an agent registry, so use `hydrateWorkflow` + `harness.run` (as above) when a document contains `acp-agent` nodes.
+- `parseAndRunWorkflow` and `dynamicWorkflow` take the same registry as `acpAgents`. For a document you did not write, they also check every `mcpServers` entry against the `mcp` allowlist before anything runs: HTTP/SSE by URL pattern (`urls: [{ url: 'https://mcp.example.com/*', secrets: { 'mcp.token': 'Authorization' } }]`), stdio by exact command and args (`commands: [{ command: 'npx', args: ['-y', '@acme/docs-mcp'] }]`), and header or env values only as `{ "$secret": "<name>" }` bound by the grant. No `mcp` refuses every server (`CONNECTION_NOT_ALLOWED`). `hydrateWorkflow` and `workflow()` trust their document and do not check servers.
 
 ## Pattern: Generative UI Interaction Loop
 

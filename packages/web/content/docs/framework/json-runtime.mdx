@@ -850,8 +850,10 @@ const response = await harness.getAgentResponse();
 | `maxDepth` | `number` | `5` | Maximum allowed tree depth for generated workflows. |
 | `maxRevisions` | `number` | `3` | Retries with error feedback on validation failure. |
 | `connections` | `ConnectionAllowlist` | `undefined` | What a generated document may use of the harness's connections. Required for the planner to use connections at all; the planner is shown only these. See [What a document may use](/docs/framework/connections#what-a-document-may-use). |
+| `acpAgents` | `ReadonlyMap<string, AcpAgent>` | `undefined` | ACP agents a generated `acp-agent` node may run, keyed by agent id. See [ACP agents](/docs/framework/acp-agents#json-workflows). |
+| `mcp` | `McpAllowlist` | `undefined` | The MCP servers a generated `acp-agent` node may hand its agent. Without it, every server is refused; the planner is shown only these. See [MCP servers](#mcp-servers). |
 
-Throws `NoeticConfigError` with code `WORKFLOW_VALIDATION_FAILED` if the planner cannot produce a valid workflow within the revision limit, `CONNECTION_UNKNOWN` if the allowlist names a connection the harness does not have, and `CONNECTION_NOT_ALLOWED` if the last revision still asks for more than the allowlist grants.
+Throws `NoeticConfigError` with code `WORKFLOW_VALIDATION_FAILED` if the planner cannot produce a valid workflow within the revision limit, `CONNECTION_UNKNOWN` if the allowlist names a connection the harness does not have, and `CONNECTION_NOT_ALLOWED` if the last revision still asks for more than `connections` or `mcp` grants.
 
 ## parseAndRunWorkflow()
 
@@ -890,10 +892,71 @@ const result = await parseAndRunWorkflow({
 | `maxRecursionDepth` | `number` | `100` | Deepest chain of named-ref resolutions on one path. A positive integer or `Infinity`. |
 | `expressionLimits` | `ExpressionLimits` | `DEFAULT_EXPRESSION_LIMITS` | Bounds on each expression evaluation (`steps`, `depth`, `length`, `timeout`). See [Expressions](/docs/framework/expressions#limits). |
 | `connections` | `ConnectionAllowlist` | `undefined` | What the document may use of the harness's connections: operation and event globs, `setup` value patterns, and secrets bound to one `op.field` each. A manifest asking for more fails with `CONNECTION_NOT_ALLOWED`. See [What a document may use](/docs/framework/connections#what-a-document-may-use). |
+| `acpAgents` | `ReadonlyMap<string, AcpAgent>` | `undefined` | ACP agents the document's `acp-agent` nodes may run, keyed by agent id. |
+| `mcp` | `McpAllowlist` | `undefined` | The MCP servers the document's `acp-agent` nodes may hand their agent. Unlike `connections`, absence refuses every server. See [MCP servers](#mcp-servers). |
 
 Returns `Promise<string>` -- the string output of the executed workflow.
 
-Throws `NoeticConfigError` with code `WORKFLOW_VALIDATION_FAILED` if the JSON does not match `WorkflowDocumentSchema`. Throws `NoeticConfigError` with code `UNKNOWN_TOOL_REFERENCE` if a tool name cannot be resolved. Throws `CONNECTION_UNKNOWN` if a node uses a connection the document does not declare (or the allowlist names one the harness does not have), and `CONNECTION_NOT_ALLOWED` if the document asks for more than `connections` grants.
+Throws `NoeticConfigError` with code `WORKFLOW_VALIDATION_FAILED` if the JSON does not match `WorkflowDocumentSchema`. Throws `NoeticConfigError` with code `UNKNOWN_TOOL_REFERENCE` if a tool name cannot be resolved. Throws `CONNECTION_UNKNOWN` if a node uses a connection the document does not declare (or the allowlist names one the harness does not have), and `CONNECTION_NOT_ALLOWED` if the document asks for more than `connections` or `mcp` grants.
+
+### MCP servers
+
+An `acp-agent` node's `mcpServers` go to the agent, which connects to them itself: a stdio server is a command the agent launches, and header and environment values reach the agent process. So `parseAndRunWorkflow` and `dynamicWorkflow` accept a server only when the `mcp` allowlist grants it, and check every server before anything runs:
+
+```ts
+import { parseAndRunWorkflow, AgentHarness } from '@noetic-tools/core';
+import { claudeCode, createAcpAgentRegistry } from '@noetic-tools/acp';
+
+declare const workflowDocument: unknown;
+
+const harness = new AgentHarness({
+  name: 'runner',
+  params: {},
+  environment: {
+    secrets: { resolve: async (name) => process.env[name.replace('.', '_').toUpperCase()] ?? '' },
+  },
+});
+
+await parseAndRunWorkflow({
+  json: workflowDocument,
+  harness,
+  ctx: harness.createContext(),
+  tools: [],
+  acpAgents: createAcpAgentRegistry(claudeCode()),
+  mcp: {
+    // HTTP and SSE servers by URL pattern; this secret may fill only the Authorization header.
+    urls: [{ url: 'https://mcp.example.com/*', secrets: { 'mcp.token': 'Authorization' } }],
+    // Stdio servers by exact command and args.
+    commands: [{ command: 'npx', args: ['-y', '@acme/docs-mcp'] }],
+  },
+});
+```
+
+A document then names a granted server, with any header or environment value written as a secret:
+
+```json
+{
+  "kind": "acp-agent",
+  "id": "research",
+  "agent": "claude-code",
+  "prompt": "Find the API docs for the billing service",
+  "mcpServers": [
+    {
+      "type": "http",
+      "name": "docs",
+      "url": "https://mcp.example.com/v1",
+      "headers": [{ "name": "Authorization", "value": { "$secret": "mcp.token" } }]
+    }
+  ]
+}
+```
+
+- A URL must be `http:` or `https:`, carry no user or password, and match a pattern (`*` matches any run of characters).
+- A stdio server must have the same `command` and the same `args`, in order, as a grant.
+- A header or environment value must be `{ "$secret": "<name>" }`, and the grant's `secrets` must bind that name to that header or variable. Literal values are refused. The secret is resolved through `environment.secrets` when the session starts.
+- Without `mcp`, every server is refused, on both functions. A document you wrote yourself can run through `workflow()` or [`hydrateWorkflow`](#hydration-api), which do not check servers.
+
+Anything else fails with `CONNECTION_NOT_ALLOWED` before the agent starts. `dynamicWorkflow` feeds the refusal back to the planner, and shows it only the granted servers.
 
 ## Worked example: a model panel with an Opus judge
 

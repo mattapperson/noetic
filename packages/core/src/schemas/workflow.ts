@@ -35,6 +35,7 @@ export type {
   WorkflowExprValue,
   WorkflowGraph,
   WorkflowLiteralValue,
+  WorkflowMcpServer,
   WorkflowNode,
   WorkflowOpShorthand,
   WorkflowReplayKey,

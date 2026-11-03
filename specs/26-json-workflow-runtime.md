@@ -717,6 +717,9 @@ function dynamicWorkflow(opts: {
   tools: Map<string, Tool>;
   maxRevisions?: number;
   maxDepth?: number;
+  connections?: ConnectionAllowlist;
+  acpAgents?: ReadonlyMap<string, AcpAgent>;
+  mcp?: McpAllowlist;
 }): Step<string, string>
 ```
 
@@ -758,6 +761,9 @@ function parseAndRunWorkflow(opts: {
   layers?: ReadonlyMap<string, ContextLayer>;
   workflows?: ReadonlyMap<string, WorkflowDocument>;
   maxRecursionDepth?: number;
+  connections?: ConnectionAllowlist;
+  acpAgents?: ReadonlyMap<string, AcpAgent>;
+  mcp?: McpAllowlist;
 }): Promise<string>
 ```
 
@@ -774,6 +780,28 @@ const result = await parseAndRunWorkflow({
   input: userPrompt,
 });
 ```
+
+### MCP servers
+
+An `acp-agent` node's `mcpServers` are handed to the agent, which connects to them itself: a stdio server is a command the agent launches, and header and environment values reach the agent process. So `parseAndRunWorkflow` and `dynamicWorkflow` accept a server only when the host's `mcp` allowlist grants it, and check every server (inline subflows included) at parse time, before anything runs:
+
+```ts
+parseAndRunWorkflow({
+  json, harness, ctx, tools,
+  acpAgents: createAcpAgentRegistry(claudeCode()),
+  mcp: {
+    urls: [{ url: 'https://mcp.example.com/*', secrets: { 'mcp.token': 'Authorization' } }],
+    commands: [{ command: 'npx', args: ['-y', '@acme/docs-mcp'], secrets: { 'docs.token': 'DOCS_TOKEN' } }],
+  },
+});
+```
+
+- **HTTP and SSE** servers are granted by `url`, a `*` glob over the whole URL. The URL must be `http:` or `https:` and carry no user or password (`http://localhost:1@evil.example/` would otherwise match `http://localhost:*`).
+- **Stdio** servers are granted by their exact command line: the same `command` and the same `args` in the same order (`args` defaults to none).
+- **Header and environment values** come only from host secrets. Each must be `{ "$secret": "<name>" }` with the grant's `secrets` binding that name to that header or variable; a literal value is refused. The secret is resolved through `environment.secrets` when the session starts (no resolver is `CONNECTION_INVALID`), and the resolved value goes to the agent.
+- **No allowlist grants nothing.** Unlike `connections`, whose absence on `parseAndRunWorkflow` means no host allowlist applies, an absent `mcp` refuses every server on both functions: there is no trusted mode for a document's commands. A host that wrote the document itself runs it with `workflow()` (spec 02) or `hydrateWorkflow`, which do not check servers.
+
+A server the allowlist does not grant fails validation with `CONNECTION_NOT_ALLOWED`, naming the node and server. `dynamicWorkflow` feeds the refusal back to the planner like any validation error, and shows the planner only the granted servers. `acpAgents` names the agents a document may run; without it an `acp-agent` node fails with `UNKNOWN_ACP_AGENT_REFERENCE`.
 
 ---
 
@@ -873,6 +901,7 @@ The JSON Workflow Runtime introduces the following `NoeticConfigError` codes:
 | `UNKNOWN_UI_LIBRARY_REFERENCE` | A `callModel` node's `output.library` is not in the codec registry.           |
 | `UNKNOWN_SUBPROCESS_REFERENCE` | A `runCode` node's `subprocess` ref cannot be resolved.                      |
 | `CONNECTION_UNKNOWN`           | A node names a connection the manifest or harness does not have. Other connection codes are in `35-connections` § Errors. |
+| `CONNECTION_NOT_ALLOWED`       | A document asks for more than `connections` grants, or an `acp-agent` node names an MCP server, header or environment value `mcp` does not grant (§ MCP servers). |
 | `UNKNOWN_UNTIL_PREDICATE`      | An until predicate kind is unrecognised.                                 |
 | `INVALID_UNTIL_DECIDER`        | A decide until predicate does not ask exactly one boolean question (raised at hydration by `loop`/`any`/`all`). |
 | `UNKNOWN_WORKFLOW_REFERENCE`   | A `subflow` ref names no registered workflow (raised at execution time). |

@@ -41,6 +41,7 @@ export class ConnectionGate {
     setHarnessInternals(options.harness, {
       connectionRegistry: this.#connections?.registry,
       verifier: options.verifier,
+      secrets: options.secrets,
     });
   }
 

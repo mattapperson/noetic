@@ -59,6 +59,7 @@ import {
   hydrateEmitItems,
   nodeScope,
 } from './workflow-custom-items';
+import { stepMcpServers } from './workflow-mcp-servers';
 import { workflowReplayKey } from './workflow-replay-key';
 import { hydrateVerifyNode } from './workflow-verify';
 
@@ -380,7 +381,7 @@ function hydrateAcpAgentNode(
     cwd: node.cwd,
     mode: node.mode,
     model: node.model,
-    mcpServers: node.mcpServers,
+    mcpServers: stepMcpServers(node.mcpServers),
     permissions: node.permissions,
     clientCapabilities: node.clientCapabilities,
     session: node.session,

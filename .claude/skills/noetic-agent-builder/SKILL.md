@@ -114,7 +114,7 @@ A **connection** is a named, live thing the agent works with -- a browser, a sim
 - **Profiles** (`@noetic-tools/profile-{ui,screen,browser,app,device,chat}`) are shared, versioned vocabularies. `connection('app', browser)` returns a typed handle; `step.call({ id, connection: app, op: 'ui.tap', args })` runs one operation, `step.wait({ id, connection, event, filter?, around?, timeoutMs })` waits for an event (with `around` it listens first, so the event an action causes cannot slip past).
 - **Verification**: `step.verify({ id, subject, expect: [net('POST /api/orders 201').once()], never: [net('5xx')], act })` (matchers from `@noetic-tools/verify`; register `verification: verifier()` on the harness) declares claims, checks before, listens, runs `act`, and answers `pass`/`fail`/`partial`/`unknown` through OVP's `adjudicate()` -- with evidence and gaps. It never throws for `no` or `unknown`.
 - **Triggers** start turns from connection events (`triggers: [{ id, connection, event, input }]`); `defineSource()` and `cron()` are in-process event sources.
-- **JSON**: a document's `connections` manifest plus `call` / `wait` / `verify` nodes; `{ "$expr" }`, `{ "$secret" }`, `{ "$literal" }` values; `dynamicWorkflow({ connections })` needs an allowlist.
+- **JSON**: a document's `connections` manifest plus `call` / `wait` / `verify` nodes; `{ "$expr" }`, `{ "$secret" }`, `{ "$literal" }` values; `dynamicWorkflow({ connections })` needs an allowlist, and an `acp-agent` node's `mcpServers` need the `mcp` allowlist on `dynamicWorkflow` / `parseAndRunWorkflow`.
 
 Full API: `references/api-reference.md` → Connections, Profiles, and Verification.
 

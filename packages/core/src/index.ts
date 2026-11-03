@@ -318,6 +318,7 @@ export type {
   WorkflowCustomItem,
   WorkflowDocument,
   WorkflowEmitItems,
+  WorkflowMcpServer,
   WorkflowNode,
 } from './schemas/workflow';
 /** @public */
@@ -907,6 +908,9 @@ export type {
   FreshScope,
   ListenRequest,
   Locator,
+  McpAllowlist,
+  McpCommandGrant,
+  McpUrlGrant,
   Receipt,
   Ref,
   RefBody,

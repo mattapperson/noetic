@@ -475,6 +475,8 @@ const hydrated = hydrateWorkflow(document, {
 
 A node naming an unregistered agent fails hydration with `UNKNOWN_ACP_AGENT_REFERENCE`.
 
+A node's `mcpServers` launch commands and carry credentials, so a document you did not write — one a model generated with `dynamicWorkflow`, or one `parseAndRunWorkflow` loads — may name only the servers the host's `mcp` allowlist grants: HTTP/SSE servers by URL pattern, stdio servers by exact command and args, and header or environment values only as `{ "$secret": "<name>" }` bound by the grant. Anything else fails with `CONNECTION_NOT_ALLOWED` before the agent starts. See [MCP servers](/docs/framework/json-runtime#mcp-servers).
+
 ## Testing an ACP step
 
 `loopbackTransport` stands an in-process agent on the far end of a real protocol connection — full handshake, sessions, notifications, and client callbacks, with no process to spawn:

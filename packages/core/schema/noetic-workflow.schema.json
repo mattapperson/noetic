@@ -2572,7 +2572,24 @@
                               "type": "string"
                             },
                             "value": {
-                              "type": "string"
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "$secret": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    }
+                                  },
+                                  "required": [
+                                    "$secret"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              ]
                             }
                           },
                           "required": [
@@ -2614,7 +2631,24 @@
                               "type": "string"
                             },
                             "value": {
-                              "type": "string"
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "$secret": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    }
+                                  },
+                                  "required": [
+                                    "$secret"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              ]
                             }
                           },
                           "required": [
@@ -2659,7 +2693,24 @@
                               "type": "string"
                             },
                             "value": {
-                              "type": "string"
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "$secret": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    }
+                                  },
+                                  "required": [
+                                    "$secret"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              ]
                             }
                           },
                           "required": [
