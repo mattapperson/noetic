@@ -1,6 +1,6 @@
 {
   "name": "@noetic-tools/mcp",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
   "description": "The MCP bridge for Noetic: mcp() turns any Model Context Protocol server into a connection, with profile negotiation, Tasks, Events and webhook verification.",
   "license": "Apache-2.0",
