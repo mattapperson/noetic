@@ -1,7 +1,7 @@
 /**
- * Hydrators for the connection nodes of a JSON workflow (spec 35): `call` and
- * `wait`, plus resolving the connection a node runs on against the document's
- * manifest.
+ * Hydrators for the JSON workflow nodes that reach outside the workflow:
+ * `call` and `wait` (spec 35), resolving the connection a node runs on against
+ * the document's manifest, and `acp-agent` with its MCP servers (spec 27).
  */
 
 import type { ContextData } from '@noetic-tools/context';
@@ -11,9 +11,12 @@ import type { CompiledExpression } from '../expression/jsonata';
 import { compileExpression, compute, passes, readInput } from '../expression/jsonata';
 import type { WorkflowConnectionRef, WorkflowNode } from '../schemas/workflow';
 import { getDefaultRegistrar } from '../types/step-registrar';
+import { step } from './step-builders';
+import { boundedAcpSettings } from './workflow-acp-grants';
 import { compileArgs, documentHandle, documentSecretsOf } from './workflow-connections';
 import type { HydrationContext } from './workflow-hydrator';
 import { bindingsFor, hydrateStepList } from './workflow-hydrator';
+import { stepMcpServers } from './workflow-mcp-servers';
 
 //#region Connection Node Hydrators
 
@@ -211,6 +214,47 @@ export function hydrateWaitNode(
       : {}),
   };
   return registered(built);
+}
+
+//#endregion
+
+//#region ACP Agent Node Hydrator
+
+/**
+ * Hydrates an `acp-agent` node into `step.acpAgent`. Under `ctx.acpBounds` the
+ * node's cwd, client capabilities and session key are held to its agent's
+ * grant (see `boundedAcpSettings`).
+ *
+ * @throws `NoeticConfigError` `UNKNOWN_ACP_AGENT_REFERENCE` when `ctx.acpAgents` has no adapter for the node's agent.
+ */
+export function hydrateAcpAgentNode(
+  node: WorkflowNode,
+  ctx: HydrationContext,
+): Step<ContextData, string, string> {
+  if (node.kind !== 'acp-agent') {
+    return frameworkCast(undefined);
+  }
+  const agent = ctx.acpAgents?.get(node.agent);
+  if (!agent) {
+    throw new NoeticConfigError({
+      code: 'UNKNOWN_ACP_AGENT_REFERENCE',
+      message: `ACP agent '${node.agent}' referenced in workflow node '${node.id}' is not registered.`,
+      hint: 'Pass agent adapters via HydrationContext.acpAgents, e.g. createAcpAgentRegistry(claudeCode()) from @noetic-tools/acp.',
+    });
+  }
+  const bounded = ctx.acpBounds ? boundedAcpSettings(node, ctx.acpBounds) : node;
+  return step.acpAgent({
+    id: node.id,
+    agent,
+    prompt: node.prompt,
+    cwd: bounded.cwd,
+    mode: node.mode,
+    model: node.model,
+    mcpServers: stepMcpServers(node.mcpServers),
+    permissions: node.permissions,
+    clientCapabilities: bounded.clientCapabilities,
+    session: bounded.session,
+  });
 }
 
 //#endregion

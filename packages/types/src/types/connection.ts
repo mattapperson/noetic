@@ -634,6 +634,43 @@ export interface ConnectionAllowlistEntry {
 /** @public Harness connection name → what a document may use of it. */
 export type ConnectionAllowlist = Readonly<Record<string, ConnectionAllowlistEntry>>;
 
+/**
+ * @public
+ * The MCP servers a document's `acp-agent` nodes may hand to an agent
+ * (`dynamicWorkflow({ mcp })`, `parseAndRunWorkflow({ mcp })`). A server the
+ * allowlist does not grant fails validation with `CONNECTION_NOT_ALLOWED`.
+ */
+export interface McpAllowlist {
+  /** HTTP and SSE servers, by URL pattern. */
+  readonly urls?: ReadonlyArray<McpUrlGrant>;
+  /** Stdio servers, each named by its exact command line. */
+  readonly commands?: ReadonlyArray<McpCommandGrant>;
+}
+
+/** @public An HTTP or SSE server a document may name. */
+export interface McpUrlGrant {
+  /**
+   * `<scheme>://<host>[:<port>]<path>`, matched part by part
+   * (`https://*.example.com/mcp/*`). The scheme is `http` or `https`; the host
+   * matches case-insensitively and may start with `*.` for any subdomain; the
+   * port is a number or `*`, and when left out is the scheme's default; in the
+   * path, which defaults to `/`, `*` matches any run of characters. The query
+   * is not matched.
+   */
+  readonly url: string;
+  /** Secret name → the one header it may fill (names match case-insensitively). Headers take no other values. */
+  readonly secrets?: Readonly<Record<string, string>>;
+}
+
+/** @public A stdio server a document may name: this command with exactly these args. */
+export interface McpCommandGrant {
+  readonly command: string;
+  /** Default: none. */
+  readonly args?: ReadonlyArray<string>;
+  /** Secret name → the one environment variable it may fill. The environment takes no other values. */
+  readonly secrets?: Readonly<Record<string, string>>;
+}
+
 //#endregion
 
 //#region Status and framework events

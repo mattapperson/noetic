@@ -452,6 +452,20 @@ registry: supporting a new agent needs another entry, not a schema change. An
 unregistered reference fails hydration with `UNKNOWN_ACP_AGENT_REFERENCE`. The
 published JSON Schema is regenerated from the Zod source (`bun run gen:schema`).
 
+A node's `mcpServers` take the ACP shapes, except that a header or environment
+value may be `{ "$secret": "<name>" }`, resolved through `environment.secrets`
+when the session starts. Because a node decides what the agent can reach on
+the host — `terminal` alone hands it a shell — `parseAndRunWorkflow` and
+`dynamicWorkflow` hold a document they run to two host allowlists: `acp`, the
+most a node may ask of each agent in `permissions`, `mode`, `model`, `cwd`,
+`clientCapabilities` and `session` (narrowest by default: deny-only
+permissions, no `mode`, any `model`, the harness's cwd, `readTextFile` only,
+`keepAlive` up to `run`, no `load`), and `mcp`, the servers
+it may name. Anything more is `CONNECTION_NOT_ALLOWED` before the agent starts.
+A document's `session.reuse` keys live in a namespace of their own per run, so
+its nodes never join a session the host opened
+(`26-json-workflow-runtime` § What a document may ask of an agent).
+
 ## Core decoupling invariant
 
 `@noetic-tools/core` imports only the *contract types* from

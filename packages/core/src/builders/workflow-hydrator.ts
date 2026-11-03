@@ -9,6 +9,7 @@
 import type { ContextData, ContextLayer } from '@noetic-tools/context';
 import type {
   AcpAgent,
+  AcpAllowlist,
   Context,
   CustomItemMap,
   ExecuteStepFn,
@@ -36,14 +37,14 @@ import type {
 import { shorthandStepId, stepEntryToNode, stepListEntries } from '../schemas/workflow';
 import { DetachedHandleImpl } from '../util/detached-handle';
 import { outputText } from './output-text';
-import { callModel, runCode, step } from './step-builders';
+import { callModel, runCode } from './step-builders';
 import {
   hydrateInParallelNode,
   hydrateSpawnNode,
   hydrateSubflowNode,
   hydrateWithContextNode,
 } from './workflow-child-nodes';
-import { hydrateCallNode, hydrateWaitNode } from './workflow-connection-nodes';
+import { hydrateAcpAgentNode, hydrateCallNode, hydrateWaitNode } from './workflow-connection-nodes';
 import type { ConnectionManifestEntries, ConnectionUses } from './workflow-connections';
 import { checkDocumentConnections } from './workflow-connections';
 import {
@@ -106,6 +107,18 @@ export interface HydrationContext {
   recursionDepth?: number;
   /** Bounds on each expression evaluation; unset fields use `DEFAULT_EXPRESSION_LIMITS`. */
   expressionLimits?: ExpressionLimits;
+  /**
+   * What `acp-agent` nodes are held to when the host did not write the
+   * document: set by `parseAndRunWorkflow` and `dynamicWorkflow`, dropped for
+   * named subflow refs, which the host wrote. Callers never set it.
+   */
+  acpBounds?: {
+    readonly grants: AcpAllowlist;
+    /** Prefixes every `session.reuse` key, so the document's sessions never meet the host's. */
+    readonly sessionScope: string;
+    /** The harness's working directory when the document was checked: a node's `cwd` when neither it nor its grant sets one. */
+    readonly cwd: string;
+  };
   /**
    * The hydrated document's identity for `$steps`: each `hydrateWorkflow` call
    * makes a new one, so two documents in one run never read each other's node
@@ -356,35 +369,6 @@ function hydrateSequenceNode(
       },
     }),
   );
-}
-
-function hydrateAcpAgentNode(
-  node: WorkflowNode,
-  ctx: HydrationContext,
-): Step<ContextData, string, string> {
-  if (node.kind !== 'acp-agent') {
-    return frameworkCast(undefined);
-  }
-  const agent = ctx.acpAgents?.get(node.agent);
-  if (!agent) {
-    throw new NoeticConfigError({
-      code: 'UNKNOWN_ACP_AGENT_REFERENCE',
-      message: `ACP agent '${node.agent}' referenced in workflow node '${node.id}' is not registered.`,
-      hint: 'Pass agent adapters via HydrationContext.acpAgents, e.g. createAcpAgentRegistry(claudeCode()) from @noetic-tools/acp.',
-    });
-  }
-  return step.acpAgent({
-    id: node.id,
-    agent,
-    prompt: node.prompt,
-    cwd: node.cwd,
-    mode: node.mode,
-    model: node.model,
-    mcpServers: node.mcpServers,
-    permissions: node.permissions,
-    clientCapabilities: node.clientCapabilities,
-    session: node.session,
-  });
 }
 
 //#endregion

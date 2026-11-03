@@ -286,12 +286,26 @@ const AcpClientCapabilityConfigSchema = z.object({
   terminal: z.boolean().optional(),
 });
 
+const SecretValueSchema: z.ZodType<WorkflowSecretValue> = z
+  .object({
+    $secret: z.string().min(1),
+  })
+  .strict();
+
+/** A header or environment entry. Its value may be a `$secret`, resolved when the session starts. */
 const AcpNamedValueSchema = z.object({
   name: z.string(),
-  value: z.string(),
+  value: z.union([
+    z.string(),
+    SecretValueSchema,
+  ]),
 });
 
-/** ACP `McpServer`. Stdio is untagged and mandatory for every agent; http/sse are capability-gated. */
+/**
+ * ACP `McpServer`. Stdio is untagged and mandatory for every agent; http/sse are
+ * capability-gated. `parseAndRunWorkflow` and `dynamicWorkflow` accept a server
+ * only when the host's `mcp` allowlist grants it.
+ */
 const AcpMcpServerSchema = z.union([
   z.object({
     type: z.literal('http'),
@@ -312,6 +326,9 @@ const AcpMcpServerSchema = z.union([
     env: z.array(AcpNamedValueSchema),
   }),
 ]);
+
+/** @public An `acp-agent` node's MCP server, as a document writes it. */
+export type WorkflowMcpServer = z.infer<typeof AcpMcpServerSchema>;
 
 const AcpSessionPolicySchema = z.object({
   reuse: z.string().min(1).optional(),
@@ -584,7 +601,7 @@ export interface AcpAgentWorkflowNode extends WorkflowNodeBase {
   mode?: string;
   /** Model to select before prompting. */
   model?: string;
-  mcpServers?: z.infer<typeof AcpMcpServerSchema>[];
+  mcpServers?: WorkflowMcpServer[];
   permissions?: z.infer<typeof AcpPermissionPolicySchema>;
   clientCapabilities?: z.infer<typeof AcpClientCapabilityConfigSchema>;
   session?: z.infer<typeof AcpSessionPolicySchema>;
@@ -1082,12 +1099,6 @@ const LiteralValueSchema: z.ZodType<WorkflowLiteralValue> = z
   .refine((v) => Object.hasOwn(v, '$literal'), {
     message: "A '$literal' wrapper needs a value.",
   });
-
-const SecretValueSchema: z.ZodType<WorkflowSecretValue> = z
-  .object({
-    $secret: z.string().min(1),
-  })
-  .strict();
 
 const PlainKeySchema = z
   .string()

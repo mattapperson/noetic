@@ -16,6 +16,8 @@ export interface HarnessInternalSlots {
   connectionRegistry: unknown;
   /** The verifier `step.verify` uses (spec 37). */
   verifier: unknown;
+  /** The harness's `environment.secrets` resolver (spec 35 § Secrets). */
+  secrets: unknown;
 }
 
 type HarnessInternalKey = keyof HarnessInternalSlots;

@@ -475,6 +475,8 @@ const hydrated = hydrateWorkflow(document, {
 
 A node naming an unregistered agent fails hydration with `UNKNOWN_ACP_AGENT_REFERENCE`.
 
+A node decides what the agent can reach on your machine — `clientCapabilities.terminal` alone hands it a shell, and `mcpServers` launch commands and carry credentials. So a document you did not write — one a model generated with `dynamicWorkflow`, or one `parseAndRunWorkflow` loads — gets only what you grant: the `acp` allowlist caps each agent's `permissions`, `mode`, `model`, `cwd`, `clientCapabilities` and `session` (by default: deny-only permissions, no `mode`, any `model`, the harness's working directory, `readTextFile` only, no `session.load`; `keepAlive: 'harness'` never), and the `mcp` allowlist names the servers it may use. Anything more fails with `CONNECTION_NOT_ALLOWED` before the agent starts, and the document's sessions never join yours. See [What a document may ask of an agent](/docs/framework/json-runtime#what-a-document-may-ask-of-an-agent).
+
 ## Testing an ACP step
 
 `loopbackTransport` stands an in-process agent on the far end of a real protocol connection — full handshake, sessions, notifications, and client callbacks, with no process to spawn:
