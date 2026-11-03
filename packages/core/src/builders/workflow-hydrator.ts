@@ -36,14 +36,14 @@ import type {
 import { shorthandStepId, stepEntryToNode, stepListEntries } from '../schemas/workflow';
 import { DetachedHandleImpl } from '../util/detached-handle';
 import { outputText } from './output-text';
-import { callModel, runCode, step } from './step-builders';
+import { callModel, runCode } from './step-builders';
 import {
   hydrateInParallelNode,
   hydrateSpawnNode,
   hydrateSubflowNode,
   hydrateWithContextNode,
 } from './workflow-child-nodes';
-import { hydrateCallNode, hydrateWaitNode } from './workflow-connection-nodes';
+import { hydrateAcpAgentNode, hydrateCallNode, hydrateWaitNode } from './workflow-connection-nodes';
 import type { ConnectionManifestEntries, ConnectionUses } from './workflow-connections';
 import { checkDocumentConnections } from './workflow-connections';
 import {
@@ -59,7 +59,6 @@ import {
   hydrateEmitItems,
   nodeScope,
 } from './workflow-custom-items';
-import { stepMcpServers } from './workflow-mcp-servers';
 import { workflowReplayKey } from './workflow-replay-key';
 import { hydrateVerifyNode } from './workflow-verify';
 
@@ -357,35 +356,6 @@ function hydrateSequenceNode(
       },
     }),
   );
-}
-
-function hydrateAcpAgentNode(
-  node: WorkflowNode,
-  ctx: HydrationContext,
-): Step<ContextData, string, string> {
-  if (node.kind !== 'acp-agent') {
-    return frameworkCast(undefined);
-  }
-  const agent = ctx.acpAgents?.get(node.agent);
-  if (!agent) {
-    throw new NoeticConfigError({
-      code: 'UNKNOWN_ACP_AGENT_REFERENCE',
-      message: `ACP agent '${node.agent}' referenced in workflow node '${node.id}' is not registered.`,
-      hint: 'Pass agent adapters via HydrationContext.acpAgents, e.g. createAcpAgentRegistry(claudeCode()) from @noetic-tools/acp.',
-    });
-  }
-  return step.acpAgent({
-    id: node.id,
-    agent,
-    prompt: node.prompt,
-    cwd: node.cwd,
-    mode: node.mode,
-    model: node.model,
-    mcpServers: stepMcpServers(node.mcpServers),
-    permissions: node.permissions,
-    clientCapabilities: node.clientCapabilities,
-    session: node.session,
-  });
 }
 
 //#endregion
