@@ -18,10 +18,15 @@ import type {
   StepConnectionTarget,
   StorageAdapter,
 } from '@noetic-tools/types';
-import { frameworkCast, NoeticConfigError, NoeticErrorImpl } from '@noetic-tools/types';
+import {
+  frameworkCast,
+  isConnectionPick,
+  NoeticConfigError,
+  NoeticErrorImpl,
+} from '@noetic-tools/types';
 import { z } from 'zod';
 import type { ResumeDecision } from '../connections/durability';
-import { resumeDecision } from '../connections/durability';
+import { resumeDecision, stepPathOf } from '../connections/durability';
 import type {
   ConnectionRegistry,
   ConnectionScope,
@@ -170,12 +175,6 @@ export async function releasePathLeases(paths: ReadonlyArray<Context>): Promise<
   }
 }
 
-/** The ledger path of the step running on `ctx`, when it runs on a lane. */
-export function stepPathOf(ctx: Context): string | undefined {
-  const path = ctx instanceof ContextImpl ? ctx.currentPath() : '';
-  return path.length > 0 ? path : undefined;
-}
-
 /** The run-and-step key a call carries, stable across a resume of the same run (spec 35 § Durability). */
 export function idempotencyKeyFor(ctx: Context, stepId: string, ledgerKey?: string): string {
   return `${runRootOf(ctx).id}:${ledgerKey ?? stepPathOf(ctx) ?? stepId}`;
@@ -298,6 +297,30 @@ export interface GraphConnectionNeed {
   readonly setup: boolean;
 }
 
+/** What the picks in a model step's eager `tools` need: a picked handle's profile range. */
+function pickNeeds(tools: unknown): GraphConnectionNeed[] {
+  if (!Array.isArray(tools)) {
+    return [];
+  }
+  return tools.flatMap((entry: unknown): GraphConnectionNeed[] => {
+    if (!isConnectionPick(entry) || !entry.requirement) {
+      return [];
+    }
+    return [
+      {
+        name: entry.connection,
+        ...(entry.profile
+          ? {
+              profile: entry.profile,
+            }
+          : {}),
+        requirement: entry.requirement,
+        setup: false,
+      },
+    ];
+  });
+}
+
 /**
  * Every connection need a graph states up front: each `call` and `wait` whose
  * connection is a static handle, with its profile and requirement. The harness
@@ -307,6 +330,10 @@ export interface GraphConnectionNeed {
 export function graphConnectionNeeds(graph: Step): GraphConnectionNeed[] {
   const needs: GraphConnectionNeed[] = [];
   someStep(graph, (step) => {
+    if (step.kind === 'callModel') {
+      needs.push(...pickNeeds(step.tools));
+      return false;
+    }
     if (step.kind !== 'call' && step.kind !== 'wait') {
       return false;
     }

@@ -326,32 +326,6 @@ describe('executeAcpAgent', () => {
       'prompt',
     ]);
   });
-
-  it('passes MCP servers through to session creation', async () => {
-    const { ctx } = harnessCtx();
-    let seen: AcpNewSessionOptions | undefined;
-    const acpStep = step.acpAgent({
-      id: 'with-mcp',
-      agent: fakeAgent({
-        onNewSession: (o) => {
-          seen = o;
-        },
-      }),
-      prompt: 'go',
-      mcpServers: [
-        {
-          name: 'db',
-          command: 'mcp-db',
-          args: [],
-          env: [],
-        },
-      ],
-    });
-
-    await execute(acpStep, undefined, ctx);
-
-    expect(seen?.mcpServers).toHaveLength(1);
-  });
 });
 
 describe('executeAcpAgent — session lifecycle', () => {

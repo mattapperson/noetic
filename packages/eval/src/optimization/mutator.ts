@@ -1,18 +1,19 @@
-import type { ServerToolSpec, Step, Tool } from '@noetic-tools/core';
-import { isServerToolSpec } from '@noetic-tools/core';
+import type { Step, StepToolEntry } from '@noetic-tools/core';
+import { isConnectionEntry, isConnectionPick, isServerToolSpec } from '@noetic-tools/core';
 
 import type { Candidate } from '../types/optimizer';
 
 //#region Helper Functions
 
 function replaceToolListFields(
-  tools: (Tool | ServerToolSpec)[],
+  tools: StepToolEntry[],
   candidate: Candidate,
   path: string,
-): (Tool | ServerToolSpec)[] {
+): StepToolEntry[] {
   return tools.map((t) => {
-    // Server tools (web_search/web_fetch) have no optimizable fields — pass through.
-    if (isServerToolSpec(t)) {
+    // Server tools (web_search/web_fetch) and connections (whose tools their
+    // server names) have no optimizable fields — pass through.
+    if (isServerToolSpec(t) || isConnectionPick(t) || isConnectionEntry(t)) {
       return t;
     }
     const name = candidate[`${path}.tools.${t.name}.name`] ?? t.name;

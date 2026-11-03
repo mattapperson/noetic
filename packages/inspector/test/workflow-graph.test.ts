@@ -222,6 +222,33 @@ describe('toFlow', () => {
     ]);
   });
 
+  it('names each callModel tool entry by its tool, connection or MCP server', () => {
+    const { nodes } = toFlow(
+      doc({
+        kind: 'callModel',
+        id: 'agent',
+        instructions: 'triage',
+        tools: [
+          {
+            type: 'search',
+          },
+          {
+            connection: 'github',
+          },
+          {
+            mcp: {
+              name: 'docs',
+              type: 'http',
+              url: 'https://example.com/mcp',
+            },
+          },
+        ],
+      }),
+    );
+
+    expect(node(nodes, 'agent').chips).toContain('tools search, github, docs');
+  });
+
   it('draws a loop as a do-while: body first, then the test', () => {
     const { nodes, edges } = toFlow(
       doc({

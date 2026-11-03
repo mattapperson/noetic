@@ -230,7 +230,37 @@ async function recordToLedger<TContext, I, O>(opts: {
  * @throws `NoeticError` with kind `step_failed` if max depth is exceeded or an unknown step kind is encountered.
  * @throws `NoeticError` with kind `cancelled` if the context is aborted.
  */
-export async function execute<TContext = ContextData, I = unknown, O = unknown>(
+export function execute<TContext = ContextData, I = unknown, O = unknown>(
+  step: Step<TContext, I, O>,
+  input: I,
+  ctx: Context<TContext>,
+): Promise<O> {
+  // Only the outermost call on a root is marked; every step under it passes
+  // straight through, adding no frame to deep recursion.
+  if (ctx.parent !== null || runningRoots.has(ctx.id)) {
+    return executeStep(step, input, ctx);
+  }
+  runningRoots.add(ctx.id);
+  return executeStep(step, input, ctx).finally(() => {
+    runningRoots.delete(ctx.id);
+  });
+}
+
+/**
+ * Root contexts some `execute()` call is running a step on, by id: a step runs
+ * on a lane wrapping its context, which is a different object with the same id. A `harness.run`
+ * made from inside one (a tool running a step on `toolCtx.ctx`) joins that
+ * run rather than starting a new one, so it neither re-initializes the
+ * context's layers nor, on finishing, closes what the outer run still uses.
+ */
+const runningRoots = new Set<string>();
+
+/** True while an `execute()` call is running a step on this root context. */
+export function isRootRunning(ctx: Context): boolean {
+  return runningRoots.has(ctx.id);
+}
+
+async function executeStep<TContext, I, O>(
   step: Step<TContext, I, O>,
   input: I,
   ctx: Context<TContext>,

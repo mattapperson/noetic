@@ -10,7 +10,11 @@
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { createMemoryArtifactStore } from '@noetic-tools/mcp';
 import type {
+  Connection,
+  ConnectionConfig,
+  ConnectionProvider,
   ContextLayer,
   ExecutionContext,
   FsAdapter,
@@ -359,6 +363,124 @@ export function layerFn(
     throw new Error(`layer does not expose a '${name}' function`);
   }
   return (args, state, ctx) => decl.execute(args, state, ctx);
+}
+
+//#endregion
+
+//#region MCP fixtures
+
+/** `${PLUGIN_ROOT}` and `${PLUGIN_DATA}`, spelled so no template literal expands them. */
+export const ROOT_VAR = `\${${'PLUGIN_ROOT'}}`;
+export const DATA_VAR = `\${${'PLUGIN_DATA'}}`;
+
+/**
+ * A stdio MCP server written against the wire protocol directly rather than
+ * the SDK, so it needs no `node_modules` inside the temp fixture. The stdio
+ * transport is newline-delimited JSON-RPC, which is small enough to speak by
+ * hand.
+ *
+ * - `echo_env` returns the `PLUGIN_ROOT` and `PLUGIN_DATA` it was launched
+ *   with, which turns a round trip into an end-to-end check of §9.1.
+ * - `echo` returns its `text` argument.
+ * - `key` returns the idempotency key the client sent with the call.
+ *
+ * Every call is appended to `$PLUGIN_DATA/calls.log` when that is set, so a
+ * test can tell whether a call reached the server at all.
+ */
+export const FIXTURE_SERVER = `
+import { appendFileSync } from 'node:fs';
+const send = (msg) => process.stdout.write(JSON.stringify(msg) + '\\n');
+const TOOLS = [
+  {
+    name: 'echo_env',
+    description: 'Returns the plugin variables this server was launched with.',
+    inputSchema: { type: 'object', properties: { prefix: { type: 'string' } } },
+  },
+  {
+    name: 'echo',
+    description: 'Returns its text.',
+    inputSchema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] },
+  },
+  {
+    name: 'key',
+    description: 'Returns the idempotency key of this call.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+];
+const text = (value) => ({ content: [{ type: 'text', text: value }] });
+const run = (params) => {
+  const args = params.arguments || {};
+  if (params.name === 'echo') return text(String(args.text));
+  if (params.name === 'key') return text(String((params._meta || {})['tools.noetic/idempotency-key']));
+  return text((args.prefix || '') + JSON.stringify({
+    pluginRoot: process.env.PLUGIN_ROOT,
+    pluginData: process.env.PLUGIN_DATA,
+    cwd: process.cwd(),
+    config: process.env.CONFIG,
+  }));
+};
+let buffer = '';
+process.stdin.on('data', (chunk) => {
+  buffer += chunk;
+  let index;
+  while ((index = buffer.indexOf('\\n')) !== -1) {
+    const line = buffer.slice(0, index).trim();
+    buffer = buffer.slice(index + 1);
+    if (line === '') continue;
+    const msg = JSON.parse(line);
+    if (msg.method === 'initialize') {
+      send({
+        jsonrpc: '2.0',
+        id: msg.id,
+        result: {
+          protocolVersion: msg.params.protocolVersion,
+          capabilities: { tools: {} },
+          serverInfo: { name: 'fixture-server', version: '1.0.0' },
+        },
+      });
+      continue;
+    }
+    if (msg.method === 'tools/list') {
+      send({ jsonrpc: '2.0', id: msg.id, result: { tools: TOOLS } });
+      continue;
+    }
+    if (msg.method === 'tools/call') {
+      if (process.env.PLUGIN_DATA) {
+        appendFileSync(process.env.PLUGIN_DATA + '/calls.log', msg.params.name + '\\n');
+      }
+      send({ jsonrpc: '2.0', id: msg.id, result: run(msg.params) });
+      continue;
+    }
+    if (msg.id !== undefined) {
+      send({ jsonrpc: '2.0', id: msg.id, result: {} });
+    }
+  }
+});
+`;
+
+/** Connect one entry the way the harness would, outside a harness. */
+export async function connectEntry(entry: ConnectionConfig): Promise<Connection> {
+  const [connection] = await entry.provider.connect({
+    name: entry.provider.name ?? 'test',
+    signal: new AbortController().signal,
+    artifacts: createMemoryArtifactStore(),
+  });
+  if (connection === undefined) {
+    throw new Error('the provider offered no connection');
+  }
+  return connection;
+}
+
+/** Connect and release a provider, ignoring whether the connection succeeds. */
+export async function connectQuietly(provider: ConnectionProvider): Promise<void> {
+  try {
+    const connection = await connectEntry({
+      provider,
+    });
+    await connection.release();
+  } catch {
+    // The test asserts on what the server saw, not on the outcome.
+  }
 }
 
 //#endregion

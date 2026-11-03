@@ -7,30 +7,30 @@
  */
 
 import { afterAll, describe, expect, test } from 'bun:test';
+import assert from 'node:assert';
 import { chmod, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DiagnosticCode } from '../src/diagnostics';
 import { discoverPlugins } from '../src/discovery';
-import { agentPlugins } from '../src/layer/agent-plugins';
 import { PLUGIN_SCHEMA_ID } from '../src/manifest';
-import { buildSubprocessEnv, connectMcpServer } from '../src/mcp-client';
+import { buildSubprocessEnv, pluginConnections } from '../src/mcp-client';
 import { McpTransport, resolveMcpServer } from '../src/mcp-config';
 import {
   cleanupFixtures,
-  fakeExecutionContext,
+  connectEntry,
+  connectQuietly,
+  DATA_VAR,
+  FIXTURE_SERVER,
   linkFixture,
   makePluginRoot,
-  makeScopedStorage,
   manifest,
   mcpConfig,
+  ROOT_VAR,
   skillDoc,
   tempDir,
 } from './_helpers';
 
 afterAll(cleanupFixtures);
-
-const ROOT_VAR = `\${${'PLUGIN_ROOT'}}`;
-const DATA_VAR = `\${${'PLUGIN_DATA'}}`;
 
 //#region Plugin loader
 
@@ -397,28 +397,24 @@ describe('Appendix A — MCP configuration', () => {
         }),
       },
     ]);
-    const layer = agentPlugins({
-      roots: [
-        root,
-      ],
-      dataDir,
-      // The default transport set omits the deprecated SSE transport.
-      transports: [
-        McpTransport.Stdio,
-        McpTransport.StreamableHttp,
-      ],
-    });
-    const { ctx } = fakeExecutionContext();
-    await layer.hooks.init?.({
-      storage: makeScopedStorage(),
-      scopeKey: 'thread:test',
-      ctx,
-    });
+    const { connections, diagnostics } = await pluginConnections(
+      await discoverPlugins(
+        [
+          root,
+        ],
+        dataDir,
+      ),
+      {
+        // The default transport set omits the deprecated SSE transport.
+        transports: [
+          McpTransport.Stdio,
+          McpTransport.StreamableHttp,
+        ],
+      },
+    );
 
-    expect(layer.readMcpTools()).toHaveLength(0);
-    expect(
-      layer.readDiagnostics().some((d) => d.code === DiagnosticCode.McpTransportUnsupported),
-    ).toBe(true);
+    expect(connections).toHaveLength(0);
+    expect(diagnostics.some((d) => d.code === DiagnosticCode.McpTransportUnsupported)).toBe(true);
   });
 
   test('rejects an env entry named after a reserved variable (§9.2)', async () => {
@@ -639,29 +635,20 @@ describe('Appendix A — resilience', () => {
         }),
       },
     ]);
-    const layer = agentPlugins({
-      roots: [
+    const found = await discoverPlugins(
+      [
         root,
       ],
       dataDir,
-    });
-    const { ctx } = fakeExecutionContext();
-    await layer.hooks.init?.({
-      storage: makeScopedStorage(),
-      scopeKey: 'thread:test',
-      ctx,
-    });
-
-    expect(layer.readPlugins()[0]?.skills).toHaveLength(1);
-    expect(layer.readMcpTools()).toHaveLength(0);
-    expect(layer.readDiagnostics().some((d) => d.code === DiagnosticCode.McpConnectFailed)).toBe(
-      true,
     );
-    await layer.hooks.dispose?.({
-      state: {
-        activated: [],
-      },
-    });
+    const { connections } = await pluginConnections(found);
+    const [entry] = connections;
+    assert(entry !== undefined);
+
+    // The failure surfaces when the entry connects — inside the harness, as an
+    // unavailable connection — and the plugin's skills are untouched.
+    await expect(connectEntry(entry)).rejects.toThrow();
+    expect(found.plugins[0]?.skills).toHaveLength(1);
   });
 });
 
@@ -722,28 +709,21 @@ describe('Appendix A — remaining boxes', () => {
         }),
       },
     ]);
-    const layer = agentPlugins({
-      roots: [
-        root,
-      ],
-      dataDir,
-    });
-    const { ctx } = fakeExecutionContext();
-    await layer.hooks.init?.({
-      storage: makeScopedStorage(),
-      scopeKey: 'thread:test',
-      ctx,
-    });
+    const { connections } = await pluginConnections(
+      await discoverPlugins(
+        [
+          root,
+        ],
+        dataDir,
+      ),
+    );
+    const [entry] = connections;
+    assert(entry !== undefined);
+    const connection = await connectEntry(entry);
     try {
-      expect(layer.readMcpTools().map((t) => t.name)).toEqual([
-        'echo_env',
-      ]);
+      expect(Object.keys(connection.manifest.operations)).toContain('echo_env');
     } finally {
-      await layer.hooks.dispose?.({
-        state: {
-          activated: [],
-        },
-      });
+      await connection.release();
     }
   }, 20_000);
 
@@ -774,24 +754,20 @@ describe('Appendix A — remaining boxes', () => {
           }),
         },
       ]);
-      const layer = agentPlugins({
-        roots: [
-          root,
-        ],
-        dataDir,
-        connectTimeoutMs: 3000,
-      });
-      const { ctx } = fakeExecutionContext();
-      await layer.hooks.init?.({
-        storage: makeScopedStorage(),
-        scopeKey: 'thread:test',
-        ctx,
-      });
-      await layer.hooks.dispose?.({
-        state: {
-          activated: [],
+      const { connections } = await pluginConnections(
+        await discoverPlugins(
+          [
+            root,
+          ],
+          dataDir,
+        ),
+        {
+          timeoutMs: 3000,
         },
-      });
+      );
+      for (const entry of connections) {
+        await connectQuietly(entry.provider);
+      }
 
       // The declared transport was attempted, and no fallback followed it.
       expect(seen.length).toBeGreaterThan(0);
@@ -805,76 +781,6 @@ describe('Appendix A — remaining boxes', () => {
 //#endregion
 
 //#region Live MCP round trip
-
-/**
- * A stdio MCP server written against the wire protocol directly rather than
- * the SDK, so it needs no `node_modules` inside the temp fixture. The stdio
- * transport is newline-delimited JSON-RPC, which is small enough to speak by
- * hand.
- *
- * It echoes back the `PLUGIN_ROOT` and `PLUGIN_DATA` it was launched with,
- * which is what turns this into an end-to-end check of §9.1 rather than just
- * a check that a connection can be made.
- */
-const FIXTURE_SERVER = `
-const send = (msg) => process.stdout.write(JSON.stringify(msg) + '\\n');
-const TOOL = {
-  name: 'echo_env',
-  description: 'Returns the plugin variables this server was launched with.',
-  inputSchema: { type: 'object', properties: { prefix: { type: 'string' } } },
-};
-let buffer = '';
-process.stdin.on('data', (chunk) => {
-  buffer += chunk;
-  let index;
-  while ((index = buffer.indexOf('\\n')) !== -1) {
-    const line = buffer.slice(0, index).trim();
-    buffer = buffer.slice(index + 1);
-    if (line === '') continue;
-    const msg = JSON.parse(line);
-    if (msg.method === 'initialize') {
-      send({
-        jsonrpc: '2.0',
-        id: msg.id,
-        result: {
-          protocolVersion: msg.params.protocolVersion,
-          capabilities: { tools: {} },
-          serverInfo: { name: 'fixture-server', version: '1.0.0' },
-        },
-      });
-      continue;
-    }
-    if (msg.method === 'tools/list') {
-      send({ jsonrpc: '2.0', id: msg.id, result: { tools: [TOOL] } });
-      continue;
-    }
-    if (msg.method === 'tools/call') {
-      const prefix = (msg.params.arguments && msg.params.arguments.prefix) || '';
-      send({
-        jsonrpc: '2.0',
-        id: msg.id,
-        result: {
-          content: [
-            {
-              type: 'text',
-              text: prefix + JSON.stringify({
-                pluginRoot: process.env.PLUGIN_ROOT,
-                pluginData: process.env.PLUGIN_DATA,
-                cwd: process.cwd(),
-                config: process.env.CONFIG,
-              }),
-            },
-          ],
-        },
-      });
-      continue;
-    }
-    if (msg.id !== undefined) {
-      send({ jsonrpc: '2.0', id: msg.id, result: {} });
-    }
-  }
-});
-`;
 
 describe('live stdio MCP server', () => {
   test('connects, lists tools, and round-trips a call with the §9.1 environment', async () => {
@@ -901,46 +807,33 @@ describe('live stdio MCP server', () => {
     ]);
     await chmod(join(root, 'toolbox', 'bin', 'server.mjs'), 0o755);
 
-    const layer = agentPlugins({
-      roots: [
+    const found = await discoverPlugins(
+      [
         root,
       ],
       dataDir,
-    });
-    const { ctx } = fakeExecutionContext();
-    await layer.hooks.init?.({
-      storage: makeScopedStorage(),
-      scopeKey: 'thread:test',
-      ctx,
-    });
+    );
+    const { connections, diagnostics } = await pluginConnections(found);
+    expect(diagnostics).toEqual([]);
+    const [entry] = connections;
+    assert(entry !== undefined);
+    expect(entry.provider.name).toBe('toolbox_fixture');
+    expect(entry.expose).toBe('call');
 
+    const connection = await connectEntry(entry);
     try {
-      const tools = layer.readMcpTools();
-      expect(layer.readDiagnostics()).toEqual([]);
-      expect(tools.map((t) => t.qualifiedName)).toEqual([
-        'toolbox/fixture/echo_env',
-      ]);
-
-      const decl = layer.provides?.callMcpTool;
-      expect(decl?.kind).toBe('function');
-      if (decl === undefined || decl.kind !== 'function') {
-        return;
-      }
-      const outcome = await decl.execute(
+      const outcome = await connection.call(
+        'echo_env',
         {
-          server: 'toolbox/fixture',
-          tool: 'echo_env',
-          arguments: {
-            prefix: 'ENV=',
-          },
+          prefix: 'ENV=',
         },
         {
-          activated: [],
+          signal: new AbortController().signal,
+          idempotencyKey: 'conformance',
         },
-        ctx,
       );
 
-      const payload = JSON.stringify(outcome.result);
+      const payload = JSON.stringify(outcome);
       expect(payload).toContain('ENV=');
       // §9.1: the client supplied both reserved variables to the subprocess…
       expect(payload).toContain(join(root, 'toolbox'));
@@ -948,71 +841,9 @@ describe('live stdio MCP server', () => {
       // …§9.2: and expanded the placeholder in the configured env value.
       expect(payload).toContain(join(root, 'toolbox', 'config.json'));
     } finally {
-      await layer.hooks.dispose?.({
-        state: {
-          activated: [],
-        },
-      });
+      await connection.release();
     }
   }, 20_000);
-
-  test('an unknown server key is reported to the model, not thrown', async () => {
-    const { root, dataDir } = await makePluginRoot([
-      {
-        manifest: manifest('p'),
-      },
-    ]);
-    const layer = agentPlugins({
-      roots: [
-        root,
-      ],
-      dataDir,
-    });
-    const { ctx } = fakeExecutionContext();
-    await layer.hooks.init?.({
-      storage: makeScopedStorage(),
-      scopeKey: 'thread:test',
-      ctx,
-    });
-
-    const decl = layer.provides?.callMcpTool;
-    if (decl === undefined || decl.kind !== 'function') {
-      throw new Error('callMcpTool should be exposed');
-    }
-    const outcome = await decl.execute(
-      {
-        server: 'nope/nope',
-        tool: 'x',
-      },
-      {
-        activated: [],
-      },
-      ctx,
-    );
-    expect(JSON.stringify(outcome.result)).toContain('no connected MCP server');
-  });
-
-  test('connectMcpServer reports a launch failure instead of throwing', async () => {
-    const base = await tempDir();
-    const pluginRoot = join(base, 'p');
-    await mkdir(pluginRoot, {
-      recursive: true,
-    });
-
-    const result = await connectMcpServer({
-      server: {
-        key: 'p/missing',
-        type: McpTransport.Stdio,
-        command: 'noetic-agent-plugins-no-such-executable',
-        args: [],
-        env: {},
-        cwd: pluginRoot,
-      },
-      pluginRoot,
-      pluginData: join(base, 'data'),
-    });
-    expect(result.ok).toBe(false);
-  });
 });
 
 //#endregion

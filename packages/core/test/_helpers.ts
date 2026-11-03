@@ -3,6 +3,7 @@
  */
 
 import { expect } from 'bun:test';
+import assert from 'node:assert';
 import * as fsp from 'node:fs/promises';
 import type {
   ContextData,
@@ -82,6 +83,12 @@ import type {
 import { createContextCacheStore } from '@noetic-tools/context';
 //#endregion
 import type {
+  AcpAgent,
+  AcpAgentConnection,
+  AcpClientHost,
+  AcpSession,
+  AcpToolCall,
+  AcpTurnResult,
   AgentHarnessContract,
   CallModelRequest,
   Context,
@@ -844,6 +851,10 @@ export function makeLayer(
 /** One round the fake server answered: what it was sent, and what it replied. */
 export interface FakeOpenRouterRound {
   input: unknown[];
+  /** The names of the function tools the round was sent. */
+  tools: string[];
+  /** The round's `tool_choice`, as sent. */
+  toolChoice: unknown;
 }
 
 /**
@@ -907,10 +918,26 @@ export function startFakeOpenRouter(reply: (input: unknown[]) => unknown[]): Fak
         .object({
           model: z.string(),
           input: z.array(z.unknown()).default([]),
+          tools: z
+            .array(
+              z.object({
+                name: z.string().optional(),
+              }),
+            )
+            .default([]),
+          tool_choice: z.unknown().optional(),
         })
         .parse(await request.json());
       rounds.push({
         input: body.input,
+        tools: body.tools.flatMap((tool) =>
+          tool.name === undefined
+            ? []
+            : [
+                tool.name,
+              ],
+        ),
+        toolChoice: body.tool_choice,
       });
       const round = rounds.length;
       const stream = fakeResponseStream({
@@ -1048,6 +1075,142 @@ function fakeResponseStream({
     },
   ];
   return `${events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join('')}data: [DONE]\n\n`;
+}
+
+//#endregion
+
+//#region Scripted ACP agent
+
+/** A call a scripted ACP agent makes during its turn. */
+export interface Planned {
+  name: string;
+  args: unknown;
+  /** Sent in the MCP request, as Claude Code and Codex do. */
+  agentCallId?: string;
+  /** Announced as an ACP `tool_call` first, as every agent does; opencode sends no id over MCP. */
+  announce?: {
+    toolCallId: string;
+    title: string;
+  };
+}
+
+/** What a scripted ACP agent saw and did. */
+export interface AgentRun {
+  host?: AcpClientHost;
+  results: Array<{
+    output: string;
+    isError: boolean;
+  }>;
+  calls: AcpToolCall[];
+}
+
+/**
+ * An agent that, during its turn, makes each planned call through the tool
+ * host and reports it back as an ACP tool call item, the way a real agent's
+ * `tool_call` updates become items.
+ */
+export function toolCallingAgent(
+  planned: Planned[] | ((turn: number) => Planned[]),
+  run: AgentRun,
+  takesTools = true,
+): AcpAgent {
+  let turn = 0;
+  return {
+    specificationVersion: 'acp-v1',
+    agentId: 'fake-tools',
+    ...(takesTools
+      ? {}
+      : {
+          refusesTools: {
+            code: 'ACP_TRANSPORT_CANNOT_REACH',
+            reason: 'its transport has no `reach()`.',
+            hint: 'Give it a machine.',
+          },
+        }),
+    async connect(connect): Promise<AcpAgentConnection> {
+      run.host = connect.host;
+      const session: AcpSession = {
+        sessionId: 's-1',
+        availableCommands: [],
+        async prompt(): Promise<AcpTurnResult> {
+          const tools = connect.host.tools;
+          assert(tools);
+          const items: Item[] = [
+            makeMessage('assistant', 'done'),
+          ];
+          const plans = typeof planned === 'function' ? planned(turn) : planned;
+          turn += 1;
+          for (const [index, plan] of plans.entries()) {
+            const toolCallId = plan.agentCallId ?? plan.announce?.toolCallId ?? `acp-${index}`;
+            if (plan.announce) {
+              connect.host.onSessionUpdate({
+                sessionId: 's-1',
+                update: {
+                  sessionUpdate: 'tool_call',
+                  toolCallId: plan.announce.toolCallId,
+                  title: plan.announce.title,
+                },
+              });
+            }
+            const call: AcpToolCall = {
+              name: plan.name,
+              args: plan.args,
+              agentCallId: plan.agentCallId,
+              signal: new AbortController().signal,
+            };
+            run.calls.push(call);
+            run.results.push(await tools.call(call));
+            items.push(
+              frameworkCast<FunctionCallItem>({
+                id: toolCallId,
+                type: 'function_call',
+                status: 'completed',
+                callId: toolCallId,
+                name: `mcp__noetic__${plan.name}`,
+                arguments: JSON.stringify(plan.args),
+              }),
+              frameworkCast<Item>({
+                id: `${toolCallId}-out`,
+                type: 'function_call_output',
+                status: 'completed',
+                callId: toolCallId,
+                output: 'agent-side rendering',
+              }),
+            );
+          }
+          return {
+            stopReason: 'end_turn',
+            items,
+            text: 'done',
+          };
+        },
+        async cancel() {},
+        async setMode() {},
+        async setModel() {},
+      };
+      return {
+        agentCapabilities: {},
+        authMethods: [],
+        protocolVersion: 1,
+        async authenticate() {},
+        async newSession() {
+          return session;
+        },
+        async loadSession() {
+          return session;
+        },
+        async close() {},
+      };
+    },
+  };
+}
+
+/** An empty {@link AgentRun}. */
+export function newRun(): AgentRun {
+  return {
+    results: [],
+    calls: [],
+  };
 }
 
 //#endregion

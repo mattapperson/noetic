@@ -20,7 +20,7 @@ import { mcp } from '@noetic-tools/mcp';
 const harness = new AgentHarness({
   name: 'browser-agent',
   params: {},
-  connections: { browser: mcp('npx @playwright/mcp@latest') },
+  connections: [mcp({ name: 'browser', command: 'npx', args: ['@playwright/mcp@latest'] })],
   agentGraph: loop({
     id: 'agent',
     steps: [callModel({ id: 'turn', model: 'anthropic/claude-sonnet-4.5', instructions: 'Use the browser.' })],
@@ -45,7 +45,7 @@ npm install @noetic-tools/profile-browser @noetic-tools/profile-chat
 
 ## Configuring Connections
 
-`connections` maps names you choose to what backs them:
+`connections` names what backs each connection: a record keyed by the names you choose, or a list of entries each named by its provider.
 
 ```ts
 import { AgentHarness, defineSource } from '@noetic-tools/core';
@@ -59,14 +59,14 @@ const harness = new AgentHarness({
   params: {},
   connections: {
     // One server, one connection.
-    browser: mcp('npx @playwright/mcp@latest'),
+    browser: mcp({ command: 'npx', args: ['@playwright/mcp@latest'] }),
     // A remote server, with a policy over its operations.
     slack: {
-      provider: mcp({ url: 'https://slack-mcp.example.com/mcp' }),
+      provider: mcp({ type: 'http', url: 'https://slack-mcp.example.com/mcp' }),
       policy: { approve: ['chat.post'], deny: ['com.slack.admin.*'] },
     },
     // A pool: fresh browsers on demand.
-    browsers: { provider: mcp('npx playwright-noetic-mcp'), pool: { max: 8 } },
+    browsers: { provider: mcp({ command: 'npx', args: ['playwright-noetic-mcp'] }), pool: { max: 8 } },
     // An in-process source (see Triggers).
     deploys,
   },
@@ -78,12 +78,131 @@ const harness = new AgentHarness({
 | `provider` | What backs it: `mcp(…)`, a source, or any `ConnectionProvider`. A bare provider is shorthand for `{ provider }`. |
 | `pool` | Makes it a pool: `{ max, warm?, waitMs? }`. Each user gets a fresh connection (see [Fresh connections](#fresh-connections)). |
 | `policy` | `allow`, `deny`, and `approve` globs over operation names (see [Gates](#gates)). |
-| `expose` | How its operations reach the model: `'eager'` (default), `'all'`, or `'none'` (see [Model tools](#model-tools)). |
+| `expose` | How its operations reach the model: `'eager'` (default), `'all'`, `'call'`, or `'none'` (see [Model tools](#model-tools)). |
 | `look` | What the model sees of it each turn (see [Looking](#looking)). |
 
-`mcp()` takes a command line (`'npx @playwright/mcp@latest'`), `{ command, args, env }`, or `{ url, headers }`. Its options add `webhooks` when the server delivers events by webhook, and `profiles` / `extensions` — the definitions the bridge checks a declaring server against.
+The same connections as a list, each named by `mcp({ name })`:
+
+```ts
+import { AgentHarness } from '@noetic-tools/core';
+import { mcp } from '@noetic-tools/mcp';
+
+const harness = new AgentHarness({
+  name: 'ops',
+  params: {},
+  connections: [
+    mcp({ name: 'browser', command: 'npx', args: ['@playwright/mcp@latest'] }),
+    {
+      provider: mcp({ name: 'slack', type: 'http', url: 'https://slack-mcp.example.com/mcp' }),
+      policy: { approve: ['chat.post'] },
+    },
+  ],
+});
+```
+
+A record key that disagrees with `mcp({ name })`, or a list entry with no name, is `CONNECTION_INVALID`.
+
+`mcp()` takes ACP's `McpServer` shape, so an ACP server config is an argument as it stands:
+
+| Shape | Fields |
+|---|---|
+| Remote | `{ name, type: 'http' \| 'sse', url, headers?: [{ name, value }] }` (`'sse'` is the old 2024-11-05 transport) |
+| Stdio | `{ name, command, args?, env?: [{ name, value }] }` (`type: 'stdio'` may be given; ACP leaves it out) |
+| In process | `{ transport }`, a caller-built MCP transport |
+
+Options sit beside those fields: `auth`, `fetch` (remote), `cwd` and `spawn` (stdio), `webhooks` when the server delivers events by webhook, `profiles` / `extensions` — the definitions the bridge checks a declaring server against — and `timeoutMs`, `requestTimeoutMs`, `pollIntervalMs`, `clientInfo`. A header or environment variable given twice is `CONNECTION_INVALID`. A stdio server that must run elsewhere — the machine an ACP agent runs on, a container — takes `spawn`, which starts the process there and returns its stdio as a `{ readable, writable, close }` stream (`Spawn` from `@noetic-tools/types`; an ACP agent's `agent.spawn` is one); the bridge speaks MCP over it. `policy`, `expose`, `look` and `pool` belong to the entry, not to `mcp()`.
+
+### Signing in to a remote server
+
+An `Authorization` header signs in with a fixed token; `auth` signs in for you:
+
+```ts
+import type { OAuthClientProvider } from '@noetic-tools/mcp';
+import { mcp } from '@noetic-tools/mcp';
+
+declare const linearToken: string;
+declare const driveOAuth: OAuthClientProvider; // your token storage and sign-in redirect
+
+const connections = {
+  linear: mcp({
+    type: 'http',
+    url: 'https://mcp.linear.app/mcp',
+    headers: [{ name: 'Authorization', value: `Bearer ${linearToken}` }],
+  }),
+  drive: mcp({ type: 'http', url: 'https://drive-mcp.example.com/mcp', auth: { kind: 'oauth', provider: driveOAuth } }),
+};
+```
+
+| `auth` | What happens |
+|---|---|
+| `{ kind: 'bearer', token }` | Every request to the server carries `Authorization: Bearer <token>`. |
+| `{ kind: 'oauth', provider }` | The MCP SDK transport reads the provider's tokens and, on a 401, runs discovery, refresh or authorization through it. `OAuthClientProvider` is re-exported from `@noetic-tools/mcp`, so you need not import the MCP SDK. |
+
+The credential (and any `headers`) goes to the server's origin only — never across a redirect to another origin, and configured headers never to the authorization server. Passing both `auth` and an `Authorization` header is `CONNECTION_INVALID`. The `Authorization` header and its bearer token, and every OAuth token the provider hands out or saves, is scrubbed from outputs, events, traces and connection status like a resolved secret.
 
 Providers connect when the harness starts: on the first `execute()` or `run()`, or on an explicit `await harness.start()` for a harness that only reacts to triggers. Construction stays synchronous. A connection that drops is marked unavailable: its tools and steps report it, and every other connection keeps working while it reconnects. `harness.getConnectionStatus(name?)` reports each one's state, identity, and pool usage, and `harness.close()` stops triggers and releases every connection and lease, closing everything even when one part throws and then rethrowing the first failure.
+
+### Attaching at the harness, a turn, or a step
+
+The same entry can be attached at three levels. The model sees the same tool names, every call passes the same gates, and the results, events and spans are the same wherever it is attached.
+
+```ts
+import type { ContextData } from '@noetic-tools/core';
+import { AgentHarness, callModel, connectionTools, tool } from '@noetic-tools/core';
+import { mcp } from '@noetic-tools/mcp';
+import { z } from 'zod';
+
+declare const token: string;
+const LINEAR_MCP = 'https://mcp.linear.app/mcp';
+const search = tool({
+  name: 'search',
+  description: 'Searches the docs.',
+  input: z.object({ query: z.string() }),
+  output: z.string(),
+  execute: async () => 'no docs',
+});
+
+// For one step: offered only by the steps that list it.
+const triage = callModel<ContextData, string, string>({
+  id: 'triage',
+  model: 'anthropic/claude-sonnet-4.5',
+  tools: [mcp({ name: 'linear', type: 'http', url: LINEAR_MCP, headers: [{ name: 'Authorization', value: `Bearer ${token}` }] })],
+});
+
+// For the harness's life.
+const harness = new AgentHarness({
+  name: 'triage',
+  params: {},
+  agentGraph: triage,
+  connections: [mcp({ name: 'linear', type: 'http', url: LINEAR_MCP, headers: [{ name: 'Authorization', value: `Bearer ${token}` }] })],
+});
+
+// Part of a harness or turn connection, picked by name.
+const reader = callModel({
+  id: 'read',
+  model: 'anthropic/claude-sonnet-4.5',
+  tools: [connectionTools('linear', { ops: ['get_*'] }), search],
+});
+
+// For one turn: connected when it starts, released when it ends.
+const linear = mcp({ name: 'linear', type: 'http', url: LINEAR_MCP, headers: [{ name: 'Authorization', value: `Bearer ${token}` }] });
+await harness.execute('Triage ENG-1', { connections: [linear] });
+```
+
+| Level | Connects | Released |
+|---|---|---|
+| Harness `connections` | at `harness.start()` | at `harness.close()` |
+| `execute(input, { connections })` | when the turn starts, before its tool set is built | when the turn ends |
+| A `callModel` or `acpAgent` step's `tools` | with the turn's entries | with them (a kept ACP session holds them until it closes) |
+
+- **A pick by name.** `connectionTools('linear', { ops })` picks a connection the harness or the turn attaches. The name is checked when the turn's tool set is built: no connection with that name is `CONNECTION_UNKNOWN`, and a name that is not a letter followed by letters, digits, `_` or `-` is `CONNECTION_INVALID` at once.
+- **Identity is the name.** An entry whose name the harness, the turn or another step already attaches is that connection when it has the same provider and options. Otherwise it is `CONNECTION_NAME_TAKEN`.
+- **Function-form `tools`** cannot be walked before the turn, so an entry they return must already be attached by the harness or the turn; any other is `CONNECTION_INVALID`.
+- **Pools** stay at the harness: a turn or step entry with `pool` is `CONNECTION_INVALID`.
+- **`toolChoice: { tool }`** naming a connection tool is checked when the turn's tool set is built, and fails there with `UNKNOWN_TOOL_CHOICE`.
+- **Spawned children** see their root turn's connections.
+- **ACP agents** get a step entry's tools through noetic's tool bridge, by the same names and through the same gates as a model; see [Giving the agent your tools](/docs/framework/acp-agents#mcp-servers). A connection tool's idempotency key is `<execution>:tool:<callId>` on both paths.
+- **Handles and triggers.** `step.call`, `step.wait`, `step.verify` and `connection()` handles reach harness and turn connections by name; a step entry is reached only through its model tools. Triggers reach harness connections only.
 
 ### Harness environment
 
@@ -102,11 +221,14 @@ How a connection's operations reach the model is its `expose` setting:
 |---|---|
 | `'eager'` (default) | The operations its profile marks `eager`, plus two tools for the rest: `<name>_ops` lists them and `<name>_call` runs one. |
 | `'all'` | Every operation as its own tool. |
+| `'call'` | Only `<name>_ops` and `<name>_call` (which also reads, `{ read }`). Nothing is rendered into the context; the model lists what it needs. |
 | `'none'` | None; the connection is for steps and triggers only. |
 
 A server with no profile has no eager set, so its tools are exposed as they are. Every call through any of these tools passes the same [gates](#gates) as a step.
 
-When two connections offer the same profile operation — `ui.tap` on an `ios` and an `android` device — the model gets one `ui_tap` tool with a `target` argument naming the connection, instead of two near-identical tools. A `callModel` step can narrow what it offers with `connectionTools()`:
+When two connections offer the same profile operation — `ui.tap` on an `ios` and an `android` device — the model gets one `ui_tap` tool with a `target` argument naming the connection, instead of two near-identical tools. Two or more `'call'` connections likewise share one `ops` and one `call` tool, each taking `target`.
+
+A model step with no `tools` is offered every tool of the turn except those of connections only some step lists. A step that lists a connection entry is offered its tools; `connectionTools(nameOrHandleOrEntry, { ops })` returns a `ConnectionPick` that narrows them. A pick cuts the turn's tools to what it names and keeps their names — `<name>_<op>`, `<name>_ops` / `<name>_call`, merged `ui_tap` with `target`. `ops` globs match operations and reads alike. A merged tool reaches only the connections the step picks: its `target` enum is cut to them and a call to any other target is refused, and `<name>_call` runs only the picked operations and `'ask'` reads:
 
 ```ts
 import { callModel, connection, connectionTools } from '@noetic-tools/core';
@@ -118,7 +240,7 @@ const turn = callModel({
   id: 'turn',
   model: 'anthropic/claude-sonnet-4.5',
   instructions: 'Find the settings screen.',
-  tools: connectionTools(phone, { ops: ['ui.*'] }),
+  tools: [connectionTools(phone, { ops: ['ui.*'] })],
 });
 ```
 
@@ -237,7 +359,7 @@ const harness = new AgentHarness({
   name: 'helper',
   params: {},
   connections: {
-    slack: mcp({ url: SLACK_MCP }),
+    slack: mcp({ type: 'http', url: SLACK_MCP }),
     morning: cron('0 8 * * *', { timezone: 'America/New_York' }),
   },
   triggers: [
@@ -313,10 +435,11 @@ A [JSON workflow](/docs/framework/json-runtime) lists the connections it needs, 
 }
 ```
 
-- **The manifest.** Each entry names a `profile` with a range, `extensions` with ranges, or for a source the `events` it needs; plus `from`, `fresh`, and `setup` for pooled connections. Every operation and event a node uses must come from what its entry declares; anything else fails validation. The optional operations a document uses are worked out from its nodes, so they are never listed twice.
+- **The manifest.** Each entry names a `profile` with a range, `extensions` with ranges, or for a source the `events` it needs; plus `from`, `fresh`, and `setup` for pooled connections. An entry may instead bring its own server: `"linear": { "mcp": { "name": "linear", "type": "http", "url": "…", "headers": [{ "name": "Authorization", "value": { "$secret": "linear.token" } }] } }` is attached when the document runs, and every node reaches it by name. Its key must equal `mcp.name`, it takes no `from`, `fresh` or `setup`, and the host's [`mcp` allowlist](/docs/framework/json-runtime#mcp-servers) grants it. Every operation and event a node uses must come from what its entry declares; anything else fails validation. The optional operations a document uses are worked out from its nodes, so they are never listed twice.
 - **Nodes.** [`call`](/docs/framework/json-runtime#call), [`wait`](/docs/framework/json-runtime#wait), and [`verify`](/docs/framework/json-runtime#verify), shaped like their TypeScript builders. Inside `around`, `act`, or any array of steps, an operation can be written by name: `{ "ui.tap": { "element": "button \"Pay\"" } }` is a `call` on the enclosing connection (the `verify` subject, or the document's only connection).
 - **Values.** `{ "$expr": "…" }` is an [expression](/docs/framework/expressions), evaluated against the node's input with `$steps` holding the outputs of earlier nodes by id; `{ "$literal": … }` passes an object through untouched; `{ "$secret": "name" }` is a secret; refs and blobs appear as they were returned. `$refId(x)` reads a ref's id inside an expression.
 - **Fan-out.** `inParallel` with `over` a list of connection names and `"connection": { "$expr": "$item" }` on its nodes runs the same steps on each, every name checked against the manifest.
+- **Model tools.** A `callModel` or `acp-agent` node's `tools` take `{ "connection": "<name>", "ops"?: [...] }` for a harness or turn connection, and `{ "mcp": { "name", "type", "url", "headers"? } }` (or `{ "mcp": { "name", "command", "args"?, "env"? } }`) for a server the step attaches — the same tools, under the same names, as `connectionTools(…)` and `tools: [mcp(…)]`. Header and environment values are `$secret`s only; the URL or exact command, the secrets and the policy come from the host's [`mcp` allowlist](/docs/framework/json-runtime#mcp-servers). See [Connection tools](/docs/framework/json-runtime#connection-tools).
 
 ### What a document may use
 
@@ -340,6 +463,8 @@ const planner = dynamicWorkflow({
 
 Each entry grants operation and event globs, the `setup` values a document may choose (patterns per field), and the secrets it may use, each bound to one operation field. A manifest asking for more fails validation with [`CONNECTION_NOT_ALLOWED`](/docs/framework/errors#connection_not_allowed). `dynamicWorkflow` shows the model only the allowed connections and operations, with their argument schemas, and fills in the manifest's version ranges itself.
 
+The same entries bound a document's `{ "connection" }` tool entries: the name must be granted (a harness or a turn connection), each `ops` glob must lie inside a granted one, and a pick without `ops` takes exactly the granted operations.
+
 ## Gates
 
 Every connection call — from the model, a step, or a document — passes the same gates, in order:
@@ -359,10 +484,11 @@ Setup and validation raise a [`NoeticConfigError`](/docs/framework/errors#noetic
 
 | Code | When |
 |---|---|
-| [`CONNECTION_UNKNOWN`](/docs/framework/errors#connection_unknown) | A handle, node, trigger, or allowlist names a connection the harness does not have. |
+| [`CONNECTION_UNKNOWN`](/docs/framework/errors#connection_unknown) | A handle, node, trigger, allowlist or `connectionTools('<name>')` pick names a connection the harness (or, for a pick, the turn) does not have. |
 | [`CONNECTION_UNSATISFIED`](/docs/framework/errors#connection_unsatisfied) | A connection does not offer what is required. `missing` says which: a profile or extension version, an operation, an event, or a sense. |
 | [`CONNECTION_NOT_ALLOWED`](/docs/framework/errors#connection_not_allowed) | A document asks for more than its allowlist grants, or sets a setup field reserved to the host. |
-| [`CONNECTION_INVALID`](/docs/framework/errors#connection_invalid) | A manifest entry or handle is malformed. |
+| [`CONNECTION_INVALID`](/docs/framework/errors#connection_invalid) | A manifest entry, handle or harness entry is malformed: an unnamed list entry, a record key that disagrees with `mcp({ name })`, a turn or step entry with `pool`, a function-form `tools` returning a connection nothing attached, an `mcp()` config that is not ACP's `McpServer` shape, names a header or environment variable twice, or gives both `auth` and an `Authorization` header, or a document `{ "mcp" }` connection whose key disagrees with its name. |
+| [`CONNECTION_NAME_TAKEN`](/docs/framework/errors#connection_name_taken) | An entry names a connection its scope or an outer one already attaches with a different provider or options. |
 | [`CONNECTION_TOOL_COLLISION`](/docs/framework/errors#connection_tool_collision) | Two operations would reach the model under one tool name. |
 
 At run time, a failed call raises a [`NoeticError`](/docs/framework/errors#noeticerror-type) of one of these kinds:
@@ -449,6 +575,10 @@ interface Connection {
 
 A connection's identity `instance` changes whenever the thing it drives is replaced; `epoch` moves on code edits.
 
+`ConnectOptions.redact(value)` registers a credential the provider holds (a bearer token, an OAuth token); the harness then scrubs it everywhere it scrubs resolved secrets. `mcp()` calls it for its `auth` credentials, every configured header value, the URL's userinfo and query values, and every stdio `env` value — skipping values under 8 characters and absolute paths, which are flags and locations rather than credentials.
+
+Each operation in a manifest may carry `annotations` — the server's hints `title`, `readOnlyHint`, `destructiveHint`, `idempotentHint` and `openWorldHint`. `mcp()` copies them from the MCP tool's `annotations`. A host can read them from `connection.manifest.operations` to choose a default `policy` (allow read-only operations, approve destructive ones); the gates never trust them in place of a `policy` or a profile's `guarded`.
+
 `createInMemoryConnection()` implements the whole contract as scripted operations, events, and tasks for tests; given `provision`, it also backs pools:
 
 ```ts
@@ -477,7 +607,7 @@ console.log(shop.connection.calls); // [{ op: 'ui.tap', … }]
 
 `mcp()` receives events by push, webhook, or poll, preferring them in that order; callers never see the difference. For webhook delivery, pass a receiver — `createWebhookReceiver()` from [`@noetic-tools/platform-node`](/docs/framework/platform-packages#webhook-receiver) — as `mcp(server, { webhooks: { receiver } })`. Deliveries are verified (Standard Webhooks signature, five-minute timestamp window, duplicate ids dropped).
 
-[Agent plugins](/docs/framework/context-layers/agent-plugins) register each plugin MCP server through `@noetic-tools/mcp` as a connection with no profile, so a plugin's tools and a configured server's tools share one registry, one naming rule, and one set of gates.
+[Agent plugins](/docs/framework/context-layers/agent-plugins) turn each plugin MCP server into an `mcp()` connection entry with `expose: 'call'` (`pluginConnections()`), which you attach to the harness or a turn, so a plugin's tools and a configured server's tools share one registry, one naming rule, and one set of gates.
 
 ## Related Pages
 

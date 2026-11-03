@@ -1,6 +1,7 @@
 import type { StandardSchemaV1 } from '@standard-schema/spec';
 import type { Channel, ChannelHandle, ExternalChannel } from './channel';
 import type { LLMResponse, ModelParams, RoundUsage, ServerToolSpec, ToolChoice } from './common';
+import type { ConnectionEntries } from './connection';
 import type { Context, RestoreContextOptions } from './context';
 import type { ContextCacheConfig, ContextCacheStore } from './context-cache';
 import type { ContextDetachedSpawnOverrides } from './context-harness';
@@ -186,6 +187,14 @@ export interface ExecuteOptions {
    * without discarding the layers the harness was built with.
    */
   extraContextLayers?: ContextLayer[];
+  /**
+   * Connections for this turn only: entries keyed by name, or a list of named
+   * entries (`[mcp({ name, … })]`). They connect when the turn starts, before
+   * its tool set is built, and are released when it ends. A name already in
+   * use must name the same provider with the same options, or the turn fails
+   * with `CONNECTION_NAME_TAKEN`.
+   */
+  connections?: ConnectionEntries;
   /** Override the harness's default delivery mode for this message only. */
   deliveryMode?: DeliveryMode;
   /**

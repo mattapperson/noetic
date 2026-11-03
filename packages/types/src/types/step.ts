@@ -5,14 +5,18 @@ import type {
   AcpAgent,
   AcpClientCapabilityConfig,
   AcpContentBlock,
-  AcpMcpServer,
   AcpPermissionHandler,
   AcpPermissionPolicy,
   AcpSessionPolicy,
 } from './acp';
 import type { Channel } from './channel';
 import type { ModelParams, RetryPolicy, ServerToolSpec, StepMeta, ToolChoice } from './common';
-import type { ConnectionEvent, ConnectionHandle } from './connection';
+import type {
+  ConnectionEntry,
+  ConnectionEvent,
+  ConnectionHandle,
+  ConnectionPick,
+} from './connection';
 import type { Context } from './context';
 import type { ContextConfig, ContextData, ContextLayer, ProjectionPolicy } from './context-layer';
 import type { CustomItem, CustomItemMap, CustomItemType } from './custom-item';
@@ -89,6 +93,9 @@ export type Until = (snapshot: Snapshot, run?: UntilRun) => Verdict | Promise<Ve
  * @public
  */
 export type Lazy<T, TContext = ContextData> = T | ((ctx: Context<TContext>) => T | Promise<T>);
+
+/** @public One entry of a model step's `tools`: a tool, a server tool, a connection entry, or part of one. */
+export type StepToolEntry = Tool | ServerToolSpec | ConnectionEntry | ConnectionPick;
 
 /**
  * Outcome of a single path in a `settle`-mode inParallel step (mirrors `Promise.allSettled`).
@@ -537,12 +544,15 @@ export interface StepCallModel<TContext = ContextData, I = unknown, O = unknown>
   instructions?: Lazy<string | undefined, TContext>;
   /**
    * Tools exposed to the LLM. Eager array or `(ctx) => (...)[] | undefined` getter.
-   * Entries are either a client `Tool` or an inline `ServerToolSpec` (an
-   * OpenRouter server tool the provider executes, e.g. web search/fetch).
+   * Entries are a client `Tool`, an inline `ServerToolSpec` (an OpenRouter
+   * server tool the provider executes, e.g. web search/fetch), a connection
+   * entry (`mcp({ name, … })`, offering that connection's tools), or a
+   * `ConnectionPick` (`connectionTools(…)`, offering part of them).
    * Function-form tools do not contribute to the pre-computed `ctx.unifiedTools`;
-   * they are resolved per execution.
+   * they are resolved per execution, and may list only connections the harness
+   * or the turn already attached.
    */
-  tools?: Lazy<(Tool | ServerToolSpec)[] | undefined, TContext>;
+  tools?: Lazy<ReadonlyArray<StepToolEntry> | undefined, TContext>;
   /**
    * How the model may use its tools: `'auto'` (default), `'required'`,
    * `'none'`, or `{ tool: name }` to force one client tool. Applies within the
@@ -593,8 +603,15 @@ export interface StepAcpAgent<TContext = ContextData, I = unknown, O = unknown>
    * advertised `promptCapabilities` before the turn is sent.
    */
   content?: Lazy<ReadonlyArray<AcpContentBlock> | undefined, TContext>;
-  /** MCP servers to expose to the agent for this session. */
-  mcpServers?: Lazy<ReadonlyArray<AcpMcpServer> | undefined, TContext>;
+  /**
+   * What to give the agent: `tool()` definitions, connection entries and
+   * picks, as a `callModel` step takes them (spec 27 § Tools). Served through
+   * noetic's tool bridge; each call runs the same steering, validation,
+   * approval, and execution path as a `callModel` tool call. Eager connection
+   * entries connect when the turn starts. Server tools cannot run locally and
+   * are rejected.
+   */
+  tools?: Lazy<ReadonlyArray<StepToolEntry> | undefined, TContext>;
   /** Working directory for the session. Defaults to `ctx.cwdState.cwd`. */
   cwd?: Lazy<string | undefined, TContext>;
   /** Session mode to switch to before prompting (e.g. `'plan'`). */

@@ -1,22 +1,33 @@
 /**
  * Hydrators for the JSON workflow nodes that reach outside the workflow:
  * `call` and `wait` (spec 35), resolving the connection a node runs on against
- * the document's manifest, and `acp-agent` with its MCP servers (spec 27).
+ * the document's manifest; `acp-agent` with its tools (spec 27); and `runCode`,
+ * which runs its code through a subprocess adapter.
  */
 
 import type { ContextData } from '@noetic-tools/context';
-import type { Context, Step, StepCall, StepConnectionTarget, StepWait } from '@noetic-tools/types';
+import type {
+  Context,
+  ProcessSubprocessRequest,
+  Step,
+  StepCall,
+  StepConnectionTarget,
+  StepWait,
+  SubprocessAdapter,
+} from '@noetic-tools/types';
 import { frameworkCast, NoeticConfigError } from '@noetic-tools/types';
 import type { CompiledExpression } from '../expression/jsonata';
 import { compileExpression, compute, passes, readInput } from '../expression/jsonata';
 import type { WorkflowConnectionRef, WorkflowNode } from '../schemas/workflow';
 import { getDefaultRegistrar } from '../types/step-registrar';
-import { step } from './step-builders';
+import { DetachedHandleImpl } from '../util/detached-handle';
+import { outputText } from './output-text';
+import { runCode, step } from './step-builders';
 import { boundedAcpSettings } from './workflow-acp-grants';
 import { compileArgs, documentHandle, documentSecretsOf } from './workflow-connections';
 import type { HydrationContext } from './workflow-hydrator';
 import { bindingsFor, hydrateStepList } from './workflow-hydrator';
-import { stepMcpServers } from './workflow-mcp-servers';
+import { acpTools } from './workflow-tool-entries';
 
 //#region Connection Node Hydrators
 
@@ -218,7 +229,7 @@ export function hydrateWaitNode(
 
 //#endregion
 
-//#region ACP Agent Node Hydrator
+//#region Agent and Code Node Hydrators
 
 /**
  * Hydrates an `acp-agent` node into `step.acpAgent`. Under `ctx.acpBounds` the
@@ -250,11 +261,112 @@ export function hydrateAcpAgentNode(
     cwd: bounded.cwd,
     mode: node.mode,
     model: node.model,
-    mcpServers: stepMcpServers(node.mcpServers),
+    tools: acpTools(node, ctx, agent.spawn),
     permissions: node.permissions,
     clientCapabilities: bounded.clientCapabilities,
     session: bounded.session,
   });
+}
+
+export function hydrateRunCodeNode(
+  node: WorkflowNode,
+  ctx: HydrationContext,
+): Step<ContextData, string, string> {
+  if (node.kind !== 'runCode') {
+    return frameworkCast(undefined);
+  }
+  const code = node.execute;
+  const subprocessRef = node.subprocess;
+  return frameworkCast(
+    runCode({
+      id: node.id,
+      retry: node.retry,
+      execute: async (input: string, execCtx: Context) => {
+        const adapter = resolveSubprocessAdapter({
+          ref: subprocessRef,
+          hydrationCtx: ctx,
+          execCtx,
+          nodeId: node.id,
+        });
+        return runCodeViaSubprocess({
+          adapter,
+          nodeId: node.id,
+          code,
+          input: outputText(input),
+        });
+      },
+    }),
+  );
+}
+
+//#endregion
+
+//#region Run Node Helpers
+
+/**
+ * Resolves the subprocess adapter for a `runCode` node. When the node names an
+ * adapter ref, the host must supply a `resolveSubprocess` resolver; otherwise
+ * the step falls back to the harness adapter on the execution context.
+ */
+function resolveSubprocessAdapter(opts: {
+  ref: string | undefined;
+  hydrationCtx: HydrationContext;
+  execCtx: Context;
+  nodeId: string;
+}): SubprocessAdapter {
+  const { ref, hydrationCtx, execCtx, nodeId } = opts;
+  if (ref === undefined) {
+    return execCtx.subprocess;
+  }
+  const resolved = hydrationCtx.resolveSubprocess?.(ref);
+  if (!resolved) {
+    throw new NoeticConfigError({
+      code: 'UNKNOWN_SUBPROCESS_REFERENCE',
+      message: `Subprocess adapter '${ref}' referenced in run node '${nodeId}' could not be resolved.`,
+      hint: 'Pass a `resolveSubprocess(ref)` mapping in the HydrationContext, or omit `subprocess` to use the harness default (ctx.subprocess).',
+    });
+  }
+  return resolved;
+}
+
+/**
+ * Dispatches a `runCode` node's code string through a subprocess adapter: ships the
+ * code plus the JSON-stringified input as a process request (input on stdin),
+ * waits for the handle to settle, and returns the captured stdout as the step
+ * output. A non-zero exit / failed handle surfaces as a thrown error.
+ *
+ * The code is never eval'd in-process (Cloudflare Workers forbid eval). The
+ * adapter owns running the code and capturing stdout into `handle.metadata.result`.
+ */
+async function runCodeViaSubprocess(opts: {
+  adapter: SubprocessAdapter;
+  nodeId: string;
+  code: string;
+  input: string;
+}): Promise<string> {
+  const { adapter, nodeId, code, input } = opts;
+  const request: ProcessSubprocessRequest = {
+    kind: 'process',
+    command: 'node',
+    args: [
+      '-e',
+      code,
+    ],
+    stdin: input,
+    metadata: {
+      noeticRun: true,
+      stepId: nodeId,
+      code,
+      input,
+    },
+  };
+  const handle = new DetachedHandleImpl<string>({
+    id: `run-${nodeId}`,
+    stepId: nodeId,
+    spawned: adapter.spawn(request),
+  });
+  const result = await handle.await();
+  return outputText(result);
 }
 
 //#endregion

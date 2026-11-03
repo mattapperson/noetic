@@ -21,6 +21,7 @@ import type {
   UntilPredicate,
   WorkflowDocument,
   WorkflowNode,
+  WorkflowToolEntry,
 } from '@noetic-tools/core';
 
 //#region Types
@@ -674,7 +675,7 @@ function leafChips(node: WorkflowNode): string[] {
         chips.push(`model ${node.model}`);
       }
       if (node.tools?.length) {
-        chips.push(`tools ${node.tools.map((tool) => tool.type).join(', ')}`);
+        chips.push(`tools ${node.tools.map(toolName).join(', ')}`);
       }
       if (node.output) {
         chips.push(`${node.output.codec}: ${node.output.library}`);
@@ -705,6 +706,14 @@ function leafChips(node: WorkflowNode): string[] {
     default:
       return [];
   }
+}
+
+/** A tool entry by what it names: the tool, the connection, or the MCP server. */
+function toolName(entry: WorkflowToolEntry): string {
+  if ('type' in entry) {
+    return entry.type;
+  }
+  return 'connection' in entry ? entry.connection : entry.mcp.name;
 }
 
 function clip(text: string): string {

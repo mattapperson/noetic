@@ -1,66 +1,185 @@
 /**
- * Connecting the MCP servers a plugin declares.
+ * The MCP servers a plugin declares, as harness connections.
  *
  * Agent Plugins defines the *configuration* format; the Model Context Protocol
  * defines the wire behavior. The MCP client, its transports and capability
- * negotiation live in `@noetic-tools/mcp` (spec 35): this module takes the
- * resolved entries produced by `mcp-config.ts`, applies the §9.1 subprocess
- * environment, and registers each server through `mcp()` as a connection with
- * no profile — so a plugin's tools share one naming rule and one set of gates
- * with every other MCP server the harness uses, and a plugin server that
- * declares a profile gets its typed operations too.
+ * negotiation live in `@noetic-tools/mcp` (spec 35). This module takes the
+ * servers `discoverPlugins()` found, resolves each one, applies the §9.1
+ * subprocess environment, and hands back one `mcp()` connection entry per
+ * server with `expose: 'call'`. The host attaches them to the harness or to a
+ * turn, so a plugin's tools pass the same gates — policy, `beforeToolCall`,
+ * approval, secret scrubbing, replay-stable idempotency keys — as any other
+ * MCP server, and give the same tools as that server attached through `mcp()`.
  *
- * §7.2.2 rule 5 is the rule that shapes the error handling here — a server
- * that fails to start, connect, authenticate, or handshake must not stop the
- * client loading anything else. Every failure below becomes a diagnostic and
- * an absent session, never a thrown error.
+ * §7.2.2 rule 5 shapes the error handling: a server that fails to start,
+ * connect, authenticate, or handshake must not stop the client loading
+ * anything else. A server that cannot be resolved becomes a diagnostic; one
+ * that fails to connect becomes an unavailable connection in the harness.
+ * Neither throws. The one thrown error is a host mistake rather than a server
+ * failure: two servers that map to one connection name.
  */
 
 import { mkdir } from 'node:fs/promises';
-import type { McpConnection, McpProvider } from '@noetic-tools/mcp';
-import { createMemoryArtifactStore, mcp } from '@noetic-tools/mcp';
-import type { ArtifactStore } from '@noetic-tools/types';
-import { isNoeticError } from '@noetic-tools/types';
+import type { McpProvider } from '@noetic-tools/mcp';
+import { mcp } from '@noetic-tools/mcp';
+import type { ConnectionConfig, McpNamedValue } from '@noetic-tools/types';
+import { ConnectionConfigErrorCode, NoeticConfigError } from '@noetic-tools/types';
+import type { PluginDiagnostic } from './diagnostics';
+import { DiagnosticCode, diagnostic } from './diagnostics';
+import type { DiscoveryResult, LoadedPlugin } from './discovery';
 import type { ResolvedMcpServer, ResolvedStdioServer } from './mcp-config';
-import { McpTransport } from './mcp-config';
+import { DEFAULT_TRANSPORTS, McpTransport, resolveMcpServer } from './mcp-config';
+import { resolveRoot } from './paths';
 
 //#region Types
 
-/** @public A tool exposed by a connected MCP server. */
-export interface McpToolInfo {
-  /** Qualified as `<plugin>/<server>/<tool>` — unique across every connected server. */
-  qualifiedName: string;
-  /** The tool name as the server declares it. */
-  name: string;
-  /** `<plugin>/<server>` — the session that owns this tool. */
-  server: string;
-  description?: string;
-  /** The tool's JSON Schema input shape, verbatim from the server. */
-  inputSchema?: unknown;
+/** @public Options for {@link pluginConnections}. */
+export interface PluginConnectionsOptions {
+  /**
+   * MCP transports this host will connect. An entry declaring a transport
+   * outside this list is skipped per §7.2.2 rule 4. Defaults to
+   * {@link DEFAULT_TRANSPORTS} (`stdio` + `streamable-http`); add `'sse'` to
+   * opt into the deprecated HTTP+SSE transport.
+   */
+  transports?: readonly McpTransport[];
+  /** Ambient environment for the §9.1 inherited allowlist. Defaults to `process.env`. */
+  baseEnv?: Record<string, string | undefined>;
+  /** Per-server budget for start + connect + handshake + tools/list; `mcp()`'s default when absent. */
+  timeoutMs?: number;
 }
 
-/** @public A live connection to one MCP server. */
-export interface McpSession {
-  /** `<plugin>/<server>`. */
-  key: string;
-  /** The connection `mcp()` opened; a plugin server has no profile unless it declares one. */
-  connection: McpConnection;
-  /** The provider behind it, for a host that registers plugin servers as harness connections. */
-  provider: McpProvider;
-  tools: McpToolInfo[];
-  close(): Promise<void>;
+/** @public What {@link pluginConnections} returns. */
+export interface PluginConnections {
+  /** One `expose: 'call'` entry per usable server, named by {@link pluginConnectionName}. */
+  connections: ConnectionConfig[];
+  /** The servers that were skipped, and why (§11.3). */
+  diagnostics: PluginDiagnostic[];
 }
 
-/** @public Result of attempting to connect one server. */
-export type McpConnectResult =
-  | {
-      ok: true;
-      session: McpSession;
+//#endregion
+
+//#region Public API
+
+/**
+ * Turn the MCP servers of discovered plugins into harness connection entries,
+ * for `new AgentHarness({ connections })` or `execute(…, { connections })`.
+ *
+ * Creates each plugin's `PLUGIN_DATA` directory (§9.1) before any value can
+ * name it. Never connects anything: the harness connects each entry, and one
+ * that fails is marked unavailable without touching the rest.
+ *
+ * @public
+ * @throws NoeticConfigError `CONNECTION_NAME_TAKEN` when two servers map to one connection name.
+ * @example
+ * ```ts
+ * const found = await discoverPlugins(roots, dataDir);
+ * const { connections } = await pluginConnections(found);
+ * const harness = new AgentHarness({ name: 'agent', params: {}, connections });
+ * ```
+ */
+export async function pluginConnections(
+  discovered: DiscoveryResult,
+  options: PluginConnectionsOptions = {},
+): Promise<PluginConnections> {
+  claimNames(discovered.plugins);
+  const transports = options.transports ?? DEFAULT_TRANSPORTS;
+  const out: PluginConnections = {
+    connections: [],
+    diagnostics: [],
+  };
+  for (const plugin of discovered.plugins) {
+    if (plugin.mcpServers.length === 0) {
+      continue;
     }
-  | {
-      ok: false;
-      detail: string;
-    };
+    await addPlugin(out, {
+      plugin,
+      transports,
+      options,
+    });
+  }
+  return out;
+}
+
+/**
+ * @public
+ * The connection name of a plugin's server: `<plugin>_<server>`, with every
+ * character the connection name rule does not allow replaced by `_`.
+ * `undefined` when the result still breaks the rule — a plugin name that
+ * starts with a digit.
+ */
+export function pluginConnectionName(pluginName: string, serverKey: string): string | undefined {
+  const name = `${pluginName}_${serverKey}`.replace(/[^A-Za-z0-9_-]/g, '_');
+  return NAME_PATTERN.test(name) ? name : undefined;
+}
+
+/**
+ * The `mcp()` provider for one resolved plugin server: the §9.1 environment
+ * for a stdio server, the already-filtered headers for a remote one (which
+ * `@noetic-tools/mcp` never forwards across an origin-changing redirect,
+ * §7.2.1).
+ *
+ * A stdio server's `PLUGIN_DATA` directory must exist before it launches;
+ * {@link pluginConnections} creates it.
+ *
+ * @public
+ */
+export function pluginMcpProvider(params: {
+  /** The connection name. */
+  name: string;
+  server: ResolvedMcpServer;
+  pluginRoot: string;
+  pluginData: string;
+  baseEnv?: Record<string, string | undefined>;
+  /** Per-server budget for start + connect + handshake + tools/list. */
+  timeoutMs?: number;
+}): McpProvider {
+  const { server } = params;
+  const options = {
+    name: params.name,
+    clientInfo: CLIENT_INFO,
+    ...(params.timeoutMs === undefined
+      ? {}
+      : {
+          timeoutMs: params.timeoutMs,
+        }),
+  };
+  if (server.type === McpTransport.Stdio) {
+    return mcp({
+      ...options,
+      command: server.command,
+      args: server.args,
+      env: namedValues(
+        buildSubprocessEnv({
+          server,
+          pluginRoot: params.pluginRoot,
+          pluginData: params.pluginData,
+          ...(params.baseEnv === undefined
+            ? {}
+            : {
+                baseEnv: params.baseEnv,
+              }),
+        }),
+      ),
+      cwd: server.cwd,
+    });
+  }
+  return mcp({
+    ...options,
+    type: server.type === McpTransport.Sse ? 'sse' : 'http',
+    url: server.url,
+    // Already stripped during resolution — `server.headers` is by definition
+    // what may be sent.
+    headers: namedValues(server.headers),
+  });
+}
+
+/** A record of headers or environment variables as the `[{ name, value }]` list `mcp()` takes. */
+function namedValues(record: Readonly<Record<string, string>>): McpNamedValue[] {
+  return Object.entries(record).map(([name, value]) => ({
+    name,
+    value,
+  }));
+}
 
 //#endregion
 
@@ -133,23 +252,7 @@ const INHERITED_ENV = [
 
 //#endregion
 
-//#region Connection
-
-/**
- * How long one server gets to start, connect, handshake, and list its tools.
- *
- * Without a bound, a server that opens its pipe and then never answers
- * `initialize` hangs `connect()` forever. That is not hypothetical: it takes
- * the layer's `init` with it, and because the runtime's own init timeout
- * *throws*, one unresponsive plugin aborts the entire agent execution and
- * orphans every subprocess started alongside it. §7.2.2 rule 5 requires the
- * opposite — the client must carry on when a server fails to start or
- * handshake.
- */
-export const DEFAULT_CONNECT_TIMEOUT_MS = 1e4;
-
-/** @public How long a tool call without a caller's signal may run, long operations included. */
-export const DEFAULT_TOOL_CALL_TIMEOUT_MS = 6e5;
+//#region Servers
 
 /** Identifies this client to servers during the MCP handshake. */
 const CLIENT_INFO = {
@@ -157,215 +260,144 @@ const CLIENT_INFO = {
   version: '1.0.0',
 };
 
+/** The harness connection name rule (`CONNECTION_NAME_PATTERN` in core). */
+const NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_-]*$/;
+
 /**
- * The `mcp()` provider for one resolved plugin server: the §9.1 environment
- * for a stdio server, the already-filtered headers for a remote one (which
- * `@noetic-tools/mcp` never forwards across an origin-changing redirect,
- * §7.2.1).
- *
- * A stdio server's `PLUGIN_DATA` directory must exist before launch; call
- * {@link connectMcpServer}, or create it, before connecting.
- *
- * @public
+ * Refuses two servers that map to one connection name. The mapping folds `.`
+ * and `/` into `_`, so `a.b`'s `c` and `a`'s `b_c` would otherwise both be
+ * `a_b_c`, and one would silently stand in for the other.
  */
-export function pluginMcpProvider(params: {
-  server: ResolvedMcpServer;
-  pluginRoot: string;
-  pluginData: string;
-  baseEnv?: Record<string, string | undefined>;
-  /** Per-server budget for start + connect + handshake + tools/list. */
-  timeoutMs?: number;
-}): McpProvider {
-  const { server } = params;
-  const options = {
-    timeoutMs: params.timeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS,
-    clientInfo: CLIENT_INFO,
+function claimNames(plugins: readonly LoadedPlugin[]): void {
+  const claimed = new Map<string, string>();
+  for (const plugin of plugins) {
+    for (const server of plugin.mcpServers) {
+      const name = pluginConnectionName(plugin.manifest.name, server.key);
+      if (name === undefined) {
+        continue;
+      }
+      const holder = claimed.get(name);
+      if (holder !== undefined) {
+        throw new NoeticConfigError({
+          code: ConnectionConfigErrorCode.NameTaken,
+          message: `Plugin servers '${holder}' and '${server.qualifiedKey}' both map to connection '${name}'.`,
+          hint: 'Rename one of the servers in its mcp.json, or leave one of the plugins out.',
+        });
+      }
+      claimed.set(name, server.qualifiedKey);
+    }
+  }
+}
+
+async function addPlugin(
+  out: PluginConnections,
+  params: {
+    plugin: LoadedPlugin;
+    transports: readonly McpTransport[];
+    options: PluginConnectionsOptions;
+  },
+): Promise<void> {
+  const { plugin, transports, options } = params;
+  const report = (component: string, code: DiagnosticCode, detail: string): void => {
+    out.diagnostics.push(
+      diagnostic({
+        code,
+        pluginDir: plugin.root,
+        pluginName: plugin.manifest.name,
+        component,
+        detail,
+      }),
+    );
   };
-  if (server.type === McpTransport.Stdio) {
-    return mcp({
-      ...options,
-      command: server.command,
-      args: server.args,
-      env: buildSubprocessEnv({
-        server,
-        pluginRoot: params.pluginRoot,
-        pluginData: params.pluginData,
-        ...(params.baseEnv === undefined
+  const data = await ensureDataDir(plugin.dataDir);
+  // §9.1 defines PLUGIN_DATA as an absolute, filesystem-resolved path, so it is
+  // resolved before it can be substituted into any `args`, `env` or `cwd`.
+  const vars = {
+    pluginRoot: plugin.root,
+    pluginData: data.path,
+  };
+
+  for (const declared of plugin.mcpServers) {
+    if (!transports.includes(declared.config.type)) {
+      report(
+        declared.key,
+        DiagnosticCode.McpTransportUnsupported,
+        `§7.2.2: transport '${declared.config.type}' is not enabled on this host`,
+      );
+      continue;
+    }
+    const name = pluginConnectionName(plugin.manifest.name, declared.key);
+    if (name === undefined) {
+      report(
+        declared.key,
+        DiagnosticCode.McpServerInvalid,
+        `'${plugin.manifest.name}_${declared.key}' cannot be a connection name: it must start with a letter`,
+      );
+      continue;
+    }
+    if (declared.config.type === McpTransport.Stdio && data.failure !== undefined) {
+      report(declared.key, DiagnosticCode.McpConnectFailed, data.failure);
+      continue;
+    }
+    const resolved = await resolveMcpServer({
+      key: declared.qualifiedKey,
+      config: declared.config,
+      vars,
+    });
+    if (!resolved.ok) {
+      report(declared.key, DiagnosticCode.McpServerInvalid, resolved.detail);
+      continue;
+    }
+    // §7.2.1: client-generated headers win. Resolution already removed them,
+    // so this only reports — a plugin author who set `Authorization` and saw
+    // it quietly ignored would otherwise have no way to find out.
+    for (const dropped of resolved.droppedHeaders) {
+      report(declared.key, DiagnosticCode.McpHeaderDropped, dropped.reason);
+    }
+    out.connections.push({
+      provider: pluginMcpProvider({
+        name,
+        server: resolved.server,
+        pluginRoot: plugin.root,
+        pluginData: vars.pluginData,
+        ...(options.baseEnv === undefined
           ? {}
           : {
-              baseEnv: params.baseEnv,
+              baseEnv: options.baseEnv,
+            }),
+        ...(options.timeoutMs === undefined
+          ? {}
+          : {
+              timeoutMs: options.timeoutMs,
             }),
       }),
-      cwd: server.cwd,
+      expose: 'call',
     });
   }
-  return mcp({
-    ...options,
-    url: server.url,
-    // Already stripped during resolution — `server.headers` is by definition
-    // what may be sent.
-    headers: server.headers,
-    protocol: server.type === McpTransport.Sse ? 'sse' : 'streamable-http',
-  });
-}
-
-function describeFailure(error: unknown): string {
-  if (isNoeticError(error) && error.noeticError.kind === 'connection_unavailable') {
-    return error.noeticError.reason;
-  }
-  return error instanceof Error ? error.message : String(error);
 }
 
 /**
- * Connect one resolved server and enumerate its tools.
- *
- * Never throws: §7.2.2 rule 5 requires a connection failure to be isolated to
- * that server, so every failure path returns a diagnostic detail instead.
- *
- * @public
+ * Creates a plugin's `PLUGIN_DATA` directory and returns its resolved path.
+ * When it cannot be created, `failure` says why, and only the plugin's stdio
+ * servers — the ones that would run in it — are skipped.
  */
-export async function connectMcpServer(params: {
-  server: ResolvedMcpServer;
-  pluginRoot: string;
-  pluginData: string;
-  baseEnv?: Record<string, string | undefined>;
-  /** Per-server budget for start + connect + handshake + tools/list. */
-  timeoutMs?: number;
-  /** Where binary tool output is stored; defaults to an in-memory store. */
-  artifacts?: ArtifactStore;
-}): Promise<McpConnectResult> {
-  const { server } = params;
-
-  if (server.type === McpTransport.Stdio) {
-    // §9.1: PLUGIN_DATA must exist and be writable before the subprocess
-    // launches. Creating it here rather than at discovery keeps the guarantee
-    // tied to the launch it applies to.
-    try {
-      await mkdir(params.pluginData, {
-        recursive: true,
-      });
-    } catch (error) {
-      return {
-        ok: false,
-        detail: `§9.1: PLUGIN_DATA directory could not be created: ${error instanceof Error ? error.message : String(error)}`,
-      };
-    }
-  }
-
-  const provider = pluginMcpProvider(params);
-  let connection: McpConnection | undefined;
-  try {
-    [connection] = await provider.connect({
-      name: server.key,
-      signal: new AbortController().signal,
-      artifacts: params.artifacts ?? createMemoryArtifactStore(),
-    });
-  } catch (error) {
-    return {
-      ok: false,
-      detail: `§7.2.2: connection failed: ${describeFailure(error)}`,
-    };
-  }
-  if (connection === undefined) {
-    return {
-      ok: false,
-      detail: '§7.2.2: the server offered no connection',
-    };
-  }
-  const live = connection;
-  const tools = Object.values(live.manifest.operations).map((op) => ({
-    qualifiedName: `${server.key}/${op.name}`,
-    name: op.name,
-    server: server.key,
-    ...(op.description === undefined
-      ? {}
-      : {
-          description: op.description,
-        }),
-    inputSchema: op.inputSchema,
-  }));
-
-  return {
-    ok: true,
-    session: {
-      key: server.key,
-      connection: live,
-      provider,
-      tools,
-      close: () => live.release(),
-    },
-  };
-}
-
-function hasContent(value: unknown): value is {
-  content: unknown;
-} {
-  return typeof value === 'object' && value !== null && 'content' in value;
-}
-
-/**
- * Invoke a tool on a connected session. A tool that runs as a long operation
- * is waited for.
- *
- * @public
- * @returns The tool result content, or a description of the failure. A failing
- *   tool call is data the model should see and react to, not an exception that
- *   unwinds the agent's turn.
- */
-export async function callMcpTool(params: {
-  session: McpSession;
-  tool: string;
-  args: Record<string, unknown>;
-  /**
-   * Cancels the call and any long operation it waits on — the calling run's
-   * abort signal. Without one the call gives up after
-   * {@link DEFAULT_TOOL_CALL_TIMEOUT_MS}, so a task that never ends cannot hang the turn.
-   */
-  signal?: AbortSignal;
-}): Promise<{
-  ok: boolean;
-  content: unknown;
+async function ensureDataDir(dataDir: string): Promise<{
+  path: string;
+  failure?: string;
 }> {
-  const { connection } = params.session;
-  const signal = params.signal ?? AbortSignal.timeout(DEFAULT_TOOL_CALL_TIMEOUT_MS);
   try {
-    const first = await connection.call(params.tool, params.args, {
-      signal,
-      idempotencyKey: `agent-plugins:${crypto.randomUUID()}`,
+    await mkdir(dataDir, {
+      recursive: true,
     });
-    const outcome =
-      first.status === 'task'
-        ? await connection.tasks.result(first.taskId, {
-            signal,
-          })
-        : first;
-    if (outcome.status === 'error') {
-      return {
-        ok: false,
-        content: outcome.error.details?.content ?? outcome.error.message,
-      };
-    }
-    return {
-      ok: true,
-      content: hasContent(outcome.output) ? outcome.output.content : outcome.output,
-    };
   } catch (error) {
     return {
-      ok: false,
-      content: `tool call failed: ${error instanceof Error ? error.message : String(error)}`,
+      path: dataDir,
+      failure: `§9.1: PLUGIN_DATA directory could not be created: ${error instanceof Error ? error.message : String(error)}`,
     };
   }
-}
-
-/**
- * Close every session, tolerating individual failures. Teardown must run to
- * completion — one server refusing to shut down cannot be allowed to leak the
- * rest as orphaned subprocesses.
- *
- * @public
- */
-export async function closeSessions(sessions: readonly McpSession[]): Promise<void> {
-  await Promise.all(sessions.map((session) => session.close().catch(() => {})));
+  return {
+    path: (await resolveRoot(dataDir)) ?? dataDir,
+  };
 }
 
 //#endregion

@@ -32,24 +32,15 @@
  */
 
 import type { Dirent } from 'node:fs';
-import { mkdir, readdir, readFile, stat } from 'node:fs/promises';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import type { ContextLayer, ContextScope, ExecutionContext } from '@noetic-tools/types';
 import { estimateTokens, Slot } from '@noetic-tools/types';
 import { z } from 'zod';
 import type { PluginDiagnostic } from '../diagnostics';
-import { DiagnosticCode, diagnostic } from '../diagnostics';
 import type { DiscoveredSkill, LoadedPlugin } from '../discovery';
 import { discoverPlugins } from '../discovery';
-import type { McpSession, McpToolInfo } from '../mcp-client';
-import {
-  callMcpTool,
-  closeSessions,
-  connectMcpServer,
-  DEFAULT_CONNECT_TIMEOUT_MS,
-} from '../mcp-client';
-import type { McpTransport, ResolvedMcpServer } from '../mcp-config';
-import { DEFAULT_TRANSPORTS, resolveMcpServer } from '../mcp-config';
+import { pluginConnectionName } from '../mcp-client';
 import { containedPath, resolveRoot } from '../paths';
 
 //#region Configuration
@@ -67,42 +58,9 @@ export interface AgentPluginsConfig {
    * and preserved across plugin updates.
    */
   dataDir: string;
-  /**
-   * MCP transports this host will connect. An entry declaring a transport
-   * outside this list is skipped per §7.2.2 rule 4. Defaults to
-   * {@link DEFAULT_TRANSPORTS} (`stdio` + `streamable-http`); add `'sse'` to
-   * opt into the deprecated HTTP+SSE transport.
-   */
-  transports?: readonly McpTransport[];
-  /**
-   * Whether to connect MCP servers at all. When `false`, the layer is a
-   * skills-only client — still conformant under §11.2 — and the
-   * `callMcpTool` function is not exposed to the model.
-   */
-  connectMcp?: boolean;
-  /** Ambient environment for the §9.1 inherited allowlist. Defaults to `process.env`. */
-  baseEnv?: Record<string, string | undefined>;
-  /**
-   * Per-server budget for start + connect + handshake + tools/list. Defaults to
-   * {@link DEFAULT_CONNECT_TIMEOUT_MS}. Servers connect concurrently, so this
-   * also bounds the whole connect phase.
-   */
-  connectTimeoutMs?: number;
   slot?: number;
   scope?: ContextScope;
   budget?: ContextLayer['budget'];
-}
-
-/** The calling run's abort signal, read from a tool execution context, when it has one. */
-function runSignalOf(toolCtx: unknown): AbortSignal | undefined {
-  if (typeof toolCtx !== 'object' || toolCtx === null || !('ctx' in toolCtx)) {
-    return undefined;
-  }
-  const ctx = toolCtx.ctx;
-  if (typeof ctx !== 'object' || ctx === null || !('abortSignal' in ctx)) {
-    return undefined;
-  }
-  return ctx.abortSignal instanceof AbortSignal ? ctx.abortSignal : undefined;
 }
 
 /** @public The layer id, and the key `ctx.context[…]` exposes its handle under. */
@@ -117,16 +75,6 @@ const MAX_RESOURCES = 200;
 /** Cap on a single resource read, mirroring the guard the file-reference layer uses. */
 const MAX_RESOURCE_BYTES = 1024 * 1024;
 
-/**
- * How many MCP servers may be connecting at once.
- *
- * Unbounded concurrency is not free: 30 plugins declaring two servers each
- * would launch 60 `npx` processes simultaneously, tens of megabytes apiece.
- * A small pool costs almost no wall clock — startup is dominated by the
- * slowest server, not the queue — and keeps peak memory sane.
- */
-const MAX_CONCURRENT_CONNECTS = 8;
-
 //#endregion
 
 //#region State
@@ -134,10 +82,9 @@ const MAX_CONCURRENT_CONNECTS = 8;
 /**
  * @public Per-thread layer state.
  *
- * Only activation lives here. The discovered index and the live MCP sessions
- * are held on the layer instance instead: the index is identical for every
- * thread and would be pure duplication in durable storage, and a session is a
- * live subprocess or socket that cannot be serialized at all.
+ * Only activation lives here. The discovered index is held on the layer
+ * instance instead: it is identical for every thread and would be pure
+ * duplication in durable storage.
  */
 export interface AgentPluginsState {
   /** Qualified ids of skills activated in this thread, oldest first. */
@@ -149,10 +96,15 @@ interface PluginIndex {
   plugins: LoadedPlugin[];
   /** Keyed by qualified id (`<plugin>/<skill>`). */
   skills: Map<string, DiscoveredSkill>;
-  servers: ResolvedMcpServer[];
-  sessions: McpSession[];
-  tools: McpToolInfo[];
+  servers: PluginServer[];
   diagnostics: PluginDiagnostic[];
+}
+
+/** @public A plugin's MCP server and the connection `pluginConnections()` names it. */
+export interface PluginServer {
+  /** `<plugin>/<server>`. */
+  server: string;
+  connection: string;
 }
 
 function emptyState(): AgentPluginsState {
@@ -375,10 +327,18 @@ function renderSkillLine(skill: DiscoveredSkill): string {
   return `- ${skill.qualifiedId}: ${escapeMeta(skill.frontmatter.description)}`;
 }
 
-function renderServerLine(session: McpSession): string {
-  const tools = session.tools.map((tool) => escapeMeta(tool.name)).join(', ');
-  return `- ${escapeMeta(session.key)}: ${tools || '(no tools)'}`;
+function renderServerLine(entry: PluginServer): string {
+  // The connection name is confined to `[A-Za-z0-9_-]`; the server key is not.
+  return `- ${escapeMeta(entry.server)}: connection ${entry.connection}`;
 }
+
+/**
+ * How the model reaches a plugin server. Every server is an `expose: 'call'`
+ * connection, and two or more of those share one `ops` and one `call`, so the
+ * hint names both forms rather than guessing which one this turn has.
+ */
+const SERVERS_HINT =
+  'Each server is a connection. List its operations with <connection>_ops and run one with <connection>_call. When several connections share them, the tools are ops and call, with target naming the connection.';
 
 function renderActivatedSkill(skill: DiscoveredSkill): string {
   return `<skill id="${skill.qualifiedId}">\n${neutralizeOwnTags(skill.body)}\n</skill>`;
@@ -409,11 +369,9 @@ function renderBlock(index: PluginIndex, activated: DiscoveredSkill[]): string {
     );
   }
 
-  if (index.sessions.length > 0) {
+  if (index.servers.length > 0) {
     sections.push(
-      `<mcp_servers>\nCall callMcpTool to invoke a tool on a connected server.\n${index.sessions
-        .map(renderServerLine)
-        .join('\n')}\n</mcp_servers>`,
+      `<mcp_servers>\n${SERVERS_HINT}\n${index.servers.map(renderServerLine).join('\n')}\n</mcp_servers>`,
     );
   }
 
@@ -462,200 +420,36 @@ function renderWithinBudget(params: {
 
 //#endregion
 
-//#region Discovery + connection
+//#region Discovery
 
-/**
- * Create a plugin's `PLUGIN_DATA` directory and return its filesystem-resolved
- * path (§9.1). Falls back to the requested path when it cannot be created, so
- * a permissions problem surfaces as a per-server connection failure rather
- * than taking down the whole scan.
- */
-async function ensureDataDir(dataDir: string): Promise<string> {
-  try {
-    await mkdir(dataDir, {
-      recursive: true,
-    });
-  } catch {
-    return dataDir;
-  }
-  return (await resolveRoot(dataDir)) ?? dataDir;
-}
-
-/** Run tasks with at most `limit` in flight. Tasks never reject — they report. */
-async function runBounded(tasks: ReadonlyArray<() => Promise<void>>, limit: number): Promise<void> {
-  let next = 0;
-  const workers = Array.from({
-    length: Math.min(limit, tasks.length),
-  }).map(async () => {
-    for (;;) {
-      const index = next++;
-      const task = tasks[index];
-      if (task === undefined) {
-        return;
-      }
-      await task();
-    }
-  });
-  await Promise.all(workers);
-}
-
-async function connectServers(params: {
-  plugins: readonly LoadedPlugin[];
-  transports: readonly McpTransport[];
-  baseEnv: Record<string, string | undefined> | undefined;
-  connectTimeoutMs: number;
-  diagnostics: PluginDiagnostic[];
-  /**
-   * Sessions are pushed here the moment they open, rather than only being
-   * returned at the end. If `init` is aborted partway — the runtime's own init
-   * timeout throws — whatever already connected is still reachable for
-   * `dispose` to close. Returning them only on success orphaned every
-   * subprocess that had started.
-   */
-  sink: McpSession[];
-}): Promise<ResolvedMcpServer[]> {
-  const servers: ResolvedMcpServer[] = [];
-
-  // Each plugin's declared entries, flattened, so connects can run
-  // concurrently. Serially they cost the sum of every server's startup — with
-  // `npx`-launched servers taking seconds apiece, a handful of plugins blew the
-  // runtime's 10s init budget and aborted the execution.
-  const pending: Array<() => Promise<void>> = [];
-
-  for (const plugin of params.plugins) {
-    if (plugin.mcpServers.length === 0) {
-      continue;
-    }
-    const vars = {
-      pluginRoot: plugin.root,
-      // §9.1 defines PLUGIN_DATA as an *absolute, filesystem-resolved* path,
-      // so the directory is created and resolved before it can be substituted
-      // into any `args`, `env`, or `cwd` value. Skipped entirely for a plugin
-      // with no MCP servers — discovery must not create directories for a
-      // plugin that will never launch a subprocess.
-      pluginData: await ensureDataDir(plugin.dataDir),
-    };
-
-    for (const declared of plugin.mcpServers) {
-      if (!params.transports.includes(declared.config.type)) {
-        // §7.2.2 rule 4: skip the entry, keep loading the rest.
-        params.diagnostics.push(
-          diagnostic({
-            code: DiagnosticCode.McpTransportUnsupported,
-            pluginDir: plugin.root,
-            pluginName: plugin.manifest.name,
-            component: declared.key,
-            detail: `§7.2.2: transport '${declared.config.type}' is not enabled on this host`,
-          }),
-        );
-        continue;
-      }
-
-      const resolved = await resolveMcpServer({
-        key: declared.qualifiedKey,
-        config: declared.config,
-        vars,
-      });
-      if (!resolved.ok) {
-        params.diagnostics.push(
-          diagnostic({
-            code: DiagnosticCode.McpServerInvalid,
-            pluginDir: plugin.root,
-            pluginName: plugin.manifest.name,
-            component: declared.key,
-            detail: resolved.detail,
-          }),
-        );
-        continue;
-      }
-      const server = resolved.server;
-      servers.push(server);
-
-      // §7.2.1: client-generated headers win. Resolution already removed them,
-      // so this only reports — a plugin author who set `Authorization` and saw
-      // it quietly ignored would otherwise have no way to find out.
-      for (const dropped of resolved.droppedHeaders) {
-        params.diagnostics.push(
-          diagnostic({
-            code: DiagnosticCode.McpHeaderDropped,
-            pluginDir: plugin.root,
-            pluginName: plugin.manifest.name,
-            component: declared.key,
-            detail: dropped.reason,
-          }),
-        );
-      }
-
-      pending.push(async () => {
-        const connected = await connectMcpServer({
-          server,
-          pluginRoot: plugin.root,
-          pluginData: vars.pluginData,
-          timeoutMs: params.connectTimeoutMs,
-          ...(params.baseEnv === undefined
-            ? {}
-            : {
-                baseEnv: params.baseEnv,
-              }),
-        });
-        if (!connected.ok) {
-          // §7.2.2 rule 5: a connection failure is isolated to this server.
-          params.diagnostics.push(
-            diagnostic({
-              code: DiagnosticCode.McpConnectFailed,
-              pluginDir: plugin.root,
-              pluginName: plugin.manifest.name,
-              component: declared.key,
-              detail: connected.detail,
-            }),
-          );
-          return;
-        }
-        params.sink.push(connected.session);
-      });
-    }
-  }
-
-  await runBounded(pending, MAX_CONCURRENT_CONNECTS);
-  return servers;
-}
-
-async function buildIndex(
-  config: AgentPluginsConfig,
-  sessionSink: McpSession[],
-): Promise<PluginIndex> {
+async function buildIndex(config: AgentPluginsConfig): Promise<PluginIndex> {
   const discovered = await discoverPlugins(config.roots, config.dataDir);
-  const diagnostics = [
-    ...discovered.diagnostics,
-  ];
-
   const skills = new Map<string, DiscoveredSkill>();
   for (const plugin of discovered.plugins) {
     for (const skill of plugin.skills) {
       skills.set(skill.qualifiedId, skill);
     }
   }
-
-  const connectMcp = config.connectMcp !== false;
-  const servers = connectMcp
-    ? await connectServers({
-        plugins: discovered.plugins,
-        transports: config.transports ?? DEFAULT_TRANSPORTS,
-        baseEnv: config.baseEnv,
-        connectTimeoutMs: config.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS,
-        diagnostics,
-        sink: sessionSink,
-      })
-    : [];
-
   return {
     plugins: discovered.plugins,
     skills,
-    servers,
-    sessions: sessionSink,
-    tools: sessionSink.flatMap((session) => session.tools),
-    diagnostics,
+    servers: discovered.plugins.flatMap(serversOf),
+    diagnostics: discovered.diagnostics,
   };
+}
+
+function serversOf(plugin: LoadedPlugin): PluginServer[] {
+  return plugin.mcpServers.flatMap((declared) => {
+    const connection = pluginConnectionName(plugin.manifest.name, declared.key);
+    return connection === undefined
+      ? []
+      : [
+          {
+            server: declared.qualifiedKey,
+            connection,
+          },
+        ];
+  });
 }
 
 //#endregion
@@ -691,18 +485,6 @@ const ReadSkillResourceOutput = z.object({
   error: z.string().optional(),
 });
 
-const CallMcpToolInput = z.object({
-  server: z.string().describe("Server key — '<plugin>/<server>'."),
-  tool: z.string().describe('Tool name as the server declares it.'),
-  arguments: z.record(z.string(), z.unknown()).optional().describe('Tool arguments.'),
-});
-
-const CallMcpToolOutput = z.object({
-  ok: z.boolean(),
-  content: z.unknown().optional(),
-  error: z.string().optional(),
-});
-
 //#endregion
 
 //#region Layer
@@ -713,12 +495,12 @@ export interface AgentPluginsLayer extends ContextLayer<AgentPluginsState> {
   readPlugins(): readonly LoadedPlugin[];
   /** Everything that was skipped or rejected, and why (§11.3). */
   readDiagnostics(): readonly PluginDiagnostic[];
-  /** Tools exposed by connected MCP servers. */
-  readMcpTools(): readonly McpToolInfo[];
 }
 
 /**
- * Create the Agent Plugins context layer.
+ * Create the Agent Plugins context layer: the skills, and the list of plugin
+ * MCP servers with the connection each one is. The servers themselves reach
+ * the model as connections the host attaches with {@link pluginConnections}.
  *
  * @public
  * @example
@@ -731,28 +513,16 @@ export interface AgentPluginsLayer extends ContextLayer<AgentPluginsState> {
  */
 export function agentPlugins(config: AgentPluginsConfig): AgentPluginsLayer {
   // One scan per layer instance, shared by every scope that inits against it.
-  // The index is install-level, not thread-level: rescanning per thread would
-  // relaunch every stdio server.
+  // The index is install-level, not thread-level.
   let indexPromise: Promise<PluginIndex> | undefined;
-  /**
-   * Every session opened by this instance, recorded as it opens. `dispose` has
-   * to be able to close subprocesses started by an `init` that was aborted
-   * before it returned — reading them off the finished index closed nothing,
-   * because there was no finished index.
-   */
-  const liveSessions: McpSession[] = [];
   let index: PluginIndex | undefined;
-  // Sessions are owned by the instance, not by any one scope. Counting live
-  // inits stops the first thread to finish from tearing down subprocesses the
-  // other threads are still using.
-  let liveScopes = 0;
 
   const load = async (): Promise<PluginIndex> => {
     // `??=` alone memoized a *rejected* promise forever, so one failed scan
     // poisoned the layer for the life of the process. Clearing on rejection
     // lets the next init retry; the assignment is still synchronous, so
     // concurrent inits continue to share one scan rather than double-spawning.
-    indexPromise ??= buildIndex(config, liveSessions)
+    indexPromise ??= buildIndex(config)
       .then((built) => {
         index = built;
         return built;
@@ -769,8 +539,6 @@ export function agentPlugins(config: AgentPluginsConfig): AgentPluginsLayer {
       plugins: [],
       skills: new Map(),
       servers: [],
-      sessions: [],
-      tools: [],
       diagnostics: [],
     };
 
@@ -798,14 +566,6 @@ export function agentPlugins(config: AgentPluginsConfig): AgentPluginsLayer {
     // prefix. Activation is the only mutation, and renderDelta handles it.
     placement: 'anchor',
 
-    // The runtime's default init budget is 10s, which is not enough to scan
-    // plugin roots and complete a handshake with every declared MCP server.
-    // Exceeding it does not degrade this layer — it throws, aborting the whole
-    // execution — so the budget is raised to sit above the per-server connect
-    // timeout rather than under it.
-    timeouts: {
-      init: 6e4,
-    },
     // Plugins are enrichment, not load-bearing context. If discovery fails
     // outright the right outcome is an agent with no skills and a diagnostic,
     // not a dead execution.
@@ -825,10 +585,6 @@ export function agentPlugins(config: AgentPluginsConfig): AgentPluginsLayer {
       mcpServers: {
         kind: 'data',
         read: () => currentIndex().servers,
-      },
-      mcpTools: {
-        kind: 'data',
-        read: () => currentIndex().tools,
       },
       diagnostics: {
         kind: 'data',
@@ -964,64 +720,10 @@ export function agentPlugins(config: AgentPluginsConfig): AgentPluginsLayer {
           }
         },
       },
-
-      ...(config.connectMcp === false
-        ? {}
-        : {
-            callMcpTool: {
-              kind: 'function' as const,
-              description:
-                'Invoke a tool on a connected MCP server. Server keys and tool names are listed in <agent_plugins>.',
-              input: CallMcpToolInput,
-              output: CallMcpToolOutput,
-              async execute(args: z.infer<typeof CallMcpToolInput>, toolCtx?: unknown) {
-                const loaded = await load();
-                const session = loaded.sessions.find((entry) => entry.key === args.server);
-                if (session === undefined) {
-                  return {
-                    result: {
-                      ok: false,
-                      error: `no connected MCP server '${args.server}'. Connected: ${loaded.sessions.map((s) => s.key).join(', ') || '(none)'}`,
-                    },
-                  };
-                }
-                const signal = runSignalOf(toolCtx);
-                const outcome = await callMcpTool({
-                  session,
-                  tool: args.tool,
-                  args: args.arguments ?? {},
-                  ...(signal
-                    ? {
-                        signal,
-                      }
-                    : {}),
-                });
-                return {
-                  result: {
-                    ok: outcome.ok,
-                    content: outcome.content,
-                    // The output schema advertises `error`, so a failing call
-                    // has to populate it. Returning only `{ok:false, content}`
-                    // left the model to infer the failure from the payload.
-                    ...(outcome.ok
-                      ? {}
-                      : {
-                          error: `MCP tool '${args.tool}' on '${args.server}' reported a failure`,
-                        }),
-                  },
-                };
-              },
-            },
-          }),
     },
 
     hooks: {
       async init({ ctx }) {
-        // Counted BEFORE the await. Incrementing afterwards meant a failed scan
-        // skipped the increment while the matching dispose still decremented,
-        // driving the count negative so that a later, genuinely-live scope was
-        // torn down at what looked like zero.
-        liveScopes += 1;
         const loaded = await load();
         reportDiagnostics(ctx, loaded.diagnostics);
         return {
@@ -1092,36 +794,10 @@ export function agentPlugins(config: AgentPluginsConfig): AgentPluginsLayer {
           parentState: parentState ?? emptyState(),
         };
       },
-
-      async dispose() {
-        // Floored at zero. `DisposeParams` carries no scope identity, so this
-        // is a count rather than a set — and an unmatched dispose used to drive
-        // it negative, which then made the *next* dispose tear down sessions a
-        // live scope was still using. Clamping keeps an extra dispose inert.
-        liveScopes = Math.max(0, liveScopes - 1);
-        if (liveScopes > 0) {
-          return;
-        }
-        // Closed from the instance-level sink rather than from `index`, so an
-        // init that was aborted partway still has its subprocesses reaped.
-        await closeSessions([
-          ...liveSessions,
-        ]);
-        liveSessions.length = 0;
-        if (index !== undefined) {
-          // Sessions are gone, but the discovered plugins, skills and
-          // diagnostics are not — a host collects diagnostics at end-of-run,
-          // which is after teardown, and blanking these returned it nothing.
-          index.sessions = [];
-          index.tools = [];
-        }
-        indexPromise = undefined;
-      },
     },
 
     readPlugins: () => currentIndex().plugins,
     readDiagnostics: () => currentIndex().diagnostics,
-    readMcpTools: () => currentIndex().tools,
   };
 }
 

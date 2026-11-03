@@ -504,10 +504,17 @@ interface DetachedHandle<O> {
 
 ## Connections and Triggers
 
-`connections` maps names to the live things an agent works with — browsers,
+`connections` names the live things an agent works with — browsers,
 devices, desktop apps, chat workspaces, in-process event sources — each backed
 by an MCP server through `mcp()` or any `ConnectionProvider`, optionally as a
-pool of fresh connections. `triggers` declares which connection events start
+pool of fresh connections. It is a record keyed by name, or a list of entries
+each named by its provider (`[mcp({ name: 'linear', … })]`). A harness entry
+lives as long as the harness. A turn attaches its own with
+`execute(input, { connections })`, and a model step with `tools: [entry]`;
+those connect when the turn starts, before its tool set is built, and are
+released when it ends (`35-connections` § Attaching connections). A step
+picks part of any of them by name with `connectionTools('linear', { ops })`.
+`triggers` declares which connection events start
 or join a turn. `environment.secrets` resolves `secret()` values and
 `environment.artifacts` stores binary content; `verification` registers the
 verifier `step.verify` uses (`37-verification`). Providers connect in
@@ -713,6 +720,13 @@ interface ExecuteOptions {
   resourceId?: string;
   state?: unknown;
   context?: ContextLayer[];
+  /**
+   * Connections for this turn only, keyed by name or listed by name. They
+   * connect at the turn start and are released when it ends; a name the
+   * harness already holds must carry the same provider and options
+   * (`CONNECTION_NAME_TAKEN`).
+   */
+  connections?: ConnectionEntries;
   /** Per-call override of the harness default. */
   deliveryMode?: DeliveryMode;
 }

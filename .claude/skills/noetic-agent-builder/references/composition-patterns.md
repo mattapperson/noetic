@@ -1418,9 +1418,10 @@ const result = await harness.run(root, 'Add input validation to the signup endpo
 
 Key points:
 
-- An `acp-agent` node carries `agent`, `prompt`, and optional `cwd` / `mode` / `model` / `mcpServers` / `permissions` / `clientCapabilities` / `session` — the JSON mirror of the `step.acpAgent` options.
+- An `acp-agent` node carries `agent`, `prompt`, and optional `cwd` / `mode` / `model` / `tools` / `permissions` / `clientCapabilities` / `session` — the JSON mirror of the `step.acpAgent` options. `tools` are served to the agent through noetic's tool bridge, as in TypeScript; a stdio `{ "mcp" }` entry starts where the agent runs.
 - `createAcpAgentRegistry(claudeCode(), codex(), …)` builds the `Map<string, AcpAgent>` the hydrator resolves nodes against. The keys are the adapters' `agentId`s, an **open** set — supporting a new agent needs another entry, not a schema change. An unregistered `agent` fails hydration with `UNKNOWN_ACP_AGENT_REFERENCE`.
-- `parseAndRunWorkflow` and `dynamicWorkflow` take the same registry as `acpAgents`. For a document you did not write, they cap each agent's `permissions`, `cwd`, `clientCapabilities` and `session` by the `acp` allowlist (`acp: { 'claude-code': { clientCapabilities: { readTextFile: true, writeTextFile: true }, cwd: '/srv/checkouts' } }`; narrowest defaults without an entry), give the document's sessions their own namespace, and check every `mcpServers` entry against the `mcp` allowlist before anything runs: HTTP/SSE by URL pattern (`urls: [{ url: 'https://mcp.example.com/*', secrets: { 'mcp.token': 'Authorization' } }]`), stdio by exact command and args (`commands: [{ command: 'npx', args: ['-y', '@acme/docs-mcp'] }]`), and header or env values only as `{ "$secret": "<name>" }` bound by the grant. No `mcp` refuses every server (`CONNECTION_NOT_ALLOWED`). `hydrateWorkflow` and `workflow()` trust their document and do not check servers.
+- `parseAndRunWorkflow` and `dynamicWorkflow` take the same registry as `acpAgents`. For a document you did not write, they cap each agent's `permissions`, `cwd`, `clientCapabilities` and `session` by the `acp` allowlist (`acp: { 'claude-code': { clientCapabilities: { readTextFile: true, writeTextFile: true }, cwd: '/srv/checkouts' } }`; narrowest defaults without an entry), give the document's sessions their own namespace, and check every MCP server it names — `{ "mcp": … }` entries in `tools` or the document's `connections` — against the `mcp` allowlist before anything runs: HTTP/SSE by URL pattern (`urls: [{ url: 'https://mcp.example.com/*', secrets: { 'mcp.token': 'Authorization' }, policy: { deny: ['delete_*'] } }]`), stdio by exact command and args (`commands: [{ command: 'npx', args: ['-y', '@acme/docs-mcp'] }]`), header or env values only as `{ "$secret": "<name>" }` bound by the grant, and the grant's `policy` — never the document's. `provider: mcp` connects a granted server (it arrives in ACP's shape, secrets resolved). No `mcp` refuses every server (`CONNECTION_NOT_ALLOWED`).
+- A JSON `callModel` / `acp-agent` node gives the model a connection's tools with `{ "connection": "linear", "ops": ["get_*"] }` (a harness or turn connection, narrowed to what `connections` grants) or an inline `{ "mcp": { "name": "linear", "type": "http", "url": "…", "headers": [{ "name": "Authorization", "value": { "$secret": "linear.token" } }] } }` server — the same tool names and results as `connectionTools('linear', …)` / `tools: [mcp(…)]`. The same `{ "mcp" }` entry under the document's `connections` (keyed by its name) attaches it for the whole document. A document run from a step mid-turn attaches its entries when it starts; they are released with the turn.
 
 ## Pattern: Generative UI Interaction Loop
 
@@ -1511,7 +1512,7 @@ import { mcp } from '@noetic-tools/mcp';
 const harness = new AgentHarness({
   name: 'browser-agent',
   params: {},
-  connections: { browser: mcp('npx @playwright/mcp@latest') },
+  connections: [mcp({ name: 'browser', command: 'npx', args: ['@playwright/mcp@latest'] })],
   agentGraph: loop({
     id: 'agent',
     steps: [callModel({ id: 'turn', model: 'anthropic/claude-sonnet-4.5', instructions: 'Use the browser.' })],
@@ -1524,6 +1525,37 @@ await harness.execute('Open example.com and follow the "More information" link')
 
 - A server that declares a profile (`browser@1`) gets eager tools plus `browser_ops` / `browser_call`, a per-turn view of its state (`look`), events, and verification. Pass `mcp(server, { profiles: [browser] })` so the bridge can check the declaration.
 - Destructive operations (profile `guarded`) need approval unless `policy.allow` covers them.
+
+## Pattern: Per-User Connections for One Turn
+
+A multi-tenant host gives each turn the user's own servers with their own credentials, instead of building a harness per user. The turn connects them when it starts and releases them when it ends; the model sees the same `<name>_<tool>` names a harness connection would give.
+
+```typescript
+import { AgentHarness, callModel, connection, connectionTools } from '@noetic-tools/core';
+import { mcp } from '@noetic-tools/mcp';
+
+declare const tokenFor: (userId: string) => Promise<string>;
+
+const harness = new AgentHarness({
+  name: 'assistant',
+  params: {},
+  agentGraph: [
+    callModel({ id: 'work', model: 'anthropic/claude-sonnet-4.5' }),
+    // A summarizer held away from write tools: it picks only the reads of whatever the turn attached.
+    callModel({
+      id: 'summary',
+      model: 'anthropic/claude-haiku-4.5',
+      tools: [connectionTools('linear', { ops: ['get_*', 'list_*'] })],
+    }),
+  ],
+});
+
+const linear = mcp({ name: 'linear', type: 'http', url: 'https://mcp.linear.app/mcp', headers: [{ name: 'Authorization', value: `Bearer ${await tokenFor('u-42')}` }] });
+await harness.execute('Summarise my open issues', { threadId: 'u-42', connections: [linear] });
+```
+
+- Pick by name (`connectionTools('linear')`) to narrow whatever the harness or turn attached; a name nothing attached is `CONNECTION_UNKNOWN` when the turn starts; a pick made from a different entry under the same name is `CONNECTION_NAME_TAKEN`.
+- Many servers at once: `expose: 'call'` on each merges them into one `ops` and one `call` tool taking `target`. A step that picks some of them gets `ops` and `call` cut to those: the `target` enum lists only the picked connections, and a call to any other is refused.
 
 ## Pattern: Verified Action (step.verify)
 

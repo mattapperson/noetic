@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import { isNoeticConfigError } from '@noetic-tools/types';
-import { resolveMcpConfig, splitCommandLine } from '../src/config';
+import { resolveMcpConfig } from '../src/config';
 import { resourceValue, storeInlineBlobs, toolResultOutput } from '../src/content';
 import { mostCautious, overForgivingDeterminism, overTrustedSenses } from '../src/declaration';
 import { requestErrorPayload, toolErrorPayload } from '../src/errors';
@@ -21,71 +21,48 @@ function expectInvalid(fn: () => unknown): void {
   }
 }
 
-describe('splitCommandLine', () => {
-  it('splits words and honors quotes and escapes', () => {
-    expect(splitCommandLine('npx @playwright/mcp@latest')).toEqual([
-      'npx',
-      '@playwright/mcp@latest',
-    ]);
-    expect(splitCommandLine(`node "my server.js" --name 'a b' x\\ y ""`)).toEqual([
-      'node',
-      'my server.js',
-      '--name',
-      'a b',
-      'x y',
-      '',
-    ]);
-    expect(splitCommandLine('a "b\\"c"')).toEqual([
-      'a',
-      'b"c',
-    ]);
-  });
-
-  it('refuses an empty line or an unclosed quote with CONNECTION_INVALID', () => {
-    expectInvalid(() => splitCommandLine('   '));
-    expectInvalid(() => splitCommandLine('node "oops'));
-  });
-});
-
 describe('resolveMcpConfig', () => {
-  it('normalizes a command line, a stdio object, an http object and a transport', () => {
-    expect(resolveMcpConfig('npx server --flag').target).toEqual({
-      command: 'npx',
-      args: [
-        'server',
-        '--flag',
+  it("takes ACP's McpServer shapes as they stand and a transport", () => {
+    const http = resolveMcpConfig({
+      name: 'linear',
+      type: 'http',
+      url: 'https://mcp.example.com/mcp',
+      headers: [
+        {
+          name: 'X-Tenant',
+          value: 't',
+        },
+      ],
+      timeoutMs: 5,
+      pollIntervalMs: 7,
+    });
+    expect(http.target).toEqual({
+      type: 'http',
+      url: 'https://mcp.example.com/mcp',
+      headers: [
+        {
+          name: 'X-Tenant',
+          value: 't',
+        },
       ],
     });
-    const http = resolveMcpConfig(
-      {
-        url: 'https://mcp.example.com/mcp',
-        headers: {
-          'X-Tenant': 't',
-        },
-        timeoutMs: 5,
-      },
-      {
-        pollIntervalMs: 7,
-      },
-    );
-    expect(http.target).toEqual({
-      url: 'https://mcp.example.com/mcp',
-      headers: {
-        'X-Tenant': 't',
-      },
-    });
     expect(http.options).toEqual({
+      name: 'linear',
       timeoutMs: 5,
       pollIntervalMs: 7,
     });
     const stdio = resolveMcpConfig({
+      name: 'files',
       command: 'node',
       args: [
         'x.js',
       ],
-      env: {
-        A: '1',
-      },
+      env: [
+        {
+          name: 'A',
+          value: '1',
+        },
+      ],
       cwd: '/tmp',
     });
     expect(stdio.target).toEqual({
@@ -93,10 +70,22 @@ describe('resolveMcpConfig', () => {
       args: [
         'x.js',
       ],
-      env: {
-        A: '1',
-      },
+      env: [
+        {
+          name: 'A',
+          value: '1',
+        },
+      ],
       cwd: '/tmp',
+    });
+    expect(
+      resolveMcpConfig({
+        type: 'stdio',
+        command: 'node',
+      }).target,
+    ).toEqual({
+      type: 'stdio',
+      command: 'node',
     });
     const factory = (): never => {
       throw new Error('unused');
@@ -110,6 +99,32 @@ describe('resolveMcpConfig', () => {
     });
   });
 
+  it("drops ACP's _meta, on the server and on each value", () => {
+    // A variable, as an ACP config arrives: `_meta` is ACP's extension point.
+    const server = {
+      name: 'linear',
+      type: 'sse',
+      url: 'https://mcp.example.com/sse',
+      headers: [
+        {
+          name: 'X-Tenant',
+          value: 't',
+          _meta: {
+            note: 'x',
+          },
+        },
+      ],
+      _meta: {
+        note: 'x',
+      },
+    } as const;
+    const resolved = resolveMcpConfig(server);
+    expect(resolved.options).toEqual({
+      name: 'linear',
+    });
+    expect(resolved.target).not.toHaveProperty('_meta');
+  });
+
   it('refuses malformed configurations with CONNECTION_INVALID', () => {
     expectInvalid(() =>
       mcp({
@@ -118,14 +133,88 @@ describe('resolveMcpConfig', () => {
     );
     expectInvalid(() =>
       mcp({
+        type: 'http',
         url: 'not a url',
       }),
     );
     expectInvalid(() =>
-      mcp('server', {
+      mcp({
+        command: 'server',
         timeoutMs: -1,
       }),
     );
+  });
+
+  it('refuses the shapes ACP does not use with CONNECTION_INVALID', () => {
+    // A URL with no `type`: ACP always tags a remote server.
+    expectInvalid(() => resolveMcpConfig(JSON.parse('{ "url": "https://mcp.example.com/mcp" }')));
+    // `protocol` is not an ACP field.
+    expectInvalid(() =>
+      resolveMcpConfig(
+        JSON.parse('{ "type": "http", "url": "https://mcp.example.com/mcp", "protocol": "sse" }'),
+      ),
+    );
+    // Headers and environment as records, not `[{ name, value }]`.
+    expectInvalid(() =>
+      resolveMcpConfig(
+        JSON.parse(
+          '{ "type": "http", "url": "https://mcp.example.com/mcp", "headers": { "A": "1" } }',
+        ),
+      ),
+    );
+    expectInvalid(() => resolveMcpConfig(JSON.parse('{ "command": "node", "env": { "A": "1" } }')));
+    // A command line as a string.
+    expectInvalid(() => resolveMcpConfig(JSON.parse('"npx server"')));
+  });
+
+  it('refuses a header or environment variable given twice with CONNECTION_INVALID', () => {
+    expectInvalid(() =>
+      mcp({
+        type: 'http',
+        url: 'https://mcp.example.com/mcp',
+        headers: [
+          {
+            name: 'X-Tenant',
+            value: 'a',
+          },
+          {
+            name: 'x-tenant',
+            value: 'b',
+          },
+        ],
+      }),
+    );
+    expectInvalid(() =>
+      mcp({
+        command: 'node',
+        env: [
+          {
+            name: 'A',
+            value: '1',
+          },
+          {
+            name: 'A',
+            value: '2',
+          },
+        ],
+      }),
+    );
+    // Environment names are case-sensitive, so `A` and `a` are two variables.
+    expect(
+      mcp({
+        command: 'node',
+        env: [
+          {
+            name: 'A',
+            value: '1',
+          },
+          {
+            name: 'a',
+            value: '2',
+          },
+        ],
+      }).config.target,
+    ).toHaveProperty('env');
   });
 });
 
@@ -654,24 +743,31 @@ describe('createTransport', () => {
         args: [
           'server.js',
         ],
-        env: {
-          A: '1',
-        },
+        env: [
+          {
+            name: 'A',
+            value: '1',
+          },
+        ],
         cwd: '/tmp',
       }),
     ).toBeInstanceOf(StdioClientTransport);
     expect(
       await createTransport({
+        type: 'http',
         url: 'https://mcp.example.test/mcp',
-        headers: {
-          'X-Tenant': 't',
-        },
+        headers: [
+          {
+            name: 'X-Tenant',
+            value: 't',
+          },
+        ],
       }),
     ).toBeInstanceOf(StreamableHTTPClientTransport);
     expect(
       await createTransport({
+        type: 'sse',
         url: 'https://mcp.example.test/sse',
-        protocol: 'sse',
       }),
     ).toBeInstanceOf(SSEClientTransport);
   });

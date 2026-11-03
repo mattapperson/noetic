@@ -3,7 +3,6 @@ import type {
   AcpAgent,
   AcpClientCapabilityConfig,
   AcpContentBlock,
-  AcpMcpServer,
   AcpPermissionHandler,
   AcpPermissionPolicy,
   AcpSessionPolicy,
@@ -21,7 +20,6 @@ import type {
   OutputCodec,
   RetryPolicy,
   RunCodeExecute,
-  ServerToolSpec,
   StandardSchemaV1,
   Step,
   StepAcpAgent,
@@ -31,14 +29,22 @@ import type {
   StepInvokeTool,
   StepReplay,
   StepRunCode,
+  StepToolEntry,
   StepWait,
   StepWaitOutput,
   SubprocessAdapter,
   Tool,
   ToolChoice,
 } from '@noetic-tools/types';
-import { frameworkCast, isServerToolSpec, NoeticConfigError } from '@noetic-tools/types';
+import {
+  frameworkCast,
+  isConnectionEntry,
+  isConnectionPick,
+  isServerToolSpec,
+  NoeticConfigError,
+} from '@noetic-tools/types';
 import { getDefaultRegistrar } from '../types/step-registrar';
+import { assertAgentTakesTools, checkedAcpTools } from './acp-agent-checks';
 import { checkEmitItems, isGeneratorFunction } from './custom-item';
 import { verify } from './verify-builder';
 
@@ -69,10 +75,11 @@ export interface CallModelOpts<TContext, O, I = unknown>
   instructions?: Lazy<string | undefined, TContext>;
   /**
    * Optional tools; eager array or `(ctx) => (...)[] | undefined` getter. Each
-   * entry is either a client `Tool` or an inline `ServerToolSpec` (an OpenRouter
-   * server tool the provider executes, e.g. web search/fetch).
+   * entry is a client `Tool`, an inline `ServerToolSpec` (an OpenRouter server
+   * tool the provider executes, e.g. web search/fetch), a connection entry
+   * (`mcp({ name, … })`), or a `ConnectionPick` (`connectionTools(…)`).
    */
-  tools?: Lazy<(Tool | ServerToolSpec)[] | undefined, TContext>;
+  tools?: Lazy<ReadonlyArray<StepToolEntry> | undefined, TContext>;
   /**
    * How the model may use its tools: `'auto'` (default), `'required'`,
    * `'none'`, or `{ tool: name }` to force one client tool from `tools`.
@@ -111,8 +118,15 @@ export interface StepAcpAgentOpts<TContext, O, I = unknown>
    * did not advertise the matching prompt capability.
    */
   content?: Lazy<ReadonlyArray<AcpContentBlock> | undefined, TContext>;
-  /** MCP servers to expose to the agent for this session. */
-  mcpServers?: Lazy<ReadonlyArray<AcpMcpServer> | undefined, TContext>;
+  /**
+   * What to give the agent: `tool()` definitions, connection entries
+   * (`mcp({ name, … })`) and picks (`connectionTools(…)`), as a `callModel`
+   * step takes them. Served to the agent through noetic's tool bridge; every
+   * call runs the same steering, validation, approval, and execution path.
+   * The agent's own permission request for one of these is allowed, since
+   * that path gates it.
+   */
+  tools?: Lazy<ReadonlyArray<StepToolEntry> | undefined, TContext>;
   /** Working directory for the session. Defaults to `ctx.cwdState.cwd`. */
   cwd?: Lazy<string | undefined, TContext>;
   /** Session mode to switch to before prompting (e.g. `'plan'`). */
@@ -281,6 +295,26 @@ function validateAcpAgentOpts<TContext, O, I>(opts: StepAcpAgentOpts<TContext, O
       hint: 'Pass `prompt` for plain text, or `content` for image/audio/resource blocks.',
     });
   }
+  validateAcpAgentTools(opts);
+}
+
+/**
+ * Reject tools the agent cannot take while the step is built. Only an eager
+ * `tools` array and an eager agent can be checked here; getters are checked
+ * when the step runs.
+ */
+function validateAcpAgentTools<TContext, O, I>(opts: StepAcpAgentOpts<TContext, O, I>): void {
+  const tools = Array.isArray(opts.tools) ? opts.tools : [];
+  if (tools.length === 0) {
+    return;
+  }
+  if (typeof opts.agent === 'object') {
+    assertAgentTakesTools(opts.id, opts.agent);
+  }
+  checkedAcpTools(
+    opts.id,
+    tools.filter((entry) => !isConnectionPick(entry) && !isConnectionEntry(entry)),
+  );
 }
 
 /**
@@ -292,8 +326,14 @@ function validateToolChoice<TContext, O, I>(opts: CallModelOpts<TContext, O, I>)
   if (typeof choice !== 'object' || !Array.isArray(opts.tools)) {
     return;
   }
-  const names = opts.tools.flatMap((entry) =>
-    isServerToolSpec(entry)
+  const tools: ReadonlyArray<StepToolEntry> = opts.tools;
+  // A connection's tool names come from its server, so they are checked when
+  // the turn's tool set is built.
+  if (tools.some((entry) => isConnectionPick(entry) || isConnectionEntry(entry))) {
+    return;
+  }
+  const names = tools.flatMap((entry) =>
+    isServerToolSpec(entry) || isConnectionPick(entry) || isConnectionEntry(entry)
       ? []
       : [
           entry.name,

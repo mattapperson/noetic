@@ -87,6 +87,8 @@ export interface InMemoryEventType extends Omit<ConnectionEventInfo, 'name' | 'r
 
 /** `createInMemoryConnection()` options. */
 export interface InMemoryConnectionOptions {
+  /** The connection name, so the provider can be listed in `connections: [...]`. */
+  readonly name?: string;
   readonly id?: string;
   readonly surface?: string;
   /**
@@ -871,6 +873,11 @@ export function createInMemoryConnection(
   let connects = 0;
   const provisioned: InMemoryConnection[] = [];
   const provider: InMemoryConnectionProvider = {
+    ...(options.name === undefined
+      ? {}
+      : {
+          name: options.name,
+        }),
     get connection(): InMemoryConnection {
       return current;
     },

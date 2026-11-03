@@ -42,7 +42,9 @@ import {
   deduplicateTools,
   dispatchStepThroughAdapter,
   execute,
+  isRootRunning,
   prepareBandedView,
+  runRootOf,
 } from './deps/interpreter';
 import type {
   ChannelWarning,
@@ -745,6 +747,8 @@ export class AgentHarness<
           const perTurnOptions: ExecuteOptions = messages[0]?.options ?? {};
           const messageIds = messages.map((m) => m.id);
           const history = record ? await record.history() : session.accumulatedItems;
+          const graph = this.agentGraph ? frameworkCast<Step>(this.agentGraph) : undefined;
+          const views = this.#connections.turnViews(perTurnOptions.connections, graph);
           // A re-delivery of a cut-off turn's messages picks that turn up where it died.
           const resumed = await record?.resume(messageIds, {
             state: perTurnOptions.state,
@@ -763,11 +767,20 @@ export class AgentHarness<
               state: perTurnOptions.state,
               contextLayers: perTurnOptions.contextLayers,
               extraContextLayers: perTurnOptions.extraContextLayers,
+              _connectionViews: views.layers,
               _broadcaster: session.runner.broadcaster,
             });
+          // A resumed context was made without the turn's view layers.
+          if (!resumed) {
+            views.bind(ctx);
+          }
           frameworkCast<Context & SessionCtxExtension>(ctx)._sessionQueue = session.runner.queue;
           await this.start();
-          const connectionTools = this.#connections.tools();
+          const connectionTools = await this.#connections.openTurn(
+            ctx,
+            perTurnOptions.connections,
+            graph,
+          );
           if (this.agentGraph || this.harnessTools.length > 0 || connectionTools.length > 0) {
             const stepTools = this.agentGraph ? collectAllTools(this.agentGraph) : [];
             this.setUnifiedTools(ctx, [
@@ -789,6 +802,7 @@ export class AgentHarness<
         },
         runTurn: async (ctx, _turn, signal) => {
           if (!this.agentGraph) {
+            await this.#connections.release(ctx.id);
             throw new NoeticConfigError({
               code: 'NO_STEP_CONFIGURED',
               message: 'No agentGraph configured on this harness.',
@@ -916,16 +930,34 @@ export class AgentHarness<
   ): Promise<StepsOutput<T>>;
   async run<I, O>(s: Steps<ContextData, I, O>, input: I, ctx: Context): Promise<O> {
     const root = toStep<ContextData, I, O>(s);
-    await this.dropRerunsOnFailure(ctx, () => this.prepareRun(root, ctx));
-    return this.executeClosingChannels(root, input, ctx);
+    // Called from inside a step that a bare `execute()` is running on this
+    // root (a tool running a step on `toolCtx.ctx`): join that run. Treating
+    // the context as a fresh root would initialize its layers mid-run and, on
+    // return, close its channels and ACP sessions under the outer step.
+    if (ctx.parent === null && !this.liveRoots.has(ctx.id) && isRootRunning(ctx)) {
+      return execute(root, input, ctx);
+    }
+    let restore: (() => void) | undefined;
+    await this.dropRerunsOnFailure(ctx, async () => {
+      restore = await this.prepareRun(root, ctx);
+    });
+    try {
+      return await this.executeClosingChannels(root, input, ctx);
+    } finally {
+      restore?.();
+    }
   }
 
   /**
    * Everything `run()` does before the root executes: fail fast on a missing
    * model provider, connect, negotiate the root, wire the tool pool and run the
-   * layers' `init` hooks.
+   * layers' `init` hooks. Returns what puts the tool pool back when the run
+   * attached connections into a pool it found already built.
    */
-  private async prepareRun<I, O>(root: Step<ContextData, I, O>, ctx: Context): Promise<void> {
+  private async prepareRun<I, O>(
+    root: Step<ContextData, I, O>,
+    ctx: Context,
+  ): Promise<(() => void) | undefined> {
     const missingModel = this.llm.missingModelFor(root);
     if (missingModel) {
       throw missingModel;
@@ -937,16 +969,49 @@ export class AgentHarness<
     await this.start();
     this.#connections.negotiateRoot(frameworkCast<Step>(root));
     if (!ctx.unifiedTools) {
+      // A root run is its own turn: it attaches the entries its steps list.
+      const connectionTools =
+        ctx.parent === null
+          ? await this.#connections.openTurn(ctx, undefined, frameworkCast<Step>(root))
+          : this.#connections.tools(runRootOf(ctx).id);
       this.setUnifiedTools(ctx, [
         ...collectAllTools(root),
         ...this.harnessTools,
-        ...this.#connections.tools(),
+        ...connectionTools,
       ]);
     }
+    const restore = ctx.unifiedTools
+      ? await this.attachGraphTools(frameworkCast<Step>(root), ctx)
+      : undefined;
     // Hydrate/recall/persist context on the bare `run()` path too (issue #48):
     // configuring `context` + `storage` must "just work" without going through
     // `execute()`/`seedSessionHistory`. Idempotent — see `ensureLayersInit`.
     await this.ensureLayersInit(ctx);
+    return restore;
+  }
+
+  /**
+   * Attaches the entries a graph built mid-turn lists (a JSON document a step
+   * hydrates) and adds their tools to `ctx`'s pool for this run only, so the
+   * rest of the turn keeps the tool set — and the prompt cache — it started
+   * with. Returns what restores the pool.
+   */
+  private async attachGraphTools(root: Step, ctx: Context): Promise<(() => void) | undefined> {
+    const tools = await this.#connections.attachGraph(runRootOf(ctx), root);
+    if (!tools) {
+      return undefined;
+    }
+    const pool = frameworkCast<{
+      unifiedTools?: ReadonlyArray<Tool>;
+    }>(ctx);
+    const before = pool.unifiedTools;
+    pool.unifiedTools = deduplicateTools([
+      ...(before ?? []),
+      ...tools,
+    ]);
+    return () => {
+      pool.unifiedTools = before;
+    };
   }
 
   /**
@@ -959,6 +1024,9 @@ export class AgentHarness<
       await prepare();
     } catch (error) {
       this.#connections.dropReruns(ctx);
+      if (ctx.parent === null && !this.liveRoots.has(ctx.id)) {
+        await this.#connections.release(ctx.id);
+      }
       throw error;
     }
   }
@@ -1024,6 +1092,8 @@ export class AgentHarness<
           await this.#connections.releaseRun(ctx.id);
           await this.endDurableRun(ctx);
         }
+        // The turn's own connections end with it; a resume attaches them again.
+        await this.#connections.release(ctx.id);
       }
     }
   }
@@ -1181,14 +1251,19 @@ export class AgentHarness<
      * isolation to root a child agent at the worktree path.
      */
     cwdInit?: string;
+    /** View layers for the connections the turn attaches, after the harness's own. */
+    _connectionViews?: ContextLayer[];
     _broadcaster?: EventBroadcaster;
   }): Context {
     const resolved = opts ?? {};
     // `ContextImpl` takes the layers as `layers`, so the option spelling is
     // dropped from `rest` rather than spread through under the wrong name.
-    const { contextLayers, extraContextLayers, cwdInit, ...rest } = resolved;
+    const { contextLayers, extraContextLayers, cwdInit, _connectionViews, ...rest } = resolved;
     const configuredLayers = contextLayers ?? this._contextLayers;
-    const views = this.#connections.views;
+    const views = [
+      ...this.#connections.views,
+      ...(_connectionViews ?? []),
+    ];
     const baseLayers =
       views.length > 0
         ? [

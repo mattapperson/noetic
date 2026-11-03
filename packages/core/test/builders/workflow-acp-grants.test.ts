@@ -899,19 +899,6 @@ describe('parseAndRunWorkflow — ACP agent grants', () => {
           reuse: 'main',
           keepAlive: 'harness',
         },
-        mcpServers: [
-          {
-            type: 'http',
-            name: 'admin',
-            url: 'https://admin.internal/',
-            headers: [
-              {
-                name: 'Authorization',
-                value: 'Bearer host-secret',
-              },
-            ],
-          },
-        ],
       }),
       'x',
       harness.createContext(),

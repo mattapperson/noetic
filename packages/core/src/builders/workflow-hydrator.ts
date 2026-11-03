@@ -10,24 +10,23 @@ import type { ContextData, ContextLayer } from '@noetic-tools/context';
 import type {
   AcpAgent,
   AcpAllowlist,
+  ConnectionAllowlist,
   Context,
   CustomItemMap,
   ExecuteStepFn,
+  McpAllowlist,
   OutputCodec,
-  ProcessSubprocessRequest,
-  ServerToolSpec,
   Step,
   SubprocessAdapter,
   Tool,
   ToolContext,
   ToolExecutionContext,
 } from '@noetic-tools/types';
-import { frameworkCast, isServerToolSpec, NoeticConfigError } from '@noetic-tools/types';
+import { frameworkCast, NoeticConfigError } from '@noetic-tools/types';
 import type { ExpressionBindings, ExpressionLimits } from '../expression/jsonata';
 import { compileExpression, compute, readInput } from '../expression/jsonata';
 import { markRecorded, stepOutputsOf } from '../expression/step-outputs';
 import type {
-  CallModelWorkflowNode,
   OutputCodecRef,
   WorkflowConnectionRef,
   WorkflowDocument,
@@ -35,7 +34,6 @@ import type {
   WorkflowStepList,
 } from '../schemas/workflow';
 import { shorthandStepId, stepEntryToNode, stepListEntries } from '../schemas/workflow';
-import { DetachedHandleImpl } from '../util/detached-handle';
 import { outputText } from './output-text';
 import { callModel, runCode } from './step-builders';
 import {
@@ -44,7 +42,12 @@ import {
   hydrateSubflowNode,
   hydrateWithContextNode,
 } from './workflow-child-nodes';
-import { hydrateAcpAgentNode, hydrateCallNode, hydrateWaitNode } from './workflow-connection-nodes';
+import {
+  hydrateAcpAgentNode,
+  hydrateCallNode,
+  hydrateRunCodeNode,
+  hydrateWaitNode,
+} from './workflow-connection-nodes';
 import type { ConnectionManifestEntries, ConnectionUses } from './workflow-connections';
 import { checkDocumentConnections } from './workflow-connections';
 import {
@@ -61,6 +64,7 @@ import {
   nodeScope,
 } from './workflow-custom-items';
 import { workflowReplayKey } from './workflow-replay-key';
+import { recordDocumentConnections, registeredSentence, stepTools } from './workflow-tool-entries';
 import { hydrateVerifyNode } from './workflow-verify';
 
 //#region Types
@@ -146,6 +150,17 @@ export interface HydrationContext {
   enclosingConnection?: WorkflowConnectionRef;
   /** The connection name `$item` holds on a fan-out path (an `inParallel` whose `over` lists connections). */
   fanOutItem?: string;
+  /**
+   * What the document may use of each connection. A `{ "connection" }` tool
+   * entry is narrowed to the operations it grants. Absent allows every
+   * connection the harness or the turn holds.
+   */
+  allowlist?: ConnectionAllowlist;
+  /**
+   * The MCP servers the document may name (spec 26 § MCP servers): its
+   * `{ "mcp" }` entries, in `tools` or `connections`. Absent grants none.
+   */
+  mcp?: McpAllowlist;
 }
 
 type NodeHydrator = (
@@ -157,34 +172,6 @@ type NodeHydrator = (
 
 //#region Node Hydrators
 
-/**
- * Resolve an llm node's `tools` entries into a combined client+server list.
- *
- * Every entry is `{ type, parameters? }`. A reserved `openrouter:*` literal is
- * a SERVER tool (flows through unchanged); any other `type` is a CLIENT tool
- * whose `type` is the registered tool NAME (resolved from the registry). Both
- * kinds combine into one `tools` array; the interpreter partitions them again
- * at execution.
- */
-function resolveCallModelTools(
-  entries: CallModelWorkflowNode['tools'],
-  registry: ReadonlyMap<string, Tool>,
-): (Tool | ServerToolSpec)[] {
-  const toolNames: string[] = [];
-  const serverSpecs: ServerToolSpec[] = [];
-  for (const entry of entries ?? []) {
-    if (isServerToolSpec(entry)) {
-      serverSpecs.push(entry);
-    } else {
-      toolNames.push(entry.type);
-    }
-  }
-  return [
-    ...resolveTools(toolNames, registry),
-    ...serverSpecs,
-  ];
-}
-
 function hydrateCallModelNode(
   node: WorkflowNode,
   ctx: HydrationContext,
@@ -193,13 +180,13 @@ function hydrateCallModelNode(
     return frameworkCast(undefined);
   }
 
-  const combined = resolveCallModelTools(node.tools, ctx.tools);
+  const tools = stepTools(node.id, node.tools ?? [], ctx);
 
   return callModel({
     id: node.id,
     model: node.model ?? 'openai/gpt-4o',
     instructions: node.instructions,
-    tools: combined.length > 0 ? combined : undefined,
+    tools: tools.length > 0 ? tools : undefined,
     toolChoice: node.toolChoice,
     params: node.params,
     output: resolveOutputCodec(node.output, node.id, ctx),
@@ -214,17 +201,6 @@ function hydrateCallModelNode(
  * runtime still returns the codec's real value. This is the same erasure the
  * rest of the hydrator applies via `frameworkCast`.
  */
-/** A complete sentence naming what is registered, for a hint. */
-function registeredSentence(noun: string, names: Iterable<string>): string {
-  const list = [
-    ...names,
-  ];
-  if (list.length === 0) {
-    return `No ${noun} are registered.`;
-  }
-  return `Registered ${noun}: ${list.join(', ')}.`;
-}
-
 function resolveOutputCodec(
   ref: OutputCodecRef | undefined,
   nodeId: string,
@@ -291,37 +267,6 @@ function hydrateInvokeToolNode(
         };
         const result = await resolved.execute(args, toolCtx);
         return outputText(result);
-      },
-    }),
-  );
-}
-
-function hydrateRunCodeNode(
-  node: WorkflowNode,
-  ctx: HydrationContext,
-): Step<ContextData, string, string> {
-  if (node.kind !== 'runCode') {
-    return frameworkCast(undefined);
-  }
-  const code = node.execute;
-  const subprocessRef = node.subprocess;
-  return frameworkCast(
-    runCode({
-      id: node.id,
-      retry: node.retry,
-      execute: async (input: string, execCtx: Context) => {
-        const adapter = resolveSubprocessAdapter({
-          ref: subprocessRef,
-          hydrationCtx: ctx,
-          execCtx,
-          nodeId: node.id,
-        });
-        return runCodeViaSubprocess({
-          adapter,
-          nodeId: node.id,
-          code,
-          input: outputText(input),
-        });
       },
     }),
   );
@@ -451,100 +396,6 @@ const NODE_HYDRATORS: Record<string, NodeHydrator> = {
 
 //#endregion
 
-//#region Helpers
-
-function resolveTools(
-  toolNames: string[] | undefined,
-  registry: ReadonlyMap<string, Tool>,
-): Tool[] {
-  if (!toolNames || toolNames.length === 0) {
-    return [];
-  }
-  return toolNames.map((name) => {
-    const resolved = registry.get(name);
-    if (!resolved) {
-      throw new NoeticConfigError({
-        code: 'UNKNOWN_TOOL_REFERENCE',
-        message: `Tool '${name}' referenced in workflow is not registered.`,
-        hint: `Register '${name}' in HydrationContext.tools before hydrating. ${registeredSentence('tools', registry.keys())}`,
-      });
-    }
-    return resolved;
-  });
-}
-
-//#endregion
-
-//#region Run Node Helpers
-
-/**
- * Resolves the subprocess adapter for a `runCode` node. When the node names an
- * adapter ref, the host must supply a `resolveSubprocess` resolver; otherwise
- * the step falls back to the harness adapter on the execution context.
- */
-function resolveSubprocessAdapter(opts: {
-  ref: string | undefined;
-  hydrationCtx: HydrationContext;
-  execCtx: Context;
-  nodeId: string;
-}): SubprocessAdapter {
-  const { ref, hydrationCtx, execCtx, nodeId } = opts;
-  if (ref === undefined) {
-    return execCtx.subprocess;
-  }
-  const resolved = hydrationCtx.resolveSubprocess?.(ref);
-  if (!resolved) {
-    throw new NoeticConfigError({
-      code: 'UNKNOWN_SUBPROCESS_REFERENCE',
-      message: `Subprocess adapter '${ref}' referenced in run node '${nodeId}' could not be resolved.`,
-      hint: 'Pass a `resolveSubprocess(ref)` mapping in the HydrationContext, or omit `subprocess` to use the harness default (ctx.subprocess).',
-    });
-  }
-  return resolved;
-}
-
-/**
- * Dispatches a `runCode` node's code string through a subprocess adapter: ships the
- * code plus the JSON-stringified input as a process request (input on stdin),
- * waits for the handle to settle, and returns the captured stdout as the step
- * output. A non-zero exit / failed handle surfaces as a thrown error.
- *
- * The code is never eval'd in-process (Cloudflare Workers forbid eval). The
- * adapter owns running the code and capturing stdout into `handle.metadata.result`.
- */
-async function runCodeViaSubprocess(opts: {
-  adapter: SubprocessAdapter;
-  nodeId: string;
-  code: string;
-  input: string;
-}): Promise<string> {
-  const { adapter, nodeId, code, input } = opts;
-  const request: ProcessSubprocessRequest = {
-    kind: 'process',
-    command: 'node',
-    args: [
-      '-e',
-      code,
-    ],
-    stdin: input,
-    metadata: {
-      noeticRun: true,
-      stepId: nodeId,
-      code,
-      input,
-    },
-  };
-  const handle = new DetachedHandleImpl<string>({
-    id: `run-${nodeId}`,
-    stepId: nodeId,
-    spawned: adapter.spawn(request),
-  });
-  const result = await handle.await();
-  return outputText(result);
-}
-
-//#endregion
-
 //#region Public API
 
 /**
@@ -632,6 +483,7 @@ export function hydrateWorkflow(
     ...everyDocumentItem(doc),
     ...root.customItems,
   };
+  recordDocumentConnections(frameworkCast<Step>(root), doc, ctx.mcp);
   return root;
 }
 

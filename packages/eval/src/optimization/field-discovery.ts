@@ -1,5 +1,5 @@
 import type { Step } from '@noetic-tools/core';
-import { isServerToolSpec } from '@noetic-tools/core';
+import { isConnectionEntry, isConnectionPick, isServerToolSpec } from '@noetic-tools/core';
 
 import { OptimizeScope } from '../types/eval';
 import type { OptimizableField } from '../types/optimizer';
@@ -56,8 +56,8 @@ function extractCallModelFields(
     return;
   }
   for (const t of step.tools) {
-    // Server tools (web_search/web_fetch) carry no optimizable name/description.
-    if (isServerToolSpec(t)) {
+    // Server tools (web_search/web_fetch) and connections carry no optimizable name/description.
+    if (isServerToolSpec(t) || isConnectionPick(t) || isConnectionEntry(t)) {
       continue;
     }
     fields.push({

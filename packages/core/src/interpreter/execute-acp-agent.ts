@@ -16,7 +16,6 @@ import type {
   AcpContentBlock,
   AcpKeepAlive,
   AcpLiveSession,
-  AcpMcpServer,
   AcpPermissionOutcome,
   AcpPermissionSteerer,
   AcpSessionPolicy,
@@ -38,10 +37,14 @@ import {
   NoeticErrorImpl,
   SteeringAction,
 } from '@noetic-tools/types';
+import { assertAgentTakesTools } from '../builders/acp-agent-checks';
+import { runtimeOf } from '../connections/model-tools';
 import type { AcpSessionStore } from '../runtime/acp-session-store';
 import { AcpEventBridge } from './acp-events';
 import { withHistoryPrompt } from './acp-history';
-import { resolveLazy } from './execute-action';
+import { renderLayerContext } from './acp-layers';
+import { AcpToolRunner, mergeBridgedItems, resolveAcpTools } from './acp-tools';
+import { appendUserInput, MAX_STEERING_RETRIES, resolveLazy } from './execute-action';
 import { trackUsage } from './message-helpers';
 import { parseStructuredOutput } from './structured-output';
 import { isContextImpl, isFunctionCall, isMutableContext } from './typeguards';
@@ -219,6 +222,11 @@ interface HostBindingOptions<TContext, I, O> {
   onActivity: NonNullable<AcpClientHost['onClientActivity']>;
   layers?: ContextLayer[];
   onUpdate: AcpClientHost['onSessionUpdate'];
+  /** The step's tools, served to the agent; `undefined` when it gave none. */
+  tools?: AcpToolRunner;
+  events: AcpEventBridge;
+  /** Fail the turn when the tool pipeline itself throws. */
+  failTurn: (error: unknown) => void;
 }
 
 /**
@@ -248,6 +256,24 @@ function bindHostToStep<TContext, I, O>(
     : undefined;
   host.onSessionUpdate = opts.onUpdate;
   host.onClientActivity = opts.onActivity;
+  // A step that gives no tools gets none, even on a session another step
+  // opened with tools. The session's runner stays listed, so the agent's
+  // permission requests are still recognized, but its calls answer as unknown
+  // tools.
+  if (!opts.tools) {
+    if (host.tools instanceof AcpToolRunner) {
+      host.tools.unbind();
+    }
+    return;
+  }
+  host.tools = opts.tools;
+  opts.tools.bind({
+    stepId: opts.step.id,
+    ctx: opts.ctx,
+    layers: opts.layers,
+    events: opts.events,
+    fail: opts.failTurn,
+  });
 }
 
 function buildHost<TContext, I, O>(
@@ -289,18 +315,15 @@ function normalizedCapabilities(config: AcpClientCapabilityConfig | undefined): 
 }
 
 /**
- * `cwd` and `mcpServers` are fixed when the session is created, so a step
- * joining an existing one cannot change them either.
- *
- * These used to be dropped in silence while a mismatched `clientCapabilities`
- * threw — so a step that named different MCP servers simply got none of them,
- * with no diagnostic. Connection-scoped settings should all fail the same way.
+ * `cwd` and the served tools are fixed when the session is created, so a step
+ * joining an existing one cannot change them either. Connection-scoped
+ * settings all fail the same way: a mismatch throws rather than being dropped.
  */
 function assertSessionScopedSettingsMatch<TContext, I, O>(
   step: StepAcpAgent<TContext, I, O>,
   live: AcpLiveSession,
   cwd: string,
-  servers: ReadonlyArray<AcpMcpServer> | undefined,
+  tools: AcpToolRunner | undefined,
 ): void {
   const conflict = (setting: string, hint: string): NoeticConfigError =>
     new NoeticConfigError({
@@ -315,12 +338,22 @@ function assertSessionScopedSettingsMatch<TContext, I, O>(
       'A session is created in one working directory. Give every step sharing a `session.reuse` key the same `cwd`, or use a separate session.',
     );
   }
-  // Only a step that asks for servers can conflict; omitting them means
-  // "whatever the session already has".
-  if (servers && JSON.stringify(servers) !== JSON.stringify(live.mcpServers ?? [])) {
+  // The agent reads its tool list once, so a step may serve any part of it —
+  // a call to a tool outside its part answers as unknown, as on `callModel` —
+  // but nothing the list lacks.
+  const listed = new Map(
+    (live.tools ?? []).map((tool) => [
+      tool.name,
+      JSON.stringify(tool),
+    ]),
+  );
+  const unlisted = (tools?.tools ?? [])
+    .filter((tool) => listed.get(tool.name) !== JSON.stringify(tool))
+    .map((tool) => tool.name);
+  if (unlisted.length > 0) {
     throw conflict(
-      'set of MCP servers',
-      'MCP servers are attached when the session is created. Give every step sharing a `session.reuse` key the same `mcpServers`, or use a separate session.',
+      `set of tools (${unlisted.join(', ')} ${unlisted.length === 1 ? 'is' : 'are'} not in the session's tool list, or differ)`,
+      'The agent reads its tool list once, when the session is created. Give the step that opens a `session.reuse` session every tool a later step will serve, or use a separate session.',
     );
   }
 }
@@ -393,8 +426,7 @@ async function openSession<TContext, I, O>(opts: {
   host: AcpClientHost;
   /** Per-turn host binding, reapplied when an existing session is reused. */
   binding: HostBindingOptions<TContext, I, O>;
-  /** MCP servers for the session, already resolved from the step. */
-  servers?: Parameters<AcpAgentConnection['newSession']>[0]['mcpServers'];
+  tools?: AcpToolRunner;
 }): Promise<SessionResolution> {
   const store = sessionStore(opts.baseCtx);
   const keepAlive = keepAliveOf(opts.step.session);
@@ -409,10 +441,14 @@ async function openSession<TContext, I, O>(opts: {
   const key = store.keyFor(parts);
 
   const { live, fresh } = await store.acquire(key, parts, async () => {
-    const connection = await opts.agent.connect({
-      host: opts.host,
-      signal: abortSignalOf(opts.baseCtx),
-    });
+    const connection = holdingConnections(
+      await opts.agent.connect({
+        host: opts.host,
+        signal: abortSignalOf(opts.baseCtx),
+      }),
+      opts.baseCtx,
+      keepAlive,
+    );
 
     // From here on the connection owns a live agent (usually a child process).
     // Anything that throws before the caller can take responsibility for it
@@ -424,11 +460,9 @@ async function openSession<TContext, I, O>(opts: {
         ? await connection.loadSession({
             sessionId: loadId,
             cwd: opts.cwd,
-            mcpServers: opts.servers,
           })
         : await connection.newSession({
             cwd: opts.cwd,
-            mcpServers: opts.servers,
           });
       return {
         connection,
@@ -437,7 +471,7 @@ async function openSession<TContext, I, O>(opts: {
         agentId: opts.agent.agentId,
         keepAlive,
         cwd: opts.cwd,
-        mcpServers: opts.servers,
+        tools: opts.tools?.tools,
       };
     } catch (e) {
       await connection.close().catch(() => undefined);
@@ -446,7 +480,7 @@ async function openSession<TContext, I, O>(opts: {
   });
 
   if (!fresh) {
-    assertSessionScopedSettingsMatch(opts.step, live, opts.cwd, opts.servers);
+    assertSessionScopedSettingsMatch(opts.step, live, opts.cwd, opts.tools);
     if (live.agentId !== opts.agent.agentId) {
       throw new NoeticConfigError({
         code: 'ACP_SESSION_AGENT_CONFLICT',
@@ -465,6 +499,33 @@ async function openSession<TContext, I, O>(opts: {
     keepAlive,
     fresh,
   };
+}
+
+/**
+ * A connection kept past its step holds the turn's connections until it
+ * closes: its agent may still call tools of entries the turn attached, which
+ * would otherwise be released when the turn ends.
+ */
+function holdingConnections(
+  connection: AcpAgentConnection,
+  ctx: Context<ContextData>,
+  keepAlive: AcpKeepAlive,
+): AcpAgentConnection {
+  const registry = runtimeOf(ctx.harness);
+  if (keepAlive === 'step' || !registry) {
+    return connection;
+  }
+  const release = registry.hold(rootContextId(ctx));
+  const close = connection.close.bind(connection);
+  return Object.assign(connection, {
+    async close(): Promise<void> {
+      try {
+        await close();
+      } finally {
+        release();
+      }
+    },
+  });
 }
 
 /**
@@ -548,10 +609,134 @@ function turnFailure(
   return new NoeticErrorImpl({
     kind: 'step_failed',
     stepId: step.id,
-    cause: cause instanceof Error ? cause : new Error(String(cause)),
+    cause: cause instanceof Error ? cause : new Error(describeCause(cause)),
     retriesExhausted: false,
   });
 }
+
+/** A readable message for a thrown non-Error, such as a JSON-RPC error object. */
+function describeCause(cause: unknown): string {
+  if (typeof cause !== 'object' || cause === null) {
+    return String(cause);
+  }
+  const message = Reflect.get(cause, 'message');
+  const data = Reflect.get(cause, 'data');
+  const head = typeof message === 'string' ? message : JSON.stringify(cause);
+  return data === undefined ? head : `${head}: ${JSON.stringify(data)}`;
+}
+
+//#region Turn
+
+interface TurnError {
+  error?: unknown;
+  cancel?: () => Promise<void>;
+}
+
+/**
+ * The tools the agent is served. No `tools` offers every tool the run has,
+ * as on `callModel`, and an agent that cannot take tools then simply gets
+ * none; tools given explicitly to such an agent are a configuration error.
+ */
+async function resolveServedTools<TContext, I, O>(
+  step: StepAcpAgent<TContext, I, O>,
+  ctx: Context<TContext>,
+  layers: ContextLayer[] | undefined,
+  agent: AcpAgent,
+): Promise<AcpToolRunner | undefined> {
+  const given = gives(step.tools);
+  if (given) {
+    assertAgentTakesTools(step.id, agent);
+  }
+  const tools = await resolveAcpTools(step, ctx, layers);
+  if (given || agent.refusesTools === undefined) {
+    return tools;
+  }
+  return undefined;
+}
+
+/** Whether a step setting may name anything: a getter, or a non-empty array. */
+function gives(setting: unknown): boolean {
+  return typeof setting === 'function' || (Array.isArray(setting) && setting.length > 0);
+}
+
+/**
+ * One agent turn: prompt, wait for every bridged call the turn started, and
+ * fold the bridge's records into the turn's items.
+ */
+async function runTurn<TContext, I, O>(params: {
+  step: StepAcpAgent<TContext, I, O>;
+  baseCtx: Context<ContextData>;
+  resolution: SessionResolution;
+  bridge: AcpEventBridge;
+  tools: AcpToolRunner | undefined;
+  turnError: TurnError;
+  content: AcpContentBlock[];
+}): Promise<AcpTurnResult> {
+  const { step, baseCtx, resolution, bridge, tools, turnError } = params;
+  if (tools) {
+    bridge.nameToolCalls((title: string) => tools.wireNameOf(title));
+  }
+  bridge.begin();
+  let result: AcpTurnResult;
+  try {
+    result = await resolution.live.session.prompt({
+      content: params.content,
+      // Per-turn signal, so a session reused across turns is cancelled by the
+      // context running the CURRENT turn rather than the one that opened it.
+      signal: abortSignalOf(baseCtx),
+    });
+  } catch (e) {
+    await settle(tools);
+    // Close the turn on the event surface before rethrowing. A consumer driving
+    // a UI off `getFullStream()` saw `response.created` and would otherwise
+    // wait forever for a completion that never comes — the stream just stops.
+    bridge.abort(e);
+    await discardIfFresh(resolution, baseCtx);
+    throw turnFailure(step, turnError.error ?? e, baseCtx);
+  }
+  await settle(tools);
+  if (turnError.error !== undefined) {
+    bridge.abort(turnError.error);
+    await discardIfFresh(resolution, baseCtx);
+    throw turnFailure(step, turnError.error, baseCtx);
+  }
+  if (tools) {
+    const merged = mergeBridgedItems(result.items, tools.takeFinished());
+    bridge.adoptToolCalls(merged.adopted);
+    result = {
+      ...result,
+      items: merged.items,
+    };
+  }
+  bridge.finalize(result);
+  return result;
+}
+
+/** Let every bridged call the turn started finish, then stop taking calls. */
+async function settle(tools: AcpToolRunner | undefined): Promise<void> {
+  if (!tools) {
+    return;
+  }
+  await tools.idle();
+  tools.unbind();
+}
+
+async function stepOutput<TContext, I, O>(
+  step: StepAcpAgent<TContext, I, O>,
+  result: AcpTurnResult,
+): Promise<O> {
+  const lastText = result.text.trim().length > 0 ? result.text : extractAssistantText(result.items);
+  if (step.output) {
+    return await parseStructuredOutput<O>({
+      schema: step.output,
+      rawText: lastText,
+      stepId: step.id,
+    });
+  }
+  return frameworkCast<O>(lastText);
+}
+
+//#endregion
 
 //#region Public API
 
@@ -583,7 +768,7 @@ export async function executeAcpAgent<TContext, I, O>(
   }
 
   const cwd = (await resolveLazy(step.cwd, ctx)) ?? baseCtx.cwdState.cwd;
-  const servers = await resolveLazy(step.mcpServers, ctx);
+  const tools = await resolveServedTools(step, ctx, layers, agent);
 
   // Capture the conversation so far BEFORE appending this turn's prompt, so a
   // fresh session can be seeded with it and the agent is not left guessing at
@@ -591,25 +776,42 @@ export async function executeAcpAgent<TContext, I, O>(
   const priorHistory: Item[] = [
     ...baseCtx.itemLog.items,
   ];
-  if (promptText.length > 0) {
-    baseCtx.itemLog.append(createMessage(promptText, 'user'));
-  }
+  // Through the layers' append pipeline, as `callModel` adds its input.
+  let rerenderRequests = await appendUserInput({
+    ctx: baseCtx,
+    layers,
+    input: promptText,
+  });
 
-  const bridge = new AcpEventBridge(step, agent.agentId, baseCtx);
-  const binding = {
+  let bridge = new AcpEventBridge(step, agent.agentId, baseCtx);
+  // A tool pipeline error fails the step, as it does in `callModel`: it is
+  // kept, the agent's turn is cancelled, and the error is thrown once the
+  // turn has unwound.
+  const turnError: TurnError = {};
+  const bindingFor = (events: AcpEventBridge): HostBindingOptions<TContext, I, O> => ({
     step,
     ctx: baseCtx,
     agentId: agent.agentId,
     layers,
-    onUpdate: (notification: Parameters<AcpClientHost['onSessionUpdate']>[0]) => {
-      bridge.forward(notification);
+    onUpdate: (notification) => {
+      tools?.observe(notification.update);
+      events.forward(notification);
     },
     onActivity: (activity: AcpClientActivity) => {
-      bridge.forwardActivity(activity);
+      events.forwardActivity(activity);
     },
-  };
+    tools,
+    events,
+    failTurn: (error: unknown) => {
+      if (turnError.error !== undefined) {
+        return;
+      }
+      turnError.error = error;
+      void turnError.cancel?.().catch(() => undefined);
+    },
+  });
   const host = buildHost({
-    ...binding,
+    ...bindingFor(bridge),
     cwd,
   });
 
@@ -619,61 +821,89 @@ export async function executeAcpAgent<TContext, I, O>(
     baseCtx,
     cwd,
     host,
-    binding,
-    servers: servers
-      ? [
-          ...servers,
-        ]
-      : undefined,
+    binding: bindingFor(bridge),
+    tools,
   });
 
   await applySessionSelection(step, ctx, resolution, baseCtx);
+  turnError.cancel = () => resolution.live.session.cancel();
 
-  bridge.begin();
-
-  let result: AcpTurnResult;
-  try {
-    result = await resolution.live.session.prompt({
+  // History seeds only a freshly opened session; a reused one already owns
+  // its conversation on the agent side.
+  let turnPrompt = resolution.fresh
+    ? withHistoryPrompt({
+        prompt: promptText,
+        history: priorHistory,
+      })
+    : promptText;
+  let turnBlocks = blocks;
+  let retries = 0;
+  for (;;) {
+    // Recall runs before every turn, as before every model call; its output
+    // leads the prompt.
+    const context = await renderLayerContext({
+      ctx: baseCtx,
+      layers,
+      query: promptText,
+      rerenderRequests,
+    });
+    rerenderRequests = [];
+    const result = await runTurn({
+      step,
+      baseCtx,
+      resolution,
+      bridge,
+      tools,
+      turnError,
       content: buildContent({
-        // History seeds only a freshly opened session; a reused one already
-        // owns its conversation on the agent side.
-        text: resolution.fresh
-          ? withHistoryPrompt({
-              prompt: promptText,
-              history: priorHistory,
-            })
-          : promptText,
-        blocks,
+        text: [
+          context,
+          turnPrompt,
+        ]
+          .filter((part) => part.length > 0)
+          .join('\n\n'),
+        blocks: turnBlocks,
       }),
-      // Per-turn signal, so a session reused across turns is cancelled by the
-      // context running the CURRENT turn rather than the one that opened it.
-      signal: abortSignalOf(baseCtx),
     });
-  } catch (e) {
-    // Close the turn on the event surface before rethrowing. A consumer driving
-    // a UI off `getFullStream()` saw `response.created` and would otherwise
-    // wait forever for a completion that never comes — the stream just stops.
-    bridge.abort(e);
-    await discardIfFresh(resolution, baseCtx);
-    throw turnFailure(step, e, baseCtx);
+    applyTurnResult(baseCtx, result);
+    try {
+      assertTurnSucceeded(step.id, result, baseCtx);
+    } catch (e) {
+      await finalizeSession(resolution, baseCtx);
+      throw e;
+    }
+
+    const response = toLlmResponse(result);
+    const decision =
+      layers && layers.length > 0
+        ? await baseCtx.harness.afterModelCall(layers, response, baseCtx)
+        : undefined;
+    if (decision?.action === SteeringAction.Deny) {
+      await finalizeSession(resolution, baseCtx);
+      throw new NoeticErrorImpl({
+        kind: 'steering_denied',
+        guidance: decision.guidance,
+      });
+    }
+    // A layer asking for a better answer gets another turn carrying its
+    // guidance, as a `callModel` step retries its call. The agent keeps its
+    // first answer in its own history, so it stays in the log as well.
+    if (decision?.action === SteeringAction.Guide && retries < MAX_STEERING_RETRIES) {
+      const guidance = decision.guidance ?? 'Please adjust your response.';
+      baseCtx.itemLog.append(createMessage(guidance, 'developer'));
+      turnPrompt = guidance;
+      turnBlocks = undefined;
+      retries += 1;
+      bridge = new AcpEventBridge(step, agent.agentId, baseCtx);
+      bindHostToStep(resolution.live.host, bindingFor(bridge));
+      continue;
+    }
+    if (layers && layers.length > 0) {
+      await baseCtx.harness.storeLayers(layers, response, baseCtx);
+    }
+    await finalizeSession(resolution, baseCtx);
+    return await stepOutput(step, result);
   }
-
-  bridge.finalize(result);
-  applyTurnResult(baseCtx, result);
-  await finalizeSession(resolution, baseCtx);
-  assertTurnSucceeded(step.id, result, baseCtx);
-
-  const lastText = result.text.length > 0 ? result.text : extractAssistantText(result.items);
-
-  if (step.output) {
-    return parseStructuredOutput<O>({
-      schema: step.output,
-      rawText: lastText,
-      stepId: step.id,
-    });
-  }
-
-  return frameworkCast<O>(lastText);
 }
 
 //#endregion

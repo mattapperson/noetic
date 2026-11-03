@@ -302,14 +302,10 @@ describe('connect failures', () => {
 
   it('rejects with connection_unavailable when the handshake times out', async () => {
     const { InMemoryTransport } = await import('@modelcontextprotocol/sdk/inMemory.js');
-    const provider = mcp(
-      {
-        transport: () => InMemoryTransport.createLinkedPair()[0],
-      },
-      {
-        timeoutMs: 50,
-      },
-    );
+    const provider = mcp({
+      transport: () => InMemoryTransport.createLinkedPair()[0],
+      timeoutMs: 50,
+    });
     try {
       await provider.connect(connectOptions('silent'));
       throw new Error('expected a throw');

@@ -83,7 +83,7 @@ Context layers inject context into the LLM view (via `recall`) and persist state
 - **`toolCalls()`** -- auto-generated layers from tool `context` declarations
 - **`decisionsHistoryLayer()`** -- records `decide` answers (via the `onDecision` hook) for later steps and `callModel` views
 - **`openUiSurface()`** (from `@noetic-tools/openui`) -- server-authoritative generative-UI state; see [Generative UI](#generative-ui-openui)
-- **`agentPlugins()`** (from `@noetic-tools/agent-plugins`) -- an [Agent Plugins](https://agent-plugins.org) v1 client: discovers plugin packages and exposes their Agent Skills (`SKILL.md`) and MCP servers (`mcp.json`) with progressive disclosure; see `references/api-reference.md`
+- **`agentPlugins()`** (from `@noetic-tools/agent-plugins`) -- an [Agent Plugins](https://agent-plugins.org) v1 client: discovers plugin packages and shows their Agent Skills (`SKILL.md`) with progressive disclosure; `pluginConnections()` turns their MCP servers (`mcp.json`) into `expose: 'call'` connections for the harness or a turn; see `references/api-reference.md`
 
 The `@noetic-tools/cli` package provides additional enhanced prompt layers (`promptEngineeringLayer`, `communicationStyleLayer`, `environmentContextLayer`, `toolGuidanceLayer`, `planningModeLayer`) that implement behavioral guidelines, adaptive communication, environment detection, tool preferences, and plan-mode guidance. The CLI is developed in a separate repository (`github.com/mattapperson/noetic-internal`) — import those layers from the published barrel, never from a `src/` subpath. Progressive skill disclosure is not a published built-in; the reference implementation is `packages/core/examples/deep-agent/context/skills-layer.ts`. See `references/api-reference.md` → CLI enhanced-prompt layers for signatures.
 
@@ -109,12 +109,12 @@ An agent can respond with a *UI* built from components you register, instead of 
 
 ### Connections, Profiles, and Verification
 
-A **connection** is a named, live thing the agent works with -- a browser, a simulator, a desktop app, a Slack workspace, a queue -- configured as `new AgentHarness({ connections: { browser: mcp('npx @playwright/mcp@latest') } })` (`mcp()` from `@noetic-tools/mcp`; core never imports it). Its operations reach the model as tools, gated like any tool (`policy` globs, `guarded` approval, `beforeToolCall`).
+A **connection** is a named, live thing the agent works with -- a browser, a simulator, a desktop app, a Slack workspace, a queue -- configured as `new AgentHarness({ connections: [mcp({ name: 'linear', type: 'http', url, headers: [{ name: 'Authorization', value: `Bearer ${token}` }] })] })` (`mcp()` from `@noetic-tools/mcp` takes ACP's `McpServer` shape; core never imports it). Its operations reach the model as tools, gated like any tool (`policy` globs, `guarded` approval, `beforeToolCall`). The same entry can instead be attached for one turn (`execute(input, { connections: [entry] })`) or one step (`callModel({ tools: [entry] })`), with identical tools and gates; `connectionTools('linear', { ops: ['get_*'] })` picks part of one by name.
 
 - **Profiles** (`@noetic-tools/profile-{ui,screen,browser,app,device,chat}`) are shared, versioned vocabularies. `connection('app', browser)` returns a typed handle; `step.call({ id, connection: app, op: 'ui.tap', args })` runs one operation, `step.wait({ id, connection, event, filter?, around?, timeoutMs })` waits for an event (with `around` it listens first, so the event an action causes cannot slip past).
 - **Verification**: `step.verify({ id, subject, expect: [net('POST /api/orders 201').once()], never: [net('5xx')], act })` (matchers from `@noetic-tools/verify`; register `verification: verifier()` on the harness) declares claims, checks before, listens, runs `act`, and answers `pass`/`fail`/`partial`/`unknown` through OVP's `adjudicate()` -- with evidence and gaps. It never throws for `no` or `unknown`.
 - **Triggers** start turns from connection events (`triggers: [{ id, connection, event, input }]`); `defineSource()` and `cron()` are in-process event sources.
-- **JSON**: a document's `connections` manifest plus `call` / `wait` / `verify` nodes; `{ "$expr" }`, `{ "$secret" }`, `{ "$literal" }` values; `dynamicWorkflow({ connections })` needs an allowlist, and on `dynamicWorkflow` / `parseAndRunWorkflow` an `acp-agent` node's `mcpServers` need the `mcp` allowlist and its `permissions` / `cwd` / `clientCapabilities` / `session` stay within the `acp` allowlist.
+- **JSON**: a document's `connections` manifest plus `call` / `wait` / `verify` nodes; `{ "$expr" }`, `{ "$secret" }`, `{ "$literal" }` values; `dynamicWorkflow({ connections })` needs an allowlist; `callModel` / `acp-agent` `tools` take `{ "connection", "ops"? }` picks and inline `{ "mcp": { "name", "type", "url", "headers"? } }` servers (also as a document `connections` entry), which need the `mcp` allowlist — grants with secrets, `policy` and a `provider` — on `dynamicWorkflow` / `parseAndRunWorkflow`, and an `acp-agent` node's `permissions` / `cwd` / `clientCapabilities` / `session` stay within the `acp` allowlist.
 
 Full API: `references/api-reference.md` → Connections, Profiles, and Verification.
 
@@ -152,7 +152,7 @@ It is all separate from the `emit` event filter on `callModel`/`decide`/`acpAgen
 | Deterministic state machine or counter loop with no LLM calls, as data | JSON Workflow with State | `loop` node (`"maxIterations": "infinity"`) + `compute` body + `{ "kind": "expr" }` until (JSONata, spec 33) |
 | Run a real coding agent (Claude Code / Codex / Gemini CLI) as a step | ACP Agent Step | `step.acpAgent` |
 | Agent responds with a UI (not text) | Generative UI | `callModel({ output: openUi(library) })` + `openUiSurface()` |
-| Drive a browser / simulator / app / chat workspace | Connections | `connections: { name: mcp(...) }` + `step.call` / model tools |
+| Drive a browser / simulator / app / chat workspace | Connections | `connections: [mcp({ name, ... })]` + `step.call` / model tools |
 | Prove an action worked, with evidence | Verify | `step.verify({ subject, expect, never, act })` + `verifier()` |
 | Ask a person and wait for the answer | Wait Around | `step.wait({ event, filter, around: step.call(...) })` |
 | React to external events (mentions, deploys, schedules) | Triggers | `triggers: [...]` + `defineSource()` / `cron()` |

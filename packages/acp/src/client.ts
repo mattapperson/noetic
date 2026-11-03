@@ -20,6 +20,8 @@ import { isAbsolutePath, isWithinRoots } from './paths';
 import type { AcpPermissionResolverOptions } from './permissions';
 import { resolvePermission, selectPermissionOption } from './permissions';
 import { buildCommandLine, TerminalRegistry } from './terminals';
+import type { BridgedPermissionCheck } from './tool-permissions';
+import { allowOnceOption } from './tool-permissions';
 
 //#region Capability advertisement
 
@@ -70,6 +72,8 @@ function parentDir(path: string): string | undefined {
 
 //#region Client
 
+const ANNOUNCED_LIMIT = 1e3;
+
 /** @public Options for {@link NoeticAcpClient}. */
 export interface NoeticAcpClientOptions {
   /**
@@ -84,6 +88,8 @@ export interface NoeticAcpClientOptions {
    * having to wrap (and thereby copy) the host.
    */
   onNotify: (notification: acp.SessionNotification) => void;
+  /** Recognizes this agent's permission requests for bridged tools. */
+  permitsBridged?: BridgedPermissionCheck;
 }
 
 /**
@@ -96,8 +102,12 @@ export class NoeticAcpClient implements acp.Client {
   private readonly host: AcpClientHost;
   private readonly onNotify: (notification: acp.SessionNotification) => void;
   private readonly terminals: TerminalRegistry;
+  /** Each `tool_call` the agent announced, by id, to recognize bridged calls. */
+  private readonly announced = new Map<string, acp.RequestPermissionRequest['toolCall']>();
+  private readonly permitsBridged?: BridgedPermissionCheck;
 
   constructor(opts: NoeticAcpClientOptions) {
+    this.permitsBridged = opts.permitsBridged;
     this.host = opts.host;
     this.onNotify = opts.onNotify;
     this.terminals = new TerminalRegistry(opts.host.shell, opts.host.cwd);
@@ -127,6 +137,15 @@ export class NoeticAcpClient implements acp.Client {
   async requestPermission(
     params: acp.RequestPermissionRequest,
   ): Promise<acp.RequestPermissionResponse> {
+    const bridged = this.bridgedAllow(params);
+    if (bridged) {
+      return {
+        outcome: {
+          outcome: 'selected',
+          optionId: bridged.optionId,
+        },
+      };
+    }
     const outcome = await resolvePermission(params, this.permissions);
     const selected = selectPermissionOption(
       outcome,
@@ -148,7 +167,43 @@ export class NoeticAcpClient implements acp.Client {
   }
 
   async sessionUpdate(params: acp.SessionNotification): Promise<void> {
+    this.trackAnnounced(params.update);
     this.onNotify(params);
+  }
+
+  /**
+   * Keep each `tool_call` until it settles; a permission request can only
+   * precede that. A call that never settles (cancelled) ages out once the
+   * map holds `ANNOUNCED_LIMIT`.
+   */
+  private trackAnnounced(update: acp.SessionNotification['update']): void {
+    if (update.sessionUpdate === 'tool_call') {
+      this.announced.set(update.toolCallId, update);
+      const oldest = this.announced.keys().next().value;
+      if (this.announced.size > ANNOUNCED_LIMIT && oldest !== undefined) {
+        this.announced.delete(oldest);
+      }
+      return;
+    }
+    if (
+      update.sessionUpdate === 'tool_call_update' &&
+      (update.status === 'completed' || update.status === 'failed')
+    ) {
+      this.announced.delete(update.toolCallId);
+    }
+  }
+
+  /** The allow option for a request on a bridged tool, which the bridge gates itself. */
+  private bridgedAllow(params: acp.RequestPermissionRequest): acp.PermissionOption | undefined {
+    const tools = this.host.tools;
+    if (!tools || !this.permitsBridged) {
+      return undefined;
+    }
+    const announced = this.announced.get(params.toolCall.toolCallId);
+    if (!this.permitsBridged(params, tools, announced)) {
+      return undefined;
+    }
+    return allowOnceOption(params.options);
   }
 
   //#endregion

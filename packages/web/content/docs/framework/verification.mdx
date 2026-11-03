@@ -27,7 +27,7 @@ const checkout = step.verify({
 const harness = new AgentHarness({
   name: 'qa',
   params: {},
-  connections: { app: mcp('npx playwright-noetic-mcp') },
+  connections: { app: mcp({ command: 'npx', args: ['playwright-noetic-mcp'] }) },
   verification: verifier(),
 });
 

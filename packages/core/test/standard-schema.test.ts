@@ -17,17 +17,13 @@ import {
 import { toStandardJsonSchema } from '@valibot/to-json-schema';
 import * as v from 'valibot';
 import { ZodError, z } from 'zod';
-import {
-  convertTools,
-  executeToolCall,
-  resolveWireJsonSchema,
-  toolsOnWire,
-} from '../src/adapters/openrouter';
+import { convertTools, toolsOnWire } from '../src/adapters/openrouter';
 import { callModel, invokeTool } from '../src/builders/step-builders';
 import { tool } from '../src/builders/tool-builder';
 import { AgentHarness } from '../src/harness/agent-harness';
 import { executeCallModel } from '../src/interpreter/execute-action';
 import { executeInvokeTool } from '../src/interpreter/execute-invoke-tool';
+import { executeToolCall, resolveWireJsonSchema } from '../src/runtime/tool-call';
 import {
   makeLLMResponse,
   makeMockContext,

@@ -22,6 +22,7 @@ import type {
   SenseDescriptor,
   SenseId,
 } from './profile';
+import type { Spawn } from './spawn';
 
 export * from './connection-values';
 
@@ -113,6 +114,7 @@ export const ConnectionConfigErrorCode = {
   NotAllowed: 'CONNECTION_NOT_ALLOWED',
   Invalid: 'CONNECTION_INVALID',
   ToolCollision: 'CONNECTION_TOOL_COLLISION',
+  NameTaken: 'CONNECTION_NAME_TAKEN',
 } as const;
 
 /** @public One of `ConnectionConfigErrorCode`. */
@@ -167,6 +169,26 @@ export interface ConnectionPartOrigin {
   readonly extension?: string;
 }
 
+/**
+ * @public
+ * Hints a server publishes about an operation (MCP tool `annotations`). They
+ * are the server's claims, not guarantees: a host may use them to pick a
+ * default policy (`readOnlyHint` → allow, `destructiveHint` → approve), but
+ * the gates never trust them in place of a `policy` or a profile's `guarded`.
+ */
+export interface ConnectionOperationAnnotations {
+  /** A human-readable name for the operation. */
+  readonly title?: string;
+  /** The operation does not change its environment. */
+  readonly readOnlyHint?: boolean;
+  /** When it changes its environment, the change may be destructive (not only additive). */
+  readonly destructiveHint?: boolean;
+  /** Calling it again with the same arguments has no further effect. */
+  readonly idempotentHint?: boolean;
+  /** It reaches an open world of outside entities (the web), not a closed domain. */
+  readonly openWorldHint?: boolean;
+}
+
 /** @public One operation a connection offers. */
 export interface ConnectionOperationInfo extends ConnectionPartOrigin {
   readonly name: string;
@@ -178,6 +200,8 @@ export interface ConnectionOperationInfo extends ConnectionPartOrigin {
   readonly once?: boolean;
   readonly guarded?: boolean;
   readonly sense?: SenseId;
+  /** The server's hints about the operation, when it publishes any. */
+  readonly annotations?: ConnectionOperationAnnotations;
 }
 
 /** @public One readable resource (a profile `read`). */
@@ -365,6 +389,14 @@ export interface ConnectOptions {
    */
   readonly profiles?: ReadonlyArray<AnyProfile>;
   readonly extensions?: ReadonlyArray<AnyExtension>;
+  /**
+   * Registers a credential the provider holds — a bearer token, an OAuth
+   * access or refresh token — so the harness replaces it with `"<redacted>"`
+   * wherever it would be stored, traced or shown, like a resolved secret.
+   */
+  readonly redact?: (value: string) => void;
+  /** The harness's `environment.secrets`, for a provider that reads its credentials by name. */
+  readonly secrets?: SecretResolver;
 }
 
 /** @public A live connection, as a provider implements it. Steps and tools never hold one directly. */
@@ -400,6 +432,12 @@ export interface Connection {
 
 /** @public Backs one or more connections: an MCP server, a source, an in-memory fake. */
 export interface ConnectionProvider {
+  /**
+   * The connection name, when the provider carries one (`mcp({ name })`). It
+   * names the entry in an array of connections; a record key that disagrees
+   * with it is `CONNECTION_INVALID`.
+   */
+  readonly name?: string;
   connect(opts: ConnectOptions): Promise<ReadonlyArray<Connection>>;
   /** Present on providers that can back a pool. */
   provision?(setup: Record<string, unknown>, opts: ConnectOptions): Promise<Connection>;
@@ -434,8 +472,14 @@ export interface ConnectionPolicy {
   readonly approve?: ReadonlyArray<string>;
 }
 
-/** @public How a connection's operations reach the model. */
-export type ConnectionExpose = 'eager' | 'all' | 'none';
+/**
+ * @public
+ * How a connection's operations reach the model: `'eager'` its profile's eager
+ * operations plus `<name>_ops` / `<name>_call` for the rest, `'all'` every
+ * operation as its own tool, `'call'` only `<name>_ops` / `<name>_call`, and
+ * `'none'` no tools.
+ */
+export type ConnectionExpose = 'eager' | 'all' | 'call' | 'none';
 
 /** @public Read name → when it is shown to the model. */
 export type ConnectionLook = Readonly<Record<string, LookMode>>;
@@ -450,11 +494,61 @@ export interface ConnectionConfig {
   readonly look?: ConnectionLook;
 }
 
-/** @public A harness `connections` entry: a bare provider is shorthand for `{ provider }`. */
+/** @public A connection entry: a bare provider is shorthand for `{ provider }`. */
 export type ConnectionEntry = ConnectionProvider | ConnectionConfig;
 
-/** @public The harness `connections` option. */
+/** @public Connection entries keyed by name. */
 export type ConnectionsConfig = Readonly<Record<string, ConnectionEntry>>;
+
+/**
+ * @public
+ * The `connections` option of the harness and of `execute()`: entries keyed by
+ * name, or a list of entries each named by its provider (`mcp({ name })`).
+ */
+export type ConnectionEntries = ConnectionsConfig | ReadonlyArray<ConnectionEntry>;
+
+/** @public Whether `value` is a connection entry: a provider, or `{ provider }`. */
+export function isConnectionEntry(value: unknown): value is ConnectionEntry {
+  if (isConnectionProvider(value)) {
+    return true;
+  }
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'provider' in value &&
+    isConnectionProvider(value.provider)
+  );
+}
+
+/**
+ * @public
+ * Part of one connection's model tools, as `connectionTools()` returns it. A
+ * step that lists it is offered the tools the turn built for that connection —
+ * under the same names — narrowed to the operations matching `ops`.
+ */
+export interface ConnectionPick {
+  readonly kind: 'connection-pick';
+  /** The connection name. */
+  readonly connection: string;
+  /** Operation globs; absent picks every tool of the connection. */
+  readonly ops?: ReadonlyArray<string>;
+  /** Present when picked from an entry: the step attaches it, as listing the entry would. */
+  readonly entry?: ConnectionEntry;
+  /** Present when picked from a handle with a profile: what the connection must offer. */
+  readonly requirement?: ConnectionRequirement;
+  /** The handle's profile, whose ref kinds the harness registers. */
+  readonly profile?: AnyProfile;
+}
+
+/** @public Whether `value` is a `ConnectionPick`. */
+export function isConnectionPick(value: unknown): value is ConnectionPick {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'kind' in value &&
+    value.kind === 'connection-pick'
+  );
+}
 
 /** @public Expands a bare provider to `{ provider }`. */
 export function normalizeConnectionEntry(entry: ConnectionEntry): ConnectionConfig {
@@ -636,15 +730,23 @@ export type ConnectionAllowlist = Readonly<Record<string, ConnectionAllowlistEnt
 
 /**
  * @public
- * The MCP servers a document's `acp-agent` nodes may hand to an agent
- * (`dynamicWorkflow({ mcp })`, `parseAndRunWorkflow({ mcp })`). A server the
- * allowlist does not grant fails validation with `CONNECTION_NOT_ALLOWED`.
+ * The MCP servers a document may connect (`dynamicWorkflow({ mcp })`,
+ * `parseAndRunWorkflow({ mcp })`): its `{ "mcp": … }` entries, in a node's
+ * `tools` or the document's `connections`. A server no grant matches fails
+ * with `CONNECTION_NOT_ALLOWED`.
  */
 export interface McpAllowlist {
   /** HTTP and SSE servers, by URL pattern. */
   readonly urls?: ReadonlyArray<McpUrlGrant>;
   /** Stdio servers, each named by its exact command line. */
   readonly commands?: ReadonlyArray<McpCommandGrant>;
+  /**
+   * Builds the provider for a granted server, with its secrets resolved:
+   * `mcp` from `@noetic-tools/mcp`, since a granted server is already the
+   * shape `mcp()` takes. A stdio server is the exact command a grant names.
+   * Without it, a document that names a server fails with `CONNECTION_INVALID`.
+   */
+  readonly provider?: (server: GrantedMcpServer) => ConnectionProvider;
 }
 
 /** @public An HTTP or SSE server a document may name. */
@@ -660,6 +762,8 @@ export interface McpUrlGrant {
   readonly url: string;
   /** Secret name → the one header it may fill (names match case-insensitively). Headers take no other values. */
   readonly secrets?: Readonly<Record<string, string>>;
+  /** The gates' policy for a matching server. A document never sets one. */
+  readonly policy?: ConnectionPolicy;
 }
 
 /** @public A stdio server a document may name: this command with exactly these args. */
@@ -669,7 +773,41 @@ export interface McpCommandGrant {
   readonly args?: ReadonlyArray<string>;
   /** Secret name → the one environment variable it may fill. The environment takes no other values. */
   readonly secrets?: Readonly<Record<string, string>>;
+  /** The gates' policy for this server. A document never sets one. */
+  readonly policy?: ConnectionPolicy;
 }
+
+/**
+ * @public
+ * A header or environment variable, as ACP's `HttpHeader` and `EnvVariable`
+ * (and `mcp()`) write it.
+ */
+export interface McpNamedValue {
+  readonly name: string;
+  readonly value: string;
+}
+
+/**
+ * @public
+ * A server a grant allows, as `McpAllowlist.provider` receives it: ACP's
+ * `McpServer` shape with each `$secret` resolved, which `mcp()` takes as it
+ * stands.
+ */
+export type GrantedMcpServer =
+  | {
+      readonly name: string;
+      readonly type: 'http' | 'sse';
+      readonly url: string;
+      readonly headers: ReadonlyArray<McpNamedValue>;
+    }
+  | {
+      readonly name: string;
+      readonly command: string;
+      readonly args: ReadonlyArray<string>;
+      readonly env: ReadonlyArray<McpNamedValue>;
+      /** Starts the server where the ACP agent that lists it runs; absent runs it here. */
+      readonly spawn?: Spawn;
+    };
 
 //#endregion
 

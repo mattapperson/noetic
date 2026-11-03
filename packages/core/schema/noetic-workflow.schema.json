@@ -57,6 +57,124 @@
           "additionalProperties": {
             "type": "object",
             "properties": {
+              "mcp": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": [
+                          "http",
+                          "sse"
+                        ]
+                      },
+                      "url": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "headers": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "name": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "value": {
+                              "type": "object",
+                              "properties": {
+                                "$secret": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              },
+                              "required": [
+                                "$secret"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "value"
+                          ],
+                          "additionalProperties": false
+                        }
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "type",
+                      "url"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
+                      },
+                      "type": {
+                        "type": "string",
+                        "const": "stdio"
+                      },
+                      "command": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "args": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "env": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "name": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "value": {
+                              "type": "object",
+                              "properties": {
+                                "$secret": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              },
+                              "required": [
+                                "$secret"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "value"
+                          ],
+                          "additionalProperties": false
+                        }
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "command"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              },
               "profile": {
                 "type": "string"
               },
@@ -223,24 +341,179 @@
             "tools": {
               "type": "array",
               "items": {
-                "type": "object",
-                "properties": {
-                  "type": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "parameters": {
+                "anyOf": [
+                  {
                     "type": "object",
-                    "propertyNames": {
-                      "type": "string"
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "parameters": {
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string"
+                        },
+                        "additionalProperties": {}
+                      }
                     },
-                    "additionalProperties": {}
+                    "required": [
+                      "type"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "connection": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
+                          },
+                          "ops": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          }
+                        },
+                        "required": [
+                          "connection"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "mcp": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "name": {
+                                    "type": "string",
+                                    "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
+                                  },
+                                  "type": {
+                                    "type": "string",
+                                    "enum": [
+                                      "http",
+                                      "sse"
+                                    ]
+                                  },
+                                  "url": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "headers": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "name": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        },
+                                        "value": {
+                                          "type": "object",
+                                          "properties": {
+                                            "$secret": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            }
+                                          },
+                                          "required": [
+                                            "$secret"
+                                          ],
+                                          "additionalProperties": false
+                                        }
+                                      },
+                                      "required": [
+                                        "name",
+                                        "value"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "type",
+                                  "url"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "name": {
+                                    "type": "string",
+                                    "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
+                                  },
+                                  "type": {
+                                    "type": "string",
+                                    "const": "stdio"
+                                  },
+                                  "command": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "args": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "env": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "name": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        },
+                                        "value": {
+                                          "type": "object",
+                                          "properties": {
+                                            "$secret": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            }
+                                          },
+                                          "required": [
+                                            "$secret"
+                                          ],
+                                          "additionalProperties": false
+                                        }
+                                      },
+                                      "required": [
+                                        "name",
+                                        "value"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "command"
+                                ],
+                                "additionalProperties": false
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "mcp"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
                   }
-                },
-                "required": [
-                  "type"
-                ],
-                "additionalProperties": false
+                ]
               }
             },
             "toolChoice": {
@@ -2545,7 +2818,7 @@
               "type": "string",
               "minLength": 1
             },
-            "mcpServers": {
+            "tools": {
               "type": "array",
               "items": {
                 "anyOf": [
@@ -2554,180 +2827,171 @@
                     "properties": {
                       "type": {
                         "type": "string",
-                        "const": "http"
-                      },
-                      "name": {
-                        "type": "string",
                         "minLength": 1
                       },
-                      "url": {
-                        "type": "string"
-                      },
-                      "headers": {
-                        "type": "array",
-                        "items": {
-                          "type": "object",
-                          "properties": {
-                            "name": {
-                              "type": "string"
-                            },
-                            "value": {
-                              "anyOf": [
-                                {
-                                  "type": "string"
-                                },
-                                {
-                                  "type": "object",
-                                  "properties": {
-                                    "$secret": {
-                                      "type": "string",
-                                      "minLength": 1
-                                    }
-                                  },
-                                  "required": [
-                                    "$secret"
-                                  ],
-                                  "additionalProperties": false
-                                }
-                              ]
-                            }
-                          },
-                          "required": [
-                            "name",
-                            "value"
-                          ],
-                          "additionalProperties": false
-                        }
-                      }
-                    },
-                    "required": [
-                      "type",
-                      "name",
-                      "url",
-                      "headers"
-                    ],
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "type": {
-                        "type": "string",
-                        "const": "sse"
-                      },
-                      "name": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "url": {
-                        "type": "string"
-                      },
-                      "headers": {
-                        "type": "array",
-                        "items": {
-                          "type": "object",
-                          "properties": {
-                            "name": {
-                              "type": "string"
-                            },
-                            "value": {
-                              "anyOf": [
-                                {
-                                  "type": "string"
-                                },
-                                {
-                                  "type": "object",
-                                  "properties": {
-                                    "$secret": {
-                                      "type": "string",
-                                      "minLength": 1
-                                    }
-                                  },
-                                  "required": [
-                                    "$secret"
-                                  ],
-                                  "additionalProperties": false
-                                }
-                              ]
-                            }
-                          },
-                          "required": [
-                            "name",
-                            "value"
-                          ],
-                          "additionalProperties": false
-                        }
-                      }
-                    },
-                    "required": [
-                      "type",
-                      "name",
-                      "url",
-                      "headers"
-                    ],
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "name": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "command": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "args": {
-                        "type": "array",
-                        "items": {
+                      "parameters": {
+                        "type": "object",
+                        "propertyNames": {
                           "type": "string"
-                        }
-                      },
-                      "env": {
-                        "type": "array",
-                        "items": {
-                          "type": "object",
-                          "properties": {
-                            "name": {
-                              "type": "string"
-                            },
-                            "value": {
-                              "anyOf": [
-                                {
-                                  "type": "string"
-                                },
-                                {
-                                  "type": "object",
-                                  "properties": {
-                                    "$secret": {
-                                      "type": "string",
-                                      "minLength": 1
-                                    }
-                                  },
-                                  "required": [
-                                    "$secret"
-                                  ],
-                                  "additionalProperties": false
-                                }
-                              ]
-                            }
-                          },
-                          "required": [
-                            "name",
-                            "value"
-                          ],
-                          "additionalProperties": false
-                        }
+                        },
+                        "additionalProperties": {}
                       }
                     },
                     "required": [
-                      "name",
-                      "command",
-                      "args",
-                      "env"
+                      "type"
                     ],
                     "additionalProperties": false
+                  },
+                  {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "connection": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
+                          },
+                          "ops": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          }
+                        },
+                        "required": [
+                          "connection"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "mcp": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "name": {
+                                    "type": "string",
+                                    "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
+                                  },
+                                  "type": {
+                                    "type": "string",
+                                    "enum": [
+                                      "http",
+                                      "sse"
+                                    ]
+                                  },
+                                  "url": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "headers": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "name": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        },
+                                        "value": {
+                                          "type": "object",
+                                          "properties": {
+                                            "$secret": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            }
+                                          },
+                                          "required": [
+                                            "$secret"
+                                          ],
+                                          "additionalProperties": false
+                                        }
+                                      },
+                                      "required": [
+                                        "name",
+                                        "value"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "type",
+                                  "url"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "name": {
+                                    "type": "string",
+                                    "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
+                                  },
+                                  "type": {
+                                    "type": "string",
+                                    "const": "stdio"
+                                  },
+                                  "command": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "args": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "env": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "name": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        },
+                                        "value": {
+                                          "type": "object",
+                                          "properties": {
+                                            "$secret": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            }
+                                          },
+                                          "required": [
+                                            "$secret"
+                                          ],
+                                          "additionalProperties": false
+                                        }
+                                      },
+                                      "required": [
+                                        "name",
+                                        "value"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "command"
+                                ],
+                                "additionalProperties": false
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "mcp"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
                   }
                 ]
               }

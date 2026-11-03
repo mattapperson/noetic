@@ -1,3 +1,9 @@
+## Unreleased
+
+* **Breaking:** `callMcpTool`, `readMcpTools`, `connectMcpServer`, `closeSessions`, the `McpSession` / `McpToolInfo` / `McpConnectResult` types, `DEFAULT_CONNECT_TIMEOUT_MS`, `DEFAULT_TOOL_CALL_TIMEOUT_MS` and the layer's `connectMcp`, `transports`, `baseEnv` and `connectTimeoutMs` options are removed. The layer no longer connects MCP servers or offers a tool for them.
+* `pluginConnections(discoverPlugins(…))` returns one `mcp()` connection entry per plugin server, named `<plugin>_<server>` with `expose: 'call'`, for `new AgentHarness({ connections })` or `execute(…, { connections })`. Plugin tools now pass every connection gate (policy, `beforeToolCall`, approval, secret scrubbing, replay-stable idempotency keys). Migrate by attaching these entries; the model calls `<name>_call({ op, args })` instead of `callMcpTool({ server, tool, arguments })`.
+* `pluginMcpProvider()` takes the connection `name`.
+
 ## @noetic-tools/agent-plugins-v0.2.1 (2026-11-03)
 
 * ci: publish prereleases from next to the next dist-tag (#152) ([0b247bc](https://github.com/mattapperson/noetic/commit/0b247bc)), closes [#152](https://github.com/mattapperson/noetic/issues/152)

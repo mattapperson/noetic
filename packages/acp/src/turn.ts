@@ -83,11 +83,20 @@ export function renderToolCallContent(
 
 /** @public Folds a turn's session updates into a result. */
 export class AcpTurnAccumulator {
-  private text = '';
   private reasoning = '';
   private readonly toolCalls = new Map<string, TrackedToolCall>();
-  /** Insertion order, so items come out in the order the agent produced them. */
-  private readonly toolCallOrder: string[] = [];
+  /**
+   * The turn in the order the agent produced it: runs of text between tool
+   * calls, so items interleave as a `callModel` round's do.
+   */
+  private readonly order: Array<
+    | {
+        text: string;
+      }
+    | {
+        toolCallId: string;
+      }
+  > = [];
   private plan?: AcpPlanEntry[];
   private availableCommands?: AcpAvailableCommand[];
   private currentModeId?: string;
@@ -95,11 +104,6 @@ export class AcpTurnAccumulator {
   /** Feed one `session/update` notification. */
   push(notification: AcpSessionNotification): void {
     this.apply(notification.update);
-  }
-
-  /** Assistant text accumulated so far. */
-  get textContent(): string {
-    return this.text;
   }
 
   /** Reasoning text accumulated so far. */
@@ -115,11 +119,12 @@ export class AcpTurnAccumulator {
   /** Build the turn result. */
   result(opts: { stopReason: AcpStopReason; usage?: TokenUsage; cost?: number }): AcpTurnResult {
     const items: Item[] = [];
-    if (this.text.length > 0) {
-      items.push(assistantMessageItem(this.text));
-    }
-    for (const id of this.toolCallOrder) {
-      const call = this.toolCalls.get(id);
+    for (const entry of this.order) {
+      if ('text' in entry) {
+        items.push(assistantMessageItem(entry.text));
+        continue;
+      }
+      const call = this.toolCalls.get(entry.toolCallId);
       if (!call) {
         continue;
       }
@@ -147,7 +152,7 @@ export class AcpTurnAccumulator {
     return {
       stopReason: opts.stopReason,
       items,
-      text: this.text,
+      text: this.finalText(),
       usage: opts.usage,
       cost: opts.cost,
       plan: this.plan,
@@ -158,9 +163,31 @@ export class AcpTurnAccumulator {
 
   //#region internals
 
+  /**
+   * The agent's last message — the text after its final tool call — as a
+   * `callModel` step returns its final message rather than every message.
+   */
+  private finalText(): string {
+    const last = this.order[this.order.length - 1];
+    return last && 'text' in last ? last.text : '';
+  }
+
+  private appendText(chunk: string): void {
+    const last = this.order[this.order.length - 1];
+    if (last && 'text' in last) {
+      last.text += chunk;
+      return;
+    }
+    if (chunk.length > 0) {
+      this.order.push({
+        text: chunk,
+      });
+    }
+  }
+
   private apply(update: SessionUpdate): void {
     if (update.sessionUpdate === 'agent_message_chunk') {
-      this.text += contentBlockText(update.content);
+      this.appendText(contentBlockText(update.content));
       return;
     }
     if (update.sessionUpdate === 'agent_thought_chunk') {
@@ -207,7 +234,9 @@ export class AcpTurnAccumulator {
     >,
   ): void {
     if (!this.toolCalls.has(update.toolCallId)) {
-      this.toolCallOrder.push(update.toolCallId);
+      this.order.push({
+        toolCallId: update.toolCallId,
+      });
     }
     this.toolCalls.set(update.toolCallId, {
       toolCallId: update.toolCallId,
@@ -236,7 +265,9 @@ export class AcpTurnAccumulator {
     if (!existing) {
       // An update for a call we never saw announced. Track it anyway rather
       // than dropping the agent's work.
-      this.toolCallOrder.push(update.toolCallId);
+      this.order.push({
+        toolCallId: update.toolCallId,
+      });
       this.toolCalls.set(update.toolCallId, {
         toolCallId: update.toolCallId,
         title: update.title ?? update.toolCallId,

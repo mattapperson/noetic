@@ -1,20 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import type { ConnectionsConfig, Tool, ToolExecutionContext } from '@noetic-tools/types';
-import {
-  defineProfile,
-  frameworkCast,
-  isNoeticConfigError,
-  isNoeticError,
-  receipt,
-} from '@noetic-tools/types';
+import { frameworkCast, isNoeticConfigError, isNoeticError } from '@noetic-tools/types';
 import { z } from 'zod';
-import { connection } from '../../src/connections/handle';
 import type { InMemoryConnectionOptions } from '../../src/connections/in-memory-connection';
 import { createInMemoryConnection } from '../../src/connections/in-memory-connection';
 import {
   buildConnectionTools,
   connectionToolName,
-  connectionTools,
   runtimeOf,
 } from '../../src/connections/model-tools';
 import type { ConnectionRuntime } from '../../src/connections/registry';
@@ -338,111 +330,6 @@ describe('buildConnectionTools', () => {
     expect(connectionToolName('app', 'ui.tap')).toBe('app_ui_tap');
     expect(runtimeOf(undefined)).toBeUndefined();
     expect(runtimeOf({})).toBeUndefined();
-  });
-});
-
-describe('connectionTools(handle)', () => {
-  const ui = defineProfile({
-    name: 'ui',
-    version: '1.1.0',
-    operations: {
-      'ui.tap': {
-        description: 'Tap.',
-        input: z.object({
-          element: z.string(),
-        }),
-        output: z.object({
-          receipt: receipt(),
-        }),
-        effects: true,
-        eager: true,
-      },
-      'ui.scroll': {
-        description: 'Scroll.',
-        input: z.object({}),
-        output: z.object({}),
-      },
-    },
-  });
-
-  test('offers the profile operations matching ops, typed from the profile', async () => {
-    const runtime = await runtimeWith({
-      phone: createInMemoryConnection(deviceOptions()),
-    });
-    const tools = connectionTools(connection('phone', ui), {
-      ops: [
-        'ui.tap',
-      ],
-    });
-    expect(tools.map((t) => t.name)).toEqual([
-      'phone_ui_tap',
-    ]);
-    expect(tools[0]?.inputJsonSchema).toMatchObject({
-      properties: {
-        element: {
-          type: 'string',
-        },
-      },
-    });
-    expect(
-      await run(
-        named(tools, 'phone_ui_tap'),
-        {
-          element: 'OK',
-        },
-        toolCtxFor(runtime),
-      ),
-    ).toMatchObject({
-      tapped: {
-        element: 'OK',
-      },
-    });
-  });
-
-  test('without a profile offers one <name>_call limited to ops', async () => {
-    const runtime = await runtimeWith({
-      phone: createInMemoryConnection(deviceOptions()),
-    });
-    const [call] = connectionTools(connection('phone'), {
-      ops: [
-        'ui.scroll',
-      ],
-    });
-    if (!call) {
-      throw new Error('no tool');
-    }
-    const ctx = toolCtxFor(runtime);
-    expect(
-      await run(
-        call,
-        {
-          op: 'ui.scroll',
-        },
-        ctx,
-      ),
-    ).toEqual({
-      scrolled: true,
-    });
-    const refused = await rejected(
-      run(
-        call,
-        {
-          op: 'ui.tap',
-        },
-        ctx,
-      ),
-    );
-    expect(isNoeticError(refused) && refused.noeticError.kind).toBe('steering_denied');
-    const noRuntime = await rejected(
-      run(
-        call,
-        {
-          op: 'ui.scroll',
-        },
-        toolCtxFor(undefined),
-      ),
-    );
-    expect(isNoeticError(noRuntime) && noRuntime.noeticError.kind).toBe('steering_denied');
   });
 });
 

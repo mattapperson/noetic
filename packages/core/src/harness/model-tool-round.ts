@@ -15,14 +15,14 @@ import type {
   Tool,
 } from '@noetic-tools/types';
 import { SteerPoint } from '@noetic-tools/types';
-import { executeToolCall, itemsToInput } from '../adapters/openrouter';
+import { itemsToInput } from '../adapters/openrouter';
 import { isFunctionCall } from '../interpreter/typeguards';
 import { drainsOf } from '../runtime/drain';
 import type { ApprovalOutcome } from '../runtime/tool-approval';
+import { createToolResultItem, executeToolCall } from '../runtime/tool-call';
 import type { CallSpanCollector } from './call-span-collector';
 import type { PreparedModelRequest } from './model-request';
 import { findTool } from './model-request';
-import { createToolResultItem } from './model-schema.js';
 import type { SteerInbox } from './steer-inbox';
 
 //#region Types

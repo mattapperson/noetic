@@ -7,8 +7,14 @@
  * round-trips, `fs/*` and `terminal/*` callbacks — without spawning a process.
  */
 
-import type { AcpTransport, AcpTransportFactory } from '@noetic-tools/types';
-import { frameworkCast } from '@noetic-tools/types';
+import type {
+  AcpMachine,
+  AcpMachineFactory,
+  AcpTransport,
+  AcpTransportFactory,
+  SpawnCommand,
+} from '@noetic-tools/types';
+import { AcpConnectError, frameworkCast } from '@noetic-tools/types';
 import type * as acp from '@zed-industries/agent-client-protocol';
 import { AgentSideConnection, ndJsonStream } from '@zed-industries/agent-client-protocol';
 
@@ -94,4 +100,29 @@ export function loopbackTransport(
       },
     };
   };
+}
+
+/**
+ * A machine that is this process: the bridge is reached where it listens, and
+ * `launch` stands the in-process agent up with the command it was given, so a
+ * test can see the launch settings. It runs no processes.
+ * @public
+ */
+export function loopbackMachine(
+  toAgent: (conn: AgentSideConnection, command: SpawnCommand) => acp.Agent,
+): AcpMachineFactory {
+  return async (): Promise<AcpMachine> => ({
+    reach: async (bridge) => bridge,
+    launch: (command) =>
+      loopbackTransport((conn) => toAgent(conn, command))({
+        cwd: command.cwd ?? '',
+      }),
+    async spawn(command) {
+      throw new AcpConnectError({
+        agentId: 'loopback',
+        message: `A loopback machine runs no processes, so it cannot start '${command.command}'.`,
+      });
+    },
+    close: async () => undefined,
+  });
 }

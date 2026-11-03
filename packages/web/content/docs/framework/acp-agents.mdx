@@ -47,11 +47,11 @@ It also brings capabilities a hand-rolled adapter has no way to express: permiss
 ```ts
 import { claudeCode, codex, gemini, opencode, pi, customAcpAgent } from '@noetic-tools/acp';
 
-claudeCode();                       // npx @zed-industries/claude-code-acp
-codex();                            // npx @zed-industries/codex-acp
+claudeCode();                       // npx @agentclientprotocol/claude-agent-acp
+codex();                            // npx @agentclientprotocol/codex-acp
 gemini();                           // gemini --experimental-acp
 opencode();                         // opencode acp  (native ACP)
-pi();                               // npx pi-acp    (community adapter)
+pi();                               // npx pi-acp@0.0.32 (community adapter)
 
 customAcpAgent({                    // any other ACP-speaking binary
   agentId: 'my-agent',
@@ -60,7 +60,7 @@ customAcpAgent({                    // any other ACP-speaking binary
 });
 ```
 
-Every preset accepts `command`, `args`, and `env` overrides, plus a `transport` for reaching an agent that is not a local child process.
+Every preset accepts `command`, `args`, and `env` overrides, a `machine` to run the agent somewhere other than this machine (see [Where the agent runs](#where-the-agent-runs)), and a `transport` to attach to an agent someone else started.
 
 ## Filesystem confinement
 
@@ -199,7 +199,7 @@ The specification requires clients to restrict content to what the agent adverti
 
 An empty `prompt` means "use the step's runtime input as the prompt".
 
-## Modes, models, and MCP servers
+## Modes and models
 
 ```ts
 import { step } from '@noetic-tools/core';
@@ -211,13 +211,80 @@ step.acpAgent({
   prompt: 'Design the migration',
   mode: 'plan',                     // session/set_mode before the turn
   model: 'claude-opus-4-8',         // session/set_model before the turn
-  mcpServers: [
-    { name: 'db', command: 'mcp-db', args: [], env: [] },
-  ],
 });
 ```
 
-Each is checked against what the agent advertised. Asking for a mode from an agent that reports none, or an HTTP MCP server from an agent without `mcpCapabilities.http`, throws `AcpCapabilityError` rather than failing opaquely mid-turn.
+Each is checked against what the agent advertised. Asking for a mode from an agent that reports none throws `AcpCapabilityError` rather than failing opaquely mid-turn.
+
+## Giving the agent your tools
+
+Pass the same `tool()` definitions a `callModel` step takes. The agent calls them over MCP, and each call runs the same path a model's tool call does: the `beforeToolCall` layers, input validation, `needsApproval` and the harness approver, execution, the result item, its `tool_call_started` / `tool_call_completed` events, and its `tool.call` span. The agent gets the exact string a model would.
+
+```ts
+import { callModel, step, tool } from '@noetic-tools/core';
+import { claudeCode } from '@noetic-tools/acp';
+import { z } from 'zod';
+
+const lookup = tool({
+  name: 'orders/lookup',
+  description: 'Find an order by id.',
+  input: z.object({ id: z.string() }),
+  output: z.object({ status: z.string() }),
+  execute: async ({ id }) => ({ status: id.startsWith('A') ? 'shipped' : 'pending' }),
+});
+
+callModel({ id: 'answer', model: 'openai/gpt-5', tools: [lookup] });
+step.acpAgent({ id: 'fix', agent: claudeCode(), prompt: 'Fix the stuck order', tools: [lookup] });
+```
+
+Leave `tools` out and the agent gets every tool the run offers, connection tools included, as a `callModel` step's model does; `tools: []` gives it none. An `acpAgentTool` is never served to the step it runs.
+
+### MCP servers
+
+Give the agent an MCP server the way you give one to a `callModel` step: list the connection in `tools`. Noetic is the MCP client, so the agent reaches the server's tools through the bridge, by the same names (`linear_get_issue`), through the same gates, and the credentials never leave the host:
+
+```ts
+import { connectionTools, step } from '@noetic-tools/core';
+import { claudeCode } from '@noetic-tools/acp';
+import { mcp } from '@noetic-tools/mcp';
+
+declare const token: string;
+const LINEAR_MCP = 'https://mcp.linear.app/mcp';
+
+step.acpAgent({
+  id: 'fix',
+  agent: claudeCode(),
+  prompt: 'Fix ENG-1',
+  tools: [mcp({ name: 'linear', type: 'http', url: LINEAR_MCP, headers: [{ name: 'Authorization', value: `Bearer ${token}` }] })],
+});
+// A harness or turn connection named 'linear', picked by name.
+step.acpAgent({
+  id: 'read',
+  agent: claudeCode(),
+  prompt: 'Summarize ENG-1',
+  tools: [connectionTools('linear', { ops: ['get_*'] })],
+});
+```
+
+The entry connects when the turn starts, like a `callModel` step's, and is released when the turn ends — or, for a session kept with `keepAlive: 'run'` or `'harness'`, when that session closes. A connection tool's idempotency key is `<execution>:tool:<callId>`, the agent's own call id, as it is the model's on `callModel`.
+
+`mcp()` takes ACP's `McpServer` shape, so a server config written for an ACP agent goes into `tools` as it stands: `mcp({ name, type: 'http', url, headers })`, or `mcp({ name, command, args, env })` for stdio. A stdio server that must run where the agent runs takes `spawn: agent.spawn`, so it starts on that machine — a remote runner included — with its stdio carried back to noetic. No server reaches the agent's own MCP client, so pi, whose adapter drops MCP servers, gets their tools too.
+
+What the step does for you:
+
+- **Serves the tools.** The connection starts a loopback MCP server (`127.0.0.1`, random port and path, a bearer token per connection) and hands it to the agent as the MCP server `noetic`. The server closes with the connection.
+- **Sets up each agent to match `callModel`.** Out of the box, agents hide MCP tools behind a search step, cut large results, or run their own approval review. Each preset turns those off: Claude Code reads per-tool hints from the tool list, Codex and opencode get launch settings (`CODEX_CONFIG`, `OPENCODE_CONFIG_CONTENT`) merged into any you already set, and Gemini CLI needs none.
+- **Gemini CLI needs a trusted folder.** Gemini starts no MCP server, so serves none of your tools, in a folder it does not trust, and it cannot trust one server alone: trusting a folder also loads that folder's `.gemini/settings.json` (its MCP servers, hooks, and tool commands), `GEMINI.md`, and `.env`. noetic never trusts one for you. Pass `gemini({ trustWorkspace: true })` to trust the session's folder for that process (`GEMINI_CLI_TRUST_WORKSPACE=true`); a folder you trusted with `gemini trust` takes the same option. Without it, a step that gives Gemini tools fails with `ACP_AGENT_CANNOT_TAKE_TOOLS` before the agent starts, rather than running with none of them. Leave it off, and give the step no tools, for a repository you did not write.
+- **Asks permission once.** Your tools are gated by steering and `needsApproval`, as in `callModel`. Claude Code's, Codex's, and Gemini CLI's own permission request for one of them is answered `allow` without consulting the step's `permissions` policy, which governs only the agent's built-in tools. The request is recognized by fields the agent's adapter sets, never by a title the model could have written. Other agents' requests go to the policy; opencode asks none by default.
+- **Shows the agent your context layers.** Before each turn the layers' recall runs, as before a model call, and leads the prompt as a `<context>` block — a tool's own `context` layer included. After the turn the `afterModelCall` hooks run (a `guide` sends one more turn with the guidance) and the `store` hooks see the result.
+- **Records every call.** The agent's `tool_call` report is replaced in the item log by the bridge's `function_call` / `function_call_output` pair, and a call still running when the agent ends its turn is waited for and recorded. Events, the approver, and the items all carry the agent's own call id, and the stream names calls by tool name.
+- **Runs calls one at a time**, like the `callModel` tool loop, even when the agent sends them together. Once a call's pipeline fails, no further call runs and the step fails.
+
+Tool names reach the agent reduced to letters, digits, `_`, and `-` (`orders/lookup` becomes `orders_lookup`). Two tools that reduce to the same name, or a server tool such as `openrouter:web_search`, are configuration errors. A schema whose root is not a plain object (a scalar, nullable, or union) is wrapped as `{ value }`, since MCP and Anthropic require one; the tool still receives the unwrapped value. A tool that returns nothing reaches the agent, like a model, as an empty string. A tool that runs a step on `toolCtx.ctx` — `acpAgentTool` does — works under a bare `execute()` as under `harness.run`.
+
+ACP has no `toolChoice`: an agent decides for itself when to call a tool, so say so in the prompt.
+
+Every preset takes tools (`gemini()` with `trustWorkspace: true`), on this machine or on a [remote runner](#where-the-agent-runs). pi has no MCP client and `pi-acp` drops MCP servers, so `pi()` adds the `pi-noetic-tools` extension, which registers each tool as a native pi tool with the same name, description, and schema and returns its result unchanged. `pi()` pins `pi-acp@0.0.32`: 0.0.34 hangs on every prompt with pi 0.73 (`@mariozechner/pi-coding-agent`), waiting for an event that pi never sends. pi 1.x (`@earendil-works/pi-coding-agent`) is untested; pass `command` and `args` to run another adapter. Two agents cannot take tools. `gemini()` without `trustWorkspace: true` fails with `ACP_AGENT_CANNOT_TAKE_TOOLS` (see above). The other is one attached through a custom `transport`: noetic did not start it, so it can neither carry the bridge to it nor apply its launch settings. Given `tools`, such an agent fails before anything spawns, with `ACP_TRANSPORT_CANNOT_LAUNCH` when its wiring has launch settings and `ACP_TRANSPORT_CANNOT_REACH` otherwise; with `tools` left out it simply gets none. `acpAgentTool()` and the `acp-agent` JSON node take `tools` too.
 
 ## Conversation history
 
@@ -475,7 +542,9 @@ const hydrated = hydrateWorkflow(document, {
 
 A node naming an unregistered agent fails hydration with `UNKNOWN_ACP_AGENT_REFERENCE`.
 
-A node decides what the agent can reach on your machine — `clientCapabilities.terminal` alone hands it a shell, and `mcpServers` launch commands and carry credentials. So a document you did not write — one a model generated with `dynamicWorkflow`, or one `parseAndRunWorkflow` loads — gets only what you grant: the `acp` allowlist caps each agent's `permissions`, `mode`, `model`, `cwd`, `clientCapabilities` and `session` (by default: deny-only permissions, no `mode`, any `model`, the harness's working directory, `readTextFile` only, no `session.load`; `keepAlive: 'harness'` never), and the `mcp` allowlist names the servers it may use. Anything more fails with `CONNECTION_NOT_ALLOWED` before the agent starts, and the document's sessions never join yours. See [What a document may ask of an agent](/docs/framework/json-runtime#what-a-document-may-ask-of-an-agent).
+A node's `tools` take what a `callModel` node's take — `{ "type" }`, `{ "connection", "ops"? }` and inline `{ "mcp": { "name", "type", "url", "headers"? } }` or `{ "mcp": { "name", "command", "args"?, "env"? } }` entries — served to the agent through the bridge exactly as a TypeScript step's are. Each `{ "mcp" }` entry is built by the allowlist's `provider`; a stdio one starts where the node's agent runs, through its `spawn`.
+
+A node decides what the agent can reach on your machine — `clientCapabilities.terminal` alone hands it a shell, and `{ "mcp" }` entries launch commands and carry credentials. So a document you did not write — one a model generated with `dynamicWorkflow`, or one `parseAndRunWorkflow` loads — gets only what you grant: the `acp` allowlist caps each agent's `permissions`, `mode`, `model`, `cwd`, `clientCapabilities` and `session` (by default: deny-only permissions, no `mode`, any `model`, the harness's working directory, `readTextFile` only, no `session.load`; `keepAlive: 'harness'` never), and the `mcp` allowlist names the servers it may use: HTTP/SSE servers by URL pattern, stdio servers by exact command and args, header or environment values only as `{ "$secret": "<name>" }` bound by the grant, and the grant's policy. Anything more fails with `CONNECTION_NOT_ALLOWED` before the agent starts, and the document's sessions never join yours. See [What a document may ask of an agent](/docs/framework/json-runtime#what-a-document-may-ask-of-an-agent) and [MCP servers](/docs/framework/json-runtime#mcp-servers).
 
 ## Testing an ACP step
 
@@ -508,11 +577,68 @@ const fake = defineAcpAgent({
 });
 ```
 
-Because the wire protocol really runs, this catches contract mistakes a hand-rolled stub would hide.
+Because the wire protocol really runs, this catches contract mistakes a hand-rolled stub would hide. An agent on a transport takes no tools, so to test a step with `tools`, stand the same agent up with `loopbackMachine` and give it a command, as a preset has:
 
-## Custom transports
+```ts
+import { claudeToolWiring, defineAcpAgent, loopbackMachine } from '@noetic-tools/acp';
 
-An agent is reachable over anything that yields a duplex byte stream. The default is a local child process over stdio; supply `transport` for anything else — a socket, a sandbox bridge, a remote host:
+declare const fakeAgent: Parameters<typeof loopbackMachine>[0];
+
+const withTools = defineAcpAgent({
+  agentId: 'fake',
+  command: { command: 'fake-agent' },
+  machine: loopbackMachine(fakeAgent),
+  tools: claudeToolWiring,
+});
+```
+
+## Where the agent runs
+
+A preset runs its command on a **machine**. The default is this one. Give it another and the same preset — command, tool settings, and all — runs there, and its tools still behave exactly as on `callModel`:
+
+```ts
+import { codex } from '@noetic-tools/acp';
+import { commandMachine, webSocketMachine } from '@noetic-tools/acp/remote';
+
+// A runner listening on a build host, over TLS.
+const overWebSocket = codex({
+  machine: webSocketMachine({ url: 'wss://build-host:7000', token: process.env.RUNNER_TOKEN ?? '' }),
+});
+
+// A runner started over ssh, or in a container with `docker exec -i`.
+const overSsh = codex({
+  machine: commandMachine({
+    command: 'ssh',
+    args: ['build-host', 'npx', '-y', '@noetic-tools/acp', 'serve', '--stdio'],
+  }),
+});
+```
+
+The far end is the **remote runner**, `noetic-acp serve`, from `@noetic-tools/acp`:
+
+```bash
+# Listen for hosts (127.0.0.1 unless given a certificate):
+NOETIC_ACP_RUNNER_TOKEN=… npx @noetic-tools/acp serve --host 0.0.0.0 --port 7000 \
+  --tls-cert cert.pem --tls-key key.pem --agent codex
+# Or serve one host over stdio, for ssh and docker exec:
+npx @noetic-tools/acp serve --stdio
+```
+
+Over its one channel the runner starts the agent with the preset's launch settings, starts MCP servers beside it, and serves your tools to it on its own loopback port, forwarding each request back to the tool bridge on your machine. The agent needs no route back to you, and every WebSocket upgrade must carry the runner's token. `--cwd` sets the working directory for a start that names none. The step's `cwd` must exist on the runner's machine.
+
+A runner started without grants starts whatever its host asks. Grants limit it:
+
+```bash
+npx @noetic-tools/acp serve --stdio --agent claude-code \
+  --spawn 'npx -y @modelcontextprotocol/server-github' \
+  --env ANTHROPIC_API_KEY --env GITHUB_PERSONAL_ACCESS_TOKEN --cwd /srv/work
+```
+
+`--agent <id>` grants one preset's command with the environment names its tool settings set (`PRESET_ENV`). `--spawn` grants an MCP server's command line, word for word, so a step can start it with `agent.spawn`; without it a granted runner refuses every server. `--env` adds a name every grant may set, such as an API key you pass in a preset's `env`. With any grant, a start must match one exactly, may set only its names, so `NODE_OPTIONS`, `LD_PRELOAD`, `PATH` and the like are refused, and must run inside `--cwd` (the runner's own directory by default), with `..` and symlinks resolved first. Grants bound what the runner starts, not what the agent does once started: it still runs what its settings name (`CODEX_CONFIG` servers, pi's `PI_ACP_PI_COMMAND`) and what your permission answers allow.
+
+A stdio MCP server that depends on the agent's machine — one that reads its workspace — runs there too: `spawnOn(machine)` starts it and hands back its stdio, so noetic stays its client. Every command agent carries one as `agent.spawn`; pass it to `mcp({ name, command, spawn: agent.spawn })`.
+
+To attach to an agent someone else started, supply a `transport` — anything that yields a duplex byte stream:
 
 ```ts
 import { defineAcpAgent } from '@noetic-tools/acp';
@@ -521,7 +647,7 @@ declare const readable: ReadableStream<Uint8Array>;
 declare const writable: WritableStream<Uint8Array>;
 declare const socket: { close: () => void };
 
-const remote = defineAcpAgent({
+const attached = defineAcpAgent({
   agentId: 'remote-agent',
   transport: async () => ({
     readable,
@@ -533,6 +659,8 @@ const remote = defineAcpAgent({
 });
 ```
 
+An attached agent takes no tools: see [Giving the agent your tools](#giving-the-agent-your-tools).
+
 The Node stdio transport lives at `@noetic-tools/acp/stdio`. The main entry has no static `node:*` import and never loads `child_process` unless a stdio connection is opened — but that is a runtime property: the dynamic `import('./stdio')` uses a static specifier, so a bundler still pulls the module in. A browser build should alias or externalise `@noetic-tools/acp/stdio`.
 
 ## API reference
@@ -543,16 +671,23 @@ Everything `@noetic-tools/acp` exports. Internal helpers — the item builders, 
 
 | Export | What it is |
 |---|---|
-| `claudeCode(opts?)` | Preset for `@zed-industries/claude-code-acp`. |
-| `codex(opts?)` | Preset for `@zed-industries/codex-acp`. |
+| `claudeCode(opts?)` | Preset for `@agentclientprotocol/claude-agent-acp`. |
+| `codex(opts?)` | Preset for `@agentclientprotocol/codex-acp`. |
 | `gemini(opts?)` | Preset for Gemini CLI's native ACP mode. |
 | `opencode(opts?)` | Preset for opencode's native `opencode acp` command. |
-| `pi(opts?)` | Preset for pi, via the community `pi-acp` adapter. |
-| `customAcpAgent(opts)` | Any other ACP-speaking binary. Needs a `command` or a `transport`. |
-| `AcpPresetOptions` | `command` / `args` / `env` / `transport` overrides accepted by every preset. |
+| `pi(opts?)` | Preset for pi, via the community `pi-acp` adapter (pinned to 0.0.32). |
+| `customAcpAgent(opts)` | Any other ACP-speaking binary. Needs a `command` (run on its `machine`) or a `transport`. |
+| `AcpPresetOptions` | `command` / `args` / `env` / `machine` / `transport` overrides accepted by every preset. |
+| `PRESET_COMMANDS` | The command each preset starts, by agent id. |
+| `PRESET_ENV` | The environment names each preset's tool settings set, by agent id: what `noetic-acp serve --agent <id>` lets a host set. |
+| `GeminiOptions` | `gemini()`'s options: every preset option plus `trustWorkspace`. |
 | `AcpProcessSpec` | How to launch an agent as a local child process. |
-| `defineAcpAgent(opts)` | Build an `AcpAgent` from a transport factory — the constructor behind every preset. |
-| `DefineAcpAgentOptions` | `agentId`, `transport`, `env`. |
+| `defineAcpAgent(opts)` | Build an `AcpAgent` from a command on a machine, or a transport — the constructor behind every preset. |
+| `DefineAcpAgentOptions` | `agentId`, `command`, `machine`, `transport`, `env`, `tools` (default `sessionToolWiring`). |
+| `AcpToolWiring` | How an agent takes Noetic tools: where the bridge is declared (`'session'` or `'launch'`) and the launch settings that make the agent match `callModel`. |
+| `claudeToolWiring`, `codexToolWiring`, `geminiToolWiring`, `opencodeToolWiring`, `piToolWiring`, `sessionToolWiring` | The wiring each preset uses, for building your own agent with `defineAcpAgent`. |
+| `BridgedPermissionCheck`, `claudeBridgedPermission`, `codexBridgedPermission`, `geminiBridgedPermission` | How a wiring recognizes its agent's permission requests for bridged tools (`AcpToolWiring.permits`). |
+| `ToolBridgeAddress`, `ToolBridgeLaunch` | What `AcpToolWiring.launchEnv` receives. |
 | `createAcpAgentRegistry(...agents)` | Build the `Map<string, AcpAgent>` a JSON workflow hydrates against. |
 | `AcpAgentRegistry` | That map's type. |
 
@@ -561,6 +696,12 @@ Everything `@noetic-tools/acp` exports. Internal helpers — the item builders, 
 | Export | What it is |
 |---|---|
 | `loopbackTransport(toAgent)` | Stands an in-process agent on the far end of a real protocol connection. The recommended way to test an ACP step. |
+| `loopbackMachine(toAgent)` | The same agent as a machine, so a test step can give it tools. |
+| `localMachine()` | This machine: the default for every preset. Lives at `@noetic-tools/acp/stdio`. |
+| `spawnOn(machine)` | A `Spawn` that starts a process on `machine` and returns its stdio; a command agent's `agent.spawn`. |
+| `webSocketMachine(opts)`, `commandMachine(opts)`, `runnerMachine(openLink)` | A remote runner over WebSocket, over a command's stdio, or over any `FrameLink`. Live at `@noetic-tools/acp/remote`. |
+| `listenAcpRunner(opts)`, `serveAcpRunner(link)`, `serveAcpRunnerOverStdio()` | The runner itself, as the `noetic-acp serve` bin uses it. Live at `@noetic-tools/acp/remote`. |
+| `AcpRunnerGrant` | One entry of `AcpRunnerOptions.allow`: a `command`, its exact `args`, and the `env` names a host may set for it. Lives at `@noetic-tools/acp/remote`. |
 | `createAcpLoopbackPair()` | The two raw ends, when you want to drive both sides yourself. |
 | `AcpLoopbackPair` | That pair's type. |
 | `stdioAcpTransport(spec)` | Node stdio over a child process. Lives at `@noetic-tools/acp/stdio`. |

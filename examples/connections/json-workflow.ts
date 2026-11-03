@@ -51,11 +51,20 @@ function server(name: string, sensitiveSchema = true): ReturnType<typeof mcp> {
     args: [
       SERVER_PATH,
     ],
-    env: {
-      UI_SERVER_LOG: join(dir, `${name}.jsonl`),
-      UI_SERVER_INSTANCE: name,
-      UI_SERVER_SENSITIVE_SCHEMA: sensitiveSchema ? '1' : '0',
-    },
+    env: [
+      {
+        name: 'UI_SERVER_LOG',
+        value: join(dir, `${name}.jsonl`),
+      },
+      {
+        name: 'UI_SERVER_INSTANCE',
+        value: name,
+      },
+      {
+        name: 'UI_SERVER_SENSITIVE_SCHEMA',
+        value: sensitiveSchema ? '1' : '0',
+      },
+    ],
     profiles: [
       ui,
     ],

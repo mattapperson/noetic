@@ -480,7 +480,7 @@ step.acpAgent<TContext = ContextData, I = unknown, O = unknown>({
   agent: Lazy<AcpAgent, TContext>;                     // preset or custom adapter
   prompt?: Lazy<string, TContext>;                     // plain-text turn input ('' → use step input)
   content?: Lazy<ReadonlyArray<AcpContentBlock> | undefined, TContext>;  // image/audio/resource blocks
-  mcpServers?: Lazy<ReadonlyArray<AcpMcpServer> | undefined, TContext>;
+  tools?: Lazy<ReadonlyArray<StepToolEntry> | undefined, TContext>;  // tool()s, mcp({ name, … }) entries and connectionTools() picks, served through the bridge
   cwd?: Lazy<string | undefined, TContext>;            // defaults to ctx.cwdState.cwd
   mode?: Lazy<string | undefined, TContext>;           // session/set_mode before the turn
   model?: Lazy<string | undefined, TContext>;          // session/set_model before the turn
@@ -493,6 +493,8 @@ step.acpAgent<TContext = ContextData, I = unknown, O = unknown>({
 }): StepAcpAgent<TContext, I, O>
 ```
 
+**Tools.** `tools` takes what `callModel`'s takes — `tool()` definitions, connection entries (`mcp({ name, … })`) and picks (`connectionTools('linear', { ops })`, by name or from a handle or entry) — with the same semantics: omitted = every tool the run offers (connection tools included), `[]` = none. Eager entries connect at turn start (the same walk as `callModel`'s) and reach the agent by their harness names (`linear_get_issue`, `_ops`/`_call`). Noetic is always the MCP client: the agent calls everything over the loopback tool bridge, and each call runs the `callModel` tool pipeline (steering, validation, `needsApproval`, execution, result item, events, span), so the agent gets the exact string a model would. A connection tool's idempotency key is `<execution>:tool:<callId>` with the agent's own call id (`ToolExecutionContext.callId`), as with the model's on `callModel`. A `keepAlive: 'run' | 'harness'` session holds the turn's connections until it closes. Context layers run around each turn: recall leads the prompt as a `<context>` block; `afterModelCall`/`store` see the result. Claude Code's, Codex's, and Gemini's permission requests for these tools are allowed, recognized by adapter-set fields; `permissions` governs only the agent's built-in tools. Calls run one at a time; a pipeline failure stops further calls and fails the step. Every preset takes tools, `pi()` included (through the `pi-noetic-tools` extension, as native pi tools; the preset pins `pi-acp@0.0.32`, since 0.0.34 hangs with pi 0.73 and pi 1.x is untested), on this machine or on a remote runner: give a preset `machine: webSocketMachine({ url, token })` or `commandMachine({ command: 'ssh', args: [host, 'npx', '-y', '@noetic-tools/acp', 'serve', '--stdio'] })` from `@noetic-tools/acp/remote`, and run `noetic-acp serve` there. An agent attached through a custom `transport` cannot take tools: `ACP_TRANSPORT_CANNOT_LAUNCH` (its wiring has launch settings) or `ACP_TRANSPORT_CANNOT_REACH`; omitted `tools` → none. `gemini()` takes tools only as `gemini({ trustWorkspace: true })` (Gemini starts no MCP server in an untrusted folder); without it a step with `tools` fails with `ACP_AGENT_CANNOT_TAKE_TOOLS` before the agent starts. A stdio server that must run where the agent runs is `mcp({ name, command, args, env, spawn: agent.spawn })` (`AcpAgent.spawn` = `spawnOn(machine)`), listed in `tools` like any entry. `Spawn` / `SpawnCommand` / `ByteStream` (types) are the one seam `mcp({ command, spawn })` and `spawnOn(machine)` share. Server tools are `ACP_SERVER_TOOL`; names that collide on the wire are `ACP_TOOL_NAME_COLLISION`. No `toolChoice`. See `specs/27-acp-agent-steps.md` § Tools and `specs/38-acp-tools.md`.
+
 Agents come from `@noetic-tools/acp`. A preset is only a launch recipe — there is no vendor SDK:
 
 ```typescript
@@ -500,7 +502,7 @@ import { claudeCode, codex, gemini, customAcpAgent } from '@noetic-tools/acp';
 
 const review = step.acpAgent({
   id: 'review',
-  agent: claudeCode(),                                  // npx @zed-industries/claude-code-acp
+  agent: claudeCode(),                                  // npx @agentclientprotocol/claude-agent-acp
   prompt: 'Review the staged diff and summarize the riskiest change.',
   mode: 'plan',
   permissions: { default: 'deny', allow: [{ kind: 'read' }] },
@@ -554,7 +556,7 @@ A connection owns a live agent process, so **keeping one is always an explicit o
 
 **Errors:** `EMPTY_STEP_ID` (empty `id`), `MISSING_ACP_AGENT` (no `agent`), `MISSING_PROMPT` (neither `prompt` nor `content`). Asking for a capability the agent did not advertise — `loadSession`, a mode, a model, image/audio/embedded content, an HTTP/SSE MCP server — throws `AcpCapabilityError` before anything reaches the wire; a failed handshake throws `AcpConnectError`.
 
-**JSON workflow:** one node kind, `acp-agent`, with fields `agent` (registry key), `prompt`, and optional `cwd` / `mode` / `model` / `mcpServers` / `permissions` / `clientCapabilities` / `session`. Adapters resolve at hydration from `HydrationContext.acpAgents` (a `Map<string, AcpAgent>`); build it with `createAcpAgentRegistry(claudeCode(), codex())`. The registry is an **open** set — a new agent needs an entry, not a schema change. An unregistered key fails with `UNKNOWN_ACP_AGENT_REFERENCE`. `parseAndRunWorkflow` / `dynamicWorkflow` take the registry as `acpAgents`, cap each agent's `permissions` / `cwd` / `clientCapabilities` / `session` with `acp: AcpAllowlist` (`{ [agentId]: { permissions?: { default?, allow?: [{ kind?, title? }], persist? }, cwd?: dir, clientCapabilities?: { readTextFile?, writeTextFile?, terminal? }, session?: { keepAlive?, load? } } }`; without an entry: deny-only, the harness cwd, `readTextFile` only, `keepAlive` up to `'run'`, no `load`; a document's `session.reuse` keys get a per-run namespace so it never joins host sessions), and accept a node's `mcpServers` only when their `mcp: McpAllowlist` grants them — `urls: McpUrlGrant[]` (`{ url: 'https://*.example.com/path/*', secrets?: { secretName: headerName } }`, matched scheme/host/port/path separately; the server URL must equal its `new URL(url).href`) and `commands: McpCommandGrant[]` (`{ command, args?, secrets?: { secretName: envName } }`, exact match). Header and env values must be `{ "$secret" }` bound by the grant, resolved through `environment.secrets`. No `mcp` grants nothing; a refusal is `CONNECTION_NOT_ALLOWED` before the agent starts.
+**JSON workflow:** one node kind, `acp-agent`, with fields `agent` (registry key), `prompt`, and optional `cwd` / `mode` / `model` / `tools` / `permissions` / `clientCapabilities` / `session`. Adapters resolve at hydration from `HydrationContext.acpAgents` (a `Map<string, AcpAgent>`); build it with `createAcpAgentRegistry(claudeCode(), codex())`. The registry is an **open** set — a new agent needs an entry, not a schema change. An unregistered key fails with `UNKNOWN_ACP_AGENT_REFERENCE`. `tools` take `{ "type" }`, `{ "connection", "ops"? }` and `{ "mcp": … }` entries in ACP's `McpServer` shape — `{ "name", "type": "http" | "sse", "url", "headers"? }` or `{ "name", "command", "args"?, "env"? }` (a stdio one on an `acp-agent` node starts through the agent's `spawn`) — served through the bridge as in TypeScript. `parseAndRunWorkflow` / `dynamicWorkflow` take the registry as `acpAgents`, cap each agent's `permissions` / `cwd` / `clientCapabilities` / `session` with `acp: AcpAllowlist` (`{ [agentId]: { permissions?: { default?, allow?: [{ kind?, title? }], persist? }, cwd?: dir, clientCapabilities?: { readTextFile?, writeTextFile?, terminal? }, session?: { keepAlive?, load? } } }`; without an entry: deny-only, the harness cwd, `readTextFile` only, `keepAlive` up to `'run'`, no `load`; a document's `session.reuse` keys get a per-run namespace so it never joins host sessions), and accept an MCP server (a `tools` entry, or a document `connections` entry `"linear": { "mcp": { … } }`) only when their `mcp: McpAllowlist` grants it — `urls: McpUrlGrant[]` (`{ url: 'https://*.example.com/path/*', secrets?: { secretName: headerName }, policy? }`, matched scheme/host/port/path separately; the server URL must equal its `new URL(url).href`; header names match case-insensitively, and each header or env name appears once), `commands: McpCommandGrant[]` (`{ command, args?, secrets?: { secretName: envName }, policy? }`, exact match), and `provider: (server: GrantedMcpServer) => ConnectionProvider` (`mcp` itself: a granted server is ACP's shape with secrets resolved). Header and env values must be `{ "$secret" }` bound by the grant, resolved through `environment.secrets` when the server connects; the policy is the grant's. No `mcp` grants nothing; a refusal is `CONNECTION_NOT_ALLOWED` before anything runs.
 
 **Authoring an agent + testing.** The `AcpAgent` contract lives in `@noetic-tools/types` (next to `ContextLayer`); `@noetic-tools/core` depends only on the *type* and runs adapter *instances* you pass in — it never imports `@noetic-tools/acp` (enforced by `.sentrux/rules.toml`). Build an adapter with `defineAcpAgent({ agentId, transport })`. For tests, `loopbackTransport` stands an in-process agent on the far end of a **real** protocol connection, so the wire format is exercised without spawning anything:
 
@@ -592,7 +594,7 @@ acpAgentTool({
   agent: AcpAgent;                       // e.g. claudeCode()
   name?: string;                         // default `delegate_to_<agentId>`
   description?: string;                  // steer WHEN the model delegates
-  cwd?, mode?, model?, mcpServers?, permissions?, onPermissionRequest?, clientCapabilities?,
+  cwd?, mode?, model?, tools?, permissions?, onPermissionRequest?, clientCapabilities?,
   session?: AcpSessionPolicy;            // reuse + keepAlive → a conversation across calls
 }): Tool  // input { prompt }, output { text }
 ```
@@ -1047,15 +1049,13 @@ instructions({ load: () => Promise<string>, tag?, id?, slot?, scope? })
 From `@noetic-tools/agent-plugins` (its own package -- it carries the MCP SDK and
 spawns subprocesses, so it must stay out of core's dependency graph). A
 conformant [Agent Plugins](https://agent-plugins.org) v1 client: discovers
-plugin directories and exposes their Agent Skills + MCP servers to the model.
+plugin directories, shows their Agent Skills to the model, and turns their MCP
+servers into harness connections with `pluginConnections()`.
 
 ```typescript
 agentPlugins({
   roots: readonly string[],       // dirs to scan; each child with a plugin.json is a plugin
   dataDir: string,                // base for per-plugin PLUGIN_DATA (spec §9.1)
-  transports?: McpTransport[],    // default ['stdio', 'streamable-http']; add 'sse' to opt in
-  connectMcp?: boolean,           // false => skills-only client, callMcpTool not exposed
-  baseEnv?: Record<string, string | undefined>,
   slot?, scope?, budget?,
 })
 // slot: Slot.PROCEDURAL (250) — skills are procedural knowledge
@@ -1072,15 +1072,34 @@ Progressive disclosure, as the Agent Skills spec prescribes:
 2. **tier 2** -- `loadSkill({ skill })` returns the `SKILL.md` body and pins it for the thread
 3. **tier 3** -- `readSkillResource({ skill, path })` reads one bundled file at a time
 
-Also exposes `callMcpTool({ server, tool, arguments })` when MCP is enabled.
-Data: `plugins`, `skills`, `mcpServers`, `mcpTools`, `diagnostics`, `activeSkills`.
+Data: `plugins`, `skills`, `mcpServers` (`{ server, connection }`), `diagnostics`,
+`activeSkills`. The block lists each server with its connection name.
+
+Plugin MCP servers are connections, not layer tools:
+
+```typescript
+const found = await discoverPlugins(roots, dataDir);
+const { connections, diagnostics } = await pluginConnections(found, {
+  transports?: McpTransport[],    // default ['stdio', 'streamable-http']; add 'sse' to opt in
+  baseEnv?: Record<string, string | undefined>,
+  timeoutMs?: number,
+});
+new AgentHarness({ connections, contextLayers: [agentPlugins({ roots, dataDir })], ... });
+// or harness.execute(input, { connections }) for one turn
+```
+
+Each entry is `{ provider: mcp({ name: '<plugin>_<server>', ... }), expose: 'call' }`,
+so the model sees `<name>_ops` / `<name>_call` (merged `ops` / `call` with
+`target` when two or more `'call'` connections exist) and every connection gate
+applies. Two servers mapping to one name throw `CONNECTION_NAME_TAKEN`; a server
+that fails to connect is an unavailable connection, never a thrown error.
 
 Under budget pressure it sheds the OLDEST activated body first and trims the
 index last -- the index is what makes the model aware a skill exists. Zero
 budget is fail-open.
 
 Failures are isolated per the spec: a non-conforming `SKILL.md` never stops its
-siblings, an unconnectable MCP server never stops the plugin's skills. Every
+siblings, an unconnectable MCP server is an unavailable connection. Every
 skip is reported via `layer.readDiagnostics()` and as an
 `agent-plugins.diagnostic` trace event.
 
@@ -2751,7 +2770,7 @@ const agent = dynamicWorkflow({
 });
 ```
 
-`connections` (a `ConnectionAllowlist`) is required for the planner to use connections at all; it is shown only the allowed connections and operations. `parseAndRunWorkflow` takes the same option. A manifest asking for more fails with `CONNECTION_NOT_ALLOWED`.
+`connections` (a `ConnectionAllowlist`) is required for the planner to use connections at all; it is shown only the allowed connections and operations. `parseAndRunWorkflow` takes the same option. A manifest asking for more fails with `CONNECTION_NOT_ALLOWED`. The same allowlist narrows `callModel` / `acp-agent` `{ "connection", "ops"? }` tool entries: the name must be granted and each `ops` glob must lie inside a granted one. Inline `{ "mcp" }` entries need `mcp: McpAllowlist`; the planner is shown only its granted URLs.
 
 ### parseAndRunWorkflow
 
@@ -2876,9 +2895,9 @@ const harness = new AgentHarness({
   name: 'qa',
   params: {},
   connections: {
-    browser: mcp('npx @playwright/mcp@latest'),                        // bare provider = { provider }
-    slack: { provider: mcp({ url: SLACK_MCP }), policy: { approve: ['chat.post'], deny: ['com.slack.admin.*'] } },
-    browsers: { provider: mcp('npx playwright-noetic-mcp', { profiles: [browser] }), pool: { max: 8, warm: 1, waitMs: 3e4 } },
+    browser: mcp({ command: 'npx', args: ['@playwright/mcp@latest'] }),   // bare provider = { provider }
+    slack: { provider: mcp({ type: 'http', url: SLACK_MCP }), policy: { approve: ['chat.post'], deny: ['com.slack.admin.*'] } },
+    browsers: { provider: mcp({ command: 'npx', args: ['playwright-noetic-mcp'], profiles: [browser] }), pool: { max: 8, warm: 1, waitMs: 3e4 } },
     morning: cron('0 8 * * *', { timezone: 'America/New_York' }),
   },
   triggers: [{ id: 'daily', connection: 'morning', event: 'tick', input: () => 'Write the daily summary' }],
@@ -2895,10 +2914,30 @@ const harness = new AgentHarness({
 | `provider` | `mcp(…)`, a source, or any `ConnectionProvider` |
 | `pool` | `{ max, warm?, waitMs? }` — fresh connections on demand (provider must implement `provision`) |
 | `policy` | `allow` / `deny` / `approve` globs over operation names |
-| `expose` | `'eager'` (default: profile-eager ops + `<name>_ops` / `<name>_call`), `'all'`, `'none'` |
+| `expose` | `'eager'` (default: profile-eager ops + `<name>_ops` / `<name>_call`), `'all'`, `'call'` (only `<name>_ops` / `<name>_call`, no view layer; two or more merge into one `ops` + one `call` taking `target`), `'none'` |
 | `look` | read name → `'turn'` \| `'effect'` \| `'ask'` |
 
-`mcp(config, options?)`: `config` is a command line string, `{ command, args?, env?, cwd? }`, `{ url, headers?, protocol? }`, or `{ transport }`; options `webhooks: { receiver }`, `profiles`, `extensions`, `timeoutMs` (1e4), `requestTimeoutMs`, `pollIntervalMs`.
+`connections` is a record keyed by name, or a list of named entries: `connections: [mcp({ name: 'linear', type: 'http', url, headers: [{ name: 'Authorization', value: `Bearer ${token}` }] })]`. A record key that disagrees with `mcp({ name })`, or an unnamed list entry, is `CONNECTION_INVALID`.
+
+`mcp(config)` takes ACP's `McpServer` shape, so an ACP server config passes as it stands: `{ name, type: 'http' | 'sse', url, headers?: [{ name, value }], auth?, fetch? }`, `{ name, command, args?, env?: [{ name, value }], cwd?, spawn? }` (`type: 'stdio'` optional; `spawn(command) => Promise<ByteStream>` starts the stdio server elsewhere — an ACP agent's machine, a container), or `{ transport }`; beside them the options `webhooks: { receiver }`, `profiles`, `extensions`, `timeoutMs` (1e4), `requestTimeoutMs`, `pollIntervalMs`, `clientInfo`. A header or environment variable given twice is `CONNECTION_INVALID`. `auth` is `{ kind: 'bearer', token }` or `{ kind: 'oauth', provider }` (an `OAuthClientProvider`, re-exported from `@noetic-tools/mcp`); `auth` with an `Authorization` header is `CONNECTION_INVALID`. The credential — `auth` or an `Authorization` header — stays on the server's origin and is scrubbed like a secret. Each manifest operation may carry `annotations` (`title`, `readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) copied from the MCP tool — hints for choosing a default `policy`, never trusted by the gates.
+
+**Attaching at three levels** — the same entry gives the same tool names, gates, results, events and spans wherever it is attached:
+
+```typescript
+const linear = mcp({ name: 'linear', type: 'http', url: LINEAR_MCP, headers: [{ name: 'Authorization', value: `Bearer ${token}` }] });
+new AgentHarness({ name, params, agentGraph, connections: [linear] });  // harness life
+await harness.execute(input, { connections: [linear] });        // this turn: connected at its start, released at its end
+callModel({ id: 'triage', model, tools: [linear, search] });    // this step: offered only by steps listing it
+callModel({ id: 'read', model, tools: [connectionTools('linear', { ops: ['get_*'] }), search] });  // part of one, by name
+```
+
+JSON equivalents: a node's `tools` take `{ "mcp": { "name": "linear", "type": "http", "url": "…", "headers": [{ "name": "Authorization", "value": { "$secret": "linear.token" } }] } }` or `{ "connection": "linear", "ops": ["get_*"] }`; a document's `connections` take the same `"linear": { "mcp": { … } }` entry (key = name; no `from` / `fresh` / `setup`), attached for the run.
+
+- A name already attached (harness → turn → step) must carry the same provider and options, else `CONNECTION_NAME_TAKEN`.
+- Step entries are found by walking the graph's eager `tools`; a function-form `tools` may only return entries the harness or turn attached (`CONNECTION_INVALID` otherwise). Turn and step entries cannot set `pool` (`CONNECTION_INVALID`).
+- A pick by name must name a connection the turn can see once its entries attach, else `CONNECTION_UNKNOWN` (also for JSON `{ "connection" }`).
+- `toolChoice: { tool }` naming a connection tool is checked when the turn's tool set is built (`UNKNOWN_TOOL_CHOICE`). Spawned children see the root turn's connections.
+- Handles (`step.call` / `step.wait` / `step.verify` / `connection()`) reach harness and turn connections; triggers reach harness connections only.
 
 Harness methods: `start()` (connects providers, starts triggers; implicit on first `execute`/`run`), `getConnectionStatus(name?)`, `artifacts.listRun(executionId)`, `restore(executionId, { rerun?: ['app'] })`, `close()` (also closes ACP sessions).
 
@@ -2922,8 +2961,10 @@ const approval = step.wait({
   timeoutMs: 18e5,
 });                                                     // output { event, around }
 
-callModel({ id: 'turn', model, instructions, tools: connectionTools(app, { ops: ['ui.*'] }) });
+callModel({ id: 'turn', model, instructions, tools: [connectionTools(app, { ops: ['ui.*'] })] });
 ```
+
+- `connectionTools(nameOrHandleOrEntry, { ops? })` returns a `ConnectionPick`, not tools: it narrows the turn's tool set to that connection's tools under their harness names (`<name>_<op>`, `<name>_ops` / `<name>_call`, merged `ui_tap` with `target`). Each tool is cut to the pick: a merged tool's `target` enum and routing reach only picked connections, and `<name>_ops` / `<name>_call` only the operations and `'ask'` reads matching `ops`. A pick from an entry attaches it to the step; a `fresh` handle, an unnamed entry or a malformed name is `CONNECTION_INVALID`.
 
 - `connection(name, profile?, { from?, fresh?: 'run' | 'path', setup?, extensions? })`. `setup` without `fresh` throws `CONNECTION_INVALID`.
 - `step.call({ id, connection, op, args? })` — `connection` is a handle or a harness connection name; `op` must contain a dot (`CONNECTION_INVALID` otherwise). `args` is a value or `(input, ctx) => value`. Long upstream operations (SEP-2663 tasks) are awaited.

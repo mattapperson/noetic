@@ -588,9 +588,12 @@ await section('over MCP: verify against the stdio ui@1 server', async () => {
         args: [
           SERVER_PATH,
         ],
-        env: {
-          UI_SERVER_LOG: join(dir, 'calls.jsonl'),
-        },
+        env: [
+          {
+            name: 'UI_SERVER_LOG',
+            value: join(dir, 'calls.jsonl'),
+          },
+        ],
         profiles: [
           ui,
         ],

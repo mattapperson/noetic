@@ -4,7 +4,6 @@ import type {
   ToolContext,
   ToolExecutionContext,
 } from '@noetic-tools/types';
-import type { TurnContext } from '@openrouter/agent';
 
 function buildToolContext(harness: AgentHarnessContract, ctx: Context): ToolContext {
   return {
@@ -20,7 +19,7 @@ function buildToolContext(harness: AgentHarnessContract, ctx: Context): ToolCont
 export function buildToolExecutionContext(
   ctx: Context,
   harness: AgentHarnessContract,
-  turnContext?: TurnContext,
+  callId?: string,
 ): ToolExecutionContext {
   const toolContext = buildToolContext(harness, ctx);
   return {
@@ -31,6 +30,10 @@ export function buildToolExecutionContext(
     context: toolContext,
     assembledView: ctx.itemLog.items,
     lastStepMeta: ctx.lastStepMeta,
-    turnContext,
+    ...(callId === undefined
+      ? {}
+      : {
+          callId,
+        }),
   };
 }

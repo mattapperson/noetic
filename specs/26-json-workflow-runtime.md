@@ -185,7 +185,11 @@ interface CallModelWorkflowNode {
   id: string;
   model?: string;
   instructions: string;
-  tools?: string[];
+  tools?: Array<
+    | { type: string; parameters?: Record<string, unknown> }  // a client or openrouter:* server tool
+    | { connection: string; ops?: string[] }                   // a harness or turn connection's tools
+    | { mcp: { name: string; url: string; headers?: Array<{ name: string; value: { $secret: string } }> } }
+  >;
   toolChoice?: 'auto' | 'required' | 'none' | { tool: string };
   params?: {
     temperature?: number;
@@ -201,7 +205,7 @@ interface CallModelWorkflowNode {
 |----------------|----------|----------------------------------------------------------|
 | `model`        | No       | Model identifier. Falls back to the harness default.     |
 | `instructions` | Yes      | System instructions for this LLM call.                   |
-| `tools`        | No       | Tool names resolved from the hydration context registry.  |
+| `tools`        | No       | Tool entries: `{ "type" }` names a registered client tool or an `openrouter:*` server tool; `{ "connection" }` and `{ "mcp" }` give the model a connection's tools (§ Tools). |
 | `toolChoice`   | No       | How the model may use its tools (spec 02, Unified Tool Set). Defaults to `"auto"`. `{ "tool": name }` must name a client tool in `tools`, or hydration throws `UNKNOWN_TOOL_CHOICE`; without `tools` it is checked against the unified set at request time. |
 | `params`       | No       | Model-level sampling parameters.                         |
 
@@ -644,7 +648,7 @@ Each node kind maps to a single existing builder:
 
 ### Tool Resolution
 
-Tool names in `callModel.tools` and `invokeTool.toolName` are resolved against `ctx.tools` at hydration time. If a name is not found, hydration throws:
+The `type` of a `callModel.tools` client entry and `invokeTool.toolName` are resolved against `ctx.tools` at hydration time (connection entries resolve when the turn attaches them, § Tools). If a name is not found, hydration throws:
 
 ```typescript
 {
@@ -783,14 +787,43 @@ const result = await parseAndRunWorkflow({
 });
 ```
 
+### Tools
+
+A `callModel` node's `tools` entries are objects. Besides `{ "type": … }` (a registered client tool, or an `openrouter:*` server tool), two entries give the model a connection's tools — the same tools, under the same names, as the TypeScript step entries they hydrate to (spec 35 § Attaching connections):
+
+```json
+{ "kind": "callModel", "id": "triage", "instructions": "…", "tools": [
+  { "connection": "linear", "ops": ["get_*"] },
+  { "mcp": { "name": "docs", "type": "http", "url": "https://mcp.example.com/docs",
+             "headers": [{ "name": "Authorization", "value": { "$secret": "docs.token" } }] } },
+  { "type": "search" }
+] }
+```
+
+- **`{ "connection", "ops"? }`** names a harness, turn or document connection and becomes `connectionTools(name, { ops })`: every tool of the connection, or only those whose operations all match the `ops` globs. It needs no `connections` manifest entry. A name no connection has fails with `CONNECTION_UNKNOWN` when the turn's tool set is built. Under a `connections` allowlist the name must be granted and each `ops` glob must lie inside a granted glob (`get_issue` and `get_*` inside `get_*`; `*` is not); without `ops` the pick takes exactly the granted operations. Anything else is `CONNECTION_NOT_ALLOWED`.
+- **`{ "mcp": … }`** is an MCP server the step attaches, in ACP's `McpServer` shape as `mcp()` takes it: `{ "name", "type": "http" | "sse", "url", "headers"? }` or `{ "name", "command", "args"?, "env"? }`, like `tools: [mcp({ … })]`. Header and environment values are `$secret`s only; it takes no `cwd` and no `policy`, and the schema refuses any other key. The server must match an `mcp` grant (§ MCP servers), which supplies its secrets, its policy and the provider that connects it.
+
+An `acp-agent` node takes the same two entries in its own `tools` (no `{ "type" }` entries): connections served to the agent with noetic as the MCP client, never handed to the agent's own MCP client (spec 27 § Tools). A stdio `{ "mcp" }` entry on an `acp-agent` node starts through its agent's `spawn`, where the agent runs.
+
+The same `{ "mcp" }` entry under the document's `connections`, keyed by its name, attaches the server for the whole document (spec 35 § JSON workflows):
+
+```json
+{ "version": 1,
+  "connections": { "linear": { "mcp": { "name": "linear", "type": "http", "url": "https://mcp.linear.app/mcp",
+    "headers": [{ "name": "Authorization", "value": { "$secret": "linear.token" } }] } } },
+  "root": { "kind": "callModel", "id": "triage", "instructions": "…" } }
+```
+
+**A document run in the middle of a turn.** A step entry connects with the turn, before its tool set is built (spec 35 § Attaching connections). A document `parseAndRunWorkflow` or `dynamicWorkflow` hydrates from a running step did not exist then, so when the harness runs it, it attaches the document's entries — its nodes' and its `connections`' — to the turn (released when the turn ends) and adds their tools to the pool for that run only: the rest of the turn keeps the tool set it started with. A name the harness or turn already holds with a different provider or options is `CONNECTION_NAME_TAKEN`.
+
 ### What a document may ask of an agent
 
 `parseAndRunWorkflow` and `dynamicWorkflow` run documents the host did not write, so an `acp-agent` node gets only what the host grants. Two allowlists cover it, and both are checked at parse time (inline subflows included), before anything runs:
 
 - **`acp`** (`AcpAllowlist`) — per agent id, the most a node may ask in `permissions`, `mode`, `model`, `cwd`, `clientCapabilities` and `session` (§ ACP agents).
-- **`mcp`** (`McpAllowlist`) — the MCP servers a node may list in `mcpServers`, and the secrets their headers and environment may carry (§ MCP servers).
+- **`mcp`** (`McpAllowlist`) — the MCP servers a document may attach as `{ "mcp" }` entries, in a node's `tools` or its `connections`, and the secrets their headers and environment may carry (§ MCP servers).
 
-`acpAgents` is the registry of agents a node may name, not an allowlist: a node naming an agent outside it fails with `UNKNOWN_ACP_AGENT_REFERENCE`. Nothing else on the node is limited — `prompt` passes as written. Named subflow refs come from the host's own registry and are neither checked nor held to the grants: every registered workflow is one any document may invoke, run with the host's settings, so a host registers only workflows it would let an untrusted document run. A host that wrote the document itself runs it with `workflow()` (spec 02) or `hydrateWorkflow`, which check none of this.
+`acpAgents` is the registry of agents a node may name, not an allowlist: a node naming an agent outside it fails with `UNKNOWN_ACP_AGENT_REFERENCE`. Nothing else on the node is limited — `prompt` passes as written. Named subflow refs come from the host's own registry and are neither checked nor held to the grants: every registered workflow is one any document may invoke, run with the host's settings, so a host registers only workflows it would let an untrusted document run. A host that wrote the document itself runs it with `workflow()` (spec 02) or `hydrateWorkflow`, which check none of the `acp` limits.
 
 #### ACP agents
 
@@ -828,26 +861,29 @@ A document's sessions never join the host's. Each run of `parseAndRunWorkflow`, 
 
 #### MCP servers
 
-An `acp-agent` node's `mcpServers` are handed to the agent, which connects to them itself: a stdio server is a command the agent launches, and header and environment values reach the agent process.
+`parseAndRunWorkflow` and `dynamicWorkflow` accept an MCP server a document names — a `{ "mcp" }` entry in a node's `tools` or the document's `connections` — only when the host's `mcp` allowlist grants it, and check every server (inline subflows included) at parse time, before anything runs:
 
 ```ts
 parseAndRunWorkflow({
   json, harness, ctx, tools,
-  acpAgents: createAcpAgentRegistry(claudeCode()),
   mcp: {
-    urls: [{ url: 'https://mcp.example.com/*', secrets: { 'mcp.token': 'Authorization' } }],
-    commands: [{ command: 'npx', args: ['-y', '@acme/docs-mcp'], secrets: { 'docs.token': 'DOCS_TOKEN' } }],
+    urls: [{ url: 'https://mcp.example.com/*', secrets: { 'docs.token': 'Authorization' },
+             policy: { deny: ['delete_*'] } }],
+    commands: [{ command: 'npx', args: ['-y', '@acme/docs-mcp'], secrets: { 'docs.key': 'DOCS_KEY' } }],
+    provider: mcp,   // from @noetic-tools/mcp: a granted server is the shape mcp() takes
   },
 });
 ```
 
 - **HTTP and SSE** servers are granted by a `url` pattern, `<scheme>://<host>[:<port>]<path>`, matched part by part so a `*` cannot stand for the `/`, `?`, `#` or `@` that would move a URL to another host. The scheme is `http` or `https`. The host matches case-insensitively and may start with `*.`, for one or more non-empty labels before the rest (not the rest itself, nor `.` + the rest). The rest must have at least two labels — `*.com` is invalid — and `*` anywhere else in the host is an invalid pattern (`CONNECTION_INVALID`). The port is a number or `*`, and when left out is the scheme's default. The path defaults to `/`, and in it `*` matches any run of characters. The query is not matched. Patterns are read through `URL` like the URLs they match, so `https://MCP.example.com:443/*` and `https://mcp.example.com/*` are the same pattern.
-- **A server's URL** must be `http:` or `https:`, carry no user or password (`http://localhost:1@evil.example/` would otherwise match `http://localhost:*`), and be written exactly as `new URL(url).href` reads it back. The agent gets the URL as written, so one that reads differently — a backslash, a tab, an uppercase host, a default port, a missing path — is refused rather than checked in one form and used in another.
+- **A server's URL** must be `http:` or `https:`, carry no user or password (`http://localhost:1@evil.example/` would otherwise match `http://localhost:*`), and be written exactly as `new URL(url).href` reads it back. The server is connected at the URL as written, so one that reads differently — a backslash, a tab, an uppercase host, a default port, a missing path — is refused rather than checked in one form and used in another.
 - **Stdio** servers are granted by their exact command line: the same `command` and the same `args` in the same order (`args` defaults to none).
-- **Header and environment values** come only from host secrets. A server names each header (case-insensitively) or variable at most once. Each must be `{ "$secret": "<name>" }` with a grant's `secrets` binding that name to that header (names compared case-insensitively) or variable (compared exactly); a literal value is refused. A server is accepted when any one grant matching it binds all its values, whatever the grant order. The secret is resolved through `environment.secrets` when the session starts, and the resolved value goes to the agent; a document using a secret on a harness with no resolver fails at parse time with `CONNECTION_INVALID`.
-- **No allowlist grants nothing.** Unlike `connections`, whose absence on `parseAndRunWorkflow` means no host allowlist applies, an absent `mcp` refuses every server on both functions: there is no trusted mode for a document's commands.
+- **Header and environment values** come only from host secrets. A server names each header (case-insensitively) or variable at most once. Each must be `{ "$secret": "<name>" }` with a grant's `secrets` binding that name to that header (names compared case-insensitively) or variable (compared exactly); a literal value is refused. A server is accepted when any one grant matching it binds all its values, whatever the grant order; the first such grant is the server's grant. The secret is resolved through `environment.secrets` when the server connects and is scrubbed like any resolved secret; a document using a secret on a harness with no resolver fails at parse time with `CONNECTION_INVALID`.
+- **Policy comes from the grant.** The connection entry gets its grant's `policy`; a document has no way to set one.
+- **The host connects it.** `provider` builds the connection for the granted server — ACP's `McpServer` shape with its secrets resolved (`GrantedMcpServer`) — so `provider: mcp` is all it takes; core never imports `@noetic-tools/mcp`. A stdio server is the exact granted command, and the host decides where it runs. Without `provider`, a document that names a server fails with `CONNECTION_INVALID`. The same server under the same allowlist is always the same provider, so two nodes naming it share one connection.
+- **No allowlist grants nothing.** Unlike `connections`, whose absence on `parseAndRunWorkflow` means no host allowlist applies, an absent `mcp` refuses every server on both functions: there is no trusted mode for a document's servers.
 
-A node asking for more than `acp` or `mcp` grants fails validation with `CONNECTION_NOT_ALLOWED`, naming the node and what it asked for. `dynamicWorkflow` feeds the refusal back to the planner like any validation error, and shows the planner the registered agent ids, each agent's limits, and only the granted servers.
+A document asking for more than `acp` or `mcp` grants fails validation with `CONNECTION_NOT_ALLOWED`, naming the node (or the document's connections) and what it asked for. `dynamicWorkflow` feeds the refusal back to the planner like any validation error, and shows the planner the registered agent ids, each agent's limits, and only the granted servers.
 
 ---
 
@@ -947,7 +983,8 @@ The JSON Workflow Runtime introduces the following `NoeticConfigError` codes:
 | `UNKNOWN_UI_LIBRARY_REFERENCE` | A `callModel` node's `output.library` is not in the codec registry.           |
 | `UNKNOWN_SUBPROCESS_REFERENCE` | A `runCode` node's `subprocess` ref cannot be resolved.                      |
 | `CONNECTION_UNKNOWN`           | A node names a connection the manifest or harness does not have. Other connection codes are in `35-connections` § Errors. |
-| `CONNECTION_NOT_ALLOWED`       | A document asks for more than `connections` grants, or an `acp-agent` node asks for more than `acp` or `mcp` grants (§ What a document may ask of an agent). |
+| `CONNECTION_NOT_ALLOWED`       | A document asks for more than `connections` grants (a manifest, or a `{ "connection" }` tool entry and its `ops`), names an MCP server, header or environment value `mcp` does not grant, or an `acp-agent` node asks for more than `acp` grants (§ Tools, § What a document may ask of an agent). |
+| `CONNECTION_NAME_TAKEN`        | A document's `{ "mcp" }` entry uses a name the harness or the turn holds for a different connection (§ Tools). |
 | `UNKNOWN_UNTIL_PREDICATE`      | An until predicate kind is unrecognised.                                 |
 | `INVALID_UNTIL_DECIDER`        | A decide until predicate does not ask exactly one boolean question (raised at hydration by `loop`/`any`/`all`). |
 | `UNKNOWN_WORKFLOW_REFERENCE`   | A `subflow` ref names no registered workflow (raised at execution time). |
@@ -983,7 +1020,7 @@ const WorkflowNodeSchema: z.ZodType<WorkflowNode> = z.lazy(() =>
       id: z.string().min(1),
       model: z.string().optional(),
       instructions: z.string(),
-      tools: z.array(z.string()).optional(),
+      tools: z.array(z.union([TypedToolEntry, ConnectionToolEntry, McpToolEntry])).optional(),
       toolChoice: z.union([
         z.enum(ToolChoiceMode),
         z.object({ tool: z.string().min(1) }),

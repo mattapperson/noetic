@@ -107,11 +107,18 @@ async function readOne(
     readonly name: string;
     readonly read: string;
     readonly ctx: ExecutionContext;
+    readonly rootId?: string;
   },
 ): Promise<string> {
   try {
     const resolved = await runtime.resolve({
       name: request.name,
+      caller: 'model',
+      ...(request.rootId === undefined
+        ? {}
+        : {
+            rootId: request.rootId,
+          }),
       scope: {
         executionId: request.ctx.executionId,
         threadId: request.ctx.threadId,
@@ -134,11 +141,13 @@ async function readOne(
 
 /**
  * The view layer for one connection. It renders nothing while the connection
- * is not ready or has no `'turn'`/`'effect'` reads.
+ * is not ready or has no `'turn'`/`'effect'` reads. For a connection a turn
+ * attaches, `rootOf` names the turn once its context exists.
  */
 export function connectionViewLayer(
   runtime: ConnectionRuntime,
   name: string,
+  rootOf: () => string | undefined = () => undefined,
 ): ContextLayer<ConnectionViewState> {
   return {
     id: `noetic/connection-view/${name}`,
@@ -156,15 +165,16 @@ export function connectionViewLayer(
       },
       async recall({ state, budget, ctx }): Promise<RecallResult<ConnectionViewState> | null> {
         const current = state ?? EMPTY_STATE;
-        const manifest = runtime.current(name)?.manifest;
+        const rootId = rootOf();
+        const manifest = runtime.current(name, rootId)?.manifest;
         if (!manifest) {
           return null;
         }
-        const effects = runtime.effectCount(name);
+        const effects = runtime.effectCount(name, rootId);
         const effectsChanged = effects !== current.effects;
         const rendered: RenderedRead[] = [];
         for (const resource of Object.values(manifest.resources)) {
-          const mode = modeOf(runtime.config(name)?.look, resource.name, resource.look);
+          const mode = modeOf(runtime.config(name, rootId)?.look, resource.name, resource.look);
           const previous = current.previous[resource.name];
           if (!wantsRead(mode, effectsChanged, effects)) {
             continue;
@@ -173,6 +183,7 @@ export function connectionViewLayer(
             name,
             read: resource.name,
             ctx,
+            rootId,
           });
           ctx.trace.addEvent('connection.read', {
             connection: name,
@@ -218,7 +229,7 @@ export function connectionViewLayers(
 ): ContextLayer<ConnectionViewState>[] {
   return runtime
     .names()
-    .filter((name) => !runtime.config(name)?.pool)
+    .filter((name) => runtime.viewed(name))
     .map((name) => connectionViewLayer(runtime, name));
 }
 

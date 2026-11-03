@@ -11,8 +11,8 @@ import type {
 } from '@noetic-tools/types';
 import { frameworkCast, isNoeticError, SteeringAction } from '@noetic-tools/types';
 import { z } from 'zod';
-import { executeToolCall } from '../../src/adapters/openrouter';
 import { executeInvokeTool } from '../../src/interpreter/execute-invoke-tool';
+import { executeToolCall } from '../../src/runtime/tool-call';
 import { makeCtx, makeMockContext, makeMockHarness } from '../_helpers';
 
 //#region Helpers

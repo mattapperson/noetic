@@ -35,7 +35,11 @@ export const DiagnosticCode = {
   McpServerInvalid: 'mcp-server-invalid',
   /** §7.2.2(4) — the client does not implement this entry's declared transport. */
   McpTransportUnsupported: 'mcp-transport-unsupported',
-  /** §7.2.2(5) — the server was valid but failed to start, connect, or handshake. */
+  /**
+   * §7.2.2(5) — the server is valid but cannot be attached: its `PLUGIN_DATA`
+   * directory could not be created. A server that fails to start or connect
+   * is an unavailable connection in the harness instead.
+   */
   McpConnectFailed: 'mcp-connect-failed',
   /**
    * §7.2.1 — a configured header was dropped because the client owns that

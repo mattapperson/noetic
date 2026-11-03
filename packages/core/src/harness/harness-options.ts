@@ -1,6 +1,6 @@
 import type {
   ArtifactStore,
-  ConnectionsConfig,
+  ConnectionEntries,
   ConnectionTrigger,
   SecretResolver,
 } from '@noetic-tools/types';
@@ -165,9 +165,10 @@ export interface AgentHarnessOpts<
   approveToolCall?: ToolApprover;
   /**
    * The live things the agent works with — browsers, devices, apps, chat workspaces,
-   * sources — by name (spec 35). Providers connect in `start()`.
+   * sources — keyed by name, or as a list of named entries (`[mcp({ name, … })]`)
+   * (spec 35). Providers connect in `start()` and live as long as the harness.
    */
-  connections?: ConnectionsConfig;
+  connections?: ConnectionEntries;
   /** Connection events that start or join a turn (spec 35 § Triggers). */
   triggers?: ReadonlyArray<ConnectionTrigger>;
   /** The verifier `step.verify` uses (spec 37). */

@@ -11,23 +11,28 @@ portable component types:
 - **MCP servers** — `mcp.json`, over stdio, Streamable HTTP, or the legacy
   HTTP+SSE transport
 
-This package discovers those packages and exposes them to a model through a
-single context layer.
+This package discovers those packages, shows their skills to a model through
+the `agentPlugins()` context layer, and turns their MCP servers into harness
+connections with `pluginConnections()`.
 
 ```bash
 bun add @noetic-tools/agent-plugins
 ```
 
 ```ts
-import { agentPlugins } from '@noetic-tools/agent-plugins';
-import { context } from '@noetic-tools/core';
+import { agentPlugins, discoverPlugins, pluginConnections } from '@noetic-tools/agent-plugins';
+import { AgentHarness } from '@noetic-tools/core';
 
-const config = context([
-  agentPlugins({
-    roots: ['/home/alex/.agents/plugins'],
-    dataDir: '/home/alex/.agents/plugins-data',
-  }),
-]);
+const roots = ['/home/alex/.agents/plugins'];
+const dataDir = '/home/alex/.agents/plugins-data';
+const { connections } = await pluginConnections(await discoverPlugins(roots, dataDir));
+
+const harness = new AgentHarness({
+  name: 'agent',
+  params: {},
+  contextLayers: [agentPlugins({ roots, dataDir })],
+  connections, // or harness.execute(input, { connections }) for one turn
+});
 ```
 
 ## Progressive disclosure
@@ -48,20 +53,22 @@ rather than rewriting the cached prompt prefix.
 
 ## MCP
 
-Declared servers are validated and resolved here, then connected through
-[`@noetic-tools/mcp`](../mcp) as connections with no profile, so a plugin's
-tools share one naming rule and one set of gates with every other MCP server
-a harness uses. Their tools are exposed to the model via `callMcpTool`;
-`pluginMcpProvider()` returns the provider for a host that registers a plugin
-server under its harness `connections`. Set
-`connectMcp: false` for a skills-only client, which the specification
-explicitly permits.
+Declared servers are validated and resolved here. `pluginConnections()`
+returns one [`@noetic-tools/mcp`](../mcp) connection entry per server, named
+`<plugin>_<server>` and exposed with `expose: 'call'`, so the model reaches a
+server through `<name>_ops` / `<name>_call` (or the shared `ops` / `call` with
+`target` when several connections use `'call'`). A plugin's tools pass the same
+gates as every other connection: policy, `beforeToolCall`, approval, secret
+scrubbing and replay-stable idempotency keys. Two servers that map to one name
+fail with `CONNECTION_NAME_TAKEN`. Leave `pluginConnections()` out for a
+skills-only client, which the specification explicitly permits.
 
 ## Failures are isolated
 
 The specification's central property is that a broken part of a plugin never
 takes down a working part. A non-conforming `SKILL.md` never stops its
-siblings; a server that will not start never stops the plugin's skills. Every
+siblings; a server that will not start is an unavailable connection and never
+stops the plugin's skills or any other connection. Every
 skip produces a diagnostic naming the specification section it enforces,
 readable via `layer.readDiagnostics()` and emitted onto the execution trace.
 

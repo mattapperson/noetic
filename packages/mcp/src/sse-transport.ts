@@ -8,26 +8,24 @@
  * `@modelcontextprotocol/sdk/client/sse.js` to it.
  */
 
+import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import type { McpFetch } from './config';
+
+/** @public What both HTTP transports are built with. */
+export interface HttpTransportOptions {
+  readonly fetch: McpFetch;
+  readonly requestInit?: {
+    readonly headers: Record<string, string>;
+  };
+  readonly authProvider?: OAuthClientProvider;
+}
 
 /** @public Builds an HTTP+SSE client transport for a remote MCP endpoint. */
 export async function createSseTransport(
   url: URL,
-  requestInit:
-    | {
-        headers: Record<string, string>;
-      }
-    | undefined,
-  fetchImpl: McpFetch,
+  options: HttpTransportOptions,
 ): Promise<Transport> {
   const { SSEClientTransport } = await import('@modelcontextprotocol/sdk/client/sse.js');
-  return new SSEClientTransport(url, {
-    fetch: fetchImpl,
-    ...(requestInit === undefined
-      ? {}
-      : {
-          requestInit,
-        }),
-  });
+  return new SSEClientTransport(url, options);
 }
