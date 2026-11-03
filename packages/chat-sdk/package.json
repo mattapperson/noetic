@@ -1,6 +1,6 @@
 {
   "name": "@noetic-tools/chat-sdk",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "description": "Chat SDK (chat-sdk.dev) integration for Noetic — run a Noetic agent harness as the brain of a multi-platform chat bot via chat.onSubscribedMessage(noeticAgent(...)).",
   "license": "Apache-2.0",
