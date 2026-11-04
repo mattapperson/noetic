@@ -27,7 +27,7 @@ import { boundedAcpSettings } from './workflow-acp-grants';
 import { compileArgs, documentHandle, documentSecretsOf } from './workflow-connections';
 import type { HydrationContext } from './workflow-hydrator';
 import { bindingsFor, hydrateStepList } from './workflow-hydrator';
-import { acpTools } from './workflow-tool-entries';
+import { nodeTools } from './workflow-tool-entries';
 
 //#region Connection Node Hydrators
 
@@ -261,7 +261,10 @@ export function hydrateAcpAgentNode(
     cwd: bounded.cwd,
     mode: node.mode,
     model: node.model,
-    tools: acpTools(node, ctx, agent.spawn),
+    tools: nodeTools(node, {
+      ...ctx,
+      spawn: agent.spawn,
+    }),
     permissions: node.permissions,
     clientCapabilities: bounded.clientCapabilities,
     session: bounded.session,

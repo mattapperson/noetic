@@ -8,7 +8,6 @@
  */
 
 import type {
-  AcpAgentWorkflowNode,
   ConnectionAllowlist,
   ConnectionConfig,
   ConnectionPick,
@@ -25,6 +24,7 @@ import type {
 } from '@noetic-tools/types';
 import { isServerToolSpec, NoeticConfigError, walkWorkflow } from '@noetic-tools/types';
 import { setDocumentEntries } from './document-entries';
+import type { ConnectionManifestEntries } from './workflow-connections';
 import { globMatches } from './workflow-connections';
 import { DOCUMENT_WHERE, documentServers, mcpEntry } from './workflow-mcp-servers';
 
@@ -38,11 +38,40 @@ export interface ToolEntryHosts {
   readonly mcp?: McpAllowlist;
   /** Where a stdio `{ mcp }` server starts: the node's ACP agent's machine. Absent starts it here. */
   readonly spawn?: Spawn;
+  /** The connections the node's document declares; its `{ mcp }` entries are the document's own servers. */
+  readonly connections?: ConnectionManifestEntries;
 }
 
 //#endregion
 
 //#region Public API
+
+/**
+ * The step tools a `callModel` or `acp-agent` node stands for. Under a
+ * connections allowlist a node gets exactly what it lists, and a node with no
+ * `tools` gets each granted connection with exactly its granted operations,
+ * plus the MCP servers its document's `connections` attach — never every
+ * connection the harness holds. Without an allowlist an empty list is no
+ * list, and the step is offered what any step with no `tools` is.
+ *
+ * @throws `NoeticConfigError` as `stepTools`.
+ */
+export function nodeTools(
+  node: {
+    readonly id: string;
+    readonly tools?: ReadonlyArray<WorkflowToolEntry>;
+  },
+  hosts: ToolEntryHosts,
+): StepToolEntry[] | undefined {
+  if (hosts.allowlist === undefined) {
+    const tools = stepTools(node.id, node.tools ?? [], hosts);
+    return tools.length > 0 ? tools : undefined;
+  }
+  if (node.tools === undefined) {
+    return grantedPicks(hosts.allowlist, hosts.connections);
+  }
+  return stepTools(node.id, node.tools, hosts);
+}
 
 /**
  * The step tools a `callModel` node's `tools` entries stand for.
@@ -85,24 +114,6 @@ export function connectionEntries(
         })
       : connectionPick(nodeId, entry, hosts.allowlist),
   );
-}
-
-/**
- * An `acp-agent` node's tools, a stdio `{ mcp }` server started through
- * `spawn`, where the node's agent runs.
- *
- * @throws `NoeticConfigError` as `stepTools`.
- */
-export function acpTools(
-  node: AcpAgentWorkflowNode,
-  hosts: ToolEntryHosts,
-  spawn: Spawn | undefined,
-): ReadonlyArray<StepToolEntry> | undefined {
-  const tools = stepTools(node.id, node.tools ?? [], {
-    ...hosts,
-    spawn,
-  });
-  return tools.length > 0 ? tools : undefined;
 }
 
 /**
@@ -154,6 +165,31 @@ export function checkToolConnections(doc: WorkflowDocument, allowlist: Connectio
 //#endregion
 
 //#region Helpers
+
+function grantedPicks(
+  allowlist: ConnectionAllowlist,
+  manifest: ConnectionManifestEntries | undefined,
+): ConnectionPick[] {
+  const granted = Object.entries(allowlist).map(
+    ([connection, entry]): ConnectionPick => ({
+      kind: 'connection-pick',
+      connection,
+      ops: entry.ops ?? [],
+    }),
+  );
+  const own = Object.entries(manifest ?? {})
+    .filter(([name, entry]) => entry.mcp !== undefined && !Object.hasOwn(allowlist, name))
+    .map(
+      ([connection]): ConnectionPick => ({
+        kind: 'connection-pick',
+        connection,
+      }),
+    );
+  return [
+    ...granted,
+    ...own,
+  ];
+}
 
 function isTypedEntry(entry: WorkflowToolEntry): entry is WorkflowTypedToolEntry {
   return 'type' in entry;

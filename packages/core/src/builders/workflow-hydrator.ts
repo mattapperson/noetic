@@ -64,7 +64,7 @@ import {
   nodeScope,
 } from './workflow-custom-items';
 import { workflowReplayKey } from './workflow-replay-key';
-import { recordDocumentConnections, registeredSentence, stepTools } from './workflow-tool-entries';
+import { nodeTools, recordDocumentConnections, registeredSentence } from './workflow-tool-entries';
 import { hydrateVerifyNode } from './workflow-verify';
 
 //#region Types
@@ -180,13 +180,11 @@ function hydrateCallModelNode(
     return frameworkCast(undefined);
   }
 
-  const tools = stepTools(node.id, node.tools ?? [], ctx);
-
   return callModel({
     id: node.id,
     model: node.model ?? 'openai/gpt-4o',
     instructions: node.instructions,
-    tools: tools.length > 0 ? tools : undefined,
+    tools: nodeTools(node, ctx),
     toolChoice: node.toolChoice,
     params: node.params,
     output: resolveOutputCodec(node.output, node.id, ctx),

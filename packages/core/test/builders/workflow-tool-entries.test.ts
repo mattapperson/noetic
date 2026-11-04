@@ -92,7 +92,7 @@ function grant(provider: (server: GrantedMcpServer) => ConnectionProvider): McpA
   };
 }
 
-function modelDoc(tools: unknown[]): unknown {
+function modelDoc(tools: unknown[] | undefined): unknown {
   return {
     version: 1,
     root: {
@@ -821,6 +821,120 @@ describe('a document run in the middle of a turn', () => {
     expect(run.error).toBeUndefined();
     expect(run.output).not.toContain('rebooted');
     expect(JSON.stringify(run.model.rounds[0]?.toolChoice)).not.toContain('phone_reboot');
+  });
+
+  it('a callModel node with no tools under an empty connections allowlist cannot run an effect op', async () => {
+    const run = await runInTurn(modelDoc(undefined), {
+      reply: callsOnce('phone_reboot'),
+      connections: {},
+    });
+    expect(run.error).toBeUndefined();
+    expect(run.output).not.toContain('rebooted');
+    expect(JSON.stringify(run.model.rounds[0]?.tools)).not.toContain('phone_');
+  });
+
+  it('a callModel node with no tools gets exactly the granted operations', async () => {
+    const run = await runInTurn(modelDoc(undefined), {
+      reply: callsOnce('phone_reboot'),
+      connections: {
+        phone: {
+          ops: [
+            'ping',
+          ],
+        },
+      },
+    });
+    expect(run.error).toBeUndefined();
+    expect(run.output).not.toContain('rebooted');
+    const allowed = JSON.stringify(run.model.rounds[0]?.toolChoice);
+    expect(allowed).toContain('phone_ping');
+    expect(allowed).not.toContain('phone_reboot');
+  });
+
+  it('an acp-agent node with no tools under an empty connections allowlist cannot run an effect op', async () => {
+    const seen: Array<{
+      readonly offered: string[];
+      readonly output: string;
+    }> = [];
+    const agent: AcpAgent = {
+      specificationVersion: 'acp-v1',
+      agentId: 'fake',
+      connect: async (opts) => {
+        const tools = opts.host.tools;
+        const result = await tools?.call({
+          name: 'phone_reboot',
+          args: {},
+          agentCallId: 'c1',
+          signal: new AbortController().signal,
+        });
+        seen.push({
+          offered: (tools?.tools ?? []).map((tool) => tool.name),
+          output: result?.output ?? 'no tools',
+        });
+        throw new Error('stop after the call');
+      },
+    };
+    const run = await runInTurn(
+      {
+        version: 1,
+        root: {
+          kind: 'acp-agent',
+          id: 'agent',
+          agent: 'fake',
+          prompt: 'go',
+        },
+      },
+      {
+        connections: {},
+        acpAgents: new Map([
+          [
+            'fake',
+            agent,
+          ],
+        ]),
+      },
+    );
+    expect(String(run.error)).toContain('stop after the call');
+    expect(seen).toEqual([
+      {
+        offered: [],
+        output: 'no tools',
+      },
+    ]);
+  });
+
+  it('a node with no tools under an allowlist still gets the servers its document attaches', async () => {
+    const built = host();
+    const run = await runInTurn(
+      {
+        version: 1,
+        connections: {
+          remote: {
+            mcp: {
+              name: 'remote',
+              type: 'http',
+              url: 'https://mcp.example.com/v1',
+            },
+          },
+        },
+        root: {
+          kind: 'callModel',
+          id: 'reader',
+          instructions: 'look',
+          model: 'test/model',
+        },
+      },
+      {
+        reply: callsOnce('remote_ping'),
+        mcp: grant(built.provider),
+        connections: {},
+      },
+    );
+    expect(run.error).toBeUndefined();
+    expect(run.output).toContain('pong from remote');
+    const allowed = JSON.stringify(run.model.rounds[0]?.toolChoice);
+    expect(allowed).toContain('remote_ping');
+    expect(allowed).not.toContain('phone_');
   });
 
   it("an acp-agent node's connection entries reach its agent through the bridge, by their harness names", async () => {

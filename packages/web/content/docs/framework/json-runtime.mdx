@@ -196,7 +196,7 @@ Two more `tools` entries give the model a connection's tools, under the same nam
 }
 ```
 
-- `{ "connection": "<name>", "ops"?: [...] }` picks a harness or turn connection: all its tools, or those whose operations match the `ops` globs — `connectionTools(name, { ops })`. Under a `connections` allowlist the name must be granted and each glob must lie inside a granted one; with no `ops` it takes exactly the granted operations.
+- `{ "connection": "<name>", "ops"?: [...] }` picks a harness or turn connection: all its tools, or those whose operations match the `ops` globs — `connectionTools(name, { ops })`. Under a `connections` allowlist the name must be granted and each glob must lie inside a granted one; with no `ops` it takes exactly the granted operations. Under a `connections` allowlist a `callModel` or `acp-agent` node gets exactly the tools it lists, and a node with no `tools` gets each granted connection with exactly its granted operations plus the MCP servers the document's `connections` attach: under `connections: {}` it gets no tools.
 - `{ "mcp": { "name", "type": "http" | "sse", "url", "headers"? } }` attaches an MCP server to the step, like `tools: [mcp({ name, type, url, headers })]`: ACP's `McpServer` shape, as `mcp()` takes it. A stdio server is `{ "mcp": { "name", "command", "args"?, "env"? } }`; on an `acp-agent` node it starts where the node's agent runs. Header and environment values are `{ "$secret" }`s only, and there is no `cwd` or `policy`. The host's [`mcp` allowlist](#mcp-servers) must grant the URL or exact command; it binds the secrets, sets the policy and connects the server.
 
 The three ways to give a model an MCP server, in JSON:
