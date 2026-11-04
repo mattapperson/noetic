@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import assert from 'node:assert';
 import type {
   ConnectionEvent,
@@ -198,6 +198,13 @@ function appOptions(overrides: Partial<InMemoryConnectionOptions> = {}): InMemor
   };
 }
 
+// A provider that keeps failing reconnects every 5 ms until its runtime
+// closes, so every runtime a test builds closes when the test ends.
+const opened: ConnectionRuntime[] = [];
+afterEach(async () => {
+  await Promise.all(opened.splice(0).map((runtime) => runtime.close().catch(() => undefined)));
+});
+
 interface Rig {
   readonly runtime: ConnectionRuntime;
   readonly events: ConnectionFrameworkEventRecord[];
@@ -229,6 +236,7 @@ function rig(
     onFrameworkEvent: (event) => events.push(event),
     reconnectDelayMs: () => 5,
   });
+  opened.push(runtime);
   return {
     runtime,
     events,
