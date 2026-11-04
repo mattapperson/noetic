@@ -488,6 +488,61 @@ describe('checkMcpServers — HTTP and SSE', () => {
     );
   });
 
+  it('refuses one name for two servers before anything runs, across nodes and the document', () => {
+    const node = (id: string, url: string) => ({
+      kind: 'acp-agent' as const,
+      id,
+      agent: 'fake',
+      prompt: 'go',
+      tools: [
+        {
+          mcp: http(url),
+        },
+      ],
+    });
+    const twoNodes: WorkflowDocument = {
+      version: 1,
+      root: {
+        kind: 'sequence',
+        id: 'both',
+        steps: [
+          node('a', 'https://mcp.example.com/a'),
+          node('b', 'https://mcp.example.com/b'),
+        ],
+      },
+    };
+    const docAndNode: WorkflowDocument = {
+      version: 1,
+      connections: {
+        remote: {
+          mcp: http('https://mcp.example.com/a'),
+        },
+      },
+      root: node('b', 'https://mcp.example.com/b'),
+    };
+    for (const doc of [
+      twoNodes,
+      docAndNode,
+    ]) {
+      const error = thrown(() => checkMcpServers(doc, grant, SECRETS));
+      assert(isNoeticConfigError(error));
+      expect(error.code).toBe('CONNECTION_NAME_TAKEN');
+      expect(error.message).toContain("Node 'b' names MCP server 'remote'");
+    }
+    const same: WorkflowDocument = {
+      version: 1,
+      root: {
+        kind: 'sequence',
+        id: 'both',
+        steps: [
+          node('a', 'https://mcp.example.com/a'),
+          node('b', 'https://mcp.example.com/a'),
+        ],
+      },
+    };
+    expect(() => checkMcpServers(same, grant, SECRETS)).not.toThrow();
+  });
+
   it('refuses a URL with a user or password, which a pattern could otherwise match', () => {
     expectNotAllowed(
       agentDoc([

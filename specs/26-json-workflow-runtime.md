@@ -861,7 +861,7 @@ A document's sessions never join the host's. Each run of `parseAndRunWorkflow`, 
 
 #### MCP servers
 
-`parseAndRunWorkflow` and `dynamicWorkflow` accept an MCP server a document names — a `{ "mcp" }` entry in a node's `tools` or the document's `connections` — only when the host's `mcp` allowlist grants it, and check every server (inline subflows included) at parse time, before anything runs:
+`parseAndRunWorkflow` and `dynamicWorkflow` accept an MCP server a document names — a `{ "mcp" }` entry in a node's `tools` or the document's `connections` — only when the host's `mcp` allowlist grants it, and check every server (inline subflows included) at parse time, before anything runs. Two different servers under one name — two nodes, or a node and the document's `connections` — are `CONNECTION_NAME_TAKEN` there too; the same server written the same way twice is one connection:
 
 ```ts
 parseAndRunWorkflow({
@@ -984,7 +984,7 @@ The JSON Workflow Runtime introduces the following `NoeticConfigError` codes:
 | `UNKNOWN_SUBPROCESS_REFERENCE` | A `runCode` node's `subprocess` ref cannot be resolved.                      |
 | `CONNECTION_UNKNOWN`           | A node names a connection the manifest or harness does not have. Other connection codes are in `35-connections` § Errors. |
 | `CONNECTION_NOT_ALLOWED`       | A document asks for more than `connections` grants (a manifest, or a `{ "connection" }` tool entry and its `ops`), names an MCP server, header or environment value `mcp` does not grant, or an `acp-agent` node asks for more than `acp` grants (§ Tools, § What a document may ask of an agent). |
-| `CONNECTION_NAME_TAKEN`        | A document's `{ "mcp" }` entry uses a name the harness or the turn holds for a different connection (§ Tools). |
+| `CONNECTION_NAME_TAKEN`        | A document's `{ "mcp" }` entry uses a name the harness or the turn holds for a different connection, or the document names two different servers under one name (§ Tools, § MCP servers). |
 | `UNKNOWN_UNTIL_PREDICATE`      | An until predicate kind is unrecognised.                                 |
 | `INVALID_UNTIL_DECIDER`        | A decide until predicate does not ask exactly one boolean question (raised at hydration by `loop`/`any`/`all`). |
 | `UNKNOWN_WORKFLOW_REFERENCE`   | A `subflow` ref names no registered workflow (raised at execution time). |

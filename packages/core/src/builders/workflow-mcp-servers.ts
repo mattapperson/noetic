@@ -59,6 +59,7 @@ type Grant = McpUrlGrant | McpCommandGrant;
  *
  * @throws `NoeticConfigError` `CONNECTION_NOT_ALLOWED` for a server, header or environment value the allowlist does not grant, or a header or environment variable named twice.
  * @throws `NoeticConfigError` `CONNECTION_INVALID` for a `$secret` value when the harness has no `secrets` resolver, or an allowlist URL pattern that does not parse.
+ * @throws `NoeticConfigError` `CONNECTION_NAME_TAKEN` for two different servers under one name.
  */
 export function checkMcpServers(
   doc: WorkflowDocument,
@@ -71,12 +72,21 @@ export function checkMcpServers(
       throw noResolver(server.name);
     }
   };
+  const named = new Map<string, WorkflowMcpServer>();
+  const claim = (where: string, server: WorkflowMcpServer) => {
+    check(where, server);
+    const held = named.get(server.name);
+    if (held && JSON.stringify(held) !== JSON.stringify(server)) {
+      throw nameTaken(where, server.name);
+    }
+    named.set(server.name, server);
+  };
   for (const server of documentServers(doc)) {
-    check(DOCUMENT_WHERE, server);
+    claim(DOCUMENT_WHERE, server);
   }
   for (const node of walkWorkflow(doc.root)) {
     for (const server of serversOf(node)) {
-      check(`Node '${node.id}'`, server);
+      claim(`Node '${node.id}'`, server);
     }
   }
 }
@@ -330,6 +340,14 @@ function notAllowed(message: string, hint: string): NoeticConfigError {
     code: 'CONNECTION_NOT_ALLOWED',
     message,
     hint,
+  });
+}
+
+function nameTaken(where: string, server: string): NoeticConfigError {
+  return new NoeticConfigError({
+    code: 'CONNECTION_NAME_TAKEN',
+    message: `${where} names MCP server '${server}', which the document already names with a different URL, command or values.`,
+    hint: 'Give each server its own name, or write the same server the same way everywhere.',
   });
 }
 

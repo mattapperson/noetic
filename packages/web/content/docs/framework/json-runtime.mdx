@@ -220,7 +220,7 @@ The three ways to give a model an MCP server, in JSON:
 
 The `connections` entry is the document's own connection: attached when the document runs, reached by name from every node, and released with the turn. Its key must equal `mcp.name`, and it takes no `from`, `fresh` or `setup`; a malformed one is `CONNECTION_INVALID`. The `triage` node's inline entry is the same server under the same name, so it is the same connection. A `{ "connection" }` pick naming no connection fails with `CONNECTION_UNKNOWN` when the tool set is built.
 
-An `acp-agent` node takes the same two entries in `tools`. A name the harness or the turn already holds for a different connection fails with `CONNECTION_NAME_TAKEN`. A document run from a step in the middle of a turn attaches its entries when it starts; they are released with the turn.
+An `acp-agent` node takes the same two entries in `tools`. A name the harness or the turn already holds for a different connection fails with `CONNECTION_NAME_TAKEN`, and so, before anything runs, do two different servers the document names under one name. A document run from a step in the middle of a turn attaches its entries when it starts; they are released with the turn.
 
 ### runCode
 
