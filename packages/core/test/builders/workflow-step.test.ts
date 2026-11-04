@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import assert from 'node:assert';
 import type { Context, WorkflowDocument, WorkflowNode } from '@noetic-tools/types';
-import { frameworkCast, isNoeticConfigError } from '@noetic-tools/types';
+import { frameworkCast, isNoeticConfigError, WorkflowDocumentSchema } from '@noetic-tools/types';
 import { callModel, runCode } from '../../src/builders/step-builders';
 import { workflow } from '../../src/builders/workflow-step';
 import { makeMockContext, makeMockHarness, makeTestTool } from '../_helpers';
@@ -166,6 +166,59 @@ describe('workflow — execution', () => {
       expect(e.code).toBe('UNKNOWN_WORKFLOW_REFERENCE');
       expect(e.hint).toContain('(none)');
     }
+  });
+
+  test('a subflow document declares no connections, inline or named', async () => {
+    const withConnections = {
+      version: 1,
+      connections: {
+        docs: {
+          mcp: {
+            name: 'docs',
+            type: 'http',
+            url: 'https://mcp.example.com/docs',
+          },
+        },
+      },
+      root: INLINE_DOC.root,
+    } as const;
+    const inline = WorkflowDocumentSchema.safeParse({
+      version: 1,
+      root: {
+        kind: 'subflow',
+        id: 'sf',
+        document: withConnections,
+      },
+    });
+    assert(!inline.success);
+    expect(inline.error.message).toContain('A subflow document declares no connections');
+    const built = workflow({
+      id: 'wf-named',
+      document: {
+        version: 1,
+        root: {
+          kind: 'subflow',
+          id: 'sf',
+          ref: 'named',
+        },
+      },
+      workflows: new Map([
+        [
+          'named',
+          withConnections,
+        ],
+      ]),
+    });
+    const { ctx, executed } = makeRecordingContext();
+    try {
+      await built.execute('in', ctx);
+      expect.unreachable('expected CONNECTION_INVALID');
+    } catch (e) {
+      assert(isNoeticConfigError(e));
+      expect(e.code).toBe('CONNECTION_INVALID');
+      expect(e.message).toContain("Sub-workflow 'named'");
+    }
+    expect(executed.map((run) => run.kind)).not.toContain('callModel');
   });
 
   test('a step built from a ref counts that ref toward maxRecursionDepth', async () => {

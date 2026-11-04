@@ -21,6 +21,7 @@ export type {
   ScheduleWorkflowNode,
   SequenceWorkflowNode,
   SpawnWorkflowNode,
+  SubflowDocument,
   SubflowWorkflowNode,
   UntilPredicate,
   VerifyWorkflowNode,

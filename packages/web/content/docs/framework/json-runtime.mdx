@@ -627,7 +627,7 @@ Run another workflow document as a single step — inline, or by name resolved f
 | `ref` | `string` | XOR | Named sub-workflow resolved from `HydrationContext.workflows` (or the `workflows` option on `parseAndRunWorkflow`). |
 | `input` | `string` | `undefined` | Literal input for the sub-workflow; defaults to the node's runtime input. |
 
-Resolution is lazy — the target document resolves and hydrates on first execution, so a live registry may gain entries after hydration. An unregistered name raises `UNKNOWN_WORKFLOW_REFERENCE`. Two subflow nodes referencing the same workflow are fine — the sub-tree's node ids are suffixed with the subflow node's id so traces stay distinct.
+Resolution is lazy — the target document resolves and hydrates on first execution, so a live registry may gain entries after hydration. An unregistered name raises `UNKNOWN_WORKFLOW_REFERENCE`. Two subflow nodes referencing the same workflow are fine — the sub-tree's node ids are suffixed with the subflow node's id so traces stay distinct. A subflow document, inline or named, declares no `connections`: its nodes use the root document's. An inline one that does fails validation, and a named one fails with `CONNECTION_INVALID` when it resolves.
 
 #### Recursion
 

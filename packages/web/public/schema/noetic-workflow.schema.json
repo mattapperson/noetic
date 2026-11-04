@@ -2682,7 +2682,62 @@
               }
             },
             "document": {
-              "$ref": "#/$defs/WorkflowDocument"
+              "type": "object",
+              "properties": {
+                "version": {
+                  "type": "number",
+                  "const": 1
+                },
+                "customItems": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "pattern": "^[^:]+:.+$"
+                      },
+                      "description": {
+                        "type": "string"
+                      },
+                      "event": {
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string"
+                        },
+                        "additionalProperties": {}
+                      },
+                      "output": {
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string"
+                        },
+                        "additionalProperties": {}
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "output"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "connections": {
+                  "not": {}
+                },
+                "root": {
+                  "$ref": "#/$defs/WorkflowNode"
+                }
+              },
+              "required": [
+                "version",
+                "root"
+              ],
+              "additionalProperties": false
             },
             "ref": {
               "type": "string",

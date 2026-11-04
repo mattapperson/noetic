@@ -434,7 +434,7 @@ Runs another workflow document as a single step — either inline or by name.
 interface SubflowWorkflowNode {
   kind: 'subflow';
   id: string;
-  document?: WorkflowDocument;
+  document?: SubflowDocument;   // a WorkflowDocument without `connections`
   ref?: string;
   input?: string;
 }
@@ -446,7 +446,7 @@ interface SubflowWorkflowNode {
 | `ref`      | XOR      | Named sub-workflow resolved from `HydrationContext.workflows`.           |
 | `input`    | No       | Literal input passed to the sub-workflow; defaults to the node's input.  |
 
-Resolution is lazy: the target document resolves and hydrates on the node's first execution, memoized afterwards. A live `workflows` map may therefore gain entries after hydration and still satisfy refs. The hydrated sub-document's node ids are suffixed with `-<node id>` so two subflow nodes referencing the same named workflow trace with distinct step ids.
+Resolution is lazy: the target document resolves and hydrates on the node's first execution, memoized afterwards. A live `workflows` map may therefore gain entries after hydration and still satisfy refs. The hydrated sub-document's node ids are suffixed with `-<node id>` so two subflow nodes referencing the same named workflow trace with distinct step ids. A subflow document, inline or named, declares no `connections`: its nodes use the root document's. An inline one that does fails validation, and a named one fails with `CONNECTION_INVALID` when it resolves.
 
 #### Recursion
 

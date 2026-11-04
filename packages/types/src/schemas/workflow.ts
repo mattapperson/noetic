@@ -635,13 +635,22 @@ export interface AcpAgentWorkflowNode extends WorkflowNodeBase {
  */
 export interface SubflowWorkflowNode extends WorkflowNodeBase {
   kind: 'subflow';
-  /** Inline sub-workflow. Mutually exclusive with `ref`. */
-  document?: WorkflowDocument;
+  /**
+   * Inline sub-workflow. Mutually exclusive with `ref`. It declares no
+   * `connections`: its nodes use the root document's.
+   */
+  document?: SubflowDocument;
   /** Named sub-workflow resolved from `HydrationContext.workflows`. Mutually exclusive with `document`. */
   ref?: string;
   /** Literal input passed to the sub-workflow; defaults to the node's runtime input. */
   input?: string;
 }
+
+/**
+ * @public A document a `subflow` node runs inline: a `WorkflowDocument`
+ * without `connections`, since its nodes use the root document's.
+ */
+export type SubflowDocument = Omit<WorkflowDocument, 'connections'>;
 
 //#region Connection Node Types
 
@@ -1143,13 +1152,25 @@ const ScheduleNodeSchema = z.object({
     .optional(),
 });
 
-const WorkflowDocumentRef: z.ZodType<WorkflowDocument> = z.lazy(() => WorkflowDocumentSchema);
+const SubflowDocumentSchema: z.ZodType<SubflowDocument> = z.lazy(() =>
+  z.object({
+    version: z.literal(1),
+    customItems: CustomItemsSchema.optional(),
+    connections: z
+      .never({
+        error:
+          "A subflow document declares no connections: its nodes use the root document's, so declare them there.",
+      })
+      .optional(),
+    root: WorkflowNodeSchema,
+  }),
+);
 
 const SubflowNodeSchema = z
   .object({
     kind: z.literal('subflow'),
     ...SHARED_FIELDS,
-    document: WorkflowDocumentRef.optional(),
+    document: SubflowDocumentSchema.optional(),
     ref: z.string().min(1).optional(),
     input: z.string().optional(),
   })
