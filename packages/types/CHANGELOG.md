@@ -1,3 +1,7 @@
+## @noetic-tools/types-v3.18.0 (2026-11-04)
+
+* feat: one way to attach MCP servers, served to every agent (#156) ([2195f69](https://github.com/mattapperson/noetic/commit/2195f69)), closes [#156](https://github.com/mattapperson/noetic/issues/156)
+
 ## @noetic-tools/types-v3.17.2 (2026-11-03)
 
 * fix(core): hold a document's acp-agent nodes and MCP servers to host grants (#155) ([89ed3e6](https://github.com/mattapperson/noetic/commit/89ed3e6)), closes [#155](https://github.com/mattapperson/noetic/issues/155)
