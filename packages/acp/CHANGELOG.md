@@ -1,3 +1,7 @@
+## @noetic-tools/acp-v1.4.0 (2026-11-04)
+
+* feat: one way to attach MCP servers, served to every agent (#156) ([2195f69](https://github.com/mattapperson/noetic/commit/2195f69)), closes [#156](https://github.com/mattapperson/noetic/issues/156)
+
 ## @noetic-tools/acp-v1.3.1 (2026-10-30)
 
 * ci: publish prereleases from next to the next dist-tag (#152) ([0b247bc](https://github.com/mattapperson/noetic/commit/0b247bc)), closes [#152](https://github.com/mattapperson/noetic/issues/152)
