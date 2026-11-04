@@ -1,3 +1,7 @@
+## @noetic-tools/agent-plugins-v0.3.0 (2026-11-04)
+
+* feat: one way to attach MCP servers, served to every agent (#156) ([2195f69](https://github.com/mattapperson/noetic/commit/2195f69)), closes [#156](https://github.com/mattapperson/noetic/issues/156)
+
 ## @noetic-tools/agent-plugins-v0.2.2 (2026-11-04)
 
 * fix(agent-plugins): depend on @noetic-tools/mcp ~1.0.0 (#157) ([1637445](https://github.com/mattapperson/noetic/commit/1637445)), closes [#157](https://github.com/mattapperson/noetic/issues/157)
