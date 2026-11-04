@@ -23,6 +23,7 @@ import type {
   WorkflowTypedToolEntry,
 } from '@noetic-tools/types';
 import { isServerToolSpec, NoeticConfigError, walkWorkflow } from '@noetic-tools/types';
+import { setConnectionCeiling } from './connection-ceiling';
 import { setDocumentEntries } from './document-entries';
 import type { ConnectionManifestEntries } from './workflow-connections';
 import { globMatches } from './workflow-connections';
@@ -49,7 +50,7 @@ export interface ToolEntryHosts {
 /**
  * The step tools a `callModel` or `acp-agent` node stands for. Under a
  * connections allowlist a node gets exactly what it lists; a node with no
- * `tools` has none, and `nodeCeiling` bounds the connections it is offered.
+ * `tools` has none, and `withCeiling` bounds the connections it is offered.
  * Without an allowlist an empty list is no list.
  *
  * @throws `NoeticConfigError` as `stepTools`.
@@ -69,22 +70,24 @@ export function nodeTools(
 }
 
 /**
- * What a node with no `tools` may be offered of the turn's connections under a
- * connections allowlist: each granted connection with exactly its granted
- * operations, plus the MCP servers its document's `connections` attach — never
- * every connection the harness holds. Its other tools are those of any step
- * with no `tools`. Undefined when the node lists tools or no allowlist applies.
+ * Records on `built`, the step for a node with no `tools` under a
+ * connections allowlist, the most of the turn's connections it may be
+ * offered: each granted connection with exactly its granted operations, plus
+ * the MCP servers its document's `connections` attach — never every
+ * connection the harness holds. Its other tools are those of any step with no
+ * `tools`. Returns `built`.
  */
-export function nodeCeiling(
+export function withCeiling<S extends object>(
+  built: S,
   node: {
     readonly tools?: ReadonlyArray<WorkflowToolEntry>;
   },
   hosts: Pick<ToolEntryHosts, 'allowlist' | 'connections'>,
-): ConnectionPick[] | undefined {
-  if (node.tools !== undefined || hosts.allowlist === undefined) {
-    return undefined;
+): S {
+  if (node.tools === undefined && hosts.allowlist !== undefined) {
+    setConnectionCeiling(built, grantedPicks(hosts.allowlist, hosts.connections));
   }
-  return grantedPicks(hosts.allowlist, hosts.connections);
+  return built;
 }
 
 /**

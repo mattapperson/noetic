@@ -100,5 +100,6 @@ describe('the environment a stdio MCP server starts with', () => {
     expect(local[HOST_SECRET]).toBeUndefined();
     expect(machine).toEqual(local);
     expect(runner).toEqual(local);
-  });
+    // It starts three servers, each a fresh process.
+  }, 30e3);
 });

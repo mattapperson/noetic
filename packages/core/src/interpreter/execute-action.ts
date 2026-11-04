@@ -13,11 +13,11 @@ import {
   NoeticConfigError,
   NoeticErrorImpl,
 } from '@noetic-tools/types';
-import { connectionCeilingOf } from '../builders/connection-ceiling';
 import type { SplitStepTools } from '../connections/step-tools';
 import {
   checkLazyEntries,
   offeredTools,
+  splitCeiling,
   splitStepTools,
   stepConnectionsOf,
   withOffered,
@@ -421,17 +421,7 @@ export function splitResolvedTools(
   ctx: Context,
 ): SplitStepTools | undefined {
   if (resolved === undefined) {
-    const ceiling = connectionCeilingOf(step);
-    return ceiling
-      ? {
-          tools: [],
-          serverTools: [],
-          picks: [
-            ...ceiling,
-          ],
-          ceiling: true,
-        }
-      : undefined;
+    return splitCeiling(step);
   }
   if (typeof step.tools === 'function') {
     checkLazyEntries(step.id, resolved, stepConnectionsOf(ctx));

@@ -21,14 +21,13 @@ import { compileExpression, compute, passes, readInput } from '../expression/jso
 import type { WorkflowConnectionRef, WorkflowNode } from '../schemas/workflow';
 import { getDefaultRegistrar } from '../types/step-registrar';
 import { DetachedHandleImpl } from '../util/detached-handle';
-import { setConnectionCeiling } from './connection-ceiling';
 import { outputText } from './output-text';
 import { runCode, step } from './step-builders';
 import { boundedAcpSettings } from './workflow-acp-grants';
 import { compileArgs, documentHandle, documentSecretsOf } from './workflow-connections';
 import type { HydrationContext } from './workflow-hydrator';
 import { bindingsFor, hydrateStepList } from './workflow-hydrator';
-import { nodeCeiling, nodeTools } from './workflow-tool-entries';
+import { nodeTools, withCeiling } from './workflow-tool-entries';
 
 //#region Connection Node Hydrators
 
@@ -270,11 +269,7 @@ export function hydrateAcpAgentNode(
     clientCapabilities: bounded.clientCapabilities,
     session: bounded.session,
   });
-  const ceiling = nodeCeiling(node, ctx);
-  if (ceiling) {
-    setConnectionCeiling(built, ceiling);
-  }
-  return built;
+  return withCeiling(built, node, ctx);
 }
 
 export function hydrateRunCodeNode(

@@ -22,6 +22,7 @@ import type {
   Tool,
 } from '@noetic-tools/types';
 import { isConnectionEntry, isConnectionPick, isServerToolSpec } from '@noetic-tools/types';
+import { connectionCeilingOf } from '../builders/connection-ceiling';
 import type { NamedEntry } from '../types/connection-entry';
 import { rootOf } from '../util/root-context';
 import { namedFromList, sameConfig } from './entries';
@@ -67,6 +68,24 @@ export function stepConnectionsOf(ctx: Context): StepConnections | undefined {
     runtime,
     rootId: rootOf(ctx).id,
   };
+}
+
+/**
+ * The split a step with no `tools` stands for when a document node built it
+ * under a connections allowlist: its ceiling, as picks. Undefined otherwise.
+ */
+export function splitCeiling(step: object): SplitStepTools | undefined {
+  const ceiling = connectionCeilingOf(step);
+  return ceiling
+    ? {
+        tools: [],
+        serverTools: [],
+        picks: [
+          ...ceiling,
+        ],
+        ceiling: true,
+      }
+    : undefined;
 }
 
 /** Splits a step's `tools` into client tools, server tools and connection picks. */

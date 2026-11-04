@@ -34,7 +34,6 @@ import type {
   WorkflowStepList,
 } from '../schemas/workflow';
 import { shorthandStepId, stepEntryToNode, stepListEntries } from '../schemas/workflow';
-import { setConnectionCeiling } from './connection-ceiling';
 import { outputText } from './output-text';
 import { callModel, runCode } from './step-builders';
 import {
@@ -66,10 +65,10 @@ import {
 } from './workflow-custom-items';
 import { workflowReplayKey } from './workflow-replay-key';
 import {
-  nodeCeiling,
   nodeTools,
   recordDocumentConnections,
   registeredSentence,
+  withCeiling,
 } from './workflow-tool-entries';
 import { hydrateVerifyNode } from './workflow-verify';
 
@@ -186,20 +185,19 @@ function hydrateCallModelNode(
     return frameworkCast(undefined);
   }
 
-  const built = callModel({
-    id: node.id,
-    model: node.model ?? 'openai/gpt-4o',
-    instructions: node.instructions,
-    tools: nodeTools(node, ctx),
-    toolChoice: node.toolChoice,
-    params: node.params,
-    output: resolveOutputCodec(node.output, node.id, ctx),
-  });
-  const ceiling = nodeCeiling(node, ctx);
-  if (ceiling) {
-    setConnectionCeiling(built, ceiling);
-  }
-  return built;
+  return withCeiling(
+    callModel({
+      id: node.id,
+      model: node.model ?? 'openai/gpt-4o',
+      instructions: node.instructions,
+      tools: nodeTools(node, ctx),
+      toolChoice: node.toolChoice,
+      params: node.params,
+      output: resolveOutputCodec(node.output, node.id, ctx),
+    }),
+    node,
+    ctx,
+  );
 }
 
 /**
