@@ -47,7 +47,7 @@
     "zod": "^4.0.0"
   },
   "dependencies": {
-    "@noetic-tools/mcp": "workspace:*",
+    "@noetic-tools/mcp": "~1.0.0",
     "@noetic-tools/types": "workspace:*",
     "yaml": "^2.9.0",
     "zod": "^4.0.0"
