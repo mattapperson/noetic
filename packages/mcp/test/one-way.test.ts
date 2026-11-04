@@ -14,7 +14,7 @@ import assert from 'node:assert';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import type { McpAllowlist, Step } from '@noetic-tools/types';
+import type { ConnectionAllowlist, McpAllowlist, Step } from '@noetic-tools/types';
 import { frameworkCast, isNoeticConfigError } from '@noetic-tools/types';
 import { z } from 'zod';
 import type { ContextData } from '../../core/src/index';
@@ -269,7 +269,10 @@ function harnessFields(model: FakeOpenRouter): {
 }
 
 /** A host step that runs `json` from inside the turn, as a document a step hydrates. */
-function runsDocument(json: unknown): (harness: () => AgentHarness) => AgentGraph {
+function runsDocument(
+  json: unknown,
+  connections?: ConnectionAllowlist,
+): (harness: () => AgentHarness) => AgentGraph {
   return (harness) =>
     frameworkCast<AgentGraph>(
       runCode({
@@ -284,6 +287,11 @@ function runsDocument(json: unknown): (harness: () => AgentHarness) => AgentGrap
               search,
             ],
             mcp: allowlist(),
+            ...(connections
+              ? {
+                  connections,
+                }
+              : {}),
           }),
       }),
     );
@@ -457,20 +465,29 @@ describe('the one way to give an agent an MCP server', () => {
             linear,
           ],
         }),
-      runsDocument({
-        version: 1,
-        root: callModelNode([
-          {
-            connection: 'linear',
+      runsDocument(
+        {
+          version: 1,
+          root: callModelNode([
+            {
+              connection: 'linear',
+              ops: [
+                'get_*',
+              ],
+            },
+            {
+              type: 'search',
+            },
+          ]),
+        },
+        {
+          linear: {
             ops: [
               'get_*',
             ],
           },
-          {
-            type: 'search',
-          },
-        ]),
-      }),
+        },
+      ),
     );
     expect(json).toEqual(typescript);
   });

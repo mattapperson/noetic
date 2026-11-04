@@ -13,6 +13,7 @@ import {
   NoeticConfigError,
   NoeticErrorImpl,
 } from '@noetic-tools/types';
+import { connectionCeilingOf } from '../builders/connection-ceiling';
 import type { SplitStepTools } from '../connections/step-tools';
 import {
   checkLazyEntries,
@@ -229,6 +230,7 @@ export async function resolveLazy<T, TContext>(
  * Semantics:
  *   step.tools = undefined → unrestricted (all tools, no allowedToolNames),
  *                            except the tools of connections only some step lists
+ *                            (a document node's ceiling narrows its connections)
  *   step.tools = []        → no tools at all
  *   step.tools = [a, b]    → full set sent, restrict to a and b (a connection
  *                            entry or pick restricts to its connection's tools,
@@ -244,7 +246,7 @@ export function resolveToolsAndRestrictions(
 ): ResolvedTools {
   const stepTools = listed?.tools;
   // stepTools = [] → explicit opt-out
-  if (listed && listed.tools.length === 0 && listed.picks.length === 0) {
+  if (listed && !listed.ceiling && listed.tools.length === 0 && listed.picks.length === 0) {
     return {
       tools: undefined,
       allowedToolNames: undefined,
@@ -419,7 +421,17 @@ export function splitResolvedTools(
   ctx: Context,
 ): SplitStepTools | undefined {
   if (resolved === undefined) {
-    return undefined;
+    const ceiling = connectionCeilingOf(step);
+    return ceiling
+      ? {
+          tools: [],
+          serverTools: [],
+          picks: [
+            ...ceiling,
+          ],
+          ceiling: true,
+        }
+      : undefined;
   }
   if (typeof step.tools === 'function') {
     checkLazyEntries(step.id, resolved, stepConnectionsOf(ctx));

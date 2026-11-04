@@ -1442,10 +1442,10 @@ describe("a document's own connections", () => {
     }
   });
 
-  it('refuses a pick naming no connection with CONNECTION_UNKNOWN before the agent starts', async () => {
+  it('refuses a pick naming a connection nothing grants, before the agent starts', async () => {
     const message = await expectConfig(
       runDoc(connectionsDoc(undefined, 'nowhere')),
-      'CONNECTION_UNKNOWN',
+      'CONNECTION_NOT_ALLOWED',
     );
     expect(message).toContain("'nowhere'");
   });

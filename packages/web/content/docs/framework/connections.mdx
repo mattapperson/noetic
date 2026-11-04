@@ -443,7 +443,7 @@ A [JSON workflow](/docs/framework/json-runtime) lists the connections it needs, 
 
 ### What a document may use
 
-A document's manifest says what it needs; the host decides what it may have. `dynamicWorkflow` — where a model writes the document — requires an allowlist to use connections at all, and `parseAndRunWorkflow` accepts one:
+A document's manifest says what it needs; the host decides what it may have, through the `connections` allowlist of `dynamicWorkflow` and `parseAndRunWorkflow`:
 
 ```ts
 import { dynamicWorkflow } from '@noetic-tools/core';
@@ -463,7 +463,9 @@ const planner = dynamicWorkflow({
 
 Each entry grants operation and event globs, the `setup` values a document may choose (patterns per field), and the secrets it may use, each bound to one operation field. A manifest asking for more fails validation with [`CONNECTION_NOT_ALLOWED`](/docs/framework/errors#connection_not_allowed). `dynamicWorkflow` shows the model only the allowed connections and operations, with their argument schemas, and fills in the manifest's version ranges itself.
 
-The same entries bound a document's `{ "connection" }` tool entries: the name must be granted (a harness or a turn connection), each `ops` glob must lie inside a granted one, and a pick without `ops` takes exactly the granted operations.
+The same entries bound a document's `{ "connection" }` tool entries: the name must be granted (a harness or a turn connection), each `ops` glob must lie inside a granted one, and a pick without `ops` takes exactly the granted operations. A `callModel` or `acp-agent` node with no `tools` is offered only the granted connections and the MCP servers the document attaches.
+
+Without `connections` a document is granted nothing, as with `acp` and `mcp`: no option is `connections: {}`, so a manifest entry, a `{ "connection" }` pick or a `call`, `wait` or `verify` node naming a harness connection fails with `CONNECTION_NOT_ALLOWED`, and a `callModel` or `acp-agent` node with no `tools` is offered no connection. A host that trusts a document passes the grants it wants it to have.
 
 ## Gates
 

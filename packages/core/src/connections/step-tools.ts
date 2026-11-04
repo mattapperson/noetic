@@ -45,6 +45,12 @@ export interface SplitStepTools {
   readonly serverTools: ServerToolSpec[];
   /** The connections it lists: entries (no `ops`) and picks. */
   readonly picks: ConnectionPick[];
+  /**
+   * The picks are a ceiling, not a list: a document node with no `tools` may
+   * reach only these connections, and keeps every other tool a step with no
+   * `tools` is offered.
+   */
+  readonly ceiling?: true;
 }
 
 //#endregion
@@ -99,7 +105,8 @@ export function offeredTools(
   turn: StepConnections | undefined,
 ): Tool[] | undefined {
   const allows = listed ? pickedBy(listed.picks) : sharedIn(turn);
-  const names = listed ? new Set(listed.tools.map((tool) => tool.name)) : undefined;
+  const names =
+    listed && !listed.ceiling ? new Set(listed.tools.map((tool) => tool.name)) : undefined;
   const offered = unified.flatMap((tool) => {
     const cut = cutForStep(tool, allows);
     if (cut === 'not-connection') {
@@ -116,7 +123,7 @@ export function offeredTools(
       : [];
   });
   const whole = offered.length === unified.length && offered.every((t, i) => t === unified[i]);
-  return !listed && whole ? undefined : offered;
+  return (!listed || listed.ceiling) && whole ? undefined : offered;
 }
 
 /**

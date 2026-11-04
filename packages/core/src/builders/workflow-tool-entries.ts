@@ -48,11 +48,9 @@ export interface ToolEntryHosts {
 
 /**
  * The step tools a `callModel` or `acp-agent` node stands for. Under a
- * connections allowlist a node gets exactly what it lists, and a node with no
- * `tools` gets each granted connection with exactly its granted operations,
- * plus the MCP servers its document's `connections` attach — never every
- * connection the harness holds. Without an allowlist an empty list is no
- * list, and the step is offered what any step with no `tools` is.
+ * connections allowlist a node gets exactly what it lists; a node with no
+ * `tools` has none, and `nodeCeiling` bounds the connections it is offered.
+ * Without an allowlist an empty list is no list.
  *
  * @throws `NoeticConfigError` as `stepTools`.
  */
@@ -63,14 +61,30 @@ export function nodeTools(
   },
   hosts: ToolEntryHosts,
 ): StepToolEntry[] | undefined {
-  if (hosts.allowlist === undefined) {
-    const tools = stepTools(node.id, node.tools ?? [], hosts);
-    return tools.length > 0 ? tools : undefined;
-  }
   if (node.tools === undefined) {
-    return grantedPicks(hosts.allowlist, hosts.connections);
+    return undefined;
   }
-  return stepTools(node.id, node.tools, hosts);
+  const tools = stepTools(node.id, node.tools, hosts);
+  return hosts.allowlist === undefined && tools.length === 0 ? undefined : tools;
+}
+
+/**
+ * What a node with no `tools` may be offered of the turn's connections under a
+ * connections allowlist: each granted connection with exactly its granted
+ * operations, plus the MCP servers its document's `connections` attach — never
+ * every connection the harness holds. Its other tools are those of any step
+ * with no `tools`. Undefined when the node lists tools or no allowlist applies.
+ */
+export function nodeCeiling(
+  node: {
+    readonly tools?: ReadonlyArray<WorkflowToolEntry>;
+  },
+  hosts: Pick<ToolEntryHosts, 'allowlist' | 'connections'>,
+): ConnectionPick[] | undefined {
+  if (node.tools !== undefined || hosts.allowlist === undefined) {
+    return undefined;
+  }
+  return grantedPicks(hosts.allowlist, hosts.connections);
 }
 
 /**
@@ -104,7 +118,7 @@ export function stepTools(
 export function connectionEntries(
   nodeId: string,
   entries: ReadonlyArray<WorkflowStepConnectionEntry>,
-  hosts: Pick<ToolEntryHosts, 'allowlist' | 'mcp' | 'spawn'>,
+  hosts: Pick<ToolEntryHosts, 'allowlist' | 'mcp' | 'spawn' | 'connections'>,
 ): Array<ConnectionPick | ConnectionConfig> {
   return entries.map((entry) =>
     'mcp' in entry
@@ -112,7 +126,7 @@ export function connectionEntries(
           allowlist: hosts.mcp,
           spawn: hosts.spawn,
         })
-      : connectionPick(nodeId, entry, hosts.allowlist),
+      : connectionPick(nodeId, entry, hosts),
   );
 }
 
@@ -145,17 +159,19 @@ export function recordDocumentConnections(
  * Checks every `{ connection }` tool entry against the host's allowlist: it
  * names an allowed connection, and each of its `ops` globs stays inside the
  * operations the allowlist grants. Without `ops` the pick takes exactly the
- * granted operations.
+ * granted operations. A pick of an MCP server the document's own
+ * `connections` attach answers to the `mcp` allowlist instead.
  *
  * @throws `NoeticConfigError` `CONNECTION_NOT_ALLOWED` for a connection or operation glob the allowlist does not grant.
  */
 export function checkToolConnections(doc: WorkflowDocument, allowlist: ConnectionAllowlist): void {
+  const own = ownServers(doc.connections);
   for (const node of walkWorkflow(doc.root)) {
     if (node.kind !== 'callModel' && node.kind !== 'acp-agent') {
       continue;
     }
     for (const entry of node.tools ?? []) {
-      if ('connection' in entry) {
+      if ('connection' in entry && !own.has(entry.connection)) {
         allowedOps(node.id, entry, allowlist);
       }
     }
@@ -165,6 +181,18 @@ export function checkToolConnections(doc: WorkflowDocument, allowlist: Connectio
 //#endregion
 
 //#region Helpers
+
+/**
+ * The MCP servers a document's own `connections` attach. A pick of one answers
+ * to the `mcp` allowlist, which granted the server, not to `connections`.
+ */
+function ownServers(manifest: ConnectionManifestEntries | undefined): ReadonlySet<string> {
+  return new Set(
+    Object.entries(manifest ?? {})
+      .filter(([, entry]) => entry.mcp !== undefined)
+      .map(([name]) => name),
+  );
+}
 
 function grantedPicks(
   allowlist: ConnectionAllowlist,
@@ -202,9 +230,11 @@ function isConnectionEntry(entry: WorkflowToolEntry): entry is WorkflowStepConne
 function connectionPick(
   nodeId: string,
   entry: WorkflowConnectionToolEntry,
-  allowlist: ConnectionAllowlist | undefined,
+  hosts: Pick<ToolEntryHosts, 'allowlist' | 'connections'>,
 ): ConnectionPick {
-  const ops = allowlist ? allowedOps(nodeId, entry, allowlist) : entry.ops;
+  const { allowlist } = hosts;
+  const own = ownServers(hosts.connections).has(entry.connection);
+  const ops = allowlist && !own ? allowedOps(nodeId, entry, allowlist) : entry.ops;
   return {
     kind: 'connection-pick',
     connection: entry.connection,

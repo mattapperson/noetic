@@ -21,13 +21,14 @@ import { compileExpression, compute, passes, readInput } from '../expression/jso
 import type { WorkflowConnectionRef, WorkflowNode } from '../schemas/workflow';
 import { getDefaultRegistrar } from '../types/step-registrar';
 import { DetachedHandleImpl } from '../util/detached-handle';
+import { setConnectionCeiling } from './connection-ceiling';
 import { outputText } from './output-text';
 import { runCode, step } from './step-builders';
 import { boundedAcpSettings } from './workflow-acp-grants';
 import { compileArgs, documentHandle, documentSecretsOf } from './workflow-connections';
 import type { HydrationContext } from './workflow-hydrator';
 import { bindingsFor, hydrateStepList } from './workflow-hydrator';
-import { nodeTools } from './workflow-tool-entries';
+import { nodeCeiling, nodeTools } from './workflow-tool-entries';
 
 //#region Connection Node Hydrators
 
@@ -254,7 +255,7 @@ export function hydrateAcpAgentNode(
     });
   }
   const bounded = ctx.acpBounds ? boundedAcpSettings(node, ctx.acpBounds) : node;
-  return step.acpAgent({
+  const built: Step<ContextData, string, string> = step.acpAgent({
     id: node.id,
     agent,
     prompt: node.prompt,
@@ -269,6 +270,11 @@ export function hydrateAcpAgentNode(
     clientCapabilities: bounded.clientCapabilities,
     session: bounded.session,
   });
+  const ceiling = nodeCeiling(node, ctx);
+  if (ceiling) {
+    setConnectionCeiling(built, ceiling);
+  }
+  return built;
 }
 
 export function hydrateRunCodeNode(

@@ -470,6 +470,18 @@ function graphFor(
             ctx,
             tools: [],
             mcp: ALLOWLIST,
+            // The host trusts the document with the harness's own `linear`.
+            ...(attachment === 'json connection'
+              ? {
+                  connections: {
+                    linear: {
+                      ops: [
+                        '*',
+                      ],
+                    },
+                  },
+                }
+              : {}),
             acpAgents: new Map([
               [
                 'claude-shaped',

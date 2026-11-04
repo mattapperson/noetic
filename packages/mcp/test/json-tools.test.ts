@@ -239,6 +239,18 @@ function graphFor(route: Route, harness: () => AgentHarness): AgentGraph {
         tools: [],
         input,
         mcp: ALLOWLIST(),
+        // The host trusts the document with the harness's own `linear`.
+        ...(route === 'json connection'
+          ? {
+              connections: {
+                linear: {
+                  ops: [
+                    '*',
+                  ],
+                },
+              },
+            }
+          : {}),
       }),
   });
 }

@@ -109,10 +109,16 @@ function retryError(prompt: string): string {
   return start < 0 ? '' : prompt.slice(start, start + 400);
 }
 
+/**
+ * Runs `json` under `connections`. A document grants nothing without them, so
+ * the default is what a host that wrote the document grants it: every
+ * operation and event of each connection its manifest names, and the
+ * password in `ui.fill.text`.
+ */
 async function runDoc(
   harness: AgentHarness,
   json: unknown,
-  connections?: ConnectionAllowlist,
+  connections: ConnectionAllowlist = trusting(json),
 ): Promise<Settled> {
   return settle(
     parseAndRunWorkflow({
@@ -120,12 +126,36 @@ async function runDoc(
       harness,
       ctx: harness.createContext(),
       tools: [],
-      ...(connections === undefined
-        ? {}
-        : {
-            connections,
-          }),
+      connections,
     }),
+  );
+}
+
+function trusting(json: unknown): ConnectionAllowlist {
+  const manifest =
+    typeof json === 'object' && json !== null && 'connections' in json ? json.connections : {};
+  const targets = Object.entries(
+    typeof manifest === 'object' && manifest !== null ? manifest : {},
+  ).map(([name, entry]) =>
+    typeof entry === 'object' && entry !== null && 'from' in entry && typeof entry.from === 'string'
+      ? entry.from
+      : name,
+  );
+  return Object.fromEntries(
+    targets.map((target) => [
+      target,
+      {
+        ops: [
+          '*',
+        ],
+        events: [
+          '*',
+        ],
+        secrets: {
+          'app.password': 'ui.fill.text',
+        },
+      },
+    ]),
   );
 }
 

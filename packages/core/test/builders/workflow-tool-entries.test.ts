@@ -73,6 +73,15 @@ function host(): {
 
 const URL_GRANT = 'https://mcp.example.com/*';
 
+/** Every operation of the harness's `phone`: what a host that trusts the document grants. */
+const PHONE_GRANT: ConnectionAllowlist = {
+  phone: {
+    ops: [
+      '*',
+    ],
+  },
+};
+
 function grant(provider: (server: GrantedMcpServer) => ConnectionProvider): McpAllowlist {
   return {
     urls: [
@@ -654,6 +663,9 @@ describe('a document run in the middle of a turn', () => {
           ],
         },
       ]),
+      {
+        connections: PHONE_GRANT,
+      },
     );
     expect(run.error).toBeUndefined();
     expect(run.output).toBe('saw pong from phone');
@@ -833,6 +845,70 @@ describe('a document run in the middle of a turn', () => {
     expect(JSON.stringify(run.model.rounds[0]?.tools)).not.toContain('phone_');
   });
 
+  it('without a connections option, a callModel node with no tools is offered no connection', async () => {
+    const run = await runInTurn(modelDoc(undefined), {
+      reply: callsOnce('phone_reboot'),
+    });
+    expect(run.error).toBeUndefined();
+    expect(run.output).not.toContain('rebooted');
+    expect(run.model.rounds[0]?.tools).toEqual([]);
+  });
+
+  it('without a connections option, an acp-agent node with no tools is offered no connection', async () => {
+    const offered: string[][] = [];
+    const agent: AcpAgent = {
+      specificationVersion: 'acp-v1',
+      agentId: 'fake',
+      connect: async (opts) => {
+        offered.push((opts.host.tools?.tools ?? []).map((tool) => tool.name));
+        throw new Error('stop after the tool list');
+      },
+    };
+    const run = await runInTurn(
+      {
+        version: 1,
+        root: {
+          kind: 'acp-agent',
+          id: 'agent',
+          agent: 'fake',
+          prompt: 'go',
+        },
+      },
+      {
+        acpAgents: new Map([
+          [
+            'fake',
+            agent,
+          ],
+        ]),
+      },
+    );
+    expect(String(run.error)).toContain('stop after the tool list');
+    expect(offered).toEqual([
+      [],
+    ]);
+  });
+
+  it('without a connections option, a call node on a harness connection is refused before it runs', async () => {
+    const run = await runInTurn({
+      version: 1,
+      connections: {
+        phone: {
+          profile: 'device@^1',
+        },
+      },
+      root: {
+        kind: 'call',
+        id: 'reboot',
+        connection: 'phone',
+        op: 'device.reboot',
+      },
+    });
+    expect(codeOf(run.error)).toBe('CONNECTION_NOT_ALLOWED');
+    expect(run.output).toBeUndefined();
+    expect(run.model.rounds).toHaveLength(0);
+  });
+
   it('a callModel node with no tools gets exactly the granted operations', async () => {
     const run = await runInTurn(modelDoc(undefined), {
       reply: callsOnce('phone_reboot'),
@@ -960,6 +1036,7 @@ describe('a document run in the middle of a turn', () => {
         ]),
       },
       {
+        connections: PHONE_GRANT,
         acpAgents: new Map([
           [
             'fake',

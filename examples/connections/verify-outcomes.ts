@@ -428,6 +428,25 @@ await section(
           harness,
           ctx: harness.createContext(),
           tools: [],
+          // The host trusts this document with both devices; without grants it gets none.
+          connections: {
+            ios: {
+              ops: [
+                'ui.*',
+              ],
+              events: [
+                '*',
+              ],
+            },
+            android: {
+              ops: [
+                'ui.*',
+              ],
+              events: [
+                '*',
+              ],
+            },
+          },
         }),
       );
       console.log(`      ${show(settled).slice(0, 300)}`);

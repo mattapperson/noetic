@@ -561,7 +561,8 @@ export async function resolveAcpTools<TContext, I, O>(
 /**
  * What the step offers of the turn's tool set: its own tools as given, and
  * each listed connection's tools as the turn built them. With no `tools`, the
- * run's whole set but for connections only other steps list.
+ * run's whole set but for connections only other steps list, or those past
+ * its ceiling.
  */
 function offeredAcpTools(
   listed: SplitStepTools | undefined,
@@ -583,11 +584,13 @@ function offeredAcpTools(
       },
       turn,
     ) ?? [];
-  const own = listed
-    ? listed.tools
-    : (offeredTools(unified, undefined, turn) ?? [
-        ...unified,
-      ]);
+  // A ceiling narrows only connection tools, so the step keeps the rest whole.
+  const own =
+    listed && !listed.ceiling
+      ? listed.tools
+      : (offeredTools(unified, listed, turn) ?? [
+          ...unified,
+        ]);
   return deduplicateTools([
     ...own,
     ...picked,

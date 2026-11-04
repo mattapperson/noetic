@@ -453,9 +453,9 @@ A document lists the connections it needs, each with a version range:
 
 ### What a document may use
 
-A document's manifest says what it needs; the host decides what it may have.
-`dynamicWorkflow` — where a model writes the document — requires an allowlist,
-and `parseAndRunWorkflow` accepts one:
+A document's manifest says what it needs; the host decides what it may have,
+through the `connections` allowlist of `dynamicWorkflow` and
+`parseAndRunWorkflow`:
 
 ```ts
 dynamicWorkflow({
@@ -478,6 +478,16 @@ The same allowlist bounds a document's `{ "connection", "ops"? }` tool entries
 (spec 26 § Tools): the name must be granted, each `ops` glob must lie inside a
 granted operation glob, and a pick without `ops` takes exactly the granted
 operations. The allowlist may name a turn connection as well as a harness one.
+A `callModel` or `acp-agent` node with no `tools` is offered only the granted
+connections, with their granted operations, and the MCP servers the document
+attaches; its other tools are those of any step with no `tools`.
+
+Both functions grant nothing without an allowlist, as with `acp` and
+`mcp`: no `connections` is `connections: {}`. Under it a manifest entry, a
+`{ "connection" }` pick or a `call`, `wait` or `verify` node that names a
+harness connection is refused, and a `callModel` or `acp-agent` node with no
+`tools` is offered no connection. A host that trusts a document passes the
+grants it wants it to have.
 A document's inline `{ "mcp" }` servers are granted by a separate `mcp`
 allowlist, which also sets each server's secrets and `policy` (spec 26 § MCP
 servers); a document never sets a policy.
