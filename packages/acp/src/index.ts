@@ -19,9 +19,18 @@
 //#region Agents
 
 /** @public */
-export type { AcpPresetOptions, AcpProcessSpec } from './agents';
+export type { AcpPresetOptions, AcpProcessSpec, GeminiOptions } from './agents';
 /** @public */
-export { claudeCode, codex, customAcpAgent, gemini, opencode, pi } from './agents';
+export {
+  claudeCode,
+  codex,
+  customAcpAgent,
+  gemini,
+  opencode,
+  PRESET_COMMANDS,
+  PRESET_ENV,
+  pi,
+} from './agents';
 /** @public */
 export type { DefineAcpAgentOptions } from './define';
 /** @public */
@@ -30,15 +39,36 @@ export { defineAcpAgent } from './define';
 export type { AcpAgentRegistry } from './registry';
 /** @public */
 export { createAcpAgentRegistry } from './registry';
+/** @public */
+export type { AcpToolWiring, ToolBridgeAddress, ToolBridgeLaunch } from './tool-bridge';
+/** @public */
+export type { BridgedPermissionCheck } from './tool-permissions';
+/** @public */
+export {
+  claudeBridgedPermission,
+  codexBridgedPermission,
+  geminiBridgedPermission,
+} from './tool-permissions';
+/** @public */
+export {
+  claudeToolWiring,
+  codexToolWiring,
+  geminiToolWiring,
+  opencodeToolWiring,
+  piToolWiring,
+  sessionToolWiring,
+} from './tool-wiring';
 
 //#endregion
 
 //#region Transports
 
 /** @public */
+export { spawnOn } from './spawn';
+/** @public */
 export type { AcpLoopbackPair } from './transport-loopback';
 /** @public */
-export { createAcpLoopbackPair, loopbackTransport } from './transport-loopback';
+export { createAcpLoopbackPair, loopbackMachine, loopbackTransport } from './transport-loopback';
 
 //#endregion
 

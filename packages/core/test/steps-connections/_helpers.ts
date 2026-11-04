@@ -157,6 +157,11 @@ export class FakeRegistry implements ConnectionRegistry {
     return Object.keys(this.connections);
   }
 
+  /** A fake turn attaches nothing: its connections are the harness's. */
+  visibleNames(): ReadonlyArray<string> {
+    return this.names();
+  }
+
   async resolve(request: ResolveRequest): Promise<ResolvedConnection> {
     this.resolves.push(request);
     const name = request.from ?? request.name;

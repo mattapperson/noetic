@@ -1,6 +1,6 @@
 ---
 title: Agent Plugins
-description: A conformant Agent Plugins v1 client — discovers plugin packages from agent-plugins.org and exposes their Agent Skills and MCP servers to the model using progressive disclosure.
+description: A conformant Agent Plugins v1 client — discovers plugin packages from agent-plugins.org, shows their Agent Skills to the model using progressive disclosure, and attaches their MCP servers as connections.
 ---
 
 ## Overview
@@ -10,7 +10,7 @@ description: A conformant Agent Plugins v1 client — discovers plugin packages 
 - **Skills** — `skills/<name>/SKILL.md`, conforming to the [Agent Skills specification](https://agentskills.io/specification)
 - **MCP servers** — `mcp.json`, over stdio, Streamable HTTP, or the legacy HTTP+SSE transport
 
-`agentPlugins()` discovers those packages and puts them in front of the model, following the progressive disclosure model the Agent Skills spec prescribes: skill descriptions are always in context, skill instructions load on demand, and bundled files load one at a time.
+`agentPlugins()` discovers those packages and puts their skills in front of the model, following the progressive disclosure model the Agent Skills spec prescribes: skill descriptions are always in context, skill instructions load on demand, and bundled files load one at a time. The MCP servers reach the model as [connections](/docs/framework/connections): `pluginConnections()` turns each one into an `mcp()` entry you attach to the harness or a turn.
 
 - **Default slot**: `250` (`Slot.PROCEDURAL`) — skills are procedural knowledge
 - **Default scope**: `thread` — the plugin set is fixed, but which skills are active is conversation state
@@ -18,7 +18,7 @@ description: A conformant Agent Plugins v1 client — discovers plugin packages 
 - **[Placement](/docs/framework/context-layers#prompt-cache-anchoring)**: `'anchor'` — the skill index is identical every turn, so it belongs in the cache-stable prefix
 
 <Callout type="info">
-This layer ships in its own package, `@noetic-tools/agent-plugins`, not in `@noetic-tools/core`. It connects MCP servers through [`@noetic-tools/mcp`](/docs/framework/connections) and spawns subprocesses, and neither belongs in core's dependency graph.
+This layer ships in its own package, `@noetic-tools/agent-plugins`, not in `@noetic-tools/core`. Its MCP servers run through [`@noetic-tools/mcp`](/docs/framework/connections) and spawn subprocesses, and neither belongs in core's dependency graph.
 </Callout>
 
 ## Installation
@@ -30,19 +30,21 @@ bun add @noetic-tools/agent-plugins
 ## Usage
 
 ```ts
-import { agentPlugins } from '@noetic-tools/agent-plugins';
+import { agentPlugins, discoverPlugins, pluginConnections } from '@noetic-tools/agent-plugins';
 import { AgentHarness } from '@noetic-tools/core';
 
-const plugins = agentPlugins({
-  roots: ['/home/alex/.agents/plugins'],
-  dataDir: '/home/alex/.agents/plugins-data',
-});
+const roots = ['/home/alex/.agents/plugins'];
+const dataDir = '/home/alex/.agents/plugins-data';
+
+// Each plugin MCP server becomes a connection named `<plugin>_<server>`.
+const { connections } = await pluginConnections(await discoverPlugins(roots, dataDir));
 
 const harness = new AgentHarness({
   name: 'my-agent',
   params: {},
   // Context layers go under `contextLayers`, as a plain array.
-  contextLayers: [plugins],
+  contextLayers: [agentPlugins({ roots, dataDir })],
+  connections,
   // The harness does not pick up OPENROUTER_API_KEY on its own — name the
   // provider explicitly, or model calls fail at run time.
   callModelDefaults: { provider: 'openrouter' },
@@ -76,24 +78,13 @@ Point `roots` at the directory that **contains** plugins, not at a plugin itself
 ## Configuration
 
 ```ts
-import type { McpTransport } from '@noetic-tools/agent-plugins';
 import type { BudgetConfig, ContextScope } from '@noetic-tools/types';
 
 interface AgentPluginsConfig {
   /** Directories to scan for plugin directories. */
   roots: readonly string[];
-  /**
-   * Base directory for per-plugin PLUGIN_DATA. Each plugin gets
-   * `<dataDir>/<plugin-name>`, created before its first subprocess launches
-   * and preserved across plugin updates.
-   */
+  /** Base directory for per-plugin PLUGIN_DATA (`<dataDir>/<plugin-name>`). */
   dataDir: string;
-  /** MCP transports to connect. Default: ['stdio', 'streamable-http']. */
-  transports?: readonly McpTransport[];
-  /** Connect MCP servers at all. Default: true. */
-  connectMcp?: boolean;
-  /** Ambient environment for the inherited allowlist. Default: process.env. */
-  baseEnv?: Record<string, string | undefined>;
   slot?: number;
   scope?: ContextScope;
   budget?: BudgetConfig;
@@ -117,8 +108,8 @@ Call loadSkill with a skill id to read its full instructions.
 - reports/chart: Charts data. Use when the user asks for a chart.
 </skills>
 <mcp_servers>
-Call callMcpTool to invoke a tool on a connected server.
-- reports/api: fetch_report, list_reports
+Each server is a connection. List its operations with <connection>_ops and run one with <connection>_call. When several connections share them, the tools are ops and call, with target naming the connection.
+- reports/api: connection reports_api
 </mcp_servers>
 </agent_plugins>
 ```
@@ -145,11 +136,10 @@ These become LLM tools automatically, and are callable from code steps via `ctx.
 |---|---|
 | `loadSkill({ skill })` | Returns a skill's instructions and its bundled-resource list, and activates it |
 | `readSkillResource({ skill, path })` | Reads one bundled file, contained to the skill directory |
-| `callMcpTool({ server, tool, arguments })` | Invokes a tool on a connected MCP server |
 
 `loadSkill` accepts either the qualified `<plugin>/<skill>` id or a bare skill name. A bare name resolves when exactly one plugin provides it; when two do, the call reports the candidates instead of guessing.
 
-`callMcpTool` is only registered when `connectMcp` is enabled, so a skills-only host does not carry a dead tool.
+The layer has no MCP tool of its own. A plugin's tools are the tools of its [connection](#plugin-servers-as-connections).
 
 ## Exposed data
 
@@ -157,14 +147,13 @@ These become LLM tools automatically, and are callable from code steps via `ctx.
 |---|---|
 | `plugins` | Every loaded plugin, with its manifest, root, and data directory |
 | `skills` | Every discovered skill, with frontmatter and body |
-| `mcpServers` | Resolved, launch-ready server configurations |
-| `mcpTools` | Tools exposed by connected servers |
+| `mcpServers` | Each plugin server (`<plugin>/<server>`) and its connection name |
 | `diagnostics` | Everything that was skipped or rejected, and why |
 | `activeSkills` | Qualified ids activated in this thread |
 
 ## Diagnostics
 
-The spec requires that failures be isolated, not silent. A broken skill never stops its siblings loading; a server that will not start never stops the plugin's skills working. Every skip produces a diagnostic naming the specification section it enforces:
+The spec requires that failures be isolated, not silent. A broken skill never stops its siblings loading; a server that will not start is an unavailable connection and never stops the plugin's skills, or any other connection, working. Every skip produces a diagnostic naming the specification section it enforces:
 
 ```ts
 import { agentPlugins } from '@noetic-tools/agent-plugins';
@@ -192,7 +181,7 @@ Diagnostics are also emitted onto the execution trace as `agent-plugins.diagnost
 | `mcp-disabled` | `mcp.json` is unusable; MCP is off for this plugin only |
 | `mcp-server-invalid` | One server entry is invalid; siblings still load |
 | `mcp-transport-unsupported` | The host has not enabled that entry's transport |
-| `mcp-connect-failed` | The server was valid but would not start or connect |
+| `mcp-connect-failed` | The server's `PLUGIN_DATA` directory could not be created, so it was not attached |
 | `skill-warning` | A skill loaded, but carries a frontmatter key the spec does not define |
 | `root-unreadable` | A configured scan root could not be read |
 | `root-empty` | A scan root held no plugin directories — usually a misconfigured path |
@@ -204,26 +193,42 @@ The layer enforces the specification's containment rules, which matter because a
 - Every package path is resolved through `realpath` before use. A symlink may point outside the plugin directory, so a lexical check would let `skills/x` look contained while resolving to `/etc`. Paths that cannot be resolved are treated as escapes — the check fails closed.
 - `readSkillResource` is contained to the *skill* directory, which is stricter than the spec requires and stops one skill reading another's files.
 - MCP `command` values must be a single executable token, never a shell command string, so no user-authored string is ever parsed or escaped as shell syntax.
-- Plugin subprocesses receive a narrow environment allowlist, not the agent's environment. Ambient secrets — API keys and the like — are not passed through. `PLUGIN_ROOT` and `PLUGIN_DATA` are applied last, so a plugin cannot spoof them. Note that the MCP SDK's stdio transport also merges its own default environment (`HOME`, `SHELL`, `USER`, …) into the child and offers no way to suppress that, so the allowlist bounds what *this layer* forwards, not the child's total environment.
+- Plugin subprocesses receive a narrow environment allowlist, not the agent's environment. Ambient secrets — API keys and the like — are not passed through. `PLUGIN_ROOT` and `PLUGIN_DATA` are applied last, so a plugin cannot spoof them. Note that the MCP SDK's stdio transport also merges its own default environment (`HOME`, `SHELL`, `USER`, …) into the child and offers no way to suppress that, so the allowlist bounds what *this package* forwards, not the child's total environment.
 - A plugin's configured `Authorization`, `mcp-session-id`, and other client-owned headers are dropped rather than sent, per the specification's precedence rule — otherwise a plugin could replace the agent's own credentials. Each drop is reported as a diagnostic.
 - Plugin-controlled text (descriptions, skill bodies) cannot forge this layer's own context tags, so a plugin cannot close the block and append text the model would read as a system instruction.
 - Configured `env` values and MCP headers are visible package data. The specification is explicit that they are not a secret mechanism; do not put credentials in either.
 
 ## Plugin servers as connections
 
-Plugin MCP servers are connected through [`@noetic-tools/mcp`](/docs/framework/connections), the same bridge a harness uses for its own [connections](/docs/framework/connections). Each one is a connection with no [profile](/docs/framework/connection-profiles): its tools pass through as they are, and it has no reads, events, or verification. So a plugin's tools and a configured server's tools share one naming rule and one set of [gates](/docs/framework/connections#gates), and binary tool output is stored in an artifact store as a blob reference rather than inlined.
+`pluginConnections(discovered)` takes what `discoverPlugins()` found and returns one [`mcp()`](/docs/framework/connections) connection entry per server, plus a diagnostic for each server it skipped. Attach the entries to the harness, for its whole life, or to one turn:
 
-A host that wants a plugin server under its harness `connections` — to give it a `policy`, or to drive it from `step.call` — gets its provider from `pluginMcpProvider()`. It applies the same environment allowlist and header filtering as the layer, and never forwards headers across an origin-changing redirect:
+```ts
+import { discoverPlugins, pluginConnections } from '@noetic-tools/agent-plugins';
+import { AgentHarness } from '@noetic-tools/core';
 
-```ts validate=none
-import { pluginMcpProvider } from '@noetic-tools/agent-plugins';
+const found = await discoverPlugins(['/home/alex/.agents/plugins'], '/home/alex/.agents/plugins-data');
+const { connections, diagnostics } = await pluginConnections(found);
 
-const provider = pluginMcpProvider({ server, pluginRoot, pluginData });
-
-new AgentHarness({ name: 'agent', params: {}, connections: { search: { provider, policy: { deny: ['*_delete'] } } } });
+const harness = new AgentHarness({ name: 'agent', params: {}, connections });
+// or: await harness.execute('Summarize the open reports.', { connections });
 ```
 
-A stdio server's `PLUGIN_DATA` directory must exist before it launches; `connectMcpServer()` creates it, or create it yourself before the harness starts.
+- **Names.** The server `reports/api` is the connection `reports_api`: `<plugin>_<server>`, with any character a connection name can't hold replaced by `_` (`pluginConnectionName()`). Two servers that map to the same name fail with `CONNECTION_NAME_TAKEN`.
+- **Tools.** Each entry uses `expose: 'call'`, so the model sees `reports_api_ops` and `reports_api_call` and nothing is added to the context each turn. Two or more `'call'` connections share one `ops` and one `call` tool that take a `target` argument.
+- **Gates.** A plugin's tools are connection tools, so they pass every [gate](/docs/framework/connections#gates): the connection `policy`, `beforeToolCall` layers, approval, secret scrubbing, and an idempotency key that a replayed call repeats. They give the same tools and results as the same server attached with `mcp()`.
+- **Failures.** `pluginConnections()` launches nothing. A server that fails to start or connect is an unavailable connection with no tools; every other connection keeps working.
+
+An entry is a plain `ConnectionConfig`, so a host can add a `policy` before attaching it:
+
+```ts validate=none
+const guarded = connections.map((entry) => ({ ...entry, policy: { deny: ['*_delete'] } }));
+```
+
+Options: `transports` (default `['stdio', 'streamable-http']`; add `'sse'` for the legacy transport), `baseEnv` (the ambient environment the subprocess allowlist draws from, default `process.env`) and `timeoutMs` (per-server connect budget). `pluginConnections()` creates each plugin's `PLUGIN_DATA` directory before any value names it. For one resolved server, `pluginMcpProvider()` returns the `mcp()` provider with the same environment allowlist and header filtering; it takes the connection `name`.
+
+### Moving from the layer's MCP client
+
+Before 0.3.0 the layer connected plugin servers itself and offered the model a `callMcpTool({ server, tool, arguments })` tool. That client is gone: `callMcpTool`, `readMcpTools`, `connectMcpServer`, `closeSessions`, the `McpSession`, `McpToolInfo` and `McpConnectResult` types, `DEFAULT_CONNECT_TIMEOUT_MS`, `DEFAULT_TOOL_CALL_TIMEOUT_MS`, and the layer's `connectMcp`, `transports`, `baseEnv` and `connectTimeoutMs` options. Attach `pluginConnections()`'s entries instead; the model then calls `<plugin>_<server>_call({ op, args })`, and each call passes every connection gate — policy, `beforeToolCall`, approval, secret scrubbing and replay-stable idempotency keys.
 
 ## Client extensions
 
@@ -246,14 +251,4 @@ Semantics are deliberately open — the data is passed through rather than inter
 
 ## Skills-only hosts
 
-A client may support skills without supporting MCP and still conform. Set `connectMcp: false` to skip connecting servers entirely; they are still discovered and validated, and reported through `mcpServers`.
-
-```ts
-import { agentPlugins } from '@noetic-tools/agent-plugins';
-
-agentPlugins({
-  roots: ['/home/alex/.agents/plugins'],
-  dataDir: '/home/alex/.agents/plugins-data',
-  connectMcp: false,
-});
-```
+A client may support skills without supporting MCP and still conform. Leave out `pluginConnections()`: the layer still discovers and validates the servers and lists them in `mcpServers`, and nothing is launched.

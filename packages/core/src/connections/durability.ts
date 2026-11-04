@@ -17,7 +17,13 @@
  * that declares no determinism is treated as `'unsafe'`.
  */
 
-import type { ConnectionIdentity, ConnectionLease, Determinism } from '@noetic-tools/types';
+import type {
+  ConnectionIdentity,
+  ConnectionLease,
+  Context,
+  Determinism,
+} from '@noetic-tools/types';
+import { ContextImpl } from '../runtime/context-impl';
 
 //#region Types
 
@@ -52,7 +58,46 @@ export type ResumeDecision =
 
 //#endregion
 
+//#region Helpers
+
+/** Calls each owner gave an id, by step. */
+const CALL_COUNTS = new WeakMap<object, Map<string, number>>();
+
+/** FNV-1a over `text`, as 8 hex digits: a short, stable digest. */
+function digest(text: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+//#endregion
+
 //#region Public API
+
+/** The ledger path of the step running on `ctx`, when it runs on a lane. */
+export function stepPathOf(ctx: Context): string | undefined {
+  const path = ctx instanceof ContextImpl ? ctx.currentPath() : '';
+  return path.length > 0 ? path : undefined;
+}
+
+/**
+ * An id for a tool call that brings none — a step running a tool directly, or
+ * an agent call with no id: the step's place in the run and the call's place
+ * among the calls `owner` gave ids in that step. A resumed step makes its
+ * calls in the same order, so it gets the same ids, and two equal calls get
+ * two ids.
+ */
+export function orderedCallId(owner: object, ctx: Context, stepId?: string): string {
+  const step = stepPathOf(ctx) ?? stepId ?? ctx.id;
+  const counts = CALL_COUNTS.get(owner) ?? new Map<string, number>();
+  CALL_COUNTS.set(owner, counts);
+  const order = counts.get(step) ?? 0;
+  counts.set(step, order + 1);
+  return `derived-${digest(`${step}\u0000${order}`)}`;
+}
 
 /** The idempotency key of a step's call: the run and the step's ledger key. */
 export function stepIdempotencyKey(executionId: string, ledgerKey: string): string {

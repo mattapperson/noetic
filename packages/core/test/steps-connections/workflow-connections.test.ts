@@ -144,6 +144,40 @@ const LOGIN: WorkflowDocument = doc(
   },
 );
 
+/** What a host that trusts LOGIN grants it. */
+const LOGIN_GRANT: ConnectionAllowlist = {
+  browsers: {
+    ops: [
+      'ui.*',
+    ],
+    setup: {
+      url: [
+        'http://localhost:*',
+      ],
+    },
+    secrets: {
+      'app.password': 'ui.fill.text',
+    },
+  },
+};
+
+/** Every operation and event of `names`: what a host that trusts the document grants. */
+function trusting(...names: string[]): ConnectionAllowlist {
+  return Object.fromEntries(
+    names.map((name) => [
+      name,
+      {
+        ops: [
+          '*',
+        ],
+        events: [
+          '*',
+        ],
+      },
+    ]),
+  );
+}
+
 //#endregion
 
 describe('call nodes', () => {
@@ -151,7 +185,9 @@ describe('call nodes', () => {
     const registry = new FakeRegistry({
       browsers: {},
     });
-    await runDoc(registry, LOGIN);
+    await runDoc(registry, LOGIN, {
+      allowlist: LOGIN_GRANT,
+    });
     expect(registry.calls.map((c) => c.op)).toEqual([
       'ui.fill',
       'ui.fill',
@@ -270,6 +306,7 @@ describe('call nodes', () => {
       ),
       {
         input: '{"name":"Ada"}',
+        allowlist: trusting('app'),
       },
     );
     expect(registry.calls[0]?.args).toEqual({
@@ -313,6 +350,7 @@ describe('call nodes', () => {
       JSON.parse(
         await runDoc(registry, doc(node, manifest), {
           input: '{"n":1}',
+          allowlist: trusting('app'),
         }),
       ),
     ).toEqual({
@@ -330,6 +368,9 @@ describe('call nodes', () => {
           },
           manifest,
         ),
+        {
+          allowlist: trusting('app'),
+        },
       ),
       'EXPRESSION_FAILED',
     );
@@ -510,6 +551,7 @@ describe('wait nodes', () => {
       ),
       {
         input: '{"thread":"t-1"}',
+        allowlist: trusting('team'),
       },
     );
     const parsed = JSON.parse(output);
@@ -581,6 +623,7 @@ describe('connection fan-out', () => {
       ),
       {
         input: 'kept',
+        allowlist: trusting('ios', 'android'),
       },
     );
     expect(output.split('\n').sort()).toEqual([
@@ -651,6 +694,9 @@ describe('connection fan-out', () => {
             },
           },
         ),
+        {
+          allowlist: trusting('app'),
+        },
       ),
       'CONNECTION_INVALID',
     );

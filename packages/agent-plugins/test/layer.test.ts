@@ -161,7 +161,6 @@ async function fixtureLayer(overrides: Parameters<typeof agentPlugins>[0] | null
         root,
       ],
       dataDir,
-      connectMcp: false,
     },
   );
   return {
@@ -182,25 +181,17 @@ describe('layer shape', () => {
     expect(layer.placement).toBe('anchor');
   });
 
-  test('omits callMcpTool when MCP is disabled', async () => {
+  test('offers the skill functions and no MCP tool of its own', async () => {
     const { layer } = await fixtureLayer();
-    expect(layer.provides?.callMcpTool).toBeUndefined();
-    expect(layer.provides?.loadSkill).toBeDefined();
-  });
-
-  test('exposes callMcpTool when MCP is enabled', async () => {
-    const { root, dataDir } = await makePluginRoot([
-      {
-        manifest: manifest('p'),
-      },
+    expect(Object.keys(layer.provides ?? {}).sort()).toEqual([
+      'activeSkills',
+      'diagnostics',
+      'loadSkill',
+      'mcpServers',
+      'plugins',
+      'readSkillResource',
+      'skills',
     ]);
-    const layer = agentPlugins({
-      roots: [
-        root,
-      ],
-      dataDir,
-    });
-    expect(layer.provides?.callMcpTool).toBeDefined();
   });
 });
 
@@ -225,7 +216,6 @@ describe('tier 1 — the skill index', () => {
         root,
       ],
       dataDir,
-      connectMcp: false,
     });
     const { state } = await start(layer);
     expect(await recall(layer, state)).toBe('');
@@ -333,7 +323,6 @@ describe('tier 2 — loading a skill', () => {
         root,
       ],
       dataDir,
-      connectMcp: false,
     });
     const { state, ctx } = await start(layer);
 
@@ -487,7 +476,6 @@ describe('budget degradation', () => {
         root,
       ],
       dataDir,
-      connectMcp: false,
     });
   }
 
@@ -682,7 +670,6 @@ describe('provides data', () => {
       'reports',
     ]);
     expect(layer.readDiagnostics()).toHaveLength(0);
-    expect(layer.readMcpTools()).toHaveLength(0);
     expect(data(layer, 'activeSkills', state)).toEqual([]);
   });
 
@@ -699,7 +686,6 @@ describe('provides data', () => {
         root,
       ],
       dataDir,
-      connectMcp: false,
     });
     const { events } = await start(layer);
 
@@ -709,11 +695,11 @@ describe('provides data', () => {
   });
 });
 
-describe('mcp declaration without connecting', () => {
-  test('connectMcp: false leaves servers unconnected but still discovered', async () => {
+describe('plugin MCP servers', () => {
+  test('lists each server with the connection pluginConnections names it', async () => {
     const { root, dataDir } = await makePluginRoot([
       {
-        manifest: manifest('p'),
+        manifest: manifest('my.tools'),
         mcp: mcpConfig({
           api: {
             type: 'streamable-http',
@@ -727,13 +713,19 @@ describe('mcp declaration without connecting', () => {
         root,
       ],
       dataDir,
-      connectMcp: false,
     });
     const { state } = await start(layer);
 
-    expect(layer.readPlugins()[0]?.mcpServers).toHaveLength(1);
-    expect(layer.readMcpTools()).toHaveLength(0);
+    expect(data(layer, 'mcpServers', state)).toEqual([
+      {
+        server: 'my.tools/api',
+        connection: 'my_tools_api',
+      },
+    ]);
     const text = await recall(layer, state);
-    expect(text).not.toContain('<mcp_servers>');
+    expect(text).toContain('<mcp_servers>');
+    expect(text).toContain('- my.tools/api: connection my_tools_api');
+    expect(text).toContain('<connection>_ops');
+    expect(text).not.toContain('callMcpTool');
   });
 });

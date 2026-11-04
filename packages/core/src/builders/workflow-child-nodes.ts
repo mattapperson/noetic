@@ -392,6 +392,13 @@ function resolveSubflowDocument(
       }.`,
     });
   }
+  if (Object.keys(doc.connections ?? {}).length > 0) {
+    throw new NoeticConfigError({
+      code: 'CONNECTION_INVALID',
+      message: `Sub-workflow '${ref}' referenced in subflow node '${node.id}' declares connections, which a subflow cannot: its nodes use the root document's.`,
+      hint: `Move the connections of '${ref}' to the root document's "connections".`,
+    });
+  }
   return {
     doc,
     childCtx: {

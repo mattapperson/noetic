@@ -8,14 +8,11 @@ import type {
 import { frameworkCast, NoeticConfigError, ToolChoiceMode } from '@noetic-tools/types';
 import type * as OpenRouterAgent from '@openrouter/agent';
 import { serverTool } from '@openrouter/agent';
-import {
-  convertTools,
-  extractSystemInstruction,
-  resolveWireJsonSchema,
-  sanitizeToolNameForWire,
-} from '../adapters/openrouter';
+import { convertTools, extractSystemInstruction } from '../adapters/openrouter';
 import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../runtime/broadcaster-utils';
 import type { EventBroadcaster } from '../runtime/event-broadcaster';
+import { resolveWireJsonSchema } from '../runtime/tool-call';
+import { sanitizeToolNameForWire } from '../util/tool-name';
 
 /**
  * Shapes a `callModel` request for the wire: system instructions, the SDK tool

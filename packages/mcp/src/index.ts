@@ -5,8 +5,17 @@
  * only package permitted to import the MCP SDK.
  */
 
+/** The SDK types an `auth: { kind: 'oauth', provider }` implements, so hosts need not import the MCP SDK. */
+export type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
+export type {
+  OAuthClientInformationMixed,
+  OAuthClientMetadata,
+  OAuthTokens,
+} from '@modelcontextprotocol/sdk/shared/auth.js';
+export type { McpNamedValue } from '@noetic-tools/types';
 export { PROFILES_CAPABILITY } from '@noetic-tools/types';
 export type {
+  McpAuth,
   McpConfig,
   McpFetch,
   McpHttpServer,
@@ -21,7 +30,6 @@ export {
   DEFAULT_POLL_INTERVAL_MS,
   DEFAULT_REQUEST_TIMEOUT_MS,
   resolveMcpConfig,
-  splitCommandLine,
 } from './config';
 export type { McpConnectionInit } from './connection';
 export { McpConnection } from './connection';
@@ -38,6 +46,7 @@ export { deliveryModes } from './events';
 export { coverageUri, parseAnomalies, parseCoverage } from './evidence';
 export { createMemoryArtifactStore } from './memory-artifacts';
 export { McpProvider, mcp } from './provider';
+export { SpawnedTransport } from './stream-transport';
 export { originAwareFetch } from './transports';
 export type {
   McpWebhooks,

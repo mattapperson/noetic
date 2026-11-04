@@ -37,6 +37,7 @@ import {
 import { clientCapabilitiesFor, NoeticAcpClient } from './client';
 import type { WatchedTransport } from './liveness';
 import { watchTransport } from './liveness';
+import type { ToolBridge } from './tool-bridge';
 import { AcpTurnAccumulator } from './turn';
 
 //#region Types
@@ -47,6 +48,8 @@ export interface OpenAcpConnectionOptions {
   transport: AcpTransport;
   host: AcpClientHost;
   signal?: AbortSignal;
+  /** The tool bridge serving `host.tools`, closed with the connection. */
+  tools?: ToolBridge;
 }
 
 /** Routes a session's notifications to whichever turn is currently running. */
@@ -236,6 +239,7 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
     readonly authMethods: ReadonlyArray<acp.AuthMethod>,
     readonly protocolVersion: number,
     private readonly watch: WatchedTransport,
+    private readonly tools: ToolBridge | undefined,
   ) {}
 
   /** The sink the client hands every `session/update` notification. */
@@ -258,7 +262,7 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
     const response = await Promise.race([
       this.agent.newSession({
         cwd: opts.cwd,
-        mcpServers: this.checkedMcpServers(opts.mcpServers),
+        mcpServers: this.sessionMcpServers(opts.mcpServers),
       }),
       this.watch.death,
     ]);
@@ -301,7 +305,7 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
       this.agent.loadSession({
         sessionId: opts.sessionId,
         cwd: opts.cwd,
-        mcpServers: this.checkedMcpServers(opts.mcpServers),
+        mcpServers: this.sessionMcpServers(opts.mcpServers),
       }),
       this.watch.death,
     ]);
@@ -317,6 +321,7 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
     // for another one during teardown.
     await this.transport.close().catch(() => undefined);
     await this.client.dispose();
+    await this.tools?.close().catch(() => undefined);
   }
 
   //#region internals
@@ -324,6 +329,25 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
   private track(session: AcpSessionImpl): AcpSessionImpl {
     this.sessions.set(session.sessionId, session);
     return session;
+  }
+
+  /**
+   * The servers `session/new` carries: the user's plus the tool bridge, or
+   * none when the agent was given them all at launch.
+   */
+  private sessionMcpServers(servers?: ReadonlyArray<acp.McpServer>): acp.McpServer[] {
+    if (this.tools?.declare === 'launch') {
+      this.checkedMcpServers(servers);
+      return [];
+    }
+    return this.checkedMcpServers([
+      ...(servers ?? []),
+      ...(this.tools
+        ? [
+            this.tools.server,
+          ]
+        : []),
+    ]);
   }
 
   /** Reject HTTP/SSE MCP transports the agent never advertised support for. */
@@ -379,6 +403,7 @@ export async function openAcpConnection(
 
   const client = new NoeticAcpClient({
     host,
+    permitsBridged: opts.tools?.permits,
     onNotify: (notification) => {
       sink?.(notification);
       host.onSessionUpdate(notification);
@@ -420,6 +445,7 @@ export async function openAcpConnection(
     initialized.authMethods ?? [],
     initialized.protocolVersion,
     watch,
+    opts.tools,
   );
   sink = connection.sink;
   return connection;

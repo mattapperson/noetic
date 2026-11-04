@@ -2,8 +2,9 @@
 
 `@noetic-tools/agent-plugins` is a conformant client for the
 [Agent Plugins](https://agent-plugins.org) specification, v1.0.0. It discovers
-plugin packages on disk and exposes their components to a model through a
-single context layer, `agentPlugins()`.
+plugin packages on disk and gives their components to an agent in two parts:
+the `agentPlugins()` context layer for skills, and `pluginConnections()`, which
+turns each plugin MCP server into a harness connection.
 
 Agent Plugins is a vendor-neutral packaging format. A plugin is a directory
 with a closed `plugin.json` manifest and exactly two portable component types:
@@ -28,7 +29,9 @@ to run stdio servers. Neither belongs anywhere lower in the stack:
 
 So the package sits alongside `@noetic-tools/acp` and `@noetic-tools/openui`: a
 consumer package built on the `ContextLayer` contract in `@noetic-tools/types`,
-composed in by a host rather than imported by core.
+composed in by a host rather than imported by core. It and `@noetic-tools/acp`
+(which serves a step's tools over MCP, `38-acp-tools`) are the only packages
+that depend on the MCP SDK.
 `.sentrux/rules.toml` enforces both directions.
 
 Because the package is Node-targeted by definition, it reads the filesystem
@@ -46,7 +49,8 @@ that contains it:
 |---|---|---|
 | Plugin | Unresolvable root, missing/invalid `plugin.json`, bad `name`, unsupported `$schema` | Plugin rejected; **no** component discovered (§11.3 rule 2) |
 | Component type | Fixed location present but the wrong filesystem kind, or outside the root | That type unavailable; other types still load (§6.2, §4.1 rule 2) |
-| Component entry | Non-conforming `SKILL.md`; invalid, unsupported, or unconnectable server | That entry skipped; siblings still load (§7.1, §7.2.2) |
+| Component entry | Non-conforming `SKILL.md`; invalid or unsupported server | That entry skipped; siblings still load (§7.1, §7.2.2) |
+| Connection | A server that fails to start, connect, or handshake | That connection unavailable in the harness; every other connection still serves the turn (§7.2.2 rule 5) |
 
 Two manifest problems are explicitly **non-fatal** and must be reported and
 ignored rather than rejected (§5.2, §8.1):
@@ -118,11 +122,52 @@ the block or forge the index.
 ## MCP servers
 
 The MCP client, its transports and capability negotiation live in
-`@noetic-tools/mcp` (`35-connections`); this package resolves and validates
-`mcp.json` entries and registers each resolved server as a connection with no
-profile. A plugin's tools therefore share one registry, one naming rule and one
-set of gates with every other MCP server the harness uses; a plugin server that
-declares a profile (`36-connection-profiles`) gets its typed operations too.
+`@noetic-tools/mcp` (`35-connections`). This package resolves and validates
+`mcp.json` entries, and `pluginConnections()` hands back one `mcp()`
+connection entry per resolved server. The host attaches them like any other
+connection:
+
+```ts
+const found = await discoverPlugins(roots, dataDir);
+const { connections, diagnostics } = await pluginConnections(found);
+
+new AgentHarness({ connections, contextLayers: [agentPlugins({ roots, dataDir })], … });
+// or, for one turn:
+harness.execute(input, { connections });
+```
+
+A plugin's tools therefore live in the harness's one registry and pass the same
+gates as every other connection: the connection `policy`, `beforeToolCall`,
+approval, secret scrubbing, and an idempotency key derived from the execution
+and the tool call, so a replayed call sends the key the server already saw. A
+plugin server and the same server attached through `mcp()` give the model the
+same tools and the same results. A plugin server that declares a profile
+(`36-connection-profiles`) gets its typed operations too.
+
+### Connection entries
+
+```ts
+pluginConnections(discovered: DiscoveryResult, {
+  transports?: McpTransport[],   // default: stdio + streamable-http
+  baseEnv?: Record<string, string | undefined>,
+  timeoutMs?: number,            // per-server connect budget; mcp()'s default otherwise
+}): Promise<{ connections: ConnectionConfig[]; diagnostics: PluginDiagnostic[] }>
+```
+
+- **Names.** The server `<plugin>/<server>` is the connection
+  `<plugin>_<server>` (`pluginConnectionName`), with every character the
+  connection name rule (`[A-Za-z][A-Za-z0-9_-]*`) forbids replaced by `_`. A
+  name that still breaks the rule — a plugin name starting with a digit — is
+  a `McpServerInvalid` diagnostic. Two servers that map to one name fail with
+  `CONNECTION_NAME_TAKEN`, since one would otherwise stand in for the other.
+- **Exposure.** Every entry uses `expose: 'call'`: the model sees
+  `<name>_ops` and `<name>_call`, and nothing is rendered into context on
+  every turn. Two or more `'call'` connections share one `ops` and one `call`
+  that take a `target` argument (`35-connections`). A host may add `policy`,
+  `look` or another `expose` to an entry before attaching it.
+- **Connecting** is the harness's job. `pluginConnections()` launches nothing;
+  a server that fails to connect is marked unavailable, offers no tools, and
+  leaves every other connection alone.
 
 `mcp.json` is a closed union over three transports. Validation and resolution
 are separate concerns: validation is pure, while resolution touches the
@@ -189,10 +234,12 @@ guarantee is that nothing from the *agent's* configuration — API keys,
 provider credentials — is forwarded, and that the reserved variables are still
 applied last.
 
-`PLUGIN_DATA` is created and resolved before its value can be substituted
-anywhere, since §9.1 defines it as an absolute, filesystem-resolved path. It is
-not created for a plugin that declares no MCP servers: discovery must not have
-side effects for a plugin that will never launch a subprocess.
+`pluginConnections()` creates and resolves `PLUGIN_DATA` before its value can
+be substituted anywhere, since §9.1 defines it as an absolute,
+filesystem-resolved path. When it cannot be created, the plugin's stdio servers
+are skipped with a `McpConnectFailed` diagnostic and its remote servers are
+kept. It is not created for a plugin that declares no MCP servers: discovery
+must not have side effects for a plugin that will never launch a subprocess.
 
 ### Expansion (§9.2)
 
@@ -207,9 +254,6 @@ Nothing else expands — not `env` keys, not `command`, not `url` or headers.
 agentPlugins({
   roots: readonly string[],      // directories to scan
   dataDir: string,               // base for per-plugin PLUGIN_DATA
-  transports?: McpTransport[],   // default: stdio + streamable-http
-  connectMcp?: boolean,          // default: true
-  baseEnv?: Record<string, string | undefined>,
   slot?, scope?, budget?,
 })
 ```
@@ -257,14 +301,11 @@ deleting the block, matching `staticContent` and `openUiSurface`.
 
 ### State and ownership
 
-Layer state holds only `activated: string[]`. The discovered index and the live
-MCP sessions live on the layer instance: the index is identical for every
-thread and would be pure duplication in durable storage, and a session is a
-live subprocess or socket that cannot be serialized at all.
-
-Discovery runs once per layer instance and is shared by every scope that inits
-against it — rescanning per thread would relaunch every stdio server. Sessions
-are closed on the last scope's `dispose`.
+Layer state holds only `activated: string[]`. The discovered index lives on
+the layer instance: it is identical for every thread and would be pure
+duplication in durable storage. Discovery runs once per layer instance and is
+shared by every scope that inits against it. The layer holds no MCP session;
+the harness owns every connection.
 
 A spawned child inherits the parent's activations but its own do not merge
 back. Activation says what *this* conversation is working from; a child that
@@ -273,8 +314,12 @@ instructions into the parent.
 
 ### Exposed surface
 
-`provides` data: `plugins`, `skills`, `mcpServers`, `mcpTools`, `diagnostics`,
-`activeSkills`.
+`provides` data: `plugins`, `skills`, `mcpServers` (each
+`{ server: '<plugin>/<server>', connection }`), `diagnostics`, `activeSkills`.
+
+The rendered block lists each plugin MCP server with its connection name, and
+says how to reach it: `<connection>_ops` and `<connection>_call`, or the shared
+`ops` and `call` with `target` when several connections use them.
 
 `provides` functions, which the runtime also exposes to the model as tools:
 
@@ -285,11 +330,7 @@ instructions into the parent.
 - `readSkillResource({ skill, path })` — contained against the *skill*
   directory, which is stricter than §4.1 requires and stops one skill reading
   another's files.
-- `callMcpTool({ server, tool, arguments })` — registered only when
-  `connectMcp` is enabled, so a skills-only host does not carry a dead tool.
-
-A failing tool call returns a result the model can react to rather than
-throwing, which keeps a misbehaving server from unwinding the agent's turn.
+The layer offers no MCP tool of its own: plugin tools are connection tools.
 
 ## Client extensions (§8)
 
@@ -327,20 +368,23 @@ frontmatter openness, header precedence, and the lifecycle cases.
 
 Live stdio MCP behavior is covered end-to-end against a fixture server that
 echoes back the environment it was launched with, so `PLUGIN_ROOT` and
-`PLUGIN_DATA` are observed inside a real subprocess.
+`PLUGIN_DATA` are observed inside a real subprocess. `test/mcp-client.test.ts`
+drives the same server through harness turns: a failing sibling stays
+isolated, each gate applies to plugin tools, and a plugin server and the same
+server attached through `mcp()` give byte-identical tools, results, events and
+spans.
 
 ## Failure isolation is load-bearing, and bounded
 
 Two limits exist because a plugin is third-party code that can be hostile or
 merely broken:
 
-- **Every MCP connection is bounded** (`DEFAULT_CONNECT_TIMEOUT_MS`). A server
-  that opens its pipe and never answers `initialize` would otherwise hang
-  `connect()` forever, and with it the layer's `init` — which the runtime
-  resolves by *throwing*, aborting the whole agent execution and orphaning
-  every subprocess started alongside it. Servers connect concurrently, so the
+- **Every MCP connection is bounded** (`mcp()`'s `timeoutMs`). A server that
+  opens its pipe and never answers `initialize` would otherwise hang its
+  connect forever. The harness connects every entry concurrently, so the
   timeout also bounds the whole connect phase rather than being multiplied by
-  the server count.
+  the server count, and a server that runs out of time is unavailable rather
+  than fatal.
 - **Sizes are capped**: a `SKILL.md` is size-checked before it is read, since
   its body is retained for the process lifetime and returned by `loadSkill` as
   a single tool result, and the number of declared MCP servers is capped

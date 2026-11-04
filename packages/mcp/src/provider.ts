@@ -9,7 +9,7 @@
 
 import type { ConnectionProvider, ConnectOptions } from '@noetic-tools/types';
 import { ConnectionUnsatisfiedError, isNoeticError } from '@noetic-tools/types';
-import type { McpConfig, McpOptions, ResolvedMcpConfig } from './config';
+import type { McpConfig, ResolvedMcpConfig } from './config';
 import { isStdioTarget, isTransportTarget, resolveMcpConfig } from './config';
 import { McpConnection, readIdentity } from './connection';
 import type { Catalog, Discovery, ServedParts } from './declaration';
@@ -58,9 +58,11 @@ function describe(error: unknown): string {
 export class McpProvider implements ConnectionProvider {
   readonly kind = 'mcp';
   readonly config: ResolvedMcpConfig;
+  readonly name?: string;
 
   constructor(config: ResolvedMcpConfig) {
     this.config = config;
+    this.name = config.options.name;
   }
 
   /**
@@ -161,7 +163,16 @@ export class McpProvider implements ConnectionProvider {
   private async open(opts: ConnectOptions): Promise<OpenedSession> {
     let session: McpSession;
     try {
-      session = await McpSession.open(this.config.target, this.config.options, opts.signal);
+      session = await McpSession.open(
+        this.config.target,
+        this.config.options,
+        opts.signal,
+        opts.redact === undefined
+          ? {}
+          : {
+              redact: opts.redact,
+            },
+      );
     } catch (error) {
       opts.signal.throwIfAborted();
       throw unavailable(
@@ -286,14 +297,19 @@ function instanceMeta(instance: string): Record<string, unknown> {
 
 /**
  * @public
- * Any MCP server as a connection. Takes a command line
- * (`'npx @playwright/mcp@latest'`), `{ command, args, env, cwd }`,
- * `{ url, headers }`, or `{ transport }`, with options such as `webhooks`.
+ * Any MCP server as a connection. Takes ACP's `McpServer` shape —
+ * `{ name, type: 'http' | 'sse', url, headers: [{ name, value }] }` or
+ * `{ name, command, args, env: [{ name, value }] }` — so an ACP server config
+ * is an argument as it stands; or `{ transport }` for a caller-built
+ * transport. Bridge options (`auth`, `spawn`, `webhooks`, `profiles`,
+ * timeouts) sit beside the server fields.
  *
- * @throws NoeticConfigError `CONNECTION_INVALID` when the configuration is malformed.
+ * @throws NoeticConfigError `CONNECTION_INVALID` when the configuration is
+ *   malformed, repeats a header or environment variable, or gives both `auth`
+ *   and an `Authorization` header.
  */
-export function mcp(config: McpConfig, options?: McpOptions): McpProvider {
-  return new McpProvider(resolveMcpConfig(config, options));
+export function mcp(config: McpConfig): McpProvider {
+  return new McpProvider(resolveMcpConfig(config));
 }
 
 //#endregion

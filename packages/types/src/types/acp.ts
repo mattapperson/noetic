@@ -25,6 +25,7 @@ import type { Context } from './context';
 import type { FsAdapter } from './fs-adapter';
 import type { Item } from './items';
 import type { ShellAdapter } from './shell-adapter';
+import type { ByteStream, Spawn, SpawnCommand } from './spawn';
 
 //#region Step-kind discriminator
 
@@ -49,14 +50,7 @@ export const ACP_AGENT_STEP_KIND = 'acp-agent';
  * and {@link ShellAdapter} is one-shot. ACP needs a long-lived duplex pipe.
  * @public
  */
-export interface AcpTransport {
-  /** Frames arriving from the agent. */
-  readonly readable: ReadableStream<Uint8Array>;
-  /** Frames sent to the agent. */
-  readonly writable: WritableStream<Uint8Array>;
-  /** Tear the stream down and release the underlying resource (process, socket, …). */
-  close(): Promise<void>;
-}
+export type AcpTransport = ByteStream;
 
 /** @public Options a transport factory receives when a step opens a connection. */
 export interface AcpTransportOptions {
@@ -75,6 +69,49 @@ export interface AcpTransportOptions {
  * @public
  */
 export type AcpTransportFactory = (opts: AcpTransportOptions) => Promise<AcpTransport>;
+
+/**
+ * Where a tool bridge can be reached: an MCP streamable HTTP endpoint and the
+ * headers every request must carry (always the bridge's bearer token).
+ * @public
+ */
+export interface ToolBridgeAddress {
+  readonly serverName: string;
+  readonly url: string;
+  readonly headers: ReadonlyArray<{
+    name: string;
+    value: string;
+  }>;
+}
+
+/**
+ * The machine an ACP agent runs on, opened once per connection before the
+ * agent starts. The tool bridge listens on the host's loopback interface, so
+ * the machine first carries it to where the agent can reach it, then starts
+ * the agent with launch settings that may name that address.
+ * @public
+ */
+export interface AcpMachine {
+  /**
+   * An address the agent can use to reach `bridge`. The same address on this
+   * machine; a channel to it from anywhere else. A non-loopback hop is TLS.
+   */
+  reach(bridge: ToolBridgeAddress): Promise<ToolBridgeAddress>;
+  /** Start the agent and return its ACP byte stream. */
+  launch(command: SpawnCommand): Promise<AcpTransport>;
+  /**
+   * Start a process beside the agent — a stdio MCP server that depends on
+   * this machine — and carry its stdio back, so noetic stays its client. It
+   * gets the MCP SDK's default environment on this machine plus `env`, as a
+   * local server does, not the agent's.
+   */
+  spawn: Spawn;
+  /** Release the machine and everything started on it. */
+  close(): Promise<void>;
+}
+
+/** @public Opens an {@link AcpMachine} for one connection. */
+export type AcpMachineFactory = (opts: { signal?: AbortSignal }) => Promise<AcpMachine>;
 
 //#endregion
 
@@ -309,6 +346,132 @@ export interface AcpClientHost {
    * to the step that actually caused it.
    */
   onClientActivity?: (activity: AcpClientActivity) => void;
+  /**
+   * Noetic tools to serve to the agent over MCP. Set before `connect`: agents
+   * that read their MCP settings at launch need the bridge to exist first.
+   */
+  tools?: AcpToolHost;
+}
+
+//#endregion
+
+//#region Bridged tools
+
+/**
+ * A Noetic tool as an ACP agent sees it: one entry in the `tools/list` answer
+ * of the MCP server the bridge serves to the agent.
+ * @public
+ */
+export interface AcpTool {
+  /** Wire name, already reduced to `[A-Za-z0-9_-]` so every agent keeps it as-is. */
+  readonly name: string;
+  readonly description: string;
+  /** JSON Schema of the arguments. Always `type: "object"` at the root, as MCP requires. */
+  readonly inputSchema: Record<string, unknown>;
+  /** Display title, from the tool's `acp.title` when it is a plain string. */
+  readonly title?: string;
+}
+
+/** @public One `tools/call` the agent made, as the bridge hands it to the host. */
+export interface AcpToolCall {
+  /** Wire name the agent called. */
+  readonly name: string;
+  readonly args: unknown;
+  /**
+   * The agent's own id for the call, when it sends one in the MCP request
+   * `_meta`. It equals the `toolCallId` of the ACP `tool_call` update for the
+   * same call, which is how the two records are joined.
+   */
+  readonly agentCallId?: string;
+  /** Aborted when the agent cancels the call. */
+  readonly signal: AbortSignal;
+}
+
+/** @public What a bridged tool call returns to the agent. */
+export interface AcpToolResult {
+  /** The exact string a model would receive for the same call. */
+  readonly output: string;
+  readonly isError: boolean;
+}
+
+/**
+ * The Noetic tools a connection serves to its agent over MCP.
+ *
+ * `tools` is fixed for the life of a connection: agents fetch the list once.
+ * `call` is per-turn and mutable, like the permission fields on
+ * {@link AcpClientHost}: a session reused by several steps runs each call in
+ * the context of the step whose turn is in flight.
+ * @public
+ */
+export interface AcpToolHost {
+  /** MCP server name the agent sees, and the prefix it puts on tool names. */
+  readonly serverName: string;
+  readonly tools: ReadonlyArray<AcpTool>;
+  call: (call: AcpToolCall) => Promise<AcpToolResult>;
+}
+
+/**
+ * The exact titles agents give a call to `wireName` on the MCP server
+ * `serverName`: Claude Code's `mcp__<server>__<tool>`, Codex's
+ * `mcp.<server>.<tool>`, and opencode's `<server>_<tool>`.
+ * @public
+ */
+export function bridgedToolTitles(serverName: string, wireName: string): ReadonlyArray<string> {
+  return [
+    `mcp__${serverName}__${wireName}`,
+    `mcp.${serverName}.${wireName}`,
+    `${serverName}_${wireName}`,
+  ];
+}
+
+/**
+ * True when an agent's tool call is a call to `wireName` on the MCP server
+ * `serverName`, by what the agent itself puts in the call: one of
+ * {@link bridgedToolTitles}, or Gemini CLI's id `mcp_<server>_<tool>__call_<n>`.
+ * Gemini shortens a long `mcp_<server>_<tool>` with `...` in the middle; the
+ * shortened form matches when the tool name starts and ends as it does.
+ * @public
+ */
+export function namesBridgedToolCall(
+  serverName: string,
+  wireName: string,
+  call: {
+    toolCallId: string;
+    title?: string | null;
+  },
+): boolean {
+  if (call.title && bridgedToolTitles(serverName, wireName).includes(call.title)) {
+    return true;
+  }
+  return geminiToolNameMatches(serverName, wireName, call.toolCallId);
+}
+
+/** Whether a Gemini CLI tool call id names `wireName` on `serverName`. */
+export function geminiToolNameMatches(
+  serverName: string,
+  wireName: string,
+  toolCallId: string,
+): boolean {
+  const prefix = `mcp_${serverName}_`;
+  const end = toolCallId.lastIndexOf('__call_');
+  if (!toolCallId.startsWith(prefix) || end < prefix.length) {
+    return false;
+  }
+  const registered = toolCallId.slice(prefix.length, end);
+  if (registered === wireName) {
+    return true;
+  }
+  const gap = registered.indexOf('...');
+  if (gap < 0) {
+    return false;
+  }
+  const head = registered.slice(0, gap);
+  const tail = registered.slice(gap + 3);
+  return (
+    wireName.length > head.length + tail.length &&
+    wireName.startsWith(head) &&
+    wireName.endsWith(tail)
+  );
 }
 
 //#endregion
@@ -345,7 +508,7 @@ export interface AcpTurnResult {
   stopReason: AcpStopReason;
   /** Noetic Items produced this turn (assistant message, tool calls, tool results). */
   items: Item[];
-  /** Concatenated assistant text of the turn. */
+  /** The agent's final message: its text after the last tool call of the turn. */
   text: string;
   usage?: TokenUsage;
   cost?: number;
@@ -442,6 +605,8 @@ export interface AcpLiveSession {
   cwd: string;
   /** MCP servers attached at creation — also fixed for its lifetime. */
   mcpServers?: ReadonlyArray<acp.McpServer>;
+  /** Noetic tools served to the agent at creation — also fixed for its lifetime. */
+  tools?: ReadonlyArray<AcpTool>;
 }
 
 /** @public Options handed to {@link AcpAgent.connect}. */
@@ -449,6 +614,12 @@ export interface AcpConnectOptions {
   /** The runtime surface backing client-side ACP methods. */
   host: AcpClientHost;
   signal?: AbortSignal;
+  /**
+   * The MCP servers the step will attach. Agents that must declare servers at
+   * launch (to give the tool bridge its settings) read them here; every other
+   * agent receives them in `session/new` as usual.
+   */
+  mcpServers?: ReadonlyArray<acp.McpServer>;
 }
 
 /**
@@ -467,6 +638,34 @@ export interface AcpAgent {
   readonly agentId: string;
   /** Open a transport, run `initialize`, and return the negotiated connection. */
   connect(opts: AcpConnectOptions): Promise<AcpAgentConnection>;
+  /**
+   * Why this agent cannot take tools — an agent attached through a transport
+   * the bridge cannot reach, or Gemini CLI in a folder it does not trust. A
+   * step that gives it `tools` fails with this error before anything spawns.
+   * Otherwise `connect` serves {@link AcpClientHost.tools} to the agent.
+   */
+  readonly refusesTools?: AcpToolRefusal;
+  /**
+   * Starts a process on the machine this agent runs on and carries its stdio
+   * back. A stdio `mcp()` server in the step's `tools` starts through it, so
+   * it runs where the agent runs while noetic stays its MCP client. Absent
+   * for an agent attached through a transport, which names no machine.
+   */
+  readonly spawn?: Spawn;
+}
+
+/**
+ * Why an agent cannot take tools, and the fix it is missing.
+ * @public
+ */
+export interface AcpToolRefusal {
+  readonly code:
+    | 'ACP_TRANSPORT_CANNOT_REACH'
+    | 'ACP_TRANSPORT_CANNOT_LAUNCH'
+    | 'ACP_AGENT_CANNOT_TAKE_TOOLS';
+  /** Completes "the agent cannot take tools: …". */
+  readonly reason: string;
+  readonly hint: string;
 }
 
 //#endregion

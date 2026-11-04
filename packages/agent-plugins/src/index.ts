@@ -6,8 +6,10 @@
  * (Agent Skills and MCP servers), path containment, plugin variable expansion,
  * and the `tools.noetic` client-extension namespace.
  *
- * The deliverable is {@link agentPlugins}, a context layer that presents
- * discovered plugins to a model using the spec's progressive disclosure model.
+ * Two deliverables: {@link agentPlugins}, a context layer that presents
+ * discovered skills to a model using the spec's progressive disclosure model,
+ * and {@link pluginConnections}, which turns the plugins' MCP servers into
+ * harness connections.
  */
 
 export type {
@@ -27,6 +29,7 @@ export type {
   AgentPluginsConfig,
   AgentPluginsLayer,
   AgentPluginsState,
+  PluginServer,
 } from './layer/agent-plugins';
 export { AGENT_PLUGINS_LAYER_ID, agentPlugins } from './layer/agent-plugins';
 export type {
@@ -43,17 +46,13 @@ export {
   validateManifest,
 } from './manifest';
 export type {
-  McpConnectResult,
-  McpSession,
-  McpToolInfo,
+  PluginConnections,
+  PluginConnectionsOptions,
 } from './mcp-client';
 export {
   buildSubprocessEnv,
-  callMcpTool,
-  closeSessions,
-  connectMcpServer,
-  DEFAULT_CONNECT_TIMEOUT_MS,
-  DEFAULT_TOOL_CALL_TIMEOUT_MS,
+  pluginConnectionName,
+  pluginConnections,
   pluginMcpProvider,
 } from './mcp-client';
 export type {

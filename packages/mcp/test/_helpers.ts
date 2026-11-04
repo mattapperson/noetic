@@ -35,6 +35,8 @@ export interface TestTool {
   description?: string;
   inputSchema?: Record<string, unknown>;
   taskSupport?: 'required' | 'optional';
+  /** Published as the tool's MCP `annotations`. */
+  annotations?: Record<string, unknown>;
   handler: ToolHandler;
 }
 
@@ -141,21 +143,17 @@ export class TestServer {
 
   /** A provider whose sessions each get a fresh in-process server. */
   provider(options: McpOptions = {}): McpProvider {
-    return mcp(
-      {
-        transport: async () => {
-          const [client, serverSide] = InMemoryTransport.createLinkedPair();
-          const server = this.build();
-          this.servers.push(server);
-          await server.connect(serverSide);
-          return client;
-        },
+    return mcp({
+      transport: async () => {
+        const [client, serverSide] = InMemoryTransport.createLinkedPair();
+        const server = this.build();
+        this.servers.push(server);
+        await server.connect(serverSide);
+        return client;
       },
-      {
-        pollIntervalMs: 10,
-        ...options,
-      },
-    );
+      pollIntervalMs: 10,
+      ...options,
+    });
   }
 
   /** Sends one event to every push subscriber for its name, and queues it for pollers. */
@@ -267,7 +265,8 @@ export class TestServer {
     };
   }
 
-  private build(): Server<Request, Notification, Result> {
+  /** A fresh in-process server, not yet connected. */
+  build(): Server<Request, Notification, Result> {
     const server = new Server<Request, Notification, Result>(
       {
         name: 'test-server',
@@ -303,6 +302,11 @@ export class TestServer {
               execution: {
                 taskSupport: tool.taskSupport,
               },
+            }),
+        ...(tool.annotations === undefined
+          ? {}
+          : {
+              annotations: tool.annotations,
             }),
       })),
     }));

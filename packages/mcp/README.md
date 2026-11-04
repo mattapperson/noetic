@@ -7,26 +7,59 @@ connection (`specs/35-connections.md`).
 ```ts
 import { mcp } from '@noetic-tools/mcp';
 
-const harness = new AgentHarness({
-  connections: {
-    browser: mcp('npx @playwright/mcp@latest'),
-    slack: mcp({ url: 'https://slack-mcp.example.com/mcp', headers: { 'X-Tenant': 'acme' } }),
-    deploys: mcp({ url: DEPLOY_MCP, webhooks: { receiver: createWebhookReceiver({ port: 8787, publicUrl }) } }),
-  },
-  // …
+const linear = mcp({
+  name: 'linear',
+  type: 'http',
+  url: LINEAR_MCP,
+  headers: [{ name: 'Authorization', value: `Bearer ${token}` }],
 });
+
+callModel({ id: 'triage', model, tools: [linear] });                // one step
+new AgentHarness({ name: 'agent', params: {}, agentGraph, connections: [linear] }); // the harness
+callModel({ id: 'read', model, tools: [connectionTools('linear', { ops: ['get_*'] }), search] });
 ```
 
-`mcp()` accepts a command line, `{ command, args?, env?, cwd? }`,
-`{ url, headers?, protocol? }` or `{ transport }` (a caller-built MCP
-transport, e.g. an in-process server), plus options: `webhooks`, `profiles` /
-`extensions` (definitions to check a declaring server against), `timeoutMs`,
-`requestTimeoutMs`, `pollIntervalMs`.
+`mcp()` takes ACP's `McpServer` shape, so an ACP server config is an
+argument as it stands:
+
+- `{ name, type: 'http' | 'sse', url, headers?: [{ name, value }] }` — a
+  remote server (`'sse'` is the deprecated 2024-11-05 transport);
+- `{ name, command, args?, env?: [{ name, value }] }` — a stdio server
+  (`type: 'stdio'` is accepted too);
+- `{ transport }` — a caller-built MCP transport, e.g. an in-process server.
+
+The bridge options sit beside those fields: `auth`, `fetch` (remote),
+`cwd` and `spawn` (stdio), `webhooks`, `profiles` / `extensions`
+(definitions to check a declaring server against), `timeoutMs`,
+`requestTimeoutMs`, `pollIntervalMs` and `clientInfo`. A header or
+environment variable given twice is `CONNECTION_INVALID`.
+
+```ts
+mcp({ name: 'browser', command: 'npx', args: ['@playwright/mcp@latest'] });
+mcp({ name: 'drive', type: 'http', url: DRIVE_MCP, auth: { kind: 'oauth', provider: driveOAuth } });
+mcp({ name: 'deploys', type: 'http', url: DEPLOY_MCP, webhooks: { receiver: createWebhookReceiver({ port: 8787, publicUrl }) } });
+```
+
+`auth` signs in to a remote server: `{ kind: 'bearer', token }` sends
+`Authorization: Bearer <token>`; `{ kind: 'oauth', provider }` hands an MCP
+SDK `OAuthClientProvider` (re-exported here) to the transport, which handles
+the 401, discovery and refresh. `auth` and an `Authorization` header together
+are `CONNECTION_INVALID`. Credentials and headers never leave the server's
+origin, and the bridge registers every token — an `Authorization` header's
+included — with the harness (`ConnectOptions.redact`) so it is scrubbed like
+a secret.
+
+A JSON document names the same server as `{ "mcp": { "name": "linear",
+"type": "http", "url": "…", "headers": [{ "name": "Authorization", "value":
+{ "$secret": "linear.token" } }] } }`, granted by the host's `mcp` allowlist,
+whose `provider` is `mcp` itself.
 
 What the bridge does:
 
 - **Operations** are tools; a declared alias maps an operation onto an
-  existing tool with fixed arguments merged in. Binary content is stored in
+  existing tool with fixed arguments merged in. A tool's MCP `annotations`
+  (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`,
+  `title`) appear on the operation as `annotations`. Binary content is stored in
   the artifact store and passed as `{ $blob: … }`.
 - **Profiles.** A server declares what it implements under
   `tools.noetic/profiles` in its `extensions` capability (spec 36). The
@@ -52,7 +85,11 @@ What the bridge does:
 ```ts
 import { checkConformance } from '@noetic-tools/mcp/conformance';
 
-const report = await checkConformance({ server: 'node ./my-browser-server.js', profile: browser, driver });
+const report = await checkConformance({
+  server: { command: 'node', args: ['./my-browser-server.js'] },
+  profile: browser,
+  driver,
+});
 ```
 
 The driver causes what the server cannot (an ambiguous locator, a replaced

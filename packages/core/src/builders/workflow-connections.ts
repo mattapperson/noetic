@@ -765,7 +765,10 @@ export function checkConnectionAllowlist(
   doc: WorkflowDocument,
   allowlist: ConnectionAllowlist | undefined,
 ): void {
-  const manifest = doc.connections ?? {};
+  // A document's own `{ "mcp" }` connections answer to the `mcp` allowlist instead.
+  const manifest = Object.fromEntries(
+    Object.entries(doc.connections ?? {}).filter(([, entry]) => entry.mcp === undefined),
+  );
   const uses = checkDocumentConnections(doc);
   const names = Object.keys(manifest);
   if (names.length === 0) {

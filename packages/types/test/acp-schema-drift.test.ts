@@ -6,6 +6,9 @@
  * Hand-maintained copies drift. These tests compare each copy against the
  * upstream package so an added `ToolKind` (or a changed `McpServer` shape) fails
  * here rather than becoming silently unrepresentable in a workflow document.
+ * A document's `{ "mcp" }` entry takes the upstream `McpServer` shape, its
+ * values only as `$secret`s, so an upstream server with no values is one as it
+ * stands.
  */
 
 import { describe, expect, test } from 'bun:test';
@@ -73,7 +76,7 @@ describe('AcpToolKindSchema tracks the protocol package', () => {
   });
 });
 
-describe('AcpMcpServerSchema tracks the protocol package', () => {
+describe("a document's { mcp } entry tracks the protocol package's McpServer", () => {
   /** Typed as the upstream union, so a shape change fails to compile here. */
   const STDIO: acp.McpServer = {
     name: 'db',
@@ -114,8 +117,10 @@ describe('AcpMcpServerSchema tracks the protocol package', () => {
         id: 'probe',
         agent: 'a',
         prompt: 'p',
-        mcpServers: [
-          server,
+        tools: [
+          {
+            mcp: server,
+          },
         ],
       }).success,
     ).toBe(true);
@@ -128,10 +133,12 @@ describe('AcpMcpServerSchema tracks the protocol package', () => {
         id: 'probe',
         agent: 'a',
         prompt: 'p',
-        mcpServers: [
+        tools: [
           {
-            type: 'carrier-pigeon',
-            name: 'db',
+            mcp: {
+              type: 'carrier-pigeon',
+              name: 'db',
+            },
           },
         ],
       }).success,

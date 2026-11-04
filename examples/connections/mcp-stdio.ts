@@ -54,11 +54,20 @@ function server(
     args: [
       SERVER_PATH,
     ],
-    env: {
-      UI_SERVER_LOG: log,
-      UI_SERVER_INSTANCE: instance,
-      UI_SERVER_SENSITIVE_SCHEMA: sensitiveSchema ? '1' : '0',
-    },
+    env: [
+      {
+        name: 'UI_SERVER_LOG',
+        value: log,
+      },
+      {
+        name: 'UI_SERVER_INSTANCE',
+        value: instance,
+      },
+      {
+        name: 'UI_SERVER_SENSITIVE_SCHEMA',
+        value: sensitiveSchema ? '1' : '0',
+      },
+    ],
     ...(withProfiles
       ? {
           profiles: [

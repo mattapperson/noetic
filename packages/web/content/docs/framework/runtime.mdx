@@ -73,7 +73,7 @@ const harness = new AgentHarness({
 | `traceExporter` | `TraceExporter` | `NoopExporter` | Where to send completed spans. |
 | `defaultDeliveryMode` | `DeliveryMode` | `'next-turn'` | Default delivery mode for messages that don't specify one. |
 | `initialCwd` | `string` | `process.cwd()` | Initial working directory seeded into every root context this harness creates. |
-| `connections` | `ConnectionsConfig` | `undefined` | The live things the agent works with — browsers, devices, apps, chat workspaces, sources — by name. Providers connect on the first `execute()`/`run()` or `start()`. See [Connections](/docs/framework/connections). |
+| `connections` | `ConnectionEntries` | `undefined` | The live things the agent works with — browsers, devices, apps, chat workspaces, sources — keyed by name, or as a list of named entries (`[mcp({ name, … })]`). Providers connect on the first `execute()`/`run()` or `start()`. See [Connections](/docs/framework/connections). |
 | `triggers` | `ConnectionTrigger[]` | `undefined` | Connection events that start or join a turn. See [Triggers](/docs/framework/connections#triggers). |
 | `verification` | `Verifier` | `undefined` | The verifier `step.verify` uses — `verifier()` from `@noetic-tools/verify`. See [Verification](/docs/framework/verification). |
 | `emitItemsOnReplay` | `boolean` | `false` | When a resumed run replays a finished step, also stream the items that step emitted (`emitItems`) again as `item_appended`, so a client that reconnects mid-run sees the progress it missed. Without it, replay puts them back on the log quietly. See [Emitting Items Early](/docs/framework/steps#emitting-items-early). |
@@ -137,7 +137,7 @@ await harness.execute('follow-up', { threadId: 'thread-1' });
 | Parameter | Type | Description |
 |---|---|---|
 | `input` | `string \| Item \| Item[]` | The input to the agent. |
-| `options` | `ExecuteOptions` | Optional `threadId`, `resourceId`, `state`, `contextLayers`, `deliveryMode`, `messageId`. |
+| `options` | `ExecuteOptions` | Optional `threadId`, `resourceId`, `state`, `contextLayers`, `connections`, `deliveryMode`, `messageId`. `connections` attaches connections for this turn only: connected when it starts, released when it ends (see [Attaching](/docs/framework/connections#attaching-at-the-harness-a-turn-or-a-step)). |
 
 Rejects with `NoeticConfigError` code `NO_STEP_CONFIGURED` if no `agentGraph` was provided in the constructor.
 

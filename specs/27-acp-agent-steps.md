@@ -29,6 +29,9 @@ different matter, and the honest limit is stated below.
 It also brings capabilities that have no representation in a hand-rolled
 adapter: permission requests, plans, session modes, slash commands, MCP server
 passthrough, multimodal prompts, typed stop reasons, and cancellation semantics.
+A step's own Noetic tools reach the agent over MCP too, through the same
+pipeline as a `callModel` tool call, and its context layers run around each
+turn as around a model call (see `38-acp-tools`).
 
 ## Packages
 
@@ -102,13 +105,101 @@ interface AcpTransport {
 
 This is deliberately **not** built on `SubprocessAdapter` — that contract returns
 a durable handle with no attached stdio — nor on `ShellAdapter`, which is
-one-shot. Three transports ship:
+one-shot.
 
-| Transport | Use |
+An agent is reached one of two ways:
+
+- **A command on a machine** — how every preset runs. An `AcpMachine` is opened
+  once per connection, before the agent starts:
+
+  ```ts
+  interface AcpMachine {
+    reach(bridge: ToolBridgeAddress): Promise<ToolBridgeAddress>;
+    launch(command: SpawnCommand): Promise<AcpTransport>;
+    spawn: Spawn; // (command: SpawnCommand) => Promise<AcpTransport>
+    close(): Promise<void>;
+  }
+  ```
+
+  `reach` carries the tool bridge (spec 38) to where the agent can use it,
+  `launch` starts the agent with launch settings built from that address, and
+  `spawn` starts a process beside it — a stdio MCP server that depends on that
+  machine — whose stdio comes back, so Noetic stays its client. A command
+  agent's `AcpAgent.spawn` is `spawnOn(machine)`; `Spawn`, `SpawnCommand` and
+  `ByteStream` live in `@noetic-tools/types`, so `@noetic-tools/mcp` takes the
+  same seam (`mcp({ command, spawn })`) without importing this package. Closing
+  the agent's stream releases the machine.
+- **A transport** — `AcpTransportFactory`, for an agent someone else started.
+  It cannot carry the bridge or apply launch settings, so a step that gives it
+  `tools` fails (`AcpAgent.refusesTools`):
+  `ACP_TRANSPORT_CANNOT_LAUNCH` when the agent's wiring has launch settings,
+  `ACP_TRANSPORT_CANNOT_REACH` otherwise. With `tools` left out it gets none.
+  `gemini()` without `trustWorkspace: true` refuses tools the same way, with
+  `ACP_AGENT_CANNOT_TAKE_TOOLS`: Gemini starts no MCP server in a folder it
+  does not trust (`38-acp-tools` § Gemini CLI and folder trust).
+
+| Machine or transport | Use |
 |---|---|
-| `stdioAcpTransport` (`@noetic-tools/acp/stdio`) | A local agent as a child process. The default for every preset, loaded through a lazy `import()`. |
-| `loopbackTransport` | An in-process agent. Runs the real wire protocol with no process — the recommended way to test an ACP-backed step. |
-| custom | Anything yielding a duplex byte stream: a socket, a sandbox bridge, a remote host. |
+| `localMachine()` (`@noetic-tools/acp/stdio`) | This machine. `reach` returns the bridge's loopback address; `launch` and `spawn` start child processes. The default for every preset, loaded through a lazy `import()`. |
+| `webSocketMachine({ url, token, ca? })` (`@noetic-tools/acp/remote`) | A remote runner over WebSocket. Every upgrade carries the runner's bearer token; `ws://` is refused except to a loopback host, so a hop off the machine is TLS. |
+| `commandMachine({ command, args })` (`@noetic-tools/acp/remote`) | A remote runner started by a local command and spoken to over its stdio: `ssh host npx -y @noetic-tools/acp serve --stdio`, `docker exec -i ctr noetic-acp serve --stdio`. The command's own channel carries everything. |
+| `runnerMachine(openLink)` (`@noetic-tools/acp/remote`) | A remote runner over any `FrameLink`. |
+| `loopbackMachine(toAgent)`, `loopbackTransport(toAgent)` | An in-process agent over the real wire protocol, with no process — the way to test an ACP-backed step. The machine is reached where the bridge listens. |
+| `stdioAcpTransport` (`@noetic-tools/acp/stdio`) | An attached child process. |
+| custom transport | Anything yielding a duplex byte stream to an agent already running. |
+
+### The remote runner
+
+`noetic-acp serve` (the `@noetic-tools/acp` bin, Node) runs on the agent's
+machine and serves one host per channel — a WebSocket, or its own stdio with
+`--stdio`. When the channel closes, everything it started stops. Over that one
+channel, as JSON frames (`HostFrame` / `RunnerFrame`):
+
+- `start` runs a process (the agent, or an MCP server beside it) and carries
+  its stdin, stdout and exit;
+- `reach` opens a port on the runner's loopback interface; each HTTP request
+  the agent sends there travels to the host, which answers it from its own
+  bridge only — a request for any other path is `404`, and the host forwards
+  the parsed path to the bridge's own origin, never the raw one. The bridge
+  still checks the bearer token, `Host`, and `Origin` itself.
+
+So the agent needs no route back to the host, and the one channel is the only
+network hop. This one design covers ssh (`commandMachine` over `ssh`),
+containers (`docker exec -i`) and WebSocket, in place of an ssh reverse
+forward or a container host-gateway address.
+
+The runner listens on `127.0.0.1` by default; any other address needs
+`--tls-cert` and `--tls-key`. Its token comes from `NOETIC_ACP_RUNNER_TOKEN`
+(or is made up and printed). `--cwd` sets the working directory for a start
+that names none; a working directory missing on the runner's machine is an
+error.
+
+Without an allowlist the runner starts whatever the host asks. `--agent <id>`
+grants that preset's command (`PRESET_COMMANDS`) with the environment names
+its tool settings set (`PRESET_ENV`); `--spawn <command line>`, repeatable,
+grants a command for an MCP server beside it (split on spaces); `--env <name>`,
+repeatable, adds a name every grant may set — an API key, a server's token.
+With any grant (`AcpRunnerOptions.allow`) a start must match one by executable
+and arguments, may set only that grant's names — so a launcher such as
+`NODE_OPTIONS`, `LD_PRELOAD` or `PATH` is refused unless granted — and runs in
+a directory inside `--cwd` (the runner's own directory by default), compared
+by real path, so neither `..` nor a symlink leads out. A refused start is an
+`error` frame naming why. A setting that names a command the agent
+starts is held to the allowlist as well: every `mcp_servers` entry with a
+`command` in a `CODEX_CONFIG` must match a grant, setting only that grant's
+names, and `notify` is refused; for pi, the `--agent pi` grant sets
+`PI_ACP_PI_COMMAND` (the runner's own launcher) and `NOETIC_PI_COMMAND` (its
+own `NOETIC_PI_COMMAND`, else `pi`) itself, over what a host sends
+(`AcpRunnerGrant.fixedEnv`). The allowlist bounds what the runner starts, not
+what the agent does once started: any agent runs what the host's permission
+answers let it. The runner trusts whoever holds its token or its stdio, and
+warns so on stderr when it starts.
+`spawnOn(machine)` opens a machine per process, for a stdio MCP server that
+must run where the agent runs. Such a server starts as the MCP SDK starts a
+local one: with that machine's `HOME`, `LOGNAME`, `PATH`, `SHELL`, `TERM` and
+`USER` plus its own `env`, never the rest of the machine's environment
+(`localMachine()` and the runner alike). Only the agent `launch` starts gets
+the whole environment.
 
 ## Client-side capabilities
 
@@ -230,7 +321,35 @@ item, opens (or reuses) a connection and session, applies `mode`/`model`, drives
 one `session/prompt`, forwards each notification to the event bridge, appends
 the turn's items to the item log, charges `ctx.tokens`/`ctx.cost`, records
 `ctx.lastStepMeta`, tears the connection down per policy, and returns the
-assistant text (or the parsed `output`).
+agent's final message — the text after its last tool call, as `callModel`
+returns its final message — or the parsed `output`.
+
+### Tools
+
+`tools` takes what a `callModel` step's `tools` take: `tool()` definitions,
+connection entries — `mcp({ name, … })` — and picks —
+`connectionTools('linear', { ops })` by name, or from a handle or entry —
+with the same meaning (`35-connections` § Attaching connections, spec 38).
+Eager entries connect with the turn, found by the same walk that finds a
+`callModel` step's, so their tools are in the turn's set before the agent
+launches. With no `tools` the agent gets the whole set, connection tools
+included; `tools: []` gives it none.
+
+Noetic is always the MCP client. Every tool reaches the agent through noetic's
+tool bridge by its harness name (`<name>_<op>`, `<name>_ops` / `<name>_call`,
+merged profile tools with `target`), and every call passes the same gates as a
+`callModel` tool call; credentials stay with the host. A server is never handed
+to the agent's own MCP client.
+
+A connection tool's idempotency key is `<execution>:tool:<callId>`, where
+`callId` is the agent's own id for the call (`ToolExecutionContext.callId`), as
+it is the model's call id on `callModel` (`35-connections` § Durability).
+
+A stdio server that must run where the agent runs is `mcp({ name, command,
+args, env, spawn: agent.spawn })`: `AcpAgent.spawn` — `spawnOn(machine)` for a
+preset — starts it there and carries its stdio back to noetic. Because nothing
+reaches the agent's own MCP client, an agent whose adapter drops a
+`session/new` server list — pi-acp does — still gets the tools.
 
 ### Prompt content
 
@@ -293,6 +412,12 @@ session: { reuse: 'assistant', keepAlive: 'harness' }
 `session.load` resumes an existing ACP session id via `session/load` instead of
 creating a new one.
 
+**A kept connection holds the turn's connections.** Its agent may call a step
+entry's tools on a later turn, so a connection kept past its step
+(`'run'` or `'harness'`) holds what the turn attached (`registry.hold`) and
+releases it when the connection closes. A `'step'` connection holds nothing:
+the turn releases its entries when it ends.
+
 **Per-turn state follows the current step.** The client host carries the
 permission policy, the steering hook, the async handler, and the event sink, and
 the runtime rebinds it before every turn. A session shared by several steps
@@ -337,7 +462,10 @@ of it.
 Items follow the same rule: assistant text becomes a `MessageItem`, a `tool_call`
 becomes a `FunctionCallItem`, and a completed `tool_call_update` becomes a
 `FunctionCallOutputItem` whose output renders the ACP content structurally —
-diffs and terminal references included, never dropped.
+diffs and terminal references included, never dropped. Items keep the order the
+agent produced them in: each run of text between tool calls is its own
+`MessageItem`, so a turn reads message, call, result, message, as a `callModel`
+round does.
 
 ## Driving an agent from a model, and from a human
 
@@ -452,17 +580,25 @@ registry: supporting a new agent needs another entry, not a schema change. An
 unregistered reference fails hydration with `UNKNOWN_ACP_AGENT_REFERENCE`. The
 published JSON Schema is regenerated from the Zod source (`bun run gen:schema`).
 
-A node's `mcpServers` take the ACP shapes, except that a header or environment
-value may be `{ "$secret": "<name>" }`, resolved through `environment.secrets`
-when the session starts. Because a node decides what the agent can reach on
-the host — `terminal` alone hands it a shell — `parseAndRunWorkflow` and
-`dynamicWorkflow` hold a document they run to two host allowlists: `acp`, the
-most a node may ask of each agent in `permissions`, `mode`, `model`, `cwd`,
-`clientCapabilities` and `session` (narrowest by default: deny-only
-permissions, no `mode`, any `model`, the harness's cwd, `readTextFile` only,
-`keepAlive` up to `run`, no `load`), and `mcp`, the servers
-it may name. Anything more is `CONNECTION_NOT_ALLOWED` before the agent starts.
-A document's `session.reuse` keys live in a namespace of their own per run, so
+A node's `tools` take what a `callModel` node's take — `{ "type" }`,
+`{ "connection", "ops"? }` and inline `{ "mcp": … }` entries in ACP's
+`McpServer` shape — hydrated to the step's `tools` and served through the
+bridge like a TypeScript step's (`26-json-workflow-runtime` § Tools). Each
+`{ "mcp" }` server is checked against the host's `mcp` allowlist — HTTP/SSE by
+URL pattern, stdio by exact command and args and started through the node's
+agent's `spawn`, header and environment values only as bound
+`{ "$secret": "<name>" }`s, policy from the grant. Anything the allowlist does
+not grant is refused with `CONNECTION_NOT_ALLOWED` before the agent starts
+(`26-json-workflow-runtime` § MCP servers).
+
+Because a node decides what the agent can reach on the host — `terminal`
+alone hands it a shell — `parseAndRunWorkflow` and `dynamicWorkflow` also hold
+a document they run to the host's `acp` allowlist: the most a node may ask of
+each agent in `permissions`, `mode`, `model`, `cwd`, `clientCapabilities` and
+`session` (narrowest by default: deny-only permissions, no `mode`, any
+`model`, the harness's cwd, `readTextFile` only, `keepAlive` up to `run`, no
+`load`). Anything more is `CONNECTION_NOT_ALLOWED` before the agent starts. A
+document's `session.reuse` keys live in a namespace of their own per run, so
 its nodes never join a session the host opened
 (`26-json-workflow-runtime` § What a document may ask of an agent).
 
@@ -484,6 +620,14 @@ Runtime import graph clean; install graph not.
 
 ## Future Considerations
 
+- **MCP over ACP.** The ACP RFD `mcp-over-acp` (draft, request-scoped since
+  2026-09) offers an `{ "type": "acp", "name", "serverId" }` MCP server whose
+  messages travel as `mcp/message` requests on the ACP connection itself
+  (`mcpCapabilities.acp`), which would need no `reach` at all. It needs MCP
+  2026-07-28, the ACP library moved to `@agentclientprotocol/sdk` (its
+  `unstable` entry implements it; `@zed-industries/agent-client-protocol`
+  0.4.5 rejects an `acp` server), and an agent that advertises it — none of
+  Claude Code, Codex (`acp: false`), Gemini CLI, opencode or pi-acp does yet.
 - Protocol features still in draft upstream (`session/resume`, `session/list`,
   `elicitation/*`, session config options, usage reporting) arrive with a
   version bump of `@zed-industries/agent-client-protocol`.

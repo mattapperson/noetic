@@ -68,7 +68,7 @@ import { createWebhookReceiver } from '@noetic-tools/platform-node';
 
 const receiver = createWebhookReceiver({ port: 8787, publicUrl: 'https://hooks.example.com' });
 
-const slack = mcp({ url: 'https://slack-mcp.example.com/mcp' }, { webhooks: { receiver } });
+const slack = mcp({ type: 'http', url: 'https://slack-mcp.example.com/mcp', webhooks: { receiver } });
 ```
 
 | Option | Default | Meaning |

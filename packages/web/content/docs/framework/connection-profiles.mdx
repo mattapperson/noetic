@@ -296,7 +296,7 @@ A server declares what it implements under `tools.noetic/profiles` in its MCP `e
 - **Instances** — when one server serves several connections, requests carry `_meta["tools.noetic/instance"]`.
 - Names use only letters, digits, `_`, `-`, and `.`, as MCP tool names require.
 
-The `mcp()` bridge checks a declaration against the profile definitions you pass it — `mcp(server, { profiles: [browser] })` — and marks a server whose tools contradict its declaration unavailable.
+The `mcp()` bridge checks a declaration against the profile definitions you pass it — `mcp({ ...server, profiles: [browser] })` — and marks a server whose tools contradict its declaration unavailable.
 
 ### Parts every server provides
 
@@ -339,7 +339,7 @@ import { checkConformance } from '@noetic-tools/mcp/conformance';
 import { browser } from '@noetic-tools/profile-browser';
 
 const report = await checkConformance({
-  server: 'npx my-browser-mcp',
+  server: { command: 'npx', args: ['my-browser-mcp'] },
   profile: browser,
   driver: {
     sample: async (op) => (op === 'browser.navigate' ? { url: 'http://localhost:5173' } : undefined),

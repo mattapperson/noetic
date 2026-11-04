@@ -54,6 +54,19 @@ export function toolCollisionError(
   });
 }
 
+/**
+ * `CONNECTION_NAME_TAKEN`: an entry names a connection already attached in its
+ * scope or an outer one (harness, then turn, then step) with a different
+ * provider or options.
+ */
+export function nameTakenError(name: string, where: string, holder: string): NoeticConfigError {
+  return new NoeticConfigError({
+    code: ConnectionConfigErrorCode.NameTaken,
+    message: `${where} names connection '${name}', which the ${holder} already attaches with a different provider or options.`,
+    hint: `Pass the same entry the ${holder} uses, or give this one another name.`,
+  });
+}
+
 //#endregion
 
 //#region Run-time errors

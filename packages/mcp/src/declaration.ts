@@ -22,6 +22,7 @@ import type {
   AnyProfile,
   ConnectionEventInfo,
   ConnectionManifest,
+  ConnectionOperationAnnotations,
   ConnectionOperationInfo,
   ConnectionPartOrigin,
   ConnectionResourceInfo,
@@ -650,6 +651,48 @@ interface OperationSource {
     | undefined;
 }
 
+/** The MCP annotations a tool publishes, as `ConnectionOperationInfo.annotations`; absent when it publishes none. */
+function toolAnnotations(tool: ToolInfo): {
+  readonly annotations?: ConnectionOperationAnnotations;
+} {
+  const published = tool.annotations;
+  if (published === undefined) {
+    return {};
+  }
+  const annotations: ConnectionOperationAnnotations = {
+    ...(published.title === undefined
+      ? {}
+      : {
+          title: published.title,
+        }),
+    ...(published.readOnlyHint === undefined
+      ? {}
+      : {
+          readOnlyHint: published.readOnlyHint,
+        }),
+    ...(published.destructiveHint === undefined
+      ? {}
+      : {
+          destructiveHint: published.destructiveHint,
+        }),
+    ...(published.idempotentHint === undefined
+      ? {}
+      : {
+          idempotentHint: published.idempotentHint,
+        }),
+    ...(published.openWorldHint === undefined
+      ? {}
+      : {
+          openWorldHint: published.openWorldHint,
+        }),
+  };
+  return Object.keys(annotations).length === 0
+    ? {}
+    : {
+        annotations,
+      };
+}
+
 function operationInfo(
   source: OperationSource,
   declaration: ServerProfileDeclaration,
@@ -698,6 +741,7 @@ function operationInfo(
       : {
           sense: def.sense,
         }),
+    ...toolAnnotations(tool),
     ...(part?.origin ?? prefixOrigin(name, declaration)),
   };
 }
@@ -874,6 +918,7 @@ function profileLess(served: ServedParts): Discovery {
         : {
             outputSchema: tool.outputSchema,
           }),
+      ...toolAnnotations(tool),
     };
     routes.set(tool.name, {
       tool: tool.name,

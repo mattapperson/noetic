@@ -788,7 +788,8 @@ export async function checkConformance(
   const artifacts = options.artifacts ?? createMemoryArtifactStore();
   const provider = isConnectionProvider(options.server)
     ? options.server
-    : mcp(options.server, {
+    : mcp({
+        ...options.server,
         profiles: [
           options.profile,
           ...parentsOf(options.profile),

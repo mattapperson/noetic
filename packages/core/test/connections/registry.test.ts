@@ -1,7 +1,8 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import assert from 'node:assert';
 import type {
   ConnectionEvent,
+  ConnectionProvider,
   ConnectionsConfig,
   EventStreamMessage,
   NoeticError,
@@ -30,7 +31,7 @@ import type {
 import { createConnectionRuntime } from '../../src/connections/registry';
 import type { ConnectionScope, GatedCallOptions } from '../../src/connections/registry-types';
 import { createInMemoryArtifactStore } from '../../src/runtime/in-memory-artifact-store';
-import { makeStorage, sleep } from '../_helpers';
+import { makeMockContext, makeStorage, sleep } from '../_helpers';
 
 //#region Fixtures
 
@@ -197,6 +198,13 @@ function appOptions(overrides: Partial<InMemoryConnectionOptions> = {}): InMemor
   };
 }
 
+// A provider that keeps failing reconnects every 5 ms until its runtime
+// closes, so every runtime a test builds closes when the test ends.
+const opened: ConnectionRuntime[] = [];
+afterEach(async () => {
+  await Promise.all(opened.splice(0).map((runtime) => runtime.close().catch(() => undefined)));
+});
+
 interface Rig {
   readonly runtime: ConnectionRuntime;
   readonly events: ConnectionFrameworkEventRecord[];
@@ -228,6 +236,7 @@ function rig(
     onFrameworkEvent: (event) => events.push(event),
     reconnectDelayMs: () => 5,
   });
+  opened.push(runtime);
   return {
     runtime,
     events,
@@ -755,6 +764,54 @@ describe('gated calls', () => {
       echoed: {
         text: REDACTED_TEXT,
       },
+    });
+  });
+
+  test('credentials a provider registers through redact are scrubbed like secrets', async () => {
+    const inner = createInMemoryConnection(appOptions());
+    const { runtime } = rig({
+      connections: {
+        app: {
+          async connect(opts) {
+            opts.redact?.('cred-xyz');
+            return inner.connect(opts);
+          },
+        },
+      },
+    });
+    const app = await runtime.resolve({
+      name: 'app',
+      scope: scope(),
+    });
+    const output = await app.call(
+      'ui.fill',
+      {
+        text: 'Bearer cred-xyz',
+      },
+      callOptions(),
+    );
+    expect(output).toEqual({
+      echoed: {
+        text: `Bearer ${REDACTED_TEXT}`,
+      },
+    });
+  });
+
+  test('a registered credential is scrubbed from an unavailable reason', async () => {
+    const { runtime } = rig({
+      connections: {
+        app: {
+          async connect(opts) {
+            opts.redact?.('cred-xyz');
+            throw new Error('401 for token cred-xyz');
+          },
+        },
+      },
+    });
+    await runtime.start();
+    expect(runtime.status('app')[0]).toMatchObject({
+      state: 'unavailable',
+      reason: `401 for token ${REDACTED_TEXT}`,
     });
   });
 
@@ -1613,6 +1670,105 @@ describe('closing', () => {
       },
     });
   }
+
+  /** A provider whose first connect fails and whose next one takes 50 ms, counting releases. */
+  function slowSecondConnect(): {
+    readonly provider: ConnectionProvider;
+    readonly connects: () => number;
+    readonly released: () => number;
+  } {
+    const inner = createInMemoryConnection(appOptions());
+    let connects = 0;
+    let released = 0;
+    return {
+      connects: () => connects,
+      released: () => released,
+      provider: {
+        name: 'slow',
+        async connect(opts) {
+          connects += 1;
+          if (connects === 1) {
+            throw new Error('first try fails');
+          }
+          await sleep(50);
+          return (await inner.connect(opts)).map((connection) =>
+            Object.assign(Object.create(connection), {
+              release: async () => {
+                released += 1;
+              },
+            }),
+          );
+        },
+      },
+    };
+  }
+
+  test('a reconnect in flight when the turn detaches releases what it got, and the entry stays closed', async () => {
+    const slow = slowSecondConnect();
+    const { runtime } = rig({
+      connections: {},
+    });
+    await runtime.start();
+    const root = makeMockContext();
+    await runtime.attach(root, [
+      {
+        name: 'slow',
+        config: {
+          provider: slow.provider,
+        },
+        scope: 'turn',
+        where: 'test',
+      },
+    ]);
+    await sleep(20);
+    expect(slow.connects()).toBe(2);
+    await runtime.detach(root.id);
+    expect(slow.released()).toBe(1);
+    await sleep(80);
+    expect(slow.connects()).toBe(2);
+    expect(runtime.current('slow', root.id)).toBeUndefined();
+    await runtime.close();
+    expect(slow.released()).toBe(1);
+  });
+
+  test('a hold taken before the turn attaches holds what it attaches later', async () => {
+    const provider = createInMemoryConnection(appOptions());
+    const { runtime } = rig({
+      connections: {},
+    });
+    await runtime.start();
+    const root = makeMockContext();
+    const release = runtime.hold(root.id);
+    await runtime.attach(root, [
+      {
+        name: 'late',
+        config: {
+          provider,
+        },
+        scope: 'turn',
+        where: 'test',
+      },
+    ]);
+    await runtime.detach(root.id);
+    expect(provider.connection.released).toBe(false);
+    expect(runtime.current('late', root.id)).toBeDefined();
+    release();
+    await sleep(0);
+    expect(provider.connection.released).toBe(true);
+    await runtime.close();
+  });
+
+  test('a hold released before anything attaches leaves nothing behind', async () => {
+    const { runtime } = rig({
+      connections: {},
+    });
+    await runtime.start();
+    const release = runtime.hold('root-1');
+    release();
+    await sleep(0);
+    expect(runtime.visibleNames('root-1')).toEqual(runtime.visibleNames());
+    await runtime.close();
+  });
 
   test('close() closes every entry when one throws, then rethrows the first failure', async () => {
     const good = createInMemoryConnection(appOptions());

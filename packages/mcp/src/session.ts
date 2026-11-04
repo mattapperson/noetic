@@ -12,6 +12,7 @@ import type { McpOptions, McpServerTarget } from './config';
 import { DEFAULT_MCP_TIMEOUT_MS, DEFAULT_REQUEST_TIMEOUT_MS } from './config';
 import type { ServedParts } from './declaration';
 import { hasDeclaration } from './declaration';
+import type { TransportHooks } from './transports';
 import { createTransport } from './transports';
 import type { EventInfo, ResourceInfo, ToolInfo } from './wire';
 import {
@@ -114,9 +115,10 @@ export class McpSession {
     target: McpServerTarget,
     options: McpOptions,
     signal: AbortSignal,
+    hooks: TransportHooks = {},
   ): Promise<McpSession> {
     signal.throwIfAborted();
-    const transport = await createTransport(target);
+    const transport = await createTransport(target, hooks);
     const client = new Client<Request, Notification, Result>(
       options.clientInfo ?? DEFAULT_CLIENT_INFO,
       {

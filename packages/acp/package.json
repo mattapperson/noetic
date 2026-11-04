@@ -2,7 +2,7 @@
   "name": "@noetic-tools/acp",
   "version": "1.3.1",
   "type": "module",
-  "description": "Both directions of the Agent Client Protocol for Noetic. Drives any ACP-speaking coding agent (Claude Code, Codex, Gemini CLI, …) as a step, and serves a Noetic harness as an ACP agent for editors like Zed (toAcpAgent / serveAcp).",
+  "description": "Both directions of the Agent Client Protocol for Noetic. Drives any ACP-speaking coding agent (Claude Code, Codex, Gemini CLI, \u2026) as a step, and serves a Noetic harness as an ACP agent for editors like Zed (toAcpAgent / serveAcp).",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -40,6 +40,11 @@
       "types": "./dist/server.d.ts",
       "default": "./dist/server.js"
     },
+    "./remote": {
+      "bun": "./src/remote.ts",
+      "types": "./dist/remote.d.ts",
+      "default": "./dist/remote.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -51,16 +56,21 @@
     "access": "public"
   },
   "devDependencies": {
-    "bun-types": "latest",
+    "@modelcontextprotocol/client": "2.4.0",
+    "@noetic-tools/context": "workspace:*",
     "@noetic-tools/core": "workspace:*",
-    "@noetic-tools/context": "workspace:*"
+    "@types/ws": "8.18.2",
+    "bun-types": "latest"
   },
   "peerDependencies": {
     "zod": "^4.0.0"
   },
   "dependencies": {
+    "@modelcontextprotocol/node": "2.1.2",
+    "@modelcontextprotocol/server": "2.4.0",
     "@noetic-tools/types": "workspace:*",
     "@zed-industries/agent-client-protocol": "^0.4.5",
+    "ws": "8.22.1",
     "zod": "^4.0.0"
   },
   "scripts": {
@@ -75,5 +85,9 @@
     "lint:fix": "bunx biome check --fix .",
     "format": "bunx biome format --write .",
     "format:check": "bunx biome format ."
+  },
+  "bin": {
+    "noetic-acp": "./dist/bin.js",
+    "noetic-pi": "./dist/pi/launch.js"
   }
 }

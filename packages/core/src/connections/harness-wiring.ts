@@ -10,7 +10,7 @@
 
 import type {
   ArtifactStore,
-  ConnectionsConfig,
+  ConnectionEntries,
   ConnectionTrigger,
   Context,
   ContextLayer,
@@ -63,7 +63,7 @@ export interface WiredHarness {
 /** `createHarnessConnections` options. */
 export interface HarnessConnectionsOptions {
   readonly harness: WiredHarness;
-  readonly connections?: ConnectionsConfig;
+  readonly connections?: ConnectionEntries;
   readonly triggers?: ReadonlyArray<ConnectionTrigger>;
   readonly storage: StorageAdapter;
   readonly artifacts: ArtifactStore;
@@ -81,8 +81,8 @@ export interface HarnessConnections {
   start(): Promise<void>;
   /** Stops triggers and releases every connection. */
   close(): Promise<void>;
-  /** This turn's connection tools. */
-  tools(): Tool[];
+  /** A turn's connection tools: the harness's, and the ones attached under `rootId`. */
+  tools(rootId?: string): Tool[];
 }
 
 //#endregion
@@ -230,7 +230,7 @@ export function createHarnessConnections(options: HarnessConnectionsOptions): Ha
         () => registry.close(),
       ]);
     },
-    tools: () => buildConnectionTools(registry),
+    tools: (rootId) => buildConnectionTools(registry, rootId),
   };
 }
 

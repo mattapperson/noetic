@@ -2,7 +2,7 @@
  * Action step handlers: run, llm, spawn, provide.
  */
 
-import type { OutputCodec, StandardSchemaV1 } from '@noetic-tools/types';
+import type { OutputCodec, StandardSchemaV1, StepToolEntry } from '@noetic-tools/types';
 import {
   createMessage,
   estimateTokens,
@@ -13,6 +13,15 @@ import {
   NoeticConfigError,
   NoeticErrorImpl,
 } from '@noetic-tools/types';
+import type { SplitStepTools } from '../connections/step-tools';
+import {
+  checkLazyEntries,
+  offeredTools,
+  splitCeiling,
+  splitStepTools,
+  stepConnectionsOf,
+  withOffered,
+} from '../connections/step-tools';
 import type { EmitOption } from '../runtime/broadcaster-utils';
 import { chargeSpent } from '../util/spent';
 import type { ItemSchemaRegistry, LayerStateStore, SessionCtxExtension } from './action-deps';
@@ -67,7 +76,7 @@ import type {
   StorageAdapter,
   Tool,
 } from './action-types';
-import { isServerToolSpec, SteeringAction } from './action-types';
+import { SteeringAction } from './action-types';
 import { openChildSpan, traceChild } from './child-span';
 import { cloneWithGuard } from './clone-guard';
 import { collectAllTools, deduplicateTools } from './collect-tools';
@@ -153,7 +162,7 @@ function computeDelay(retry: RetryPolicy, attempt: number): number {
 
 //#region llm
 
-const MAX_STEERING_RETRIES = 3;
+export const MAX_STEERING_RETRIES = 3;
 const emptyRecall: ReadonlyArray<RecallLayerOutput> = [];
 
 /**
@@ -219,20 +228,25 @@ export async function resolveLazy<T, TContext>(
  * every LLM call sends the full set and step.tools narrows via allowedToolNames.
  *
  * Semantics:
- *   step.tools = undefined → unrestricted (all tools, no allowedToolNames)
+ *   step.tools = undefined → unrestricted (all tools, no allowedToolNames),
+ *                            except the tools of connections only some step lists
+ *                            (a document node's ceiling narrows its connections)
  *   step.tools = []        → no tools at all
- *   step.tools = [a, b]    → full set sent, restrict to a and b
+ *   step.tools = [a, b]    → full set sent, restrict to a and b (a connection
+ *                            entry or pick restricts to its connection's tools,
+ *                            each cut to what it picks and sent in place)
  *
  * Fallback: when no unified set exists (e.g. harness.run() called directly),
  * merge step tools with layer tools as before.
  */
-function resolveToolsAndRestrictions(
-  stepTools: Tool[] | undefined,
+export function resolveToolsAndRestrictions(
+  listed: SplitStepTools | undefined,
   layers: ContextLayer[] | undefined,
   ctx: Context,
 ): ResolvedTools {
+  const stepTools = listed?.tools;
   // stepTools = [] → explicit opt-out
-  if (stepTools && stepTools.length === 0) {
+  if (listed && !listed.ceiling && listed.tools.length === 0 && listed.picks.length === 0) {
     return {
       tools: undefined,
       allowedToolNames: undefined,
@@ -241,12 +255,10 @@ function resolveToolsAndRestrictions(
 
   const unified = ctx.unifiedTools;
   if (unified && unified.length > 0) {
-    const allowedToolNames = stepTools ? stepTools.map((t) => t.name) : undefined;
+    const offered = offeredTools(unified, listed, stepConnectionsOf(ctx));
     return {
-      tools: [
-        ...unified,
-      ],
-      allowedToolNames,
+      tools: withOffered(unified, offered),
+      allowedToolNames: offered?.map((t) => t.name),
     };
   }
 
@@ -390,42 +402,31 @@ async function finalizeStepOutput<O>(params: {
   return frameworkCast<O>(params.lastText);
 }
 
-interface PartitionedStepTools {
-  clientStepTools: Tool[] | undefined;
-  serverToolSpecs: ServerToolSpec[];
-}
-
 /**
- * `step.tools` is heterogeneous: client `Tool`s plus inline OpenRouter
- * server-tool specs (web search/fetch). Partition them — client tools flow
- * through the unified-tool / allowedToolNames / steering machinery as before;
- * server-tool specs bypass it entirely and are stamped onto the model request
- * (`_serverTools`) for the model caller to wrap via the SDK's `serverTool()`.
- * `undefined` (unrestricted) is preserved as-is; only a present array is
- * partitioned so the `[] = opt-out` semantics of step.tools stay intact.
+ * Splits a step's resolved `tools`. Client tools and connection picks flow
+ * through the unified-tool / allowedToolNames / steering machinery; server-tool
+ * specs bypass it and are stamped onto the model request (`_serverTools`) for
+ * the model caller to wrap via the SDK's `serverTool()`. `undefined`
+ * (unrestricted) is preserved, so the `[] = opt-out` semantics stay intact.
+ *
+ * @throws NoeticConfigError `CONNECTION_INVALID` when function-form tools return
+ * a connection the turn never attached.
  */
-function partitionStepTools(
-  resolvedStepTools: (Tool | ServerToolSpec)[] | undefined,
-): PartitionedStepTools {
-  if (resolvedStepTools === undefined) {
-    return {
-      clientStepTools: undefined,
-      serverToolSpecs: [],
-    };
+export function splitResolvedTools(
+  step: {
+    readonly id: string;
+    readonly tools?: unknown;
+  },
+  resolved: ReadonlyArray<StepToolEntry> | undefined,
+  ctx: Context,
+): SplitStepTools | undefined {
+  if (resolved === undefined) {
+    return splitCeiling(step);
   }
-  const clientStepTools: Tool[] = [];
-  const serverToolSpecs: ServerToolSpec[] = [];
-  for (const entry of resolvedStepTools) {
-    if (isServerToolSpec(entry)) {
-      serverToolSpecs.push(entry);
-      continue;
-    }
-    clientStepTools.push(entry);
+  if (typeof step.tools === 'function') {
+    checkLazyEntries(step.id, resolved, stepConnectionsOf(ctx));
   }
-  return {
-    clientStepTools,
-    serverToolSpecs,
-  };
+  return splitStepTools(resolved);
 }
 
 /**
@@ -433,7 +434,7 @@ function partitionStepTools(
  * The append pipeline may request a context re-render (e.g. a layer that
  * expanded an input reference into new content); applied after recall.
  */
-async function appendUserInput<I>(params: {
+export async function appendUserInput<I>(params: {
   ctx: Context<ContextData>;
   layers: ContextLayer[] | undefined;
   input: I;
@@ -457,7 +458,7 @@ async function appendUserInput<I>(params: {
  * Splits the context budget across layers via `allocateBudgets`. An empty map
  * when the step runs without layers.
  */
-function computeBudgetMap(params: {
+export function computeBudgetMap(params: {
   layers: ContextLayer[] | undefined;
   policy: ProjectionPolicy;
   systemPromptTokens: number;
@@ -487,7 +488,7 @@ function computeBudgetMap(params: {
  * steering retry loop because retries replay the same context. Re-render
  * requests collected from the input-append pipeline are applied on top.
  */
-async function gatherRecallResults(params: {
+export async function gatherRecallResults(params: {
   ctx: Context<ContextData>;
   layers: ContextLayer[] | undefined;
   recallQuery: string;
@@ -743,8 +744,8 @@ export async function executeCallModel<TContext, I, O>(
     step.output,
     baseInstructions,
   );
-  const resolvedStepTools = await resolveLazy(step.tools, ctx);
-  const { clientStepTools, serverToolSpecs } = partitionStepTools(resolvedStepTools);
+  const listedTools = splitResolvedTools(step, await resolveLazy(step.tools, ctx), baseCtx);
+  const serverToolSpecs = listedTools?.serverTools ?? [];
 
   const rerenderRequests = await appendUserInput({
     ctx: baseCtx,
@@ -753,7 +754,7 @@ export async function executeCallModel<TContext, I, O>(
   });
 
   const { tools: resolvedTools, allowedToolNames } = resolveToolsAndRestrictions(
-    clientStepTools,
+    listedTools,
     layers,
     baseCtx,
   );

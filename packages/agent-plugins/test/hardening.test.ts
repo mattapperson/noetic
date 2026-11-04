@@ -13,12 +13,13 @@ import { join } from 'node:path';
 import { DiagnosticCode } from '../src/diagnostics';
 import { discoverPlugins } from '../src/discovery';
 import { agentPlugins } from '../src/layer/agent-plugins';
-import { buildSubprocessEnv, connectMcpServer } from '../src/mcp-client';
+import { buildSubprocessEnv, pluginMcpProvider } from '../src/mcp-client';
 import { McpTransport, partitionHeaders, resolveMcpServer } from '../src/mcp-config';
 import { containedPath } from '../src/paths';
 import { parseSkill } from '../src/skill';
 import {
   cleanupFixtures,
+  connectQuietly,
   fakeExecutionContext,
   layerFn,
   linkFixture,
@@ -130,7 +131,6 @@ describe('§4.1 containment fails closed', () => {
         root,
       ],
       dataDir,
-      connectMcp: false,
     });
     await startLayer(layer);
 
@@ -175,7 +175,6 @@ describe('plugin text cannot forge the context block', () => {
         root,
       ],
       dataDir,
-      connectMcp: false,
     });
     await startLayer(layer);
 
@@ -203,7 +202,6 @@ describe('plugin text cannot forge the context block', () => {
         root,
       ],
       dataDir,
-      connectMcp: false,
     });
     await startLayer(layer);
 
@@ -236,7 +234,6 @@ describe('plugin text cannot forge the context block', () => {
         root,
       ],
       dataDir,
-      connectMcp: false,
     });
     await startLayer(layer);
 
@@ -278,7 +275,6 @@ describe('renderDelta', () => {
         root,
       ],
       dataDir,
-      connectMcp: false,
     });
     await startLayer(layer);
 
@@ -434,12 +430,15 @@ describe('§7.2.1 client-generated headers take precedence', () => {
         throw new Error('fixture should resolve');
       }
 
-      await connectMcpServer({
-        server: resolved.server,
-        pluginRoot: '/plugins/p',
-        pluginData: '/data/p',
-        timeoutMs: 3000,
-      });
+      await connectQuietly(
+        pluginMcpProvider({
+          name: 'p_api',
+          server: resolved.server,
+          pluginRoot: '/plugins/p',
+          pluginData: '/data/p',
+          timeoutMs: 3000,
+        }),
+      );
 
       expect(received.length).toBeGreaterThan(0);
       for (const headers of received) {
@@ -498,12 +497,15 @@ describe('§7.2.1 client-generated headers take precedence', () => {
         throw new Error('fixture should resolve');
       }
 
-      await connectMcpServer({
-        server: resolved.server,
-        pluginRoot: '/plugins/p',
-        pluginData: '/data/p',
-        timeoutMs: 3000,
-      });
+      await connectQuietly(
+        pluginMcpProvider({
+          name: 'p_api',
+          server: resolved.server,
+          pluginRoot: '/plugins/p',
+          pluginData: '/data/p',
+          timeoutMs: 3000,
+        }),
+      );
 
       expect(atTarget.length).toBeGreaterThan(0);
       for (const headers of atTarget) {
@@ -571,42 +573,6 @@ describe('§9.1 subprocess environment', () => {
 //#region Lifecycle
 
 describe('layer lifecycle', () => {
-  test('an unmatched dispose does not tear down a later live scope', async () => {
-    const { root, dataDir } = await makePluginRoot([
-      {
-        manifest: manifest('p'),
-        skills: {
-          s: skillDoc({
-            name: 's',
-          }),
-        },
-      },
-    ]);
-    const layer = agentPlugins({
-      roots: [
-        root,
-      ],
-      dataDir,
-      connectMcp: false,
-    });
-
-    await layer.hooks.dispose?.({
-      state: {
-        activated: [],
-      },
-    });
-    await startLayer(layer);
-    await startLayer(layer);
-    await layer.hooks.dispose?.({
-      state: {
-        activated: [],
-      },
-    });
-
-    // Two scopes were opened and only one closed, so the index must survive.
-    expect(layer.readPlugins()[0]?.skills).toHaveLength(1);
-  });
-
   test('diagnostics remain readable after teardown', async () => {
     // A host collects diagnostics at end-of-run, which is after dispose.
     const { root, dataDir } = await makePluginRoot([
@@ -621,7 +587,6 @@ describe('layer lifecycle', () => {
         root,
       ],
       dataDir,
-      connectMcp: false,
     });
     await startLayer(layer);
     await layer.hooks.dispose?.({

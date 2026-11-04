@@ -44,6 +44,7 @@ They are mandatory, not optional.
 | `35-connections.md` | `packages/types/src/types/connection.ts`, `packages/types/src/schemas/workflow.ts` (`connections`, `call`/`wait` nodes, value wrappers), `connections/`, `interpreter/execute-call`, `interpreter/execute-wait`, `builders/step-builders` (`step.call`/`step.wait`), `packages/mcp/src/`, `packages/platform-node/src/webhook-receiver.ts`, `packages/types/src/types/artifact-store.ts`, `runtime/in-memory-artifact-store.ts`, `packages/platform-node/src/file-artifact-store.ts` | `framework/connections.mdx`, `framework/json-runtime.mdx`, `framework/errors.mdx` (+ run `bun run gen:schema`, see Requirement 6) |
 | `36-connection-profiles.md` | `packages/types/src/types/profile.ts` (`defineProfile`, `defineExtension`), `packages/profile-*/src/` | `framework/connection-profiles.mdx` |
 | `37-verification.md` | `packages/types/src/verify/` (`Verifier`, OVP document types), `interpreter/execute-verify`, `builders/step-builders` (`step.verify`), `packages/verify/src/` | `framework/verification.mdx`, `framework/json-runtime.mdx` (+ run `bun run gen:schema`, see Requirement 6) |
+| `38-acp-tools.md` | `packages/types/src/types/acp.ts` (`AcpToolHost`), `runtime/tool-call`, `interpreter/acp-tools`, `builders/acp-agent-checks`, `packages/acp/src/` (`tool-bridge`, `tool-wiring`, `tool-permissions`, `mcp/`) | `framework/acp-agents.mdx` |
 
 **Paths are relative to**: Specs → `specs/`, Source → `packages/core/src/` (except rows that name a full `packages/...` path), Docs → `packages/web/content/docs/`
 

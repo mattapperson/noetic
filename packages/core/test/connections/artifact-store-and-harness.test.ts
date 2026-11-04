@@ -271,14 +271,14 @@ describe('AgentHarness connections', () => {
     expect(harness.getConnectionStatus('phone')[0]?.state).toBe('closed');
   });
 
-  test('a harness without connections has none, and an in-memory artifact store', async () => {
+  test('a harness without connections has an empty registry, and an in-memory artifact store', async () => {
     const harness = new AgentHarness({
       name: 'agent',
       params: {},
     });
     await harness.start();
     expect(harness.getConnectionStatus()).toEqual([]);
-    expect(registryOf(harness)).toBeUndefined();
+    expect(registryOf(harness)?.names()).toEqual([]);
     expect(await harness.artifacts.listRun('x')).toEqual([]);
     expect(await harness.restore('missing')).toBeNull();
   });

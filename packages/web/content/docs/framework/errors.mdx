@@ -596,9 +596,39 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 #### ACP_SESSION_SETTING_CONFLICT
 
-**Cause:** A step reuses a session but asks for a different `cwd` or different MCP servers than the session was created with.
+**Cause:** A step reuses a session but asks for a different `cwd` or different MCP servers than the session was created with, or serves a tool the session's tool list lacks (the error names it).
 
-**Fix:** Give every step that shares a `session.reuse` key the same `cwd` and `mcpServers`, or use a separate session.
+**Fix:** Give every step that shares a `session.reuse` key the same `cwd` and `tools`, or use a separate session.
+
+#### ACP_TRANSPORT_CANNOT_REACH
+
+**Cause:** `step.acpAgent()` gives `tools` to an agent attached through a custom `transport`. Noetic did not start that agent, and the transport has no `reach()` to carry the tool bridge to wherever it runs. With `tools` left out, such an agent simply gets none.
+
+**Fix:** Give the agent a command and a `machine` instead — `localMachine()` for this machine, or `webSocketMachine()` / `commandMachine()` from `@noetic-tools/acp/remote` for a remote runner (`noetic-acp serve`) — or leave `tools` off the step.
+
+#### ACP_TRANSPORT_CANNOT_LAUNCH
+
+**Cause:** As `ACP_TRANSPORT_CANNOT_REACH`, for an agent whose wiring has launch settings (Claude Code, Codex, opencode, pi): attached to an agent someone else started, those settings cannot be applied, so its tools would not match `callModel`.
+
+**Fix:** Give the preset a `machine` instead of a `transport`; the machine's `launch()` starts the agent with those settings.
+
+#### ACP_AGENT_CANNOT_TAKE_TOOLS
+
+**Cause:** `step.acpAgent()` gives `tools` to `gemini()` without `trustWorkspace: true`. Gemini CLI starts no MCP server, the tool bridge included, in a folder it does not trust, so the agent would run with none of the tools `callModel` would offer.
+
+**Fix:** Pass `gemini({ trustWorkspace: true })` to trust the session's folder for the agent process. Trusting it also loads the folder's own `.gemini/settings.json`, `GEMINI.md` and `.env`, so do this only for a repository you wrote; otherwise leave `tools` off the step.
+
+#### ACP_SERVER_TOOL
+
+**Cause:** `step.acpAgent()` was given a server tool such as `openrouter:web_search`. Only a model provider can run server tools.
+
+**Fix:** Pass only client tools built with `tool()`.
+
+#### ACP_TOOL_NAME_COLLISION
+
+**Cause:** Two of a step's tools reduce to the same wire name (names keep only letters, digits, `_`, and `-`), so the agent could not tell them apart.
+
+**Fix:** Rename one of the tools.
 
 #### ACP_SERVE_KIND_RULES_WITHOUT_TOOLS
 
@@ -611,7 +641,7 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 #### CONNECTION_UNKNOWN
 
-**Cause:** A handle, workflow node, trigger or allowlist names a connection the harness does not have.
+**Cause:** A handle, workflow node, trigger or allowlist names a connection the harness does not have, or a `connectionTools('<name>')` pick (or a JSON `{ "connection" }` pick) names one neither the harness nor the turn attaches, found when the turn's tool set is built.
 
 **Fix:** Add the connection under that name in `new AgentHarness({ connections })`, or correct the name. The hint lists the connections the harness has.
 
@@ -629,7 +659,7 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 #### CONNECTION_INVALID
 
-**Cause:** A connection manifest entry, handle or provider configuration is malformed: for example a bad version range, a `fresh` handle without a pool, a `secret()` or an MCP server `$secret` used with no `environment.secrets` resolver, or an `mcp` allowlist URL pattern with `*` in the host other than a leading `*.` followed by at least two labels.
+**Cause:** A connection manifest entry, handle or provider configuration is malformed: for example a bad version range, a `fresh` handle without a pool, a `secret()` or an MCP server `$secret` used with no `environment.secrets` resolver, an `mcp` allowlist URL pattern with `*` in the host other than a leading `*.` followed by at least two labels, a listed entry with no name, a record key that disagrees with `mcp({ name })`, a turn or step entry that sets `pool`, a function-form `tools` that returns a connection the turn never attached, an `mcp()` config that is not ACP's `McpServer` shape (a command line string, `protocol`, headers or environment as a record), a header or environment variable given twice, `auth` together with an `Authorization` header, a `connectionTools()` name that is not a connection name, or a document `{ "mcp" }` connection whose key disagrees with its name or that sets `from`, `fresh` or `setup`.
 
 **Fix:** Correct the entry the message names. The hint says which field is wrong.
 
@@ -637,7 +667,13 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 **Cause:** Two connection operations would reach the model under the same tool name.
 
-**Fix:** Rename one of the connections, or expose fewer operations to the model through `connectionTools()`.
+**Fix:** Rename one of the connections, or set `expose: 'call'` or `'none'` on one of them.
+
+#### CONNECTION_NAME_TAKEN
+
+**Cause:** An entry names a connection that its scope or an outer one already attaches with a different provider or options. The scopes are the harness, then the turn (`execute(input, { connections })`), then a step's `tools`. Two entries in one list or record with the same name and different providers fail the same way.
+
+**Fix:** Pass the same entry object the outer scope uses, or give this one another name.
 
 ### Verification
 

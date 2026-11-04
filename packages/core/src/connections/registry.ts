@@ -11,6 +11,11 @@
  * reconnected with backoff while every other connection keeps working. When a
  * connection's manifest changes it is renegotiated against what the harness
  * graph requires; one that no longer satisfies it becomes unavailable.
+ *
+ * A turn attaches its own entries — the turn's `connections` and the entries
+ * its steps list — with `attach(ctx, …)` before its tool set is built, and
+ * `detach(id)` releases them when it ends. They are looked up by name from
+ * any context under the turn's root, after the harness's own.
  */
 
 import type {
@@ -19,6 +24,7 @@ import type {
   Connection,
   ConnectionChangedEventData,
   ConnectionConfig,
+  ConnectionEntries,
   ConnectionEvent,
   ConnectionEventEventData,
   ConnectionEventInit,
@@ -29,7 +35,6 @@ import type {
   ConnectionRequirement,
   ConnectionState,
   ConnectionStatus,
-  ConnectionsConfig,
   ConnectionTaskEventData,
   ConnectionTaskStatus,
   Context,
@@ -38,12 +43,15 @@ import type {
   StorageAdapter,
   StreamChangedEventData,
 } from '@noetic-tools/types';
-import { isConnectionProvider, normalizeConnectionEntry } from '@noetic-tools/types';
+import type { AttachedEntry, AttachedScope } from '../types/connection-entry';
+import { rootOf } from '../util/root-context';
 import { withholdSensitiveBlobs } from './blobs';
 import type { ResumeDecision } from './durability';
 import { resumeDecision } from './durability';
+import { checkEntry, namedEntries, sameConfig } from './entries';
 import {
   invalidConnectionError,
+  nameTakenError,
   notAllowedConnectionError,
   resumeRefusedError,
   unavailableError,
@@ -52,7 +60,6 @@ import {
 import { bufferedEventStream } from './event-stream';
 import type { GateContext, GateHooks } from './gates';
 import { admitIncoming, gatedAwaitTask, gatedCall } from './gates';
-import { CONNECTION_NAME_PATTERN } from './handle';
 import { checkRequirement } from './negotiation';
 import type { LeaseChange } from './pool';
 import { ConnectionPool } from './pool';
@@ -84,7 +91,7 @@ export interface ConnectionFrameworkEventRecord {
 
 /** Options for `createConnectionRuntime`. */
 export interface ConnectionRuntimeOptions {
-  readonly connections?: ConnectionsConfig;
+  readonly connections?: ConnectionEntries;
   readonly storage: StorageAdapter;
   readonly artifacts: ArtifactStore;
   readonly secrets?: SecretResolver;
@@ -112,6 +119,29 @@ export interface NeedOptions {
 
 export interface ConnectionRuntime extends ConnectionRegistry {
   resolve(request: RuntimeResolveRequest): Promise<ResolvedConnection>;
+  /**
+   * Attaches a turn's entries under its root context and connects them. An
+   * entry whose name the harness or the turn already holds with the same
+   * provider and options is that connection; it is not connected twice.
+   *
+   * @throws NoeticConfigError `CONNECTION_NAME_TAKEN` when a name is held with a
+   * different provider or options, `CONNECTION_INVALID` for a malformed entry
+   * or one that sets `pool`.
+   */
+  attach(root: Context, entries: ReadonlyArray<AttachedEntry>): Promise<void>;
+  /** Releases what a turn attached, once nothing holds it (see `hold`). */
+  detach(rootId: string): Promise<void>;
+  /**
+   * Keeps a turn's entries attached past the turn — for a session that outlives
+   * it — until the returned function is called.
+   */
+  hold(rootId: string): () => void;
+  /** Harness names, then the names a turn attached. */
+  visibleNames(rootId?: string): ReadonlyArray<string>;
+  /** Where `name` lives for a turn: `'harness'`, or the scope it was attached at. */
+  scopeOf(name: string, rootId?: string): 'harness' | AttachedScope | undefined;
+  /** Whether a view layer renders the connection's `'turn'` and `'effect'` reads. */
+  viewed(name: string, rootId?: string): boolean;
   /** Connects every provider and starts every pool. Idempotent. */
   start(): Promise<void>;
   /**
@@ -123,12 +153,12 @@ export interface ConnectionRuntime extends ConnectionRegistry {
   rerunAllowed(executionId: string, name: string): boolean;
   /** Releases every connection and lease. */
   close(): Promise<void>;
-  /** The harness configuration of a connection. */
-  config(name: string): ConnectionConfig | undefined;
+  /** The configuration of a connection: the harness's, or one a turn attached. */
+  config(name: string, rootId?: string): ConnectionConfig | undefined;
   /** The live provider connection behind a non-pool name, when it is ready. */
-  current(name: string): Connection | undefined;
+  current(name: string, rootId?: string): Connection | undefined;
   /** Bumped every time an operation with effects runs on the connection. */
-  effectCount(name: string): number;
+  effectCount(name: string, rootId?: string): number;
   /** Records what the harness graph requires of a connection; renegotiated on manifest changes. */
   require(name: string, requirement: ConnectionRequirement, options?: NeedOptions): void;
   /**
@@ -186,9 +216,22 @@ export interface ConnectionRuntime extends ConnectionRegistry {
   withholdSensitive(value: unknown): Promise<unknown>;
 }
 
+/** What one turn attached. */
+interface Attachment {
+  readonly entries: Map<string, Entry>;
+  holds: number;
+  released: boolean;
+}
+
 interface Entry {
   readonly name: string;
   readonly config: ConnectionConfig;
+  readonly scope: 'harness' | AttachedScope;
+  /** The map it lives in; a provider's further instances join it. */
+  readonly home: Map<string, Entry>;
+  /** The turn's root context, for an attached entry: its events go to that turn. */
+  readonly root?: Context;
+  readonly viewed: boolean;
   readonly pool?: ConnectionPool;
   connection?: Connection;
   state: ConnectionState;
@@ -205,12 +248,6 @@ interface Entry {
 
 //#region Helpers
 
-const EXPOSE_VALUES = new Set([
-  'eager',
-  'all',
-  'none',
-]);
-
 function defaultReconnectDelay(attempt: number): number {
   return Math.min(3e4, 1e3 * 2 ** attempt);
 }
@@ -222,27 +259,6 @@ function errorReason(e: unknown): string {
 function unrefTimeout(timer: ReturnType<typeof setTimeout>): void {
   if (typeof timer === 'object' && timer !== null && 'unref' in timer) {
     timer.unref();
-  }
-}
-
-function validateEntry(name: string, config: ConnectionConfig): void {
-  if (!CONNECTION_NAME_PATTERN.test(name)) {
-    throw invalidConnectionError(
-      `Connection name '${name}' is not valid.`,
-      'Start with a letter and use only letters, digits, _ and -.',
-    );
-  }
-  if (!isConnectionProvider(config.provider)) {
-    throw invalidConnectionError(
-      `Connection '${name}' has no provider.`,
-      'Pass mcp(…), a source, or any ConnectionProvider (an object with connect()).',
-    );
-  }
-  if (config.expose !== undefined && !EXPOSE_VALUES.has(config.expose)) {
-    throw invalidConnectionError(
-      `Connection '${name}' has expose '${String(config.expose)}'.`,
-      "Use expose: 'eager', 'all' or 'none'.",
-    );
   }
 }
 
@@ -285,8 +301,14 @@ function validateSetup(
 
 class Runtime implements ConnectionRuntime {
   private readonly entries = new Map<string, Entry>();
+  /** What each live turn attached, by its root context id. */
+  private readonly attached = new Map<string, Attachment>();
   private readonly sealer: RefSealer;
   private readonly scrubber = new SecretScrubber();
+  /** Handed to providers so the credentials they hold are scrubbed like resolved secrets. */
+  private readonly redact = (value: string): void => {
+    this.scrubber.add(value);
+  };
   private readonly refKinds = new Map<string, RefKindInfo>();
   /** Every profile handles name, by id, handed to providers when they connect. */
   private readonly profiles = new Map<string, AnyProfile>();
@@ -301,12 +323,14 @@ class Runtime implements ConnectionRuntime {
     for (const profile of options.profiles ?? []) {
       this.registerProfile(profile);
     }
-    for (const [name, raw] of Object.entries(options.connections ?? {})) {
-      const config = normalizeConnectionEntry(raw);
-      validateEntry(name, config);
+    for (const { name, config } of namedEntries(options.connections, 'The harness connections')) {
+      checkEntry(name, config);
       this.entries.set(name, {
         name,
         config,
+        scope: 'harness',
+        home: this.entries,
+        viewed: !config.pool && config.expose !== 'call',
         pool: config.pool ? this.createPool(name, config) : undefined,
         state: 'connecting',
         effects: 0,
@@ -314,6 +338,27 @@ class Runtime implements ConnectionRuntime {
         requirements: [],
       });
     }
+  }
+
+  /** The entry `name` names for a turn: the harness's, else one the turn attached. */
+  private lookup(name: string, rootId: string | undefined): Entry | undefined {
+    const own = this.entries.get(name);
+    if (own || rootId === undefined) {
+      return own;
+    }
+    return this.attached.get(rootId)?.entries.get(name);
+  }
+
+  /**
+   * The entry a request resolves. A step's entry is reachable only through the
+   * model tools the turn built from it; handles reach harness and turn entries.
+   */
+  private lookupFor(request: RuntimeResolveRequest, target: string): Entry | undefined {
+    const entry = this.lookup(target, request.ctx ? rootOf(request.ctx).id : request.rootId);
+    if (entry?.scope === 'step' && request.caller !== 'model') {
+      return undefined;
+    }
+    return entry;
   }
 
   //#region Registry contract
@@ -326,7 +371,7 @@ class Runtime implements ConnectionRuntime {
 
   async resolve(request: RuntimeResolveRequest): Promise<ResolvedConnection> {
     const target = request.from ?? request.name;
-    const entry = this.entries.get(target);
+    const entry = this.lookupFor(request, target);
     if (!entry) {
       throw unknownConnectionError(target, this.names());
     }
@@ -425,41 +470,163 @@ class Runtime implements ConnectionRuntime {
   async close(): Promise<void> {
     this.controller.abort();
     // Every entry is closed even when one throws; the first failure is rethrown.
+    const attachedEntries = [
+      ...this.attached.values(),
+    ].flatMap((attachment) => [
+      ...attachment.entries.values(),
+    ]);
+    this.attached.clear();
     await runEvery(
       [
         ...this.entries.values(),
-      ].map((entry) => () => this.closeEntry(entry)),
+        ...attachedEntries,
+      ].map((entry) => () => this.closeEntry(entry, 'the harness closed')),
     );
   }
 
-  private async closeEntry(entry: Entry): Promise<void> {
+  private async closeEntry(entry: Entry, reason: string): Promise<void> {
     if (entry.reconnectTimer) {
       clearTimeout(entry.reconnectTimer);
+      entry.reconnectTimer = undefined;
     }
     const connection = entry.connection;
+    const connecting = entry.connecting;
+    this.setState(entry, 'closed', reason);
     try {
+      // A connect in flight sees the entry closed and releases what it got.
+      await connecting?.catch(() => undefined);
       await runEvery([
         () => entry.unsubscribe?.(),
         () => entry.pool?.close(),
       ]);
     } finally {
       entry.connection = undefined;
-      this.setState(entry, 'closed', 'the harness closed');
       await connection?.release().catch(() => undefined);
     }
   }
 
-  config(name: string): ConnectionConfig | undefined {
-    return this.entries.get(name)?.config;
+  config(name: string, rootId?: string): ConnectionConfig | undefined {
+    return this.lookup(name, rootId)?.config;
   }
 
-  current(name: string): Connection | undefined {
-    const entry = this.entries.get(name);
+  current(name: string, rootId?: string): Connection | undefined {
+    const entry = this.lookup(name, rootId);
     return entry?.state === 'ready' ? entry.connection : undefined;
   }
 
-  effectCount(name: string): number {
-    return this.entries.get(name)?.effects ?? 0;
+  effectCount(name: string, rootId?: string): number {
+    return this.lookup(name, rootId)?.effects ?? 0;
+  }
+
+  visibleNames(rootId?: string): ReadonlyArray<string> {
+    const own = rootId === undefined ? undefined : this.attached.get(rootId);
+    return [
+      ...this.entries.keys(),
+      ...(own ? own.entries.keys() : []),
+    ];
+  }
+
+  scopeOf(name: string, rootId?: string): 'harness' | AttachedScope | undefined {
+    return this.lookup(name, rootId)?.scope;
+  }
+
+  viewed(name: string, rootId?: string): boolean {
+    return this.lookup(name, rootId)?.viewed ?? false;
+  }
+
+  //#endregion
+
+  //#region Attaching
+
+  async attach(root: Context, entries: ReadonlyArray<AttachedEntry>): Promise<void> {
+    const attachment = this.attached.get(root.id) ?? {
+      entries: new Map<string, Entry>(),
+      holds: 0,
+      released: false,
+    };
+    const added = entries.flatMap((entry) => this.admitAttached(root, attachment, entry));
+    if (added.length === 0) {
+      return;
+    }
+    attachment.released = false;
+    this.attached.set(root.id, attachment);
+    await Promise.all(added.map((entry) => this.ensureConnected(entry).catch(() => undefined)));
+  }
+
+  /**
+   * Adds one entry to a turn's attachment, or nothing when its name already
+   * names the same connection there or on the harness.
+   */
+  private admitAttached(root: Context, attachment: Attachment, entry: AttachedEntry): Entry[] {
+    checkEntry(entry.name, entry.config);
+    if (entry.config.pool) {
+      throw invalidConnectionError(
+        `${entry.where} gives connection '${entry.name}' a pool.`,
+        'Pools stay at the harness: move the entry to new AgentHarness({ connections }).',
+      );
+    }
+    const held = this.entries.get(entry.name) ?? attachment.entries.get(entry.name);
+    if (held) {
+      if (!sameConfig(held.config, entry.config)) {
+        throw nameTakenError(entry.name, entry.where, held.scope);
+      }
+      return [];
+    }
+    const created: Entry = {
+      name: entry.name,
+      config: entry.config,
+      scope: entry.scope,
+      home: attachment.entries,
+      root,
+      viewed: entry.viewed === true && entry.config.expose !== 'call',
+      state: 'connecting',
+      effects: 0,
+      attempts: 0,
+      requirements: [],
+    };
+    attachment.entries.set(entry.name, created);
+    return [
+      created,
+    ];
+  }
+
+  async detach(rootId: string): Promise<void> {
+    const attachment = this.attached.get(rootId);
+    if (!attachment) {
+      return;
+    }
+    attachment.released = true;
+    if (attachment.holds > 0) {
+      return;
+    }
+    this.attached.delete(rootId);
+    await runEvery(
+      [
+        ...attachment.entries.values(),
+      ].map((entry) => () => this.closeEntry(entry, 'the turn ended')),
+    );
+  }
+
+  hold(rootId: string): () => void {
+    // A hold may come before the turn attaches anything; what it attaches later is held too.
+    const attachment = this.attached.get(rootId) ?? {
+      entries: new Map<string, Entry>(),
+      holds: 0,
+      released: false,
+    };
+    this.attached.set(rootId, attachment);
+    attachment.holds += 1;
+    let done = false;
+    return () => {
+      if (done) {
+        return;
+      }
+      done = true;
+      attachment.holds -= 1;
+      if (attachment.released || (attachment.holds === 0 && attachment.entries.size === 0)) {
+        void this.detach(rootId);
+      }
+    };
   }
 
   require(name: string, requirement: ConnectionRequirement, options?: NeedOptions): void {
@@ -519,7 +686,7 @@ class Runtime implements ConnectionRuntime {
     readonly recorded: ConnectionIdentity;
     readonly signal: AbortSignal;
   }): Promise<ResumeDecision> {
-    const entry = this.entries.get(params.name);
+    const entry = this.lookup(params.name, params.executionId);
     if (!entry) {
       throw unknownConnectionError(params.name, this.names());
     }
@@ -703,14 +870,23 @@ class Runtime implements ConnectionRuntime {
         profiles: [
           ...this.profiles.values(),
         ],
+        redact: this.redact,
+        secrets: this.options.secrets,
       });
+      if (entry.state === 'closed') {
+        await runEvery(connections.map((connection) => () => connection.release()));
+        return;
+      }
       const [first, ...extra] = connections;
       if (!first) {
         throw new Error('the provider returned no connections');
       }
-      this.attach(entry, first);
+      this.attachConnection(entry, first);
       this.attachExtra(entry, extra);
     } catch (e) {
+      if (entry.state === 'closed') {
+        return;
+      }
       this.setState(entry, 'unavailable', errorReason(e));
       this.scheduleReconnect(entry);
       throw unavailableError(entry.name, errorReason(e));
@@ -721,21 +897,25 @@ class Runtime implements ConnectionRuntime {
   private attachExtra(entry: Entry, extra: ReadonlyArray<Connection>): void {
     for (const connection of extra) {
       const name = `${entry.name}-${connection.id.replace(/[^A-Za-z0-9_-]/g, '_')}`;
-      const existing = this.entries.get(name);
+      const existing = entry.home.get(name);
       const sibling: Entry = existing ?? {
         name,
         config: entry.config,
+        scope: entry.scope,
+        home: entry.home,
+        root: entry.root,
+        viewed: false,
         state: 'connecting',
         effects: 0,
         attempts: 0,
         requirements: [],
       };
-      this.entries.set(name, sibling);
-      this.attach(sibling, connection);
+      entry.home.set(name, sibling);
+      this.attachConnection(sibling, connection);
     }
   }
 
-  private attach(entry: Entry, connection: Connection): void {
+  private attachConnection(entry: Entry, connection: Connection): void {
     entry.unsubscribe?.();
     entry.connection = connection;
     entry.attempts = 0;
@@ -842,6 +1022,8 @@ class Runtime implements ConnectionRuntime {
         profiles: [
           ...this.profiles.values(),
         ],
+        redact: this.redact,
+        secrets: this.options.secrets,
       }),
       onLease: (lease, change) => this.emitLease(name, lease, change),
     });
@@ -1073,13 +1255,18 @@ class Runtime implements ConnectionRuntime {
 
   private setState(entry: Entry, state: ConnectionState, reason?: string): void {
     entry.state = state;
-    entry.reason = reason;
+    entry.reason = reason === undefined ? undefined : this.scrubber.scrubText(reason);
     this.emitChanged(entry);
   }
 
   private emitChanged(entry: Entry): void {
     this.emit({
       type: 'connection_changed',
+      ...(entry.root
+        ? {
+            ctx: entry.root,
+          }
+        : {}),
       data: {
         connection: entry.name,
         state: entry.state,

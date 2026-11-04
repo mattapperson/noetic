@@ -25,10 +25,11 @@ import type {
 } from '@noetic-tools/types/verify';
 import { AnomalyKind, OvpChannelIdSchema, VerifyConfigErrorCode } from '@noetic-tools/types/verify';
 import { z } from 'zod';
+import { stepPathOf } from '../connections/durability';
 import type { ResolvedConnection } from '../connections/registry-types';
 import { createInMemoryArtifactStore } from '../runtime/in-memory-artifact-store';
 import { harnessInternal } from '../util/harness-internals';
-import { idempotencyKeyFor, runRootOf, stepPathOf } from './connection-steps';
+import { idempotencyKeyFor, runRootOf } from './connection-steps';
 
 //#region Constants
 

@@ -292,44 +292,6 @@ const SecretValueSchema: z.ZodType<WorkflowSecretValue> = z
   })
   .strict();
 
-/** A header or environment entry. Its value may be a `$secret`, resolved when the session starts. */
-const AcpNamedValueSchema = z.object({
-  name: z.string(),
-  value: z.union([
-    z.string(),
-    SecretValueSchema,
-  ]),
-});
-
-/**
- * ACP `McpServer`. Stdio is untagged and mandatory for every agent; http/sse are
- * capability-gated. `parseAndRunWorkflow` and `dynamicWorkflow` accept a server
- * only when the host's `mcp` allowlist grants it.
- */
-const AcpMcpServerSchema = z.union([
-  z.object({
-    type: z.literal('http'),
-    name: z.string().min(1),
-    url: z.string(),
-    headers: z.array(AcpNamedValueSchema),
-  }),
-  z.object({
-    type: z.literal('sse'),
-    name: z.string().min(1),
-    url: z.string(),
-    headers: z.array(AcpNamedValueSchema),
-  }),
-  z.object({
-    name: z.string().min(1),
-    command: z.string().min(1),
-    args: z.array(z.string()),
-    env: z.array(AcpNamedValueSchema),
-  }),
-]);
-
-/** @public An `acp-agent` node's MCP server, as a document writes it. */
-export type WorkflowMcpServer = z.infer<typeof AcpMcpServerSchema>;
-
 const AcpSessionPolicySchema = z.object({
   reuse: z.string().min(1).optional(),
   /**
@@ -420,18 +382,71 @@ export interface OutputCodecRef {
   library: string;
 }
 
+/** @public A `{ type }` tool entry: a registered client tool, or an `openrouter:*` server tool. */
+export type WorkflowTypedToolEntry = z.infer<typeof CallModelToolEntrySchema>;
+
+/**
+ * @public
+ * A harness or turn connection's model tools, by connection name: every tool,
+ * or only those whose operations match the `ops` globs.
+ */
+export interface WorkflowConnectionToolEntry {
+  connection: string;
+  ops?: string[];
+}
+
+/** @public A header or environment variable a document sets: its value only as a `$secret`. */
+export interface WorkflowMcpSecretValue {
+  name: string;
+  value: WorkflowSecretValue;
+}
+
+/**
+ * @public
+ * An MCP server a document names, in ACP's `McpServer` shape, as `mcp()`
+ * takes it: `{ name, type: "http" | "sse", url, headers? }` or
+ * `{ name, command, args?, env? }`. Header and environment values are
+ * `$secret`s only. The host's `mcp` allowlist grants the URL or exact command,
+ * binds the secrets and sets the policy.
+ */
+export type WorkflowMcpServer =
+  | {
+      name: string;
+      type: 'http' | 'sse';
+      url: string;
+      headers?: WorkflowMcpSecretValue[];
+    }
+  | {
+      name: string;
+      type?: 'stdio';
+      command: string;
+      args?: string[];
+      env?: WorkflowMcpSecretValue[];
+    };
+
+/** @public An MCP server a document attaches, in a node's `tools` or the document's `connections`. */
+export interface WorkflowMcpToolEntry {
+  mcp: WorkflowMcpServer;
+}
+
+/** @public A connection a step's `tools` lists. */
+export type WorkflowStepConnectionEntry = WorkflowConnectionToolEntry | WorkflowMcpToolEntry;
+
+/** @public One entry of a `callModel` node's `tools`. */
+export type WorkflowToolEntry = WorkflowTypedToolEntry | WorkflowStepConnectionEntry;
+
 export interface CallModelWorkflowNode extends WorkflowNodeBase {
   kind: 'callModel';
   model?: string;
   instructions: string;
   /**
-   * Tool entries. Every entry is an object `{ type, parameters? }`. A CLIENT
-   * tool is `{ type: "<registered-tool-name>" }` (resolved from the registry);
-   * a SERVER tool is `{ type: "openrouter:web_search" | "openrouter:web_fetch",
-   * parameters?: {...} }` (executed by the provider). Client vs server is
-   * decided by the `type` value.
+   * Tool entries, each an object. A CLIENT tool is `{ type:
+   * "<registered-tool-name>" }` (resolved from the registry); a SERVER tool is
+   * `{ type: "openrouter:web_search" | "openrouter:web_fetch", parameters?:
+   * {...} }` (executed by the provider); a connection's tools are `{
+   * connection, ops? }` or an inline `{ mcp: { name, type, url } }`.
    */
-  tools?: z.infer<typeof CallModelToolEntrySchema>[];
+  tools?: WorkflowToolEntry[];
   /**
    * How the model may use its tools: `"auto"` (default), `"required"`,
    * `"none"`, or `{ "tool": "<registered-tool-name>" }` to force one client
@@ -601,7 +616,13 @@ export interface AcpAgentWorkflowNode extends WorkflowNodeBase {
   mode?: string;
   /** Model to select before prompting. */
   model?: string;
-  mcpServers?: WorkflowMcpServer[];
+  /**
+   * What to give the agent, as the same entries a `callModel` node takes:
+   * `{ type }` registered tools, `{ connection, ops? }` picks and inline
+   * `{ mcp }` servers, all served through noetic. Server tools are rejected:
+   * only a model provider can run them.
+   */
+  tools?: WorkflowToolEntry[];
   permissions?: z.infer<typeof AcpPermissionPolicySchema>;
   clientCapabilities?: z.infer<typeof AcpClientCapabilityConfigSchema>;
   session?: z.infer<typeof AcpSessionPolicySchema>;
@@ -614,13 +635,22 @@ export interface AcpAgentWorkflowNode extends WorkflowNodeBase {
  */
 export interface SubflowWorkflowNode extends WorkflowNodeBase {
   kind: 'subflow';
-  /** Inline sub-workflow. Mutually exclusive with `ref`. */
-  document?: WorkflowDocument;
+  /**
+   * Inline sub-workflow. Mutually exclusive with `ref`. It declares no
+   * `connections`: its nodes use the root document's.
+   */
+  document?: SubflowDocument;
   /** Named sub-workflow resolved from `HydrationContext.workflows`. Mutually exclusive with `document`. */
   ref?: string;
   /** Literal input passed to the sub-workflow; defaults to the node's runtime input. */
   input?: string;
 }
+
+/**
+ * @public A document a `subflow` node runs inline: a `WorkflowDocument`
+ * without `connections`, since its nodes use the root document's.
+ */
+export type SubflowDocument = Omit<WorkflowDocument, 'connections'>;
 
 //#region Connection Node Types
 
@@ -751,9 +781,13 @@ export interface VerifyWorkflowNode extends WorkflowNodeBase {
  * @public
  * A connection a document needs: a `profile` with a range, `extensions` with
  * ranges, or for a source the `events` it needs; plus `from`, `fresh` and
- * `setup` for pooled connections (spec 35 § JSON workflows).
+ * `setup` for pooled connections. Or one it brings: `{ "mcp": … }`, the
+ * entry a node's `tools` takes, attached when the document runs (spec 35
+ * § JSON workflows).
  */
 export interface WorkflowConnectionRequirement {
+  /** An MCP server the document attaches under this name, as a `tools` entry names it. */
+  mcp?: WorkflowMcpServer;
   /** `<profile>@<range>`, e.g. `browser@^1.2`. */
   profile?: string;
   /** Extension id → range. */
@@ -828,6 +862,75 @@ const WorkflowCustomItemSchema: z.ZodType<WorkflowCustomItem> = z
 
 const CustomItemsSchema = z.record(z.string().min(1), WorkflowCustomItemSchema);
 
+//#region Connection Tool Entries
+
+const CONNECTION_NAME_RE = /^[A-Za-z][A-Za-z0-9_-]*$/;
+
+/** A harness or turn connection's model tools: all of them, or those whose operations match `ops`. */
+const ConnectionToolEntrySchema: z.ZodType<WorkflowConnectionToolEntry> = z
+  .object({
+    connection: z
+      .string()
+      .regex(
+        CONNECTION_NAME_RE,
+        'A connection name is a letter followed by letters, digits, _ or -.',
+      ),
+    ops: z.array(z.string().min(1)).optional(),
+  })
+  .strict();
+
+const McpNameSchema = z
+  .string()
+  .regex(CONNECTION_NAME_RE, 'A connection name is a letter followed by letters, digits, _ or -.');
+
+const McpSecretValueSchema = z
+  .object({
+    name: z.string().min(1),
+    value: SecretValueSchema,
+  })
+  .strict();
+
+/**
+ * An MCP server a document names, in ACP's `McpServer` shape. Header and
+ * environment values are `$secret`s the host's `mcp` allowlist binds; the
+ * allowlist also grants the URL or exact command and sets the policy.
+ */
+const WorkflowMcpServerSchema: z.ZodType<WorkflowMcpServer> = z.union([
+  z
+    .object({
+      name: McpNameSchema,
+      type: z.enum([
+        'http',
+        'sse',
+      ]),
+      url: z.string().min(1),
+      headers: z.array(McpSecretValueSchema).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      name: McpNameSchema,
+      type: z.literal('stdio').optional(),
+      command: z.string().min(1),
+      args: z.array(z.string()).optional(),
+      env: z.array(McpSecretValueSchema).optional(),
+    })
+    .strict(),
+]);
+
+const McpToolEntrySchema: z.ZodType<WorkflowMcpToolEntry> = z
+  .object({
+    mcp: WorkflowMcpServerSchema,
+  })
+  .strict();
+
+const StepConnectionEntrySchema = z.union([
+  ConnectionToolEntrySchema,
+  McpToolEntrySchema,
+]);
+
+//#endregion
+
 const SHARED_FIELDS = {
   id: z.string().min(1),
   durable: z.boolean().optional(),
@@ -846,7 +949,14 @@ const CallModelNodeSchema = z.object({
   ...SHARED_FIELDS,
   model: z.string().optional(),
   instructions: z.string(),
-  tools: z.array(CallModelToolEntrySchema).optional(),
+  tools: z
+    .array(
+      z.union([
+        CallModelToolEntrySchema,
+        StepConnectionEntrySchema,
+      ]),
+    )
+    .optional(),
   toolChoice: ToolChoiceSchema.optional(),
   params: ModelParamsSchema.optional(),
   output: OutputCodecRefSchema.optional(),
@@ -1042,13 +1152,25 @@ const ScheduleNodeSchema = z.object({
     .optional(),
 });
 
-const WorkflowDocumentRef: z.ZodType<WorkflowDocument> = z.lazy(() => WorkflowDocumentSchema);
+const SubflowDocumentSchema: z.ZodType<SubflowDocument> = z.lazy(() =>
+  z.object({
+    version: z.literal(1),
+    customItems: CustomItemsSchema.optional(),
+    connections: z
+      .never({
+        error:
+          "A subflow document declares no connections: its nodes use the root document's, so declare them there.",
+      })
+      .optional(),
+    root: WorkflowNodeSchema,
+  }),
+);
 
 const SubflowNodeSchema = z
   .object({
     kind: z.literal('subflow'),
     ...SHARED_FIELDS,
-    document: WorkflowDocumentRef.optional(),
+    document: SubflowDocumentSchema.optional(),
     ref: z.string().min(1).optional(),
     input: z.string().optional(),
   })
@@ -1064,7 +1186,14 @@ const AcpAgentNodeSchema = z.object({
   cwd: z.string().min(1).optional(),
   mode: z.string().min(1).optional(),
   model: z.string().min(1).optional(),
-  mcpServers: z.array(AcpMcpServerSchema).optional(),
+  tools: z
+    .array(
+      z.union([
+        CallModelToolEntrySchema,
+        StepConnectionEntrySchema,
+      ]),
+    )
+    .optional(),
   permissions: AcpPermissionPolicySchema.optional(),
   clientCapabilities: AcpClientCapabilityConfigSchema.optional(),
   session: AcpSessionPolicySchema.optional(),
@@ -1073,7 +1202,6 @@ const AcpAgentNodeSchema = z.object({
 //#region Connection Value and Node Schemas
 
 const OP_NAME_RE = /^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)+$/;
-const CONNECTION_NAME_RE = /^[A-Za-z][A-Za-z0-9_-]*$/;
 const EVENT_NAME_RE = /^[A-Za-z0-9_.-]+$/;
 const SENSE_KEY_RE = /^(ui|net|log|route|state|signal|storage|time|visual|x-[a-z0-9-]+|event)$/;
 const EXTENSION_ID_RE = /^[a-z0-9-]+(\.[a-z0-9-]+){2,}$/;
@@ -1284,6 +1412,7 @@ const VerifyNodeSchema = z
 /** @public Zod schema validating a `WorkflowConnectionRequirement`. */
 export const WorkflowConnectionRequirementSchema: z.ZodType<WorkflowConnectionRequirement> = z
   .object({
+    mcp: WorkflowMcpServerSchema.optional(),
     profile: z
       .string()
       .refine((p) => parseProfileRequirement(p) !== undefined, {
@@ -1311,22 +1440,49 @@ export const WorkflowConnectionRequirementSchema: z.ZodType<WorkflowConnectionRe
   .strict()
   .refine(
     (entry) =>
-      entry.profile !== undefined || entry.extensions !== undefined || entry.events !== undefined,
+      entry.mcp !== undefined ||
+      entry.profile !== undefined ||
+      entry.extensions !== undefined ||
+      entry.events !== undefined,
     {
       message:
-        "A connection entry names a 'profile', 'extensions', or the 'events' a source must offer.",
+        "A connection entry names an 'mcp' server, a 'profile', 'extensions', or the 'events' a source must offer.",
+    },
+  )
+  .refine(
+    (entry) =>
+      entry.mcp === undefined ||
+      (entry.from === undefined && entry.fresh === undefined && entry.setup === undefined),
+    {
+      message: "An 'mcp' connection is the document's own: it takes no 'from', 'fresh' or 'setup'.",
     },
   );
 
-const ConnectionsManifestSchema = z.record(
-  z
-    .string()
-    .regex(
-      CONNECTION_NAME_RE,
-      'A connection name is a letter followed by letters, digits, _ or -.',
-    ),
-  WorkflowConnectionRequirementSchema,
-);
+const ConnectionsManifestSchema = z
+  .record(
+    z
+      .string()
+      .regex(
+        CONNECTION_NAME_RE,
+        'A connection name is a letter followed by letters, digits, _ or -.',
+      ),
+    WorkflowConnectionRequirementSchema,
+  )
+  .superRefine((manifest, issue) => {
+    for (const [name, entry] of Object.entries(manifest)) {
+      if (entry.mcp !== undefined && entry.mcp.name !== name) {
+        issue.addIssue({
+          code: 'custom',
+          path: [
+            name,
+            'mcp',
+            'name',
+          ],
+          message: `Connection '${name}' names its MCP server '${entry.mcp.name}'; the two must agree.`,
+        });
+      }
+    }
+  });
 
 //#endregion
 

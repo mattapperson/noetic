@@ -7,34 +7,42 @@
  *   `'ask'` read). A connection with no profile has no eager set, so its tools
  *   are exposed as they are.
  * - `'all'`: every operation as its own tool.
+ * - `'call'`: only `<name>_ops` and `<name>_call`.
  * - `'none'`: none; the connection is for steps and triggers only.
  *
  * Tools are named `<name>_<op>` (dots become underscores). When two
  * connections offer the same profile operation, the model gets one tool named
  * after the operation (`ui_tap`) with a `target` argument naming the
- * connection. Two operations that would still share a name are a
+ * connection; two or more `'call'` connections likewise share one `ops` and
+ * one `call`. Two operations that would still share a name are a
  * `CONNECTION_TOOL_COLLISION`. Every call passes the same gates as a step.
  *
- * `connectionTools(handle, { ops })` builds tools for one handle, for a
- * `callModel` step that narrows what it offers.
+ * The tools are built once per turn, from the harness's connections and the
+ * ones the turn attached, so a connection gives the same tools wherever it is
+ * attached. `connectionTools(handle, { ops })` picks part of them for a step,
+ * and each tool cuts itself to what the step picked (`cutForStep`).
  */
 
 import type {
+  AnyProfile,
+  ConnectionEntry,
   ConnectionHandle,
   ConnectionOperationInfo,
+  ConnectionPick,
   Context,
   JsonSchemaObject,
   StandardSchemaV1,
   Tool,
   ToolExecutionContext,
 } from '@noetic-tools/types';
-import { frameworkCast } from '@noetic-tools/types';
+import { frameworkCast, isConnectionEntry } from '@noetic-tools/types';
 import { z } from 'zod';
 import { harnessInternal } from '../util/harness-internals';
-import { toolIdempotencyKey } from './durability';
-import { deniedError, toolCollisionError } from './errors';
+import { orderedCallId, toolIdempotencyKey } from './durability';
+import { entryName } from './entries';
+import { deniedError, invalidConnectionError, toolCollisionError } from './errors';
 import { matchesAnyGlob } from './glob';
-import { handleTarget } from './handle';
+import { CONNECTION_NAME_PATTERN, handleTarget } from './handle';
 import { requirementFor } from './negotiation';
 import { refConnections } from './refs';
 import type { ConnectionRuntime, RuntimeResolveRequest } from './registry';
@@ -46,6 +54,22 @@ import { isPlainRecord } from './values';
 export interface ConnectionToolsOptions {
   /** Operation globs to offer; default every operation. */
   readonly ops?: ReadonlyArray<string>;
+}
+
+/** Whether a step may run operation, or read resource, `name` of `connection`. */
+export type StepAllows = (connection: string, name: string) => boolean;
+
+/**
+ * A connection tool cut to what a step may use: the tool itself when the step
+ * may use all of it, a copy under the same name reaching only what it may,
+ * or undefined when it may use none of it.
+ */
+type StepCut = (allows: StepAllows) => Tool | undefined;
+
+/** The connections of one turn: the harness's and the ones the turn attached under `rootId`. */
+interface TurnConnections {
+  readonly runtime: ConnectionRuntime;
+  readonly rootId?: string;
 }
 
 /** One operation offered as its own tool on one connection. */
@@ -86,6 +110,13 @@ const ANY_OBJECT_INPUT: ToolInput = {
 
 const ANY_OUTPUT = z.unknown();
 
+const CUTS = new WeakMap<Tool, StepCut>();
+
+function cutting<T extends Tool>(tool: T, cut: StepCut): T {
+  CUTS.set(tool, cut);
+  return tool;
+}
+
 function sanitize(name: string): string {
   return name.replace(/[^A-Za-z0-9_-]/g, '_');
 }
@@ -104,23 +135,9 @@ export function runtimeOf(harness: unknown): ConnectionRuntime | undefined {
   return harnessInternal<ConnectionRuntime>(harness, 'connectionRegistry');
 }
 
-/** FNV-1a over `text`, as 8 hex digits: a short, stable digest. */
-function digest(text: string): string {
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < text.length; i++) {
-    hash ^= text.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return (hash >>> 0).toString(16).padStart(8, '0');
-}
-
-/**
- * The tool call's id, or — when the pipeline gave none — one derived from the
- * operation and its arguments, so the idempotency key is stable across a resume.
- */
-function callIdOf(toolCtx: ToolExecutionContext, op: string, args: unknown): string {
-  const call = toolCtx.turnContext?.toolCall;
-  return call?.callId ?? call?.id ?? `derived-${digest(`${op}\u0000${JSON.stringify(args)}`)}`;
+/** The tool call's id, or — when a step runs the tool directly and there is no call — one from the step and the call's order. */
+function callIdOf(toolCtx: ToolExecutionContext): string {
+  return toolCtx.callId ?? orderedCallId(toolCtx.ctx, toolCtx.ctx);
 }
 
 /** The run's abort signal: cancelling the run cancels the call and any long operation it waits on. */
@@ -155,8 +172,9 @@ async function callThrough(
     ...request,
     scope,
     ctx,
+    caller: 'model',
   });
-  const toolCallId = callIdOf(request.toolCtx, request.op, request.args);
+  const toolCallId = callIdOf(request.toolCtx);
   const output = await resolved.call(request.op, request.args, {
     signal: scope.signal,
     caller: 'model',
@@ -207,7 +225,7 @@ function pickTarget(args: Record<string, unknown>, targets: ReadonlyArray<string
 }
 
 function directTool(runtime: ConnectionRuntime, exposure: DirectExposure): ConnectionTool {
-  return {
+  const tool: ConnectionTool = {
     name: connectionToolName(exposure.connection, exposure.op),
     description: exposure.info.description ?? `${exposure.op} on ${exposure.connection}`,
     input: ANY_OBJECT_INPUT,
@@ -223,6 +241,7 @@ function directTool(runtime: ConnectionRuntime, exposure: DirectExposure): Conne
         toolCtx: toolContext(toolCtx),
       }),
   };
+  return cutting(tool, (allows) => (allows(exposure.connection, exposure.op) ? tool : undefined));
 }
 
 function mergedTool(
@@ -234,7 +253,7 @@ function mergedTool(
     throw deniedError('internal: empty tool group');
   }
   const targets = group.map((e) => e.connection);
-  return {
+  const tool: ConnectionTool = {
     name: sanitize(first.op),
     description: `${first.info.description ?? first.op} (on ${targets.join(' or ')}; pass target)`,
     input: ANY_OBJECT_INPUT,
@@ -248,121 +267,297 @@ function mergedTool(
         toolCtx: toolContext(toolCtx),
       }),
   };
+  return cutting(tool, (allows) => {
+    const kept = group.filter((e) => allows(e.connection, e.op));
+    if (kept.length === group.length) {
+      return tool;
+    }
+    return kept.length > 0 ? mergedTool(runtime, kept) : undefined;
+  });
 }
 
-function opsTool(
-  runtime: ConnectionRuntime,
-  name: string,
-  hidden: ReadonlyArray<string>,
-): ConnectionTool {
+/**
+ * The reads `<name>_call({ read })` serves: the connection's own `'ask'` reads
+ * (every read when no view shows any, see `hasView`) that the step may use.
+ */
+function askReads(
+  turn: TurnConnections,
+  generic: GenericExposure,
+): Array<{
+  read: string;
+  description?: string;
+}> {
+  const { name } = generic;
+  const manifest = turn.runtime.current(name, turn.rootId)?.manifest;
+  const viewed = hasView(turn, name);
+  const look = turn.runtime.config(name, turn.rootId)?.look ?? {};
+  return Object.values(manifest?.resources ?? {})
+    .filter((r) => !viewed || (look[r.name] ?? r.look ?? 'ask') === 'ask')
+    .filter((r) => generic.reads(r.name))
+    .map((r) => ({
+      read: r.name,
+      description: r.description,
+    }));
+}
+
+/** Whether a view layer renders the connection's `'turn'` and `'effect'` reads. */
+function hasView(turn: TurnConnections, name: string): boolean {
+  return turn.runtime.viewed(name, turn.rootId);
+}
+
+/** What `<name>_ops` lists for one connection. */
+function listOps(
+  turn: TurnConnections,
+  generic: GenericExposure,
+  filter: string,
+): Record<string, unknown> {
+  const { name, hidden } = generic;
+  const manifest = turn.runtime.current(name, turn.rootId)?.manifest;
+  const operations = hidden
+    .filter((op) =>
+      matchesAnyGlob(
+        [
+          filter,
+        ],
+        op,
+      ),
+    )
+    .map((op) => manifest?.operations[op])
+    .filter((info): info is ConnectionOperationInfo => info !== undefined)
+    .map((info) => ({
+      op: info.name,
+      description: info.description,
+      inputSchema: info.inputSchema,
+    }));
   return {
-    name: `${sanitize(name)}_ops`,
-    description: `List the operations of ${name} that are not tools of their own, and the state you can read with ${sanitize(name)}_call({ read }).`,
-    input: ANY_OBJECT_INPUT,
-    inputJsonSchema: {
-      type: 'object',
-      properties: {
-        filter: {
-          type: 'string',
-          description: "A glob over operation names, e.g. 'ui.*'.",
-        },
-      },
-    },
-    output: ANY_OUTPUT,
-    execute: async (args) => {
-      const manifest = runtime.current(name)?.manifest;
-      const filter = typeof args.filter === 'string' ? args.filter : '*';
-      const operations = hidden
-        .filter((op) =>
-          matchesAnyGlob(
-            [
-              filter,
-            ],
-            op,
-          ),
-        )
-        .map((op) => manifest?.operations[op])
-        .filter((info): info is ConnectionOperationInfo => info !== undefined)
-        .map((info) => ({
-          op: info.name,
-          description: info.description,
-          inputSchema: info.inputSchema,
-        }));
-      const look = runtime.config(name)?.look ?? {};
-      const reads = Object.values(manifest?.resources ?? {})
-        .filter((r) => (look[r.name] ?? r.look ?? 'ask') === 'ask')
-        .map((r) => ({
-          read: r.name,
-          description: r.description,
-        }));
-      return {
-        operations,
-        reads,
-      };
-    },
+    operations,
+    reads: askReads(turn, generic),
   };
 }
 
-function callTool(
-  runtime: ConnectionRuntime,
-  name: string,
-  allowed: ReadonlyArray<string>,
-): ConnectionTool {
-  return {
+/** Runs what `<name>_call` was asked: one listed operation, or a read. */
+async function runCall(
+  turn: TurnConnections,
+  generic: GenericExposure,
+  call: {
+    readonly args: Record<string, unknown>;
+    readonly toolCtx: ToolExecutionContext;
+  },
+): Promise<unknown> {
+  const { args, toolCtx } = call;
+  const { runtime } = turn;
+  const { name, hidden } = generic;
+  if (typeof args.read === 'string') {
+    const read = args.read;
+    if (!askReads(turn, generic).some((r) => r.read === read)) {
+      throw deniedError(`'${read}' is not a read ${sanitize(name)}_call can serve`);
+    }
+    const resolved = await runtime.resolve({
+      name,
+      scope: scopeOf(toolCtx.ctx),
+      ctx: toolCtx.ctx,
+      caller: 'model',
+    });
+    const value = await resolved.read(read, {
+      signal: signalOf(toolCtx.ctx),
+    });
+    return runtime.withholdSensitive(value);
+  }
+  const op = typeof args.op === 'string' ? args.op : '';
+  if (!hidden.includes(op)) {
+    throw deniedError(`'${op}' is not an operation ${sanitize(name)}_call can run`);
+  }
+  return callThrough(runtime, {
+    name,
+    op,
+    args: args.args ?? {},
+    toolCtx,
+  });
+}
+
+const everyRead = (): boolean => true;
+
+const OPS_SCHEMA: JsonSchemaObject = {
+  type: 'object',
+  properties: {
+    filter: {
+      type: 'string',
+      description: "A glob over operation names, e.g. 'ui.*'.",
+    },
+  },
+};
+
+const CALL_SCHEMA: JsonSchemaObject = {
+  type: 'object',
+  properties: {
+    op: {
+      type: 'string',
+    },
+    args: {
+      type: 'object',
+    },
+    read: {
+      type: 'string',
+    },
+  },
+};
+
+function filterOf(args: Record<string, unknown>): string {
+  return typeof args.filter === 'string' ? args.filter : '*';
+}
+
+/** `<name>_ops` and `<name>_call` for one connection. */
+function genericTools(turn: TurnConnections, generic: GenericExposure): ConnectionTool[] {
+  const { name } = generic;
+  const ops: ConnectionTool = {
+    name: `${sanitize(name)}_ops`,
+    description: `List the operations of ${name} that are not tools of their own, and the state you can read with ${sanitize(name)}_call({ read }).`,
+    input: ANY_OBJECT_INPUT,
+    inputJsonSchema: OPS_SCHEMA,
+    output: ANY_OUTPUT,
+    execute: async (args) => listOps(turn, generic, filterOf(args)),
+  };
+  const call: ConnectionTool = {
     name: `${sanitize(name)}_call`,
     description: `Run one operation of ${name} listed by ${sanitize(name)}_ops ({ op, args }), or read its state ({ read }).`,
     input: ANY_OBJECT_INPUT,
-    inputJsonSchema: {
-      type: 'object',
-      properties: {
-        op: {
-          type: 'string',
-        },
-        args: {
-          type: 'object',
-        },
-        read: {
-          type: 'string',
-        },
-      },
-    },
+    inputJsonSchema: CALL_SCHEMA,
     output: ANY_OUTPUT,
-    execute: async (args, toolCtx) => {
-      const tc = toolContext(toolCtx);
-      if (typeof args.read === 'string') {
-        const resolved = await runtime.resolve({
-          name,
-          scope: scopeOf(tc.ctx),
-          ctx: tc.ctx,
-        });
-        const value = await resolved.read(args.read, {
-          signal: signalOf(tc.ctx),
-        });
-        return runtime.withholdSensitive(value);
+    execute: (args, toolCtx) =>
+      runCall(turn, generic, {
+        args,
+        toolCtx: toolContext(toolCtx),
+      }),
+  };
+  const tools: [
+    ConnectionTool,
+    ConnectionTool,
+  ] = [
+    ops,
+    call,
+  ];
+  return tools.map((tool, i) =>
+    cutting(tool, (allows) => {
+      const cut = cutGeneric(turn, generic, allows);
+      if (cut === 'whole') {
+        return tool;
       }
-      const op = typeof args.op === 'string' ? args.op : '';
-      if (!allowed.includes(op)) {
-        throw deniedError(`'${op}' is not an operation ${sanitize(name)}_call can run`);
-      }
-      return callThrough(runtime, {
-        name,
-        op,
-        args: args.args ?? {},
-        toolCtx: tc,
-      });
+      return cut === 'none' ? undefined : genericTools(turn, cut)[i];
+    }),
+  );
+}
+
+/** One `ops` and one `call` shared by every `'call'` connection, each taking `target`. */
+function mergedGenericTools(
+  turn: TurnConnections,
+  group: ReadonlyArray<GenericExposure>,
+): ConnectionTool[] {
+  const targets = group.map((g) => g.name);
+  const byName = new Map(
+    group.map((g) => [
+      g.name,
+      g,
+    ]),
+  );
+  const generic = (args: Record<string, unknown>): GenericExposure => {
+    const found = byName.get(pickTarget(args, targets));
+    if (!found) {
+      throw deniedError(`pass target: one of ${targets.join(', ')}`);
+    }
+    return found;
+  };
+  const ops: ConnectionTool = {
+    name: 'ops',
+    description: `List the operations of ${targets.join(' or ')} (pass target), and the state you can read with call({ target, read }).`,
+    input: ANY_OBJECT_INPUT,
+    inputJsonSchema: withTarget(OPS_SCHEMA, targets),
+    output: ANY_OUTPUT,
+    execute: async (args) => {
+      return listOps(turn, generic(args), filterOf(args));
     },
+  };
+  const call: ConnectionTool = {
+    name: 'call',
+    description: `Run one operation listed by ops on ${targets.join(' or ')} ({ target, op, args }), or read its state ({ target, read }).`,
+    input: ANY_OBJECT_INPUT,
+    inputJsonSchema: withTarget(CALL_SCHEMA, targets),
+    output: ANY_OUTPUT,
+    execute: async (args, toolCtx) =>
+      runCall(turn, generic(args), {
+        args: withoutTarget(args),
+        toolCtx: toolContext(toolCtx),
+      }),
+  };
+  const tools: [
+    ConnectionTool,
+    ConnectionTool,
+  ] = [
+    ops,
+    call,
+  ];
+  return tools.map((tool, i) =>
+    cutting(tool, (allows) => {
+      const cuts = group.map((g) => cutGeneric(turn, g, allows));
+      if (cuts.every((cut) => cut === 'whole')) {
+        return tool;
+      }
+      const kept = group.flatMap((member, j) => {
+        const cut = cuts[j];
+        if (cut === 'none' || cut === undefined) {
+          return [];
+        }
+        return [
+          cut === 'whole' ? member : cut,
+        ];
+      });
+      return kept.length > 0 ? mergedGenericTools(turn, kept)[i] : undefined;
+    }),
+  );
+}
+
+/** The operations and reads a connection serves through `<name>_ops` / `<name>_call`. */
+interface GenericExposure {
+  readonly name: string;
+  readonly hidden: ReadonlyArray<string>;
+  /** Whether the step may read resource `read`. */
+  readonly reads: (read: string) => boolean;
+}
+
+/**
+ * `generic` cut to what a step may use: `'whole'` when it may use all of it,
+ * `'none'` when it may use nothing, else the part it may.
+ */
+function cutGeneric(
+  turn: TurnConnections,
+  generic: GenericExposure,
+  allows: StepAllows,
+): GenericExposure | 'whole' | 'none' {
+  const { name } = generic;
+  const hidden = generic.hidden.filter((op) => allows(name, op));
+  const reads = askReads(turn, generic);
+  const kept = reads.filter((r) => allows(name, r.read));
+  if (hidden.length === generic.hidden.length && kept.length === reads.length) {
+    return 'whole';
+  }
+  if (hidden.length === 0 && kept.length === 0) {
+    return 'none';
+  }
+  return {
+    name,
+    hidden,
+    reads: (read) => generic.reads(read) && allows(name, read),
   };
 }
 
 function exposuresFor(
-  runtime: ConnectionRuntime,
+  turn: TurnConnections,
   name: string,
 ): {
   readonly direct: DirectExposure[];
   readonly hidden: string[];
 } {
-  const config = runtime.config(name);
-  const connection = runtime.current(name);
+  const config = turn.runtime.config(name, turn.rootId);
+  const connection = turn.runtime.current(name, turn.rootId);
   const expose = config?.expose ?? 'eager';
   if (!connection || config?.pool || expose === 'none') {
     return {
@@ -375,7 +570,7 @@ function exposuresFor(
   const direct: DirectExposure[] = [];
   const hidden: string[] = [];
   for (const [op, info] of Object.entries(manifest.operations)) {
-    const own = expose === 'all' || !hasProfile || info.eager === true;
+    const own = expose !== 'call' && (expose === 'all' || !hasProfile || info.eager === true);
     if (own) {
       direct.push({
         connection: name,
@@ -414,22 +609,52 @@ class ToolSet {
 }
 
 function needsGenericTools(
-  runtime: ConnectionRuntime,
+  turn: TurnConnections,
   name: string,
   hidden: ReadonlyArray<string>,
 ): boolean {
-  const config = runtime.config(name);
+  const config = turn.runtime.config(name, turn.rootId);
   if (config?.pool || config?.expose === 'none') {
     return false;
   }
-  if (hidden.length > 0) {
-    return true;
-  }
-  const manifest = runtime.current(name)?.manifest;
-  const look = runtime.config(name)?.look ?? {};
-  return Object.values(manifest?.resources ?? {}).some(
-    (r) => (look[r.name] ?? r.look ?? 'ask') === 'ask',
+  return (
+    hidden.length > 0 ||
+    askReads(turn, {
+      name,
+      hidden,
+      reads: everyRead,
+    }).length > 0
   );
+}
+
+/** Adds each `'call'` connection's ops and call, merged when there are two or more. */
+function addGenericTools(
+  turn: TurnConnections,
+  tools: ToolSet,
+  groups: {
+    /** Connections whose ops and call are their own. */
+    readonly generics: ReadonlyArray<GenericExposure>;
+    /** `'call'` connections, which share one ops and one call when there are two or more. */
+    readonly called: ReadonlyArray<GenericExposure>;
+  },
+): void {
+  const { generics, called } = groups;
+  for (const generic of generics) {
+    for (const tool of genericTools(turn, generic)) {
+      tools.add(tool, `${generic.name} (${tool.name.endsWith('_ops') ? 'ops' : 'call'})`);
+    }
+  }
+  if (called.length > 1) {
+    for (const tool of mergedGenericTools(turn, called)) {
+      tools.add(tool, `${tool.name} on ${called.map((g) => g.name).join(', ')}`);
+    }
+    return;
+  }
+  for (const generic of called) {
+    for (const tool of genericTools(turn, generic)) {
+      tools.add(tool, `${generic.name} (${tool.name.endsWith('_ops') ? 'ops' : 'call'})`);
+    }
+  }
 }
 
 //#endregion
@@ -437,18 +662,24 @@ function needsGenericTools(
 //#region Public API
 
 /**
- * The model tools for every ready connection in `runtime`, built fresh each
- * turn so a renegotiated connection's tools change at the next turn, never
- * mid-turn.
+ * The model tools for every ready connection of a turn — the harness's, and
+ * the ones attached under `rootId` — built fresh each turn so a renegotiated
+ * connection's tools change at the next turn, never mid-turn.
  *
  * @throws NoeticConfigError `CONNECTION_TOOL_COLLISION` when two operations would share a tool name.
  */
-export function buildConnectionTools(runtime: ConnectionRuntime): Tool[] {
+export function buildConnectionTools(runtime: ConnectionRuntime, rootId?: string): Tool[] {
+  const turn: TurnConnections = {
+    runtime,
+    rootId,
+  };
   const tools = new ToolSet();
   const byProfileOp = new Map<string, DirectExposure[]>();
   const plain: DirectExposure[] = [];
-  for (const name of runtime.names()) {
-    const { direct, hidden } = exposuresFor(runtime, name);
+  const generics: GenericExposure[] = [];
+  const called: GenericExposure[] = [];
+  for (const name of runtime.visibleNames(rootId)) {
+    const { direct, hidden } = exposuresFor(turn, name);
     for (const exposure of direct) {
       if (!exposure.info.profile && !exposure.info.extension) {
         plain.push(exposure);
@@ -458,11 +689,20 @@ export function buildConnectionTools(runtime: ConnectionRuntime): Tool[] {
       group.push(exposure);
       byProfileOp.set(exposure.op, group);
     }
-    if (needsGenericTools(runtime, name, hidden)) {
-      tools.add(opsTool(runtime, name, hidden), `${name} (ops)`);
-      tools.add(callTool(runtime, name, hidden), `${name} (call)`);
+    if (!needsGenericTools(turn, name, hidden)) {
+      continue;
     }
+    const isCalled = runtime.config(name, rootId)?.expose === 'call';
+    (isCalled ? called : generics).push({
+      name,
+      hidden,
+      reads: everyRead,
+    });
   }
+  addGenericTools(turn, tools, {
+    generics,
+    called,
+  });
   for (const [op, group] of byProfileOp) {
     if (group.length > 1) {
       tools.add(
@@ -480,98 +720,90 @@ export function buildConnectionTools(runtime: ConnectionRuntime): Tool[] {
 }
 
 /**
+ * Cuts a tool built by `buildConnectionTools` to what a step may use (see
+ * `StepCut`): a merged tool keeps only the targets the step may use, its
+ * `target` enum and routing with them, and `<name>_ops` / `<name>_call` only
+ * the operations and reads. Returns `'not-connection'` for any other tool.
+ */
+export function cutForStep(tool: Tool, allows: StepAllows): Tool | undefined | 'not-connection' {
+  const cut = CUTS.get(tool);
+  return cut ? cut(allows) : 'not-connection';
+}
+
+/**
  * @public
- * Tools for one connection handle, for a `callModel` step that narrows what it
- * offers: one tool per profile operation matching `ops`, or — for a handle with
- * no profile — one `<name>_call` tool limited to `ops`.
+ * Picks part of one connection's model tools for a step: the tools the turn
+ * built for it, under the same names — `<name>_<op>`, `<name>_ops` /
+ * `<name>_call`, and merged profile tools that take `target` — narrowed to the
+ * operations matching `ops`. A step that lists the pick is offered a tool only
+ * when every operation the tool can run matches, so `<name>_call` comes with a
+ * pick only when every operation behind it does. Picking from an entry
+ * (`mcp({ name, … })`) attaches it to the step, as listing the entry would.
+ * A name picks a connection the harness or the turn attaches; it is checked
+ * when the turn's tool set is built.
+ *
+ * @throws NoeticConfigError `CONNECTION_INVALID` for a handle with `fresh` (a
+ * pool has no model tools), an entry with no name, or a malformed name. The
+ * turn fails with `CONNECTION_UNKNOWN` when no connection has the name.
  */
 export function connectionTools(
-  handle: ConnectionHandle,
+  target: string | ConnectionHandle | ConnectionEntry,
   options: ConnectionToolsOptions = {},
-): Tool[] {
-  const patterns = options.ops ?? [
-    '*',
-  ];
-  const target = handleTarget(handle);
-  const profile = handle.profile;
-  const resolveRuntime = (toolCtx: ToolExecutionContext): ConnectionRuntime => {
-    const runtime = runtimeOf(toolCtx.harness);
-    if (!runtime) {
-      throw deniedError('this harness has no connections');
+): ConnectionPick {
+  const ops =
+    options.ops === undefined
+      ? {}
+      : {
+          ops: [
+            ...options.ops,
+          ],
+        };
+  if (typeof target === 'string') {
+    if (!CONNECTION_NAME_PATTERN.test(target)) {
+      throw invalidConnectionError(
+        `connectionTools(${JSON.stringify(target)}) is not a connection name.`,
+        'A connection name is a letter followed by letters, digits, _ or -.',
+      );
     }
-    return runtime;
-  };
-  if (!profile) {
-    const generic: ConnectionTool = {
-      name: `${sanitize(handle.name)}_call`,
-      description: `Run an operation of ${handle.name}: { op, args }.`,
-      input: ANY_OBJECT_INPUT,
-      inputJsonSchema: {
-        type: 'object',
-        properties: {
-          op: {
-            type: 'string',
-          },
-          args: {
-            type: 'object',
-          },
-        },
-        required: [
-          'op',
-        ],
-      },
-      output: ANY_OUTPUT,
-      execute: (args, toolCtx) => {
-        const tc = toolContext(toolCtx);
-        const op = typeof args.op === 'string' ? args.op : '';
-        if (!matchesAnyGlob(patterns, op)) {
-          throw deniedError(`'${op}' is not offered to this step`);
-        }
-        return callThrough(resolveRuntime(tc), {
-          name: target,
-          op,
-          args: args.args ?? {},
-          toolCtx: tc,
-          requirement: requirementFor(handle),
-          fresh: handle.options.fresh,
-          setup: handle.options.setup,
-        });
-      },
+    return {
+      kind: 'connection-pick',
+      connection: target,
+      ...ops,
     };
-    return [
-      generic,
-    ];
   }
-  return Object.entries(profile.operations)
-    .filter(([op]) => matchesAnyGlob(patterns, op))
-    .map(
-      ([op, def]): ConnectionTool => ({
-        name: connectionToolName(handle.name, op),
-        description: def.description,
-        input: ANY_OBJECT_INPUT,
-        inputJsonSchema: z.toJSONSchema(def.input, {
-          unrepresentable: 'any',
-        }),
-        output: ANY_OUTPUT,
-        execute: (args, toolCtx) => {
-          const tc = toolContext(toolCtx);
-          return callThrough(resolveRuntime(tc), {
-            name: target,
-            op,
-            args,
-            toolCtx: tc,
-            profile,
-            requirement: requirementFor(handle, {
-              operations: [
-                op,
-              ],
-            }),
-            fresh: handle.options.fresh,
-            setup: handle.options.setup,
-          });
-        },
-      }),
+  if (isConnectionEntry(target)) {
+    const name = entryName(target);
+    if (name === undefined) {
+      throw invalidConnectionError(
+        'connectionTools() was given a connection with no name.',
+        "Name it on the provider: connectionTools(mcp({ name: 'linear', … })).",
+      );
+    }
+    return {
+      kind: 'connection-pick',
+      connection: name,
+      ...ops,
+      entry: target,
+    };
+  }
+  if (target.options.fresh) {
+    throw invalidConnectionError(
+      `connectionTools(connection('${target.name}')) names a fresh connection.`,
+      'A pool gives no model tools; drive it from steps (step.call) instead.',
     );
+  }
+  const profile: AnyProfile | undefined = target.profile;
+  return {
+    kind: 'connection-pick',
+    connection: handleTarget(target),
+    ...ops,
+    ...(profile
+      ? {
+          requirement: requirementFor(target),
+          profile,
+        }
+      : {}),
+  };
 }
 
 //#endregion

@@ -33,4 +33,12 @@ export interface ToolExecutionContext {
   readonly lastStepMeta: StepMeta | null;
   /** OpenRouter turn context, when using the OpenRouter SDK adapter. */
   readonly turnContext?: TurnContext;
+  /**
+   * The id of the call this execution answers: the model's `function_call`
+   * id, or for a call an ACP agent makes through the tool bridge, the agent's
+   * own call id. Connection tools key their idempotency on it
+   * (`<execution>:tool:<callId>`), so both paths give the same key shape.
+   * Absent when a step runs the tool directly (`invokeTool`).
+   */
+  readonly callId?: string;
 }

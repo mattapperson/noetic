@@ -131,6 +131,19 @@ export const CallResponseSchema = z.looseObject({
     .optional(),
 });
 
+/**
+ * @public
+ * A tool's `annotations`. Each hint is optional and a malformed one is
+ * dropped, so a server's bad hint never costs it its tool.
+ */
+export const ToolAnnotationsSchema = z.looseObject({
+  title: z.string().optional().catch(undefined),
+  readOnlyHint: z.boolean().optional().catch(undefined),
+  destructiveHint: z.boolean().optional().catch(undefined),
+  idempotentHint: z.boolean().optional().catch(undefined),
+  openWorldHint: z.boolean().optional().catch(undefined),
+});
+
 /** @public One tool, as `tools/list` describes it. */
 export const ToolInfoSchema = z.looseObject({
   name: z.string().min(1),
@@ -138,6 +151,7 @@ export const ToolInfoSchema = z.looseObject({
   description: z.string().optional(),
   inputSchema: z.record(z.string(), z.unknown()),
   outputSchema: z.record(z.string(), z.unknown()).optional(),
+  annotations: ToolAnnotationsSchema.optional().catch(undefined),
   execution: z
     .looseObject({
       taskSupport: z.string().optional(),

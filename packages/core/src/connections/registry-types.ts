@@ -59,6 +59,13 @@ export interface ResolveRequest {
   readonly profile?: AnyProfile;
   /** The context resolving it, so gates and framework events reach its run. */
   readonly ctx?: Context;
+  /**
+   * Who resolves it. A step's own entry is reached only by the model tools
+   * built from it (`'model'`); handles reach harness and turn connections.
+   */
+  readonly caller?: ConnectionCaller;
+  /** The turn whose attached connections the name may name, when there is no `ctx` to find it from. */
+  readonly rootId?: string;
 }
 
 /** Options for one gated call. */

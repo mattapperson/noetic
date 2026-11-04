@@ -443,9 +443,11 @@ reason = "chat-sdk must not depend on cli"
 # It ships the agentPlugins() context layer and, like the ACP client and openui,
 # is a consumer package sitting above types and below every core layer. It
 # connects plugin MCP servers through @noetic-tools/mcp (the only package that
-# imports the MCP SDK), and it launches plugin subprocesses; core must never import it, for the same reason it must never
-# import the ACP client — no protocol library, vendor SDK, or subprocess
-# launcher enters core's dependency graph. See specs/30-agent-plugins.md.
+# imports the MCP client SDK; @noetic-tools/acp imports the MCP server SDK to
+# serve a step's tools), and it launches plugin subprocesses; core must never
+# import it, for the same reason it must never import the ACP client — no
+# protocol library, vendor SDK, or subprocess launcher enters core's dependency
+# graph. See specs/30-agent-plugins.md.
 # ─────────────────────────────────────────────────────────────────────────────
 
 [[layers]]
