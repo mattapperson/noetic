@@ -4,6 +4,7 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import type {
+  AcpAgent,
   Context,
   ContextData,
   DecideRequest,
@@ -16,14 +17,14 @@ import { frameworkCast, isNoeticError } from '@noetic-tools/types';
 import { z } from 'zod';
 import { inParallel } from '../../src/builders/control-flow-builders';
 import { decide } from '../../src/builders/decide-builders';
-import { callModel, runCode } from '../../src/builders/step-builders';
+import { callModel, runCode, step } from '../../src/builders/step-builders';
 import { tool } from '../../src/builders/tool-builder';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { createCheckpointStore } from '../../src/runtime/durable/checkpoint-store';
 import { createStepLedgerStore } from '../../src/runtime/durable/step-ledger';
 import { createInMemoryStorage } from '../../src/runtime/in-memory-storage';
 import { markSpent } from '../../src/util/spent';
-import { makeMessage, sleep } from '../_helpers';
+import { makeMessage, newRun, sleep, toolCallingAgent } from '../_helpers';
 
 //#region Fakes
 
@@ -739,6 +740,91 @@ describe('cancel with drainMs', () => {
     expect(client.started).toBe(2);
     expect(client.aborted).toBe(0);
     expect(ctx.cost).toBeCloseTo(0.02);
+  });
+
+  it('holds back a bridged ACP tool call the same way, while another round is in flight', async () => {
+    let toolRan = false;
+    const lookup = tool({
+      name: 'lookup',
+      description: 'lookup',
+      input: z.object({}),
+      output: z.object({}),
+      execute: async () => {
+        toolRan = true;
+        return {};
+      },
+    });
+    const client = new SlowClient({
+      slow: 150,
+    });
+    const harness = makeHarness(client);
+    const ctx = harness.createContext();
+    let prompted = false;
+    let open = (): void => undefined;
+    const gate = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    const run = newRun();
+    const inner = toolCallingAgent(
+      [
+        {
+          name: 'lookup',
+          args: {},
+        },
+      ],
+      run,
+    );
+    // The agent calls its tool only once the drain has begun.
+    const agent: AcpAgent = {
+      ...inner,
+      async connect(opts) {
+        const connection = await inner.connect(opts);
+        return {
+          ...connection,
+          async newSession(session) {
+            const opened = await connection.newSession(session);
+            return {
+              ...opened,
+              async prompt(prompt) {
+                prompted = true;
+                await gate;
+                return await opened.prompt(prompt);
+              },
+            };
+          },
+        };
+      },
+    };
+    const done = harness.run(
+      sideBySide([
+        step.acpAgent({
+          id: 'agent',
+          agent,
+          prompt: 'use tools',
+          tools: [
+            lookup,
+          ],
+        }),
+        ask('right', 'slow'),
+      ]),
+      'go',
+      ctx,
+    );
+    await waitFor(() => client.started === 1 && prompted);
+
+    const cancelled = harness.cancel(ctx, {
+      drainMs: 2e3,
+    });
+    open();
+    await cancelled;
+
+    expect(await cancelledError(done)).toBe('cancelled');
+    expect(toolRan).toBe(false);
+    expect(run.results.map((result) => result.isError)).toEqual([
+      true,
+    ]);
+    expect(client.aborted).toBe(0);
+    expect(ctx.cost).toBeCloseTo(0.01);
   });
 
   it('keeps a call in flight until its own step ends, not a sibling step on the same context', async () => {
