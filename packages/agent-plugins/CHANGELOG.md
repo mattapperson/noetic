@@ -1,3 +1,7 @@
+## @noetic-tools/agent-plugins-v0.2.2 (2026-11-04)
+
+* fix(agent-plugins): depend on @noetic-tools/mcp ~1.0.0 (#157) ([1637445](https://github.com/mattapperson/noetic/commit/1637445)), closes [#157](https://github.com/mattapperson/noetic/issues/157)
+
 ## @noetic-tools/agent-plugins-v0.2.1 (2026-11-03)
 
 * ci: publish prereleases from next to the next dist-tag (#152) ([0b247bc](https://github.com/mattapperson/noetic/commit/0b247bc)), closes [#152](https://github.com/mattapperson/noetic/issues/152)
