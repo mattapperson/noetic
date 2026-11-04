@@ -191,6 +191,7 @@ describe('serveAcpRunner with an allowlist', () => {
     for (const frame of frames) {
       frame({
         t: 'start',
+        kind: 'launch',
         id: 'h1',
         command: process.execPath,
         args: [
@@ -268,6 +269,7 @@ describe('noetic-acp serve grants', () => {
   it('starts a --spawn command with the --env names, and refuses others', async () => {
     const start = (id: string, env: Record<string, string>) => ({
       t: 'start',
+      kind: 'spawn',
       id,
       command: 'sh',
       args: [
@@ -294,6 +296,7 @@ describe('noetic-acp serve grants', () => {
         }),
         {
           t: 'start',
+          kind: 'launch',
           id: 'h3',
           command: 'npx',
           args: [

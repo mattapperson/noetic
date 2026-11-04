@@ -101,7 +101,9 @@ export interface AcpMachine {
   launch(command: SpawnCommand): Promise<AcpTransport>;
   /**
    * Start a process beside the agent — a stdio MCP server that depends on
-   * this machine — and carry its stdio back, so noetic stays its client.
+   * this machine — and carry its stdio back, so noetic stays its client. It
+   * gets the MCP SDK's default environment on this machine plus `env`, as a
+   * local server does, not the agent's.
    */
   spawn: Spawn;
   /** Release the machine and everything started on it. */

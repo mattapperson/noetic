@@ -23,7 +23,12 @@ export interface ByteStream {
 export interface SpawnCommand {
   readonly command: string;
   readonly args?: ReadonlyArray<string>;
-  /** Environment overrides layered onto that machine's environment. */
+  /**
+   * Added to that machine's environment: for an agent (`AcpMachine.launch`)
+   * all of it; for an MCP server (`AcpMachine.spawn`, a `Spawn`) only the MCP
+   * SDK's default list (`HOME`, `LOGNAME`, `PATH`, `SHELL`, `TERM`, `USER`),
+   * as the SDK starts a local server.
+   */
   readonly env?: Readonly<Record<string, string | undefined>>;
   /** Working directory on that machine. */
   readonly cwd?: string;

@@ -18,6 +18,7 @@ import * as https from 'node:https';
 import { Readable, Writable } from 'node:stream';
 import { frameworkCast } from '@noetic-tools/types';
 import { WebSocketServer } from 'ws';
+import { serverEnv } from '../server-env';
 import type { AcpRunnerGrant } from './grants';
 import { checkStart } from './grants';
 import type { FrameLink, HostFrame } from './protocol';
@@ -310,12 +311,17 @@ async function startProcess(
   >,
 ): Promise<void> {
   const cwd = checkStart(frame, session.options);
+  // An MCP server gets what the MCP SDK would give it here, the agent all of the runner's.
+  const env =
+    frame.kind === 'spawn'
+      ? serverEnv(frame.env)
+      : {
+          ...process.env,
+          ...frame.env,
+        };
   const child = spawn(frame.command, frame.args, {
     cwd,
-    env: {
-      ...process.env,
-      ...frame.env,
-    },
+    env,
     stdio: [
       'pipe',
       'pipe',

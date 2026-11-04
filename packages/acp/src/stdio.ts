@@ -18,6 +18,7 @@ import type {
   SpawnCommand,
 } from '@noetic-tools/types';
 import { AcpConnectError, frameworkCast } from '@noetic-tools/types';
+import { serverEnv } from './server-env';
 
 /** @public How to launch an ACP agent as a child process. */
 export interface StdioAgentSpec {
@@ -44,6 +45,7 @@ export function stdioAcpTransport(spec: StdioAgentSpec): AcpTransportFactory {
         command: spec.command,
         args: spec.args,
         env: {
+          ...process.env,
           ...spec.env,
           ...opts.env,
         },
@@ -55,21 +57,37 @@ export function stdioAcpTransport(spec: StdioAgentSpec): AcpTransportFactory {
 
 /**
  * This machine: the bridge is reached on its own loopback address, and the
- * agent and any MCP server beside it run as child processes.
+ * agent and any MCP server beside it run as child processes. The agent gets
+ * this process's environment; an MCP server, as the MCP SDK starts one, only
+ * `serverEnv`'s short list.
  * @public
  */
 export function localMachine(agentId = 'local'): AcpMachineFactory {
   return async ({ signal }): Promise<AcpMachine> => {
     const started = new Set<AcpTransport>();
-    const start = async (command: SpawnCommand): Promise<AcpTransport> => {
-      const transport = await spawnStdio(agentId, command, signal);
+    const start = async (
+      command: SpawnCommand,
+      env: Record<string, string | undefined>,
+    ): Promise<AcpTransport> => {
+      const transport = await spawnStdio(
+        agentId,
+        {
+          ...command,
+          env,
+        },
+        signal,
+      );
       started.add(transport);
       return transport;
     };
     return {
       reach: async (bridge) => bridge,
-      launch: start,
-      spawn: start,
+      launch: (command) =>
+        start(command, {
+          ...process.env,
+          ...command.env,
+        }),
+      spawn: (command) => start(command, serverEnv(command.env)),
       async close() {
         for (const transport of started) {
           await transport.close().catch(() => undefined);
@@ -80,7 +98,7 @@ export function localMachine(agentId = 'local'): AcpMachineFactory {
   };
 }
 
-/** Spawn `command` and carry its stdin/stdout as a byte stream. */
+/** Spawn `command` with exactly its `env` and carry its stdin/stdout as a byte stream. */
 async function spawnStdio(
   agentId: string,
   command: SpawnCommand,
@@ -93,10 +111,7 @@ async function spawnStdio(
     ],
     {
       cwd: command.cwd,
-      env: {
-        ...process.env,
-        ...command.env,
-      },
+      env: command.env,
       stdio: [
         'pipe',
         'pipe',

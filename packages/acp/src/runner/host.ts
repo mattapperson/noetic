@@ -86,8 +86,8 @@ class RunnerPeer {
   machine(): AcpMachine {
     return {
       reach: (bridge) => this.reach(bridge),
-      launch: (command) => this.start(command),
-      spawn: (command) => this.start(command),
+      launch: (command) => this.start(command, 'launch'),
+      spawn: (command) => this.start(command, 'spawn'),
       close: () => this.link.close(),
     };
   }
@@ -108,7 +108,7 @@ class RunnerPeer {
     };
   }
 
-  private async start(command: SpawnCommand): Promise<AcpTransport> {
+  private async start(command: SpawnCommand, kind: 'launch' | 'spawn'): Promise<AcpTransport> {
     const id = this.id();
     let exit = (): void => undefined;
     const exited = new Promise<void>((resolve) => {
@@ -126,6 +126,7 @@ class RunnerPeer {
     const reply = await this.ask(
       {
         t: 'start',
+        kind,
         command: command.command,
         args: [
           ...(command.args ?? []),

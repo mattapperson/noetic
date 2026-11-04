@@ -29,10 +29,17 @@ export const HostFrameSchema = z.discriminatedUnion('t', [
     id: Id,
     path: z.string().startsWith('/'),
   }),
-  /** Start a process; its stdio becomes stream `id`. */
+  /**
+   * Start a process; its stdio becomes stream `id`. `launch` is the agent,
+   * `spawn` an MCP server beside it (`AcpMachine.launch` and `.spawn`).
+   */
   z.object({
     t: z.literal('start'),
     id: Id,
+    kind: z.enum([
+      'launch',
+      'spawn',
+    ]),
     command: z.string().min(1),
     args: z.array(z.string()),
     env: z.record(z.string(), z.string()),

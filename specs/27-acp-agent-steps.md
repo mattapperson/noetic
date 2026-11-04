@@ -189,7 +189,11 @@ what the agent it starts does: Codex starts the servers in `CODEX_CONFIG`,
 pi-acp the command in `PI_ACP_PI_COMMAND`, and any agent runs what the host's
 permission answers let it.
 `spawnOn(machine)` opens a machine per process, for a stdio MCP server that
-must run where the agent runs.
+must run where the agent runs. Such a server starts as the MCP SDK starts a
+local one: with that machine's `HOME`, `LOGNAME`, `PATH`, `SHELL`, `TERM` and
+`USER` plus its own `env`, never the rest of the machine's environment
+(`localMachine()` and the runner alike). Only the agent `launch` starts gets
+the whole environment.
 
 ## Client-side capabilities
 
