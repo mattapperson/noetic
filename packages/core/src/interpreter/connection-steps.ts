@@ -119,7 +119,7 @@ export function connectionRegistryOf(ctx: Context, name: string): ConnectionRegi
   throw new NoeticConfigError({
     code: 'CONNECTION_UNKNOWN',
     message: `Connection '${name}' is used, but the harness has no connections.`,
-    hint: `Add it to the harness: new AgentHarness({ connections: { ${name}: mcp('…') } }).`,
+    hint: `Add it to the harness: new AgentHarness({ connections: [mcp({ name: '${name}', type: 'http', url: '…' })] }).`,
   });
 }
 

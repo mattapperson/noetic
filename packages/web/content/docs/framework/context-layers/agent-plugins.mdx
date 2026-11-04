@@ -224,7 +224,11 @@ An entry is a plain `ConnectionConfig`, so a host can add a `policy` before atta
 const guarded = connections.map((entry) => ({ ...entry, policy: { deny: ['*_delete'] } }));
 ```
 
-Options: `transports` (default `['stdio', 'streamable-http']`; add `'sse'` for the legacy transport), `baseEnv` (the ambient environment the subprocess allowlist draws from, default `process.env`) and `timeoutMs` (per-server connect budget). `pluginConnections()` creates each plugin's `PLUGIN_DATA` directory before any value names it. For one resolved server, `pluginMcpProvider()` returns the `mcp()` provider with the same environment allowlist and header filtering.
+Options: `transports` (default `['stdio', 'streamable-http']`; add `'sse'` for the legacy transport), `baseEnv` (the ambient environment the subprocess allowlist draws from, default `process.env`) and `timeoutMs` (per-server connect budget). `pluginConnections()` creates each plugin's `PLUGIN_DATA` directory before any value names it. For one resolved server, `pluginMcpProvider()` returns the `mcp()` provider with the same environment allowlist and header filtering; it takes the connection `name`.
+
+### Moving from the layer's MCP client
+
+Before 0.3.0 the layer connected plugin servers itself and offered the model a `callMcpTool({ server, tool, arguments })` tool. That client is gone: `callMcpTool`, `readMcpTools`, `connectMcpServer`, `closeSessions`, the `McpSession`, `McpToolInfo` and `McpConnectResult` types, `DEFAULT_CONNECT_TIMEOUT_MS`, `DEFAULT_TOOL_CALL_TIMEOUT_MS`, and the layer's `connectMcp`, `transports`, `baseEnv` and `connectTimeoutMs` options. Attach `pluginConnections()`'s entries instead; the model then calls `<plugin>_<server>_call({ op, args })`, and each call passes every connection gate — policy, `beforeToolCall`, approval, secret scrubbing and replay-stable idempotency keys.
 
 ## Client extensions
 
