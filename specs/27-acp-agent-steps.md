@@ -184,10 +184,16 @@ and arguments, may set only that grant's names — so a launcher such as
 `NODE_OPTIONS`, `LD_PRELOAD` or `PATH` is refused unless granted — and runs in
 a directory inside `--cwd` (the runner's own directory by default), compared
 by real path, so neither `..` nor a symlink leads out. A refused start is an
-`error` frame naming why. The allowlist bounds what the runner starts, not
-what the agent it starts does: Codex starts the servers in `CODEX_CONFIG`,
-pi-acp the command in `PI_ACP_PI_COMMAND`, and any agent runs what the host's
-permission answers let it.
+`error` frame naming why. A setting that names a command the agent
+starts is held to the allowlist as well: every `mcp_servers` entry with a
+`command` in a `CODEX_CONFIG` must match a grant, setting only that grant's
+names, and `notify` is refused; for pi, the `--agent pi` grant sets
+`PI_ACP_PI_COMMAND` (the runner's own launcher) and `NOETIC_PI_COMMAND` (its
+own `NOETIC_PI_COMMAND`, else `pi`) itself, over what a host sends
+(`AcpRunnerGrant.fixedEnv`). The allowlist bounds what the runner starts, not
+what the agent does once started: any agent runs what the host's permission
+answers let it. The runner trusts whoever holds its token or its stdio, and
+warns so on stderr when it starts.
 `spawnOn(machine)` opens a machine per process, for a stdio MCP server that
 must run where the agent runs. Such a server starts as the MCP SDK starts a
 local one: with that machine's `HOME`, `LOGNAME`, `PATH`, `SHELL`, `TERM` and

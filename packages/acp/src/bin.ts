@@ -12,13 +12,13 @@
  * The WebSocket token comes from NOETIC_ACP_RUNNER_TOKEN, or is made up and
  * printed to stderr. `--agent` and `--spawn` limit the runner to that preset's
  * command and those command lines (split on spaces), each with the preset's
- * environment names plus every `--env` name, inside `--cwd`.
+ * environment names plus every `--env` name, inside `--cwd`. For pi the
+ * runner names pi's command itself. Whoever holds the token can start what
+ * the grants allow, as the runner's user.
  */
 
 import { parseArgs } from 'node:util';
-import { PRESET_COMMANDS, PRESET_ENV } from './agents';
-import type { AcpRunnerGrant } from './runner/grants';
-import type { AcpRunnerOptions } from './runner/serve';
+import { runnerOptions, trustWarning } from './runner/options';
 import { listenAcpRunner, newRunnerToken, readPem, serveAcpRunnerOverStdio } from './runner/serve';
 
 const USAGE =
@@ -66,6 +66,7 @@ async function main(argv: ReadonlyArray<string>): Promise<void> {
     },
   });
   const options = runnerOptions(values);
+  process.stderr.write(`${trustWarning(options)}\n`);
   if (values.stdio) {
     await serveAcpRunnerOverStdio(options);
     return;
@@ -93,63 +94,6 @@ async function main(argv: ReadonlyArray<string>): Promise<void> {
   if (!process.env.NOETIC_ACP_RUNNER_TOKEN) {
     process.stderr.write(`token: ${token}\n`);
   }
-}
-
-function runnerOptions(values: {
-  agent?: string;
-  spawn?: string[];
-  env?: string[];
-  cwd?: string;
-}): AcpRunnerOptions {
-  const grants = [
-    ...(values.agent === undefined
-      ? []
-      : [
-          presetGrant(values.agent),
-        ]),
-    ...(values.spawn ?? []).map(commandGrant),
-  ];
-  if (grants.length === 0) {
-    return {
-      cwd: values.cwd,
-    };
-  }
-  const extra = values.env ?? [];
-  return {
-    cwd: values.cwd,
-    allow: grants.map((grant) => ({
-      ...grant,
-      env: [
-        ...(grant.env ?? []),
-        ...extra,
-      ],
-    })),
-  };
-}
-
-function presetGrant(agent: string): AcpRunnerGrant {
-  if (!isPreset(agent)) {
-    fail(`Unknown agent '${agent}'. Known: ${Object.keys(PRESET_COMMANDS).join(', ')}.`);
-  }
-  return {
-    ...PRESET_COMMANDS[agent],
-    env: PRESET_ENV[agent],
-  };
-}
-
-function isPreset(id: string): id is keyof typeof PRESET_COMMANDS {
-  return Object.hasOwn(PRESET_COMMANDS, id);
-}
-
-function commandGrant(line: string): AcpRunnerGrant {
-  const [command, ...args] = line.split(' ').filter((word) => word !== '');
-  if (command === undefined) {
-    fail('--spawn needs a command.');
-  }
-  return {
-    command,
-    args,
-  };
 }
 
 function fail(message: string): never {

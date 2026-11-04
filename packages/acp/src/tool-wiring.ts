@@ -226,10 +226,10 @@ export const piToolWiring: AcpToolWiring = {
 };
 
 /**
- * The launcher shipped beside this module. An agent on another machine needs
- * `NOETIC_PI_LAUNCHER` naming the launcher there.
+ * The launcher shipped beside this module. A runner started with
+ * `--agent pi` names its own in place of the one a host sends.
  */
-function piLauncherPath(): string {
+export function piLauncherPath(): string {
   const suffix = import.meta.url.endsWith('.ts') ? 'ts' : 'js';
   return decodeURIComponent(new URL(`./pi/launch.${suffix}`, import.meta.url).pathname);
 }

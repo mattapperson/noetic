@@ -310,17 +310,17 @@ async function startProcess(
     }
   >,
 ): Promise<void> {
-  const cwd = checkStart(frame, session.options);
+  const checked = checkStart(frame, session.options);
   // An MCP server gets what the MCP SDK would give it here, the agent all of the runner's.
   const env =
     frame.kind === 'spawn'
-      ? serverEnv(frame.env)
+      ? serverEnv(checked.env)
       : {
           ...process.env,
-          ...frame.env,
+          ...checked.env,
         };
   const child = spawn(frame.command, frame.args, {
-    cwd,
+    cwd: checked.cwd,
     env,
     stdio: [
       'pipe',
