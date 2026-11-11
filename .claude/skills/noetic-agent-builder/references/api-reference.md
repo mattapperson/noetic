@@ -1881,7 +1881,7 @@ interface DecideResponse {
 }
 ```
 
-For decision models the OpenRouter adapter calls the native decisions API; for any other model it makes one structured-output `callModel` per sample. Samples that fail or do not parse are dropped; when none parse it throws `DecideOutputError` (from `@noetic-tools/types`), which carries the samples' `usage` and `cost`. `decide` counts that spend and turns it into `model_parse_error`; `aiCondition` turns it into `model_parse_error` too.
+For decision models the OpenRouter adapter calls the native decisions API (at `<baseUrl>/api/alpha/decisions` when the provider's base URL is not on `openrouter.ai`); for any other model it makes one structured-output `callModel` per sample. Samples that fail or do not parse are dropped; when none parse it throws `DecideOutputError` (from `@noetic-tools/types`), which carries the samples' `usage` and `cost`. `decide` counts that spend and turns it into `model_parse_error`; `aiCondition` turns it into `model_parse_error` too.
 
 ### Session Accessors
 

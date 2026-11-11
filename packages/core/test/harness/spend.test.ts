@@ -128,18 +128,6 @@ function useFakeSdk(
   };
 }
 
-const realFetch = globalThis.fetch;
-
-/** Send the SDK's native decide calls, which always go to openrouter.ai, to `server`. */
-function routeDecisions(server: FakeOpenRouter): void {
-  globalThis.fetch = Object.assign((input: Request | string | URL, init?: RequestInit) => {
-    if (input instanceof Request && input.url === 'https://openrouter.ai/api/alpha/decisions') {
-      return realFetch(new Request(`${server.origin}/api/alpha/decisions`, input), init);
-    }
-    return realFetch(input, init);
-  }, realFetch);
-}
-
 function answer(): unknown[] {
   return [
     {
@@ -160,7 +148,6 @@ function answer(): unknown[] {
 
 const servers: FakeOpenRouter[] = [];
 afterEach(() => {
-  globalThis.fetch = realFetch;
   for (const server of servers.splice(0)) {
     server.stop();
   }
@@ -472,7 +459,6 @@ describe('a host killed mid-call', () => {
 
   it("saves a decide() call's generation id from its headers, before its body", async () => {
     const server = startServer();
-    routeDecisions(server);
     const storage = createInMemoryStorage();
     const first = harnessOver(storage, server);
     useFakeSdk(first, {

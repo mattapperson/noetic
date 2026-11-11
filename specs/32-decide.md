@@ -466,6 +466,13 @@ its generation id from the `x-generation-id` header when headers arrive, and one
 cut off before its body finishes is still priced later. Estimated calls are
 `callModel` rounds and are recorded as such.
 
+**Base URL.** The SDK sends decisions to `https://openrouter.ai/api/alpha/decisions`
+whatever base URL its client was given. When the provider's base URL is not on
+`openrouter.ai` (the `'noetic'` provider, or an `'openrouter'` provider with a
+`baseUrl` naming a gateway or proxy), the adapter sends them to
+`<baseUrl>/api/alpha/decisions` instead, so the credential only ever reaches the
+host it was configured for. A base on `openrouter.ai`, or none, keeps the SDK's URL.
+
 **Estimated.** For any other model, the adapter makes one structured-output
 `callModel` per sample, asking for a probability per boolean, choice, and level,
 then averages across the samples that parsed. A sample that fails or does not

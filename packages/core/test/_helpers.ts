@@ -868,12 +868,11 @@ export interface FakeOpenRouterRound {
  * killed mid-stream sees. Every
  * response carries the generation id `gen-<round>` in its `x-generation-id` header.
  *
- * A native decide call (`POST /api/alpha/decisions`, under `origin`) gets its headers,
+ * A native decide call (`POST /api/alpha/decisions`, under `baseUrl`) gets its headers,
  * with the id `gen-dec-<n>`, and then never its body.
  */
 export interface FakeOpenRouter {
   readonly baseUrl: string;
-  readonly origin: string;
   readonly rounds: FakeOpenRouterRound[];
   readonly dropAt: Set<number>;
   readonly cutAt: Map<number, number>;
@@ -898,7 +897,7 @@ export function startFakeOpenRouter(reply: (input: unknown[]) => unknown[]): Fak
           status: 404,
         });
       }
-      if (new URL(request.url).pathname === '/api/alpha/decisions') {
+      if (new URL(request.url).pathname === '/api/v1/api/alpha/decisions') {
         decisions += 1;
         return new Response(
           new ReadableStream({
@@ -982,7 +981,6 @@ export function startFakeOpenRouter(reply: (input: unknown[]) => unknown[]): Fak
   });
   return {
     baseUrl: `http://localhost:${server.port}/api/v1`,
-    origin: `http://localhost:${server.port}`,
     rounds,
     dropAt,
     cutAt,
