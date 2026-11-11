@@ -220,6 +220,8 @@ Any model can answer. How it answers depends on the model.
 
 **Native.** Decision models such as `typesafe/jev-1.14` answer every question in one pass and return calibrated distributions rather than sampled text. A model is native when OpenRouter lists `decisions` among its output modalities; the harness looks this up once per model id and caches the result. A lookup that fails for any reason but a 404 is not cached: that call takes the estimated path, and the next call asks again. The native path needs an OpenRouter client, so configure the harness's `llm` provider (or set `OPENROUTER_API_KEY`). Without one, every model takes the estimated path.
 
+Native decisions go to the provider you configured. With a `baseUrl` that is not on `openrouter.ai` (a gateway or proxy, or the `'noetic'` provider), the request is sent to `<baseUrl>/api/alpha/decisions`, so your credential never reaches `openrouter.ai`.
+
 TypeSafe's decision models limit a request to 64k tokens for the state plus all questions, and 32k for the state plus any one question. Set `longContext: true` to ask for long-context mode, which raises both to 262k: the request then carries the `TypeSafe-Danger-Zone-Long-Context: true` header. It is ignored on the estimated path.
 
 On the native path, only an explicit refusal from the provider becomes a `Refusal`. A missing or mistyped answer fails the step with `model_parse_error`, rather than passing a provider fault off as the model declining. Every answer's `probabilities` has an entry for each outcome (`0` when the provider sent none). A boolean `criteria` with only one side cannot be sent as criteria, so it joins the instructions as `Yes means: …` (or `No means: …`).

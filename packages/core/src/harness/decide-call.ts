@@ -33,6 +33,8 @@ export type DecisionsClient = Pick<OpenRouter, 'alpha' | 'models'>;
 /** @internal */
 export interface DecideCallerDeps {
   client?: DecisionsClient;
+  /** The client's base URL. Undefined means the SDK's default, OpenRouter. */
+  serverURL?: string;
   callModel: (request: CallModelRequest) => Promise<LLMResponse>;
   /** Per-harness cache: model id → whether it is a decision model (`undefined` while unknown). */
   nativeModels: Map<string, Promise<boolean | undefined>>;
@@ -64,7 +66,7 @@ export async function callDecide(
   deps: DecideCallerDeps,
 ): Promise<DecideResponse> {
   if (deps.client && (await isDecisionModel(request.model, deps))) {
-    return callNative(request, deps.client, deps.spend);
+    return callNative(request, deps.client, deps);
   }
   return callEstimated(request, deps);
 }
@@ -118,7 +120,7 @@ async function lookupDecisionModel(
 async function callNative(
   request: DecideRequest,
   client: DecisionsClient,
-  spend: Spend | undefined,
+  { serverURL, spend }: Pick<DecideCallerDeps, 'serverURL' | 'spend'>,
 ): Promise<DecideResponse> {
   const questions: Record<string, NativeQuestion> = {};
   for (const [id, question] of Object.entries(request.questions)) {
@@ -131,6 +133,7 @@ async function callNative(
   };
   const response = await sendNative({
     client,
+    serverURL: decisionsURL(serverURL),
     decisionsRequest,
     request,
     spend,
@@ -162,11 +165,13 @@ async function callNative(
  */
 async function sendNative({
   client,
+  serverURL,
   decisionsRequest,
   request,
   spend,
 }: {
   client: DecisionsClient;
+  serverURL: string | undefined;
   decisionsRequest: Parameters<
     DecisionsClient['alpha']['decisions']['create']
   >[0]['decisionsRequest'];
@@ -186,6 +191,11 @@ async function sendNative({
       },
       {
         signal: request.signal,
+        ...(serverURL
+          ? {
+              serverURL,
+            }
+          : {}),
         headers: {
           ...dispatch?.headers,
           ...(request.longContext ? LONG_CONTEXT_HEADER : {}),
@@ -208,6 +218,20 @@ async function sendNative({
 const LONG_CONTEXT_HEADER = {
   'TypeSafe-Danger-Zone-Long-Context': 'true',
 };
+
+/**
+ * Where to send decisions, or undefined for the SDK's default. The SDK sends them to
+ * openrouter.ai whatever base URL its client has, which would hand a gateway's
+ * credential to OpenRouter; so a client based anywhere else sends them to
+ * `/api/alpha/decisions` under its own base. OpenRouter's base keeps the default,
+ * since its decisions route sits at the origin, outside `/api/v1`.
+ */
+function decisionsURL(serverURL: string | undefined): string | undefined {
+  if (!serverURL || new URL(serverURL).hostname === 'openrouter.ai') {
+    return undefined;
+  }
+  return serverURL.replace(/\/+$/, '');
+}
 
 /**
  * The native APIs require `instructions` on every question, while Noetic lets a
