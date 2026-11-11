@@ -125,9 +125,12 @@ function functionCallResponse(callNumber: number): MockModelResponse {
   });
 }
 
-class ToolLimitRecoveryClient {
+/** Calls a tool for `toolRounds` rounds, then answers. */
+class LongToolLoopClient {
   calls = 0;
   readonly inputs: RecordedModelInput[] = [];
+
+  constructor(private readonly toolRounds: number) {}
 
   callModel(request: { input: RecordedModelInput }): {
     getFullResponsesStream: () => AsyncIterable<unknown>;
@@ -137,12 +140,10 @@ class ToolLimitRecoveryClient {
     this.inputs.push(request.input);
     return {
       async *getFullResponsesStream() {},
-      getResponse: async () => {
-        if (callNumber >= 32 && isEphemeralContinueInput(request.input)) {
-          return messageResponse(`resp-final-${callNumber}`, 'finished after continue');
-        }
-        return functionCallResponse(callNumber);
-      },
+      getResponse: async () =>
+        callNumber < this.toolRounds
+          ? functionCallResponse(callNumber)
+          : messageResponse(`resp-final-${callNumber}`, 'finished'),
     };
   }
 }
@@ -537,8 +538,18 @@ describe('AgentHarness session accessors', () => {
     ).toBe(true);
   });
 
-  it('recovers from the tool-round limit with an ephemeral continue retry', async () => {
-    const fakeClient = new ToolLimitRecoveryClient();
+  it('runs as many tool rounds as the model asks for', async () => {
+    const fakeClient = new LongToolLoopClient(100);
+    const harness = new AgentHarness({
+      name: 'test',
+      params: {},
+    });
+    frameworkCast<{
+      llm: {
+        client: LongToolLoopClient;
+      };
+    }>(harness).llm.client = fakeClient;
+    const ctx = harness.createContext();
     const noopTool = tool({
       name: 'noop',
       description: 'Always returns ok',
@@ -550,16 +561,6 @@ describe('AgentHarness session accessors', () => {
         ok: true,
       }),
     });
-    const harness = new AgentHarness({
-      name: 'test',
-      params: {},
-    });
-    frameworkCast<{
-      llm: {
-        client: ToolLimitRecoveryClient;
-      };
-    }>(harness).llm.client = fakeClient;
-    const ctx = harness.createContext();
 
     const response = await harness.callModel({
       model: 'test/model',
@@ -572,16 +573,61 @@ describe('AgentHarness session accessors', () => {
       ctx,
     });
 
-    expect(fakeClient.calls).toBe(33);
-    expect(fakeClient.inputs.slice(0, 32).some(hasEphemeralContinueInput)).toBe(false);
-    expect(hasEphemeralContinueInput(fakeClient.inputs[32] ?? [])).toBe(true);
-    expect(ctx.itemLog.items.some((item) => item.type === 'message' && item.role === 'user')).toBe(
-      false,
-    );
+    expect(fakeClient.calls).toBe(101);
+    expect(fakeClient.inputs.some(hasEphemeralContinueInput)).toBe(false);
+    expect(response.items.filter((item) => item.type === 'function_call_output')).toHaveLength(100);
     expect(response.items.at(-1)).toMatchObject({
       type: 'message',
       role: 'assistant',
     });
+  });
+
+  it('ends a tool loop that never stops when the request is aborted', async () => {
+    const fakeClient = new LongToolLoopClient(Number.POSITIVE_INFINITY);
+    const harness = new AgentHarness({
+      name: 'test',
+      params: {},
+    });
+    frameworkCast<{
+      llm: {
+        client: LongToolLoopClient;
+      };
+    }>(harness).llm.client = fakeClient;
+    const abort = new AbortController();
+    let runs = 0;
+    const stopping = tool({
+      name: 'noop',
+      description: 'Aborts the request on its 40th call',
+      input: z.object({}),
+      output: z.object({
+        ok: z.boolean(),
+      }),
+      execute: async () => {
+        runs += 1;
+        if (runs === 40) {
+          abort.abort();
+        }
+        return {
+          ok: true,
+        };
+      },
+    });
+
+    const response = await harness.callModel({
+      model: 'test/model',
+      items: [
+        makeMessage('user', 'keep using tools'),
+      ],
+      tools: [
+        stopping,
+      ],
+      ctx: harness.createContext(),
+      signal: abort.signal,
+    });
+
+    expect(runs).toBe(40);
+    expect(fakeClient.calls).toBe(40);
+    expect(response.items.at(-1)?.type).toBe('function_call_output');
   });
 
   it('recovers incomplete provider responses without persisting the synthetic continue', async () => {
