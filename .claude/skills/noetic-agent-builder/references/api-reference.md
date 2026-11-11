@@ -456,6 +456,7 @@ tool<I, O>({
   ui?: ToolUiDeclaration<I, O>;           // call/progress/result/error render fns (generative UI)
   itemSchemas?: ItemSchemaExtensions;     // { items?, developerMessages?, toolCalls?, toolResults? }
   decorateResultItem?: (params) => Item;  // enrich the harness-created tool-result item
+  toModelOutput?: (result: O, args: I) => string | InputContentPart[]; // what the model reads instead of the JSON result (e.g. an image)
 }): Tool
 ```
 

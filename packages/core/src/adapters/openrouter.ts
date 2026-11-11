@@ -128,6 +128,23 @@ function contentPartsToProviderContent(
   return frameworkCast<ReadonlyArray<InputContentPart>>(parts).map(inputContentPartToProvider);
 }
 
+/** @internal A tool result as the provider takes it: text, or content parts. */
+export function toolOutputToProvider(
+  output: string | ReadonlyArray<InputContentPart>,
+): OpenRouterAgent.FunctionCallOutputItem['output'] {
+  if (typeof output === 'string') {
+    return output;
+  }
+  return output.map((part) => {
+    if (part.type === 'input_text') {
+      return inputTextPartToProvider(part);
+    }
+    return part.type === 'input_image'
+      ? inputImagePartToProvider(part)
+      : inputFilePartToProvider(part);
+  });
+}
+
 //#endregion
 
 //#region Item → OpenRouter Input Conversion

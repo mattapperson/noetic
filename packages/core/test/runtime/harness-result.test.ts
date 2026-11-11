@@ -1563,6 +1563,153 @@ describe('AgentHarness — item schema extensions', () => {
   });
 });
 
+describe('AgentHarness — toModelOutput', () => {
+  const PIXEL = 'data:image/png;base64,iVBORw0KGgo=';
+
+  function harnessOver(client: LongToolLoopClient): AgentHarness {
+    const harness = new AgentHarness({
+      name: 'test',
+      params: {},
+    });
+    frameworkCast<{
+      llm: {
+        client: LongToolLoopClient;
+      };
+    }>(harness).llm.client = client;
+    return harness;
+  }
+
+  /** The tool result the model was sent on its second round. */
+  function sentOutput(client: LongToolLoopClient): unknown {
+    return client.inputs[1]?.find((item) => item.type === 'function_call_output')?.output;
+  }
+
+  it('sends the model what the tool returns for it, and logs the JSON result', async () => {
+    const seen: unknown[] = [];
+    const screenshot = tool({
+      name: 'noop',
+      description: 'Takes a screenshot',
+      input: z.object({}),
+      output: z.object({
+        path: z.string(),
+      }),
+      execute: async () => ({
+        path: '/tmp/shot.png',
+      }),
+      toModelOutput: (result, args) => {
+        seen.push(result, args);
+        return [
+          {
+            type: 'input_text',
+            text: `Saved to ${result.path}`,
+          },
+          {
+            type: 'input_image',
+            imageUrl: PIXEL,
+          },
+        ];
+      },
+    });
+    const client = new LongToolLoopClient(1);
+    const harness = harnessOver(client);
+
+    const response = await harness.callModel({
+      model: 'test/model',
+      items: [
+        makeMessage('user', 'look'),
+      ],
+      tools: [
+        screenshot,
+      ],
+      ctx: harness.createContext(),
+    });
+
+    expect(sentOutput(client)).toEqual([
+      {
+        type: 'input_text',
+        text: 'Saved to /tmp/shot.png',
+      },
+      {
+        type: 'input_image',
+        imageUrl: PIXEL,
+        detail: 'auto',
+      },
+    ]);
+    expect(seen).toEqual([
+      {
+        path: '/tmp/shot.png',
+      },
+      {},
+    ]);
+    expect(response.items).toContainEqual(
+      expect.objectContaining({
+        type: 'function_call_output',
+        callId: 'call_0',
+        output: '{"path":"/tmp/shot.png"}',
+      }),
+    );
+  });
+
+  it('sends a string as it is', async () => {
+    const client = new LongToolLoopClient(1);
+    const harness = harnessOver(client);
+    await harness.callModel({
+      model: 'test/model',
+      items: [
+        makeMessage('user', 'look'),
+      ],
+      tools: [
+        tool({
+          name: 'noop',
+          description: 'Counts',
+          input: z.object({}),
+          output: z.object({
+            count: z.number(),
+          }),
+          execute: async () => ({
+            count: 3,
+          }),
+          toModelOutput: (result) => `${result.count} found`,
+        }),
+      ],
+      ctx: harness.createContext(),
+    });
+
+    expect(sentOutput(client)).toBe('3 found');
+  });
+
+  it('sends the error, not the tool-made output, when the call fails', async () => {
+    let asked = false;
+    const client = new LongToolLoopClient(1);
+    const harness = harnessOver(client);
+    await harness.callModel({
+      model: 'test/model',
+      items: [
+        makeMessage('user', 'look'),
+      ],
+      tools: [
+        tool({
+          name: 'noop',
+          description: 'Always fails',
+          input: z.object({}),
+          output: z.object({}),
+          execute: async () => {
+            throw new Error('camera offline');
+          },
+          toModelOutput: () => {
+            asked = true;
+            return 'unreachable';
+          },
+        }),
+      ],
+      ctx: harness.createContext(),
+    });
+
+    expect(sentOutput(client)).toBe('Error: camera offline');
+    expect(asked).toBe(false);
+  });
+});
+
 describe('AgentHarness — emit option', () => {
   it('emit: false suppresses framework events inside callModel', async () => {
     const silentStep: Step<ContextData, string, string> = {

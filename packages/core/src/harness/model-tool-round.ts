@@ -15,7 +15,7 @@ import type {
   Tool,
 } from '@noetic-tools/types';
 import { SteerPoint } from '@noetic-tools/types';
-import { itemsToInput } from '../adapters/openrouter';
+import { itemsToInput, toolOutputToProvider } from '../adapters/openrouter';
 import { isFunctionCall } from '../interpreter/typeguards';
 import { drainsOf } from '../runtime/drain';
 import type { ApprovalOutcome } from '../runtime/tool-approval';
@@ -239,7 +239,10 @@ async function executeFunctionCall(
   conversationInput.push({
     type: 'function_call_output',
     callId: fc.callId,
-    output: toolResult.output,
+    output:
+      toolForCall?.toModelOutput && !toolResult.error
+        ? toolOutputToProvider(toolForCall.toModelOutput(toolResult.result, parsedArgs))
+        : toolResult.output,
   });
   scope.emitItemAppended(request.ctx, outputItem);
   params.emitIfAllowed('tool_call_completed', {

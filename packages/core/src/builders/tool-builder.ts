@@ -2,6 +2,7 @@ import type {
   FunctionCallItem,
   FunctionCallOutputItem,
   InferSchemaOutput,
+  InputContentPart,
   InputSchemaConfig,
   Item,
   ItemSchemaExtensions,
@@ -31,6 +32,11 @@ type ToolConfig<I extends StandardSchemaV1, O extends StandardSchemaV1> = {
     output: string;
     error?: boolean;
   }) => Item | ToolResultExtensionItem;
+  /** What the model reads as a call's result, in place of the JSON of `result`. */
+  toModelOutput?: (
+    result: InferSchemaOutput<O>,
+    args: InferSchemaOutput<I>,
+  ) => string | InputContentPart[];
   execute: (
     args: InferSchemaOutput<I>,
     toolCtx: ToolExecutionContext,
@@ -63,6 +69,11 @@ type GeneratorToolConfig<
     output: string;
     error?: boolean;
   }) => Item | ToolResultExtensionItem;
+  /** What the model reads as a call's result, in place of the JSON of `result`. */
+  toModelOutput?: (
+    result: InferSchemaOutput<O>,
+    args: InferSchemaOutput<I>,
+  ) => string | InputContentPart[];
   execute: (
     args: InferSchemaOutput<I>,
     toolCtx: ToolExecutionContext,
@@ -123,6 +134,7 @@ export function tool<I extends StandardSchemaV1, O extends StandardSchemaV1>(
     inputJsonSchema: config.inputJsonSchema,
     itemSchemas: config.itemSchemas,
     decorateResultItem: config.decorateResultItem,
+    toModelOutput: config.toModelOutput,
     execute: config.execute,
     needsApproval: config.needsApproval,
     context: config.context,
@@ -152,6 +164,7 @@ export function toolWithGenerator<
     inputJsonSchema: config.inputJsonSchema,
     itemSchemas: config.itemSchemas,
     decorateResultItem: config.decorateResultItem,
+    toModelOutput: config.toModelOutput,
     execute: config.execute,
     needsApproval: config.needsApproval,
     context: config.context,

@@ -215,7 +215,7 @@ The agent harness owns the tool call loop. The SDK makes one model request per r
 1. **Request.** Send the conversation so far (the View plus this step's earlier rounds) to the SDK's `callModel()`, streaming its events to the session broadcaster through `getFullResponsesStream()` and reading the finished response from `getResponse()`.
 2. **Stop check.** If the round's output holds no function calls, the step is done.
 3. **Run tools.** Otherwise run each function call in order: look the tool up in the step's allowed subset (see Unified Tool Set), run the layers' `beforeToolCall` steering hooks, validate the arguments against `Tool.input`, and call `Tool.execute`. An unknown tool, malformed JSON arguments, invalid arguments, a steering denial or redirect, or a thrown error becomes an error tool result for the model to read; it does not fail the step.
-4. **Append.** Add the `function_call` and `function_call_output` items to the conversation, then go back to step 1.
+4. **Append.** Add the `function_call` and `function_call_output` items to the conversation, then go back to step 1. The model reads the result as its JSON text, unless the tool defines `toModelOutput(result, args)` and the call succeeded: then it reads what that returns, a string or input content parts (text, image, file). Only this step's conversation carries that form. The `function_call_output` item in the `ItemLog` always holds the JSON text, so later steps, and a step resumed from its log, read the JSON.
 
 Limits and recovery:
 
@@ -296,6 +296,8 @@ interface Tool<I extends StandardSchemaV1 = StandardSchemaV1, O extends Standard
     args: InferSchemaOutput<I>,
     toolCtx: ToolExecutionContext,
   ) => Promise<InferSchemaOutput<O>> | AsyncGenerator<unknown, InferSchemaOutput<O>>;
+  // what the model reads as a successful call's result, in place of the JSON; see Tool Call Execution
+  toModelOutput?: (result: InferSchemaOutput<O>, args: InferSchemaOutput<I>) => string | InputContentPart[];
   needsApproval?: boolean;  // every call needs the harness approver's go-ahead; see below
   context?: ToolContextDeclaration;
 }
