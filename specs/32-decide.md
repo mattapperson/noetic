@@ -46,6 +46,8 @@ interface StepDecideOpts<TContext, Q extends DecideQuestions> {
   projection?: ProjectionPolicy;
   /** Runs per decision on the estimated path, averaged. Ignored on the native path. Default 1. */
   samples?: number;
+  /** Ask a native decision model for its long-context mode. Ignored on the estimated path. */
+  longContext?: boolean;
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }
 
@@ -368,6 +370,7 @@ interface StepDecide<TContext = ContextData, _I = unknown, O = unknown> {
   context?: (ctx: Context<TContext>) => Record<string, unknown> | Promise<Record<string, unknown>>;
   projection?: ProjectionPolicy;
   samples: number;
+  longContext?: boolean;
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
   /** Phantom field carrying the answers type for inference. Never set at runtime. */
   readonly _answers?: O;
@@ -434,6 +437,7 @@ interface DecideRequest {
   state: ReadonlyArray<DecideStatePart>;
   questions: DecideQuestions;
   samples?: number;
+  longContext?: boolean;
   signal?: AbortSignal;
 }
 
@@ -465,6 +469,12 @@ decisions client shares the model client's response hook, so a native call saves
 its generation id from the `x-generation-id` header when headers arrive, and one
 cut off before its body finishes is still priced later. Estimated calls are
 `callModel` rounds and are recorded as such.
+
+**Long context.** With `longContext: true` a native request carries the header
+`TypeSafe-Danger-Zone-Long-Context: true`, which turns on TypeSafe's long-context
+mode: the token limits on the state plus all questions (64k) and on the state plus
+any one question (32k) both rise to 262k. Without it no such header is sent. The
+estimated path ignores it.
 
 **Estimated.** For any other model, the adapter makes one structured-output
 `callModel` per sample, asking for a probability per boolean, choice, and level,
@@ -607,6 +617,7 @@ interface DecideWorkflowNode {
   questions: Record<string, DecideQuestion>;
   view?: 'full' | 'layers' | 'none';
   samples?: number;
+  longContext?: boolean;
 }
 
 interface RouteSwitchWorkflowNode {
@@ -647,6 +658,7 @@ Each `decide` step opens a `decide.call` span under `ctx.span` (see
 - per question: `noetic.decision.<id>.value` and `noetic.decision.<id>.confidence`
   (or `.probability`)
 - `noetic.decision.refused` — refused question ids
+- `noetic.decision.long_context` — `true` when the step set `longContext`; absent otherwise
 
 `routeSwitch` adds a `route_switch` event to `ctx.span` with `stepId` and
 `case` — the case taken, `uncertain`, or `default`.

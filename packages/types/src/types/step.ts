@@ -668,6 +668,11 @@ export interface StepDecide<TContext = ContextData, I = unknown, O = unknown>
   projection?: ProjectionPolicy;
   /** Runs averaged on the estimated path. Ignored on the native path. */
   samples: number;
+  /**
+   * Ask a native decision model for its long-context mode, which raises the token
+   * limits on the state and on each question. Ignored on the estimated path.
+   */
+  longContext?: boolean;
   /** Controls framework event emission for this step. Defaults to `true`. */
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }

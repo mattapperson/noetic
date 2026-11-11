@@ -459,6 +459,7 @@ Ask a model typed questions about the context. Hydrates into [`decide`](/docs/fr
 | `questions` | `Record<string, DecideQuestion>` | required | `boolean`, `choice`, and `score` questions keyed by id. Validated by the same rules as `decide()`. |
 | `view` | `'full' \| 'layers' \| 'none'` | `'full'` | How much of the assembled view the model sees. |
 | `samples` | `number` | `1` | Positive integer. Runs to average on the estimated path. |
+| `longContext` | `boolean` | `false` | Ask a native decision model for its long-context mode. Ignored on the estimated path. |
 
 A `decide` node outputs the answers object. Inside a `sequence`, the next node receives it as JSON, so a `callModel` node can read it. A `conditional` matches against the answers' string values, and a `inParallel` with `merge: "concat"` writes them as JSON. The `context` selector is a closure and has no JSON form.
 

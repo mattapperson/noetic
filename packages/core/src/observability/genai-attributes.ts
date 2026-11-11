@@ -78,6 +78,8 @@ export const NoeticAttr = {
   DECISION_SOURCE: 'noetic.decision.source',
   /** Comma-separated ids of questions the model refused. */
   DECISION_REFUSED: 'noetic.decision.refused',
+  /** `true` when the step asked a native decision model for long-context mode. */
+  DECISION_LONG_CONTEXT: 'noetic.decision.long_context',
   /** Prefix for per-question attributes: `noetic.decision.<id>.value` etc. */
   DECISION_PREFIX: 'noetic.decision.',
   /** Layer a `layer.hook` span belongs to. */

@@ -23,6 +23,7 @@ import { runCode } from '../../src/builders/step-builders';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { execute } from '../../src/interpreter/execute';
 import { isMutableContext } from '../../src/interpreter/typeguards';
+import { SpanImpl } from '../../src/observability/span-impl';
 import { EventBroadcaster } from '../../src/runtime/event-broadcaster';
 
 //#region Helpers
@@ -305,6 +306,50 @@ describe('executeDecide', () => {
       harness.createContext(),
     );
     expect(requests[0]?.model).toBe('typesafe/jev-latest');
+  });
+
+  it('asks for long context, and says so on its span, only when the step sets it', async () => {
+    const requests: DecideRequest[] = [];
+    const stamped: unknown[] = [];
+    const harness = new AgentHarness({
+      name: 'decide-long',
+      params: {},
+      traceExporter: {
+        export: async (spans) => {
+          for (const span of spans) {
+            assert(span instanceof SpanImpl);
+            stamped.push(span.attributes.get('noetic.decision.long_context'));
+          }
+        },
+      },
+      _testDecide: async (request) => {
+        requests.push(request);
+        return answered();
+      },
+    });
+    for (const longContext of [
+      true,
+      undefined,
+    ]) {
+      await harness.run(
+        decide({
+          id: `triage-${longContext}`,
+          model: 'typesafe/jev-1.14',
+          questions: QUESTIONS,
+          longContext,
+        }),
+        'x',
+        harness.createContext(),
+      );
+    }
+    expect(requests.map((request) => request.longContext)).toEqual([
+      true,
+      undefined,
+    ]);
+    expect(stamped).toEqual([
+      true,
+      undefined,
+    ]);
   });
 
   it('throws MISSING_MODEL when neither the step nor the harness names a model', async () => {

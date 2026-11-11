@@ -72,6 +72,9 @@ export async function executeDecide<TContext, I, O>(
 
   const span = baseCtx.harness.createSpan('decide.call', baseCtx.span);
   span.setAttribute(NoeticAttr.NODE_ID, step.id);
+  if (step.longContext) {
+    span.setAttribute(NoeticAttr.DECISION_LONG_CONTEXT, true);
+  }
   let answers: Record<string, DecideAnswer>;
   let response: DecideResponse;
   try {
@@ -81,6 +84,7 @@ export async function executeDecide<TContext, I, O>(
       state,
       questions: step.questions,
       samples: step.samples,
+      longContext: step.longContext,
       signal: isContextImpl(baseCtx) ? baseCtx.abortSignal : undefined,
       parentSpan: span,
       _billTo: baseCtx,

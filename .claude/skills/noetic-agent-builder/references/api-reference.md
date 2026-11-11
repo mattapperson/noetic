@@ -158,6 +158,7 @@ decide<const Q extends DecideQuestions, TContext = ContextData, I = unknown>({
   context?: (ctx: Context<TContext>) => Record<string, unknown> | Promise<Record<string, unknown>>; // sent as one `context` entry
   projection?: ProjectionPolicy;                // default DECISION_PROJECTION
   samples?: number;                             // estimated path only; default 1
+  longContext?: boolean;                        // native path only; asks for the model's long-context mode
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }): DecideStep<TContext, I, Q>                  // StepDecide<TContext, I, DecideAnswers<Q>> & { questions: Q }
 ```
@@ -1869,6 +1870,7 @@ interface DecideRequest {
   >;
   questions: DecideQuestions;
   samples?: number;          // estimated path only; default 1
+  longContext?: boolean;     // native path only; sends TypeSafe's long-context header
   signal?: AbortSignal;
 }
 

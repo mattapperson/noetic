@@ -121,6 +121,7 @@ A step that asks a model typed questions and returns typed answers with probabil
 | `context` | `(ctx: Context<TContext>) => Record<string, unknown> \| Promise<Record<string, unknown>>` | no | Typed state read from context layers, sent as one JSON entry named `context` |
 | `projection` | `ProjectionPolicy` | no | Budget for the decision's view. Defaults to `DECISION_PROJECTION` |
 | `samples` | `number` | yes | Runs averaged on the estimated path. `decide()` defaults it to `1` |
+| `longContext` | `boolean` | no | Ask a native decision model for its long-context mode. Ignored on the estimated path |
 | `emit` | `boolean \| ((eventType, data) => boolean)` | no | Controls framework event emission for this step |
 | `_answers` | `O` | no | Phantom field carrying the answers type for inference. Never set at runtime |
 

@@ -47,6 +47,11 @@ export interface StepDecideOpts<TContext, Q extends DecideQuestions, I = unknown
   projection?: ProjectionPolicy;
   /** Runs averaged on the estimated path. Ignored on the native path. Default 1. */
   samples?: number;
+  /**
+   * Ask a native decision model for its long-context mode, which raises the token
+   * limits on the state and on each question. Ignored on the estimated path.
+   */
+  longContext?: boolean;
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }
 

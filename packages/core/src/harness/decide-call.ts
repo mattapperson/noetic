@@ -186,11 +186,10 @@ async function sendNative({
       },
       {
         signal: request.signal,
-        ...(dispatch
-          ? {
-              headers: dispatch.headers,
-            }
-          : {}),
+        headers: {
+          ...dispatch?.headers,
+          ...(request.longContext ? LONG_CONTEXT_HEADER : {}),
+        },
       },
     );
     await dispatch?.settle();
@@ -204,6 +203,11 @@ async function sendNative({
     dispatch?.end();
   }
 }
+
+/** TypeSafe's opt-in to long-context mode, read per request. */
+const LONG_CONTEXT_HEADER = {
+  'TypeSafe-Danger-Zone-Long-Context': 'true',
+};
 
 /**
  * The native APIs require `instructions` on every question, while Noetic lets a

@@ -346,6 +346,7 @@ interface DecideRequest {
   state: ReadonlyArray<DecideStatePart>;
   questions: DecideQuestions;
   samples?: number;
+  longContext?: boolean;
   signal?: AbortSignal;
 }
 
@@ -362,6 +363,7 @@ type DecideStatePart =
 | `state` | `ReadonlyArray<DecideStatePart>` | What the decision is made against: text, named JSON values, and images |
 | `questions` | `DecideQuestions` | Questions keyed by id. See [Step Types](/docs/framework/api/step-types#questions-and-answers) |
 | `samples` | `number` | Runs averaged on the estimated path. Ignored on the native path. Default `1` (optional) |
+| `longContext` | `boolean` | Ask a native decision model for its long-context mode. Ignored on the estimated path (optional) |
 | `signal` | `AbortSignal` | Cancels the call (optional) |
 
 ## DecideResponse

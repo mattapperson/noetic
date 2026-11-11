@@ -4,6 +4,7 @@ import type { CallModelRequest, DecideRequest, LLMResponse } from '@noetic-tools
 import { DecideOutputError, frameworkCast } from '@noetic-tools/types';
 import type { DecisionsClient } from '../../src/harness/decide-call';
 import { callDecide } from '../../src/harness/decide-call';
+import type { Spend } from '../../src/harness/spend';
 import { makeLLMResponse } from '../_helpers';
 
 //#region Helpers
@@ -66,11 +67,16 @@ const REQUEST: DecideRequest = {
 interface FakeClient {
   client: DecisionsClient;
   sent: unknown[];
+  /** The request options of each native call. */
+  options: Array<{
+    headers?: Record<string, string>;
+  }>;
   lookups: string[];
 }
 
 function fakeClient(opts: { modality: string; answers: Record<string, unknown> }): FakeClient {
   const sent: unknown[] = [];
+  const options: FakeClient['options'] = [];
   const lookups: string[] = [];
   const client = frameworkCast<DecisionsClient>({
     models: {
@@ -89,8 +95,9 @@ function fakeClient(opts: { modality: string; answers: Record<string, unknown> }
     },
     alpha: {
       decisions: {
-        create: async (req: unknown) => {
+        create: async (req: unknown, requestOptions: FakeClient['options'][number]) => {
           sent.push(req);
+          options.push(requestOptions);
           return {
             answers: opts.answers,
             model: 'typesafe/jev-1.14-20261014',
@@ -107,6 +114,7 @@ function fakeClient(opts: { modality: string; answers: Record<string, unknown> }
   return {
     client,
     sent,
+    options,
     lookups,
   };
 }
@@ -446,6 +454,67 @@ describe('callDecide — native path', () => {
     expect(fake.lookups).toEqual([
       'typesafe/jev-1.14',
     ]);
+  });
+});
+
+describe('callDecide — long context', () => {
+  it("sends TypeSafe's long-context header only when the request asks for it", async () => {
+    const fake = fakeClient({
+      modality: 'decisions',
+      answers: NATIVE_ANSWERS,
+    });
+    const deps = {
+      client: fake.client,
+      callModel: noChatModel(),
+      nativeModels: new Map(),
+    };
+    await callDecide(
+      {
+        ...REQUEST,
+        longContext: true,
+      },
+      deps,
+    );
+    await callDecide(REQUEST, deps);
+
+    expect(fake.options.map((o) => o.headers)).toEqual([
+      {
+        'TypeSafe-Danger-Zone-Long-Context': 'true',
+      },
+      {},
+    ]);
+  });
+
+  it("keeps the dispatch record's headers beside it", async () => {
+    const fake = fakeClient({
+      modality: 'decisions',
+      answers: NATIVE_ANSWERS,
+    });
+    await callDecide(
+      {
+        ...REQUEST,
+        longContext: true,
+      },
+      {
+        client: fake.client,
+        callModel: noChatModel(),
+        nativeModels: new Map(),
+        spend: frameworkCast<Spend>({
+          open: async () => ({
+            headers: {
+              'x-noetic-dispatch': 'd-1',
+            },
+            settle: async () => {},
+            end: () => {},
+          }),
+        }),
+      },
+    );
+
+    expect(fake.options[0]?.headers).toEqual({
+      'x-noetic-dispatch': 'd-1',
+      'TypeSafe-Danger-Zone-Long-Context': 'true',
+    });
   });
 });
 

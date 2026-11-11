@@ -514,6 +514,7 @@ export interface DecideWorkflowNode extends WorkflowNodeBase {
   questions: Record<string, DecideQuestion>;
   view?: DecideView;
   samples?: number;
+  longContext?: boolean;
 }
 
 /** A node that routes to a case by one question of a decision. See spec 32. */
@@ -1015,6 +1016,7 @@ const DecideNodeSchema = z.object({
     ])
     .optional(),
   samples: z.number().int().positive().optional(),
+  longContext: z.boolean().optional(),
 });
 
 /** A decide node that ends a loop: exactly one question, and a boolean one. */
