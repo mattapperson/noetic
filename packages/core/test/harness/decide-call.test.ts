@@ -5,6 +5,7 @@ import { DecideOutputError, frameworkCast } from '@noetic-tools/types';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import type { DecisionsClient } from '../../src/harness/decide-call';
 import { callDecide } from '../../src/harness/decide-call';
+import type { Spend } from '../../src/harness/spend';
 import { makeLLMResponse } from '../_helpers';
 
 //#region Helpers
@@ -458,6 +459,113 @@ describe('callDecide — native path', () => {
   });
 });
 
+describe('callDecide — headers', () => {
+  it("sends a request's headers on the native call, and none when it has none", async () => {
+    const fake = fakeClient({
+      modality: 'decisions',
+      answers: NATIVE_ANSWERS,
+    });
+    const deps = {
+      client: fake.client,
+      callModel: noChatModel(),
+      nativeModels: new Map(),
+    };
+    await callDecide(
+      {
+        ...REQUEST,
+        headers: {
+          'X-Provider-Mode': 'wide',
+        },
+      },
+      deps,
+    );
+    await callDecide(REQUEST, deps);
+
+    expect(fake.options.map((o) => o.headers)).toEqual([
+      {
+        'X-Provider-Mode': 'wide',
+      },
+      {},
+    ]);
+  });
+
+  it("keeps the dispatch record's headers, which win on a clash", async () => {
+    const fake = fakeClient({
+      modality: 'decisions',
+      answers: NATIVE_ANSWERS,
+    });
+    await callDecide(
+      {
+        ...REQUEST,
+        headers: {
+          'X-Provider-Mode': 'wide',
+          'x-noetic-dispatch': 'forged',
+        },
+      },
+      {
+        client: fake.client,
+        callModel: noChatModel(),
+        nativeModels: new Map(),
+        spend: frameworkCast<Spend>({
+          open: async () => ({
+            headers: {
+              'x-noetic-dispatch': 'd-1',
+            },
+            settle: async () => {},
+            end: () => {},
+          }),
+        }),
+      },
+    );
+
+    expect(fake.options[0]?.headers).toEqual({
+      'X-Provider-Mode': 'wide',
+      'x-noetic-dispatch': 'd-1',
+    });
+  });
+
+  it('ignores headers on the estimated path', async () => {
+    const fake = fakeClient({
+      modality: 'text',
+      answers: {},
+    });
+    const chat = scriptedChat([
+      JSON.stringify({
+        damaged: {
+          yes: 0.65,
+        },
+        queue: {
+          billing: 0.6,
+          shipping: 0.2,
+        },
+        urgency: {
+          low: 0,
+          medium: 0,
+          high: 0.5,
+        },
+      }),
+    ]);
+    const response = await callDecide(
+      {
+        ...REQUEST,
+        model: 'openai/gpt-4o-mini',
+        headers: {
+          'X-Provider-Mode': 'wide',
+        },
+      },
+      {
+        client: fake.client,
+        callModel: chat.callModel,
+        nativeModels: new Map(),
+      },
+    );
+
+    expect(response.source).toBe('estimated');
+    expect(fake.options).toEqual([]);
+    expect(JSON.stringify(chat.requests)).not.toContain('X-Provider-Mode');
+  });
+});
+
 describe('callDecide — base URL', () => {
   async function sentTo(serverURL: string | undefined): Promise<string | undefined> {
     const fake = fakeClient({
@@ -492,6 +600,7 @@ describe('callDecide — base URL', () => {
     const received: Array<{
       path: string;
       authorization: string | null;
+      mode: string | null;
     }> = [];
     const gateway = Bun.serve({
       port: 0,
@@ -499,6 +608,7 @@ describe('callDecide — base URL', () => {
         received.push({
           path: new URL(request.url).pathname,
           authorization: request.headers.get('authorization'),
+          mode: request.headers.get('x-provider-mode'),
         });
         return Response.json({
           answers: {
@@ -559,6 +669,9 @@ describe('callDecide — base URL', () => {
             instructions: 'Is this urgent?',
           },
         },
+        headers: {
+          'X-Provider-Mode': 'wide',
+        },
       });
 
       expect(response.answers.urgent).toEqual({
@@ -570,6 +683,7 @@ describe('callDecide — base URL', () => {
         {
           path: '/v1/api/alpha/decisions',
           authorization: 'Bearer sk-gateway',
+          mode: 'wide',
         },
       ]);
       expect(elsewhere).toEqual([]);

@@ -346,6 +346,7 @@ interface DecideRequest {
   state: ReadonlyArray<DecideStatePart>;
   questions: DecideQuestions;
   samples?: number;
+  headers?: Readonly<Record<string, string>>;
   signal?: AbortSignal;
 }
 
@@ -362,6 +363,7 @@ type DecideStatePart =
 | `state` | `ReadonlyArray<DecideStatePart>` | What the decision is made against: text, named JSON values, and images |
 | `questions` | `DecideQuestions` | Questions keyed by id. See [Step Types](/docs/framework/api/step-types#questions-and-answers) |
 | `samples` | `number` | Runs averaged on the estimated path. Ignored on the native path. Default `1` (optional) |
+| `headers` | `Readonly<Record<string, string>>` | Extra HTTP headers on the native decision request. Ignored on the estimated path (optional) |
 | `signal` | `AbortSignal` | Cancels the call (optional) |
 
 ## DecideResponse

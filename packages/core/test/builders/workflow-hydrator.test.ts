@@ -1773,6 +1773,22 @@ describe('hydrateNode — decide and routeSwitch', () => {
     ]);
   });
 
+  test('carries headers from a decide node to its step', () => {
+    const result = hydrateNode(
+      {
+        ...decideNode,
+        headers: {
+          'X-Provider-Mode': 'wide',
+        },
+      },
+      makeHydrationContext(),
+    );
+    assert(result.kind === 'decide');
+    expect(result.headers).toEqual({
+      'X-Provider-Mode': 'wide',
+    });
+  });
+
   test('hydrates a routeSwitch node whose route runs the decision and picks the case', async () => {
     const node: WorkflowNode = {
       kind: 'routeSwitch',

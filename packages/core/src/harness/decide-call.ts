@@ -196,11 +196,11 @@ async function sendNative({
               serverURL,
             }
           : {}),
-        ...(dispatch
-          ? {
-              headers: dispatch.headers,
-            }
-          : {}),
+        // The dispatch record's headers come last: a step's own headers never replace them.
+        headers: {
+          ...request.headers,
+          ...dispatch?.headers,
+        },
       },
     );
     await dispatch?.settle();

@@ -190,6 +190,12 @@ export interface DecideRequest {
   questions: DecideQuestions;
   /** Runs averaged on the estimated path. Ignored on the native path. Default 1. */
   samples?: number;
+  /**
+   * Extra HTTP headers sent with each native decision request, such as a provider's
+   * opt-in to a mode it turns on per request. Noetic passes them through unread, and
+   * its own dispatch headers win on a clash. Ignored on the estimated path.
+   */
+  headers?: Readonly<Record<string, string>>;
   signal?: AbortSignal;
   /** @internal Parent span for the decide-call span. */
   parentSpan?: Span;
