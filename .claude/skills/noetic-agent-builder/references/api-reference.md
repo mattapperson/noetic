@@ -158,6 +158,7 @@ decide<const Q extends DecideQuestions, TContext = ContextData, I = unknown>({
   context?: (ctx: Context<TContext>) => Record<string, unknown> | Promise<Record<string, unknown>>; // sent as one `context` entry
   projection?: ProjectionPolicy;                // default DECISION_PROJECTION
   samples?: number;                             // estimated path only; default 1
+  headers?: Readonly<Record<string, string>>;   // native path only; extra HTTP headers on each decision request
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }): DecideStep<TContext, I, Q>                  // StepDecide<TContext, I, DecideAnswers<Q>> & { questions: Q }
 ```
@@ -456,6 +457,7 @@ tool<I, O>({
   ui?: ToolUiDeclaration<I, O>;           // call/progress/result/error render fns (generative UI)
   itemSchemas?: ItemSchemaExtensions;     // { items?, developerMessages?, toolCalls?, toolResults? }
   decorateResultItem?: (params) => Item;  // enrich the harness-created tool-result item
+  toModelOutput?: (result: O, args: I) => string | InputContentPart[]; // what the model reads instead of the JSON result (e.g. an image)
 }): Tool
 ```
 
@@ -1868,6 +1870,7 @@ interface DecideRequest {
   >;
   questions: DecideQuestions;
   samples?: number;          // estimated path only; default 1
+  headers?: Readonly<Record<string, string>>; // native path only; extra HTTP headers
   signal?: AbortSignal;
 }
 
@@ -1880,7 +1883,7 @@ interface DecideResponse {
 }
 ```
 
-For decision models the OpenRouter adapter calls the native decisions API; for any other model it makes one structured-output `callModel` per sample. Samples that fail or do not parse are dropped; when none parse it throws `DecideOutputError` (from `@noetic-tools/types`), which carries the samples' `usage` and `cost`. `decide` counts that spend and turns it into `model_parse_error`; `aiCondition` turns it into `model_parse_error` too.
+For decision models the OpenRouter adapter calls the native decisions API (at `<baseUrl>/api/alpha/decisions` when the provider's base URL is not on `openrouter.ai`); for any other model it makes one structured-output `callModel` per sample. Samples that fail or do not parse are dropped; when none parse it throws `DecideOutputError` (from `@noetic-tools/types`), which carries the samples' `usage` and `cost`. `decide` counts that spend and turns it into `model_parse_error`; `aiCondition` turns it into `model_parse_error` too.
 
 ### Session Accessors
 

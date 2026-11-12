@@ -39,7 +39,6 @@ import type { Spend } from './spend';
 import type { SteerInbox } from './steer-inbox';
 import { openSteerInbox } from './steer-inbox';
 
-const MAX_TOOL_ROUNDS = 32;
 const MAX_RECOVERY_CONTINUATIONS = 3;
 const EPHEMERAL_CONTINUE_INPUT = 'continue';
 
@@ -272,7 +271,6 @@ export class AgentHarnessModelCaller {
       : undefined;
     let round = 0;
     let invalidRecoveryContinuations = 0;
-    let toolLimitRecoveryContinuations = 0;
     let useEphemeralContinue = false;
     const drains = drainsOf(request.ctx);
     const replaySchemas = buildItemSchemaRegistry({
@@ -412,15 +410,6 @@ export class AgentHarnessModelCaller {
           await recordRound(spend.keep());
         }
         round += 1;
-        const replayLimit = this.handleToolRoundLimit({
-          round,
-          toolLimitRecoveryContinuations,
-          emitIfAllowed: prepared.emitIfAllowed,
-        });
-        if (replayLimit.kind === 'continue') {
-          toolLimitRecoveryContinuations = replayLimit.toolLimitRecoveryContinuations;
-          useEphemeralContinue = true;
-        }
         continue;
       }
       if (marks.round !== round) {
@@ -661,15 +650,6 @@ export class AgentHarnessModelCaller {
         });
         await recordRound(bill);
         round += 1;
-        const cutLimitRecovery = this.handleToolRoundLimit({
-          round,
-          toolLimitRecoveryContinuations,
-          emitIfAllowed: prepared.emitIfAllowed,
-        });
-        if (cutLimitRecovery.kind === 'continue') {
-          toolLimitRecoveryContinuations = cutLimitRecovery.toolLimitRecoveryContinuations;
-          useEphemeralContinue = true;
-        }
         continue;
       }
       const recovery = await rejectRound(() =>
@@ -735,15 +715,6 @@ export class AgentHarnessModelCaller {
       await recordRound(bill);
 
       round += 1;
-      const limitRecovery = this.handleToolRoundLimit({
-        round,
-        toolLimitRecoveryContinuations,
-        emitIfAllowed: prepared.emitIfAllowed,
-      });
-      if (limitRecovery.kind === 'continue') {
-        toolLimitRecoveryContinuations = limitRecovery.toolLimitRecoveryContinuations;
-        useEphemeralContinue = true;
-      }
     }
 
     return {
@@ -884,37 +855,6 @@ export class AgentHarnessModelCaller {
     return {
       kind: 'continue',
       invalidRecoveryContinuations: next,
-    };
-  }
-
-  private handleToolRoundLimit(params: {
-    round: number;
-    toolLimitRecoveryContinuations: number;
-    emitIfAllowed: (eventType: string, data: Record<string, unknown>) => void;
-  }):
-    | {
-        kind: 'continue';
-        toolLimitRecoveryContinuations: number;
-      }
-    | {
-        kind: 'ok';
-      } {
-    if (params.round < MAX_TOOL_ROUNDS) {
-      return {
-        kind: 'ok',
-      };
-    }
-    params.emitIfAllowed('tool_round_limit_exceeded', {
-      maxToolRounds: MAX_TOOL_ROUNDS,
-      attempt: params.toolLimitRecoveryContinuations + 1,
-      maxAttempts: MAX_RECOVERY_CONTINUATIONS,
-    });
-    if (params.toolLimitRecoveryContinuations >= MAX_RECOVERY_CONTINUATIONS) {
-      throw new Error(`LLM exceeded maximum tool rounds (${MAX_TOOL_ROUNDS})`);
-    }
-    return {
-      kind: 'continue',
-      toolLimitRecoveryContinuations: params.toolLimitRecoveryContinuations + 1,
     };
   }
 }

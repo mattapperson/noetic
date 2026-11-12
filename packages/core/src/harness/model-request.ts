@@ -53,7 +53,7 @@ export interface PreparedModelRequest {
   /**
    * The wire tool choice, by round. A forcing choice (`required`, `{ tool }`)
    * holds only until the model has called a tool; later rounds fall back to
-   * `auto`, or every round would force another call until the round limit.
+   * `auto`, or every round would force another call and the loop would never end.
    */
   toolChoice: {
     first: WireToolChoice;

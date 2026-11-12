@@ -3,6 +3,7 @@ import type { AcpToolKind } from './acp';
 import type {
   FunctionCallItem,
   FunctionCallOutputItem,
+  InputContentPart,
   Item,
   ItemSchemaExtensions,
   ToolResultExtensionItem,
@@ -142,6 +143,16 @@ export interface Tool<
     output: string;
     error?: boolean;
   }): Item | ToolResultExtensionItem;
+  /**
+   * What the model reads as a call's result, in place of the JSON of `result`: text,
+   * or content parts such as an image. Runs only for a call that succeeded, in a
+   * `callModel` step. The item log keeps the JSON result, so later steps and a
+   * resumed step read that instead.
+   */
+  toModelOutput?(
+    result: InferSchemaOutput<O>,
+    args: InferSchemaOutput<I>,
+  ): string | InputContentPart[];
   /**
    * Async function that performs the tool's work. `toolCtx` is a
    * `ToolExecutionContext` at runtime — typed as `unknown` here to keep

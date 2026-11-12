@@ -244,6 +244,8 @@ export class LlmGateway {
    * prices, and generation lookups.
    */
   readonly sdkClient?: OpenRouterSdk;
+  /** The base URL both clients send to. Undefined means the SDK's default. */
+  private readonly serverURL?: string;
   /** Model id → whether it answers natively as a decision model. */
   private readonly decisionModels = new Map<string, Promise<boolean>>();
 
@@ -256,6 +258,7 @@ export class LlmGateway {
     this.sdkClient = options.callModelOverride
       ? undefined
       : createSdkClient(options.providerConfig, http);
+    this.serverURL = resolveLlmClient(options.providerConfig, readLlmEnv())?.serverURL;
   }
 
   callModel(request: CallModelRequest, host: ModelCallHost): Promise<LLMResponse> {
@@ -280,6 +283,7 @@ export class LlmGateway {
     }
     return callDecide(request, {
       client: this.sdkClient,
+      serverURL: this.serverURL,
       callModel,
       nativeModels: this.decisionModels,
       spend: this.#options.spend,

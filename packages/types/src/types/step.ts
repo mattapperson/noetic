@@ -668,6 +668,12 @@ export interface StepDecide<TContext = ContextData, I = unknown, O = unknown>
   projection?: ProjectionPolicy;
   /** Runs averaged on the estimated path. Ignored on the native path. */
   samples: number;
+  /**
+   * Extra HTTP headers sent with each native decision request, such as a provider's
+   * opt-in to a mode it turns on per request. Noetic passes them through unread, and
+   * its own dispatch headers win on a clash. Ignored on the estimated path.
+   */
+  headers?: Readonly<Record<string, string>>;
   /** Controls framework event emission for this step. Defaults to `true`. */
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }

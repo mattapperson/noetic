@@ -2,8 +2,10 @@ import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import type { CallModelRequest, DecideRequest, LLMResponse } from '@noetic-tools/types';
 import { DecideOutputError, frameworkCast } from '@noetic-tools/types';
+import { AgentHarness } from '../../src/harness/agent-harness';
 import type { DecisionsClient } from '../../src/harness/decide-call';
 import { callDecide } from '../../src/harness/decide-call';
+import type { Spend } from '../../src/harness/spend';
 import { makeLLMResponse } from '../_helpers';
 
 //#region Helpers
@@ -66,11 +68,17 @@ const REQUEST: DecideRequest = {
 interface FakeClient {
   client: DecisionsClient;
   sent: unknown[];
+  /** The request options of each native call: its base URL and headers. */
+  options: Array<{
+    serverURL?: string;
+    headers?: Record<string, string>;
+  }>;
   lookups: string[];
 }
 
 function fakeClient(opts: { modality: string; answers: Record<string, unknown> }): FakeClient {
   const sent: unknown[] = [];
+  const options: FakeClient['options'] = [];
   const lookups: string[] = [];
   const client = frameworkCast<DecisionsClient>({
     models: {
@@ -89,8 +97,9 @@ function fakeClient(opts: { modality: string; answers: Record<string, unknown> }
     },
     alpha: {
       decisions: {
-        create: async (req: unknown) => {
+        create: async (req: unknown, requestOptions: FakeClient['options'][number]) => {
           sent.push(req);
+          options.push(requestOptions);
           return {
             answers: opts.answers,
             model: 'typesafe/jev-1.14-20261014',
@@ -107,6 +116,7 @@ function fakeClient(opts: { modality: string; answers: Record<string, unknown> }
   return {
     client,
     sent,
+    options,
     lookups,
   };
 }
@@ -446,6 +456,241 @@ describe('callDecide — native path', () => {
     expect(fake.lookups).toEqual([
       'typesafe/jev-1.14',
     ]);
+  });
+});
+
+describe('callDecide — headers', () => {
+  it("sends a request's headers on the native call, and none when it has none", async () => {
+    const fake = fakeClient({
+      modality: 'decisions',
+      answers: NATIVE_ANSWERS,
+    });
+    const deps = {
+      client: fake.client,
+      callModel: noChatModel(),
+      nativeModels: new Map(),
+    };
+    await callDecide(
+      {
+        ...REQUEST,
+        headers: {
+          'X-Provider-Mode': 'wide',
+        },
+      },
+      deps,
+    );
+    await callDecide(REQUEST, deps);
+
+    expect(fake.options.map((o) => o.headers)).toEqual([
+      {
+        'X-Provider-Mode': 'wide',
+      },
+      {},
+    ]);
+  });
+
+  it("keeps the dispatch record's headers, which win on a clash", async () => {
+    const fake = fakeClient({
+      modality: 'decisions',
+      answers: NATIVE_ANSWERS,
+    });
+    await callDecide(
+      {
+        ...REQUEST,
+        headers: {
+          'X-Provider-Mode': 'wide',
+          'x-noetic-dispatch': 'forged',
+        },
+      },
+      {
+        client: fake.client,
+        callModel: noChatModel(),
+        nativeModels: new Map(),
+        spend: frameworkCast<Spend>({
+          open: async () => ({
+            headers: {
+              'x-noetic-dispatch': 'd-1',
+            },
+            settle: async () => {},
+            end: () => {},
+          }),
+        }),
+      },
+    );
+
+    expect(fake.options[0]?.headers).toEqual({
+      'X-Provider-Mode': 'wide',
+      'x-noetic-dispatch': 'd-1',
+    });
+  });
+
+  it('ignores headers on the estimated path', async () => {
+    const fake = fakeClient({
+      modality: 'text',
+      answers: {},
+    });
+    const chat = scriptedChat([
+      JSON.stringify({
+        damaged: {
+          yes: 0.65,
+        },
+        queue: {
+          billing: 0.6,
+          shipping: 0.2,
+        },
+        urgency: {
+          low: 0,
+          medium: 0,
+          high: 0.5,
+        },
+      }),
+    ]);
+    const response = await callDecide(
+      {
+        ...REQUEST,
+        model: 'openai/gpt-4o-mini',
+        headers: {
+          'X-Provider-Mode': 'wide',
+        },
+      },
+      {
+        client: fake.client,
+        callModel: chat.callModel,
+        nativeModels: new Map(),
+      },
+    );
+
+    expect(response.source).toBe('estimated');
+    expect(fake.options).toEqual([]);
+    expect(JSON.stringify(chat.requests)).not.toContain('X-Provider-Mode');
+  });
+});
+
+describe('callDecide — base URL', () => {
+  async function sentTo(serverURL: string | undefined): Promise<string | undefined> {
+    const fake = fakeClient({
+      modality: 'decisions',
+      answers: NATIVE_ANSWERS,
+    });
+    await callDecide(REQUEST, {
+      client: fake.client,
+      serverURL,
+      callModel: noChatModel(),
+      nativeModels: new Map(),
+    });
+    assert(fake.options[0]);
+    return fake.options[0].serverURL;
+  }
+
+  it("leaves the SDK's own decisions URL alone for OpenRouter and for no base", async () => {
+    expect(await sentTo(undefined)).toBeUndefined();
+    expect(await sentTo('https://openrouter.ai/api/v1')).toBeUndefined();
+  });
+
+  it("sends decisions under any other base, the SDK's path appended", async () => {
+    expect(await sentTo('https://gateway.example/v1')).toBe('https://gateway.example/v1');
+    expect(await sentTo('https://gateway.example/v1//')).toBe('https://gateway.example/v1');
+    // A host that only looks like OpenRouter's is still somewhere else.
+    expect(await sentTo('https://openrouter.ai.example/api/v1')).toBe(
+      'https://openrouter.ai.example/api/v1',
+    );
+  });
+
+  it('reaches only the gateway when the harness is pointed at one', async () => {
+    const received: Array<{
+      path: string;
+      authorization: string | null;
+      mode: string | null;
+    }> = [];
+    const gateway = Bun.serve({
+      port: 0,
+      fetch(request) {
+        received.push({
+          path: new URL(request.url).pathname,
+          authorization: request.headers.get('authorization'),
+          mode: request.headers.get('x-provider-mode'),
+        });
+        return Response.json({
+          answers: {
+            urgent: {
+              type: 'noul',
+              noul: 0.9,
+            },
+          },
+          model: 'typesafe/jev-1.14',
+          usage: {
+            input_tokens: 12,
+            output_tokens: 1,
+          },
+        });
+      },
+    });
+    const realFetch = globalThis.fetch;
+    const elsewhere: string[] = [];
+    // Nothing leaves the machine: a request to any other host is noted and refused.
+    globalThis.fetch = Object.assign((input: Request | string | URL, init?: RequestInit) => {
+      const url = new URL(input instanceof Request ? input.url : input);
+      if (url.hostname !== 'localhost') {
+        elsewhere.push(url.href);
+        return Promise.reject(new Error(`unexpected request to ${url.href}`));
+      }
+      return realFetch(input, init);
+    }, realFetch);
+    try {
+      const harness = new AgentHarness({
+        name: 'gateway',
+        params: {},
+        callModelDefaults: {
+          provider: 'openrouter',
+          apiKey: 'sk-gateway',
+          baseUrl: `http://localhost:${gateway.port}/v1`,
+        },
+      });
+      // The model lookup is faked; the decision goes out through the harness's own client.
+      const llm = frameworkCast<{
+        llm: {
+          sdkClient: Pick<DecisionsClient, 'alpha'>;
+        };
+      }>(harness).llm;
+      llm.sdkClient = {
+        ...fakeClient({
+          modality: 'decisions',
+          answers: {},
+        }).client,
+        alpha: llm.sdkClient.alpha,
+      };
+
+      const response = await harness.decide({
+        model: 'typesafe/jev-1.14',
+        state: [],
+        questions: {
+          urgent: {
+            type: 'boolean',
+            instructions: 'Is this urgent?',
+          },
+        },
+        headers: {
+          'X-Provider-Mode': 'wide',
+        },
+      });
+
+      expect(response.answers.urgent).toEqual({
+        type: 'boolean',
+        value: true,
+        probability: 0.9,
+      });
+      expect(received).toEqual([
+        {
+          path: '/v1/api/alpha/decisions',
+          authorization: 'Bearer sk-gateway',
+          mode: 'wide',
+        },
+      ]);
+      expect(elsewhere).toEqual([]);
+    } finally {
+      globalThis.fetch = realFetch;
+      gateway.stop(true);
+    }
   });
 });
 

@@ -307,6 +307,41 @@ describe('executeDecide', () => {
     expect(requests[0]?.model).toBe('typesafe/jev-latest');
   });
 
+  it("passes a step's headers to the decision request", async () => {
+    const requests: DecideRequest[] = [];
+    const harness = new AgentHarness({
+      name: 'decide-headers',
+      params: {},
+      _testDecide: async (request) => {
+        requests.push(request);
+        return answered();
+      },
+    });
+    for (const headers of [
+      {
+        'X-Provider-Mode': 'wide',
+      },
+      undefined,
+    ]) {
+      await harness.run(
+        decide({
+          id: 'triage',
+          model: 'typesafe/jev-1.14',
+          questions: QUESTIONS,
+          headers,
+        }),
+        'x',
+        harness.createContext(),
+      );
+    }
+    expect(requests.map((request) => request.headers)).toEqual([
+      {
+        'X-Provider-Mode': 'wide',
+      },
+      undefined,
+    ]);
+  });
+
   it('throws MISSING_MODEL when neither the step nor the harness names a model', async () => {
     const { harness } = harnessWith({});
     try {

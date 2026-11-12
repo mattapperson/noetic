@@ -215,11 +215,11 @@ The agent harness owns the tool call loop. The SDK makes one model request per r
 1. **Request.** Send the conversation so far (the View plus this step's earlier rounds) to the SDK's `callModel()`, streaming its events to the session broadcaster through `getFullResponsesStream()` and reading the finished response from `getResponse()`.
 2. **Stop check.** If the round's output holds no function calls, the step is done.
 3. **Run tools.** Otherwise run each function call in order: look the tool up in the step's allowed subset (see Unified Tool Set), run the layers' `beforeToolCall` steering hooks, validate the arguments against `Tool.input`, and call `Tool.execute`. An unknown tool, malformed JSON arguments, invalid arguments, a steering denial or redirect, or a thrown error becomes an error tool result for the model to read; it does not fail the step.
-4. **Append.** Add the `function_call` and `function_call_output` items to the conversation, then go back to step 1.
+4. **Append.** Add the `function_call` and `function_call_output` items to the conversation, then go back to step 1. The model reads the result as its JSON text, unless the tool defines `toModelOutput(result, args)` and the call succeeded: then it reads what that returns, a string or input content parts (text, image, file). Only this step's conversation carries that form. The `function_call_output` item in the `ItemLog` always holds the JSON text, so later steps, and a step resumed from its log, read the JSON.
 
 Limits and recovery:
 
-- **Round cap.** After 32 tool rounds the harness sends a further round with an ephemeral `continue` user message (never logged), and allows three such rounds before the step throws `LLM exceeded maximum tool rounds (32)`.
+- **No round cap.** A step runs as many tool rounds as the model asks for; the loop ends when a round calls no tool. `until` predicates such as `maxCost` are checked between `loop` iterations, not between a step's rounds, so what stops a step that keeps calling tools is cancellation: the request's abort signal, which `ctx.abort()`, `harness.abort()` and a caller's own cost or deadline watch all reach (see Abort and stalls).
 - **Bad rounds.** A provider-reported terminal error, or a completed response with no output items, is retried the same way: an ephemeral `continue` round, up to three in a row, then the step throws. The provider billed the bad round, so its usage and cost count like any other round's: they reach `LLMResponse.usage` and `cost`, and so the context. In `rounds` the bad round's usage is added to the round after it, so `rounds[0]` still reports on the first view the model answered. A step that throws still charges its context with every round it paid for (see `23a-step-level-resume` § Model-loop rounds).
 - **Steers.** On a session turn, queued steers (`between-rounds` and `next-item` messages) are added before each round, including the first; a `next-item` steer can also end a round early at an item boundary (see `08-runtime` § Steers).
 - **Abort and stalls.** The request's abort signal cancels the in-flight round and ends the loop. A per-round stream-idle watchdog aborts a round whose stream goes silent (see `08-runtime`).
@@ -296,6 +296,8 @@ interface Tool<I extends StandardSchemaV1 = StandardSchemaV1, O extends Standard
     args: InferSchemaOutput<I>,
     toolCtx: ToolExecutionContext,
   ) => Promise<InferSchemaOutput<O>> | AsyncGenerator<unknown, InferSchemaOutput<O>>;
+  // what the model reads as a successful call's result, in place of the JSON; see Tool Call Execution
+  toModelOutput?: (result: InferSchemaOutput<O>, args: InferSchemaOutput<I>) => string | InputContentPart[];
   needsApproval?: boolean;  // every call needs the harness approver's go-ahead; see below
   context?: ToolContextDeclaration;
 }
