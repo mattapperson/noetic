@@ -190,7 +190,7 @@ Every LLM call that may use a client tool receives the full unified tool set, in
 
    Function names in `tool_choice` are the sanitised wire names the model sees. Server tools (`ServerToolSpec` entries, run by the provider) are appended to the tools sent and, when the step restricts, listed in `allowed_tools` as `{ type: "<server tool type>" }`. A call that sends only server tools gets `"required"` or `"none"` when asked, and no choice otherwise.
 
-   `'required'` and `{ tool }` force a tool call, so they hold only until the model has called a tool: every round after a tool round goes back to `'auto'` (the step's `allowed_tools` restriction, or no choice). Without this each round would force another call until the round cap. `'none'` holds on every round. `'none'` keeps the full tool list rather than dropping it, so the call shares the cache prefix of the steps around it.
+   `'required'` and `{ tool }` force a tool call, so they hold only until the model has called a tool: every round after a tool round goes back to `'auto'` (the step's `allowed_tools` restriction, or no choice). Without this each round would force another call, and the step would never end. `'none'` holds on every round. `'none'` keeps the full tool list rather than dropping it, so the call shares the cache prefix of the steps around it.
 
    `{ tool }` must name a client tool the call may run. `callModel()` throws `NoeticConfigError` `UNKNOWN_TOOL_CHOICE` at build time when `tools` is an eager array without that tool (server tools cannot be forced); otherwise the harness throws the same error at request time, before anything is sent, when the tool is outside the unified set or the step's restriction.
 2. **Execution.** The harness tool loop (see Tool Call Execution) only runs tools in the allowed subset. A function call naming any other tool — a provider that ignores `allowed_tools`, or a model that names a tool anyway — is answered with an `Error: unknown tool '<name>'` tool result and never runs.
@@ -219,7 +219,7 @@ The agent harness owns the tool call loop. The SDK makes one model request per r
 
 Limits and recovery:
 
-- **Round cap.** After 32 tool rounds the harness sends a further round with an ephemeral `continue` user message (never logged), and allows three such rounds before the step throws `LLM exceeded maximum tool rounds (32)`.
+- **No round cap.** A step runs tool rounds until the model answers without calling a tool or the step is cancelled. The harness never ends a step for the number of rounds it took.
 - **Bad rounds.** A provider-reported terminal error, or a completed response with no output items, is retried the same way: an ephemeral `continue` round, up to three in a row, then the step throws. The provider billed the bad round, so its usage and cost count like any other round's: they reach `LLMResponse.usage` and `cost`, and so the context. In `rounds` the bad round's usage is added to the round after it, so `rounds[0]` still reports on the first view the model answered. A step that throws still charges its context with every round it paid for (see `23a-step-level-resume` § Model-loop rounds).
 - **Steers.** On a session turn, queued steers (`between-rounds` and `next-item` messages) are added before each round, including the first; a `next-item` steer can also end a round early at an item boundary (see `08-runtime` § Steers).
 - **Abort and stalls.** The request's abort signal cancels the in-flight round and ends the loop. A per-round stream-idle watchdog aborts a round whose stream goes silent (see `08-runtime`).
