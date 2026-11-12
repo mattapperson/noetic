@@ -1,3 +1,7 @@
+## @noetic-tools/core-v5.21.0 (2026-11-12)
+
+* feat(core): drop the tool round cap (#160) ([c415b56](https://github.com/mattapperson/noetic/commit/c415b56)), closes [#160](https://github.com/mattapperson/noetic/issues/160)
+
 ## @noetic-tools/core-v5.20.0 (2026-11-04)
 
 * feat: one way to attach MCP servers, served to every agent (#156) ([2195f69](https://github.com/mattapperson/noetic/commit/2195f69)), closes [#156](https://github.com/mattapperson/noetic/issues/156)
