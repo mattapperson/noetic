@@ -169,14 +169,15 @@ noetic-eval --watch                # Re-run on changes
 
 noetic-eval -u                     # Optimize (GEPA)
 noetic-eval -u --scope full        # Full program optimization
-noetic-eval -u --budget 10         # Cost cap
+noetic-eval --concurrency 4       # Bound cases running per suite
 noetic-eval -u --dry-run           # Preview without writing
+noetic-eval -u --force-dirty       # Override dirty-file write guard
 
 noetic-eval --save-baseline        # Save scores as regression baseline
 noetic-eval --check                # Fail if scores regress or baseline cases vanish
 ```
 
-Exit codes: `0` all cases passed (clean `--check`; no-baseline `--check` prints a notice and passes), `1` any failed/errored case, regression, missing baseline case, or unresolvable explicit file pattern, `2` usage error (unknown flag, invalid `--scope`/`--budget` value — never silently dropped).
+Exit codes: `0` all cases passed (clean `--check`; no-baseline `--check` prints a notice and passes), `1` any failed/errored case, regression, missing baseline case, or unresolvable explicit file pattern, `2` usage error (unknown flag or invalid `--scope`/`--concurrency` value — never silently dropped).
 
 Watch mode spawns a fresh subprocess per run (in-process re-import is module-cached and would never re-register suites), serializes runs, coalesces changes during a run into one follow-up, and always exits `0` itself. Only the eval files are watched, not transitive imports.
 

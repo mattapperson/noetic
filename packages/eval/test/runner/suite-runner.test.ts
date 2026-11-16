@@ -98,3 +98,140 @@ describe('runSuite passThreshold', () => {
 });
 
 //#endregion
+
+//#region bounded case concurrency
+
+describe('runSuite case concurrency', () => {
+  function makeConcurrencySuite(caseCount: number): {
+    suite: SuiteDefinition;
+    state: {
+      active: number;
+      maxActive: number;
+      started: string[];
+    };
+  } {
+    const echoStep = runCode({
+      id: 'echo',
+      execute: async (input: unknown) => input,
+    });
+    const state: {
+      active: number;
+      maxActive: number;
+      started: string[];
+    } = {
+      active: 0,
+      maxActive: 0,
+      started: [],
+    };
+    const cases = Array.from(
+      {
+        length: caseCount,
+      },
+      (_, i) => ({
+        name: `case-${i}`,
+        async fn() {
+          state.started.push(`case-${i}`);
+          state.active++;
+          state.maxActive = Math.max(state.maxActive, state.active);
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          state.active--;
+        },
+      }),
+    );
+    return {
+      suite: {
+        step: echoStep,
+        options: {
+          objective: 'concurrency test',
+        },
+        cases,
+      },
+      state,
+    };
+  }
+
+  test('cases run concurrently by default (bounded at 4)', async () => {
+    const { suite, state } = makeConcurrencySuite(8);
+    const result = await runSuite(suite);
+
+    expect(result.cases).toHaveLength(8);
+    expect(state.maxActive).toBeGreaterThan(1);
+    expect(state.maxActive).toBeLessThanOrEqual(4);
+  });
+
+  test('explicit concurrency bounds in-flight cases', async () => {
+    const { suite, state } = makeConcurrencySuite(6);
+    await runSuite(suite, {
+      concurrency: 2,
+    });
+
+    expect(state.maxActive).toBeLessThanOrEqual(2);
+    expect(state.maxActive).toBeGreaterThan(1);
+  });
+
+  test('rejects invalid programmatic concurrency', async () => {
+    const { suite } = makeConcurrencySuite(1);
+    await expect(
+      runSuite(suite, {
+        concurrency: Number.NaN,
+      }),
+    ).rejects.toThrow('positive integer');
+    await expect(
+      runSuite(suite, {
+        concurrency: 1.5,
+      }),
+    ).rejects.toThrow('positive integer');
+    await expect(
+      runSuite(suite, {
+        concurrency: 0,
+      }),
+    ).rejects.toThrow('positive integer');
+  });
+
+  test('concurrency 1 runs strictly sequentially', async () => {
+    const { suite, state } = makeConcurrencySuite(4);
+    await runSuite(suite, {
+      concurrency: 1,
+    });
+
+    expect(state.maxActive).toBe(1);
+  });
+
+  test('results stay ordered by definition regardless of completion order', async () => {
+    const echoStep = runCode({
+      id: 'echo',
+      execute: async (input: unknown) => input,
+    });
+    // First case is slowest: with a naive push-on-completion pool it would
+    // land last. Result order must follow the definition order.
+    const suite: SuiteDefinition = {
+      step: echoStep,
+      options: {
+        objective: 'ordering test',
+      },
+      cases: [
+        {
+          name: 'slow-first',
+          async fn() {
+            await new Promise((resolve) => setTimeout(resolve, 30));
+          },
+        },
+        {
+          name: 'fast-second',
+          async fn() {
+            await new Promise((resolve) => setTimeout(resolve, 1));
+          },
+        },
+      ],
+    };
+
+    const result = await runSuite(suite);
+
+    expect(result.cases.map((c) => c.name)).toEqual([
+      'slow-first',
+      'fast-second',
+    ]);
+  });
+});
+
+//#endregion

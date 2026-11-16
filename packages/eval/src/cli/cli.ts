@@ -107,8 +107,8 @@ async function handleOptimization(
         return buildScoreMap(result);
       },
       maxMetricCalls: MAX_METRIC_CALLS,
-      budget: args.budget,
       dryRun: args.dryRun,
+      forceDirty: args.forceDirty,
     });
   }
   console.log('Optimization complete');
@@ -146,7 +146,13 @@ async function runEvals(args: CliArgs): Promise<RunOutcome> {
   }
 
   const { runAllSuites } = await import('../runner/suite-runner');
-  const results = await runAllSuites(suites);
+  const results = await runAllSuites(suites, {
+    ...(args.concurrency !== undefined
+      ? {
+          concurrency: args.concurrency,
+        }
+      : {}),
+  });
 
   reportResults(results, {
     verbose: args.verbose,

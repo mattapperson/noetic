@@ -1,4 +1,5 @@
 import type { CaseResult, SuiteResult } from '../types/eval';
+import { runPool } from '../utils/run-pool';
 import type { SuiteDefinition } from './describe';
 import { createEvalContext } from './eval-context';
 
@@ -47,13 +48,33 @@ function computeAggregateScore(cases: CaseResult[]): number {
 
 //#region Public API
 
-export async function runSuite(suite: SuiteDefinition): Promise<SuiteResult> {
-  const suiteStart = performance.now();
-  const cases: CaseResult[] = [];
+/** Options controlling suite execution. */
+export interface RunSuiteOptions {
+  /**
+   * Max cases running concurrently within a suite. Every case executes a real
+   * agent plus scorers, so wall-clock scales ~linearly with this. Results are
+   * ordered by definition regardless of completion order. Default 4; pass 1
+   * for strictly sequential runs (e.g. cases sharing external state).
+   */
+  concurrency?: number;
+}
 
-  for (const caseDef of suite.cases) {
-    cases.push(await runCase(caseDef, suite));
-  }
+const DEFAULT_CASE_CONCURRENCY = 4;
+
+export async function runSuite(
+  suite: SuiteDefinition,
+  options?: RunSuiteOptions,
+): Promise<SuiteResult> {
+  const suiteStart = performance.now();
+  const concurrency = options?.concurrency ?? DEFAULT_CASE_CONCURRENCY;
+
+  // Cases run concurrently (each has its own harness/context — see
+  // createEvalContext); `runCase` already converts throws into CaseResult
+  // errors, so a failed case never rejects the pool.
+  const cases = await runPool(
+    suite.cases.map((caseDef) => () => runCase(caseDef, suite)),
+    concurrency,
+  );
 
   return {
     suiteName: suite.options.objective,
@@ -65,10 +86,15 @@ export async function runSuite(suite: SuiteDefinition): Promise<SuiteResult> {
   };
 }
 
-export async function runAllSuites(suites: ReadonlyArray<SuiteDefinition>): Promise<SuiteResult[]> {
+export async function runAllSuites(
+  suites: ReadonlyArray<SuiteDefinition>,
+  options?: RunSuiteOptions,
+): Promise<SuiteResult[]> {
+  // Suites stay sequential: aggregate scores feed baseline comparisons, and
+  // cross-suite interleaving would make timing-sensitive suites flaky.
   const results: SuiteResult[] = [];
   for (const suite of suites) {
-    results.push(await runSuite(suite));
+    results.push(await runSuite(suite, options));
   }
   return results;
 }

@@ -25,7 +25,6 @@ export interface OptimizeParams {
   runEval: (step: Step) => Promise<Record<string, number>>;
   examples?: ReadonlyArray<Record<string, unknown>>;
   maxMetricCalls?: number;
-  budget?: number;
   gepa?: GepaConfig;
 }
 
