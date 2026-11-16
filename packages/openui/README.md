@@ -18,7 +18,11 @@ built from components you registered. This package provides:
 - **`ui.*` until-predicates** (`ui.submitted`, `ui.interacted`, `ui.toAssistant`)
   for interaction loops built from plain composition.
 - The transport at the **`./server`** subpath — `serveOpenUi()`, a web-standard
-  fetch handler that speaks the OpenUI protocol over an `AgentHarness`.
+  fetch handler that speaks the OpenUI protocol over an `AgentHarness`. Prompt
+  streams are serialized per harness/thread (`409` while active), event posts
+  return `{ accepted, seq, version }`, and snapshots use thread-keyed state.
+- Client events may carry `clientId`; sequence watermarks are tracked per client.
+  `set` events can only update declared `$var`s and payloads are capped at 16 KiB.
 
 It depends only on [`@noetic-tools/context`](https://www.npmjs.com/package/@noetic-tools/context)
 and [`@noetic-tools/types`](https://www.npmjs.com/package/@noetic-tools/types) —

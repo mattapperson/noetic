@@ -26,6 +26,8 @@ interface ScannerState {
   inString: boolean;
   escaped: boolean;
   line: number;
+  /** Physical line the buffered statement STARTED on (for diagnostics). */
+  statementStartLine: number;
 }
 
 function freshScannerState(): ScannerState {
@@ -34,13 +36,36 @@ function freshScannerState(): ScannerState {
     depth: 0,
     inString: false,
     escaped: false,
-    line: 0,
+    line: 1,
+    statementStartLine: 1,
   };
 }
 
 /**
+ * Whether a buffered line can possibly become an assignment statement.
+ * Prose lines (no `=`-headed assignment shape, no fence/comment) can never
+ * complete, so bracket/string state inside them must not swallow newlines.
+ */
+const ASSIGNMENT_HEAD_RE = /^\$?[A-Za-z_][A-Za-z0-9_]*\s*=/;
+
+function bufferLooksLikeStatement(buffer: string): boolean {
+  const trimmed = buffer.trimStart();
+  return (
+    trimmed.length === 0 ||
+    ASSIGNMENT_HEAD_RE.test(trimmed) ||
+    trimmed.startsWith(FENCE_PREFIX) ||
+    COMMENT_PREFIXES.some((p) => trimmed.startsWith(p))
+  );
+}
+
+/**
  * Consume raw text, returning each completed top-level statement line.
- * Newlines inside brackets or strings do not terminate a statement.
+ * Newlines inside brackets or strings do not terminate a statement — but only
+ * when the buffer is assignment-shaped. A stray `(` or `"` in a PROSE line
+ * would otherwise leave depth/string state pinned open and silently swallow
+ * every subsequent newline into one never-completing mega-statement (zero
+ * streamed statements for the rest of the turn). Tolerance of model
+ * imperfection is the design goal; prose must flush per line.
  */
 function scanStatements(
   state: ScannerState,
@@ -54,9 +79,13 @@ function scanStatements(
     line: number;
   }> = [];
   for (const ch of text) {
-    if (ch === '\n' && state.depth <= 0 && !state.inString) {
-      flushStatement(state, completed);
-      continue;
+    if (ch === '\n') {
+      state.line += 1;
+      const continuing = state.depth > 0 || state.inString;
+      if (!continuing || !bufferLooksLikeStatement(state.buffer)) {
+        flushStatement(state, completed);
+        continue;
+      }
     }
     state.buffer += ch;
     if (state.inString) {
@@ -91,18 +120,19 @@ function flushStatement(
     line: number;
   }>,
 ): void {
-  state.line += 1;
   const source = state.buffer.trim();
+  const line = state.statementStartLine;
   state.buffer = '';
   state.depth = 0;
   state.inString = false;
   state.escaped = false;
+  state.statementStartLine = state.line;
   if (source.length === 0) {
     return;
   }
   out.push({
     source,
-    line: state.line,
+    line,
   });
 }
 

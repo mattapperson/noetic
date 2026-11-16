@@ -87,7 +87,7 @@ const harness = new AgentHarness({
 What each hook buys you:
 
 - **Durable, resumable state** (`init` + `store`, thread scope) — the surface is loaded from and written through to `ScopedStorage`, so a resumed run or a reconnecting client reconstructs the exact UI the user was looking at.
-- **Client events flow back in** (`onItemAppend`) — a transport appends each client interaction as a `ui-event` item; the layer reduces it into `vars`/`interactions`, **drops keystroke noise** from the item log, and requests an immediate re-render so the next turn already reflects it.
+- **Client events flow back in** (`onItemAppend`) — a transport appends each client interaction as a `ui-event` item; the layer reduces it into `vars`/`interactions`, **drops keystroke noise** from the item log, and requests an immediate re-render so the next turn already reflects it. `set` events are validated: only `$var`s the document declares are writable, payloads are capped at 16 KiB, and rejections emit an `openui.set_rejected` trace while still advancing the dedupe watermark. Dedupe is **per client** — events carrying a `clientId` get independent `seq` watermarks (bounded to 32 recent clients), so one client's replay can't drop another's events.
 - **The model sees the UI** (`recall`) — a budget-trimmed `<ui_surface>` block renders the mounted components, current `vars`, and fresh query results.
 - **Cheap history** (`projectHistory`) — superseded OpenUI Lang renders in history collapse to a one-line placeholder; the current surface is already in the recall block.
 - **Server-side validation** (`afterModelCall`) — each render is validated against the library (unknown component, prop mismatch) and repaired or guided before the client renderer ever sees it.
@@ -173,12 +173,12 @@ declare const harness: AgentHarness;
 declare const surface: OpenUiSurfaceLayer;
 
 const handler = serveOpenUi(harness, { surface });
-// POST { prompt } → runs a turn, streams the surface as SSE
-// POST { event }  → ingests a client UI event (202)
+// POST { prompt } → runs a turn, streams the surface as SSE (409 while a stream is active)
+// POST { event }  → ingests a client UI event (202, echoes { accepted, seq, version })
 // GET             → returns the current surface snapshot (reconnect rehydration)
 ```
 
-`serveOpenUi` translates the harness's `response.*` and `openui.*` events into the wire protocol, ingests client interactions as `ui-event` items (carrying the document version they were rendered against, so stale interactions are flagged), and answers a reconnect with a single snapshot instead of replaying the stream. The matching client descriptor is `noeticStreamAdapter()`.
+`serveOpenUi` translates the harness's `response.*` and `openui.*` events into the wire protocol, ingests client interactions as `ui-event` items (carrying the document version they were rendered against, so stale interactions are flagged), and answers a reconnect with a single snapshot instead of replaying the stream. Prompt turns are serialized per harness and thread — a concurrent `POST { prompt }` gets `409` and the client retries after its stream ends — and the SSE pump cleans up on client disconnect. Snapshots read through the surface's thread-keyed live mirror (`readState(threadId)`), so multi-thread harnesses never serve one thread's UI as another's. The matching client descriptor is `noeticStreamAdapter()`.
 
 ## JSON workflow runtime
 

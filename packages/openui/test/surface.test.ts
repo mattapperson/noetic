@@ -118,6 +118,14 @@ describe('afterModelCall folding', () => {
   });
 });
 
+/** Narrow an optional hook-result state without casting. */
+function expectState(state: OpenUiSurfaceState | undefined): OpenUiSurfaceState {
+  if (!state) {
+    throw new Error('expected state');
+  }
+  return state;
+}
+
 describe('onItemAppend ui-event reduction', () => {
   async function applyItems(state: OpenUiSurfaceState, items: Item[], surface = makeSurface()) {
     const onItemAppend = surface.hooks.onItemAppend;
@@ -132,9 +140,12 @@ describe('onItemAppend ui-event reduction', () => {
     });
   }
 
-  test('set events mirror into vars and are dropped from the item pipeline', async () => {
-    const { state } = await initState();
-    const result = await applyItems(state, [
+  test('set events for DECLARED $vars mirror into vars and drop from the pipeline', async () => {
+    const { surface, state } = await initState();
+    // Declare $tab by folding a render first — sets are only accepted for
+    // state vars the document actually declares.
+    const folded = await foldRender(surface, state);
+    const result = await applyItems(expectState(folded.state), [
       createUiEventItem({
         kind: 'set',
         ref: 'tab',
@@ -144,9 +155,145 @@ describe('onItemAppend ui-event reduction', () => {
     ]);
     expect(result.items).toEqual([]);
     expect(result.state?.vars.tab).toBe('b');
-    expect(result.state?.version).toBe(1);
+    expect(result.state?.version).toBe(2); // fold bumped to 1, set to 2
     expect(result.rerender).toBe(true);
     expect(result.timing).toBe('immediate');
+  });
+
+  test('set events for UNDECLARED vars are rejected but still advance the watermark', async () => {
+    const { state } = await initState(); // empty document — nothing declared
+    const ctx = makeExecCtx();
+    const onItemAppend = makeSurface().hooks.onItemAppend;
+    if (!onItemAppend) {
+      throw new Error('surface must define onItemAppend');
+    }
+    const result = await onItemAppend({
+      items: [
+        createUiEventItem({
+          kind: 'set',
+          ref: 'ghost',
+          payload: 'x',
+          seq: 0,
+        }),
+      ],
+      log: makeItemLog(),
+      ctx,
+      state,
+    });
+    expect(result.state?.vars.ghost).toBeUndefined();
+    expect(result.state?.version).toBe(0); // rejected sets don't bump
+    expect(result.state?.appliedEventSeq).toBe(0); // but the event was consumed
+    expect(
+      ctx.traceEvents.some(
+        (e) => e.name === 'openui.set_rejected' && e.attributes?.reason === 'unknown state var',
+      ),
+    ).toBe(true);
+  });
+
+  test('oversized set payloads are rejected with a trace', async () => {
+    const { surface, state } = await initState();
+    const folded = await foldRender(surface, state);
+    const ctx = makeExecCtx();
+    const onItemAppend = surface.hooks.onItemAppend;
+    if (!onItemAppend) {
+      throw new Error('surface must define onItemAppend');
+    }
+    const result = await onItemAppend({
+      items: [
+        createUiEventItem({
+          kind: 'set',
+          ref: 'tab',
+          payload: 'x'.repeat(20 * 1024),
+          seq: 0,
+        }),
+      ],
+      log: makeItemLog(),
+      ctx,
+      state: expectState(folded.state),
+    });
+    expect(result.state?.vars.tab).toBeUndefined();
+    expect(
+      ctx.traceEvents.some(
+        (e) => e.name === 'openui.set_rejected' && e.attributes?.reason === 'payload too large',
+      ),
+    ).toBe(true);
+  });
+
+  test('the payload cap measures UTF-8 bytes rather than JavaScript characters', async () => {
+    const { surface, state } = await initState();
+    const folded = await foldRender(surface, state);
+    const result = await applyItems(expectState(folded.state), [
+      createUiEventItem({
+        kind: 'set',
+        ref: 'tab',
+        payload: '🙂'.repeat(5_000),
+        seq: 0,
+      }),
+    ]);
+    expect(result.state?.vars.tab).toBeUndefined();
+  });
+
+  test('per-client watermarks: two clients starting at seq 0 do not shadow each other', async () => {
+    const { surface, state } = await initState();
+    const folded = await foldRender(surface, state);
+    const afterA = await applyItems(expectState(folded.state), [
+      createUiEventItem({
+        kind: 'submit',
+        ref: 'form',
+        seq: 0,
+        clientId: 'tab-a',
+      }),
+    ]);
+    const afterB = await applyItems(expectState(afterA.state), [
+      createUiEventItem({
+        kind: 'submit',
+        ref: 'form',
+        seq: 0,
+        clientId: 'tab-b',
+      }),
+    ]);
+    // Both applied — a GLOBAL watermark would drop B's seq-0 as a duplicate.
+    expect(afterB.state?.interactions).toHaveLength(2);
+    // Replays still dedupe per client.
+    const replay = await applyItems(expectState(afterB.state), [
+      createUiEventItem({
+        kind: 'submit',
+        ref: 'form',
+        seq: 0,
+        clientId: 'tab-a',
+      }),
+    ]);
+    expect(replay.state?.interactions).toHaveLength(2);
+    // ...and a NEW seq from the same client still applies.
+    const fresh = await applyItems(expectState(replay.state), [
+      createUiEventItem({
+        kind: 'submit',
+        ref: 'form',
+        seq: 1,
+        clientId: 'tab-a',
+      }),
+    ]);
+    expect(fresh.state?.interactions).toHaveLength(3);
+  });
+
+  test('client watermarks are bounded: evicted clients fall back to accepting replays', async () => {
+    const { state } = await initState();
+    let next = state;
+    // 33 distinct clients (> MAX_CLIENT_WATERMARKS of 32) evict the first.
+    for (let i = 0; i < 33; i += 1) {
+      const result = await applyItems(next, [
+        createUiEventItem({
+          kind: 'submit',
+          ref: 'f',
+          seq: 0,
+          clientId: `client-${i}`,
+        }),
+      ]);
+      next = expectState(result.state);
+    }
+    expect(Object.keys(next.clientEventSeqs ?? {})).toHaveLength(32);
+    expect(next.clientEventSeqs?.['client-0']).toBeUndefined();
+    expect(next.clientEventSeqs?.['client-32']).toBe(0);
   });
 
   test('submit events append interactions and stay in the pipeline', async () => {
@@ -478,5 +625,61 @@ describe('ui predicates', () => {
     expect(ui.interacted(surface)(snap).stop).toBe(true);
     expect(ui.interacted(surface, 'toAssistant')(snap).stop).toBe(false);
     expect(ui.toAssistant(surface)(snap).stop).toBe(false);
+  });
+});
+
+describe('thread-keyed live mirrors', () => {
+  test("readState(threadId) never serves one thread's surface as another's", async () => {
+    const surface = makeSurface();
+    const ctxA = {
+      ...makeExecCtx(),
+      threadId: 'thread-a',
+    };
+    const ctxB = {
+      ...makeExecCtx(),
+      threadId: 'thread-b',
+    };
+    const init = surface.hooks.init;
+    if (!init) {
+      throw new Error('surface must define init');
+    }
+    const { state: stateA } = await init({
+      storage: makeStorage(),
+      scopeKey: 'thread-a',
+      ctx: ctxA,
+    });
+    const { state: stateB } = await init({
+      storage: makeStorage(),
+      scopeKey: 'thread-b',
+      ctx: ctxB,
+    });
+    // Render on thread A only.
+    const afterModelCall = surface.hooks.afterModelCall;
+    if (!afterModelCall) {
+      throw new Error('surface must define afterModelCall');
+    }
+    await afterModelCall({
+      response: makeResponse(RENDER),
+      ctx: ctxA,
+      state: stateA,
+    });
+    expect(surface.readState('thread-a')?.version).toBe(1);
+    expect(surface.readState('thread-b')?.version).toBe(0);
+    // Omitted thread → most recently ACTIVE thread (single-thread convenience).
+    expect(surface.readState()?.version).toBe(1);
+    // Touch thread B's mirror; the default follows activity.
+    const store = surface.hooks.store;
+    if (!store) {
+      throw new Error('surface must define store');
+    }
+    await store({
+      newItems: [],
+      log: makeItemLog(),
+      response: makeResponse(''),
+      ctx: ctxB,
+      state: stateB,
+    });
+    expect(surface.readState()?.version).toBe(0);
+    expect(surface.readState('thread-a')?.version).toBe(1);
   });
 });

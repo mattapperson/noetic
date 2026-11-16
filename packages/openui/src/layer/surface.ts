@@ -59,8 +59,17 @@ export const UiEventSchema = z.object({
   /** The statement ref (or `$var` name for `set`) the event targets. */
   ref: z.string(),
   payload: z.unknown().optional(),
-  /** Client-assigned monotonic sequence — dedupe/ordering across reconnects. */
+  /**
+   * Client-assigned monotonic sequence — dedupe/ordering across reconnects.
+   * Scoped to `clientId` when present: each client counts independently.
+   */
   seq: z.number().int().nonnegative(),
+  /**
+   * Stable identifier for the emitting client (a tab, a device). Dedupe
+   * watermarks are kept per client, so two clients each starting at seq 0
+   * don't shadow each other. Omitted ⇒ the shared legacy watermark.
+   */
+  clientId: z.string().min(1).max(128).optional(),
   /** Document version the client rendered against when the event fired. */
   version: z.number().int().nonnegative().optional(),
 });
@@ -139,8 +148,13 @@ export interface OpenUiSurfaceState {
   interactions: OpenUiInteraction[];
   /** Monotonic version — every mutation (agent render or client event) bumps it. */
   version: number;
-  /** Highest client event seq applied — dedupe/ordering on reconnect. */
+  /** Highest id-less client event seq applied — legacy shared watermark. */
   appliedEventSeq: number;
+  /**
+   * Per-client seq watermarks (`clientId → highest applied seq`). Bounded to
+   * `MAX_CLIENT_WATERMARKS` most-recently-active clients.
+   */
+  clientEventSeqs?: Record<string, number>;
 }
 
 function emptyState(dialect: string): OpenUiSurfaceState {
@@ -155,12 +169,67 @@ function emptyState(dialect: string): OpenUiSurfaceState {
 
 /** Newest interactions kept on the durable state. */
 const MAX_INTERACTIONS = 100;
+/** Most-recently-active client watermarks kept on the durable state. */
+const MAX_CLIENT_WATERMARKS = 32;
+/**
+ * Largest accepted `set` payload, in JSON bytes. `vars` round-trips through
+ * every checkpoint and every recall render — an unbounded client payload is
+ * a durable-state and prompt-size hazard.
+ */
+const MAX_SET_PAYLOAD_BYTES = 16 * 1024;
 
 function trimInteractions(interactions: OpenUiInteraction[]): OpenUiInteraction[] {
   if (interactions.length <= MAX_INTERACTIONS) {
     return interactions;
   }
   return interactions.slice(interactions.length - MAX_INTERACTIONS);
+}
+
+/**
+ * Insert/refresh one client watermark, evicting the stalest entries past the
+ * cap. Re-insertion order approximates recency (object key order).
+ */
+function bumpClientWatermark(
+  watermarks: Record<string, number> | undefined,
+  clientId: string,
+  seq: number,
+): Record<string, number> {
+  const entries = Object.entries(watermarks ?? {}).filter(([id]) => id !== clientId);
+  entries.push([
+    clientId,
+    seq,
+  ]);
+  const kept =
+    entries.length <= MAX_CLIENT_WATERMARKS
+      ? entries
+      : entries.slice(entries.length - MAX_CLIENT_WATERMARKS);
+  return Object.fromEntries(kept);
+}
+
+/** The dedupe watermark applicable to one event. */
+function watermarkFor(state: OpenUiSurfaceState, event: UiEvent): number {
+  if (event.clientId !== undefined) {
+    return state.clientEventSeqs?.[event.clientId] ?? -1;
+  }
+  return state.appliedEventSeq;
+}
+
+/** Whether a `set` targets a `$var` the current document actually declares. */
+function isDeclaredStateVar(state: OpenUiSurfaceState, ref: string): boolean {
+  const key = ref.startsWith('$') ? ref : `$${ref}`;
+  return state.document.assignments[key] !== undefined;
+}
+
+function withinPayloadCap(payload: unknown): boolean {
+  if (payload === undefined) {
+    return true;
+  }
+  try {
+    const json = JSON.stringify(payload);
+    return json === undefined || new TextEncoder().encode(json).byteLength <= MAX_SET_PAYLOAD_BYTES;
+  } catch {
+    return false;
+  }
 }
 
 //#endregion
@@ -293,14 +362,19 @@ export const OPENUI_SURFACE_LAYER_ID = 'openui-surface';
 
 /**
  * The surface layer plus a live read handle for loop predicates (`Until`
- * receives only a `Snapshot`, so predicates close over the layer instance).
- * The mirror tracks the most recent state any hook observed — per-execution
- * best effort; create one surface per harness when executions run in parallel.
+ * receives only a `Snapshot`, so predicates close over the layer instance)
+ * and transport snapshots. The mirror is keyed by THREAD: one layer instance
+ * on a multi-thread harness keeps an independent mirror per thread, so
+ * `readState(threadId)` never serves one thread's surface as another's.
  * @public
  */
 export interface OpenUiSurfaceLayer extends ContextLayer<OpenUiSurfaceState> {
-  /** Latest state observed by any hook of this layer instance. */
-  readState(): OpenUiSurfaceState | undefined;
+  /**
+   * Latest state observed by any hook of this layer instance for `threadId`.
+   * Omitting the thread returns the most recently ACTIVE thread's state —
+   * correct for single-thread harnesses, ambiguous otherwise.
+   */
+  readState(threadId?: string): OpenUiSurfaceState | undefined;
 }
 
 function applyEvents(
@@ -316,21 +390,48 @@ function applyEvents(
       kept.push(item);
       continue;
     }
-    if (event.seq <= next.appliedEventSeq) {
+    if (event.seq <= watermarkFor(next, event)) {
       continue; // duplicate delivery (reconnect replay) — already applied
     }
+    const advanceWatermarks = (
+      s: OpenUiSurfaceState,
+    ): Pick<OpenUiSurfaceState, 'appliedEventSeq' | 'clientEventSeqs'> =>
+      event.clientId !== undefined
+        ? {
+            appliedEventSeq: s.appliedEventSeq,
+            clientEventSeqs: bumpClientWatermark(s.clientEventSeqs, event.clientId, event.seq),
+          }
+        : {
+            appliedEventSeq: event.seq,
+            clientEventSeqs: s.clientEventSeqs,
+          };
     const stale = event.version !== undefined && event.version < next.version;
     applied = true;
     if (event.kind === UiEventKind.Set) {
-      // Keystroke-grade updates mirror into vars but never reach the item log.
+      /* Two-way-binding updates only mirror into vars when the target is a
+       * `$var` the document actually declares and the payload is bounded —
+       * `vars` rides every checkpoint and recall render, so an arbitrary
+       * client must not be able to grow it without limit. Rejected sets
+       * still advance the watermark (the event was seen, just refused). */
+      const accepted = isDeclaredStateVar(next, event.ref) && withinPayloadCap(event.payload);
+      if (!accepted) {
+        params.ctx.trace.addEvent('openui.set_rejected', {
+          ref: event.ref,
+          reason: isDeclaredStateVar(next, event.ref) ? 'payload too large' : 'unknown state var',
+        });
+      }
       next = {
         ...next,
-        vars: {
-          ...next.vars,
-          [event.ref]: event.payload,
-        },
-        version: next.version + 1,
-        appliedEventSeq: event.seq,
+        ...(accepted
+          ? {
+              vars: {
+                ...next.vars,
+                [event.ref]: event.payload,
+              },
+              version: next.version + 1,
+            }
+          : {}),
+        ...advanceWatermarks(next),
       };
       continue;
     }
@@ -351,7 +452,7 @@ function applyEvents(
         },
       ]),
       version: next.version + 1,
-      appliedEventSeq: event.seq,
+      ...advanceWatermarks(next),
     };
     kept.push(item);
   }
@@ -419,17 +520,22 @@ function foldModelRender(
  */
 export function openUiSurface(config: OpenUiSurfaceConfig): OpenUiSurfaceLayer {
   const dialect = config.library.dialect;
-  let live: OpenUiSurfaceState | undefined;
-  const observe = (state: OpenUiSurfaceState): OpenUiSurfaceState => {
-    live = state;
-    return state;
-  };
+  /** Per-thread mirrors + the last thread any hook touched (single-thread convenience). */
+  const liveByThread = new Map<string, OpenUiSurfaceState>();
+  let lastThreadId: string | undefined;
+  const observeFor =
+    (threadId: string) =>
+    (state: OpenUiSurfaceState): OpenUiSurfaceState => {
+      liveByThread.set(threadId, state);
+      lastThreadId = threadId;
+      return state;
+    };
 
   const hooks: ContextLayerHooks<OpenUiSurfaceState> = {
-    async init({ storage }) {
+    async init({ storage, ctx }) {
       const saved = await storage.get<OpenUiSurfaceState>('state');
       return {
-        state: observe(saved ?? emptyState(dialect)),
+        state: observeFor(ctx.threadId)(saved ?? emptyState(dialect)),
       };
     },
 
@@ -437,7 +543,7 @@ export function openUiSurface(config: OpenUiSurfaceConfig): OpenUiSurfaceLayer {
       const state = params.state ?? emptyState(dialect);
       const result = applyEvents(state, params);
       if (result.state) {
-        observe(result.state);
+        observeFor(params.ctx.threadId)(result.state);
       }
       return result;
     },
@@ -465,19 +571,19 @@ export function openUiSurface(config: OpenUiSurfaceConfig): OpenUiSurfaceLayer {
       const state = params.state ?? emptyState(dialect);
       const result = foldModelRender(state, params, config.library);
       if (result.state) {
-        observe(result.state);
+        observeFor(params.ctx.threadId)(result.state);
       }
       return result;
     },
 
-    async store({ state }) {
+    async store({ state, ctx }) {
       // Mutations happen in onItemAppend/afterModelCall; returning the state
       // here keeps the runtime's durable write-through mirror current.
       if (!state) {
         return undefined;
       }
       return {
-        state: observe(state),
+        state: observeFor(ctx.threadId)(state),
       };
     },
 
@@ -502,16 +608,16 @@ export function openUiSurface(config: OpenUiSurfaceConfig): OpenUiSurfaceLayer {
         ]),
       };
       return {
-        parentState: observe(merged),
+        parentState: merged,
       };
     },
 
-    async onComplete({ state }) {
+    async onComplete({ state, ctx }) {
       if (!state) {
         return undefined;
       }
       return {
-        state: observe(state),
+        state: observeFor(ctx.threadId)(state),
       };
     },
   };
@@ -552,7 +658,10 @@ export function openUiSurface(config: OpenUiSurfaceConfig): OpenUiSurfaceLayer {
       },
     },
     hooks,
-    readState: () => live,
+    readState: (threadId?: string) => {
+      const key = threadId ?? lastThreadId;
+      return key === undefined ? undefined : liveByThread.get(key);
+    },
   };
 }
 

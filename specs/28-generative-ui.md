@@ -171,8 +171,10 @@ interface OpenUiSurfaceState {
   }>;
   /** Monotonic version — every mutation (agent render or client event) bumps it. */
   version: number;
-  /** Highest client event seq applied — dedupe/ordering on reconnect. */
+  /** Highest id-less client event seq applied — legacy shared watermark. */
   appliedEventSeq: number;
+  /** Per-client seq watermarks (`clientId → highest applied seq`), bounded to the 32 most-recently-active clients. */
+  clientEventSeqs?: Record<string, number>;
 }
 
 function openUiSurface(config: { library: UiLibrary }): ContextLayer<OpenUiSurfaceState>
@@ -199,6 +201,18 @@ function openUiSurface(config: { library: UiLibrary }): ContextLayer<OpenUiSurfa
   `$Set` events update `vars` but are **filtered out of the item pipeline** so
   the item log records semantic interactions, not keystrokes. Requests an
   immediate re-render so the next recall reflects the interaction.
+  - `set` events are only accepted when the target is a `$var` the current
+    document actually declares and the JSON payload is ≤ 16 KiB — `vars`
+    round-trips through every checkpoint and recall render, so an arbitrary
+    client must not grow it without limit. Rejected sets emit an
+    `openui.set_rejected` trace event and still advance the dedupe watermark
+    (the event was seen, just refused).
+  - Dedupe watermarks are **per client**: events may carry a `clientId`
+    (≤ 128 chars), and each client's `seq` counts independently, so two tabs
+    each starting at seq 0 don't shadow each other and one client's replay
+    can't drop another's events. Events without a `clientId` share the legacy
+    `appliedEventSeq` watermark. The per-client map is bounded to the 32
+    most-recently-active clients.
 - `recall`: renders a budget-trimmed `<ui_surface>` block — mounted components,
   current `vars`, filled/submitted forms, fresh query results. The raw document
   stays in state; the View gets a summary (same render-and-trim discipline as
@@ -293,12 +307,18 @@ shapes fail at typecheck, not in the client renderer.
 ```ts
 import { serveOpenUi } from '@noetic-tools/openui/server';
 
-serveOpenUi(harness, { library: lib, port: 3111 });
+serveOpenUi(harness, { surface, threadId: 'ui-thread' });
 ```
 
 - Wraps `harness.execute()` in an HTTP/SSE endpoint speaking the message format
   OpenUI's `<AgentInterface>` expects — the package exports the matching
   client-side `noeticStreamAdapter()` / `noeticMessageFormat` for `fetchLLM`.
+- **Serializes prompt turns per harness and thread**: a second `POST { prompt }` while a
+  stream is active gets `409` (concurrent streams on one thread would share
+  one broadcaster and terminate at whichever turn ends first). `POST { event }`
+  is never blocked. The SSE pump survives client disconnect: `cancel()` stops
+  the pump, guarded enqueues never throw into a dead controller, and the event
+  iterator is `return()`ed so the turn's resources clean up.
 - Translates the harness's `source: 'sdk'` `response.*` events and the
   `openui.*` framework events into OpenUI's stream protocol (progressive
   line delivery, fragment patches).
@@ -306,10 +326,14 @@ serveOpenUi(harness, { library: lib, port: 3111 });
   appends them as `ui-event` items into the running execution, carrying the
   document `version` they were rendered against — the layer detects stale
   interactions (the user clicked a control the agent has since re-rendered
-  away) via `version` / `appliedEventSeq`.
+  away) via `version` / `appliedEventSeq`. The `202` response echoes
+  `{ accepted, seq, version }` so the client can reconcile (a strictly-greater
+  `version` on the next GET confirms the event landed).
 - On reconnect, answers with the layer-state snapshot
   (`{ document, vars, version }` from `getLayerState`) so a client rehydrates
-  from one message instead of replaying the LLM stream.
+  from one message instead of replaying the LLM stream. Snapshots are read
+  through the surface's **thread-keyed** live mirror (`readState(threadId)`),
+  so one thread's surface is never served as another's.
 - Exposes registered tools as the data endpoint OpenUI `Query` / `Mutation`
   bindings call — the same registry the steps use.
 
@@ -378,8 +402,9 @@ a drift-gate test fails CI if either published copy is stale.
 - **Presentation modes.** Tool render functions may grow an options argument
   (`call(args, { mode })`) for condensed-vs-verbose variants; the methods are
   optional and bivariant, so this is additive.
-- **Multiple concurrent clients.** Several renderers projecting one surface,
-  with per-client cursors over `version`.
+- **Multiple concurrent clients.** Several renderers projecting one surface.
+  Per-client event watermarks (`clientId`) and thread-keyed state mirrors are
+  in place; what remains is per-client cursors over `version` for streaming.
 - **Dialect evolution.** OpenUI Lang is versioned (`dialect: 'openui-lang/0.5'`);
   the codec and fragment builder pin the version they emit, and the library
   prompt advertises only feature flags that version supports.
