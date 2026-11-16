@@ -376,7 +376,7 @@ describe('Observational Memory: real LLM observer', () => {
           2e3,
         ],
       ]);
-      const recallResults = await recallLayers({
+      let results = await recallLayers({
         layers: [
           layer,
         ],
@@ -387,9 +387,34 @@ describe('Observational Memory: real LLM observer', () => {
         store,
       });
 
-      // ~50 tokens in the message exceeds the bufferThreshold of 10, so observer must fire
-      expect(recallResults.length).toBe(1);
-      expect(recallResults[0].items.length).toBeGreaterThan(0);
+      // ~50 tokens exceeds the bufferThreshold of 10, so the observer fires —
+      // but distillation is DEFERRED off the turn path now. A later `store`
+      // drains the completed batch into state; poll until it lands.
+      for (let attempt = 0; attempt < 40 && results.length === 0; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        await storeLayers({
+          layers: [
+            layer,
+          ],
+          response: makeLLMResponse(''),
+          ctx,
+          log,
+          store,
+          storage: makeStorage(),
+        });
+        results = await recallLayers({
+          layers: [
+            layer,
+          ],
+          query: '',
+          ctx,
+          log,
+          budgets,
+          store,
+        });
+      }
+      expect(results.length).toBe(1);
+      expect(results[0].items.length).toBeGreaterThan(0);
     },
   );
 });
