@@ -12,7 +12,7 @@ The filesystem layer watches user messages for `#path/to/file.ts`-style referenc
 - **Budget**: `'auto'`
 - **Re-render timing**: `immediate`
 - **[Placement](/docs/framework/context-layers#prompt-cache-anchoring)**: `'anchor'` — a large payload that changes one file at a time. The layer implements `renderDelta`, so a change publishes only the files that moved plus a note of any no longer referenced, instead of republishing the whole set
-- **Hook timeouts**: `onItemAppend` `30000` ms — it reads files *and* runs an LLM scoring call per new reference, so the 5s pipeline default would silently drop the transform
+- **Hook timeouts**: `onItemAppend` `10000` ms for file reads by default; `30000` ms when `scoringModel` is configured, since each new reference then also runs an LLM scoring call — the 5s pipeline default would silently drop the transform
 
 ## Usage
 
@@ -33,7 +33,7 @@ A user message like `Look at #src/index.ts and #package.json` tracks both files;
 interface FilesystemOptions {
   baseDir?: string;             // base for resolving relative paths (default: cwd)
   slot?: number;                // default Slot.RAG (350)
-  scoringModel?: string;        // model for priority scoring
+  scoringModel?: string;        // opt-in: LLM relevance scoring (default: heuristic, no model call)
   maxFileSize?: number;         // default 1 MB
   followSymlinks?: boolean;     // default false (security)
   allowedExtensions?: string[]; // default: common code/text extensions
@@ -44,7 +44,7 @@ interface FilesystemOptions {
 |---|---|---|---|
 | `baseDir` | `string` | `process.cwd()` | All references resolve relative to this directory |
 | `slot` | `number` | `350` | Position of injected file contents |
-| `scoringModel` | `string` | a small fast model | Used for the relevance-scoring LLM call |
+| `scoringModel` | `string` | none (heuristic) | Opt-in model for the relevance-scoring LLM call |
 | `maxFileSize` | `number` | `1048576` | Files larger than this are rejected with `FILE_TOO_LARGE` |
 | `followSymlinks` | `boolean` | `false` | When `false`, any symlinked path component is rejected |
 | `allowedExtensions` | `string[]` | code/text set | Extension (or exact filename, e.g. `Dockerfile`) allowlist |
@@ -54,7 +54,7 @@ interface FilesystemOptions {
 ### onItemAppend
 
 1. Scans incoming user messages for the `#path` pattern (requires a file-like shape — `#hashtag`, `#123`, `#region` are not matched).
-2. New references are read and **priority-scored 0-100** via an LLM call against the current user query (path-match heuristic when no model is available; parse failures default to 50). Absolute paths are rejected — only relative paths under `baseDir` are allowed.
+2. New references are read and **priority-scored 0-100**. By default a fast path-match heuristic scores references — no model call, so the user's turn carries no extra LLM round-trip per `#file` reference. Configure `scoringModel` to opt into LLM scoring against the current user query (parse failures default to 50). Absolute paths are rejected — only relative paths under `baseDir` are allowed.
 3. Already-tracked files are re-read for **change detection** (content hash); changes, deletions, and reappearances update the tracked state and request an immediate re-render.
 4. Reference text in the message is transformed into markdown anchor links.
 
