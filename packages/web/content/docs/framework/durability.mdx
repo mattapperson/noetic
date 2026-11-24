@@ -267,7 +267,7 @@ Replaying an output replays a step's **value**, not its **effect**. A `runCode` 
 
 Core's ledger covers control flow, `callModel` steps, their rounds, and each tool call within a round. A tool call that finished is never run again, even when its round was cut off before it recorded.
 
-That leaves one call: the one running when the host died. It runs again on resume, and core cannot know whether its effect landed the first time. Every model tool call gets an `idempotencyKey` for this, the same on every attempt:
+That leaves one call: the one running when the host died. It runs again on resume, and core cannot know whether its effect landed the first time. Every tool call, a model's or an `invokeTool` step's, gets an `idempotencyKey` for this, the same on every attempt:
 
 ```ts validate=none
 const charge = tool({
@@ -300,7 +300,7 @@ await harness.execute(text, { threadId, messageId: event.id }); // resumes
 const response = await harness.getAgentResponse({ threadId });
 ```
 
-A message delivered again after its turn finished is not run again either. A thread remembers its last 20 finished turns, and answers the retry with that turn's recorded answer: `getAgentResponse()` resolves with `replayed: true`. So a queue that delivers at least once, or a webhook the sender retries, is safe to pass straight to `execute()` as long as each message carries its own `messageId`.
+A message delivered again after its turn finished is not run again either. A thread remembers its last 20 finished turns, and answers the retry with that turn's recorded answer: `getAgentResponse()` resolves with `replayed: true`. A retry that arrives while the first delivery is still being worked on is dropped, and `getAgentResponse()` gives it that turn's answer. So a queue that delivers at least once, or a webhook the sender retries, is safe to pass straight to `execute()` as long as each message carries its own `messageId`.
 
 ### One Writer per Turn
 

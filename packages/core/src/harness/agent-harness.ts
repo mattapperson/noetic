@@ -667,6 +667,9 @@ export class AgentHarness<
     if (await this.answerAgain(session, message)) {
       return;
     }
+    if (await this.inHand(session, message)) {
+      return;
+    }
     const steersRunningTurn = session.runner.getStatus().kind === 'generating' && isSteer(message);
     session.runner.enqueue(message);
     if (steersRunningTurn) {
@@ -1472,6 +1475,33 @@ export class AgentHarness<
       message.id,
     );
     return true;
+  }
+
+  /**
+   * A message delivered again while this harness already has it in hand: its turn is
+   * running, it is queued to run, or its turn finished a moment ago and the runner
+   * has not gone idle yet (spec 23a § Sessions). Queuing it would run the same
+   * message as a second turn once the first ends. It is dropped; the caller reads
+   * the answer of the turn that has it. Resolves true when it was.
+   */
+  private async inHand(session: Session, message: QueuedMessage): Promise<boolean> {
+    if (message.deliveryMode === 'interrupt') {
+      return false;
+    }
+    const { runner, record } = session;
+    if (runner.getStatus().kind === 'idle' && runner.queue.size === 0) {
+      return false;
+    }
+    if (runner.queue.peekAll().some((queued) => queued.id === message.id)) {
+      return true;
+    }
+    if (!record) {
+      return false;
+    }
+    if ((await record.turn())?.messageIds.includes(message.id)) {
+      return true;
+    }
+    return (await record.answerFor(message.id)) !== undefined;
   }
 
   /**

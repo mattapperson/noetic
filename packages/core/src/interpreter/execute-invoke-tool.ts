@@ -247,7 +247,10 @@ async function runInvokeTool<TContext, I, O>(
     args: parsedArgs,
   });
   try {
-    const toolCtx = buildToolExecutionContext(baseCtx, harness);
+    // The step's place in the run is its key: a resumed step sends the same one.
+    const toolCtx = buildToolExecutionContext(baseCtx, harness, {
+      recordId: holdId,
+    });
     const execResult = step.tool.execute(parsedArgs, toolCtx);
 
     const ran = isAsyncGenerator(execResult)

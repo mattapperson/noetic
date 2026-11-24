@@ -55,8 +55,12 @@ export function buildToolExecutionContext(
       ? {}
       : {
           callId,
+        }),
+    ...(recordId === undefined
+      ? {}
+      : {
           // The root execution's id: a child context gets a new id on every resume.
-          idempotencyKey: toolIdempotencyKey(rootIdOf(ctx), recordId ?? callId),
+          idempotencyKey: toolIdempotencyKey(rootIdOf(ctx), recordId),
         }),
   };
 }

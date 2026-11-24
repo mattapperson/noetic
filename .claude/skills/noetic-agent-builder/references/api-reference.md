@@ -2196,7 +2196,7 @@ The approver decides; with none, or on `hold`, the action is held and `approve` 
 
 ### Tool calls and `idempotencyKey`
 
-Each tool call in a model round is recorded as it finishes, so a resumed round runs only the call that was cut off. `ToolExecutionContext.idempotencyKey` (`<execution>:tool:<callId>`) is the same on every attempt of a call: a tool with a lasting effect passes it to what it writes to.
+Each tool call in a model round is recorded as it finishes, so a resumed round runs only the call that was cut off. `ToolExecutionContext.idempotencyKey` (`<execution>:tool:<callId>`) is the same on every attempt of a call: a tool with a lasting effect passes it to what it writes to. A tool run by an `invokeTool` step gets one too, keyed by the step's place in the run. A message delivered again with the same `messageId` while its turn is still running or queued is dropped, not run as a second turn.
 
 ### Parked turns
 

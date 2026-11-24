@@ -233,3 +233,105 @@ describe('triggers at the harness', () => {
     await harness.close();
   });
 });
+
+describe('a message delivered again while its turn is still running', () => {
+  it('does not run as a second turn once the first ends', async () => {
+    let calls = 0;
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const storage = createInMemoryStorage();
+    const harness = new AgentHarness({
+      name: 'events',
+      params: {},
+      agentGraph: agent,
+      environment: {
+        storage: {
+          adapter: storage,
+        },
+      },
+      _testCallModel: async () => {
+        calls += 1;
+        await gate;
+        return {
+          items: [
+            assistantMessage(`answer-${calls}`),
+          ],
+          usage: {
+            inputTokens: 1,
+            outputTokens: 1,
+          },
+        };
+      },
+    });
+    const delivery = {
+      threadId: 't',
+      messageId: 'webhook-9',
+    };
+    await harness.execute('charge the card', delivery);
+    await until(() => calls === 1);
+
+    // The sender retries while the first delivery is still being worked on.
+    await harness.execute('charge the card', delivery);
+    await harness.execute('charge the card', delivery);
+    release?.();
+    const response = await harness.getAgentResponse({
+      threadId: 't',
+    });
+    expect(response.text).toBe('answer-1');
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(calls).toBe(1);
+
+    // A different message on the thread still gets its own turn.
+    await harness.execute('and email the receipt', {
+      threadId: 't',
+      messageId: 'webhook-10',
+    });
+    await until(() => calls === 2);
+    await harness.close();
+  });
+
+  it('applies without storage too, to a message still queued', async () => {
+    let calls = 0;
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const harness = new AgentHarness({
+      name: 'events',
+      params: {},
+      agentGraph: agent,
+      _testCallModel: async () => {
+        calls += 1;
+        await gate;
+        return {
+          items: [
+            assistantMessage(`answer-${calls}`),
+          ],
+          usage: {
+            inputTokens: 1,
+            outputTokens: 1,
+          },
+        };
+      },
+    });
+    await harness.execute('first', {
+      threadId: 't',
+      messageId: 'm-1',
+    });
+    await until(() => calls === 1);
+    // m-2 waits its turn; delivered twice, it is queued once.
+    const second = {
+      threadId: 't',
+      messageId: 'm-2',
+    };
+    await harness.execute('second', second);
+    await harness.execute('second', second);
+    release?.();
+    await until(() => calls === 2);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(calls).toBe(2);
+    await harness.close();
+  });
+});

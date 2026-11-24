@@ -588,11 +588,16 @@ export type {
   ExecutionStatus,
   HarnessJudgmentContract,
   HarnessStatus,
+  HeldCall,
+  HeldResolution,
   ItemSchemaConfig,
   ReanchorReason,
   RecallLayerOutput,
   SessionScope,
   SessionUsage,
+  StuckTurn,
+  ToolHold,
+  TrailMark,
 } from '@noetic-tools/types';
 
 //#endregion
@@ -617,6 +622,7 @@ export { SpendKind } from '@noetic-tools/types';
 export type {
   AfterModelCallParams,
   AfterModelCallResult,
+  ApproveRequest,
   ApproveToolCallParams,
   BeforeToolCallParams,
   BeforeToolCallResult,
@@ -936,6 +942,7 @@ export type {
   ConnectOptions,
   CronOptions,
   CronTick,
+  DeadTriggerEvent,
   Determinism,
   EventStream,
   EventStreamMessage,

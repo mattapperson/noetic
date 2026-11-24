@@ -153,7 +153,7 @@ A round can ask for several tool calls, and the round records only once all of t
 
 A resumed round walks its calls again in order. A call with a record goes on with the recorded result and its tool does not run; `tool_call_completed` carries `replayed: true`. A call whose name or arguments differ from the record is not the same call and runs. The round's own record, when it lands, prunes the call records beneath it.
 
-Every model tool call also gets an **idempotency key**, `<execution>:tool:<callId>`, as `ToolExecutionContext.idempotencyKey`. It is the key connection tools already send (`35-connections` § Durability). The call id comes from the model's item, which a resumed round keeps, so a call made again carries the key it carried the first time.
+Every model tool call also gets an **idempotency key**, `<execution>:tool:<callId>`, as `ToolExecutionContext.idempotencyKey`. It is the key connection tools already send (`35-connections` § Durability). The call id comes from the model's item, which a resumed round keeps, so a call made again carries the key it carried the first time. A tool run by an `invokeTool` step gets a key too, `<execution>:tool:<the step's ledger path>`, which a resumed step repeats.
 
 Together these bound what a crash can repeat to the one call that was running, and give that call the means to land once: a tool with a lasting effect passes the key to whatever it writes to.
 
@@ -198,6 +198,8 @@ Session totals add each turn's increase in usage rather than its context's total
 Resuming a turn therefore requires the host to pass stable `messageId`s to `execute()`.
 
 A thread also remembers its last 20 finished turns: the message ids each delivered and the answer it gave. A message delivered again after its turn finished — a queue that delivers at least once, a webhook the sender retried — is answered with that turn's recorded answer and nothing runs. `getAgentResponse()` resolves with `replayed: true`, the recorded `text`, and the thread's history as `items`; the runner emits `{name}:turn_replayed`. Only a message given a `messageId` can be recognised; one left to a generated id is always new.
+
+A message delivered again while the harness already has it in hand is dropped: its turn is running, it is queued to run, or its turn finished and the runner has not gone idle yet. Queuing it would run the same message as a second turn once the first ended. The caller's `getAgentResponse()` resolves with the answer of the turn that has it.
 
 ## The side-effect boundary
 

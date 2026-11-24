@@ -458,3 +458,80 @@ describe('harness.approve()', () => {
     });
   });
 });
+
+describe("an invokeTool step's idempotency key", () => {
+  it('is the same on a resumed run, and differs between two steps', async () => {
+    const keys: Array<string | undefined> = [];
+    let hung = false;
+    const charge = tool({
+      name: 'charge',
+      description: 'Charge a card.',
+      input: z.object({
+        amount: z.number(),
+      }),
+      output: z.string(),
+      execute: async (_args, toolCtx) => {
+        keys.push(toolCtx.idempotencyKey);
+        // The host dies inside the second charge, the first time round.
+        if (keys.length === 2 && !hung) {
+          hung = true;
+          await new Promise(() => {});
+        }
+        return 'charged';
+      },
+    });
+    const deposit = invokeTool({
+      id: 'charge-deposit',
+      tool: charge,
+    });
+    const balance = invokeTool({
+      id: 'charge-balance',
+      tool: charge,
+    });
+    const args = {
+      amount: 42,
+    };
+    // One run that makes both charges, so a resume replays the first.
+    const both = runCode<ContextData, undefined, string>({
+      id: 'both',
+      execute: async (_input, execCtx) => {
+        await execCtx.harness.run(deposit, args, execCtx);
+        return String(await execCtx.harness.run(balance, args, execCtx));
+      },
+    });
+    const storage = createInMemoryStorage();
+    const build = (): AgentHarness =>
+      new AgentHarness({
+        name: 'routes',
+        params: {},
+        environment: {
+          storage: {
+            adapter: storage,
+          },
+        },
+      });
+    const before = build();
+    const ctx = before.createContext();
+    void before.run(both, undefined, ctx).catch(() => {});
+    for (let i = 0; i < 2e3 && keys.length < 2; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    const [depositKey, balanceKey] = keys;
+    assert(depositKey);
+    assert(balanceKey);
+    expect(depositKey).not.toBe(balanceKey);
+    expect(depositKey.startsWith(`${ctx.id}:tool:`)).toBe(true);
+
+    // A new process resumes the run: the deposit replays, the balance is sent
+    // again with the key it had, so the processor can tell it is the same charge.
+    const after = build();
+    const resumed = await after.restore(ctx.id);
+    assert(resumed);
+    expect(await after.run(both, undefined, resumed)).toBe('charged');
+    expect(keys).toEqual([
+      depositKey,
+      balanceKey,
+      balanceKey,
+    ]);
+  });
+});
