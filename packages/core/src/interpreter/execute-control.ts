@@ -42,6 +42,7 @@ import { closeUnstartedSpan, openChildSpan, traceChild } from './child-span';
 import { cloneWithGuard } from './clone-guard';
 import { releasePathLeases } from './connection-steps';
 import { forgetAnswers } from './execute-decide';
+import { turnEndingIn } from './turn-ending';
 import { getContextChannelStore, isContextImpl, isMutableContext } from './typeguards';
 
 //#region conditional
@@ -444,6 +445,21 @@ function toNoeticError(err: unknown, stepId: string): NoeticError {
   };
 }
 
+/**
+ * A path whose error ends the turn ends it for every path: it is not folded into
+ * `fork_partial`, handed to a `settle` merge, or lost to a race.
+ *
+ * @throws The turn-ending error of the first path that has one.
+ */
+function throwTurnEnding(settled: ReadonlyArray<PromiseSettledResult<unknown>>): void {
+  for (const result of settled) {
+    const ending = result.status === 'rejected' ? turnEndingIn(result.reason) : undefined;
+    if (ending) {
+      throw ending;
+    }
+  }
+}
+
 function classifyResults<T>(
   settled: PromiseSettledResult<T>[],
   paths: {
@@ -520,6 +536,7 @@ async function executeAll<TContext, I, O>(
     }
   });
   const settled = await runWithConcurrency(tasks, concurrency);
+  throwTurnEnding(settled);
   const { succeeded, failed } = classifyResults(settled, paths);
 
   // If the PARENT context was aborted mid-inParallel, the whole inParallel is cancelled —
@@ -826,6 +843,11 @@ export async function executeLoop<TContext, I, O>(
       // guard as executeSchedule's 'continue' policy below.
       if (e.noeticError.kind === 'cancelled') {
         throw e;
+      }
+      // Nor is an error that ends the turn something a loop retries or skips.
+      const ending = turnEndingIn(e);
+      if (ending) {
+        throw ending;
       }
       const action = step.onError(e.noeticError, ctx);
       if (action === 'retry') {

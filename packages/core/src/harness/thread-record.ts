@@ -189,6 +189,13 @@ export class ThreadRecord {
           : {
               version: this.host.version,
             }),
+        // Kept until the turn ends: a host that dies part way through going on
+        // must not find the same step stuck again.
+        ...(record.turn?.executionId === ctx.id && record.turn.accept !== undefined
+          ? {
+              accept: record.turn.accept,
+            }
+          : {}),
       },
     }));
   }
@@ -230,7 +237,7 @@ export class ThreadRecord {
       if (!turn?.stuck) {
         return undefined;
       }
-      const { stuck: _stuck, stopped: _stopped, ...rest } = turn;
+      const { stuck, stopped: _stopped, ...rest } = turn;
       await this.write((record) =>
         action === 'abandon'
           ? withoutTurn(record)
@@ -240,7 +247,7 @@ export class ThreadRecord {
                 ...rest,
                 ...(action === 'continue'
                   ? {
-                      accept: true,
+                      accept: stuck.path,
                     }
                   : {}),
               },

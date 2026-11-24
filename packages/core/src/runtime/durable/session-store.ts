@@ -67,7 +67,13 @@ const SessionRecordSchema = z.object({
         })
         .optional(),
       /** The host looked at the stuck turn and chose to go on: its next run may discard such steps. */
-      accept: z.boolean().optional(),
+      /** The step a host chose to go on past (`true` in records written before that was kept). */
+      accept: z
+        .union([
+          z.boolean(),
+          z.string(),
+        ])
+        .optional(),
       /** Set while the turn is parked: every part of it waits, and no harness holds it. */
       parked: z
         .object({

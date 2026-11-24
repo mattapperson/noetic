@@ -69,6 +69,8 @@ export interface CallLedger {
   take(call: CalledFunction): ToolCallResult | undefined;
   /** Record what the call produced. Resolves whether the record was stored. */
   record(call: CalledFunction, result: ToolCallResult): Promise<boolean>;
+  /** Note that the call has a lasting effect: its record and its round's are marked so. */
+  noteEffect(call: CalledFunction): void;
 }
 
 /** What one finished round added to the loop. */
@@ -241,6 +243,10 @@ export class RoundLedger {
         arguments: call.arguments,
       });
     return {
+      noteEffect: (call) => {
+        ledger?.noteEffect(keyOf(call));
+        ledger?.noteEffect(this.key(round));
+      },
       take: (call) => {
         const entry = ledger?.take(keyOf(call), {
           id: stepId,

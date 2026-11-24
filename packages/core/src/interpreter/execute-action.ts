@@ -86,6 +86,7 @@ import { emitStepEvent, runToReturn } from './emit-items';
 import { trackUsage } from './message-helpers';
 import { wrapModelError } from './model-error';
 import { parseStructuredOutput } from './structured-output';
+import { turnEndingIn } from './turn-ending';
 import {
   getContextChannelStore,
   isContextImpl,
@@ -127,8 +128,9 @@ export async function executeRunCode<TContext, I, O>(
       }
       // These end the turn, not the step: a retry could not help, and wrapping
       // them would hide from the harness why the turn stopped.
-      if (isNoeticError(e) && TURN_ENDING_KINDS.has(e.noeticError.kind)) {
-        throw e;
+      const ending = turnEndingIn(e);
+      if (ending) {
+        throw ending;
       }
       lastError = e instanceof Error ? e : new Error(String(e));
 
@@ -146,13 +148,6 @@ export async function executeRunCode<TContext, I, O>(
     retriesExhausted: maxAttempts > 1,
   });
 }
-
-/** Error kinds that stop the whole turn, whichever step they surface in. */
-const TURN_ENDING_KINDS: ReadonlySet<string> = new Set([
-  'turn_stuck',
-  'lease_lost',
-  'ledger_write_failed',
-]);
 
 function computeDelay(retry: RetryPolicy, attempt: number): number {
   let delay: number;

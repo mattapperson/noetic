@@ -238,6 +238,18 @@ harness.execute({ type: 'noetic:decision', action: 'continue' | 'restart' | 'aba
 | `restart` | The ledger, held calls and pending entries of the turn are cleared and it runs from the top on this harness's version. Every step runs again, effects included. The snapshot is kept: it holds the turn's input. |
 | `abandon` | The turn is dropped and its checkpoint cleared. Its trail is kept. The thread's next message starts a fresh turn. |
 
+What marks an entry as an effect, and what keeps the mark:
+
+- A durable tool a model calls marks its own call record and its round's record, which is what a cut-off step has on record.
+- An entry replayed on a resume keeps its mark, so the parent that then records over it is marked too.
+- `turn_stuck` reaches the harness from anywhere: a path of `inParallel` (it is not folded into `fork_partial`), a `settle` merge, a loop's `onError` (which may not retry or skip it), a `step_failed` cause.
+
+What settling does, precisely:
+
+- `continue` lets the turn go past the one step that was named. Another recorded effect further on that no longer matches stops the turn again. The choice is kept until the turn ends, so a host that dies part way through going on does not find the same step stuck.
+- `restart` puts a trail mark down for every entry before it clears the ledger: what the first run did still happened.
+- A message that arrives for a stuck thread is kept in storage and runs after the turn is settled (§ A message for a parked thread). It does not replace the stuck turn; `interrupt` does.
+
 A decision for a thread with no stuck turn is refused with `decision_refused`. The decision is never written to the conversation, and other input passed beside it is delivered after it, so `abandon` and the next message can go in one call.
 
 A harness whose `agentGraph` is the root step `hydrateWorkflow` returned, and that names no version, takes `workflow-<hash of the document>`: editing the document is a new version, and the same document on another deploy is the same one. An explicit `version` wins.
@@ -268,6 +280,7 @@ interface TrailMark {
 
 - A live ledger entry is read as a mark. When an entry is pruned (`23a-step-level-resume` § Retention) it leaves a mark behind under `execution:<id>:trail:<seq>`, without its output or items.
 - Marks do not count toward `maxEntries`.
+- A mark is kept under the sequence number of the entry it came from, and no new entry is given a number a mark already has.
 - A thread's trail covers its turn in flight and the finished turns it remembers for message dedupe (`08-runtime`).
 - Core never deletes a mark. `clearCheckpoint` leaves them; a host prunes the `execution:<id>:trail:` prefix by age when it wants to.
 

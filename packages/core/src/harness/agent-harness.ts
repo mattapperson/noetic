@@ -23,6 +23,7 @@ import { toStep } from '../builders/sequence';
 import { workflowDocumentOf } from '../builders/workflow-hydrator';
 import { runEvery } from '../connections/settle';
 import { pendingTasksOf, resumableWaitsOf } from '../interpreter/connection-steps';
+import { turnEndingIn } from '../interpreter/turn-ending';
 import { AcpSessionStore } from '../runtime/acp-session-store';
 import { emitFrameworkEvent, getBroadcaster } from '../runtime/broadcaster-utils';
 import { hashStepInput, stubOf } from '../runtime/durable/step-ledger';
@@ -213,10 +214,11 @@ function stuckOf(error: unknown):
       to: string;
     }
   | undefined {
-  if (!isNoeticError(error) || error.noeticError.kind !== 'turn_stuck') {
+  const ending = turnEndingIn(error)?.noeticError;
+  if (ending?.kind !== 'turn_stuck') {
     return undefined;
   }
-  const { path, from, to } = error.noeticError;
+  const { path, from, to } = ending;
   return {
     path,
     from,
@@ -1215,8 +1217,9 @@ export class AgentHarness<
         }
       }
       // A stuck turn the host chose to go on with may discard what no longer matches.
-      if ((await record?.turn())?.accept && ctx instanceof ContextImpl) {
-        ctx.ledger?.acceptVersionLoss();
+      const accept = (await record?.turn())?.accept;
+      if (accept && ctx instanceof ContextImpl) {
+        ctx.ledger?.acceptVersionLoss(typeof accept === 'string' ? accept : undefined);
       }
       await record?.begin(ctx, messageIds);
       return ctx;
@@ -1562,7 +1565,18 @@ export class AgentHarness<
     }
     if (action === 'restart') {
       // The snapshot stays: it holds the turn's input. What the run recorded goes.
-      await this.stepLedgerStore?.clear(turn.executionId);
+      // What the first run did still happened: its marks go on the trail first.
+      const store = this.stepLedgerStore;
+      if (store) {
+        const { entries, seqs } = await store.load(turn.executionId);
+        for (const [path, entry] of entries) {
+          const seq = seqs.get(path);
+          if (seq !== undefined) {
+            await store.mark(turn.executionId, seq, stubOf(entry));
+          }
+        }
+        await store.clear(turn.executionId);
+      }
       await heldCallsOf(this).clear(turn.executionId);
       if (this.config.storage) {
         await clearPendingEntries(this.config.storage, turn.executionId);

@@ -472,6 +472,15 @@ export function createStepLedgerStore(opts: { storage: StorageAdapter }): StepLe
         entries.set(parsed.data.path, parsed.data);
         seqs.set(parsed.data.path, seq);
       }
+      // Trail marks are kept under the sequence number of the entry they came
+      // from. A new entry must not take a number a mark already has, or its own
+      // mark would one day overwrite that one.
+      for (const key of await storage.list(stepTrailPrefix(executionId))) {
+        const seq = Number(key.slice(stepTrailPrefix(executionId).length));
+        if (Number.isInteger(seq)) {
+          highestSeq = Math.max(highestSeq, seq);
+        }
+      }
       return {
         entries,
         seqs,
@@ -541,7 +550,7 @@ export class StepLedger {
   /** The flow version entries are recorded under, when the harness names one. */
   private version: string | undefined;
   /** A host accepted that this resume may discard effects recorded under another version. */
-  private accepts = false;
+  private accepts: boolean | string = false;
   /** Paths noted as having a lasting effect, until the entry there records. */
   private readonly effects = new Set<string>();
   /** Every live entry, by path: what its trail mark is made from when it is pruned. */
@@ -606,8 +615,8 @@ export class StepLedger {
    * Let this resume discard effects recorded under another version: the host looked
    * at a stuck turn and chose to go on.
    */
-  acceptVersionLoss(): void {
-    this.accepts = true;
+  acceptVersionLoss(path?: string): void {
+    this.accepts = path ?? true;
   }
 
   /** Note that the step at `path` has a lasting effect; its entry is marked so. */
@@ -680,6 +689,10 @@ export class StepLedger {
       for (const use of entry.connections ?? []) {
         this.noteConnection(path, use);
       }
+      // A replayed effect is still an effect: the step above it records one too.
+      if (entry.effect === true) {
+        this.effects.add(path);
+      }
       return entry;
     }
     if (path.startsWith(REPLAY_KEY_PREFIX)) {
@@ -709,11 +722,19 @@ export class StepLedger {
    */
   private refuseEffectLoss(lost: ReadonlyArray<StepLedgerEntry>): void {
     const to = this.version;
-    if (this.accepts || to === undefined) {
+    const accepted = this.accepts;
+    if (accepted === true || to === undefined) {
       return;
     }
+    // The host went on past one step. Any other recorded effect still stops the turn.
+    const isAccepted = (entry: StepLedgerEntry): boolean =>
+      typeof accepted === 'string' && (entry.path === accepted || isBeneath(entry.path, accepted));
     const effect = lost.find(
-      (entry) => entry.effect === true && entry.version !== undefined && entry.version !== to,
+      (entry) =>
+        entry.effect === true &&
+        entry.version !== undefined &&
+        entry.version !== to &&
+        !isAccepted(entry),
     );
     if (!effect?.version) {
       return;
