@@ -3,7 +3,7 @@
  * call, the harness approver decides it. Covers both enforcement points — the
  * model-driven tool loop (refusal → error tool result) and `invokeTool`
  * (refusal → `steering_denied`) — plus the default without an approver (the
- * call runs, with a one-time warning) and the `tool.approval` span attribute.
+ * call is held for a person) and the `tool.approval` span attribute.
  */
 
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
@@ -12,6 +12,7 @@ import type {
   ApproveToolCallParams,
   Context,
   ContextLayer,
+  HeldCall,
   LLMResponse,
   SteeringDecision,
   ToolApprover,
@@ -208,6 +209,21 @@ async function modelCall(
   return result.output;
 }
 
+/** The one call the fixture's execution holds, once it holds it. */
+async function heldCall(f: Fixture): Promise<HeldCall> {
+  const scope = {
+    executionId: f.ctx.id,
+  };
+  for (let i = 0; i < 2e3; i += 1) {
+    const [held] = await f.harness.pending(scope);
+    if (held) {
+      return held;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+  return expect.unreachable('no call was held');
+}
+
 function invokeAdd(f: Fixture, needsApproval: boolean | undefined) {
   return invokeTool({
     id: 'add-step',
@@ -331,22 +347,36 @@ describe('model-requested calls', () => {
     expect(f.runs).toHaveLength(1);
   });
 
-  it('with no approver the call runs, warns once per tool name, and the span records it', async () => {
+  it('with no approver the call is held until a person answers it', async () => {
     const f = fixture();
+    const scope = {
+      executionId: f.ctx.id,
+    };
 
-    expect(await modelCall(f, true)).toContain('5');
-    frameworkCast<{
-      llm: {
-        client: unknown;
-      };
-    }>(f.harness).llm.client = new AddThenDoneClient();
-    expect(await modelCall(f, true)).toContain('5');
+    const output = modelCall(f, true);
+    const held = await heldCall(f);
+    expect(held).toMatchObject({
+      callId: 'call-1',
+      name: 'add',
+      args: {
+        a: 2,
+        b: 3,
+      },
+      reason: 'approval',
+    });
+    // Held, not run: the tool waits for the answer.
+    expect(f.runs).toEqual([]);
 
-    expect(f.runs).toHaveLength(2);
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0]).toContain("tool 'add' needs approval");
-    expect(warnings[0]).toContain('approveToolCall');
-    expect(approvalAttr(f)).toBe('none_configured');
+    await f.harness.resolve(scope, {
+      callId: held.callId,
+      argsHash: held.argsHash,
+      action: 'allow',
+    });
+    expect(await output).toContain('5');
+    expect(f.runs).toHaveLength(1);
+    expect(warnings).toEqual([]);
+    expect(approvalAttr(f)).toBe('approved');
+    expect(await f.harness.pending(scope)).toEqual([]);
   });
 
   it('a throwing approver fails closed', async () => {
@@ -456,10 +486,13 @@ describe('invokeTool', () => {
     expect(f.runs).toEqual([]);
   });
 
-  it('with no approver the call runs, warns, and the span records it', async () => {
+  it('with no approver the call is held until a person answers it', async () => {
     const f = fixture();
+    const scope = {
+      executionId: f.ctx.id,
+    };
 
-    const result = await f.harness.run(
+    const result = f.harness.run(
       invokeAdd(f, true),
       {
         a: 1,
@@ -467,13 +500,23 @@ describe('invokeTool', () => {
       },
       f.ctx,
     );
+    const held = await heldCall(f);
+    expect(held).toMatchObject({
+      callId: 'add-step',
+      name: 'add',
+      reason: 'approval',
+    });
+    expect(f.runs).toEqual([]);
 
-    expect(result).toEqual({
+    await f.harness.resolve(scope, {
+      callId: held.callId,
+      action: 'allow',
+    });
+    expect(await result).toEqual({
       sum: 3,
     });
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0]).toContain("tool 'add' needs approval");
-    expect(approvalAttr(f)).toBe('none_configured');
+    expect(warnings).toEqual([]);
+    expect(approvalAttr(f)).toBe('approved');
   });
 
   it('a throwing approver throws steering_denied', async () => {

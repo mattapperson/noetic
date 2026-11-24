@@ -18,6 +18,7 @@ import { SteerPoint } from '@noetic-tools/types';
 import { itemsToInput } from '../adapters/openrouter';
 import { isFunctionCall } from '../interpreter/typeguards';
 import { drainsOf } from '../runtime/drain';
+import { heldCallsOf, heldScopeOf, waitOnHeldCalls } from '../runtime/held-calls';
 import type { ApprovalOutcome } from '../runtime/tool-approval';
 import { createToolResultItem, executeToolCall } from '../runtime/tool-call';
 import type { CallSpanCollector } from './call-span-collector';
@@ -52,6 +53,13 @@ export function replayOutput(
   roundItems: ReadonlyArray<Item>,
 ): void {
   input.push(...itemsToInput(roundItems.filter((item) => !isFunctionCall(item))));
+}
+
+/** How one function call of a round ended. */
+interface FunctionCallOutcome {
+  approval?: ApprovalOutcome;
+  /** The call is held for a person and has no result yet. */
+  held?: boolean;
 }
 
 /** Whether a round asked for any tool calls. */
@@ -141,6 +149,7 @@ async function executeToolRound(
       arguments: fc.arguments,
     });
   }
+  const heldCalls: FunctionCallItem[] = [];
   for (const [index, fc] of functionCalls.entries()) {
     await drainsOf(request.ctx)?.hold(request.ctx);
     if (request.signal?.aborted) {
@@ -161,7 +170,7 @@ async function executeToolRound(
       break;
     }
     const toolForCall = findTool(allowedTools, fc.name);
-    const approval = await executeFunctionCall(scope, {
+    const call = await executeFunctionCall(scope, {
       fc,
       request,
       allowedTools,
@@ -170,7 +179,41 @@ async function executeToolRound(
       emitIfAllowed: params.emitIfAllowed,
       calls: params.calls,
     });
-    spans.recordToolSpan(modelSpan, fc.name, toolForCall?.needsApproval ?? false, approval);
+    if (call.held) {
+      heldCalls.push(fc);
+      continue;
+    }
+    spans.recordToolSpan(modelSpan, fc.name, toolForCall?.needsApproval ?? false, call.approval);
+  }
+  // Calls held for a person: the round goes no further until each has an answer.
+  while (heldCalls.length > 0) {
+    if (!request.ctx) {
+      throw new Error('A held tool call needs a context to wait on.');
+    }
+    await waitOnHeldCalls({
+      harness: scope.harness,
+      ctx: request.ctx,
+      callIds: heldCalls.map((fc) => fc.callId),
+      signal: request.signal,
+    });
+    for (const fc of heldCalls.splice(0)) {
+      const toolForCall = findTool(allowedTools, fc.name);
+      const call = await executeFunctionCall(scope, {
+        fc,
+        request,
+        allowedTools,
+        allItems,
+        conversationInput,
+        emitIfAllowed: params.emitIfAllowed,
+        calls: params.calls,
+        announced: true,
+      });
+      if (call.held) {
+        heldCalls.push(fc);
+        continue;
+      }
+      spans.recordToolSpan(modelSpan, fc.name, toolForCall?.needsApproval ?? false, call.approval);
+    }
   }
   params.emitIfAllowed('tool_round_completed', {
     round: params.round,
@@ -193,13 +236,17 @@ async function executeFunctionCall(
     conversationInput: ReturnType<typeof itemsToInput>;
     emitIfAllowed: (eventType: string, data: Record<string, unknown>) => void;
     calls?: CallLedger;
+    /** The call was held and is being looked at again: its start was already announced. */
+    announced?: boolean;
   },
-): Promise<ApprovalOutcome | undefined> {
+): Promise<FunctionCallOutcome> {
   const { fc, request, allowedTools, allItems, conversationInput } = params;
-  params.emitIfAllowed('tool_call_started', {
-    name: fc.name,
-    callId: fc.callId,
-  });
+  if (!params.announced) {
+    params.emitIfAllowed('tool_call_started', {
+      name: fc.name,
+      callId: fc.callId,
+    });
+  }
   let parsedArgs: unknown;
   try {
     parsedArgs = JSON.parse(fc.arguments);
@@ -213,7 +260,7 @@ async function executeFunctionCall(
       conversationInput,
       emitIfAllowed: params.emitIfAllowed,
     });
-    return undefined;
+    return {};
   }
   if (!request.tools) {
     throw new Error(
@@ -235,8 +282,22 @@ async function executeFunctionCall(
       layers: request.layers,
       callId: fc.callId,
     }));
+  // Held: it has no result yet. Nothing goes into the conversation for it.
+  if (toolResult.held) {
+    if (!params.announced) {
+      params.emitIfAllowed('tool_call_held', {
+        ...toolResult.held,
+      });
+    }
+    return {
+      held: true,
+    };
+  }
   if (!recorded) {
     await params.calls?.record(fc, toolResult);
+  }
+  if (toolResult.settled) {
+    await heldCallsOf(scope.harness).close(heldScopeOf(request.ctx), fc.callId);
   }
   // Owner-scoped result validation: a tool's `toolResults` schemas apply
   // only to that tool's own result items. Harness-level `opts.itemSchemas`
@@ -269,7 +330,9 @@ async function executeFunctionCall(
         }
       : {}),
   });
-  return toolResult.approval;
+  return {
+    approval: toolResult.approval,
+  };
 }
 
 function recordSkippedToolCall(

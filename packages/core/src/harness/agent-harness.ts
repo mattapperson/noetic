@@ -1,13 +1,20 @@
-import type { ArtifactStore, ConnectionStatus } from '@noetic-tools/types';
+import type {
+  ArtifactStore,
+  ConnectionStatus,
+  HeldCall,
+  HeldResolution,
+} from '@noetic-tools/types';
 import {
   CONNECTION_EVENT_ITEM_TYPE,
   frameworkCast,
   ItemSchemaRegistry,
   NoeticConfigError,
+  NoeticErrorImpl,
 } from '@noetic-tools/types';
 import { toStep } from '../builders/sequence';
 import { runEvery } from '../connections/settle';
 import { AcpSessionStore } from '../runtime/acp-session-store';
+import { heldCallsOf, toHeldCall } from '../runtime/held-calls';
 import { ConnectionGate } from './connection-gate';
 import type { LayerStateStore, RecallCache } from './deps/context';
 import {
@@ -938,7 +945,7 @@ export class AgentHarness<
           // to wake it, and the response says so.
           const wakeAt = parkedUntil(ctx);
           if (wakeAt !== undefined && record) {
-            await record.park(ctx, wakeAt);
+            await record.park(ctx, Number.isFinite(wakeAt) ? wakeAt : undefined);
             await this.#connections.release(ctx.id);
             return PARKED;
           }
@@ -990,7 +997,10 @@ export class AgentHarness<
       if (!turn) {
         continue;
       }
-      if (!scope?.threadId && turn.parked && turn.parked.until > now) {
+      // A routine wake leaves alone a parked turn that is not due, and one with no
+      // deadline at all: that one waits for an answer, not for a time.
+      const notDue = turn.parked && (turn.parked.until === undefined || turn.parked.until > now);
+      if (!scope?.threadId && notDue) {
         continue;
       }
       const session = this.getOrCreateSession(threadId);
@@ -1035,6 +1045,90 @@ export class AgentHarness<
       earliest = earliest === undefined ? until : Math.min(earliest, until);
     }
     return earliest;
+  }
+
+  /**
+   * The tool calls a thread's turn holds for a person (spec 08 § Held tool calls):
+   * calls waiting for approval, and calls whose tool left its result open. Each
+   * carries what `resolve()` needs to answer it.
+   * @public
+   */
+  async pending(scope?: SessionScope | ExecutionScope): Promise<HeldCall[]> {
+    const executionId = await this.heldExecutionId(scope);
+    if (executionId === undefined) {
+      return [];
+    }
+    const records = await heldCallsOf(this).list(executionId);
+    return records.filter((record) => record.resolution === undefined).map(toHeldCall);
+  }
+
+  /**
+   * Answer a held tool call: a decision for one that waits for approval, an output
+   * for one that waits for its result. The turn then goes on — at once when it is
+   * running here, and by being woken when it is parked.
+   *
+   * `scope` names the thread, or with `{ executionId }` an execution a host runs
+   * itself through `harness.run()`.
+   *
+   * The first answer wins. The same answer again is a no-op, so a host may retry.
+   * Pass the `argsHash` the call was shown with to make sure the answer is for it.
+   *
+   * @throws NoeticError `hold_refused` when the thread holds no such call,
+   *   `argsHash` names different arguments, the answer is the wrong kind for the
+   *   hold, or the call was already answered differently.
+   * @public
+   */
+  async resolve(
+    scope: SessionScope | ExecutionScope | undefined,
+    answer: HeldResolution & {
+      readonly callId: string;
+      readonly argsHash?: string;
+    },
+  ): Promise<void> {
+    const executionId = await this.heldExecutionId(scope);
+    if (executionId === undefined) {
+      throw new NoeticErrorImpl({
+        kind: 'hold_refused',
+        callId: answer.callId,
+        reason: 'the thread has no turn holding a call',
+      });
+    }
+    const { callId, argsHash, ...resolution } = answer;
+    await heldCallsOf(this).resolve(executionId, {
+      callId,
+      argsHash,
+      resolution,
+    });
+    // A turn running here was told; a parked one has to be resumed. An execution
+    // the host runs itself is the host's to resume.
+    if (scope && 'executionId' in scope) {
+      return;
+    }
+    const threadId = scope?.threadId ?? DEFAULT_THREAD_ID;
+    if (this.sessions.get(threadId)?.runner.context === undefined) {
+      await this.wake({
+        threadId,
+      });
+    }
+  }
+
+  /** The execution whose held calls `scope` names. */
+  private heldExecutionId(
+    scope: SessionScope | ExecutionScope | undefined,
+  ): Promise<string | undefined> {
+    if (scope && 'executionId' in scope) {
+      return Promise.resolve(scope.executionId);
+    }
+    return this.turnExecutionId(scope?.threadId ?? DEFAULT_THREAD_ID);
+  }
+
+  /** The execution of the thread's turn in flight: running here, or stored. */
+  private async turnExecutionId(threadId: string): Promise<string | undefined> {
+    const running = this.sessions.get(threadId)?.runner.context;
+    if (running) {
+      return rootIdOf(running);
+    }
+    return (await this.sessionStore?.load(threadId))?.turn?.executionId;
   }
 
   /** The harness clock. */

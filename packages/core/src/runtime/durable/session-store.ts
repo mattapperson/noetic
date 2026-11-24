@@ -39,8 +39,8 @@ const SessionRecordSchema = z.object({
       /** Set while the turn is parked: every part of it waits, and no harness holds it. */
       parked: z
         .object({
-          /** Epoch ms of the earliest deadline among its waits. */
-          until: z.number(),
+          /** Epoch ms of the earliest deadline among its waits. Absent when none has one. */
+          until: z.number().optional(),
         })
         .optional(),
     })

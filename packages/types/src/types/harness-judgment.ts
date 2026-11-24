@@ -64,3 +64,51 @@ export interface ApproveToolCallParams {
 export type ToolApprover = (
   params: ApproveToolCallParams,
 ) => SteeringDecision | Promise<SteeringDecision>;
+
+//#region Held calls
+
+/**
+ * @public A tool call left open for a person (spec 08 § Held tool calls). Listed by
+ * `harness.pending()` and carried by the `tool_call_held` event.
+ */
+export interface HeldCall {
+  readonly callId: string;
+  /** The tool's name. */
+  readonly name: string;
+  /** The validated arguments: exactly what the tool receives if the call is approved. */
+  readonly args: unknown;
+  /** Ties an answer to this exact call. Pass it back to `harness.resolve()`. */
+  readonly argsHash: string;
+  /** `approval`: the tool has not run. `result`: it ran and left its result open. */
+  readonly reason: 'approval' | 'result';
+  /** Epoch ms after which the hold runs out. */
+  readonly dueAt?: number;
+  /** What happens then: `deny` (the default) or `keep`. */
+  readonly onDue?: 'deny' | 'keep';
+  /** What a tool passed to `hold()`, for whoever answers. */
+  readonly request?: unknown;
+}
+
+/**
+ * @public The answer to a held call: a decision for one that waits for approval, an
+ * output for one that waits for its result.
+ */
+export type HeldResolution =
+  | {
+      readonly action: 'allow' | 'deny' | 'guide';
+      readonly guidance?: string;
+    }
+  | {
+      readonly output: unknown;
+    };
+
+/** @public What a tool returns to leave its result open: see `hold()`. */
+export interface ToolHold {
+  readonly kind: 'noetic/tool-hold';
+  /** Passed to whoever answers, as `HeldCall.request`. */
+  readonly request?: unknown;
+  readonly dueAt?: number;
+  readonly onDue?: 'deny' | 'keep';
+}
+
+//#endregion

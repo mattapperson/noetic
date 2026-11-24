@@ -314,9 +314,12 @@ export class SessionRunner {
           ? buildResponse(text, ctx)
           : {
               ...buildResponse(text, ctx),
-              parked: {
-                wakeAt,
-              },
+              // A turn parked on a held call alone has no time to wake at.
+              parked: Number.isFinite(wakeAt)
+                ? {
+                    wakeAt,
+                  }
+                : {},
             };
       this.lastResponse = response;
       this.lastError = undefined;

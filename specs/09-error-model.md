@@ -188,6 +188,12 @@ Durable execution (`23-durable-execution`) adds two `NoeticError` kinds, raised 
 | `lease_lost` | `executionId`, `term`, `reason` | Another harness holds or took the thread's turn. Raised when the lease cannot be taken, and when a renewal or a ledger write shows it is gone. `executionId` is the thread id when the turn had no execution yet. |
 | `ledger_write_failed` | `executionId`, `path`, `cause: Error` | A step-ledger entry or the thread record could not be written, so the turn stopped. `path` is the ledger path, or `session:<threadId>`. |
 
+## Held Call Errors
+
+| Kind | Payload | Condition |
+|---|---|---|
+| `hold_refused` | `callId`, `reason` | `harness.resolve()` could not take an answer to a held tool call (`08-runtime` § Held tool calls). |
+
 ## Connection Errors
 
 Connections (`35-connections`) and verification (`37-verification`) add `NoeticConfigError` codes for setup and validation (`CONNECTION_UNKNOWN`, `CONNECTION_UNSATISFIED`, `CONNECTION_NOT_ALLOWED`, `CONNECTION_INVALID`, `CONNECTION_TOOL_COLLISION`, `VERIFY_NOT_CONFIGURED`, `VERIFY_INVALID`) and `NoeticError` kinds for run-time failures (`connection_unavailable`, `connection_failed`, `connection_ref_invalid`, `connection_secret_refused`, `connection_input_required`, `connection_resume_refused`, `verify_act_failed`). Each spec's § Errors lists its codes and kinds with their conditions and payloads; this spec's rules apply to all of them.

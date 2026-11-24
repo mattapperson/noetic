@@ -32,6 +32,7 @@ import {
 } from '@noetic-tools/types';
 import { emitFrameworkEvent, getBroadcaster } from '../runtime/broadcaster-utils';
 import type { EventBroadcaster } from '../runtime/event-broadcaster';
+import { askApproval } from '../runtime/tool-approval';
 import type { GateHooks, GateRequest } from './gates';
 import { buildConnectionTools } from './model-tools';
 import type { ConnectionFrameworkEventRecord, ConnectionRuntime } from './registry';
@@ -114,6 +115,19 @@ function gateHooks(harness: WiredHarness): GateHooks {
       );
     },
     async approve(request: GateRequest): Promise<SteeringDecision> {
+      // A model's tool call can be held for a person: its tool pipeline writes the
+      // record when this throws, and answers from it when the call is made again.
+      if (request.ctx && request.caller === 'model' && request.callId !== undefined) {
+        const approval = await askApproval({
+          harness,
+          toolName: request.toolName,
+          toolArgs: request.args,
+          callId: request.callId,
+          ctx: request.ctx,
+          matched: true,
+        });
+        return approval.decision;
+      }
       const approver = harness.config.approveToolCall;
       if (!approver) {
         return deny(

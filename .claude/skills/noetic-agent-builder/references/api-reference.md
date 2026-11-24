@@ -1837,7 +1837,7 @@ interface ApproveToolCallParams {
 - Order: `beforeToolCall` layers first, then the approver, then `execute`. A layer refusal means the approver is never asked.
 - `allow` runs the call; `deny`/`guide` refuse it. A throwing approver refuses it.
 - Refusal: model-driven call → error tool result (`Tool call denied: <guidance>`); `invokeTool` → `NoeticError` kind `steering_denied`.
-- No approver configured: the call runs unapproved and the harness warns once per tool name.
+- No approver configured, or the approver answers `hold`: the call is held until `harness.resolve()` answers it. `harness.pending()` lists held calls.
 - Span: `tool.call` gets `tool.approval` = `approved` | `denied` | `none_configured` (`ToolAttr.APPROVAL`).
 - Self-gating wrappers (chat-sdk `fromAiSdkTool`) do not declare `needsApproval`, so a call is never gated twice.
 
@@ -2139,6 +2139,19 @@ interface StorageAdapter {
 ```
 
 On storage with `swap` (`createFileStorage`, `createSqliteStorage`, `createInMemoryStorage({ swap: true })`), each `harness.execute()` turn takes its thread's lease: one harness writes a turn, a replaced harness stops with `lease_lost`, and a failed ledger write stops the turn with `ledger_write_failed`.
+
+### Held tool calls
+
+```typescript
+// approveToolCall may return { action: 'hold', dueAt?, onDue?: 'deny' | 'keep' }
+// a tool may return hold({ request?, dueAt?, onDue? }) to leave its result open
+harness.pending(scope?: { threadId } | { executionId }): Promise<HeldCall[]>;
+harness.resolve(scope, { callId, argsHash?, action: 'allow' | 'deny' | 'guide', guidance? }): Promise<void>;
+harness.resolve(scope, { callId, argsHash?, output }): Promise<void>;
+// HeldCall: { callId, name, args, argsHash, reason: 'approval' | 'result', dueAt?, onDue?, request? }
+```
+
+A call that needs approval with no approver, or whose approver answers `hold`, is held: its siblings run, nothing is written for it, and the turn waits (and parks, with `park` on) until `resolve()`. Refusals are `NoeticError` `hold_refused`. Event: `{name}:tool_call_held`.
 
 ### Tool calls and `idempotencyKey`
 

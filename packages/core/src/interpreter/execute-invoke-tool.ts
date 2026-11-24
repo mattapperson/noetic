@@ -6,7 +6,7 @@
 import type { Span, SteeringDecision } from '@noetic-tools/types';
 import { frameworkCast, NoeticErrorImpl, validateSchema } from '@noetic-tools/types';
 import { ToolAttr } from '../observability/genai-attributes';
-import { askApproval } from '../runtime/tool-approval';
+import { awaitApproval } from '../runtime/tool-approval';
 import { emitToolUi } from '../runtime/tool-ui';
 import { buildToolExecutionContext, emitFrameworkEvent, getBroadcaster } from './action-deps';
 import type {
@@ -166,7 +166,7 @@ async function runInvokeTool<TContext, I, O>(
   }
 
   if (step.tool.needsApproval) {
-    const approval = await askApproval({
+    const approval = await awaitApproval({
       harness,
       toolName: step.tool.name,
       toolArgs: parsedArgs,

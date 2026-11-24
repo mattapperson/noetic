@@ -10,10 +10,11 @@ import type {
   ToolAcpDeclaration,
   ToolContextDeclaration,
   ToolExecutionContext,
+  ToolHold,
   ToolResultExtensionItem,
   ToolUiDeclaration,
 } from '@noetic-tools/types';
-import { NoeticConfigError } from '@noetic-tools/types';
+import { frameworkCast, NoeticConfigError } from '@noetic-tools/types';
 
 //#region Types
 
@@ -161,3 +162,28 @@ export function toolWithGenerator<
 }
 
 //#endregion
+
+/**
+ * @public
+ * What a tool returns to leave its result open for a person
+ * (spec 08 § Held tool calls). The tool has done its part — posted the question,
+ * opened the ticket — and the answer becomes the call's result when
+ * `harness.resolve()` gives one. The tool body does not run again.
+ *
+ * @param options - `request` is passed to whoever answers, as `HeldCall.request`.
+ *   `dueAt` (epoch ms) ends the hold; `onDue` says how: `deny` (the default)
+ *   fails the call, `keep` leaves it held.
+ */
+export function hold<O = never>(options?: {
+  request?: unknown;
+  dueAt?: number;
+  onDue?: 'deny' | 'keep';
+}): O {
+  const held: ToolHold = {
+    kind: 'noetic/tool-hold',
+    ...options,
+  };
+  // Typed as the tool's own output so `return hold()` fits any `execute`. The
+  // harness takes it out before anything reads it as a result.
+  return frameworkCast<O>(held);
+}

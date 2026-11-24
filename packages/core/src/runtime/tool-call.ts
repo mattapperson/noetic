@@ -8,11 +8,13 @@ import type { ContextLayer } from '@noetic-tools/context';
 import type {
   AgentHarnessContract,
   Context,
+  HeldCall,
   Item,
   ItemSchemaRegistry,
   StandardSchemaV1,
   SteeringDecision,
   Tool,
+  ToolHold,
 } from '@noetic-tools/types';
 import {
   frameworkCast,
@@ -24,7 +26,16 @@ import {
 } from '@noetic-tools/types';
 import { z } from 'zod';
 import { sanitizeToolNameForWire } from '../util/tool-name';
-import type { ApprovalOutcome } from './tool-approval';
+import type { HoldDue } from './held-calls';
+import {
+  HoldSignal,
+  heldArgsHash,
+  heldCallsOf,
+  heldScopeOf,
+  isOverdue,
+  toHeldCall,
+} from './held-calls';
+import type { ApprovalOutcome, ToolApproval } from './tool-approval';
 import { askApproval } from './tool-approval';
 import { buildToolExecutionContext } from './tool-context';
 import { emitToolUi } from './tool-ui';
@@ -126,6 +137,13 @@ export interface ToolCallResult {
   error?: boolean;
   /** Set when the tool declares `needsApproval` and the call reached the approver. */
   approval?: ApprovalOutcome;
+  /**
+   * Set when the call is held for a person (spec 08 § Held tool calls): it has no
+   * result yet, and `output` is empty.
+   */
+  held?: HeldCall;
+  /** The call was held and is now settled: its record can be dropped. */
+  settled?: boolean;
 }
 
 /**
@@ -150,7 +168,11 @@ export async function executeToolCall(params: ExecuteToolCallParams): Promise<To
     };
   }
 
-  if (params.layers && params.layers.length > 0) {
+  // A call that was held got past these layers before it was held.
+  const holds = heldCallsOf(params.harness);
+  const scope = heldScopeOf(params.context);
+  const prior = params.callId === undefined ? undefined : await holds.load(scope, params.callId);
+  if (!prior && params.layers && params.layers.length > 0) {
     const decision = await params.harness.beforeToolCall(
       params.layers,
       params.toolName,
@@ -172,26 +194,116 @@ export async function executeToolCall(params: ExecuteToolCallParams): Promise<To
   }
   const parsedArgs = validated.value;
 
-  const approval = matchedTool.needsApproval
-    ? await askApproval({
-        harness: params.harness,
-        toolName: matchedTool.name,
-        toolArgs: parsedArgs,
-        callId: params.callId,
-        ctx: params.context,
-      })
-    : undefined;
+  // A record for other arguments is for another call: this one starts over.
+  const held = prior?.argsHash === heldArgsHash(matchedTool.name, parsedArgs) ? prior : undefined;
+  const wasHeld = held !== undefined;
+  if (held?.reason === 'result') {
+    if (held.resolution?.hasOutput) {
+      return {
+        output: toolOutputText(held.resolution.output),
+        result: held.resolution.output,
+        settled: true,
+      };
+    }
+    if (isOverdue(held, holds.now())) {
+      return {
+        output: `Error: nobody answered '${matchedTool.name}' before the hold ran out`,
+        error: true,
+        settled: true,
+      };
+    }
+    return {
+      output: '',
+      held: toHeldCall(held),
+    };
+  }
+
+  let approval: ToolApproval | undefined;
+  try {
+    approval = matchedTool.needsApproval
+      ? await askApproval({
+          harness: params.harness,
+          toolName: matchedTool.name,
+          toolArgs: parsedArgs,
+          callId: params.callId,
+          ctx: params.context,
+        })
+      : undefined;
+  } catch (e) {
+    if (!(e instanceof HoldSignal) || params.callId === undefined) {
+      throw e;
+    }
+    return holdCall(params, {
+      callId: params.callId,
+      tool: matchedTool,
+      args: parsedArgs,
+      reason: 'approval',
+      due: e.due,
+    });
+  }
   if (approval && approval.decision.action !== SteeringAction.Allow) {
     return {
       ...refusedResult(approval.decision),
       approval: approval.outcome,
+      settled: wasHeld,
     };
   }
   const executed = await runMatchedTool(params, matchedTool, parsedArgs);
   return {
     ...executed,
     approval: approval?.outcome,
+    settled: wasHeld && executed.held === undefined,
   };
+}
+
+/** Write the record of a call that is now held, and report it as held. */
+async function holdCall(
+  params: ExecuteToolCallParams,
+  call: {
+    callId: string;
+    tool: Tool;
+    args: unknown;
+    reason: 'approval' | 'result';
+    due: HoldDue;
+    request?: unknown;
+  },
+): Promise<ToolCallResult> {
+  const record = await heldCallsOf(params.harness).open(heldScopeOf(params.context), {
+    callId: call.callId,
+    name: call.tool.name,
+    args: call.args,
+    argsHash: heldArgsHash(call.tool.name, call.args),
+    reason: call.reason,
+    ...(call.due.dueAt === undefined
+      ? {}
+      : {
+          dueAt: call.due.dueAt,
+        }),
+    ...(call.due.onDue === undefined
+      ? {}
+      : {
+          onDue: call.due.onDue,
+        }),
+    ...(call.request === undefined
+      ? {}
+      : {
+          request: call.request,
+        }),
+  });
+  return {
+    output: '',
+    held: toHeldCall(record),
+  };
+}
+
+/** True for what `hold()` returns: a tool leaving its result open. */
+function isToolHold(value: unknown): value is ToolHold {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'kind' in value &&
+    value.kind === 'noetic/tool-hold'
+  );
 }
 
 function refusedResult(decision: SteeringDecision): ToolCallResult {
@@ -254,6 +366,26 @@ async function runMatchedTool(
     } else {
       result = await executionResult;
     }
+    // The tool did its part and left the result for a person to give.
+    if (isToolHold(result)) {
+      if (callId === undefined) {
+        return {
+          output: `Error: '${matchedTool.name}' cannot be held: the call has no id`,
+          error: true,
+        };
+      }
+      return holdCall(params, {
+        callId,
+        tool: matchedTool,
+        args: parsedArgs,
+        reason: 'result',
+        due: {
+          dueAt: result.dueAt,
+          onDue: result.onDue,
+        },
+        request: result.request,
+      });
+    }
     if (uiBase) {
       emitToolUi({
         ...uiBase,
@@ -266,6 +398,16 @@ async function runMatchedTool(
       result,
     };
   } catch (e) {
+    // An approval seam inside the tool (a connection's gates) held the call.
+    if (e instanceof HoldSignal && callId !== undefined) {
+      return holdCall(params, {
+        callId,
+        tool: matchedTool,
+        args: parsedArgs,
+        reason: 'approval',
+        due: e.due,
+      });
+    }
     if (uiBase) {
       emitToolUi({
         ...uiBase,

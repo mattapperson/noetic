@@ -90,6 +90,8 @@ function formatMessage(error: NoeticError): string {
       return `Execution '${error.executionId}' lost its lease at term ${error.term}: ${error.reason}`;
     case 'ledger_write_failed':
       return `Execution '${error.executionId}' could not record '${error.path}': ${error.cause.message}`;
+    case 'hold_refused':
+      return `Held call '${error.callId}' refused the answer: ${error.reason}`;
     case 'verify_act_failed':
       return `Verify '${error.stepId}' act failed: ${error.cause.message}`;
     default: {

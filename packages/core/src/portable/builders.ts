@@ -16,4 +16,4 @@ export { spawn } from '../builders/spawn-builder';
 export { callModel, invokeTool, runCode, step } from '../builders/step-builders';
 
 /** @public */
-export { tool, toolWithGenerator } from '../builders/tool-builder';
+export { hold, tool, toolWithGenerator } from '../builders/tool-builder';

@@ -9,6 +9,11 @@ export const SteeringAction = {
   Allow: 'allow',
   Deny: 'deny',
   Guide: 'guide',
+  /**
+   * Leave the call open for a person. Only the harness approver
+   * (`approveToolCall`) may answer it; from a steering rule it is a denial.
+   */
+  Hold: 'hold',
 } satisfies Record<string, string>;
 
 export type SteeringAction = (typeof SteeringAction)[keyof typeof SteeringAction];
@@ -62,6 +67,13 @@ export type SteerAction = (typeof SteerAction)[keyof typeof SteerAction];
 export interface SteeringDecision {
   action: SteeringAction;
   guidance?: string;
+  /** With `hold`: epoch ms after which the hold runs out. */
+  dueAt?: number;
+  /**
+   * With `hold` and `dueAt`: what happens when it runs out. `deny` (the default)
+   * refuses the call; `keep` leaves it held.
+   */
+  onDue?: 'deny' | 'keep';
 }
 
 /** @public A single entry in the steering ledger, recording a tool call, model turn, or custom event. */

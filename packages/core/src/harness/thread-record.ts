@@ -159,16 +159,19 @@ export class ThreadRecord {
    * The turn on `ctx` parked: keep its record, marked with when to wake it. Its
    * checkpoint and ledger stay, since they are what the woken turn resumes from.
    */
-  park(ctx: Context, until: number): Promise<void> {
+  park(ctx: Context, until: number | undefined): Promise<void> {
     return this.updateHeld(ctx, (record) =>
       record.turn
         ? {
             ...record,
             turn: {
               ...record.turn,
-              parked: {
-                until,
-              },
+              parked:
+                until === undefined
+                  ? {}
+                  : {
+                      until,
+                    },
             },
           }
         : record,

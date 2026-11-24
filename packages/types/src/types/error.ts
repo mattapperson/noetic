@@ -142,6 +142,12 @@ export type NoeticError =
       cause: Error;
     }
   | {
+      /** An answer to a held tool call could not be taken (spec 08 § Held tool calls). */
+      kind: 'hold_refused';
+      callId: string;
+      reason: string;
+    }
+  | {
       /** A verify's `act` threw; the run is recorded with the failure as evidence (spec 37). */
       kind: 'verify_act_failed';
       stepId: string;

@@ -181,7 +181,39 @@ The approver receives `{ toolName, toolArgs, callId, ctx }`. `toolArgs` are the 
 
 **Refusal.** A refused call never runs. On the model-driven path the model receives an error tool result (`Tool call denied: <guidance>`), the same shape as a gating-layer refusal. An `invokeTool` step throws `NoeticError` kind `steering_denied` carrying the guidance. An approver that throws refuses the call.
 
-**No approver.** A harness without `approveToolCall` runs the call unapproved and logs a warning once per tool name. Traces show it: each `tool.call` span carries `tool.approval` — `approved`, `denied`, or `none_configured`.
+**No approver, or `hold`.** A harness without `approveToolCall` does not run the call unapproved: it **holds** it. So does an approver that answers `{ action: 'hold' }`, after sending the request wherever it likes. Nothing is written to the conversation for a held call. The rest of the round's calls run, and the turn waits.
+
+```ts validate=none
+const [held] = await harness.pending({ threadId });
+// held: { callId, name, args, argsHash, reason: 'approval', dueAt?, … }
+
+await harness.resolve({ threadId }, { callId: held.callId, argsHash: held.argsHash, action: 'allow' });
+```
+
+- `resolve` takes `allow`, `deny` or `guide` (with `guidance`). The first answer wins; the same answer again is a no-op, and a different one fails with `hold_refused`.
+- `argsHash` ties the answer to the exact call the person saw. An answer for other arguments is refused.
+- A hold may carry `dueAt`: when it passes the call is denied, or stays held with `onDue: 'keep'`.
+- The stream emits `{name}:tool_call_held` with the same fields as `pending()`.
+- On storage with [`park`](/docs/framework/durability#parked-turns) on, a turn whose only work left is a held call parks. Any harness on that storage can list it, answer it and finish the turn, and no finished call runs again.
+
+A tool can also leave its own **result** open, by returning `hold()` once it has done its part:
+
+```ts validate=none
+const askPerson = tool({
+  name: 'ask_person',
+  input: z.object({ question: z.string() }),
+  output: z.string(),
+  execute: async ({ question }) => {
+    await slack.post(channel, question);
+    return hold({ request: { question } }); // the body does not run again
+  },
+});
+
+// Later, when the person replies:
+await harness.resolve({ threadId }, { callId, output: 'Use the new address.' });
+```
+
+Traces show the outcome: each `tool.call` span carries `tool.approval` — `approved` or `denied`.
 
 **Self-gating integrations.** A wrapper that gates inside `execute` does not declare `needsApproval`, so its calls are gated once. [`fromAiSdkTool`](/docs/framework/chat-sdk) is one: it waits on its own approval channels and fails the call when it is refused or times out.
 

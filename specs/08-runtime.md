@@ -661,6 +661,7 @@ interface FrameworkStreamEvent {
 | `{name}:item_appended` | Emitted whenever a framework-authored item enters the session log — turn input messages (after `turn_started`), between-rounds inbox injections, tool result items, and the items a step with `emitItems` adds when it finishes, or streams again on replay under `emitItemsOnReplay` (`01-step-type` § Emitting items). Data: `{ item }`. Backs `getItemStream` for everything the SDK stream cannot carry, so it is emitted unconditionally — never filtered by `step.emit`. |
 | `{name}:custom_item_event` | One event of a declared custom item, as a step yields it (`34-custom-items`). Data: `{ id, type, event }`; `id` is the one its final item takes. Emitted unconditionally, like `item_appended`. |
 | `{name}:turn_completed` | Emitted when a turn completes. Data: `{ turnId, durationMs }` |
+| `{name}:tool_call_held` | Emitted when a tool call is held for a person (§ Held tool calls). Data: the `HeldCall`: `{ callId, name, args, argsHash, reason, dueAt?, onDue?, request? }` |
 | `{name}:turn_parked` | Emitted in place of `turn_completed` when a turn parks (`23-durable-execution` § Parked turns). Data: `{ turnId, durationMs, wakeAt }` |
 | `{name}:turn_aborted` | Emitted when a turn is aborted or errors. Data: `{ turnId, reason }` |
 | `{name}:steer_accepted` | Emitted when a steer is queued while a turn runs. Always precedes the `inbox_injected` that applies it. Data: `{ messageId, turnId, deliveryMode }` |
@@ -817,7 +818,7 @@ Ordering at resolve time: an eager `step.tools` array still wins for its own cal
 
 ### Tool approval
 
-`AgentHarnessOpts.approveToolCall?: ToolApprover` is the harness approver for tools that declare `needsApproval`; the harness stores it as `config.approveToolCall`. Both tool-executing paths — the model-driven tool loop and `invokeTool` — ask it after the `beforeToolCall` layers allow a call and before `execute` runs. `allow` runs the call; any other action refuses it, and an approver that throws refuses it too. Without an approver, such calls run unapproved and the harness logs a warning once per tool name. The contract, gate order, and refusal shapes are specified in `02-step-variants` ("Approval").
+`AgentHarnessOpts.approveToolCall?: ToolApprover` is the harness approver for tools that declare `needsApproval`; the harness stores it as `config.approveToolCall`. Both tool-executing paths — the model-driven tool loop and `invokeTool` — ask it after the `beforeToolCall` layers allow a call and before `execute` runs. `allow` runs the call; any other action refuses it, and an approver that throws refuses it too. It may also answer `hold`. Without an approver, such calls are held (§ Held tool calls). The contract, gate order, and refusal shapes are specified in `02-step-variants` ("Approval").
 
 ```typescript
 const harness = new AgentHarness({
@@ -830,6 +831,45 @@ const harness = new AgentHarness({
   },
 });
 ```
+
+### Held tool calls
+
+A tool call can be left open for a person. Nothing is written to the conversation for it; the turn goes no further than its round until it is answered.
+
+**What holds a call.**
+
+- The approver answers `{ action: 'hold' }`. It has usually sent the request somewhere first: where it goes is business logic, and core has no opinion. `dueAt` (epoch ms) ends the hold, and `onDue` says how: `deny` (the default) or `keep`.
+- A call needs approval and the harness has no approver. This is the one rule for `needsApproval` tools and for a model's call to a connection operation that needs approval (`35-connections` § Gates).
+- A tool returns `hold({ request?, dueAt?, onDue? })` in place of a result. The tool has done its part; the answer becomes its result.
+
+`hold` is the approver's answer only. From a `beforeToolCall` layer it is a denial.
+
+**The record.** A held call is one record under `execution:<root id>:held:<callId>`: the tool name, the validated arguments, a hash of both, why it is held (`approval` or `result`), the deadline, and once it has one, its answer. The harness always has storage, so this is the same in memory and on disk.
+
+**In the round.** The round's other calls run and record as usual (`23a-step-level-resume` § Tool calls in a round). The held call gets no output item. The harness emits `{name}:tool_call_held` with the fields `pending()` returns, then waits. When something changes it walks the held calls again: an answered one is settled, and the round goes back to the model once none is held.
+
+**Answering.**
+
+```typescript
+harness.pending(scope?): Promise<HeldCall[]>;
+harness.resolve(scope, answer: { callId: string; argsHash?: string } & HeldResolution): Promise<void>;
+
+type HeldResolution =
+  | { action: 'allow' | 'deny' | 'guide'; guidance?: string }  // for an approval
+  | { output: unknown };                                       // for a held result
+```
+
+`scope` is `{ threadId }`, or `{ executionId }` for an execution the host runs itself with `harness.run()`.
+
+- `allow` runs the tool. `deny` and `guide` give the refusal an approver's would. An `output` becomes the call's result; the tool body does not run again.
+- The first answer wins, by `swap` where storage has it. The same answer again is a no-op; a different one is refused.
+- `argsHash` is the hash the call was shown with. An answer for other arguments is refused, so an approval never applies to an action other than the one a person saw. A record whose arguments no longer match its call is void, and the call is asked about again.
+- Each refusal is `NoeticError` `hold_refused` with `callId` and `reason`: the call is not held, the arguments differ, the answer is the wrong kind for the hold, or it was already answered differently.
+- A deadline that passes with `onDue: 'deny'` settles the call as a denial that says so.
+
+**Where the turn is.** A turn running in this process is told, and goes on at once. On storage with parking on (`23-durable-execution` § Parked turns), a turn whose every step in flight is a held call or a resumable wait parks; `resolve()` then wakes it. A parked turn waiting only on a held call has no time to wake at, so `parked.wakeAt` is absent and a routine `wake()` leaves it alone. Any harness over the same storage can list, answer and finish it.
+
+An `invokeTool` step whose call is held waits the same way, under its step id.
 
 ### Item schema registry (extension-item validation)
 

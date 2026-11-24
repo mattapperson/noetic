@@ -331,7 +331,7 @@ A layer refusal stops the call before the approver is asked, so policy runs befo
 
 **Refusal.** A refused call never executes. On the model-driven path the model receives the refusal as an error tool result, the same shape as a gating-layer refusal (`Tool call denied: <guidance>`, or `Tool call redirected: <guidance>` for `guide`). An `invokeTool` step throws `NoeticError` kind `steering_denied` carrying the guidance. An approver that throws refuses the call, with the error message as the guidance.
 
-**No approver.** A harness without `approveToolCall` runs the call unapproved and logs a warning once per tool name, pointing at the option. The span records the outcome (below), so unapproved runs stay visible in traces.
+**No approver.** A harness without `approveToolCall` holds the call for a person (`08-runtime` § Held tool calls); it does not run it unapproved. An approver may hold a call too, by answering `hold`.
 
 **Tracing.** Each `tool.call` span carries `tool.needs_approval` and, once the call reaches the approval stage, `tool.approval`: `approved`, `denied`, or `none_configured` (`10-observability`). A call stopped by a layer, or one whose tool does not need approval, has no `tool.approval`.
 
