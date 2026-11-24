@@ -100,6 +100,11 @@ export async function askApproval(params: {
   toolName: string;
   toolArgs: unknown;
   callId?: string;
+  /**
+   * The id the call's held record is under, when it is not `callId`. The approver
+   * is still shown `callId`, the id the call goes by everywhere else.
+   */
+  recordId?: string;
   ctx: Context;
   /**
    * The caller already matched the held record to this call, so `toolArgs` need not
@@ -108,10 +113,9 @@ export async function askApproval(params: {
   matched?: boolean;
 }): Promise<ToolApproval> {
   const holds = heldCallsOf(params.harness);
+  const recordId = params.recordId ?? params.callId;
   const held =
-    params.callId === undefined
-      ? undefined
-      : await holds.load(heldScopeOf(params.ctx), params.callId);
+    recordId === undefined ? undefined : await holds.load(heldScopeOf(params.ctx), recordId);
   const sameCall =
     held?.reason === 'approval' &&
     (params.matched === true || held.argsHash === heldArgsHash(params.toolName, params.toolArgs));

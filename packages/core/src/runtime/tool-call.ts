@@ -122,6 +122,18 @@ export interface ExecuteToolCallParams {
    * `ToolExecutionContext.callId`, a connection tool's idempotency key.
    */
   callId?: string;
+  /**
+   * The id the call's durable records go under: its held record, a `durable` tool's
+   * intent, its idempotency key. Defaults to `callId`. A caller whose `callId` does
+   * not survive a resume (an ACP agent makes the call again under a new id) gives
+   * one that does.
+   */
+  recordId?: string;
+}
+
+/** The id a call's durable records go under. */
+function recordIdOf(params: ExecuteToolCallParams): string | undefined {
+  return params.recordId ?? params.callId;
 }
 
 function isAsyncGenerator(value: unknown): value is AsyncGenerator<unknown, unknown> {
@@ -177,7 +189,8 @@ export async function executeToolCall(params: ExecuteToolCallParams): Promise<To
   // A call that was held got past these layers before it was held.
   const holds = heldCallsOf(params.harness);
   const scope = heldScopeOf(params.context);
-  const prior = params.callId === undefined ? undefined : await holds.load(scope, params.callId);
+  const recordId = recordIdOf(params);
+  const prior = recordId === undefined ? undefined : await holds.load(scope, recordId);
   if (!prior && params.layers && params.layers.length > 0) {
     const decision = await params.harness.beforeToolCall(
       params.layers,
@@ -246,15 +259,16 @@ export async function executeToolCall(params: ExecuteToolCallParams): Promise<To
             toolName: matchedTool.name,
             toolArgs: parsedArgs,
             callId: params.callId,
+            recordId,
             ctx: params.context,
           })
         : undefined;
   } catch (e) {
-    if (!(e instanceof HoldSignal) || params.callId === undefined) {
+    if (!(e instanceof HoldSignal) || recordId === undefined) {
       throw e;
     }
     return holdCall(params, {
-      callId: params.callId,
+      callId: recordId,
       tool: matchedTool,
       args: parsedArgs,
       reason: 'approval',
@@ -271,12 +285,12 @@ export async function executeToolCall(params: ExecuteToolCallParams): Promise<To
   // A durable tool must not be repeated unasked. An intent record says it started;
   // finding one with no result means a host died while it ran, and only a person
   // can say whether its effect landed.
-  const armed = matchedTool.durable === true && params.callId !== undefined;
-  if (armed && params.callId !== undefined) {
+  const armed = matchedTool.durable === true && recordId !== undefined;
+  if (armed && recordId !== undefined) {
     const argsHash = heldArgsHash(matchedTool.name, parsedArgs);
-    if (!rerun && (await holds.wasStarted(scope, params.callId, argsHash))) {
+    if (!rerun && (await holds.wasStarted(scope, recordId, argsHash))) {
       return holdCall(params, {
-        callId: params.callId,
+        callId: recordId,
         tool: matchedTool,
         args: parsedArgs,
         reason: 'outcome',
@@ -286,9 +300,9 @@ export async function executeToolCall(params: ExecuteToolCallParams): Promise<To
     if (mayWriteHolds(params.context)) {
       if (rerun) {
         // Answered: if this attempt is cut off too, the question is asked afresh.
-        await holds.close(scope, params.callId);
+        await holds.close(scope, recordId);
       }
-      await holds.arm(scope, params.callId, argsHash);
+      await holds.arm(scope, recordId, argsHash);
     }
   }
   const executed = await runMatchedTool(params, matchedTool, parsedArgs);
@@ -374,7 +388,10 @@ async function runMatchedTool(
   matchedTool: Tool,
   parsedArgs: unknown,
 ): Promise<ToolCallResult> {
-  const toolCtx = buildToolExecutionContext(params.context, params.harness, params.callId);
+  const toolCtx = buildToolExecutionContext(params.context, params.harness, {
+    callId: params.callId,
+    recordId: recordIdOf(params),
+  });
   const callId = params.callId;
   const uiBase =
     callId !== undefined

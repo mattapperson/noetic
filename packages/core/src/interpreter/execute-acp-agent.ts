@@ -18,6 +18,7 @@ import type {
   AcpLiveSession,
   AcpPermissionOutcome,
   AcpPermissionSteerer,
+  AcpSession,
   AcpSessionPolicy,
   AcpTurnResult,
   Context,
@@ -43,6 +44,7 @@ import type { AcpSessionStore } from '../runtime/acp-session-store';
 import { AcpEventBridge } from './acp-events';
 import { withHistoryPrompt } from './acp-history';
 import { renderLayerContext } from './acp-layers';
+import { ACP_RESUME_NOTICE, acpSessionRecords } from './acp-resume';
 import { AcpToolRunner, mergeBridgedItems, resolveAcpTools } from './acp-tools';
 import { appendUserInput, MAX_STEERING_RETRIES, resolveLazy } from './execute-action';
 import { trackUsage } from './message-helpers';
@@ -448,6 +450,58 @@ interface SessionResolution {
   keepAlive: AcpKeepAlive;
   /** True when this step opened the connection rather than reusing one. */
   fresh: boolean;
+  /** True when this step reloaded the session an earlier attempt of it opened. */
+  resumed: boolean;
+}
+
+/**
+ * Open the step's session on a new connection. An earlier attempt's session is
+ * reloaded when the agent can; an agent that cannot, or that no longer has the
+ * session, gets a new one, and the step starts it over.
+ */
+async function sessionOn(
+  connection: AcpAgentConnection,
+  opts: {
+    cwd: string;
+    /** The session the step names with `session.load`. A failure to load it is an error. */
+    loadId?: string;
+    /** The session an earlier attempt of this step opened. */
+    resumeId?: string;
+  },
+): Promise<{
+  session: AcpSession;
+  resumed: boolean;
+}> {
+  const { cwd, loadId, resumeId } = opts;
+  if (loadId) {
+    return {
+      session: await connection.loadSession({
+        sessionId: loadId,
+        cwd,
+      }),
+      resumed: false,
+    };
+  }
+  if (resumeId !== undefined && connection.agentCapabilities.loadSession === true) {
+    const session = await connection
+      .loadSession({
+        sessionId: resumeId,
+        cwd,
+      })
+      .catch(() => undefined);
+    if (session) {
+      return {
+        session,
+        resumed: true,
+      };
+    }
+  }
+  return {
+    session: await connection.newSession({
+      cwd,
+    }),
+    resumed: false,
+  };
 }
 
 async function openSession<TContext, I, O>(opts: {
@@ -459,7 +513,10 @@ async function openSession<TContext, I, O>(opts: {
   /** Per-turn host binding, reapplied when an existing session is reused. */
   binding: HostBindingOptions<TContext, I, O>;
   tools?: AcpToolRunner;
+  /** The session an earlier attempt of this step opened, to reload when the agent can. */
+  resumeId?: string;
 }): Promise<SessionResolution> {
+  let resumed = false;
   const store = sessionStore(opts.baseCtx);
   const keepAlive = keepAliveOf(opts.step.session);
   const reuseKey = opts.step.session?.reuse;
@@ -487,15 +544,13 @@ async function openSession<TContext, I, O>(opts: {
     // must close it first — otherwise the agent outlives the step and, because
     // its stdio keeps the event loop alive, the host never exits.
     try {
-      const loadId = opts.step.session?.load;
-      const session = loadId
-        ? await connection.loadSession({
-            sessionId: loadId,
-            cwd: opts.cwd,
-          })
-        : await connection.newSession({
-            cwd: opts.cwd,
-          });
+      const opened = await sessionOn(connection, {
+        cwd: opts.cwd,
+        loadId: opts.step.session?.load,
+        resumeId: opts.resumeId,
+      });
+      resumed = opened.resumed;
+      const { session } = opened;
       return {
         connection,
         session,
@@ -530,6 +585,7 @@ async function openSession<TContext, I, O>(opts: {
     key,
     keepAlive,
     fresh,
+    resumed,
   };
 }
 
@@ -815,6 +871,14 @@ export async function executeAcpAgent<TContext, I, O>(
     input: promptText,
   });
 
+  // An earlier attempt of this step may have left its session behind.
+  const sessions = step.session?.load ? undefined : acpSessionRecords(baseCtx);
+  const recorded = await sessions?.load();
+  const resumeId = recorded?.agentId === agent.agentId ? recorded.sessionId : undefined;
+  // `session/load` replays the session's conversation as updates. They are the
+  // agent's history, not this turn's work, so they are not forwarded.
+  let reloading = false;
+
   let bridge = new AcpEventBridge(step, agent.agentId, baseCtx);
   // A tool pipeline error fails the step, as it does in `callModel`: it is
   // kept, the agent's turn is cancelled, and the error is thrown once the
@@ -826,6 +890,9 @@ export async function executeAcpAgent<TContext, I, O>(
     agentId: agent.agentId,
     layers,
     onUpdate: (notification) => {
+      if (reloading) {
+        return;
+      }
       tools?.observe(notification.update);
       events.forward(notification);
     },
@@ -847,6 +914,7 @@ export async function executeAcpAgent<TContext, I, O>(
     cwd,
   });
 
+  reloading = resumeId !== undefined;
   const resolution = await openSession({
     step,
     agent,
@@ -855,19 +923,31 @@ export async function executeAcpAgent<TContext, I, O>(
     host,
     binding: bindingFor(bridge),
     tools,
+    resumeId,
+  }).finally(() => {
+    reloading = false;
   });
+  if (resolution.fresh && !resolution.resumed) {
+    await sessions?.write({
+      sessionId: resolution.live.session.sessionId,
+      agentId: agent.agentId,
+    });
+  }
 
   await applySessionSelection(step, ctx, resolution, baseCtx);
   turnError.cancel = () => resolution.live.session.cancel();
 
   // History seeds only a freshly opened session; a reused one already owns
   // its conversation on the agent side.
-  let turnPrompt = resolution.fresh
-    ? withHistoryPrompt({
-        prompt: promptText,
-        history: priorHistory,
-      })
-    : promptText;
+  // A reloaded session has its conversation too, and the work it had done.
+  let turnPrompt = resolution.resumed
+    ? `${ACP_RESUME_NOTICE}\n\n${promptText}`
+    : resolution.fresh
+      ? withHistoryPrompt({
+          prompt: promptText,
+          history: priorHistory,
+        })
+      : promptText;
   let turnBlocks = blocks;
   let retries = 0;
   for (;;) {
@@ -934,6 +1014,7 @@ export async function executeAcpAgent<TContext, I, O>(
       await baseCtx.harness.storeLayers(layers, response, baseCtx);
     }
     await finalizeSession(resolution, baseCtx);
+    await sessions?.clear();
     return await stepOutput(step, result);
   }
 }

@@ -419,6 +419,40 @@ session: { reuse: 'assistant', keepAlive: 'harness' }
 `session.load` resumes an existing ACP session id via `session/load` instead of
 creating a new one.
 
+### Resuming a step
+
+An ACP step is cut off like any other: the host dies while the agent works. On a
+durable run (`23a-step-level-resume`) the step keeps two things so a resume does
+not start the agent's work over.
+
+**The agent's session.** When the step opens a session it stores the session id
+with the run's pending entries, under `execution:<root id>:pending:<step path>/acp-session`,
+and removes it when the step finishes. A resumed step that finds one, written by
+the same agent id:
+
+1. connects, and when the agent advertises `loadSession` calls `session/load`
+   with the stored id. The `session/update` notifications the agent replays
+   while it loads are its history, not this turn's work, and are not forwarded
+   as events.
+2. sends the step's prompt behind a notice that the previous turn was cut off
+   and that finished work is not to be redone (`ACP_RESUME_NOTICE`). The
+   conversation history is not prepended: the session has it.
+
+An agent that does not advertise `loadSession`, or that fails the load because
+it no longer has the session, gets a new session and the prompt with the
+conversation history, as on a first run, and the new id replaces the stored one.
+A step that names `session.load` itself keeps no record: its session is the
+caller's.
+
+**The tool calls it made.** Each call the agent makes through the tool bridge is
+recorded in the step ledger as it finishes (`38-acp-tools` § Replay), so an
+agent that makes a call again on resume, in a reloaded session or a new one,
+gets the result it got the first time and the tool does not run.
+
+What a resume cannot recover is work the agent did with its own tools and its
+`fs/*` and `terminal/*` calls: those are the agent's, and it is the agent,
+reading its reloaded session, that decides not to repeat them.
+
 **A kept connection holds the turn's connections.** Its agent may call a step
 entry's tools on a later turn, so a connection kept past its step
 (`'run'` or `'harness'`) holds what the turn attached (`registry.hold`) and

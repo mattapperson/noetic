@@ -513,6 +513,8 @@ const review = step.acpAgent({
 
 The interpreter mirrors `executeCallModel`: it appends the prompt as a user item, opens (or reuses) a connection + session, applies `mode`/`model`, drives one `session/prompt`, forwards each notification as an `acp_event` framework event, appends the turn's items to the item log, charges `ctx.tokens`/`ctx.cost`, records `ctx.lastStepMeta`, tears the connection down per policy, and returns the assistant text (or the parsed `output`).
 
+**Resume.** On a durable run a cut-off `step.acpAgent` reloads the agent's own session on resume (`session/load`, when the agent advertises `loadSession`; `claudeCode()` and `codex()` do) and sends the prompt behind `ACP_RESUME_NOTICE`; otherwise it opens a new session with the history. Each bridged tool call is recorded as it finishes, keyed by tool, arguments and order, so a call the resumed agent makes again is answered from the record. Tool `durable` applies as in `callModel`: `false` runs again, `true` is held as `outcome` when the host died inside it. A held bridged call waits inside the agent's turn (no parking) until `harness.resolve()`; its `HeldCall.callId` is the record id `acp:<step path>/bridged:<tool>:<hash>#<n>`, not the agent's call id.
+
 **Client capabilities.** ACP inverts control: the agent asks the client to read/write files and run terminals. Noetic serves those from `ctx.fs` and `ctx.shell`, so a sub-agent's file and shell access is sandboxed and audited like a first-party step. `clientCapabilities` withdraws one — the agent is then told the method does not exist:
 
 ```typescript

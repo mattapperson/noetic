@@ -32,8 +32,16 @@ export function toolIdempotencyKey(executionId: string, toolCallId: string): str
 export function buildToolExecutionContext(
   ctx: Context,
   harness: AgentHarnessContract,
-  callId?: string,
+  call?:
+    | string
+    | {
+        callId?: string;
+        /** The id the idempotency key is made from, when it is not `callId`. */
+        recordId?: string;
+      },
 ): ToolExecutionContext {
+  const callId = typeof call === 'string' ? call : call?.callId;
+  const recordId = typeof call === 'string' ? call : (call?.recordId ?? call?.callId);
   const toolContext = buildToolContext(harness, ctx);
   return {
     ctx,
@@ -48,7 +56,7 @@ export function buildToolExecutionContext(
       : {
           callId,
           // The root execution's id: a child context gets a new id on every resume.
-          idempotencyKey: toolIdempotencyKey(rootIdOf(ctx), callId),
+          idempotencyKey: toolIdempotencyKey(rootIdOf(ctx), recordId ?? callId),
         }),
   };
 }

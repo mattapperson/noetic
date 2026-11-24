@@ -39,9 +39,12 @@ import type { SplitStepTools } from '../connections/step-tools';
 import { offeredTools, stepConnectionsOf } from '../connections/step-tools';
 import { ToolAttr } from '../observability/genai-attributes';
 import { drainsOf } from '../runtime/drain';
+import { heldCallsOf, heldScopeOf, mayWriteHolds, waitOnHeldCalls } from '../runtime/held-calls';
 import { createToolResultItem, executeToolCall, resolveWireJsonSchema } from '../runtime/tool-call';
 import { sanitizeToolNameForWire } from '../util/tool-name';
 import type { AcpEventBridge } from './acp-events';
+import type { BridgedCallRecord } from './acp-resume';
+import { BridgedCallRecords } from './acp-resume';
 import { openChildSpan, traceChild } from './child-span';
 import { deduplicateTools } from './collect-tools';
 import { resolveLazy, resolveToolsAndRestrictions, splitResolvedTools } from './execute-action';
@@ -250,6 +253,8 @@ export class AcpToolRunner implements AcpToolHost {
   private readonly announced = new Map<string, string>();
   /** Ids already given to a call this session; an agent may not reuse one. */
   private readonly claimed = new Set<string>();
+  /** What each call recorded, so a resumed step replays it (spec 27 § Resuming a step). */
+  private readonly records = new BridgedCallRecords();
 
   constructor(private readonly source: ReadonlyArray<Tool>) {
     const wrapped = new Set<string>();
@@ -448,6 +453,49 @@ export class AcpToolRunner implements AcpToolHost {
     return Reflect.get(call.args, WRAPPED_ARG);
   }
 
+  /**
+   * Run the call to a result. A call held for a person waits here, with the agent
+   * waiting on it: the turn stays live, since the agent's process is what holds its
+   * place. The result is recorded before the call's intent or hold is dropped, so a
+   * step cut off in between asks again rather than runs again.
+   */
+  private async settle(
+    binding: AcpToolBinding,
+    record: BridgedCallRecord,
+    params: Parameters<typeof executeToolCall>[0],
+  ): ReturnType<typeof executeToolCall> {
+    const { ctx } = binding;
+    let result = await executeToolCall(params);
+    while (result.held !== undefined) {
+      binding.events.toolEvent('tool_call_held', {
+        name: params.toolName,
+        callId: result.held.callId,
+        reason: result.held.reason,
+      });
+      await waitOnHeldCalls({
+        harness: ctx.harness,
+        ctx,
+        callIds: [
+          result.held.callId,
+        ],
+        park: false,
+      });
+      result = await executeToolCall(params);
+    }
+    const stored = await record.store(result);
+    if (!mayWriteHolds(ctx)) {
+      return result;
+    }
+    const holds = heldCallsOf(ctx.harness);
+    if (result.armed && stored) {
+      await holds.disarm(heldScopeOf(ctx), record.id);
+    }
+    if (result.settled) {
+      await holds.close(heldScopeOf(ctx), record.id);
+    }
+    return result;
+  }
+
   private async execute(
     binding: AcpToolBinding,
     call: AcpToolCall,
@@ -459,15 +507,25 @@ export class AcpToolRunner implements AcpToolHost {
       name: call.name,
       callId,
     });
-    const result = await executeToolCall({
-      toolName: call.name,
+    const record = this.records.recordFor({
+      ctx: binding.ctx,
+      stepId: binding.stepId,
+      tool,
+      wireName: call.name,
       args,
-      tools: this.source,
-      context: binding.ctx,
-      harness: binding.ctx.harness,
-      layers: binding.layers,
-      callId,
     });
+    const result =
+      record.take() ??
+      (await this.settle(binding, record, {
+        toolName: call.name,
+        args,
+        tools: this.source,
+        context: binding.ctx,
+        harness: binding.ctx.harness,
+        layers: binding.layers,
+        callId,
+        recordId: record.id,
+      }));
     const callItem: FunctionCallItem = {
       id: callId,
       type: 'function_call',

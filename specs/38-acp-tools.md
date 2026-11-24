@@ -121,6 +121,44 @@ through `ToolExecutionContext.callId`) carry the id the agent's own records use:
 An agent id already used in the session is refused: the call does not run and
 the agent gets an error result, so one id never keys two calls.
 
+### Replay
+
+On a durable run each call is recorded in the step ledger as it finishes,
+beneath the step's entry:
+
+```
+<step path>/bridged:<wire name>:<hash of the arguments>#<n>
+```
+
+`<n>` is the call's place among the step's calls with that tool and those
+arguments, so two equal calls keep two records. The agent's own id for a call is
+not part of the key: an agent that makes the call again after a resume
+(`27-acp-agent-steps` § Resuming a step) uses a new id, but asks for the same
+thing. A call that matches a record is answered with the recorded result: the
+tool does not run, and the call and its result still land in the item log. A
+call with other arguments runs. The step's own entry prunes these records when
+it lands.
+
+A tool's `durable` setting means what it means in `callModel`
+(`23a-step-level-resume` § Tool calls in a round): unset records the call,
+`false` records nothing so the call runs again, and `true` also writes an
+intent record before the tool runs, so a call the host died inside is held as
+`outcome` on resume instead of repeated.
+
+The same key, as `acp:<record path>`, is the id of the call's durable records:
+its held record (`HeldCall.callId`), a durable tool's intent, and its
+idempotency key (`<execution>:tool:acp:<record path>`). The approver, the
+events and the items keep the agent's id.
+
+### Held calls
+
+A bridged call that is held, for approval with no approver, by a tool that
+returned `hold()`, or as a durable tool's unknown outcome, waits inside the
+bridge until `harness.resolve()` answers it, then goes on with the answer. The
+turn does not park: the agent's process is waiting on the call. Event:
+`tool_call_held`. The record is under the call's replay key, so an answer given
+while the host was down is found when the resumed agent makes the call again.
+
 A call the agent cancels while it runs, or one still running when the agent
 ends its turn, runs to completion and is recorded: the turn ends only once the
 runner is idle, as an in-flight `callModel` call belongs to its aborted round.
@@ -313,8 +351,9 @@ entries a `callModel` node takes, resolved from `HydrationContext.tools`.
 - **MCP over ACP.** See spec 27: the draft `mcp-over-acp` RFD would carry the
   bridge on the ACP connection itself and need no `reach`. Prefer it once an
   agent advertises `mcpCapabilities.acp`; none does yet.
-- **Replay.** A replayed ACP step re-runs its tool calls; recording each
-  bridged call in the step ledger would serve the recorded result instead.
+- **Parking a held call.** A held bridged call keeps the agent's process and its
+  MCP request open. Ending the turn and answering the call in a reloaded session
+  would let the turn park.
 - **Steers.** A `callModel` step offers queued steers before each tool call and
   can skip the rest of a round. ACP steps take no steers yet, so bridged calls
   have no steer point.

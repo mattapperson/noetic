@@ -146,6 +146,8 @@ export {
 //#region Execution
 
 /** @public */
+export { ACP_RESUME_NOTICE } from './interpreter/acp-resume';
+/** @public */
 export { execute } from './interpreter/execute';
 
 //#endregion
