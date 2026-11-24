@@ -92,6 +92,8 @@ function formatMessage(error: NoeticError): string {
       return `Execution '${error.executionId}' could not record '${error.path}': ${error.cause.message}`;
     case 'turn_stuck':
       return `Execution '${error.executionId}' is stuck: step '${error.path}' had a lasting effect under version '${error.from}' and no longer matches under '${error.to}'`;
+    case 'decision_refused':
+      return `Thread '${error.threadId}' refused the decision '${error.action}': ${error.reason}`;
     case 'hold_refused':
       return `Held call '${error.callId}' refused the answer: ${error.reason}`;
     case 'verify_act_failed':

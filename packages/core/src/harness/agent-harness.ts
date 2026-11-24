@@ -738,9 +738,13 @@ export class AgentHarness<
    * its stuck turn. It is not written to the conversation, and input that holds
    * nothing else starts no turn: the turn the decision is for goes on.
    *
-   * @throws NoeticError `hold_refused` when a decision does not fit: the thread
-   *   holds no such call, `argsHash` names other arguments, the action is the wrong
-   *   kind, the call was already answered differently, or no turn is stuck.
+   * @throws NoeticError `hold_refused` when an answer to a held call cannot be
+   *   taken: the thread holds no such call, `argsHash` names other arguments, the
+   *   answer is the wrong kind for the hold, or the call was already answered
+   *   differently.
+   * @throws NoeticError `decision_refused` when a decision does not fit what the
+   *   thread is waiting on: no turn is stuck, or its action is the wrong kind for a
+   *   decision with, or without, a `callId`.
    * @public
    */
   async execute(input: ExecuteArgument, options?: ExecuteOptions): Promise<void> {
@@ -792,11 +796,12 @@ export class AgentHarness<
       const settles = action === 'continue' || action === 'restart' || action === 'abandon';
       if (!settles || !(await this.settleStuckTurn(threadId, action))) {
         throw new NoeticErrorImpl({
-          kind: 'hold_refused',
-          callId: '',
+          kind: 'decision_refused',
+          threadId,
+          action: String(action),
           reason: settles
             ? 'the thread has no stuck turn'
-            : `"${String(action)}" answers a held call: give its callId`,
+            : 'it answers a held call: give its callId',
         });
       }
       return;
@@ -813,9 +818,10 @@ export class AgentHarness<
     const { action, guidance } = decision;
     if (action !== 'allow' && action !== 'deny' && action !== 'guide') {
       throw new NoeticErrorImpl({
-        kind: 'hold_refused',
-        callId,
-        reason: `"${String(action)}" settles a stuck turn: it takes no callId`,
+        kind: 'decision_refused',
+        threadId,
+        action: String(action),
+        reason: 'it settles a stuck turn: it takes no callId',
       });
     }
     await this.resolveHeld(scope, {

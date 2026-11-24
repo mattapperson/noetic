@@ -2168,7 +2168,7 @@ harness.execute({ type: 'noetic:decision', callId, argsHash?, output }, { thread
 // HeldCall: { callId, name, args, argsHash, reason: 'approval' | 'result', dueAt?, onDue?, request? }
 ```
 
-A call that needs approval with no approver, or whose approver answers `hold`, is held: its siblings run, nothing is written for it, and the turn waits (and parks, with `park` on) until the decision. A decision is never written to the conversation and starts no turn. Refusals are `NoeticError` `hold_refused`. Event: `{name}:tool_call_held`.
+A call that needs approval with no approver, or whose approver answers `hold`, is held: its siblings run, nothing is written for it, and the turn waits (and parks, with `park` on) until the decision. A decision is never written to the conversation and starts no turn. Refusals of an answer are `NoeticError` `hold_refused`; a decision that does not fit at all (no stuck turn, wrong kind of action) is `decision_refused`. Event: `{name}:tool_call_held`.
 
 ### Triggers as data, durable `emit`
 

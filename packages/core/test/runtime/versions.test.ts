@@ -271,7 +271,9 @@ describe('a turn resumed under a newer flow version', () => {
     ]);
     expect(await second.listStuckRuns()).toEqual([]);
     // There is nothing left to settle: a second decision is refused.
-    expect(await kindOf(() => second.execute(decision('continue'), thread))).toBe('hold_refused');
+    expect(await kindOf(() => second.execute(decision('continue'), thread))).toBe(
+      'decision_refused',
+    );
     // And a decision of the wrong kind never reaches a turn.
     expect(
       await kindOf(() =>
@@ -283,7 +285,7 @@ describe('a turn resumed under a newer flow version', () => {
           thread,
         ),
       ),
-    ).toBe('hold_refused');
+    ).toBe('decision_refused');
   });
 
   it('runs from the top when the host restarts it', async () => {

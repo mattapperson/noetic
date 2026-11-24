@@ -229,7 +229,7 @@ harness.execute({ type: 'noetic:decision', action: 'continue' | 'restart' | 'aba
 | `restart` | The ledger, held calls and pending entries of the turn are cleared and it runs from the top on this harness's version. Every step runs again, effects included. The snapshot is kept: it holds the turn's input. |
 | `abandon` | The turn is dropped and its checkpoint cleared. Its trail is kept. The thread's next message starts a fresh turn. |
 
-A decision for a thread with no stuck turn is refused with `hold_refused`. The decision is never written to the conversation, and other input passed beside it is delivered after it, so `abandon` and the next message can go in one call.
+A decision for a thread with no stuck turn is refused with `decision_refused`. The decision is never written to the conversation, and other input passed beside it is delivered after it, so `abandon` and the next message can go in one call.
 
 A harness whose `agentGraph` is the root step `hydrateWorkflow` returned, and that names no version, takes `workflow-<hash of the document>`: editing the document is a new version, and the same document on another deploy is the same one. An explicit `version` wins.
 

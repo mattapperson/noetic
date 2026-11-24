@@ -878,7 +878,8 @@ There is no separate method to answer with: `execute()` is the one way in. It ac
 - A call held as `outcome` takes either kind: an `output` says it landed, `allow` runs it again with the same idempotency key, and `deny` or `guide` refuses it.
 - The first answer wins, by `swap` where storage has it. The same answer again is a no-op; a different one is refused.
 - `argsHash` is the hash the call was shown with. An answer for other arguments is refused, so an approval never applies to an action other than the one a person saw. A record whose arguments no longer match its call is void, and the call is asked about again.
-- Each refusal is `NoeticError` `hold_refused` with `callId` and `reason`: the call is not held, the arguments differ, the answer is the wrong kind for the hold, or it was already answered differently.
+- Each refusal of an answer is `NoeticError` `hold_refused` with `callId` and `reason`: the call is not held, the arguments differ, the answer is the wrong kind for the hold, or it was already answered differently.
+- A decision that does not fit at all is `decision_refused` with `threadId`, `action` and `reason`: a stuck-turn action given a `callId`, a held-call action given none, or a stuck-turn decision on a thread with no stuck turn.
 - A deadline that passes with `onDue: 'deny'` settles the call as a denial that says so.
 
 **Where the turn is.** A turn running in this process is told, and goes on at once. On storage with parking on (`23-durable-execution` § Parked turns), a turn whose every step in flight is a held call or a resumable wait parks; the decision then wakes it. A parked turn waiting only on a held call has no time to wake at, so `parked.wakeAt` is absent and a routine `wake()` leaves it alone. Any harness over the same storage can list, answer and finish it.

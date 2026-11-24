@@ -46,6 +46,7 @@ Noetic wraps every framework-level failure in a structured `NoeticError` discrim
 | `connection_secret_refused` | `connection`, `op` | A `secret()` was used outside a field the operation marks `sensitive`, or by the model. |
 | `connection_input_required` | `connection`, `request` | A long-running operation asked a question nobody could answer. |
 | `connection_resume_refused` | `connection`, `reason` | A resumed run's connection was replaced and cannot safely be driven again. |
+| `decision_refused` | `threadId`, `action`, `reason` | A decision passed to `harness.execute()` does not fit what the thread is waiting on: no turn is stuck, or its action is the wrong kind for the decision. |
 | `hold_refused` | `callId`, `reason` | `harness.execute()` could not take a decision for a [held tool call](/docs/framework/steps/invoke-tool#human-in-the-loop-approval). |
 | `lease_lost` | `executionId`, `term`, `reason` | Another harness holds or took this thread's turn. See [one writer per turn](/docs/framework/durability#one-writer-per-turn). |
 | `turn_stuck` | `executionId`, `path`, `from`, `to` | A turn resumed under a newer flow version would have to redo a step that already had a lasting effect, so it stopped. See [flow versions](/docs/framework/durability#flow-versions). |
@@ -74,6 +75,7 @@ type NoeticError =
   | { kind: 'connection_secret_refused'; connection: string; op: string }
   | { kind: 'connection_input_required'; connection: string; request: { id: string; message: string; schema?: JsonSchema } }
   | { kind: 'connection_resume_refused'; connection: string; reason: string }
+  | { kind: 'decision_refused'; threadId: string; action: string; reason: string }
   | { kind: 'hold_refused'; callId: string; reason: string }
   | { kind: 'lease_lost'; executionId: string; term: number; reason: string }
   | { kind: 'turn_stuck'; executionId: string; path: string; from: string; to: string }

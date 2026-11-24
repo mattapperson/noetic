@@ -162,6 +162,18 @@ export type NoeticError =
       reason: string;
     }
   | {
+      /**
+       * A decision passed to `execute()` does not fit what the thread is waiting on:
+       * no turn is stuck, or its action is the wrong kind for a decision with, or
+       * without, a `callId` (spec 08 § Held tool calls, spec 23 § Versions).
+       */
+      kind: 'decision_refused';
+      threadId: string;
+      /** The action the decision carried. */
+      action: string;
+      reason: string;
+    }
+  | {
       /** A verify's `act` threw; the run is recorded with the failure as evidence (spec 37). */
       kind: 'verify_act_failed';
       stepId: string;
