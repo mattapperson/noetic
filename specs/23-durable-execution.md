@@ -175,7 +175,7 @@ A parked turn is rows in storage and nothing else. It survives the process endin
 
 A woken turn replays its ledger, so no finished model call is made again, and its wait listens from the recorded cursor until the recorded deadline. If nothing has arrived it parks again, with the same `until`. If the deadline has passed, the wait fails as it would have live.
 
-`harness.nextWake()` resolves the earliest time the harness has something to do: the earliest `until` among parked turns, or the next event of a scheduled source a trigger listens to, such as a `cron()` tick (`35-connections` § Triggers). It resolves `undefined` when there is neither. A host with no process of its own between events schedules its next `start()` and `wake()` from it, and awaits `harness.idle()` before it lets its process go.
+`harness.getNextWakeTime()` resolves the earliest time the harness has something to do: the earliest `until` among parked turns, or the next event of a scheduled source a trigger listens to, such as a `cron()` tick (`35-connections` § Triggers). It resolves `undefined` when there is neither. A host with no process of its own between events schedules its next `start()` and `wake()` from it, and awaits `harness.waitForIdle()` before it lets its process go.
 
 **The clock.** `AgentHarness({ now })` is the clock wait deadlines, leases and wake times are read from. It defaults to `Date.now`.
 
@@ -189,7 +189,7 @@ Either one calls `wake({ threadId })` with the options the turn ran with. A watc
 
 A watcher lives in the process. When the process ends the parked turns stay in storage, and the next process rebuilds a watcher for each one its first `wake()` finds. So a long-lived host calls `wake()` once, at boot.
 
-A host with no process between requests sets `autoWake: false` and wakes turns itself: `wake()` from an alarm scheduled with `nextWake()`, and `wake({ threadId })` when an event arrives.
+A host with no process between requests sets `autoWake: false` and wakes turns itself: `wake()` from an alarm scheduled with `getNextWakeTime()`, and `wake({ threadId })` when an event arrives.
 
 ### A message for a parked thread
 
@@ -211,8 +211,10 @@ A flow changes while turns are in flight. `AgentHarnessOpts.version` names the f
 - **Stuck turns wait for the host.** The turn record is marked `stuck`. `harness.wake()` skips it, and a re-delivery of its message stops the same way. `turn_stuck`, `lease_lost` and `ledger_write_failed` end the turn whichever step they surface in: a `run` step neither retries them nor wraps them in `step_failed`.
 
 ```typescript
-harness.stuck(): Promise<StuckTurn[]>;   // { threadId, executionId, path, from, to }
-harness.settleStuck(scope, action: 'continue' | 'restart' | 'abandon'): Promise<boolean>;
+harness.listStuckRuns(): Promise<StuckTurn[]>;   // { threadId, executionId, path, from, to }
+
+// the host's decision, passed to execute() on the stuck thread
+harness.execute({ type: 'noetic:decision', action: 'continue' | 'restart' | 'abandon' }, { threadId });
 ```
 
 | Action | What happens |
@@ -221,7 +223,7 @@ harness.settleStuck(scope, action: 'continue' | 'restart' | 'abandon'): Promise<
 | `restart` | The ledger, held calls and pending entries of the turn are cleared and it runs from the top on this harness's version. Every step runs again, effects included. The snapshot is kept: it holds the turn's input. |
 | `abandon` | The turn is dropped and its checkpoint cleared. Its trail is kept. The thread's next message starts a fresh turn. |
 
-`settleStuck` resolves `false` when the thread has no stuck turn.
+A decision for a thread with no stuck turn is refused with `hold_refused`. The decision is never written to the conversation, and other input passed beside it is delivered after it, so `abandon` and the next message can go in one call.
 
 A harness whose `agentGraph` is the root step `hydrateWorkflow` returned, and that names no version, takes `workflow-<hash of the document>`: editing the document is a new version, and the same document on another deploy is the same one. An explicit `version` wins.
 
@@ -234,7 +236,7 @@ An author keeps an effect step matching across edits with `replayKey`, which key
 The trail is what a run did, step by step, kept after the ledger that produced it is gone.
 
 ```typescript
-harness.trail(scope: { threadId } | { executionId }): Promise<TrailMark[]>;
+harness.getAuditTrail(scope: { threadId } | { executionId }): Promise<TrailMark[]>;
 
 interface TrailMark {
   executionId: string;

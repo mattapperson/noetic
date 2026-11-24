@@ -30,7 +30,7 @@ export interface HarnessJudgmentContract {
    * Ask whether an action that needs a person's go-ahead may run, by the harness's
    * one approval rule (spec 08 § Held tool calls): its `approveToolCall` approver
    * decides, and with none, or when the approver answers `hold`, the action is
-   * held until `harness.resolve()` answers it. Resolves the settled decision, so it
+   * held until a decision passed to `harness.execute()` answers it. Resolves the settled decision, so it
    * waits for as long as the action is held.
    *
    * Optional: a harness without it has no approval seam, and callers fall back to
@@ -105,7 +105,7 @@ export interface HeldCall {
   readonly name: string;
   /** The validated arguments: exactly what the tool receives if the call is approved. */
   readonly args: unknown;
-  /** Ties an answer to this exact call. Pass it back to `harness.resolve()`. */
+  /** Ties an answer to this exact call. Pass it back in the decision item. */
   readonly argsHash: string;
   /**
    * `approval`: the tool has not run. `result`: it ran and left its result open.

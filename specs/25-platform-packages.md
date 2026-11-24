@@ -266,8 +266,8 @@ A harness in a Worker is built with `park: { autoWake: false }`: its own timers 
 
 **Alarm.** `alarmWake({ harness, alarms })`, in a Durable Object, with `alarms` the object's `ctx.storage`.
 
-- `schedule()` starts the harness and sets the object's alarm to `harness.nextWake()`, or deletes it when there is none. The host calls it after a turn it ran has answered, and once when the object is first set up, so the first `cron()` tick has an alarm.
-- `alarm()`, called from the object's `alarm()` handler, calls `harness.start()`, `harness.wake()` and `harness.idle()`, then `schedule()`. Starting the harness is what makes a `cron()` source deliver the ticks that fell due while nothing ran. It does not throw for a turn that failed, since a throw makes the runtime retry the alarm.
+- `schedule()` starts the harness and sets the object's alarm to `harness.getNextWakeTime()`, or deletes it when there is none. The host calls it after a turn it ran has answered, and once when the object is first set up, so the first `cron()` tick has an alarm.
+- `alarm()`, called from the object's `alarm()` handler, calls `harness.start()`, `harness.wake()` and `harness.waitForIdle()`, then `schedule()`. Starting the harness is what makes a `cron()` source deliver the ticks that fell due while nothing ran. It does not throw for a turn that failed, since a throw makes the runtime retry the alarm.
 
 A `cron()` trigger therefore runs on the alarm preset as it does on Node, with the schedule written once. The package has no cron helper of its own.
 
@@ -280,7 +280,7 @@ A `cron()` trigger therefore runs on the alarm preset as it does on Node, with t
 
 `startTurn(binding, turn)` creates the instance under `turnInstanceId(threadId, messageId)`, so a message delivered twice starts one instance. `wakeTurn(binding, instanceId)` sends the wake event; Workflows keeps an event sent before the instance reaches its wait.
 
-The Workflows preset has no object that is always there, so a `cron()` trigger needs something to start the harness at each tick: a Cloudflare Cron Trigger whose `scheduled` handler calls `harness.start()` and awaits `harness.idle()`.
+The Workflows preset has no object that is always there, so a `cron()` trigger needs something to start the harness at each tick: a Cloudflare Cron Trigger whose `scheduled` handler calls `harness.start()` and awaits `harness.waitForIdle()`.
 
 The Workflow decides only when the harness runs. What a turn did is in the harness's storage, so a Workflow step that is retried, and a turn woken twice, replay from the step ledger and repeat nothing.
 

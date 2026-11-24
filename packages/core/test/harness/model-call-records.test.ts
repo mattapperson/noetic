@@ -299,7 +299,7 @@ describe('a durable tool', () => {
     ]);
 
     // The person checked: it did ship.
-    await next.resolve(scope, {
+    await next.resolveHeld(scope, {
       callId: held.callId,
       output: {
         ok: true,
@@ -318,7 +318,7 @@ describe('a durable tool', () => {
     const { next, scope, finished } = await cutOffInShipmentTwo(fixture);
     const held = await heldOutcome(next, scope);
 
-    await next.resolve(scope, {
+    await next.resolveHeld(scope, {
       callId: held.callId,
       action: 'allow',
     });
@@ -334,7 +334,7 @@ describe('a durable tool', () => {
     const { next, scope, finished } = await cutOffInShipmentTwo(fixture);
     const held = await heldOutcome(next, scope);
 
-    await next.resolve(scope, {
+    await next.resolveHeld(scope, {
       callId: held.callId,
       action: 'deny',
       guidance: 'the order was cancelled',

@@ -153,7 +153,7 @@ export interface Tool<
    * Every call needs approval before it runs. The harness asks its
    * `approveToolCall` approver after the `beforeToolCall` layers allow the
    * call. With no approver configured the call is held until
-   * `harness.resolve()` answers it (spec 08 § Held tool calls).
+   * a decision passed to `harness.execute()` answers it (spec 08 § Held tool calls).
    */
   needsApproval?: boolean;
   /**

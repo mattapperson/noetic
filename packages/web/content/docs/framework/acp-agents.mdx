@@ -126,7 +126,7 @@ ACP requires the client to answer `session/request_permission` before the agent 
 2. **Steering.** The same `beforeToolCall` pipeline that governs first-party tool calls, so one rule set covers both. Steering acts as a **veto**: only a non-allow decision is acted on, because `allow` is also what an empty rule set returns.
 3. **`onPermissionRequest`.** An async handler — the human-in-the-loop hatch that a synchronous predicate cannot express.
 
-When all three abstain and the policy names no `default`, the request goes to the harness's approval seam: its `approveToolCall` approver decides, and with none the request is [held](/docs/framework/steps/invoke-tool#human-in-the-loop-approval) until `harness.resolve()` answers it. The agent keeps waiting, and the turn stays live.
+When all three abstain and the policy names no `default`, the request goes to the harness's approval seam: its `approveToolCall` approver decides, and with none the request is [held](/docs/framework/steps/invoke-tool#human-in-the-loop-approval) until a decision passed to `harness.execute()` answers it. The agent keeps waiting, and the turn stays live.
 
 Name a `default` to settle it without asking anyone. `default: 'deny'` is the choice for an unattended agent: it should not gain approval by omission, and should not wait on a person who is not there.
 
@@ -372,7 +372,7 @@ On a [durable](/docs/framework/durability) run, an ACP step that was cut off doe
 
 What the agent did with its own built-in tools is the agent's to remember: a reloaded session is how it knows.
 
-A tool call that is held, because it needs approval and no approver is set, or because the tool returned `hold()`, waits inside the agent's turn until `harness.resolve()` answers it. The turn stays live while it waits, since the agent's process is waiting on the call.
+A tool call that is held, because it needs approval and no approver is set, or because the tool returned `hold()`, waits inside the agent's turn until a decision passed to `harness.execute()` answers it. The turn stays live while it waits, since the agent's process is waiting on the call.
 
 ## Stop reasons
 

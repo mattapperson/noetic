@@ -513,7 +513,7 @@ const review = step.acpAgent({
 
 The interpreter mirrors `executeCallModel`: it appends the prompt as a user item, opens (or reuses) a connection + session, applies `mode`/`model`, drives one `session/prompt`, forwards each notification as an `acp_event` framework event, appends the turn's items to the item log, charges `ctx.tokens`/`ctx.cost`, records `ctx.lastStepMeta`, tears the connection down per policy, and returns the assistant text (or the parsed `output`).
 
-**Resume.** On a durable run a cut-off `step.acpAgent` reloads the agent's own session on resume (`session/load`, when the agent advertises `loadSession`; `claudeCode()` and `codex()` do) and sends the prompt behind `ACP_RESUME_NOTICE`; otherwise it opens a new session with the history. Each bridged tool call is recorded as it finishes, keyed by tool, arguments and order, so a call the resumed agent makes again is answered from the record. Tool `durable` applies as in `callModel`: `false` runs again, `true` is held as `outcome` when the host died inside it. A held bridged call waits inside the agent's turn (no parking) until `harness.resolve()`; its `HeldCall.callId` is the record id `acp:<step path>/bridged:<tool>:<hash>#<n>`, not the agent's call id.
+**Resume.** On a durable run a cut-off `step.acpAgent` reloads the agent's own session on resume (`session/load`, when the agent advertises `loadSession`; `claudeCode()` and `codex()` do) and sends the prompt behind `ACP_RESUME_NOTICE`; otherwise it opens a new session with the history. Each bridged tool call is recorded as it finishes, keyed by tool, arguments and order, so a call the resumed agent makes again is answered from the record. Tool `durable` applies as in `callModel`: `false` runs again, `true` is held as `outcome` when the host died inside it. A held bridged call waits inside the agent's turn (no parking) until a decision passed to `harness.execute()`; its `HeldCall.callId` is the record id `acp:<step path>/bridged:<tool>:<hash>#<n>`, not the agent's call id.
 
 **Client capabilities.** ACP inverts control: the agent asks the client to read/write files and run terminals. Noetic serves those from `ctx.fs` and `ctx.shell`, so a sub-agent's file and shell access is sandboxed and audited like a first-party step. `clientCapabilities` withdraws one — the agent is then told the method does not exist:
 
@@ -1839,7 +1839,7 @@ interface ApproveToolCallParams {
 - Order: `beforeToolCall` layers first, then the approver, then `execute`. A layer refusal means the approver is never asked.
 - `allow` runs the call; `deny`/`guide` refuse it. A throwing approver refuses it.
 - Refusal: model-driven call → error tool result (`Tool call denied: <guidance>`); `invokeTool` → `NoeticError` kind `steering_denied`.
-- No approver configured, or the approver answers `hold`: the call is held until `harness.resolve()` answers it. `harness.pending()` lists held calls.
+- No approver configured, or the approver answers `hold`: the call is held until a decision passed to `harness.execute()` answers it. `harness.pending()` lists held calls.
 - Span: `tool.call` gets `tool.approval` = `approved` | `denied` | `none_configured` (`ToolAttr.APPROVAL`).
 - Self-gating wrappers (chat-sdk `fromAiSdkTool`) do not declare `needsApproval`, so a call is never gated twice.
 
@@ -2147,13 +2147,13 @@ On storage with `swap` (`createFileStorage`, `createSqliteStorage`, `createInMem
 ```typescript
 new AgentHarness({ version: 'v2', /* … */ });   // any string you change when the flow changes
 // agentGraph: hydrateWorkflow(doc, …) with no version → 'workflow-<hash of doc>'
-harness.stuck(): Promise<StuckTurn[]>;          // { threadId, executionId, path, from, to }
-harness.settleStuck(scope, 'continue' | 'restart' | 'abandon'): Promise<boolean>;
-harness.trail(scope: { threadId } | { executionId }): Promise<TrailMark[]>;
+harness.listStuckRuns(): Promise<StuckTurn[]>;  // { threadId, executionId, path, from, to }
+harness.execute({ type: 'noetic:decision', action: 'continue' | 'restart' | 'abandon' }, { threadId });
+harness.getAuditTrail(scope: { threadId } | { executionId }): Promise<TrailMark[]>;
 // TrailMark: { executionId, path, stepId, kind, completedAt, version?, term?, holder?, receipt? }
 ```
 
-A turn resumed under another `version` keeps the steps that still match. If the first step that differs already had a lasting effect (a `once`/`effects` connection operation, or a `durable: true` tool), the turn stops with `NoeticError` `turn_stuck` and waits: `wake()` skips it until `settleStuck()`. Give an effect step a `replayKey` to keep it matching across edits. Trail marks outlive the ledger and `clearCheckpoint`.
+A turn resumed under another `version` keeps the steps that still match. If the first step that differs already had a lasting effect (a `once`/`effects` connection operation, or a `durable: true` tool), the turn stops with `NoeticError` `turn_stuck` and waits: `wake()` skips it until that decision arrives. Give an effect step a `replayKey` to keep it matching across edits. Trail marks outlive the ledger and `clearCheckpoint`.
 
 ### Held tool calls
 
@@ -2161,22 +2161,23 @@ A turn resumed under another `version` keeps the steps that still match. If the 
 // approveToolCall may return { action: 'hold', dueAt?, onDue?: 'deny' | 'keep' }
 // a tool may return hold({ request?, dueAt?, onDue? }) to leave its result open
 harness.pending(scope?: { threadId } | { executionId }): Promise<HeldCall[]>;
-harness.resolve(scope, { callId, argsHash?, action: 'allow' | 'deny' | 'guide', guidance? }): Promise<void>;
-harness.resolve(scope, { callId, argsHash?, output }): Promise<void>;
+// answer with a decision item passed to execute() on the call's thread:
+harness.execute({ type: 'noetic:decision', callId, argsHash?, action: 'allow' | 'deny' | 'guide', guidance? }, { threadId });
+harness.execute({ type: 'noetic:decision', callId, argsHash?, output }, { threadId });
+// a function_call_output item with a held call's id is taken as its result too
 // HeldCall: { callId, name, args, argsHash, reason: 'approval' | 'result', dueAt?, onDue?, request? }
 ```
 
-A call that needs approval with no approver, or whose approver answers `hold`, is held: its siblings run, nothing is written for it, and the turn waits (and parks, with `park` on) until `resolve()`. Refusals are `NoeticError` `hold_refused`. Event: `{name}:tool_call_held`.
+A call that needs approval with no approver, or whose approver answers `hold`, is held: its siblings run, nothing is written for it, and the turn waits (and parks, with `park` on) until the decision. A decision is never written to the conversation and starts no turn. Refusals are `NoeticError` `hold_refused`. Event: `{name}:tool_call_held`.
 
-### Triggers as data, dead events, durable `emit`
+### Triggers as data, durable `emit`
 
 ```typescript
 // ConnectionTrigger.filter / input / thread: a function, or a JSONata expression over { event }
 harness.addTrigger(trigger): Promise<void>;        // data triggers are kept in storage
 harness.removeTrigger(id): Promise<boolean>;
 harness.listTriggers(): ConnectionTrigger[];
-harness.deadTriggerEvents(triggerId?): Promise<DeadTriggerEvent[]>;  // after 5 failed tries
-harness.replayTrigger(triggerId, eventId): Promise<boolean>;
+// after 5 failed tries a trigger gives up on an event: reported, marked seen, not kept
 await source.emit(event);   // resolves once every listening trigger has stored it
 ```
 
@@ -2189,7 +2190,7 @@ harness.approve({ toolName, toolArgs, callId, ctx, park? }): Promise<SteeringDec
 // also ctx.harness.approve(...) and, in a layer function, ctx.approve({ toolName, toolArgs, callId, park? })
 ```
 
-The approver decides; with none, or on `hold`, the action is held and `approve` resolves once `harness.resolve()` answers it. Asked by `needsApproval` tools, connection operations that need approval (from a model or a step), long-task questions, ACP permission requests with no policy `default`, the served-agent gate after its timeout, `chatTools()` gated tools (set `approveToolCall: chatApprover()` to ask in chat; `approval: 'channel'` opts back into the in-memory flow), and `plan({ requireApproval: true })`. A parked response lists held calls as `held`.
+The approver decides; with none, or on `hold`, the action is held and `approve` resolves once a decision passed to `harness.execute()` answers it. Asked by `needsApproval` tools, connection operations that need approval (from a model or a step), long-task questions, ACP permission requests with no policy `default`, the served-agent gate after its timeout, `chatTools()` gated tools (set `approveToolCall: chatApprover()` to ask in chat; `approval: 'channel'` opts back into the in-memory flow), and `plan({ requireApproval: true })`. A parked response lists held calls as `held`.
 
 ### `durable` on a tool
 
@@ -2205,8 +2206,8 @@ Each tool call in a model round is recorded as it finishes, so a resumed round r
 // environment.storage.park?: boolean | { graceMs?: number }   (needs swap storage)
 // AgentHarness({ now?: () => number })
 harness.wake(scope?: { threadId?: string; options?: ExecuteOptions }): Promise<string[]>;
-harness.nextWake(): Promise<number | undefined>;   // earliest parked deadline or next cron() tick
-harness.idle(): Promise<void>;                     // due scheduled events are read; every turn finished or parked
+harness.getNextWakeTime(): Promise<number | undefined>;   // earliest parked deadline or next cron() tick
+harness.waitForIdle(): Promise<void>;                     // due scheduled events are read; every turn finished or parked
 // defineSource({ events, schedule: { next(cursor, now), begin(now) } }) — a source that knows when its events are due
 // HarnessResponse.parked?: { wakeAt: number }   — event `{name}:turn_parked`
 ```

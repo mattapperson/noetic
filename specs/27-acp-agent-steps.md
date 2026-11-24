@@ -289,7 +289,7 @@ in three tiers; the first decisive one wins:
 When all three abstain and the policy names no `default`, the request goes to
 the harness's approval seam (`08-runtime` § Held tool calls): the
 `approveToolCall` approver decides, and with none the request is held until
-`harness.resolve()` answers it. The agent's process is waiting on the answer,
+a decision passed to `harness.execute()` answers it. The agent's process is waiting on the answer,
 so the turn stays live while it is held. A policy that names a `default` has
 decided, and the seam is not asked.
 

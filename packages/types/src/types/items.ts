@@ -218,4 +218,56 @@ export type Item = OutputItem | InputMessageItem | FunctionCallOutputItem;
 /** @public Accepted input types for `AgentHarness.execute()`: a plain string, a single Item, or an array of Items. */
 export type ExecuteInput = string | Item | Item[];
 
+/** @public The `type` of a {@link DecisionItem}. */
+export const DECISION_ITEM_TYPE = 'noetic:decision';
+
+/**
+ * @public
+ * A person's decision, passed to `AgentHarness.execute()` on the thread it is for.
+ * It is never written to the conversation.
+ *
+ * - With `callId` and an `action`, it answers a tool call the thread's turn holds
+ *   (`harness.pending()`): `allow` runs it, `deny` and `guide` refuse it with
+ *   `guidance`.
+ * - With `callId` and an `output`, it supplies that call's result: what a person
+ *   answered, or what a write turned out to have done.
+ * - With neither, it settles the thread's stuck turn
+ *   (`harness.listStuckRuns()`): `continue`, `restart` or `abandon`.
+ *
+ * Pass the `argsHash` a held call was shown with to make sure the answer is for
+ * that exact call. A `function_call_output` item with a held call's id is taken
+ * as its result too.
+ */
+export type DecisionItem =
+  | {
+      readonly type: typeof DECISION_ITEM_TYPE;
+      readonly callId: string;
+      readonly argsHash?: string;
+      readonly action: 'allow' | 'deny' | 'guide';
+      readonly guidance?: string;
+    }
+  | {
+      readonly type: typeof DECISION_ITEM_TYPE;
+      readonly callId: string;
+      readonly argsHash?: string;
+      readonly output: unknown;
+    }
+  | {
+      readonly type: typeof DECISION_ITEM_TYPE;
+      readonly action: 'continue' | 'restart' | 'abandon';
+    };
+
+/** @public What `AgentHarness.execute()` takes: a message, a decision, or both. */
+export type ExecuteArgument = ExecuteInput | DecisionItem | ReadonlyArray<Item | DecisionItem>;
+
+/** @public True for a {@link DecisionItem}. */
+export function isDecisionItem(value: unknown): value is DecisionItem {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'type' in value &&
+    value.type === DECISION_ITEM_TYPE
+  );
+}
+
 //#endregion

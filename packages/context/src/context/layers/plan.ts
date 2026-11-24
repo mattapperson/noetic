@@ -120,7 +120,7 @@ export interface PlanConfig {
   /**
    * With no `onExit`, ask the harness's approval seam before a plan executes
    * (Noetic spec 08 § Held tool calls): its `approveToolCall` approver decides, and
-   * with none the request is held until `harness.resolve()` answers it. The request
+   * with none the request is held until a decision passed to `harness.execute()` answers it. The request
    * is durable where the harness's storage is, and is asked again if the plan
    * changes. Default `false`: a plan with no `onExit` executes unasked.
    */

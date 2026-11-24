@@ -836,7 +836,7 @@ const harness = new AgentHarness({
 
 ### Flow versions and the trail
 
-`AgentHarnessOpts.version` names the flow the harness runs. `harness.stuck()` lists the turns that stopped with `turn_stuck` rather than redo a recorded effect under another version, `harness.settleStuck(scope, 'continue' | 'restart' | 'abandon')` settles one, and `harness.trail(scope)` reads what a thread or an execution did, step by step. The rules are in `23-durable-execution` § Versions and § The trail.
+`AgentHarnessOpts.version` names the flow the harness runs. `harness.listStuckRuns()` lists the turns that stopped with `turn_stuck` rather than redo a recorded effect under another version, a decision item (`continue`, `restart` or `abandon`) passed to `execute()` settles one, and `harness.getAuditTrail(scope)` reads what a thread or an execution did, step by step. The rules are in `23-durable-execution` § Versions and § The trail.
 
 ### Held tool calls
 
@@ -859,14 +859,20 @@ A tool call can be left open for a person. Nothing is written to the conversatio
 
 ```typescript
 harness.pending(scope?): Promise<HeldCall[]>;
-harness.resolve(scope, answer: { callId: string; argsHash?: string } & HeldResolution): Promise<void>;
 
-type HeldResolution =
-  | { action: 'allow' | 'deny' | 'guide'; guidance?: string }  // for an approval
-  | { output: unknown };                                       // for a held result
+// a person's answer is an item passed to execute() on the call's thread
+type DecisionItem =
+  | { type: 'noetic:decision'; callId: string; argsHash?: string;
+      action: 'allow' | 'deny' | 'guide'; guidance?: string }      // for an approval
+  | { type: 'noetic:decision'; callId: string; argsHash?: string;
+      output: unknown }                                           // for a held result
+  | { type: 'noetic:decision';
+      action: 'continue' | 'restart' | 'abandon' };               // for a stuck turn
+
+harness.execute(decision, { threadId });
 ```
 
-`scope` is `{ threadId }`, or `{ executionId }` for an execution the host runs itself with `harness.run()`.
+There is no separate method to answer with: `execute()` is the one way in. It acts on the decisions in its input first and delivers what is left as a message; input that is only decisions starts no turn. A decision is never written to the conversation. A `function_call_output` item whose `callId` is a held call's is taken as that call's result too, with its string `output`.
 
 - `allow` runs the tool. `deny` and `guide` give the refusal an approver's would. An `output` becomes the call's result; the tool body does not run again.
 - A call held as `outcome` takes either kind: an `output` says it landed, `allow` runs it again with the same idempotency key, and `deny` or `guide` refuses it.
@@ -875,7 +881,7 @@ type HeldResolution =
 - Each refusal is `NoeticError` `hold_refused` with `callId` and `reason`: the call is not held, the arguments differ, the answer is the wrong kind for the hold, or it was already answered differently.
 - A deadline that passes with `onDue: 'deny'` settles the call as a denial that says so.
 
-**Where the turn is.** A turn running in this process is told, and goes on at once. On storage with parking on (`23-durable-execution` § Parked turns), a turn whose every step in flight is a held call or a resumable wait parks; `resolve()` then wakes it. A parked turn waiting only on a held call has no time to wake at, so `parked.wakeAt` is absent and a routine `wake()` leaves it alone. Any harness over the same storage can list, answer and finish it.
+**Where the turn is.** A turn running in this process is told, and goes on at once. On storage with parking on (`23-durable-execution` § Parked turns), a turn whose every step in flight is a held call or a resumable wait parks; the decision then wakes it. A parked turn waiting only on a held call has no time to wake at, so `parked.wakeAt` is absent and a routine `wake()` leaves it alone. Any harness over the same storage can list, answer and finish it.
 
 An `invokeTool` step whose call is held waits the same way. Its approval is kept under its step id; a held result (`hold()`) and an unknown outcome (`durable: true`) are kept under its dispatch path, which does not repeat across loop iterations.
 

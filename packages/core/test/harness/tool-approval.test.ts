@@ -367,7 +367,7 @@ describe('model-requested calls', () => {
     // Held, not run: the tool waits for the answer.
     expect(f.runs).toEqual([]);
 
-    await f.harness.resolve(scope, {
+    await f.harness.resolveHeld(scope, {
       callId: held.callId,
       argsHash: held.argsHash,
       action: 'allow',
@@ -508,7 +508,7 @@ describe('invokeTool', () => {
     });
     expect(f.runs).toEqual([]);
 
-    await f.harness.resolve(scope, {
+    await f.harness.resolveHeld(scope, {
       callId: held.callId,
       action: 'allow',
     });

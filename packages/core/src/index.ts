@@ -114,6 +114,8 @@ export { cosineSimilarity } from './conditions/cosine-similarity';
 /** @public */
 /** @public */
 export {
+  DECISION_ITEM_TYPE,
+  isDecisionItem,
   isNoeticConfigError,
   isNoeticError,
   NoeticConfigError,
@@ -470,7 +472,9 @@ export type { NoeticError } from '@noetic-tools/types';
 /** @public */
 export type {
   ContentPart,
+  DecisionItem,
   DeveloperMessageExtensionItem,
+  ExecuteArgument,
   ExecuteInput,
   ExtendedItem,
   ExtensionItem,
@@ -942,7 +946,6 @@ export type {
   ConnectOptions,
   CronOptions,
   CronTick,
-  DeadTriggerEvent,
   Determinism,
   EventSchedule,
   EventStream,

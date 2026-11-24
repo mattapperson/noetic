@@ -33,7 +33,7 @@ export interface FromAiSdkToolOptions {
    * - `'harness'` (default): the tool is marked `needsApproval` and the harness
    *   gates it (Noetic spec 08 § Held tool calls). Set
    *   `approveToolCall: chatApprover()` on the harness to ask in chat; with no
-   *   approver the call is held until `harness.resolve()` answers it. The call's
+   *   approver the call is held until a decision passed to `harness.execute()` answers it. The call's
    *   record is in storage, so it survives a restart and the turn can park while a
    *   person decides.
    * - `'channel'`: inside the tool, on the approval channels. The wait lives in
@@ -119,7 +119,7 @@ export interface ChatToolsOptions {
    * - `'harness'` (default): the tool is marked `needsApproval` and the harness
    *   gates it (Noetic spec 08 § Held tool calls). Set
    *   `approveToolCall: chatApprover()` on the harness to ask in chat; with no
-   *   approver the call is held until `harness.resolve()` answers it. The call's
+   *   approver the call is held until a decision passed to `harness.execute()` answers it. The call's
    *   record is in storage, so it survives a restart and the turn can park while a
    *   person decides.
    * - `'channel'`: inside the tool, on the approval channels. The wait lives in

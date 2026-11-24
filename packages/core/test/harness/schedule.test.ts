@@ -69,7 +69,7 @@ function minuteAgo(minutes: number): number {
 
 //#endregion
 
-describe('harness.nextWake() with a cron trigger', () => {
+describe('harness.getNextWakeTime() with a cron trigger', () => {
   it('is the next tick, counted from a place the trigger stores when it first starts', async () => {
     const storage = createInMemoryStorage();
     const harness = everyMinute(storage, []);
@@ -80,7 +80,7 @@ describe('harness.nextWake() with a cron trigger', () => {
     assert(stored);
     expect(Date.parse(stored)).toBeGreaterThanOrEqual(before);
 
-    const next = await harness.nextWake();
+    const next = await harness.getNextWakeTime();
     assert(next !== undefined);
     expect(next % MINUTE).toBe(0);
     expect(next).toBeGreaterThan(Date.parse(stored));
@@ -106,7 +106,7 @@ describe('harness.nextWake() with a cron trigger', () => {
       },
     });
     await harness.start();
-    expect(await harness.nextWake()).toBeUndefined();
+    expect(await harness.getNextWakeTime()).toBeUndefined();
     await harness.close();
   });
 
@@ -143,7 +143,7 @@ describe('harness.nextWake() with a cron trigger', () => {
       },
     });
     await harness.start();
-    expect(await harness.nextWake()).toBe(1500);
+    expect(await harness.getNextWakeTime()).toBe(1500);
     await harness.close();
   });
 });
@@ -158,18 +158,18 @@ describe('a cron trigger that was not running when its ticks fell due', () => {
     const harness = everyMinute(storage, ticks);
 
     await harness.start();
-    const due = await harness.nextWake();
+    const due = await harness.getNextWakeTime();
     assert(due !== undefined);
     expect(due).toBeLessThanOrEqual(Date.now());
 
-    await harness.idle();
+    await harness.waitForIdle();
     // The clock is real, so a minute may turn over mid-test and add a tick.
     expect(ticks.length).toBeGreaterThanOrEqual(2);
     expect(ticks[0]).toContain(new Date(seen + MINUTE).toISOString());
     expect(ticks[1]).toContain(new Date(seen + 2 * MINUTE).toISOString());
 
     // Nothing is overdue now: the next tick is the one after the last delivered.
-    const next = await harness.nextWake();
+    const next = await harness.getNextWakeTime();
     assert(next !== undefined);
     expect(next).toBe(seen + (ticks.length + 1) * MINUTE);
     await harness.close();
@@ -179,7 +179,7 @@ describe('a cron trigger that was not running when its ticks fell due', () => {
     const harness = everyMinute(createInMemoryStorage(), []);
     await harness.start();
     const began = Date.now();
-    await harness.idle();
+    await harness.waitForIdle();
     expect(Date.now() - began).toBeLessThan(500);
     await harness.close();
   });

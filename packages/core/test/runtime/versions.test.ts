@@ -9,6 +9,7 @@ import type { StorageAdapter } from '@noetic-tools/context';
 import type {
   CallModelRequest,
   ContextData,
+  DecisionItem,
   LLMResponse,
   WorkflowDocument,
 } from '@noetic-tools/types';
@@ -19,7 +20,7 @@ import { tool } from '../../src/builders/tool-builder';
 import { hydrateWorkflow } from '../../src/builders/workflow-hydrator';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { createInMemoryStorage } from '../../src/runtime/in-memory-storage';
-import { assistantMessage } from '../_helpers';
+import { assistantMessage, makeMessage } from '../_helpers';
 
 //#region Fixtures
 
@@ -151,6 +152,14 @@ async function cutOffAfterCharge(storage: StorageAdapter, charges: number[]): Pr
   ]);
 }
 
+/** A person's decision about the thread's stuck turn, as `execute()` takes it. */
+function decision(action: 'continue' | 'restart' | 'abandon'): DecisionItem {
+  return {
+    type: 'noetic:decision',
+    action,
+  };
+}
+
 async function kindOf(run: () => Promise<unknown>): Promise<string> {
   try {
     await run();
@@ -187,7 +196,7 @@ describe('a turn resumed under a newer flow version', () => {
       42,
     ]);
 
-    const trail = await second.trail(thread);
+    const trail = await second.getAuditTrail(thread);
     const byStep = new Map(
       trail.map((mark) => [
         mark.stepId,
@@ -222,7 +231,7 @@ describe('a turn resumed under a newer flow version', () => {
       42,
     ]);
 
-    const [stuck] = await second.stuck();
+    const [stuck] = await second.listStuckRuns();
     assert(stuck);
     expect(stuck).toMatchObject({
       threadId: 't',
@@ -253,15 +262,28 @@ describe('a turn resumed under a newer flow version', () => {
     await second.execute('refund order 7', delivery);
     await second.getAgentResponse(thread).catch(() => {});
 
-    expect(await second.settleStuck(thread, 'continue')).toBe(true);
+    await second.execute(decision('continue'), thread);
     const response = await second.getAgentResponse(thread);
     expect(response.text).toBe('b-1');
     expect(charges).toEqual([
       42,
       50,
     ]);
-    expect(await second.stuck()).toEqual([]);
-    expect(await second.settleStuck(thread, 'continue')).toBe(false);
+    expect(await second.listStuckRuns()).toEqual([]);
+    // There is nothing left to settle: a second decision is refused.
+    expect(await kindOf(() => second.execute(decision('continue'), thread))).toBe('hold_refused');
+    // And a decision of the wrong kind never reaches a turn.
+    expect(
+      await kindOf(() =>
+        second.execute(
+          {
+            type: 'noetic:decision',
+            action: 'allow',
+          },
+          thread,
+        ),
+      ),
+    ).toBe('hold_refused');
   });
 
   it('runs from the top when the host restarts it', async () => {
@@ -279,7 +301,7 @@ describe('a turn resumed under a newer flow version', () => {
     await second.execute('refund order 7', delivery);
     await second.getAgentResponse(thread).catch(() => {});
 
-    expect(await second.settleStuck(thread, 'restart')).toBe(true);
+    await second.execute(decision('restart'), thread);
     const response = await second.getAgentResponse(thread);
     // The plan was asked again too: nothing of the first run was kept.
     expect(m.calls).toBe(2);
@@ -303,11 +325,11 @@ describe('a turn resumed under a newer flow version', () => {
     });
     await second.execute('refund order 7', delivery);
     await second.getAgentResponse(thread).catch(() => {});
-    const [stuck] = await second.stuck();
+    const [stuck] = await second.listStuckRuns();
     assert(stuck);
 
-    expect(await second.settleStuck(thread, 'abandon')).toBe(true);
-    expect(await second.stuck()).toEqual([]);
+    await second.execute(decision('abandon'), thread);
+    expect(await second.listStuckRuns()).toEqual([]);
     expect(await second.wake(thread)).toEqual([]);
     expect(charges).toEqual([
       42,
@@ -355,7 +377,7 @@ describe('a harness that names no version', () => {
       42,
       50,
     ]);
-    expect(await second.stuck()).toEqual([]);
+    expect(await second.listStuckRuns()).toEqual([]);
   });
 });
 
@@ -391,7 +413,7 @@ describe('a harness running a JSON workflow', () => {
     });
     await harness.execute('hello', delivery);
     await harness.getAgentResponse(thread);
-    const [mark] = await harness.trail(thread);
+    const [mark] = await harness.getAuditTrail(thread);
     assert(mark);
     return mark.version;
   }
@@ -407,5 +429,44 @@ describe('a harness running a JSON workflow', () => {
 
   it('keeps the version the host names', async () => {
     expect(await versionOf(document('Be brief.'), 'release-7')).toBe('release-7');
+  });
+});
+
+describe('a decision passed to execute()', () => {
+  it('is acted on first, and the message beside it starts the next turn', async () => {
+    const storage = createInMemoryStorage();
+    const charges: number[] = [];
+    await cutOffAfterCharge(storage, charges);
+    const m = model('b');
+    const second = harnessOn({
+      storage,
+      m,
+      version: 'v2',
+      amount: 50,
+      charges,
+    });
+    await second.execute('refund order 7', delivery);
+    await second.getAgentResponse(thread).catch(() => {});
+
+    // The operator drops the stuck turn and says what to do instead, in one call.
+    await second.execute(
+      [
+        decision('abandon'),
+        makeMessage('user', 'refund order 8 instead'),
+      ],
+      {
+        threadId: 't',
+        messageId: 'm-2',
+      },
+    );
+    const response = await second.getAgentResponse(thread);
+    expect(response.text).toBe('b-2');
+    expect(await second.listStuckRuns()).toEqual([]);
+    // The decision itself never became part of the conversation.
+    expect(JSON.stringify(response.items)).not.toContain('noetic:decision');
+    expect(charges).toEqual([
+      42,
+      50,
+    ]);
   });
 });

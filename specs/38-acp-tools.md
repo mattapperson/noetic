@@ -154,7 +154,7 @@ events and the items keep the agent's id.
 
 A bridged call that is held, for approval with no approver, by a tool that
 returned `hold()`, or as a durable tool's unknown outcome, waits inside the
-bridge until `harness.resolve()` answers it, then goes on with the answer. The
+bridge until a decision passed to `harness.execute()` answers it, then goes on with the answer. The
 turn does not park: the agent's process is waiting on the call. Event:
 `tool_call_held`. The record is under the call's replay key, so an answer given
 while the host was down is found when the resumed agent makes the call again.

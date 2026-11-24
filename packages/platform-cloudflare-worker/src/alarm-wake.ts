@@ -1,6 +1,6 @@
 /**
  * The alarm preset (spec 25 § Cloudflare Workers): a Durable Object's alarm wakes
- * the harness's parked turns, and the next alarm is set from `harness.nextWake()`.
+ * the harness's parked turns, and the next alarm is set from `harness.getNextWakeTime()`.
  *
  * A Worker has no process between requests, so the harness's own timers
  * (`park.autoWake`) cannot be relied on. Build the harness with
@@ -18,7 +18,10 @@ export interface AlarmStorageLike {
 }
 
 /** @public The harness methods the alarm preset calls. An `AgentHarness` fits. */
-export type WakeableHarness = Pick<AgentHarness, 'start' | 'wake' | 'nextWake' | 'idle'>;
+export type WakeableHarness = Pick<
+  AgentHarness,
+  'start' | 'wake' | 'getNextWakeTime' | 'waitForIdle'
+>;
 
 /** @public Options for `alarmWake`. */
 export interface AlarmWakeOptions {
@@ -80,7 +83,7 @@ export function alarmWake(options: AlarmWakeOptions): AlarmWake {
   async function schedule(): Promise<void> {
     // Started, so a scheduled source's next event is known.
     await harness.start();
-    const at = await harness.nextWake();
+    const at = await harness.getNextWakeTime();
     if (at === undefined) {
       await alarms.deleteAlarm();
       return;
@@ -95,7 +98,7 @@ export function alarmWake(options: AlarmWakeOptions): AlarmWake {
       const woken = await harness.wake();
       // The handler is what keeps the object alive: stay until every turn has
       // finished or parked again.
-      await harness.idle();
+      await harness.waitForIdle();
       await schedule();
       return woken;
     },

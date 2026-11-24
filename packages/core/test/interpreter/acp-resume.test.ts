@@ -604,7 +604,7 @@ describe('a `durable: true` tool an agent was inside when its host died', () => 
       },
     });
     // The person looked: the deploy went out.
-    await harness.resolve(
+    await harness.resolveHeld(
       {
         executionId: ctx.id,
       },
@@ -669,7 +669,7 @@ describe('a bridged tool that needs approval, with no approver', () => {
     });
     expect(runs).toEqual([]);
 
-    await harness.resolve(
+    await harness.resolveHeld(
       {
         executionId: ctx.id,
       },
@@ -716,7 +716,7 @@ describe('a bridged tool that needs approval, with no approver', () => {
       ctx,
     );
     const held = await heldCall(harness, ctx.id);
-    await harness.resolve(
+    await harness.resolveHeld(
       {
         executionId: ctx.id,
       },

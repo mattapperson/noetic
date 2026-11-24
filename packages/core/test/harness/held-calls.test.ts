@@ -1,4 +1,4 @@
-// Held tool calls: a call left open for a person, answered with `harness.resolve()`.
+// Held tool calls: a call left open for a person, answered with `harness.resolveHeld()`.
 // Drives the real model client against a fake server. See specs/08-runtime § Held
 // tool calls.
 
@@ -219,6 +219,34 @@ afterEach(() => {
 
 //#endregion
 
+/** Answer a held call the way a host does: a decision item passed to `execute()`. */
+function decide(
+  harness: Pick<AgentHarness, 'execute'>,
+  scope: {
+    threadId?: string;
+  },
+  decision:
+    | {
+        callId: string;
+        argsHash?: string;
+        action: 'allow' | 'deny' | 'guide';
+        guidance?: string;
+      }
+    | {
+        callId: string;
+        argsHash?: string;
+        output: unknown;
+      },
+): Promise<void> {
+  return harness.execute(
+    {
+      type: 'noetic:decision',
+      ...decision,
+    },
+    scope,
+  );
+}
+
 describe('a call the approver holds', () => {
   it('waits for an answer while its siblings run, then runs once when allowed', async () => {
     const { runs, harness } = setup(LOOKUP_THEN_REFUND);
@@ -241,7 +269,7 @@ describe('a call the approver holds', () => {
       'lookup',
     ]);
 
-    await h.resolve(THREAD, {
+    await decide(h, THREAD, {
       callId: held.callId,
       argsHash: held.argsHash,
       action: 'allow',
@@ -263,7 +291,7 @@ describe('a call the approver holds', () => {
     await h.execute('refund A1', THREAD);
     const held = await heldCall(h);
 
-    await h.resolve(THREAD, {
+    await decide(h, THREAD, {
       callId: held.callId,
       action: 'deny',
       guidance: 'over the limit',
@@ -283,7 +311,7 @@ describe('a call the approver holds', () => {
     await h.execute('refund A1', THREAD);
     const held = await heldCall(h);
 
-    await h.resolve(THREAD, {
+    await decide(h, THREAD, {
       callId: held.callId,
       action: 'guide',
       guidance: 'offer store credit instead',
@@ -302,7 +330,7 @@ describe('a call the approver holds', () => {
     const held = await heldCall(h);
     expect(held.name).toBe('refund');
 
-    await h.resolve(THREAD, {
+    await decide(h, THREAD, {
       callId: held.callId,
       action: 'allow',
     });
@@ -325,7 +353,7 @@ describe('answers that are refused', () => {
 
     expect(
       await refusal(() =>
-        h.resolve(THREAD, {
+        decide(h, THREAD, {
           callId: 'call_nope',
           action: 'allow',
         }),
@@ -333,7 +361,7 @@ describe('answers that are refused', () => {
     ).toContain('no call with this id is held');
     expect(
       await refusal(() =>
-        h.resolve(
+        h.resolveHeld(
           {
             threadId: 'another',
           },
@@ -357,7 +385,7 @@ describe('answers that are refused', () => {
 
     expect(
       await refusal(() =>
-        h.resolve(THREAD, {
+        decide(h, THREAD, {
           callId: held.callId,
           argsHash: 'hash-of-what-the-reviewer-saw',
           action: 'allow',
@@ -382,7 +410,7 @@ describe('answers that are refused', () => {
 
     expect(
       await refusal(() =>
-        h.resolve(THREAD, {
+        decide(h, THREAD, {
           callId: held.callId,
           output: 'refunded by hand',
         }),
@@ -424,7 +452,7 @@ describe('a hold with a deadline', () => {
     await new Promise((resolve) => setTimeout(resolve, 40));
     expect(await h.pending(THREAD)).toHaveLength(1);
 
-    await h.resolve(THREAD, {
+    await decide(h, THREAD, {
       callId: held.callId,
       action: 'allow',
     });
@@ -453,7 +481,7 @@ describe('a tool that leaves its result open', () => {
       },
     });
 
-    await h.resolve(THREAD, {
+    await decide(h, THREAD, {
       callId: held.callId,
       output: 'No, use the new one.',
     });
@@ -471,7 +499,7 @@ describe('a tool that leaves its result open', () => {
 
     expect(
       await refusal(() =>
-        h.resolve(THREAD, {
+        decide(h, THREAD, {
           callId: held.callId,
           action: 'allow',
         }),
@@ -496,7 +524,7 @@ describe('a tool that leaves its result open', () => {
       storage,
     });
 
-    await other.resolve(
+    await other.resolveHeld(
       {
         executionId: await executionOf(storage),
       },
@@ -505,7 +533,7 @@ describe('a tool that leaves its result open', () => {
         output: 'yes',
       },
     );
-    await other.resolve(
+    await other.resolveHeld(
       {
         executionId: await executionOf(storage),
       },
@@ -516,7 +544,7 @@ describe('a tool that leaves its result open', () => {
     );
     expect(
       await refusal(async () =>
-        other.resolve(
+        other.resolveHeld(
           {
             executionId: await executionOf(storage),
           },
@@ -574,7 +602,7 @@ describe('a held call on durable storage', () => {
     assert(held);
     expect(held.name).toBe('refund');
 
-    await second.resolve(THREAD, {
+    await second.resolveHeld(THREAD, {
       callId: held.callId,
       argsHash: held.argsHash,
       action: 'allow',
@@ -637,7 +665,7 @@ describe('a message that arrives while a call is held', () => {
       'lookup',
     ]);
 
-    await h.resolve(THREAD, {
+    await decide(h, THREAD, {
       callId: held.callId,
       action: 'allow',
     });
@@ -738,7 +766,7 @@ describe('an answer from another process', () => {
       storage,
       approveToolCall: holdIt,
     });
-    await other.resolve(THREAD, {
+    await decide(other, THREAD, {
       callId: held.callId,
       action: 'allow',
     });
@@ -767,7 +795,7 @@ describe('an answer from another process', () => {
     });
     await h.execute('refund', THREAD);
     const held = await heldCall(h);
-    await h.resolve(THREAD, {
+    await decide(h, THREAD, {
       callId: held.callId,
       action: 'allow',
     });

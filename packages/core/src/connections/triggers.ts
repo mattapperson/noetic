@@ -15,7 +15,6 @@ import type {
   ConnectionEvent,
   ConnectionEventInit,
   ConnectionTrigger,
-  DeadTriggerEvent,
   StorageAdapter,
 } from '@noetic-tools/types';
 import { ConnectionUnsatisfiedError } from '@noetic-tools/types';
@@ -53,7 +52,7 @@ export interface TriggerRunnerOptions {
   readonly relistenDelayMs?: (attempt: number) => number;
   /** Delay before retrying a failed delivery, by attempt. Default: 1 s doubling to 30 s. */
   readonly redeliverDelayMs?: (attempt: number) => number;
-  /** The clock dead events are stamped by. Default `Date.now`. */
+  /** The clock scheduled events are counted by. Default `Date.now`. */
   readonly now?: () => number;
 }
 
@@ -79,7 +78,7 @@ interface InboxEntry {
 
 //#region Constants
 
-/** Deliveries of one event tried before it is set aside on the dead list. */
+/** Deliveries of one event tried before the trigger gives up on it. */
 const MAX_DELIVERY_ATTEMPTS = 5;
 
 /** A trigger as stored: only its data. A trigger with a function in it is not stored. */
@@ -91,24 +90,6 @@ const StoredTriggerSchema = z.object({
   filter: z.string().optional(),
   input: z.string(),
   thread: z.string().optional(),
-});
-
-const DeadEntrySchema = z.object({
-  event: z.object({
-    id: z.string(),
-    type: z.string(),
-    time: z.string(),
-    payload: z.unknown(),
-    cursor: z.string().nullable(),
-    connection: z.string(),
-    actionId: z.string().optional(),
-  }),
-  threadId: z.string(),
-  input: z.string(),
-  messageId: z.string(),
-  attempts: z.number(),
-  error: z.string(),
-  at: z.number(),
 });
 
 /** Where triggers added while the harness runs are kept. */
@@ -350,59 +331,6 @@ export class TriggerRunner {
     return true;
   }
 
-  /** The events triggers gave up on, for one trigger or all. */
-  async dead(triggerId?: string): Promise<DeadTriggerEvent[]> {
-    const found: DeadTriggerEvent[] = [];
-    const ids =
-      triggerId === undefined
-        ? [
-            ...this.triggers.keys(),
-          ]
-        : [
-            triggerId,
-          ];
-    for (const id of ids) {
-      for (const key of await this.options.storage.list(`${prefix(id)}/dead/`)) {
-        const parsed = DeadEntrySchema.safeParse(await this.options.storage.get(key));
-        if (!parsed.success) {
-          continue;
-        }
-        found.push({
-          trigger: id,
-          event: parsed.data.event,
-          threadId: parsed.data.threadId,
-          attempts: parsed.data.attempts,
-          error: parsed.data.error,
-          at: parsed.data.at,
-        });
-      }
-    }
-    return found;
-  }
-
-  /**
-   * Try a dead event again: it goes back in the inbox and is delivered as a turn,
-   * with its retries afresh. Resolves false when the trigger has no such dead event.
-   */
-  async replay(triggerId: string, eventId: string): Promise<boolean> {
-    const trigger = this.triggers.get(triggerId);
-    if (!trigger) {
-      return false;
-    }
-    const storage = this.options.storage;
-    const deadKey = `${prefix(triggerId)}/dead/${encodeURIComponent(eventId)}`;
-    const parsed = DeadEntrySchema.safeParse(await storage.get(deadKey));
-    if (!parsed.success) {
-      return false;
-    }
-    const { attempts: _attempts, error: _error, at: _at, ...entry } = parsed.data;
-    const inboxKey = `${prefix(triggerId)}/inbox/${encodeURIComponent(eventId)}`;
-    await storage.set<InboxEntry>(inboxKey, entry);
-    await storage.delete(deadKey);
-    this.deliver(trigger, entry, inboxKey);
-    return true;
-  }
-
   /**
    * Epoch ms of the earliest event a trigger is due, for triggers on a connection
    * that can tell (`Connection.schedule`, as `cron()` has). Undefined when none can,
@@ -610,7 +538,7 @@ export class TriggerRunner {
     try {
       entry = await this.entryFor(trigger, init);
     } catch (e) {
-      // A filter or input that throws on one event dead-letters it rather than
+      // A filter or input that throws on one event gives up on it rather than
       // re-reading it from the same cursor forever.
       this.report(trigger.id, e);
       await storage.set(seenKey, {
@@ -694,8 +622,9 @@ export class TriggerRunner {
 
   /**
    * Delivers one inbox entry, retrying a failed turn with backoff. On success the
-   * event is marked done. After the last try it moves to the dead list, where
-   * `replay` can bring it back; it is not tried again on its own.
+   * event is marked done. After the last try the trigger gives up: the failure is
+   * reported, the event is marked seen so it is not delivered again, and nothing
+   * more is kept. A host that wants another try emits the event again itself.
    */
   private async deliverWithRetry(
     trigger: ConnectionTrigger,
@@ -735,14 +664,8 @@ export class TriggerRunner {
     if (attempts < MAX_DELIVERY_ATTEMPTS) {
       return;
     }
-    await storage.set(`${base}/dead/${eventKey}`, {
-      ...entry,
-      attempts,
-      error: lastError,
-      at: (this.options.now ?? Date.now)(),
-    });
     await storage.set(seenKey, {
-      dead: lastError,
+      failed: lastError,
     });
     await storage.delete(inboxKey);
   }

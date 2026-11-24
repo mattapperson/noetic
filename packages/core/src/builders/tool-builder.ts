@@ -174,7 +174,7 @@ export function toolWithGenerator<
  * What a tool returns to leave its result open for a person
  * (spec 08 § Held tool calls). The tool has done its part — posted the question,
  * opened the ticket — and the answer becomes the call's result when
- * `harness.resolve()` gives one. The tool body does not run again.
+ * a decision passed to `harness.execute()` gives one. The tool body does not run again.
  *
  * @param options - `request` is passed to whoever answers, as `HeldCall.request`.
  *   `dueAt` (epoch ms) ends the hold; `onDue` says how: `deny` (the default)

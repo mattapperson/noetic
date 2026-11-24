@@ -60,7 +60,7 @@ export interface HarnessResponse<TItem = Item> {
   /**
    * Set when the turn parked instead of finishing: every part of it is waiting, and
    * no process holds it. `wakeAt` is the earliest deadline among its waits, in epoch
-   * ms. `harness.wake()` resumes it, as does `harness.resolve()` for a held call. `text` is empty and `items` are those so far.
+   * ms. `harness.wake()` resumes it, as does a decision for a held call, passed to `harness.execute()`. `text` is empty and `items` are those so far.
    */
   readonly parked?: {
     /** Absent when nothing the turn waits on has a deadline, such as a held tool call. */
@@ -74,7 +74,7 @@ export interface HarnessResponse<TItem = Item> {
   readonly replayed?: boolean;
   /**
    * The tool calls a parked turn holds for a person, as `harness.pending()` lists
-   * them. Present with `parked` when there are any; `harness.resolve()` answers one.
+   * them. Present with `parked` when there are any; a decision item passed to `harness.execute()` answers one.
    */
   readonly held?: ReadonlyArray<HeldCall>;
   /** Per-context-layer context window breakdown captured at the last callModel of this execution. */

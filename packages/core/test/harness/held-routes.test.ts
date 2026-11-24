@@ -98,7 +98,7 @@ describe("a step's connection call that needs approval", () => {
       name: 'app_app_wipe',
       reason: 'approval',
     });
-    await harness.resolve(scope, {
+    await harness.resolveHeld(scope, {
       callId: held.callId,
       action: 'allow',
     });
@@ -131,7 +131,7 @@ describe("a step's connection call that needs approval", () => {
       ctx,
     );
     const held = await heldCall(harness, scope);
-    await harness.resolve(scope, {
+    await harness.resolveHeld(scope, {
       callId: held.callId,
       action: 'deny',
       guidance: 'not on a Friday',
@@ -173,7 +173,7 @@ describe('a question a long task asks', () => {
         message: 'Trust this developer?',
       },
     });
-    await harness.resolve(scope, {
+    await harness.resolveHeld(scope, {
       callId: held.callId,
       output: 'yes',
     });
@@ -237,10 +237,17 @@ describe('a question a long task asks', () => {
       message: 'Trust this developer?',
     });
 
-    await harness.resolve(thread, {
-      callId: held.callId,
-      output: 'yes',
-    });
+    // The answer comes in the way any tool result does: an item passed to execute().
+    await harness.execute(
+      {
+        id: 'answer-1',
+        type: 'function_call_output',
+        status: 'completed',
+        callId: held.callId,
+        output: 'yes',
+      },
+      thread,
+    );
     const done = await harness.getAgentResponse(thread);
     expect(done.parked).toBeUndefined();
     expect(done.text).toBe('{"trusted":"yes"}');
@@ -297,7 +304,7 @@ describe('an invokeTool step', () => {
         question: 'Ship it?',
       },
     });
-    await harness.resolve(scope, {
+    await harness.resolveHeld(scope, {
       callId: held.callId,
       output: 'Yes, ship it.',
     });
@@ -385,7 +392,7 @@ describe('an invokeTool step', () => {
       reason: 'outcome',
     });
     // The person checked the processor: the charge went through.
-    await next.resolve(scope, {
+    await next.resolveHeld(scope, {
       callId: held.callId,
       output: {
         charged: 42,
@@ -449,7 +456,7 @@ describe('harness.approve()', () => {
         to: 'prod',
       },
     });
-    await harness.resolve(scope, {
+    await harness.resolveHeld(scope, {
       callId: 'd-1',
       action: 'allow',
     });

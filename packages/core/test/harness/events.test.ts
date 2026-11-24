@@ -188,7 +188,7 @@ describe('a message delivered again after its turn finished', () => {
 });
 
 describe('triggers at the harness', () => {
-  it('can be added while it runs, and list their dead events', async () => {
+  it('can be added and removed while it runs', async () => {
     const m = model('a');
     const inbox = emails();
     const harness = new AgentHarness({
@@ -226,8 +226,6 @@ describe('triggers at the harness', () => {
       },
     });
     await until(() => m.calls === 1);
-    expect(await harness.deadTriggerEvents()).toEqual([]);
-    expect(await harness.replayTrigger('all-mail', 'm-1')).toBe(false);
     expect(await harness.removeTrigger('all-mail')).toBe(true);
     expect(harness.listTriggers()).toEqual([]);
     await harness.close();

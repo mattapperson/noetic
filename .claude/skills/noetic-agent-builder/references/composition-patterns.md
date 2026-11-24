@@ -177,7 +177,7 @@ const harness = new AgentHarness({
 });
 ```
 
-A refused model-driven call comes back to the model as an error tool result; a refused `invokeTool` throws `steering_denied`. Without `approveToolCall`, a gated call is held until `harness.resolve()` answers it.
+A refused model-driven call comes back to the model as an error tool result; a refused `invokeTool` throws `steering_denied`. Without `approveToolCall`, a gated call is held until a decision passed to `harness.execute()` answers it.
 
 ## Pattern: Sub-Agent Delegation via Tools
 

@@ -188,10 +188,13 @@ The approver receives `{ toolName, toolArgs, callId, ctx }`. `toolArgs` are the 
 const [held] = await harness.pending({ threadId });
 // held: { callId, name, args, argsHash, reason: 'approval', dueAt?, … }
 
-await harness.resolve({ threadId }, { callId: held.callId, argsHash: held.argsHash, action: 'allow' });
+await harness.execute(
+  { type: 'noetic:decision', callId: held.callId, argsHash: held.argsHash, action: 'allow' },
+  { threadId },
+);
 ```
 
-- `resolve` takes `allow`, `deny` or `guide` (with `guidance`). The first answer wins; the same answer again is a no-op, and a different one fails with `hold_refused`.
+- The answer is a decision item passed to `execute()` on the call's thread. It takes `allow`, `deny` or `guide` (with `guidance`), is never written to the conversation, and starts no turn of its own. The first answer wins; the same answer again is a no-op, and a different one fails with `hold_refused`.
 - `argsHash` ties the answer to the exact call the person saw. An answer for other arguments is refused.
 - A hold may carry `dueAt`: when it passes the call is denied, or stays held with `onDue: 'keep'`.
 - The stream emits `{name}:tool_call_held` with the same fields as `pending()`.
@@ -213,7 +216,7 @@ const askPerson = tool({
 });
 
 // Later, when the person replies:
-await harness.resolve({ threadId }, { callId, output: 'Use the new address.' });
+await harness.execute({ type: 'noetic:decision', callId, output: 'Use the new address.' }, { threadId });
 ```
 
 A tool marked `durable: true` adds a third kind of hold. If the host dies while it runs, the resumed turn does not run it again: it holds the call with `reason: 'outcome'`. Answer with `{ output }` if it did land, or `{ action: 'allow' }` to run it again.

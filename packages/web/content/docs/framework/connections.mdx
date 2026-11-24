@@ -397,7 +397,7 @@ await harness.addTrigger({
 
 A trigger written with expressions only is plain data. `harness.addTrigger()` starts it and keeps it in storage, so it is there again after a restart; `removeTrigger(id)` and `listTriggers()` manage them.
 
-**When a turn keeps failing.** A trigger tries an event's turn five times, with backoff. After that the event moves to the trigger's dead list and is not tried again on its own. `harness.deadTriggerEvents()` lists them with the last error; `harness.replayTrigger(triggerId, eventId)` runs one again.
+**When a turn keeps failing.** A trigger tries an event's turn five times, with backoff. After that it gives up: each failure was reported, and the event is not tried again. If you want another go, emit the event again under a new id.
 
 **Webhooks.** Noetic has no webhook concept. Your HTTP handler verifies the request and calls `source.emit(...)`, which resolves once every listening trigger has stored the event:
 

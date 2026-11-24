@@ -366,13 +366,13 @@ Later, in this process or another one:
 ```ts validate=none
 await harness.wake();               // resume turns that are due, and turns that were cut off
 await harness.wake({ threadId });   // the event for this thread arrived: resume it now
-const at = await harness.nextWake(); // a parked deadline or the next cron() tick, or undefined
-await harness.idle();                // nothing due is unread, and no turn is running
+const at = await harness.getNextWakeTime(); // a parked deadline or the next cron() tick, or undefined
+await harness.waitForIdle();                // nothing due is unread, and no turn is running
 ```
 
 - **What parks.** Only a `wait` on an event the connection can replay from a cursor (`replay: 'durable'` in its manifest), such as a [source](/docs/framework/connections#sources) with a `start`. A turn with a model call, a tool or user code still running stays live, as does a wait on an event that cannot be replayed.
 - **What a woken turn does.** It replays its ledger, so finished model calls are not made again, and listens from the recorded cursor until the original deadline. With nothing to receive it parks again; past the deadline the wait fails as it would have live.
-- **Who wakes it.** The harness that parked it, by default: it keeps a timer for the deadline and a listener for the event, and resumes the turn when either fires. A long-lived process only calls `wake()` once at boot, which also picks up the parked turns an earlier process left. Where no process lives between requests, set `park: { autoWake: false }` and call `wake()` from an alarm set from `nextWake()`, and `wake({ threadId })` when an event arrives.
+- **Who wakes it.** The harness that parked it, by default: it keeps a timer for the deadline and a listener for the event, and resumes the turn when either fires. A long-lived process only calls `wake()` once at boot, which also picks up the parked turns an earlier process left. Where no process lives between requests, set `park: { autoWake: false }` and call `wake()` from an alarm set from `getNextWakeTime()`, and `wake({ threadId })` when an event arrives.
 - **A watcher cannot run your `filter`.** It wakes on any event of the awaited type; a turn whose filter turns the event down parks again. Each event wakes it at most once.
 - **Requirements.** Storage with [`swap`](#one-writer-per-turn), and a connection defined on the harness: a woken turn does not keep the connections one `execute()` call passed.
 
@@ -396,9 +396,9 @@ const harness = new AgentHarness({
 You settle a stuck turn yourself:
 
 ```ts validate=none
-for (const turn of await harness.stuck()) {
+for (const turn of await harness.listStuckRuns()) {
   // { threadId, executionId, path, from: 'v1', to: 'v2' }
-  await harness.settleStuck({ threadId: turn.threadId }, 'continue');
+  await harness.execute({ type: 'noetic:decision', action: 'continue' }, { threadId: turn.threadId });
 }
 ```
 
@@ -412,10 +412,10 @@ To keep an effect step matching across edits, give it a [`replayKey`](#replay-id
 
 ### The Trail
 
-`harness.trail()` lists what a run did, step by step: which flow version ran each step, which harness, and the receipt of a step with a lasting effect.
+`harness.getAuditTrail()` lists what a run did, step by step: which flow version ran each step, which harness, and the receipt of a step with a lasting effect.
 
 ```ts validate=none
-const marks = await harness.trail({ threadId: 'case-7' });
+const marks = await harness.getAuditTrail({ threadId: 'case-7' });
 // [{ executionId, path, stepId: 'charge', kind, completedAt, version: 'v1', term, holder, receipt }, …]
 ```
 

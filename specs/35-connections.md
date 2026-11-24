@@ -397,14 +397,12 @@ the harness runs:
 - `harness.removeTrigger(id)` stops it and forgets it.
 - `harness.listTriggers()` gives every trigger: the harness's own and the added.
 
-**Retries and the dead list.** A turn that fails is tried again, five times in
-all, with backoff. After the last try the event leaves the inbox for the
-trigger's **dead list**, with how many times it was tried and why the last one
-failed. It is not tried again on its own, in this process or the next.
-`harness.deadTriggerEvents(triggerId?)` lists them, and
-`harness.replayTrigger(triggerId, eventId)` puts one back in the inbox to run
-as a fresh turn. An event cut off by the process ending, before its tries ran
-out, stays in the inbox and is delivered again at the next start.
+**Retries.** A turn that fails is tried again, five times in all, with backoff.
+After the last try the trigger gives up on the event: each failure was reported
+(`onError`, else a warning), the event is marked seen so it is not delivered
+again, and nothing more is kept. Trying it again is the sender's business: a
+host that wants another go emits the event again under a new id. An event cut
+off by the process ending, before its tries ran out, stays in the inbox and is delivered again at the next start.
 
 **Sources** are event streams you write in code — a queue consumer, a file
 watcher, a webhook from your own app — registered as connections:
@@ -452,15 +450,15 @@ declares one as `defineSource({ events, schedule })`; `cron()` has one.
 - A trigger on a scheduled connection that has no cursor stores `begin(now)`
   when it first starts. A host that is not running when the first event falls
   due then still counts from that place when it comes back, and gets the event.
-- `harness.nextWake()` includes the earliest `next` among the triggers on
+- `harness.getNextWakeTime()` includes the earliest `next` among the triggers on
   scheduled connections (`23-durable-execution` § Parked turns).
-- `harness.idle()` resolves once every scheduled event that is due has been
+- `harness.waitForIdle()` resolves once every scheduled event that is due has been
   read by its trigger and every turn has finished or parked. It stops waiting
   on a due event after 10 s, so a source that cannot deliver holds no caller.
 
 So a host with no process between events runs a `cron()` trigger unchanged: it
-calls `harness.start()` at the time `nextWake()` gave, the source delivers what
-fell due, and `idle()` says when the host may go.
+calls `harness.start()` at the time `getNextWakeTime()` gave, the source delivers what
+fell due, and `waitForIdle()` says when the host may go.
 
 A chat bot that answers every message — streaming replies, tool cards,
 history — belongs on `@noetic-tools/chat-sdk` (spec 29). Chat connections are

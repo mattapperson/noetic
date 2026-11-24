@@ -1,4 +1,9 @@
-import type { ChannelHandle, ExternalChannel, ToolApprover } from '@noetic-tools/types';
+import type {
+  ChannelHandle,
+  DecisionItem,
+  ExternalChannel,
+  ToolApprover,
+} from '@noetic-tools/types';
 import { z } from 'zod';
 
 /**
@@ -148,24 +153,21 @@ export function chatApprover(options: { timeout?: number } = {}): ToolApprover {
 
 /** The slice of the harness `answerApproval` needs. */
 export interface HeldApprovalHarness extends ApprovalHarness {
-  /** Answers a held tool call. Absent on a harness that cannot hold one. */
-  resolve?(
-    scope:
-      | {
-          threadId?: string;
-        }
-      | undefined,
-    answer: {
-      callId: string;
-      action: 'allow' | 'deny';
-      guidance?: string;
+  /**
+   * Takes a decision for a held tool call, as `AgentHarness.execute()` does.
+   * Absent on a harness that cannot hold one.
+   */
+  execute?(
+    input: DecisionItem,
+    options?: {
+      threadId?: string;
     },
   ): Promise<void>;
 }
 
 /**
  * Deliver a user's decision, wherever the call is waiting. A call the harness
- * holds (see `chatApprover`) is answered through `harness.resolve()`, which also
+ * holds (see `chatApprover`) is answered with a decision item through `harness.execute()`, which also
  * wakes a parked turn; anything else goes to `resolveApproval` and the channel.
  *
  * Resolves `false` when nothing was waiting for the decision, such as a stale
@@ -180,13 +182,11 @@ export async function answerApproval(params: {
   scopeId?: string;
 }): Promise<boolean> {
   const { harness, decision } = params;
-  if (harness.resolve) {
+  if (harness.execute) {
     try {
-      await harness.resolve(
+      await harness.execute(
         {
-          threadId: params.threadId,
-        },
-        {
+          type: 'noetic:decision',
           callId: decision.requestId,
           action: decision.approved ? 'allow' : 'deny',
           ...(decision.reason === undefined
@@ -194,6 +194,9 @@ export async function answerApproval(params: {
             : {
                 guidance: decision.reason,
               }),
+        },
+        {
+          threadId: params.threadId,
         },
       );
       return true;

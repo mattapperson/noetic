@@ -67,7 +67,7 @@ A gated tool is gated by the harness's approval seam (`08-runtime` § Held tool 
 1. The wrapper marks a gated tool `needsApproval` and does nothing else: the harness asks before the tool runs.
 2. `chatApprover({ timeout? })` is the `approveToolCall` that asks in chat. It sends `{ requestId, toolName, args, threadId }` on the shared `approvalRequests` queue channel, with the tool call's own id as `requestId`, and answers `hold` with a deadline (default 5 minutes; `Infinity` for none). The call's record is in the harness's storage, so it survives a restart and its turn can park.
 3. The integration subscribes ONCE per harness with the never-closed lifetime scope: `harness.getChannelStream(approvalRequests, APPROVAL_SCOPE)`. Queue delivery is competing-consumer and channel-scoped, so a single subscriber is the correctness requirement — the request's `threadId` tells it which conversation gets the card.
-4. The button click calls `answerApproval({ harness, threadId, decision: { requestId, approved, reason? } })`, which answers the held call through `harness.resolve()`. It resolves `false`, and never throws, when nothing was waiting: stale button clicks are expected. A rejection or a passed deadline surfaces to the model as a tool error.
+4. The button click calls `answerApproval({ harness, threadId, decision: { requestId, approved, reason? } })`, which answers the held call with a decision item passed to `harness.execute()`. It resolves `false`, and never throws, when nothing was waiting: stale button clicks are expected. A rejection or a passed deadline surfaces to the model as a tool error.
 
 A harness with no approver still gates these tools: the call is held and listed by `harness.pending()`, and no request is sent to chat.
 

@@ -4,7 +4,7 @@
  * A call is held when the approver answers `hold`, when a tool that needs
  * approval has no approver, or when a tool returns `hold()` in place of a
  * result. Nothing is written to the conversation for it. Its record sits in
- * storage until `harness.resolve()` settles it; then the round walks its calls
+ * storage until a decision passed to `harness.execute()` settles it; then the round walks its calls
  * again, and this time the call has an answer.
  *
  * The record is the whole state, so a held call survives the process: a parked

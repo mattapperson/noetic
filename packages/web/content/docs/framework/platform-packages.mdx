@@ -184,7 +184,7 @@ const instanceId = await startTurn(env.TURNS, { threadId, messageId, input: text
 await wakeTurn(env.TURNS, instanceId);
 ```
 
-The instance runs the turn until it parks, sleeps until the turn's deadline or a wake, and runs it again. This preset has no object that is always there, so for a `cron()` trigger add a Cloudflare Cron Trigger whose `scheduled` handler calls `harness.start()` and awaits `harness.idle()`. Everything the turn did is in the harness's storage, so a Workflow step that is retried repeats nothing.
+The instance runs the turn until it parks, sleeps until the turn's deadline or a wake, and runs it again. This preset has no object that is always there, so for a `cron()` trigger add a Cloudflare Cron Trigger whose `scheduled` handler calls `harness.start()` and awaits `harness.waitForIdle()`. Everything the turn did is in the harness's storage, so a Workflow step that is retried repeats nothing.
 
 ## Related Pages
 

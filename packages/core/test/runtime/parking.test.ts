@@ -373,7 +373,7 @@ describe('a parked turn', () => {
     });
     // Nothing is due, so a routine wake leaves the turn parked.
     expect(await harness.wake()).toEqual([]);
-    expect(await harness.nextWake()).toBe(1e6 + DAY);
+    expect(await harness.getNextWakeTime()).toBe(1e6 + DAY);
     expect(second.calls).toBe(0);
 
     // The reply arrives; the host wakes the thread it belongs to.
@@ -394,7 +394,7 @@ describe('a parked turn', () => {
     ]);
     const stored = await fixture.storage.get<StoredSession>('session:t');
     expect(stored?.turn).toBeUndefined();
-    expect(await harness.nextWake()).toBeUndefined();
+    expect(await harness.getNextWakeTime()).toBeUndefined();
     await harness.close();
   });
 

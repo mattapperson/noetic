@@ -92,7 +92,7 @@ describe('chatApprover', () => {
 });
 
 describe('answerApproval', () => {
-  /** A harness that records `resolve` calls and can refuse them; its channel is closed. */
+  /** A harness that records the decisions passed to `execute` and can refuse them; its channel is closed. */
   function harness(refuse: boolean): {
     harness: HeldApprovalHarness;
     resolved: unknown[];
@@ -101,7 +101,7 @@ describe('answerApproval', () => {
     return {
       resolved,
       harness: frameworkCast<HeldApprovalHarness>({
-        resolve: async (scope: unknown, answer: unknown) => {
+        execute: async (answer: unknown, scope: unknown) => {
           if (refuse) {
             throw new Error('no call with this id is held');
           }
@@ -136,6 +136,7 @@ describe('answerApproval', () => {
           threadId: 'thread-9',
         },
         answer: {
+          type: 'noetic:decision',
           callId: 'call-7',
           action: 'deny',
           guidance: 'wrong channel',

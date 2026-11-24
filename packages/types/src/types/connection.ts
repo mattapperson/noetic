@@ -430,7 +430,7 @@ export interface Connection {
   /**
    * Set by a connection whose events come at times it can tell in advance, such as
    * `cron()`. A host with no process of its own between events learns from it when
-   * to come back (`harness.nextWake()`).
+   * to come back (`harness.getNextWakeTime()`).
    */
   readonly schedule?: EventSchedule;
   onChange(listener: (change: 'manifest' | 'identity') => void): () => void;
@@ -613,19 +613,6 @@ export interface ConnectionTrigger<P = unknown> {
    * Default: the profile's natural thread for the event, else the trigger id.
    */
   readonly thread?: ((event: ConnectionEvent<P>) => string) | Expression;
-}
-
-/** @public An event a trigger gave up on after its retries (spec 35 § Triggers). */
-export interface DeadTriggerEvent {
-  readonly trigger: string;
-  readonly event: ConnectionEvent;
-  readonly threadId: string;
-  /** How many times its turn was tried. */
-  readonly attempts: number;
-  /** Why the last try failed. */
-  readonly error: string;
-  /** Epoch ms it was set aside. */
-  readonly at: number;
 }
 
 //#endregion

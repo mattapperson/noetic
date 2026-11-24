@@ -397,7 +397,7 @@ const roles: Record<string, Role> = {
     await harness.close();
   },
 
-  /** The reviewer's decision arrives, a day later, at whichever executor is up. */
+  /** The reviewer's decision arrives a day later, as an item passed to `execute()` on whichever executor is up. */
   review: async (opts) => {
     const { harness } = buildExecutor(opts);
     const thread = {
@@ -408,20 +408,28 @@ const roles: Record<string, Role> = {
     // An approval for a different action than the one proposed is refused.
     let refusal = 'accepted';
     try {
-      await harness.resolve(thread, {
-        callId: held.callId,
-        argsHash: 'the-hash-of-some-other-payment',
-        action: 'allow',
-      });
+      await harness.execute(
+        {
+          type: 'noetic:decision',
+          callId: held.callId,
+          argsHash: 'the-hash-of-some-other-payment',
+          action: 'allow',
+        },
+        thread,
+      );
     } catch (error) {
       refusal = isNoeticError(error) ? error.noeticError.kind : String(error);
     }
 
-    await harness.resolve(thread, {
-      callId: held.callId,
-      argsHash: held.argsHash,
-      action: 'allow',
-    });
+    await harness.execute(
+      {
+        type: 'noetic:decision',
+        callId: held.callId,
+        argsHash: held.argsHash,
+        action: 'allow',
+      },
+      thread,
+    );
     await harness.wake(thread);
     const response = await paidOn(harness, thread.threadId);
     say({
@@ -446,11 +454,15 @@ const roles: Record<string, Role> = {
       threadId: 'mail:msg-2077',
     };
     const held = await heldOn(harness, thread.threadId);
-    await harness.resolve(thread, {
-      callId: held.callId,
-      argsHash: held.argsHash,
-      action: 'allow',
-    });
+    await harness.execute(
+      {
+        type: 'noetic:decision',
+        callId: held.callId,
+        argsHash: held.argsHash,
+        action: 'allow',
+      },
+      thread,
+    );
     await harness.wake(thread);
     const response = await paidOn(harness, thread.threadId);
     say({
@@ -458,11 +470,11 @@ const roles: Record<string, Role> = {
       text: response.text,
       trail: {
         first: summary(
-          await harness.trail({
+          await harness.getAuditTrail({
             threadId: 'mail:msg-1042',
           }),
         ),
-        second: summary(await harness.trail(thread)),
+        second: summary(await harness.getAuditTrail(thread)),
       },
     });
     await harness.close();

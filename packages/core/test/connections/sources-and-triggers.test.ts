@@ -977,10 +977,9 @@ describe('triggers', () => {
     await rig.runtime.close();
   });
 
-  test('an event whose turn keeps failing goes to the dead list, and replay tries it again', async () => {
+  test('an event whose turn keeps failing is given up on after five tries, and not tried again', async () => {
     const rig = setup();
     await rig.runtime.start();
-    let failing = true;
     let tries = 0;
     const delivered: string[] = [];
     const errors: unknown[] = [];
@@ -995,10 +994,8 @@ describe('triggers', () => {
       ],
       deliver: async (d: TriggerDelivery): Promise<void> => {
         tries += 1;
-        if (failing) {
-          throw new Error('model is down');
-        }
         delivered.push(d.input);
+        throw new Error('model is down');
       },
       errors,
     };
@@ -1006,36 +1003,28 @@ describe('triggers', () => {
     await runner.start();
     await sleep(5);
     await rig.source.emit(failed('e1'));
-    await until(async () => (await runner.dead()).length === 1);
+    await until(() => tries === 5);
+    await until(
+      async () =>
+        (await rig.storage.list('noetic/connections/triggers/failures/inbox/')).length === 0,
+    );
 
-    const [dead] = await runner.dead('failures');
-    assert(dead);
-    expect(dead).toMatchObject({
-      trigger: 'failures',
-      attempts: 5,
-      error: 'model is down',
-      at: 4242,
+    // Each failed try was reported; nothing is kept but the mark that it was seen.
+    expect(errors).toHaveLength(5);
+    expect(await rig.storage.get('noetic/connections/triggers/failures/seen/e1')).toEqual({
+      failed: 'model is down',
     });
-    expect(dead.event.id).toBe('e1');
-    expect(tries).toBe(5);
-    // Out of the inbox: it is not tried again on its own, here or after a restart.
-    expect(await rig.storage.list('noetic/connections/triggers/failures/inbox/')).toEqual([]);
+    expect(await rig.storage.list('noetic/connections/triggers/failures/dead/')).toEqual([]);
     await runner.close();
+
+    // Not tried again after a restart, nor when the source delivers it again.
     const restarted = runnerFor(rig, options);
     await restarted.start();
     await sleep(10);
+    await rig.source.emit(failed('e1'));
+    await sleep(10);
     expect(tries).toBe(5);
-
-    // The model is back: replay delivers it, and it leaves the dead list.
-    failing = false;
-    expect(await restarted.replay('failures', 'e1')).toBe(true);
-    await until(() => delivered.length === 1);
-    expect(delivered).toEqual([
-      'e1',
-    ]);
-    expect(await restarted.dead()).toEqual([]);
-    expect(await restarted.replay('failures', 'e1')).toBe(false);
-    expect(await restarted.replay('nope', 'e1')).toBe(false);
+    expect(delivered).toHaveLength(5);
     await restarted.close();
     await rig.runtime.close();
   });
