@@ -443,6 +443,25 @@ turns).
 `cron(schedule, { timezone })` is a built-in source with one event, `tick`,
 delivered once per scheduled time even after downtime.
 
+**Scheduled sources.** A connection whose events come at times it can tell in
+advance sets `Connection.schedule`, an `EventSchedule`:
+`next(cursor, now)` gives the epoch ms of the first event after a listener's
+cursor, and `begin(now)` the cursor a listener with none starts from. A source
+declares one as `defineSource({ events, schedule })`; `cron()` has one.
+
+- A trigger on a scheduled connection that has no cursor stores `begin(now)`
+  when it first starts. A host that is not running when the first event falls
+  due then still counts from that place when it comes back, and gets the event.
+- `harness.nextWake()` includes the earliest `next` among the triggers on
+  scheduled connections (`23-durable-execution` § Parked turns).
+- `harness.idle()` resolves once every scheduled event that is due has been
+  read by its trigger and every turn has finished or parked. It stops waiting
+  on a due event after 10 s, so a source that cannot deliver holds no caller.
+
+So a host with no process between events runs a `cron()` trigger unchanged: it
+calls `harness.start()` at the time `nextWake()` gave, the source delivers what
+fell due, and `idle()` says when the host may go.
+
 A chat bot that answers every message — streaming replies, tool cards,
 history — belongs on `@noetic-tools/chat-sdk` (spec 29). Chat connections are
 for agents that start conversations or wait on people: post a question, wait

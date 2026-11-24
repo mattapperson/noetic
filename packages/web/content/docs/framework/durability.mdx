@@ -366,7 +366,8 @@ Later, in this process or another one:
 ```ts validate=none
 await harness.wake();               // resume turns that are due, and turns that were cut off
 await harness.wake({ threadId });   // the event for this thread arrived: resume it now
-const at = await harness.nextWake(); // when to call wake() next, or undefined
+const at = await harness.nextWake(); // a parked deadline or the next cron() tick, or undefined
+await harness.idle();                // nothing due is unread, and no turn is running
 ```
 
 - **What parks.** Only a `wait` on an event the connection can replay from a cursor (`replay: 'durable'` in its manifest), such as a [source](/docs/framework/connections#sources) with a `start`. A turn with a model call, a tool or user code still running stays live, as does a wait on an event that cannot be replayed.

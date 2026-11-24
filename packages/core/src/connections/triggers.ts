@@ -64,6 +64,10 @@ interface CompiledTrigger {
   readonly thread?: CompiledExpression;
 }
 
+/** How long `idle` waits for a due event to be read before it stops waiting on it. */
+const DUE_WAIT_MS = 1e4;
+const DUE_POLL_MS = 10;
+
 interface InboxEntry {
   readonly event: ConnectionEvent;
   readonly threadId: string;
@@ -399,6 +403,70 @@ export class TriggerRunner {
     return true;
   }
 
+  /**
+   * Epoch ms of the earliest event a trigger is due, for triggers on a connection
+   * that can tell (`Connection.schedule`, as `cron()` has). Undefined when none can,
+   * or before the runner has started.
+   */
+  async nextDue(): Promise<number | undefined> {
+    const now = (this.options.now ?? Date.now)();
+    let earliest: number | undefined;
+    for (const trigger of this.triggers.values()) {
+      const schedule = this.options.runtime.current(trigger.connection)?.schedule;
+      if (!schedule) {
+        continue;
+      }
+      const due = schedule.next(await this.cursorOf(trigger), now);
+      if (due !== undefined) {
+        earliest = earliest === undefined ? due : Math.min(earliest, due);
+      }
+    }
+    return earliest;
+  }
+
+  /**
+   * Resolves once the runner has nothing in hand: every scheduled event that is
+   * due has been read, and every turn a trigger started has finished or parked.
+   * It gives up waiting on a due event after `dueWaitMs`, so a source that cannot
+   * deliver does not hold a caller forever.
+   */
+  async idle(dueWaitMs = DUE_WAIT_MS): Promise<void> {
+    const now = this.options.now ?? Date.now;
+    const giveUpAt = Date.now() + dueWaitMs;
+    for (;;) {
+      await Promise.allSettled([
+        ...this.threads.values(),
+      ]);
+      const due = await this.nextDue();
+      const overdue = due !== undefined && due <= now() && Date.now() < giveUpAt;
+      if (!overdue && this.threads.size === 0) {
+        return;
+      }
+      await wait(DUE_POLL_MS, this.controller.signal);
+      if (this.controller.signal.aborted) {
+        return;
+      }
+    }
+  }
+
+  private async cursorOf(trigger: ConnectionTrigger): Promise<string | null> {
+    const cursor = await this.options.storage.get<string>(`${prefix(trigger.id)}/cursor`);
+    return typeof cursor === 'string' ? cursor : null;
+  }
+
+  /**
+   * A trigger on a scheduled connection starts counting from now. Without a stored
+   * place to count from, a host that is not running when the first event falls due
+   * would come back, count from "now" again, and never see it.
+   */
+  private async anchor(trigger: ConnectionTrigger): Promise<void> {
+    const schedule = this.options.runtime.current(trigger.connection)?.schedule;
+    if (!schedule || (await this.cursorOf(trigger)) !== null) {
+      return;
+    }
+    await this.advance(trigger, schedule.begin((this.options.now ?? Date.now)()));
+  }
+
   /** Triggers added on an earlier run, read back from storage. */
   private async loadAdded(): Promise<void> {
     for (const key of await this.options.storage.list(STORED_PREFIX)) {
@@ -431,6 +499,7 @@ export class TriggerRunner {
   /** Redeliver what the trigger left in its inbox, then listen. */
   private async begin(trigger: ConnectionTrigger): Promise<void> {
     await this.redeliver(trigger);
+    await this.anchor(trigger);
     const controller = new AbortController();
     const stop = (): void => controller.abort();
     this.controller.signal.addEventListener('abort', stop, {
@@ -486,11 +555,10 @@ export class TriggerRunner {
 
   /** Listens until the stream ends. Returns whether it got as far as listening. */
   private async listenOnce(trigger: ConnectionTrigger, signal: AbortSignal): Promise<boolean> {
-    const cursor = await this.options.storage.get<string>(`${prefix(trigger.id)}/cursor`);
     const stream = await this.options.runtime.listenRaw(trigger.connection, {
       event: trigger.event,
       arguments: trigger.arguments,
-      cursor: typeof cursor === 'string' ? cursor : null,
+      cursor: await this.cursorOf(trigger),
       signal,
       // A source's `emit` waits to hear the event is in the inbox.
       stores: true,

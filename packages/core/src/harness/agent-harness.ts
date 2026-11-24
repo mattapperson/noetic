@@ -596,6 +596,26 @@ export class AgentHarness<
   }
 
   /**
+   * Resolves once the harness has nothing in hand: every scheduled event that is
+   * due has been read by its trigger, and every turn has finished or parked. A
+   * serverless host awaits it after `start()` and `wake()`, before it lets its
+   * process go.
+   * @public
+   */
+  async idle(): Promise<void> {
+    for (;;) {
+      await this.#connections.triggers.idle();
+      const busy = [
+        ...this.sessions.values(),
+      ].filter((session) => session.runner.getStatus().kind !== 'idle');
+      if (busy.length === 0) {
+        return;
+      }
+      await Promise.allSettled(busy.map((session) => session.runner.getAgentResponse()));
+    }
+  }
+
+  /**
    * Each connection's state, identity and pool usage; one entry for `name`, or all.
    * @public
    */
@@ -1159,16 +1179,18 @@ export class AgentHarness<
   }
 
   /**
-   * The earliest time a parked turn needs waking, in epoch ms, or undefined when
-   * none is parked. A host with no process of its own between events (a serverless
-   * worker) schedules its next `wake()` from this.
+   * The earliest time the harness has something to do, in epoch ms: a parked turn
+   * that needs waking, or the next event of a scheduled source a trigger listens
+   * to (`cron()`). Undefined when there is neither. A host with no process of its
+   * own between events (a serverless worker) schedules its next `start()` and
+   * `wake()` from this.
    * @public
    */
   async nextWake(): Promise<number | undefined> {
+    let earliest = await this.#connections.triggers.nextDue();
     if (!this.sessionStore) {
-      return undefined;
+      return earliest;
     }
-    let earliest: number | undefined;
     for (const threadId of await this.sessionStore.threads()) {
       const until = (await this.sessionStore.load(threadId))?.turn?.parked?.until;
       if (until === undefined) {

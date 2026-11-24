@@ -18,7 +18,7 @@ export interface AlarmStorageLike {
 }
 
 /** @public The harness methods the alarm preset calls. An `AgentHarness` fits. */
-export type WakeableHarness = Pick<AgentHarness, 'wake' | 'nextWake' | 'getAgentResponse'>;
+export type WakeableHarness = Pick<AgentHarness, 'start' | 'wake' | 'nextWake' | 'idle'>;
 
 /** @public Options for `alarmWake`. */
 export interface AlarmWakeOptions {
@@ -30,16 +30,19 @@ export interface AlarmWakeOptions {
 /** @public What `alarmWake` returns. */
 export interface AlarmWake {
   /**
-   * Call from the object's `alarm()` handler. Wakes every turn that is due, waits
-   * for each to finish or park again, then sets the next alarm. It does not throw
-   * for a turn that failed: a throw would make the runtime retry the alarm, and
-   * the failure is already on the turn. Resolves the ids of the threads it woke.
+   * Call from the object's `alarm()` handler. Starts the harness, so a `cron()`
+   * source delivers the ticks that fell due while nothing ran; wakes every parked
+   * turn that is due; waits for every turn to finish or park again; then sets the
+   * next alarm. It does not throw for a turn that failed: a throw would make the
+   * runtime retry the alarm, and the failure is already on the turn. Resolves the
+   * ids of the parked threads it woke.
    */
   alarm(): Promise<string[]>;
   /**
-   * Set the alarm to the harness's next wake time, or clear it when nothing is
-   * parked. Call after a turn you ran yourself has answered, since it may have
-   * parked.
+   * Set the alarm to the harness's next wake time (a parked turn's deadline or a
+   * `cron()` tick), or clear it when there is none. Call after a turn you ran
+   * yourself has answered, since it may have parked, and once when the object is
+   * first set up, so the first tick has an alarm.
    */
   schedule(): Promise<void>;
 }
@@ -75,6 +78,8 @@ export function alarmWake(options: AlarmWakeOptions): AlarmWake {
   const { harness, alarms } = options;
 
   async function schedule(): Promise<void> {
+    // Started, so a scheduled source's next event is known.
+    await harness.start();
     const at = await harness.nextWake();
     if (at === undefined) {
       await alarms.deleteAlarm();
@@ -86,16 +91,11 @@ export function alarmWake(options: AlarmWakeOptions): AlarmWake {
   return {
     schedule,
     async alarm(): Promise<string[]> {
+      await harness.start();
       const woken = await harness.wake();
-      // The handler is what keeps the object alive: stay until each turn has
+      // The handler is what keeps the object alive: stay until every turn has
       // finished or parked again.
-      await Promise.allSettled(
-        woken.map((threadId) =>
-          harness.getAgentResponse({
-            threadId,
-          }),
-        ),
-      );
+      await harness.idle();
       await schedule();
       return woken;
     },

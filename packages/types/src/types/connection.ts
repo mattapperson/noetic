@@ -427,6 +427,12 @@ export interface Connection {
   listen(req: ListenRequest): EventStream;
   readonly tasks: ConnectionTasks;
   reset?(opts: { signal: AbortSignal }): Promise<void>;
+  /**
+   * Set by a connection whose events come at times it can tell in advance, such as
+   * `cron()`. A host with no process of its own between events learns from it when
+   * to come back (`harness.nextWake()`).
+   */
+  readonly schedule?: EventSchedule;
   onChange(listener: (change: 'manifest' | 'identity') => void): () => void;
   /**
    * Set while the connection cannot be used though it is still open — a
@@ -657,6 +663,25 @@ export interface SourceStartContext<E extends SourceEventSchemas> {
 export interface SourceDefinition<E extends SourceEventSchemas> {
   readonly events: E;
   start?(ctx: SourceStartContext<E>): Promise<void> | void;
+  /** When the source's events are due, for a source that can tell in advance. */
+  readonly schedule?: EventSchedule;
+}
+
+/**
+ * @public
+ * When a connection's next event is due, worked out from a listener's cursor.
+ */
+export interface EventSchedule {
+  /**
+   * Epoch ms of the first event after `cursor`, or undefined when there is none.
+   * With no cursor, the first event after `now`.
+   */
+  next(cursor: string | null, now: number): number | undefined;
+  /**
+   * The cursor a listener that has none starts from at `now`. It is stored, so a
+   * host that is not running when the first event falls due still gets it.
+   */
+  begin(now: number): string;
 }
 
 /** @public An in-process event stream registered as a connection. */

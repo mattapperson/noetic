@@ -136,7 +136,7 @@ const receive = eventEndpoint({
 export default { fetch: (request: Request) => receive(request) };
 ```
 
-It answers `200` when the event is stored, `503` when it could not be (so the provider sends it again), `401` when `verify` refuses, `400` when `toEvent` throws, `204` when `toEvent` returns `undefined`, and `405` for anything but a POST. A delivery that arrives twice with the same event id starts one turn. For a schedule, call `source.emit` from the Worker's `scheduled` handler.
+It answers `200` when the event is stored, `503` when it could not be (so the provider sends it again), `401` when `verify` refuses, `400` when `toEvent` throws, `204` when `toEvent` returns `undefined`, and `405` for anything but a POST. A delivery that arrives twice with the same event id starts one turn.
 
 ### Waking parked turns
 
@@ -152,7 +152,7 @@ export class Agent extends DurableObject {
   #wake = alarmWake({ harness: this.#harness, alarms: this.ctx.storage });
 
   async alarm() {
-    await this.#wake.alarm(); // wakes what is due, waits for it, sets the next alarm
+    await this.#wake.alarm(); // runs what is due, waits for it, sets the next alarm
   }
 
   async message(text: string, messageId: string) {
@@ -163,6 +163,8 @@ export class Agent extends DurableObject {
   }
 }
 ```
+
+A [`cron()`](/docs/framework/connections) trigger runs on this preset unchanged. The alarm is set to the next tick as well as to parked deadlines, and `alarm()` delivers the ticks that fell due while nothing ran. Call `schedule()` once when the object is first set up, so the first tick has an alarm.
 
 **A Cloudflare Workflow, one instance per turn:**
 
@@ -182,7 +184,7 @@ const instanceId = await startTurn(env.TURNS, { threadId, messageId, input: text
 await wakeTurn(env.TURNS, instanceId);
 ```
 
-The instance runs the turn until it parks, sleeps until the turn's deadline or a wake, and runs it again. Everything the turn did is in the harness's storage, so a Workflow step that is retried repeats nothing.
+The instance runs the turn until it parks, sleeps until the turn's deadline or a wake, and runs it again. This preset has no object that is always there, so for a `cron()` trigger add a Cloudflare Cron Trigger whose `scheduled` handler calls `harness.start()` and awaits `harness.idle()`. Everything the turn did is in the harness's storage, so a Workflow step that is retried repeats nothing.
 
 ## Related Pages
 

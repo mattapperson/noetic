@@ -175,7 +175,7 @@ A parked turn is rows in storage and nothing else. It survives the process endin
 
 A woken turn replays its ledger, so no finished model call is made again, and its wait listens from the recorded cursor until the recorded deadline. If nothing has arrived it parks again, with the same `until`. If the deadline has passed, the wait fails as it would have live.
 
-`harness.nextWake()` resolves the earliest `until` among parked turns, or `undefined`. A host with no process of its own between events schedules its next `wake()` from it.
+`harness.nextWake()` resolves the earliest time the harness has something to do: the earliest `until` among parked turns, or the next event of a scheduled source a trigger listens to, such as a `cron()` tick (`35-connections` § Triggers). It resolves `undefined` when there is neither. A host with no process of its own between events schedules its next `start()` and `wake()` from it, and awaits `harness.idle()` before it lets its process go.
 
 **The clock.** `AgentHarness({ now })` is the clock wait deadlines, leases and wake times are read from. It defaults to `Date.now`.
 

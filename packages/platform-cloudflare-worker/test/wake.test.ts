@@ -6,7 +6,8 @@
 import { Database } from 'bun:sqlite';
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import type { StorageAdapter } from '@noetic-tools/core';
+import type { ContextData, StorageAdapter } from '@noetic-tools/core';
+import { AgentHarness, callModel, cron } from '@noetic-tools/core';
 import { alarmWake } from '../src/alarm-wake';
 import { createD1Storage } from '../src/d1-storage';
 import { createDurableObjectStorage } from '../src/durable-object-storage';
@@ -400,5 +401,83 @@ describe('starting and waking a turn’s instance', () => {
     expect(exact).toBe(`${'a'.repeat(96)}-m-1`);
     expect(await turnInstanceId('a'.repeat(97), 'm-1')).toHaveLength(100);
     expect(await turnInstanceId('-lead', 'm')).toMatch(VALID);
+  });
+});
+
+describe('a cron() trigger on the alarm preset', () => {
+  const MINUTE = 6e4;
+  const CURSOR_KEY = 'noetic/connections/triggers/every-minute/cursor';
+
+  function everyMinute(storage: StorageAdapter, ticks: string[]): AgentHarness {
+    return new AgentHarness({
+      name: 'worker',
+      params: {},
+      agentGraph: callModel<ContextData, string, string>({
+        id: 'agent',
+        model: 'test/model',
+      }),
+      connections: {
+        clock: cron('* * * * *'),
+      },
+      triggers: [
+        {
+          id: 'every-minute',
+          connection: 'clock',
+          event: 'tick',
+          input: 'event.payload.scheduledFor',
+          thread: '"tick:" & event.id',
+        },
+      ],
+      environment: {
+        storage: {
+          adapter: storage,
+          park: {
+            graceMs: 0,
+            autoWake: false,
+          },
+        },
+      },
+      _testCallModel: async (request) => {
+        ticks.push(JSON.stringify(request));
+        return model('tick').call(request);
+      },
+    });
+  }
+
+  it('sets the first alarm to the next tick', async () => {
+    const storage = (storages.D1?.() ?? expect.unreachable())();
+    const alarm = fakeAlarm();
+    const harness = everyMinute(storage, []);
+    await alarmWake({
+      harness,
+      alarms: alarm,
+    }).schedule();
+    assert(alarm.at !== undefined);
+    expect(alarm.at % MINUTE).toBe(0);
+    expect(alarm.at).toBeGreaterThan(Date.now());
+    expect(alarm.at - Date.now()).toBeLessThanOrEqual(MINUTE);
+    await harness.close();
+  });
+
+  it('runs the tick that fell due while no Worker was up, then sets the next alarm', async () => {
+    const make = storages.D1?.() ?? expect.unreachable();
+    // The object last saw the tick a minute ago; the alarm for this one fires now.
+    const thisTick = Math.floor(Date.now() / MINUTE) * MINUTE;
+    await make().set(CURSOR_KEY, new Date(thisTick - MINUTE).toISOString());
+
+    const ticks: string[] = [];
+    const alarm = fakeAlarm();
+    const harness = everyMinute(make(), ticks);
+    await alarmWake({
+      harness,
+      alarms: alarm,
+    }).alarm();
+
+    // `alarm()` stayed until the tick's turn was over.
+    // The clock is real, so a minute may turn over mid-test and add a tick.
+    expect(ticks.length).toBeGreaterThanOrEqual(1);
+    expect(ticks[0]).toContain(new Date(thisTick).toISOString());
+    expect(alarm.at).toBe(thisTick + ticks.length * MINUTE);
+    await harness.close();
   });
 });

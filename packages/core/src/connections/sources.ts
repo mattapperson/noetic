@@ -345,6 +345,11 @@ export const defineSource: DefineSource = <const E extends SourceEventSchemas>(
           );
         },
         listen: (request) => current.listen(request),
+        ...(definition.schedule
+          ? {
+              schedule: definition.schedule,
+            }
+          : {}),
         tasks: {
           async get(taskId) {
             return {
@@ -395,6 +400,13 @@ export const cron: Cron = (schedule, options) => {
   };
   return defineSource({
     events,
+    schedule: {
+      next: (cursor, now) => {
+        const resumed = cursor === null ? Number.NaN : Date.parse(cursor);
+        return nextCronRun(parsed, Number.isNaN(resumed) ? now : resumed);
+      },
+      begin: (now) => new Date(now).toISOString(),
+    },
     async start({ emit, cursor, signal }) {
       const resumed = cursor === null ? Number.NaN : Date.parse(cursor);
       let after = Number.isNaN(resumed) ? Date.now() : resumed;

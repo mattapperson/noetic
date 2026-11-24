@@ -258,7 +258,7 @@ A webhook is the host's business: core has no webhook concept (`35-connections` 
 | `503` | `emit` rejected: the event is not stored, and the provider should send it again. |
 | `200` | `emit` resolved, which is when every listening trigger has stored the event. |
 
-`standardWebhookVerifier({ secret, toleranceMs?, now? })` is a `verify` for Standard Webhooks signatures on Web Crypto. It does not drop a repeated `webhook-id`; a trigger's inbox dedupes by event id, so `toEvent` uses the `webhook-id` as the event's id. A cron trigger needs no helper: the Worker's `scheduled` handler calls `source.emit`.
+`standardWebhookVerifier({ secret, toleranceMs?, now? })` is a `verify` for Standard Webhooks signatures on Web Crypto. It does not drop a repeated `webhook-id`; a trigger's inbox dedupes by event id, so `toEvent` uses the `webhook-id` as the event's id.
 
 ### Waking parked turns
 
@@ -266,8 +266,10 @@ A harness in a Worker is built with `park: { autoWake: false }`: its own timers 
 
 **Alarm.** `alarmWake({ harness, alarms })`, in a Durable Object, with `alarms` the object's `ctx.storage`.
 
-- `schedule()` sets the object's alarm to `harness.nextWake()`, or deletes it when nothing is parked. The host calls it after a turn it ran has answered.
-- `alarm()`, called from the object's `alarm()` handler, calls `harness.wake()`, waits for every woken turn to finish or park again, then calls `schedule()`. It does not throw for a turn that failed, since a throw makes the runtime retry the alarm.
+- `schedule()` starts the harness and sets the object's alarm to `harness.nextWake()`, or deletes it when there is none. The host calls it after a turn it ran has answered, and once when the object is first set up, so the first `cron()` tick has an alarm.
+- `alarm()`, called from the object's `alarm()` handler, calls `harness.start()`, `harness.wake()` and `harness.idle()`, then `schedule()`. Starting the harness is what makes a `cron()` source deliver the ticks that fell due while nothing ran. It does not throw for a turn that failed, since a throw makes the runtime retry the alarm.
+
+A `cron()` trigger therefore runs on the alarm preset as it does on Node, with the schedule written once. The package has no cron helper of its own.
 
 **Cloudflare Workflows.** One Workflow instance per turn. `runTurn({ harness, step, turn, options?, maxWaitMs?, now? })` is called from the Workflow's `run`:
 
@@ -277,6 +279,8 @@ A harness in a Worker is built with `park: { autoWake: false }`: its own timers 
 4. It resolves `{ text }`, or `{ text: '', gone: true }` when there was no turn left to wake.
 
 `startTurn(binding, turn)` creates the instance under `turnInstanceId(threadId, messageId)`, so a message delivered twice starts one instance. `wakeTurn(binding, instanceId)` sends the wake event; Workflows keeps an event sent before the instance reaches its wait.
+
+The Workflows preset has no object that is always there, so a `cron()` trigger needs something to start the harness at each tick: a Cloudflare Cron Trigger whose `scheduled` handler calls `harness.start()` and awaits `harness.idle()`.
 
 The Workflow decides only when the harness runs. What a turn did is in the harness's storage, so a Workflow step that is retried, and a turn woken twice, replay from the step ledger and repeat nothing.
 

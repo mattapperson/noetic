@@ -2205,7 +2205,9 @@ Each tool call in a model round is recorded as it finishes, so a resumed round r
 // environment.storage.park?: boolean | { graceMs?: number }   (needs swap storage)
 // AgentHarness({ now?: () => number })
 harness.wake(scope?: { threadId?: string; options?: ExecuteOptions }): Promise<string[]>;
-harness.nextWake(): Promise<number | undefined>;
+harness.nextWake(): Promise<number | undefined>;   // earliest parked deadline or next cron() tick
+harness.idle(): Promise<void>;                     // due scheduled events are read; every turn finished or parked
+// defineSource({ events, schedule: { next(cursor, now), begin(now) } }) — a source that knows when its events are due
 // HarnessResponse.parked?: { wakeAt: number }   — event `{name}:turn_parked`
 ```
 

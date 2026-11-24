@@ -944,6 +944,7 @@ export type {
   CronTick,
   DeadTriggerEvent,
   Determinism,
+  EventSchedule,
   EventStream,
   EventStreamMessage,
   FreshScope,
