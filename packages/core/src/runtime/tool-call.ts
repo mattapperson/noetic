@@ -393,6 +393,8 @@ async function runMatchedTool(
     recordId: recordIdOf(params),
   });
   const callId = params.callId;
+  // Where the call's held record goes: the id that survives a resume.
+  const holdId = recordIdOf(params);
   const uiBase =
     callId !== undefined
       ? {
@@ -435,14 +437,14 @@ async function runMatchedTool(
     }
     // The tool did its part and left the result for a person to give.
     if (isToolHold(result)) {
-      if (callId === undefined) {
+      if (holdId === undefined) {
         return {
           output: `Error: '${matchedTool.name}' cannot be held: the call has no id`,
           error: true,
         };
       }
       return holdCall(params, {
-        callId,
+        callId: holdId,
         tool: matchedTool,
         args: parsedArgs,
         reason: 'result',
@@ -466,9 +468,9 @@ async function runMatchedTool(
     };
   } catch (e) {
     // An approval seam inside the tool (a connection's gates) held the call.
-    if (e instanceof HoldSignal && callId !== undefined) {
+    if (e instanceof HoldSignal && holdId !== undefined) {
       return holdCall(params, {
-        callId,
+        callId: holdId,
         tool: matchedTool,
         args: parsedArgs,
         reason: 'approval',

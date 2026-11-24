@@ -2,6 +2,7 @@ import type { Context, HeldCall, SteeringDecision } from '@noetic-tools/types';
 import { SteeringAction } from '@noetic-tools/types';
 import type { HeldRecord, HoldHost } from './held-calls';
 import {
+  announcerOf,
   HoldSignal,
   heldArgsHash,
   heldCallsOf,
@@ -132,13 +133,12 @@ export async function askApproval(params: {
   const approver = params.harness.config.approveToolCall;
   if (!approver) {
     if (params.callId === undefined) {
+      // Nobody to ask and no id to hold it under. Approval is not something a
+      // call gets by default: it is refused.
       warnOnce(params.harness, params.toolName);
-      return {
-        outcome: ApprovalOutcome.NoneConfigured,
-        decision: {
-          action: SteeringAction.Allow,
-        },
-      };
+      return denied(
+        `'${params.toolName}' needs approval, and there is no approver and no call id to hold it under`,
+      );
     }
     throw new HoldSignal();
   }
@@ -179,6 +179,11 @@ export async function awaitApproval(params: {
   toolName: string;
   toolArgs: unknown;
   callId: string;
+  /**
+   * The id the call's held record is under, when it is not `callId`: one that is
+   * unique to this call in the run. The approver is still shown `callId`.
+   */
+  recordId?: string;
   ctx: Context;
   /** Called once, when the call is first held. */
   onHeld?: (held: HeldCall) => void;
@@ -187,12 +192,16 @@ export async function awaitApproval(params: {
 }): Promise<ToolApproval> {
   const holds = heldCallsOf(params.harness);
   const scope = heldScopeOf(params.ctx);
+  const heldAs = params.recordId ?? params.callId;
   let announced = false;
   for (;;) {
     try {
       const approval = await askApproval(params);
-      if (announced && mayWriteHolds(params.ctx)) {
-        await holds.close(scope, params.callId);
+      // Whether this process saw the call held or a resumed one found it answered,
+      // the answer is spent here. Left in storage, it would approve the next ask
+      // under this id with nobody asked.
+      if (mayWriteHolds(params.ctx)) {
+        await holds.close(scope, heldAs);
       }
       return approval;
     } catch (e) {
@@ -203,7 +212,7 @@ export async function awaitApproval(params: {
         ? (record: HeldRecord) => holds.open(scope, record)
         : async (record: HeldRecord) => record;
       const record = await open({
-        callId: params.callId,
+        callId: heldAs,
         name: params.toolName,
         args: params.toolArgs,
         argsHash: heldArgsHash(params.toolName, params.toolArgs),
@@ -221,13 +230,13 @@ export async function awaitApproval(params: {
       });
       if (!announced) {
         announced = true;
-        params.onHeld?.(toHeldCall(record));
+        (params.onHeld ?? announcerOf(params.harness, params.ctx))(toHeldCall(record));
       }
       await waitOnHeldCalls({
         harness: params.harness,
         ctx: params.ctx,
         callIds: [
-          params.callId,
+          heldAs,
         ],
         park: params.park,
       });

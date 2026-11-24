@@ -540,3 +540,300 @@ describe("an invokeTool step's idempotency key", () => {
     ]);
   });
 });
+
+describe('a call held for one thing after another', () => {
+  /** A tool that needs approval, then leaves its result for a person. */
+  function askAfterApproval(runs: string[]) {
+    return invokeTool({
+      id: 'ask',
+      tool: tool({
+        name: 'ask_person',
+        description: 'Ask a person.',
+        input: z.object({
+          question: z.string(),
+        }),
+        output: z.string(),
+        needsApproval: true,
+        execute: async ({ question }) => {
+          runs.push(question);
+          return hold({
+            request: {
+              question,
+            },
+          });
+        },
+      }),
+    });
+  }
+
+  it('asks for approval, runs the body once, then asks for the result', async () => {
+    const runs: string[] = [];
+    const harness = new AgentHarness({
+      name: 'routes',
+      params: {},
+    });
+    const ctx = harness.createContext();
+    const scope = {
+      executionId: ctx.id,
+    };
+    const running = harness.run(
+      askAfterApproval(runs),
+      {
+        question: 'Ship it?',
+      },
+      ctx,
+    );
+    const approval = await heldCall(harness, scope);
+    expect(approval.reason).toBe('approval');
+    expect(runs).toEqual([]);
+    await harness.resolveHeld(scope, {
+      callId: approval.callId,
+      action: 'allow',
+    });
+
+    // The approval is spent: what is held now is a different question.
+    let result: HeldCall | undefined;
+    for (let i = 0; i < 2e3 && result?.reason !== 'result'; i += 1) {
+      [result] = await harness.pending(scope);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    assert(result);
+    expect(result.reason).toBe('result');
+    expect(runs).toEqual([
+      'Ship it?',
+    ]);
+    await harness.resolveHeld(scope, {
+      callId: result.callId,
+      output: 'Yes.',
+    });
+    expect(await running).toBe('Yes.');
+    expect(runs).toEqual([
+      'Ship it?',
+    ]);
+    expect(await harness.pending(scope)).toEqual([]);
+  });
+});
+
+describe('an approval, once used', () => {
+  function gatedAdd(runs: number[]) {
+    return invokeTool({
+      id: 'add',
+      tool: tool({
+        name: 'add',
+        description: 'Add one.',
+        input: z.object({
+          n: z.number(),
+        }),
+        output: z.number(),
+        needsApproval: true,
+        execute: async ({ n }) => {
+          runs.push(n);
+          return n + 1;
+        },
+      }),
+    });
+  }
+  const args = {
+    n: 7,
+  };
+
+  it('does not approve the same step asking again with the same arguments', async () => {
+    const runs: number[] = [];
+    const addStep = gatedAdd(runs);
+    const harness = new AgentHarness({
+      name: 'routes',
+      params: {},
+      environment: {
+        storage: {
+          adapter: createInMemoryStorage(),
+        },
+      },
+    });
+    const ctx = harness.createContext();
+    const scope = {
+      executionId: ctx.id,
+    };
+    const first = harness.run(addStep, args, ctx);
+    const held = await heldCall(harness, scope);
+    await harness.resolveHeld(scope, {
+      callId: held.callId,
+      action: 'allow',
+    });
+    expect(await first).toBe(8);
+
+    // The same step, the same arguments, a second time: a person is asked again.
+    const second = harness.run(addStep, args, ctx);
+    const again = await heldCall(harness, scope);
+    expect(again.callId).not.toBe(held.callId);
+    expect(runs).toEqual([
+      7,
+    ]);
+    await harness.resolveHeld(scope, {
+      callId: again.callId,
+      action: 'deny',
+    });
+    await expect(second).rejects.toThrow();
+    expect(runs).toEqual([
+      7,
+    ]);
+  });
+
+  it('covers one call: two at once under one step id are two questions', async () => {
+    const runs: number[] = [];
+    const addStep = gatedAdd(runs);
+    // No storage: the calls have no ledger path to tell them apart.
+    const harness = new AgentHarness({
+      name: 'routes',
+      params: {},
+    });
+    const ctx = harness.createContext();
+    const scope = {
+      executionId: ctx.id,
+    };
+    const a = harness.run(addStep, args, ctx);
+    const b = harness.run(addStep, args, ctx);
+    b.catch(() => {});
+    let held: HeldCall[] = [];
+    for (let i = 0; i < 2e3 && held.length < 2; i += 1) {
+      held = await harness.pending(scope);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    expect(held).toHaveLength(2);
+    const [one, two] = held;
+    assert(one);
+    assert(two);
+    await harness.resolveHeld(scope, {
+      callId: one.callId,
+      action: 'allow',
+    });
+    await Promise.race([
+      a,
+      b,
+    ]);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(runs).toEqual([
+      7,
+    ]);
+    await harness.resolveHeld(scope, {
+      callId: two.callId,
+      action: 'deny',
+    });
+    await Promise.allSettled([
+      a,
+      b,
+    ]);
+    expect(runs).toEqual([
+      7,
+    ]);
+  });
+
+  it('is the first of two answers given at once, on storage with no swap', async () => {
+    const runs: number[] = [];
+    const harness = new AgentHarness({
+      name: 'routes',
+      params: {},
+    });
+    const ctx = harness.createContext();
+    const scope = {
+      executionId: ctx.id,
+    };
+    const running = harness.run(gatedAdd(runs), args, ctx);
+    running.catch(() => {});
+    const held = await heldCall(harness, scope);
+    const answers = await Promise.allSettled([
+      harness.resolveHeld(scope, {
+        callId: held.callId,
+        action: 'allow',
+      }),
+      harness.resolveHeld(scope, {
+        callId: held.callId,
+        action: 'deny',
+      }),
+    ]);
+    expect(answers.map((answer) => answer.status)).toEqual([
+      'fulfilled',
+      'rejected',
+    ]);
+    expect(await running).toBe(8);
+  });
+});
+
+describe('a durable tool that needed approval and was cut off', () => {
+  it('asks a person how it ended, not for the approval it already had', async () => {
+    const attempts: number[] = [];
+    let hung = false;
+    const shipStep = invokeTool({
+      id: 'ship',
+      tool: tool({
+        name: 'ship',
+        description: 'Ship an order.',
+        input: z.object({
+          n: z.number(),
+        }),
+        output: z.string(),
+        needsApproval: true,
+        durable: true,
+        execute: async ({ n }) => {
+          attempts.push(n);
+          if (!hung) {
+            hung = true;
+            await new Promise(() => {});
+          }
+          return `shipped ${n}`;
+        },
+      }),
+    });
+    const storage = createInMemoryStorage();
+    const build = (): AgentHarness =>
+      new AgentHarness({
+        name: 'routes',
+        params: {},
+        environment: {
+          storage: {
+            adapter: storage,
+          },
+        },
+      });
+    const input = {
+      n: 1,
+    };
+    const first = build();
+    const ctx = first.createContext();
+    const scope = {
+      executionId: ctx.id,
+    };
+    void first.run(shipStep, input, ctx).catch(() => {});
+    const approval = await heldCall(first, scope);
+    await first.resolveHeld(scope, {
+      callId: approval.callId,
+      action: 'allow',
+    });
+    for (let i = 0; i < 2e3 && attempts.length === 0; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    expect(attempts).toEqual([
+      1,
+    ]);
+
+    // The host died inside the tool. The next one must not spin, and must ask.
+    const next = build();
+    const resumed = await next.restore(ctx.id);
+    assert(resumed);
+    const running = next.run(shipStep, input, resumed);
+    let outcome: HeldCall | undefined;
+    for (let i = 0; i < 2e3 && outcome?.reason !== 'outcome'; i += 1) {
+      [outcome] = await next.pending(scope);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    assert(outcome);
+    expect(outcome.reason).toBe('outcome');
+    await next.resolveHeld(scope, {
+      callId: outcome.callId,
+      output: 'shipped 1',
+    });
+    expect(await running).toBe('shipped 1');
+    expect(attempts).toEqual([
+      1,
+    ]);
+  });
+});

@@ -5,6 +5,7 @@
 
 import type { Span, SteeringDecision } from '@noetic-tools/types';
 import { frameworkCast, NoeticErrorImpl, validateSchema } from '@noetic-tools/types';
+import { orderedCallId } from '../connections/durability';
 import { ToolAttr } from '../observability/genai-attributes';
 import { ContextImpl } from '../runtime/context-impl';
 import type { HeldRecord, HoldHost } from '../runtime/held-calls';
@@ -29,6 +30,7 @@ import type {
 } from './action-types';
 import { SteeringAction } from './action-types';
 import { openChildSpan, traceChild } from './child-span';
+import { runRootOf } from './connection-steps';
 
 //#region tool
 
@@ -175,12 +177,32 @@ async function runInvokeTool<TContext, I, O>(
     }
   }
 
-  if (step.tool.needsApproval) {
+  // Held calls of this step, and its idempotency key, go under its dispatch path:
+  // a step id repeats across loop iterations and parallel branches, a path does
+  // not. A run with no ledger has no path, so the call is told apart by its order
+  // among this step's calls in the run.
+  const holdId =
+    (baseCtx instanceof ContextImpl ? baseCtx.currentDispatch()?.path : undefined) ??
+    orderedCallId(runRootOf(baseCtx), baseCtx, step.id);
+
+  // A durable call a host died inside had its approval before it started. What a
+  // person is asked now is how it ended, not whether it may run.
+  const wasCutOff =
+    step.tool.durable === true &&
+    (await heldCallsOf(harness).wasStarted(
+      heldScopeOf(baseCtx),
+      holdId,
+      heldArgsHash(step.tool.name, parsedArgs),
+    ));
+
+  if (step.tool.needsApproval && !wasCutOff) {
     const approval = await awaitApproval({
       harness,
       toolName: step.tool.name,
       toolArgs: parsedArgs,
+      // The approver sees the step's id; the hold goes under an id unique to this call.
       callId: step.id,
+      recordId: holdId,
       ctx: baseCtx,
     });
     span.setAttribute(ToolAttr.APPROVAL, approval.outcome);
@@ -189,10 +211,6 @@ async function runInvokeTool<TContext, I, O>(
     }
   }
 
-  // Held calls of this step are kept under its dispatch path: a step id repeats
-  // across loop iterations, a path does not.
-  const holdId =
-    (baseCtx instanceof ContextImpl ? baseCtx.currentDispatch()?.path : undefined) ?? step.id;
   const held = {
     callId: holdId,
     name: step.tool.name,

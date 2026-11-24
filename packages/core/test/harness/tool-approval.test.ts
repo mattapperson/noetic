@@ -502,7 +502,6 @@ describe('invokeTool', () => {
     );
     const held = await heldCall(f);
     expect(held).toMatchObject({
-      callId: 'add-step',
       name: 'add',
       reason: 'approval',
     });

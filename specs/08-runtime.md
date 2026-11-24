@@ -884,6 +884,16 @@ There is no separate method to answer with: `execute()` is the one way in. It ac
 
 **Where the turn is.** A turn running in this process is told, and goes on at once. On storage with parking on (`23-durable-execution` § Parked turns), a turn whose every step in flight is a held call or a resumable wait parks; the decision then wakes it. A parked turn waiting only on a held call has no time to wake at, so `parked.wakeAt` is absent and a routine `wake()` leaves it alone. Any harness over the same storage can list, answer and finish it.
 
+**One question at a time.** A call is held for one thing at a time. A tool that needs approval and then returns `hold()` is held for approval, runs once, and is then held for its result: the second hold replaces the first, and the approval's answer never passes for the result's. A `durable: true` tool that was approved and then cut off is held as `outcome`; it is not asked for approval again.
+
+**An approval is used once.** Its record is dropped as soon as it is acted on, in the process that saw the call held or in one that resumed and found it answered. The same step asking again, with the same arguments, asks a person again.
+
+**Ids.** A model's call is held under its call id. An `invokeTool` step's call is held under its dispatch path, or, on a run with no ledger, an id made from the step and the call's order in the run, so two calls of one step are two questions. The approver is still shown the step's id as `callId`. Every hold is announced with `{name}:tool_call_held`, whichever path made it.
+
+**No approver and nowhere to hold.** A call that needs approval, with no approver and no id to hold it under, is refused. It is never run with a warning.
+
+**A cancelled turn leaves no question behind.** When the host aborts a turn, its held calls are cleared.
+
 An `invokeTool` step whose call is held waits the same way. Its approval is kept under its step id; a held result (`hold()`) and an unknown outcome (`durable: true`) are kept under its dispatch path, which does not repeat across loop iterations.
 
 A parked response lists the calls its turn holds as `held`, the same list `pending()` gives.

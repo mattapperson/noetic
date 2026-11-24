@@ -1297,6 +1297,9 @@ export class AgentHarness<
           // A harness that was replaced says nothing about the turn: it is the new
           // holder's now, and marking it stopped would keep a wake from resuming it.
           const replaced = isLeaseLost(error) || session.lease?.lost === true;
+          if (ctx.aborted && !replaced && ctx.abortReason !== INTERRUPT_REASON) {
+            await heldCallsOf(this).clear(ctx.id);
+          }
           if (record && !replaced && ctx.abortReason !== INTERRUPT_REASON) {
             await record.stop(
               ctx,

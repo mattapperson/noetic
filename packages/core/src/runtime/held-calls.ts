@@ -15,6 +15,7 @@ import type { StorageAdapter } from '@noetic-tools/context';
 import type { Context, HeldCall, HeldResolution, ToolApprover } from '@noetic-tools/types';
 import { NoeticErrorImpl } from '@noetic-tools/types';
 import { z } from 'zod';
+import { emitFrameworkEvent, getBroadcaster } from './broadcaster-utils';
 import { ContextImpl, rootIdOf } from './context-impl';
 import { hashStepInput } from './durable/step-ledger';
 import { createInMemoryStorage } from './in-memory-storage';
@@ -199,6 +200,9 @@ export class HeldCalls {
     return parsed?.success ? parsed.data : undefined;
   }
 
+  /** Answers being taken, by execution and call, so two never overlap. */
+  private readonly answering = new Map<string, Promise<void>>();
+
   /** Every held call of an execution. */
   async list(executionId: string): Promise<HeldRecord[]> {
     const found: HeldRecord[] = [];
@@ -211,10 +215,19 @@ export class HeldCalls {
     return found;
   }
 
-  /** Hold a call. A call already held keeps its record, and with it any answer. */
+  /**
+   * Hold a call. A call already held for the same thing keeps its record, and with
+   * it any answer. A record held for another reason is an earlier stage of the call
+   * (its approval, since given) and is replaced: a call is held for one thing at a
+   * time, and an old answer must not pass for the new question.
+   */
   async open(executionId: string, record: HeldRecord): Promise<HeldRecord> {
     const existing = await this.load(executionId, record.callId);
-    if (existing && existing.argsHash === record.argsHash) {
+    const same =
+      existing !== undefined &&
+      existing.argsHash === record.argsHash &&
+      existing.reason === record.reason;
+    if (same) {
       return existing;
     }
     await this.storage.set(`${heldPrefix(executionId)}${record.callId}`, record);
@@ -268,7 +281,31 @@ export class HeldCalls {
    *   different call, the answer is the wrong kind for the hold, or another answer
    *   already landed.
    */
-  async resolve(
+  resolve(
+    executionId: string,
+    answer: {
+      callId: string;
+      argsHash?: string;
+      resolution: HeldResolution;
+    },
+  ): Promise<void> {
+    // One answer at a time per call. Storage with `swap` settles a race between
+    // processes; without it nothing else stops two answers here from both landing.
+    const key = `${executionId}\u0000${answer.callId}`;
+    const turn = (this.answering.get(key) ?? Promise.resolve())
+      .catch(() => undefined)
+      .then(() => this.resolveOne(executionId, answer));
+    this.answering.set(key, turn);
+    const forget = (): void => {
+      if (this.answering.get(key) === turn) {
+        this.answering.delete(key);
+      }
+    };
+    turn.then(forget, forget);
+    return turn;
+  }
+
+  private async resolveOne(
     executionId: string,
     answer: {
       callId: string;
@@ -409,7 +446,7 @@ export async function waitOnHeldCalls(opts: {
   harness: HoldHost;
   ctx: Context;
   callIds: ReadonlyArray<string>;
-  /** Used when `ctx` carries no abort signal of its own. */
+  /** Ends the wait as well as the context's own abort does. */
   signal?: AbortSignal;
   /** False when the turn must stay live while it waits. Default true. */
   park?: boolean;
@@ -418,7 +455,16 @@ export async function waitOnHeldCalls(opts: {
   const holds = heldCallsOf(opts.harness);
   const executionId = heldScopeOf(ctx);
   const impl = ctx instanceof ContextImpl ? ctx : undefined;
-  const signal = impl?.abortSignal ?? opts.signal ?? new AbortController().signal;
+  const signals = [
+    impl?.abortSignal,
+    opts.signal,
+  ].filter((given) => given !== undefined);
+  const signal =
+    signals.length === 0
+      ? new AbortController().signal
+      : signals.length === 1 && signals[0]
+        ? signals[0]
+        : AbortSignal.any(signals);
   // Listen before reading: an answer that lands in between must still wake this.
   const listening = holds.listen(executionId, signal);
   let stopWaiting: (() => void) | undefined;
@@ -511,7 +557,9 @@ export async function holdAndWait(opts: {
   const executionId = heldScopeOf(opts.ctx);
   const { callId } = opts.record;
   const opened = mayWriteHolds(opts.ctx) ? await holds.open(executionId, opts.record) : opts.record;
-  opts.onHeld?.(toHeldCall(opened));
+  if (opened.resolution === undefined) {
+    (opts.onHeld ?? announcerOf(opts.harness, opts.ctx))(toHeldCall(opened));
+  }
   for (;;) {
     const current = await holds.load(executionId, callId);
     const settled = current?.resolution !== undefined;
@@ -531,6 +579,24 @@ export async function holdAndWait(opts: {
       ],
     });
   }
+}
+
+/**
+ * @internal
+ * Says on the stream that a call is held: `{name}:tool_call_held`, with the fields
+ * `harness.pending()` returns. What a hold does when its caller gives no `onHeld`.
+ */
+export function announcerOf(harness: HoldHost, ctx: Context): (held: HeldCall) => void {
+  return (held) => {
+    emitFrameworkEvent({
+      broadcaster: getBroadcaster(ctx),
+      agentName: harness.config.name,
+      eventType: 'tool_call_held',
+      data: {
+        ...held,
+      },
+    });
+  };
 }
 
 /** True once a hold with a `deny` deadline has run out. */

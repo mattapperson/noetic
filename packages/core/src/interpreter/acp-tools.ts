@@ -462,24 +462,46 @@ export class AcpToolRunner implements AcpToolHost {
   private async settle(
     binding: AcpToolBinding,
     record: BridgedCallRecord,
-    params: Parameters<typeof executeToolCall>[0],
+    call: {
+      params: Parameters<typeof executeToolCall>[0];
+      /** Aborted when the agent gives up on the call. */
+      signal: AbortSignal;
+    },
   ): ReturnType<typeof executeToolCall> {
     const { ctx } = binding;
+    const { params, signal } = call;
     let result = await executeToolCall(params);
+    let announced: string | undefined;
     while (result.held !== undefined) {
-      binding.events.toolEvent('tool_call_held', {
-        name: params.toolName,
-        callId: result.held.callId,
-        reason: result.held.reason,
-      });
+      const { held } = result;
+      // Said once per question, under the id the agent's other events carry.
+      if (announced !== held.reason) {
+        announced = held.reason;
+        binding.events.toolEvent('tool_call_held', {
+          ...held,
+          callId: params.callId ?? held.callId,
+          heldAs: held.callId,
+        });
+      }
       await waitOnHeldCalls({
         harness: ctx.harness,
         ctx,
         callIds: [
-          result.held.callId,
+          held.callId,
         ],
+        signal,
         park: false,
       });
+      // The agent stopped waiting for this call: nobody is left to give an answer to.
+      if (signal.aborted) {
+        if (mayWriteHolds(ctx)) {
+          await heldCallsOf(ctx.harness).close(heldScopeOf(ctx), held.callId);
+        }
+        return {
+          output: CANCELLED_OUTPUT,
+          error: true,
+        };
+      }
       result = await executeToolCall(params);
     }
     const stored = await record.store(result);
@@ -517,14 +539,17 @@ export class AcpToolRunner implements AcpToolHost {
     const result =
       record.take() ??
       (await this.settle(binding, record, {
-        toolName: call.name,
-        args,
-        tools: this.source,
-        context: binding.ctx,
-        harness: binding.ctx.harness,
-        layers: binding.layers,
-        callId,
-        recordId: record.id,
+        signal: call.signal,
+        params: {
+          toolName: call.name,
+          args,
+          tools: this.source,
+          context: binding.ctx,
+          harness: binding.ctx.harness,
+          layers: binding.layers,
+          callId,
+          recordId: record.id,
+        },
       }));
     const callItem: FunctionCallItem = {
       id: callId,
