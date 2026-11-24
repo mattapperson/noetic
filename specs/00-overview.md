@@ -25,7 +25,8 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 @noetic-tools/core  ←  @noetic-tools/eval
       ↑
       ├── @noetic-tools/platform-node
-      └── @noetic/platform-browser
+      ├── @noetic/platform-browser
+      └── @noetic-tools/platform-cloudflare-worker
 
 @noetic-tools/mcp  →  @noetic-tools/types  ←  @noetic-tools/profile-*
         ↑
@@ -45,6 +46,8 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 - **`@noetic-tools/platform-node`** — Node.js ≥ 20 concrete adapter implementations: local filesystem, local shell, local subprocess, durable IPC, agent-ipc server/client, step bootstrap. Consumed by `@noetic-tools/cli`, `@noetic-tools/code-agent`, and any Node-target user code. See `25-platform-packages`.
 
 - **`@noetic/platform-browser`** — Browser / edge-runtime glue: runtime-neutral adapter re-exports. Contains no `node:*` imports. See `25-platform-packages`.
+
+- **`@noetic-tools/platform-cloudflare-worker`** — Cloudflare Workers: storage with `swap` over D1 and a Durable Object's SQLite, an event endpoint, and two presets that wake parked turns (a Durable Object alarm, a Cloudflare Workflow per turn). Contains no `node:*` imports and imports no Cloudflare package. See `25-platform-packages`.
 
 - **`@noetic-tools/acp`** — Both directions of the Agent Client Protocol. The client side lets any ACP-speaking coding agent (Claude Code, Codex, Gemini CLI, …) run as a Noetic step: the protocol library, capability negotiation, the session/turn drivers, the client-side `fs/*` + `terminal/*` + permission handlers backed by Noetic's own adapters, the transports (stdio, loopback), and the agent presets (`27-acp-agent-steps`). The server side (`toAcpAgent()`, `serveAcp()` at `./server`) exposes an `AgentHarness` *as* an ACP agent so editors like Zed can drive it (`30-acp-server`). Depends only on `@noetic-tools/types` — never on `@noetic-tools/core`.
 

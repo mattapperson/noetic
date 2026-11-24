@@ -98,6 +98,19 @@ export {
 
 Peer dependencies: none. Runtime imports: browser platform APIs only. No `node:*` imports — bundlers targeting browsers succeed without polyfills.
 
+### `@noetic-tools/platform-cloudflare-worker`
+
+Exports (all stable):
+
+```typescript
+export { createD1Storage, createDurableObjectStorage };          // StorageAdapter, with swap
+export { eventEndpoint, EventEndpointStatus, standardWebhookVerifier };
+export { alarmWake };                                            // wake preset: Durable Object alarm
+export { runTurn, startTurn, wakeTurn, turnInstanceId, TURN_WAKE_EVENT }; // wake preset: Cloudflare Workflows
+```
+
+Peer dependencies: none. It imports neither `cloudflare:workers` nor a Cloudflare types package: every helper takes a structural type naming the part of a binding it calls (`D1DatabaseLike`, `DurableObjectSqlLike`, `AlarmStorageLike`, `WorkflowStepLike`, `WorkflowBindingLike`), so the real bindings fit and a test passes its own. No `node:*` imports. See § Cloudflare Workers.
+
 ### Migrating `@noetic-tools/core/adapters/node`
 
 The existing `@noetic-tools/core/adapters/node` subpath export is removed. Consumers update imports:
@@ -120,7 +133,8 @@ browser/edge consumer  ──→  @noetic/platform-browser  ──────�
 @noetic-tools/eval  ────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-- `@noetic-tools/core` has no dependency on either platform package.
+- `@noetic-tools/core` has no dependency on any platform package.
+- `@noetic-tools/platform-cloudflare-worker` depends only on `@noetic-tools/core`, like its two siblings, and imports neither of them.
 - Platform packages depend only on `@noetic-tools/core` (plus their runtime's built-ins and any declared peers).
 - Node-only consumers (`@noetic-tools/cli`, `@noetic-tools/code-agent`, `@noetic/plugin-*`) depend on `@noetic-tools/platform-node`.
 - Runtime-agnostic consumers (`@noetic-tools/eval`) depend only on `@noetic-tools/core` and inject whichever adapters they need via their API surface.
@@ -219,6 +233,52 @@ IndexedDB or a remote store.
 `@noetic-tools/platform-node` provides `createWebhookReceiver({ port, publicUrl })`, an HTTP receiver passed to `mcp({ webhooks })` for servers that deliver events by webhook (`35-connections` § Events). `@noetic/platform-browser` provides none; a serverless host implements the contract over its own routing.
 
 The contract `mcp()` consumes is transport only: `register(handler)` opens an endpoint and returns `{ url, close() }`; each POST reaches `handler` as `{ headers, body }` (lowercase header names, raw body text) and is answered with the `{ status }` the handler returns. `mcp()` verifies deliveries itself with the secret it sent in `events/subscribe`. The Node receiver also accepts `register({ onDelivery, secret?, signal? })`, for which it verifies each delivery (Standard Webhooks signature, five-minute timestamp window, duplicate ids) before calling `onDelivery`. Either way it refuses methods other than POST (405), bodies over `maxBodyBytes` (413) and unknown or closed endpoints (404).
+
+## Cloudflare Workers
+
+A Worker has no process between requests, no filesystem and no timers that outlive a request. `@noetic-tools/platform-cloudflare-worker` supplies what a durable harness needs there: storage with `swap`, a way in for events, and something to call `harness.wake()`.
+
+### Storage
+
+Both adapters implement `StorageAdapter.swap`, store each value as its JSON encoding in one table (default `noetic_storage`, created when missing) and throw when a write fails.
+
+- **`createD1Storage({ database, table? })`** — one row per key in a D1 database. Every Worker bound to the database shares the storage. `swap` is a single conditional statement (`INSERT … ON CONFLICT DO NOTHING` for a missing key, `UPDATE … WHERE key = ? AND value = ?` otherwise) and wins when it changed one row. The table is made on first use.
+- **`createDurableObjectStorage({ sql, table? })`** — one row per key in a Durable Object's SQLite storage (`ctx.storage.sql`). One object is one storage. `swap` reads, compares and writes with no `await` between, which an object runs as one atomic step.
+
+### Event endpoint
+
+A webhook is the host's business: core has no webhook concept (`35-connections` § Events). `eventEndpoint({ emit, verify?, toEvent })` is the last step, from a request the host accepts to an event a source emits. It returns a `fetch`-shaped handler:
+
+| Answer | When |
+|---|---|
+| `405` | The request is not a POST. |
+| `401` | `verify(request, body)` returned false. |
+| `400` | `toEvent(body, request)` threw. |
+| `204` | `toEvent` returned `undefined`: a delivery that carries no event. |
+| `503` | `emit` rejected: the event is not stored, and the provider should send it again. |
+| `200` | `emit` resolved, which is when every listening trigger has stored the event. |
+
+`standardWebhookVerifier({ secret, toleranceMs?, now? })` is a `verify` for Standard Webhooks signatures on Web Crypto. It does not drop a repeated `webhook-id`; a trigger's inbox dedupes by event id, so `toEvent` uses the `webhook-id` as the event's id. A cron trigger needs no helper: the Worker's `scheduled` handler calls `source.emit`.
+
+### Waking parked turns
+
+A harness in a Worker is built with `park: { autoWake: false }`: its own timers do not outlive the request. The host picks one preset.
+
+**Alarm.** `alarmWake({ harness, alarms })`, in a Durable Object, with `alarms` the object's `ctx.storage`.
+
+- `schedule()` sets the object's alarm to `harness.nextWake()`, or deletes it when nothing is parked. The host calls it after a turn it ran has answered.
+- `alarm()`, called from the object's `alarm()` handler, calls `harness.wake()`, waits for every woken turn to finish or park again, then calls `schedule()`. It does not throw for a turn that failed, since a throw makes the runtime retry the alarm.
+
+**Cloudflare Workflows.** One Workflow instance per turn. `runTurn({ harness, step, turn, options?, maxWaitMs?, now? })` is called from the Workflow's `run`:
+
+1. Step `turn-0` delivers the message with `harness.execute()` and reads the response.
+2. While the response is parked, `step.waitForEvent('wait-<n>', { type: TURN_WAKE_EVENT, timeout })` sleeps until the turn's deadline or a wake event. With no deadline it sleeps `maxWaitMs` (default 24 hours). A wait that times out is the deadline arriving, not an error.
+3. Step `turn-<n>` calls `harness.wake({ threadId })` and reads the response. A turn woken with nothing to do parks again and the loop repeats.
+4. It resolves `{ text }`, or `{ text: '', gone: true }` when there was no turn left to wake.
+
+`startTurn(binding, turn)` creates the instance under `turnInstanceId(threadId, messageId)`, so a message delivered twice starts one instance. `wakeTurn(binding, instanceId)` sends the wake event; Workflows keeps an event sent before the instance reaches its wait.
+
+The Workflow decides only when the harness runs. What a turn did is in the harness's storage, so a Workflow step that is retried, and a turn woken twice, replay from the step ledger and repeat nothing.
 
 ## Future Considerations
 

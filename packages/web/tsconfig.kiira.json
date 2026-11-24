@@ -34,6 +34,7 @@
       "@noetic-tools/openui/*": ["../openui/src/*"],
       "@noetic-tools/cli": ["./.typecheck-snippets-shims/noetic-cli.d.ts"],
       "@noetic-tools/platform-node": ["../platform-node/src/index.ts"],
+      "@noetic-tools/platform-cloudflare-worker": ["../platform-cloudflare-worker/src/index.ts"],
       "@noetic/platform-browser": ["../platform-browser/src/index.ts"],
       "@noetic-tools/acp": ["../acp/src/index.ts"],
       "@noetic-tools/acp/server": ["../acp/src/server.ts"],

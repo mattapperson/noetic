@@ -695,11 +695,72 @@ jobs:
           NPM_CONFIG_PROVENANCE: 'true'
         run: npx --yes -p semantic-release@25 -p semantic-release-monorepo@8 -p @semantic-release/changelog@6 -p @semantic-release/git@10 -p conventional-changelog-conventionalcommits@7 semantic-release --extends semantic-release-monorepo
 
+  platform-cloudflare-worker:
+    name: Release @noetic-tools/platform-cloudflare-worker
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: platform-browser
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install npm with trusted publishing support
+        run: npm install --global npm@11
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Lint
+        run: bunx biome check packages/platform-cloudflare-worker
+
+      - name: Typecheck
+        run: bun run --cwd packages/platform-cloudflare-worker typecheck
+
+      - name: Build dependencies
+        run: |
+          bun run --cwd packages/types build
+          bun run --cwd packages/context build
+          bun run --cwd packages/core build
+
+      - name: Build
+        run: bun run --cwd packages/platform-cloudflare-worker build
+
+      - name: Detach package from workspace for npm
+        run: node -e "const fs=require('fs');const p=require('./package.json');delete p.workspaces;fs.writeFileSync('./package.json',JSON.stringify(p,null,2)+'\n')"
+
+      - name: Finish any pending npm publish
+        run: bash scripts/publish-missing.sh packages/platform-cloudflare-worker
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Release
+        working-directory: packages/platform-cloudflare-worker
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: 'true'
+        run: npx --yes -p semantic-release@25 -p semantic-release-monorepo@8 -p @semantic-release/changelog@6 -p @semantic-release/git@10 -p conventional-changelog-conventionalcommits@7 semantic-release --extends semantic-release-monorepo
+
   profile-ui:
     name: Release @noetic-tools/profile-ui
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: platform-browser
+    needs: platform-cloudflare-worker
     permissions:
       contents: write
       issues: write

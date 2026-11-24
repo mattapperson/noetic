@@ -69,7 +69,7 @@ to skip the workflow entirely.
 The `release-packages.yml` workflow runs on every push to `main` or `next`.
 It releases the publishable packages as **sequential jobs in dependency order**
 (types → context → acp → core → openui → mcp → agent-plugins → eval → chat-sdk
-→ platform-node → platform-browser → the profiles → verify) — never in parallel, so the
+→ platform-node → platform-browser → platform-cloudflare-worker → the profiles → verify) — never in parallel, so the
 `chore: release` commit each job pushes back to main can't strand a sibling,
 and a dependent never publishes pinned to a dependency version that isn't on
 npm yet. Each job:

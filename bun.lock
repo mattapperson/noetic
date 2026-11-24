@@ -24,7 +24,7 @@
     },
     "packages/acp": {
       "name": "@noetic-tools/acp",
-      "version": "1.3.1",
+      "version": "1.4.0",
       "bin": {
         "noetic-acp": "./dist/bin.js",
         "noetic-pi": "./dist/pi/launch.js",
@@ -50,7 +50,7 @@
     },
     "packages/agent-plugins": {
       "name": "@noetic-tools/agent-plugins",
-      "version": "0.2.1-next.1",
+      "version": "0.3.0",
       "dependencies": {
         "@noetic-tools/mcp": "workspace:*",
         "@noetic-tools/types": "workspace:*",
@@ -66,7 +66,7 @@
     },
     "packages/chat-sdk": {
       "name": "@noetic-tools/chat-sdk",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "dependencies": {
         "@noetic-tools/types": "workspace:*",
       },
@@ -101,7 +101,7 @@
     },
     "packages/core": {
       "name": "@noetic-tools/core",
-      "version": "5.19.2",
+      "version": "5.21.0",
       "dependencies": {
         "@noetic-tools/context": "workspace:*",
         "@noetic-tools/types": "workspace:*",
@@ -126,7 +126,7 @@
     },
     "packages/eval": {
       "name": "@noetic-tools/eval",
-      "version": "1.2.1-next.1",
+      "version": "1.3.0",
       "bin": {
         "noetic-eval": "./dist/cli/cli.js",
       },
@@ -176,7 +176,7 @@
     },
     "packages/mcp": {
       "name": "@noetic-tools/mcp",
-      "version": "0.1.0",
+      "version": "1.1.0",
       "dependencies": {
         "@modelcontextprotocol/sdk": "1.30.0",
         "@noetic-tools/types": "workspace:*",
@@ -213,6 +213,17 @@
       },
       "devDependencies": {
         "bun-types": "latest",
+      },
+    },
+    "packages/platform-cloudflare-worker": {
+      "name": "@noetic-tools/platform-cloudflare-worker",
+      "version": "0.1.0",
+      "dependencies": {
+        "@noetic-tools/core": "workspace:*",
+      },
+      "devDependencies": {
+        "bun-types": "latest",
+        "zod": "^4.0.0",
       },
     },
     "packages/platform-node": {
@@ -315,7 +326,7 @@
     },
     "packages/types": {
       "name": "@noetic-tools/types",
-      "version": "3.17.1",
+      "version": "3.18.0",
       "dependencies": {
         "@openrouter/agent": "^0.11.0",
         "@standard-schema/spec": "1.1.0",
@@ -588,6 +599,8 @@
     "@noetic-tools/mcp": ["@noetic-tools/mcp@workspace:packages/mcp"],
 
     "@noetic-tools/openui": ["@noetic-tools/openui@workspace:packages/openui"],
+
+    "@noetic-tools/platform-cloudflare-worker": ["@noetic-tools/platform-cloudflare-worker@workspace:packages/platform-cloudflare-worker"],
 
     "@noetic-tools/platform-node": ["@noetic-tools/platform-node@workspace:packages/platform-node"],
 
@@ -1484,6 +1497,8 @@
     "@noetic-tools/core/bun-types": ["bun-types@1.4.4", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-yjrJh5oGX7mMPKGd19YXyIjmEuj4G4zNC30bs7PM9Az7NQ3ndF3j6hbeRdvJTRQEhJ/FYQwW0a2moweEi2hMxQ=="],
 
     "@noetic-tools/mcp/bun-types": ["bun-types@1.4.4", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-yjrJh5oGX7mMPKGd19YXyIjmEuj4G4zNC30bs7PM9Az7NQ3ndF3j6hbeRdvJTRQEhJ/FYQwW0a2moweEi2hMxQ=="],
+
+    "@noetic-tools/platform-cloudflare-worker/bun-types": ["bun-types@1.4.5", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-ECHn+9dhL3wv0G6u0+7dQvrnaimXiRDxxerYBmhTaLyJEEuvTPWk2Fye3XIf5Y++JIIiHKfQw4Z7V5D8KuiXbg=="],
 
     "@noetic-tools/platform-node/bun-types": ["bun-types@1.4.4", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-yjrJh5oGX7mMPKGd19YXyIjmEuj4G4zNC30bs7PM9Az7NQ3ndF3j6hbeRdvJTRQEhJ/FYQwW0a2moweEi2hMxQ=="],
 

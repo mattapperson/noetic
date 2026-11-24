@@ -101,6 +101,89 @@ import {
 
 It re-exports core's runtime-neutral in-memory adapters for ergonomic imports, and uses web platform APIs only.
 
+## `@noetic-tools/platform-cloudflare-worker`
+
+Storage, an event endpoint and wake presets for a harness on Cloudflare Workers. It imports no Cloudflare package: each helper takes the part of a binding it uses, so `env.DB`, `ctx.storage` and a Workflow's `step` fit as they are.
+
+### Storage
+
+```ts validate=none
+import { createD1Storage, createDurableObjectStorage } from '@noetic-tools/platform-cloudflare-worker';
+
+const shared = createD1Storage({ database: env.DB });                  // every Worker bound to the database
+const perObject = createDurableObjectStorage({ sql: ctx.storage.sql }); // one Durable Object
+```
+
+Both implement `swap`, so sessions on them run under a [turn lease](/docs/framework/durability#one-writer-per-turn).
+
+### Events from outside
+
+`eventEndpoint` turns a request you accept into an event a source emits, and answers the provider only once the event is stored:
+
+```ts validate=none
+import { eventEndpoint, standardWebhookVerifier } from '@noetic-tools/platform-cloudflare-worker';
+
+const receive = eventEndpoint({
+  emit: (event) => mail.emit(event),
+  verify: standardWebhookVerifier({ secret: env.WEBHOOK_SECRET }),
+  toEvent: (body, request) => ({
+    type: 'received',
+    id: request.headers.get('webhook-id') ?? crypto.randomUUID(),
+    payload: JSON.parse(body),
+  }),
+});
+
+export default { fetch: (request: Request) => receive(request) };
+```
+
+It answers `200` when the event is stored, `503` when it could not be (so the provider sends it again), `401` when `verify` refuses, `400` when `toEvent` throws, `204` when `toEvent` returns `undefined`, and `405` for anything but a POST. A delivery that arrives twice with the same event id starts one turn. For a schedule, call `source.emit` from the Worker's `scheduled` handler.
+
+### Waking parked turns
+
+A Worker has no process between requests, so build the harness with `park: { autoWake: false }` and pick one of two presets to call [`harness.wake()`](/docs/framework/durability#parked-turns).
+
+**A Durable Object alarm:**
+
+```ts validate=none
+import { alarmWake, createDurableObjectStorage } from '@noetic-tools/platform-cloudflare-worker';
+
+export class Agent extends DurableObject {
+  #harness = buildHarness(createDurableObjectStorage({ sql: this.ctx.storage.sql }));
+  #wake = alarmWake({ harness: this.#harness, alarms: this.ctx.storage });
+
+  async alarm() {
+    await this.#wake.alarm(); // wakes what is due, waits for it, sets the next alarm
+  }
+
+  async message(text: string, messageId: string) {
+    await this.#harness.execute(text, { threadId: 'main', messageId });
+    const response = await this.#harness.getAgentResponse({ threadId: 'main' });
+    await this.#wake.schedule(); // the turn may have parked
+    return response;
+  }
+}
+```
+
+**A Cloudflare Workflow, one instance per turn:**
+
+```ts validate=none
+import { runTurn, startTurn, wakeTurn, type TurnParams } from '@noetic-tools/platform-cloudflare-worker';
+
+export class Turns extends WorkflowEntrypoint<Env, TurnParams> {
+  async run(event: WorkflowEvent<TurnParams>, step: WorkflowStep) {
+    return runTurn({ harness: buildHarness(this.env), step, turn: event.payload });
+  }
+}
+
+// A message arrives: one instance per message, however often it is delivered.
+const instanceId = await startTurn(env.TURNS, { threadId, messageId, input: text });
+
+// The event a parked turn waits for arrived, or a person answered a held call.
+await wakeTurn(env.TURNS, instanceId);
+```
+
+The instance runs the turn until it parks, sleeps until the turn's deadline or a wake, and runs it again. Everything the turn did is in the harness's storage, so a Workflow step that is retried repeats nothing.
+
 ## Related Pages
 
 - [AgentHarness](/docs/framework/runtime) -- the `environment` options these adapters fill.

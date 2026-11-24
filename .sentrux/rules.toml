@@ -136,6 +136,11 @@ name = "platform-browser"
 paths = ["packages/platform-browser/src/**"]
 order = 50
 
+[[layers]]
+name = "platform-cloudflare-worker"
+paths = ["packages/platform-cloudflare-worker/src/**"]
+order = 50
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Tier D — core-internal layers (packages/core/src/**)
 # Ordered per the dependency graph in specs/00-overview.md: harness →
@@ -280,6 +285,36 @@ reason = "platform packages must stay runtime-isolated; neither may import from 
 from = "packages/platform-browser/src/**"
 to = "packages/platform-node/src/**"
 reason = "platform packages must stay runtime-isolated; neither may import from the other"
+
+[[boundaries]]
+from = "packages/platform-cloudflare-worker/src/**"
+to = "packages/platform-node/src/**"
+reason = "platform packages must stay runtime-isolated; a Worker has no node:* built-ins to satisfy platform-node"
+
+[[boundaries]]
+from = "packages/platform-cloudflare-worker/src/**"
+to = "packages/platform-browser/src/**"
+reason = "platform packages must stay runtime-isolated; neither may import from the other"
+
+[[boundaries]]
+from = "packages/platform-node/src/**"
+to = "packages/platform-cloudflare-worker/src/**"
+reason = "platform packages must stay runtime-isolated; neither may import from the other"
+
+[[boundaries]]
+from = "packages/platform-browser/src/**"
+to = "packages/platform-cloudflare-worker/src/**"
+reason = "platform packages must stay runtime-isolated; neither may import from the other"
+
+[[boundaries]]
+from = "packages/core/src/**"
+to = "packages/platform-cloudflare-worker/src/**"
+reason = "core is runtime-agnostic; it cannot depend on a specific platform"
+
+[[boundaries]]
+from = "packages/context/src/**"
+to = "packages/platform-cloudflare-worker/src/**"
+reason = "context layers are platform-independent; platform packages are platform-specific"
 
 [[boundaries]]
 from = "packages/core/src/**"

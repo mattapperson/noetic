@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "target": "ESNext",
+    "lib": ["ESNext"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    // Resolve sibling workspace packages to their `src/*.ts` via the `bun`
+    // export condition, like every other in-repo consumer. Without it these
+    // packages typecheck against a built `dist/`, so they pass or fail
+    // depending on whether someone happened to build core first.
+    "customConditions": ["bun"],
+    "esModuleInterop": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "outDir": "dist",
+    "rootDir": ".",
+    "skipLibCheck": true,
+    "types": ["bun-types"]
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}

@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 All scripts run from the repo root unless noted.
 
 - `bun install` — install workspace deps (postinstall patches `@openrouter/agent`)
-- `bun test` — runs the package suites **sequentially** in this order: `types → context → openui → agent-plugins → acp → chat-sdk → core → eval → inspector`. `platform-node` and `platform-browser` have their own `test` scripts but are **not** in the root chain — run them per-package.
+- `bun test` — runs the package suites **sequentially** in this order: `types → context → openui → agent-plugins → acp → chat-sdk → core → eval → inspector`. `platform-node`, `platform-browser` and `platform-cloudflare-worker` have their own `test` scripts but are **not** in the root chain — run them per-package.
 - `bun test:ci` — same plus coverage enforcement (diff gate from baseline)
 - `bun run lint` / `bun run lint:fix` — biome
 - `bun run check:exports` — validates `@public` JSDoc tags on core's entry points (`bun scripts/check-export-tags.ts`)
@@ -35,6 +35,7 @@ Workspace packages under `packages/*`. Dependency direction (arrows = "depends o
 inspector ──→ platform-node ──→ core ──→ context ──→ types
                      eval ────→ core         ↑          ↑
          platform-browser ────→ core         │          │
+platform-cloudflare-worker ───→ core         │          │
                                    openui ───┘──────────┤
                                         chat-sdk ───────┤
                                              acp ───────┤
@@ -50,13 +51,13 @@ Every edge above is the complete set: `types` depends on nothing; `context`,
 `chat-sdk`, `acp`, `mcp`, `verify`, `profile-ui`, `profile-screen` and
 `profile-chat` depend only on `types`; `profile-browser`, `profile-app` and
 `profile-device` on `types` + `profile-ui`; `agent-plugins` on `types` + `mcp`;
-`openui` and `core` on `context` + `types`; `eval`, `platform-node`, and
-`platform-browser` on `core`; `inspector` on `core` + `platform-node`; `web` on
+`openui` and `core` on `context` + `types`; `eval`, `platform-node`,
+`platform-browser` and `platform-cloudflare-worker` on `core`; `inspector` on `core` + `platform-node`; `web` on
 nothing.
 
-The 20 packages under `packages/`: `acp`, `agent-plugins`, `chat-sdk`,
+The 21 packages under `packages/`: `acp`, `agent-plugins`, `chat-sdk`,
 `context`, `core`, `eval`, `inspector`, `mcp`, `openui`, `platform-browser`,
-`platform-node`, `profile-app`, `profile-browser`, `profile-chat`,
+`platform-cloudflare-worker`, `platform-node`, `profile-app`, `profile-browser`, `profile-chat`,
 `profile-device`, `profile-screen`, `profile-ui`, `types`, `verify`, `web`.
 Most publish under the `@noetic-tools/` scope; `inspector`, `platform-browser`,
 and `web` use `@noetic/`.
@@ -79,6 +80,7 @@ this repo under `packages/web/content/docs/code-agent-cli/`.
 - **`@noetic-tools/openui`** — generative UI via the OpenUI standard: the `openUi()` output codec (streaming OpenUI Lang parser), the `openUiSurface()` context layer, the typed `fragment()` builder for tool-authored UI, and an OpenUI-speaking transport at `./server`. Depends on `context` + `types` only; **core never imports it**. See `specs/28-generative-ui.md`.
 - **`@noetic-tools/chat-sdk`** — chat-sdk.dev integration: run a harness as the brain of a multi-platform chat bot via `chat.onSubscribedMessage(noeticAgent(...))`. Depends only on `types`. See `specs/29-chat-platform-integration.md`.
 - **`@noetic-tools/platform-node`** / **`@noetic/platform-browser`** — the platform adapter implementations. Core ships only contracts + in-memory adapters; `platform-node` adds the local fs/shell/subprocess adapters, file storage, the durable outbound queue, and the agent IPC client/server/protocol, while `platform-browser` re-exports core's runtime-neutral in-memory adapters with no `node:*` imports. Both depend on `core`. See `specs/25-platform-packages.md`.
+- **`@noetic-tools/platform-cloudflare-worker`** — Noetic on Cloudflare Workers: `StorageAdapter`s with `swap` over D1 and over a Durable Object's SQLite, `eventEndpoint()` (verify a request, `source.emit`, answer once stored), and two presets that wake parked turns: `alarmWake()` on a Durable Object alarm and `runTurn()` inside a Cloudflare Workflow, one instance per turn. It imports no Cloudflare package: each helper takes the small part of a binding it uses. Depends on `core`. See `specs/25-platform-packages.md`.
 - **`@noetic-tools/eval`** — eval framework, scorers, GEPA optimization, regression. Depends on `core`.
 - **`@noetic/inspector`** — a local web inspector (Next.js + Monaco): edit agent TypeScript, chat with it, and watch per-layer state, the assembled context window, token composition, the plan graph, framework events, and traces. Depends on `core` + `platform-node`; run it with `bun run inspect`.
 - **`@noetic/web`** — the docs site (Next.js + fumadocs). Standalone: no workspace dependencies. Its doc snippets are typechecked against real `@noetic-tools/*` source through `tsconfig.kiira.json` path mappings, not through a built `dist/`.
