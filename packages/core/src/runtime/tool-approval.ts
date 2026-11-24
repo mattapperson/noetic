@@ -7,6 +7,7 @@ import {
   heldCallsOf,
   heldScopeOf,
   isOverdue,
+  mayWriteHolds,
   toHeldCall,
   waitOnHeldCalls,
 } from './held-calls';
@@ -177,6 +178,8 @@ export async function awaitApproval(params: {
   ctx: Context;
   /** Called once, when the call is first held. */
   onHeld?: (held: HeldCall) => void;
+  /** False when the turn must stay live while the call is held. Default true. */
+  park?: boolean;
 }): Promise<ToolApproval> {
   const holds = heldCallsOf(params.harness);
   const scope = heldScopeOf(params.ctx);
@@ -184,7 +187,7 @@ export async function awaitApproval(params: {
   for (;;) {
     try {
       const approval = await askApproval(params);
-      if (announced) {
+      if (announced && mayWriteHolds(params.ctx)) {
         await holds.close(scope, params.callId);
       }
       return approval;
@@ -192,7 +195,10 @@ export async function awaitApproval(params: {
       if (!(e instanceof HoldSignal)) {
         throw e;
       }
-      const record = await holds.open(scope, {
+      const open = mayWriteHolds(params.ctx)
+        ? (record: HeldRecord) => holds.open(scope, record)
+        : async (record: HeldRecord) => record;
+      const record = await open({
         callId: params.callId,
         name: params.toolName,
         args: params.toolArgs,
@@ -219,6 +225,7 @@ export async function awaitApproval(params: {
         callIds: [
           params.callId,
         ],
+        park: params.park,
       });
     }
   }

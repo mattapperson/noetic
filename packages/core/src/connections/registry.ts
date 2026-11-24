@@ -191,6 +191,8 @@ export interface ConnectionRuntime extends ConnectionRegistry {
     readonly recorded: ConnectionIdentity;
     readonly signal: AbortSignal;
   }): Promise<ResumeDecision>;
+  /** The state of a long operation on a harness connection, without waiting on it. */
+  taskStatus(name: string, taskId: string, signal: AbortSignal): Promise<ConnectionTaskStatus>;
   /** Unsealed, un-buffered events for a trigger; the caller seals them per thread. */
   listenRaw(
     name: string,
@@ -743,6 +745,21 @@ class Runtime implements ConnectionRuntime {
         h.connection.identity.instance === recorded.instance,
     );
     return own?.connection ?? held[0]?.connection;
+  }
+
+  async taskStatus(
+    name: string,
+    taskId: string,
+    signal: AbortSignal,
+  ): Promise<ConnectionTaskStatus> {
+    const entry = this.entries.get(name);
+    if (!entry) {
+      throw unknownConnectionError(name, this.names());
+    }
+    await this.ensureConnected(entry);
+    return this.requireReady(entry).tasks.get(taskId, {
+      signal,
+    });
   }
 
   async listenRaw(

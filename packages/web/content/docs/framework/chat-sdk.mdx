@@ -75,7 +75,24 @@ resolveApproval({
 
 A rejection or the 5-minute timeout surfaces to the model as a tool error with the reason; each waiting tool filters the decision broadcast by its own `requestId`, so concurrent gated calls never cross wires.
 
-These tools gate themselves, so they do not declare core's `needsApproval` — a harness [`approveToolCall`](/docs/framework/steps/invoke-tool#human-in-the-loop-approval) approver is never asked about them, and a call is never gated twice.
+To make these approvals survive a restart, gate through the harness instead:
+
+```ts validate=none
+import { answerApproval, chatApprover, chatTools } from "@noetic-tools/chat-sdk";
+
+const harness = new AgentHarness({
+  approveToolCall: chatApprover(),
+  tools: await chatTools({ chat, approval: "harness" }),
+  // …
+});
+
+// In the button handler, with the request's threadId:
+await answerApproval({ harness, threadId, decision: { requestId, approved: true } });
+```
+
+The approval request still arrives on `approvalRequests`, so the code that posts the card does not change. The call is now [held](/docs/framework/steps/invoke-tool#human-in-the-loop-approval) in the harness's storage, and on storage with `park` on its turn stops holding a process while a person decides.
+
+By default these tools gate themselves, so they do not declare core's `needsApproval` — a harness [`approveToolCall`](/docs/framework/steps/invoke-tool#human-in-the-loop-approval) approver is never asked about them, and a call is never gated twice.
 
 ## Persistence
 

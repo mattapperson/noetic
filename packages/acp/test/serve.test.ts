@@ -15,6 +15,7 @@ import type {
   ExecuteOptions,
   ExecutionContext,
   Item,
+  SteeringDecision,
   StreamEvent,
   StreamingItem,
 } from '@noetic-tools/types';
@@ -1734,6 +1735,77 @@ describe('loadSession edges', () => {
       expect(JSON.stringify(e)).toContain('already active');
     }
     await rig.close();
+  });
+});
+
+describe('a permission request nobody at the editor answers', () => {
+  async function askThrough(ctx: Partial<ExecutionContext>): Promise<SteeringDecision> {
+    const { beforeToolCallLayers, createLayerStateStore } = await import('@noetic-tools/context');
+    const { createServePermissionLayer, ServePermissionBroker } = await import(
+      '../src/serve-permissions'
+    );
+    const layer = createServePermissionLayer({
+      sessionId: 's1',
+      policy: {
+        default: 'ask',
+        askTimeoutMs: 10,
+      },
+      // The editor never replies.
+      broker: new ServePermissionBroker(() => new Promise(() => {})),
+      presentation: {
+        kindOf: () => undefined,
+        titleOf: (name: string) => name,
+      },
+    });
+    return beforeToolCallLayers({
+      layers: [
+        layer,
+      ],
+      toolName: 'deploy',
+      toolArgs: {
+        to: 'prod',
+      },
+      callId: 'call-1',
+      ctx: frameworkCast<ExecutionContext>({
+        executionId: 'exec-1',
+        threadId: 'thread-1',
+        trace: {
+          setAttribute: () => {},
+          addEvent: () => {},
+        },
+        ...ctx,
+      }),
+      store: createLayerStateStore(),
+    });
+  }
+
+  it('goes to the harness approval seam, which keeps the turn live', async () => {
+    const asked: unknown[] = [];
+    const decision = await askThrough({
+      approve: async (request) => {
+        asked.push(request);
+        return {
+          action: 'allow',
+        };
+      },
+    });
+    expect(decision.action).toBe('allow');
+    expect(asked).toEqual([
+      {
+        toolName: 'deploy',
+        toolArgs: {
+          to: 'prod',
+        },
+        callId: 'call-1',
+        park: false,
+      },
+    ]);
+  });
+
+  it('is denied when the harness has no approval seam', async () => {
+    const decision = await askThrough({});
+    expect(decision.action).toBe('deny');
+    expect(decision.guidance).toContain('timed out');
   });
 });
 

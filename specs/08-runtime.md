@@ -872,7 +872,22 @@ type HeldResolution =
 
 **Where the turn is.** A turn running in this process is told, and goes on at once. On storage with parking on (`23-durable-execution` § Parked turns), a turn whose every step in flight is a held call or a resumable wait parks; `resolve()` then wakes it. A parked turn waiting only on a held call has no time to wake at, so `parked.wakeAt` is absent and a routine `wake()` leaves it alone. Any harness over the same storage can list, answer and finish it.
 
-An `invokeTool` step whose call is held waits the same way, under its step id.
+An `invokeTool` step whose call is held waits the same way. Its approval is kept under its step id; a held result (`hold()`) and an unknown outcome (`durable: true`) are kept under its dispatch path, which does not repeat across loop iterations.
+
+A parked response lists the calls its turn holds as `held`, the same list `pending()` gives.
+
+**One seam.** Everything that needs a person's go-ahead asks the same place, `harness.approve({ toolName, toolArgs, callId, ctx, park? })`: the approver decides, and with none, or when it answers `hold`, the action is held and `approve` resolves once it is answered. It is on `ContextHarness`, and on a layer's `ExecutionContext` as `approve`, so packages that do not import core reach it. What asks it:
+
+| Asker | When |
+|---|---|
+| A `needsApproval` tool; a model's or a step's call to a connection operation that needs approval | Always |
+| A long task's question (MCP Tasks `input_required`) | Always; held as `result`, and the answer goes back to the task |
+| A coding agent's permission request (`27-acp-agent-steps`) | When no policy rule, steering decision or handler settled it and the policy names no `default` |
+| The served-agent gate (`31-acp-server`) | When the editor did not answer within `askTimeoutMs` |
+| Chat approvals (`29-chat-platform-integration`) | With `approval: 'harness'` and `approveToolCall: chatApprover()` |
+| The plan layer (`12-builtin-context-layers`) | With `requireApproval` and no `onExit` |
+
+`park: false` keeps the turn live while the action is held. The two agent paths pass it: something outside the run is waiting on the answer and would not survive the turn stopping.
 
 **A message while calls are held.** It is a steer like any other, and the context layers decide. A round stuck on held calls has no boundary to reach, so the round offers queued steers at the `held` steer point, with the held calls as `pendingCalls`. The default there is to apply: the held calls get the output a skipped call gets, their records are dropped, and the next round sees the message. A layer's `onSteer` may defer it, leaving it queued behind the calls, or drop it. A `next-turn` message is not a steer: it waits for the turn to end (`23-durable-execution` § A message for a parked thread).
 

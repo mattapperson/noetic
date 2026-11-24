@@ -27,6 +27,17 @@ export interface HarnessJudgmentContract {
     ctx: Context,
   ): Promise<SteeringDecision>;
   /**
+   * Ask whether an action that needs a person's go-ahead may run, by the harness's
+   * one approval rule (spec 08 § Held tool calls): its `approveToolCall` approver
+   * decides, and with none, or when the approver answers `hold`, the action is
+   * held until `harness.resolve()` answers it. Resolves the settled decision, so it
+   * waits for as long as the action is held.
+   *
+   * Optional: a harness without it has no approval seam, and callers fall back to
+   * their own rule.
+   */
+  approve?(request: ApproveRequest): Promise<SteeringDecision>;
+  /**
    * Run a steer through every layer's `onSteer` hook, in slot order. A harness
    * without it lands each steer at its delivery mode's default point, unchanged.
    */
@@ -35,6 +46,23 @@ export interface HarnessJudgmentContract {
     params: Pick<OnSteerParams, 'steer' | 'point' | 'action' | 'pendingCalls'>,
     ctx: Context,
   ): Promise<SteerVerdict>;
+}
+
+/** @public What `harness.approve()` is asked about. */
+export interface ApproveRequest {
+  /** The name the action is shown under and held as. */
+  toolName: string;
+  /** What it will be done with: exactly what a person is asked to approve. */
+  toolArgs: unknown;
+  /** Identifies the action. The same id, asked again after a resume, finds its answer. */
+  callId: string;
+  ctx: Context;
+  /**
+   * Whether the turn may park while the action is held. Default `true`. Pass
+   * `false` when something outside the run is waiting on the answer and would not
+   * survive the turn stopping, such as a live agent session.
+   */
+  park?: boolean;
 }
 
 /**

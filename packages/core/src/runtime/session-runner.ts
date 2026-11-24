@@ -2,6 +2,7 @@ import type {
   Context,
   HarnessResponse,
   HarnessStatus,
+  HeldCall,
   Item,
   SessionUsage,
 } from '@noetic-tools/types';
@@ -56,6 +57,8 @@ export interface SessionRunnerOpts {
    * writes it to storage and hands the stored totals back through `seedUsage`.
    */
   readonly onTurnUsage?: (usage: TurnUsage) => Promise<void>;
+  /** The tool calls the turn on `ctx` holds for a person, for a parked response. */
+  readonly heldCalls?: (ctx: Context) => Promise<ReadonlyArray<HeldCall>>;
 }
 
 //#endregion
@@ -111,6 +114,7 @@ export class SessionRunner {
   private totalCost = 0;
   private totalBilledCost = 0;
   private readonly onTurnUsage?: (usage: TurnUsage) => Promise<void>;
+  private readonly heldCalls?: (ctx: Context) => Promise<ReadonlyArray<HeldCall>>;
   private currentController?: AbortController;
   private currentCtx?: Context;
   private loopPromise?: Promise<void>;
@@ -127,6 +131,7 @@ export class SessionRunner {
     this.runTurn = opts.runTurn;
     this.createContext = opts.createContext;
     this.onTurnUsage = opts.onTurnUsage;
+    this.heldCalls = opts.heldCalls;
 
     this.queue.subscribe(() => {
       this.kick();
@@ -309,11 +314,17 @@ export class SessionRunner {
       const text = await this.runTurn(ctx, turn, controller.signal);
       await this.settleUsage(start, ctx);
       const wakeAt = parkedUntilOf(ctx);
+      const held = wakeAt === undefined ? [] : ((await this.heldCalls?.(ctx)) ?? []);
       const response: HarnessResponse =
         wakeAt === undefined
           ? buildResponse(text, ctx)
           : {
               ...buildResponse(text, ctx),
+              ...(held.length > 0
+                ? {
+                    held,
+                  }
+                : {}),
               // A turn parked on a held call alone has no time to wake at.
               parked: Number.isFinite(wakeAt)
                 ? {

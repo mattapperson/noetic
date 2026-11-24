@@ -26,13 +26,14 @@ import {
 } from '@noetic-tools/types';
 import { z } from 'zod';
 import { sanitizeToolNameForWire } from '../util/tool-name';
-import type { HoldDue } from './held-calls';
+import type { HeldRecord, HoldDue } from './held-calls';
 import {
   HoldSignal,
   heldArgsHash,
   heldCallsOf,
   heldScopeOf,
   isOverdue,
+  mayWriteHolds,
   toHeldCall,
 } from './held-calls';
 import type { ApprovalOutcome, ToolApproval } from './tool-approval';
@@ -282,11 +283,13 @@ export async function executeToolCall(params: ExecuteToolCallParams): Promise<To
         due: {},
       });
     }
-    if (rerun) {
-      // Answered: if this attempt is cut off too, the question is asked afresh.
-      await holds.close(scope, params.callId);
+    if (mayWriteHolds(params.context)) {
+      if (rerun) {
+        // Answered: if this attempt is cut off too, the question is asked afresh.
+        await holds.close(scope, params.callId);
+      }
+      await holds.arm(scope, params.callId, argsHash);
     }
-    await holds.arm(scope, params.callId, argsHash);
   }
   const executed = await runMatchedTool(params, matchedTool, parsedArgs);
   return {
@@ -309,7 +312,13 @@ async function holdCall(
     request?: unknown;
   },
 ): Promise<ToolCallResult> {
-  const record = await heldCallsOf(params.harness).open(heldScopeOf(params.context), {
+  // A harness that was replaced writes nothing; the call still reads as held, and
+  // this turn is about to stop.
+  const holds = heldCallsOf(params.harness);
+  const open = mayWriteHolds(params.context)
+    ? (record: HeldRecord) => holds.open(heldScopeOf(params.context), record)
+    : async (record: HeldRecord) => record;
+  const record = await open({
     callId: call.callId,
     name: call.tool.name,
     args: call.args,
@@ -338,7 +347,7 @@ async function holdCall(
 }
 
 /** True for what `hold()` returns: a tool leaving its result open. */
-function isToolHold(value: unknown): value is ToolHold {
+export function isToolHold(value: unknown): value is ToolHold {
   return (
     typeof value === 'object' &&
     value !== null &&

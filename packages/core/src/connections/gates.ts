@@ -29,6 +29,7 @@ import type {
   SteeringDecision,
 } from '@noetic-tools/types';
 import { SteeringAction } from '@noetic-tools/types';
+import { PARK_REASON } from '../runtime/durable/parking';
 import { attachBlobs, checkBlobs } from './blobs';
 import { deniedError, failedError, inputRequiredError } from './errors';
 import { validateJsonSchema } from './json-schema';
@@ -202,7 +203,9 @@ async function awaitTask(
         gc.onTask?.(request.op, status, request.stepId);
         request.onTask?.(status);
         if (status.state === 'input_required') {
-          void answer(status);
+          // A turn that parks while the question is open aborts the wait for its
+          // answer; the task itself is what reports that, below.
+          void answer(status).catch(() => undefined);
         }
       },
     });
@@ -211,7 +214,8 @@ async function awaitTask(
       await gc.connection.tasks.cancel(request.taskId).catch(() => undefined);
       throw inputRequiredError(gc.name, unanswered.request);
     }
-    if (request.signal.aborted) {
+    // A parked turn comes back for its task (spec 23 § Parked turns): leave it running.
+    if (request.signal.aborted && request.ctx?.abortReason !== PARK_REASON) {
       await gc.connection.tasks.cancel(request.taskId).catch(() => undefined);
     }
     throw e;

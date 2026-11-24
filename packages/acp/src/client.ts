@@ -123,6 +123,7 @@ export class NoeticAcpClient implements acp.Client {
     return {
       policy: this.host.permissions,
       steer: this.host.steerPermission,
+      approve: this.host.approvePermission,
       handler: this.host.onPermissionRequest,
     };
   }

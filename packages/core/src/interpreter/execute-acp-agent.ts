@@ -213,6 +213,37 @@ function buildSteerer(
   };
 }
 
+/**
+ * The last tier of a permission request: the harness's approval seam (spec 08
+ * § Held tool calls). The agent's process is waiting on the answer and its session
+ * would not survive the turn stopping, so the turn stays live while the request is
+ * held.
+ */
+function buildApprover(ctx: Context<ContextData>): AcpPermissionSteerer | undefined {
+  const approve = ctx.harness.approve?.bind(ctx.harness);
+  if (!approve) {
+    return undefined;
+  }
+  return async (request): Promise<AcpPermissionOutcome | undefined> => {
+    const decision = await approve({
+      toolName: request.toolCall.title ?? request.toolCall.toolCallId,
+      toolArgs: request.toolCall.rawInput,
+      callId: request.toolCall.toolCallId,
+      ctx,
+      park: false,
+    });
+    if (decision.action === SteeringAction.Allow) {
+      return {
+        decision: 'allow',
+      };
+    }
+    return {
+      decision: 'deny',
+      reason: decision.guidance ?? `approval ${decision.action}`,
+    };
+  };
+}
+
 interface HostBindingOptions<TContext, I, O> {
   step: StepAcpAgent<TContext, I, O>;
   ctx: Context<ContextData>;
@@ -244,6 +275,7 @@ function bindHostToStep<TContext, I, O>(
 ): void {
   host.permissions = opts.step.permissions;
   host.steerPermission = buildSteerer(opts.ctx, opts.layers);
+  host.approvePermission = buildApprover(opts.ctx);
   // Bind the executing context into the handler so the protocol client never
   // has to know about `Context` — it just asks a question and gets an answer.
   const handler = opts.step.onPermissionRequest;

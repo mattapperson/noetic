@@ -154,7 +154,7 @@ A turn that reaches a `wait` step holds its process until the event comes. What 
 
 Parking is on when `environment.storage.park` is set and the turn runs under a lease.
 
-**When a turn parks.** The harness tracks the steps in flight. A turn parks once every innermost one has been a resumable wait for `graceMs` (default 100): a `wait` on an event whose manifest says `replay: 'durable'`, with its deadline still ahead. A step doing anything else — a model call, user code, a tool, a wait on an event that cannot be replayed — keeps the turn live. So does a step between two children.
+**When a turn parks.** The harness tracks the steps in flight. A turn parks once every innermost one has been a resumable wait for `graceMs` (default 100): a `wait` on an event whose manifest says `replay: 'durable'`, with its deadline still ahead; a `call` waiting on a long operation whose id is on record; or a held tool call. A step doing anything else — a model call, user code, a tool, a wait on an event that cannot be replayed — keeps the turn live. So does a step between two children.
 
 **What parking does.**
 
@@ -182,7 +182,8 @@ A woken turn replays its ledger, so no finished model call is made again, and it
 **Auto-wake.** A harness wakes the turns it parked, unless `park.autoWake` is `false`. For each parked turn it keeps a watcher:
 
 - a timer for the turn's `until`;
-- a listener on each event the turn waits for, on the same harness connection, from the cursor the wait recorded.
+- a listener on each event the turn waits for, on the same harness connection, from the cursor the wait recorded;
+- a poll, every `taskPollMs` (default 5 s), of each long operation one of its calls waits on. An operation has no event to listen for, so its state is read; the turn is woken when the state changes from the one it last woke for.
 
 Either one calls `wake({ threadId })` with the options the turn ran with. A watcher knows the event's type but not the wait's `filter`, which is code in the flow, so it wakes on any event of that type; a turn whose filter turns the event down parks again. The watcher remembers the last cursor it saw, so each event wakes the turn at most once, and it waits `wakeDebounceMs` (default 250) after the first event so a burst wakes it once.
 

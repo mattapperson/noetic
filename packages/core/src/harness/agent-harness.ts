@@ -1,4 +1,5 @@
 import type {
+  ApproveRequest,
   ArtifactStore,
   ConnectionStatus,
   HeldCall,
@@ -14,9 +15,11 @@ import {
 } from '@noetic-tools/types';
 import { toStep } from '../builders/sequence';
 import { runEvery } from '../connections/settle';
-import { resumableWaitsOf } from '../interpreter/connection-steps';
+import { pendingTasksOf, resumableWaitsOf } from '../interpreter/connection-steps';
 import { AcpSessionStore } from '../runtime/acp-session-store';
+import { emitFrameworkEvent, getBroadcaster } from '../runtime/broadcaster-utils';
 import { heldCallsOf, toHeldCall } from '../runtime/held-calls';
+import { awaitApproval } from '../runtime/tool-approval';
 import { ConnectionGate } from './connection-gate';
 import type { LayerStateStore, RecallCache } from './deps/context';
 import {
@@ -166,7 +169,7 @@ import { resolveCheckpointStore, resolveEnvironmentAdapters } from './harness-op
 import { createHarnessSpan, recordChannelWarning, resolveTraceExporter } from './harness-tracing';
 import { LlmGateway } from './llm-client';
 import { buildItemSchemaRegistry } from './model-schema';
-import { DEFAULT_WAKE_DEBOUNCE_MS, ParkWatchers } from './park-watchers';
+import { DEFAULT_TASK_POLL_MS, DEFAULT_WAKE_DEBOUNCE_MS, ParkWatchers } from './park-watchers';
 import type { SpendClient } from './spend';
 import { Spend } from './spend';
 import { ThreadRecord } from './thread-record';
@@ -860,6 +863,10 @@ export class AgentHarness<
             }
           }
         },
+        heldCalls: async (ctx) =>
+          (await heldCallsOf(this).list(rootIdOf(ctx)))
+            .filter((held) => held.resolution === undefined)
+            .map(toHeldCall),
         // Stored totals are the session's usage; the runner only mirrors them.
         onTurnUsage: record
           ? async (spent) => {
@@ -1195,6 +1202,20 @@ export class AgentHarness<
           return this.#connections.registry.listenRaw(connection, request);
         },
         waits: async (executionId) => (storage ? resumableWaitsOf(storage, executionId) : []),
+        tasks: async (executionId) => (storage ? pendingTasksOf(storage, executionId) : []),
+        taskState: async (task, signal) => {
+          try {
+            await this.start();
+            const status = await this.#connections.registry.taskStatus(
+              task.connection,
+              task.taskId,
+              signal,
+            );
+            return status.state;
+          } catch {
+            return undefined;
+          }
+        },
         wake: async (threadId, options) =>
           (
             await this.wake({
@@ -1205,6 +1226,7 @@ export class AgentHarness<
         now: () => this.now(),
       },
       config.wakeDebounceMs ?? DEFAULT_WAKE_DEBOUNCE_MS,
+      config.taskPollMs ?? DEFAULT_TASK_POLL_MS,
     );
   }
 
@@ -1329,6 +1351,34 @@ export class AgentHarness<
 
   async decide(request: DecideRequest): Promise<DecideResponse> {
     return this.llm.decide(request, (r) => this.callModel(r));
+  }
+
+  /**
+   * The approval seam (spec 08 § Held tool calls): the `approveToolCall` approver
+   * decides, and with none, or when it answers `hold`, the action is held until
+   * `resolve()` answers it. Resolves the settled decision.
+   * @public
+   */
+  async approve(request: ApproveRequest): Promise<SteeringDecision> {
+    const approval = await awaitApproval({
+      harness: this,
+      toolName: request.toolName,
+      toolArgs: request.toolArgs,
+      callId: request.callId,
+      ctx: request.ctx,
+      park: request.park,
+      onHeld: (held) => {
+        emitFrameworkEvent({
+          broadcaster: getBroadcaster(request.ctx),
+          agentName: this.config.name,
+          eventType: 'tool_call_held',
+          data: {
+            ...held,
+          },
+        });
+      },
+    });
+    return approval.decision;
   }
 
   async notifyDecision(

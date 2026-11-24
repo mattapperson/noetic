@@ -1,4 +1,5 @@
 import type { LastLayerUsage } from './context-parts/layer-usage';
+import type { HeldCall } from './harness-judgment';
 import type { Item } from './items';
 
 //#region Stream Event Types
@@ -65,6 +66,11 @@ export interface HarnessResponse<TItem = Item> {
     /** Absent when nothing the turn waits on has a deadline, such as a held tool call. */
     readonly wakeAt?: number;
   };
+  /**
+   * The tool calls a parked turn holds for a person, as `harness.pending()` lists
+   * them. Present with `parked` when there are any; `harness.resolve()` answers one.
+   */
+  readonly held?: ReadonlyArray<HeldCall>;
   /** Per-context-layer context window breakdown captured at the last callModel of this execution. */
   readonly lastLayerUsage?: LastLayerUsage;
 }

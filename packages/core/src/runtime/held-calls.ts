@@ -411,6 +411,8 @@ export async function waitOnHeldCalls(opts: {
   callIds: ReadonlyArray<string>;
   /** Used when `ctx` carries no abort signal of its own. */
   signal?: AbortSignal;
+  /** False when the turn must stay live while it waits. Default true. */
+  park?: boolean;
 }): Promise<void> {
   const { ctx } = opts;
   const holds = heldCallsOf(opts.harness);
@@ -432,7 +434,10 @@ export async function waitOnHeldCalls(opts: {
         earliest = Math.min(earliest, record.dueAt);
       }
     }
-    stopWaiting = impl?.ledger?.parking.wait(impl.currentDispatch()?.path, earliest);
+    stopWaiting =
+      opts.park === false
+        ? undefined
+        : impl?.ledger?.parking.wait(impl.currentDispatch()?.path, earliest);
     // Another process answering cannot wake this one, so shared storage is read again
     // every so often. A deadline wakes it too.
     const untilDue = earliest - holds.now();
@@ -454,6 +459,76 @@ export async function waitOnHeldCalls(opts: {
     throw new NoeticErrorImpl({
       kind: 'cancelled',
       reason: ctx.abortReason ?? 'context aborted',
+    });
+  }
+}
+
+/**
+ * @internal
+ * False once the context's execution writes under a lease it no longer holds: a
+ * harness that was replaced must not open, close or disarm the new holder's calls
+ * (spec 23 § One writer per turn). An answer (`resolve`) is not a turn's write and
+ * is not fenced; it is a compare-and-set any harness may make.
+ */
+export function mayWriteHolds(ctx: Context): boolean {
+  let node: Context = ctx;
+  while (node.parent) {
+    node = node.parent;
+  }
+  for (const candidate of [
+    ctx,
+    node,
+  ]) {
+    if (candidate instanceof ContextImpl && candidate.ledger) {
+      return candidate.ledger.isHeld;
+    }
+  }
+  return true;
+}
+
+/** @internal How a call held by `holdAndWait` ended. */
+export interface HeldAnswer {
+  /** The answer, or undefined when the hold's deadline passed with none. */
+  resolution: HeldRecord['resolution'];
+}
+
+/**
+ * @internal
+ * Hold a call from a caller with no model round to come back to (a step), and wait
+ * for its answer. While it waits the step is only waiting, so the turn may park; a
+ * resumed step calls this again and finds the same record, and its answer.
+ *
+ * @throws NoeticError `cancelled` when the context is aborted while it waits.
+ */
+export async function holdAndWait(opts: {
+  harness: HoldHost;
+  ctx: Context;
+  record: HeldRecord;
+  /** Called once per process, when the call is first seen held. */
+  onHeld?: (held: HeldCall) => void;
+}): Promise<HeldAnswer> {
+  const holds = heldCallsOf(opts.harness);
+  const executionId = heldScopeOf(opts.ctx);
+  const { callId } = opts.record;
+  const opened = mayWriteHolds(opts.ctx) ? await holds.open(executionId, opts.record) : opts.record;
+  opts.onHeld?.(toHeldCall(opened));
+  for (;;) {
+    const current = await holds.load(executionId, callId);
+    const settled = current?.resolution !== undefined;
+    if (!current || settled || isOverdue(current, holds.now())) {
+      if (mayWriteHolds(opts.ctx)) {
+        await holds.close(executionId, callId);
+      }
+      return {
+        resolution: current?.resolution,
+      };
+    }
+    await waitOnHeldCalls({
+      harness: opts.harness,
+      ctx: opts.ctx,
+      callIds: [
+        callId,
+      ],
     });
   }
 }

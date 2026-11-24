@@ -748,6 +748,14 @@ identity, a step with a pending entry and no result picks up where it was:
 re-sending with the same key, waiting on the same task, or listening again from
 the recorded cursor until the recorded deadline.
 
+**A call that waits on a long operation.** Once the operation has an id on
+record, the call does not depend on the connection instance either: any instance
+of the same surface waits on that id. Such a call is only waiting, so its turn
+may park (`23-durable-execution` § Parked turns), and parking leaves the
+operation running rather than cancelling it. A question the operation asks
+(`input_required`) is held for a person (`08-runtime` § Held tool calls); only
+where nobody can be asked does the call fail with `connection_input_required`.
+
 **A wait that replays from a cursor.** A `wait` on an event whose manifest says
 `replay: 'durable'` does not depend on the connection instance it began on. Its
 pending entry is marked so, and any instance of the same surface picks it up:

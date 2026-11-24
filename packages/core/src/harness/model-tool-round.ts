@@ -18,7 +18,7 @@ import { SteerPoint } from '@noetic-tools/types';
 import { itemsToInput } from '../adapters/openrouter';
 import { isFunctionCall } from '../interpreter/typeguards';
 import { drainsOf } from '../runtime/drain';
-import { heldCallsOf, heldScopeOf, waitOnHeldCalls } from '../runtime/held-calls';
+import { heldCallsOf, heldScopeOf, mayWriteHolds, waitOnHeldCalls } from '../runtime/held-calls';
 import type { ApprovalOutcome } from '../runtime/tool-approval';
 import { createToolResultItem, executeToolCall } from '../runtime/tool-call';
 import type { CallSpanCollector } from './call-span-collector';
@@ -322,10 +322,11 @@ async function executeFunctionCall(
   const stored = recorded || !keeps ? undefined : await params.calls?.record(fc, toolResult);
   // The intent of a durable call is dropped once its result is on record. A result
   // that could not be recorded keeps it, so a resume asks rather than runs again.
-  if (toolResult.armed && stored !== false && request.ctx) {
+  const writes = request.ctx !== undefined && mayWriteHolds(request.ctx);
+  if (toolResult.armed && stored !== false && writes) {
     await heldCallsOf(scope.harness).disarm(heldScopeOf(request.ctx), fc.callId);
   }
-  if (toolResult.settled) {
+  if (toolResult.settled && writes) {
     await heldCallsOf(scope.harness).close(heldScopeOf(request.ctx), fc.callId);
   }
   // Owner-scoped result validation: a tool's `toolResults` schemas apply
@@ -370,7 +371,7 @@ async function dropHolds(
   request: CallModelRequest,
   calls: ReadonlyArray<FunctionCallItem>,
 ): Promise<void> {
-  if (!request.ctx) {
+  if (!request.ctx || !mayWriteHolds(request.ctx)) {
     return;
   }
   const holds = heldCallsOf(scope.harness);

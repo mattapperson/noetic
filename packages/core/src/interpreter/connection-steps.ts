@@ -579,7 +579,9 @@ export async function resumableWaitsOf(
   }> = [];
   for (const key of await storage.list(`execution:${executionId}:pending:`)) {
     const parsed = PendingEntrySchema.safeParse(await storage.get<unknown>(key));
-    if (!parsed.success || !resumesFromCursor(parsed.data) || parsed.data.event === undefined) {
+    const resumable =
+      parsed.success && parsed.data.kind === 'wait' && resumesFromCursor(parsed.data);
+    if (!parsed.success || !resumable || parsed.data.event === undefined) {
       continue;
     }
     waits.push({
@@ -589,6 +591,36 @@ export async function resumableWaitsOf(
     });
   }
   return waits;
+}
+
+/**
+ * The long operations an execution's calls wait on: what a watcher polls to know
+ * when a parked turn can go on (spec 23 § Parked turns).
+ */
+export async function pendingTasksOf(
+  storage: StorageAdapter,
+  executionId: string,
+): Promise<
+  Array<{
+    connection: string;
+    taskId: string;
+  }>
+> {
+  const tasks: Array<{
+    connection: string;
+    taskId: string;
+  }> = [];
+  for (const key of await storage.list(`execution:${executionId}:pending:`)) {
+    const parsed = PendingEntrySchema.safeParse(await storage.get<unknown>(key));
+    if (!parsed.success || parsed.data.kind !== 'call' || parsed.data.taskId === undefined) {
+      continue;
+    }
+    tasks.push({
+      connection: parsed.data.connection,
+      taskId: parsed.data.taskId,
+    });
+  }
+  return tasks;
 }
 
 /** The storage key of a step's pending entry. */
@@ -678,9 +710,16 @@ export async function reconcilePending(
   return undefined;
 }
 
-/** True for a pending `wait` that any instance of its surface can pick up from its cursor. */
+/**
+ * True for a pending entry that any instance of its surface can pick up: a `wait`
+ * that replays from a cursor, or a `call` whose long operation has an id the server
+ * keeps. Neither depends on the connection instance it began on.
+ */
 function resumesFromCursor(entry: PendingEntry): boolean {
-  return entry.kind === 'wait' && entry.durable === true;
+  if (entry.kind === 'call') {
+    return entry.taskId !== undefined;
+  }
+  return entry.durable === true;
 }
 
 /** Records on the run's ledger that the step at `ledgerKey` used `resolved` (spec 35 § Durability). */

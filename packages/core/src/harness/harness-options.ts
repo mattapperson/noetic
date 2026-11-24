@@ -109,6 +109,11 @@ export interface ParkConfig {
    * burst of events wakes it once. Default `DEFAULT_WAKE_DEBOUNCE_MS` (250).
    */
   wakeDebounceMs?: number;
+  /**
+   * How often auto-wake reads the state of a long operation a parked turn's call
+   * waits on, in ms. Default `DEFAULT_TASK_POLL_MS` (5000).
+   */
+  taskPollMs?: number;
 }
 
 /** @public Settings for the turn lease. Every field has a default. */

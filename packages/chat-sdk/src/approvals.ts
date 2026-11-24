@@ -1,4 +1,4 @@
-import type { ChannelHandle, ExternalChannel } from '@noetic-tools/types';
+import type { ChannelHandle, ExternalChannel, ToolApprover } from '@noetic-tools/types';
 import { z } from 'zod';
 
 /**
@@ -91,3 +91,117 @@ export function resolveApproval(params: {
     return false;
   }
 }
+
+//#region Through the harness
+
+/** How long a held approval waits for a click by default: five minutes. */
+const DEFAULT_HOLD_MS = 3e5;
+
+/**
+ * An `approveToolCall` approver that asks in chat and holds the call
+ * (Noetic spec 08 § Held tool calls).
+ *
+ * It sends an `ApprovalRequest` on `approvalRequests`, as a gated tool always
+ * has, so the code that posts approval cards does not change. The request's id is
+ * the tool call's own id. Then it answers `hold`: the call's record lives in the
+ * harness's storage, the turn may park, and `answerApproval` settles it.
+ *
+ * Use it with tools built with `approval: 'harness'`:
+ *
+ * ```ts
+ * new AgentHarness({ approveToolCall: chatApprover(), tools: await chatTools({ chat, approval: 'harness' }) });
+ * ```
+ *
+ * @param options - `timeout` is how long the call stays held, in milliseconds,
+ *   before it is denied. Default five minutes. `Infinity` holds it until answered.
+ */
+export function chatApprover(options: { timeout?: number } = {}): ToolApprover {
+  const timeout = options.timeout ?? DEFAULT_HOLD_MS;
+  return async ({ toolName, toolArgs, callId, ctx }) => {
+    if (callId === undefined) {
+      return {
+        action: 'deny',
+        guidance: `'${toolName}' has no call id to ask about`,
+      };
+    }
+    await ctx.harness.send(
+      approvalRequests,
+      {
+        requestId: callId,
+        toolName,
+        args: toolArgs,
+        threadId: ctx.threadId,
+      },
+      ctx,
+    );
+    const now = ctx.harness.config.now?.() ?? Date.now();
+    return Number.isFinite(timeout)
+      ? {
+          action: 'hold',
+          dueAt: now + timeout,
+        }
+      : {
+          action: 'hold',
+        };
+  };
+}
+
+/** The slice of the harness `answerApproval` needs. */
+export interface HeldApprovalHarness extends ApprovalHarness {
+  /** Answers a held tool call. Absent on a harness that cannot hold one. */
+  resolve?(
+    scope:
+      | {
+          threadId?: string;
+        }
+      | undefined,
+    answer: {
+      callId: string;
+      action: 'allow' | 'deny';
+      guidance?: string;
+    },
+  ): Promise<void>;
+}
+
+/**
+ * Deliver a user's decision, wherever the call is waiting. A call the harness
+ * holds (see `chatApprover`) is answered through `harness.resolve()`, which also
+ * wakes a parked turn; anything else goes to `resolveApproval` and the channel.
+ *
+ * Resolves `false` when nothing was waiting for the decision, such as a stale
+ * button clicked long after the fact.
+ */
+export async function answerApproval(params: {
+  harness: HeldApprovalHarness;
+  decision: ApprovalDecision;
+  /** The harness thread the request came from: `ApprovalRequest.threadId`. */
+  threadId?: string;
+  /** Override when the integration subscribed under a custom scope id. */
+  scopeId?: string;
+}): Promise<boolean> {
+  const { harness, decision } = params;
+  if (harness.resolve) {
+    try {
+      await harness.resolve(
+        {
+          threadId: params.threadId,
+        },
+        {
+          callId: decision.requestId,
+          action: decision.approved ? 'allow' : 'deny',
+          ...(decision.reason === undefined
+            ? {}
+            : {
+                guidance: decision.reason,
+              }),
+        },
+      );
+      return true;
+    } catch {
+      // Not a call the harness holds: it may be one waiting on the channel.
+    }
+  }
+  return resolveApproval(params);
+}
+
+//#endregion

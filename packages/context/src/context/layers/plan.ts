@@ -1,6 +1,7 @@
 import type {
   ContextLayer,
   ContextScope,
+  ExecutionContext,
   WorkflowDocument,
   WorkflowNode,
 } from '@noetic-tools/types';
@@ -116,6 +117,14 @@ export interface PlanConfig {
   onEnterSession?: PlanEnterSessionCallback;
   /** Called when `exitPlanMode` is requested with `action: 'execute'`. */
   onExit?: PlanExitCallback;
+  /**
+   * With no `onExit`, ask the harness's approval seam before a plan executes
+   * (Noetic spec 08 § Held tool calls): its `approveToolCall` approver decides, and
+   * with none the request is held until `harness.resolve()` answers it. The request
+   * is durable where the harness's storage is, and is asked again if the plan
+   * changes. Default `false`: a plan with no `onExit` executes unasked.
+   */
+  requireApproval?: boolean;
 }
 
 interface DocumentLimits {
@@ -333,6 +342,7 @@ interface PlanLayerOptions {
   additionalPlanInstructions?: string;
   onEnterSession?: PlanEnterSessionCallback;
   onExit?: PlanExitCallback;
+  requireApproval: boolean;
 }
 
 function resolvePlanOptions(config?: PlanConfig): PlanLayerOptions {
@@ -350,6 +360,7 @@ function resolvePlanOptions(config?: PlanConfig): PlanLayerOptions {
     additionalPlanInstructions: config?.additionalPlanInstructions,
     onEnterSession: config?.onEnterSession,
     onExit: config?.onExit,
+    requireApproval: config?.requireApproval ?? false,
   };
 }
 
@@ -591,13 +602,48 @@ async function executeGetWorkflow(
   };
 }
 
+/**
+ * Whether the plan may execute: the host's `onExit` says, or with `requireApproval`
+ * the harness's approval seam does. With neither, it may.
+ */
+async function exitApproved(
+  state: PlanState,
+  options: PlanLayerOptions,
+  ctx: ExecutionContext,
+): Promise<boolean> {
+  if (options.onExit) {
+    return (await options.onExit(state)).approved;
+  }
+  if (!options.requireApproval) {
+    return true;
+  }
+  // A harness with no approval seam cannot ask anyone, so the plan is not approved.
+  if (!ctx.approve) {
+    return false;
+  }
+  const decision = await ctx.approve({
+    toolName: 'plan/exitPlanMode',
+    // The plan itself is what is approved: a changed plan is a new question.
+    toolArgs: {
+      prd: state.prd,
+      planTree: state.planTree,
+    },
+    callId: `plan-exit:${ctx.executionId}`,
+  });
+  return decision.action === 'allow';
+}
+
 async function executeExitPlanMode(
   args: {
     action: 'execute' | 'cancel';
   },
   state: PlanState,
-  options: PlanLayerOptions,
+  at: {
+    options: PlanLayerOptions;
+    ctx: ExecutionContext;
+  },
 ): Promise<PlanToolResult> {
+  const { options, ctx } = at;
   if (state.phase !== PlanPhase.Planning) {
     return {
       result: `Cannot exit plan mode: current phase is "${state.phase}".`,
@@ -637,15 +683,12 @@ async function executeExitPlanMode(
     };
   }
 
-  if (options.onExit) {
-    const { approved } = await options.onExit(state);
-    if (!approved) {
-      return {
-        result:
-          'User did not approve the plan. Stay in plan mode, address their feedback, and call plan/exitPlanMode again when ready.',
-        state,
-      };
-    }
+  if (!(await exitApproved(state, options, ctx))) {
+    return {
+      result:
+        'User did not approve the plan. Stay in plan mode, address their feedback, and call plan/exitPlanMode again when ready.',
+      state,
+    };
   }
 
   return {
@@ -947,7 +990,11 @@ export function plan(config?: PlanConfig): ContextLayer<PlanState> {
           ]),
         }),
         output: z.string(),
-        execute: (args, state) => executeExitPlanMode(args, state, options),
+        execute: (args, state, ctx) =>
+          executeExitPlanMode(args, state, {
+            options,
+            ctx,
+          }),
       }),
     },
     hooks: buildPlanHooks(options),

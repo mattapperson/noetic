@@ -25,6 +25,12 @@ export interface ParkedWait {
   readonly cursor: string | null;
 }
 
+/** A long operation a parked turn's call waits on. */
+export interface ParkedTask {
+  readonly connection: string;
+  readonly taskId: string;
+}
+
 /** What the watchers need of their harness. */
 export interface ParkWatcherHost {
   /** Listen on a harness connection. */
@@ -38,6 +44,10 @@ export interface ParkWatcherHost {
   ): Promise<EventStream<ConnectionEventInit>>;
   /** The events the parked execution waits for. */
   waits(executionId: string): Promise<ParkedWait[]>;
+  /** The long operations the parked execution's calls wait on. */
+  tasks(executionId: string): Promise<ParkedTask[]>;
+  /** The state of one of them now, or undefined when it cannot be read. */
+  taskState(task: ParkedTask, signal: AbortSignal): Promise<string | undefined>;
   /** Resume the thread's turn. Resolves false when it could not be resumed just now. */
   wake(threadId: string, options: ExecuteOptions): Promise<boolean>;
   now(): number;
@@ -60,6 +70,8 @@ interface Watcher {
 
 /** @public How long auto-wake waits after an event before waking a turn, so a burst wakes it once. */
 export const DEFAULT_WAKE_DEBOUNCE_MS = 250;
+/** @public How often auto-wake reads the state of a long operation a parked turn waits on. */
+export const DEFAULT_TASK_POLL_MS = 5e3;
 /** The longest delay a timer takes; a later deadline is reached in several steps. */
 const MAX_TIMER_MS = 2 ** 31 - 1;
 /** How many times a wake is tried while the runner is still closing the parked turn out. */
@@ -79,6 +91,7 @@ export class ParkWatchers {
   constructor(
     private readonly host: ParkWatcherHost,
     private readonly debounceMs: number,
+    private readonly taskPollMs: number,
   ) {}
 
   /** True when the thread's parked turn is being watched. */
@@ -97,6 +110,7 @@ export class ParkWatchers {
     this.watchers.set(threadId, watcher);
     this.armDeadline(threadId, watcher, turn);
     void this.listenForWaits(threadId, watcher, turn);
+    void this.pollTasks(threadId, watcher, turn).catch(() => undefined);
   }
 
   /** Stop watching a thread: its turn was woken, or is being. */
@@ -193,6 +207,42 @@ export class ParkWatchers {
       watcher.debounce ??= setTimeout(() => {
         void this.fire(threadId, watcher, turn);
       }, this.debounceMs);
+    }
+  }
+
+  /**
+   * A long operation has no event to listen for, so its state is read every so
+   * often. The turn is woken when the state is no longer the one it parked on:
+   * finished, failed, or asking a question. A state it already woke for does not
+   * wake it again, or a turn waiting on a person's answer would never rest.
+   */
+  private async pollTasks(threadId: string, watcher: Watcher, turn: ParkedTurn): Promise<void> {
+    const signal = watcher.controller.signal;
+    const tasks = await this.host.tasks(turn.executionId);
+    while (tasks.length > 0 && !signal.aborted) {
+      for (const task of tasks) {
+        const state = await this.host.taskState(task, signal);
+        const key = `${turn.executionId}\u0000task\u0000${task.taskId}`;
+        if (state === undefined || state === 'working' || this.seen.get(key) === state) {
+          continue;
+        }
+        this.seen.set(key, state);
+        void this.fire(threadId, watcher, turn);
+        return;
+      }
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, this.taskPollMs);
+        signal.addEventListener(
+          'abort',
+          () => {
+            clearTimeout(timer);
+            resolve();
+          },
+          {
+            once: true,
+          },
+        );
+      });
     }
   }
 

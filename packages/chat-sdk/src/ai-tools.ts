@@ -27,6 +27,17 @@ export interface FromAiSdkToolOptions {
   needsApproval?: boolean;
   /** How long a gated call waits for a decision, in milliseconds. Default 5 minutes. */
   approvalTimeout?: number;
+  /**
+   * Where a gated call waits for its decision.
+   *
+   * - `'channel'` (default): inside the tool, on the approval channels. The wait
+   *   lives in memory and ends with the process.
+   * - `'harness'`: the tool is marked `needsApproval` and the harness gates it
+   *   (Noetic spec 08 § Held tool calls). Pair it with
+   *   `approveToolCall: chatApprover()`. The call's record is in storage, so it
+   *   survives a restart and the turn can park while a person decides.
+   */
+  approval?: 'channel' | 'harness';
 }
 
 /**
@@ -59,8 +70,14 @@ export function fromAiSdkTool(
     description: aiTool.description ?? name,
     input,
     output: z.unknown(),
+    ...(needsApproval && options.approval === 'harness'
+      ? {
+          needsApproval: true,
+        }
+      : {}),
     execute: async (args: unknown, toolCtxRaw: unknown): Promise<unknown> => {
-      if (needsApproval) {
+      // In 'harness' mode the harness asked before this ran.
+      if (needsApproval && options.approval !== 'harness') {
         const toolCtx = frameworkCast<ToolExecutionContext>(toolCtxRaw);
         await awaitApproval({
           name,
@@ -92,6 +109,17 @@ export interface ChatToolsOptions {
   requireApproval?: boolean | Record<string, boolean>;
   /** How long a gated call waits for a decision, in milliseconds. Default 5 minutes. */
   approvalTimeout?: number;
+  /**
+   * Where a gated call waits for its decision.
+   *
+   * - `'channel'` (default): inside the tool, on the approval channels. The wait
+   *   lives in memory and ends with the process.
+   * - `'harness'`: the tool is marked `needsApproval` and the harness gates it
+   *   (Noetic spec 08 § Held tool calls). Pair it with
+   *   `approveToolCall: chatApprover()`. The call's record is in storage, so it
+   *   survives a restart and the turn can park while a person decides.
+   */
+  approval?: 'channel' | 'harness';
 }
 
 /**
@@ -116,6 +144,7 @@ export async function chatTools(options: ChatToolsOptions): Promise<Tool[]> {
       fromAiSdkTool(name, aiTool, {
         needsApproval: resolveApprovalFlag(options.requireApproval, name),
         approvalTimeout: options.approvalTimeout,
+        approval: options.approval,
       }),
     );
   }

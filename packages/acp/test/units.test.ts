@@ -355,6 +355,61 @@ describe('resolvePermission', () => {
     expect(outcome.reason).toBeDefined();
   });
 
+  test('asks the approval seam last, when nothing decided and the policy names no default', async () => {
+    const asked: string[] = [];
+    const outcome = await resolvePermission(request('execute', 'x'), {
+      approve: async (req) => {
+        asked.push(req.toolCall.toolCallId);
+        return {
+          decision: 'allow',
+        };
+      },
+    });
+    expect(outcome.decision).toBe('allow');
+    expect(asked).toHaveLength(1);
+  });
+
+  test('does not ask the seam when the policy names a default', async () => {
+    let asked = false;
+    const outcome = await resolvePermission(request('execute', 'x'), {
+      policy: {
+        default: 'deny',
+      },
+      approve: async () => {
+        asked = true;
+        return {
+          decision: 'allow',
+        };
+      },
+    });
+    expect(outcome.decision).toBe('deny');
+    expect(asked).toBe(false);
+  });
+
+  test('a handler decides before the seam is asked', async () => {
+    let asked = false;
+    const outcome = await resolvePermission(request('execute', 'x'), {
+      handler: async () => ({
+        decision: 'deny',
+      }),
+      approve: async () => {
+        asked = true;
+        return {
+          decision: 'allow',
+        };
+      },
+    });
+    expect(outcome.decision).toBe('deny');
+    expect(asked).toBe(false);
+  });
+
+  test('denies when the seam abstains', async () => {
+    const outcome = await resolvePermission(request('execute', 'x'), {
+      approve: async () => undefined,
+    });
+    expect(outcome.decision).toBe('deny');
+  });
+
   test('honours an explicit default', async () => {
     const outcome = await resolvePermission(request('execute', 'x'), {
       policy: {

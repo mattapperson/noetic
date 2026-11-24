@@ -6,7 +6,17 @@
 import type { Span, SteeringDecision } from '@noetic-tools/types';
 import { frameworkCast, NoeticErrorImpl, validateSchema } from '@noetic-tools/types';
 import { ToolAttr } from '../observability/genai-attributes';
+import { ContextImpl } from '../runtime/context-impl';
+import type { HeldRecord, HoldHost } from '../runtime/held-calls';
+import {
+  heldArgsHash,
+  heldCallsOf,
+  heldScopeOf,
+  holdAndWait,
+  mayWriteHolds,
+} from '../runtime/held-calls';
 import { awaitApproval } from '../runtime/tool-approval';
+import { isToolHold } from '../runtime/tool-call';
 import { emitToolUi } from '../runtime/tool-ui';
 import { buildToolExecutionContext, emitFrameworkEvent, getBroadcaster } from './action-deps';
 import type {
@@ -179,6 +189,53 @@ async function runInvokeTool<TContext, I, O>(
     }
   }
 
+  // Held calls of this step are kept under its dispatch path: a step id repeats
+  // across loop iterations, a path does not.
+  const holdId =
+    (baseCtx instanceof ContextImpl ? baseCtx.currentDispatch()?.path : undefined) ?? step.id;
+  const held = {
+    callId: holdId,
+    name: step.tool.name,
+    args: parsedArgs,
+    argsHash: heldArgsHash(step.tool.name, parsedArgs),
+  };
+  const holds = heldCallsOf(harness);
+  const holdScope = heldScopeOf(baseCtx);
+
+  // A durable tool is not repeated unasked (spec 23a § Tool calls in a round). An
+  // intent with no result means a host died while it ran: a person says what happened.
+  const durable = step.tool.durable === true;
+  if (durable && (await holds.wasStarted(holdScope, holdId, held.argsHash))) {
+    const answer = await holdAndWait({
+      harness,
+      ctx: baseCtx,
+      record: {
+        ...held,
+        reason: 'outcome',
+      },
+    });
+    if (answer.resolution?.hasOutput) {
+      emitCompleted(false, JSON.stringify(answer.resolution.output));
+      return frameworkCast<O>(answer.resolution.output);
+    }
+    const action = answer.resolution?.action ?? SteeringAction.Deny;
+    if (action !== SteeringAction.Allow) {
+      refuse({
+        action,
+        guidance: answer.resolution?.guidance,
+      });
+    }
+  }
+  if (durable && mayWriteHolds(baseCtx)) {
+    await holds.arm(holdScope, holdId, held.argsHash);
+  }
+  // The tool reported back, with a result or an error: its outcome is known.
+  const disarm = async (): Promise<void> => {
+    if (durable && mayWriteHolds(baseCtx)) {
+      await holds.disarm(holdScope, holdId);
+    }
+  };
+
   emitToolUi({
     ctx: baseCtx,
     tool: step.tool,
@@ -190,7 +247,7 @@ async function runInvokeTool<TContext, I, O>(
     const toolCtx = buildToolExecutionContext(baseCtx, harness);
     const execResult = step.tool.execute(parsedArgs, toolCtx);
 
-    const result = isAsyncGenerator(execResult)
+    const ran = isAsyncGenerator(execResult)
       ? await consumeToolGenerator({
           generator: execResult,
           stepId: step.id,
@@ -199,6 +256,36 @@ async function runInvokeTool<TContext, I, O>(
           args: parsedArgs,
         })
       : await execResult;
+    await disarm();
+    // The tool did its part and left the result for a person to give.
+    const result = isToolHold(ran)
+      ? await heldResult(
+          {
+            harness,
+            ctx: baseCtx,
+            stepId: step.id,
+          },
+          {
+            ...held,
+            reason: 'result',
+            ...(ran.dueAt === undefined
+              ? {}
+              : {
+                  dueAt: ran.dueAt,
+                }),
+            ...(ran.onDue === undefined
+              ? {}
+              : {
+                  onDue: ran.onDue,
+                }),
+            ...(ran.request === undefined
+              ? {}
+              : {
+                  request: ran.request,
+                }),
+          },
+        )
+      : ran;
 
     emitToolUi({
       ctx: baseCtx,
@@ -221,8 +308,13 @@ async function runInvokeTool<TContext, I, O>(
     });
     emitCompleted(true, e instanceof Error ? e.message : String(e));
     if (e instanceof NoeticErrorImpl) {
+      // A run cut short was not the tool reporting back: its outcome stays unknown.
+      if (e.noeticError.kind !== 'cancelled') {
+        await disarm();
+      }
       throw e;
     }
+    await disarm();
     throw new NoeticErrorImpl({
       kind: 'step_failed',
       stepId: step.id,
@@ -230,6 +322,40 @@ async function runInvokeTool<TContext, I, O>(
       retriesExhausted: false,
     });
   }
+}
+
+//#endregion
+
+//#region Held results
+
+/**
+ * Wait for the answer to a result a tool left open with `hold()`.
+ *
+ * @throws NoeticError `step_failed` when the hold's deadline passes with no answer,
+ *   `cancelled` when the context is aborted while it waits.
+ */
+async function heldResult(
+  at: {
+    harness: HoldHost;
+    ctx: Context;
+    stepId: string;
+  },
+  record: HeldRecord,
+): Promise<unknown> {
+  const answer = await holdAndWait({
+    harness: at.harness,
+    ctx: at.ctx,
+    record,
+  });
+  if (answer.resolution?.hasOutput) {
+    return answer.resolution.output;
+  }
+  throw new NoeticErrorImpl({
+    kind: 'step_failed',
+    stepId: at.stepId,
+    cause: new Error(`nobody answered '${record.name}' before the hold ran out`),
+    retriesExhausted: true,
+  });
 }
 
 //#endregion

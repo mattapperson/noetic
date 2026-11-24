@@ -34,6 +34,12 @@ export interface AcpPermissionResolverOptions {
   policy?: AcpPermissionPolicy;
   steer?: AcpPermissionSteerer;
   handler?: AcpBoundPermissionHandler;
+  /**
+   * The harness's approval seam, asked last: when nothing above decided and the
+   * policy names no `default`. It holds the request for a person rather than
+   * denying it (spec 08 § Held tool calls).
+   */
+  approve?: AcpPermissionSteerer;
 }
 
 /** The concrete ACP outcome payload sent back to the agent. */
@@ -201,6 +207,13 @@ export async function resolvePermission(
   }
   if (opts.handler) {
     return await opts.handler(request);
+  }
+  // A policy that names its default has decided. Otherwise a person does.
+  if (opts.policy?.default === undefined && opts.approve) {
+    const approved = await opts.approve(request);
+    if (approved) {
+      return approved;
+    }
   }
   return {
     decision: opts.policy?.default ?? 'deny',

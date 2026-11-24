@@ -10,7 +10,12 @@
  * client as a pending `tool_call` rather than invisible until approved.
  */
 
-import type { AcpToolKind, ContextLayer, SteeringDecision } from '@noetic-tools/types';
+import type {
+  AcpToolKind,
+  ContextLayer,
+  ExecutionContext,
+  SteeringDecision,
+} from '@noetic-tools/types';
 import { frameworkCast } from '@noetic-tools/types';
 import type {
   AcpServePermissionDecision,
@@ -22,6 +27,8 @@ import type {
 //#region Policy evaluation
 
 const DEFAULT_ASK_TIMEOUT_MS = 5 * 60 * 1e3;
+/** The longest delay a timer takes: about 24.8 days. */
+const MAX_HOOK_TIMEOUT_MS = 2 ** 31 - 1;
 
 /**
  * First decisive rule wins, checked `deny` → `ask` → `allow`; the policy
@@ -58,9 +65,14 @@ export function evaluateServePolicy(params: {
 
 //#region Broker
 
+/** A reply, and whether it is the broker's own because nobody answered in time. */
+interface AskOutcome extends AcpServePermissionReply {
+  timedOut?: boolean;
+}
+
 interface PendingAsk {
   sessionId: string;
-  resolve(reply: AcpServePermissionReply): void;
+  resolve(reply: AskOutcome): void;
 }
 
 /**
@@ -78,9 +90,9 @@ export class ServePermissionBroker {
     ) => Promise<AcpServePermissionReply>,
   ) {}
 
-  async ask(prompt: AcpServePermissionPrompt, timeoutMs: number): Promise<AcpServePermissionReply> {
+  async ask(prompt: AcpServePermissionPrompt, timeoutMs: number): Promise<AskOutcome> {
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const parked = new Promise<AcpServePermissionReply>((resolve) => {
+    const parked = new Promise<AskOutcome>((resolve) => {
       this.pending.set(prompt.requestId, {
         sessionId: prompt.sessionId,
         resolve,
@@ -89,6 +101,7 @@ export class ServePermissionBroker {
         this.answer(prompt.requestId, {
           decision: 'deny',
           reason: 'permission request timed out',
+          timedOut: true,
         });
       }, timeoutMs);
     });
@@ -115,7 +128,7 @@ export class ServePermissionBroker {
   }
 
   /** Resolve one park; later answers to the same request are dropped. */
-  answer(requestId: string, reply: AcpServePermissionReply): void {
+  answer(requestId: string, reply: AskOutcome): void {
     const entry = this.pending.get(requestId);
     if (!entry) {
       return;
@@ -167,6 +180,7 @@ export function createServePermissionLayer(params: {
     toolName: string;
     toolArgs: unknown;
     callId?: string;
+    ctx?: Pick<ExecutionContext, 'approve'>;
   }): Promise<{
     decision: SteeringDecision;
   }> => {
@@ -204,6 +218,20 @@ export function createServePermissionLayer(params: {
       },
       askTimeoutMs,
     );
+    // Nobody at the editor answered. Rather than refuse, hand the call to the
+    // harness's approval seam, where a person can still answer it (spec 08 § Held
+    // tool calls). The editor's turn is waiting on it, so the turn stays live.
+    const approve = hookParams.ctx?.approve;
+    if (reply.timedOut && approve && callId !== undefined) {
+      return {
+        decision: await approve({
+          toolName,
+          toolArgs,
+          callId,
+          park: false,
+        }),
+      };
+    }
     if (reply.decision === 'allow') {
       return {
         decision: {
@@ -230,9 +258,10 @@ export function createServePermissionLayer(params: {
       beforeToolCall,
     },
     timeouts: {
-      // The broker owns the real deadline (askTimeoutMs → deny); this outer
-      // lifecycle timeout only backstops a wedged broker.
-      beforeToolCall: askTimeoutMs + 10e3,
+      // The broker owns the editor's deadline (askTimeoutMs). After it a call may be
+      // held for a person through the harness, for as long as that takes, so the
+      // lifecycle timeout is the longest a timer allows and only backstops a wedge.
+      beforeToolCall: MAX_HOOK_TIMEOUT_MS,
     },
     // A gate fails CLOSED: if the hook ever throws or blows the backstop
     // timeout, the lifecycle denies the call rather than abstaining into the

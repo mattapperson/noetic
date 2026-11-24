@@ -31,8 +31,10 @@ import {
   SteeringAction,
 } from '@noetic-tools/types';
 import { emitFrameworkEvent, getBroadcaster } from '../runtime/broadcaster-utils';
+import { ContextImpl } from '../runtime/context-impl';
 import type { EventBroadcaster } from '../runtime/event-broadcaster';
-import { askApproval } from '../runtime/tool-approval';
+import { heldArgsHash, holdAndWait } from '../runtime/held-calls';
+import { askApproval, awaitApproval } from '../runtime/tool-approval';
 import type { GateHooks, GateRequest } from './gates';
 import { buildConnectionTools } from './model-tools';
 import type { ConnectionFrameworkEventRecord, ConnectionRuntime } from './registry';
@@ -114,6 +116,35 @@ function gateHooks(harness: WiredHarness): GateHooks {
         request.callId,
       );
     },
+    // A long operation asked a question (MCP Tasks `input_required`). It is held for
+    // a person like a tool's open result: the answer goes back to the operation.
+    async answerInput(request) {
+      const question = request.status.request;
+      if (!request.ctx || !question) {
+        return undefined;
+      }
+      const args = {
+        taskId: request.status.taskId,
+        question: question.message,
+      };
+      const answer = await holdAndWait({
+        harness,
+        ctx: request.ctx,
+        record: {
+          callId: `${holdIdOf(request.ctx, request.callId ?? request.op)}:input:${question.id}`,
+          name: request.toolName,
+          args,
+          argsHash: heldArgsHash(request.toolName, args),
+          reason: 'result',
+          request: question,
+        },
+      });
+      return answer.resolution?.hasOutput
+        ? {
+            answer: answer.resolution.output,
+          }
+        : undefined;
+    },
     async approve(request: GateRequest): Promise<SteeringDecision> {
       // A model's tool call can be held for a person: its tool pipeline writes the
       // record when this throws, and answers from it when the call is made again.
@@ -125,6 +156,18 @@ function gateHooks(harness: WiredHarness): GateHooks {
           callId: request.callId,
           ctx: request.ctx,
           matched: true,
+        });
+        return approval.decision;
+      }
+      // A step's call has no round to come back to, so it waits where it is until a
+      // person answers, and the turn may park meanwhile.
+      if (request.ctx && request.caller === 'step' && request.callId !== undefined) {
+        const approval = await awaitApproval({
+          harness,
+          toolName: request.toolName,
+          toolArgs: request.args,
+          callId: holdIdOf(request.ctx, request.callId),
+          ctx: request.ctx,
         });
         return approval.decision;
       }
@@ -149,6 +192,14 @@ function gateHooks(harness: WiredHarness): GateHooks {
       }
     },
   };
+}
+
+/**
+ * The id a step's held call is kept under: its dispatch path, since a step id
+ * repeats across loop iterations and a path does not.
+ */
+function holdIdOf(ctx: Context, fallback: string): string {
+  return (ctx instanceof ContextImpl ? ctx.currentDispatch()?.path : undefined) ?? fallback;
 }
 
 function broadcast(

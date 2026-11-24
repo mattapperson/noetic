@@ -8,6 +8,7 @@
 import type { ConnectionTaskStatus, Context, StepCall } from '@noetic-tools/types';
 import { frameworkCast } from '@noetic-tools/types';
 import type { ConnectionCaller, GatedCallOptions } from '../connections/registry-types';
+import { ContextImpl } from '../runtime/context-impl';
 import type { PendingEntry, StepConnection } from './connection-steps';
 import {
   evaluateTarget,
@@ -137,15 +138,35 @@ export async function executeCall<TContext, I, O>(
     onTask: (status: ConnectionTaskStatus) => {
       if (entry.taskId !== status.taskId) {
         entry.taskId = status.taskId;
-        void connection.pending?.write(entry);
+        void connection.pending?.write(entry).then(markWaiting);
       }
     },
   };
+  // Once the long operation has an id on record the step only waits for it, and a
+  // parked turn can come back for it (spec 23 § Parked turns).
+  let stopWaiting: (() => void) | undefined;
+  const markWaiting = (): void => {
+    if (stopWaiting || !(baseCtx instanceof ContextImpl) || !connection.pending) {
+      return;
+    }
+    stopWaiting = baseCtx.ledger?.parking.wait(
+      baseCtx.currentDispatch()?.path,
+      Number.POSITIVE_INFINITY,
+    );
+  };
+  if (prior?.taskId) {
+    markWaiting();
+  }
   // A previous attempt's long operation is waited on, not started again (spec 35 § Durability).
-  const output =
-    prior?.taskId && connection.resolved.awaitTask
-      ? await connection.resolved.awaitTask(prior.taskId, step.op, callOptions)
-      : await connection.resolved.call(step.op, args, callOptions);
+  let output: unknown;
+  try {
+    output =
+      prior?.taskId && connection.resolved.awaitTask
+        ? await connection.resolved.awaitTask(prior.taskId, step.op, callOptions)
+        : await connection.resolved.call(step.op, args, callOptions);
+  } finally {
+    stopWaiting?.();
+  }
   await connection.pending?.clear();
   return frameworkCast<O>(output);
 }

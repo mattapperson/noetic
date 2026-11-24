@@ -2153,6 +2153,15 @@ harness.resolve(scope, { callId, argsHash?, output }): Promise<void>;
 
 A call that needs approval with no approver, or whose approver answers `hold`, is held: its siblings run, nothing is written for it, and the turn waits (and parks, with `park` on) until `resolve()`. Refusals are `NoeticError` `hold_refused`. Event: `{name}:tool_call_held`.
 
+### `harness.approve()`: the one approval seam
+
+```typescript
+harness.approve({ toolName, toolArgs, callId, ctx, park? }): Promise<SteeringDecision>;
+// also ctx.harness.approve(...) and, in a layer function, ctx.approve({ toolName, toolArgs, callId, park? })
+```
+
+The approver decides; with none, or on `hold`, the action is held and `approve` resolves once `harness.resolve()` answers it. Asked by `needsApproval` tools, connection operations that need approval (from a model or a step), long-task questions, ACP permission requests with no policy `default`, the served-agent gate after its timeout, `chatTools({ approval: 'harness' })` with `chatApprover()`, and `plan({ requireApproval: true })`. A parked response lists held calls as `held`.
+
 ### `durable` on a tool
 
 `tool({ durable })`: unset records the result and re-runs a call cut off mid-flight with the same key; `true` holds such a call as `reason: 'outcome'` (answer with `{ output }` or `{ action: 'allow' }`); `false` never records, so the call always runs again.

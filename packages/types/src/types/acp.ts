@@ -333,6 +333,12 @@ export interface AcpClientHost {
    */
   permissions?: AcpPermissionPolicy;
   steerPermission?: AcpPermissionSteerer;
+  /**
+   * The harness's approval seam, asked when no policy rule, steering decision or
+   * handler settled a permission request and the policy names no default
+   * (spec 08 § Held tool calls). Set by the runtime.
+   */
+  approvePermission?: AcpPermissionSteerer;
   onPermissionRequest?: AcpBoundPermissionHandler;
   /**
    * Receive every `session/update` notification for the active session. Also

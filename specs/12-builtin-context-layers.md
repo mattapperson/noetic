@@ -479,6 +479,7 @@ interface PlanConfig {
   additionalPlanInstructions?: string;
   onEnterSession?: PlanEnterSessionCallback;  // () => Promise<{ slug: string }>
   onExit?: PlanExitCallback;                  // (state) => Promise<{ approved: boolean }>
+  requireApproval?: boolean;                  // no onExit: ask the harness approval seam (08-runtime § Held tool calls)
 }
 
 function plan(config?: PlanConfig): ContextLayer<PlanState>

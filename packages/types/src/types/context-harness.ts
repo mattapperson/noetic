@@ -12,6 +12,7 @@ import type {
 } from './context-layer';
 import type { DecideRequest, DecideResponse, DecisionRecord } from './decide';
 import type { DetachedHandle } from './detached';
+import type { ApproveRequest } from './harness-judgment';
 import type { HarnessPlatform } from './harness-platform';
 import type { HarnessResponse, StreamEvent, StreamingItem } from './harness-result';
 import type { ExecuteInput, Item } from './items';
@@ -141,6 +142,8 @@ export interface ContextHarness extends HarnessPlatform {
   };
   callModel(request: ContextCallModelRequest): Promise<LLMResponse>;
   decide(request: DecideRequest): Promise<DecideResponse>;
+  /** The harness's approval seam; see `HarnessJudgmentContract.approve`. */
+  approve?(request: ApproveRequest): Promise<SteeringDecision>;
   /** Run every layer's `onDecision` hook, in slot order. */
   notifyDecision(layers: ContextLayer[], record: DecisionRecord, ctx: Context): Promise<void>;
   execute(input: ExecuteInput, options?: unknown): Promise<void>;

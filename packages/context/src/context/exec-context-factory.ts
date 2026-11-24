@@ -41,6 +41,7 @@ export function contextToExecCtx(ctx: Context, overrides?: ExecCtxOverrides): Ex
     fs: ctx.harness.fs,
     shell: ctx.harness.shell,
     callModel: overrides?.callModel,
+    approve: approverOf(ctx),
     tokenize: estimateTokens,
     trace: {
       setAttribute: (key, value) => ctx.span.setAttribute(key, value),
@@ -50,6 +51,19 @@ export function contextToExecCtx(ctx: Context, overrides?: ExecCtxOverrides): Ex
     readLayerState: <T>(layerId: string): T | undefined =>
       ctx.harness.getLayerState<T>(readLayerStateId, layerId),
   };
+}
+
+/** The harness's approval seam, bound to `ctx`, when the harness has one. */
+function approverOf(ctx: Context): ExecutionContext['approve'] {
+  const approve = ctx.harness.approve?.bind(ctx.harness);
+  if (!approve) {
+    return undefined;
+  }
+  return (request) =>
+    approve({
+      ...request,
+      ctx,
+    });
 }
 
 /** Opens a span under `ctx.span` that exports itself to the harness when it ends. */

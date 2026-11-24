@@ -286,7 +286,14 @@ in three tiers; the first decisive one wins:
 3. **`onPermissionRequest`** — an async handler, the human-in-the-loop hatch
    that steering's synchronous predicate cannot express.
 
-When all three abstain, the policy `default` applies — **`deny` unless the step
+When all three abstain and the policy names no `default`, the request goes to
+the harness's approval seam (`08-runtime` § Held tool calls): the
+`approveToolCall` approver decides, and with none the request is held until
+`harness.resolve()` answers it. The agent's process is waiting on the answer,
+so the turn stays live while it is held. A policy that names a `default` has
+decided, and the seam is not asked.
+
+Where there is no seam, the policy `default` applies — **`deny` unless the step
 says otherwise**. An unattended agent must not gain blanket approval by
 omission.
 

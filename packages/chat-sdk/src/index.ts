@@ -12,8 +12,11 @@ export {
   type ApprovalHarness,
   type ApprovalRequest,
   ApprovalRequestSchema,
+  answerApproval,
   approvalDecisions,
   approvalRequests,
+  chatApprover,
+  type HeldApprovalHarness,
   resolveApproval,
 } from './approvals';
 export type {

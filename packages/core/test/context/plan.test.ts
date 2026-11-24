@@ -1839,6 +1839,88 @@ describe('plan layer', () => {
       expect(state.planSlug ?? null).toBeNull();
     });
 
+    it('with requireApproval, asks the harness approval seam about the plan itself', async () => {
+      const asked: unknown[] = [];
+      const layer = plan({
+        requireApproval: true,
+      });
+      const fn = layer.provides!.exitPlanMode;
+      assert(fn.kind === 'function');
+      const inputState = makePlanningState({
+        prd: '# PRD',
+        planTree: makeDoc(),
+      });
+      const result = await fn.execute(
+        {
+          action: 'execute',
+        },
+        inputState,
+        {
+          ...makeCtx(),
+          approve: async (request) => {
+            asked.push(request);
+            return {
+              action: 'allow',
+            };
+          },
+        },
+      );
+      expect(planState(result.state).phase).toBe(PlanPhase.Executing);
+      expect(asked).toHaveLength(1);
+      expect(asked[0]).toMatchObject({
+        toolName: 'plan/exitPlanMode',
+        toolArgs: {
+          prd: '# PRD',
+        },
+      });
+    });
+
+    it('with requireApproval, a refusal keeps the plan in Planning', async () => {
+      const layer = plan({
+        requireApproval: true,
+      });
+      const fn = layer.provides!.exitPlanMode;
+      assert(fn.kind === 'function');
+      const inputState = makePlanningState({
+        prd: '# PRD',
+        planTree: makeDoc(),
+      });
+      const result = await fn.execute(
+        {
+          action: 'execute',
+        },
+        inputState,
+        {
+          ...makeCtx(),
+          approve: async () => ({
+            action: 'deny',
+          }),
+        },
+      );
+      expect(result.result).toContain('did not approve');
+      expect(result.state).toBe(inputState);
+    });
+
+    it('with requireApproval and no seam to ask, the plan is not approved', async () => {
+      const layer = plan({
+        requireApproval: true,
+      });
+      const fn = layer.provides!.exitPlanMode;
+      assert(fn.kind === 'function');
+      const inputState = makePlanningState({
+        prd: '# PRD',
+        planTree: makeDoc(),
+      });
+      const result = await fn.execute(
+        {
+          action: 'execute',
+        },
+        inputState,
+        makeCtx(),
+      );
+      expect(result.result).toContain('did not approve');
+    });
+
     it('rejected onExit keeps phase in Planning and reports rejection', async () => {
       const layer = plan({
         onExit: async () => ({

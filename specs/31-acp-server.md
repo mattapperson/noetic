@@ -303,8 +303,11 @@ The mechanics:
   `ACP_SERVE_KIND_RULES_WITHOUT_TOOLS` instead of silently matching nothing.
 - `ask` parks the hook on a **permission broker** owned by the served agent.
   The broker registers the park *before* forwarding, so an answer racing back
-  in the same tick still lands, and it owns the deadline (`askTimeoutMs`,
-  default 5 minutes → deny). A layer hook receives an `ExecutionContext`,
+  in the same tick still lands, and it owns the editor's deadline
+  (`askTimeoutMs`, default 5 minutes). When that passes with no answer the call
+  goes to the harness's approval seam (`08-runtime` § Held tool calls), where
+  a person can still answer it; the turn stays live meanwhile. A harness with
+  no seam denies it. A layer hook receives an `ExecutionContext`,
   which has no channel access — this is why the park is a broker, not the
   spec-27 channel pair, which needs a full `Context` to `recv` on.
 - The gate **fails closed**: the layer sets
