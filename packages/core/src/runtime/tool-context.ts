@@ -5,6 +5,14 @@ import type {
   ToolExecutionContext,
 } from '@noetic-tools/types';
 
+function rootIdOf(ctx: Context): string {
+  let node: Context = ctx;
+  while (node.parent) {
+    node = node.parent;
+  }
+  return node.id;
+}
+
 function buildToolContext(harness: AgentHarnessContract, ctx: Context): ToolContext {
   return {
     get<T>(layerId: string): T | undefined {
@@ -16,7 +24,7 @@ function buildToolContext(harness: AgentHarnessContract, ctx: Context): ToolCont
   };
 }
 
-/** The idempotency key of a model tool call: the turn's execution and the tool call id. */
+/** The idempotency key of a model tool call: the turn's root execution and the tool call id. */
 export function toolIdempotencyKey(executionId: string, toolCallId: string): string {
   return `${executionId}:tool:${toolCallId}`;
 }
@@ -39,7 +47,8 @@ export function buildToolExecutionContext(
       ? {}
       : {
           callId,
-          idempotencyKey: toolIdempotencyKey(ctx.id, callId),
+          // The root execution's id: a child context gets a new id on every resume.
+          idempotencyKey: toolIdempotencyKey(rootIdOf(ctx), callId),
         }),
   };
 }

@@ -12,7 +12,7 @@ import { tool } from '../../src/builders/tool-builder';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { createInMemoryStorage } from '../../src/runtime/in-memory-storage';
 import type { FakeOpenRouter } from '../_helpers';
-import { startFakeOpenRouter } from '../_helpers';
+import { slowStorage, startFakeOpenRouter } from '../_helpers';
 
 //#region Fixtures
 
@@ -192,6 +192,29 @@ describe('tool calls recorded within a round', () => {
     expect(cut).toBe(`${ctx.id}:tool:call_2`);
     // A vendor that keeps one outcome per key sees three shipments, not four.
     expect(new Set(attempts.map((a) => a.key)).size).toBe(SHIPMENTS);
+  });
+
+  it('keeps finished calls recorded when storage is slow', async () => {
+    // Regression: records of the round still being written pruned the call records.
+    const { attempts, harness, agent } = setup(3);
+    const storage = slowStorage(createInMemoryStorage(), 15);
+    const first = harness(storage);
+    const ctx = first.createContext();
+    void first.run(agent, 'go', ctx).catch(() => {});
+    await waitFor(() => attempts.length === 3);
+    // Let the writes the first two calls started land, as they would before a crash.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    const next = harness(storage);
+    const resumed = await next.restore(ctx.id);
+    assert(resumed);
+    expect(await next.run(agent, 'go', resumed)).toBe('shipped 3');
+    expect(attempts.map((a) => a.n)).toEqual([
+      1,
+      2,
+      3,
+      3,
+    ]);
   });
 
   it('a run that is never cut off runs each call once', async () => {

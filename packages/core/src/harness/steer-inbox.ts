@@ -249,7 +249,9 @@ function findSessionQueue(ctx: Context): MessageQueue | undefined {
 
 /** What each delivery mode does at each point before any layer has a say. */
 function defaultAction(point: SteerPoint, mode: DeliveryMode): SteerAction {
-  if (point === SteerPoint.BeforeRound) {
+  // At a round boundary, and at a round that is stuck on held calls and so has no
+  // boundary to reach, a steer lands.
+  if (point === SteerPoint.BeforeRound || point === SteerPoint.Held) {
     return SteerAction.Apply;
   }
   if (point === SteerPoint.ItemDone && mode === 'next-item') {

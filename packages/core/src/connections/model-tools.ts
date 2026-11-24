@@ -37,6 +37,7 @@ import type {
 } from '@noetic-tools/types';
 import { frameworkCast, isConnectionEntry } from '@noetic-tools/types';
 import { z } from 'zod';
+import { rootIdOf } from '../runtime/context-impl';
 import { harnessInternal } from '../util/harness-internals';
 import { orderedCallId, toolIdempotencyKey } from './durability';
 import { entryName } from './entries';
@@ -178,7 +179,7 @@ async function callThrough(
   const output = await resolved.call(request.op, request.args, {
     signal: scope.signal,
     caller: 'model',
-    idempotencyKey: toolIdempotencyKey(ctx.id, toolCallId),
+    idempotencyKey: toolIdempotencyKey(rootIdOf(ctx), toolCallId),
     toolCallId,
     ctx,
   });

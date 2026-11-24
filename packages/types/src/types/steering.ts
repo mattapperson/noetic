@@ -35,11 +35,15 @@ export type LedgerEntryKind = (typeof LedgerEntryKind)[keyof typeof LedgerEntryK
  * - `before_tool_call`: a tool call is about to run. Applying here skips this
  *   call and the rest of the round.
  * - `before_round`: the next model call is about to start, including the first.
+ * - `held`: the round's remaining tool calls are held for a person, so the round
+ *   cannot end by itself. Applying here skips those calls and starts the next
+ *   round with the message; deferring leaves it queued behind them.
  */
 export const SteerPoint = {
   ItemDone: 'item_done',
   BeforeToolCall: 'before_tool_call',
   BeforeRound: 'before_round',
+  Held: 'held',
 } satisfies Record<string, string>;
 
 export type SteerPoint = (typeof SteerPoint)[keyof typeof SteerPoint];

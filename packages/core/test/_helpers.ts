@@ -1214,3 +1214,38 @@ export function newRun(): AgentRun {
 }
 
 //#endregion
+
+/**
+ * `storage` with every operation delayed by `ms`, as a networked adapter would be.
+ * Ordering bugs that an in-memory store hides show up here.
+ */
+export function slowStorage(storage: StorageAdapter, ms: number): StorageAdapter {
+  const wait = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+  const swap = storage.swap?.bind(storage);
+  return {
+    async get<T>(key: string): Promise<T | null> {
+      await wait();
+      return storage.get<T>(key);
+    },
+    async set<T>(key: string, value: T): Promise<void> {
+      await wait();
+      await storage.set(key, value);
+    },
+    async delete(key: string): Promise<void> {
+      await wait();
+      await storage.delete(key);
+    },
+    async list(prefix: string): Promise<string[]> {
+      await wait();
+      return storage.list(prefix);
+    },
+    ...(swap
+      ? {
+          async swap<T>(key: string, prev: T | null, next: T): Promise<boolean> {
+            await wait();
+            return swap(key, prev, next);
+          },
+        }
+      : {}),
+  };
+}

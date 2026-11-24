@@ -638,6 +638,9 @@ export class AgentHarnessModelCaller {
         });
         allItems.push(...roundItems);
         replayOutput(conversationInput, roundItems);
+        // Let the round's cut records land first: each one prunes what is beneath the
+        // round's key, which is where the calls about to run are recorded.
+        await checkpoints;
         await runToolRound(this.toolRoundScope(), {
           roundItems,
           request,
@@ -692,6 +695,8 @@ export class AgentHarnessModelCaller {
       servedTier = sdkResponse.serviceTier ?? undefined;
       allItems.push(...roundItems);
 
+      // As above: no cut record may land after a call of this round is recorded.
+      await checkpoints;
       const ranTools = await runToolRound(this.toolRoundScope(), {
         roundItems,
         request,

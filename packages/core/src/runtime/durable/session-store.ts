@@ -18,6 +18,11 @@ import { z } from 'zod';
 //#region Schema
 
 const SessionRecordSchema = z.object({
+  /**
+   * The lease term of the last turn that wrote this record (spec 23 § One writer per
+   * turn). A turn holding a lower term was replaced, and its writes are refused.
+   */
+  term: z.number().int().nonnegative().optional(),
   /** The thread's history after its last finished turn. */
   items: z.array(z.unknown()),
   /** What the thread's turns have spent, summed as each turn settles. */
@@ -36,6 +41,18 @@ const SessionRecordSchema = z.object({
       executionId: z.string(),
       /** The ids of the messages the turn delivers, in order. */
       messageIds: z.array(z.string()),
+      /**
+       * Set when the turn ended in a live process without finishing: it failed or was
+       * cancelled. A turn with neither this nor `parked` was cut off by its process
+       * dying. A routine wake resumes only the latter; delivering the turn's messages
+       * again resumes either.
+       */
+      stopped: z
+        .object({
+          at: z.number(),
+          reason: z.string(),
+        })
+        .optional(),
       /** Set while the turn is parked: every part of it waits, and no harness holds it. */
       parked: z
         .object({
@@ -55,6 +72,8 @@ const SessionRecordSchema = z.object({
         deliveryMode: z.enum([
           'between-rounds',
           'next-item',
+          // Kept only across a park: a message that waits for the parked turn to end.
+          'next-turn',
         ]),
         enqueuedAt: z.number(),
       }),
@@ -69,17 +88,33 @@ export type SessionRecord = z.infer<typeof SessionRecordSchema>;
 
 //#region Store
 
+/** @internal A session record as read: the stored value, and the record it parses to. */
+export interface StoredSession {
+  /** Exactly what storage holds, or null when nothing is. */
+  raw: unknown;
+  /** Undefined when nothing is stored or it does not parse. */
+  record: SessionRecord | undefined;
+}
+
 /** @internal Reads and writes session records under `session:<threadId>`. */
 export interface SessionStore {
   /** The thread's record, or undefined when none is stored or it does not parse. */
   load(threadId: string): Promise<SessionRecord | undefined>;
   save(threadId: string, record: SessionRecord): Promise<void>;
+  /** The record as stored, with the value it parsed from, for a compare-and-set. */
+  read(threadId: string): Promise<StoredSession>;
+  /**
+   * Store `next` only if what is stored is still `prev` (a `read`'s `raw`).
+   * Absent on storage that cannot compare-and-set.
+   */
+  swap?: (threadId: string, prev: unknown, next: SessionRecord) => Promise<boolean>;
   /** The ids of every thread with a stored record. */
   threads(): Promise<string[]>;
 }
 
 /** @internal */
 export function createSessionStore(storage: StorageAdapter): SessionStore {
+  const swap = storage.swap?.bind(storage);
   return {
     load: async (threadId) => {
       const raw = await storage.get<unknown>(sessionKey(threadId));
@@ -98,6 +133,19 @@ export function createSessionStore(storage: StorageAdapter): SessionStore {
     save: async (threadId, record) => {
       await storage.set(sessionKey(threadId), record);
     },
+    read: async (threadId) => {
+      const raw = await storage.get<unknown>(sessionKey(threadId));
+      const parsed = raw === null ? undefined : SessionRecordSchema.safeParse(raw);
+      return {
+        raw,
+        record: parsed?.success ? parsed.data : undefined,
+      };
+    },
+    ...(swap
+      ? {
+          swap: (threadId, prev, next) => swap(sessionKey(threadId), prev, next),
+        }
+      : {}),
     threads: async () =>
       (await storage.list(SESSION_PREFIX))
         .filter((key) => !key.endsWith(LEASE_SUFFIX))

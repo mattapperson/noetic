@@ -179,7 +179,7 @@ await harness.execute('Use the staging database, not production.', {
 });
 ```
 
-A model call offers queued steers at three points: when the stream finishes an output item (`item_done`), before each tool call (`before_tool_call`), and before each round (`before_round`). By default a `next-item` steer applies at `item_done`, and a `between-rounds` steer at `before_round`. Applied steers keep their content parts and role, and land in the history in the order the model saw them.
+A model call offers queued steers at four points: when the stream finishes an output item (`item_done`), before each tool call (`before_tool_call`), before each round (`before_round`), and while a round is stuck on [held tool calls](/docs/framework/steps/invoke-tool#human-in-the-loop-approval) (`held`), where applying skips those calls. By default a `next-item` steer applies at `item_done`, and a `between-rounds` steer at `before_round`. Applied steers keep their content parts and role, and land in the history in the order the model saw them.
 
 To change when a steer lands, give a context layer an `onSteer` hook. It can apply a steer sooner (before a tool call, skipping the rest of the round), hold it longer, rewrite it, or drop it. See [Custom Layers](/docs/framework/context-layers/custom-layers#steering-a-running-turn-with-onsteer).
 

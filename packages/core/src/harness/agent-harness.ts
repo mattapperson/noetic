@@ -8,6 +8,7 @@ import {
   CONNECTION_EVENT_ITEM_TYPE,
   frameworkCast,
   ItemSchemaRegistry,
+  isNoeticError,
   NoeticConfigError,
   NoeticErrorImpl,
 } from '@noetic-tools/types';
@@ -184,6 +185,13 @@ interface Session {
 
 const DEFAULT_THREAD_ID = '__default__';
 
+function isLeaseLost(error: unknown): boolean {
+  return isNoeticError(error) && error.noeticError.kind === 'lease_lost';
+}
+
+/** Added to the lease period for the default wait on a held lease. */
+const LEASE_WAIT_MARGIN_MS = 1e3;
+
 /** What a turn's run resolves to when it parked instead of finishing. */
 const PARKED: unique symbol = Symbol('parked');
 
@@ -215,7 +223,8 @@ function resolveLeaseOptions(
     storage,
     holder: config?.holder ?? crypto.randomUUID(),
     ttlMs: config?.ttlMs ?? DEFAULT_LEASE_TTL_MS,
-    waitMs: config?.waitMs ?? config?.ttlMs ?? DEFAULT_LEASE_TTL_MS,
+    // One lease period, and a little more: a dead holder's lease runs out in that time.
+    waitMs: config?.waitMs ?? (config?.ttlMs ?? DEFAULT_LEASE_TTL_MS) + LEASE_WAIT_MARGIN_MS,
     now: config?.now ?? Date.now,
   };
 }
@@ -611,12 +620,23 @@ export class AgentHarness<
       return Promise.resolve();
     }
 
+    return this.deliver(session, message);
+  }
+
+  private async deliver(session: Session, message: QueuedMessage): Promise<void> {
+    if (await this.deliverToParked(session, message)) {
+      return;
+    }
     const steersRunningTurn = session.runner.getStatus().kind === 'generating' && isSteer(message);
     session.runner.enqueue(message);
     if (steersRunningTurn) {
       void session.record?.keepSteer(message);
+      // A round waiting on a held call offers the steer to the layers at once.
+      const running = session.runner.context;
+      if (running) {
+        heldCallsOf(this).notify(rootIdOf(running));
+      }
     }
-    return Promise.resolve();
   }
 
   /** The turn's response. `items` holds final items: standard ones and the graph's declared custom items. */
@@ -825,6 +845,11 @@ export class AgentHarness<
             return await runTurn(ctx, signal);
           } finally {
             await this.releaseLease(session);
+            // An answer that landed while this harness still held the lease could not
+            // wake the turn. Now that it is free, do that.
+            if (parkedUntil(ctx) !== undefined) {
+              void this.wakeIfAnswered(threadId, ctx.id);
+            }
           }
         },
         // Stored totals are the session's usage; the runner only mirrors them.
@@ -945,9 +970,23 @@ export class AgentHarness<
           // to wake it, and the response says so.
           const wakeAt = parkedUntil(ctx);
           if (wakeAt !== undefined && record) {
+            // Messages still queued wait in storage, not in this process: the woken
+            // turn gets them back, and the runner is left with nothing to start.
+            for (const queued of session.runner.queue.drainAll()) {
+              await record.keepQueued(queued);
+            }
             await record.park(ctx, Number.isFinite(wakeAt) ? wakeAt : undefined);
             await this.#connections.release(ctx.id);
             return PARKED;
+          }
+          // The turn ended here, in a live process. Say so, or a routine wake would
+          // take it for one cut off by a crash and run it again, every time.
+          if (record && !isLeaseLost(error) && ctx.abortReason !== INTERRUPT_REASON) {
+            await record.stop(
+              ctx,
+              error instanceof Error ? error.message : String(error),
+              this.now(),
+            );
           }
           throw error;
         },
@@ -997,10 +1036,11 @@ export class AgentHarness<
       if (!turn) {
         continue;
       }
-      // A routine wake leaves alone a parked turn that is not due, and one with no
-      // deadline at all: that one waits for an answer, not for a time.
+      // A routine wake leaves alone a parked turn that is not due, one with no
+      // deadline at all (it waits for an answer, not for a time), and one that
+      // failed or was cancelled here: only a turn cut off by a crash resumes unasked.
       const notDue = turn.parked && (turn.parked.until === undefined || turn.parked.until > now);
-      if (!scope?.threadId && notDue) {
+      if (!scope?.threadId && (notDue || (turn.stopped && !turn.parked))) {
         continue;
       }
       const session = this.getOrCreateSession(threadId);
@@ -1110,6 +1150,50 @@ export class AgentHarness<
         threadId,
       });
     }
+  }
+
+  /** Resume a parked turn when one of its held calls already has an answer. */
+  private async wakeIfAnswered(threadId: string, executionId: string): Promise<void> {
+    const records = await heldCallsOf(this).list(executionId);
+    if (!records.some((record) => record.resolution !== undefined)) {
+      return;
+    }
+    // The runner is still closing the parked turn out; let it go idle first.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await this.wake({
+      threadId,
+    });
+  }
+
+  /**
+   * A message for a thread whose turn is parked (spec 23 § Parked turns). It must not
+   * start a turn of its own: the thread has one in flight, and starting another would
+   * abandon it. Resolves true when the message was taken care of here.
+   *
+   * - `next-turn` waits in storage for the parked turn to end.
+   * - A steer wakes the turn, which offers it to the context layers as it would mid-round.
+   * - `interrupt` is not handled here: it replaces the turn, as it does a running one.
+   */
+  private async deliverToParked(session: Session, message: QueuedMessage): Promise<boolean> {
+    const record = session.record;
+    if (!record || message.deliveryMode === 'interrupt') {
+      return false;
+    }
+    if (session.runner.getStatus().kind !== 'idle' || session.runner.queue.size > 0) {
+      return false;
+    }
+    const turn = await record.turn();
+    if (!turn?.parked || turn.messageIds.includes(message.id)) {
+      return false;
+    }
+    await record.keepQueued(message);
+    if (isSteer(message)) {
+      await this.wake({
+        threadId: session.runner.threadId,
+        options: message.options,
+      });
+    }
+    return true;
   }
 
   /** The execution whose held calls `scope` names. */
@@ -1884,7 +1968,13 @@ export class AgentHarness<
    */
   private saveCheckpoint(ctx: Context): Promise<boolean> {
     const prior = this.pendingCheckpoints.get(ctx.id);
-    const next = (prior ?? Promise.resolve(true)).then(() => captureCheckpoint(this, ctx));
+    const next = (prior ?? Promise.resolve(true)).then(() => {
+      // A harness that was replaced must not overwrite the new holder's snapshot.
+      if (ctx instanceof ContextImpl && ctx.ledger?.isHeld === false) {
+        return false;
+      }
+      return captureCheckpoint(this, ctx);
+    });
     this.pendingCheckpoints.set(ctx.id, next);
     void next.finally(() => {
       if (this.pendingCheckpoints.get(ctx.id) === next) {
@@ -1962,7 +2052,9 @@ export class AgentHarness<
    * behind, and nothing else enumerates them.
    */
   async clearCheckpoint(executionId: string): Promise<void> {
-    return clearCheckpoint(this, executionId);
+    await clearCheckpoint(this, executionId);
+    // Calls the execution held for a person have nobody left to answer to.
+    await heldCallsOf(this).clear(executionId);
   }
 
   //#endregion

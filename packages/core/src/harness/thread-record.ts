@@ -29,6 +29,9 @@ export interface ThreadRecordHost {
   parseItems(raw: unknown[]): Item[];
 }
 
+/** How many times a compare-and-set write is tried against a record that keeps changing. */
+const COMMIT_ATTEMPTS = 8;
+
 const EMPTY_USAGE: SessionUsage = {
   inputTokens: 0,
   outputTokens: 0,
@@ -108,6 +111,18 @@ export class ThreadRecord {
     if (message.deliveryMode !== 'between-rounds' && message.deliveryMode !== 'next-item') {
       return Promise.resolve();
     }
+    return this.keepQueued(message);
+  }
+
+  /**
+   * Keep a message a parked turn has not taken yet, steer or not: with no process
+   * holding the turn, storage is the only queue there is. An `interrupt` is never
+   * kept; it replaces the turn.
+   */
+  keepQueued(message: QueuedMessage): Promise<void> {
+    if (message.deliveryMode === 'interrupt') {
+      return Promise.resolve();
+    }
     const steer = {
       id: message.id,
       input: message.input,
@@ -178,6 +193,27 @@ export class ThreadRecord {
     );
   }
 
+  /**
+   * The turn on `ctx` ended here without finishing. Best-effort: a turn whose mark
+   * does not land is simply taken for one that was cut off.
+   */
+  stop(ctx: Context, reason: string, at: number): Promise<void> {
+    return this.update((record) =>
+      record.turn?.executionId === ctx.id
+        ? {
+            ...record,
+            turn: {
+              ...record.turn,
+              stopped: {
+                at,
+                reason,
+              },
+            },
+          }
+        : record,
+    );
+  }
+
   /** The turn in flight, cut off or parked, when one is recorded. */
   turn(): Promise<SessionRecord['turn']> {
     return this.run(async () => (await this.load())?.turn);
@@ -224,8 +260,10 @@ export class ThreadRecord {
   }
 
   /**
-   * A write the turn itself makes. Under a lease it is refused once the lease is
-   * lost, and a save that fails throws instead of being logged.
+   * A write the turn itself makes. Under a lease it carries the lease's term and is
+   * refused when the record already holds a higher one — another harness took the
+   * turn, whatever this one's clock says — and a write that fails throws instead of
+   * being logged (spec 23 § One writer per turn, § Fail-stop).
    */
   private updateHeld(
     ctx: Context,
@@ -237,14 +275,20 @@ export class ThreadRecord {
     }
     return this.run(async () => {
       fence.assert();
-      const record = change(
-        (await this.load()) ?? {
-          items: [],
-        },
-      );
       try {
-        await this.host.store.save(this.threadId, record);
+        await this.commit((record) => {
+          if ((record.term ?? 0) > fence.term) {
+            throw fence.lose(`the thread record was written at term ${record.term}`);
+          }
+          return {
+            ...change(record),
+            term: fence.term,
+          };
+        });
       } catch (error) {
+        if (error instanceof NoeticErrorImpl) {
+          throw error;
+        }
         throw new NoeticErrorImpl({
           kind: 'ledger_write_failed',
           executionId: ctx.id,
@@ -255,15 +299,10 @@ export class ThreadRecord {
     });
   }
 
-  /** Read-modify-write the stored record. Call only from inside `run`. */
+  /** Read-modify-write the stored record, best-effort. Call only from inside `run`. */
   private async write(change: (record: SessionRecord) => SessionRecord): Promise<void> {
-    const record = change(
-      (await this.load()) ?? {
-        items: [],
-      },
-    );
     try {
-      await this.host.store.save(this.threadId, record);
+      await this.commit(change);
     } catch (error) {
       // Same rule as checkpoints: losing the record costs resumability, not the turn.
       console.warn(
@@ -271,6 +310,31 @@ export class ThreadRecord {
         error instanceof Error ? error.message : String(error),
       );
     }
+  }
+
+  /**
+   * Apply `change` to what storage holds now. On storage that can compare-and-set
+   * the write lands only if nothing else wrote meanwhile, and is tried again on what
+   * the other writer left, so two harnesses never overwrite each other's fields.
+   */
+  private async commit(change: (record: SessionRecord) => SessionRecord): Promise<void> {
+    const store = this.host.store;
+    for (let attempt = 0; attempt < COMMIT_ATTEMPTS; attempt += 1) {
+      const stored = await store.read(this.threadId);
+      const next = change(
+        stored.record ?? {
+          items: [],
+        },
+      );
+      if (!store.swap) {
+        await store.save(this.threadId, next);
+        return;
+      }
+      if (await store.swap(this.threadId, stored.raw, next)) {
+        return;
+      }
+    }
+    throw new Error(`session "${this.threadId}" kept changing while it was being written`);
   }
 
   private parseInput(input: unknown): ExecuteInput {

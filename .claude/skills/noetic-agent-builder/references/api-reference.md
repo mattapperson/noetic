@@ -1800,7 +1800,7 @@ const items = await harness.previewRequestItems({ threadId: 'thread-1' });
 | `next-item` | Steer: apply once the model finishes its current output item; the stream stops there, finished tool calls run, the next round sees it. |
 | `interrupt` | Abort the in-flight turn, keep the items it finished, place message at head of queue, restart. |
 
-Steers are offered at three points — `item_done`, `before_tool_call`, `before_round` — to each layer's [`onSteer`](#onsteer) hook. Events: `steer_accepted`, `steer_pending` (waiting on tool calls), `steer_dropped`, `inbox_injected` (applied), `model_call_steered` (stream stopped at an item boundary). A `spawn` child takes steers only with `steers: 'forward'`. With durability on, steers sent into a running turn are kept in the session record until it ends; a resumed turn applies the ones not yet applied (dedupe by item id; a text steer's id is `steer-<messageId>`).
+Steers are offered at four points (the fourth, `held`, is a round stuck on held tool calls; applying there skips them) — `item_done`, `before_tool_call`, `before_round` — to each layer's [`onSteer`](#onsteer) hook. Events: `steer_accepted`, `steer_pending` (waiting on tool calls), `steer_dropped`, `inbox_injected` (applied), `model_call_steered` (stream stopped at an item boundary). A `spawn` child takes steers only with `steers: 'forward'`. With durability on, steers sent into a running turn are kept in the session record until it ends; a resumed turn applies the ones not yet applied (dedupe by item id; a text steer's id is `steer-<messageId>`).
 
 ### Stream Idle Timeout
 
@@ -2608,7 +2608,7 @@ interface ContextLayerHooks<TState> {
 
 interface OnSteerParams<TState> {
   steer: { id: string; items: Item[] };   // id = the messageId
-  point: SteerPoint;                       // 'item_done' | 'before_tool_call' | 'before_round'
+  point: SteerPoint;                       // 'held' | 'item_done' | 'before_tool_call' | 'before_round'
   action: SteerAction;                     // 'apply' | 'defer' | 'drop' — mode default, as changed so far
   pendingCalls: ReadonlyArray<FunctionCallItem>;
   ctx: ExecutionContext;

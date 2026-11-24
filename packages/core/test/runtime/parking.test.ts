@@ -438,6 +438,14 @@ describe('a parked turn', () => {
       assert(isNoeticError(error));
       expect(error.noeticError.kind).toBe('step_failed');
     }
+    // It failed here, in a live process: a routine wake does not run it again.
+    expect(await harness.wake()).toEqual([]);
+    expect(await harness.wake()).toEqual([]);
+    // Asking for the thread by name still does.
+    expect(await harness.wake(scope)).toEqual([
+      't',
+    ]);
+    await harness.getAgentResponse(scope).catch(() => {});
     await harness.close();
   });
 

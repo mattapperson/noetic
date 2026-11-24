@@ -125,13 +125,16 @@ interface StorageAdapter {
 With `swap`, every session turn (`harness.execute()`) runs under a lease:
 
 - **The record.** `session:<threadId>:lease` holds `{ term, holder, heldUntil }`. `term` goes up by one each time the lease is taken.
-- **Taking it.** Before a turn reads anything, the harness swaps the record to `term + 1`. A lease another harness holds is waited on for up to `waitMs` (default: one `ttlMs`), which is long enough to take over from a holder that died; if it is still held then, the turn fails with `lease_lost`.
-- **Keeping it.** The holder renews every third of `ttlMs` (default 30 s) while the turn runs, and hands the lease back when the turn ends, whether it finished or failed.
+- **Taking it.** Before a turn reads anything, the harness swaps the record to `term + 1`. A lease another harness holds is waited on for up to `waitMs` (default: one `ttlMs` and a second more), which is long enough to take over from a holder that died; if it is still held then, the turn fails with `lease_lost`. The swap compares against the stored value exactly as read, so a record this version cannot parse is taken over rather than left to wedge the thread.
+- **Keeping it.** The holder renews every third of `ttlMs` (default 30 s) while the turn runs, and hands the lease back when the turn ends, whether it finished or failed. One renewal runs at a time, and the hand-back waits for one in flight.
 - **Fencing.** Every step-ledger entry carries its writer's term, and a sequence number is claimed with `swap` rather than set. A harness that finds a higher term in its way has been replaced: it stops with `lease_lost` and its context is aborted. An entry from a lower term is a replaced harness's late write, and the current holder overwrites it. On load, an entry with a lower term than one before it in sequence order is ignored.
-- **Before paying.** The lease is checked before each paid dispatch, so a replaced harness stops before it spends again.
-- **The thread record.** The turn's own writes to `session:<threadId>` (recording the turn, storing its history) are refused once the lease is lost.
+- **Before paying.** The lease is read back from storage before each paid dispatch. A harness whose stored term is no longer its own stops there, before it spends again.
+- **The thread record.** `session:<threadId>` carries the term of the last turn that wrote it. The turn's own writes (recording the turn, storing its history, parking) go through `swap`, carry the lease's term, and are refused when the record already holds a higher one. Every other write to the record (usage, kept steers, a seeded history) is a compare-and-set that is tried again on what the other writer left, so no writer drops another's fields.
+- **Everything else.** A harness that knows it lost its lease writes no checkpoint, no pending entry, and deletes no ledger entry.
 
-Time decides only when a quiet holder may be replaced. The term decides whose writes count, so a clock that is wrong can delay a takeover but cannot let two writers through.
+Time decides only when a quiet holder may be replaced; the term decides whose writes count. A holder whose clock runs behind can go on believing it holds a lease another harness took. Its writes to the thread record are refused by the term, and it stops at its next paid dispatch or its next conflicting ledger write. Between those points it can still do work that is thrown away: one model round at most, since each round begins with a paid dispatch.
+
+Each harness needs its own `holder` name. The default is a random id; two harnesses given the same name would take each other's lease without waiting.
 
 `harness.run(step, input, ctx)` on a context the host built itself takes no lease; the host owns that execution's identity.
 
@@ -164,9 +167,10 @@ A parked turn is rows in storage and nothing else. It survives the process endin
 
 **Waking.** `harness.wake()` resumes stored turns by delivering their own message ids again, which is what resumes a cut-off turn (`23a-step-level-resume` § Sessions):
 
-- `wake()` looks at every stored thread. A parked turn is resumed once its `until` has come; a turn that was cut off is resumed at once.
+- `wake()` looks at every stored thread. A parked turn is resumed once its `until` has come. A turn cut off by its process dying is resumed at once. A turn that failed or was cancelled in a live process is marked `stopped` and left alone, or every routine wake would run it again.
 - `wake({ threadId })` resumes that thread's turn whether or not it is due. A host calls it when it knows the event a parked turn waits for has arrived.
 - A turn another harness holds, or one already running here, is left alone.
+- An answer to a held call that lands while the turn's harness still holds the lease cannot wake it. That harness checks for one as soon as it has parked and released, and wakes the turn itself.
 - `options` are the `execute()` options the turn runs with; a stored turn keeps none of its own, so a connection it waits on must be one the harness defines.
 
 A woken turn replays its ledger, so no finished model call is made again, and its wait listens from the recorded cursor until the recorded deadline. If nothing has arrived it parks again, with the same `until`. If the deadline has passed, the wait fails as it would have live.
@@ -176,6 +180,16 @@ A woken turn replays its ledger, so no finished model call is made again, and it
 **The clock.** `AgentHarness({ now })` is the clock wait deadlines, leases and wake times are read from. It defaults to `Date.now`.
 
 Waking is the host's job: a long-lived process calls `wake()` when it starts and when an event arrives; a serverless host calls it from an alarm. Core starts no timer for a parked turn.
+
+### A message for a parked thread
+
+A thread has one turn in flight. A message that arrives while that turn is parked must not start another, which would abandon the parked one:
+
+- `next-turn` (the default) is kept in storage and runs as the next turn once the parked turn ends.
+- A steer (`between-rounds`, `next-item`) is kept and wakes the turn. A turn stuck on held tool calls offers it to the context layers at the `held` steer point (`08-runtime` § Steers): applied, the held calls are skipped and the round goes on with the message.
+- `interrupt` replaces the turn, as it does a running one. Its checkpoint, ledger and held calls are cleared.
+
+Messages still queued in the process when a turn parks are moved to storage the same way.
 
 ## Restore flow
 

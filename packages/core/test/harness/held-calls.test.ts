@@ -13,7 +13,7 @@ import { hold, tool } from '../../src/builders/tool-builder';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { createInMemoryStorage } from '../../src/runtime/in-memory-storage';
 import type { FakeOpenRouter } from '../_helpers';
-import { startFakeOpenRouter } from '../_helpers';
+import { slowStorage, startFakeOpenRouter } from '../_helpers';
 
 //#region Fixtures
 
@@ -72,6 +72,7 @@ function modelAsking(calls: unknown[]): (input: unknown[]) => unknown[] {
 
 interface Setup {
   server: FakeOpenRouter;
+  agent: ReturnType<typeof callModel<ContextData, string, string>>;
   /** Every time a tool body ran, by tool name. */
   runs: string[];
   harness: (opts?: { approveToolCall?: ToolApprover; storage?: StorageAdapter }) => AgentHarness;
@@ -141,6 +142,7 @@ function setup(reply: (input: unknown[]) => unknown[]): Setup {
   });
   return {
     server,
+    agent,
     runs,
     harness: (opts) =>
       new AgentHarness({
@@ -589,5 +591,236 @@ describe('a held call on durable storage', () => {
     expect(server.rounds).toHaveLength(2);
     expect(await second.pending(THREAD)).toEqual([]);
     await second.close();
+  });
+});
+
+describe('a message that arrives while a call is held', () => {
+  const TWO_REFUNDS = modelAsking([
+    call('lookup', {
+      order: 'A1',
+    }),
+    call('refund', {
+      amount: 420,
+    }),
+  ]);
+
+  async function parkOnRefund(setup: Setup, storage: StorageAdapter): Promise<AgentHarness> {
+    const h = setup.harness({
+      storage,
+      approveToolCall: holdIt,
+    });
+    await h.execute('refund A1', {
+      ...THREAD,
+      messageId: 'm-1',
+    });
+    assert((await h.getAgentResponse(THREAD)).parked);
+    return h;
+  }
+
+  it('waits behind the parked turn by default, and the turn is not lost', async () => {
+    // Regression: a new message used to abandon the parked turn and orphan its held call.
+    const fixture = setup(TWO_REFUNDS);
+    const storage = createInMemoryStorage({
+      swap: true,
+    });
+    const h = await parkOnRefund(fixture, storage);
+
+    await h.execute('what is the status?', {
+      ...THREAD,
+      messageId: 'm-2',
+    });
+    // The parked turn and its held call are still there.
+    const [held] = await h.pending(THREAD);
+    assert(held);
+    expect(held.name).toBe('refund');
+    expect(fixture.runs).toEqual([
+      'lookup',
+    ]);
+
+    await h.resolve(THREAD, {
+      callId: held.callId,
+      action: 'allow',
+    });
+    await h.getAgentResponse(THREAD);
+    expect(fixture.runs).toEqual([
+      'lookup',
+      'refund',
+    ]);
+    // The first turn finished with the refund, and the second saw all of it.
+    const lastRound = fixture.server.rounds.at(-1);
+    assert(lastRound);
+    const sent = JSON.stringify(lastRound.input);
+    expect(sent).toContain('refund A1');
+    expect(sent).toContain('refunded 420');
+    expect(sent).toContain('what is the status?');
+    await h.close();
+  });
+
+  it('sent as a steer, skips the held call and the turn goes on with it', async () => {
+    const fixture = setup(TWO_REFUNDS);
+    const storage = createInMemoryStorage({
+      swap: true,
+    });
+    const h = await parkOnRefund(fixture, storage);
+
+    await h.execute('never mind the refund', {
+      ...THREAD,
+      messageId: 'm-2',
+      deliveryMode: 'between-rounds',
+    });
+    const response = await h.getAgentResponse(THREAD);
+    expect(response.parked).toBeUndefined();
+    expect(response.text).toContain('Skipped: a new message arrived before this tool call ran.');
+    // The lookup that had finished kept its result; the refund never ran.
+    expect(response.text).toContain('order A1 found');
+    expect(fixture.runs).toEqual([
+      'lookup',
+    ]);
+    expect(await h.pending(THREAD)).toEqual([]);
+    await h.close();
+  });
+
+  it('a steer into a turn that waits here, not parked, is offered at once', async () => {
+    const fixture = setup(TWO_REFUNDS);
+    const h = fixture.harness({
+      approveToolCall: holdIt,
+    });
+    await h.execute('refund A1', THREAD);
+    await heldCall(h);
+
+    await h.execute('never mind the refund', {
+      ...THREAD,
+      deliveryMode: 'between-rounds',
+    });
+    const response = await h.getAgentResponse(THREAD);
+    expect(response.text).toContain('Skipped: a new message arrived before this tool call ran.');
+    expect(fixture.runs).toEqual([
+      'lookup',
+    ]);
+    expect(await h.pending(THREAD)).toEqual([]);
+  });
+});
+
+describe('an answer from another process', () => {
+  it('reaches a turn that is waiting, not parked, on shared storage', async () => {
+    // Regression: only the answering process was told, so the turn never moved.
+    const fixture = setup(LOOKUP_THEN_REFUND);
+    const storage = createInMemoryStorage({
+      swap: true,
+    });
+    const waiting = new AgentHarness({
+      name: 'held',
+      params: {},
+      agentGraph: fixture.agent,
+      approveToolCall: holdIt,
+      callModelDefaults: {
+        provider: 'openrouter',
+        apiKey: 'sk-test',
+        baseUrl: fixture.server.baseUrl,
+      },
+      environment: {
+        storage: {
+          // Shared storage, parking off: the turn holds its process.
+          adapter: storage,
+          lease: {
+            waitMs: 0,
+          },
+        },
+      },
+    });
+    await waiting.execute('refund A1', {
+      ...THREAD,
+      messageId: 'm-1',
+    });
+    const held = await heldCall(waiting);
+
+    const other = fixture.harness({
+      storage,
+      approveToolCall: holdIt,
+    });
+    await other.resolve(THREAD, {
+      callId: held.callId,
+      action: 'allow',
+    });
+    const response = await waiting.getAgentResponse(THREAD);
+    expect(response.text).toBe('order A1 found | refunded 420');
+    expect(fixture.runs).toEqual([
+      'lookup',
+      'refund',
+    ]);
+    await waiting.close();
+    await other.close();
+  }, 15e3);
+
+  it('is not missed when it lands while the turn is still reading its held calls', async () => {
+    // Regression: the waiter registered after reading, so an answer in between was lost.
+    const fixture = setup(
+      modelAsking([
+        call('refund', {
+          amount: 1,
+        }),
+      ]),
+    );
+    const h = fixture.harness({
+      storage: slowStorage(createInMemoryStorage(), 20),
+      approveToolCall: holdIt,
+    });
+    await h.execute('refund', THREAD);
+    const held = await heldCall(h);
+    await h.resolve(THREAD, {
+      callId: held.callId,
+      action: 'allow',
+    });
+    expect((await h.getAgentResponse(THREAD)).text).toBe('refunded 1');
+  }, 15e3);
+});
+
+describe('a tool call key', () => {
+  it('uses the root execution, so a child context that gets a new id keeps its key', async () => {
+    const keys: Array<string | undefined> = [];
+    const probe = tool({
+      name: 'probe',
+      description: 'Records its key.',
+      input: z.object({}),
+      output: z.string(),
+      execute: async (_args, toolCtx) => {
+        keys.push(toolCtx.idempotencyKey);
+        return 'ok';
+      },
+    });
+    const server = startFakeOpenRouter(
+      modelAsking([
+        call('probe', {}),
+      ]),
+    );
+    servers.push(server);
+    const h = new AgentHarness({
+      name: 'keys',
+      params: {},
+      callModelDefaults: {
+        provider: 'openrouter',
+        apiKey: 'sk-test',
+        baseUrl: server.baseUrl,
+      },
+    });
+    const root = h.createContext();
+    const child = h.createContext({
+      parent: root,
+    });
+    await h.run(
+      callModel<ContextData, string, string>({
+        id: 'agent',
+        model: 'test/model',
+        tools: [
+          probe,
+        ],
+      }),
+      'go',
+      child,
+    );
+    expect(keys).toEqual([
+      `${root.id}:tool:call_probe`,
+    ]);
+    expect(child.id).not.toBe(root.id);
   });
 });

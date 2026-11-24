@@ -104,6 +104,9 @@ export function heldArgsHash(name: string, args: unknown): string {
   );
 }
 
+/** How often a live turn re-reads held calls that another process may have answered. */
+const HELD_POLL_MS = 2e3;
+
 function heldPrefix(executionId: string): string {
   return `execution:${executionId}:held:`;
 }
@@ -209,6 +212,13 @@ export class HeldCalls {
     return record;
   }
 
+  /** Drop every held call of an execution that is over or was abandoned. */
+  async clear(executionId: string): Promise<void> {
+    for (const key of await this.storage.list(heldPrefix(executionId))) {
+      await this.storage.delete(key);
+    }
+  }
+
   /** The call was settled and its result recorded: drop its record. */
   async close(executionId: string, callId: string): Promise<void> {
     await this.storage.delete(`${heldPrefix(executionId)}${callId}`);
@@ -273,32 +283,45 @@ export class HeldCalls {
     this.notify(executionId);
   }
 
+  /** True when other processes may share this storage, and so may answer a call. */
+  get shared(): boolean {
+    return this.storage.swap !== undefined;
+  }
+
   /**
-   * Resolves once something about the execution's held calls changed, `untilMs`
-   * from now passed, or `signal` aborted. The caller then looks again.
+   * Start listening for a change to the execution's held calls. Listening begins
+   * when this returns, so an answer that lands while the caller is still reading
+   * the records is not missed. `changed` resolves on the first change or when
+   * `signal` aborts; call `stop` when done either way.
    */
-  wait(executionId: string, untilMs: number | undefined, signal: AbortSignal): Promise<void> {
-    return new Promise((resolve) => {
-      const waiters = this.waiters.get(executionId) ?? new Set<() => void>();
-      this.waiters.set(executionId, waiters);
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const done = (): void => {
-        waiters.delete(done);
-        clearTimeout(timer);
-        signal.removeEventListener('abort', done);
-        resolve();
-      };
-      waiters.add(done);
-      signal.addEventListener('abort', done, {
-        once: true,
-      });
-      if (untilMs !== undefined) {
-        timer = setTimeout(done, Math.max(0, untilMs));
-      }
-      if (signal.aborted) {
-        done();
-      }
+  listen(
+    executionId: string,
+    signal: AbortSignal,
+  ): {
+    changed: Promise<void>;
+    stop: () => void;
+  } {
+    const waiters = this.waiters.get(executionId) ?? new Set<() => void>();
+    this.waiters.set(executionId, waiters);
+    let wake: () => void = () => {};
+    const changed = new Promise<void>((resolve) => {
+      wake = resolve;
     });
+    const stop = (): void => {
+      waiters.delete(wake);
+      signal.removeEventListener('abort', wake);
+    };
+    waiters.add(wake);
+    signal.addEventListener('abort', wake, {
+      once: true,
+    });
+    if (signal.aborted) {
+      wake();
+    }
+    return {
+      changed,
+      stop,
+    };
   }
 
   /** Wake whoever in this process waits on the execution's held calls. */
@@ -351,28 +374,40 @@ export async function waitOnHeldCalls(opts: {
   const { ctx } = opts;
   const holds = heldCallsOf(opts.harness);
   const executionId = heldScopeOf(ctx);
-  let earliest = Number.POSITIVE_INFINITY;
-  for (const callId of opts.callIds) {
-    const record = await holds.load(executionId, callId);
-    // An answer that landed since the call was looked at: do not wait at all.
-    if (!record || record.resolution) {
-      return;
-    }
-    if (record.dueAt !== undefined && record.onDue !== 'keep') {
-      earliest = Math.min(earliest, record.dueAt);
-    }
-  }
   const impl = ctx instanceof ContextImpl ? ctx : undefined;
   const signal = impl?.abortSignal ?? opts.signal ?? new AbortController().signal;
-  const stopWaiting = impl?.ledger?.parking.wait(impl.currentDispatch()?.path, earliest);
+  // Listen before reading: an answer that lands in between must still wake this.
+  const listening = holds.listen(executionId, signal);
+  let stopWaiting: (() => void) | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    await holds.wait(
-      executionId,
-      Number.isFinite(earliest) ? earliest - holds.now() : undefined,
-      signal,
-    );
+    let earliest = Number.POSITIVE_INFINITY;
+    for (const callId of opts.callIds) {
+      const record = await holds.load(executionId, callId);
+      if (!record || record.resolution) {
+        return;
+      }
+      if (record.dueAt !== undefined && record.onDue !== 'keep') {
+        earliest = Math.min(earliest, record.dueAt);
+      }
+    }
+    stopWaiting = impl?.ledger?.parking.wait(impl.currentDispatch()?.path, earliest);
+    // Another process answering cannot wake this one, so shared storage is read again
+    // every so often. A deadline wakes it too.
+    const untilDue = earliest - holds.now();
+    const wakeIn = Math.min(untilDue, holds.shared ? HELD_POLL_MS : Number.POSITIVE_INFINITY);
+    await Promise.race([
+      listening.changed,
+      new Promise<void>((resolve) => {
+        if (Number.isFinite(wakeIn)) {
+          timer = setTimeout(resolve, Math.max(0, wakeIn));
+        }
+      }),
+    ]);
   } finally {
+    clearTimeout(timer);
     stopWaiting?.();
+    listening.stop();
   }
   if (signal.aborted) {
     throw new NoeticErrorImpl({

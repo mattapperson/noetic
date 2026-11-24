@@ -57,6 +57,12 @@ export interface LedgerFence {
   readonly term: number;
   /** Throws `lease_lost` once the lease is lost or has run past `heldUntil`. */
   assert(): void;
+  /**
+   * `assert`, after reading the lease back from storage. A holder whose clock runs
+   * slow can believe it still holds a lease another harness has taken; the stored
+   * term settles it. Costs one read, so it guards what must not be repeated.
+   */
+  verify(): Promise<void>;
   /** Marks the lease lost and returns the error to throw. */
   lose(reason: string): NoeticErrorImpl;
 }
@@ -73,29 +79,53 @@ export function canSwap(storage: StorageAdapter | undefined): storage is SwapSto
 /** How often `take` looks again at a lease it is waiting on. */
 const LEASE_POLL_MS = 100;
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, Math.max(1, ms)));
+/** Resolves after `ms`, or as soon as `signal` aborts. */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const done = (): void => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', done);
+      resolve();
+    };
+    const timer = setTimeout(done, Math.max(1, ms));
+    signal?.addEventListener('abort', done, {
+      once: true,
+    });
+  });
+}
+
+/** True when a harness other than `holder` holds the lease and its time has not run out. */
+function isHeldBy(record: LeaseRecord | null, holder: string, now: number): boolean {
+  return record !== null && record.holder !== holder && record.heldUntil > now;
 }
 
 function leaseKey(threadId: string): string {
   return `session:${threadId}:lease`;
 }
 
-async function readLease(storage: SwapStorage, threadId: string): Promise<LeaseRecord | null> {
+/** What is stored for a thread's lease: the value as read, and the lease it parses to. */
+interface StoredLease {
+  /** Exactly what storage holds, or null when nothing is. A swap compares against this. */
+  raw: unknown;
+  /** Null when nothing is stored, or what is stored is not a lease: it is free to take. */
+  record: LeaseRecord | null;
+}
+
+async function readLease(storage: SwapStorage, threadId: string): Promise<StoredLease> {
   const raw = await storage.get<unknown>(leaseKey(threadId));
-  if (raw === null) {
-    return null;
-  }
-  const parsed = LeaseRecordSchema.safeParse(raw);
-  return parsed.success ? parsed.data : null;
+  const parsed = raw === null ? undefined : LeaseRecordSchema.safeParse(raw);
+  return {
+    raw,
+    record: parsed?.success ? parsed.data : null,
+  };
 }
 
 //#endregion
 
 /** @internal True when a harness other than `opts.holder` holds the thread's lease now. */
 export async function heldElsewhere(opts: TurnLeaseOptions, threadId: string): Promise<boolean> {
-  const current = await readLease(opts.storage, threadId);
-  return current !== null && current.holder !== opts.holder && current.heldUntil > opts.now();
+  const { record } = await readLease(opts.storage, threadId);
+  return record !== null && record.holder !== opts.holder && record.heldUntil > opts.now();
 }
 
 //#endregion
@@ -113,6 +143,8 @@ export class TurnLease implements LedgerFence {
   private onLost: ((reason: string) => void) | undefined;
   /** The execution this lease serves, once the turn knows it. */
   private boundTo: string | undefined;
+  /** The renewal in flight, if one is. */
+  private renewing: Promise<void> | undefined;
 
   private constructor(
     private readonly opts: TurnLeaseOptions,
@@ -128,30 +160,35 @@ export class TurnLease implements LedgerFence {
    * @throws NoeticError `lease_lost` when another harness still holds it after the
    *   wait, or when another harness won the swap.
    */
-  static async take(opts: TurnLeaseOptions, threadId: string): Promise<TurnLease> {
-    let current = await readLease(opts.storage, threadId);
+  static async take(
+    opts: TurnLeaseOptions,
+    threadId: string,
+    signal?: AbortSignal,
+  ): Promise<TurnLease> {
+    let stored = await readLease(opts.storage, threadId);
     let now = opts.now();
     const giveUpAt = Date.now() + opts.waitMs;
-    while (current && current.holder !== opts.holder && current.heldUntil > now) {
+    while (isHeldBy(stored.record, opts.holder, now)) {
       const left = giveUpAt - Date.now();
-      if (left <= 0) {
+      if (left <= 0 || signal?.aborted) {
         throw new NoeticErrorImpl({
           kind: 'lease_lost',
           executionId: threadId,
-          term: current.term,
-          reason: `thread "${threadId}" is held by "${current.holder}"`,
+          term: stored.record?.term ?? 0,
+          reason: `thread "${threadId}" is held by "${stored.record?.holder ?? 'another harness'}"`,
         });
       }
-      await sleep(Math.min(left, current.heldUntil - now, LEASE_POLL_MS));
-      current = await readLease(opts.storage, threadId);
+      const untilFree = (stored.record?.heldUntil ?? now) - now;
+      await sleep(Math.min(left, untilFree, LEASE_POLL_MS), signal);
+      stored = await readLease(opts.storage, threadId);
       now = opts.now();
     }
     const next: LeaseRecord = {
-      term: (current?.term ?? 0) + 1,
+      term: (stored.record?.term ?? 0) + 1,
       holder: opts.holder,
       heldUntil: now + opts.ttlMs,
     };
-    const won = await opts.storage.swap(leaseKey(threadId), current, next);
+    const won = await opts.storage.swap(leaseKey(threadId), stored.raw, next);
     if (!won) {
       throw new NoeticErrorImpl({
         kind: 'lease_lost',
@@ -203,8 +240,19 @@ export class TurnLease implements LedgerFence {
     }, every);
   }
 
-  /** Push `heldUntil` out. A failed swap means another harness took the lease. */
-  async renew(): Promise<void> {
+  /**
+   * Push `heldUntil` out. A failed swap means another harness took the lease. One
+   * renewal runs at a time: a second, started while storage is slow, would compare
+   * against a record the first is about to replace and wrongly conclude it lost.
+   */
+  renew(): Promise<void> {
+    this.renewing ??= this.renewOnce().finally(() => {
+      this.renewing = undefined;
+    });
+    return this.renewing;
+  }
+
+  private async renewOnce(): Promise<void> {
     if (this.lostReason !== undefined) {
       return;
     }
@@ -226,9 +274,20 @@ export class TurnLease implements LedgerFence {
     this.record = next;
   }
 
+  async verify(): Promise<void> {
+    this.assert();
+    const { record } = await readLease(this.opts.storage, this.threadId);
+    if (record?.term !== this.record.term || record.holder !== this.record.holder) {
+      this.markLost('another harness took the lease');
+    }
+    this.assert();
+  }
+
   /** Hand the lease back so the next turn need not wait for it to run out. */
   async release(): Promise<void> {
     this.stopTimer();
+    // A renewal in flight would otherwise land after this and keep the lease held.
+    await this.renewing;
     if (this.lostReason !== undefined) {
       return;
     }

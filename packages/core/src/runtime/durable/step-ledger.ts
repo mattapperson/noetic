@@ -506,6 +506,24 @@ export class StepLedger {
     this.held?.assert();
   }
 
+  /**
+   * `assertHeld`, after reading the lease back from storage. Called before a paid
+   * dispatch, so a harness that was replaced without knowing it does not pay again.
+   */
+  async verifyHeld(): Promise<void> {
+    await this.held?.verify();
+  }
+
+  /** False once this execution writes under a lease it no longer holds. */
+  get isHeld(): boolean {
+    try {
+      this.held?.assert();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   /** True when this execution has nothing recovered to replay (the common, fresh case). */
   get isEmpty(): boolean {
     return this.replayable.size === 0;
@@ -752,6 +770,10 @@ export class StepLedger {
   }
 
   private async deleteSeq(seq: number): Promise<void> {
+    // A harness that was replaced must not delete what the new holder wrote.
+    if (!this.isHeld) {
+      return;
+    }
     try {
       await this.store?.delete(this.executionId, seq);
     } catch (error) {

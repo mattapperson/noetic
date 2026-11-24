@@ -595,6 +595,7 @@ A **steer** is a `between-rounds` or `next-item` message: one meant for the turn
 | `item_done` | The stream finished an output item | `defer` | `apply` | Stops the stream; the round ends with the finished items |
 | `before_tool_call` | A client tool call is about to run | `defer` | `defer` | Skips this call and the rest of the round; each skipped call is answered `"Skipped: a new message arrived before this tool call ran."` |
 | `before_round` | A model call is about to start | `apply` | `apply` | Adds the steer to this call's input |
+| `held` | The round's remaining tool calls are held for a person (§ Held tool calls) | `apply` | `apply` | Skips the held calls, each answered as a skipped call is, and drops their records |
 
 Layers change the outcome with the `onSteer` hook (see `11-context-layer-system`): `apply`, `defer` (offer again at the next point), or `drop`. A steer applied at any point is held until the next model call, then added to the conversation in the order the model sees it, after passing through the `onItemAppend` pipeline. Applied steers are part of the call's response items, so they reach the item log with the rest of the round.
 
@@ -870,6 +871,10 @@ type HeldResolution =
 **Where the turn is.** A turn running in this process is told, and goes on at once. On storage with parking on (`23-durable-execution` § Parked turns), a turn whose every step in flight is a held call or a resumable wait parks; `resolve()` then wakes it. A parked turn waiting only on a held call has no time to wake at, so `parked.wakeAt` is absent and a routine `wake()` leaves it alone. Any harness over the same storage can list, answer and finish it.
 
 An `invokeTool` step whose call is held waits the same way, under its step id.
+
+**A message while calls are held.** It is a steer like any other, and the context layers decide. A round stuck on held calls has no boundary to reach, so the round offers queued steers at the `held` steer point, with the held calls as `pendingCalls`. The default there is to apply: the held calls get the output a skipped call gets, their records are dropped, and the next round sees the message. A layer's `onSteer` may defer it, leaving it queued behind the calls, or drop it. A `next-turn` message is not a steer: it waits for the turn to end (`23-durable-execution` § A message for a parked thread).
+
+**Another process.** On storage with `swap`, any harness can answer a call. A turn waiting in a different process re-reads its held calls every two seconds, since an answer written elsewhere cannot signal it.
 
 ### Item schema registry (extension-item validation)
 

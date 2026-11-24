@@ -126,7 +126,7 @@ export class Spend {
   async open(params: DispatchParams): Promise<Dispatch> {
     // A harness that was replaced stops here, before it pays for anything more.
     if (params.ctx instanceof ContextImpl) {
-      params.ctx.ledger?.assertHeld();
+      await params.ctx.ledger?.verifyHeld();
     }
     const root = rootOf(params.ctx);
     const path = pathOf(params.ctx);

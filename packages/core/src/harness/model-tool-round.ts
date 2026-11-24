@@ -156,7 +156,14 @@ async function executeToolRound(
       break;
     }
     const remaining = functionCalls.slice(index);
-    if (steers?.hasQueued() && (await steers.offer(SteerPoint.BeforeToolCall, remaining))) {
+    // A call an earlier attempt finished is not up for skipping: it already ran.
+    const finished = params.calls?.take(fc) !== undefined;
+    if (
+      !finished &&
+      steers?.hasQueued() &&
+      (await steers.offer(SteerPoint.BeforeToolCall, remaining))
+    ) {
+      await dropHolds(scope, request, remaining);
       for (const skipped of remaining) {
         recordSkippedToolCall(scope, {
           fc: skipped,
@@ -187,6 +194,23 @@ async function executeToolRound(
   }
   // Calls held for a person: the round goes no further until each has an answer.
   while (heldCalls.length > 0) {
+    // A message that arrives while calls are held is a steer like any other: the
+    // context layers decide. Applied, the held calls are skipped and the round goes on.
+    if (steers?.hasQueued() && (await steers.offer(SteerPoint.Held, heldCalls))) {
+      await dropHolds(scope, request, heldCalls);
+      for (const skipped of heldCalls.splice(0)) {
+        recordUnrunToolCall(scope, {
+          fc: skipped,
+          output: SKIPPED_FOR_STEER_OUTPUT,
+          request,
+          allowedTools,
+          allItems,
+          conversationInput,
+          emitIfAllowed: params.emitIfAllowed,
+        });
+      }
+      break;
+    }
     if (!request.ctx) {
       throw new Error('A held tool call needs a context to wait on.');
     }
@@ -333,6 +357,24 @@ async function executeFunctionCall(
   return {
     approval: toolResult.approval,
   };
+}
+
+/** Drop the records of calls that are being skipped, so none stays listed as held. */
+async function dropHolds(
+  scope: ToolRoundScope,
+  request: CallModelRequest,
+  calls: ReadonlyArray<FunctionCallItem>,
+): Promise<void> {
+  if (!request.ctx) {
+    return;
+  }
+  const holds = heldCallsOf(scope.harness);
+  const executionId = heldScopeOf(request.ctx);
+  for (const call of calls) {
+    if (await holds.load(executionId, call.callId)) {
+      await holds.close(executionId, call.callId);
+    }
+  }
 }
 
 function recordSkippedToolCall(

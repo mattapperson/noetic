@@ -513,6 +513,8 @@ export class PendingEntries {
   constructor(
     private readonly storage: StorageAdapter,
     private readonly key: string,
+    /** False once the run writes under a lease it no longer holds. */
+    private readonly mayWrite: () => boolean = () => true,
   ) {}
 
   /** The entry a previous attempt left, or undefined when there is none (or it does not parse). */
@@ -526,6 +528,9 @@ export class PendingEntries {
   }
 
   async write(entry: PendingEntry): Promise<void> {
+    if (!this.mayWrite()) {
+      return;
+    }
     try {
       await this.storage.set(this.key, entry);
     } catch (error) {
@@ -537,6 +542,9 @@ export class PendingEntries {
   }
 
   async clear(): Promise<void> {
+    if (!this.mayWrite()) {
+      return;
+    }
     try {
       await this.storage.delete(this.key);
     } catch (error) {
@@ -575,7 +583,12 @@ function pendingEntriesFor(
   if (!storage || !durable || ledgerKey === undefined) {
     return undefined;
   }
-  return new PendingEntries(storage, pendingEntryKey(runRootOf(ctx).id, ledgerKey));
+  const ledger = ctx.ledger;
+  return new PendingEntries(
+    storage,
+    pendingEntryKey(runRootOf(ctx).id, ledgerKey),
+    () => ledger?.isHeld ?? true,
+  );
 }
 
 /**

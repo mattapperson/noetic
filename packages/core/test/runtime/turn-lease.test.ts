@@ -13,7 +13,7 @@ import { createStepLedgerStore, StepLedger } from '../../src/runtime/durable/ste
 import type { LedgerFence, TurnLeaseOptions } from '../../src/runtime/durable/turn-lease';
 import { canSwap, TurnLease } from '../../src/runtime/durable/turn-lease';
 import { createInMemoryStorage } from '../../src/runtime/in-memory-storage';
-import { assistantMessage } from '../_helpers';
+import { assistantMessage, slowStorage } from '../_helpers';
 
 //#region Fixtures
 
@@ -69,6 +69,7 @@ function fenceAt(term: number): LedgerFence & {
   } = {
     term,
     assert: () => {},
+    verify: async () => {},
     lose: (reason) => {
       fence.lostBecause = reason;
       return new NoeticErrorImpl({
@@ -286,6 +287,105 @@ describe('TurnLease', () => {
   });
 });
 
+describe('TurnLease against a bad clock or slow storage', () => {
+  it('learns from storage that it was replaced, though its own clock says it holds', async () => {
+    const storage = createInMemoryStorage(SWAP);
+    const slow: Clock = {
+      t: 0,
+    };
+    const fast: Clock = {
+      t: TTL,
+    };
+    const stale = await TurnLease.take(leaseOptions(storage, 'a', slow), 't');
+    await TurnLease.take(leaseOptions(storage, 'b', fast), 't');
+
+    // By its own clock the first holder is fine.
+    expect(() => stale.assert()).not.toThrow();
+    const lost = await failure(() => stale.verify());
+    expect(lost.kind).toBe('lease_lost');
+    expect(stale.lost).toBe(true);
+  });
+
+  it('does not evict itself when two renewals overlap on slow storage', async () => {
+    const storage = slowStorage(createInMemoryStorage(SWAP), 20);
+    const clock: Clock = {
+      t: 0,
+    };
+    const lease = await TurnLease.take(leaseOptions(storage, 'a', clock), 't');
+    await Promise.all([
+      lease.renew(),
+      lease.renew(),
+      lease.renew(),
+    ]);
+    expect(lease.lost).toBe(false);
+    await lease.verify();
+  });
+
+  it('a release waits for a renewal in flight, so the lease is free afterwards', async () => {
+    const storage = slowStorage(createInMemoryStorage(SWAP), 20);
+    const clock: Clock = {
+      t: 0,
+    };
+    const lease = await TurnLease.take(leaseOptions(storage, 'a', clock), 't');
+    const renewing = lease.renew();
+    await lease.release();
+    await renewing;
+    const next = await TurnLease.take(leaseOptions(storage, 'b', clock), 't');
+    expect(next.term).toBe(2);
+  });
+
+  it('takes a thread whose lease record is not one it can read', async () => {
+    const storage = createInMemoryStorage(SWAP);
+    await storage.set('session:t:lease', {
+      holder: 'someone',
+      junk: true,
+    });
+    const clock: Clock = {
+      t: 0,
+    };
+    const lease = await TurnLease.take(leaseOptions(storage, 'a', clock), 't');
+    expect(lease.term).toBe(1);
+  });
+
+  it('keeps taking a thread whose lease record gained a field it does not know', async () => {
+    const storage = createInMemoryStorage(SWAP);
+    await storage.set('session:t:lease', {
+      term: 7,
+      holder: 'old',
+      heldUntil: 0,
+      region: 'eu',
+    });
+    const clock: Clock = {
+      t: 0,
+    };
+    const lease = await TurnLease.take(leaseOptions(storage, 'a', clock), 't');
+    expect(lease.term).toBe(8);
+  });
+
+  it('stops waiting for a held lease when told to', async () => {
+    const storage = createInMemoryStorage(SWAP);
+    const clock: Clock = {
+      t: 0,
+    };
+    await TurnLease.take(leaseOptions(storage, 'a', clock), 't');
+    const abort = new AbortController();
+    setTimeout(() => abort.abort(), 20);
+    const started = Date.now();
+    const refused = await failure(() =>
+      TurnLease.take(
+        {
+          ...leaseOptions(storage, 'b', clock),
+          waitMs: 5e3,
+        },
+        't',
+        abort.signal,
+      ),
+    );
+    expect(refused.kind).toBe('lease_lost');
+    expect(Date.now() - started).toBeLessThan(1e3);
+  });
+});
+
 describe('a fenced step ledger', () => {
   it('tags what it records with the lease term', async () => {
     const storage = createInMemoryStorage(SWAP);
@@ -497,6 +597,55 @@ describe('two harnesses racing one turn', () => {
       'a-1',
       'a-2',
     ]);
+  });
+
+  it('a harness whose clock runs behind cannot overwrite the turn another one finished', async () => {
+    const storage = createInMemoryStorage(SWAP);
+    // The first harness's clock never moves; the second's is a lease period ahead.
+    const behind: Clock = {
+      t: 0,
+    };
+    const ahead: Clock = {
+      t: TTL,
+    };
+    const stalled = model('a', true);
+    const first = harnessOver({
+      storage,
+      m: stalled,
+      holder: 'a',
+      clock: behind,
+    });
+    await first.execute('hello', delivery);
+    await waitFor(() => stalled.calls === 1);
+
+    const taker = model('b', false);
+    const second = harnessOver({
+      storage,
+      m: taker,
+      holder: 'b',
+      clock: ahead,
+    });
+    await second.execute('hello', delivery);
+    expect(assistantTexts((await second.getAgentResponse(scope)).items)).toEqual([
+      'b-1',
+      'b-2',
+    ]);
+
+    // By its own clock the first harness still holds the turn. The record's term
+    // says otherwise, so its write is refused.
+    stalled.release();
+    const lost = await failure(() => first.getAgentResponse(scope));
+    expect(lost.kind).toBe('lease_lost');
+    const stored = await storage.get<{
+      items: Item[];
+      term?: number;
+    }>('session:t');
+    assert(stored);
+    expect(assistantTexts(stored.items)).toEqual([
+      'b-1',
+      'b-2',
+    ]);
+    expect(stored.term).toBe(2);
   });
 
   it("only the new holder's work lands, and the replaced harness stops before paying again", async () => {
