@@ -42,6 +42,7 @@ import type {
   SecretResolver,
   StorageAdapter,
   StreamChangedEventData,
+  TriggerGaveUpEventData,
 } from '@noetic-tools/types';
 import type { AttachedEntry, AttachedScope } from '../types/connection-entry';
 import { rootOf } from '../util/root-context';
@@ -84,7 +85,8 @@ export interface ConnectionFrameworkEventRecord {
     | ConnectionChangedEventData
     | ConnectionEventEventData
     | ConnectionTaskEventData
-    | StreamChangedEventData;
+    | StreamChangedEventData
+    | TriggerGaveUpEventData;
   /** The context it concerns, when there is one. */
   readonly ctx?: Context;
 }

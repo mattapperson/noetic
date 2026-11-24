@@ -158,7 +158,13 @@ class SourceHub<E extends SourceEventSchemas> {
   /** The cursor of the last event emitted, when one carried a cursor. */
   private lastCursor: string | undefined;
   private started = false;
-  private readonly controller = new AbortController();
+  private controller = new AbortController();
+  /**
+   * Event types a storing listener (a trigger) has asked for and not given up.
+   * While one is away, between a failed write and its next listen, an event of that
+   * type has nowhere durable to go.
+   */
+  private readonly storers = new Map<string, number>();
 
   constructor(private readonly definition: SourceDefinition<E>) {}
 
@@ -196,6 +202,15 @@ class SourceHub<E extends SourceEventSchemas> {
     const targets = [
       ...this.listeners,
     ].filter((l) => l.event === event.type);
+    // A trigger stores this event type but is not listening at this moment (it is
+    // backing off after a failure). Holding the event in memory and saying it is
+    // taken would be a lie the sender cannot check: say it was not stored.
+    const storing = targets.some((l) => l.stores);
+    if (!storing && (this.storers.get(event.type) ?? 0) > 0) {
+      throw new Error(
+        `Source event '${event.type}' was not stored: the trigger that stores it is not listening right now. Send it again.`,
+      );
+    }
     if (targets.length === 0) {
       this.pending.push(init);
       if (this.pending.length > WAIT_BUFFER_LIMIT) {
@@ -226,6 +241,9 @@ class SourceHub<E extends SourceEventSchemas> {
       cursor: asked ?? this.position(),
     });
     this.listeners.add(listener);
+    if (listener.stores) {
+      this.expectStore(request);
+    }
     const held = this.pending.filter((e) => e.type === request.event);
     for (const event of held) {
       this.pending.splice(this.pending.indexOf(event), 1);
@@ -241,6 +259,33 @@ class SourceHub<E extends SourceEventSchemas> {
     }
     this.startOnce(asked === SOURCE_ORIGIN ? null : asked);
     return stream;
+  }
+
+  /**
+   * Remember that `request`'s event type is one a trigger stores, until that
+   * trigger stops for good (its signal is aborted), not merely until its stream ends.
+   */
+  private expectStore(request: ListenRequest): void {
+    const type = request.event;
+    const { signal } = request;
+    if (signal.aborted) {
+      return;
+    }
+    this.storers.set(type, (this.storers.get(type) ?? 0) + 1);
+    signal.addEventListener(
+      'abort',
+      () => {
+        const left = (this.storers.get(type) ?? 1) - 1;
+        if (left > 0) {
+          this.storers.set(type, left);
+          return;
+        }
+        this.storers.delete(type);
+      },
+      {
+        once: true,
+      },
+    );
   }
 
   /** Where the source is now, as a cursor: after its last event, or before any. */
@@ -263,6 +308,10 @@ class SourceHub<E extends SourceEventSchemas> {
 
   close(reason: string): void {
     this.controller.abort();
+    this.endListeners(reason);
+  }
+
+  private endListeners(reason: string): void {
     for (const listener of [
       ...this.listeners,
     ]) {
@@ -288,7 +337,15 @@ class SourceHub<E extends SourceEventSchemas> {
       });
     };
     void run().catch((e: unknown) => {
-      this.close(`source stopped: ${e instanceof Error ? e.message : String(e)}`);
+      // `start` threw, most often because an event it emitted could not be stored.
+      // Its listeners are told the stream ended, and the source is left able to
+      // start again: the next listener begins it from its own cursor.
+      const reason = `source stopped: ${e instanceof Error ? e.message : String(e)}`;
+      const stopped = this.controller;
+      this.controller = new AbortController();
+      this.started = false;
+      stopped.abort();
+      this.endListeners(reason);
     });
   }
 }

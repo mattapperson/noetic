@@ -901,11 +901,28 @@ export const ConnectionFrameworkEvent = {
   ConnectionEvent: 'connection_event',
   ConnectionTask: 'connection_task',
   StreamChanged: 'stream_changed',
+  TriggerGaveUp: 'trigger_gave_up',
 } as const;
 
 /** @public One of `ConnectionFrameworkEvent`. */
 export type ConnectionFrameworkEvent =
   (typeof ConnectionFrameworkEvent)[keyof typeof ConnectionFrameworkEvent];
+
+/**
+ * @public
+ * `trigger_gave_up` data: a trigger will not try this event again. Either its turn
+ * failed on every try, or the trigger's own `filter`, `input` or `thread` threw.
+ * Nothing about the event is kept; a host that wants it handled sends it again.
+ */
+export interface TriggerGaveUpEventData {
+  readonly connection: string;
+  readonly trigger: string;
+  readonly event: ConnectionEventInit;
+  /** How many times its turn was tried; 0 when the trigger itself threw. */
+  readonly attempts: number;
+  /** Why the last try failed. */
+  readonly error: string;
+}
 
 /** @public `connection_changed` data: state, identity or lease changed. */
 export interface ConnectionChangedEventData {

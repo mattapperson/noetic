@@ -191,6 +191,8 @@ import { ThreadRecord } from './thread-record';
 //#region Types
 
 interface Session {
+  /** The delivery in progress on this thread, which the next one waits behind. */
+  delivering?: Promise<void>;
   readonly runner: SessionRunner;
   /** The thread's history between turns. Used only when durability is off. */
   accumulatedItems: Item[];
@@ -874,7 +876,20 @@ export class AgentHarness<
     return this.deliver(session, message);
   }
 
-  private async deliver(session: Session, message: QueuedMessage): Promise<void> {
+  /**
+   * Hand a message to its thread. One at a time per thread: what to do with a
+   * message is decided by looking at the thread and then acting, and two
+   * deliveries doing that at once would each miss the other.
+   */
+  private deliver(session: Session, message: QueuedMessage): Promise<void> {
+    const turn = (session.delivering ?? Promise.resolve())
+      .catch(() => undefined)
+      .then(() => this.deliverOne(session, message));
+    session.delivering = turn;
+    return turn;
+  }
+
+  private async deliverOne(session: Session, message: QueuedMessage): Promise<void> {
     if (await this.deliverToParked(session, message)) {
       return;
     }
@@ -1652,6 +1667,8 @@ export class AgentHarness<
    * @public
    */
   async removeTrigger(id: string): Promise<boolean> {
+    // Started first, so a trigger kept from an earlier run is known to be there.
+    await this.#connections.start();
     const removed = await this.#connections.triggers.remove(id);
     await this.announceWakeTimeQuietly();
     return removed;
@@ -1810,6 +1827,11 @@ export class AgentHarness<
       return false;
     }
     if (runner.queue.peekAll().some((queued) => queued.id === message.id)) {
+      return true;
+    }
+    // Known from the first instant of the turn, before its record is written and
+    // on a harness with no storage at all.
+    if (runner.isRunning(message.id)) {
       return true;
     }
     if (!record) {

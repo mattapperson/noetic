@@ -199,7 +199,7 @@ Resuming a turn therefore requires the host to pass stable `messageId`s to `exec
 
 A thread also remembers its last 20 finished turns: the message ids each delivered and the answer it gave. A message delivered again after its turn finished — a queue that delivers at least once, a webhook the sender retried — is answered with that turn's recorded answer and nothing runs. `getAgentResponse()` resolves with `replayed: true`, the recorded `text`, and the thread's history as `items`; the runner emits `{name}:turn_replayed`. Only a message given a `messageId` can be recognised; one left to a generated id is always new.
 
-A message delivered again while the harness already has it in hand is dropped: its turn is running, it is queued to run, or its turn finished and the runner has not gone idle yet. Queuing it would run the same message as a second turn once the first ended. The caller's `getAgentResponse()` resolves with the answer of the turn that has it.
+Deliveries to a thread are taken one at a time, so two arriving at the same instant cannot each miss the other. A message delivered again while the harness already has it in hand is dropped: its turn is running, it is queued to run, or its turn finished and the runner has not gone idle yet. Queuing it would run the same message as a second turn once the first ended. The caller's `getAgentResponse()` resolves with the answer of the turn that has it.
 
 ## The side-effect boundary
 

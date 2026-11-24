@@ -333,3 +333,46 @@ describe('a message delivered again while its turn is still running', () => {
     await harness.close();
   });
 });
+
+describe('a message delivered twice at the same instant', () => {
+  it('runs once, with storage and without', async () => {
+    for (const storage of [
+      createInMemoryStorage(),
+      undefined,
+    ]) {
+      const m = model('a');
+      const harness = new AgentHarness({
+        name: 'events',
+        params: {},
+        agentGraph: agent,
+        ...(storage
+          ? {
+              environment: {
+                storage: {
+                  adapter: storage,
+                },
+              },
+            }
+          : {}),
+        _testCallModel: (request) => m.call(request),
+      });
+      const delivery = {
+        threadId: 't',
+        messageId: 'webhook-9',
+      };
+      // Neither waits for the other: the second arrives before the first turn has
+      // written anything down.
+      await Promise.all([
+        harness.execute('charge the card', delivery),
+        harness.execute('charge the card', delivery),
+      ]);
+      const response = await harness.getAgentResponse({
+        threadId: 't',
+      });
+      expect(response.text).toBe('a-1');
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(m.calls).toBe(1);
+      await harness.close();
+    }
+  });
+});

@@ -263,9 +263,23 @@ export class TriggerRunner {
    * @throws ConnectionUnsatisfiedError when a trigger's connection does not offer its event.
    */
   async start(): Promise<void> {
-    await this.loadAdded();
-    for (const trigger of this.triggers.values()) {
-      this.requireEvent(trigger);
+    const added = await this.loadAdded();
+    for (const trigger of [
+      ...this.triggers.values(),
+    ]) {
+      if (!added.has(trigger.id)) {
+        this.requireEvent(trigger);
+        continue;
+      }
+      // A trigger kept from an earlier run may name an event its connection no
+      // longer offers. That stops this trigger, not every other one.
+      try {
+        this.requireEvent(trigger);
+      } catch (e) {
+        this.report(trigger.id, e);
+        this.triggers.delete(trigger.id);
+        this.compiled.delete(trigger.id);
+      }
     }
     this.started = true;
     for (const trigger of this.triggers.values()) {
@@ -330,6 +344,11 @@ export class TriggerRunner {
     loop?.controller.abort();
     await loop?.done;
     await this.options.storage.delete(`${STORED_PREFIX}${id}`);
+    // What it had in hand goes with it: a trigger added later under this id starts
+    // clean, not from this one's cursor and its list of events already seen.
+    for (const key of await this.options.storage.list(`${prefix(id)}/`)) {
+      await this.options.storage.delete(key);
+    }
     return true;
   }
 
@@ -398,7 +417,8 @@ export class TriggerRunner {
   }
 
   /** Triggers added on an earlier run, read back from storage. */
-  private async loadAdded(): Promise<void> {
+  private async loadAdded(): Promise<Set<string>> {
+    const added = new Set<string>();
     for (const key of await this.options.storage.list(STORED_PREFIX)) {
       const parsed = StoredTriggerSchema.safeParse(await this.options.storage.get(key));
       if (!parsed.success || this.triggers.has(parsed.data.id)) {
@@ -407,10 +427,12 @@ export class TriggerRunner {
       try {
         this.compiled.set(parsed.data.id, compileTrigger(parsed.data));
         this.triggers.set(parsed.data.id, parsed.data);
+        added.add(parsed.data.id);
       } catch (e) {
         this.report(parsed.data.id, e);
       }
     }
+    return added;
   }
 
   private requireEvent(trigger: ConnectionTrigger): void {
@@ -441,6 +463,26 @@ export class TriggerRunner {
     this.loops.set(trigger.id, {
       controller,
       done: this.listenLoop(trigger, controller.signal),
+    });
+  }
+
+  /** Say on the stream that this event will not be tried again, and which one it was. */
+  private gaveUp(
+    trigger: ConnectionTrigger,
+    event: ConnectionEventInit,
+    why: {
+      attempts: number;
+      error: string;
+    },
+  ): void {
+    this.options.runtime.emit({
+      type: 'trigger_gave_up',
+      data: {
+        connection: trigger.connection,
+        trigger: trigger.id,
+        event,
+        ...why,
+      },
     });
   }
 
@@ -543,8 +585,13 @@ export class TriggerRunner {
       // A filter or input that throws on one event gives up on it rather than
       // re-reading it from the same cursor forever.
       this.report(trigger.id, e);
+      const error = e instanceof Error ? e.message : String(e);
+      this.gaveUp(trigger, init, {
+        attempts: 0,
+        error,
+      });
       await storage.set(seenKey, {
-        failed: e instanceof Error ? e.message : String(e),
+        failed: error,
       });
       await this.advance(trigger, init.cursor);
       return;
@@ -644,9 +691,11 @@ export class TriggerRunner {
     const eventKey = encodeURIComponent(entry.event.id);
     const seenKey = `${base}/seen/${eventKey}`;
     const signal = this.controller.signal;
+    // Stopped: the runner closed, or this trigger was removed while it retried.
+    const stopped = (): boolean => signal.aborted || !this.triggers.has(trigger.id);
     let lastError = '';
     let attempts = 0;
-    for (; attempts < MAX_DELIVERY_ATTEMPTS && !signal.aborted; attempts++) {
+    for (; attempts < MAX_DELIVERY_ATTEMPTS && !stopped(); attempts++) {
       try {
         await this.options.deliver({
           trigger: trigger.id,
@@ -665,14 +714,19 @@ export class TriggerRunner {
       }
       await wait((this.options.redeliverDelayMs ?? defaultDelay)(attempts), signal);
     }
-    // Stopped part way: the inbox entry stays and is delivered again on the next start.
-    if (attempts < MAX_DELIVERY_ATTEMPTS) {
+    // Stopped part way, on the last try included: the inbox entry stays and is
+    // delivered again on the next start.
+    if (attempts < MAX_DELIVERY_ATTEMPTS || stopped()) {
       return;
     }
     await storage.set(seenKey, {
       failed: lastError,
     });
     await storage.delete(inboxKey);
+    this.gaveUp(trigger, entry.event, {
+      attempts,
+      error: lastError,
+    });
   }
 }
 

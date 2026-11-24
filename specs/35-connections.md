@@ -398,9 +398,11 @@ the harness runs:
 - `harness.listTriggers()` gives every trigger: the harness's own and the added.
 
 **Retries.** A turn that fails is tried again, five times in all, with backoff.
-After the last try the trigger gives up on the event: each failure was reported
-(`onError`, else a warning), the event is marked seen so it is not delivered
-again, and nothing more is kept. Trying it again is the sender's business: a
+After the last try the trigger gives up on the event: the harness emits
+`{name}:trigger_gave_up` with the connection, the trigger, the event, how many
+tries it had and the last error, the event is marked seen so it is not delivered
+again, and nothing more is kept. The same event is emitted, with `attempts: 0`,
+when the trigger's own `filter`, `input` or `thread` throws on an event. Trying it again is the sender's business: a
 host that wants another go emits the event again under a new id. An event cut
 off by the process ending, before its tries ran out, stays in the inbox and is delivered again at the next start.
 
@@ -440,6 +442,26 @@ turns).
 
 `cron(schedule, { timezone })` is a built-in source with one event, `tick`,
 delivered once per scheduled time even after downtime.
+
+**What `emit` promises, and when it refuses.**
+
+- `emit` resolves once every trigger listening for the event has it in its
+  inbox, and rejects when one could not store it.
+- A trigger that failed to store an event stops listening and listens again
+  after a delay. In that gap the event has nowhere durable to go, so `emit`
+  rejects (`… was not stored … Send it again`) and does not hold the event in
+  memory and call it taken. A sender that retries on anything but success gets
+  it through once the trigger is back.
+- With no trigger for the event type at all, `emit` holds the event in memory
+  for the next listener and resolves at once.
+- A source with a `start` loop outlives a failed store: `start` is run again,
+  from the listener's cursor, when the trigger next listens.
+
+**Triggers kept in storage.** One that names an event its connection no longer
+offers is reported and skipped at start; it does not stop the others.
+`removeTrigger(id)` also deletes the trigger's cursor, inbox and seen marks, so
+a trigger added later under the same id starts clean, and stops the retries of
+a delivery in flight.
 
 **Scheduled sources.** A connection whose events come at times it can tell in
 advance sets `Connection.schedule`, an `EventSchedule`:

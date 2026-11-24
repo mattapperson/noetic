@@ -835,6 +835,216 @@ describe('triggers', () => {
     await rig.runtime.close();
   });
 
+  test('emit rejects while the trigger is away after a failed write, and the trigger comes back', async () => {
+    const rig = setup();
+    await rig.runtime.start();
+    let failing = true;
+    const store = rig.storage.set.bind(rig.storage);
+    rig.storage.set = async (key: string, value: unknown) => {
+      if (failing && key.includes('/inbox/')) {
+        throw new Error('disk full');
+      }
+      await store(key, value);
+    };
+    const delivered: string[] = [];
+    const runner = new TriggerRunner({
+      runtime: rig.runtime,
+      storage: rig.storage,
+      triggers: [
+        {
+          id: 'failures',
+          connection: 'deploys',
+          event: 'deploy.failed',
+          input: (e) => e.id,
+        },
+      ],
+      deliver: async (d) => {
+        delivered.push(d.input);
+      },
+      onError: () => {},
+      // Long enough to emit into the gap before the trigger listens again.
+      relistenDelayMs: () => 60,
+      redeliverDelayMs: () => 0,
+    });
+    await runner.start();
+    await sleep(5);
+
+    const first = await rejected(rig.source.emit(failed('e1')));
+    assert(first instanceof Error);
+    expect(first.message).toContain('disk full');
+    // The trigger is backing off. The event has nowhere durable to go, and the
+    // sender is told so instead of being told it was taken.
+    failing = false;
+    const second = await rejected(rig.source.emit(failed('e2')));
+    assert(second instanceof Error);
+    expect(second.message).toContain('not stored');
+    expect(await rig.storage.list('noetic/connections/triggers/failures/inbox/')).toEqual([]);
+
+    // The trigger listens again: the sender's retry goes through.
+    await sleep(120);
+    await rig.source.emit(failed('e2'));
+    await until(() => delivered.includes('e2'));
+    await runner.close();
+    await rig.runtime.close();
+  });
+
+  test('a source with a start loop survives an event that could not be stored', async () => {
+    const storage = makeStorage();
+    let starts = 0;
+    const ticks = defineSource({
+      events: {
+        tick: z.object({}),
+      },
+      async start({ emit, cursor, signal }) {
+        starts += 1;
+        for (let n = cursor === null ? 1 : Number(cursor) + 1; n <= 3 && !signal.aborted; n += 1) {
+          await emit({
+            type: 'tick',
+            id: `tick-${n}`,
+            cursor: String(n),
+            payload: {},
+          });
+        }
+      },
+    });
+    const runtime = createConnectionRuntime({
+      connections: {
+        ticks,
+      },
+      storage,
+      artifacts: createInMemoryArtifactStore(),
+    });
+    await runtime.start();
+    let failures = 1;
+    const store = storage.set.bind(storage);
+    storage.set = async (key: string, value: unknown) => {
+      if (failures > 0 && key.includes('/inbox/')) {
+        failures -= 1;
+        throw new Error('blip');
+      }
+      await store(key, value);
+    };
+    const delivered: string[] = [];
+    const runner = new TriggerRunner({
+      runtime,
+      storage,
+      triggers: [
+        {
+          id: 'on-tick',
+          connection: 'ticks',
+          event: 'tick',
+          input: (e) => e.id,
+        },
+      ],
+      deliver: async (d) => {
+        delivered.push(d.input);
+      },
+      onError: () => {},
+      relistenDelayMs: () => 1,
+      redeliverDelayMs: () => 0,
+    });
+    await runner.start();
+    await until(() => delivered.length === 3);
+    // The loop was started again after the failure, and no tick was lost.
+    expect(starts).toBe(2);
+    expect(delivered).toEqual([
+      'tick-1',
+      'tick-2',
+      'tick-3',
+    ]);
+    await runner.close();
+    await runtime.close();
+  });
+
+  test('a trigger that gives up on an event says which one, on the stream', async () => {
+    const source = deploySource();
+    const storage = makeStorage();
+    const events: Array<{
+      type: string;
+      data: unknown;
+    }> = [];
+    const runtime = createConnectionRuntime({
+      connections: {
+        deploys: source,
+      },
+      storage,
+      artifacts: createInMemoryArtifactStore(),
+      onFrameworkEvent: (event) => events.push(event),
+    });
+    await runtime.start();
+    const runner = new TriggerRunner({
+      runtime,
+      storage,
+      triggers: [
+        {
+          id: 'failures',
+          connection: 'deploys',
+          event: 'deploy.failed',
+          input: (e) => e.id,
+        },
+      ],
+      deliver: async () => {
+        throw new Error('model is down');
+      },
+      onError: () => {},
+      relistenDelayMs: () => 1,
+      redeliverDelayMs: () => 0,
+    });
+    await runner.start();
+    await sleep(5);
+    await source.emit(failed('e1'));
+    await until(() => events.some((event) => event.type === 'trigger_gave_up'));
+    const gaveUp = events.find((event) => event.type === 'trigger_gave_up');
+    expect(gaveUp?.data).toMatchObject({
+      connection: 'deploys',
+      trigger: 'failures',
+      attempts: 5,
+      error: 'model is down',
+      event: {
+        id: 'e1',
+      },
+    });
+    await runner.close();
+    await runtime.close();
+  });
+
+  test('a trigger kept from an earlier run that no longer fits does not stop the others', async () => {
+    const rig = setup();
+    await rig.storage.set('noetic/connections/triggers-added/stale', {
+      id: 'stale',
+      connection: 'deploys',
+      event: 'deploy.renamed-away',
+      input: 'event.id',
+    });
+    await rig.runtime.start();
+    const delivered: string[] = [];
+    const errors: unknown[] = [];
+    const runner = runnerFor(rig, {
+      triggers: [
+        {
+          id: 'failures',
+          connection: 'deploys',
+          event: 'deploy.failed',
+          input: (e) => e.id,
+        },
+      ],
+      deliver: async (d) => {
+        delivered.push(d.input);
+      },
+      errors,
+    });
+    await runner.start();
+    await sleep(5);
+    await rig.source.emit(failed('e1'));
+    await until(() => delivered.length === 1);
+    expect(errors).toHaveLength(1);
+    expect(runner.list().map((trigger) => trigger.id)).toEqual([
+      'failures',
+    ]);
+    await runner.close();
+    await rig.runtime.close();
+  });
+
   test('emit resolves at once when no trigger listens: the event waits in memory', async () => {
     const rig = setup();
     await rig.runtime.start();

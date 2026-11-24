@@ -118,6 +118,8 @@ export class SessionRunner {
   private currentController?: AbortController;
   private currentCtx?: Context;
   private loopPromise?: Promise<void>;
+  /** The message ids of the turn being started or run, set before anything is awaited. */
+  private currentIds: ReadonlyArray<string> = [];
   private lastResponse?: HarnessResponse;
   private lastError?: Error;
   private readonly responseWaiters: Array<{
@@ -163,6 +165,11 @@ export class SessionRunner {
       });
     }
     this.queue.enqueue(message);
+  }
+
+  /** True while the turn being started or run took the message with this id. */
+  isRunning(messageId: string): boolean {
+    return this.status.kind !== 'idle' && this.currentIds.includes(messageId);
   }
 
   /** Resolves once the queue loop has gone idle: no turn running or closing out. */
@@ -286,6 +293,7 @@ export class SessionRunner {
   private async runOneTurn(messages: QueuedMessage[]): Promise<void> {
     const turnId = crypto.randomUUID();
     const startedAt = Date.now();
+    this.currentIds = messages.map((message) => message.id);
     this.status = {
       kind: 'generating',
       startedAt,
