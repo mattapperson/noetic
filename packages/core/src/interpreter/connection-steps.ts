@@ -85,6 +85,12 @@ const PendingEntrySchema = z.object({
   leaseId: z.string().optional(),
   cursor: z.string().nullish(),
   deadline: z.number().optional(),
+  /**
+   * Set on a `wait` whose event replays from a cursor (`replay: 'durable'`). Such
+   * a wait does not depend on the connection instance it began on: any instance of
+   * the same surface can listen again from the cursor (spec 35 § Durability).
+   */
+  durable: z.boolean().optional(),
 });
 
 //#endregion
@@ -593,6 +599,9 @@ export async function reconcilePending(
     return undefined;
   }
   const current = connection.resolved.identity();
+  if (resumesFromCursor(entry) && entry.identity.surface === current.surface) {
+    return entry;
+  }
   const executionId = connection.scope.executionId;
   const registry = ctx ? harnessOf(ctx).connectionRegistry : undefined;
   const decision = resumeDecision({
@@ -619,6 +628,11 @@ export async function reconcilePending(
   }
   await connection.pending?.clear();
   return undefined;
+}
+
+/** True for a pending `wait` that any instance of its surface can pick up from its cursor. */
+function resumesFromCursor(entry: PendingEntry): boolean {
+  return entry.kind === 'wait' && entry.durable === true;
 }
 
 /** Records on the run's ledger that the step at `ledgerKey` used `resolved` (spec 35 § Durability). */
@@ -711,6 +725,10 @@ async function dropReplacedPending(
   for (const key of keys) {
     const parsed = PendingEntrySchema.safeParse(await storage.get<unknown>(key));
     if (!parsed.success) {
+      continue;
+    }
+    // A wait that replays from a cursor is settled when its step runs again.
+    if (resumesFromCursor(parsed.data)) {
       continue;
     }
     const decision = await decide(parsed.data.connection, parsed.data.identity);

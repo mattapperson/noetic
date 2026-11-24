@@ -72,11 +72,14 @@ import {
   createStepLedgerStore,
   customItemGates,
   DEFAULT_LEASE_TTL_MS,
+  DEFAULT_PARK_GRACE_MS,
   Drains,
   filterReasoningStream,
   filterTextStream,
+  heldElsewhere,
   INTERRUPT_REASON,
   isSteer,
+  PARK_REASON,
   resolveStepLedgerRetention,
   restoreFromCheckpoint,
   rootIdOf,
@@ -149,7 +152,7 @@ import type {
   WriteOffSpendOptions,
 } from './deps/types';
 import { SteeringAction } from './deps/types';
-import type { AgentHarnessOpts, TurnLeaseConfig } from './harness-options';
+import type { AgentHarnessOpts, ParkConfig, TurnLeaseConfig } from './harness-options';
 import { resolveCheckpointStore, resolveEnvironmentAdapters } from './harness-options';
 import { createHarnessSpan, recordChannelWarning, resolveTraceExporter } from './harness-tracing';
 import { LlmGateway } from './llm-client';
@@ -173,6 +176,25 @@ interface Session {
 //#endregion
 
 const DEFAULT_THREAD_ID = '__default__';
+
+/** What a turn's run resolves to when it parked instead of finishing. */
+const PARKED: unique symbol = Symbol('parked');
+
+/** When the turn on `ctx` parked until, or undefined when it did not park. */
+function parkedUntil(ctx: Context): number | undefined {
+  if (ctx.abortReason !== PARK_REASON || !(ctx instanceof ContextImpl)) {
+    return undefined;
+  }
+  return ctx.ledger?.parking.parkedUntil;
+}
+
+/** The grace before a turn parks, or undefined when parking is off. */
+function resolveParkGrace(park: boolean | ParkConfig | undefined): number | undefined {
+  if (!park) {
+    return undefined;
+  }
+  return park === true ? DEFAULT_PARK_GRACE_MS : (park.graceMs ?? DEFAULT_PARK_GRACE_MS);
+}
 
 /** Lease settings for sessions on `storage`, or none when it cannot compare-and-set. */
 function resolveLeaseOptions(
@@ -299,6 +321,8 @@ export class AgentHarness<
   private readonly sessionStore?: SessionStore;
   /** Set when sessions are durable and storage can compare-and-set. */
   private readonly leaseOptions?: TurnLeaseOptions;
+  /** Set when turns park (`environment.storage.park`): the grace before one does. */
+  private readonly parkGraceMs?: number;
   /** Checkpoint capture in flight per execution id — see `saveCheckpoint`. */
   private readonly pendingCheckpoints = new Map<string, Promise<boolean>>();
   private readonly defaultDeliveryMode: DeliveryMode;
@@ -413,6 +437,7 @@ export class AgentHarness<
       decisionModel: opts.decisionModel,
       emitItemsOnReplay: opts.emitItemsOnReplay,
       approveToolCall: opts.approveToolCall,
+      now: opts.now,
     };
     const adapters = resolveEnvironmentAdapters(environment);
     this.fs = adapters.fs;
@@ -428,10 +453,11 @@ export class AgentHarness<
     this.sessionStore = this.checkpointStore
       ? createSessionStore(this.config.storage ?? createInMemoryStorage())
       : undefined;
-    this.leaseOptions = resolveLeaseOptions(
-      this.sessionStore ? this.config.storage : undefined,
-      storageEnv?.lease,
-    );
+    this.leaseOptions = resolveLeaseOptions(this.sessionStore ? this.config.storage : undefined, {
+      now: opts.now,
+      ...storageEnv?.lease,
+    });
+    this.parkGraceMs = resolveParkGrace(this.leaseOptions ? storageEnv?.park : undefined);
     this.spend = this.checkpointStore
       ? this.createSpend(this.config.storage ?? createInMemoryStorage())
       : undefined;
@@ -840,6 +866,12 @@ export class AgentHarness<
           ctx.ledger?.fence(lease);
         }
         lease.keep((reason) => ctx.abort(`lease_lost: ${reason}`));
+        if (this.parkGraceMs !== undefined && ctx instanceof ContextImpl) {
+          ctx.ledger?.parking.arm({
+            graceMs: this.parkGraceMs,
+            onPark: () => ctx.abort(PARK_REASON),
+          });
+        }
       }
       // A resumed context was made without the turn's view layers.
       if (!resumed) {
@@ -896,15 +928,26 @@ export class AgentHarness<
         );
       }
       const result = await this.initAndRun(this.agentGraph, '', ctx).catch(
-        async (error: unknown) => {
+        async (error: unknown): Promise<typeof PARKED> => {
           // An interrupted turn restarts from what it finished, so the
           // interrupting message lands after the work it interrupted.
           if (ctx.abortReason === INTERRUPT_REASON) {
             await keepHistory(ctx);
           }
+          // A parked turn is not a failed one: its record stays, marked with when
+          // to wake it, and the response says so.
+          const wakeAt = parkedUntil(ctx);
+          if (wakeAt !== undefined && record) {
+            await record.park(ctx, wakeAt);
+            await this.#connections.release(ctx.id);
+            return PARKED;
+          }
           throw error;
         },
       );
+      if (result === PARKED) {
+        return '';
+      }
       await keepHistory(ctx);
       return result;
     };
@@ -914,6 +957,89 @@ export class AgentHarness<
       void record.usage().then((usage) => session.runner.seedUsage(usage));
     }
     return session;
+  }
+
+  /**
+   * Resume turns that are parked or were cut off (spec 23 § Parked turns).
+   *
+   * With no `threadId`, every stored thread is looked at: a parked turn is resumed
+   * once its wake time has come, and a cut-off turn at once. With a `threadId`, that
+   * thread's turn is resumed whether or not it is due — the call a host makes when
+   * it knows the event a parked turn waits for has arrived. A turn another harness
+   * holds, or one already running here, is left alone.
+   *
+   * A resumed turn replays what it finished and goes on. `options` are the
+   * `execute()` options it runs with; a stored turn keeps none of its own.
+   *
+   * Resolves the ids of the threads it resumed. Durable sessions only.
+   * @public
+   */
+  async wake(scope?: { threadId?: string; options?: ExecuteOptions }): Promise<string[]> {
+    if (!this.sessionStore) {
+      return [];
+    }
+    const now = this.now();
+    const threadIds = scope?.threadId
+      ? [
+          scope.threadId,
+        ]
+      : await this.sessionStore.threads();
+    const woken: string[] = [];
+    for (const threadId of threadIds) {
+      const turn = (await this.sessionStore.load(threadId))?.turn;
+      if (!turn) {
+        continue;
+      }
+      if (!scope?.threadId && turn.parked && turn.parked.until > now) {
+        continue;
+      }
+      const session = this.getOrCreateSession(threadId);
+      if (session.runner.getStatus().kind !== 'idle' || session.runner.queue.size > 0) {
+        continue;
+      }
+      if (this.leaseOptions && (await heldElsewhere(this.leaseOptions, threadId))) {
+        continue;
+      }
+      // Re-deliver the turn's own messages: the same ids resume it, and a resumed
+      // turn reads its input from its checkpoint, not from these.
+      for (const id of turn.messageIds) {
+        session.runner.enqueue({
+          id,
+          input: [],
+          deliveryMode: 'next-turn',
+          options: scope?.options ?? {},
+          enqueuedAt: Date.now(),
+        });
+      }
+      woken.push(threadId);
+    }
+    return woken;
+  }
+
+  /**
+   * The earliest time a parked turn needs waking, in epoch ms, or undefined when
+   * none is parked. A host with no process of its own between events (a serverless
+   * worker) schedules its next `wake()` from this.
+   * @public
+   */
+  async nextWake(): Promise<number | undefined> {
+    if (!this.sessionStore) {
+      return undefined;
+    }
+    let earliest: number | undefined;
+    for (const threadId of await this.sessionStore.threads()) {
+      const until = (await this.sessionStore.load(threadId))?.turn?.parked?.until;
+      if (until === undefined) {
+        continue;
+      }
+      earliest = earliest === undefined ? until : Math.min(earliest, until);
+    }
+    return earliest;
+  }
+
+  /** The harness clock. */
+  private now(): number {
+    return this.config.now?.() ?? Date.now();
   }
 
   /** Hand the turn's lease back and return the thread record to best-effort writes. */

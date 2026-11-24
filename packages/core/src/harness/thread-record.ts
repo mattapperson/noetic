@@ -156,6 +156,31 @@ export class ThreadRecord {
   }
 
   /**
+   * The turn on `ctx` parked: keep its record, marked with when to wake it. Its
+   * checkpoint and ledger stay, since they are what the woken turn resumes from.
+   */
+  park(ctx: Context, until: number): Promise<void> {
+    return this.updateHeld(ctx, (record) =>
+      record.turn
+        ? {
+            ...record,
+            turn: {
+              ...record.turn,
+              parked: {
+                until,
+              },
+            },
+          }
+        : record,
+    );
+  }
+
+  /** The turn in flight, cut off or parked, when one is recorded. */
+  turn(): Promise<SessionRecord['turn']> {
+    return this.run(async () => (await this.load())?.turn);
+  }
+
+  /**
    * The turn on `ctx` finished: store the history it left and drop its checkpoint.
    * Only steers still queued are kept; the rest were applied or dropped.
    */

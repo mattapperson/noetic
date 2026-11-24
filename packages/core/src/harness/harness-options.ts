@@ -79,6 +79,24 @@ export interface StorageEnvironmentConfig {
    * stops the turn instead of being logged.
    */
   lease?: TurnLeaseConfig;
+  /**
+   * Park a turn when every step in flight is a wait that can be resumed without
+   * loss (spec 23 § Parked turns). The turn's lease is handed back, its response
+   * resolves with `parked`, and `harness.wake()` resumes it. Needs a lease, so it
+   * has no effect on storage without `swap`. Default `false`: a waiting turn holds
+   * its process. `true` uses `DEFAULT_PARK_GRACE_MS`.
+   */
+  park?: boolean | ParkConfig;
+}
+
+/** @public Settings for parking. */
+export interface ParkConfig {
+  /**
+   * How long every step in flight must stay waiting before the turn parks, in ms.
+   * Keeps a turn whose event is about to arrive from parking and waking at once.
+   * Default `DEFAULT_PARK_GRACE_MS` (100).
+   */
+  graceMs?: number;
 }
 
 /** @public Settings for the turn lease. Every field has a default. */
@@ -184,6 +202,11 @@ export interface AgentHarnessOpts<
    * the progress it missed.
    */
   emitItemsOnReplay?: boolean;
+  /**
+   * The clock wait deadlines, turn leases and wake times are read from. Default
+   * `Date.now`. A host that drives time itself (a test, a replay) passes its own.
+   */
+  now?: () => number;
   /**
    * Approves or refuses calls to tools that declare `needsApproval`, after the
    * `beforeToolCall` layers allow them. Without one, those calls run

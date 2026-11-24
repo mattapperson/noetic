@@ -359,6 +359,8 @@ async function executeStep<TContext, I, O>(
     return replay.output;
   }
 
+  // Parking needs to know which steps are in flight (spec 23 § Parked turns).
+  const leaveParking = ledger?.parking.enter(lane?.currentDispatch()?.path);
   let result: O;
   try {
     await beginEmitItems(step, input, stepCtx);
@@ -384,6 +386,7 @@ async function executeStep<TContext, I, O>(
       );
     }
   } catch (error) {
+    leaveParking?.();
     lane?.releaseDispatch();
     drains?.release(frameworkCast<Context>(stepCtx));
     throw error;
@@ -427,5 +430,6 @@ async function executeStep<TContext, I, O>(
   // they are charged and the step recorded. A call a failed record leaves
   // behind is released when an enclosing step ends.
   drains?.release(frameworkCast<Context>(stepCtx));
+  leaveParking?.();
   return result;
 }

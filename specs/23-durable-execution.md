@@ -145,6 +145,38 @@ Without a lease the rule in § Failure handling stands: writes are best-effort.
 
 The ledger's retention caps (`23a-step-level-resume` § Retention) are a policy, not a failure. An entry dropped for size or count is still dropped, and its step runs again on resume.
 
+## Parked turns
+
+A turn that reaches a `wait` step holds its process until the event comes. What it waits for is already in storage: the wait's pending entry carries the connection, the event, the cursor and the deadline (`35-connections` § Durability). A **parked** turn gives the process up.
+
+Parking is on when `environment.storage.park` is set and the turn runs under a lease.
+
+**When a turn parks.** The harness tracks the steps in flight. A turn parks once every innermost one has been a resumable wait for `graceMs` (default 100): a `wait` on an event whose manifest says `replay: 'durable'`, with its deadline still ahead. A step doing anything else — a model call, user code, a tool, a wait on an event that cannot be replayed — keeps the turn live. So does a step between two children.
+
+**What parking does.**
+
+1. The turn's record gains `parked: { until }`, the earliest deadline among its waits.
+2. Its context is aborted, its connections are released, and its lease is handed back.
+3. Its checkpoint, ledger and pending entries stay; they are what the turn resumes from.
+4. `getAgentResponse()` resolves with `parked: { wakeAt }`, an empty `text`, and the items so far. The runner emits `{name}:turn_parked` in place of `turn_completed`.
+
+A parked turn is rows in storage and nothing else. It survives the process ending, a deploy, and a move to another machine.
+
+**Waking.** `harness.wake()` resumes stored turns by delivering their own message ids again, which is what resumes a cut-off turn (`23a-step-level-resume` § Sessions):
+
+- `wake()` looks at every stored thread. A parked turn is resumed once its `until` has come; a turn that was cut off is resumed at once.
+- `wake({ threadId })` resumes that thread's turn whether or not it is due. A host calls it when it knows the event a parked turn waits for has arrived.
+- A turn another harness holds, or one already running here, is left alone.
+- `options` are the `execute()` options the turn runs with; a stored turn keeps none of its own, so a connection it waits on must be one the harness defines.
+
+A woken turn replays its ledger, so no finished model call is made again, and its wait listens from the recorded cursor until the recorded deadline. If nothing has arrived it parks again, with the same `until`. If the deadline has passed, the wait fails as it would have live.
+
+`harness.nextWake()` resolves the earliest `until` among parked turns, or `undefined`. A host with no process of its own between events schedules its next `wake()` from it.
+
+**The clock.** `AgentHarness({ now })` is the clock wait deadlines, leases and wake times are read from. It defaults to `Date.now`.
+
+Waking is the host's job: a long-lived process calls `wake()` when it starts and when an event arrives; a serverless host calls it from an alarm. Core starts no timer for a parked turn.
+
 ## Restore flow
 
 `harness.restore(executionId, opts?)` reverses a snapshot:
@@ -531,6 +563,7 @@ Both root defaults respect `NOETIC_HOME` (if set, the roots become `$NOETIC_HOME
 - IPC replay is exactly-once at the frame level when the client tracks `durableAck` correctly — no losses, no duplicates.
 - Schema version drift surfaces as a typed error, not silent corruption.
 - On storage with `swap`, one harness at a time writes a thread's turn (§ One writer per turn), and a failed durable write stops the turn (§ Fail-stop).
+- With parking on, a turn waiting on a replayable event holds no process, and resumes on any harness over the same storage with no finished model call made again (§ Parked turns).
 - Every paid model call is recorded before it is sent. A call cut off after its response headers arrived is settled at the provider's exact cost once the provider has priced it; one cut off earlier is held at its ceiling. Neither is dropped by a discard (§ Paid dispatches).
 
 **What durable execution does not guarantee:**

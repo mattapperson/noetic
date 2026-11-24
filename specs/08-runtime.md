@@ -542,7 +542,7 @@ A session's runner starts turns lazily whenever the queue goes non-empty while t
 1. Drains the queue (combining all queued messages into one turn's input).
 2. Emits `{name}:turn_started` with the drained message IDs.
 3. Invokes the initial step (which ultimately calls `callModel`).
-4. Emits `{name}:turn_completed` (or `{name}:turn_aborted` on failure/cancellation).
+4. Emits `{name}:turn_completed` (or `{name}:turn_aborted` on failure/cancellation, or `{name}:turn_parked` when the turn parks).
 5. Returns to idle. If the queue became non-empty during the turn, the next turn begins immediately.
 
 ### Response Shape
@@ -661,6 +661,7 @@ interface FrameworkStreamEvent {
 | `{name}:item_appended` | Emitted whenever a framework-authored item enters the session log — turn input messages (after `turn_started`), between-rounds inbox injections, tool result items, and the items a step with `emitItems` adds when it finishes, or streams again on replay under `emitItemsOnReplay` (`01-step-type` § Emitting items). Data: `{ item }`. Backs `getItemStream` for everything the SDK stream cannot carry, so it is emitted unconditionally — never filtered by `step.emit`. |
 | `{name}:custom_item_event` | One event of a declared custom item, as a step yields it (`34-custom-items`). Data: `{ id, type, event }`; `id` is the one its final item takes. Emitted unconditionally, like `item_appended`. |
 | `{name}:turn_completed` | Emitted when a turn completes. Data: `{ turnId, durationMs }` |
+| `{name}:turn_parked` | Emitted in place of `turn_completed` when a turn parks (`23-durable-execution` § Parked turns). Data: `{ turnId, durationMs, wakeAt }` |
 | `{name}:turn_aborted` | Emitted when a turn is aborted or errors. Data: `{ turnId, reason }` |
 | `{name}:steer_accepted` | Emitted when a steer is queued while a turn runs. Always precedes the `inbox_injected` that applies it. Data: `{ messageId, turnId, deliveryMode }` |
 | `{name}:steer_pending` | Emitted once per steer when it is deferred at `before_tool_call`, waiting for tool calls to finish. Data: `{ messageId, waitingOn: callId[] }` |

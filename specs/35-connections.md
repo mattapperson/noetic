@@ -738,6 +738,14 @@ identity, a step with a pending entry and no result picks up where it was:
 re-sending with the same key, waiting on the same task, or listening again from
 the recorded cursor until the recorded deadline.
 
+**A wait that replays from a cursor.** A `wait` on an event whose manifest says
+`replay: 'durable'` does not depend on the connection instance it began on. Its
+pending entry is marked so, and any instance of the same surface picks it up:
+it listens again from the recorded cursor until the recorded deadline. This is
+what lets a parked turn (`23-durable-execution` § Parked turns) resume in
+another process, where every connection is a new instance. A wait on a `live`
+event follows the rule for a replaced connection below.
+
 **A replaced connection.** If a connection's identity instance changed — the
 browser restarted, the lease expired, the simulator was reset — results
 recorded against it describe a world that is gone. Its determinism (spec 36)

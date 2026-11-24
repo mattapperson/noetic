@@ -36,6 +36,13 @@ const SessionRecordSchema = z.object({
       executionId: z.string(),
       /** The ids of the messages the turn delivers, in order. */
       messageIds: z.array(z.string()),
+      /** Set while the turn is parked: every part of it waits, and no harness holds it. */
+      parked: z
+        .object({
+          /** Epoch ms of the earliest deadline among its waits. */
+          until: z.number(),
+        })
+        .optional(),
     })
     .optional(),
   /** Steers sent into the turn in flight, in arrival order. */
@@ -67,6 +74,8 @@ export interface SessionStore {
   /** The thread's record, or undefined when none is stored or it does not parse. */
   load(threadId: string): Promise<SessionRecord | undefined>;
   save(threadId: string, record: SessionRecord): Promise<void>;
+  /** The ids of every thread with a stored record. */
+  threads(): Promise<string[]>;
 }
 
 /** @internal */
@@ -89,11 +98,19 @@ export function createSessionStore(storage: StorageAdapter): SessionStore {
     save: async (threadId, record) => {
       await storage.set(sessionKey(threadId), record);
     },
+    threads: async () =>
+      (await storage.list(SESSION_PREFIX))
+        .filter((key) => !key.endsWith(LEASE_SUFFIX))
+        .map((key) => key.slice(SESSION_PREFIX.length)),
   };
 }
 
+const SESSION_PREFIX = 'session:';
+/** The suffix of a thread's lease record, which shares the prefix (see `turn-lease`). */
+const LEASE_SUFFIX = ':lease';
+
 function sessionKey(threadId: string): string {
-  return `session:${threadId}`;
+  return `${SESSION_PREFIX}${threadId}`;
 }
 
 //#endregion

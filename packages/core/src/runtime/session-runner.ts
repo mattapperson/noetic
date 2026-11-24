@@ -7,6 +7,7 @@ import type {
 } from '@noetic-tools/types';
 import { isNoeticError } from '@noetic-tools/types';
 import { emitFrameworkEvent } from './broadcaster-utils';
+import { ContextImpl } from './context-impl';
 import { EventBroadcaster } from './event-broadcaster';
 import type { QueuedMessage } from './message-queue';
 import { inputToItems, isSteer, MessageQueue } from './message-queue';
@@ -307,16 +308,30 @@ export class SessionRunner {
     try {
       const text = await this.runTurn(ctx, turn, controller.signal);
       await this.settleUsage(start, ctx);
-      const response = buildResponse(text, ctx);
+      const wakeAt = parkedUntilOf(ctx);
+      const response: HarnessResponse =
+        wakeAt === undefined
+          ? buildResponse(text, ctx)
+          : {
+              ...buildResponse(text, ctx),
+              parked: {
+                wakeAt,
+              },
+            };
       this.lastResponse = response;
       this.lastError = undefined;
       emitFrameworkEvent({
         broadcaster: this.broadcaster,
         agentName: this.agentName,
-        eventType: 'turn_completed',
+        eventType: wakeAt === undefined ? 'turn_completed' : 'turn_parked',
         data: {
           turnId,
           durationMs: Date.now() - startedAt,
+          ...(wakeAt === undefined
+            ? {}
+            : {
+                wakeAt,
+              }),
         },
       });
       // Only resolve waiters when the queue is fully drained; otherwise let
@@ -431,6 +446,11 @@ function usageSince(start: TurnUsage, ctx: Context): TurnUsage {
     cost: now.cost - start.cost,
     billedCost: now.billedCost - start.billedCost,
   };
+}
+
+/** When the turn on `ctx` parked until, or undefined when it ran to its end. */
+function parkedUntilOf(ctx: Context): number | undefined {
+  return ctx instanceof ContextImpl ? ctx.ledger?.parking.parkedUntil : undefined;
 }
 
 function buildResponse(text: string, ctx: Context): HarnessResponse {

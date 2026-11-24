@@ -11,6 +11,7 @@ export {
   clearCheckpoint,
   restoreFromCheckpoint,
 } from '../../runtime/durable/harness-checkpoints';
+export { DEFAULT_PARK_GRACE_MS, PARK_REASON } from '../../runtime/durable/parking';
 export type { SessionStore } from '../../runtime/durable/session-store';
 export { createSessionStore } from '../../runtime/durable/session-store';
 export { createSpendLog } from '../../runtime/durable/spend-log';
@@ -25,7 +26,12 @@ export {
   StepLedger,
 } from '../../runtime/durable/step-ledger';
 export type { TurnLeaseOptions } from '../../runtime/durable/turn-lease';
-export { canSwap, DEFAULT_LEASE_TTL_MS, TurnLease } from '../../runtime/durable/turn-lease';
+export {
+  canSwap,
+  DEFAULT_LEASE_TTL_MS,
+  heldElsewhere,
+  TurnLease,
+} from '../../runtime/durable/turn-lease';
 export type { EventBroadcaster } from '../../runtime/event-broadcaster';
 export { createInMemoryStorage } from '../../runtime/in-memory-storage';
 export { customItemGates } from '../../runtime/item-gates';

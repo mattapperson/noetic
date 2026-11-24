@@ -36,6 +36,7 @@ import type { StorageAdapter } from '@noetic-tools/context';
 import { storageGetMany } from '@noetic-tools/context';
 import { NoeticConfigError, NoeticErrorImpl } from '@noetic-tools/types';
 import { z } from 'zod';
+import { isBeneath, Parking } from './parking';
 import type { LedgerFence } from './turn-lease';
 
 //#region Entry
@@ -444,6 +445,8 @@ export class StepLedger {
   private readonly store?: StepLedgerStore;
   private readonly executionId: string;
   private readonly retention: Required<StepLedgerRetention>;
+  /** Which steps are in flight, and whether the turn may park (spec 23 § Parked turns). */
+  readonly parking = new Parking();
   /** The lease this execution writes under, once the turn has taken one. */
   private held: LedgerFence | undefined;
   private readonly counts: StepLedgerStats = {
@@ -822,11 +825,6 @@ function matches(entry: StepLedgerEntry, step: StepLedgerMatch): boolean {
     return false;
   }
   return entry.inputHash === undefined || entry.inputHash === step.inputHash;
-}
-
-/** Whether `path` lies in the subtree under `parent` — a lane below it or a child context's prefix. */
-function isBeneath(path: string, parent: string): boolean {
-  return path.startsWith(`${parent}/`) || path.startsWith(`${parent}[`);
 }
 
 /**

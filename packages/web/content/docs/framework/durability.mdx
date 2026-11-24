@@ -324,6 +324,43 @@ async swap<T>(key: string, prev: T | null, next: T): Promise<boolean> {
 }
 ```
 
+### Parked Turns
+
+A turn that reaches a [`step.wait`](/docs/framework/connections#steps) holds its process until the event comes. With `park` on, a turn whose every step in flight is waiting gives the process up instead: it becomes rows in storage, and any harness over the same storage picks it up later.
+
+```ts validate=none
+const harness = new AgentHarness({
+  name: 'refunds',
+  params: {},
+  agentGraph, // … step.wait({ id: 'reply', connection: 'inbox', event: 'reply', timeoutMs: 86_400_000 }) …
+  connections: { inbox },
+  environment: {
+    storage: { adapter: createSqliteStorage({ database }), park: true },
+  },
+});
+
+await harness.execute(text, { threadId, messageId });
+const response = await harness.getAgentResponse({ threadId });
+if (response.parked) {
+  // Nothing is running. response.parked.wakeAt is the wait's deadline.
+}
+```
+
+Later, in this process or another one:
+
+```ts validate=none
+await harness.wake();               // resume turns that are due, and turns that were cut off
+await harness.wake({ threadId });   // the event for this thread arrived: resume it now
+const at = await harness.nextWake(); // when to call wake() next, or undefined
+```
+
+- **What parks.** Only a `wait` on an event the connection can replay from a cursor (`replay: 'durable'` in its manifest), such as a [source](/docs/framework/connections#sources) with a `start`. A turn with a model call, a tool or user code still running stays live, as does a wait on an event that cannot be replayed.
+- **What a woken turn does.** It replays its ledger, so finished model calls are not made again, and listens from the recorded cursor until the original deadline. With nothing to receive it parks again; past the deadline the wait fails as it would have live.
+- **Who wakes it.** The host. A long-lived process calls `wake()` at startup and when an event arrives; a serverless host calls it from an alarm set from `nextWake()`.
+- **Requirements.** Storage with [`swap`](#one-writer-per-turn), and a connection defined on the harness: a woken turn does not keep the connections one `execute()` call passed.
+
+Pass `now` to the harness to drive the clock yourself; wait deadlines, leases and wake times all read it.
+
 ### Paid Calls
 
 A model call cut off with its host — or by `cancel(ctx)`, a steer, or a dropped connection — finished nothing, so the ledger has no entry for it. The provider billed it anyway: a cut-off stream is billed for every token generated, even after the client went away. So every paid call leaves a **dispatch record** in storage before it is sent — each `callModel` round and each native `decide()` call:

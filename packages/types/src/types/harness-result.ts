@@ -56,6 +56,14 @@ export interface HarnessResponse<TItem = Item> {
   /** USD held for the turn's paid calls that have no settled bill yet. See `Context.heldCost`. */
   readonly heldCost?: number;
   readonly text: string;
+  /**
+   * Set when the turn parked instead of finishing: every part of it is waiting, and
+   * no process holds it. `wakeAt` is the earliest deadline among its waits, in epoch
+   * ms. `harness.wake()` resumes it. `text` is empty and `items` are those so far.
+   */
+  readonly parked?: {
+    readonly wakeAt: number;
+  };
   /** Per-context-layer context window breakdown captured at the last callModel of this execution. */
   readonly lastLayerUsage?: LastLayerUsage;
 }

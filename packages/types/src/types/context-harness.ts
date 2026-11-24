@@ -136,6 +136,8 @@ export interface ContextHarness extends HarnessPlatform {
     readonly decisionModel?: string;
     /** Whether a resumed run streams again the items its replayed steps emitted. */
     readonly emitItemsOnReplay?: boolean;
+    /** The clock deadlines are read from. Default `Date.now`. */
+    readonly now?: () => number;
   };
   callModel(request: ContextCallModelRequest): Promise<LLMResponse>;
   decide(request: DecideRequest): Promise<DecideResponse>;

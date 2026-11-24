@@ -2140,6 +2140,18 @@ interface StorageAdapter {
 
 On storage with `swap` (`createFileStorage`, `createSqliteStorage`, `createInMemoryStorage({ swap: true })`), each `harness.execute()` turn takes its thread's lease: one harness writes a turn, a replaced harness stops with `lease_lost`, and a failed ledger write stops the turn with `ledger_write_failed`.
 
+### Parked turns
+
+```typescript
+// environment.storage.park?: boolean | { graceMs?: number }   (needs swap storage)
+// AgentHarness({ now?: () => number })
+harness.wake(scope?: { threadId?: string; options?: ExecuteOptions }): Promise<string[]>;
+harness.nextWake(): Promise<number | undefined>;
+// HarnessResponse.parked?: { wakeAt: number }   — event `{name}:turn_parked`
+```
+
+With `park` on, a turn whose every step in flight is a `step.wait` on a `replay: 'durable'` event stops holding its process: its record is marked parked, its lease is handed back, and `getAgentResponse()` resolves with `parked`. `wake()` resumes due and cut-off turns; `wake({ threadId })` resumes one now. A woken turn replays its ledger and listens from the wait's recorded cursor.
+
 ### `createFileStorage`
 
 ```typescript

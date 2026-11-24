@@ -253,6 +253,7 @@ export { AgentHarness } from './harness/agent-harness';
 /** @public */
 export type {
   AgentEnvironmentConfig,
+  ParkConfig,
   StorageEnvironmentConfig,
   TurnLeaseConfig,
 } from './harness/harness-options';
@@ -282,6 +283,8 @@ export {
   runnableLoop,
   seedFromItems,
 } from './runtime/durable';
+/** @public */
+export { DEFAULT_PARK_GRACE_MS } from './runtime/durable/parking';
 /** @public */
 export { DEFAULT_LEASE_TTL_MS } from './runtime/durable/turn-lease';
 /** @public */

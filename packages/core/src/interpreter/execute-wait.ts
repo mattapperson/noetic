@@ -17,6 +17,7 @@ import type {
   StepWaitOutput,
 } from '@noetic-tools/types';
 import { frameworkCast, NoeticErrorImpl } from '@noetic-tools/types';
+import { ContextImpl } from '../runtime/context-impl';
 import type { PendingEntry, StepConnection } from './connection-steps';
 import {
   evaluateTarget,
@@ -119,9 +120,14 @@ async function listenForMatch<TContext, I>(
   };
 }
 
-/** Resolves `undefined` once `deadline` passes or `signal` aborts; `clear` cancels the timer. */
+/** The harness clock (`AgentHarness({ now })`), which deadlines are read from. */
+function nowOf(ctx: Context): number {
+  return ctx.harness.config.now?.() ?? Date.now();
+}
+
+/** Resolves `undefined` once `remainingMs` pass or `signal` aborts; `clear` cancels the timer. */
 function deadlineTimer(
-  deadline: number,
+  remainingMs: number,
   signal: AbortSignal,
 ): {
   promise: Promise<undefined>;
@@ -130,7 +136,7 @@ function deadlineTimer(
   let timer: ReturnType<typeof setTimeout> | undefined;
   let onAbort: (() => void) | undefined;
   const promise = new Promise<undefined>((resolve) => {
-    timer = setTimeout(() => resolve(undefined), Math.max(0, deadline - Date.now()));
+    timer = setTimeout(() => resolve(undefined), Math.max(0, remainingMs));
     onAbort = () => resolve(undefined);
     signal.addEventListener('abort', onAbort, {
       once: true,
@@ -169,10 +175,10 @@ function timeoutError<TContext, I>(step: StepWait<TContext, I, unknown>): Noetic
 /** Waits for the listener or the deadline, whichever comes first; `undefined` means the deadline. */
 async function awaitOutcome(
   matched: Promise<ListenOutcome>,
-  deadline: number,
+  remainingMs: number,
   signal: AbortSignal,
 ): Promise<ListenOutcome | undefined> {
-  const timer = deadlineTimer(deadline, signal);
+  const timer = deadlineTimer(remainingMs, signal);
   try {
     return await Promise.race([
       matched,
@@ -190,7 +196,7 @@ async function recordListening<TContext, I>(
 ): Promise<number> {
   const { step, connection, stream } = listen;
   const { cursor } = await stream.ready;
-  const deadline = prior?.deadline ?? Date.now() + step.timeoutMs;
+  const deadline = prior?.deadline ?? nowOf(frameworkCast<Context>(listen.ctx)) + step.timeoutMs;
   await connection.pending?.write({
     stepId: step.id,
     kind: 'wait',
@@ -199,6 +205,11 @@ async function recordListening<TContext, I>(
     identity: connection.resolved.identity(),
     cursor: prior?.cursor ?? cursor,
     deadline,
+    ...(replaysFromCursor(listen)
+      ? {
+          durable: true,
+        }
+      : {}),
     ...(connection.resolved.lease
       ? {
           leaseId: connection.resolved.lease.id,
@@ -225,7 +236,14 @@ async function waitOnStream<TContext, I>(opts: {
     step.around === undefined
       ? undefined
       : await runAround(aroundSteps(step), input, ctx, executeStep);
-  const outcome = await awaitOutcome(matched, deadline, runSignal);
+  const baseCtx = frameworkCast<Context>(ctx);
+  const stopWaiting = markWaiting(listen, deadline);
+  let outcome: ListenOutcome | undefined;
+  try {
+    outcome = await awaitOutcome(matched, deadline - nowOf(baseCtx), runSignal);
+  } finally {
+    stopWaiting();
+  }
   const event = matchedEvent(listen, outcome, runSignal);
   await listen.connection.pending?.clear();
   return {
@@ -236,6 +254,35 @@ async function waitOnStream<TContext, I>(opts: {
           around,
         }),
   };
+}
+
+/** True when the event this wait listens for replays from a cursor. */
+function replaysFromCursor<TContext, I>(listen: ListenContext<TContext, I>): boolean {
+  return listen.connection.resolved.manifest.events[listen.step.event]?.replay === 'durable';
+}
+
+/**
+ * Tells the turn's parking that this step is now only waiting, when the wait can be
+ * picked up again without loss: the event replays from a cursor, so a turn that
+ * parks here and wakes later still sees an event that arrived in between
+ * (spec 23 § Parked turns). Returns what to call when the wait ends.
+ */
+function markWaiting<TContext, I>(
+  listen: ListenContext<TContext, I>,
+  deadline: number,
+): () => void {
+  const { ctx } = listen;
+  if (!(ctx instanceof ContextImpl) || !ctx.ledger) {
+    return () => {};
+  }
+  if (!replaysFromCursor(listen)) {
+    return () => {};
+  }
+  // A wait whose time is already up is about to fail, not to wait.
+  if (deadline <= nowOf(frameworkCast<Context>(ctx))) {
+    return () => {};
+  }
+  return ctx.ledger.parking.wait(ctx.currentDispatch()?.path, deadline);
 }
 
 /**

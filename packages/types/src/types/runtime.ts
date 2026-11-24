@@ -60,6 +60,8 @@ export interface AgentConfig<TParams extends Record<string, unknown> = Record<st
   emitItemsOnReplay?: boolean;
   /** Approves or refuses calls to tools that declare `needsApproval`. Without one, those calls run unapproved. */
   approveToolCall?: ToolApprover;
+  /** The clock deadlines, leases and wake times are read from. Default `Date.now`. */
+  now?: () => number;
 }
 
 //#region Delivery Mode
