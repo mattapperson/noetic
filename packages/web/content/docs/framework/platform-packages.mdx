@@ -124,6 +124,7 @@ Both implement `swap`, so sessions on them run under a [turn lease](/docs/framew
 import { eventEndpoint, standardWebhookVerifier } from '@noetic-tools/platform-cloudflare-worker';
 
 const receive = eventEndpoint({
+  harness, // started before the event is emitted
   emit: (event) => mail.emit(event),
   verify: standardWebhookVerifier({ secret: env.WEBHOOK_SECRET }),
   toEvent: (body, request) => ({
@@ -136,7 +137,9 @@ const receive = eventEndpoint({
 export default { fetch: (request: Request) => receive(request) };
 ```
 
-It answers `200` when the event is stored, `503` when it could not be (so the provider sends it again), `401` when `verify` refuses, `400` when `toEvent` throws, `204` when `toEvent` returns `undefined`, and `405` for anything but a POST. A delivery that arrives twice with the same event id starts one turn.
+It answers `200` when the event is stored, `503` when it could not be (so the provider sends it again), `401` when `verify` refuses or throws, `400` when `toEvent` throws, `204` when `toEvent` returns `undefined`, and `405` for anything but a POST. A delivery that arrives twice with the same event id starts one turn.
+
+Pass `harness` so the endpoint starts it before it emits. A source refuses an event while no trigger is listening to store it, which is the state of a Worker on its first request. `standardWebhookVerifier` throws when it is built if the secret is not base64.
 
 ### Waking parked turns
 

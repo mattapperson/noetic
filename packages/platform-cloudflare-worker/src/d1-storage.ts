@@ -1,6 +1,6 @@
 import type { StorageAdapter } from '@noetic-tools/core';
 
-import { decoded, storedKey, storedValue, tableName } from './storage-values';
+import { decoded, prefixEnd, storedKey, storedValue, tableName } from './storage-values';
 
 //#region Types
 
@@ -92,8 +92,10 @@ export function createD1Storage(options: CreateD1StorageOptions): StorageAdapter
     async list(prefix: string): Promise<string[]> {
       await ready();
       const { results } = await db
-        .prepare(`SELECT key FROM ${table} WHERE substr(key, 1, length(?)) = ?`)
-        .bind(prefix, prefix)
+        .prepare(
+          `SELECT key FROM ${table} WHERE key >= ? AND key < ? AND substr(key, 1, length(?)) = ?`,
+        )
+        .bind(prefix, prefixEnd(prefix), prefix, prefix)
         .all();
       return (results ?? []).flatMap((row) => storedKey(row) ?? []);
     },

@@ -247,18 +247,20 @@ Both adapters implement `StorageAdapter.swap`, store each value as its JSON enco
 
 ### Event endpoint
 
-A webhook is the host's business: core has no webhook concept (`35-connections` § Events). `eventEndpoint({ emit, verify?, toEvent })` is the last step, from a request the host accepts to an event a source emits. It returns a `fetch`-shaped handler:
+A webhook is the host's business: core has no webhook concept (`35-connections` § Events). `eventEndpoint({ emit, verify?, toEvent, harness? })` is the last step, from a request the host accepts to an event a source emits. It returns a `fetch`-shaped handler:
 
 | Answer | When |
 |---|---|
 | `405` | The request is not a POST. |
-| `401` | `verify(request, body)` returned false. |
+| `401` | `verify(request, body)` returned false or threw. |
 | `400` | `toEvent(body, request)` threw. |
 | `204` | `toEvent` returned `undefined`: a delivery that carries no event. |
-| `503` | `emit` rejected: the event is not stored, and the provider should send it again. |
+| `503` | `harness.start()` or `emit` rejected: the event is not stored, and the provider should send it again. |
 | `200` | `emit` resolved, which is when every listening trigger has stored the event. |
 
-`standardWebhookVerifier({ secret, toleranceMs?, now? })` is a `verify` for Standard Webhooks signatures on Web Crypto. It does not drop a repeated `webhook-id`; a trigger's inbox dedupes by event id, so `toEvent` uses the `webhook-id` as the event's id.
+A source's `emit` rejects when no trigger is there to store the event, which is the state of a Worker whose harness has not started. Given `harness`, the endpoint awaits `harness.start()` before it emits, so the first request of a cold Worker stores its event. `start()` is idempotent.
+
+`standardWebhookVerifier({ secret, toleranceMs?, now? })` throws when it is built with a secret that is not base64, not on each delivery. It is a `verify` for Standard Webhooks signatures on Web Crypto. It does not drop a repeated `webhook-id`; a trigger's inbox dedupes by event id, so `toEvent` uses the `webhook-id` as the event's id.
 
 ### Waking parked turns
 
@@ -267,7 +269,7 @@ A harness in a Worker is built with `park: { autoWake: false }`: its own timers 
 **Alarm.** `alarmWake({ harness, alarms })`, in a Durable Object, with `alarms` the object's `ctx.storage`.
 
 - It listens with `harness.onWakeTimeChange()` and keeps the object's alarm at the time it hears, deleting the alarm when there is none. The host sets no alarm itself: the first is set when the harness starts, and a turn that parks does not answer until its alarm is set.
-- `alarm()`, called from the object's `alarm()` handler, calls `harness.start()`, `harness.wake()` and `harness.waitForIdle()`, then sets the alarm to `harness.getNextWakeTime()`, since the alarm that fired is spent even when the time did not change. Starting the harness is what makes a `cron()` source deliver the ticks that fell due while nothing ran. It does not throw for a turn that failed, since a throw makes the runtime retry the alarm.
+- `alarm()`, called from the object's `alarm()` handler, calls `harness.start()`, `harness.wake()` and `harness.waitForIdle()`, then sets the alarm to `harness.getNextWakeTime()`, since the alarm that fired is spent even when the time did not change. `getNextWakeTime()` covers a turn a dead Worker was cut off in: it is due when that Worker's lease runs out, so the alarm is neither dropped nor fired in a loop before then. Starting the harness is what makes a `cron()` source deliver the ticks that fell due while nothing ran. It does not throw for a turn that failed, since a throw makes the runtime retry the alarm.
 - `stop()` stops the listening.
 
 A `cron()` trigger therefore runs on the alarm preset as it does on Node, with the schedule written once. The package has no cron helper of its own.
@@ -277,9 +279,9 @@ A `cron()` trigger therefore runs on the alarm preset as it does on Node, with t
 1. Step `turn-0` delivers the message with `harness.execute()` and reads the response.
 2. While the response is parked, `step.waitForEvent('wait-<n>', { type: TURN_WAKE_EVENT, timeout })` sleeps until the turn's deadline or a wake event. With no deadline it sleeps `maxWaitMs` (default 24 hours). A wait that times out is the deadline arriving, not an error.
 3. Step `turn-<n>` calls `harness.wake({ threadId })` and reads the response. A turn woken with nothing to do parks again and the loop repeats.
-4. It resolves `{ text }`, or `{ text: '', gone: true }` when there was no turn left to wake.
+4. It resolves `{ text }`, or `{ text: '', gone: true }` when there was no turn left to wake. A turn that is there but could not be woken, because another Worker holds its lease or is running it, is not gone: the step throws, and Workflows retries it.
 
-`startTurn(binding, turn)` creates the instance under `turnInstanceId(threadId, messageId)`, so a message delivered twice starts one instance. `wakeTurn(binding, instanceId)` sends the wake event; Workflows keeps an event sent before the instance reaches its wait.
+`startTurn(binding, turn)` creates the instance under `turnInstanceId(threadId, messageId)`, so a message delivered twice starts one instance. The id is a readable part cut to fit, then `_` and a hash of the two ids as a pair, so `('a-b', 'c')` and `('a', 'b-c')` are different instances and the id is never over the 100 characters Workflows allows. `wakeTurn(binding, instanceId)` sends the wake event; Workflows keeps an event sent before the instance reaches its wait.
 
 The Workflows preset has no object that is always there, so a `cron()` trigger needs something to start the harness at each tick: a Cloudflare Cron Trigger whose `scheduled` handler calls `harness.start()` and awaits `harness.waitForIdle()`.
 

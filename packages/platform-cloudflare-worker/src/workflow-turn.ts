@@ -44,7 +44,7 @@ export interface TurnParams {
 }
 
 /** @public The harness methods the Workflows preset calls. An `AgentHarness` fits. */
-export type TurnHarness = Pick<AgentHarness, 'execute' | 'wake' | 'getAgentResponse'>;
+export type TurnHarness = Pick<AgentHarness, 'execute' | 'wake' | 'getAgentResponse' | 'getStatus'>;
 
 /** @public Options for `runTurn`. */
 export interface RunTurnOptions {
@@ -154,13 +154,24 @@ async function wokenRun(options: RunTurnOptions): Promise<TurnRun> {
     threadId,
     options: options.options,
   });
-  if (woken.length === 0) {
-    return {
-      text: '',
-      gone: true,
-    };
+  if (woken.length > 0) {
+    return answerOf(options.harness, threadId);
   }
-  return answerOf(options.harness, threadId);
+  // Nothing was woken. If the turn is running in this isolate, its answer is the
+  // one to wait for. Otherwise there is no turn left to wake: a wake asked for by
+  // thread does not pass over a turn another harness holds, it waits for it, and
+  // fails (so that this step is retried) if it cannot have it.
+  const running =
+    options.harness.getStatus({
+      threadId,
+    }).kind !== 'idle';
+  if (running) {
+    return answerOf(options.harness, threadId);
+  }
+  return {
+    text: '',
+    gone: true,
+  };
 }
 
 /** Sleeps until the wake event or the deadline, whichever is first. */
@@ -185,14 +196,17 @@ async function sleep(step: WorkflowStepLike, name: string, ms: number): Promise<
  * give the same id, so a message delivered twice starts one instance.
  */
 export async function turnInstanceId(threadId: string, messageId: string): Promise<string> {
-  const plain = `${threadId}-${messageId}`;
-  const safe = plain.replace(INSTANCE_ID_UNSAFE, '_').replace(/^-/, '_');
-  if (safe === plain && safe.length <= INSTANCE_ID_MAX) {
-    return safe;
-  }
-  // Something was replaced or cut: add a hash so two different turns cannot collide.
-  const hash = await shortHash(plain);
-  return `${safe.slice(0, INSTANCE_ID_MAX - HASH_CHARS - 1)}_${hash}`;
+  // The readable part is for a person looking at a list of instances. The hash is
+  // what tells turns apart: joined with a dash, ("a-b", "c") and ("a", "b-c") read
+  // the same, so it is taken over the pair, not over the joined text.
+  const readable = `${threadId}-${messageId}`.replace(INSTANCE_ID_UNSAFE, '_').replace(/^-/, '_');
+  const hash = await shortHash(
+    JSON.stringify([
+      threadId,
+      messageId,
+    ]),
+  );
+  return `${readable.slice(0, INSTANCE_ID_MAX - HASH_CHARS - 1)}_${hash}`;
 }
 
 /**

@@ -125,6 +125,20 @@ async function readLease(storage: SwapStorage, threadId: string): Promise<Stored
 //#endregion
 
 /** @internal True when a harness other than `opts.holder` holds the thread's lease now. */
+/**
+ * @internal
+ * When another harness's lease on the thread runs out, in epoch ms, or undefined
+ * when no other harness holds it now.
+ */
+export async function heldElsewhereUntil(
+  opts: TurnLeaseOptions,
+  threadId: string,
+): Promise<number | undefined> {
+  const { record } = await readLease(opts.storage, threadId);
+  const held = record !== null && record.holder !== opts.holder && record.heldUntil > opts.now();
+  return held ? record.heldUntil : undefined;
+}
+
 export async function heldElsewhere(opts: TurnLeaseOptions, threadId: string): Promise<boolean> {
   const { record } = await readLease(opts.storage, threadId);
   return record !== null && record.holder !== opts.holder && record.heldUntil > opts.now();

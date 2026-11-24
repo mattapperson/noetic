@@ -15,6 +15,15 @@ export interface EventEndpointOptions<E> {
   /** Where the event goes: a source's `emit`. Resolves once the event is stored. */
   emit: (event: E) => Promise<void>;
   /**
+   * The harness whose triggers take the event. It is started before the event is
+   * emitted. Without this, a Worker that has not started its harness in this
+   * isolate has no trigger listening, and `emit` would resolve with the event held
+   * only in memory.
+   */
+  harness?: {
+    start(): Promise<void>;
+  };
+  /**
    * Decide whether the request is genuine, from the request and its raw body.
    * Without it every request is taken, which is right only behind something that
    * already checked.
@@ -55,6 +64,19 @@ function answer(status: EventEndpointStatus): Response {
   });
 }
 
+/** Whether `verify` accepts the request. A verifier that throws has not accepted it. */
+async function verified(
+  verify: NonNullable<EventEndpointOptions<unknown>['verify']>,
+  request: Request,
+  body: string,
+): Promise<boolean> {
+  try {
+    return await verify(request, body);
+  } catch {
+    return false;
+  }
+}
+
 /** The event in `body`, `null` for none, or the status to refuse with. */
 async function eventIn<E>(
   options: EventEndpointOptions<E>,
@@ -87,6 +109,7 @@ async function eventIn<E>(
  * @example
  * ```ts
  * const receive = eventEndpoint({
+ *   harness,
  *   emit: (event) => mail.emit(event),
  *   verify: standardWebhookVerifier({ secret: env.WEBHOOK_SECRET }),
  *   toEvent: (body, request) => ({
@@ -106,7 +129,7 @@ export function eventEndpoint<E>(
       return answer(EventEndpointStatus.MethodNotAllowed);
     }
     const body = await request.text();
-    if (options.verify && !(await options.verify(request, body))) {
+    if (options.verify && !(await verified(options.verify, request, body))) {
       return answer(EventEndpointStatus.Unauthorized);
     }
     const read = await eventIn(options, request, body);
@@ -117,6 +140,7 @@ export function eventEndpoint<E>(
       return answer(EventEndpointStatus.Ignored);
     }
     try {
+      await options.harness?.start();
       await options.emit(read.event);
     } catch {
       return answer(EventEndpointStatus.NotStored);

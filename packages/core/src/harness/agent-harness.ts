@@ -98,6 +98,7 @@ import {
   filterReasoningStream,
   filterTextStream,
   heldElsewhere,
+  heldElsewhereUntil,
   INTERRUPT_REASON,
   isSteer,
   PARK_REASON,
@@ -1404,7 +1405,11 @@ export class AgentHarness<
       if (session.runner.getStatus().kind !== 'idle' || session.runner.queue.size > 0) {
         continue;
       }
-      if (this.leaseOptions && (await heldElsewhere(this.leaseOptions, threadId))) {
+      // A routine wake leaves a turn another harness holds for a later pass. One
+      // asked for by name goes ahead: taking the lease waits for the holder's to
+      // run out, and if it does not, that is an error the caller hears about.
+      const held = this.leaseOptions && (await heldElsewhere(this.leaseOptions, threadId));
+      if (held && !scope?.threadId) {
         continue;
       }
       // Re-deliver the turn's own messages: the same ids resume it, and a resumed
@@ -1438,14 +1443,42 @@ export class AgentHarness<
     if (!this.sessionStore) {
       return earliest;
     }
+    const now = this.now();
     for (const threadId of await this.sessionStore.threads()) {
-      const until = (await this.sessionStore.load(threadId))?.turn?.parked?.until;
-      if (until === undefined) {
-        continue;
+      const due = await this.turnDueAt(threadId, now);
+      if (due !== undefined) {
+        earliest = earliest === undefined ? due : Math.min(earliest, due);
       }
-      earliest = earliest === undefined ? until : Math.min(earliest, until);
     }
     return earliest;
+  }
+
+  /**
+   * When a routine `wake()` would have something to do for the thread's turn: a
+   * parked turn at its deadline, a turn cut off by a crash at once. Never before
+   * another harness's lease on it runs out, since a wake before then does nothing.
+   * Undefined for a turn that waits on something other than time, one that is
+   * stuck or stopped, and one this harness is running.
+   */
+  private async turnDueAt(threadId: string, now: number): Promise<number | undefined> {
+    const turn = (await this.sessionStore?.load(threadId))?.turn;
+    if (!turn || turn.stuck || (turn.stopped && !turn.parked)) {
+      return undefined;
+    }
+    if (turn.parked && turn.parked.until === undefined) {
+      return undefined;
+    }
+    // A turn with no park on record is cut off, unless it is simply running here.
+    // (One that is parked may still be closing out in this process: it counts.)
+    const runner = this.sessions.get(threadId)?.runner;
+    if (!turn.parked && runner && runner.getStatus().kind !== 'idle') {
+      return undefined;
+    }
+    const due = turn.parked?.until ?? now;
+    const heldUntil = this.leaseOptions
+      ? await heldElsewhereUntil(this.leaseOptions, threadId)
+      : undefined;
+    return heldUntil === undefined ? due : Math.max(due, heldUntil);
   }
 
   /**

@@ -13,6 +13,15 @@ export function tableName(table: string | undefined, factory: string): string {
   return name;
 }
 
+/**
+ * @internal
+ * The upper end of the key range a prefix covers, so a `list` reads that range from
+ * the primary key and does not scan the table. The exact match is still checked.
+ */
+export function prefixEnd(prefix: string): string {
+  return `${prefix}\u{10FFFF}`;
+}
+
 /** @internal The `value` column of `row`, when it is a string. */
 export function storedValue(row: unknown): string | undefined {
   if (typeof row !== 'object' || row === null || !('value' in row)) {

@@ -327,6 +327,9 @@ describe('waiting with no deadline', () => {
     execute: async () => {},
     wake: async () => [],
     getAgentResponse: () => expect.unreachable(),
+    getStatus: () => ({
+      kind: 'idle' as const,
+    }),
   };
 
   it('sleeps `maxWaitMs`, a day by default', async () => {
@@ -386,11 +389,11 @@ describe('starting and waking a turn’s instance', () => {
     const binding = fakeBinding();
     const id = await startTurn(binding, turn);
     expect(await startTurn(binding, turn)).toBe(id);
-    expect(id).toBe('t-m-1');
+    expect(id.startsWith('t-m-1_')).toBe(true);
     expect([
       ...binding.created.keys(),
     ]).toEqual([
-      't-m-1',
+      id,
     ]);
   });
 
@@ -428,11 +431,14 @@ describe('starting and waking a turn’s instance', () => {
     expect(long).toMatch(VALID);
     expect(await turnInstanceId('t'.repeat(150), 'm-2')).not.toBe(long);
 
-    // Boundary: 100 characters pass through, 101 are cut and hashed.
-    const exact = await turnInstanceId('a'.repeat(96), 'm-1');
-    expect(exact).toBe(`${'a'.repeat(96)}-m-1`);
+    // Never longer than Workflows allows, however the two ids add up.
+    expect((await turnInstanceId('a'.repeat(96), 'm-1')).length).toBeLessThanOrEqual(100);
     expect(await turnInstanceId('a'.repeat(97), 'm-1')).toHaveLength(100);
     expect(await turnInstanceId('-lead', 'm')).toMatch(VALID);
+
+    // Joined with a dash these two read the same. They are different turns.
+    expect(await turnInstanceId('a-b', 'c')).not.toBe(await turnInstanceId('a', 'b-c'));
+    expect(await turnInstanceId('a.b-c', 'd')).not.toBe(await turnInstanceId('a.b', 'c-d'));
   });
 });
 
@@ -513,5 +519,89 @@ describe('a cron() trigger on the alarm preset', () => {
     expect(ticks[0]).toContain(new Date(thisTick).toISOString());
     expect(alarm.at).toBe(thisTick + ticks.length * MINUTE);
     await harness.close();
+  });
+});
+
+describe('a turn another Worker still holds', () => {
+  it('is not reported gone by the Workflows preset: the step fails, to be retried', async () => {
+    const make = storages.D1?.() ?? expect.unreachable();
+    const w = world(make);
+    const instance = fakeInstance();
+    const first = worker(w);
+    void runTurn({
+      harness: first,
+      step: instance.step(),
+      turn,
+      now: () => w.clock.t,
+    }).catch(() => {});
+    await settled();
+    await first.close();
+
+    // A Worker that was resuming the turn died: its lease has time left to run.
+    await make().set('session:t:lease', {
+      term: 9,
+      holder: 'a-worker-that-died',
+      heldUntil: w.clock.t + 3e4,
+    });
+    w.mailbox.push('approved');
+    instance.events += 1;
+    const second = worker(w);
+    const outcome = await runTurn({
+      harness: second,
+      step: instance.step(),
+      turn,
+      now: () => w.clock.t,
+    }).then(
+      (done) => done,
+      () => 'step failed',
+    );
+    // Not "gone": the turn is there. Workflows retries a step that threw.
+    expect(outcome).toBe('step failed');
+    expect(
+      await make().get<{
+        turn?: object;
+      }>('session:t'),
+    ).toMatchObject({
+      turn: {},
+    });
+    await second.close();
+  });
+
+  it("keeps the alarm set, for when the dead Worker's lease runs out", async () => {
+    const make = storages.D1?.() ?? expect.unreachable();
+    const w = world(make);
+    const first = worker(w);
+    await first.execute(turn.input, turn);
+    assert((await first.getAgentResponse(thread)).parked);
+    await first.close();
+
+    // The turn was woken and then cut off: no park on record, a live lease.
+    const stored = await make().get<{
+      turn: {
+        parked?: object;
+      };
+    }>('session:t');
+    assert(stored);
+    const { parked: _parked, ...cutOff } = stored.turn;
+    await make().set('session:t', {
+      ...stored,
+      turn: cutOff,
+    });
+    await make().set('session:t:lease', {
+      term: 9,
+      holder: 'a-worker-that-died',
+      heldUntil: w.clock.t + 3e4,
+    });
+
+    const alarm = fakeAlarm();
+    const second = worker(w);
+    await alarmWake({
+      harness: second,
+      alarms: alarm,
+    }).alarm();
+    // Nothing could be woken yet, and the alarm is not dropped: it comes back
+    // when the lease is free, not in a tight loop before then.
+    expect(alarm.at).toBe(w.clock.t + 3e4);
+    await second.close();
   });
 });

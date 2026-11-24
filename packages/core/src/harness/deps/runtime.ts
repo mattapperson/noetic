@@ -30,6 +30,7 @@ export {
   canSwap,
   DEFAULT_LEASE_TTL_MS,
   heldElsewhere,
+  heldElsewhereUntil,
   TurnLease,
 } from '../../runtime/durable/turn-lease';
 export type { EventBroadcaster } from '../../runtime/event-broadcaster';

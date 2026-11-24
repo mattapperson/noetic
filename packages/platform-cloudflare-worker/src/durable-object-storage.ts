@@ -1,6 +1,6 @@
 import type { StorageAdapter } from '@noetic-tools/core';
 
-import { decoded, storedKey, storedValue, tableName } from './storage-values';
+import { decoded, prefixEnd, storedKey, storedValue, tableName } from './storage-values';
 
 //#region Types
 
@@ -77,7 +77,13 @@ export function createDurableObjectStorage(
     },
     async list(prefix: string): Promise<string[]> {
       return sql
-        .exec(`SELECT key FROM ${table} WHERE substr(key, 1, length(?)) = ?`, prefix, prefix)
+        .exec(
+          `SELECT key FROM ${table} WHERE key >= ? AND key < ? AND substr(key, 1, length(?)) = ?`,
+          prefix,
+          prefixEnd(prefix),
+          prefix,
+          prefix,
+        )
         .toArray()
         .flatMap((row) => storedKey(row) ?? []);
     },

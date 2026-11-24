@@ -148,6 +148,50 @@ describe('eventEndpoint', () => {
     expect(emitted).toEqual([]);
   });
 
+  it('answers 401 when verify throws', async () => {
+    const receive = eventEndpoint<Mail>({
+      emit: async () => {},
+      verify: () => {
+        throw new Error('bad secret');
+      },
+      toEvent,
+    });
+    expect((await receive(post(BODY))).status).toBe(EventEndpointStatus.Unauthorized);
+  });
+
+  it('starts the harness before it emits, so a trigger is there to store the event', async () => {
+    const order: string[] = [];
+    const receive = eventEndpoint<Mail>({
+      harness: {
+        start: async () => {
+          order.push('start');
+        },
+      },
+      emit: async () => {
+        order.push('emit');
+      },
+      toEvent,
+    });
+    expect((await receive(post(BODY))).status).toBe(EventEndpointStatus.Stored);
+    expect(order).toEqual([
+      'start',
+      'emit',
+    ]);
+  });
+
+  it('answers 503 when the harness cannot start', async () => {
+    const receive = eventEndpoint<Mail>({
+      harness: {
+        start: async () => {
+          throw new Error('storage is down');
+        },
+      },
+      emit: async () => {},
+      toEvent,
+    });
+    expect((await receive(post(BODY))).status).toBe(EventEndpointStatus.NotStored);
+  });
+
   it('answers 400 for a body toEvent cannot read', async () => {
     const receive = eventEndpoint<Mail>({
       emit: async () => {},
@@ -181,6 +225,14 @@ describe('eventEndpoint', () => {
 describe('standardWebhookVerifier', () => {
   const verify = standardWebhookVerifier({
     secret: SECRET,
+  });
+
+  it('refuses a secret that is not base64 when it is set up, not on every delivery', () => {
+    expect(() =>
+      standardWebhookVerifier({
+        secret: 'whsec_not base64 at all!',
+      }),
+    ).toThrow('not base64');
   });
 
   it('accepts a delivery signed with the secret', async () => {

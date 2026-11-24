@@ -70,6 +70,8 @@ function isFresh(timestamp: string, options: StandardWebhookVerifierOptions): bo
 
 /**
  * @public
+ * @throws Error when `secret` is not base64.
+ *
  * A `verify` for `eventEndpoint` that checks a Standard Webhooks signature:
  * `webhook-id`, `webhook-timestamp` and `webhook-signature`, within the timestamp
  * tolerance. The comparison is `crypto.subtle.verify`, which runs in constant time.
@@ -83,12 +85,22 @@ export function standardWebhookVerifier(
   const secret = options.secret.startsWith(SECRET_PREFIX)
     ? options.secret.slice(SECRET_PREFIX.length)
     : options.secret;
+  // Decoded now: a secret that is not base64 is a setup mistake, and is better
+  // heard about here than as a refusal of every delivery.
+  let secretBytes: Uint8Array<ArrayBuffer>;
+  try {
+    secretBytes = bytesOf(secret);
+  } catch {
+    throw new Error(
+      'standardWebhookVerifier: the secret is not base64. Pass the signing secret as the provider shows it, with or without its "whsec_" prefix.',
+    );
+  }
   let key: Promise<CryptoKey> | undefined;
 
   function importKey(): Promise<CryptoKey> {
     key ??= crypto.subtle.importKey(
       'raw',
-      bytesOf(secret),
+      secretBytes,
       {
         name: 'HMAC',
         hash: 'SHA-256',
