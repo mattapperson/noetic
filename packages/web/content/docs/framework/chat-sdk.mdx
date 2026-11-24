@@ -54,45 +54,49 @@ Approval defaults follow the vendor: Chat SDK ships its write tools gated, and t
 
 ## Approval gates
 
-Gated tools park on the external-channel approval flow instead of running. Subscribe **once per harness** under the never-closed `APPROVAL_SCOPE` — queue delivery is competing-consumer, so a second subscriber would steal requests — and route each card by the request's `threadId`:
+A gated tool does not run until a person approves it. The harness gates it: the tool is marked `needsApproval`, and a call to it goes to the harness's [approval seam](/docs/framework/steps/invoke-tool#human-in-the-loop-approval). `chatApprover()` is the approver that asks in chat:
 
 ```ts validate=none
-import { APPROVAL_SCOPE, approvalRequests, resolveApproval } from "@noetic-tools/chat-sdk";
+import {
+  APPROVAL_SCOPE,
+  answerApproval,
+  approvalRequests,
+  chatApprover,
+  chatTools,
+} from "@noetic-tools/chat-sdk";
+
+const harness = new AgentHarness({
+  approveToolCall: chatApprover(), // asks in chat, then holds the call
+  tools: await chatTools({ chat }),
+  // …
+});
 
 // One observer per harness, alive across turns; `break` ends it.
 for await (const request of harness.getChannelStream(approvalRequests, APPROVAL_SCOPE)) {
   const thread = await chat.getThread(request.threadId);
-  await thread.post(approvalCard(request)); // carries request.requestId in the action
+  await thread.post(approvalCard(request)); // carries request.requestId and threadId in the action
 }
 
-// The button click routes the decision back in. Returns false (never throws)
-// for stale clicks after the tool already timed out.
-resolveApproval({
+// The button click routes the decision back in. Resolves false for a stale click.
+await answerApproval({
   harness,
+  threadId,
   decision: { requestId: action.value, approved: true },
 });
 ```
 
-A rejection or the 5-minute timeout surfaces to the model as a tool error with the reason; each waiting tool filters the decision broadcast by its own `requestId`, so concurrent gated calls never cross wires.
+- **The request.** `chatApprover()` sends an `ApprovalRequest` on `approvalRequests`, with the tool call's own id as `requestId`. Subscribe **once per harness** under the never-closed `APPROVAL_SCOPE`: queue delivery is competing-consumer, so a second subscriber would steal requests. Route each card by the request's `threadId`.
+- **The wait.** The call is held in the harness's storage, not in the tool. It survives a restart, and on storage with [`park`](/docs/framework/durability#parked-turns) on, its turn stops holding a process while the person decides.
+- **The deadline.** `chatApprover({ timeout })` sets how long a call stays held before it is denied: five minutes by default, `Infinity` to wait as long as it takes.
+- **No approver.** A harness without `chatApprover()` (or another `approveToolCall`) still gates these tools: the call is held, it shows in `harness.pending()`, and nothing runs until `harness.resolve()` answers it. No request is sent to chat, so set the approver if you want cards.
 
-To make these approvals survive a restart, gate through the harness instead:
+A rejection or a passed deadline reaches the model as a tool error with the reason.
 
-```ts validate=none
-import { answerApproval, chatApprover, chatTools } from "@noetic-tools/chat-sdk";
+To run a tool without approval, say so: `chatTools({ chat, requireApproval: { postMessage: false } })`.
 
-const harness = new AgentHarness({
-  approveToolCall: chatApprover(),
-  tools: await chatTools({ chat, approval: "harness" }),
-  // …
-});
+### Gating inside the tool
 
-// In the button handler, with the request's threadId:
-await answerApproval({ harness, threadId, decision: { requestId, approved: true } });
-```
-
-The approval request still arrives on `approvalRequests`, so the code that posts the card does not change. The call is now [held](/docs/framework/steps/invoke-tool#human-in-the-loop-approval) in the harness's storage, and on storage with `park` on its turn stops holding a process while a person decides.
-
-By default these tools gate themselves, so they do not declare core's `needsApproval` — a harness [`approveToolCall`](/docs/framework/steps/invoke-tool#human-in-the-loop-approval) approver is never asked about them, and a call is never gated twice.
+`chatTools({ chat, approval: 'channel' })` is the older flow: each gated tool sends its request and waits for the decision inside its own `execute`, on the approval channels. The wait lives in memory, ends with the process, and times out after `approvalTimeout`. Deliver decisions with `resolveApproval({ harness, decision })`, or with `answerApproval`, which handles both flows. These tools do not declare `needsApproval`, so a harness approver is never asked about them.
 
 ## Persistence
 

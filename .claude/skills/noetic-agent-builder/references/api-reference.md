@@ -2160,7 +2160,7 @@ harness.approve({ toolName, toolArgs, callId, ctx, park? }): Promise<SteeringDec
 // also ctx.harness.approve(...) and, in a layer function, ctx.approve({ toolName, toolArgs, callId, park? })
 ```
 
-The approver decides; with none, or on `hold`, the action is held and `approve` resolves once `harness.resolve()` answers it. Asked by `needsApproval` tools, connection operations that need approval (from a model or a step), long-task questions, ACP permission requests with no policy `default`, the served-agent gate after its timeout, `chatTools({ approval: 'harness' })` with `chatApprover()`, and `plan({ requireApproval: true })`. A parked response lists held calls as `held`.
+The approver decides; with none, or on `hold`, the action is held and `approve` resolves once `harness.resolve()` answers it. Asked by `needsApproval` tools, connection operations that need approval (from a model or a step), long-task questions, ACP permission requests with no policy `default`, the served-agent gate after its timeout, `chatTools()` gated tools (set `approveToolCall: chatApprover()` to ask in chat; `approval: 'channel'` opts back into the in-memory flow), and `plan({ requireApproval: true })`. A parked response lists held calls as `held`.
 
 ### `durable` on a tool
 

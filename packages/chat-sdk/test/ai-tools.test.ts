@@ -77,10 +77,14 @@ async function approveOnceRequested(requests: ApprovalRequest[]): Promise<Approv
 }
 
 /**
- * Whether the wrapper gates `tool` itself: run it against a harness that
- * rejects every approval request and report whether a request was sent.
+ * Whether a call to `tool` needs a person's go-ahead: the harness gates it
+ * (`needsApproval`, the default), or with `approval: 'channel'` the wrapper gates
+ * it itself, which shows as an approval request sent to a harness that rejects them.
  */
 async function parksForApproval(tool: Tool): Promise<boolean> {
+  if (tool.needsApproval === true) {
+    return true;
+  }
   const requests: ApprovalRequest[] = [];
   const toolCtx = {
     ctx: {
@@ -212,14 +216,27 @@ describe('fromAiSdkTool', () => {
     ).toBe(true);
   });
 
-  test('a gated tool does not declare core needsApproval, so the harness approver never asks twice', () => {
-    const tool = fromAiSdkTool(
-      'del',
-      aiTool({
-        needsApproval: true,
-      }),
-    );
-    expect(tool.needsApproval).toBeUndefined();
+  test('a gated tool is gated once: by the harness by default, or by itself when asked', () => {
+    const vendor = aiTool({
+      needsApproval: true,
+    });
+    // By default the harness's approval seam gates it, and the tool does not.
+    expect(fromAiSdkTool('del', vendor).needsApproval).toBe(true);
+    // Gating inside the tool leaves core's flag unset, so the approver never asks twice.
+    expect(
+      fromAiSdkTool('del', vendor, {
+        approval: 'channel',
+      }).needsApproval,
+    ).toBeUndefined();
+    // A tool that needs no approval is marked by neither.
+    expect(
+      fromAiSdkTool(
+        'read',
+        aiTool({
+          needsApproval: false,
+        }),
+      ).needsApproval,
+    ).toBeUndefined();
   });
 
   test('falls back to z.unknown() when the tool has no zod schema', () => {
@@ -253,6 +270,7 @@ describe('fromAiSdkTool', () => {
       }),
       {
         needsApproval: true,
+        approval: 'channel',
       },
     );
 
@@ -288,6 +306,7 @@ describe('fromAiSdkTool', () => {
       }),
       {
         needsApproval: true,
+        approval: 'channel',
       },
     );
     const { toolCtx, requests } = approvalToolCtx([
@@ -339,6 +358,7 @@ describe('fromAiSdkTool', () => {
       }),
       {
         needsApproval: true,
+        approval: 'channel',
       },
     );
     const { toolCtx, requests } = approvalToolCtx([]);

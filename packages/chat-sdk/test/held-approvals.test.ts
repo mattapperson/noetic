@@ -176,7 +176,7 @@ describe('answerApproval', () => {
   });
 });
 
-describe("fromAiSdkTool with approval: 'harness'", () => {
+describe('fromAiSdkTool gated through the harness', () => {
   const aiTool = {
     description: 'Delete a message.',
     inputSchema: z.object({
@@ -189,9 +189,8 @@ describe("fromAiSdkTool with approval: 'harness'", () => {
   };
 
   test('marks the tool needsApproval and runs it without gating inside the tool', async () => {
-    const tool = fromAiSdkTool('deleteMessage', aiTool, {
-      approval: 'harness',
-    });
+    // The default: no option needed.
+    const tool = fromAiSdkTool('deleteMessage', aiTool);
     expect(tool.needsApproval).toBe(true);
     // No harness on the context: an in-tool gate would have thrown reaching for it.
     const result = await tool.execute(
@@ -207,8 +206,10 @@ describe("fromAiSdkTool with approval: 'harness'", () => {
     });
   });
 
-  test("by default the tool gates itself and is not marked for the harness's seam", () => {
-    const tool = fromAiSdkTool('deleteMessage', aiTool);
+  test("with approval: 'channel' the tool gates itself and is not marked for the seam", () => {
+    const tool = fromAiSdkTool('deleteMessage', aiTool, {
+      approval: 'channel',
+    });
     assert(tool.needsApproval !== true);
   });
 });

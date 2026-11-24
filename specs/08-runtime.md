@@ -884,7 +884,7 @@ A parked response lists the calls its turn holds as `held`, the same list `pendi
 | A long task's question (MCP Tasks `input_required`) | Always; held as `result`, and the answer goes back to the task |
 | A coding agent's permission request (`27-acp-agent-steps`) | When no policy rule, steering decision or handler settled it and the policy names no `default` |
 | The served-agent gate (`31-acp-server`) | When the editor did not answer within `askTimeoutMs` |
-| Chat approvals (`29-chat-platform-integration`) | With `approval: 'harness'` and `approveToolCall: chatApprover()` |
+| Chat tools that need approval (`29-chat-platform-integration`) | Always, unless built with `approval: 'channel'`. `chatApprover()` is the approver that asks in chat |
 | The plan layer (`12-builtin-context-layers`) | With `requireApproval` and no `onExit` |
 
 `park: false` keeps the turn live while the action is held. The two agent paths pass it: something outside the run is waiting on the answer and would not survive the turn stopping.

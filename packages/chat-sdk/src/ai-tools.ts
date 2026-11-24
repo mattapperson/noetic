@@ -30,12 +30,14 @@ export interface FromAiSdkToolOptions {
   /**
    * Where a gated call waits for its decision.
    *
-   * - `'channel'` (default): inside the tool, on the approval channels. The wait
-   *   lives in memory and ends with the process.
-   * - `'harness'`: the tool is marked `needsApproval` and the harness gates it
-   *   (Noetic spec 08 § Held tool calls). Pair it with
-   *   `approveToolCall: chatApprover()`. The call's record is in storage, so it
-   *   survives a restart and the turn can park while a person decides.
+   * - `'harness'` (default): the tool is marked `needsApproval` and the harness
+   *   gates it (Noetic spec 08 § Held tool calls). Set
+   *   `approveToolCall: chatApprover()` on the harness to ask in chat; with no
+   *   approver the call is held until `harness.resolve()` answers it. The call's
+   *   record is in storage, so it survives a restart and the turn can park while a
+   *   person decides.
+   * - `'channel'`: inside the tool, on the approval channels. The wait lives in
+   *   memory and ends with the process.
    */
   approval?: 'channel' | 'harness';
 }
@@ -64,20 +66,22 @@ export function fromAiSdkTool(
     : z.unknown();
   const needsApproval = options.needsApproval ?? vendorNeedsApproval(aiTool);
   const timeout = options.approvalTimeout ?? DEFAULT_APPROVAL_TIMEOUT;
+  // Gating inside the tool is the older, in-memory flow, kept for those who ask for it.
+  const inTool = options.approval === 'channel';
 
   return {
     name,
     description: aiTool.description ?? name,
     input,
     output: z.unknown(),
-    ...(needsApproval && options.approval === 'harness'
+    ...(needsApproval && !inTool
       ? {
           needsApproval: true,
         }
       : {}),
     execute: async (args: unknown, toolCtxRaw: unknown): Promise<unknown> => {
-      // In 'harness' mode the harness asked before this ran.
-      if (needsApproval && options.approval !== 'harness') {
+      // Unless it gates itself, the harness asked before this ran.
+      if (needsApproval && inTool) {
         const toolCtx = frameworkCast<ToolExecutionContext>(toolCtxRaw);
         await awaitApproval({
           name,
@@ -112,12 +116,14 @@ export interface ChatToolsOptions {
   /**
    * Where a gated call waits for its decision.
    *
-   * - `'channel'` (default): inside the tool, on the approval channels. The wait
-   *   lives in memory and ends with the process.
-   * - `'harness'`: the tool is marked `needsApproval` and the harness gates it
-   *   (Noetic spec 08 § Held tool calls). Pair it with
-   *   `approveToolCall: chatApprover()`. The call's record is in storage, so it
-   *   survives a restart and the turn can park while a person decides.
+   * - `'harness'` (default): the tool is marked `needsApproval` and the harness
+   *   gates it (Noetic spec 08 § Held tool calls). Set
+   *   `approveToolCall: chatApprover()` on the harness to ask in chat; with no
+   *   approver the call is held until `harness.resolve()` answers it. The call's
+   *   record is in storage, so it survives a restart and the turn can park while a
+   *   person decides.
+   * - `'channel'`: inside the tool, on the approval channels. The wait lives in
+   *   memory and ends with the process.
    */
   approval?: 'channel' | 'harness';
 }
