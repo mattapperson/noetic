@@ -46,6 +46,8 @@ Noetic wraps every framework-level failure in a structured `NoeticError` discrim
 | `connection_secret_refused` | `connection`, `op` | A `secret()` was used outside a field the operation marks `sensitive`, or by the model. |
 | `connection_input_required` | `connection`, `request` | A long-running operation asked a question nobody could answer. |
 | `connection_resume_refused` | `connection`, `reason` | A resumed run's connection was replaced and cannot safely be driven again. |
+| `lease_lost` | `executionId`, `term`, `reason` | Another harness holds or took this thread's turn. See [one writer per turn](/docs/framework/durability#one-writer-per-turn). |
+| `ledger_write_failed` | `executionId`, `path`, `cause` | Under a turn lease, a durable record could not be written, so the turn stopped. |
 | `verify_act_failed` | `stepId`, `cause: Error`, `run?: BlobRef` | A `step.verify`'s `act` threw. The verification run is recorded first, with the failure as evidence, and `run` points at it. |
 
 ### Full Type Definition
@@ -70,6 +72,8 @@ type NoeticError =
   | { kind: 'connection_secret_refused'; connection: string; op: string }
   | { kind: 'connection_input_required'; connection: string; request: { id: string; message: string; schema?: JsonSchema } }
   | { kind: 'connection_resume_refused'; connection: string; reason: string }
+  | { kind: 'lease_lost'; executionId: string; term: number; reason: string }
+  | { kind: 'ledger_write_failed'; executionId: string; path: string; cause: Error }
   | { kind: 'verify_act_failed'; stepId: string; cause: Error; run?: BlobRef };
 ```
 

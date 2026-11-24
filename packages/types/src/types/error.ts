@@ -126,6 +126,22 @@ export type NoeticError =
       reason: string;
     }
   | {
+      /** Another harness took this turn; this one stopped writing (spec 23 § One writer per turn). */
+      kind: 'lease_lost';
+      executionId: string;
+      /** The term this harness held. */
+      term: number;
+      reason: string;
+    }
+  | {
+      /** A durable record could not be written, so the turn stopped rather than run on unrecorded (spec 23 § Fail-stop). */
+      kind: 'ledger_write_failed';
+      executionId: string;
+      /** The ledger path or record that failed to land. */
+      path: string;
+      cause: Error;
+    }
+  | {
       /** A verify's `act` threw; the run is recorded with the failure as evidence (spec 37). */
       kind: 'verify_act_failed';
       stepId: string;

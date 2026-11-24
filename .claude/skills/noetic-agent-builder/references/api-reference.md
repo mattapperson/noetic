@@ -2121,6 +2121,25 @@ harness.writeOffSpend(id: string, opts: { assumedCost: number }): Promise<SpendS
 
 Reconciliation prices calls with a generation id via the provider's generation lookup, polling up to `patienceMs` (default 60s — providers price a call 7–32s after it ends). It runs on its own after `restore()` and whenever a call is cut off. A settled bill is charged once: to the run in flight on the execution, else the thread's stored session, else the restored context — so it lands in `cost` and `billedCost`. Until then `heldCost` on `Context`, `HarnessResponse`, and `SessionUsage` reports the hold, and `until.maxCost` stops at `cost + heldCost`. Calls cut off before any response byte have no id: they stay held until written off. A `spend:<id>` value that no longer reads is listed by `pendingSpend()` with `unreadable: true` — only `id`, `executionId?`, and `threadId?` are real; `kind: 'model'`, `model: 'unknown'`, `requestHash: ''`, `inputTokens: 0`, and an epoch `sentAt` are placeholders — and flagged `{ id, unreadable: true, unbounded: true }` on `spend_pending` — never priced, adds nothing to `heldCost` (like an unbounded call), and cleared only by `writeOffSpend`. Check `p.unreadable` before trusting a record's model or size. `clearCheckpoint` and abandoned turns never delete spend records. Events: `{name}:spend_pending`, `{name}:spend_settled`.
 
+### `createSqliteStorage`
+
+```typescript
+function createSqliteStorage(opts: { database: SqliteDatabase; table?: string }): StorageAdapter;
+```
+
+A `StorageAdapter` over one SQLite table (default `noetic_storage`). `database` is an open `bun:sqlite` `Database`, `node:sqlite` `DatabaseSync`, or `better-sqlite3` database that the caller owns. Implements `swap`; a failed write throws.
+
+### Turn leases (`StorageAdapter.swap`)
+
+```typescript
+interface StorageAdapter {
+  swap?<T>(key: string, prev: T | null, next: T): Promise<boolean>; // compare-and-set
+}
+// environment.storage.lease?: { holder?: string; ttlMs?: number; waitMs?: number; now?: () => number }
+```
+
+On storage with `swap` (`createFileStorage`, `createSqliteStorage`, `createInMemoryStorage({ swap: true })`), each `harness.execute()` turn takes its thread's lease: one harness writes a turn, a replaced harness stops with `lease_lost`, and a failed ledger write stops the turn with `ledger_write_failed`.
+
 ### `createFileStorage`
 
 ```typescript

@@ -124,6 +124,10 @@ export class Spend {
 
   /** Write the record for a call about to be sent. A failed write never blocks the call. */
   async open(params: DispatchParams): Promise<Dispatch> {
+    // A harness that was replaced stops here, before it pays for anything more.
+    if (params.ctx instanceof ContextImpl) {
+      params.ctx.ledger?.assertHeld();
+    }
     const root = rootOf(params.ctx);
     const path = pathOf(params.ctx);
     const { json, inputTokens } = measureRequest(params.body);

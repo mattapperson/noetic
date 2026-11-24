@@ -179,6 +179,15 @@ Budget limits (`maxCost`, `maxSteps`, `maxDuration`) are enforced by `until` pre
 
 Within a loop, the `until` predicate returns `{ stop: true, reason: 'Cost $5.12 exceeded budget $5.00' }` and the loop terminates normally. The `budget_exceeded` error is only thrown when there is no `until` predicate to catch the overage.
 
+## Durability Errors
+
+Durable execution (`23-durable-execution`) adds two `NoeticError` kinds, raised only when a turn runs under a lease:
+
+| Kind | Payload | Condition |
+|---|---|---|
+| `lease_lost` | `executionId`, `term`, `reason` | Another harness holds or took the thread's turn. Raised when the lease cannot be taken, and when a renewal or a ledger write shows it is gone. `executionId` is the thread id when the turn had no execution yet. |
+| `ledger_write_failed` | `executionId`, `path`, `cause: Error` | A step-ledger entry or the thread record could not be written, so the turn stopped. `path` is the ledger path, or `session:<threadId>`. |
+
 ## Connection Errors
 
 Connections (`35-connections`) and verification (`37-verification`) add `NoeticConfigError` codes for setup and validation (`CONNECTION_UNKNOWN`, `CONNECTION_UNSATISFIED`, `CONNECTION_NOT_ALLOWED`, `CONNECTION_INVALID`, `CONNECTION_TOOL_COLLISION`, `VERIFY_NOT_CONFIGURED`, `VERIFY_INVALID`) and `NoeticError` kinds for run-time failures (`connection_unavailable`, `connection_failed`, `connection_ref_invalid`, `connection_secret_refused`, `connection_input_required`, `connection_resume_refused`, `verify_act_failed`). Each spec's § Errors lists its codes and kinds with their conditions and payloads; this spec's rules apply to all of them.

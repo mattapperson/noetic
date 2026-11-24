@@ -43,12 +43,15 @@ const harness = new AgentHarness({
 | `createLocalShellAdapter()` | A `ShellAdapter` over the local shell. |
 | `createLocalSubprocessAdapter()` | A `SubprocessAdapter` with OS child-process lifecycle, POSIX signals, and unix-socket IPC. |
 | `createFileStorage()` | A file-backed `StorageAdapter`, for [durable execution](/docs/framework/durability). |
+| `createSqliteStorage({ database, table? })` | A `StorageAdapter` over one SQLite table. Pass an open `bun:sqlite`, `node:sqlite` or `better-sqlite3` database; the package imports no driver. |
 | `createDurableOutboundQueue()` | The durable outbound frame queue for out-of-process runs. |
 | `AgentIpcServer` / `AgentIpcClient` | Per-task IPC for live chat with a running agent. |
 | `createFileArtifactStore({ dir, retention? })` | The file-backed [artifact store](#file-artifact-store). |
 | `createWebhookReceiver(options?)` | An HTTP [webhook receiver](#webhook-receiver) for `mcp({ webhooks })`. |
 
 Runtime imports are Node built-ins only; there are no third-party runtime dependencies.
+
+Both storage adapters implement `swap`, so sessions on them run under a [turn lease](/docs/framework/durability#one-writer-per-turn).
 
 ### File Artifact Store
 

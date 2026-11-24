@@ -4,6 +4,8 @@ import {
   readdirSync,
   readFileSync,
   renameSync,
+  rmdirSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -79,6 +81,67 @@ function defaultRoot(): string {
   return path.join(home, '.noetic', 'checkpoints');
 }
 
+/** A lock older than this was left by a process that died holding it. */
+const STALE_LOCK_MS = 1e4;
+/** How long `swap` waits for another process's lock before giving up. */
+const LOCK_WAIT_MS = 2e3;
+
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
+ * Hold `lockDir` while `run` executes. `mkdir` is the atomic step: of two
+ * processes creating the same directory, one gets `EEXIST`.
+ */
+function withLock<T>(lockDir: string, run: () => T): T {
+  const deadline = Date.now() + LOCK_WAIT_MS;
+  for (;;) {
+    try {
+      mkdirSync(lockDir);
+      break;
+    } catch (err) {
+      if (!isExists(err)) {
+        throw err;
+      }
+      if (isStale(lockDir)) {
+        tryRemoveLock(lockDir);
+        continue;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(`createFileStorage: timed out waiting for the lock "${lockDir}".`);
+      }
+      sleepSync(2);
+    }
+  }
+  try {
+    return run();
+  } finally {
+    tryRemoveLock(lockDir);
+  }
+}
+
+function isExists(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && 'code' in err && err.code === 'EEXIST';
+}
+
+function isStale(lockDir: string): boolean {
+  try {
+    return Date.now() - statSync(lockDir).mtimeMs > STALE_LOCK_MS;
+  } catch {
+    // Released between the failed mkdir and here.
+    return false;
+  }
+}
+
+function tryRemoveLock(lockDir: string): void {
+  try {
+    rmdirSync(lockDir);
+  } catch {
+    // Already gone.
+  }
+}
+
 function ensureDir(dir: string): void {
   if (!existsSync(dir)) {
     mkdirSync(dir, {
@@ -121,9 +184,30 @@ export function createFileStorage(options: CreateFileStorageOptions = {}): Stora
     }
   }
 
+  function writeKey(file: string, encoded: string): void {
+    const tmp = `${file}.tmp`;
+    writeFileSync(tmp, encoded);
+    renameSync(tmp, file);
+  }
+
   return {
     async get<T>(key: string): Promise<T | null> {
       return readKey<T>(key);
+    },
+    // Compare-and-set under a per-key lock directory, so two processes sharing
+    // `root` cannot both win. Values compare by their JSON encoding.
+    async swap<T>(key: string, prev: T | null, next: T): Promise<boolean> {
+      ensureDir(root);
+      const file = keyToPath(root, key);
+      return withLock(`${file}.lock`, () => {
+        const stored = existsSync(file) ? readFileSync(file, 'utf8') : '';
+        const expected = prev === null ? '' : JSON.stringify(prev);
+        if (stored !== expected) {
+          return false;
+        }
+        writeKey(file, JSON.stringify(next));
+        return true;
+      });
     },
     async set<T>(key: string, value: T): Promise<void> {
       ensureDir(root);

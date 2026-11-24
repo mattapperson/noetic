@@ -24,6 +24,8 @@ export {
   resolveStepLedgerRetention,
   StepLedger,
 } from '../../runtime/durable/step-ledger';
+export type { TurnLeaseOptions } from '../../runtime/durable/turn-lease';
+export { canSwap, DEFAULT_LEASE_TTL_MS, TurnLease } from '../../runtime/durable/turn-lease';
 export type { EventBroadcaster } from '../../runtime/event-broadcaster';
 export { createInMemoryStorage } from '../../runtime/in-memory-storage';
 export { customItemGates } from '../../runtime/item-gates';

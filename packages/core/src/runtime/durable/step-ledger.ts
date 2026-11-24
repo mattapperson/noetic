@@ -34,8 +34,9 @@
 
 import type { StorageAdapter } from '@noetic-tools/context';
 import { storageGetMany } from '@noetic-tools/context';
-import { NoeticConfigError } from '@noetic-tools/types';
+import { NoeticConfigError, NoeticErrorImpl } from '@noetic-tools/types';
 import { z } from 'zod';
+import type { LedgerFence } from './turn-lease';
 
 //#region Entry
 
@@ -80,6 +81,13 @@ export const StepLedgerEntrySchema = z.object({
     )
     .optional(),
   completedAt: z.string(),
+  /**
+   * The lease term of the harness that wrote the entry (spec 23 § One writer per
+   * turn). Absent on storage that cannot compare-and-set. An entry with a lower term
+   * than one recorded before it was written by a harness that had been replaced, and
+   * is ignored.
+   */
+  term: z.number().int().nonnegative().optional(),
 });
 
 /** @public A completed step recorded for replay. */
@@ -256,12 +264,39 @@ export interface StepLedgerWindow {
 export interface StepLedgerStore {
   /** Record a completed step. Sequence numbers order entries within an execution. */
   append: (executionId: string, seq: number, entry: StepLedgerEntry) => Promise<void>;
+  /**
+   * Record a completed step only when nothing holds its sequence number. Resolves
+   * undefined when the entry was stored, else what is in the way. Present only on
+   * storage that can compare-and-set.
+   */
+  claim?: (
+    executionId: string,
+    seq: number,
+    entry: StepLedgerEntry,
+  ) => Promise<StepLedgerClaimConflict | undefined>;
+  /** Replace what `claim` found in the way. Resolves false when it changed meanwhile. */
+  replace?: (at: StepLedgerSlot, conflict: StepLedgerClaimConflict) => Promise<boolean>;
   /** Drop one entry by sequence number. No-op when the key is absent. */
   delete: (executionId: string, seq: number) => Promise<void>;
   /** Everything recorded for an execution, plus its sequence bounds. */
   load: (executionId: string) => Promise<StepLedgerWindow>;
   /** Drop an execution's ledger (paired with `CheckpointStore.clear`). */
   clear: (executionId: string) => Promise<void>;
+}
+
+/** @public An entry and the sequence number it goes at. */
+export interface StepLedgerSlot {
+  readonly executionId: string;
+  readonly seq: number;
+  readonly entry: StepLedgerEntry;
+}
+
+/** @public What already held a sequence number a ledger tried to claim. */
+export interface StepLedgerClaimConflict {
+  /** The stored value, as read. */
+  readonly raw: unknown;
+  /** Its lease term, or undefined when it carries none or does not parse. */
+  readonly term: number | undefined;
 }
 
 /** Zero-pad so lexicographic key order matches dispatch order under `list()`. */
@@ -281,10 +316,28 @@ function seqFromKey(executionId: string, key: string): number | null {
 
 export function createStepLedgerStore(opts: { storage: StorageAdapter }): StepLedgerStore {
   const { storage } = opts;
+  const swap = storage.swap?.bind(storage);
   return {
     append: async (executionId, seq, entry) => {
       await storage.set(seqKey(executionId, seq), entry);
     },
+    ...(swap
+      ? {
+          claim: async (executionId, seq, entry) => {
+            const key = seqKey(executionId, seq);
+            if (await swap(key, null, entry)) {
+              return undefined;
+            }
+            const raw = await storage.get<unknown>(key);
+            const parsed = StepLedgerEntrySchema.safeParse(raw);
+            return {
+              raw,
+              term: parsed.success ? parsed.data.term : undefined,
+            };
+          },
+          replace: (at, conflict) => swap(seqKey(at.executionId, at.seq), conflict.raw, at.entry),
+        }
+      : {}),
     delete: async (executionId, seq) => {
       await storage.delete(seqKey(executionId, seq));
     },
@@ -297,6 +350,9 @@ export function createStepLedgerStore(opts: { storage: StorageAdapter }): StepLe
       /* The next sequence number comes from the KEYS, not the parsed rows: a row that
        * fails to parse still occupies its key, so it must not be handed back out. */
       let highestSeq = -1;
+      /* The highest lease term seen so far, in sequence order. An entry with a lower
+       * term after it came from a harness that had already been replaced. */
+      let highestTerm = -1;
       const seqs = new Map<string, number>();
       // Walk the keys sorted: `seqKey`'s zero-padding makes key order dispatch order,
       // and a later entry at a path must win over an earlier one.
@@ -318,6 +374,11 @@ export function createStepLedgerStore(opts: { storage: StorageAdapter }): StepLe
           console.warn(`StepLedger: discarding unreadable entry "${key}": ${parsed.error.message}`);
           continue;
         }
+        const term = parsed.data.term;
+        if (term !== undefined && term < highestTerm) {
+          continue;
+        }
+        highestTerm = Math.max(highestTerm, term ?? -1);
         entries.set(parsed.data.path, parsed.data);
         seqs.set(parsed.data.path, seq);
       }
@@ -383,6 +444,8 @@ export class StepLedger {
   private readonly store?: StepLedgerStore;
   private readonly executionId: string;
   private readonly retention: Required<StepLedgerRetention>;
+  /** The lease this execution writes under, once the turn has taken one. */
+  private held: LedgerFence | undefined;
   private readonly counts: StepLedgerStats = {
     recorded: 0,
     droppedOversize: 0,
@@ -421,6 +484,23 @@ export class StepLedger {
       this.live.set(path, seq);
     }
     this.seq = Math.max(this.seq, recovered.nextSeq);
+  }
+
+  /**
+   * Write under `fence` from here on: entries carry its term, a sequence number is
+   * claimed rather than set, and a write that fails stops the turn instead of being
+   * logged (spec 23 § One writer per turn, § Fail-stop).
+   */
+  fence(fence: LedgerFence): void {
+    this.held = fence;
+  }
+
+  /**
+   * Throws `lease_lost` when this execution writes under a lease it no longer holds.
+   * Called before a paid dispatch, so a replaced harness stops before it spends.
+   */
+  assertHeld(): void {
+    this.held?.assert();
   }
 
   /** True when this execution has nothing recovered to replay (the common, fresh case). */
@@ -472,14 +552,25 @@ export class StepLedger {
   /**
    * Record a completed step, then prune what it makes dead: a resumed run replays this
    * entry without descending, so nothing recorded beneath it will be read again.
-   * Best-effort: a failed write costs resumability, not the run. Resolves whether
-   * the entry was stored.
+   * Without a lease this is best-effort: a failed write costs resumability, not the
+   * run. Resolves whether the entry was stored.
+   *
+   * @throws NoeticError `lease_lost` when the write shows another harness took the turn.
+   * @throws NoeticError `ledger_write_failed` when, under a lease, the write fails.
    */
   async record(recorded: StepLedgerEntry): Promise<boolean> {
     if (!this.store) {
       return false;
     }
-    const entry = this.withConnections(recorded);
+    this.held?.assert();
+    const entry = this.withConnections(
+      this.held
+        ? {
+            ...recorded,
+            term: this.held.term,
+          }
+        : recorded,
+    );
     if (!this.retainable(entry)) {
       return false;
     }
@@ -489,8 +580,18 @@ export class StepLedger {
     const seq = this.seq;
     this.seq = seq + 1;
     try {
-      await this.store.append(this.executionId, seq, entry);
+      await this.write(seq, entry);
     } catch (error) {
+      if (this.held) {
+        throw error instanceof NoeticErrorImpl
+          ? error
+          : new NoeticErrorImpl({
+              kind: 'ledger_write_failed',
+              executionId: this.executionId,
+              path: entry.path,
+              cause: error instanceof Error ? error : new Error(String(error)),
+            });
+      }
       console.warn(
         `StepLedger: failed to record "${entry.path}":`,
         error instanceof Error ? error.message : String(error),
@@ -508,6 +609,38 @@ export class StepLedger {
       await this.prune(this.live.beneath(entry.path));
     }
     return true;
+  }
+
+  /**
+   * Store `entry` at `seq`. Under a lease the sequence number is claimed: finding
+   * an entry there from a higher term means this harness was replaced, and one from
+   * a lower term is a replaced harness's late write, which this one overwrites.
+   */
+  private async write(seq: number, entry: StepLedgerEntry): Promise<void> {
+    const store = this.store;
+    if (!store) {
+      return;
+    }
+    const fence = this.held;
+    if (!fence || !store.claim || !store.replace) {
+      await store.append(this.executionId, seq, entry);
+      return;
+    }
+    const conflict = await store.claim(this.executionId, seq, entry);
+    if (!conflict) {
+      return;
+    }
+    if (conflict.term !== undefined && conflict.term >= fence.term) {
+      throw fence.lose(`ledger entry ${seq} was written at term ${conflict.term}`);
+    }
+    const slot = {
+      executionId: this.executionId,
+      seq,
+      entry,
+    };
+    if (!(await store.replace(slot, conflict))) {
+      throw fence.lose(`ledger entry ${seq} changed while it was being replaced`);
+    }
   }
 
   /** Drop the entry recorded at `path`, when there is one. */

@@ -68,6 +68,12 @@ export {
   type ProcessSignaller,
   type SubprocessSignal,
 } from './local-subprocess-adapter';
+export type {
+  CreateSqliteStorageOptions,
+  SqliteDatabase,
+  SqliteStatement,
+} from './sqlite-storage';
+export { createSqliteStorage } from './sqlite-storage';
 export {
   type CreateWebhookReceiverOptions,
   createWebhookReceiver,

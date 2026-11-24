@@ -56,11 +56,13 @@ import type {
   SessionStore,
   StepLedgerRetention,
   StepLedgerStore,
+  TurnLeaseOptions,
 } from './deps/runtime';
 import {
   buildItemStream,
   ChannelStore,
   ContextImpl,
+  canSwap,
   captureCheckpoint,
   clearCheckpoint,
   collectContextTree,
@@ -69,6 +71,7 @@ import {
   createSpendLog,
   createStepLedgerStore,
   customItemGates,
+  DEFAULT_LEASE_TTL_MS,
   Drains,
   filterReasoningStream,
   filterTextStream,
@@ -80,6 +83,7 @@ import {
   SessionRunner,
   StepLedger,
   snapshotCwdState,
+  TurnLease,
 } from './deps/runtime';
 import type {
   AcpLiveSession,
@@ -145,7 +149,7 @@ import type {
   WriteOffSpendOptions,
 } from './deps/types';
 import { SteeringAction } from './deps/types';
-import type { AgentHarnessOpts } from './harness-options';
+import type { AgentHarnessOpts, TurnLeaseConfig } from './harness-options';
 import { resolveCheckpointStore, resolveEnvironmentAdapters } from './harness-options';
 import { createHarnessSpan, recordChannelWarning, resolveTraceExporter } from './harness-tracing';
 import { LlmGateway } from './llm-client';
@@ -162,11 +166,30 @@ interface Session {
   accumulatedItems: Item[];
   /** The thread's stored session, when durability is on — then the only record. */
   readonly record?: ThreadRecord;
+  /** The lease the turn in flight runs under, when storage can compare-and-set. */
+  lease?: TurnLease;
 }
 
 //#endregion
 
 const DEFAULT_THREAD_ID = '__default__';
+
+/** Lease settings for sessions on `storage`, or none when it cannot compare-and-set. */
+function resolveLeaseOptions(
+  storage: StorageAdapter | undefined,
+  config: TurnLeaseConfig | undefined,
+): TurnLeaseOptions | undefined {
+  if (!canSwap(storage)) {
+    return undefined;
+  }
+  return {
+    storage,
+    holder: config?.holder ?? crypto.randomUUID(),
+    ttlMs: config?.ttlMs ?? DEFAULT_LEASE_TTL_MS,
+    waitMs: config?.waitMs ?? config?.ttlMs ?? DEFAULT_LEASE_TTL_MS,
+    now: config?.now ?? Date.now,
+  };
+}
 /** Default idle-timeout for a single model call's streaming response. Chosen to be
  *  long enough that slow models aren't falsely aborted, but short enough that a
  *  stalled SSE becomes a visible error rather than a silent hang. */
@@ -274,6 +297,8 @@ export class AgentHarness<
   >();
   /** Stored sessions for `execute()` threads. Present exactly when durability is on. */
   private readonly sessionStore?: SessionStore;
+  /** Set when sessions are durable and storage can compare-and-set. */
+  private readonly leaseOptions?: TurnLeaseOptions;
   /** Checkpoint capture in flight per execution id — see `saveCheckpoint`. */
   private readonly pendingCheckpoints = new Map<string, Promise<boolean>>();
   private readonly defaultDeliveryMode: DeliveryMode;
@@ -403,6 +428,10 @@ export class AgentHarness<
     this.sessionStore = this.checkpointStore
       ? createSessionStore(this.config.storage ?? createInMemoryStorage())
       : undefined;
+    this.leaseOptions = resolveLeaseOptions(
+      this.sessionStore ? this.config.storage : undefined,
+      storageEnv?.lease,
+    );
     this.spend = this.checkpointStore
       ? this.createSpend(this.config.storage ?? createInMemoryStorage())
       : undefined;
@@ -744,97 +773,26 @@ export class AgentHarness<
         // are ignored. `deliveryMode` is resolved per-message at enqueue
         // time and doesn't apply here.
         createContext: async (items, _turnId, messages) => {
-          const perTurnOptions: ExecuteOptions = messages[0]?.options ?? {};
-          const messageIds = messages.map((m) => m.id);
-          const history = record ? await record.history() : session.accumulatedItems;
-          const graph = this.agentGraph ? frameworkCast<Step>(this.agentGraph) : undefined;
-          const views = this.#connections.turnViews(perTurnOptions.connections, graph);
-          // A re-delivery of a cut-off turn's messages picks that turn up where it died.
-          const resumed = await record?.resume(messageIds, {
-            state: perTurnOptions.state,
-            contextLayers: perTurnOptions.contextLayers,
-            _broadcaster: session.runner.broadcaster,
-          });
-          const ctx =
-            resumed ??
-            this.createContext({
-              items: [
-                ...history,
-                ...items,
-              ],
-              threadId,
-              resourceId: perTurnOptions.resourceId,
-              state: perTurnOptions.state,
-              contextLayers: perTurnOptions.contextLayers,
-              extraContextLayers: perTurnOptions.extraContextLayers,
-              _connectionViews: views.layers,
-              _broadcaster: session.runner.broadcaster,
-            });
-          // A resumed context was made without the turn's view layers.
-          if (!resumed) {
-            views.bind(ctx);
+          // One harness drives a thread's turn: take its lease before reading anything.
+          const lease =
+            record && this.leaseOptions
+              ? await TurnLease.take(this.leaseOptions, threadId)
+              : undefined;
+          record?.hold(lease);
+          session.lease = lease;
+          try {
+            return await buildTurnContext(items, messages, lease);
+          } catch (error) {
+            await this.releaseLease(session);
+            throw error;
           }
-          frameworkCast<Context & SessionCtxExtension>(ctx)._sessionQueue = session.runner.queue;
-          await this.start();
-          const connectionTools = await this.#connections.openTurn(
-            ctx,
-            perTurnOptions.connections,
-            graph,
-          );
-          if (this.agentGraph || this.harnessTools.length > 0 || connectionTools.length > 0) {
-            const stepTools = this.agentGraph ? collectAllTools(this.agentGraph) : [];
-            this.setUnifiedTools(ctx, [
-              ...stepTools,
-              ...this.harnessTools,
-              ...connectionTools,
-            ]);
-          }
-          // Steers the last harness accepted but never applied go back in the queue;
-          // ones already in the conversation are skipped when offered.
-          for (const steer of (await record?.steers()) ?? []) {
-            const queued = session.runner.queue.peekAll().some((m) => m.id === steer.id);
-            if (!queued && !messageIds.includes(steer.id)) {
-              session.runner.queue.enqueue(steer);
-            }
-          }
-          await record?.begin(ctx, messageIds);
-          return ctx;
         },
         runTurn: async (ctx, _turn, signal) => {
-          if (!this.agentGraph) {
-            await this.#connections.release(ctx.id);
-            throw new NoeticConfigError({
-              code: 'NO_STEP_CONFIGURED',
-              message: 'No agentGraph configured on this harness.',
-              hint: 'Pass `agentGraph` in constructor options.',
-            });
+          try {
+            return await runTurn(ctx, signal);
+          } finally {
+            await this.releaseLease(session);
           }
-          // Wire signal-abort to context-abort so the interpreter bails cleanly.
-          if (signal.aborted) {
-            ctx.abort(signal.reason ? String(signal.reason) : 'aborted');
-          } else {
-            signal.addEventListener(
-              'abort',
-              () => {
-                ctx.abort(signal.reason ? String(signal.reason) : 'aborted');
-              },
-              {
-                once: true,
-              },
-            );
-          }
-          const result = await this.initAndRun(this.agentGraph, '', ctx).catch(
-            async (error: unknown) => {
-              // An interrupted turn restarts from what it finished, so the
-              // interrupting message lands after the work it interrupted.
-              if (ctx.abortReason === INTERRUPT_REASON) {
-                await keepHistory(ctx);
-              }
-              throw error;
-            },
-          );
-          await keepHistory(ctx);
-          return result;
         },
         // Stored totals are the session's usage; the runner only mirrors them.
         onTurnUsage: record
@@ -845,11 +803,125 @@ export class AgentHarness<
       }),
     };
 
+    const buildTurnContext = async (
+      items: ReadonlyArray<Item>,
+      messages: ReadonlyArray<QueuedMessage>,
+      lease: TurnLease | undefined,
+    ): Promise<Context> => {
+      const perTurnOptions: ExecuteOptions = messages[0]?.options ?? {};
+      const messageIds = messages.map((m) => m.id);
+      const history = record ? await record.history() : session.accumulatedItems;
+      const graph = this.agentGraph ? frameworkCast<Step>(this.agentGraph) : undefined;
+      const views = this.#connections.turnViews(perTurnOptions.connections, graph);
+      // A re-delivery of a cut-off turn's messages picks that turn up where it died.
+      const resumed = await record?.resume(messageIds, {
+        state: perTurnOptions.state,
+        contextLayers: perTurnOptions.contextLayers,
+        _broadcaster: session.runner.broadcaster,
+      });
+      const ctx =
+        resumed ??
+        this.createContext({
+          items: [
+            ...history,
+            ...items,
+          ],
+          threadId,
+          resourceId: perTurnOptions.resourceId,
+          state: perTurnOptions.state,
+          contextLayers: perTurnOptions.contextLayers,
+          extraContextLayers: perTurnOptions.extraContextLayers,
+          _connectionViews: views.layers,
+          _broadcaster: session.runner.broadcaster,
+        });
+      if (lease) {
+        lease.bind(ctx.id);
+        if (ctx instanceof ContextImpl) {
+          ctx.ledger?.fence(lease);
+        }
+        lease.keep((reason) => ctx.abort(`lease_lost: ${reason}`));
+      }
+      // A resumed context was made without the turn's view layers.
+      if (!resumed) {
+        views.bind(ctx);
+      }
+      frameworkCast<Context & SessionCtxExtension>(ctx)._sessionQueue = session.runner.queue;
+      await this.start();
+      const connectionTools = await this.#connections.openTurn(
+        ctx,
+        perTurnOptions.connections,
+        graph,
+      );
+      if (this.agentGraph || this.harnessTools.length > 0 || connectionTools.length > 0) {
+        const stepTools = this.agentGraph ? collectAllTools(this.agentGraph) : [];
+        this.setUnifiedTools(ctx, [
+          ...stepTools,
+          ...this.harnessTools,
+          ...connectionTools,
+        ]);
+      }
+      // Steers the last harness accepted but never applied go back in the queue;
+      // ones already in the conversation are skipped when offered.
+      for (const steer of (await record?.steers()) ?? []) {
+        const queued = session.runner.queue.peekAll().some((m) => m.id === steer.id);
+        if (!queued && !messageIds.includes(steer.id)) {
+          session.runner.queue.enqueue(steer);
+        }
+      }
+      await record?.begin(ctx, messageIds);
+      return ctx;
+    };
+
+    const runTurn = async (ctx: Context, signal: AbortSignal): Promise<string> => {
+      if (!this.agentGraph) {
+        await this.#connections.release(ctx.id);
+        throw new NoeticConfigError({
+          code: 'NO_STEP_CONFIGURED',
+          message: 'No agentGraph configured on this harness.',
+          hint: 'Pass `agentGraph` in constructor options.',
+        });
+      }
+      // Wire signal-abort to context-abort so the interpreter bails cleanly.
+      if (signal.aborted) {
+        ctx.abort(signal.reason ? String(signal.reason) : 'aborted');
+      } else {
+        signal.addEventListener(
+          'abort',
+          () => {
+            ctx.abort(signal.reason ? String(signal.reason) : 'aborted');
+          },
+          {
+            once: true,
+          },
+        );
+      }
+      const result = await this.initAndRun(this.agentGraph, '', ctx).catch(
+        async (error: unknown) => {
+          // An interrupted turn restarts from what it finished, so the
+          // interrupting message lands after the work it interrupted.
+          if (ctx.abortReason === INTERRUPT_REASON) {
+            await keepHistory(ctx);
+          }
+          throw error;
+        },
+      );
+      await keepHistory(ctx);
+      return result;
+    };
+
     this.sessions.set(threadId, session);
     if (record) {
       void record.usage().then((usage) => session.runner.seedUsage(usage));
     }
     return session;
+  }
+
+  /** Hand the turn's lease back and return the thread record to best-effort writes. */
+  private async releaseLease(session: Session): Promise<void> {
+    const lease = session.lease;
+    session.lease = undefined;
+    session.record?.hold(undefined);
+    await lease?.release();
   }
 
   /** The stored record for `threadId`, when durability is on. */

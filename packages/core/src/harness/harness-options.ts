@@ -72,6 +72,33 @@ export interface StorageEnvironmentConfig {
    * never correctness.
    */
   stepLedgerRetention?: StepLedgerRetention;
+  /**
+   * The turn lease (spec 23 § One writer per turn). Used only when `adapter`
+   * implements `swap`: each session turn then takes its thread's lease, so two
+   * harnesses on one storage cannot both drive a turn, and a failed durable write
+   * stops the turn instead of being logged.
+   */
+  lease?: TurnLeaseConfig;
+}
+
+/** @public Settings for the turn lease. Every field has a default. */
+export interface TurnLeaseConfig {
+  /** This harness's name in the lease record. Default: a random id per harness. */
+  holder?: string;
+  /**
+   * How long a lease lasts between renewals, in ms. It is renewed every third of
+   * this while a turn runs; a harness that goes quiet for longer can be replaced.
+   * Default `DEFAULT_LEASE_TTL_MS` (30 s).
+   */
+  ttlMs?: number;
+  /**
+   * How long a turn waits for a lease another harness holds, in ms, before it fails
+   * with `lease_lost`. A holder that died stops renewing, so waiting one `ttlMs`
+   * is enough to take over from it. Default: `ttlMs`.
+   */
+  waitMs?: number;
+  /** The clock leases are timed by. Default `Date.now`. */
+  now?: () => number;
 }
 
 /**

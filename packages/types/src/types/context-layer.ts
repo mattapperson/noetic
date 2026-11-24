@@ -176,6 +176,20 @@ export interface StorageAdapter {
    * something was missing.
    */
   getMany?<T>(keys: string[]): Promise<Map<string, T>>;
+  /**
+   * Compare-and-set: store `next` at `key` only when what is stored there now
+   * equals `prev`, and resolve whether it did. `prev: null` means "nothing is
+   * stored", so `swap(key, null, next)` creates the key or loses to whoever
+   * created it first. Values compare by their JSON encoding.
+   *
+   * The check and the write must be one atomic step for every process that
+   * shares the storage: this is what lets two harnesses contend for one turn
+   * and exactly one win (spec 23 § One writer per turn).
+   *
+   * Optional. A harness on storage without it runs as before: durable, but
+   * with nothing stopping a second harness from driving the same turn.
+   */
+  swap?<T>(key: string, prev: T | null, next: T): Promise<boolean>;
 }
 
 /** @public Scope-namespaced storage interface provided to context layer init hooks. */

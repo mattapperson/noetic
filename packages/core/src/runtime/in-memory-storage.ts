@@ -3,6 +3,16 @@ import { frameworkCast } from '@noetic-tools/types';
 
 //#region Public API
 
+/** @public Options for `createInMemoryStorage`. */
+export interface CreateInMemoryStorageOptions {
+  /**
+   * Implement `swap`, so harnesses sharing this storage take turn leases (spec 23
+   * § One writer per turn). Off by default: the Map lives in one process, where a
+   * lease only matters to a test that puts two harnesses on one storage.
+   */
+  swap?: boolean;
+}
+
 /**
  * @public Process-local, Map-backed StorageAdapter.
  *
@@ -10,8 +20,29 @@ import { frameworkCast } from '@noetic-tools/types';
  * for the lifetime of the Map (i.e., this harness instance). Durable backends
  * must be supplied explicitly by the caller.
  */
-export function createInMemoryStorage(): StorageAdapter {
+export function createInMemoryStorage(options?: CreateInMemoryStorageOptions): StorageAdapter {
   const store = new Map<string, unknown>();
+  const base = inMemoryAdapter(store);
+  if (!options?.swap) {
+    return base;
+  }
+  return {
+    ...base,
+    // Single-threaded: nothing runs between the compare and the write.
+    async swap<T>(key: string, prev: T | null, next: T): Promise<boolean> {
+      const stored = store.get(key);
+      const matches =
+        prev === null ? stored === undefined : JSON.stringify(stored) === JSON.stringify(prev);
+      if (!matches) {
+        return false;
+      }
+      store.set(key, next);
+      return true;
+    },
+  };
+}
+
+function inMemoryAdapter(store: Map<string, unknown>): StorageAdapter {
   return {
     async get<T>(key: string): Promise<T | null> {
       const val = store.get(key);

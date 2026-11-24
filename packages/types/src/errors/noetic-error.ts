@@ -86,6 +86,10 @@ function formatMessage(error: NoeticError): string {
       return `Connection '${error.connection}' needs input nobody could give: ${error.request.message}`;
     case 'connection_resume_refused':
       return `Connection '${error.connection}' cannot be resumed: ${error.reason}`;
+    case 'lease_lost':
+      return `Execution '${error.executionId}' lost its lease at term ${error.term}: ${error.reason}`;
+    case 'ledger_write_failed':
+      return `Execution '${error.executionId}' could not record '${error.path}': ${error.cause.message}`;
     case 'verify_act_failed':
       return `Verify '${error.stepId}' act failed: ${error.cause.message}`;
     default: {

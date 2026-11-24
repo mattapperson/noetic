@@ -107,6 +107,44 @@ Snapshots are keyed by `executionId` under a single storage key (`execution:<id>
 
 A failing `store.save` is logged via `console.warn` and swallowed. **A failing checkpoint never aborts an otherwise-successful step.** Durability is a best-effort recovery mechanism, not a correctness invariant of the current turn. Because history is rebuilt from the step ledger, a stale snapshot costs only the live parts (layer folds, state, usage) since its capture. A run whose end-of-run snapshot fails keeps its ledger, since the stored snapshot still points at that run's start.
 
+## One writer per turn
+
+Two harnesses on one storage can reach for the same thread's turn: a host that restarted while the old process was still alive, or two workers handed the same message. A **turn lease** makes exactly one of them its writer.
+
+The lease needs storage that can compare-and-set:
+
+```typescript
+interface StorageAdapter {
+  // Store `next` only when what is stored equals `prev` (`null`: nothing stored).
+  swap?<T>(key: string, prev: T | null, next: T): Promise<boolean>;
+}
+```
+
+`swap` is optional. The check and the write must be one atomic step for every process sharing the storage, and values compare by their JSON encoding. A harness whose storage has no `swap` behaves as it always has: durable, with nothing stopping a second harness from driving the same turn.
+
+With `swap`, every session turn (`harness.execute()`) runs under a lease:
+
+- **The record.** `session:<threadId>:lease` holds `{ term, holder, heldUntil }`. `term` goes up by one each time the lease is taken.
+- **Taking it.** Before a turn reads anything, the harness swaps the record to `term + 1`. A lease another harness holds is waited on for up to `waitMs` (default: one `ttlMs`), which is long enough to take over from a holder that died; if it is still held then, the turn fails with `lease_lost`.
+- **Keeping it.** The holder renews every third of `ttlMs` (default 30 s) while the turn runs, and hands the lease back when the turn ends, whether it finished or failed.
+- **Fencing.** Every step-ledger entry carries its writer's term, and a sequence number is claimed with `swap` rather than set. A harness that finds a higher term in its way has been replaced: it stops with `lease_lost` and its context is aborted. An entry from a lower term is a replaced harness's late write, and the current holder overwrites it. On load, an entry with a lower term than one before it in sequence order is ignored.
+- **Before paying.** The lease is checked before each paid dispatch, so a replaced harness stops before it spends again.
+- **The thread record.** The turn's own writes to `session:<threadId>` (recording the turn, storing its history) are refused once the lease is lost.
+
+Time decides only when a quiet holder may be replaced. The term decides whose writes count, so a clock that is wrong can delay a takeover but cannot let two writers through.
+
+`harness.run(step, input, ctx)` on a context the host built itself takes no lease; the host owns that execution's identity.
+
+Settings live under `environment.storage.lease`: `holder` (default: a random id per harness), `ttlMs`, `waitMs`, and `now`.
+
+### Fail-stop
+
+Under a lease, a durable write that fails stops the turn instead of being logged. A step-ledger entry or the thread record that cannot be written raises `ledger_write_failed`: the turn ends there, with everything before it recorded, rather than running on with work no resume could replay.
+
+Without a lease the rule in § Failure handling stands: writes are best-effort.
+
+The ledger's retention caps (`23a-step-level-resume` § Retention) are a policy, not a failure. An entry dropped for size or count is still dropped, and its step runs again on resume.
+
 ## Restore flow
 
 `harness.restore(executionId, opts?)` reverses a snapshot:
@@ -492,6 +530,7 @@ Both root defaults respect `NOETIC_HOME` (if set, the roots become `$NOETIC_HOME
 - Restart rediscovers running children and rebuilds the parent context for each.
 - IPC replay is exactly-once at the frame level when the client tracks `durableAck` correctly — no losses, no duplicates.
 - Schema version drift surfaces as a typed error, not silent corruption.
+- On storage with `swap`, one harness at a time writes a thread's turn (§ One writer per turn), and a failed durable write stops the turn (§ Fail-stop).
 - Every paid model call is recorded before it is sent. A call cut off after its response headers arrived is settled at the provider's exact cost once the provider has priced it; one cut off earlier is held at its ceiling. Neither is dropped by a discard (§ Paid dispatches).
 
 **What durable execution does not guarantee:**

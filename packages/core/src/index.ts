@@ -227,6 +227,8 @@ export { GenAI, NoeticAttr, NoeticEvent, ToolAttr } from './observability/genai-
 /** @public */
 export { InMemoryExporter, NoopExporter } from './observability/trace-exporter';
 /** @public */
+export type { CreateInMemoryStorageOptions } from './runtime/in-memory-storage';
+/** @public */
 export { createInMemoryStorage } from './runtime/in-memory-storage';
 
 //#endregion
@@ -252,6 +254,7 @@ export { AgentHarness } from './harness/agent-harness';
 export type {
   AgentEnvironmentConfig,
   StorageEnvironmentConfig,
+  TurnLeaseConfig,
 } from './harness/harness-options';
 /** @public */
 export type {
@@ -279,6 +282,8 @@ export {
   runnableLoop,
   seedFromItems,
 } from './runtime/durable';
+/** @public */
+export { DEFAULT_LEASE_TTL_MS } from './runtime/durable/turn-lease';
 /** @public */
 export { getRegistry, lookupStep, registerStep } from './runtime/step-registry';
 

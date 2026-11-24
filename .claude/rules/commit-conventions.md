@@ -66,14 +66,14 @@ to skip the workflow entirely.
 
 ## What Triggers an npm Release
 
-The `release-packages.yml` workflow runs on push to `main` or `next` when
-`packages/types/**`, `packages/memory/**`, `packages/core/**`, `biome.json`,
-or `bun.lock` changes. It releases the three packages as **sequential jobs in
-dependency order (types → memory → core)** — never in parallel, so the
+The `release-packages.yml` workflow runs on every push to `main` or `next`.
+It releases the publishable packages as **sequential jobs in dependency order**
+(types → context → acp → core → openui → mcp → agent-plugins → eval → chat-sdk
+→ platform-node → platform-browser → the profiles → verify) — never in parallel, so the
 `chore: release` commit each job pushes back to main can't strand a sibling,
 and a dependent never publishes pinned to a dependency version that isn't on
 npm yet. Each job:
-1. Runs lint, typecheck, build (plus dependency dists for memory/core)
+1. Runs lint, typecheck, build (plus the dists of the packages it depends on)
 2. Scans commits since the last `<pkg>-v*` tag (scoped to its package by
    `semantic-release-monorepo`)
 3. Determines the version bump from commit types — **minor** for breaking and

@@ -287,6 +287,43 @@ const response = await harness.getAgentResponse({ threadId });
 
 A turn that finished is not replayed when re-delivered — it runs again as a new turn — so acknowledge messages once their turn completes.
 
+### One Writer per Turn
+
+Two harnesses on one storage can reach for the same turn: a host that restarted while the old process was still running, or two workers handed the same message. On storage that implements `swap`, each turn runs under a **lease**, and exactly one of them writes.
+
+```ts validate=none
+import { Database } from 'bun:sqlite';
+import { AgentHarness } from '@noetic-tools/core';
+import { createSqliteStorage } from '@noetic-tools/platform-node';
+
+const harness = new AgentHarness({
+  name: 'support',
+  params: {},
+  agentGraph,
+  environment: {
+    storage: {
+      adapter: createSqliteStorage({ database: new Database('noetic.db') }),
+      lease: { ttlMs: 30_000 }, // optional; these are the defaults
+    },
+  },
+});
+```
+
+- **Taking over.** A harness that finds the turn held waits for the lease to run out, up to `waitMs` (default: one `ttlMs`). A holder that died stops renewing, so a restarted host picks its turn up without retrying. If the turn is still held after the wait, `getAgentResponse()` rejects with `lease_lost`.
+- **Being replaced.** A harness that stalled past its lease and came back finds a newer writer's term on its next ledger write, stops with `lease_lost`, and does not make another paid call.
+- **Failed writes stop the turn.** Under a lease, a ledger entry that cannot be written raises `ledger_write_failed` instead of a warning, so a turn never runs on with work a resume could not replay.
+
+`createFileStorage` and `createSqliteStorage` both implement `swap`. The in-memory adapter leaves it out unless you pass `createInMemoryStorage({ swap: true })`, which is for tests that put two harnesses on one storage. Storage without `swap` behaves as before.
+
+To add it to your own adapter, make the compare and the write one atomic step:
+
+```ts validate=none
+async swap<T>(key: string, prev: T | null, next: T): Promise<boolean> {
+  // prev === null: create the key only if it is absent.
+  // Otherwise: replace only if the stored value still equals prev.
+}
+```
+
 ### Paid Calls
 
 A model call cut off with its host — or by `cancel(ctx)`, a steer, or a dropped connection — finished nothing, so the ledger has no entry for it. The provider billed it anyway: a cut-off stream is billed for every token generated, even after the client went away. So every paid call leaves a **dispatch record** in storage before it is sent — each `callModel` round and each native `decide()` call:

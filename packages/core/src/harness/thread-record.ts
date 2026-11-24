@@ -9,7 +9,9 @@
  */
 
 import type { Context, ExecuteInput, Item, SessionUsage } from '@noetic-tools/types';
+import { NoeticErrorImpl } from '@noetic-tools/types';
 import type { SessionRecord } from '../runtime/durable/session-store';
+import type { LedgerFence } from '../runtime/durable/turn-lease';
 import type {
   QueuedMessage,
   RestoreCheckpointOptions,
@@ -46,11 +48,22 @@ const EMPTY_USAGE: SessionUsage = {
  */
 export class ThreadRecord {
   private queue: Promise<unknown> = Promise.resolve();
+  /** The lease the turn in flight runs under, when storage can compare-and-set. */
+  private fence: LedgerFence | undefined;
 
   constructor(
     private readonly host: ThreadRecordHost,
     private readonly threadId: string,
   ) {}
+
+  /**
+   * Run the turn's own writes (`begin`, `end`) under `fence`: a harness that lost
+   * the lease does not overwrite the record, and a write that fails stops the turn
+   * (spec 23 § One writer per turn, § Fail-stop). `undefined` goes back to best-effort.
+   */
+  hold(fence: LedgerFence | undefined): void {
+    this.fence = fence;
+  }
 
   /** The history the thread's next turn builds on: what storage holds, or none. */
   history(): Promise<Item[]> {
@@ -130,7 +143,7 @@ export class ThreadRecord {
    * delivers as input stop being steers: re-delivering the turn re-sends them.
    */
   begin(ctx: Context, messageIds: ReadonlyArray<string>): Promise<void> {
-    return this.update((record) => ({
+    return this.updateHeld(ctx, (record) => ({
       ...record,
       steers: record.steers?.filter((steer) => !messageIds.includes(steer.id)),
       turn: {
@@ -151,7 +164,7 @@ export class ThreadRecord {
     history: ReadonlyArray<Item>,
     queuedIds: ReadonlyArray<string>,
   ): Promise<void> {
-    await this.update((record) => ({
+    await this.updateHeld(ctx, (record) => ({
       ...withoutTurn(record),
       steers: record.steers?.filter((steer) => queuedIds.includes(steer.id)),
       items: [
@@ -180,6 +193,38 @@ export class ThreadRecord {
 
   private update(change: (record: SessionRecord) => SessionRecord): Promise<void> {
     return this.run(() => this.write(change));
+  }
+
+  /**
+   * A write the turn itself makes. Under a lease it is refused once the lease is
+   * lost, and a save that fails throws instead of being logged.
+   */
+  private updateHeld(
+    ctx: Context,
+    change: (record: SessionRecord) => SessionRecord,
+  ): Promise<void> {
+    const fence = this.fence;
+    if (!fence) {
+      return this.update(change);
+    }
+    return this.run(async () => {
+      fence.assert();
+      const record = change(
+        (await this.load()) ?? {
+          items: [],
+        },
+      );
+      try {
+        await this.host.store.save(this.threadId, record);
+      } catch (error) {
+        throw new NoeticErrorImpl({
+          kind: 'ledger_write_failed',
+          executionId: ctx.id,
+          path: `session:${this.threadId}`,
+          cause: error instanceof Error ? error : new Error(String(error)),
+        });
+      }
+    });
   }
 
   /** Read-modify-write the stored record. Call only from inside `run`. */

@@ -69,6 +69,7 @@ export { createLocalSubprocessAdapter } from './local-subprocess-adapter';
 
 // Durable execution glue
 export { createFileStorage } from './file-storage';
+export { createSqliteStorage } from './sqlite-storage';
 export { createDurableOutboundQueue } from './durable-outbound-queue';
 
 // Per-task IPC (see 08-runtime § Per-Task IPC for Live Chat)
@@ -195,6 +196,13 @@ Mechanical migration:
 - Importing `@noetic-tools/core` into a browser bundle must produce no `node:*` references in the output. Enforced by a CI test that bundles `@noetic-tools/core` with a browser target and fails on any `node:` specifier.
 - Importing `@noetic/platform-browser` similarly produces no `node:*` references.
 - Importing `@noetic-tools/platform-node` may reference `node:*`; bundling for a browser target surfaces the mismatch as a build-time error, which is the desired behaviour.
+
+## Storage
+
+Both Node storage adapters implement `StorageAdapter.swap` (`23-durable-execution` § One writer per turn), so sessions on them run under a turn lease.
+
+- **`createFileStorage({ root })`** — one JSON file per key. `swap` holds a per-key lock directory (`mkdir` is the atomic step) while it compares and writes, so processes sharing `root` agree. A lock older than 10 s was left by a process that died and is removed.
+- **`createSqliteStorage({ database, table? })`** — one row per key in one table (default `noetic_storage`, created when missing). `database` is an open handle the caller owns: a `Database` from `bun:sqlite`, a `DatabaseSync` from `node:sqlite`, or a `better-sqlite3` database. The package imports no SQLite driver. Each statement is atomic across the processes that open the file, and a write that fails throws.
 
 ## File Artifact Store
 
