@@ -230,11 +230,13 @@ new AgentHarness({ /* … */ environment: { storage: { adapter, stepLedgerRetent
 2. **Live entries.** Once `maxEntries` are live, nothing more is recorded. A resume walks the run from the top, so the head of the ledger is what it reads first: keeping the head and dropping what follows keeps every replayed value consistent with the ones before it.
 3. **Pruning.** When a step records, every entry beneath it is deleted: a resumed run replays the parent without descending, so they will never be read. The live count therefore tracks the open part of the run — the in-flight frontier and the finished siblings along it — rather than its length, and a parent may always record, since it frees its children.
 
+A pruned entry leaves a trail mark: its path, step id, kind, time, term, holder, flow version and receipt, without its output or items (`23-durable-execution` § The trail). Marks are never read on resume and do not count toward `maxEntries`.
+
 Every degradation reduces to one thing: a step with no entry re-runs. That costs work and repeats the step's effects, but never replays a value that disagrees with the recorded run. Retention is observable — `StepLedger.stats` counts what was recorded, dropped (oversize, unserialisable, full), and pruned — and the first drop of each kind warns.
 
 ## Clearing a ledger
 
-`harness.clearCheckpoint(executionId)` discards the snapshot **and** every ledger shard. Hosts need it when the workflow changed (see "coarsest completed granularity" above) and when an execution is abandoned; `CheckpointStore.clear` alone strands the ledger's shards.
+`harness.clearCheckpoint(executionId)` discards the snapshot **and** every ledger shard; trail marks stay. A harness that names a `version` does not need a clear when the flow changes: a resumed turn keeps what matches and stops as stuck rather than redo a recorded effect (`23-durable-execution` § Versions). Hosts need it when the workflow changed (see "coarsest completed granularity" above) and when an execution is abandoned; `CheckpointStore.clear` alone strands the ledger's shards.
 
 ## Schema
 

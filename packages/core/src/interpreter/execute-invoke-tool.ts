@@ -205,6 +205,9 @@ async function runInvokeTool<TContext, I, O>(
   // A durable tool is not repeated unasked (spec 23a § Tool calls in a round). An
   // intent with no result means a host died while it ran: a person says what happened.
   const durable = step.tool.durable === true;
+  if (durable && baseCtx instanceof ContextImpl) {
+    baseCtx.ledger?.noteEffect(baseCtx.currentDispatch()?.path);
+  }
   if (durable && (await holds.wasStarted(holdScope, holdId, held.argsHash))) {
     const answer = await holdAndWait({
       harness,

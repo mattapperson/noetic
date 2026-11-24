@@ -17,6 +17,7 @@ import type {
 import { SteerPoint } from '@noetic-tools/types';
 import { itemsToInput } from '../adapters/openrouter';
 import { isFunctionCall } from '../interpreter/typeguards';
+import { ContextImpl } from '../runtime/context-impl';
 import { drainsOf } from '../runtime/drain';
 import { heldCallsOf, heldScopeOf, mayWriteHolds, waitOnHeldCalls } from '../runtime/held-calls';
 import type { ApprovalOutcome } from '../runtime/tool-approval';
@@ -294,6 +295,10 @@ async function executeFunctionCall(
   const toolForCall = findTool(allowedTools, fc.name);
   // An earlier attempt of this round may have finished this call: go on with what
   // it produced instead of running the tool again.
+  // A durable tool's call marks its model step as having had a lasting effect.
+  if (toolForCall?.durable === true && request.ctx instanceof ContextImpl) {
+    request.ctx.ledger?.noteEffect(request.ctx.currentDispatch()?.path);
+  }
   // A tool that opts out of recording (`durable: false`) always runs again.
   const keeps = toolForCall?.durable !== false;
   const recorded = keeps ? params.calls?.take(fc) : undefined;

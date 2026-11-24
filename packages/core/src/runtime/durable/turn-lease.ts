@@ -55,6 +55,8 @@ export interface TurnLeaseOptions {
  */
 export interface LedgerFence {
   readonly term: number;
+  /** The holder's name in the lease, stamped on what it records. */
+  readonly holder?: string;
   /** Throws `lease_lost` once the lease is lost or has run past `heldUntil`. */
   assert(): void;
   /**
@@ -202,6 +204,10 @@ export class TurnLease implements LedgerFence {
 
   get term(): number {
     return this.record.term;
+  }
+
+  get holder(): string {
+    return this.record.holder;
   }
 
   /** Name the execution this lease serves, for the errors it raises. */

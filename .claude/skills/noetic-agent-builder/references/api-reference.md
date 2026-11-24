@@ -2140,6 +2140,18 @@ interface StorageAdapter {
 
 On storage with `swap` (`createFileStorage`, `createSqliteStorage`, `createInMemoryStorage({ swap: true })`), each `harness.execute()` turn takes its thread's lease: one harness writes a turn, a replaced harness stops with `lease_lost`, and a failed ledger write stops the turn with `ledger_write_failed`.
 
+### Flow versions and the trail
+
+```typescript
+new AgentHarness({ version: 'v2', /* … */ });   // any string you change when the flow changes
+harness.stuck(): Promise<StuckTurn[]>;          // { threadId, executionId, path, from, to }
+harness.settleStuck(scope, 'continue' | 'restart' | 'abandon'): Promise<boolean>;
+harness.trail(scope: { threadId } | { executionId }): Promise<TrailMark[]>;
+// TrailMark: { executionId, path, stepId, kind, completedAt, version?, term?, holder?, receipt? }
+```
+
+A turn resumed under another `version` keeps the steps that still match. If the first step that differs already had a lasting effect (a `once`/`effects` connection operation, or a `durable: true` tool), the turn stops with `NoeticError` `turn_stuck` and waits: `wake()` skips it until `settleStuck()`. Give an effect step a `replayKey` to keep it matching across edits. Trail marks outlive the ledger and `clearCheckpoint`.
+
 ### Held tool calls
 
 ```typescript

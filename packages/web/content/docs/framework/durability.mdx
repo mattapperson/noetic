@@ -377,6 +377,49 @@ const at = await harness.nextWake(); // when to call wake() next, or undefined
 
 Pass `now` to the harness to drive the clock yourself; wait deadlines, leases and wake times all read it.
 
+### Flow Versions
+
+Flows change while turns are in flight. Name the flow a harness runs with `version`, and a turn that resumes on a newer deploy moves forward to it:
+
+```ts validate=none
+const harness = new AgentHarness({
+  name: 'refunds',
+  version: 'v2', // a release tag, a hash: any string you change with the flow
+  // …
+});
+```
+
+- **What still matches is kept.** A step replays when its id, kind and input are what the new flow asks for. The turn runs live from the first difference.
+- **A recorded effect is never redone unasked.** If the first difference is a step that already had a lasting effect (a connection operation declared `once` or `effects`, or a `durable: true` tool), the turn stops with `turn_stuck` instead of running it again. `harness.wake()` leaves a stuck turn alone.
+
+You settle a stuck turn yourself:
+
+```ts validate=none
+for (const turn of await harness.stuck()) {
+  // { threadId, executionId, path, from: 'v1', to: 'v2' }
+  await harness.settleStuck({ threadId: turn.threadId }, 'continue');
+}
+```
+
+| Action | What happens |
+|---|---|
+| `continue` | Accept the difference. The turn resumes and the changed step runs again. |
+| `restart` | Forget what the turn recorded and run it from the top. Every step runs again, effects included. |
+| `abandon` | Drop the turn. Its trail is kept. |
+
+To keep an effect step matching across edits, give it a [`replayKey`](#replay-identity). Without `version`, a resumed turn discards whatever no longer matches and runs it again, as before.
+
+### The Trail
+
+`harness.trail()` lists what a run did, step by step: which flow version ran each step, which harness, and the receipt of a step with a lasting effect.
+
+```ts validate=none
+const marks = await harness.trail({ threadId: 'case-7' });
+// [{ executionId, path, stepId: 'charge', kind, completedAt, version: 'v1', term, holder, receipt }, …]
+```
+
+A mark outlives the ledger entry it came from: pruning an entry, finishing the run and `clearCheckpoint` all leave it. Marks live under `execution:<id>:trail:` in your storage, and core never deletes them; prune that prefix by age if you need to.
+
 ### Paid Calls
 
 A model call cut off with its host — or by `cancel(ctx)`, a steer, or a dropped connection — finished nothing, so the ledger has no entry for it. The provider billed it anyway: a cut-off stream is billed for every token generated, even after the client went away. So every paid call leaves a **dispatch record** in storage before it is sent — each `callModel` round and each native `decide()` call:

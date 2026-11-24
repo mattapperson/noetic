@@ -109,6 +109,12 @@ export async function executeCall<TContext, I, O>(
     ledgerKey: options.ledgerKey,
   });
   refuseWitnessAct(baseCtx, connection.resolved, step.op);
+  // An operation with a lasting effect marks its step: a turn resumed under another
+  // flow version will not throw that record away unasked (spec 23 § Versions).
+  const info = connection.resolved.manifest.operations[step.op];
+  if ((info?.once || info?.effects) && baseCtx instanceof ContextImpl) {
+    baseCtx.ledger?.noteEffect(baseCtx.currentDispatch()?.path);
+  }
   const signal = signalOf(baseCtx);
   const prior = await reconcilePending(connection, signal, baseCtx);
   const key = prior?.key ?? connection.idempotencyKey;

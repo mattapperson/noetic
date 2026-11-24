@@ -220,6 +220,15 @@ export interface AgentHarnessOpts<
    */
   emitItemsOnReplay?: boolean;
   /**
+   * The version of the flow this harness runs: any string the host changes when the
+   * flow changes, such as a release tag or a hash (spec 23 § Versions). Every step a
+   * run records carries it, so the trail shows which version handled each step. A
+   * turn resumed under another version keeps the steps that still match, and stops
+   * as stuck rather than redo one that had a lasting effect. Without it, a resumed
+   * turn discards whatever no longer matches, as before.
+   */
+  version?: string;
+  /**
    * The clock wait deadlines, turn leases and wake times are read from. Default
    * `Date.now`. A host that drives time itself (a test, a replay) passes its own.
    */

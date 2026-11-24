@@ -6,6 +6,8 @@ import type {
   DeadTriggerEvent,
   HeldCall,
   HeldResolution,
+  StuckTurn,
+  TrailMark,
 } from '@noetic-tools/types';
 import {
   CONNECTION_EVENT_ITEM_TYPE,
@@ -20,6 +22,7 @@ import { runEvery } from '../connections/settle';
 import { pendingTasksOf, resumableWaitsOf } from '../interpreter/connection-steps';
 import { AcpSessionStore } from '../runtime/acp-session-store';
 import { emitFrameworkEvent, getBroadcaster } from '../runtime/broadcaster-utils';
+import { stubOf } from '../runtime/durable/step-ledger';
 import { heldCallsOf, toHeldCall } from '../runtime/held-calls';
 import { awaitApproval } from '../runtime/tool-approval';
 import { ConnectionGate } from './connection-gate';
@@ -194,6 +197,25 @@ interface Session {
 
 const DEFAULT_THREAD_ID = '__default__';
 
+/** What a `turn_stuck` error says about where the turn stopped, or undefined for any other error. */
+function stuckOf(error: unknown):
+  | {
+      path: string;
+      from: string;
+      to: string;
+    }
+  | undefined {
+  if (!isNoeticError(error) || error.noeticError.kind !== 'turn_stuck') {
+    return undefined;
+  }
+  const { path, from, to } = error.noeticError;
+  return {
+    path,
+    from,
+    to,
+  };
+}
+
 function isLeaseLost(error: unknown): boolean {
   return isNoeticError(error) && error.noeticError.kind === 'lease_lost';
 }
@@ -346,6 +368,8 @@ export class AgentHarness<
   private readonly sessionStore?: SessionStore;
   /** Set when sessions are durable and storage can compare-and-set. */
   private readonly leaseOptions?: TurnLeaseOptions;
+  /** The flow version this harness runs, when the host names one. */
+  private readonly version?: string;
   /** Set when turns park (`environment.storage.park`): the grace before one does. */
   private readonly parkGraceMs?: number;
   /** Set when this harness wakes the turns it parked (`park.autoWake`). */
@@ -484,6 +508,7 @@ export class AgentHarness<
       now: opts.now,
       ...storageEnv?.lease,
     });
+    this.version = opts.version;
     this.parkGraceMs = resolveParkGrace(this.leaseOptions ? storageEnv?.park : undefined);
     this.parkWatchers = this.createParkWatchers(storageEnv?.park);
     this.spend = this.checkpointStore
@@ -958,6 +983,10 @@ export class AgentHarness<
           session.runner.queue.enqueue(steer);
         }
       }
+      // A stuck turn the host chose to go on with may discard what no longer matches.
+      if ((await record?.turn())?.accept && ctx instanceof ContextImpl) {
+        ctx.ledger?.acceptVersionLoss();
+      }
       await record?.begin(ctx, messageIds);
       return ctx;
     };
@@ -1013,6 +1042,13 @@ export class AgentHarness<
           }
           // The turn ended here, in a live process. Say so, or a routine wake would
           // take it for one cut off by a crash and run it again, every time.
+          // It stopped rather than redo a recorded effect under a newer flow version:
+          // it waits, marked, for the host to settle it.
+          const stuck = stuckOf(error);
+          if (record && stuck) {
+            await record.stick(ctx, stuck);
+            throw error;
+          }
           if (record && !isLeaseLost(error) && ctx.abortReason !== INTERRUPT_REASON) {
             await record.stop(
               ctx,
@@ -1066,7 +1102,8 @@ export class AgentHarness<
     const woken: string[] = [];
     for (const threadId of threadIds) {
       const turn = (await this.sessionStore.load(threadId))?.turn;
-      if (!turn) {
+      // A stuck turn waits for the host to settle it, however the wake was asked for.
+      if (!turn || turn.stuck) {
         continue;
       }
       // A routine wake leaves alone a parked turn that is not due, one with no
@@ -1192,6 +1229,111 @@ export class AgentHarness<
       });
     }
   }
+
+  //#region Versions and the trail
+
+  /**
+   * The turns that stopped rather than redo a step that had a lasting effect under
+   * another flow version (spec 23 § Versions). Each waits for `settleStuck`.
+   * @public
+   */
+  async stuck(): Promise<StuckTurn[]> {
+    if (!this.sessionStore) {
+      return [];
+    }
+    const found: StuckTurn[] = [];
+    for (const threadId of await this.sessionStore.threads()) {
+      const turn = (await this.sessionStore.load(threadId))?.turn;
+      if (!turn?.stuck) {
+        continue;
+      }
+      found.push({
+        threadId,
+        executionId: turn.executionId,
+        ...turn.stuck,
+      });
+    }
+    return found;
+  }
+
+  /**
+   * Settle a stuck turn (spec 23 § Versions). Resolves false when the thread has none.
+   *
+   * - `continue`: accept the difference. The turn resumes on this harness's
+   *   version, and the step that no longer matches runs again.
+   * - `restart`: forget what the turn recorded and run it from the top on this
+   *   harness's version. Every step runs again, effects included.
+   * - `abandon`: drop the turn. Its trail is kept.
+   * @public
+   */
+  async settleStuck(
+    scope: SessionScope | undefined,
+    action: 'continue' | 'restart' | 'abandon',
+  ): Promise<boolean> {
+    const threadId = scope?.threadId ?? DEFAULT_THREAD_ID;
+    const record = this.threadRecord(threadId);
+    const turn = await record?.settle(action);
+    if (!turn) {
+      return false;
+    }
+    if (action === 'abandon') {
+      await this.clearCheckpoint(turn.executionId);
+      return true;
+    }
+    if (action === 'restart') {
+      // The snapshot stays: it holds the turn's input. What the run recorded goes.
+      await this.stepLedgerStore?.clear(turn.executionId);
+      await heldCallsOf(this).clear(turn.executionId);
+      if (this.config.storage) {
+        await clearPendingEntries(this.config.storage, turn.executionId);
+      }
+    }
+    await this.wake({
+      threadId,
+    });
+    return true;
+  }
+
+  /**
+   * What a run did, step by step: who ran each step, under which flow version, and
+   * the receipt of a step with a lasting effect (spec 23 § The trail). Marks outlive
+   * the ledger entries they came from, so the trail of a finished run stays readable.
+   *
+   * `scope` names an execution, or a thread, whose recent turns are then listed in
+   * order.
+   * @public
+   */
+  async trail(scope: SessionScope | ExecutionScope): Promise<TrailMark[]> {
+    const store = this.stepLedgerStore;
+    if (!store) {
+      return [];
+    }
+    const executionIds =
+      'executionId' in scope
+        ? [
+            scope.executionId,
+          ]
+        : ((await this.threadRecord(scope.threadId ?? DEFAULT_THREAD_ID)?.executions()) ?? []);
+    const marks: TrailMark[] = [];
+    for (const executionId of executionIds) {
+      const kept = await store.trail(executionId);
+      const live = [
+        ...(await store.load(executionId)).entries.values(),
+      ].map(stubOf);
+      for (const mark of [
+        ...kept,
+        ...live,
+      ]) {
+        marks.push({
+          executionId,
+          ...mark,
+        });
+      }
+    }
+    return marks;
+  }
+
+  //#endregion
 
   //#region Triggers
 
@@ -1403,6 +1545,7 @@ export class AgentHarness<
     return new ThreadRecord(
       {
         store: this.sessionStore,
+        version: this.version,
         restore: (executionId, opts) => this.restore(executionId, opts),
         clearCheckpoint: (executionId) => this.clearCheckpoint(executionId),
         parseItems: (raw) => this.itemSchemas.parseMany(raw),
@@ -1857,6 +2000,14 @@ export class AgentHarness<
      * can be keyed to it — the ledger's storage keys and `ctx.id` must agree for a
      * later `restore()` to find what this run recorded. */
     const executionId = crypto.randomUUID();
+    const ledger = this.stepLedgerStore
+      ? new StepLedger({
+          executionId,
+          store: this.stepLedgerStore,
+          retention: this.stepLedgerRetention,
+        })
+      : undefined;
+    ledger?.runAs(this.version);
     return new ContextImpl({
       ...rest,
       id: executionId,
@@ -1868,13 +2019,7 @@ export class AgentHarness<
       // Without this `ctx.checkpoint()` is inert, and the boundaries below never
       // persist anything (a no-op when no CheckpointStore is configured).
       checkpointFn: (c) => this.checkpoint(c),
-      ledger: this.stepLedgerStore
-        ? new StepLedger({
-            executionId,
-            store: this.stepLedgerStore,
-            retention: this.stepLedgerRetention,
-          })
-        : undefined,
+      ledger,
     });
   }
 
@@ -2223,6 +2368,10 @@ export class AgentHarness<
     }
     if (restored.fromSnapshot) {
       this.restoredExecutions.add(executionId);
+    }
+    // The restored ledger is a new one: it records under this harness's version too.
+    if (restored.ctx instanceof ContextImpl) {
+      restored.ctx.ledger?.runAs(this.version);
     }
     await this.spend?.adopt(restored.ctx);
     // Granted only to the context this restore returns: a restore that fails, or a

@@ -142,6 +142,20 @@ export type NoeticError =
       cause: Error;
     }
   | {
+      /**
+       * A turn resumed under a newer flow version would have to redo a step that
+       * already had a lasting effect, so it stopped instead (spec 23 § Versions).
+       */
+      kind: 'turn_stuck';
+      executionId: string;
+      /** The ledger path of the step whose recorded effect no longer matches. */
+      path: string;
+      /** The version the step was recorded under. */
+      from: string;
+      /** The version the turn was resumed under. */
+      to: string;
+    }
+  | {
       /** An answer to a held tool call could not be taken (spec 08 § Held tool calls). */
       kind: 'hold_refused';
       callId: string;

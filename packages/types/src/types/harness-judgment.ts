@@ -146,3 +146,42 @@ export interface ToolHold {
 }
 
 //#endregion
+
+//#region Trail
+
+/**
+ * @public One step a run finished, as its trail keeps it (spec 23 § The trail):
+ * who ran it, under which flow version, and the receipt of what it did. A mark
+ * outlives the ledger entry it came from.
+ */
+export interface TrailMark {
+  readonly executionId: string;
+  /** The step's ledger path. */
+  readonly path: string;
+  readonly stepId: string;
+  readonly kind: string;
+  /** ISO time the step finished. */
+  readonly completedAt: string;
+  /** The flow version the step ran under, when the harness names one. */
+  readonly version?: string;
+  /** The lease term of the harness that ran it, on storage with `swap`. */
+  readonly term?: number;
+  /** That harness's name in the lease. */
+  readonly holder?: string;
+  /** The receipt of a step with a lasting effect, when its output carried one. */
+  readonly receipt?: unknown;
+}
+
+/** @public A turn that stopped rather than redo a recorded effect (spec 23 § Versions). */
+export interface StuckTurn {
+  readonly threadId: string;
+  readonly executionId: string;
+  /** The ledger path of the step whose recorded effect no longer matches. */
+  readonly path: string;
+  /** The version the step was recorded under. */
+  readonly from: string;
+  /** The version the turn was resumed under. */
+  readonly to: string;
+}
+
+//#endregion

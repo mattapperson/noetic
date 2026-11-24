@@ -201,6 +201,57 @@ A thread has one turn in flight. A message that arrives while that turn is parke
 
 Messages still queued in the process when a turn parks are moved to storage the same way.
 
+## Versions
+
+A flow changes while turns are in flight. `AgentHarnessOpts.version` names the flow a harness runs: any string the host changes when the flow changes, such as a release tag or a hash. Old versions do not stay deployed; a turn moves forward to the version that resumes it.
+
+- **Recorded.** The turn record stores the version the turn began under. Every ledger entry stores the version that recorded it.
+- **Resume keeps what still matches.** The ledger matches per step, by id, kind and input hash (`23a-step-level-resume` § Identity). A turn resumed under another version replays every entry the new flow still agrees with and runs live from the first difference.
+- **A recorded effect is not thrown away unasked.** An entry is marked `effect` when its step had a lasting effect: a `call` to a connection operation declared `once` or `effects`, or a `durable: true` tool, called by a model or by an `invokeTool` step. When a resume would discard such an entry recorded under a different version, the turn stops with `turn_stuck`, naming the step's path and both versions. Nothing is redone.
+- **Stuck turns wait for the host.** The turn record is marked `stuck`. `harness.wake()` skips it, and a re-delivery of its message stops the same way. `turn_stuck`, `lease_lost` and `ledger_write_failed` end the turn whichever step they surface in: a `run` step neither retries them nor wraps them in `step_failed`.
+
+```typescript
+harness.stuck(): Promise<StuckTurn[]>;   // { threadId, executionId, path, from, to }
+harness.settleStuck(scope, action: 'continue' | 'restart' | 'abandon'): Promise<boolean>;
+```
+
+| Action | What happens |
+|---|---|
+| `continue` | The host accepts the difference. The turn resumes on this harness's version and the step that no longer matches runs again. |
+| `restart` | The ledger, held calls and pending entries of the turn are cleared and it runs from the top on this harness's version. Every step runs again, effects included. The snapshot is kept: it holds the turn's input. |
+| `abandon` | The turn is dropped and its checkpoint cleared. Its trail is kept. The thread's next message starts a fresh turn. |
+
+`settleStuck` resolves `false` when the thread has no stuck turn.
+
+A harness that names no version behaves as it did before versions: a resumed turn discards whatever no longer matches and runs it again. An entry recorded under no version never makes a turn stuck.
+
+An author keeps an effect step matching across edits with `replayKey`, which keys its entry by a stable name instead of its position (`23a-step-level-resume` § `replayKey` and `durable: false`).
+
+## The trail
+
+The trail is what a run did, step by step, kept after the ledger that produced it is gone.
+
+```typescript
+harness.trail(scope: { threadId } | { executionId }): Promise<TrailMark[]>;
+
+interface TrailMark {
+  executionId: string;
+  path: string;        // the step's ledger path
+  stepId: string;
+  kind: string;
+  completedAt: string; // ISO time
+  version?: string;    // the flow version the step ran under
+  term?: number;       // the lease term of the harness that ran it
+  holder?: string;     // that harness's name in the lease
+  receipt?: unknown;   // the `receipt` field of the step's output, when it has one
+}
+```
+
+- A live ledger entry is read as a mark. When an entry is pruned (`23a-step-level-resume` § Retention) it leaves a mark behind under `execution:<id>:trail:<seq>`, without its output or items.
+- Marks do not count toward `maxEntries`.
+- A thread's trail covers its turn in flight and the finished turns it remembers for message dedupe (`08-runtime`).
+- Core never deletes a mark. `clearCheckpoint` leaves them; a host prunes the `execution:<id>:trail:` prefix by age when it wants to.
+
 ## Restore flow
 
 `harness.restore(executionId, opts?)` reverses a snapshot:

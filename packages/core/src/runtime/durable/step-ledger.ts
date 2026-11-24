@@ -89,7 +89,77 @@ export const StepLedgerEntrySchema = z.object({
    * is ignored.
    */
   term: z.number().int().nonnegative().optional(),
+  /** The lease holder that wrote the entry: the harness's name in its lease. */
+  holder: z.string().optional(),
+  /** The flow version the step ran under, when the harness names one (spec 23 § Versions). */
+  version: z.string().optional(),
+  /**
+   * The step, or one beneath it, had a lasting effect: a `durable` tool, or a
+   * connection operation marked `once` or `effects`. A turn resumed under another
+   * version stops rather than discard such an entry.
+   */
+  effect: z.boolean().optional(),
 });
+
+/** What a ledger entry leaves behind once it is pruned: its trail mark. */
+const TrailStubSchema = StepLedgerEntrySchema.pick({
+  path: true,
+  stepId: true,
+  kind: true,
+  completedAt: true,
+  term: true,
+  holder: true,
+  version: true,
+}).extend({
+  receipt: z.unknown().optional(),
+});
+
+/** @public A pruned entry's trail mark, as stored. */
+export type StepTrailStub = z.infer<typeof TrailStubSchema>;
+
+/** Storage key prefix of one execution's trail: what its pruned ledger entries left. */
+export function stepTrailPrefix(executionId: string): string {
+  return `execution:${executionId}:trail:`;
+}
+
+/** The receipt an effect's output carries, when it has one. */
+function receiptOf(output: unknown): unknown {
+  if (typeof output !== 'object' || output === null || !('receipt' in output)) {
+    return undefined;
+  }
+  return output.receipt;
+}
+
+/** The trail mark of an entry. */
+export function stubOf(entry: StepLedgerEntry): StepTrailStub {
+  const receipt = receiptOf(entry.output);
+  return {
+    path: entry.path,
+    stepId: entry.stepId,
+    kind: entry.kind,
+    completedAt: entry.completedAt,
+    ...(entry.term === undefined
+      ? {}
+      : {
+          term: entry.term,
+        }),
+    ...(entry.holder === undefined
+      ? {}
+      : {
+          holder: entry.holder,
+        }),
+    ...(entry.version === undefined
+      ? {}
+      : {
+          version: entry.version,
+        }),
+    ...(receipt === undefined
+      ? {}
+      : {
+          receipt,
+        }),
+  };
+}
 
 /** @public A completed step recorded for replay. */
 export type StepLedgerEntry = z.infer<typeof StepLedgerEntrySchema>;
@@ -279,6 +349,10 @@ export interface StepLedgerStore {
   replace?: (at: StepLedgerSlot, conflict: StepLedgerClaimConflict) => Promise<boolean>;
   /** Drop one entry by sequence number. No-op when the key is absent. */
   delete: (executionId: string, seq: number) => Promise<void>;
+  /** Keep the trail mark of an entry that is being pruned (spec 23 § The trail). */
+  mark: (executionId: string, seq: number, stub: StepTrailStub) => Promise<void>;
+  /** An execution's trail marks, oldest first. They outlive `clear`. */
+  trail: (executionId: string) => Promise<StepTrailStub[]>;
   /** Everything recorded for an execution, plus its sequence bounds. */
   load: (executionId: string) => Promise<StepLedgerWindow>;
   /** Drop an execution's ledger (paired with `CheckpointStore.clear`). */
@@ -341,6 +415,21 @@ export function createStepLedgerStore(opts: { storage: StorageAdapter }): StepLe
       : {}),
     delete: async (executionId, seq) => {
       await storage.delete(seqKey(executionId, seq));
+    },
+    mark: async (executionId, seq, stub) => {
+      await storage.set(`${stepTrailPrefix(executionId)}${String(seq).padStart(8, '0')}`, stub);
+    },
+    trail: async (executionId) => {
+      const keys = (await storage.list(stepTrailPrefix(executionId))).sort();
+      const raws = await storageGetMany<unknown>(storage, keys);
+      const marks: StepTrailStub[] = [];
+      for (const key of keys) {
+        const parsed = TrailStubSchema.safeParse(raws.get(key));
+        if (parsed.success) {
+          marks.push(parsed.data);
+        }
+      }
+      return marks;
     },
     load: async (executionId) => {
       const keys = await storage.list(stepLedgerPrefix(executionId));
@@ -449,6 +538,14 @@ export class StepLedger {
   readonly parking = new Parking();
   /** The lease this execution writes under, once the turn has taken one. */
   private held: LedgerFence | undefined;
+  /** The flow version entries are recorded under, when the harness names one. */
+  private version: string | undefined;
+  /** A host accepted that this resume may discard effects recorded under another version. */
+  private accepts = false;
+  /** Paths noted as having a lasting effect, until the entry there records. */
+  private readonly effects = new Set<string>();
+  /** Every live entry, by path: what its trail mark is made from when it is pruned. */
+  private readonly entries = new Map<string, StepLedgerEntry>();
   private readonly counts: StepLedgerStats = {
     recorded: 0,
     droppedOversize: 0,
@@ -479,8 +576,10 @@ export class StepLedger {
    */
   adopt(recovered: StepLedgerWindow): void {
     this.replayable.clear();
+    this.entries.clear();
     for (const [path, entry] of recovered.entries) {
       this.replayable.set(path, entry);
+      this.entries.set(path, entry);
     }
     this.live.clear();
     for (const [path, seq] of recovered.seqs) {
@@ -496,6 +595,33 @@ export class StepLedger {
    */
   fence(fence: LedgerFence): void {
     this.held = fence;
+  }
+
+  /** Record entries under flow version `version` from here on (spec 23 § Versions). */
+  runAs(version: string | undefined): void {
+    this.version = version;
+  }
+
+  /**
+   * Let this resume discard effects recorded under another version: the host looked
+   * at a stuck turn and chose to go on.
+   */
+  acceptVersionLoss(): void {
+    this.accepts = true;
+  }
+
+  /** Note that the step at `path` has a lasting effect; its entry is marked so. */
+  noteEffect(path: string | undefined): void {
+    if (path !== undefined) {
+      this.effects.add(path);
+    }
+  }
+
+  /** The entries still in the ledger, as trail marks: those not yet pruned. */
+  liveMarks(): StepTrailStub[] {
+    return [
+      ...this.entries.values(),
+    ].map(stubOf);
   }
 
   /**
@@ -557,17 +683,48 @@ export class StepLedger {
       return entry;
     }
     if (path.startsWith(REPLAY_KEY_PREFIX)) {
+      this.refuseEffectLoss([
+        entry,
+      ]);
       this.replayable.delete(path);
       return undefined;
     }
-    for (const key of [
-      ...this.replayable.keys(),
-    ]) {
-      if (key === path || isBeneath(key, path)) {
-        this.replayable.delete(key);
-      }
+    const doomed = [
+      ...this.replayable.entries(),
+    ].filter(([key]) => key === path || isBeneath(key, path));
+    this.refuseEffectLoss(doomed.map(([, lost]) => lost));
+    for (const [key] of doomed) {
+      this.replayable.delete(key);
     }
     return undefined;
+  }
+
+  /**
+   * A step that no longer matches is run again, and what was recorded for it is
+   * thrown away. That is safe within one flow version. Under a newer version it is
+   * not safe for a step that already had a lasting effect: running it again could
+   * repeat the effect, so the turn stops for the host to decide.
+   *
+   * @throws NoeticError `turn_stuck`.
+   */
+  private refuseEffectLoss(lost: ReadonlyArray<StepLedgerEntry>): void {
+    const to = this.version;
+    if (this.accepts || to === undefined) {
+      return;
+    }
+    const effect = lost.find(
+      (entry) => entry.effect === true && entry.version !== undefined && entry.version !== to,
+    );
+    if (!effect?.version) {
+      return;
+    }
+    throw new NoeticErrorImpl({
+      kind: 'turn_stuck',
+      executionId: this.executionId,
+      path: effect.path,
+      from: effect.version,
+      to,
+    });
   }
 
   /**
@@ -584,14 +741,7 @@ export class StepLedger {
       return false;
     }
     this.held?.assert();
-    const entry = this.withConnections(
-      this.held
-        ? {
-            ...recorded,
-            term: this.held.term,
-          }
-        : recorded,
-    );
+    const entry = this.withConnections(this.stamped(recorded));
     if (!this.retainable(entry)) {
       return false;
     }
@@ -621,6 +771,10 @@ export class StepLedger {
     }
     const replaced = this.live.get(entry.path);
     this.live.set(entry.path, seq);
+    this.entries.set(entry.path, entry);
+    if (entry.effect) {
+      this.effects.add(entry.path);
+    }
     if (replaced === undefined) {
       this.counts.recorded += 1;
     } else {
@@ -630,6 +784,38 @@ export class StepLedger {
       await this.prune(this.live.beneath(entry.path));
     }
     return true;
+  }
+
+  /** `recorded` with who wrote it, under which version, and whether it had an effect. */
+  private stamped(recorded: StepLedgerEntry): StepLedgerEntry {
+    const hadEffect =
+      recorded.effect === true ||
+      [
+        ...this.effects,
+      ].some((path) => path === recorded.path || isBeneath(path, recorded.path));
+    return {
+      ...recorded,
+      ...(this.held
+        ? {
+            term: this.held.term,
+          }
+        : {}),
+      ...(this.held?.holder === undefined
+        ? {}
+        : {
+            holder: this.held.holder,
+          }),
+      ...(this.version === undefined
+        ? {}
+        : {
+            version: this.version,
+          }),
+      ...(hadEffect
+        ? {
+            effect: true,
+          }
+        : {}),
+    };
   }
 
   /**
@@ -765,7 +951,29 @@ export class StepLedger {
       this.live.delete(path);
       this.replayable.delete(path);
       this.counts.pruned += 1;
+      await this.leaveMark(path, seq);
       await this.deleteSeq(seq);
+    }
+  }
+
+  /**
+   * Keep the trail mark of the entry at `path` before it is deleted. Best-effort:
+   * the trail is a record of what happened, not something a resume reads.
+   */
+  private async leaveMark(path: string, seq: number): Promise<void> {
+    const entry = this.entries.get(path);
+    this.entries.delete(path);
+    this.effects.delete(path);
+    if (!entry || !this.store || !this.isHeld) {
+      return;
+    }
+    try {
+      await this.store.mark(this.executionId, seq, stubOf(entry));
+    } catch (error) {
+      console.warn(
+        `StepLedger: failed to keep the trail mark of "${path}":`,
+        error instanceof Error ? error.message : String(error),
+      );
     }
   }
 

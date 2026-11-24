@@ -24,6 +24,8 @@ import type {
 /** @internal The harness surface a thread record needs. */
 export interface ThreadRecordHost {
   readonly store: SessionStore;
+  /** The flow version this harness runs, when it names one. */
+  readonly version?: string;
   restore(executionId: string, opts: RestoreCheckpointOptions): Promise<Context | null>;
   clearCheckpoint(executionId: string): Promise<void>;
   parseItems(raw: unknown[]): Item[];
@@ -169,8 +171,70 @@ export class ThreadRecord {
         messageIds: [
           ...messageIds,
         ],
+        ...(this.host.version === undefined
+          ? {}
+          : {
+              version: this.host.version,
+            }),
       },
     }));
+  }
+
+  /**
+   * The turn on `ctx` stopped rather than redo a recorded effect under a newer flow
+   * version. It stays, marked, until the host settles it.
+   */
+  stick(
+    ctx: Context,
+    stuck: {
+      path: string;
+      from: string;
+      to: string;
+    },
+  ): Promise<void> {
+    return this.update((record) =>
+      record.turn?.executionId === ctx.id
+        ? {
+            ...record,
+            turn: {
+              ...record.turn,
+              stuck,
+            },
+          }
+        : record,
+    );
+  }
+
+  /**
+   * Settle a stuck turn. `continue` and `restart` clear the mark so the turn can
+   * run; `continue` also lets its next run discard what no longer matches.
+   * `abandon` forgets the turn. Resolves the turn it settled, or undefined when
+   * the thread has no stuck turn.
+   */
+  settle(action: 'continue' | 'restart' | 'abandon'): Promise<SessionRecord['turn']> {
+    return this.run(async () => {
+      const turn = (await this.load())?.turn;
+      if (!turn?.stuck) {
+        return undefined;
+      }
+      const { stuck: _stuck, stopped: _stopped, ...rest } = turn;
+      await this.write((record) =>
+        action === 'abandon'
+          ? withoutTurn(record)
+          : {
+              ...record,
+              turn: {
+                ...rest,
+                ...(action === 'continue'
+                  ? {
+                      accept: true,
+                    }
+                  : {}),
+              },
+            },
+      );
+      return turn;
+    });
   }
 
   /**
@@ -235,6 +299,7 @@ export class ThreadRecord {
           {
             messageIds: record.turn.messageIds,
             text,
+            executionId: ctx.id,
           },
         ],
       };
@@ -249,6 +314,26 @@ export class ThreadRecord {
     return this.run(async () => {
       const done = (await this.load())?.done ?? [];
       return done.findLast((turn) => turn.messageIds.includes(messageId))?.text;
+    });
+  }
+
+  /** The executions of the thread's turns that have a trail: recent finished ones, then the one in flight. */
+  executions(): Promise<string[]> {
+    return this.run(async () => {
+      const record = await this.load();
+      const ids = (record?.done ?? []).flatMap((turn) =>
+        turn.executionId === undefined
+          ? []
+          : [
+              turn.executionId,
+            ],
+      );
+      return record?.turn
+        ? [
+            ...ids,
+            record.turn.executionId,
+          ]
+        : ids;
     });
   }
 

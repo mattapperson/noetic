@@ -834,6 +834,10 @@ const harness = new AgentHarness({
 });
 ```
 
+### Flow versions and the trail
+
+`AgentHarnessOpts.version` names the flow the harness runs. `harness.stuck()` lists the turns that stopped with `turn_stuck` rather than redo a recorded effect under another version, `harness.settleStuck(scope, 'continue' | 'restart' | 'abandon')` settles one, and `harness.trail(scope)` reads what a thread or an execution did, step by step. The rules are in `23-durable-execution` § Versions and § The trail.
+
 ### Held tool calls
 
 A tool call can be left open for a person. Nothing is written to the conversation for it; the turn goes no further than its round until it is answered.

@@ -53,6 +53,21 @@ const SessionRecordSchema = z.object({
           reason: z.string(),
         })
         .optional(),
+      /** The flow version the turn was last run under, when the harness names one. */
+      version: z.string().optional(),
+      /**
+       * Set when the turn stopped rather than redo a step that had a lasting effect
+       * under another flow version (spec 23 § Versions). It waits for the host.
+       */
+      stuck: z
+        .object({
+          path: z.string(),
+          from: z.string(),
+          to: z.string(),
+        })
+        .optional(),
+      /** The host looked at the stuck turn and chose to go on: its next run may discard such steps. */
+      accept: z.boolean().optional(),
       /** Set while the turn is parked: every part of it waits, and no harness holds it. */
       parked: z
         .object({
@@ -72,6 +87,8 @@ const SessionRecordSchema = z.object({
       z.object({
         messageIds: z.array(z.string()),
         text: z.string(),
+        /** The turn's execution, under which its trail is kept. */
+        executionId: z.string().optional(),
       }),
     )
     .optional(),

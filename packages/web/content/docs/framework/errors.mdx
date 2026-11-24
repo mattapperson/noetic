@@ -48,6 +48,7 @@ Noetic wraps every framework-level failure in a structured `NoeticError` discrim
 | `connection_resume_refused` | `connection`, `reason` | A resumed run's connection was replaced and cannot safely be driven again. |
 | `hold_refused` | `callId`, `reason` | `harness.resolve()` could not take an answer to a [held tool call](/docs/framework/steps/invoke-tool#human-in-the-loop-approval). |
 | `lease_lost` | `executionId`, `term`, `reason` | Another harness holds or took this thread's turn. See [one writer per turn](/docs/framework/durability#one-writer-per-turn). |
+| `turn_stuck` | `executionId`, `path`, `from`, `to` | A turn resumed under a newer flow version would have to redo a step that already had a lasting effect, so it stopped. See [flow versions](/docs/framework/durability#flow-versions). |
 | `ledger_write_failed` | `executionId`, `path`, `cause` | Under a turn lease, a durable record could not be written, so the turn stopped. |
 | `verify_act_failed` | `stepId`, `cause: Error`, `run?: BlobRef` | A `step.verify`'s `act` threw. The verification run is recorded first, with the failure as evidence, and `run` points at it. |
 
@@ -75,6 +76,7 @@ type NoeticError =
   | { kind: 'connection_resume_refused'; connection: string; reason: string }
   | { kind: 'hold_refused'; callId: string; reason: string }
   | { kind: 'lease_lost'; executionId: string; term: number; reason: string }
+  | { kind: 'turn_stuck'; executionId: string; path: string; from: string; to: string }
   | { kind: 'ledger_write_failed'; executionId: string; path: string; cause: Error }
   | { kind: 'verify_act_failed'; stepId: string; cause: Error; run?: BlobRef };
 ```
