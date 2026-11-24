@@ -115,6 +115,31 @@ function sleep(ms: number, signal: AbortSignal): Promise<boolean> {
 //#region Source hub
 
 /**
+ * Give `event` to a listener that stores what it receives, and resolve once it says
+ * the event is stored. Rejects with its error, or if the listener ends first.
+ */
+function handToStore(listener: Listener, event: ConnectionEventInit): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const ended = (): void => {
+      reject(new Error(`The listener for '${event.type}' ended before it stored the event.`));
+    };
+    listener.onEnd.add(ended);
+    listener.push({
+      type: 'event',
+      event,
+      stored: (error) => {
+        listener.onEnd.delete(ended);
+        if (error === undefined) {
+          resolve();
+          return;
+        }
+        reject(error instanceof Error ? error : new Error(String(error)));
+      },
+    });
+  });
+}
+
+/**
  * The cursor of a source that has emitted nothing yet: "before the first event". A
  * listener that starts there and listens again later gets everything since.
  */
@@ -178,12 +203,19 @@ class SourceHub<E extends SourceEventSchemas> {
       }
       return;
     }
+    const stored: Promise<void>[] = [];
     for (const listener of targets) {
-      listener.push({
-        type: 'event',
-        event: init,
-      });
+      if (!listener.stores) {
+        listener.push({
+          type: 'event',
+          event: init,
+        });
+        continue;
+      }
+      stored.push(handToStore(listener, init));
     }
+    // Resolve only once every trigger has the event in its inbox.
+    await Promise.all(stored);
   }
 
   listen(request: ListenRequest): EventStream {

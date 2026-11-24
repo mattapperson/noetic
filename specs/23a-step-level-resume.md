@@ -195,7 +195,9 @@ Session totals add each turn's increase in usage rather than its context's total
 
 - A steer (`08-runtime` § Steers) sent while a turn runs is kept in the record until the turn ends. The next turn to start — a resumed one included — puts kept steers back in the queue. A steer whose items are already in the conversation, because a replayed round or step applied it, is taken off the queue without being applied again; a text steer's item id is `steer-<messageId>` for this check. When a turn ends, the record keeps only the steers still queued, and a turn that takes a kept steer as its input drops it from the record. A steer rewritten by an `onSteer` or `onItemAppend` layer has new item ids, so after a crash it can be applied twice.
 
-Resuming a turn therefore requires the host to pass stable `messageId`s to `execute()`. A turn that finished is not replayed when re-delivered; it runs again as a new turn.
+Resuming a turn therefore requires the host to pass stable `messageId`s to `execute()`.
+
+A thread also remembers its last 20 finished turns: the message ids each delivered and the answer it gave. A message delivered again after its turn finished — a queue that delivers at least once, a webhook the sender retried — is answered with that turn's recorded answer and nothing runs. `getAgentResponse()` resolves with `replayed: true`, the recorded `text`, and the thread's history as `items`; the runner emits `{name}:turn_replayed`. Only a message given a `messageId` can be recognised; one left to a generated id is always new.
 
 ## The side-effect boundary
 
@@ -284,4 +286,3 @@ in § The side-effect boundary.
 ## Future Considerations
 
 - **Mid-item resume.** A resume goes on from the last item the stream finished; an item cut off part way is made again. Providers that expose resumable streams would let a round resume where its stream stopped.
-- **Re-delivered finished turns.** Remembering recently finished message ids per thread would let a session answer a re-delivery of a finished turn with its recorded response instead of running it again.

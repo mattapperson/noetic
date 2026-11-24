@@ -663,6 +663,7 @@ interface FrameworkStreamEvent {
 | `{name}:custom_item_event` | One event of a declared custom item, as a step yields it (`34-custom-items`). Data: `{ id, type, event }`; `id` is the one its final item takes. Emitted unconditionally, like `item_appended`. |
 | `{name}:turn_completed` | Emitted when a turn completes. Data: `{ turnId, durationMs }` |
 | `{name}:tool_call_held` | Emitted when a tool call is held for a person (§ Held tool calls). Data: the `HeldCall`: `{ callId, name, args, argsHash, reason, dueAt?, onDue?, request? }` |
+| `{name}:turn_replayed` | Emitted when a message delivered again is answered from its finished turn's record (`23a-step-level-resume` § Sessions). Data: `{ messageIds }` |
 | `{name}:turn_parked` | Emitted in place of `turn_completed` when a turn parks (`23-durable-execution` § Parked turns). Data: `{ turnId, durationMs, wakeAt }` |
 | `{name}:turn_aborted` | Emitted when a turn is aborted or errors. Data: `{ turnId, reason }` |
 | `{name}:steer_accepted` | Emitted when a steer is queued while a turn runs. Always precedes the `inbox_injected` that applies it. Data: `{ messageId, turnId, deliveryMode }` |

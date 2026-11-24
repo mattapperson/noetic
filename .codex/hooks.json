@@ -1,0 +1,52 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash '/Users/mattapperson/.t3/worktrees/noetic/t3-durable-runs-asks-ev-f00267b8a7c3f062/.codex/hooks/no-biome-ignore.sh'",
+            "timeout": 10,
+            "statusMessage": "Checking for biome-ignore comments..."
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash '/Users/mattapperson/.t3/worktrees/noetic/t3-durable-runs-asks-ev-f00267b8a7c3f062/.codex/hooks/biome-check.sh'",
+            "timeout": 30,
+            "statusMessage": "Running biome auto-fix & check..."
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash '/Users/mattapperson/.t3/worktrees/noetic/t3-durable-runs-asks-ev-f00267b8a7c3f062/.codex/hooks/sentrux-gate-save.sh'",
+            "timeout": 30,
+            "statusMessage": "Saving sentrux quality baseline..."
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash '/Users/mattapperson/.t3/worktrees/noetic/t3-durable-runs-asks-ev-f00267b8a7c3f062/.codex/hooks/sentrux-gate-check.sh'",
+            "timeout": 30,
+            "statusMessage": "Checking sentrux quality gate..."
+          }
+        ]
+      }
+    ]
+  }
+}

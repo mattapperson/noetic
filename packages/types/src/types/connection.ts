@@ -10,6 +10,7 @@
  */
 
 import { z } from 'zod';
+import type { Expression } from '../schemas/expression';
 import type { ArtifactStore } from './artifact-store';
 import type {
   AnyExtension,
@@ -346,6 +347,12 @@ export interface ListenRequest {
   /** Resume after this cursor; `null` or absent listens from now. */
   readonly cursor?: string | null;
   readonly signal: AbortSignal;
+  /**
+   * This listener writes each event to durable storage, and calls the message's
+   * `stored` when it has (spec 35 § Triggers). A source's `emit` waits for it, so
+   * whoever emitted knows the event will not be lost. Triggers set it.
+   */
+  readonly stores?: boolean;
 }
 
 /** @public One message on an event stream: an event, a gap, or the end of the stream. */
@@ -353,6 +360,11 @@ export type EventStreamMessage<E = ConnectionEventInit> =
   | {
       readonly type: 'event';
       readonly event: E;
+      /**
+       * Present for a listener that asked with `stores`. Call it once the event is
+       * in durable storage, or with the error that kept it out.
+       */
+      readonly stored?: (error?: unknown) => void;
     }
   | {
       readonly type: 'gap';
@@ -570,7 +582,15 @@ export interface SecretResolver {
   ): Promise<string>;
 }
 
-/** @public Starts or joins a turn when a connection reports an event. */
+/**
+ * @public
+ * Starts or joins a turn when a connection reports an event.
+ *
+ * `filter`, `input` and `thread` each take a function or an expression
+ * (spec 33): JSONata over `{ event }`. A trigger written with expressions only is
+ * plain data, so it can be added while the harness runs and is kept in storage
+ * (spec 35 § Triggers).
+ */
 export interface ConnectionTrigger<P = unknown> {
   readonly id: string;
   /** A harness connection name. */
@@ -578,12 +598,28 @@ export interface ConnectionTrigger<P = unknown> {
   readonly event: string;
   /** Filter on the server. */
   readonly arguments?: Readonly<Record<string, unknown>>;
-  /** Filter here. */
-  readonly filter?: (event: ConnectionEvent<P>) => boolean;
-  /** The message the turn starts with. */
-  readonly input: (event: ConnectionEvent<P>) => string;
-  /** The thread the turn runs on. Default: the profile's natural thread for the event, else the trigger id. */
-  readonly thread?: (event: ConnectionEvent<P>) => string;
+  /** Filter here: a predicate, or an expression that gives `true` to let the event through. */
+  readonly filter?: ((event: ConnectionEvent<P>) => boolean) | Expression;
+  /** The message the turn starts with: a function, or an expression that gives it. */
+  readonly input: ((event: ConnectionEvent<P>) => string) | Expression;
+  /**
+   * The thread the turn runs on: a function, or an expression that gives its id.
+   * Default: the profile's natural thread for the event, else the trigger id.
+   */
+  readonly thread?: ((event: ConnectionEvent<P>) => string) | Expression;
+}
+
+/** @public An event a trigger gave up on after its retries (spec 35 § Triggers). */
+export interface DeadTriggerEvent {
+  readonly trigger: string;
+  readonly event: ConnectionEvent;
+  readonly threadId: string;
+  /** How many times its turn was tried. */
+  readonly attempts: number;
+  /** Why the last try failed. */
+  readonly error: string;
+  /** Epoch ms it was set aside. */
+  readonly at: number;
 }
 
 //#endregion
@@ -610,6 +646,7 @@ export type SourceEventOf<E extends SourceEventSchemas> = {
 
 /** @public What a source's `start` receives. */
 export interface SourceStartContext<E extends SourceEventSchemas> {
+  /** As `ConnectionSource.emit`: resolves once the event is stored by every trigger listening. */
   emit(event: SourceEventOf<E>): Promise<void>;
   /** The last durable cursor a trigger recorded, or `null` on a first start. */
   readonly cursor: string | null;
@@ -627,7 +664,13 @@ export interface ConnectionSource<E extends SourceEventSchemas = SourceEventSche
   extends ConnectionProvider {
   readonly kind: 'source';
   readonly events: E;
-  /** Pushes an event from host code. */
+  /**
+   * Pushes an event from host code. Resolves once every trigger listening for it
+   * has written it to its durable inbox, and rejects if one could not. So a host
+   * that got the event from somewhere that retries (a webhook, a queue) can
+   * acknowledge it only after this resolves. With no trigger listening, the event
+   * is held in memory for the next listener and this resolves at once.
+   */
   emit(event: SourceEventOf<E>): Promise<void>;
 }
 

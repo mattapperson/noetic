@@ -171,6 +171,10 @@ export interface InMemoryConnectionProvider extends ConnectionProvider {
 export interface Listener {
   readonly event: string;
   readonly args: Readonly<Record<string, unknown>>;
+  /** The listener writes events to durable storage and says when (see `ListenRequest.stores`). */
+  readonly stores: boolean;
+  /** Called when the listener ends, by whoever is waiting on something it had not finished. */
+  readonly onEnd: Set<() => void>;
   push(message: EventStreamMessage): void;
   end(): void;
 }
@@ -310,8 +314,16 @@ export function createListenerStream(
   const waiters: Array<(result: IteratorResult<EventStreamMessage>) => void> = [];
   let ended = false;
   const finish = (): void => {
+    if (ended) {
+      return;
+    }
     ended = true;
     listeners.delete(listener);
+    for (const told of [
+      ...listener.onEnd,
+    ]) {
+      told();
+    }
     for (const waiter of waiters.splice(0)) {
       waiter({
         value: undefined,
@@ -322,6 +334,8 @@ export function createListenerStream(
   const listener: Listener = {
     event: request.event,
     args: request.arguments ?? {},
+    stores: request.stores === true,
+    onEnd: new Set(),
     push(message): void {
       if (ended) {
         return;

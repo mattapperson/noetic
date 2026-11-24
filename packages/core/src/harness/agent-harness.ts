@@ -2,6 +2,8 @@ import type {
   ApproveRequest,
   ArtifactStore,
   ConnectionStatus,
+  ConnectionTrigger,
+  DeadTriggerEvent,
   HeldCall,
   HeldResolution,
 } from '@noetic-tools/types';
@@ -519,11 +521,10 @@ export class AgentHarness<
         ...(this.agentGraph
           ? collectCustomItems(frameworkCast<Step>(this.agentGraph)).map((item) => item.type)
           : []),
-        ...(opts.triggers && opts.triggers.length > 0
-          ? [
-              CONNECTION_EVENT_ITEM_TYPE,
-            ]
-          : []),
+        // Always known: a trigger can be added while the harness runs, and one added
+        // on an earlier run comes back from storage, so its turns must be able to
+        // carry the event.
+        CONNECTION_EVENT_ITEM_TYPE,
       ]),
     });
     this.rootCwdState = {
@@ -636,6 +637,9 @@ export class AgentHarness<
 
   private async deliver(session: Session, message: QueuedMessage): Promise<void> {
     if (await this.deliverToParked(session, message)) {
+      return;
+    }
+    if (await this.answerAgain(session, message)) {
       return;
     }
     const steersRunningTurn = session.runner.getStatus().kind === 'generating' && isSteer(message);
@@ -812,8 +816,12 @@ export class AgentHarness<
 
     const record = this.threadRecord(threadId);
     // Save a turn's items as the thread's history for the next turn.
-    const keepHistory = async (ctx: Context): Promise<void> => {
+    const keepHistory = async (ctx: Context, answer?: string): Promise<void> => {
       if (record) {
+        // A finished turn's answer is kept, so its messages delivered again get it back.
+        if (answer !== undefined) {
+          await record.answered(ctx, answer);
+        }
         await record.end(
           ctx,
           ctx.itemLog.items,
@@ -1018,7 +1026,7 @@ export class AgentHarness<
       if (result === PARKED) {
         return '';
       }
-      await keepHistory(ctx);
+      await keepHistory(ctx, result);
       this.parkWatchers?.forget(threadId, ctx.id);
       return result;
     };
@@ -1185,6 +1193,58 @@ export class AgentHarness<
     }
   }
 
+  //#region Triggers
+
+  /**
+   * Add a trigger while the harness runs (spec 35 § Triggers). A trigger written
+   * with expressions only is kept in storage, so it is there again after a restart;
+   * one with a function in it lasts for this process.
+   *
+   * @throws NoeticConfigError `CONNECTION_INVALID` for an id already in use, a
+   *   missing event or an expression that does not parse; `CONNECTION_UNKNOWN` for
+   *   an unknown connection.
+   * @public
+   */
+  async addTrigger(trigger: ConnectionTrigger): Promise<void> {
+    await this.start();
+    await this.#connections.triggers.add(trigger);
+  }
+
+  /**
+   * Stop and forget a trigger. Resolves false when there is none with that id.
+   * @public
+   */
+  removeTrigger(id: string): Promise<boolean> {
+    return this.#connections.triggers.remove(id);
+  }
+
+  /**
+   * Every trigger the harness has: its own, and those added while it ran.
+   * @public
+   */
+  listTriggers(): ConnectionTrigger[] {
+    return this.#connections.triggers.list();
+  }
+
+  /**
+   * The events triggers gave up on after their retries, for one trigger or all.
+   * @public
+   */
+  deadTriggerEvents(triggerId?: string): Promise<DeadTriggerEvent[]> {
+    return this.#connections.triggers.dead(triggerId);
+  }
+
+  /**
+   * Try a dead event again, as a fresh turn with its retries afresh. Resolves false
+   * when the trigger has no such dead event.
+   * @public
+   */
+  replayTrigger(triggerId: string, eventId: string): Promise<boolean> {
+    return this.#connections.triggers.replay(triggerId, eventId);
+  }
+
+  //#endregion
+
   /** The watchers that wake this harness's parked turns, when auto-wake is on. */
   private createParkWatchers(park: boolean | ParkConfig | undefined): ParkWatchers | undefined {
     if (this.parkGraceMs === undefined) {
@@ -1241,6 +1301,35 @@ export class AgentHarness<
     await this.wake({
       threadId,
     });
+  }
+
+  /**
+   * A message delivered again after its turn finished (spec 23a § Sessions): a queue
+   * that delivers at least once, or a webhook the sender retried. It is answered
+   * with the answer that turn gave, and nothing runs. Resolves true when it was.
+   */
+  private async answerAgain(session: Session, message: QueuedMessage): Promise<boolean> {
+    const record = session.record;
+    if (!record || session.runner.getStatus().kind !== 'idle' || session.runner.queue.size > 0) {
+      return false;
+    }
+    const text = await record.answerFor(message.id);
+    if (text === undefined) {
+      return false;
+    }
+    session.runner.answerWith(
+      {
+        items: await record.history(),
+        usage: {
+          inputTokens: 0,
+          outputTokens: 0,
+        },
+        text,
+        replayed: true,
+      },
+      message.id,
+    );
+    return true;
   }
 
   /**

@@ -67,6 +67,12 @@ export interface HarnessResponse<TItem = Item> {
     readonly wakeAt?: number;
   };
   /**
+   * Set when the message was delivered before and its turn had already finished:
+   * this is that turn's recorded answer, and nothing ran. `items` is the thread's
+   * history.
+   */
+  readonly replayed?: boolean;
+  /**
    * The tool calls a parked turn holds for a person, as `harness.pending()` lists
    * them. Present with `parked` when there are any; `harness.resolve()` answers one.
    */

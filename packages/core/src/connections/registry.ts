@@ -201,6 +201,8 @@ export interface ConnectionRuntime extends ConnectionRegistry {
       readonly arguments?: Readonly<Record<string, unknown>>;
       readonly cursor?: string | null;
       readonly signal: AbortSignal;
+      /** The caller stores each event durably and says when: see `ListenRequest.stores`. */
+      readonly stores?: boolean;
     },
   ): Promise<EventStream>;
   /** Scrubs secrets from, seals refs in, and links blobs in a value for a thread. */
@@ -769,6 +771,8 @@ class Runtime implements ConnectionRuntime {
       readonly arguments?: Readonly<Record<string, unknown>>;
       readonly cursor?: string | null;
       readonly signal: AbortSignal;
+      /** The caller stores each event durably and says when: see `ListenRequest.stores`. */
+      readonly stores?: boolean;
     },
   ): Promise<EventStream> {
     const entry = this.entries.get(name);

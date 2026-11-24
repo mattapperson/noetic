@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import type { ConnectionEventInit, EventStreamMessage } from '@noetic-tools/types';
+import assert from 'node:assert';
+import type {
+  ConnectionEventInit,
+  ConnectionTrigger,
+  EventStreamMessage,
+} from '@noetic-tools/types';
 import { isConnectionUnsatisfiedError, isNoeticConfigError } from '@noetic-tools/types';
 import { z } from 'zod';
 import { cronMatches, nextCronRun, parseCronSchedule } from '../../src/connections/cron-schedule';
@@ -59,9 +64,9 @@ async function take<T>(iterable: AsyncIterable<T>, count: number): Promise<T[]> 
   return out;
 }
 
-async function until(predicate: () => boolean, ms = 500): Promise<void> {
+async function until(predicate: () => boolean | Promise<boolean>, ms = 500): Promise<void> {
   const deadline = Date.now() + ms;
-  while (!predicate()) {
+  while (!(await predicate())) {
     if (Date.now() > deadline) {
       throw new Error('timed out waiting');
     }
@@ -731,5 +736,307 @@ describe('triggers', () => {
     expect(delivered[0]?.threadId).toBe('slack:T1');
     expect(await storage.list('noetic/connections/triggers/mentions/inbox/')).toHaveLength(1);
     await runner.close();
+  });
+
+  /** A runner over `setup()` with one trigger and no delays between tries. */
+  function runnerFor(
+    rig: ReturnType<typeof setup>,
+    options: {
+      triggers: ConnectionTrigger[];
+      deliver: (d: TriggerDelivery) => Promise<void>;
+      errors?: unknown[];
+    },
+  ): TriggerRunner {
+    return new TriggerRunner({
+      runtime: rig.runtime,
+      storage: rig.storage,
+      triggers: options.triggers,
+      deliver: options.deliver,
+      onError: (_trigger, error) => options.errors?.push(error),
+      relistenDelayMs: () => 1,
+      redeliverDelayMs: () => 0,
+      now: () => 4242,
+    });
+  }
+
+  function failed(
+    id: string,
+    service = 'api',
+  ): {
+    type: 'deploy.failed';
+    id: string;
+    payload: {
+      service: string;
+    };
+  } {
+    return {
+      type: 'deploy.failed',
+      id,
+      payload: {
+        service,
+      },
+    };
+  }
+
+  test('emit resolves only once the trigger has the event in its inbox', async () => {
+    const rig = setup();
+    await rig.runtime.start();
+    // The turn never finishes, so the inbox entry stays where the test can see it.
+    const runner = runnerFor(rig, {
+      triggers: [
+        {
+          id: 'failures',
+          connection: 'deploys',
+          event: 'deploy.failed',
+          input: (e) => e.id,
+        },
+      ],
+      deliver: () => new Promise(() => {}),
+    });
+    await runner.start();
+    await sleep(5);
+
+    await rig.source.emit(failed('e1'));
+    // No waiting here: by the time emit resolved, the event was stored.
+    expect(await rig.storage.list('noetic/connections/triggers/failures/inbox/')).toHaveLength(1);
+    void runner.close();
+    await rig.runtime.close();
+  });
+
+  test('emit rejects when the trigger could not store the event', async () => {
+    const rig = setup();
+    await rig.runtime.start();
+    const store = rig.storage.set.bind(rig.storage);
+    rig.storage.set = async (key: string, value: unknown) => {
+      if (key.includes('/inbox/')) {
+        throw new Error('disk full');
+      }
+      await store(key, value);
+    };
+    const runner = runnerFor(rig, {
+      triggers: [
+        {
+          id: 'failures',
+          connection: 'deploys',
+          event: 'deploy.failed',
+          input: (e) => e.id,
+        },
+      ],
+      deliver: async () => {},
+      errors: [],
+    });
+    await runner.start();
+    await sleep(5);
+
+    const error = await rejected(rig.source.emit(failed('e1')));
+    assert(error instanceof Error);
+    expect(error.message).toContain('disk full');
+    await runner.close();
+    await rig.runtime.close();
+  });
+
+  test('emit resolves at once when no trigger listens: the event waits in memory', async () => {
+    const rig = setup();
+    await rig.runtime.start();
+    await rig.source.emit(failed('e1'));
+    await rig.runtime.close();
+  });
+
+  test('a trigger written as data filters, names its thread and builds its input by expression', async () => {
+    const rig = setup();
+    await rig.runtime.start();
+    const delivered: TriggerDelivery[] = [];
+    const runner = runnerFor(rig, {
+      triggers: [
+        {
+          id: 'api-failures',
+          connection: 'deploys',
+          event: 'deploy.failed',
+          filter: 'event.payload.service = "api"',
+          input: '"Deploy of " & event.payload.service & " failed (" & event.id & ")"',
+          thread: '"service:" & event.payload.service',
+        },
+      ],
+      deliver: async (d) => {
+        delivered.push(d);
+      },
+    });
+    await runner.start();
+    await sleep(5);
+
+    await rig.source.emit(failed('e1', 'web'));
+    await rig.source.emit(failed('e2', 'api'));
+    await until(() => delivered.length >= 1);
+    expect(delivered.map((d) => d.input)).toEqual([
+      'Deploy of api failed (e2)',
+    ]);
+    expect(delivered[0]?.threadId).toBe('service:api');
+    await runner.close();
+    await rig.runtime.close();
+  });
+
+  test('an expression that does not parse is CONNECTION_INVALID', () => {
+    const e = thrown(() =>
+      validateTriggers(
+        [
+          {
+            id: 'bad',
+            connection: 'deploys',
+            event: 'deploy.failed',
+            filter: 'event.payload.service = ',
+            input: 'event.id',
+          },
+        ],
+        [
+          'deploys',
+        ],
+      ),
+    );
+    assert(isNoeticConfigError(e));
+    expect(e.code).toBe('CONNECTION_INVALID');
+    expect(e.message).toContain('filter');
+  });
+
+  test('a data trigger added while running is kept, and is there after a restart', async () => {
+    const rig = setup();
+    await rig.runtime.start();
+    const delivered: string[] = [];
+    const deliver = async (d: TriggerDelivery): Promise<void> => {
+      delivered.push(d.input);
+    };
+    const first = runnerFor(rig, {
+      triggers: [],
+      deliver,
+    });
+    await first.start();
+    await first.add({
+      id: 'added',
+      connection: 'deploys',
+      event: 'deploy.failed',
+      input: 'event.id',
+    });
+    expect(first.list().map((t) => t.id)).toEqual([
+      'added',
+    ]);
+    await sleep(5);
+    await rig.source.emit(failed('e1'));
+    await until(() => delivered.length === 1);
+    await first.close();
+
+    // A new runner, as after a restart, given no triggers of its own.
+    const second = runnerFor(rig, {
+      triggers: [],
+      deliver,
+    });
+    await second.start();
+    expect(second.list().map((t) => t.id)).toEqual([
+      'added',
+    ]);
+    await sleep(5);
+    await rig.source.emit(failed('e2'));
+    await until(() => delivered.length === 2);
+    expect(delivered).toEqual([
+      'e1',
+      'e2',
+    ]);
+
+    // Removed, it stops firing and is gone after the next restart too.
+    expect(await second.remove('added')).toBe(true);
+    expect(await second.remove('added')).toBe(false);
+    await second.close();
+    const third = runnerFor(rig, {
+      triggers: [],
+      deliver,
+    });
+    await third.start();
+    expect(third.list()).toEqual([]);
+    await third.close();
+    await rig.runtime.close();
+  });
+
+  test('adding a trigger whose id is taken is CONNECTION_INVALID', async () => {
+    const rig = setup();
+    await rig.runtime.start();
+    const trigger = {
+      id: 'dup',
+      connection: 'deploys',
+      event: 'deploy.failed',
+      input: 'event.id',
+    };
+    const runner = runnerFor(rig, {
+      triggers: [
+        trigger,
+      ],
+      deliver: async () => {},
+    });
+    await runner.start();
+    const e = await rejected(runner.add(trigger));
+    assert(isNoeticConfigError(e));
+    expect(e.code).toBe('CONNECTION_INVALID');
+    await runner.close();
+    await rig.runtime.close();
+  });
+
+  test('an event whose turn keeps failing goes to the dead list, and replay tries it again', async () => {
+    const rig = setup();
+    await rig.runtime.start();
+    let failing = true;
+    let tries = 0;
+    const delivered: string[] = [];
+    const errors: unknown[] = [];
+    const options = {
+      triggers: [
+        {
+          id: 'failures',
+          connection: 'deploys',
+          event: 'deploy.failed',
+          input: 'event.id',
+        },
+      ],
+      deliver: async (d: TriggerDelivery): Promise<void> => {
+        tries += 1;
+        if (failing) {
+          throw new Error('model is down');
+        }
+        delivered.push(d.input);
+      },
+      errors,
+    };
+    const runner = runnerFor(rig, options);
+    await runner.start();
+    await sleep(5);
+    await rig.source.emit(failed('e1'));
+    await until(async () => (await runner.dead()).length === 1);
+
+    const [dead] = await runner.dead('failures');
+    assert(dead);
+    expect(dead).toMatchObject({
+      trigger: 'failures',
+      attempts: 5,
+      error: 'model is down',
+      at: 4242,
+    });
+    expect(dead.event.id).toBe('e1');
+    expect(tries).toBe(5);
+    // Out of the inbox: it is not tried again on its own, here or after a restart.
+    expect(await rig.storage.list('noetic/connections/triggers/failures/inbox/')).toEqual([]);
+    await runner.close();
+    const restarted = runnerFor(rig, options);
+    await restarted.start();
+    await sleep(10);
+    expect(tries).toBe(5);
+
+    // The model is back: replay delivers it, and it leaves the dead list.
+    failing = false;
+    expect(await restarted.replay('failures', 'e1')).toBe(true);
+    await until(() => delivered.length === 1);
+    expect(delivered).toEqual([
+      'e1',
+    ]);
+    expect(await restarted.dead()).toEqual([]);
+    expect(await restarted.replay('failures', 'e1')).toBe(false);
+    expect(await restarted.replay('nope', 'e1')).toBe(false);
+    await restarted.close();
+    await rig.runtime.close();
   });
 });

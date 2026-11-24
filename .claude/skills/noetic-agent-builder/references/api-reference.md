@@ -2153,6 +2153,20 @@ harness.resolve(scope, { callId, argsHash?, output }): Promise<void>;
 
 A call that needs approval with no approver, or whose approver answers `hold`, is held: its siblings run, nothing is written for it, and the turn waits (and parks, with `park` on) until `resolve()`. Refusals are `NoeticError` `hold_refused`. Event: `{name}:tool_call_held`.
 
+### Triggers as data, dead events, durable `emit`
+
+```typescript
+// ConnectionTrigger.filter / input / thread: a function, or a JSONata expression over { event }
+harness.addTrigger(trigger): Promise<void>;        // data triggers are kept in storage
+harness.removeTrigger(id): Promise<boolean>;
+harness.listTriggers(): ConnectionTrigger[];
+harness.deadTriggerEvents(triggerId?): Promise<DeadTriggerEvent[]>;  // after 5 failed tries
+harness.replayTrigger(triggerId, eventId): Promise<boolean>;
+await source.emit(event);   // resolves once every listening trigger has stored it
+```
+
+A message passed to `execute()` with a `messageId` whose turn already finished is answered from the record: `HarnessResponse.replayed`, event `{name}:turn_replayed`.
+
 ### `harness.approve()`: the one approval seam
 
 ```typescript

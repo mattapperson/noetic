@@ -62,6 +62,19 @@ const SessionRecordSchema = z.object({
         .optional(),
     })
     .optional(),
+  /**
+   * The thread's most recent finished turns, oldest first: the messages each
+   * delivered and the answer it gave. A message delivered again after its turn
+   * finished is answered from here instead of run again.
+   */
+  done: z
+    .array(
+      z.object({
+        messageIds: z.array(z.string()),
+        text: z.string(),
+      }),
+    )
+    .optional(),
   /** Steers sent into the turn in flight, in arrival order. */
   steers: z
     .array(

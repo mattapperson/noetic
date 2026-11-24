@@ -300,7 +300,7 @@ await harness.execute(text, { threadId, messageId: event.id }); // resumes
 const response = await harness.getAgentResponse({ threadId });
 ```
 
-A turn that finished is not replayed when re-delivered — it runs again as a new turn — so acknowledge messages once their turn completes.
+A message delivered again after its turn finished is not run again either. A thread remembers its last 20 finished turns, and answers the retry with that turn's recorded answer: `getAgentResponse()` resolves with `replayed: true`. So a queue that delivers at least once, or a webhook the sender retries, is safe to pass straight to `execute()` as long as each message carries its own `messageId`.
 
 ### One Writer per Turn
 

@@ -86,6 +86,8 @@ export interface HarnessConnections {
   close(): Promise<void>;
   /** A turn's connection tools: the harness's, and the ones attached under `rootId`. */
   tools(rootId?: string): Tool[];
+  /** The harness's triggers: its own, and those added while it runs. */
+  readonly triggers: TriggerRunner;
 }
 
 //#endregion
@@ -268,15 +270,14 @@ export function createHarnessConnections(options: HarnessConnectionsOptions): Ha
   });
   const triggers = options.triggers ?? [];
   validateTriggers(triggers, registry.names());
-  const runner =
-    triggers.length > 0
-      ? new TriggerRunner({
-          runtime: registry,
-          triggers,
-          storage: options.storage,
-          deliver: (delivery) => deliverTurn(options.harness, delivery),
-        })
-      : undefined;
+  // Always built: a trigger can be added while the harness runs, and ones added on
+  // an earlier run are read back from storage at start.
+  const runner = new TriggerRunner({
+    runtime: registry,
+    triggers,
+    storage: options.storage,
+    deliver: (delivery) => deliverTurn(options.harness, delivery),
+  });
   const views = connectionViewLayers(registry);
   let starting: Promise<void> | undefined;
   return {
@@ -285,17 +286,18 @@ export function createHarnessConnections(options: HarnessConnectionsOptions): Ha
     start(): Promise<void> {
       starting ??= (async (): Promise<void> => {
         await registry.start();
-        await runner?.start();
+        await runner.start();
       })();
       return starting;
     },
     async close(): Promise<void> {
       await runEvery([
-        () => runner?.close(),
+        () => runner.close(),
         () => registry.close(),
       ]);
     },
     tools: (rootId) => buildConnectionTools(registry, rootId),
+    triggers: runner,
   };
 }
 

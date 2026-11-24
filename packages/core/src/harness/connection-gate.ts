@@ -4,6 +4,7 @@ import type { HarnessConnections, HarnessConnectionsOptions } from '../connectio
 import { createHarnessConnections } from '../connections/harness-wiring';
 import type { ConnectionRuntime } from '../connections/registry';
 import type { StepConnections } from '../connections/step-tools';
+import type { TriggerRunner } from '../connections/triggers';
 import { connectionViewLayer } from '../connections/views';
 import type { AttachedEntry } from '../types/connection-entry';
 import { setHarnessInternals } from '../util/harness-internals';
@@ -173,6 +174,11 @@ export class ConnectionGate {
         this.#viewed.set(root.id, names);
       },
     };
+  }
+
+  /** The harness's triggers: its own, and those added while it runs. */
+  get triggers(): TriggerRunner {
+    return this.#connections.triggers;
   }
 
   /** Connects providers and starts triggers. Idempotent. */

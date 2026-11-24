@@ -207,6 +207,26 @@ export class SessionRunner {
     });
   }
 
+  /**
+   * Answer whoever is waiting with a response no turn of this runner produced: the
+   * recorded answer to a message that was delivered again.
+   */
+  answerWith(response: HarnessResponse, messageId: string): void {
+    this.lastResponse = response;
+    this.lastError = undefined;
+    emitFrameworkEvent({
+      broadcaster: this.broadcaster,
+      agentName: this.agentName,
+      eventType: 'turn_replayed',
+      data: {
+        messageIds: [
+          messageId,
+        ],
+      },
+    });
+    this.resolveWaiters(response);
+  }
+
   /** Cancel the in-flight turn. Does NOT re-kick — callers that want restart
    *  behaviour should enqueue a message before/after calling abort. */
   async abort(reason?: string): Promise<void> {

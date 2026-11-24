@@ -114,7 +114,9 @@ async function handleMessage(
   // afterwards would miss the whole turn and post() would never resolve.
   const events = attachEvents(options.harness, threadId);
 
-  const messageId = crypto.randomUUID();
+  // The platform's own id for the message: a redelivery of it resumes or replays the
+  // turn it started instead of starting another (Noetic spec 23a § Sessions).
+  const messageId = message.id;
   await persistItems(session, threadId, input);
   await options.harness.execute(input, {
     threadId,

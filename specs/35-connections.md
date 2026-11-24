@@ -376,6 +376,36 @@ id — with `input(event)` as the message. The event itself is attached to the
 turn as a `noetic:connection_event` item, so steps can read it. A trigger
 delivers each event once, even across crashes (§ Durability).
 
+**Triggers as data.** `filter`, `input` and `thread` each take a function or
+an expression (`33-expressions`): JSONata over `{ event }`. A filter passes on
+`true`; an input that is not text is sent as JSON. An expression that does not
+parse is `CONNECTION_INVALID` when the trigger is given.
+
+```ts
+{ id: 'vendor-mail', connection: 'inbox', event: 'received',
+  filter: '$contains(event.payload.from, "@vendor.example")',
+  input:  '"Email from " & event.payload.from & ": " & event.payload.subject',
+  thread: '"mail:" & event.id' }
+```
+
+A trigger written with expressions only is plain data, so it can be added while
+the harness runs:
+
+- `harness.addTrigger(trigger)` validates it, starts it, and keeps it in
+  storage, so it is there again after a restart. One with a function in it is
+  accepted too and lasts for the process.
+- `harness.removeTrigger(id)` stops it and forgets it.
+- `harness.listTriggers()` gives every trigger: the harness's own and the added.
+
+**Retries and the dead list.** A turn that fails is tried again, five times in
+all, with backoff. After the last try the event leaves the inbox for the
+trigger's **dead list**, with how many times it was tried and why the last one
+failed. It is not tried again on its own, in this process or the next.
+`harness.deadTriggerEvents(triggerId?)` lists them, and
+`harness.replayTrigger(triggerId, eventId)` puts one back in the inbox to run
+as a fresh turn. An event cut off by the process ending, before its tries ran
+out, stays in the inbox and is delivered again at the next start.
+
 **Sources** are event streams you write in code — a queue consumer, a file
 watcher, a webhook from your own app — registered as connections:
 
@@ -389,8 +419,16 @@ const deploys = defineSource({
   },
 });
 
-deploys.emit({ type: 'deploy.failed', id: run.id, payload });   // or push from host code
+await deploys.emit({ type: 'deploy.failed', id: run.id, payload });   // or push from host code
 ```
+
+`emit` resolves once every trigger listening for the event has written it to
+its durable inbox, and rejects if one could not. A host that got the event from
+somewhere that retries — a webhook, a queue — acknowledges it only after `emit`
+resolves, so an event is never acknowledged and then lost. Noetic has no webhook
+concept of its own: the host's HTTP handler verifies the request and calls
+`emit`. With no trigger listening, the event is held in memory for the next
+listener and `emit` resolves at once.
 
 A source with a `start` declares its events `replay: 'durable'`, and keeps that
 promise for every listener, not only the first. `start` runs once, from the

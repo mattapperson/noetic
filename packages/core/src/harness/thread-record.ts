@@ -29,6 +29,9 @@ export interface ThreadRecordHost {
   parseItems(raw: unknown[]): Item[];
 }
 
+/** How many finished turns a thread remembers, to answer a message delivered again. */
+const MAX_DONE_TURNS = 20;
+
 /** How many times a compare-and-set write is tried against a record that keeps changing. */
 const COMMIT_ATTEMPTS = 8;
 
@@ -212,6 +215,41 @@ export class ThreadRecord {
           }
         : record,
     );
+  }
+
+  /**
+   * The turn on `ctx` gave its answer: remember it under the turn's message ids, so
+   * the same messages delivered again get it back (`answerFor`). Call before `end`,
+   * which forgets the turn. Only the last few turns are kept.
+   */
+  answered(ctx: Context, text: string): Promise<void> {
+    return this.update((record) => {
+      if (record.turn?.executionId !== ctx.id) {
+        return record;
+      }
+      const kept = (record.done ?? []).slice(1 - MAX_DONE_TURNS);
+      return {
+        ...record,
+        done: [
+          ...(MAX_DONE_TURNS > 1 ? kept : []),
+          {
+            messageIds: record.turn.messageIds,
+            text,
+          },
+        ],
+      };
+    });
+  }
+
+  /**
+   * The answer a finished turn gave to the message `messageId`, when one of the
+   * thread's recent turns delivered it.
+   */
+  answerFor(messageId: string): Promise<string | undefined> {
+    return this.run(async () => {
+      const done = (await this.load())?.done ?? [];
+      return done.findLast((turn) => turn.messageIds.includes(messageId))?.text;
+    });
   }
 
   /** The turn in flight, cut off or parked, when one is recorded. */
