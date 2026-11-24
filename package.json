@@ -41,6 +41,7 @@
     "example:acp": "bun examples/acp-e2e.ts",
     "example:verify": "bun examples/verify-e2e.ts",
     "example:webhook": "bun examples/webhook-e2e.ts",
+    "example:vendor-email": "bun examples/vendor-email.ts",
     "inspect": "bun packages/inspector/server/host.ts"
   },
   "dependencies": {
