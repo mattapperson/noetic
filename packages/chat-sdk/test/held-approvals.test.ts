@@ -5,7 +5,7 @@
 import { describe, expect, test } from 'bun:test';
 import assert from 'node:assert';
 import type { ApproveToolCallParams, ExternalChannel } from '@noetic-tools/types';
-import { frameworkCast } from '@noetic-tools/types';
+import { frameworkCast, NoeticErrorImpl } from '@noetic-tools/types';
 import { z } from 'zod';
 import { fromAiSdkTool } from '../src/ai-tools';
 import type { ApprovalRequest, HeldApprovalHarness } from '../src/approvals';
@@ -92,8 +92,16 @@ describe('chatApprover', () => {
 });
 
 describe('answerApproval', () => {
-  /** A harness that records the decisions passed to `execute` and can refuse them; its channel is closed. */
-  function harness(refuse: boolean): {
+  /**
+   * A harness holding `call-7`, that records the decisions passed to `execute`
+   * and can fail them; its channel is closed.
+   */
+  function harness(
+    fail?: 'refused' | 'storage',
+    held: string[] = [
+      'call-7',
+    ],
+  ): {
     harness: HeldApprovalHarness;
     resolved: unknown[];
   } {
@@ -101,9 +109,20 @@ describe('answerApproval', () => {
     return {
       resolved,
       harness: frameworkCast<HeldApprovalHarness>({
+        pending: async () =>
+          held.map((callId) => ({
+            callId,
+          })),
         execute: async (answer: unknown, scope: unknown) => {
-          if (refuse) {
-            throw new Error('no call with this id is held');
+          if (fail === 'refused') {
+            throw new NoeticErrorImpl({
+              kind: 'hold_refused',
+              callId: 'call-7',
+              reason: 'it was already answered differently',
+            });
+          }
+          if (fail === 'storage') {
+            throw new Error('storage is down');
           }
           resolved.push({
             scope,
@@ -119,7 +138,7 @@ describe('answerApproval', () => {
   }
 
   test('answers a call the harness holds, on the thread the request came from', async () => {
-    const h = harness(false);
+    const h = harness();
     const delivered = await answerApproval({
       harness: h.harness,
       threadId: 'thread-9',
@@ -146,7 +165,7 @@ describe('answerApproval', () => {
   });
 
   test('maps an approval to allow', async () => {
-    const h = harness(false);
+    const h = harness();
     await answerApproval({
       harness: h.harness,
       decision: {
@@ -162,18 +181,63 @@ describe('answerApproval', () => {
     });
   });
 
+  const click = {
+    requestId: 'call-7',
+    approved: true,
+  };
+
   test('falls back to the channel when the harness holds no such call', async () => {
-    const h = harness(true);
+    const h = harness(undefined, []);
     // The channel is closed, as for a stale button: nothing was waiting.
     expect(
       await answerApproval({
         harness: h.harness,
-        decision: {
-          requestId: 'call-7',
-          approved: true,
-        },
+        decision: click,
       }),
     ).toBe(false);
+    // The harness was not handed a decision for a call it does not hold.
+    expect(h.resolved).toEqual([]);
+  });
+
+  test('is false when someone else answered first', async () => {
+    const h = harness('refused');
+    expect(
+      await answerApproval({
+        harness: h.harness,
+        decision: click,
+      }),
+    ).toBe(false);
+  });
+
+  test('throws when the harness fails for another reason: the click was not delivered', async () => {
+    const h = harness('storage');
+    expect(
+      answerApproval({
+        harness: h.harness,
+        decision: click,
+      }),
+    ).rejects.toThrow('storage is down');
+  });
+
+  test('does not hand a decision to a harness that cannot list held calls', async () => {
+    const executed: unknown[] = [];
+    // Its `execute` would take the decision for a message and start a turn.
+    const plain = frameworkCast<HeldApprovalHarness>({
+      execute: async (input: unknown) => {
+        executed.push(input);
+      },
+      getChannelHandle: () => ({
+        closed: true,
+        send: () => {},
+      }),
+    });
+    expect(
+      await answerApproval({
+        harness: plain,
+        decision: click,
+      }),
+    ).toBe(false);
+    expect(executed).toEqual([]);
   });
 });
 
@@ -205,6 +269,21 @@ describe('fromAiSdkTool gated through the harness', () => {
         id: 'm1',
       },
     });
+  });
+
+  test('refuses approvalTimeout, which the harness would not apply', () => {
+    expect(() =>
+      fromAiSdkTool('deleteMessage', aiTool, {
+        approvalTimeout: 1e3,
+      }),
+    ).toThrow('chatApprover({ timeout })');
+    // With the tool gating itself, the timeout is its own.
+    expect(() =>
+      fromAiSdkTool('deleteMessage', aiTool, {
+        approval: 'channel',
+        approvalTimeout: 1e3,
+      }),
+    ).not.toThrow();
   });
 
   test("with approval: 'channel' the tool gates itself and is not marked for the seam", () => {

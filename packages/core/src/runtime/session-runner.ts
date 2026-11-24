@@ -236,6 +236,8 @@ export class SessionRunner {
         messageIds: [
           messageId,
         ],
+        // Nothing streams for a replayed turn: its answer is here for those who post it.
+        text: response.text,
       },
     });
     this.resolveWaiters(response);

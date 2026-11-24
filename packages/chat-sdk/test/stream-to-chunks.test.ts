@@ -54,6 +54,74 @@ describe('streamToChatChunks', () => {
     ]);
   });
 
+  test('follows a turn that parks to the end of the turn that is woken', async () => {
+    const chunks = await collect(
+      streamToChatChunks(
+        asStream([
+          fwEvent('turn_started', TURN),
+          delta('Asking for approval.'),
+          fwEvent('turn_parked', {
+            turnId: 'turn-1',
+          }),
+          // Another message's turn in between is not this reply.
+          fwEvent('turn_started', {
+            turnId: 'turn-2',
+            messageIds: [
+              'other',
+            ],
+          }),
+          delta('NOT-OURS'),
+          fwEvent('turn_completed', {
+            turnId: 'turn-2',
+          }),
+          // Woken: a new turn id, the same message.
+          fwEvent('turn_started', {
+            turnId: 'turn-3',
+            messageIds: [
+              MESSAGE_ID,
+            ],
+          }),
+          messageAdded('m-2'),
+          delta('Approved, done.'),
+          fwEvent('turn_completed', {
+            turnId: 'turn-3',
+          }),
+          delta('AFTER-END'),
+        ]),
+        {
+          messageId: MESSAGE_ID,
+        },
+      ),
+    );
+    expect(chunks).toEqual([
+      'Asking for approval.',
+      '\n\n',
+      'Approved, done.',
+    ]);
+  });
+
+  test('posts the recorded answer of a message delivered again, and ends', async () => {
+    const chunks = await collect(
+      streamToChatChunks(
+        asStream([
+          fwEvent('turn_replayed', {
+            messageIds: [
+              MESSAGE_ID,
+            ],
+            text: 'The answer it gave before.',
+          }),
+          delta('AFTER-END'),
+        ]),
+        {
+          messageId: MESSAGE_ID,
+        },
+      ),
+    );
+    expect(chunks).toEqual([
+      'The answer it gave before.',
+    ]);
+  });
+
   test('skips replayed events from earlier turns', async () => {
     const chunks = await collect(
       streamToChatChunks(

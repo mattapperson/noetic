@@ -87,7 +87,9 @@ await answerApproval({
 
 - **The request.** `chatApprover()` sends an `ApprovalRequest` on `approvalRequests`, with the tool call's own id as `requestId`. Subscribe **once per harness** under the never-closed `APPROVAL_SCOPE`: queue delivery is competing-consumer, so a second subscriber would steal requests. Route each card by the request's `threadId`.
 - **The wait.** The call is held in the harness's storage, not in the tool. It survives a restart, and on storage with [`park`](/docs/framework/durability#parked-turns) on, its turn stops holding a process while the person decides.
-- **The deadline.** `chatApprover({ timeout })` sets how long a call stays held before it is denied: five minutes by default, `Infinity` to wait as long as it takes.
+- **The deadline.** `chatApprover({ timeout })` sets how long a call stays held before it is denied: five minutes by default, `Infinity` to wait as long as it takes. `chatTools({ approvalTimeout })` is for the older in-tool flow below and throws without `approval: 'channel'`.
+- **The answer.** `answerApproval` resolves `true` when a waiting call took the decision and `false` for a stale click. It throws if the harness could not be reached, so you can tell the person the click did not land.
+- **The reply.** A turn that parks keeps its reply open: when the decision wakes it, the rest streams into the same post.
 - **No approver.** A harness without `chatApprover()` (or another `approveToolCall`) still gates these tools: the call is held, it shows in `harness.pending()`, and nothing runs until a decision passed to `harness.execute()` answers it. No request is sent to chat, so set the approver if you want cards.
 
 A rejection or a passed deadline reaches the model as a tool error with the reason.

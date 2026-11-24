@@ -211,7 +211,7 @@ Framework events emitted during execution:
 |---|---|
 | `{name}:turn_started` | A session turn began. Data: `{ turnId, messageIds }`. |
 | `{name}:turn_completed` | A session turn completed. Data: `{ turnId, durationMs }`. |
-| `{name}:turn_replayed` | A message delivered again was answered from its finished turn's record; nothing ran. Data: `{ messageIds }`. |
+| `{name}:turn_replayed` | A message delivered again was answered from its finished turn's record; nothing ran. Data: `{ messageIds, text }`, where `text` is the recorded answer. |
 | `{name}:turn_parked` | A session turn [parked](/docs/framework/durability#parked-turns) instead of completing. Data: `{ turnId, durationMs, wakeAt }`. |
 | `{name}:turn_aborted` | A session turn was aborted or errored. Data: `{ turnId, reason }`. |
 | `{name}:steer_accepted` | A steer was queued while a turn runs. Data: `{ messageId, turnId, deliveryMode }`. |

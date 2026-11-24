@@ -4,10 +4,16 @@ import type {
   ExternalChannel,
   ToolApprover,
 } from '@noetic-tools/types';
+import { isNoeticError } from '@noetic-tools/types';
 import { z } from 'zod';
 
 /**
- * Approval flow for gated chat tools, built on external channels:
+ * Approval flow for gated chat tools.
+ *
+ * By default the harness holds a gated call (`chatApprover`, `answerApproval`,
+ * below). The steps here are the older flow a tool built with
+ * `approval: 'channel'` runs inside its own `execute`, on external channels.
+ * Both send the same `ApprovalRequest`, so step 2 serves either.
  *
  * 1. A gated tool sends an `ApprovalRequest` (carrying its `threadId` for
  *    routing) on `approvalRequests` and waits on `approvalDecisions`.
@@ -163,6 +169,71 @@ export interface HeldApprovalHarness extends ApprovalHarness {
       threadId?: string;
     },
   ): Promise<void>;
+  /**
+   * Lists the calls a thread holds, as `AgentHarness.pending()` does. A harness
+   * with `execute` and no `pending` is not asked: nothing says its `execute`
+   * reads a decision as one, rather than as a message to answer.
+   */
+  pending?(scope?: { threadId?: string }): Promise<
+    ReadonlyArray<{
+      readonly callId: string;
+    }>
+  >;
+}
+
+/** True for the error a harness throws when a decision has no call to go to. */
+function isRefusal(error: unknown): boolean {
+  if (!isNoeticError(error)) {
+    return false;
+  }
+  const { kind } = error.noeticError;
+  return kind === 'hold_refused' || kind === 'decision_refused';
+}
+
+/**
+ * Answer the call if the harness holds it. Resolves false when it holds no such
+ * call, or it was answered by someone else first.
+ *
+ * @throws whatever the harness throws for another reason: storage that is down
+ *   is not a stale click.
+ */
+async function answerHeld(params: {
+  harness: HeldApprovalHarness;
+  decision: ApprovalDecision;
+  threadId?: string;
+}): Promise<boolean> {
+  const { harness, decision } = params;
+  if (!harness.execute || !harness.pending) {
+    return false;
+  }
+  const scope = {
+    threadId: params.threadId,
+  };
+  const held = await harness.pending(scope);
+  if (!held.some((call) => call.callId === decision.requestId)) {
+    return false;
+  }
+  try {
+    await harness.execute(
+      {
+        type: 'noetic:decision',
+        callId: decision.requestId,
+        action: decision.approved ? 'allow' : 'deny',
+        ...(decision.reason === undefined
+          ? {}
+          : {
+              guidance: decision.reason,
+            }),
+      },
+      scope,
+    );
+    return true;
+  } catch (error) {
+    if (isRefusal(error)) {
+      return false;
+    }
+    throw error;
+  }
 }
 
 /**
@@ -171,7 +242,11 @@ export interface HeldApprovalHarness extends ApprovalHarness {
  * wakes a parked turn; anything else goes to `resolveApproval` and the channel.
  *
  * Resolves `false` when nothing was waiting for the decision, such as a stale
- * button clicked long after the fact.
+ * button clicked long after the fact, and `true` only when a waiting call took it.
+ *
+ * @throws when the harness fails for a reason other than the call not being
+ *   held, such as storage that cannot be reached: the click was not delivered,
+ *   and the caller should say so or try again.
  */
 export async function answerApproval(params: {
   harness: HeldApprovalHarness;
@@ -181,28 +256,8 @@ export async function answerApproval(params: {
   /** Override when the integration subscribed under a custom scope id. */
   scopeId?: string;
 }): Promise<boolean> {
-  const { harness, decision } = params;
-  if (harness.execute) {
-    try {
-      await harness.execute(
-        {
-          type: 'noetic:decision',
-          callId: decision.requestId,
-          action: decision.approved ? 'allow' : 'deny',
-          ...(decision.reason === undefined
-            ? {}
-            : {
-                guidance: decision.reason,
-              }),
-        },
-        {
-          threadId: params.threadId,
-        },
-      );
-      return true;
-    } catch {
-      // Not a call the harness holds: it may be one waiting on the channel.
-    }
+  if (await answerHeld(params)) {
+    return true;
   }
   return resolveApproval(params);
 }

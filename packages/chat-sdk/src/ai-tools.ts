@@ -25,7 +25,12 @@ export interface FromAiSdkToolOptions {
    * A dynamic vendor predicate counts as gated.
    */
   needsApproval?: boolean;
-  /** How long a gated call waits for a decision, in milliseconds. Default 5 minutes. */
+  /**
+   * How long a call gated with `approval: 'channel'` waits for a decision, in
+   * milliseconds. Default 5 minutes. A call the harness holds takes its deadline
+   * from the approver instead (`chatApprover({ timeout })`), so this option is
+   * refused without `approval: 'channel'` rather than ignored.
+   */
   approvalTimeout?: number;
   /**
    * Where a gated call waits for its decision.
@@ -68,6 +73,11 @@ export function fromAiSdkTool(
   const timeout = options.approvalTimeout ?? DEFAULT_APPROVAL_TIMEOUT;
   // Gating inside the tool is the older, in-memory flow, kept for those who ask for it.
   const inTool = options.approval === 'channel';
+  if (options.approvalTimeout !== undefined && !inTool) {
+    throw new Error(
+      `'approvalTimeout' applies to approval: 'channel'. The harness holds '${name}' and takes its deadline from the approver: pass chatApprover({ timeout }) as approveToolCall.`,
+    );
+  }
 
   return {
     name,
@@ -111,7 +121,12 @@ export interface ChatToolsOptions {
    * default — Chat SDK gates its write tools.
    */
   requireApproval?: boolean | Record<string, boolean>;
-  /** How long a gated call waits for a decision, in milliseconds. Default 5 minutes. */
+  /**
+   * How long a call gated with `approval: 'channel'` waits for a decision, in
+   * milliseconds. Default 5 minutes. A call the harness holds takes its deadline
+   * from the approver instead (`chatApprover({ timeout })`), so this option is
+   * refused without `approval: 'channel'` rather than ignored.
+   */
   approvalTimeout?: number;
   /**
    * Where a gated call waits for its decision.

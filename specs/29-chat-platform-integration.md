@@ -1,7 +1,7 @@
 # Chat Platform Integration: `@noetic-tools/chat-sdk`
 
 > **Depends On:** `06-channels` (external channels — approval flow), `08-runtime` (session API — `execute`, streams, seeding)
-> **Exports:** `noeticAgent()`, `toItems()`, `streamToChatChunks()`, `chatTools()`, `fromAiSdkTool()`, approval channels (`approvalRequests`, `approvalDecision()`, `resolveApproval()`), `createChatHistoryStore()`, `ChatHarness`, chat structural mirrors
+> **Exports:** `noeticAgent()`, `toItems()`, `streamToChatChunks()`, `chatTools()`, `fromAiSdkTool()`, approvals (`chatApprover()`, `answerApproval()`, `approvalRequests`, `approvalDecisions`, `resolveApproval()`, `APPROVAL_SCOPE`), `createChatHistoryStore()`, `ChatHarness`, chat structural mirrors
 
 ---
 
@@ -55,6 +55,8 @@ A state machine over `StreamEvent`s:
 2. **Text.** `response.output_text.delta` passes through as string chunks. When a second assistant message opens in the same turn (`response.output_item.added` after text was emitted), a separator (default blank line) is injected first — platforms concatenate raw deltas otherwise.
 3. **Tool cards.** `tool_call_started` / `tool_call_completed` become `task_update` chunks keyed by `callId` with status `in_progress` → `complete`/`error`; Slack and Linear render these natively, other platforms degrade via Chat SDK's own fallbacks. `taskTitle` customizes card titles. Calls still open at the turn boundary are flushed (`complete` on completion, `error` on abort) so no card is left spinning.
 4. **Terminate.** `turn_completed` (matching `turnId`, or any boundary for an injected claim) ends the iterable. `turn_aborted` flushes open cards, then yields the `abortNotice` — a generic `_(turn aborted)_` by default, never the raw internal reason string.
+5. **Parked turns.** `turn_parked` is not a boundary: the iterable stays open. A woken turn starts again under a new `turnId` with the same `messageIds`, so the next `turn_started` that carries the caller's `messageId` is followed to its end; other turns' events in between are skipped.
+6. **Replayed turns.** A message delivered again after its turn finished starts no turn. Its `turn_replayed` event carries the recorded answer as `text`, which is yielded before the iterable ends.
 
 Constraint: a harness `config.name` must not itself end in a `:`-prefixed event name (e.g. `:turn_started`), since matching is suffix-based.
 
@@ -67,11 +69,11 @@ A gated tool is gated by the harness's approval seam (`08-runtime` § Held tool 
 1. The wrapper marks a gated tool `needsApproval` and does nothing else: the harness asks before the tool runs.
 2. `chatApprover({ timeout? })` is the `approveToolCall` that asks in chat. It sends `{ requestId, toolName, args, threadId }` on the shared `approvalRequests` queue channel, with the tool call's own id as `requestId`, and answers `hold` with a deadline (default 5 minutes; `Infinity` for none). The call's record is in the harness's storage, so it survives a restart and its turn can park.
 3. The integration subscribes ONCE per harness with the never-closed lifetime scope: `harness.getChannelStream(approvalRequests, APPROVAL_SCOPE)`. Queue delivery is competing-consumer and channel-scoped, so a single subscriber is the correctness requirement — the request's `threadId` tells it which conversation gets the card.
-4. The button click calls `answerApproval({ harness, threadId, decision: { requestId, approved, reason? } })`, which answers the held call with a decision item passed to `harness.execute()`. It resolves `false`, and never throws, when nothing was waiting: stale button clicks are expected. A rejection or a passed deadline surfaces to the model as a tool error.
+4. The button click calls `answerApproval({ harness, threadId, decision: { requestId, approved, reason? } })`, which answers the held call with a decision item passed to `harness.execute()`. It looks the call up with `harness.pending()` first, so a harness that cannot list held calls is never handed a decision it might read as a message. It resolves `true` only when a waiting call took the decision and `false` when nothing was waiting (a stale click, or a call someone else answered first). It throws when the harness fails for another reason, such as storage that cannot be reached: that click was not delivered. A rejection or a passed deadline surfaces to the model as a tool error.
 
 A harness with no approver still gates these tools: the call is held and listed by `harness.pending()`, and no request is sent to chat.
 
-**Gating inside the tool.** `approval: 'channel'` keeps the earlier flow: the tool sends its request and waits on the shared `approvalDecisions` topic channel inside its own `execute` (receiver parked *before* the request is sent, so a decision cannot race past it), filtering broadcasts by its `requestId` under `approvalTimeout` (default 5 minutes). Such a tool does not declare `needsApproval`, so the harness approver is not asked a second time. `resolveApproval({ harness, decision })` broadcasts the decision and returns `false` when the channel is no longer open. The wait is in memory and ends with the process.
+**Gating inside the tool.** `approval: 'channel'` keeps the earlier flow: the tool sends its request and waits on the shared `approvalDecisions` topic channel inside its own `execute` (receiver parked *before* the request is sent, so a decision cannot race past it), filtering broadcasts by its `requestId` under `approvalTimeout` (default 5 minutes). `approvalTimeout` belongs to this flow only: a call the harness holds takes its deadline from `chatApprover({ timeout })`, and `chatTools`/`fromAiSdkTool` throw when given `approvalTimeout` without `approval: 'channel'`. Such a tool does not declare `needsApproval`, so the harness approver is not asked a second time. `resolveApproval({ harness, decision })` broadcasts the decision and returns `false` when the channel is no longer open. The wait is in memory and ends with the process.
 
 Session-mode harnesses work out of the box: `APPROVAL_SCOPE` is a harness-lifetime scope id, so the approval stream spans turns and no per-turn execution id is ever needed. Vendor tools receive a synthetic `toolCallId` and are not cancelled mid-flight on turn abort (the harness exposes no abort signal to tool executors).
 

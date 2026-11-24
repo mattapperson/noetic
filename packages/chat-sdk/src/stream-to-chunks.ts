@@ -10,6 +10,11 @@ export interface StreamToChatChunksOptions {
    * the batch claims it — the other handlers' translators end without
    * emitting, so the shared reply is posted exactly once. A `steer_dropped`
    * for this id also ends the translator without emitting.
+   *
+   * A turn that parks is not over: the stream stays open, and when the turn is
+   * woken it starts again under a new turn id with the same message ids, which
+   * the translator follows to its end. A message delivered again after its turn
+   * finished (`turn_replayed`) yields the recorded answer and ends.
    */
   messageId: string;
   /** Renders a task-card title for a tool call. Default: the tool name. */
@@ -36,6 +41,11 @@ type TurnClaim =
       kind: 'dropped';
     }
   | {
+      /** The message's turn finished earlier: this is the answer it gave. */
+      kind: 'replayed';
+      text: string;
+    }
+  | {
       kind: 'none';
     };
 
@@ -60,16 +70,40 @@ export async function* streamToChatChunks(
   /** Tool calls started but not yet completed — flushed at the turn boundary. */
   const openCalls = new Map<string, string>();
 
+  /** The turn parked: it goes on, under a new turn id, when it is woken. */
+  let parked = false;
+
   for await (const event of events) {
     if (!claimed) {
       const claim = matchClaim(event, options.messageId);
       if (claim.kind === 'foreign' || claim.kind === 'dropped') {
         return;
       }
+      if (claim.kind === 'replayed') {
+        if (claim.text) {
+          yield claim.text;
+        }
+        return;
+      }
       if (claim.kind === 'ours') {
         claimed = true;
         turnId = claim.turnId;
       }
+      continue;
+    }
+
+    if (parked) {
+      // Only the woken turn is ours; another turn's events in between are not.
+      const woken = wokenTurnId(event, options.messageId);
+      if (woken === undefined) {
+        continue;
+      }
+      parked = false;
+      turnId = woken;
+      continue;
+    }
+    if (hasEventName(event, 'turn_parked') && matchesTurn(event, turnId)) {
+      parked = true;
       continue;
     }
 
@@ -123,7 +157,28 @@ export async function* streamToChatChunks(
   }
 }
 
+/** The id of the turn `event` starts, when it is the woken turn of `messageId`. */
+function wokenTurnId(event: StreamEvent, messageId: string): string | null | undefined {
+  if (!hasEventName(event, 'turn_started')) {
+    return undefined;
+  }
+  const ids = event.data.messageIds;
+  if (!Array.isArray(ids) || !ids.includes(messageId)) {
+    return undefined;
+  }
+  return readTurnId(event);
+}
+
 function matchClaim(event: StreamEvent, messageId: string): TurnClaim {
+  if (hasEventName(event, 'turn_replayed')) {
+    const ids = event.data.messageIds;
+    if (Array.isArray(ids) && ids.includes(messageId)) {
+      return {
+        kind: 'replayed',
+        text: typeof event.data.text === 'string' ? event.data.text : '',
+      };
+    }
+  }
   if (hasEventName(event, 'turn_started')) {
     return claimFromIds(event.data.messageIds, messageId, readTurnId(event));
   }

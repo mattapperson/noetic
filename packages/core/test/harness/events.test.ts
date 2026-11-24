@@ -146,8 +146,21 @@ describe('a message delivered again after its turn finished', () => {
 
     // The sender retries; a new process takes the retry.
     const second = build();
+    const events = second.getFullStream(delivery)[Symbol.asyncIterator]();
+    const firstEvent = events.next();
     await second.execute('create the case', delivery);
     const again = await second.getAgentResponse(delivery);
+    // Nothing streams for it, so the event carries the answer for whoever posts it.
+    expect((await firstEvent).value).toMatchObject({
+      type: 'events:turn_replayed',
+      data: {
+        messageIds: [
+          'webhook-9',
+        ],
+        text: 'a-1',
+      },
+    });
+    await events.return?.();
     expect(again.replayed).toBe(true);
     expect(again.text).toBe('a-1');
     expect(m.calls).toBe(1);
