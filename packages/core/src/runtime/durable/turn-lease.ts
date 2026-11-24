@@ -101,8 +101,32 @@ function isHeldBy(record: LeaseRecord | null, holder: string, now: number): bool
   return record !== null && record.holder !== holder && record.heldUntil > now;
 }
 
+/**
+ * A prefix of its own. Under `session:`, the lease of thread `a` and the session
+ * of a thread named `a:lease` would be one key.
+ */
 function leaseKey(threadId: string): string {
-  return `session:${threadId}:lease`;
+  return `turn-lease:${threadId}`;
+}
+
+/**
+ * The term to take the lease at. It only ever goes up: a lease that went back to
+ * term 1 would lose every write to the entries a higher term left in the ledger,
+ * and the thread could never run again.
+ */
+function nextTerm(stored: StoredLease, now: number): number {
+  if (stored.record) {
+    return stored.record.term + 1;
+  }
+  if (stored.raw === null) {
+    return 1;
+  }
+  // Something is stored and it is not a lease. Keep its term if it has one. If not,
+  // the clock is above any term a thread counted up to, and still goes up by one.
+  const term = typeof stored.raw === 'object' && 'term' in stored.raw ? stored.raw.term : undefined;
+  return typeof term === 'number' && Number.isSafeInteger(term) && term >= 0
+    ? term + 1
+    : Math.max(1, Math.floor(now));
 }
 
 /** What is stored for a thread's lease: the value as read, and the lease it parses to. */
@@ -174,7 +198,8 @@ export class TurnLease implements LedgerFence {
    * can be picked up without the host retrying.
    *
    * @throws NoeticError `lease_lost` when another harness still holds it after the
-   *   wait, or when another harness won the swap.
+   *   wait, or when another harness won the swap; `cancelled` when `signal` aborts
+   *   while it waits.
    */
   static async take(
     opts: TurnLeaseOptions,
@@ -186,7 +211,13 @@ export class TurnLease implements LedgerFence {
     const giveUpAt = Date.now() + opts.waitMs;
     while (isHeldBy(stored.record, opts.holder, now)) {
       const left = giveUpAt - Date.now();
-      if (left <= 0 || signal?.aborted) {
+      if (signal?.aborted) {
+        throw new NoeticErrorImpl({
+          kind: 'cancelled',
+          reason: typeof signal.reason === 'string' ? signal.reason : 'aborted',
+        });
+      }
+      if (left <= 0) {
         throw new NoeticErrorImpl({
           kind: 'lease_lost',
           executionId: threadId,
@@ -200,7 +231,7 @@ export class TurnLease implements LedgerFence {
       now = opts.now();
     }
     const next: LeaseRecord = {
-      term: (stored.record?.term ?? 0) + 1,
+      term: nextTerm(stored, now),
       holder: opts.holder,
       heldUntil: now + opts.ttlMs,
     };

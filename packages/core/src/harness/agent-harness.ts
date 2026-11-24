@@ -282,12 +282,25 @@ function resolveLeaseOptions(
   if (!canSwap(storage)) {
     return undefined;
   }
+  const ttlMs = config?.ttlMs ?? DEFAULT_LEASE_TTL_MS;
+  // One lease period, and a little more: a dead holder's lease runs out in that time.
+  const waitMs = config?.waitMs ?? ttlMs + LEASE_WAIT_MARGIN_MS;
+  // A lease of no length is lost before the turn's first write; one that never
+  // ends is never taken over.
+  const ttlOk = Number.isFinite(ttlMs) && ttlMs > 0;
+  const waitOk = Number.isFinite(waitMs) && waitMs >= 0;
+  if (!ttlOk || !waitOk || config?.holder === '') {
+    throw new NoeticConfigError({
+      code: 'INVALID_LEASE_OPTIONS',
+      message: `environment.storage.lease is not usable: ttlMs ${ttlMs}, waitMs ${waitMs}, holder ${JSON.stringify(config?.holder)}.`,
+      hint: 'Give ttlMs a finite number of milliseconds above 0, waitMs a finite number from 0 up, and holder a non-empty name, or leave them out for the defaults.',
+    });
+  }
   return {
     storage,
     holder: config?.holder ?? crypto.randomUUID(),
-    ttlMs: config?.ttlMs ?? DEFAULT_LEASE_TTL_MS,
-    // One lease period, and a little more: a dead holder's lease runs out in that time.
-    waitMs: config?.waitMs ?? (config?.ttlMs ?? DEFAULT_LEASE_TTL_MS) + LEASE_WAIT_MARGIN_MS,
+    ttlMs,
+    waitMs,
     now: config?.now ?? Date.now,
   };
 }
@@ -1132,7 +1145,8 @@ export class AgentHarness<
           // One harness drives a thread's turn: take its lease before reading anything.
           const lease =
             record && this.leaseOptions
-              ? await TurnLease.take(this.leaseOptions, threadId)
+              ? // Aborting the thread ends the wait for a lease held elsewhere.
+                await TurnLease.take(this.leaseOptions, threadId, session.runner.signal)
               : undefined;
           record?.hold(lease);
           session.lease = lease;

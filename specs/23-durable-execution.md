@@ -124,7 +124,7 @@ interface StorageAdapter {
 
 With `swap`, every session turn (`harness.execute()`) runs under a lease:
 
-- **The record.** `session:<threadId>:lease` holds `{ term, holder, heldUntil }`. `term` goes up by one each time the lease is taken.
+- **The record.** `turn-lease:<threadId>` holds `{ term, holder, heldUntil }`. `term` goes up by one each time the lease is taken, and never goes back: where what is stored cannot be read as a lease, the next term is above its `term` if it has one, and the clock in epoch ms if not, so earlier entries in the ledger never outrank the new holder.
 - **Taking it.** Before a turn reads anything, the harness swaps the record to `term + 1`. A lease another harness holds is waited on for up to `waitMs` (default: one `ttlMs` and a second more), which is long enough to take over from a holder that died; if it is still held then, the turn fails with `lease_lost`. The swap compares against the stored value exactly as read, so a record this version cannot parse is taken over rather than left to wedge the thread.
 - **Keeping it.** The holder renews every third of `ttlMs` (default 30 s) while the turn runs, and hands the lease back when the turn ends, whether it finished or failed. One renewal runs at a time, and the hand-back waits for one in flight.
 - **Fencing.** Every step-ledger entry carries its writer's term, and a sequence number is claimed with `swap` rather than set. A harness that finds a higher term in its way has been replaced: it stops with `lease_lost` and its context is aborted. An entry from a lower term is a replaced harness's late write, and the current holder overwrites it. On load, an entry with a lower term than one before it in sequence order is ignored.

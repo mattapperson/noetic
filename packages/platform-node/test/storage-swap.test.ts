@@ -5,7 +5,7 @@
 import { Database } from 'bun:sqlite';
 import { afterEach, describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, rmdirSync, rmSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { StorageAdapter } from '@noetic-tools/core';
@@ -236,5 +236,60 @@ describe('sqlite storage', () => {
     });
     db.exec('DROP TABLE noetic_storage');
     await expect(s.set('a', 1)).rejects.toThrow();
+  });
+});
+
+describe('file storage swap against a lock left behind', () => {
+  /** A root with key `k` stored, and the path of that key's lock directory. */
+  async function locked(): Promise<{
+    storage: StorageAdapter;
+    lock: string;
+  }> {
+    const root = tempDir();
+    const storage = createFileStorage({
+      root,
+    });
+    await storage.set('k', 'before');
+    const [file] = readdirSync(root).filter((name) => name.endsWith('.json'));
+    assert(file);
+    const lock = path.join(root, `${file}.lock`);
+    mkdirSync(lock);
+    return {
+      storage,
+      lock,
+    };
+  }
+
+  it('takes over a lock a dead process left, rather than failing', async () => {
+    const { storage, lock } = await locked();
+    const longAgo = new Date(Date.now() - 6e4);
+    utimesSync(lock, longAgo, longAgo);
+    assert(storage.swap);
+    expect(await storage.swap('k', 'before', 'after')).toBe(true);
+    expect(await storage.get<string>('k')).toBe('after');
+  });
+
+  it('waits for a lock in use without stopping the process, then goes on', async () => {
+    const { storage, lock } = await locked();
+    assert(storage.swap);
+    let ticks = 0;
+    const ticking = setInterval(() => {
+      ticks += 1;
+    }, 5);
+    setTimeout(() => rmdirSync(lock), 60);
+    const swapped = await storage.swap('k', 'before', 'after');
+    clearInterval(ticking);
+    expect(swapped).toBe(true);
+    // Timers ran while it waited: the wait did not hold the event loop.
+    expect(ticks).toBeGreaterThan(2);
+  });
+
+  it('does not remove a lock in use because a breaker was left behind', async () => {
+    const { storage, lock } = await locked();
+    // Another process is part way through breaking a stale lock; this one is fresh.
+    mkdirSync(`${lock}.break`);
+    assert(storage.swap);
+    setTimeout(() => rmdirSync(lock), 40);
+    expect(await storage.swap('k', 'before', 'after')).toBe(true);
   });
 });

@@ -538,7 +538,7 @@ describe('a turn another Worker still holds', () => {
     await first.close();
 
     // A Worker that was resuming the turn died: its lease has time left to run.
-    await make().set('session:t:lease', {
+    await make().set('turn-lease:t', {
       term: 9,
       holder: 'a-worker-that-died',
       heldUntil: w.clock.t + 3e4,
@@ -587,7 +587,7 @@ describe('a turn another Worker still holds', () => {
       ...stored,
       turn: cutOff,
     });
-    await make().set('session:t:lease', {
+    await make().set('turn-lease:t', {
       term: 9,
       holder: 'a-worker-that-died',
       heldUntil: w.clock.t + 3e4,

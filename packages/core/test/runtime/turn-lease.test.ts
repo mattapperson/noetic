@@ -5,7 +5,7 @@ import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import type { StorageAdapter } from '@noetic-tools/context';
 import type { CallModelRequest, ContextData, Item, LLMResponse } from '@noetic-tools/types';
-import { isNoeticError, NoeticErrorImpl } from '@noetic-tools/types';
+import { isNoeticError, NoeticConfigError, NoeticErrorImpl } from '@noetic-tools/types';
 import { callModel, runCode } from '../../src/builders/step-builders';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import type { StepLedgerEntry } from '../../src/runtime/durable/step-ledger';
@@ -336,20 +336,48 @@ describe('TurnLease against a bad clock or slow storage', () => {
 
   it('takes a thread whose lease record is not one it can read', async () => {
     const storage = createInMemoryStorage(SWAP);
-    await storage.set('session:t:lease', {
+    await storage.set('turn-lease:t', {
       holder: 'someone',
       junk: true,
     });
     const clock: Clock = {
       t: 0,
     };
+    clock.t = 1.7e12;
     const lease = await TurnLease.take(leaseOptions(storage, 'a', clock), 't');
-    expect(lease.term).toBe(1);
+    // Not back to 1: entries an earlier holder left in the ledger would outrank
+    // it, and every write of the thread would lose from then on.
+    expect(lease.term).toBe(1.7e12);
+    await lease.release();
+    expect((await TurnLease.take(leaseOptions(storage, 'b', clock), 't')).term).toBe(1.7e12 + 1);
+  });
+
+  it('keeps the term of a record it cannot otherwise read', async () => {
+    const storage = createInMemoryStorage(SWAP);
+    await storage.set('turn-lease:t', {
+      term: 41,
+      holder: 7,
+    });
+    const clock: Clock = {
+      t: 0,
+    };
+    expect((await TurnLease.take(leaseOptions(storage, 'a', clock), 't')).term).toBe(42);
+  });
+
+  it("is not the session record of a thread named after another's lease", async () => {
+    const storage = createInMemoryStorage(SWAP);
+    const clock: Clock = {
+      t: 0,
+    };
+    await TurnLease.take(leaseOptions(storage, 'a', clock), 't');
+    // A thread may be called anything, 't:lease' included.
+    expect(await storage.get('session:t:lease')).toBeNull();
+    expect(await storage.list('session:')).toEqual([]);
   });
 
   it('keeps taking a thread whose lease record gained a field it does not know', async () => {
     const storage = createInMemoryStorage(SWAP);
-    await storage.set('session:t:lease', {
+    await storage.set('turn-lease:t', {
       term: 7,
       holder: 'old',
       heldUntil: 0,
@@ -381,7 +409,8 @@ describe('TurnLease against a bad clock or slow storage', () => {
         abort.signal,
       ),
     );
-    expect(refused.kind).toBe('lease_lost');
+    // Told to stop is not the same as losing the lease.
+    expect(refused.kind).toBe('cancelled');
     expect(Date.now() - started).toBeLessThan(1e3);
   });
 });
@@ -695,5 +724,109 @@ describe('two harnesses racing one turn', () => {
       'b-2',
     ]);
     expect(stored.turn).toBeUndefined();
+  });
+});
+
+describe('lease settings', () => {
+  const build = (lease: { ttlMs?: number; waitMs?: number; holder?: string }): AgentHarness =>
+    new AgentHarness({
+      name: 'lease-options',
+      params: {},
+      environment: {
+        storage: {
+          adapter: createInMemoryStorage(SWAP),
+          lease,
+        },
+      },
+    });
+
+  it('refuses a lease of no length, of no end, or with no holder', () => {
+    for (const lease of [
+      {
+        ttlMs: 0,
+      },
+      {
+        ttlMs: -1,
+      },
+      {
+        ttlMs: Number.POSITIVE_INFINITY,
+      },
+      {
+        ttlMs: Number.NaN,
+      },
+      {
+        waitMs: -1,
+      },
+      {
+        waitMs: Number.NaN,
+      },
+      {
+        holder: '',
+      },
+    ]) {
+      let code: string | undefined;
+      try {
+        build(lease);
+      } catch (error) {
+        assert(error instanceof NoeticConfigError);
+        code = error.code;
+      }
+      expect(code).toBe('INVALID_LEASE_OPTIONS');
+    }
+  });
+
+  it('takes the smallest lease and no wait at all', () => {
+    expect(() =>
+      build({
+        ttlMs: 1,
+        waitMs: 0,
+      }),
+    ).not.toThrow();
+  });
+});
+
+describe('aborting a thread that waits for a lease', () => {
+  it('ends the wait: the turn is cancelled, not left waiting out the other holder', async () => {
+    const storage = createInMemoryStorage(SWAP);
+    await storage.set('turn-lease:t', {
+      term: 3,
+      holder: 'another-harness',
+      heldUntil: Date.now() + 6e4,
+    });
+    const harness = new AgentHarness({
+      name: 'lease-abort',
+      params: {},
+      agentGraph: runCode<ContextData, string, string>({
+        id: 'never',
+        execute: async () => 'ran',
+      }),
+      environment: {
+        storage: {
+          adapter: storage,
+          lease: {
+            waitMs: 6e4,
+          },
+        },
+      },
+    });
+    const scope = {
+      threadId: 't',
+    };
+    await harness.execute('go', scope);
+    const answer = harness.getAgentResponse(scope).then(
+      () => 'answered',
+      () => 'failed',
+    );
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const started = Date.now();
+    await harness.abort(scope);
+    expect(await answer).toBe('failed');
+    expect(Date.now() - started).toBeLessThan(2e3);
+    // The other harness's lease was not touched.
+    expect(await storage.get('turn-lease:t')).toMatchObject({
+      term: 3,
+      holder: 'another-harness',
+    });
+    await harness.close();
   });
 });

@@ -81,20 +81,28 @@ function defaultRoot(): string {
   return path.join(home, '.noetic', 'checkpoints');
 }
 
-/** A lock older than this was left by a process that died holding it. */
-const STALE_LOCK_MS = 1e4;
-/** How long `swap` waits for another process's lock before giving up. */
-const LOCK_WAIT_MS = 2e3;
+/**
+ * A lock older than this was left by a process that died holding it. A lock is
+ * held for one small read and write, with nothing awaited in between.
+ */
+const STALE_LOCK_MS = 5e3;
+/**
+ * How long `swap` waits for another process's lock before giving up. Longer than
+ * `STALE_LOCK_MS`, so a lock a dead process left is outwaited, not an error.
+ */
+const LOCK_WAIT_MS = STALE_LOCK_MS + 1e3;
+const LOCK_POLL_MS = 2;
 
-function sleepSync(ms: number): void {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+function pause(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
  * Hold `lockDir` while `run` executes. `mkdir` is the atomic step: of two
- * processes creating the same directory, one gets `EEXIST`.
+ * processes creating the same directory, one gets `EEXIST`. Waiting for the lock
+ * does not block the process; `run` itself is synchronous.
  */
-function withLock<T>(lockDir: string, run: () => T): T {
+async function withLock<T>(lockDir: string, run: () => T): Promise<T> {
   const deadline = Date.now() + LOCK_WAIT_MS;
   for (;;) {
     try {
@@ -105,19 +113,47 @@ function withLock<T>(lockDir: string, run: () => T): T {
         throw err;
       }
       if (isStale(lockDir)) {
-        tryRemoveLock(lockDir);
+        breakStaleLock(lockDir);
         continue;
       }
       if (Date.now() >= deadline) {
         throw new Error(`createFileStorage: timed out waiting for the lock "${lockDir}".`);
       }
-      sleepSync(2);
+      await pause(LOCK_POLL_MS);
     }
   }
   try {
     return run();
   } finally {
     tryRemoveLock(lockDir);
+  }
+}
+
+/**
+ * Remove a lock a dead process left. One process at a time, and it looks again
+ * once it is the one: two that both saw the lock stale would otherwise each remove
+ * it, the second removing the lock the first had just taken for itself.
+ */
+function breakStaleLock(lockDir: string): void {
+  const breaker = `${lockDir}.break`;
+  try {
+    mkdirSync(breaker);
+  } catch (err) {
+    if (!isExists(err)) {
+      throw err;
+    }
+    // Another process is breaking it, or died doing so.
+    if (isStale(breaker)) {
+      tryRemoveLock(breaker);
+    }
+    return;
+  }
+  try {
+    if (isStale(lockDir)) {
+      tryRemoveLock(lockDir);
+    }
+  } finally {
+    tryRemoveLock(breaker);
   }
 }
 

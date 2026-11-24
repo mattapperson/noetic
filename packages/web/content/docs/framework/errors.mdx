@@ -232,6 +232,12 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 **Fix:** Pass `agentGraph` to the `AgentHarness` constructor, or drive steps directly with `harness.run(step, input, ctx)`.
 
+#### INVALID_LEASE_OPTIONS
+
+**Cause:** `environment.storage.lease` has a `ttlMs` that is not a finite number above 0, a `waitMs` that is negative or not finite, or an empty `holder`.
+
+**Fix:** Correct the value, or leave it out for the default (`ttlMs` 30 seconds; `waitMs` one `ttlMs` and a little more).
+
 #### MISSING_HARNESS_CONTEXT
 
 **Cause:** A `workflow()` or `dynamicWorkflow()` step ran on a context with no harness attached.

@@ -356,7 +356,7 @@ describe('a parked turn', () => {
     // The lease was handed back, so no harness holds the parked turn.
     const lease = await fixture.storage.get<{
       heldUntil: number;
-    }>('session:t:lease');
+    }>('turn-lease:t');
     expect(lease?.heldUntil).toBe(0);
   });
 
@@ -459,7 +459,7 @@ describe('a parked turn', () => {
       park: false,
     });
     await holder.execute('hello', delivery);
-    for (let i = 0; i < 500 && !(await fixture.storage.get('session:t:lease')); i += 1) {
+    for (let i = 0; i < 500 && !(await fixture.storage.get('turn-lease:t')); i += 1) {
       await tick(1);
     }
 

@@ -243,6 +243,11 @@ export class SessionRunner {
     this.resolveWaiters(response);
   }
 
+  /** The abort signal of the turn in flight, from before its context is built. */
+  get signal(): AbortSignal | undefined {
+    return this.currentController?.signal;
+  }
+
   /** Cancel the in-flight turn. Does NOT re-kick — callers that want restart
    *  behaviour should enqueue a message before/after calling abort. */
   async abort(reason?: string): Promise<void> {

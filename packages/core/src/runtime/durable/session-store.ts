@@ -183,15 +183,11 @@ export function createSessionStore(storage: StorageAdapter): SessionStore {
         }
       : {}),
     threads: async () =>
-      (await storage.list(SESSION_PREFIX))
-        .filter((key) => !key.endsWith(LEASE_SUFFIX))
-        .map((key) => key.slice(SESSION_PREFIX.length)),
+      (await storage.list(SESSION_PREFIX)).map((key) => key.slice(SESSION_PREFIX.length)),
   };
 }
 
 const SESSION_PREFIX = 'session:';
-/** The suffix of a thread's lease record, which shares the prefix (see `turn-lease`). */
-const LEASE_SUFFIX = ':lease';
 
 function sessionKey(threadId: string): string {
   return `${SESSION_PREFIX}${threadId}`;
