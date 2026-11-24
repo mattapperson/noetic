@@ -43,6 +43,20 @@ const CALL_KIND = 'callModel:call';
 const CallOutputSchema = z.object({
   output: z.string(),
   result: z.unknown().optional(),
+  /**
+   * `result` was left out because `output` holds the same thing: as text, or as
+   * its JSON. A record that kept both was twice the size of what it recorded.
+   */
+  resultAs: z
+    .enum([
+      'text',
+      'json',
+    ])
+    .optional(),
+  /** The id of the result item the call appended, which a replay appends again. */
+  itemId: z.string().optional(),
+  /** The tool's body ran, so its UI showed a call and how it ended. */
+  ran: z.boolean().optional(),
   error: z.boolean().optional(),
   approval: z
     .enum([
@@ -65,6 +79,11 @@ interface CalledFunction {
  * (spec 23a § Tool calls in a round).
  */
 export interface CallLedger {
+  /**
+   * Where in the run this round is: the model step's path and the round's number.
+   * The same on a resume, and what tells two calls with one call id apart.
+   */
+  readonly scope: string;
   /** The recorded result of this call, when an earlier attempt of the round finished it. */
   take(call: CalledFunction): ToolCallResult | undefined;
   /** Record what the call produced. Resolves whether the record was stored. */
@@ -224,7 +243,9 @@ export class RoundLedger {
     this.recorded.add(round);
     // A new record holds a bill no context has been charged with yet.
     chargedRounds.get(ledger)?.delete(this.key(round));
-    await ledger.drop(this.key(round + 1));
+    // The next round's record, and the calls recorded beneath it, belong to the
+    // conversation an earlier attempt had. This one may ask for other calls.
+    await ledger.dropWithin(this.key(round + 1));
     return true;
   }
 
@@ -236,13 +257,17 @@ export class RoundLedger {
     const ledger = this.ctx.ledger;
     const stepId = this.dispatch.stepId;
     const keyOf = (call: CalledFunction): string => `${this.key(round)}/call:${call.callId}`;
-    // A call is the same call only with the same name and arguments.
+    // A call is the same call only with the same name and arguments, asked for by
+    // the same step input: a provider that numbers its calls from one each time
+    // would otherwise hand a call the result of another conversation's.
     const hashOf = (call: CalledFunction): string | undefined =>
       hashStepInput({
         name: call.name,
         arguments: call.arguments,
+        step: this.dispatch.inputHash,
       });
     return {
+      scope: this.key(round),
       noteEffect: (call) => {
         ledger?.noteEffect(keyOf(call));
         ledger?.noteEffect(this.key(round));
@@ -254,7 +279,7 @@ export class RoundLedger {
           inputHash: hashOf(call),
         });
         const parsed = entry ? CallOutputSchema.safeParse(entry.output) : undefined;
-        return parsed?.success ? parsed.data : undefined;
+        return parsed?.success ? expandResult(parsed.data) : undefined;
       },
       record: async (call, result) => {
         if (!ledger) {
@@ -265,7 +290,7 @@ export class RoundLedger {
           stepId,
           kind: CALL_KIND,
           inputHash: hashOf(call),
-          output: frameworkCast<unknown>(result),
+          output: compactResult(result),
           completedAt: new Date().toISOString(),
         });
       },
@@ -293,6 +318,76 @@ export class RoundLedger {
   private key(round: number): string {
     return roundPath(this.dispatch.path, round);
   }
+}
+
+/** What a call record stores: the result, with `result` left out where `output` says it. */
+function compactResult(result: ToolCallResult): z.infer<typeof CallOutputSchema> {
+  const kept: z.infer<typeof CallOutputSchema> = {
+    output: result.output,
+    ...(result.error === undefined
+      ? {}
+      : {
+          error: result.error,
+        }),
+    ...(result.approval === undefined
+      ? {}
+      : {
+          approval: result.approval,
+        }),
+    ...(result.itemId === undefined
+      ? {}
+      : {
+          itemId: result.itemId,
+        }),
+    ...(result.ran === undefined
+      ? {}
+      : {
+          ran: result.ran,
+        }),
+  };
+  if (result.result === undefined) {
+    return kept;
+  }
+  const resultAs = sameAsOutput(result.result, result.output);
+  return resultAs === undefined
+    ? {
+        ...kept,
+        result: result.result,
+      }
+    : {
+        ...kept,
+        resultAs,
+      };
+}
+
+/** How `output` holds `result`, or undefined when it does not. */
+function sameAsOutput(result: unknown, output: string): 'text' | 'json' | undefined {
+  if (typeof result === 'string') {
+    return result === output ? 'text' : undefined;
+  }
+  try {
+    return JSON.stringify(result) === output ? 'json' : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The result a call record stands for. */
+function expandResult(stored: z.infer<typeof CallOutputSchema>): ToolCallResult {
+  const { resultAs, ...result } = stored;
+  if (resultAs === 'text') {
+    return {
+      ...result,
+      result: result.output,
+    };
+  }
+  if (resultAs === 'json') {
+    return {
+      ...result,
+      result: JSON.parse(result.output),
+    };
+  }
+  return result;
 }
 
 /** A cut round holding a function call or an answer has something to go on from. */

@@ -129,6 +129,11 @@ export interface ExecuteToolCallParams {
    * one that does.
    */
   recordId?: string;
+  /**
+   * Where in the run the call was made: a model step's path and round. Goes into the
+   * idempotency key, so two calls a provider gave the same id do not share one.
+   */
+  keyScope?: string;
 }
 
 /** The id a call's durable records go under. */
@@ -157,6 +162,10 @@ export interface ToolCallResult {
   held?: HeldCall;
   /** The call was held and is now settled: its record can be dropped. */
   settled?: boolean;
+  /** The tool's body ran (and its UI showed the call), whether it returned or threw. */
+  ran?: boolean;
+  /** The id of the result item this call appended, kept so a replay appends the same. */
+  itemId?: string;
   /**
    * A `durable` tool ran under an intent record. The caller drops it once the
    * result is on record; until then a resumed run treats the call as started.
@@ -391,6 +400,7 @@ async function runMatchedTool(
   const toolCtx = buildToolExecutionContext(params.context, params.harness, {
     callId: params.callId,
     recordId: recordIdOf(params),
+    keyScope: params.keyScope,
   });
   const callId = params.callId;
   // Where the call's held record goes: the id that survives a resume.
@@ -465,6 +475,7 @@ async function runMatchedTool(
     return {
       output: toolOutputText(result),
       result,
+      ran: true,
     };
   } catch (e) {
     // An approval seam inside the tool (a connection's gates) held the call.
@@ -487,6 +498,7 @@ async function runMatchedTool(
     return {
       output: `Error: ${e instanceof Error ? e.message : String(e)}`,
       error: true,
+      ran: true,
     };
   }
 }
@@ -516,6 +528,7 @@ function toolOutputText(result: unknown): string {
  * without `itemSchemas` fall back to the base structural parse.
  */
 export function createToolResultItem({
+  id,
   output,
   callId,
   roundItemSchemas,
@@ -525,6 +538,8 @@ export function createToolResultItem({
   result,
   error,
 }: {
+  /** The item's id, when it is one made before: a replayed call keeps its id. */
+  id?: string;
   output: string;
   callId: string;
   roundItemSchemas: ItemSchemaRegistry;
@@ -535,7 +550,7 @@ export function createToolResultItem({
   error?: boolean;
 }): Item {
   const baseItem = {
-    id: crypto.randomUUID(),
+    id: id ?? crypto.randomUUID(),
     status: 'completed',
     type: 'function_call_output',
     callId,

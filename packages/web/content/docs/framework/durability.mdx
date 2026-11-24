@@ -267,6 +267,8 @@ Replaying an output replays a step's **value**, not its **effect**. A `runCode` 
 
 Core's ledger covers control flow, `callModel` steps, their rounds, and each tool call within a round. A tool call that finished is never run again, even when its round was cut off before it recorded.
 
+A replayed call appends the result item it appended the first time, under the same id, and a tool with a `ui` draws it again. A result larger than the ledger's entry cap (128 KiB by default) is not recorded, so its call runs again; raise `stepLedgerRetention.maxEntryBytes` if your tools return more.
+
 That leaves one call: the one running when the host died. It runs again on resume, and core cannot know whether its effect landed the first time. Every tool call, a model's or an `invokeTool` step's, gets an `idempotencyKey` for this, the same on every attempt:
 
 ```ts validate=none

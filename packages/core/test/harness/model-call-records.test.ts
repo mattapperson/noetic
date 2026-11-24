@@ -5,7 +5,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import type { StorageAdapter } from '@noetic-tools/context';
-import type { ContextData, HeldCall } from '@noetic-tools/types';
+import type { ContextData, HeldCall, Item } from '@noetic-tools/types';
 import { z } from 'zod';
 import { callModel } from '../../src/builders/step-builders';
 import { tool } from '../../src/builders/tool-builder';
@@ -20,6 +20,13 @@ const SHIPMENTS = 3;
 
 const OutputSchema = z.object({
   type: z.literal('function_call_output'),
+});
+
+const CallRecordSchema = z.object({
+  kind: z.literal('callModel:call'),
+  output: z.object({
+    itemId: z.string(),
+  }),
 });
 
 /** Asks for every shipment in one round, then answers once it has their results. */
@@ -71,14 +78,23 @@ interface Attempt {
 function setup(
   hangOn: number,
   durable?: boolean,
+  /** Characters of padding in each result, to make it large. */
+  pad = 0,
 ): {
   attempts: Attempt[];
+  /** Each time the tool's UI was asked to draw: `call:1`, `result:1`. */
+  drawn: string[];
   harness: (storage: StorageAdapter) => AgentHarness;
   agent: ReturnType<typeof callModel<ContextData, string, string>>;
 } {
   const server = startFakeOpenRouter(shippingModel);
   servers.push(server);
   const attempts: Attempt[] = [];
+  const drawn: string[] = [];
+  const fragment = {
+    dialect: 'openui-lang/0.5',
+    source: 'root = Text("shipment")',
+  };
   let hung = false;
   const ship = tool({
     name: 'ship',
@@ -88,8 +104,19 @@ function setup(
     }),
     output: z.object({
       ok: z.boolean(),
+      pad: z.string().optional(),
     }),
     durable,
+    ui: {
+      call: ({ n }) => {
+        drawn.push(`call:${n}`);
+        return fragment;
+      },
+      result: (_output, { n }) => {
+        drawn.push(`result:${n}`);
+        return fragment;
+      },
+    },
     execute: async ({ n }, toolCtx) => {
       attempts.push({
         n,
@@ -99,13 +126,19 @@ function setup(
         hung = true;
         await new Promise(() => {});
       }
-      return {
-        ok: true,
-      };
+      return pad > 0
+        ? {
+            ok: true,
+            pad: 'x'.repeat(pad),
+          }
+        : {
+            ok: true,
+          };
     },
   });
   return {
     attempts,
+    drawn,
     harness: (storage) =>
       new AgentHarness({
         name: 'records',
@@ -193,7 +226,10 @@ describe('tool calls recorded within a round', () => {
     const [one, cut, again, three] = attempts.map((a) => a.key);
     assert(one && cut && again && three);
     expect(again).toBe(cut);
-    expect(cut).toBe(`${ctx.id}:tool:call_2`);
+    // The run, where in it the call was made, and the call's id.
+    expect(cut.startsWith(`${ctx.id}:tool:`)).toBe(true);
+    expect(cut).toContain('round#0');
+    expect(cut.endsWith(':call_2')).toBe(true);
     // A vendor that keeps one outcome per key sees three shipments, not four.
     expect(new Set(attempts.map((a) => a.key)).size).toBe(SHIPMENTS);
   });
@@ -379,5 +415,146 @@ describe('a tool with durable: false', () => {
       2,
       3,
     ]);
+  });
+});
+
+describe('what a replayed call leaves', () => {
+  /** Runs until the host "dies" inside shipment 3, then resumes on a new harness. */
+  async function cutOffInShipmentThree(fixture: ReturnType<typeof setup>): Promise<{
+    before: string[];
+    after: Item[];
+  }> {
+    const storage = createInMemoryStorage();
+    const first = fixture.harness(storage);
+    const ctx = first.createContext();
+    void first.run(fixture.agent, 'go', ctx).catch(() => {});
+    await waitFor(() => fixture.attempts.length === 3);
+    // The ids of the result items the first process appended, from its call records.
+    const before: string[] = [];
+    for (const key of await storage.list(`execution:${ctx.id}:ledger:`)) {
+      const parsed = CallRecordSchema.safeParse(await storage.get(key));
+      if (parsed.success) {
+        before.push(parsed.data.output.itemId);
+      }
+    }
+
+    const next = fixture.harness(storage);
+    const resumed = await next.restore(ctx.id);
+    assert(resumed);
+    expect(await next.run(fixture.agent, 'go', resumed)).toBe('shipped 3');
+    return {
+      before,
+      after: [
+        ...resumed.itemLog.items,
+      ],
+    };
+  }
+
+  const outputIds = (items: Item[]): Array<string | undefined> =>
+    items.filter((item) => item.type === 'function_call_output').map((item) => item.id);
+
+  it('records a result of 100,000 characters, so its call is not made again', async () => {
+    // Regression: the record held the result twice and no longer fit the entry cap
+    // at about half of it, so every finished call ran again on resume.
+    const fixture = setup(3, undefined, 1e5);
+    await cutOffInShipmentThree(fixture);
+    expect(fixture.attempts.map((a) => a.n)).toEqual([
+      1,
+      2,
+      3,
+      3,
+    ]);
+  });
+
+  it('appends the result item it appended the first time, under the same id', async () => {
+    const fixture = setup(3);
+    const { before, after } = await cutOffInShipmentThree(fixture);
+    const [one, two] = before;
+    assert(one && two);
+    // A client that saw these items before the crash is not handed two more.
+    expect(outputIds(after).slice(0, 2).sort()).toEqual(
+      [
+        one,
+        two,
+      ].sort(),
+    );
+    expect(new Set(outputIds(after)).size).toBe(SHIPMENTS);
+  });
+
+  it("draws the call in the tool's UI again, as it was drawn the first time", async () => {
+    const fixture = setup(3);
+    const drawnBefore = (): number => fixture.drawn.length;
+    const storage = createInMemoryStorage();
+    const first = fixture.harness(storage);
+    const ctx = first.createContext();
+    void first.run(fixture.agent, 'go', ctx).catch(() => {});
+    await waitFor(() => fixture.attempts.length === 3);
+    const seen = drawnBefore();
+    expect(fixture.drawn).toEqual([
+      'call:1',
+      'result:1',
+      'call:2',
+      'result:2',
+      'call:3',
+    ]);
+
+    const next = fixture.harness(storage);
+    const resumed = await next.restore(ctx.id);
+    assert(resumed);
+    await next.run(fixture.agent, 'go', resumed);
+    // The new process's UI starts empty: every call reaches its result in it.
+    expect(fixture.drawn.slice(seen)).toEqual([
+      'call:1',
+      'result:1',
+      'call:2',
+      'result:2',
+      'call:3',
+      'result:3',
+    ]);
+  });
+});
+
+describe('a host that dies right after a durable call is recorded', () => {
+  it('leaves nothing of the call behind once the run resumes: no intent, no hold', async () => {
+    const fixture = setup(0, true);
+    const inner = createInMemoryStorage();
+    const isIntent = (key: string): boolean => key.includes(':intent:');
+    // The first process stops dead at the first thing it does after recording a
+    // result: dropping the call's intent.
+    let dead = false;
+    const dying: StorageAdapter = {
+      ...inner,
+      get: (key) => inner.get(key),
+      set: (key, value) => (dead ? new Promise(() => {}) : inner.set(key, value)),
+      list: (prefix) => inner.list(prefix),
+      delete: (key) => {
+        if (isIntent(key)) {
+          dead = true;
+        }
+        return dead ? new Promise(() => {}) : inner.delete(key);
+      },
+    };
+    const first = fixture.harness(dying);
+    const ctx = first.createContext();
+    void first.run(fixture.agent, 'go', ctx).catch(() => {});
+    await waitFor(() => dead);
+    expect((await inner.list('')).filter(isIntent)).toHaveLength(1);
+
+    const next = fixture.harness(inner);
+    const resumed = await next.restore(ctx.id);
+    assert(resumed);
+    expect(await next.run(fixture.agent, 'go', resumed)).toBe('shipped 3');
+    // Shipment 1 was on record: it is not made again, and nobody is asked about it.
+    expect(fixture.attempts.map((a) => a.n)).toEqual([
+      1,
+      2,
+      3,
+    ]);
+    expect((await inner.list('')).filter(isIntent)).toEqual([]);
+    expect(
+      await next.pending({
+        executionId: ctx.id,
+      }),
+    ).toEqual([]);
   });
 });

@@ -20,7 +20,9 @@ import { isFunctionCall } from '../interpreter/typeguards';
 import { drainsOf } from '../runtime/drain';
 import { heldCallsOf, heldScopeOf, mayWriteHolds, waitOnHeldCalls } from '../runtime/held-calls';
 import type { ApprovalOutcome } from '../runtime/tool-approval';
+import type { ToolCallResult } from '../runtime/tool-call';
 import { createToolResultItem, executeToolCall } from '../runtime/tool-call';
+import { emitToolUi } from '../runtime/tool-ui';
 import type { CallSpanCollector } from './call-span-collector';
 import type { PreparedModelRequest } from './model-request';
 import { findTool } from './model-request';
@@ -313,6 +315,7 @@ async function executeFunctionCall(
       harness: scope.harness,
       layers: request.layers,
       callId: fc.callId,
+      keyScope: params.calls?.scope,
     }));
   // Held: it has no result yet. Nothing goes into the conversation for it.
   if (toolResult.held) {
@@ -325,7 +328,15 @@ async function executeFunctionCall(
       held: true,
     };
   }
-  const stored = recorded || !keeps ? undefined : await params.calls?.record(fc, toolResult);
+  // A replayed call appends the item it appended before, under the same id.
+  const itemId = recorded?.itemId ?? crypto.randomUUID();
+  const stored =
+    recorded || !keeps
+      ? undefined
+      : await params.calls?.record(fc, {
+          ...toolResult,
+          itemId,
+        });
   // The intent of a durable call is dropped once its result is on record. A result
   // that could not be recorded keeps it, so a resume asks rather than runs again.
   const writes = request.ctx !== undefined && mayWriteHolds(request.ctx);
@@ -335,10 +346,25 @@ async function executeFunctionCall(
   if (toolResult.settled && writes) {
     await heldCallsOf(scope.harness).close(heldScopeOf(request.ctx), fc.callId);
   }
+  if (recorded && request.ctx) {
+    // A host that died between recording the result and the two steps above left
+    // the call's intent or its answered hold behind. The record says it is done.
+    if (writes) {
+      await tidyFinishedCall(scope, request.ctx, fc.callId);
+    }
+    replayToolUi({
+      ctx: request.ctx,
+      tool: toolForCall,
+      callId: fc.callId,
+      args: parsedArgs,
+      result: recorded,
+    });
+  }
   // Owner-scoped result validation: a tool's `toolResults` schemas apply
   // only to that tool's own result items. Harness-level `opts.itemSchemas`
   // stay global by design; sibling tools' schemas never reject this item.
   const outputItem = createToolResultItem({
+    id: itemId,
     output: toolResult.output,
     callId: fc.callId,
     roundItemSchemas: scope.itemSchemas.extend(toolForCall?.itemSchemas),
@@ -369,6 +395,60 @@ async function executeFunctionCall(
   return {
     approval: toolResult.approval,
   };
+}
+
+/** Drop what a finished call may have left in storage: its intent, its answered hold. */
+async function tidyFinishedCall(
+  scope: ToolRoundScope,
+  ctx: Context,
+  callId: string,
+): Promise<void> {
+  const holds = heldCallsOf(scope.harness);
+  const executionId = heldScopeOf(ctx);
+  await holds.disarm(executionId, callId);
+  if (await holds.load(executionId, callId)) {
+    await holds.close(executionId, callId);
+  }
+}
+
+/**
+ * Show a replayed call in the tool's UI as it was shown the first time: the call,
+ * then how it ended. Nothing for a call whose body never ran.
+ */
+function replayToolUi(params: {
+  ctx: Context;
+  tool: Tool | undefined;
+  callId: string;
+  args: unknown;
+  result: ToolCallResult;
+}): void {
+  const { tool, result } = params;
+  if (!tool || !result.ran) {
+    return;
+  }
+  const base = {
+    ctx: params.ctx,
+    tool,
+    callId: params.callId,
+    args: params.args,
+  };
+  emitToolUi({
+    ...base,
+    phase: 'call',
+  });
+  if (result.error) {
+    emitToolUi({
+      ...base,
+      phase: 'error',
+      error: new Error(result.output.replace(/^Error: /, '')),
+    });
+    return;
+  }
+  emitToolUi({
+    ...base,
+    phase: 'result',
+    output: result.result,
+  });
 }
 
 /** Drop the records of calls that are being skipped, so none stays listed as held. */

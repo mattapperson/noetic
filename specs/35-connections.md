@@ -805,7 +805,7 @@ Two kinds of listening use it:
 ### Durability
 
 **Idempotency keys.** Every call carries a key derived from the run and the
-step's ledger key, or for a model tool call `<execution>:tool:<callId>`, as
+step's ledger key, or for a model tool call `<execution>:tool:<step path>/round#<n>:<callId>`, as
 `_meta["tools.noetic/idempotency-key"]`. `callId` is
 `ToolExecutionContext.callId`: the model's call id on `callModel`, and the
 agent's own call id for a call an ACP agent makes through the tool bridge, so

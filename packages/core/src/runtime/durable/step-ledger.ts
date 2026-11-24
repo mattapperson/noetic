@@ -883,6 +883,14 @@ export class StepLedger {
     ]);
   }
 
+  /** Drop the entry recorded at `path` and every entry beneath it. */
+  async dropWithin(path: string): Promise<void> {
+    await this.prune([
+      path,
+      ...this.live.beneath(path),
+    ]);
+  }
+
   /**
    * Notes that the step at `path` used a connection with the given identity; the
    * entry recorded at `path` (or at any path above it) carries it.
