@@ -37,6 +37,8 @@ type ToolConfig<I extends StandardSchemaV1, O extends StandardSchemaV1> = {
     toolCtx: ToolExecutionContext,
   ) => Promise<InferSchemaOutput<O>>;
   needsApproval?: boolean;
+  /** See `Tool.durable`: `true` holds an interrupted call for a person, `false` records nothing. */
+  durable?: boolean;
   /** Optional context declaration — the runtime generates a ContextLayer from this via toolCalls(). */
   context?: ToolContextDeclaration;
   /** Optional UI declaration — the runtime emits the rendered fragments at call/progress/result points. */
@@ -69,6 +71,8 @@ type GeneratorToolConfig<
     toolCtx: ToolExecutionContext,
   ) => AsyncGenerator<InferSchemaOutput<E>, InferSchemaOutput<O>>;
   needsApproval?: boolean;
+  /** See `Tool.durable`: `true` holds an interrupted call for a person, `false` records nothing. */
+  durable?: boolean;
   /** Optional context declaration — the runtime generates a ContextLayer from this via toolCalls(). */
   context?: ToolContextDeclaration;
   /** Optional UI declaration — the runtime emits the rendered fragments at call/progress/result points. */
@@ -126,6 +130,7 @@ export function tool<I extends StandardSchemaV1, O extends StandardSchemaV1>(
     decorateResultItem: config.decorateResultItem,
     execute: config.execute,
     needsApproval: config.needsApproval,
+    durable: config.durable,
     context: config.context,
     ui: config.ui,
     acp: config.acp,
@@ -155,6 +160,7 @@ export function toolWithGenerator<
     decorateResultItem: config.decorateResultItem,
     execute: config.execute,
     needsApproval: config.needsApproval,
+    durable: config.durable,
     context: config.context,
     ui: config.ui,
     acp: config.acp,

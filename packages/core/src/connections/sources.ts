@@ -114,10 +114,24 @@ function sleep(ms: number, signal: AbortSignal): Promise<boolean> {
 
 //#region Source hub
 
+/**
+ * The cursor of a source that has emitted nothing yet: "before the first event". A
+ * listener that starts there and listens again later gets everything since.
+ */
+const SOURCE_ORIGIN = '';
+
 /** The live side of a source: its listeners, its pending events, and its one running `start`. */
 class SourceHub<E extends SourceEventSchemas> {
   readonly listeners = new Set<Listener>();
   private readonly pending: ConnectionEventInit[] = [];
+  /**
+   * What a source with a `start` has emitted, newest last, so a listener that comes
+   * with a cursor gets what came after it. Without this only the first listener ever
+   * saw a replay, though the manifest says the events replay from a cursor.
+   */
+  private readonly history: ConnectionEventInit[] = [];
+  /** The cursor of the last event emitted, when one carried a cursor. */
+  private lastCursor: string | undefined;
   private started = false;
   private readonly controller = new AbortController();
 
@@ -145,6 +159,15 @@ class SourceHub<E extends SourceEventSchemas> {
       payload: parsed.data,
       cursor: event.cursor ?? null,
     };
+    if (this.definition.start) {
+      this.history.push(init);
+      if (this.history.length > WAIT_BUFFER_LIMIT) {
+        this.history.shift();
+      }
+      if (init.cursor !== null) {
+        this.lastCursor = init.cursor;
+      }
+    }
     const targets = [
       ...this.listeners,
     ].filter((l) => l.event === event.type);
@@ -164,20 +187,46 @@ class SourceHub<E extends SourceEventSchemas> {
   }
 
   listen(request: ListenRequest): EventStream {
+    const asked = request.cursor ?? null;
     const { stream, listener } = createListenerStream(this.listeners, request, {
-      cursor: request.cursor ?? null,
+      // Where this listener starts: what it asked for, or where the source is now. A
+      // wait records it, and listening again from it replays what came since.
+      cursor: asked ?? this.position(),
     });
     this.listeners.add(listener);
     const held = this.pending.filter((e) => e.type === request.event);
     for (const event of held) {
       this.pending.splice(this.pending.indexOf(event), 1);
+    }
+    // A listener with a cursor gets everything after it; one without gets only
+    // what nobody was there to hear.
+    const replay = asked === null ? held : this.since(asked, request.event);
+    for (const event of replay) {
       listener.push({
         type: 'event',
         event,
       });
     }
-    this.startOnce(request.cursor ?? null);
+    this.startOnce(asked === SOURCE_ORIGIN ? null : asked);
     return stream;
+  }
+
+  /** Where the source is now, as a cursor: after its last event, or before any. */
+  private position(): string | null {
+    if (!this.definition.start) {
+      return null;
+    }
+    return this.lastCursor ?? SOURCE_ORIGIN;
+  }
+
+  /**
+   * The events of `type` emitted after `cursor`. A cursor that is not in the history
+   * is older than all of it — the source began after it — so everything is after it.
+   */
+  private since(cursor: string, type: string): ConnectionEventInit[] {
+    const at =
+      cursor === SOURCE_ORIGIN ? -1 : this.history.findLastIndex((e) => e.cursor === cursor);
+    return this.history.slice(at + 1).filter((e) => e.type === type);
   }
 
   close(reason: string): void {

@@ -294,7 +294,9 @@ async function executeFunctionCall(
   const toolForCall = findTool(allowedTools, fc.name);
   // An earlier attempt of this round may have finished this call: go on with what
   // it produced instead of running the tool again.
-  const recorded = params.calls?.take(fc);
+  // A tool that opts out of recording (`durable: false`) always runs again.
+  const keeps = toolForCall?.durable !== false;
+  const recorded = keeps ? params.calls?.take(fc) : undefined;
   const toolResult =
     recorded ??
     (await executeToolCall({
@@ -317,8 +319,11 @@ async function executeFunctionCall(
       held: true,
     };
   }
-  if (!recorded) {
-    await params.calls?.record(fc, toolResult);
+  const stored = recorded || !keeps ? undefined : await params.calls?.record(fc, toolResult);
+  // The intent of a durable call is dropped once its result is on record. A result
+  // that could not be recorded keeps it, so a resume asks rather than runs again.
+  if (toolResult.armed && stored !== false && request.ctx) {
+    await heldCallsOf(scope.harness).disarm(heldScopeOf(request.ctx), fc.callId);
   }
   if (toolResult.settled) {
     await heldCallsOf(scope.harness).close(heldScopeOf(request.ctx), fc.callId);

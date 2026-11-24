@@ -258,6 +258,8 @@ export type {
   TurnLeaseConfig,
 } from './harness/harness-options';
 /** @public */
+export { DEFAULT_WAKE_DEBOUNCE_MS } from './harness/park-watchers';
+/** @public */
 export type {
   AfterFirstTurnContext,
   CheckpointStore,

@@ -205,6 +205,7 @@ async function recordListening<TContext, I>(
     identity: connection.resolved.identity(),
     cursor: prior?.cursor ?? cursor,
     deadline,
+    event: step.event,
     ...(replaysFromCursor(listen)
       ? {
           durable: true,

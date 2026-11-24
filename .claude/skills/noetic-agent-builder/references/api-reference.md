@@ -2153,6 +2153,10 @@ harness.resolve(scope, { callId, argsHash?, output }): Promise<void>;
 
 A call that needs approval with no approver, or whose approver answers `hold`, is held: its siblings run, nothing is written for it, and the turn waits (and parks, with `park` on) until `resolve()`. Refusals are `NoeticError` `hold_refused`. Event: `{name}:tool_call_held`.
 
+### `durable` on a tool
+
+`tool({ durable })`: unset records the result and re-runs a call cut off mid-flight with the same key; `true` holds such a call as `reason: 'outcome'` (answer with `{ output }` or `{ action: 'allow' }`); `false` never records, so the call always runs again.
+
 ### Tool calls and `idempotencyKey`
 
 Each tool call in a model round is recorded as it finishes, so a resumed round runs only the call that was cut off. `ToolExecutionContext.idempotencyKey` (`<execution>:tool:<callId>`) is the same on every attempt of a call: a tool with a lasting effect passes it to what it writes to.
@@ -2166,6 +2170,8 @@ harness.wake(scope?: { threadId?: string; options?: ExecuteOptions }): Promise<s
 harness.nextWake(): Promise<number | undefined>;
 // HarnessResponse.parked?: { wakeAt: number }   — event `{name}:turn_parked`
 ```
+
+`park` also takes `{ graceMs?, autoWake?, wakeDebounceMs? }`. By default the harness that parked a turn wakes it (a deadline timer and a listener on the awaited event); set `autoWake: false` for a serverless host and call `wake()` yourself.
 
 With `park` on, a turn whose every step in flight is a `step.wait` on a `replay: 'durable'` event stops holding its process: its record is marked parked, its lease is handed back, and `getAgentResponse()` resolves with `parked`. `wake()` resumes due and cut-off turns; `wake({ threadId })` resumes one now. A woken turn replays its ledger and listens from the wait's recorded cursor.
 

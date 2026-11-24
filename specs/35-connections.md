@@ -392,6 +392,16 @@ const deploys = defineSource({
 deploys.emit({ type: 'deploy.failed', id: run.id, payload });   // or push from host code
 ```
 
+A source with a `start` declares its events `replay: 'durable'`, and keeps that
+promise for every listener, not only the first. `start` runs once, from the
+first listener's cursor. The source keeps what it emitted since (up to the wait
+buffer's size), and a listener that comes with a cursor is sent everything after
+it. A listener with no cursor starts at the source's current position, which is
+the cursor a `wait` records; a source that has emitted nothing yet reports the
+empty cursor, "before the first event". This is what lets a watcher and the
+parked turn it wakes both read the same event (`23-durable-execution` § Parked
+turns).
+
 `cron(schedule, { timezone })` is a built-in source with one event, `tick`,
 delivered once per scheduled time even after downtime.
 

@@ -144,6 +144,11 @@ export interface ToolCallResult {
   held?: HeldCall;
   /** The call was held and is now settled: its record can be dropped. */
   settled?: boolean;
+  /**
+   * A `durable` tool ran under an intent record. The caller drops it once the
+   * result is on record; until then a resumed run treats the call as started.
+   */
+  armed?: boolean;
 }
 
 /**
@@ -197,11 +202,23 @@ export async function executeToolCall(params: ExecuteToolCallParams): Promise<To
   // A record for other arguments is for another call: this one starts over.
   const held = prior?.argsHash === heldArgsHash(matchedTool.name, parsedArgs) ? prior : undefined;
   const wasHeld = held !== undefined;
-  if (held?.reason === 'result') {
+  // A person may answer an unknown outcome with "run it again".
+  const rerun = held?.reason === 'outcome' && held.resolution?.action === SteeringAction.Allow;
+  if (held && held.reason !== 'approval' && !rerun) {
     if (held.resolution?.hasOutput) {
       return {
         output: toolOutputText(held.resolution.output),
         result: held.resolution.output,
+        settled: true,
+      };
+    }
+    const refusal = held.resolution?.action;
+    if (refusal !== undefined) {
+      return {
+        ...refusedResult({
+          action: refusal,
+          guidance: held.resolution?.guidance,
+        }),
         settled: true,
       };
     }
@@ -220,15 +237,17 @@ export async function executeToolCall(params: ExecuteToolCallParams): Promise<To
 
   let approval: ToolApproval | undefined;
   try {
-    approval = matchedTool.needsApproval
-      ? await askApproval({
-          harness: params.harness,
-          toolName: matchedTool.name,
-          toolArgs: parsedArgs,
-          callId: params.callId,
-          ctx: params.context,
-        })
-      : undefined;
+    // A call a person just said to run again was approved the first time it ran.
+    approval =
+      matchedTool.needsApproval && !rerun
+        ? await askApproval({
+            harness: params.harness,
+            toolName: matchedTool.name,
+            toolArgs: parsedArgs,
+            callId: params.callId,
+            ctx: params.context,
+          })
+        : undefined;
   } catch (e) {
     if (!(e instanceof HoldSignal) || params.callId === undefined) {
       throw e;
@@ -248,11 +267,33 @@ export async function executeToolCall(params: ExecuteToolCallParams): Promise<To
       settled: wasHeld,
     };
   }
+  // A durable tool must not be repeated unasked. An intent record says it started;
+  // finding one with no result means a host died while it ran, and only a person
+  // can say whether its effect landed.
+  const armed = matchedTool.durable === true && params.callId !== undefined;
+  if (armed && params.callId !== undefined) {
+    const argsHash = heldArgsHash(matchedTool.name, parsedArgs);
+    if (!rerun && (await holds.wasStarted(scope, params.callId, argsHash))) {
+      return holdCall(params, {
+        callId: params.callId,
+        tool: matchedTool,
+        args: parsedArgs,
+        reason: 'outcome',
+        due: {},
+      });
+    }
+    if (rerun) {
+      // Answered: if this attempt is cut off too, the question is asked afresh.
+      await holds.close(scope, params.callId);
+    }
+    await holds.arm(scope, params.callId, argsHash);
+  }
   const executed = await runMatchedTool(params, matchedTool, parsedArgs);
   return {
     ...executed,
     approval: approval?.outcome,
-    settled: wasHeld && executed.held === undefined,
+    settled: wasHeld && !rerun && executed.held === undefined,
+    armed,
   };
 }
 
@@ -263,7 +304,7 @@ async function holdCall(
     callId: string;
     tool: Tool;
     args: unknown;
-    reason: 'approval' | 'result';
+    reason: 'approval' | 'result' | 'outcome';
     due: HoldDue;
     request?: unknown;
   },

@@ -5,7 +5,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import type { StorageAdapter } from '@noetic-tools/context';
-import type { ContextData } from '@noetic-tools/types';
+import type { ContextData, HeldCall } from '@noetic-tools/types';
 import { z } from 'zod';
 import { callModel } from '../../src/builders/step-builders';
 import { tool } from '../../src/builders/tool-builder';
@@ -68,7 +68,10 @@ interface Attempt {
  * A `ship` tool whose first attempt at shipment `hangOn` never returns, as a host
  * killed mid-call leaves it. `attempts` is every time the tool body ran.
  */
-function setup(hangOn: number): {
+function setup(
+  hangOn: number,
+  durable?: boolean,
+): {
   attempts: Attempt[];
   harness: (storage: StorageAdapter) => AgentHarness;
   agent: ReturnType<typeof callModel<ContextData, string, string>>;
@@ -86,6 +89,7 @@ function setup(hangOn: number): {
     output: z.object({
       ok: z.boolean(),
     }),
+    durable,
     execute: async ({ n }, toolCtx) => {
       attempts.push({
         n,
@@ -222,6 +226,155 @@ describe('tool calls recorded within a round', () => {
     const h = harness(createInMemoryStorage());
     expect(await h.run(agent, 'go', h.createContext())).toBe('shipped 3');
     expect(attempts.map((a) => a.n)).toEqual([
+      1,
+      2,
+      3,
+    ]);
+  });
+});
+
+describe('a durable tool', () => {
+  /** Runs until the host "dies" inside shipment 2, then resumes on a new harness. */
+  async function cutOffInShipmentTwo(fixture: ReturnType<typeof setup>): Promise<{
+    storage: StorageAdapter;
+    next: AgentHarness;
+    scope: {
+      executionId: string;
+    };
+    finished: Promise<unknown>;
+  }> {
+    const storage = createInMemoryStorage();
+    const first = fixture.harness(storage);
+    const ctx = first.createContext();
+    void first.run(fixture.agent, 'go', ctx).catch(() => {});
+    await waitFor(() => fixture.attempts.length === 2);
+
+    const next = fixture.harness(storage);
+    const resumed = await next.restore(ctx.id);
+    assert(resumed);
+    return {
+      storage,
+      next,
+      scope: {
+        executionId: ctx.id,
+      },
+      finished: next.run(fixture.agent, 'go', resumed),
+    };
+  }
+
+  async function heldOutcome(
+    harness: AgentHarness,
+    scope: {
+      executionId: string;
+    },
+  ): Promise<HeldCall> {
+    for (let i = 0; i < 2e3; i += 1) {
+      const [held] = await harness.pending(scope);
+      if (held) {
+        return held;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    return expect.unreachable('no call was held');
+  }
+
+  it('is not run again after a crash: its outcome is held for a person', async () => {
+    const fixture = setup(2, true);
+    const { next, scope, finished } = await cutOffInShipmentTwo(fixture);
+
+    const held = await heldOutcome(next, scope);
+    expect(held).toMatchObject({
+      callId: 'call_2',
+      name: 'ship',
+      reason: 'outcome',
+      args: {
+        n: 2,
+      },
+    });
+    // Shipment 1 replayed, shipment 2 was not attempted again, and 3 ran.
+    expect(fixture.attempts.map((a) => a.n)).toEqual([
+      1,
+      2,
+      3,
+    ]);
+
+    // The person checked: it did ship.
+    await next.resolve(scope, {
+      callId: held.callId,
+      output: {
+        ok: true,
+      },
+    });
+    expect(await finished).toBe('shipped 3');
+    expect(fixture.attempts.map((a) => a.n)).toEqual([
+      1,
+      2,
+      3,
+    ]);
+  });
+
+  it('runs again, with the same key, when the person says to', async () => {
+    const fixture = setup(2, true);
+    const { next, scope, finished } = await cutOffInShipmentTwo(fixture);
+    const held = await heldOutcome(next, scope);
+
+    await next.resolve(scope, {
+      callId: held.callId,
+      action: 'allow',
+    });
+    expect(await finished).toBe('shipped 3');
+    const second = fixture.attempts.filter((a) => a.n === 2);
+    expect(second).toHaveLength(2);
+    expect(second[1]?.key).toBe(second[0]?.key);
+    expect(await next.pending(scope)).toEqual([]);
+  });
+
+  it('is refused when the person says not to run it', async () => {
+    const fixture = setup(2, true);
+    const { next, scope, finished } = await cutOffInShipmentTwo(fixture);
+    const held = await heldOutcome(next, scope);
+
+    await next.resolve(scope, {
+      callId: held.callId,
+      action: 'deny',
+      guidance: 'the order was cancelled',
+    });
+    expect(await finished).toBe('shipped 3');
+    expect(fixture.attempts.filter((a) => a.n === 2)).toHaveLength(1);
+  });
+
+  it('leaves no intent behind when nothing goes wrong', async () => {
+    const fixture = setup(0, true);
+    const storage = createInMemoryStorage();
+    const h = fixture.harness(storage);
+    const ctx = h.createContext();
+    expect(await h.run(fixture.agent, 'go', ctx)).toBe('shipped 3');
+    expect(await storage.list(`execution:${ctx.id}:intent:`)).toEqual([]);
+    expect(
+      await h.pending({
+        executionId: ctx.id,
+      }),
+    ).toEqual([]);
+  });
+});
+
+describe('a tool with durable: false', () => {
+  it('is not recorded, so every call of a cut round runs again', async () => {
+    const fixture = setup(3, false);
+    const storage = createInMemoryStorage();
+    const first = fixture.harness(storage);
+    const ctx = first.createContext();
+    void first.run(fixture.agent, 'go', ctx).catch(() => {});
+    await waitFor(() => fixture.attempts.length === 3);
+
+    const next = fixture.harness(storage);
+    const resumed = await next.restore(ctx.id);
+    assert(resumed);
+    expect(await next.run(fixture.agent, 'go', resumed)).toBe('shipped 3');
+    expect(fixture.attempts.map((a) => a.n)).toEqual([
+      1,
+      2,
+      3,
       1,
       2,
       3,

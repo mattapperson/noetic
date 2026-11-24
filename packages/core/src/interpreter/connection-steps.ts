@@ -85,6 +85,8 @@ const PendingEntrySchema = z.object({
   leaseId: z.string().optional(),
   cursor: z.string().nullish(),
   deadline: z.number().optional(),
+  /** On a `wait`: the event it listens for, so a parked turn can be watched over. */
+  event: z.string().optional(),
   /**
    * Set on a `wait` whose event replays from a cursor (`replay: 'durable'`). Such
    * a wait does not depend on the connection instance it began on: any instance of
@@ -554,6 +556,39 @@ export class PendingEntries {
       );
     }
   }
+}
+
+/**
+ * The events an execution's waits listen for and can pick up again from a cursor:
+ * what a watcher needs to wake a parked turn (spec 23 § Parked turns).
+ */
+export async function resumableWaitsOf(
+  storage: StorageAdapter,
+  executionId: string,
+): Promise<
+  Array<{
+    connection: string;
+    event: string;
+    cursor: string | null;
+  }>
+> {
+  const waits: Array<{
+    connection: string;
+    event: string;
+    cursor: string | null;
+  }> = [];
+  for (const key of await storage.list(`execution:${executionId}:pending:`)) {
+    const parsed = PendingEntrySchema.safeParse(await storage.get<unknown>(key));
+    if (!parsed.success || !resumesFromCursor(parsed.data) || parsed.data.event === undefined) {
+      continue;
+    }
+    waits.push({
+      connection: parsed.data.connection,
+      event: parsed.data.event,
+      cursor: parsed.data.cursor ?? null,
+    });
+  }
+  return waits;
 }
 
 /** The storage key of a step's pending entry. */

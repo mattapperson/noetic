@@ -52,6 +52,7 @@ Every tool in Noetic follows the same interface, whether it is passed to `callMo
 | `inputJsonSchema` | `Record<string, unknown>` | No | Explicit JSON Schema override/fallback for non-Zod tool input. Zod uses its native converter; other validators can implement StandardJSONSchemaV1. A validation-only schema must provide this field or conversion throws `MISSING_JSON_SCHEMA` |
 | `execute` | `(args: I, toolCtx: ToolExecutionContext) => Promise<O>` | Yes | The function that runs the tool. The second argument is a `ToolExecutionContext` — `{ ctx, harness, fs, shell, context, assembledView, lastStepMeta }` — not the step `Context` itself (which is available as `toolCtx.ctx`) |
 | `needsApproval` | `boolean` | No | Every call needs the harness approver's go-ahead before it runs — see [Human-in-the-Loop Approval](#human-in-the-loop-approval) |
+| `durable` | `boolean` | No | How a call behaves when a run resumes. Unset: recorded, and a call cut off mid-flight runs again with the same `idempotencyKey`. `true`: a call cut off mid-flight is [held](#human-in-the-loop-approval) as `outcome` for a person instead of repeated. `false`: never recorded, always runs again |
 | `context` | `ToolContextDeclaration` | No | Declares tool-owned state; the runtime generates a context layer from it |
 | `ui` | `ToolUiDeclaration` | No | Render functions (`call` / `progress` / `result` / `error`) so the tool's calls carry their own UI — see [Generative UI](/docs/framework/generative-ui) |
 
@@ -214,6 +215,8 @@ const askPerson = tool({
 // Later, when the person replies:
 await harness.resolve({ threadId }, { callId, output: 'Use the new address.' });
 ```
+
+A tool marked `durable: true` adds a third kind of hold. If the host dies while it runs, the resumed turn does not run it again: it holds the call with `reason: 'outcome'`. Answer with `{ output }` if it did land, or `{ action: 'allow' }` to run it again.
 
 Traces show the outcome: each `tool.call` span carries `tool.approval` — `approved` or `denied`.
 

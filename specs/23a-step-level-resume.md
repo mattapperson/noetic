@@ -157,6 +157,16 @@ Every model tool call also gets an **idempotency key**, `<execution>:tool:<callI
 
 Together these bound what a crash can repeat to the one call that was running, and give that call the means to land once: a tool with a lasting effect passes the key to whatever it writes to.
 
+**`durable` on a tool** says how its calls behave on resume, as it does on a step:
+
+| `durable` | Result recorded | A call that was running when the host died |
+|---|---|---|
+| unset | yes | runs again, with the same key |
+| `true` | yes | is **held** as `outcome` until a person answers (`08-runtime` § Held tool calls) |
+| `false` | no | runs again, as does every call of that tool in a resumed round |
+
+A `durable: true` tool writes an intent record, `execution:<root id>:intent:<callId>`, before its body runs, and drops it once the call's result is on record. A resumed round that finds the intent with no result knows the call started and cannot know whether its effect landed, so it does not run the tool: it holds the call. The answer is an output ("it landed, and this was its result"), `allow` ("run it again", with the same key), or `deny`/`guide`. A result too large to record keeps the intent, so a resume asks rather than repeats.
+
 ## Storage is the only record
 
 Durability never leans on what a harness holds in memory. Everything that decides how a run or a session resumes is read from storage at the moment it is needed, so a harness that served the last run and a harness built a moment ago behave the same:
@@ -191,7 +201,7 @@ Resuming a turn therefore requires the host to pass stable `messageId`s to `exec
 
 Replaying an output replays a step's **value**, not its **effect**. A `runCode` step that wrote a file, or an `invokeTool` step that opened a PR, returns its recorded output on replay while the effect is not redone — correct only if the effect was durable when it happened.
 
-Within a model loop, a recorded round's tools do not run again, and neither does a call that finished in a round that was cut off (§ Tool calls in a round). The one call that was running when the host died runs again on resume, with the idempotency key it had before. Core cannot know whether that call's effect landed, so it does not claim exactly-once tool execution: a tool whose duplication matters passes `idempotencyKey` to what it writes to.
+Within a model loop, a recorded round's tools do not run again, and neither does a call that finished in a round that was cut off (§ Tool calls in a round). The one call that was running when the host died runs again on resume, with the idempotency key it had before. Core cannot know whether that call's effect landed. A tool whose duplication matters either passes `idempotencyKey` to what it writes to, or declares `durable: true` so the call is held for a person instead of repeated (§ Tool calls in a round).
 
 ## Interaction with context layers
 
@@ -274,5 +284,4 @@ in § The side-effect boundary.
 ## Future Considerations
 
 - **Mid-item resume.** A resume goes on from the last item the stream finished; an item cut off part way is made again. Providers that expose resumable streams would let a round resume where its stream stopped.
-- **Unknown outcomes.** Recording a tool call before it runs would turn the one call interrupted mid-round into a loud "unknown outcome" for a tool that cannot take an idempotency key, instead of a re-run.
 - **Re-delivered finished turns.** Remembering recently finished message ids per thread would let a session answer a re-delivery of a finished turn with its recorded response instead of running it again.

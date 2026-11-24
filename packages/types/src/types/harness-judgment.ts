@@ -79,8 +79,12 @@ export interface HeldCall {
   readonly args: unknown;
   /** Ties an answer to this exact call. Pass it back to `harness.resolve()`. */
   readonly argsHash: string;
-  /** `approval`: the tool has not run. `result`: it ran and left its result open. */
-  readonly reason: 'approval' | 'result';
+  /**
+   * `approval`: the tool has not run. `result`: it ran and left its result open.
+   * `outcome`: a `durable` tool was running when the host died, and nobody knows
+   * whether its effect landed.
+   */
+  readonly reason: 'approval' | 'result' | 'outcome';
   /** Epoch ms after which the hold runs out. */
   readonly dueAt?: number;
   /** What happens then: `deny` (the default) or `keep`. */
@@ -91,7 +95,9 @@ export interface HeldCall {
 
 /**
  * @public The answer to a held call: a decision for one that waits for approval, an
- * output for one that waits for its result.
+ * output for one that waits for its result. A call held as `outcome` takes either:
+ * an output says it landed and gives its result, `allow` runs it again, and
+ * `deny` or `guide` refuses it.
  */
 export type HeldResolution =
   | {

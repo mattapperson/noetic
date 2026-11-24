@@ -97,6 +97,18 @@ export interface ParkConfig {
    * Default `DEFAULT_PARK_GRACE_MS` (100).
    */
   graceMs?: number;
+  /**
+   * Whether this harness wakes the turns it parked: at their deadline, and when an
+   * event they wait for arrives on a harness connection. Default `true`, which
+   * suits a long-lived process. Set `false` where no process lives between
+   * requests; the host then calls `harness.wake()` itself.
+   */
+  autoWake?: boolean;
+  /**
+   * How long auto-wake waits after an event before waking the turn, in ms, so a
+   * burst of events wakes it once. Default `DEFAULT_WAKE_DEBOUNCE_MS` (250).
+   */
+  wakeDebounceMs?: number;
 }
 
 /** @public Settings for the turn lease. Every field has a default. */

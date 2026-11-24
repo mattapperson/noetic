@@ -179,7 +179,16 @@ A woken turn replays its ledger, so no finished model call is made again, and it
 
 **The clock.** `AgentHarness({ now })` is the clock wait deadlines, leases and wake times are read from. It defaults to `Date.now`.
 
-Waking is the host's job: a long-lived process calls `wake()` when it starts and when an event arrives; a serverless host calls it from an alarm. Core starts no timer for a parked turn.
+**Auto-wake.** A harness wakes the turns it parked, unless `park.autoWake` is `false`. For each parked turn it keeps a watcher:
+
+- a timer for the turn's `until`;
+- a listener on each event the turn waits for, on the same harness connection, from the cursor the wait recorded.
+
+Either one calls `wake({ threadId })` with the options the turn ran with. A watcher knows the event's type but not the wait's `filter`, which is code in the flow, so it wakes on any event of that type; a turn whose filter turns the event down parks again. The watcher remembers the last cursor it saw, so each event wakes the turn at most once, and it waits `wakeDebounceMs` (default 250) after the first event so a burst wakes it once.
+
+A watcher lives in the process. When the process ends the parked turns stay in storage, and the next process rebuilds a watcher for each one its first `wake()` finds. So a long-lived host calls `wake()` once, at boot.
+
+A host with no process between requests sets `autoWake: false` and wakes turns itself: `wake()` from an alarm scheduled with `nextWake()`, and `wake({ threadId })` when an event arrives.
 
 ### A message for a parked thread
 

@@ -156,6 +156,19 @@ export interface Tool<
    * `harness.resolve()` answers it (spec 08 § Held tool calls).
    */
   needsApproval?: boolean;
+  /**
+   * How a call to this tool behaves when a run is resumed, as `durable` does for a
+   * step (spec 23a § Tool calls in a round).
+   *
+   * - unset: the call's result is recorded. A call that was running when the host
+   *   died runs again, with the same `idempotencyKey`.
+   * - `true`: the call has a lasting effect and must not be repeated unasked. A
+   *   call that was running when the host died is held as `outcome` until a
+   *   person says whether it landed (spec 08 § Held tool calls).
+   * - `false`: the result is not recorded, so the call runs again on every resume.
+   *   For a cheap read whose answer should be fresh.
+   */
+  durable?: boolean;
   /** Optional context declaration — the runtime generates a ContextLayer from this. */
   context?: ToolContextDeclaration;
   /** Optional UI declaration — the runtime emits the rendered fragments at call/progress/result points. */

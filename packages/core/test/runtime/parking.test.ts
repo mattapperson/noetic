@@ -264,6 +264,7 @@ describe('a parked turn', () => {
               ? false
               : {
                   graceMs: 0,
+                  autoWake: false,
                 },
         },
       },
@@ -491,5 +492,229 @@ describe('a parked turn', () => {
     expect(response.parked).toBeUndefined();
     expect(response.text).toBe('a-2');
     await harness.close();
+  });
+
+  describe('woken by the harness that parked it', () => {
+    /** A flow like `flow`, counting how often it started and taking only `accept`ed replies. */
+    function countingFlow(opts: { timeoutMs: number; accept?: string }): {
+      starts: () => number;
+      graph: typeof flow;
+    } {
+      let starts = 0;
+      const wait = step.wait({
+        id: 'wait',
+        connection: 'inbox',
+        event: 'reply',
+        timeoutMs: opts.timeoutMs,
+        ...(opts.accept === undefined
+          ? {}
+          : {
+              filter: (event) => WaitedSchema.shape.event.parse(event).payload.text === opts.accept,
+            }),
+      });
+      return {
+        starts: () => starts,
+        graph: runCode<ContextData, string, string>({
+          id: 'flow',
+          execute: async (input, execCtx) => {
+            starts += 1;
+            await execCtx.harness.run(turn('plan'), input, execCtx);
+            const waited = WaitedSchema.parse(await execCtx.harness.run(wait, undefined, execCtx));
+            return String(
+              await execCtx.harness.run(turn('answer'), waited.event.payload.text, execCtx),
+            );
+          },
+        }),
+      };
+    }
+
+    function watchfulHarness(opts: {
+      storage: StorageAdapter;
+      m: Model;
+      mailbox: Mailbox;
+      graph: typeof flow;
+    }): AgentHarness {
+      return new AgentHarness({
+        name: 'parking',
+        params: {},
+        agentGraph: opts.graph,
+        connections: {
+          inbox: inbox(opts.mailbox),
+        },
+        environment: {
+          storage: {
+            adapter: opts.storage,
+            lease: {
+              waitMs: 0,
+            },
+            park: {
+              graceMs: 0,
+              wakeDebounceMs: 10,
+            },
+          },
+        },
+        _testCallModel: (request) => opts.m.call(request),
+      });
+    }
+
+    /**
+     * The turn's response once it has stopped being parked. `getAgentResponse`
+     * answers with the last response while nothing runs, so ask until it changes.
+     */
+    async function onceWoken(harness: AgentHarness) {
+      for (let i = 0; i < 400; i += 1) {
+        const response = await harness.getAgentResponse(scope);
+        if (!response.parked) {
+          return response;
+        }
+        await tick(5);
+      }
+      return expect.unreachable('the turn stayed parked');
+    }
+
+    async function storedTurn(storage: StorageAdapter): Promise<StoredSession['turn']> {
+      return (await storage.get<StoredSession>('session:t'))?.turn;
+    }
+
+    it('finishes when the reply arrives, with nothing calling wake()', async () => {
+      const storage = createInMemoryStorage(SWAP);
+      const mailbox: Mailbox = [];
+      const m = model('a');
+      const counted = countingFlow({
+        timeoutMs: DAY,
+      });
+      const harness = watchfulHarness({
+        storage,
+        m,
+        mailbox,
+        graph: counted.graph,
+      });
+      await harness.execute('hello', delivery);
+      assert((await harness.getAgentResponse(scope)).parked);
+
+      mailbox.push('approved');
+      const response = await onceWoken(harness);
+      expect(response.text).toBe('a-2');
+      // Planned once, answered once: the plan was replayed, not asked again.
+      expect(m.calls).toBe(2);
+      expect(await storedTurn(storage)).toBeUndefined();
+      await harness.close();
+    });
+
+    it('wakes once for a reply the flow turns down, then parks again', async () => {
+      const storage = createInMemoryStorage(SWAP);
+      const mailbox: Mailbox = [];
+      const m = model('a');
+      const counted = countingFlow({
+        timeoutMs: DAY,
+        accept: 'approved',
+      });
+      const harness = watchfulHarness({
+        storage,
+        m,
+        mailbox,
+        graph: counted.graph,
+      });
+      await harness.execute('hello', delivery);
+      assert((await harness.getAgentResponse(scope)).parked);
+      expect(counted.starts()).toBe(1);
+
+      // Not the reply it waits for: the turn looks, and parks again.
+      mailbox.push('thanks!');
+      await tick(120);
+      assert((await storedTurn(storage))?.parked);
+      // It woke for that event once, not over and over.
+      expect(counted.starts()).toBe(2);
+      expect(m.calls).toBe(1);
+
+      mailbox.push('approved');
+      const response = await onceWoken(harness);
+      expect(response.text).toBe('a-2');
+      expect(counted.starts()).toBe(3);
+      await harness.close();
+    });
+
+    it('wakes at the deadline, and the wait times out', async () => {
+      const storage = createInMemoryStorage(SWAP);
+      const counted = countingFlow({
+        timeoutMs: 60,
+      });
+      const harness = watchfulHarness({
+        storage,
+        m: model('a'),
+        mailbox: [],
+        graph: counted.graph,
+      });
+      await harness.execute('hello', delivery);
+      assert((await harness.getAgentResponse(scope)).parked);
+
+      try {
+        await onceWoken(harness);
+        expect.unreachable('the wait should have timed out');
+      } catch (error) {
+        assert(isNoeticError(error));
+        expect(error.noeticError.kind).toBe('step_failed');
+      }
+      await harness.close();
+    });
+
+    it('a new process watches over the parked turns it finds at boot', async () => {
+      const storage = createInMemoryStorage(SWAP);
+      const mailbox: Mailbox = [];
+      const first = countingFlow({
+        timeoutMs: DAY,
+      });
+      const before = watchfulHarness({
+        storage,
+        m: model('a'),
+        mailbox,
+        graph: first.graph,
+      });
+      await before.execute('hello', delivery);
+      assert((await before.getAgentResponse(scope)).parked);
+      await before.close();
+
+      const m = model('b');
+      const second = countingFlow({
+        timeoutMs: DAY,
+      });
+      const after = watchfulHarness({
+        storage,
+        m,
+        mailbox,
+        graph: second.graph,
+      });
+      // The one call a host makes at boot. Nothing is due, so nothing resumes yet.
+      expect(await after.wake()).toEqual([]);
+
+      mailbox.push('approved');
+      // This harness has run no turn yet, so there is no last response to mistake.
+      const response = await after.getAgentResponse(scope);
+      expect(response.text).toBe('b-1');
+      expect(m.calls).toBe(1);
+      await after.close();
+    });
+
+    it('with autoWake off, a reply leaves the turn parked until wake() is called', async () => {
+      const fixture = fixtureOn(SWAP);
+      const m = model('a');
+      const harness = harnessOver({
+        ...fixture,
+        m,
+      });
+      await harness.execute('hello', delivery);
+      assert((await harness.getAgentResponse(scope)).parked);
+
+      fixture.mailbox.push('approved');
+      await tick(80);
+      assert((await storedTurn(fixture.storage))?.parked);
+      expect(m.calls).toBe(1);
+
+      expect(await harness.wake(scope)).toEqual([
+        't',
+      ]);
+      expect((await harness.getAgentResponse(scope)).text).toBe('a-2');
+      await harness.close();
+    });
   });
 });

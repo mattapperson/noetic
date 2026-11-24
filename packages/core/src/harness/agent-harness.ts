@@ -14,6 +14,7 @@ import {
 } from '@noetic-tools/types';
 import { toStep } from '../builders/sequence';
 import { runEvery } from '../connections/settle';
+import { resumableWaitsOf } from '../interpreter/connection-steps';
 import { AcpSessionStore } from '../runtime/acp-session-store';
 import { heldCallsOf, toHeldCall } from '../runtime/held-calls';
 import { ConnectionGate } from './connection-gate';
@@ -165,6 +166,7 @@ import { resolveCheckpointStore, resolveEnvironmentAdapters } from './harness-op
 import { createHarnessSpan, recordChannelWarning, resolveTraceExporter } from './harness-tracing';
 import { LlmGateway } from './llm-client';
 import { buildItemSchemaRegistry } from './model-schema';
+import { DEFAULT_WAKE_DEBOUNCE_MS, ParkWatchers } from './park-watchers';
 import type { SpendClient } from './spend';
 import { Spend } from './spend';
 import { ThreadRecord } from './thread-record';
@@ -179,6 +181,8 @@ interface Session {
   readonly record?: ThreadRecord;
   /** The lease the turn in flight runs under, when storage can compare-and-set. */
   lease?: TurnLease;
+  /** The `execute()` options of the turn in flight, to resume it with if it parks. */
+  turnOptions?: ExecuteOptions;
 }
 
 //#endregion
@@ -339,6 +343,8 @@ export class AgentHarness<
   private readonly leaseOptions?: TurnLeaseOptions;
   /** Set when turns park (`environment.storage.park`): the grace before one does. */
   private readonly parkGraceMs?: number;
+  /** Set when this harness wakes the turns it parked (`park.autoWake`). */
+  private readonly parkWatchers?: ParkWatchers;
   /** Checkpoint capture in flight per execution id — see `saveCheckpoint`. */
   private readonly pendingCheckpoints = new Map<string, Promise<boolean>>();
   private readonly defaultDeliveryMode: DeliveryMode;
@@ -474,6 +480,7 @@ export class AgentHarness<
       ...storageEnv?.lease,
     });
     this.parkGraceMs = resolveParkGrace(this.leaseOptions ? storageEnv?.park : undefined);
+    this.parkWatchers = this.createParkWatchers(storageEnv?.park);
     this.spend = this.checkpointStore
       ? this.createSpend(this.config.storage ?? createInMemoryStorage())
       : undefined;
@@ -565,6 +572,7 @@ export class AgentHarness<
    * @public
    */
   async close(): Promise<void> {
+    this.parkWatchers?.stopAll();
     await runEvery([
       () => this.#connections.close(),
       () => this.closeAcpSessions(),
@@ -867,6 +875,9 @@ export class AgentHarness<
       lease: TurnLease | undefined,
     ): Promise<Context> => {
       const perTurnOptions: ExecuteOptions = messages[0]?.options ?? {};
+      // The turn is starting or resuming here: nothing needs to watch over it.
+      session.turnOptions = perTurnOptions;
+      this.parkWatchers?.stop(threadId);
       const messageIds = messages.map((m) => m.id);
       const history = record ? await record.history() : session.accumulatedItems;
       const graph = this.agentGraph ? frameworkCast<Step>(this.agentGraph) : undefined;
@@ -975,8 +986,14 @@ export class AgentHarness<
             for (const queued of session.runner.queue.drainAll()) {
               await record.keepQueued(queued);
             }
-            await record.park(ctx, Number.isFinite(wakeAt) ? wakeAt : undefined);
+            const until = Number.isFinite(wakeAt) ? wakeAt : undefined;
+            await record.park(ctx, until);
             await this.#connections.release(ctx.id);
+            this.parkWatchers?.watch(threadId, {
+              executionId: ctx.id,
+              until,
+              options: session.turnOptions ?? {},
+            });
             return PARKED;
           }
           // The turn ended here, in a live process. Say so, or a routine wake would
@@ -995,6 +1012,7 @@ export class AgentHarness<
         return '';
       }
       await keepHistory(ctx);
+      this.parkWatchers?.forget(threadId, ctx.id);
       return result;
     };
 
@@ -1041,6 +1059,14 @@ export class AgentHarness<
       // failed or was cancelled here: only a turn cut off by a crash resumes unasked.
       const notDue = turn.parked && (turn.parked.until === undefined || turn.parked.until > now);
       if (!scope?.threadId && (notDue || (turn.stopped && !turn.parked))) {
+        // A parked turn found in storage, as at boot, is watched over from here on.
+        if (turn.parked && this.parkWatchers && !this.parkWatchers.has(threadId)) {
+          this.parkWatchers.watch(threadId, {
+            executionId: turn.executionId,
+            until: turn.parked.until,
+            options: scope?.options ?? {},
+          });
+        }
         continue;
       }
       const session = this.getOrCreateSession(threadId);
@@ -1150,6 +1176,36 @@ export class AgentHarness<
         threadId,
       });
     }
+  }
+
+  /** The watchers that wake this harness's parked turns, when auto-wake is on. */
+  private createParkWatchers(park: boolean | ParkConfig | undefined): ParkWatchers | undefined {
+    if (this.parkGraceMs === undefined) {
+      return undefined;
+    }
+    const config = park === true || park === undefined || park === false ? {} : park;
+    if (config.autoWake === false) {
+      return undefined;
+    }
+    const storage = this.config.storage;
+    return new ParkWatchers(
+      {
+        listen: async (connection, request) => {
+          await this.start();
+          return this.#connections.registry.listenRaw(connection, request);
+        },
+        waits: async (executionId) => (storage ? resumableWaitsOf(storage, executionId) : []),
+        wake: async (threadId, options) =>
+          (
+            await this.wake({
+              threadId,
+              options,
+            })
+          ).length > 0,
+        now: () => this.now(),
+      },
+      config.wakeDebounceMs ?? DEFAULT_WAKE_DEBOUNCE_MS,
+    );
   }
 
   /** Resume a parked turn when one of its held calls already has an answer. */

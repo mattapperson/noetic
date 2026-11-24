@@ -280,6 +280,8 @@ const charge = tool({
 
 A tool with a lasting effect passes the key to whatever it writes to, and the write lands once. [Connection](/docs/framework/connections) tools send it for you.
 
+Where the downstream system cannot dedupe on a key, mark the tool `durable: true`. A call cut off by a crash is then [held](/docs/framework/steps/invoke-tool#human-in-the-loop-approval) for a person, who says whether it landed, instead of being repeated. `durable: false` is the opposite: the result is never recorded, for a cheap read that should be fresh.
+
 ### Sessions
 
 `harness.execute()` sessions are durable too. With a storage adapter, each thread keeps its history, what its turns spent, and the turn in flight under `session:<threadId>` — and every turn reads them from storage rather than from the harness's memory:
@@ -369,7 +371,8 @@ const at = await harness.nextWake(); // when to call wake() next, or undefined
 
 - **What parks.** Only a `wait` on an event the connection can replay from a cursor (`replay: 'durable'` in its manifest), such as a [source](/docs/framework/connections#sources) with a `start`. A turn with a model call, a tool or user code still running stays live, as does a wait on an event that cannot be replayed.
 - **What a woken turn does.** It replays its ledger, so finished model calls are not made again, and listens from the recorded cursor until the original deadline. With nothing to receive it parks again; past the deadline the wait fails as it would have live.
-- **Who wakes it.** The host. A long-lived process calls `wake()` at startup and when an event arrives; a serverless host calls it from an alarm set from `nextWake()`.
+- **Who wakes it.** The harness that parked it, by default: it keeps a timer for the deadline and a listener for the event, and resumes the turn when either fires. A long-lived process only calls `wake()` once at boot, which also picks up the parked turns an earlier process left. Where no process lives between requests, set `park: { autoWake: false }` and call `wake()` from an alarm set from `nextWake()`, and `wake({ threadId })` when an event arrives.
+- **A watcher cannot run your `filter`.** It wakes on any event of the awaited type; a turn whose filter turns the event down parks again. Each event wakes it at most once.
 - **Requirements.** Storage with [`swap`](#one-writer-per-turn), and a connection defined on the harness: a woken turn does not keep the connections one `execute()` call passed.
 
 Pass `now` to the harness to drive the clock yourself; wait deadlines, leases and wake times all read it.

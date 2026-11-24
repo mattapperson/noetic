@@ -42,10 +42,11 @@ const HeldRecordSchema = z.object({
   args: z.unknown(),
   /** Hash of the call's name and arguments: an answer is for this call and no other. */
   argsHash: z.string(),
-  /** `approval`: the tool has not run. `result`: it ran and left its result open. */
+  /** Why the call is held: see `HeldCall.reason`. */
   reason: z.enum([
     'approval',
     'result',
+    'outcome',
   ]),
   dueAt: z.number().optional(),
   onDue: z
@@ -102,6 +103,14 @@ export function heldArgsHash(name: string, args: unknown): string {
       args,
     }) ?? ''
   );
+}
+
+const IntentSchema = z.object({
+  argsHash: z.string(),
+});
+
+function intentPrefix(executionId: string): string {
+  return `execution:${executionId}:intent:`;
 }
 
 /** How often a live turn re-reads held calls that another process may have answered. */
@@ -212,11 +221,38 @@ export class HeldCalls {
     return record;
   }
 
-  /** Drop every held call of an execution that is over or was abandoned. */
+  /** Drop every held call and intent of an execution that is over or was abandoned. */
   async clear(executionId: string): Promise<void> {
-    for (const key of await this.storage.list(heldPrefix(executionId))) {
-      await this.storage.delete(key);
+    for (const prefix of [
+      heldPrefix(executionId),
+      intentPrefix(executionId),
+    ]) {
+      for (const key of await this.storage.list(prefix)) {
+        await this.storage.delete(key);
+      }
     }
+  }
+
+  /**
+   * Note that a `durable` tool call is about to run. Written before the tool does
+   * anything, so a resumed run that finds it knows the call had started.
+   */
+  async arm(executionId: string, callId: string, argsHash: string): Promise<void> {
+    await this.storage.set(`${intentPrefix(executionId)}${callId}`, {
+      argsHash,
+    });
+  }
+
+  /** True when a call with these arguments was started and never finished. */
+  async wasStarted(executionId: string, callId: string, argsHash: string): Promise<boolean> {
+    const raw = await this.storage.get<unknown>(`${intentPrefix(executionId)}${callId}`);
+    const parsed = IntentSchema.safeParse(raw);
+    return parsed.success && parsed.data.argsHash === argsHash;
+  }
+
+  /** The call finished and its result is on record. */
+  async disarm(executionId: string, callId: string): Promise<void> {
+    await this.storage.delete(`${intentPrefix(executionId)}${callId}`);
   }
 
   /** The call was settled and its result recorded: drop its record. */
@@ -249,7 +285,12 @@ export class HeldCalls {
       throw refused(callId, 'the answer is for a call with different arguments');
     }
     const resolution = toResolutionRecord(answer.resolution);
-    if ((record.reason === 'result') !== (resolution.hasOutput === true)) {
+    // An unknown outcome takes either answer: "it landed, here is the result", or
+    // a decision on whether to run it again.
+    const wrongKind =
+      record.reason !== 'outcome' &&
+      (record.reason === 'result') !== (resolution.hasOutput === true);
+    if (wrongKind) {
       throw refused(
         callId,
         record.reason === 'result'

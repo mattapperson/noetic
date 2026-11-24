@@ -67,8 +67,8 @@ interface CalledFunction {
 export interface CallLedger {
   /** The recorded result of this call, when an earlier attempt of the round finished it. */
   take(call: CalledFunction): ToolCallResult | undefined;
-  /** Record what the call produced. */
-  record(call: CalledFunction, result: ToolCallResult): Promise<void>;
+  /** Record what the call produced. Resolves whether the record was stored. */
+  record(call: CalledFunction, result: ToolCallResult): Promise<boolean>;
 }
 
 /** What one finished round added to the loop. */
@@ -251,7 +251,10 @@ export class RoundLedger {
         return parsed?.success ? parsed.data : undefined;
       },
       record: async (call, result) => {
-        await ledger?.record({
+        if (!ledger) {
+          return false;
+        }
+        return ledger.record({
           path: keyOf(call),
           stepId,
           kind: CALL_KIND,

@@ -349,6 +349,11 @@ export class SessionRunner {
       await this.settleUsage(start, ctx);
       const error = err instanceof Error ? err : new Error(String(err));
       this.lastError = error;
+      // A turn that parked and then failed once woken did not end parked: stop
+      // answering with the parked response.
+      if (this.lastResponse?.parked) {
+        this.lastResponse = undefined;
+      }
       emitFrameworkEvent({
         broadcaster: this.broadcaster,
         agentName: this.agentName,

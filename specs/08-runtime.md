@@ -842,10 +842,11 @@ A tool call can be left open for a person. Nothing is written to the conversatio
 - The approver answers `{ action: 'hold' }`. It has usually sent the request somewhere first: where it goes is business logic, and core has no opinion. `dueAt` (epoch ms) ends the hold, and `onDue` says how: `deny` (the default) or `keep`.
 - A call needs approval and the harness has no approver. This is the one rule for `needsApproval` tools and for a model's call to a connection operation that needs approval (`35-connections` § Gates).
 - A tool returns `hold({ request?, dueAt?, onDue? })` in place of a result. The tool has done its part; the answer becomes its result.
+- A `durable: true` tool was running when the host died (`23a-step-level-resume` § Tool calls in a round). Its reason is `outcome`: nobody knows whether its effect landed.
 
 `hold` is the approver's answer only. From a `beforeToolCall` layer it is a denial.
 
-**The record.** A held call is one record under `execution:<root id>:held:<callId>`: the tool name, the validated arguments, a hash of both, why it is held (`approval` or `result`), the deadline, and once it has one, its answer. The harness always has storage, so this is the same in memory and on disk.
+**The record.** A held call is one record under `execution:<root id>:held:<callId>`: the tool name, the validated arguments, a hash of both, why it is held (`approval`, `result` or `outcome`), the deadline, and once it has one, its answer. The harness always has storage, so this is the same in memory and on disk.
 
 **In the round.** The round's other calls run and record as usual (`23a-step-level-resume` § Tool calls in a round). The held call gets no output item. The harness emits `{name}:tool_call_held` with the fields `pending()` returns, then waits. When something changes it walks the held calls again: an answered one is settled, and the round goes back to the model once none is held.
 
@@ -863,6 +864,7 @@ type HeldResolution =
 `scope` is `{ threadId }`, or `{ executionId }` for an execution the host runs itself with `harness.run()`.
 
 - `allow` runs the tool. `deny` and `guide` give the refusal an approver's would. An `output` becomes the call's result; the tool body does not run again.
+- A call held as `outcome` takes either kind: an `output` says it landed, `allow` runs it again with the same idempotency key, and `deny` or `guide` refuses it.
 - The first answer wins, by `swap` where storage has it. The same answer again is a no-op; a different one is refused.
 - `argsHash` is the hash the call was shown with. An answer for other arguments is refused, so an approval never applies to an action other than the one a person saw. A record whose arguments no longer match its call is void, and the call is asked about again.
 - Each refusal is `NoeticError` `hold_refused` with `callId` and `reason`: the call is not held, the arguments differ, the answer is the wrong kind for the hold, or it was already answered differently.
