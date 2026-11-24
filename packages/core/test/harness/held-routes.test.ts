@@ -98,8 +98,11 @@ describe("a step's connection call that needs approval", () => {
       name: 'app_app_wipe',
       reason: 'approval',
     });
-    await harness.resolveHeld(scope, {
+    // A run the host started itself has no thread: the decision names the run.
+    await harness.execute({
+      type: 'noetic:decision',
       callId: held.callId,
+      executionId: ctx.id,
       action: 'allow',
     });
     expect(await running).toEqual({

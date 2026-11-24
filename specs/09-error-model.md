@@ -193,7 +193,7 @@ Durable execution (`23-durable-execution`) adds two `NoeticError` kinds, raised 
 
 | Kind | Payload | Condition |
 |---|---|---|
-| `decision_refused` | `threadId`, `action`, `reason` | A decision passed to `harness.execute()` does not fit what the thread is waiting on: no turn is stuck, or its action is the wrong kind for a decision with, or without, a `callId`. |
+| `decision_refused` | `threadId`, `action`, `reason` | A decision passed to `harness.execute()` does not fit what the thread is waiting on: no turn is stuck, it carries both an `action` and an `output`, or its action is the wrong kind for a decision with, or without, a `callId`. |
 | `hold_refused` | `callId`, `reason` | `harness.execute()` could not take a decision for a held tool call (`08-runtime` § Held tool calls). |
 
 ## Connection Errors

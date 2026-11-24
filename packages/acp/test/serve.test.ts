@@ -11,7 +11,7 @@ import type {
   AcpPermissionPolicy,
   AcpSessionNotification,
   ContextLayer,
-  ExecuteInput,
+  ExecuteArgument,
   ExecuteOptions,
   ExecutionContext,
   Item,
@@ -66,7 +66,7 @@ interface ServeMockScript {
 
 interface ServeMockHarness extends AcpServeHarness {
   readonly executed: Array<{
-    input: ExecuteInput;
+    input: ExecuteArgument;
     options: ExecuteOptions | undefined;
   }>;
   readonly seeded: Array<{

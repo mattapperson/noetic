@@ -1,8 +1,9 @@
-// Held tool calls: a call left open for a person, answered with `harness.resolveHeld()`.
+// Held tool calls: a call left open for a person, answered with a decision item
+// passed to `harness.execute()`.
 // Drives the real model client against a fake server. See specs/08-runtime § Held
 // tool calls.
 
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it, spyOn } from 'bun:test';
 import assert from 'node:assert';
 import type { StorageAdapter } from '@noetic-tools/context';
 import type { ContextData, HeldCall, ToolApprover } from '@noetic-tools/types';
@@ -420,6 +421,209 @@ describe('answers that are refused', () => {
   });
 });
 
+/** The kind and reason of the error `run` throws. */
+async function thrown(run: () => Promise<unknown>): Promise<{
+  kind: string;
+  reason: string;
+}> {
+  try {
+    await run();
+  } catch (error) {
+    assert(isNoeticError(error));
+    const e = error.noeticError;
+    assert(e.kind === 'hold_refused' || e.kind === 'decision_refused');
+    return {
+      kind: e.kind,
+      reason: e.reason,
+    };
+  }
+  return expect.unreachable('expected a refusal');
+}
+
+describe('a decision that does not fit', () => {
+  /** A harness holding the refund, and a way to send it anything at all. */
+  async function holding(): Promise<{
+    h: AgentHarness;
+    held: HeldCall;
+    runs: string[];
+    send: (decision: Record<string, unknown>) => Promise<void>;
+  }> {
+    const { runs, harness } = setup(LOOKUP_THEN_REFUND);
+    const h = harness({
+      approveToolCall: holdIt,
+    });
+    await h.execute('refund A1', THREAD);
+    const held = await heldCall(h);
+    return {
+      h,
+      held,
+      runs,
+      // A caller without types: the fields are whatever it sent.
+      send: (decision) => h.execute(JSON.parse(JSON.stringify(decision)), THREAD),
+    };
+  }
+
+  it('is refused when it carries both an action and an output', async () => {
+    const { h, held, send } = await holding();
+    expect(
+      await thrown(() =>
+        send({
+          type: 'noetic:decision',
+          callId: held.callId,
+          action: 'allow',
+          output: 'refunded by hand',
+        }),
+      ),
+    ).toMatchObject({
+      kind: 'decision_refused',
+      reason: expect.stringContaining('both an action and an output'),
+    });
+    expect(await h.pending(THREAD)).toHaveLength(1);
+    await h.abort(THREAD);
+  });
+
+  it('is refused when it settles a stuck turn but names a call, or answers one but names none', async () => {
+    const { h, held, runs, send } = await holding();
+    expect(
+      await thrown(() =>
+        send({
+          type: 'noetic:decision',
+          callId: held.callId,
+          action: 'continue',
+        }),
+      ),
+    ).toMatchObject({
+      kind: 'decision_refused',
+      reason: expect.stringContaining('takes no callId'),
+    });
+    expect(
+      await thrown(() =>
+        send({
+          type: 'noetic:decision',
+          action: 'allow',
+        }),
+      ),
+    ).toMatchObject({
+      kind: 'decision_refused',
+      reason: expect.stringContaining('give its callId'),
+    });
+    // An output with no call to give it to, the same.
+    expect(
+      await thrown(() =>
+        send({
+          type: 'noetic:decision',
+          output: 'done',
+        }),
+      ),
+    ).toMatchObject({
+      kind: 'decision_refused',
+    });
+    expect(runs).toEqual([
+      'lookup',
+    ]);
+    await h.abort(THREAD);
+  });
+
+  it('is refused when its output cannot be recorded', async () => {
+    const { h, held } = await holding();
+    for (const output of [
+      undefined,
+      () => 'a function',
+      1n,
+    ]) {
+      expect(
+        await thrown(() =>
+          decide(h, THREAD, {
+            callId: held.callId,
+            output,
+          }),
+        ),
+      ).toMatchObject({
+        kind: 'hold_refused',
+        reason: expect.stringContaining('not a JSON value'),
+      });
+    }
+    expect(await h.pending(THREAD)).toHaveLength(1);
+    await h.abort(THREAD);
+  });
+
+  it('in a list, stops every decision in it: nothing is taken', async () => {
+    const { h, held, runs } = await holding();
+    expect(
+      await thrown(() =>
+        h.execute(
+          [
+            {
+              type: 'noetic:decision',
+              callId: held.callId,
+              action: 'allow',
+            },
+            JSON.parse(
+              JSON.stringify({
+                type: 'noetic:decision',
+                action: 'allow',
+              }),
+            ),
+          ],
+          THREAD,
+        ),
+      ),
+    ).toMatchObject({
+      kind: 'decision_refused',
+    });
+    // The first decision was fine, and was not taken: the refund did not run.
+    expect(await h.pending(THREAD)).toHaveLength(1);
+    expect(runs).toEqual([
+      'lookup',
+    ]);
+    await h.abort(THREAD);
+  });
+});
+
+describe('a function_call_output for a held call', () => {
+  it('is refused: it would join the conversation and leave the call waiting', async () => {
+    const { runs, harness } = setup(
+      modelAsking([
+        call('ask_person', {
+          question: 'ship it?',
+        }),
+      ]),
+    );
+    const h = harness();
+    await h.execute('ask', THREAD);
+    const held = await heldCall(h);
+    expect(
+      await thrown(() =>
+        h.execute(
+          [
+            {
+              id: 'out-1',
+              type: 'function_call_output',
+              status: 'completed',
+              callId: held.callId,
+              output: 'yes',
+            },
+          ],
+          THREAD,
+        ),
+      ),
+    ).toMatchObject({
+      kind: 'hold_refused',
+      reason: expect.stringContaining('decision item'),
+    });
+    // Still held, and answered the right way it goes on.
+    expect(await h.pending(THREAD)).toHaveLength(1);
+    await decide(h, THREAD, {
+      callId: held.callId,
+      output: 'yes',
+    });
+    expect((await h.getAgentResponse(THREAD)).text).toBe('yes');
+    expect(runs).toEqual([
+      'ask_person',
+    ]);
+  });
+});
+
 describe('a hold with a deadline', () => {
   it('is denied when nobody answers in time', async () => {
     const { runs, harness } = setup(LOOKUP_THEN_REFUND);
@@ -602,10 +806,24 @@ describe('a held call on durable storage', () => {
     assert(held);
     expect(held.name).toBe('refund');
 
-    await second.resolveHeld(THREAD, {
-      callId: held.callId,
-      argsHash: held.argsHash,
-      action: 'allow',
+    // What the host passes with the decision reaches the turn it resumes.
+    const wake = spyOn(second, 'wake');
+    const options = {
+      ...THREAD,
+      resourceId: 'the-approver',
+    };
+    await second.execute(
+      {
+        type: 'noetic:decision',
+        callId: held.callId,
+        argsHash: held.argsHash,
+        action: 'allow',
+      },
+      options,
+    );
+    expect(wake).toHaveBeenCalledWith({
+      threadId: 't',
+      options,
     });
     const response = await second.getAgentResponse(THREAD);
     expect(response.parked).toBeUndefined();

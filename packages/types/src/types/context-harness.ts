@@ -15,7 +15,7 @@ import type { DetachedHandle } from './detached';
 import type { ApproveRequest } from './harness-judgment';
 import type { HarnessPlatform } from './harness-platform';
 import type { HarnessResponse, StreamEvent, StreamingItem } from './harness-result';
-import type { ExecuteInput, Item } from './items';
+import type { ExecuteArgument, Item } from './items';
 import type { Span, TraceExporter } from './observability';
 import type { CancelOptions, DrainReport, ExecutionScope, ExecutionStatus } from './runtime';
 import type { OnSteerParams, SteeringDecision, SteerVerdict } from './steering';
@@ -146,7 +146,7 @@ export interface ContextHarness extends HarnessPlatform {
   approve?(request: ApproveRequest): Promise<SteeringDecision>;
   /** Run every layer's `onDecision` hook, in slot order. */
   notifyDecision(layers: ContextLayer[], record: DecisionRecord, ctx: Context): Promise<void>;
-  execute(input: ExecuteInput, options?: unknown): Promise<void>;
+  execute(input: ExecuteArgument, options?: unknown): Promise<void>;
   getAgentResponse(scope?: unknown): Promise<HarnessResponse>;
   getItemStream(scope?: unknown): AsyncIterable<StreamingItem>;
   getTextStream(scope?: unknown): AsyncIterable<string>;

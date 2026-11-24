@@ -1,5 +1,5 @@
 import type {
-  ExecuteInput,
+  ExecuteArgument,
   ExecuteOptions,
   Item,
   SessionScope,
@@ -63,7 +63,7 @@ export function chatMessage(overrides: {
 
 export interface MockHarness extends ChatHarness {
   readonly executed: Array<{
-    input: ExecuteInput;
+    input: ExecuteArgument;
     options: ExecuteOptions | undefined;
   }>;
   readonly seeded: Array<{

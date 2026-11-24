@@ -16,7 +16,7 @@ import type { DetachedHandle } from './detached';
 import type { HarnessJudgmentContract, ToolApprover } from './harness-judgment';
 import type { HarnessPlatform } from './harness-platform';
 import type { HarnessResponse, StreamEvent, StreamingItem } from './harness-result';
-import type { ExecuteInput, Item, ItemSchemaExtensions } from './items';
+import type { ExecuteArgument, Item, ItemSchemaExtensions } from './items';
 import type { Span, TraceExporter } from './observability';
 import type { Step, StepLike, StepsInput, StepsOutput, ValidStepChain } from './step';
 import type { Tool } from './tool';
@@ -379,7 +379,7 @@ export interface AgentHarnessContract<
    * model responds. Use `getAgentResponse()` or `getItemStream()` to observe
    * the response.
    */
-  execute(input: ExecuteInput, options?: ExecuteOptions): Promise<void>;
+  execute(input: ExecuteArgument, options?: ExecuteOptions): Promise<void>;
 
   /**
    * Resolves with the accumulated response once the session has finished

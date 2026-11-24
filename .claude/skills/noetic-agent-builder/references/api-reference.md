@@ -2164,7 +2164,9 @@ harness.pending(scope?: { threadId } | { executionId }): Promise<HeldCall[]>;
 // answer with a decision item passed to execute() on the call's thread:
 harness.execute({ type: 'noetic:decision', callId, argsHash?, action: 'allow' | 'deny' | 'guide', guidance? }, { threadId });
 harness.execute({ type: 'noetic:decision', callId, argsHash?, output }, { threadId });
-// a function_call_output item does NOT answer a held call: use the { callId, output } decision
+// a function_call_output item naming a held call is refused (hold_refused): use the { callId, output } decision
+// output must be a JSON value. Add executionId to answer a call held by a run you started yourself
+// (parseAndRunWorkflow), which has no thread. Several decisions in one list: all read first, then taken in order.
 // HeldCall: { callId, name, args, argsHash, reason: 'approval' | 'result', dueAt?, onDue?, request? }
 ```
 

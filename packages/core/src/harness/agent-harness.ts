@@ -185,6 +185,8 @@ import { createHarnessSpan, recordChannelWarning, resolveTraceExporter } from '.
 import { LlmGateway } from './llm-client';
 import { buildItemSchemaRegistry } from './model-schema';
 import { DEFAULT_TASK_POLL_MS, DEFAULT_WAKE_DEBOUNCE_MS, ParkWatchers } from './park-watchers';
+import type { ReadDecision } from './read-decision';
+import { readDecision } from './read-decision';
 import type { SpendClient } from './spend';
 import { Spend } from './spend';
 import { ThreadRecord } from './thread-record';
@@ -743,17 +745,23 @@ export class AgentHarness<
    * its stuck turn. It is not written to the conversation, and input that holds
    * nothing else starts no turn: the turn the decision is for goes on.
    *
+   * Several decisions in one list are read first, so a malformed one changes
+   * nothing, and then taken in order: one the thread's state refuses throws, and
+   * those before it stay taken. `options` reach the turn a decision resumes.
+   *
    * @throws NoeticError `hold_refused` when an answer to a held call cannot be
    *   taken: the thread holds no such call, `argsHash` names other arguments, the
-   *   answer is the wrong kind for the hold, or the call was already answered
-   *   differently.
+   *   answer is the wrong kind for the hold, the call was already answered
+   *   differently, its `output` is not a JSON value, or a `function_call_output`
+   *   item names a held call.
    * @throws NoeticError `decision_refused` when a decision does not fit what the
-   *   thread is waiting on: no turn is stuck, or its action is the wrong kind for a
-   *   decision with, or without, a `callId`.
+   *   thread is waiting on: no turn is stuck, it carries both an `action` and an
+   *   `output`, or its action is the wrong kind for a decision with, or without,
+   *   a `callId`.
    * @public
    */
   async execute(input: ExecuteArgument, options?: ExecuteOptions): Promise<void> {
-    const message = await this.takeDecisions(input, options?.threadId ?? DEFAULT_THREAD_ID);
+    const message = await this.takeDecisions(input, options);
     if (message === undefined) {
       return;
     }
@@ -763,26 +771,36 @@ export class AgentHarness<
   /**
    * Act on the decisions in `input` and resolve what is left of it: the message to
    * deliver, or undefined when the input was decisions only.
+   *
+   * Every decision is read before any is acted on, so a list with a malformed one
+   * changes nothing. They are then acted on in order: one the thread's state
+   * refuses throws, and those before it stay taken.
    */
   private async takeDecisions(
     input: ExecuteArgument,
-    threadId: string,
+    options: ExecuteOptions | undefined,
   ): Promise<ExecuteInput | undefined> {
     if (typeof input === 'string') {
       return input;
     }
+    const threadId = options?.threadId ?? DEFAULT_THREAD_ID;
     const given = isItemList(input)
       ? input
       : [
           input,
         ];
     const rest: Item[] = [];
+    const decisions: ReadDecision[] = [];
     for (const item of given) {
       if (isDecisionItem(item)) {
-        await this.takeDecision(threadId, item);
+        decisions.push(readDecision(threadId, item));
         continue;
       }
       rest.push(item);
+    }
+    await this.refuseResultsForHeldCalls(threadId, rest);
+    for (const decision of decisions) {
+      await this.takeDecision(decision, options);
     }
     if (rest.length === given.length) {
       return frameworkCast<ExecuteInput>(input);
@@ -790,54 +808,50 @@ export class AgentHarness<
     return rest.length === 0 ? undefined : rest;
   }
 
-  /** Act on one decision: an answer to a held call, or the settling of a stuck turn. */
-  private async takeDecision(threadId: string, decision: DecisionItem): Promise<void> {
-    const scope = {
-      threadId,
-    };
-    if (!('callId' in decision)) {
-      const { action } = decision;
-      // A caller without types can still send an answer with no call to give it to.
-      const settles = action === 'continue' || action === 'restart' || action === 'abandon';
-      if (!settles || !(await this.settleStuckTurn(threadId, action))) {
-        throw new NoeticErrorImpl({
-          kind: 'decision_refused',
+  /**
+   * A held call's result comes in a decision. A `function_call_output` for one
+   * would go into the conversation and leave the call waiting, so it is refused.
+   */
+  private async refuseResultsForHeldCalls(threadId: string, items: Item[]): Promise<void> {
+    const outputs = items.filter((item) => item.type === 'function_call_output');
+    if (outputs.length === 0) {
+      return;
+    }
+    const held = new Set(
+      (
+        await this.pending({
           threadId,
-          action: String(action),
-          reason: settles
-            ? 'the thread has no stuck turn'
-            : 'it answers a held call: give its callId',
+        })
+      ).map((call) => call.callId),
+    );
+    for (const item of outputs) {
+      if ('callId' in item && typeof item.callId === 'string' && held.has(item.callId)) {
+        throw new NoeticErrorImpl({
+          kind: 'hold_refused',
+          callId: item.callId,
+          reason: "a held call's result is given in a decision item, not a function_call_output",
         });
       }
+    }
+  }
+
+  /** Act on one decision: an answer to a held call, or the settling of a stuck turn. */
+  private async takeDecision(
+    decision: ReadDecision,
+    options: ExecuteOptions | undefined,
+  ): Promise<void> {
+    if ('answer' in decision) {
+      await this.resolveHeld(decision.scope, decision.answer, options);
       return;
     }
-    const { callId, argsHash } = decision;
-    if ('output' in decision) {
-      await this.resolveHeld(scope, {
-        callId,
-        argsHash,
-        output: decision.output,
-      });
+    if (await this.settleStuckTurn(decision.threadId, decision.settle, options)) {
       return;
     }
-    const { action, guidance } = decision;
-    if (action !== 'allow' && action !== 'deny' && action !== 'guide') {
-      throw new NoeticErrorImpl({
-        kind: 'decision_refused',
-        threadId,
-        action: String(action),
-        reason: 'it settles a stuck turn: it takes no callId',
-      });
-    }
-    await this.resolveHeld(scope, {
-      callId,
-      argsHash,
-      action,
-      ...(guidance === undefined
-        ? {}
-        : {
-            guidance,
-          }),
+    throw new NoeticErrorImpl({
+      kind: 'decision_refused',
+      threadId: decision.threadId,
+      action: decision.settle,
+      reason: 'the thread has no stuck turn',
     });
   }
 
@@ -1510,9 +1524,9 @@ export class AgentHarness<
    * @throws NoeticError `hold_refused` when the thread holds no such call,
    *   `argsHash` names different arguments, the answer is the wrong kind for the
    *   hold, or the call was already answered differently.
-   * @internal Hosts answer through `execute()` with a `DecisionItem` or a
-   *   `function_call_output` item. This is what that calls, and what a test that
-   *   runs a step with `run()` uses to answer by execution id.
+   * @internal Hosts answer through `execute()` with a `DecisionItem`, which
+   *   carries an `executionId` for a call held by a run the host started itself.
+   *   This is what that calls.
    */
   async resolveHeld(
     scope: SessionScope | ExecutionScope | undefined,
@@ -1520,6 +1534,7 @@ export class AgentHarness<
       readonly callId: string;
       readonly argsHash?: string;
     },
+    options?: ExecuteOptions,
   ): Promise<void> {
     const executionId = await this.heldExecutionId(scope);
     if (executionId === undefined) {
@@ -1545,6 +1560,7 @@ export class AgentHarness<
     if (runner?.context === undefined) {
       await this.wake({
         threadId,
+        options,
       });
       return;
     }
@@ -1556,6 +1572,7 @@ export class AgentHarness<
         if ((await this.sessionStore?.load(threadId))?.turn?.parked) {
           await this.wake({
             threadId,
+            options,
           });
         }
       })
@@ -1601,6 +1618,7 @@ export class AgentHarness<
   private async settleStuckTurn(
     threadId: string,
     action: 'continue' | 'restart' | 'abandon',
+    options?: ExecuteOptions,
   ): Promise<boolean> {
     const record = this.threadRecord(threadId);
     const turn = await record?.settle(action);
@@ -1632,6 +1650,7 @@ export class AgentHarness<
     }
     await this.wake({
       threadId,
+      options,
     });
     return true;
   }

@@ -235,15 +235,21 @@ export const DECISION_ITEM_TYPE = 'noetic:decision';
  *   (`harness.listStuckRuns()`): `continue`, `restart` or `abandon`.
  *
  * Pass the `argsHash` a held call was shown with to make sure the answer is for
- * that exact call. A held call's result is given this way and no other: a
- * `function_call_output` item passed to `execute()` is an ordinary conversation
- * item, and settles nothing.
+ * that exact call. An `output` is a JSON value. A held call's result is given
+ * this way and no other: a `function_call_output` item that names a held call
+ * is refused with `hold_refused`.
+ *
+ * A call is looked for in the turn of the thread `execute()` was called on. Give
+ * `executionId` for one held by a run the host started itself, outside a thread:
+ * a workflow run with `parseAndRunWorkflow`, whose id `harness.pending()` takes
+ * the same way. That run is the host's to resume.
  */
 export type DecisionItem =
   | {
       readonly type: typeof DECISION_ITEM_TYPE;
       readonly callId: string;
       readonly argsHash?: string;
+      readonly executionId?: string;
       readonly action: 'allow' | 'deny' | 'guide';
       readonly guidance?: string;
     }
@@ -251,6 +257,7 @@ export type DecisionItem =
       readonly type: typeof DECISION_ITEM_TYPE;
       readonly callId: string;
       readonly argsHash?: string;
+      readonly executionId?: string;
       readonly output: unknown;
     }
   | {

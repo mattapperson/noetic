@@ -219,6 +219,8 @@ const askPerson = tool({
 await harness.execute({ type: 'noetic:decision', callId, output: 'Use the new address.' }, { threadId });
 ```
 
+The `output` is a JSON value, and the decision is the only way to give it: a `function_call_output` item that names a held call is refused with `hold_refused`. A call held by a run you started yourself, such as [`parseAndRunWorkflow`](/docs/framework/json-runtime), has no thread, so add the run's `executionId` to the decision.
+
 A tool marked `durable: true` adds a third kind of hold. If the host dies while it runs, the resumed turn does not run it again: it holds the call with `reason: 'outcome'`. Answer with `{ output }` if it did land, or `{ action: 'allow' }` to run it again.
 
 Traces show the outcome: each `tool.call` span carries `tool.approval` — `approved` or `denied`.

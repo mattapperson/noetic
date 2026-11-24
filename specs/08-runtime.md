@@ -862,9 +862,9 @@ harness.pending(scope?): Promise<HeldCall[]>;
 
 // a person's answer is an item passed to execute() on the call's thread
 type DecisionItem =
-  | { type: 'noetic:decision'; callId: string; argsHash?: string;
+  | { type: 'noetic:decision'; callId: string; argsHash?: string; executionId?: string;
       action: 'allow' | 'deny' | 'guide'; guidance?: string }      // for an approval
-  | { type: 'noetic:decision'; callId: string; argsHash?: string;
+  | { type: 'noetic:decision'; callId: string; argsHash?: string; executionId?: string;
       output: unknown }                                           // for a held result
   | { type: 'noetic:decision';
       action: 'continue' | 'restart' | 'abandon' };               // for a stuck turn
@@ -872,14 +872,18 @@ type DecisionItem =
 harness.execute(decision, { threadId });
 ```
 
-There is no separate method to answer with: `execute()` is the one way in. It acts on the decisions in its input first and delivers what is left as a message; input that is only decisions starts no turn. A decision is never written to the conversation. A held call's result is given with the decision's `output` form and no other: a `function_call_output` item passed to `execute()` is an ordinary conversation item, and settles nothing.
+There is no separate method to answer with: `execute()` is the one way in. It acts on the decisions in its input first and delivers what is left as a message; input that is only decisions starts no turn. A decision is never written to the conversation. A held call's result is given with the decision's `output` form and no other: a `function_call_output` item that names a held call is refused with `hold_refused`, since it would join the conversation and leave the call waiting. The `options` passed with a decision reach the turn it resumes.
+
+A call is looked for in the turn of the thread `execute()` was called on. A run the host started itself, outside a thread (`parseAndRunWorkflow`, or a step run on a context the host built), has no thread: the decision names it with `executionId`, as `pending({ executionId })` does. That run is waiting in the host's process and goes on when told; resuming it after a restart is the host's to do.
+
+The decisions in one list are all read before any is acted on, so a list with a malformed decision changes nothing. They are then taken in order. One the thread's state refuses throws, and those before it stay taken.
 
 - `allow` runs the tool. `deny` and `guide` give the refusal an approver's would. An `output` becomes the call's result; the tool body does not run again.
 - A call held as `outcome` takes either kind: an `output` says it landed, `allow` runs it again with the same idempotency key, and `deny` or `guide` refuses it.
 - The first answer wins, by `swap` where storage has it. The same answer again is a no-op; a different one is refused.
 - `argsHash` is the hash the call was shown with. An answer for other arguments is refused, so an approval never applies to an action other than the one a person saw. A record whose arguments no longer match its call is void, and the call is asked about again.
-- Each refusal of an answer is `NoeticError` `hold_refused` with `callId` and `reason`: the call is not held, the arguments differ, the answer is the wrong kind for the hold, or it was already answered differently.
-- A decision that does not fit at all is `decision_refused` with `threadId`, `action` and `reason`: a stuck-turn action given a `callId`, a held-call action given none, or a stuck-turn decision on a thread with no stuck turn.
+- Each refusal of an answer is `NoeticError` `hold_refused` with `callId` and `reason`: the call is not held, the arguments differ, the answer is the wrong kind for the hold, it was already answered differently, or its `output` is not a JSON value (`undefined`, a function, a cycle), which no record could hold.
+- A decision that does not fit at all is `decision_refused` with `threadId`, `action` and `reason`: a stuck-turn action given a `callId`, a held-call action or an `output` given none, an `action` and an `output` together, or a stuck-turn decision on a thread with no stuck turn. A `callId` that is present but `undefined` counts as absent.
 - A deadline that passes with `onDue: 'deny'` settles the call as a denial that says so.
 
 **Where the turn is.** A turn running in this process is told, and goes on at once. On storage with parking on (`23-durable-execution` § Parked turns), a turn whose every step in flight is a held call or a resumable wait parks; the decision then wakes it. A parked turn waiting only on a held call has no time to wake at, so `parked.wakeAt` is absent and a routine `wake()` leaves it alone. Any harness over the same storage can list, answer and finish it.

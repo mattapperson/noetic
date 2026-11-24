@@ -9,7 +9,7 @@
 import type {
   AcpMcpServer,
   AcpToolKind,
-  ExecuteInput,
+  ExecuteArgument,
   ExecuteOptions,
   FsAdapter,
   Item,
@@ -29,7 +29,7 @@ import type * as acp from '@zed-industries/agent-client-protocol';
  * @public
  */
 export interface AcpServeHarness {
-  execute(input: ExecuteInput, options?: ExecuteOptions): Promise<void>;
+  execute(input: ExecuteArgument, options?: ExecuteOptions): Promise<void>;
   getFullStream(scope?: SessionScope): AsyncIterable<StreamEvent>;
   getItemStream(scope?: SessionScope): AsyncIterable<StreamingItem>;
   seedSessionHistory(threadId: string, items: ReadonlyArray<Item>): void;
