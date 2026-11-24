@@ -223,7 +223,9 @@ harness.settleStuck(scope, action: 'continue' | 'restart' | 'abandon'): Promise<
 
 `settleStuck` resolves `false` when the thread has no stuck turn.
 
-A harness that names no version behaves as it did before versions: a resumed turn discards whatever no longer matches and runs it again. An entry recorded under no version never makes a turn stuck.
+A harness whose `agentGraph` is the root step `hydrateWorkflow` returned, and that names no version, takes `workflow-<hash of the document>`: editing the document is a new version, and the same document on another deploy is the same one. An explicit `version` wins.
+
+A harness with neither behaves as it did before versions: a resumed turn discards whatever no longer matches and runs it again. An entry recorded under no version never makes a turn stuck.
 
 An author keeps an effect step matching across edits with `replayKey`, which keys its entry by a stable name instead of its position (`23a-step-level-resume` § `replayKey` and `durable: false`).
 

@@ -491,7 +491,21 @@ export function hydrateWorkflow(
     ...root.customItems,
   };
   recordDocumentConnections(frameworkCast<Step>(root), doc, ctx.mcp);
+  documents.set(root, doc);
   return root;
+}
+
+/** The document each hydrated root step came from. */
+const documents = new WeakMap<object, WorkflowDocument>();
+
+/**
+ * @internal
+ * The document `step` was hydrated from, when it is the root of one. A harness
+ * given such a step and no `version` names its flow by the document's hash
+ * (spec 23 § Versions).
+ */
+export function workflowDocumentOf(step: object): WorkflowDocument | undefined {
+  return documents.get(step);
 }
 
 //#endregion

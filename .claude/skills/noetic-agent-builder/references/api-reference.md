@@ -2146,6 +2146,7 @@ On storage with `swap` (`createFileStorage`, `createSqliteStorage`, `createInMem
 
 ```typescript
 new AgentHarness({ version: 'v2', /* … */ });   // any string you change when the flow changes
+// agentGraph: hydrateWorkflow(doc, …) with no version → 'workflow-<hash of doc>'
 harness.stuck(): Promise<StuckTurn[]>;          // { threadId, executionId, path, from, to }
 harness.settleStuck(scope, 'continue' | 'restart' | 'abandon'): Promise<boolean>;
 harness.trail(scope: { threadId } | { executionId }): Promise<TrailMark[]>;

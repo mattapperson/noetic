@@ -18,11 +18,12 @@ import {
   NoeticErrorImpl,
 } from '@noetic-tools/types';
 import { toStep } from '../builders/sequence';
+import { workflowDocumentOf } from '../builders/workflow-hydrator';
 import { runEvery } from '../connections/settle';
 import { pendingTasksOf, resumableWaitsOf } from '../interpreter/connection-steps';
 import { AcpSessionStore } from '../runtime/acp-session-store';
 import { emitFrameworkEvent, getBroadcaster } from '../runtime/broadcaster-utils';
-import { stubOf } from '../runtime/durable/step-ledger';
+import { hashStepInput, stubOf } from '../runtime/durable/step-ledger';
 import { heldCallsOf, toHeldCall } from '../runtime/held-calls';
 import { awaitApproval } from '../runtime/tool-approval';
 import { ConnectionGate } from './connection-gate';
@@ -214,6 +215,16 @@ function stuckOf(error: unknown):
     from,
     to,
   };
+}
+
+/**
+ * The version of a flow hydrated from a JSON workflow: a hash of its document, so
+ * an edited document is a new version without the host naming one.
+ */
+function documentVersion(graph: object | undefined): string | undefined {
+  const document = graph ? workflowDocumentOf(graph) : undefined;
+  const hash = document ? hashStepInput(document) : undefined;
+  return hash === undefined ? undefined : `workflow-${hash}`;
 }
 
 function isLeaseLost(error: unknown): boolean {
@@ -508,13 +519,13 @@ export class AgentHarness<
       now: opts.now,
       ...storageEnv?.lease,
     });
-    this.version = opts.version;
     this.parkGraceMs = resolveParkGrace(this.leaseOptions ? storageEnv?.park : undefined);
     this.parkWatchers = this.createParkWatchers(storageEnv?.park);
     this.spend = this.checkpointStore
       ? this.createSpend(this.config.storage ?? createInMemoryStorage())
       : undefined;
     this.agentGraph = opts.agentGraph ? toStep(opts.agentGraph) : undefined;
+    this.version = opts.version ?? documentVersion(this.agentGraph);
     this.harnessTools = opts.tools ?? [];
     this._contextLayers = opts.contextLayers;
     this.llm = new LlmGateway({

@@ -6,11 +6,17 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import type { StorageAdapter } from '@noetic-tools/context';
-import type { CallModelRequest, ContextData, LLMResponse } from '@noetic-tools/types';
+import type {
+  CallModelRequest,
+  ContextData,
+  LLMResponse,
+  WorkflowDocument,
+} from '@noetic-tools/types';
 import { isNoeticError } from '@noetic-tools/types';
 import { z } from 'zod';
 import { callModel, invokeTool, runCode } from '../../src/builders/step-builders';
 import { tool } from '../../src/builders/tool-builder';
+import { hydrateWorkflow } from '../../src/builders/workflow-hydrator';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { createInMemoryStorage } from '../../src/runtime/in-memory-storage';
 import { assistantMessage } from '../_helpers';
@@ -350,5 +356,56 @@ describe('a harness that names no version', () => {
       50,
     ]);
     expect(await second.stuck()).toEqual([]);
+  });
+});
+
+describe('a harness running a JSON workflow', () => {
+  const document = (prompt: string): WorkflowDocument => ({
+    version: 1,
+    root: {
+      kind: 'callModel',
+      id: 'answer',
+      model: 'test/model',
+      instructions: prompt,
+    },
+  });
+
+  /** The version the harness stamps on what a turn records. */
+  async function versionOf(doc: WorkflowDocument, version?: string): Promise<string | undefined> {
+    const m = model('a');
+    const harness = new AgentHarness({
+      name: 'versions',
+      params: {},
+      version,
+      agentGraph: hydrateWorkflow(doc, {
+        tools: new Map(),
+        // A one-node document runs no child step.
+        executeStep: async () => expect.unreachable('the document has no child step'),
+      }),
+      environment: {
+        storage: {
+          adapter: createInMemoryStorage(),
+        },
+      },
+      _testCallModel: (request) => m.call(request),
+    });
+    await harness.execute('hello', delivery);
+    await harness.getAgentResponse(thread);
+    const [mark] = await harness.trail(thread);
+    assert(mark);
+    return mark.version;
+  }
+
+  it('names its flow by the hash of the document', async () => {
+    const first = await versionOf(document('Be brief.'));
+    assert(first);
+    expect(first.startsWith('workflow-')).toBe(true);
+    // The same document is the same version; an edited one is another.
+    expect(await versionOf(document('Be brief.'))).toBe(first);
+    expect(await versionOf(document('Be thorough.'))).not.toBe(first);
+  });
+
+  it('keeps the version the host names', async () => {
+    expect(await versionOf(document('Be brief.'), 'release-7')).toBe('release-7');
   });
 });
