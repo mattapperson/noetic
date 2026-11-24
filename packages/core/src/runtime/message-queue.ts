@@ -89,6 +89,15 @@ export class MessageQueue {
     this.notify();
   }
 
+  /** Queue several messages as one arrival, so a listener sees them all at once. */
+  enqueueAll(messages: ReadonlyArray<QueuedMessage>): void {
+    if (messages.length === 0) {
+      return;
+    }
+    this.items.push(...messages);
+    this.notify();
+  }
+
   prepend(message: QueuedMessage): void {
     this.items.unshift(message);
     this.notify();

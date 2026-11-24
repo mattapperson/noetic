@@ -86,11 +86,30 @@ async function runAround<TContext, I>(
   return current;
 }
 
+/**
+ * Runs the step's filter on one event. A filter is work, not waiting: while it runs
+ * the turn must not park, or a filter slower than the park's grace would be cut off
+ * on every wake and its event never delivered.
+ */
+async function passesFilter<TContext, I>(
+  filter: NonNullable<StepWait<TContext, I, unknown>['filter']>,
+  event: ConnectionEvent,
+  listen: ListenContext<TContext, I>,
+): Promise<boolean> {
+  const { ctx, input } = listen;
+  const busy = ctx instanceof ContextImpl ? ctx.ledger?.parking.enter(undefined) : undefined;
+  try {
+    return await filter(event, input, ctx);
+  } finally {
+    busy?.();
+  }
+}
+
 /** Consumes the stream until an event the filter accepts arrives, or the stream ends. */
 async function listenForMatch<TContext, I>(
   listen: ListenContext<TContext, I>,
 ): Promise<ListenOutcome> {
-  const { step, input, ctx, stream } = listen;
+  const { step, stream } = listen;
   // The registry's stream emits `connection_event` and `stream_changed` (once each).
   for await (const message of stream) {
     if (message.type === 'gap') {
@@ -106,7 +125,7 @@ async function listenForMatch<TContext, I>(
     if (event.type !== step.event) {
       continue;
     }
-    if (step.filter && !(await step.filter(event, input, ctx))) {
+    if (step.filter && !(await passesFilter(step.filter, event, listen))) {
       continue;
     }
     return {

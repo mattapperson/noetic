@@ -36,7 +36,7 @@ export type CreateContextFn = (
   items: ReadonlyArray<Item>,
   turnId: string,
   messages: ReadonlyArray<QueuedMessage>,
-) => Context | Promise<Context>;
+) => Context | undefined | Promise<Context | undefined>;
 
 /** @internal What one turn spent: its context's usage at the end, less at the start. */
 export interface TurnUsage {
@@ -163,6 +163,13 @@ export class SessionRunner {
       });
     }
     this.queue.enqueue(message);
+  }
+
+  /** Resolves once the queue loop has gone idle: no turn running or closing out. */
+  async whenIdle(): Promise<void> {
+    while (this.loopPromise) {
+      await this.loopPromise.catch(() => undefined);
+    }
   }
 
   /** Cumulative token usage and cost across all turns this session has run. */
@@ -293,7 +300,20 @@ export class SessionRunner {
     const items = mergeInputsToItems(messages);
     let ctx: Context;
     try {
-      ctx = await this.createContext(items, turnId, messages);
+      const built = await this.createContext(items, turnId, messages);
+      if (built === undefined) {
+        // The host set these messages aside (the thread's turn is parked or stuck):
+        // no turn starts, and whoever is waiting keeps the answer they had.
+        this.currentController = undefined;
+        this.status = {
+          kind: 'idle',
+        };
+        if (this.lastResponse) {
+          this.resolveWaiters(this.lastResponse);
+        }
+        return;
+      }
+      ctx = built;
     } catch (err: unknown) {
       this.failBeforeStart(turnId, err);
       return;

@@ -933,7 +933,11 @@ export class AgentHarness<
 
   async abort(scope?: SessionScope & CancelOptions): Promise<DrainReport | undefined> {
     const threadId = scope?.threadId ?? DEFAULT_THREAD_ID;
-    const session = this.sessions.get(threadId);
+    // A parked turn lives in storage, so a harness that never ran the thread can
+    // still be the one asked to abort it.
+    const session =
+      this.sessions.get(threadId) ??
+      (this.sessionStore ? this.getOrCreateSession(threadId) : undefined);
     if (!session) {
       return undefined;
     }
@@ -941,6 +945,14 @@ export class AgentHarness<
     const ctx = runner.context;
     if (!ctx) {
       await runner.abort(scope?.reason);
+      // Nothing is running, but a parked turn is still the thread's turn: drop it,
+      // or the next wake would bring back what the host just cancelled.
+      await runner.whenIdle();
+      if ((await session.record?.turn())?.parked) {
+        this.parkWatchers?.stop(threadId);
+        await session.record?.drop();
+        await this.announceWakeTimeQuietly();
+      }
       return undefined;
     }
     const draining = this.drains.stop(ctx);
@@ -1093,6 +1105,10 @@ export class AgentHarness<
           record?.hold(lease);
           session.lease = lease;
           try {
+            if (record && (await this.setAside(session, record, messages))) {
+              await this.releaseLease(session);
+              return undefined;
+            }
             return await buildTurnContext(items, messages, lease);
           } catch (error) {
             await this.releaseLease(session);
@@ -1206,6 +1222,33 @@ export class AgentHarness<
       return ctx;
     };
 
+    /**
+     * A parked turn is not a failed one: its record stays, marked with when to wake
+     * it, and the response says so. Resolves true when the turn on `ctx` parked.
+     */
+    const closeOutPark = async (ctx: Context): Promise<boolean> => {
+      const wakeAt = parkedUntil(ctx);
+      if (wakeAt === undefined || !record) {
+        return false;
+      }
+      // Messages still queued wait in storage, not in this process: the woken
+      // turn gets them back, and the runner is left with nothing to start.
+      for (const queued of session.runner.queue.drainAll()) {
+        await record.keepQueued(queued);
+      }
+      const until = Number.isFinite(wakeAt) ? wakeAt : undefined;
+      await record.park(ctx, until);
+      await this.#connections.release(ctx.id);
+      this.parkWatchers?.watch(threadId, {
+        executionId: ctx.id,
+        until,
+        options: session.turnOptions ?? {},
+      });
+      // Before the turn answers as parked: whoever wakes it has to know when.
+      await this.announceWakeTime();
+      return true;
+    };
+
     const runTurn = async (ctx: Context, signal: AbortSignal): Promise<string> => {
       if (!this.agentGraph) {
         await this.#connections.release(ctx.id);
@@ -1238,23 +1281,7 @@ export class AgentHarness<
           }
           // A parked turn is not a failed one: its record stays, marked with when
           // to wake it, and the response says so.
-          const wakeAt = parkedUntil(ctx);
-          if (wakeAt !== undefined && record) {
-            // Messages still queued wait in storage, not in this process: the woken
-            // turn gets them back, and the runner is left with nothing to start.
-            for (const queued of session.runner.queue.drainAll()) {
-              await record.keepQueued(queued);
-            }
-            const until = Number.isFinite(wakeAt) ? wakeAt : undefined;
-            await record.park(ctx, until);
-            await this.#connections.release(ctx.id);
-            this.parkWatchers?.watch(threadId, {
-              executionId: ctx.id,
-              until,
-              options: session.turnOptions ?? {},
-            });
-            // Before the turn answers as parked: whoever wakes it has to know when.
-            await this.announceWakeTime();
+          if (await closeOutPark(ctx)) {
             return PARKED;
           }
           // The turn ended here, in a live process. Say so, or a routine wake would
@@ -1267,7 +1294,10 @@ export class AgentHarness<
             await this.announceWakeTimeQuietly();
             throw error;
           }
-          if (record && !isLeaseLost(error) && ctx.abortReason !== INTERRUPT_REASON) {
+          // A harness that was replaced says nothing about the turn: it is the new
+          // holder's now, and marking it stopped would keep a wake from resuming it.
+          const replaced = isLeaseLost(error) || session.lease?.lost === true;
+          if (record && !replaced && ctx.abortReason !== INTERRUPT_REASON) {
             await record.stop(
               ctx,
               error instanceof Error ? error.message : String(error),
@@ -1278,7 +1308,9 @@ export class AgentHarness<
           throw error;
         },
       );
-      if (result === PARKED) {
+      // A flow that caught the wait's cancellation and returned is parked all the
+      // same: the wait it was in has not ended, and the woken turn goes back to it.
+      if (result === PARKED || (await closeOutPark(ctx))) {
         return '';
       }
       await keepHistory(ctx, result);
@@ -1321,6 +1353,12 @@ export class AgentHarness<
       : await this.sessionStore.threads();
     const woken: string[] = [];
     for (const threadId of threadIds) {
+      // A turn asked for by name may be closing out its park this instant: its
+      // runner is busy, though nothing is running. Wait for it rather than skip.
+      const closing = scope?.threadId ? this.sessions.get(threadId)?.runner : undefined;
+      if (closing && closing.context === undefined) {
+        await closing.whenIdle();
+      }
       const turn = (await this.sessionStore.load(threadId))?.turn;
       // A stuck turn waits for the host to settle it, however the wake was asked for.
       if (!turn || turn.stuck) {
@@ -1349,16 +1387,18 @@ export class AgentHarness<
         continue;
       }
       // Re-deliver the turn's own messages: the same ids resume it, and a resumed
-      // turn reads its input from its checkpoint, not from these.
-      for (const id of turn.messageIds) {
-        session.runner.enqueue({
+      // turn reads its input from its checkpoint, not from these. They go back as
+      // one arrival: handed over one at a time, the first would start a turn of
+      // its own and that turn would not be this one.
+      session.runner.queue.enqueueAll(
+        turn.messageIds.map((id) => ({
           id,
           input: [],
           deliveryMode: 'next-turn',
           options: scope?.options ?? {},
           enqueuedAt: Date.now(),
-        });
-      }
+        })),
+      );
       woken.push(threadId);
     }
     return woken;
@@ -1447,11 +1487,25 @@ export class AgentHarness<
       return;
     }
     const threadId = scope?.threadId ?? DEFAULT_THREAD_ID;
-    if (this.sessions.get(threadId)?.runner.context === undefined) {
+    const runner = this.sessions.get(threadId)?.runner;
+    if (runner?.context === undefined) {
       await this.wake({
         threadId,
       });
+      return;
     }
+    // The turn is running here and was told. But it may have been parking as the
+    // answer landed, too late to hear it: once it has come to rest, look again.
+    void runner
+      .whenIdle()
+      .then(async () => {
+        if ((await this.sessionStore?.load(threadId))?.turn?.parked) {
+          await this.wake({
+            threadId,
+          });
+        }
+      })
+      .catch(() => undefined);
   }
 
   //#region Versions and the trail
@@ -1641,6 +1695,46 @@ export class AgentHarness<
     );
   }
 
+  /**
+   * Messages that reached the runner while the thread's turn is parked or stuck
+   * (one that landed as the turn was closing out, say). Starting a turn with them
+   * would throw the waiting one away, so they are kept in storage for after it. A
+   * steer wakes a parked turn, as one delivered a moment later would. An
+   * `interrupt` is not set aside: replacing the turn is what it asks for.
+   * Resolves true when the messages were set aside.
+   */
+  private async setAside(
+    session: Session,
+    record: ThreadRecord,
+    messages: ReadonlyArray<QueuedMessage>,
+  ): Promise<boolean> {
+    const turn = await record.turn();
+    if (!turn || (!turn.parked && !turn.stuck)) {
+      return false;
+    }
+    if (messages.some((message) => message.deliveryMode === 'interrupt')) {
+      return false;
+    }
+    if (messages.every((message) => turn.messageIds.includes(message.id))) {
+      return false;
+    }
+    for (const message of messages) {
+      if (!turn.messageIds.includes(message.id)) {
+        await record.keepQueued(message);
+      }
+    }
+    if (turn.parked && messages.some(isSteer)) {
+      const { threadId } = session.runner;
+      void session.runner.whenIdle().then(() =>
+        this.wake({
+          threadId,
+          options: messages[0]?.options,
+        }),
+      );
+    }
+    return true;
+  }
+
   /** Resume a parked turn when one of its held calls already has an answer. */
   private async wakeIfAnswered(threadId: string, executionId: string): Promise<void> {
     const records = await heldCallsOf(this).list(executionId);
@@ -1648,7 +1742,7 @@ export class AgentHarness<
       return;
     }
     // The runner is still closing the parked turn out; let it go idle first.
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await this.sessions.get(threadId)?.runner.whenIdle();
     await this.wake({
       threadId,
     });
@@ -2639,6 +2733,10 @@ export class AgentHarness<
     await clearCheckpoint(this, executionId);
     // Calls the execution held for a person have nobody left to answer to.
     await heldCallsOf(this).clear(executionId);
+    // Nor is anything left to pick up what its steps were waiting on.
+    if (this.config.storage) {
+      await clearPendingEntries(this.config.storage, executionId);
+    }
   }
 
   //#endregion

@@ -205,7 +205,16 @@ A thread has one turn in flight. A message that arrives while that turn is parke
 - A steer (`between-rounds`, `next-item`) is kept and wakes the turn. A turn stuck on held tool calls offers it to the context layers at the `held` steer point (`08-runtime` § Steers): applied, the held calls are skipped and the round goes on with the message.
 - `interrupt` replaces the turn, as it does a running one. Its checkpoint, ledger and held calls are cleared.
 
-Messages still queued in the process when a turn parks are moved to storage the same way.
+Messages still queued in the process when a turn parks are moved to storage the same way. So is a message that reaches the runner while the turn is still closing out its park, and one that arrives for a thread whose turn is stuck (§ Versions): neither starts a turn.
+
+Details that keep a parked turn whole:
+
+- **Its messages come back together.** `wake()` hands the turn all its message ids as one arrival. A re-delivery of some of a turn's messages resumes that turn; it does not start another.
+- **An answer that lands as the turn parks is not lost.** A decision that arrives while the turn is still coming to rest wakes it once it has.
+- **A flow cannot catch its way out of a park.** Parking cancels the wait with `cancelled`. A flow that catches that and returns is parked all the same: its return value is discarded, and the woken turn goes back to the wait. A wait that really runs out of time fails with a timeout, which a flow may catch.
+- **A filter is work.** While a `wait`'s `filter` runs on an event, the turn does not park.
+- **`harness.abort({ threadId })` drops a parked turn.** Its checkpoint, ledger, held calls and pending entries are cleared, on whichever harness is asked.
+- **A harness that was replaced says nothing about the turn.** It does not mark it stopped; the turn is the new holder's.
 
 ## Versions
 

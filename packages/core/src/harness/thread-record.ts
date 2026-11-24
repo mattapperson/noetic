@@ -102,12 +102,25 @@ export class ThreadRecord {
       if (!turn) {
         return undefined;
       }
-      if (sameIds(turn.messageIds, messageIds)) {
+      if (isSameDelivery(turn.messageIds, messageIds)) {
         return (await this.host.restore(turn.executionId, opts)) ?? undefined;
       }
       await this.write(withoutTurn);
       await this.host.clearCheckpoint(turn.executionId);
       return undefined;
+    });
+  }
+
+  /** Forget the turn in flight and what it recorded: the host aborted a parked turn. */
+  drop(): Promise<SessionRecord['turn']> {
+    return this.run(async () => {
+      const turn = (await this.load())?.turn;
+      if (!turn) {
+        return undefined;
+      }
+      await this.write(withoutTurn);
+      await this.host.clearCheckpoint(turn.executionId);
+      return turn;
     });
   }
 
@@ -490,8 +503,12 @@ function withoutTurn(record: SessionRecord): SessionRecord {
   return rest;
 }
 
-function sameIds(a: ReadonlyArray<string>, b: ReadonlyArray<string>): boolean {
-  return a.length === b.length && a.every((id, i) => id === b[i]);
+/**
+ * True when `delivered` is the turn's own messages coming round again. Some of them
+ * is enough: a queue redelivers one at a time, and a wake hands them back together.
+ */
+function isSameDelivery(turn: ReadonlyArray<string>, delivered: ReadonlyArray<string>): boolean {
+  return delivered.length > 0 && delivered.every((id) => turn.includes(id));
 }
 
 function addUsage(total: SessionUsage, spent: TurnUsage): SessionUsage {
