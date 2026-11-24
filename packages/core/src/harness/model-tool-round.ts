@@ -23,6 +23,7 @@ import { createToolResultItem, executeToolCall } from '../runtime/tool-call';
 import type { CallSpanCollector } from './call-span-collector';
 import type { PreparedModelRequest } from './model-request';
 import { findTool } from './model-request';
+import type { CallLedger } from './model-rounds';
 import type { SteerInbox } from './steer-inbox';
 
 //#region Types
@@ -71,6 +72,8 @@ export async function runToolRound(
     spans: CallSpanCollector;
     modelSpan: Span | null;
     steers: SteerInbox | undefined;
+    /** Where the round's calls are recorded as they finish. */
+    calls?: CallLedger;
   },
 ): Promise<boolean> {
   const functionCalls = params.roundItems.filter(isFunctionCall);
@@ -88,6 +91,7 @@ export async function runToolRound(
     spans: params.spans,
     modelSpan: params.modelSpan,
     steers: params.steers,
+    calls: params.calls,
   });
   return true;
 }
@@ -110,6 +114,7 @@ async function executeToolRound(
     spans: CallSpanCollector;
     modelSpan: Span | null;
     steers: SteerInbox | undefined;
+    calls?: CallLedger;
   },
 ): Promise<void> {
   const {
@@ -130,7 +135,8 @@ async function executeToolRound(
     conversationInput.push({
       type: 'function_call',
       callId: fc.callId,
-      id: fc.id ?? crypto.randomUUID(),
+      // Derived, so a resumed round sends the id it sent before.
+      id: fc.id ?? `fc_${fc.callId}`,
       name: fc.name,
       arguments: fc.arguments,
     });
@@ -162,6 +168,7 @@ async function executeToolRound(
       allItems,
       conversationInput,
       emitIfAllowed: params.emitIfAllowed,
+      calls: params.calls,
     });
     spans.recordToolSpan(modelSpan, fc.name, toolForCall?.needsApproval ?? false, approval);
   }
@@ -185,6 +192,7 @@ async function executeFunctionCall(
     allItems: Item[];
     conversationInput: ReturnType<typeof itemsToInput>;
     emitIfAllowed: (eventType: string, data: Record<string, unknown>) => void;
+    calls?: CallLedger;
   },
 ): Promise<ApprovalOutcome | undefined> {
   const { fc, request, allowedTools, allItems, conversationInput } = params;
@@ -213,15 +221,23 @@ async function executeFunctionCall(
     );
   }
   const toolForCall = findTool(allowedTools, fc.name);
-  const toolResult = await executeToolCall({
-    toolName: fc.name,
-    args: parsedArgs,
-    tools: allowedTools,
-    context: request.ctx,
-    harness: scope.harness,
-    layers: request.layers,
-    callId: fc.callId,
-  });
+  // An earlier attempt of this round may have finished this call: go on with what
+  // it produced instead of running the tool again.
+  const recorded = params.calls?.take(fc);
+  const toolResult =
+    recorded ??
+    (await executeToolCall({
+      toolName: fc.name,
+      args: parsedArgs,
+      tools: allowedTools,
+      context: request.ctx,
+      harness: scope.harness,
+      layers: request.layers,
+      callId: fc.callId,
+    }));
+  if (!recorded) {
+    await params.calls?.record(fc, toolResult);
+  }
   // Owner-scoped result validation: a tool's `toolResults` schemas apply
   // only to that tool's own result items. Harness-level `opts.itemSchemas`
   // stay global by design; sibling tools' schemas never reject this item.
@@ -247,6 +263,11 @@ async function executeFunctionCall(
     callId: fc.callId,
     error: toolResult.error === true,
     output: toolResult.output,
+    ...(recorded
+      ? {
+          replayed: true,
+        }
+      : {}),
   });
   return toolResult.approval;
 }

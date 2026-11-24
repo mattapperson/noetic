@@ -41,4 +41,12 @@ export interface ToolExecutionContext {
    * Absent when a step runs the tool directly (`invokeTool`).
    */
   readonly callId?: string;
+  /**
+   * A key that is the same every time this call is made: the turn's execution and
+   * `callId`. A call a resumed run makes again carries the key it carried the
+   * first time, so a tool with a lasting effect passes it to whatever it writes to
+   * and the write lands once (spec 23a § The side-effect boundary). Absent when
+   * `callId` is.
+   */
+  readonly idempotencyKey?: string;
 }

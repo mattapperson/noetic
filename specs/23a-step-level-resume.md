@@ -139,13 +139,23 @@ A resume that finds a cut round goes on from its items:
 - With an assistant message and no function calls, the message is the answer and the loop ends. A stream cut between a message and the function calls after it ends the loop on that message.
 - With neither, such as a lone reasoning item, there is nothing to go on from: replay stops and the round is asked again.
 
-The items a resume goes on from are not made again, and they keep their ids. A tool that ran before the host died, but whose round had not recorded, runs again (§ The side-effect boundary). When a round records, the record of the round after it is dropped: it can only be left from an earlier attempt of the same step, such as a steering retry, and replay stops at the first missing round.
+The items a resume goes on from are not made again, and they keep their ids. A tool call that finished before the host died is not run again either (§ Tool calls in a round); the one that was running is (§ The side-effect boundary). When a round records, the record of the round after it is dropped: it can only be left from an earlier attempt of the same step, such as a steering retry, and replay stops at the first missing round.
 
 Each record that lands emits `{name}:model_round_recorded` with `{ round, itemIds, done }` (`08-runtime` § Framework Events): `itemIds` are the ids of the items the record holds, and `done` is false for a cut round's record. A resume will not make an item listed in a landed record again, unless that record is later dropped as above. `model_call_completed` and `model_call_steered` fire before the round records, so they are not that signal.
 
 A round the loop rejects and asks again (`02-step-variants` § Limits and recovery) is not recorded on its own, yet the provider billed it. Its usage and cost ride in the record of the next round the loop goes on from, so a resume that replays that record still counts them. A step that throws charges its context with every round it paid for, recorded or not, so a failed run reports its whole bill. A retry in place replays the recorded rounds on that same context, so the harness remembers, in memory, which recorded rounds a failure charged, and their replay counts nothing. A new harness resuming from storage starts from the restored context, which never saw that charge, so its replay counts them as usual.
 
 An abort that lands mid-call is not a round: the step surfaces cancellation, and the round is not recorded. Items it finished before the abort keep their cut record, so a later resume goes on from them.
+
+## Tool calls in a round
+
+A round can ask for several tool calls, and the round records only once all of them are done. So each call is recorded as it finishes, under `<step path>/round#<n>/call:<callId>`, with kind `callModel:call`, a hash of the call's name and arguments, and the result the round went on with (the output, the structured result, and whether it was an error or was approved).
+
+A resumed round walks its calls again in order. A call with a record goes on with the recorded result and its tool does not run; `tool_call_completed` carries `replayed: true`. A call whose name or arguments differ from the record is not the same call and runs. The round's own record, when it lands, prunes the call records beneath it.
+
+Every model tool call also gets an **idempotency key**, `<execution>:tool:<callId>`, as `ToolExecutionContext.idempotencyKey`. It is the key connection tools already send (`35-connections` § Durability). The call id comes from the model's item, which a resumed round keeps, so a call made again carries the key it carried the first time.
+
+Together these bound what a crash can repeat to the one call that was running, and give that call the means to land once: a tool with a lasting effect passes the key to whatever it writes to.
 
 ## Storage is the only record
 
@@ -181,7 +191,7 @@ Resuming a turn therefore requires the host to pass stable `messageId`s to `exec
 
 Replaying an output replays a step's **value**, not its **effect**. A `runCode` step that wrote a file, or an `invokeTool` step that opened a PR, returns its recorded output on replay while the effect is not redone — correct only if the effect was durable when it happened.
 
-Within a model loop, a recorded round's tools do not run again. A tool interrupted mid-round, before its round recorded, runs again on resume. Core has no durable pre-dispatch record of a tool call and no way to know whether a tool is idempotent, so it does not claim exactly-once tool execution: fence effects whose duplication matters at the tool or host boundary.
+Within a model loop, a recorded round's tools do not run again, and neither does a call that finished in a round that was cut off (§ Tool calls in a round). The one call that was running when the host died runs again on resume, with the idempotency key it had before. Core cannot know whether that call's effect landed, so it does not claim exactly-once tool execution: a tool whose duplication matters passes `idempotencyKey` to what it writes to.
 
 ## Interaction with context layers
 
@@ -264,5 +274,5 @@ in § The side-effect boundary.
 ## Future Considerations
 
 - **Mid-item resume.** A resume goes on from the last item the stream finished; an item cut off part way is made again. Providers that expose resumable streams would let a round resume where its stream stopped.
-- **Pre-dispatch tool records.** Recording a tool call before it runs would turn a tool interrupted mid-round into a loud "unknown outcome" instead of a silent re-run.
+- **Unknown outcomes.** Recording a tool call before it runs would turn the one call interrupted mid-round into a loud "unknown outcome" for a tool that cannot take an idempotency key, instead of a re-run.
 - **Re-delivered finished turns.** Remembering recently finished message ids per thread would let a session answer a re-delivery of a finished turn with its recorded response instead of running it again.

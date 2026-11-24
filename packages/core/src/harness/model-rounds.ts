@@ -30,11 +30,46 @@ import { frameworkCast, isAssistantMessage } from '@noetic-tools/types';
 import { z } from 'zod';
 import { isFunctionCall } from '../interpreter/typeguards';
 import type { StepLedger } from '../runtime/durable/step-ledger';
+import { hashStepInput } from '../runtime/durable/step-ledger';
+import type { ToolCallResult } from '../runtime/tool-call';
 import { ContextImpl } from './deps/runtime';
 
 //#region Types
 
 const ROUND_KIND = 'callModel:round';
+const CALL_KIND = 'callModel:call';
+
+/** What a recorded tool call left: the result the round went on with. */
+const CallOutputSchema = z.object({
+  output: z.string(),
+  result: z.unknown().optional(),
+  error: z.boolean().optional(),
+  approval: z
+    .enum([
+      'approved',
+      'denied',
+      'none_configured',
+    ])
+    .optional(),
+});
+
+/** A function call as the call ledger identifies it. */
+interface CalledFunction {
+  callId: string;
+  name: string;
+  arguments: string;
+}
+
+/**
+ * The tool calls of one round, recorded one by one as they finish
+ * (spec 23a § Tool calls in a round).
+ */
+export interface CallLedger {
+  /** The recorded result of this call, when an earlier attempt of the round finished it. */
+  take(call: CalledFunction): ToolCallResult | undefined;
+  /** Record what the call produced. */
+  record(call: CalledFunction, result: ToolCallResult): Promise<void>;
+}
 
 /** What one finished round added to the loop. */
 export interface RoundRecord {
@@ -189,6 +224,43 @@ export class RoundLedger {
     chargedRounds.get(ledger)?.delete(this.key(round));
     await ledger.drop(this.key(round + 1));
     return true;
+  }
+
+  /**
+   * The call ledger of round `round`. Each call is recorded beneath the round's key,
+   * so the round's own record prunes them once it lands.
+   */
+  calls(round: number): CallLedger {
+    const ledger = this.ctx.ledger;
+    const stepId = this.dispatch.stepId;
+    const keyOf = (call: CalledFunction): string => `${this.key(round)}/call:${call.callId}`;
+    // A call is the same call only with the same name and arguments.
+    const hashOf = (call: CalledFunction): string | undefined =>
+      hashStepInput({
+        name: call.name,
+        arguments: call.arguments,
+      });
+    return {
+      take: (call) => {
+        const entry = ledger?.take(keyOf(call), {
+          id: stepId,
+          kind: CALL_KIND,
+          inputHash: hashOf(call),
+        });
+        const parsed = entry ? CallOutputSchema.safeParse(entry.output) : undefined;
+        return parsed?.success ? parsed.data : undefined;
+      },
+      record: async (call, result) => {
+        await ledger?.record({
+          path: keyOf(call),
+          stepId,
+          kind: CALL_KIND,
+          inputHash: hashOf(call),
+          output: frameworkCast<unknown>(result),
+          completedAt: new Date().toISOString(),
+        });
+      },
+    };
   }
 
   /** Drop the record of round `round`: the loop threw that round away. */

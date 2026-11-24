@@ -2140,6 +2140,10 @@ interface StorageAdapter {
 
 On storage with `swap` (`createFileStorage`, `createSqliteStorage`, `createInMemoryStorage({ swap: true })`), each `harness.execute()` turn takes its thread's lease: one harness writes a turn, a replaced harness stops with `lease_lost`, and a failed ledger write stops the turn with `ledger_write_failed`.
 
+### Tool calls and `idempotencyKey`
+
+Each tool call in a model round is recorded as it finishes, so a resumed round runs only the call that was cut off. `ToolExecutionContext.idempotencyKey` (`<execution>:tool:<callId>`) is the same on every attempt of a call: a tool with a lasting effect passes it to what it writes to.
+
 ### Parked turns
 
 ```typescript

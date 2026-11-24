@@ -104,10 +104,7 @@ export function stepIdempotencyKey(executionId: string, ledgerKey: string): stri
   return `${executionId}:${ledgerKey}`;
 }
 
-/** The idempotency key of a model tool call: the turn's execution and the tool call id. */
-export function toolIdempotencyKey(executionId: string, toolCallId: string): string {
-  return `${executionId}:tool:${toolCallId}`;
-}
+export { toolIdempotencyKey } from '../runtime/tool-context';
 
 /** Whether `current` is the same thing `recorded` described (an epoch change alone keeps it). */
 export function sameInstance(recorded: ConnectionIdentity, current: ConnectionIdentity): boolean {

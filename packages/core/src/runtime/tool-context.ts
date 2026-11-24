@@ -16,6 +16,11 @@ function buildToolContext(harness: AgentHarnessContract, ctx: Context): ToolCont
   };
 }
 
+/** The idempotency key of a model tool call: the turn's execution and the tool call id. */
+export function toolIdempotencyKey(executionId: string, toolCallId: string): string {
+  return `${executionId}:tool:${toolCallId}`;
+}
+
 export function buildToolExecutionContext(
   ctx: Context,
   harness: AgentHarnessContract,
@@ -34,6 +39,7 @@ export function buildToolExecutionContext(
       ? {}
       : {
           callId,
+          idempotencyKey: toolIdempotencyKey(ctx.id, callId),
         }),
   };
 }

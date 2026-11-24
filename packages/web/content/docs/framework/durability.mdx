@@ -265,7 +265,20 @@ Call it in two situations:
 
 Replaying an output replays a step's **value**, not its **effect**. A `runCode` step that wrote a file, or an `invokeTool` step that opened a PR, returns its recorded output on replay while the effect is not redone — correct only if that effect was durable when it happened.
 
-Core's ledger therefore covers control flow, `callModel` steps, and their rounds — a recorded round's tools never run again. It does **not** claim exactly-once execution for a tool interrupted mid-round: it has no durable pre-dispatch record of a tool call and no way to know whether a given tool is idempotent. (Paid model calls do get one — see [Paid Calls](#paid-calls).) Fence effects whose duplication matters at the tool/host boundary.
+Core's ledger covers control flow, `callModel` steps, their rounds, and each tool call within a round. A tool call that finished is never run again, even when its round was cut off before it recorded.
+
+That leaves one call: the one running when the host died. It runs again on resume, and core cannot know whether its effect landed the first time. Every model tool call gets an `idempotencyKey` for this, the same on every attempt:
+
+```ts validate=none
+const charge = tool({
+  name: 'charge',
+  input: z.object({ amount: z.number() }),
+  execute: async ({ amount }, toolCtx) =>
+    payments.charge({ amount, idempotencyKey: toolCtx.idempotencyKey }),
+});
+```
+
+A tool with a lasting effect passes the key to whatever it writes to, and the write lands once. [Connection](/docs/framework/connections) tools send it for you.
 
 ### Sessions
 

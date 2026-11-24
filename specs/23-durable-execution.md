@@ -570,7 +570,7 @@ Both root defaults respect `NOETIC_HOME` (if set, the roots become `$NOETIC_HOME
 
 - **LLM mid-stream.** A round cut off mid-stream is asked again on resume; the rounds before it replay. Its first bill is settled from its dispatch record, not lost.
 - **Prices for every cut-off call.** A call cut off before any response byte has no generation id, so it can only be bounded, never priced: it stays held until written off.
-- **Tools interrupted mid-round.** A tool running when the host died runs again on resume. Tools in recorded rounds do not.
+- **The tool interrupted mid-round.** The one tool call running when the host died runs again on resume, with the same idempotency key. Calls that had finished do not, in a recorded round or a cut one.
 - **Non-idempotent `runCode` bodies.** A crash between a step's side effect and its ledger append re-runs the step body, whose side effects already landed. The framework cannot make arbitrary user code idempotent; use stable step ids and idempotent bodies where durability matters.
 - **Third-party state outside the framework.** If a `runCode` mutates an external database, the database's state is not part of the snapshot. Callers that need cross-system consistency must integrate with their database's own transaction / idempotency primitives.
 - **Adapter-specific identity drift.** The local adapter's `reattach` verifies `pidStarttime` against `ps`, which is a best-effort check; a truly adversarial pid recycle within `<1s` can evade detection. Out-of-the-box this is safe enough for interactive workloads; production-critical usage should run the child under a supervisor that owns pid identity.

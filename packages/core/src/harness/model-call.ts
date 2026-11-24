@@ -406,6 +406,7 @@ export class AgentHarnessModelCaller {
             spans,
             modelSpan: null,
             steers,
+            calls: roundLedger?.calls(round),
           });
           await recordRound(spend.keep());
         }
@@ -647,6 +648,7 @@ export class AgentHarnessModelCaller {
           spans,
           modelSpan,
           steers,
+          calls: roundLedger?.calls(round),
         });
         await recordRound(bill);
         round += 1;
@@ -700,6 +702,7 @@ export class AgentHarnessModelCaller {
         spans,
         modelSpan,
         steers,
+        calls: roundLedger?.calls(round),
       });
       // A steer staged while the final answer streamed gets its own round, so
       // the model answers it inside this call rather than in the next turn.
