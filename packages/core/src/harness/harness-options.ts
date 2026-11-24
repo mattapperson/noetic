@@ -89,6 +89,13 @@ export interface StorageEnvironmentConfig {
   park?: boolean | ParkConfig;
 }
 
+/**
+ * @public
+ * Hears the harness's next wake time when it changes (`harness.onWakeTimeChange`):
+ * epoch ms, or `undefined` when there is nothing to wake for.
+ */
+export type WakeTimeListener = (at: number | undefined) => void | Promise<void>;
+
 /** @public Settings for parking. */
 export interface ParkConfig {
   /**

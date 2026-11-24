@@ -872,7 +872,7 @@ type DecisionItem =
 harness.execute(decision, { threadId });
 ```
 
-There is no separate method to answer with: `execute()` is the one way in. It acts on the decisions in its input first and delivers what is left as a message; input that is only decisions starts no turn. A decision is never written to the conversation. A `function_call_output` item whose `callId` is a held call's is taken as that call's result too, with its string `output`.
+There is no separate method to answer with: `execute()` is the one way in. It acts on the decisions in its input first and delivers what is left as a message; input that is only decisions starts no turn. A decision is never written to the conversation. A held call's result is given with the decision's `output` form and no other: a `function_call_output` item passed to `execute()` is an ordinary conversation item, and settles nothing.
 
 - `allow` runs the tool. `deny` and `guide` give the refusal an approver's would. An `output` becomes the call's result; the tool body does not run again.
 - A call held as `outcome` takes either kind: an `output` says it landed, `allow` runs it again with the same idempotency key, and `deny` or `guide` refuses it.

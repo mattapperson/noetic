@@ -235,8 +235,9 @@ export const DECISION_ITEM_TYPE = 'noetic:decision';
  *   (`harness.listStuckRuns()`): `continue`, `restart` or `abandon`.
  *
  * Pass the `argsHash` a held call was shown with to make sure the answer is for
- * that exact call. A `function_call_output` item with a held call's id is taken
- * as its result too.
+ * that exact call. A held call's result is given this way and no other: a
+ * `function_call_output` item passed to `execute()` is an ordinary conversation
+ * item, and settles nothing.
  */
 export type DecisionItem =
   | {

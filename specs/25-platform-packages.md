@@ -266,8 +266,9 @@ A harness in a Worker is built with `park: { autoWake: false }`: its own timers 
 
 **Alarm.** `alarmWake({ harness, alarms })`, in a Durable Object, with `alarms` the object's `ctx.storage`.
 
-- `schedule()` starts the harness and sets the object's alarm to `harness.getNextWakeTime()`, or deletes it when there is none. The host calls it after a turn it ran has answered, and once when the object is first set up, so the first `cron()` tick has an alarm.
-- `alarm()`, called from the object's `alarm()` handler, calls `harness.start()`, `harness.wake()` and `harness.waitForIdle()`, then `schedule()`. Starting the harness is what makes a `cron()` source deliver the ticks that fell due while nothing ran. It does not throw for a turn that failed, since a throw makes the runtime retry the alarm.
+- It listens with `harness.onWakeTimeChange()` and keeps the object's alarm at the time it hears, deleting the alarm when there is none. The host sets no alarm itself: the first is set when the harness starts, and a turn that parks does not answer until its alarm is set.
+- `alarm()`, called from the object's `alarm()` handler, calls `harness.start()`, `harness.wake()` and `harness.waitForIdle()`, then sets the alarm to `harness.getNextWakeTime()`, since the alarm that fired is spent even when the time did not change. Starting the harness is what makes a `cron()` source deliver the ticks that fell due while nothing ran. It does not throw for a turn that failed, since a throw makes the runtime retry the alarm.
+- `stop()` stops the listening.
 
 A `cron()` trigger therefore runs on the alarm preset as it does on Node, with the schedule written once. The package has no cron helper of its own.
 

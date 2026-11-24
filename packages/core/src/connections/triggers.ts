@@ -54,6 +54,8 @@ export interface TriggerRunnerOptions {
   readonly redeliverDelayMs?: (attempt: number) => number;
   /** The clock scheduled events are counted by. Default `Date.now`. */
   readonly now?: () => number;
+  /** A trigger on a scheduled connection moved on, so its next event is a new one. */
+  readonly onSchedule?: () => Promise<void>;
 }
 
 /** A trigger's expressions, compiled once. A field written as a function has none. */
@@ -602,6 +604,9 @@ export class TriggerRunner {
       return;
     }
     await this.options.storage.set(`${prefix(trigger.id)}/cursor`, cursor);
+    if (this.options.runtime.current(trigger.connection)?.schedule) {
+      await this.options.onSchedule?.();
+    }
   }
 
   private deliver(trigger: ConnectionTrigger, entry: InboxEntry, inboxKey: string): void {

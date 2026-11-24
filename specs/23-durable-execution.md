@@ -177,6 +177,12 @@ A woken turn replays its ledger, so no finished model call is made again, and it
 
 `harness.getNextWakeTime()` resolves the earliest time the harness has something to do: the earliest `until` among parked turns, or the next event of a scheduled source a trigger listens to, such as a `cron()` tick (`35-connections` § Triggers). It resolves `undefined` when there is neither. A host with no process of its own between events schedules its next `start()` and `wake()` from it, and awaits `harness.waitForIdle()` before it lets its process go.
 
+`harness.onWakeTimeChange(listener)` calls `listener` with that time whenever it changes, and returns a function that stops it. The first call comes when the harness starts. After that the harness checks when a turn parks or ends, when a trigger is added or removed, and when a trigger reads an event of a scheduled source; it calls the listener only when the time differs from the one last heard.
+
+- A parking turn waits for the listener before it answers. If the listener throws, the turn's response rejects with that error: a turn nothing will wake does not look safely parked. The turn's record stays parked, so a later `wake()` still resumes it.
+- Anywhere else, a listener that throws is logged and the harness goes on.
+- The listener is told; it does not take over. Auto-wake, below, is unchanged by it.
+
 **The clock.** `AgentHarness({ now })` is the clock wait deadlines, leases and wake times are read from. It defaults to `Date.now`.
 
 **Auto-wake.** A harness wakes the turns it parked, unless `park.autoWake` is `false`. For each parked turn it keeps a watcher:
@@ -189,7 +195,7 @@ Either one calls `wake({ threadId })` with the options the turn ran with. A watc
 
 A watcher lives in the process. When the process ends the parked turns stay in storage, and the next process rebuilds a watcher for each one its first `wake()` finds. So a long-lived host calls `wake()` once, at boot.
 
-A host with no process between requests sets `autoWake: false` and wakes turns itself: `wake()` from an alarm scheduled with `getNextWakeTime()`, and `wake({ threadId })` when an event arrives.
+A host with no process between requests sets `autoWake: false` and wakes turns itself: `wake()` from an alarm it sets in `onWakeTimeChange()`, and `wake({ threadId })` when an event arrives.
 
 ### A message for a parked thread
 

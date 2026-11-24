@@ -1,6 +1,7 @@
 /**
  * The alarm preset (spec 25 § Cloudflare Workers): a Durable Object's alarm wakes
- * the harness's parked turns, and the next alarm is set from `harness.getNextWakeTime()`.
+ * the harness's parked turns, and the harness sets the next alarm itself, through
+ * `harness.onWakeTimeChange()`.
  *
  * A Worker has no process between requests, so the harness's own timers
  * (`park.autoWake`) cannot be relied on. Build the harness with
@@ -20,7 +21,7 @@ export interface AlarmStorageLike {
 /** @public The harness methods the alarm preset calls. An `AgentHarness` fits. */
 export type WakeableHarness = Pick<
   AgentHarness,
-  'start' | 'wake' | 'getNextWakeTime' | 'waitForIdle'
+  'start' | 'wake' | 'getNextWakeTime' | 'waitForIdle' | 'onWakeTimeChange'
 >;
 
 /** @public Options for `alarmWake`. */
@@ -41,13 +42,8 @@ export interface AlarmWake {
    * ids of the parked threads it woke.
    */
   alarm(): Promise<string[]>;
-  /**
-   * Set the alarm to the harness's next wake time (a parked turn's deadline or a
-   * `cron()` tick), or clear it when there is none. Call after a turn you ran
-   * yourself has answered, since it may have parked, and once when the object is
-   * first set up, so the first tick has an alarm.
-   */
-  schedule(): Promise<void>;
+  /** Stop setting the alarm from the harness. */
+  stop(): void;
 }
 
 //#endregion
@@ -56,7 +52,11 @@ export interface AlarmWake {
 
 /**
  * @public
- * Wake parked turns from a Durable Object alarm.
+ * Wake parked turns from a Durable Object alarm. From here on the harness keeps
+ * the object's alarm at its next wake time (a parked turn's deadline or a `cron()`
+ * tick), and clears it when there is none: the first time when the harness starts,
+ * then whenever the time changes. A turn that parks does not answer until its
+ * alarm is set.
  *
  * @example
  * ```ts
@@ -70,9 +70,7 @@ export interface AlarmWake {
  *
  *   async message(text: string, messageId: string) {
  *     await this.#harness.execute(text, { threadId: 'main', messageId });
- *     const response = await this.#harness.getAgentResponse({ threadId: 'main' });
- *     await this.#wake.schedule();
- *     return response;
+ *     return this.#harness.getAgentResponse({ threadId: 'main' });
  *   }
  * }
  * ```
@@ -80,10 +78,7 @@ export interface AlarmWake {
 export function alarmWake(options: AlarmWakeOptions): AlarmWake {
   const { harness, alarms } = options;
 
-  async function schedule(): Promise<void> {
-    // Started, so a scheduled source's next event is known.
-    await harness.start();
-    const at = await harness.getNextWakeTime();
+  async function set(at: number | undefined): Promise<void> {
     if (at === undefined) {
       await alarms.deleteAlarm();
       return;
@@ -91,15 +86,19 @@ export function alarmWake(options: AlarmWakeOptions): AlarmWake {
     await alarms.setAlarm(at);
   }
 
+  const stop = harness.onWakeTimeChange(set);
+
   return {
-    schedule,
+    stop,
     async alarm(): Promise<string[]> {
       await harness.start();
       const woken = await harness.wake();
       // The handler is what keeps the object alive: stay until every turn has
       // finished or parked again.
       await harness.waitForIdle();
-      await schedule();
+      // The alarm that fired is spent. Set it again even when the time did not
+      // change, as when it fired early and nothing was due.
+      await set(await harness.getNextWakeTime());
       return woken;
     },
   };

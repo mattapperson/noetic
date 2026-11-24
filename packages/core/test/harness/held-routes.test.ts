@@ -237,12 +237,10 @@ describe('a question a long task asks', () => {
       message: 'Trust this developer?',
     });
 
-    // The answer comes in the way any tool result does: an item passed to execute().
+    // The person's answer is a decision item.
     await harness.execute(
       {
-        id: 'answer-1',
-        type: 'function_call_output',
-        status: 'completed',
+        type: 'noetic:decision',
         callId: held.callId,
         output: 'yes',
       },

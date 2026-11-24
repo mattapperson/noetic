@@ -172,7 +172,12 @@ import type {
   WriteOffSpendOptions,
 } from './deps/types';
 import { SteeringAction } from './deps/types';
-import type { AgentHarnessOpts, ParkConfig, TurnLeaseConfig } from './harness-options';
+import type {
+  AgentHarnessOpts,
+  ParkConfig,
+  TurnLeaseConfig,
+  WakeTimeListener,
+} from './harness-options';
 import { resolveCheckpointStore, resolveEnvironmentAdapters } from './harness-options';
 import { createHarnessSpan, recordChannelWarning, resolveTraceExporter } from './harness-tracing';
 import { LlmGateway } from './llm-client';
@@ -394,6 +399,12 @@ export class AgentHarness<
   private readonly parkGraceMs?: number;
   /** Set when this harness wakes the turns it parked (`park.autoWake`). */
   private readonly parkWatchers?: ParkWatchers;
+  /** Who hears when the next wake time changes (`onWakeTimeChange`). */
+  private readonly wakeTimeListeners = new Set<WakeTimeListener>();
+  /** The wake time listeners last heard; `null` until they have heard one. */
+  private announcedWakeTime: number | undefined | null = null;
+  /** The announcement in flight, so two never run out of order. */
+  private announcing: Promise<void> = Promise.resolve();
   /** Checkpoint capture in flight per execution id — see `saveCheckpoint`. */
   private readonly pendingCheckpoints = new Map<string, Promise<boolean>>();
   private readonly defaultDeliveryMode: DeliveryMode;
@@ -580,6 +591,7 @@ export class AgentHarness<
       harness: this,
       connections: opts.connections,
       triggers: opts.triggers,
+      onSchedule: () => this.announceWakeTimeQuietly(),
       storage: this.config.storage ?? createInMemoryStorage(),
       artifacts: this.artifacts,
       secrets: environment?.secrets,
@@ -602,6 +614,61 @@ export class AgentHarness<
    */
   async start(): Promise<void> {
     await this.#connections.start();
+    // Once started, a scheduled source's next event is known: say when it is.
+    if (this.announcedWakeTime === null) {
+      await this.announceWakeTime();
+    }
+  }
+
+  /**
+   * Hear when `getNextWakeTime()` changes: a turn parks, resumes or ends, a
+   * trigger is added or removed, or a scheduled source's event is read. `listener`
+   * gets the new time, or `undefined` when there is nothing to wake for. The first
+   * call comes when the harness starts. A host with no process of its own between
+   * events sets its alarm from it.
+   *
+   * The harness waits for the listener before a parking turn answers, and a
+   * listener that throws there fails that turn's response: a turn nothing will
+   * wake must not look safely parked. Anywhere else a throw is logged.
+   *
+   * It does not replace the harness's own timer (`park.autoWake`).
+   *
+   * @returns a function that stops the listener hearing.
+   * @public
+   */
+  onWakeTimeChange(listener: WakeTimeListener): () => void {
+    this.wakeTimeListeners.add(listener);
+    return () => {
+      this.wakeTimeListeners.delete(listener);
+    };
+  }
+
+  /** Tell the listeners the next wake time, when it is not the one they last heard. */
+  private announceWakeTime(): Promise<void> {
+    if (this.wakeTimeListeners.size === 0) {
+      return Promise.resolve();
+    }
+    const run = this.announcing.then(async () => {
+      const at = await this.getNextWakeTime();
+      if (at === this.announcedWakeTime) {
+        return;
+      }
+      for (const listener of this.wakeTimeListeners) {
+        await listener(at);
+      }
+      this.announcedWakeTime = at;
+    });
+    this.announcing = run.catch(() => undefined);
+    return run;
+  }
+
+  /** `announceWakeTime`, where a listener's failure has no turn to land on. */
+  private async announceWakeTimeQuietly(): Promise<void> {
+    try {
+      await this.announceWakeTime();
+    } catch (error) {
+      console.warn('[noetic] onWakeTimeChange listener error:', error);
+    }
   }
 
   /**
@@ -668,8 +735,7 @@ export class AgentHarness<
    * Hand the thread a message, a person's decision, or both.
    *
    * A {@link DecisionItem} answers a tool call the thread's turn holds, or settles
-   * its stuck turn. A `function_call_output` item for a held call supplies that
-   * call's result. Neither is written to the conversation, and input that holds
+   * its stuck turn. It is not written to the conversation, and input that holds
    * nothing else starts no turn: the turn the decision is for goes on.
    *
    * @throws NoeticError `hold_refused` when a decision does not fit: the thread
@@ -701,31 +767,10 @@ export class AgentHarness<
       : [
           input,
         ];
-    const held = given.some((item) => !isDecisionItem(item) && item.type === 'function_call_output')
-      ? new Set(
-          (
-            await this.pending({
-              threadId,
-            })
-          ).map((call) => call.callId),
-        )
-      : new Set<string>();
     const rest: Item[] = [];
     for (const item of given) {
       if (isDecisionItem(item)) {
         await this.takeDecision(threadId, item);
-        continue;
-      }
-      if (item.type === 'function_call_output' && held.has(item.callId)) {
-        await this.resolveHeld(
-          {
-            threadId,
-          },
-          {
-            callId: item.callId,
-            output: item.output,
-          },
-        );
         continue;
       }
       rest.push(item);
@@ -1202,6 +1247,8 @@ export class AgentHarness<
               until,
               options: session.turnOptions ?? {},
             });
+            // Before the turn answers as parked: whoever wakes it has to know when.
+            await this.announceWakeTime();
             return PARKED;
           }
           // The turn ended here, in a live process. Say so, or a routine wake would
@@ -1211,6 +1258,7 @@ export class AgentHarness<
           const stuck = stuckOf(error);
           if (record && stuck) {
             await record.stick(ctx, stuck);
+            await this.announceWakeTimeQuietly();
             throw error;
           }
           if (record && !isLeaseLost(error) && ctx.abortReason !== INTERRUPT_REASON) {
@@ -1220,6 +1268,7 @@ export class AgentHarness<
               this.now(),
             );
           }
+          await this.announceWakeTimeQuietly();
           throw error;
         },
       );
@@ -1228,6 +1277,7 @@ export class AgentHarness<
       }
       await keepHistory(ctx, result);
       this.parkWatchers?.forget(threadId, ctx.id);
+      await this.announceWakeTimeQuietly();
       return result;
     };
 
@@ -1517,14 +1567,17 @@ export class AgentHarness<
   async addTrigger(trigger: ConnectionTrigger): Promise<void> {
     await this.start();
     await this.#connections.triggers.add(trigger);
+    await this.announceWakeTimeQuietly();
   }
 
   /**
    * Stop and forget a trigger. Resolves false when there is none with that id.
    * @public
    */
-  removeTrigger(id: string): Promise<boolean> {
-    return this.#connections.triggers.remove(id);
+  async removeTrigger(id: string): Promise<boolean> {
+    const removed = await this.#connections.triggers.remove(id);
+    await this.announceWakeTimeQuietly();
+    return removed;
   }
 
   /**

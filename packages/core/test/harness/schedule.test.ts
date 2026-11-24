@@ -184,3 +184,62 @@ describe('a cron trigger that was not running when its ticks fell due', () => {
     await harness.close();
   });
 });
+
+describe('harness.onWakeTimeChange()', () => {
+  it('hears the next tick when the harness starts, and each tick as it is read', async () => {
+    const storage = createInMemoryStorage();
+    // One tick is overdue, so starting reads it and the next wake time moves on.
+    const seen = minuteAgo(1);
+    await storage.set(CURSOR_KEY, new Date(seen).toISOString());
+    const harness = everyMinute(storage, []);
+    const heard: Array<number | undefined> = [];
+    harness.onWakeTimeChange((at) => {
+      heard.push(at);
+    });
+
+    await harness.start();
+    await harness.waitForIdle();
+
+    expect(heard.length).toBeGreaterThanOrEqual(1);
+    expect(heard.at(-1)).toBe(await harness.getNextWakeTime());
+    // Told of a change only: no time is heard twice running.
+    for (const [index, at] of heard.entries()) {
+      expect(at).not.toBe(heard[index - 1] ?? Number.NaN);
+    }
+    await harness.close();
+  });
+
+  it('hears undefined once the scheduled trigger is removed, and nothing after it is stopped', async () => {
+    const harness = everyMinute(createInMemoryStorage(), []);
+    const heard: Array<number | undefined> = [];
+    const stop = harness.onWakeTimeChange((at) => {
+      heard.push(at);
+    });
+    await harness.start();
+    expect(heard).toHaveLength(1);
+
+    expect(await harness.removeTrigger('every-minute')).toBe(true);
+    expect(heard.at(-1)).toBeUndefined();
+    expect(heard).toHaveLength(2);
+
+    stop();
+    await harness.addTrigger({
+      id: 'again',
+      connection: 'clock',
+      event: 'tick',
+      input: '"go"',
+    });
+    expect(heard).toHaveLength(2);
+    await harness.close();
+  });
+
+  it('a listener that throws outside a parking turn is logged, not thrown', async () => {
+    const harness = everyMinute(createInMemoryStorage(), []);
+    await harness.start();
+    harness.onWakeTimeChange(() => {
+      throw new Error('no alarm');
+    });
+    expect(await harness.removeTrigger('every-minute')).toBe(true);
+    await harness.close();
+  });
+});

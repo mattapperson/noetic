@@ -101,18 +101,49 @@ for (const [name, make] of Object.entries(storages)) {
       const w = world(make());
       const alarm = fakeAlarm();
       const first = worker(w);
-      const wake = alarmWake({
+      alarmWake({
         harness: first,
         alarms: alarm,
       });
-      await wake.schedule();
+      await first.start();
       expect(alarm.at).toBeUndefined();
 
+      // The host sets nothing: the turn's alarm is there by the time it answers.
       await first.execute(turn.input, turn);
       const parked = await first.getAgentResponse(thread);
       assert(parked.parked);
-      await wake.schedule();
       expect(alarm.at).toBe(1e6 + DAY);
+      await first.close();
+    });
+
+    it('a turn whose alarm could not be set does not answer as parked', async () => {
+      const w = world(make());
+      const first = worker(w);
+      alarmWake({
+        harness: first,
+        alarms: {
+          setAlarm: () => {
+            throw new Error('alarm refused');
+          },
+          deleteAlarm: () => undefined,
+        },
+      });
+      await first.execute(turn.input, turn);
+      await expect(first.getAgentResponse(thread)).rejects.toThrow('alarm refused');
+      await first.close();
+    });
+
+    it('stops setting the alarm once stopped', async () => {
+      const w = world(make());
+      const alarm = fakeAlarm();
+      const first = worker(w);
+      alarmWake({
+        harness: first,
+        alarms: alarm,
+      }).stop();
+      await first.execute(turn.input, turn);
+      assert((await first.getAgentResponse(thread)).parked);
+      expect(alarm.at).toBeUndefined();
       await first.close();
     });
 
@@ -120,12 +151,13 @@ for (const [name, make] of Object.entries(storages)) {
       const w = world(make());
       const alarm = fakeAlarm();
       const first = worker(w);
-      await first.execute(turn.input, turn);
-      assert((await first.getAgentResponse(thread)).parked);
-      await alarmWake({
+      alarmWake({
         harness: first,
         alarms: alarm,
-      }).schedule();
+      });
+      await first.execute(turn.input, turn);
+      assert((await first.getAgentResponse(thread)).parked);
+      expect(alarm.at).toBe(1e6 + DAY);
       await first.close();
       expect(w.m.calls).toBe(1);
 
@@ -448,10 +480,12 @@ describe('a cron() trigger on the alarm preset', () => {
     const storage = (storages.D1?.() ?? expect.unreachable())();
     const alarm = fakeAlarm();
     const harness = everyMinute(storage, []);
-    await alarmWake({
+    alarmWake({
       harness,
       alarms: alarm,
-    }).schedule();
+    });
+    // Starting the harness is all a new object does.
+    await harness.start();
     assert(alarm.at !== undefined);
     expect(alarm.at % MINUTE).toBe(0);
     expect(alarm.at).toBeGreaterThan(Date.now());

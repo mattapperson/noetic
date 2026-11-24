@@ -2164,7 +2164,7 @@ harness.pending(scope?: { threadId } | { executionId }): Promise<HeldCall[]>;
 // answer with a decision item passed to execute() on the call's thread:
 harness.execute({ type: 'noetic:decision', callId, argsHash?, action: 'allow' | 'deny' | 'guide', guidance? }, { threadId });
 harness.execute({ type: 'noetic:decision', callId, argsHash?, output }, { threadId });
-// a function_call_output item with a held call's id is taken as its result too
+// a function_call_output item does NOT answer a held call: use the { callId, output } decision
 // HeldCall: { callId, name, args, argsHash, reason: 'approval' | 'result', dueAt?, onDue?, request? }
 ```
 
@@ -2207,6 +2207,7 @@ Each tool call in a model round is recorded as it finishes, so a resumed round r
 // AgentHarness({ now?: () => number })
 harness.wake(scope?: { threadId?: string; options?: ExecuteOptions }): Promise<string[]>;
 harness.getNextWakeTime(): Promise<number | undefined>;   // earliest parked deadline or next cron() tick
+harness.onWakeTimeChange(listener: (at: number | undefined) => void | Promise<void>): () => void; // told when that time changes; a parking turn waits for it
 harness.waitForIdle(): Promise<void>;                     // due scheduled events are read; every turn finished or parked
 // defineSource({ events, schedule: { next(cursor, now), begin(now) } }) — a source that knows when its events are due
 // HarnessResponse.parked?: { wakeAt: number }   — event `{name}:turn_parked`

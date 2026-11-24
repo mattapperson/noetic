@@ -157,14 +157,14 @@ export class Agent extends DurableObject {
 
   async message(text: string, messageId: string) {
     await this.#harness.execute(text, { threadId: 'main', messageId });
-    const response = await this.#harness.getAgentResponse({ threadId: 'main' });
-    await this.#wake.schedule(); // the turn may have parked
-    return response;
+    return this.#harness.getAgentResponse({ threadId: 'main' });
   }
 }
 ```
 
-A [`cron()`](/docs/framework/connections) trigger runs on this preset unchanged. The alarm is set to the next tick as well as to parked deadlines, and `alarm()` delivers the ticks that fell due while nothing ran. Call `schedule()` once when the object is first set up, so the first tick has an alarm.
+You never set the alarm yourself. `alarmWake` listens to [`harness.onWakeTimeChange()`](/docs/framework/durability#parked-turns) and keeps the object's alarm at the harness's next wake time. A turn that parks does not answer until its alarm is set.
+
+A [`cron()`](/docs/framework/connections) trigger runs on this preset unchanged. The alarm is set to the next tick as well as to parked deadlines, and `alarm()` delivers the ticks that fell due while nothing ran. The first tick's alarm is set when the harness starts, so an object that only runs on a schedule needs one call to `harness.start()` when it is created.
 
 **A Cloudflare Workflow, one instance per turn:**
 

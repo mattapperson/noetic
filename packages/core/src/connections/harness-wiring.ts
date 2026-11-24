@@ -68,6 +68,8 @@ export interface HarnessConnectionsOptions {
   readonly harness: WiredHarness;
   readonly connections?: ConnectionEntries;
   readonly triggers?: ReadonlyArray<ConnectionTrigger>;
+  /** A scheduled trigger moved on (`TriggerRunnerOptions.onSchedule`). */
+  readonly onSchedule?: () => Promise<void>;
   readonly storage: StorageAdapter;
   readonly artifacts: ArtifactStore;
   readonly secrets?: SecretResolver;
@@ -276,6 +278,7 @@ export function createHarnessConnections(options: HarnessConnectionsOptions): Ha
     runtime: registry,
     triggers,
     storage: options.storage,
+    onSchedule: options.onSchedule,
     deliver: (delivery) => deliverTurn(options.harness, delivery),
   });
   const views = connectionViewLayers(registry);
