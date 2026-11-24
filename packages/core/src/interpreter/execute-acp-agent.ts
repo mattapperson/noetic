@@ -927,6 +927,9 @@ export async function executeAcpAgent<TContext, I, O>(
   }).finally(() => {
     reloading = false;
   });
+  if (resolution.resumed) {
+    tools?.sessionReloaded();
+  }
   if (resolution.fresh && !resolution.resumed) {
     await sessions?.write({
       sessionId: resolution.live.session.sessionId,

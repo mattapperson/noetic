@@ -284,14 +284,28 @@ describe('an ACP step resumed after its host died', () => {
       'write:b.ts',
     ]);
 
-    // A new process. The agent has its session, and goes through its calls again.
+    // A new process. The agent has its session back, knows the two writes are
+    // done, and writes a.ts once more on purpose before running the tests.
     const after = agentLog();
     const { running } = await resume({
       storage,
       executionId,
       acpAgent: agent({
         log: after,
-        calls: THREE,
+        calls: [
+          {
+            name: 'write',
+            args: {
+              file: 'a.ts',
+            },
+          },
+          {
+            name: 'test',
+            args: {
+              file: 'all',
+            },
+          },
+        ],
       }),
       tools,
     });
@@ -305,16 +319,17 @@ describe('an ACP step resumed after its host died', () => {
     expect(after.prompts[0]).toContain('Add the feature.');
     expect(after.prompts[0]).not.toContain('what I said before the crash');
 
-    // The two writes were answered from the record; only the tests ran.
+    // A reloaded agent's call is a new call, even with a tool and arguments it
+    // used before: it runs, and is not answered with the old result.
     expect(runs).toEqual([
       'write:a.ts',
       'write:b.ts',
+      'write:a.ts',
       'test:all',
     ]);
     expect(after.results.map((result) => result.output)).toEqual([
-      'write a.ts #1',
-      'write b.ts #2',
-      'test all #3',
+      'write a.ts #3',
+      'test all #4',
     ]);
   });
 
@@ -389,6 +404,7 @@ describe('an ACP step resumed after its host died', () => {
       executionId,
       acpAgent: agent({
         log: agentLog(),
+        canLoad: false,
         calls: [
           {
             name: 'write',
@@ -465,6 +481,7 @@ describe('an ACP step resumed after its host died', () => {
       executionId: ctx.id,
       acpAgent: agent({
         log: after,
+        canLoad: false,
         calls: twice,
       }),
       tools,

@@ -134,6 +134,20 @@ export function acpSessionRecords(ctx: Context<ContextData>): AcpSessionRecords 
  */
 export class BridgedCallRecords {
   private readonly seen = new Map<string, number>();
+  private reloaded = false;
+
+  /**
+   * The agent's session was reloaded: it has its own record of the calls it
+   * finished, and was told not to redo them. A call it makes now is a new call,
+   * even with a tool and arguments it used before, so it must not be answered
+   * from a record. Each call's order starts after the ones already recorded.
+   *
+   * An agent that starts over in a new session makes its calls again from the
+   * first, and those are answered from the record.
+   */
+  sessionReloaded(): void {
+    this.reloaded = true;
+  }
 
   recordFor(opts: {
     ctx: Context<ContextData>;
@@ -149,10 +163,19 @@ export class BridgedCallRecords {
     });
     const step = stepPathOf(ctx) ?? stepId;
     const call = `${wireName}:${inputHash ?? 'unhashed'}`;
-    const order = this.seen.get(`${step}\u0000${call}`) ?? 0;
-    this.seen.set(`${step}\u0000${call}`, order + 1);
-    const path = `${step}/bridged:${call}#${order}`;
     const ledger = ctx instanceof ContextImpl ? ctx.ledger : undefined;
+    const pathAt = (n: number): string => `${step}/bridged:${call}#${n}`;
+    const key = `${step}\u0000${call}`;
+    let order = this.seen.get(key);
+    if (order === undefined) {
+      order = 0;
+      // Past what a reloaded agent already finished: those are not coming again.
+      while (this.reloaded && ledger?.has(pathAt(order))) {
+        order += 1;
+      }
+    }
+    this.seen.set(key, order + 1);
+    const path = pathAt(order);
     // `durable: false` records nothing; unhashable arguments cannot be matched.
     const records = ledger !== undefined && tool?.durable !== false && inputHash !== undefined;
     return {

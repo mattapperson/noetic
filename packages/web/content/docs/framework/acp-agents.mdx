@@ -368,7 +368,7 @@ Two more things to know about sharing a session:
 On a [durable](/docs/framework/durability) run, an ACP step that was cut off does not start the agent's work over when the run resumes:
 
 - **The agent keeps its session.** The step stores the agent's session id when it opens one. On resume it reloads that session (`session/load`) and sends your prompt behind a short notice that the previous turn was cut off. `claudeCode()` and `codex()` both advertise `loadSession`. An agent that cannot reload, or no longer has the session, gets a new one with the conversation history, as on a first run.
-- **Your tools do not run twice.** Every call the agent makes to a tool you gave it is recorded as it finishes. When the resumed agent makes the same call again, with the same arguments, it gets the recorded result. A `durable: false` tool is not recorded and runs again; a `durable: true` tool the host died inside is [held for a person](/docs/framework/steps/invoke-tool#human-in-the-loop-approval) instead of repeated.
+- **Your tools do not run twice.** Every call the agent makes to a tool you gave it is recorded as it finishes. An agent that had to start over in a new session makes its calls again, and each one that matches a record gets the recorded result. An agent whose session was reloaded already knows what it finished, so a call it makes is a new call and runs. A `durable: false` tool is not recorded and runs again; a `durable: true` tool the host died inside is [held for a person](/docs/framework/steps/invoke-tool#human-in-the-loop-approval) instead of repeated.
 
 What the agent did with its own built-in tools is the agent's to remember: a reloaded session is how it knows.
 

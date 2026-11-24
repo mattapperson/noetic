@@ -310,6 +310,11 @@ export class AcpToolRunner implements AcpToolHost {
     } while (settled !== this.queue);
   }
 
+  /** The agent's session was reloaded: see `BridgedCallRecords.sessionReloaded`. */
+  sessionReloaded(): void {
+    this.records.sessionReloaded();
+  }
+
   /** The tool's wire name when `title` is how an agent titles a call to it. */
   wireNameOf(title: string): string | undefined {
     return this.tools.find((tool) => bridgedToolTitles(this.serverName, tool.name).includes(title))

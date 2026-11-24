@@ -134,9 +134,18 @@ beneath the step's entry:
 arguments, so two equal calls keep two records. The agent's own id for a call is
 not part of the key: an agent that makes the call again after a resume
 (`27-acp-agent-steps` § Resuming a step) uses a new id, but asks for the same
-thing. A call that matches a record is answered with the recorded result: the
-tool does not run, and the call and its result still land in the item log. A
-call with other arguments runs. The step's own entry prunes these records when
+thing. Which calls are answered from a record depends on what the agent knows:
+
+- **A new session** (the agent could not reload, or lost the session). The agent
+  starts over and makes its calls again from the first. A call that matches a
+  record is answered with the recorded result: the tool does not run, and the
+  call and its result still land in the item log. A call with other arguments
+  runs.
+- **A reloaded session.** The agent has its own account of the calls it
+  finished and is told not to redo them. A call it makes now is a new call, even
+  with a tool and arguments it used before, so it runs: each call's order starts
+  after the ones already recorded. Answering it from a record would hand a
+  counter, a clock or an append its old result. The step's own entry prunes these records when
 it lands.
 
 A tool's `durable` setting means what it means in `callModel`
@@ -154,7 +163,7 @@ events and the items keep the agent's id.
 
 A bridged call that is held, for approval with no approver, by a tool that
 returned `hold()`, or as a durable tool's unknown outcome, waits inside the
-bridge until a decision passed to `harness.execute()` answers it, then goes on with the answer. The
+bridge until a decision passed to `harness.execute()` answers it, then goes on with the answer. The wait also ends when the agent gives up on the call (its request is cancelled): the hold is dropped and the agent is told the call was cancelled. The
 turn does not park: the agent's process is waiting on the call. Event:
 `tool_call_held`. The record is under the call's replay key, so an answer given
 while the host was down is found when the resumed agent makes the call again.

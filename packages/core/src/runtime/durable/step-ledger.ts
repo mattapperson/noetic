@@ -619,6 +619,11 @@ export class StepLedger {
     this.accepts = path ?? true;
   }
 
+  /** True when an earlier attempt recorded a step at `path` that this run has not replayed yet. */
+  has(path: string): boolean {
+    return this.replayable.has(path);
+  }
+
   /** Note that the step at `path` has a lasting effect; its entry is marked so. */
   noteEffect(path: string | undefined): void {
     if (path !== undefined) {
