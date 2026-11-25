@@ -893,7 +893,8 @@ export async function executeAcpAgent<TContext, I, O>(
   const recorded = await sessions?.load();
   const resumeId = recorded?.agentId === agent.agentId ? recorded.sessionId : undefined;
   // `session/load` replays the session's conversation as updates. They are the
-  // agent's history, not this turn's work, so they are not forwarded.
+  // agent's history, not this turn's work: they reach raw-event consumers
+  // marked `replay: true`, and never the text, reasoning or item streams.
   let reloading = false;
 
   let bridge = new AcpEventBridge(step, agent.agentId, baseCtx);
@@ -908,6 +909,7 @@ export async function executeAcpAgent<TContext, I, O>(
     layers,
     onUpdate: (notification) => {
       if (reloading) {
+        events.forwardReplay(notification);
         return;
       }
       tools?.observe(notification.update);
@@ -931,7 +933,9 @@ export async function executeAcpAgent<TContext, I, O>(
     cwd,
   });
 
-  reloading = resumeId !== undefined;
+  // Both an explicit `session.load` and the resume of an earlier attempt's
+  // session load it; a reused live session is not reloaded and replays nothing.
+  reloading = resumeId !== undefined || step.session?.load !== undefined;
   const resolution = await openSession({
     step,
     agent,

@@ -1296,3 +1296,107 @@ describe('executeAcpAgent — readable agent errors (#96)', () => {
     );
   });
 });
+
+describe('executeAcpAgent — session/load replay (#100)', () => {
+  const replayed: AcpSessionNotification[] = [
+    {
+      sessionId: 'session-from-yesterday',
+      update: {
+        sessionUpdate: 'agent_message_chunk',
+        content: {
+          type: 'text',
+          text: 'what I answered yesterday',
+        },
+      },
+    },
+    {
+      sessionId: 'session-from-yesterday',
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'old-call',
+        title: 'Read config',
+        status: 'completed',
+      },
+    },
+  ];
+
+  it('streams loaded history only as raw acp_events marked replay, never as new output', async () => {
+    const { ctx, events } = capturingCtx();
+    const acpStep = step.acpAgent({
+      id: 'follow-up',
+      agent: fakeAgent({
+        text: 'new answer',
+        replayOnLoad: replayed,
+        updates: [
+          {
+            sessionId: 'session-from-yesterday',
+            update: {
+              sessionUpdate: 'agent_message_chunk',
+              content: {
+                type: 'text',
+                text: 'new answer',
+              },
+            },
+          },
+        ],
+      }),
+      prompt: 'continue',
+      session: {
+        load: 'session-from-yesterday',
+      },
+    });
+
+    expect(await execute(acpStep, undefined, ctx)).toBe('new answer');
+
+    const raw = events.filter((e) => e.type.endsWith(':acp_event'));
+    const replays = raw.filter((e) => e.data.replay === true);
+    expect(replays.map((e) => e.data.update)).toEqual(replayed.map((n) => n.update));
+    for (const event of replays) {
+      expect(event.data).toMatchObject({
+        stepId: 'follow-up',
+        agentId: 'claude-code',
+        sessionId: 'session-from-yesterday',
+      });
+    }
+    expect(raw.filter((e) => e.data.replay !== true)).toHaveLength(1);
+    // Only the new turn reaches the text and item streams.
+    const deltas = events.filter((e) => e.type === 'response.output_text.delta');
+    expect(deltas.map((e) => e.data.delta)).toEqual([
+      'new answer',
+    ]);
+    const calls = events.filter(
+      (e) => e.type === 'response.output_item.added' && JSON.stringify(e.data).includes('old-call'),
+    );
+    expect(calls).toHaveLength(0);
+    expect(messageTexts(ctx)).not.toContain('what I answered yesterday');
+  });
+
+  it('keeps replay marked even when the follow-up then fails selecting its mode', async () => {
+    const { ctx, events } = capturingCtx();
+    const acpStep = step.acpAgent({
+      id: 'follow-up-mode',
+      agent: fakeAgent({
+        replayOnLoad: replayed,
+        throwOnSetMode: new Error(
+          "ACP agent 'codex' did not advertise the 'session/set_mode' capability",
+        ),
+      }),
+      prompt: 'continue',
+      mode: 'read-only',
+      session: {
+        load: 'session-from-yesterday',
+      },
+    });
+
+    const error = await execute(acpStep, undefined, ctx).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+
+    expect(error).toBeDefined();
+    expect(events.filter((e) => e.type === 'response.output_text.delta')).toHaveLength(0);
+    const raw = events.filter((e) => e.type.endsWith(':acp_event'));
+    expect(raw).toHaveLength(2);
+    expect(raw.every((e) => e.data.replay === true)).toBe(true);
+  });
+});

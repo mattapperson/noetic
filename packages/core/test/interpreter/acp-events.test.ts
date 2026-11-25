@@ -436,4 +436,49 @@ describe('AcpEventBridge — current updates and replay', () => {
     assert(completed);
     expect(completed.data.error).toBe('Authentication required (-32000)');
   });
+
+  it('marks replayed history as replay and never translates it (#100)', () => {
+    const { bridge, events } = bridgeCtx(STEP);
+
+    bridge.forwardReplay(textChunk('what I said yesterday'));
+    bridge.forwardReplay({
+      sessionId: 's1',
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'old-call',
+        title: 'Read config',
+      },
+    });
+
+    expect(events).toHaveLength(2);
+    for (const event of events) {
+      expect(event.type.endsWith(':acp_event')).toBe(true);
+      expect(event.data).toMatchObject({
+        stepId: 'review',
+        agentId: 'claude-code',
+        sessionId: 's1',
+        replay: true,
+      });
+    }
+    // The turn itself is still opened by fresh output, not by replay.
+    bridge.begin();
+    bridge.forward(textChunk('new answer'));
+    const deltas = events.filter((e) => e.type === 'response.output_text.delta');
+    expect(deltas.map((e) => e.data.delta)).toEqual([
+      'new answer',
+    ]);
+    const fresh = events.filter((e) => e.type.endsWith(':acp_event') && e.data.replay !== true);
+    expect(fresh).toHaveLength(1);
+  });
+
+  it('honours step.emit for replayed events', () => {
+    const { bridge, events } = bridgeCtx({
+      id: 'quiet',
+      emit: false,
+    });
+
+    bridge.forwardReplay(textChunk('old'));
+
+    expect(events).toHaveLength(0);
+  });
 });

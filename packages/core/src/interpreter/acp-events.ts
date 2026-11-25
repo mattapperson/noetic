@@ -162,6 +162,23 @@ export class AcpEventBridge {
   }
 
   /**
+   * Forward one update `session/load` replayed: the loaded session's history,
+   * not this turn's output. It reaches raw-event consumers as an `acp_event`
+   * marked `replay: true` (same step, agent and session attribution) and is
+   * never translated into text, reasoning or function-call events.
+   */
+  forwardReplay(notification: AcpSessionNotification): void {
+    if (!this.broadcaster) {
+      return;
+    }
+    this.framework('acp_event', {
+      sessionId: notification.sessionId,
+      update: notification.update,
+      replay: true,
+    });
+  }
+
+  /**
    * Ensure the turn's output reached the event surface. For an agent that
    * returns a result without streaming, synthesize events from the result.
    */
