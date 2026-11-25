@@ -1422,49 +1422,13 @@ export class AgentHarness<
         graph,
       );
       this.setTurnTools(ctx, perTurnOptions.tools ?? [], connectionTools);
-      const { removed, kept } = record
-        ? await this.splitKeptMessages(session, record, messageIds, perTurnOptions.keptSteers)
-        : {
-            removed: [],
-            kept: [],
-          };
       // A stuck turn the host chose to go on with may discard what no longer matches.
       const accept = (await record?.turn())?.accept;
       if (accept && ctx instanceof ContextImpl) {
         ctx.ledger?.acceptVersionLoss(typeof accept === 'string' ? accept : undefined);
       }
-      try {
-        await record?.begin(
-          ctx,
-          messageIds,
-          removed.map((steer) => steer.id),
-        );
-      } catch (error) {
-        await this.#connections.release(ctx.id);
-        throw error;
-      }
-      for (const message of kept) {
-        session.keptOptions.delete(message.id);
-        if (!session.runner.queue.peekAll().some((queued) => queued.id === message.id)) {
-          session.runner.queue.enqueue(message);
-        }
-      }
-      const saved =
-        removed.length > 0 && ctx instanceof ContextImpl ? savedItemIds(ctx) : undefined;
-      // Told only once the record no longer holds them.
-      for (const steer of removed) {
-        if (saved && steerInConversation(steerItems(steer), (id) => saved.has(id))) {
-          continue;
-        }
-        emitFrameworkEvent({
-          broadcaster: session.runner.broadcaster,
-          agentName: this.config.name,
-          eventType: 'steer_dropped',
-          data: {
-            messageId: steer.id,
-            reason: 'kept_steers',
-          },
-        });
+      if (record) {
+        await this.beginStoredTurn(session, record, ctx, messageIds, perTurnOptions.keptSteers);
       }
       // A turn on record can be cut off from here on. A host that sleeps between
       // requests has to know when to come back and look (see `turnDueAt`).
@@ -1797,6 +1761,49 @@ export class AgentHarness<
       }
       this.cuts?.forget(session.runner.threadId);
       throw error;
+    }
+  }
+
+  /** Start the stored turn before putting kept messages back or reporting drops. */
+  private async beginStoredTurn(
+    session: Session,
+    record: ThreadRecord,
+    ctx: Context,
+    messageIds: ReadonlyArray<string>,
+    keptSteers: KeptSteers | undefined,
+  ): Promise<void> {
+    const { removed, kept } = await this.splitKeptMessages(session, record, messageIds, keptSteers);
+    try {
+      await record.begin(
+        ctx,
+        messageIds,
+        removed.map((steer) => steer.id),
+      );
+    } catch (error) {
+      await this.#connections.release(ctx.id);
+      throw error;
+    }
+    for (const message of kept) {
+      session.keptOptions.delete(message.id);
+      if (!session.runner.queue.peekAll().some((queued) => queued.id === message.id)) {
+        session.runner.queue.enqueue(message);
+      }
+    }
+    const saved = removed.length > 0 && ctx instanceof ContextImpl ? savedItemIds(ctx) : undefined;
+    // Told only once the record no longer holds them.
+    for (const steer of removed) {
+      if (saved && steerInConversation(steerItems(steer), (id) => saved.has(id))) {
+        continue;
+      }
+      emitFrameworkEvent({
+        broadcaster: session.runner.broadcaster,
+        agentName: this.config.name,
+        eventType: 'steer_dropped',
+        data: {
+          messageId: steer.id,
+          reason: 'kept_steers',
+        },
+      });
     }
   }
 
