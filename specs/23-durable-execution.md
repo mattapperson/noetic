@@ -512,6 +512,7 @@ interface ForgetOptions {
   keepTrail?: boolean;  // keep the trail marks (§ The trail). Default false: keep nothing.
   patienceMs?: number;  // how long to wait for the provider to price a pending call. Default 60 000.
   waitMs?: number;      // how long to wait for another harness's lease on the thread to run out. Default 0.
+  subprocesses?: SubprocessAdapter[];  // adapters that may run the runs' children out of process (below)
 }
 
 interface ForgetReport {
@@ -548,7 +549,15 @@ The lease goes last, while the forget still holds it (below). A forget cut off p
 
 A key under `execution:` is read as the execution its part's suffix names (`:snapshot`, `:ledger:<seq>`, `:trail:<seq>`, `:held:`, `:intent:`, `:pending:`, `:child:<childId>`); when more than one reading is well formed, the longest execution id wins, so `a:child:trail:1` is execution `a:child`'s trail. Any other key belongs to the longest execution id that other keys name and that it starts with, else to the id before its first colon; so `execution:a:b:custom` is execution `a:b`'s when `a:b` has records of its own.
 
-**Children spawned out of process.** A spawn run in process records its steps under its run's root, so forgetting the run covers it. A `spawn` or `harness.detachedSpawn` a subprocess adapter runs elsewhere is an execution of its own, under its own id: before dispatching it, a durable run writes a link, `execution:<rootId>:child:<childId>`. An adapter that runs steps in the calling process — core's in-memory adapter — gets no link. A forget follows the links, transitively, and forgets each child as part of its run: it settles the children's spend with the run's, asks the harness's `environment.subprocess` and every adapter the harness has dispatched a child through to stop a handle still running one of them, then deletes what each child keeps. `ForgetReport.executionIds` lists every run before its children. A child a step's own adapter runs, on a harness that never dispatched through that adapter, is not stopped: its keys are deleted, and the adapter reclaims it.
+**Children spawned out of process.** A spawn run in process records its steps under its run's root, so forgetting the run covers it. A `spawn` or `harness.detachedSpawn` a subprocess adapter runs elsewhere is an execution of its own, under its own id. Before dispatching it, a durable run writes a link, `execution:<rootId>:child:<childId>`, naming the step and where its adapter came from — the harness's `environment.subprocess` (`harness`), the step's own `subprocess` (`step`), or the adapter a `detachedSpawn` call passed (`call`) — and marks the link `settled` once the child has finished, however it ended. An adapter that runs steps in the calling process — core's in-memory adapter — gets no link.
+
+A forget follows the links, transitively, and forgets each child as part of its run. Before it settles or deletes anything it stops every one still running, so none spends or writes again under what is deleted:
+
+1. A child whose link is not `settled` is asked of the adapter that ran it: the one this harness dispatched it through, when it did; else, by the link, the harness's `environment.subprocess` or the step's own `subprocess`, found by step id among the steps built in this process. The adapters the host passes in `subprocesses` are asked too.
+2. Each such adapter, the harness's `environment.subprocess`, and every adapter the harness has dispatched a child through are asked for handles still running one of the forgotten executions, and each is stopped.
+3. A child that has not finished, whose adapter none of these can be — a `call` child this harness did not dispatch, or a link that does not read — refuses the forget with `NoeticConfigError` `FORGET_CHILD_UNREACHABLE` before anything is settled or deleted, unless the host passed `subprocesses`: it then answers for which adapters may run them.
+
+The children's spend is settled with the run's, and then what each child keeps is deleted as an execution's forget deletes it. `ForgetReport.executionIds` lists every run before its children.
 
 An execution's forget also covers the connection-pool leases (`35-connections` § Pools and leases) of its run: a lease this harness still holds for it — a failed run keeps its lease for a resume — is released, which hands its connection back to the provider, and every stored lease record of the run is deleted, those a crashed process left included. A lease record names the run that holds it; one written before it did is the run's when its holder is the run (`<executionId>`) or one of its parallel paths (`<executionId>:path:…`). A thread's forget does this for each execution it forgets.
 

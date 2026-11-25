@@ -232,6 +232,12 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 **Fix:** Pass `agentGraph` to the `AgentHarness` constructor, or drive steps directly with `harness.run(step, input, ctx)`.
 
+#### FORGET_CHILD_UNREACHABLE
+
+**Cause:** `harness.forget()` found a child the run had a subprocess adapter run out of process that has not finished, and no adapter this harness knows of can be the one that ran it — typically a `detachedSpawn` given its own `subprocess` by another harness. Nothing was settled or deleted.
+
+**Fix:** Pass that adapter: `harness.forget(scope, { subprocesses: [adapter] })`. The forget stops the child if it still runs, then deletes what it kept.
+
 #### INVALID_FORGET_SCOPE
 
 **Cause:** `harness.forget()` was given a scope with neither a `threadId` nor an `executionId`, or an empty `threadId`.

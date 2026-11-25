@@ -4,6 +4,7 @@
  * never builds a storage key itself (spec 23 § Forgetting).
  */
 
+import { storageGetMany } from '@noetic-tools/context';
 import type {
   ForgetOptions,
   ForgetReport,
@@ -11,16 +12,20 @@ import type {
   SpendSettlement,
   StorageAdapter,
   StoredExecution,
+  SubprocessAdapter,
 } from '@noetic-tools/types';
-import { ExecutionPart, NoeticErrorImpl } from '@noetic-tools/types';
+import { ExecutionPart, NoeticConfigError, NoeticErrorImpl } from '@noetic-tools/types';
 import { poolLeasesOf } from '../connections/pool';
 import type { CheckpointStore } from '../runtime/durable/checkpoint-store';
+import type { ChildLink } from '../runtime/durable/child-links';
+import { ChildAdapterSource, ChildLinkSchema, runsInProcess } from '../runtime/durable/child-links';
 import type { SessionRecord, SessionStore } from '../runtime/durable/session-store';
 import { SESSION_PREFIX, sessionKey } from '../runtime/durable/session-store';
 import type { SpendRecord } from '../runtime/durable/spend-log';
 import type { TurnLeaseOptions } from '../runtime/durable/turn-lease';
 import { LEASE_PREFIX, leaseKey, TurnLease } from '../runtime/durable/turn-lease';
 import { OUTPUT_PREFIX, outputKey } from '../runtime/output-store';
+import { lookupStep } from '../runtime/step-registry';
 import { executionsOf } from './thread-record';
 
 //#region Types
@@ -53,8 +58,12 @@ export interface ForgetHost {
   layerIds(): ReadonlyArray<string>;
   /** Release the pool leases this harness still holds for the run, freeing their connections. */
   releaseConnections(executionId: string): Promise<void>;
-  /** Stop every subprocess still running one of the executions. */
-  stopSubprocesses(executionIds: ReadonlySet<string>): Promise<void>;
+  /** The harness's `environment.subprocess`. */
+  readonly subprocess: SubprocessAdapter;
+  /** The out-of-process adapters this harness has dispatched a child through. */
+  adaptersUsed(): ReadonlyArray<SubprocessAdapter>;
+  /** The adapter this harness dispatched the child through, when it did. */
+  adapterOfChild(childId: string): SubprocessAdapter | undefined;
 }
 
 //#endregion
@@ -222,33 +231,160 @@ function busy(threadOrExecution: string, reason: string): NoeticErrorImpl {
 
 //#region Forget
 
+/** A child a forgotten run had a subprocess adapter run out of process. */
+interface LinkedChild {
+  readonly childId: string;
+  /** Undefined when the link does not read: then whether it finished is unknown. */
+  readonly link: ChildLink | undefined;
+}
+
+/** What a forget covers: the executions, and the links that brought in their children. */
+interface Covered {
+  readonly executions: Set<string>;
+  readonly children: LinkedChild[];
+}
+
 /**
- * `executionIds` and every execution they spawned out of process, their children's
+ * `executionIds` and every execution they had run out of process, their children's
  * included, in the order found: each run before its children.
  */
 async function withChildren(
   host: ForgetHost,
   executionIds: ReadonlyArray<string>,
-): Promise<Set<string>> {
-  const found = new Set<string>();
+): Promise<Covered> {
+  const executions = new Set<string>();
+  const children: LinkedChild[] = [];
   const queue = [
     ...executionIds,
   ];
   for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
-    if (found.has(next)) {
+    if (executions.has(next)) {
       continue;
     }
-    found.add(next);
-    if (host.storage) {
-      const keys = await host.storage.list(`${EXECUTION_PREFIX}${next}:child:`);
-      for (const link of parseExecutionKeys(keys)) {
-        if (link.executionId === next && link.part === ExecutionPart.Child && link.tail) {
-          queue.push(link.tail);
-        }
+    executions.add(next);
+    for (const child of await linksOf(host.storage, next)) {
+      if (!children.some((known) => known.childId === child.childId)) {
+        children.push(child);
       }
+      queue.push(child.childId);
     }
   }
-  return found;
+  return {
+    executions,
+    children,
+  };
+}
+
+/** The children the run rooted at `executionId` linked, with their links. */
+async function linksOf(
+  storage: StorageAdapter | undefined,
+  executionId: string,
+): Promise<LinkedChild[]> {
+  if (!storage) {
+    return [];
+  }
+  const keys = parseExecutionKeys(
+    await storage.list(`${EXECUTION_PREFIX}${executionId}:child:`),
+  ).filter(
+    (parsed) =>
+      parsed.executionId === executionId && parsed.part === ExecutionPart.Child && parsed.tail,
+  );
+  const values = await storageGetMany<unknown>(
+    storage,
+    keys.map((parsed) => parsed.key),
+  );
+  return keys.map((parsed) => {
+    const link = ChildLinkSchema.safeParse(values.get(parsed.key));
+    return {
+      childId: parsed.tail ?? '',
+      link: link.success ? link.data : undefined,
+    };
+  });
+}
+
+/** The adapter that ran `child`, as far as this harness can tell. */
+function runnerOf(host: ForgetHost, child: LinkedChild): SubprocessAdapter | undefined {
+  const dispatched = host.adapterOfChild(child.childId);
+  if (dispatched) {
+    return dispatched;
+  }
+  if (child.link?.from === ChildAdapterSource.Harness) {
+    return host.subprocess;
+  }
+  if (child.link?.from === ChildAdapterSource.Step) {
+    const step = lookupStep(child.link.stepId);
+    return step && (step.kind === 'runCode' || step.kind === 'spawn') ? step.subprocess : undefined;
+  }
+  return undefined;
+}
+
+/** Stop every handle `adapter` still runs for a covered execution. Resolves the executions it stopped. */
+async function stopLive(
+  adapter: SubprocessAdapter,
+  executions: ReadonlySet<string>,
+): Promise<Set<string>> {
+  const stopped = new Set<string>();
+  for (const handle of await adapter.listLive()) {
+    const executionId = handle.metadata?.executionId;
+    if (typeof executionId === 'string' && executions.has(executionId)) {
+      await adapter.stop(handle.id, 'forgotten');
+      stopped.add(executionId);
+    }
+  }
+  return stopped;
+}
+
+/**
+ * Stop every covered execution still running out of process, before anything of it
+ * is settled or deleted: one that kept running would spend, and write again under
+ * what the forget deletes. A child that has not finished is asked of the adapter
+ * that ran it. When no adapter this harness knows of can be that one, and the host
+ * named none in `subprocesses`, the forget is refused.
+ *
+ * @throws NoeticConfigError `FORGET_CHILD_UNREACHABLE`
+ */
+async function stopChildren(
+  host: ForgetHost,
+  covered: Covered,
+  named: ReadonlyArray<SubprocessAdapter>,
+): Promise<void> {
+  const unfinished = covered.children.filter((child) => child.link?.settled !== true);
+  const runners = new Map<string, SubprocessAdapter | undefined>(
+    unfinished.map((child) => [
+      child.childId,
+      runnerOf(host, child),
+    ]),
+  );
+  const unreachable = unfinished.filter((child) => runners.get(child.childId) === undefined);
+  if (unreachable.length > 0 && named.length === 0) {
+    throw childUnreachable(unreachable);
+  }
+  const adapters = new Set<SubprocessAdapter>([
+    host.subprocess,
+    ...host.adaptersUsed(),
+    ...named,
+  ]);
+  for (const runner of runners.values()) {
+    if (runner) {
+      adapters.add(runner);
+    }
+  }
+  for (const adapter of adapters) {
+    if (!runsInProcess(adapter)) {
+      await stopLive(adapter, covered.executions);
+    }
+  }
+}
+
+function childUnreachable(children: ReadonlyArray<LinkedChild>): NoeticConfigError {
+  const named = children
+    .map((child) => `"${child.childId}" (step "${child.link?.stepId ?? 'unknown'}")`)
+    .join(', ');
+  return new NoeticConfigError({
+    code: 'FORGET_CHILD_UNREACHABLE',
+    message: `Cannot tell whether ${named} still runs: the subprocess adapter that ran it is not known to this harness.`,
+    hint: 'Pass that adapter in forget(scope, { subprocesses: [adapter] }) so a child still running is stopped before what it kept is deleted.',
+  });
 }
 
 /** Delete everything stored for the executions, checking the lease between them. */
@@ -261,8 +397,6 @@ async function forgetExecutionState(
   },
 ): Promise<void> {
   const storage = host.storage;
-  // A child still running elsewhere would write again under what is deleted here.
-  await host.stopSubprocesses(new Set(executionIds));
   for (const executionId of executionIds) {
     under.lease?.assert();
     await host.releaseConnections(executionId);
@@ -413,7 +547,9 @@ async function forgetHeldThread(
   },
 ): Promise<ForgetReport> {
   const { options, before, lease } = held;
-  const executions = await withChildren(host, executionsOf(before));
+  const covered = await withChildren(host, executionsOf(before));
+  await stopChildren(host, covered, options.subprocesses ?? []);
+  const executions = covered.executions;
   const spend = await host.closeSpend(
     (record) =>
       record.threadId === threadId ||
@@ -424,10 +560,12 @@ async function forgetHeldThread(
   // A turn may have begun before the lease was taken: read the record again under it.
   const after = await recordOf(host, threadId);
   refuseBusy(host, threadId, after);
+  const again = await withChildren(host, executionsOf(after));
   const added = [
-    ...(await withChildren(host, executionsOf(after))),
+    ...again.executions,
   ].filter((executionId) => !executions.has(executionId));
   if (added.length > 0) {
+    await stopChildren(host, again, options.subprocesses ?? []);
     spend.push(
       ...(await host.closeSpend(
         (record) => record.executionId !== undefined && added.includes(record.executionId),
@@ -479,15 +617,17 @@ export async function forgetExecution(
   executionId: string,
   options: ForgetOptions = {},
 ): Promise<ForgetReport> {
-  const executions = await withChildren(host, [
+  const covered = await withChildren(host, [
     executionId,
   ]);
+  const executions = covered.executions;
   const live = [
     ...executions,
   ].find((id) => host.executionBusy(id));
   if (live !== undefined) {
     throw busy(live, `execution "${live}" has a run in flight in this harness`);
   }
+  await stopChildren(host, covered, options.subprocesses ?? []);
   const spend = await host.closeSpend(
     (record) => record.executionId !== undefined && executions.has(record.executionId),
     options.patienceMs,

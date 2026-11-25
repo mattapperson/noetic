@@ -1,15 +1,23 @@
 /**
- * Child links: how a run remembers the executions it spawned out of process, so a
- * forget of the run finds them (spec 23 § Forgetting).
+ * Child links: how a run remembers the executions it had a subprocess adapter run
+ * out of process, so a forget of the run finds them and stops one still running
+ * (spec 23 § Forgetting).
  *
  * A spawn run in process records its steps under its run's root, so it needs no
- * link. One routed to a subprocess adapter that runs it elsewhere becomes an
- * execution of its own, under its own id; the parent run writes
- * `execution:<rootId>:child:<childId>` before dispatching it.
+ * link. One an adapter runs elsewhere becomes an execution of its own, under its
+ * own id: the parent run writes `execution:<rootId>:child:<childId>` before
+ * dispatching it, naming the step and where its adapter came from, and marks the
+ * link `settled` once the child has finished.
  */
 
-import type { Context, StorageAdapter, SubprocessAdapter } from '@noetic-tools/types';
+import type {
+  Context,
+  SpawnedSubprocess,
+  StorageAdapter,
+  SubprocessAdapter,
+} from '@noetic-tools/types';
 import { frameworkCast } from '@noetic-tools/types';
+import { z } from 'zod';
 import { ContextImpl, rootIdOf } from '../context-impl';
 
 //#region In-process adapters
@@ -32,84 +40,135 @@ export function runsInProcess(adapter: SubprocessAdapter): boolean {
 
 //#region Adapters used
 
-/** The out-of-process adapters each harness has dispatched a child through. */
-const usedBy = new WeakMap<object, Set<SubprocessAdapter>>();
+/** The adapter each child a harness dispatched out of process ran on, by child id. */
+const ranBy = new WeakMap<object, Map<string, SubprocessAdapter>>();
 
-/** @internal Note that `harness` dispatched a child through `adapter`. */
-export function noteAdapter(harness: object, adapter: SubprocessAdapter): void {
-  const used = usedBy.get(harness) ?? new Set<SubprocessAdapter>();
-  used.add(adapter);
-  usedBy.set(harness, used);
+function noteAdapter(harness: object, childId: string, adapter: SubprocessAdapter): void {
+  const children = ranBy.get(harness) ?? new Map<string, SubprocessAdapter>();
+  children.set(childId, adapter);
+  ranBy.set(harness, children);
 }
 
 /** @internal The out-of-process adapters `harness` has dispatched a child through. */
 export function adaptersUsedBy(harness: object): ReadonlyArray<SubprocessAdapter> {
   return [
-    ...(usedBy.get(harness) ?? []),
+    ...new Set(ranBy.get(harness)?.values()),
   ];
+}
+
+/** @internal The adapter `harness` dispatched the child `childId` through, when it did. */
+export function adapterOfChild(harness: object, childId: string): SubprocessAdapter | undefined {
+  return ranBy.get(harness)?.get(childId);
 }
 
 //#endregion
 
 //#region Links
 
-const CHILD_PART = ':child:';
+/** @internal Where the adapter that ran a child came from. */
+export const ChildAdapterSource = {
+  /** The harness's `environment.subprocess`. */
+  Harness: 'harness',
+  /** The step's own `subprocess`. */
+  Step: 'step',
+  /** The `subprocess` a `detachedSpawn` call passed. */
+  Call: 'call',
+} as const;
 
-function linkPrefix(rootId: string): string {
-  return `execution:${rootId}${CHILD_PART}`;
+/** @internal */
+export type ChildAdapterSource = (typeof ChildAdapterSource)[keyof typeof ChildAdapterSource];
+
+/** @internal A child link as stored. */
+export const ChildLinkSchema = z.object({
+  stepId: z.string(),
+  at: z.string(),
+  from: z.enum([
+    ChildAdapterSource.Harness,
+    ChildAdapterSource.Step,
+    ChildAdapterSource.Call,
+  ]),
+  /** Set once the child finished, however it ended. */
+  settled: z.boolean().optional(),
+});
+
+/** @internal */
+export type ChildLink = z.infer<typeof ChildLinkSchema>;
+
+/** @internal The key of the link from the run rooted at `rootId` to `childId`. */
+export function childLinkKey(rootId: string, childId: string): string {
+  return `execution:${rootId}:child:${childId}`;
 }
 
-/** @internal Record that the run rooted at `rootId` spawned the execution `childId`. */
-export async function linkChild(
-  storage: StorageAdapter,
-  link: {
-    rootId: string;
-    childId: string;
-    stepId: string;
-  },
-): Promise<void> {
-  await storage.set(`${linkPrefix(link.rootId)}${link.childId}`, {
-    stepId: link.stepId,
-    at: new Date().toISOString(),
-  });
+/** Mark a link settled, unless a forget deleted it meanwhile: nothing brings it back. */
+async function markSettled(storage: StorageAdapter, key: string): Promise<void> {
+  const raw = await storage.get<unknown>(key);
+  const link = ChildLinkSchema.safeParse(raw);
+  if (!link.success || link.data.settled) {
+    return;
+  }
+  const next: ChildLink = {
+    ...link.data,
+    settled: true,
+  };
+  if (storage.swap) {
+    await storage.swap(key, raw, next);
+    return;
+  }
+  await storage.set(key, next);
 }
 
 //#endregion
 
 //#region Dispatch
 
+/** The durable storage of `parent`'s run, when it has a ledger: only then is a child linked. */
+function durableStorageOf<TContext>(parent: Context<TContext>): StorageAdapter | undefined {
+  if (!(parent instanceof ContextImpl) || parent.ledger === undefined) {
+    return undefined;
+  }
+  return frameworkCast<{
+    config?: {
+      storage?: StorageAdapter;
+    };
+  }>(parent.harness).config?.storage;
+}
+
 /**
- * A step an adapter runs out of process for `parent` is an execution of its own:
- * on a durable run, link it to the run's root so a forget of the run finds it, and
- * note the adapter so the forget can stop it (spec 23 § Forgetting). One run in
- * process records under the root already.
+ * Dispatch a step to `adapter` for `parent`. A step the adapter runs out of process
+ * is an execution of its own: on a durable run it is linked to the run's root before
+ * it is dispatched, and the link is marked settled once the child finished (spec 23
+ * § Forgetting).
  *
  * @internal
  */
-export async function linkIfOutOfProcess<TContext>(
+export async function spawnLinked<TContext>(
   parent: Context<TContext>,
   adapter: SubprocessAdapter,
   child: {
     childId: string;
     stepId: string;
+    from: ChildAdapterSource;
+    spawn: () => Promise<SpawnedSubprocess>;
   },
-): Promise<void> {
-  if (runsInProcess(adapter) || !(parent instanceof ContextImpl) || parent.ledger === undefined) {
-    return;
-  }
-  const storage = frameworkCast<{
-    config?: {
-      storage?: StorageAdapter;
-    };
-  }>(parent.harness).config?.storage;
+): Promise<SpawnedSubprocess> {
+  const storage = runsInProcess(adapter) ? undefined : durableStorageOf(parent);
   if (!storage) {
-    return;
+    return child.spawn();
   }
-  noteAdapter(parent.harness, adapter);
-  await linkChild(storage, {
-    rootId: rootIdOf(parent),
-    ...child,
-  });
+  noteAdapter(parent.harness, child.childId, adapter);
+  const key = childLinkKey(rootIdOf(frameworkCast<Context>(parent)), child.childId);
+  const link: ChildLink = {
+    stepId: child.stepId,
+    at: new Date().toISOString(),
+    from: child.from,
+  };
+  await storage.set(key, link);
+  const spawned = await child.spawn();
+  void spawned.settled
+    .catch(() => undefined)
+    .then(() => markSettled(storage, key))
+    .catch(() => undefined);
+  return spawned;
 }
 
 //#endregion

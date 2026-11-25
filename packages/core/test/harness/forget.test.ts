@@ -7,6 +7,7 @@ import assert from 'node:assert';
 import type { StorageAdapter } from '@noetic-tools/context';
 import type {
   CallModelRequest,
+  Context,
   ContextData,
   ContextLayer,
   LLMResponse,
@@ -1201,7 +1202,13 @@ describe('forget and children spawned out of process', () => {
    * under the child's own id over the same storage, spawns a grandchild of its own,
    * and leaves that grandchild running.
    */
-  function remoteAdapter(storage: StorageAdapter): {
+  function remoteAdapter(
+    storage: StorageAdapter,
+    opts: {
+      /** Keep each child running until it is stopped. */
+      hold?: boolean;
+    } = {},
+  ): {
     adapter: SubprocessAdapter;
     stopped: string[];
     children: string[];
@@ -1211,6 +1218,10 @@ describe('forget and children spawned out of process', () => {
     const children: string[] = [];
     const grandchild = crypto.randomUUID();
     const live = new Map<string, SubprocessHandle>();
+    // The step the child runs its grandchild with, on this same adapter. Building it
+    // registers it, so any harness in this process can find its adapter by id.
+    const grandStep = `grand-${grandchild}`;
+    const finishers = new Map<string, () => void>();
     const adapter: SubprocessAdapter = {
       spawn: async (request) => {
         assert(request.kind === 'step');
@@ -1228,8 +1239,9 @@ describe('forget and children spawned out of process', () => {
           }),
         );
         await storage.set(`execution:${child}:child:${grandchild}`, {
-          stepId: 'grand',
+          stepId: grandStep,
           at: new Date().toISOString(),
+          from: 'step',
         });
         await storage.set(`execution:${grandchild}:ledger:00000001`, {
           path: 'grand',
@@ -1252,15 +1264,34 @@ describe('forget and children spawned out of process', () => {
             result: 'remote-done',
           },
         };
+        if (!opts.hold) {
+          return {
+            handle,
+            settled: Promise.resolve(handle),
+          };
+        }
+        const running: SubprocessHandle = {
+          ...handle,
+          status: 'running',
+        };
+        live.set(running.id, running);
         return {
-          handle,
-          settled: Promise.resolve(handle),
+          handle: running,
+          settled: new Promise<SubprocessHandle>((resolve) => {
+            finishers.set(running.id, () =>
+              resolve({
+                ...running,
+                status: 'stopped',
+              }),
+            );
+          }),
         };
       },
       get: async (id) => live.get(id) ?? null,
       stop: async (id) => {
         stopped.push(id);
         live.delete(id);
+        finishers.get(id)?.();
         return {
           kind: 'stopped',
           handleId: id,
@@ -1278,6 +1309,11 @@ describe('forget and children spawned out of process', () => {
         ...live.values(),
       ],
     };
+    runCode<ContextData, string, string>({
+      id: grandStep,
+      execute: async (input) => input,
+      subprocess: adapter,
+    });
     return {
       adapter,
       stopped,
@@ -1358,8 +1394,9 @@ describe('forget and children spawned out of process', () => {
     const crashes = runCode<ContextData, string, string>({
       id: 'detaches-then-crashes',
       execute: async (input, execCtx) => {
-        await execCtx.harness
-          .detachedSpawn(leaf, input, execCtx, {
+        // The harness's own `detachedSpawn` takes a per-call adapter.
+        await harness
+          .detachedSpawn(leaf, input, frameworkCast<Context>(execCtx), {
             subprocess: remote.adapter,
           })
           .await();
@@ -1386,6 +1423,169 @@ describe('forget and children spawned out of process', () => {
     expect(remote.stopped).toEqual([
       `h-${remote.grandchild}`,
     ]);
+    expect(await storage.list('')).toEqual([]);
+  });
+
+  /** A run that leaves a remote child running, by `detachedSpawn`, and then crashes. */
+  async function crashLeavingChild(
+    harness: AgentHarness,
+    remote: ReturnType<typeof remoteAdapter>,
+    via: 'step' | 'call',
+  ): Promise<string> {
+    const leaf = runCode<ContextData, string, string>({
+      id: `remote-leaf-${via}-${crypto.randomUUID()}`,
+      execute: async (input) => input,
+      ...(via === 'step'
+        ? {
+            subprocess: remote.adapter,
+          }
+        : {}),
+    });
+    const crashes = runCode<ContextData, string, string>({
+      id: 'leaves-a-child-then-crashes',
+      execute: async (input, execCtx) => {
+        harness.detachedSpawn(
+          leaf,
+          input,
+          frameworkCast<Context>(execCtx),
+          via === 'call'
+            ? {
+                subprocess: remote.adapter,
+              }
+            : undefined,
+        );
+        while (remote.children.length === 0) {
+          await new Promise((resolve) => setTimeout(resolve, 2));
+        }
+        throw new Error('crashed with a child running');
+      },
+    });
+    const ctx = harness.createContext();
+    await expect(harness.run(crashes, 'go', ctx)).rejects.toThrow('crashed with a child running');
+    return ctx.id;
+  }
+
+  /** A harness over `storage` in a process that never dispatched anything. */
+  function freshHarness(storage: StorageAdapter): AgentHarness {
+    return new AgentHarness({
+      name: 'sweeper',
+      params: {},
+      environment: {
+        storage: {
+          adapter: storage,
+        },
+      },
+    });
+  }
+
+  it('a fresh harness stops a child still running on its step’s own adapter, found by step id', async () => {
+    const storage = createInMemoryStorage({
+      swap: true,
+    });
+    const remote = remoteAdapter(storage, {
+      hold: true,
+    });
+    const run = await crashLeavingChild(harnessOver(storage), remote, 'step');
+    const [child] = remote.children;
+    assert(child);
+
+    await freshHarness(storage).forget(
+      {
+        executionId: run,
+      },
+      {
+        patienceMs: 0,
+      },
+    );
+
+    expect(remote.stopped).toContain(`h-${child}`);
+    expect(remote.stopped).toContain(`h-${remote.grandchild}`);
+    expect(await storage.list('')).toEqual([]);
+  });
+
+  it('a fresh harness refuses a running child whose per-call adapter it cannot know, until it is passed', async () => {
+    const storage = createInMemoryStorage({
+      swap: true,
+    });
+    const remote = remoteAdapter(storage, {
+      hold: true,
+    });
+    const run = await crashLeavingChild(harnessOver(storage), remote, 'call');
+    const [child] = remote.children;
+    assert(child);
+    const sweeper = freshHarness(storage);
+    const before = await storage.list('');
+
+    await expect(
+      sweeper.forget(
+        {
+          executionId: run,
+        },
+        {
+          patienceMs: 0,
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: 'FORGET_CHILD_UNREACHABLE',
+    });
+    expect(await storage.list('')).toEqual(before);
+    expect(remote.stopped).toEqual([]);
+
+    await sweeper.forget(
+      {
+        executionId: run,
+      },
+      {
+        patienceMs: 0,
+        subprocesses: [
+          remote.adapter,
+        ],
+      },
+    );
+    expect(remote.stopped).toContain(`h-${child}`);
+    expect(await storage.list('')).toEqual([]);
+  });
+
+  it('a fresh harness needs no adapter for a child that finished', async () => {
+    const storage = createInMemoryStorage({
+      swap: true,
+    });
+    const remote = remoteAdapter(storage);
+    const harness = harnessOver(storage);
+    const leaf = runCode<ContextData, string, string>({
+      id: 'finished-leaf',
+      execute: async (input) => input,
+    });
+    const crashes = runCode<ContextData, string, string>({
+      id: 'awaits-then-crashes',
+      execute: async (input, execCtx) => {
+        await harness
+          .detachedSpawn(leaf, input, frameworkCast<Context>(execCtx), {
+            subprocess: remote.adapter,
+          })
+          .await();
+        throw new Error('crashed after the child finished');
+      },
+    });
+    const ctx = harness.createContext();
+    await expect(harness.run(crashes, 'go', ctx)).rejects.toThrow('crashed after');
+    const [child] = remote.children;
+    assert(child);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(await storage.get(`execution:${ctx.id}:child:${child}`)).toMatchObject({
+      from: 'call',
+      settled: true,
+    });
+
+    await freshHarness(storage).forget(
+      {
+        executionId: ctx.id,
+      },
+      {
+        patienceMs: 0,
+      },
+    );
+
     expect(await storage.list('')).toEqual([]);
   });
 

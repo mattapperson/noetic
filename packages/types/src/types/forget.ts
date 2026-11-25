@@ -4,6 +4,7 @@
  */
 
 import type { SpendSettlement } from './spend';
+import type { SubprocessAdapter } from './subprocess-adapter';
 
 /** @public Options for `harness.forget()`. */
 export interface ForgetOptions {
@@ -13,6 +14,14 @@ export interface ForgetOptions {
   patienceMs?: number;
   /** How long to wait for another harness's lease on the thread to run out, in ms. Default 0. */
   waitMs?: number;
+  /**
+   * Adapters that may run the forgotten runs' children out of process, beside the
+   * harness's `environment.subprocess`, the steps' own adapters, and those it has
+   * dispatched through. Pass the adapter a `detachedSpawn` call named when this
+   * harness did not make that call, or a child still running cannot be stopped and
+   * the forget is refused.
+   */
+  subprocesses?: ReadonlyArray<SubprocessAdapter>;
 }
 
 /** @public What `harness.forget()` did. */

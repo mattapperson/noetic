@@ -30,7 +30,7 @@ import { pendingTasksOf, resumableWaitsOf } from '../interpreter/connection-step
 import { turnEndingIn } from '../interpreter/turn-ending';
 import { AcpSessionStore } from '../runtime/acp-session-store';
 import { emitFrameworkEvent, getBroadcaster } from '../runtime/broadcaster-utils';
-import { adaptersUsedBy } from '../runtime/durable/child-links';
+import { adapterOfChild, adaptersUsedBy } from '../runtime/durable/child-links';
 import { stubOf } from '../runtime/durable/step-ledger';
 import { heldCallsOf, toHeldCall } from '../runtime/held-calls';
 import type { OutputSnapshot } from '../runtime/output-store';
@@ -238,23 +238,6 @@ function keepForLater(
 //#endregion
 
 const DEFAULT_THREAD_ID = '__default__';
-
-/**
- * Stop every handle `adapter` still runs for one of `executionIds`, best-effort: a
- * child that cannot be stopped is left to the adapter (spec 23 § Forgetting).
- */
-async function stopSubprocessesOf(
-  adapter: SubprocessAdapter,
-  executionIds: ReadonlySet<string>,
-): Promise<void> {
-  const live = await adapter.listLive().catch(() => []);
-  for (const handle of live) {
-    const executionId = handle.metadata?.executionId;
-    if (typeof executionId === 'string' && executionIds.has(executionId)) {
-      await adapter.stop(handle.id, 'forgotten').catch(() => undefined);
-    }
-  }
-}
 
 /**
  * `store`, noting in `ids` the id of every layer it keeps durable state for, so a
@@ -1999,14 +1982,9 @@ export class AgentHarness<
       },
       layerIds: () => this.layerIds(),
       releaseConnections: (executionId) => this.#connections.registry.releaseRun(executionId),
-      stopSubprocesses: async (executionIds) => {
-        for (const adapter of new Set([
-          this.subprocess,
-          ...adaptersUsedBy(this),
-        ])) {
-          await stopSubprocessesOf(adapter, executionIds);
-        }
-      },
+      subprocess: this.subprocess,
+      adaptersUsed: () => adaptersUsedBy(this),
+      adapterOfChild: (childId) => adapterOfChild(this, childId),
     };
   }
 
