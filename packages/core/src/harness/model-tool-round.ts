@@ -9,6 +9,7 @@ import type {
   CallModelRequest,
   Context,
   FunctionCallItem,
+  HeldCall,
   Item,
   ItemSchemaRegistry,
   Span,
@@ -18,7 +19,13 @@ import { SteerPoint, validateSchema } from '@noetic-tools/types';
 import { itemsToInput, toolModelOutputToProvider } from '../adapters/openrouter';
 import { isFunctionCall } from '../interpreter/typeguards';
 import { drainsOf } from '../runtime/drain';
-import { heldCallsOf, heldScopeOf, mayWriteHolds, waitOnHeldCalls } from '../runtime/held-calls';
+import {
+  heldCallsOf,
+  heldScopeOf,
+  mayWriteHolds,
+  noticeHeld,
+  waitOnHeldCalls,
+} from '../runtime/held-calls';
 import type { ApprovalOutcome } from '../runtime/tool-approval';
 import type { ToolCallResult } from '../runtime/tool-call';
 import { createToolResultItem, executeToolCall } from '../runtime/tool-call';
@@ -60,8 +67,8 @@ export function replayOutput(
 /** How one function call of a round ended. */
 interface FunctionCallOutcome {
   approval?: ApprovalOutcome;
-  /** The call is held for a person and has no result yet. */
-  held?: boolean;
+  /** The call is held for a person and has no result yet: what for. */
+  held?: HeldCall['reason'];
 }
 
 /** Whether a round asked for any tool calls. */
@@ -152,6 +159,8 @@ async function executeToolRound(
     });
   }
   const heldCalls: FunctionCallItem[] = [];
+  /** What each held call was last announced as held for. */
+  const announcedAs = new Map<string, HeldCall['reason']>();
   for (const [index, fc] of functionCalls.entries()) {
     await drainsOf(request.ctx)?.hold(request.ctx);
     if (request.signal?.aborted) {
@@ -190,6 +199,7 @@ async function executeToolRound(
     });
     if (call.held) {
       heldCalls.push(fc);
+      announcedAs.set(fc.callId, call.held);
       continue;
     }
     spans.recordToolSpan(modelSpan, fc.name, toolForCall?.needsApproval ?? false, call.approval);
@@ -232,10 +242,11 @@ async function executeToolRound(
         conversationInput,
         emitIfAllowed: params.emitIfAllowed,
         calls: params.calls,
-        announced: true,
+        announced: announcedAs.get(fc.callId),
       });
       if (call.held) {
         heldCalls.push(fc);
+        announcedAs.set(fc.callId, call.held);
         continue;
       }
       spans.recordToolSpan(modelSpan, fc.name, toolForCall?.needsApproval ?? false, call.approval);
@@ -262,8 +273,12 @@ async function executeFunctionCall(
     conversationInput: ReturnType<typeof itemsToInput>;
     emitIfAllowed: (eventType: string, data: Record<string, unknown>) => void;
     calls?: CallLedger;
-    /** The call was held and is being looked at again: its start was already announced. */
-    announced?: boolean;
+    /**
+     * The call was held and is being looked at again: its start was already
+     * announced, and so was its hold, for this reason. A hold for another reason
+     * (approved, then its result left open) is a new question, announced again.
+     */
+    announced?: HeldCall['reason'];
   },
 ): Promise<FunctionCallOutcome> {
   const { fc, request, allowedTools, allItems, conversationInput } = params;
@@ -319,13 +334,24 @@ async function executeFunctionCall(
     }));
   // Held: it has no result yet. Nothing goes into the conversation for it.
   if (toolResult.held) {
-    if (!params.announced) {
+    if (params.announced !== toolResult.held.reason) {
       params.emitIfAllowed('tool_call_held', {
         ...toolResult.held,
       });
+      if (request.ctx) {
+        noticeHeld({
+          harness: scope.harness,
+          ctx: request.ctx,
+          held: toolResult.held,
+          emit: (settled) =>
+            params.emitIfAllowed('tool_call_settled', {
+              ...settled,
+            }),
+        });
+      }
     }
     return {
-      held: true,
+      held: toolResult.held.reason,
     };
   }
   // A replayed call appends the item it appended before, under the same id.
@@ -516,7 +542,7 @@ async function dropHolds(
   const executionId = heldScopeOf(request.ctx);
   for (const call of calls) {
     if (await holds.load(executionId, call.callId)) {
-      await holds.close(executionId, call.callId);
+      await holds.close(executionId, call.callId, 'skipped');
     }
   }
 }

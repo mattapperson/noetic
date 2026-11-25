@@ -6,6 +6,7 @@ export * from './errors/connection-errors';
 export * from './errors/noetic-config-error';
 export * from './errors/noetic-error';
 export * from './schemas/expression';
+export * from './schemas/held-call';
 export * from './schemas/item';
 export * from './schemas/workflow';
 export * from './types/acp';

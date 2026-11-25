@@ -197,10 +197,37 @@ await harness.execute(
 - The answer is a decision item passed to `execute()` on the call's thread. It takes `allow`, `deny` or `guide` (with `guidance`), is never written to the conversation, and starts no turn of its own. The first answer wins; the same answer again is a no-op, and a different one fails with `hold_refused`.
 - `argsHash` ties the answer to the exact call the person saw. An answer for other arguments is refused.
 - A hold may carry `dueAt`: when it passes the call is denied, or stays held with `onDue: 'keep'`.
-- The stream emits `{name}:tool_call_held` with the same fields as `pending()`.
+- The stream emits `{name}:tool_call_held` with the same fields as `pending()`, and `{name}:tool_call_settled` (`{ callId, name, argsHash, reason, by }`) once the call stops being held. `readHeldCallEvent(event)` reads either, validated.
 - On storage with [`park`](/docs/framework/durability#parked-turns) on, a turn whose only work left is a held call parks. Any harness on that storage can list it, answer it and finish the turn, and no finished call runs again.
 
-A message that arrives while a call is held is a [steer](/docs/framework/runtime#steering-a-running-turn) like any other. Sent with `deliveryMode: 'between-rounds'` or `'next-item'`, it skips the held calls and the turn goes on with it; a layer's `onSteer` can defer or drop it at the `held` steer point. A default (`next-turn`) message waits for the turn to end and does not disturb it.
+### Showing a person: `onHeld`
+
+The approver decides what is held; `onHeld` is where a host shows a held call to a person. It is called once per question, with a signal that aborts when the call is settled some other way. Return the answer and the harness takes it as the decision item above, waking the turn if it parked:
+
+```ts validate=none
+const harness = new AgentHarness({
+  name: 'ops-agent',
+  params: {},
+  tools: [deleteTool],
+  // Answer what needs no one here; hold the rest for a person.
+  approveToolCall: ({ toolName }) => (alwaysSafe(toolName) ? { action: 'allow' } : { action: 'hold' }),
+  onHeld: async (call, { signal }) => {
+    // call.reason: 'approval' (not run yet), 'result' (a tool's hold()), or
+    // 'outcome' (a durable tool cut off, effect unknown: allow runs it again).
+    const answer = await showCard(call, signal); // close the card when signal aborts
+    if (answer === undefined) {
+      return undefined; // leave it held; answer later with execute()
+    }
+    return answer.ok ? { action: 'allow' } : { action: 'deny', guidance: 'The user said no.' };
+  },
+});
+```
+
+- `signal.reason` says how the call was settled: `answer` (a decision, from anywhere; also a call another harness over the same storage settled and finished the turn on, however it ended, seen within two seconds), `due` (its deadline), `skipped` (a steer), or `cancelled` (the turn was aborted or interrupted, the agent gave up, or the harness closed). An answer returned after that is dropped, and nothing throws.
+- The harness never waits on the handler: the call waits on its record as it would for any answer. A handler that throws is logged, and the call stays held.
+- A handler lives in its process. After a restart, list what is still held with `pending()` and answer it with `execute()`.
+
+A message that arrives while a call is held is a [steer](/docs/framework/runtime#steering-a-running-turn) like any other. Sent with `deliveryMode: 'between-rounds'` or `'next-item'`, it skips the held calls and the turn goes on with it. Set `steerWhileHeld: 'defer'` on the harness to keep the call's question open instead: the steer waits behind the held calls and lands once they are answered. A layer's `onSteer` still has the last word at the `held` steer point. A default (`next-turn`) message waits for the turn to end and does not disturb it.
 
 A tool can also leave its own **result** open, by returning `hold()` once it has done its part:
 

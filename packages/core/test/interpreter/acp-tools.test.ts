@@ -10,6 +10,7 @@ import type {
   AcpAgent,
   ContextLayer,
   FunctionCallItem,
+  HeldCallContext,
   Item,
   ToolApprover,
 } from '@noetic-tools/types';
@@ -923,5 +924,80 @@ describe('mergeBridgedItems', () => {
       'x',
       'b-1',
     ]);
+  });
+});
+
+describe('a bridged call held for a person', () => {
+  it('is settled as cancelled, and its onHeld signal aborts, when the agent stops waiting', async () => {
+    const shown: HeldCallContext[] = [];
+    const harness = new AgentHarness({
+      name: 'test',
+      params: {},
+      approveToolCall: () => ({
+        action: 'hold',
+      }),
+      onHeld: (_call, held) => {
+        shown.push(held);
+        return new Promise<undefined>(() => {});
+      },
+    });
+    const ctx = harness.createContext();
+    const run = newRun();
+    let answered: unknown;
+    const agent: AcpAgent = {
+      ...toolCallingAgent([], run),
+      async connect(connect) {
+        const connection = await toolCallingAgent([], run).connect(connect);
+        const tools = connect.host.tools;
+        assert(tools);
+        return {
+          ...connection,
+          async newSession(opts) {
+            const session = await connection.newSession(opts);
+            return {
+              ...session,
+              async prompt(prompt) {
+                const giveUp = new AbortController();
+                const calling = tools.call({
+                  name: 'gated',
+                  args: {},
+                  signal: giveUp.signal,
+                });
+                for (let i = 0; i < 2e3 && shown.length === 0; i += 1) {
+                  await new Promise((resolve) => setTimeout(resolve, 1));
+                }
+                giveUp.abort();
+                answered = await calling;
+                return await session.prompt(prompt);
+              },
+            };
+          },
+        };
+      },
+    };
+    await execute(
+      step.acpAgent({
+        id: 'gives-up',
+        agent,
+        prompt: 'go',
+        tools: [
+          gated,
+        ],
+      }),
+      undefined,
+      ctx,
+    );
+    const [held] = shown;
+    assert(held);
+    expect(held.signal.aborted).toBe(true);
+    expect(held.signal.reason).toMatchObject({
+      by: 'cancelled',
+    });
+    expect(answered).toBeDefined();
+    expect(
+      await harness.pending({
+        executionId: ctx.id,
+      }),
+    ).toEqual([]);
   });
 });

@@ -13,7 +13,12 @@ import type {
   StorageAdapter,
 } from './context-layer';
 import type { DetachedHandle } from './detached';
-import type { HarnessJudgmentContract, ToolApprover } from './harness-judgment';
+import type {
+  HarnessJudgmentContract,
+  HeldCallHandler,
+  HeldSteerPolicy,
+  ToolApprover,
+} from './harness-judgment';
 import type { HarnessPlatform } from './harness-platform';
 import type { HarnessResponse, StreamEvent, StreamingItem } from './harness-result';
 import type { ExecuteArgument, Item, ItemSchemaExtensions } from './items';
@@ -60,6 +65,10 @@ export interface AgentConfig<TParams extends Record<string, unknown> = Record<st
   emitItemsOnReplay?: boolean;
   /** Approves or refuses calls to tools that declare `needsApproval`. Without one, those calls run unapproved. */
   approveToolCall?: ToolApprover;
+  /** Puts a held call in front of a person and returns their answer (spec 08 § Held tool calls). */
+  onHeld?: HeldCallHandler;
+  /** What a steer does at the `held` steer point before any layer has a say. Default `apply`. */
+  steerWhileHeld?: HeldSteerPolicy;
   /** The clock deadlines, leases and wake times are read from. Default `Date.now`. */
   now?: () => number;
 }

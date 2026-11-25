@@ -2174,10 +2174,23 @@ harness.execute({ type: 'noetic:decision', callId, argsHash?, output }, { thread
 // a function_call_output item naming a held call is refused (hold_refused): use the { callId, output } decision
 // output must be a JSON value. Add executionId to answer a call held by a run you started yourself
 // (parseAndRunWorkflow), which has no thread. Several decisions in one list: all read first, then taken in order.
-// HeldCall: { callId, name, args, argsHash, reason: 'approval' | 'result', dueAt?, onDue?, request? }
+// HeldCall: { callId, name, args, argsHash, reason: 'approval' | 'result' | 'outcome', dueAt?, onDue?, request? }
+
+// Showing a person: the approver decides, onHeld shows what it held. Once per question per process.
+new AgentHarness({
+  approveToolCall: (call) => (safe(call) ? { action: 'allow' } : { action: 'hold' }),
+  onHeld: async (call, { signal, executionId, threadId }) => {
+    // return a HeldResolution ({ action, guidance? } | { output }) to answer, undefined to leave it held
+    return (await card(call, signal)) ? { action: 'allow' } : { action: 'deny', guidance: 'no' };
+  },
+  steerWhileHeld: 'defer', // default 'apply': a steer skips held calls; 'defer' waits behind them
+});
+// signal aborts when settled another way; signal.reason: HeldCallSettled
+// HeldCallSettled: { callId, name, argsHash, reason, by: 'answer' | 'due' | 'skipped' | 'cancelled' } // settled by another harness → 'answer'
+readHeldCallEvent(event, agentName?): { type: 'held', call: HeldCall } | { type: 'settled', settled: HeldCallSettled } | undefined
 ```
 
-A call that needs approval with no approver, or whose approver answers `hold`, is held: its siblings run, nothing is written for it, and the turn waits (and parks, with `park` on) until the decision. A decision is never written to the conversation and starts no turn. Refusals of an answer are `NoeticError` `hold_refused`; a decision that does not fit at all (no stuck turn, wrong kind of action) is `decision_refused`. Event: `{name}:tool_call_held`.
+A call that needs approval with no approver, or whose approver answers `hold`, is held: its siblings run, nothing is written for it, and the turn waits (and parks, with `park` on) until the decision. A decision is never written to the conversation and starts no turn. Refusals of an answer are `NoeticError` `hold_refused`; a decision that does not fit at all (no stuck turn, wrong kind of action) is `decision_refused`. Events: `{name}:tool_call_held`, `{name}:tool_call_settled` (aborted/interrupted turns settle `cancelled` and clear their held calls).
 
 ### Triggers as data, durable `emit`
 

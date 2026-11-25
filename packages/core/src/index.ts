@@ -115,11 +115,14 @@ export { cosineSimilarity } from './conditions/cosine-similarity';
 /** @public */
 export {
   DECISION_ITEM_TYPE,
+  HeldCallSchema,
+  HeldCallSettledSchema,
   isDecisionItem,
   isNoeticConfigError,
   isNoeticError,
   NoeticConfigError,
   NoeticErrorImpl,
+  readHeldCallEvent,
 } from '@noetic-tools/types';
 
 //#endregion
@@ -599,7 +602,12 @@ export type {
   HarnessJudgmentContract,
   HarnessStatus,
   HeldCall,
+  HeldCallContext,
+  HeldCallEvent,
+  HeldCallHandler,
+  HeldCallSettled,
   HeldResolution,
+  HeldSteerPolicy,
   ItemSchemaConfig,
   ReanchorReason,
   RecallLayerOutput,

@@ -39,7 +39,13 @@ import type { SplitStepTools } from '../connections/step-tools';
 import { offeredTools, stepConnectionsOf } from '../connections/step-tools';
 import { ToolAttr } from '../observability/genai-attributes';
 import { drainsOf } from '../runtime/drain';
-import { heldCallsOf, heldScopeOf, mayWriteHolds, waitOnHeldCalls } from '../runtime/held-calls';
+import {
+  heldCallsOf,
+  heldScopeOf,
+  mayWriteHolds,
+  noticeHeld,
+  waitOnHeldCalls,
+} from '../runtime/held-calls';
 import { createToolResultItem, executeToolCall, resolveWireJsonSchema } from '../runtime/tool-call';
 import { sanitizeToolNameForWire } from '../util/tool-name';
 import type { AcpEventBridge } from './acp-events';
@@ -487,8 +493,21 @@ export class AcpToolRunner implements AcpToolHost {
           callId: params.callId ?? held.callId,
           heldAs: held.callId,
         });
+        noticeHeld({
+          harness: ctx.harness,
+          ctx,
+          held,
+          emit: (settled) =>
+            binding.events.toolEvent('tool_call_settled', {
+              ...settled,
+              callId: params.callId ?? settled.callId,
+              heldAs: settled.callId,
+            }),
+        });
       }
-      await waitOnHeldCalls({
+      // The wait throws `cancelled` when the agent's signal ends it, as it does for
+      // the turn's own abort: only the latter is the turn's to handle.
+      const gaveUp = await waitOnHeldCalls({
         harness: ctx.harness,
         ctx,
         callIds: [
@@ -496,11 +515,19 @@ export class AcpToolRunner implements AcpToolHost {
         ],
         signal,
         park: false,
-      });
+      }).then(
+        () => signal.aborted,
+        (error: unknown) => {
+          if (signal.aborted) {
+            return true;
+          }
+          throw error;
+        },
+      );
       // The agent stopped waiting for this call: nobody is left to give an answer to.
-      if (signal.aborted) {
+      if (gaveUp) {
         if (mayWriteHolds(ctx)) {
-          await heldCallsOf(ctx.harness).close(heldScopeOf(ctx), held.callId);
+          await heldCallsOf(ctx.harness).close(heldScopeOf(ctx), held.callId, 'cancelled');
         }
         return {
           output: CANCELLED_OUTPUT,

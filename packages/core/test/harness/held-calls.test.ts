@@ -5,11 +5,26 @@
 
 import { afterEach, describe, expect, it, spyOn } from 'bun:test';
 import assert from 'node:assert';
-import type { StorageAdapter } from '@noetic-tools/context';
-import type { ContextData, HeldCall, ToolApprover } from '@noetic-tools/types';
-import { isNoeticError, SteeringAction } from '@noetic-tools/types';
+import type { ContextLayer, StorageAdapter } from '@noetic-tools/context';
+import type {
+  ContextData,
+  HeldCall,
+  HeldCallContext,
+  HeldCallEvent,
+  HeldCallHandler,
+  HeldResolution,
+  ToolApprover,
+} from '@noetic-tools/types';
+import {
+  isNoeticError,
+  readHeldCallEvent,
+  Slot,
+  SteerAction,
+  SteeringAction,
+  SteerPoint,
+} from '@noetic-tools/types';
 import { z } from 'zod';
-import { callModel } from '../../src/builders/step-builders';
+import { callModel, invokeTool } from '../../src/builders/step-builders';
 import { hold, tool } from '../../src/builders/tool-builder';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { createInMemoryStorage } from '../../src/runtime/in-memory-storage';
@@ -76,7 +91,13 @@ interface Setup {
   agent: ReturnType<typeof callModel<ContextData, string, string>>;
   /** Every time a tool body ran, by tool name. */
   runs: string[];
-  harness: (opts?: { approveToolCall?: ToolApprover; storage?: StorageAdapter }) => AgentHarness;
+  harness: (opts?: {
+    approveToolCall?: ToolApprover;
+    storage?: StorageAdapter;
+    onHeld?: HeldCallHandler;
+    steerWhileHeld?: 'apply' | 'defer';
+    contextLayers?: ContextLayer[];
+  }) => AgentHarness;
 }
 
 const THREAD = {
@@ -132,6 +153,24 @@ function setup(reply: (input: unknown[]) => unknown[]): Setup {
       });
     },
   });
+  // Needs approval, then leaves its result open: two questions for one call.
+  const ship = tool({
+    name: 'ship',
+    description: 'Ship an order, once a person confirms the address.',
+    input: z.object({
+      order: z.string(),
+    }),
+    output: z.string(),
+    needsApproval: true,
+    execute: async ({ order }) => {
+      runs.push('ship');
+      return hold({
+        request: {
+          confirm: `address for ${order}`,
+        },
+      });
+    },
+  });
   const agent = callModel<ContextData, string, string>({
     id: 'agent',
     model: 'test/model',
@@ -139,6 +178,7 @@ function setup(reply: (input: unknown[]) => unknown[]): Setup {
       lookup,
       refund,
       askPerson,
+      ship,
     ],
   });
   return {
@@ -151,6 +191,9 @@ function setup(reply: (input: unknown[]) => unknown[]): Setup {
         params: {},
         agentGraph: agent,
         approveToolCall: opts?.approveToolCall,
+        onHeld: opts?.onHeld,
+        steerWhileHeld: opts?.steerWhileHeld,
+        contextLayers: opts?.contextLayers,
         callModelDefaults: {
           provider: 'openrouter',
           apiKey: 'sk-test',
@@ -1076,3 +1119,634 @@ describe('a tool call key', () => {
     expect(child.id).not.toBe(root.id);
   });
 });
+
+//#region Showing a person: onHeld
+
+/** Every held-call event the thread's stream carries, read. */
+async function collectHeld(h: AgentHarness, seen: HeldCallEvent[]): Promise<void> {
+  for await (const event of h.getFullStream(THREAD)) {
+    const read = readHeldCallEvent(event, 'held');
+    if (read) {
+      seen.push(read);
+    }
+  }
+}
+
+function followHeld(h: AgentHarness): HeldCallEvent[] {
+  const seen: HeldCallEvent[] = [];
+  void collectHeld(h, seen);
+  return seen;
+}
+
+async function until(check: () => boolean, what: string): Promise<void> {
+  for (let i = 0; i < 2e3; i += 1) {
+    if (check()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+  expect.unreachable(`timed out waiting for ${what}`);
+}
+
+/** A card a person answers later: the handler waits on it, and sees it closed. */
+interface Card {
+  call: HeldCall;
+  held: HeldCallContext;
+  answer: (resolution: HeldResolution | undefined) => void;
+}
+
+function cards(): {
+  shown: Card[];
+  onHeld: HeldCallHandler;
+} {
+  const shown: Card[] = [];
+  return {
+    shown,
+    onHeld: (call, held) =>
+      new Promise((resolve) => {
+        shown.push({
+          call,
+          held,
+          answer: resolve,
+        });
+      }),
+  };
+}
+
+describe('onHeld', () => {
+  it('shows the call, and its answer runs it once; the stream says held, then settled', async () => {
+    const { runs, harness } = setup(LOOKUP_THEN_REFUND);
+    const { shown, onHeld } = cards();
+    const h = harness({
+      approveToolCall: holdIt,
+      onHeld,
+    });
+    const events = followHeld(h);
+    await h.execute('refund A1', THREAD);
+    await until(() => shown.length === 1, 'the card');
+    const [card] = shown;
+    assert(card);
+    expect(card.call).toMatchObject({
+      callId: 'call_refund',
+      name: 'refund',
+      reason: 'approval',
+    });
+    expect(card.held.threadId).toBe('t');
+    expect(card.held.executionId).toBeString();
+    expect(card.held.signal.aborted).toBe(false);
+
+    card.answer({
+      action: 'allow',
+    });
+    const response = await h.getAgentResponse(THREAD);
+    expect(response.text).toBe('order A1 found | refunded 420');
+    expect(runs).toEqual([
+      'lookup',
+      'refund',
+    ]);
+    expect(shown).toHaveLength(1);
+    await until(() => events.length === 2, 'both events');
+    expect(events[0]).toMatchObject({
+      type: 'held',
+      call: {
+        callId: 'call_refund',
+        argsHash: card.call.argsHash,
+      },
+    });
+    expect(events[1]).toEqual({
+      type: 'settled',
+      settled: {
+        callId: 'call_refund',
+        name: 'refund',
+        argsHash: card.call.argsHash,
+        reason: 'approval',
+        by: 'answer',
+      },
+    });
+    expect(card.held.signal.aborted).toBe(true);
+  });
+
+  it('a deny becomes the refusal the model sees', async () => {
+    const { runs, harness } = setup(LOOKUP_THEN_REFUND);
+    const h = harness({
+      approveToolCall: holdIt,
+      onHeld: () => ({
+        action: 'deny',
+        guidance: 'the user said no',
+      }),
+    });
+    await h.execute('refund A1', THREAD);
+    expect((await h.getAgentResponse(THREAD)).text).toBe(
+      'order A1 found | Tool call denied: the user said no',
+    );
+    expect(runs).toEqual([
+      'lookup',
+    ]);
+  });
+
+  it('answers a tool that left its result open with an output', async () => {
+    const { runs, harness } = setup(
+      modelAsking([
+        call('ask_person', {
+          question: 'Ship to the old address?',
+        }),
+      ]),
+    );
+    const asked: HeldCall[] = [];
+    const h = harness({
+      onHeld: (held) => {
+        asked.push(held);
+        return {
+          output: 'No, use the new one.',
+        };
+      },
+    });
+    await h.execute('check the address', THREAD);
+    expect((await h.getAgentResponse(THREAD)).text).toBe('No, use the new one.');
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toMatchObject({
+      reason: 'result',
+      request: {
+        question: 'Ship to the old address?',
+      },
+    });
+    expect(runs).toEqual([
+      'ask_person',
+    ]);
+  });
+
+  it('leaves the call held when it returns nothing, for an answer that comes another way', async () => {
+    const { harness } = setup(LOOKUP_THEN_REFUND);
+    let asked = 0;
+    const h = harness({
+      approveToolCall: holdIt,
+      onHeld: () => {
+        asked += 1;
+        return undefined;
+      },
+    });
+    await h.execute('refund A1', THREAD);
+    const held = await heldCall(h);
+    expect(asked).toBe(1);
+    await decide(h, THREAD, {
+      callId: held.callId,
+      action: 'allow',
+    });
+    expect((await h.getAgentResponse(THREAD)).text).toContain('refunded 420');
+  });
+
+  it('that throws is logged, and the call stays held', async () => {
+    const { harness } = setup(LOOKUP_THEN_REFUND);
+    const warn = spyOn(console, 'warn').mockImplementation(() => {});
+    const h = harness({
+      approveToolCall: holdIt,
+      onHeld: () => {
+        throw new Error('no socket');
+      },
+    });
+    await h.execute('refund A1', THREAD);
+    const held = await heldCall(h);
+    await until(
+      () => warn.mock.calls.some((args) => String(args[0]).includes('no socket')),
+      'the warning',
+    );
+    warn.mockRestore();
+    expect(await h.pending(THREAD)).toHaveLength(1);
+    await decide(h, THREAD, {
+      callId: held.callId,
+      action: 'allow',
+    });
+    expect((await h.getAgentResponse(THREAD)).text).toContain('refunded 420');
+  });
+
+  it('is told by its signal when a decision answered first, and its late answer is dropped quietly', async () => {
+    const { harness } = setup(LOOKUP_THEN_REFUND);
+    const { shown, onHeld } = cards();
+    const h = harness({
+      approveToolCall: holdIt,
+      onHeld,
+    });
+    await h.execute('refund A1', THREAD);
+    await until(() => shown.length === 1, 'the card');
+    const [card] = shown;
+    assert(card);
+
+    await decide(h, THREAD, {
+      callId: card.call.callId,
+      action: 'deny',
+      guidance: 'answered elsewhere',
+    });
+    expect(card.held.signal.aborted).toBe(true);
+    expect(card.held.signal.reason).toMatchObject({
+      callId: 'call_refund',
+      by: 'answer',
+    });
+    const warn = spyOn(console, 'warn').mockImplementation(() => {});
+    card.answer({
+      action: 'allow',
+    });
+    const response = await h.getAgentResponse(THREAD);
+    warn.mockRestore();
+    expect(response.text).toContain('Tool call denied: answered elsewhere');
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('is told by its signal when the deadline passes', async () => {
+    const { harness } = setup(LOOKUP_THEN_REFUND);
+    const { shown, onHeld } = cards();
+    const h = harness({
+      approveToolCall: () => ({
+        action: SteeringAction.Hold,
+        dueAt: Date.now() + 30,
+      }),
+      onHeld,
+    });
+    const events = followHeld(h);
+    await h.execute('refund A1', THREAD);
+    await h.getAgentResponse(THREAD);
+    const [card] = shown;
+    assert(card);
+    expect(card.held.signal.reason).toMatchObject({
+      by: 'due',
+    });
+    await until(() => events.some((event) => event.type === 'settled'), 'the settled event');
+    expect(events.at(-1)).toMatchObject({
+      type: 'settled',
+      settled: {
+        by: 'due',
+      },
+    });
+  });
+
+  it('is told by its signal when the turn is aborted', async () => {
+    const { harness } = setup(LOOKUP_THEN_REFUND);
+    const { shown, onHeld } = cards();
+    const h = harness({
+      approveToolCall: holdIt,
+      onHeld,
+    });
+    await h.execute('refund A1', THREAD);
+    await until(() => shown.length === 1, 'the card');
+    const [card] = shown;
+    assert(card);
+    await h.abort(THREAD);
+    await until(() => card.held.signal.aborted, 'the signal');
+    expect(card.held.signal.reason).toMatchObject({
+      by: 'cancelled',
+    });
+    expect(await h.pending(THREAD)).toEqual([]);
+  });
+
+  it('is told by its signal when an interrupt restarts the turn, and no record is left', async () => {
+    const { runs, harness } = setup(LOOKUP_THEN_REFUND);
+    const { shown, onHeld } = cards();
+    const h = harness({
+      approveToolCall: holdIt,
+      onHeld,
+    });
+    await h.execute('refund A1', THREAD);
+    await until(() => shown.length === 1, 'the card');
+    const [card] = shown;
+    assert(card);
+    await h.execute('stop, refund B2 instead', {
+      ...THREAD,
+      deliveryMode: 'interrupt',
+    });
+    await until(() => card.held.signal.aborted, 'the signal');
+    expect(card.held.signal.reason).toMatchObject({
+      by: 'cancelled',
+    });
+    expect(runs.filter((run) => run === 'refund')).toEqual([]);
+  });
+
+  it('is let go when the harness closes', async () => {
+    const { harness } = setup(LOOKUP_THEN_REFUND);
+    const { shown, onHeld } = cards();
+    const h = harness({
+      approveToolCall: holdIt,
+      onHeld,
+    });
+    await h.execute('refund A1', THREAD);
+    await until(() => shown.length === 1, 'the card');
+    await h.close();
+    expect(shown[0]?.held.signal.aborted).toBe(true);
+  });
+
+  it('answers a turn that parked while the card was open, and wakes it', async () => {
+    const { runs, harness } = setup(LOOKUP_THEN_REFUND);
+    const { shown, onHeld } = cards();
+    const h = harness({
+      approveToolCall: holdIt,
+      onHeld,
+      storage: createInMemoryStorage({
+        swap: true,
+      }),
+    });
+    await h.execute('refund A1', THREAD);
+    expect((await h.getAgentResponse(THREAD)).parked).toBeDefined();
+    const [card] = shown;
+    assert(card);
+    expect(card.held.signal.aborted).toBe(false);
+
+    card.answer({
+      action: 'allow',
+    });
+    await until(() => runs.includes('refund'), 'the refund');
+    await until(() => card.held.signal.aborted, 'the settle');
+    const response = await h.getAgentResponse(THREAD);
+    expect(response.text).toBe('order A1 found | refunded 420');
+    expect(shown).toHaveLength(1);
+    await h.close();
+  });
+});
+
+describe('onHeld, more questions and more places', () => {
+  it('asks again when an approved call then leaves its result open', async () => {
+    const { runs, harness } = setup(
+      modelAsking([
+        call('ship', {
+          order: 'A1',
+        }),
+      ]),
+    );
+    const asked: HeldCall['reason'][] = [];
+    const h = harness({
+      approveToolCall: holdIt,
+      onHeld: (held) => {
+        asked.push(held.reason);
+        return held.reason === 'approval'
+          ? {
+              action: 'allow',
+            }
+          : {
+              output: 'confirmed: 1 Main St',
+            };
+      },
+    });
+    const events = followHeld(h);
+    await h.execute('ship A1', THREAD);
+    expect((await h.getAgentResponse(THREAD)).text).toBe('confirmed: 1 Main St');
+    expect(asked).toEqual([
+      'approval',
+      'result',
+    ]);
+    expect(runs).toEqual([
+      'ship',
+    ]);
+    await until(() => events.length === 4, 'both questions held and settled');
+    expect(events.map((event) => event.type)).toEqual([
+      'held',
+      'settled',
+      'held',
+      'settled',
+    ]);
+  });
+
+  it('answers the execution that held the call, never a later turn on the thread', async () => {
+    const { harness } = setup(LOOKUP_THEN_REFUND);
+    const h = harness({
+      approveToolCall: holdIt,
+    });
+    await h.execute('refund A1', THREAD);
+    const held = await heldCall(h);
+    const reason = await refusal(() =>
+      h.answerHeld({
+        executionId: 'an-earlier-turn',
+        threadId: 't',
+        callId: held.callId,
+        argsHash: held.argsHash,
+        resolution: {
+          action: 'allow',
+        },
+      }),
+    );
+    expect(reason).toBe('no call with this id is held');
+    expect(await h.pending(THREAD)).toHaveLength(1);
+    await decide(h, THREAD, {
+      callId: held.callId,
+      action: 'deny',
+    });
+    await h.getAgentResponse(THREAD);
+  });
+
+  it('is told, by a sweep, when another harness answers and finishes the turn', async () => {
+    const fixture = setup(LOOKUP_THEN_REFUND);
+    const storage = createInMemoryStorage({
+      swap: true,
+    });
+    const { shown, onHeld } = cards();
+    const a = fixture.harness({
+      storage,
+      approveToolCall: holdIt,
+      onHeld,
+    });
+    await a.execute('refund A1', THREAD);
+    expect((await a.getAgentResponse(THREAD)).parked).toBeDefined();
+    const [card] = shown;
+    assert(card);
+
+    const b = fixture.harness({
+      storage,
+      approveToolCall: holdIt,
+    });
+    const [held] = await b.pending(THREAD);
+    assert(held);
+    await decide(b, THREAD, {
+      callId: held.callId,
+      action: 'allow',
+    });
+    expect((await b.getAgentResponse(THREAD)).text).toBe('order A1 found | refunded 420');
+    await until(() => card.held.signal.aborted, 'the sweep');
+    expect(card.held.signal.reason).toMatchObject({
+      by: 'answer',
+    });
+    await a.close();
+    await b.close();
+  }, 10e3);
+
+  it('shows a call an invokeTool step holds, and its answer runs the step', async () => {
+    const runs: string[] = [];
+    const add = tool({
+      name: 'add',
+      description: 'Add.',
+      input: z.object({
+        a: z.number(),
+        b: z.number(),
+      }),
+      output: z.number(),
+      needsApproval: true,
+      execute: async ({ a, b }) => {
+        runs.push('add');
+        return a + b;
+      },
+    });
+    const asked: HeldCall[] = [];
+    const h = new AgentHarness({
+      name: 'held',
+      params: {},
+      onHeld: (held) => {
+        asked.push(held);
+        return {
+          action: 'allow',
+        };
+      },
+    });
+    const total = await h.run(
+      invokeTool({
+        id: 'add-step',
+        tool: add,
+      }),
+      {
+        a: 1,
+        b: 2,
+      },
+      h.createContext(),
+    );
+    expect(total).toBe(3);
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toMatchObject({
+      name: 'add',
+      reason: 'approval',
+    });
+    expect(runs).toEqual([
+      'add',
+    ]);
+  });
+
+  it('answers harness.approve(), the seam other packages ask', async () => {
+    const asked: HeldCall[] = [];
+    const h = new AgentHarness({
+      name: 'held',
+      params: {},
+      onHeld: (held, { threadId }) => {
+        asked.push(held);
+        expect(threadId).toBeUndefined();
+        return {
+          action: 'deny',
+          guidance: 'not today',
+        };
+      },
+    });
+    const decision = await h.approve({
+      toolName: 'plan/exit',
+      toolArgs: {
+        plan: 'x',
+      },
+      callId: 'plan-1',
+      ctx: h.createContext(),
+    });
+    expect(decision).toMatchObject({
+      action: 'deny',
+      guidance: 'not today',
+    });
+    expect(asked.map((held) => held.name)).toEqual([
+      'plan/exit',
+    ]);
+  });
+});
+
+describe('a steer while a call is held, as the harness says', () => {
+  it('skips the held call by default, and the card is told', async () => {
+    const { runs, harness } = setup(LOOKUP_THEN_REFUND);
+    const { shown, onHeld } = cards();
+    const h = harness({
+      approveToolCall: holdIt,
+      onHeld,
+    });
+    const events = followHeld(h);
+    await h.execute('refund A1', THREAD);
+    await until(() => shown.length === 1, 'the card');
+    await h.execute('never mind the refund', {
+      ...THREAD,
+      deliveryMode: 'between-rounds',
+    });
+    const response = await h.getAgentResponse(THREAD);
+    expect(response.text).toContain('Skipped: a new message arrived before this tool call ran.');
+    expect(runs).toEqual([
+      'lookup',
+    ]);
+    expect(shown[0]?.held.signal.reason).toMatchObject({
+      by: 'skipped',
+    });
+    await until(() => events.length === 2, 'the settled event');
+    expect(events[1]).toMatchObject({
+      type: 'settled',
+      settled: {
+        by: 'skipped',
+      },
+    });
+  });
+
+  it('with steerWhileHeld: defer, waits behind the call; the card answers and the steer lands after', async () => {
+    const { runs, server, harness } = setup(LOOKUP_THEN_REFUND);
+    const { shown, onHeld } = cards();
+    const h = harness({
+      approveToolCall: holdIt,
+      onHeld,
+      steerWhileHeld: 'defer',
+    });
+    await h.execute('refund A1', THREAD);
+    await until(() => shown.length === 1, 'the card');
+    await h.execute('and say thanks', {
+      ...THREAD,
+      deliveryMode: 'between-rounds',
+    });
+    // Offered and deferred: the card is still open, nothing was skipped.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const [card] = shown;
+    assert(card);
+    expect(card.held.signal.aborted).toBe(false);
+    expect(await h.pending(THREAD)).toHaveLength(1);
+
+    card.answer({
+      action: 'allow',
+    });
+    const response = await h.getAgentResponse(THREAD);
+    expect(response.text).toContain('refunded 420');
+    expect(response.text).not.toContain('Skipped');
+    expect(runs).toEqual([
+      'lookup',
+      'refund',
+    ]);
+    // The steer reached the model in the round after the refund's result.
+    const sent = JSON.stringify(server.rounds.at(-1)?.input);
+    expect(sent.indexOf('refunded 420')).toBeLessThan(sent.indexOf('and say thanks'));
+    expect(shown).toHaveLength(1);
+  });
+
+  it('a layer still has the last word over the harness default', async () => {
+    const { runs, harness } = setup(LOOKUP_THEN_REFUND);
+    const applyAtHeld: ContextLayer = {
+      id: 'apply-at-held',
+      slot: Slot.STEERING,
+      scope: 'execution',
+      hooks: {
+        onSteer: async ({ point }) =>
+          point === SteerPoint.Held
+            ? {
+                action: SteerAction.Apply,
+              }
+            : {},
+      },
+    };
+    const h = harness({
+      approveToolCall: holdIt,
+      steerWhileHeld: 'defer',
+      contextLayers: [
+        applyAtHeld,
+      ],
+    });
+    await h.execute('refund A1', THREAD);
+    await heldCall(h);
+    await h.execute('never mind', {
+      ...THREAD,
+      deliveryMode: 'between-rounds',
+    });
+    expect((await h.getAgentResponse(THREAD)).text).toContain('Skipped');
+    expect(runs).toEqual([
+      'lookup',
+    ]);
+  });
+});
+
+//#endregion

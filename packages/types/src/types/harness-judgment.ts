@@ -136,6 +136,57 @@ export type HeldResolution =
       readonly output: unknown;
     };
 
+/**
+ * @public How a held call stopped being held (spec 08 § Held tool calls). Carried by the
+ * `tool_call_settled` event, and as `signal.reason` of the `onHeld` handler's signal.
+ *
+ * - `answer`: a decision settled it, from `execute()`, from the `onHeld` handler
+ *   itself, or from another harness over the same storage. A call another harness
+ *   settled and finished its turn on is reported as answered, however it ended.
+ * - `due`: its deadline passed with `onDue: 'deny'`.
+ * - `skipped`: a steer applied at the `held` steer point skipped it.
+ * - `cancelled`: its turn was aborted, interrupted or abandoned, the agent that asked
+ *   stopped waiting, or the harness closed.
+ */
+export interface HeldCallSettled {
+  readonly callId: string;
+  readonly name: string;
+  readonly argsHash: string;
+  readonly reason: HeldCall['reason'];
+  readonly by: 'answer' | 'due' | 'skipped' | 'cancelled';
+}
+
+/** @public What the `onHeld` handler is given beside the call. */
+export interface HeldCallContext {
+  /**
+   * Aborts once the call is settled any way at all; `signal.reason` is the
+   * `HeldCallSettled`. A host closes the question it showed when it aborts. A call
+   * settled by another harness over shared storage is seen within two seconds.
+   */
+  readonly signal: AbortSignal;
+  /** The execution the call is held under. */
+  readonly executionId: string;
+  /** The thread, when the call is held by a thread's turn. */
+  readonly threadId?: string;
+}
+
+/**
+ * @public Puts a held call in front of a person (`AgentHarnessOpts.onHeld`). Called once
+ * per question per process. Return the person's answer, taken as a decision item passed
+ * to `execute()` is, or `undefined` to leave the call held for an answer that comes
+ * another way. An answer returned after `signal` aborted is dropped.
+ */
+export type HeldCallHandler = (
+  call: HeldCall,
+  held: HeldCallContext,
+) => HeldResolution | undefined | Promise<HeldResolution | undefined>;
+
+/**
+ * @public What a steer does at the `held` steer point before any layer has a say:
+ * `apply` skips the held calls for it, `defer` keeps it queued behind them.
+ */
+export type HeldSteerPolicy = 'apply' | 'defer';
+
 /** @public What a tool returns to leave its result open: see `hold()`. */
 export interface ToolHold {
   readonly kind: 'noetic/tool-hold';
