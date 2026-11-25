@@ -16,6 +16,7 @@ import type {
   SubprocessAdapter,
 } from '@noetic-tools/types';
 import { frameworkCast, NoeticErrorImpl } from '@noetic-tools/types';
+import { linkIfOutOfProcess } from '../runtime/durable/child-links';
 import { DetachedHandleImpl } from '../util/detached-handle';
 import { executeAcpAgent } from './execute-acp-agent';
 import {
@@ -125,6 +126,12 @@ async function dispatchViaAdapter<TContext, I, O>(
   executor: () => Promise<O>,
 ): Promise<O> {
   const adapter = resolveStepAdapter(step, ctx);
+  if (executionId !== ctx.id) {
+    await linkIfOutOfProcess(ctx, adapter, {
+      childId: executionId,
+      stepId: step.id,
+    });
+  }
   const request: StepSubprocessRequest = {
     kind: 'step',
     stepId: step.id,

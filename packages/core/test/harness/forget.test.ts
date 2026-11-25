@@ -5,8 +5,16 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import type { StorageAdapter } from '@noetic-tools/context';
-import type { CallModelRequest, ContextData, ContextLayer, LLMResponse } from '@noetic-tools/types';
+import type {
+  CallModelRequest,
+  ContextData,
+  ContextLayer,
+  LLMResponse,
+  SubprocessAdapter,
+  SubprocessHandle,
+} from '@noetic-tools/types';
 import { frameworkCast, isNoeticError } from '@noetic-tools/types';
+import { spawn } from '../../src/builders/spawn-builder';
 import { callModel, runCode, step } from '../../src/builders/step-builders';
 import { connection } from '../../src/connections/handle';
 import { createInMemoryConnection } from '../../src/connections/in-memory-connection';
@@ -1184,5 +1192,264 @@ describe('forget and connection-pool leases', () => {
     expect(provider.provisioned[0]?.released).toBe(true);
     expect(await storage.list('noetic/connections/leases/')).toEqual([]);
     await harness.close();
+  });
+});
+
+describe('forget and children spawned out of process', () => {
+  /**
+   * A subprocess adapter that runs a spawn elsewhere: its "child harness" writes
+   * under the child's own id over the same storage, spawns a grandchild of its own,
+   * and leaves that grandchild running.
+   */
+  function remoteAdapter(storage: StorageAdapter): {
+    adapter: SubprocessAdapter;
+    stopped: string[];
+    children: string[];
+    grandchild: string;
+  } {
+    const stopped: string[] = [];
+    const children: string[] = [];
+    const grandchild = crypto.randomUUID();
+    const live = new Map<string, SubprocessHandle>();
+    const adapter: SubprocessAdapter = {
+      spawn: async (request) => {
+        assert(request.kind === 'step');
+        const child = request.executionId;
+        children.push(child);
+        await storage.set(`execution:${child}:snapshot`, {
+          stub: true,
+        });
+        await storage.set(`execution:${child}:trail:00000001`, {
+          path: 'remote',
+        });
+        await createSpendLog(storage).put(
+          dispatch({
+            executionId: child,
+          }),
+        );
+        await storage.set(`execution:${child}:child:${grandchild}`, {
+          stepId: 'grand',
+          at: new Date().toISOString(),
+        });
+        await storage.set(`execution:${grandchild}:ledger:00000001`, {
+          path: 'grand',
+        });
+        live.set(`h-${grandchild}`, {
+          id: `h-${grandchild}`,
+          status: 'running',
+          startedAt: new Date().toISOString(),
+          metadata: {
+            executionId: grandchild,
+            parentExecutionId: child,
+          },
+        });
+        const handle: SubprocessHandle = {
+          id: `h-${child}`,
+          status: 'completed',
+          startedAt: new Date().toISOString(),
+          metadata: {
+            executionId: child,
+            result: 'remote-done',
+          },
+        };
+        return {
+          handle,
+          settled: Promise.resolve(handle),
+        };
+      },
+      get: async (id) => live.get(id) ?? null,
+      stop: async (id) => {
+        stopped.push(id);
+        live.delete(id);
+        return {
+          kind: 'stopped',
+          handleId: id,
+        };
+      },
+      pause: async () => {
+        throw new Error('unsupported');
+      },
+      resume: async () => {
+        throw new Error('unsupported');
+      },
+      isAlive: async (handle) => live.has(handle.id),
+      reattach: async () => null,
+      listLive: async () => [
+        ...live.values(),
+      ],
+    };
+    return {
+      adapter,
+      stopped,
+      children,
+      grandchild,
+    };
+  }
+
+  it('forgets a crashed run’s remote children and theirs, settles their spend, and stops one still running', async () => {
+    const storage = createInMemoryStorage({
+      swap: true,
+    });
+    const remote = remoteAdapter(storage);
+    const harness = harnessOver(storage);
+    const leaf = runCode<ContextData, string, string>({
+      id: 'remote-leaf',
+      execute: async (input) => input,
+    });
+    const crashes = runCode<ContextData, string, string>({
+      id: 'crashes',
+      execute: async (input, execCtx) => {
+        await execCtx.harness.run(
+          spawn({
+            id: 'remote',
+            child: leaf,
+            subprocess: remote.adapter,
+          }),
+          input,
+          execCtx,
+        );
+        throw new Error('crashed after spawning');
+      },
+    });
+    const ctx = harness.createContext();
+    await expect(harness.run(crashes, 'go', ctx)).rejects.toThrow('crashed after spawning');
+    const [child] = remote.children;
+    assert(child);
+    expect(await storage.list(`execution:${ctx.id}:child:`)).toEqual([
+      `execution:${ctx.id}:child:${child}`,
+    ]);
+    expect(
+      (await harness.listStoredExecutions()).find((stored) => stored.executionId === ctx.id)?.parts,
+    ).toContain('child');
+
+    const report = await harness.forget(
+      {
+        executionId: ctx.id,
+      },
+      {
+        patienceMs: 0,
+      },
+    );
+
+    expect(report.executionIds).toEqual([
+      ctx.id,
+      child,
+      remote.grandchild,
+    ]);
+    expect(report.spend.map((settlement) => settlement.executionId)).toEqual([
+      child,
+    ]);
+    expect(remote.stopped).toEqual([
+      `h-${remote.grandchild}`,
+    ]);
+    expect(await storage.list('')).toEqual([]);
+  });
+
+  it('covers a detached spawn run out of process', async () => {
+    const storage = createInMemoryStorage({
+      swap: true,
+    });
+    const remote = remoteAdapter(storage);
+    const harness = harnessOver(storage);
+    const leaf = runCode<ContextData, string, string>({
+      id: 'remote-leaf',
+      execute: async (input) => input,
+    });
+    const crashes = runCode<ContextData, string, string>({
+      id: 'detaches-then-crashes',
+      execute: async (input, execCtx) => {
+        await execCtx.harness
+          .detachedSpawn(leaf, input, execCtx, {
+            subprocess: remote.adapter,
+          })
+          .await();
+        throw new Error('crashed after detaching');
+      },
+    });
+    const ctx = harness.createContext();
+    await expect(harness.run(crashes, 'go', ctx)).rejects.toThrow('crashed after detaching');
+
+    const report = await harness.forget(
+      {
+        executionId: ctx.id,
+      },
+      {
+        patienceMs: 0,
+      },
+    );
+
+    expect(report.executionIds).toEqual([
+      ctx.id,
+      ...remote.children,
+      remote.grandchild,
+    ]);
+    expect(remote.stopped).toEqual([
+      `h-${remote.grandchild}`,
+    ]);
+    expect(await storage.list('')).toEqual([]);
+  });
+
+  it('a thread’s forget covers the children its turns spawned', async () => {
+    const storage = createInMemoryStorage({
+      swap: true,
+    });
+    const remote = remoteAdapter(storage);
+    const leaf = runCode<ContextData, string, string>({
+      id: 'remote-leaf',
+      execute: async (input) => input,
+    });
+    const harness = new AgentHarness({
+      name: 'remote',
+      params: {},
+      agentGraph: spawn({
+        id: 'remote',
+        child: leaf,
+        subprocess: remote.adapter,
+      }),
+      environment: {
+        storage: {
+          adapter: storage,
+        },
+      },
+    });
+    await runTurns(harness, 't', 2);
+
+    const report = await harness.forget(
+      {
+        threadId: 't',
+      },
+      {
+        patienceMs: 0,
+      },
+    );
+
+    // Two turns, each with its remote child, and the grandchild both children share.
+    expect(report.executionIds).toHaveLength(5);
+    expect(await storage.list('')).toEqual([]);
+  });
+
+  it('links no child a spawn runs in process: it records under its run already', async () => {
+    const storage = createInMemoryStorage({
+      swap: true,
+    });
+    const harness = harnessOver(storage);
+    const local = runCode<ContextData, string, string>({
+      id: 'local',
+      execute: async (input, execCtx) =>
+        execCtx.harness.run(
+          spawn({
+            id: 'in-process',
+            child: runCode<ContextData, string, string>({
+              id: 'local-leaf',
+              execute: async (leafInput) => leafInput,
+            }),
+          }),
+          input,
+          execCtx,
+        ),
+    });
+    await harness.run(local, 'go', harness.createContext());
+
+    expect((await storage.list('execution:')).filter((key) => key.includes(':child:'))).toEqual([]);
   });
 });

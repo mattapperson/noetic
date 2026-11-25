@@ -6,6 +6,7 @@ import type {
   StepSubprocessRequest,
   SubprocessAdapter,
 } from '@noetic-tools/types';
+import { linkIfOutOfProcess } from '../runtime/durable/child-links';
 import { DetachedHandleImpl } from '../util/detached-handle';
 import { executeNoAdapter } from './execute';
 
@@ -119,7 +120,10 @@ export function dispatchStepThroughAdapter<I, O>(
   return new DetachedHandleImpl<O>({
     id: childCtx.id,
     stepId: s.id,
-    spawned: adapter.spawn(request),
+    spawned: linkIfOutOfProcess(parentCtx, adapter, {
+      childId: childCtx.id,
+      stepId: s.id,
+    }).then(() => adapter.spawn(request)),
   });
 }
 

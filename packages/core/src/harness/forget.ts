@@ -53,6 +53,8 @@ export interface ForgetHost {
   layerIds(): ReadonlyArray<string>;
   /** Release the pool leases this harness still holds for the run, freeing their connections. */
   releaseConnections(executionId: string): Promise<void>;
+  /** Stop every subprocess still running one of the executions. */
+  stopSubprocesses(executionIds: ReadonlySet<string>): Promise<void>;
 }
 
 //#endregion
@@ -62,14 +64,57 @@ export interface ForgetHost {
 const EXECUTION_PREFIX = 'execution:';
 const LAYERS_PREFIX = 'layers/';
 
-/** The suffixes an execution's keys carry after its id, and the part each is. */
-const PART_PATTERN = /^(.+?):(snapshot|ledger|trail|held|intent|pending)(?::|$)/;
+/** Each part core writes under an execution, and what may follow its name. */
+const PART_TAILS: Record<string, RegExp> = {
+  snapshot: /^$/,
+  ledger: /^:\d+$/,
+  trail: /^:\d+$/,
+  held: /^:.+$/,
+  intent: /^:.+$/,
+  pending: /^:.+$/,
+  child: /^:[^:]+$/,
+};
+
+/** Every place a part's name may start in what follows `execution:`. */
+const PART_NAME = /:(snapshot|ledger|trail|held|intent|pending|child)(?=:|$)/g;
+
+/**
+ * The execution id and part of a key core writes, read as the longest id whose
+ * part is well formed: `a:child:trail:1` is execution `a:child`'s trail, and
+ * `a:child:<id>` is execution `a`'s link to child `<id>`.
+ */
+function parseCoreKey(rest: string):
+  | {
+      executionId: string;
+      part: string;
+      tail: string;
+    }
+  | undefined {
+  const starts = [
+    ...rest.matchAll(PART_NAME),
+  ].reverse();
+  for (const match of starts) {
+    const part = match[1] ?? '';
+    const at = match.index ?? 0;
+    const tail = rest.slice(at + 1 + part.length);
+    if (at > 0 && PART_TAILS[part]?.test(tail)) {
+      return {
+        executionId: rest.slice(0, at),
+        part,
+        tail: tail.slice(1),
+      };
+    }
+  }
+  return undefined;
+}
 
 /** An execution's key, with the execution and the part it belongs to. */
 interface ExecutionKey {
   key: string;
   executionId: string;
   part: ExecutionPart;
+  /** What follows the part's name: a child's id for a `child` link. */
+  tail?: string;
 }
 
 /**
@@ -84,14 +129,15 @@ function parseExecutionKeys(keys: ReadonlyArray<string>): ExecutionKey[] {
   const unknown: string[] = [];
   for (const key of keys) {
     const match = key.startsWith(EXECUTION_PREFIX)
-      ? PART_PATTERN.exec(key.slice(EXECUTION_PREFIX.length))
-      : null;
-    if (match?.[1] && match[2]) {
-      known.add(match[1]);
+      ? parseCoreKey(key.slice(EXECUTION_PREFIX.length))
+      : undefined;
+    if (match) {
+      known.add(match.executionId);
       parsed.push({
         key,
-        executionId: match[1],
-        part: toPart(match[2]),
+        executionId: match.executionId,
+        part: toPart(match.part),
+        tail: match.tail,
       });
       continue;
     }
@@ -136,6 +182,7 @@ const PARTS: Record<string, ExecutionPart> = {
   held: ExecutionPart.Held,
   intent: ExecutionPart.Intent,
   pending: ExecutionPart.Pending,
+  child: ExecutionPart.Child,
 };
 
 function toPart(name: string): ExecutionPart {
@@ -175,6 +222,35 @@ function busy(threadOrExecution: string, reason: string): NoeticErrorImpl {
 
 //#region Forget
 
+/**
+ * `executionIds` and every execution they spawned out of process, their children's
+ * included, in the order found: each run before its children.
+ */
+async function withChildren(
+  host: ForgetHost,
+  executionIds: ReadonlyArray<string>,
+): Promise<Set<string>> {
+  const found = new Set<string>();
+  const queue = [
+    ...executionIds,
+  ];
+  for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
+    if (found.has(next)) {
+      continue;
+    }
+    found.add(next);
+    if (host.storage) {
+      const keys = await host.storage.list(`${EXECUTION_PREFIX}${next}:child:`);
+      for (const link of parseExecutionKeys(keys)) {
+        if (link.executionId === next && link.part === ExecutionPart.Child && link.tail) {
+          queue.push(link.tail);
+        }
+      }
+    }
+  }
+  return found;
+}
+
 /** Delete everything stored for the executions, checking the lease between them. */
 async function forgetExecutionState(
   host: ForgetHost,
@@ -185,6 +261,8 @@ async function forgetExecutionState(
   },
 ): Promise<void> {
   const storage = host.storage;
+  // A child still running elsewhere would write again under what is deleted here.
+  await host.stopSubprocesses(new Set(executionIds));
   for (const executionId of executionIds) {
     under.lease?.assert();
     await host.releaseConnections(executionId);
@@ -335,7 +413,7 @@ async function forgetHeldThread(
   },
 ): Promise<ForgetReport> {
   const { options, before, lease } = held;
-  const executions = new Set(executionsOf(before));
+  const executions = await withChildren(host, executionsOf(before));
   const spend = await host.closeSpend(
     (record) =>
       record.threadId === threadId ||
@@ -346,11 +424,20 @@ async function forgetHeldThread(
   // A turn may have begun before the lease was taken: read the record again under it.
   const after = await recordOf(host, threadId);
   refuseBusy(host, threadId, after);
-  for (const executionId of executionsOf(after)) {
-    executions.add(executionId);
+  const added = [
+    ...(await withChildren(host, executionsOf(after))),
+  ].filter((executionId) => !executions.has(executionId));
+  if (added.length > 0) {
+    spend.push(
+      ...(await host.closeSpend(
+        (record) => record.executionId !== undefined && added.includes(record.executionId),
+        options.patienceMs,
+      )),
+    );
   }
   const executionIds = [
     ...executions,
+    ...added,
   ];
   host.dropThread(threadId);
   await forgetExecutionState(host, executionIds, {
@@ -392,26 +479,27 @@ export async function forgetExecution(
   executionId: string,
   options: ForgetOptions = {},
 ): Promise<ForgetReport> {
-  if (host.executionBusy(executionId)) {
-    throw busy(executionId, `execution "${executionId}" has a run in flight in this harness`);
+  const executions = await withChildren(host, [
+    executionId,
+  ]);
+  const live = [
+    ...executions,
+  ].find((id) => host.executionBusy(id));
+  if (live !== undefined) {
+    throw busy(live, `execution "${live}" has a run in flight in this harness`);
   }
   const spend = await host.closeSpend(
-    (record) => record.executionId === executionId,
+    (record) => record.executionId !== undefined && executions.has(record.executionId),
     options.patienceMs,
   );
-  await forgetExecutionState(
-    host,
-    [
-      executionId,
-    ],
-    {
-      keepTrail: options.keepTrail === true,
-    },
-  );
+  const executionIds = [
+    ...executions,
+  ];
+  await forgetExecutionState(host, executionIds, {
+    keepTrail: options.keepTrail === true,
+  });
   return {
-    executionIds: [
-      executionId,
-    ],
+    executionIds,
     spend,
   };
 }

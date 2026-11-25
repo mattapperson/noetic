@@ -526,7 +526,7 @@ interface StoredExecution {
   resumable: boolean;           // a snapshot or ledger entries are stored: `restore()` can rebuild it
 }
 
-type ExecutionPart = 'snapshot' | 'ledger' | 'trail' | 'held' | 'intent' | 'pending' | 'other';
+type ExecutionPart = 'snapshot' | 'ledger' | 'trail' | 'held' | 'intent' | 'pending' | 'child' | 'other';
 ```
 
 A scope with neither a `threadId` nor an `executionId` is refused with `NoeticConfigError` `INVALID_FORGET_SCOPE`: a forget never falls back to the default thread.
@@ -546,7 +546,9 @@ The lease goes last, while the forget still holds it (below). A forget cut off p
 
 `forget({ executionId })` deletes everything under `execution:<id>:` — the checkpoint snapshot (through the configured `CheckpointStore`), the step ledger, held calls and their intents, pending entries, the trail unless `keepTrail`, and any other key there. Core keeps layer state durably only at thread, resource, and global scope, so an execution has none to delete. A thread's record is not touched: forgetting the execution of a thread's turn leaves the thread naming an execution with nothing stored, and the turn starts over on its next delivery. Forget the thread for that.
 
-A key under `execution:` is read as the execution its part's suffix names (`:snapshot`, `:ledger:`, `:trail:`, `:held:`, `:intent:`, `:pending:`). Any other key belongs to the longest execution id that other keys name and that it starts with, else to the id before its first colon; so `execution:a:b:custom` is execution `a:b`'s when `a:b` has records of its own.
+A key under `execution:` is read as the execution its part's suffix names (`:snapshot`, `:ledger:<seq>`, `:trail:<seq>`, `:held:`, `:intent:`, `:pending:`, `:child:<childId>`); when more than one reading is well formed, the longest execution id wins, so `a:child:trail:1` is execution `a:child`'s trail. Any other key belongs to the longest execution id that other keys name and that it starts with, else to the id before its first colon; so `execution:a:b:custom` is execution `a:b`'s when `a:b` has records of its own.
+
+**Children spawned out of process.** A spawn run in process records its steps under its run's root, so forgetting the run covers it. A `spawn` or `harness.detachedSpawn` a subprocess adapter runs elsewhere is an execution of its own, under its own id: before dispatching it, a durable run writes a link, `execution:<rootId>:child:<childId>`. An adapter that runs steps in the calling process — core's in-memory adapter — gets no link. A forget follows the links, transitively, and forgets each child as part of its run: it settles the children's spend with the run's, asks the harness's `environment.subprocess` and every adapter the harness has dispatched a child through to stop a handle still running one of them, then deletes what each child keeps. `ForgetReport.executionIds` lists every run before its children. A child a step's own adapter runs, on a harness that never dispatched through that adapter, is not stopped: its keys are deleted, and the adapter reclaims it.
 
 An execution's forget also covers the connection-pool leases (`35-connections` § Pools and leases) of its run: a lease this harness still holds for it — a failed run keeps its lease for a resume — is released, which hands its connection back to the provider, and every stored lease record of the run is deleted, those a crashed process left included. A lease record names the run that holds it; one written before it did is the run's when its holder is the run (`<executionId>`) or one of its parallel paths (`<executionId>:path:…`). A thread's forget does this for each execution it forgets.
 

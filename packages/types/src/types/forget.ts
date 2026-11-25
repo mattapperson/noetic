@@ -33,6 +33,8 @@ export const ExecutionPart = {
   Held: 'held',
   Intent: 'intent',
   Pending: 'pending',
+  /** A link to an execution it spawned out of process. */
+  Child: 'child',
   Other: 'other',
 } as const;
 
