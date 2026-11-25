@@ -103,7 +103,7 @@ describe('questionAnswerProblem', () => {
         branch: 'main',
         depth: 1.5,
       }),
-    ).toBe("'depth' must be a integer");
+    ).toBe("'depth' must be an integer");
     expect(
       questionAnswerProblem(FORM, {
         branch: 'main',
@@ -122,6 +122,137 @@ describe('questionAnswerProblem', () => {
       }),
     ).toContain("'branch' must be one of");
     expect(questionAnswerProblem(FORM, 'main')).toContain('must be an object');
+  });
+
+  it('counts only own fields: an inherited one never satisfies required', () => {
+    expect(
+      questionAnswerProblem(
+        {
+          message: 'q',
+          schema: {
+            type: 'object',
+            properties: {},
+            required: [
+              'toString',
+            ],
+          },
+        },
+        {},
+      ),
+    ).toBe("'toString' is required");
+  });
+
+  it('checks the form’s constraints, at their boundaries', () => {
+    const form: HeldQuestion = {
+      message: 'q',
+      schema: {
+        type: 'object',
+        properties: {
+          name: {
+            type: 'string',
+            minLength: 2,
+            maxLength: 3,
+            pattern: '^[a-z]+$',
+          },
+          count: {
+            type: 'integer',
+            minimum: 1,
+            maximum: 3,
+          },
+          tags: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 2,
+            items: {
+              enum: [
+                'a',
+                'b',
+              ],
+            },
+          },
+        },
+        additionalProperties: false,
+      },
+    };
+    expect(
+      questionAnswerProblem(form, {
+        name: 'ab',
+        count: 1,
+        tags: [
+          'a',
+        ],
+      }),
+    ).toBeUndefined();
+    expect(
+      questionAnswerProblem(form, {
+        name: 'abc',
+        count: 3,
+        tags: [
+          'a',
+          'b',
+        ],
+      }),
+    ).toBeUndefined();
+    expect(
+      questionAnswerProblem(form, {
+        name: 'a',
+      }),
+    ).toContain('at least 2 characters');
+    expect(
+      questionAnswerProblem(form, {
+        name: 'abcd',
+      }),
+    ).toContain('at most 3 characters');
+    expect(
+      questionAnswerProblem(form, {
+        name: 'AB',
+      }),
+    ).toContain('must match');
+    expect(
+      questionAnswerProblem(form, {
+        count: 0,
+      }),
+    ).toContain('at least 1');
+    expect(
+      questionAnswerProblem(form, {
+        count: 4,
+      }),
+    ).toContain('at most 3');
+    expect(
+      questionAnswerProblem(form, {
+        tags: [],
+      }),
+    ).toContain('at least 1 items');
+    expect(
+      questionAnswerProblem(form, {
+        tags: [
+          'a',
+          'b',
+          'a',
+        ],
+      }),
+    ).toContain('at most 2 items');
+    expect(
+      questionAnswerProblem(form, {
+        tags: [
+          'c',
+        ],
+      }),
+    ).toContain('items must be among');
+    expect(
+      questionAnswerProblem(form, {
+        tags: [
+          1,
+        ],
+      }),
+    ).toContain('list of strings');
+    expect(
+      questionAnswerProblem(form, {
+        extra: {
+          nested: true,
+        },
+      }),
+    ).toBe("'extra' is not a field of the form");
   });
 
   it('leaves a field the form does not describe alone', () => {

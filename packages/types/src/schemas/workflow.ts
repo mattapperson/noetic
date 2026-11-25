@@ -284,6 +284,8 @@ const AcpClientCapabilityConfigSchema = z.object({
   readTextFile: z.boolean().optional(),
   writeTextFile: z.boolean().optional(),
   terminal: z.boolean().optional(),
+  /** Whether the agent may ask a person questions (spec 27 § Questions the agent asks). */
+  elicitation: z.boolean().optional(),
 });
 
 const SecretValueSchema: z.ZodType<WorkflowSecretValue> = z

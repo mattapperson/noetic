@@ -359,6 +359,20 @@ layer is decisive for `deny` and `ask`, and abstains into the default
 otherwise. Layers ahead of it in slot order can still deny first; a steering
 rule that already refuses a call is never escalated to the editor.
 
+### Questions the run holds for a person
+
+A served run's turn may hold a question for a person (`08-runtime` § Held
+tool calls, `reason: 'question'`): an MCP task's `input_required`, or a
+delegated coding agent's own question (`27-acp-agent-steps` § Questions the
+agent asks). The editor is that person's side of the wire, so as the turn's
+events are pumped, each held question is put to it as `elicitation/create`
+(form mode, the question's message and schema) when the editor advertised
+`clientCapabilities.elicitation.form`. Its answer goes back as a decision on
+the session's thread: `accept` gives the output, `decline` declines (`deny`),
+and `cancel` leaves the question held, as any unanswered question is. An
+editor that cannot show forms is not asked: the question is declined at once,
+so a served turn never waits on nobody.
+
 ## Slash commands
 
 `options.commands` is advertised to the client as an
@@ -452,8 +466,7 @@ capability, the harness contract grows it publicly first.
   the turn (`session/prompt` acks immediately; completion flows through
   `state_update`), adds `session/resume` with replay cursors, session config
   options (`config_option_update` — a natural surface for exposing harness
-  `params` and modes to the editor), `elicitation/create` (a structured-input
-  surface for clarifying-question compositions, cf. `29`'s modal note), and
+  `params` and modes to the editor), and
   `usage_update` (backed by `getUsage`). The protocol library
   (`@agentclientprotocol/sdk`) already carries their types; serving them needs
   the harness to produce them. The `history` and `commands` seams are shaped to

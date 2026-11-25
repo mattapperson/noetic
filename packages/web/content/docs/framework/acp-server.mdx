@@ -133,6 +133,10 @@ serveAcp(harness, {
 });
 ```
 
+## Questions for the person
+
+When a served run holds a question for a person — a coding agent it delegates to asks one, or a long-running task needs input — the question goes to the editor as `elicitation/create` if the editor can show forms, and the editor's answer goes back to the run. An editor that cannot show forms is not asked: the question is declined at once, so a served turn never waits on nobody.
+
 ## Slash commands
 
 Commands are advertised to the client and routed before the graph runs. A command's `run` return value — a string or `Item[]` — becomes the turn's input; a command without `run` forwards its text unchanged:

@@ -229,9 +229,15 @@ function lazyLocalMachine(agentId: string): AcpMachineFactory {
 
 /** Closing the agent's stream releases the machine it runs on. */
 function closingWith(transport: AcpTransport, opened: Opened): AcpTransport {
+  const detach = transport.detach?.bind(transport);
   return {
     readable: transport.readable,
     writable: transport.writable,
+    ...(transport.reattach
+      ? {
+          reattach: transport.reattach,
+        }
+      : {}),
     async close() {
       try {
         await transport.close();
@@ -239,6 +245,12 @@ function closingWith(transport: AcpTransport, opened: Opened): AcpTransport {
         await opened.close();
       }
     },
+    // Letting go keeps the machine: it runs the agent a later host reattaches to.
+    ...(detach
+      ? {
+          detach,
+        }
+      : {}),
   };
 }
 

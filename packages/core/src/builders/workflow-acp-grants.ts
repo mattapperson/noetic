@@ -104,6 +104,7 @@ export function boundedAcpSettings(
       readTextFile: capability('readTextFile'),
       writeTextFile: capability('writeTextFile'),
       terminal: capability('terminal'),
+      elicitation: capability('elicitation'),
     },
     session: reuse
       ? {
@@ -139,12 +140,16 @@ const NO_GRANT: AcpAgentGrant = {};
 
 const DEFAULT_CAPABILITIES: AcpCapabilityGrant = {
   readTextFile: true,
+  // Asking a person is gated, never a privilege to opt into: a host with
+  // nobody to answer withdraws it in its grant.
+  elicitation: true,
 };
 
 const CAPABILITIES: ReadonlyArray<Capability> = [
   'readTextFile',
   'writeTextFile',
   'terminal',
+  'elicitation',
 ];
 
 const KEEP_ALIVE_ORDER: Readonly<Record<AcpKeepAlive, number>> = {

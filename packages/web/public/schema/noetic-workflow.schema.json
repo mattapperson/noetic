@@ -3157,6 +3157,9 @@
                 },
                 "terminal": {
                   "type": "boolean"
+                },
+                "elicitation": {
+                  "type": "boolean"
                 }
               },
               "additionalProperties": false

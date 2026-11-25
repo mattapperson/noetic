@@ -51,6 +51,7 @@ import { isRpcError, RpcFailure } from '../util/error-message';
 import { AcpEventBridge } from './acp-events';
 import { withHistoryPrompt } from './acp-history';
 import { renderLayerContext } from './acp-layers';
+import type { QuestionAsker } from './acp-questions';
 import { questionAsker } from './acp-questions';
 import { ACP_RESUME_NOTICE, acpSessionRecords } from './acp-resume';
 import { AcpToolRunner, mergeBridgedItems, resolveAcpTools } from './acp-tools';
@@ -257,6 +258,8 @@ function buildApprover(ctx: Context<ContextData>): AcpPermissionSteerer | undefi
 interface HostBindingOptions<TContext, I, O> {
   step: StepAcpAgent<TContext, I, O>;
   ctx: Context<ContextData>;
+  /** The step's questions to a person, one asker for the whole step. */
+  questions: QuestionAsker;
   /** `agentId` of the adapter taking the turn, surfaced to permission handlers. */
   agentId: string;
   /** Sink for the agent's `fs/*` and `terminal/*` calls. */
@@ -298,11 +301,7 @@ function bindHostToStep<TContext, I, O>(
     : undefined;
   // An agent's question is a question for a person: held like any other (spec 27
   // § Questions the agent asks), answered by whoever answers held calls.
-  host.onElicitation = questionAsker({
-    ctx: opts.ctx,
-    agentId: opts.agentId,
-    stepId: opts.step.id,
-  });
+  host.onElicitation = opts.questions.ask;
   host.onSessionUpdate = opts.onUpdate;
   host.onClientActivity = opts.onActivity;
   // A step that gives no tools gets none, even on a session another step
@@ -391,7 +390,7 @@ function assertSessionScopedSettingsMatch<TContext, I, O>(
   }
   // Instructions, the adapter's `_meta`, cwd and capabilities as the connection
   // would send them, against what it sent when the session opened.
-  const opened = live.session.fingerprint;
+  const opened = live.fingerprint;
   if (
     opened !== undefined &&
     opened !== live.connection.fingerprintFor(sessionRequest(cwd, settings))
@@ -488,14 +487,7 @@ function sessionIsGone(error: unknown): boolean {
   if (typeof error !== 'object' || error === null) {
     return false;
   }
-  if (Reflect.get(error, 'code') === RESOURCE_NOT_FOUND) {
-    return true;
-  }
-  const message = Reflect.get(error, 'message');
-  return (
-    typeof message === 'string' &&
-    /session.*not found|unknown session|no such session/i.test(message)
-  );
+  return Reflect.get(error, 'code') === RESOURCE_NOT_FOUND;
 }
 
 /** Keeping a connection is always explicit; the default closes it with the step. */
@@ -651,6 +643,8 @@ async function openSession<TContext, I, O>(opts: {
         keepAlive,
         cwd: opts.cwd,
         tools: opts.tools?.tools,
+        // Checked equal to this step's when it reattached.
+        fingerprint: opts.fingerprint,
       };
     }
     const connection = holdingConnections(
@@ -680,6 +674,7 @@ async function openSession<TContext, I, O>(opts: {
         keepAlive,
         cwd: opts.cwd,
         tools: opts.tools?.tools,
+        fingerprint: session.fingerprint,
       };
     } catch (e) {
       await connection.close().catch(() => undefined);
@@ -765,14 +760,26 @@ async function reattachTo(
       session,
     };
   } catch (error) {
-    await connection.close().catch(() => undefined);
+    // The old turn may still be working: let go of it, never stop it, so a
+    // host that resumes with the settings it started with can still take it.
+    await letGo(connection);
     throw error;
   }
 }
 
-/** Undefined for "the agent or its session is gone", the error itself otherwise. */
+/** Release this host's side of a reattached connection, leaving the agent running. */
+async function letGo(connection: AcpAgentConnection): Promise<void> {
+  const release = connection.detach ?? connection.close;
+  await release.call(connection).catch(() => undefined);
+}
+
+/**
+ * Undefined when the agent or its session is confirmed gone, the error itself
+ * otherwise: a connect failure that says nothing about the agent must not
+ * start its work over.
+ */
 function goneOrThrow(error: unknown): undefined {
-  if (isAcpConnectError(error)) {
+  if (isAcpConnectError(error) && error.gone) {
     return undefined;
   }
   throw error;
@@ -1072,10 +1079,40 @@ export async function executeAcpAgent<TContext, I, O>(
   layers?: ContextLayer[],
 ): Promise<O> {
   const baseCtx = frameworkCast<Context<ContextData>>(ctx);
-
   assertReuseIsKeptAlive(step);
-
   const agent = await resolveAgent(step, ctx);
+  const questions = questionAsker({
+    ctx: baseCtx,
+    agentId: agent.agentId,
+    stepId: step.id,
+  });
+  // A question's answer is kept until the step ends, so a host that died after
+  // taking it and before the agent got it is not asked again (spec 27
+  // § Questions the agent asks). A step cut off with its host never gets here.
+  try {
+    return await runAcpStep({
+      step,
+      input,
+      ctx,
+      layers,
+      agent,
+      questions,
+    });
+  } finally {
+    await questions.release().catch(() => undefined);
+  }
+}
+
+async function runAcpStep<TContext, I, O>(params: {
+  step: StepAcpAgent<TContext, I, O>;
+  input: I;
+  ctx: Context<TContext>;
+  layers: ContextLayer[] | undefined;
+  agent: AcpAgent;
+  questions: QuestionAsker;
+}): Promise<O> {
+  const { step, input, ctx, layers, agent, questions } = params;
+  const baseCtx = frameworkCast<Context<ContextData>>(ctx);
   const resolvedPrompt = await resolveLazy(step.prompt, ctx);
   const blocks = await resolveLazy(step.content, ctx);
   const promptText =
@@ -1129,6 +1166,7 @@ export async function executeAcpAgent<TContext, I, O>(
   const bindingFor = (events: AcpEventBridge): HostBindingOptions<TContext, I, O> => ({
     step,
     ctx: baseCtx,
+    questions,
     agentId: agent.agentId,
     layers,
     onUpdate: (notification) => {
@@ -1182,7 +1220,9 @@ export async function executeAcpAgent<TContext, I, O>(
   if (resolution.resumed) {
     tools?.sessionReloaded();
   }
-  if (resolution.fresh && !resolution.resumed) {
+  // A reloaded session was opened again with this step's settings: its record
+  // takes the new fingerprint. A reattached one keeps the one it has.
+  if (resolution.fresh && !resolution.reattached) {
     await sessions?.write({
       sessionId: resolution.live.session.sessionId,
       agentId: agent.agentId,

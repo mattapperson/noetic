@@ -788,6 +788,12 @@ export async function holdAndWait(opts: {
   record: HeldRecord;
   /** False when something outside the run waits on the answer: the turn stays live. Default true. */
   park?: boolean;
+  /**
+   * Keep an answered record instead of dropping it, until the caller closes it:
+   * for an asker that may be asked the same question again after its answer
+   * was taken but before it reached whoever asked.
+   */
+  keepAnswer?: boolean;
 }): Promise<HeldAnswer> {
   const holds = heldCallsOf(opts.harness);
   const executionId = heldScopeOf(opts.ctx);
@@ -799,6 +805,11 @@ export async function holdAndWait(opts: {
   for (;;) {
     const current = await holds.load(executionId, callId);
     const settled = current?.resolution !== undefined;
+    if (settled && opts.keepAnswer) {
+      return {
+        resolution: current?.resolution,
+      };
+    }
     if (!current || settled || isOverdue(current, holds.now())) {
       if (mayWriteHolds(opts.ctx)) {
         await holds.close(executionId, callId);

@@ -87,20 +87,51 @@ export function newerSessionUpdate(line: string): AcpSessionNotification | undef
 
 //#endregion
 
+/**
+ * The JSON-RPC id of an agent's `elicitation/create` request, or undefined for
+ * any other line. The SDK hands the client a request's params only; the id is
+ * what identifies the request across hosts, since a keeper asks a reattached
+ * host again with the agent's own id.
+ */
+export function elicitationRequestId(line: string): string | number | undefined {
+  if (!line.includes('"elicitation/create"')) {
+    return undefined;
+  }
+  let message: unknown;
+  try {
+    message = JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+  if (!isRecord(message) || message.method !== 'elicitation/create') {
+    return undefined;
+  }
+  const id = message.id;
+  return typeof id === 'string' || typeof id === 'number' ? id : undefined;
+}
+
+//#endregion
+
 //#region Public API
 
 /**
  * Pass the agent's stream through, handing `deliver` each `session/update`
- * the SDK would reject for its variant instead of passing it on.
+ * the SDK would reject for its variant instead of passing it on, and
+ * `onElicitation` the id of each `elicitation/create` request, in order.
  */
 export function divertNewerUpdates(
   readable: ReadableStream<Uint8Array>,
   deliver: (notification: AcpSessionNotification) => void,
+  onElicitation?: (id: string | number) => void,
 ): ReadableStream<Uint8Array> {
   const decoder = new TextDecoder();
   const encoder = new TextEncoder();
   let carry = '';
   const pass = (line: string, controller: TransformStreamDefaultController<Uint8Array>): void => {
+    const asked = elicitationRequestId(line);
+    if (asked !== undefined) {
+      onElicitation?.(asked);
+    }
     const newer = newerSessionUpdate(line);
     if (newer) {
       deliver(newer);

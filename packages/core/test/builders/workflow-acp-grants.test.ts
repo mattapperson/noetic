@@ -636,6 +636,7 @@ describe('boundedAcpSettings', () => {
       readTextFile: false,
       writeTextFile: false,
       terminal: false,
+      elicitation: true,
     });
     expect(settings.session).toEqual({
       reuse: `${bounds.sessionScope}/main`,
@@ -870,11 +871,36 @@ describe('parseAndRunWorkflow — ACP agent grants', () => {
         readTextFile: true,
         writeTextFile: false,
         terminal: false,
+        elicitation: true,
       },
     ]);
     expect(record.permissions).toEqual([
       undefined,
     ]);
+  });
+
+  it('withdraws questions when the host grants none, and a node may withdraw them itself', async () => {
+    const withdrawn = await run(docOf(agentNode()), {
+      acp: {
+        fake: {
+          clientCapabilities: {
+            readTextFile: true,
+            elicitation: false,
+          },
+        },
+      },
+    });
+    expect(withdrawn.record.capabilities[0]?.elicitation).toBe(false);
+    const declined = await run(
+      docOf(
+        agentNode({
+          clientCapabilities: {
+            elicitation: false,
+          },
+        }),
+      ),
+    );
+    expect(declined.record.capabilities[0]?.elicitation).toBe(false);
   });
 
   it('refuses session.load unless granted, and loads the session when it is', async () => {

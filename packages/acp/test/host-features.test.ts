@@ -197,6 +197,41 @@ describe('fingerprints', () => {
     await rig.close();
   });
 
+  test("the client's path rules are part of it: a different directory grant is a different session", async () => {
+    const narrow = await createAcpTestRig();
+    const wide = await createAcpTestRig({
+      capabilities: {
+        additionalDirectories: [
+          '/shared',
+        ],
+      },
+    });
+    const request = {
+      cwd: '/workspace',
+    };
+    expect(narrow.connection.fingerprintFor(request)).not.toBe(
+      wide.connection.fingerprintFor(request),
+    );
+    await narrow.close();
+    await wide.close();
+  });
+
+  test('two hosts with the same setup agree', async () => {
+    const one = await createAcpTestRig({
+      instructionsMeta: claudeFallback,
+    });
+    const two = await createAcpTestRig({
+      instructionsMeta: claudeFallback,
+    });
+    const request = {
+      cwd: '/workspace',
+      instructions: 'rules',
+    };
+    expect(one.connection.fingerprintFor(request)).toBe(two.connection.fingerprintFor(request));
+    await one.close();
+    await two.close();
+  });
+
   test('canonicalJson ignores key order, and nothing else', () => {
     expect(
       canonicalJson({
@@ -475,6 +510,32 @@ describe("subagents' own sessions", () => {
     expect(session.availableCommands.map((command) => command.name)).toEqual([
       'review',
     ]);
+    await rig.close();
+  });
+
+  test('a child announced before its parent is known is adopted once it is, and its updates never reach the step', async () => {
+    const rig = await createAcpTestRig({
+      script: {
+        beforeNewSessionAnswer: async (conn, sessionId) => {
+          await conn.sessionUpdate(textChunk('early-kid', 'kid before announcement'));
+          await conn.sessionUpdate(subagentAnnounce(sessionId, 'early-kid'));
+          await conn.sessionUpdate(textChunk('early-kid', 'kid after announcement'));
+        },
+        onPrompt: async (conn) => {
+          await conn.sessionUpdate(textChunk('early-kid', 'kid during the turn'));
+        },
+      },
+    });
+    const session = await rig.connection.newSession({
+      cwd: '/workspace',
+    });
+    await session.prompt({
+      content: PROMPT,
+    });
+    expect(rig.updates.map((n) => n.update.sessionUpdate)).toEqual([
+      'subagent_update',
+    ]);
+    expect(JSON.stringify(rig.updates)).not.toContain('kid ');
     await rig.close();
   });
 

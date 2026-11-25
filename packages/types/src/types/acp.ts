@@ -57,6 +57,11 @@ export type AcpTransport = ByteStream & {
    * package that made it.
    */
   readonly reattach?: AcpReattachHandle;
+  /**
+   * Let go of the agent without stopping it, as a host that goes away does,
+   * so a later host can still reattach. Present only with {@link reattach}.
+   */
+  detach?(): Promise<void>;
 };
 
 /**
@@ -274,7 +279,17 @@ export type AcpPermissionSteerer = (
  */
 export type AcpBoundElicitationHandler = (
   request: acp.CreateElicitationRequest,
+  info: AcpElicitationInfo,
 ) => Promise<acp.CreateElicitationResponse>;
+
+/** @public What identifies an agent's question beyond its params. */
+export interface AcpElicitationInfo {
+  /**
+   * The agent's JSON-RPC id for the request. A keeper asks a reattached host
+   * again with the same id, so it ties the question to its earlier asking.
+   */
+  readonly requestId?: string | number;
+}
 
 //#endregion
 
@@ -705,6 +720,12 @@ export interface AcpAgentConnection {
   attachSession?(sessionId: string): Promise<AcpSession>;
   /** Close the connection and release the transport. */
   close(): Promise<void>;
+  /**
+   * Release this host's side of the connection and leave the agent running for
+   * a later host: what a host does when it must not adopt a reattached
+   * session. Present only when the agent can outlive this host.
+   */
+  detach?(): Promise<void>;
 }
 
 /** @public Options for {@link AcpSession.resumeTurn}. */
@@ -737,6 +758,11 @@ export interface AcpLiveSession {
   mcpServers?: ReadonlyArray<acp.McpServer>;
   /** Noetic tools served to the agent at creation — also fixed for its lifetime. */
   tools?: ReadonlyArray<AcpTool>;
+  /**
+   * What the session was opened with ({@link AcpSession.fingerprint}); for a
+   * reattached session, the one stored when it was opened.
+   */
+  fingerprint?: string;
 }
 
 /** @public Options handed to {@link AcpAgent.connect}. */
@@ -960,6 +986,12 @@ export interface AcpCapabilityGrant {
   readonly readTextFile?: boolean;
   readonly writeTextFile?: boolean;
   readonly terminal?: boolean;
+  /**
+   * Whether the agent may ask a person questions (held for a person, spec 27
+   * § Questions the agent asks). Granted by default; `false` for a host with
+   * nobody to answer.
+   */
+  readonly elicitation?: boolean;
 }
 
 /**
@@ -1019,16 +1051,24 @@ export function isAcpCapabilityError(e: unknown): e is AcpCapabilityError {
 export class AcpConnectError extends Error {
   readonly agentId: string;
   readonly connectCause?: unknown;
+  /**
+   * The agent, or the session asked for, is confirmed gone: nothing an earlier
+   * host started is still running there. Only then does a resumed step start
+   * its work over; any other connect failure leaves that unknown.
+   */
+  readonly gone: boolean;
 
   constructor(opts: {
     agentId: string;
     message: string;
     cause?: unknown;
+    gone?: boolean;
   }) {
     super(opts.message);
     this.name = 'AcpConnectError';
     this.agentId = opts.agentId;
     this.connectCause = opts.cause;
+    this.gone = opts.gone === true;
   }
 }
 

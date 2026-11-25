@@ -1540,22 +1540,25 @@ describe('executeAcpAgent host features', () => {
       ctx,
     );
     assert(host?.onElicitation);
-    const answer = await host.onElicitation({
-      mode: 'form',
-      sessionId: 'session-1',
-      message: 'Which branch?',
-      requestedSchema: {
-        type: 'object',
-        properties: {
-          branch: {
-            type: 'string',
+    const answer = await host.onElicitation(
+      {
+        mode: 'form',
+        sessionId: 'session-1',
+        message: 'Which branch?',
+        requestedSchema: {
+          type: 'object',
+          properties: {
+            branch: {
+              type: 'string',
+            },
           },
+          required: [
+            'branch',
+          ],
         },
-        required: [
-          'branch',
-        ],
       },
-    });
+      {},
+    );
     expect(answer).toEqual({
       action: 'accept',
       content: {
@@ -1594,15 +1597,18 @@ describe('executeAcpAgent host features', () => {
     );
     assert(host?.onElicitation);
     expect(
-      await host.onElicitation({
-        mode: 'form',
-        sessionId: 'session-1',
-        message: 'Proceed?',
-        requestedSchema: {
-          type: 'object',
-          properties: {},
+      await host.onElicitation(
+        {
+          mode: 'form',
+          sessionId: 'session-1',
+          message: 'Proceed?',
+          requestedSchema: {
+            type: 'object',
+            properties: {},
+          },
         },
-      }),
+        {},
+      ),
     ).toEqual({
       action: 'decline',
     });

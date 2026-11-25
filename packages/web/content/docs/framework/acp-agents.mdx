@@ -314,13 +314,12 @@ const harness = new AgentHarness({
 });
 ```
 
-The question also shows up in `harness.pending()` and as a `tool_call_held` event, and an answer can come later as a decision passed to `execute()`. An answer that does not fit the question's form is refused and the question stays open. The turn stays live while the agent waits. Set `clientCapabilities: { elicitation: false }` on a step whose agent must not ask.
+The question also shows up in `harness.pending()` and as a `tool_call_held` event (`readHeldCallEvent` reads it), and an answer can come later as a decision passed to `execute()`. An answer that does not fit the question's form — including a field the agent did not ask for — is refused and the question stays open. The turn stays live while the agent waits, and the answer is kept until the step ends, so a host that dies just after taking it is not asked again after a resume. Set `clientCapabilities: { elicitation: false }` on a step whose agent must not ask; for JSON workflows, a host with nobody to answer grants `elicitation: false` in its `acp` allowlist.
 
 ## Subagents
 
 An agent's subagents can run in their own child sessions. Only the step's own session produces its output: a subagent's text, tool calls and updates never reach the step's text, items, events or result.
 
-## Giving the agent your tools
 ## Giving the agent your tools
 
 Pass the same `tool()` definitions a `callModel` step takes. The agent calls them over MCP, and each call runs the same path a model's tool call does: the `beforeToolCall` layers, input validation, `needsApproval` and the harness approver, execution, the result item, its `tool_call_started` / `tool_call_completed` events, and its `tool.call` span. The agent gets the exact string a model would.

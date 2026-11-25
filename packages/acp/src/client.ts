@@ -99,6 +99,11 @@ export interface NoeticAcpClientOptions {
   onNotify: (notification: acp.SessionNotification) => void;
   /** Recognizes this agent's permission requests for bridged tools. */
   permitsBridged?: BridgedPermissionCheck;
+  /**
+   * The agent's JSON-RPC id for the `elicitation/create` being handled: the
+   * stream hands them over in order, and requests are handled in order.
+   */
+  nextElicitationId?: () => string | number | undefined;
 }
 
 /**
@@ -114,9 +119,11 @@ export class NoeticAcpClient implements acp.Client {
   /** Each `tool_call` the agent announced, by id, to recognize bridged calls. */
   private readonly announced = new Map<string, acp.RequestPermissionRequest['toolCall']>();
   private readonly permitsBridged?: BridgedPermissionCheck;
+  private readonly nextElicitationId?: () => string | number | undefined;
 
   constructor(opts: NoeticAcpClientOptions) {
     this.permitsBridged = opts.permitsBridged;
+    this.nextElicitationId = opts.nextElicitationId;
     this.host = opts.host;
     this.onNotify = opts.onNotify;
     this.terminals = new TerminalRegistry(opts.host.shell, opts.host.cwd);
@@ -183,6 +190,8 @@ export class NoeticAcpClient implements acp.Client {
   async createElicitation(
     params: acp.CreateElicitationRequest,
   ): Promise<acp.CreateElicitationResponse> {
+    // Taken before anything else: every request consumes its id, answered or not.
+    const requestId = this.nextElicitationId?.();
     const handler = this.host.onElicitation;
     if (!handler) {
       return {
@@ -190,7 +199,9 @@ export class NoeticAcpClient implements acp.Client {
       };
     }
     try {
-      return await handler(params);
+      return await handler(params, {
+        requestId,
+      });
     } catch {
       return {
         action: 'cancel',

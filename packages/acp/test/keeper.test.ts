@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import type { AcpClientHost, AcpReattachHandle, AcpSessionNotification } from '@noetic-tools/types';
 import { isAcpConnectError } from '@noetic-tools/types';
 import { customAcpAgent } from '../src/agents';
+import { keeperIsGone } from '../src/keeper/client';
 import { LineSplitter } from '../src/keeper/protocol';
 import type { AcpRunnerListener } from '../src/remote';
 import { listenAcpRunner } from '../src/remote';
@@ -297,4 +298,32 @@ describe.skipIf(!POSIX)('a kept agent on a remote runner', () => {
       expect(isAcpConnectError(gone)).toBe(true);
     }, 30e3);
   }
+});
+
+describe('keeperIsGone', () => {
+  it('is true only when no keeper is there: a missing socket or nobody listening', () => {
+    expect(
+      keeperIsGone(
+        Object.assign(new Error('x'), {
+          code: 'ENOENT',
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      keeperIsGone(
+        Object.assign(new Error('x'), {
+          code: 'ECONNREFUSED',
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      keeperIsGone(
+        Object.assign(new Error('x'), {
+          code: 'EACCES',
+        }),
+      ),
+    ).toBe(false);
+    expect(keeperIsGone(new Error('no code'))).toBe(false);
+    expect(keeperIsGone(undefined)).toBe(false);
+  });
 });

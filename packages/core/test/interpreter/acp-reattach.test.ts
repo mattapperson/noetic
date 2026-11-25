@@ -40,6 +40,8 @@ interface Seen {
   connects: AcpConnectOptions[];
   newSessions: number;
   prompts: string[];
+  /** How each reattached connection was released: closed (agent stopped) or let go. */
+  released: Array<'closed' | 'detached'>;
 }
 
 function seen(): Seen {
@@ -47,6 +49,7 @@ function seen(): Seen {
     connects: [],
     newSessions: 0,
     prompts: [],
+    released: [],
   };
 }
 
@@ -88,10 +91,15 @@ function keptAgent(opts: {
         throw new AcpConnectError({
           agentId: 'kept',
           message: 'the keeper is gone',
+          gone: true,
         });
       }
       if (connect.reattach && opts.broken) {
-        throw new Error('the keeper refused the token');
+        // A connect failure that says nothing about whether the agent still runs.
+        throw new AcpConnectError({
+          agentId: 'kept',
+          message: 'the keeper socket refused this user',
+        });
       }
       const session = (sessionId: string, reattached: boolean): AcpSession => ({
         sessionId,
@@ -165,7 +173,18 @@ function keptAgent(opts: {
               },
             }
           : {}),
-        async close() {},
+        async close() {
+          if (connect.reattach) {
+            opts.seen.released.push('closed');
+          }
+        },
+        ...(connect.reattach
+          ? {
+              async detach() {
+                opts.seen.released.push('detached');
+              },
+            }
+          : {}),
       };
     },
   };
@@ -433,6 +452,10 @@ describe('an ACP step that cannot safely reattach', () => {
     assert(isNoeticConfigError(error));
     expect(error.code).toBe('ACP_SESSION_SETTING_CONFLICT');
     expect(after.prompts).toEqual([]);
+    // The old turn is let go of, never stopped: a matching host can still take it.
+    expect(after.released).toEqual([
+      'detached',
+    ]);
   });
 
   it('collects the turn when the settings match', async () => {

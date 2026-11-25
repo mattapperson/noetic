@@ -584,7 +584,12 @@ and its `sessionMeta` merge into one `_meta`; a key `sessionMeta` sets wins.
 
 **What a session was opened with.** Instructions, `_meta`, the working
 directory, the tools and the client capabilities are fixed when a session
-opens. The connection keeps a fingerprint of what it actually sent
+opens. The connection keeps a fingerprint of what it actually sent — the
+request's instructions and `_meta`, cwd and MCP server names, the advertised
+client capabilities, and what else the agent was set up with when the
+connection opened: the tools the bridge serves (names, descriptions, schemas),
+the bridge's name, and the client's path rules — never an address or token
+that changes from host to host
 (`AcpSession.fingerprint`), and can say what it would send for a step
 (`AcpAgentConnection.fingerprintFor`). A step that reuses a live session
 (`session.reuse`) with a different fingerprint fails with
@@ -611,15 +616,30 @@ harness holds it (`08-runtime` § Held tool calls) as a **held question**.
   applied at the `held` point, the harness closed — the agent gets `cancel`.
 - The agent's process is waiting on the answer, so the turn stays live while
   the question is held (it does not park).
-- Its id is made from the execution, the step's dispatch path, the session,
-  and a hash of the request with its ordinal among identical requests, so a
-  resumed host that reattaches to the agent and is asked the same question
-  again finds the answer already given and does not ask twice.
+- Its id is made from the step's dispatch path and a hash of the request with
+  the agent's own JSON-RPC id for it, which a keeper keeps when it asks a
+  reattached host again (where that id is unknown, the request's ordinal among
+  identical ones stands in). The answer is kept until the step ends, not
+  dropped once taken, so a host that died after taking it and before the agent
+  got it is not asked again: the resumed host finds the question answered.
+- An agent's form is closed: the agent takes only the fields it described, so
+  the held question's `schema` says `additionalProperties: false`, and an
+  answer with any other field is refused before the question settles.
 
 The client advertises form elicitation (`elicitation: { form: {} }`) by
 default — asking is gated, never opted into — and URL elicitation never, since
 nothing here opens a URL. `clientCapabilities.elicitation: false` withdraws it,
-and the agent then cannot ask.
+and the agent then cannot ask. A JSON `acp-agent` node takes the same flag,
+within the host's grant: `elicitation` is granted by default
+(`AcpCapabilityGrant.elicitation`), and a host with nobody to answer grants
+`false`.
+
+**A served run** (spec 31) has a person on the other end of the wire: each
+question its turn holds is put to the editor as `elicitation/create` when the
+editor advertised form elicitation, its answer passed back as a decision
+(`accept` → the output, `decline` → `deny`, `cancel` → left held), and
+declined at once when the editor cannot show forms. A served turn never waits
+on nobody.
 
 ### Subagents' own sessions
 
@@ -631,9 +651,11 @@ updates for a session the connection does not know. An update that arrives
 for a session before the connection knows whose it is — the agent's first
 updates for a session it creates, sent before its `session/new` answer — is
 held (at most 1000) until the session is known, then delivered or dropped.
-(Showing children as nested agents in the harness's events is specified in
-`08-runtime` once it lands; until then the client does not advertise
-`subagents`.)
+A failed `session/load` forgets the session and every child it announced.
+Updates held before a session was known go through the same routing once it
+is, in order, so a child announced early is still a child. (Showing children
+as nested agents in the harness's events is specified in `08-runtime` once it
+lands; until then the client does not advertise `subagents`.)
 
 ### Failures are Noetic errors
 
@@ -723,13 +745,19 @@ the same agent id:
    the turn the dead host left running — every update of it as this step's
    output, the requests the agent still waits on answered by this host, then its
    result — instead of prompting. Only when no turn was running does it prompt,
-   behind `ACP_RESUME_NOTICE`. When the agent or its session is gone — the
-   machine says so with `AcpConnectError` — it goes on as below; any other
-   failure fails the step, since the old turn may already have changed things.
-   Before it collects anything it compares the session's stored fingerprint
-   with the step's (§ Instructions): a different one fails the step with
-   `ACP_SESSION_SETTING_CONFLICT`. A record written before fingerprints were
-   kept has none and is accepted.
+   behind `ACP_RESUME_NOTICE`. When the agent or its session is confirmed gone
+   — an `AcpConnectError` with `gone: true`: the keeper's socket is missing or
+   refuses, the keeper runs no agent, or the agent has no such session — it
+   goes on as below. Any other failure fails the step, since the old turn may
+   already have changed things. Before it collects anything it compares the
+   session's stored fingerprint with the step's (§ Instructions): a different
+   one fails the step with `ACP_SESSION_SETTING_CONFLICT`, and the host lets
+   go of the agent (`AcpAgentConnection.detach`) rather than stopping it, so a
+   host that resumes with the settings it started with can still take the
+   turn. A record written before fingerprints were kept has none and is
+   accepted; a reattached session keeps its stored fingerprint for later
+   reuse, and a reloaded one is stored with the fingerprint it was reloaded
+   with.
 1. connects, and when the agent advertises `loadSession` calls `session/load`
    with the stored id. The `session/update` notifications the agent replays
    while it loads are its history, not this turn's work: they reach only
@@ -739,8 +767,7 @@ the same agent id:
    conversation history is not prepended: the session has it.
 
 An agent that does not advertise `loadSession`, or that fails the load because
-it no longer has the session (JSON-RPC `-32002`, or a message saying the
-session is not found), gets a new session and the prompt with the conversation
+it no longer has the session (JSON-RPC `-32002`, and nothing else), gets a new session and the prompt with the conversation
 history, as on a first run, and the new id replaces the stored one. Any other
 failure of the load fails the step rather than starting the work over. A failed
 load leaves nothing tracked on the connection.
