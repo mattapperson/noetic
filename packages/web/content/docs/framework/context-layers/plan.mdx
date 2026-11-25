@@ -129,7 +129,7 @@ Documents may be passed as objects or JSON strings (a common LLM tool-call shape
 
 ## The Plan on the Event Stream
 
-The layer's plan reaches a host the way a coding agent's plan does: once a PRD is written, the harness emits `plan_updated` with `{ plan: { markdown: <the PRD> } }` (its `id` the plan session's slug, when `onEnterSession` gave one) live, as each change lands (whether a model or a coding agent wrote it), and `plan_removed` when the plan is cancelled or the layer goes idle. See [Tool calls, plans and agent settings](/docs/framework/runtime#tool-calls-plans-and-agent-settings).
+The layer's plan reaches a host the way a coding agent's plan does: once a PRD is written, the harness emits `plan_updated` with `{ plan: { markdown: <the PRD> } }` (its `id` the plan session's slug, when `onEnterSession` gave one) live, as each change lands (whether a model or a coding agent wrote it), and `plan_removed` when the plan is cancelled or the layer goes idle. Pass `plan({ emit: false })` to silence them, or a filter `(eventType, data) => boolean` to pick. See [Tool calls, plans and agent settings](/docs/framework/runtime#tool-calls-plans-and-agent-settings).
 
 ## Tool Restrictions
 

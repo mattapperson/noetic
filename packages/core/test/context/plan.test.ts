@@ -2089,6 +2089,15 @@ describe("plan layer — the agent's plan", () => {
     });
   });
 
+  it('takes the emit option for its plan events, and leaves the default unset', () => {
+    expect(
+      plan({
+        emit: false,
+      }).emit,
+    ).toBe(false);
+    expect(plan().emit).toBeUndefined();
+  });
+
   it('is none before a PRD is written, and none once the layer is idle again', () => {
     expect(read(makePlanningState())).toBeNull();
     expect(

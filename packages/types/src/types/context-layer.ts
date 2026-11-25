@@ -568,6 +568,12 @@ export interface ContextLayer<TState = unknown> {
    * erased `ContextLayer`.
    */
   plan?(state: TState): AgentPlan | null;
+  /**
+   * Controls the framework events this layer emits (its `plan_updated` /
+   * `plan_removed`), as a step's `emit` controls a step's: `false` silences
+   * them, a filter decides per event. Defaults to `true`.
+   */
+  emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }
 
 /** @public Configuration for how the runtime projects conversation items into the model's context window. */

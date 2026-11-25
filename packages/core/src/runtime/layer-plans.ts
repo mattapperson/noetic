@@ -14,7 +14,7 @@
 import type { LayerStateStore } from '@noetic-tools/context';
 import type { AgentPlan, Context, ContextLayer } from '@noetic-tools/types';
 import { hashString } from '@noetic-tools/types';
-import { emitFrameworkEvent, getBroadcaster } from './broadcaster-utils';
+import { emitFrameworkEvent, getBroadcaster, shouldEmit } from './broadcaster-utils';
 import { ContextImpl } from './context-impl';
 
 //#region Types
@@ -117,7 +117,7 @@ export class LayerPlanReporter {
     }
     // Another plan, or none, in place of the one told: that one is gone.
     if (last && (plan === null || plan.id !== last.id)) {
-      this.emit(entry.ctx, 'plan_removed', idData(last.id));
+      this.emit(entry.ctx, layer, 'plan_removed', idData(last.id));
     }
     if (plan === null || hash === undefined) {
       entry.told.delete(layerId);
@@ -127,20 +127,30 @@ export class LayerPlanReporter {
       hash,
       ...idData(plan.id),
     });
-    this.emit(entry.ctx, 'plan_updated', {
+    this.emit(entry.ctx, layer, 'plan_updated', {
       plan,
     });
   }
 
-  private emit(ctx: Context, eventType: string, data: Record<string, unknown>): void {
+  /** One event of `layer`'s, through the layer's own `emit` filter. */
+  private emit(
+    ctx: Context,
+    layer: ContextLayer,
+    eventType: string,
+    data: Record<string, unknown>,
+  ): void {
+    const payload = {
+      ...stepData(ctx),
+      ...data,
+    };
+    if (!shouldEmit(layer.emit, eventType, payload)) {
+      return;
+    }
     emitFrameworkEvent({
       broadcaster: getBroadcaster(ctx),
       agentName: ctx.harness.config.name,
       eventType,
-      data: {
-        ...stepData(ctx),
-        ...data,
-      },
+      data: payload,
     });
   }
 }

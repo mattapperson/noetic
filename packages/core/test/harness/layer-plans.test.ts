@@ -305,6 +305,45 @@ describe('LayerPlanReporter', () => {
     ]);
   });
 
+  it("goes through the layer's own emit option: false silences it, a filter picks events", () => {
+    const silent = watchedCtx([
+      {
+        ...layerWith(asPlan),
+        emit: false,
+      },
+    ]);
+    silent.reporter.changed(silent.ctx.id, 'tasks', {
+      id: 'a',
+      entries: [],
+    });
+    expect(silent.emitted).toEqual([]);
+
+    const removalsOnly = watchedCtx([
+      {
+        ...layerWith(asPlan),
+        emit: (eventType: string) => eventType === 'plan_removed',
+      },
+    ]);
+    removalsOnly.reporter.changed(removalsOnly.ctx.id, 'tasks', {
+      id: 'a',
+      entries: [],
+    });
+    removalsOnly.reporter.changed(removalsOnly.ctx.id, 'tasks', undefined);
+    expect(
+      removalsOnly.emitted.map((event) => [
+        event.type,
+        event.data,
+      ]),
+    ).toEqual([
+      [
+        'h:plan_removed',
+        {
+          id: 'a',
+        },
+      ],
+    ]);
+  });
+
   it('tells nothing for an unwatched execution or layer, a layer whose plan throws, or after forget', () => {
     const { ctx, emitted, reporter } = watchedCtx([
       layerWith(() => {

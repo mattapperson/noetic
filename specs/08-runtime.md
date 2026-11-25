@@ -885,7 +885,9 @@ well), a code step's layer function, a `store()` hook, or `init` restoring an
 earlier plan — and tells each change as it lands, before the call that made it
 completes, a plan under a new id as the old one removed. An execution's layers
 are watched from their `init` until they are disposed. These events are the
-layer's, not a step's, so a step's `emit` filter does not apply to them. The `plan()` layer's plan is its PRD, as markdown,
+layer's, not a step's, so the layer's own `emit` option controls them
+(`ContextLayer.emit`, `plan({ emit })`), as a step's `emit` controls a step's:
+`false` silences them, a filter decides per event. The `plan()` layer's plan is its PRD, as markdown,
 from the moment one is written until it is idle again (`12-builtin-context-layers`).
 `stepId` is there when the context knows the step running.
 

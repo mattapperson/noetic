@@ -119,6 +119,11 @@ export interface PlanConfig {
   /** Called when `exitPlanMode` is requested with `action: 'execute'`. */
   onExit?: PlanExitCallback;
   /**
+   * The layer's `plan_updated` / `plan_removed` events: `false` silences them,
+   * a filter decides per event. Defaults to `true` (see `ContextLayer.emit`).
+   */
+  emit?: ContextLayer['emit'];
+  /**
    * With no `onExit`, ask the harness's approval seam before a plan executes
    * (Noetic spec 08 § Held tool calls): its `approveToolCall` approver decides, and
    * with none the request is held until a decision passed to `harness.execute()` answers it. The request
@@ -863,6 +868,11 @@ export function plan(config?: PlanConfig): ContextLayer<PlanState> {
     slot: PLAN_SLOT,
     scope,
     plan: planOf,
+    ...(config?.emit === undefined
+      ? {}
+      : {
+          emit: config.emit,
+        }),
     budget: {
       min: 100,
       max: 3e3,

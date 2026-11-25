@@ -97,6 +97,8 @@ interface ContextLayer<TState = unknown> {
    * settings).
    */
   plan?(state: TState): AgentPlan | null;
+  /** The layer's framework events (its plan events), as a step's `emit`: false silences, a filter picks. Default true. */
+  emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }
 
 type LayerPlacement = 'anchor' | 'live' | 'auto';
