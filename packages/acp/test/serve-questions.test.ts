@@ -195,6 +195,66 @@ describe('forwardServedQuestions', () => {
     expect(cancelled.executed).toEqual([]);
   });
 
+  it('declines when the editor fails the request, or when its answer is refused', async () => {
+    const failed = servedHarness([]);
+    const failing = servedQuestionAnswerer({
+      conn: frameworkCast<AgentSideConnection>({
+        async createElicitation() {
+          throw new Error('Method not found');
+        },
+      }),
+      harness: failed.harness,
+      sessionId: 'sess',
+      capabilities: {
+        elicitation: {
+          form: {},
+        },
+      },
+    });
+    failing(HELD);
+    await settle(() => failed.executed.length > 0);
+    expect(failed.executed).toEqual([
+      {
+        type: 'noetic:decision',
+        callId: 'q1',
+        argsHash: 'h',
+        action: 'deny',
+      },
+    ]);
+
+    const executed: ExecuteArgument[] = [];
+    const refusing = servedQuestionAnswerer({
+      conn: editor({
+        action: 'accept',
+        content: {
+          wrong: 'field',
+        },
+      }).conn,
+      harness: frameworkCast<AcpServeHarness>({
+        async execute(input: ExecuteArgument) {
+          executed.push(input);
+          if (JSON.stringify(input).includes('"output"')) {
+            throw new Error('hold_refused: the answer does not fit the question');
+          }
+        },
+      }),
+      sessionId: 'sess',
+      capabilities: {
+        elicitation: {
+          form: {},
+        },
+      },
+    });
+    refusing(HELD);
+    await settle(() => executed.length > 1);
+    expect(executed[1]).toEqual({
+      type: 'noetic:decision',
+      callId: 'q1',
+      argsHash: 'h',
+      action: 'deny',
+    });
+  });
+
   it('leaves every other held call alone', async () => {
     const { harness, executed } = servedHarness([
       {

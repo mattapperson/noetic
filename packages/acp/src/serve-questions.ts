@@ -67,31 +67,50 @@ async function answerQuestion(opts: ServedQuestionsOptions, call: HeldCall): Pro
     opts.capabilities?.elicitation?.form !== undefined &&
     opts.capabilities?.elicitation?.form !== null;
   if (!question || !isRecord(schema) || !canAsk) {
-    await opts.harness.execute(decline(call), {
-      threadId: opts.sessionId,
-    });
+    await settle(opts, decline(call));
     return;
   }
-  const answer = await opts.conn.createElicitation({
-    mode: 'form',
-    sessionId: opts.sessionId,
-    message: question.message,
-    requestedSchema: {
-      type: 'object',
-      properties: isRecord(schema.properties) ? schema.properties : {},
-      ...(Array.isArray(schema.required)
-        ? {
-            required: schema.required.filter((name): name is string => typeof name === 'string'),
-          }
-        : {}),
-    },
-  });
-  const decision = decisionOf(call, answer);
-  if (decision) {
-    await opts.harness.execute(decision, {
-      threadId: opts.sessionId,
-    });
+  // An editor that fails the request (method not found, a dropped wire) has
+  // not answered: decline, so the turn never waits on it.
+  const answer = await opts.conn
+    .createElicitation({
+      mode: 'form',
+      sessionId: opts.sessionId,
+      message: question.message,
+      requestedSchema: {
+        type: 'object',
+        properties: isRecord(schema.properties) ? schema.properties : {},
+        ...(Array.isArray(schema.required)
+          ? {
+              required: schema.required.filter((name): name is string => typeof name === 'string'),
+            }
+          : {}),
+      },
+    })
+    .catch(() => undefined);
+  if (!answer) {
+    await settle(opts, decline(call));
+    return;
   }
+  const decision = decisionOf(call, answer);
+  if (!decision) {
+    return;
+  }
+  // An answer the question refuses (it does not fit the form) declines it.
+  await opts.harness
+    .execute(decision, {
+      threadId: opts.sessionId,
+    })
+    .catch(() => settle(opts, decline(call)));
+}
+
+/** Give a decision; one the run no longer takes (the turn moved on) is dropped. */
+async function settle(opts: ServedQuestionsOptions, decision: DecisionItem): Promise<void> {
+  await opts.harness
+    .execute(decision, {
+      threadId: opts.sessionId,
+    })
+    .catch(() => undefined);
 }
 
 //#endregion

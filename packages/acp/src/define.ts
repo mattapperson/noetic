@@ -277,6 +277,7 @@ async function reattachTo(
     whenHostExits,
   });
   let bridge: ToolBridge | undefined;
+  let attached: AcpTransport | undefined;
   try {
     if (!machine.attach) {
       throw new AcpConnectError({
@@ -285,6 +286,7 @@ async function reattachTo(
       });
     }
     const transport = await machine.attach(handle);
+    attached = transport;
     bridge = await openBridge(def, opts, {
       reach: (address) => machine.reach(address),
       reuse: bridgeOf(handle),
@@ -306,9 +308,22 @@ async function reattachTo(
     });
   } catch (e) {
     await bridge?.close();
-    await machine.close().catch(() => undefined);
+    await letGoOf(attached, machine);
     throw e;
   }
+}
+
+/**
+ * A reattach that failed before this host adopted the agent: let go of it, so
+ * it keeps running for a host that can — never stop it. Only a machine that
+ * reached nothing is closed.
+ */
+async function letGoOf(attached: AcpTransport | undefined, machine: AcpMachine): Promise<void> {
+  if (attached?.detach) {
+    await attached.detach().catch(() => undefined);
+    return;
+  }
+  await machine.close().catch(() => undefined);
 }
 
 const BridgeCredentialsSchema = z.object({

@@ -129,6 +129,12 @@ export interface QuestionAsker {
 export function questionAsker(opts: QuestionAskerOptions): QuestionAsker {
   const seen = new Map<string, number>();
   const asked = new Set<string>();
+  /**
+   * Ids this host already asked under. An agent that asks again under the
+   * same id on the same host is asking a new question; a new host after a
+   * crash starts empty, so the keeper's re-ask finds the kept answer.
+   */
+  const answeredHere = new Map<string, number>();
   const name = `${opts.agentId}:question`;
   const harness = frameworkCast<HoldHost>(opts.ctx.harness);
   const idOf = (
@@ -148,7 +154,10 @@ export function questionAsker(opts: QuestionAskerOptions): QuestionAsker {
   };
   return {
     ask: async (request, info) => {
-      const callId = idOf(request, info.requestId);
+      const base = idOf(request, info.requestId);
+      const again = answeredHere.get(base) ?? 0;
+      answeredHere.set(base, again + 1);
+      const callId = again === 0 ? base : `${base}~${again}`;
       asked.add(callId);
       const question = questionOf(request);
       const args = {

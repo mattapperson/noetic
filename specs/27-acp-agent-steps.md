@@ -618,8 +618,11 @@ harness holds it (`08-runtime` § Held tool calls) as a **held question**.
   the question is held (it does not park).
 - Its id is made from the step's dispatch path and a hash of the request with
   the agent's own JSON-RPC id for it, which a keeper keeps when it asks a
-  reattached host again (where that id is unknown, the request's ordinal among
-  identical ones stands in). The answer is kept until the step ends, not
+  reattached host again. The client reads that id off the wire and carries it
+  in the request's own `_meta` to the handler, so it cannot drift onto another
+  request; where it is unknown, the request's ordinal among identical ones
+  stands in. An agent that asks again under an id this host already asked
+  under is asking a new question. The answer is kept until the step ends, not
   dropped once taken, so a host that died after taking it and before the agent
   got it is not asked again: the resumed host finds the question answered.
 - An agent's form is closed: the agent takes only the fields it described, so
@@ -629,7 +632,8 @@ harness holds it (`08-runtime` § Held tool calls) as a **held question**.
 The client advertises form elicitation (`elicitation: { form: {} }`) by
 default — asking is gated, never opted into — and URL elicitation never, since
 nothing here opens a URL. `clientCapabilities.elicitation: false` withdraws it,
-and the agent then cannot ask. A JSON `acp-agent` node takes the same flag,
+and the agent then cannot ask: a question it asks anyway is answered `cancel`
+without reaching anyone. A JSON `acp-agent` node takes the same flag,
 within the host's grant: `elicitation` is granted by default
 (`AcpCapabilityGrant.elicitation`), and a host with nobody to answer grants
 `false`.
@@ -638,8 +642,8 @@ within the host's grant: `elicitation` is granted by default
 question its turn holds is put to the editor as `elicitation/create` when the
 editor advertised form elicitation, its answer passed back as a decision
 (`accept` → the output, `decline` → `deny`, `cancel` → left held), and
-declined at once when the editor cannot show forms. A served turn never waits
-on nobody.
+declined at once when the editor cannot show forms, fails the request, or
+gives an answer the question refuses. A served turn never waits on nobody.
 
 ### Subagents' own sessions
 
@@ -754,7 +758,9 @@ the same agent id:
    one fails the step with `ACP_SESSION_SETTING_CONFLICT`, and the host lets
    go of the agent (`AcpAgentConnection.detach`) rather than stopping it, so a
    host that resumes with the settings it started with can still take the
-   turn. A record written before fingerprints were kept has none and is
+   turn. Letting go tells the keeper so (`release`): the agent keeps running
+   whatever exit policy this host's hello set. Every failure before the host
+   adopts the agent — the bridge, the handshake — lets go the same way. A record written before fingerprints were kept has none and is
    accepted; a reattached session keeps its stored fingerprint for later
    reuse, and a reloaded one is stored with the fingerprint it was reloaded
    with.

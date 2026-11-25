@@ -42,6 +42,13 @@ export const KeeperHostLineSchema = z.discriminatedUnion('keeper', [
   z.object({
     keeper: z.literal('stop'),
   }),
+  /**
+   * This host lets go without adopting the agent: whatever exit policy its
+   * hello set, the agent keeps running for a later host.
+   */
+  z.object({
+    keeper: z.literal('release'),
+  }),
 ]);
 
 /** @public Keeper → host. */

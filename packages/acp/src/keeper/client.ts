@@ -302,9 +302,7 @@ export class KeeperLink {
       writable,
       reattach: this.handle,
       close: () => this.stop(),
-      detach: async () => {
-        this.detach();
-      },
+      detach: () => this.release(),
     };
   }
 
@@ -316,6 +314,25 @@ export class KeeperLink {
 
   /** Let go of the keeper without stopping it, as a host that goes away does. */
   detach(): void {
+    this.socket.destroy();
+  }
+
+  /**
+   * Let go of an agent this host did not adopt: the keeper keeps it running
+   * whatever exit policy this host's hello set, then the connection drops.
+   */
+  async release(): Promise<void> {
+    if (this.closed) {
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      this.socket.write(
+        `${JSON.stringify({
+          keeper: 'release',
+        })}\n`,
+        () => resolve(),
+      );
+    });
     this.socket.destroy();
   }
 

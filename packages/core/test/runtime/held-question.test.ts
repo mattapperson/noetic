@@ -255,6 +255,60 @@ describe('questionAnswerProblem', () => {
     ).toBe("'extra' is not a field of the form");
   });
 
+  it('checks titled single-select choices, counts code points, and refuses sparse lists', () => {
+    const form: HeldQuestion = {
+      message: 'q',
+      schema: {
+        type: 'object',
+        properties: {
+          answer: {
+            type: 'string',
+            oneOf: [
+              {
+                const: 'yes',
+                title: 'Yes',
+              },
+            ],
+          },
+          emoji: {
+            type: 'string',
+            maxLength: 1,
+          },
+          tags: {
+            type: 'array',
+          },
+        },
+      },
+    };
+    expect(
+      questionAnswerProblem(form, {
+        answer: 'yes',
+      }),
+    ).toBeUndefined();
+    expect(
+      questionAnswerProblem(form, {
+        answer: 'no',
+      }),
+    ).toContain("'answer' must be one of");
+    expect(
+      questionAnswerProblem(form, {
+        emoji: '🍎',
+      }),
+    ).toBeUndefined();
+    expect(
+      questionAnswerProblem(form, {
+        emoji: '🍎🍎',
+      }),
+    ).toContain('at most 1 characters');
+    const sparse: string[] = [];
+    sparse[1] = 'a';
+    expect(
+      questionAnswerProblem(form, {
+        tags: sparse,
+      }),
+    ).toContain('list of strings');
+  });
+
   it('leaves a field the form does not describe alone', () => {
     expect(
       questionAnswerProblem(FORM, {

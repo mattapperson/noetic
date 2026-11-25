@@ -368,6 +368,82 @@ describe('questions', () => {
     await rig.close();
   });
 
+  test('withdrawn, a question the agent asks anyway never reaches the handler', async () => {
+    let asked = 0;
+    let answer: acp.CreateElicitationResponse | undefined;
+    const rig = await createAcpTestRig({
+      capabilities: {
+        elicitation: false,
+      },
+      onElicitation: async () => {
+        asked += 1;
+        return {
+          action: 'decline',
+        };
+      },
+      script: {
+        onPrompt: async (conn, params) => {
+          answer = await conn.createElicitation(FORM_REQUEST(params.sessionId));
+        },
+      },
+    });
+    const session = await rig.connection.newSession({
+      cwd: '/workspace',
+    });
+    await session.prompt({
+      content: PROMPT,
+    });
+    expect(asked).toBe(0);
+    expect(answer).toEqual({
+      action: 'cancel',
+    });
+    await rig.close();
+  });
+
+  test("each question carries its own JSON-RPC id, and the agent's _meta is left as it sent it", async () => {
+    const seen: Array<{
+      requestId: string | number | undefined;
+      meta: unknown;
+    }> = [];
+    const rig = await createAcpTestRig({
+      onElicitation: async (request, info) => {
+        seen.push({
+          requestId: info.requestId,
+          meta: request._meta,
+        });
+        return {
+          action: 'decline',
+        };
+      },
+      script: {
+        onPrompt: async (conn, params) => {
+          await conn.createElicitation(FORM_REQUEST(params.sessionId));
+          await conn.createElicitation({
+            ...FORM_REQUEST(params.sessionId),
+            _meta: {
+              mine: true,
+            },
+          });
+        },
+      },
+    });
+    const session = await rig.connection.newSession({
+      cwd: '/workspace',
+    });
+    await session.prompt({
+      content: PROMPT,
+    });
+    expect(seen).toHaveLength(2);
+    expect(seen[0]?.requestId).toBeDefined();
+    expect(seen[1]?.requestId).toBeDefined();
+    expect(seen[0]?.requestId).not.toBe(seen[1]?.requestId);
+    expect(seen[0]?.meta).toBeUndefined();
+    expect(seen[1]?.meta).toEqual({
+      mine: true,
+    });
+    await rig.close();
+  });
+
   test('a throwing handler, or none, answers cancel', async () => {
     const answers: acp.CreateElicitationResponse[] = [];
     const rig = await createAcpTestRig({

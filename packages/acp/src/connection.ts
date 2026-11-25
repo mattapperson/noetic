@@ -896,13 +896,10 @@ export async function openAcpConnection(
   let connection: AcpAgentConnectionImpl | undefined;
   const host = opts.host;
 
-  // Each `elicitation/create`'s JSON-RPC id, in the order the agent sent them.
-  const elicitationIds: Array<string | number> = [];
   const client = new NoeticAcpClient({
     host,
     permitsBridged: opts.tools?.permits,
     onNotify: (notification) => notify(notification),
-    nextElicitationId: () => elicitationIds.shift(),
   });
   // The protocol library never rejects pending responses when the stream ends,
   // so without this a dead agent leaves every request hanging forever.
@@ -916,12 +913,7 @@ export async function openAcpConnection(
   };
   const agent = new ClientSideConnection(
     () => client,
-    ndJsonStream(
-      opts.transport.writable,
-      divertNewerUpdates(watch.readable, notify, (id) => {
-        elicitationIds.push(id);
-      }),
-    ),
+    ndJsonStream(opts.transport.writable, divertNewerUpdates(watch.readable, notify)),
   );
 
   let initialized: acp.InitializeResponse;
@@ -935,7 +927,12 @@ export async function openAcpConnection(
     ]);
   } catch (error) {
     watch.shutdown('failed the initialize handshake');
-    await opts.transport.close().catch(() => undefined);
+    // An agent reached for an earlier host is let go of, never stopped.
+    const release =
+      opts.reattached && opts.transport.detach
+        ? opts.transport.detach.bind(opts.transport)
+        : opts.transport.close.bind(opts.transport);
+    await release().catch(() => undefined);
     throw new AcpConnectError({
       agentId: opts.agentId,
       message: `ACP agent '${opts.agentId}' failed the initialize handshake.`,

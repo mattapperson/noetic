@@ -32,21 +32,38 @@ function numberAt(schema: Schema, key: string): number | undefined {
   return typeof value === 'number' ? value : undefined;
 }
 
+/** The values a titled single-select (`oneOf: [{ const, title }]`) allows. */
+function titledChoices(schema: Schema): unknown[] | undefined {
+  const choices = schema.oneOf ?? schema.anyOf;
+  if (!Array.isArray(choices)) {
+    return undefined;
+  }
+  return choices.filter(isRecord).map((choice) => choice.const);
+}
+
 function checkString(name: string, schema: Schema, value: unknown): string | undefined {
   if (typeof value !== 'string') {
     return `'${name}' must be a string`;
   }
+  // JSON Schema counts characters as code points, not UTF-16 units.
+  const length = [
+    ...value,
+  ].length;
   const min = numberAt(schema, 'minLength');
-  if (min !== undefined && value.length < min) {
+  if (min !== undefined && length < min) {
     return `'${name}' must be at least ${min} characters`;
   }
   const max = numberAt(schema, 'maxLength');
-  if (max !== undefined && value.length > max) {
+  if (max !== undefined && length > max) {
     return `'${name}' must be at most ${max} characters`;
   }
   const pattern = schema.pattern;
   if (typeof pattern === 'string' && !new RegExp(pattern, 'u').test(value)) {
     return `'${name}' must match ${pattern}`;
+  }
+  const choices = titledChoices(schema);
+  if (choices && !choices.includes(value)) {
+    return `'${name}' must be one of ${JSON.stringify(choices)}`;
   }
   return undefined;
 }
@@ -97,7 +114,8 @@ function itemChoices(schema: Schema): unknown[] | undefined {
 }
 
 function checkArray(name: string, schema: Schema, value: unknown): string | undefined {
-  if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) {
+  // `Array.from` fills holes with `undefined`, which `every` would skip.
+  if (!Array.isArray(value) || !Array.from(value).every((item) => typeof item === 'string')) {
     return `'${name}' must be a list of strings`;
   }
   const min = numberAt(schema, 'minItems');

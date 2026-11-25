@@ -87,13 +87,17 @@ export function newerSessionUpdate(line: string): AcpSessionNotification | undef
 
 //#endregion
 
+/** Where an `elicitation/create`'s JSON-RPC id rides in its params, for the client. */
+const REQUEST_ID_META = 'noetic.tools/requestId';
+
 /**
- * The JSON-RPC id of an agent's `elicitation/create` request, or undefined for
- * any other line. The SDK hands the client a request's params only; the id is
- * what identifies the request across hosts, since a keeper asks a reattached
- * host again with the agent's own id.
+ * An agent's `elicitation/create` line with its JSON-RPC id copied into the
+ * params' `_meta`, or undefined for any other line. The SDK hands the client a
+ * request's params only; the id is what identifies the request across hosts,
+ * since a keeper asks a reattached host again with the agent's own id. Riding
+ * in the request itself, it cannot drift onto another request.
  */
-export function elicitationRequestId(line: string): string | number | undefined {
+export function tagElicitationRequest(line: string): string | undefined {
   if (!line.includes('"elicitation/create"')) {
     return undefined;
   }
@@ -103,11 +107,57 @@ export function elicitationRequestId(line: string): string | number | undefined 
   } catch {
     return undefined;
   }
-  if (!isRecord(message) || message.method !== 'elicitation/create') {
+  if (!isRecord(message) || message.method !== 'elicitation/create' || !isRecord(message.params)) {
     return undefined;
   }
   const id = message.id;
-  return typeof id === 'string' || typeof id === 'number' ? id : undefined;
+  if (typeof id !== 'string' && typeof id !== 'number') {
+    return undefined;
+  }
+  const meta = isRecord(message.params._meta) ? message.params._meta : {};
+  return JSON.stringify({
+    ...message,
+    params: {
+      ...message.params,
+      _meta: {
+        ...meta,
+        [REQUEST_ID_META]: id,
+      },
+    },
+  });
+}
+
+/** A request's params as the agent sent them, and the JSON-RPC id the stream tagged them with. */
+export function untagElicitation<
+  T extends {
+    _meta?: Record<string, unknown> | null;
+  },
+>(
+  params: T,
+): {
+  request: T;
+  requestId?: string | number;
+} {
+  const meta = params._meta;
+  if (!meta || !Object.hasOwn(meta, REQUEST_ID_META)) {
+    return {
+      request: params,
+    };
+  }
+  const { [REQUEST_ID_META]: tagged, ...rest } = meta;
+  const requestId = typeof tagged === 'string' || typeof tagged === 'number' ? tagged : undefined;
+  const request: T = {
+    ...params,
+    _meta: Object.keys(rest).length > 0 ? rest : undefined,
+  };
+  return {
+    request,
+    ...(requestId === undefined
+      ? {}
+      : {
+          requestId,
+        }),
+  };
 }
 
 //#endregion
@@ -116,21 +166,21 @@ export function elicitationRequestId(line: string): string | number | undefined 
 
 /**
  * Pass the agent's stream through, handing `deliver` each `session/update`
- * the SDK would reject for its variant instead of passing it on, and
- * `onElicitation` the id of each `elicitation/create` request, in order.
+ * the SDK would reject for its variant instead of passing it on, and tagging
+ * each `elicitation/create` with its JSON-RPC id.
  */
 export function divertNewerUpdates(
   readable: ReadableStream<Uint8Array>,
   deliver: (notification: AcpSessionNotification) => void,
-  onElicitation?: (id: string | number) => void,
 ): ReadableStream<Uint8Array> {
   const decoder = new TextDecoder();
   const encoder = new TextEncoder();
   let carry = '';
   const pass = (line: string, controller: TransformStreamDefaultController<Uint8Array>): void => {
-    const asked = elicitationRequestId(line);
-    if (asked !== undefined) {
-      onElicitation?.(asked);
+    const tagged = tagElicitationRequest(line);
+    if (tagged !== undefined) {
+      controller.enqueue(encoder.encode(`${tagged}\n`));
+      return;
     }
     const newer = newerSessionUpdate(line);
     if (newer) {
@@ -155,6 +205,11 @@ export function divertNewerUpdates(
       flush(controller) {
         const tail = carry + decoder.decode();
         if (tail.length > 0) {
+          const tagged = tagElicitationRequest(tail);
+          if (tagged !== undefined) {
+            controller.enqueue(encoder.encode(tagged));
+            return;
+          }
           const newer = newerSessionUpdate(tail);
           if (newer) {
             deliver(newer);

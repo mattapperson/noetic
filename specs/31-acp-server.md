@@ -370,8 +370,9 @@ events are pumped, each held question is put to it as `elicitation/create`
 `clientCapabilities.elicitation.form`. Its answer goes back as a decision on
 the session's thread: `accept` gives the output, `decline` declines (`deny`),
 and `cancel` leaves the question held, as any unanswered question is. An
-editor that cannot show forms is not asked: the question is declined at once,
-so a served turn never waits on nobody.
+editor that cannot show forms is not asked: the question is declined at once.
+So is one the editor fails to take (an error answer) or answers with something
+the question refuses. A served turn never waits on nobody.
 
 ## Slash commands
 

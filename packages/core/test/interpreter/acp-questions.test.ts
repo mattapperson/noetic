@@ -77,6 +77,31 @@ describe('questionAsker', () => {
     expect(shown).toHaveLength(1);
   });
 
+  it('an agent that asks again under an id this host already asked is asking a new question', async () => {
+    const shown: HeldCall[] = [];
+    let n = 0;
+    const harness = harnessAnswering(shown, () => {
+      n += 1;
+      return {
+        branch: n === 1 ? 'main' : 'next',
+      };
+    });
+    const ctx = harness.createContext();
+    const asker = questionAsker({
+      ctx,
+      agentId: 'claude-code',
+      stepId: 'step',
+    });
+    const first = await asker.ask(REQUEST, {
+      requestId: 4,
+    });
+    const second = await asker.ask(REQUEST, {
+      requestId: 4,
+    });
+    expect(shown).toHaveLength(2);
+    expect(first).not.toEqual(second);
+  });
+
   it('two identical questions with different request ids are two questions', async () => {
     const shown: HeldCall[] = [];
     let n = 0;

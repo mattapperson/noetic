@@ -219,6 +219,31 @@ describe.skipIf(!POSIX)('a kept agent and a host that dies', () => {
     expect(isAcpConnectError(error)).toBe(true);
   }, 30e3);
 
+  it("a host that lets go keeps the agent running, even one that attached with whenHostExits: 'stop'", async () => {
+    const { host, handle, sessionId } = await firstHost('keep', 'slow');
+    await crash(host);
+    const declining = await agent.connect({
+      host: secondHost([]),
+      reattach: handle,
+      whenHostExits: 'stop',
+    });
+    assert(declining.detach);
+    await declining.detach();
+    await Bun.sleep(500);
+    // The agent is still there for a host that adopts it.
+    const adopting = await agent.connect({
+      host: secondHost([]),
+      reattach: handle,
+    });
+    try {
+      assert(adopting.attachSession);
+      const session = await adopting.attachSession(sessionId);
+      expect(session.sessionId).toBe(sessionId);
+    } finally {
+      await adopting.close();
+    }
+  }, 30e3);
+
   it('refuses a session the agent does not have', async () => {
     const { host, handle } = await firstHost('keep', 'slow');
     await crash(host);
