@@ -1,3 +1,65 @@
+## @noetic-tools/core-v5.22.0-next.1 (2026-11-25)
+
+* fix(chat-sdk): a parked turn's reply finishes, and a lost click is not reported delivered ([e498c5e](https://github.com/mattapperson/noetic/commit/e498c5e))
+* fix(core): a cut-off turn on a Worker is woken, not dropped or looped on ([abf2594](https://github.com/mattapperson/noetic/commit/abf2594))
+* fix(core): a decision that cannot be taken is refused, not half applied ([7d07818](https://github.com/mattapperson/noetic/commit/7d07818))
+* fix(core): a held call's result is given by a decision item only ([6be6795](https://github.com/mattapperson/noetic/commit/6be6795))
+* fix(core): a message delivered again mid-turn no longer runs twice ([caea6df](https://github.com/mattapperson/noetic/commit/caea6df))
+* fix(core): a parked turn is no longer lost to a wake, a message or a catch ([710413e](https://github.com/mattapperson/noetic/commit/710413e))
+* fix(core): a recorded effect is never redone unasked under a new version ([bfebbb9](https://github.com/mattapperson/noetic/commit/bfebbb9))
+* fix(core): a recorded tool call replays whole: large results, item ids, UI, cleanup ([dffc4ab](https://github.com/mattapperson/noetic/commit/dffc4ab))
+* fix(core): a reloaded agent's new call is not answered with an old result ([52d2443](https://github.com/mattapperson/noetic/commit/52d2443))
+* fix(core): a second audit's findings: questions asked twice, silent holds, lost wakes ([c275b41](https://github.com/mattapperson/noetic/commit/c275b41))
+* fix(core): a turn lease cannot reset its term, share a key, or be waited on forever ([b387004](https://github.com/mattapperson/noetic/commit/b387004))
+* fix(core): close the holes a review found in leases, parking and held calls ([1790461](https://github.com/mattapperson/noetic/commit/1790461))
+* fix(core): events are not acknowledged unstored, and a dropped one is named ([a29284b](https://github.com/mattapperson/noetic/commit/a29284b))
+* fix(core): held calls no longer loop, get reused, or land under the wrong id ([1c93e4c](https://github.com/mattapperson/noetic/commit/1c93e4c))
+* fix(core): schedules, sources and watchers stop losing or repeating work ([c855220](https://github.com/mattapperson/noetic/commit/c855220))
+* feat: one approval seam for every path that asks a person ([f2979cc](https://github.com/mattapperson/noetic/commit/f2979cc))
+* feat(core): a JSON workflow's version defaults to a hash of its document ([bcf4966](https://github.com/mattapperson/noetic/commit/bcf4966))
+* feat(core): a resumed ACP step reloads its session and repeats no tool call ([0e9dfb2](https://github.com/mattapperson/noetic/commit/0e9dfb2))
+* feat(core): cron() works on a host with no process between events ([f79a72f](https://github.com/mattapperson/noetic/commit/f79a72f))
+* feat(core): decision_refused, for a decision that does not fit the thread ([4cfadbe](https://github.com/mattapperson/noetic/commit/4cfadbe))
+* feat(core): decisions go through execute; one way in for hosts ([2a45239](https://github.com/mattapperson/noetic/commit/2a45239))
+* feat(core): durable emit, triggers as data, a dead list, and message dedupe ([03cd64c](https://github.com/mattapperson/noetic/commit/03cd64c))
+* feat(core): durable on tools, and a harness that wakes the turns it parked ([159d48e](https://github.com/mattapperson/noetic/commit/159d48e))
+* feat(core): flow versions, stuck turns and a trail that outlives the ledger ([111210d](https://github.com/mattapperson/noetic/commit/111210d))
+* feat(core): hold a tool call for a person and answer it with harness.resolve() ([30189d5](https://github.com/mattapperson/noetic/commit/30189d5))
+* feat(core): one writer per turn with a storage-backed lease ([31bfa04](https://github.com/mattapperson/noetic/commit/31bfa04))
+* feat(core): park a waiting turn and wake it later ([7234b88](https://github.com/mattapperson/noetic/commit/7234b88))
+* feat(core): record each tool call so a cut round resumes at the one that was running ([7b59fea](https://github.com/mattapperson/noetic/commit/7b59fea))
+
+### BREAKING CHANGE
+
+* a call that needs approval on a harness with no
+approveToolCall is now held until harness.resolve() answers it. It used
+to run unapproved with a warning, and a model's call to a connection
+operation that needs approval used to be denied.
+
+Specs 02, 08 and 09, the invoke-tool, errors and API docs, and the
+agent-builder skill are updated.
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+* a step's call to a connection operation that needs
+approval, on a harness with no approveToolCall, is held instead of
+denied. A coding agent's permission request that nothing settles, on a
+step whose policy names no default, is held instead of denied; name
+`default: 'deny'` to keep the old behavior.
+
+Specs 08, 12, 23, 27, 29, 31 and 35, the matching docs, and the
+agent-builder skill are updated.
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+* an event whose turn failed five times is no longer
+delivered again at the next start; call harness.replayTrigger(). A
+message passed to execute() with a messageId whose turn already finished
+is answered from the record instead of starting a new turn.
+
+Specs 08, 23a and 35, the connections, durability and runtime docs, and
+the agent-builder skill are updated.
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+
 ## @noetic-tools/core-v5.21.0 (2026-11-12)
 
 * feat(core): drop the tool round cap (#160) ([c415b56](https://github.com/mattapperson/noetic/commit/c415b56)), closes [#160](https://github.com/mattapperson/noetic/issues/160)
