@@ -1,3 +1,24 @@
+## @noetic-tools/core-v5.22.0-next.7 (2026-11-25)
+
+* feat: an agent step meets the host only through generic concepts (instructions, held questions, Noet ([858cdca](https://github.com/mattapperson/noetic/commit/858cdca)), closes [#169](https://github.com/mattapperson/noetic/issues/169)
+
+### BREAKING CHANGE
+
+* An ACP step's host-facing surface is generic.
+`instructions` replaces `systemPrompt`, vendor `_meta` moves to the
+adapter (`sessionMeta`), and the step options `onElicitation` /
+`onSubagentUpdate` are gone: an agent's questions are held calls with
+`reason: 'question'` (MCP `input_required` too), offered by default.
+`HeldCall.reason` gains `'question'`. ACP steps throw
+`NoeticConfigError` `AGENT_CAPABILITY_MISSING` or `NoeticError`
+`step_failed`, never `AcpCapabilityError` / `AcpConnectError`.
+`AcpAgentConnection` requires `fingerprintFor`;
+`AcpBoundElicitationHandler` takes `AcpElicitationInfo`;
+`AcpConnectError` has `gone`. A resume or reattach starts over only when
+the agent is confirmed gone; any other failure fails the step.
+
+Signed-off-by: Matt <me@mattapperson.com>
+
 ## @noetic-tools/core-v5.22.0-next.6 (2026-11-25)
 
 * chore(core): release 5.22.0-next.6 [skip ci] ([33eb330](https://github.com/mattapperson/noetic/commit/33eb330))
