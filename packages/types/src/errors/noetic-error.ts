@@ -9,10 +9,52 @@ export class NoeticErrorImpl extends Error {
   readonly noeticError: NoeticError;
 
   constructor(error: NoeticError) {
-    super(formatMessage(error));
+    const cause = causeOf(error);
+    super(
+      formatMessage(error),
+      cause === undefined
+        ? undefined
+        : {
+            cause,
+          },
+    );
     this.name = 'NoeticError';
     this.noeticError = error;
   }
+}
+
+/** The error a `NoeticError` wraps, when its kind carries one: it becomes the standard `Error.cause`. */
+function causeOf(error: NoeticError): Error | undefined {
+  if ('cause' in error) {
+    return error.cause;
+  }
+  if (error.kind === 'spawn_summary_failed') {
+    return error.summaryCause;
+  }
+  return undefined;
+}
+
+const MAX_CAUSE_DEPTH = 32;
+
+/**
+ * The error a failure started from: follows `cause` through every `NoeticError` that
+ * wraps one (a `step_failed` from each code step the error crossed) and returns the
+ * first value that is not a `NoeticError`. A `NoeticError` with no cause (`cancelled`,
+ * `budget_exceeded`, ...) is returned as is, and so is any other value.
+ *
+ * @public
+ * @param e - A caught value.
+ * @returns The thrown value at the bottom of the chain.
+ */
+export function failureCause(e: unknown): unknown {
+  let current = e;
+  for (let depth = 0; depth < MAX_CAUSE_DEPTH; depth++) {
+    if (!isNoeticError(current) || current.cause === undefined) {
+      return current;
+    }
+    current = current.cause;
+  }
+  return current;
 }
 
 /**

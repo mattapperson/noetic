@@ -1,0 +1,10 @@
+## @noetic-tools/platform-cloudflare-worker-v1.0.0-next.1 (2026-11-25)
+
+* feat(core): cron() works on a host with no process between events ([f79a72f](https://github.com/mattapperson/noetic/commit/f79a72f))
+* feat(core): decisions go through execute; one way in for hosts ([2a45239](https://github.com/mattapperson/noetic/commit/2a45239))
+* feat(platform-cloudflare-worker): storage scopes and spill for large values; unblock the release cha ([63d0a30](https://github.com/mattapperson/noetic/commit/63d0a30)), closes [#162](https://github.com/mattapperson/noetic/issues/162)
+* feat(platform-cloudflare-worker): storage, an event endpoint and wake presets for Workers ([414a46e](https://github.com/mattapperson/noetic/commit/414a46e))
+* fix(core): a cut-off turn on a Worker is woken, not dropped or looped on ([abf2594](https://github.com/mattapperson/noetic/commit/abf2594))
+* fix(core): a held call's result is given by a decision item only ([6be6795](https://github.com/mattapperson/noetic/commit/6be6795))
+* fix(core): a turn lease cannot reset its term, share a key, or be waited on forever ([b387004](https://github.com/mattapperson/noetic/commit/b387004))
+* fix(core): schedules, sources and watchers stop losing or repeating work ([c855220](https://github.com/mattapperson/noetic/commit/c855220))

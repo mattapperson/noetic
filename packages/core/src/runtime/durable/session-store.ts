@@ -74,6 +74,18 @@ const SessionRecordSchema = z.object({
           z.string(),
         ])
         .optional(),
+      /**
+       * Set while the turn is cut (spec 23 § Cut turns): its lease was lost or a
+       * durable write failed, and a wake runs it again once its back-off is over.
+       * `count` is how many times it has been cut.
+       */
+      cut: z
+        .object({
+          reason: z.string(),
+          count: z.number(),
+          at: z.number(),
+        })
+        .optional(),
       /** Set while the turn is parked: every part of it waits, and no harness holds it. */
       parked: z
         .object({
@@ -98,6 +110,18 @@ const SessionRecordSchema = z.object({
       }),
     )
     .optional(),
+  /**
+   * Every execution the thread began a turn on, oldest first. `done` keeps only the
+   * last few turns; this is how a forget (spec 23 § Forgetting) and the thread's trail
+   * find the older ones. Absent in records written before it was kept.
+   */
+  executions: z.array(z.string()).optional(),
+  /**
+   * Ids of the context layers whose state may be kept at the thread's scope key, so a
+   * forget on a harness that never ran the thread still finds it. Absent in records
+   * written before it was kept.
+   */
+  layers: z.array(z.string()).optional(),
   /** Steers sent into the turn in flight, in arrival order. */
   steers: z
     .array(
@@ -189,9 +213,11 @@ export function createSessionStore(storage: StorageAdapter): SessionStore {
   };
 }
 
-const SESSION_PREFIX = 'session:';
+/** @internal The prefix every thread's record key starts with. */
+export const SESSION_PREFIX = 'session:';
 
-function sessionKey(threadId: string): string {
+/** @internal The key a thread's record is stored under. */
+export function sessionKey(threadId: string): string {
   return `${SESSION_PREFIX}${threadId}`;
 }
 

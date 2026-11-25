@@ -5,6 +5,7 @@ import type {
   HeldCall,
   Item,
   SessionUsage,
+  TurnCut,
 } from '@noetic-tools/types';
 import { isNoeticError } from '@noetic-tools/types';
 import { emitFrameworkEvent } from './broadcaster-utils';
@@ -59,6 +60,8 @@ export interface SessionRunnerOpts {
   readonly onTurnUsage?: (usage: TurnUsage) => Promise<void>;
   /** The tool calls the turn on `ctx` holds for a person, for a parked response. */
   readonly heldCalls?: (ctx: Context) => Promise<ReadonlyArray<HeldCall>>;
+  /** The cut the turn on `ctx` ended with, when it was cut rather than failed (spec 23 § Cut turns). */
+  readonly cutOf?: (ctx: Context) => TurnCut | undefined;
 }
 
 //#endregion
@@ -115,6 +118,7 @@ export class SessionRunner {
   private totalBilledCost = 0;
   private readonly onTurnUsage?: (usage: TurnUsage) => Promise<void>;
   private readonly heldCalls?: (ctx: Context) => Promise<ReadonlyArray<HeldCall>>;
+  private readonly cutOf?: (ctx: Context) => TurnCut | undefined;
   private currentController?: AbortController;
   private currentCtx?: Context;
   private loopPromise?: Promise<void>;
@@ -134,6 +138,7 @@ export class SessionRunner {
     this.createContext = opts.createContext;
     this.onTurnUsage = opts.onTurnUsage;
     this.heldCalls = opts.heldCalls;
+    this.cutOf = opts.cutOf;
 
     this.queue.subscribe(() => {
       this.kick();
@@ -368,6 +373,11 @@ export class SessionRunner {
     try {
       const text = await this.runTurn(ctx, turn, controller.signal);
       await this.settleUsage(start, ctx);
+      const cut = this.cutOf?.(ctx);
+      if (cut) {
+        this.answerCut(turnId, startedAt, ctx, cut);
+        return;
+      }
       const wakeAt = parkedUntilOf(ctx);
       const held = wakeAt === undefined ? [] : ((await this.heldCalls?.(ctx)) ?? []);
       const response: HarnessResponse =
@@ -458,6 +468,34 @@ export class SessionRunner {
     this.totalCost += spent.cost;
     this.totalBilledCost += spent.billedCost;
     await this.onTurnUsage?.(spent);
+  }
+
+  /**
+   * The turn was cut: it has not ended, and a later wake runs it again. Its response
+   * says so, with the items so far, and `turn_cut` stands in for `turn_aborted`.
+   */
+  private answerCut(turnId: string, startedAt: number, ctx: Context, cut: TurnCut): void {
+    const response: HarnessResponse = {
+      ...buildResponse('', ctx),
+      cut,
+    };
+    this.lastResponse = response;
+    this.lastError = undefined;
+    emitFrameworkEvent({
+      broadcaster: this.broadcaster,
+      agentName: this.agentName,
+      eventType: 'turn_cut',
+      data: {
+        turnId,
+        durationMs: Date.now() - startedAt,
+        reason: cut.reason,
+        attempt: cut.attempt,
+        wakeAt: cut.wakeAt,
+      },
+    });
+    if (this.queue.size === 0) {
+      this.resolveWaiters(response);
+    }
   }
 
   /** A turn whose context could not be built: report it like any other failed turn. */

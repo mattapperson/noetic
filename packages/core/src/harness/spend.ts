@@ -17,7 +17,7 @@ import type {
   UsageCharge,
   WriteOffSpendOptions,
 } from '@noetic-tools/types';
-import { recordUsage, SpendKind } from '@noetic-tools/types';
+import { NoeticErrorImpl, recordUsage, SpendKind } from '@noetic-tools/types';
 import type { OpenRouter } from '@openrouter/sdk';
 import { emitFrameworkEvent, getBroadcaster } from '../runtime/broadcaster-utils';
 import type {
@@ -90,6 +90,26 @@ interface Bill {
   cost: number;
   inputTokens: number;
   outputTokens: number;
+}
+
+/** `promise`, or undefined once `ms` pass first. The timer never keeps a process alive. */
+function within<T>(ms: number, promise: Promise<T | undefined>): Promise<T | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<undefined>((resolve) => {
+    timer = setTimeout(() => resolve(undefined), Math.max(0, ms));
+    unrefTimer(timer);
+  });
+  return Promise.race([
+    promise,
+    timeout,
+  ]).finally(() => clearTimeout(timer));
+}
+
+/** Let a timer not hold the process open, where the runtime allows it. */
+function unrefTimer(timer: ReturnType<typeof setTimeout>): void {
+  if (typeof timer === 'object' && timer !== null && 'unref' in timer) {
+    timer.unref();
+  }
 }
 
 //#endregion
@@ -246,6 +266,69 @@ export class Spend {
       },
       true,
     );
+  }
+
+  /**
+   * Settle every pending dispatch `owns` picks, for a forget (spec 23 § Forgetting):
+   * price each through the provider, waiting no longer than `patienceMs` even for a
+   * lookup already running, then write off the rest at their ceiling, or at 0 flagged
+   * `unbounded` when nothing bounds them. Priced settlements come first.
+   *
+   * @throws NoeticError `ledger_write_failed` when a dispatch's record could not be
+   *   deleted, so its bill is not lost with what the forget deletes next.
+   */
+  async close(
+    owns: (record: SpendRecord) => boolean,
+    patienceMs = DEFAULT_PATIENCE_MS,
+  ): Promise<SpendSettlement[]> {
+    const records = (await this.unsettled(undefined)).filter(owns);
+    await Promise.all(records.map((record) => this.hold(record)));
+    // A lookup started earlier keeps its own patience: wait for it no longer than ours.
+    const priced = await Promise.all(
+      records.map((record) =>
+        this.lookups.has(record.id)
+          ? within(patienceMs, this.lookup(record, patienceMs))
+          : this.lookup(record, patienceMs),
+      ),
+    );
+    const settled = priced.filter((settlement) => settlement !== undefined);
+    const done = new Set(settled.map((settlement) => settlement.id));
+    for (const record of records) {
+      if (done.has(record.id)) {
+        continue;
+      }
+      const writeOff = await this.writeOffAtCeiling(record.id);
+      if (writeOff) {
+        settled.push(writeOff);
+      }
+    }
+    const left = (await this.unsettled(undefined)).find(
+      (record) => owns(record) && records.some((known) => known.id === record.id),
+    );
+    if (left) {
+      throw new NoeticErrorImpl({
+        kind: 'ledger_write_failed',
+        executionId: left.executionId ?? '',
+        path: `spend:${left.id}`,
+        cause: new Error(`the spend record of dispatch "${left.id}" could not be settled`),
+      });
+    }
+    return settled;
+  }
+
+  /** Write a held dispatch off at its ceiling, or at 0 flagged `unbounded` when it has none. */
+  private async writeOffAtCeiling(id: string): Promise<SpendSettlement | undefined> {
+    const ceiling = this.holds.get(id)?.ceiling;
+    const settlement = await this.writeOff(id, {
+      assumedCost: ceiling ?? 0,
+    });
+    if (!settlement || ceiling !== undefined) {
+      return settlement;
+    }
+    return {
+      ...settlement,
+      unbounded: true,
+    };
   }
 
   /** USD held for a thread's pending dispatches. */
@@ -440,6 +523,7 @@ export class Spend {
     }
     await this.charge(hold, bill);
     const { executionId, threadId } = hold.record;
+    const { model, path } = isUnreadable(hold.record) ? {} : hold.record;
     this.emit(hold, 'spend_settled', {
       id,
       cost: bill.cost,
@@ -462,6 +546,16 @@ export class Spend {
           }
         : {}),
       ...bill,
+      ...(model !== undefined
+        ? {
+            model,
+          }
+        : {}),
+      ...(path !== undefined
+        ? {
+            path,
+          }
+        : {}),
       ...(writtenOff
         ? {
             writtenOff: true as const,

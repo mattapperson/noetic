@@ -138,7 +138,7 @@ await harness.execute('follow-up', { threadId: 'thread-1' });
 | Parameter | Type | Description |
 |---|---|---|
 | `input` | `string \| Item \| Item[]` | The input to the agent. |
-| `options` | `ExecuteOptions` | Optional `threadId`, `resourceId`, `state`, `contextLayers`, `connections`, `deliveryMode`, `messageId`. `connections` attaches connections for this turn only: connected when it starts, released when it ends (see [Attaching](/docs/framework/connections#attaching-at-the-harness-a-turn-or-a-step)). |
+| `options` | `ExecuteOptions` | Optional `threadId`, `resourceId`, `state`, `contextLayers`, `connections`, `tools`, `deliveryMode`, `messageId`. `tools` are offered to this turn only, ahead of the harness's own: one with a name already offered replaces it. `connections` attaches connections for this turn only: connected when it starts, released when it ends (see [Attaching](/docs/framework/connections#attaching-at-the-harness-a-turn-or-a-step)). |
 
 Rejects with `NoeticConfigError` code `NO_STEP_CONFIGURED` if no `agentGraph` was provided in the constructor.
 
@@ -181,7 +181,7 @@ const items = await harness.getSessionOutput({ threadId: 't1' });
 
 | Behavior | Detail |
 |---|---|
-| Storage | One key per thread, `output:<threadId>`, in the harness's storage adapter. With no storage configured it is kept in memory. |
+| Storage | One key per thread, `output:<threadId>`, in the harness's storage adapter. With no storage configured it is kept in memory. `forget({ threadId })` deletes it. |
 | Display only | Nothing resumes or replays from it. Checkpoints, the step ledger and the model's history are stored apart. |
 | Saving | In the background while the thread streams. The harness waits for it when a root run ends, when a run fails, and in `close()`. |
 | A failed save | Never fails the run: it is logged and stays queued for the next flush, and the run's result and history stand. `getSessionOutput()` and `close()` throw `OutputStoreError` until a later write lands. |
@@ -214,7 +214,7 @@ await harness.execute('Use the staging database, not production.', {
 });
 ```
 
-A model call offers queued steers at four points: when the stream finishes an output item (`item_done`), before each tool call (`before_tool_call`), before each round (`before_round`), and while a round is stuck on [held tool calls](/docs/framework/steps/invoke-tool#human-in-the-loop-approval) (`held`), where applying skips those calls. By default a `next-item` steer applies at `item_done`, and a `between-rounds` steer at `before_round`. Applied steers keep their content parts and role, and land in the history in the order the model saw them.
+A model call offers queued steers at four points: when the stream finishes an output item (`item_done`), before each tool call (`before_tool_call`), before each round (`before_round`), and while a round is stuck on [held tool calls](/docs/framework/steps/invoke-tool#human-in-the-loop-approval) (`held`), where applying skips those calls. `steerWhileHeld: 'defer'` on the harness makes a steer wait behind held calls instead. By default a `next-item` steer applies at `item_done`, and a `between-rounds` steer at `before_round`. Applied steers keep their content parts and role, and land in the history in the order the model saw them.
 
 To change when a steer lands, give a context layer an `onSteer` hook. It can apply a steer sooner (before a tool call, skipping the rest of the round), hold it longer, rewrite it, or drop it. See [Custom Layers](/docs/framework/context-layers/custom-layers#steering-a-running-turn-with-onsteer).
 
@@ -358,12 +358,16 @@ When the harness is constructed with a durable `environment.storage.adapter` (an
 |---|---|
 | `checkpoint(ctx)` | Snapshot execution state (frontier, layer states, cwd, channels, state, usage, and the run's item-log baseline) through the checkpoint store. Fires automatically at run start, after every step, after `runAppendPipeline`, and when a run finishes. Keyed by `ctx.id`; idempotent. |
 | `restore(executionId, opts?)` | Rebuild a `Context` from a previously saved snapshot and step ledger, standing where the interrupted run began; run the same step on the same input to resume. Returns `null` when neither exists. Throws `NoeticConfigError` with `code: 'CHECKPOINT_SCHEMA_MISMATCH'` when the persisted `schemaVersion` is unrecognised. `opts` is a `RestoreContextOptions` (`parent` / `rollUpUsage` / `state` / `contextLayers`) carrying back the host wiring a snapshot cannot serialise — see [Restoring a decorated context](/docs/framework/durability#restoring-a-decorated-context). |
-| `getNextWakeTime()` | The earliest time the harness has something to do: a [parked turn](/docs/framework/durability#parked-turns)'s deadline or the next `cron()` tick. `undefined` when there is neither. |
+| `getNextWakeTime()` | The earliest time the harness has something to do: a [parked turn](/docs/framework/durability#parked-turns)'s deadline, a cut turn's back-off, or the next `cron()` tick. `undefined` when there is none. |
 | `onWakeTimeChange(listener)` | Call `listener` with `getNextWakeTime()` whenever it changes, first when the harness starts. Returns a function that stops it. A parking turn waits for the listener before it answers. |
 | `waitForIdle()` | Resolves once every scheduled event that is due has been read and every turn has finished or parked. A serverless host awaits it before it lets its process go. |
 | `listStuckRuns()` | List the turns that stopped with `turn_stuck` rather than redo a recorded effect under a newer [flow version](/docs/framework/durability#flow-versions). |
 | `execute({ type: 'noetic:decision', action }, { threadId })` | Settle a stuck turn: `'continue'` (accept the difference and resume), `'restart'` (run it from the top) or `'abandon'` (drop it). Refused with `decision_refused` when the thread has none. |
+| `recordedToolCalls(executionId)` | The tool calls a resume of the execution [brings back on its own](/docs/framework/durability#which-calls-a-resume-brings-back), each `settled` when its result is on record. |
 | `getAuditTrail(scope)` | [The trail](/docs/framework/durability#the-trail) of a thread or an execution: each finished step with its flow version, lease holder and receipt. |
+| `forget(scope, options?)` | [Forget](/docs/framework/durability#forgetting-a-thread-or-an-execution) a thread (`{ threadId }`) or an execution (`{ executionId }`): settle its pending spend, then delete every record the harness keeps for it. `options`: `keepTrail`, `patienceMs`, `waitMs`, `subprocesses`. Resolves a `ForgetReport` `{ threadId?, executionIds, spend }`. Refused with `lease_lost` while a turn runs. |
+| `listStoredThreads(options?)` | Every thread with a record, a turn lease or display output stored. `{ prefix }` narrows the ids. |
+| `listStoredExecutions(options?)` | Every execution with anything stored: `{ executionId, parts, resumable }`. `{ prefix }` narrows the ids. |
 | `cancel(ctx, options?)` | Cancel a running execution: abort `ctx` and every live descendant context (parallel paths, spawn children), then run context-layer teardown — `onComplete` with `outcome: 'aborted'`, then `dispose` — bottom-up. Layer hooks already running on a context (`recall`, `store`, `beforeToolCall`, `afterModelCall`, `onDecision`) finish, up to their timeouts, before that context's teardown starts. A no-op on an already-cancelled context. `options` is the reason as a string, or `{ reason?, drainMs? }`; `drainMs` makes it a [graceful stop](#graceful-stop). Resolves with the drain's `DrainReport` when a drain ran, `undefined` otherwise. |
 
 Cancellation reaches inside the work in flight: blocked channel `recv`/`send` calls reject with `cancelled`, the current provider stream and ACP agent turn are cut short, and the next step boundary throws `cancelled`. Tokens and cost already spent stay charged to the context. Beyond those points it is cooperative — a `runCode` body that ignores `ctx.aborted` between `await`s runs to its next step boundary.
@@ -439,8 +443,10 @@ interface AgentHooks {
 
 | Hook | When it fires | Typical use |
 |---|---|---|
-| `beforeStep` | Before each step executes. | Logging, injecting state, guard checks. |
-| `afterStep` | After each step completes. | Metrics collection, state updates, audit logging. |
+| `beforeStep` | Before each step executes, nested steps included, on the context the step runs on. | Logging, timing, guard checks. |
+| `afterStep` | After a step succeeded, with its output, before it is recorded. Not for a step that failed or was cancelled. | Metrics collection, audit logging. |
+
+A parent's `beforeStep` runs before its children's and its `afterStep` after theirs. A step [replayed on resume](/docs/framework/durability#step-level-resume) does not execute, so neither hook runs for it; watch `step_replayed` for those. A hook that throws fails the step it ran for: a Noetic error passes through unchanged, and any other error becomes `step_failed` with the hook's error as its `cause`. A step whose `afterStep` threw is not recorded, so a resume runs it again.
 
 ```ts
 const harness = new AgentHarness({

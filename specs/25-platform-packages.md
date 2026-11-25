@@ -341,11 +341,38 @@ Before the harness has started, no trigger is listening: a source then holds an 
 
 A harness in a Worker is built with `park: { autoWake: false }`: its own timers do not outlive the request. The host picks one preset.
 
-**Alarm.** `alarmWake({ harness, alarms, now? })`, in a Durable Object, with `alarms` the object's `ctx.storage` and `now` the clock the harness runs on when it is not `Date.now`.
+**Alarm.** `alarmWake({ harness, alarms, now? })`, in a Durable Object, with `alarms` the object's `ctx.storage` and `now` the clock the harness runs on when it is not `Date.now`. In place of `alarms` the host may pass `schedule`, when the object needs its one alarm for work of its own (below).
 
-- It listens with `harness.onWakeTimeChange()` and keeps the object's alarm at the time it hears, deleting the alarm when there is none. The host sets no alarm itself: the first is set when the harness starts, and a turn that parks does not answer until its alarm is set.
+- It listens with `harness.onWakeTimeChange()` and keeps the object's alarm at the time it hears, deleting the alarm when there is none. The host sets no alarm itself: the first is set when the harness starts, and a turn that parks does not answer until its alarm is set. Given `schedule`, it calls `schedule(at)` wherever it would have set or deleted the alarm, and sets nothing itself.
+- `wantedAt()` is the time it last asked for, or undefined.
 - `alarm()`, called from the object's `alarm()` handler, calls `harness.start()`, `harness.wake()` and `harness.waitForIdle()`, then sets the alarm to `harness.getNextWakeTime()`, since the alarm that fired is spent even when the time did not change. `getNextWakeTime()` covers a turn a dead Worker was cut off in: it is due when that Worker's lease runs out, so the alarm is neither dropped nor fired in a loop before then. Starting the harness is what makes a `cron()` source deliver the ticks that fell due while nothing ran. A wake time that is still in the past after the pass (something due that this pass could not do) is not set as it is, since an alarm in the past fires at once: the alarm is set 30 seconds ahead. It does not throw for a turn that failed, since a throw makes the runtime retry the alarm.
 - `stop()` stops the listening.
+- A turn that was cut (`23-durable-execution` § Cut turns) is due after its back-off, so the alarm brings it back, and gives up after `lease.cut.attempts`. The host does not catch `lease_lost` or `ledger_write_failed` itself.
+
+**One alarm, several owners.** A Durable Object has one alarm, and a real object needs it for its own work too. `sharedAlarm(ctx.storage)` merges the times each part wants:
+
+- `schedule(name)` returns a `schedule` function for one part, which `alarmWake` takes: each part says the time it wants, or undefined for none.
+- Outside the alarm handler a part's time only ever moves the stored alarm earlier: after the isolate restarts the other parts' times are no longer in memory, and an alarm that fires early does no harm.
+- Updates to the stored alarm run one at a time, so two parts asking at once leave it at the earlier time.
+- `alarm(handler)`, called from the object's `alarm()`: it forgets every time that has come, runs `handler`, in which each part does its work and says its next time again (`alarmWake`'s `alarm()` does), and then sets the alarm to the earliest time any part wants, deleting it when none does. A part whose time has not come keeps it. A handler that throws still leaves the alarm set, and the throw reaches the runtime, which retries the alarm; when setting the alarm fails as well, the handler's error is the one thrown.
+
+```typescript
+export class Session extends DurableObject {
+  #alarms = sharedAlarm(this.ctx.storage);
+  #harness = buildHarness({ holder: this.ctx.id.toString(), turnOptions: (turn) => this.optionsFor(turn) });
+  #wake = alarmWake({ harness: this.#harness, schedule: this.#alarms.schedule('noetic') });
+  #retry = this.#alarms.schedule('retries');
+
+  async alarm() {
+    await this.#alarms.alarm(async () => {
+      await this.#wake.alarm();
+      await this.#retry(await this.retryWrites());
+    });
+  }
+}
+```
+
+**The lease holder.** An object passes its own id as the lease holder, `environment.storage.lease.holder = ctx.id.toString()` (`23-durable-execution` § One writer per turn): the object that comes back after its isolate died takes its turns over at once, and the alarm finds them due at once rather than one lease period later. The package exports `durableObjectHolder(ctx)` for it.
 
 A `cron()` trigger therefore runs on the alarm preset as it does on Node, with the schedule written once. The package has no cron helper of its own.
 
@@ -353,7 +380,7 @@ A `cron()` trigger therefore runs on the alarm preset as it does on Node, with t
 
 1. Step `turn-0` delivers the message with `harness.execute()` and reads the response.
 2. While the response is parked, `step.waitForEvent('wait-<n>', { type: TURN_WAKE_EVENT, timeout })` sleeps until the turn's deadline or a wake event. With no deadline it sleeps `maxWaitMs` (default 24 hours). A wait that times out is the deadline arriving, not an error.
-3. Step `turn-<n>` calls `harness.wake({ threadId })` and reads the response. A turn woken with nothing to do parks again and the loop repeats.
+3. Step `turn-<n>` calls `harness.wake({ threadId })` and reads the response. A turn woken with nothing to do parks again and the loop repeats. A turn that was cut (`23-durable-execution` § Cut turns) waits the same way, until its `wakeAt`. One cut because another harness took it, and which that harness then finished, has nothing left to wake: the step delivers the message again, which answers with the turn's recorded answer.
 4. It resolves `{ text }`, or `{ text: '', gone: true }` when there was no turn left to wake. A turn that is there but could not be woken, because another Worker holds its lease or is running it, is not gone: the step throws, and Workflows retries it.
 
 `startTurn(binding, turn)` creates the instance under `turnInstanceId(threadId, messageId)`, so a message delivered twice starts one instance. The id is a readable part cut to fit, then `_` and a hash of the two ids as a pair, so `('a-b', 'c')` and `('a', 'b-c')` are different instances and the id is never over the 100 characters Workflows allows. `wakeTurn(binding, instanceId)` sends the wake event; Workflows keeps an event sent before the instance reaches its wait.

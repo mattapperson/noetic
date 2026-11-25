@@ -25,7 +25,10 @@ import type {
   DecideRequest,
   DecideResponse,
   DeliveryMode,
+  ExecuteOptions,
   FsAdapter,
+  HeldCallHandler,
+  HeldSteerPolicy,
   ItemSchemaConfig,
   LLMResponse,
   LlmProviderConfig,
@@ -33,6 +36,7 @@ import type {
   ShellAdapter,
   Steps,
   StorageAdapter,
+  StoredTurn,
   SubprocessAdapter,
   Tool,
   ToolApprover,
@@ -141,6 +145,24 @@ export interface TurnLeaseConfig {
   waitMs?: number;
   /** The clock leases are timed by. Default `Date.now`. */
   now?: () => number;
+  /**
+   * How a turn cut by `lease_lost` or `ledger_write_failed` is run again (spec 23
+   * § Cut turns). Every field has a default.
+   */
+  cut?: TurnCutConfig;
+}
+
+/** @public Settings for cut turns (spec 23 § Cut turns). */
+export interface TurnCutConfig {
+  /**
+   * How many times a turn may be cut and run again. The cut after that fails the
+   * turn. Default `DEFAULT_CUT_ATTEMPTS` (3); `0` fails every turn that would be cut.
+   */
+  attempts?: number;
+  /** How long after its first cut a turn is due again, in ms; doubled for each cut after. Default 1 000. */
+  delayMs?: number;
+  /** The longest a cut turn waits before it is due again, in ms. Default 60 000. */
+  maxDelayMs?: number;
 }
 
 /**
@@ -264,6 +286,28 @@ export interface AgentHarnessOpts<
    * unapproved and the harness warns once per tool name.
    */
   approveToolCall?: ToolApprover;
+  /**
+   * Puts a held tool call in front of a person (spec 08 § Held tool calls): called
+   * once per question per process with the call and a signal that aborts when the
+   * call is settled any other way. Return the answer, taken as a decision item passed
+   * to `execute()` is, or `undefined` to leave the call held. The approver still
+   * decides what is held; this is what the host does with what it held.
+   */
+  onHeld?: HeldCallHandler;
+  /**
+   * What a steer does at the `held` steer point before any layer has a say: `apply`
+   * (the default) skips the held calls for it; `defer` keeps it queued behind them,
+   * so a question a person was shown stays open.
+   */
+  steerWhileHeld?: HeldSteerPolicy;
+  /**
+   * The `execute()` options a stored turn runs with when `wake()` is given none
+   * (spec 23 § Parked turns). A stored turn keeps no options of its own, since they
+   * hold live objects: tools, layers, connections and their credentials. A host that
+   * passes per-turn options to `execute()` rebuilds them here, so a turn woken by an
+   * alarm in a fresh process runs as it began.
+   */
+  turnOptions?: (turn: StoredTurn) => ExecuteOptions | Promise<ExecuteOptions>;
   /**
    * The live things the agent works with — browsers, devices, apps, chat workspaces,
    * sources — keyed by name, or as a list of named entries (`[mcp({ name, … })]`)

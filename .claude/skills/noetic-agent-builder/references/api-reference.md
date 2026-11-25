@@ -48,7 +48,7 @@ customItems?: { [name: string]: CustomItem };   // items only this step may emit
 **`customItem({ type, description?, event?, output })`** declares a custom item, shaped like `tool()`.
 - `type` is `prefix:name`, else `INVALID_CUSTOM_ITEM_TYPE`.
 - `event` and `output` take any Standard Schema or a JSON Schema object (validated via `z.fromJSONSchema`, typed via `FromJsonSchema` when written `as const`).
-- `output` must be an object without `id`/`type`, else `INVALID_CUSTOM_ITEM_SHAPE`.
+- `output` must be an object, or a union of objects (discriminated union, `z.union`, JSON Schema `oneOf`), none declaring `id`/`type`, else `INVALID_CUSTOM_ITEM_SHAPE`. A union's final item is `{ id, type, ...option }`, so one union can be both `event` and `output`.
 - JSON documents declare items in a root or node `customItems` map: `{ "<name>": { "type", "event"?, "output" } }`, in JSON Schema.
 - `workflow({ document, customItems })` adds TypeScript declarations. A name in both must share its `type` (`CUSTOM_ITEM_MISMATCH`), and the TypeScript schema wins.
 - `workflow()` returns a `TypedWorkflowStep` branded with every item it can emit (`'~customItems'`, including an `as const` document's), and `AgentHarness` infers `TItem` from `agentGraph`:
@@ -1761,6 +1761,17 @@ hooks: {
 
 `AgentHarness` is generic over `TParams`. The `config` property exposes `AgentConfig<TParams>`, and steps/tools access params via `ctx.harness.config.params`. Execution surfaces are configured via the `environment` option (`{ storage?: { adapter?, checkpointStore?, layerStateStore?, stepLedgerRetention? }, fs?, shell?, subprocess? }`); every field defaults to an in-memory adapter, except `checkpointStore`, which defaults to a store over `storage.adapter` when one is given. The top-level `durability?: boolean` option (default on whenever storage is given) turns every durability surface off when `false`. Usage carries both `cost` (what the work cost, replayed work included) and `billedCost` (what was paid now — `0` for replayed work) on `LLMResponse`, `StepMeta`, `Context`, `HarnessResponse`, and `SessionUsage`. `Context`, `HarnessResponse`, and `SessionUsage` also carry `heldCost`: spend held at its ceiling for cut-off paid calls with no settled bill yet (see Paid dispatches). The `fs` property exposes the configured `FsAdapter`, and `shell` the configured `ShellAdapter`. Default context layers come in through `contextLayers`, and the default model-provider configuration through `callModelDefaults` (an `LlmProviderConfig`).
 
+### Step hooks
+
+```typescript
+new AgentHarness({ /* … */ hooks: {
+  beforeStep: async (step, ctx) => { /* before each step executes, nested ones included */ },
+  afterStep: async (step, result, ctx) => { /* after success, before the ledger record */ },
+} });
+```
+
+Not run for a step replayed from the ledger; `afterStep` not run for a failed or cancelled step. A hook that throws fails its step (`step_failed` with the hook error as `cause`; Noetic errors pass through); a step whose `afterStep` threw is not recorded.
+
 ### Sessions and the Message Queue
 
 Each `threadId` is a **session**: a long-lived broadcaster + message queue + item log carried across turns. `execute()` enqueues a message on the session identified by `options.threadId` (or a default thread) and returns `Promise<void>` once the message is accepted. Response is observed via session-scoped accessors.
@@ -2148,10 +2159,12 @@ A `StorageAdapter` over one SQLite table (default `noetic_storage`). `database` 
 interface StorageAdapter {
   swap?<T>(key: string, prev: T | null, next: T): Promise<boolean>; // compare-and-set
 }
-// environment.storage.lease?: { holder?: string; ttlMs?: number; waitMs?: number; now?: () => number }
+// environment.storage.lease?: { holder?: string; ttlMs?: number; waitMs?: number; now?: () => number;
+//   cut?: { attempts?: number /* 3 */; delayMs?: number /* 1e3 */; maxDelayMs?: number /* 6e4 */ } }
+// HarnessResponse.cut?: { reason: 'lease_lost' | 'ledger_write_failed'; attempt?: number; wakeAt: number } — event `{name}:turn_cut`
 ```
 
-On storage with `swap` (`createFileStorage`, `createSqliteStorage`, `createInMemoryStorage({ swap: true })`), each `harness.execute()` turn takes its thread's lease: one harness writes a turn, a replaced harness stops with `lease_lost`, and a failed ledger write stops the turn with `ledger_write_failed`.
+On storage with `swap` (`createFileStorage`, `createSqliteStorage`, `createInMemoryStorage({ swap: true })`), each `harness.execute()` turn takes its thread's lease: one harness writes a turn, a replaced harness stops with `lease_lost`, and a failed ledger write stops the turn with `ledger_write_failed`. A failed write **cuts** the turn rather than failing it: the response resolves with `cut`, the turn stays on record, and a routine `wake()` runs it again after a back-off (1 s doubling, at most 60 s), failing it only after `cut.attempts`. A `lease_lost` while the other holder still runs the turn is a cut too (no `attempt`, `wakeAt` = its lease end); once that holder finished it, the response rejects as before. A host with a stable single-instance identity (a Durable Object) passes it as `holder`, so it takes its own leases over at once after a restart.
 
 ### Flow versions and the trail
 
@@ -2162,9 +2175,24 @@ harness.listStuckRuns(): Promise<StuckTurn[]>;  // { threadId, executionId, path
 harness.execute({ type: 'noetic:decision', action: 'continue' | 'restart' | 'abandon' }, { threadId });
 harness.getAuditTrail(scope: { threadId } | { executionId }): Promise<TrailMark[]>;
 // TrailMark: { executionId, path, stepId, kind, completedAt, version?, term?, holder?, receipt? }
+// Tool calls a resume of the execution replays: { callId, name, path, settled }.
+// A host journal of tool traffic appends none of these to a restored context.
+harness.recordedToolCalls(executionId: string): Promise<RecordedToolCall[]>;
 ```
 
-A turn resumed under another `version` keeps the steps that still match. If the first step that differs already had a lasting effect (a `once`/`effects` connection operation, or a `durable: true` tool), the turn stops with `NoeticError` `turn_stuck` and waits: `wake()` skips it until that decision arrives. Give an effect step a `replayKey` to keep it matching across edits. Trail marks outlive the ledger and `clearCheckpoint`.
+A turn resumed under another `version` keeps the steps that still match. If the first step that differs already had a lasting effect (a `once`/`effects` connection operation, or a `durable: true` tool), the turn stops with `NoeticError` `turn_stuck` and waits: `wake()` skips it until that decision arrives. Give an effect step a `replayKey` to keep it matching across edits. Trail marks outlive the ledger and `clearCheckpoint`; only `forget` deletes them.
+
+### Forgetting threads and executions
+
+```ts
+harness.forget(scope: { threadId } | { executionId }, options?: { keepTrail?: boolean; patienceMs?: number; waitMs?: number; subprocesses?: SubprocessAdapter[] }): Promise<ForgetReport>;
+// ForgetReport: { threadId?, executionIds: string[], spend: SpendSettlement[] }
+harness.listStoredThreads(options?: { prefix?: string }): Promise<string[]>;
+harness.listStoredExecutions(options?: { prefix?: string }): Promise<StoredExecution[]>;
+// StoredExecution: { executionId, parts: ExecutionPart[], resumable }  — parts: snapshot|ledger|trail|held|intent|pending|child|other
+```
+
+When a thread or run is over, `forget` deletes everything core keeps for it — never build `session:`/`execution:`/`turn-lease:`/`output:` keys yourself. A thread's forget covers its record, lease, display output, thread- and execution-scoped layer state, and every execution it ran (the record lists them in `executions`); an execution's forget leaves thread records alone. Pending spend is settled first: priced through the provider (up to `patienceMs`), else written off at its ceiling, or at 0 with `unbounded: true`. Settlements carry `model` and `path` for attribution. A turn running/queued in this harness, a second concurrent forget, or a lease held elsewhere after `waitMs`, is refused with `lease_lost`; the forget holds and renews the thread lease until done, and a message sent to the thread on this harness meanwhile waits and starts it afresh. A spend record that cannot be settled stops it with `ledger_write_failed` before anything is deleted. `forget({})` throws `INVALID_FORGET_SCOPE`. Spawns a subprocess adapter runs out of process are linked (`execution:<run>:child:<child>`, with the adapter's source and a `settled` mark) and forgotten with their run, transitively: an unfinished child is stopped first through the adapter that ran it (environment, the step's own via the step registry, or one passed in `subprocesses`); if none can be known the forget throws `FORGET_CHILD_UNREACHABLE` before deleting anything. Then spend is settled and keys deleted. Each forgotten run's connection-pool leases go too: one still held here is released (its connection freed), and stored lease records — crash leftovers included — are deleted. Layer state is deleted for known thread-scoped layer ids (configured, seen durable by the harness, or named in the thread record's `layers`). Sweep with `listStoredThreads({ prefix })`; decide resumability with `listStoredExecutions()`'s `resumable` (a trail alone is not a checkpoint).
 
 ### Held tool calls
 
@@ -2178,10 +2206,23 @@ harness.execute({ type: 'noetic:decision', callId, argsHash?, output }, { thread
 // a function_call_output item naming a held call is refused (hold_refused): use the { callId, output } decision
 // output must be a JSON value. Add executionId to answer a call held by a run you started yourself
 // (parseAndRunWorkflow), which has no thread. Several decisions in one list: all read first, then taken in order.
-// HeldCall: { callId, name, args, argsHash, reason: 'approval' | 'result', dueAt?, onDue?, request? }
+// HeldCall: { callId, name, args, argsHash, reason: 'approval' | 'result' | 'outcome', dueAt?, onDue?, request? }
+
+// Showing a person: the approver decides, onHeld shows what it held. Once per question per process.
+new AgentHarness({
+  approveToolCall: (call) => (safe(call) ? { action: 'allow' } : { action: 'hold' }),
+  onHeld: async (call, { signal, executionId, threadId }) => {
+    // return a HeldResolution ({ action, guidance? } | { output }) to answer, undefined to leave it held
+    return (await card(call, signal)) ? { action: 'allow' } : { action: 'deny', guidance: 'no' };
+  },
+  steerWhileHeld: 'defer', // default 'apply': a steer skips held calls; 'defer' waits behind them
+});
+// signal aborts when settled another way; signal.reason: HeldCallSettled
+// HeldCallSettled: { callId, name, argsHash, reason, by: 'answer' | 'due' | 'skipped' | 'cancelled' } // settled by another harness → 'answer'
+readHeldCallEvent(event, agentName?): { type: 'held', call: HeldCall } | { type: 'settled', settled: HeldCallSettled } | undefined
 ```
 
-A call that needs approval with no approver, or whose approver answers `hold`, is held: its siblings run, nothing is written for it, and the turn waits (and parks, with `park` on) until the decision. A decision is never written to the conversation and starts no turn. Refusals of an answer are `NoeticError` `hold_refused`; a decision that does not fit at all (no stuck turn, wrong kind of action) is `decision_refused`. Event: `{name}:tool_call_held`.
+A call that needs approval with no approver, or whose approver answers `hold`, is held: its siblings run, nothing is written for it, and the turn waits (and parks, with `park` on) until the decision. A decision is never written to the conversation and starts no turn. Refusals of an answer are `NoeticError` `hold_refused`; a decision that does not fit at all (no stuck turn, wrong kind of action) is `decision_refused`. Events: `{name}:tool_call_held`, `{name}:tool_call_settled` (aborted/interrupted turns settle `cancelled` and clear their held calls).
 
 ### Triggers as data, durable `emit`
 
@@ -2219,6 +2260,8 @@ Each tool call in a model round is recorded as it finishes, so a resumed round r
 // environment.storage.park?: boolean | { graceMs?: number }   (needs swap storage)
 // AgentHarness({ now?: () => number })
 harness.wake(scope?: { threadId?: string; options?: ExecuteOptions }): Promise<string[]>;
+// AgentHarness({ turnOptions?: (turn: StoredTurn) => ExecuteOptions | Promise<ExecuteOptions> }) — options for a woken turn when wake() names none
+// ExecuteOptions.tools?: Tool[] — tools for one turn, ahead of the harness's own
 harness.getNextWakeTime(): Promise<number | undefined>;   // earliest parked deadline or next cron() tick
 harness.onWakeTimeChange(listener: (at: number | undefined) => void | Promise<void>): () => void; // told when that time changes; a parking turn waits for it
 harness.waitForIdle(): Promise<void>;                     // due scheduled events are read; every turn finished or parked

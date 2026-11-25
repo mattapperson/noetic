@@ -6,6 +6,7 @@ import type {
   StepSubprocessRequest,
   SubprocessAdapter,
 } from '@noetic-tools/types';
+import { ChildAdapterSource, spawnLinked } from '../runtime/durable/child-links';
 import { DetachedHandleImpl } from '../util/detached-handle';
 import { executeNoAdapter } from './execute';
 
@@ -33,6 +34,20 @@ export function resolveStepAdapter<TContext, I, O>(
     return step.subprocess;
   }
   return fallback;
+}
+
+/** Where `resolveStepAdapter` took the adapter from, for the child's link. */
+function adapterSourceOf<TContext, I, O>(
+  step: Step<TContext, I, O>,
+  callOverride: SubprocessAdapter | undefined,
+): ChildAdapterSource {
+  if (callOverride) {
+    return ChildAdapterSource.Call;
+  }
+  if ((step.kind === 'runCode' || step.kind === 'spawn') && step.subprocess) {
+    return ChildAdapterSource.Step;
+  }
+  return ChildAdapterSource.Harness;
 }
 
 //#endregion
@@ -119,7 +134,12 @@ export function dispatchStepThroughAdapter<I, O>(
   return new DetachedHandleImpl<O>({
     id: childCtx.id,
     stepId: s.id,
-    spawned: adapter.spawn(request),
+    spawned: spawnLinked(parentCtx, adapter, {
+      childId: childCtx.id,
+      stepId: s.id,
+      from: adapterSourceOf(s, overrides?.subprocess),
+      spawn: () => adapter.spawn(request),
+    }),
   });
 }
 

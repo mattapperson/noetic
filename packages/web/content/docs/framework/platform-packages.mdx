@@ -228,6 +228,31 @@ export class Agent extends DurableObject {
 
 You never set the alarm yourself. `alarmWake` listens to [`harness.onWakeTimeChange()`](/docs/framework/durability#parked-turns) and keeps the object's alarm at the harness's next wake time. A turn that parks does not answer until its alarm is set.
 
+A turn [cut](/docs/framework/durability#one-writer-per-turn) by a lost lease or a failed write is brought back by the same alarm after its back-off, so the object does not catch those errors itself.
+
+Name the lease holder after the object, so the object that comes back after its isolate died takes its turns over at once: `environment.storage.lease.holder = durableObjectHolder(this.ctx)` (the object's id). One holder name must drive a thread from one place at a time.
+
+**Sharing the alarm.** A Durable Object has one alarm, and yours may need it too. Pass `schedule` in place of `alarms`, and merge with `sharedAlarm`:
+
+```ts validate=none
+import { alarmWake, sharedAlarm } from '@noetic-tools/platform-cloudflare-worker';
+
+export class Session extends DurableObject {
+  #alarms = sharedAlarm(this.ctx.storage);
+  #wake = alarmWake({ harness: this.#harness, schedule: this.#alarms.schedule('noetic') });
+  #retries = this.#alarms.schedule('retries');
+
+  async alarm() {
+    await this.#alarms.alarm(async () => {
+      await this.#wake.alarm();                      // says noetic's next time again
+      await this.#retries(await this.retryWrites()); // yours, or undefined for none
+    });
+  }
+}
+```
+
+Outside `alarm()`, a part's time only brings the alarm forward: after the isolate restarts, the other parts' times are not in memory, and an alarm that fires early is harmless. Inside it, the times that came are forgotten, each part says its next one, and the alarm is set to the earliest, or deleted when no part wants one. `wantedAt()` on either returns the time asked for.
+
 A [`cron()`](/docs/framework/connections) trigger runs on this preset unchanged. The alarm is set to the next tick as well as to parked deadlines, and `alarm()` delivers the ticks that fell due while nothing ran. The first tick's alarm is set when the harness starts, so an object that only runs on a schedule needs one call to `harness.start()` when it is created.
 
 **A Cloudflare Workflow, one instance per turn:**
@@ -248,7 +273,7 @@ const instanceId = await startTurn(env.TURNS, { threadId, messageId, input: text
 await wakeTurn(env.TURNS, instanceId);
 ```
 
-The instance runs the turn until it parks, sleeps until the turn's deadline or a wake, and runs it again. This preset has no object that is always there, so for a `cron()` trigger add a Cloudflare Cron Trigger whose `scheduled` handler calls `harness.start()` and awaits `harness.waitForIdle()`. Everything the turn did is in the harness's storage, so a Workflow step that is retried repeats nothing.
+The instance runs the turn until it parks, sleeps until the turn's deadline or a wake, and runs it again. A cut turn sleeps until its back-off is over the same way. This preset has no object that is always there, so for a `cron()` trigger add a Cloudflare Cron Trigger whose `scheduled` handler calls `harness.start()` and awaits `harness.waitForIdle()`. Everything the turn did is in the harness's storage, so a Workflow step that is retried repeats nothing.
 
 ## Related Pages
 

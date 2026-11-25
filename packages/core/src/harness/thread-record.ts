@@ -29,10 +29,18 @@ export interface ThreadRecordHost {
   restore(executionId: string, opts: RestoreCheckpointOptions): Promise<Context | null>;
   clearCheckpoint(executionId: string): Promise<void>;
   parseItems(raw: unknown[]): Item[];
+  /** Ids of the context layers this harness keeps durable state for. */
+  layerIds?(): ReadonlyArray<string>;
 }
 
 /** How many finished turns a thread remembers, to answer a message delivered again. */
 const MAX_DONE_TURNS = 20;
+
+/** How a record write behaves. */
+interface CommitOptions {
+  /** Write only over a stored record: never create one. */
+  onlyIfStored?: boolean;
+}
 
 /** How many times a compare-and-set write is tried against a record that keeps changing. */
 const COMMIT_ATTEMPTS = 8;
@@ -194,6 +202,8 @@ export class ThreadRecord {
     return this.updateHeld(ctx, (record) => ({
       ...record,
       steers: record.steers?.filter((steer) => !messageIds.includes(steer.id)),
+      executions: withExecution(record.executions, ctx.id),
+      ...this.withLayers(record),
       turn: {
         executionId: ctx.id,
         messageIds: [
@@ -204,6 +214,14 @@ export class ThreadRecord {
           : {
               version: this.host.version,
             }),
+        // Kept until the turn ends, even when it resumes under a new execution (its
+        // checkpoint was not written): how often it was cut counts toward giving up.
+        ...(record.turn?.cut !== undefined &&
+        (record.turn.executionId === ctx.id || isSameList(record.turn.messageIds, messageIds))
+          ? {
+              cut: record.turn.cut,
+            }
+          : {}),
         // Kept until the turn ends: a host that dies part way through going on
         // must not find the same step stuck again.
         ...(record.turn?.executionId === ctx.id && record.turn.accept !== undefined
@@ -282,13 +300,40 @@ export class ThreadRecord {
         ? {
             ...record,
             turn: {
-              ...record.turn,
+              ...withoutCut(record.turn),
               parked:
                 until === undefined
                   ? {}
                   : {
                       until,
                     },
+            },
+          }
+        : record,
+    );
+  }
+
+  /**
+   * The turn on `ctx` was cut (spec 23 § Cut turns): keep its record, marked with how
+   * often and when. Best-effort and unfenced: storage that just refused a write may
+   * refuse this one, and the harness keeps the mark in memory as well. Written only
+   * while the record still names the turn's execution.
+   */
+  cut(
+    ctx: Context,
+    cut: {
+      reason: string;
+      count: number;
+      at: number;
+    },
+  ): Promise<void> {
+    return this.update((record) =>
+      record.turn?.executionId === ctx.id
+        ? {
+            ...record,
+            turn: {
+              ...record.turn,
+              cut,
             },
           }
         : record,
@@ -305,7 +350,7 @@ export class ThreadRecord {
         ? {
             ...record,
             turn: {
-              ...record.turn,
+              ...withoutCut(record.turn),
               stopped: {
                 at,
                 reason,
@@ -352,24 +397,9 @@ export class ThreadRecord {
     });
   }
 
-  /** The executions of the thread's turns that have a trail: recent finished ones, then the one in flight. */
+  /** The executions of every turn the thread began, oldest first, the one in flight last. */
   executions(): Promise<string[]> {
-    return this.run(async () => {
-      const record = await this.load();
-      const ids = (record?.done ?? []).flatMap((turn) =>
-        turn.executionId === undefined
-          ? []
-          : [
-              turn.executionId,
-            ],
-      );
-      return record?.turn
-        ? [
-            ...ids,
-            record.turn.executionId,
-          ]
-        : ids;
-    });
+    return this.run(async () => executionsOf(await this.load()));
   }
 
   /** The turn in flight, cut off or parked, when one is recorded. */
@@ -388,6 +418,7 @@ export class ThreadRecord {
   ): Promise<void> {
     await this.updateHeld(ctx, (record) => ({
       ...withoutTurn(record),
+      ...this.withLayers(record),
       steers: record.steers?.filter((steer) => queuedIds.includes(steer.id)),
       items: [
         ...history,
@@ -400,10 +431,16 @@ export class ThreadRecord {
   addUsage(spent: TurnUsage): Promise<SessionUsage> {
     return this.run(async () => {
       const usage = addUsage((await this.load())?.usage ?? EMPTY_USAGE, spent);
-      await this.write((record) => ({
-        ...record,
-        usage,
-      }));
+      // A record a forget deleted meanwhile stays deleted: a late bill does not bring it back.
+      await this.write(
+        (record) => ({
+          ...record,
+          usage,
+        }),
+        {
+          onlyIfStored: true,
+        },
+      );
       return usage;
     });
   }
@@ -458,9 +495,12 @@ export class ThreadRecord {
   }
 
   /** Read-modify-write the stored record, best-effort. Call only from inside `run`. */
-  private async write(change: (record: SessionRecord) => SessionRecord): Promise<void> {
+  private async write(
+    change: (record: SessionRecord) => SessionRecord,
+    opts?: CommitOptions,
+  ): Promise<void> {
     try {
-      await this.commit(change);
+      await this.commit(change, opts);
     } catch (error) {
       // Same rule as checkpoints: losing the record costs resumability, not the turn.
       console.warn(
@@ -475,10 +515,16 @@ export class ThreadRecord {
    * the write lands only if nothing else wrote meanwhile, and is tried again on what
    * the other writer left, so two harnesses never overwrite each other's fields.
    */
-  private async commit(change: (record: SessionRecord) => SessionRecord): Promise<void> {
+  private async commit(
+    change: (record: SessionRecord) => SessionRecord,
+    opts?: CommitOptions,
+  ): Promise<void> {
     const store = this.host.store;
     for (let attempt = 0; attempt < COMMIT_ATTEMPTS; attempt += 1) {
       const stored = await store.read(this.threadId);
+      if (opts?.onlyIfStored && stored.raw === null) {
+        return;
+      }
       const next = change(
         stored.record ?? {
           items: [],
@@ -508,6 +554,22 @@ export class ThreadRecord {
     );
   }
 
+  /** `layers` with the ids of the layers this harness keeps durable state for, when it has any new ones. */
+  private withLayers(record: SessionRecord): Pick<SessionRecord, 'layers'> {
+    const known = this.host.layerIds?.() ?? [];
+    const layers = new Set(record.layers);
+    for (const id of known) {
+      layers.add(id);
+    }
+    return layers.size === 0
+      ? {}
+      : {
+          layers: [
+            ...layers,
+          ],
+        };
+  }
+
   private load(): Promise<SessionRecord | undefined> {
     return this.host.store.load(this.threadId);
   }
@@ -517,6 +579,12 @@ export class ThreadRecord {
     this.queue = next.catch(() => {});
     return next;
   }
+}
+
+function withoutCut(turn: NonNullable<SessionRecord['turn']>): NonNullable<SessionRecord['turn']> {
+  const { cut, ...rest } = turn;
+  void cut;
+  return rest;
 }
 
 function withoutTurn(record: SessionRecord): SessionRecord {
@@ -531,6 +599,10 @@ function withoutTurn(record: SessionRecord): SessionRecord {
  */
 function isSameDelivery(turn: ReadonlyArray<string>, delivered: ReadonlyArray<string>): boolean {
   return delivered.length > 0 && delivered.every((id) => turn.includes(id));
+}
+
+function isSameList(a: ReadonlyArray<string>, b: ReadonlyArray<string>): boolean {
+  return a.length === b.length && a.every((id, i) => id === b[i]);
 }
 
 function addUsage(total: SessionUsage, spent: TurnUsage): SessionUsage {
@@ -559,6 +631,43 @@ function addUsage(total: SessionUsage, spent: TurnUsage): SessionUsage {
         }
       : {}),
   };
+}
+
+//#endregion
+
+//#region Executions
+
+/** `executions` with `executionId` added at the end, unless it is already there. */
+function withExecution(executions: string[] | undefined, executionId: string): string[] {
+  const known = executions ?? [];
+  return known.includes(executionId)
+    ? known
+    : [
+        ...known,
+        executionId,
+      ];
+}
+
+/**
+ * @internal
+ * Every execution a stored record names, oldest first, without repeats: those it
+ * began, then remembered finished turns from records written before `executions`
+ * was kept, then the turn in flight.
+ */
+export function executionsOf(record: SessionRecord | undefined): string[] {
+  const ids = new Set(record?.executions);
+  for (const turn of record?.done ?? []) {
+    if (turn.executionId !== undefined) {
+      ids.add(turn.executionId);
+    }
+  }
+  if (record?.turn) {
+    ids.delete(record.turn.executionId);
+    ids.add(record.turn.executionId);
+  }
+  return [
+    ...ids,
+  ];
 }
 
 //#endregion

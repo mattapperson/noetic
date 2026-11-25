@@ -710,7 +710,8 @@ describe('two harnesses racing one turn', () => {
       'b-2',
     ]);
 
-    // The first harness's model call comes back to a turn it no longer holds.
+    // The first harness's model call comes back to a turn it no longer holds, and
+    // that the new holder has finished: nothing is left to cut, so it fails.
     stalled.release();
     await expect(first.getAgentResponse(scope)).rejects.toThrow();
     expect(stalled.calls).toBe(1);

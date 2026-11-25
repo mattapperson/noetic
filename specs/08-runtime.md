@@ -460,6 +460,15 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
   // Settle a call that can never be priced at an amount the host asserts.
   writeOffSpend(id: string, opts: { assumedCost: number }): Promise<SpendSettlement | undefined>;
 
+  // Forgetting (see 23-durable-execution § Forgetting). Delete everything the
+  // harness keeps for a thread — its record, lease, display output, layer state,
+  // and every execution it ran — or for one execution, after settling the spend
+  // they left pending. Refused with `lease_lost` for a turn still running.
+  forget(scope: { threadId: string } | { executionId: string }, options?: ForgetOptions): Promise<ForgetReport>;
+  // What is stored, found by key, so a sweep never builds a key itself.
+  listStoredThreads(options?: { prefix?: string }): Promise<string[]>;
+  listStoredExecutions(options?: { prefix?: string }): Promise<StoredExecution[]>;
+
   // Lifecycle. A string is the reason alone; `{ drainMs }` drains first and
   // resolves with the drain's report (see Graceful Stop).
   cancel(ctx: Context, options?: string | CancelOptions): Promise<DrainReport | undefined>;
@@ -634,7 +643,7 @@ A **steer** is a `between-rounds` or `next-item` message: one meant for the turn
 | `item_done` | The stream finished an output item | `defer` | `apply` | Stops the stream; the round ends with the finished items |
 | `before_tool_call` | A client tool call is about to run | `defer` | `defer` | Skips this call and the rest of the round; each skipped call is answered `"Skipped: a new message arrived before this tool call ran."` |
 | `before_round` | A model call is about to start | `apply` | `apply` | Adds the steer to this call's input |
-| `held` | The round's remaining tool calls are held for a person (§ Held tool calls) | `apply` | `apply` | Skips the held calls, each answered as a skipped call is, and drops their records |
+| `held` | The round's remaining tool calls are held for a person (§ Held tool calls) | `AgentHarnessOpts.steerWhileHeld` (`apply`) | `AgentHarnessOpts.steerWhileHeld` (`apply`) | Skips the held calls, each answered as a skipped call is, and drops their records |
 
 Layers change the outcome with the `onSteer` hook (see `11-context-layer-system`): `apply`, `defer` (offer again at the next point), or `drop`. A steer applied at any point is held until the next model call, then added to the conversation in the order the model sees it, after passing through the `onItemAppend` pipeline. Applied steers are part of the call's response items, so they reach the item log with the rest of the round.
 
@@ -702,6 +711,7 @@ interface FrameworkStreamEvent {
 | `{name}:custom_item_event` | One event of a declared custom item, as a step yields it (`34-custom-items`). Data: `{ id, type, event }`; `id` is the one its final item takes. Emitted unconditionally, like `item_appended`. |
 | `{name}:turn_completed` | Emitted when a turn completes. Data: `{ turnId, durationMs }` |
 | `{name}:tool_call_held` | Emitted when a tool call is held for a person (§ Held tool calls). Data: the `HeldCall`: `{ callId, name, args, argsHash, reason, dueAt?, onDue?, request? }` |
+| `{name}:tool_call_settled` | Emitted when a call this process announced held stops being held (§ Held tool calls). Data: the `HeldCallSettled`: `{ callId, name, argsHash, reason, by }` |
 | `{name}:turn_replayed` | Emitted when a message delivered again is answered from its finished turn's record (`23a-step-level-resume` § Sessions). Data: `{ messageIds, text }`, `text` being the recorded answer |
 | `{name}:turn_parked` | Emitted in place of `turn_completed` when a turn parks (`23-durable-execution` § Parked turns). Data: `{ turnId, durationMs, wakeAt }` |
 | `{name}:turn_aborted` | Emitted when a turn is aborted or errors. Data: `{ turnId, reason }` |
@@ -940,7 +950,7 @@ A harness with no approver warns once per tool when it first holds a call, sayin
 
 **No approver and nowhere to hold.** A call that needs approval, with no approver and no id to hold it under, is refused. It is never run with a warning.
 
-**A cancelled turn leaves no question behind.** When the host aborts a turn, its held calls are cleared.
+**A cancelled turn leaves no question behind.** When the host aborts or interrupts a turn, its held calls are cleared and settled `by: 'cancelled'`. An interrupted turn restarts as a new execution, so no answer could reach them; a model's held call is answered `"Cancelled before it ran."` in the history it restarts from.
 
 An `invokeTool` step whose call is held waits the same way. Its approval is kept under its step id; a held result (`hold()`) and an unknown outcome (`durable: true`) are kept under its dispatch path, which does not repeat across loop iterations.
 
@@ -959,9 +969,58 @@ A parked response lists the calls its turn holds as `held`, the same list `pendi
 
 `park: false` keeps the turn live while the action is held. The two agent paths pass it: something outside the run is waiting on the answer and would not survive the turn stopping.
 
-**A message while calls are held.** It is a steer like any other, and the context layers decide. A round stuck on held calls has no boundary to reach, so the round offers queued steers at the `held` steer point, with the held calls as `pendingCalls`. The default there is to apply: the held calls get the output a skipped call gets, their records are dropped, and the next round sees the message. A layer's `onSteer` may defer it, leaving it queued behind the calls, or drop it. A `next-turn` message is not a steer: it waits for the turn to end (`23-durable-execution` § A message for a parked thread).
+**A message while calls are held.** It is a steer like any other, and the context layers decide. A round stuck on held calls has no boundary to reach, so the round offers queued steers at the `held` steer point, with the held calls as `pendingCalls`. The default there is `AgentHarnessOpts.steerWhileHeld`: `apply` (the default) or `defer`. Applied, the held calls get the output a skipped call gets, their records are dropped (settled `by: 'skipped'`), and the next round sees the message. Deferred, the steer waits behind the calls and is applied at the next round boundary, once they are answered: the host that shows a person a question keeps it open. A layer's `onSteer` still has the last word at the point, either way. A `next-turn` message is not a steer: it waits for the turn to end (`23-durable-execution` § A message for a parked thread).
 
 **Another process.** On storage with `swap`, any harness can answer a call. A turn waiting in a different process re-reads its held calls every two seconds, since an answer written elsewhere cannot signal it.
+
+**Showing a person.** `AgentHarnessOpts.onHeld` is where a host puts a held call in front of a person. The approver stays the one place that decides; `onHeld` is what a host does with the calls the approver (or the absence of one, or a tool's `hold()`, or an unknown outcome) left to a person.
+
+```typescript
+type HeldCallHandler = (
+  call: HeldCall,
+  held: HeldCallContext,
+) => HeldResolution | undefined | Promise<HeldResolution | undefined>;
+
+interface HeldCallContext {
+  /** Aborts once the call is settled any other way. `signal.reason` is the `HeldCallSettled`. */
+  readonly signal: AbortSignal;
+  /** The execution the call is held under, and the thread, when it is a thread's turn. */
+  readonly executionId: string;
+  readonly threadId?: string;
+}
+
+interface HeldCallSettled {
+  readonly callId: string;
+  readonly name: string;
+  readonly argsHash: string;
+  readonly reason: 'approval' | 'result' | 'outcome';
+  /**
+   * `answer`: a decision settled it. `due`: its deadline passed with `onDue: 'deny'`.
+   * `skipped`: a steer applied at the `held` point skipped it. `cancelled`: its turn was
+   * aborted, interrupted or abandoned, the agent that asked gave up, or the harness closed.
+   */
+  readonly by: 'answer' | 'due' | 'skipped' | 'cancelled';
+}
+
+const harness = new AgentHarness({
+  name: 'ops',
+  params: {},
+  approveToolCall: ({ toolName }) => (safe(toolName) ? { action: 'allow' } : { action: 'hold' }),
+  onHeld: async (call, { signal }) => {
+    const answer = await showCard(call, signal); // closes the card when `signal` aborts
+    return answer === 'yes' ? { action: 'allow' } : { action: 'deny', guidance: 'The user said no.' };
+  },
+});
+```
+
+- **When it is called.** Once per question per process: when a call is first announced held here (`tool_call_held`), whichever path held it — a model's round, an `invokeTool` step, `harness.approve()`, or a coding agent's tool. A call announced again (a turn that parked and woke in this process, a round that walks its calls again) is not asked again while its first handler is still waiting. A call held for a new question (approved, then left its result open with `hold()`) is a new question.
+- **Answering.** Return a `HeldResolution`. It is taken exactly as a `DecisionItem` passed to `execute()` is: by the record, under `argsHash` the call was shown with, and the turn goes on, woken when it parked. It goes to the execution that held the call, never to a later turn on the same thread. Return `undefined` to leave the call held for an answer that comes another way. A resolution returned after `signal` aborted is dropped: the call was settled first, and nothing is refused or thrown. One that is still refused (`hold_refused`, say, an `output` for an approval) is logged, and the call stays held.
+- **The reason sets the question.** `call.reason` is `approval` for a call that has not run, `result` for a tool that left its result open (answer with `{ output }`), and `outcome` for a `durable` tool cut off with its effect unknown (`{ output }` says it landed, `allow` runs it again, `deny` refuses it). One handler covers all three.
+- **It never blocks the turn.** The harness does not wait on the handler: the call waits on its record, as it would for any answer, and a turn may park meanwhile. A handler that throws is logged; the call stays held.
+- **The signal.** It aborts when the call is settled any way: a decision passed to `execute()`, a deadline, a steer applied at the `held` point, a cancelled or interrupted turn, an agent that stopped waiting, or `harness.close()`. On storage with `swap`, another harness may settle the call and finish its turn: while any call is watched, the harness reads their records again every two seconds, and settles as `answer` each one that is gone, answered, or held now for another question: another harness settled it, and this one cannot tell how, so a turn the other harness cancelled reads as answered too. Each emits `{name}:tool_call_settled` on the stream the call was announced on, except `close()`, which only aborts. An answer the handler itself returns settles the call the same way.
+- **After a restart.** A handler lives in the process that saw the call held. A turn parked on a held call in a process that died has no handler waiting on it; a host lists such calls with `pending()` on start and answers them with `execute()`.
+
+`HeldCall`, `HeldCallSettled`, `HeldCallHandler` and `HeldCallContext` are exported from `@noetic-tools/core` and `@noetic-tools/types`. `readHeldCallEvent(event)` reads a stream event as `{ type: 'held', call: HeldCall }` or `{ type: 'settled', settled: HeldCallSettled }`, validated, and `undefined` for any other event, so a host that follows the stream rather than `onHeld` never parses the data by hand.
 
 ### Item schema registry (extension-item validation)
 
@@ -971,6 +1030,26 @@ The harness validates items at trust boundaries (model output parsing, session r
 - **Tool result items** are validated against the harness registry extended with **only the called tool's** `itemSchemas.toolResults` — one tool's schemas never reject a sibling tool's result items, and tools without schemas fall back to the base structural parse.
 - Extension schemas are **gates, not normalizers**: on match the original item is returned unchanged, including fields the schema does not declare. Zod transforms and defaults in extension schemas are unsupported.
 - Validation failures raise `NoeticError` kind `item_schema_mismatch` (see `09-error-model`).
+
+### Step hooks
+
+`AgentConfig.hooks` (`AgentHooks`) takes two callbacks the interpreter runs around every step it executes in this process, in `execute()` — the root step and every nested one (sequence members, loop bodies, branches, fork and in-process spawn children, steps a tool or code step runs on its context). A child a subprocess adapter runs in another process executes under that process's harness and its hooks; this harness's hooks see only the parent-side dispatch.
+
+```typescript
+interface AgentHooks {
+  beforeStep?: (step: Step, ctx: Context) => Promise<void>;
+  afterStep?: (step: Step, result: unknown, ctx: Context) => Promise<void>;
+}
+```
+
+- **`beforeStep`** runs after the depth and abort checks and after the ledger lookup, immediately before the step's own work begins (its `emitItems` start, its dispatch). `ctx` is the context the step runs on.
+- **`afterStep`** runs once the step succeeded and its items were emitted, with its output, before the step is recorded in the ledger and before `step_completed`. The step completes only when `afterStep` returns.
+- Hooks nest: a parent's `beforeStep` runs before its children's and its `afterStep` after theirs. A step retried by its `RetryPolicy` is one execution: each hook runs once.
+- **Failure and cancellation.** `afterStep` does not run for a step that threw or was cancelled; `beforeStep` has already run for it.
+- **Replay.** A step replayed from the ledger (`23a-step-level-resume`) does not execute, so neither hook runs for it; `step_replayed` marks it.
+- **Errors.** A hook that throws fails the step it ran for, as an error the step threw would. A `NoeticError` or `NoeticConfigError` passes through unchanged; anything else becomes `step_failed` with the hook's error as `cause` (`09-error-model`). A throwing `beforeStep` means the step never ran; a throwing `afterStep` means the step is not recorded, so a resume runs it again. `afterStep` runs after the step's items were emitted, so a step whose `afterStep` threw has already appended and streamed its final custom items, and a resume that runs it again emits them again.
+
+The hooks are on `ctx.harness.config.hooks`, which is how the interpreter reaches them on any context of the harness.
 
 ### What's NOT on the AgentHarness
 
@@ -1132,6 +1211,12 @@ interface AgentConfig<TParams extends Record<string, unknown> = Record<string, u
 
   /** Approves or refuses calls to tools that declare `needsApproval`. See "Tool approval". */
   approveToolCall?: ToolApprover;
+
+  /** Puts a held call in front of a person and returns their answer. See "Held tool calls". */
+  onHeld?: HeldCallHandler;
+
+  /** What a steer does at the `held` steer point before any layer has a say. Default `apply`. */
+  steerWhileHeld?: 'apply' | 'defer';
 }
 ```
 

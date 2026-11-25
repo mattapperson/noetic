@@ -48,9 +48,9 @@ Noetic wraps every framework-level failure in a structured `NoeticError` discrim
 | `connection_resume_refused` | `connection`, `reason` | A resumed run's connection was replaced and cannot safely be driven again. |
 | `decision_refused` | `threadId`, `action`, `reason` | A decision passed to `harness.execute()` does not fit what the thread is waiting on: no turn is stuck, it carries both an `action` and an `output`, or its action is the wrong kind for the decision. |
 | `hold_refused` | `callId`, `reason` | `harness.execute()` could not take a decision for a [held tool call](/docs/framework/steps/invoke-tool#human-in-the-loop-approval). |
-| `lease_lost` | `executionId`, `term`, `reason` | Another harness holds or took this thread's turn. See [one writer per turn](/docs/framework/durability#one-writer-per-turn). |
+| `lease_lost` | `executionId`, `term`, `reason` | Another harness holds or took this thread's turn. See [one writer per turn](/docs/framework/durability#one-writer-per-turn). A turn this stops mid-run is cut, not failed: its response resolves with `cut`. |
 | `turn_stuck` | `executionId`, `path`, `from`, `to` | A turn resumed under a newer flow version would have to redo a step that already had a lasting effect, so it stopped. See [flow versions](/docs/framework/durability#flow-versions). |
-| `ledger_write_failed` | `executionId`, `path`, `cause` | Under a turn lease, a durable record could not be written, so the turn stopped. |
+| `ledger_write_failed` | `executionId`, `path`, `cause` | Under a turn lease, a durable record could not be written, so the turn stopped. It is cut and runs again after a back-off; only once it has been cut `lease.cut.attempts` times does it fail with this error. Also thrown by `harness.forget()` when a spend record (`path` `spend:<id>`) could not be settled; nothing was deleted. |
 | `verify_act_failed` | `stepId`, `cause: Error`, `run?: BlobRef` | A `step.verify`'s `act` threw. The verification run is recorded first, with the failure as evidence, and `run` points at it. |
 
 ### Full Type Definition
@@ -115,6 +115,28 @@ function isNoeticError(e: unknown): e is NoeticErrorImpl;
 ```
 
 This is an `instanceof` check against `NoeticErrorImpl` with a structural fallback: any `Error` carrying a `noeticError` object whose `kind` is a string also passes. The fallback keeps the guard reliable when more than one copy of the framework is loaded (mixed `src`/`dist` resolution, duplicated `node_modules`), where a plain `instanceof` would fail across module copies. The inner `kind` is not validated against the closed union, so errors minted by a newer framework version still pass.
+
+## The Original Error
+
+A `NoeticError` never drops the error it wraps. When a code step throws, the caller gets a `step_failed` error whose standard `cause` is the thrown error, so its class, name and own fields survive. An error that crosses several code steps is wrapped once per step; `failureCause()` walks the chain and returns the error the failure started from:
+
+```ts validate=none
+import { failureCause, isNoeticError } from '@noetic-tools/core';
+
+try {
+  await harness.run(pipeline, input);
+} catch (e) {
+  const original = failureCause(e);
+  if (original instanceof BillingError) {
+    // branch on your own typed failure
+  }
+  if (isNoeticError(e) && e.noeticError.kind === 'step_failed') {
+    console.log(e.noeticError.stepId, e.cause);
+  }
+}
+```
+
+A thrown value that is not an `Error` is wrapped in an `Error` whose own `cause` is that value; `failureCause()` returns that wrapper, so read its `cause` for the thrown value. `failureCause()` returns a `NoeticError` that carries no cause (`cancelled`, `budget_exceeded`, ...) and any other value as is.
 
 ## Handling Errors in Loops
 
@@ -231,6 +253,18 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 **Cause:** `harness.execute()` (or the session API) was called on a harness built without an `agentGraph`.
 
 **Fix:** Pass `agentGraph` to the `AgentHarness` constructor, or drive steps directly with `harness.run(step, input, ctx)`.
+
+#### FORGET_CHILD_UNREACHABLE
+
+**Cause:** `harness.forget()` found a child the run had a subprocess adapter run out of process that has not finished, and no adapter this harness knows of can be the one that ran it — typically a `detachedSpawn` given its own `subprocess` by another harness. Nothing was settled or deleted.
+
+**Fix:** Pass that adapter: `harness.forget(scope, { subprocesses: [adapter] })`. The forget stops the child if it still runs, then deletes what it kept.
+
+#### INVALID_FORGET_SCOPE
+
+**Cause:** `harness.forget()` was given a scope with neither a `threadId` nor an `executionId`, or an empty `threadId`.
+
+**Fix:** Pass `{ threadId }` to forget a thread, or `{ executionId }` to forget one execution. Forget never falls back to the default thread.
 
 #### INVALID_LEASE_OPTIONS
 
@@ -544,9 +578,9 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 #### INVALID_CUSTOM_ITEM_SHAPE
 
-**Cause:** A custom item's JSON Schema does not load, or its `output` does not describe an object, or declares `id` or `type`.
+**Cause:** A custom item's JSON Schema does not load, or its `output` does not describe an object or a union of objects, or one of those objects declares `id` or `type`.
 
-**Fix:** Give an object schema for `output` and leave out `id` and `type`: the runtime adds both to every final item.
+**Fix:** Give an object schema for `output`, or a union of object schemas (a discriminated union, a `z.union`, or a top-level JSON Schema `oneOf`/`anyOf` whose options are objects), and leave out `id` and `type`: the runtime adds both to every final item. Union options must be plain object schemas: an object with both `properties` and `oneOf`, options wrapped in `z.lazy`, and `.optional()`/`.pipe()` around the union are refused.
 
 #### CUSTOM_ITEM_MISMATCH
 

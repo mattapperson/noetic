@@ -102,12 +102,16 @@ function isHeldBy(record: LeaseRecord | null, holder: string, now: number): bool
 }
 
 /**
+ * @internal
  * A prefix of its own. Under `session:`, the lease of thread `a` and the session
  * of a thread named `a:lease` would be one key.
  */
-function leaseKey(threadId: string): string {
-  return `turn-lease:${threadId}`;
+export function leaseKey(threadId: string): string {
+  return `${LEASE_PREFIX}${threadId}`;
 }
+
+/** @internal The prefix every thread's lease key starts with. */
+export const LEASE_PREFIX = 'turn-lease:';
 
 /**
  * The term to take the lease at. It only ever goes up: a lease that went back to
@@ -346,6 +350,12 @@ export class TurnLease implements LedgerFence {
       this.markLost('another harness took the lease');
     }
     this.assert();
+  }
+
+  /** Stop renewing, and wait for a renewal in flight, keeping the lease as it stands. */
+  async stop(): Promise<void> {
+    this.stopTimer();
+    await this.renewing;
   }
 
   /** Hand the lease back so the next turn need not wait for it to run out. */

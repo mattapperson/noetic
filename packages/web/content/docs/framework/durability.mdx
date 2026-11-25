@@ -284,6 +284,21 @@ A tool with a lasting effect passes the key to whatever it writes to, and the wr
 
 Where the downstream system cannot dedupe on a key, mark the tool `durable: true`. A call cut off by a crash is then [held](/docs/framework/steps/invoke-tool#human-in-the-loop-approval) for a person, who says whether it landed, instead of being repeated. `durable: false` is the opposite: the result is never recorded, for a cheap read that should be fresh.
 
+### Which Calls a Resume Brings Back
+
+`harness.recordedToolCalls(executionId)` lists the tool calls a resume of an execution goes on from, read from storage: every call whose request the ledger holds, in a completed step or a recorded round, in the order they were recorded.
+
+```ts validate=none
+const calls = await harness.recordedToolCalls(executionId);
+// [{ callId: 'call_1', name: 'ship', path: 'agent/round#0', settled: true }, ...]
+```
+
+`settled` is true when the call's result is on record too: the resume replays it and the tool does not run. It is false for the call that was running when the host died: only the model's request is on record, so that call runs again with its `idempotencyKey` — unless its tool is `durable: true`, in which case it is held for a person, or it needs approval and waits for one.
+
+A finished run drops its positional entries, but a step with a `replayKey` keeps its record for later runs on the same context, so its calls stay listed (under `key:<key>`) until `harness.clearCheckpoint(executionId)`.
+
+A host that journals tool traffic of its own — written before rounds and calls were recorded — must not append any of these calls to a restored context: the resume appends them itself, and the model would see each one twice. With every round and every finished call recorded, such a journal has nothing left to add, and a host can drop it.
+
 ### Sessions
 
 `harness.execute()` sessions are durable too. With a storage adapter, each thread keeps its history, what its turns spent, and the turn in flight under `session:<threadId>` — and every turn reads them from storage rather than from the harness's memory:
@@ -329,6 +344,16 @@ const harness = new AgentHarness({
 - **Taking over.** A harness that finds the turn held waits for the lease to run out, up to `waitMs` (default: one `ttlMs`). A holder that died stops renewing, so a restarted host picks its turn up without retrying. If the turn is still held after the wait, `getAgentResponse()` rejects with `lease_lost`.
 - **Being replaced.** A harness that stalled past its lease and came back finds a newer writer's term on its next ledger write, stops with `lease_lost`, and does not make another paid call.
 - **Failed writes stop the turn.** Under a lease, a ledger entry that cannot be written raises `ledger_write_failed` instead of a warning, so a turn never runs on with work a resume could not replay.
+- **A stopped turn is cut, not failed.** Everything before a `ledger_write_failed` stop is on record, so the turn runs again from there. `getAgentResponse()` resolves with `cut: { reason, attempt, wakeAt }` (event `{name}:turn_cut`), the turn stays on record, and `getNextWakeTime()` and a routine `wake()` bring it back after a back-off: 1 s, doubling each time, at most 60 s. After 3 cuts the next one fails the turn as before. Tune it with `lease: { cut: { attempts, delayMs, maxDelayMs } }`; `attempts: 0` turns it off.
+- **A replaced harness is told so.** On `lease_lost` while the other holder still runs the turn, the response is `cut` with `reason: 'lease_lost'` and `wakeAt` when that holder's lease runs out; this harness writes and counts nothing. If the other holder already finished it, the response rejects with `lease_lost` as before.
+- **Name the holder after a stable identity.** Each harness needs its own `holder`; the default is a random id. A host with a stable identity that runs once at a time, such as a Cloudflare Durable Object, passes that identity (`ctx.id.toString()`): coming back after its process died, it takes its own leases over at once rather than waiting one `ttlMs`.
+
+```ts validate=none
+const response = await harness.getAgentResponse({ threadId });
+if (response.cut) {
+  // Not failed: a wake at response.cut.wakeAt runs it again from its record.
+}
+```
 
 `createFileStorage` and `createSqliteStorage` both implement `swap`. The in-memory adapter leaves it out unless you pass `createInMemoryStorage({ swap: true })`, which is for tests that put two harnesses on one storage. Storage without `swap` behaves as before.
 
@@ -377,7 +402,19 @@ const stop = harness.onWakeTimeChange((at) => setMyAlarm(at)); // told whenever 
 - **What a woken turn does.** It replays its ledger, so finished model calls are not made again, and listens from the recorded cursor until the original deadline. With nothing to receive it parks again; past the deadline the wait fails as it would have live.
 - **Who wakes it.** The harness that parked it, by default: it keeps a timer for the deadline and a listener for the event, and resumes the turn when either fires. A long-lived process only calls `wake()` once at boot, which also picks up the parked turns an earlier process left. Where no process lives between requests, set `park: { autoWake: false }` and call `wake()` from an alarm you set in `onWakeTimeChange()`, and `wake({ threadId })` when an event arrives. A parking turn waits for that listener before it answers, and fails its response if the listener throws, so a turn never looks parked with no alarm behind it. The listener does not turn the harness's own timer off; that is still `autoWake`.
 - **A watcher cannot run your `filter`.** It wakes on any event of the awaited type; a turn whose filter turns the event down parks again. Each event wakes it at most once.
-- **Requirements.** Storage with [`swap`](#one-writer-per-turn), and a connection defined on the harness: a woken turn does not keep the connections one `execute()` call passed.
+- **Options for a woken turn.** A stored turn keeps no `execute()` options: tools, layers and connections are live objects. A wake with none asks `turnOptions(turn)` on the harness, with `turn` the stored turn (`threadId`, `executionId`, `messageIds`, `parked`, `cut`), so a host that passes per-turn options rebuilds them there:
+
+```ts validate=none
+const harness = new AgentHarness({
+  // …
+  turnOptions: async ({ threadId }) => ({
+    tools: await toolsFor(threadId),
+    connections: await connectorsFor(threadId), // with fresh credentials
+  }),
+});
+```
+
+- **Requirements.** Storage with [`swap`](#one-writer-per-turn). A connection a woken turn waits on comes from the harness, or from `turnOptions`.
 
 Pass `now` to the harness to drive the clock yourself; wait deadlines, leases and wake times all read it.
 
@@ -422,7 +459,7 @@ const marks = await harness.getAuditTrail({ threadId: 'case-7' });
 // [{ executionId, path, stepId: 'charge', kind, completedAt, version: 'v1', term, holder, receipt }, …]
 ```
 
-A mark outlives the ledger entry it came from: pruning an entry, finishing the run and `clearCheckpoint` all leave it. Marks live under `execution:<id>:trail:` in your storage, and core never deletes them; prune that prefix by age if you need to.
+A mark outlives the ledger entry it came from: pruning an entry, finishing the run and `clearCheckpoint` all leave it. Only [`forget`](#forgetting-a-thread-or-an-execution) deletes marks, unless you pass `keepTrail`. A thread's trail covers every turn it began: its stored record lists each turn's execution.
 
 ### Paid Calls
 
@@ -467,6 +504,46 @@ One that names no execution may be any execution's, so it is listed with each of
 **Evidence is never discarded.** Records live under `spend:<id>`, apart from checkpoints, so `clearCheckpoint` and an abandoned turn leave them alone. A record leaves storage only when it is settled or written off.
 
 Run one harness per storage when reconciling: a harness skips the calls it has in flight, but cannot see another harness's.
+
+### Forgetting a Thread or an Execution
+
+When a thread or a run is over, tell the harness, and it deletes what it keeps for it. You never build a storage key yourself.
+
+```ts validate=none
+// A thread: its record and history, turn lease, display output, layer state, and
+// every execution it ran — snapshot, ledger, trail, held calls, pending entries.
+const report = await harness.forget({ threadId: 'case-7' });
+// { threadId, executionIds, spend: SpendSettlement[] }
+
+// One execution, such as a job run with `harness.run()`. A thread's record is left alone.
+await harness.forget({ executionId }, { keepTrail: true });
+```
+
+**Spend is settled first.** Before anything is deleted, every pending call of the thread or execution is priced through the provider, waiting up to `patienceMs` (default 60 s) — even for a lookup that was already running; one the provider did not price is written off at its ceiling. One with no ceiling — no published price, no output cap, or an unreadable record — is written off at 0 and its settlement carries `unbounded: true`, so you can log it. Each settlement carries its `model` and `path` (the round or step that made the call), so you can attribute it, and is returned in `report.spend`. A spend record that cannot be deleted stops the forget with `ledger_write_failed` before anything else is touched, so no bill is lost; try again later.
+
+**A live turn is not forgotten, and none starts meanwhile.** A thread with a turn running, queued, or being delivered in this harness, or an execution with a run in flight, is refused with `lease_lost`. A message sent to the thread on this harness during its forget waits, then starts the thread afresh. On storage with `swap`, the forget takes the thread's lease first, waiting up to `waitMs` (default 0) for another harness's — a lease still held elsewhere is refused with `lease_lost` — and keeps renewing it until the last key is gone, so no other harness starts a turn of the thread meanwhile. A forget that fails hands the lease back. `forget({})` is refused with `INVALID_FORGET_SCOPE`: it never falls back to the default thread.
+
+**Layer state.** A thread's forget deletes `layers/<layerId>/<threadId>/` for the layers that may keep state there: your thread-wide `contextLayers`, any layer the harness has kept durable state for, and the layers the thread's record names (it notes them as turns run, so a sweep harness without them configured still finds them). Thread `a/b`'s state is left alone when you forget `a`.
+
+**Children spawned out of process.** A spawn or `detachedSpawn` your subprocess adapter runs in another process is an execution of its own. A durable run links it (`execution:<run>:child:<child>`) before dispatching it, noting where its adapter came from, and marks the link settled when the child finishes. Forgetting the run forgets its children and theirs: before anything is deleted, each child still running is stopped through the adapter that ran it — the harness's `environment.subprocess`, or the step's own `subprocess` found by step id, even on a harness in a fresh process — and then their spend is settled with the run's and everything they kept is deleted. A child that has not finished and was run by an adapter passed to a `detachedSpawn` call this harness didn't make can't be found that way: the forget is refused with `FORGET_CHILD_UNREACHABLE` until you pass the adapter, `forget(scope, { subprocesses: [adapter] })`. Spawns run in process need no link: they record under the run already.
+
+**Connection-pool leases.** Forgetting a run releases any [pool lease](/docs/framework/connections) this harness still holds for it — a failed run keeps its lease for a resume — handing the connection back to its provider, and deletes every stored lease record of the run, including those a crashed process left behind.
+
+**Sweep without key layouts.** A host that died between a turn's end and its cleanup leaves the thread behind. List what is stored and forget it:
+
+```ts validate=none
+for (const threadId of await harness.listStoredThreads({ prefix: `resp_${handle}_` })) {
+  if (!isRunning(threadId)) {
+    await harness.forget({ threadId });
+  }
+}
+
+// Does a job have a checkpoint to resume? A trail alone is history, not a checkpoint.
+const [job] = await harness.listStoredExecutions({ prefix: jobId });
+const resumable = job?.executionId === jobId && job.resumable;
+```
+
+`listStoredThreads` lists every thread with a record, a lease or display output stored; `listStoredExecutions` lists every execution with anything stored, with its `parts` (`snapshot`, `ledger`, `trail`, `held`, `intent`, `pending`, `other`) and `resumable`. Both read keys only. The forget deletes a thread's lease last, so one cut off part way still lists the thread for the next sweep. Deleting goes through your `StorageAdapter`, so storage that spills large values elsewhere deletes their objects with their keys.
 
 ### Implement `getMany` on a networked adapter
 

@@ -1,3 +1,13 @@
+## @noetic-tools/core-v5.22.0-next.4 (2026-11-25)
+
+* feat: Durable Object hosting — cut turns, turnOptions, per-turn tools, shared alarm (#166) ([2a3a0cd](https://github.com/mattapperson/noetic/commit/2a3a0cd)), closes [#166](https://github.com/mattapperson/noetic/issues/166)
+
+## @noetic-tools/core-v5.22.0-next.3 (2026-11-25)
+
+* fix(core): native support for spec-workspace host workarounds (#140, #142, #143, #95) (#165) ([b1f58ca](https://github.com/mattapperson/noetic/commit/b1f58ca)), closes [#140](https://github.com/mattapperson/noetic/issues/140) [#142](https://github.com/mattapperson/noetic/issues/142) [#143](https://github.com/mattapperson/noetic/issues/143) [#95](https://github.com/mattapperson/noetic/issues/95) [#165](https://github.com/mattapperson/noetic/issues/165) [#161](https://github.com/mattapperson/noetic/issues/161)
+* feat(core): forget a thread or an execution, and list what is stored (#163) ([b025b02](https://github.com/mattapperson/noetic/commit/b025b02)), closes [#163](https://github.com/mattapperson/noetic/issues/163)
+* feat(core): onHeld, steerWhileHeld and tool_call_settled for held tool calls (#164) ([13fa817](https://github.com/mattapperson/noetic/commit/13fa817)), closes [#164](https://github.com/mattapperson/noetic/issues/164)
+
 ## @noetic-tools/core-v5.22.0-next.2 (2026-11-25)
 
 * feat(core): land the spec-workspace patch: decide headers and base URL, Tool.toModelOutput, interact ([7b21be0](https://github.com/mattapperson/noetic/commit/7b21be0)), closes [#161](https://github.com/mattapperson/noetic/issues/161) [#159](https://github.com/mattapperson/noetic/issues/159) [#159](https://github.com/mattapperson/noetic/issues/159) [#159](https://github.com/mattapperson/noetic/issues/159) [#120](https://github.com/mattapperson/noetic/issues/120) [#160](https://github.com/mattapperson/noetic/issues/160)

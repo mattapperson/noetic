@@ -12,7 +12,14 @@
  */
 
 import type { StorageAdapter } from '@noetic-tools/context';
-import type { Context, HeldCall, HeldResolution, ToolApprover } from '@noetic-tools/types';
+import type {
+  Context,
+  HeldCall,
+  HeldCallHandler,
+  HeldCallSettled,
+  HeldResolution,
+  ToolApprover,
+} from '@noetic-tools/types';
 import { NoeticErrorImpl } from '@noetic-tools/types';
 import { z } from 'zod';
 import { emitFrameworkEvent, getBroadcaster } from './broadcaster-utils';
@@ -71,7 +78,33 @@ export interface HoldHost {
     readonly storage?: StorageAdapter;
     readonly now?: () => number;
     readonly approveToolCall?: ToolApprover;
+    readonly onHeld?: HeldCallHandler;
   };
+  /** The thread a context's held calls belong to, when it is a thread's turn. */
+  heldThreadOf?(ctx: Context): string | undefined;
+  /**
+   * Answer a call held under `executionId`, as a decision item does, and wake its
+   * thread's turn when that turn is this execution and parked.
+   */
+  answerHeld?(answer: HeldAnswerRequest): Promise<void>;
+}
+
+/** @internal An answer to a held call, for the execution that holds it. */
+export interface HeldAnswerRequest {
+  readonly executionId: string;
+  /** The thread whose turn held the call, when it was a thread's turn. */
+  readonly threadId?: string;
+  readonly callId: string;
+  readonly argsHash: string;
+  readonly resolution: HeldResolution;
+}
+
+/** Who is told when a call this process announced held stops being held. */
+interface HeldWatch {
+  readonly executionId: string;
+  readonly held: HeldCall;
+  readonly controller: AbortController;
+  readonly emit: (settled: HeldCallSettled) => void;
 }
 
 /** @internal How long a hold lasts and what happens when that runs out. */
@@ -150,6 +183,44 @@ function toResolutionRecord(resolution: HeldResolution): NonNullable<HeldRecord[
   };
 }
 
+function watchKey(executionId: string, callId: string): string {
+  return `${executionId}\u0000${callId}`;
+}
+
+function settledOf(held: HeldCall, by: HeldCallSettled['by']): HeldCallSettled {
+  return {
+    callId: held.callId,
+    name: held.name,
+    argsHash: held.argsHash,
+    reason: held.reason,
+    by,
+  };
+}
+
+/** Why a record that is being closed stopped being held, as the record says. */
+function settledByOf(record: HeldRecord | undefined, now: number): HeldCallSettled['by'] {
+  if (record?.resolution !== undefined) {
+    return 'answer';
+  }
+  if (record && isOverdue(record, now)) {
+    return 'due';
+  }
+  return 'cancelled';
+}
+
+/**
+ * Whether a watched call is still the question shown: held, unanswered, for the same
+ * arguments and reason. Anything else means another harness settled it.
+ */
+function stillShown(record: HeldRecord | undefined, held: HeldCall): boolean {
+  return (
+    record !== undefined &&
+    record.resolution === undefined &&
+    record.argsHash === held.argsHash &&
+    record.reason === held.reason
+  );
+}
+
 /** A held record as hosts see it. */
 export function toHeldCall(record: HeldRecord): HeldCall {
   return {
@@ -183,6 +254,12 @@ export function toHeldCall(record: HeldRecord): HeldCall {
 /** @internal One harness's held calls: their records, and who is waiting on them here. */
 export class HeldCalls {
   private readonly waiters = new Map<string, Set<() => void>>();
+  /** Calls announced held in this process, by execution and call. */
+  private readonly watches = new Map<string, HeldWatch>();
+  /** Watched calls this process is closing: a sweep leaves them to `close`. */
+  private readonly closing = new Set<string>();
+  /** Re-reads watched calls on shared storage, which another harness may settle. */
+  private sweeper: ReturnType<typeof setInterval> | undefined;
 
   constructor(
     private readonly storage: StorageAdapter,
@@ -236,6 +313,13 @@ export class HeldCalls {
 
   /** Drop every held call and intent of an execution that is over or was abandoned. */
   async clear(executionId: string): Promise<void> {
+    for (const key of [
+      ...this.watches.keys(),
+    ]) {
+      if (key.startsWith(`${executionId}\u0000`)) {
+        this.settleWatch(key, 'cancelled');
+      }
+    }
     for (const prefix of [
       heldPrefix(executionId),
       intentPrefix(executionId),
@@ -268,9 +352,127 @@ export class HeldCalls {
     await this.storage.delete(`${intentPrefix(executionId)}${callId}`);
   }
 
-  /** The call was settled and its result recorded: drop its record. */
-  async close(executionId: string, callId: string): Promise<void> {
-    await this.storage.delete(`${heldPrefix(executionId)}${callId}`);
+  /**
+   * The call was settled and its result recorded, or it is being dropped: drop its
+   * record. `by` says why, for a call this process announced; without it the record
+   * says: answered, overdue, or else cancelled.
+   */
+  async close(executionId: string, callId: string, by?: HeldCallSettled['by']): Promise<void> {
+    const key = watchKey(executionId, callId);
+    const watched = this.watches.has(key);
+    if (watched) {
+      this.closing.add(key);
+    }
+    try {
+      const settledBy =
+        watched && by === undefined
+          ? settledByOf(await this.load(executionId, callId), this.now())
+          : by;
+      await this.storage.delete(`${heldPrefix(executionId)}${callId}`);
+      if (settledBy !== undefined) {
+        this.settleWatch(key, settledBy);
+      }
+    } finally {
+      this.closing.delete(key);
+    }
+  }
+
+  /**
+   * Note that this process announced `held`. Resolves the signal a handler waits on,
+   * or `undefined` when the same question is already being watched here. A different
+   * question under the same id replaces the old one: a call held for a new reason
+   * moved on because the old question was answered; one held for other arguments
+   * voided it.
+   */
+  watch(
+    executionId: string,
+    held: HeldCall,
+    emit: (settled: HeldCallSettled) => void,
+  ): AbortSignal | undefined {
+    const key = watchKey(executionId, held.callId);
+    const existing = this.watches.get(key);
+    if (existing?.held.argsHash === held.argsHash && existing.held.reason === held.reason) {
+      return undefined;
+    }
+    if (existing) {
+      this.settleWatch(key, existing.held.reason === held.reason ? 'cancelled' : 'answer');
+    }
+    const controller = new AbortController();
+    this.watches.set(key, {
+      executionId,
+      held,
+      controller,
+      emit,
+    });
+    this.armSweep();
+    return controller.signal;
+  }
+
+  /**
+   * On shared storage another harness may answer, skip or drop a call this process
+   * announced, and finish its turn, so nothing here would ever close it. Watched
+   * calls are read again every so often while any are watched.
+   */
+  private armSweep(): void {
+    if (!this.shared || this.sweeper !== undefined) {
+      return;
+    }
+    const sweeper = setInterval(() => {
+      void this.sweep().catch(() => undefined);
+    }, HELD_POLL_MS);
+    if (typeof sweeper === 'object' && 'unref' in sweeper) {
+      sweeper.unref();
+    }
+    this.sweeper = sweeper;
+  }
+
+  private stopSweep(): void {
+    clearInterval(this.sweeper);
+    this.sweeper = undefined;
+  }
+
+  /** Settle every watched call whose record says it is no longer the question shown. */
+  async sweep(): Promise<void> {
+    for (const [key, watch] of [
+      ...this.watches,
+    ]) {
+      const record = await this.load(watch.executionId, watch.held.callId);
+      if (this.watches.get(key) !== watch || this.closing.has(key)) {
+        continue;
+      }
+      // Settled by another harness, which cannot say how: reported as answered.
+      if (!stillShown(record, watch.held)) {
+        this.settleWatch(key, 'answer');
+      }
+    }
+  }
+
+  /** The harness is closing: every handler still waiting is let go, with no event. */
+  releaseWatches(): void {
+    this.stopSweep();
+    for (const [key, watch] of [
+      ...this.watches,
+    ]) {
+      this.watches.delete(key);
+      watch.controller.abort(settledOf(watch.held, 'cancelled'));
+    }
+  }
+
+  private settleWatch(key: string, by: HeldCallSettled['by']): void {
+    const watch = this.watches.get(key);
+    if (!watch) {
+      return;
+    }
+    this.watches.delete(key);
+    if (this.watches.size === 0) {
+      this.stopSweep();
+    }
+    const settled = settledOf(watch.held, by);
+    try {
+      watch.emit(settled);
+    } finally {
+      watch.controller.abort(settled);
+    }
   }
 
   /**
@@ -358,6 +560,7 @@ export class HeldCalls {
       }
       throw refused(callId, 'the call was already answered differently');
     }
+    this.settleWatch(watchKey(executionId, callId), 'answer');
     this.notify(executionId);
   }
 
@@ -550,15 +753,13 @@ export async function holdAndWait(opts: {
   harness: HoldHost;
   ctx: Context;
   record: HeldRecord;
-  /** Called once per process, when the call is first seen held. */
-  onHeld?: (held: HeldCall) => void;
 }): Promise<HeldAnswer> {
   const holds = heldCallsOf(opts.harness);
   const executionId = heldScopeOf(opts.ctx);
   const { callId } = opts.record;
   const opened = mayWriteHolds(opts.ctx) ? await holds.open(executionId, opts.record) : opts.record;
   if (opened.resolution === undefined) {
-    (opts.onHeld ?? announcerOf(opts.harness, opts.ctx))(toHeldCall(opened));
+    announcerOf(opts.harness, opts.ctx)(toHeldCall(opened));
   }
   for (;;) {
     const current = await holds.load(executionId, callId);
@@ -584,7 +785,7 @@ export async function holdAndWait(opts: {
 /**
  * @internal
  * Says on the stream that a call is held: `{name}:tool_call_held`, with the fields
- * `harness.pending()` returns. What a hold does when its caller gives no `onHeld`.
+ * `harness.pending()` returns, and puts it to the harness's `onHeld` handler.
  */
 export function announcerOf(harness: HoldHost, ctx: Context): (held: HeldCall) => void {
   return (held) => {
@@ -596,7 +797,126 @@ export function announcerOf(harness: HoldHost, ctx: Context): (held: HeldCall) =
         ...held,
       },
     });
+    noticeHeld({
+      harness,
+      ctx,
+      held,
+    });
   };
+}
+
+/** Emits `{name}:tool_call_settled` on the context's stream. */
+function settledAnnouncerOf(harness: HoldHost, ctx: Context): (settled: HeldCallSettled) => void {
+  return (settled) => {
+    emitFrameworkEvent({
+      broadcaster: getBroadcaster(ctx),
+      agentName: harness.config.name,
+      eventType: 'tool_call_settled',
+      data: {
+        ...settled,
+      },
+    });
+  };
+}
+
+/**
+ * @internal
+ * A call was announced held in this process (spec 08 § Held tool calls): watch it, so
+ * `tool_call_settled` follows when it stops being held, and put it to the harness's
+ * `onHeld` handler, once per question. Never waits on the handler.
+ *
+ * @param emit - How the settling is said, when not on `ctx`'s stream as is.
+ */
+export function noticeHeld(opts: {
+  harness: HoldHost;
+  ctx: Context;
+  held: HeldCall;
+  emit?: (settled: HeldCallSettled) => void;
+}): void {
+  const { harness, ctx, held } = opts;
+  const executionId = heldScopeOf(ctx);
+  const signal = heldCallsOf(harness).watch(
+    executionId,
+    held,
+    opts.emit ?? settledAnnouncerOf(harness, ctx),
+  );
+  const handler = harness.config.onHeld;
+  if (!signal || !handler) {
+    return;
+  }
+  void askHandler({
+    harness,
+    handler,
+    held,
+    signal,
+    executionId,
+    threadId: harness.heldThreadOf?.(ctx),
+  });
+}
+
+/** Put a held call to the host's handler and take its answer as a decision. */
+async function askHandler(opts: {
+  harness: HoldHost;
+  handler: HeldCallHandler;
+  held: HeldCall;
+  signal: AbortSignal;
+  executionId: string;
+  threadId: string | undefined;
+}): Promise<void> {
+  const { harness, held, signal, executionId, threadId } = opts;
+  let answer: HeldResolution | undefined;
+  try {
+    answer = await opts.handler(held, {
+      signal,
+      executionId,
+      ...(threadId === undefined
+        ? {}
+        : {
+            threadId,
+          }),
+    });
+  } catch (e) {
+    console.warn(
+      `[noetic] ${harness.config.name}: the onHeld handler failed for '${held.name}' (${held.callId}); the call stays held: ${messageOf(e)}`,
+    );
+    return;
+  }
+  // Settled some other way first: there is nothing left to answer.
+  if (answer === undefined || signal.aborted) {
+    return;
+  }
+  try {
+    if (harness.answerHeld) {
+      await harness.answerHeld({
+        executionId,
+        ...(threadId === undefined
+          ? {}
+          : {
+              threadId,
+            }),
+        callId: held.callId,
+        argsHash: held.argsHash,
+        resolution: answer,
+      });
+      return;
+    }
+    await heldCallsOf(harness).resolve(executionId, {
+      callId: held.callId,
+      argsHash: held.argsHash,
+      resolution: answer,
+    });
+  } catch (e) {
+    if (signal.aborted) {
+      return;
+    }
+    console.warn(
+      `[noetic] ${harness.config.name}: the onHeld answer for '${held.name}' (${held.callId}) was refused; the call stays held: ${messageOf(e)}`,
+    );
+  }
+}
+
+function messageOf(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
 }
 
 /** True once a hold with a `deny` deadline has run out. */

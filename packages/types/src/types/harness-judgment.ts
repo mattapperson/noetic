@@ -136,6 +136,57 @@ export type HeldResolution =
       readonly output: unknown;
     };
 
+/**
+ * @public How a held call stopped being held (spec 08 § Held tool calls). Carried by the
+ * `tool_call_settled` event, and as `signal.reason` of the `onHeld` handler's signal.
+ *
+ * - `answer`: a decision settled it, from `execute()`, from the `onHeld` handler
+ *   itself, or from another harness over the same storage. A call another harness
+ *   settled and finished its turn on is reported as answered, however it ended.
+ * - `due`: its deadline passed with `onDue: 'deny'`.
+ * - `skipped`: a steer applied at the `held` steer point skipped it.
+ * - `cancelled`: its turn was aborted, interrupted or abandoned, the agent that asked
+ *   stopped waiting, or the harness closed.
+ */
+export interface HeldCallSettled {
+  readonly callId: string;
+  readonly name: string;
+  readonly argsHash: string;
+  readonly reason: HeldCall['reason'];
+  readonly by: 'answer' | 'due' | 'skipped' | 'cancelled';
+}
+
+/** @public What the `onHeld` handler is given beside the call. */
+export interface HeldCallContext {
+  /**
+   * Aborts once the call is settled any way at all; `signal.reason` is the
+   * `HeldCallSettled`. A host closes the question it showed when it aborts. A call
+   * settled by another harness over shared storage is seen within two seconds.
+   */
+  readonly signal: AbortSignal;
+  /** The execution the call is held under. */
+  readonly executionId: string;
+  /** The thread, when the call is held by a thread's turn. */
+  readonly threadId?: string;
+}
+
+/**
+ * @public Puts a held call in front of a person (`AgentHarnessOpts.onHeld`). Called once
+ * per question per process. Return the person's answer, taken as a decision item passed
+ * to `execute()` is, or `undefined` to leave the call held for an answer that comes
+ * another way. An answer returned after `signal` aborted is dropped.
+ */
+export type HeldCallHandler = (
+  call: HeldCall,
+  held: HeldCallContext,
+) => HeldResolution | undefined | Promise<HeldResolution | undefined>;
+
+/**
+ * @public What a steer does at the `held` steer point before any layer has a say:
+ * `apply` skips the held calls for it, `defer` keeps it queued behind them.
+ */
+export type HeldSteerPolicy = 'apply' | 'defer';
+
 /** @public What a tool returns to leave its result open: see `hold()`. */
 export interface ToolHold {
   readonly kind: 'noetic/tool-hold';
@@ -170,6 +221,52 @@ export interface TrailMark {
   readonly holder?: string;
   /** The receipt of a step with a lasting effect, when its output carried one. */
   readonly receipt?: unknown;
+}
+
+/**
+ * @public A tool call an execution's step ledger holds, so a resume of that execution
+ * goes on from it rather than having the model ask for it again (spec 23a § Tool calls
+ * in a round). The model's request is on record; `settled` says whether its result is too.
+ */
+export interface RecordedToolCall {
+  /** The call id the model gave the call. */
+  readonly callId: string;
+  /** The tool the model called. */
+  readonly name: string;
+  /** The ledger path of the entry that holds the request: a step, or one of its rounds. */
+  readonly path: string;
+  /**
+   * The call's result is on record too: a resume replays it, the result item
+   * included, and the tool does not run. False when only the request is (a round cut
+   * off while the call ran): a resume does not replay a result for it. The call runs
+   * again with the idempotency key it had, unless its tool is `durable: true` (the
+   * call is held for a person) or it needs approval (it waits for one).
+   */
+  readonly settled: boolean;
+}
+
+/**
+ * @public
+ * A thread's turn as storage holds it, when a wake is about to run it again
+ * (spec 23 § Parked turns): what `AgentHarnessOpts.turnOptions` is asked about.
+ */
+export interface StoredTurn {
+  readonly threadId: string;
+  readonly executionId: string;
+  /** The ids of the messages the turn delivers, in order. */
+  readonly messageIds: ReadonlyArray<string>;
+  /** The flow version the turn last ran under, when the harness names one. */
+  readonly version?: string;
+  /** Set while the turn is parked. */
+  readonly parked?: {
+    readonly until?: number;
+  };
+  /** Set while the turn is cut (spec 23 § Cut turns). */
+  readonly cut?: {
+    readonly reason: string;
+    readonly count: number;
+    readonly at: number;
+  };
 }
 
 /** @public A turn that stopped rather than redo a recorded effect (spec 23 § Versions). */

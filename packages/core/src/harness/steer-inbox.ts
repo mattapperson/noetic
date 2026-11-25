@@ -4,6 +4,7 @@ import type {
   ContextLayer,
   DeliveryMode,
   FunctionCallItem,
+  HeldSteerPolicy,
   InputMessageItem,
   Item,
   SteerVerdict,
@@ -151,7 +152,11 @@ export class SteerInbox {
     point: SteerPoint,
     pendingCalls: ReadonlyArray<FunctionCallItem>,
   ): Promise<SteerVerdict> {
-    const action = defaultAction(point, message.deliveryMode);
+    const action = defaultAction(
+      point,
+      message.deliveryMode,
+      this.opts.harness.config.steerWhileHeld,
+    );
     const { harness, layers } = this.opts;
     if (!harness.onSteer || !layers.some((layer) => layer.hooks.onSteer)) {
       return {
@@ -248,10 +253,18 @@ function findSessionQueue(ctx: Context): MessageQueue | undefined {
 }
 
 /** What each delivery mode does at each point before any layer has a say. */
-function defaultAction(point: SteerPoint, mode: DeliveryMode): SteerAction {
-  // At a round boundary, and at a round that is stuck on held calls and so has no
-  // boundary to reach, a steer lands.
-  if (point === SteerPoint.BeforeRound || point === SteerPoint.Held) {
+function defaultAction(
+  point: SteerPoint,
+  mode: DeliveryMode,
+  whileHeld: HeldSteerPolicy = 'apply',
+): SteerAction {
+  // At a round stuck on held calls there is no boundary to reach: the harness says
+  // whether a steer skips them or waits behind them.
+  if (point === SteerPoint.Held) {
+    return whileHeld === 'defer' ? SteerAction.Defer : SteerAction.Apply;
+  }
+  // At a round boundary a steer lands.
+  if (point === SteerPoint.BeforeRound) {
     return SteerAction.Apply;
   }
   if (point === SteerPoint.ItemDone && mode === 'next-item') {

@@ -16,6 +16,7 @@ import type {
   SubprocessAdapter,
 } from '@noetic-tools/types';
 import { frameworkCast, NoeticErrorImpl } from '@noetic-tools/types';
+import { ChildAdapterSource, spawnLinked } from '../runtime/durable/child-links';
 import { DetachedHandleImpl } from '../util/detached-handle';
 import { executeAcpAgent } from './execute-acp-agent';
 import {
@@ -140,7 +141,16 @@ async function dispatchViaAdapter<TContext, I, O>(
   const handle = new DetachedHandleImpl<O>({
     id: executionId,
     stepId: step.id,
-    spawned: adapter.spawn(request),
+    spawned:
+      executionId === ctx.id
+        ? adapter.spawn(request)
+        : spawnLinked(ctx, adapter, {
+            childId: executionId,
+            stepId: step.id,
+            from:
+              step.subprocess === undefined ? ChildAdapterSource.Harness : ChildAdapterSource.Step,
+            spawn: () => adapter.spawn(request),
+          }),
   });
   return handle.await();
 }

@@ -1,7 +1,7 @@
 # Error Model
 
 > **Depends On:** `01-step-type` (stepId concept)
-> **Exports:** `NoeticError`, `NoeticConfigError`, `isNoeticError`, `isNoeticConfigError`
+> **Exports:** `NoeticError`, `NoeticConfigError`, `isNoeticError`, `isNoeticConfigError`, `failureCause`
 
 ---
 
@@ -32,6 +32,8 @@ type NoeticError =
 ### Step Failure
 
 Retry per policy (see `RetryPolicy` in `02-step-variants`). If retries exhausted, throw `step_failed`. The parent (loop, inParallel, etc.) decides what to do.
+
+The error a step threw is never lost. `step_failed.cause` holds it as thrown (the last attempt's error after retries); a thrown value that is not an `Error` (by the step, or by a step hook) is wrapped in an `Error` whose own `cause` is that value. Every `NoeticErrorImpl` whose kind carries an error (`cause`, or `summaryCause` for `spawn_summary_failed`) also sets the standard `Error.cause` to it, so `error.cause instanceof MyFailure` works on the error a caller catches. An error that crosses several code steps is wrapped once per step; `failureCause(e)` follows `cause` through every wrapping `NoeticError` and returns the first value that is not one — the error the failure started from; for a thrown non-`Error`, the wrapper, whose `cause` is the thrown value — so a host can branch on a typed failure (a billing code, a provider's HTTP status) without parsing the message.
 
 ### Model Provider Failure
 
@@ -187,7 +189,7 @@ Durable execution (`23-durable-execution`) adds two `NoeticError` kinds, raised 
 |---|---|---|
 | `lease_lost` | `executionId`, `term`, `reason` | Another harness holds or took the thread's turn. Raised when the lease cannot be taken, and when a renewal or a ledger write shows it is gone. `executionId` is the thread id when the turn had no execution yet. |
 | `turn_stuck` | `executionId`, `path`, `from`, `to` | A turn resumed under flow version `to` would have to redo the step at `path`, which had a lasting effect under version `from`, so it stopped (`23-durable-execution` § Versions). The host settles it with a decision item passed to `harness.execute()`. |
-| `ledger_write_failed` | `executionId`, `path`, `cause: Error` | A step-ledger entry or the thread record could not be written, so the turn stopped. `path` is the ledger path, or `session:<threadId>`. |
+| `ledger_write_failed` | `executionId`, `path`, `cause: Error` | A step-ledger entry or the thread record could not be written, so the turn stopped. `path` is the ledger path, `session:<threadId>`, or `spend:<id>` for a spend record `forget` could not settle (`23-durable-execution` § Forgetting). |
 
 ## Held Call Errors
 

@@ -13,7 +13,12 @@ import type {
   StorageAdapter,
 } from './context-layer';
 import type { DetachedHandle } from './detached';
-import type { HarnessJudgmentContract, ToolApprover } from './harness-judgment';
+import type {
+  HarnessJudgmentContract,
+  HeldCallHandler,
+  HeldSteerPolicy,
+  ToolApprover,
+} from './harness-judgment';
 import type { HarnessPlatform } from './harness-platform';
 import type { HarnessResponse, StreamEvent, StreamingItem } from './harness-result';
 import type { ExecuteArgument, Item, ItemSchemaExtensions } from './items';
@@ -21,9 +26,19 @@ import type { Span, TraceExporter } from './observability';
 import type { Step, StepLike, StepsInput, StepsOutput, ValidStepChain } from './step';
 import type { Tool } from './tool';
 
-/** @public Optional lifecycle hooks invoked before and after each step execution. */
+/**
+ * @public Hooks the interpreter runs around every step it executes, nested steps
+ * included (spec 08 § Step hooks). A step replayed from the ledger does not execute,
+ * so neither hook runs for it. A hook that throws fails the step it ran for.
+ */
 export interface AgentHooks {
+  /** Runs before the step executes, on the context the step runs on. */
   beforeStep?: (step: Step, ctx: Context) => Promise<void>;
+  /**
+   * Runs once the step succeeded, with its output, before it is recorded: the step
+   * completes only when this returns. Not called for a step that failed or was
+   * cancelled.
+   */
   afterStep?: (step: Step, result: unknown, ctx: Context) => Promise<void>;
 }
 
@@ -60,6 +75,10 @@ export interface AgentConfig<TParams extends Record<string, unknown> = Record<st
   emitItemsOnReplay?: boolean;
   /** Approves or refuses calls to tools that declare `needsApproval`. Without one, those calls run unapproved. */
   approveToolCall?: ToolApprover;
+  /** Puts a held call in front of a person and returns their answer (spec 08 § Held tool calls). */
+  onHeld?: HeldCallHandler;
+  /** What a steer does at the `held` steer point before any layer has a say. Default `apply`. */
+  steerWhileHeld?: HeldSteerPolicy;
   /** The clock deadlines, leases and wake times are read from. Default `Date.now`. */
   now?: () => number;
   /**
@@ -204,6 +223,11 @@ export interface ExecuteOptions {
    * with `CONNECTION_NAME_TAKEN`.
    */
   connections?: ConnectionEntries;
+  /**
+   * Tools for this turn only, offered beside the harness's own `tools`, its
+   * connections' and its flow's. A tool with a name already offered replaces it.
+   */
+  tools?: ReadonlyArray<Tool>;
   /** Override the harness's default delivery mode for this message only. */
   deliveryMode?: DeliveryMode;
   /**

@@ -112,14 +112,17 @@ export { cosineSimilarity } from './conditions/cosine-similarity';
 //#region Errors
 
 /** @public */
-/** @public */
 export {
   DECISION_ITEM_TYPE,
+  failureCause,
+  HeldCallSchema,
+  HeldCallSettledSchema,
   isDecisionItem,
   isNoeticConfigError,
   isNoeticError,
   NoeticConfigError,
   NoeticErrorImpl,
+  readHeldCallEvent,
 } from '@noetic-tools/types';
 
 //#endregion
@@ -259,6 +262,7 @@ export type {
   AgentEnvironmentConfig,
   ParkConfig,
   StorageEnvironmentConfig,
+  TurnCutConfig,
   TurnLeaseConfig,
   WakeTimeListener,
 } from './harness/harness-options';
@@ -574,6 +578,8 @@ export type {
   SdkStreamEvent,
   StreamEvent,
   StreamingItem,
+  TurnCut,
+  TurnCutReason,
 } from '@noetic-tools/types';
 
 //#endregion
@@ -599,12 +605,19 @@ export type {
   HarnessJudgmentContract,
   HarnessStatus,
   HeldCall,
+  HeldCallContext,
+  HeldCallEvent,
+  HeldCallHandler,
+  HeldCallSettled,
   HeldResolution,
+  HeldSteerPolicy,
   ItemSchemaConfig,
   ReanchorReason,
   RecallLayerOutput,
+  RecordedToolCall,
   SessionScope,
   SessionUsage,
+  StoredTurn,
   StuckTurn,
   ToolHold,
   TrailMark,
@@ -616,13 +629,17 @@ export type {
 
 /** @public */
 export type {
+  ForgetOptions,
+  ForgetReport,
+  ListStoredOptions,
   PendingSpend,
   ReconcileSpendOptions,
   SpendSettlement,
+  StoredExecution,
   WriteOffSpendOptions,
 } from '@noetic-tools/types';
 /** @public */
-export { SpendKind } from '@noetic-tools/types';
+export { ExecutionPart, SpendKind } from '@noetic-tools/types';
 
 //#endregion
 
