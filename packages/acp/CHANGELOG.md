@@ -1,3 +1,7 @@
+## @noetic-tools/acp-v2.0.0-next.2 (2026-11-25)
+
+* feat(acp): native host support for #96–#100, agents that outlive their host, and reattach (#167) ([3953c32](https://github.com/mattapperson/noetic/commit/3953c32)), closes [#100](https://github.com/mattapperson/noetic/issues/100) [#167](https://github.com/mattapperson/noetic/issues/167) [#156](https://github.com/mattapperson/noetic/issues/156)
+
 ## @noetic-tools/acp-v2.0.0-next.1 (2026-11-25)
 
 * fix: an approval never times out unless a timeout is set ([b4c762d](https://github.com/mattapperson/noetic/commit/b4c762d))
