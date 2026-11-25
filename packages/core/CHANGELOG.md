@@ -1,3 +1,7 @@
+## @noetic-tools/core-v5.22.0-next.9 (2026-11-25)
+
+* feat: an agent step's subagents are nested agents on the ordinary event stream (#170) ([31dd1b9](https://github.com/mattapperson/noetic/commit/31dd1b9)), closes [#170](https://github.com/mattapperson/noetic/issues/170) [#169](https://github.com/mattapperson/noetic/issues/169)
+
 ## @noetic-tools/core-v5.22.0-next.8 (2026-11-25)
 
 * fix: preserve queued events and clean up displaced spills ([f72b5f4](https://github.com/mattapperson/noetic/commit/f72b5f4))
