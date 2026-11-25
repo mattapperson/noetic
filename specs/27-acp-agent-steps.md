@@ -897,9 +897,20 @@ arguments — before its `tool_call_started`. Every call that starts also
 completes before the turn's `response.completed`: one the agent never reported
 finished when its turn ends — normally, cancelled, or failed — completes
 failed, and a call the agent reported only in its turn result gets its whole
-lifecycle then, with the output the result recorded. A call to
-one of the step's own Noetic tools is reported once, by the tool bridge
-(spec 38), never again from the agent's `tool_call`.
+lifecycle then, with the output the result recorded.
+
+**One record per call.** The turn keeps one record for each of its tool calls,
+shared by the step's agent and its nested agents, keyed by the id its item and
+its lifecycle carry. The agent reports its own tools' calls. A call to one of
+the step's own Noetic tools is reported once, by the tool bridge, when it runs
+it (spec 38): its item, carrying the arguments it runs with, then
+`tool_call_started`, under the id the bridge runs it under — never from the
+agent's `tool_call`, which only announces it. An announcement under that same
+id is the same call, whenever it arrives. At the turn's end an announcement
+the bridge never ran under its id either ran under another (the bridge ran
+that tool under an id no announcement had) and shows nothing more, or never
+reached the tool, and completes failed on the announcing agent's stream. A
+call id announced twice is one call.
 
 The client accepts every `session/update` variant of the current protocol, so
 normal traffic from current bridges never draws a `-32602 Invalid params`

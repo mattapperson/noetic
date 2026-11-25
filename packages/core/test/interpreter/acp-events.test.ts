@@ -326,8 +326,8 @@ describe('AcpEventBridge', () => {
       arguments: '{"path":"/a"}',
     });
     const completed = events.find((e) => e.type.endsWith(':tool_call_completed'));
+    // The payload the `callModel` tool loop emits: no step, no adapter.
     expect(completed?.data).toEqual({
-      stepId: 'review',
       name: 'Read',
       callId: 'c3',
       error: false,
@@ -415,6 +415,118 @@ describe('AcpEventBridge', () => {
         'matches',
       ],
     ]);
+  });
+
+  it('reports a bridged call once, under the id the bridge runs it under, whatever id it was announced under', () => {
+    const { bridge, events } = bridgeCtx(STEP);
+    bridge.nameToolCalls((title) => (title === 'mcp__noetic__echo' ? 'echo' : undefined));
+
+    bridge.begin();
+    bridge.forward({
+      sessionId: 's1',
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'announced-x',
+        title: 'mcp__noetic__echo',
+        rawInput: {
+          text: 'hi',
+        },
+      },
+    });
+    bridge.bridgedCallStarted('ran-y', 'echo', {
+      text: 'hi',
+    });
+    bridge.bridgedCallCompleted('ran-y', {
+      name: 'echo',
+      error: false,
+      output: 'hi',
+    });
+    bridge.finalize(emptyResult());
+
+    const calls = events.filter(
+      (e) =>
+        /tool_call_(started|completed)$/.test(e.type) ||
+        (e.type === 'response.output_item.done' && e.data.item !== undefined),
+    );
+    expect(
+      calls.map((e) => [
+        e.type.replace(/^.*:/, ''),
+        e.type === 'response.output_item.done'
+          ? JSON.stringify(e.data.item).includes('ran-y')
+          : e.data.callId,
+      ]),
+    ).toEqual([
+      [
+        'response.output_item.done',
+        true,
+      ],
+      [
+        'tool_call_started',
+        'ran-y',
+      ],
+      [
+        'tool_call_completed',
+        'ran-y',
+      ],
+    ]);
+    expect(JSON.stringify(events)).not.toContain('announced-x');
+  });
+
+  it('reports a call announced to a bridged tool that never reached it as failed', () => {
+    const { bridge, events } = bridgeCtx(STEP);
+    bridge.nameToolCalls((title) => (title === 'mcp__noetic__echo' ? 'echo' : undefined));
+
+    bridge.begin();
+    bridge.forward({
+      sessionId: 's1',
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'lost',
+        title: 'mcp__noetic__echo',
+      },
+    });
+    bridge.finalize(emptyResult());
+
+    const lifecycle = events.filter((e) => /tool_call_(started|completed)$/.test(e.type));
+    expect(
+      lifecycle.map((e) => [
+        e.type.replace(/^.*:/, ''),
+        e.data.callId,
+        e.data.error,
+      ]),
+    ).toEqual([
+      [
+        'tool_call_started',
+        'lost',
+        undefined,
+      ],
+      [
+        'tool_call_completed',
+        'lost',
+        true,
+      ],
+    ]);
+    const settledAt = events.indexOf(lifecycle[1] ?? events[0]);
+    const closedAt = events.findIndex((e) => e.type === 'response.completed');
+    expect(settledAt).toBeLessThan(closedAt);
+  });
+
+  it('reports a bridged call the agent never announced, with its arguments before its start', () => {
+    const { bridge, events } = bridgeCtx(STEP);
+
+    bridge.begin();
+    bridge.bridgedCallStarted('quiet', 'echo', {
+      text: 'x',
+    });
+
+    const done = events.findIndex(
+      (e) =>
+        e.type === 'response.output_item.done' &&
+        JSON.stringify(e.data.item).includes('"text\\":\\"x'),
+    );
+    const started = events.findIndex((e) => e.type.endsWith(':tool_call_started'));
+    expect(done).toBeGreaterThanOrEqual(0);
+    expect(done).toBeLessThan(started);
   });
 
   it("leaves a call to one of the step's bridged tools to the bridge", () => {

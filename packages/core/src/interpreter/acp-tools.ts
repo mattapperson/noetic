@@ -209,13 +209,10 @@ export function mergeBridgedItems(
   calls: ReadonlyArray<BridgedCall>,
 ): {
   items: Item[];
-  /** Bridge `callId`s now standing where an agent record with another id was. */
-  adopted: string[];
 } {
   // Only the agent's own records are matched — never a pair this merge added —
   // exact ids before titles, each record claimed once.
   const slotOf = matchBridgedCalls(items, calls);
-  const adopted: string[] = [];
   const byRecord = new Map<string, BridgedCall>();
   for (const [call, index] of slotOf) {
     const record = items[index];
@@ -223,9 +220,6 @@ export function mergeBridgedItems(
       continue;
     }
     byRecord.set(record.callId, call);
-    if (record.callId !== call.callItem.callId) {
-      adopted.push(call.callItem.callId);
-    }
   }
   const merged: Item[] = [];
   const placedOutput = new Set<string>();
@@ -258,7 +252,6 @@ export function mergeBridgedItems(
   }
   return {
     items: merged,
-    adopted,
   };
 }
 
@@ -885,10 +878,7 @@ export class AcpToolRunner implements AcpToolHost {
     tool: Tool | undefined,
   ): ReturnType<typeof executeToolCall> {
     const args = this.unwrap(call);
-    binding.events.toolEvent('tool_call_started', {
-      name: call.name,
-      callId,
-    });
+    binding.events.bridgedCallStarted(callId, call.name, args);
     const record = this.records.recordFor({
       ctx: binding.ctx,
       stepId: binding.stepId,
@@ -954,9 +944,8 @@ export class AcpToolRunner implements AcpToolHost {
       ...finished,
       callId,
     });
-    binding.events.toolEvent('tool_call_completed', {
+    binding.events.bridgedCallCompleted(callId, {
       name: call.name,
-      callId,
       error: result.error === true,
       output: result.output,
     });

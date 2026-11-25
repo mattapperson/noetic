@@ -1100,7 +1100,6 @@ async function runTurn<TContext, I, O>(params: {
   }
   if (tools) {
     const merged = mergeBridgedItems(result.items, tools.takeFinished());
-    bridge.adoptToolCalls(merged.adopted);
     result = {
       ...result,
       items: merged.items,
