@@ -611,6 +611,7 @@ export type {
   ItemSchemaConfig,
   ReanchorReason,
   RecallLayerOutput,
+  RecordedToolCall,
   SessionScope,
   SessionUsage,
   StuckTurn,

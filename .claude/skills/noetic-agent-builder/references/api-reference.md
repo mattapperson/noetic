@@ -2158,6 +2158,9 @@ harness.listStuckRuns(): Promise<StuckTurn[]>;  // { threadId, executionId, path
 harness.execute({ type: 'noetic:decision', action: 'continue' | 'restart' | 'abandon' }, { threadId });
 harness.getAuditTrail(scope: { threadId } | { executionId }): Promise<TrailMark[]>;
 // TrailMark: { executionId, path, stepId, kind, completedAt, version?, term?, holder?, receipt? }
+// Tool calls a resume of the execution replays: { callId, name, path, settled }.
+// A host journal of tool traffic appends none of these to a restored context.
+harness.recordedToolCalls(executionId: string): Promise<RecordedToolCall[]>;
 ```
 
 A turn resumed under another `version` keeps the steps that still match. If the first step that differs already had a lasting effect (a `once`/`effects` connection operation, or a `durable: true` tool), the turn stops with `NoeticError` `turn_stuck` and waits: `wake()` skips it until that decision arrives. Give an effect step a `replayKey` to keep it matching across edits. Trail marks outlive the ledger and `clearCheckpoint`; only `forget` deletes them.

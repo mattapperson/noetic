@@ -10,6 +10,7 @@ import type {
   HeldCall,
   HeldResolution,
   ListStoredOptions,
+  RecordedToolCall,
   ScopedStorage,
   StoredExecution,
   StuckTurn,
@@ -196,6 +197,7 @@ import { buildItemSchemaRegistry } from './model-schema';
 import { DEFAULT_TASK_POLL_MS, DEFAULT_WAKE_DEBOUNCE_MS, ParkWatchers } from './park-watchers';
 import type { ReadDecision } from './read-decision';
 import { readDecision } from './read-decision';
+import { recordedToolCalls } from './recorded-tool-calls';
 import type { SpendClient } from './spend';
 import { Spend } from './spend';
 import { ThreadRecord } from './thread-record';
@@ -1847,6 +1849,21 @@ export class AgentHarness<
       options,
     });
     return true;
+  }
+
+  /**
+   * The tool calls a resume of `executionId` goes on from rather than having the
+   * model ask for them again: every call whose request its step ledger holds, in a
+   * completed step or a recorded round, read from storage. `settled` says whether
+   * the call's result is on record too; an unsettled call runs again on resume (spec
+   * 23a § Tool calls in a round). A host that journals tool traffic of its own adds
+   * none of these to a restored context, or the model sees them twice. Empty without
+   * durable storage.
+   * @public
+   */
+  async recordedToolCalls(executionId: string): Promise<RecordedToolCall[]> {
+    const window = await this.stepLedgerStore?.load(executionId);
+    return window ? recordedToolCalls(window) : [];
   }
 
   /**
