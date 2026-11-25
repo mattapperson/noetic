@@ -168,14 +168,28 @@ export function createD1Storage(options: CreateD1StorageOptions): StorageAdapter
     });
   }
 
-  const change = async (key: string, prepare: () => D1StatementLike): Promise<unknown> => {
+  // SQLite rejects some valid JSON, including deeply nested values. If its guard
+  // skipped the write, parse in JavaScript and change only the exact row we read.
+  const change = async (
+    key: string,
+    prepare: () => D1StatementLike,
+    compare: (before: string) => D1StatementLike,
+  ): Promise<unknown> => {
     await ready();
-    const [before] = await batch([
-      db.prepare(sql.selectBeforeChange).bind(...sql.scope, key),
-      prepare(),
-    ]);
-    const raw = storedValue(before?.results?.[0]);
-    return raw === undefined ? null : decoded(raw);
+    while (true) {
+      const [before, changed] = await batch([
+        db.prepare(sql.select).bind(...sql.scope, key),
+        prepare(),
+      ]);
+      const stored = storedValue(before?.results?.[0]);
+      if (stored === undefined) {
+        return null;
+      }
+      const prior = decoded(stored);
+      if (changed?.results?.length || (await compare(stored).run()).meta.changes === 1) {
+        return prior;
+      }
+    }
   };
 
   return withSpill({
@@ -183,9 +197,20 @@ export function createD1Storage(options: CreateD1StorageOptions): StorageAdapter
     spill: options.spill,
     scope: options.scope,
     rows: {
-      replace: (key, value) =>
-        change(key, () => db.prepare(sql.upsert).bind(...sql.scope, key, JSON.stringify(value))),
-      remove: (key) => change(key, () => db.prepare(sql.remove).bind(...sql.scope, key)),
+      replace(key, value) {
+        const encoded = JSON.stringify(value);
+        return change(
+          key,
+          () => db.prepare(sql.upsertJson).bind(...sql.scope, key, encoded),
+          (before) => db.prepare(sql.replace).bind(encoded, ...sql.scope, key, before),
+        );
+      },
+      remove: (key) =>
+        change(
+          key,
+          () => db.prepare(sql.removeJson).bind(...sql.scope, key),
+          (before) => db.prepare(sql.removeValue).bind(...sql.scope, key, before),
+        ),
       async holds(key, value) {
         return (await raw(key)) === JSON.stringify(value);
       },

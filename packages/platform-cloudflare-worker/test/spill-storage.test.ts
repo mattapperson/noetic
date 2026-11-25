@@ -96,6 +96,34 @@ const adapters: Record<string, Make> = {
   },
 };
 
+describe('D1 inline JSON', () => {
+  it('replaces and deletes values beyond the SQLite JSON nesting limit', async () => {
+    const make = adapters.D1;
+    assert(make);
+    const { storage, blobs, db } = make({
+      scope: 'tenant',
+      maxBytes: 10_000,
+    });
+    let deep: number | unknown[] = 0;
+    for (let level = 0; level < 1_100; level += 1) {
+      deep = [
+        deep,
+      ];
+    }
+    await storage.set('replace', deep);
+    await storage.set('delete', deep);
+    expect(blobs.objects.size).toBe(0);
+
+    await storage.set('replace', SMALL);
+    await storage.delete('delete');
+    expect(await storage.get('replace')).toEqual(SMALL);
+    expect(await storage.get('delete')).toBeNull();
+    expect(db.query('SELECT count(*) AS n FROM noetic_storage').get()).toEqual({
+      n: 1,
+    });
+  });
+});
+
 describe('D1 statement preparation', () => {
   for (const operation of [
     'set',
