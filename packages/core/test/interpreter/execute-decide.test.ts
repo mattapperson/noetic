@@ -164,26 +164,27 @@ describe('executeDecide', () => {
     });
   });
 
-  it('asks for long context only when the step does', async () => {
+  it('passes a step’s headers on the request, and none when it has none', async () => {
     const { harness, requests } = harnessWith({});
-    const ask = (id: string, longContext?: boolean): Promise<unknown> =>
+    const headers = {
+      'TypeSafe-Danger-Zone-Long-Context': 'true',
+    };
+    const ask = (id: string, stepHeaders?: Record<string, string>): Promise<unknown> =>
       harness.run(
         decide({
           id,
           model: 'typesafe/jev-1.14',
           questions: QUESTIONS,
-          longContext,
+          headers: stepHeaders,
         }),
         'refund please',
         harness.createContext(),
       );
-    await ask('long', true);
-    await ask('short', false);
-    await ask('unset');
+    await ask('with', headers);
+    await ask('without');
 
-    expect(requests.map((request) => request.longContext)).toEqual([
-      true,
-      undefined,
+    expect(requests.map((request) => request.headers)).toEqual([
+      headers,
       undefined,
     ]);
   });

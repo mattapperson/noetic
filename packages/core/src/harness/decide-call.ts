@@ -65,9 +65,6 @@ type NativeAnswer = NativeResponse['answers'][string];
 
 //#region Public API
 
-/** @internal TypeSafe's header for long-context mode, which raises its per-request and per-question limits. */
-export const LONG_CONTEXT_HEADER = 'TypeSafe-Danger-Zone-Long-Context';
-
 const OPENROUTER_BASE = /^https:\/\/openrouter\.ai(\/|$)/;
 
 /**
@@ -236,24 +233,23 @@ async function sendNative({
   }
 }
 
-/** The request headers of a native call: the dispatch record's, and long-context mode. */
+/**
+ * The request headers of a native call: the request's own, then the dispatch
+ * record's, which a step's header therefore cannot replace.
+ */
 function nativeHeaders(
   dispatchHeaders: Record<string, string> | undefined,
   request: DecideRequest,
 ): {
   headers?: Record<string, string>;
 } {
-  if (!dispatchHeaders && !request.longContext) {
+  if (!dispatchHeaders && !request.headers) {
     return {};
   }
   return {
     headers: {
+      ...request.headers,
       ...dispatchHeaders,
-      ...(request.longContext
-        ? {
-            [LONG_CONTEXT_HEADER]: 'true',
-          }
-        : {}),
     },
   };
 }

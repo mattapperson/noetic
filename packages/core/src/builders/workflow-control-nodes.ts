@@ -210,7 +210,7 @@ function decideFromNode(node: DecideWorkflowNode) {
     questions: node.questions,
     view: node.view,
     samples: node.samples,
-    longContext: node.longContext,
+    headers: node.headers,
   });
 }
 

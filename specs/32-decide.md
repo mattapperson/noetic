@@ -46,8 +46,8 @@ interface StepDecideOpts<TContext, Q extends DecideQuestions> {
   projection?: ProjectionPolicy;
   /** Runs per decision on the estimated path, averaged. Ignored on the native path. Default 1. */
   samples?: number;
-  /** Ask a decision model for its long-context limits. Ignored on the estimated path. Default false. */
-  longContext?: boolean;
+  /** Extra HTTP headers for the native request. Ignored on the estimated path. */
+  headers?: Readonly<Record<string, string>>;
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }
 
@@ -370,7 +370,7 @@ interface StepDecide<TContext = ContextData, _I = unknown, O = unknown> {
   context?: (ctx: Context<TContext>) => Record<string, unknown> | Promise<Record<string, unknown>>;
   projection?: ProjectionPolicy;
   samples: number;
-  longContext?: boolean;
+  headers?: Readonly<Record<string, string>>;
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
   /** Phantom field carrying the answers type for inference. Never set at runtime. */
   readonly _answers?: O;
@@ -437,7 +437,7 @@ interface DecideRequest {
   state: ReadonlyArray<DecideStatePart>;
   questions: DecideQuestions;
   samples?: number;
-  longContext?: boolean;
+  headers?: Readonly<Record<string, string>>;
   signal?: AbortSignal;
 }
 
@@ -479,10 +479,18 @@ decisions endpoint is used. The harness's credential therefore goes only where
 its model calls go: a harness pointed at another OpenRouter-shaped route never
 sends its key to openrouter.ai.
 
-`longContext: true` adds the header `TypeSafe-Danger-Zone-Long-Context: true` to
-the native request, alongside the dispatch record's header. TypeSafe's
-long-context mode raises how many tokens one request and one question may
-carry. The estimated path has no such mode and ignores the option.
+`headers` are sent with the native request as they are. Noetic reads none of
+them and knows no provider's header names: they are how a host turns on a
+provider's per-request option. TypeSafe's decision models, for one, raise how
+many tokens a request and a question may carry when the request has
+`TypeSafe-Danger-Zone-Long-Context: true`.
+
+- The dispatch record's own header is applied after them, so a step cannot
+  replace it.
+- They are not part of the dispatch record's request hash.
+- The estimated path sends a `callModel` request and ignores them.
+- A step, and a JSON workflow, may be serialized: credentials do not belong in
+  them. The harness's provider config carries those.
 
 **Estimated.** For any other model, the adapter makes one structured-output
 `callModel` per sample, asking for a probability per boolean, choice, and level,
@@ -625,7 +633,7 @@ interface DecideWorkflowNode {
   questions: Record<string, DecideQuestion>;
   view?: 'full' | 'layers' | 'none';
   samples?: number;
-  longContext?: boolean;
+  headers?: Record<string, string>;
 }
 
 interface RouteSwitchWorkflowNode {

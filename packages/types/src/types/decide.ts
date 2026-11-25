@@ -191,10 +191,10 @@ export interface DecideRequest {
   /** Runs averaged on the estimated path. Ignored on the native path. Default 1. */
   samples?: number;
   /**
-   * Ask a decision model for its long-context limits. Sent on the native path
-   * only, as the `TypeSafe-Danger-Zone-Long-Context` header. Default false.
+   * Extra HTTP headers for the native request, such as a provider's per-request
+   * option. Passed through unread. The estimated path ignores them.
    */
-  longContext?: boolean;
+  headers?: Readonly<Record<string, string>>;
   signal?: AbortSignal;
   /** @internal Parent span for the decide-call span. */
   parentSpan?: Span;

@@ -1374,8 +1374,14 @@
               "exclusiveMinimum": 0,
               "maximum": 9007199254740991
             },
-            "longContext": {
-              "type": "boolean"
+            "headers": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
             }
           },
           "required": [
@@ -1742,8 +1748,14 @@
                   "exclusiveMinimum": 0,
                   "maximum": 9007199254740991
                 },
-                "longContext": {
-                  "type": "boolean"
+                "headers": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": "string"
+                  }
                 }
               },
               "required": [
@@ -4470,8 +4482,14 @@
               "exclusiveMinimum": 0,
               "maximum": 9007199254740991
             },
-            "longContext": {
-              "type": "boolean"
+            "headers": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
             }
           },
           "required": [

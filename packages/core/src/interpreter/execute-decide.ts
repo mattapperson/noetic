@@ -81,9 +81,9 @@ export async function executeDecide<TContext, I, O>(
       state,
       questions: step.questions,
       samples: step.samples,
-      ...(step.longContext
+      ...(step.headers
         ? {
-            longContext: true,
+            headers: step.headers,
           }
         : {}),
       signal: isContextImpl(baseCtx) ? baseCtx.abortSignal : undefined,

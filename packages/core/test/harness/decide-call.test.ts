@@ -191,6 +191,11 @@ describe('decisionsServerUrl', () => {
   });
 });
 
+/** How a host turns on TypeSafe's long-context limits: a header Noetic passes through unread. */
+const LONG_CONTEXT = {
+  'TypeSafe-Danger-Zone-Long-Context': 'true',
+};
+
 describe('callDecide — native request options', () => {
   const native = (
     request: DecideRequest,
@@ -219,22 +224,20 @@ describe('callDecide — native request options', () => {
     ]);
   });
 
-  it('sends the long-context header when the request asks for it', async () => {
+  it('sends the request’s headers on the native call', async () => {
     const { options } = await native({
       ...REQUEST,
-      longContext: true,
+      headers: LONG_CONTEXT,
     });
     expect(options).toEqual([
       {
         signal: undefined,
-        headers: {
-          'TypeSafe-Danger-Zone-Long-Context': 'true',
-        },
+        headers: LONG_CONTEXT,
       },
     ]);
   });
 
-  it("adds the long-context header to the dispatch record's headers", async () => {
+  it("sends them with the dispatch record's headers, which a request cannot replace", async () => {
     const fake = fakeClient({
       modality: 'decisions',
       answers: NATIVE_ANSWERS,
@@ -242,7 +245,7 @@ describe('callDecide — native request options', () => {
     const spend = frameworkCast<Spend>({
       open: async () => ({
         headers: {
-          'x-dispatch': 'd-1',
+          'x-noetic-dispatch': 'd-1',
         },
         settle: async () => {},
         end: () => {},
@@ -251,7 +254,10 @@ describe('callDecide — native request options', () => {
     await callDecide(
       {
         ...REQUEST,
-        longContext: true,
+        headers: {
+          ...LONG_CONTEXT,
+          'x-noetic-dispatch': 'forged',
+        },
       },
       {
         client: fake.client,
@@ -262,18 +268,46 @@ describe('callDecide — native request options', () => {
     );
     expect(fake.options[0]).toMatchObject({
       headers: {
-        'x-dispatch': 'd-1',
-        'TypeSafe-Danger-Zone-Long-Context': 'true',
+        ...LONG_CONTEXT,
+        'x-noetic-dispatch': 'd-1',
       },
     });
   });
 
-  it('leaves the header out when longContext is false', async () => {
-    const { options } = await native({
-      ...REQUEST,
-      longContext: false,
+  it('does not send them on the estimated path', async () => {
+    const fake = fakeClient({
+      modality: 'text',
+      answers: {},
     });
-    expect(options[0]).not.toHaveProperty('headers');
+    const chat = scriptedChat([
+      JSON.stringify({
+        damaged: {
+          yes: 0.9,
+        },
+        queue: {
+          billing: 1,
+          shipping: 0,
+        },
+        urgency: {
+          low: 1,
+          medium: 0,
+          high: 0,
+        },
+      }),
+    ]);
+    await callDecide(
+      {
+        ...REQUEST,
+        headers: LONG_CONTEXT,
+      },
+      {
+        client: fake.client,
+        callModel: chat.callModel,
+        nativeModels: new Map(),
+      },
+    );
+    expect(fake.options).toEqual([]);
+    expect(JSON.stringify(chat.requests)).not.toContain('TypeSafe-Danger-Zone-Long-Context');
   });
 
   it("sends the call to the client's own base URL when given one", async () => {

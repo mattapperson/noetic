@@ -222,7 +222,18 @@ Any model can answer. How it answers depends on the model.
 
 A native call goes where the harness's model calls go. When the provider's base URL is not OpenRouter's, the decision is sent to `<base URL>/api/alpha/decisions`, so a harness pointed at another OpenRouter-shaped route never sends its key to openrouter.ai.
 
-Set `longContext: true` to ask a decision model for its long-context limits, which raise how many tokens one request and one question may carry. The harness sends the header `TypeSafe-Danger-Zone-Long-Context: true` with the native request. The estimated path ignores it.
+Set `headers` to send extra HTTP headers with the native request. This is how you turn on a provider's per-request option: TypeSafe's decision models raise how many tokens one request and one question may carry when the request has `TypeSafe-Danger-Zone-Long-Context: true`.
+
+```ts validate=none
+decide({
+  id: 'triage',
+  model: 'typesafe/jev-1.14',
+  questions,
+  headers: { 'TypeSafe-Danger-Zone-Long-Context': 'true' },
+});
+```
+
+Noetic passes the headers through unread. The estimated path ignores them, and they cannot replace the header the harness adds for its own records. A step may be serialized, so do not put credentials in them.
 
 On the native path, only an explicit refusal from the provider becomes a `Refusal`. A missing or mistyped answer fails the step with `model_parse_error`, rather than passing a provider fault off as the model declining. Every answer's `probabilities` has an entry for each outcome (`0` when the provider sent none). A boolean `criteria` with only one side cannot be sent as criteria, so it joins the instructions as `Yes means: …` (or `No means: …`).
 
@@ -286,7 +297,7 @@ const triage = decide({
 | `context` | `(ctx) => Record<string, unknown> \| Promise<Record<string, unknown>>` | No | Typed state read from context layers, sent as one JSON entry named `context`. Annotate `ctx` to type it |
 | `projection` | `ProjectionPolicy` | No | Budget for the decision's view. Default `DECISION_PROJECTION` |
 | `samples` | `number` | No | Runs to average on the estimated path. Positive integer. Default `1` |
-| `longContext` | `boolean` | No | Ask a decision model for its long-context limits. Native path only. Default `false` |
+| `headers` | `Record<string, string>` | No | Extra HTTP headers for the native request. Ignored on the estimated path |
 | `emit` | `boolean \| (eventType, data) => boolean` | No | Controls framework event emission for this step |
 
 `decide()` returns a `DecideStep`, which keeps the literal question map so `routeSwitch` can infer the questions, choices, and levels.

@@ -1773,19 +1773,22 @@ describe('hydrateNode — decide and routeSwitch', () => {
     ]);
   });
 
-  test('hydrates longContext on a decide node, and leaves it unset by default', () => {
-    const long = hydrateNode(
+  test('hydrates headers on a decide node, and leaves them unset by default', () => {
+    const headers = {
+      'TypeSafe-Danger-Zone-Long-Context': 'true',
+    };
+    const withHeaders = hydrateNode(
       {
         ...decideNode,
-        longContext: true,
+        headers,
       },
       makeHydrationContext(),
     );
-    assert(long.kind === 'decide');
-    expect(long.longContext).toBe(true);
+    assert(withHeaders.kind === 'decide');
+    expect(withHeaders.headers).toEqual(headers);
     const plain = hydrateNode(decideNode, makeHydrationContext());
     assert(plain.kind === 'decide');
-    expect(plain.longContext).toBeUndefined();
+    expect(plain.headers).toBeUndefined();
   });
 
   test('hydrates a routeSwitch node whose route runs the decision and picks the case', async () => {
