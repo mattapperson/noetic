@@ -394,3 +394,42 @@ describe('a held question', () => {
     }
   });
 });
+
+describe('a hold asked again by another host', () => {
+  it('keeps its id and answer, and takes the asking host’s scope while unanswered', async () => {
+    const holds = new HeldCalls(createInMemoryStorage(), () => 0);
+    const first = {
+      ...question('q2'),
+      scope: {
+        id: 'step/turn:aaaa/agent:c1',
+        title: 'Explore',
+      },
+    };
+    await holds.open('exec', first);
+    const again = await holds.open('exec', {
+      ...question('q2'),
+      scope: {
+        id: 'step/turn:bbbb/agent:c1',
+        title: 'Explore',
+      },
+    });
+    expect(again.scope?.id).toBe('step/turn:bbbb/agent:c1');
+    expect((await holds.load('exec', 'q2'))?.scope?.id).toBe('step/turn:bbbb/agent:c1');
+
+    await holds.resolve('exec', {
+      callId: 'q2',
+      resolution: {
+        action: 'deny',
+      },
+    });
+    const answered = await holds.open('exec', {
+      ...question('q2'),
+      scope: {
+        id: 'step/turn:cccc/agent:c1',
+      },
+    });
+    // Answered, it is left as it was: the answer is what matters now.
+    expect(answered.scope?.id).toBe('step/turn:bbbb/agent:c1');
+    expect(answered.resolution?.action).toBe('deny');
+  });
+});

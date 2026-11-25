@@ -737,9 +737,16 @@ show one.
   generic `tool_call_started` / `tool_call_completed` (scoped), once each; a
   call it makes through the step's tool bridge is reported by the bridge, on
   its scope, and never joins the step's items. The bridge places a call by the
-  `tool_call` that announced it; while subagents are about, a call nobody
-  announced gets a moment for its announcement, and one still unplaced joins
-  neither the step's items nor its item stream. Its file and terminal calls
+  `tool_call` that announced it, once, before it runs — the MCP request names
+  no session. In a turn with no subagent every call is the step's at once;
+  once a subagent has spoken in the turn, a call nobody has announced yet
+  waits for its announcement (at most a moment), and one still unplaced joins
+  neither the step's items nor its item stream. A call the step's own agent
+  announces is the step's, whatever a subagent announces under the same id.
+  A call that needs approval or leaves its result open is held as the run's,
+  its held event unscoped, naming the subagent in `scope`. When another host
+  asks a still-unanswered hold again, the hold keeps its id and its answer
+  and takes that host's `scope`. Its file and terminal calls
   are reported on its scope.
 - **Its questions are the run's to answer.** A permission request or a
   question a nested agent raises is held like any other (§ Held tool calls),
@@ -775,7 +782,7 @@ window for the same agent — and its child's output is the run's output, as a
 | `{name}:item_appended` | Emitted whenever a framework-authored item enters the session log — turn input messages (after `turn_started`), between-rounds inbox injections, tool result items, and the items a step with `emitItems` adds when it finishes, or streams again on replay under `emitItemsOnReplay` (`01-step-type` § Emitting items). Data: `{ item }`. Backs `getItemStream` for everything the SDK stream cannot carry, so it is emitted unconditionally — never filtered by `step.emit`. |
 | `{name}:custom_item_event` | One event of a declared custom item, as a step yields it (`34-custom-items`). Data: `{ id, type, event }`; `id` is the one its final item takes. Emitted unconditionally, like `item_appended`. |
 | `{name}:turn_completed` | Emitted when a turn completes. Data: `{ turnId, durationMs }` |
-| `{name}:tool_call_held` | Emitted when a tool call is held for a person (§ Held tool calls). Data: the `HeldCall`: `{ callId, name, args, argsHash, reason, dueAt?, onDue?, request? }` |
+| `{name}:tool_call_held` | Emitted when a tool call is held for a person (§ Held tool calls). Never scoped. Data: the `HeldCall`: `{ callId, name, args, argsHash, reason, dueAt?, onDue?, request?, question?, scope? }` — `scope` names the nested agent asking |
 | `{name}:tool_call_settled` | Emitted when a call this process announced held stops being held (§ Held tool calls). Data: the `HeldCallSettled`: `{ callId, name, argsHash, reason, by }` |
 | `{name}:turn_replayed` | Emitted when a message delivered again is answered from its finished turn's record (`23a-step-level-resume` § Sessions). Data: `{ messageIds, text }`, `text` being the recorded answer |
 | `{name}:turn_parked` | Emitted in place of `turn_completed` when a turn parks (`23-durable-execution` § Parked turns). Data: `{ turnId, durationMs, wakeAt }` |

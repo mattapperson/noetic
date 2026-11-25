@@ -7,6 +7,7 @@
 import type { ContextLayer } from '@noetic-tools/context';
 import type {
   AgentHarnessContract,
+  AgentScope,
   Context,
   HeldCall,
   Item,
@@ -134,6 +135,8 @@ export interface ExecuteToolCallParams {
    * idempotency key, so two calls a provider gave the same id do not share one.
    */
   keyScope?: string;
+  /** The nested agent making the call, named on its held record (`HeldCall.scope`). */
+  scope?: AgentScope;
 }
 
 /** The id a call's durable records go under. */
@@ -347,6 +350,11 @@ async function holdCall(
     args: call.args,
     argsHash: heldArgsHash(call.tool.name, call.args),
     reason: call.reason,
+    ...(params.scope === undefined
+      ? {}
+      : {
+          scope: params.scope,
+        }),
     ...(call.due.dueAt === undefined
       ? {}
       : {

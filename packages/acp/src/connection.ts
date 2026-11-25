@@ -631,10 +631,24 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
 
   private adoptChild(child: string, parent: string): void {
     this.children.set(child, parent);
-    const oldest = this.children.keys().next().value;
-    if (this.children.size > CHILD_LIMIT && oldest !== undefined) {
-      this.children.delete(oldest);
-      this.childInfo.delete(oldest);
+    this.trimChildren();
+  }
+
+  /**
+   * Forget the oldest children past the cap, never one another kept child was
+   * announced under: a grandchild must still be placed under its whole chain.
+   */
+  private trimChildren(): void {
+    const parents = new Set(this.children.values());
+    for (const child of this.children.keys()) {
+      if (this.children.size <= CHILD_LIMIT) {
+        return;
+      }
+      if (parents.has(child)) {
+        continue;
+      }
+      this.children.delete(child);
+      this.childInfo.delete(child);
     }
   }
 

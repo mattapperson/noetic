@@ -570,6 +570,72 @@ describe("subagents' own sessions", () => {
     await rig.close();
   });
 
+  test('a grandchild keeps its whole chain however many siblings came after its parent', async () => {
+    const lineages: string[][] = [];
+    const rig = await createAcpTestRig({
+      onChildUpdate: (child) => {
+        if (child.sessionId === 'grand' && !child.announcement) {
+          lineages.push(child.lineage.map((info) => info.sessionId));
+        }
+      },
+      script: {
+        onPrompt: async (conn, params) => {
+          await conn.sessionUpdate(subagentAnnounce(params.sessionId, 'parent'));
+          await conn.sessionUpdate(subagentAnnounce('parent', 'grand'));
+          for (let i = 0; i < 1001; i += 1) {
+            await conn.sessionUpdate(subagentAnnounce(params.sessionId, `sib${i}`));
+          }
+          await conn.sessionUpdate(textChunk('grand', 'still placed'));
+        },
+      },
+    });
+    const session = await rig.connection.newSession({
+      cwd: '/workspace',
+    });
+    await session.prompt({
+      content: PROMPT,
+    });
+    // Past the cap something is forgotten — never the parent of a kept child, so a
+    // grandchild is never placed without its parent, and never leaks to the step.
+    expect(lineages.every((lineage) => lineage[0] === 'parent')).toBe(true);
+    expect(JSON.stringify(rig.updates)).not.toContain('still placed');
+    await rig.close();
+  }, 20e3);
+
+  test('under the cap, a grandchild that speaks later is placed under its parent', async () => {
+    const lineages: string[][] = [];
+    const rig = await createAcpTestRig({
+      onChildUpdate: (child) => {
+        if (child.sessionId === 'grand' && !child.announcement) {
+          lineages.push(child.lineage.map((info) => info.sessionId));
+        }
+      },
+      script: {
+        onPrompt: async (conn, params) => {
+          await conn.sessionUpdate(subagentAnnounce(params.sessionId, 'parent'));
+          await conn.sessionUpdate(subagentAnnounce('parent', 'grand'));
+          for (let i = 0; i < 50; i += 1) {
+            await conn.sessionUpdate(subagentAnnounce(params.sessionId, `sib${i}`));
+          }
+          await conn.sessionUpdate(textChunk('grand', 'placed'));
+        },
+      },
+    });
+    const session = await rig.connection.newSession({
+      cwd: '/workspace',
+    });
+    await session.prompt({
+      content: PROMPT,
+    });
+    expect(lineages).toEqual([
+      [
+        'parent',
+        'grand',
+      ],
+    ]);
+    await rig.close();
+  });
+
   test("a child's update sent before its announcement never reaches the step", async () => {
     const rig = await createAcpTestRig({
       script: {

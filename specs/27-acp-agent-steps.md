@@ -687,13 +687,19 @@ Only the step's own session produces the step's output. Each child becomes a
 **nested agent** of the turn (`08-runtime` § Nested agents): its updates go
 through the same event mapping as the step's, with a `scope` naming it, so
 its text, reasoning and tool calls reach the full stream as its own — never
-the step's text, items or result. Its announcement opens it
-(`agent_started`, with the RFD's `title` and `description`, or the draft's
-`name` and `task`), each state it reports is an `agent_status`
+the step's text, items or result. Its announcement registers it — the RFD's
+`title` and `description`, or the draft's `name` and `task`, and its state —
+and every update the connection hands on carries the child's lineage, its
+chain of announced parents. It opens (`agent_started`) on its first activity
+in the turn — an update, a request, a call — under that whole chain, so a
+child announced by a child is nested under it (`parentId`) even when the
+grandchild speaks first, and a child that only reappears in a replayed
+announcement shows nothing. Each state it reports is an `agent_status`
 (`running`, `idle`, `requires_action` as `waiting`, `unknown`), and the end of
 the turn closes it (`agent_completed`: `cancelled` or `failed` when its last
-stop reason said so, else `completed`). A child announced by a child is
-nested under it (`parentId`). Updates for a session the connection does not
+stop reason said so, else `completed`). A connection remembers at most a
+thousand children, forgetting the oldest first but never one another kept
+child was announced under, so a child is never placed without its parent. Updates for a session the connection does not
 know are dropped; an update that arrives before the connection knows whose
 it is — the agent's first updates for a session it creates, sent before its
 `session/new` answer, or a child's sent before its announcement — is held (at

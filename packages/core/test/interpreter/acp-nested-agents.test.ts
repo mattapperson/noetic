@@ -8,6 +8,7 @@ import type {
   AcpAgent,
   AcpAgentConnection,
   AcpChildUpdate,
+  AcpClientHost,
   AcpSession,
   AcpTurnResult,
   AgentScope,
@@ -317,14 +318,31 @@ describe('nested agents on the event bridge', () => {
   });
 });
 
-async function runChildCall(announced: boolean): Promise<{
+interface ChildCallOptions {
+  /** When the subagent's `tool_call` arrives: before the MCP call, during it, or never. */
+  announce: 'before' | 'during' | 'never';
+  /** Whether a subagent speaks at all this turn. Default true. */
+  subagent?: boolean;
+  /** The tool needs approval, which the harness's `onHeld` gives. */
+  approval?: boolean;
+}
+
+async function runChildCall(opts: ChildCallOptions): Promise<{
   items: string;
   events: Captured[];
+  held: HeldCall[];
 }> {
   {
+    const held: HeldCall[] = [];
     const harness = new AgentHarness({
       name: 'h',
       params: {},
+      onHeld: (call) => {
+        held.push(call);
+        return {
+          action: 'allow',
+        };
+      },
     });
     const ctx = harness.createContext();
     const events: Captured[] = [];
@@ -342,8 +360,19 @@ async function runChildCall(announced: boolean): Promise<{
         text: z.string(),
       }),
       output: z.string(),
+      needsApproval: opts.approval === true,
       execute: async ({ text }) => text,
     });
+    const announceCall = (): void => {
+      connectHost?.onChildUpdate?.(
+        own('c1', {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'child-call',
+          title: 'mcp__noetic__echo',
+        }),
+      );
+    };
+    let connectHost: AcpClientHost | undefined;
     const agent: AcpAgent = {
       specificationVersion: 'acp-v1',
       agentId: 'fake',
@@ -356,19 +385,15 @@ async function runChildCall(announced: boolean): Promise<{
             if (!tools) {
               throw new Error('no tools served');
             }
-            connect.host.onChildUpdate?.(announce('c1'));
-            if (announced) {
-              connect.host.onChildUpdate?.(
-                own('c1', {
-                  sessionUpdate: 'tool_call',
-                  toolCallId: 'child-call',
-                  title: 'mcp__noetic__echo',
-                }),
-              );
-            } else {
+            connectHost = connect.host;
+            if (opts.subagent !== false) {
+              connect.host.onChildUpdate?.(announce('c1'));
               connect.host.onChildUpdate?.(work('c1'));
             }
-            await tools.call({
+            if (opts.announce === 'before') {
+              announceCall();
+            }
+            const calling = tools.call({
               name: 'echo',
               args: {
                 text: 'from the child',
@@ -376,6 +401,11 @@ async function runChildCall(announced: boolean): Promise<{
               agentCallId: 'child-call',
               signal: new AbortController().signal,
             });
+            if (opts.announce === 'during') {
+              await new Promise((resolve) => setTimeout(resolve, 5));
+              announceCall();
+            }
+            await calling;
             return {
               stopReason: 'end_turn',
               items: [
@@ -419,13 +449,16 @@ async function runChildCall(announced: boolean): Promise<{
     return {
       items: JSON.stringify(ctx.itemLog.items),
       events,
+      held,
     };
   }
 }
 
 describe("a subagent's bridged tool call", () => {
   it("is its nested agent's: scoped events, one lifecycle, never in the step's items", async () => {
-    const { items, events } = await runChildCall(true);
+    const { items, events } = await runChildCall({
+      announce: 'before',
+    });
     expect(items).not.toContain('from the child');
     const appended = events.filter((e) => e.type.endsWith(':item_appended'));
     expect(appended.length).toBeGreaterThan(0);
@@ -439,8 +472,51 @@ describe("a subagent's bridged tool call", () => {
     ]);
   });
 
+  it('a subagent call announced while it is already running is still its own', async () => {
+    const { items, events } = await runChildCall({
+      announce: 'during',
+    });
+    expect(items).not.toContain('from the child');
+    const appended = events.filter((e) => e.type.endsWith(':item_appended'));
+    expect(appended.length).toBeGreaterThan(0);
+    expect(appended.every((e) => e.scope !== undefined)).toBe(true);
+  });
+
+  it('with no subagent this turn, an unannounced call is the step’s, at once', async () => {
+    const started = Date.now();
+    const { items } = await runChildCall({
+      announce: 'never',
+      subagent: false,
+    });
+    expect(items).toContain('from the child');
+    expect(Date.now() - started).toBeLessThan(1e3);
+  });
+
+  it("a subagent's call that needs approval is held as the run's, naming the subagent", async () => {
+    const { held, events } = await runChildCall({
+      announce: 'before',
+      approval: true,
+    });
+    expect(
+      held.map((call) => [
+        call.reason,
+        call.scope?.title,
+      ]),
+    ).toEqual([
+      [
+        'approval',
+        'Explore',
+      ],
+    ]);
+    const heldEvents = events.filter((e) => e.type.endsWith(':tool_call_held'));
+    expect(heldEvents.length).toBe(1);
+    expect(heldEvents[0]?.scope).toBeUndefined();
+  });
+
   it('a call nobody announced while subagents are about joins neither the items nor the item stream', async () => {
-    const { items, events } = await runChildCall(false);
+    const { items, events } = await runChildCall({
+      announce: 'never',
+    });
     expect(items).not.toContain('from the child');
     const appended = events.filter((e) => e.type.endsWith(':item_appended'));
     expect(JSON.stringify(appended)).not.toContain('from the child');

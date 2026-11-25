@@ -360,10 +360,38 @@ export class HeldCalls {
       existing.argsHash === record.argsHash &&
       existing.reason === record.reason;
     if (same) {
-      return existing;
+      return await this.restated(executionId, existing, record);
     }
     await this.storage.set(`${heldPrefix(executionId)}${record.callId}`, record);
     return record;
+  }
+
+  /**
+   * The same question asked again by another host: its answer and id stay, but
+   * who it names as asking is this host's (a nested agent's scope is per host).
+   */
+  private async restated(
+    executionId: string,
+    existing: HeldRecord,
+    asked: HeldRecord,
+  ): Promise<HeldRecord> {
+    if (
+      existing.resolution !== undefined ||
+      JSON.stringify(existing.scope) === JSON.stringify(asked.scope)
+    ) {
+      return existing;
+    }
+    const { scope: _old, ...rest } = existing;
+    const restated: HeldRecord = {
+      ...rest,
+      ...(asked.scope === undefined
+        ? {}
+        : {
+            scope: asked.scope,
+          }),
+    };
+    await this.storage.set(`${heldPrefix(executionId)}${existing.callId}`, restated);
+    return restated;
   }
 
   /** Drop every held call and intent of an execution that is over or was abandoned. */
