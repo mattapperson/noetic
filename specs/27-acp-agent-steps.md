@@ -253,7 +253,7 @@ with no host is stopped after `detachedTimeoutMs` only when one is set; by
 default (`0`) there is no limit, and it runs until a host reattaches and closes
 it, or it exits. Under `'stop'` the keeper stops the agent's whole tree as soon as the
 host's connection drops, whatever ended the host. Closing the connection
-(`close()`, a step's `keepAlive: 'step'` ending, `harness.closeAcpSessions()`)
+(`close()`, a step's `keepAlive: 'step'` ending, `harness.close()`)
 always stops it. The agent exiting stops the keeper.
 
 **Reattaching.** A connection that can be reattached carries
@@ -463,9 +463,23 @@ hostile one, which needs a real sandbox behind a transport.
 
 ### Observing client-side activity
 
-Every `fs/*` and `terminal/*` call an agent makes is reported to the host as an
-{@link AcpClientActivity} and emitted as an `acp_client_activity` framework
-event, whether it was served or refused. This is an *observed* record rather
+Every `fs/*` and `terminal/*` call an agent makes is reported to the runtime as
+an {@link AcpClientActivity} and emitted as the generic `workspace_access`
+framework event — what a step did through the host's file and shell adapters —
+whether it was served or refused:
+
+| ACP method | `operation` |
+|---|---|
+| `fs/read_text_file` | `read_file` |
+| `fs/write_text_file` | `write_file` |
+| `terminal/create` | `run_command` |
+| `terminal/output` | `read_output` |
+| `terminal/wait_for_exit` | `wait` |
+| `terminal/kill` | `kill` |
+| `terminal/release` | `release` |
+
+Data: `{ stepId, operation, path?, command?, terminalId?, allowed, reason? }`.
+A subagent's calls are its nested agent's, scoped (spec 08 § Nested agents). This is an *observed* record rather
 than the agent's self-report: a `tool_call` update says what the agent claims it
 did, while this says what it actually asked the client to do — and a refusal is
 the more interesting record of the two, being the moment an agent reached for
@@ -758,7 +772,7 @@ names the scope, and it defaults to closing with the step:
 |---|---|
 | `'step'` (default) | closed when the step finishes |
 | `'run'` | kept for the rest of the root run, then closed by the harness |
-| `'harness'` | kept until the caller runs `harness.closeAcpSessions()` or `harness.close()` — nothing closes it for you |
+| `'harness'` | kept until the caller runs `harness.close()` — nothing closes it for you |
 
 `session.reuse` shares a kept connection under an id, so later steps take their
 turns against the same agent. It requires `keepAlive: 'run'` or `'harness'`: a
@@ -771,7 +785,7 @@ silently upgrading the scope on the step's behalf.
 session: { reuse: 'bugfix', keepAlive: 'run' }
 
 // Kept past the run — a warm agent across several harness.execute() calls.
-// The caller owns it: `await harness.closeAcpSessions()` when done.
+// The caller owns it: `await harness.close()` when done.
 session: { reuse: 'assistant', keepAlive: 'harness' }
 ```
 
@@ -870,44 +884,48 @@ step's. The `AcpEventBridge` translates each variant into the same
 | `agent_message_chunk` | `response.output_item.added` (message, once) + `response.output_text.delta` |
 | `agent_thought_chunk` | `response.reasoning.delta` |
 | `tool_call` | `response.output_item.added` (function_call) + `response.function_call_arguments.delta`/`.done` + `response.output_item.done` |
-| every other variant — `user_message_chunk`, `tool_call_update`, `plan`, `available_commands_update`, `current_mode_update`, `config_option_update`, `session_info_update`, `usage_update`, … | `acp.<sessionUpdate>` (full stream only) |
+| `tool_call` of the agent's own tool | also the framework `tool_call_started` `{ name, callId }`, as the `callModel` tool loop emits it |
+| `tool_call` / `tool_call_update` that reports the call `completed` or `failed` | the framework `tool_call_completed` `{ name, callId, error }`, once per call |
+| every other variant — `user_message_chunk`, `plan`, `available_commands_update`, `current_mode_update`, `config_option_update`, `session_info_update`, `usage_update`, … | nothing: session state the runtime tracks on the live session, not output |
 
 As a result `getTextStream()`, `getReasoningStream()`, `getItemStream()`, and
-`getFullStream()` all surface ACP output. Every notification is *also* emitted
-raw as an `acp_event` framework event (`{ stepId, agentId, sessionId, update }`)
-for protocol-native consumers.
+`getFullStream()` all surface ACP output, and a host sees exactly the events a
+`callModel` step emits: nothing on the stream names the protocol. A call to
+one of the step's own Noetic tools is reported once, by the tool bridge
+(spec 38), never again from the agent's `tool_call`.
 
 The client accepts every `session/update` variant of the current protocol, so
 normal traffic from current bridges never draws a `-32602 Invalid params`
 answer. A variant newer than the protocol library is taken off the stream
-before the library sees it and handed to the host as it is, so it reaches the
-`acp_event` stream and `acp.<sessionUpdate>` rather than being rejected.
-Variants with no transcript content still reach the host and the event
-surface; the turn accumulator ignores them, except the draft plan updates: a
-`plan_update` with `items` replaces the plan snapshot and `plan_removed` clears
-it.
+before the library sees it and handed to the runtime as it is, rather than
+being rejected; it emits nothing. The turn accumulator ignores variants with
+no transcript content, except the draft plan updates: a `plan_update` with
+`items` replaces the plan snapshot and `plan_removed` clears it.
 
-**Usage.** Two different numbers, kept apart:
+**Turn metadata.** A finished turn records on `ctx.lastStepMeta` the same
+fields a `callModel` step does:
 
-- `usage_update` (`{ used, size }`, e.g. from codex-acp) is the session's
-  context-window occupancy, not billed tokens. It reaches consumers raw (the
-  `acp_event` and `acp.usage_update`) and never becomes `TokenUsage`, cost, or
-  `ctx.tokens`.
-- The `usage` a `session/prompt` answer reports is kept verbatim on
-  `AcpTurnResult.reportedUsage` and on the turn's `response.completed` event as
-  `reportedUsage`. It is not folded into `AcpTurnResult.usage` either, because
-  an agent may report session totals rather than the turn's delta;
-  `AcpTurnResult.usage` stays the billed delta an adapter supplies.
+- `stopReason` — why the agent stopped (`end_turn`, `max_tokens`,
+  `max_turn_requests`, `refusal`, `cancelled`). A token or turn cap returns
+  normally; this is how a caller tells a truncated turn from a complete one.
+- `usage` — the turn's tokens as `RoundUsage`, charged to the run's token and
+  cost totals like a model call's. An adapter that supplies the turn's usage
+  (`AcpTurnResult.usage`) wins; otherwise the `usage` the `session/prompt`
+  answer reports is the turn's: its input and output tokens, cache reads as
+  `cachedTokens` and cache writes as `cacheWriteTokens`.
+- `model` — the model the turn ran with: the current value of the session's
+  `model` config option, when the agent advertises one.
+
+`usage_update` (`{ used, size }`) is the session's context-window occupancy,
+not billed tokens, and never becomes usage or cost. The turn's
+`response.completed` carries only its `stopReason`.
 
 **Replay is not output.** While `session/load` runs — for an explicit
 `session.load` or for the resume of an earlier attempt's session — every update
-the agent sends is its loaded history. Each reaches the current step's raw
-`acp_event` stream with `replay: true` and the same step, agent and session
-attribution; none is translated into text, reasoning, item or function-call
-events, and none enters the turn's items. Normal forwarding resumes before mode
+the agent sends is its loaded history. None of it reaches the event stream or
+the turn's items. Normal forwarding resumes before mode
 and model selection and the prompt, so even a follow-up that then fails
-selecting its mode shows none of the old answer as new output. Raw-event
-consumers that want the history filter on `replay`.
+selecting its mode shows none of the old answer as new output.
 
 **A turn always closes its bracket.** The bridge opens every turn with
 `response.created` and closes it with `response.completed` — carrying the stop
@@ -1003,22 +1021,14 @@ Because reaching a person means reaching a channel, `onPermissionRequest`
 receives `(request, ctx, info)` — the executing context, plus which agent and
 step are asking.
 
-### Inspecting and steering what is live
+### Interrupting and releasing live agents
 
-The harness exposes the connections it holds, so a UI can show running
-sub-agents and act on them:
-
-```ts
-harness.listAcpSessions();       // key, agentId, sessionId, mode, commands, keepAlive
-harness.getAcpSession(key);      // the live connection + session
-await harness.cancelAcpSession(key);  // session/cancel; connection stays open
-await harness.closeAcpSessions();     // release everything held
-```
-
-This surface is deliberately read-and-interrupt only. Turns are driven by
-steps, so nothing here can start work behind the runtime's back — a turn run
-outside a step would bypass the item log, usage accounting, and the event
-bridge. Follow-up prompts go through a step with the same `session.reuse` key.
+A host never handles an agent's connection. A running turn is interrupted like
+any other, with `harness.abort()` (the step's agent is sent `session/cancel`
+and the step ends `cancelled`), and `harness.close()` releases every
+connection the harness still holds, whatever its keep-alive scope. Follow-up
+prompts go through a step with the same `session.reuse` key, so every turn
+lands in the item log, usage accounting, and event stream.
 
 ## JSON workflow nodes
 

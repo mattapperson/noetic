@@ -196,7 +196,6 @@ The translation is the client direction's `AcpEventBridge` table (spec 27,
 | `tool_call_started` (framework, carries `callId`) | `tool_call` — `toolCallId` = `callId`, presentation from the tool's `acp` declaration (below), status `pending` while gated, `in_progress` once running |
 | `tool_call_completed` | `tool_call_update` — `completed` with the output as content, or `failed` carrying the error |
 | plan-layer state changes | `plan` |
-| `acp.*` passthrough events from a nested `step.acpAgent` | re-emitted as `tool_call` / `tool_call_update` under the delegating call (below) |
 
 Notifications the harness has no source for are simply never sent — ACP treats
 absence as unsupported.
@@ -434,12 +433,12 @@ registering their id, so the finalized copy is the one persisted. Without
 A served harness whose graph contains `step.acpAgent` (or `acpAgentTool()`) is
 an ACP **proxy**: the client drives Noetic, and Noetic drives Claude Code,
 Codex, or another served Noetic harness underneath. The client direction
-already emits every nested notification as `acp.*` passthrough events; the
-server forwards the sub-agent's `tool_call` / `tool_call_update` / `plan`
-traffic to the editor, shape-validated before it can reach the wire (a
-malformed nested update is dropped, never sent) and with its tool-call ids
-namespaced under a `sub:` prefix so they can never collide with a first-party
-call's id. The editor watches file edits happen three layers down. Permission
+reports the sub-agent's text, reasoning and tool calls as the same events a
+`callModel` step emits (spec 27 § Output → harness events), so the server
+forwards them through the table above with nothing agent-specific: the
+editor watches the sub-agent's tool calls as `tool_call` / `tool_call_update`
+like any other. The sub-agent's own subagents are nested agents, scoped, and
+stay off the wire like every scoped event. Permission
 requests raised by the *sub-agent* are answered by the step's own three-tier
 resolver as spec 27 defines; routing them onward to a person is
 `askUserForPermission()` on the step plus the full harness's spec-27

@@ -835,6 +835,7 @@ window for the same agent — and its child's output is the run's output, as a
 | `{name}:agent_started` | A nested agent started (§ Nested agents). Scoped. Data: `{ stepId, title?, description? }` |
 | `{name}:agent_status` | A nested agent reported its status. Scoped. Data: `{ stepId, status, stopReason? }` |
 | `{name}:agent_completed` | The turn that ran a nested agent ended. Scoped. Data: `{ stepId, status }` |
+| `{name}:workspace_access` | A step read or wrote a file or ran a command through the host's fs or shell adapters on an agent's behalf — served or refused (spec 27 § Observing client-side activity). Data: `{ stepId, operation: 'read_file' \| 'write_file' \| 'run_command' \| 'read_output' \| 'wait' \| 'kill' \| 'release', path?, command?, terminalId?, allowed, reason? }` |
 | `{name}:drain_started` | Emitted when a graceful stop begins (see Graceful Stop). Data: `{ executionId, deadline, inFlight }` |
 | `{name}:drain_finished` | Emitted when a graceful stop ends, just before the cancel. Data: `{ executionId, reason, durationMs, finished, cutOff }` |
 
