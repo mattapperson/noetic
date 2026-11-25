@@ -2186,7 +2186,7 @@ new AgentHarness({
   steerWhileHeld: 'defer', // default 'apply': a steer skips held calls; 'defer' waits behind them
 });
 // signal aborts when settled another way; signal.reason: HeldCallSettled
-// HeldCallSettled: { callId, name, argsHash, reason, by: 'answer' | 'due' | 'skipped' | 'cancelled' | 'elsewhere' }
+// HeldCallSettled: { callId, name, argsHash, reason, by: 'answer' | 'due' | 'skipped' | 'cancelled' } // settled by another harness → 'answer'
 readHeldCallEvent(event, agentName?): { type: 'held', call: HeldCall } | { type: 'settled', settled: HeldCallSettled } | undefined
 ```
 

@@ -46,7 +46,6 @@ export const HeldCallSettledSchema = z.object({
     'due',
     'skipped',
     'cancelled',
-    'elsewhere',
   ]),
   heldAs: z.string().optional(),
 });

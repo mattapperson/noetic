@@ -140,21 +140,20 @@ export type HeldResolution =
  * @public How a held call stopped being held (spec 08 § Held tool calls). Carried by the
  * `tool_call_settled` event, and as `signal.reason` of the `onHeld` handler's signal.
  *
- * - `answer`: a decision settled it, from `execute()`, from another harness over the
- *   same storage, or from the `onHeld` handler itself.
+ * - `answer`: a decision settled it, from `execute()`, from the `onHeld` handler
+ *   itself, or from another harness over the same storage. A call another harness
+ *   settled and finished its turn on is reported as answered, however it ended.
  * - `due`: its deadline passed with `onDue: 'deny'`.
  * - `skipped`: a steer applied at the `held` steer point skipped it.
  * - `cancelled`: its turn was aborted, interrupted or abandoned, the agent that asked
  *   stopped waiting, or the harness closed.
- * - `elsewhere`: another harness over the same storage settled it and went on with
- *   the turn, and this one cannot tell how.
  */
 export interface HeldCallSettled {
   readonly callId: string;
   readonly name: string;
   readonly argsHash: string;
   readonly reason: HeldCall['reason'];
-  readonly by: 'answer' | 'due' | 'skipped' | 'cancelled' | 'elsewhere';
+  readonly by: 'answer' | 'due' | 'skipped' | 'cancelled';
 }
 
 /** @public What the `onHeld` handler is given beside the call. */

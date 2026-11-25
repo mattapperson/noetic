@@ -209,27 +209,16 @@ function settledByOf(record: HeldRecord | undefined, now: number): HeldCallSettl
 }
 
 /**
- * How a watched call was settled, as a sweep reads its record: answered, gone (settled
- * by another harness, in a way this one cannot know), replaced by another question,
- * or still the question shown (`undefined`).
+ * Whether a watched call is still the question shown: held, unanswered, for the same
+ * arguments and reason. Anything else means another harness settled it.
  */
-function sweptBy(
-  record: HeldRecord | undefined,
-  held: HeldCall,
-): HeldCallSettled['by'] | undefined {
-  if (record === undefined) {
-    return 'elsewhere';
-  }
-  if (record.resolution !== undefined) {
-    return 'answer';
-  }
-  if (record.argsHash !== held.argsHash) {
-    return 'elsewhere';
-  }
-  if (record.reason !== held.reason) {
-    return 'answer';
-  }
-  return undefined;
+function stillShown(record: HeldRecord | undefined, held: HeldCall): boolean {
+  return (
+    record !== undefined &&
+    record.resolution === undefined &&
+    record.argsHash === held.argsHash &&
+    record.reason === held.reason
+  );
 }
 
 /** A held record as hosts see it. */
@@ -451,9 +440,9 @@ export class HeldCalls {
       if (this.watches.get(key) !== watch || this.closing.has(key)) {
         continue;
       }
-      const by = sweptBy(record, watch.held);
-      if (by !== undefined) {
-        this.settleWatch(key, by);
+      // Settled by another harness, which cannot say how: reported as answered.
+      if (!stillShown(record, watch.held)) {
+        this.settleWatch(key, 'answer');
       }
     }
   }

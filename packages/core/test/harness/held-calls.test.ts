@@ -1558,7 +1558,7 @@ describe('onHeld, more questions and more places', () => {
     expect((await b.getAgentResponse(THREAD)).text).toBe('order A1 found | refunded 420');
     await until(() => card.held.signal.aborted, 'the sweep');
     expect(card.held.signal.reason).toMatchObject({
-      by: expect.stringMatching(/^(answer|elsewhere)$/),
+      by: 'answer',
     });
     await a.close();
     await b.close();

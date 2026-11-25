@@ -223,7 +223,7 @@ const harness = new AgentHarness({
 });
 ```
 
-- `signal.reason` says how the call was settled: `answer` (a decision, from anywhere), `due` (its deadline), `skipped` (a steer), `cancelled` (the turn was aborted or interrupted, the agent gave up, or the harness closed), or `elsewhere` (another harness over the same storage settled it and finished the turn; seen within two seconds). An answer returned after that is dropped, and nothing throws.
+- `signal.reason` says how the call was settled: `answer` (a decision, from anywhere; also a call another harness over the same storage settled and finished the turn on, however it ended, seen within two seconds), `due` (its deadline), `skipped` (a steer), or `cancelled` (the turn was aborted or interrupted, the agent gave up, or the harness closed). An answer returned after that is dropped, and nothing throws.
 - The harness never waits on the handler: the call waits on its record as it would for any answer. A handler that throws is logged, and the call stays held.
 - A handler lives in its process. After a restart, list what is still held with `pending()` and answer it with `execute()`.
 
