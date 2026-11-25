@@ -62,18 +62,12 @@ export function storageTable(
   const within = scoped ? 'scope = ? AND ' : '';
   return {
     columns: `PRAGMA table_info(${table})`,
-    checkShape: (rows) => {
-      const hasScope = rows.some(
-        (row) => typeof row === 'object' && row !== null && 'name' in row && row.name === 'scope',
-      );
-      if (hasScope !== scoped) {
-        throw new Error(
-          scoped
-            ? `${factory}: table "${table}" has no scope column, so a scope cannot keep its rows apart. Use a table of its own.`
-            : `${factory}: table "${table}" is scoped. Give this adapter a scope too: without one it would read and write every scope's rows.`,
-        );
-      }
-    },
+    checkShape: (rows) =>
+      checkShape(rows, {
+        scoped,
+        table,
+        factory,
+      }),
     create: scoped
       ? `CREATE TABLE IF NOT EXISTS ${table} (scope TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (scope, key))`
       : `CREATE TABLE IF NOT EXISTS ${table} (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
@@ -96,6 +90,32 @@ export function storageTable(
         ]
       : [],
   };
+}
+
+/** Throw unless a table whose columns are `rows` has a scope column exactly when `scoped`. */
+function checkShape(
+  rows: unknown[],
+  {
+    scoped,
+    table,
+    factory,
+  }: {
+    scoped: boolean;
+    table: string;
+    factory: string;
+  },
+): void {
+  const hasScope = rows.some(
+    (row) => typeof row === 'object' && row !== null && 'name' in row && row.name === 'scope',
+  );
+  if (hasScope === scoped) {
+    return;
+  }
+  throw new Error(
+    scoped
+      ? `${factory}: table "${table}" has no scope column, so a scope cannot keep its rows apart. Use a table of its own.`
+      : `${factory}: table "${table}" is scoped. Give this adapter a scope too: without one it would read and write every scope's rows.`,
+  );
 }
 
 /** @internal `keys` without repeats, in groups one statement can bind. */
