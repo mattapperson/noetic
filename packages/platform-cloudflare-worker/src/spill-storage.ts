@@ -121,6 +121,239 @@ function checkedMaxBytes(maxBytes: number | undefined): number {
 
 //#region Factory
 
+/** The spilling storage `spillStorage` makes. */
+class Spill {
+  private readonly storage: StorageAdapter;
+  private readonly blobs: BlobStoreLike;
+  private readonly maxBytes: number;
+  private readonly prefix: string;
+  private readonly keyPartBytes: number;
+  /** Object key prefixes whose pointers are followed. */
+  private readonly followed: string[];
+
+  constructor(storage: StorageAdapter, options: SpillOptions) {
+    this.storage = storage;
+    this.blobs = options.blobs;
+    this.maxBytes = checkedMaxBytes(options.maxBytes);
+    this.prefix = options.prefix ?? DEFAULT_PREFIX;
+    this.keyPartBytes = Math.min(
+      KEY_PART_BYTES,
+      OBJECT_KEY_BYTES - byteLength(this.prefix) - OBJECT_SUFFIX_BYTES,
+    );
+    if (this.keyPartBytes < 1) {
+      throw new Error(
+        `spillStorage: prefix "${this.prefix}" leaves no room in an object key; keep it under ${OBJECT_KEY_BYTES - OBJECT_SUFFIX_BYTES - 1} bytes.`,
+      );
+    }
+    this.followed = [
+      `${this.prefix}/`,
+      ...(options.movedPrefixes ?? []),
+    ];
+  }
+
+  /** The object a row points at, when it is a pointer this this.storage made or was told to follow. */
+  pointee(row: unknown): string | undefined {
+    const object = pointerIn(row);
+    return object !== undefined && this.followed.some((start) => object.startsWith(start))
+      ? object
+      : undefined;
+  }
+
+  /** Where `value` goes: the row itself, or a new object the row points at. */
+  async place(key: string, value: unknown): Promise<Placed> {
+    if (pointerIn(value) !== undefined) {
+      throw new Error(
+        `spillStorage: "${key}" cannot hold a value whose only key is "${POINTER_KEY}": it would be read as a pointer.`,
+      );
+    }
+    const json = JSON.stringify(value);
+    if (json === undefined || byteLength(json) <= this.maxBytes) {
+      return {
+        row: value,
+      };
+    }
+    const object = `${this.prefix}/${cutToBytes(key, this.keyPartBytes)}/${crypto.randomUUID()}`;
+    await this.blobs.put(object, json);
+    return {
+      row: pointerTo(object),
+      object,
+    };
+  }
+
+  /**
+   * Delete the object of a write that did not land. A write that landed but
+   * reported failure left the row pointing at it, and it is kept; so is the object
+   * of a write whose row cannot be read to tell, since deleting one the row points
+   * at would lose the value.
+   */
+  async unplace(key: string, object: string | undefined): Promise<void> {
+    if (object === undefined) {
+      return;
+    }
+    let row: unknown;
+    try {
+      row = await this.storage.get<unknown>(key);
+    } catch {
+      return;
+    }
+    if (this.pointee(row) !== object) {
+      await dropObject(this.blobs, object);
+    }
+  }
+
+  /** The text of the object `row` points at, or undefined when it is no pointer or the object is gone. */
+  async spilledText(row: unknown): Promise<string | undefined> {
+    const object = this.pointee(row);
+    const held = object === undefined ? null : await this.blobs.get(object);
+    return held ? held.text() : undefined;
+  }
+
+  /**
+   * The value a row stands for. A writer may delete an object between this
+   * reader's row read and its object read, so a missing object means the row is
+   * read again. One still missing behind an unchanged pointer is corruption, not
+   * absence: reading it as absent would restart a turn from nothing.
+   */
+  async resolve<T>(key: string, first: unknown): Promise<T | null> {
+    let row = first;
+    for (let attempt = 1; ; attempt++) {
+      const object = this.pointee(row);
+      if (object === undefined) {
+        return typedCast<T>(row);
+      }
+      const text = await this.spilledText(row);
+      if (text !== undefined) {
+        return typedCast<T>(JSON.parse(text));
+      }
+      const again = await this.storage.get<unknown>(key);
+      if (again === null) {
+        return null;
+      }
+      if (this.pointee(again) === object || attempt >= READ_ATTEMPTS) {
+        throw new Error(`spillStorage: "${key}" points at a missing object: ${object}`);
+      }
+      row = again;
+    }
+  }
+
+  /**
+   * The row `prev` is stored as, or undefined when the key holds something else.
+   * A value is matched as it is when it was stored in the row, and by its
+   * object's text when it was spilled, whichever `this.maxBytes` it was written under.
+   */
+  async rowHolding(key: string, prev: unknown): Promise<unknown> {
+    const json = JSON.stringify(prev);
+    if (json === undefined || byteLength(json) <= this.maxBytes) {
+      return prev;
+    }
+    const row = await this.storage.get<unknown>(key);
+    if (this.pointee(row) === undefined) {
+      return prev;
+    }
+    return (await this.spilledText(row)) === json ? row : undefined;
+  }
+
+  async swapRows(key: string, held: unknown, placed: Placed): Promise<boolean> {
+    const inner = this.storage.swap;
+    if (!inner) {
+      throw new Error('spillStorage: the this.storage underneath has no swap.');
+    }
+    try {
+      return await inner.call(this.storage, key, held, placed.row);
+    } catch (error) {
+      // A swap that threw may still have landed, and the row then holds what this
+      // call wrote: calling that a loss would tell a lease's holder it was replaced.
+      let now: unknown;
+      try {
+        now = await this.storage.get<unknown>(key);
+      } catch {
+        // Cannot tell whether it landed: keep the object, and report the failure.
+        throw error;
+      }
+      if (JSON.stringify(now) !== JSON.stringify(placed.row)) {
+        await this.unplace(key, placed.object);
+        throw error;
+      }
+      return true;
+    }
+  }
+
+  async swap<T>(key: string, prev: T | null, next: T): Promise<boolean> {
+    let held: unknown = prev;
+    if (prev !== null) {
+      held = await this.rowHolding(key, prev);
+      if (held === undefined) {
+        return false;
+      }
+    }
+    const placed = await this.place(key, next);
+    let won = await this.swapRows(key, held, placed);
+    if (!won && prev !== null && this.pointee(held) === undefined) {
+      // `prev` was matched as a row value, and the key may hold it spilled instead:
+      // written under a smaller `this.maxBytes`.
+      const row = await this.storage.get<unknown>(key);
+      if ((await this.spilledText(row)) === JSON.stringify(prev)) {
+        held = row;
+        won = await this.swapRows(key, held, placed);
+      }
+    }
+    const stale = won ? this.pointee(held) : placed.object;
+    if (stale !== undefined) {
+      await dropObject(this.blobs, stale);
+    }
+    return won;
+  }
+
+  async get<T>(key: string): Promise<T | null> {
+    const row = await this.storage.get<unknown>(key);
+    return row === null ? null : this.resolve<T>(key, row);
+  }
+
+  async set<T>(key: string, value: T): Promise<void> {
+    const placed = await this.place(key, value);
+    let replaced: string | undefined;
+    try {
+      // Read first: the object this write replaces is deleted once it has landed.
+      replaced = this.pointee(await this.storage.get<unknown>(key));
+      await this.storage.set(key, placed.row);
+    } catch (error) {
+      await this.unplace(key, placed.object);
+      throw error;
+    }
+    if (replaced !== undefined && replaced !== placed.object) {
+      await dropObject(this.blobs, replaced);
+    }
+  }
+
+  async delete(key: string): Promise<void> {
+    const object = this.pointee(await this.storage.get<unknown>(key));
+    await this.storage.delete(key);
+    if (object !== undefined) {
+      await dropObject(this.blobs, object);
+    }
+  }
+
+  /** Read `keys` with `getMany`, the storage underneath's. */
+  async getMany<T>(
+    keys: string[],
+    getMany: NonNullable<StorageAdapter['getMany']>,
+  ): Promise<Map<string, T>> {
+    const rows = await getMany.call(this.storage, keys);
+    const found = new Map<string, T>();
+    await Promise.all(
+      [
+        ...rows,
+      ].map(async ([key, row]) => {
+        const value = await this.resolve<T>(key, row);
+        if (value !== null) {
+          found.set(key, value);
+        }
+      }),
+    );
+    return found;
+  }
+}
+
 /**
  * @public
  * `storage`, with values too large for a row kept in a blob store (spec 25
@@ -138,225 +371,19 @@ function checkedMaxBytes(maxBytes: number | undefined): number {
  * @throws Error when `maxBytes` is not a positive number.
  */
 export function spillStorage(storage: StorageAdapter, options: SpillOptions): StorageAdapter {
-  const { blobs } = options;
-  const maxBytes = checkedMaxBytes(options.maxBytes);
-  const prefix = options.prefix ?? DEFAULT_PREFIX;
-  const keyPartBytes = Math.min(
-    KEY_PART_BYTES,
-    OBJECT_KEY_BYTES - byteLength(prefix) - OBJECT_SUFFIX_BYTES,
-  );
-  if (keyPartBytes < 1) {
-    throw new Error(
-      `spillStorage: prefix "${prefix}" leaves no room in an object key; keep it under ${OBJECT_KEY_BYTES - OBJECT_SUFFIX_BYTES - 1} bytes.`,
-    );
-  }
-  const followed = [
-    `${prefix}/`,
-    ...(options.movedPrefixes ?? []),
-  ];
-
-  /** The object a row points at, when it is a pointer this storage made or was told to follow. */
-  function pointee(row: unknown): string | undefined {
-    const object = pointerIn(row);
-    return object !== undefined && followed.some((start) => object.startsWith(start))
-      ? object
-      : undefined;
-  }
-
-  /** Where `value` goes: the row itself, or a new object the row points at. */
-  async function place(key: string, value: unknown): Promise<Placed> {
-    if (pointerIn(value) !== undefined) {
-      throw new Error(
-        `spillStorage: "${key}" cannot hold a value whose only key is "${POINTER_KEY}": it would be read as a pointer.`,
-      );
-    }
-    const json = JSON.stringify(value);
-    if (json === undefined || byteLength(json) <= maxBytes) {
-      return {
-        row: value,
-      };
-    }
-    const object = `${prefix}/${cutToBytes(key, keyPartBytes)}/${crypto.randomUUID()}`;
-    await blobs.put(object, json);
-    return {
-      row: pointerTo(object),
-      object,
-    };
-  }
-
-  /**
-   * Delete the object of a write that did not land. A write that landed but
-   * reported failure left the row pointing at it, and it is kept; so is the object
-   * of a write whose row cannot be read to tell, since deleting one the row points
-   * at would lose the value.
-   */
-  async function unplace(key: string, object: string | undefined): Promise<void> {
-    if (object === undefined) {
-      return;
-    }
-    let row: unknown;
-    try {
-      row = await storage.get<unknown>(key);
-    } catch {
-      return;
-    }
-    if (pointee(row) !== object) {
-      await dropObject(blobs, object);
-    }
-  }
-
-  /** The text of the object `row` points at, or undefined when it is no pointer or the object is gone. */
-  async function spilledText(row: unknown): Promise<string | undefined> {
-    const object = pointee(row);
-    const held = object === undefined ? null : await blobs.get(object);
-    return held ? held.text() : undefined;
-  }
-
-  /**
-   * The value a row stands for. A writer may delete an object between this
-   * reader's row read and its object read, so a missing object means the row is
-   * read again. One still missing behind an unchanged pointer is corruption, not
-   * absence: reading it as absent would restart a turn from nothing.
-   */
-  async function resolve<T>(key: string, first: unknown): Promise<T | null> {
-    let row = first;
-    for (let attempt = 1; ; attempt++) {
-      const object = pointee(row);
-      if (object === undefined) {
-        return typedCast<T>(row);
-      }
-      const text = await spilledText(row);
-      if (text !== undefined) {
-        return typedCast<T>(JSON.parse(text));
-      }
-      const again = await storage.get<unknown>(key);
-      if (again === null) {
-        return null;
-      }
-      if (pointee(again) === object || attempt >= READ_ATTEMPTS) {
-        throw new Error(`spillStorage: "${key}" points at a missing object: ${object}`);
-      }
-      row = again;
-    }
-  }
-
-  /**
-   * The row `prev` is stored as, or undefined when the key holds something else.
-   * A value is matched as it is when it was stored in the row, and by its
-   * object's text when it was spilled, whichever `maxBytes` it was written under.
-   */
-  async function rowHolding(key: string, prev: unknown): Promise<unknown> {
-    const json = JSON.stringify(prev);
-    if (json === undefined || byteLength(json) <= maxBytes) {
-      return prev;
-    }
-    const row = await storage.get<unknown>(key);
-    if (pointee(row) === undefined) {
-      return prev;
-    }
-    return (await spilledText(row)) === json ? row : undefined;
-  }
-
-  async function swapRows(key: string, held: unknown, placed: Placed): Promise<boolean> {
-    const inner = storage.swap;
-    if (!inner) {
-      throw new Error('spillStorage: the storage underneath has no swap.');
-    }
-    try {
-      return await inner.call(storage, key, held, placed.row);
-    } catch (error) {
-      // A swap that threw may still have landed, and the row then holds what this
-      // call wrote: calling that a loss would tell a lease's holder it was replaced.
-      let now: unknown;
-      try {
-        now = await storage.get<unknown>(key);
-      } catch {
-        // Cannot tell whether it landed: keep the object, and report the failure.
-        throw error;
-      }
-      if (JSON.stringify(now) !== JSON.stringify(placed.row)) {
-        await unplace(key, placed.object);
-        throw error;
-      }
-      return true;
-    }
-  }
-
-  async function swap<T>(key: string, prev: T | null, next: T): Promise<boolean> {
-    let held: unknown = prev;
-    if (prev !== null) {
-      held = await rowHolding(key, prev);
-      if (held === undefined) {
-        return false;
-      }
-    }
-    const placed = await place(key, next);
-    let won = await swapRows(key, held, placed);
-    if (!won && prev !== null && pointee(held) === undefined) {
-      // `prev` was matched as a row value, and the key may hold it spilled instead:
-      // written under a smaller `maxBytes`.
-      const row = await storage.get<unknown>(key);
-      if ((await spilledText(row)) === JSON.stringify(prev)) {
-        held = row;
-        won = await swapRows(key, held, placed);
-      }
-    }
-    const stale = won ? pointee(held) : placed.object;
-    if (stale !== undefined) {
-      await dropObject(blobs, stale);
-    }
-    return won;
-  }
-
+  const spill = new Spill(storage, options);
   const spilling: StorageAdapter = {
-    async get<T>(key: string): Promise<T | null> {
-      const row = await storage.get<unknown>(key);
-      return row === null ? null : resolve<T>(key, row);
-    },
-    async set<T>(key: string, value: T): Promise<void> {
-      const placed = await place(key, value);
-      let replaced: string | undefined;
-      try {
-        // Read first: the object this write replaces is deleted once it has landed.
-        replaced = pointee(await storage.get<unknown>(key));
-        await storage.set(key, placed.row);
-      } catch (error) {
-        await unplace(key, placed.object);
-        throw error;
-      }
-      if (replaced !== undefined && replaced !== placed.object) {
-        await dropObject(blobs, replaced);
-      }
-    },
-    async delete(key: string): Promise<void> {
-      const object = pointee(await storage.get<unknown>(key));
-      await storage.delete(key);
-      if (object !== undefined) {
-        await dropObject(blobs, object);
-      }
-    },
-    list: (prefixOfKeys: string) => storage.list(prefixOfKeys),
+    get: (key) => spill.get(key),
+    set: (key, value) => spill.set(key, value),
+    delete: (key) => spill.delete(key),
+    list: (prefixOfKeys) => storage.list(prefixOfKeys),
   };
   const getMany = storage.getMany;
   if (getMany) {
-    spilling.getMany = async <T>(keys: string[]): Promise<Map<string, T>> => {
-      const rows = await getMany.call(storage, keys);
-      const found = new Map<string, T>();
-      await Promise.all(
-        [
-          ...rows,
-        ].map(async ([key, row]) => {
-          const value = await resolve<T>(key, row);
-          if (value !== null) {
-            found.set(key, value);
-          }
-        }),
-      );
-      return found;
-    };
+    spilling.getMany = (keys) => spill.getMany(keys, getMany);
   }
   if (storage.swap) {
-    spilling.swap = swap;
+    spilling.swap = (key, prev, next) => spill.swap(key, prev, next);
   }
   return spilling;
 }
