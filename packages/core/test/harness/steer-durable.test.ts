@@ -278,6 +278,66 @@ describe('durable steers', () => {
     expect((await createSessionStore(storage).load('t'))?.steers ?? []).toEqual([]);
   });
 
+  it('replays an applied steer without reporting it as dropped', async () => {
+    const server = startServer();
+    server.dropAt.add(3);
+    const storage = createInMemoryStorage();
+    await runCutOff(storage, server);
+
+    const resumed = await resume(storage, server, {
+      keptSteers: 'drop',
+    });
+
+    expect(resumed.text).toBe('done');
+    expect(steerCount(server, 3)).toBe(1);
+    expect(droppedSteers(resumed.events)).toEqual([]);
+  });
+
+  it('keeps the steer and reports no drop when the start write fails without a lease', async () => {
+    const server = startServer();
+    server.dropAt.add(2);
+    const storage = createInMemoryStorage();
+    await runCutOff(storage, server);
+
+    const next = harnessOver(
+      {
+        ...storage,
+        set: async (key, value) => {
+          if (key === 'session:t') {
+            throw new Error('session write failed');
+          }
+          await storage.set(key, value);
+        },
+      },
+      server,
+      false,
+    );
+    const events: StreamEvent[] = [];
+    const watching = collectUntil(
+      next.getFullStream({
+        threadId: 't',
+      }),
+      'durable-steer:turn_aborted',
+      events,
+    );
+    await next.execute('go', {
+      threadId: 't',
+      messageId: 'm-1',
+      keptSteers: 'drop',
+    });
+
+    await expect(
+      next.getAgentResponse({
+        threadId: 't',
+      }),
+    ).rejects.toThrow();
+    await watching;
+    expect(droppedSteers(events)).toEqual([]);
+    expect(server.rounds).toHaveLength(2);
+    expect((await resume(storage, server)).text).toBe('done');
+    expect(steerCount(server, 2)).toBe(1);
+  });
+
   it("keptSteers: 'apply' is the default", async () => {
     const server = startServer();
     server.dropAt.add(2);

@@ -198,6 +198,7 @@ import type {
 import { resolveCheckpointStore, resolveEnvironmentAdapters } from './harness-options';
 import { createHarnessSpan, recordChannelWarning, resolveTraceExporter } from './harness-tracing';
 import { LlmGateway } from './llm-client';
+import { savedItemIds } from './model-rounds';
 import { buildItemSchemaRegistry } from './model-schema';
 import { DEFAULT_TASK_POLL_MS, DEFAULT_WAKE_DEBOUNCE_MS, ParkWatchers } from './park-watchers';
 import type { ReadDecision } from './read-decision';
@@ -205,6 +206,7 @@ import { readDecision } from './read-decision';
 import { recordedToolCalls } from './recorded-tool-calls';
 import type { SpendClient } from './spend';
 import { Spend } from './spend';
+import { steerInConversation, steerItems } from './steer-inbox';
 import { ThreadRecord } from './thread-record';
 import { TurnCuts } from './turn-cuts';
 
@@ -1420,23 +1422,46 @@ export class AgentHarness<
         graph,
       );
       this.setTurnTools(ctx, perTurnOptions.tools ?? [], connectionTools);
-      const dropped = record
-        ? await this.takeKeptSteers(session, record, messageIds, perTurnOptions.keptSteers)
-        : [];
+      const { removed, kept } = record
+        ? await this.splitKeptMessages(session, record, messageIds, perTurnOptions.keptSteers)
+        : {
+            removed: [],
+            kept: [],
+          };
       // A stuck turn the host chose to go on with may discard what no longer matches.
       const accept = (await record?.turn())?.accept;
       if (accept && ctx instanceof ContextImpl) {
         ctx.ledger?.acceptVersionLoss(typeof accept === 'string' ? accept : undefined);
       }
-      await record?.begin(ctx, messageIds, dropped);
+      try {
+        await record?.begin(
+          ctx,
+          messageIds,
+          removed.map((steer) => steer.id),
+        );
+      } catch (error) {
+        await this.#connections.release(ctx.id);
+        throw error;
+      }
+      for (const message of kept) {
+        session.keptOptions.delete(message.id);
+        if (!session.runner.queue.peekAll().some((queued) => queued.id === message.id)) {
+          session.runner.queue.enqueue(message);
+        }
+      }
+      const saved =
+        removed.length > 0 && ctx instanceof ContextImpl ? savedItemIds(ctx) : undefined;
       // Told only once the record no longer holds them.
-      for (const messageId of dropped) {
+      for (const steer of removed) {
+        if (saved && steerInConversation(steerItems(steer), (id) => saved.has(id))) {
+          continue;
+        }
         emitFrameworkEvent({
           broadcaster: session.runner.broadcaster,
           agentName: this.config.name,
           eventType: 'steer_dropped',
           data: {
-            messageId,
+            messageId: steer.id,
             reason: 'kept_steers',
           },
         });
@@ -1776,18 +1801,19 @@ export class AgentHarness<
   }
 
   /**
-   * Put the steers the thread's record kept, and this process does not already
-   * hold, back in the queue (spec 23a § Sessions). With `keptSteers: 'drop'` they
-   * are not queued: their ids come back, for the turn's `begin` to remove from
-   * the record. Ones already in the conversation are skipped when offered.
+   * Split stored messages between the queue and the steers the start write clears.
    */
-  private async takeKeptSteers(
+  private async splitKeptMessages(
     session: Session,
     record: ThreadRecord,
     messageIds: ReadonlyArray<string>,
     keptSteers: KeptSteers | undefined,
-  ): Promise<string[]> {
-    const dropped: string[] = [];
+  ): Promise<{
+    removed: QueuedMessage[];
+    kept: QueuedMessage[];
+  }> {
+    const removed: QueuedMessage[] = [];
+    const kept: QueuedMessage[] = [];
     for (const steer of await record.steers()) {
       const queued = session.runner.queue.peekAll().some((m) => m.id === steer.id);
       if (queued || messageIds.includes(steer.id)) {
@@ -1795,18 +1821,20 @@ export class AgentHarness<
       }
       // With the options it was sent with, when this process is the one it was sent to.
       const options = session.keptOptions.get(steer.id);
-      session.keptOptions.delete(steer.id);
       // A message this process kept for a parked turn still has its sender here.
-      if (keptSteers === 'drop' && options === undefined) {
-        dropped.push(steer.id);
+      if (keptSteers === 'drop' && options === undefined && isSteer(steer)) {
+        removed.push(steer);
         continue;
       }
-      session.runner.queue.enqueue({
+      kept.push({
         ...steer,
         options: options ?? steer.options,
       });
     }
-    return dropped;
+    return {
+      removed,
+      kept,
+    };
   }
 
   /**
@@ -1817,6 +1845,7 @@ export class AgentHarness<
    * @public
    */
   async getStoredThread(threadId: string): Promise<StoredThread | undefined> {
+    await this.forgetting.get(threadId);
     // Through the session's own record, when there is one: a seed it queued lands first.
     const record = await (
       this.sessions.get(threadId)?.record ?? this.threadRecord(threadId)

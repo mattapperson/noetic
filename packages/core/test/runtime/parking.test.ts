@@ -450,7 +450,7 @@ describe('a parked turn', () => {
         .map((event) => ('data' in event ? event.data : undefined));
     }
 
-    it('drops a message another process kept for the turn', async () => {
+    it('delivers a next-turn message another process kept', async () => {
       const fixture = fixtureOn(SWAP);
       await (await parkWithMessage(fixture, model('a'))).close();
 
@@ -472,19 +472,17 @@ describe('a parked turn', () => {
       ).toEqual([
         't',
       ]);
-      expect((await harness.getAgentResponse(scope)).text).toBe('b-1');
+      assert((await harness.getAgentResponse(scope)).parked);
       await watching;
 
-      expect(droppedIn(events)).toEqual([
-        {
-          messageId: 'm-2',
-          reason: 'kept_steers',
-        },
-      ]);
+      expect(droppedIn(events)).toEqual([]);
       await harness.waitForIdle();
-      // Only the answer was asked for: the dropped message started no turn.
-      expect(second.calls).toBe(1);
-      expect((await harness.getStoredThread('t'))?.turn).toBeUndefined();
+      expect(second.calls).toBe(2);
+      const stored = await harness.getStoredThread('t');
+      assert(stored?.turn);
+      expect(stored.turn.messageIds).toEqual([
+        'm-2',
+      ]);
       await harness.close();
     });
 

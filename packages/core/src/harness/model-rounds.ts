@@ -139,6 +139,29 @@ const chargedRounds = new WeakMap<StepLedger, Set<string>>();
 
 //#region Public API
 
+/** Item ids saved in the context, completed steps and model rounds. */
+export function savedItemIds(ctx: ContextImpl): Set<string> {
+  const ids = new Set<string>();
+  const add = (items: ReadonlyArray<unknown>): void => {
+    for (const item of items) {
+      if (item && typeof item === 'object' && 'id' in item && typeof item.id === 'string') {
+        ids.add(item.id);
+      }
+    }
+  };
+  add(ctx.itemLog.items);
+  for (const entry of ctx.ledger?.savedEntries() ?? []) {
+    add(entry.items ?? []);
+    if (entry.kind === ROUND_KIND) {
+      const round = RoundOutputSchema.safeParse(entry.output);
+      if (round.success) {
+        add(round.data.items);
+      }
+    }
+  }
+  return ids;
+}
+
 /**
  * The round ledger for one model loop. `open` gives none when the call is not running
  * as a step on a context with a ledger.

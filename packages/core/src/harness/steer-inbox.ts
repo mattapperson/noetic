@@ -100,7 +100,7 @@ export class SteerInbox {
       const items = steerItems(message);
       // A resumed turn re-queues the steers its last run kept; the ones that run
       // already applied come back with the replayed rounds and steps.
-      if (this.alreadyApplied(items)) {
+      if (steerInConversation(items, this.opts.inConversation)) {
         this.opts.queue.take((queued) => queued === message);
         continue;
       }
@@ -135,15 +135,6 @@ export class SteerInbox {
       recall: false,
     };
     return staged;
-  }
-
-  private alreadyApplied(items: ReadonlyArray<Item>): boolean {
-    return (
-      items.length > 0 &&
-      items.every(
-        (item) => 'id' in item && item.id !== undefined && this.opts.inConversation(item.id),
-      )
-    );
   }
 
   private async judge(
@@ -209,13 +200,24 @@ export class SteerInbox {
 
 //#endregion
 
+/** @internal Whether every item of a steer is already in the conversation. */
+export function steerInConversation(
+  items: ReadonlyArray<Item>,
+  hasItem: (id: string) => boolean,
+): boolean {
+  return (
+    items.length > 0 &&
+    items.every((item) => 'id' in item && item.id !== undefined && hasItem(item.id))
+  );
+}
+
 //#region Helpers
 
 /**
  * A steer's items. Text gets an id from the message id rather than a random one,
  * so a resumed turn can tell the steer is already in the conversation.
  */
-function steerItems(message: QueuedMessage): Item[] {
+export function steerItems(message: QueuedMessage): Item[] {
   if (typeof message.input !== 'string') {
     return inputToItems(message.input);
   }

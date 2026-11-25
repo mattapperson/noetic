@@ -251,7 +251,7 @@ Framework events emitted during execution:
 | `{name}:turn_aborted` | A session turn was aborted or errored. Data: `{ turnId, reason }`. |
 | `{name}:steer_accepted` | A steer was queued while a turn runs. Data: `{ messageId, turnId, deliveryMode }`. |
 | `{name}:steer_pending` | A steer is waiting for the round's tool calls to finish. Emitted once per steer. Data: `{ messageId, waitingOn }`. |
-| `{name}:steer_dropped` | A layer dropped a steer, or a turn started with `keptSteers: 'drop'` dropped one its stored record kept; no turn will answer it. Data: `{ messageId, point }` from a layer, `{ messageId, reason: 'kept_steers' }` from the record. |
+| `{name}:steer_dropped` | A layer dropped a steer, or a turn started with `keptSteers: 'drop'` removed an unapplied steer from its stored record. The record event follows a successful write. Data: `{ messageId, point }` from a layer, `{ messageId, reason: 'kept_steers' }` from the record. |
 | `{name}:inbox_injected` | Steers were added before a model call. Data: `{ round, count, messageIds }`. |
 | `{name}:model_call_steered` | A steer stopped the round's stream at an item boundary. Data: `{ round, itemCount }`. |
 | `{name}:step_started` | Before each step executes. |

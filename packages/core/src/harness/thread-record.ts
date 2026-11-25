@@ -197,17 +197,17 @@ export class ThreadRecord {
   /**
    * Record the turn about to run on `ctx`, before any of it runs. Kept steers it
    * delivers as input stop being steers: re-delivering the turn re-sends them.
-   * Kept steers named in `dropped` are removed in the same write (`keptSteers: 'drop'`).
+   * Kept steers named in `removed` are removed in the same write (`keptSteers: 'drop'`).
    */
   begin(
     ctx: Context,
     messageIds: ReadonlyArray<string>,
-    dropped: ReadonlyArray<string> = [],
+    removed: ReadonlyArray<string> = [],
   ): Promise<void> {
-    return this.updateHeld(ctx, (record) => ({
+    const start = (record: SessionRecord): SessionRecord => ({
       ...record,
       steers: record.steers?.filter(
-        (steer) => !messageIds.includes(steer.id) && !dropped.includes(steer.id),
+        (steer) => !messageIds.includes(steer.id) && !removed.includes(steer.id),
       ),
       executions: withExecution(record.executions, ctx.id),
       ...this.withLayers(record),
@@ -237,7 +237,8 @@ export class ThreadRecord {
             }
           : {}),
       },
-    }));
+    });
+    return this.updateHeld(ctx, start, removed.length > 0);
   }
 
   /**
@@ -470,20 +471,25 @@ export class ThreadRecord {
    * A write the turn itself makes. Under a lease it carries the lease's term and is
    * refused when the record already holds a higher one — another harness took the
    * turn, whatever this one's clock says — and a write that fails throws instead of
-   * being logged (spec 23 § One writer per turn, § Fail-stop).
+   * being logged (spec 23 § One writer per turn, § Fail-stop). A caller that
+   * reports a removal also needs the write to succeed without a lease.
    */
   private updateHeld(
     ctx: Context,
     change: (record: SessionRecord) => SessionRecord,
+    mustWrite = false,
   ): Promise<void> {
     const fence = this.fence;
-    if (!fence) {
+    if (!fence && !mustWrite) {
       return this.update(change);
     }
     return this.run(async () => {
-      fence.assert();
+      fence?.assert();
       try {
         await this.commit((record) => {
+          if (!fence) {
+            return change(record);
+          }
           if ((record.term ?? 0) > fence.term) {
             throw fence.lose(`the thread record was written at term ${record.term}`);
           }

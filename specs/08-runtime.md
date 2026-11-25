@@ -720,7 +720,7 @@ interface FrameworkStreamEvent {
 | `{name}:turn_aborted` | Emitted when a turn is aborted or errors. Data: `{ turnId, reason }` |
 | `{name}:steer_accepted` | Emitted when a steer is queued while a turn runs. Always precedes the `inbox_injected` that applies it. Data: `{ messageId, turnId, deliveryMode }` |
 | `{name}:steer_pending` | Emitted once per steer when it is deferred at `before_tool_call`, waiting for tool calls to finish. Data: `{ messageId, waitingOn: callId[] }` |
-| `{name}:steer_dropped` | Emitted when a layer drops a steer, or a turn started with `keptSteers: 'drop'` drops one its stored record kept. No turn will answer it. Data: `{ messageId, point }` from a layer, `{ messageId, reason: 'kept_steers' }` from the record |
+| `{name}:steer_dropped` | Emitted when a layer drops a steer, or a turn started with `keptSteers: 'drop'` drops an unapplied steer its stored record kept. The record event follows a successful write. Data: `{ messageId, point }` from a layer, `{ messageId, reason: 'kept_steers' }` from the record |
 | `{name}:inbox_injected` | Emitted when applied steers are added before a model call. Data: `{ round, count, messageIds }` |
 | `{name}:model_call_steered` | Emitted when a steer stops a round's stream at an item boundary. Data: `{ round, itemCount }` |
 | `{name}:step_started` | Emitted before each step executes. Data: `{ stepId, kind }` |

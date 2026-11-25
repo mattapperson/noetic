@@ -241,11 +241,11 @@ export interface ExecuteOptions {
   /**
    * What the turn this message starts does with the steers its thread's stored
    * record kept for it (spec 23a § Sessions). `'apply'` (default) puts them back
-   * in the queue. `'drop'` removes them from the record in the turn's own fenced
-   * write and emits `{name}:steer_dropped` with `{ messageId, reason: 'kept_steers' }`
-   * for each: for a host whose steers belong to a connection that is gone, such
-   * as one resuming a turn its lost process was running. Steers sent to this
-   * harness and still queued are not affected.
+   * in the queue. Use `'drop'` when the sending connections are gone. It removes
+   * their steers in the turn's start write, fenced when leased, then emits
+   * `{name}:steer_dropped` with `{ messageId, reason: 'kept_steers' }` for each
+   * removed steer absent from the saved conversation. Ordinary queued messages,
+   * live queue entries, and messages this harness saved for a parked turn stay.
    */
   keptSteers?: KeptSteers;
 }
