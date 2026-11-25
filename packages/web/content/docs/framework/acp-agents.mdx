@@ -79,6 +79,8 @@ const harness = new AgentHarness({ name: 'coder', params: {}, killAgentsOnExit: 
 
 With `killAgentsOnExit: true`, a kept agent stops as soon as its host's connection drops, whatever ended the host. A kept agent runs until a host reattaches and closes it, or it exits; set `localMachine(agentId, { detachedTimeoutMs })` to stop one no host has reattached to after a while. `localMachine(agentId, { keeper: false })` starts the agent as a plain child process that ends with your host. Closing a session, or a step whose session closes with it, always stops the agent.
 
+This is checked against the real Claude Code and Codex bridges by an opt-in test in the repository (`ACP_LIVE_AGENT=1 bun test test/live-reattach.test.ts` in `packages/acp`). The test kills the first host, reattaches a new one, and has the agent call a noetic tool on it. The agent's MCP client reconnects to the bridge the new host serves.
+
 To reach a kept agent yourself, outside a durable run, store `connection.reattach` and pass it back as `agent.connect({ host, reattach })`. Then call `connection.attachSession(sessionId)` and `session.resumeTurn()`.
 
 ### Stopping the agent's processes
