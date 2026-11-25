@@ -1,3 +1,21 @@
+## @noetic-tools/context-v2.0.0-next.1 (2026-11-25)
+
+* feat: one approval seam for every path that asks a person ([f2979cc](https://github.com/mattapperson/noetic/commit/f2979cc))
+* feat(core): decisions go through execute; one way in for hosts ([2a45239](https://github.com/mattapperson/noetic/commit/2a45239))
+
+### BREAKING CHANGE
+
+* a step's call to a connection operation that needs
+approval, on a harness with no approveToolCall, is held instead of
+denied. A coding agent's permission request that nothing settles, on a
+step whose policy names no default, is held instead of denied; name
+`default: 'deny'` to keep the old behavior.
+
+Specs 08, 12, 23, 27, 29, 31 and 35, the matching docs, and the
+agent-builder skill are updated.
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+
 ## @noetic-tools/context-v1.11.1 (2026-10-30)
 
 * ci: publish prereleases from next to the next dist-tag (#152) ([0b247bc](https://github.com/mattapperson/noetic/commit/0b247bc)), closes [#152](https://github.com/mattapperson/noetic/issues/152)
