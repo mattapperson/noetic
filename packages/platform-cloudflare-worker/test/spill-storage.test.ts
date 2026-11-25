@@ -34,6 +34,7 @@ function big(tag: string): Stored {
 
 interface Made {
   storage: StorageAdapter;
+  db: Database;
   /** Another adapter over the same rows and objects, as a second Worker holds. */
   other: StorageAdapter;
   blobs: FakeBlobs;
@@ -67,6 +68,7 @@ const adapters: Record<string, Make> = {
       });
     return {
       storage: make(),
+      db,
       other: make(),
       blobs,
       row: rowReader(db),
@@ -86,12 +88,47 @@ const adapters: Record<string, Make> = {
       });
     return {
       storage: make(),
+      db,
       other: make(),
       blobs,
       row: rowReader(db),
     };
   },
 };
+
+describe('D1 statement preparation', () => {
+  for (const operation of [
+    'set',
+    'delete',
+  ] as const) {
+    it(`creates the table before preparing the first ${operation}`, async () => {
+      const db = new Database(':memory:');
+      const binding = fakeD1(db);
+      const blobs = fakeBlobs();
+      const storage = createD1Storage({
+        database: {
+          ...binding,
+          prepare(query) {
+            db.query(query);
+            return binding.prepare(query);
+          },
+        },
+        spill: {
+          blobs,
+          maxBytes: LIMIT,
+        },
+      });
+
+      if (operation === 'set') {
+        await storage.set('first', big('first'));
+        expect(await storage.get('first')).toEqual(big('first'));
+      } else {
+        await storage.delete('missing');
+        expect(await storage.get('missing')).toBeNull();
+      }
+    });
+  }
+});
 
 /** The one object a store holds, or a failed assertion. */
 function onlyObject(blobs: FakeBlobs): [
@@ -144,6 +181,54 @@ for (const [name, make] of Object.entries(adapters)) {
           ],
         ]),
       );
+    });
+
+    it('keeps malformed rows intact when a set or delete fails', async () => {
+      const { storage, db, blobs, row } = make();
+      await storage.set('seed', SMALL);
+      // SQLite accepts this as JSON5, but stored rows must be valid JSON.
+      const malformed = '{unquoted: 1}';
+      db.query('INSERT INTO noetic_storage (key, value) VALUES (?, ?)').run('bad', malformed);
+
+      await expect(storage.set('bad', big('replacement'))).rejects.toThrow();
+      expect(row('bad')).toBe(malformed);
+      expect(blobs.objects.size).toBe(0);
+
+      await expect(storage.delete('bad')).rejects.toThrow();
+      expect(row('bad')).toBe(malformed);
+    });
+
+    it('removes every displaced spill during overlapping writes and deletes', async () => {
+      const { storage, other, blobs } = make();
+      await storage.set('k', big('old'));
+      await Promise.all([
+        storage.set('k', big('first')),
+        other.set('k', big('second')),
+      ]);
+      expect(JSON.parse(onlyObject(blobs)[1])).toEqual(await storage.get('k'));
+
+      await Promise.all([
+        other.set('k', big('third')),
+        storage.delete('k'),
+      ]);
+      const remaining = await storage.get('k');
+      if (remaining === null) {
+        expect(blobs.objects.size).toBe(0);
+      } else {
+        expect(JSON.parse(onlyObject(blobs)[1])).toEqual(remaining);
+      }
+    });
+
+    it('spills when an inline value and its key exceed the SQL row budget', async () => {
+      const { storage, blobs } = make({
+        maxBytes: 4_000_000,
+        scope: 'tenant',
+      });
+      const key = '日本語'.repeat(10);
+      const value = 'x'.repeat(1_999_950);
+      await storage.set(key, value);
+      expect(onlyObject(blobs)[1]).toBe(JSON.stringify(value));
+      expect(await storage.get(key)).toBe(value);
     });
 
     it('spills at the limit plus one byte, counted in UTF-8', async () => {

@@ -259,6 +259,9 @@ class SourceHub<E extends SourceEventSchemas> {
       // wait records it, and listening again from it replays what came since.
       cursor: asked ?? this.position(),
     });
+    if (request.signal.aborted) {
+      return stream;
+    }
     this.listeners.add(listener);
     if (listener.stores) {
       this.expectStore(request);
@@ -295,6 +298,9 @@ class SourceHub<E extends SourceEventSchemas> {
     const { stream, listener } = createListenerStream(this.listeners, request, {
       cursor: from,
     });
+    if (request.signal.aborted) {
+      return stream;
+    }
     this.listeners.add(listener);
     if (listener.stores) {
       this.expectStore(request);

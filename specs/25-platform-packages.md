@@ -260,7 +260,7 @@ A table has one shape: every adapter on it is scoped, or none is. Each adapter c
 
 #### Values larger than a row
 
-A D1 row and a Durable Object SQLite row hold about 2 MB, and core keeps a thread's whole history in one value. A value that does not fit cannot be written, and under a turn lease a record that cannot be written stops the turn (`ledger_write_failed`, `23-durable-execution` § Fail-stop). `spill` moves such values out of the row:
+The SQL adapters use a conservative 2 MB inline row budget, and core keeps a thread's whole history in one value. A value that does not fit cannot be written, and under a turn lease a record that cannot be written stops the turn (`ledger_write_failed`, `23-durable-execution` § Fail-stop). `spill` moves such values out of the row:
 
 ```typescript
 interface SpillOptions {
@@ -285,7 +285,7 @@ function spillStorage(storage: StorageAdapter, options: SpillOptions): StorageAd
 
 `spill` on either factory is `spillStorage` around that adapter, with the scope added to the prefix. `spillStorage` is exported for any other `StorageAdapter`.
 
-- **Writing.** A value whose JSON is over `maxBytes` is written to the blob store, and the row holds a pointer to it: the value `{ "noetic:spilled": "<object key>" }`. Smaller values are stored as before. A value shaped exactly like a pointer is refused: it would be read as one.
+- **Writing.** A value whose JSON is over `maxBytes` is written to the blob store, and the row holds a pointer to it: the value `{ "noetic:spilled": "<object key>" }`. The SQL adapters also spill when the JSON, key, scope, and SQLite record overhead would exceed their inline row budget. A value shaped exactly like a pointer is refused: it would be read as one.
 - **Only its own pointers.** A pointer is followed, and its object deleted, only when the object key starts with `<prefix>[/<scope>]/` or one of `movedPrefixes`. Any other row shaped like a pointer is read as a plain value, so a row written some other way cannot reach another scope's, or anyone's, objects.
 - **One object per write.** Each spilled write makes a new object, `<prefix>[/<scope>]/<key, cut to 200 UTF-8 bytes>/<uuid>`, within R2's 1024-byte key limit; a prefix and scope that leave no room for that are refused when the adapter is made, and never overwrites one. So a pointer names one value for as long as it exists, and two writers never share an object. The write that replaces or deletes a pointer deletes the object it pointed at.
 - **Reading.** `get` and `getMany` follow a pointer and return the value. A writer may delete an object between a reader's row read and its object read, so a missing object means the row is read again, up to three times. An object still missing behind an unchanged pointer is an error, not an absent key: reading it as absent would restart a turn from nothing.
@@ -295,7 +295,7 @@ function spillStorage(storage: StorageAdapter, options: SpillOptions): StorageAd
 - **`spillStorage` needs `swap` underneath to offer `swap`.** Over an adapter without it, the result has none.
 - **Changing `maxBytes`** is safe. Rows written under the old limit still read, and `swap` matches a stored value whichever side of the new limit it is on.
 
-Two plain `set`s that race on one key can leave an object nothing points at. Core's contended keys are written with `swap` under a lease, where one writer wins.
+D1 with `batch` and Durable Object SQL capture the displaced row in the same database operation as each `set` or `delete`. Concurrent writers can then clean up the objects they actually displaced. With a custom D1 binding without `batch`, or with the standalone `spillStorage` wrapper, those operations read the prior row separately and concurrent writes can leave an orphan. Core's contended keys use `swap` under a lease.
 
 #### Moving rows from another table
 

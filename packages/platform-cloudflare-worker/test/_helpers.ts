@@ -30,24 +30,33 @@ export function fakeD1(
     failing?: boolean;
   } = {},
 ): D1DatabaseLike {
+  const queries = new WeakMap<
+    D1StatementLike,
+    () => {
+      results: unknown[];
+    }
+  >();
   function statement(query: string, values: string[]): D1StatementLike {
     const refuse = (): void => {
       if (state.failing) {
         throw new Error('D1_ERROR: storage is unavailable');
       }
     };
-    return {
+    const all = (): {
+      results: unknown[];
+    } => {
+      refuse();
+      return {
+        results: db.query(query).all(...values),
+      };
+    };
+    const prepared: D1StatementLike = {
       bind: (...bound) => statement(query, bound),
       first: async () => {
         refuse();
         return db.query(query).get(...values);
       },
-      all: async () => {
-        refuse();
-        return {
-          results: db.query(query).all(...values),
-        };
-      },
+      all: async () => all(),
       run: async () => {
         refuse();
         return {
@@ -57,9 +66,21 @@ export function fakeD1(
         };
       },
     };
+    queries.set(prepared, all);
+    return prepared;
   }
+  const batch = db.transaction((statements: D1StatementLike[]) =>
+    statements.map((statement) => {
+      const run = queries.get(statement);
+      if (!run) {
+        throw new Error('D1 batch received a statement from another binding');
+      }
+      return run();
+    }),
+  );
   return {
     prepare: (query) => statement(query, []),
+    batch: async (statements) => batch(statements),
   };
 }
 

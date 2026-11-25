@@ -33,6 +33,8 @@ export interface StorageTable {
    */
   checkShape(rows: unknown[]): void;
   select: string;
+  /** Read the displaced value, failing the batch when it holds malformed JSON. */
+  selectBeforeChange: string;
   upsert: string;
   remove: string;
   list: string;
@@ -72,6 +74,7 @@ export function storageTable(
       ? `CREATE TABLE IF NOT EXISTS ${table} (scope TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (scope, key))`
       : `CREATE TABLE IF NOT EXISTS ${table} (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
     select: `SELECT value FROM ${table} WHERE ${at}`,
+    selectBeforeChange: `SELECT CASE WHEN json_valid(value) THEN value ELSE json('') END AS value FROM ${table} WHERE ${at}`,
     upsert: `INSERT INTO ${table} (${columns}, value) VALUES (${places}, ?) ON CONFLICT(${columns}) DO UPDATE SET value = excluded.value`,
     remove: `DELETE FROM ${table} WHERE ${at}`,
     list: `SELECT key FROM ${table} WHERE ${within}key >= ? AND key < ? AND substr(key, 1, length(?)) = ?`,

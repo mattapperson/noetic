@@ -133,7 +133,7 @@ A table has one shape: every storage on it is scoped, or none is. A storage chec
 
 #### Values larger than a row
 
-A D1 row and a Durable Object SQLite row hold about 2 MB, and a long thread's record is one value. Pass `spill` with an R2 bucket and any value over 1 MiB is written to the bucket, with a pointer in the row:
+The SQL adapters use a conservative 2 MB inline row budget. Pass `spill` with an R2 bucket to store values over 1 MiB by default, or values that outgrow the row budget after counting the key and scope, with a pointer in the row:
 
 ```ts validate=none
 const storage = createD1Storage({

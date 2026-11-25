@@ -318,6 +318,7 @@ export function createListenerStream(
       return;
     }
     ended = true;
+    request.signal.removeEventListener('abort', finish);
     listeners.delete(listener);
     for (const told of [
       ...listener.onEnd,
@@ -352,9 +353,13 @@ export function createListenerStream(
     },
     end: finish,
   };
-  request.signal.addEventListener('abort', finish, {
-    once: true,
-  });
+  if (request.signal.aborted) {
+    finish();
+  } else {
+    request.signal.addEventListener('abort', finish, {
+      once: true,
+    });
+  }
   const stream: EventStream = {
     ready: Promise.resolve(ready),
     close: async (): Promise<void> => finish(),
@@ -705,8 +710,10 @@ function listenOn(state: ConnectionState, request: ListenRequest): EventStream {
   const { stream, listener } = createListenerStream(state.listeners, request, {
     cursor: latest,
   });
-  replayHistory(state.history, request, listener);
-  state.listeners.add(listener);
+  if (!request.signal.aborted) {
+    replayHistory(state.history, request, listener);
+    state.listeners.add(listener);
+  }
   return stream;
 }
 

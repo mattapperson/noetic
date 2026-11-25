@@ -59,7 +59,7 @@ export interface CreateDurableObjectStorageOptions {
  * Object runs as one atomic step.
  *
  * Values are stored as their JSON encoding. `swap` compares encodings, so pass
- * `prev` as it was read from this storage. A row holds about 2 MB: give `spill` a
+ * `prev` as it was read from this storage. The inline row budget is about 2 MB: give `spill` a
  * blob store for values that can grow past that.
  *
  * @throws Error when `table` is not a plain identifier, `scope` is empty, or the
@@ -82,14 +82,18 @@ export function createDurableObjectStorage(
     return storedValue(row);
   }
 
+  function read<T>(key: string): T | null {
+    const stored = raw(key);
+    return stored === undefined ? null : decoded<T>(stored);
+  }
+
   function write(key: string, encoded: string): void {
     sql.exec(statements.upsert, ...statements.scope, key, encoded);
   }
 
   const storage: StorageAdapter = {
     async get<T>(key: string): Promise<T | null> {
-      const stored = raw(key);
-      return stored === undefined ? null : decoded<T>(stored);
+      return read<T>(key);
     },
     async set<T>(key: string, value: T): Promise<void> {
       write(key, JSON.stringify(value));
@@ -124,7 +128,26 @@ export function createDurableObjectStorage(
       return true;
     },
   };
-  return withSpill(storage, options.spill, options.scope);
+  return withSpill({
+    storage,
+    spill: options.spill,
+    scope: options.scope,
+    rows: {
+      async replace(key, value) {
+        const before = read(key);
+        write(key, JSON.stringify(value));
+        return before;
+      },
+      async remove(key) {
+        const before = read(key);
+        sql.exec(statements.remove, ...statements.scope, key);
+        return before;
+      },
+      async holds(key, value) {
+        return raw(key) === JSON.stringify(value);
+      },
+    },
+  });
 }
 
 //#endregion

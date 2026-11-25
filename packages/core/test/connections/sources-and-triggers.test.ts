@@ -196,6 +196,49 @@ describe('cron schedules', () => {
 });
 
 describe('defineSource', () => {
+  test('a canceled listener leaves held events for the next live listener', async () => {
+    const source = deploySource();
+    const [connection] = await source.connect({
+      name: 'deploys',
+      signal: new AbortController().signal,
+      artifacts: createInMemoryArtifactStore(),
+    });
+    assert(connection);
+    await source.emit({
+      type: 'deploy.failed',
+      id: 'held',
+      payload: {
+        service: 'api',
+      },
+    });
+
+    const canceled = connection.listen({
+      event: 'deploy.failed',
+      signal: AbortSignal.abort(),
+    });
+    expect(await canceled[Symbol.asyncIterator]().next()).toMatchObject({
+      done: true,
+    });
+
+    const live = connection.listen({
+      event: 'deploy.failed',
+      signal: new AbortController().signal,
+    });
+    try {
+      expect(await live[Symbol.asyncIterator]().next()).toMatchObject({
+        value: {
+          type: 'event',
+          event: {
+            id: 'held',
+          },
+        },
+        done: false,
+      });
+    } finally {
+      await live.close();
+    }
+  });
+
   test('host emits reach listeners; events emitted before anyone listens are held', async () => {
     const source = deploySource();
     const [connection] = await source.connect({

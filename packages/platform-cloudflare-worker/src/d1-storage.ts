@@ -32,6 +32,12 @@ export interface D1StatementLike {
 /** @public The part of a D1 database binding this adapter uses. Pass `env.DB`. */
 export interface D1DatabaseLike {
   prepare(query: string): D1StatementLike;
+  /** Run statements in one transaction, as the D1 binding does. */
+  batch?(statements: D1StatementLike[]): Promise<
+    Array<{
+      results?: unknown[];
+    }>
+  >;
 }
 
 /** @public Options for `createD1Storage`. */
@@ -94,19 +100,21 @@ export function createD1Storage(options: CreateD1StorageOptions): StorageAdapter
     return created;
   }
 
-  async function read<T>(key: string): Promise<T | null> {
+  async function raw(key: string): Promise<string | undefined> {
     await ready();
-    const raw = storedValue(
+    return storedValue(
       await db
         .prepare(sql.select)
         .bind(...sql.scope, key)
         .first(),
     );
-    return raw === undefined ? null : decoded<T>(raw);
   }
 
   const storage: StorageAdapter = {
-    get: read,
+    async get<T>(key: string): Promise<T | null> {
+      const stored = await raw(key);
+      return stored === undefined ? null : decoded<T>(stored);
+    },
     async set<T>(key: string, value: T): Promise<void> {
       await ready();
       await db
@@ -151,7 +159,38 @@ export function createD1Storage(options: CreateD1StorageOptions): StorageAdapter
       return (await statement.run()).meta.changes === 1;
     },
   };
-  return withSpill(storage, options.spill, options.scope);
+  const batch = db.batch?.bind(db);
+  if (!options.spill || !batch) {
+    return withSpill({
+      storage,
+      spill: options.spill,
+      scope: options.scope,
+    });
+  }
+
+  const change = async (key: string, prepare: () => D1StatementLike): Promise<unknown> => {
+    await ready();
+    const [before] = await batch([
+      db.prepare(sql.selectBeforeChange).bind(...sql.scope, key),
+      prepare(),
+    ]);
+    const raw = storedValue(before?.results?.[0]);
+    return raw === undefined ? null : decoded(raw);
+  };
+
+  return withSpill({
+    storage,
+    spill: options.spill,
+    scope: options.scope,
+    rows: {
+      replace: (key, value) =>
+        change(key, () => db.prepare(sql.upsert).bind(...sql.scope, key, JSON.stringify(value))),
+      remove: (key) => change(key, () => db.prepare(sql.remove).bind(...sql.scope, key)),
+      async holds(key, value) {
+        return (await raw(key)) === JSON.stringify(value);
+      },
+    },
+  });
 }
 
 //#endregion

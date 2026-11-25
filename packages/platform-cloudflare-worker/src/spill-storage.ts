@@ -38,18 +38,29 @@ interface Placed {
   object?: string;
 }
 
+/** SQL adapters can return the row displaced by a write in the same operation. */
+interface SpillRows {
+  replace(key: string, value: unknown): Promise<unknown>;
+  remove(key: string): Promise<unknown>;
+  /** Compare the exact row encoding so a malformed value cannot block cleanup. */
+  holds(key: string, value: unknown): Promise<boolean>;
+}
+
 //#endregion
 
 //#region Helpers
 
 /**
  * @public
- * The default `maxBytes`: 1 MiB. A D1 row and a Durable Object SQLite row hold
- * about 2 MB, so this leaves room for the row's key and its encoding.
+ * The default `maxBytes`: 1 MiB. The SQL adapters use an inline row budget
+ * of about 2 MB, so this leaves room for the row's key and its encoding.
  */
 export const DEFAULT_SPILL_BYTES = 1024 * 1024;
 
 const DEFAULT_PREFIX = 'noetic-storage';
+
+// Keep enough room for SQLite's record header and any extra row fields it stores.
+const SQL_ROW_BYTES = 2_000_000 - 32;
 
 /** The one key of a pointer row. */
 const POINTER_KEY = 'noetic:spilled';
@@ -131,7 +142,12 @@ class Spill {
   /** Object key prefixes whose pointers are followed. */
   private readonly followed: string[];
 
-  constructor(storage: StorageAdapter, options: SpillOptions) {
+  constructor(
+    storage: StorageAdapter,
+    options: SpillOptions,
+    private readonly inlineBytes?: (key: string) => number,
+    private readonly rows?: SpillRows,
+  ) {
     this.storage = storage;
     this.blobs = options.blobs;
     this.maxBytes = checkedMaxBytes(options.maxBytes);
@@ -167,7 +183,11 @@ class Spill {
       );
     }
     const json = JSON.stringify(value);
-    if (json === undefined || byteLength(json) <= this.maxBytes) {
+    if (
+      json === undefined ||
+      byteLength(json) <=
+        Math.min(this.maxBytes, this.inlineBytes?.(key) ?? Number.POSITIVE_INFINITY)
+    ) {
       return {
         row: value,
       };
@@ -190,13 +210,15 @@ class Spill {
     if (object === undefined) {
       return;
     }
-    let row: unknown;
+    let kept: boolean;
     try {
-      row = await this.storage.get<unknown>(key);
+      kept = this.rows
+        ? await this.rows.holds(key, pointerTo(object))
+        : this.pointee(await this.storage.get<unknown>(key)) === object;
     } catch {
       return;
     }
-    if (this.pointee(row) !== object) {
+    if (!kept) {
       await dropObject(this.blobs, object);
     }
   }
@@ -313,9 +335,12 @@ class Spill {
     const placed = await this.place(key, value);
     let replaced: string | undefined;
     try {
-      // Read first: the object this write replaces is deleted once it has landed.
-      replaced = this.pointee(await this.storage.get<unknown>(key));
-      await this.storage.set(key, placed.row);
+      if (this.rows) {
+        replaced = this.pointee(await this.rows.replace(key, placed.row));
+      } else {
+        replaced = this.pointee(await this.storage.get<unknown>(key));
+        await this.storage.set(key, placed.row);
+      }
     } catch (error) {
       await this.unplace(key, placed.object);
       throw error;
@@ -326,8 +351,11 @@ class Spill {
   }
 
   async delete(key: string): Promise<void> {
-    const object = this.pointee(await this.storage.get<unknown>(key));
-    await this.storage.delete(key);
+    const row = this.rows ? await this.rows.remove(key) : await this.storage.get<unknown>(key);
+    if (!this.rows) {
+      await this.storage.delete(key);
+    }
+    const object = this.pointee(row);
     if (object !== undefined) {
       await dropObject(this.blobs, object);
     }
@@ -371,7 +399,10 @@ class Spill {
  * @throws Error when `maxBytes` is not a positive number.
  */
 export function spillStorage(storage: StorageAdapter, options: SpillOptions): StorageAdapter {
-  const spill = new Spill(storage, options);
+  return wrapSpill(storage, new Spill(storage, options));
+}
+
+function wrapSpill(storage: StorageAdapter, spill: Spill): StorageAdapter {
   const spilling: StorageAdapter = {
     get: (key) => spill.get(key),
     set: (key, value) => spill.set(key, value),
@@ -392,19 +423,34 @@ export function spillStorage(storage: StorageAdapter, options: SpillOptions): St
  * @internal `storage`, spilling when the factory was given `spill`. A scope is
  * added to the prefix, so two scopes' objects are apart as their rows are.
  */
-export function withSpill(
-  storage: StorageAdapter,
-  spill: SpillOptions | undefined,
-  scope: string | undefined,
-): StorageAdapter {
+export function withSpill({
+  storage,
+  spill,
+  scope,
+  rows,
+}: {
+  storage: StorageAdapter;
+  spill: SpillOptions | undefined;
+  scope: string | undefined;
+  rows?: SpillRows;
+}): StorageAdapter {
   if (!spill) {
     return storage;
   }
   const prefix = spill.prefix ?? DEFAULT_PREFIX;
-  return spillStorage(storage, {
-    ...spill,
-    prefix: scope === undefined ? prefix : `${prefix}/${scope}`,
-  });
+  const budget = SQL_ROW_BYTES - byteLength(scope ?? '');
+  return wrapSpill(
+    storage,
+    new Spill(
+      storage,
+      {
+        ...spill,
+        prefix: scope === undefined ? prefix : `${prefix}/${scope}`,
+      },
+      (key) => budget - byteLength(key),
+      rows,
+    ),
+  );
 }
 
 // Identity coercion at the storage boundary: the `StorageAdapter` contract hands
