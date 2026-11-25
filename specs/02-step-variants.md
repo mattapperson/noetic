@@ -307,6 +307,7 @@ interface Tool<I extends StandardSchemaV1 = StandardSchemaV1, O extends Standard
   needsApproval?: boolean;  // every call needs the harness approver's go-ahead; see below
   toModelOutput?: (result: InferSchemaOutput<O>, args: InferSchemaOutput<I>) => ToolModelOutput;  // see below
   context?: ToolContextDeclaration;
+  presentation?: ToolPresentationDeclaration<I, O>;  // how a call presents to a host; see below
 }
 
 type ToolModelOutput = string | ReadonlyArray<InputContentPart>;  // text, or text, image and file parts
@@ -329,6 +330,34 @@ Only the model's copy changes, and only in the round the call was made in. The `
 - If it throws, the model is given the output text and the harness emits `tool_model_output_failed` (`08-runtime` § Framework Events). The call is already done and on record, so the throw does not fail it.
 
 A tool served to an ACP agent over the tool bridge (`38-acp-tools`), or run by an `invokeTool` step, has no model round of its own, and `toModelOutput` is not called for it.
+
+### Presentation
+
+`presentation` says how a call to the tool presents to a host — the same fields
+an agent's own calls carry (`08-runtime` § Tool calls, plans and agent
+settings), so a host shows a tool's calls and an agent's alike:
+
+```typescript
+interface ToolPresentationDeclaration<I, O, E = unknown> {
+  kind?: ToolKind;                                   // read | edit | delete | move | search | execute | think | fetch | switch_mode | other
+  title?: string | ((args: InferSchemaOutput<I>) => string);
+  locations?(args: InferSchemaOutput<I>): Array<string | ToolLocation>;  // the files a call works on
+  progress?(events: E[]): ToolCallProgress | null;   // per event a generator `execute` yields
+  content?(output: InferSchemaOutput<O>, args: InferSchemaOutput<I>): ToolContent[];  // diffs, images, resources
+}
+```
+
+The runtime puts the title, kind and locations on the call's
+`tool_call_started`, what `progress` reports for the events so far on each
+`tool_progress`, and the `content` of a call that did not fail on its
+`tool_call_completed` — on the `callModel` tool loop, and on a call an agent
+makes through the tool bridge (`38-acp-tools`). A served harness shows them in
+its client's editor (`31-acp-server`). It is presentation only: it gates
+nothing, an undeclared tool presents by its name, and a method that throws
+presents nothing for that point. `tool()` and `toolWithGenerator()` take it;
+`toolWithGenerator`'s `progress` receives its typed events. The older `acp`
+declaration (`kind`, `title`, `locations` as paths) is read in its place when a
+tool has no `presentation`.
 
 ### Approval
 

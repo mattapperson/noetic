@@ -799,6 +799,72 @@ show one.
 window for the same agent — and its child's output is the run's output, as a
 `loop(spawn(callModel))` relies on; it carries no scope.
 
+### Tool calls, plans and agent settings
+
+A host shows what an agent is doing from the events alone, in one vocabulary
+(`@noetic-tools/types`, `tool-activity`) for every agent: a `callModel` step's
+model, an agent step's agent, a nested agent, and anything else that runs as an
+agent — a workflow a tool starts, a sub-workflow run as one. Nothing in it
+names a protocol or a step kind; who is acting is the event's `scope` (§ Nested
+agents), and where the agent is, its `stepId`.
+
+**A tool call** is an item and three framework events, the same for a model's
+call, an agent's own call, and a step tool an agent calls through the tool
+bridge:
+
+- `tool_call_started` — `{ name, callId, title?, kind?, locations?, status? }`.
+  `title` is the human title, `kind` a `ToolKind` (`read`, `edit`, `delete`,
+  `move`, `search`, `execute`, `think`, `fetch`, `switch_mode`, `other`),
+  `locations` the files it works on (`{ path, line? }`), `status` `pending`
+  when the call waits (for approval, for its input) and absent when it runs.
+- `tool_progress` — what a running call reports, each field only when it
+  changed: `{ name, callId, status?, title?, kind?, locations?, progress?,
+  content? }`. `progress` is a fraction from 0 to 1; `content` replaces what an
+  earlier report gave. A generator tool's report also carries the yielded
+  `event`.
+- `tool_call_completed` — `{ name, callId, error, output?, content?, result? }`.
+  `output` is the call's text; `content` everything it produced as structure,
+  `ToolContent[]`. Text and media are the content parts a model is given
+  (`InputContentPart`: `input_text`, `input_image` with its `imageUrl` a URL or
+  a data URL, `input_file`, and any media part added there), so a call's image
+  is the part a tool's `toModelOutput` would return; the rest is what only a
+  call produces: `resource_link`, `resource`, `diff` (`path`, `oldText` — null
+  for a new file — `newText`) and `terminal` (`terminalId`). `result` is an agent's raw
+  record of what the call returned, when it gave one. A failed call carries no
+  structured content from its tool.
+
+A `callModel` step's call presents as its tool declares (`02-step-variants`
+§ Presentation): the declared title, kind and locations on its start, the
+declared progress on each event its generator yields, the declared content on
+its completion. An agent's own call presents as the agent reports it
+(`27-acp-agent-steps` § Output → harness events). A step tool an agent calls
+presents as the tool declares, exactly as in a `callModel` step — never by the
+agent's own name for the call. A host that shows a call's diff or image reads it from `content`,
+and the files a session changed from the `diff` entries of the completions.
+
+**An image an agent answers with** is an `image_generation_call` output item
+on the stream and in the step's items, as a model's generated image is — never
+text. Its `result` is a data URL, so it carries its media type.
+
+**The agent's plan** is its whole task list, replaced on every update:
+
+- `plan_updated` — `{ stepId, plan }`, `plan` an `AgentPlan`: `{ id?, entries }`
+  (each `{ content, priority: 'high' | 'medium' | 'low', status: 'pending' |
+  'in_progress' | 'completed' }`), or a plan written out, `{ id?, markdown }`,
+  or kept in a file, `{ id?, uri }`. It replaces the plan with the same `id`
+  (no id: the agent's only plan). An empty `entries` is a plan with nothing
+  left in it.
+- `plan_removed` — `{ stepId, id? }`: the agent dropped that plan.
+
+**The agent's settings** that a host shows while it works:
+
+- `agent_config_updated` — `{ stepId, mode?, model? }`: the agent changed its
+  mode, or the model it runs with, carrying only what changed. A step's last
+  model is also its `lastStepMeta.model` (`02-step-variants` § `StepMeta`).
+
+All three kinds are scoped to the nested agent they belong to, like the rest of
+its events, and pass the step's `emit` filter.
+
 ### Framework Events
 
 | Event | Description |
@@ -820,8 +886,9 @@ window for the same agent — and its child's output is the run's output, as a
 | `{name}:step_started` | Emitted before each step executes. Data: `{ stepId, kind }` |
 | `{name}:step_completed` | Emitted after each step completes. Data: `{ stepId, kind }` |
 | `{name}:tool_round_started` | Emitted before a tool execution round. Data: `{ round, toolCount }` |
-| `{name}:tool_call_started` | Emitted before each tool call. Data: `{ name, callId }` |
-| `{name}:tool_call_completed` | Emitted after each tool call. Data: `{ name, callId, error }` |
+| `{name}:tool_call_started` | Emitted before each tool call. Data: `{ name, callId, title?, kind?, locations?, status? }` (§ Tool calls, plans and agent settings) |
+| `{name}:tool_progress` | A running tool call reported progress (§ Tool calls, plans and agent settings). Data: `{ name, callId, status?, title?, kind?, locations?, progress?, content?, event? }`; an `invokeTool` step's carries `{ stepId, name, toolName, event, … }` |
+| `{name}:tool_call_completed` | Emitted after each tool call. Data: `{ name, callId, error, output?, content?, result? }` |
 | `{name}:tool_model_output_failed` | Emitted when a tool's `toModelOutput` throws; the model is given the call's output text instead (`02-step-variants` § What the model is given). Data: `{ name, callId, error }` |
 | `{name}:tool_round_completed` | Emitted after all tool calls in a round. Data: `{ round, toolCount }` |
 | `{name}:model_call_started` | Emitted before each provider call in the tool-round loop. Data: `{ round, messageCount, toolCount }` |
@@ -836,6 +903,9 @@ window for the same agent — and its child's output is the run's output, as a
 | `{name}:agent_started` | A nested agent started (§ Nested agents). Scoped. Data: `{ stepId, title?, description? }` |
 | `{name}:agent_status` | A nested agent reported its status. Scoped. Data: `{ stepId, status, stopReason? }` |
 | `{name}:agent_completed` | The turn that ran a nested agent ended. Scoped. Data: `{ stepId, status }` |
+| `{name}:plan_updated` | An agent reported its plan, whole (§ Tool calls, plans and agent settings). Data: `{ stepId, plan }` |
+| `{name}:plan_removed` | An agent dropped a plan. Data: `{ stepId, id? }` |
+| `{name}:agent_config_updated` | An agent changed its mode or its model. Data: `{ stepId, mode?, model? }` |
 | `{name}:workspace_access` | A step read or wrote a file or ran a command through the host's fs or shell adapters on an agent's behalf — served or refused (spec 27 § Observing client-side activity). Data: `{ stepId, operation: 'read_file' \| 'write_file' \| 'run_command' \| 'read_output' \| 'wait' \| 'kill' \| 'release', path?, command?, terminalId?, allowed, reason? }` |
 | `{name}:drain_started` | Emitted when a graceful stop begins (see Graceful Stop). Data: `{ executionId, deadline, inFlight }` |
 | `{name}:drain_finished` | Emitted when a graceful stop ends, just before the cancel. Data: `{ executionId, reason, durationMs, finished, cutOff }` |
@@ -1395,3 +1465,10 @@ On `send`, the server calls `harness.execute(text, { threadId, messageId })` —
 ### Resume
 
 On runner startup, the IPC server reads `<taskDir>/chat.jsonl` and calls `harness.seedSessionHistory(threadId, items)` before any `execute()` is issued. Conversations therefore survive subprocess restarts: the next runner spawn replays prior items into the fresh session and the user's chat continues from where it left off.
+
+## Future Considerations
+
+- **Workflows as agents.** A `callModel` tool that starts a workflow, or a
+  sub-workflow, run as an agent would show as a nested agent with a `scope` of
+  its own, reporting its tool calls, plan and settings in the same vocabulary
+  (§ Tool calls, plans and agent settings). A host needs nothing new for it.

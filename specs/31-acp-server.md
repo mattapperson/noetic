@@ -1,7 +1,7 @@
 # 31 — ACP Server: Serving a Harness as an ACP Agent
 
 > **Depends On:** `27-acp-agent-steps` (protocol library, transports, permission channels, event bridge), `08-agent-harness` (session API — `execute`, streams, seeding, abort), `06-channels` (external channels — the permission park), `11-context-layer-system` (`beforeToolCall` hook)
-> **Exports:** `toAcpAgent()`, `serveAcp()` (`@noetic-tools/acp/server`), `clientFsAdapter()`, `clientShellAdapter()`, `AcpServeHarness`, `AcpServeOptions`, `AcpServeSessionInit`, `AcpServePermissionPolicy`; `ToolAcpDeclaration` (`@noetic-tools/types`)
+> **Exports:** `toAcpAgent()`, `serveAcp()` (`@noetic-tools/acp/server`), `clientFsAdapter()`, `clientShellAdapter()`, `AcpServeHarness`, `AcpServeOptions`, `AcpServeSessionInit`, `AcpServePermissionPolicy`; `ToolPresentationDeclaration` (`@noetic-tools/types`)
 
 ---
 
@@ -193,9 +193,14 @@ The translation is the client direction's `AcpEventBridge` table (spec 27,
 |---|---|
 | `response.output_text.delta` | `agent_message_chunk` |
 | `response.reasoning.delta` | `agent_thought_chunk` |
-| `tool_call_started` (framework, carries `callId`) | `tool_call` — `toolCallId` = `callId`, presentation from the tool's `acp` declaration (below), status `pending` while gated, `in_progress` once running |
-| `tool_call_completed` | `tool_call_update` — `completed` with the output as content, or `failed` carrying the error |
-| plan-layer state changes | `plan` |
+| `tool_call_started` (framework, carries `callId`) | `tool_call` — `toolCallId` = `callId`; `title`, `kind` and `locations` as the event carries them, else from the tool's `presentation` declaration in the serve options (below); status `pending` while gated or when the event says so, `in_progress` once running |
+| `tool_progress` of a call it started | `tool_call_update` — what the report changed: `status`, `title`, `kind`, `locations`, `content`, and `progress` as `_meta.progress` |
+| `tool_call_completed` | `tool_call_update` — `completed` or `failed`; its structured `content` (diffs, terminals, images, resources) when it carries any — a data-URL `input_image` or audio `input_file` as the media block, a plain URL as a `resource_link` — else the output — or the error — as text content |
+| `plan_updated` with entries, `plan_removed` | `plan` — the entries, or none; a markdown or file plan is not sent |
+
+Each row reads the session's own, unscoped events: a delegated agent's call,
+progress and plan reach the editor as the step's own would, carrying what the
+agent reported (spec 08 § Tool calls, plans and agent settings).
 
 Notifications the harness has no source for are simply never sent — ACP treats
 absence as unsupported.
@@ -224,31 +229,29 @@ renderable content.
 ## Presenting tools to the editor
 
 ACP renders tool calls with a `kind` (`read`, `edit`, `execute`, …), a
-human-readable `title`, and affected `locations`. Following the
-`ToolUiDeclaration` precedent from `28`, the `Tool` type in
-`@noetic-tools/types` carries an optional ACP presentation:
+human-readable `title`, and affected `locations`. A tool says how its calls
+present with its `presentation` declaration (`02-step-variants`
+§ Presentation), which every host reads, not only an editor:
 
 ```ts
-interface ToolAcpDeclaration<I> {
-  kind?: AcpToolKind;
-  /** A string, or a bivariant args function (`ToolAcpTitleFn`). */
-  title?: string | ((args: InferSchemaOutput<I>) => string);
-  locations?(args: InferSchemaOutput<I>): string[];
-}
-
 const editFile = tool({
   name: 'edit_file',
   // ...
-  acp: {
+  presentation: {
     kind: 'edit',
     title: (args) => `Edit ${args.path}`,
     locations: (args) => [args.path],
+    content: (result, args) => [{ type: 'diff', path: args.path, oldText: result.before, newText: result.after }],
   },
 });
 ```
 
-The server reads declarations from `options.tools` — pass the same array the
-harness was built with (`serveAcp(harness, { tools })`); the harness contract
+The harness already puts the declared title, kind and locations on the call's
+`tool_call_started`, and its content on `tool_call_completed`, which the table
+above forwards.
+
+For a call whose event carries none, the server reads declarations from
+`options.tools` — pass the same array the harness was built with (`serveAcp(harness, { tools })`); the harness contract
 does not expose its tool set, and the serve options are where presentation
 concerns live. An undeclared or unlisted tool falls back to `kind: 'other'`
 and its name as the title, and title/location functions run only when the
