@@ -1,3 +1,7 @@
+## @noetic-tools/types-v3.19.0-next.7 (2026-11-25)
+
+* feat: an agent step's subagents are nested agents on the ordinary event stream (#170) ([31dd1b9](https://github.com/mattapperson/noetic/commit/31dd1b9)), closes [#170](https://github.com/mattapperson/noetic/issues/170) [#169](https://github.com/mattapperson/noetic/issues/169)
+
 ## @noetic-tools/types-v3.19.0-next.6 (2026-11-25)
 
 * feat: an agent step meets the host only through generic concepts (instructions, held questions, Noet ([858cdca](https://github.com/mattapperson/noetic/commit/858cdca)), closes [#169](https://github.com/mattapperson/noetic/issues/169)
