@@ -454,9 +454,10 @@ capability, the harness contract grows it publicly first.
   options (`config_option_update` — a natural surface for exposing harness
   `params` and modes to the editor), `elicitation/create` (a structured-input
   surface for clarifying-question compositions, cf. `29`'s modal note), and
-  `usage_update` (backed by `getUsage`). These land with a version bump of
-  `@zed-industries/agent-client-protocol`; the `history` and `commands` seams
-  are shaped to absorb them.
+  `usage_update` (backed by `getUsage`). The protocol library
+  (`@agentclientprotocol/sdk`) already carries their types; serving them needs
+  the harness to produce them. The `history` and `commands` seams are shaped to
+  absorb them.
 - **Session modes** mapped to steering configs or graph variants
   (`setSessionMode` → an author-provided `onModeChange`).
 - **MCP server passthrough** — `session/new` carries `mcpServers` the harness

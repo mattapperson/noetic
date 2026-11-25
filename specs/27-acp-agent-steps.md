@@ -44,8 +44,9 @@ core ─→ types          (resolves agents via contract + registry)
   `AcpSession`, `AcpTransport`, `AcpClientHost`, the permission types, and
   `StepAcpAgent`. It lives here — next to `ContextLayer` — so both `core` and
   `acp` depend on it without forming a cycle. Protocol types are re-exported
-  verbatim from `@zed-industries/agent-client-protocol` rather than mirrored, so
-  the wire surface cannot drift from the specification.
+  verbatim from the official `@agentclientprotocol/sdk` (pinned to its 1.x
+  line, whose `ClientSideConnection` the client is built on) rather than
+  mirrored, so the wire surface cannot drift from the specification.
 - **`@noetic-tools/acp`** — the protocol client: capability negotiation, the
   session/turn drivers, the client-side `fs/*` + `terminal/*` + permission
   handlers, the permission resolver, the agent presets, and the transports. Its
@@ -78,6 +79,7 @@ interface AcpAgentConnection {
 interface AcpSession {
   readonly sessionId: string;
   readonly modes?: AcpSessionModeState;
+  readonly configOptions?: ReadonlyArray<AcpSessionConfigOption>;
   readonly availableCommands: ReadonlyArray<AcpAvailableCommand>;
   prompt(opts: AcpPromptOptions): Promise<AcpTurnResult>;
   cancel(): Promise<void>;
@@ -86,10 +88,26 @@ interface AcpSession {
 }
 ```
 
+A session's `modes` and `configOptions` come from the answer that opened it —
+`session/new`, or `session/load` for a loaded session — and stay current:
+`current_mode_update` moves `modes.currentModeId`, `config_option_update`
+replaces `configOptions`. A loaded session that advertised modes therefore
+takes a follow-up `setMode`, and one that advertised none still refuses it.
+`setModel` selects the value of the agent's `model` config option (category
+`model`, type `select`) through `session/set_config_option`; an agent that
+advertises no such option refuses it.
+
 A capability the agent did not advertise is refused **before anything reaches
 the wire**, with `AcpCapabilityError` — loading a session, switching mode or
 model, sending image/audio/embedded content, or naming an HTTP/SSE MCP server.
 A connection that cannot be established raises `AcpConnectError`.
+
+An agent's own JSON-RPC rejection — of `session/new`, `session/load`, a mode or
+model selection, or the prompt — fails the step with `step_failed` whose cause
+reads the rejection in full: its message, its `data` detail (`data.message`,
+`data.details`, or the serialized data) and its code, as in
+`Internal error: Authentication required (-32603)`. A protocol error object is
+never reduced to `[object Object]` or a bare "Internal error".
 
 ## Transport
 
@@ -147,6 +165,31 @@ An agent is reached one of two ways:
 | `loopbackMachine(toAgent)`, `loopbackTransport(toAgent)` | An in-process agent over the real wire protocol, with no process — the way to test an ACP-backed step. The machine is reached where the bridge listens. |
 | `stdioAcpTransport` (`@noetic-tools/acp/stdio`) | An attached child process. |
 | custom transport | Anything yielding a duplex byte stream to an agent already running. |
+
+**A local agent's process tree.** Agents are usually started through a wrapper
+— `npx`, or a Node launcher that runs a native binary as its child — so the
+process Noetic spawns is rarely the agent itself. `localMachine()` and
+`stdioAcpTransport` start every process as the leader of its own process group
+(POSIX) and, when the transport closes or its signal aborts, stop the whole
+group: end its stdin, `SIGTERM`, a two-second grace period, then `SIGKILL`; on
+Windows, `taskkill /T /F` on its tree. Every wait is bounded, so an
+uncooperative child cannot hang the host, and our ends of the pipes are
+released last, so a grandchild that inherited them cannot keep the host alive.
+`close()` is idempotent — every call shares one shutdown. A missing binary, or
+a signal already aborted, rejects when the transport is opened, with
+`AcpConnectError`, not later at `close()`. A descendant that leaves the group
+(`setsid`) is outside this and must manage its own lifetime.
+
+**Presets.** `claudeCode()` and `codex()` launch the maintained bridges,
+`npx -y @agentclientprotocol/claude-agent-acp` and
+`npx -y @agentclientprotocol/codex-acp` (`PRESET_COMMANDS`); the retired
+`@zed-industries/claude-code-acp` and `@zed-industries/codex-acp` are never
+started. A preset's `args` are appended after the bridge's own, its `env` is
+layered onto the process environment (`CODEX_PATH` picks the Codex backend the
+bridge runs), and the session's `cwd` is the process's working directory. A
+`transport` override replaces the launch entirely and still receives the
+preset's environment and the connection's signal. A preset never changes the
+model a step or its environment selects.
 
 ### The remote runner
 
@@ -417,7 +460,9 @@ session: { reuse: 'assistant', keepAlive: 'harness' }
 ```
 
 `session.load` resumes an existing ACP session id via `session/load` instead of
-creating a new one.
+creating a new one. The agent replays the loaded conversation as
+`session/update` notifications before it answers; see § Output → harness events
+for how that replay is told apart from the new turn.
 
 ### Resuming a step
 
@@ -432,8 +477,8 @@ the same agent id:
 
 1. connects, and when the agent advertises `loadSession` calls `session/load`
    with the stored id. The `session/update` notifications the agent replays
-   while it loads are its history, not this turn's work, and are not forwarded
-   as events.
+   while it loads are its history, not this turn's work: they reach only
+   raw-event consumers, marked `replay: true` (§ Output → harness events).
 2. sends the step's prompt behind a notice that the previous turn was cut off
    and that finished work is not to be redone (`ACP_RESUME_NOTICE`). The
    conversation history is not prepended: the session has it.
@@ -485,11 +530,39 @@ step's. The `AcpEventBridge` translates each variant into the same
 | `agent_message_chunk` | `response.output_item.added` (message, once) + `response.output_text.delta` |
 | `agent_thought_chunk` | `response.reasoning.delta` |
 | `tool_call` | `response.output_item.added` (function_call) + `response.function_call_arguments.delta`/`.done` + `response.output_item.done` |
-| `user_message_chunk`, `tool_call_update`, `plan`, `available_commands_update`, `current_mode_update` | `acp.<sessionUpdate>` (full stream only) |
+| every other variant — `user_message_chunk`, `tool_call_update`, `plan`, `available_commands_update`, `current_mode_update`, `config_option_update`, `session_info_update`, `usage_update`, … | `acp.<sessionUpdate>` (full stream only) |
 
 As a result `getTextStream()`, `getReasoningStream()`, `getItemStream()`, and
 `getFullStream()` all surface ACP output. Every notification is *also* emitted
-raw as an `acp_event` framework event for protocol-native consumers.
+raw as an `acp_event` framework event (`{ stepId, agentId, sessionId, update }`)
+for protocol-native consumers.
+
+The client accepts every `session/update` variant of the current protocol, so
+normal traffic from current bridges never draws a `-32602 Invalid params`
+answer. Variants with no transcript content still reach the host and the event
+surface; the turn accumulator ignores them.
+
+**Usage.** Two different numbers, kept apart:
+
+- `usage_update` (`{ used, size }`, e.g. from codex-acp) is the session's
+  context-window occupancy, not billed tokens. It reaches consumers raw (the
+  `acp_event` and `acp.usage_update`) and never becomes `TokenUsage`, cost, or
+  `ctx.tokens`.
+- The `usage` a `session/prompt` answer reports is kept verbatim on
+  `AcpTurnResult.reportedUsage` and on the turn's `response.completed` event as
+  `reportedUsage`. It is not folded into `AcpTurnResult.usage` either, because
+  an agent may report session totals rather than the turn's delta;
+  `AcpTurnResult.usage` stays the billed delta an adapter supplies.
+
+**Replay is not output.** While `session/load` runs — for an explicit
+`session.load` or for the resume of an earlier attempt's session — every update
+the agent sends is its loaded history. Each reaches the current step's raw
+`acp_event` stream with `replay: true` and the same step, agent and session
+attribution; none is translated into text, reasoning, item or function-call
+events, and none enters the turn's items. Normal forwarding resumes before mode
+and model selection and the prompt, so even a follow-up that then fails
+selecting its mode shows none of the old answer as new output. Raw-event
+consumers that want the history filter on `replay`.
 
 **A turn always closes its bracket.** The bridge opens every turn with
 `response.created` and closes it with `response.completed` — carrying the stop
@@ -657,8 +730,8 @@ type-only re-exports that erase at compile time. Enforced by
 The npm dependency tree is a separate question, and the honest answer is
 different: `@noetic-tools/types` declares the protocol package as a real
 `dependency` so its `.d.ts` re-exports resolve for consumers, which means
-installing core installs it (and a second zod major alongside the workspace's).
-Runtime import graph clean; install graph not.
+installing core installs it (it takes zod as a peer, so the workspace's zod
+serves it). Runtime import graph clean; install graph not.
 
 ## Future Considerations
 
@@ -666,12 +739,14 @@ Runtime import graph clean; install graph not.
   2026-09) offers an `{ "type": "acp", "name", "serverId" }` MCP server whose
   messages travel as `mcp/message` requests on the ACP connection itself
   (`mcpCapabilities.acp`), which would need no `reach` at all. It needs MCP
-  2026-07-28, the ACP library moved to `@agentclientprotocol/sdk` (its
-  `unstable` entry implements it; `@zed-industries/agent-client-protocol`
-  0.4.5 rejects an `acp` server), and an agent that advertises it — none of
+  2026-07-28, the client on the SDK's `unstable` entry (which implements it;
+  the stable 1.x entry rejects an `acp` server), and an agent that advertises
+  it — none of
   Claude Code, Codex (`acp: false`), Gemini CLI, opencode or pi-acp does yet.
 - Protocol features still in draft upstream (`session/resume`, `session/list`,
-  `elicitation/*`, session config options, usage reporting) arrive with a
-  version bump of `@zed-industries/agent-client-protocol`.
+  `elicitation/*`) arrive with a version bump of `@agentclientprotocol/sdk`.
+  Its 2.x line drops `ClientSideConnection` for a builder API
+  (`client({ name }).connectWith(...)`), so moving to it is a rewrite of the
+  connection driver, not a version bump.
 - Feeding ACP `plan` updates into the plan context layer, so a sub-agent's plan
   becomes part of the host agent's visible state.
