@@ -4,7 +4,12 @@
  */
 
 import type { Span, SteeringDecision } from '@noetic-tools/types';
-import { frameworkCast, NoeticErrorImpl, validateSchema } from '@noetic-tools/types';
+import {
+  frameworkCast,
+  NoeticErrorImpl,
+  presentToolProgress,
+  validateSchema,
+} from '@noetic-tools/types';
 import { orderedCallId } from '../connections/durability';
 import { ToolAttr } from '../observability/genai-attributes';
 import { ContextImpl } from '../runtime/context-impl';
@@ -65,8 +70,10 @@ async function consumeToolGenerator(params: {
       eventType: 'tool_progress',
       data: {
         stepId: params.stepId,
+        name: params.tool.name,
         toolName: params.tool.name,
         event: next.value,
+        ...presentToolProgress(params.tool, events),
       },
     });
     // A direct `invokeTool` has no model call id — the step id keys its region.

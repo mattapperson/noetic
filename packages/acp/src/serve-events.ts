@@ -6,8 +6,16 @@
  * `session/prompt` request with a stop reason.
  */
 
-import type { AcpSessionNotification, AcpStopReason, StreamEvent } from '@noetic-tools/types';
+import type {
+  AcpSessionNotification,
+  AcpStopReason,
+  AcpToolCallContent,
+  StreamEvent,
+  ToolContent,
+  ToolLocation,
+} from '@noetic-tools/types';
 import { frameworkCast } from '@noetic-tools/types';
+import { z } from 'zod';
 
 //#region Types
 
@@ -20,6 +28,7 @@ export interface ServeToolCallPresentation {
   kind?: ServeToolCallKind;
   locations?: Array<{
     path: string;
+    line?: number;
   }>;
   /** Initial status: `pending` when the policy will ask, `in_progress` otherwise. */
   status: 'pending' | 'in_progress';
@@ -116,6 +125,174 @@ function readToolCall(event: StreamEvent): {
   return {
     name,
     callId,
+  };
+}
+
+const KINDS = [
+  'read',
+  'edit',
+  'delete',
+  'move',
+  'search',
+  'execute',
+  'think',
+  'fetch',
+  'switch_mode',
+  'other',
+] as const;
+
+/** How a call presents, as its events carry it (spec 08 § Tool calls, plans and agent settings). */
+const EventPresentationSchema = z.object({
+  title: z.string().optional(),
+  kind: z.enum(KINDS).optional(),
+  locations: z
+    .array(
+      z.object({
+        path: z.string(),
+        line: z.number().optional(),
+      }),
+    )
+    .optional(),
+  status: z
+    .enum([
+      'pending',
+      'in_progress',
+    ])
+    .optional(),
+  progress: z.number().optional(),
+});
+
+type EventPresentation = z.infer<typeof EventPresentationSchema>;
+
+function readPresentation(event: StreamEvent): EventPresentation {
+  const parsed = EventPresentationSchema.safeParse(event.data);
+  return parsed.success ? parsed.data : {};
+}
+
+/** A call's structured content, as its events carry it; undefined when it carries none. */
+function readContent(event: StreamEvent): ToolContent[] | undefined {
+  const content = event.data.content;
+  if (!Array.isArray(content) || content.length === 0) {
+    return undefined;
+  }
+  return frameworkCast<ToolContent[]>(content);
+}
+
+function wireLocations(
+  locations: ReadonlyArray<ToolLocation> | undefined,
+): ServeToolCallPresentation['locations'] {
+  return locations?.map((location) => ({
+    path: location.path,
+    ...(location.line === undefined
+      ? {}
+      : {
+          line: location.line,
+        }),
+  }));
+}
+
+/** A content block of a tool call's wire content. */
+type WireBlock = Extract<
+  AcpToolCallContent,
+  {
+    type: 'content';
+  }
+>['content'];
+
+type ContentOf<T extends ToolContent['type']> = Extract<
+  ToolContent,
+  {
+    type: T;
+  }
+>;
+
+/** Each content part that is a block on the wire, by its type. */
+type BlockMappers = {
+  [T in Exclude<ToolContent['type'], 'diff' | 'terminal'>]: (content: ContentOf<T>) => WireBlock;
+};
+
+const DATA_URL = /^data:([^;,]+);base64,(.*)$/s;
+
+/** Media carried as a data URL, as the wire's own media block; undefined for a plain URL. */
+function mediaBlock(kind: 'image' | 'audio', url: string): WireBlock | undefined {
+  const match = DATA_URL.exec(url);
+  if (!match?.[1] || match[2] === undefined) {
+    return undefined;
+  }
+  return {
+    type: kind,
+    mimeType: match[1],
+    data: match[2],
+  };
+}
+
+/** Something that lives at a URL: a link to it. */
+function linkBlock(uri: string, name?: string): WireBlock {
+  return {
+    type: 'resource_link',
+    uri,
+    name: name ?? uri.split('/').pop() ?? uri,
+  };
+}
+
+function fileBlock(content: ContentOf<'input_file'>): WireBlock {
+  const media = content.fileData ? DATA_URL.exec(content.fileData) : null;
+  if (media?.[1]?.startsWith('audio/') && media[2] !== undefined) {
+    return {
+      type: 'audio',
+      mimeType: media[1],
+      data: media[2],
+    };
+  }
+  const name = content.filename ?? 'file';
+  if (media?.[1] && media[2] !== undefined) {
+    return {
+      type: 'resource',
+      resource: {
+        uri: name,
+        mimeType: media[1],
+        blob: media[2],
+      },
+    };
+  }
+  return linkBlock(content.fileUrl ?? content.fileId ?? name, name);
+}
+
+const BLOCKS: BlockMappers = {
+  input_text: (content) => ({
+    type: 'text',
+    text: content.text,
+  }),
+  input_image: (content) => mediaBlock('image', content.imageUrl) ?? linkBlock(content.imageUrl),
+  input_file: fileBlock,
+  resource_link: (content) => content,
+  resource: ({ uri, mimeType, text, blob }) => ({
+    type: 'resource',
+    resource:
+      text === undefined
+        ? {
+            uri,
+            mimeType,
+            blob: blob ?? '',
+          }
+        : {
+            uri,
+            mimeType,
+            text,
+          },
+  }),
+};
+
+/** One piece of structured content, as the wire's tool-call content. */
+function wireContent(content: ToolContent): AcpToolCallContent {
+  if (content.type === 'diff' || content.type === 'terminal') {
+    return content;
+  }
+  // The registry is keyed by the union's own tags, so its mapper takes this part.
+  const toBlock = frameworkCast<(part: ToolContent) => WireBlock>(BLOCKS[content.type]);
+  return {
+    type: 'content',
+    content: toBlock(content),
   };
 }
 
@@ -250,14 +427,63 @@ async function handleToolCallStarted(state: TurnState, event: StreamEvent): Prom
   state.openCalls.add(call.callId);
   const args = state.argsByCallId.get(call.callId);
   const presentation = state.params.present(call.name, call.callId, args);
+  // How the call presents itself — a delegated agent's call, a tool's own
+  // declaration — and, where it says nothing, the serve options' tools.
+  const own = readPresentation(event);
   await notifyIfPrimary(state.params, state.primary, {
     sessionUpdate: 'tool_call',
     toolCallId: call.callId,
-    title: presentation.title,
-    kind: presentation.kind,
-    status: presentation.status,
-    locations: presentation.locations,
+    title: own.title ?? presentation.title,
+    kind: own.kind ?? presentation.kind,
+    status: own.status === 'pending' ? 'pending' : presentation.status,
+    locations: wireLocations(own.locations) ?? presentation.locations,
     rawInput: asRecord(args),
+  });
+}
+
+/** A running call's report, as an update of its call. */
+async function handleToolProgress(state: TurnState, event: StreamEvent): Promise<void> {
+  const call = readToolCall(event);
+  if (!call || !state.openCalls.has(call.callId)) {
+    return;
+  }
+  const report = readPresentation(event);
+  const content = readContent(event);
+  await notifyIfPrimary(state.params, state.primary, {
+    sessionUpdate: 'tool_call_update',
+    toolCallId: call.callId,
+    ...(report.status === undefined
+      ? {}
+      : {
+          status: report.status,
+        }),
+    ...(report.title === undefined
+      ? {}
+      : {
+          title: report.title,
+        }),
+    ...(report.kind === undefined
+      ? {}
+      : {
+          kind: report.kind,
+        }),
+    ...(report.locations === undefined
+      ? {}
+      : {
+          locations: wireLocations(report.locations),
+        }),
+    ...(content === undefined
+      ? {}
+      : {
+          content: content.map(wireContent),
+        }),
+    ...(report.progress === undefined
+      ? {}
+      : {
+          _meta: {
+            progress: report.progress,
+          },
+        }),
   });
 }
 
@@ -268,24 +494,53 @@ async function handleToolCallCompleted(state: TurnState, event: StreamEvent): Pr
   }
   state.openCalls.delete(call.callId);
   const output = typeof event.data.output === 'string' ? event.data.output : undefined;
+  const content = readContent(event);
   await notifyIfPrimary(state.params, state.primary, {
     sessionUpdate: 'tool_call_update',
     toolCallId: call.callId,
     status: event.data.error === true ? 'failed' : 'completed',
-    // The tool's output (or failure text) as renderable content — the spec's
+    // What the call produced as structure (a diff, an image) when it says;
+    // else its output (or failure text) as renderable content — the spec's
     // "completed with the output as content, failed carrying the error".
     content:
-      output !== undefined
-        ? [
-            {
-              type: 'content',
-              content: {
-                type: 'text',
-                text: output,
+      content !== undefined
+        ? content.map(wireContent)
+        : output !== undefined
+          ? [
+              {
+                type: 'content',
+                content: {
+                  type: 'text',
+                  text: output,
+                },
               },
-            },
-          ]
-        : undefined,
+            ]
+          : undefined,
+  });
+}
+
+/** The plan of the agent that answers the session, as the wire's plan. */
+async function handlePlan(state: TurnState, event: StreamEvent, removed: boolean): Promise<void> {
+  const plan = event.data.plan;
+  const entries = removed
+    ? []
+    : typeof plan === 'object' && plan !== null && 'entries' in plan && Array.isArray(plan.entries)
+      ? frameworkCast<
+          Extract<
+            ServeSessionUpdate,
+            {
+              sessionUpdate: 'plan';
+            }
+          >['entries']
+        >(plan.entries)
+      : undefined;
+  // A plan written as markdown or kept in a file has no entries to show.
+  if (entries === undefined) {
+    return;
+  }
+  await notifyIfPrimary(state.params, state.primary, {
+    sessionUpdate: 'plan',
+    entries,
   });
 }
 
@@ -332,6 +587,14 @@ async function handleFrameworkEvent(
   }
   if (hasEventName(event, 'tool_call_completed')) {
     await handleToolCallCompleted(state, event);
+    return null;
+  }
+  if (hasEventName(event, 'tool_progress')) {
+    await handleToolProgress(state, event);
+    return null;
+  }
+  if (hasEventName(event, 'plan_updated') || hasEventName(event, 'plan_removed')) {
+    await handlePlan(state, event, hasEventName(event, 'plan_removed'));
     return null;
   }
   if (hasEventName(event, 'turn_completed') && matchesTurn(event, state.turnId)) {

@@ -409,8 +409,12 @@ In addition to OpenResponses streaming events, Noetic emits framework-level even
 | `{name}:step_started` | Before each step executes | `stepId`, `kind` |
 | `{name}:step_completed` | After each step completes | `stepId`, `kind` |
 | `{name}:tool_round_started` | Before a tool execution round | `round`, `toolCount` |
-| `{name}:tool_call_started` | Before each tool call | `name`, `callId` |
-| `{name}:tool_call_completed` | After each tool call | `name`, `callId`, `error` |
+| `{name}:tool_call_started` | Before each tool call | `name`, `callId`, `title?`, `kind?`, `locations?`, `status?` |
+| `{name}:tool_progress` | A running tool call reported progress | `name`, `callId`, `status?`, `title?`, `kind?`, `locations?`, `progress?`, `content?`, `event?` |
+| `{name}:tool_call_completed` | After each tool call | `name`, `callId`, `error`, `output?`, `content?`, `result?` |
+| `{name}:plan_updated` | An agent reported its plan, whole | `stepId`, `plan` |
+| `{name}:plan_removed` | An agent dropped a plan | `stepId`, `id?` |
+| `{name}:agent_config_updated` | An agent changed its mode or model | `stepId`, `mode?`, `model?` |
 | `{name}:tool_model_output_failed` | A tool's `toModelOutput` threw; the model was given the call's JSON output | `name`, `callId`, `error` |
 | `{name}:tool_round_completed` | After all tool calls in a round | `round`, `toolCount` |
 

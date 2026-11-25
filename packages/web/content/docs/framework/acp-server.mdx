@@ -57,7 +57,7 @@ They are honest about their limits: operations the wire cannot express (binary w
 
 ## Presenting tools
 
-ACP clients render each tool call with a kind, a title, and affected file locations. Declare the presentation on the tool itself — the same pattern as [tool UI declarations](/docs/framework/generative-ui):
+ACP clients render each tool call with a kind, a title, and affected file locations. Declare the presentation on the tool itself — the same [`presentation`](/docs/framework/runtime#tool-calls-plans-and-agent-settings) every host reads:
 
 ```ts
 import { tool } from '@noetic-tools/core';
@@ -69,7 +69,7 @@ const editFile = tool({
   input: z.object({ path: z.string(), content: z.string() }),
   output: z.object({ ok: z.boolean() }),
   execute: async () => ({ ok: true }),
-  acp: {
+  presentation: {
     kind: 'edit',
     title: (args) => `Edit ${args.path}`,
     locations: (args) => [args.path],
@@ -77,7 +77,7 @@ const editFile = tool({
 });
 ```
 
-Pass the harness's tools to the server so it can read the declarations — the harness contract doesn't expose its tool set:
+The harness puts the declared title, kind and locations on the call's events, which the server shows; a call's progress becomes a `tool_call_update`, and a completion's structured `content` (diffs, images) is sent as the call's content. A delegated agent's calls, progress and plan reach the editor the same way. For calls whose events carry no presentation, pass the harness's tools to the server so it can read the declarations — the harness contract doesn't expose its tool set:
 
 ```ts
 import { serveAcp } from '@noetic-tools/acp/server';

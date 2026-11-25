@@ -257,8 +257,9 @@ Framework events emitted during execution:
 | `{name}:step_started` | Before each step executes. |
 | `{name}:step_completed` | After each step completes. |
 | `{name}:tool_round_started` | Before a tool execution round. |
-| `{name}:tool_call_started` | Before each tool call. |
-| `{name}:tool_call_completed` | After each tool call. |
+| `{name}:tool_call_started` | Before each tool call. Data: `{ name, callId, title?, kind?, locations?, status? }` — see [Tool calls, plans and agent settings](#tool-calls-plans-and-agent-settings). |
+| `{name}:tool_progress` | A running tool call reported progress. Data: `{ name, callId, status?, title?, kind?, locations?, progress?, content?, event? }`. |
+| `{name}:tool_call_completed` | After each tool call. Data: `{ name, callId, error, output?, content?, result? }`. |
 | `{name}:tool_model_output_failed` | A tool's `toModelOutput` threw; the model was given the call's JSON output. |
 | `{name}:tool_round_completed` | After all tool calls in a round. |
 | `{name}:model_call_started` | Before each provider call. Data: `{ round, messageCount, toolCount }`. |
@@ -271,11 +272,65 @@ Framework events emitted during execution:
 | `{name}:spend_settled` | A pending paid call was settled or written off. Data: `{ id, cost, writtenOff? }`. |
 | `{name}:agent_started` | A [nested agent](#nested-agents) started. Scoped. Data: `{ stepId, title?, description? }`. |
 | `{name}:agent_status` | A nested agent reported its status: `running`, `idle`, `waiting` or `unknown`. Scoped. Data: `{ stepId, status, stopReason? }`. |
+| `{name}:plan_updated` | An agent reported its plan, whole. Data: `{ stepId, plan }`. |
+| `{name}:plan_removed` | An agent dropped a plan. Data: `{ stepId, id? }`. |
+| `{name}:agent_config_updated` | An agent changed its mode or model. Data: `{ stepId, mode?, model? }`. |
 | `{name}:agent_completed` | The turn that ran a nested agent ended. Scoped. Data: `{ stepId, status }`, `status` being `completed`, `failed` or `cancelled`. |
 | `{name}:drain_started` | A [graceful stop](#graceful-stop) began. Data: `{ executionId, deadline, inFlight }`. |
 | `{name}:drain_finished` | A graceful stop ended, just before the cancel. Data: `{ executionId, reason, durationMs, finished, cutOff }`. |
 
 callModel steps support an `emit` option to control step/tool framework event emission — set `false` to suppress or pass a filter function. Turn-level events are emitted by the session runner and are not gated by `step.emit`.
+
+### Tool calls, plans and agent settings
+
+Every agent — a `callModel` step's model, a coding agent a step runs, a nested agent — reports its work in one vocabulary, so a trail of what it is doing needs no agent-specific code:
+
+- **A tool call** starts with `tool_call_started`, carrying its human `title`, its `kind` (`read`, `edit`, `delete`, `move`, `search`, `execute`, `think`, `fetch`, `switch_mode`, `other`), the `locations` it works on (`{ path, line? }`) and `status: 'pending'` while it waits. While it runs, `tool_progress` carries what changed: `status`, `title`, `progress` (0 to 1), `content`. It ends with `tool_call_completed`, whose `content` is what it produced as structure: the content parts a model is given for text and media (`input_text`, `input_image` with a URL or data URL, `input_file`), plus `diff` (`path`, `oldText`, `newText`), `terminal`, `resource_link` and `resource`.
+- **A plan** arrives whole on `plan_updated` (`{ stepId, plan }`, `plan.entries` each `{ content, priority, status }`, or a `markdown` or `uri` plan) and replaces the last one with the same `id`; `plan_removed` drops it.
+- **Settings**: `agent_config_updated` says the agent switched its `mode` or its `model`.
+- **An image an agent answers with** is an `image_generation_call` item, its `result` a data URL — not text.
+
+```ts
+import type { AgentHarness, ToolContent } from '@noetic-tools/core';
+
+declare const harness: AgentHarness;
+declare const recordEdit: (path: string, oldText: string | null, newText: string) => void;
+
+for await (const event of harness.getFullStream()) {
+  if (event.source !== 'framework' || !event.type.endsWith(':tool_call_completed')) {
+    continue;
+  }
+  const content = (event.data.content ?? []) as ToolContent[];
+  for (const entry of content) {
+    if (entry.type === 'diff') {
+      recordEdit(entry.path, entry.oldText, entry.newText);
+    }
+  }
+}
+```
+
+Your own tools report the same fields when they declare a `presentation`:
+
+```ts
+import { tool } from '@noetic-tools/core';
+import { z } from 'zod';
+
+const writeFile = tool({
+  name: 'write_file',
+  description: 'Write a file',
+  input: z.object({ path: z.string(), text: z.string() }),
+  output: z.object({ before: z.string(), after: z.string() }),
+  execute: async ({ text }) => ({ before: '', after: text }),
+  presentation: {
+    kind: 'edit',
+    title: ({ path }) => `Write ${path}`,
+    locations: ({ path }) => [path],
+    content: (result, { path }) => [{ type: 'diff', path, oldText: result.before, newText: result.after }],
+  },
+});
+```
+
+A generator tool (`toolWithGenerator`) can also declare `progress(events)`, reported on `tool_progress` for each event it yields. Presentation never gates anything, and a declaration that throws presents nothing.
 
 ### Nested agents
 

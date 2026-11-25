@@ -50,6 +50,7 @@ import type { AcpLiveSession, AcpSessionStore } from '../runtime/acp-session-sto
 import { acpSessionsOf } from '../runtime/acp-session-store';
 import { awaitApproval } from '../runtime/tool-approval';
 import { isRpcError, RpcFailure } from '../util/error-message';
+import { modelOf } from './acp-activity';
 import { AcpEventBridge } from './acp-events';
 import { withHistoryPrompt } from './acp-history';
 import { renderLayerContext } from './acp-layers';
@@ -159,11 +160,7 @@ function toLlmResponse(result: AcpTurnResult): LLMResponse {
  * model the step selected.
  */
 function currentModel(session: AcpSession, selected: string | undefined): string | undefined {
-  const selects = (session.configOptions ?? []).filter((option) => option.type === 'select');
-  const option =
-    selects.find((candidate) => candidate.category === 'model') ??
-    selects.find((candidate) => candidate.id === 'model');
-  return option?.type === 'select' ? option.currentValue : selected;
+  return modelOf(session.configOptions) ?? selected;
 }
 
 /** Record a turn's items and charge its spend: every attempt, as every model call is. */

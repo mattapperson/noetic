@@ -19,6 +19,7 @@ import type {
   StreamEvent,
   StreamingItem,
   ToolAcpDeclaration,
+  ToolPresentationDeclaration,
 } from '@noetic-tools/types';
 
 //#region Harness contract
@@ -178,16 +179,18 @@ export interface AcpServeHistory {
 
 //#region Options
 
-/** @public A tool's name plus its ACP presentation, for `AcpServeOptions.tools`. */
+/** @public A tool's name plus its presentation, for `AcpServeOptions.tools`. */
 export interface AcpPresentableTool {
   name: string;
+  presentation?: ToolPresentationDeclaration;
+  /** @deprecated Use `presentation`. */
   acp?: ToolAcpDeclaration;
 }
 
 /** @public Options for `toAcpAgent` / `serveAcp`. */
 export interface AcpServeOptions {
   /**
-   * The harness's tools (or any subset), read for their `acp` presentation
+   * The harness's tools (or any subset), read for their `presentation`
    * declarations. Pass the same array the harness was built with; an
    * undeclared or unlisted tool renders as kind `other` with its name as the
    * title.

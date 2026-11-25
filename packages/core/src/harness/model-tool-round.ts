@@ -15,7 +15,12 @@ import type {
   Span,
   Tool,
 } from '@noetic-tools/types';
-import { SteerPoint, validateSchema } from '@noetic-tools/types';
+import {
+  presentToolCall,
+  presentToolContent,
+  SteerPoint,
+  validateSchema,
+} from '@noetic-tools/types';
 import { itemsToInput, toolModelOutputToProvider } from '../adapters/openrouter';
 import { isFunctionCall } from '../interpreter/typeguards';
 import { drainsOf } from '../runtime/drain';
@@ -51,6 +56,27 @@ export interface ToolRoundScope {
 //#region Tool Round
 
 const SKIPPED_FOR_STEER_OUTPUT = 'Skipped: a new message arrived before this tool call ran.';
+
+/** A call's arguments, parsed for its presentation; undefined when they do not parse. */
+function argsForPresentation(fc: FunctionCallItem): unknown {
+  try {
+    return JSON.parse(fc.arguments);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * A call's `tool_call_started` data: its name and id, and how it presents as
+ * its tool declares (spec 08 § Tool calls, plans and agent settings).
+ */
+function callStartedData(fc: FunctionCallItem, tool: Tool | undefined): Record<string, unknown> {
+  return {
+    name: fc.name,
+    callId: fc.callId,
+    ...presentToolCall(tool, argsForPresentation(fc)),
+  };
+}
 
 /**
  * Tool rounds replay only their function calls. A round a steer follows must
@@ -283,10 +309,7 @@ async function executeFunctionCall(
 ): Promise<FunctionCallOutcome> {
   const { fc, request, allowedTools, allItems, conversationInput } = params;
   if (!params.announced) {
-    params.emitIfAllowed('tool_call_started', {
-      name: fc.name,
-      callId: fc.callId,
-    });
+    params.emitIfAllowed('tool_call_started', callStartedData(fc, findTool(allowedTools, fc.name)));
   }
   let parsedArgs: unknown;
   try {
@@ -331,6 +354,12 @@ async function executeFunctionCall(
       layers: request.layers,
       callId: fc.callId,
       keyScope: params.calls?.scope,
+      onProgress: (progress) =>
+        params.emitIfAllowed('tool_progress', {
+          name: fc.name,
+          callId: fc.callId,
+          ...progress,
+        }),
     }));
   // Held: it has no result yet. Nothing goes into the conversation for it.
   if (toolResult.held) {
@@ -413,11 +442,20 @@ async function executeFunctionCall(
     }),
   });
   scope.emitItemAppended(request.ctx, outputItem);
+  const content =
+    toolResult.error === true
+      ? undefined
+      : presentToolContent(toolForCall, toolResult.result, parsedArgs);
   params.emitIfAllowed('tool_call_completed', {
     name: fc.name,
     callId: fc.callId,
     error: toolResult.error === true,
     output: toolResult.output,
+    ...(content
+      ? {
+          content,
+        }
+      : {}),
     ...(recorded
       ? {
           replayed: true,
@@ -558,10 +596,10 @@ function recordSkippedToolCall(
     emitIfAllowed: (eventType: string, data: Record<string, unknown>) => void;
   },
 ): void {
-  params.emitIfAllowed('tool_call_started', {
-    name: params.fc.name,
-    callId: params.fc.callId,
-  });
+  params.emitIfAllowed(
+    'tool_call_started',
+    callStartedData(params.fc, findTool(params.allowedTools, params.fc.name)),
+  );
   recordUnrunToolCall(scope, {
     ...params,
     output: SKIPPED_FOR_STEER_OUTPUT,

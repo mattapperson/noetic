@@ -503,13 +503,16 @@ for await (const chunk of harness.getTextStream()) {
 
 | ACP update | Surfaces as |
 |---|---|
-| `agent_message_chunk` | `getTextStream()`, `getFullStream()` |
+| `agent_message_chunk` | `getTextStream()`, `getFullStream()`; an image is an `image_generation_call` item (a data URL), never text |
 | `agent_thought_chunk` | `getReasoningStream()` |
-| `tool_call` | `getItemStream()` as a function call, and `tool_call_started` for the agent's own tools |
-| `tool_call_update` that finishes a call | `tool_call_completed` `{ name, callId, error }` |
-| every other update — `plan`, `available_commands_update`, `current_mode_update`, `config_option_update`, `session_info_update`, `usage_update`, … | nothing: session state, not output |
+| `tool_call` | `getItemStream()` as a function call, and `tool_call_started` `{ name, callId, title, kind?, locations?, status? }` for the agent's own tools |
+| `tool_call_update` of a running call | `tool_progress` with what changed: `status`, `title`, `kind`, `locations`, `progress`, `content` |
+| `tool_call_update` that finishes a call | `tool_call_completed` `{ name, callId, error, output?, content?, result? }` — `content` its diffs, terminals, images and resources |
+| `plan` (and the draft `plan_update` / `plan_removed`) | `plan_updated` `{ stepId, plan }` / `plan_removed` `{ stepId, id }` |
+| `current_mode_update`, a `config_option_update` that changes the model | `agent_config_updated` `{ stepId, mode? , model? }` |
+| every other update — `available_commands_update`, `session_info_update`, `usage_update`, … | nothing: session state, not output |
 
-These are the same events a `callModel` step emits, so nothing you consume names the protocol. A call to one of the step's own `tools` is reported once, by the tool bridge.
+These are the same events a `callModel` step emits, with the same fields (see [Tool calls, plans and agent settings](/docs/framework/runtime#tool-calls-plans-and-agent-settings)), so nothing you consume names the protocol. A call's `progress` comes from the agent's `_meta.progress` or its raw output's `progress`; an update that leaves `content` out keeps what the call had, so the completion carries everything it produced. A call to one of the step's own `tools` is reported once, by the tool bridge.
 
 Every call that starts also completes before the turn closes — a call the agent never reported finished completes failed.
 

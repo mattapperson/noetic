@@ -23,12 +23,15 @@ import type {
   ItemSchemaRegistry,
   StepAcpAgent,
   Tool,
+  ToolCallPresentation,
 } from '@noetic-tools/types';
 import {
   bridgedToolTitles,
   defaultItemSchemaRegistry,
   frameworkCast,
   namesBridgedToolCall,
+  presentToolCall,
+  presentToolContent,
 } from '@noetic-tools/types';
 import {
   ACP_TOOL_SERVER_NAME,
@@ -48,6 +51,7 @@ import {
   toHeldCall,
   waitOnHeldCalls,
 } from '../runtime/held-calls';
+import type { ToolProgressReport } from '../runtime/tool-call';
 import { createToolResultItem, executeToolCall, resolveWireJsonSchema } from '../runtime/tool-call';
 import { sanitizeToolNameForWire } from '../util/tool-name';
 import type { AcpEventBridge } from './acp-events';
@@ -183,7 +187,7 @@ function wrapSchema(schema: Record<string, unknown>): Record<string, unknown> {
 }
 
 function titleOf(tool: Tool): string | undefined {
-  const title = tool.acp?.title;
+  const title = (tool.presentation ?? tool.acp)?.title;
   return typeof title === 'string' ? title : undefined;
 }
 
@@ -327,6 +331,7 @@ interface SettledCall extends BridgedCall {
   /** A provisional call's start and completion, reported with its result once its owner is known. */
   readonly deferred?: {
     readonly args: unknown;
+    readonly presentation: ToolCallPresentation;
     readonly completion: Record<string, unknown>;
   };
 }
@@ -893,8 +898,9 @@ export class AcpToolRunner implements AcpToolHost {
     tool: Tool | undefined,
   ): ReturnType<typeof executeToolCall> {
     const args = this.unwrap(call);
+    const presentation = presentToolCall(tool, args);
     if (!binding.provisional) {
-      binding.events.bridgedCallStarted(callId, call.name, args);
+      binding.events.bridgedCallStarted(callId, call.name, args, presentation);
     }
     const record = this.records.recordFor({
       ctx: binding.ctx,
@@ -927,6 +933,17 @@ export class AcpToolRunner implements AcpToolHost {
           layers: binding.layers,
           callId,
           recordId: record.id,
+          // A provisional call's events wait for its owner: its progress is not shown.
+          ...(binding.provisional
+            ? {}
+            : {
+                onProgress: (progress: ToolProgressReport) =>
+                  binding.events.toolEvent('tool_progress', {
+                    name: call.name,
+                    callId,
+                    ...progress,
+                  }),
+              }),
           ...(binding.scope
             ? {
                 scope: binding.scope,
@@ -957,10 +974,17 @@ export class AcpToolRunner implements AcpToolHost {
       callItem,
       outputItem,
     };
+    const content =
+      result.error === true ? undefined : presentToolContent(tool, result.result, args);
     const completion = {
       name: call.name,
       error: result.error === true,
       output: result.output,
+      ...(content
+        ? {
+            content,
+          }
+        : {}),
     };
     if (binding.provisional) {
       this.publish(binding, {
@@ -968,6 +992,7 @@ export class AcpToolRunner implements AcpToolHost {
         callId,
         deferred: {
           args,
+          presentation,
           completion,
         },
       });
@@ -991,7 +1016,12 @@ function emitResult(
   call: Pick<SettledCall, 'callId' | 'wireName' | 'outputItem' | 'deferred'>,
 ): void {
   if (call.deferred) {
-    bridge.bridgedCallStarted(call.callId, call.wireName, call.deferred.args);
+    bridge.bridgedCallStarted(
+      call.callId,
+      call.wireName,
+      call.deferred.args,
+      call.deferred.presentation,
+    );
   }
   bridge.itemAppended(call.outputItem);
   if (call.deferred) {

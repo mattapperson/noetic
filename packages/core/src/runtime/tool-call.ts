@@ -15,6 +15,7 @@ import type {
   StandardSchemaV1,
   SteeringDecision,
   Tool,
+  ToolCallProgress,
   ToolHold,
 } from '@noetic-tools/types';
 import {
@@ -22,6 +23,7 @@ import {
   isStandardJsonSchema,
   isZodSchema,
   NoeticConfigError,
+  presentToolProgress,
   SteeringAction,
   validateSchema,
 } from '@noetic-tools/types';
@@ -137,6 +139,16 @@ export interface ExecuteToolCallParams {
   keyScope?: string;
   /** The nested agent making the call, named on its held record (`HeldCall.scope`). */
   scope?: AgentScope;
+  /**
+   * Sees each event a generator tool yields, with what the tool's
+   * presentation reports for it: the caller emits it as `tool_progress`.
+   */
+  onProgress?: (progress: ToolProgressReport) => void;
+}
+
+/** One event a running generator tool yielded, and what its presentation reports for it. */
+export interface ToolProgressReport extends ToolCallProgress {
+  event: unknown;
 }
 
 /** The id a call's durable records go under. */
@@ -448,6 +460,10 @@ async function runMatchedTool(
           break;
         }
         events.push(next.value);
+        params.onProgress?.({
+          event: next.value,
+          ...presentToolProgress(matchedTool, events),
+        });
         if (uiBase) {
           emitToolUi({
             ...uiBase,
