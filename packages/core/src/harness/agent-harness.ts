@@ -2133,6 +2133,7 @@ export class AgentHarness<
       return await forgetting;
     } finally {
       this.forgetting.delete(threadId);
+      this.cuts?.forget(threadId);
       await this.announceWakeTimeQuietly();
     }
   }
