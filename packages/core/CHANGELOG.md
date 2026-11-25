@@ -1,5 +1,10 @@
 ## @noetic-tools/core-v5.22.0-next.6 (2026-11-25)
 
+* chore(core): release 5.22.0-next.6 [skip ci] ([33eb330](https://github.com/mattapperson/noetic/commit/33eb330))
+* feat(core): resume a stored turn without its kept steers; harness.getStoredThread (#168) ([1ea3a24](https://github.com/mattapperson/noetic/commit/1ea3a24)), closes [#168](https://github.com/mattapperson/noetic/issues/168)
+
+## @noetic-tools/core-v5.22.0-next.6 (2026-11-25)
+
 * feat(core): resume a stored turn without its kept steers; harness.getStoredThread (#168) ([1ea3a24](https://github.com/mattapperson/noetic/commit/1ea3a24)), closes [#168](https://github.com/mattapperson/noetic/issues/168)
 
 ## @noetic-tools/core-v5.22.0-next.5 (2026-11-25)
