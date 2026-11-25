@@ -543,38 +543,30 @@ describe('naming who asks on storage without compare-and-set', () => {
       swap: true,
     });
     const swap = storage.swap?.bind(storage);
-    const get = storage.get.bind(storage);
-    let raced = false;
-    let readsAfterRace = 0;
+    let swaps = 0;
     const holds = new HeldCalls(
       {
         ...storage,
-        async get<T>(key: string): Promise<T | null> {
-          if (raced) {
-            readsAfterRace += 1;
-            // The reread sees only the renaming; before the retry reads,
-            // another host replaces the question.
-            if (readsAfterRace === 2) {
-              await storage.set(key, {
-                ...question('q7'),
-                args: {
-                  message: 'something else',
-                },
-              });
-            }
-          }
-          return await get<T>(key);
-        },
         async swap<T>(key: string, prev: T | null, next: T): Promise<boolean> {
-          if (!raced) {
-            raced = true;
-            await storage.set(key, {
-              ...question('q7'),
-              scope: {
-                id: 'other-host',
-              },
-            });
-          }
+          swaps += 1;
+          // First another host renames the hold; then, as the answer is given
+          // again, another replaces the question.
+          await storage.set(
+            key,
+            swaps === 1
+              ? {
+                  ...question('q7'),
+                  scope: {
+                    id: 'other-host',
+                  },
+                }
+              : {
+                  ...question('q7'),
+                  args: {
+                    message: 'something else',
+                  },
+                },
+          );
           return (await swap?.(key, prev, next)) ?? false;
         },
       },
@@ -591,8 +583,88 @@ describe('naming who asks on storage without compare-and-set', () => {
       .catch((e: unknown) => e);
     assert(isNoeticError(error));
     expect(error.message).toContain('replaced');
+    expect(swaps).toBe(2);
     const record = await holds.load('exec', 'q7');
     expect(record?.resolution).toBeUndefined();
+  });
+
+  it('a renaming that loses to a replacement leaves the new question alone', async () => {
+    const storage = createInMemoryStorage({
+      swap: true,
+    });
+    const swap = storage.swap?.bind(storage);
+    let raced = false;
+    const holds = new HeldCalls(
+      {
+        ...storage,
+        async swap<T>(key: string, prev: T | null, next: T): Promise<boolean> {
+          if (!raced) {
+            raced = true;
+            // Another process moves the call on to a question of another kind.
+            await storage.set(key, {
+              ...question('q9'),
+              reason: 'result',
+            });
+          }
+          return (await swap?.(key, prev, next)) ?? false;
+        },
+      },
+      () => 0,
+    );
+    await holds.open('exec', question('q9'));
+    const now = await holds.rescope('exec', 'q9', {
+      id: 'late-scope',
+    });
+    expect(now?.reason).toBe('result');
+    expect(now?.scope).toBeUndefined();
+    const stored = await holds.load('exec', 'q9');
+    expect(stored?.scope).toBeUndefined();
+  });
+
+  it('dropping a hold while its answer is being written settles it as answered', async () => {
+    const storage = createInMemoryStorage();
+    const set = storage.set.bind(storage);
+    let release: () => void = () => undefined;
+    let paused = false;
+    const holds = new HeldCalls(
+      {
+        ...storage,
+        async set<T>(key: string, value: T): Promise<void> {
+          // Stall the answer's write until the hold is being dropped.
+          if (!paused && JSON.stringify(value).includes('"resolution"')) {
+            paused = true;
+            await new Promise<void>((resolve) => {
+              release = resolve;
+            });
+          }
+          await set(key, value);
+        },
+      },
+      () => 0,
+    );
+    const record = question('q10');
+    await holds.open('exec', record);
+    const settled: string[] = [];
+    holds.watch('exec', toHeldCall(record), (event) => {
+      settled.push(event.by);
+    });
+    const answering = holds.resolve('exec', {
+      callId: 'q10',
+      resolution: {
+        action: 'deny',
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const closing = holds.close('exec', 'q10');
+    release();
+    await Promise.all([
+      answering,
+      closing,
+    ]);
+    expect(settled).toEqual([
+      'answer',
+    ]);
+    expect(await holds.load('exec', 'q10')).toBeUndefined();
   });
 
   it('a renaming still running when the hold is dropped never writes it back', async () => {

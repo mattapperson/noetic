@@ -212,16 +212,9 @@ function wrongAnswerKind(
 
 /** The same question: everything but who asks and any answer is unchanged. */
 function sameQuestion(before: HeldRecord, after: HeldRecord): boolean {
-  const { resolution: _before, ...questionBefore } = before;
-  const { resolution: _after, ...questionAfter } = after;
-  return onlyScopeChanged(questionBefore, questionAfter);
-}
-
-/** Whether two records of one call differ in nothing but who they name as asking. */
-function onlyScopeChanged(before: HeldRecord, after: HeldRecord): boolean {
-  const { scope: _before, ...restBefore } = before;
-  const { scope: _after, ...restAfter } = after;
-  return JSON.stringify(restBefore) === JSON.stringify(restAfter);
+  const { resolution: _resolvedBefore, scope: _scopeBefore, ...questionBefore } = before;
+  const { resolution: _resolvedAfter, scope: _scopeAfter, ...questionAfter } = after;
+  return JSON.stringify(questionBefore) === JSON.stringify(questionAfter);
 }
 
 function sameResolution(a: HeldRecord['resolution'], b: HeldRecord['resolution']): boolean {
@@ -376,27 +369,27 @@ export class HeldCalls {
   }
 
   private async openOne(executionId: string, record: HeldRecord): Promise<HeldRecord> {
-    const existing = await this.load(executionId, record.callId);
-    const same =
-      existing !== undefined &&
-      existing.argsHash === record.argsHash &&
-      existing.reason === record.reason;
-    if (same) {
-      return (await this.rescopeOne(executionId, record.callId, record.scope)) ?? existing;
+    for (let attempt = 0; attempt < RESCOPE_ATTEMPTS; attempt += 1) {
+      const existing = await this.load(executionId, record.callId);
+      if (!existing || existing.argsHash !== record.argsHash || existing.reason !== record.reason) {
+        break;
+      }
+      const renamed = await this.rescopeOne(executionId, record.callId, record.scope, existing);
+      // Replaced by another process meanwhile: look again at what is held now.
+      if (renamed && sameQuestion(existing, renamed)) {
+        return renamed;
+      }
     }
     await this.storage.set(`${heldPrefix(executionId)}${record.callId}`, record);
     return record;
   }
 
   /**
-   * The same question asked again by another host: its answer and id stay, but
-   * who it names as asking is this host's (a nested agent's scope is per host).
-   */
-  /**
    * Name who asks a still-unanswered hold as this host sees it (a nested
    * agent's scope is per host), keeping its id and everything else. Never
-   * writes over an answer: a compare-and-set that loses re-reads. Resolves
-   * with the record as it now stands.
+   * writes over an answer, nor renames a question that replaced the one first
+   * read: a compare-and-set that loses re-reads. Resolves with the record as it
+   * now stands.
    */
   rescope(
     executionId: string,
@@ -412,15 +405,20 @@ export class HeldCalls {
     executionId: string,
     callId: string,
     scope: HeldRecord['scope'],
+    question?: HeldRecord,
   ): Promise<HeldRecord | undefined> {
     const key = `${heldPrefix(executionId)}${callId}`;
+    let asked = question;
     for (let attempt = 0; attempt < RESCOPE_ATTEMPTS; attempt += 1) {
       const current = await this.load(executionId, callId);
-      if (
-        !current ||
-        current.resolution !== undefined ||
-        JSON.stringify(current.scope) === JSON.stringify(scope)
-      ) {
+      if (!current || current.resolution !== undefined) {
+        return current;
+      }
+      if (asked && !sameQuestion(asked, current)) {
+        return current;
+      }
+      asked = current;
+      if (JSON.stringify(current.scope) === JSON.stringify(scope)) {
         return current;
       }
       const { scope: _previous, ...rest } = current;
@@ -496,7 +494,17 @@ export class HeldCalls {
    * record. `by` says why, for a call this process announced; without it the record
    * says: answered, overdue, or else cancelled.
    */
-  async close(executionId: string, callId: string, by?: HeldCallSettled['by']): Promise<void> {
+  close(executionId: string, callId: string, by?: HeldCallSettled['by']): Promise<void> {
+    // In line with this process's other changes to the call: its settlement is
+    // read from the record it deletes, and no renaming writes it back.
+    return this.exclusive(executionId, callId, () => this.closeOne(executionId, callId, by));
+  }
+
+  private async closeOne(
+    executionId: string,
+    callId: string,
+    by: HeldCallSettled['by'] | undefined,
+  ): Promise<void> {
     const key = watchKey(executionId, callId);
     const watched = this.watches.has(key);
     if (watched) {
@@ -507,10 +515,7 @@ export class HeldCalls {
         watched && by === undefined
           ? settledByOf(await this.load(executionId, callId), this.now())
           : by;
-      // In line with renamings of the call: none still running writes it back.
-      await this.exclusive(executionId, callId, () =>
-        this.storage.delete(`${heldPrefix(executionId)}${callId}`),
-      );
+      await this.storage.delete(`${heldPrefix(executionId)}${callId}`);
       if (settledBy !== undefined) {
         this.settleWatch(key, settledBy);
       }
@@ -659,58 +664,51 @@ export class HeldCalls {
       argsHash?: string;
       resolution: HeldResolution;
     },
-    retries = RESCOPE_ATTEMPTS,
-    question?: HeldRecord,
   ): Promise<void> {
     const { callId } = answer;
-    const record = await this.load(executionId, callId);
-    if (!record) {
-      throw refused(callId, 'no call with this id is held');
-    }
-    // A retry answers the question it first read, never one that replaced it.
-    if (question && !sameQuestion(question, record)) {
-      throw refused(callId, 'the call was replaced while it was being answered');
-    }
-    if (answer.argsHash !== undefined && answer.argsHash !== record.argsHash) {
-      throw refused(callId, 'the answer is for a call with different arguments');
-    }
     const resolution = toResolutionRecord(answer.resolution);
-    const wrongKind = wrongAnswerKind(record, resolution);
-    if (wrongKind) {
-      throw refused(callId, wrongKind);
-    }
-    if (record.resolution) {
-      if (sameResolution(record.resolution, resolution)) {
-        return;
-      }
-      throw refused(callId, 'the call was already answered differently');
-    }
-    const next: HeldRecord = {
-      ...record,
-      resolution,
-    };
     const key = `${heldPrefix(executionId)}${callId}`;
-    // With compare-and-set, two answers racing from two processes cannot both land.
-    const landed = this.storage.swap ? await this.storage.swap(key, record, next) : true;
-    if (!this.storage.swap) {
-      await this.storage.set(key, next);
-    }
-    if (!landed) {
-      const now = await this.load(executionId, callId);
-      if (now?.resolution && sameResolution(now.resolution, resolution)) {
-        return;
+    // The question this answer is for: only another host's renaming of it may
+    // change under the answer, never the question itself.
+    let question: HeldRecord | undefined;
+    let record = await this.load(executionId, callId);
+    for (let attempt = 0; ; attempt += 1) {
+      if (!record) {
+        throw refused(callId, 'no call with this id is held');
       }
-      // Only who it names as asking changed (another host restated it): answer again.
-      if (now && now.resolution === undefined && onlyScopeChanged(record, now)) {
-        if (retries > 0) {
-          return await this.resolveOne(executionId, answer, retries - 1, question ?? record);
-        }
-        throw refused(callId, 'the call kept changing while it was being answered; try again');
-      }
-      if (now && now.resolution === undefined) {
+      if (question && !sameQuestion(question, record)) {
         throw refused(callId, 'the call was replaced while it was being answered');
       }
-      throw refused(callId, 'the call was already answered differently');
+      if (answer.argsHash !== undefined && answer.argsHash !== record.argsHash) {
+        throw refused(callId, 'the answer is for a call with different arguments');
+      }
+      const wrongKind = wrongAnswerKind(record, resolution);
+      if (wrongKind) {
+        throw refused(callId, wrongKind);
+      }
+      if (record.resolution) {
+        if (sameResolution(record.resolution, resolution)) {
+          return;
+        }
+        throw refused(callId, 'the call was already answered differently');
+      }
+      if (attempt > RESCOPE_ATTEMPTS) {
+        throw refused(callId, 'the call kept changing while it was being answered; try again');
+      }
+      question = record;
+      const next: HeldRecord = {
+        ...record,
+        resolution,
+      };
+      if (!this.storage.swap) {
+        await this.storage.set(key, next);
+        break;
+      }
+      // With compare-and-set, two answers racing from two processes cannot both land.
+      if (await this.storage.swap(key, record, next)) {
+        break;
+      }
+      record = await this.load(executionId, callId);
     }
     this.settleWatch(watchKey(executionId, callId), 'answer');
     this.notify(executionId);

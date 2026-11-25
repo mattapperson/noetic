@@ -524,7 +524,7 @@ export class AcpEventBridge {
     update: Extract<
       SessionUpdate,
       {
-        sessionUpdate: 'tool_call_update';
+        sessionUpdate: 'tool_call' | 'tool_call_update';
       }
     >,
   ): void {
@@ -687,6 +687,8 @@ export class AcpEventBridge {
         name: update.title,
         callId: update.toolCallId,
       });
+      // A call reported already finished is settled at once.
+      this.childToolSettled(update);
     }
     if (this.scope && update.sessionUpdate === 'tool_call_update') {
       this.childToolSettled(update);

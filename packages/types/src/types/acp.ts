@@ -289,8 +289,6 @@ export type AcpBoundElicitationHandler = (
 export interface AcpChildUpdate {
   /** The child session. */
   readonly sessionId: string;
-  /** The session that announced it. */
-  readonly parentSessionId: string;
   readonly update: acp.SessionNotification['update'];
   /** True for the announcement (`subagent_update` / `subagent_spawned`) on the parent. */
   readonly announcement: boolean;

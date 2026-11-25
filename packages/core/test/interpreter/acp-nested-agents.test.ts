@@ -62,7 +62,6 @@ function bridge(): {
 function announce(child: string, state?: Record<string, unknown>): AcpChildUpdate {
   return {
     sessionId: child,
-    parentSessionId: 'root',
     announcement: true,
     lineage: [
       {
@@ -88,7 +87,6 @@ function announce(child: string, state?: Record<string, unknown>): AcpChildUpdat
 function own(child: string, update: AcpChildUpdate['update']): AcpChildUpdate {
   return {
     sessionId: child,
-    parentSessionId: 'root',
     announcement: false,
     lineage: [
       {
@@ -137,7 +135,6 @@ describe('nested agents on the event bridge', () => {
     b.begin();
     b.forwardChild({
       sessionId: 'grand',
-      parentSessionId: 'kid',
       announcement: false,
       lineage: [
         {
@@ -284,6 +281,43 @@ describe('nested agents on the event bridge', () => {
     expect(tools.every((e) => e.scope !== undefined)).toBe(true);
   });
 
+  it("a subagent's call reported already finished completes once", () => {
+    const { bridge: b, events } = bridge();
+    b.begin();
+    b.forwardChild(announce('c1'));
+    b.forwardChild(
+      own('c1', {
+        sessionUpdate: 'tool_call',
+        toolCallId: 't2',
+        title: 'Grep',
+        status: 'failed',
+      }),
+    );
+    b.forwardChild(
+      own('c1', {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 't2',
+        status: 'failed',
+      }),
+    );
+    const tools = events.filter((e) => /:tool_call_(started|completed)$/.test(e.type));
+    expect(
+      tools.map((e) => [
+        e.type.split(':')[1],
+        e.data.error,
+      ]),
+    ).toEqual([
+      [
+        'tool_call_started',
+        undefined,
+      ],
+      [
+        'tool_call_completed',
+        true,
+      ],
+    ]);
+  });
+
   it("reports a subagent's file and terminal calls as its own", () => {
     const { bridge: b, events } = bridge();
     b.begin();
@@ -336,6 +370,8 @@ interface ChildCallOptions {
   stepCallAfter?: boolean;
   /** The person takes a while to approve; who the hold names is read meanwhile. */
   slowPerson?: boolean;
+  /** While the call runs, the step's own agent announces it too. */
+  stepAnnouncesDuring?: boolean;
 }
 
 async function runChildCall(opts: ChildCallOptions): Promise<{
@@ -395,7 +431,7 @@ async function runChildCall(opts: ChildCallOptions): Promise<{
       execute: async ({ text }) => {
         runs += 1;
         // Long enough for an announcement sent mid-call to land while it runs.
-        if (opts.announce === 'during') {
+        if (opts.announce === 'during' || opts.stepAnnouncesDuring) {
           await new Promise((resolve) => setTimeout(resolve, 30));
         }
         return text;
@@ -446,6 +482,17 @@ async function runChildCall(opts: ChildCallOptions): Promise<{
             if (opts.announce === 'during') {
               await new Promise((resolve) => setTimeout(resolve, 5));
               announceCall();
+            }
+            if (opts.stepAnnouncesDuring) {
+              await new Promise((resolve) => setTimeout(resolve, 5));
+              connect.host.onSessionUpdate?.({
+                sessionId: 'root',
+                update: {
+                  sessionUpdate: 'tool_call',
+                  toolCallId: 'child-call',
+                  title: 'mcp__noetic__echo',
+                },
+              });
             }
             await calling;
             if (opts.announce === 'after') {
@@ -616,6 +663,20 @@ describe("a subagent's bridged tool call", () => {
     });
     expect(askers).toEqual([
       'Explore',
+    ]);
+  });
+
+  it("a call the step's own agent announces while it runs is the step's, whoever announced it first", async () => {
+    const { items, events } = await runChildCall({
+      announce: 'before',
+      stepAnnouncesDuring: true,
+    });
+    expect(items).toContain('from the child');
+    const appended = events.filter(
+      (e) => e.type.endsWith(':item_appended') && JSON.stringify(e.data).includes('from the child'),
+    );
+    expect(appended.map((e) => e.scope)).toEqual([
+      undefined,
     ]);
   });
 

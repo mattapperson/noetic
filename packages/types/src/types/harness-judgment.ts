@@ -64,8 +64,6 @@ export interface ApproveRequest {
    * survive the turn stopping, such as a live agent session.
    */
   park?: boolean;
-  /** The nested agent asking, when it is not the step's own (`HeldCall.scope`). */
-  scope?: AgentScope;
 }
 
 /**

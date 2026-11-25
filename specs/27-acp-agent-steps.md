@@ -318,7 +318,7 @@ keeper cannot place is asked of every host that attaches until it is
 answered, and moves to its root's waiting requests if the session is
 announced later, so the agent never waits on a host that was not asked. The
 keeper remembers at most a thousand descendants; past that it forgets the
-oldest, never one with a request still waiting nor one a kept descendant was
+one heard from least recently (announced or speaking), never one with a request still waiting nor one a kept descendant was
 announced under (its chain must stay whole) — those may keep it over the cap
 until their requests are answered, and are trimmed then. A child's
 waiting requests become its root's before anything is trimmed.
@@ -698,8 +698,9 @@ announcement shows nothing. Each state it reports is an `agent_status`
 (`running`, `idle`, `requires_action` as `waiting`, `unknown`), and the end of
 the turn closes it (`agent_completed`: `cancelled` or `failed` when its last
 stop reason said so, else `completed`). A connection remembers at most a
-thousand children, forgetting the oldest first but never one another kept
-child was announced under, so a child is never placed without its parent. Updates for a session the connection does not
+thousand children, forgetting the one heard from least recently first — the
+order the keeper keeps, so a child still speaking is never forgotten — but
+never one another kept child was announced under, so a child is never placed without its parent. Updates for a session the connection does not
 know are dropped; an update that arrives before the connection knows whose
 it is — the agent's first updates for a session it creates, sent before its
 `session/new` answer, or a child's sent before its announcement — is held (at

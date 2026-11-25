@@ -48,6 +48,7 @@ import {
 import { assertAgentTakesTools } from '../builders/acp-agent-checks';
 import { runtimeOf } from '../connections/model-tools';
 import type { AcpSessionStore } from '../runtime/acp-session-store';
+import { awaitApproval } from '../runtime/tool-approval';
 import { isRpcError, RpcFailure } from '../util/error-message';
 import { AcpEventBridge } from './acp-events';
 import { withHistoryPrompt } from './acp-history';
@@ -235,18 +236,20 @@ function buildApprover(
   ctx: Context<ContextData>,
   events: AcpEventBridge,
 ): AcpPermissionSteerer | undefined {
-  const approve = ctx.harness.approve?.bind(ctx.harness);
-  if (!approve) {
+  // A harness with no approval seam has none to give.
+  if (!ctx.harness.approve) {
     return undefined;
   }
   return async (request): Promise<AcpPermissionOutcome | undefined> => {
-    const decision = await approve({
+    // `harness.approve()` itself, plus who asks: a subagent's request is held
+    // as the run's, named as its nested agent's.
+    const { decision } = await awaitApproval({
+      harness: ctx.harness,
       toolName: request.toolCall.title ?? request.toolCall.toolCallId,
       toolArgs: request.toolCall.rawInput,
       callId: request.toolCall.toolCallId,
       ctx,
       park: false,
-      // A subagent's request is held as the run's, named as its nested agent's.
       scope: events.scopeFor(request.sessionId),
     });
     if (decision.action === SteeringAction.Allow) {

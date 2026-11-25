@@ -739,7 +739,8 @@ show one.
   its scope, and never joins the step's items. The bridge places a call by the
   `tool_call` that announced it — the MCP request names no session. A call
   the step's own agent announced is the step's at once, whatever a subagent
-  announces under the same id. Any other call runs at once as the step's,
+  announces under the same id — even one a subagent announced first and that
+  is already running, whose result then goes to the step. Any other call runs at once as the step's,
   provisionally. In a turn where no subagent has spoken yet, it is the step's
   for good the moment it finishes, and its result item joins the step's items
   and item stream at once. Once a subagent has spoken in the turn, the call
@@ -763,7 +764,8 @@ show one.
   the hold keeps its id and its answer and takes that host's `scope`. Opening,
   renaming, answering and dropping one call take turns in a process, so a
   renaming never writes back a hold already dropped; across processes
-  renaming is a compare-and-set, so it never writes over an answer. An answer
+  renaming is a compare-and-set, so it never writes over an answer, and a
+  renaming never touches a question that replaced the one it read. An answer
   that loses to a renaming is given again — to the question it was given for
   only: one whose call was replaced meanwhile by a new question (other
   arguments, another reason) is refused. A nested agent's place in the turn is

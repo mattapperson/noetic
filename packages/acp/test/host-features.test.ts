@@ -602,6 +602,39 @@ describe("subagents' own sessions", () => {
     await rig.close();
   }, 20e3);
 
+  test('past the cap, a child still speaking is never the one forgotten', async () => {
+    const heard: string[] = [];
+    const rig = await createAcpTestRig({
+      onChildUpdate: (child) => {
+        if (child.sessionId === 'first' && !child.announcement) {
+          heard.push(child.update.sessionUpdate);
+        }
+      },
+      script: {
+        onPrompt: async (conn, params) => {
+          await conn.sessionUpdate(subagentAnnounce(params.sessionId, 'first'));
+          for (let i = 0; i < 1001; i += 1) {
+            await conn.sessionUpdate(subagentAnnounce(params.sessionId, `sib${i}`));
+            // The oldest child keeps working while its siblings come and go.
+            if (i % 100 === 0) {
+              await conn.sessionUpdate(textChunk('first', 'still here'));
+            }
+          }
+          await conn.sessionUpdate(textChunk('first', 'last word'));
+        },
+      },
+    });
+    const session = await rig.connection.newSession({
+      cwd: '/workspace',
+    });
+    await session.prompt({
+      content: PROMPT,
+    });
+    expect(heard.length).toBe(12);
+    expect(JSON.stringify(rig.updates)).not.toContain('last word');
+    await rig.close();
+  }, 20e3);
+
   test('under the cap, a grandchild that speaks later is placed under its parent', async () => {
     const lineages: string[][] = [];
     const rig = await createAcpTestRig({

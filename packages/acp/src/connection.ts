@@ -595,7 +595,6 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
       this.describe(child, notification.update);
       this.settings.toChild?.({
         sessionId: child,
-        parentSessionId: owner,
         update: notification.update,
         announcement: true,
         lineage: this.lineageOf(child),
@@ -604,10 +603,11 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
     }
     const parent = this.children.get(owner);
     if (parent !== undefined) {
+      // A child still speaking is never the oldest to forget.
+      this.adoptChild(owner, parent);
       if (child === undefined || child === owner) {
         this.settings.toChild?.({
           sessionId: owner,
-          parentSessionId: parent,
           update: notification.update,
           announcement: false,
           lineage: this.lineageOf(owner),
@@ -629,14 +629,18 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
     return this.sessions.has(sessionId) || this.children.has(sessionId);
   }
 
+  /** Note a child as the most recently heard from, under its latest parent. */
   private adoptChild(child: string, parent: string): void {
+    // Re-set so a child announced again, or speaking, counts as the newest.
+    this.children.delete(child);
     this.children.set(child, parent);
     this.trimChildren();
   }
 
   /**
-   * Forget the oldest children past the cap, never one another kept child was
-   * announced under: a grandchild must still be placed under its whole chain.
+   * Forget the children heard from least recently past the cap, never one
+   * another kept child was announced under: a grandchild must still be placed
+   * under its whole chain.
    */
   private trimChildren(): void {
     if (this.children.size <= CHILD_LIMIT) {

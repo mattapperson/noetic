@@ -636,7 +636,10 @@ export class AcpRelay {
     return lines;
   }
 
-  /** Forget the oldest descendants past the cap, never one with a request pending. */
+  /**
+   * Forget the descendants heard from least recently past the cap, never one
+   * with a request pending.
+   */
   private trimOwners(): void {
     for (const [child, rootId] of this.owners) {
       if (this.owners.size <= MAX_DESCENDANTS) {
@@ -735,6 +738,10 @@ export class AcpRelay {
   private rootOf(sessionId: string): string | undefined {
     const owner = this.owners.get(sessionId);
     if (owner !== undefined) {
+      // A child still heard from is never the oldest to forget — the same
+      // order a host's connection keeps, so both forget the same children.
+      this.owners.delete(sessionId);
+      this.owners.set(sessionId, owner);
       return owner;
     }
     return this.sessions.has(sessionId) ? sessionId : undefined;
