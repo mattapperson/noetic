@@ -390,6 +390,7 @@ export type {
 } from '@noetic-tools/types';
 /** @public */
 export {
+  ToolModelOutput,
   isServerToolSpec,
   isStandardJsonSchema,
   isZodSchema,

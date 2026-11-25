@@ -257,6 +257,7 @@ const result = await harness.run(myStep, input, ctx);
 | `input` | `I` | Input value for the step. |
 | `ctx` | `Context` | Execution context. |
 
+| `{name}:tool_model_output_failed` | A tool's `toModelOutput` threw; the model was given the call's JSON output. |
 Before the first run of a root, `run()` checks what the root's connection handles need against each connection, so a root that needs an operation a connection lacks fails with `CONNECTION_UNSATISFIED` before anything executes.
 
 When the harness is built with `contextLayers` + a storage adapter (`environment.storage.adapter`), `run()` runs the layers' `init()` hooks once per context (keyed by `ctx.id`) before executing — so prior layer state rehydrates from storage, recalls into the model context, and updates persist back. The same memory guarantee `execute()` gives, without the session/`seedSessionHistory` ceremony. This also makes `parseAndRunWorkflow` (which dispatches through `run()`) memory-aware. The init is idempotent: nested/repeated `run()` calls never re-init (re-init would clobber accumulated in-memory state).

@@ -713,6 +713,7 @@ The `emit` option propagates through `CallModelRequest` to `callModel()`, contro
 The internal `EventBroadcaster` buffer is capped at 10,000 events. When the buffer exceeds this limit, oldest events are trimmed and active iterator cursors are adjusted. Once all consumers have departed, new events are discarded to prevent unbounded memory growth. Late subscribers receive only the retained window.
 
 ### Error Handling
+| `{name}:tool_model_output_failed` | Emitted when a tool's `toModelOutput` throws; the model is given the call's output text instead (`02-step-variants` § What the model is given). Data: `{ name, callId, error }` |
 
 When `execute()` is called on a harness without an `agentGraph`, it rejects with `NoeticConfigError` code `NO_STEP_CONFIGURED`. When a turn fails mid-stream, `getAgentResponse()` surfaces the error and the session remains usable for subsequent turns.
 

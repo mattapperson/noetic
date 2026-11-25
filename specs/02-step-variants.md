@@ -297,13 +297,29 @@ interface Tool<I extends StandardSchemaV1 = StandardSchemaV1, O extends Standard
     toolCtx: ToolExecutionContext,
   ) => Promise<InferSchemaOutput<O>> | AsyncGenerator<unknown, InferSchemaOutput<O>>;
   needsApproval?: boolean;  // every call needs the harness approver's go-ahead; see below
+  toModelOutput?: (result: InferSchemaOutput<O>, args: InferSchemaOutput<I>) => ToolModelOutput;  // see below
   context?: ToolContextDeclaration;
 }
+
+type ToolModelOutput = string | ReadonlyArray<InputContentPart>;  // text, or text, image and file parts
 ```
 
 `execute` receives a `ToolExecutionContext` (`{ ctx, harness, fs, shell, context, assembledView, lastStepMeta, turnContext? }`), not the bare `Context` — the step's `Context` is `toolCtx.ctx`. See `04-spawn` ("Context in Tools") for how tools that spawn sub-agents use it. The base `Tool` in `@noetic-tools/types` types the second argument as `unknown` to stay a dependency leaf; `tool()` and the `Tool` re-exported from `@noetic-tools/core` type it as `ToolExecutionContext`. An async-generator `execute` (built with `toolWithGenerator`) yields streaming events (typed by `event`) and returns the result.
 
 `toolCalls(tools)` generates one `ContextLayer` per unique `context.id` among the tools. Tools sharing the same id share state.
+
+### What the model is given
+
+A call's result reaches the model as its output text: the result itself when it is a string, else its JSON. A tool that defines `toModelOutput(result, args)` gives the model something else for a call that did not fail: text, or content parts (`input_text`, `input_image`, `input_file`), which is how a tool shows the model an image. `tool()` and `toolWithGenerator()` both take it.
+
+Only the model's copy changes, and only in the round the call was made in. The `function_call_output` item, the `tool_call_completed` event, the call's record in the step ledger, and the tool's `ui` and `decorateResultItem` all keep the output text, so a later turn, which is assembled from the item log, shows the model the text.
+
+- A call that failed, was refused, or was skipped is not passed to `toModelOutput`: the model gets the error text.
+- A held call answered with an `output` (`08-runtime` § Held tool calls) is passed to it, with that output as `result`.
+- A resumed round calls it again for each call it replays from a record, with the recorded result (`23a-step-level-resume` § Tool calls in a round). It is synchronous and must be a pure function of its arguments, so the model is given the same thing both times.
+- If it throws, the model is given the output text and the harness emits `tool_model_output_failed` (`08-runtime` § Framework Events). The call is already done and on record, so the throw does not fail it.
+
+A tool served to an ACP agent over the tool bridge (`38-acp-tools`), or run by an `invokeTool` step, has no model round of its own, and `toModelOutput` is not called for it.
 
 ### Approval
 

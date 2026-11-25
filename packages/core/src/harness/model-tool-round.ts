@@ -15,7 +15,7 @@ import type {
   Tool,
 } from '@noetic-tools/types';
 import { SteerPoint } from '@noetic-tools/types';
-import { itemsToInput } from '../adapters/openrouter';
+import { itemsToInput, toolModelOutputToProvider } from '../adapters/openrouter';
 import { isFunctionCall } from '../interpreter/typeguards';
 import { drainsOf } from '../runtime/drain';
 import { heldCallsOf, heldScopeOf, mayWriteHolds, waitOnHeldCalls } from '../runtime/held-calls';
@@ -378,7 +378,13 @@ async function executeFunctionCall(
   conversationInput.push({
     type: 'function_call_output',
     callId: fc.callId,
-    output: toolResult.output,
+    output: modelOutputOf({
+      tool: toolForCall,
+      toolResult,
+      args: parsedArgs,
+      emitIfAllowed: params.emitIfAllowed,
+      callId: fc.callId,
+    }),
   });
   scope.emitItemAppended(request.ctx, outputItem);
   params.emitIfAllowed('tool_call_completed', {
@@ -395,6 +401,37 @@ async function executeFunctionCall(
   return {
     approval: toolResult.approval,
   };
+}
+
+/**
+ * What the model is given as a call's result: the tool's `toModelOutput` value for
+ * a call that did not fail, else the output text. The result item, the completed
+ * event and the call's record keep the text whatever this returns, so a replayed
+ * call lands here again with its recorded result.
+ */
+function modelOutputOf(params: {
+  tool: Tool | undefined;
+  toolResult: ToolCallResult;
+  args: unknown;
+  callId: string;
+  emitIfAllowed: (eventType: string, data: Record<string, unknown>) => void;
+}): ReturnType<typeof toolModelOutputToProvider> {
+  const { tool, toolResult } = params;
+  if (toolResult.error || !tool?.toModelOutput) {
+    return toolResult.output;
+  }
+  try {
+    return toolModelOutputToProvider(tool.toModelOutput(toolResult.result, params.args));
+  } catch (error) {
+    // The call is done and on record: a throw here would fail it again on every
+    // resume. The model gets the JSON output, and the event says why.
+    params.emitIfAllowed('tool_model_output_failed', {
+      name: tool.name,
+      callId: params.callId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return toolResult.output;
+  }
 }
 
 /** Drop what a finished call may have left in storage: its intent, its answered hold. */

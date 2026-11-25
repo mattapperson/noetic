@@ -8,6 +8,7 @@ import type {
   LLMResponse,
   MessageItem,
   Tool,
+  ToolModelOutput,
 } from '@noetic-tools/types';
 import {
   frameworkCast,
@@ -126,6 +127,21 @@ function contentPartsToProviderContent(
     return contentPartsToText(parts);
   }
   return frameworkCast<ReadonlyArray<InputContentPart>>(parts).map(inputContentPartToProvider);
+}
+
+/**
+ * @internal What a `function_call_output` carries for a tool's `toModelOutput`
+ * value: text as it is, content parts in the provider's shape.
+ */
+export function toolModelOutputToProvider(
+  output: ToolModelOutput,
+): OpenRouterAgent.FunctionCallOutputItem['output'] {
+  if (typeof output === 'string') {
+    return output;
+  }
+  return frameworkCast<OpenRouterAgent.FunctionCallOutputItem['output']>(
+    output.map(inputContentPartToProvider),
+  );
 }
 
 //#endregion

@@ -3,6 +3,7 @@ import type { AcpToolKind } from './acp';
 import type {
   FunctionCallItem,
   FunctionCallOutputItem,
+  InputContentPart,
   Item,
   ItemSchemaExtensions,
   ToolResultExtensionItem,
@@ -98,6 +99,12 @@ export type ToolAcpTitleFn<I extends StandardSchemaV1 = StandardSchemaV1> = {
 }['bivariant'];
 
 /**
+ * @public What `Tool.toModelOutput` returns: the text, or the content parts, the
+ * model is given as a tool call's result.
+ */
+export type ToolModelOutput = string | ReadonlyArray<InputContentPart>;
+
+/**
  * A tool definition that an LLM can invoke during execution.
  *
  * Input and output schemas accept any Standard Schema v1 implementation
@@ -142,6 +149,15 @@ export interface Tool<
     output: string;
     error?: boolean;
   }): Item | ToolResultExtensionItem;
+  /**
+   * What the model is given as this call's result, in place of the result's JSON
+   * text: text, or content parts such as an image. Called for a call that did not
+   * fail, with the tool's result and the call's arguments. The result item, the
+   * `tool_call_completed` event and the call's record keep the JSON output, so a
+   * resumed run calls this again with the recorded result: keep it a pure function
+   * of its arguments. If it throws, the model is given the JSON output.
+   */
+  toModelOutput?(result: InferSchemaOutput<O>, args: InferSchemaOutput<I>): ToolModelOutput;
   /**
    * Async function that performs the tool's work. `toolCtx` is a
    * `ToolExecutionContext` at runtime — typed as `unknown` here to keep
