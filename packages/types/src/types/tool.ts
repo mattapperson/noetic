@@ -10,7 +10,13 @@ import type {
   ToolResultExtensionItem,
 } from './items';
 import type { InferSchemaOutput } from './schema';
-import type { ToolCallProgress, ToolContent, ToolKind, ToolLocation } from './tool-activity';
+import type {
+  ToolCallProgress,
+  ToolContent,
+  ToolIdentity,
+  ToolKind,
+  ToolLocation,
+} from './tool-activity';
 
 type ToolExecutionResult<O extends StandardSchemaV1> =
   | Promise<InferSchemaOutput<O>>
@@ -89,6 +95,14 @@ export interface ToolPresentationDeclaration<
   O extends StandardSchemaV1 = StandardSchemaV1,
   E = unknown,
 > {
+  /**
+   * Which tool a call is to, when it is not the tool's own `name`: an MCP
+   * tool's name on its server, and the server — what an agent calling the same
+   * MCP tool reports — so a host grouping calls by tool sees one tool. A
+   * function receives the call's parsed args (a tool that reaches one of
+   * several servers). Defaults to `{ id: name }`.
+   */
+  identity?: ToolIdentity | ToolIdentityFn<I>;
   /** What kind of work a call does (`read`, `edit`, `execute`, …). */
   kind?: ToolKind;
   /** Human-readable title; a function receives the call's parsed args. */
@@ -103,6 +117,15 @@ export interface ToolPresentationDeclaration<
   /** What a call that did not fail produced, as structure: diffs, images, resources. */
   content?(output: InferSchemaOutput<O>, args: InferSchemaOutput<I>): ToolContent[];
 }
+
+/**
+ * Bivariant function type for `ToolPresentationDeclaration.identity`; see
+ * {@link ToolTitleFn}.
+ * @public
+ */
+export type ToolIdentityFn<I extends StandardSchemaV1 = StandardSchemaV1> = {
+  bivariant(args: InferSchemaOutput<I>): ToolIdentity;
+}['bivariant'];
 
 /**
  * Bivariant function type for `ToolPresentationDeclaration.title` — a union

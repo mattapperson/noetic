@@ -127,6 +127,10 @@ The layer exposes seven LLM tools and one data projection via its `provides` map
 
 Documents may be passed as objects or JSON strings (a common LLM tool-call shape); validation happens inside the tool with readable error messages, against the published schema at `https://noetic.tools/schema/noetic-workflow.schema.json`.
 
+## The Plan on the Event Stream
+
+The layer's plan reaches a host the way a coding agent's plan does: once a PRD is written, the harness emits `plan_updated` with `{ plan: { markdown: <the PRD> } }` (its `id` the plan session's slug, when `onEnterSession` gave one) each time it changes, and `plan_removed` when the plan is cancelled or the layer goes idle. See [Tool calls, plans and agent settings](/docs/framework/runtime#tool-calls-plans-and-agent-settings).
+
 ## Tool Restrictions
 
 During the `planning` phase, `beforeToolCall` restricts tool usage:

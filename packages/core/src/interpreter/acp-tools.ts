@@ -30,6 +30,7 @@ import {
   bridgedToolTitles,
   defaultItemSchemaRegistry,
   frameworkCast,
+  identifyToolCall,
   namesBridgedToolCall,
   presentToolCall,
   presentToolContent,
@@ -901,10 +902,12 @@ export class AcpToolRunner implements AcpToolHost {
   ): ReturnType<typeof executeToolCall> {
     const args = this.unwrap(call);
     const presentation = presentToolCall(tool, args);
-    // The tool's own name, not the name it goes by on the wire.
-    const identity: ToolIdentity = {
-      id: tool?.name ?? call.name,
-    };
+    // The tool as it names itself, not the name it goes by on the wire.
+    const identity: ToolIdentity = tool
+      ? identifyToolCall(tool, args)
+      : {
+          id: call.name,
+        };
     if (!binding.provisional) {
       binding.events.bridgedCallStarted(callId, call.name, args, presentation, identity);
     }

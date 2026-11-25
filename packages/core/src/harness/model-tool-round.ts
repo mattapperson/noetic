@@ -16,9 +16,11 @@ import type {
   Tool,
 } from '@noetic-tools/types';
 import {
+  identifyToolCall,
   presentToolCall,
   presentToolContent,
   SteerPoint,
+  toolIdentityData,
   validateSchema,
 } from '@noetic-tools/types';
 import { itemsToInput, toolModelOutputToProvider } from '../adapters/openrouter';
@@ -31,6 +33,7 @@ import {
   noticeHeld,
   waitOnHeldCalls,
 } from '../runtime/held-calls';
+import { reportLayerPlans } from '../runtime/layer-plans';
 import type { ApprovalOutcome } from '../runtime/tool-approval';
 import type { ToolCallResult } from '../runtime/tool-call';
 import { createToolResultItem, executeToolCall } from '../runtime/tool-call';
@@ -61,12 +64,35 @@ const SKIPPED_FOR_STEER_OUTPUT = 'Skipped: a new message arrived before this too
  * What every event of a call names it by: its wire `name` and `callId`, and
  * the tool it is to, by the tool's own name (spec 08 § Tool calls).
  */
-function callIdentity(fc: FunctionCallItem, tool: Tool | undefined): Record<string, string> {
+function callIdentity(
+  fc: FunctionCallItem,
+  tool: Tool | undefined,
+): Record<string, string | undefined> {
+  const identity = tool
+    ? identifyToolCall(tool, argsForPresentation(fc))
+    : {
+        id: fc.name,
+      };
   return {
     name: fc.name,
     callId: fc.callId,
-    toolId: tool?.name ?? fc.name,
+    ...toolIdentityData(identity),
   };
+}
+
+/** A plan the step's layers keep changes only through their tools: tell it after each call. */
+function reportPlans(
+  request: CallModelRequest,
+  emit: (eventType: string, data: Record<string, unknown>) => void,
+): void {
+  if (!request.ctx) {
+    return;
+  }
+  reportLayerPlans({
+    ctx: request.ctx,
+    layers: request.layers,
+    emit,
+  });
 }
 
 /** A call's arguments, parsed for its presentation; undefined when they do not parse. */
@@ -234,6 +260,7 @@ async function executeToolRound(
       emitIfAllowed: params.emitIfAllowed,
       calls: params.calls,
     });
+    reportPlans(request, params.emitIfAllowed);
     if (call.held) {
       heldCalls.push(fc);
       announcedAs.set(fc.callId, call.held);
@@ -281,6 +308,7 @@ async function executeToolRound(
         calls: params.calls,
         announced: announcedAs.get(fc.callId),
       });
+      reportPlans(request, params.emitIfAllowed);
       if (call.held) {
         heldCalls.push(fc);
         announcedAs.set(fc.callId, call.held);

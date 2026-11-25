@@ -90,6 +90,13 @@ interface ContextLayer<TState = unknown> {
    *   boundary from observed churn. Explicit values are never overridden.
    */
   placement?: LayerPlacement;
+  /**
+   * The plan this layer's state holds, or null when it holds none, for a layer
+   * that keeps the agent's plan. The harness emits `plan_updated` /
+   * `plan_removed` when it changes (spec 08 § Tool calls, plans and agent
+   * settings).
+   */
+  plan?(state: TState): AgentPlan | null;
 }
 
 type LayerPlacement = 'anchor' | 'live' | 'auto';

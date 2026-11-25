@@ -114,7 +114,7 @@ describe('agent tool calls carry the generic presentation', () => {
     expect(only(events, 'tool_call_started').data).toEqual({
       name: 'Edit a.ts',
       callId: 'c1',
-      toolId: 'Edit a.ts',
+      toolId: 'edit',
       title: 'Edit a.ts',
       kind: 'edit',
       status: 'pending',
@@ -155,7 +155,7 @@ describe('agent tool calls carry the generic presentation', () => {
     expect(only(events, 'tool_progress').data).toEqual({
       name: 'Run tests',
       callId: 'c1',
-      toolId: 'Run tests',
+      toolId: 'execute',
       title: 'Run tests (3/10)',
       status: 'in_progress',
       progress: 0.3,
@@ -198,7 +198,7 @@ describe('agent tool calls carry the generic presentation', () => {
     expect(only(events, 'tool_call_completed').data).toEqual({
       name: 'Edit a.ts',
       callId: 'c1',
-      toolId: 'Edit a.ts',
+      toolId: 'edit',
       error: false,
       content: [
         {
@@ -787,5 +787,41 @@ describe("an agent's own call is identified by the tool it is to", () => {
       title: 'Bash',
     });
     expect(only(events, 'tool_call_started').data.toolId).toBe('Bash');
+  });
+});
+
+describe('a call no reader can place', () => {
+  it('goes by its kind, so calls named by title alone group as one tool, else by its title', () => {
+    const { bridge, events } = bridgeCtx();
+    bridge.begin();
+    for (const [callId, title, kind] of [
+      [
+        'c1',
+        'Run ls',
+        'execute',
+      ],
+      [
+        'c2',
+        'Run pwd',
+        'execute',
+      ],
+      [
+        'c3',
+        'Something',
+        'other',
+      ],
+    ] as const) {
+      send(bridge, {
+        sessionUpdate: 'tool_call',
+        toolCallId: callId,
+        title,
+        kind,
+      });
+    }
+    expect(named(events, 'tool_call_started').map((event) => event.data.toolId)).toEqual([
+      'execute',
+      'execute',
+      'Something',
+    ]);
   });
 });

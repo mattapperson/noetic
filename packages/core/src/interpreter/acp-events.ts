@@ -34,6 +34,7 @@ import type {
   ToolContent,
   ToolIdentity,
 } from '@noetic-tools/types';
+import { toolIdentityData } from '@noetic-tools/types';
 import type { EmitOption } from '../runtime/broadcaster-utils';
 import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../runtime/broadcaster-utils';
 import { ContextImpl } from '../runtime/context-impl';
@@ -190,18 +191,6 @@ function inputKey(input: unknown): string {
     return input;
   }
   return JSON.stringify(input ?? {});
-}
-
-/** A call's identity as its events carry it: `toolId`, and `toolServer` for an MCP tool. */
-export function identityData(identity: ToolIdentity): Record<string, string> {
-  return {
-    toolId: identity.id,
-    ...(identity.server === undefined
-      ? {}
-      : {
-          toolServer: identity.server,
-        }),
-  };
 }
 
 /** What a step did through the host's fs or shell adapters, as `workspace_access` names it. */
@@ -486,19 +475,26 @@ export class AcpEventBridge {
     }
   }
 
-  /** Which tool an announced call of the agent's own is to. */
+  /**
+   * Which tool an announced call of the agent's own is to: as its adapter
+   * reads it; else its kind, so calls an agent names by title alone ("Run
+   * ls", "Run pwd") still group as one tool; else, with no kind to go by, its
+   * title.
+   */
   private identityOf(update: ToolCallUpdate): ToolIdentity {
+    let read: ToolIdentity | undefined;
     try {
-      return (
-        this.toolIdOf(update) ?? {
-          id: update.title ?? update.toolCallId,
-        }
-      );
+      read = this.toolIdOf(update);
     } catch {
-      return {
-        id: update.title ?? update.toolCallId,
-      };
+      read = undefined;
     }
+    if (read) {
+      return read;
+    }
+    const kind = update.kind ?? undefined;
+    return {
+      id: kind !== undefined && kind !== 'other' ? kind : (update.title ?? update.toolCallId),
+    };
   }
 
   /**
@@ -562,7 +558,7 @@ export class AcpEventBridge {
     const payload = call
       ? {
           ...data,
-          ...identityData(call.identity),
+          ...toolIdentityData(call.identity),
         }
       : data;
     if (!this.broadcaster || !shouldEmit(this.emitOption, eventType, payload)) {

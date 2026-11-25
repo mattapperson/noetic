@@ -813,10 +813,15 @@ call, an agent's own call, and a step tool an agent calls through the tool
 bridge. Every one of them names the call (`name`, its wire name, and
 `callId`) and the tool it is to: `toolId`, the same for every call to that
 tool, and `toolServer`, the MCP server it is on when it is an MCP tool
-(`ToolIdentity`). A Noetic tool's `toolId` is its own `name` (not the
-sanitized wire name); an agent's own tool's is the name the agent gives it, as
-its adapter reads it (`27-acp-agent-steps` § Output → harness events), and its
-title only for an agent that names its tools no other way.
+(`ToolIdentity`). Grouping calls by `(toolServer, toolId)` puts every call to
+one tool in one group, whichever path made it. A Noetic tool's `toolId` is its
+own `name` (not the sanitized wire name), unless it declares another
+(`02-step-variants` § Presentation): a connection tool is its operation on its
+connection (`toolServer` the connection), so a model's call to an MCP server's
+tool through `mcp()` and an agent's call to the same server's tool group
+together. An agent's own tool's is the name the agent gives it, as its adapter
+reads it (`27-acp-agent-steps` § Output → harness events); one the adapter
+cannot place goes by its `kind`, and with no kind but `other`, by its title.
 
 - `tool_call_started` — `{ name, callId, toolId, toolServer?, title?, kind?,
   locations?, status? }`.
@@ -871,6 +876,14 @@ answer.
   (no id: the agent's only plan). An empty `entries` is a plan with nothing
   left in it.
 - `plan_removed` — `{ stepId, id? }`: the agent dropped that plan.
+
+An agent step's agent reports its plan as it goes. A `callModel` step's plan is
+the one a context layer keeps (`ContextLayer.plan`, `11-context-layer-system`):
+the harness reads each such layer's plan after every tool call — a plan changes
+only through the layer's tools — and tells each change once, a plan under a new
+id as the old one removed. The `plan()` layer's plan is its PRD, as markdown,
+from the moment one is written until it is idle again (`12-builtin-context-layers`).
+`stepId` is there when the context knows the step running.
 
 **The agent's settings** that a host shows while it works:
 

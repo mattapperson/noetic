@@ -902,7 +902,9 @@ its adapter reads it: `AcpAgent.toolIdOf(update)` (`defineAcpAgent({ toolIdOf
 tool's `mcp__<server>__<tool>` as `toolId: <tool>`, `toolServer: <server>`;
 `codex()` reads an MCP call's `rawInput` `{ server, tool }` (or its
 `mcp.<server>.<tool>` title). A call the adapter cannot place, or one whose
-reader throws, goes by its title. A step tool's call the bridge runs is
+reader throws, goes by its `kind` — so the calls an agent names by title alone
+("Run ls", "Run pwd") group as one tool — and, with no kind but `other`, by
+its title. A step tool's call the bridge runs is
 identified by the tool's own `name`. `title`
 and `kind` as given, `locations` as `{ path, line? }`, `progress` from the
 update's `_meta.progress` or its raw output's `progress` (a value above 1 is a

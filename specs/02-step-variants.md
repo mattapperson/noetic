@@ -339,6 +339,7 @@ settings), so a host shows a tool's calls and an agent's alike:
 
 ```typescript
 interface ToolPresentationDeclaration<I, O, E = unknown> {
+  identity?: ToolIdentity | ((args: InferSchemaOutput<I>) => ToolIdentity);  // { id, server? }; defaults to { id: name }
   kind?: ToolKind;                                   // read | edit | delete | move | search | execute | think | fetch | switch_mode | other
   title?: string | ((args: InferSchemaOutput<I>) => string);
   locations?(args: InferSchemaOutput<I>): Array<string | ToolLocation>;  // the files a call works on
@@ -347,8 +348,12 @@ interface ToolPresentationDeclaration<I, O, E = unknown> {
 }
 ```
 
-Every event of a call also carries `toolId`, the tool's own `name`, so a host
-tells which tool a call is to without parsing its wire name or its title. The
+Every event of a call also carries `toolId` (and `toolServer`), so a host
+tells which tool a call is to without parsing its wire name or its title. It
+is the tool's own `name` unless `identity` says otherwise: `{ id, server? }`,
+or a function of the call's args. A connection tool declares its operation on
+its connection, so it groups with an agent's call to the same MCP server's
+tool. The
 runtime puts the title, kind and locations on the call's
 `tool_call_started`, what `progress` reports for the events so far on each
 `tool_progress`, and the `content` of a call that did not fail on its

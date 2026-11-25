@@ -2057,3 +2057,46 @@ describe('plan layer', () => {
 
   //#endregion
 });
+
+describe("plan layer — the agent's plan", () => {
+  const read = (state: PlanState) => {
+    const layer = plan();
+    assert(layer.plan);
+    return layer.plan(state);
+  };
+
+  it('is the PRD, as markdown, once one is written', () => {
+    expect(
+      read(
+        makePlanningState({
+          prd: '# Plan',
+        }),
+      ),
+    ).toEqual({
+      markdown: '# Plan',
+    });
+    expect(
+      read(
+        makePlanningState({
+          prd: '# Plan',
+          planSlug: 'session-1',
+          phase: PlanPhase.Executing,
+        }),
+      ),
+    ).toEqual({
+      id: 'session-1',
+      markdown: '# Plan',
+    });
+  });
+
+  it('is none before a PRD is written, and none once the layer is idle again', () => {
+    expect(read(makePlanningState())).toBeNull();
+    expect(
+      read(
+        makeIdleState({
+          prd: '# Old',
+        }),
+      ),
+    ).toBeNull();
+  });
+});

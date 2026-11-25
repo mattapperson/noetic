@@ -237,6 +237,14 @@ function directTool(runtime: ConnectionRuntime, exposure: DirectExposure): Conne
       ...exposure.info.inputSchema,
     },
     output: ANY_OUTPUT,
+    // The operation on its connection — what an agent calling the same MCP
+    // server's tool reports — so a host groups both calls as one tool.
+    presentation: {
+      identity: {
+        id: exposure.op,
+        server: exposure.connection,
+      },
+    },
     execute: (args, toolCtx) =>
       callThrough(runtime, {
         name: exposure.connection,
@@ -263,6 +271,17 @@ function mergedTool(
     input: ANY_OBJECT_INPUT,
     inputJsonSchema: withTarget(first.info.inputSchema, targets),
     output: ANY_OUTPUT,
+    // The operation on the connection the call targets, when it names one.
+    presentation: {
+      identity: (args) => ({
+        id: first.op,
+        ...(typeof args.target === 'string' && targets.includes(args.target)
+          ? {
+              server: args.target,
+            }
+          : {}),
+      }),
+    },
     execute: (args, toolCtx) =>
       callThrough(runtime, {
         name: pickTarget(args, targets),

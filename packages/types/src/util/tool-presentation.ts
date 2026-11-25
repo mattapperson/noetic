@@ -13,6 +13,7 @@ import type {
   ToolCallPresentation,
   ToolCallProgress,
   ToolContent,
+  ToolIdentity,
   ToolLocation,
 } from '../types/tool-activity';
 import { frameworkCast } from './framework-cast';
@@ -52,6 +53,52 @@ function toLocation(entry: string | ToolLocation): ToolLocation {
 //#endregion
 
 //#region Public API
+
+/**
+ * Which tool a call to `tool` with `args` is to: what the tool declares, else
+ * its own name. A declaration that throws, or names no id, gives the name.
+ * @public
+ */
+export function identifyToolCall(
+  tool: Pick<Tool, 'name' | 'presentation' | 'acp'>,
+  args: unknown,
+): ToolIdentity {
+  const declared = tool.presentation?.identity;
+  const identity =
+    typeof declared === 'function' ? attempt(() => declared(frameworkCast<never>(args))) : declared;
+  if (!identity || typeof identity.id !== 'string' || identity.id.length === 0) {
+    return {
+      id: tool.name,
+    };
+  }
+  return {
+    id: identity.id,
+    ...(typeof identity.server === 'string' && identity.server.length > 0
+      ? {
+          server: identity.server,
+        }
+      : {}),
+  };
+}
+
+/**
+ * A call's identity as its events carry it: `toolId`, and `toolServer` for a
+ * tool on an MCP server.
+ * @public
+ */
+export function toolIdentityData(identity: ToolIdentity): {
+  toolId: string;
+  toolServer?: string;
+} {
+  return {
+    toolId: identity.id,
+    ...(identity.server === undefined
+      ? {}
+      : {
+          toolServer: identity.server,
+        }),
+  };
+}
 
 /**
  * How a call to `tool` with `args` presents: its declared title, kind and

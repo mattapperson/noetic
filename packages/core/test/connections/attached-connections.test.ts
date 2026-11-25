@@ -17,6 +17,7 @@ import type {
 import {
   defineProfile,
   frameworkCast,
+  identifyToolCall,
   isNoeticConfigError,
   isNoeticError,
 } from '@noetic-tools/types';
@@ -1289,5 +1290,37 @@ describe("expose: 'call'", () => {
         }),
       ).code,
     ).toBe('CONNECTION_INVALID');
+  });
+});
+
+describe('a connection tool names the tool it is to', () => {
+  test("as its operation on its connection, like an agent's MCP tool, and a merged tool by the call's target", async () => {
+    const runtime = await runtimeOver({
+      phone: phone(),
+      app: uiDevice('app'),
+      web: uiDevice('web'),
+    });
+    const unified = buildConnectionTools(runtime);
+    expect(identifyToolCall(toolNamed(unified, 'phone_ping'), {})).toEqual({
+      id: 'ping',
+      server: 'phone',
+    });
+    const tap = toolNamed(unified, 'ui_tap');
+    expect(
+      identifyToolCall(tap, {
+        target: 'web',
+      }),
+    ).toEqual({
+      id: 'ui.tap',
+      server: 'web',
+    });
+    expect(
+      identifyToolCall(tap, {
+        target: 'elsewhere',
+      }),
+    ).toEqual({
+      id: 'ui.tap',
+    });
+    await runtime.close();
   });
 });

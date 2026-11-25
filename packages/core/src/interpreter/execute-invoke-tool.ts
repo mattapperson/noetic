@@ -6,10 +6,12 @@
 import type { Span, SteeringDecision } from '@noetic-tools/types';
 import {
   frameworkCast,
+  identifyToolCall,
   NoeticErrorImpl,
   presentToolCall,
   presentToolContent,
   presentToolProgress,
+  toolIdentityData,
   validateSchema,
 } from '@noetic-tools/types';
 import { orderedCallId } from '../connections/durability';
@@ -74,7 +76,7 @@ async function consumeToolGenerator(params: {
         stepId: params.stepId,
         name: params.tool.name,
         callId: params.stepId,
-        toolId: params.tool.name,
+        ...toolIdentityData(identifyToolCall(params.tool, params.args)),
         toolName: params.tool.name,
         event: next.value,
         ...presentToolProgress(params.tool, events),
@@ -144,6 +146,7 @@ async function runInvokeTool<TContext, I, O>(
   // until approved — the same ordering the model-driven path guarantees.
   const broadcaster = getBroadcaster(baseCtx);
   const agentName = baseCtx.harness.config.name;
+  const identity = identifyToolCall(step.tool, parsedArgs);
   emitFrameworkEvent({
     broadcaster,
     agentName,
@@ -151,7 +154,7 @@ async function runInvokeTool<TContext, I, O>(
     data: {
       name: step.tool.name,
       callId: step.id,
-      toolId: step.tool.name,
+      ...toolIdentityData(identity),
       ...presentToolCall(step.tool, parsedArgs),
     },
   });
@@ -166,7 +169,7 @@ async function runInvokeTool<TContext, I, O>(
       data: {
         name: step.tool.name,
         callId: step.id,
-        toolId: step.tool.name,
+        ...toolIdentityData(identity),
         error,
         output,
         ...(content

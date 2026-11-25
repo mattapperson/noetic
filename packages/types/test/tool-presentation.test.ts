@@ -3,9 +3,11 @@ import type { Tool, ToolCallProgress } from '../src/index';
 import {
   clampProgress,
   frameworkCast,
+  identifyToolCall,
   presentToolCall,
   presentToolContent,
   presentToolProgress,
+  toolIdentityData,
 } from '../src/index';
 
 type Presentable = Pick<Tool, 'presentation' | 'acp'>;
@@ -307,5 +309,107 @@ describe('clampProgress', () => {
     expect(clampProgress('1')).toBeUndefined();
     expect(clampProgress(Number.NaN)).toBeUndefined();
     expect(clampProgress(Number.POSITIVE_INFINITY)).toBeUndefined();
+  });
+});
+
+describe('identifyToolCall', () => {
+  const named = (presentation?: Tool['presentation']) => ({
+    name: 'github_create_issue',
+    presentation,
+  });
+
+  it('is the tool by its own name, unless it declares another', () => {
+    expect(identifyToolCall(named(), {})).toEqual({
+      id: 'github_create_issue',
+    });
+    expect(
+      identifyToolCall(
+        named({
+          identity: {
+            id: 'create_issue',
+            server: 'github',
+          },
+        }),
+        {},
+      ),
+    ).toEqual({
+      id: 'create_issue',
+      server: 'github',
+    });
+    expect(
+      identifyToolCall(
+        named({
+          identity: (args: { target: string }) => ({
+            id: 'tap',
+            server: args.target,
+          }),
+        }),
+        {
+          target: 'web',
+        },
+      ),
+    ).toEqual({
+      id: 'tap',
+      server: 'web',
+    });
+  });
+
+  it('falls back to the name for a declaration that throws or names no id, and drops an empty server', () => {
+    expect(
+      identifyToolCall(
+        named({
+          identity: () => {
+            throw new Error('no');
+          },
+        }),
+        {},
+      ),
+    ).toEqual({
+      id: 'github_create_issue',
+    });
+    expect(
+      identifyToolCall(
+        named({
+          identity: {
+            id: '',
+          },
+        }),
+        {},
+      ),
+    ).toEqual({
+      id: 'github_create_issue',
+    });
+    expect(
+      identifyToolCall(
+        named({
+          identity: {
+            id: 'x',
+            server: '',
+          },
+        }),
+        {},
+      ),
+    ).toEqual({
+      id: 'x',
+    });
+  });
+
+  it('carries the identity as toolId and toolServer', () => {
+    expect(
+      toolIdentityData({
+        id: 'x',
+      }),
+    ).toEqual({
+      toolId: 'x',
+    });
+    expect(
+      toolIdentityData({
+        id: 'x',
+        server: 's',
+      }),
+    ).toEqual({
+      toolId: 'x',
+      toolServer: 's',
+    });
   });
 });
