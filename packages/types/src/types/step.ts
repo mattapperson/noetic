@@ -668,6 +668,8 @@ export interface StepDecide<TContext = ContextData, I = unknown, O = unknown>
   projection?: ProjectionPolicy;
   /** Runs averaged on the estimated path. Ignored on the native path. */
   samples: number;
+  /** Extra HTTP headers for the native request. Ignored on the estimated path. */
+  headers?: Readonly<Record<string, string>>;
   /** Controls framework event emission for this step. Defaults to `true`. */
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }

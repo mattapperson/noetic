@@ -11,6 +11,7 @@ import type {
   ToolContextDeclaration,
   ToolExecutionContext,
   ToolHold,
+  ToolModelOutput,
   ToolResultExtensionItem,
   ToolUiDeclaration,
 } from '@noetic-tools/types';
@@ -36,6 +37,8 @@ type ToolConfig<I extends StandardSchemaV1, O extends StandardSchemaV1> = {
     args: InferSchemaOutput<I>,
     toolCtx: ToolExecutionContext,
   ) => Promise<InferSchemaOutput<O>>;
+  /** See `Tool.toModelOutput`: what the model is given as the result, e.g. an image. */
+  toModelOutput?: (result: InferSchemaOutput<O>, args: InferSchemaOutput<I>) => ToolModelOutput;
   needsApproval?: boolean;
   /** See `Tool.durable`: `true` holds an interrupted call for a person, `false` records nothing. */
   durable?: boolean;
@@ -70,6 +73,8 @@ type GeneratorToolConfig<
     args: InferSchemaOutput<I>,
     toolCtx: ToolExecutionContext,
   ) => AsyncGenerator<InferSchemaOutput<E>, InferSchemaOutput<O>>;
+  /** See `Tool.toModelOutput`: what the model is given as the result, e.g. an image. */
+  toModelOutput?: (result: InferSchemaOutput<O>, args: InferSchemaOutput<I>) => ToolModelOutput;
   needsApproval?: boolean;
   /** See `Tool.durable`: `true` holds an interrupted call for a person, `false` records nothing. */
   durable?: boolean;
@@ -128,6 +133,7 @@ export function tool<I extends StandardSchemaV1, O extends StandardSchemaV1>(
     inputJsonSchema: config.inputJsonSchema,
     itemSchemas: config.itemSchemas,
     decorateResultItem: config.decorateResultItem,
+    toModelOutput: config.toModelOutput,
     execute: config.execute,
     needsApproval: config.needsApproval,
     durable: config.durable,
@@ -158,6 +164,7 @@ export function toolWithGenerator<
     inputJsonSchema: config.inputJsonSchema,
     itemSchemas: config.itemSchemas,
     decorateResultItem: config.decorateResultItem,
+    toModelOutput: config.toModelOutput,
     execute: config.execute,
     needsApproval: config.needsApproval,
     durable: config.durable,

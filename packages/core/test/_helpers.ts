@@ -868,13 +868,15 @@ export interface FakeOpenRouterRound {
  * killed mid-stream sees. Every
  * response carries the generation id `gen-<round>` in its `x-generation-id` header.
  *
- * A native decide call (`POST /api/alpha/decisions`, under `origin`) gets its headers,
- * with the id `gen-dec-<n>`, and then never its body.
+ * A native decide call (`POST …/api/alpha/decisions`, under `origin` or under
+ * `baseUrl`) gets its headers, with the id `gen-dec-<n>`, and then never its body.
+ * `decisionPaths` holds the path each one was sent to.
  */
 export interface FakeOpenRouter {
   readonly baseUrl: string;
   readonly origin: string;
   readonly rounds: FakeOpenRouterRound[];
+  readonly decisionPaths: string[];
   readonly dropAt: Set<number>;
   readonly cutAt: Map<number, number>;
   readonly incompleteAt: Set<number>;
@@ -882,13 +884,19 @@ export interface FakeOpenRouter {
   stop(): void;
 }
 
-export function startFakeOpenRouter(reply: (input: unknown[]) => unknown[]): FakeOpenRouter {
+export function startFakeOpenRouter(
+  reply: (input: unknown[]) => unknown[],
+  opts?: {
+    /** Stream each message as a live response does: `added`, a text delta, then `done`. */
+    streamed?: boolean;
+  },
+): FakeOpenRouter {
   const rounds: FakeOpenRouterRound[] = [];
   const dropAt = new Set<number>();
   const cutAt = new Map<number, number>();
   const incompleteAt = new Set<number>();
   const hangAt = new Set<number>();
-  let decisions = 0;
+  const decisionPaths: string[] = [];
   const server = Bun.serve({
     port: 0,
     async fetch(request) {
@@ -898,8 +906,9 @@ export function startFakeOpenRouter(reply: (input: unknown[]) => unknown[]): Fak
           status: 404,
         });
       }
-      if (new URL(request.url).pathname === '/api/alpha/decisions') {
-        decisions += 1;
+      const { pathname } = new URL(request.url);
+      if (pathname.endsWith('/api/alpha/decisions')) {
+        decisionPaths.push(pathname);
         return new Response(
           new ReadableStream({
             start(controller) {
@@ -909,7 +918,7 @@ export function startFakeOpenRouter(reply: (input: unknown[]) => unknown[]): Fak
           {
             headers: {
               'content-type': 'application/json',
-              'x-generation-id': `gen-dec-${decisions}`,
+              'x-generation-id': `gen-dec-${decisionPaths.length}`,
             },
           },
         );
@@ -945,6 +954,7 @@ export function startFakeOpenRouter(reply: (input: unknown[]) => unknown[]): Fak
         model: body.model,
         output: reply(body.input),
         status: incompleteAt.has(round) ? 'incomplete' : 'completed',
+        streamed: opts?.streamed,
       });
       const headers = {
         'content-type': 'text/event-stream',
@@ -984,6 +994,7 @@ export function startFakeOpenRouter(reply: (input: unknown[]) => unknown[]): Fak
     baseUrl: `http://localhost:${server.port}/api/v1`,
     origin: `http://localhost:${server.port}`,
     rounds,
+    decisionPaths,
     dropAt,
     cutAt,
     incompleteAt,
@@ -1009,16 +1020,59 @@ function itemsOf(stream: string, count = 0): string {
   return kept.map((event) => `${event}\n\n`).join('');
 }
 
+const StreamedMessageSchema = z.object({
+  type: z.literal('message'),
+  id: z.string(),
+  content: z.array(
+    z.object({
+      text: z.string(),
+    }),
+  ),
+});
+
+/** A message's `added` event and one text delta holding its whole text, as a live stream sends before `done`. */
+function streamedEvents(item: unknown, index: number): unknown[] {
+  const message = StreamedMessageSchema.safeParse(item);
+  if (!message.success) {
+    return [];
+  }
+  return [
+    {
+      type: 'response.output_item.added',
+      sequence_number: 0,
+      output_index: index,
+      item: {
+        type: 'message',
+        id: message.data.id,
+        role: 'assistant',
+        status: 'in_progress',
+        content: [],
+      },
+    },
+    {
+      type: 'response.output_text.delta',
+      sequence_number: 0,
+      output_index: index,
+      content_index: 0,
+      item_id: message.data.id,
+      delta: message.data.content.map((part) => part.text).join(''),
+      logprobs: [],
+    },
+  ];
+}
+
 function fakeResponseStream({
   round,
   model,
   output,
   status,
+  streamed,
 }: {
   round: number;
   model: string;
   output: unknown[];
   status: 'completed' | 'incomplete';
+  streamed?: boolean;
 }): string {
   const response = {
     id: `resp_${round}`,
@@ -1062,12 +1116,15 @@ function fakeResponseStream({
         output: [],
       },
     },
-    ...output.map((item, index) => ({
-      type: 'response.output_item.done',
-      sequence_number: index + 1,
-      output_index: index,
-      item,
-    })),
+    ...output.flatMap((item, index) => [
+      ...(streamed ? streamedEvents(item, index) : []),
+      {
+        type: 'response.output_item.done',
+        sequence_number: index + 1,
+        output_index: index,
+        item,
+      },
+    ]),
     {
       type: 'response.completed',
       sequence_number: output.length + 1,

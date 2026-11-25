@@ -3,7 +3,8 @@ import assert from 'node:assert';
 import type { CallModelRequest, DecideRequest, LLMResponse } from '@noetic-tools/types';
 import { DecideOutputError, frameworkCast } from '@noetic-tools/types';
 import type { DecisionsClient } from '../../src/harness/decide-call';
-import { callDecide } from '../../src/harness/decide-call';
+import { callDecide, decisionsServerUrl } from '../../src/harness/decide-call';
+import type { Spend } from '../../src/harness/spend';
 import { makeLLMResponse } from '../_helpers';
 
 //#region Helpers
@@ -66,11 +67,14 @@ const REQUEST: DecideRequest = {
 interface FakeClient {
   client: DecisionsClient;
   sent: unknown[];
+  /** The request options each native call was sent with. */
+  options: unknown[];
   lookups: string[];
 }
 
 function fakeClient(opts: { modality: string; answers: Record<string, unknown> }): FakeClient {
   const sent: unknown[] = [];
+  const options: unknown[] = [];
   const lookups: string[] = [];
   const client = frameworkCast<DecisionsClient>({
     models: {
@@ -89,8 +93,9 @@ function fakeClient(opts: { modality: string; answers: Record<string, unknown> }
     },
     alpha: {
       decisions: {
-        create: async (req: unknown) => {
+        create: async (req: unknown, requestOptions: unknown) => {
           sent.push(req);
+          options.push(requestOptions);
           return {
             answers: opts.answers,
             model: 'typesafe/jev-1.14-20261014',
@@ -107,6 +112,7 @@ function fakeClient(opts: { modality: string; answers: Record<string, unknown> }
   return {
     client,
     sent,
+    options,
     lookups,
   };
 }
@@ -161,6 +167,164 @@ function scriptedChat(texts: string[]): {
 }
 
 //#endregion
+
+describe('decisionsServerUrl', () => {
+  it("is unset for OpenRouter's own base, and for none", () => {
+    expect(decisionsServerUrl(undefined)).toBeUndefined();
+    expect(decisionsServerUrl('')).toBeUndefined();
+    expect(decisionsServerUrl('https://openrouter.ai')).toBeUndefined();
+    expect(decisionsServerUrl('https://openrouter.ai/')).toBeUndefined();
+    expect(decisionsServerUrl('https://openrouter.ai/api/v1')).toBeUndefined();
+    // However the host and its default port are spelled.
+    expect(decisionsServerUrl('https://OpenRouter.AI/api/v1')).toBeUndefined();
+    expect(decisionsServerUrl('https://openrouter.ai:443/api/v1')).toBeUndefined();
+  });
+
+  it('is any other base, without trailing slashes', () => {
+    expect(decisionsServerUrl('https://api.example.com/v1')).toBe('https://api.example.com/v1');
+    expect(decisionsServerUrl('https://api.example.com/v1//')).toBe('https://api.example.com/v1');
+    expect(decisionsServerUrl('http://localhost:8787/')).toBe('http://localhost:8787');
+  });
+
+  it('does not take a host that only starts like OpenRouter for it', () => {
+    expect(decisionsServerUrl('https://openrouter.ai.example.com/v1')).toBe(
+      'https://openrouter.ai.example.com/v1',
+    );
+    expect(decisionsServerUrl('http://openrouter.ai/api/v1')).toBe('http://openrouter.ai/api/v1');
+  });
+});
+
+/** How a host turns on TypeSafe's long-context limits: a header Noetic passes through unread. */
+const LONG_CONTEXT = {
+  'TypeSafe-Danger-Zone-Long-Context': 'true',
+};
+
+describe('callDecide — native request options', () => {
+  const native = (
+    request: DecideRequest,
+    serverUrl?: string,
+  ): Promise<{
+    options: unknown[];
+  }> => {
+    const fake = fakeClient({
+      modality: 'decisions',
+      answers: NATIVE_ANSWERS,
+    });
+    return callDecide(request, {
+      client: fake.client,
+      serverUrl,
+      callModel: noChatModel(),
+      nativeModels: new Map(),
+    }).then(() => fake);
+  };
+
+  it('sends no headers and no server URL by default', async () => {
+    const { options } = await native(REQUEST);
+    expect(options).toEqual([
+      {
+        signal: undefined,
+      },
+    ]);
+  });
+
+  it('sends the request’s headers on the native call', async () => {
+    const { options } = await native({
+      ...REQUEST,
+      headers: LONG_CONTEXT,
+    });
+    expect(options).toEqual([
+      {
+        signal: undefined,
+        headers: LONG_CONTEXT,
+      },
+    ]);
+  });
+
+  it("sends them with the dispatch record's headers, which a request cannot replace", async () => {
+    const fake = fakeClient({
+      modality: 'decisions',
+      answers: NATIVE_ANSWERS,
+    });
+    const spend = frameworkCast<Spend>({
+      open: async () => ({
+        headers: {
+          'x-noetic-dispatch': 'd-1',
+        },
+        settle: async () => {},
+        end: () => {},
+      }),
+    });
+    await callDecide(
+      {
+        ...REQUEST,
+        headers: {
+          ...LONG_CONTEXT,
+          'x-noetic-dispatch': 'forged',
+          // Header names are not case-sensitive: this one would be joined to the real id.
+          'X-Noetic-Dispatch': 'forged too',
+        },
+      },
+      {
+        client: fake.client,
+        callModel: noChatModel(),
+        nativeModels: new Map(),
+        spend,
+      },
+    );
+    expect(fake.options[0]).toMatchObject({
+      headers: {
+        ...LONG_CONTEXT,
+        'x-noetic-dispatch': 'd-1',
+      },
+    });
+  });
+
+  it('does not send them on the estimated path', async () => {
+    const fake = fakeClient({
+      modality: 'text',
+      answers: {},
+    });
+    const chat = scriptedChat([
+      JSON.stringify({
+        damaged: {
+          yes: 0.9,
+        },
+        queue: {
+          billing: 1,
+          shipping: 0,
+        },
+        urgency: {
+          low: 1,
+          medium: 0,
+          high: 0,
+        },
+      }),
+    ]);
+    await callDecide(
+      {
+        ...REQUEST,
+        headers: LONG_CONTEXT,
+      },
+      {
+        client: fake.client,
+        callModel: chat.callModel,
+        nativeModels: new Map(),
+      },
+    );
+    expect(fake.options).toEqual([]);
+    expect(JSON.stringify(chat.requests)).not.toContain('TypeSafe-Danger-Zone-Long-Context');
+  });
+
+  it("sends the call to the client's own base URL when given one", async () => {
+    const { options } = await native(REQUEST, 'https://api.example.com/v1');
+    expect(options).toEqual([
+      {
+        signal: undefined,
+        serverURL: 'https://api.example.com/v1',
+      },
+    ]);
+  });
+});
 
 describe('callDecide — native path', () => {
   it('translates questions and state into the TypeSafe wire format', async () => {

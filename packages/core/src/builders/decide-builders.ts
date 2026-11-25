@@ -47,6 +47,13 @@ export interface StepDecideOpts<TContext, Q extends DecideQuestions, I = unknown
   projection?: ProjectionPolicy;
   /** Runs averaged on the estimated path. Ignored on the native path. Default 1. */
   samples?: number;
+  /**
+   * Extra HTTP headers for the native request: how a host sets a provider's
+   * per-request option, e.g. `{ 'TypeSafe-Danger-Zone-Long-Context': 'true' }`
+   * for TypeSafe's long-context limits. Passed through unread and ignored on the
+   * estimated path. A step may be serialized, so keep credentials out of them.
+   */
+  headers?: Readonly<Record<string, string>>;
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }
 

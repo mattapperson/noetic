@@ -1,4 +1,10 @@
-import type { Item, ItemSchemaRegistry, StreamEvent, StreamingItem } from '@noetic-tools/types';
+import type {
+  Item,
+  ItemSchemaRegistry,
+  SdkStreamEvent,
+  StreamEvent,
+  StreamingItem,
+} from '@noetic-tools/types';
 import { defaultItemSchemaRegistry, frameworkCast } from '@noetic-tools/types';
 import type { EventBroadcaster } from './event-broadcaster';
 
@@ -31,6 +37,8 @@ interface ItemAccumulator {
   item: MutableItem;
   isComplete: boolean;
 }
+
+type AccumulatorUpdate = (acc: ItemAccumulator, event: StreamEvent) => void;
 
 //#endregion
 
@@ -167,6 +175,45 @@ function completeStreamingItem(item: MutableItem): MutableItem & {
   };
 }
 
+/** The id of the item an SDK event is about, when the event names one. */
+function itemIdOf(event: SdkStreamEvent): string | undefined {
+  const { itemId, item } = event.data;
+  if (typeof itemId === 'string') {
+    return itemId;
+  }
+  return isItemRecord(item) && typeof item.id === 'string' ? item.id : undefined;
+}
+
+/** Framework-authored snapshots: a custom item in progress, or an appended item. */
+function* frameworkSnapshots(event: StreamEvent): Generator<StreamingItem> {
+  // A custom item's event streams in progress under the id its final item takes.
+  if (event.type.endsWith(':custom_item_event')) {
+    yield frameworkCast<StreamingItem>({
+      ...event.data,
+      isComplete: false,
+    });
+    return;
+  }
+  if (
+    event.type.endsWith(':item_appended') &&
+    typeof event.data.item === 'object' &&
+    event.data.item !== null
+  ) {
+    yield {
+      ...frameworkCast<Item>(event.data.item),
+      isComplete: true,
+    };
+  }
+}
+
+/** How each delta event changes the item it is about. */
+const ACCUMULATOR_UPDATES: Record<string, AccumulatorUpdate | undefined> = {
+  'response.output_text.delta': updateMessageAccumulator,
+  'response.output_text.done': updateMessageAccumulator,
+  'response.function_call_arguments.delta': updateFunctionCallAccumulator,
+  'response.function_call_arguments.done': updateFunctionCallAccumulator,
+};
+
 //#endregion
 
 //#region Public stream filters
@@ -197,106 +244,114 @@ export async function* filterReasoningStream(broadcaster: EventBroadcaster): Asy
   }
 }
 
-/** @internal Yield cumulative StreamingItem snapshots. Uses roundOffset keyed by
- *  response.created so accumulators across multiple tool rounds and across
- *  multiple turns within a session don't collide.
+/**
+ * @internal Yield cumulative StreamingItem snapshots.
  *
- *  SDK events cover model output only; framework-authored items — turn input
- *  messages, between-rounds injections, tool results — arrive via the
- *  `item_appended` framework event and are yielded already complete. */
+ * SDK events cover model output only; framework-authored items — turn input
+ * messages, between-rounds injections, tool results — arrive via the
+ * `item_appended` framework event and are yielded already complete.
+ */
 export async function* buildItemStream(
   broadcaster: EventBroadcaster,
   itemSchemas: ItemSchemaRegistry = defaultItemSchemaRegistry,
 ): AsyncIterable<StreamingItem> {
-  const accumulators = new Map<string, ItemAccumulator>();
-  let roundOffset = 0;
-
+  const stream = new ItemStream(itemSchemas);
   for await (const event of broadcaster) {
+    yield* stream.push(event);
+  }
+}
+
+//#endregion
+
+//#region ItemStream
+
+/**
+ * @internal Folds stream events into item snapshots, one event at a time: what
+ * `getItemStream` yields and what an `OutputStore` keeps.
+ *
+ * An event that names its item is matched by that id, which keeps model calls
+ * running at once apart. One that does not is matched by round and output index,
+ * the round counted from `response.created`, so the items of later tool rounds
+ * and later turns do not collide.
+ */
+export class ItemStream {
+  private readonly accumulators = new Map<string, ItemAccumulator>();
+  private readonly byId = new Map<string, ItemAccumulator>();
+  private roundOffset = 0;
+  private readonly itemSchemas: ItemSchemaRegistry;
+
+  constructor(itemSchemas: ItemSchemaRegistry = defaultItemSchemaRegistry) {
+    this.itemSchemas = itemSchemas;
+  }
+
+  /** The snapshots `event` produces: none, or one. */
+  *push(event: StreamEvent): Generator<StreamingItem> {
     if (event.source === 'framework') {
-      // A custom item's event streams in progress under the id its final item takes.
-      if (event.type.endsWith(':custom_item_event')) {
-        yield frameworkCast<StreamingItem>({
-          ...event.data,
-          isComplete: false,
-        });
-        continue;
-      }
-      if (
-        event.type.endsWith(':item_appended') &&
-        typeof event.data.item === 'object' &&
-        event.data.item !== null
-      ) {
-        yield {
-          ...frameworkCast<Item>(event.data.item),
-          isComplete: true,
-        };
-      }
-      continue;
+      yield* frameworkSnapshots(event);
+      return;
     }
     if (event.source !== 'sdk') {
-      continue;
+      return;
     }
-
     if (event.type === 'response.created') {
-      roundOffset++;
-      continue;
+      this.roundOffset++;
+      return;
     }
-
     if (event.type === 'response.output_item.added') {
-      const outputIndex =
-        typeof event.outputIndex === 'number' ? event.outputIndex : accumulators.size;
-      const key = accumulatorKey(roundOffset, outputIndex);
-      const acc = createAccumulatorFromItemAdded(event, itemSchemas);
-      if (acc) {
-        accumulators.set(key, acc);
-        yield {
-          ...acc.item,
-          isComplete: false,
-        };
-      }
-      continue;
+      yield* this.add(event);
+      return;
     }
-
     if (event.type === 'response.output_item.done') {
-      const outputIndex = typeof event.outputIndex === 'number' ? event.outputIndex : -1;
-      const key = accumulatorKey(roundOffset, outputIndex);
-      const acc = accumulators.get(key);
+      const acc = this.find(event, -1);
       if (acc) {
         acc.isComplete = true;
         yield completeStreamingItem(acc.item);
       }
-      continue;
+      return;
     }
+    const update = ACCUMULATOR_UPDATES[event.type];
+    const acc = update ? this.find(event, 0) : undefined;
+    if (update && acc) {
+      update(acc, event);
+      yield {
+        ...acc.item,
+        isComplete: acc.isComplete,
+      };
+    }
+  }
 
-    if (event.type === 'response.output_text.delta' || event.type === 'response.output_text.done') {
-      const outputIndex = typeof event.outputIndex === 'number' ? event.outputIndex : 0;
-      const key = accumulatorKey(roundOffset, outputIndex);
-      const acc = accumulators.get(key);
-      if (acc) {
-        updateMessageAccumulator(acc, event);
-        yield {
-          ...acc.item,
-          isComplete: acc.isComplete,
-        };
-      }
-      continue;
+  private *add(event: SdkStreamEvent): Generator<StreamingItem> {
+    const outputIndex =
+      typeof event.outputIndex === 'number' ? event.outputIndex : this.accumulators.size;
+    const acc = createAccumulatorFromItemAdded(event, this.itemSchemas);
+    if (!acc) {
+      return;
     }
+    this.accumulators.set(accumulatorKey(this.roundOffset, outputIndex), acc);
+    if (acc.id !== '') {
+      this.byId.set(acc.id, acc);
+    }
+    yield {
+      ...acc.item,
+      isComplete: false,
+    };
+  }
 
-    if (
-      event.type === 'response.function_call_arguments.delta' ||
-      event.type === 'response.function_call_arguments.done'
-    ) {
-      const outputIndex = typeof event.outputIndex === 'number' ? event.outputIndex : 0;
-      const key = accumulatorKey(roundOffset, outputIndex);
-      const acc = accumulators.get(key);
-      if (acc) {
-        updateFunctionCallAccumulator(acc, event);
-        yield {
-          ...acc.item,
-          isComplete: acc.isComplete,
-        };
-      }
+  /** The accumulator `event` is about. `missingIndex` stands in for an absent output index. */
+  private find(event: SdkStreamEvent, missingIndex: number): ItemAccumulator | undefined {
+    const id = itemIdOf(event);
+    const named = id === undefined ? undefined : this.byId.get(id);
+    if (named) {
+      return named;
     }
+    // An event that names an item this stream never saw is about the item at its
+    // own output index, which the provider renamed after `added`. One with no
+    // index is given to no item: it could be another call's.
+    if (id !== undefined && typeof event.outputIndex !== 'number') {
+      return undefined;
+    }
+    const outputIndex = typeof event.outputIndex === 'number' ? event.outputIndex : missingIndex;
+    return this.accumulators.get(accumulatorKey(this.roundOffset, outputIndex));
   }
 }
 

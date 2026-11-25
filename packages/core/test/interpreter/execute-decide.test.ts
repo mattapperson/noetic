@@ -164,6 +164,31 @@ describe('executeDecide', () => {
     });
   });
 
+  it('passes a step’s headers on the request, and none when it has none', async () => {
+    const { harness, requests } = harnessWith({});
+    const headers = {
+      'TypeSafe-Danger-Zone-Long-Context': 'true',
+    };
+    const ask = (id: string, stepHeaders?: Record<string, string>): Promise<unknown> =>
+      harness.run(
+        decide({
+          id,
+          model: 'typesafe/jev-1.14',
+          questions: QUESTIONS,
+          headers: stepHeaders,
+        }),
+        'refund please',
+        harness.createContext(),
+      );
+    await ask('with', headers);
+    await ask('without');
+
+    expect(requests.map((request) => request.headers)).toEqual([
+      headers,
+      undefined,
+    ]);
+  });
+
   it('sends the input, instructions, and context selector — under one `context` entry — as state', async () => {
     const { harness, requests } = harnessWith({});
     const ctx = harness.createContext();

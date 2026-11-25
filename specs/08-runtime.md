@@ -571,6 +571,45 @@ type StreamingItem = Item & { readonly isComplete: boolean };
 
 Stream accessors MAY be subscribed before any `execute()` call; the underlying `EventBroadcaster` replays buffered events so late subscribers observe turn history within the buffer window.
 
+`getItemStream` matches each SDK event to its item by the item id the event names, so the items of model calls that stream at the same time (parallel branches, spawned agents) stay apart. An event that names no item is matched by round and output index, the round counted from `response.created`.
+
+### Display output
+
+Streams end with the process. An **interactive** harness, `AgentHarnessOpts.interactive: true` (default `false`), also keeps what each thread streamed, so a host can show the thread again: after a restart, on another machine over the same storage, or after a run that failed.
+
+```typescript
+// On the `AgentHarness` class. `AgentHarnessContract` does not carry them.
+class AgentHarness {
+  /** The thread's display output: the latest snapshot of every item it streamed. */
+  getSessionOutput(scope?: SessionScope): Promise<OutputSnapshot[]>;
+  /** Save display snapshots, each replacing the stored one with its id. Resolves the whole output. */
+  saveSessionOutput(items: ReadonlyArray<unknown>, scope: SessionScope): Promise<OutputSnapshot[]>;
+}
+
+/** An item snapshot as `getItemStream` yields it, or whatever an adapter saved in its place. */
+type OutputSnapshot = { type: string; id?: string; isComplete?: boolean; [key: string]: unknown };
+
+class OutputStoreError extends Error {
+  readonly scope: string;   // the thread id
+  readonly cause: unknown;  // what storage, or the snapshot check, failed with
+}
+```
+
+- **What is kept.** Every snapshot `getItemStream` would yield for the thread, folded from the same events, with a later snapshot of an item replacing the earlier one. An item that never finished stays as its last snapshot, `isComplete: false`. Snapshots are keyed by `id`, else by `type` and `callId`, else by content.
+- **Recording needs no listener.** The harness observes the thread's `EventBroadcaster` directly (`EventBroadcaster.observe`), so output is kept whether or not any client reads a stream, and after every client has left.
+- **Where.** In the harness's `StorageAdapter` under `output:<threadId>`, apart from checkpoints, the step ledger and the thread's history (`23-durable-execution` § Storage layout). With no storage configured it is kept in memory and ends with the harness.
+- **It is for display only.** Nothing resumes, replays or assembles a model's context from it. A resumed run is rebuilt from its checkpoint and ledger as always.
+- **When it is saved.** In the background while the thread streams, one write at a time. The harness waits for what is queued when a root run ends, when a run fails, and in `close()`. A write is tried three times.
+- **A failed save never decides a run.** When a root run ends, finished or failed, a save that could not be made is logged and stays queued for the next flush; the run's own result or error stands, and its history is kept as usual. `getSessionOutput` and `close()` throw the `OutputStoreError` until a later write lands, every caller waiting on it alike. `close()` throws it after closing everything else.
+- **Writers do not overwrite each other.** A harness keeps one store per thread, so its own writes queue. Over storage with `swap`, a write lands only if nothing was saved since it read, and otherwise merges over the newer value and tries again; two harnesses over the same storage then keep each other's snapshots. Without `swap`, the last write of two harnesses wins.
+- **An event that cannot be read as display output** (an item type no schema knows, say) is left out with a warning; it does not fail the save.
+- **Reading.** `getSessionOutput` first waits for what is queued, then reads storage. It works on any harness over the same storage, interactive or not. It throws `OutputStoreError` when storage fails or holds something else under the key.
+- **`saveSessionOutput`** is for a protocol adapter that shows a thread in its own item shapes (an ACP server's plan entries, say): it saves them beside the streamed snapshots. Each item must be an object with a string `type`, or the call throws `OutputStoreError` and saves none of them. The model's history is untouched.
+
+An interactive harness also makes a root context that a host builds part of its thread. `createContext({ threadId })` with no `parent` gets the thread's broadcaster, so `run(step, input, ctx)` on it streams through the thread's accessors and is recorded like a session turn. A root context built with no `threadId` is its own thread, named by its execution id; when its run ends the harness drops that thread's session and store from memory, and what was saved stays in storage under `output:<ctx.id>` for the host to read or delete. Child contexts are unchanged.
+
+`OutputStore`, `OutputStoreError` and the `OutputSnapshot` type are exported from `@noetic-tools/core` and `@noetic-tools/core/portable/runtime` for a host that keeps display output for something other than a harness thread.
+
 ### Delivery Modes
 
 Each queued message carries a `DeliveryMode`:
@@ -676,6 +715,7 @@ interface FrameworkStreamEvent {
 | `{name}:tool_round_started` | Emitted before a tool execution round. Data: `{ round, toolCount }` |
 | `{name}:tool_call_started` | Emitted before each tool call. Data: `{ name, callId }` |
 | `{name}:tool_call_completed` | Emitted after each tool call. Data: `{ name, callId, error }` |
+| `{name}:tool_model_output_failed` | Emitted when a tool's `toModelOutput` throws; the model is given the call's output text instead (`02-step-variants` § What the model is given). Data: `{ name, callId, error }` |
 | `{name}:tool_round_completed` | Emitted after all tool calls in a round. Data: `{ round, toolCount }` |
 | `{name}:model_call_started` | Emitted before each provider call in the tool-round loop. Data: `{ round, messageCount, toolCount }` |
 | `{name}:model_call_first_event` | Emitted when the first SDK event for the call arrives. Useful for measuring time-to-first-token. Only emitted when a broadcaster is attached to the context. Data: `{ round }` |

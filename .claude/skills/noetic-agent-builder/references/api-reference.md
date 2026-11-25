@@ -158,6 +158,7 @@ decide<const Q extends DecideQuestions, TContext = ContextData, I = unknown>({
   context?: (ctx: Context<TContext>) => Record<string, unknown> | Promise<Record<string, unknown>>; // sent as one `context` entry
   projection?: ProjectionPolicy;                // default DECISION_PROJECTION
   samples?: number;                             // estimated path only; default 1
+  headers?: Readonly<Record<string, string>>;   // native path only: extra HTTP headers, passed through unread
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }): DecideStep<TContext, I, Q>                  // StepDecide<TContext, I, DecideAnswers<Q>> & { questions: Q }
 ```
@@ -232,7 +233,7 @@ Recall runs with `{ peek: true }` (see [RecallOptions.peek](#recalloptionspeek))
 
 **Asking again.** Within one execution, the same decide step id with the same input and the same conversation length returns its earlier answers with no model call. Two nested `routeSwitch`es over one decision pay once and cannot disagree; a loop that asks again after new items land gets a fresh decision.
 
-**Model paths.** A decision model (one whose OpenRouter output modalities include `decisions`, such as `'typesafe/jev-1.14'`) answers in one pass with calibrated probabilities (`source: 'native'`). Any chat model also works: the harness asks for probabilities as structured output and averages `samples` runs (`source: 'estimated'`). Estimated probabilities are not calibrated; use them for routing thresholds only.
+**Model paths.** A decision model (one whose OpenRouter output modalities include `decisions`, such as `'typesafe/jev-1.14'`) answers in one pass with calibrated probabilities (`source: 'native'`). Any chat model also works: the harness asks for probabilities as structured output and averages `samples` runs (`source: 'estimated'`). Estimated probabilities are not calibrated; use them for routing thresholds only. `headers` are sent with the native request, unread: `headers: { 'TypeSafe-Danger-Zone-Long-Context': 'true' }` turns on TypeSafe's long-context limits. They cannot replace the harness's dispatch header, and credentials do not belong in them. A native call follows the provider's base URL: when it is not OpenRouter's, decisions go to `<baseUrl>/api/alpha/decisions`, never to openrouter.ai.
 
 - Native: only an explicit provider refusal becomes a `Refusal`; a missing or mistyped answer is `model_parse_error`. `probabilities` always has every outcome (`0` when missing). A one-sided boolean `criteria` joins the instructions (`Yes means: …`). A failed model lookup (other than 404) is not cached; that call goes estimated and the next one asks again.
 - Estimated: samples that fail or do not parse are dropped; the step fails only when none parse, and still counts what the samples spent.
@@ -452,6 +453,7 @@ tool<I, O>({
   inputJsonSchema?: Record<string, unknown>;  // explicit fallback/override after Zod and StandardJSONSchemaV1
   execute: (args: I, toolCtx: ToolExecutionContext) => Promise<O>;
   needsApproval?: boolean;                // harness approveToolCall decides each call (see Tool approval)
+  toModelOutput?: (result: O, args: I) => string | ReadonlyArray<InputContentPart>; // what the model gets instead of the JSON text, e.g. an input_image
   context?: ToolContextDeclaration;
   ui?: ToolUiDeclaration<I, O>;           // call/progress/result/error render fns (generative UI)
   itemSchemas?: ItemSchemaExtensions;     // { items?, developerMessages?, toolCalls?, toolResults? }
@@ -462,6 +464,8 @@ tool<I, O>({
 `toolWithGenerator({ …, event, async *execute })` is the streaming form: it adds
 the `event` schema and takes an async generator, and its `ui.progress(events)`
 is typed from `event` (the non-generator `tool()` has no events to render).
+
+**`toModelOutput(result, args)`** — set it when the model should see something other than the result's JSON text, typically an image: return a string or content parts (`{ type: 'input_text', text }`, `{ type: 'input_image', imageUrl, detail? }`, `{ type: 'input_file', … }`). It applies to the round the call was made in; the result item, `tool_call_completed`, the durable call record, `ui` and `decorateResultItem` keep the JSON text, and a later turn shows the model that text. Not called for a failed call. Called for a held call answered with an `output`, and again on resume for each replayed call (with the recorded result), so keep it synchronous and pure. `result` arrives as its JSON round trip (a `Date` as ISO text) and `args` as the input schema reads them. If it throws, the model gets the JSON text and `tool_model_output_failed` is emitted. Not called for tools an ACP agent runs or for `invokeTool`.
 
 **`itemSchemas` contract** — extension schemas are additive and owner-scoped:
 
@@ -1870,6 +1874,7 @@ interface DecideRequest {
   >;
   questions: DecideQuestions;
   samples?: number;          // estimated path only; default 1
+  headers?: Readonly<Record<string, string>>; // native path only
   signal?: AbortSignal;
 }
 
@@ -1890,6 +1895,8 @@ For decision models the OpenRouter adapter calls the native decisions API; for a
 |--------|-------------|
 | `getAgentResponse(scope?)` | Resolves once the session drains its queue. |
 | `getItemStream(scope?)` | Cumulative item snapshots across every turn. |
+| `getSessionOutput(scope?)` | Display output from storage: the latest snapshot of every item the thread streamed, unfinished included. Recorded when the harness has `interactive: true`; readable from any harness over the same storage. Throws `OutputStoreError`. |
+| `saveSessionOutput(items, scope)` | Save display snapshots (objects with a string `type`) by id; resolves the whole output. Model history untouched. |
 | `getTextStream(scope?)` / `getReasoningStream(scope?)` | Text / reasoning deltas. |
 | `getFullStream(scope?)` | Raw SDK + framework events. |
 | `abort(scope?)` | Cancel in-flight turn; queued messages preserved. `{ drainMs }` drains first and resolves with the `DrainReport` (see Cancellation). |

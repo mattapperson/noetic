@@ -320,4 +320,48 @@ describe('BroadcastIterator pipelined next() (C9)', () => {
     const events = await collect(bc);
     expect(events).toHaveLength(2);
   });
+
+  describe('observe()', () => {
+    it('hears every event with no consumer attached, and after every consumer left', async () => {
+      const bc = new EventBroadcaster();
+      const heard: StreamEvent[] = [];
+      bc.observe((event) => heard.push(event));
+
+      bc.emit(textDelta('a'));
+      const iterator = bc[Symbol.asyncIterator]();
+      await iterator.next();
+      await iterator.return?.();
+      // No consumer is left, so the buffer stops filling; the observer still hears.
+      bc.emit(textDelta('b'));
+
+      expect(heard).toEqual([
+        textDelta('a'),
+        textDelta('b'),
+      ]);
+      expect(bc.bufferSize).toBe(1);
+    });
+
+    it('is not replayed what was emitted before it, and stops when told to', () => {
+      const bc = new EventBroadcaster();
+      bc.emit(textDelta('before'));
+      const heard: StreamEvent[] = [];
+      const stop = bc.observe((event) => heard.push(event));
+      bc.emit(textDelta('during'));
+      stop();
+      bc.emit(textDelta('after'));
+
+      expect(heard).toEqual([
+        textDelta('during'),
+      ]);
+    });
+
+    it('hears nothing once the stream is done', () => {
+      const bc = new EventBroadcaster();
+      const heard: StreamEvent[] = [];
+      bc.observe((event) => heard.push(event));
+      bc.complete();
+      bc.emit(textDelta('late'));
+      expect(heard).toEqual([]);
+    });
+  });
 });

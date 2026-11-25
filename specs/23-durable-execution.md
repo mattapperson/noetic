@@ -663,6 +663,8 @@ The CLI's durable execution uses three distinct on-disk roots so tools and opera
 
 Subprocess and IPC queue storage share a root because the adapter already provides a `StorageAdapter` and wiring a second one would force callers to coordinate two storage adapters per launch. Keeping the checkpoint-snapshot root distinct makes "discard all recovery data" a single directory removal.
 
+A thread's display output (`08-runtime` § Display output) is kept in the harness's `StorageAdapter` under `output:<threadId>`, one key per thread holding every snapshot. It is outside the `execution:<id>:` and `session:<threadId>` keys: `clearCheckpoint`, an abandoned turn and ledger pruning leave it alone, `restore()` never reads it, and nothing replays from it. A host that discards a thread deletes the key itself.
+
 Both root defaults respect `NOETIC_HOME` (if set, the roots become `$NOETIC_HOME/subprocess` and `$NOETIC_HOME/checkpoints`), so embedders that run under sandboxed or isolated home directories can relocate them with a single env var.
 
 ## Guarantees and limitations

@@ -1773,6 +1773,24 @@ describe('hydrateNode — decide and routeSwitch', () => {
     ]);
   });
 
+  test('hydrates headers on a decide node, and leaves them unset by default', () => {
+    const headers = {
+      'TypeSafe-Danger-Zone-Long-Context': 'true',
+    };
+    const withHeaders = hydrateNode(
+      {
+        ...decideNode,
+        headers,
+      },
+      makeHydrationContext(),
+    );
+    assert(withHeaders.kind === 'decide');
+    expect(withHeaders.headers).toEqual(headers);
+    const plain = hydrateNode(decideNode, makeHydrationContext());
+    assert(plain.kind === 'decide');
+    expect(plain.headers).toBeUndefined();
+  });
+
   test('hydrates a routeSwitch node whose route runs the decision and picks the case', async () => {
     const node: WorkflowNode = {
       kind: 'routeSwitch',

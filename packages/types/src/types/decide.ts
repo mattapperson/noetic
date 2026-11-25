@@ -190,6 +190,11 @@ export interface DecideRequest {
   questions: DecideQuestions;
   /** Runs averaged on the estimated path. Ignored on the native path. Default 1. */
   samples?: number;
+  /**
+   * Extra HTTP headers for the native request, such as a provider's per-request
+   * option. Passed through unread. The estimated path ignores them.
+   */
+  headers?: Readonly<Record<string, string>>;
   signal?: AbortSignal;
   /** @internal Parent span for the decide-call span. */
   parentSpan?: Span;
