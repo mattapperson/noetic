@@ -24,6 +24,7 @@ export * from './types/custom-item';
 export * from './types/decide';
 export * from './types/detached';
 export * from './types/error';
+export * from './types/forget';
 export * from './types/fs-adapter';
 export * from './types/harness-judgment';
 export * from './types/harness-platform';

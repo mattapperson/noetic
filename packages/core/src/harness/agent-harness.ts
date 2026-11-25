@@ -5,8 +5,12 @@ import type {
   ConnectionTrigger,
   DecisionItem,
   ExecuteArgument,
+  ForgetOptions,
+  ForgetReport,
   HeldCall,
   HeldResolution,
+  ListStoredOptions,
+  StoredExecution,
   StuckTurn,
   TrailMark,
 } from '@noetic-tools/types';
@@ -176,6 +180,8 @@ import type {
 } from './deps/types';
 import { SteeringAction } from './deps/types';
 import { flowVersionOf } from './flow-version';
+import type { ForgetHost } from './forget';
+import { forgetExecution, forgetThread, listStoredExecutions, listStoredThreads } from './forget';
 import type {
   AgentHarnessOpts,
   ParkConfig,
@@ -1806,6 +1812,83 @@ export class AgentHarness<
       }
     }
     return marks;
+  }
+
+  //#endregion
+
+  //#region Forgetting
+
+  /**
+   * Delete everything the harness keeps for a thread or an execution, so a host never
+   * builds a storage key itself (spec 23 § Forgetting).
+   *
+   * A thread's forget covers every execution the thread ran, its context-layer state,
+   * display output, record and turn lease. An execution's forget covers what is stored
+   * under it and its layer state, and leaves any thread's record alone. Pending spend
+   * is settled first: priced through the provider, waiting up to `patienceMs`, else
+   * written off at its ceiling (at 0, flagged `unbounded`, when it has none). The trail
+   * goes too unless `keepTrail`.
+   *
+   * @throws NoeticError `lease_lost` when the thread has a turn running in this
+   *   harness, or the execution a run in flight; or when another harness still holds
+   *   the thread's lease after `waitMs`.
+   * @public
+   */
+  async forget(
+    scope: SessionScope | ExecutionScope,
+    options?: ForgetOptions,
+  ): Promise<ForgetReport> {
+    const report =
+      'executionId' in scope
+        ? await forgetExecution(this.forgetHost(), scope.executionId, options)
+        : await forgetThread(this.forgetHost(), scope.threadId ?? DEFAULT_THREAD_ID, options);
+    await this.announceWakeTimeQuietly();
+    return report;
+  }
+
+  /**
+   * Every thread with a record, a turn lease, or display output stored: what
+   * `forget({ threadId })` deletes. Sorted; `prefix` narrows to ids that start with it.
+   * @public
+   */
+  async listStoredThreads(options?: ListStoredOptions): Promise<string[]> {
+    return listStoredThreads(this.forgetHost(), options);
+  }
+
+  /**
+   * Every execution with anything stored, with what is stored for it. `resumable` is
+   * set when a snapshot or ledger entries are: a trail alone is not a checkpoint.
+   * Sorted; `prefix` narrows to ids that start with it.
+   * @public
+   */
+  async listStoredExecutions(options?: ListStoredOptions): Promise<StoredExecution[]> {
+    return listStoredExecutions(this.forgetHost(), options);
+  }
+
+  private forgetHost(): ForgetHost {
+    return {
+      storage: this.config.storage,
+      outputStorage: this.outputStorage,
+      checkpointStore: this.checkpointStore,
+      sessionStore: this.sessionStore,
+      leaseOptions: this.leaseOptions,
+      threadBusy: (threadId) => {
+        const session = this.sessions.get(threadId);
+        return session?.lease !== undefined || session?.runner.context !== undefined;
+      },
+      executionBusy: (executionId) => this.liveRoots.has(executionId),
+      closeSpend: async (owns, patienceMs) => (await this.spend?.close(owns, patienceMs)) ?? [],
+      clearCheckpoint: (executionId) => this.clearCheckpoint(executionId),
+      settleOutput: async (threadId) => {
+        const output = this.outputs.get(threadId);
+        this.outputs.delete(threadId);
+        await output?.flush().catch(() => undefined);
+      },
+      dropThread: (threadId) => {
+        this.parkWatchers?.stop(threadId);
+        this.sessions.delete(threadId);
+      },
+    };
   }
 
   //#endregion

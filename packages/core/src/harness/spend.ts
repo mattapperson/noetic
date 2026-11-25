@@ -248,6 +248,48 @@ export class Spend {
     );
   }
 
+  /**
+   * Settle every pending dispatch `owns` picks, for a forget (spec 23 § Forgetting):
+   * price each through the provider, waiting up to `patienceMs`, then write off the
+   * rest at their ceiling, or at 0 flagged `unbounded` when nothing bounds them.
+   * Priced settlements come first, then write-offs.
+   */
+  async close(
+    owns: (record: SpendRecord) => boolean,
+    patienceMs = DEFAULT_PATIENCE_MS,
+  ): Promise<SpendSettlement[]> {
+    const records = (await this.unsettled(undefined)).filter(owns);
+    await Promise.all(records.map((record) => this.hold(record)));
+    const priced = await Promise.all(records.map((record) => this.lookup(record, patienceMs)));
+    const settled = priced.filter((settlement) => settlement !== undefined);
+    const done = new Set(settled.map((settlement) => settlement.id));
+    for (const record of records) {
+      if (done.has(record.id)) {
+        continue;
+      }
+      const writeOff = await this.writeOffAtCeiling(record.id);
+      if (writeOff) {
+        settled.push(writeOff);
+      }
+    }
+    return settled;
+  }
+
+  /** Write a held dispatch off at its ceiling, or at 0 flagged `unbounded` when it has none. */
+  private async writeOffAtCeiling(id: string): Promise<SpendSettlement | undefined> {
+    const ceiling = this.holds.get(id)?.ceiling;
+    const settlement = await this.writeOff(id, {
+      assumedCost: ceiling ?? 0,
+    });
+    if (!settlement || ceiling !== undefined) {
+      return settlement;
+    }
+    return {
+      ...settlement,
+      unbounded: true,
+    };
+  }
+
   /** USD held for a thread's pending dispatches. */
   heldFor(threadId: string): number {
     let held = 0;
@@ -440,6 +482,7 @@ export class Spend {
     }
     await this.charge(hold, bill);
     const { executionId, threadId } = hold.record;
+    const { model, path } = isUnreadable(hold.record) ? {} : hold.record;
     this.emit(hold, 'spend_settled', {
       id,
       cost: bill.cost,
@@ -462,6 +505,16 @@ export class Spend {
           }
         : {}),
       ...bill,
+      ...(model !== undefined
+        ? {
+            model,
+          }
+        : {}),
+      ...(path !== undefined
+        ? {
+            path,
+          }
+        : {}),
       ...(writtenOff
         ? {
             writtenOff: true as const,

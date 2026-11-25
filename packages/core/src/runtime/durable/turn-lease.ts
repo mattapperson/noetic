@@ -102,12 +102,16 @@ function isHeldBy(record: LeaseRecord | null, holder: string, now: number): bool
 }
 
 /**
+ * @internal
  * A prefix of its own. Under `session:`, the lease of thread `a` and the session
  * of a thread named `a:lease` would be one key.
  */
-function leaseKey(threadId: string): string {
-  return `turn-lease:${threadId}`;
+export function leaseKey(threadId: string): string {
+  return `${LEASE_PREFIX}${threadId}`;
 }
+
+/** @internal The prefix every thread's lease key starts with. */
+export const LEASE_PREFIX = 'turn-lease:';
 
 /**
  * The term to take the lease at. It only ever goes up: a lease that went back to

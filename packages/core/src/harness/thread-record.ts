@@ -194,6 +194,7 @@ export class ThreadRecord {
     return this.updateHeld(ctx, (record) => ({
       ...record,
       steers: record.steers?.filter((steer) => !messageIds.includes(steer.id)),
+      executions: withExecution(record.executions, ctx.id),
       turn: {
         executionId: ctx.id,
         messageIds: [
@@ -352,24 +353,9 @@ export class ThreadRecord {
     });
   }
 
-  /** The executions of the thread's turns that have a trail: recent finished ones, then the one in flight. */
+  /** The executions of every turn the thread began, oldest first, the one in flight last. */
   executions(): Promise<string[]> {
-    return this.run(async () => {
-      const record = await this.load();
-      const ids = (record?.done ?? []).flatMap((turn) =>
-        turn.executionId === undefined
-          ? []
-          : [
-              turn.executionId,
-            ],
-      );
-      return record?.turn
-        ? [
-            ...ids,
-            record.turn.executionId,
-          ]
-        : ids;
-    });
+    return this.run(async () => executionsOf(await this.load()));
   }
 
   /** The turn in flight, cut off or parked, when one is recorded. */
@@ -559,6 +545,43 @@ function addUsage(total: SessionUsage, spent: TurnUsage): SessionUsage {
         }
       : {}),
   };
+}
+
+//#endregion
+
+//#region Executions
+
+/** `executions` with `executionId` added at the end, unless it is already there. */
+function withExecution(executions: string[] | undefined, executionId: string): string[] {
+  const known = executions ?? [];
+  return known.includes(executionId)
+    ? known
+    : [
+        ...known,
+        executionId,
+      ];
+}
+
+/**
+ * @internal
+ * Every execution a stored record names, oldest first, without repeats: those it
+ * began, then remembered finished turns from records written before `executions`
+ * was kept, then the turn in flight.
+ */
+export function executionsOf(record: SessionRecord | undefined): string[] {
+  const ids = new Set(record?.executions);
+  for (const turn of record?.done ?? []) {
+    if (turn.executionId !== undefined) {
+      ids.add(turn.executionId);
+    }
+  }
+  if (record?.turn) {
+    ids.delete(record.turn.executionId);
+    ids.add(record.turn.executionId);
+  }
+  return [
+    ...ids,
+  ];
 }
 
 //#endregion
