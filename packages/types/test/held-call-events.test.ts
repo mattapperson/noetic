@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { StreamEvent } from '../src';
+import type { HeldCall, HeldCallSettled, StreamEvent } from '../src';
 import { readHeldCallEvent } from '../src';
 
 function framework(type: `${string}:${string}`, data: Record<string, unknown>): StreamEvent {
@@ -10,7 +10,7 @@ function framework(type: `${string}:${string}`, data: Record<string, unknown>): 
   };
 }
 
-const HELD = {
+const HELD: HeldCall = {
   callId: 'call_1',
   name: 'refund',
   args: {
@@ -22,7 +22,13 @@ const HELD = {
 
 describe('readHeldCallEvent', () => {
   it('reads a held call', () => {
-    expect(readHeldCallEvent(framework('ops:tool_call_held', HELD))).toEqual({
+    expect(
+      readHeldCallEvent(
+        framework('ops:tool_call_held', {
+          ...HELD,
+        }),
+      ),
+    ).toEqual({
       type: 'held',
       call: HELD,
     });
@@ -71,14 +77,20 @@ describe('readHeldCallEvent', () => {
   });
 
   it('reads a settled call', () => {
-    const settled = {
+    const settled: HeldCallSettled = {
       callId: 'call_1',
       name: 'refund',
       argsHash: 'h1',
       reason: 'outcome',
       by: 'skipped',
     };
-    expect(readHeldCallEvent(framework('ops:tool_call_settled', settled))).toEqual({
+    expect(
+      readHeldCallEvent(
+        framework('ops:tool_call_settled', {
+          ...settled,
+        }),
+      ),
+    ).toEqual({
       type: 'settled',
       settled,
     });
@@ -98,14 +110,36 @@ describe('readHeldCallEvent', () => {
   });
 
   it('is undefined for other events, other harnesses, sdk events and data that does not fit', () => {
-    expect(readHeldCallEvent(framework('ops:tool_call_started', HELD))).toBeUndefined();
-    expect(readHeldCallEvent(framework('ops:tool_call_held', HELD), 'other')).toBeUndefined();
-    expect(readHeldCallEvent(framework('ops:tool_call_held', HELD), 'ops')).toBeDefined();
+    expect(
+      readHeldCallEvent(
+        framework('ops:tool_call_started', {
+          ...HELD,
+        }),
+      ),
+    ).toBeUndefined();
+    expect(
+      readHeldCallEvent(
+        framework('ops:tool_call_held', {
+          ...HELD,
+        }),
+        'other',
+      ),
+    ).toBeUndefined();
+    expect(
+      readHeldCallEvent(
+        framework('ops:tool_call_held', {
+          ...HELD,
+        }),
+        'ops',
+      ),
+    ).toBeDefined();
     expect(
       readHeldCallEvent({
         source: 'sdk',
         type: 'response.created',
-        data: HELD,
+        data: {
+          ...HELD,
+        },
       }),
     ).toBeUndefined();
     expect(
