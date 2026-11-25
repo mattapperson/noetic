@@ -639,6 +639,9 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
    * announced under: a grandchild must still be placed under its whole chain.
    */
   private trimChildren(): void {
+    if (this.children.size <= CHILD_LIMIT) {
+      return;
+    }
     const parents = new Set(this.children.values());
     for (const child of this.children.keys()) {
       if (this.children.size <= CHILD_LIMIT) {

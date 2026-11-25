@@ -28,6 +28,9 @@ import { hashStepInput } from './durable/step-ledger';
 import { questionAnswerProblem } from './held-question';
 import { createInMemoryStorage } from './in-memory-storage';
 
+/** Tries at a compare-and-set before giving way to whatever is stored. */
+const RESCOPE_ATTEMPTS = 3;
+
 //#region Types
 
 const ResolutionSchema = z.object({
@@ -360,7 +363,7 @@ export class HeldCalls {
       existing.argsHash === record.argsHash &&
       existing.reason === record.reason;
     if (same) {
-      return await this.restated(executionId, existing, record);
+      return (await this.rescope(executionId, record.callId, record.scope)) ?? existing;
     }
     await this.storage.set(`${heldPrefix(executionId)}${record.callId}`, record);
     return record;
@@ -370,28 +373,46 @@ export class HeldCalls {
    * The same question asked again by another host: its answer and id stay, but
    * who it names as asking is this host's (a nested agent's scope is per host).
    */
-  private async restated(
+  /**
+   * Name who asks a still-unanswered hold as this host sees it (a nested
+   * agent's scope is per host), keeping its id and everything else. Never
+   * writes over an answer: a compare-and-set that loses re-reads. Resolves
+   * with the record as it now stands.
+   */
+  async rescope(
     executionId: string,
-    existing: HeldRecord,
-    asked: HeldRecord,
-  ): Promise<HeldRecord> {
-    if (
-      existing.resolution !== undefined ||
-      JSON.stringify(existing.scope) === JSON.stringify(asked.scope)
-    ) {
-      return existing;
+    callId: string,
+    scope: HeldRecord['scope'],
+  ): Promise<HeldRecord | undefined> {
+    const key = `${heldPrefix(executionId)}${callId}`;
+    for (let attempt = 0; attempt < RESCOPE_ATTEMPTS; attempt += 1) {
+      const current = await this.load(executionId, callId);
+      if (
+        !current ||
+        current.resolution !== undefined ||
+        JSON.stringify(current.scope) === JSON.stringify(scope)
+      ) {
+        return current;
+      }
+      const { scope: _previous, ...rest } = current;
+      const next: HeldRecord = {
+        ...rest,
+        ...(scope === undefined
+          ? {}
+          : {
+              scope,
+            }),
+      };
+      // Compare-and-set: an answer that lands meanwhile is never written over.
+      if (!this.storage.swap) {
+        await this.storage.set(key, next);
+        return next;
+      }
+      if (await this.storage.swap(key, current, next)) {
+        return next;
+      }
     }
-    const { scope: _old, ...rest } = existing;
-    const restated: HeldRecord = {
-      ...rest,
-      ...(asked.scope === undefined
-        ? {}
-        : {
-            scope: asked.scope,
-          }),
-    };
-    await this.storage.set(`${heldPrefix(executionId)}${existing.callId}`, restated);
-    return restated;
+    return await this.load(executionId, callId);
   }
 
   /** Drop every held call and intent of an execution that is over or was abandoned. */
@@ -597,6 +618,7 @@ export class HeldCalls {
       argsHash?: string;
       resolution: HeldResolution;
     },
+    retries = RESCOPE_ATTEMPTS,
   ): Promise<void> {
     const { callId } = answer;
     const record = await this.load(executionId, callId);
@@ -631,6 +653,10 @@ export class HeldCalls {
       const now = await this.load(executionId, callId);
       if (now?.resolution && sameResolution(now.resolution, resolution)) {
         return;
+      }
+      // Only who it names as asking changed (another host restated it): answer again.
+      if (now && now.resolution === undefined && retries > 0) {
+        return await this.resolveOne(executionId, answer, retries - 1);
       }
       throw refused(callId, 'the call was already answered differently');
     }

@@ -1032,6 +1032,8 @@ async function runTurn<TContext, I, O>(params: {
       }));
   } catch (e) {
     await settle(tools);
+    // What the turn's calls did still reaches the stream, settled to their owners.
+    tools?.takeFinished();
     // Close the turn on the event surface before rethrowing. A consumer driving
     // a UI off `getFullStream()` saw `response.created` and would otherwise
     // wait forever for a completion that never comes — the stream just stops.
@@ -1043,6 +1045,7 @@ async function runTurn<TContext, I, O>(params: {
   }
   await settle(tools);
   if (turnError.error !== undefined) {
+    tools?.takeFinished();
     const failure = stepFailure(step, turnError.error, baseCtx);
     bridge.abort(failure);
     await discardIfFresh(resolution, baseCtx);

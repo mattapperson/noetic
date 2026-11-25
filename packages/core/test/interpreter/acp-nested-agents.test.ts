@@ -325,13 +325,19 @@ interface ChildCallOptions {
   subagent?: boolean;
   /** The tool needs approval, which the harness's `onHeld` gives. */
   approval?: boolean;
+  /** The agent's prompt fails after the call finished. */
+  failAfter?: boolean;
+  /** The agent gives up on the call while its owner is still being settled. */
+  abortDuringWait?: boolean;
 }
 
 async function runChildCall(opts: ChildCallOptions): Promise<{
   items: string;
   events: Captured[];
   held: HeldCall[];
+  runs: number;
 }> {
+  let runs = 0;
   {
     const held: HeldCall[] = [];
     const harness = new AgentHarness({
@@ -361,7 +367,10 @@ async function runChildCall(opts: ChildCallOptions): Promise<{
       }),
       output: z.string(),
       needsApproval: opts.approval === true,
-      execute: async ({ text }) => text,
+      execute: async ({ text }) => {
+        runs += 1;
+        return text;
+      },
     });
     const announceCall = (): void => {
       connectHost?.onChildUpdate?.(
@@ -393,14 +402,18 @@ async function runChildCall(opts: ChildCallOptions): Promise<{
             if (opts.announce === 'before') {
               announceCall();
             }
+            const giveUp = new AbortController();
             const calling = tools.call({
               name: 'echo',
               args: {
                 text: 'from the child',
               },
               agentCallId: 'child-call',
-              signal: new AbortController().signal,
+              signal: giveUp.signal,
             });
+            if (opts.abortDuringWait) {
+              giveUp.abort();
+            }
             if (opts.announce === 'during') {
               await new Promise((resolve) => setTimeout(resolve, 5));
               announceCall();
@@ -408,6 +421,9 @@ async function runChildCall(opts: ChildCallOptions): Promise<{
             await calling;
             if (opts.announce === 'after') {
               announceCall();
+            }
+            if (opts.failAfter) {
+              throw new Error('the agent fell over');
             }
             return {
               stopReason: 'end_turn',
@@ -448,11 +464,16 @@ async function runChildCall(opts: ChildCallOptions): Promise<{
       }),
       undefined,
       ctx,
-    );
+    ).catch((error: unknown) => {
+      if (!opts.failAfter) {
+        throw error;
+      }
+    });
     return {
       items: JSON.stringify(ctx.itemLog.items),
       events,
       held,
+      runs,
     };
   }
 }
@@ -483,6 +504,45 @@ describe("a subagent's bridged tool call", () => {
     const appended = events.filter((e) => e.type.endsWith(':item_appended'));
     expect(appended.length).toBeGreaterThan(0);
     expect(appended.every((e) => e.scope !== undefined)).toBe(true);
+  });
+
+  it('a call made before any subagent update, then announced by one, is the subagent’s', async () => {
+    const { items, events } = await runChildCall({
+      announce: 'during',
+      subagent: false,
+    });
+    expect(items).not.toContain('from the child');
+    const appended = events.filter(
+      (e) => e.type.endsWith(':item_appended') && JSON.stringify(e.data).includes('from the child'),
+    );
+    expect(appended.map((e) => e.scope?.title)).toEqual([
+      'Explore',
+    ]);
+  });
+
+  it('a failed turn still publishes what its finished calls returned', async () => {
+    const { events } = await runChildCall({
+      announce: 'never',
+      subagent: false,
+      failAfter: true,
+    });
+    const appended = events.filter(
+      (e) => e.type.endsWith(':item_appended') && JSON.stringify(e.data).includes('from the child'),
+    );
+    expect(appended.length).toBe(1);
+    const published = events.findIndex(
+      (e) => e.type.endsWith(':item_appended') && JSON.stringify(e.data).includes('from the child'),
+    );
+    const completed = events.findIndex((e) => e.type === 'response.completed' && !e.scope);
+    expect(published).toBeLessThan(completed);
+  });
+
+  it('a call given up on while its owner is being settled never runs', async () => {
+    const { runs } = await runChildCall({
+      announce: 'never',
+      abortDuringWait: true,
+    });
+    expect(runs).toBe(0);
   });
 
   it('with no subagent this turn, an unannounced call is the step’s, at once', async () => {

@@ -265,11 +265,14 @@ type CallOwner =
       kind: 'provisional';
     };
 
-/** A call placed with the step provisionally: its items wait for the turn's end. */
-interface ProvisionalCall extends BridgedCall {
+/** A finished call, in the order calls finished. */
+interface SettledCall extends BridgedCall {
   readonly callId: string;
-  /** The step's events, where its result item goes if it stays the step's. */
-  readonly stepEvents: AcpEventBridge;
+  /**
+   * Set for a call run as the step's provisionally: its result item waits for
+   * the turn's end, published on these step events if it stays the step's.
+   */
+  readonly provisional?: AcpEventBridge;
 }
 
 //#region Runner
@@ -286,7 +289,7 @@ export class AcpToolRunner implements AcpToolHost {
   private readonly wrapped: ReadonlySet<string>;
   private binding: AcpToolBinding | undefined;
   private queue: Promise<unknown> = Promise.resolve();
-  private finished: BridgedCall[] = [];
+  private finished: SettledCall[] = [];
   private round = 0;
   /** Set when a call's pipeline threw: the turn is failing, so no further call runs. */
   private failed = false;
@@ -298,8 +301,8 @@ export class AcpToolRunner implements AcpToolHost {
   private readonly waiting = new Map<string, () => void>();
   /** Set once a subagent is heard from this turn: calls may then be theirs. */
   private subagentsThisTurn = false;
-  /** Calls run as the step's provisionally, settled when the turn's items are taken. */
-  private provisional: ProvisionalCall[] = [];
+  /** Calls held for a person right now, by the agent's call id, with their record id. */
+  private readonly holding = new Map<string, string>();
   /** Ids already given to a call this session; an agent may not reuse one. */
   private readonly claimed = new Set<string>();
   /** What each call recorded, so a resumed step replays it (spec 27 § Resuming a step). */
@@ -399,8 +402,22 @@ export class AcpToolRunner implements AcpToolHost {
         kind: 'subagent',
         sessionId,
       });
+      this.renameAsker(update.toolCallId, sessionId);
     }
     this.wake(update.toolCallId);
+  }
+
+  /** A call already held for a person turns out to be a subagent's: the hold names it. */
+  private renameAsker(callId: string, sessionId: string): void {
+    const recordId = this.holding.get(callId);
+    const binding = this.binding;
+    if (recordId === undefined || !binding || !mayWriteHolds(binding.ctx)) {
+      return;
+    }
+    const scope = binding.events.scopeFor(sessionId);
+    void heldCallsOf(binding.ctx.harness)
+      .rescope(heldScopeOf(binding.ctx), recordId, scope)
+      .catch(() => undefined);
   }
 
   private wake(callId: string): void {
@@ -425,9 +442,12 @@ export class AcpToolRunner implements AcpToolHost {
     if (known) {
       return known;
     }
+    // A subagent's announcement may still come, even before its first update
+    // reaches us: the call is the step's only provisionally. With no subagent
+    // heard from yet there is nothing to wait for.
     if (!this.subagentsThisTurn) {
       return {
-        kind: 'step',
+        kind: 'provisional',
       };
     }
     await new Promise<void>((resolve) => {
@@ -476,21 +496,24 @@ export class AcpToolRunner implements AcpToolHost {
    * step's items — and otherwise it is the step's.
    */
   takeFinished(): BridgedCall[] {
-    for (const call of this.provisional) {
-      const owner = this.owners.get(call.callId);
-      if (owner?.kind === 'subagent') {
-        call.stepEvents.childBridge(owner.sessionId)?.itemAppended(call.outputItem);
+    const taken: BridgedCall[] = [];
+    for (const call of this.finished) {
+      if (!call.provisional) {
+        taken.push(call);
         continue;
       }
-      call.stepEvents.itemAppended(call.outputItem);
-      this.finished.push(call);
+      const owner = this.owners.get(call.callId);
+      if (owner?.kind === 'subagent') {
+        call.provisional.childBridge(owner.sessionId)?.itemAppended(call.outputItem);
+        continue;
+      }
+      call.provisional.itemAppended(call.outputItem);
+      taken.push(call);
     }
-    this.provisional = [];
+    this.finished = [];
     // The turn's calls are settled: their owners are no longer needed.
     this.owners.clear();
-    const finished = this.finished;
-    this.finished = [];
-    return finished;
+    return taken;
   }
 
   readonly call = (call: AcpToolCall): Promise<AcpToolResult> => {
@@ -524,6 +547,13 @@ export class AcpToolRunner implements AcpToolHost {
       };
     }
     const owner = await this.ownerOf(callId);
+    // Waiting for its owner was a wait too: nothing starts once the call is off.
+    if (this.failed || binding.ctx.aborted || call.signal.aborted) {
+      return {
+        output: CANCELLED_OUTPUT,
+        isError: true,
+      };
+    }
     try {
       return await this.runInRound(this.bindingFor(binding, owner), call, callId);
     } catch (e) {
@@ -659,6 +689,8 @@ export class AcpToolRunner implements AcpToolHost {
             }),
         });
       }
+      // While it waits, a subagent identified as its caller renames the asker.
+      this.holding.set(params.callId ?? held.callId, held.callId);
       // The wait throws `cancelled` when the agent's signal ends it, as it does for
       // the turn's own abort: only the latter is the turn's to handle.
       const gaveUp = await waitOnHeldCalls({
@@ -680,6 +712,7 @@ export class AcpToolRunner implements AcpToolHost {
       );
       // The agent stopped waiting for this call: nobody is left to give an answer to.
       if (gaveUp) {
+        this.holding.delete(params.callId ?? held.callId);
         if (mayWriteHolds(ctx)) {
           await heldCallsOf(ctx.harness).close(heldScopeOf(ctx), held.callId, 'cancelled');
         }
@@ -690,6 +723,7 @@ export class AcpToolRunner implements AcpToolHost {
       }
       result = await executeToolCall(params);
     }
+    this.holding.delete(params.callId ?? '');
     const stored = await record.store(result);
     if (!mayWriteHolds(ctx)) {
       return result;
@@ -776,16 +810,20 @@ export class AcpToolRunner implements AcpToolHost {
       callItem,
       outputItem,
     };
-    // A provisional call's items wait for the turn's end (`takeFinished`).
+    // One queue, in the order calls finished: a provisional call's items wait
+    // for the turn's end (`takeFinished`); a subagent's are never the step's.
     if (binding.owner.kind === 'provisional') {
-      this.provisional.push({
+      this.finished.push({
         ...finished,
         callId,
-        stepEvents: binding.stepEvents,
+        provisional: binding.stepEvents,
       });
     }
     if (binding.owner.kind === 'step') {
-      this.finished.push(finished);
+      this.finished.push({
+        ...finished,
+        callId,
+      });
     }
     if (binding.owner.kind !== 'provisional') {
       binding.events.itemAppended(outputItem);

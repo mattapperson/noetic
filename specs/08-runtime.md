@@ -737,21 +737,24 @@ show one.
   generic `tool_call_started` / `tool_call_completed` (scoped), once each; a
   call it makes through the step's tool bridge is reported by the bridge, on
   its scope, and never joins the step's items. The bridge places a call by the
-  `tool_call` that announced it — the MCP request names no session. In a turn
-  with no subagent every call is the step's at once. Once a subagent has
-  spoken in the turn, a call nobody has announced yet waits for its
-  announcement (at most a moment); one still unannounced runs as the step's,
-  provisionally — it is never dropped — and is settled when the turn ends,
-  with every announcement in: a subagent that announced it by then takes it
-  (its result item goes to that nested agent), otherwise it is the step's and
-  joins the step's items and item stream then. Its `tool_call_started` /
-  `tool_call_completed` are reported on the step as it runs. A call the
-  step's own agent announces is the step's, whatever a subagent announces
-  under the same id.
+  `tool_call` that announced it — the MCP request names no session. A call
+  the step's own agent announced is the step's at once, whatever a subagent
+  announces under the same id. Any other call runs at once as the step's,
+  provisionally (once a subagent has spoken in the turn, it first waits a
+  moment for its announcement): it is never dropped, its
+  `tool_call_started` / `tool_call_completed` are reported on the step as it
+  runs, and its result item waits for the turn's end — whether the turn
+  finishes or fails — when, with every announcement in, a subagent that
+  announced it by then takes it (the item goes to that nested agent) and
+  otherwise it joins the step's items and item stream, in the order calls
+  finished. A call the agent gives up on while its owner is being settled
+  never runs.
   A call that needs approval or leaves its result open is held as the run's,
-  its held event unscoped, naming the subagent in `scope`. When another host
-  asks a still-unanswered hold again, the hold keeps its id and its answer
-  and takes that host's `scope`. Its file and terminal calls
+  its held event unscoped, naming the subagent in `scope` — a provisional
+  call's hold is renamed once its subagent is known. When another host asks a
+  still-unanswered hold again, the hold keeps its id and its answer and takes
+  that host's `scope`; renaming is a compare-and-set, so it never writes over
+  an answer, and an answer that loses to a renaming is given again. Its file and terminal calls
   are reported on its scope.
 - **Its questions are the run's to answer.** A permission request or a
   question a nested agent raises is held like any other (§ Held tool calls),

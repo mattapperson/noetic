@@ -433,3 +433,65 @@ describe('a hold asked again by another host', () => {
     expect(answered.resolution?.action).toBe('deny');
   });
 });
+
+describe('naming who asks, racing an answer', () => {
+  /** Storage that runs `between` once, just before the first compare-and-set. */
+  function racing(between: () => Promise<void>): ReturnType<typeof createInMemoryStorage> {
+    const storage = createInMemoryStorage({
+      swap: true,
+    });
+    const swap = storage.swap?.bind(storage);
+    let raced = false;
+    return {
+      ...storage,
+      async swap<T>(key: string, prev: T | null, next: T): Promise<boolean> {
+        if (!raced) {
+          raced = true;
+          await between();
+        }
+        return (await swap?.(key, prev, next)) ?? false;
+      },
+    };
+  }
+
+  it('a rescope that loses to an answer never writes over it', async () => {
+    let other: HeldCalls | undefined;
+    const storage = racing(async () => {
+      await other?.resolve('exec', {
+        callId: 'q3',
+        resolution: {
+          action: 'deny',
+        },
+      });
+    });
+    const holds = new HeldCalls(storage, () => 0);
+    other = new HeldCalls(storage, () => 0);
+    await holds.open('exec', question('q3'));
+    const after = await holds.rescope('exec', 'q3', {
+      id: 'new-scope',
+    });
+    expect(after?.resolution?.action).toBe('deny');
+    expect((await holds.load('exec', 'q3'))?.resolution?.action).toBe('deny');
+  });
+
+  it('an answer that loses to a rescope is answered again, not refused', async () => {
+    let other: HeldCalls | undefined;
+    const storage = racing(async () => {
+      await other?.rescope('exec', 'q4', {
+        id: 'another-host',
+      });
+    });
+    const holds = new HeldCalls(storage, () => 0);
+    other = new HeldCalls(storage, () => 0);
+    await holds.open('exec', question('q4'));
+    await holds.resolve('exec', {
+      callId: 'q4',
+      resolution: {
+        action: 'deny',
+      },
+    });
+    const record = await holds.load('exec', 'q4');
+    expect(record?.resolution?.action).toBe('deny');
+    expect(record?.scope?.id).toBe('another-host');
+  });
+});

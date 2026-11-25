@@ -255,9 +255,15 @@ export async function executeToolCall(params: ExecuteToolCallParams): Promise<To
         settled: true,
       };
     }
+    // Still held, asked again by this host: the hold names who asks as this
+    // host sees it.
+    const current =
+      params.scope !== undefined && mayWriteHolds(params.context)
+        ? await holds.rescope(heldScopeOf(params.context), held.callId, params.scope)
+        : undefined;
     return {
       output: '',
-      held: toHeldCall(held),
+      held: toHeldCall(current ?? held),
     };
   }
 
