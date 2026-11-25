@@ -16,13 +16,23 @@ import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import { createServer } from 'node:http';
 import * as https from 'node:https';
 import { Readable, Writable } from 'node:stream';
+import type { AcpTransport, AcpWhenHostExits } from '@noetic-tools/types';
 import { frameworkCast } from '@noetic-tools/types';
 import { WebSocketServer } from 'ws';
+import type { KeeperLink } from '../keeper/client';
+import { attachKeeper, isKeeperAddress, keeperHandleOf, startKeeper } from '../keeper/client';
 import { serverEnv } from '../server-env';
 import type { AcpRunnerGrant } from './grants';
 import { checkStart } from './grants';
 import type { FrameLink, HostFrame } from './protocol';
-import { fromBase64, HostFrameSchema, isLoopbackHost, lineFrameLink, toBase64 } from './protocol';
+import {
+  chunksOf,
+  fromBase64,
+  HostFrameSchema,
+  isLoopbackHost,
+  lineFrameLink,
+  toBase64,
+} from './protocol';
 import { webSocketFrameLink } from './ws-link';
 
 //#region Types
@@ -37,6 +47,11 @@ export interface AcpRunnerOptions {
   allow?: ReadonlyArray<AcpRunnerGrant>;
   /** Working directory for a start that names none. */
   cwd?: string;
+  /**
+   * How long an agent a host keeps may run with no host attached before its
+   * keeper stops it. Default `0`: until a host reattaches or it exits.
+   */
+  detachedTimeoutMs?: number;
 }
 
 /** @public Options for {@link listenAcpRunner}. */
@@ -66,6 +81,16 @@ interface Session {
   readonly ports: Server[];
   readonly responses: Map<string, ServerResponse>;
   next: number;
+  /** Set by a `keep` frame: this channel's agents run through a keeper. */
+  keep?: AcpWhenHostExits;
+  keeper?: Promise<KeeperLink | undefined>;
+  /** Streams of kept agents, by stream id. */
+  readonly kept: Map<string, KeptStream>;
+}
+
+interface KeptStream {
+  readonly transport: AcpTransport;
+  readonly writer: WritableStreamDefaultWriter<Uint8Array>;
 }
 
 type Handler<F extends HostFrame['t']> = (
@@ -94,6 +119,7 @@ export function serveAcpRunner(link: FrameLink, options: AcpRunnerOptions = {}):
     ports: [],
     responses: new Map(),
     next: 0,
+    kept: new Map(),
   };
   return new Promise<void>((resolve) => {
     link.onFrame((raw) => {
@@ -189,11 +215,27 @@ const handlers: { [F in HostFrame['t']]: Handler<F> } = {
   reach: openPort,
   start: startProcess,
   stdin: (session, frame) => {
+    const kept = session.kept.get(frame.id);
+    if (kept) {
+      void kept.writer.write(fromBase64(frame.data)).catch(() => undefined);
+      return;
+    }
     session.children.get(frame.id)?.stdin?.write(fromBase64(frame.data));
   },
-  kill: (session, frame) => {
+  kill: async (session, frame) => {
+    const kept = session.kept.get(frame.id);
+    if (kept) {
+      // The host closes its agent on purpose: stop it, keeper and all.
+      session.kept.delete(frame.id);
+      await kept.transport.close();
+      return;
+    }
     session.children.get(frame.id)?.kill();
   },
+  keep: (session, frame) => {
+    session.keep = frame.whenHostExits;
+  },
+  attach: attachKept,
   response: (session, frame) => {
     const res = session.responses.get(frame.id);
     if (!res || res.headersSent) {
@@ -256,10 +298,14 @@ async function openPort(
   if (address === null || typeof address === 'string') {
     throw new Error('The bridge port did not bind.');
   }
+  const local = `http://127.0.0.1:${address.port}${frame.path}`;
+  // A kept agent reaches the bridge on its keeper's port, which outlives this
+  // channel; the keeper forwards to this channel's port while it is open.
+  const keeper = await openKeeper(session);
   session.link.send({
     t: 'reached',
     id: frame.id,
-    url: `http://127.0.0.1:${address.port}${frame.path}`,
+    url: keeper ? await keeper.reach(frame.path, local) : local,
   });
 }
 
@@ -311,6 +357,20 @@ async function startProcess(
   >,
 ): Promise<void> {
   const checked = checkStart(frame, session.options);
+  const keeper = frame.kind === 'launch' ? await openKeeper(session) : undefined;
+  if (keeper) {
+    const transport = await keeper.launch({
+      command: frame.command,
+      args: frame.args,
+      cwd: checked.cwd,
+      env: {
+        ...process.env,
+        ...checked.env,
+      },
+    });
+    carryKept(session, frame.id, transport);
+    return;
+  }
   // An MCP server gets what the MCP SDK would give it here, the agent all of the runner's.
   const env =
     frame.kind === 'spawn'
@@ -356,6 +416,69 @@ async function startProcess(
   });
 }
 
+/** Start this channel's keeper on first use, when the host keeps its agents. */
+function openKeeper(session: Session): Promise<KeeperLink | undefined> {
+  const whenHostExits = session.keep;
+  if (!whenHostExits) {
+    return Promise.resolve(undefined);
+  }
+  session.keeper ??= startKeeper('runner', {
+    whenHostExits,
+    detachedTimeoutMs: session.options.detachedTimeoutMs ?? 0,
+  });
+  return session.keeper;
+}
+
+/** Send a kept agent's output as stream `id` until it ends. */
+async function pumpKept(session: Session, id: string, transport: AcpTransport): Promise<void> {
+  for await (const chunk of chunksOf(transport.readable)) {
+    session.link.send({
+      t: 'stdout',
+      id,
+      data: toBase64(chunk),
+    });
+  }
+  session.kept.delete(id);
+  session.link.send({
+    t: 'exit',
+    id,
+    code: null,
+  });
+}
+
+/** Carry a kept agent's stream over this channel as stream `id`. */
+function carryKept(session: Session, id: string, transport: AcpTransport): void {
+  session.kept.set(id, {
+    transport,
+    writer: transport.writable.getWriter(),
+  });
+  void pumpKept(session, id, transport).catch(() => undefined);
+  session.link.send({
+    t: 'started',
+    id,
+    reattach: transport.reattach,
+  });
+}
+
+/** Take over an agent an earlier channel launched and kept. */
+async function attachKept(
+  session: Session,
+  frame: Extract<
+    HostFrame,
+    {
+      t: 'attach';
+    }
+  >,
+): Promise<void> {
+  const handle = keeperHandleOf(frame.handle);
+  if (!handle || !isKeeperAddress(handle.address)) {
+    throw new Error('The handle names no keeper on this runner.');
+  }
+  const link = await attachKeeper('runner', handle, session.keep ?? 'keep');
+  session.keeper = Promise.resolve(link);
+  carryKept(session, frame.id, link.transport());
+}
+
 //#endregion
 
 //#region Helpers
@@ -373,6 +496,9 @@ function release(session: Session): void {
     res.destroy();
   }
   session.responses.clear();
+  // A kept agent is let go, not stopped: its keeper decides (`whenHostExits`).
+  session.kept.clear();
+  void session.keeper?.then((link) => link?.detach());
 }
 
 function sameSecret(given: string | undefined, expected: string): boolean {

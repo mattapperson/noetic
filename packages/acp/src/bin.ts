@@ -22,7 +22,19 @@ import { runnerOptions, trustWarning } from './runner/options';
 import { listenAcpRunner, newRunnerToken, readPem, serveAcpRunnerOverStdio } from './runner/serve';
 
 const USAGE =
-  'usage: noetic-acp serve [--stdio] [--host <host>] [--port <port>] [--agent <id>] [--spawn <command>]... [--env <name>]... [--cwd <dir>] [--tls-cert <pem> --tls-key <pem>]';
+  'usage: noetic-acp serve [--stdio] [--host <host>] [--port <port>] [--agent <id>] [--spawn <command>]... [--env <name>]... [--cwd <dir>] [--detached-timeout <ms>] [--tls-cert <pem> --tls-key <pem>]';
+
+/** `--detached-timeout <ms>`: a whole number of milliseconds, `0` for no limit. */
+function detachedTimeout(value: string | undefined): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const ms = Number(value);
+  if (!Number.isInteger(ms) || ms < 0) {
+    fail('--detached-timeout takes a whole number of milliseconds (0 for no limit).');
+  }
+  return ms;
+}
 
 async function main(argv: ReadonlyArray<string>): Promise<void> {
   const [verb, ...rest] = argv;
@@ -57,6 +69,9 @@ async function main(argv: ReadonlyArray<string>): Promise<void> {
       cwd: {
         type: 'string',
       },
+      'detached-timeout': {
+        type: 'string',
+      },
       'tls-cert': {
         type: 'string',
       },
@@ -65,7 +80,10 @@ async function main(argv: ReadonlyArray<string>): Promise<void> {
       },
     },
   });
-  const options = runnerOptions(values);
+  const options = runnerOptions({
+    ...values,
+    detachedTimeoutMs: detachedTimeout(values['detached-timeout']),
+  });
   process.stderr.write(`${trustWarning(options)}\n`);
   if (values.stdio) {
     await serveAcpRunnerOverStdio(options);

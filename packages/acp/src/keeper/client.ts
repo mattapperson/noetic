@@ -91,6 +91,29 @@ export function keeperScript(): string | undefined {
   return undefined;
 }
 
+/** Where this user's keepers listen and log (POSIX). */
+function keeperDirectory(): string {
+  return join(tmpdir(), `noetic-acp-${process.getuid?.() ?? 'user'}`);
+}
+
+/** The prefix of every keeper's named pipe (Windows). */
+const PIPE_PREFIX = '\\\\.\\pipe\\noetic-acp-';
+
+/**
+ * Whether `handle` names a keeper this user's keepers would listen on — so a
+ * runner never connects to an arbitrary socket a host names.
+ */
+export function isKeeperAddress(address: string): boolean {
+  if (process.platform === 'win32') {
+    return address.startsWith(PIPE_PREFIX);
+  }
+  return (
+    address.startsWith(`${keeperDirectory()}/`) &&
+    !address.includes('..') &&
+    address.endsWith('.sock')
+  );
+}
+
 /** A fresh private address for a keeper, and its log file. */
 function newAddress(): {
   address: string;
@@ -99,12 +122,12 @@ function newAddress(): {
   const id = randomBytes(6).toString('hex');
   if (process.platform === 'win32') {
     return {
-      address: `\\\\.\\pipe\\noetic-acp-${id}-${randomUUID()}`,
+      address: `${PIPE_PREFIX}${id}-${randomUUID()}`,
       log: join(tmpdir(), `noetic-acp-${id}.log`),
     };
   }
   // Only this user may open the directory, so only this user reaches the socket.
-  const dir = join(tmpdir(), `noetic-acp-${process.getuid?.() ?? 'user'}`);
+  const dir = keeperDirectory();
   mkdirSync(dir, {
     recursive: true,
     mode: 0o700,

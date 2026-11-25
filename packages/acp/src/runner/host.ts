@@ -9,7 +9,9 @@
 import type {
   AcpMachine,
   AcpMachineFactory,
+  AcpReattachHandle,
   AcpTransport,
+  AcpWhenHostExits,
   SpawnCommand,
   ToolBridgeAddress,
 } from '@noetic-tools/types';
@@ -29,6 +31,11 @@ interface Stream {
   exited: Promise<void>;
   exit(): void;
 }
+
+/** How long a runner may take to answer a reattach. */
+const ATTACH_TIMEOUT_MS = 1e4;
+/** How long closing a stream waits for the runner to report it stopped. */
+const KILL_WAIT_MS = 5e3;
 
 /** Request headers that belong to one hop, which `fetch` sets for itself. */
 const HOP_HEADERS = new Set([
@@ -50,7 +57,13 @@ const HOP_HEADERS = new Set([
 export function runnerMachine(
   openLink: (signal?: AbortSignal) => Promise<FrameLink>,
 ): AcpMachineFactory {
-  return async ({ signal }) => new RunnerPeer(await openLink(signal), signal).machine();
+  return async ({ signal, whenHostExits = 'keep' }) => {
+    const peer = new RunnerPeer(await openLink(signal), signal);
+    // Agents this channel launches run through a keeper on the runner's
+    // machine, so they outlive the channel and a later one can reattach.
+    peer.keep(whenHostExits);
+    return peer.machine();
+  };
 }
 
 //#endregion
@@ -88,6 +101,7 @@ class RunnerPeer {
       reach: (bridge) => this.reach(bridge),
       launch: (command) => this.start(command, 'launch'),
       spawn: (command) => this.start(command, 'spawn'),
+      attach: (handle) => this.attach(handle),
       close: () => this.link.close(),
     };
   }
@@ -108,21 +122,54 @@ class RunnerPeer {
     };
   }
 
+  keep(whenHostExits: AcpWhenHostExits): void {
+    this.link.send({
+      t: 'keep',
+      id: this.id(),
+      whenHostExits,
+    });
+  }
+
+  /** The stream of an agent an earlier channel launched and the runner kept. */
+  private async attach(handle: AcpReattachHandle): Promise<AcpTransport> {
+    const id = this.id();
+    const stream = this.openStream(id);
+    // A runner that does not keep agents never answers an attach.
+    const timeout = new Promise<never>((_, reject) => {
+      const timer = setTimeout(
+        () =>
+          reject(
+            new AcpConnectError({
+              agentId: 'runner',
+              message: 'The remote runner did not answer a reattach; it may not keep agents.',
+            }),
+          ),
+        ATTACH_TIMEOUT_MS,
+      );
+      timer.unref?.();
+    });
+    const reply = await Promise.race([
+      this.ask(
+        {
+          t: 'attach',
+          handle,
+        },
+        id,
+      ),
+      timeout,
+    ]).catch((e: unknown) => {
+      this.streams.delete(id);
+      throw e;
+    });
+    if (reply.t !== 'started') {
+      throw unexpected(reply);
+    }
+    return this.transportFor(id, stream, handle);
+  }
+
   private async start(command: SpawnCommand, kind: 'launch' | 'spawn'): Promise<AcpTransport> {
     const id = this.id();
-    let exit = (): void => undefined;
-    const exited = new Promise<void>((resolve) => {
-      exit = resolve;
-    });
-    const readable = new ReadableStream<Uint8Array>({
-      start: (controller) => {
-        this.streams.set(id, {
-          controller,
-          exited,
-          exit,
-        });
-      },
-    });
+    const stream = this.openStream(id);
     const reply = await this.ask(
       {
         t: 'start',
@@ -142,6 +189,42 @@ class RunnerPeer {
     if (reply.t !== 'started') {
       throw unexpected(reply);
     }
+    return this.transportFor(id, stream, reply.reattach);
+  }
+
+  /** The readable for stream `id`, registered before the runner can answer. */
+  private openStream(id: string): {
+    readable: ReadableStream<Uint8Array>;
+    exited: Promise<void>;
+  } {
+    let exit = (): void => undefined;
+    const exited = new Promise<void>((resolve) => {
+      exit = resolve;
+    });
+    const readable = new ReadableStream<Uint8Array>({
+      start: (controller) => {
+        this.streams.set(id, {
+          controller,
+          exited,
+          exit,
+        });
+      },
+    });
+    return {
+      readable,
+      exited,
+    };
+  }
+
+  /** Stream `id` as a transport; closing it stops what it carries. */
+  private transportFor(
+    id: string,
+    stream: {
+      readable: ReadableStream<Uint8Array>;
+      exited: Promise<void>;
+    },
+    reattach: AcpReattachHandle | undefined,
+  ): AcpTransport {
     const writable = new WritableStream<Uint8Array>({
       write: (chunk) => {
         this.link.send({
@@ -153,8 +236,9 @@ class RunnerPeer {
     });
     let closed = false;
     return {
-      readable,
+      readable: stream.readable,
       writable,
+      reattach,
       close: async () => {
         if (closed) {
           return;
@@ -165,8 +249,8 @@ class RunnerPeer {
           id,
         });
         await Promise.race([
-          exited,
-          new Promise((resolve) => setTimeout(resolve, 2e3)),
+          stream.exited,
+          new Promise((resolve) => setTimeout(resolve, KILL_WAIT_MS)),
         ]);
       },
     };

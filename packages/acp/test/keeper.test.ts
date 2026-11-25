@@ -4,7 +4,7 @@
  * still waiting on, and the turn's result — real processes throughout.
  */
 
-import { describe, expect, it } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import type { ChildProcess } from 'node:child_process';
 import { spawn } from 'node:child_process';
@@ -13,19 +13,31 @@ import type { AcpClientHost, AcpReattachHandle, AcpSessionNotification } from '@
 import { isAcpConnectError } from '@noetic-tools/types';
 import { customAcpAgent } from '../src/agents';
 import { LineSplitter } from '../src/keeper/protocol';
+import type { AcpRunnerListener } from '../src/remote';
+import { listenAcpRunner } from '../src/remote';
 import { MemoryFs, RecordingShell } from './_helpers';
+import type { MachineKind } from './fixtures/keeper-machines';
+import { machineFor } from './fixtures/keeper-machines';
+
+/** Where the 'ws' machine's runner listens, for the first host's process. */
+let runnerEnv: Record<string, string> = {};
 
 const POSIX = process.platform !== 'win32';
 const HOST = fileURLToPath(new URL('./fixtures/keeper-host.ts', import.meta.url));
 const AGENT = fileURLToPath(new URL('./fixtures/keeper-agent.ts', import.meta.url));
 
-const agent = customAcpAgent({
-  agentId: 'kept',
-  command: process.execPath,
-  args: [
-    AGENT,
-  ],
-});
+function keptAgent(machine: MachineKind) {
+  return customAcpAgent({
+    agentId: 'kept',
+    command: process.execPath,
+    args: [
+      AGENT,
+    ],
+    machine: machineFor(machine),
+  });
+}
+
+const agent = keptAgent('local');
 
 interface Started {
   host: ChildProcess;
@@ -34,15 +46,24 @@ interface Started {
 }
 
 /** Start a first host in its own process; resolves once the agent has spoken. */
-async function firstHost(whenHostExits: 'keep' | 'stop', prompt: string): Promise<Started> {
+async function firstHost(
+  whenHostExits: 'keep' | 'stop',
+  prompt: string,
+  machine: MachineKind = 'local',
+): Promise<Started> {
   const host = spawn(
     process.execPath,
     [
       HOST,
       whenHostExits,
       prompt,
+      machine,
     ],
     {
+      env: {
+        ...process.env,
+        ...runnerEnv,
+      },
       stdio: [
         'ignore',
         'pipe',
@@ -215,4 +236,65 @@ describe.skipIf(!POSIX)('a kept agent and a host that dies', () => {
       await connection.close();
     }
   }, 30e3);
+});
+
+describe.skipIf(!POSIX)('a kept agent on a remote runner', () => {
+  let runner: AcpRunnerListener | undefined;
+  const token = 'runner-token-for-keeper-tests';
+
+  beforeAll(async () => {
+    runner = await listenAcpRunner({
+      token,
+    });
+    runnerEnv = {
+      NOETIC_TEST_RUNNER_URL: runner.url,
+      NOETIC_TEST_RUNNER_TOKEN: token,
+    };
+    process.env.NOETIC_TEST_RUNNER_URL = runner.url;
+    process.env.NOETIC_TEST_RUNNER_TOKEN = token;
+  });
+
+  afterAll(async () => {
+    await runner?.close();
+    runnerEnv = {};
+  });
+
+  for (const machine of [
+    'ws',
+    'stdio',
+  ] satisfies MachineKind[]) {
+    it(`over ${machine}: a new host reconnects and takes the turn over`, async () => {
+      const remote = keptAgent(machine);
+      const { host, handle, sessionId } = await firstHost('keep', 'ask', machine);
+      // The host dies: its channel to the runner drops (and a stdio runner exits).
+      await crash(host);
+
+      const updates: AcpSessionNotification[] = [];
+      const connection = await remote.connect({
+        host: secondHost(updates),
+        reattach: handle,
+      });
+      try {
+        assert(connection.attachSession);
+        const session = await connection.attachSession(sessionId);
+        assert(session.resumeTurn);
+        const result = await session.resumeTurn({});
+        assert(result);
+        expect(result.text).toBe('one two');
+        expect(texts(updates)).toBe('one two');
+      } finally {
+        await connection.close();
+      }
+      const gone = await remote
+        .connect({
+          host: secondHost([]),
+          reattach: handle,
+        })
+        .then(
+          () => undefined,
+          (e: unknown) => e,
+        );
+      expect(isAcpConnectError(gone)).toBe(true);
+    }, 30e3);
+  }
 });

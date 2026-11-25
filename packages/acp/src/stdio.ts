@@ -79,14 +79,11 @@ export interface LocalMachineOptions {
   keeper?: boolean;
   /**
    * How long a kept agent may run with no host attached before its keeper
-   * stops it. Default 24 hours; `0` keeps it until a host reattaches or it
-   * exits.
+   * stops it. Default `0`: no limit — it runs until a host reattaches and
+   * closes it, or it exits.
    */
   detachedTimeoutMs?: number;
 }
-
-/** A kept agent with no host for this long is stopped, unless the machine says otherwise. */
-const DEFAULT_DETACHED_TIMEOUT_MS = 24 * 60 * 60 * 1e3;
 
 /**
  * This machine: the agent runs through a keeper (see
@@ -106,7 +103,7 @@ export function localMachine(
     let keeper: Promise<KeeperLink | undefined> | undefined;
     const keeperOptions = {
       whenHostExits,
-      detachedTimeoutMs: options.detachedTimeoutMs ?? DEFAULT_DETACHED_TIMEOUT_MS,
+      detachedTimeoutMs: options.detachedTimeoutMs ?? 0,
     };
     const openKeeper = (): Promise<KeeperLink | undefined> => {
       keeper ??= useKeeper ? startKeeper(agentId, keeperOptions) : Promise.resolve(undefined);

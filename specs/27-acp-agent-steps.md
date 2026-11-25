@@ -236,8 +236,9 @@ detaches and, under `whenHostExits: 'keep'` (the default), lets the agent work
 on: its updates are kept, its permission, `fs/*` and `terminal/*` requests wait,
 and the bridge port holds the agent's tool calls until a host serves the bridge
 again (a call that was mid-way in the dead host fails with `502`). A kept agent
-with no host for `detachedTimeoutMs` (default 24 hours, `0` for no limit) is
-stopped. Under `'stop'` the keeper stops the agent's whole tree as soon as the
+with no host is stopped after `detachedTimeoutMs` only when one is set; by
+default (`0`) there is no limit, and it runs until a host reattaches and closes
+it, or it exits. Under `'stop'` the keeper stops the agent's whole tree as soon as the
 host's connection drops, whatever ended the host. Closing the connection
 (`close()`, a step's `keepAlive: 'step'` ending, `harness.closeAcpSessions()`)
 always stops it. The agent exiting stops the keeper.
@@ -283,11 +284,17 @@ model a step or its environment selects.
 
 `noetic-acp serve` (the `@noetic-tools/acp` bin, Node) runs on the agent's
 machine and serves one host per channel — a WebSocket, or its own stdio with
-`--stdio`. When the channel closes, everything it started stops. Over that one
+`--stdio`. When the channel closes, the MCP servers it started stop; the agent
+is kept (§ A runner keeps its agents). Over that one
 channel, as JSON frames (`HostFrame` / `RunnerFrame`):
 
+- `keep` (first, from a host that keeps agents) says agents launched over this
+  channel run through a keeper, and what `whenHostExits` asks;
 - `start` runs a process (the agent, or an MCP server beside it) and carries
-  its stdin, stdout and exit;
+  its stdin, stdout and exit; a kept agent's `started` carries its reattach
+  handle;
+- `attach` carries the stream of an agent an earlier channel launched, from
+  that handle;
 - `reach` opens a port on the runner's loopback interface; each HTTP request
   the agent sends there travels to the host, which answers it from its own
   bridge only — a request for any other path is `404`, and the host forwards
@@ -298,6 +305,29 @@ So the agent needs no route back to the host, and the one channel is the only
 network hop. This one design covers ssh (`commandMachine` over `ssh`),
 containers (`docker exec -i`) and WebSocket, in place of an ssh reverse
 forward or a container host-gateway address.
+
+#### A runner keeps its agents
+
+A runner keeps the agents a host launches through it exactly as a local
+machine does (§ A local agent outlives its host): after a `keep` frame, it
+launches each agent through a keeper on the runner's own machine, and serves
+the bridge to it on the keeper's port, which forwards to the channel's port
+while a channel is open. When the channel drops — the host died, the network
+went, an ssh session ended — the runner lets the keeper go without stopping it,
+so the agent keeps working under the keeper's `whenHostExits`, and holds what
+it sends. A `--stdio` runner exits with its channel; the keeper, in its own
+session, does not.
+
+A later host reconnects with `machine.attach(handle)`: over a new channel —
+to the same WebSocket runner, or through a new `--stdio` runner on the same
+machine and user — an `attach` frame makes the runner connect to that keeper
+and carry the agent's stream, and the host's `reach` points the keeper's port at
+the new channel. From there it is the local reattach: `attachSession`, then
+`resumeTurn`. The runner connects only to a keeper socket in its own user's
+keeper directory, and the keeper still demands its token. A runner that keeps
+no agents never answers `attach`; the host gives up after ten seconds with
+`AcpConnectError`. `--detached-timeout <ms>` (`AcpRunnerOptions.detachedTimeoutMs`)
+bounds how long a kept agent may run with no host; the default is no limit.
 
 The runner listens on `127.0.0.1` by default; any other address needs
 `--tls-cert` and `--tls-key`. Its token comes from `NOETIC_ACP_RUNNER_TOKEN`
@@ -835,11 +865,6 @@ serves it). Runtime import graph clean; install graph not.
 
 ## Future Considerations
 
-- **Kept agents on a remote runner.** A remote runner (`noetic-acp serve`)
-  still stops everything it started when its channel closes. Giving it the
-  keeper's relay — kept sessions, held requests, a bridge port that outlives the
-  channel, and an `attach` — would let a host that loses its link to a runner
-  reattach the same way it reattaches to a local agent.
 - **MCP over ACP.** The ACP RFD `mcp-over-acp` (draft, request-scoped since
   2026-09) offers an `{ "type": "acp", "name", "serverId" }` MCP server whose
   messages travel as `mcp/message` requests on the ACP connection itself
