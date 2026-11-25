@@ -36,8 +36,12 @@ import { ContextImpl } from './deps/runtime';
 
 //#region Types
 
-const ROUND_KIND = 'callModel:round';
-const CALL_KIND = 'callModel:call';
+/** Ledger kind of a model-loop round's record. */
+export const ROUND_KIND = 'callModel:round';
+/** Ledger kind of one tool call's record within a round. */
+export const CALL_KIND = 'callModel:call';
+/** What follows a round's key in the key of a call recorded beneath it. */
+export const CALL_SEGMENT = '/call:';
 
 /** What a recorded tool call left: the result the round went on with. */
 const CallOutputSchema = z.object({
@@ -256,7 +260,8 @@ export class RoundLedger {
   calls(round: number): CallLedger {
     const ledger = this.ctx.ledger;
     const stepId = this.dispatch.stepId;
-    const keyOf = (call: CalledFunction): string => `${this.key(round)}/call:${call.callId}`;
+    const keyOf = (call: CalledFunction): string =>
+      `${this.key(round)}${CALL_SEGMENT}${call.callId}`;
     // A call is the same call only with the same name and arguments, asked for by
     // the same step input: a provider that numbers its calls from one each time
     // would otherwise hand a call the result of another conversation's.

@@ -41,7 +41,7 @@ type ItemShape = StandardSchemaV1 | JsonSchema;
 
 - **`type`** follows the Open Responses convention for extension items: `prefix:name`, where the prefix names the vendor or domain. A type without a colon throws `INVALID_CUSTOM_ITEM_TYPE` (standard item types never contain one, which is what keeps the two apart).
 - **`event`** and **`output`** each take a Standard Schema (Zod, Valibot, …) or a JSON Schema object. A JSON Schema validates through `z.fromJSONSchema`, so no code is generated and the check runs on Workers. Its static type comes from `FromJsonSchema`, which reads an `as const` schema (see § JSON Schema Types).
-- **`output`** describes the item's own fields. It must describe an object, and it must not declare `id` or `type`; the runtime adds both. A shape that breaks either rule throws `INVALID_CUSTOM_ITEM_SHAPE` when it is declared.
+- **`output`** describes the item's own fields. It must describe an object, or a union of objects (a discriminated union such as `z.discriminatedUnion('kind', [...])`, a `z.union`, or a JSON Schema `oneOf`/`anyOf`), and no object in it may declare `id` or `type`; the runtime adds both. Each option of a union is checked as a single object is. A shape that breaks either rule throws `INVALID_CUSTOM_ITEM_SHAPE` when it is declared. With a union, the final item is `{ id, type, ...option }`: an item whose events and final item share one vocabulary declares the same union for both, with no wrapper object. Options must be plain object schemas; an object that combines `properties` with `oneOf` (an intersection), a `z.lazy` option, or a union under `.optional()`/`.pipe()` is refused. A JSON Schema `oneOf` keeps its meaning — exactly one option must match — so its options need `required` fields that tell them apart.
 - Without `event`, the item has no events: it arrives only as a final item.
 
 ### The item and its events
@@ -235,7 +235,7 @@ All are `NoeticConfigError`s (spec 09).
 | Code | When |
 |---|---|
 | `INVALID_CUSTOM_ITEM_TYPE` | A declared `type` has no `prefix:` part. |
-| `INVALID_CUSTOM_ITEM_SHAPE` | `output` does not describe an object, or declares `id` or `type`. |
+| `INVALID_CUSTOM_ITEM_SHAPE` | `output` does not describe an object or a union of objects, or one of them declares `id` or `type`. |
 | `CUSTOM_ITEM_MISMATCH` | `workflow()` and its document declare one name with different `type`s. |
 | `UNKNOWN_CUSTOM_ITEM` | `emitItems.item`, or the `type` of an `emitItems: true` output, names no item in scope. |
 | `CUSTOM_ITEM_HAS_NO_EVENTS` | A hook or generator `runCode` yields for a step that names no item, or names one without `event`. |

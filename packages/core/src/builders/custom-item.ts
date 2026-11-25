@@ -34,7 +34,7 @@ interface CustomItemConfig<T extends CustomItemType, E extends ItemShape, O exte
  * @public
  * @throws `NoeticConfigError` with code `INVALID_CUSTOM_ITEM_TYPE` when `type` has no `prefix:` part.
  * @throws `NoeticConfigError` with code `INVALID_CUSTOM_ITEM_SHAPE` when a JSON Schema does not
- * load, or `output` does not describe an object or declares `id` or `type`.
+ * load, or `output` is not an object (or a union of objects), or declares `id` or `type`.
  */
 export function customItem<
   T extends CustomItemType,
@@ -137,17 +137,29 @@ function isStandardSchema(shape: ItemShape): shape is StandardSchemaV1 {
 
 /**
  * The fields check needs a schema it can see into: a Zod object, which every JSON
- * Schema becomes. Other vendors are checked when a value is emitted instead.
+ * Schema becomes, or a union of them (a discriminated union of item shapes, or a
+ * JSON Schema `oneOf`/`anyOf`), each option checked the same way. Other vendors are
+ * checked when a value is emitted instead.
  */
 function checkFields(output: StandardSchemaV1, type: string): void {
   if (!isZodSchema(output)) {
+    return;
+  }
+  checkZodFields(output, type);
+}
+
+function checkZodFields(output: z.core.$ZodType, type: string): void {
+  if (output instanceof z.ZodUnion) {
+    for (const option of output.options) {
+      checkZodFields(option, type);
+    }
     return;
   }
   if (!(output instanceof z.ZodObject)) {
     throw new NoeticConfigError({
       code: 'INVALID_CUSTOM_ITEM_SHAPE',
       message: `The output of custom item '${type}' does not describe an object.`,
-      hint: 'A final item is its fields plus the id and type the runtime adds, so output must be an object schema.',
+      hint: 'A final item is its fields plus the id and type the runtime adds, so output must be an object schema, or a union of object schemas.',
     });
   }
   const reserved = Object.keys(output.shape).filter((key) => key === 'id' || key === 'type');

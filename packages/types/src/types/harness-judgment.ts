@@ -223,6 +223,28 @@ export interface TrailMark {
   readonly receipt?: unknown;
 }
 
+/**
+ * @public A tool call an execution's step ledger holds, so a resume of that execution
+ * goes on from it rather than having the model ask for it again (spec 23a § Tool calls
+ * in a round). The model's request is on record; `settled` says whether its result is too.
+ */
+export interface RecordedToolCall {
+  /** The call id the model gave the call. */
+  readonly callId: string;
+  /** The tool the model called. */
+  readonly name: string;
+  /** The ledger path of the entry that holds the request: a step, or one of its rounds. */
+  readonly path: string;
+  /**
+   * The call's result is on record too: a resume replays it, the result item
+   * included, and the tool does not run. False when only the request is (a round cut
+   * off while the call ran): a resume does not replay a result for it. The call runs
+   * again with the idempotency key it had, unless its tool is `durable: true` (the
+   * call is held for a person) or it needs approval (it waits for one).
+   */
+  readonly settled: boolean;
+}
+
 /** @public A turn that stopped rather than redo a recorded effect (spec 23 § Versions). */
 export interface StuckTurn {
   readonly threadId: string;

@@ -284,6 +284,21 @@ A tool with a lasting effect passes the key to whatever it writes to, and the wr
 
 Where the downstream system cannot dedupe on a key, mark the tool `durable: true`. A call cut off by a crash is then [held](/docs/framework/steps/invoke-tool#human-in-the-loop-approval) for a person, who says whether it landed, instead of being repeated. `durable: false` is the opposite: the result is never recorded, for a cheap read that should be fresh.
 
+### Which Calls a Resume Brings Back
+
+`harness.recordedToolCalls(executionId)` lists the tool calls a resume of an execution goes on from, read from storage: every call whose request the ledger holds, in a completed step or a recorded round, in the order they were recorded.
+
+```ts validate=none
+const calls = await harness.recordedToolCalls(executionId);
+// [{ callId: 'call_1', name: 'ship', path: 'agent/round#0', settled: true }, ...]
+```
+
+`settled` is true when the call's result is on record too: the resume replays it and the tool does not run. It is false for the call that was running when the host died: only the model's request is on record, so that call runs again with its `idempotencyKey` — unless its tool is `durable: true`, in which case it is held for a person, or it needs approval and waits for one.
+
+A finished run drops its positional entries, but a step with a `replayKey` keeps its record for later runs on the same context, so its calls stay listed (under `key:<key>`) until `harness.clearCheckpoint(executionId)`.
+
+A host that journals tool traffic of its own — written before rounds and calls were recorded — must not append any of these calls to a restored context: the resume appends them itself, and the model would see each one twice. With every round and every finished call recorded, such a journal has nothing left to add, and a host can drop it.
+
 ### Sessions
 
 `harness.execute()` sessions are durable too. With a storage adapter, each thread keeps its history, what its turns spent, and the turn in flight under `session:<threadId>` — and every turn reads them from storage rather than from the harness's memory:

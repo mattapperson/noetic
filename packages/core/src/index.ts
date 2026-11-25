@@ -112,9 +112,9 @@ export { cosineSimilarity } from './conditions/cosine-similarity';
 //#region Errors
 
 /** @public */
-/** @public */
 export {
   DECISION_ITEM_TYPE,
+  failureCause,
   HeldCallSchema,
   HeldCallSettledSchema,
   isDecisionItem,
@@ -611,6 +611,7 @@ export type {
   ItemSchemaConfig,
   ReanchorReason,
   RecallLayerOutput,
+  RecordedToolCall,
   SessionScope,
   SessionUsage,
   StuckTurn,

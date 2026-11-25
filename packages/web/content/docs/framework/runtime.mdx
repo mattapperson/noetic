@@ -362,6 +362,7 @@ When the harness is constructed with a durable `environment.storage.adapter` (an
 | `waitForIdle()` | Resolves once every scheduled event that is due has been read and every turn has finished or parked. A serverless host awaits it before it lets its process go. |
 | `listStuckRuns()` | List the turns that stopped with `turn_stuck` rather than redo a recorded effect under a newer [flow version](/docs/framework/durability#flow-versions). |
 | `execute({ type: 'noetic:decision', action }, { threadId })` | Settle a stuck turn: `'continue'` (accept the difference and resume), `'restart'` (run it from the top) or `'abandon'` (drop it). Refused with `decision_refused` when the thread has none. |
+| `recordedToolCalls(executionId)` | The tool calls a resume of the execution [brings back on its own](/docs/framework/durability#which-calls-a-resume-brings-back), each `settled` when its result is on record. |
 | `getAuditTrail(scope)` | [The trail](/docs/framework/durability#the-trail) of a thread or an execution: each finished step with its flow version, lease holder and receipt. |
 | `forget(scope, options?)` | [Forget](/docs/framework/durability#forgetting-a-thread-or-an-execution) a thread (`{ threadId }`) or an execution (`{ executionId }`): settle its pending spend, then delete every record the harness keeps for it. `options`: `keepTrail`, `patienceMs`, `waitMs`, `subprocesses`. Resolves a `ForgetReport` `{ threadId?, executionIds, spend }`. Refused with `lease_lost` while a turn runs. |
 | `listStoredThreads(options?)` | Every thread with a record, a turn lease or display output stored. `{ prefix }` narrows the ids. |
@@ -441,8 +442,10 @@ interface AgentHooks {
 
 | Hook | When it fires | Typical use |
 |---|---|---|
-| `beforeStep` | Before each step executes. | Logging, injecting state, guard checks. |
-| `afterStep` | After each step completes. | Metrics collection, state updates, audit logging. |
+| `beforeStep` | Before each step executes, nested steps included, on the context the step runs on. | Logging, timing, guard checks. |
+| `afterStep` | After a step succeeded, with its output, before it is recorded. Not for a step that failed or was cancelled. | Metrics collection, audit logging. |
+
+A parent's `beforeStep` runs before its children's and its `afterStep` after theirs. A step [replayed on resume](/docs/framework/durability#step-level-resume) does not execute, so neither hook runs for it; watch `step_replayed` for those. A hook that throws fails the step it ran for: a Noetic error passes through unchanged, and any other error becomes `step_failed` with the hook's error as its `cause`. A step whose `afterStep` threw is not recorded, so a resume runs it again.
 
 ```ts
 const harness = new AgentHarness({

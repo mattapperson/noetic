@@ -17,7 +17,13 @@ import type { HarnessPlatform } from './harness-platform';
 import type { HarnessResponse, StreamEvent, StreamingItem } from './harness-result';
 import type { ExecuteArgument, Item } from './items';
 import type { Span, TraceExporter } from './observability';
-import type { CancelOptions, DrainReport, ExecutionScope, ExecutionStatus } from './runtime';
+import type {
+  AgentHooks,
+  CancelOptions,
+  DrainReport,
+  ExecutionScope,
+  ExecutionStatus,
+} from './runtime';
 import type { OnSteerParams, SteeringDecision, SteerVerdict } from './steering';
 import type { StepLike, StepsInput, StepsOutput, ValidStepChain } from './step';
 import type { Tool } from './tool';
@@ -139,6 +145,8 @@ export interface ContextHarness extends HarnessPlatform {
     readonly emitItemsOnReplay?: boolean;
     /** The clock deadlines are read from. Default `Date.now`. */
     readonly now?: () => number;
+    /** Step hooks the interpreter runs around each step it executes (spec 08 § Step hooks). */
+    readonly hooks?: AgentHooks;
   };
   callModel(request: ContextCallModelRequest): Promise<LLMResponse>;
   decide(request: DecideRequest): Promise<DecideResponse>;

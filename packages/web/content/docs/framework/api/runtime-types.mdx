@@ -399,8 +399,10 @@ interface AgentHooks {
 
 | Hook | Parameters | Description |
 |---|---|---|
-| `beforeStep` | `(step, ctx)` | Called before each step executes |
-| `afterStep` | `(step, result, ctx)` | Called after each step completes |
+| `beforeStep` | `(step, ctx)` | Called before each step executes, nested steps included. Not for a step replayed from the ledger. |
+| `afterStep` | `(step, result, ctx)` | Called after a step succeeded, before it is recorded. Not for a failed, cancelled or replayed step. |
+
+A hook that throws fails the step it ran for (`step_failed` with the hook's error as `cause`; a Noetic error passes through unchanged).
 
 ## DetachedHandle
 

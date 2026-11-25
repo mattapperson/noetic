@@ -1031,6 +1031,26 @@ The harness validates items at trust boundaries (model output parsing, session r
 - Extension schemas are **gates, not normalizers**: on match the original item is returned unchanged, including fields the schema does not declare. Zod transforms and defaults in extension schemas are unsupported.
 - Validation failures raise `NoeticError` kind `item_schema_mismatch` (see `09-error-model`).
 
+### Step hooks
+
+`AgentConfig.hooks` (`AgentHooks`) takes two callbacks the interpreter runs around every step it executes in this process, in `execute()` — the root step and every nested one (sequence members, loop bodies, branches, fork and in-process spawn children, steps a tool or code step runs on its context). A child a subprocess adapter runs in another process executes under that process's harness and its hooks; this harness's hooks see only the parent-side dispatch.
+
+```typescript
+interface AgentHooks {
+  beforeStep?: (step: Step, ctx: Context) => Promise<void>;
+  afterStep?: (step: Step, result: unknown, ctx: Context) => Promise<void>;
+}
+```
+
+- **`beforeStep`** runs after the depth and abort checks and after the ledger lookup, immediately before the step's own work begins (its `emitItems` start, its dispatch). `ctx` is the context the step runs on.
+- **`afterStep`** runs once the step succeeded and its items were emitted, with its output, before the step is recorded in the ledger and before `step_completed`. The step completes only when `afterStep` returns.
+- Hooks nest: a parent's `beforeStep` runs before its children's and its `afterStep` after theirs. A step retried by its `RetryPolicy` is one execution: each hook runs once.
+- **Failure and cancellation.** `afterStep` does not run for a step that threw or was cancelled; `beforeStep` has already run for it.
+- **Replay.** A step replayed from the ledger (`23a-step-level-resume`) does not execute, so neither hook runs for it; `step_replayed` marks it.
+- **Errors.** A hook that throws fails the step it ran for, as an error the step threw would. A `NoeticError` or `NoeticConfigError` passes through unchanged; anything else becomes `step_failed` with the hook's error as `cause` (`09-error-model`). A throwing `beforeStep` means the step never ran; a throwing `afterStep` means the step is not recorded, so a resume runs it again. `afterStep` runs after the step's items were emitted, so a step whose `afterStep` threw has already appended and streamed its final custom items, and a resume that runs it again emits them again.
+
+The hooks are on `ctx.harness.config.hooks`, which is how the interpreter reaches them on any context of the harness.
+
 ### What's NOT on the AgentHarness
 
 - **`assembleView`** — view assembly (the Projector) is a standalone function in `context/projector.ts`. It calls `recallLayers`, allocates token budgets, and assembles system prompt item + layer output items + conversation history items into the View as `Item[]`. This is what `executeLLM` calls internally before sending items to the model.
